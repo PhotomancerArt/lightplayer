@@ -11,6 +11,7 @@ related:
   - third_party/esp-hal/README-LP.md (the #[ram] fork, pay-down item 1)
   - lp-fw/fw-esp32v3/rwdata_hook.x (the jump-table globs, pay-down item 1)
   - lp-fw/fw-esp32v3/src/output/rmt/shared_driver.rs (`with_app_core_stalled`)
+  - lp-fw/fw-esp32v3/probes/rtos-tick/ (the esp-rtos measurement, 2026-09-07)
 ---
 # The classic's `#[ram]` interrupt paths still fetch from flash — in esp-hal and esp-rtos, not in ours
 
@@ -40,9 +41,9 @@ zero flash literals. Read per branch, the picture splits three ways:
    | IRAM function | core | rodata reads (all cold) | flash code on the executed path |
    |---|---|---|---|
    | esp-hal `__level_1/2/3_interrupt` | both | `panic_bounds_check` Location; level 3 also an 11-entry jump table (`.rodata.__level_3_interrupt`) for CPU-internal sources 6..16 — never taken here (nothing uses the CPU Timer/Software/Profiling lines). **Table in `.data` since 2026-09-07** (`rwdata_hook.x`) | `InterruptStatus::current` (80 B, level-triggered path), `InterruptStatusIterator::next` (127 B), `mapped_to_raw` (81 B, via `should_handle`) — 288 B that **used to** run from flash on every peripheral interrupt, including the RMT refill interrupt on the APP core. **In `.rwtext` since 2026-09-07** via the vendored esp-hal fork (`third_party/esp-hal`, +376 B of IRAM with the entries' literal pools); `mapped_to_raw` keeps two flash literals, both its bounds-check panic tail |
-   | esp-rtos `timer_tick_handler` | PRO, every tick | 24 — `debug!`/`trace!` pieces behind a `MAX_LOG_LEVEL_FILTER` check (dead at Info) and `unwrap_failed` tails | `esp_rtos::now` (77 B) and `TimeDriver::arm_next_wakeup` (575 B), unconditional; `u64 Display::fmt` log-gated |
-   | esp-rtos `cross_core_yield_handler` (bound to FROM_CPU_INTR0 on the PRO core; the APP core never runs esp-rtos here) | PRO | 21 — log-gated, an `assert!(addr.is_multiple_of(16))` tail, `unwrap_failed` | `Task::ensure_no_stack_overflow` (77 B, whenever a task is current), `esp_rtos::now`, `arm_next_wakeup`; `delete_marked_tasks` is `#[cold]` and conditional |
-   | esp-rtos `RunQueue::pop` / `mark_task_ready` / `resume_task` | PRO | 6 / 3 / 1 — log-gated + `unwrap_failed` | `Priority::new` — a **5-byte `const fn` outlined at `opt-level = "z"`** — on pop's unmark path; `TaskExt::set_state` (80 B) unconditionally at `mark_task_ready`'s entry |
+   | esp-rtos `timer_tick_handler` | PRO, every embassy alarm (18/s under zook; the 100 Hz `tick_rate_hz` timeslice only arms when two ready tasks compete) | 24 — `debug!`/`trace!` pieces behind a `MAX_LOG_LEVEL_FILTER` check (dead at Info) and `unwrap_failed` tails | `esp_rtos::now` (77 B) and `TimeDriver::arm_next_wakeup` (575 B), unconditional, and under the latter esp-hal's `timg::Timer::load_value` (286 B) → `apb_clk_config_frequency` (flash) and `__udivdi3` (ROM); `u64 Display::fmt` log-gated. **Measured 2026-09-07: 5.8 µs per call, 6.3 µs max, 0.010 % of the PRO core; 6.2 µs with the esp-rtos callees in RAM** — register-bound (LACT poll + TIMG reprogramming), not fetch-bound |
+   | esp-rtos `cross_core_yield_handler` (bound to FROM_CPU_INTR0 on the PRO core; the APP core never runs esp-rtos here) | PRO, 36/s under zook | 21 — log-gated, an `assert!(addr.is_multiple_of(16))` tail, `unwrap_failed` | `Task::ensure_no_stack_overflow` (77 B, whenever a task is current), `esp_rtos::now`, `arm_next_wakeup`; `delete_marked_tasks` is `#[cold]` and conditional. **Measured: 10.4 µs mean, 41 µs max, 0.038 % of the PRO core; 4.6 µs / 5.5 µs / 0.018 % with the callees in RAM** — the one place the flash residue is visible, as worst-case yield latency |
+   | esp-rtos `RunQueue::pop` / `mark_task_ready` / `resume_task` | PRO | 6 / 3 / 1 — log-gated + `unwrap_failed` | `Priority::new` — a **5-byte `const fn` outlined at `opt-level = "z"`** — on pop's unmark path (and `P::from_usize` under it: `#[inline(always)]` on `new` alone just outlines the callee instead); `TaskExt::set_state` (80 B) unconditionally at `mark_task_ready`'s entry. Inside the yield figure above |
    | esp-rtos embassy `__pender` | PRO | 4-entry jump table `.rodata.__pender` on the executed path (match on the executor id) — **in `.data` since 2026-09-07** (`rwdata_hook.x`) — + `BorrowMutError` tail | — |
    | esp-hal default GPIO handler | — | 40-entry jump table + panic tails; never fires (no GPIO interrupt is listened for) | `AnyPin::steal` |
    | esp-hal UART0/1/2 irq trampolines | PRO | the `PERIPHERAL` info pointer; UART0's fires for the async host link, UART1/2 unused | the whole esp-hal UART handler is flash anyway |
@@ -111,10 +112,23 @@ dispatch plus the pusher path) after warm-up, so refill-interrupt entry would
 pay a miss only after eviction. On the PRO core the
 render loop thrashes the cache, so each tick's `now` + `arm_next_wakeup`
 (~650 B, ~20 lines) and each yield's `set_state`/`ensure_no_stack_overflow`
-can miss; bounded by tens of microseconds per tick at 40 MHz flash, a
-low-single-digit percent of the PRO core at worst. Worth one measurement
-before spending RAM on it — the classic's heap is the scarcer resource
-(docs/reports/2026-09-04-classic-ram-budget.md).
+can miss. **Measured 2026-09-07** on the DOM-Z-102 under
+`projects/test/zook-dome-1500` (CCOUNT around both handlers, procedure and
+captures in `lp-fw/fw-esp32v3/probes/rtos-tick/`): the tick handler costs
+5.8 µs per call at 18 calls/s, **0.010 % of the PRO core**, and moving its
+esp-rtos callees into RAM does not make it faster (6.2 µs — the time is the
+LACT read and the TIMG alarm reprogramming, not fetch); the yield handler
+costs 10.4 µs mean / 41 µs max at 36 calls/s, **0.038 %**, and in RAM
+4.6 µs / 5.5 µs, 0.018 %. The whole esp-rtos residue is therefore under
+0.05 % of the PRO core, and the RAM move (+880 B `.rwtext`, which is free —
+16 KB sit between `rwtext_end` and the JIT region, no DRAM involved) buys
+35 µs of worst-case yield latency that nothing on that core needs. A
+side finding worth more than the measurement: **flash code layout alone
+moves this project's frame time across 50–56 ms** (pristine main 56.0,
+the probe image 54.0, a control that shifted the same flash region without
+touching the hot path 51.2, the RAM-move image 50.3), so a before/after
+fps delta on the classic is not evidence of anything without a layout
+control.
 
 **Workarounds** —
 - Re-verify after any esp-hal / esp-rtos bump or a change to a `#[ram]`
@@ -138,9 +152,16 @@ before spending RAM on it — the classic's heap is the scarcer resource
    2026-09-07) so the fork can be dropped; the fork's README-LP.md says how
    to re-sync until then. The attributes also apply to the RISC-V
    `handle_interrupts` callees on the C6/S3, which is the same rule there.
-2. esp-rtos upstream: `#[ram]` on `now`, `arm_next_wakeup`, `set_state`,
+2. ~~esp-rtos upstream: `#[ram]` on `now`, `arm_next_wakeup`, `set_state`,
    `ensure_no_stack_overflow`, and `#[inline(always)]` on `Priority::new`
-   (~900 B if all moved).
+   (~900 B if all moved).~~ **Retired 2026-09-07**: measured at 0.010 % of
+   the PRO core for the tick and 0.038 % for the yield (above), so not worth
+   a vendored fork. The change was built and verified anyway (880 B
+   `.rwtext`; `Priority::new` needs `P::from_usize` inlined too, and
+   `arm_next_wakeup` still reaches esp-hal's `timg::Timer::load_value` in
+   flash); the patches to reproduce the measurement are in
+   `lp-fw/fw-esp32v3/probes/rtos-tick/`. Reopen only for a PRO-core
+   interrupt-latency need that 41 µs of yield jitter would break.
 3. Firmware: `#[esp_hal::ram]` on `io_pacer_isr` is free but only moves the
    trampoline; its callees are embassy's. Moving the pusher path costs
    ~1.3 KB of IRAM for no deadline it currently misses — the 2026-09-07
