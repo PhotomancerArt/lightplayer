@@ -74,6 +74,30 @@ def run(objdump: str, *args: str) -> str:
     ).stdout
 
 
+# Rust v0 mangling carries a per-crate disambiguator hash (`Csejznmnmrysr_`),
+# and the demangled form keeps it as `esp_hal[a6be47eceb7560b5]::…`. The hash
+# changes whenever the crate's source or dependency graph changes — vendoring
+# a crate under `[patch.crates-io]`, a version bump — and every function in
+# that crate would then read as "new" against the baseline. Keys are therefore
+# the demangled name with the disambiguators stripped.
+_CRATE_HASH = re.compile(r"\[[0-9a-f]{8,16}\]")
+
+
+def demangle(objdump: str, names: list[str]) -> dict[str, str]:
+    """Map each mangled name to its demangled, hash-free form (identity on failure)."""
+    if not names:
+        return {}
+    filt = objdump.replace("objdump", "c++filt")
+    if shutil.which(filt) is None:
+        return {name: name for name in names}
+    out = subprocess.run(
+        [filt], input="\n".join(names) + "\n", capture_output=True, text=True
+    ).stdout.splitlines()
+    if len(out) != len(names):
+        return {name: name for name in names}
+    return {name: _CRATE_HASH.sub("", demangled) for name, demangled in zip(names, out)}
+
+
 def section_headers(objdump: str, elf: str) -> set[str]:
     return {
         match.group("name")
@@ -98,7 +122,11 @@ def flash_literals_per_function(
         if hit := _L32R_VALUE.search(line):
             if FLASH_RODATA_LO <= int(hit.group("value"), 16) < FLASH_RODATA_HI:
                 counts[current] += 1
-    return counts
+    names = demangle(objdump, list(counts))
+    merged: dict[str, int] = {}
+    for name, count in counts.items():
+        merged[names[name]] = merged.get(names[name], 0) + count
+    return merged
 
 
 _SECTION_RANGE = re.compile(

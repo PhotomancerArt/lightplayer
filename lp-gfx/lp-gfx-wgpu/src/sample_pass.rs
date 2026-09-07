@@ -44,6 +44,7 @@ use lp_gfx::GfxError;
 use lp_shader::ShaderEntrySpace;
 use lps_shared::TextureStorageFormat;
 
+use crate::fault_flag::FaultFlag;
 use crate::gpu_graphics::GpuShared;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::read_back::read_back_f32;
@@ -236,12 +237,16 @@ impl SamplePass {
     /// lane groups in the shader's declared space (`[x, y]` pairs for 2D, a
     /// single `[t]` word for 1D) — and quantize the results into `out`
     /// (`count × 4` RGBA16 channels). The caller has already written the
-    /// uniform buffer behind `bind_group`.
+    /// uniform buffer behind `bind_group`. `fault` is the shader's loop
+    /// fault flag, cleared before the draw and read after it: a point
+    /// that spends its budget makes the whole call
+    /// [`GfxError::FuelExhausted`] (native: this call; browser: the next).
     pub(crate) fn run(
         &mut self,
         shared: &GpuShared,
         points_q16: &[i32],
         bind_group: Option<&wgpu::BindGroup>,
+        mut fault: Option<&mut FaultFlag>,
         out: &mut [u16],
     ) -> Result<(), GfxError> {
         let lanes = self.space.coord_lanes();
@@ -290,6 +295,9 @@ impl SamplePass {
         let mut encoder = shared
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        if let Some(fault) = fault.as_deref_mut() {
+            fault.begin(&mut encoder)?;
+        }
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("lp-gfx-wgpu sample"),
@@ -314,9 +322,28 @@ impl SamplePass {
             pass.set_vertex_buffer(0, resources.vertex_buffer.slice(..));
             pass.draw(0..count, 0..1);
         }
-        shared.queue.submit([encoder.finish()]);
+        if let Some(fault) = fault.as_deref_mut() {
+            fault.capture(&mut encoder);
+        }
+        let submission = shared.queue.submit([encoder.finish()]);
 
-        self.read_back_into(shared, out)
+        self.read_back_into(shared, out)?;
+        // Native: the sample read-back above already waited past this
+        // submission, so the flag's own wait is a formality.
+        match fault {
+            Some(fault) => fault.collect(&shared.device, submission, Self::fault_wait()),
+            None => Ok(()),
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn fault_wait() -> Option<core::time::Duration> {
+        Some(crate::read_back::PRODUCT_READ_BACK_WAIT)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn fault_wait() -> Option<core::time::Duration> {
+        None
     }
 
     /// Native: blocking row-major readback of the frame just drawn. Texel

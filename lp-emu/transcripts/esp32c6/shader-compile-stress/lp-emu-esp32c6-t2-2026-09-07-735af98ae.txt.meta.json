@@ -1,0 +1,55 @@
+{
+  "schema": 1,
+  "payload": "shader-compile-stress",
+  "chip": "esp32c6",
+  "configuration": "lp-emu:esp32c6:t2",
+  "date": "2026-09-07",
+  "firmware_commit": "735af98ae9d9",
+  "firmware_features": [
+    "esp32c6",
+    "test_shader_compile_incremental",
+    "spike_uart0_link"
+  ],
+  "firmware_dirty": false,
+  "silicon_rev": "v0.2",
+  "board": "seeed/xiao-esp32-c6",
+  "mac": "a0:f2:62:87:b4:8c",
+  "tools": {
+    "lp-emu-esp32c6": "40.0.0 (735af98ae+dirty)",
+    "rom": "esp32c6_rev0_rom.elf sha256 788e1d38724aeb8fd974fa10c4a7b089c02627d35342ce84b9e0b12b239f3551"
+  },
+  "source": "(cd lp-fw/fw-esp32c6 && cargo build --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,test_shader_compile_incremental,spike_uart0_link) && cargo run -q -p lp-emu-esp32c6 --release -- --elf target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6 --time-grade t2 --uart0 file:target/validate/shader-compile-stress.cap --timeout 120s --wall-timeout 2400 --strict-bus --exit-on '[inc-shader-compile] === DONE ===' --efuse-mac a0:f2:62:87:b4:8c --efuse-rev 0.2",
+  "capture": "lp-cli validate record compile-parity --config lp-emu:esp32c6:t2",
+  "trust": [
+    {
+      "class": "memory",
+      "grade": "modeled",
+      "because": "the same allocator and the same RAM model as t1, and the harness's 372 memory values are identical under both grades — a time grade must not move a heap byte. The one figure that does move is the idle stack high-water mark (11,432 B under t1, 11,752 B under t2), which is interleaving, not memory: the deepest interrupted call chain is not the same chain"
+    },
+    {
+      "class": "timing",
+      "grade": "modeled",
+      "because": "t2 uses the per-class cycle model rather than one cycle per instruction, and no transcript grades it either. It is a rung up the ladder, not a promise about milliseconds on silicon"
+    },
+    {
+      "class": "boot-log",
+      "grade": "modeled",
+      "because": "direct load prints no ROM or bootloader banner; the time grade changes nothing about that. M7 owns it"
+    },
+    {
+      "class": "usb-serial-jtag",
+      "grade": "modeled",
+      "because": "the same host-absent-only model as t1; M6 owns the attached and not-draining states"
+    },
+    {
+      "class": "pin",
+      "grade": "modeled",
+      "because": "the same absence of pin observation as t1; M5 owns it"
+    },
+    {
+      "class": "wire",
+      "grade": "modeled",
+      "because": "the same UART0 model as t1: the bytes are the guest's, a live socket's arrival times are the host's"
+    }
+  ]
+}
