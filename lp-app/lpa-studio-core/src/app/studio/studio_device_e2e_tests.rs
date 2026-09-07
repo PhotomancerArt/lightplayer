@@ -2040,6 +2040,7 @@ fn a_flash_from_the_blank_pending_card_runs_to_ready_named_and_registered() {
         board_id: choice.board_id.clone(),
         build_id: choice.build_id.clone(),
         park_first: false,
+        name: None,
     });
 
     // The gesture adopts: the pending card becomes a device card, busy
@@ -2097,6 +2098,50 @@ fn a_flash_from_the_blank_pending_card_runs_to_ready_named_and_registered() {
     );
 }
 
+/// The same walk with a name typed into the board pick (the setup surface's
+/// optional field): the Flash carries it, the model records it as the user's
+/// name before the flash spawns, and the derived "<board> · <Mon D>" is
+/// never minted — the card and the registry row wear the typed name.
+#[test]
+fn a_flash_with_a_typed_name_wears_it_instead_of_the_derived_one() {
+    let device = blank_board();
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-flash-named");
+
+    bench.run_until(&tasks, "the blank verdict to settle", |bench| {
+        bench
+            .view()
+            .pending
+            .first()
+            .is_some_and(|pending| pending.needs_firmware())
+    });
+    let target = bench.view().pending[0].device;
+    let choice = c6_board_choice();
+
+    bench.gesture(DeviceAction::Flash {
+        device: target,
+        board_id: choice.board_id.clone(),
+        build_id: choice.build_id.clone(),
+        park_first: false,
+        name: Some("Porch lantern".to_string()),
+    });
+    bench.run_until(&tasks, "the flashed board to land Ready", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Ready" && card.activity.is_none())
+    });
+
+    let card = &bench.view().devices[0];
+    assert_eq!(
+        card.title, "Porch lantern",
+        "the typed name is the title (the surface trims before dispatching)"
+    );
+    let rows = bench.registry();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].name, "Porch lantern");
+}
+
 /// A mid-write failure lands on an honest problem face: outcome line with
 /// the tool's message, the needs-firmware face re-offered (retry in place),
 /// and every escape still present.
@@ -2120,6 +2165,7 @@ fn a_mid_write_failure_lands_on_an_honest_face_with_retry_in_place() {
         board_id: choice.board_id,
         build_id: choice.build_id,
         park_first: false,
+        name: None,
     });
     bench.run_until(&tasks, "the failure to settle", |bench| {
         bench
@@ -2167,6 +2213,7 @@ fn post_flash_silence_climbs_the_ladder_then_fails_with_honest_guidance() {
         board_id: choice.board_id,
         build_id: choice.build_id,
         park_first: false,
+        name: None,
     });
     bench.run_until(&tasks, "the ladder to exhaust", |bench| {
         bench
@@ -2215,6 +2262,7 @@ fn forgetting_mid_flash_evicts_the_hung_effect_and_cleans_up() {
         board_id: choice.board_id,
         build_id: choice.build_id,
         park_first: false,
+        name: None,
     });
     bench.run_until(&tasks, "the flash to be visibly running", |bench| {
         bench
@@ -2347,6 +2395,59 @@ fn the_empty_face_pushes_an_example_and_the_card_ends_up_running() {
     );
 }
 
+/// The New tab's naming: a starter pushed with a project name lands in the
+/// library under that name (not the board's), and the "name the board the
+/// same" offer, ticked, renames the board in the same gesture — folded as
+/// the user's own `SetName` before the push, so the card wears it whether or
+/// not the wire accepts the project.
+#[test]
+fn a_named_starter_push_names_the_library_package_and_the_board() {
+    let device = empty_light_player("dev000000daqf6dvvr9");
+    let (mut bench, tasks) = identified(&device, "usb-push-named");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let device_id = bench.view().devices[0].id;
+    assert_ne!(bench.view().devices[0].title, "Porch sign");
+
+    let action = crate::DevicePushOp {
+        device: device_id,
+        source: crate::PushSource::NewForBoard {
+            board_id: "seeed/xiao-esp32-c6".to_string(),
+            name: Some("Porch sign".to_string()),
+        },
+        device_name: Some("Porch sign".to_string()),
+    }
+    .into_action();
+    drive(bench.controller.dispatch(action)).expect("a push gesture never fails loudly");
+    bench.run_until(&tasks, "the push to settle", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+
+    let card = &bench.view().devices[0];
+    assert_eq!(
+        card.title, "Porch sign",
+        "the board took the project's name"
+    );
+    let library = bench.library();
+    assert_eq!(library.len(), 1, "{library:?}");
+    assert_eq!(
+        library[0].name, "Porch sign",
+        "the starter is named, not the board"
+    );
+    let rows = bench.registry();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].name, "Porch sign");
+}
+
 /// A push the board refuses lands on the problem face: the outcome line says
 /// what happened, the picker is still there (retry in place), and every
 /// escape survives.
@@ -2410,6 +2511,7 @@ fn a_project_that_cannot_be_prepared_fails_on_the_card_not_in_a_log() {
         device_id,
         crate::PushSource::NewForBoard {
             board_id: "no-such-board".to_string(),
+            name: None,
         },
     );
     bench.run_until(&tasks, "the refusal to settle", |bench| {

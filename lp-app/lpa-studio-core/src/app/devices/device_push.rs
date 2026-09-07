@@ -34,8 +34,12 @@ pub enum PushSource {
     /// A project the library already holds.
     Library { project_uid: String },
     /// A starter generated for this board: a complete package with the
-    /// board's own default LED wire.
-    NewForBoard { board_id: String },
+    /// board's own default LED wire. `name` is what the user typed for it,
+    /// when they typed one; `None` names it after the board.
+    NewForBoard {
+        board_id: String,
+        name: Option<String>,
+    },
 }
 
 /// Which part of the picker an entry belongs to.
@@ -100,7 +104,10 @@ pub fn push_offer(
             title: "Start something new".to_string(),
             blurb: "A starter project wired for this board.".to_string(),
             group: PushSourceGroup::New,
-            source: PushSource::NewForBoard { board_id },
+            source: PushSource::NewForBoard {
+                board_id,
+                name: None,
+            },
         }),
         Err(reason) => new_project_unavailable = Some(reason),
     }
@@ -194,6 +201,11 @@ pub fn first_bundled_example_id() -> Option<&'static str> {
 pub struct DevicePushOp {
     pub device: DeviceId,
     pub source: PushSource,
+    /// Rename the board as part of the same gesture — the picker's "name
+    /// the board to match" offer when a new project is named on the card.
+    /// Folded as a `SetName` before the push; `None` leaves the board's
+    /// name alone.
+    pub device_name: Option<String>,
 }
 
 impl DevicePushOp {
@@ -202,10 +214,18 @@ impl DevicePushOp {
 
     /// This op as a dispatchable [`UiAction`](crate::UiAction).
     pub fn action_for(device: DeviceId, source: PushSource) -> crate::UiAction {
-        crate::UiAction::from_op(
-            crate::ControllerId::new(Self::NODE_ID),
-            Self { device, source },
-        )
+        Self {
+            device,
+            source,
+            device_name: None,
+        }
+        .into_action()
+    }
+
+    /// This op as a dispatchable [`UiAction`](crate::UiAction), every field
+    /// as given.
+    pub fn into_action(self) -> crate::UiAction {
+        crate::UiAction::from_op(crate::ControllerId::new(Self::NODE_ID), self)
     }
 }
 
@@ -341,7 +361,8 @@ mod tests {
         assert_eq!(
             offer.choices[0].source,
             PushSource::NewForBoard {
-                board_id: board.board_id.clone()
+                board_id: board.board_id.clone(),
+                name: None,
             }
         );
         assert_eq!(

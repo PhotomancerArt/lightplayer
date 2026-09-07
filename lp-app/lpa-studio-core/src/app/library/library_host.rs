@@ -73,9 +73,11 @@ pub enum CatalogOp {
     /// Generate a first project for a catalog board (the setup flow's
     /// provision step, P03/P06) and install it. Creation-shaped: it touches
     /// no existing project, and NOT seed-once — every provision makes its
-    /// own package.
+    /// own package. `name` is the user's name for it when they typed one;
+    /// `None` names it after the board.
     GenerateForBoard {
         board_id: String,
+        name: Option<String>,
     },
     /// Migrate a package's own bytes to the current project format and
     /// save the result (P5's Upgrade verb; the same body P3 runs on open).
@@ -406,8 +408,8 @@ pub fn apply_catalog_op(
             upgraded_from = outcome.upgraded_from;
             Some(outcome.summary)
         }
-        CatalogOp::GenerateForBoard { board_id } => {
-            Some(generate_for_board(store, &board_id, now)?)
+        CatalogOp::GenerateForBoard { board_id, name } => {
+            Some(generate_for_board(store, &board_id, name.as_deref(), now)?)
         }
         CatalogOp::UpsertRegisteredDevice(device) => {
             crate::app::places::DeviceRegistry::new(store.fs_handle())
@@ -484,9 +486,10 @@ fn import_refusal(error: &LibraryError, context: String) -> LibraryHostError {
 fn generate_for_board(
     store: &LibraryStore,
     board_id: &str,
+    name: Option<&str>,
     now: f64,
 ) -> Result<PackageSummary, LibraryHostError> {
-    let generated = crate::app::home::generate_board_project(board_id)
+    let generated = crate::app::home::generate_board_project(board_id, name)
         .map_err(|error| LibraryHostError::Host(error.to_string()))?;
     Ok(store.install_package(
         &generated.name,
