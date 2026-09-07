@@ -205,7 +205,7 @@ milestone owns.
 | `USB_DEVICE` | `0x6000_F000` | modelled | **no host attached**: `ep1_conf.serial_in_ep_data_free` = 1 until a `wr_done` with bytes, then 0 for ever; `serial_out_ep_data_avail` = 0; `int_raw.sof` never; `serial_in_empty` set at reset, never re-set after the seal; source 48. IN bytes go to the `usb-sj` observation sink. The attached / draining states are M6 |
 | `SPI0`, `SPI1` | `0x6000_2000/3000` | accept | a flash access spins on `SPI1.cmd` (the `SPIN` line names it) until M4 |
 | `RMT` | `0x6000_6000` | accept | `Rmt::new` runs in every image; channels, blocks and the WS281x waveform are M5 |
-| `WIFI_MAC` | `0x600A_0000..9800` | accept | the radio window as **one** block with coarse names (`mac` / `ieee802154` / `bb` — ours, nothing documents it), a `TOUCH` note per distinct offset, and the override list `wifi_stub::OVERRIDES` (five entries, one per `SPIN` the boot showed, each with the poll's disassembly beside it); `+0x4084` is the RX DMA base the `WIFI RX config` line reports |
+| `WIFI_MAC` | `0x600A_0000..9800` | accept (*modeled*) | the radio window as **one** block with coarse names (`mac` / `ieee802154` / `bb` — ours, nothing documents it), a `TOUCH` note per distinct offset, and the override list `wifi_stub::OVERRIDES` (five entries, one per `SPIN` the boot showed, each with the poll's disassembly beside it); `+0x4084` is the RX DMA base the `WIFI RX config` line reports |
 | `WIFI_PWR` | `0x600A_9900..F000` | accept | the undocumented gap after MODEM_SYSCON (the ROM's `tsf_hal_*` touch it first); `+0x3700` is a live **microsecond counter** (*modeled* `cycles / 160`) — the blob's `wait_i2c_sdm_stable` latches it and gives up after 9,999 ticks, and a remembered 0 never lets it |
 | `I2C_MST_MEM` | `0x600A_FC00..600B_0000` | accept | the analog I2C master's burst **command memory**, `I2C_ANA_MST + 0x400`, which the PAC's block (ending at `date`, `+0x34`) does not cover; libphy's `phy_i2c_master_cmd_mem_init` fills it and nothing reads it back |
 
@@ -400,6 +400,14 @@ lp-emu-esp32c6 --elf <app.elf> [--rom <path>] [--time-grade t1|t2]
     [--probe <symbol>@<ms>] [--break-at <symbol>] [--hooks] [--map]
 ```
 
+`--exit-on` stops at the **end of the line** the match is on, not at the
+match. UART0 drains a byte at a time in emulated time, so a needle that is a
+prefix of its line would otherwise end the run mid-line — which is how M3 P7
+first recorded `[stack] heartbeat: high-water` with neither of the two figures
+after it. If the newline never arrives the run goes on to its deadline, which
+is the safe direction: a run that ran too long says so, a capture cut in half
+looks like data.
+
 `--probe` and `--break-at` take an ELF name, a demangled path
 (`esp_println::serial_jtag_printer::TIMED_OUT`, LLVM's `.N` suffix
 stripped) or a unique suffix; an ambiguous one is refused, with the
@@ -434,6 +442,41 @@ Without `--strict-bus` the run carries on with unmapped reads answering zero,
 which is how far the machine gets before a single block is modelled — far
 enough, on the shipped image, to walk the whole documented boot sequence.
 
+## The runner, and what a transcript costs
+
+`just emu-c6` above is the debugging door. The door that makes a *claim* is
+the validation runner, where this machine is the configuration
+`lp-emu:esp32c6:t1` (and `:t2` for the other grade):
+
+```bash
+cargo run -p lp-cli -- validate run emu-m3 --config lp-emu:esp32c6:t1 --dry-run
+cargo run -p lp-cli -- validate record emu-m3 --config lp-emu:esp32c6:t1 \
+    --date <today> --commit d6cfaa2051ae --dirty --timeout-secs 20 \
+    --image shader-compile-stress=target/emu-ref/d6cfaa205-harness/fw-esp32c6 \
+    --image boot-idle=target/emu-ref/d6cfaa205-boot-idle-memfs/fw-esp32c6
+```
+
+The driver builds nothing this machine does not need: it turns a payload into
+one invocation of the CLI above — `--elf`, `--time-grade`, `--uart0 file:`,
+`--exit-on`, `--timeout`, `--strict-bus`, `--efuse-mac`, `--efuse-rev` — so
+the plan a `--dry-run` prints is the entire protocol, and the sidecar records
+it verbatim as `source`. `--image` is per payload because a set runs several
+and a reference image is built per feature set. The eFuse identity comes from
+the configuration's entry in `validate.toml` (the desk board's
+`a0:f2:62:87:b4:8c`, rev `v0.2`), so a hello frame's identity fields compare
+equal to a silicon transcript's rather than differing over who was told what.
+
+The sidecar's `tools` carry this crate's version and commit and the vendored
+ROM's sha256. They do **not** carry a hash of the image: the build path is
+compiled into the ELF, so two checkouts of the same source differ in bytes and
+agree in code. What identifies the image is the recipe — script, commit,
+feature set — recorded in `note`.
+
+Every class is graded `modeled`, with byte-equality written into the reason as
+evidence rather than as a promotion; `validate.toml` is where those reasons
+live and `tests/m3_replays.rs` is where strict mode's refusal of them is
+pinned.
+
 ## Tests
 
 `cargo test -p lp-emu-esp32c6` runs everything that needs no firmware. The
@@ -444,7 +487,15 @@ conventional target path, and only builds when `LP_EMU_BUILD_FW=1`. The
 reference-image tests (`harness_parity`, `boot_idle`) resolve theirs from
 `LP_EMU_C6_REF_<SLUG>`, then `target/emu-ref/`, and with `LP_EMU_BUILD_FW=1`
 run `scripts/emu/build-reference-image.sh` — which needs the repository's
-history for the reference commit, so it is a local affair, not CI's.
+history for the reference commit (a shallow CI checkout cannot do it), so it
+is a local affair.
+
+`just test-emu-c6` is the whole set: the machine's boot tests, the M3 replays
+of the committed transcripts, and the registry parity test. About **70 s** on
+a warm cargo cache with the reference images absent — roughly 25 s of firmware
+build and 45 s of emulation. The replays alone
+(`cargo test -p lp-emu-validate --test m3_replays`) need no firmware at all
+and already run in `cargo test`, so the four gates cost CI nothing.
 
 ## Provenance
 

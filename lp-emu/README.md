@@ -195,12 +195,25 @@ fixture and its current blocker are
 
 `lp-emu-validate/` and the first two transcripts landed with M2 of the
 2026-09-06 esp-emulator plan. `esp/lp-emu-esp-common` landed with M3 P3,
-alongside `lp-emu-core`'s discrete-event `Scheduler`. `esp/lp-emu-esp32c6`
-and the vendored C6 ROM landed with M3 P4: the shipped firmware image
-direct-loads and runs, and stops at the first access nothing claims. The
-peripheral models that move that fault forward are P5 and P6.
+alongside `lp-emu-core`'s discrete-event `Scheduler`; `esp/lp-emu-esp32c6` and
+the vendored C6 ROM with M3 P4; the boot peripheral set with P5; UART0, the
+host-absent USB-Serial-JTAG and the radio window with P6, which is where the
+shipped image first said hello.
 
-`lp-cli validate list` already names `lp-emu:esp32c6:t1`, and says
-`unavailable until M3`. That is deliberate: the configuration exists as a name
-and a seam (`lp_emu_validate::driver::ConfigurationDriver`), so M3 implements
-one trait and nothing else in the validation system changes.
+**M3 is closed by P7**: `lp-emu:esp32c6:t1` and `:t2` are runnable
+configurations, and the milestone's gates are committed transcripts under
+`transcripts/esp32c6/` that `cargo test` replays — the compile harness
+byte-equal to silicon in the memory class, and the shipped image's boot to its
+idle heartbeat. Everything the machine claims is graded `modeled`, with the
+byte-equality recorded as evidence in the reason rather than as a promotion.
+
+```bash
+cargo run -p lp-cli -- validate list          # three configurations, all available
+just test-emu-c6                              # the machine's gates + the replays
+just emu-c6 <elf> --strict-bus --timeout 6s   # one image, by hand
+```
+
+Next: M4 (SPI1 flash and the MMU windows — the flash-backed image still stops
+at `SPIN SPI1+0x000 cmd` at 11 ms), M5 (RMT and the WS281x decoder, which is
+what makes a pin claim possible), M6 (the honest USB-Serial-JTAG with a
+control channel), M7 (ROM-up boot, where the boot-log class becomes a claim).
