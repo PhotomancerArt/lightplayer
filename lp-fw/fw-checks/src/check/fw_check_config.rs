@@ -6,11 +6,21 @@ pub const FW_CHECK_JSON_PREFIX: &str = "[fw-check-json] ";
 pub struct FwCheckConfig {
     pub check: FwCheck,
     pub display_name: &'static str,
+    /// The cargo features on `fw-esp32c6` that build this check, on top of
+    /// the crate's defaults. Usually one `test_*` feature; `boot-idle` is the
+    /// exception — it is the shipped image itself, so its list is the image's.
     pub firmware_features: &'static [&'static str],
     pub done_marker: Option<&'static str>,
     pub trace_slug: &'static str,
     pub supported_targets: &'static [FwCheckTarget],
     pub emits_records: bool,
+    /// Does the image print the in-band `[fw-checks-header] ` line?
+    ///
+    /// Every check with a module in this crate does, through
+    /// [`crate::write_header`]. `boot-idle` does not: there is no check module
+    /// to print it — the payload *is* the product image — so its provenance
+    /// comes from the transcript's sidecar alone.
+    pub emits_header: bool,
 }
 
 impl FwCheckConfig {
@@ -35,6 +45,7 @@ pub const ALL_CHECKS: &[FwCheckConfig] = &[
         trace_slug: "inc-shader-compile-stress",
         supported_targets: ESP32_AND_EMU,
         emits_records: true,
+        emits_header: true,
     },
     FwCheckConfig {
         check: FwCheck::GpioCalibrate,
@@ -47,6 +58,7 @@ pub const ALL_CHECKS: &[FwCheckConfig] = &[
         trace_slug: "gpio-calibrate",
         supported_targets: ESP32_ONLY,
         emits_records: false,
+        emits_header: true,
     },
     FwCheckConfig {
         check: FwCheck::UartBridge,
@@ -59,6 +71,7 @@ pub const ALL_CHECKS: &[FwCheckConfig] = &[
         trace_slug: "uart-bridge",
         supported_targets: ESP32_ONLY,
         emits_records: false,
+        emits_header: true,
     },
     FwCheckConfig {
         check: FwCheck::JitMathPerf,
@@ -68,6 +81,36 @@ pub const ALL_CHECKS: &[FwCheckConfig] = &[
         trace_slug: "jit-math-perf",
         supported_targets: ESP32_ONLY,
         emits_records: true,
+        emits_header: true,
+    },
+    FwCheckConfig {
+        check: FwCheck::BootIdle,
+        display_name: "Shipped image to the idle loop",
+        // The shipped-image walk as a payload (vision Q1): no check module,
+        // no `test_*` feature — the product image itself, built with the
+        // firmware's own "no flash" switch on top of the defaults
+        // (`esp32c6,server,radio`). `memory_fs` is there because the
+        // flash-backed boot mounts `lpfs` through the SPI1 controller, which
+        // is M4 of the esp-emulator plan (DD23): on `lp-emu:esp32c6:*` the
+        // flash-backed image stops at `SPIN SPI1+0x000 cmd` at 11 ms, and the
+        // §5.1 figures it would print (`freeBytes 265392`,
+        // `[stack] high-water 11844 B of 71328 B`, the `[FS]` mount pair) are
+        // recorded as expected at M4 rather than compared now.
+        //
+        // An emulated configuration adds `spike_uart0_link` on top of this
+        // list, because neither emulator has a USB host to serve the shipped
+        // link over (`RunRequest::features`, spike report §4, §5.1).
+        firmware_features: &["server", "radio", "memory_fs"],
+        // The first stack heartbeat, at 5 s of uptime. It is the last line of
+        // the boot the payload exists to observe, so a run must be at least
+        // 5.5 s long to reach it.
+        done_marker: Some("[stack] heartbeat: high-water"),
+        trace_slug: "boot-idle",
+        supported_targets: ESP32_ONLY,
+        emits_records: false,
+        // No check module runs in this image, so nothing prints the in-band
+        // header; the transcript's sidecar is the whole provenance.
+        emits_header: false,
     },
     FwCheckConfig {
         check: FwCheck::Json,
@@ -77,6 +120,7 @@ pub const ALL_CHECKS: &[FwCheckConfig] = &[
         trace_slug: "json",
         supported_targets: ESP32_ONLY,
         emits_records: false,
+        emits_header: false,
     },
     FwCheckConfig {
         check: FwCheck::Rmt,
@@ -86,6 +130,7 @@ pub const ALL_CHECKS: &[FwCheckConfig] = &[
         trace_slug: "rmt",
         supported_targets: ESP32_ONLY,
         emits_records: false,
+        emits_header: false,
     },
     FwCheckConfig {
         check: FwCheck::Dither,
@@ -95,6 +140,7 @@ pub const ALL_CHECKS: &[FwCheckConfig] = &[
         trace_slug: "dither",
         supported_targets: ESP32_ONLY,
         emits_records: false,
+        emits_header: false,
     },
     FwCheckConfig {
         check: FwCheck::FluidDemo,
@@ -104,6 +150,7 @@ pub const ALL_CHECKS: &[FwCheckConfig] = &[
         trace_slug: "fluid-demo",
         supported_targets: ESP32_ONLY,
         emits_records: false,
+        emits_header: false,
     },
     FwCheckConfig {
         check: FwCheck::MsaFluid,
@@ -113,6 +160,7 @@ pub const ALL_CHECKS: &[FwCheckConfig] = &[
         trace_slug: "msafluid",
         supported_targets: ESP32_ONLY,
         emits_records: false,
+        emits_header: false,
     },
 ];
 

@@ -131,13 +131,15 @@ impl Configuration {
 
     /// Is this configuration a thing that can be run right now?
     ///
-    /// `lp-emu:*` is the seam M3 fills; naming it here rather than omitting it
-    /// is deliberate — `validate list` should say the configuration exists and
-    /// is not ready, not pretend it was never planned.
+    /// All three are, since M3 P7 filled the `lp-emu:*` seam. The variant that
+    /// says otherwise stays: the next machine under `lp-emu/esp/` will be a
+    /// name and a milestone before it is a driver, and `validate list` saying
+    /// "unavailable until M<n>" is better than a configuration nobody planned.
     pub fn availability(&self) -> Availability {
         match self.kind {
-            ConfigurationKind::LpEmu => Availability::UnavailableUntil("M3"),
-            _ => Availability::Available,
+            ConfigurationKind::Silicon | ConfigurationKind::EspEmu | ConfigurationKind::LpEmu => {
+                Availability::Available
+            }
         }
     }
 }
@@ -292,18 +294,17 @@ mod tests {
     }
 
     #[test]
-    fn lp_emu_is_unavailable_until_m3() {
+    fn every_named_configuration_is_runnable_now() {
+        for name in ["lp-emu:esp32c6:t1", "lp-emu:esp32c6:t2", "esp-emu:0.42.0"] {
+            assert_eq!(
+                Configuration::parse(name).unwrap().availability(),
+                Availability::Available,
+                "{name}"
+            );
+        }
         assert_eq!(
-            Configuration::parse("lp-emu:esp32c6:t1")
-                .unwrap()
-                .availability(),
-            Availability::UnavailableUntil("M3")
-        );
-        assert_eq!(
-            Configuration::parse("esp-emu:0.42.0")
-                .unwrap()
-                .availability(),
-            Availability::Available
+            Availability::UnavailableUntil("M9").to_string(),
+            "unavailable until M9"
         );
     }
 

@@ -198,6 +198,41 @@ pub static JIT_OVERHEAD_CYCLES: MaskRule = MaskRule::new(
     "$1=N cycles",
 );
 
+/// The hello frame's build provenance: `"commit":"d6cfaa2051ae","dirty":true`.
+///
+/// Not a claim about the chip — a claim about the tree the image was built
+/// from, which the sidecar carries as `firmware_commit` / `firmware_dirty` and
+/// which `Transcript::load` already refuses to let disagree with an in-band
+/// header. Comparing it here as well would fail every replay of one image
+/// captured at two commits, for a difference the header states plainly.
+pub static HELLO_BUILD_PROVENANCE: MaskRule = MaskRule::new(
+    "hello-build-provenance",
+    "the hello's build commit and dirty flag; the sidecar's firmware_commit \
+     and firmware_dirty are the provenance, and they are checked against the \
+     in-band header rather than diffed as prose",
+    FieldClass::Structural,
+    r#""commit":"[0-9a-f]*","dirty":(true|false)"#,
+    r#""commit":"N","dirty":N"#,
+);
+
+/// The chip identity a wire frame carries: `baseMac`, `chipRevision`, `eui64`.
+///
+/// These come from the eFuse block, and the sidecar carries them as `mac` and
+/// `silicon_rev`. The runner seeds an emulated configuration's eFuse from the
+/// configuration's entry in `validate.toml` (`--efuse-mac` / `--efuse-rev`),
+/// so an emulated transcript and a silicon one of the same desk board agree by
+/// construction; masking here keeps the *human* view stable when they are not
+/// the same board, which is a fact about the desk and not about the model.
+pub static WIRE_IDENTITY: MaskRule = MaskRule::new(
+    "wire-identity",
+    "baseMac / chipRevision / eui64 in a wire frame: eFuse content, carried by \
+     the sidecar as mac and silicon_rev and seeded into an emulated \
+     configuration from validate.toml",
+    FieldClass::Wire,
+    r#""(baseMac|chipRevision|eui64)":"[^"]*""#,
+    r#""$1":"N""#,
+);
+
 /// A named, ordered set of rules.
 pub struct MaskSet {
     pub name: &'static str,
@@ -277,12 +312,35 @@ pub static JIT_MATH_PERF: MaskSet = MaskSet {
     rules: &[&ANSI, &JIT_BENCH_CYCLES, &JIT_OVERHEAD_CYCLES],
 };
 
+/// The shipped-image boot set: normalise, drop build provenance and chip
+/// identity, mask everything with a clock in it — and leave **memory alone**.
+///
+/// `HEAP_LEDGER_*`, `HEARTBEAT_MEMORY` and `STACK_HIGH_WATER` are deliberately
+/// absent: the heap ledger at the idle heartbeat and the stack high-water mark
+/// are the two numbers this payload exists to compare, and the `heartbeat` and
+/// `stack-heartbeat` series carry them as `Memory`.
+pub static BOOT_IDLE: MaskSet = MaskSet {
+    name: "boot-idle",
+    description: "ANSI, build provenance, chip identity and every clock-derived \
+                  field; the heap and stack figures are left comparable",
+    rules: &[
+        &ANSI,
+        &HELLO_BUILD_PROVENANCE,
+        &WIRE_IDENTITY,
+        &HEARTBEAT_TIMING,
+        &SAMPLE_STATS,
+        &PROSE_TIMING,
+        &BOOT_TIMESTAMP,
+    ],
+};
+
 pub static ALL_SETS: &[&MaskSet] = &[
     &NORMALIZE,
     &COMPILE_HARNESS,
     &WALK,
     &BOOT_LOG,
     &JIT_MATH_PERF,
+    &BOOT_IDLE,
 ];
 
 pub fn mask_set(name: &str) -> Result<&'static MaskSet> {
@@ -379,6 +437,29 @@ mod tests {
             ROM_PRINTF_COLUMNS.apply(silicon),
             "I (N) boot: 0 nvs WiFi data 01 02 00009000 00005000"
         );
+    }
+
+    #[test]
+    fn the_boot_idle_set_hides_provenance_and_identity_but_not_the_heap() {
+        let hello = r#"M!{"id":0,"msg":{"hello":{"proto":20,"build":{"features":[],"#.to_string()
+            + r#""package":"fw-esp32c6","commit":"d6cfaa2051ae","dirty":true,"#
+            + r#""profile":"release-esp32"},"hardware":{"boardId":"seeed/xiao-esp32-c6","#
+            + r#""baseMac":"a0:f2:62:87:b4:8c","chipRevision":"0.2","eui64":"a0:f2:62:87:b4:8c:00:00"}}}}"#;
+        let masked = BOOT_IDLE.apply(&hello);
+        assert!(masked.contains(r#""commit":"N","dirty":N"#), "{masked}");
+        assert!(masked.contains(r#""baseMac":"N""#), "{masked}");
+        assert!(masked.contains(r#""chipRevision":"N""#), "{masked}");
+        assert!(masked.contains(r#""eui64":"N""#), "{masked}");
+        // The board profile is not identity: it stays.
+        assert!(masked.contains(r#""boardId":"seeed/xiao-esp32-c6""#), "{masked}");
+
+        // The two numbers the payload exists for survive the mask.
+        let beat = r#"M!{"id":0,"msg":{"heartbeat":{"uptime_ms":5000,"memory":{"freeBytes":266688,"usedBytes":58848,"totalBytes":325536}}}}"#;
+        let masked = BOOT_IDLE.apply(beat);
+        assert!(masked.contains(r#""freeBytes":266688"#), "{masked}");
+        assert!(masked.contains(r#""uptime_ms":N"#), "{masked}");
+        let stack = "[stack] heartbeat: high-water 11432 B of 71960 B (60528 B headroom)";
+        assert_eq!(BOOT_IDLE.apply(stack), stack);
     }
 
     #[test]
