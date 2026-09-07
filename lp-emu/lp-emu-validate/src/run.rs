@@ -14,7 +14,7 @@ use crate::config::ValidateConfig;
 use crate::configuration::{Availability, Configuration};
 use crate::driver::{RunRequest, default_out_dir, driver_for};
 use crate::grade::FieldClass;
-use crate::header::TranscriptHeader;
+use crate::header::{InbandHeader, TranscriptHeader};
 use crate::payload::{ALL_PAYLOADS, Sentinel, find_payload};
 use crate::replay::{ReplayOptions, ReplayReport, replay};
 use crate::transcript::{Transcript, sidecar_path};
@@ -342,6 +342,56 @@ pub struct RecordProvenance<'a> {
 
 /// `validate record <set> --config <name>` — run, then write each capture into
 /// its committed location with the header filled in.
+/// Let the image have the last word on which features it was built with.
+///
+/// A plan asks for the payload's features — `esp32c6,test_shader_compile_incremental`
+/// — and Cargo then resolves that against the package's *defaults*, so the
+/// image that actually boots carries `default,esp_radio,lpfs,server,…` as well.
+/// Writing the request into the sidecar therefore stated something the image
+/// contradicts on its very first line, and `agrees_with_inband` refused every
+/// such capture. It had never fired before G3 sitting 1 (2026-09-07) because
+/// the only images anyone had recorded were the pinned reference ones, built
+/// at `d6cfaa205` — before the payloads printed an in-band header at all.
+///
+/// So: when the payload printed a header, the sidecar takes its resolved
+/// feature list, and what the plan asked for is checked as a **subset** of it.
+/// That is the invariant worth having — it still catches a capture taken from
+/// an image built for a different payload — while the exact list becomes a
+/// fact reported by the firmware rather than a guess reconstructed by the host.
+/// `firmware_commit` is deliberately *not* adopted: a disagreement there means
+/// the flashed image is older than the tree, which is the operator's to resolve.
+fn adopt_inband_features(mut header: TranscriptHeader, body: &str) -> Result<TranscriptHeader> {
+    let Some(inband) = body
+        .split('\n')
+        .find_map(|line| InbandHeader::from_line(line).transpose())
+        .transpose()?
+    else {
+        return Ok(header);
+    };
+    let resolved: Vec<&str> = inband
+        .firmware_features
+        .split(',')
+        .map(str::trim)
+        .filter(|f| !f.is_empty())
+        .collect();
+    let missing: Vec<&str> = header
+        .firmware_features
+        .iter()
+        .map(String::as_str)
+        .filter(|f| !resolved.contains(f))
+        .collect();
+    if !missing.is_empty() {
+        bail!(
+            "the image that ran is not the image the plan asked for: it reports features \
+             `{}`, which is missing `{}`. Re-build and re-flash rather than recording this.",
+            inband.firmware_features,
+            missing.join(", ")
+        );
+    }
+    header.firmware_features = resolved.into_iter().map(str::to_string).collect();
+    Ok(header)
+}
+
 pub fn record_set(
     cfg: &ValidateConfig,
     set: &str,
@@ -420,6 +470,7 @@ pub fn record_set(
         let capture = repo_root.join(driver.execute(&plan)?);
         let body = std::fs::read_to_string(&capture)
             .with_context(|| format!("reading capture {}", capture.display()))?;
+        let header = adopt_inband_features(header, &body)?;
         // Parse before committing: a capture that does not parse is not a
         // transcript, and writing it would make the tree lie.
         let parsed = Transcript::from_parts(header.clone(), &body)?;
