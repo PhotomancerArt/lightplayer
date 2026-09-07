@@ -41,12 +41,13 @@ pub use app::devices::{
     DeviceFrameFeeds, DeviceIdentityFirmware, DeviceIdentityLine, DevicePushOp, DeviceRoster,
     DeviceRosterView, DeviceTaskFuture, DeviceTimerFuture, DeviceTransport, DeviceTransportFuture,
     DevicesOp, FeedLiveness, FirmwareVerb, FlashBoardChoice, FlashOffer, GrantedLink, JournalLine,
-    LensLineTap, LensTapEvent, PushOffer, PushPayload, PushSource, PushSourceChoice,
-    PushSourceGroup, RememberedView, RosterSplit, StagedPush, device_card_feed_view,
-    device_card_feed_views, device_chip, device_escape_action, device_firmware_line,
-    device_identity_line, device_status_kind, feed_liveness, firmware_face_preview_sentence,
-    firmware_verb, first_bundled_example_id, flash_offer, flash_offer_for, pending_escape_action,
-    pending_firmware_line, pending_identity_rows, push_offer, reflash_choice, split_roster,
+    LensFrameSource, LensLineTap, LensTapEvent, PushOffer, PushPayload, PushSource,
+    PushSourceChoice, PushSourceGroup, RememberedView, RosterSplit, StagedPush,
+    device_card_feed_view, device_card_feed_views, device_chip, device_escape_action,
+    device_firmware_line, device_identity_line, device_status_kind, feed_liveness,
+    firmware_face_preview_sentence, firmware_verb, first_bundled_example_id, flash_offer,
+    flash_offer_for, pending_escape_action, pending_firmware_line, pending_identity_rows,
+    push_offer, reflash_choice, split_roster,
 };
 pub use app::docs_host::DocsSimHost;
 pub use app::frame_feed::{CardFeedApply, CardFeedState};

@@ -52,7 +52,8 @@ pub mod shared_link_client_io;
 pub use browser_transport::BrowserSerialTransport;
 pub use device_affordance::{device_escape_action, device_status_kind, pending_escape_action};
 pub use device_card_feed_view::{
-    DeviceCardFeedView, FeedLiveness, device_card_feed_view, device_card_feed_views, feed_liveness,
+    DeviceCardFeedView, FeedLiveness, LensFrameSource, device_card_feed_view,
+    device_card_feed_views, feed_liveness,
 };
 pub use device_effects::{
     CompletedPush, DeviceEffects, DeviceTaskFuture, DeviceTimerFuture, PendingWrites, PushPayload,

@@ -683,14 +683,45 @@ impl StudioController {
     /// The devices surface's projection.
     pub fn device_roster_view(&self) -> crate::DeviceRosterView {
         let mut view = self.devices.view(self.device_now());
+        let lens_frame = self.lens_frame_source();
         view.feeds = crate::device_card_feed_views(
             self.devices.roster(),
             &view.roster.devices,
             &self.device_feeds,
             self.devices.effects(),
+            lens_frame.as_ref(),
             (self.now_secs)(),
         );
         view
+    }
+
+    /// The lens session's picture for the device card it is open on
+    /// ([`crate::LensFrameSource`]): the editor's own passive pull already
+    /// carries the board's published frame, so the card draws that while
+    /// the feed cannot pull under the borrow — no second pull, no change to
+    /// the lens's cadence. `None` without a device lens holding a wire, or
+    /// before its first frame (the card then shows "editor has the wire").
+    fn lens_frame_source(&self) -> Option<crate::LensFrameSource> {
+        let session = self.pool.device_session()?;
+        if self.pool.lens() != Some(session.id()) {
+            return None;
+        }
+        let attachment = session.device_attachment()?;
+        if !self.devices.effects().lens_holds_wire(attachment.link) {
+            return None;
+        }
+        let (frame, frames_seen) = self.project.lens_published_frame()?;
+        let age =
+            self.device_feeds
+                .observe_lens_frames(session.id(), frames_seen, (self.now_secs)());
+        Some(crate::LensFrameSource {
+            device: attachment.device,
+            frame,
+            frame_age_secs: Some(age),
+            engine_fps: session
+                .engine_fps()
+                .map(|fps| fps.round().clamp(0.0, f32::from(u16::MAX)) as u16),
+        })
     }
 
     /// Install the platform's user-settings persistence sink (localStorage
