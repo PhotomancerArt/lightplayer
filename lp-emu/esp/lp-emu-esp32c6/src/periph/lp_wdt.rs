@@ -44,7 +44,7 @@
 
 use lp_emu_core::sched::EventId;
 use lp_emu_esp_common::regfile::{lane_of, merge_lane};
-use lp_emu_esp_common::{BusCx, MachineRequest, Peripheral, RegFile, Width, event_id};
+use lp_emu_esp_common::{BusCx, MachineRequest, Peripheral, RegFile, Strap, Width, event_id};
 
 use super::systimer::Reader;
 use super::{RC_SLOW_HZ, WDT_WKEY};
@@ -235,7 +235,12 @@ impl Peripheral for LpWdt {
             cx.trace.note(&line);
         }
         let at = cx.now;
-        cx.request(MachineRequest::Reset { source, at });
+        // A watchdog reset boots the app: the strap pin is not involved.
+        cx.request(MachineRequest::Reset {
+            source,
+            at,
+            strap: Strap::App,
+        });
     }
 
     fn reg_name(&self, off: u32) -> Option<&'static str> {
@@ -350,7 +355,8 @@ mod tests {
             sb.request,
             Some(MachineRequest::Reset {
                 source: "LP_WDT stage 0 (ResetSystem)",
-                at: 5 * memmap::CPU_HZ + period
+                at: 5 * memmap::CPU_HZ + period,
+                strap: Strap::App,
             })
         );
         assert_eq!(buf.lines().len(), 1);
