@@ -167,7 +167,10 @@ fn t2_memory_equals_t1() {
     let Some(Run { m, outcome, text }) = run_harness_at(TimeGrade::T2) else {
         return;
     };
-    assert!(matches!(outcome, Outcome::ExitMatched { .. }), "{outcome:?}");
+    assert!(
+        matches!(outcome, Outcome::ExitMatched { .. }),
+        "{outcome:?}"
+    );
     assert_eq!(m.bus.unmapped_reads() + m.bus.unmapped_writes(), 0);
 
     let root = workspace_root().expect("workspace root");

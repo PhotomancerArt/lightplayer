@@ -678,7 +678,10 @@ mod tests {
             r#""largestFreeBlock":200633},"recovery":{"level":"green","#,
             r#""resetReason":"power-on","bootCount":1,"safeMode":false}}}}"#,
         );
-        let caps = HEARTBEAT.regex().captures(beat).expect("the heartbeat parses");
+        let caps = HEARTBEAT
+            .regex()
+            .captures(beat)
+            .expect("the heartbeat parses");
         assert_eq!(&caps["msg"], "heartbeat");
         assert_eq!(&caps["free_bytes"], "266688");
         assert_eq!(&caps["total_bytes"], "325536");
@@ -687,7 +690,10 @@ mod tests {
         assert_eq!(&caps["boot_count"], "1");
         // esp-emu's sample prints a fractional average (spike report §5.1).
         let float = beat.replace(r#""avg":967"#, r#""avg":491.60336"#);
-        assert_eq!(&HEARTBEAT.regex().captures(&float).unwrap()["fps_avg"], "491.60336");
+        assert_eq!(
+            &HEARTBEAT.regex().captures(&float).unwrap()["fps_avg"],
+            "491.60336"
+        );
 
         let stack = "[INFO] fw_esp32c6::stack_probe: [stack] heartbeat: \
                      high-water 11432 B of 71960 B (60528 B headroom)";

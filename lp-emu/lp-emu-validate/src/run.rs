@@ -298,9 +298,7 @@ pub fn run_set(
             driver.availability()
         );
         for payload in payloads {
-            let plan = driver.plan(&request(
-                payload, entry, &config, opts, repo_root, &out_dir,
-            ))?;
+            let plan = driver.plan(&request(payload, entry, &config, opts, repo_root, &out_dir))?;
             s.push('\n');
             s.push_str(&plan.render());
         }
@@ -314,8 +312,7 @@ pub fn run_set(
         s.push_str(&plan.render());
         if !dry_run {
             let dir = repo_root.join(&out_dir);
-            std::fs::create_dir_all(&dir)
-                .with_context(|| format!("creating {}", dir.display()))?;
+            std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
             let capture = driver.execute(&plan)?;
             let _ = writeln!(s, "  captured {}", capture.display());
         }

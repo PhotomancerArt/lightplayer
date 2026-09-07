@@ -560,12 +560,14 @@ impl ConfigurationDriver for LpEmuDriver {
             emu.push(rev.to_string());
         }
 
-        steps.push(PlanStep::new("run the machine, UART0 to the capture", emu).with_note(
-            "the eFuse identity comes from this configuration's entry in validate.toml, so the \
+        steps.push(
+            PlanStep::new("run the machine, UART0 to the capture", emu).with_note(
+                "the eFuse identity comes from this configuration's entry in validate.toml, so the \
              hello frame's baseMac / chipRevision / eui64 read the same as the desk board's and \
              a replay against a silicon transcript compares chip identity rather than a \
              difference in who was told what",
-        ));
+            ),
+        );
 
         Ok(RunPlan {
             configuration: req.configuration.name(),
@@ -625,7 +627,13 @@ fn emulator_tools(repo_root: &Path) -> BTreeMap<String, String> {
 /// refuse to record — it is a reason to say so in the header.
 fn git_description(repo_root: &Path) -> String {
     let short = Command::new("git")
-        .args(["-C", &repo_root.display().to_string(), "rev-parse", "--short=9", "HEAD"])
+        .args([
+            "-C",
+            &repo_root.display().to_string(),
+            "rev-parse",
+            "--short=9",
+            "HEAD",
+        ])
         .output()
         .ok()
         .filter(|o| o.status.success())
@@ -830,8 +838,15 @@ mod tests {
         assert_eq!(plan.availability, Availability::Available);
         assert_eq!(plan.steps.len(), 2, "build, then run");
         let rendered = plan.render();
-        assert!(rendered.contains("--features esp32c6,test_shader_compile_incremental,spike_uart0_link"), "{rendered}");
-        assert!(rendered.contains("cargo run -q -p lp-emu-esp32c6 --release"), "{rendered}");
+        assert!(
+            rendered
+                .contains("--features esp32c6,test_shader_compile_incremental,spike_uart0_link"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("cargo run -q -p lp-emu-esp32c6 --release"),
+            "{rendered}"
+        );
         assert!(rendered.contains("--time-grade t1"), "{rendered}");
         assert!(rendered.contains("--strict-bus"), "{rendered}");
         assert!(rendered.contains("--uart0 file:"), "{rendered}");
@@ -843,7 +858,10 @@ mod tests {
         assert!(rendered.contains("--timeout 120s"), "{rendered}");
         assert!(rendered.contains("--wall-timeout 2400"), "{rendered}");
         // The identity the configuration was given, not the machine default.
-        assert!(rendered.contains("--efuse-mac a0:f2:62:87:b4:8c"), "{rendered}");
+        assert!(
+            rendered.contains("--efuse-mac a0:f2:62:87:b4:8c"),
+            "{rendered}"
+        );
         assert!(rendered.contains("--efuse-rev 0.2"), "{rendered}");
     }
 
@@ -853,11 +871,19 @@ mod tests {
     fn lp_emu_runs_a_pinned_image_for_the_shipped_image_payload() {
         let mut req = request("lp-emu:esp32c6:t2", "boot-idle", None);
         req.identity = desk_identity();
-        req.image = Some(PathBuf::from("target/emu-ref/d6cfaa205-boot-idle-memfs/fw-esp32c6"));
+        req.image = Some(PathBuf::from(
+            "target/emu-ref/d6cfaa205-boot-idle-memfs/fw-esp32c6",
+        ));
         req.timeout_secs = 6;
         assert_eq!(
             req.features(),
-            vec!["esp32c6", "server", "radio", "memory_fs", "spike_uart0_link"]
+            vec![
+                "esp32c6",
+                "server",
+                "radio",
+                "memory_fs",
+                "spike_uart0_link"
+            ]
         );
         let plan = LpEmuDriver.plan(&req).unwrap();
         assert_eq!(plan.steps.len(), 1, "a pinned image is not built here");

@@ -451,7 +451,10 @@ mod tests {
         assert!(masked.contains(r#""chipRevision":"N""#), "{masked}");
         assert!(masked.contains(r#""eui64":"N""#), "{masked}");
         // The board profile is not identity: it stays.
-        assert!(masked.contains(r#""boardId":"seeed/xiao-esp32-c6""#), "{masked}");
+        assert!(
+            masked.contains(r#""boardId":"seeed/xiao-esp32-c6""#),
+            "{masked}"
+        );
 
         // The two numbers the payload exists for survive the mask.
         let beat = r#"M!{"id":0,"msg":{"heartbeat":{"uptime_ms":5000,"memory":{"freeBytes":266688,"usedBytes":58848,"totalBytes":325536}}}}"#;

@@ -42,7 +42,8 @@ fn load_with_body(payload: &str, name: &str, edit: impl Fn(String) -> String) ->
     let path = transcripts().join(payload).join(name);
     let body = std::fs::read_to_string(&path).unwrap();
     let header =
-        TranscriptHeader::from_json(&std::fs::read_to_string(sidecar_path(&path)).unwrap()).unwrap();
+        TranscriptHeader::from_json(&std::fs::read_to_string(sidecar_path(&path)).unwrap())
+            .unwrap();
     Transcript::from_parts(header, &edit(body)).unwrap()
 }
 
@@ -307,9 +308,8 @@ fn the_recorded_transcripts_are_filed_where_their_headers_say() {
         assert_eq!(t.header.silicon_rev.as_deref(), Some("v0.2"));
         assert!(t.header.tools.contains_key("lp-emu-esp32c6"));
         assert!(
-            t.header.tools["rom"].contains(
-                "788e1d38724aeb8fd974fa10c4a7b089c02627d35342ce84b9e0b12b239f3551"
-            ),
+            t.header.tools["rom"]
+                .contains("788e1d38724aeb8fd974fa10c4a7b089c02627d35342ce84b9e0b12b239f3551"),
             "the vendored ROM's sha256 belongs in the sidecar: {:?}",
             t.header.tools
         );
