@@ -141,10 +141,10 @@ The module authoring unit (T1, PR #380) had shipped the pattern shape —
   template, the rewire op named to avoid `retarget`).
 - `featured` on the manifest and a curated home, when Explore returns as
   the full list (D17 end state).
-- Widen the byte-identity gate to `projects/test/` on the merge of
-  PR #543.
-- A GPU-tier guard for unbounded shaders (static loop-exit refusal, or
-  an injected iteration cap) so content authored for the fuel-metered
-  tiers cannot hang a GPU — the open defect above.
+- ~~Widen the byte-identity gate to `projects/test/` on the merge of
+  PR #543.~~ Done on this branch once #543 merged in.
+- ~~A GPU-tier guard for unbounded shaders~~ Landed as PR #556
+  (`2026-09-06-gpu-tier-loop-bounds`): static refusal plus an injected
+  back-edge budget; the defect above is closed.
 - The pattern submodule's 15.6 KB largest-free-block cost on the classic
   is worth a look when the classic's load gate is next re-measured.

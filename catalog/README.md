@@ -122,10 +122,11 @@ below.
 
 Not here on purpose: `projects/test/fault-demo`, the shader that faults
 every frame to demonstrate "a fault is never black". Its loop never ends
-and only the LPVM's fuel meter stops it; a GPU tier has no meter, so a
-gallery card previewing it hangs the GPU
-(`docs/defects/2026-09-06-gpu-tier-executes-unbounded-shaders.md`). It
-stays a rig for `lp-cli dev` and the engine/server tests.
+and only the LPVM's fuel meter traps it; a GPU tier used to hang on it
+(`docs/defects/2026-09-06-gpu-tier-executes-unbounded-shaders.md`, fixed
+by the loop-bounds pass, which now refuses it at GPU compile time), so a
+gallery card would show a placeholder instead of the pattern. It stays a
+rig for `lp-cli dev` and the engine/server tests.
 
 ## Ports from WLED
 
