@@ -5,7 +5,11 @@
 - **Deciders:** Photomancer
 - **Supersedes:** the D12 hero strip (gallery-rework P05) as the device
   card's preview surface
-- **Superseded by:** None
+- **Superseded by:** in part — the client-side display-layout synthesis
+  clause below was deleted in 45df0da9c; `2026-09-06-shared-link-
+  conversations-and-the-card-feed.md` records what stands (geometry comes
+  only from the wire; over-budget layouts are named, not drawn) and brings
+  this feed to the round-2 device card over the SHARED link
 
 ## Context
 
