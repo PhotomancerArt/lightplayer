@@ -37,9 +37,11 @@ const STORY_NOW: f64 = 1_800_000_000.0;
     description = "README front-page hero: the full Studio editing a loaded show — sidebar node tree, the focused Aurora shader card (TRACKED visual preview with rendered output, knob row, agent chat, code drawer), and the connected simulator pane. Single-state and deterministic on purpose; the repo README embeds the lg capture."
 )]
 fn studio_hero() -> Element {
-    // The right column is the D43 LENS CARD — the same DeviceCard the
-    // gallery shows, docked as the editor's device surface. (The legacy
-    // step-stack device pane renders only when no lens card exists.)
+    // The right column is the D43 LENS CARD — the same card the gallery
+    // shows, grown and docked as the editor's ONLY runtime surface. This
+    // hero takes the Sim arm (`SimCard`); a device session takes the
+    // roster card. There is no fallback pane: core pins a lens card
+    // whenever panes render.
     shell_story(
         UiStudioView::new(
             vec![readme_project_pane()],

@@ -1,6 +1,7 @@
 # ADR: The rich-object pattern — sections, rollup, surfaces
 
-- **Status:** Accepted (amended 2026-07-24 — see the M7′ note below)
+- **Status:** Accepted (amended 2026-07-24 and 2026-09-07 — see the notes
+  below)
 - **Date:** 2026-07-17
 - **Deciders:** Photomancer
 - **Supersedes:** None (builds on
@@ -21,6 +22,20 @@
 > order) and Q5 (danger inline, red, never shouting) carry over into the
 > tabs unchanged. `RichObjectPane`/`DetailPopover` REMAIN the pattern for
 > nodes — nothing about node surfaces changes.
+
+> **Spike-record note (2026-09-07).** The P2 exploration sheet
+> (`lpa-studio-web/src/exploration/rich_object_stories.rs`) is DELETED.
+> It was an era record: it carried a spike-local copy of the deleted
+> `StatusCircle` so it could keep drawing the circle-as-trigger card the
+> M7′ note above had already superseded, and the device card it mirrored
+> has since been rebuilt again as the four-zone roster card
+> (`2026-09-03-device-card-fixed-height-and-disconnect-disappears.md`).
+> This ADR is the record; the sheet was only a rendering of a card that
+> no longer exists in any form. `core::menu_item_destructive_action_class`,
+> exported at P3 solely so the sheet could stop hand-copying the private
+> class, went with it — live danger rows reach `menu_item_class` through
+> `ActionButton`'s MenuItem variant. `base::detail_popover_card_class`
+> stays: the palette swatch field uses it.
 
 ## Context
 
@@ -126,7 +141,8 @@ what they share is the merge/rollup shape and the header anatomy.
 - The story sheet grows the popover gates
   (`device_detail_running_behind`, `device_detail_offline`); the P2
   exploration module remains as the spike record, now consuming the
-  exported classes it had to copy.
+  exported classes it had to copy. *(Deleted 2026-09-07 — see the
+  spike-record note above.)*
 
 ## Alternatives Considered
 
