@@ -1,43 +1,25 @@
-//! USB-Serial-JTAG connection monitor for ESP32-C6.
+//! USB-Serial-JTAG connection monitor for ESP32-C6 — the chip half.
 //!
-//! Two independent signals decide whether protocol writes should be
-//! attempted:
-//!
-//! 1. **Cable/enumeration** — SOF (Start of Frame) packets. USB full-speed
-//!    hosts send SOF every 1ms; if they stop, the cable is unplugged or the
-//!    device de-enumerated. (Same approach as ESP-IDF's
-//!    `usb_serial_jtag_connection_monitor.c`.)
-//! 2. **Host application draining** — SOF keeps arriving as long as the
-//!    cable is plugged, even when no application has the port open. In that
-//!    state the TX FIFO fills and every write times out; unchecked, those
-//!    timeouts stall the io task (frame stutter) and once starved the
-//!    recovery watchdog reboots the device. Consecutive write timeouts
-//!    therefore latch "not draining" and writes are dropped fast until the
-//!    host proves itself again (incoming bytes, or a periodic probe write
-//!    succeeding).
+//! The state machine, its two thresholds and its two log lines live in
+//! [`fw_esp32_common::serial::usb_connection`], which is chip-free and
+//! host-tested. What is genuinely a C6 fact is here and is only two things:
+//! reading and clearing `USB_DEVICE.int_raw.sof`, and reading the device
+//! clock. The S3 keeps the same pair for the same reason.
 
-/// Missed-poll threshold before declaring disconnected.
-/// io_task polls every ~2ms, so 3 misses ≈ 6ms without SOF — enough to
-/// avoid false disconnects from tick jitter while still detecting quickly.
-const DISCONNECT_THRESHOLD: u8 = 3;
-
-/// Consecutive write timeouts before latching "host not draining".
-/// One timeout can be a hiccup; two in a row (each a full write timeout)
-/// means nobody is reading.
-const NOT_DRAINING_THRESHOLD: u8 = 2;
+use fw_esp32_common::serial::link_counters::NEVER;
+use fw_esp32_common::serial::usb_connection::UsbLinkState;
 
 pub struct UsbConnectionMonitor {
-    no_sof_count: u8,
-    write_timeouts: u8,
-    host_draining: bool,
+    link: UsbLinkState,
 }
 
 impl UsbConnectionMonitor {
     pub fn new() -> Self {
         Self {
-            no_sof_count: 0,
-            write_timeouts: 0,
-            host_draining: true,
+            // The `spike_uart0_link` build moves the host link to UART0,
+            // which has no cable to detect: SOF never arrives there and must
+            // not gate writes.
+            link: UsbLinkState::new(cfg!(feature = "spike_uart0_link")),
         }
     }
 
@@ -47,58 +29,42 @@ impl UsbConnectionMonitor {
         let regs = esp_hal::peripherals::USB_DEVICE::regs();
         let sof_received = regs.int_raw().read().sof().bit_is_set();
         regs.int_clr().write(|w| w.sof().clear_bit_by_one());
-
-        if sof_received {
-            self.no_sof_count = 0;
-        } else {
-            self.no_sof_count = self.no_sof_count.saturating_add(1);
-            if !self.is_enumerated() {
-                // Physical disconnect resets the draining latch: the next
-                // enumeration starts from a clean slate.
-                self.write_timeouts = 0;
-                self.host_draining = true;
-            }
-        }
+        self.link.poll_with(sof_received);
     }
 
     /// A serial write timed out or failed: evidence nobody is draining.
     pub fn note_write_timeout(&mut self) {
-        self.write_timeouts = self.write_timeouts.saturating_add(1);
-        if self.write_timeouts >= NOT_DRAINING_THRESHOLD && self.host_draining {
-            self.host_draining = false;
-            log::info!("[io_task] host not draining; dropping protocol writes");
-        }
+        self.link.note_write_timeout(now_ms());
     }
 
     /// A serial write completed, or bytes arrived from the host: the host
     /// application is provably alive and draining.
     pub fn note_host_active(&mut self) {
-        self.write_timeouts = 0;
-        if !self.host_draining {
-            self.host_draining = true;
-            log::info!("[io_task] host draining again; resuming protocol writes");
-        }
+        self.link.note_host_active(now_ms());
     }
 
     /// Should a probe write be attempted? True while enumerated but latched
     /// not-draining — the probe is the self-healing path for hosts that
     /// reopen the port without ever sending bytes (e.g. a passive monitor).
     pub fn needs_probe(&self) -> bool {
-        self.is_enumerated() && !self.host_draining
-    }
-
-    fn is_enumerated(&self) -> bool {
-        // esp-emu spike: the link is UART0, which has no cable to detect;
-        // SOF never arrives under the emulator and must not gate writes.
-        if cfg!(feature = "spike_uart0_link") {
-            return true;
-        }
-        self.no_sof_count < DISCONNECT_THRESHOLD
+        self.link.needs_probe()
     }
 
     /// Attempt protocol writes only when the cable is enumerated AND the
     /// host application is draining the port.
     pub fn is_connected(&self) -> bool {
-        self.is_enumerated() && self.host_draining
+        self.link.is_connected()
     }
+}
+
+/// Milliseconds since boot on the device's own clock, saturating one short of
+/// [`NEVER`].
+///
+/// `u32::MAX` is the "never happened" sentinel in the link counters, so an
+/// uptime of 49.7 days must not accidentally spell it. Clamping is the honest
+/// failure here: a stamp that far out is already useless as a latency, and
+/// the alternative — wrapping — would read as a fresh transition.
+fn now_ms() -> u32 {
+    let ms = embassy_time::Instant::now().as_millis();
+    ms.min(u64::from(NEVER) - 1) as u32
 }
