@@ -401,6 +401,12 @@ impl UsbSerialJtag {
         self.out_underruns
     }
 
+    /// Are frames arriving? True exactly while a host is attached — the
+    /// `sof=on|off` the control channel's `state` reply reports.
+    pub fn sof_running(&self) -> bool {
+        self.host.attached()
+    }
+
     // ---- the host's transitions (P3's control channel calls these) --------
 
     /// A cable is plugged in and the host enumerates the device: a bus
@@ -543,23 +549,45 @@ impl UsbSerialJtag {
                 } else {
                     self.reset(cx);
                 }
+                // Whether the request was made or `chip_rst.disable`
+                // suppressed it, the dance is over; the trace note says which.
             }
         }
         self.update_lines(cx);
     }
 
     /// The serial channel's chip reset into the app (the plain dance).
-    pub fn reset(&mut self, cx: &mut BusCx<'_>) {
-        self.chip_reset(Strap::App, cx);
+    /// `false` when `chip_rst.disable` (bit 2) suppressed it.
+    pub fn reset(&mut self, cx: &mut BusCx<'_>) -> bool {
+        self.chip_reset(Strap::App, cx)
     }
 
     /// The serial channel's chip reset into the ROM download console (the
-    /// dance with DTR high).
-    pub fn download_mode(&mut self, cx: &mut BusCx<'_>) {
-        self.chip_reset(Strap::Download, cx);
+    /// dance with DTR high). `false` when `chip_rst.disable` suppressed it.
+    pub fn download_mode(&mut self, cx: &mut BusCx<'_>) -> bool {
+        self.chip_reset(Strap::Download, cx)
     }
 
-    fn chip_reset(&mut self, strap: Strap, cx: &mut BusCx<'_>) {
+    /// `chip_rst` bit 2: the guest has disabled the chip reset the serial
+    /// channel can ask for. A dance is then recorded and not performed, and
+    /// the control channel answers `err` rather than pretending.
+    pub fn chip_reset_disabled(&self) -> bool {
+        self.regs.stored(CHIP_RST) & CHIP_RST_DISABLE != 0
+    }
+
+    /// Host bytes on the OUT path without a byte stream behind them: the
+    /// control channel's `usb-write`, and what a test uses instead of a
+    /// socket. They stage exactly as a source's bytes do — a closed port
+    /// holds them until [`open`](Self::open).
+    pub fn host_write(&mut self, bytes: &[u8], cx: &mut BusCx<'_>) {
+        if bytes.is_empty() {
+            return;
+        }
+        self.out_staging.extend(bytes.iter().copied());
+        self.try_land(cx.now, cx);
+    }
+
+    fn chip_reset(&mut self, strap: Strap, cx: &mut BusCx<'_>) -> bool {
         let stored = self.regs.stored(CHIP_RST);
         self.regs.poke(CHIP_RST, stored | CHIP_RST_SERIAL);
         let disabled = stored & CHIP_RST_DISABLE != 0;
@@ -575,7 +603,7 @@ impl UsbSerialJtag {
         );
         cx.trace.note(&line);
         if disabled {
-            return;
+            return false;
         }
         let at = cx.now;
         cx.request(MachineRequest::Reset {
@@ -583,6 +611,7 @@ impl UsbSerialJtag {
             at,
             strap,
         });
+        true
     }
 
     // ---- the pieces ------------------------------------------------------
@@ -974,6 +1003,13 @@ impl Peripheral for UsbSerialJtag {
 
     fn reg_grade(&self, off: u32) -> RegGrade {
         self.grades.grade(off)
+    }
+
+    /// The one block the machine drives from outside the guest: M6 P3's
+    /// control channel calls [`attach`](Self::attach) and its siblings
+    /// through [`lp_emu_esp_common::SocBus::with_peripheral`].
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
     }
 
     fn save_state(&self) -> Vec<u8> {
