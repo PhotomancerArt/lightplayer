@@ -20,7 +20,7 @@
 use lpa_devices::identity::DeviceId;
 use lpa_devices::view::DeviceView;
 
-use crate::app::home::embedded_example::embedded_examples;
+use crate::app::home::embedded_example::embedded_example;
 use crate::app::home::{UiExampleCard, UiPackageCard};
 
 /// Where a pushed project comes from.
@@ -67,6 +67,10 @@ pub struct PushSourceChoice {
     pub title: String,
     /// One terse consequence line for the option card.
     pub blurb: String,
+    /// The section heading this choice sits under inside its group, when
+    /// the group is subdivided: the catalog's kind sections ("Projects",
+    /// "Patterns") for examples; `None` for the library and the starter.
+    pub section: Option<&'static str>,
     pub group: PushSourceGroup,
     pub source: PushSource,
 }
@@ -99,29 +103,37 @@ pub fn push_offer(
             key: format!("new:{board_id}"),
             title: "Start something new".to_string(),
             blurb: "A starter project wired for this board.".to_string(),
+            section: None,
             group: PushSourceGroup::New,
             source: PushSource::NewForBoard { board_id },
         }),
         Err(reason) => new_project_unavailable = Some(reason),
     }
-    for example in examples {
-        choices.push(PushSourceChoice {
-            key: format!("example:{}", example.id),
-            title: example.name.clone(),
-            // Examples lost their blurbs in the card-overlay slim (#470);
-            // the kind chip label is what identifies one now.
-            blurb: example.kind.clone(),
-            group: PushSourceGroup::Example,
-            source: PushSource::Example {
-                example_id: example.id.clone(),
-            },
-        });
+    // The catalog in its kind sections, real pieces first: a walk wants a
+    // real piece (or pulse) on the board, so those come before the
+    // patterns (catalog content tree D17). The blurb is the kind word,
+    // not the entry's description — the G1 ruling kept that copy off the
+    // cards.
+    for group in crate::app::home::example_groups(examples) {
+        for example in group.cards {
+            choices.push(PushSourceChoice {
+                key: format!("example:{}", example.id),
+                title: example.name.clone(),
+                blurb: example.kind_label().to_string(),
+                section: Some(group.label),
+                group: PushSourceGroup::Example,
+                source: PushSource::Example {
+                    example_id: example.id.clone(),
+                },
+            });
+        }
     }
     for project in projects {
         choices.push(PushSourceChoice {
             key: format!("library:{}", project.uid),
             title: project.slug.clone(),
             blurb: project.project_kind.clone(),
+            section: None,
             group: PushSourceGroup::Library,
             source: PushSource::Library {
                 project_uid: project.uid.clone(),
@@ -176,11 +188,13 @@ fn starter_board(board_id: Option<&str>) -> Result<String, String> {
     Ok(board.board_id.clone())
 }
 
-/// The example the walk reaches for when nothing else is picked: the first
-/// bundled one. Exists so the fake-device bench and the page agree on what
-/// "the starter example" means.
+/// The example the walk reaches for when nothing else is picked: the
+/// Studio demo project, by id — not "the first table row", which the
+/// bucket-then-slug registry order would otherwise decide. Exists so the
+/// fake-device bench and the page agree on what "the starter example"
+/// means.
 pub fn first_bundled_example_id() -> Option<&'static str> {
-    embedded_examples().first().map(|example| example.id)
+    embedded_example(crate::STUDIO_DEMO_PROJECT_ID).map(|example| example.id)
 }
 
 /// The app-level "prepare a project and put it on this board" gesture.
@@ -245,6 +259,7 @@ impl crate::ControllerOp for DevicePushOp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::home::embedded_example::embedded_examples;
     use lpa_devices::view::LoadedProject;
 
     fn card(board_id: Option<&str>) -> DeviceView {
@@ -277,7 +292,8 @@ mod tests {
         UiExampleCard {
             id: id.to_string(),
             name: name.to_string(),
-            kind: "Module".to_string(),
+            kind: lpc_model::ProjectKind::General,
+            description: String::new(),
         }
     }
 
@@ -305,7 +321,7 @@ mod tests {
         let offer = push_offer(
             &card(None),
             &[project("prj_1", "2026-08-30-porch")],
-            &[example("examples/plasma", "Plasma")],
+            &[example("catalog/plasma", "Plasma")],
         );
 
         assert_eq!(offer.choices.len(), 2, "{offer:?}");

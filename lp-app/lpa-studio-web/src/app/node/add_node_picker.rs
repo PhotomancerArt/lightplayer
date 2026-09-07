@@ -18,8 +18,8 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    NODE_KIND, NodePasteOp, ProjectController, UiAction, UiAddNodeMenu, UiAddNodeMenuEntry,
-    UiAttachTarget, peek_header,
+    IMPORT_BUILTIN_SECTION, IMPORT_LIBRARY_SECTION, NODE_KIND, NodePasteOp, ProjectController,
+    UiAction, UiAddNodeMenu, UiAddNodeMenuEntry, UiAttachTarget, peek_header,
 };
 
 use crate::base::{
@@ -78,14 +78,26 @@ pub fn AddNodePicker(
                     PasteNodeMenuRow { attach: menu.attach.clone(), on_action }
                 }
             }
-            // The third source: a pattern already in your library, vendored
-            // in as your own copy. Absent entirely on menus that are not an
-            // import site (a playlist's, this round) — the controller says
-            // so by leaving both the rows AND the empty-state reason unset.
-            if !menu.imports.is_empty() || menu.imports_empty.is_some() {
+            // The third source: a pattern already in your library, or one
+            // of the catalog's built-ins, vendored in as your own copy. Two
+            // sub-sections when both have rows (core names them); the one
+            // that exists renders heading-less otherwise. Absent entirely
+            // on menus that are not an import site (a playlist's, this
+            // round) — the controller says so by leaving the rows AND the
+            // empty-state reason unset.
+            if !menu.imports.is_empty() || !menu.imports_builtin.is_empty() || menu.imports_empty.is_some() {
                 DetailSection { title: "Import pattern",
                     div { class: "tw:grid tw:gap-0.5",
+                        if !menu.imports.is_empty() && !menu.imports_builtin.is_empty() {
+                            ImportSubheading { label: IMPORT_LIBRARY_SECTION }
+                        }
                         for entry in menu.imports.clone() {
+                            AddNodeMenuRow { entry, on_action }
+                        }
+                        if !menu.imports.is_empty() && !menu.imports_builtin.is_empty() {
+                            ImportSubheading { label: IMPORT_BUILTIN_SECTION }
+                        }
+                        for entry in menu.imports_builtin.clone() {
                             AddNodeMenuRow { entry, on_action }
                         }
                         if let Some(reason) = menu.imports_empty.clone() {
@@ -94,6 +106,18 @@ pub fn AddNodePicker(
                     }
                 }
             }
+        }
+    }
+}
+
+/// A sub-heading inside the import section, splitting the library's rows
+/// from the catalog's when both exist.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn ImportSubheading(label: &'static str) -> Element {
+    rsx! {
+        p { class: "tw:m-0 tw:px-2 tw:pt-1.5 tw:pb-0.5 tw:text-[10px]/none tw:font-extrabold tw:uppercase tw:tracking-[0.06em] tw:text-muted-foreground",
+            "{label}"
         }
     }
 }

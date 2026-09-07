@@ -11,6 +11,7 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{DeviceCardFeedView, FeedLiveness};
 use lpa_studio_web_story_macros::story;
+use lpc_model::ProjectKind;
 
 use lpa_studio_core::app::library::PackageHealth;
 use lpa_studio_core::{
@@ -39,12 +40,26 @@ use crate::app::home::{DevicesPage, ExplorePage, ProjectsPage};
 /// A fixed "now" so relative times in baselines never drift.
 const STORY_NOW: f64 = 1_800_000_000.0;
 
+/// One of each kind, so the grouped surfaces show both sections.
 fn examples() -> Vec<UiExampleCard> {
-    vec![UiExampleCard {
-        id: "examples/basic".to_string(),
-        name: "Basic".to_string(),
-        kind: "Module".to_string(),
-    }]
+    vec![
+        UiExampleCard {
+            id: "catalog/fyeah-sign".to_string(),
+            name: "Fyeah Sign".to_string(),
+            kind: ProjectKind::General,
+            description: "A porch sign on the full bus: clock, button and radio share one trigger."
+                .to_string(),
+        },
+        UiExampleCard {
+            id: "catalog/plasma".to_string(),
+            name: "Plasma".to_string(),
+            kind: ProjectKind::Pattern {
+                exports: vec!["effect".to_string()],
+            },
+            description: "The smallest non-empty panel: one plasma shader with three bound knobs."
+                .to_string(),
+        },
+    ]
 }
 
 fn packages() -> Vec<UiPackageCard> {
@@ -264,7 +279,7 @@ fn live_thumb_states() -> Element {
             }
             article { class: "tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
                 CardThumb {
-                    seed: "examples/basic".to_string(),
+                    seed: "catalog/plasma".to_string(),
                     label: "failed".to_string(),
                     static_badge: Some(ThumbPreviewBadge::Error {
                         reason: "deploy: shader compile failed".to_string(),
@@ -512,6 +527,43 @@ fn devices_page_story(remembered_open: bool) -> Element {
     rsx! {
         section { class: "tw:p-4",
             DevicesPage { home, remembered_open, on_action: |_| {} }
+        }
+    }
+}
+
+#[story(
+    description = "The remembered line open, with the board's LAST PICTURE (the honest-device-preview follow-up, 2026-09-07): the same page as `devices_page_remembered_open`, but the remembered board's feed carries the frame Studio persisted to its per-uid sidecar the last time the board was fed. The tile's 120px slot draws that frame exactly as a card's Offline look does — the lamp field dimmed and desaturated, the neutral pill \"last frame · 3 h ago\" with the age measured from when the board actually published it (the STORED capture stamp, not the reload) — instead of the \"Not connected — …\" sentence. Nothing else on the tile moves: same dashed border, same height, same board · last-heard meta line, same Reconnect / Forget verbs. Compare against `devices_page_remembered_open`, whose remembered board has no sidecar and keeps its sentence."
+)]
+fn devices_page_remembered_last_frame() -> Element {
+    let mut devices = roster_page_fixture();
+    let remembered = devices
+        .roster
+        .devices
+        .iter()
+        .find(|device| device.status == DeviceStatus::Offline)
+        .map(|device| device.id)
+        .expect("the page fixture has a remembered board");
+    devices.feeds.insert(
+        remembered,
+        DeviceCardFeedView {
+            frame: Some(thumb_lamp_frame()),
+            frame_age_secs: Some(3.0 * 3_600.0),
+            engine_fps: None,
+            liveness: FeedLiveness::Offline,
+        },
+    );
+    let home = UiHomeView {
+        sim: None,
+        projects: packages(),
+        examples: examples(),
+        devices,
+        library_available: true,
+        opening: None,
+        issue: None,
+    };
+    rsx! {
+        section { class: "tw:p-4",
+            DevicesPage { home, remembered_open: true, on_action: |_| {} }
         }
     }
 }
@@ -1714,21 +1766,29 @@ fn pick_popover_library() -> Vec<UiPackageCard> {
         .collect()
 }
 
-/// Six bundled examples, so the Examples tab is a grid rather than a row.
+/// Six bundled examples, three of each kind, so the Examples tab shows
+/// both of its sections as grids rather than rows.
 fn pick_popover_examples() -> Vec<UiExampleCard> {
     [
-        "Basic",
-        "Meteor",
-        "Plasma",
-        "Rainbow",
-        "Logo sign",
-        "Candle",
+        ("Logo sign", false),
+        ("Meteor", true),
+        ("Porch sign", false),
+        ("Plasma", true),
+        ("Zook dome", false),
+        ("Candle", true),
     ]
     .into_iter()
-    .map(|name| UiExampleCard {
-        id: format!("examples/{}", name.to_lowercase().replace(' ', "-")),
+    .map(|(name, pattern)| UiExampleCard {
+        id: format!("catalog/{}", name.to_lowercase().replace(' ', "-")),
         name: name.to_string(),
-        kind: "Module".to_string(),
+        kind: if pattern {
+            ProjectKind::Pattern {
+                exports: vec!["effect".to_string()],
+            }
+        } else {
+            ProjectKind::General
+        },
+        description: format!("{name}, in one sentence."),
     })
     .collect()
 }

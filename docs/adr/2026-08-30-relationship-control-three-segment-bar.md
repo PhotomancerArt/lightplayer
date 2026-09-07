@@ -318,6 +318,17 @@ destination now is what keeps the next person from inventing a third home.
   (D13).
 - **Sweep-time healing of no-saved-head projects** — unchanged from `#465`;
   the state is now visible as product, which was the precondition.
+  *2026-09-06:* a neighbouring gap closed — a project whose one
+  install-time trip was refused (or that was installed before `whoami`
+  answered) stayed `MineLocal` forever, because the coarse tick only
+  re-armed what the queue still tracked. The tick now re-derives from the
+  library (`SyncQueue::sweep`), and refusals back off instead of being
+  forgotten; see the defect's round 2. No-saved-head projects are still
+  not healed: the tick treats their `Nothing` as a settled verdict.
+- **`MineLocal` folds "service-silent" in** — unpublished, restricted, and
+  a driver that never got the project to the service all read as the same
+  "Not shared" sentence; only the `/account` ledger says which.
+  **Revisit when** the panel can read the ledger row for its own uid.
 - **Provenance prose** ("Forked from Plasma Duo") is not reachable from an
   open project: it lives on `PackageMeta` and surfaces only on gallery
   cards. The Where section says what this surface actually knows;

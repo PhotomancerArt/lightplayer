@@ -12,6 +12,10 @@
       "title": "Provenance: ISO date the project was created",
       "type": "string"
     },
+    "description": {
+      "title": "Card blurb: one sentence, what the project shows off",
+      "type": "string"
+    },
     "exports": {
       "description": "Module folder names this project exports, for other projects to import. Only meaningful alongside a \"pattern\" or \"rig\" kind.",
       "items": {

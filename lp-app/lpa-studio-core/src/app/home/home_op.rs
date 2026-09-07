@@ -344,7 +344,7 @@ mod tests {
                 key: "prj1".to_string(),
             },
             HomeOp::OpenExample {
-                id: "examples/basic".to_string(),
+                id: "catalog/plasma".to_string(),
             },
             HomeOp::CreateProject {
                 template: ProjectTemplate::Blank,

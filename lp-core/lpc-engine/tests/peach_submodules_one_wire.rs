@@ -41,7 +41,7 @@ fn both_peaches_merge_both_submodules_onto_one_wire() {
         let mut rt = load(example);
         for tick in 0..TICKS {
             rt.tick(16)
-                .unwrap_or_else(|e| panic!("examples/{example} tick {tick}: {e:?}"));
+                .unwrap_or_else(|e| panic!("{example} tick {tick}: {e:?}"));
         }
 
         let output = output_node(&rt);
@@ -102,7 +102,7 @@ fn the_published_display_layout_draws_every_lamp_of_both_fixtures() {
         let mut rt = load(example);
         for tick in 0..TICKS {
             rt.tick(16)
-                .unwrap_or_else(|e| panic!("examples/{example} tick {tick}: {e:?}"));
+                .unwrap_or_else(|e| panic!("{example} tick {tick}: {e:?}"));
         }
 
         let (engine, registry) = rt.read_parts();
@@ -152,11 +152,11 @@ fn output_node(rt: &LoadedProjectRuntime) -> lpc_model::NodeId {
 }
 
 fn load(project: &str) -> LoadedProjectRuntime {
-    let fs = LpFsStd::new(workspace_dir().join("examples").join(project));
+    let fs = LpFsStd::new(workspace_dir().join("catalog/projects").join(project));
     let root = format!("/{}.show", project.replace(['/', '-'], "_"));
     let services = EngineServices::new(TreePath::parse(&root).expect("root path"));
     let mut rt = ProjectLoader::load_from_root(&fs, services)
-        .unwrap_or_else(|e| panic!("load examples/{project}: {e:?}"));
+        .unwrap_or_else(|e| panic!("load {project}: {e:?}"));
     rt.engine_mut()
         .set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
             lp_shader::ShaderFrontend::LpsGlsl,

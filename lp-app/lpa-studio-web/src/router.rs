@@ -210,7 +210,7 @@ pub(crate) enum StudioRoute {
     /// and navigates to the fork's own `Project` route.
     Example {
         /// The example's bare slug — the id tail
-        /// (`examples/fyeah-sign` → `fyeah-sign`).
+        /// (`catalog/fyeah-sign` → `fyeah-sign`).
         slug: String,
         /// Same view suffixes as [`StudioRoute::Project`] — one session,
         /// mutually exclusive zooms.
@@ -1522,7 +1522,7 @@ mod tests {
         let mut view = UiStudioView::new(Vec::new(), UiConsoleView::empty())
             .with_open_project(Some(SHARE_UID.to_string()), Some("Fyeah Sign".to_string()));
         assert!(!route.project_matches_view(&view));
-        view.open_transient_example = Some("examples/fyeah-sign".to_string());
+        view.open_transient_example = Some("catalog/fyeah-sign".to_string());
         assert!(route.project_matches_view(&view));
     }
 
@@ -1543,7 +1543,7 @@ mod tests {
             }),
             "an ordinary library session binds its project address"
         );
-        view.open_transient_example = Some("examples/fyeah-sign".to_string());
+        view.open_transient_example = Some("catalog/fyeah-sign".to_string());
         assert_eq!(
             lens_route(&view),
             Some(StudioRoute::Example {

@@ -1,0 +1,9 @@
+{
+  "format": 10,
+  "name": "Plasma",
+  "description": "The smallest non-empty panel: one plasma shader with three bound knobs, speed, scale and palette. Also the docs' live figure.",
+  "kind": "pattern",
+  "exports": [
+    "effect"
+  ]
+}

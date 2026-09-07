@@ -1258,7 +1258,102 @@ impl StudioController {
         if new_frame {
             self.mark_dirty();
         }
+        self.persist_due_device_frames().await;
         preempted
+    }
+
+    /// Write every feed's newest frame to its board's sidecar when one is
+    /// due ([`crate::DeviceFrameFeed::snapshot_due`]: a frame newer than the
+    /// written one, at most every ten seconds per board), so a remembered
+    /// board keeps its last picture across reloads.
+    ///
+    /// Runs in the feed lane, after the pulls, and never in a fold (I7).
+    /// The write goes straight to the host — NOT through `run_catalog_op`,
+    /// whose gallery re-hydration would rebuild the home view every ten
+    /// seconds for nothing the gallery lists. A failed write is logged and
+    /// still stamped as written: a store that refuses today would refuse
+    /// again every tick, and the board's picture is a convenience, not the
+    /// source of truth.
+    async fn persist_due_device_frames(&mut self) {
+        let now = (self.now_secs)();
+        let due = self.device_feeds.snapshots_due(now);
+        if due.is_empty() {
+            return;
+        }
+        let Ok(host) = self.library_host() else {
+            return;
+        };
+        for (device, frame, captured_at) in due {
+            let Some(uid) = self.device_registry_key(device).or_else(|| {
+                self.devices
+                    .roster()
+                    .device(device)
+                    .and_then(|device| device.identity.uid.as_ref())
+                    .map(|uid| uid.0.clone())
+            }) else {
+                // An anonymous board has no honest key; its picture lives
+                // for the session only, like its record.
+                continue;
+            };
+            let bytes = crate::app::devices::device_frame_snapshot::encode(&frame, captured_at);
+            if let Err(error) = host
+                .catalog(CatalogOp::StoreDeviceFrame { uid, bytes })
+                .await
+            {
+                log::warn!("device last frame not persisted: {error}");
+            }
+            self.device_feeds
+                .mark_snapshot_written(device, captured_at, now);
+        }
+    }
+
+    /// Seed the feeds of remembered boards from their persisted last frames
+    /// (`device_frame_snapshot`), read off the library snapshot `fs` at
+    /// settle. Only a board whose feed has NO picture reads its sidecar, so
+    /// after the first settle nothing is read again, and a frame this
+    /// session pulled is never displaced by an older one on disk.
+    fn seed_device_frame_snapshots(&mut self, fs: &Rc<std::cell::RefCell<dyn lpfs::LpFs>>) {
+        let Some(inputs) = self.home_inputs.as_ref() else {
+            return;
+        };
+        let mut seeded = false;
+        let rows: Vec<(String, Option<u64>)> = inputs
+            .registered
+            .iter()
+            .map(|row| (row.uid.clone(), row.device_id))
+            .collect();
+        for (uid, device_id) in rows {
+            let device = self
+                .devices
+                .roster()
+                .devices()
+                .iter()
+                .find(|device| {
+                    device_id == Some(device.id.0)
+                        || device
+                            .identity
+                            .uid
+                            .as_ref()
+                            .is_some_and(|known| known.0 == uid)
+                })
+                .map(|device| device.id);
+            let Some(device) = device else {
+                continue;
+            };
+            if self.device_feeds.has_frame(device) {
+                continue;
+            }
+            let snapshot = {
+                let fs = fs.borrow();
+                crate::app::devices::device_frame_snapshot::read_snapshot(&*fs, &uid)
+            };
+            if let Some((frame, captured_at)) = snapshot {
+                seeded |= self.device_feeds.seed_snapshot(device, frame, captured_at);
+            }
+        }
+        if seeded {
+            self.mark_dirty();
+        }
     }
 
     /// The card's mount lease for its live frame feed: a mounted
@@ -1892,15 +1987,18 @@ impl StudioController {
             return;
         };
         let open_elsewhere = host.open_elsewhere_uids().await;
+        let mut snapshot_fs = None;
         match host.catalog_snapshot().await {
             Ok(fs) => {
-                let inputs = home_view_builder::hydrate_home_inputs(fs, &open_elsewhere);
+                let inputs =
+                    home_view_builder::hydrate_home_inputs(Rc::clone(&fs), &open_elsewhere);
                 // The add-node picker's import source is derived from the
                 // same walk (P5) — one snapshot read feeds both the
                 // gallery and the picker.
                 self.project
                     .set_import_patterns(home_view_builder::importable_patterns(&inputs));
                 self.home_inputs = Some(inputs);
+                snapshot_fs = Some(fs);
             }
             Err(error) => {
                 log::warn!("library snapshot failed: {error}");
@@ -1914,8 +2012,12 @@ impl StudioController {
         }
         // The registry rows come off the same snapshot walk; the roster
         // rehydrates from them the first time they land, so a remembered
-        // board has a card before any port is open.
+        // board has a card before any port is open — and its last picture,
+        // off the same snapshot, so the tile shows what it last did.
         self.load_device_records_if_due();
+        if let Some(fs) = snapshot_fs.as_ref() {
+            self.seed_device_frame_snapshots(fs);
+        }
         self.mark_dirty();
     }
 
@@ -3867,14 +3969,15 @@ impl StudioController {
         self.record_project_edit_run(run)
     }
 
-    /// Vendor a library pattern export into the open project (module
-    /// authoring unit, P5). The source bytes come from the library, the
-    /// write goes over the wire as an ordinary `CreateNode`.
+    /// Vendor a pattern export into the open project (module authoring
+    /// unit, P5; built-ins, catalog content tree P6). The source bytes come
+    /// from the library or the compiled-in catalog, the write goes over the
+    /// wire as an ordinary `CreateNode`.
     async fn execute_node_import_op(&mut self, op: NodeImportOp) -> UiResult {
         let run = {
             let server = self.pool.lens_session_mut()?.client_mut()?;
             self.project
-                .import_pattern(server, &op.package_uid, &op.export)
+                .import_pattern(server, &op.source, &op.export)
                 .await
         };
         // The vendored files landed in the library through the create's

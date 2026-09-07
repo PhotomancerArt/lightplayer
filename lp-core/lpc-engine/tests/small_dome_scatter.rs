@@ -96,7 +96,7 @@ fn expected_placements(map2d: &str, patch: &str) -> Vec<(String, Placement)> {
 #[test]
 fn the_shipped_small_dome_install_places_every_run_where_authored() {
     let workspace_dir = workspace_dir();
-    let project_dir: PathBuf = workspace_dir.join("examples/small-dome");
+    let project_dir: PathBuf = workspace_dir.join("catalog/projects/small-dome");
     let fs = LpFsStd::new(project_dir.clone());
     let services = EngineServices::new(TreePath::parse("/small_dome.show").expect("path"));
     let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load small-dome");

@@ -22,7 +22,7 @@ use lpa_studio_core::{
 /// artifacts stamped, bodies pulled from the embedded example, both
 /// fixtures ARRANGED (dome at origin, doors beside it, tilted).
 fn dome_canvas_inputs() -> (UiPatchSurface, BTreeMap<ArtifactLocation, String>) {
-    let example = lpa_studio_core::app::home::embedded_example("examples/small-dome")
+    let example = lpa_studio_core::app::home::embedded_example("catalog/small-dome")
         .expect("small-dome embedded");
     let body = |name: &str| {
         let bytes = example
@@ -244,11 +244,13 @@ fn peach_canvas_inputs() -> (UiPatchSurface, BTreeMap<ArtifactLocation, String>)
     let leaf_artifact = ArtifactLocation::file("/leaf/peach_leaf.map2d.json");
     bodies.insert(
         body_artifact.clone(),
-        include_str!("../../../../../examples/peach-2d/body/peach_body.map2d.json").to_string(),
+        include_str!("../../../../../catalog/projects/peach-2d/body/peach_body.map2d.json")
+            .to_string(),
     );
     bodies.insert(
         leaf_artifact.clone(),
-        include_str!("../../../../../examples/peach-2d/leaf/peach_leaf.map2d.json").to_string(),
+        include_str!("../../../../../catalog/projects/peach-2d/leaf/peach_leaf.map2d.json")
+            .to_string(),
     );
     surface.fixtures[0].mapping_artifact = Some(body_artifact);
     surface.fixtures[1].mapping_artifact = Some(leaf_artifact);

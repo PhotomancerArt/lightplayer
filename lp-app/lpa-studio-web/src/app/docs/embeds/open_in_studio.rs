@@ -28,7 +28,7 @@ use super::docs_sims::DocsStudioActions;
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn OpenInStudioButton(
-    /// Embedded example id (`examples/plasma`).
+    /// Embedded example id (`catalog/plasma`).
     example_id: String,
     /// Button text; the fence's `label=` overrides the default.
     #[props(default)]

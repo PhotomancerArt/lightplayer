@@ -1,5 +1,6 @@
-//! The **import** op: vendor one library pattern export into the open
-//! project (module authoring unit, P5).
+//! The **import** op: vendor one pattern export — from the user's library
+//! or from the built-in catalog — into the open project (module authoring
+//! unit, P5; catalog content tree, P6).
 //!
 //! Planning Q3 ruling: the gesture starts INSIDE the open project — the
 //! destination is unambiguous, because the project is open by definition.
@@ -20,11 +21,22 @@ use crate::{
 
 use super::node_create_op::UiAttachTarget;
 
-/// Vendor `export` from library package `package_uid` into this project.
+/// Where an import's bytes come from. Both are read-only sources the copy
+/// leaves behind: the library package keeps its own files, and the catalog
+/// entry is compiled in.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ImportSource {
+    /// A package in the user's library, by `prj…` uid.
+    Library { package_uid: String },
+    /// A built-in catalog pattern, by registry id (`catalog/<slug>`).
+    BuiltIn { example_id: String },
+}
+
+/// Vendor `export` from `source` into this project.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NodeImportOp {
-    /// Source package `prj_…` uid, straight off the picker row.
-    pub package_uid: String,
+    /// Where the export folder is read from, straight off the picker row.
+    pub source: ImportSource,
     /// The export folder's name in that package (`effect`, `fire`).
     pub export: String,
     /// Where the vendored module attaches. Project root this round — the
@@ -37,7 +49,7 @@ impl ControllerOp for NodeImportOp {
     fn default_action_meta(&self) -> ActionMeta {
         ActionMeta::new(
             "Import pattern",
-            "Copy a pattern module from your library into this project.",
+            "Copy a pattern module from your library or the catalog into this project.",
             ActionPriority::Secondary,
         )
         .with_icon("add")
@@ -75,7 +87,9 @@ mod tests {
     #[test]
     fn import_is_editor_foreground_class() {
         let op = NodeImportOp {
-            package_uid: "prj_a".to_string(),
+            source: ImportSource::Library {
+                package_uid: "prj_a".to_string(),
+            },
             export: "effect".to_string(),
             attach: UiAttachTarget::ProjectRoot,
         };
@@ -93,7 +107,9 @@ mod tests {
     #[test]
     fn each_export_is_its_own_op() {
         let fire = NodeImportOp {
-            package_uid: "prj_a".to_string(),
+            source: ImportSource::Library {
+                package_uid: "prj_a".to_string(),
+            },
             export: "fire".to_string(),
             attach: UiAttachTarget::ProjectRoot,
         };
