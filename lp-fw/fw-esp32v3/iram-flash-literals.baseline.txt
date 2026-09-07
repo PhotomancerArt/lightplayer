@@ -3,6 +3,18 @@
 .AllocAException, 0
 .HandleException, 0
 .RestoreContext, 0
+<esp_hal::asynch::AtomicWaker>::wake, 0
+<esp_hal::interrupt::InterruptStatus>::current, 0
+<esp_hal::interrupt::InterruptStatusIterator as core::iter::traits::iterator::Iterator>::next, 0
+<esp_hal::peripherals::UART0 as esp_hal::uart::Instance>::parts::__esp_hal_internal_irq_handler, 1
+<esp_hal::peripherals::UART1 as esp_hal::uart::Instance>::parts::__esp_hal_internal_irq_handler, 1
+<esp_hal::peripherals::UART2 as esp_hal::uart::Instance>::parts::__esp_hal_internal_irq_handler, 1
+<esp_rtos::run_queue::RunQueue>::mark_task_ready, 3
+<esp_rtos::run_queue::RunQueue>::pop, 6
+<esp_rtos::run_queue::RunQueue>::select_scheduler_trigger_multi_core, 0
+<esp_rtos::run_queue::RunQueue>::select_scheduler_trigger_single_core, 0
+<esp_rtos::scheduler::SchedulerState>::resume_task, 1
+<lp_ws281x::driver::Ws281xDriver<fw_esp32v3::output::rmt::v3_rmt::V3Rmt, 8: usize>>::fill_half, 0
 Reset, 0
 _AllocAException, 0
 _DoubleExceptionVector, 0
@@ -13,32 +25,6 @@ _Level4InterruptVector, 0
 _Level5InterruptVector, 0
 _Level6InterruptVector, 0
 _Level7InterruptVector, 0
-_RNvMNtCsejznmnMrysr_7esp_hal6asynchNtB2_11AtomicWaker4wake, 0
-_RNvMs0_NtCs7ihCgUboHh2_8esp_rtos9schedulerNtB5_14SchedulerState11resume_task, 1
-_RNvMs1_NtCs7ihCgUboHh2_8esp_rtos9run_queueNtB5_8RunQueue15mark_task_ready, 3
-_RNvMs1_NtCs7ihCgUboHh2_8esp_rtos9run_queueNtB5_8RunQueue35select_scheduler_trigger_multi_core, 0
-_RNvMs1_NtCs7ihCgUboHh2_8esp_rtos9run_queueNtB5_8RunQueue36select_scheduler_trigger_single_core, 0
-_RNvMs1_NtCs7ihCgUboHh2_8esp_rtos9run_queueNtB5_8RunQueue3pop, 6
-_RNvMs_NtCs3P3AVKa0K44_9lp_ws281x6driverINtB4_12Ws281xDriverNtNtNtNtCsw00A3R8Ci9_10fw_esp32v36output3rmt6v3_rmt5V3RmtKj8_E9fill_halfB13_, 0
-_RNvNtCs7ihCgUboHh2_8esp_rtos5timer18timer_tick_handler, 24
-_RNvNtCs9sLBi2Uk0pr_11esp_storage13chip_specific13spiflash_read, 0
-_RNvNtCs9sLBi2Uk0pr_11esp_storage13chip_specific14spiflash_write, 0
-_RNvNtCs9sLBi2Uk0pr_11esp_storage13chip_specific15spiflash_unlock, 0
-_RNvNtCs9sLBi2Uk0pr_11esp_storage13chip_specific20spiflash_erase_block, 0
-_RNvNtCs9sLBi2Uk0pr_11esp_storage13chip_specific21spiflash_erase_sector, 0
-_RNvNtCsejznmnMrysr_7esp_hal4uart12intr_handler, 0
-_RNvNtNtCs7ihCgUboHh2_8esp_rtos4task13arch_specific24cross_core_yield_handler, 21
-_RNvNtNtCsejznmnMrysr_7esp_hal4gpio9interrupt49___esp_hal_internal_default_gpio_interrupt_handler, 5
-_RNvNtNtNtCsw00A3R8Ci9_10fw_esp32v36output3rmt11wire_pusher12doorbell_isr, 0
-_RNvNtNtNtCsw00A3R8Ci9_10fw_esp32v36output3rmt11wire_pusher13ring_doorbell, 0
-_RNvNtNtNtCsw00A3R8Ci9_10fw_esp32v36output3rmt11wire_pusher3run, 2
-_RNvNtNtNtCsw00A3R8Ci9_10fw_esp32v36output3rmt11wire_pusher6now_us, 0
-_RNvNtNtNtCsw00A3R8Ci9_10fw_esp32v36output3rmt11wire_pusher9idle_once, 0
-_RNvNtNtNtCsw00A3R8Ci9_10fw_esp32v36output3rmt11wire_pusher9note_wake, 0
-_RNvNtNtNtCsw00A3R8Ci9_10fw_esp32v36output3rmt13shared_driver7rmt_isr, 3
-_RNvNvXs3c_NtCsejznmnMrysr_7esp_hal4uartNtNtBa_11peripherals5UART0NtB8_8Instance5parts30___esp_hal_internal_irq_handler, 1
-_RNvNvXs3d_NtCsejznmnMrysr_7esp_hal4uartNtNtBa_11peripherals5UART1NtB8_8Instance5parts30___esp_hal_internal_irq_handler, 1
-_RNvNvXs3e_NtCsejznmnMrysr_7esp_hal4uartNtNtBa_11peripherals5UART2NtB8_8Instance5parts30___esp_hal_internal_irq_handler, 1
 _UserExceptionVector, 0
 _WindowOverflow12, 0
 _WindowOverflow4, 0
@@ -61,15 +47,18 @@ __default_naked_level_7_interrupt, 0
 __default_user_exception, 2
 __level_1_interrupt, 1
 __level_2_interrupt, 1
-__level_3_interrupt, 2
+__level_3_interrupt, 1
 __level_4_interrupt, 0
 __level_5_interrupt, 0
 __level_6_interrupt, 0
 __level_7_interrupt, 0
-__pender, 2
+__pender, 1
 __user_exception, 2
 _xtensa_lx_rt_copy, 0
 _xtensa_lx_rt_zero_fill, 0
+esp_hal::gpio::interrupt::__esp_hal_internal_default_gpio_interrupt_handler, 5
+esp_hal::interrupt::mapped_to_raw, 2
+esp_hal::uart::intr_handler, 0
 esp_rom_spiflash_clear_bp, 0
 esp_rom_spiflash_enable_write$constprop$0, 0
 esp_rom_spiflash_erase_block, 0
@@ -81,6 +70,21 @@ esp_rom_spiflash_read_statushigh, 0
 esp_rom_spiflash_wait_idle, 0
 esp_rom_spiflash_write, 0
 esp_rom_spiflash_write_status, 0
+esp_rtos::task::arch_specific::cross_core_yield_handler, 21
+esp_rtos::timer::timer_tick_handler, 24
+esp_storage::chip_specific::spiflash_erase_block, 0
+esp_storage::chip_specific::spiflash_erase_sector, 0
+esp_storage::chip_specific::spiflash_read, 0
+esp_storage::chip_specific::spiflash_unlock, 0
+esp_storage::chip_specific::spiflash_write, 0
+fw_esp32v3::linker_rwtext_end::rwtext_floor, 0
+fw_esp32v3::output::rmt::shared_driver::rmt_isr, 3
+fw_esp32v3::output::rmt::wire_pusher::doorbell_isr, 0
+fw_esp32v3::output::rmt::wire_pusher::idle_once, 0
+fw_esp32v3::output::rmt::wire_pusher::note_wake, 0
+fw_esp32v3::output::rmt::wire_pusher::now_us, 0
+fw_esp32v3::output::rmt::wire_pusher::ring_doorbell, 0
+fw_esp32v3::output::rmt::wire_pusher::run, 2
 restore_context, 0
 save_context, 0
 sym__init_data, 0
