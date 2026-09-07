@@ -507,9 +507,13 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
     match outcome {
         Outcome::ExitMatched { .. } => eprintln!("--exit-on matched"),
         Outcome::Deadline { .. } => eprintln!("emulated timeout reached, no fault"),
-        Outcome::Reset { cycle, source } => eprintln!(
-            "RESET requested by {source} at cycle {cycle} ({} us) — the chip would reboot; \
-             the emulator reports it (M7 owns the boot chain)",
+        Outcome::Reset {
+            cycle,
+            source,
+            strap,
+        } => eprintln!(
+            "RESET requested by {source} at cycle {cycle} ({} us), strap = {strap} — the chip \
+             would reboot; the emulator reports it (M7 owns the boot chain)",
             cycle / memmap::CYCLES_PER_US
         ),
         Outcome::Fault { pc, fault, .. } => eprintln!(
@@ -524,10 +528,17 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
                 .symbolize(violation.pc)
                 .map(|s| format!(" ({s})"))
                 .unwrap_or_default();
+            let grade = violation
+                .grade
+                .map(|g| format!(" of a register graded {g}, below --strict-grade"))
+                .unwrap_or_default();
             eprintln!(
-                "STRICT-BUS {:?}{} of {} bytes at {:#010x} from pc={:#010x}{symbol} at cycle {}",
+                "STRICT-BUS {:?}{}{grade} of {} bytes at {:#010x} from pc={:#010x}{symbol} at \
+                 cycle {}",
                 violation.access,
-                if violation.in_mmio_window {
+                if violation.grade.is_some() {
+                    ""
+                } else if violation.in_mmio_window {
                     " inside a declared MMIO window — an unmodelled block"
                 } else {
                     ""

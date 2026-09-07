@@ -52,7 +52,7 @@ use lp_emu_core::sched::Cycles;
 use lp_emu_core::{Bus, CycleModel};
 use lp_emu_esp_common::bus::StrictViolation;
 use lp_emu_esp_common::periph::BoxedPeripheral;
-use lp_emu_esp_common::{ByteLog, ByteSink, ByteSource, ElfImage, RamRegion, SocBus};
+use lp_emu_esp_common::{ByteLog, ByteSink, ByteSource, ElfImage, RamRegion, SocBus, Strap};
 use lp_riscv_emu::mach::trigger::TRIGGER_COUNT;
 use lp_riscv_emu::mach::{HartFault, MachineHart, SliceEnd};
 
@@ -246,10 +246,16 @@ pub enum Outcome {
     /// the hart ended up after taking the fault for it.
     StrictBus { violation: StrictViolation },
     /// A peripheral asked for a reset the machine cannot perform: the RWDT
-    /// expired with a reset action. The chip would reboot; the emulator
+    /// expired with a reset action, or the USB-Serial-JTAG block saw a
+    /// host's reset dance. The chip would reboot into `strap`; the emulator
     /// reports it (M7 owns the boot chain). Exit code 2, like a fault —
-    /// on silicon this is `rst:0x10 (RTCWDT_RTC_RST)` in the boot log.
-    Reset { cycle: Cycles, source: &'static str },
+    /// on silicon this is `rst:0x10 (RTCWDT_RTC_RST)` / `rst:0x15
+    /// (USB_UART_HPSYS)` in the boot log.
+    Reset {
+        cycle: Cycles,
+        source: &'static str,
+        strap: Strap,
+    },
     /// The wall-clock safety net fired. The only non-deterministic outcome,
     /// and it can only end a run.
     WallTimeout { cycle: Cycles },
@@ -1174,10 +1180,14 @@ impl Esp32C6Machine {
                     pc,
                 };
             }
-            if let Some(lp_emu_esp_common::MachineRequest::Reset { source, at }) =
+            if let Some(lp_emu_esp_common::MachineRequest::Reset { source, at, strap }) =
                 self.bus.take_request()
             {
-                return Outcome::Reset { cycle: at, source };
+                return Outcome::Reset {
+                    cycle: at,
+                    source,
+                    strap,
+                };
             }
             if let Some(needle) = &stop.exit_on
                 && let Some(cycle) = self.exit_on_match(needle, &mut matched)
@@ -1447,7 +1457,8 @@ mod tests {
         assert_eq!(
             Outcome::Reset {
                 cycle: 5,
-                source: "LP_WDT stage 0 (ResetSystem)"
+                source: "LP_WDT stage 0 (ResetSystem)",
+                strap: Strap::App,
             }
             .exit_code(),
             2
@@ -1474,6 +1485,7 @@ mod tests {
                 out,
                 Outcome::Reset {
                     source: "LP_WDT stage 0 (ResetSystem)",
+                    strap: Strap::App,
                     ..
                 }
             ),
