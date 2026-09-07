@@ -680,7 +680,7 @@ function deskFace(costume, lan) {
     deviceVerbs: lan ? [verb('Reset'), verb('Disconnect'), sp, verb('Forget')] : [verb('Reset'), verb('Power off'), sp, verb('Forget')],
     term: costume
       ? [['','lp: fw-browser 4c7e912 · desktop manifest'],['hi','hello · lightplayer/desktop · 02:d3:5c:00:00:01'],['em','costume: domraem/dom-z-102 (no emulator module yet)'],['','ports: 4 of unlimited · resolution as DOM-Z-102'],['','project: Big dome · 1,880 lamps · 60 fps'],['','heartbeat · frame 4,012 · gpu ok']]
-      : [['','lp: ' + (lan ? 'fw-host 4c7e912' : 'fw-browser 4c7e912') + ' · desktop manifest'],['hi',`hello · lightplayer/desktop · ${DESK_MAC}`],['','tier: GPU (granted)'],['','project: Luna\'s porch sign · 42 lamps · 60 fps'],['','heartbeat · frame 4,012 · gpu ok'],['','heartbeat · frame 4,072 · gpu ok']],
+      : [['','lp: ' + (lan ? 'fw-host 4c7e912' : 'fw-browser 4c7e912') + ' · desktop manifest'],['hi',`hello · lightplayer/desktop · ${lan ? '3c:22:fb:9a:11:02' : DESK_MAC}`],['','tier: GPU (granted)'],['','project: Luna\'s porch sign · 42 lamps · 60 fps'],['','heartbeat · frame 4,012 · gpu ok'],['','heartbeat · frame 4,072 · gpu ok']],
     guest:null, dilated:false,
   };
   return f;
