@@ -5683,6 +5683,7 @@ dependencies = [
  "lp-emu-esp-common",
  "lp-emu-validate",
  "lp-riscv-emu",
+ "lp-ws281x",
  "rustc-demangle",
  "sha2",
  "test-log",
