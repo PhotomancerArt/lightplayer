@@ -127,7 +127,7 @@ your art is never a commitment to a way of lighting it.
 
 ## The same patch, both ways
 
-The two projects are `examples/peach-1d` and `examples/peach-2d`, and their
+The two projects are `catalog/projects/peach-1d` and `catalog/projects/peach-2d`, and their
 patch files are **byte-identical**. Not similar — the same bytes, pinned by
 a test.
 
@@ -141,12 +141,12 @@ you edit the patch; change your mind about the look and you don't.
 Open either one — they land in your projects, wiring and all. The 2D peach,
 the picture painted over the fruit:
 
-```embed open-in-studio example=examples/peach-2d
+```embed open-in-studio example=catalog/peach-2d
 ```
 
 And the 1D peach, the same artwork lit along its wire:
 
-```embed open-in-studio example=examples/peach-1d
+```embed open-in-studio example=catalog/peach-1d
 ```
 
 Good things to try: change one entry's `at.channel` and watch the fixture

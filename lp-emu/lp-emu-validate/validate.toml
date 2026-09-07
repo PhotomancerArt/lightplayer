@@ -37,6 +37,16 @@ description = "Payloads that make a claim about a pin."
 payloads = ["gpio-calibrate"]
 
 [[set]]
+name = "shipped-image"
+description = "The shipped image at rest: boot to the first idle heartbeat, and the hello frame that precedes it. A scenario rather than a check — nothing here is behind a `test_*` feature — and the only set that says what the product does when nobody is asking it for anything. It is a set of one because `emu-m3` pairs it with the compile harness, and a desk sitting that wants only the idle walk cannot ask for that pair twice."
+payloads = ["boot-idle"]
+
+[[set]]
+name = "emu-m3"
+description = "The M3 gate set for our own C6 machine: the compile harness (heap parity against silicon, the first point on the time ladder) and the shipped image's boot to the idle heartbeat. Both run against the reference images `scripts/emu/build-reference-image.sh` builds, so `--image` is part of the recipe."
+payloads = ["shader-compile-stress", "boot-idle"]
+
+[[set]]
 name = "jit-math-perf"
 description = "The Q32 math kernel cycle-cost payload (Q12 ledger, cheapest test_* migration): mul/div/sin kernels and LUT access cost against the PMU cycle counter. Timing only — never a gate under esp-emu, which has no cycle model."
 payloads = ["jit-math-perf"]
@@ -119,10 +129,97 @@ class = "wire"
 grade = "measured"
 because = "the masked UART0 walk transcript is content-identical to silicon's (spike report §11.3)"
 
+# ---------------------------------------------------------------------------
+# Our own machine, one entry per time grade.
+#
+# Every class is `modeled`, and that is not modesty. Byte-equality with silicon
+# on one payload is *evidence*, and it is written into the `because` where a
+# reader can weigh it; it is not a promotion. `measured` means the class was
+# measured on silicon, or on a configuration whose agreement with silicon for
+# that class is itself in a committed transcript — which for us will mean a
+# transcript per class, not one payload's heap ledger standing in for all of
+# them. The vision's graded ladder is the same idea for time.
+#
+# `mac` / `silicon_rev` / `board` are the desk board's, because an emulator has
+# no eFuse to read: the runner passes them as `--efuse-mac` / `--efuse-rev`, so
+# a hello frame's identity fields compare equal to silicon's transcripts rather
+# than differing for a reason that says nothing about the model. The
+# configuration is still the CHIP (PD4); the board is metadata, here and in
+# every sidecar.
+# ---------------------------------------------------------------------------
+
 [[configuration]]
 name = "lp-emu:esp32c6:t1"
-description = "Our own C6 machine at time grade 1. Unavailable until M3 — listed so the seam has a name."
+description = "Our own C6 machine (lp-emu/esp/lp-emu-esp32c6) at time grade 1: one cycle per instruction. The gate configuration for M3."
 chip = "esp32c6"
-# No trust entries: nothing has been measured, so everything is `modeled`.
-# M3 earns the memory entry the same way esp-emu did — with a committed
-# transcript that this crate replays.
+mac = "a0:f2:62:87:b4:8c"
+silicon_rev = "v0.2"
+board = "seeed/xiao-esp32-c6"
+
+[[configuration.trust]]
+class = "memory"
+grade = "modeled"
+because = "the allocator is the guest's own and the RAM model is byte-exact, and on the compile harness this configuration is byte-equal to silicon — 372/372 values, peak 48,132 / resident 18,932 / after-drop 3,976 B and all 184 per-tick figures (M3 P6). That is evidence, not a promotion: the boot-idle heap sample sits 104 B below esp-emu's §5.4 figure (266,688 vs 266,792 at 5 s; 266,788 by 15 s, 4 B away), a transient in silent guest state that only a silicon capture of the memfs variant can arbitrate. Never tuned toward it"
+
+[[configuration.trust]]
+class = "timing"
+grade = "modeled"
+because = "t1 counts one cycle per instruction — no cache, no flash wait states — and neither grade is graded by a transcript yet (the vision's 'time is a graded ladder, never a promise'). What is modelled honestly is the UART drain, at baud in emulated time, which is why the harness's log-bearing ticks land at 1.01x silicon while its compute ticks are 0.42x"
+
+[[configuration.trust]]
+class = "boot-log"
+grade = "modeled"
+because = "there is no boot log: a direct load places the app's segments and jumps to its entry, so no ROM banner and no IDF bootloader lines are printed at all. M7 boots from reset and is where this class becomes a claim"
+
+[[configuration.trust]]
+class = "usb-serial-jtag"
+grade = "modeled"
+because = "the model is the host-absent state and only that — EP1 free until the first committed write, no SOF ever, `serial_in_empty` sealed. It is honest about what the shipped image then does (esp-println times out and falls silent), and it cannot answer any question about an attached or a stalled host until M6's control channel"
+
+[[configuration.trust]]
+class = "pin"
+grade = "modeled"
+because = "no pin is observed: GPIO and IO_MUX accept and remember, RMT accepts, and no waveform is produced or decoded. M5 brings the RMT channels and the WS281x decoder that make a pin claim possible"
+
+[[configuration.trust]]
+class = "wire"
+grade = "modeled"
+because = "the bytes are the guest's own, drained through a UART0 model at the configured baud, so their content and order are the firmware's. What is not the firmware's is when a host's bytes arrive on a live socket — that is host time, not guest time, and `--uart0-script` is the deterministic path for anything a transcript should carry"
+
+[[configuration]]
+name = "lp-emu:esp32c6:t2"
+description = "The same machine at time grade 2: the measured per-class cycle model. Memory is identical to t1 by construction; the interleaving is not, and the stack high-water mark moves with it."
+chip = "esp32c6"
+mac = "a0:f2:62:87:b4:8c"
+silicon_rev = "v0.2"
+board = "seeed/xiao-esp32-c6"
+
+[[configuration.trust]]
+class = "memory"
+grade = "modeled"
+because = "the same allocator and the same RAM model as t1, and the harness's 372 memory values are identical under both grades — a time grade must not move a heap byte. The one figure that does move is the idle stack high-water mark (11,432 B under t1, 11,752 B under t2), which is interleaving, not memory: the deepest interrupted call chain is not the same chain"
+
+[[configuration.trust]]
+class = "timing"
+grade = "modeled"
+because = "t2 uses the per-class cycle model rather than one cycle per instruction, and no transcript grades it either. It is a rung up the ladder, not a promise about milliseconds on silicon"
+
+[[configuration.trust]]
+class = "boot-log"
+grade = "modeled"
+because = "direct load prints no ROM or bootloader banner; the time grade changes nothing about that. M7 owns it"
+
+[[configuration.trust]]
+class = "usb-serial-jtag"
+grade = "modeled"
+because = "the same host-absent-only model as t1; M6 owns the attached and not-draining states"
+
+[[configuration.trust]]
+class = "pin"
+grade = "modeled"
+because = "the same absence of pin observation as t1; M5 owns it"
+
+[[configuration.trust]]
+class = "wire"
+grade = "modeled"
+because = "the same UART0 model as t1: the bytes are the guest's, a live socket's arrival times are the host's"

@@ -7,10 +7,15 @@
 //! - **accept** — a [`lp_emu_esp_common::RegFile`] with a short table of
 //!   exceptions ([`accept`]): every block `esp_hal::init` writes and reads
 //!   back, with the bits it spins on pinned to the value the discovery cites.
+//! - **modelled, P6** — [`uart`] (the FIFOs, the shifter at baud, the
+//!   thresholds and receive timeout, a host stream outside), [`usb_sj`] (the
+//!   honest USB-Serial-JTAG: host absent, attached-idle or attached-draining,
+//!   M6 P2), [`pcr`] (the P5 accept
+//!   block, now also feeding the UART clock lines), [`wifi_stub`] (the radio
+//!   window as one accept block driven by the spin detector).
 //! - **not modelled** — left unmapped on purpose, so a strict run stops on
-//!   them: the WiFi MAC/BB window (`IEEE802154`), RMT (M5), SPI flash
-//!   behaviour (M4 — SPI0/SPI1 are accept), the UART FIFO and the honest USB
-//!   model (P6).
+//!   them: RMT's channels (M5), SPI flash behaviour (M4 — SPI0/SPI1 are
+//!   accept).
 //!
 //! Every constant that is a *guess* is marked `modeled` where it is defined;
 //! the README's peripheral table repeats the grades.
@@ -19,10 +24,15 @@ pub mod accept;
 pub mod efuse;
 pub mod intpri;
 pub mod lp_wdt;
+pub mod pcr;
 pub mod rng;
 pub mod systimer;
 pub mod timg;
+pub mod uart;
+pub mod usb_sj;
+pub mod wifi_stub;
 
+use lp_emu_esp_common::StreamId;
 use lp_emu_esp_common::periph::BoxedPeripheral;
 
 use crate::intmatrix::{InterruptCore0View, PlicMxView};
@@ -44,11 +54,37 @@ pub const RC_SLOW_HZ: u64 = 136_000;
 /// (`rtc_cntl/mod.rs:660`).
 pub const WDT_WKEY: u32 = 0x50D8_3AA1;
 
+/// The host streams the console blocks are wired to. The machine registers
+/// the streams on the bus first, so the ids exist before the peripherals
+/// that hold them do.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct HostStreams {
+    /// UART0's outside: TX bytes go here, RX bytes come from here.
+    pub uart0: Option<StreamId>,
+    /// UART1's outside. The firmware never opens UART1; a machine that
+    /// wants its bytes gives it a stream.
+    pub uart1: Option<StreamId>,
+    /// USB-Serial-JTAG's outside: what a host **received** from the IN
+    /// endpoint (sink) and what it **sent** to the OUT endpoint (source).
+    pub usb_sj: Option<StreamId>,
+    /// USB-Serial-JTAG's observation stream: bytes the guest handed to the
+    /// IN endpoint that no host took (pushed with no host, dropped past a
+    /// committed FIFO, dropped by a bus reset).
+    pub usb_sj_tried: Option<StreamId>,
+}
+
 /// The whole boot set, in [`crate::machine::PERIPHERAL_REGISTRATION_ORDER`].
 ///
-/// `efuse` seeds the EFUSE block; `seed` seeds the RNG. Everything else is
-/// the same on every machine.
-pub fn boot_set(efuse: EfuseIdentity, seed: u64) -> Vec<(u32, u32, BoxedPeripheral)> {
+/// `efuse` seeds the EFUSE block; `seed` seeds the RNG; `streams` are the
+/// consoles' outsides; `usb_host` is the USB host's state at power-on.
+/// Everything else is the same on every machine.
+pub fn boot_set(
+    efuse: EfuseIdentity,
+    seed: u64,
+    streams: HostStreams,
+    usb_host: usb_sj::HostState,
+) -> Vec<(u32, u32, BoxedPeripheral)> {
+    let clocks = pcr::UartClockLines::default();
     vec![
         (
             base::LP_APM,
@@ -69,7 +105,7 @@ pub fn boot_set(efuse: EfuseIdentity, seed: u64) -> Vec<(u32, u32, BoxedPeripher
             0x400,
             Box::new(accept::lp_i2c_ana_mst()),
         ),
-        (base::PCR, 0x1000, Box::new(accept::pcr())),
+        (base::PCR, 0x1000, Box::new(pcr::Pcr::new(clocks.clone()))),
         (base::TIMG0, 0x100, Box::new(timg::Timg::timg0())),
         (base::TIMG1, 0x100, Box::new(timg::Timg::timg1())),
         (base::EFUSE, 0x200, Box::new(efuse::efuse(efuse))),
@@ -86,13 +122,48 @@ pub fn boot_set(efuse: EfuseIdentity, seed: u64) -> Vec<(u32, u32, BoxedPeripher
         (base::LP_IO, 0x400, Box::new(accept::lp_io())),
         (base::RNG, 0x400, Box::new(rng::Rng::new(seed))),
         (base::EXTMEM, 0x400, Box::new(accept::extmem())),
-        (base::UART0, 0x100, Box::new(accept::uart("UART0"))),
-        (base::UART1, 0x100, Box::new(accept::uart("UART1"))),
-        (base::USB_DEVICE, 0x100, Box::new(accept::usb_device())),
+        (
+            base::UART0,
+            0x100,
+            Box::new(uart::Uart::uart0(clocks.uart0.clone(), streams.uart0)),
+        ),
+        (
+            base::UART1,
+            0x100,
+            Box::new(uart::Uart::uart1(clocks.uart1.clone(), streams.uart1)),
+        ),
+        (
+            base::USB_DEVICE,
+            0x100,
+            Box::new(usb_sj::UsbSerialJtag::new(
+                streams.usb_sj,
+                streams.usb_sj_tried,
+                usb_host,
+            )),
+        ),
         (base::IO_MUX, 0x100, Box::new(accept::io_mux())),
         (base::GPIO, 0x700, Box::new(accept::gpio())),
         (base::SPI0, 0x400, Box::new(accept::spi("SPI0"))),
         (base::SPI1, 0x400, Box::new(accept::spi("SPI1"))),
         (base::RMT, 0x400, Box::new(accept::rmt())),
+        // The radio window, after RMT: `Rmt::new` runs before esp-radio's
+        // init in `main`, so this is the order the boot meets them.
+        (
+            base::MODEM_WINDOW,
+            wifi_stub::WINDOW_LEN,
+            Box::new(wifi_stub::WifiStub::new()),
+        ),
+        (
+            base::WIFI_PWR,
+            base::WIFI_PWR_LEN,
+            Box::new(wifi_stub::WifiStub::pwr()),
+        ),
+        // The PHY's I2C burst command memory, after the radio window: the
+        // first block `phy_i2c_master_cmd_mem_init` reaches past it.
+        (
+            base::I2C_MST_MEM,
+            base::I2C_MST_MEM_LEN,
+            Box::new(wifi_stub::WifiStub::i2c_mst_mem()),
+        ),
     ]
 }

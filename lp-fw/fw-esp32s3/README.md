@@ -414,7 +414,7 @@ compiles GLSL on the board.
 > `[OUT] dump` lines; that comparison needs a new source of frame bytes before
 > the walk can be re-run.
 
-`examples/shader-oracle` is the project built for that comparison. It is
+`projects/test/shader-oracle` is the project built for that comparison. It is
 deliberately clock-free, so every frame is identical and no time
 synchronisation is needed, and it is sized to 64 LEDs so the readout's one-shot
 dump covers the **whole** frame rather than a prefix. Its output node turns the

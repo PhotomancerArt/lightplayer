@@ -141,11 +141,7 @@ pub fn build_home_view(
     let examples = dedupe_by_key(
         embedded_examples()
             .iter()
-            .map(|example| UiExampleCard {
-                id: example.id.to_string(),
-                name: example.name.to_string(),
-                kind: example.kind.to_string(),
-            })
+            .map(UiExampleCard::from_embedded)
             .collect(),
         |card| card.id.clone(),
         "example",
@@ -257,8 +253,37 @@ pub fn importable_patterns(inputs: &HomeInputs) -> Vec<crate::UiImportablePatter
             card.exports
                 .iter()
                 .map(move |export| crate::UiImportablePattern {
-                    package_uid: card.uid.clone(),
+                    source: crate::ImportSource::Library {
+                        package_uid: card.uid.clone(),
+                    },
                     package_label: card.slug.clone(),
+                    export: export.clone(),
+                    family,
+                })
+        })
+        .collect()
+}
+
+/// Every built-in catalog pattern's export, for the same picker source
+/// (catalog content tree, P6): one row per export of every registry entry
+/// whose manifest says `pattern`, in registry order. The consumption half
+/// of D1 — a pattern in the catalog is one you can import by copy.
+pub fn builtin_importable_patterns() -> Vec<crate::UiImportablePattern> {
+    embedded_examples()
+        .iter()
+        .filter_map(|example| match example.kind {
+            lpc_model::ProjectKind::Pattern { exports } => Some((example, exports)),
+            _ => None,
+        })
+        .flat_map(|(example, exports)| {
+            let family = exports.len() > 1;
+            exports
+                .iter()
+                .map(move |export| crate::UiImportablePattern {
+                    source: crate::ImportSource::BuiltIn {
+                        example_id: example.id.to_string(),
+                    },
+                    package_label: example.name.to_string(),
                     export: export.clone(),
                     family,
                 })
@@ -499,7 +524,7 @@ mod tests {
                     br#"{"format":10,"name":"Basic"}"#.to_vec(),
                 )],
                 PackageProvenance::SeededFrom {
-                    source: "examples/fyeah-sign".to_string(),
+                    source: "catalog/fyeah-sign".to_string(),
                 },
                 20.0,
             )

@@ -66,7 +66,7 @@ For a headless engine demo without the Studio:
 
 ```bash
 just demo
-just demo <example-name>   # run other examples (see examples/)
+just demo <example-name>   # run other examples (see catalog/)
 ```
 
 # Run on hardware
@@ -77,7 +77,7 @@ Xtensa) — with the supported-board list at
 chip's own instruction set, on the chip. It goes surprisingly fast on modest silicon: a
 decade-old classic ESP32 drives 1,500 LEDs across five outputs at 30 fps, using both cores.
 
-The quickest demo path uses an ESP32-C6. To flash firmware, push the `examples/basic` project over
+The quickest demo path uses an ESP32-C6. To flash firmware, push the `projects/test/basic` project over
 USB serial, and run it on real hardware:
 
 ```bash
@@ -90,7 +90,7 @@ flashing.
 
 **Wiring:** connect a WS2812-class addressable strip's data line to **GPIO 18**. Where outputs go
 is configured, not hardcoded: each output channel names a board endpoint — `ws281x:local:D10` in
-[`examples/basic/output.json`](examples/basic/output.json) — which the board's manifest maps to a
+[`projects/test/basic/output.json`](projects/test/basic/output.json) — which the board's manifest maps to a
 physical pin (the default ESP32-C6 profile maps `D10` to GPIO 18). Outputs can be rewired from the
 Studio, boards can drive multiple output channels concurrently (up to 1,024 LEDs per channel), and
 a `/hardware.json` pushed to the device overrides the built-in board profile.
@@ -148,7 +148,7 @@ firmware tests.
 - **`lp-cli/`** Developer CLI (projects, dev server, board manifests, GPIO calibration); runs
   from a source checkout
 - **`lp-base/`** Foundation crates: collections, filesystem, performance, recovery
-- **`examples/`** Example LightPlayer projects
+- **`catalog/`** Built-in content: patterns and projects (Explore in Studio)
 - **`schemas/`** Generated JSON Schemas for project/node/board files
 - **`docs/`** Documentation, ADRs, and design notes
 - **`scripts/`** Build scripts and development utilities

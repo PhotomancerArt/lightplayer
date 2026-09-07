@@ -1,0 +1,58 @@
+{
+  "schema": 1,
+  "payload": "boot-idle",
+  "chip": "esp32c6",
+  "configuration": "lp-emu:esp32c6:t1",
+  "date": "2026-09-06",
+  "firmware_commit": "d6cfaa2051ae",
+  "firmware_features": [
+    "esp32c6",
+    "server",
+    "radio",
+    "memory_fs",
+    "spike_uart0_link"
+  ],
+  "firmware_dirty": true,
+  "silicon_rev": "v0.2",
+  "board": "seeed/xiao-esp32-c6",
+  "mac": "a0:f2:62:87:b4:8c",
+  "tools": {
+    "lp-emu-esp32c6": "40.0.0 (e62f1a7ef+dirty)",
+    "rom": "esp32c6_rev0_rom.elf sha256 788e1d38724aeb8fd974fa10c4a7b089c02627d35342ce84b9e0b12b239f3551"
+  },
+  "source": "cargo run -q -p lp-emu-esp32c6 --release -- --elf target/emu-ref/d6cfaa205-boot-idle-memfs/fw-esp32c6 --time-grade t1 --uart0 file:target/validate/boot-idle.cap --timeout 20s --wall-timeout 400 --strict-bus --exit-on '[stack] heartbeat: high-water' --efuse-mac a0:f2:62:87:b4:8c --efuse-rev 0.2",
+  "capture": "lp-cli validate record emu-m3 --config lp-emu:esp32c6:t1",
+  "note": "running the pinned image target/emu-ref/d6cfaa205-boot-idle-memfs/fw-esp32c6 rather than building one: the committed transcripts are at firmware d6cfaa2051ae with `spike_uart0_link` applied as a dirty tree, which is not what this checkout builds. `scripts/emu/build-reference-image.sh esp32c6,server,radio,memory_fs,spike_uart0_link` reproduces that tree in a detached worktree and builds it there.",
+  "trust": [
+    {
+      "class": "memory",
+      "grade": "modeled",
+      "because": "the allocator is the guest's own and the RAM model is byte-exact, and on the compile harness this configuration is byte-equal to silicon — 372/372 values, peak 48,132 / resident 18,932 / after-drop 3,976 B and all 184 per-tick figures (M3 P6). That is evidence, not a promotion: the boot-idle heap sample sits 104 B below esp-emu's §5.4 figure (266,688 vs 266,792 at 5 s; 266,788 by 15 s, 4 B away), a transient in silent guest state that only a silicon capture of the memfs variant can arbitrate. Never tuned toward it"
+    },
+    {
+      "class": "timing",
+      "grade": "modeled",
+      "because": "t1 counts one cycle per instruction — no cache, no flash wait states — and neither grade is graded by a transcript yet (the vision's 'time is a graded ladder, never a promise'). What is modelled honestly is the UART drain, at baud in emulated time, which is why the harness's log-bearing ticks land at 1.01x silicon while its compute ticks are 0.42x"
+    },
+    {
+      "class": "boot-log",
+      "grade": "modeled",
+      "because": "there is no boot log: a direct load places the app's segments and jumps to its entry, so no ROM banner and no IDF bootloader lines are printed at all. M7 boots from reset and is where this class becomes a claim"
+    },
+    {
+      "class": "usb-serial-jtag",
+      "grade": "modeled",
+      "because": "the model is the host-absent state and only that — EP1 free until the first committed write, no SOF ever, `serial_in_empty` sealed. It is honest about what the shipped image then does (esp-println times out and falls silent), and it cannot answer any question about an attached or a stalled host until M6's control channel"
+    },
+    {
+      "class": "pin",
+      "grade": "modeled",
+      "because": "no pin is observed: GPIO and IO_MUX accept and remember, RMT accepts, and no waveform is produced or decoded. M5 brings the RMT channels and the WS281x decoder that make a pin claim possible"
+    },
+    {
+      "class": "wire",
+      "grade": "modeled",
+      "because": "the bytes are the guest's own, drained through a UART0 model at the configured baud, so their content and order are the firmware's. What is not the firmware's is when a host's bytes arrive on a live socket — that is host time, not guest time, and `--uart0-script` is the deterministic path for anything a transcript should carry"
+    }
+  ]
+}

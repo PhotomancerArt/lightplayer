@@ -117,7 +117,7 @@ web-demo-build: install-wasm32-target
     wasm-bindgen target/wasm32-unknown-unknown/release/web_demo.wasm \
         --out-dir lp-app/web-demo/www/pkg --target web
     mkdir -p lp-app/web-demo/www
-    cp examples/basic/shader.glsl lp-app/web-demo/www/rainbow-default.glsl
+    cp projects/test/basic/shader.glsl lp-app/web-demo/www/rainbow-default.glsl
     echo "Artifacts: lp-app/web-demo/www/ (index.html, pkg/)"
 
 # Build and serve the web demo (installs miniserve via cargo if missing)
@@ -717,7 +717,7 @@ format-bump:
     echo "Next steps:"
     echo "  1. Bump PROJECT_FORMAT_VERSION in ${const_file}."
     echo "  2. Make the format change; update authored project.json files"
-    echo "     (projects/, examples/, lp-fw/fw-browser/www/smoke-project)."
+    echo "     (projects/, catalog/, lp-fw/fw-browser/www/smoke-project)."
     echo "  3. Write ${step_file}'s apply() (see lp-app/lpa-upgrade/README.md)"
     echo "     and register it in lp-app/lpa-upgrade/src/steps/mod.rs::STEPS."
     echo "  4. Copy ${dest}/fixtures/* into"
@@ -2033,17 +2033,40 @@ lint-upgrade-fw:
 lint-emu-fence:
     ./scripts/check-emu-fence.sh
 
-# The ESP32-C6 machine's boot tests, which need the shipped firmware ELF.
+# The ESP32-C6 machine's boot tests, which need firmware ELFs, plus the M3
+# replays of the committed transcripts.
 #
-# They are `#[ignore]`d so that `cargo test --workspace` never starts a
-# cross-target firmware build (a two-minute workspace run would become a
+# The boot tests are `#[ignore]`d so that `cargo test --workspace` never starts
+# a cross-target firmware build (a two-minute workspace run would become a
 # ten-minute one on every machine and every CI job that has nothing to do with
 # the emulator). This recipe is what sets the environment and runs them.
 #
-# `LP_EMU_BUILD_FW=1` lets the test build the ELF if it is not already there;
-# set `LP_EMU_C6_ELF_ESP32C6_SERVER_RADIO=<path>` instead to point at one.
+# `LP_EMU_BUILD_FW=1` lets a test build what it needs if it is not already
+# there: `cargo build` for a plain feature set, and
+# `scripts/emu/build-reference-image.sh` for the pinned reference images the
+# gates use (which needs this repository's history for the reference commit, so
+# it is a local affair). Point at prebuilt ones instead with
+# `LP_EMU_C6_ELF_<SLUG>` / `LP_EMU_C6_REF_<SLUG>`; both are cached under
+# `target/lp-emu-c6/` and `target/emu-ref/` once built, so a second run of this
+# recipe rebuilds nothing.
+#
+# NOT in `test-rust-core`: two firmware builds is minutes, and the director
+# log's CI cost rule says a gated job or a nightly, never the default path.
+# `m3_replays` needs no firmware and does run everywhere.
 test-emu-c6:
     LP_EMU_BUILD_FW=1 cargo test -p lp-emu-esp32c6 -- --include-ignored
+    cargo test -p lp-emu-validate --test m3_replays
+    cargo test -p lp-cli --test validate_registry_parity
+
+# Run one image on the C6 machine — the human front door.
+#
+#   just emu-c6 target/emu-ref/d6cfaa205-boot-idle-memfs/fw-esp32c6 --timeout 6s --strict-bus
+#
+# Every timeout is EMULATED time and needs its unit; `--help` lists the rest.
+# For a recorded, replayable run use the runner instead:
+# `lp-cli validate record emu-m3 --config lp-emu:esp32c6:t1 …`.
+emu-c6 elf *args:
+    cargo run -p lp-emu-esp32c6 --release -- --elf {{ elf }} {{ args }}
 
 # The generated `RegNames` tables (offset -> register name) are derived from
 # the esp32c6 PAC's svd2rust offset comments and carry a provenance header.
@@ -2323,21 +2346,22 @@ validate *args:
 # ============================================================================
 # Demo projects
 # ============================================================================
-# Run lp-cli dev server with an example project
-# Usage: just demo [example-name]
+# Run lp-cli dev server with a checked-in project (a workspace-relative path:
+# `catalog/patterns/<slug>`, `catalog/projects/<slug>` or `projects/test/<slug>`).
+# Usage: just demo [project-dir]
 
-# Example: just demo basic
-demo example="basic":
-    cd lp-cli && cargo run -- dev ../examples/{{ example }}
+# Example: just demo catalog/patterns/pulse
+demo project="projects/test/basic":
+    cargo run -p lp-cli -- dev {{ project }}
 
 # Requires: ESP32-C6 device connected via USB. Builds the default lps-glsl frontend path.
-# Usage: just demo-esp32c6-host [example-name]
-demo-esp32c6-host example="basic": install-rv32-target
+# Usage: just demo-esp32c6-host [project-dir]
+demo-esp32c6-host project="projects/test/basic": install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server
     PORT="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32c6)"; \
     echo "Using ESPFLASH_PORT=$PORT"; \
     ESPFLASH_PORT="$PORT" espflash flash --chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} {{ fw_esp32c6_elf }}; \
-    cargo run --package lp-cli -- dev examples/{{ example }} --push "serial:$PORT"
+    cargo run --package lp-cli -- dev {{ project }} --push "serial:$PORT"
 
 # Run an ESP32-C6 demo as an automated hardware check: capture boot serial,
 # push the project, and exit once the loaded project responds.
@@ -2349,13 +2373,13 @@ test-native-rainbow: build-rv32-builtins
     cargo run -p lps-filetests-app -- test --target rv32lpn.q32 --concise lps-glsl/rainbow.glsl
 
 # Requires: ESP32-C6 device connected via USB. Builds the explicit Naga reference frontend.
-# Usage: just demo-esp32c6-host-naga [example-name]
-demo-esp32c6-host-naga example="basic": install-rv32-target
+# Usage: just demo-esp32c6-host-naga [project-dir]
+demo-esp32c6-host-naga project="projects/test/basic": install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server,naga
     PORT="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32c6)"; \
     echo "Using ESPFLASH_PORT=$PORT"; \
     ESPFLASH_PORT="$PORT" espflash flash --chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} {{ fw_esp32c6_elf }}; \
-    cargo run --package lp-cli -- dev examples/{{ example }} --push "serial:$PORT"
+    cargo run --package lp-cli -- dev {{ project }} --push "serial:$PORT"
 
 # Same as demo-esp32c6-check, but builds the explicit Naga frontend.
 demo-esp32c6-check-naga example="basic": install-rv32-target
@@ -2439,7 +2463,7 @@ fwtest-json-esp32c6: install-rv32-target
 fwtest-msafluid-esp32c6: install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo run --features test_msafluid,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
 
-# Run firmware with test_fluid_demo: live RGB MSAFluid demo on examples/basic ring fixture (GPIO4)
+# Run firmware with test_fluid_demo: live RGB MSAFluid demo on projects/test/basic ring fixture (GPIO4)
 fwtest-fluid-demo-esp32c6: install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo run --features test_fluid_demo,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
 
@@ -2587,7 +2611,7 @@ decode-backtrace-esp32v3 *addrs:
 # ============================================================================
 # Profile a project in the emulator with the unified profile collector(s).
 # Replaces mem-profile and heap-summary.
-# Default project: examples/basic
+# Default project: projects/test/basic
 # Default collectors: alloc
 # Usage: just profile [path/to/project] [--collect alloc] [--frames N] [--note "description"]
 profile *args:

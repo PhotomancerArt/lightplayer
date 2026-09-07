@@ -20,6 +20,16 @@ A module in `fw-checks` behind a cargo feature, runnable many per image
 records behind `[fw-check-json] `, then human log lines the host parses as
 *series*.
 
+**One payload is not a module**, and it is the interesting one. `boot-idle` is
+the shipped image itself, run to its first idle heartbeat (vision Q1:
+shipped-image walks are a distinct scenario kind). It has no `fw-checks`
+feature, prints no in-band header — its provenance is the sidecar alone — and
+its firmware features are the image's own. That is why a payload's features are
+a *list* and why `emits_header` is a field rather than an assumption. Its three
+series are the hello frame, the idle heartbeat and the stack probe's line, and
+the numbers it exists for are `freeBytes`/`totalBytes` and the stack
+high-water mark.
+
 The registry is `src/payload.rs`. It **mirrors** `fw-checks` rather than
 importing it: `fw-checks` is AGPL and outside the `lp-emu/` MIT fence, so an
 import would fail `just lint-emu-fence`. `lp-cli` depends on both and owns the
@@ -33,7 +43,8 @@ The named reference implementation a payload ran on (plan PD4):
 ```text
 silicon:esp32c6                 real silicon, that chip
 esp-emu:0.42.0                  Espressif's binary emulator, that version
-lp-emu:esp32c6:t1               our machine, time grade 1 (M3)
+lp-emu:esp32c6:t1               our machine, time grade 1 (instruction count)
+lp-emu:esp32c6:t2               our machine, time grade 2 (per-class model)
 ```
 
 **Identity is the chip, not the board** (Yona, G2 2026-09-06). This is chip
@@ -51,6 +62,19 @@ reason**. A class with no entry is `modeled`: silence is not trust. That table
 is where the spike's findings live — esp-emu is `measured` for memory (byte-
 equal on 184 per-tick values) and `modeled` for time (2.37x fast) and for
 USB-Serial-JTAG (asserts SOF forever).
+
+Our own machine is `modeled` in **every** class, and will stay that way until
+each is earned separately. It is byte-equal to silicon on the compile
+harness's 372 memory values, and that sentence is in the `because` where a
+reader can weigh it — evidence, not a promotion. `measured` means the class was
+measured on silicon, or on a configuration whose agreement with silicon *for
+that class* is itself in a committed transcript; one payload's heap ledger is
+not a licence for the pin class.
+
+An emulated configuration also carries the identity it has no eFuse to read
+(`mac`, `silicon_rev`, `board`), which the runner passes to the machine. The
+configuration is still the chip: those are facts about the board being
+imitated, not part of the name.
 
 ## Transcript
 
@@ -96,7 +120,7 @@ Masking here means *reported but not compared*, never *deleted*.
 ```bash
 cargo run -p lp-cli -- validate list
 cargo run -p lp-cli -- validate replay <transcript> --against <transcript|configuration>
-cargo run -p lp-cli -- validate run <set> --config <name> [--port …] [--dry-run]
+cargo run -p lp-cli -- validate run <set> --config <name> [--port …] [--image …] [--dry-run]
 cargo run -p lp-cli -- validate record <set> --config <name> --date … --commit … [--dry-run]
 ```
 
@@ -113,9 +137,25 @@ For `esp-emu:*` it builds a merged image and runs the binary named by
 `$LP_ESP_EMU` with `--exit-on` the payload's done marker (install per spike
 report §10 — a checksum-verified release asset, outside the repo).
 
-`lp-emu:*` is listed as `unavailable until M3`. The seam is
-`driver::ConfigurationDriver`: implement it for the machine and nothing else in
-this crate changes.
+For `lp-emu:*` there is no port, no reset dance and no `lsof` pre-check,
+because there is no board. Its plan is two commands — build the payload image
+(with `spike_uart0_link`, because that machine models USB-Serial-JTAG with no
+host attached), then run the machine with UART0 pointed at a file — and every
+decision that shapes the run is a flag on the second one, so the printed plan
+is the whole protocol. That was the seam M2 left as
+`driver::ConfigurationDriver`, and M3 filling it changed nothing else here.
+
+`--image [<payload>=]<path>` runs an already-built image instead of building
+one. It exists for provenance: the committed C6 transcripts are at firmware
+`d6cfaa205` with `spike_uart0_link` applied as a dirty tree, which is not what
+a checkout builds, and `scripts/emu/build-reference-image.sh` is what
+reproduces it. It takes a payload name because a set runs several payloads and
+a reference image is built per feature set. Silicon refuses it — a run that
+flashes somebody else's ELF cannot honestly report `firmware_features`.
+
+Every path a plan prints is relative to the repository root and the steps run
+there, so the `source` line in a committed sidecar reads the same in anyone's
+checkout.
 
 ## Rules of the desk
 

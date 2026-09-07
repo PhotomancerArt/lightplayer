@@ -33,7 +33,8 @@ use lp_emu_core::sched::{Cycles, EventId, Scheduler};
 
 use crate::host::HostSinks;
 use crate::periph::{
-    BoxedPeripheral, BusCx, CpuIntMatrix, IrqLines, MachineRequest, NoCpuInterrupts, Width,
+    BoxedPeripheral, BusCx, CpuIntMatrix, IrqLines, MachineRequest, NoCpuInterrupts, RegGrade,
+    Width,
 };
 use crate::trace::{Access, MmioEvent, Trace};
 
@@ -134,6 +135,11 @@ pub struct StrictViolation {
     /// The address was inside a declared MMIO window — an unmodelled block,
     /// not a wild pointer.
     pub in_mmio_window: bool,
+    /// `Some(grade)` when the refusal was a strict-**grade** one: the
+    /// register exists and is modelled, but its [`RegGrade`] is below the
+    /// level [`SocBus::set_strict_grade`] asked for. `None` for an unmapped
+    /// access.
+    pub grade: Option<RegGrade>,
 }
 
 /// The bus's scalar state, for a machine snapshot.
@@ -181,6 +187,9 @@ pub struct SocBus {
     mmio_windows: Vec<(u32, u32)>,
 
     strict: bool,
+    /// `Some(level)`: an access to a register graded below `level` is
+    /// refused like an unmapped one. See [`SocBus::set_strict_grade`].
+    strict_grade: Option<RegGrade>,
     sideband: bool,
     /// The chip's misaligned-access policy, mirrored from the hart. The C6
     /// core performs misaligned data accesses in hardware, so its machine
@@ -247,6 +256,7 @@ impl SocBus {
             mmio_by_base: Vec::new(),
             mmio_windows: Vec::new(),
             strict: false,
+            strict_grade: None,
             sideband: false,
             allow_unaligned: false,
             watchpoints: [None; WATCHPOINT_SLOTS],
@@ -340,6 +350,28 @@ impl SocBus {
 
     pub fn strict(&self) -> bool {
         self.strict
+    }
+
+    /// Refuse every access to a register whose [`RegGrade`] is **below**
+    /// `level` — the honest-peripheral policy one rung up from
+    /// [`set_strict`](Self::set_strict): not "is this block modelled" but
+    /// "is what the model says about this register backed by evidence".
+    /// The refusal is a [`StrictViolation`] with `grade` set and
+    /// `in_mmio_window` true, reported the same way as an unmapped access
+    /// and, like it, before the peripheral sees the access.
+    ///
+    /// `Some(RegGrade::Modeled)` refuses nothing (no grade is below it);
+    /// `Some(Documented)` stops on the first `Modeled` register any block
+    /// answers — which on a chip whose accept tables are all `Modeled` is
+    /// the first MMIO access of the boot. That is the point: the level says
+    /// what the run is allowed to trust, and a register outside it is a
+    /// stop with its name in the report, not a silent guess.
+    pub fn set_strict_grade(&mut self, level: Option<RegGrade>) {
+        self.strict_grade = level;
+    }
+
+    pub fn strict_grade(&self) -> Option<RegGrade> {
+        self.strict_grade
     }
 
     /// Mirror the hart's misaligned-access policy onto the bus.
@@ -489,6 +521,29 @@ impl SocBus {
                 request: &mut self.request,
             };
             range.periph.on_event(id, &mut cx);
+        }
+    }
+
+    /// Give every peripheral its [`Peripheral::started`] call, in
+    /// registration order, at the current bus time. The machine calls this
+    /// once, after the ROM and the app are placed and before the first
+    /// slice; see the trait method for what it is for.
+    ///
+    /// [`Peripheral::started`]: crate::periph::Peripheral::started
+    pub fn start_peripherals(&mut self) {
+        for range in &mut self.mmio {
+            let mut cx = BusCx {
+                now: self.now,
+                pc: self.pc,
+                hart: self.hart,
+                sched: &mut self.sched,
+                irq: &mut self.irq,
+                trace: &mut self.trace,
+                host: &mut self.host,
+                matrix: &mut *self.matrix,
+                request: &mut self.request,
+            };
+            range.periph.started(&mut cx);
         }
     }
 
@@ -735,6 +790,7 @@ impl SocBus {
                 let p = &self.mmio[i].periph;
                 (p.name(), p.reg_name(off))
             };
+            self.check_grade(i, off, address, width, Access::Read)?;
             let (now, pc, hart) = (self.now, self.pc, self.hart);
             let value = {
                 let range = &mut self.mmio[i];
@@ -802,6 +858,7 @@ impl SocBus {
                 let p = &self.mmio[i].periph;
                 (p.name(), p.reg_name(off))
             };
+            self.check_grade(i, off, address, width, Access::Write)?;
             let (now, pc, hart) = (self.now, self.pc, self.hart);
             {
                 let range = &mut self.mmio[i];
@@ -842,6 +899,61 @@ impl SocBus {
         self.unmapped(address, width, Access::Write, value)
     }
 
+    /// The strict-grade policy ([`set_strict_grade`](Self::set_strict_grade)):
+    /// a register graded below the level is refused before the peripheral
+    /// sees the access, recorded as the first violation if none is yet, and
+    /// noted in the trace with its name and grade.
+    fn check_grade(
+        &mut self,
+        index: usize,
+        off: u32,
+        address: u32,
+        width: Width,
+        access: Access,
+    ) -> Result<(), MemoryError> {
+        let Some(level) = self.strict_grade else {
+            return Ok(());
+        };
+        let grade = self.mmio[index].periph.reg_grade(off);
+        if grade >= level {
+            return Ok(());
+        }
+        if self.first_strict_violation.is_none() {
+            self.first_strict_violation = Some(StrictViolation {
+                cycle: self.now,
+                pc: self.pc,
+                address,
+                width,
+                access,
+                in_mmio_window: true,
+                grade: Some(grade),
+            });
+            let p = &self.mmio[index].periph;
+            let line = alloc::format!(
+                "cyc={} pc=0x{:08x} STRICT-GRADE {} of {}+0x{off:03x} {}: graded {grade}, the \
+                 run trusts {level} and above",
+                self.now,
+                self.pc,
+                match access {
+                    Access::Read => "read",
+                    Access::Write => "write",
+                },
+                p.name(),
+                p.reg_name(off).unwrap_or("?"),
+            );
+            self.trace.note(&line);
+            log::warn!("{line}");
+        }
+        Err(MemoryError::InvalidAccess {
+            address,
+            size: width.bytes() as usize,
+            kind: match access {
+                Access::Read => MemoryAccessKind::Read,
+                Access::Write => MemoryAccessKind::Write,
+            },
+        })
+    }
+
     /// The unmapped-access policy: count always, log the first time this
     /// exact `(pc, address)` appears, fault in strict mode.
     fn unmapped(
@@ -867,6 +979,7 @@ impl SocBus {
                 width,
                 access,
                 in_mmio_window: self.in_mmio_window(address),
+                grade: None,
             });
         }
 
@@ -1053,7 +1166,7 @@ impl Bus for SocBus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::periph::Peripheral;
+    use crate::periph::{Peripheral, RegGrades, Strap};
     use crate::regfile::RegFile;
     use crate::trace::SharedBuffer;
 
@@ -1567,6 +1680,7 @@ mod tests {
             cx.request(MachineRequest::Reset {
                 source: "WDT stage 0",
                 at,
+                strap: Strap::App,
             });
         }
 
@@ -1591,11 +1705,150 @@ mod tests {
             bus.take_request(),
             Some(MachineRequest::Reset {
                 source: "WDT stage 0",
-                at: 77
+                at: 77,
+                strap: Strap::App,
             }),
             "the first request is the one the machine sees"
         );
         assert_eq!(bus.take_request(), None, "take clears");
+    }
+
+    /// A block with one `documented` register at `+0x24` and everything
+    /// else `modeled`.
+    struct Graded {
+        grades: RegGrades,
+        reads: u32,
+    }
+
+    impl Peripheral for Graded {
+        fn name(&self) -> &'static str {
+            "USB_DEVICE"
+        }
+
+        fn read(&mut self, _off: u32, _width: Width, _cx: &mut BusCx<'_>) -> u32 {
+            self.reads += 1;
+            0x55
+        }
+
+        fn write(&mut self, _off: u32, _width: Width, _value: u32, _cx: &mut BusCx<'_>) {}
+
+        fn reg_name(&self, off: u32) -> Option<&'static str> {
+            match off & !3 {
+                0x00 => Some("ep1"),
+                0x24 => Some("fram_num"),
+                _ => None,
+            }
+        }
+
+        fn reg_grade(&self, off: u32) -> RegGrade {
+            self.grades.grade(off)
+        }
+
+        fn save_state(&self) -> Vec<u8> {
+            Vec::new()
+        }
+
+        fn load_state(&mut self, _bytes: &[u8]) {}
+    }
+
+    #[test]
+    fn strict_grade_refuses_a_register_below_the_level_before_the_peripheral_sees_it() {
+        let buf = SharedBuffer::new();
+        let mut bus = bus_with_ram();
+        bus.trace = Trace::to_sink(Box::new(buf.clone()));
+        bus.add_mmio_window(0x6000_0000, 0x0010_0000);
+        bus.add_peripheral(
+            0x6000_f000,
+            0x100,
+            Box::new(Graded {
+                grades: RegGrades::new().with_grade(0x24, RegGrade::Documented),
+                reads: 0,
+            }),
+        );
+        bus.set_time(9);
+        bus.set_pc(0x4200_0000);
+
+        // No level: everything is answered.
+        assert_eq!(bus.read_word(0x6000_f000).unwrap(), 0x55);
+        // `modeled` is the floor, so it refuses nothing.
+        bus.set_strict_grade(Some(RegGrade::Modeled));
+        assert_eq!(bus.read_word(0x6000_f000).unwrap(), 0x55);
+        assert!(bus.first_strict_violation().is_none());
+
+        bus.set_strict_grade(Some(RegGrade::Documented));
+        assert_eq!(bus.strict_grade(), Some(RegGrade::Documented));
+        // The documented register still answers …
+        assert_eq!(bus.read_word(0x6000_f024).unwrap(), 0x55);
+        // … the modeled one is refused, and the peripheral never saw it.
+        let err = bus.read_word(0x6000_f000).unwrap_err();
+        assert!(matches!(
+            err,
+            MemoryError::InvalidAccess {
+                kind: MemoryAccessKind::Read,
+                ..
+            }
+        ));
+        let v = bus.first_strict_violation().expect("recorded");
+        assert_eq!(
+            (
+                v.cycle,
+                v.pc,
+                v.address,
+                v.access,
+                v.in_mmio_window,
+                v.grade
+            ),
+            (
+                9,
+                0x4200_0000,
+                0x6000_f000,
+                Access::Read,
+                true,
+                Some(RegGrade::Modeled)
+            )
+        );
+        assert!(bus.write_word(0x6000_f000, 1).is_err());
+        assert_eq!(
+            bus.unmapped_reads() + bus.unmapped_writes(),
+            0,
+            "a grade refusal is not an unmapped access"
+        );
+        let lines = buf.lines();
+        assert_eq!(lines.len(), 4, "{lines:?}");
+        assert_eq!(
+            lines[3],
+            "cyc=9 pc=0x42000000 STRICT-GRADE read of USB_DEVICE+0x000 ep1: graded modeled, \
+             the run trusts documented and above"
+        );
+        // `measured` refuses the documented one too.
+        bus.clear_strict_violation();
+        bus.set_strict_grade(Some(RegGrade::Measured));
+        assert!(bus.read_word(0x6000_f024).is_err());
+        assert_eq!(
+            bus.first_strict_violation().unwrap().grade,
+            Some(RegGrade::Documented)
+        );
+    }
+
+    #[test]
+    fn reg_grades_default_to_modeled_and_replace_by_offset() {
+        let g = RegGrades::new()
+            .with_grade(0x24, RegGrade::Documented)
+            .with_grade(0x18, RegGrade::Documented)
+            .with_grade(0x25, RegGrade::Measured);
+        assert_eq!(g.grade(0x00), RegGrade::Modeled);
+        assert_eq!(g.grade(0x18), RegGrade::Documented);
+        assert_eq!(g.grade(0x24), RegGrade::Measured, "0x25 aliases 0x24");
+        assert_eq!(g.grade(0x26), RegGrade::Measured);
+        assert_eq!(
+            g.entries(),
+            [(0x18, RegGrade::Documented), (0x24, RegGrade::Measured)]
+        );
+        assert!(RegGrade::Modeled < RegGrade::Documented);
+        assert!(RegGrade::Documented < RegGrade::Measured);
+        assert_eq!(RegGrade::parse("documented"), Some(RegGrade::Documented));
+        assert_eq!(RegGrade::parse("strict"), None);
+        assert_eq!(RegGrade::Measured.to_string(), "measured");
     }
 
     #[test]

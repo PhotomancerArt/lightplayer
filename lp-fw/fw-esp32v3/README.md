@@ -202,7 +202,7 @@ just ci-prereqs                              # the oracle's rv32 engine needs th
 scripts/m4-hardware-walk.sh --chip esp32     # or: ... --chip esp32 /dev/cu.wchusbserialNNNN
 ```
 
-The walk flashes with `frame-dump`, pushes `examples/shader-oracle` (retargeted
+The walk flashes with `frame-dump`, pushes `projects/test/shader-oracle` (retargeted
 from the XIAO's `D10` pad to this board's `IO18` — an endpoint picks a wire, not
 a colour), reflashes to watch the device compile and render it, and diffs the
 device's `rgb=` against the host's. Off by default for the same reason the

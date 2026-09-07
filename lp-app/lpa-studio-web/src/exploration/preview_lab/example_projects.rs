@@ -34,7 +34,7 @@ macro_rules! example_files {
         static $name: [ExampleFile; example_files!(@count $($file)+)] = [
             $(ExampleFile {
                 relative_path: $file,
-                bytes: include_bytes!(concat!("../../../../../examples/", $dir, "/", $file)),
+                bytes: include_bytes!(concat!("../../../../../", $dir, "/", $file)),
             },)+
         ];
     };
@@ -44,7 +44,7 @@ macro_rules! example_files {
 
 example_files!(
     BASIC,
-    "basic",
+    "projects/test/basic",
     [
         "clock.json",
         "fixture.json",
@@ -58,7 +58,7 @@ example_files!(
 
 example_files!(
     FLUID,
-    "fluid",
+    "projects/test/fluid",
     [
         "clock.json",
         "compute.glsl",
@@ -73,7 +73,7 @@ example_files!(
 
 example_files!(
     EVENTS,
-    "events",
+    "projects/test/events",
     [
         "clock.json",
         "event_a.glsl",
@@ -91,7 +91,7 @@ example_files!(
 
 example_files!(
     FYEAH_SIGN,
-    "fyeah-sign",
+    "catalog/projects/fyeah-sign",
     [
         "blast.glsl",
         "blast.json",

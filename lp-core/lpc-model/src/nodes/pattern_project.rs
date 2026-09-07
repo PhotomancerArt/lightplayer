@@ -34,7 +34,7 @@
 //!   clean under [`crate::check_exports`].
 //!
 //! Each rig fixture gets its **own** control channel (`control.strip_300`,
-//! `control.matrix_32x16`) and its own output, the `examples/plasma-duo`
+//! `control.matrix_32x16`) and its own output, the `catalog/patterns/plasma-duo`
 //! idiom. Two fixtures writing one `control.out` is no longer the *ambiguity*
 //! it once was — an output consumes its control input with
 //! `merge = "fragments"`, so several producers on one channel concatenate
@@ -99,7 +99,7 @@ struct RigSpec {
     map2d: &'static str,
     /// Wire the rig's output drives. Unauthored hardware is not a thing —
     /// an output node always names a wire — so the templates take the
-    /// default wire and the next one along, the `examples/plasma-duo`
+    /// default wire and the next one along, the `catalog/patterns/plasma-duo`
     /// shape. This is NOT a rig chooser: retargeting is an edit.
     endpoint: &'static str,
 }

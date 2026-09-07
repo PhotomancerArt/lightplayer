@@ -2,7 +2,7 @@
 
 One-off tooling that turns Bob Zook's Illustrator wiring sketch
 (`mapping-attempt.svg`, committed here for provenance) into
-`examples/zook-dome/fixture.map2d.json`. This is **not** the product SVG
+`catalog/projects/zook-dome/fixture.map2d.json`. This is **not** the product SVG
 importer — the sketch uses plain `<line>` elements, dashed jumper styling,
 and filled arrowheads, none of which the importer's `path:N,count:N`
 contract covers.
@@ -72,12 +72,12 @@ IO18/IO16/IO14/IO2/IO13).
 
 ## Output topology note
 
-`examples/zook-dome/output.json` authors the true physical split: five
+`catalog/projects/zook-dome/output.json` authors the true physical split: five
 wires of 300, listed in repeat-instance order (see above), the last as
 the count-less remainder. Since the pooled-slot RMT work (PR #350), the
 classic drives all five wires over its four RMT slots by re-binding pins
 per transmission — the whole dome is live on one board.
 
 ```bash
-lp-cli upload examples/zook-dome serial:auto
+lp-cli upload catalog/projects/zook-dome serial:auto
 ```

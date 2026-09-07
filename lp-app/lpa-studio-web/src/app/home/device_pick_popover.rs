@@ -357,6 +357,20 @@ fn ProjectPickPanel(
     // The name form rides the New tab under its one card: a starter is the
     // one source that has no name yet.
     let show_naming = current == PickTab::New && !visible.is_empty();
+    // The visible choices in their sections, encounter order: the Examples
+    // tab reads "Projects" then "Patterns" (core's grouping); the other
+    // tabs have one unlabelled section.
+    let nothing_visible = visible.is_empty();
+    let mut sections: Vec<(Option<&'static str>, Vec<PushSourceChoice>)> = Vec::new();
+    for choice in visible {
+        match sections
+            .iter_mut()
+            .find(|(label, _)| *label == choice.section)
+        {
+            Some((_, choices)) => choices.push(choice),
+            None => sections.push((choice.section, vec![choice])),
+        }
+    }
 
     rsx! {
         div { class: "tw:grid tw:min-w-0",
@@ -388,7 +402,7 @@ fn ProjectPickPanel(
                 // The New tab is one card or one honest reason — never an
                 // empty grid, which would read as a bug rather than as "this
                 // board has not said which board it is".
-                if visible.is_empty() {
+                if nothing_visible {
                     p { class: panel_note_class(),
                         if current == PickTab::New {
                             {
@@ -401,22 +415,27 @@ fn ProjectPickPanel(
                         }
                     }
                 } else {
-                    div { class: pick_grid_class(),
-                        for choice in visible {
-                            {
-                                let picked = selected.as_deref() == Some(choice.key.as_str());
-                                let key = choice.key.clone();
-                                rsx! {
-                                    PickCard {
-                                        key: "{choice.key}",
-                                        choice: choice.clone(),
-                                        selected: picked,
-                                        on_pick: move |_| {
-                                            on_pick.call(key.clone());
-                                            if let Some(mut close) = close {
-                                                close.close();
-                                            }
-                                        },
+                    for (label , choices) in sections {
+                        if let Some(label) = label {
+                            p { key: "{label}", class: pick_section_class(), "{label}" }
+                        }
+                        div { class: pick_grid_class(),
+                            for choice in choices {
+                                {
+                                    let picked = selected.as_deref() == Some(choice.key.as_str());
+                                    let key = choice.key.clone();
+                                    rsx! {
+                                        PickCard {
+                                            key: "{choice.key}",
+                                            choice: choice.clone(),
+                                            selected: picked,
+                                            on_pick: move |_| {
+                                                on_pick.call(key.clone());
+                                                if let Some(mut close) = close {
+                                                    close.close();
+                                                }
+                                            },
+                                        }
                                     }
                                 }
                             }
@@ -1423,4 +1442,11 @@ mod tests {
             escapes: vec![DeviceEscape::Forget],
         }
     }
+}
+
+/// A section heading inside a tab's grid: the catalog's kind sections on
+/// the Examples tab ("Projects", "Patterns"), in the page headings' voice
+/// at grid scale.
+fn pick_section_class() -> &'static str {
+    "tw:m-0 tw:px-0.5 tw:pt-1.5 tw:text-[11px]/none tw:font-extrabold tw:uppercase tw:tracking-[0.06em] tw:text-heading"
 }

@@ -182,7 +182,7 @@ fn load_mini_dome() -> (Engine, ProjectRegistry) {
         .parent()
         .expect("workspace dir")
         .to_path_buf();
-    let project_dir: PathBuf = workspace_dir.join("examples/small-dome");
+    let project_dir: PathBuf = workspace_dir.join("catalog/projects/small-dome");
     let fs = LpFsStd::new(project_dir);
     let services = EngineServices::new(TreePath::parse("/small_dome.show").expect("path"));
     let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load small-dome");

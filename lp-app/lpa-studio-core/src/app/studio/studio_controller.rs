@@ -3948,14 +3948,15 @@ impl StudioController {
         self.record_project_edit_run(run)
     }
 
-    /// Vendor a library pattern export into the open project (module
-    /// authoring unit, P5). The source bytes come from the library, the
-    /// write goes over the wire as an ordinary `CreateNode`.
+    /// Vendor a pattern export into the open project (module authoring
+    /// unit, P5; built-ins, catalog content tree P6). The source bytes come
+    /// from the library or the compiled-in catalog, the write goes over the
+    /// wire as an ordinary `CreateNode`.
     async fn execute_node_import_op(&mut self, op: NodeImportOp) -> UiResult {
         let run = {
             let server = self.pool.lens_session_mut()?.client_mut()?;
             self.project
-                .import_pattern(server, &op.package_uid, &op.export)
+                .import_pattern(server, &op.source, &op.export)
                 .await
         };
         // The vendored files landed in the library through the create's

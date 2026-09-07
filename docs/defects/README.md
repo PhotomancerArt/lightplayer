@@ -185,6 +185,19 @@ genuinely fits none of these, and define it here in one line.
   than by construction, so unrelated growth elsewhere crosses it silently
   and the failure is quantised at one specific deadline, every time. The
   fix is placement or budget, verified by measurement, not by attributes.
+- **`toolchain-miscompile`** — a compiler between the validated IR and
+  the hardware drops or rewrites a construct that is legal at every layer
+  above it; nothing host-side can see it, only a device run of the exact
+  construct. The fix is a shape the compiler handles and a device test
+  that holds the shape.
+- **`contract-gap`** — content is authored against a guarantee one tier
+  enforces (a fuel meter, a bound, a trap) and a second implementation of
+  the same interface never enforces it, so the same input is safe on one
+  tier and lethal on another. Unlike `backend-contract-divergence` the two
+  do not disagree on a detail — one of them simply has nothing where the
+  other has a guard, and nothing in the interface says which. The fix
+  shape is to make the guarantee part of the interface: enforce it on
+  every tier, or refuse the input on the tier that cannot.
 - **`arena-retained-transient`** — a value that is transient by intent
   (an intermediate of a recursive build, a type copied "for convenience"
   onto every node) is pushed into an arena whose lifetime is the whole
@@ -301,6 +314,8 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| toolchain-miscompile | 2026-09-07 | [metal-drops-atomic-guarded-by-loop-exit-sum](2026-09-07-metal-drops-atomic-guarded-by-loop-exit-sum.md) | fixed | lp-gfx-wgpu loop_bound_pass → Metal: a conditional `atomicAdd` guarded by the loop's pre-store exit sum never executes; storing first and reading back fixes every shape |
+| contract-gap | 2026-09-06 | [gpu-tier-executes-unbounded-shaders](2026-09-06-gpu-tier-executes-unbounded-shaders.md) | fixed | lp-gfx-wgpu GPU tiers + catalog: `fault-demo`'s `while (true)` has no fuel meter on a GPU — the driver watchdog resets the device, corrupts sibling surfaces, and can take the OS down |
 | nondeterministic-capture | 2026-09-06 | [heap-budget-capture-truncated-by-cycle-cap](2026-09-06-heap-budget-capture-truncated-by-cycle-cap.md) | fixed | scripts/heap-budget-check.sh: the startup capture hit `--max-cycles` mid-compile and recorded the cut as a figure |
 | stand-in-divergence | 2026-09-04 | [read-gate-refuses-on-largest-block-proxy](2026-09-04-read-gate-refuses-on-largest-block-proxy.md) | **open** | lpa-server ProjectRead headroom gate vs the classic's two-region heap |
 | stand-in-divergence | 2026-09-04 | [unload-leaves-classic-unloadable-until-power-cycle](2026-09-04-unload-leaves-classic-unloadable-until-power-cycle.md) | **open** (not reproducing on the four-region heap 2026-09-06: reload accepted at 72,954 B, margin ~7 KB) | after stopAllProjects the classic's largest block is 39.7 KB and the 64 KiB load gate refuses every load |

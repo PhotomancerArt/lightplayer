@@ -16,9 +16,13 @@
 //! TERM/KILL, which wedges a native-USB port; and signalling espflash by
 //! pattern has killed the wrong lane on a two-board desk.
 //!
-//! `lp-emu:*` has no driver yet. It is listed, it says which milestone will
-//! bring it, and the trait below is the seam M3 implements.
+//! `lp-emu:*` needs none of that discipline and has none of it: there is no
+//! board, so its plan is two commands — build the image, run the machine with
+//! UART0 pointed at a file — and every decision that shapes the run is a flag
+//! on the second one. It landed in M3 P7 and nothing else in this crate
+//! changed to accept it, which is what the seam was for.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -32,7 +36,17 @@ pub const RV32_TARGET: &str = "riscv32imac-unknown-none-elf";
 pub const FW_ESP32C6_PROFILE: &str = "release-esp32";
 pub const C6_FLASH_SIZE: &str = "4mb";
 pub const C6_PARTITIONS: &str = "lp-fw/fw-esp32c6/partitions.csv";
-pub const FW_ESP32C6_MANIFEST: &str = "lp-fw/fw-esp32c6/Cargo.toml";
+/// The firmware package's directory, and the only place its build may run
+/// from. `lp-fw/fw-esp32c6/.cargo/config.toml` carries `-Tlinkall.x`,
+/// `-Zbuild-std` and the flash-budget flags, and Cargo resolves a config from
+/// the **current directory** upward — never from `--manifest-path`. Building
+/// this package from the repository root therefore links without a linker
+/// script and dies on every symbol in `__EXTERNAL_INTERRUPTS` (`undefined
+/// symbol: GPIO`, `WIFI_MAC`, …). The `justfile` has always `cd`-ed here
+/// (`build-fw-esp32c6`), and so does
+/// `scripts/emu/build-reference-image.sh`; this constant is that same rule for
+/// the runner's plans. Found at G3 sitting 1, 2026-09-07.
+pub const FW_ESP32C6_DIR: &str = "lp-fw/fw-esp32c6";
 pub const DESK_STEP_SCRIPT: &str = "scripts/spike/esp-emu/desk-espflash-step.sh";
 
 /// The environment variable naming the `esp-emu` binary (spike report §1, §10).
@@ -46,21 +60,65 @@ pub struct RunRequest {
     /// `candidates[0]` eventually flashes the wrong board.
     pub port: Option<String>,
     pub timeout_secs: u64,
-    /// Repository root; every path in a plan is relative to it.
+    /// Repository root. Every path a plan prints is relative to it, and it is
+    /// the directory the steps run in — so a plan reads the same in a
+    /// transcript's sidecar as it does on a terminal, whoever's checkout it
+    /// came from.
     pub repo_root: PathBuf,
-    /// Where captures and intermediate images go.
+    /// Where captures and intermediate images go, relative to `repo_root`.
     pub out_dir: PathBuf,
+    /// An already-built image to run instead of building one.
+    ///
+    /// The reason this exists is provenance, not convenience: the committed
+    /// transcripts are at firmware `d6cfaa205` with `spike_uart0_link` applied
+    /// as a dirty tree, which is not what a checkout builds today.
+    /// `scripts/emu/build-reference-image.sh` reproduces that tree, and
+    /// `--image` is how the runner is pointed at what it produced. Only the
+    /// emulated configurations accept it — an image nobody can put on a board
+    /// is not a silicon run.
+    pub image: Option<PathBuf>,
+    /// The chip identity the configuration reports, from `validate.toml`.
+    ///
+    /// Silicon reads its own eFuse; an emulator has to be told. Ours is told
+    /// the desk board's MAC and revision so the identity fields in a hello
+    /// frame compare equal to silicon's transcripts instead of differing for
+    /// a reason that has nothing to do with the model.
+    pub identity: Identity,
+}
+
+/// The eFuse identity an emulated configuration is given.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Identity {
+    pub mac: Option<String>,
+    /// As the chip reports it: `v0.2` or `0.2`.
+    pub silicon_rev: Option<String>,
+    pub board: Option<String>,
+}
+
+impl Identity {
+    /// `v0.2` -> `0.2`: the machine's `--efuse-rev` takes wafer
+    /// `major.minor`, the header records the chip's own spelling.
+    pub fn efuse_rev(&self) -> Option<&str> {
+        self.silicon_rev
+            .as_deref()
+            .map(|r| r.strip_prefix('v').unwrap_or(r))
+    }
 }
 
 impl RunRequest {
     /// The cargo feature list for this payload on this configuration.
     ///
-    /// `spike_uart0_link` is added for `esp-emu:*` and only there: the
-    /// emulator has no USB host, so the host link has to be UART0 (spike
-    /// report §5.1). Adding it on silicon would change the image under test.
+    /// `spike_uart0_link` is added for `esp-emu:*` and `lp-emu:*`, and only
+    /// there: neither emulator has a USB host, so the host link has to be
+    /// UART0 (spike report §4, §5.1). Adding it on silicon would change the
+    /// image under test.
     pub fn features(&self) -> Vec<&'static str> {
-        let mut f = vec!["esp32c6", self.payload.firmware_feature];
-        if self.configuration.kind == ConfigurationKind::EspEmu {
+        let mut f = vec!["esp32c6"];
+        f.extend_from_slice(self.payload.firmware_features);
+        if matches!(
+            self.configuration.kind,
+            ConfigurationKind::EspEmu | ConfigurationKind::LpEmu
+        ) {
             f.push("spike_uart0_link");
         }
         f
@@ -76,6 +134,10 @@ pub struct PlanStep {
     pub describe: String,
     pub command: Vec<String>,
     pub env: Vec<(String, String)>,
+    /// Run this step somewhere other than the plan's `cwd`, relative to it.
+    /// Only the firmware build needs it, and it needs it absolutely: see
+    /// [`FW_ESP32C6_DIR`].
+    pub cwd: Option<String>,
     /// Why this step is shaped this way, when the shape is load-bearing.
     pub note: Option<String>,
 }
@@ -86,12 +148,18 @@ impl PlanStep {
             describe: describe.into(),
             command,
             env: Vec::new(),
+            cwd: None,
             note: None,
         }
     }
 
     fn with_env(mut self, k: &str, v: impl Into<String>) -> Self {
         self.env.push((k.to_string(), v.into()));
+        self
+    }
+
+    fn in_dir(mut self, dir: &str) -> Self {
+        self.cwd = Some(dir.to_string());
         self
     }
 
@@ -107,7 +175,13 @@ impl PlanStep {
             .map(|(k, v)| format!("{k}={}", shell_quote(v)))
             .collect::<Vec<_>>();
         let argv = self.command.iter().map(|a| shell_quote(a));
-        env.into_iter().chain(argv).collect::<Vec<_>>().join(" ")
+        let line = env.into_iter().chain(argv).collect::<Vec<_>>().join(" ");
+        // A printed plan is meant to be pasted from the repository root, so a
+        // step that runs elsewhere has to say so in the line itself.
+        match &self.cwd {
+            Some(dir) => format!("(cd {} && {line})", shell_quote(dir)),
+            None => line,
+        }
     }
 }
 
@@ -117,9 +191,19 @@ pub struct RunPlan {
     pub payload: &'static str,
     pub availability: Availability,
     pub steps: Vec<PlanStep>,
-    /// Where the transcript body will be after the plan runs.
+    /// Where the transcript body will be after the plan runs, relative to
+    /// `cwd`.
     pub capture: PathBuf,
+    /// The directory the steps run in: the repository root.
+    pub cwd: PathBuf,
     pub warnings: Vec<String>,
+    /// Facts about the plan that are not warnings: which pinned image is
+    /// being run, and by what recipe. They reach the transcript's sidecar as
+    /// its `note`, because a reader six months from now needs them more than
+    /// the operator does today.
+    pub notes: Vec<String>,
+    /// Tool name -> version, for the sidecar's `tools` map.
+    pub tools: BTreeMap<String, String>,
 }
 
 impl RunPlan {
@@ -130,6 +214,9 @@ impl RunPlan {
         );
         for w in &self.warnings {
             s.push_str(&format!("  ! {w}\n"));
+        }
+        for n in &self.notes {
+            s.push_str(&format!("  # {n}\n"));
         }
         for (i, step) in self.steps.iter().enumerate() {
             s.push_str(&format!("\n  {}. {}\n", i + 1, step.describe));
@@ -180,6 +267,13 @@ impl ConfigurationDriver for SiliconDriver {
              not pick a port for you, because a runner that grabs candidates[0] \
              eventually flashes the wrong board.",
         )?;
+        if req.image.is_some() {
+            bail!(
+                "--image is for the emulated configurations. A silicon run flashes what it \
+                 built, from the tree it is in; pointing it at somebody else's ELF would make \
+                 the transcript's `firmware_features` a guess."
+            );
+        }
         let elf = format!("target/{RV32_TARGET}/{FW_ESP32C6_PROFILE}/fw-esp32c6");
         let capture = req.capture_path();
         let steps = vec![
@@ -188,8 +282,6 @@ impl ConfigurationDriver for SiliconDriver {
                 vec![
                     "cargo".into(),
                     "build".into(),
-                    "--manifest-path".into(),
-                    FW_ESP32C6_MANIFEST.into(),
                     "--target".into(),
                     RV32_TARGET.into(),
                     "--profile".into(),
@@ -197,7 +289,8 @@ impl ConfigurationDriver for SiliconDriver {
                     "--features".into(),
                     req.features().join(","),
                 ],
-            ),
+            )
+            .in_dir(FW_ESP32C6_DIR),
             PlanStep::new(
                 "flash and monitor in the foreground, stop at the sentinel",
                 vec![
@@ -234,11 +327,14 @@ impl ConfigurationDriver for SiliconDriver {
             availability: Availability::Available,
             steps,
             capture,
+            cwd: req.repo_root.clone(),
             warnings: vec![
                 "never open this port while Studio holds it — check `just hardware-list` \
                  and close the browser tab first"
                     .into(),
             ],
+            notes: Vec::new(),
+            tools: BTreeMap::new(),
         })
     }
 
@@ -289,8 +385,6 @@ impl ConfigurationDriver for EspEmuDriver {
                 vec![
                     "cargo".into(),
                     "build".into(),
-                    "--manifest-path".into(),
-                    FW_ESP32C6_MANIFEST.into(),
                     "--target".into(),
                     RV32_TARGET.into(),
                     "--profile".into(),
@@ -299,6 +393,7 @@ impl ConfigurationDriver for EspEmuDriver {
                     req.features().join(","),
                 ],
             )
+            .in_dir(FW_ESP32C6_DIR)
             .with_note(
                 "spike_uart0_link is on because the emulator has no USB host: the shipped \
                  image's USB-Serial-JTAG link cannot be served there (spike report §4, §5.1)",
@@ -331,6 +426,7 @@ impl ConfigurationDriver for EspEmuDriver {
             availability: Availability::Available,
             steps,
             capture,
+            cwd: req.repo_root.clone(),
             warnings: if std::env::var(ESP_EMU_ENV).is_err() {
                 vec![format!(
                     "{ESP_EMU_ENV} is not set; the plan assumes `esp-emu` is on PATH"
@@ -338,6 +434,8 @@ impl ConfigurationDriver for EspEmuDriver {
             } else {
                 Vec::new()
             },
+            notes: Vec::new(),
+            tools: BTreeMap::new(),
         })
     }
 
@@ -347,14 +445,34 @@ impl ConfigurationDriver for EspEmuDriver {
     }
 }
 
-/// Our own machine. The seam, and nothing behind it yet.
+/// Our own machine (`lp-emu/esp/lp-emu-esp32c6`), M3 onward.
 ///
-/// M3 replaces this with a driver over the C6 machine. What it has to provide
-/// is exactly what the other two do: a plan whose steps are reproducible from
-/// the command line, and an execution that leaves a capture file. Nothing in
-/// the rest of this crate knows which driver produced a transcript — the
+/// Two steps and no ceremony: build the payload image (or take a pinned one),
+/// then run it with UART0 pointed at a file. Everything that decides what the
+/// run *is* — the time grade, the eFuse identity, the strict bus, the
+/// sentinel, the emulated timeout — is on that one command line, so the plan
+/// a `--dry-run` prints is the whole protocol. There is no port, no reset
+/// dance and no `lsof` pre-check, because there is no board.
+///
+/// Nothing else in this crate knows which driver produced a transcript; the
 /// configuration name in the header is the only difference.
 pub struct LpEmuDriver;
+
+/// The emulator binary's package, and the `just` front door for a human.
+pub const LP_EMU_C6_PACKAGE: &str = "lp-emu-esp32c6";
+/// The vendored mask ROM's checksum file, read into the sidecar's `tools`.
+pub const C6_ROM_SHA256SUMS: &str = "lp-emu/esp/roms/SHA256SUMS";
+pub const C6_ROM_ELF: &str = "esp32c6_rev0_rom.elf";
+
+/// How much host time the emulated timeout is allowed to cost before the
+/// wall-clock safety net fires.
+///
+/// The net can end a run, never change one (the machine's rule): guest time is
+/// the scheduler's, and this is only here so a wedged run on a desk or in CI
+/// stops instead of burning a core all night. M3 P6 measured about 3x wall for
+/// emulated on this machine (5.5 s of guest time in ~15 s), so 20x is generous
+/// by a factor of six and still bounded.
+pub const WALL_TIMEOUT_FACTOR: u64 = 20;
 
 impl ConfigurationDriver for LpEmuDriver {
     fn kind(&self) -> ConfigurationKind {
@@ -362,24 +480,218 @@ impl ConfigurationDriver for LpEmuDriver {
     }
 
     fn availability(&self) -> Availability {
-        Availability::UnavailableUntil("M3")
+        Availability::Available
     }
 
     fn plan(&self, req: &RunRequest) -> Result<RunPlan> {
+        let grade = req.configuration.qualifier.as_deref().unwrap_or("t1");
+        if !matches!(grade, "t1" | "t2") {
+            bail!(
+                "`{}`: `{grade}` is not a time grade. The machine has two — `t1` counts \
+                 instructions, `t2` uses the measured per-class model — and neither is a \
+                 claim about milliseconds on silicon (the vision's graded ladder).",
+                req.configuration.name()
+            );
+        }
+        if req.configuration.detail != "esp32c6" {
+            bail!(
+                "`{}`: the only lp-emu machine is the C6 today",
+                req.configuration.name()
+            );
+        }
+
+        let capture = req.capture_path();
+        let built = format!("target/{RV32_TARGET}/{FW_ESP32C6_PROFILE}/fw-esp32c6");
+        let mut steps = Vec::new();
+        let mut notes = Vec::new();
+
+        let elf = match &req.image {
+            Some(path) => {
+                notes.push(format!(
+                    "running the pinned image {} rather than building one: the committed \
+                     transcripts are at firmware {} with `spike_uart0_link` applied as a dirty \
+                     tree, which is not what this checkout builds. \
+                     `scripts/emu/build-reference-image.sh {}` reproduces that tree in a \
+                     detached worktree and builds it there.",
+                    path.display(),
+                    REFERENCE_FIRMWARE_COMMIT,
+                    req.features().join(","),
+                ));
+                path.display().to_string()
+            }
+            None => {
+                steps.push(
+                    PlanStep::new(
+                        "build the payload image (UART0 host link)",
+                        vec![
+                            "cargo".into(),
+                            "build".into(),
+                            "--target".into(),
+                            RV32_TARGET.into(),
+                            "--profile".into(),
+                            FW_ESP32C6_PROFILE.into(),
+                            "--features".into(),
+                            req.features().join(","),
+                        ],
+                    )
+                    .in_dir(FW_ESP32C6_DIR)
+                    .with_note(
+                        "spike_uart0_link is on for the same reason it is on for esp-emu: this \
+                         machine models the USB-Serial-JTAG block with no host attached (M6 owns \
+                         the attached states), so the host link has to be UART0",
+                    ),
+                );
+                built
+            }
+        };
+
+        let mut emu: Vec<String> = vec![
+            "cargo".into(),
+            "run".into(),
+            "-q".into(),
+            "-p".into(),
+            LP_EMU_C6_PACKAGE.into(),
+            "--release".into(),
+            "--".into(),
+            "--elf".into(),
+            elf,
+            "--time-grade".into(),
+            grade.into(),
+            "--uart0".into(),
+            format!("file:{}", capture.display()),
+            // Emulated time, always: a run is the same run on a laptop and on
+            // a loaded CI box.
+            "--timeout".into(),
+            format!("{}s", req.timeout_secs),
+            "--wall-timeout".into(),
+            (req.timeout_secs * WALL_TIMEOUT_FACTOR).to_string(),
+            // An access nothing claims is a fault, not a zero. A transcript
+            // recorded with the bus in permissive mode would be a transcript
+            // of a machine quietly answering questions it cannot answer.
+            "--strict-bus".into(),
+        ];
+        if let Sentinel::Done(marker) = req.payload.sentinel {
+            emu.push("--exit-on".into());
+            emu.push(marker.into());
+        }
+        if let Some(mac) = &req.identity.mac {
+            emu.push("--efuse-mac".into());
+            emu.push(mac.clone());
+        }
+        if let Some(rev) = req.identity.efuse_rev() {
+            emu.push("--efuse-rev".into());
+            emu.push(rev.to_string());
+        }
+
+        steps.push(
+            PlanStep::new("run the machine, UART0 to the capture", emu).with_note(
+                "the eFuse identity comes from this configuration's entry in validate.toml, so the \
+             hello frame's baseMac / chipRevision / eui64 read the same as the desk board's and \
+             a replay against a silicon transcript compares chip identity rather than a \
+             difference in who was told what",
+            ),
+        );
+
         Ok(RunPlan {
             configuration: req.configuration.name(),
             payload: req.payload.name,
-            availability: self.availability(),
-            steps: Vec::new(),
-            capture: req.capture_path(),
-            warnings: vec![
-                "the lp-emu machine arrives in M3 (esp-emulator plan one). Until then this \
-                 configuration exists as a name and a seam: implement ConfigurationDriver \
-                 for it and nothing else in this crate changes."
-                    .into(),
-            ],
+            availability: Availability::Available,
+            steps,
+            capture,
+            cwd: req.repo_root.clone(),
+            warnings: Vec::new(),
+            notes,
+            tools: emulator_tools(&req.repo_root),
         })
     }
+
+    fn execute(&self, plan: &RunPlan) -> Result<PathBuf> {
+        // The machine writes the capture itself; a stale one from an earlier
+        // run would otherwise be appended to or, worse, left behind by a run
+        // that produced nothing.
+        let capture = plan.cwd.join(&plan.capture);
+        if capture.exists() {
+            std::fs::remove_file(&capture)
+                .with_context(|| format!("clearing {}", capture.display()))?;
+        }
+        run_steps(plan)?;
+        Ok(plan.capture.clone())
+    }
+}
+
+/// The firmware commit the committed C6 transcripts and the spike report's
+/// figures come from (`scripts/emu/build-reference-image.sh`).
+pub const REFERENCE_FIRMWARE_COMMIT: &str = "d6cfaa2051ae";
+
+/// What produced a `lp-emu:*` transcript, for the sidecar's `tools` map: this
+/// workspace's version and commit, and the vendored ROM's checksum.
+///
+/// The emulator's own ELF is not identified by a hash on purpose. A build path
+/// is compiled into it, so two checkouts of the same source produce different
+/// bytes; the commit is what says which source ran, and the gates are what say
+/// the machine still behaves the same.
+fn emulator_tools(repo_root: &Path) -> BTreeMap<String, String> {
+    let mut tools = BTreeMap::new();
+    tools.insert(
+        LP_EMU_C6_PACKAGE.to_string(),
+        format!(
+            "{} ({})",
+            env!("CARGO_PKG_VERSION"),
+            git_description(repo_root)
+        ),
+    );
+    if let Some(sha) = rom_sha256(repo_root) {
+        tools.insert("rom".to_string(), format!("{C6_ROM_ELF} sha256 {sha}"));
+    }
+    tools
+}
+
+/// `d6cfaa205` or `d6cfaa205+dirty`, from git. A dirty tree is not a reason to
+/// refuse to record — it is a reason to say so in the header.
+fn git_description(repo_root: &Path) -> String {
+    let short = Command::new("git")
+        .args([
+            "-C",
+            &repo_root.display().to_string(),
+            "rev-parse",
+            "--short=9",
+            "HEAD",
+        ])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty());
+    let Some(short) = short else {
+        return "unknown commit".to_string();
+    };
+    let dirty = Command::new("git")
+        .args([
+            "-C",
+            &repo_root.display().to_string(),
+            "status",
+            "--porcelain",
+        ])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .is_some_and(|o| !o.stdout.is_empty());
+    if dirty {
+        format!("{short}+dirty")
+    } else {
+        short
+    }
+}
+
+/// The vendored ROM's sha256, read from the committed `SHA256SUMS` rather than
+/// recomputed: that file is the checked artefact (`rom_vendoring.rs` re-derives
+/// it in-process), and reading it here keeps one source of truth.
+fn rom_sha256(repo_root: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(repo_root.join(C6_ROM_SHA256SUMS)).ok()?;
+    text.lines()
+        .find(|l| l.ends_with(C6_ROM_ELF))
+        .and_then(|l| l.split_whitespace().next())
+        .map(str::to_string)
 }
 
 pub fn driver_for(config: &Configuration) -> Box<dyn ConfigurationDriver> {
@@ -421,6 +733,10 @@ fn run_steps(plan: &RunPlan) -> Result<()> {
             .split_first()
             .with_context(|| format!("step {} has no command", i + 1))?;
         let mut cmd = Command::new(program);
+        match &step.cwd {
+            Some(dir) => cmd.current_dir(plan.cwd.join(dir)),
+            None => cmd.current_dir(&plan.cwd),
+        };
         cmd.args(args);
         for (k, v) in &step.env {
             cmd.env(k, v);
@@ -446,9 +762,10 @@ fn shell_quote(s: &str) -> String {
     }
 }
 
-/// Where a driver's scratch output goes by default.
-pub fn default_out_dir(repo_root: &Path) -> PathBuf {
-    repo_root.join("target/validate")
+/// Where a driver's scratch output goes by default, relative to the
+/// repository root.
+pub fn default_out_dir() -> PathBuf {
+    PathBuf::from("target/validate")
 }
 
 #[cfg(test)]
@@ -463,7 +780,18 @@ mod tests {
             port: port.map(str::to_string),
             timeout_secs: 120,
             repo_root: PathBuf::from("/repo"),
-            out_dir: PathBuf::from("/repo/target/validate"),
+            out_dir: default_out_dir(),
+            image: None,
+            identity: Identity::default(),
+        }
+    }
+
+    /// The desk board, as `validate.toml` carries it for `lp-emu:esp32c6:*`.
+    fn desk_identity() -> Identity {
+        Identity {
+            mac: Some("a0:f2:62:87:b4:8c".into()),
+            silicon_rev: Some("v0.2".into()),
+            board: Some("seeed/xiao-esp32-c6".into()),
         }
     }
 
@@ -529,13 +857,109 @@ mod tests {
     }
 
     #[test]
-    fn lp_emu_is_a_seam_not_a_driver() {
-        let req = request("lp-emu:esp32c6:t1", "shader-compile-stress", None);
+    fn lp_emu_builds_the_image_then_runs_the_machine() {
+        let mut req = request("lp-emu:esp32c6:t1", "shader-compile-stress", None);
+        req.identity = desk_identity();
         let plan = LpEmuDriver.plan(&req).unwrap();
-        assert!(plan.steps.is_empty());
-        assert_eq!(plan.availability, Availability::UnavailableUntil("M3"));
-        let err = LpEmuDriver.execute(&plan).unwrap_err().to_string();
-        assert!(err.contains("unavailable until M3"), "{err}");
+        assert_eq!(plan.availability, Availability::Available);
+        assert_eq!(plan.steps.len(), 2, "build, then run");
+        let rendered = plan.render();
+        assert!(
+            rendered
+                .contains("--features esp32c6,test_shader_compile_incremental,spike_uart0_link"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("cargo run -q -p lp-emu-esp32c6 --release"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("--time-grade t1"), "{rendered}");
+        assert!(rendered.contains("--strict-bus"), "{rendered}");
+        assert!(rendered.contains("--uart0 file:"), "{rendered}");
+        assert!(
+            rendered.contains("'[inc-shader-compile] === DONE ==='"),
+            "{rendered}"
+        );
+        // Emulated time carries its unit; the wall clock is only a net.
+        assert!(rendered.contains("--timeout 120s"), "{rendered}");
+        assert!(rendered.contains("--wall-timeout 2400"), "{rendered}");
+        // The identity the configuration was given, not the machine default.
+        assert!(
+            rendered.contains("--efuse-mac a0:f2:62:87:b4:8c"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("--efuse-rev 0.2"), "{rendered}");
+    }
+
+    /// The `boot-idle` payload is the shipped image: several features, no
+    /// `test_*` module, and the spike link on top because there is no host.
+    #[test]
+    fn lp_emu_runs_a_pinned_image_for_the_shipped_image_payload() {
+        let mut req = request("lp-emu:esp32c6:t2", "boot-idle", None);
+        req.identity = desk_identity();
+        req.image = Some(PathBuf::from(
+            "target/emu-ref/d6cfaa205-boot-idle-memfs/fw-esp32c6",
+        ));
+        req.timeout_secs = 6;
+        assert_eq!(
+            req.features(),
+            vec![
+                "esp32c6",
+                "server",
+                "radio",
+                "memory_fs",
+                "spike_uart0_link"
+            ]
+        );
+        let plan = LpEmuDriver.plan(&req).unwrap();
+        assert_eq!(plan.steps.len(), 1, "a pinned image is not built here");
+        let rendered = plan.render();
+        assert!(rendered.contains("build-reference-image.sh"), "{rendered}");
+        assert!(rendered.contains("d6cfaa2051ae"), "{rendered}");
+        assert!(
+            rendered.contains("--elf target/emu-ref/d6cfaa205-boot-idle-memfs/fw-esp32c6"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("--time-grade t2"), "{rendered}");
+        assert!(
+            rendered.contains("'[stack] heartbeat: high-water'"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn a_time_grade_that_is_not_a_rung_on_the_ladder_is_refused() {
+        let req = request("lp-emu:esp32c6:t9", "boot-idle", None);
+        let err = LpEmuDriver.plan(&req).unwrap_err().to_string();
+        assert!(err.contains("t1"), "{err}");
+        assert!(err.contains("t2"), "{err}");
+    }
+
+    #[test]
+    fn a_pinned_image_is_not_a_silicon_run() {
+        let mut req = request(
+            "silicon:esp32c6",
+            "boot-idle",
+            Some("/dev/cu.usbmodem1433201"),
+        );
+        req.image = Some(PathBuf::from("target/emu-ref/x/fw-esp32c6"));
+        let err = SiliconDriver.plan(&req).unwrap_err().to_string();
+        assert!(err.contains("--image"), "{err}");
+    }
+
+    /// `v0.2` is how a chip spells it; `--efuse-rev` wants `0.2`.
+    #[test]
+    fn the_efuse_revision_drops_the_chips_v() {
+        assert_eq!(desk_identity().efuse_rev(), Some("0.2"));
+        assert_eq!(
+            Identity {
+                silicon_rev: Some("0.3".into()),
+                ..Identity::default()
+            }
+            .efuse_rev(),
+            Some("0.3")
+        );
+        assert_eq!(Identity::default().efuse_rev(), None);
     }
 
     #[test]

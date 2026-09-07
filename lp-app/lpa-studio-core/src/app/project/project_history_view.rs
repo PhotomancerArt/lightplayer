@@ -273,11 +273,11 @@ mod tests {
             ),
             (
                 EventKind::RemixedFrom {
-                    source: "examples/small-dome".to_string(),
+                    source: "catalog/small-dome".to_string(),
                     source_version: Some(hash(b"seed")),
                 },
                 Some(1),
-                "remixed from examples/small-dome",
+                "remixed from catalog/small-dome",
             ),
             (
                 EventKind::ForkedFrom {

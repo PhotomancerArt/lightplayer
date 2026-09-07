@@ -53,8 +53,8 @@ pub use app::frame_feed::{CardFeedApply, CardFeedState};
 pub use app::home::{
     CardSheet, CardUiOp, CardUiState, CardVerb, DEFAULT_STRIP_PIXELS, GenerateProjectError,
     GeneratedProject, HOME_NODE_ID, HomeOp, HomePoolEvidence, HomeSimEvidence, ProjectTemplate,
-    SIM_CARD_KEY, UiExampleCard, UiHomeView, UiPackageCard, UiSimCard, UiSimProjectChip, ZipBytes,
-    generate_board_project, template_project_files,
+    SIM_CARD_KEY, UiExampleCard, UiExampleGroup, UiHomeView, UiPackageCard, UiSimCard,
+    UiSimProjectChip, ZipBytes, example_groups, generate_board_project, template_project_files,
 };
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,
@@ -91,10 +91,11 @@ pub use app::preview_host::{
 pub use app::project::{
     AgentEngineStatus, AssetContentFetchOp, AssetEditOp, DirtySummary, EDIT_JOURNAL_CAP,
     EDITOR_META_PATH, EditorMetaFetchOp, EditorMetaFixture, EditorMetaOp, EditorMetaSet,
-    EditorMetaVerb, FROZEN_PREVIEW_PHASE, HISTORY_ROW_CAP, LoadedProjectChoice,
-    MAX_ASSET_BODY_BYTES, ModuleExportOp, ModuleHeroProduct, NodeCardDrawer, NodeCardUiState,
-    NodeClearDebugOp, NodeController, NodeControllerState, NodeCopyOp, NodeCreateOp, NodeImportOp,
-    NodePasteOp, NodeRemoveOp, NodeRevertOp, NodeUiOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp,
+    EditorMetaVerb, FROZEN_PREVIEW_PHASE, HISTORY_ROW_CAP, IMPORT_BUILTIN_SECTION,
+    IMPORT_LIBRARY_SECTION, ImportSource, LoadedProjectChoice, MAX_ASSET_BODY_BYTES,
+    ModuleExportOp, ModuleHeroProduct, NodeCardDrawer, NodeCardUiState, NodeClearDebugOp,
+    NodeController, NodeControllerState, NodeCopyOp, NodeCreateOp, NodeImportOp, NodePasteOp,
+    NodeRemoveOp, NodeRevertOp, NodeUiOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp,
     PatchPulseLamps, PatchPulseLanguage, PatchPulseOp, PatchPulseSpace, PatchPulseSubject,
     PatchVerbFixture, PatchVerbKind, PatchVerbOp, PatchVerbSubject, PatchVerbWindow,
     PendingAssetEdit, PendingEdit, PendingEditOp, PendingEditPhase, PlaylistActivateOp,
@@ -179,4 +180,4 @@ pub use lpa_devices::{
     TerminalLine as DeviceTerminalLine, WireVersion as DeviceWireVersion,
 };
 
-pub const STUDIO_DEMO_PROJECT_ID: &str = "examples/fyeah-sign";
+pub const STUDIO_DEMO_PROJECT_ID: &str = "catalog/fyeah-sign";

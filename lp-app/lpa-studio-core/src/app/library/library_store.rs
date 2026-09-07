@@ -839,7 +839,7 @@ mod tests {
                 "fallback",
                 &demo_files(),
                 PackageProvenance::SeededFrom {
-                    source: "examples/basic".to_string(),
+                    source: "catalog/plasma".to_string(),
                 },
                 2.0,
             )

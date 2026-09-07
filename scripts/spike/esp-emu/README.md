@@ -1,5 +1,14 @@
 # esp-emu spike scripts
 
+> **What has been promoted lives in `scripts/emu/`.** `build-reference-image.sh`
+> (the pinned firmware tree the committed C6 transcripts came from),
+> `pac-regnames.py` (the generated register-name tables) and the bench
+> instruments (`board-port.py`, `tty-capture.py`, `flash-image.sh`, the
+> `uart-bridge-*` pair, `reset-and-capture.py`) are there, with `just
+> lint-emu-regnames` and `just test-emu-c6` over them. `mask-transcript.sh`'s
+> rules are now code, in `lp-emu/lp-emu-validate/src/mask.rs`, where each
+> carries its field class and the reason it is ignored.
+>
 > **`desk-espflash-step.sh` is no longer spike-only.** The validation runner
 > (`lp-cli validate run --config silicon:…`) shells out to it rather than
 > re-deriving the port discipline, so its foreground-`script(1)`,
@@ -34,7 +43,7 @@ Typical run (from the worktree root, image already merged with
 ```bash
 export SCRATCH=/path/to/scratch WORKTREE=$PWD
 PORT=5561 RUST_LOG=info scripts/spike/esp-emu/run-emu-tcp-walk.sh merged.bin walk 120 \
-    -- upload examples/basic 'serial:TCP' --wait-timeout 60
+    -- upload projects/test/basic 'serial:TCP' --wait-timeout 60
 ```
 
 The firmware image must carry `--features spike_uart0_link` (fw-esp32c6): the
@@ -46,7 +55,7 @@ through the same proxy —
 ```bash
 export SCRATCH=/path/to/scratch WORKTREE=$PWD PORT_DEV=/dev/cu.usbmodem1433201
 scripts/spike/esp-emu/run-desk-tcp-walk.sh meteor 40 --flash merged-default.bin \
-    -- upload examples/meteor 'serial:TCP' --wait-timeout 90
+    -- upload catalog/patterns/meteor 'serial:TCP' --wait-timeout 90
 diff <(scripts/spike/esp-emu/mask-transcript.sh $SCRATCH/walks/det1.uart.bin) \
      <(scripts/spike/esp-emu/mask-transcript.sh $SCRATCH/desk/basic.uart.bin)
 ```

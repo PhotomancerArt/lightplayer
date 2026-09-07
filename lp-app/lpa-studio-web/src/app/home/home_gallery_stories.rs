@@ -11,6 +11,7 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{DeviceCardFeedView, FeedLiveness};
 use lpa_studio_web_story_macros::story;
+use lpc_model::ProjectKind;
 
 use lpa_studio_core::app::library::PackageHealth;
 use lpa_studio_core::{
@@ -39,12 +40,26 @@ use crate::app::home::{DevicesPage, ExplorePage, ProjectsPage};
 /// A fixed "now" so relative times in baselines never drift.
 const STORY_NOW: f64 = 1_800_000_000.0;
 
+/// One of each kind, so the grouped surfaces show both sections.
 fn examples() -> Vec<UiExampleCard> {
-    vec![UiExampleCard {
-        id: "examples/basic".to_string(),
-        name: "Basic".to_string(),
-        kind: "Module".to_string(),
-    }]
+    vec![
+        UiExampleCard {
+            id: "catalog/fyeah-sign".to_string(),
+            name: "Fyeah Sign".to_string(),
+            kind: ProjectKind::General,
+            description: "A porch sign on the full bus: clock, button and radio share one trigger."
+                .to_string(),
+        },
+        UiExampleCard {
+            id: "catalog/plasma".to_string(),
+            name: "Plasma".to_string(),
+            kind: ProjectKind::Pattern {
+                exports: vec!["effect".to_string()],
+            },
+            description: "The smallest non-empty panel: one plasma shader with three bound knobs."
+                .to_string(),
+        },
+    ]
 }
 
 fn packages() -> Vec<UiPackageCard> {
@@ -264,7 +279,7 @@ fn live_thumb_states() -> Element {
             }
             article { class: "tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
                 CardThumb {
-                    seed: "examples/basic".to_string(),
+                    seed: "catalog/plasma".to_string(),
                     label: "failed".to_string(),
                     static_badge: Some(ThumbPreviewBadge::Error {
                         reason: "deploy: shader compile failed".to_string(),
@@ -1714,21 +1729,29 @@ fn pick_popover_library() -> Vec<UiPackageCard> {
         .collect()
 }
 
-/// Six bundled examples, so the Examples tab is a grid rather than a row.
+/// Six bundled examples, three of each kind, so the Examples tab shows
+/// both of its sections as grids rather than rows.
 fn pick_popover_examples() -> Vec<UiExampleCard> {
     [
-        "Basic",
-        "Meteor",
-        "Plasma",
-        "Rainbow",
-        "Logo sign",
-        "Candle",
+        ("Logo sign", false),
+        ("Meteor", true),
+        ("Porch sign", false),
+        ("Plasma", true),
+        ("Zook dome", false),
+        ("Candle", true),
     ]
     .into_iter()
-    .map(|name| UiExampleCard {
-        id: format!("examples/{}", name.to_lowercase().replace(' ', "-")),
+    .map(|(name, pattern)| UiExampleCard {
+        id: format!("catalog/{}", name.to_lowercase().replace(' ', "-")),
         name: name.to_string(),
-        kind: "Module".to_string(),
+        kind: if pattern {
+            ProjectKind::Pattern {
+                exports: vec!["effect".to_string()],
+            }
+        } else {
+            ProjectKind::General
+        },
+        description: format!("{name}, in one sentence."),
     })
     .collect()
 }

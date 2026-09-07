@@ -37,13 +37,13 @@
 # no `[OUT]` lines at all and this walk would report "nothing rendered".
 #
 # The gate is the last section: the device's `[OUT] dump` hex must equal the
-# oracle's `[ORACLE] rgb` hex, byte for byte. `examples/shader-oracle` is
+# oracle's `[ORACLE] rgb` hex, byte for byte. `projects/test/shader-oracle` is
 # clock-free precisely so that comparison needs no time synchronisation.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 LOG_DIR="${TMPDIR:-/tmp}"
-PROJECT="${PROJECT:-examples/shader-oracle}"
+PROJECT="${PROJECT:-projects/test/shader-oracle}"
 # The `[OUT]` transcript this walk parses exists only under this feature; see
 # lp-fw/fw-esp32s3/src/output/rmt/frame_dump.rs and its byte-for-byte port at
 # lp-fw/fw-esp32v3/src/output/rmt/frame_dump.rs — the two print identical line
@@ -76,7 +76,7 @@ done
 #                   classic) `--monitor-baud 921600`; this script must not
 #                   duplicate any of them.
 #   ENDPOINT_LABEL  the board label the oracle project's output node must name.
-#                   `examples/shader-oracle` is authored for the XIAO S3's
+#                   `projects/test/shader-oracle` is authored for the XIAO S3's
 #                   `D10`; the DOM-Z-102 has no such pad and names its four
 #                   data channels IO18/IO16/IO14/IO2. An output node whose
 #                   endpoint the board does not have never opens — the device
