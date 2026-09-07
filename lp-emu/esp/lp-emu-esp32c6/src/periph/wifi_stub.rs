@@ -81,7 +81,12 @@ pub const OVERRIDES: &[(u32, u32, u32, &str)] = &[
     // bne a5,a4(=7)` — until the 3-bit state field at bits 14:16 reads 7.
     // Blob spins here; esp-emu evidently satisfies it; value chosen so the
     // poll exits (the field reads 7).
-    (0x0814, 0x7 << 14, 0x7 << 14, "ram_pwdet_tone_start state field == 7"),
+    (
+        0x0814,
+        0x7 << 14,
+        0x7 << 14,
+        "ram_pwdet_tone_start state field == 7",
+    ),
     // `SPIN WIFI_MAC+0x0cc mac = 0x25824e50 x10000` from
     // `ram_set_chan_freq_sw_start` (`0x4221a72a`, 30.3 ms): after the ROM's
     // `freq_chan_en_sw` and a 10 µs delay it loops `lw a5,0xcc(a4); andi
@@ -89,7 +94,12 @@ pub const OVERRIDES: &[(u32, u32, u32, &str)] = &[
     // lock flag (`freq_reg_init` wrote the register with bit 8 clear). Blob
     // spins here; esp-emu evidently satisfies it; value chosen so the poll
     // exits.
-    (0x00cc, 1 << 8, 1 << 8, "ram_set_chan_freq_sw_start lock flag"),
+    (
+        0x00cc,
+        1 << 8,
+        1 << 8,
+        "ram_set_chan_freq_sw_start lock flag",
+    ),
     // `SPIN WIFI_MAC+0x4a0 mac = 0x00000000 x10000` from the ROM's
     // `rom_iq_est_enable` (`0x40005dba`, 30.3 ms): it sets `+0x470` bit 26,
     // programs `+0x474` (bit 20, a length field, then bits 0 and 1 as
@@ -324,7 +334,11 @@ mod tests {
         assert_eq!(c.reg_name(0x0000), Some("cmd_mem"));
         assert_eq!(c.reg_name(0x0400), None);
         sb.write(&mut c, 0x0000, 0x0006_0267);
-        assert_eq!(sb.read(&mut c, 0x0000), 0x0006_0267, "a command word is remembered");
+        assert_eq!(
+            sb.read(&mut c, 0x0000),
+            0x0006_0267,
+            "a command word is remembered"
+        );
 
         let mut p = WifiStub::pwr();
         assert_eq!(p.name(), "WIFI_PWR");

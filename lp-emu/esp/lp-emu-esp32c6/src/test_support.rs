@@ -72,6 +72,16 @@ impl FwImage {
         default_features: false,
     };
 
+    /// The shipped feature set minus flash: `esp32c6,server,radio,memory_fs`
+    /// (the same set `--features memory_fs` on the defaults builds). The P6
+    /// host-absent gate image (director note 2): the flash-backed shipped
+    /// image spins on `SPI1.cmd` until M4, so the wfi/tick assertions run
+    /// on this one.
+    pub const SHIPPED_NO_FLASH: FwImage = FwImage {
+        features: &["esp32c6", "server", "radio", "memory_fs"],
+        default_features: false,
+    };
+
     pub fn slug(&self) -> String {
         slug(self.features)
     }
@@ -216,6 +226,99 @@ pub fn skip_notice(test: &str, reason: &str) {
     println!("SKIP {test}: {reason}");
 }
 
+/// The firmware commit the committed C6 transcripts and the spike report's
+/// figures came from (`scripts/emu/build-reference-image.sh`).
+pub const REFERENCE_COMMIT: &str = "d6cfaa205";
+
+/// One of the reference images the script builds: `<commit>` plus the
+/// `spike_uart0_link` feature applied as a dirty tree, with these features.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReferenceImage {
+    /// The script's slug (`target/emu-ref/<commit>-<slug>/fw-esp32c6`).
+    pub slug: &'static str,
+    pub features: &'static str,
+}
+
+impl ReferenceImage {
+    /// The harness the silicon transcript ran: G6-1's byte-equal gate.
+    pub const HARNESS: ReferenceImage = ReferenceImage {
+        slug: "harness",
+        features: "test_shader_compile_incremental,esp32c6,spike_uart0_link",
+    };
+    /// The spike image (§5.1): flash-backed, spins on `SPI1.cmd` until M4.
+    pub const BOOT_IDLE: ReferenceImage = ReferenceImage {
+        slug: "boot-idle",
+        features: "esp32c6,server,radio,spike_uart0_link",
+    };
+    /// The §5.4 diagnostic variant: G6-2's gate image in M3.
+    pub const BOOT_IDLE_MEMFS: ReferenceImage = ReferenceImage {
+        slug: "boot-idle-memfs",
+        features: "esp32c6,server,radio,spike_uart0_link,memory_fs",
+    };
+
+    /// `LP_EMU_C6_REF_HARNESS`, `LP_EMU_C6_REF_BOOT_IDLE_MEMFS`, …
+    pub fn env_var(&self) -> String {
+        format!(
+            "LP_EMU_C6_REF_{}",
+            self.slug.to_uppercase().replace('-', "_")
+        )
+    }
+
+    pub fn conventional_path(&self, root: &Path) -> PathBuf {
+        root.join("target")
+            .join("emu-ref")
+            .join(format!("{REFERENCE_COMMIT}-{}", self.slug))
+            .join("fw-esp32c6")
+    }
+}
+
+/// A reference image's ELF, or the reason there is none — the same order as
+/// [`fw_esp32c6_image`]: the env var, then the script's output path, then
+/// (only with `LP_EMU_BUILD_FW=1`) the script itself, which adds a detached
+/// worktree at the reference commit under `target/emu-ref/` and builds
+/// there. Never runs the script from a bare `cargo test`.
+pub fn reference_image(image: &ReferenceImage) -> Result<PathBuf, String> {
+    let var = image.env_var();
+    if let Ok(path) = std::env::var(&var) {
+        let path = PathBuf::from(path);
+        if path.is_file() {
+            return Ok(path);
+        }
+        return Err(format!(
+            "{var} points at {}, which is not a file",
+            path.display()
+        ));
+    }
+    let root = workspace_root().ok_or("could not find the workspace root")?;
+    let path = image.conventional_path(&root);
+    if path.is_file() {
+        return Ok(path);
+    }
+    if std::env::var("LP_EMU_BUILD_FW").as_deref() != Ok("1") {
+        return Err(format!(
+            "no reference image `{}` at {}. Set {var} to one, or LP_EMU_BUILD_FW=1 to build it \
+             with scripts/emu/build-reference-image.sh (`just test-emu-c6`).",
+            image.slug,
+            path.display()
+        ));
+    }
+    let status = Command::new(root.join("scripts/emu/build-reference-image.sh"))
+        .arg(image.features)
+        .current_dir(&root)
+        .status()
+        .map_err(|e| format!("running build-reference-image.sh: {e}"))?;
+    if !status.success() {
+        return Err(format!(
+            "build-reference-image.sh {} failed: {status}",
+            image.features
+        ));
+    }
+    if !path.is_file() {
+        return Err(format!("the script ran but {} is missing", path.display()));
+    }
+    Ok(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -228,6 +331,14 @@ mod tests {
         assert_eq!(FwImage::NO_RADIO.slug(), "ESP32C6_SERVER_MEMORY_FS");
         assert_eq!(FwImage::NO_RADIO_FLASH.slug(), "ESP32C6_SERVER");
         assert_eq!(FwImage::SHIPPED.slug(), "ESP32C6_SERVER_RADIO");
+        assert_eq!(
+            FwImage::SHIPPED_NO_FLASH.slug(),
+            "ESP32C6_SERVER_RADIO_MEMORY_FS"
+        );
+        assert_eq!(
+            ReferenceImage::BOOT_IDLE_MEMFS.env_var(),
+            "LP_EMU_C6_REF_BOOT_IDLE_MEMFS"
+        );
     }
 
     #[test]
