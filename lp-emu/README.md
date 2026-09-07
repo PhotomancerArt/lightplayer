@@ -241,8 +241,34 @@ shipped rungs, on a desk at load ~190, read 25.5 M -> 75.8 M (2.97x) with the
 either side — which is the bar every rung of this work is held to (PD5, ADR
 2026-09-06: a run is a pure function of the instruction stream).
 
-Evidence, and the rungs not yet climbed (MMIO fast path, poll-loop skip, block
-cache, the wasm/phone rig): the planning workspace's
+**M2's MMIO fast path** (last-hit cache in `mmio_index`, a two-entry
+data-region cache, and a precomputed range compare for the single store
+watchpoint esp-hal keeps on the stack guard) landed on top: a same-window A/B
+against M1's binary, desk load ~65-83 both sides, read the harness (the
+longer-running, primary benchmark) up 6.5-11.8% (83.3 M -> 88.7 M at `t2`,
+85.6 M -> 95.7 M at `t1`); `boot-idle-memfs` — a 0.5 s run, too short for the
+load noise at this desk to average out — moved within +-8% either side of
+even. Identity: `stopped after`, UART and a 20 ms `--trace` byte-identical to
+M1's binary on both images, both grades (trace md5 `44015adf...`, unchanged
+from M1). The ABI-slimming item (`Box` the register dump in `EmulatorError`,
+`Option<Box<InstLog>>` on `ExecutionResult`) was implemented and measured
+against the MMIO-only build: the harness read 0 to -5.9% (a same-load-window
+regression, not the plan's required >=3% gain), so it was reverted rather
+than kept — smaller `Result<T, E>` types did not translate into a faster
+interpreter loop here, at least not enough to clear load noise.
+
+**PGO** is `just bench-emu-c6-pgo` / `scripts/emu/pgo-c6.sh`: an instrumented
+build, one training run of each pinned reference image, `cargo profdata --
+merge`, an optimized rebuild, then the probe on the result — each phase in
+its own `target/emu-pgo/*` dir so the RUSTFLAGS involved never invalidate the
+plain release build. Opt-in (D4): never a default build or CI step, and the
+target is met without it. The overnight research measured ≈1.45x on top of
+the opt-3-plus-patch tree (103.5 M -> 149 M instr/s); needs
+`rustup component add llvm-tools-preview` and `cargo install cargo-binutils`,
+which the script checks for first.
+
+Evidence, and the rungs not yet climbed (poll-loop skip, block cache, the
+wasm/phone rig): the planning workspace's
 `2026-09-06-1001-esp-emulator/2026-09-07-speed-ladder-research.md` and its
 `speed-research/` directory, executed by the `2026-09-07-0827-emu-speed-ladder`
 plan.
