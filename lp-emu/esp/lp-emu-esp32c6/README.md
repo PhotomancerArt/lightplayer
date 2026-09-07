@@ -497,6 +497,14 @@ build and 45 s of emulation. The replays alone
 (`cargo test -p lp-emu-validate --test m3_replays`) need no firmware at all
 and already run in `cargo test`, so the four gates cost CI nothing.
 
+`just bench-emu-c6` is the speed side of the same two images: both reference
+images at both grades, reported as user seconds, instructions/second and a
+real-time ratio, with the load average and a `cmp` of the UART0 bytes against
+the previous run. It builds `--release` deliberately — that is the profile
+users get, and the root `Cargo.toml` lifts this crate to `opt-level = 3`
+there (`lp-emu/README.md`, "Speed"). No CI job runs it and nothing gates on
+what it prints.
+
 ## Provenance
 
 - The mask ROM is Apache-2.0, from `espressif/esp-rom-elfs` release
