@@ -7,9 +7,8 @@ use crate::app::library::{LibraryError, LibraryStore, PackageSummary};
 pub enum PlaceKind {
     /// The local library — the source of truth.
     Library,
-    /// An ephemeral simulator runtime (a device with no memory — D19).
-    SimRuntime,
-    /// A physical device (serial today, networked later).
+    /// A device: silicon on a wire, or a sim this tab runs (PD9 — one
+    /// kind, however it is backed).
     Device,
 }
 

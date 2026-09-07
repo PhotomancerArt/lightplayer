@@ -81,7 +81,7 @@ pub use studio_view_channel::{
 };
 pub use ui_console_view::UiConsoleView;
 pub use ui_studio_view::{
-    UiChromeSessionControl, UiChromeSessionKind, UiChromeSessionStatus, UiLensCard, UiLensRuntime,
+    UiChromeSessionControl, UiChromeSessionStatus, UiLensCard, UiLensRuntime,
     UiStudioView,
 };
 pub use unsaved_changes::has_unsaved_work;

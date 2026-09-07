@@ -194,15 +194,7 @@ fn face_status_glyphs(card: &UiPackageCard, blocked: bool) -> Vec<CardStatusGlyp
             words: "This project can't be opened by this Studio.".to_string(),
         }];
     }
-    let mut glyphs = Vec::new();
-    if card.running_in_sim {
-        glyphs.push(CardStatusGlyph {
-            icon: StudioIconName::Simulator,
-            tone: GlyphTone::Live,
-            words: "Running in simulator".to_string(),
-        });
-    }
-    glyphs
+    Vec::new()
 }
 
 /// The card menu — the redesigned card's DEPTH surface ("the second
@@ -607,20 +599,17 @@ struct LivePresenceLine {
 
 const LIVE_LINE_GOOD: &str = "tw:m-0 tw:truncate tw:text-xs tw:text-status-good-foreground";
 
-/// The card's runtime-presence line (D28): "Running in simulator" while
-/// the sim runs this project's head — load-as-push always runs the head,
-/// so the sim is current (green).
+/// The card's runtime-presence line (D28).
 ///
-/// ⚠️ The DEVICE lines (the D24 connected line and the "Live in 2 places"
-/// aggregate) went with M2 of the device-model rebuild, along with the
-/// `connected_device` connection the card carried. The rebuilt device
-/// model re-adds them.
-fn live_presence_line(card: &UiPackageCard) -> Option<LivePresenceLine> {
-    card.running_in_sim.then(|| LivePresenceLine {
-        text: "Running in simulator".to_string(),
-        class: LIVE_LINE_GOOD,
-        title: None,
-    })
+/// ⚠️ Nothing produces one right now. The sim arm read
+/// `UiPackageCard::running_in_sim`, whose source — the runtime pool's own
+/// record of what the sim ran — retired with the sim session (PD9): a sim
+/// is a device, and the device pairing is the registry `association` a
+/// card Push banks, which a lens open does not write. The DEVICE lines
+/// (the D24 connected line and the "Live in 2 places" aggregate) went with
+/// M2 of the device-model rebuild. Both come back together.
+fn live_presence_line(_card: &UiPackageCard) -> Option<LivePresenceLine> {
+    None
 }
 
 #[cfg(target_arch = "wasm32")]

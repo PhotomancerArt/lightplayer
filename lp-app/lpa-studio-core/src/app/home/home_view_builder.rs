@@ -1,11 +1,11 @@
-//! Building [`UiHomeView`] from hydrated library inputs and the runtime
-//! pool's evidence.
+//! Building [`UiHomeView`] from hydrated library inputs.
 //!
 //! ⚠️ The DEVICE roster (the D27 last-seen-sorted list, the live/remembered
 //! merge, `derive_roster_card_state`) was deleted in M2 of the device-model
 //! rebuild; the rebuilt model owns that projection. What remains is the
-//! library half plus the live SIM card (D36) and the D28 sim pairing —
-//! a project the sim runs wears "Running in simulator" on its own card.
+//! the library half. The device half is the model's own projection, joined
+//! in by `StudioController::home_view` — every runtime is a device (PD9),
+//! so nothing about a sim is built here.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -16,14 +16,10 @@ use lpfs::LpFs;
 use crate::UiIssue;
 use crate::app::library::{LibraryStore, PackageMeta, PackageProvenance};
 use crate::app::places::{DeviceRegistry, RegisteredDevice};
-use crate::app::roster::SimCardState;
-
-use super::card_ui_state::CardUiState;
 use super::embedded_example::embedded_examples;
 use super::ui_example_card::UiExampleCard;
 use super::ui_home_view::UiHomeView;
 use super::ui_package_card::UiPackageCard;
-use super::ui_sim_card::{UiSimCard, UiSimProjectChip};
 
 /// The gallery's hydrated library data: built asynchronously from a host
 /// catalog snapshot (`StudioController::refresh_library`) and cached —
@@ -42,42 +38,6 @@ pub struct HomeInputs {
     /// Listing failed — the gallery surfaces this instead of an empty
     /// library.
     pub issue: Option<UiIssue>,
-}
-
-/// Everything the runtime pool contributes to the gallery: the SIM
-/// session's evidence while that session lives.
-#[derive(Clone, Debug, Default)]
-pub struct HomePoolEvidence {
-    /// The live SIM session's evidence — present exactly while the
-    /// session lives (D36: the sim card exists only while the session
-    /// does; stop-sim removes both together).
-    pub sim: Option<HomeSimEvidence>,
-}
-
-/// What the live SIM session contributes to its card (D36). The session's
-/// existence IS the live status — there is no link state, no connect
-/// ceremony, no registry entry (the sim is not a device, D22).
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct HomeSimEvidence {
-    /// The project loaded on the sim (uid + display name), when one is —
-    /// the card's chip and the project card's "Running in simulator"
-    /// pairing key.
-    pub project: Option<UiSimProjectChip>,
-    /// The ▶ tab's live frame — the SIM ENGINE'S published output, read
-    /// through the session's card feed (G1 ruling 3: the sim card
-    /// never re-simulates; it shows what the simulated board actually
-    /// output).
-    pub frame: Option<crate::UiControlProductPreview>,
-    /// Seconds since [`Self::frame`] arrived, stamped at build time.
-    pub frame_age_secs: Option<f64>,
-    /// The sim engine's reported fps, when known.
-    pub fps: Option<f32>,
-    /// The board the sim claims to be (vision D4), inherited from the
-    /// project it runs — `vendor/product`, the registry's vocabulary.
-    /// `None` = no board known, the ordinary default.
-    pub board_id: Option<String>,
-    /// The session's console tail (D42), oldest first.
-    pub console_tail: Vec<crate::UiLogEntry>,
 }
 
 /// Hydrate [`HomeInputs`] from a library snapshot fs. `open_elsewhere`
@@ -136,7 +96,6 @@ pub fn build_home_view(
     inputs: Option<&HomeInputs>,
     opening: Option<String>,
     issue: Option<UiIssue>,
-    pool: &HomePoolEvidence,
 ) -> UiHomeView {
     let examples = dedupe_by_key(
         embedded_examples()
@@ -146,11 +105,8 @@ pub fn build_home_view(
         |card| card.id.clone(),
         "example",
     );
-    let sim = pool.sim.as_ref().map(sim_card);
-
     let Some(inputs) = inputs else {
         return UiHomeView {
-            sim,
             projects: Vec::new(),
             examples,
             devices: crate::DeviceRosterView::default(),
@@ -160,18 +116,12 @@ pub fn build_home_view(
         };
     };
 
-    let mut projects = inputs.projects.clone();
-    // The D28 pairing's sim arm: the loaded project's card wears the
-    // "Running in simulator" indication.
-    if let Some(chip) = pool.sim.as_ref().and_then(|sim| sim.project.as_ref())
-        && let Some(card) = projects.iter_mut().find(|card| card.uid == chip.uid)
-    {
-        card.running_in_sim = true;
-    }
-
     UiHomeView {
-        sim,
-        projects: dedupe_by_key(projects, |card| card.uid.clone(), "project"),
+        projects: dedupe_by_key(
+            inputs.projects.clone(),
+            |card| card.uid.clone(),
+            "project",
+        ),
         examples,
         // Filled by `StudioController::home_view` from the roster: the
         // builder reads the LIBRARY, and the device model is not in it.
@@ -199,36 +149,6 @@ fn dedupe_by_key<T>(cards: Vec<T>, key: impl Fn(&T) -> String, what: &'static st
             fresh
         })
         .collect()
-}
-
-/// Collapse the sim card's state to the header control's dots (D16).
-pub(crate) fn chip_status(state: SimCardState) -> crate::UiChromeSessionStatus {
-    match state {
-        SimCardState::Running => crate::UiChromeSessionStatus::Run,
-        SimCardState::Empty => crate::UiChromeSessionStatus::Empty,
-    }
-}
-
-/// The live sim card (D36). The session's existence is the status —
-/// Running when a project is loaded, "Connected — nothing loaded"
-/// otherwise; no uid, no transport, no firmware provenance (the sim is not
-/// a device, D22).
-pub(crate) fn sim_card(sim: &HomeSimEvidence) -> UiSimCard {
-    UiSimCard {
-        state: if sim.project.is_some() {
-            SimCardState::Running
-        } else {
-            SimCardState::Empty
-        },
-        project: sim.project.clone(),
-        // D4: the sim's inherited board — the one card that carries this
-        board_id: sim.board_id.clone(),
-        console_tail: sim.console_tail.clone(),
-        frame_preview: sim.frame.clone(),
-        frame_age_secs: sim.frame_age_secs,
-        frame_fps: sim.fps,
-        ui: CardUiState::default(),
-    }
 }
 
 /// The display label a pattern project's kind reads as
@@ -339,7 +259,6 @@ fn package_card(
         provenance: meta.and_then(|meta| provenance_line(store, &meta)),
         on_device,
         open_elsewhere: false, // stamped by the hydration pass
-        running_in_sim: false, // stamped by the D28 sim arm at view build
         target,
         health: summary.health,
     })
@@ -366,7 +285,6 @@ fn degraded_package_card(summary: crate::app::library::PackageSummary) -> UiPack
         provenance: None,
         on_device: None,
         open_elsewhere: false,
-        running_in_sim: false,
         // A degraded package's manifest may be unreadable; no target claim.
         target: None,
         health: summary.health,
@@ -431,17 +349,7 @@ mod tests {
 
     fn view_of(store: &LibraryStore) -> UiHomeView {
         let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
-        build_home_view(Some(&inputs), None, None, &HomePoolEvidence::default())
-    }
-
-    /// A pool carrying only the live sim session's evidence.
-    fn sim_pool(project: Option<UiSimProjectChip>) -> HomePoolEvidence {
-        HomePoolEvidence {
-            sim: Some(HomeSimEvidence {
-                project,
-                ..HomeSimEvidence::default()
-            }),
-        }
+        build_home_view(Some(&inputs), None, None)
     }
 
     #[test]
@@ -488,7 +396,7 @@ mod tests {
 
     #[test]
     fn no_library_still_lists_examples() {
-        let view = build_home_view(None, None, None, &HomePoolEvidence::default());
+        let view = build_home_view(None, None, None);
         assert!(!view.library_available);
         assert!(view.projects.is_empty());
         assert!(view.sim.is_none());
@@ -612,12 +520,7 @@ mod tests {
 
     #[test]
     fn opening_and_issue_pass_through() {
-        let view = build_home_view(
-            None,
-            Some("prjx".to_string()),
-            Some(UiIssue::new("boom")),
-            &HomePoolEvidence::default(),
-        );
+        let view = build_home_view(None, Some("prjx".to_string()), Some(UiIssue::new("boom")));
         assert_eq!(view.opening.as_deref(), Some("prjx"));
         assert_eq!(view.issue.as_ref().unwrap().message, "boom");
         assert_eq!(
@@ -633,63 +536,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn sim_session_yields_the_live_sim_card_and_stamps_the_project() {
-        // D36 + the D28 sim arm: a live sim session running a known
-        // project = a Running sim card wearing the project chip, AND the
-        // project card wearing "Running in simulator".
-        let store = store();
-        let summary = store.create("Porch", 1.0).unwrap();
-        let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
-
-        let pool = sim_pool(Some(UiSimProjectChip {
-            uid: summary.uid.to_string(),
-            name: summary.slug.clone(),
-        }));
-        let view = build_home_view(Some(&inputs), None, None, &pool);
-
-        let card = view.sim.as_ref().expect("the live sim card");
-        assert_eq!(card.render_key(), "runtime-sim");
-        assert_eq!(card.state, SimCardState::Running);
-        let chip = card.project.as_ref().expect("loaded project chip");
-        assert_eq!(chip.name, summary.slug);
-
-        let project = view
-            .projects
-            .iter()
-            .find(|card| card.uid == summary.uid.to_string())
-            .unwrap();
-        assert!(project.running_in_sim, "the sim arm stamps the project");
-    }
-
-    #[test]
-    fn sim_with_nothing_loaded_reads_connected_empty() {
-        let store = store();
-        store.create("Porch", 1.0).unwrap();
-        let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
-
-        let view = build_home_view(Some(&inputs), None, None, &sim_pool(None));
-        let card = view.sim.as_ref().expect("the live sim card");
-        assert_eq!(card.state, SimCardState::Empty);
-        assert!(card.project.is_none());
-        assert!(
-            view.projects.iter().all(|card| !card.running_in_sim),
-            "no loaded project, no sim stamp"
-        );
-    }
-
-    /// The header control's dots collapse the sim's two rows honestly:
-    /// running reads Run, empty reads Empty — nothing ever reads Attention,
-    /// because neither sim state is a problem.
-    #[test]
-    fn the_header_dot_follows_the_sim_state() {
-        assert_eq!(
-            chip_status(SimCardState::Running),
-            crate::UiChromeSessionStatus::Run
-        );
-        assert_eq!(
-            chip_status(SimCardState::Empty),
-            crate::UiChromeSessionStatus::Empty
-        );
-    }
 }

@@ -18,7 +18,7 @@
 //!   affordance = the primary affordance; Advisory/Danger never roll up).
 //!
 //! The SIM builder lives with its evidence in
-//! [`crate::app::roster::sim_rich_object`]; the device builder went with
+//! the retired sim card's builder; the device builder went with
 //! M2 of the device-model rebuild.
 
 pub mod rich_object_view;

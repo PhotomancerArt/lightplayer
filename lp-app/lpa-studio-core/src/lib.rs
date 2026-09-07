@@ -58,10 +58,9 @@ pub use app::devices::{
 pub use app::docs_host::DocsSimHost;
 pub use app::frame_feed::{CardFeedApply, CardFeedState};
 pub use app::home::{
-    CardSheet, CardUiOp, CardUiState, CardVerb, DEFAULT_STRIP_PIXELS, GenerateProjectError,
-    GeneratedProject, HOME_NODE_ID, HomeOp, HomePoolEvidence, HomeSimEvidence, ProjectTemplate,
-    SIM_CARD_KEY, UiExampleCard, UiExampleGroup, UiHomeView, UiPackageCard, UiSimCard,
-    UiSimProjectChip, ZipBytes, example_groups, generate_board_project, template_project_files,
+    DEFAULT_STRIP_PIXELS, GenerateProjectError, GeneratedProject, HOME_NODE_ID, HomeOp,
+    ProjectTemplate, UiExampleCard, UiExampleGroup, UiHomeView, UiPackageCard, ZipBytes,
+    example_groups, generate_board_project, template_project_files,
 };
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,
@@ -126,13 +125,9 @@ pub use app::rich_object::{
     RichChip, RichLine, RichObjectView, RichRollup, RichSection, RichWeight,
 };
 pub use app::roster::board_display_name;
-pub use app::roster::{
-    CardTab, CardTabView, SimCardState, SimDetailAffordance, SimRichInput, card_tabs,
-    sim_rich_object,
-};
 pub use app::runtime_pool::{
-    DeviceLensAttachment, RuntimeId, RuntimeKind, RuntimeOp, RuntimePayload, RuntimePool,
-    RuntimeSession, SIM_SESSION_CAPACITY, SimAttachment, SimLink, SimLoadedProject,
+    DeviceLensAttachment, LinkTransport, RuntimeId, RuntimeOp, RuntimePayload, RuntimePool,
+    RuntimeSession, SESSION_CAPACITY,
 };
 pub use app::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerFailureKind, ServerSnapshot, ServerState,
@@ -155,7 +150,7 @@ pub use app::studio::{
     PASSIVE_PREEMPTIONS_BEFORE_PROMOTION, RefreshCadence, SIMULATOR_REFRESH_INTERVAL,
     STUDIO_LOG_SINK, StudioActor, StudioActorOptions, StudioCommand, StudioController,
     StudioHandle, StudioLogSink, StudioSnapshot, StudioViewReceiver, StudioViewSender,
-    UiChromeSessionControl, UiChromeSessionKind, UiChromeSessionStatus, UiConsoleView, UiError,
+    UiChromeSessionControl, UiChromeSessionStatus, UiConsoleView, UiError,
     UiLensCard, UiLensRuntime, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource,
     UiNotice, UiNoticeLevel, UiResult, UxActivityTarget, UxUpdate, UxUpdateSink,
     VERDICT_CHASE_INTERVAL, VERDICT_CHASE_TICKS, ViewPublisher, has_unsaved_work,

@@ -340,9 +340,6 @@ where
             let standing = self.passive_standing();
             let refresh_preempted = self.run_refresh_tick(standing).await;
             self.controller.run_due_heartbeats();
-            // Sim crash detection + guarded auto-reboot rides the same
-            // cadence — a no-op while the sim worker is healthy.
-            self.controller.run_due_sim_crash_recovery().await;
             // LAST in the tick: the card frame feed is a picture, and
             // nothing structural should wait behind one. A no-op unless a
             // card is showing its ▶ tab on a running runtime.
@@ -356,6 +353,12 @@ where
 
         self.emit_if_changed();
         self.publish_refresh_delay();
+        if plan.shutdown {
+            // A running sim is a worker, and a worker nobody terminates
+            // outlives the page that started it. The LAST thing this loop
+            // does is stop the ones this tab (or this docs host) started.
+            self.controller.power_off_sims();
+        }
         !plan.shutdown
     }
 
@@ -529,19 +532,9 @@ where
     async fn run_card_feed_tick(&mut self, standing: PassiveStanding) -> bool {
         let cancel = SharedCancel::new();
         cancel.reset();
-        let feeds = async {
-            let sim = self
-                .controller
-                .run_due_card_feeds(self.make_timer.clone(), &cancel)
-                .await;
-            // The roster boards' feeds run in the same lane, after the
-            // sim's, under the same cancel.
-            let devices = self
-                .controller
-                .run_due_device_feeds(self.make_timer.clone(), &cancel)
-                .await;
-            sim || devices
-        };
+        let feeds = self
+            .controller
+            .run_due_device_feeds(self.make_timer.clone(), &cancel);
         let watch = watch_for_preempt(&self.commands, &cancel, standing);
         pull_while_watching(feeds, watch).await
     }
