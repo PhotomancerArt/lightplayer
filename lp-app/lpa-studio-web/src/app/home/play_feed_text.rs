@@ -3,16 +3,19 @@
 //! they say them from one place.
 
 /// A frame age in units that read naturally (the unit-awareness principle):
-/// seconds while seconds are meaningful, then minutes, then hours. A stale
-/// pill counting "412 s" is arithmetic homework.
+/// seconds while seconds are meaningful, then minutes, then hours, then
+/// days — a remembered board's persisted picture can be a week old. A
+/// stale pill counting "412 s" is arithmetic homework.
 pub(crate) fn frame_age_label(age_secs: f64) -> String {
     let age = age_secs.max(0.0);
     if age < 90.0 {
         format!("{} s ago", age.round() as i64)
     } else if age < 5400.0 {
         format!("{} min ago", (age / 60.0).round() as i64)
-    } else {
+    } else if age < 172_800.0 {
         format!("{} h ago", (age / 3600.0).round() as i64)
+    } else {
+        format!("{} d ago", (age / 86_400.0).round() as i64)
     }
 }
 
@@ -28,6 +31,9 @@ mod tests {
         assert_eq!(frame_age_label(90.0), "2 min ago");
         assert_eq!(frame_age_label(1_800.0), "30 min ago");
         assert_eq!(frame_age_label(5_400.0), "2 h ago");
+        assert_eq!(frame_age_label(172_799.0), "48 h ago");
+        assert_eq!(frame_age_label(172_800.0), "2 d ago");
+        assert_eq!(frame_age_label(7.0 * 86_400.0), "7 d ago");
         assert_eq!(frame_age_label(-3.0), "0 s ago");
     }
 }

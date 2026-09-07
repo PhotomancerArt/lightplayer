@@ -517,6 +517,43 @@ fn devices_page_story(remembered_open: bool) -> Element {
 }
 
 #[story(
+    description = "The remembered line open, with the board's LAST PICTURE (the honest-device-preview follow-up, 2026-09-07): the same page as `devices_page_remembered_open`, but the remembered board's feed carries the frame Studio persisted to its per-uid sidecar the last time the board was fed. The tile's 120px slot draws that frame exactly as a card's Offline look does — the lamp field dimmed and desaturated, the neutral pill \"last frame · 3 h ago\" with the age measured from when the board actually published it (the STORED capture stamp, not the reload) — instead of the \"Not connected — …\" sentence. Nothing else on the tile moves: same dashed border, same height, same board · last-heard meta line, same Reconnect / Forget verbs. Compare against `devices_page_remembered_open`, whose remembered board has no sidecar and keeps its sentence."
+)]
+fn devices_page_remembered_last_frame() -> Element {
+    let mut devices = roster_page_fixture();
+    let remembered = devices
+        .roster
+        .devices
+        .iter()
+        .find(|device| device.status == DeviceStatus::Offline)
+        .map(|device| device.id)
+        .expect("the page fixture has a remembered board");
+    devices.feeds.insert(
+        remembered,
+        DeviceCardFeedView {
+            frame: Some(thumb_lamp_frame()),
+            frame_age_secs: Some(3.0 * 3_600.0),
+            engine_fps: None,
+            liveness: FeedLiveness::Offline,
+        },
+    );
+    let home = UiHomeView {
+        sim: None,
+        projects: packages(),
+        examples: examples(),
+        devices,
+        library_available: true,
+        opening: None,
+        issue: None,
+    };
+    rsx! {
+        section { class: "tw:p-4",
+            DevicesPage { home, remembered_open: true, on_action: |_| {} }
+        }
+    }
+}
+
+#[story(
     description = "The card's four zones and the height rule (AC2), as a measurement: the six device states in 400px columns — running, nothing loaded, needs firmware, flashing at 62%, sending (indeterminate), and degraded. Under the header (title · status chip · board · chip · MAC · firmware) the card is divided by SUBJECT, with no labels: PROJECT (preview slot 120px · info line 17px · bar 4px · verbs 30px) says what is on the board and offers Open · Clear faults … the pick + Put it on the board … Remove; FIRMWARE (info 17px · bar 4px · verbs 30px, then the terminal) reads \"<firmware> · <board>\" or \"Blank flash — needs firmware\", holds Flash firmware … Factory reset, and carries the terminal as its second half — one zone, no hairline between the verb row and the log, and the dark ground running flush to both card edges rather than sitting in a padded well (the pair is one section so a later milestone can put it behind one curtain); DEVICE (info 17px · verbs 30px) carries the freshness line and Reset · Retry · Disconnect … Forget. An activity narrates in the zone whose subject it changes, lights THAT zone's bar and puts its Cancel in THAT zone's verb row: compare Flashing (firmware bar lit, the firmware line counting percent) with Sending (project bar sweeping, the project line narrating). Every row exists in every state, so all six cards MUST measure the same height, and a board event — a heartbeat, a fault, a lost link, a new terminal line — can never move a card nor make the gallery jump while a flash runs. Laid out three rows of two rather than six across so every state fits the captured sheet."
 )]
 fn devices_card_states() -> Element {
