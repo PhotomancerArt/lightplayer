@@ -50,6 +50,7 @@
 //! unmapped on purpose (the radio window, RMT, the flash controller), so a
 //! strict run stops on the first block a later milestone owns.
 
+pub mod control;
 pub mod intmatrix;
 pub mod loader;
 pub mod machine;
