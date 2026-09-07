@@ -88,6 +88,13 @@ lpc-shared = { path = "../lp-core/lpc-shared" }
 lpfs = { path = "../lp-base/lpfs", features = ["std"] }
 lpc-model = { path = "../lp-core/lpc-model" }
 lpc-wire = { path = "../lp-core/lpc-wire" }
+# `tests/emu_usb_hello.rs` only: the C6 machine's `test_support`, so the
+# firmware ELF this test runs is resolved by exactly the rules the emulator's
+# own gates use (`LP_EMU_BUILD_FW=1`, the cached image, the env override) and
+# not by a second copy of them here. The fence runs the other way — nothing
+# under `lp-emu/` may reach a product crate — so a product crate reaching in
+# is fine (`just lint-emu-fence`).
+lp-emu-esp32c6 = { path = "../lp-emu/esp/lp-emu-esp32c6" }
 serde_json = "1"
 
 [features]

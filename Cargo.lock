@@ -5525,6 +5525,7 @@ dependencies = [
  "log",
  "lp-collection 1.0.0",
  "lp-emu-core",
+ "lp-emu-esp32c6",
  "lp-emu-validate",
  "lp-gfx-lpvm",
  "lp-perf",
