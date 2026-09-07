@@ -46,7 +46,10 @@ pub const COARSE_NAMES: &[(u32, u32, &str)] = &[
     // `IEEE802154: 0x600a_3000`) — named by the PAC, but esp-radio's WiFi
     // path does not run the 802.15.4 driver.
     (0x3000, 0x4000, "ieee802154"),
-    // Baseband / RF calibration / power: `rfcal_*`, `hal_init_imrsp_power`.
+    // Baseband / RF calibration / power: `rfcal_*`, `hal_init_imrsp_power` —
+    // and, P6 found, the MAC's `hal_mac_*` registers too: the RX DMA base
+    // at `+0x4084`, the ready flag at `+0x4ddc`. One coarse name for both,
+    // because nothing documents where one ends and the other begins.
     (0x4000, 0x9800, "bb"),
 ];
 
@@ -131,10 +134,14 @@ pub const I2C_MST_MEM_COARSE_NAMES: &[(u32, u32, &str)] = &[(0x0000, 0x0400, "cm
 pub const PWR_MICROS_COUNTER: u32 = 0x3700;
 
 /// The register the blob programs with its RX DMA descriptor base, reported
-/// as the `WIFI RX config` trace line. `None` until the trace shows which
-/// offset receives a DRAM address (esp-emu's trace called it
-/// `dma_base=0x15DBC`, without saying where it read it).
-pub const RX_DMA_BASE_OFFSET: Option<u32> = None;
+/// as the `WIFI RX config` trace line. Found in P6's G6-5 run: the only
+/// write of a DRAM address into the window is
+/// `cyc=6269893 pc=0x4222acdc W4 WIFI_MAC+0x4084 = 0x4081557c`, from the
+/// MAC init right before `mac_txrx_init` — a pointer into the app's `.bss`,
+/// the RX descriptor ring. (esp-emu's trace called it `dma_base=0x15DBC`
+/// without saying where it read it; that is the same kind of value, an
+/// offset from `0x4080_0000`, on the flash-backed image's layout.)
+pub const RX_DMA_BASE_OFFSET: Option<u32> = Some(0x4084);
 
 /// The radio window (and, as a second instance, the `WIFI_PWR` gap).
 #[derive(Debug)]
