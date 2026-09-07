@@ -491,16 +491,6 @@ impl ProjectController {
         &self.runtime_storage_id
     }
 
-    /// A file from the ACTIVE package's store (transient e2e assertions:
-    /// the memory copy is unreachable from outside the controller).
-    #[cfg(test)]
-    pub(crate) fn active_package_file_for_test(&self, path: &str) -> Option<Vec<u8>> {
-        use lpc_model::AsLpPath;
-        let active = self.library.as_ref()?.active.as_ref()?;
-        let view = active.handle.package_fs.borrow();
-        view.read_file(path.as_path()).ok()
-    }
-
     /// Attach the injected library host (browser shell, once the store
     /// backing it is ready).
     pub fn set_library(
