@@ -468,31 +468,35 @@ fn a_restored_snapshot_replays_the_same_trace_through_the_tick() {
 
 #[test]
 #[ignore = "needs the fw-esp32c6 ELF; run through `just test-emu-c6`"]
-fn the_flash_image_spins_on_spi1_cmd_which_is_m4s() {
-    // The brief's `esp32c6,server` image reads flash at boot. With SPI1
-    // accepted, the ROM's `esp_rom_spiflash_read` spins on `cmd.usr` — the
-    // SPIN line names it. Not a gate failure: a block with no model, and
-    // the trace says which.
+fn the_flash_image_mounts_lpfs_and_reaches_the_idle_loop() {
+    // M3's version of this test asserted the opposite, and named itself
+    // after it: the brief's `esp32c6,server` image reads flash at boot, and
+    // with SPI1 merely *accepted* the ROM's `esp_rom_spiflash_read` spun on
+    // `cmd` at 11 ms — `SPIN SPI1+0x000 cmd = 0x10000000`, `idle_skips == 0`.
+    // M4 models the controller, and the same image now formats `lpfs` and
+    // idles. This is the no-radio twin of `boot_idle`'s flash-backed gate:
+    // no radio blob, so nothing here depends on the WiFi stub.
     let buf = SharedBuffer::new();
     let Some(mut m) = machine(&FwImage::NO_RADIO_FLASH, TimeGrade::T1, &buf) else {
         return;
     };
     m.bus.trace = Trace::to_sink(Box::new(buf.clone())).with_block_filter(["NOTHING"]);
-    let outcome = m.run_until(&StopCondition::after_micros(20_000));
+    let outcome = m.run_until(&StopCondition::after_micros(3_000_000));
     assert!(matches!(outcome, Outcome::Deadline { .. }), "{outcome:?}");
     assert_eq!(m.bus.unmapped_reads(), 0);
-    let spins: Vec<String> = buf
-        .lines()
-        .into_iter()
-        .filter(|l| l.contains(" SPIN "))
-        .collect();
+
+    let lines = buf.lines();
+    let spins: Vec<&String> = lines.iter().filter(|l| l.contains(" SPIN ")).collect();
     assert!(
-        spins
-            .iter()
-            .any(|l| l.contains("SPIN SPI1+0x000 cmd = 0x10000000")),
-        "{spins:?}"
+        !spins.iter().any(|l| l.contains("SPI1")),
+        "the flash controller is modelled now: {spins:?}"
     );
-    assert_eq!(m.idle_skips(), 0, "it never reaches the idle loop");
+    let census = m.flash_census();
+    assert!(
+        census.reads > 0 && census.sector_erases > 0 && census.programs > 0,
+        "an erased chip is read, erased and programmed: {census}"
+    );
+    assert!(m.idle_skips() > 100, "{} idle skips", m.idle_skips());
 }
 
 /// The trace excerpts the PR body quotes, printed so `--nocapture` gives
