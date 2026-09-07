@@ -770,10 +770,6 @@ LOOP_KINDS = ["for", "while", "dowhile"]
 # matches the annotated files on disk byte-for-byte).
 WGPU_UNSUPPORTED = "@unsupported(wgpu.f32)"
 WGPU_DIVERGES = "wgpu.f32: f32 GPU result diverges (undefined/edge-domain semantics)"
-WGPU_NO_TERMINATE = (
-    "wgpu.f32: shader does not terminate on the GPU tier"
-    " (no fuel; CPU targets rely on fuel-exhaustion traps)"
-)
 
 
 def make_loop(kind: str, var: str, bound, body_stmts: tuple):
@@ -1280,17 +1276,6 @@ def cont_file(kind: str) -> TestFile:
         ),
     )
     files_tests.append((fn_d2, [(p,) for p in range(4)]))
-
-    if kind == "dowhile":
-        # Every directive in this file is wgpu-unsupported; the d2_inner p=3
-        # case additionally documents why (the GPU tier has no fuel).
-        annotated = []
-        for fn, runs in files_tests:
-            annots = {args: [WGPU_UNSUPPORTED] for args in runs}
-            if fn.name == "test_cont_dowhile_d2_inner":
-                annots[(3,)] = [WGPU_NO_TERMINATE, WGPU_UNSUPPORTED]
-            annotated.append((fn, runs, annots))
-        files_tests = annotated
 
     return TestFile(
         name=f"cont_{kind}.glsl",
