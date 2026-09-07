@@ -95,7 +95,7 @@ fn run_memfs() -> Option<Run> {
 #[ignore = "needs the memfs reference image; run through `just test-emu-c6`"]
 fn the_memfs_spike_image_says_hello_and_heartbeats_with_the_5_4_figures() {
     let Some(Run {
-        m,
+        mut m,
         outcome,
         text,
         notes,
@@ -145,6 +145,20 @@ fn the_memfs_spike_image_says_hello_and_heartbeats_with_the_5_4_figures() {
         .filter(|l| l.contains("WIFI_MAC TOUCH"))
         .count();
     assert!(touched > 300, "{touched} distinct WIFI_MAC offsets");
+
+    // M5 P1 G1-2: `Esp32C6RmtWs281xDriver: 2 WS281x channels` configured
+    // both TX channels (`mem_size 1` each) and never started one.
+    assert_eq!(m.rmt_frames_ended(0), 0);
+    assert_eq!(m.rmt_frames_ended(1), 0);
+    assert!(m.rmt_words(0).is_empty());
+    let conf0 = m
+        .peek_word(lp_emu_esp32c6::memmap::periph::RMT + 0x10)
+        .expect("RMT.ch0_tx_conf0");
+    assert_eq!(conf0 & (1 << 6), 1 << 6, "idle_out_en: {conf0:#010x}");
+    assert_eq!(conf0 & (1 << 5), 0, "idle_out_lv 0: {conf0:#010x}");
+    assert_eq!((conf0 >> 8) & 0xff, 1, "div_cnt 1: {conf0:#010x}");
+    assert_eq!((conf0 >> 16) & 0x7, 1, "mem_size 1: {conf0:#010x}");
+    assert!(!notes.iter().any(|l| l.contains("RMT ch0 start")));
 }
 
 #[test]
