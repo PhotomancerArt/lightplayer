@@ -43,6 +43,8 @@ use std::path::Path;
 
 use lp_emu_esp_common::{ElfImage, SocBus};
 
+use crate::memmap;
+
 /// Force an `include_bytes!` blob to 8-byte alignment.
 ///
 /// `include_bytes!` promises nothing about alignment, and `object`'s ELF
@@ -134,6 +136,11 @@ pub enum HookResult {
     /// The hook declined after all; give the guest the architectural
     /// breakpoint. Same as having no hook at the address.
     Breakpoint,
+    /// Stop the run here, with the guest untouched: `pc` still at the
+    /// symbol, every register as the caller left it. `--break-at`'s answer,
+    /// and the one a bring-up wants when the question is "who called this
+    /// with what".
+    Stop,
 }
 
 /// A host stand-in for a ROM routine.
@@ -208,7 +215,19 @@ impl HookTable {
         let sym = rom
             .symbol(symbol)
             .ok_or_else(|| RomError::NoSuchSymbol(symbol.to_string()))?;
-        let address = sym.address;
+        self.install_at(bus, sym.address, symbol, call)
+    }
+
+    /// [`install`](Self::install) at an address already resolved — for a
+    /// symbol found by demangled path (`--break-at`), whose ELF name is not
+    /// what the listing should show.
+    pub fn install_at(
+        &mut self,
+        bus: &mut SocBus,
+        address: u32,
+        symbol: &'static str,
+        call: HostHook,
+    ) -> Result<u32, RomError> {
         let original = read_word(bus, address)?;
         bus.load_image(address, &EBREAK.to_le_bytes())
             .map_err(|e| RomError::Elf(format!("patching `{symbol}`: {e}")))?;
@@ -301,6 +320,58 @@ pub fn load(bus: &mut SocBus, rom: &ElfImage) -> Result<Vec<PlacedSegment>, RomE
 /// "21 program headers, 5 placed" is not a discrepancy anyone has to chase.
 pub fn empty_segments(image: &ElfImage) -> usize {
     image.segments.iter().filter(|s| s.memsz == 0).count()
+}
+
+/// One ROM data section seeded by [`seed_data`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SeededSection {
+    pub name: String,
+    pub address: u32,
+    pub len: u32,
+}
+
+/// Seed the ROM's initialised data — what its startup would have copied into
+/// HP SRAM before the app ran, taken from the ELF's own bytes.
+///
+/// The ROM ELF's `.data_*` and `.data.interface.*` sections are writable
+/// `PROGBITS` **without** `SHF_ALLOC` ([`lp_emu_esp_common::elf::InitSection`]):
+/// no `PT_LOAD` places them, the one covering their addresses is the `.bss`
+/// with `filesz = 0`, and on the chip `_start` → `main` copies them in from
+/// an image inside the mask ROM. Direct load skips that startup (M7 runs it),
+/// so this writes the same bytes at the same addresses. Found the hard way
+/// in M3 P6: `esp_pp_rom_version_get` is `lw a0, pp_rom_version` at
+/// `0x4087_F83C` (`.data_pp_rom + 0x294`), and a zero there is a NULL the
+/// WiFi blob hands `pp_printf("pp rom version: %s")` — a load fault at
+/// address 0 inside `_vsnprintf`, 15 ms into the boot.
+///
+/// The same ELF quirk hides part of the mask ROM itself: `.rodata.interface`
+/// (`0x4004_FD40`, `0x2C0` bytes — the tables the app's WiFi blob reads its
+/// ROM pointers from, `lmacInitAc`'s `lw a5, -0x20(0x40050000)` among them)
+/// is non-allocated too, and no `PT_LOAD` reaches past `0x4004_E3A8`. On the
+/// chip those bytes are simply in the ROM. So the rule has no address
+/// filter: every non-allocated `PROGBITS` section with bytes is something
+/// the mask ROM holds or its startup copies, and it goes where the ELF says.
+///
+/// Nothing here touches memory the app owns: the SRAM seeds start at
+/// `.data_ets` (`0x4087_E610`, the ROM data base, above `dram2_seg`) and the
+/// rest lands in the mask ROM's DROM, so the app's `[mem]` figures are
+/// unaffected. Call it after [`load`] and before the app is placed.
+pub fn seed_data(bus: &mut SocBus, rom: &ElfImage) -> Result<Vec<SeededSection>, RomError> {
+    let mut seeded = Vec::new();
+    for section in &rom.init_sections {
+        place_spanning(
+            bus,
+            section.address,
+            &section.data,
+            section.data.len() as u32,
+        )?;
+        seeded.push(SeededSection {
+            name: section.name.clone(),
+            address: section.address,
+            len: section.data.len() as u32,
+        });
+    }
+    Ok(seeded)
 }
 
 /// Write `data` at `address`, then zero out to `memsz`, splitting the write
@@ -430,6 +501,66 @@ mod tests {
             .expect("one segment spans two regions");
         assert_eq!(straddle.vaddr, 0x4004_8400);
         assert_eq!(straddle.regions, ["rom-mask", "drom-mask"]);
+    }
+
+    #[test]
+    fn the_roms_initialised_data_is_seeded_from_its_unallocated_sections() {
+        let rom = parse(VENDORED_C6_ROM).unwrap();
+        let mut bus = crate::machine::Esp32C6Builder::bare_bus();
+        load(&mut bus, &rom).unwrap();
+
+        // Before: the `.bss` PT_LOAD zero-filled the whole ROM data area.
+        let pp_rom_version = rom.symbol("pp_rom_version").unwrap().address;
+        assert_eq!(pp_rom_version, 0x4087_f83c);
+        assert_eq!(bus.read_word(pp_rom_version).unwrap(), 0);
+
+        // The interface table the WiFi blob reads its ROM pointers from is
+        // in the mask ROM's DROM, past every PT_LOAD.
+        assert_eq!(
+            bus.read_word(0x4004_ffe0).unwrap(),
+            0,
+            "unreached by any PT_LOAD"
+        );
+
+        let seeded = seed_data(&mut bus, &rom).unwrap();
+        let names: Vec<&str> = seeded.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&".data_pp_rom"), "{names:?}");
+        assert!(names.contains(&".data.interface.rom_pp"), "{names:?}");
+        assert!(names.contains(&".rodata.interface"), "{names:?}");
+        let drom = memmap::DROM_MASK_BASE..memmap::DROM_MASK_BASE + memmap::DROM_MASK_LEN;
+        assert!(
+            seeded
+                .iter()
+                .all(|s| s.address >= memmap::ROM_DATA_BASE || drom.contains(&s.address)),
+            "every seed is above dram2_seg or inside the mask ROM's DROM: {seeded:?}"
+        );
+        let total: u32 = seeded.iter().map(|s| s.len).sum();
+        assert!(total > 0x500, "{total} bytes seeded");
+        let table_entry = bus.read_word(0x4004_ffe0).unwrap() as u32;
+        assert!(
+            (memmap::HP_SRAM_BASE..memmap::HP_SRAM_BASE + memmap::HP_SRAM_LEN)
+                .contains(&table_entry),
+            "the lmac AC table pointer {table_entry:#010x} names ROM data in HP SRAM"
+        );
+
+        // After: the three `*_rom_version` pointers name strings in the
+        // mask ROM, which is what `esp_pp_rom_version_get` returns on the
+        // chip and what the WiFi blob prints.
+        for name in [
+            "pp_rom_version",
+            "net80211_rom_version",
+            "coexist_rom_version",
+        ] {
+            let at = rom.symbol(name).unwrap().address;
+            let ptr = bus.read_word(at).unwrap() as u32;
+            assert!(
+                (memmap::ROM_MASK_BASE..memmap::DROM_MASK_BASE + memmap::DROM_MASK_LEN)
+                    .contains(&ptr),
+                "{name} = {ptr:#010x} is not in the mask ROM"
+            );
+            let first = bus.read_u8(ptr).unwrap();
+            assert!(first.is_ascii_graphic(), "{name} -> {first:#04x}");
+        }
     }
 
     #[test]

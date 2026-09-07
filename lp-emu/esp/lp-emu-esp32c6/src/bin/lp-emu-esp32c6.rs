@@ -14,10 +14,11 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
+use lp_emu_esp_common::ScriptedSource;
 use lp_emu_esp32c6::loader::EfuseIdentity;
 use lp_emu_esp32c6::machine::{
     AppSource, Esp32C6Builder, Esp32C6Machine, Outcome, RomSource, StopCondition, TimeGrade,
-    Uart0Sink,
+    Uart0Sink, UsbSjSink,
 };
 use lp_emu_esp32c6::memmap;
 
@@ -36,9 +37,18 @@ OPTIONS:
                             EMULATED time to run for [100ms]
     --wall-timeout <s>      host-clock safety net; exits 4
     --exit-on <substr>      stop when this appears on UART0
-    --uart0 stdout|file:<path>
-                            where UART0's bytes go (a model arrives in P6)
-    --uart0-script <file>   scripted host input for UART0 (wired in P6)
+    --uart0 stdout|file:<path>|tcp:<host:port>
+                            where UART0's bytes go; tcp: LISTENS, one client at a
+                            time, and the client's bytes are UART0's RX (not
+                            deterministic: wall clock decides their cycle)
+    --uart0-script <file>   scripted host input for UART0, deterministic:
+                            one chunk per line: <ms> then a double-quoted
+                            string (\\n \\r \\t \\xNN escapes) or hex bytes
+                            (`1500 \"M!{...}\\n\"`, `2000 4d 21 0a`)
+    --usb-sj stderr|file:<path>
+                            where USB-Serial-JTAG's IN-endpoint bytes are
+                            OBSERVED — what the guest tried to print with no
+                            host attached [kept in memory, summarised at exit]
     --efuse-mac <a0:f2:..>  the MAC the eFuse block reports [the desk board]
     --efuse-rev <0.2>       wafer major.minor [0.2]
     --seed <u64>            the machine PRNG's seed [0]
@@ -46,6 +56,8 @@ OPTIONS:
     --trace-file <path>     write the trace here instead of stderr
     --strict-bus            an access nothing claims is fatal; exits 3
     --probe <symbol>@<ms>   print a static's word at an emulated time
+    --break-at <symbol>     stop when the symbol is entered; print a0..a7, sp
+                            and the backtrace; exits 5
     --hooks                 list the ROM hook table and exit
     --map                   print the memory map and exit
     -h, --help              this
@@ -55,6 +67,7 @@ EXIT CODES:
     2  the hart faulted
     3  a strict-bus violation
     4  the wall-clock safety net fired
+    5  a --break-at symbol was reached
 ";
 
 fn main() -> ExitCode {
@@ -78,6 +91,7 @@ struct Args {
     exit_on: Option<String>,
     uart0: Uart0Sink,
     uart0_script: Option<PathBuf>,
+    usb_sj: UsbSjSink,
     efuse: EfuseIdentity,
     seed: u64,
     trace: bool,
@@ -85,6 +99,7 @@ struct Args {
     trace_file: Option<PathBuf>,
     strict: bool,
     probes: Vec<(u64, String)>,
+    break_at: Vec<String>,
     hooks: bool,
     map: bool,
 }
@@ -102,7 +117,8 @@ fn run() -> Result<ExitCode, String> {
         .strict(args.strict)
         .efuse(args.efuse)
         .seed(args.seed)
-        .uart0(args.uart0.clone());
+        .uart0(args.uart0.clone())
+        .usb_sj(args.usb_sj.clone());
 
     if let Some(rom) = args.rom.clone() {
         builder = builder.rom(RomSource::Path(rom));
@@ -123,13 +139,10 @@ fn run() -> Result<ExitCode, String> {
         builder = builder.trace(sink, args.trace_blocks.clone());
     }
     if let Some(script) = &args.uart0_script {
-        // Parsed and validated here so a typo is caught now rather than in
-        // P6; the bytes are wired to the UART model when there is one.
-        std::fs::read(script).map_err(|e| format!("reading {}: {e}", script.display()))?;
-        eprintln!(
-            "note: --uart0-script is accepted but UART0 has no model until P6; \
-             the file was read and will be ignored"
-        );
+        let text = std::fs::read_to_string(script)
+            .map_err(|e| format!("reading {}: {e}", script.display()))?;
+        let source = parse_uart0_script(&text).map_err(|e| format!("{}: {e}", script.display()))?;
+        builder = builder.uart0_source(Box::new(source));
     }
 
     let mut machine = builder.build().map_err(|e| e.to_string())?;
@@ -137,6 +150,13 @@ fn run() -> Result<ExitCode, String> {
     if args.hooks {
         print_hooks(&machine);
         return Ok(ExitCode::SUCCESS);
+    }
+
+    for symbol in &args.break_at {
+        let at = machine
+            .break_at(symbol)
+            .map_err(|e| format!("--break-at {symbol}: {e}"))?;
+        eprintln!("break-at: {symbol} @ {at:#010x}");
     }
 
     print_load_report(&machine);
@@ -153,7 +173,7 @@ fn run() -> Result<ExitCode, String> {
     };
 
     let outcome = machine.run_until(&stop);
-    report(&machine, &outcome);
+    report(&mut machine, &outcome);
     Ok(ExitCode::from(outcome.exit_code() as u8))
 }
 
@@ -188,6 +208,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--exit-on" => args.exit_on = Some(value("--exit-on")?),
             "--uart0" => args.uart0 = parse_uart0(&value("--uart0")?)?,
             "--uart0-script" => args.uart0_script = Some(value("--uart0-script")?.into()),
+            "--usb-sj" => args.usb_sj = parse_usb_sj(&value("--usb-sj")?)?,
             "--efuse-mac" => args.efuse.mac = EfuseIdentity::parse_mac(&value("--efuse-mac")?)?,
             "--efuse-rev" => {
                 let (major, minor) = EfuseIdentity::parse_rev(&value("--efuse-rev")?)?;
@@ -215,6 +236,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             }
             "--strict-bus" => args.strict = true,
             "--probe" => args.probes.push(parse_probe(&value("--probe")?)?),
+            "--break-at" => args.break_at.push(value("--break-at")?),
             "--hooks" => args.hooks = true,
             "--map" => args.map = true,
             other => return Err(format!("unknown flag `{other}`\n\n{USAGE}")),
@@ -247,15 +269,97 @@ fn parse_uart0(text: &str) -> Result<Uart0Sink, String> {
         "memory" => Ok(Uart0Sink::Memory),
         other => match other.split_once(':') {
             Some(("file", path)) => Ok(Uart0Sink::File(path.into())),
-            Some(("tcp", _)) => Err(
-                "--uart0 tcp:<host:port> is an M6 destination; use stdout or file:<path>"
-                    .to_string(),
-            ),
+            Some(("tcp", addr)) if addr.contains(':') => Ok(Uart0Sink::Tcp(addr.to_string())),
+            Some(("tcp", addr)) => Err(format!(
+                "--uart0 tcp:{addr}: write tcp:<host:port>, e.g. tcp:127.0.0.1:5555"
+            )),
             _ => Err(format!(
-                "`{other}` is not a UART0 destination (stdout, memory, file:<path>)"
+                "`{other}` is not a UART0 destination (stdout, memory, file:<path>, tcp:<host:port>)"
             )),
         },
     }
+}
+
+fn parse_usb_sj(text: &str) -> Result<UsbSjSink, String> {
+    match text {
+        "stderr" => Ok(UsbSjSink::Stderr),
+        "memory" => Ok(UsbSjSink::Memory),
+        other => match other.split_once(':') {
+            Some(("file", path)) => Ok(UsbSjSink::File(path.into())),
+            _ => Err(format!(
+                "`{other}` is not a USB-SJ destination (stderr, memory, file:<path>)"
+            )),
+        },
+    }
+}
+
+/// `--uart0-script`: one chunk per line, `<ms> <bytes>`, where `<bytes>` is
+/// either a double-quoted string with `\n \r \t \\ \" \xNN` escapes or
+/// whitespace-separated hex bytes. `#` starts a comment; blank lines are
+/// skipped. The millisecond is emulated time from cycle zero; chunks keep
+/// file order on the wire whatever their times say (a serial line has an
+/// order).
+fn parse_uart0_script(text: &str) -> Result<ScriptedSource, String> {
+    let mut source = ScriptedSource::new();
+    for (n, raw) in text.lines().enumerate() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let (ms, rest) = line
+            .split_once(char::is_whitespace)
+            .ok_or_else(|| format!("line {}: expected `<ms> <bytes>`", n + 1))?;
+        let ms: u64 = ms
+            .trim_end_matches("ms")
+            .parse()
+            .map_err(|e| format!("line {}: `{ms}` is not a millisecond count: {e}", n + 1))?;
+        let rest = rest.trim();
+        let bytes = if let Some(quoted) = rest.strip_prefix('"') {
+            let body = quoted
+                .strip_suffix('"')
+                .ok_or_else(|| format!("line {}: unterminated string", n + 1))?;
+            unescape(body).map_err(|e| format!("line {}: {e}", n + 1))?
+        } else {
+            rest.split_whitespace()
+                .map(|h| {
+                    u8::from_str_radix(h.trim_start_matches("0x"), 16)
+                        .map_err(|e| format!("line {}: `{h}` is not a hex byte: {e}", n + 1))
+                })
+                .collect::<Result<Vec<u8>, String>>()?
+        };
+        source.push(ms * 1_000 * memmap::CYCLES_PER_US, bytes);
+    }
+    Ok(source)
+}
+
+fn unescape(body: &str) -> Result<Vec<u8>, String> {
+    let mut out = Vec::with_capacity(body.len());
+    let mut chars = body.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            let mut buf = [0u8; 4];
+            out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
+            continue;
+        }
+        match chars.next() {
+            Some('n') => out.push(b'\n'),
+            Some('r') => out.push(b'\r'),
+            Some('t') => out.push(b'\t'),
+            Some('0') => out.push(0),
+            Some('\\') => out.push(b'\\'),
+            Some('"') => out.push(b'"'),
+            Some('x') => {
+                let hex: String = chars.by_ref().take(2).collect();
+                out.push(
+                    u8::from_str_radix(&hex, 16)
+                        .map_err(|e| format!("`\\x{hex}` is not a hex byte: {e}"))?,
+                );
+            }
+            Some(other) => return Err(format!("unknown escape `\\{other}`")),
+            None => return Err("trailing backslash".to_string()),
+        }
+    }
+    Ok(out)
 }
 
 /// `TIMED_OUT@120` → (120 ms, "TIMED_OUT").
@@ -331,6 +435,11 @@ fn print_load_report(machine: &Esp32C6Machine) {
             seg.regions.join(", ")
         );
     }
+    eprintln!(
+        "rom data: {} sections seeded, {} bytes (the ROM startup's .data copy, from the ELF)",
+        machine.rom_data().len(),
+        machine.rom_data().iter().map(|s| s.len).sum::<u32>()
+    );
     if let Some(app) = machine.app() {
         eprintln!(
             "app: {} segments placed, entry 0x{:08x} ({})",
@@ -353,7 +462,7 @@ fn print_load_report(machine: &Esp32C6Machine) {
     }
 }
 
-fn report(machine: &Esp32C6Machine, outcome: &Outcome) {
+fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
     let cycles = machine.cycles();
     eprintln!(
         "\nstopped after {} cycles ({} us emulated, {} instructions, grade {})",
@@ -369,6 +478,31 @@ fn report(machine: &Esp32C6Machine, outcome: &Outcome) {
         machine.bus.unmapped_sites(),
         machine.idle_skips()
     );
+    eprintln!(
+        "uart0: {} bytes left the wire{}",
+        machine.uart0().len(),
+        match machine.uart0_tcp() {
+            Some(tcp) => format!(
+                " ({} listened, {} client(s) attached)",
+                tcp.local_addr(),
+                tcp.clients_seen()
+            ),
+            None => String::new(),
+        }
+    );
+    let usb = machine.usb_sj();
+    if !usb.is_empty() {
+        eprintln!(
+            "usb-sj: host absent; the guest handed {} bytes to the IN endpoint that no host \
+             read:\n{}",
+            usb.len(),
+            usb.text()
+                .lines()
+                .map(|l| format!("  | {l}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+    }
 
     match outcome {
         Outcome::ExitMatched { .. } => eprintln!("--exit-on matched"),
@@ -407,12 +541,54 @@ fn report(machine: &Esp32C6Machine, outcome: &Outcome) {
         Outcome::WallTimeout { .. } => {
             eprintln!("WALL TIMEOUT — the host-clock safety net, not a guest event")
         }
+        Outcome::Breakpoint { pc, .. } => {
+            let regs = machine.registers();
+            eprintln!(
+                "BREAK at {pc:#010x} {}",
+                machine.symbolize(*pc).unwrap_or_default()
+            );
+            eprintln!(
+                "  a0={:#010x} a1={:#010x} a2={:#010x} a3={:#010x}\n  a4={:#010x} a5={:#010x} \
+                 a6={:#010x} a7={:#010x}\n  sp={:#010x} s0={:#010x} ra={:#010x}",
+                regs[10],
+                regs[11],
+                regs[12],
+                regs[13],
+                regs[14],
+                regs[15],
+                regs[16],
+                regs[17],
+                regs[2],
+                regs[8],
+                regs[1]
+            );
+            let (mcause, mepc, mtval) = machine.trap_csrs();
+            eprintln!(
+                "  mcause={mcause:#010x} mepc={mepc:#010x} {} mtval={mtval:#010x}",
+                machine.symbolize(mepc).unwrap_or_default()
+            );
+            for (name, i) in [("a0", 10), ("a1", 11), ("a2", 12), ("a3", 13)] {
+                if let Some(text) = machine.peek_string(regs[i], 120) {
+                    eprintln!("  {name} as text: {text:?}");
+                }
+            }
+        }
+    }
+    if matches!(
+        outcome,
+        Outcome::Fault { .. } | Outcome::StrictBus { .. } | Outcome::Breakpoint { .. }
+    ) {
+        eprintln!("backtrace (s0 frame-pointer chain, innermost first):");
+        for (i, (address, symbol)) in machine.backtrace().into_iter().enumerate() {
+            eprintln!("  #{i:<2} {address:#010x} {symbol}");
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lp_emu_esp_common::ByteSource;
 
     #[test]
     fn durations_are_emulated_and_carry_their_unit() {
@@ -454,12 +630,41 @@ mod tests {
             parse_uart0("file:/tmp/u.log").unwrap(),
             Uart0Sink::File(_)
         ));
-        // M6's destination, refused by name rather than as "unknown".
+        assert!(matches!(
+            parse_uart0("tcp:127.0.0.1:9000").unwrap(),
+            Uart0Sink::Tcp(addr) if addr == "127.0.0.1:9000"
+        ));
         assert!(
-            parse_uart0("tcp:127.0.0.1:9000")
-                .unwrap_err()
-                .contains("M6")
+            parse_uart0("tcp:9000").is_err(),
+            "host:port, not a bare port"
         );
+        assert!(matches!(parse_usb_sj("stderr").unwrap(), UsbSjSink::Stderr));
+        assert!(matches!(
+            parse_usb_sj("file:/tmp/usb.log").unwrap(),
+            UsbSjSink::File(_)
+        ));
+    }
+
+    #[test]
+    fn a_uart0_script_is_milliseconds_then_a_string_or_hex_bytes() {
+        let src = parse_uart0_script(
+            "# a comment\n\
+             1500 \"M!{\\\"id\\\":1}\\n\"\n\
+             \n\
+             2000ms 4d 21 0a\n\
+             2500 \"\\x41\\t\"\n",
+        )
+        .unwrap();
+        assert_eq!(src.remaining(), 12 + 3 + 2);
+        assert_eq!(
+            src.next_ready(),
+            Some(1_500 * 1_000 * memmap::CYCLES_PER_US)
+        );
+        assert!(parse_uart0_script("abc \"x\"").is_err());
+        assert!(parse_uart0_script("10 \"unterminated").is_err());
+        assert!(parse_uart0_script("10 zz").is_err());
+        assert!(parse_uart0_script("10 \"\\q\"").is_err());
+        assert_eq!(unescape("a\\nb\\x00c\\\\").unwrap(), b"a\nb\0c\\");
     }
 
     #[test]

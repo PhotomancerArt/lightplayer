@@ -40,6 +40,14 @@ pub trait ByteSource: Send {
     fn next_ready(&self) -> Option<Cycles> {
         None
     }
+
+    /// `true` for a source whose bytes come from outside guest time — a
+    /// socket — so the peripheral that owns it knows to poll on a schedule
+    /// of its own. A scripted or null source answers `false`: everything it
+    /// will ever deliver is in [`next_ready`](Self::next_ready).
+    fn is_live(&self) -> bool {
+        false
+    }
 }
 
 /// One named bidirectional stream.
@@ -72,6 +80,10 @@ impl HostStream {
 
     pub fn next_ready(&self) -> Option<Cycles> {
         self.source.next_ready()
+    }
+
+    pub fn is_live(&self) -> bool {
+        self.source.is_live()
     }
 }
 
@@ -310,9 +322,259 @@ impl ByteSource for ScriptedSource {
     }
 }
 
+/// How much device→host output a [`TcpHost`] keeps for a client that has
+/// not connected yet. The spike's proxy kept the same 4 MiB, so a walk that
+/// attaches after the boot banner still sees the banner.
+pub const TCP_BACKLOG_CAP: usize = 4 << 20;
+
+/// A byte stream over one TCP socket: the emulator **listens**, one client at
+/// a time, exactly as esp-emu's `--uart-tcp` did for the spike's proxy and
+/// as `lp-cli … serial:tcp://host:port` expects to connect to.
+///
+/// Both halves share one state behind a mutex so a peripheral can hold the
+/// sink and the source as two boxes and never learn they are one socket:
+///
+/// - **device → host**: bytes written to the sink go to the connected client
+///   at once; with no client they are kept (up to [`TCP_BACKLOG_CAP`]) and
+///   replayed to the first client that attaches, which is what a serial port
+///   with a fresh boot behind it looks like to lp-cli.
+/// - **host → device**: bytes the client sends are read into a queue on every
+///   poll and handed to the peripheral one at a time by
+///   [`ByteSource::next_byte`], at the cycle the peripheral asks. That cycle
+///   is whatever guest time the poll landed on, which is the one place wall
+///   clock reaches the machine: a run with a live socket is **not**
+///   deterministic, and the README says so. `--uart0-script` is the
+///   deterministic path.
+///
+/// The socket carries bytes and nothing else. The control channel plan PD8
+/// names (signals, USB attach/detach, strap — the scripted fake's
+/// reset-dance vocabulary) is a second socket and belongs to M6; see the
+/// chip crate's README for the protocol it will speak.
+pub struct TcpHost {
+    inner: Arc<Mutex<TcpInner>>,
+    local_addr: std::net::SocketAddr,
+}
+
+struct TcpInner {
+    listener: std::net::TcpListener,
+    client: Option<std::net::TcpStream>,
+    /// Device output with no client to send it to.
+    backlog: Vec<u8>,
+    /// Device output the client's socket could not take yet.
+    outbound: Vec<u8>,
+    /// Host input not yet handed to the peripheral.
+    inbound: VecDeque<u8>,
+    clients_seen: u32,
+}
+
+impl TcpHost {
+    /// Bind and listen on `addr` (`127.0.0.1:5555`). Non-blocking from here
+    /// on: nothing in the machine ever waits on the socket.
+    pub fn listen(addr: &str) -> std::io::Result<Self> {
+        let listener = std::net::TcpListener::bind(addr)?;
+        listener.set_nonblocking(true)?;
+        let local_addr = listener.local_addr()?;
+        Ok(Self {
+            inner: Arc::new(Mutex::new(TcpInner {
+                listener,
+                client: None,
+                backlog: Vec::new(),
+                outbound: Vec::new(),
+                inbound: VecDeque::new(),
+                clients_seen: 0,
+            })),
+            local_addr,
+        })
+    }
+
+    pub fn local_addr(&self) -> std::net::SocketAddr {
+        self.local_addr
+    }
+
+    /// The two halves a peripheral holds.
+    pub fn split(&self) -> (Box<dyn ByteSink>, Box<dyn ByteSource>) {
+        (
+            Box::new(TcpSink(self.inner.clone())),
+            Box::new(TcpSource(self.inner.clone())),
+        )
+    }
+
+    /// Has a client ever attached?
+    pub fn clients_seen(&self) -> u32 {
+        self.inner.lock().expect("tcp host poisoned").clients_seen
+    }
+}
+
+impl TcpInner {
+    /// Accept a waiting client, replay the backlog to a new one, read what
+    /// the client sent, push what it could not take before.
+    fn poll(&mut self) {
+        use std::io::{ErrorKind, Read, Write};
+
+        if self.client.is_none() {
+            match self.listener.accept() {
+                Ok((stream, peer)) => {
+                    let _ = stream.set_nodelay(true);
+                    let _ = stream.set_nonblocking(true);
+                    self.clients_seen += 1;
+                    log::info!(
+                        "TcpHost: client {peer} attached (replaying {} B)",
+                        self.backlog.len()
+                    );
+                    self.client = Some(stream);
+                    let backlog = core::mem::take(&mut self.backlog);
+                    self.outbound.splice(0..0, backlog);
+                }
+                Err(e) if e.kind() == ErrorKind::WouldBlock => {}
+                Err(e) => log::warn!("TcpHost: accept failed: {e}"),
+            }
+        }
+
+        let Some(client) = self.client.as_mut() else {
+            return;
+        };
+
+        // Flush what the device wrote.
+        let mut gone = false;
+        while !self.outbound.is_empty() {
+            match client.write(&self.outbound) {
+                Ok(0) => {
+                    gone = true;
+                    break;
+                }
+                Ok(n) => {
+                    self.outbound.drain(..n);
+                }
+                Err(e) if e.kind() == ErrorKind::WouldBlock => break,
+                Err(e) if e.kind() == ErrorKind::Interrupted => {}
+                Err(_) => {
+                    gone = true;
+                    break;
+                }
+            }
+        }
+
+        // Read what the host sent.
+        let mut buf = [0u8; 4096];
+        loop {
+            match client.read(&mut buf) {
+                Ok(0) => {
+                    gone = true;
+                    break;
+                }
+                Ok(n) => self.inbound.extend(&buf[..n]),
+                Err(e) if e.kind() == ErrorKind::WouldBlock => break,
+                Err(e) if e.kind() == ErrorKind::Interrupted => {}
+                Err(_) => {
+                    gone = true;
+                    break;
+                }
+            }
+        }
+
+        if gone {
+            log::info!("TcpHost: client closed");
+            self.client = None;
+            // Whatever it did not take starts the backlog for the next one.
+            let rest = core::mem::take(&mut self.outbound);
+            self.backlog = rest;
+        }
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        self.poll();
+        if self.client.is_some() {
+            self.outbound.extend_from_slice(bytes);
+            self.poll();
+        } else {
+            self.backlog.extend_from_slice(bytes);
+            if self.backlog.len() > TCP_BACKLOG_CAP {
+                let excess = self.backlog.len() - TCP_BACKLOG_CAP;
+                self.backlog.drain(..excess);
+            }
+        }
+    }
+}
+
+struct TcpSink(Arc<Mutex<TcpInner>>);
+
+impl ByteSink for TcpSink {
+    fn write(&mut self, bytes: &[u8]) {
+        self.0.lock().expect("tcp host poisoned").write(bytes);
+    }
+
+    fn flush(&mut self) {
+        self.0.lock().expect("tcp host poisoned").poll();
+    }
+}
+
+struct TcpSource(Arc<Mutex<TcpInner>>);
+
+impl ByteSource for TcpSource {
+    fn next_byte(&mut self, _now: Cycles) -> Option<u8> {
+        let mut inner = self.0.lock().expect("tcp host poisoned");
+        if inner.inbound.is_empty() {
+            inner.poll();
+        }
+        inner.inbound.pop_front()
+    }
+
+    fn is_live(&self) -> bool {
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tcp_host_replays_its_backlog_and_reads_what_the_client_sends() {
+        use std::io::{Read, Write};
+        let host = TcpHost::listen("127.0.0.1:0").unwrap();
+        let (mut sink, mut source) = host.split();
+        assert!(source.is_live());
+        assert_eq!(source.next_byte(0), None, "no client, nothing to read");
+
+        // Device output before any client: kept.
+        sink.write(b"banner\n");
+        let mut client = std::net::TcpStream::connect(host.local_addr()).unwrap();
+        client
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
+        // The accept happens on a poll, and the loopback handshake may not
+        // have landed by the first one; poll like the machine does, on a
+        // schedule, until the client is seen.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while host.clients_seen() == 0 && std::time::Instant::now() < deadline {
+            sink.flush();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        sink.write(b"more\n");
+        sink.flush();
+        let mut got = Vec::new();
+        let mut buf = [0u8; 64];
+        while got.len() < 12 {
+            let n = client.read(&mut buf).unwrap();
+            assert!(n > 0);
+            got.extend_from_slice(&buf[..n]);
+        }
+        assert_eq!(got, b"banner\nmore\n");
+        assert_eq!(host.clients_seen(), 1);
+
+        client.write_all(b"M!x\n").unwrap();
+        client.flush().unwrap();
+        let mut seen = Vec::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while seen.len() < 4 && std::time::Instant::now() < deadline {
+            if let Some(b) = source.next_byte(1) {
+                seen.push(b);
+            } else {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        }
+        assert_eq!(seen, b"M!x\n");
+    }
 
     #[test]
     fn a_memory_stream_reads_back_what_was_written() {

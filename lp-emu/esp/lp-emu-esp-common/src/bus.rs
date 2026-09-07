@@ -492,6 +492,29 @@ impl SocBus {
         }
     }
 
+    /// Give every peripheral its [`Peripheral::started`] call, in
+    /// registration order, at the current bus time. The machine calls this
+    /// once, after the ROM and the app are placed and before the first
+    /// slice; see the trait method for what it is for.
+    ///
+    /// [`Peripheral::started`]: crate::periph::Peripheral::started
+    pub fn start_peripherals(&mut self) {
+        for range in &mut self.mmio {
+            let mut cx = BusCx {
+                now: self.now,
+                pc: self.pc,
+                hart: self.hart,
+                sched: &mut self.sched,
+                irq: &mut self.irq,
+                trace: &mut self.trace,
+                host: &mut self.host,
+                matrix: &mut *self.matrix,
+                request: &mut self.request,
+            };
+            range.periph.started(&mut cx);
+        }
+    }
+
     /// The request a peripheral left for the machine, if any, clearing it.
     pub fn take_request(&mut self) -> Option<MachineRequest> {
         self.request.take()
