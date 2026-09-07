@@ -134,7 +134,7 @@ impl Configuration {
     /// All three are, since M3 P7 filled the `lp-emu:*` seam. The variant that
     /// says otherwise stays: the next machine under `lp-emu/esp/` will be a
     /// name and a milestone before it is a driver, and `validate list` saying
-    /// "unavailable until M<n>" is better than a configuration nobody planned.
+    /// `unavailable until M<n>` is better than a configuration nobody planned.
     pub fn availability(&self) -> Availability {
         match self.kind {
             ConfigurationKind::Silicon | ConfigurationKind::EspEmu | ConfigurationKind::LpEmu => {
