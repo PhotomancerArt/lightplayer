@@ -130,7 +130,11 @@ impl BrowserFirmwareRuntime {
     /// reason recorded (visible state, not an error — the CPU tier is always
     /// functional). The selection is emitted as one structured log line and
     /// returned to the worker script for the `runtime_created` message.
-    pub(crate) fn new(id: u32, label: &str, options: &BrowserRuntimeOptions) -> Result<Self, String> {
+    pub(crate) fn new(
+        id: u32,
+        label: &str,
+        options: &BrowserRuntimeOptions,
+    ) -> Result<Self, String> {
         // The board this runtime wears. ONE manifest, ONE registry: outputs
         // resolve against it and so do buttons and the radio, which is what
         // makes a board sim honest — an endpoint the board does not have is
@@ -139,7 +143,9 @@ impl BrowserFirmwareRuntime {
         // some other board: the hello is about to name this one.
         let manifest = HardwareManifestFile::read_json(&options.hardware_manifest_json)
             .and_then(|file| file.to_manifest())
-            .map_err(|error| format!("boot options carry an unusable hardware manifest: {error}"))?;
+            .map_err(|error| {
+                format!("boot options carry an unusable hardware manifest: {error}")
+            })?;
         let board_id = manifest.board_id().to_string();
         let hardware = Rc::new(HardwareSystem::with_virtual_drivers(Rc::new(
             HwRegistry::new(manifest),

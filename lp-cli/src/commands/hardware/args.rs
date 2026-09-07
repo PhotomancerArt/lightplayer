@@ -165,8 +165,12 @@ impl From<HardwareTargetArg> for lpc_hardware::HardwareTarget {
 impl HardwareTargetArg {
     /// Every target, in menu order. `interactive_new_manifest` picks from this,
     /// so a new variant reaches the interactive manager without a second edit.
-    pub const ALL: &'static [Self] =
-        &[Self::Esp32c6, Self::Esp32s3, Self::Rv32imacEmu, Self::Desktop];
+    pub const ALL: &'static [Self] = &[
+        Self::Esp32c6,
+        Self::Esp32s3,
+        Self::Rv32imacEmu,
+        Self::Desktop,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {

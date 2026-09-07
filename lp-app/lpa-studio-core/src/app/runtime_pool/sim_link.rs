@@ -116,9 +116,10 @@ fn link_env_wearing(hardware_manifest_json: &'static str) -> LinkEnv {
         BrowserRuntimeOptions, BrowserRuntimeTier, BrowserWorkerOptions,
     };
     LinkEnv {
-        browser_worker: BrowserWorkerOptions::default().with_runtime(
-            BrowserRuntimeOptions::new(BrowserRuntimeTier::Gpu, hardware_manifest_json),
-        ),
+        browser_worker: BrowserWorkerOptions::default().with_runtime(BrowserRuntimeOptions::new(
+            BrowserRuntimeTier::Gpu,
+            hardware_manifest_json,
+        )),
         ..LinkEnv::default()
     }
 }

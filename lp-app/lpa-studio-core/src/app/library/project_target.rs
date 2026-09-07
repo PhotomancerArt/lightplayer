@@ -179,7 +179,8 @@ mod tests {
 
     #[test]
     fn an_unsimulatable_board_falls_back_to_desktop_with_a_notice() {
-        let (worn, notice) = ProjectTarget::from_manifest(Some("quinled/dig-uno")).resolve_for_sim();
+        let (worn, notice) =
+            ProjectTarget::from_manifest(Some("quinled/dig-uno")).resolve_for_sim();
 
         assert_eq!(worn, ProjectTarget::Desktop);
         let notice = notice.expect("the fallback must say so");

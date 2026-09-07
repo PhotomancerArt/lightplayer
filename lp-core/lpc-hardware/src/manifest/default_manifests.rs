@@ -14,8 +14,7 @@ const DOM_Z_102_JSON: &str = include_str!("../../boards/domraem/dom-z-102.json")
 /// `fw-browser` re-exports it to its standalone smoke page, which boots a
 /// runtime by handing the manifest back in. A `const`, so an image that
 /// never mentions it (every ESP firmware) carries none of these bytes.
-pub const DESKTOP_BOARD_MANIFEST_JSON: &str =
-    include_str!("../../boards/lightplayer/desktop.json");
+pub const DESKTOP_BOARD_MANIFEST_JSON: &str = include_str!("../../boards/lightplayer/desktop.json");
 
 pub fn default_esp32c6_hardware_manifest() -> HwManifest {
     HardwareManifestFile::read_json(XIAO_ESP32_C6_JSON)

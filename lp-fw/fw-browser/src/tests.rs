@@ -806,7 +806,10 @@ fn hello_reports_the_worn_board_and_the_supplied_identity() {
     let anonymous = create_cpu_runtime("hello-desktop-test");
     let hello = boot_hello(anonymous);
     assert_eq!(hello.build.package, "fw-browser");
-    assert_eq!(hello.hardware.board_id.as_deref(), Some("lightplayer/desktop"));
+    assert_eq!(
+        hello.hardware.board_id.as_deref(),
+        Some("lightplayer/desktop")
+    );
     assert_eq!(hello.hardware.base_mac, None);
 
     let identified = create_runtime_with_options(
@@ -814,8 +817,14 @@ fn hello_reports_the_worn_board_and_the_supplied_identity() {
         &desktop_options(Some("02:00:00:ab:cd:ef")),
     );
     let hello = boot_hello(identified);
-    assert_eq!(hello.hardware.base_mac.as_deref(), Some("02:00:00:ab:cd:ef"));
-    assert_eq!(hello.hardware.board_id.as_deref(), Some("lightplayer/desktop"));
+    assert_eq!(
+        hello.hardware.base_mac.as_deref(),
+        Some("02:00:00:ab:cd:ef")
+    );
+    assert_eq!(
+        hello.hardware.board_id.as_deref(),
+        Some("lightplayer/desktop")
+    );
 }
 
 /// Boot options that carry a manifest the hardware layer refuses fail the
