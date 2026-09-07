@@ -137,6 +137,10 @@ export async function flashFirmware(
         totalSteps: 3,
         percent: 100,
       });
+      // Between the write and the reset, over the stub that is still up:
+      // the bootloader we just wrote cannot boot from the LP state a fresh
+      // board's factory firmware leaves behind.
+      await restoreLpAnalogI2cClock(loader, chipName, knownChipIds, terminal);
       await loader.after("hard_reset");
       return {
         manifest: summarizeManifest(manifest, manifestPath),
@@ -587,6 +591,66 @@ async function readBaseMac(loader) {
     console.warn(`[esp32-flash] base MAC read failed: ${errorMessage(error)}`);
     return null;
   }
+}
+
+/// ESP32-C6 LP analog I2C clock registers. The twin of
+/// `host_serial_esp32/lp_analog_i2c.rs` — same addresses, same sequence,
+/// same log line; this file has no tests, so keep them in step by hand.
+const LPPERI_CLK_EN = 0x600b2800;
+const LPPERI_RESET_EN = 0x600b2804;
+const LP_ANA_I2C_BIT = 0x20000000; // bit 29 in both registers above
+const LP_I2C_ANA_MST_I2C0_CTRL = 0x600b2400;
+const LP_I2C_ANA_MST_BUSY = 0x02000000; // bit 25
+
+/// Undo the LP-domain state a fresh board's factory firmware leaves behind,
+/// so the bootloader we just wrote can boot on the reset that follows.
+///
+/// ESP-IDF apps gate the LP peripheral clocks they do not use — `LPPERI_CLK_EN`
+/// bit 29, the LP analog I2C clock, among them. Our merged image's
+/// second-stage bootloader (ESP-IDF v5.1-beta1, bundled by espflash 3.3.0)
+/// drives the analog bus through the LP aperture, and every reset a flasher
+/// can send is HP-only, so on a factory-fresh board it hangs on its first
+/// regi2c write (`Saved PC:0x4086ed7a`) until someone replugs the board.
+/// Bench-proven fix (2026-09-06, XIAO ESP32C6): set the bit AND pulse
+/// `LPPERI_RESET_EN` bit 29 — the clock alone does not clear the latched
+/// busy — then the ordinary hard reset boots LightPlayer.
+///
+/// C6 only; silent when the clock is on and the master idle. Best-effort: a
+/// failed register call is logged and the flash still ends in a reset — the
+/// board may then need the replug it always needed. See
+/// `docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.md`.
+async function restoreLpAnalogI2cClock(loader, chipName, knownChipIds, terminal) {
+  if (chipIdFrom(chipName, knownChipIds) !== "esp32c6") {
+    return;
+  }
+  try {
+    const clkBefore = (await loader.readReg(LPPERI_CLK_EN)) >>> 0;
+    const ctrl = (await loader.readReg(LP_I2C_ANA_MST_I2C0_CTRL)) >>> 0;
+    const clockWasGated = (clkBefore & LP_ANA_I2C_BIT) === 0;
+    const masterWasBusy = (ctrl & LP_I2C_ANA_MST_BUSY) !== 0;
+    if (!clockWasGated && !masterWasBusy) {
+      return;
+    }
+    await loader.writeReg(LPPERI_CLK_EN, (clkBefore | LP_ANA_I2C_BIT) >>> 0, 0xffffffff);
+    const resetBefore = (await loader.readReg(LPPERI_RESET_EN)) >>> 0;
+    await loader.writeReg(LPPERI_RESET_EN, (resetBefore | LP_ANA_I2C_BIT) >>> 0, 0xffffffff);
+    await loader.writeReg(LPPERI_RESET_EN, (resetBefore & ~LP_ANA_I2C_BIT) >>> 0, 0xffffffff);
+    const clkAfter = (await loader.readReg(LPPERI_CLK_EN)) >>> 0;
+    const busyAfter = ((await loader.readReg(LP_I2C_ANA_MST_I2C0_CTRL)) & LP_I2C_ANA_MST_BUSY) !== 0;
+    const what = clockWasGated
+      ? "restored the LP analog I2C clock the previous firmware left gated"
+      : "reset the LP analog I2C master the previous firmware left busy";
+    const busy = busyAfter ? "busy still set; the board may need a replug" : "busy cleared";
+    terminal.writeLine(
+      `${what} (LPPERI_CLK_EN 0x${hex32(clkBefore)} -> 0x${hex32(clkAfter)}, ${busy})`,
+    );
+  } catch (error) {
+    terminal.writeLine(`warning: LP analog I2C clock check failed: ${errorMessage(error)}`);
+  }
+}
+
+function hex32(value) {
+  return (value >>> 0).toString(16).padStart(8, "0");
 }
 
 /// The chip id a reported name belongs to — the JS half of
