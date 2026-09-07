@@ -107,10 +107,13 @@ pub enum HomeOp {
     /// Deviates from D17 (the examples place is unbuilt and node authoring
     /// makes an empty project genuinely useful; see
     /// `docs/adr/2026-07-27-node-authoring-operations.md`). No name
-    /// prompt: the template's default label is slugged/dated/deduped by
-    /// the library, and rename lives on the card kebab.
+    /// PROMPT — `name` is the menu's optional field: `None` (or blank)
+    /// falls back to the template's default label, slugged/dated/deduped
+    /// by the library, and rename lives on the card kebab and in the
+    /// project's own settings.
     CreateProject {
         template: ProjectTemplate,
+        name: Option<String>,
     },
     /// Create a project BUILT AROUND a library pattern's export, and open
     /// it (module authoring unit, P5): the pattern-project rig with the
@@ -216,13 +219,14 @@ impl ControllerOp for HomeOp {
             // and the menu's own rows carry the per-template labels.
             Self::CreateProject {
                 template: ProjectTemplate::Blank,
+                ..
             } => ActionMeta::new(
                 "New",
                 "Create a blank project and open it.",
                 ActionPriority::Secondary,
             )
             .with_icon("add"),
-            Self::CreateProject { template } => ActionMeta::new(
+            Self::CreateProject { template, .. } => ActionMeta::new(
                 template.label(),
                 match template {
                     ProjectTemplate::Pattern1d => {
@@ -348,12 +352,15 @@ mod tests {
             },
             HomeOp::CreateProject {
                 template: ProjectTemplate::Blank,
+                name: None,
             },
             HomeOp::CreateProject {
                 template: ProjectTemplate::Pattern1d,
+                name: None,
             },
             HomeOp::CreateProject {
                 template: ProjectTemplate::Pattern2d,
+                name: None,
             },
         ] {
             assert_eq!(
@@ -373,6 +380,7 @@ mod tests {
         assert_eq!(
             HomeOp::CreateProject {
                 template: ProjectTemplate::Blank,
+                name: None,
             }
             .default_action_meta()
             .label,
@@ -380,9 +388,12 @@ mod tests {
         );
         for template in [ProjectTemplate::Pattern1d, ProjectTemplate::Pattern2d] {
             assert_eq!(
-                HomeOp::CreateProject { template }
-                    .default_action_meta()
-                    .label,
+                HomeOp::CreateProject {
+                    template,
+                    name: None
+                }
+                .default_action_meta()
+                .label,
                 template.label(),
             );
         }

@@ -189,6 +189,12 @@ pub struct StudioController {
     /// Cached gallery inputs, hydrated from a host catalog snapshot by
     /// [`Self::refresh_library`] — `view()` never reads a live store.
     home_inputs: Option<HomeInputs>,
+    /// The library half of a rename made while the project was OPEN: the
+    /// `(uid, name)` whose directory slug still has to move. The manifest
+    /// name was patched at once through the open handle; the catalog rename
+    /// (a directory move under a lock the open project holds) waits for the
+    /// close, and runs at the next library settle after it.
+    pending_reslug: Option<(String, String)>,
     /// A library re-hydration is due (attach, home op, save, close, or a
     /// cross-tab `LibraryChanged` ping). Drained at the end of every
     /// dispatch and by the actor after each batch.
@@ -320,6 +326,7 @@ impl StudioController {
             last_log_only_publish: f64::NEG_INFINITY,
             library_host: None,
             home_inputs: None,
+            pending_reslug: None,
             library_refresh_pending: false,
             pending_open: None,
             card_ui: std::collections::HashMap::new(),
@@ -1642,6 +1649,7 @@ impl StudioController {
         Some(crate::UiChromeSessionControl {
             kind: crate::UiChromeSessionKind::Sim,
             key: card.identity_key().to_string(),
+            device: None,
             // The control renders the sim's board as a suffix, so the
             // name stays the kind.
             name: "Sim".to_string(),
@@ -1701,7 +1709,13 @@ impl StudioController {
         Some(crate::UiChromeSessionControl {
             kind: crate::UiChromeSessionKind::Device,
             key: format!("device:{}", attachment.uid),
-            name: attachment.name.clone(),
+            device: Some(attachment.device),
+            // The roster's LIVE title, so a rename made from this very
+            // panel shows up in the segment at once; the attach-time
+            // snapshot only covers a device the roster has since dropped.
+            name: device
+                .map(lpa_devices::Device::title)
+                .unwrap_or_else(|| attachment.name.clone()),
             board: attachment
                 .board_id
                 .as_deref()
@@ -1977,8 +1991,38 @@ impl StudioController {
     /// settle. Called at the end of every dispatch and by the actor after
     /// each command batch, so host futures always get driven even when a
     /// close happened on a synchronous path.
+    /// The deferred half of a rename made while its project was open: once
+    /// the project is no longer the active library package (its close has
+    /// been released just above), move the library directory to the new
+    /// name with the ordinary catalog rename — the same op the gallery's
+    /// kebab runs, so the slug, the manifest and the cloud's `Renamed`
+    /// trigger all land the way a closed-project rename lands them.
+    ///
+    /// A rename that never gets its close (the tab is shut first) keeps the
+    /// manifest name it already wrote; only the dated directory slug stays
+    /// behind, which the next gallery rename fixes.
+    async fn run_pending_reslug(&mut self) {
+        let Some((uid, name)) = self.pending_reslug.clone() else {
+            return;
+        };
+        if self.project.active_library_uid().as_deref() == Some(uid.as_str()) {
+            return;
+        }
+        self.pending_reslug = None;
+        if let Err(error) = self
+            .run_catalog_op(CatalogOp::Rename {
+                uid: uid.clone(),
+                new_slug: name,
+            })
+            .await
+        {
+            log::warn!("library slug of {uid} did not follow its rename: {error}");
+        }
+    }
+
     pub async fn settle_library(&mut self) {
         self.project.release_closed_library_projects().await;
+        self.run_pending_reslug().await;
         if !self.library_refresh_pending {
             return;
         }
@@ -2426,19 +2470,22 @@ impl StudioController {
                     )
                     .await;
             }
-            HomeOp::CreateProject { template } => {
+            HomeOp::CreateProject { template, name } => {
                 // Create-and-open (the D17 deviation, 2026-07-27): the
                 // package lands in the library — slugged/dated/deduped by
-                // the store from the template's label; rename lives on the
-                // card kebab — then opens like any card, so the user lands
-                // in the editor with something to do next. `Blank` sends no
-                // files at all, so the historical path is untouched.
+                // the store from the name the menu's optional field carried,
+                // else the template's label; rename lives on the card kebab
+                // and in the project's settings — then opens like any card,
+                // so the user lands in the editor with something to do next.
+                // `Blank` sends no files at all, so the historical path is
+                // untouched.
                 let files = crate::app::home::template_project_files(template)?;
+                let name = name
+                    .map(|name| name.trim().to_string())
+                    .filter(|name| !name.is_empty())
+                    .unwrap_or_else(|| template.default_project_name().to_string());
                 let outcome = self
-                    .run_catalog_op(CatalogOp::Create {
-                        name: template.default_project_name().to_string(),
-                        files,
-                    })
+                    .run_catalog_op(CatalogOp::Create { name, files })
                     .await?;
                 let created = outcome.summary.ok_or_else(|| {
                     UiError::MissingSession("create produced no package".to_string())
@@ -2480,6 +2527,22 @@ impl StudioController {
                     return Err(UiError::UnsupportedAction(
                         "a project name cannot be empty".to_string(),
                     ));
+                }
+                // The project OPEN in this tab — the one whose settings row
+                // or gallery card was just edited while it runs — cannot go
+                // through the catalog: the host refuses structural ops on
+                // it (`OpenInThisTab`, the project-before-catalog rule).
+                // Its name is patched through its own handle instead, and
+                // the library directory follows when the project closes
+                // (`run_pending_reslug`).
+                if self.project.active_library_uid().as_deref() == Some(uid.as_str()) {
+                    let renamed = {
+                        let server = self.pool.lens_session_mut()?.client_mut()?;
+                        self.project.rename_active_project(server, name).await?
+                    };
+                    self.pending_reslug = Some((uid, renamed.clone()));
+                    return Ok(UiNotices::new()
+                        .with_notice(UiNotice::info(format!("Renamed to {renamed}"))));
                 }
                 let outcome = self
                     .run_catalog_op(CatalogOp::Rename {
@@ -2922,6 +2985,15 @@ impl StudioController {
     /// instead of one of them being a toast the card never hears about.
     async fn execute_device_push_op(&mut self, op: crate::DevicePushOp) -> UiResult {
         self.yield_lens_wire_for(&crate::DeviceAction::Push { device: op.device });
+        // The picker's "name the board to match" offer: a user-stream
+        // rename, folded before the push exactly as the card's own Rename
+        // would be.
+        if let Some(name) = op.device_name.clone() {
+            self.fold_device_input(crate::DeviceInput::Action(crate::DeviceAction::SetName {
+                device: op.device,
+                name,
+            }));
+        }
         let staged = self.prepare_push(&op.source).await;
         if let Err(reason) = &staged {
             log::warn!("nothing to push to {:?}: {reason}", op.device);
@@ -2960,9 +3032,10 @@ impl StudioController {
                 })
                 .await?
             }
-            crate::PushSource::NewForBoard { board_id } => {
+            crate::PushSource::NewForBoard { board_id, name } => {
                 self.install_for_push(CatalogOp::GenerateForBoard {
                     board_id: board_id.clone(),
+                    name: name.clone(),
                 })
                 .await?
             }
@@ -3091,17 +3164,25 @@ impl StudioController {
 
     /// The auto-name that precedes a Flash on a still-unnamed board, if one
     /// is due. `None` for every other gesture, for a named board (a re-flash
-    /// must not rename), and for a target the roster does not hold.
+    /// must not rename), for a Flash that carries the name the user typed
+    /// at setup (the model records that one itself), and for a target the
+    /// roster does not hold.
     fn derive_flash_name_action(
         &self,
         action: &crate::DeviceAction,
     ) -> Option<crate::DeviceAction> {
         let crate::DeviceAction::Flash {
-            device, board_id, ..
+            device,
+            board_id,
+            name,
+            ..
         } = action
         else {
             return None;
         };
+        if name.is_some() {
+            return None;
+        }
         let named = self
             .devices
             .roster()
@@ -5403,6 +5484,60 @@ mod tests {
         assert!(!home.examples.is_empty(), "examples always show");
     }
 
+    /// The New menu's optional name: a typed name is what the library dates
+    /// and slugs; blank falls back to the template's label. The follow-on
+    /// open errs on host (no sim runtime), exactly as the create test below
+    /// documents — the package sticks either way.
+    #[test]
+    fn home_create_project_takes_the_menus_optional_name() {
+        use crate::app::library::{LibraryStore, MemoryLibraryHost};
+        use crate::{HOME_NODE_ID, HomeOp};
+        use lpfs::LpFsMemory;
+
+        let mut studio = StudioController::new(|| 42.0);
+        let counter = Rc::new(RefCell::new(0u8));
+        let store = LibraryStore::new(
+            Rc::new(RefCell::new(LpFsMemory::new())),
+            Rc::new(move || {
+                *counter.borrow_mut() += 1;
+                [*counter.borrow(); 16]
+            }),
+            Rc::new(|| "2026-09-06-1010".to_string()),
+        );
+        studio.attach_library(Rc::new(MemoryLibraryHost::new(
+            store.clone(),
+            Rc::new(|| 42.0),
+        )));
+        let home_action = |op: HomeOp| UiAction::from_op(ControllerId::new(HOME_NODE_ID), op);
+
+        block_on_ready(studio.dispatch(home_action(HomeOp::CreateProject {
+            template: crate::ProjectTemplate::Blank,
+            name: Some("  Porch sign ".to_string()),
+        })))
+        .expect_err("host test builds have no sim runtime to open into");
+        block_on_ready(studio.dispatch(home_action(HomeOp::CreateProject {
+            template: crate::ProjectTemplate::Blank,
+            name: Some("   ".to_string()),
+        })))
+        .expect_err("host test builds have no sim runtime to open into");
+
+        let mut slugs: Vec<String> = store
+            .list()
+            .expect("library lists")
+            .into_iter()
+            .map(|summary| summary.slug)
+            .collect();
+        slugs.sort();
+        assert_eq!(
+            slugs,
+            vec![
+                "2026-09-06-1010-porch-sign".to_string(),
+                "2026-09-06-1010-project".to_string(),
+            ],
+            "typed name slugged and dated; blank fell back to the template's label"
+        );
+    }
+
     #[test]
     fn home_ops_rename_duplicate_import_and_delete_library_packages() {
         use crate::app::library::{
@@ -5522,6 +5657,7 @@ mod tests {
         for _ in 0..2 {
             block_on_ready(studio.dispatch(home_action(HomeOp::CreateProject {
                 template: crate::ProjectTemplate::Blank,
+                name: None,
             })))
             .expect_err("host test builds have no sim runtime to open into");
         }

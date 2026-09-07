@@ -1794,6 +1794,47 @@ fn pick_popover_examples() -> Vec<UiExampleCard> {
 }
 
 #[story(
+    description = "The gallery pick popover open on its NEW tab, the one source that has no name yet. Under the starter card sits the optional Project name field, prefilled with the board's own title — a piece and the board that runs it usually share a name, so leaving it is the common case and the hint says so. Typing a different name swaps the hint for one offer, ticked by default: name the board the same. Nothing here is a step — the CTA in the verb row still dispatches one Push, now carrying the project's name (and, when ticked, the board's rename) as parameters. The board's rename is only ever offered on a NEW project; an example or a library project pushed to the board never renames it."
+)]
+fn device_pick_popover_new_tab() -> Element {
+    rsx! {
+        section { class: "tw:min-h-[520px] tw:w-[420px] tw:p-4",
+            div { class: "tw:flex tw:h-[30px] tw:min-w-0 tw:items-center tw:gap-1.5 tw:overflow-hidden tw:whitespace-nowrap",
+                ProjectPickPopover {
+                    card: pick_popover_card(),
+                    projects: pick_popover_library(),
+                    examples: pick_popover_examples(),
+                    initially_open: true,
+                    initial_pick: Some("new:seeed/xiao-esp32-c6".to_string()),
+                    on_action: |_| {},
+                }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The device card's header ⋯ menu, open: the project card's menu grammar on the device card, holding the one verb that acts on the ENTRY rather than the board — Rename, as an inline form prefilled with the card's current title (here the derived \"<board> · <Mon D>\" a flash minted). Submitting dispatches the model's own SetName and closes the menu; the name is Studio's (persisted to the registry) and is never written to the board. Every board verb keeps its zone; this is a menu, not a fourth verb row. The pending card carries no menu — a link that has not identified itself has no intent to write a name into, and names itself through the board pick's name field instead."
+)]
+fn devices_card_menu_open() -> Element {
+    let card = roster_fixture().roster.devices.remove(0);
+    rsx! {
+        section { class: "tw:min-h-[560px] tw:p-4",
+            div { class: "tw:w-[400px]",
+                DeviceRosterCard {
+                    card,
+                    open_uid: Some("dev000000daqf6dvvqz".to_string()),
+                    projects: packages(),
+                    examples: examples(),
+                    menu_initially_open: true,
+                    on_action: |_| {},
+                }
+            }
+        }
+    }
+}
+
+#[story(
     description = "The gallery pick popover, open (P6, AC8). The card's verb row holds ONE 30px control — the trigger — and the options live in a panel in the browser's top layer, so a library of forty projects can no longer make the card taller than the viewport (the reflow rule, AC2). Tabs are the three sources core's push_offer already groups, with their counts; the search box filters titles client-side; the cards are the gallery's own thumbs with their provenance, and a picked one wears the app-wide selection grammar (spectrum ring + wash + check). Picking closes the panel and updates the trigger — nothing is journaled until the CTA beside it dispatches the Push."
 )]
 fn device_pick_popover_open() -> Element {
@@ -1813,7 +1854,7 @@ fn device_pick_popover_open() -> Element {
 }
 
 #[story(
-    description = "The board pick popover, open and filtered (P6, AC4; renderings P10). The chip the boot banner named narrows the served catalog, and the panel SAYS so — which chip, which source answered it, how many boards fit — with \"show all\" as the escape; the flash preflight's chip guard, not the filter, is what makes a wrong pick fail safely, which is what the foot line is for. Each tile now LEADS with the board as lpa-boards draws it — the same sidecar and the same renderer the boards page uses, turned a quarter turn and fitted to a 56px band, so a devkit lies along the band instead of standing in it as a sliver and tiles of a three-to-one height range still line their names up — over the name, its manufacturer and flash, and its family, marked green only where it matches the detected chip. The trigger's swatch carries the picked board's own silhouette. Two C6 boards fit, so nothing is preselected and the Flash verb waits: the pin map is written to the device, so the card never guesses."
+    description = "The board pick popover, open and filtered (P6, AC4; renderings P10). The chip the boot banner named narrows the served catalog, and the panel SAYS so — which chip, which source answered it, how many boards fit — with \"show all\" as the escape; the flash preflight's chip guard, not the filter, is what makes a wrong pick fail safely, which is what the foot line is for. Each tile now LEADS with the board as lpa-boards draws it — the same sidecar and the same renderer the boards page uses, turned a quarter turn and fitted to a 56px band, so a devkit lies along the band instead of standing in it as a sliver and tiles of a three-to-one height range still line their names up — over the name, its manufacturer and flash, and its family, marked green only where it matches the detected chip. The trigger's swatch carries the picked board's own silhouette. Two C6 boards fit, so nothing is preselected and the Flash verb waits: the pin map is written to the device, so the card never guesses. Above the foot line sits the optional Board name field: blank keeps the derived \"<board> · <Mon D>\" the app mints at flash (shown as the placeholder once a board is picked), and a typed name rides the Flash gesture itself — the only road a still-pending link's name can take, since it has no intent to rename until this gesture adopts it. The Update verb's pick carries no field: that board already has its name."
 )]
 fn device_board_pick_open() -> Element {
     board_pick_story(BoardPickMode::Row, ("esp32c6", ChipSource::BootBanner))

@@ -4650,6 +4650,81 @@ impl ProjectController {
         })
     }
 
+    /// Rename the OPEN library project: patch the container manifest's
+    /// `name` through the project's own exclusive-locked `package_fs` — the
+    /// seam [`Self::set_module_export`] uses, because a
+    /// [`crate::app::library::CatalogOp::Rename`] would refuse
+    /// `OpenInThisTab` for the very project being edited — then mirror the
+    /// bytes into the runtime copy so the save path's library/runtime hash
+    /// tripwire stays quiet. Returns the trimmed name that was written.
+    ///
+    /// The library's dated directory slug is NOT moved here: the open
+    /// handle is chrooted to it. The studio controller re-slugs the package
+    /// with the ordinary catalog rename once this project closes.
+    pub async fn rename_active_project(
+        &mut self,
+        server: &mut StudioServerClient,
+        name: &str,
+    ) -> Result<String, UiError> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(UiError::UnsupportedAction(
+                "a project name cannot be empty".to_string(),
+            ));
+        }
+        let root = self.project_fs_root.clone().ok_or_else(|| {
+            UiError::Project(
+                "the connected project's filesystem root is unknown; cannot rename".to_string(),
+            )
+        })?;
+        let now = {
+            let context = self.library.as_ref().ok_or_else(no_library_error)?;
+            (context.now_secs)()
+        };
+
+        // --- library write (the manifest's home) --------------------------
+        let (bytes, uid) = {
+            let context = self.library.as_ref().ok_or_else(no_library_error)?;
+            let active = context.active.as_ref().ok_or_else(|| {
+                UiError::UnsupportedAction(
+                    "this project is not in your library, so it has no name to change".to_string(),
+                )
+            })?;
+            if active.transient.is_some() {
+                // A view session's copy is someone else's document (or an
+                // example's): naming it means owning it first.
+                return Err(UiError::UnsupportedAction(
+                    "save a copy of this project first, then name it".to_string(),
+                ));
+            }
+            let fs = active.handle.package_fs.borrow();
+            crate::app::library::package_manifest::set_name(&*fs, name)
+                .map_err(library_ui_error)?;
+            let bytes = fs
+                .read_file(lpc_model::AsLpPath::as_path(
+                    &crate::app::library::package_manifest::MANIFEST_PATH,
+                ))
+                .map_err(|e| library_ui_error(crate::app::library::LibraryError::from(e)))?;
+            (bytes, active.handle.uid.to_string())
+        };
+
+        // --- runtime mirror (keeps the two copies hash-identical) ---------
+        server.fs_write(&root.join("project.json"), &bytes).await?;
+
+        {
+            let context = self.library.as_mut().ok_or_else(no_library_error)?;
+            if let Some(active) = context.active.as_mut() {
+                // The bytes on disk moved without a runtime commit, so the
+                // history head is stale until this snapshot lands.
+                active.handle.record_save(now).map_err(library_ui_error)?;
+            }
+            // A save happened, as far as the library and the cloud are
+            // concerned: the manifest is what carries the name they show.
+            context.host.notify_saved(&uid);
+        }
+        Ok(name.to_string())
+    }
+
     /// Every panel control a card subtree already derived whose
     /// `panel_target` names `scope`, deduplicated per channel.
     ///

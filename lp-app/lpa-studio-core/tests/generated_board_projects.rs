@@ -59,8 +59,8 @@ fn every_catalog_board_generates_a_valid_targeted_project() {
         let wire = board
             .default_led_wire()
             .unwrap_or_else(|| panic!("{board_id}: catalog board declares no default LED wire"));
-        let project =
-            generate_board_project(board_id).unwrap_or_else(|error| panic!("{board_id}: {error}"));
+        let project = generate_board_project(board_id, None)
+            .unwrap_or_else(|error| panic!("{board_id}: {error}"));
 
         // 1. schema conformance, file by file
         for (path, bytes) in &project.files {
@@ -155,6 +155,7 @@ fn generate_for_board_installs_a_targeted_library_package() {
         &store,
         CatalogOp::GenerateForBoard {
             board_id: "domraem/dom-z-102".to_string(),
+            name: None,
         },
         1.0,
     )

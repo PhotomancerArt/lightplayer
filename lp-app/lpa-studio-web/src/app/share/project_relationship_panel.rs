@@ -161,6 +161,10 @@ pub fn ProjectRelationshipPanel(
     /// Stories only: mount with the ⋯ overflow already disclosed.
     #[props(default = false)]
     menu_open: bool,
+    /// Dispatch for the Details sections' own controls (the project
+    /// settings' rename). `None` renders them read-only.
+    #[props(default)]
+    on_action: Option<EventHandler<lpa_studio_core::UiAction>>,
 ) -> Element {
     // Captured once per popover-open (the popover unmounts its content on
     // close): a bump after mount = the fork happened under this very panel.
@@ -188,7 +192,7 @@ pub fn ProjectRelationshipPanel(
                 }
             }
             if let Some(details) = details.clone() {
-                ProjectDetailSections { content: details }
+                ProjectDetailSections { content: details, on_action }
             }
         };
     }

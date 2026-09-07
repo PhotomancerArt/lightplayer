@@ -78,6 +78,7 @@ use lpa_studio_core::{
 
 use super::card_thumb::{CardThumb, thumb_swatch_style};
 use super::device_roster_card::{RowCta, RowCtaDisabled, row_note_class};
+use super::package_card::platform_now_secs;
 use super::thumb_poster::cached_poster;
 use crate::base::{
     OPTION_CARD_CHECK_CLASS, PopoverButton, PopoverCloseHandle, PopoverPlacement, StudioIcon,
@@ -165,12 +166,22 @@ pub(crate) fn ProjectPickPopover(
     /// Stories only: mount the panel open (capture cannot click).
     #[props(default = false)]
     initially_open: bool,
+    /// Stories only: the choice key to mount picked, so a capture can open
+    /// the panel on the tab that pick lives in (the New tab's name form).
+    #[props(default)]
+    initial_pick: Option<String>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     // Every hook first: the "nothing to offer" row below is an early
     // return, and a hook behind one would shift the hook order the frame a
     // library appeared.
-    let mut pick = use_signal(|| None::<String>);
+    let mut pick = use_signal(|| initial_pick);
+    // The New tab's naming (optional, like everything about naming here):
+    // the project's name — `None` until typed, meaning "the board's own
+    // name", which is what a board and the piece it runs usually share —
+    // and whether a name typed for the project renames the board to match.
+    let mut typed_project_name = use_signal(|| None::<String>);
+    let mut name_board_too = use_signal(|| true);
 
     let device = card.id;
     let offer = push_offer(&card, &projects, &examples);
@@ -206,7 +217,33 @@ pub(crate) fn ProjectPickPopover(
         .as_ref()
         .map(|choice| choice.key.clone())
         .unwrap_or_else(|| "no-pick".to_string());
-    let source = chosen.map(|choice| choice.source);
+    // The effective project name for a New push: what was typed, else the
+    // board's title. The board is renamed to match only when the name
+    // actually differs and the offer is still ticked.
+    let device_title = card.title.trim().to_string();
+    let project_name = typed_project_name()
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| device_title.clone());
+    let differs_from_board = project_name != device_title;
+    let naming = NewProjectNaming {
+        name: project_name.clone(),
+        differs_from_board,
+        name_board_too: name_board_too(),
+    };
+    let source = chosen.map(|choice| match choice.source {
+        PushSource::NewForBoard { board_id, .. } => PushSource::NewForBoard {
+            board_id,
+            name: Some(project_name.clone()),
+        },
+        other => other,
+    });
+    let device_name = match &source {
+        Some(PushSource::NewForBoard { .. }) if differs_from_board && name_board_too() => {
+            Some(project_name.clone())
+        }
+        _ => None,
+    };
 
     rsx! {
         div { class: trigger_slot_class(),
@@ -231,13 +268,19 @@ pub(crate) fn ProjectPickPopover(
                 ProjectPickPanel {
                     offer,
                     selected: selected_key,
+                    naming,
                     on_pick: move |key: String| pick.set(Some(key)),
+                    on_name: move |name: String| typed_project_name.set(Some(name)),
+                    on_name_board_too: move |ticked: bool| name_board_too.set(ticked),
                 }
             }
         }
         match source {
             Some(source) => rsx! {
-                RowCta { action: DevicePushOp::action_for(device, source.clone()), on_action }
+                RowCta {
+                    action: DevicePushOp { device, source: source.clone(), device_name }.into_action(),
+                    on_action,
+                }
             },
             // Several things to choose from and none preselected: the verb
             // waits rather than guessing which project the user meant.
@@ -257,12 +300,27 @@ pub(crate) fn ProjectPickPopover(
 /// A component (rather than an inline fragment) so it has a scope of its own
 /// to read the enclosing popover's [`PopoverCloseHandle`] from — picking is a
 /// completed gesture, so it closes (the add-node picker's rule).
+/// The New tab's naming state, as the panel draws it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct NewProjectNaming {
+    /// The effective project name (typed, else the board's title).
+    name: String,
+    /// Whether that name differs from the board's — the only case the
+    /// "name the board to match" offer applies to.
+    differs_from_board: bool,
+    /// The offer's tick.
+    name_board_too: bool,
+}
+
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ProjectPickPanel(
     offer: PushOffer,
     selected: Option<String>,
+    naming: NewProjectNaming,
     on_pick: EventHandler<String>,
+    on_name: EventHandler<String>,
+    on_name_board_too: EventHandler<bool>,
 ) -> Element {
     let close = try_consume_context::<PopoverCloseHandle>();
     // Open on the tab the current pick already lives in — the palette
@@ -296,6 +354,9 @@ fn ProjectPickPanel(
         })
         .collect();
     let new_unavailable = offer.new_project_unavailable.clone();
+    // The name form rides the New tab under its one card: a starter is the
+    // one source that has no name yet.
+    let show_naming = current == PickTab::New && !visible.is_empty();
     // The visible choices in their sections, encounter order: the Examples
     // tab reads "Projects" then "Patterns" (core's grouping); the other
     // tabs have one unlabelled section.
@@ -382,6 +443,32 @@ fn ProjectPickPanel(
                     }
                 }
             }
+            if show_naming {
+                div { class: panel_name_row_class(),
+                    span { class: panel_name_label_class(), "Project name" }
+                    input {
+                        class: panel_name_input_class(),
+                        r#type: "text",
+                        aria_label: "Project name",
+                        value: "{naming.name}",
+                        oninput: move |event| on_name.call(event.value()),
+                    }
+                }
+                if naming.differs_from_board {
+                    label { class: panel_name_offer_class(),
+                        input {
+                            r#type: "checkbox",
+                            checked: naming.name_board_too,
+                            onchange: move |event| on_name_board_too.call(event.checked()),
+                        }
+                        "Name the board the same"
+                    }
+                } else {
+                    p { class: panel_name_hint_class(),
+                        "Named after the board \u{2014} a piece and the board that runs it usually share a name."
+                    }
+                }
+            }
             p { class: panel_foot_class(), "Same cards as the Explore and Projects pages." }
         }
     }
@@ -464,6 +551,10 @@ pub(crate) fn BoardPickPopover(
     // Hooks before the early return, for the same reason the gallery's are.
     let mut show_all = use_signal(|| false);
     let mut pick = use_signal(|| None::<String>);
+    // The optional name typed at setup. Blank leaves the derived
+    // "<board> · <Mon D>" (the no-naming-step ruling); typed, it rides the
+    // Flash as the board's name from the first hello on.
+    let mut typed_name = use_signal(String::new);
 
     let chip_name = chip.as_ref().map(|(name, _)| name.clone());
     // Show-all is local UI state: the escape from the chip filter, never a
@@ -501,12 +592,33 @@ pub(crate) fn BoardPickPopover(
         .cloned();
 
     let flash_action = move |choice: &FlashBoardChoice| {
+        let name = typed_name.read().trim().to_string();
         DevicesOp::action_for(DeviceAction::Flash {
             device,
             board_id: choice.board_id.clone(),
             build_id: choice.build_id.clone(),
             park_first: choice.park_first,
+            name: (!name.is_empty()).then_some(name),
         })
+    };
+    // What the board will be called if the field stays blank: the derived
+    // name the app mints for the picked board (the collision suffix is the
+    // app's, at flash time).
+    let name_placeholder = chosen
+        .as_ref()
+        .map(|choice| {
+            lpa_studio_core::app::devices::derive_flash_name(
+                &choice.title,
+                platform_now_secs(),
+                &[],
+            )
+        })
+        .unwrap_or_else(|| "Named after the board".to_string());
+    // Only the needs-firmware row names a board: an update is a re-flash of
+    // a board that already has its name.
+    let name_field = match mode {
+        BoardPickMode::Row => Some(typed_name()),
+        BoardPickMode::Verb => None,
     };
 
     let lead = board_filter_lead(
@@ -534,6 +646,9 @@ pub(crate) fn BoardPickPopover(
             selected: selected_id,
             lead,
             why,
+            name: name_field,
+            name_placeholder,
+            on_name: move |name: String| typed_name.set(name),
             escape_label: escape.as_ref().map(|escape| escape.label.clone()),
             escape_show_all: escape.map(|escape| escape.show_all).unwrap_or_default(),
             on_show_all: move |next: bool| show_all.set(next),
@@ -633,8 +748,16 @@ fn BoardPickPanel(
     why: Option<String>,
     escape_label: Option<String>,
     escape_show_all: bool,
+    /// The optional board-name field's value; `None` draws no field (the
+    /// Update verb's pick — that board has its name).
+    #[props(default)]
+    name: Option<String>,
+    /// What the board is called if the field stays blank.
+    #[props(default)]
+    name_placeholder: String,
     on_show_all: EventHandler<bool>,
     on_pick: EventHandler<String>,
+    on_name: EventHandler<String>,
 ) -> Element {
     let close = try_consume_context::<PopoverCloseHandle>();
 
@@ -696,6 +819,19 @@ fn BoardPickPanel(
                                 }
                             }
                         }
+                    }
+                }
+            }
+            if let Some(name) = name {
+                div { class: panel_name_row_class(),
+                    span { class: panel_name_label_class(), "Board name" }
+                    input {
+                        class: panel_name_input_class(),
+                        r#type: "text",
+                        aria_label: "Board name (optional)",
+                        placeholder: "{name_placeholder}",
+                        value: "{name}",
+                        oninput: move |event| on_name.call(event.value()),
                     }
                 }
             }
@@ -977,6 +1113,30 @@ fn panel_foot_class() -> &'static str {
 
 fn panel_note_class() -> &'static str {
     "tw:m-0 tw:text-[11.5px] tw:leading-snug tw:text-subtle-foreground"
+}
+
+/// The optional name row both panels carry above their foot line: a label
+/// and a field on one line, in the panel's own hairline grammar.
+fn panel_name_row_class() -> &'static str {
+    "tw:flex tw:min-w-0 tw:items-center tw:gap-2 tw:border-t tw:border-border-muted tw:px-2.5 tw:py-2"
+}
+
+fn panel_name_label_class() -> &'static str {
+    "tw:flex-none tw:text-[11px] tw:font-semibold tw:text-subtle-foreground"
+}
+
+/// The search box's dress, stretched to the row.
+fn panel_name_input_class() -> &'static str {
+    "tw:min-w-0 tw:flex-1 tw:appearance-none tw:rounded-xs tw:border tw:border-border tw:bg-card tw:px-2 tw:py-1 tw:text-[11.5px] tw:text-strong-foreground"
+}
+
+/// The "name the board the same" offer under the project-name row.
+fn panel_name_offer_class() -> &'static str {
+    "tw:flex tw:cursor-pointer tw:items-center tw:gap-1.5 tw:px-2.5 tw:pb-2 tw:text-[11px] tw:text-muted-foreground"
+}
+
+fn panel_name_hint_class() -> &'static str {
+    "tw:m-0 tw:px-2.5 tw:pb-2 tw:text-[11px] tw:leading-snug tw:text-dim-foreground"
 }
 
 fn panel_search_class() -> &'static str {

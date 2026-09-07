@@ -125,7 +125,7 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DeviceAction, DeviceActivityView, DeviceCardFeedView, DeviceEscape, DeviceFeedOp,
+    DeviceAction, DeviceActivityView, DeviceCardFeedView, DeviceEscape, DeviceFeedOp, DeviceId,
     DeviceLoadedProject, DeviceStatus, DeviceView, DevicesOp, FeedLiveness, FirmwareVerb,
     PendingLinkView, UiAction, UiExampleCard, UiPackageCard, UiStatus, device_escape_action,
     device_firmware_line, device_identity_line, device_status_kind, firmware_face_preview_sentence,
@@ -138,7 +138,10 @@ use super::device_pick_popover::{
 use super::device_terminal::DeviceTerminal;
 use super::play_feed_text::frame_age_label;
 use crate::app::node::lamp_view::LampView;
-use crate::core::{ActionButton, ActionButtonVariant, StatusChip};
+use crate::base::{
+    DetailPopover, DetailSection, PopoverCloseHandle, PopoverPlacement, StudioIcon, StudioIconName,
+};
+use crate::core::{ActionButton, ActionButtonVariant, StatusChip, quiet_action_class};
 
 /// One device card.
 #[component]
@@ -168,6 +171,9 @@ pub(crate) fn DeviceRosterCard(
     /// `None` = nothing honest to draw: the slot keeps its sentence.
     #[props(default)]
     feed: Option<DeviceCardFeedView>,
+    /// Open the header's ⋯ menu immediately (stories only).
+    #[props(default = false)]
+    menu_initially_open: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let device = card.id;
@@ -263,7 +269,15 @@ pub(crate) fn DeviceRosterCard(
                             title: "{card.title}",
                             "{card.title}"
                         }
-                        StatusChip { status }
+                        div { class: "tw:flex tw:flex-none tw:items-center tw:gap-1.5",
+                            StatusChip { status }
+                            DeviceCardMenu {
+                                device,
+                                title: card.title.clone(),
+                                initially_open: menu_initially_open,
+                                on_action,
+                            }
+                        }
                     }
                     // board · chip / MAC · firmware (AC3), split in core so
                     // a hello-only board still names its chip — two FIXED
@@ -525,6 +539,98 @@ pub(crate) fn DeviceRosterCard(
         }
     }
 }
+
+/// The header's ⋯ menu — the project card's grammar on the device card. The
+/// verbs that act on the ENTRY rather than on the board live here, and
+/// today that is one: Rename. Every board verb keeps its zone (P9), which
+/// is why this is a menu and not a fourth verb row.
+///
+/// Not on the pending card: a link that has not identified itself has no
+/// intent to write a name into — its name rides the Flash gesture instead
+/// (the board pick's name field).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn DeviceCardMenu(
+    device: DeviceId,
+    title: String,
+    #[props(default = false)] initially_open: bool,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    rsx! {
+        DetailPopover {
+            icon: StudioIconName::More,
+            label: "Device menu".to_string(),
+            title: "Rename this device.".to_string(),
+            placement: PopoverPlacement::BottomEnd,
+            initially_open,
+            trigger: rsx! {
+                StudioIcon { name: StudioIconName::More, size: 13 }
+            },
+            trigger_class: HEADER_MENU_TRIGGER_CLASS.to_string(),
+            trigger_open_class: format!(
+                "{HEADER_MENU_TRIGGER_CLASS} tw:bg-white/10 tw:text-strong-foreground"
+            ),
+            DeviceRenameSection { device, title, on_action }
+        }
+    }
+}
+
+/// The "Rename" section: one form, on the project card's Rename precedent
+/// (a form in the menu, never a dialog). Prefilled with what the card says
+/// now, so a board wearing the derived "<board> · <Mon D>" is a few
+/// keystrokes from a name of its own. Submitting dispatches `SetName` — the
+/// user-stream write the model persists to the registry (the name is
+/// Studio's, never written to the board) — and closes the menu: a rename is
+/// a completed gesture.
+///
+/// Shared with the header session control's device panel, which is the
+/// other place the name is shown.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub(crate) fn DeviceRenameSection(
+    device: DeviceId,
+    /// What the device is called right now — the field's starting value.
+    title: String,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let mut value = use_signal(|| title);
+    let close = try_consume_context::<PopoverCloseHandle>();
+
+    rsx! {
+        DetailSection { title: Some("Rename".to_string()),
+            form {
+                class: "tw:flex tw:gap-2",
+                onsubmit: move |event| {
+                    event.prevent_default();
+                    let name = value.read().trim().to_string();
+                    if name.is_empty() {
+                        return;
+                    }
+                    on_action.call(DevicesOp::action_for(DeviceAction::SetName { device, name }));
+                    if let Some(mut close) = close {
+                        close.close();
+                    }
+                },
+                input {
+                    class: RENAME_INPUT_CLASS,
+                    aria_label: "Device name",
+                    value: "{value}",
+                    oninput: move |event| value.set(event.value()),
+                }
+                button { class: quiet_action_class(), r#type: "submit", "Rename" }
+            }
+        }
+    }
+}
+
+/// The header menu's 20px quiet ⋯ trigger — the project card's
+/// (`CARD_MENU_TRIGGER_CLASS`), so the two cards' menus read as one
+/// control. Resets UA button chrome itself — Tailwind preflight is not
+/// loaded.
+const HEADER_MENU_TRIGGER_CLASS: &str = "tw:grid tw:h-5 tw:w-5 tw:flex-none tw:cursor-pointer tw:appearance-none tw:place-items-center tw:rounded tw:border-0 tw:bg-transparent tw:p-0 tw:text-muted-foreground tw:transition-colors tw:hover:bg-white/10 tw:hover:text-strong-foreground";
+
+/// The rename form's field — the project card's rename input, verbatim.
+const RENAME_INPUT_CLASS: &str = "tw:min-w-0 tw:flex-1 tw:rounded tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1 tw:text-sm tw:text-strong-foreground";
 
 /// One zone's 4px bar slot: present in every state, lit only when the
 /// activity running belongs to THIS zone.
