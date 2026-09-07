@@ -24,7 +24,7 @@
 //! | `sched` | the live event queue, with the sequence numbers that break ties |
 //! | `matrix` | the interrupt matrix's configuration (nothing, until P5) |
 //! | `rng` | the seeded PRNG's position |
-//! | `hook_calls`, `uart0` | observables a test compares |
+//! | `hook_calls`, `uart0`, `usb_sj` | observables a test compares |
 //!
 //! Watchpoints are **not** here: they live on the bus but they are derived
 //! from the hart's trigger CSRs, so [`crate::machine::Esp32C6Machine::restore`]
@@ -48,6 +48,9 @@ pub struct Snapshot {
     pub rng: u64,
     pub hook_calls: u64,
     pub uart0: Vec<u8>,
+    /// The USB-Serial-JTAG observation log — same rule as `uart0`: a restored
+    /// run must not still hold bytes from a future it no longer has.
+    pub usb_sj: Vec<u8>,
 }
 
 impl Snapshot {
@@ -62,5 +65,6 @@ impl Snapshot {
         self.regions.iter().map(Vec::len).sum::<usize>()
             + self.periph.iter().map(|(_, b)| b.len()).sum::<usize>()
             + self.uart0.len()
+            + self.usb_sj.len()
     }
 }

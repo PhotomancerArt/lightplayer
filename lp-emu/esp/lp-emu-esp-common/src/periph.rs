@@ -370,6 +370,16 @@ pub trait Peripheral {
     /// event tag and the bus routes the event back by it.
     fn attached(&mut self, _index: usize) {}
 
+    /// The machine is about to run: guest time is zero and the schedule is
+    /// empty. Called once per peripheral from
+    /// [`crate::bus::SocBus::start_peripherals`], after every block is
+    /// attached, with a full [`BusCx`] — the one place a peripheral can
+    /// schedule something *before* the guest touches it. A UART polling a
+    /// host source for bytes that may arrive before the guest has configured
+    /// the block is the case; nothing else needs it and the default is a
+    /// no-op.
+    fn started(&mut self, _cx: &mut BusCx<'_>) {}
+
     /// A scheduled event came due. `id` is whatever this peripheral passed
     /// to [`Scheduler::schedule_at`]; the bus routes it back by the
     /// peripheral index encoded in the id (see [`crate::bus::event_id`]).

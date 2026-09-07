@@ -21,6 +21,11 @@ lp-emu-esp-common = { path = "../lp-emu-esp-common" }
 lp-riscv-emu = { path = "../../lp-riscv-emu", features = ["std"] }
 log = { workspace = true }
 env_logger = { workspace = true }
+# `--probe esp_println::serial_jtag_printer::TIMED_OUT@3000`: the static's
+# ELF name is mangled with a hash nobody can type, so a probe is resolved by
+# demangling every symbol and matching the path. MIT/Apache-2.0, already in
+# the tree through the workspace's dependencies.
+rustc-demangle = "0.1"
 
 [dev-dependencies]
 test-log = { workspace = true }
@@ -29,3 +34,7 @@ test-log = { workspace = true }
 # than a boot; shelling out to `shasum` would make the assertion depend on
 # which host ran it.
 sha2 = "0.10"
+# `tests/harness_parity.rs` replays the harness capture against the committed
+# silicon transcript with M2's runner. Inside the `lp-emu/` fence (MIT), and
+# it mirrors `fw-checks` rather than importing it, so the fence lint passes.
+lp-emu-validate = { path = "../../lp-emu-validate" }

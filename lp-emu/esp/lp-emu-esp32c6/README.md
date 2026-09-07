@@ -138,6 +138,19 @@ against an unseeded block the ROM says "no reset" on a genuine power-on,
 `.rtc_fast.persistent` is never zeroed, and the firmware's `resetReason` is
 quietly wrong.
 
+P6 was the second candidate, and the answer was the same. The brief
+pre-approved hooks for the ROM console path (`uart_tx_one_char`,
+`uart_tx_flush`, `ets_get_printf_channel`) in case the ROM routed by a
+global its boot would have set. It does route by one — `ets_printf_uart`, a
+ROM `.bss` byte — and that byte is 0 after a direct load, which is UART0. So
+the spike image's tee and esp-println's `uart` printer reach the real ROM
+`uart_serial_tx_one_char`, which spins on `status.txfifo_cnt` and stores to
+the real FIFO, and the table is still empty. What P6 did add is the ROM's
+**initialised data** (`rom::seed_data`): the non-allocated `PROGBITS`
+sections of the ROM ELF are what the ROM startup copies into HP SRAM and
+what the mask ROM physically holds past its last `PT_LOAD`; without them
+`pp_rom_version` is NULL and the WiFi blob faults inside `_vsnprintf`.
+
 Note the base — `0x600B_0410` is **LP_CLKRST** (`0x600B_0400`), not LP_AON,
 which is at `0x600B_1000`. The generated register-name table is what caught
 that.
@@ -181,18 +194,20 @@ milestone owns.
 | `EFUSE` | `0x600B_0800` | modelled | memory seeded from `--efuse-mac`/`--efuse-rev` in esp-hal's byte order (`rd_mac_spi_sys_0/1/3`) |
 | `RNG` | `0x600B_2800` | modelled | `rng_data` (+0x08) = xorshift64\* from `--seed`; deterministic by design; other `LP_PERI` offsets accept |
 | `LP_CLKRST` | `0x600B_0400` | accept | `reset_cause` seeded 1 (POWERON) — the mask ROM's `rtc_get_reset_reason` reads it; `lp_clk_conf` = RC_SLOW |
-| `PCR` | `0x6009_6000` | accept | `sysclk_conf.clk_xtal_freq` pinned 40; `cpu_waiti_conf.cpu_wait_mode_force_on` pinned 0; `timergroup.timer_clk_conf` reset = XTAL |
+| `PCR` | `0x6009_6000` | accept | `sysclk_conf.clk_xtal_freq` pinned 40; `cpu_waiti_conf.cpu_wait_mode_force_on` pinned 0; `timergroup.timer_clk_conf` reset = XTAL; `uart(n).clk_conf` drives the two UART clock lines (reset = XTAL, enabled) |
 | `I2C_ANA_MST` | `0x600A_F800` | accept | `ana_conf0.cal_done` pinned 1; `i2c_ctrl(0/1).busy` pinned 0; `ana_conf2` reset 0 (master 1) |
 | `LP_I2C_ANA_MST` | `0x600B_2400` | accept | `i2c0_ctrl.I2C0_BUSY` (bit 25) pinned 0 — the bench's fourth spin site |
 | `ASSIST_DEBUG` | `0x600C_2000` | accept | `cpu0.debug_mode` pinned 0 (no debugger: watchpoints arm, `wfi` runs) |
 | `GPIO` | `0x6009_1000` | accept | `in_` and `pcpu_int` pinned 0; `enable`/`out` writes are trace lines (pins: M5) |
 | `IO_MUX` | `0x6009_0000` | accept | all 31 pads at reset `0x0800` |
 | `PMU`, `LP_AON`, `LP_APM`, `LP_APM0`, `HP_APM`, `MODEM_SYSCON`, `MODEM_LPCON`, `APB_SARADC`, `HP_SYS`, `TEE`, `LP_TEE`, `LP_IO`, `LP_TIMER`, `EXTMEM` | — | accept | written by `esp_hal::init`, read back as written; `LP_AON.store1` carries the calibration value |
-| `UART0`, `UART1` | `0x6000_0000/1000` | accept | the FIFO, thresholds and `RXFIFO_TOUT` are P6 |
-| `USB_DEVICE` | `0x6000_F000` | accept | reads 0: "host absent, FIFO full" — esp-println spins 50,000 iterations once and then drops output; the honest model is P6/M6 |
+| `UART0`, `UART1` | `0x6000_0000/1000` | modelled | 128-byte FIFOs; the shifter drains **at the configured baud in emulated time** (PCR clock line × `clkdiv`; reset `clkdiv = 347 + 3/16` = 115,200 from XTAL, *modeled* "as the ROM boot leaves it"); `rxfifo_full`/`txfifo_empty` as levels (`>`/`<` the `conf1` thresholds, per the TRM), `rxfifo_tout` in bit-times, `tx_done`, `rxfifo_ovf`, `reg_update` pulse; `at_cmd_char_det` never fires (stated, not modelled); sources 43/44. See "UART0 and the outside" |
+| `USB_DEVICE` | `0x6000_F000` | modelled | **no host attached**: `ep1_conf.serial_in_ep_data_free` = 1 until a `wr_done` with bytes, then 0 for ever; `serial_out_ep_data_avail` = 0; `int_raw.sof` never; `serial_in_empty` set at reset, never re-set after the seal; source 48. IN bytes go to the `usb-sj` observation sink. The attached / draining states are M6 |
 | `SPI0`, `SPI1` | `0x6000_2000/3000` | accept | a flash access spins on `SPI1.cmd` (the `SPIN` line names it) until M4 |
 | `RMT` | `0x6000_6000` | accept | `Rmt::new` runs in every image; channels, blocks and the WS281x waveform are M5 |
-| radio window | `0x600A_0000..9800` | **unmapped** | `IEEE802154` / WiFi MAC/BB — P6's stub; the shipped image's strict run stops here |
+| `WIFI_MAC` | `0x600A_0000..9800` | accept | the radio window as **one** block with coarse names (`mac` / `ieee802154` / `bb` — ours, nothing documents it), a `TOUCH` note per distinct offset, and the override list `wifi_stub::OVERRIDES` (five entries, one per `SPIN` the boot showed, each with the poll's disassembly beside it); `+0x4084` is the RX DMA base the `WIFI RX config` line reports |
+| `WIFI_PWR` | `0x600A_9900..F000` | accept | the undocumented gap after MODEM_SYSCON (the ROM's `tsf_hal_*` touch it first); `+0x3700` is a live **microsecond counter** (*modeled* `cycles / 160`) — the blob's `wait_i2c_sdm_stable` latches it and gives up after 9,999 ticks, and a remembered 0 never lets it |
+| `I2C_MST_MEM` | `0x600A_FC00..600B_0000` | accept | the analog I2C master's burst **command memory**, `I2C_ANA_MST + 0x400`, which the PAC's block (ending at `date`, `+0x34`) does not cover; libphy's `phy_i2c_master_cmd_mem_init` fills it and nothing reads it back |
 
 Two values worth repeating because they are *modeled*, not measured: the RTC
 slow clock is taken as 136 kHz (so the calibration value is 301,176 for 1,024
@@ -236,10 +251,131 @@ Beyond the MMIO lines, three kinds of note appear in the same stream:
   trigger CSR write that changed a slot's effective watchpoint (esp-hal
   rewrites all four on every context switch; only changes are logged).
 - `<BLOCK> WDT ARMED` / `LP_WDT RWDT EXPIRED: …` — the watchdogs.
+- `WIFI_MAC TOUCH +0x0418 mac (R; 27 distinct so far)` — the first access
+  to each distinct offset of a coarse-named block; a run's log is the list
+  of what the blob reached.
+- `WIFI RX config: dma_base=0x4081557c` — the blob programming its RX
+  descriptor ring (`mac_rxbuf_init`), the first artefact of the virtual-air
+  work.
+- `USB_DEVICE wr_done: 28 bytes committed to the IN endpoint; no host will
+  drain them` and `… ep1 write with the IN FIFO committed (host absent):
+  byte 0x0a dropped` — the host-absent USB model saying what the guest
+  tried.
 
 A 3 s no-radio run with `--trace SYSTIMER,PLIC_MX,INTPRI,INTERRUPT_CORE0,LP_WDT,TIMG0`
 is about 780 k lines, half of them the RTC-calibration poll at boot. Without
 a filter it is 18 M lines; write it to a file on a disk with room.
+
+### UART0 and the outside
+
+TX bytes leave the shifter one symbol apart at the configured baud and are
+written to the host stream *as they leave*, so a capture's byte order is
+the guest's order at the guest's rate. That is what makes the ROM's
+blocking `uart_tx_one_char` wait like silicon once `txfifo_cnt` reaches
+128, and it is why the harness transcript's ticks 19–92 show silicon's
+7 ms-per-line floor (see "Reference images" below): the time class is
+reported against silicon, never compared, and this is the first place the
+model spends time the way the chip does.
+
+Where the bytes go is `--uart0`: `stdout`, `file:<path>`, `memory`, or
+`tcp:<host:port>`, which **listens** for one client at a time (as esp-emu's
+`--uart-tcp` did for the spike's proxy) and takes the client's bytes as
+UART0's RX — `lp-cli … serial:tcp://127.0.0.1:5555` connects to it, the P7
+seam. Where RX bytes come from otherwise is `--uart0-script <file>`: one
+chunk per line, `<ms>` then a double-quoted string (`\n \r \t \xNN`) or hex
+bytes, delivered at that emulated millisecond one byte per symbol.
+
+**A run with a live socket is not deterministic.** A socket's bytes arrive
+at whatever cycle the 1 ms poll landed on when the host wrote them; two
+runs with the same client are two different runs. The script is the
+deterministic path, and the determinism tests use it (or no input at all).
+
+### USB-Serial-JTAG with no host
+
+The model is the *no host attached* state and only that (`periph/usb_sj.rs`
+says what each register does and what the two drivers then do). The
+observable is register and static state, not a log line: esp-println
+fills 64 bytes, commits them, spins 50,000 times on
+`ep1_conf.serial_in_ep_data_free`, latches `TIMED_OUT` and falls silent;
+`UsbConnectionMonitor` never sees a SOF, so the connected path that arms
+`int_ena.serial_out_recv_pkt` is never taken; `io_task`'s probe writes time
+out. `--probe esp_println::serial_jtag_printer::TIMED_OUT@3000` reads the
+latch, `--usb-sj stderr|file:` shows what the guest tried to print, and
+`tests/host_absent.rs` pins all of it.
+
+Attach, detach and a host that drains are M6's, behind a **control
+channel** the emulator does not have yet: a host-side command stream
+(alongside `--uart0-script`) that says "a host attached at 1,500 ms" and
+"it stopped draining at 4 s" so the transitions in spike report §11.5 can
+be scripted. That paragraph is the whole design so far (plan PD8); nothing
+here is a protocol.
+
+### The radio window
+
+Everything esp-radio's blob and the ROM's PHY code touch between
+`0x600A_0000` and `0x600B_0000` is three accept-and-remember blocks
+(`periph/wifi_stub.rs`), and the rule for them is plan D5's: run the
+image, read every `SPIN` line as a status bit the hardware would have set,
+disassemble the poll, add the one override that lets it exit with the
+evidence beside it, run again. The boot asked five times —
+
+| where | register | the poll | reads |
+|---|---|---|---|
+| `txdc_cal_new` | `WIFI_MAC+0x418` | `slli a3,a4,9; bgez` — bit 22, done | bit 22 = 1 |
+| `ram_pwdet_tone_start` / `_wait_idle` | `WIFI_MAC+0x814` | `srli 14; andi 7; bne 7` — a state field | bits 14:16 = 7 |
+| `ram_set_chan_freq_sw_start` | `WIFI_MAC+0x0cc` | `andi 256; beqz` — bit 8, lock | bit 8 = 1 |
+| `rom_iq_est_enable` (ROM) | `WIFI_MAC+0x4a0` | `slli a3,a5,15; bgez` — bit 16, done | bit 16 = 1 |
+| `hal_init` | `WIFI_MAC+0x4ddc` | `andi 1; beqz` — bit 0, ready | bit 0 = 1 |
+
+— and then said hello. The list is `wifi_stub::OVERRIDES`; a unit test walks
+it and refuses an entry without a reason. Interrupt sources 0–3 are never
+raised: nothing here receives, and the `WIFI RX config` line is where the
+virtual-air work (M6) will start.
+
+## Reference images and the gates
+
+The committed silicon transcript and the spike report's figures are at
+firmware `d6cfaa205` with the `spike_uart0_link` feature applied as a dirty
+tree. `scripts/emu/build-reference-image.sh <features>` reproduces that
+tree in a detached worktree under `target/emu-ref/` and builds it there:
+
+```bash
+scripts/emu/build-reference-image.sh test_shader_compile_incremental,esp32c6,spike_uart0_link   # harness
+scripts/emu/build-reference-image.sh esp32c6,server,radio,spike_uart0_link,memory_fs            # boot-idle-memfs
+scripts/emu/build-reference-image.sh esp32c6,server,radio,spike_uart0_link                      # boot-idle (flash-backed)
+```
+
+The ELF's sha256 is written beside it. It is **per worktree** — the build
+path is in the binary — so two checkouts' images differ in bytes while the
+code they carry does not; the harness gate, which is byte-equality of the
+*guest's* memory figures, is what says the code is the same.
+
+The M3 P6 gates, all `--strict-bus`, `t1`, default eFuse identity, no host
+input (`tests/{harness_parity,boot_idle,host_absent}.rs`):
+
+- **G6-1**, the harness replayed against
+  `lp-emu/transcripts/esp32c6/shader-compile-stress/silicon-…-d6cfaa205.txt`
+  with M2's runner: memory **372/372 equal** (all 184 per-tick values,
+  peak 48,132, resident 18,932, after-drop 3,976), structural 190/190,
+  timing reported — `build_us` 550,958 vs 568,757 (**0.97×**),
+  `max_slice_us` 10,676 vs 11,724 (0.91×), per-tick `slice_us` sum 0.97×.
+  esp-emu was 10.5× fast on the same ticks because its ROM UART drained for
+  free; here the drain is modelled at baud and the floor appears.
+- **G6-2**, the memfs spike image: the hello frame (`proto 20`,
+  `seeed/xiao-esp32-c6`, `chipRevision 0.2`, `baseMac a0:f2:62:87:b4:8c`),
+  the RMT line, `ESP-NOW radio ready`, `[RECOVERY] boot complete`, then the
+  heartbeat: `[stack] high-water 11432 B of 71960 B` (§5.4 exactly) and
+  `freeBytes 266688` at 5 s against esp-emu's 266,792 — a transient (the
+  15 s sample reads 266,788; `tests/boot_idle.rs` says what was ruled out).
+  The flash-backed spike image stops at `SPIN SPI1+0x000 cmd` at 11 ms: the
+  `[FS]` mount pair and its heartbeat are M4's (DD23).
+- **G6-3**, the shipped image minus flash: `TIMED_OUT == 1`, `int_ena`
+  bit 2 never armed, the sink holds `[INIT] Initializing board...`, 3,970
+  RWDT feeds and 4,037 `wfi` skips in 5 s.
+- **G6-4**: two runs of each → byte-identical UART0 captures, identical
+  cycle and instruction counts.
+- **G6-5**: the `WIFI RX config` line; five overrides, each with its `SPIN`;
+  no radio `SPIN` left.
 
 ## Snapshot
 
@@ -257,11 +393,22 @@ is a function of every access the machine makes.
 ```text
 lp-emu-esp32c6 --elf <app.elf> [--rom <path>] [--time-grade t1|t2]
     [--timeout 5s|1500ms|900us] [--wall-timeout <s>] [--exit-on <substr>]
-    [--uart0 stdout|file:<path>] [--uart0-script <file>]
+    [--uart0 stdout|memory|file:<path>|tcp:<host:port>] [--uart0-script <file>]
+    [--usb-sj stderr|memory|file:<path>]
     [--efuse-mac a0:f2:62:87:b4:8c] [--efuse-rev 0.2] [--seed <u64>]
     [--trace [BLOCK,BLOCK…]] [--trace-file <path>] [--strict-bus]
-    [--probe <symbol>@<ms>] [--hooks] [--map]
+    [--probe <symbol>@<ms>] [--break-at <symbol>] [--hooks] [--map]
 ```
+
+`--probe` and `--break-at` take an ELF name, a demangled path
+(`esp_println::serial_jtag_printer::TIMED_OUT`, LLVM's `.N` suffix
+stripped) or a unique suffix; an ambiguous one is refused, with the
+alternatives in the log. `--break-at` stops at the symbol's first
+instruction with every register as the caller left it and prints
+`a0..a7`, `sp`, `mcause/mepc/mtval`, `a0..a3` as text when they point at
+text, and the `s0` frame-pointer backtrace — inside a panic path that
+chain walks the panic machinery's own frames, so break at
+`ExceptionHandler` or `core::panicking::panic_fmt` for a clean one.
 
 Every timeout is **emulated** time, so a run is the same run on a laptop and
 on a loaded CI box. A duration without a unit is refused rather than guessed:
@@ -269,8 +416,9 @@ on a loaded CI box. A duration without a unit is refused rather than guessed:
 too short.
 
 Exit codes are a contract: `0` on an `--exit-on` match or a clean timeout,
-`2` on a hart fault (symbolized against the app ELF), `3` on a strict-bus
-violation, `4` on the wall-clock safety net.
+`2` on a hart fault (symbolized against the app ELF) or a reset request,
+`3` on a strict-bus violation, `4` on the wall-clock safety net, `5` on a
+`--break-at`.
 
 ## Bring-up loop
 
@@ -292,7 +440,11 @@ enough, on the shipped image, to walk the whole documented boot sequence.
 boot tests are `#[ignore]`d, because a workspace test run must not start a
 cross-target firmware build; `just test-emu-c6` sets the environment and runs
 them. `test_support` resolves the ELF from `LP_EMU_C6_ELF_<SLUG>`, then the
-conventional target path, and only builds when `LP_EMU_BUILD_FW=1`.
+conventional target path, and only builds when `LP_EMU_BUILD_FW=1`. The
+reference-image tests (`harness_parity`, `boot_idle`) resolve theirs from
+`LP_EMU_C6_REF_<SLUG>`, then `target/emu-ref/`, and with `LP_EMU_BUILD_FW=1`
+run `scripts/emu/build-reference-image.sh` — which needs the repository's
+history for the reference commit, so it is a local affair, not CI's.
 
 ## Provenance
 

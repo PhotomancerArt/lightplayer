@@ -17,7 +17,7 @@ use alloc::vec::Vec;
 
 use object::Endianness;
 use object::read::elf::{ElfFile32, FileHeader, ProgramHeader};
-use object::{Object, ObjectSymbol};
+use object::{Object, ObjectSection, ObjectSymbol, SectionFlags, SectionKind};
 
 /// What went wrong reading an ELF.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -75,11 +75,31 @@ pub struct Symbol {
     pub size: u32,
 }
 
+/// A section the ELF carries bytes for but asks no loader to place:
+/// `PROGBITS`, writable, **not** `SHF_ALLOC`.
+///
+/// The ESP32-C6 mask ROM's ELF describes its `.data_*` and
+/// `.data.interface.*` this way — `.data_pp_rom` at `0x4087_F5A8`, say, with
+/// `0x298` bytes of initial values in the file and no `PT_LOAD` covering
+/// them (the only `PT_LOAD` there is the `.bss`, `filesz = 0`). On the chip
+/// the ROM's startup copies those values into HP SRAM from an image inside
+/// the mask ROM; a direct load that skips the startup has to seed them from
+/// here, or every ROM global that was not zero at boot — `pp_rom_version`,
+/// the interface tables — reads as zero. An application ELF has none.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InitSection {
+    pub name: String,
+    pub address: u32,
+    pub data: Vec<u8>,
+}
+
 /// A parsed ELF image: entry, `PT_LOAD` segments, symbols.
 #[derive(Clone, Debug, Default)]
 pub struct ElfImage {
     pub entry: u32,
     pub segments: Vec<LoadSegment>,
+    /// See [`InitSection`]. In section order.
+    pub init_sections: Vec<InitSection>,
     /// Sorted by address, so `symbol_at` is a binary search.
     symbols: Vec<Symbol>,
 }
@@ -118,11 +138,55 @@ impl ElfImage {
             });
         }
 
+        let mut init_sections = Vec::new();
+        for section in file.sections() {
+            if section.kind() != SectionKind::Data && section.kind() != SectionKind::Other {
+                continue;
+            }
+            let SectionFlags::Elf { sh_flags } = section.flags() else {
+                continue;
+            };
+            let writable = sh_flags & u64::from(object::elf::SHF_WRITE) != 0;
+            let alloc = sh_flags & u64::from(object::elf::SHF_ALLOC) != 0;
+            if !writable || alloc || section.size() == 0 {
+                continue;
+            }
+            let Ok(data) = section.data() else {
+                continue;
+            };
+            if data.is_empty() {
+                continue;
+            }
+            init_sections.push(InitSection {
+                name: section.name().unwrap_or("?").to_string(),
+                address: section.address() as u32,
+                data: data.to_vec(),
+            });
+        }
+
         let mut symbols: Vec<Symbol> = file
             .symbols()
             .filter_map(|s| {
                 let name = s.name().ok()?;
                 if name.is_empty() {
+                    return None;
+                }
+                // Not symbols in the sense a backtrace or a probe means:
+                // `STT_FILE` (a source path at address 0), `STT_SECTION`,
+                // and RISC-V's `$x`/`$d` mapping symbols, which mark every
+                // instruction/data boundary and sort before every real
+                // name — a lookup "first symbol at this address" would
+                // answer `$x`, and `symbol("$x")` is the first one in the
+                // image. `llvm-nm` hides them for the same reason.
+                // `.L…` are assembler-local labels (`.LVL410`,
+                // `.Lswitch.table.…`) that survive into the table on this
+                // toolchain; a backtrace naming one names nothing.
+                if matches!(
+                    s.kind(),
+                    object::SymbolKind::File | object::SymbolKind::Section
+                ) || name.starts_with('$')
+                    || name.starts_with(".L")
+                {
                     return None;
                 }
                 Some(Symbol {
@@ -137,6 +201,7 @@ impl ElfImage {
         Ok(Self {
             entry: header.e_entry(endian),
             segments,
+            init_sections,
             symbols,
         })
     }
@@ -270,6 +335,7 @@ mod tests {
         let img = ElfImage {
             entry: 0,
             segments: Vec::new(),
+            init_sections: Vec::new(),
             symbols: alloc::vec![
                 Symbol {
                     name: "uart_tx_one_char".to_string(),
