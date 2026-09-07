@@ -95,6 +95,13 @@ pub const OVERRIDES: &[(u32, u32, u32, &str)] = &[
     // spins here; esp-emu evidently satisfies it; value chosen so the poll
     // exits.
     (0x04a0, 1 << 16, 1 << 16, "rom_iq_est_enable done flag"),
+    // `SPIN WIFI_MAC+0x4ddc bb = 0x00000002 x10000` from `hal_init`
+    // (`0x4222b364`, 39.4 ms) — the MAC proper, after the PHY calibration:
+    // it sets bit 1 of `+0x4ddc` (an enable strobe) and loops `lw a4,0(a4);
+    // andi a4,a4,1; beqz a4` — until **bit 0** reads 1, ready — before
+    // `mac_txrx_init`. Blob spins here; esp-emu evidently satisfies it;
+    // value chosen so the poll exits.
+    (0x4ddc, 1 << 0, 1 << 0, "hal_init ready flag"),
 ];
 
 /// The `WIFI_PWR` block's override list; same rule, same shape.
