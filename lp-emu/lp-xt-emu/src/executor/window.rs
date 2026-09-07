@@ -56,10 +56,10 @@ fn save_slot(callee_sp: u32, r: u8) -> u32 {
 }
 
 impl Emulator {
-    pub(super) fn exec_entry(
+    pub(super) fn exec_entry<T: Tracer + ?Sized>(
         &mut self,
         inst: &Inst,
-        tracer: &mut dyn Tracer,
+        tracer: &mut T,
     ) -> Result<Flow, Trap> {
         let (as_reg, imm) = match *inst {
             Inst::Entry(rs, imm) => (rs.num(), imm),
@@ -96,7 +96,7 @@ impl Emulator {
         Ok(Flow::Next)
     }
 
-    pub(super) fn exec_retw(&mut self, tracer: &mut dyn Tracer) -> Result<Flow, Trap> {
+    pub(super) fn exec_retw<T: Tracer + ?Sized>(&mut self, tracer: &mut T) -> Result<Flow, Trap> {
         let a0 = self.rreg(0);
         let n = ((a0 >> 30) & 3) as u8;
         // Return PC: high 2 (region) bits from the current PC, low 30 from a0.
@@ -152,11 +152,11 @@ impl Emulator {
     /// so a live ancestor still occupies them, that ancestor must be spilled
     /// *now*, before the frame runs, or the next `CALL` would clobber it. Loops
     /// because a wide frame can collide with more than one ancestor.
-    fn ensure_window_free(
+    fn ensure_window_free<T: Tracer + ?Sized>(
         &mut self,
         new_base: u8,
         inc: u8,
-        tracer: &mut dyn Tracer,
+        tracer: &mut T,
     ) -> Result<(), Trap> {
         let region_start = new_base + (4 - inc);
         loop {
@@ -187,7 +187,7 @@ impl Emulator {
     /// Spill call-stack frame `i`'s owned registers to its stack save area
     /// (located from its callee's SP — the next resident frame) and mark it
     /// non-resident.
-    fn spill_frame(&mut self, i: usize, tracer: &mut dyn Tracer) -> Result<(), Trap> {
+    fn spill_frame<T: Tracer + ?Sized>(&mut self, i: usize, tracer: &mut T) -> Result<(), Trap> {
         let f = self.cpu.call_stack[i];
         // The victim is the oldest resident frame, so the frame after it is
         // resident and its SP locates the victim's base save area.
@@ -210,7 +210,7 @@ impl Emulator {
 
     /// Reload the innermost (caller) frame's owned registers from its stack save
     /// area (located from its callee's SP, `callee_sp`) and mark it resident.
-    fn reload_frame(&mut self, callee_sp: u32, tracer: &mut dyn Tracer) -> Result<(), Trap> {
+    fn reload_frame<T: Tracer + ?Sized>(&mut self, callee_sp: u32, tracer: &mut T) -> Result<(), Trap> {
         let idx = self.cpu.call_stack.len() - 1;
         let f = self.cpu.call_stack[idx];
         let nregs = 4 * f.inc;

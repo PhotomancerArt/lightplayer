@@ -7,7 +7,7 @@ use crate::error::Trap;
 use crate::trace::Tracer;
 
 impl Emulator {
-    pub(super) fn exec_imm(&mut self, inst: &Inst, tracer: &mut dyn Tracer) -> Result<Flow, Trap> {
+    pub(super) fn exec_imm<T: Tracer + ?Sized>(&mut self, inst: &Inst, tracer: &mut T) -> Result<Flow, Trap> {
         match *inst {
             Inst::Movi(rt, imm) => {
                 self.wreg(rt.num(), imm as u32, tracer);

@@ -123,11 +123,11 @@ mod window;
 impl Emulator {
     /// Execute one decoded instruction. `pc`/`len` describe the current
     /// instruction; the returned [`Flow`] tells the run loop how to advance.
-    pub(crate) fn execute(
+    pub(crate) fn execute<T: Tracer + ?Sized>(
         &mut self,
         inst: &Inst,
         pc: u32,
-        tracer: &mut dyn Tracer,
+        tracer: &mut T,
     ) -> Result<Flow, Trap> {
         match inst {
             // --- arithmetic / logical / shift (register + register-immediate shifts) ---

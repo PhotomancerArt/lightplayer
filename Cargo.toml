@@ -442,6 +442,16 @@ codegen-units = 4
 # A profile, not a `[profile.release-emu]` build, because `lp-cli` and the
 # validation runner link these crates too and must get the fast code without
 # anyone remembering a flag. (D2, plan 2026-09-07-0827-emu-speed-ladder.)
+#
+# A per-package override only reaches code CODEGEN'D IN THAT PACKAGE. A
+# generic function is codegen'd in whichever crate instantiates it, at that
+# crate's opt-level, and LTO keeps the per-function size attributes it was
+# given — so a generic public entry point silently opts the hot loop out of
+# this override. Measured in M6: making `lp-xt-emu`'s run loop generic over
+# the tracer and leaving the entry point generic cost 25% on the Xtensa probe,
+# because `lp-xt-elf` instantiated it at "z". Keep the generic parameters
+# behind non-generic entry points inside these crates (see
+# `Emulator::run_loop`), or the override is a comment rather than a setting.
 [profile.release.package.lp-emu-core]
 opt-level = 3
 [profile.release.package.lp-riscv-emu]

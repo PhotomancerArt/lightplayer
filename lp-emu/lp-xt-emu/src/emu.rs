@@ -470,9 +470,31 @@ impl Emulator {
         Ok(())
     }
 
+    /// Pick the run loop this tracer deserves, once per run.
+    ///
+    /// A tracer that discards everything ([`crate::trace::Tracer::discards_events`])
+    /// gets the [`NoopTracer`] monomorphisation, where the per-instruction and
+    /// per-register-write events fold away entirely; anything else gets the
+    /// `dyn` one and its virtual call per event. Both instantiations are
+    /// codegen'd here in `lp-xt-emu`, which is what keeps them at the
+    /// opt-level the workspace grants this crate — a generic public entry
+    /// point would be codegen'd in the caller instead, and the emulator would
+    /// silently run at whatever opt-level that crate happens to use.
     fn run_loop(
         &mut self,
         tracer: &mut dyn Tracer,
+        handler: Option<&mut dyn SyscallHandler>,
+    ) -> RunOutcome {
+        if tracer.discards_events() {
+            self.run_loop_with(&mut crate::trace::NoopTracer, handler)
+        } else {
+            self.run_loop_with(tracer, handler)
+        }
+    }
+
+    fn run_loop_with<T: Tracer + ?Sized>(
+        &mut self,
+        tracer: &mut T,
         mut handler: Option<&mut dyn SyscallHandler>,
     ) -> RunOutcome {
         let mut steps = 0u64;
@@ -523,7 +545,7 @@ impl Emulator {
     }
 
     /// Fetch, decode, and execute one instruction, updating `pc`.
-    fn step(&mut self, tracer: &mut dyn Tracer) -> Result<Step, Trap> {
+    fn step<T: Tracer + ?Sized>(&mut self, tracer: &mut T) -> Result<Step, Trap> {
         let pc = self.cpu.pc;
         let mut bytes = [0u8; 3];
         let got = self.mem.fetch(pc, &mut bytes)?;
@@ -572,7 +594,7 @@ impl Emulator {
     // --- small shared helpers used by the executor modules ---
 
     /// Write windowed register `a{i}` and emit a trace event.
-    pub(crate) fn wreg(&mut self, i: u8, v: u32, tracer: &mut dyn Tracer) {
+    pub(crate) fn wreg<T: Tracer + ?Sized>(&mut self, i: u8, v: u32, tracer: &mut T) {
         let phys = self.cpu.set_a(i, v);
         tracer.event(TraceEvent::RegWrite {
             index: i,
@@ -592,7 +614,7 @@ impl Emulator {
     /// Executors go through here rather than touching `cpu.fr` so that every FP
     /// write is on one traced path — P6 bisects numeric divergences off this
     /// trace, and an intermediate you cannot see is a bad day.
-    pub(crate) fn wfreg(&mut self, i: u8, bits: u32, tracer: &mut dyn Tracer) {
+    pub(crate) fn wfreg<T: Tracer + ?Sized>(&mut self, i: u8, bits: u32, tracer: &mut T) {
         self.cpu.set_f(i, bits);
         tracer.event(TraceEvent::FRegWrite { index: i, bits });
     }
@@ -604,7 +626,7 @@ impl Emulator {
     }
 
     /// Write boolean register `b{i}` and emit a trace event.
-    pub(crate) fn wbreg(&mut self, i: u8, v: bool, tracer: &mut dyn Tracer) {
+    pub(crate) fn wbreg<T: Tracer + ?Sized>(&mut self, i: u8, v: bool, tracer: &mut T) {
         self.cpu.set_b(i, v);
         tracer.event(TraceEvent::BRegWrite { index: i, value: v });
     }
