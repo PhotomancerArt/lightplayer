@@ -49,6 +49,10 @@ pub const DISPLAY_MANIFEST_SOURCES: &[(&str, &str)] = &[
         "domraem/dom-z-102",
         include_str!("../../../lp-core/lpc-hardware/boards/domraem/dom-z-102.display.json"),
     ),
+    (
+        "lightplayer/desktop",
+        include_str!("../../../lp-core/lpc-hardware/boards/lightplayer/desktop.display.json"),
+    ),
 ];
 
 /// Every checked-in board, parsed once. Panics on malformed embedded data —
