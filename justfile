@@ -2084,6 +2084,19 @@ emu-c6 elf *args:
 bench-emu-c6 *args:
     scripts/emu/bench-c6.sh {{ args }}
 
+# The C6 machine's browser/phone speed probe: builds the wasip1 module,
+# stages it with the two pinned reference images plus a page and worker
+# under a JS WASI shim, and serves it on the LAN (port from
+# scripts/dev-port.sh, never pinned) so a phone can run it and upload its
+# result. D6: no source changes, no wasm32-unknown-unknown entry point.
+#
+#   just bench-emu-web              # build, stage, serve — open the printed URL
+#   just bench-emu-web --collect    # print every uploaded result-*.json as a table
+#
+# Also an ORACLE, not a gate — see the script's header.
+bench-emu-web *args:
+    scripts/emu/bench-web.sh {{ args }}
+
 # The generated `RegNames` tables (offset -> register name) are derived from
 # the esp32c6 PAC's svd2rust offset comments and carry a provenance header.
 # A hand edit is reverted by the next regeneration and takes its provenance
