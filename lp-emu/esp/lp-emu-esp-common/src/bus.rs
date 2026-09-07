@@ -173,11 +173,15 @@ struct MmioRange {
 pub struct SocBus {
     /// Sorted by base, non-overlapping.
     regions: Vec<RamRegion>,
-    /// "Last region hit" cache. The common case — the same stack or heap
-    /// region twice in a row — is then one compare instead of a search.
-    last_region: usize,
-    /// The same cache for instruction fetch, kept apart from `last_region`:
-    /// code runs from the flash window while data lives in HP SRAM, so one
+    /// Two-entry "last hit" data-region cache, checked before the binary
+    /// search. One slot missed on every other access: the harness
+    /// alternates between HP SRAM (data) and the flash-cache rodata window,
+    /// so a single cache thrashed between the two on every load. Slot 0 is
+    /// the most recent hit; a hit in slot 1 promotes it to slot 0 (a cheap
+    /// two-way LRU, not a full one).
+    last_regions: [usize; 2],
+    /// The same cache for instruction fetch, kept apart from `last_regions`:
+    /// code runs from the flash window while data lives in HP SRAM, so a
     /// shared cache missed on nearly every instruction (fetch, load, fetch…)
     /// and each miss was a binary search.
     last_fetch_region: usize,
@@ -260,7 +264,7 @@ impl SocBus {
     pub fn new() -> Self {
         Self {
             regions: Vec::new(),
-            last_region: 0,
+            last_regions: [0, 0],
             last_fetch_region: 0,
             mmio: Vec::new(),
             mmio_by_base: Vec::new(),
@@ -309,7 +313,7 @@ impl SocBus {
         }
         self.regions.push(region);
         self.regions.sort_by_key(|r| r.base);
-        self.last_region = 0;
+        self.last_regions = [0, 0];
         self.last_fetch_region = 0;
     }
 
@@ -619,7 +623,7 @@ impl SocBus {
             );
             region.data.copy_from_slice(bytes);
         }
-        self.last_region = 0;
+        self.last_regions = [0, 0];
         self.last_fetch_region = 0;
     }
 
@@ -692,14 +696,25 @@ impl SocBus {
     // ---- decode -------------------------------------------------------
 
     #[inline(always)]
-    fn region_index(&self, address: u32) -> Option<usize> {
-        // The "last hit" cache: one compare for the common case.
-        if let Some(r) = self.regions.get(self.last_region)
+    fn region_index(&mut self, address: u32) -> Option<usize> {
+        // The two-entry "last hit" cache: one or two compares for the
+        // common case, instead of thrashing a single slot between the two
+        // working sets a run alternates over.
+        if let Some(r) = self.regions.get(self.last_regions[0])
             && r.contains(address)
         {
-            return Some(self.last_region);
+            return Some(self.last_regions[0]);
         }
-        self.region_index_slow(address)
+        if let Some(r) = self.regions.get(self.last_regions[1])
+            && r.contains(address)
+        {
+            self.last_regions.swap(0, 1);
+            return Some(self.last_regions[0]);
+        }
+        let i = self.region_index_slow(address)?;
+        self.last_regions[1] = self.last_regions[0];
+        self.last_regions[0] = i;
+        Some(i)
     }
 
     /// [`region_index`](Self::region_index) for instruction fetch, with its
@@ -808,8 +823,8 @@ impl SocBus {
 
         if let Some(i) = self.region_index(address) {
             // `region_index` guarantees `address` is inside the region, so
-            // "the span fits" is exactly "the slice exists".
-            self.last_region = i;
+            // "the span fits" is exactly "the slice exists"; it also updated
+            // its own cache, so there is nothing left to record here.
             let off = (address - self.regions[i].base) as usize;
             let data = &self.regions[i].data;
             let v = match width {
@@ -901,7 +916,6 @@ impl SocBus {
             if !self.regions[i].writable {
                 return Err(fault);
             }
-            self.last_region = i;
             let off = (address - self.regions[i].base) as usize;
             let data = &mut self.regions[i].data;
             let stored = match width {
