@@ -1940,6 +1940,7 @@ mod tests {
         UiChromeSessionControl {
             kind: UiChromeSessionKind::Sim,
             key: "runtime-sim".to_string(),
+            device: None,
             name: "Sim".to_string(),
             board: Some("ESP32-C6".to_string()),
             status: UiChromeSessionStatus::Run,
