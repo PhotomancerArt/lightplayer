@@ -1,13 +1,14 @@
 //! GLSL → WGSL translation: assembly → naga `glsl-in` → bounded-tanh pass →
-//! validation → `wgsl-out`.
+//! loop bounds → validation → `wgsl-out`.
 //!
 //! naga parse/validation failures surface as [`GfxError::Compile`] carrying
 //! the naga diagnostic text (consumed by browser-integration UX later).
 
 use lp_gfx::GfxError;
-use lp_shader::{ShaderEntrySpace, TextureBindingSpecs};
+use lp_shader::{DEFAULT_INVOCATION_FUEL, ShaderEntrySpace, TextureBindingSpecs};
 
 use crate::assembly::{assemble_fragment_glsl, assemble_sample_fragment_glsl};
+use crate::loop_bound_pass::{bound_loop_iterations, refuse_loops_without_exit};
 use crate::tanh_pass::bound_tanh;
 use crate::uniform_layout::assign_texture_bindings;
 
@@ -51,8 +52,8 @@ pub fn compile_sample_wgsl(
     translate_assembled_glsl(assemble_sample_fragment_glsl(authored, textures, space)?)
 }
 
-/// naga `glsl-in` → bounded-tanh pass → validation → `wgsl-out` on an
-/// already-assembled fragment compilation unit.
+/// naga `glsl-in` → bounded-tanh pass → loop bounds → validation →
+/// `wgsl-out` on an already-assembled fragment compilation unit.
 fn translate_assembled_glsl(assembled_glsl: String) -> Result<WgslShader, GfxError> {
     let mut frontend = naga::front::glsl::Frontend::default();
     let options = naga::front::glsl::Options::from(naga::ShaderStage::Fragment);
@@ -65,6 +66,11 @@ fn translate_assembled_glsl(assembled_glsl: String) -> Result<WgslShader, GfxErr
 
     assign_texture_bindings(&mut module)?;
     bound_tanh(&mut module).map_err(GfxError::Compile)?;
+    // The GPU tier's loop contract (`loop_bound_pass`): a loop that can never
+    // exit is a compile error, and every loop that remains charges the same
+    // per-invocation back-edge budget the LPVM tiers meter as fuel.
+    refuse_loops_without_exit(&module, &assembled_glsl).map_err(GfxError::Compile)?;
+    bound_loop_iterations(&mut module, DEFAULT_INVOCATION_FUEL);
 
     let mut validator = naga::valid::Validator::new(
         naga::valid::ValidationFlags::all(),
@@ -92,6 +98,7 @@ fn translate_assembled_glsl(assembled_glsl: String) -> Result<WgslShader, GfxErr
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::loop_bound_pass::LOOP_BUDGET_GLOBAL;
     use lp_shader::texture_binding;
     use lps_shared::{TextureFilter, TextureStorageFormat, TextureWrap};
 
@@ -101,6 +108,21 @@ mod tests {
             &TextureBindingSpecs::new(),
             ShaderEntrySpace::TwoD,
         )
+    }
+
+    /// The fault-demo rig's authored shader: `projects/test/fault-demo`
+    /// (its home once the catalog tree lands, PR #536) or `examples/fault-demo`
+    /// (main's, until then). Read at test time so the pin follows the file.
+    fn fault_demo_source() -> String {
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+        let candidates = [
+            "projects/test/fault-demo/effect/shader.glsl",
+            "examples/fault-demo/shader.glsl",
+        ];
+        candidates
+            .iter()
+            .find_map(|candidate| std::fs::read_to_string(format!("{root}/{candidate}")).ok())
+            .unwrap_or_else(|| panic!("fault-demo shader not found at any of {candidates:?}"))
     }
 
     #[test]
@@ -142,6 +164,68 @@ mod tests {
         assert!(
             shader.wgsl.contains("clamp"),
             "bounded tanh:\n{}",
+            shader.wgsl
+        );
+    }
+
+    /// The defect's subject (`docs/defects/2026-09-06-gpu-tier-executes-unbounded-shaders.md`):
+    /// the fault-demo rig's `while (true)` is refused before anything reaches
+    /// a device. Nothing here creates a wgpu device — the assertion is on the
+    /// compile refusal alone, which is the only safe way to test it.
+    #[test]
+    fn fault_demo_is_refused_at_gpu_compile_time() {
+        let source = fault_demo_source();
+        assert!(
+            source.contains("while (true)"),
+            "the rig still carries its unbounded loop:\n{source}"
+        );
+        let err = compile_wgsl_no_textures(&source)
+            .err()
+            .expect("fault-demo must not compile on the GPU tier");
+        match err {
+            GfxError::Compile(message) => {
+                assert!(message.contains("unbounded loop"), "{message}");
+                assert!(
+                    message.contains("`render_2d`"),
+                    "names the function: {message}"
+                );
+                assert!(
+                    message.contains("while (true)"),
+                    "quotes the loop head: {message}"
+                );
+            }
+            other => panic!("expected GfxError::Compile, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bounded_loops_carry_the_invocation_budget_in_wgsl() {
+        let shader = compile_wgsl_no_textures(
+            "layout(binding = 0) uniform vec2 outputSize;\n\
+             vec4 render_2d(vec2 pos) {\n\
+                 float a = 0.0;\n\
+                 for (int i = 0; i < 8; i++) { a += pos.x / outputSize.x; }\n\
+                 return vec4(a);\n\
+             }\n",
+        )
+        .expect("a bounded loop translates");
+        assert!(
+            shader
+                .wgsl
+                .contains(&format!("var<private> {LOOP_BUDGET_GLOBAL}: u32 = 0u;")),
+            "per-invocation budget global:\n{}",
+            shader.wgsl
+        );
+        assert!(
+            shader.wgsl.contains("break if"),
+            "the loop breaks when the budget is spent:\n{}",
+            shader.wgsl
+        );
+        assert!(
+            shader
+                .wgsl
+                .contains(&format!("> {DEFAULT_INVOCATION_FUEL}u")),
+            "the budget is the LPVM fuel tank:\n{}",
             shader.wgsl
         );
     }
