@@ -63,6 +63,7 @@ use crate::app::share::relationship::ProjectRelationship;
 use crate::app::share::share_person::SharePerson;
 use crate::app::share::share_url::ShareUrl;
 use crate::base::{StudioIcon, StudioIconName};
+use crate::cloud::sync::sync_status::SyncOutcomeKind;
 use crate::core::inline_link_row_class;
 
 /// The Access section's live half, when the service answered the roster.
@@ -84,20 +85,19 @@ pub struct RosterFacts {
     pub can_administer: bool,
 }
 
-/// The publish line the `MineLocal` Where section carries, read off the
-/// tab's auto-publish ledger (`cloud::sync::sync_status`).
+/// The auto-publish ledger's last word on this project — its row in the
+/// tab's ledger (`cloud::sync::sync_status`), which selects the `MineLocal`
+/// Access sentence (see [`local_access_line`]).
 ///
 /// `None` at the call site means the ledger has nothing for this project —
 /// the driver has not concluded a trip yet — and the panel falls back to
 /// the honest static wording rather than inventing an outcome.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PublishStatus {
-    /// The ledger's badge word: "published", "no save yet", "retrying"…
-    pub label: String,
+    /// How the driver's last trip for this project concluded.
+    pub kind: SyncOutcomeKind,
     /// The one human sentence the driver recorded, verbatim.
     pub detail: String,
-    /// Whether this reads as trouble (`SyncOutcomeKind::is_failure`).
-    pub trouble: bool,
 }
 
 /// The project popover's content. Pure: everything below comes from props.
@@ -120,7 +120,8 @@ pub fn ProjectRelationshipPanel(
     /// The Access section's live half; see [`RosterFacts`].
     #[props(default)]
     roster: Option<RosterFacts>,
-    /// The auto-publish ledger's last word on this project (`MineLocal`).
+    /// The auto-publish ledger's last word on this project — the
+    /// `MineLocal` Access sentence reads it; every other state ignores it.
     #[props(default)]
     publish: Option<PublishStatus>,
     /// The library package behind the open project, for the ⋯ menu's two
@@ -217,7 +218,15 @@ pub fn ProjectRelationshipPanel(
     };
     let menu_shown = menu();
     let note = address_note(relationship);
-    let access_line = access_sentence(relationship);
+    let AccessLine {
+        sentence: access_sentence,
+        trouble: access_trouble,
+    } = access_line(relationship, publish.as_ref());
+    let access_tone = if access_trouble {
+        "tw:text-status-warning-foreground"
+    } else {
+        "tw:text-dim-foreground"
+    };
 
     rsx! {
         // One explicit grid wrapper: the popover primitive nests children
@@ -266,9 +275,6 @@ pub fn ProjectRelationshipPanel(
                             "{note}"
                         }
                     }
-                    if relationship == ProjectRelationship::MineLocal {
-                        PublishLine { publish }
-                    }
                 } else {
                     p { class: "tw:m-0 tw:px-0.5 tw:text-[10px] tw:leading-snug tw:text-dim-foreground",
                         "No address yet \u{2014} this project has no link the browser can point at."
@@ -295,10 +301,12 @@ pub fn ProjectRelationshipPanel(
                         span { class: GROUP_HEADER_CLASS, "People" }
                         PeopleList { people: facts.people, on_remove: None }
                     },
-                    // Nothing to administer: one honest sentence.
+                    // Nothing to administer: one honest sentence — for
+                    // `MineLocal`, the ledger's, in the warning tone when
+                    // the driver's last trip failed.
                     _ => rsx! {
-                        p { class: "tw:m-0 tw:px-0.5 tw:text-[10.5px] tw:leading-snug tw:text-dim-foreground",
-                            "{access_line}"
+                        p { class: "tw:m-0 tw:px-0.5 tw:text-[10.5px] tw:leading-snug {access_tone}",
+                            "{access_sentence}"
                         }
                     },
                 }
@@ -373,36 +381,6 @@ fn SectionHead(label: &'static str) -> Element {
             // The `::after` rule of the spike, as a flex child — Tailwind
             // has no content-generating utility, and a div is one node.
             div { class: "tw:h-px tw:flex-1 tw:bg-border-muted" }
-        }
-    }
-}
-
-/// The `MineLocal` publish line: the tab's auto-publish ledger, or the
-/// honest static wording when it has concluded nothing yet.
-///
-/// This surface never *drives* publishing — it reads the notebook the
-/// driver keeps (`cloud::sync::sync_status`). No ledger row is not a
-/// failure; it is a driver that has not run a trip for this project in
-/// this tab.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn PublishLine(publish: Option<PublishStatus>) -> Element {
-    let Some(publish) = publish else {
-        return rsx! {
-            p { class: "tw:m-0 tw:px-0.5 tw:text-[10px] tw:leading-snug tw:text-dim-foreground",
-                "Publishes on save while you\u{2019}re signed in \u{2014} nothing has gone up from this tab yet."
-            }
-        };
-    };
-    let tone = if publish.trouble {
-        "tw:text-status-warning-foreground"
-    } else {
-        "tw:text-dim-foreground"
-    };
-    rsx! {
-        p { class: "tw:m-0 tw:px-0.5 tw:text-[10px] tw:leading-snug {tone}",
-            span { class: "tw:font-semibold", "{publish.label}" }
-            " \u{2014} {publish.detail}"
         }
     }
 }
@@ -558,7 +536,8 @@ fn where_words(relationship: ProjectRelationship) -> WhereWords {
 }
 
 /// The line under the URL, where the address needs one. `MineLocal` has no
-/// note here — [`PublishLine`] is its line.
+/// note here — what the driver did with the project is an Access fact
+/// ([`local_access_line`]), not an address one.
 fn address_note(relationship: ProjectRelationship) -> Option<&'static str> {
     match relationship {
         ProjectRelationship::Example => {
@@ -573,23 +552,77 @@ fn address_note(relationship: ProjectRelationship) -> Option<&'static str> {
     }
 }
 
+/// The Access section's sentence for a state with nothing to administer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AccessLine {
+    sentence: String,
+    /// Whether it reads as trouble (the warning tone): the driver's last
+    /// trip for this project failed.
+    trouble: bool,
+}
+
 /// The Access section for a state with nothing to administer.
-fn access_sentence(relationship: ProjectRelationship) -> &'static str {
-    match relationship {
+fn access_line(relationship: ProjectRelationship, publish: Option<&PublishStatus>) -> AccessLine {
+    let sentence = match relationship {
         ProjectRelationship::Example => {
             "Everyone can open this example \u{2014} it\u{2019}s built in. Your copy gets its own access control once you save it."
         }
         ProjectRelationship::ViewingSomeoneElses => {
             "You hold view access \u{2014} the link is the key, no account needed. Nothing you touch changes their copy."
         }
-        ProjectRelationship::MineLocal => {
-            "Not shared \u{2014} it lives in this browser\u{2019}s library. Access controls appear once it reaches the cloud."
-        }
+        ProjectRelationship::MineLocal => return local_access_line(publish),
         // Both of these carry a roster when the service has answered; this
         // is the answer-not-yet-in case, and saying so beats dead controls.
         ProjectRelationship::MinePublished | ProjectRelationship::MemberOfSomeoneElses => {
             "Waiting on the service for this project\u{2019}s access and roster."
         }
+    };
+    AccessLine {
+        sentence: sentence.to_string(),
+        trouble: false,
+    }
+}
+
+/// The `MineLocal` Access sentence, from the tab's auto-publish ledger.
+///
+/// `MineLocal` folds three truths together — never published, published
+/// but restricted to its owner, and a driver that never got the project to
+/// the service — and the roster answer alone cannot tell them apart. The
+/// ledger can, for the last one: when this tab's driver has a failure or an
+/// unfinished conclusion for the project, that is the sentence, in place
+/// of the generic "Not shared" (relationship-control ADR follow-up
+/// "`MineLocal` folds service-silent in").
+///
+/// This surface never *drives* publishing — it reads the notebook the
+/// driver keeps (`cloud::sync::sync_status`), and only its own project's
+/// row. No ledger row is not a failure; it is a driver that has not run a
+/// trip for this project in this tab, so the static wording stands.
+fn local_access_line(publish: Option<&PublishStatus>) -> AccessLine {
+    let Some(publish) = publish else {
+        return AccessLine {
+            sentence: "Not shared \u{2014} it lives in this browser\u{2019}s library. Access controls appear once it reaches the cloud.".to_string(),
+            trouble: false,
+        };
+    };
+    // The driver's sentence is the clause after the dash: one period, ours.
+    let detail = publish.detail.trim().trim_end_matches('.');
+    let sentence = match publish.kind {
+        // Up, and the roster has not answered — the service-silent half
+        // that belongs to the READ side, not the driver.
+        SyncOutcomeKind::Published | SyncOutcomeKind::Pushed => {
+            "Published from this tab \u{2014} waiting on the service for its access and roster.".to_string()
+        }
+        SyncOutcomeKind::NothingSaved => {
+            "Not published yet \u{2014} there is no saved version to send. The first save publishes it.".to_string()
+        }
+        SyncOutcomeKind::Skipped => format!("Not published from this tab \u{2014} {detail}."),
+        SyncOutcomeKind::Retrying => format!("Publishing is retrying \u{2014} {detail}."),
+        SyncOutcomeKind::Refused => format!("Publishing was refused: {detail}."),
+        SyncOutcomeKind::Denied => format!("Publishing was denied \u{2014} {detail}."),
+    };
+    AccessLine {
+        sentence,
+        trouble: publish.kind.is_failure(),
     }
 }
 
@@ -725,9 +758,87 @@ mod tests {
             assert!(!words.rest.is_empty(), "{relationship:?} has no rest");
             assert!(!words.sub.is_empty(), "{relationship:?} has no sub line");
             assert!(
-                !access_sentence(relationship).is_empty(),
+                !access_line(relationship, None).sentence.is_empty(),
                 "{relationship:?} has no access sentence"
             );
+        }
+    }
+
+    /// The `MineLocal` Access line reads the ledger: a failure or an
+    /// unfinished conclusion for THIS project replaces the generic "Not
+    /// shared" — and no row keeps it, because no row is not a failure.
+    #[test]
+    fn the_local_access_line_says_what_the_driver_concluded() {
+        let line = |kind, detail: &str| {
+            local_access_line(Some(&PublishStatus {
+                kind,
+                detail: detail.to_string(),
+            }))
+        };
+
+        let none = local_access_line(None);
+        assert!(none.sentence.starts_with("Not shared"));
+        assert!(!none.trouble);
+
+        let retrying = line(SyncOutcomeKind::Retrying, "the service was unreachable");
+        assert_eq!(
+            retrying.sentence,
+            "Publishing is retrying \u{2014} the service was unreachable."
+        );
+        assert!(retrying.trouble);
+
+        let refused = line(
+            SyncOutcomeKind::Refused,
+            "this tab is older than the service; reload to publish",
+        );
+        assert_eq!(
+            refused.sentence,
+            "Publishing was refused: this tab is older than the service; reload to publish."
+        );
+        assert!(refused.trouble);
+
+        // A detail that already ends its sentence does not earn a second
+        // period.
+        let denied = line(
+            SyncOutcomeKind::Denied,
+            "the service says this project is not yours to write.",
+        );
+        assert_eq!(
+            denied.sentence,
+            "Publishing was denied \u{2014} the service says this project is not yours to write."
+        );
+        assert!(denied.trouble);
+
+        // The quiet conclusions are named too, without the warning tone.
+        for kind in [
+            SyncOutcomeKind::Published,
+            SyncOutcomeKind::Pushed,
+            SyncOutcomeKind::NothingSaved,
+            SyncOutcomeKind::Skipped,
+        ] {
+            let quiet = line(kind, "open in another tab; that tab syncs it");
+            assert!(!quiet.trouble, "{kind:?} reads as trouble");
+            assert!(
+                !quiet.sentence.starts_with("Not shared"),
+                "{kind:?} fell through to the generic line"
+            );
+        }
+        assert_eq!(
+            line(
+                SyncOutcomeKind::Skipped,
+                "open in another tab; that tab syncs it"
+            )
+            .sentence,
+            "Not published from this tab \u{2014} open in another tab; that tab syncs it."
+        );
+
+        // Trouble is exactly the ledger's own definition of trouble.
+        for kind in [
+            SyncOutcomeKind::Retrying,
+            SyncOutcomeKind::Refused,
+            SyncOutcomeKind::Denied,
+        ] {
+            assert_eq!(line(kind, "x").trouble, kind.is_failure());
         }
     }
 

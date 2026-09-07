@@ -160,6 +160,19 @@ gave up on the library host. All three are now re-derived by the tick.
 
 **Still open** — the no-saved-head case (`TripReport::Nothing`) is now a
 settled verdict the tick respects, so it is still not healed at sweep
-time; that remains the product decision recorded above. And the
-relationship panel still folds "service-silent" into `MineLocal` — the
-ledger on `/account` is the only place that says which.
+time; that remains the product decision recorded above. The
+relationship panel's fold of "service-silent" into `MineLocal` closed the
+next day (below).
+
+## The panel reads the ledger (2026-09-07)
+
+The relationship panel's `MineLocal` Access sentence now
+reads this ledger for its own project: a failure or unfinished conclusion
+("Publishing is retrying — the service was unreachable", "Publishing was
+refused: …") replaces the generic "Not shared — it lives in this browser's
+library" line that used to cover unpublished, restricted, and
+service-silent alike. The driver also records the actionable failures in
+a person's words (`sync_trip::describe_error`: "the service was
+unreachable" rather than `transport: offline`), so `/account` and the
+panel read the same sentence. `/account` is unchanged in role — still the
+only surface that lists every project.

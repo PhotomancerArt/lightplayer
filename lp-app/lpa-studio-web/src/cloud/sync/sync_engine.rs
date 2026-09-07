@@ -53,7 +53,7 @@ use lpc_history::PrefixedUid;
 use super::sidecar_producer::read_identity;
 use super::sync_queue::{DueProject, SyncQueue, SyncTrigger, TripResult};
 use super::sync_status::{self, SyncOutcomeKind};
-use super::sync_trip::{TripReport, classify, run_trip};
+use super::sync_trip::{TripReport, classify, describe_error, run_trip};
 use crate::cloud::FetchCloudPort;
 use crate::local_store::opfs_library_host;
 
@@ -324,7 +324,7 @@ impl SyncEngine {
                     TripResult::Denied => SyncOutcomeKind::Denied,
                     TripResult::Settled | TripResult::Refused => SyncOutcomeKind::Refused,
                 };
-                conclude(kind, &error.to_string());
+                conclude(kind, &describe_error(&error));
                 verdict
             }
         }
