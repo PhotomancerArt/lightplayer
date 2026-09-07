@@ -45,6 +45,17 @@
 //! big dome frame self-throttles) under `DEVICE_CARD_FEED_CLASS`: the
 //! actor's passive tick runs due pulls beside the sim's and a preempting
 //! gesture cancels the in-flight read at its next frame boundary.
+//!
+//! # The last frame outlives the tab
+//!
+//! A feed's newest frame is also written to the board's sidecar in the
+//! library store (`device_frame_snapshot`) — at most once per
+//! [`DEVICE_FRAME_SNAPSHOT_INTERVAL_SECS`], and only when a frame newer
+//! than the written one exists ([`DeviceFrameFeed::snapshot_due`]) — and a
+//! remembered board's feed is SEEDED from that sidecar at library settle
+//! ([`DeviceFrameFeeds::seed_snapshot`]), stamped at the capture time so
+//! the offline pill's age is honest across reloads. A seed never displaces
+//! a frame this session pulled, and the first live pull replaces the seed.
 
 use core::future::Future;
 use core::time::Duration;
@@ -58,6 +69,7 @@ use lpa_devices::{Device, Roster};
 use lpc_wire::{ClientRequest, ServerMsgBody, WireProjectHandle};
 
 use super::device_effects::DeviceEffects;
+use super::device_frame_snapshot::DEVICE_FRAME_SNAPSHOT_INTERVAL_SECS;
 use super::shared_link_client_io::SharedLinkClientIo;
 use crate::UiControlProductPreview;
 use crate::app::frame_feed::{CardFeedState, output_frame_entries};
@@ -130,6 +142,12 @@ pub struct DeviceFrameFeed {
     parked: Option<FeedTarget>,
     /// The card is mounted somewhere a person can see it.
     wanted: bool,
+    /// The capture stamp of the frame last written to (or seeded from) the
+    /// board's sidecar — a frame is only worth writing once.
+    snapshot_written_at: Option<f64>,
+    /// When the sidecar was last written, in the controller's seconds —
+    /// the rate limit's anchor.
+    snapshot_write_at: Option<f64>,
 }
 
 impl DeviceFrameFeed {
@@ -141,6 +159,8 @@ impl DeviceFrameFeed {
             failures: 0,
             parked: None,
             wanted: false,
+            snapshot_written_at: None,
+            snapshot_write_at: None,
         }
     }
 
@@ -168,6 +188,44 @@ impl DeviceFrameFeed {
 
     pub fn is_wanted(&self) -> bool {
         self.wanted
+    }
+
+    /// The frame worth writing to the board's sidecar right now, with its
+    /// capture stamp: the newest frame is newer than the one last written
+    /// (or nothing was ever written) AND the write window has elapsed
+    /// since the last write. `None` otherwise — the common case.
+    pub fn snapshot_due(&self, now: f64) -> Option<(&UiControlProductPreview, f64)> {
+        let frame = self.state.frame()?;
+        let captured_at = self.state.last_frame_at()?;
+        if self
+            .snapshot_written_at
+            .is_some_and(|written| captured_at <= written)
+        {
+            return None;
+        }
+        if self
+            .snapshot_write_at
+            .is_some_and(|last| now - last < DEVICE_FRAME_SNAPSHOT_INTERVAL_SECS)
+        {
+            return None;
+        }
+        Some((frame, captured_at))
+    }
+
+    /// Stamp a sidecar write of the frame captured at `captured_at`.
+    pub fn mark_snapshot_written(&mut self, captured_at: f64, now: f64) {
+        self.snapshot_written_at = Some(captured_at);
+        self.snapshot_write_at = Some(now);
+    }
+
+    /// Seed this feed from the board's sidecar (see the module doc). A
+    /// seed counts as already written — it came FROM the store.
+    fn seed_snapshot(&mut self, frame: UiControlProductPreview, captured_at: f64) -> bool {
+        if !self.state.seed(frame, captured_at) {
+            return false;
+        }
+        self.snapshot_written_at = Some(captured_at);
+        true
     }
 
     /// Whether this feed would pull on `target`: not parked, or parked
@@ -243,6 +301,48 @@ impl DeviceFrameFeeds {
 
     pub fn set_page_visible(&mut self, visible: bool) {
         self.page_visible = visible;
+    }
+
+    /// Whether `device`'s feed already carries a picture (live or seeded).
+    pub fn has_frame(&self, device: DeviceId) -> bool {
+        self.by_device
+            .get(&device)
+            .is_some_and(|feed| feed.frame().is_some())
+    }
+
+    /// Seed `device`'s feed from its persisted last frame, creating the
+    /// feed if the card was never mounted (a remembered board's tile is
+    /// not a card, and wants no pull). Returns whether it seeded — `false`
+    /// when the feed already has a picture.
+    pub fn seed_snapshot(
+        &mut self,
+        device: DeviceId,
+        frame: UiControlProductPreview,
+        captured_at: f64,
+    ) -> bool {
+        self.by_device
+            .entry(device)
+            .or_insert_with(DeviceFrameFeed::new)
+            .seed_snapshot(frame, captured_at)
+    }
+
+    /// Every feed with a frame worth writing to its sidecar at `now`
+    /// (see [`DeviceFrameFeed::snapshot_due`]), the frame cloned out so the
+    /// caller can write without holding the feeds.
+    pub fn snapshots_due(&self, now: f64) -> Vec<(DeviceId, UiControlProductPreview, f64)> {
+        self.by_device
+            .iter()
+            .filter_map(|(id, feed)| {
+                feed.snapshot_due(now)
+                    .map(|(frame, captured_at)| (*id, frame.clone(), captured_at))
+            })
+            .collect()
+    }
+
+    pub fn mark_snapshot_written(&mut self, device: DeviceId, captured_at: f64, now: f64) {
+        if let Some(feed) = self.by_device.get_mut(&device) {
+            feed.mark_snapshot_written(captured_at, now);
+        }
     }
 
     /// Drop the feeds of devices the model no longer has (Forget).
@@ -549,6 +649,68 @@ mod tests {
 
         assert!(feed.is_parked());
         assert_eq!(feed.state.pull_completed_at(), Some(2.0));
+    }
+
+    fn frame(revision: i64) -> UiControlProductPreview {
+        UiControlProductPreview {
+            revision,
+            extent: lpc_model::ControlExtent::new(1, 3),
+            sample_format: crate::UiControlSampleFormat::U16,
+            sample_layout: lpc_model::ControlSampleLayout::default(),
+            display_layout: None,
+            bytes: std::rc::Rc::from(vec![0u8; 6]),
+        }
+    }
+
+    /// The write rule: a new frame is written once, and a burst of new
+    /// frames is written at most once per window.
+    #[test]
+    fn a_snapshot_is_due_once_per_new_frame_and_once_per_window() {
+        let mut feed = DeviceFrameFeed::new();
+        assert!(feed.snapshot_due(100.0).is_none(), "no frame, nothing due");
+
+        assert!(feed.state.seed(frame(1), 100.0));
+        // (`seed` on the state alone is the "a pull landed" stand-in here;
+        // the feeds-level seed marks itself written, tested below.)
+        assert_eq!(feed.snapshot_due(100.0).map(|(_, at)| at), Some(100.0));
+        feed.mark_snapshot_written(100.0, 100.0);
+        assert!(feed.snapshot_due(105.0).is_none(), "written: not again");
+
+        // A newer frame inside the window waits for the window.
+        feed.state = CardFeedState::default();
+        feed.state.seed(frame(2), 103.0);
+        assert!(feed.snapshot_due(105.0).is_none(), "inside the window");
+        assert_eq!(
+            feed.snapshot_due(100.0 + DEVICE_FRAME_SNAPSHOT_INTERVAL_SECS)
+                .map(|(frame, _)| frame.revision),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn a_seeded_feed_is_not_written_back_and_never_displaces_a_live_frame() {
+        let mut feeds = DeviceFrameFeeds::new();
+        let device = DeviceId(9);
+        assert!(!feeds.has_frame(device));
+
+        assert!(feeds.seed_snapshot(device, frame(4), 50.0));
+        assert!(feeds.has_frame(device));
+        assert!(
+            feeds.get(device).is_some_and(|feed| !feed.is_wanted()),
+            "a seeded feed wants no pull"
+        );
+        assert!(
+            feeds.snapshots_due(1_000.0).is_empty(),
+            "what came from the store is not written back"
+        );
+        assert!(!feeds.seed_snapshot(device, frame(5), 60.0), "seeded once");
+        assert_eq!(
+            feeds
+                .get(device)
+                .and_then(|feed| feed.frame())
+                .map(|f| f.revision),
+            Some(4)
+        );
     }
 
     #[test]

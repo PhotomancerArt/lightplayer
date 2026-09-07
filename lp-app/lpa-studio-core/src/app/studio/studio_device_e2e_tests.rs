@@ -40,6 +40,8 @@ use lpa_link::providers::fake_device::{
     FakeBootState, FakeDeviceIdentity, FakeDeviceScript, FakeEsp32Device, FakeLightPlayerState,
 };
 
+use lpfs::AsLpPath;
+
 use crate::app::library::{LibraryStore, MemoryLibraryHost};
 use crate::app::places::DeviceRegistry;
 use crate::{
@@ -583,13 +585,35 @@ impl DeviceBench {
         chooser_grants: bool,
     ) -> (Self, TaskPool) {
         let clock = Rc::new(Cell::new(1_000.0));
+        let store = memory_store(Rc::clone(&clock));
+        Self::build_on(device, endpoint, granted, chooser_grants, clock, store)
+    }
+
+    /// A reload: a FRESH controller (empty roster, empty feeds) over the
+    /// store an earlier bench wrote to, with the clock carried forward —
+    /// the registry rows and the last-frame sidecars are what survive a
+    /// page reload, and nothing else does. No port grant: the board is
+    /// remembered, not seen.
+    fn reloaded(previous: &Self, device: &FakeEsp32Device, endpoint: &str) -> (Self, TaskPool) {
+        let clock = Rc::new(Cell::new(previous.clock.get()));
+        let store = memory_store_sharing(&previous.store);
+        Self::build_on(device, endpoint, false, false, clock, store)
+    }
+
+    fn build_on(
+        device: &FakeEsp32Device,
+        endpoint: &str,
+        granted: bool,
+        chooser_grants: bool,
+        clock: Rc<Cell<f64>>,
+        store: LibraryStore,
+    ) -> (Self, TaskPool) {
         let tasks: TaskPool = Rc::new(RefCell::new(Vec::new()));
         let inbox: Rc<RefCell<VecDeque<DeviceInput>>> = Rc::new(RefCell::new(VecDeque::new()));
         let granted = Rc::new(Cell::new(granted));
         let chooser_grants = Rc::new(Cell::new(chooser_grants));
         let revoked = Rc::new(RefCell::new(Vec::new()));
 
-        let store = memory_store(Rc::clone(&clock));
         let host = MemoryLibraryHost::new(memory_store_sharing(&store), {
             let clock = Rc::clone(&clock);
             Rc::new(move || clock.get())
@@ -1513,6 +1537,129 @@ fn a_running_board_feeds_its_card_over_the_shared_link() {
     );
 }
 
+/// The persisted last frame (honest-device-preview follow-up): a fed
+/// board's newest picture is written to its per-uid sidecar at most every
+/// ten seconds, and a RELOAD — a fresh controller over the same store, no
+/// port — rehydrates the remembered board's tile with that picture, dimmed
+/// as Offline, aged from the STORED capture stamp rather than from now.
+#[test]
+fn a_fed_boards_last_frame_survives_a_reload() {
+    let uid = "dev000000daqf6dvvt9";
+    let (mut bench, tasks) = running_board_wanting_a_picture(uid, "usb-feed-9");
+    let device = bench.view().devices[0].id;
+    let sidecar = crate::app::devices::device_frame_snapshot::snapshot_path(uid);
+    let sidecar_bytes = |bench: &DeviceBench| {
+        bench
+            .store
+            .fs_handle()
+            .borrow()
+            .read_file(sidecar.as_path())
+            .ok()
+    };
+
+    // The first frame is written as soon as it lands (nothing was written
+    // before, so the window does not apply).
+    let mut pulls = 0;
+    while feed_frame_revision(&bench, device).is_none() {
+        feed_tick(&mut bench, &tasks, 5.0);
+        pulls += 1;
+        assert!(pulls <= 2, "no frame after two pulls");
+        for _ in 0..40 {
+            bench.step(&tasks);
+        }
+    }
+    let first = sidecar_bytes(&bench).expect("the first frame is written at once");
+    let (stored, stored_at) =
+        crate::app::devices::device_frame_snapshot::decode(&first).expect("decodes");
+    let feed = bench.controller.device_feeds().get(device).expect("a feed");
+    let live = feed.frame().expect("the feed's frame");
+    // The packed layout form quantizes lamp centers, so the picture is
+    // compared by what a slot would draw from it, not bit for bit.
+    assert_eq!(stored.revision, live.revision);
+    assert_eq!(stored.bytes, live.bytes);
+    assert_eq!(stored.extent, live.extent);
+    assert!(stored.display_layout.is_some() && live.display_layout.is_some());
+    let live_at = feed
+        .frame_age_secs(bench.clock.get())
+        .map(|age| bench.clock.get() - age)
+        .expect("aged");
+    assert!(
+        (stored_at - live_at).abs() < 1e-6,
+        "the sidecar carries the frame's own capture stamp: {stored_at} vs {live_at}"
+    );
+
+    // Newer frames inside the ten-second window do not rewrite the file;
+    // once the window elapses, the newest one does.
+    for _ in 0..40 {
+        bench.step(&tasks);
+    }
+    feed_tick(&mut bench, &tasks, 5.0);
+    assert!(
+        feed_frame_revision(&bench, device).is_some_and(|rev| rev > stored.revision),
+        "the engine kept publishing"
+    );
+    assert_eq!(
+        sidecar_bytes(&bench).as_deref(),
+        Some(first.as_slice()),
+        "inside the window the sidecar stands"
+    );
+    bench
+        .clock
+        .set(bench.clock.get() + crate::DEVICE_FRAME_SNAPSHOT_INTERVAL_SECS);
+    feed_tick(&mut bench, &tasks, 5.0);
+    let second = sidecar_bytes(&bench).expect("still there");
+    let (newer, newer_at) =
+        crate::app::devices::device_frame_snapshot::decode(&second).expect("decodes");
+    assert!(newer.revision > stored.revision, "{newer:?} vs {stored:?}");
+    assert!(newer_at > stored_at);
+
+    // Reload: a fresh controller over the same store, the board unplugged
+    // an hour later. The registry row rehydrates the remembered board; the
+    // sidecar rehydrates its picture.
+    let (mut reloaded, _tasks) =
+        DeviceBench::reloaded(&bench, &empty_light_player(uid), "usb-feed-9");
+    reloaded.clock.set(reloaded.clock.get() + 3_600.0);
+    drive(reloaded.controller.settle_library());
+    let roster = reloaded.controller.device_roster_view();
+    let card = roster.roster.devices.first().expect("the remembered board");
+    assert_eq!(
+        card.status,
+        lpa_devices::device::DeviceStatus::Offline,
+        "{card:?}"
+    );
+    let feed_view = roster
+        .feeds
+        .get(&card.id)
+        .expect("the remembered board carries its last picture");
+    assert_eq!(feed_view.liveness, crate::FeedLiveness::Offline);
+    assert_eq!(feed_view.frame.as_ref(), Some(&newer));
+    let age = feed_view
+        .frame_age_secs
+        .expect("aged from the stored stamp");
+    assert!(
+        (age - (reloaded.clock.get() - newer_at)).abs() < 1e-6,
+        "age {age} should be measured from the stored stamp {newer_at}"
+    );
+    // The split the page draws puts it on the remembered line, picture
+    // attached.
+    let split = crate::split_roster(&roster);
+    assert!(split.connected.is_empty());
+    assert_eq!(split.remembered.len(), 1);
+
+    // What came from the store is never written back, and a second settle
+    // reads nothing new (idempotent).
+    reloaded.clock.set(reloaded.clock.get() + 60.0);
+    drive(reloaded.controller.settle_library());
+    assert!(
+        reloaded
+            .controller
+            .device_feeds()
+            .snapshots_due(reloaded.clock.get())
+            .is_empty()
+    );
+    assert_eq!(sidecar_bytes(&reloaded).as_deref(), Some(second.as_slice()));
+}
+
 /// AC3: while the editor lens holds the wire the feed does not pull — not
 /// one request — and it resumes the moment the wire comes back.
 #[test]
@@ -1920,11 +2067,30 @@ fn forgetting_an_identified_device_deletes_its_row_and_gives_the_grant_back() {
     assert_eq!(bench.registry().len(), 1);
     let device_id = bench.view().devices[0].id;
 
+    // A last-frame sidecar under the same uid, as a fed session leaves.
+    crate::app::devices::device_frame_snapshot::write_snapshot(
+        &*bench.store.fs_handle().borrow(),
+        "dev_forget",
+        b"{}",
+    )
+    .unwrap();
+
     bench.gesture(DeviceAction::Forget { device: device_id });
     bench.step(&tasks);
 
     assert!(bench.view().devices.is_empty(), "the card is gone");
     assert!(bench.registry().is_empty(), "so is the remembered row");
+    assert!(
+        !bench
+            .store
+            .fs_handle()
+            .borrow()
+            .file_exists(
+                crate::app::devices::device_frame_snapshot::snapshot_path("dev_forget").as_path()
+            )
+            .unwrap(),
+        "and so is any last-frame sidecar"
+    );
     assert_eq!(
         bench.revoked.borrow().len(),
         1,

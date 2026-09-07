@@ -6085,6 +6085,7 @@ name = "lpa-studio-core"
 version = "40.0.0"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "futures-util",
  "js-sys",
  "jsonschema",

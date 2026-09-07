@@ -108,6 +108,11 @@ pub struct RememberedView {
     /// re-derived, so the split can never offer an escape the model did not
     /// grant (invariant I3).
     pub escapes: Vec<Escape>,
+    /// The board's last picture, when this session pulled one before the
+    /// port went away or a sidecar remembered one across a reload
+    /// (`device_frame_snapshot`) — always `FeedLiveness::Offline` here,
+    /// dimmed, "last frame · <age>". `None` keeps the tile's sentence.
+    pub feed: Option<super::DeviceCardFeedView>,
 }
 
 /// Split a roster view into cards worth drawing and the quiet remembered
@@ -124,6 +129,7 @@ pub fn split_roster(roster: &DeviceRosterView) -> RosterSplit {
                 board: device_identity_line(device).board,
                 last_seen_label: device.freshness_label.clone(),
                 escapes: device.escapes.clone(),
+                feed: roster.feeds.get(&device.id).cloned(),
             });
         } else {
             connected.push(device.clone());
@@ -523,7 +529,17 @@ mod tests {
             },
             transport_available: true,
             open_addresses: Default::default(),
-            feeds: std::collections::BTreeMap::new(),
+            // The remembered board's last picture (a sidecar across a
+            // reload, or this session's last pull) rides the split.
+            feeds: std::collections::BTreeMap::from([(
+                DeviceId(2),
+                super::super::DeviceCardFeedView {
+                    frame: None,
+                    frame_age_secs: Some(3_600.0),
+                    engine_fps: None,
+                    liveness: super::super::FeedLiveness::Offline,
+                },
+            )]),
         };
 
         let split = split_roster(&view);
@@ -545,6 +561,11 @@ mod tests {
             Some("last heard 3 m ago")
         );
         assert_eq!(remembered.escapes, vec![Escape::Reconnect, Escape::Forget]);
+        assert_eq!(
+            remembered.feed.as_ref().map(|feed| feed.liveness),
+            Some(super::super::FeedLiveness::Offline),
+            "the last picture rides the split"
+        );
     }
 
     /// Roster order (last-seen-sorted) survives the split for the cards that
