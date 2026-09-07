@@ -39,6 +39,19 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
+
+/// One firmware build at a time per process. Three tests in one binary
+/// (`boot_idle`'s two memfs runs and its flash-backed one) all resolve an
+/// image on their own thread, and with `LP_EMU_BUILD_FW=1` and no image on
+/// disk each would start `build-reference-image.sh` — into the **same**
+/// detached worktree and the same output path. Two `git worktree add`s race
+/// (the loser exits 128 and its test SKIPs), and two `cherry-pick -n` +
+/// `cargo build` + `cp` sequences race into one ELF: M5 P1's CI run loaded
+/// a memfs image built that way and read a stack high-water 128 B off the
+/// pinned figure, and the rerun of the same commit was green. The lock makes
+/// the first thread build and the rest find the file.
+static BUILD_LOCK: Mutex<()> = Mutex::new(());
 
 /// The profile and target `fw-esp32c6` is built with (`justfile`:
 /// `build-fw-esp32c6`).
@@ -86,6 +99,18 @@ impl FwImage {
     /// on this one.
     pub const SHIPPED_NO_FLASH: FwImage = FwImage {
         features: &["esp32c6", "server", "radio", "memory_fs"],
+        default_features: false,
+    };
+
+    /// The M5 P1 gate image: the `test_rmt` hardware harness — a 256-LED
+    /// white chase on GPIO18 through the shipped `lp-ws281x` refill path,
+    /// no server loop, no radio init, no filesystem (a harness build never
+    /// reaches `bootctl`, so no `memory_fs` is needed). `server` is in the
+    /// set because on today's main `recovery/panic_path.rs` uses
+    /// `lpc_shared` unconditionally and only `server`/`radio` bring that
+    /// crate: the brief's bare `esp32c6,test_rmt` does not link.
+    pub const TEST_RMT: FwImage = FwImage {
+        features: &["esp32c6", "server", "test_rmt"],
         default_features: false,
     };
 
@@ -254,6 +279,15 @@ pub fn fw_esp32c6_image(image: &FwImage) -> Result<PathBuf, String> {
     }
     let conventional = conventional_path(&root);
 
+    // Serialise with every other image build in this process, then look
+    // again: the thread that held the lock may have built this very image.
+    let _build = BUILD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(cached) = &cached
+        && cached.is_file()
+    {
+        return Ok(cached.clone());
+    }
+
     if std::env::var("LP_EMU_BUILD_FW").as_deref() != Ok("1") {
         return Err(format!(
             "no fw-esp32c6 ELF for `{slug}`. Set LP_EMU_C6_ELF_{slug} to one, or LP_EMU_BUILD_FW=1 \
@@ -373,6 +407,12 @@ pub fn reference_image(image: &ReferenceImage) -> Result<PathBuf, String> {
     if path.is_file() {
         return Ok(path);
     }
+    // The script shares one detached worktree between every reference
+    // image: never run it twice at once (see `BUILD_LOCK`).
+    let _build = BUILD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    if path.is_file() {
+        return Ok(path);
+    }
     if std::env::var("LP_EMU_BUILD_FW").as_deref() != Ok("1") {
         return Err(format!(
             "no reference image `{}` at {}. Set {var} to one, or LP_EMU_BUILD_FW=1 to build it \
@@ -414,6 +454,7 @@ mod tests {
             FwImage::SHIPPED_NO_FLASH.slug(),
             "ESP32C6_SERVER_RADIO_MEMORY_FS"
         );
+        assert_eq!(FwImage::TEST_RMT.slug(), "ESP32C6_SERVER_TEST_RMT");
         assert_eq!(
             ReferenceImage::BOOT_IDLE_MEMFS.env_var(),
             "LP_EMU_C6_REF_BOOT_IDLE_MEMFS"

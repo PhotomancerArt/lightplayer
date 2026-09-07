@@ -35,7 +35,27 @@ const GATE_US: u64 = 5_500_000;
 /// as measured for this configuration; never tuned.
 const HEARTBEAT_MEMORY: &str =
     r#""memory":{"freeBytes":266688,"usedBytes":58848,"totalBytes":325536"#;
-const STACK_LINE: &str = "[stack] heartbeat: high-water 11432 B of 71960 B";
+/// The stack line is checked for its shape and its total, and its
+/// high-water for a band — not the exact §5.4 figure the memory line still
+/// gets. The high-water is the deepest point an interrupt ever landed on
+/// the main task, and P6 already recorded it as interleaving-dependent
+/// (11432 B under `t1`, 11752 under `t2`, DD26). M5 P1's CI runs added the
+/// other axis: the reference image `build-reference-image.sh` produces on
+/// the GitHub runner is not the binary it produces here — three CI runs of
+/// one commit and one path gave three sha256s (`63b5b658…`, `f74b310b…`,
+/// `207ba410…`), 4,772 B larger than the local `55d810a9…`, with the code
+/// shifted (`Rmt::new`'s `sys_conf` write at pc `0x4207713e` vs
+/// `0x42076e6c`), 1,517 fewer instructions to the 5.5 s deadline and one
+/// idle skip fewer — and on that binary the same emulator reads
+/// `11560 B` where this one reads `11432 B`, every register the guest asks
+/// the RMT and PCR models for answering identically on both hosts and the
+/// heap figures byte-equal. A tick that lands on a different instruction
+/// of a differently laid-out image is a different deepest point. The band
+/// is the documented spread with room, not a fitted number: the memory
+/// class stays exact, the stack figure is reported by `digest`.
+const STACK_LINE_PREFIX: &str = "[stack] heartbeat: high-water ";
+const STACK_TOTAL: &str = " B of 71960 B";
+const STACK_HIGH_WATER_BAND: std::ops::RangeInclusive<u64> = 11_000..=12_000;
 
 /// The lines the brief asks for, in order.
 const BOOT_LINES: &[&str] = &[
@@ -47,7 +67,7 @@ const BOOT_LINES: &[&str] = &[
     "[fw-esp32c6] ESP-NOW radio ready: device_id= channel=11",
     "[RECOVERY] boot complete (first frame served)",
     "M!{\"id\":0,\"msg\":{\"heartbeat\":{",
-    STACK_LINE,
+    STACK_LINE_PREFIX,
 ];
 
 struct Run {
@@ -65,14 +85,33 @@ fn machine(image: &ReferenceImage, buf: &SharedBuffer) -> Option<Esp32C6Machine>
             return None;
         }
     };
+    if let Ok(bytes) = std::fs::read(&elf) {
+        use sha2::Digest;
+        let sha = sha2::Sha256::digest(&bytes);
+        println!(
+            "boot_idle: {} = {} ({} bytes)",
+            elf.display(),
+            sha.iter().map(|b| format!("{b:02x}")).collect::<String>(),
+            bytes.len()
+        );
+    }
     Some(
         Esp32C6Builder::new()
             .app(AppSource::Path(elf))
             .strict(true)
             .time_grade(TimeGrade::T1)
-            // A filter that matches no block: only the notes (SPIN, TOUCH,
-            // WIFI RX config, …) come through.
-            .trace(Box::new(buf.clone()), vec!["NOTHING".to_string()])
+            // The notes (SPIN, TOUCH, WIFI RX config, …) plus the three
+            // blocks the M5 P1 CI diagnosis reads (`digest`): the RMT block,
+            // PCR (its clock lines), and the interrupt-entry timeline
+            // (`core_0_intr_status` reads, one per `handle_interrupts`).
+            .trace(
+                Box::new(buf.clone()),
+                vec![
+                    "RMT".to_string(),
+                    "PCR".to_string(),
+                    "INTERRUPT_CORE0".to_string(),
+                ],
+            )
             .build()
             .expect("the reference image builds a machine"),
     )
@@ -91,11 +130,71 @@ fn run_memfs() -> Option<Run> {
     })
 }
 
+/// The M5 P1 CI diagnosis (PR #569): the memfs image's `[stack]` high-water
+/// read 11560 B on the GitHub runner and 11432 B here with the rest of the
+/// boot text byte-identical. Printed on every run (`--nocapture` in
+/// `just test-emu-c6`) so the two hosts can be compared line by line: the
+/// image's sha, the stack line, every RMT and PCR-RMT register access, and
+/// the interrupt-entry timeline as a count, its first entries, and an FNV
+/// digest over every entry's cycle.
+fn digest(m: &Esp32C6Machine, text: &str, notes: &[String]) {
+    let stack = text
+        .lines()
+        .find(|l| l.contains("[stack] heartbeat"))
+        .unwrap_or("<no stack line>");
+    println!("digest: stack: {stack}");
+    println!(
+        "digest: cycles={} instructions={} idle_skips={} rmt_frames={}/{}",
+        m.cycles(),
+        m.instructions(),
+        m.idle_skips(),
+        m.rmt_frames_ended(0),
+        m.rmt_frames_ended(1)
+    );
+    let entries: Vec<&String> = notes
+        .iter()
+        .filter(|l| l.contains("R4 INTERRUPT_CORE0+0x134 core_0_intr_status0"))
+        .collect();
+    let mut fnv: u64 = 0xcbf2_9ce4_8422_2325;
+    for e in &entries {
+        for b in e.split_whitespace().next().unwrap_or("").bytes() {
+            fnv ^= u64::from(b);
+            fnv = fnv.wrapping_mul(0x0100_0000_01b3);
+        }
+    }
+    println!(
+        "digest: interrupt entries={} fnv={fnv:016x} first={:?} last={:?}",
+        entries.len(),
+        entries
+            .iter()
+            .take(24)
+            .map(|l| l.split_whitespace().next().unwrap_or(""))
+            .collect::<Vec<_>>(),
+        entries
+            .iter()
+            .rev()
+            .take(4)
+            .map(|l| l.split_whitespace().next().unwrap_or(""))
+            .collect::<Vec<_>>()
+    );
+    for l in notes
+        .iter()
+        .filter(|l| l.contains(" RMT") || l.contains("PCR+0x02c") || l.contains("PCR+0x030"))
+    {
+        println!("digest: {l}");
+    }
+    let ints = notes
+        .iter()
+        .filter(|l| l.contains("INTERRUPT_CORE0"))
+        .count();
+    println!("digest: notes={} interrupt_core0_lines={ints}", notes.len());
+}
+
 #[test]
 #[ignore = "needs the memfs reference image; run through `just test-emu-c6`"]
 fn the_memfs_spike_image_says_hello_and_heartbeats_with_the_5_4_figures() {
     let Some(Run {
-        m,
+        mut m,
         outcome,
         text,
         notes,
@@ -112,6 +211,7 @@ fn the_memfs_spike_image_says_hello_and_heartbeats_with_the_5_4_figures() {
         0,
         "unmapped"
     );
+    digest(&m, &text, &notes);
 
     // The boot lines, in order.
     let mut from = 0;
@@ -122,6 +222,20 @@ fn the_memfs_spike_image_says_hello_and_heartbeats_with_the_5_4_figures() {
         from += at + needle.len();
     }
     assert!(text.contains(HEARTBEAT_MEMORY), "{text}");
+    // The stack line: its shape and total exactly, its high-water in the
+    // band (see `STACK_HIGH_WATER_BAND`).
+    let stack = text
+        .lines()
+        .find(|l| l.contains(STACK_LINE_PREFIX))
+        .expect("the stack line follows the heartbeat");
+    let after = &stack[stack.find(STACK_LINE_PREFIX).unwrap() + STACK_LINE_PREFIX.len()..];
+    let (used, rest) = after.split_at(after.find(' ').unwrap_or(after.len()));
+    assert!(rest.starts_with(STACK_TOTAL), "{stack}");
+    let used: u64 = used.parse().unwrap_or_else(|_| panic!("{stack}"));
+    assert!(
+        STACK_HIGH_WATER_BAND.contains(&used),
+        "high-water {used} B outside {STACK_HIGH_WATER_BAND:?}: {stack}"
+    );
     // No `[FS]` mount pair: `memory_fs` is the no-flash switch; the flash-
     // backed hello is M4's.
     assert!(!text.contains("[FS]"));
@@ -145,6 +259,20 @@ fn the_memfs_spike_image_says_hello_and_heartbeats_with_the_5_4_figures() {
         .filter(|l| l.contains("WIFI_MAC TOUCH"))
         .count();
     assert!(touched > 300, "{touched} distinct WIFI_MAC offsets");
+
+    // M5 P1 G1-2: `Esp32C6RmtWs281xDriver: 2 WS281x channels` configured
+    // both TX channels (`mem_size 1` each) and never started one.
+    assert_eq!(m.rmt_frames_ended(0), 0);
+    assert_eq!(m.rmt_frames_ended(1), 0);
+    assert!(m.rmt_words(0).is_empty());
+    let conf0 = m
+        .peek_word(lp_emu_esp32c6::memmap::periph::RMT + 0x10)
+        .expect("RMT.ch0_tx_conf0");
+    assert_eq!(conf0 & (1 << 6), 1 << 6, "idle_out_en: {conf0:#010x}");
+    assert_eq!(conf0 & (1 << 5), 0, "idle_out_lv 0: {conf0:#010x}");
+    assert_eq!((conf0 >> 8) & 0xff, 1, "div_cnt 1: {conf0:#010x}");
+    assert_eq!((conf0 >> 16) & 0x7, 1, "mem_size 1: {conf0:#010x}");
+    assert!(!notes.iter().any(|l| l.contains("RMT ch0 start")));
 }
 
 #[test]

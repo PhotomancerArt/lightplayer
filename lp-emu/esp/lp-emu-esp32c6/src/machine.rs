@@ -62,6 +62,7 @@ use crate::control::{ControlCommand, ControlReply, HostReport};
 use crate::intmatrix::Esp32C6IntMatrix;
 use crate::loader::{self, EfuseIdentity, LoadError, PlacedAppSegment, ResetCause};
 use crate::memmap;
+use crate::periph;
 use crate::periph::uart::LIVE_POLL_CYCLES;
 use crate::periph::usb_sj::UsbSerialJtag;
 use crate::rom::{self, HookResult, HookTable, PlacedSegment, RomError};
@@ -1180,6 +1181,31 @@ impl Esp32C6Machine {
     /// The UART0 TCP listener, when `Uart0Sink::Tcp` was chosen.
     pub fn uart0_tcp(&self) -> Option<&lp_emu_esp_common::TcpHost> {
         self.uart0_tcp.as_ref()
+    }
+
+    /// The RMT block, read-only, through the bus's peripheral downcast
+    /// (`Peripheral::as_any`, the matrix precedent). `None` on a bare
+    /// machine that registered no RMT.
+    fn rmt(&self) -> Option<&periph::rmt::Rmt> {
+        let index = self.bus.peripheral_index("RMT")?;
+        self.bus.peripheral(index)?.as_any()?.downcast_ref()
+    }
+
+    /// Every pulse RMT TX channel `ch` has put on its signal, in guest
+    /// time — the observation until P2's fabric routes it to a pad.
+    pub fn rmt_pulses(&self, ch: usize) -> &[periph::rmt::Pulse] {
+        self.rmt().map(|r| r.pulses(ch)).unwrap_or(&[])
+    }
+
+    /// Every word channel `ch` fetched from the RMT RAM, with its cycle;
+    /// STOP words included, so a frame reads `data … latch STOP`.
+    pub fn rmt_words(&self, ch: usize) -> &[(Cycles, u32)] {
+        self.rmt().map(|r| r.words(ch)).unwrap_or(&[])
+    }
+
+    /// `tx_end`s raised on channel `ch`.
+    pub fn rmt_frames_ended(&self, ch: usize) -> usize {
+        self.rmt().map(|r| r.frames_ended(ch)).unwrap_or(0)
     }
 
     // ---- time ----------------------------------------------------------

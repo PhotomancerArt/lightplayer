@@ -38,3 +38,8 @@ sha2 = "0.10"
 # silicon transcript with M2's runner. Inside the `lp-emu/` fence (MIT), and
 # it mirrors `fw-checks` rather than importing it, so the fence lint passes.
 lp-emu-validate = { path = "../../lp-emu-validate" }
+# `tests/rmt_chase.rs` decodes the RMT model's fetched words with the same
+# `PulseItem::decode` the firmware encodes them with. MIT, and on the fence's
+# allowlist for exactly this (`scripts/check-emu-fence.sh`). No `mock`: the
+# emulator is the cycle-time model of the same peripheral.
+lp-ws281x = { path = "../../../lp-fw/lp-ws281x", default-features = false }

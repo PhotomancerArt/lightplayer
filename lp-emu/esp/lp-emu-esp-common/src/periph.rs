@@ -543,6 +543,15 @@ pub trait Peripheral {
 
     /// Restore from a blob produced by [`save_state`](Self::save_state).
     fn load_state(&mut self, bytes: &[u8]);
+
+    /// The downcast seam for a machine that wants to *observe* a peripheral
+    /// it built — the matrix's `as_any` precedent (plan DD22), read-only.
+    /// `None` by default: most blocks have nothing to show beyond their
+    /// registers, and a peripheral that does (the RMT's pulse and word logs)
+    /// opts in with `Some(self)`. Nothing on the guest side can reach it.
+    fn as_any(&self) -> Option<&dyn Any> {
+        None
+    }
 }
 
 /// A boxed peripheral, as the bus stores them.
