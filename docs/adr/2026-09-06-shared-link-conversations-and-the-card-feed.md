@@ -128,8 +128,12 @@ and fold borrow churn straight into freshness.
 - **Device-push streaming:** rejected already at the 2026-08-05 spike
   gate; a push monopolizes the mode-exclusive wire.
 - **Joining the lens session's own frames into the card while the
-  editor is open:** a later nicety; the dimmed last frame is honest
-  meanwhile.
+  editor is open:** landed 2026-09-07 (`LensFrameSource`, joined at
+  `device_card_feed_view`): while the lens holds a device's wire the card
+  draws the lens mirror's composed frame as `Live`, aged by the lens's own
+  frame clock; `FeedLiveness::Lens` (the dimmed last frame, "editor has
+  the wire") remains only until the lens has produced a frame. No second
+  pull, and the feed's own pull still never runs under the borrow.
 
 ## References
 
