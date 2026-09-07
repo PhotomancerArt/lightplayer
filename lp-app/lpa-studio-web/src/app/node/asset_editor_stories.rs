@@ -137,6 +137,19 @@ fn compile_error() -> Element {
 }
 
 #[story(
+    description = "The GPU preview tier's unbounded-loop refusal, verbatim from `lp-gfx-wgpu` for the fault-demo rig: the codespan-style marker lands the gutter mark on the AUTHORED line 14 (`while (true)`), not on the assembled unit's line; the headline names the function, the line and the loop head."
+)]
+fn compile_error_gpu_loop_refusal() -> Element {
+    let mut editor = editor_fixture(resolved(true));
+    editor.shader_error = Some(UiShaderError::parse(
+        "shader compile: unbounded loop in `render_2d` at line 14 (`while (true) { acc += 0.001; }`): no path through the loop body breaks, returns or discards. The GPU tier has no fuel meter, so it refuses to compile a loop that can never exit.\n   ┌─ glsl:14:5\n   │\n14 │     while (true) { acc += 0.001; }\n   │     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n",
+    ));
+    rsx! {
+        EditorStoryCard { editor }
+    }
+}
+
+#[story(
     description = "A location-less compile error (recovery-blocked): the message with no line:col; full-error popup available."
 )]
 fn compile_error_no_location() -> Element {
