@@ -375,6 +375,62 @@ raise it well above the fuel tank so fuel traps fire first and the budget stays
 a backstop for fuel-off compiles; `DEFAULT_STEP_BUDGET` is sized for the fixture
 corpus, not for real shaders.
 
+## Speed
+
+```bash
+just bench-emu-xt                                   # the table, promoted to prev/
+just bench-emu-xt --json target/emu-bench-xt/new.json
+scripts/emu/bench-xt.sh --bin <saved-binary> --no-build --no-promote   # the A/B half
+```
+
+This core has no SoC around it — no peripherals, no emulated clock — so it
+runs at `CycleModel::InstructionCount`, where a cycle *is* an instruction and
+there is no real-time ratio to report. The probe prints instructions/second,
+user seconds, wall seconds and the load average, and `cmp`s two things against
+the previous run: the guest's collected output and a capped text trace. Those
+two are the identity oracle — the speed work must not change one byte of
+either (PD5, ADR 2026-09-06).
+
+The workload is the `lp-xt/fixtures` corpus, which the recipe builds (esp
+toolchain) if it is missing. **The corpus is short**: its longest program,
+`ackermann`, retires 292 k instructions, three orders of magnitude under a
+probe-sized run, so each row is repeated from a clean emulator until it has
+retired ≥100 M. Per-repeat setup (region allocation plus the ELF load) measures
+~40 µs against ~16 ms of execution, so it is a rounding error in the rate and
+not a hidden constant. A long-running Xtensa image would replace the repeats.
+
+Like the C6 probe it is an **oracle, not a gate**: nothing in CI runs it, and
+no number it prints gates anything.
+
+**The measured ladder** (M6, 2026-09-07; best of three runs, two interleaved
+same-window rounds on an M2 Max at load 10–28; the spread between rounds is
+±8%, which is the resolution this desk offers):
+
+| rung | ackermann instr/s | fib_rec instr/s |
+|---|---:|---:|
+| stock (`opt-level = 3` from M1) | 21.4 M | 54.5 M |
+| + one memory resolution per access, region hint | 31.4 M | 62.4 M |
+| + compile-time tracer | 30.6 M | 61.9 M |
+| + cost class from the executor arm, log level hoisted | 31.2 M | 61.3 M |
+| **total** | **1.46×** | **1.12×** |
+
+Read that honestly: the memory path is the whole win. `ackermann` is deep
+recursion with heavy window spill/reload traffic, so it was paying five region
+scans per stored word; `fib_rec`'s wide, shallow call tree pays fewer, and
+gains less. The tracer and cost-class rungs are inside the noise here — they
+remove real per-instruction work (a virtual call per register write, a second
+full match over the 51-variant `Inst`), but an indirect call to an empty
+function and a well-predicted match are close to free on this core. They are
+kept for the work they remove and for the seam the block cache (M5) wants.
+
+**One trap worth knowing.** A per-package `opt-level` override only reaches
+code codegen'd in *that* package, and a generic function is codegen'd wherever
+it is instantiated. Making the emulator's public entry points generic over the
+tracer put the whole run loop in `lp-xt-elf`, at the workspace's
+`opt-level = "z"`, and cost 25%. The generic parameters therefore stay behind
+non-generic entry points (`Emulator::run_loop`), and the root `Cargo.toml`
+says so next to the override.
+
 ## Validation
 
 `tests/conformance.rs` runs every corpus case on the emulator under **every**

@@ -2084,6 +2084,27 @@ emu-c6 elf *args:
 bench-emu-c6 *args:
     scripts/emu/bench-c6.sh {{ args }}
 
+# The Xtensa core's speed probe: the two longest fixture programs, repeated
+# until each row has retired >=100 M instructions, reported as user seconds,
+# instructions/second and the load average, with a `cmp` of the guest output
+# AND of a capped text trace against the previous run.
+#
+#   just bench-emu-xt                                   # table, promote to prev/
+#   just bench-emu-xt --json target/emu-bench-xt/new.json
+#   scripts/emu/bench-xt.sh --bin <saved> --no-build --no-promote   # the A/B half
+#
+# `lp-xt-emu` is an ISA core with no SoC around it, so there is no emulated
+# clock and no real-time ratio — a cycle is an instruction
+# (`CycleModel::InstructionCount`). The workload is the `lp-xt/fixtures`
+# corpus, which the recipe builds (esp toolchain) if it is missing; the
+# repeats are there because no long-running Xtensa image exists in this repo.
+# See the script's header.
+#
+# It is an ORACLE, not a gate — no CI job runs it and no number it prints
+# gates anything.
+bench-emu-xt *args:
+    scripts/emu/bench-xt.sh {{ args }}
+
 # The generated `RegNames` tables (offset -> register name) are derived from
 # the esp32c6 PAC's svd2rust offset comments and carry a provenance header.
 # A hand edit is reverted by the next regeneration and takes its provenance
