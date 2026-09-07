@@ -285,6 +285,13 @@ enum Step {
         bytes: VecDeque<u8>,
         resolved: Option<Cycles>,
     },
+    /// Deliver `bytes` `delay` cycles after the previous step finished
+    /// delivering its own — a host that paces itself.
+    Then {
+        delay: Cycles,
+        bytes: VecDeque<u8>,
+        resolved: Option<Cycles>,
+    },
 }
 
 /// Deterministic host input: bytes at declared cycles, or bytes that wait
@@ -379,12 +386,41 @@ impl ScriptedSource {
         }
     }
 
+    /// `bytes` become available `delay` cycles after the previous step
+    /// finished delivering its own.
+    ///
+    /// This is how a host **paces itself**, and it is the difference between
+    /// a walk that lands and one that arrives corrupt. UART0's RX FIFO is
+    /// 128 bytes; at 921,600 baud that is 1.39 ms of wire, and the
+    /// firmware's reader takes 64 bytes per turn of its server loop. A host
+    /// that streams a 739-byte request without pausing overruns the FIFO —
+    /// the part drops the byte, and three layers up it reads as `dropping
+    /// unparseable N B M! line`. A bridge board, or any host with a write
+    /// loop, does not do that; `then` is how a script says so.
+    pub fn then(mut self, delay: Cycles, bytes: impl AsRef<[u8]>) -> Self {
+        self.push_then(delay, bytes);
+        self
+    }
+
+    pub fn push_then(&mut self, delay: Cycles, bytes: impl AsRef<[u8]>) {
+        let bytes: VecDeque<u8> = bytes.as_ref().iter().copied().collect();
+        if !bytes.is_empty() {
+            self.steps.push_back(Step::Then {
+                delay,
+                bytes,
+                resolved: None,
+            });
+        }
+    }
+
     /// Bytes still undelivered.
     pub fn remaining(&self) -> usize {
         self.steps
             .iter()
             .map(|s| match s {
-                Step::At { bytes, .. } | Step::After { bytes, .. } => bytes.len(),
+                Step::At { bytes, .. } | Step::After { bytes, .. } | Step::Then { bytes, .. } => {
+                    bytes.len()
+                }
             })
             .sum()
     }
@@ -424,6 +460,18 @@ impl ScriptedSource {
                 self.search_from = from + hit + needle.len();
                 Some(at)
             }
+            Step::Then {
+                resolved: Some(at), ..
+            } => Some(*at),
+            // First look at this step: the previous one has just finished,
+            // so the clock starts here.
+            Step::Then {
+                delay, resolved, ..
+            } => {
+                let at = now.saturating_add(*delay);
+                *resolved = Some(at);
+                Some(at)
+            }
         }
     }
 }
@@ -435,7 +483,7 @@ impl ByteSource for ScriptedSource {
             return None;
         }
         let (byte, drained) = match self.steps.front_mut()? {
-            Step::At { bytes, .. } | Step::After { bytes, .. } => {
+            Step::At { bytes, .. } | Step::After { bytes, .. } | Step::Then { bytes, .. } => {
                 let byte = bytes.pop_front();
                 (byte, bytes.is_empty())
             }
@@ -451,18 +499,25 @@ impl ByteSource for ScriptedSource {
             Step::At { at, .. } => Some(*at),
             Step::After {
                 resolved: Some(at), ..
+            }
+            | Step::Then {
+                resolved: Some(at), ..
             } => Some(*at),
             // Unresolved: the answer depends on output that has not
-            // happened yet. `is_live` is what keeps the UART polling.
-            Step::After { .. } => None,
+            // happened yet, or on a step that has not finished. `is_live` is
+            // what keeps the UART polling.
+            Step::After { .. } | Step::Then { .. } => None,
         }
     }
 
-    /// `true` only while a wait is pending. The bytes still arrive on a
-    /// guest-time grid (see the type's docs); "live" here means "ask again",
-    /// not "the host clock decides".
+    /// `true` only while a step's cycle is not yet known. The bytes still
+    /// arrive on a guest-time grid (see the type's docs); "live" here means
+    /// "ask again", not "the host clock decides".
     fn is_live(&self) -> bool {
-        matches!(self.steps.front(), Some(Step::After { resolved: None, .. }))
+        matches!(
+            self.steps.front(),
+            Some(Step::After { resolved: None, .. } | Step::Then { resolved: None, .. })
+        )
     }
 }
 

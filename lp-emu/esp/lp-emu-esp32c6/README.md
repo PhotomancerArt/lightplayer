@@ -166,10 +166,76 @@ bytes have to already be there), and the core arrives at `_start` with
 left at the architectural reset value would idle in `wfi` forever.
 
 The file also carries a written-down list of the seven things direct load does
-**not** reproduce — the partition table, the MMU page table, the ROM's console
-globals, the `rst:0x1 (POWERON)` banner, early RNG entropy, real eFuse, and
-the derived reset cause. That list is the seed for M7's cross-check, and it is
-worth more than the code around it.
+**not** reproduce — the partition table, the MMU page table's *provenance*,
+the ROM's console globals, the `rst:0x1 (POWERON)` banner, early RNG entropy,
+real eFuse, and the derived reset cause. That list is the seed for M7's
+cross-check, and it is worth more than the code around it.
+
+Two of those seven the loader now does, because M4's firmware asks the flash
+*chip* questions and the two halves of the address space have to describe one
+board:
+
+- **`stage_image_in_flash`** puts the image's flash-resident segments into
+  the chip at `paddr = 0x0001_0000 + (vaddr - 0x4200_0000)` — the `factory`
+  partition's offset plus the offset into the window, which is a whole number
+  of 64 KiB pages, so the cache MMU's `paddr % page == vaddr % page` holds —
+  and programs the page table for them. It is **not** an `esptool` image
+  layout; M7 boots a real merged image through the real bootloader and gets
+  the real offsets, and this is one of the things that cross-check checks.
+- **`seed_rom_flash_chip`** writes the chip size into
+  `rom_spiflash_legacy_data->chip_size`, in place of the bootloader's
+  `esp_rom_spiflash_config_param`. The ROM's own default chip is **2 MiB**
+  (`rom_default_spiflash_legacy_data` at `0x4087_fa08`), `SPI_read_data`
+  refuses any read past `chip_size`, and `lpfs` starts at `0x0031_0000` —
+  so without this every filesystem read returns error 1 for a reason that has
+  nothing to do with the filesystem.
+
+## Flash, and the cache window
+
+The chip is a `flash::FlashImage`: read, program (an `&=`, because a NOR cell
+only goes one to zero — programming twice without an erase corrupts here
+exactly as it does on the part), erase back to `0xff`, and a JEDEC id whose
+capacity byte is the image's real size. Where its bytes come from is
+`FlashBacking`:
+
+| flag | at start | at exit |
+|---|---|---|
+| *(none)* | a blank chip, all `0xff` | nothing |
+| `--flash <file>` | the file, `0xff`-padded (created if absent) | written back |
+| `--flash-copy <file>` | the file | nothing |
+
+`--flash-size` takes a power of two of at least 64 KiB; anything else is
+refused, because the JEDEC capacity byte is an exponent and there is no
+honest id for a chip that is not one.
+
+The `0x4200_0000` window reads **through the MMU**. `cache::CacheMmu` is the
+page table, and every number in it is read off the vendored ROM ELF rather
+than a datasheet: `Cache_MMU_Init` (`0x4002_7c76`) says 256 entries and that
+zero is invalid, `Cache_MSPI_MMU_Set` (`0x4002_7c90`) says an entry is
+`page | encrypt<<10 | VALID<<9` and gives the index arithmetic,
+`MMU_Get_Page_Mode` (`0x4002_75ea`) says the page mode is
+`mmu_power_ctrl[4:3]`. `CacheMmu::translate` is the whole address path in one
+function, on purpose: a later `t2` rung hangs its cache-miss wait states off
+exactly that lookup.
+
+The window is served as a **cache fill** — `cache::fill` copies a valid
+page's flash bytes into the RAM region behind `0x4200_0000` when the table
+changes or the flash under a mapped page is written — so instruction fetch
+stays a RAM read. That makes the model *stricter than silicon about
+staleness*: a real cache keeps serving old bytes until something invalidates
+it, and this one refills at the next slice boundary. Nothing in this
+milestone's images writes a mapped page (the app is in `factory`, littlefs in
+`lpfs`, and only `lpfs` is written), so the difference is documented rather
+than exercised.
+
+The run summary reports what the guest asked the flash to do, for comparison
+with the spike inventory's esp-emu figures:
+
+```text
+flash: 300 commands (287 reads, 4 page programs, 2 sector erases, 0 block
+erases, 7 write-enables; 60 status polls); 37 page(s) filled into the cache
+window
+```
 
 ## Peripherals
 
@@ -203,7 +269,8 @@ milestone owns.
 | `PMU`, `LP_AON`, `LP_APM`, `LP_APM0`, `HP_APM`, `MODEM_SYSCON`, `MODEM_LPCON`, `APB_SARADC`, `HP_SYS`, `TEE`, `LP_TEE`, `LP_IO`, `LP_TIMER`, `EXTMEM` | — | accept | written by `esp_hal::init`, read back as written; `LP_AON.store1` carries the calibration value |
 | `UART0`, `UART1` | `0x6000_0000/1000` | modelled | 128-byte FIFOs; the shifter drains **at the configured baud in emulated time** (PCR clock line × `clkdiv`; reset `clkdiv = 347 + 3/16` = 115,200 from XTAL, *modeled* "as the ROM boot leaves it"); `rxfifo_full`/`txfifo_empty` as levels (`>`/`<` the `conf1` thresholds, per the TRM), `rxfifo_tout` in bit-times, `tx_done`, `rxfifo_ovf`, `reg_update` pulse; `at_cmd_char_det` never fires (stated, not modelled); sources 43/44. See "UART0 and the outside" |
 | `USB_DEVICE` | `0x6000_F000` | modelled | **no host attached**: `ep1_conf.serial_in_ep_data_free` = 1 until a `wr_done` with bytes, then 0 for ever; `serial_out_ep_data_avail` = 0; `int_raw.sof` never; `serial_in_empty` set at reset, never re-set after the seal; source 48. IN bytes go to the `usb-sj` observation sink. The attached / draining states are M6 |
-| `SPI0`, `SPI1` | `0x6000_2000/3000` | accept | a flash access spins on `SPI1.cmd` (the `SPIN` line names it) until M4 |
+| `SPI1` | `0x6000_3000` | modelled | **the legacy flash controller**, against a `flash::FlashImage`: `flash_rdid` (esp-storage's own size probe), the `usr` engine (command/address/dummy/data phases from `user`/`user1`/`user2`/`addr`/`w0..w15`), the dedicated `flash_read`/`pp`/`se`/`be`/`ce`/`wren`/`wrdi`/`rdsr`/`wrsr` bits, and a real status register (WIP always clear, WEL set by `wren` and consumed by a program or erase). Every trigger self-clears and `mst_st` reads idle, which is what `Wait_SPI_Idle` waits for. **Every PAC reset value is carried**, `user = 0x8000_0000` above all: the mask ROM's read path never sets `usr_command` because reset already did |
+| `SPI0` | `0x6000_2000` | modelled | the cache controller's block: `mmu_item_content`/`mmu_item_index`/`mmu_power_ctrl` drive `cache::CacheMmu`; the rest accept, with the PAC's reset values |
 | `RMT` | `0x6000_6000` | accept | `Rmt::new` runs in every image; channels, blocks and the WS281x waveform are M5 |
 | `WIFI_MAC` | `0x600A_0000..9800` | accept (*modeled*) | the radio window as **one** block with coarse names (`mac` / `ieee802154` / `bb` — ours, nothing documents it), a `TOUCH` note per distinct offset, and the override list `wifi_stub::OVERRIDES` (five entries, one per `SPIN` the boot showed, each with the poll's disassembly beside it); `+0x4084` is the RX DMA base the `WIFI RX config` line reports |
 | `WIFI_PWR` | `0x600A_9900..F000` | accept | the undocumented gap after MODEM_SYSCON (the ROM's `tsf_hal_*` touch it first); `+0x3700` is a live **microsecond counter** (*modeled* `cycles / 160`) — the blob's `wait_i2c_sdm_stable` latches it and gives up after 9,999 ticks, and a remembered 0 never lets it |
@@ -395,6 +462,7 @@ lp-emu-esp32c6 --elf <app.elf> [--rom <path>] [--time-grade t1|t2]
     [--timeout 5s|1500ms|900us] [--wall-timeout <s>] [--exit-on <substr>]
     [--uart0 stdout|memory|file:<path>|tcp:<host:port>] [--uart0-script <file>]
     [--usb-sj stderr|memory|file:<path>]
+    [--flash <file>] [--flash-copy <file>] [--flash-size 4M]
     [--efuse-mac a0:f2:62:87:b4:8c] [--efuse-rev 0.2] [--seed <u64>]
     [--trace [BLOCK,BLOCK…]] [--trace-file <path>] [--strict-bus]
     [--probe <symbol>@<ms>] [--break-at <symbol>] [--hooks] [--map]

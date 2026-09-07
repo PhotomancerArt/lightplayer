@@ -47,6 +47,15 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# `WALK_TRACE=NOTHING` is the useful default when something goes wrong: a
+# block filter that matches nothing lets only the machine's *notes* through
+# (SPIN, RX FIFO overflow, an unmodelled SPI1 command) with no register
+# traffic at all.
+trace_args=()
+if [[ -n "${WALK_TRACE:-}" ]]; then
+    trace_args=(--trace "$WALK_TRACE" --trace-file "$out/emu.trace")
+fi
+
 "$emu" --elf "$elf" \
     --uart0 "tcp:127.0.0.1:$port" \
     --flash "$flash" \
@@ -54,12 +63,22 @@ trap cleanup EXIT
     --timeout "${WALK_TIMEOUT:-30s}" \
     --wall-timeout "${WALK_WALL_TIMEOUT:-180}" \
     --strict-bus \
+    "${trace_args[@]}" \
     >"$out/emu.stdout" 2>"$out/emu.stderr" &
 emu_pid=$!
 
+# Pacing, in wall-clock milliseconds, because that is the only clock the
+# proxy has. The device's RX FIFO is 128 bytes and its reader takes 64 per
+# turn of the server loop, so an unpaced host loses bytes mid-request; the
+# desk walk this is modelled on went through a bridge board, which paces
+# itself. The default is deliberately slack — the machine runs several times
+# slower than real time, so 64 B every 25 ms of wall clock is well under the
+# guest's appetite in *emulated* time.
 python3 "$repo/scripts/emu/uart-tcp-proxy.py" \
     --target "127.0.0.1:$port" \
     --listen "127.0.0.1:$proxy_port" \
+    --pace-bytes "${WALK_PACE_BYTES:-64}" \
+    --pace-ms "${WALK_PACE_MS:-25}" \
     --log "$out/walk.uart.bin" \
     >"$out/proxy.log" 2>&1 &
 proxy_pid=$!

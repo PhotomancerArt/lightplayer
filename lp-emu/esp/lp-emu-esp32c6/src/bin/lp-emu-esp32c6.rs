@@ -358,6 +358,9 @@ fn parse_usb_sj(text: &str) -> Result<UsbSjSink, String> {
 /// # 5 ms after the device says this, whatever cycle that lands on
 /// after "[RECOVERY] boot complete" +5ms "M!{...}\n"
 /// after "\"stopAllProjects\"" "M!{...}\n"
+///
+/// # 2 ms after the previous chunk finished — a host that paces itself
+/// then +2ms "…the next 64 bytes…"
 /// ```
 ///
 /// `after` is what makes a walk a walk: a host client sends its next
@@ -378,23 +381,15 @@ fn parse_uart0_script(text: &str) -> Result<ScriptedSource, String> {
         let at = |e: String| format!("line {}: {e}", n + 1);
         if let Some(rest) = line.strip_prefix("after ") {
             let (needle, rest) = take_quoted(rest.trim()).map_err(&at)?;
-            let rest = rest.trim();
-            // An optional `+<ms>` delay between the needle and the bytes.
-            let (delay_ms, rest) = match rest.strip_prefix('+') {
-                Some(after_plus) => {
-                    let (num, tail) = after_plus
-                        .split_once(char::is_whitespace)
-                        .ok_or_else(|| at("`+<ms>` needs bytes after it".to_string()))?;
-                    let ms: u64 = num
-                        .trim_end_matches("ms")
-                        .parse()
-                        .map_err(|e| at(format!("`{num}` is not a millisecond count: {e}")))?;
-                    (ms, tail.trim())
-                }
-                None => (0, rest),
-            };
+            let (delay_ms, rest) = parse_delay(rest.trim()).map_err(&at)?;
             let bytes = parse_script_bytes(rest).map_err(&at)?;
             source.push_after(needle, delay_ms * 1_000 * memmap::CYCLES_PER_US, bytes);
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("then ") {
+            let (delay_ms, rest) = parse_delay(rest.trim()).map_err(&at)?;
+            let bytes = parse_script_bytes(rest).map_err(&at)?;
+            source.push_then(delay_ms * 1_000 * memmap::CYCLES_PER_US, bytes);
             continue;
         }
         let (ms, rest) = line.split_once(char::is_whitespace).ok_or_else(|| {
@@ -408,6 +403,21 @@ fn parse_uart0_script(text: &str) -> Result<ScriptedSource, String> {
         source.push(ms * 1_000 * memmap::CYCLES_PER_US, bytes);
     }
     Ok(source)
+}
+
+/// An optional leading `+<ms>` delay, and the rest.
+fn parse_delay(text: &str) -> Result<(u64, &str), String> {
+    let Some(after_plus) = text.strip_prefix('+') else {
+        return Ok((0, text));
+    };
+    let (num, tail) = after_plus
+        .split_once(char::is_whitespace)
+        .ok_or_else(|| "`+<ms>` needs bytes after it".to_string())?;
+    let ms: u64 = num
+        .trim_end_matches("ms")
+        .parse()
+        .map_err(|e| format!("`{num}` is not a millisecond count: {e}"))?;
+    Ok((ms, tail.trim()))
 }
 
 /// A double-quoted, escaped string at the start of `text`, and the rest.

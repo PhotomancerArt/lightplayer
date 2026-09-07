@@ -143,7 +143,7 @@ pub fn boot_set(
         (base::GPIO, 0x700, Box::new(accept::gpio())),
         (base::SPI0, 0x400, Box::new(spi0::Spi0::new(mmu))),
         (base::SPI1, 0x400, Box::new(spi1::Spi1::new(flash))),
-        (base::RMT, 0x400, Box::new(accept::rmt())),
+        (base::RMT, base::RMT_LEN, Box::new(accept::rmt())),
         // The radio window, after RMT: `Rmt::new` runs before esp-radio's
         // init in `main`, so this is the order the boot meets them.
         (

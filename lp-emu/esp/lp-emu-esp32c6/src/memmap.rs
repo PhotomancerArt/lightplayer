@@ -111,6 +111,15 @@ pub mod periph {
     pub const SPI0: u32 = 0x6000_2000;
     pub const SPI1: u32 = 0x6000_3000;
     pub const RMT: u32 = 0x6000_6000;
+    /// The RMT block reaches past its registers: `esp-metadata-generated`
+    /// gives `rmt.ram_start = 1610638336` (`0x6000_6400`) and
+    /// `rmt.channel_ram_size = 48` words, and the C6 has four channels — so
+    /// the channel memory is `+0x400..+0x700`. M3 mapped only `0x400`, which
+    /// was enough until a project with an output was loaded: the first write
+    /// the WS281x driver's `open` makes is to `0x6000_6400` (M4's upload
+    /// walk found it, as a strict-bus stop inside a declared window). The
+    /// channel memory is accept-and-remember here; M5 gives it a model.
+    pub const RMT_LEN: u32 = 0x700;
     pub const TIMG0: u32 = 0x6000_8000;
     pub const TIMG1: u32 = 0x6000_9000;
     pub const SYSTIMER: u32 = 0x6000_A000;
