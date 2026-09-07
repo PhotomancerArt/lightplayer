@@ -21,9 +21,15 @@ related: [2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.md, lp20
 > espflash CLI does not, so a fresh board flashed from the bench still needs
 > one replug (or the `fix` subcommand) after its first flash. The wiring
 > advice below is still worth checking, but it is not what stopped this
-> board. The stub timeout in the second half is a separate open question
-> (see F4 in the plan's notes): whether espflash's RAM stub also trips on
-> the gated clock is untested.
+> board. **The stub timeout in the second half is the same cause**: on the
+> desk XIAO with the clock gated on purpose, `espflash board-info` times out
+> in 3.7 s with the stub and answers at once with `--no-stub` (probe,
+> 2026-09-06 17:25). espflash's `esp-flasher-stub` trips on the gated LP
+> analog I2C clock; esptool's C stub (esptool-js, Studio's browser flasher)
+> does not. The host provider therefore applies the fix over a ROM-only
+> connection before it loads the stub. `scripts/emu/*`'s `--no-stub`
+> workaround is explained, and `espflash erase-flash` works again after
+> `scripts/c6-lp-ana-i2c.py fix <port>` (or a replug).
 
 
 **Symptom** — XIAO ESP32-C6 `A0:F2:62:86:7E:44` (hub port 2,

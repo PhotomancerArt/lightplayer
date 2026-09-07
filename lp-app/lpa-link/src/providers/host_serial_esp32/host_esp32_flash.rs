@@ -90,7 +90,9 @@ pub(super) fn flash_firmware(
     })?;
     // `NoResetNoStub`: the flash-target `finish` must NOT reset the board —
     // the LP-clock restore below has to run between the write and the reset,
-    // over the stub that is still up. The reset is ours, after it.
+    // over the stub that is still up. The reset is ours, after it. (The
+    // ROM-only pass in `connect` normally leaves nothing for this one to do;
+    // it stays as the belt to that brace.)
     let mut flasher = connect(
         port_name,
         Some(expected_chip),
@@ -450,10 +452,8 @@ fn connect(
     recorder: &mut EventRecorder,
 ) -> Result<Flasher, LinkError> {
     recorder.log(format!("Connecting to {port_name}"));
-    let serial = serialport::new(port_name, CONNECT_BAUD)
-        .flow_control(serialport::FlowControl::None)
-        .open_native()
-        .map_err(|error| LinkError::other(format!("failed to open {port_name}: {error}")))?;
+    prepare_lp_domain(port_name, recorder);
+    let serial = open_port(port_name)?;
     Flasher::connect(
         serial,
         port_info_for(port_name),
@@ -466,6 +466,53 @@ fn connect(
         ResetBeforeOperation::DefaultReset,
     )
     .map_err(|error| LinkError::other(format!("espflash connect failed: {error}")))
+}
+
+fn open_port(port_name: &str) -> Result<serialport::TTYPort, LinkError> {
+    serialport::new(port_name, CONNECT_BAUD)
+        .flow_control(serialport::FlowControl::None)
+        .open_native()
+        .map_err(|error| LinkError::other(format!("failed to open {port_name}: {error}")))
+}
+
+/// A ROM-only pass over the board BEFORE the stub is loaded: on a C6 whose
+/// previous firmware gated the LP analog I2C clock, espflash's RAM stub
+/// never answers its first command (bench, 2026-09-06: `Timeout while
+/// running command` 3.7 s in, on every stub operation; the ROM alone
+/// connects and answers `board-info` fine, and after the fix below the stub
+/// comes up again). So the same restore the flash path runs before its
+/// closing reset also has to run here, over the ROM, or a factory-fresh
+/// board cannot be flashed at all. One extra ROM handshake per operation;
+/// silent on a clean board.
+///
+/// Best-effort: any failure is logged and the real connect below produces
+/// the error that matters (chip mismatch, no bootloader, port gone).
+fn prepare_lp_domain(port_name: &str, recorder: &mut EventRecorder) {
+    let serial = match open_port(port_name) {
+        Ok(serial) => serial,
+        Err(error) => {
+            recorder.log(format!("warning: LP-domain pre-check skipped: {error}"));
+            return;
+        }
+    };
+    let flasher = Flasher::connect(
+        serial,
+        port_info_for(port_name),
+        Some(CONNECT_BAUD),
+        /* use_stub  */ false,
+        /* verify    */ false,
+        /* skip      */ false,
+        None,
+        ResetAfterOperation::NoResetNoStub,
+        ResetBeforeOperation::DefaultReset,
+    );
+    match flasher {
+        Ok(mut flasher) => restore_lp_analog_i2c_clock(&mut flasher, recorder),
+        Err(error) => recorder.log(format!("warning: LP-domain pre-check skipped: {error}")),
+    }
+    // Dropping the ROM session closes the port; the stub connect that
+    // follows resets into the downloader again (HP-only — the restore
+    // survives it).
 }
 
 /// Refuse to write `manifest` onto `detected`.
