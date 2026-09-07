@@ -395,6 +395,10 @@ pub struct Esp32C6Builder {
     /// Scripted host input for UART0 (`--uart0-script`). Ignored when the
     /// sink is `Tcp`, whose client is the source.
     uart0_source: Option<Box<dyn ByteSource>>,
+    /// The same, as a [`ScriptedSource`] the builder still has to hand the
+    /// UART0 log to — the only way an `after "<line>"` step can see what the
+    /// device said.
+    uart0_script: Option<lp_emu_esp_common::ScriptedSource>,
     usb_sj: UsbSjSink,
     seed: u64,
     /// Where the flash chip's bytes come from and whether they go back.
@@ -426,6 +430,7 @@ impl Esp32C6Builder {
             trace_blocks: Vec::new(),
             uart0: Uart0Sink::default(),
             uart0_source: None,
+            uart0_script: None,
             usb_sj: UsbSjSink::default(),
             seed: 0,
             flash: crate::flash::FlashBacking::Blank,
@@ -485,6 +490,16 @@ impl Esp32C6Builder {
     /// a socket).
     pub fn uart0_source(mut self, source: Box<dyn ByteSource>) -> Self {
         self.uart0_source = Some(source);
+        self
+    }
+
+    /// Deterministic host input written as a script
+    /// ([`lp_emu_esp_common::ScriptedSource`]). Preferred over
+    /// [`uart0_source`](Self::uart0_source) for a script, because the
+    /// builder hands it the UART0 log — without which an `after "<line>"`
+    /// step has nothing to watch and never fires.
+    pub fn uart0_script(mut self, script: lp_emu_esp_common::ScriptedSource) -> Self {
+        self.uart0_script = Some(script);
         self
     }
 
@@ -562,6 +577,7 @@ impl Esp32C6Builder {
             trace_blocks,
             uart0,
             uart0_source,
+            uart0_script,
             usb_sj,
             seed,
             flash,
@@ -596,6 +612,14 @@ impl Esp32C6Builder {
         // `--exit-on` and the snapshot, whatever else they go to.
         let uart0_log = ByteLog::new();
         let mut uart0_tcp: Option<lp_emu_esp_common::TcpHost> = None;
+        // A script watches the same log the sink tees into, so an
+        // `after "<line>"` step sees exactly what the device sent.
+        let uart0_source = match uart0_script {
+            Some(script) => {
+                Some(Box::new(script.watching(uart0_log.clone())) as Box<dyn ByteSource>)
+            }
+            None => uart0_source,
+        };
         let (inner, source): (Box<dyn ByteSink>, Box<dyn ByteSource>) = match &uart0 {
             Uart0Sink::Memory => (
                 Box::new(lp_emu_esp_common::host::NullSink),

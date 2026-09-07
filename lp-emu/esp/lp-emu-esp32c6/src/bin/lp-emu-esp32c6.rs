@@ -43,9 +43,11 @@ OPTIONS:
                             time, and the client's bytes are UART0's RX (not
                             deterministic: wall clock decides their cycle)
     --uart0-script <file>   scripted host input for UART0, deterministic:
-                            one chunk per line: <ms> then a double-quoted
-                            string (\\n \\r \\t \\xNN escapes) or hex bytes
-                            (`1500 \"M!{...}\\n\"`, `2000 4d 21 0a`)
+                            one chunk per line, either at an EMULATED time
+                            (`1500 \"M!{...}\\n\"`, `2000 4d 21 0a`) or waiting
+                            for something the device said
+                            (`after \"boot complete\" +5ms \"M!{...}\\n\"`).
+                            Strings take \\n \\r \\t \\0 \\\\ \\\" \\xNN escapes.
     --flash <file>          the flash chip's bytes: read at start, written back
                             at exit (created blank if absent) — the board's
                             flash, surviving a run
@@ -154,7 +156,7 @@ fn run() -> Result<ExitCode, String> {
         let text = std::fs::read_to_string(script)
             .map_err(|e| format!("reading {}: {e}", script.display()))?;
         let source = parse_uart0_script(&text).map_err(|e| format!("{}: {e}", script.display()))?;
-        builder = builder.uart0_source(Box::new(source));
+        builder = builder.uart0_script(source);
     }
 
     let mut machine = builder.build().map_err(|e| e.to_string())?;
@@ -342,6 +344,30 @@ fn parse_usb_sj(text: &str) -> Result<UsbSjSink, String> {
 /// skipped. The millisecond is emulated time from cycle zero; chunks keep
 /// file order on the wire whatever their times say (a serial line has an
 /// order).
+/// The `--uart0-script` grammar.
+///
+/// Two kinds of line, each ending in the bytes to send — a double-quoted
+/// string with `\n \r \t \0 \\ \" \xNN` escapes, or whitespace-separated hex
+/// bytes:
+///
+/// ```text
+/// # at 1500 ms of EMULATED time
+/// 1500 "M!{...}\n"
+/// 2000 4d 21 0a
+///
+/// # 5 ms after the device says this, whatever cycle that lands on
+/// after "[RECOVERY] boot complete" +5ms "M!{...}\n"
+/// after "\"stopAllProjects\"" "M!{...}\n"
+/// ```
+///
+/// `after` is what makes a walk a walk: a host client sends its next
+/// request when the answer to the last one arrives, not at a wall-clock
+/// offset. The wait is still resolved entirely in guest time (see
+/// [`ScriptedSource`]), so two runs of the same script against the same
+/// image deliver the same bytes at the same cycles.
+///
+/// The needle is matched against the device's UART0 output *after* the
+/// previous step, so the same line can be waited for twice.
 fn parse_uart0_script(text: &str) -> Result<ScriptedSource, String> {
     let mut source = ScriptedSource::new();
     for (n, raw) in text.lines().enumerate() {
@@ -349,30 +375,82 @@ fn parse_uart0_script(text: &str) -> Result<ScriptedSource, String> {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let (ms, rest) = line
-            .split_once(char::is_whitespace)
-            .ok_or_else(|| format!("line {}: expected `<ms> <bytes>`", n + 1))?;
+        let at = |e: String| format!("line {}: {e}", n + 1);
+        if let Some(rest) = line.strip_prefix("after ") {
+            let (needle, rest) = take_quoted(rest.trim()).map_err(&at)?;
+            let rest = rest.trim();
+            // An optional `+<ms>` delay between the needle and the bytes.
+            let (delay_ms, rest) = match rest.strip_prefix('+') {
+                Some(after_plus) => {
+                    let (num, tail) = after_plus
+                        .split_once(char::is_whitespace)
+                        .ok_or_else(|| at("`+<ms>` needs bytes after it".to_string()))?;
+                    let ms: u64 = num
+                        .trim_end_matches("ms")
+                        .parse()
+                        .map_err(|e| at(format!("`{num}` is not a millisecond count: {e}")))?;
+                    (ms, tail.trim())
+                }
+                None => (0, rest),
+            };
+            let bytes = parse_script_bytes(rest).map_err(&at)?;
+            source.push_after(needle, delay_ms * 1_000 * memmap::CYCLES_PER_US, bytes);
+            continue;
+        }
+        let (ms, rest) = line.split_once(char::is_whitespace).ok_or_else(|| {
+            at("expected `<ms> <bytes>` or `after \"<line>\" <bytes>`".to_string())
+        })?;
         let ms: u64 = ms
             .trim_end_matches("ms")
             .parse()
-            .map_err(|e| format!("line {}: `{ms}` is not a millisecond count: {e}", n + 1))?;
-        let rest = rest.trim();
-        let bytes = if let Some(quoted) = rest.strip_prefix('"') {
-            let body = quoted
-                .strip_suffix('"')
-                .ok_or_else(|| format!("line {}: unterminated string", n + 1))?;
-            unescape(body).map_err(|e| format!("line {}: {e}", n + 1))?
-        } else {
-            rest.split_whitespace()
-                .map(|h| {
-                    u8::from_str_radix(h.trim_start_matches("0x"), 16)
-                        .map_err(|e| format!("line {}: `{h}` is not a hex byte: {e}", n + 1))
-                })
-                .collect::<Result<Vec<u8>, String>>()?
-        };
+            .map_err(|e| at(format!("`{ms}` is not a millisecond count: {e}")))?;
+        let bytes = parse_script_bytes(rest.trim()).map_err(&at)?;
         source.push(ms * 1_000 * memmap::CYCLES_PER_US, bytes);
     }
     Ok(source)
+}
+
+/// A double-quoted, escaped string at the start of `text`, and the rest.
+fn take_quoted(text: &str) -> Result<(Vec<u8>, &str), String> {
+    let body = text
+        .strip_prefix('"')
+        .ok_or_else(|| "expected a double-quoted string".to_string())?;
+    // The closing quote is the first unescaped one.
+    let mut end = None;
+    let mut escaped = false;
+    for (i, c) in body.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match c {
+            '\\' => escaped = true,
+            '"' => {
+                end = Some(i);
+                break;
+            }
+            _ => {}
+        }
+    }
+    let end = end.ok_or_else(|| "unterminated string".to_string())?;
+    Ok((unescape(&body[..end])?, &body[end + 1..]))
+}
+
+/// A quoted string, or whitespace-separated hex bytes.
+fn parse_script_bytes(rest: &str) -> Result<Vec<u8>, String> {
+    if rest.starts_with('"') {
+        let (bytes, tail) = take_quoted(rest)?;
+        if !tail.trim().is_empty() {
+            return Err(format!("trailing `{}` after the string", tail.trim()));
+        }
+        return Ok(bytes);
+    }
+    rest.split_whitespace()
+        .map(|h| {
+            u8::from_str_radix(h.trim_start_matches("0x"), 16)
+                .map_err(|e| format!("`{h}` is not a hex byte: {e}"))
+        })
+        .collect()
 }
 
 fn unescape(body: &str) -> Result<Vec<u8>, String> {

@@ -269,20 +269,76 @@ impl ByteSource for NullSource {
     }
 }
 
-/// Bytes that arrive at declared cycles — deterministic host input.
+/// One step of a [`ScriptedSource`].
+#[derive(Clone, Debug)]
+enum Step {
+    /// Deliver `bytes` at an absolute cycle.
+    At { at: Cycles, bytes: VecDeque<u8> },
+    /// Deliver `bytes` once `needle` has appeared in the device's own
+    /// output *after* the previous step, plus `delay` cycles.
+    ///
+    /// `resolved` latches the cycle the needle was seen at, so the wait is
+    /// evaluated once and the answer does not move.
+    After {
+        needle: Vec<u8>,
+        delay: Cycles,
+        bytes: VecDeque<u8>,
+        resolved: Option<Cycles>,
+    },
+}
+
+/// Deterministic host input: bytes at declared cycles, or bytes that wait
+/// for something the device said.
 ///
 /// Chunks are delivered in the order given; a chunk's bytes all become
 /// available at its cycle, one per `next_byte` call. A chunk scheduled
 /// before an earlier one still waits its turn, because a serial line has an
 /// order and reordering it would model a different wire.
+///
+/// # Why a wait, and why it is still deterministic
+///
+/// A walk written as absolute cycles is brittle in one direction and a lie
+/// in the other: too early and the frame lands before the guest is
+/// listening, too late and the transcript carries dead time that moves
+/// whenever the guest gets faster. What a host client actually does is
+/// wait for an answer and then send the next request, so
+/// [`after`](Self::after) says exactly that — "send this once the device has
+/// printed *that*".
+///
+/// It stays deterministic because the only clock involved is the guest's.
+/// While a wait is pending the source reports [`is_live`](ByteSource::is_live)
+/// and the UART polls it on its own fixed emulated-time schedule
+/// (`LIVE_POLL_CYCLES`), so the resolve lands on a grid in *guest* cycles.
+/// Nothing consults the host clock, and two runs of the same script against
+/// the same image deliver the same bytes at the same cycles.
+///
+/// The device output it watches is a [`ByteLog`] handed in with
+/// [`watching`](Self::watching) — the same log the machine tees UART0's TX
+/// into. A source built without one has no way to see the device and treats
+/// every `after` as unsatisfiable, which is reported by
+/// [`remaining`](Self::remaining) never reaching zero rather than by
+/// pretending the wait passed.
 #[derive(Default, Debug)]
 pub struct ScriptedSource {
-    chunks: VecDeque<(Cycles, VecDeque<u8>)>,
+    steps: VecDeque<Step>,
+    /// The device's output, when this script watches for lines in it.
+    watch: Option<ByteLog>,
+    /// How far into `watch` the current step has already searched. Reset
+    /// forward as each `after` resolves, so a needle only ever matches
+    /// output that came *after* the previous step.
+    search_from: usize,
 }
 
 impl ScriptedSource {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Watch `log` — the device's output — for [`after`](Self::after)'s
+    /// needles.
+    pub fn watching(mut self, log: ByteLog) -> Self {
+        self.watch = Some(log);
+        self
     }
 
     /// `bytes` become available at cycle `at`.
@@ -294,31 +350,119 @@ impl ScriptedSource {
     pub fn push(&mut self, at: Cycles, bytes: impl AsRef<[u8]>) {
         let bytes: VecDeque<u8> = bytes.as_ref().iter().copied().collect();
         if !bytes.is_empty() {
-            self.chunks.push_back((at, bytes));
+            self.steps.push_back(Step::At { at, bytes });
+        }
+    }
+
+    /// `bytes` become available `delay` cycles after the device's output
+    /// first contains `needle` (searching only what it said after the
+    /// previous step).
+    pub fn after(
+        mut self,
+        needle: impl AsRef<[u8]>,
+        delay: Cycles,
+        bytes: impl AsRef<[u8]>,
+    ) -> Self {
+        self.push_after(needle, delay, bytes);
+        self
+    }
+
+    pub fn push_after(&mut self, needle: impl AsRef<[u8]>, delay: Cycles, bytes: impl AsRef<[u8]>) {
+        let bytes: VecDeque<u8> = bytes.as_ref().iter().copied().collect();
+        if !bytes.is_empty() {
+            self.steps.push_back(Step::After {
+                needle: needle.as_ref().to_vec(),
+                delay,
+                bytes,
+                resolved: None,
+            });
         }
     }
 
     /// Bytes still undelivered.
     pub fn remaining(&self) -> usize {
-        self.chunks.iter().map(|(_, b)| b.len()).sum()
+        self.steps
+            .iter()
+            .map(|s| match s {
+                Step::At { bytes, .. } | Step::After { bytes, .. } => bytes.len(),
+            })
+            .sum()
+    }
+
+    /// Steps still to run.
+    pub fn steps_left(&self) -> usize {
+        self.steps.len()
+    }
+
+    /// Resolve the front step's wait if the device has said its needle.
+    /// Returns the cycle the front step's bytes become available, if known.
+    fn ready_at(&mut self, now: Cycles) -> Option<Cycles> {
+        let search_from = self.search_from;
+        let seen = self.watch.as_ref().map(|log| log.bytes());
+        match self.steps.front_mut()? {
+            Step::At { at, .. } => Some(*at),
+            Step::After {
+                resolved: Some(at), ..
+            } => Some(*at),
+            Step::After {
+                needle,
+                delay,
+                resolved,
+                ..
+            } => {
+                let seen = seen?;
+                if needle.is_empty() {
+                    return None;
+                }
+                let from = search_from.min(seen.len());
+                let hit = seen
+                    .get(from..)?
+                    .windows(needle.len())
+                    .position(|w| w == needle.as_slice())?;
+                let at = now.saturating_add(*delay);
+                *resolved = Some(at);
+                self.search_from = from + hit + needle.len();
+                Some(at)
+            }
+        }
     }
 }
 
 impl ByteSource for ScriptedSource {
     fn next_byte(&mut self, now: Cycles) -> Option<u8> {
-        let (at, bytes) = self.chunks.front_mut()?;
-        if *at > now {
+        let at = self.ready_at(now)?;
+        if at > now {
             return None;
         }
-        let b = bytes.pop_front();
-        if bytes.is_empty() {
-            self.chunks.pop_front();
+        let (byte, drained) = match self.steps.front_mut()? {
+            Step::At { bytes, .. } | Step::After { bytes, .. } => {
+                let byte = bytes.pop_front();
+                (byte, bytes.is_empty())
+            }
+        };
+        if drained {
+            self.steps.pop_front();
         }
-        b
+        byte
     }
 
     fn next_ready(&self) -> Option<Cycles> {
-        self.chunks.front().map(|(at, _)| *at)
+        match self.steps.front()? {
+            Step::At { at, .. } => Some(*at),
+            Step::After {
+                resolved: Some(at), ..
+            } => Some(*at),
+            // Unresolved: the answer depends on output that has not
+            // happened yet. `is_live` is what keeps the UART polling.
+            Step::After { .. } => None,
+        }
+    }
+
+    /// `true` only while a wait is pending. The bytes still arrive on a
+    /// guest-time grid (see the type's docs); "live" here means "ask again",
+    /// not "the host clock decides".
+    fn is_live(&self) -> bool {
+        matches!(self.steps.front(), Some(Step::After { resolved: None, .. }))
     }
 }
 
@@ -628,6 +772,60 @@ mod tests {
         assert_eq!(src.next_byte(100), None);
         assert_eq!(src.next_byte(500), Some(b'x'));
         assert_eq!(src.next_byte(500), Some(b'y'));
+    }
+
+    #[test]
+    fn an_after_step_waits_for_the_device_and_then_fires_on_a_guest_cycle() {
+        let log = ByteLog::new();
+        let mut src = ScriptedSource::new()
+            .watching(log.clone())
+            .after("boot complete", 0, b"go")
+            .after("\"id\":1,", 50, b"next");
+
+        // Nothing said yet: no byte, no known ready cycle, and *live* — the
+        // UART has to keep asking.
+        assert_eq!(src.next_byte(1_000), None);
+        assert_eq!(src.next_ready(), None);
+        assert!(src.is_live());
+
+        log.append(b"[RECOVERY] boot complete (first frame served)\n");
+        assert_eq!(src.next_byte(2_000), Some(b'g'));
+        assert_eq!(src.next_byte(2_000), Some(b'o'));
+        // The second step is waiting on something not said yet.
+        assert!(src.is_live());
+        assert_eq!(src.next_byte(3_000), None);
+
+        log.append(b"M!{\"id\":1,\"msg\":\"stopAllProjects\"}\n");
+        // The delay is counted from the poll that saw it, in guest cycles.
+        assert_eq!(src.next_byte(3_000), None, "50 cycles of delay");
+        assert_eq!(src.next_ready(), Some(3_050));
+        assert!(!src.is_live(), "resolved: the cycle is known now");
+        assert_eq!(src.next_byte(3_050), Some(b'n'));
+        assert_eq!(src.steps_left(), 1);
+    }
+
+    #[test]
+    fn an_after_needle_only_matches_output_that_came_after_the_previous_step() {
+        // The same line twice: a walk that waits on `"id":1,` and then on
+        // `"id":1,` again must not resolve both from one occurrence.
+        let log = ByteLog::new();
+        let mut src = ScriptedSource::new()
+            .watching(log.clone())
+            .after("tick", 0, b"a")
+            .after("tick", 0, b"b");
+        log.append(b"tick\n");
+        assert_eq!(src.next_byte(10), Some(b'a'));
+        assert_eq!(src.next_byte(10), None, "the second tick has not come");
+        log.append(b"tick\n");
+        assert_eq!(src.next_byte(20), Some(b'b'));
+        assert_eq!(src.remaining(), 0);
+    }
+
+    #[test]
+    fn an_after_step_with_nothing_to_watch_never_fires_rather_than_pretending() {
+        let mut src = ScriptedSource::new().after("anything", 0, b"x");
+        assert_eq!(src.next_byte(u64::MAX), None);
+        assert_eq!(src.remaining(), 1, "still owed, and it says so");
     }
 
     #[test]
