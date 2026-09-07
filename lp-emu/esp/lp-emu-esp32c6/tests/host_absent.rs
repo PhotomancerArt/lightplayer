@@ -112,4 +112,22 @@ fn with_no_host_the_printer_times_out_once_and_the_rx_path_is_never_armed() {
     assert!(!lines.iter().any(|l| l.contains("EXPIRED")));
     // UART0 is silent on the shipped image: the console is USB-Serial-JTAG.
     assert!(m.uart0().is_empty());
+
+    // M6 P1b, gate G1b-4 — the negative control's own negative control.
+    //
+    // The connection monitor latches "the host is not draining me" after two
+    // consecutive write timeouts, and it stamps that latch into a static the
+    // heartbeat reports. With NO host at all there is no enumeration, so
+    // `is_connected()` is false from the third poll onward, no protocol write
+    // is ever attempted, no write can time out — and the latch must therefore
+    // never fire. A non-zero count here would mean the stamp fires on
+    // something other than the state it names, which would make every
+    // silicon figure the phase records meaningless.
+    let (_, silences) = m
+        .peek_symbol("fw_esp32_common::serial::link_counters::NOT_DRAINING_COUNT")
+        .expect("the image carries the link counters");
+    assert_eq!(
+        silences, 0,
+        "absent is not not-draining: nothing was written, so nothing timed out"
+    );
 }

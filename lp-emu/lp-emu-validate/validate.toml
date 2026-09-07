@@ -47,6 +47,11 @@ description = "The M3 gate set for our own C6 machine: the compile harness (heap
 payloads = ["shader-compile-stress", "boot-idle"]
 
 [[set]]
+name = "usb-negative-control"
+description = "M6's negative control, rig-free: flash the shipped image, leave the port CLOSED for several seconds, then open a non-resetting reader and read the first heartbeat. The device is enumerated and undrained throughout, which is the one link state it cannot report on at the time — the `link` object's `hostNotDrainingMs` / `hostDrainingAgainMs` / `notDrainingCount` are its own record of it, on its own clock. Runs on silicon today; M6 P4 adds the emulator twin."
+payloads = ["usb-negative-control"]
+
+[[set]]
 name = "jit-math-perf"
 description = "The Q32 math kernel cycle-cost payload (Q12 ledger, cheapest test_* migration): mul/div/sin kernels and LUT access cost against the PMU cycle counter. Timing only — never a gate under esp-emu, which has no cycle model."
 payloads = ["jit-math-perf"]

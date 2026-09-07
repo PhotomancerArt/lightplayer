@@ -16,6 +16,13 @@
 //! TERM/KILL, which wedges a native-USB port; and signalling espflash by
 //! pattern has killed the wrong lane on a two-board desk.
 //!
+//! One payload is watched differently, and the difference is the payload
+//! (`Payload::capture`, M6 P1b). `usb-negative-control` asks what the device
+//! did while **nobody** was reading it, so its plan is three steps rather than
+//! one: flash with no monitor and let the port go back to closed, wait, then
+//! open a non-resetting reader. A monitor at the flash would answer a
+//! different question, and answer it every time.
+//!
 //! `lp-emu:*` needs none of that discipline and has none of it: there is no
 //! board, so its plan is two commands — build the image, run the machine with
 //! UART0 pointed at a file — and every decision that shapes the run is a flag
@@ -29,7 +36,7 @@ use std::process::Command;
 use anyhow::{Context, Result, bail};
 
 use crate::configuration::{Availability, Configuration, ConfigurationKind};
-use crate::payload::{Payload, Sentinel};
+use crate::payload::{Capture, Payload, Sentinel};
 
 /// Build constants, kept equal to the `justfile`'s variables of the same name.
 pub const RV32_TARGET: &str = "riscv32imac-unknown-none-elf";
@@ -48,6 +55,12 @@ pub const C6_PARTITIONS: &str = "lp-fw/fw-esp32c6/partitions.csv";
 /// the runner's plans. Found at G3 sitting 1, 2026-09-07.
 pub const FW_ESP32C6_DIR: &str = "lp-fw/fw-esp32c6";
 pub const DESK_STEP_SCRIPT: &str = "scripts/spike/esp-emu/desk-espflash-step.sh";
+/// The flash half of a [`Capture::FlashThenOpenAfter`] run: the same port
+/// discipline as `DESK_STEP_SCRIPT`, and no monitor.
+pub const DESK_FLASH_NO_MONITOR_SCRIPT: &str = "scripts/emu/desk-flash-no-monitor.sh";
+/// The non-resetting reader (`os.open` + raw termios, `HUPCL` cleared, DTR and
+/// RTS untouched) — the same open Studio and lp-cli make.
+pub const TTY_CAPTURE_SCRIPT: &str = "scripts/emu/tty-capture.py";
 
 /// The environment variable naming the `esp-emu` binary (spike report §1, §10).
 pub const ESP_EMU_ENV: &str = "LP_ESP_EMU";
@@ -276,7 +289,11 @@ impl ConfigurationDriver for SiliconDriver {
         }
         let elf = format!("target/{RV32_TARGET}/{FW_ESP32C6_PROFILE}/fw-esp32c6");
         let capture = req.capture_path();
-        let steps = vec![
+        // One build step, whichever way the board is then watched: the
+        // negative control flashes the same image as everyone else, and it is
+        // built from the firmware's own directory for the reason
+        // `FW_ESP32C6_DIR` gives.
+        let mut steps = vec![
             PlanStep::new(
                 "build the payload image",
                 vec![
@@ -291,36 +308,98 @@ impl ConfigurationDriver for SiliconDriver {
                 ],
             )
             .in_dir(FW_ESP32C6_DIR),
-            PlanStep::new(
-                "flash and monitor in the foreground, stop at the sentinel",
-                vec![
+        ];
+
+        // The espflash argument list, up to but not including `--monitor`.
+        let flash_args = |elf: String| -> Vec<String> {
+            vec![
+                "flash".into(),
+                "--chip".into(),
+                "esp32c6".into(),
+                "--port".into(),
+                port.into(),
+                "--partition-table".into(),
+                C6_PARTITIONS.into(),
+                "--flash-size".into(),
+                C6_FLASH_SIZE.into(),
+                "--after".into(),
+                "hard-reset".into(),
+                elf,
+            ]
+        };
+
+        match req.payload.capture {
+            Capture::Monitor => {
+                let mut command = vec![
                     DESK_STEP_SCRIPT.into(),
                     capture.display().to_string(),
                     req.payload.sentinel.marker().into(),
                     req.timeout_secs.to_string(),
                     "--".into(),
-                    "flash".into(),
-                    "--chip".into(),
-                    "esp32c6".into(),
-                    "--port".into(),
+                ];
+                let mut args = flash_args(elf);
+                // `--monitor` goes before the ELF, where espflash wants it.
+                args.insert(args.len() - 1, "--monitor".into());
+                command.extend(args);
+                steps.push(PlanStep::new(
+                    "flash and monitor in the foreground, stop at the sentinel",
+                    command,
+                )
+                .with_env("PORT_DEV", port)
+                .with_note(
+                    "the script pre-checks lsof/pgrep, runs espflash in the foreground under \
+                     script(1) with a SIG_DFL exec shim, SIGINTs that pid only, and post-checks \
+                     that the port is free. Never run two of these at once.",
+                ));
+            }
+            Capture::FlashThenOpenAfter(open_after_secs) => {
+                let mut command: Vec<String> = vec![DESK_FLASH_NO_MONITOR_SCRIPT.into(), "--".into()];
+                command.extend(flash_args(elf));
+                steps.push(
+                    PlanStep::new("flash in the foreground and RELEASE the port", command)
+                        .with_env("PORT_DEV", port)
+                        .with_note(
+                            "no --monitor, on purpose: espflash exits the moment the write is \
+                             done and the port goes back to closed. The same pre-check and \
+                             post-check as the monitored step, and the post-check is what \
+                             proves the wait that follows really is a wait with nobody reading.",
+                        ),
+                );
+                steps.push(
+                    PlanStep::new(
+                        format!("wait {open_after_secs} s with the port closed"),
+                        vec!["sleep".into(), open_after_secs.to_string()],
+                    )
+                    .with_note(
+                        "THIS is the measurement. The board is enumerated and nothing is \
+                         draining it, so its protocol writes time out, the monitor latches, \
+                         and both log lines about it are dropped by that latch. What survives \
+                         is the pair of timestamps in the next heartbeat.",
+                    ),
+                );
+                let mut open: Vec<String> = vec![
+                    TTY_CAPTURE_SCRIPT.into(),
+                    "--dev".into(),
                     port.into(),
-                    "--partition-table".into(),
-                    C6_PARTITIONS.into(),
-                    "--flash-size".into(),
-                    C6_FLASH_SIZE.into(),
-                    "--after".into(),
-                    "hard-reset".into(),
-                    "--monitor".into(),
-                    elf,
-                ],
-            )
-            .with_env("PORT_DEV", port)
-            .with_note(
-                "the script pre-checks lsof/pgrep, runs espflash in the foreground under \
-                 script(1) with a SIG_DFL exec shim, SIGINTs that pid only, and post-checks \
-                 that the port is free. Never run two of these at once.",
-            ),
-        ];
+                    "--out".into(),
+                    capture.display().to_string(),
+                    "--seconds".into(),
+                    req.timeout_secs.to_string(),
+                ];
+                if let Sentinel::Done(marker) = req.payload.sentinel {
+                    open.push("--until".into());
+                    open.push(marker.into());
+                }
+                steps.push(PlanStep::new("open a non-resetting reader", open).with_note(
+                    "os.open + raw termios with HUPCL cleared and DTR/RTS untouched: opening \
+                     the port is the only line-state change, which is the same one Studio and \
+                     lp-cli make. espflash --monitor would assert the reset dance instead and \
+                     the board would boot again with a reader already attached — the very \
+                     thing this payload must not do.",
+                ));
+            }
+        }
+
         Ok(RunPlan {
             configuration: req.configuration.name(),
             payload: req.payload.name,
@@ -823,6 +902,50 @@ mod tests {
             "{rendered}"
         );
         assert!(rendered.contains("Studio"), "{rendered}");
+    }
+
+    /// G1b-2: flash / wait / open, three steps after the build, no `--monitor`
+    /// anywhere, and the open step is the non-resetting reader.
+    #[test]
+    fn the_negative_control_flashes_waits_then_opens_without_resetting() {
+        let req = request(
+            "silicon:esp32c6",
+            "usb-negative-control",
+            Some("/dev/cu.usbmodem1433201"),
+        );
+        let plan = SiliconDriver.plan(&req).unwrap();
+        assert_eq!(plan.steps.len(), 4, "build, flash, wait, open");
+        let rendered = plan.render();
+
+        // The commands, not the prose that explains them — one of the notes
+        // says the word `--monitor` precisely to say it is not there.
+        let commands: Vec<String> = plan.steps.iter().map(|s| s.shell()).collect();
+        assert!(
+            !commands.iter().any(|c| c.contains("--monitor")),
+            "a monitor at the flash answers a different question: {commands:?}"
+        );
+        assert!(rendered.contains(DESK_FLASH_NO_MONITOR_SCRIPT), "{rendered}");
+        assert!(rendered.contains("--after hard-reset"), "{rendered}");
+        assert!(rendered.contains("sleep 8"), "{rendered}");
+        assert!(rendered.contains(TTY_CAPTURE_SCRIPT), "{rendered}");
+        assert!(
+            rendered.contains("--dev /dev/cu.usbmodem1433201"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("--until '[stack] heartbeat: high-water'"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("--seconds 120"), "{rendered}");
+
+        // In order, and the wait really is between the two.
+        let flash = rendered.find(DESK_FLASH_NO_MONITOR_SCRIPT).unwrap();
+        let wait = rendered.find("sleep 8").unwrap();
+        let open = rendered.find(TTY_CAPTURE_SCRIPT).unwrap();
+        assert!(flash < wait && wait < open, "{rendered}");
+
+        // The shipped image, not the memfs variant.
+        assert_eq!(req.features(), vec!["esp32c6", "server", "radio"]);
     }
 
     #[test]
