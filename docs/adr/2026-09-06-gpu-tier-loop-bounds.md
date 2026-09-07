@@ -129,7 +129,13 @@ already reset. The filetest probe keeps its own 20 s bound.
 
 - A fault signal on the GPU tier (so a runaway paints the pattern
   there too) if a GPU tier ever runs a wall.
-- The `ui_shader_error.rs` diagnostic parser: the refusal's `line N`
+- ~~The `ui_shader_error.rs` diagnostic parser: the refusal's `line N`
   refers to the assembled source, as naga's own diagnostics do; if the
   Studio ever maps assembled lines back to authored ones, this message
-  should ride the same mapping.
+  should ride the same mapping.~~ Done 2026-09-07: the Studio mapped no
+  GPU-tier diagnostic (naga parse errors landed on assembled lines,
+  validation errors carried a `wgsl` label the parser ignores), so the
+  fix went to the producer, as the CPU-tier naga frontend's did
+  (`lps-frontend/src/parse.rs`): `assembly::AssembledGlsl` records the
+  authored byte range and `wgsl_compile` shifts every span into it before
+  rendering; the refusal carries the same `┌─ glsl:LINE:COL` marker.
