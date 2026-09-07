@@ -194,7 +194,7 @@ milestone owns.
 | `EFUSE` | `0x600B_0800` | modelled | memory seeded from `--efuse-mac`/`--efuse-rev` in esp-hal's byte order (`rd_mac_spi_sys_0/1/3`) |
 | `RNG` | `0x600B_2800` | modelled | `rng_data` (+0x08) = xorshift64\* from `--seed`; deterministic by design; other `LP_PERI` offsets accept |
 | `LP_CLKRST` | `0x600B_0400` | accept | `reset_cause` seeded 1 (POWERON) — the mask ROM's `rtc_get_reset_reason` reads it; `lp_clk_conf` = RC_SLOW |
-| `PCR` | `0x6009_6000` | accept | `sysclk_conf.clk_xtal_freq` pinned 40; `cpu_waiti_conf.cpu_wait_mode_force_on` pinned 0; `timergroup.timer_clk_conf` reset = XTAL; `uart(n).clk_conf` drives the two UART clock lines (reset = XTAL, enabled) |
+| `PCR` | `0x6009_6000` | accept | `sysclk_conf.clk_xtal_freq` pinned 40; `cpu_waiti_conf.cpu_wait_mode_force_on` pinned 0; `timergroup.timer_clk_conf` reset = XTAL; `uart(n).clk_conf` drives the two UART clock lines (reset = XTAL, enabled); `rmt_conf`/`rmt_sclk_conf` drive the RMT clock line (reset `0x0050_1000` = PLL/2 = 40 MHz; esp-hal writes `div_num 0` for 80) |
 | `I2C_ANA_MST` | `0x600A_F800` | accept | `ana_conf0.cal_done` pinned 1; `i2c_ctrl(0/1).busy` pinned 0; `ana_conf2` reset 0 (master 1) |
 | `LP_I2C_ANA_MST` | `0x600B_2400` | accept | `i2c0_ctrl.I2C0_BUSY` (bit 25) pinned 0 — the bench's fourth spin site |
 | `ASSIST_DEBUG` | `0x600C_2000` | accept | `cpu0.debug_mode` pinned 0 (no debugger: watchpoints arm, `wfi` runs) |
@@ -204,7 +204,7 @@ milestone owns.
 | `UART0`, `UART1` | `0x6000_0000/1000` | modelled | 128-byte FIFOs; the shifter drains **at the configured baud in emulated time** (PCR clock line × `clkdiv`; reset `clkdiv = 347 + 3/16` = 115,200 from XTAL, *modeled* "as the ROM boot leaves it"); `rxfifo_full`/`txfifo_empty` as levels (`>`/`<` the `conf1` thresholds, per the TRM), `rxfifo_tout` in bit-times, `tx_done`, `rxfifo_ovf`, `reg_update` pulse; `at_cmd_char_det` never fires (stated, not modelled); sources 43/44. See "UART0 and the outside" |
 | `USB_DEVICE` | `0x6000_F000` | modelled (M6 P2) | the host's side in three states (`--usb-host absent\|attached\|attached-idle`, the transitions for P3's control channel): **absent** — `sof` never, `free` = 0 for ever after the first `wr_done`, nothing arrives; **attached, port closed** — `int_raw.sof` every 1 ms (*documented*), `fram_num` counts, a committed IN packet is held until the port opens; **attached, draining** — the packet reaches the `usb-sj` stream 100 µs after `wr_done` (*modeled*), `free` returns, `serial_in_empty` and `in_token_rec_in_ep1` rise; host bytes land as ≤ 64 B OUT packets, one resident at a time (*modeled*), `avail` + `serial_out_recv_pkt` + `out_ep1_st.wr_addr/rec_data_cnt`. The DTR/RTS dance → `chip_rst` bit 0 + `MachineRequest::Reset { strap }`. Per-register grades: `fram_num`, `conf0` *documented*, the rest *modeled* (the file header's table; `--strict-grade`). The PCR reset of the block is **not** modelled (stated). Source 48 |
 | `SPI0`, `SPI1` | `0x6000_2000/3000` | accept | a flash access spins on `SPI1.cmd` (the `SPIN` line names it) until M4 |
-| `RMT` | `0x6000_6000` | accept | `Rmt::new` runs in every image; channels, blocks and the WS281x waveform are M5 |
+| `RMT` | `0x6000_6000` | modelled (M5 P1) | the PAC register file, the **192-word RAM** at `+0x400` (word/half/byte lanes, read live by the engine), and two TX engines on the scheduler: a word's two pulses at PCR's function clock (`rmt_sclk_conf` × `div_cnt`; one tick = 2 cycles, a WS2812 bit 200, the latch 48,000 — exact integer arithmetic over absolute ticks, anchored on the previous due cycle), **`tx_lim` as a position** (`== window_words` is the wrap), `mem_tx_wrap_en`, the all-zero STOP → `tx_end`, wrap off → `tx_err` + `mem_empty`, `int_st = raw & ena`, `int_clr` w1c, source 49. *Modeled* (discovery §10.1–5, each named where made): `mem_raddr_ex` = the next word to fetch; the strobes act at `conf_update` (a `tx_start` with no `conf_update` in the slice is acted on at the slice boundary, noted); the half-level end marker; `tx_stop` raises no `tx_end`; `ref_cnt_rst` accepted; no clock stalls the engine (1 ms poll resumes it), FOSC refused. RX channels 2/3 accept-and-remember (`rx_en` is noted once); the APB FIFO is not modelled. The waveform's pad is P2's fabric; until then `rmt_pulses`/`rmt_words`/`rmt_frames_ended` on the machine are the observation. See "The RMT chase" |
 | `WIFI_MAC` | `0x600A_0000..9800` | accept (*modeled*) | the radio window as **one** block with coarse names (`mac` / `ieee802154` / `bb` — ours, nothing documents it), a `TOUCH` note per distinct offset, and the override list `wifi_stub::OVERRIDES` (five entries, one per `SPIN` the boot showed, each with the poll's disassembly beside it); `+0x4084` is the RX DMA base the `WIFI RX config` line reports |
 | `WIFI_PWR` | `0x600A_9900..F000` | accept | the undocumented gap after MODEM_SYSCON (the ROM's `tsf_hal_*` touch it first); `+0x3700` is a live **microsecond counter** (*modeled* `cycles / 160`) — the blob's `wait_i2c_sdm_stable` latches it and gives up after 9,999 ticks, and a remembered 0 never lets it |
 | `I2C_MST_MEM` | `0x600A_FC00..600B_0000` | accept | the analog I2C master's burst **command memory**, `I2C_ANA_MST + 0x400`, which the PAC's block (ending at `date`, `+0x34`) does not cover; libphy's `phy_i2c_master_cmd_mem_init` fills it and nothing reads it back |
@@ -267,6 +267,12 @@ Beyond the MMIO lines, three kinds of note appear in the same stream:
 - `STRICT-GRADE read of USB_DEVICE+0x000 ep1: graded modeled, the run
   trusts documented and above` — the one line a `--strict-grade` stop
   leaves before the report.
+- `RMT ch0 start f_rmt=80000000 div_cnt=1 window=0..192 raddr=0 wrap=1
+  tx_lim=96`, `RMT ch0 thr pos=96`, `RMT ch0 end words=6146 idle=0`,
+  `RMT ch0 err mem_empty (window end, wrap off)`, `RMT ch0 stop idle=0`,
+  `RMT ch0 stalled: …` / `resumed` — the TX engines (M5 P1); `--trace RMT`
+  adds the register and RAM writes around them, which is how a refill's
+  timing against the read pointer is read off.
 
 A 3 s no-radio run with `--trace SYSTIMER,PLIC_MX,INTPRI,INTERRUPT_CORE0,LP_WDT,TIMG0`
 is about 780 k lines, half of them the RTC-calibration poll at boot. Without
@@ -386,6 +392,37 @@ writes`. Its twin, `host not draining`, never appears on the link: it is
 queued and then dropped by the very latch it reports (M6 discovery §4).
 That asymmetry is the thing G3's desk sitting exists to measure, and a
 control channel reproduces the recovery half of it with no rig.
+
+### The RMT chase
+
+The WS281x driver (`lp-ws281x`, through `fw-esp32c6`'s `c6_rmt.rs`) fills
+both halves of a channel's RAM window, arms `tx_lim` at the half, starts,
+and then races the transmitter: every `tx_thr_event` the ISR reads
+`mem_raddr_ex`, flips `tx_lim` between the half and the whole window,
+plants a STOP guard in the half just left and refills it. The model is the
+consumer side of that race in cycles — a word's pulses are scheduled at
+`anchor + cycles_for(absolute ticks since tx_start)`, so a bit is exactly
+200 cycles wherever a slice boundary falls, the RAM is read at the fetch
+(a late refill is overwritten data, as on the chip), and the threshold is
+a **position** in the window (`periph/rmt.rs` says why the alternative
+was refuted on silicon).
+
+The M5 P1 gates (`tests/rmt_chase.rs`, `--strict-bus`, `t1`): the
+`esp32c6,server,test_rmt` harness — a 256-LED white chase on GPIO18 through
+the one-channel plan (192-word window, 96-word halves) — for 800 ms ends
+24 frames, each **6,144 data words + latch + STOP**, every data word a
+WS2812 code, the bits decoding to pixel `k mod 256` white and the rest
+black, 64 `thr` per frame, words 200 cycles apart and the latch 48,000; two
+runs are identical, and `t2` sends the same words. The first frame starts
+at ≈ 359 ms because the harness's logger pays a 250 ms drain timeout on
+the host-absent USB link first. Refill lag is *reported* from the trace
+(P3 adds the histogram), never gated (plan D13/PD9).
+
+What the machine exposes until P2 routes the signal to a pad:
+`rmt_pulses(ch)` (every level/duration with its start cycle),
+`rmt_words(ch)` (every fetched word with its cycle, STOPs included) and
+`rmt_frames_ended(ch)`. `GPIO.func_out_sel_cfg[18] = 71` is written by
+esp-hal's `with_pin` and sits in the GPIO accept block for P2's fabric.
 
 ### The radio window
 
@@ -573,6 +610,10 @@ boot tests are `#[ignore]`d, because a workspace test run must not start a
 cross-target firmware build; `just test-emu-c6` sets the environment and runs
 them. `test_support` resolves the ELF from `LP_EMU_C6_ELF_<SLUG>`, then the
 conventional target path, and only builds when `LP_EMU_BUILD_FW=1`. The
+images: `NO_RADIO` (`esp32c6,server,memory_fs`), `SHIPPED_NO_FLASH`
+(`esp32c6,server,radio,memory_fs`) and `TEST_RMT`
+(`esp32c6,server,test_rmt` — the bare `esp32c6,test_rmt` does not link on
+today's main, `panic_path.rs` needs `lpc_shared`). The
 reference-image tests (`harness_parity`, `boot_idle`) resolve theirs from
 `LP_EMU_C6_REF_<SLUG>`, then `target/emu-ref/`, and with `LP_EMU_BUILD_FW=1`
 run `scripts/emu/build-reference-image.sh` — which needs the repository's
