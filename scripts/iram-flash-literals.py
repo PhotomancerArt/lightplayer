@@ -17,8 +17,18 @@ that no function's count grows against a committed baseline.
 
     scripts/iram-flash-literals.py <elf> [--objdump xtensa-esp32-elf-objdump]
                                          [--baseline <table>] [--write-baseline]
+    scripts/iram-flash-literals.py <elf> --dump <function-substring>...
 
 Exit status is 1 when a baseline is given and some function's count grew.
+
+A count is a lead, not a verdict: most flash literals in this image are
+`core::panic::Location`s on panic tails or `debug!` format pieces behind the
+log-level check, which never execute. `--dump` prints the annotated
+disassembly of the matching functions so each hit can be read on the branch it
+sits on — every `l32r` is tagged with where its value points (flash rodata,
+flash text, RAM), and direct calls into flash `.text` are tagged too, because a
+`#[ram]` function calling a flash-resident helper is the same cache miss as a
+flash literal (docs/debt/classic-iram-handlers-reach-flash.md).
 
 ⚠️ The values come from objdump, which prints each `l32r`'s resolved literal in
 parentheses when the literal address falls inside a loaded section:
@@ -91,6 +101,52 @@ def flash_literals_per_function(
     return counts
 
 
+_SECTION_RANGE = re.compile(
+    r"^\s*\d+\s+(?P<name>\S+)\s+(?P<size>[0-9a-f]{8})\s+(?P<vma>[0-9a-f]{8})\s", re.I
+)
+# Direct branches into flash: `call8 400d1234 <sym>` / `j 400d1234 <sym>`.
+_DIRECT_TARGET = re.compile(r"\b(?:call[048]|call12|j)\s+(?P<addr>[0-9a-f]+)\b", re.I)
+
+
+def flash_text_range(objdump: str, elf: str) -> tuple[int, int]:
+    """The flash-mapped `.text` window, from the section table."""
+    for line in run(objdump, "-h", elf).splitlines():
+        if (m := _SECTION_RANGE.match(line)) and m.group("name") == ".text":
+            lo = int(m.group("vma"), 16)
+            return lo, lo + int(m.group("size"), 16)
+    return 0, 0
+
+
+def dump_annotated(objdump: str, elf: str, sections: list[str], wanted: list[str]) -> None:
+    """Print each matching function's disassembly with every flash reference tagged."""
+    text_lo, text_hi = flash_text_range(objdump, elf)
+
+    def tag(value: int) -> str:
+        if FLASH_RODATA_LO <= value < FLASH_RODATA_HI:
+            return "FLASH-RODATA"
+        if text_lo <= value < text_hi:
+            return "FLASH-TEXT"
+        return "ram"
+
+    args = ["-d", "--no-show-raw-insn"] + [f"--section={s}" for s in sections] + [elf]
+    printing = False
+    for line in run(objdump, *args).splitlines():
+        if header := _FUNC_HEADER.match(line):
+            printing = any(w in header.group("name") for w in wanted)
+            if printing:
+                print(f"\n==== {header.group('name')}")
+            continue
+        if not printing or not line.strip():
+            continue
+        mark = ""
+        if hit := _L32R_VALUE.search(line):
+            mark = tag(int(hit.group("value"), 16))
+            mark = "" if mark == "ram" else f"   ;; {mark}"
+        elif (m := _DIRECT_TARGET.search(line)) and text_lo <= int(m.group("addr"), 16) < text_hi:
+            mark = "   ;; -> FLASH-TEXT"
+        print(f"{line.strip()}{mark}")
+
+
 def render(counts: dict[str, int]) -> str:
     lines = [
         "# function, flash-pointing literals loaded from a RAM-resident text section",
@@ -117,6 +173,12 @@ def main() -> int:
     parser.add_argument("--objdump", default="xtensa-esp32-elf-objdump")
     parser.add_argument("--baseline", type=Path)
     parser.add_argument("--write-baseline", action="store_true")
+    parser.add_argument(
+        "--dump",
+        nargs="+",
+        metavar="FUNC",
+        help="print the annotated disassembly of functions whose name contains FUNC",
+    )
     args = parser.parse_args()
 
     if shutil.which(args.objdump) is None:
@@ -136,6 +198,10 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
+
+    if args.dump:
+        dump_annotated(args.objdump, args.elf, sections, args.dump)
+        return 0
 
     counts = flash_literals_per_function(args.objdump, args.elf, sections)
     table = render(counts)
