@@ -245,7 +245,12 @@ impl SyncEngine {
         // so `/account` stops telling the user to reload.
         if !library.is_empty() {
             sync_status::record(|board| {
-                if board.engine.last_sweep.as_ref().is_some_and(|sweep| sweep.host_missing) {
+                if board
+                    .engine
+                    .last_sweep
+                    .as_ref()
+                    .is_some_and(|sweep| sweep.host_missing)
+                {
                     board.record_sweep(library.len(), false, now);
                 }
             });
