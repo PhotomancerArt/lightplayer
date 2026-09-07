@@ -89,7 +89,7 @@ impl GpuGraphics {
             texture.width(),
             texture.height(),
             texture.format(),
-            None,
+            Some(crate::read_back::PRODUCT_READ_BACK_WAIT),
         )
     }
 

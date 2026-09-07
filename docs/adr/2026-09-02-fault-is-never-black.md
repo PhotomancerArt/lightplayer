@@ -209,6 +209,11 @@ the Meteor/C6 OOM which needs real hardware pressure to reproduce.
 > `projects/test/fault-demo` as the tests' and `lp-cli dev`'s rig
 > (`docs/defects/2026-09-06-gpu-tier-executes-unbounded-shaders.md`,
 > `2026-09-06-catalog-content-tree`).
+>
+> Amended 2026-09-07: the GPU tier now refuses it at compile time and
+> bounds every loop it does compile
+> (`2026-09-06-gpu-tier-loop-bounds`). The fuel trap — and this pattern —
+> remain an LPVM-tier feature; a GPU runaway is bounded, not faulted.
 
 ## Alternatives considered
 

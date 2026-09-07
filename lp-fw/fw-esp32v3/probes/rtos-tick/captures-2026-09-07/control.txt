@@ -1,0 +1,5 @@
+[INIT] fw-esp32 initialized, starting server loop... proto=20 commit=5f20c4b474ae dirty=false
+[INFO] fw_esp32_common::server_loop: [perf] frame=85 fps=16 elapsed=5022ms recv=0ms tick=57ms send=0ms total=57ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frame=172 fps=17 elapsed=5014ms recv=0ms tick=56ms send=0ms total=56ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frame=259 fps=17 elapsed=5013ms recv=0ms tick=56ms send=0ms total=56ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frame=346 fps=17 elapsed=5012ms recv=0ms tick=56ms send=0ms total=56ms responses=0
