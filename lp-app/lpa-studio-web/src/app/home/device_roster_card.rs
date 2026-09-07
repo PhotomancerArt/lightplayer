@@ -319,7 +319,7 @@ pub(crate) fn DeviceRosterCard(
                                 class: row_cta_class(),
                                 href: "{href}",
                                 title: "Open this board in the editor",
-                                "Open"
+                                "Open in editor"
                             }
                         }
                         // Only on a board that has SAID it is degraded: a
