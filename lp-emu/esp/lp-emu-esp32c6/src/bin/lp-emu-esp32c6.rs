@@ -363,15 +363,21 @@ fn report(machine: &Esp32C6Machine, outcome: &Outcome) {
         machine.time_grade().configuration()
     );
     eprintln!(
-        "unmapped: {} reads, {} writes, {} distinct sites",
+        "unmapped: {} reads, {} writes, {} distinct sites; {} idle skips (wfi)",
         machine.bus.unmapped_reads(),
         machine.bus.unmapped_writes(),
-        machine.bus.unmapped_sites()
+        machine.bus.unmapped_sites(),
+        machine.idle_skips()
     );
 
     match outcome {
         Outcome::ExitMatched { .. } => eprintln!("--exit-on matched"),
         Outcome::Deadline { .. } => eprintln!("emulated timeout reached, no fault"),
+        Outcome::Reset { cycle, source } => eprintln!(
+            "RESET requested by {source} at cycle {cycle} ({} us) — the chip would reboot; \
+             the emulator reports it (M7 owns the boot chain)",
+            cycle / memmap::CYCLES_PER_US
+        ),
         Outcome::Fault { pc, fault, .. } => eprintln!(
             "FAULT {fault:?} at pc={pc:#010x} {}",
             machine

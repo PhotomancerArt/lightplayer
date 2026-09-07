@@ -51,7 +51,9 @@ pub use bus::{
 };
 pub use elf::{ElfImage, LoadSegment};
 pub use host::{ByteLog, ByteSink, ByteSource, HostSinks, ScriptedSource, StreamId};
-pub use periph::{BusCx, CpuIntMatrix, IrqLines, NoCpuInterrupts, Peripheral, Width};
+pub use periph::{
+    BusCx, CpuIntMatrix, IrqLines, MachineRequest, NoCpuInterrupts, Peripheral, Sandbox, Width,
+};
 pub use regfile::RegFile;
 pub use regnames::RegNames;
 pub use trace::{Access, MmioEvent, Trace};

@@ -73,7 +73,7 @@ fn call_rtc_get_reset_reason(machine: &mut Esp32C6Machine) -> u32 {
 }
 
 fn machine_with_lp_clkrst(reset_cause: u32) -> Esp32C6Machine {
-    Esp32C6Builder::new()
+    Esp32C6Builder::bare()
         .peripheral(
             LP_CLKRST_BASE,
             LP_CLKRST_LEN,
@@ -132,10 +132,20 @@ fn the_low_five_bits_are_the_reason_and_the_rest_are_masked_off() {
 }
 
 #[test]
-fn with_no_block_at_all_the_read_is_reported_as_an_unmodelled_mmio_site() {
-    // What P4 actually ships: nothing is mapped, so the first MMIO access of
-    // every boot is this one, and it is visible rather than silent.
+fn the_default_machine_answers_power_on_which_is_the_line_p5_owed() {
+    // Director note 1: `LP_CLKRST.reset_cause` seeded so the real ROM says
+    // POWERON on a machine built with no arguments at all.
     let mut m = Esp32C6Builder::new().build().unwrap();
+    assert_eq!(call_rtc_get_reset_reason(&mut m), 1);
+    assert!(m.hooks().is_empty());
+    assert_eq!(m.bus.unmapped_reads(), 0);
+}
+
+#[test]
+fn with_no_block_at_all_the_read_is_reported_as_an_unmodelled_mmio_site() {
+    // A bare machine: nothing is mapped, so the first MMIO access of every
+    // boot is this one, and it is visible rather than silent.
+    let mut m = Esp32C6Builder::bare().build().unwrap();
     assert_eq!(call_rtc_get_reset_reason(&mut m), 0);
     assert_eq!(m.bus.unmapped_reads(), 1);
     assert_eq!(m.bus.unmapped_sites(), 1);
