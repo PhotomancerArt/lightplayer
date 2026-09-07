@@ -1,4 +1,5 @@
 pub mod args;
+mod bootloader_guard;
 pub mod build;
 pub mod build_def;
 pub mod distribution_manifest;

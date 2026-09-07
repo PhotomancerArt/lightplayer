@@ -16,6 +16,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use super::args::PackageArgs;
+use super::bootloader_guard::check_bootloader_segments;
 use super::build::build_firmware;
 use super::build_def::{BuildDef, find_repo_root, load_build_def};
 use super::distribution_manifest::{
@@ -72,6 +73,10 @@ fn package_build(repo_root: &Path, def: &BuildDef, out_dir: &Path) -> Result<Pat
     // picked up a stale or foreign artifact.
     let image_bytes =
         std::fs::read(&image_path).with_context(|| format!("reading {}", image_path.display()))?;
+    // The bootloader at the head of the image must load where Studio's
+    // hung-bootloader detection expects it (`lpa_devices::bootloader`).
+    check_bootloader_segments(&def.chip.name, &image_bytes)
+        .with_context(|| format!("checking the bootloader in {}", image_path.display()))?;
     let (_, image_core) = extract_core(&image_bytes, &image_path)?;
     if image_core != core {
         bail!(

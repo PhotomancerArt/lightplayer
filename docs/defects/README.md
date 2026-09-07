@@ -301,6 +301,8 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| assumed-context | 2026-09-06 | [c6-first-flash-bootloader-hang-lp-analog-i2c-clock](2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.md) | fixed | lpa-link flashers + lpa-devices reconnect ladder: a fresh C6's factory firmware gates the LP analog I2C clock; our bootloader hangs after every HP-only reset until a replug |
+| assumed-context | 2026-09-06 | [xiao-c6-7e44-hangs-in-the-second-stage-bootloader](2026-09-06-xiao-c6-7e44-hangs-in-the-second-stage-bootloader.md) | fixed (same cause; espflash-stub half open) | UART-bridge bench fixture, board A0:F2:62:86:7E:44 — the same hang, first blamed on the wiring |
 | nondeterministic-capture | 2026-09-06 | [heap-budget-capture-truncated-by-cycle-cap](2026-09-06-heap-budget-capture-truncated-by-cycle-cap.md) | fixed | scripts/heap-budget-check.sh: the startup capture hit `--max-cycles` mid-compile and recorded the cut as a figure |
 | stand-in-divergence | 2026-09-04 | [read-gate-refuses-on-largest-block-proxy](2026-09-04-read-gate-refuses-on-largest-block-proxy.md) | **open** | lpa-server ProjectRead headroom gate vs the classic's two-region heap |
 | stand-in-divergence | 2026-09-04 | [unload-leaves-classic-unloadable-until-power-cycle](2026-09-04-unload-leaves-classic-unloadable-until-power-cycle.md) | **open** (not reproducing on the four-region heap 2026-09-06: reload accepted at 72,954 B, margin ~7 KB) | after stopAllProjects the classic's largest block is 39.7 KB and the 64 KiB load gate refuses every load |

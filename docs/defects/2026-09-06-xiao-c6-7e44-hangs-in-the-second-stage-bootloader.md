@@ -1,12 +1,30 @@
 ---
-status: open
+status: fixed
 found: 2026-09-06      # bench, L1 (the UART bridge harness), esp-emulator plan
-fixed: not fixed — needs hands at the desk
+fixed: this change     # root cause found the same evening; remedy below
 area: bench fixture (two XIAO ESP32-C6s wired UART0-to-UART0), board A0:F2:62:86:7E:44
-class: board-or-fixture
-related: [lp2025/2026-09-06-1001-esp-emulator/g3-desk-batch.md, lp-fw/fw-esp32c6/src/tests/uart_bridge.rs]
+class: assumed-context
+related: [2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.md, lp2025/2026-09-06-1001-esp-emulator/g3-desk-batch.md, lp-fw/fw-esp32c6/src/tests/uart_bridge.rs]
 ---
 # The bridge board never reaches its app: the second-stage bootloader dies before its first line
+
+> **Root cause found (2026-09-06, evening) — not the fixture, not the
+> board.** This is the first-flash bootloader hang:
+> [2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock](2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.md).
+> The board was factory-fresh; its ESP-IDF firmware had gated
+> `LPPERI_CLK_EN` bit 29 (the LP analog I2C clock), and the bootloader in
+> every image we flash drives the analog bus through the LP aperture, so it
+> hangs at exactly this `Saved PC` after any HP-only reset. Nothing that
+> reflashes can reach it; a power-on reset (replug) or
+> `scripts/c6-lp-ana-i2c.py fix <port>` over the ROM downloader does.
+> Studio's flashers now restore the clock before their closing reset; the
+> espflash CLI does not, so a fresh board flashed from the bench still needs
+> one replug (or the `fix` subcommand) after its first flash. The wiring
+> advice below is still worth checking, but it is not what stopped this
+> board. The stub timeout in the second half is a separate open question
+> (see F4 in the plan's notes): whether espflash's RAM stub also trips on
+> the gated clock is untested.
+
 
 **Symptom** — XIAO ESP32-C6 `A0:F2:62:86:7E:44` (hub port 2,
 `/dev/cu.usbmodem1433201`; board **B** of the UART-bridge fixture) boot-loops
