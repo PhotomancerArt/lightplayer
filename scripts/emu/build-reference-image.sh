@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
 # Build the reference fw-esp32c6 image the committed C6 transcripts came from.
 #
-#   scripts/emu/build-reference-image.sh <features> [<commit>=d6cfaa205] [<spike>=e8d64eeff]
+#   scripts/emu/build-reference-image.sh <features> [<commit>=d6cfaa205] [<spike>=e8d64eeff|none]
 #   → target/emu-ref/<commit>-<slug>/fw-esp32c6   (ELF; sha256 printed and written beside it)
+#
+# `<spike>=none` (or `--no-spike` in place of the features) builds the commit's
+# own tree with no cherry-pick at all. That is what M6 needs: the shipped image
+# speaks its real USB-Serial-JTAG link, so the UART0-link feature is not merely
+# unnecessary, it would be a different image — and DD30's arbitration is only
+# an arbitration if both sides are the same bytes. A no-spike build leaves the
+# worktree clean, so `build.rs` stamps `dirty: false` the way a silicon flash
+# of the same commit does.
 #
 # The silicon transcript under lp-emu/transcripts/esp32c6/shader-compile-stress/
 # and the spike report's §5.1 numbers are at firmware commit d6cfaa2051ae with
@@ -30,9 +38,11 @@
 # how the spike built them (§5.4: "defaults on").
 set -euo pipefail
 
-features="${1:?usage: build-reference-image.sh <features> [<commit>] [<spike>]}"
+features="${1:?usage: build-reference-image.sh <features> [<commit>] [<spike>|none]}"
 commit="${2:-d6cfaa205}"
 spike="${3:-e8d64eeff}"
+# `--no-spike` in the spike slot, for callers that would rather say it in words.
+[[ "$spike" == "--no-spike" ]] && spike=none
 
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 target="riscv32imac-unknown-none-elf"
@@ -42,11 +52,19 @@ case "$features" in
     test_shader_compile_incremental,esp32c6,spike_uart0_link) slug=harness ;;
     esp32c6,server,radio,spike_uart0_link) slug=boot-idle ;;
     esp32c6,server,radio,spike_uart0_link,memory_fs) slug=boot-idle-memfs ;;
+    esp32c6,server,radio,memory_fs) slug=boot-idle-memfs-usb ;;
     *) slug="${features//,/+}" ;;
 esac
 
 out_dir="$repo/target/emu-ref/$commit-$slug"
-wt="$repo/target/emu-ref/wt-$commit"
+# A no-spike worktree is a different tree at the same commit, so it gets its
+# own directory: two builds of one commit that differ in their features must
+# never share a checkout.
+if [[ "$spike" == "none" ]]; then
+    wt="$repo/target/emu-ref/wt-$commit-nospike"
+else
+    wt="$repo/target/emu-ref/wt-$commit"
+fi
 elf="$out_dir/fw-esp32c6"
 
 # ---------------------------------------------------------------------------
@@ -90,10 +108,12 @@ if [[ -f "$elf" ]]; then
 fi
 
 full_commit="$(git -C "$repo" rev-parse "$commit")"
-spike_parent="$(git -C "$repo" rev-parse "$spike^")"
-if [[ "$spike_parent" != "$full_commit" ]]; then
-    echo "build-reference-image: $spike's parent is $spike_parent, not $commit — the cherry-pick would not be the spike's tree" >&2
-    exit 1
+if [[ "$spike" != "none" ]]; then
+    spike_parent="$(git -C "$repo" rev-parse "$spike^")"
+    if [[ "$spike_parent" != "$full_commit" ]]; then
+        echo "build-reference-image: $spike's parent is $spike_parent, not $commit — the cherry-pick would not be the spike's tree" >&2
+        exit 1
+    fi
 fi
 
 if [[ ! -d "$wt" ]]; then
@@ -106,10 +126,12 @@ if [[ ! -d "$wt" ]]; then
     # reporting; it is bookkeeping, and pruning is what clears it.
     git -C "$repo" worktree prune
     git -C "$repo" worktree add --detach "$wt" "$full_commit"
-    # The six firmware files of spike_uart0_link, staged and uncommitted.
-    git -C "$wt" cherry-pick -n "$spike"
-    # build.rs reads `git status --porcelain` for the hello's `dirty` flag;
-    # the cherry-pick leaves the tree dirty exactly as the original was.
+    if [[ "$spike" != "none" ]]; then
+        # The six firmware files of spike_uart0_link, staged and uncommitted.
+        git -C "$wt" cherry-pick -n "$spike"
+        # build.rs reads `git status --porcelain` for the hello's `dirty` flag;
+        # the cherry-pick leaves the tree dirty exactly as the original was.
+    fi
 fi
 
 head_now="$(git -C "$wt" rev-parse HEAD)"
@@ -117,7 +139,12 @@ if [[ "$head_now" != "$full_commit" ]]; then
     echo "build-reference-image: worktree $wt is at $head_now, expected $full_commit — remove it and re-run" >&2
     exit 1
 fi
-if ! git -C "$wt" diff --quiet --cached -- lp-fw/fw-esp32c6/src/serial/spike_uart0.rs 2>/dev/null \
+if [[ "$spike" == "none" ]]; then
+    if ! git -C "$wt" diff --quiet --cached; then
+        echo "build-reference-image: $wt has staged changes, but --no-spike asked for the commit's own tree — remove it and re-run" >&2
+        exit 1
+    fi
+elif ! git -C "$wt" diff --quiet --cached -- lp-fw/fw-esp32c6/src/serial/spike_uart0.rs 2>/dev/null \
    && [[ ! -f "$wt/lp-fw/fw-esp32c6/src/serial/spike_uart0.rs" ]]; then
     echo "build-reference-image: the spike feature is not applied in $wt" >&2
     exit 1

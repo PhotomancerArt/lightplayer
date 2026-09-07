@@ -27,23 +27,97 @@ pub enum Sentinel {
     /// The payload announces readiness and then serves until told to stop.
     /// Host-driven payloads (the GPIO calibration protocol) work this way.
     Ready(&'static str),
+    /// The payload's subject is machine **state**, not console output: the
+    /// capture is the emulator's own report rather than anything the device
+    /// said, and the marker is a line of that report.
+    ///
+    /// M6's `usb-host-absent` is the case. With no cable the device says
+    /// nothing at all — that *is* the finding — so there is no console line
+    /// to stop on and no line to record. What the run has to say is read out
+    /// of the guest's memory with `--probe`, and the run ends at its
+    /// deadline. So no `--exit-on` is passed (there is nothing on a console
+    /// to match) and the marker is the name of the last probe: the payload
+    /// got where it was going when the last question was answered.
+    State(&'static str),
 }
 
 impl Sentinel {
     pub const fn marker(self) -> &'static str {
         match self {
-            Self::Done(m) | Self::Ready(m) => m,
+            Self::Done(m) | Self::Ready(m) | Self::State(m) => m,
+        }
+    }
+
+    /// The marker to pass as `--exit-on`, or `None` for a payload that ends
+    /// some other way: `Ready` serves for ever, `State` has no console to
+    /// match on.
+    pub const fn exit_on(self) -> Option<&'static str> {
+        match self {
+            Self::Done(m) => Some(m),
+            Self::Ready(_) | Self::State(_) => None,
         }
     }
 
     /// The `done_marker` a matching `fw-checks` registry entry must declare.
-    /// `Ready` payloads never finish, so theirs is `None`.
+    /// `Ready` payloads never finish and `State` payloads print nothing, so
+    /// theirs is `None`.
     pub const fn fw_checks_done_marker(self) -> Option<&'static str> {
         match self {
             Self::Done(m) => Some(m),
-            Self::Ready(_) => None,
+            Self::Ready(_) | Self::State(_) => None,
         }
     }
+}
+
+/// Which link carries the payload's output.
+///
+/// A host-side property in the same sense as [`Capture`]: on silicon the
+/// shipped image has exactly one link — the USB-Serial-JTAG the product
+/// ships — and this says whether an *emulated* configuration serves that
+/// link or is handed the `spike_uart0_link` workaround instead.
+///
+/// It exists because until M6 every emulated run got `spike_uart0_link`
+/// unconditionally (`RunRequest::features`, "neither emulator has a USB
+/// host"). That is now false for `lp-emu:*`, and it mattered: a UART0-link
+/// image on one side and a USB-link image on the other compares two link
+/// drivers' allocations, not two machines (DD30).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Link {
+    /// The product's own link. On `lp-emu:*` the machine models the host
+    /// (M6), the capture is the USB byte stream — the same bytes a silicon
+    /// reader on the port sees — and no `spike_uart0_link` is built.
+    UsbSerialJtag,
+    /// The spike's UART0 workaround: the host link moved to UART0 by a cargo
+    /// feature, so an emulator with no USB host model can still be served.
+    /// `esp-emu:*` has no choice (its USB model is a lie — spike report §4);
+    /// `shader-compile-stress` stays here on purpose, because its committed
+    /// transcripts are of that image and a transcript is never re-baselined
+    /// to suit a later idea.
+    Uart0Spike,
+}
+
+impl Link {
+    pub const fn slug(self) -> &'static str {
+        match self {
+            Self::UsbSerialJtag => "usb-serial-jtag",
+            Self::Uart0Spike => "uart0-spike",
+        }
+    }
+}
+
+/// The initial host state an emulated run starts in, and the scripted host
+/// actions that follow.
+///
+/// The script is `--usb-script`'s grammar (M6 P3): absolute emulated
+/// milliseconds, one command per line. It is the deterministic twin of the
+/// control socket — a socket is host time and has no place in a transcript.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HostPlan {
+    /// `--usb-host`: `absent`, `attached` (a cable and an open port) or
+    /// `attached-idle` (a cable, port closed).
+    pub host: &'static str,
+    /// `--usb-script` content, or `""` for a run nobody touches.
+    pub script: &'static str,
 }
 
 /// How a silicon run watches the board.
@@ -158,6 +232,36 @@ pub struct Payload {
     pub series: &'static [&'static SeriesSpec],
     /// When the host side opens the port, on a silicon run. See [`Capture`].
     pub capture: Capture,
+    /// Which link carries the output. See [`Link`].
+    pub link: Link,
+    /// What the emulated configurations build instead, and only because
+    /// something is not modelled yet.
+    ///
+    /// `None` — the honest default — means one image on every configuration,
+    /// which is what makes two transcripts of a payload comparable at all.
+    /// The one exception is `usb-negative-control`, whose image is
+    /// flash-backed: on `lp-emu:*` a flash-backed boot stops at `SPIN
+    /// SPI1+0x000 cmd` until M4 lands the flash controller (DD23), so the
+    /// emulator twin runs the `memory_fs` variant and **says so in the PR and
+    /// in the sidecar**. M6 P5 re-runs it on the flash-backed bytes.
+    pub emulator_features: Option<&'static [&'static str]>,
+    /// The host's side of an emulated run: where it starts and what happens
+    /// to it. `None` for a payload that makes no claim about the host.
+    pub host_plan: Option<HostPlan>,
+    /// Statics to read out of the guest at a given emulated millisecond
+    /// (`--probe <symbol>@<ms>`), for a payload whose subject is state the
+    /// device never gets to say out loud.
+    pub probes: &'static [(&'static str, u64)],
+    /// The emulated seconds a scenario needs, when its subject is a timeline
+    /// rather than a line. `None` leaves it to the runner's `--timeout-secs`.
+    pub run_secs: Option<u64>,
+    /// Why silicon cannot record this payload, when it cannot.
+    ///
+    /// `usb-host-absent` is the case, and the reason is the payload: an
+    /// absent host records nothing, because recording is what a host does.
+    /// The runner refuses a silicon run with this sentence rather than
+    /// producing an empty file and calling it evidence.
+    pub emulator_only: Option<&'static str>,
 }
 
 impl Payload {
@@ -166,6 +270,14 @@ impl Payload {
             .iter()
             .find(|f| f.record == record && f.field == field)
             .map(|f| f.class)
+    }
+
+    /// The firmware features this payload builds on `configuration`.
+    pub fn features_for(&self, emulated: bool) -> &'static [&'static str] {
+        match (emulated, self.emulator_features) {
+            (true, Some(f)) => f,
+            _ => self.firmware_features,
+        }
     }
 }
 
@@ -399,6 +511,44 @@ pub static LINK_MONITOR: SeriesSpec = SeriesSpec {
         ("count", FieldClass::UsbSerialJtag),
         ("not_draining_ms", FieldClass::Timing),
         ("draining_again_ms", FieldClass::Timing),
+    ],
+    compiled: OnceLock::new(),
+};
+
+/// A static read out of the guest's memory at a chosen emulated moment
+/// (`lp-emu-esp32c6 --probe <symbol>@<ms>`), as the machine prints it.
+///
+/// ```text
+/// probe cyc=800000000 us=5000000 esp_println::serial_jtag_printer::TIMED_OUT @ 0x4080f2a4 = 0x00000001
+/// ```
+///
+/// This is the vehicle for a payload whose subject is a state the device
+/// cannot report at the time. With no host attached the firmware writes
+/// nothing at all — that is the whole finding — so the transcript is not
+/// what the device said, it is what the machine could see of it. The address
+/// is matched and never captured: it moves with every build (DD45), and what
+/// the claim is about is the value.
+///
+/// Every value here is graded `UsbSerialJtag`, which is **hard** in replay,
+/// including the two that hold milliseconds. That is deliberate and it is
+/// not a timing gate in disguise: on this payload
+/// `HOST_DRAINING_AGAIN_MS` reads `0xffffffff`, the monitor's "never this
+/// boot" sentinel, and "never" is precisely the claim the negative control
+/// exists to make (DD38: the stamp *pair* is the discriminator, never the
+/// count). `HOST_NOT_DRAINING_MS` is the other half of the pair, and its
+/// value is the firmware's own clock on one machine at one time grade — a
+/// figure that moves is a finding to report, never a number to tune.
+pub static PROBE: SeriesSpec = SeriesSpec {
+    name: "probe",
+    description: "a static read out of the guest at a chosen emulated moment",
+    pattern: concat!(
+        r"^probe cyc=(?<cyc>\d+) us=(?<us>\d+) (?<symbol>\S+) ",
+        r"@ 0x[0-9a-f]{8} = 0x(?<value>[0-9a-f]{8})$",
+    ),
+    key: "symbol",
+    fields: &[
+        ("value", FieldClass::UsbSerialJtag),
+        ("us", FieldClass::Timing),
     ],
     compiled: OnceLock::new(),
 };
@@ -685,6 +835,17 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         ],
         series: &[&COMPILE_TICK],
         capture: Capture::Monitor,
+        // The one payload that stays on the spike link, and not because the
+        // link is right: its silicon, esp-emu and lp-emu transcripts are all
+        // of that image, and `scripts/emu/build-reference-image.sh` pins the
+        // recipe. Moving it to the real link would invalidate three committed
+        // captures to gain nothing this milestone measures.
+        link: Link::Uart0Spike,
+        emulator_features: None,
+        host_plan: None,
+        probes: &[],
+        run_secs: None,
+        emulator_only: None,
     },
     Payload {
         name: "gpio-calibrate",
@@ -700,6 +861,12 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         fields: &[],
         series: &[&CAL_PULSE],
         capture: Capture::Monitor,
+        link: Link::UsbSerialJtag,
+        emulator_features: None,
+        host_plan: None,
+        probes: &[],
+        run_secs: None,
+        emulator_only: None,
     },
     Payload {
         name: "uart-bridge",
@@ -715,6 +882,12 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         fields: &[],
         series: &[&BRIDGE_READY],
         capture: Capture::Monitor,
+        link: Link::UsbSerialJtag,
+        emulator_features: None,
+        host_plan: None,
+        probes: &[],
+        run_secs: None,
+        emulator_only: None,
     },
     Payload {
         name: "jit-math-perf",
@@ -730,6 +903,12 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         fields: JIT_BENCH_FIELDS,
         series: &[],
         capture: Capture::Monitor,
+        link: Link::Uart0Spike,
+        emulator_features: None,
+        host_plan: None,
+        probes: &[],
+        run_secs: None,
+        emulator_only: None,
     },
     Payload {
         name: "boot-idle",
@@ -763,6 +942,22 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         fields: &[],
         series: &[&HELLO, &HEARTBEAT, &STACK_HEARTBEAT],
         capture: Capture::Monitor,
+        // The product's own link, on every configuration that can serve it.
+        // This is DD26/DD30's arbitration: silicon's capture of this image
+        // came off the USB port, and only an emulated run of the same bytes
+        // over the same link compares two machines rather than two link
+        // drivers.
+        link: Link::UsbSerialJtag,
+        emulator_features: None,
+        // A cable in and an application reading, from the first byte — the
+        // same state `espflash --monitor` puts the board in.
+        host_plan: Some(HostPlan {
+            host: "attached",
+            script: "",
+        }),
+        probes: &[],
+        run_secs: None,
+        emulator_only: None,
     },
     Payload {
         name: "usb-negative-control",
@@ -797,6 +992,114 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // one 5 s heartbeat interval of margin so the wait cannot land inside
         // the transition it is trying to observe.
         capture: Capture::FlashThenOpenAfter(8),
+        link: Link::UsbSerialJtag,
+        // The one payload whose emulator twin is a different image, and the
+        // reason is a peripheral, not a preference: a flash-backed boot stops
+        // at `SPIN SPI1+0x000 cmd` on `lp-emu:*` until M4 lands the flash
+        // controller (DD23). M6 P5 re-runs it on the flash-backed bytes.
+        emulator_features: Some(&["server", "radio", "memory_fs"]),
+        // The emulator twin of [`Capture::FlashThenOpenAfter`]: a cable in
+        // and the port closed from boot, opened at the same eight seconds.
+        // `the_negative_controls_two_halves_agree` holds the two numbers
+        // together so a change to one is a compile-time-visible change to a
+        // pair.
+        host_plan: Some(HostPlan {
+            host: "attached-idle",
+            script: "8000  open\n",
+        }),
+        probes: &[],
+        // Latch at ~0.6 s, open at 8 s, the recovery on the first probe of
+        // io_task's 2 s grid after it, the 10 s heartbeat carrying the pair,
+        // and the stack heartbeat at 15 s that stops the run.
+        run_secs: Some(20),
+        emulator_only: None,
+    },
+    Payload {
+        name: "usb-detach-reattach",
+        display_name: "The cable out mid-session and back in",
+        fw_check_slug: "usb-detach-reattach",
+        // The shipped image minus flash, like every M6 emulator scenario
+        // until M4: what is under test is the link, and the filesystem has
+        // nothing to say about it.
+        firmware_features: &["server", "radio", "memory_fs"],
+        fw_checks_feature: None,
+        emits_header: false,
+        // Not a stack heartbeat: the one at 5 s crosses before the unplug and
+        // the next is at 15 s, five seconds after the scenario has anything
+        // left to say. A whole heartbeat arriving *after* the re-open is the
+        // stronger claim and the natural end of the timeline — the session
+        // recovered, and the proof is a frame that crossed it.
+        sentinel: Sentinel::Done("\"uptime_ms\":10000"),
+        record_kinds: &[],
+        mask_set: "boot-idle",
+        fields: &[],
+        series: &[&HELLO, &HEARTBEAT, &STACK_HEARTBEAT],
+        capture: Capture::Monitor,
+        link: Link::UsbSerialJtag,
+        emulator_features: None,
+        // `scripts/device-scenarios/s7-unplug-mid-op.json`'s shape, which has
+        // wanted a device-side trace since M2: read from boot, unplugged at
+        // 6 s, back in at 9 s, re-opened at 9.5 s.
+        host_plan: Some(HostPlan {
+            host: "attached",
+            // The initial state is `--usb-host attached` — a cable in and an
+            // application reading — so the script carries only what changes.
+            script: "\
+6000  detach
+9000  attach
+9500  open
+",
+        }),
+        probes: &[],
+        run_secs: Some(12),
+        emulator_only: None,
+    },
+    Payload {
+        name: "usb-host-absent",
+        display_name: "The shipped image with no cable at all",
+        fw_check_slug: "usb-host-absent",
+        firmware_features: &["server", "radio", "memory_fs"],
+        fw_checks_feature: None,
+        emits_header: false,
+        // Nothing is printed, because nothing can be: see [`Sentinel::State`].
+        sentinel: Sentinel::State("link_counters::NOT_DRAINING_COUNT"),
+        record_kinds: &[],
+        mask_set: "normalize",
+        fields: &[],
+        series: &[&PROBE],
+        capture: Capture::Monitor,
+        link: Link::UsbSerialJtag,
+        emulator_features: None,
+        host_plan: Some(HostPlan {
+            host: "absent",
+            script: "",
+        }),
+        // esp-println's own latch, then the connection monitor's pair and its
+        // count, at 5 s — after the boot has done everything it is going to
+        // do into the void. Order matters: the last one named is the payload's
+        // sentinel.
+        probes: &[
+            ("esp_println::serial_jtag_printer::TIMED_OUT", 5_000),
+            (
+                "fw_esp32_common::serial::link_counters::HOST_NOT_DRAINING_MS",
+                5_000,
+            ),
+            (
+                "fw_esp32_common::serial::link_counters::HOST_DRAINING_AGAIN_MS",
+                5_000,
+            ),
+            (
+                "fw_esp32_common::serial::link_counters::NOT_DRAINING_COUNT",
+                5_000,
+            ),
+        ],
+        run_secs: Some(6),
+        emulator_only: Some(
+            "an absent host records nothing: recording IS what a host does. On silicon this \
+             payload is `unplug the board and watch the port that is no longer there`, which is \
+             not a capture — it is an empty file. The state it asks about is read out of the \
+             guest's memory, which only an emulator can do",
+        ),
     },
     Payload {
         name: "boot-idle-flash",
@@ -1087,6 +1390,122 @@ mod tests {
         for other in ALL_PAYLOADS.iter().filter(|o| o.name != p.name) {
             assert_eq!(other.capture, Capture::Monitor, "{}", other.name);
         }
+    }
+
+    /// The negative control is one measurement expressed twice — a silicon
+    /// wait and an emulated `open` — and the two have to be the same number
+    /// or the twin is not a twin.
+    #[test]
+    fn the_negative_controls_two_halves_agree() {
+        let p = find_payload("usb-negative-control").unwrap();
+        let Capture::FlashThenOpenAfter(secs) = p.capture else {
+            panic!("the negative control is watched after a wait");
+        };
+        let plan = p.host_plan.expect("the emulator twin has a host plan");
+        assert_eq!(plan.host, "attached-idle", "a cable in, the port closed");
+        assert!(
+            plan.script.contains(&format!("{}  open", secs * 1_000)),
+            "the emulated open is at {secs} s, the same wait silicon takes: {:?}",
+            plan.script
+        );
+    }
+
+    /// The emulator twin's image differs from silicon's, and exactly one
+    /// payload is allowed that — with a reason that names what is missing.
+    #[test]
+    fn only_the_negative_control_builds_a_different_image_on_an_emulator() {
+        for p in ALL_PAYLOADS {
+            let differs = p.emulator_features.is_some();
+            assert_eq!(
+                differs,
+                p.name == "usb-negative-control",
+                "payload `{}` builds a different image on an emulator",
+                p.name
+            );
+            assert_eq!(p.features_for(false), p.firmware_features);
+        }
+        let p = find_payload("usb-negative-control").unwrap();
+        assert_eq!(p.features_for(true), &["server", "radio", "memory_fs"]);
+    }
+
+    /// `usb-host-absent` is the first payload silicon cannot record, and the
+    /// registry says why rather than leaving a runner to fail confusingly.
+    #[test]
+    fn the_absent_host_payload_is_emulator_only_and_says_why() {
+        let p = find_payload("usb-host-absent").unwrap();
+        let why = p.emulator_only.expect("a reason, not a flag");
+        assert!(why.contains("records nothing"), "{why}");
+        assert!(matches!(p.sentinel, Sentinel::State(_)));
+        assert_eq!(p.sentinel.exit_on(), None, "there is no console to match");
+        // The sentinel is the last probe: the run got where it was going when
+        // the last question was answered.
+        let last = p.probes.last().expect("probes").0;
+        assert!(
+            last.ends_with(p.sentinel.marker()),
+            "`{last}` does not end with the sentinel `{}`",
+            p.sentinel.marker()
+        );
+        for other in ALL_PAYLOADS.iter().filter(|o| o.name != p.name) {
+            assert!(other.emulator_only.is_none(), "{}", other.name);
+        }
+    }
+
+    /// The probe series against a line the machine actually printed
+    /// (`host_absent`'s own symbols, `--probe …@5000`).
+    #[test]
+    fn the_probe_series_parses_a_line_the_machine_prints() {
+        let line = "probe cyc=800000000 us=5000000 \
+                    esp_println::serial_jtag_printer::TIMED_OUT @ 0x4080f2a4 = 0x00000001";
+        let caps = PROBE.regex().captures(line).expect("the probe line parses");
+        assert_eq!(
+            &caps["symbol"],
+            "esp_println::serial_jtag_printer::TIMED_OUT"
+        );
+        assert_eq!(&caps["value"], "00000001");
+        assert_eq!(&caps["us"], "5000000");
+        // The address moves with every build (DD45) and is never captured.
+        let names: Vec<_> = PROBE.regex().capture_names().flatten().collect();
+        assert!(!names.contains(&"address"));
+
+        // The "never this boot" sentinel, which is this payload's claim.
+        let never = "probe cyc=800000000 us=5000000 \
+                     fw_esp32_common::serial::link_counters::HOST_DRAINING_AGAIN_MS \
+                     @ 0x4080f2b0 = 0xffffffff";
+        assert_eq!(
+            &PROBE.regex().captures(never).expect("parses")["value"],
+            "ffffffff"
+        );
+
+        // A symbol the machine could not find is not a sample.
+        assert!(
+            PROBE
+                .regex()
+                .captures("probe cyc=800000000 NOPE: no such symbol in the app or the ROM")
+                .is_none()
+        );
+    }
+
+    /// The link is a payload property now, and only the two payloads whose
+    /// transcripts are of a spike-link image carry it.
+    #[test]
+    fn the_shipped_scenarios_speak_the_shipped_link() {
+        for name in [
+            "boot-idle",
+            "usb-negative-control",
+            "usb-detach-reattach",
+            "usb-host-absent",
+        ] {
+            assert_eq!(
+                find_payload(name).unwrap().link,
+                Link::UsbSerialJtag,
+                "{name}"
+            );
+        }
+        assert_eq!(
+            find_payload("shader-compile-stress").unwrap().link,
+            Link::Uart0Spike,
+            "its three committed transcripts are of that image"
+        );
     }
 
     #[test]
