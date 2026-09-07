@@ -52,6 +52,7 @@ pub mod intmatrix;
 pub mod loader;
 pub mod machine;
 pub mod memmap;
+pub mod regs;
 pub mod rom;
 pub mod snapshot;
 pub mod test_support;

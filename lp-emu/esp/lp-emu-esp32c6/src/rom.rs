@@ -24,9 +24,12 @@
 //! work by seeding a register a peripheral model owns. The candidates, in the
 //! order the boot meets them:
 //!
-//! 1. `rtc_get_reset_reason` (`0x4000_0018`) — reads PMU/LP_AON reset-cause
-//!    registers. P5 seeds those; the ROM should then return 1 (`POWERON`) on
-//!    its own, which is what makes `[RECOVERY] boot: cause=power-on` hold.
+//! 1. `rtc_get_reset_reason` (the `0x4000_0018` slot) — reads
+//!    `LP_CLKRST.reset_cause` at `0x600B_0410` and masks it to five bits.
+//!    **Answered: no hook.** P5 gives that register a reset value of 1 and
+//!    the real ROM returns `POWERON` on its own, which is what makes
+//!    `[RECOVERY] boot: cause=power-on` hold. See
+//!    `tests/rom_reset_reason.rs`.
 //! 2. `ets_delay_us` (`0x4000_0040`) — spins on a counter the hart provides.
 //!    Runs for real.
 //! 3. `uart_tx_one_char` / `uart_tx_flush` / `ets_get_printf_channel` — P6.

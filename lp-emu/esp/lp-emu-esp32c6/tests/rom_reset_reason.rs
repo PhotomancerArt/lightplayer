@@ -15,10 +15,16 @@
 //! 0x4001968a  ret
 //! ```
 //!
-//! — so it returns `LP_AON[0x410] & 0x1f`, and the fix is one **reset
-//! value** on the LP_AON register block: `with_reset(0x410, 1)`. That is the
+//! — so it returns `LP_CLKRST.reset_cause & 0x1f`, and the fix is one
+//! **reset value** on that block: `with_reset(0x010, 1)`. That is the
 //! brief's preferred outcome (seed the register, do not hook), and P5 owns
 //! the line.
+//!
+//! Note the base. `0x600B_0410` is **not** LP_AON, which is at `0x600B_1000`
+//! — it is `LP_CLKRST` (`0x600B_0400`) offset `0x10`, whose PAC accessor is
+//! literally called `reset_cause`. The generated register-name table is what
+//! caught that; reading the address as "LP_AON plus something" would have
+//! sent P5 to model the wrong block.
 //!
 //! The failing half is pinned too, because it is the trap: with the register
 //! reading zero — which is what an unmodelled block and a plain `RegFile`
@@ -33,10 +39,11 @@ use lp_riscv_emu::mach::{MachineHart, SliceEnd};
 use lp_emu_esp32c6::machine::Esp32C6Builder;
 use lp_emu_esp32c6::Esp32C6Machine;
 
-/// LP_AON's base, and the offset the ROM reads. `0x600B_0410` is the address
-/// the trace shows on the first MMIO access of every boot.
-const LP_AON_BASE: u32 = 0x600B_0000;
-const RESET_CAUSE_OFF: u32 = 0x410;
+/// `LP_CLKRST`'s base and the register the ROM reads. `0x600B_0410` is the
+/// address the trace shows on the first MMIO access of every boot.
+const LP_CLKRST_BASE: u32 = 0x600B_0400;
+const LP_CLKRST_LEN: u32 = 0x400;
+const RESET_CAUSE_OFF: u32 = 0x010;
 
 /// Somewhere in HP SRAM to park a return address at.
 const RETURN_TO: u32 = 0x4080_0000;
@@ -65,12 +72,16 @@ fn call_rtc_get_reset_reason(machine: &mut Esp32C6Machine) -> u32 {
     machine.harts[0].regs()[10] as u32 // a0
 }
 
-fn machine_with_lp_aon(reset_cause: u32) -> Esp32C6Machine {
+fn machine_with_lp_clkrst(reset_cause: u32) -> Esp32C6Machine {
     Esp32C6Builder::new()
         .peripheral(
-            LP_AON_BASE,
-            0x1000,
-            Box::new(RegFile::new("LP_AON", 0x1000).with_reset(RESET_CAUSE_OFF, reset_cause)),
+            LP_CLKRST_BASE,
+            LP_CLKRST_LEN,
+            Box::new(
+                RegFile::new("LP_CLKRST", LP_CLKRST_LEN)
+                    .with_names(lp_emu_esp32c6::regs::LP_CLKRST)
+                    .with_reset(RESET_CAUSE_OFF, reset_cause),
+            ),
         )
         .build()
         .expect("a machine with one accept-and-remember block")
@@ -87,8 +98,8 @@ fn the_routine_is_the_three_instructions_the_analysis_says_it_is() {
 }
 
 #[test]
-fn seeding_lp_aon_makes_the_real_rom_return_power_on_with_no_hook() {
-    let mut m = machine_with_lp_aon(1);
+fn seeding_lp_clkrst_makes_the_real_rom_return_power_on_with_no_hook() {
+    let mut m = machine_with_lp_clkrst(1);
     assert_eq!(
         call_rtc_get_reset_reason(&mut m),
         1,
@@ -101,7 +112,7 @@ fn seeding_lp_aon_makes_the_real_rom_return_power_on_with_no_hook() {
 
 #[test]
 fn an_unseeded_block_makes_it_answer_zero_which_is_the_trap() {
-    let mut m = machine_with_lp_aon(0);
+    let mut m = machine_with_lp_clkrst(0);
     assert_eq!(
         call_rtc_get_reset_reason(&mut m),
         0,
@@ -115,7 +126,7 @@ fn the_low_five_bits_are_the_reason_and_the_rest_are_masked_off() {
     // `andi a0, a0, 31`: a reset-cause register carrying other flags in its
     // high bits still answers correctly, which is why seeding the whole
     // word is safe.
-    let mut m = machine_with_lp_aon(0xDEAD_BEE1);
+    let mut m = machine_with_lp_clkrst(0xDEAD_BEE1);
     assert_eq!(call_rtc_get_reset_reason(&mut m), 0xDEAD_BEE1 & 0x1f);
     assert_eq!(0xDEAD_BEE1u32 & 0x1f, 1, "…and this one is still POWERON");
 }
@@ -129,7 +140,7 @@ fn with_no_block_at_all_the_read_is_reported_as_an_unmodelled_mmio_site() {
     assert_eq!(m.bus.unmapped_reads(), 1);
     assert_eq!(m.bus.unmapped_sites(), 1);
     assert!(
-        m.bus.in_mmio_window(LP_AON_BASE + RESET_CAUSE_OFF),
+        m.bus.in_mmio_window(LP_CLKRST_BASE + RESET_CAUSE_OFF),
         "it is inside a declared MMIO window, so the log says `unmodelled block`"
     );
 }

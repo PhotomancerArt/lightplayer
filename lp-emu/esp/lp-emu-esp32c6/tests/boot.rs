@@ -20,9 +20,10 @@ use lp_emu_esp32c6::machine::{AppSource, Esp32C6Builder, Esp32C6Machine, Outcome
 use lp_emu_esp32c6::memmap;
 use lp_emu_esp32c6::test_support::{fw_esp32c6_elf, skip_notice, SHIPPED_FEATURES};
 
-/// LP_AON's reset-cause register — the first MMIO access of every boot,
-/// from inside the ROM's `rtc_get_reset_reason`.
-const LP_AON_RESET_CAUSE: u32 = 0x600B_0410;
+/// `LP_CLKRST.reset_cause` (`0x600B_0400 + 0x10`) — the first MMIO access of
+/// every boot, from inside the ROM's `rtc_get_reset_reason`. Not LP_AON,
+/// which is at 0x600B_1000.
+const LP_CLKRST_RESET_CAUSE: u32 = 0x600B_0410;
 /// `INTERRUPT_CORE0.core_0_intr_map[0]`. `_setup_interrupts` writes 31
 /// (`DISABLED`) to all 77 of them, ending at `+0x130`.
 const INTR_MAP_BASE: u32 = 0x6001_0000;
@@ -76,7 +77,7 @@ fn the_first_access_nothing_claims_stops_a_strict_run_and_names_itself() {
     };
 
     // The ROM's own reset-cause read, before `.bss` is even zeroed.
-    assert_eq!(violation.address, LP_AON_RESET_CAUSE);
+    assert_eq!(violation.address, LP_CLKRST_RESET_CAUSE);
     assert_eq!(violation.pc, 0x4001_9684);
     assert_eq!(
         m.symbolize(violation.pc).as_deref(),
@@ -117,7 +118,7 @@ fn the_documented_boot_sequence_appears_in_the_trace_in_order() {
     );
 
     let lines = buf.lines();
-    let rom_read = line_with(&lines, &format!("R4 UNMAPPED+{LP_AON_RESET_CAUSE:#010x}"));
+    let rom_read = line_with(&lines, &format!("R4 UNMAPPED+{LP_CLKRST_RESET_CAUSE:#010x}"));
     assert_eq!(rom_read, 0, "the ROM's reset-cause read comes first of all");
 
     let first_map = line_with(&lines, &format!("W4 UNMAPPED+{INTR_MAP_BASE:#010x}"));

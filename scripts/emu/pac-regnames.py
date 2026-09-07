@@ -59,10 +59,19 @@ class Target:
     out: str  # repo-relative output path
 
 
-# The blocks generated today. P3 needs two: a flat one (uart0) and one with
-# register arrays and clusters (systimer), which is what proves the
-# generator handles both shapes. P5/P6 add rows here pointing at
-# `lp-emu/esp/lp-emu-esp32c6/src/regs/` as they model each block.
+# The blocks generated today.
+#
+# The first two live in `lp-emu-esp-common/tests/` and are P3's proof that
+# the generator handles both shapes: a flat block (uart0) and one with
+# register arrays and clusters (systimer). They are fixtures, not tables the
+# emulator uses.
+#
+# The rest live in the CHIP crate, because a register layout is chip-family
+# data and the common crate holds no chip numbers. P4 adds the two blocks its
+# boot trace actually names — `lp_clkrst`, whose `reset_cause` at +0x10 the
+# mask ROM reads before `.bss` is zeroed, and `interrupt_core0`, whose 77 map
+# entries `_setup_interrupts` writes. P5/P6/M4 add a row each as they model a
+# block.
 TARGETS = [
     Target(
         block="uart0",
@@ -73,6 +82,16 @@ TARGETS = [
         block="systimer",
         static="SYSTIMER",
         out="lp-emu/esp/lp-emu-esp-common/tests/regs/systimer.rs",
+    ),
+    Target(
+        block="lp_clkrst",
+        static="LP_CLKRST",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/lp_clkrst.rs",
+    ),
+    Target(
+        block="interrupt_core0",
+        static="INTERRUPT_CORE0",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/interrupt_core0.rs",
     ),
 ]
 
