@@ -183,10 +183,47 @@ impl core::fmt::Debug for Spi1 {
     }
 }
 
+/// Every non-zero reset value the PAC gives SPI1's registers
+/// (`esp32c6-0.23.2/src/spi1/*.rs`, each register module's
+/// `impl Resettable`). Derived data with the same provenance as the name
+/// tables.
+///
+/// **`user` is the load-bearing one.** It resets to `0x8000_0000` —
+/// `usr_command` already set — and the mask ROM's read path *never sets it*:
+/// `_esp_rom_spiflash_read` only clears `usr_mosi` and sets `usr_miso`, and
+/// `esp_rom_spi_set_rd_cmd_bit_len` only touches `usr_addr` and `usr_dummy`.
+/// A block that reset to zero therefore issued every flash read with no
+/// command phase, and every read returned nothing. That is not a theory: it
+/// is what the second-boot gate caught here — the first boot formatted
+/// `lpfs`, the bytes were in the image, and the second boot reformatted,
+/// because the mount's reads moved no data. The `[FS]` pair and the §5.1
+/// heap figures had already matched, since a read that returns nothing and a
+/// read of a blank chip both fail the superblock check the same way.
+const RESETS: &[(u32, u32)] = &[
+    (0x008, 0x002c_a00c), // ctrl
+    (0x00c, 0x0000_0ffc), // ctrl1
+    (0x014, 0x0003_0103), // clock
+    (0x018, 0x8000_0000), // user — usr_command
+    (0x01c, 0x5c00_0007), // user1 — 24-bit address, 8 dummy cycles
+    (0x020, 0x7000_0000), // user2 — 8-bit command phase
+    (0x034, 0x0000_0002), // misc
+    (0x038, 0xffff_ffff), // tx_crc
+    (0x098, 0x0005_0001), // flash_waiti_ctrl
+    (0x09c, 0x0800_2000), // flash_sus_ctrl
+    (0x0a0, 0x0005_7575), // flash_sus_cmd
+    (0x0a4, 0x7a7a_0000), // sus_status
+    (0x0d4, 0x0000_0020), // ddr
+    (0x200, 0x0000_0001), // clock_gate
+];
+
 impl Spi1 {
     pub fn new(flash: FlashHandle) -> Self {
+        let mut regs = RegFile::new("SPI1", 0x400).with_names(regs::SPI1);
+        for (off, value) in RESETS {
+            regs = regs.with_reset(*off, *value);
+        }
         Self {
-            regs: RegFile::new("SPI1", 0x400).with_names(regs::SPI1),
+            regs,
             flash,
             status: 0,
             refused: Vec::new(),
@@ -565,6 +602,32 @@ mod tests {
         // And esp-storage's own decode of it: capacity byte 0x16 → 4 MiB.
         let [_, _, capacity, _] = (sb.read(&mut spi, W0) & 0x00ff_ffff).to_le_bytes();
         assert_eq!(1u32 << capacity, DEFAULT_FLASH_LEN);
+    }
+
+    #[test]
+    fn the_reset_user_register_is_what_enables_the_roms_read_command_phase() {
+        // `_esp_rom_spiflash_read` clears `usr_mosi` and sets `usr_miso`;
+        // `esp_rom_spi_set_rd_cmd_bit_len` sets `usr_addr` and the dummy
+        // length. **Nothing sets `usr_command`** — the reset value already
+        // has it, and a block that reset to zero moves no bytes on any read.
+        let (mut sb, mut spi, flash) = rig();
+        assert_eq!(sb.read(&mut spi, USER), 0x8000_0000);
+        assert_eq!(sb.read(&mut spi, USER1), 0x5c00_0007);
+        assert_eq!(sb.read(&mut spi, USER2), 0x7000_0000);
+        assert_eq!(sb.read(&mut spi, CTRL), 0x002c_a00c);
+
+        // Now drive it exactly as the ROM does, touching nothing else.
+        flash.lock().unwrap().stage(0x31_0000, b"littlefs");
+        let user = sb.read(&mut spi, USER);
+        sb.write(&mut spi, USER, (user & 0xf7ff_ffff) | 0x1000_0000); // -mosi +miso
+        let user = sb.read(&mut spi, USER);
+        sb.write(&mut spi, USER, user | 0x4000_0000); // +addr
+        sb.write(&mut spi, USER2, 0x7000_0003); // 8-bit command 0x03
+        sb.write(&mut spi, MISO_DLEN, 16 * 8 - 1);
+        sb.write(&mut spi, ADDR, 0x31_0000);
+        sb.write(&mut spi, CMD, CMD_USR);
+        assert_eq!(sb.read(&mut spi, W0).to_le_bytes(), *b"litt");
+        assert_eq!(sb.read(&mut spi, W0 + 4).to_le_bytes(), *b"lefs");
     }
 
     #[test]

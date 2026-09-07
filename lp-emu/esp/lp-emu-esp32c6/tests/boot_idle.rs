@@ -5,9 +5,15 @@
 //!
 //! The image is `esp32c6,server,radio,spike_uart0_link,memory_fs` at the
 //! reference commit (`scripts/emu/build-reference-image.sh`; `just
-//! test-emu-c6` builds it, or set `LP_EMU_C6_REF_BOOT_IDLE_MEMFS`). The
-//! flash-backed spike image is the M4 deferral (DD23) and is pinned below
-//! as spinning on `SPI1.cmd`.
+//! test-emu-c6` builds it, or set `LP_EMU_C6_REF_BOOT_IDLE_MEMFS`).
+//!
+//! **M4's first gate is in this file too**: the *flash-backed* variant of
+//! the same image (`LP_EMU_C6_REF_BOOT_IDLE`), which at the end of M3 spun
+//! on `SPI1.cmd` at 11 ms (DD23), now formats `lpfs` and reaches the same
+//! idle loop with the spike report §5.1 figures. The two tests are side by
+//! side on purpose: the only difference between the images is the
+//! `memory_fs` feature, so the only difference between the transcripts
+//! should be the `[FS]` pair and the heap the filesystem costs.
 //!
 //! `#[ignore]`d for the usual reason (`test_support`).
 
@@ -162,25 +168,102 @@ fn two_boot_idle_runs_are_byte_identical() {
     assert_eq!(a.notes, b.notes);
 }
 
+/// M3's deferral, closed. The test this replaces
+/// (`the_flash_backed_spike_image_spins_on_spi1_cmd_which_is_m4s`) asserted
+/// that the flash-backed image stopped at `SPIN SPI1+0x000 cmd =
+/// 0x10000000` at 11 ms with an empty UART0 and never reached the idle
+/// loop; DD23 said the `[FS]` pair and §5.1's figures were M4's.
+///
+/// They are here, and **all four heap figures are byte-equal to the spike
+/// report §5.1's** — the same image bytes on esp-emu:
+/// `freeBytes 265392`, `usedBytes 60144`, `totalBytes 325536`,
+/// `largestFreeBlock 199173`, and `[stack] heartbeat: high-water 11844 B of
+/// 71328 B (59484 B headroom)`. Including `largestFreeBlock`, which §11.2
+/// records as the one heap figure that does not usually transfer.
+const FLASH_HEARTBEAT_MEMORY: &str = r#""memory":{"freeBytes":265392,"usedBytes":60144,"totalBytes":325536,"largestFreeBlock":199173}"#;
+const FLASH_STACK_LINE: &str =
+    "[stack] heartbeat: high-water 11844 B of 71328 B (59484 B headroom)";
+
+/// The `[FS]` pair the brief names, and the boot lines around it.
+const FLASH_BOOT_LINES: &[&str] = &[
+    "\nM!{\"id\":0,\"msg\":{\"hello\":{\"proto\":20,",
+    "[fw-esp32c6] Shader backend: native JIT",
+    // No `[BOOTCTL]` line: an erased boot-control sector is *no record*,
+    // not an unusable one. (It said "unusable record (invalid)" while
+    // SPI1's `user` reset was wrong and reads moved no bytes — the same bug
+    // `tests/flash_persistence.rs` caught, seen from the other end.)
+    "[FS] Mount failed (filesystem corrupt), formatting partition...",
+    "[FS] Formatted and mounted fresh filesystem",
+    "[fw-esp32c6] Hardware manifest: seeed/xiao-esp32-c6",
+    "Esp32C6RmtWs281xDriver: 2 WS281x channels for 2 declared",
+    "[fw-esp32c6] ESP-NOW radio ready: device_id= channel=11",
+    "Boot: scanning /projects for projects",
+    "[RECOVERY] boot complete (first frame served)",
+    "M!{\"id\":0,\"msg\":{\"heartbeat\":{",
+    FLASH_STACK_LINE,
+];
+
 #[test]
 #[ignore = "needs the flash-backed reference image; run through `just test-emu-c6`"]
-fn the_flash_backed_spike_image_spins_on_spi1_cmd_which_is_m4s() {
-    // DD23: the shipped boot mounts `lpfs` from flash through esp-storage
-    // and the ROM's `esp_rom_spiflash_*`, which is the SPI1 controller.
+fn the_flash_backed_spike_image_formats_lpfs_and_heartbeats_with_the_5_1_figures() {
     let buf = SharedBuffer::new();
     let Some(mut m) = machine(&ReferenceImage::BOOT_IDLE, &buf) else {
         return;
     };
-    let outcome = m.run_until(&StopCondition::after_micros(20_000));
+    let outcome = m.run_until(&StopCondition::after_micros(6_000_000));
     assert!(matches!(outcome, Outcome::Deadline { .. }), "{outcome:?}");
-    assert_eq!(m.bus.unmapped_reads() + m.bus.unmapped_writes(), 0);
-    assert!(
-        buf.lines()
-            .iter()
-            .any(|l| l.contains("SPIN SPI1+0x000 cmd = 0x10000000")),
-        "{:?}",
-        buf.lines()
+    assert_eq!(
+        m.bus.unmapped_reads() + m.bus.unmapped_writes(),
+        0,
+        "unmapped"
     );
-    assert_eq!(m.idle_skips(), 0, "it never reaches the idle loop");
-    assert!(m.uart0().is_empty(), "no hello before the mount");
+    let text = String::from_utf8_lossy(&m.uart0().bytes()).into_owned();
+
+    let mut from = 0;
+    for needle in FLASH_BOOT_LINES {
+        let at = text[from..]
+            .find(needle)
+            .unwrap_or_else(|| panic!("`{needle}` not found after byte {from}:\n{text}"));
+        from += at + needle.len();
+    }
+    assert!(text.contains(FLASH_HEARTBEAT_MEMORY), "{text}");
+    assert!(m.idle_skips() > 1_000, "{} idle skips", m.idle_skips());
+
+    // Nothing in SPI1 spun: the only `SPIN` left is esp-println's USB wait,
+    // exactly as on the memfs variant.
+    let lines = buf.lines();
+    let spins: Vec<&String> = lines.iter().filter(|l| l.contains(" SPIN ")).collect();
+    assert_eq!(spins.len(), 1, "{spins:?}");
+    assert!(spins[0].contains("USB_DEVICE+0x004 ep1_conf"));
+    // … and no SPI1 command was refused as unmodelled.
+    assert!(
+        !buf.contents().contains("unmodelled command"),
+        "{}",
+        buf.contents()
+    );
+
+    // The window really is served through the MMU: 37 pages of the 2.4 MiB
+    // image were filled from the flash chip the loader staged it into, and
+    // every one of them translates back to where it was staged.
+    let staging = m.flash_staging().clone();
+    assert_eq!(m.cache_fills(), staging.pages.len() as u64);
+    assert_eq!(staging.chip_size, lp_emu_esp32c6::flash::DEFAULT_FLASH_LEN);
+    let cache = m.cache().lock().unwrap();
+    for page in &staging.pages {
+        assert_eq!(cache.translate(page.vaddr), Some(page.paddr));
+        assert_eq!(cache.translate(page.vaddr + 0x20), Some(page.paddr + 0x20));
+    }
+    drop(cache);
+
+    // And the boot's flash traffic: the format is erases and programs, the
+    // mount and the `/projects` scan are reads.
+    let census = m.flash_census();
+    assert!(census.reads > 100, "{census}");
+    assert!(census.sector_erases > 0, "{census}");
+    assert!(census.programs > 0, "{census}");
+    assert_eq!(
+        census.write_enables,
+        census.programs + census.sector_erases + census.block_erases + 1,
+        "one write-enable per program or erase, plus the unlock's: {census}"
+    );
 }

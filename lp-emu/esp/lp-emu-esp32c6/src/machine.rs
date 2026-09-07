@@ -295,6 +295,14 @@ impl StopCondition {
             ..Default::default()
         }
     }
+
+    /// …or at the end of the first UART0 line containing `needle`, whichever
+    /// comes first. The `--exit-on` flag's condition, for a caller that
+    /// builds a [`StopCondition`] rather than parsing one.
+    pub fn exit_on(mut self, needle: impl Into<String>) -> Self {
+        self.exit_on = Some(needle.into());
+        self
+    }
 }
 
 /// Anything that stopped a machine from being built.
@@ -1372,13 +1380,25 @@ impl Esp32C6Machine {
     /// If the newline never arrives the run goes on to its deadline, which is
     /// the safe direction: a run that ran too long says so in its own report,
     /// while a capture cut in half looks like data.
+    ///
+    /// The search is over **bytes**, not `str`. A console is a byte stream —
+    /// the flash-backed image's `[BOOTCTL] unusable record (invalid) —
+    /// booting normally` carries an em dash — and anchoring an index into a
+    /// lossily-decoded `String` lands inside a multi-byte character and
+    /// panics. (It did: the first `--exit-on` run of the flash-backed image
+    /// in M4 stopped with "byte index 650 is not a char boundary".)
     fn exit_on_match(&self, needle: &str, from: &mut usize) -> Option<Cycles> {
-        let text = self.uart0_log.text();
-        if text.len() <= *from {
+        let text = self.uart0_log.bytes();
+        let needle = needle.as_bytes();
+        if text.len() <= *from || needle.is_empty() {
             return None;
         }
-        match text[*from..].find(needle).map(|i| *from + i) {
-            Some(at) if text[at + needle.len()..].contains('\n') => Some(self.cycles()),
+        let found = text[*from..]
+            .windows(needle.len())
+            .position(|w| w == needle)
+            .map(|i| *from + i);
+        match found {
+            Some(at) if text[at + needle.len()..].contains(&b'\n') => Some(self.cycles()),
             // Matched, but the line is still arriving: hold the anchor here so
             // the next byte re-checks this same match rather than the tail.
             Some(at) => {
