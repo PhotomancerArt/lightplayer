@@ -635,7 +635,7 @@ impl Esp32C6Builder {
                 let file = std::fs::File::create(path)
                     .map_err(|e| BuildError::Io(format!("creating {}: {e}", path.display())))?;
                 (
-                    Box::new(FileSink(file)),
+                    Box::new(FileSink::new(file)),
                     uart0_source.unwrap_or_else(|| Box::new(lp_emu_esp_common::host::NullSource)),
                 )
             }
@@ -671,7 +671,7 @@ impl Esp32C6Builder {
                 UsbSjSink::File(path) => {
                     let file = std::fs::File::create(path)
                         .map_err(|e| BuildError::Io(format!("creating {}: {e}", path.display())))?;
-                    Box::new(FileSink(file))
+                    Box::new(FileSink::new(file))
                 }
             })
         };
@@ -788,8 +788,16 @@ impl ByteSink for StderrSink {
     }
 }
 
-/// A `ByteSink` over a file handle.
-struct FileSink(std::fs::File);
+/// A `ByteSink` over a file handle. Buffered: UART0 drains one byte at a
+/// time in emulated time, and a `write(2)` per byte was 4-5 % of a run.
+/// `BufWriter` flushes on [`ByteSink::flush`] and when the machine drops.
+struct FileSink(std::io::BufWriter<std::fs::File>);
+
+impl FileSink {
+    fn new(file: std::fs::File) -> Self {
+        Self(std::io::BufWriter::new(file))
+    }
+}
 
 impl ByteSink for FileSink {
     fn write(&mut self, bytes: &[u8]) {
@@ -1342,26 +1350,42 @@ impl Esp32C6Machine {
     /// the safe direction: a run that ran too long says so in its own report,
     /// while a capture cut in half looks like data.
     fn exit_on_match(&self, needle: &str, from: &mut usize) -> Option<Cycles> {
-        let text = self.uart0_log.text();
-        if text.len() <= *from {
-            return None;
-        }
-        match text[*from..].find(needle).map(|i| *from + i) {
-            Some(at) if text[at + needle.len()..].contains('\n') => Some(self.cycles()),
-            // Matched, but the line is still arriving: hold the anchor here so
-            // the next byte re-checks this same match rather than the tail.
-            Some(at) => {
-                *from = at;
-                None
+        // Borrow the log in place and scan bytes: this runs after every
+        // slice, and cloning + re-decoding the whole console each time was
+        // measurable. Console output is ASCII (see `ByteLog::text`), and
+        // UTF-8 is self-synchronising, so a byte search finds exactly what
+        // the lossy-text search found.
+        let needle = needle.as_bytes();
+        let cycles = self.cycles();
+        self.uart0_log.with_bytes(|text| {
+            if text.len() <= *from {
+                return None;
             }
-            // Keep the search anchored so a long run does not rescan the whole
-            // console every slice; back off by the needle so a match split
-            // across two slices is still found.
-            None => {
-                *from = text.len().saturating_sub(needle.len());
-                None
+            let found = if needle.is_empty() {
+                Some(0)
+            } else {
+                text[*from..]
+                    .windows(needle.len())
+                    .position(|w| w == needle)
+            };
+            match found.map(|i| *from + i) {
+                Some(at) if text[at + needle.len()..].contains(&b'\n') => Some(cycles),
+                // Matched, but the line is still arriving: hold the anchor
+                // here so the next byte re-checks this same match rather than
+                // the tail.
+                Some(at) => {
+                    *from = at;
+                    None
+                }
+                // Keep the search anchored so a long run does not rescan the
+                // whole console every slice; back off by the needle so a match
+                // split across two slices is still found.
+                None => {
+                    *from = text.len().saturating_sub(needle.len());
+                    None
+                }
             }
-        }
+        })
     }
 
     // ---- snapshot -------------------------------------------------------
