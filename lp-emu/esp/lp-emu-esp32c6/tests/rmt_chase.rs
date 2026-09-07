@@ -16,7 +16,9 @@
 
 use lp_emu_core::sched::Cycles;
 use lp_emu_esp_common::trace::SharedBuffer;
-use lp_emu_esp32c6::machine::{AppSource, Esp32C6Builder, Esp32C6Machine, Outcome, StopCondition, TimeGrade};
+use lp_emu_esp32c6::machine::{
+    AppSource, Esp32C6Builder, Esp32C6Machine, Outcome, StopCondition, TimeGrade,
+};
 use lp_emu_esp32c6::periph::rmt::Pulse;
 use lp_emu_esp32c6::test_support::{FwImage, fw_esp32c6_image, skip_notice};
 use lp_ws281x::{PulseItem, STOP_WORD};
@@ -155,7 +157,11 @@ fn the_test_rmt_chase_is_transmitted_word_exact() {
         let pixels = decode_pixels(frame);
         assert_eq!(pixels.len(), LEDS);
         for (i, px) in pixels.iter().enumerate() {
-            let expected = if i == k % LEDS { [10, 10, 10] } else { [0, 0, 0] };
+            let expected = if i == k % LEDS {
+                [10, 10, 10]
+            } else {
+                [0, 0, 0]
+            };
             assert_eq!(*px, expected, "frame {k}, pixel {i}");
         }
         // The latch, then the STOP.
@@ -194,11 +200,9 @@ fn the_test_rmt_chase_is_transmitted_word_exact() {
         thr_per_frame.iter().all(|&t| t == THR_PER_FRAME),
         "{thr_per_frame:?}"
     );
-    assert!(
-        notes
-            .iter()
-            .any(|l| l.contains("RMT ch0 start f_rmt=80000000 div_cnt=1 window=0..192 raddr=0 wrap=1 tx_lim=96"))
-    );
+    assert!(notes.iter().any(|l| l.contains(
+        "RMT ch0 start f_rmt=80000000 div_cnt=1 window=0..192 raddr=0 wrap=1 tx_lim=96"
+    )));
     assert!(notes.iter().all(|l| !l.contains("RMT ch0 err")));
     assert!(notes.iter().all(|l| !l.contains("log cap")));
     // Nothing on UART0: the harness logs over USB-Serial-JTAG.
@@ -223,18 +227,32 @@ fn two_runs_are_identical_and_t2_transmits_the_same_words() {
     let Some(t2) = run(TimeGrade::T2) else {
         return;
     };
-    assert!(matches!(t2.outcome, Outcome::Deadline { .. }), "{:?}", t2.outcome);
+    assert!(
+        matches!(t2.outcome, Outcome::Deadline { .. }),
+        "{:?}",
+        t2.outcome
+    );
     assert_eq!(t2.m.bus.unmapped_reads() + t2.m.bus.unmapped_writes(), 0);
     let wa: Vec<u32> = a.m.rmt_words(0).iter().map(|(_, w)| *w).collect();
     let w2: Vec<u32> = t2.m.rmt_words(0).iter().map(|(_, w)| *w).collect();
     let n = wa.len().min(w2.len());
     assert!(n > 20 * (DATA_WORDS + 2));
     assert_eq!(wa[..n], w2[..n], "the word sequence differs between grades");
-    let fa: Vec<usize> = frames(a.m.rmt_words(0)).iter().map(|f| f.words.len()).collect();
-    let f2: Vec<usize> = frames(t2.m.rmt_words(0)).iter().map(|f| f.words.len()).collect();
+    let fa: Vec<usize> = frames(a.m.rmt_words(0))
+        .iter()
+        .map(|f| f.words.len())
+        .collect();
+    let f2: Vec<usize> = frames(t2.m.rmt_words(0))
+        .iter()
+        .map(|f| f.words.len())
+        .collect();
     let n = fa.len().min(f2.len());
     assert!(n >= 20, "{n} frames under both grades");
-    assert_eq!(fa[..n], f2[..n], "per-frame word counts differ between grades");
+    assert_eq!(
+        fa[..n],
+        f2[..n],
+        "per-frame word counts differ between grades"
+    );
     println!(
         "rmt_chase: t1 {} frames at {} cycles, t2 {} frames at {} cycles",
         fa.len(),

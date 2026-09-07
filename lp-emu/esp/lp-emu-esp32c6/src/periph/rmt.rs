@@ -541,7 +541,9 @@ impl Rmt {
         let words = e.frame_words;
         let idle = u8::from(e.idle_level());
         self.raise(ch, INT_TX_END_SHIFT);
-        note(cx, || format!("cyc={at} RMT ch{ch} end words={words} idle={idle}"));
+        note(cx, || {
+            format!("cyc={at} RMT ch{ch} end words={words} idle={idle}")
+        });
         self.update_lines(cx);
     }
 
@@ -552,7 +554,9 @@ impl Rmt {
         if !e.stall_noted {
             e.stall_noted = true;
             note(cx, || {
-                format!("cyc={at} RMT ch{ch} stalled: {reason} (the engine resumes when PCR gives it a clock)")
+                format!(
+                    "cyc={at} RMT ch{ch} stalled: {reason} (the engine resumes when PCR gives it a clock)"
+                )
             });
         }
         if !self.poll_armed {
@@ -572,7 +576,9 @@ impl Rmt {
             e.pulse_cap_noted = true;
             let at = pulse.at;
             note(cx, || {
-                format!("cyc={at} RMT ch{ch} pulse log cap ({PULSE_LOG_CAP}) reached; later pulses are not recorded")
+                format!(
+                    "cyc={at} RMT ch{ch} pulse log cap ({PULSE_LOG_CAP}) reached; later pulses are not recorded"
+                )
             });
         }
     }
@@ -588,7 +594,9 @@ impl Rmt {
         } else if !e.word_cap_noted {
             e.word_cap_noted = true;
             note(cx, || {
-                format!("cyc={now} RMT ch{ch} word log cap ({WORD_LOG_CAP}) reached; later words are not recorded")
+                format!(
+                    "cyc={now} RMT ch{ch} word log cap ({WORD_LOG_CAP}) reached; later words are not recorded"
+                )
             });
         }
     }
@@ -691,7 +699,9 @@ impl Rmt {
                 self.raise(ch, INT_TX_ERR_SHIFT);
                 self.ch[ch].mem_empty = true;
                 self.ch[ch].ending = Ending::Overrun;
-                note(cx, || format!("cyc={now} RMT ch{ch} err mem_empty (window end, wrap off)"));
+                note(cx, || {
+                    format!("cyc={now} RMT ch{ch} err mem_empty (window end, wrap off)")
+                });
             }
         }
         self.update_lines(cx);
@@ -710,7 +720,9 @@ impl Rmt {
                 let e = &mut self.ch[ch];
                 e.running = false;
                 e.ending = Ending::No;
-                note(cx, || format!("cyc={due} RMT ch{ch} stopped after mem_empty"));
+                note(cx, || {
+                    format!("cyc={due} RMT ch{ch} stopped after mem_empty")
+                });
             }
         }
     }
@@ -762,7 +774,9 @@ impl Rmt {
                 let now = cx.now;
                 let pc = cx.pc;
                 note(cx, || {
-                    format!("cyc={now} pc=0x{pc:08x} RMT write to +0x{off:03x}: between the register block and the RAM, dropped")
+                    format!(
+                        "cyc={now} pc=0x{pc:08x} RMT write to +0x{off:03x}: between the register block and the RAM, dropped"
+                    )
                 });
             }
             return;
@@ -806,7 +820,9 @@ impl Rmt {
                         self.warned_ref_cnt[bit] = true;
                         let now = cx.now;
                         note(cx, || {
-                            format!("cyc={now} RMT ch{bit} ref_cnt_rst: divider phase reset accepted, unobservable at div_cnt 1 (modeled)")
+                            format!(
+                                "cyc={now} RMT ch{bit} ref_cnt_rst: divider phase reset accepted, unobservable at div_cnt 1 (modeled)"
+                            )
                         });
                     }
                 }
@@ -818,7 +834,9 @@ impl Rmt {
                     let ch = if off == CH2_RX_CONF1 { 2 } else { 3 };
                     let now = cx.now;
                     note(cx, || {
-                        format!("cyc={now} RMT ch{ch} rx_en set: RX channels are not modelled (M5 models TX only)")
+                        format!(
+                            "cyc={now} RMT ch{ch} rx_en set: RX channels are not modelled (M5 models TX only)"
+                        )
                     });
                 }
             }
@@ -828,7 +846,9 @@ impl Rmt {
                     self.warned_fifo = true;
                     let now = cx.now;
                     note(cx, || {
-                        format!("cyc={now} RMT sys_conf.apb_fifo_mask = 0: the APB FIFO is not modelled (direct RAM access only)")
+                        format!(
+                            "cyc={now} RMT sys_conf.apb_fifo_mask = 0: the APB FIFO is not modelled (direct RAM access only)"
+                        )
                     });
                 }
             }
@@ -837,7 +857,10 @@ impl Rmt {
                     self.warned_fifo = true;
                     let now = cx.now;
                     note(cx, || {
-                        format!("cyc={now} RMT ch{}data write: the APB FIFO is not modelled (direct RAM access only)", o >> 2)
+                        format!(
+                            "cyc={now} RMT ch{}data write: the APB FIFO is not modelled (direct RAM access only)",
+                            o >> 2
+                        )
                     });
                 }
             }
@@ -878,7 +901,9 @@ impl Peripheral for Rmt {
                         self.warned_late_start[ch] = true;
                         let now = cx.now;
                         note(cx, || {
-                            format!("cyc={now} RMT ch{ch} tx_start with no conf_update in the slice: acted on at the slice boundary (modeled, discovery §10.3)")
+                            format!(
+                                "cyc={now} RMT ch{ch} tx_start with no conf_update in the slice: acted on at the slice boundary (modeled, discovery §10.3)"
+                            )
                         });
                     }
                     self.conf_update(ch, cx);
@@ -960,7 +985,9 @@ impl Peripheral for Rmt {
             out.extend_from_slice(&(e.pulses.len() as u64).to_le_bytes());
             for p in &e.pulses {
                 out.extend_from_slice(&p.at.to_le_bytes());
-                out.extend_from_slice(&(u32::from(p.ticks) | (u32::from(p.level) << 16)).to_le_bytes());
+                out.extend_from_slice(
+                    &(u32::from(p.ticks) | (u32::from(p.level) << 16)).to_le_bytes(),
+                );
             }
             out.extend_from_slice(&(e.words.len() as u64).to_le_bytes());
             for (at, w) in &e.words {
@@ -1076,7 +1103,10 @@ impl Peripheral for Rmt {
         self.warned_late_start = [flags & (1 << 8) != 0, flags & (1 << 9) != 0];
         *self.ram = ram;
         let mut it = engines.into_iter();
-        self.ch = [it.next().expect("two engines"), it.next().expect("two engines")];
+        self.ch = [
+            it.next().expect("two engines"),
+            it.next().expect("two engines"),
+        ];
         self.regs.load_state(r.0);
     }
 
@@ -1092,7 +1122,9 @@ mod tests {
 
     /// `lp_ws281x::pulse_code`, locally: two level/duration pairs in one word.
     const fn word(l1: bool, d1: u16, l2: bool, d2: u16) -> u32 {
-        ((l1 as u32) << 15) | (d1 as u32 & 0x7fff) | ((((l2 as u32) << 15) | (d2 as u32 & 0x7fff)) << 16)
+        ((l1 as u32) << 15)
+            | (d1 as u32 & 0x7fff)
+            | ((((l2 as u32) << 15) | (d2 as u32 & 0x7fff)) << 16)
     }
 
     /// The WS2812 codes at 80 MHz (`lp_ws281x::timing`): 100 ticks each.
@@ -1122,7 +1154,8 @@ mod tests {
     /// esp-hal's `configure_tx` on channel 0: `div_cnt 1`, idle low,
     /// `mem_size` blocks (no `conf_update`), then `enable_tx_interrupts`.
     fn configure(sb: &mut Sandbox, r: &mut Rmt, mem_size: u32) {
-        let conf = (1 << CONF_DIV_CNT_SHIFT) | (1 << 6) | (mem_size << CONF_MEM_SIZE_SHIFT) | (1 << 20);
+        let conf =
+            (1 << CONF_DIV_CNT_SHIFT) | (1 << 6) | (mem_size << CONF_MEM_SIZE_SHIFT) | (1 << 20);
         sb.write(r, CH_TX_CONF0[0], conf);
         sb.write(r, INT_ENA, INT_ENA_CH0);
     }
@@ -1133,7 +1166,11 @@ mod tests {
         sb.write(r, REF_CNT_RST, 1);
         sb.write(r, REF_CNT_RST, 0);
         let c = sb.read(r, CH_TX_CONF0[0]);
-        sb.write(r, CH_TX_CONF0[0], (c & !CONF_TX_STOP & !(1 << 3)) | CONF_MEM_TX_WRAP_EN);
+        sb.write(
+            r,
+            CH_TX_CONF0[0],
+            (c & !CONF_TX_STOP & !(1 << 3)) | CONF_MEM_TX_WRAP_EN,
+        );
         let c = sb.read(r, CH_TX_CONF0[0]);
         sb.write(r, CH_TX_CONF0[0], c | CONF_CONF_UPDATE);
         let c = sb.read(r, CH_TX_CONF0[0]);
@@ -1163,7 +1200,11 @@ mod tests {
         assert_eq!(sb.read(&mut r, CH_TX_CONF0[1]), 0x0071_0200);
         assert_eq!(sb.read(&mut r, CH_TX_LIM[0]), 0x80);
         assert_eq!(sb.read(&mut r, SYS_CONF), 0x0500_0010);
-        assert_eq!(sb.read(&mut r, CH_TX_STATUS[1]) & 0x1ff, 48, "ch1's window starts at block 1");
+        assert_eq!(
+            sb.read(&mut r, CH_TX_STATUS[1]) & 0x1ff,
+            48,
+            "ch1's window starts at block 1"
+        );
         assert_eq!(r.reg_name(0x028), Some("ch0_tx_status"));
         assert_eq!(r.reg_name(0x400), None, "the RAM has no register name");
         // (e) int_st = raw & ena; int_clr w1c; the strobes read 0; tx_stop reads back.
@@ -1177,9 +1218,17 @@ mod tests {
         assert_eq!(sb.read(&mut r, INT_RAW), END0, "w1c cleared only thr");
         assert!(!sb.irq.level(source::RMT));
         assert_eq!(sb.read(&mut r, INT_CLR), 0);
-        sb.write(&mut r, CH_TX_CONF0[0], CONF_TX_STOP | CONF_CONF_UPDATE | CONF_TX_START | CONF_MEM_RD_RST);
+        sb.write(
+            &mut r,
+            CH_TX_CONF0[0],
+            CONF_TX_STOP | CONF_CONF_UPDATE | CONF_TX_START | CONF_MEM_RD_RST,
+        );
         let c = sb.read(&mut r, CH_TX_CONF0[0]);
-        assert_eq!(c & CONF_PULSES, 0, "tx_start, mem_rd_rst, conf_update read 0");
+        assert_eq!(
+            c & CONF_PULSES,
+            0,
+            "tx_start, mem_rd_rst, conf_update read 0"
+        );
         assert_eq!(c & CONF_TX_STOP, CONF_TX_STOP, "tx_stop is sticky");
         assert!(!r.is_running(0), "tx_start under tx_stop does nothing");
         // (h) a byte write into the RAM merges its lane.
@@ -1194,7 +1243,11 @@ mod tests {
         sb2.trace = lp_emu_esp_common::Trace::to_sink(Box::new(buf.clone()));
         sb2.write(&mut r, CH2_RX_CONF1, 1);
         sb2.write(&mut r, CH3_RX_CONF1, 1);
-        let rx: Vec<String> = buf.lines().into_iter().filter(|l| l.contains("rx_en")).collect();
+        let rx: Vec<String> = buf
+            .lines()
+            .into_iter()
+            .filter(|l| l.contains("rx_en"))
+            .collect();
         assert_eq!(rx.len(), 1, "{rx:?}");
         assert!(rx[0].contains("RMT ch2 rx_en set: RX channels are not modelled"));
     }
@@ -1209,8 +1262,16 @@ mod tests {
         sb.now = 1_000;
         start_tx(&mut sb, &mut r);
         assert!(r.is_running(0));
-        assert_eq!(sb.read(&mut r, CH_TX_STATUS[0]) >> 9 & 7, 1, "state = sending");
-        assert_eq!(read_pos(&mut sb, &mut r), 1, "word 0 fetched at start; next to fetch is 1");
+        assert_eq!(
+            sb.read(&mut r, CH_TX_STATUS[0]) >> 9 & 7,
+            1,
+            "state = sending"
+        );
+        assert_eq!(
+            read_pos(&mut sb, &mut r),
+            1,
+            "word 0 fetched at start; next to fetch is 1"
+        );
         assert_eq!(sb.sched.next_deadline(), Some(1_000 + WORD_CYCLES));
 
         let start = 1_000u64;
@@ -1219,7 +1280,10 @@ mod tests {
             // thr at pos 24: fires when word 23 is fetched.
             let at = start + (expected_words + 23) * WORD_CYCLES;
             sb.run_to(&mut r, at - 1);
-            assert!(!sb.irq.level(source::RMT), "round {round}: not before word 23");
+            assert!(
+                !sb.irq.level(source::RMT),
+                "round {round}: not before word 23"
+            );
             sb.run_to(&mut r, at);
             assert!(sb.irq.level(source::RMT), "round {round}: thr at 24");
             assert_eq!(sb.read(&mut r, INT_ST), THR0);
@@ -1240,13 +1304,35 @@ mod tests {
             expected_words += 48;
         }
         assert_eq!(r.frames_ended(0), 0, "never ended");
-        assert_eq!(r.words(0).len(), 4 * 48, "four windows, ending on the fourth wrap");
+        assert_eq!(
+            r.words(0).len(),
+            4 * 48,
+            "four windows, ending on the fourth wrap"
+        );
         // Pulses are exactly two per word, on the 200-cycle grid.
         let p = r.pulses(0);
-        assert_eq!(p[0], Pulse { at: start, level: true, ticks: 32 });
-        assert_eq!(p[1], Pulse { at: start + 64, level: false, ticks: 68 });
+        assert_eq!(
+            p[0],
+            Pulse {
+                at: start,
+                level: true,
+                ticks: 32
+            }
+        );
+        assert_eq!(
+            p[1],
+            Pulse {
+                at: start + 64,
+                level: false,
+                ticks: 68
+            }
+        );
         assert_eq!(p[2].at, start + 200);
-        assert_eq!(p[95 * 2].at, start + 95 * WORD_CYCLES, "word 95 is at 95 periods");
+        assert_eq!(
+            p[95 * 2].at,
+            start + 95 * WORD_CYCLES,
+            "word 95 is at 95 periods"
+        );
     }
 
     /// (b) A STOP at word 0 after the wrap ends the frame with `tx_end`
@@ -1284,7 +1370,11 @@ mod tests {
         sb.now = 100_000;
         start_tx(&mut sb, &mut r);
         assert!(r.is_running(0));
-        assert_eq!(read_pos(&mut sb, &mut r), 1, "mem_rd_rst rewound to 0, fetched it");
+        assert_eq!(
+            read_pos(&mut sb, &mut r),
+            1,
+            "mem_rd_rst rewound to 0, fetched it"
+        );
         sb.run_to(&mut r, 100_000 + 10 * WORD_CYCLES);
         assert_eq!(r.words(0).len(), 49 + 11);
         assert_eq!(r.pulses(0)[96].at, 100_000);
@@ -1337,7 +1427,11 @@ mod tests {
 
         // div_cnt 2 → 400 per word.
         let (mut sb, mut r, _) = rig();
-        sb.write(&mut r, CH_TX_CONF0[0], (2 << CONF_DIV_CNT_SHIFT) | (1 << CONF_MEM_SIZE_SHIFT));
+        sb.write(
+            &mut r,
+            CH_TX_CONF0[0],
+            (2 << CONF_DIV_CNT_SHIFT) | (1 << CONF_MEM_SIZE_SHIFT),
+        );
         sb.write(&mut r, INT_ENA, INT_ENA_CH0);
         fill(&mut sb, &mut r, 0, 48, ZERO);
         sb.write(&mut r, CH_TX_LIM[0], 0);
@@ -1366,7 +1460,10 @@ mod tests {
         assert_eq!(c.cycles_for(12_000 * 2, 1), 48_000, "the latch word");
         let c = Clock::decode(1, 0x0070_0000).unwrap();
         assert_eq!(c.hz(), 40_000_000);
-        assert_eq!(Clock::decode(0, 0x0050_0000), Err("PCR rmt_conf.clk_en = 0"));
+        assert_eq!(
+            Clock::decode(0, 0x0050_0000),
+            Err("PCR rmt_conf.clk_en = 0")
+        );
         assert!(Clock::decode(1, 0x0060_0000).is_err(), "FOSC refused");
         assert!(Clock::decode(1, 0x0040_0000).is_err(), "sel 0");
         assert!(Clock::decode(1, 0x0010_0000).is_err(), "sclk_en 0");
@@ -1399,11 +1496,16 @@ mod tests {
         // The restored machine re-schedules from the saved due cycle (the
         // scheduler's own queue is restored by the machine); run it on.
         let mut sb2 = Sandbox::new();
-        sb2.sched.schedule_at(other.ch[0].word_due, event_id(7, EV_WORD));
+        sb2.sched
+            .schedule_at(other.ch[0].word_due, event_id(7, EV_WORD));
         sb2.run_to(&mut other, 500 + 23 * WORD_CYCLES);
         assert!(sb2.irq.level(source::RMT) || sb2.read(&mut other, INT_RAW) & THR0 != 0);
         assert_eq!(other.words(0).len(), 24);
-        assert_eq!(other.words(0)[23].0, 500 + 23 * WORD_CYCLES, "still on the anchor");
+        assert_eq!(
+            other.words(0)[23].0,
+            500 + 23 * WORD_CYCLES,
+            "still on the anchor"
+        );
     }
 
     /// (i) No clock: the engine stalls with a note and resumes when PCR
@@ -1426,7 +1528,11 @@ mod tests {
         assert_eq!(r.words(0).len(), 4, "word 4 is not fetched …");
         assert_eq!(r.pulses(0).len(), 8, "… and not emitted");
         assert!(r.ch[0].stalled);
-        assert!(buf.lines().iter().any(|l| l.contains("RMT ch0 stalled: PCR rmt_conf.clk_en = 0")));
+        assert!(
+            buf.lines()
+                .iter()
+                .any(|l| l.contains("RMT ch0 stalled: PCR rmt_conf.clk_en = 0"))
+        );
         sb.run_to(&mut r, 4 * WORD_CYCLES + 3 * CLOCK_POLL_CYCLES);
         assert_eq!(r.pulses(0).len(), 8, "still stalled through three polls");
         // The clock returns; the next poll resumes word 4 at the poll cycle.
@@ -1434,11 +1540,19 @@ mod tests {
         let resume = 4 * WORD_CYCLES + 4 * CLOCK_POLL_CYCLES;
         sb.run_to(&mut r, resume);
         assert!(!r.ch[0].stalled);
-        assert_eq!(r.words(0)[4], (resume, ZERO), "word 4 fetched at the resume");
+        assert_eq!(
+            r.words(0)[4],
+            (resume, ZERO),
+            "word 4 fetched at the resume"
+        );
         assert_eq!(r.pulses(0)[8].at, resume, "and starts there");
         assert!(buf.lines().iter().any(|l| l.contains("RMT ch0 resumed")));
         sb.run_to(&mut r, resume + 2 * WORD_CYCLES);
-        assert_eq!(r.words(0)[6].0, resume + 2 * WORD_CYCLES, "re-anchored, exact from there");
+        assert_eq!(
+            r.words(0)[6].0,
+            resume + 2 * WORD_CYCLES,
+            "re-anchored, exact from there"
+        );
         // sclk_sel 0 stalls too.
         clock.sclk.set(0x0040_0000);
         sb.run_to(&mut r, resume + 3 * WORD_CYCLES);
@@ -1454,14 +1568,22 @@ mod tests {
         configure(&mut sb, &mut r, 1);
         fill(&mut sb, &mut r, 0, 48, ZERO);
         let c = sb.read(&mut r, CH_TX_CONF0[0]);
-        sb.write(&mut r, CH_TX_CONF0[0], c | CONF_MEM_TX_WRAP_EN | CONF_CONF_UPDATE);
+        sb.write(
+            &mut r,
+            CH_TX_CONF0[0],
+            c | CONF_MEM_TX_WRAP_EN | CONF_CONF_UPDATE,
+        );
         sb.now = 40;
         let c = sb.read(&mut r, CH_TX_CONF0[0]);
         sb.write(&mut r, CH_TX_CONF0[0], c | CONF_TX_START | CONF_MEM_RD_RST);
         assert!(!r.is_running(0), "not yet: no conf_update");
         sb.run_to(&mut r, 40);
         assert!(r.is_running(0), "the slice boundary acted on it");
-        assert!(buf.lines().iter().any(|l| l.contains("tx_start with no conf_update")));
+        assert!(
+            buf.lines()
+                .iter()
+                .any(|l| l.contains("tx_start with no conf_update"))
+        );
         assert_eq!(r.words(0)[0].0, 40);
     }
 
@@ -1473,7 +1595,11 @@ mod tests {
         sb.write(&mut r, CH_TX_LIM[0], 0);
         // Start with wrap off.
         let c = sb.read(&mut r, CH_TX_CONF0[0]);
-        sb.write(&mut r, CH_TX_CONF0[0], c | CONF_MEM_RD_RST | CONF_TX_START | CONF_CONF_UPDATE);
+        sb.write(
+            &mut r,
+            CH_TX_CONF0[0],
+            c | CONF_MEM_RD_RST | CONF_TX_START | CONF_CONF_UPDATE,
+        );
         sb.run_to(&mut r, 47 * WORD_CYCLES);
         assert_eq!(sb.read(&mut r, INT_ST), ERR0, "tx_err at the last fetch");
         assert!(sb.read(&mut r, CH_TX_STATUS[0]) & STATUS_MEM_EMPTY != 0);
@@ -1515,21 +1641,37 @@ mod tests {
     fn channel_one_has_its_own_window_engine_and_interrupt_bits() {
         let (mut sb, mut r, _) = rig();
         // Two channels, one block each (the shipped plan).
-        sb.write(&mut r, CH_TX_CONF0[1], (1 << CONF_DIV_CNT_SHIFT) | (1 << 6) | (1 << CONF_MEM_SIZE_SHIFT));
+        sb.write(
+            &mut r,
+            CH_TX_CONF0[1],
+            (1 << CONF_DIV_CNT_SHIFT) | (1 << 6) | (1 << CONF_MEM_SIZE_SHIFT),
+        );
         sb.write(&mut r, INT_ENA, 0x333);
         fill(&mut sb, &mut r, 48, 96, ONE);
         sb.write(&mut r, ram_off(96), 0);
         sb.write(&mut r, CH_TX_LIM[1], 24);
         let c = sb.read(&mut r, CH_TX_CONF0[1]);
-        sb.write(&mut r, CH_TX_CONF0[1], c | CONF_MEM_TX_WRAP_EN | CONF_MEM_RD_RST | CONF_TX_START | CONF_CONF_UPDATE);
+        sb.write(
+            &mut r,
+            CH_TX_CONF0[1],
+            c | CONF_MEM_TX_WRAP_EN | CONF_MEM_RD_RST | CONF_TX_START | CONF_CONF_UPDATE,
+        );
         assert!(r.is_running(1) && !r.is_running(0));
-        assert_eq!(sb.read(&mut r, CH_TX_STATUS[1]) & 0x1ff, 49, "absolute: block 1 + 1");
+        assert_eq!(
+            sb.read(&mut r, CH_TX_STATUS[1]) & 0x1ff,
+            49,
+            "absolute: block 1 + 1"
+        );
         sb.run_to(&mut r, 23 * WORD_CYCLES);
         assert_eq!(sb.read(&mut r, INT_ST), 1 << (INT_TX_THR_SHIFT + 1));
         sb.write(&mut r, INT_CLR, 0xffff);
         sb.write(&mut r, CH_TX_LIM[1], 48);
         sb.run_to(&mut r, 47 * WORD_CYCLES);
-        assert_eq!(sb.read(&mut r, CH_TX_STATUS[1]) & 0x1ff, 48, "wrapped to its own block");
+        assert_eq!(
+            sb.read(&mut r, CH_TX_STATUS[1]) & 0x1ff,
+            48,
+            "wrapped to its own block"
+        );
         sb.write(&mut r, ram_off(48), 0);
         sb.run_to(&mut r, 48 * WORD_CYCLES);
         assert_eq!(r.frames_ended(1), 1);
