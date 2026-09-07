@@ -15,6 +15,12 @@
 //! | `RevokeGrant` | [`DeviceTransport::revoke_grant`] → the provider's `forget_endpoint` |
 //! | `RunEffect` | [`DeviceEffects::run_effect`] → the wire, borrowed exclusively: esptool for a flash, the `lpa-client` conversation for a push |
 //!
+//! Not a command — frames are not evidence — but the same store: a fed
+//! board's newest picture is written to `/device-frames/<uid>.json`
+//! ([`device_frame_snapshot`]) at most every ten seconds, and read back
+//! into its feed at library settle so a remembered board keeps its last
+//! picture across reloads.
+//!
 //! # Invariant I7: the fold loop never awaits device IO
 //!
 //! Every link event reaches the model the same way a user gesture does — as a
@@ -40,6 +46,7 @@ pub mod device_feed_op;
 pub mod device_firmware_face;
 pub mod device_flash;
 pub mod device_frame_feed;
+pub mod device_frame_snapshot;
 pub mod device_identity;
 pub mod device_push;
 pub mod device_records;
@@ -67,6 +74,7 @@ pub use device_flash::{
     flash_offer_for, reflash_choice, taken_device_titles,
 };
 pub use device_frame_feed::{DEVICE_FEED_PARK_AFTER_FAILURES, DeviceFrameFeed, DeviceFrameFeeds};
+pub use device_frame_snapshot::DEVICE_FRAME_SNAPSHOT_INTERVAL_SECS;
 pub use device_identity::{
     DeviceIdentityLine, IdentityFirmware as DeviceIdentityFirmware, IdentityRows, device_chip,
     device_identity_line, pending_identity_rows,
