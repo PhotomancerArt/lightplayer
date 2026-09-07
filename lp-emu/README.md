@@ -258,14 +258,37 @@ than kept — smaller `Result<T, E>` types did not translate into a faster
 interpreter loop here, at least not enough to clear load noise.
 
 **PGO** is `just bench-emu-c6-pgo` / `scripts/emu/pgo-c6.sh`: an instrumented
-build, one training run of each pinned reference image, `cargo profdata --
-merge`, an optimized rebuild, then the probe on the result — each phase in
-its own `target/emu-pgo/*` dir so the RUSTFLAGS involved never invalidate the
-plain release build. Opt-in (D4): never a default build or CI step, and the
-target is met without it. The overnight research measured ≈1.45x on top of
-the opt-3-plus-patch tree (103.5 M -> 149 M instr/s); needs
-`rustup component add llvm-tools-preview` and `cargo install cargo-binutils`,
-which the script checks for first.
+build, one training run of each pinned reference image, a merge, an
+optimized rebuild, then the probe on the result — each phase in its own
+`target/emu-pgo/*` dir so the RUSTFLAGS involved never invalidate the plain
+release build. Opt-in (D4): never a default build or CI step, and the target
+is met without it. Needs `rustup component add llvm-tools-preview`; the
+script checks for it first.
+
+The merge step calls `llvm-profdata` directly (resolved via `rustc --print
+sysroot`) rather than the plan's `cargo profdata -- merge`: `cargo-binutils`
+0.4.0 panics on any invocation on this toolchain (`cargo profdata -- merge
+--help` alone crashes inside its own clap parsing), reproduced fresh after
+reinstalling it — a real defect in that release, not an environment quirk.
+`llvm-profdata` is the exact binary `cargo profdata` shells out to, so the
+merge is unchanged; only the broken wrapper in front of it is gone.
+
+**Measured 2026-09-07**, same-window A/B against the plain (non-PGO) release
+build, desk load ~13-15 both sides:
+
+| image | grade | non-PGO instr/s | PGO instr/s | speedup |
+|---|---|---:|---:|---:|
+| harness | t1 | 109.0 M | 163.1 M | **1.50x** |
+| harness | t2 | 103.2 M | 161.1 M | **1.56x** |
+| boot-idle-memfs | t1 | 81.6 M | 138.3 M | **1.69x** |
+| boot-idle-memfs | t2 | 79.9 M | 134.4 M | **1.68x** |
+
+`stopped after`, UART0 and the identity oracles are unchanged from the
+non-PGO build (PGO changes codegen, never behaviour). On top of M1 and M2's
+MMIO fast path, the harness now reads 163 M instr/s at `t1` on this desk —
+call it the toolchain-bound end of this milestone's ladder; the overnight
+research's opt-3-plus-patch-tree figure (103.5 M -> 149 M, ≈1.45x) is the
+pre-M2 baseline this rung was designed against.
 
 Evidence, and the rungs not yet climbed (poll-loop skip, block cache, the
 wasm/phone rig): the planning workspace's

@@ -11,20 +11,26 @@
 #
 #   1. instrumented build (-Cprofile-generate) into target/emu-pgo/gen
 #   2. one run of each pinned reference image (the "training" run) merged
-#      into target/emu-pgo/merged.profdata with `cargo profdata -- merge`
+#      into target/emu-pgo/merged.profdata with `llvm-profdata merge`
 #   3. optimized build (-Cprofile-use) into target/emu-pgo/use
 #
-# Needs `rustup component add llvm-tools-preview` and `cargo install
-# cargo-binutils` (the `cargo profdata` subcommand); this script checks both
-# and says so rather than failing deep in a build. The merged profile is a
-# toolchain-bound artifact (the instrumentation counters are keyed to the
-# exact compiler build) and is never committed — target/emu-pgo/ is
-# gitignored the same way target/ is.
+# Needs `rustup component add llvm-tools-preview` for `llvm-profdata`; this
+# script checks and says so rather than failing deep in a build. The merged
+# profile is a toolchain-bound artifact (the instrumentation counters are
+# keyed to the exact compiler build) and is never committed —
+# target/emu-pgo/ is gitignored the same way target/ is.
 #
-# Prints the optimized binary's path and runs the probe on it at the end
-# (scripts/emu/bench-c6.sh --bin ... --no-build --no-promote), so the numbers
-# land next to a same-window comparison without disturbing target/emu-bench/
-# (the plain-build A/B's prev/ baseline).
+# The plan named `cargo profdata -- merge` (the `cargo-binutils` wrapper
+# around this same binary). `cargo-binutils` 0.4.0 panics on ANY invocation
+# on this toolchain -- `cargo profdata -- merge --help` alone crashes with
+# `arg `no-default-features`'s `ArgAction` should be one of `SetTrue`,
+# `SetFalse`...` inside its own clap parsing, reproduced fresh after
+# `cargo install cargo-binutils --force` rebuilt it against clap_builder
+# 4.6.6 -- so this is a real defect in that release, not an environment
+# quirk. `llvm-profdata` is the binary `cargo profdata` itself shells out to
+# (llvm-tools-preview's own copy, resolved here via `rustc --print
+# sysroot`), so calling it directly is the same merge with one fewer, broken
+# layer in front of it.
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -35,9 +41,11 @@ if ! rustup component list --installed 2>/dev/null | grep -q '^llvm-tools-'; the
     echo "    rustup component add llvm-tools-preview" >&2
     exit 1
 fi
-if ! command -v cargo-profdata >/dev/null 2>&1; then
-    echo "pgo-c6: cargo-profdata is not installed. Run:" >&2
-    echo "    cargo install cargo-binutils" >&2
+sysroot="$(rustc --print sysroot)"
+host_tuple="$(rustc -vV | awk '/^host:/{print $2}')"
+llvm_profdata="$sysroot/lib/rustlib/$host_tuple/bin/llvm-profdata"
+if [[ ! -x "$llvm_profdata" ]]; then
+    echo "pgo-c6: llvm-profdata not found at $llvm_profdata (llvm-tools-preview installed?)" >&2
     exit 1
 fi
 
@@ -94,7 +102,11 @@ for spec in "${images[@]}"; do
 done
 
 echo "pgo-c6: merging profile data" >&2
-cargo profdata -- merge -o "$merged" "$raw_dir"/*.profraw
+shopt -s nullglob
+raw_files=("$raw_dir"/*.profraw)
+shopt -u nullglob
+[[ ${#raw_files[@]} -gt 0 ]] || { echo "pgo-c6: no .profraw files in $raw_dir" >&2; exit 1; }
+"$llvm_profdata" merge -o "$merged" "${raw_files[@]}"
 
 echo "pgo-c6: optimized build (profile-use)" >&2
 RUSTFLAGS="-Cprofile-use=$merged -Cllvm-args=-pgo-warn-missing-function" \
