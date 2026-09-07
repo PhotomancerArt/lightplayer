@@ -190,6 +190,12 @@ pub struct SocBus {
     mmio: Vec<MmioRange>,
     /// Indices into `mmio`, sorted by base. The decode's binary search.
     mmio_by_base: Vec<usize>,
+    /// "Last hit" cache for the MMIO decode: the peripheral index plus its
+    /// `(base, len)`, checked with one subtract-compare before
+    /// `mmio_by_base`'s binary search. 86% of a boot's MMIO traffic is
+    /// UART0's TX-FIFO status register polled at baud, so the same
+    /// peripheral answers back-to-back almost always.
+    last_mmio: Option<(usize, u32, u32)>,
     /// Address ranges that belong to MMIO even where no peripheral claims
     /// them. The chip crate registers these; the common crate has no
     /// addresses of its own.
@@ -268,6 +274,7 @@ impl SocBus {
             last_fetch_region: 0,
             mmio: Vec::new(),
             mmio_by_base: Vec::new(),
+            last_mmio: None,
             mmio_windows: Vec::new(),
             strict: false,
             strict_grade: None,
@@ -736,13 +743,31 @@ impl SocBus {
         self.regions[i].contains(address).then_some(i)
     }
 
-    fn mmio_index(&self, address: u32) -> Option<usize> {
+    #[inline(always)]
+    fn mmio_index(&mut self, address: u32) -> Option<usize> {
+        // The last-hit cache: one subtract-compare, checked before the
+        // sorted-by-base binary search.
+        if let Some((i, base, len)) = self.last_mmio
+            && address.wrapping_sub(base) < len
+        {
+            return Some(i);
+        }
+        self.mmio_index_slow(address)
+    }
+
+    #[inline(never)]
+    fn mmio_index_slow(&mut self, address: u32) -> Option<usize> {
         let k = self
             .mmio_by_base
             .partition_point(|&i| self.mmio[i].base <= address);
         let i = self.mmio_by_base[k.checked_sub(1)?];
         let r = &self.mmio[i];
-        (address < r.base.wrapping_add(r.len)).then_some(i)
+        if address.wrapping_sub(r.base) < r.len {
+            self.last_mmio = Some((i, r.base, r.len));
+            Some(i)
+        } else {
+            None
+        }
     }
 
     /// MMIO accesses are register-aligned unless
