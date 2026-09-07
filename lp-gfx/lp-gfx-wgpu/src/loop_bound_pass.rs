@@ -16,7 +16,9 @@
 //!    body opens with `if (!true) { break; }` — the demo's exit is
 //!    syntactically present and semantically dead. The check is
 //!    conservative the safe way round: it only refuses loops with *no*
-//!    exit; a data-dependent runaway compiles and is left to layer 2.
+//!    exit, and only in functions an entry point can reach (a loop nothing
+//!    calls cannot run, and the LPVM tiers compile such a unit); a
+//!    data-dependent runaway compiles and is left to layer 2.
 //! 2. [`bound_loop_iterations`] — every remaining loop charges one unit of a
 //!    per-invocation `var<private>` budget in its `continuing` block and
 //!    `break if`s once the budget is spent. The unit is the loop back-edge,
@@ -42,7 +44,8 @@ pub const LOOP_BUDGET_GLOBAL: &str = "lp_gfx_loop_budget";
 /// `source` is the text the module was parsed from (the assembled GLSL), used
 /// to name the offending line. Call after `glsl-in`, before validation.
 pub fn refuse_loops_without_exit(module: &Module, source: &str) -> Result<(), String> {
-    for (_, function) in module.functions.iter() {
+    for handle in reachable_functions(module) {
+        let function = &module.functions[handle];
         check_block(module, function, &function.body, source)?;
     }
     for entry_point in &module.entry_points {
@@ -108,6 +111,53 @@ pub fn bound_loop_iterations(module: &mut Module, budget: u32) -> usize {
 }
 
 // ---- layer 1: static exit analysis ----------------------------------------
+
+/// Every function some entry point can reach through `Call` statements,
+/// in arena order (so the first refusal is deterministic).
+fn reachable_functions(module: &Module) -> Vec<Handle<Function>> {
+    let mut reached = vec![false; module.functions.len()];
+    let mut worklist = Vec::new();
+    for entry_point in &module.entry_points {
+        collect_calls(&entry_point.function.body, &mut worklist);
+    }
+    while let Some(handle) = worklist.pop() {
+        if core::mem::replace(&mut reached[handle.index()], true) {
+            continue;
+        }
+        collect_calls(&module.functions[handle].body, &mut worklist);
+    }
+    module
+        .functions
+        .iter()
+        .map(|(handle, _)| handle)
+        .filter(|handle| reached[handle.index()])
+        .collect()
+}
+
+fn collect_calls(block: &Block, out: &mut Vec<Handle<Function>>) {
+    for statement in block.iter() {
+        match statement {
+            Statement::Call { function, .. } => out.push(*function),
+            Statement::Block(inner) => collect_calls(inner, out),
+            Statement::If { accept, reject, .. } => {
+                collect_calls(accept, out);
+                collect_calls(reject, out);
+            }
+            Statement::Switch { cases, .. } => {
+                for case in cases {
+                    collect_calls(&case.body, out);
+                }
+            }
+            Statement::Loop {
+                body, continuing, ..
+            } => {
+                collect_calls(body, out);
+                collect_calls(continuing, out);
+            }
+            _ => {}
+        }
+    }
+}
 
 /// Walk a block looking for loops; refuse the first one with no exit.
 fn check_block(
@@ -465,6 +515,34 @@ mod tests {
         );
         let message = refuse_loops_without_exit(&module, &source).expect_err("refused");
         assert!(message.contains("`spin`"), "names the helper: {message}");
+    }
+
+    #[test]
+    fn an_uncalled_helper_with_an_infinite_loop_does_not_refuse_the_unit() {
+        let (module, source) = parse_fragment_with_helpers(
+            "float spin() { float acc = 0.0; while (true) { acc += 0.1; } return acc; }\n",
+            "color = vec4(sin(gl_FragCoord.x));\n",
+        );
+        assert!(
+            module
+                .functions
+                .iter()
+                .any(|(_, f)| f.name.as_deref() == Some("spin")),
+            "glsl-in keeps the uncalled helper, so reachability is what spares it"
+        );
+        refuse_loops_without_exit(&module, &source)
+            .expect("a loop nothing calls cannot run; the LPVM tiers compile this unit");
+    }
+
+    #[test]
+    fn a_helper_reached_through_another_helper_is_checked() {
+        let (module, source) = parse_fragment_with_helpers(
+            "float spin() { float acc = 0.0; while (true) { acc += 0.1; } return acc; }\n\
+             float via() { return spin() * 2.0; }\n",
+            "color = vec4(via());\n",
+        );
+        let message = refuse_loops_without_exit(&module, &source).expect_err("refused");
+        assert!(message.contains("`spin`"), "{message}");
     }
 
     // ---- layer 2: the budget ---------------------------------------------
