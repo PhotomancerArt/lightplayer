@@ -533,15 +533,19 @@ my-project/
   a sub-module folder like `effect/` above importable elsewhere rather
   than merely local: `docs/adr/2026-08-07-project-kinds-and-pattern-exports.md`
   has the full model (designation UX, export lint, vendoring mechanics).
-  Existing flat examples are not migrated to this shape as part of that
-  work; each restructures opportunistically as it enters a pack, not in
-  one big-bang pass.
+  The eight single-effect examples restructured into this shape on
+  2026-09-06 as catalog content work — `catalog/patterns/<slug>/` with
+  the shader inside `effect/` and provenance on the export
+  (`docs/adr/2026-09-06-catalog-content-tree.md`); the pieces under
+  `catalog/projects/` stay flat.
 
 > Status: the project.json/module.json split, the container-manifest
 > format gate (missing manifest = hard refuse, format bumped to 3), and
 > the split schemas landed 2026-08-01. `.lp/panel.json` arrives with the
 > panel phases. `kind`/`exports` and the vendoring/import flow landed
-> 2026-08-07 (module authoring unit, P1–P5).
+> 2026-08-07 (module authoring unit, P1–P5). The catalog tree — buckets
+> mirroring `kind`, generated registration, the eight patterns adopted,
+> built-in patterns importable — landed 2026-09-06.
 
 ## 7. Bus vocabulary — under discovery
 

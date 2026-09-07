@@ -1,80 +1,135 @@
-# Catalog: built-in patterns and projects
+# Catalog: the built-in projects and patterns
 
-The checked-in content Studio embeds and lists on the home page, Explore
-and the device card's project picker — user-facing word: *Explore*. Two
-buckets: `patterns/` (single-effect pattern projects) and `projects/`
-(real pieces). Engine and bench test rigs live under `../projects/test/`,
-not here.
+The checked-in content Studio compiles in and lists on the home page,
+on Explore and in the device card's project picker. The user-facing word
+is **Explore**; the word here is *catalog* because "library" is taken —
+Studio's *library* is the user's own store of projects, and this tree is
+the built-in stock it remixes from. The public library is a later step.
 
-Each entry directory is one project in the ratified two-file layout
-(`docs/design/modules.md` §6): a `project.json` container manifest
-carrying workspace identity (`format`, `name`, provenance), beside a
-`module.json` root module node carrying the technical spec. Every other
-file is a node artifact or an asset the module references.
+Design record: `docs/adr/2026-09-06-catalog-content-tree.md`.
 
-These are checked-in fixtures as much as they are content:
-`cargo test -p lp-cli` walks every entry here (and every rig under
-`../projects/test/`) and fails if one does not load
-(`checked_in_catalog_entries_load_as_core_projects`) or does not
-survive a load → write round trip byte-for-byte
-(`checked_in_catalog_entries_rewrite_byte_identically`).
+## Layout: buckets mirror `kind`, the manifest is the truth
 
-## In the Studio gallery
+```text
+catalog/
+  projects/<slug>/    real pieces          — project.json has no `kind` (general)
+  patterns/<slug>/    single effects        — project.json says `kind: pattern`, `exports: ["effect"]`
+  templates/          reserved for `kind: template` (follow-up plan; absent today)
+  COPYING.md          license rows for every entry that is not CC0
+```
 
-Fourteen are compiled into the app and listed in the gallery's *Examples*
-section — `fyeah-sign`, `logo-sign`, `plasma`, `meteor`, `comet`,
-`palette-waves`, `fire2012`, `plasma-duo`, `zook-dome`, `small-dome`,
-`peach-1d`, `peach-2d`, `pulse`, `fault-demo`. Their Studio ids are
-bucket-free (`catalog/<slug>`; the pre-catalog `examples/<slug>` spelling
-still resolves for libraries seeded before the move).
-Registration is automatic: `lp-app/lpa-studio-core/build.rs` walks
-`catalog/<bucket>/<slug>/` at build time and embeds every file, and the
-registry types each entry from its own `project.json` (`name`, `kind`,
-`description`). Adding an entry is adding a folder — no Rust edit. A
-change here reaches Studio only after a rebuild, and an already-seeded
-library keeps the copy it made (delete the gallery package to re-seed).
+The bucket is for authors — a place to look. What the code reads is
+`project.json`, and `cargo test -p lp-cli --test catalog_tree` fails when
+a folder's bucket and its manifest disagree, so the two cannot drift.
+Studio's ids are bucket-free (`catalog/<slug>`), so reclassifying an
+entry moves a folder and changes nothing persisted; the pre-catalog
+spelling `examples/<slug>` still resolves for libraries seeded before
+the move.
 
-A gallery example must open onto a **populated panel**: at least one
-root-scope control, published the only way publicity happens — an
-authored binding to a bus channel
-(`docs/adr/2026-08-03-panel-visibility-is-derived.md`). Pinned by
-`every_gallery_example_opens_onto_a_populated_root_panel`.
+Engine and bench test rigs are **not** content: they live under
+[`../projects/test/`](../projects/test/) and are never embedded.
 
-| Example | Publishes | Shows off |
+Every entry is one project in the two-file layout
+(`docs/design/modules.md` §6): a `project.json` container manifest beside
+a `module.json` root module; every other file is a node artifact or an
+asset the module references. A pattern additionally keeps its effect
+inside `effect/` — its own `module.json`, the shader def and source —
+which is the folder other projects import by copy.
+
+## Registration is automatic
+
+`lp-app/lpa-studio-core/build.rs` walks `catalog/<bucket>/<slug>/` at
+build time and embeds every file; the registry types each entry from its
+own `project.json` (`name`, `kind`, `description`). Adding an entry is
+adding a folder — no Rust edit, pinned by
+`every_catalog_directory_is_registered_and_vice_versa`. A change here
+reaches Studio after a rebuild, and an already-seeded library keeps the
+copy it made (delete the gallery package to re-seed).
+
+## The manifest fields an entry sets
+
+| Field | Where | Rule |
 |---|---|---|
-| `fyeah-sign` | `glow`, `palette` (via the active playlist entry) | the full bus: clock, button + radio onto `bus:trigger`, playlist switching idle/blast, and an authored palette cycling three moods. The Studio demo project. |
-| `logo-sign` | `speed`, `bands`, `tilt`, `palette` | the brand as a buildable piece: a shaped PCB matrix in the outline of the play triangle (132 lamps, map2d `filled_polygon` — the outline and the 11.5 pitch are authored, the count is *derived*) plus "LightPlayer" as 11 single-stroke letter strands (109 lamps) on ONE canvas, which is the landing hero's own stage. Generated, not drawn: `sign.map2d.json` comes from the brand triangle geometry and from `letters.svg` through the corpus SVG importer, and `logo_sign_gen.rs` in `lpa-studio-web` fails if the committed document falls behind the mark |
-| `plasma` | `speed`, `scale`, `palette` | the smallest non-empty panel: one shader, three bound uniforms. Also the `what-is-a-shader` article's live figure. |
-| `plasma-duo` | `speed`, `scale`, `palette` | one shader and one palette channel feeding two fixtures (disc + grid) with separate outputs |
-| `zook-dome` | `speed` | a real 1500-LED dome across five output channels |
-| `meteor` | `decay` | a compute/render pair — `sim` integrates meteor heads into a persistent map, `render` draws their tails over a `node:` binding |
-| `comet` | `speed`, `tail`, `palette` | a true 1D shader: `vec4 render_1d(float)` against a 120-lamp strip, declaring `OneD { in_2d: Project { extrude-x } }` — the factored default projection. Ported from WLED |
-| `palette-waves` | `speed`, `scale`, `depth`, `palette` | the declared-projection example: a 1D shader declaring `OneD { in_2d: Project { radial } }`, so the strip it is written along arrives on the disc fixture as rings. Ported from WLED |
-| `fire2012` | `speed`, `reach`, `sparks`, `palette` | a fire climbing a 120-lamp strip, declaring `OneD { in_2d: Project { extrude-x } }`. Ported from WLED — but *stateless*: the per-cell heat simulation is not ported, the closed form writes down what it settles into |
-| `peach-1d` | `speed`, `glow` (one set per submodule) | the patching example: two fixtures (body + leaves), each in its own submodule (`body/`, `leaf/`), sharing ONE 56-lamp wire, placed by hand-authored `.patch.json` files — the body claims two discontiguous ranges and its second range is `reversed`. Both fixtures run `render_1d` shaders along the strand (`strip_order_meaningful`), which is how this art runs on WLED today |
-| `peach-2d` | `speed`, `glow` (one set per submodule) | the same artwork, the same wiring, the *byte-identical* patch files, declared 2D: `render_2d` planes sampled at the lamps' mapped positions. The pair is the whole mapping-and-patching argument — presentation and sampling are separate questions. See [the peach](../docs/user-guide/the-peach.md) |
-| `small-dome` | `speed`, `bands`, `warmth` (per submodule) | Yona's real 16' 2V dome at FULL scale — the patching archetype and the desktop-class sim stress fixture (6,310 lamps). Ten panel-position objects, each a 5-way repeat of a closed 119-lamp polygon (50 suspended lucite panels — the 40 2V faces plus the riser rung's 10 downward triangles), and ONE always-lit 360-lamp chevron door, scattered across TWO named outputs ("1", "Box 2": the build's two control boxes, 13 ports each) with the door sharing a box-1 port tail — many-to-many. The `.patch.json` files are format-2 path-identity rows (`/band-a/3`) carrying the as-built install — one panel reversed, one rotated a side, the door turned a leg; ALL six wiring artifacts regenerate via `cargo run -p lpt-geodome`. See [patching the dome](../docs/user-guide/patching-the-dome.md) and [the three domes](../docs/use-cases/2026-08-28-three-domes.md) |
-| `pulse` | `speed` | the plainest possible shader — one colour breathing on a phasor. The hardware-walk test subject: if a strip is dark under `pulse`, that is the wiring or a fault, never the content |
-| `fault-demo` | `speed` | a shader that compiles but FAULTS at run time (fuel exhaustion) — the demo for "a fault is never black": the outputs show the red breathe and the device card reads Degraded |
-| `fiber-headband`, `rocaille` | — | real fixtures with real 2D mappings |
+| `name` | `project.json` | The card title and the picker row. |
+| `description` | `project.json` | Optional, one sentence, ≤160 characters. Project data (the card face does not show it today). |
+| `kind`, `exports` | `project.json` | Patterns: `"kind": "pattern"`, `"exports": ["effect"]`. Projects: absent. |
+| `provenance` | `effect/module.json` for a pattern; the root `module.json` for a project | `author`, `version`, `license`, `created`. CC0-1.0 unless stated; a pattern's export must state a license or the export lint warns. |
 
-Sample content in this repository is CC0 unless a project's
-`module.json` provenance says otherwise.
+Sample content in this repository is CC0 unless a module's provenance
+says otherwise; anything that is not CC0 has a row in
+[`COPYING.md`](COPYING.md).
 
-The two peaches are original content: their geometry is sampled at even
-arc-length stations along the wire-true segment paths of Yona Appletree's
-reference drawing, so both mapping documents describe the strand as it is
-actually run — 22 lamps up one side of the body, 12 across the leaves, 22
-back down the other side. No upstream project is involved.
+## Add an entry
+
+1. In Studio, **New → Pattern 1D / Pattern 2D** for an effect (or copy a
+   neighbouring folder for a piece), author it, and save it into
+   `catalog/<bucket>/<slug>/` — Download zip from the project card, or
+   copy the library folder. The slug is `[a-z0-9-]`; it becomes the
+   `/p/<slug>` address.
+2. Set `name` (and `description` if you want one) in `project.json`.
+   A pattern's `project.json` carries `kind`/`exports`; its provenance
+   goes on `effect/module.json`.
+3. If the module is not CC0, add a `COPYING.md` row: slug, name, SPDX
+   tag, author, source URL, upstream file/function.
+4. Run the gates (below). A pattern must also open onto a populated
+   root panel: at least one control bound to a bus channel (`speed` is
+   the usual one), per `docs/adr/2026-08-03-panel-visibility-is-derived.md`.
+5. Optional: a per-entry `README.md` — source commit for ports, what
+   changed, what it stresses, and a bench-test line (board, date, who
+   walked it). It ships with the entry and travels with a remix.
+
+No Rust changes anywhere in that list.
+
+## The gates
+
+| Test | Holds |
+|---|---|
+| `checked_in_catalog_entries_load_as_core_projects` (`lp-cli`, `examples_valid`) | every entry (and every rig under `projects/test/`) loads through the real `ProjectLoader` |
+| `checked_in_catalog_entries_rewrite_byte_identically` | load → write is byte-identical for `project.json` and `module.json` |
+| `authored_artifacts_conform_to_checked_in_schemas` (`schema_conformance`) | every JSON validates against `schemas/` |
+| `every_bucket_agrees_with_its_manifest_kind` (`catalog_tree`) | bucket ⇔ `kind`; a pattern's every export has a `module.json` |
+| `copying_manifest_matches_the_tree_both_ways` | non-CC0 entries have a `COPYING.md` row; every row names an entry |
+| `every_description_is_one_line` | a description, when present, is ≤160 characters |
+| `every_catalog_directory_is_registered_and_vice_versa` (`lpa-studio-core`) | the registry equals the tree (≥16) |
+| `every_gallery_example_opens_onto_a_populated_root_panel` | each entry boots on a real server and publishes a control |
+| `catalog_pattern_oracles` (`lpa-studio-core/tests`) | every pattern passes the four template oracles: schemas, loader, library round trip keeping `kind`/`exports`, export lint clean from the installed copy |
+
+Run them with `cargo test -p lp-cli` and `cargo test -p lpa-studio-core`,
+or the whole gate with `just check test`.
+
+## What is here
+
+**Projects** (`projects/`): `fyeah-sign` (the Studio demo — the full bus,
+a playlist and an authored palette), `logo-sign` (the brand as a
+buildable piece; generated by `logo_sign_gen.rs` in `lpa-studio-web`,
+whose drift test fails if the committed mapping falls behind),
+`zook-dome` (a real 16' dome, 1,500 LEDs on five channels), `small-dome`
+(Yona's 16' 2V dome at full scale, 6,310 lamps — the patching archetype
+and the desktop-class stress fixture; regenerate with `cargo run -p
+lpt-geodome`), `peach-1d` / `peach-2d` (the mapping-and-patching pair:
+byte-identical patch files, opposite declarations — see
+[the peach](../docs/user-guide/the-peach.md)), `fiber-headband` (a real,
+battery-powered wearable) and `rocaille` (a real 2D piece on a
+hand-authored mapping).
+
+**Patterns** (`patterns/`): `plasma` (the smallest non-empty panel; also
+the docs' live figure), `plasma-duo` (one shader, two fixtures — its
+shader and clock stay byte-identical with `plasma`, test-pinned),
+`meteor` (a compute/render pair over a `node:` binding; the board-project
+generator vendors its export), `pulse` (the hardware-walk subject: if a
+strip is dark under it, that is the wiring), `fault-demo` (compiles,
+faults every frame on purpose — "a fault is never black"), and the three
+WLED ports below.
 
 ## Ports from WLED
 
 `comet`, `palette-waves` and `fire2012` are re-authored from **WLED's
 MIT-era** source: commit `44e28f96e0af0c78cb1b902a45b6332dcacd10e0` (2024-10-15),
-one commit before WLED relicensed to EUPL. Their `module.json`
-provenance says `MIT`, each `.glsl` carries a provenance header naming
-the upstream repo, file, function and SHA, and WLED's license text is
-vendored at [`licenses/WLED-MIT.txt`](../licenses/WLED-MIT.txt) — the
+one commit before WLED relicensed to EUPL. Their exported
+`effect/module.json` provenance says `MIT`, each `.glsl` carries a
+provenance header naming the upstream repo, file, function and SHA,
+[`COPYING.md`](COPYING.md) carries their rows, and WLED's license text
+is vendored at [`licenses/WLED-MIT.txt`](../licenses/WLED-MIT.txt) — the
 per-file discipline
 `docs/adr/2026-07-29-license-provenance-discipline.md` (and its
 2026-08-01 addendum, which established that pre-relicense WLED is MIT)
@@ -96,3 +151,15 @@ what that simulation converges to: an exponential heat gradient anchored
 at the base, modulated by layered value noise scrolling upward, with the
 crests of the finest layer standing in for the spark die-roll. The look
 and the name are WLED lineage; the algorithm is original.
+
+The two peaches are original content: their geometry is sampled at even
+arc-length stations along the wire-true segment paths of Yona Appletree's
+reference drawing, so both mapping documents describe the strand as it is
+actually run — 22 lamps up one side of the body, 12 across the leaves, 22
+back down the other side. No upstream project is involved.
+
+## Test rigs
+
+Engine, bench and hardware bring-up projects live under
+[`../projects/test/`](../projects/test/): not content, not embedded, but
+walked by the same load and schema gates.

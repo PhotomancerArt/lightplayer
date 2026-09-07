@@ -53,6 +53,7 @@ stay in place when retired; the log is the history).
 
 | Entry | Status | Since | Area | Cost in one line |
 | --- | --- | --- | --- | --- |
+| [espressif-devkit-led-wire-label-mismatch](espressif-devkit-led-wire-label-mismatch.md) | carried | 2026-07-31 | lpa-boards sidecars + lpc-hardware runtime manifests | the two Espressif devkits name their LED wire `18` in the sidecar and `GPIO18` on the device, so a generated starter opens no output there; blocks the catalog follow-up's positional board rewire |
 | [bounds-asserted-in-the-wrong-unit](bounds-asserted-in-the-wrong-unit.md) | carried | 2026-06-12 | cross-cutting — lp-collection, lps-glsl, lpvm-native regalloc | limits written in the unit that was easy to count, not the one the consumer enforces; all three instances passed their tests, and one miscompiles silently |
 | [shared-uart-io-task-starvation](shared-uart-io-task-starvation.md) | carried | 2026-08-02 | fw serial io_task + classic UART0 | while a project plays, serial is silently lossy BOTH directions (RX FifoOverflow >~128 B, TX responses dropped); three incidents in three weeks, workaround = stopAllProjects before big transfers |
 | [two-green-prs-can-red-main](two-green-prs-can-red-main.md) | carried | 2026-08-02 | CI / merge policy | CI never builds the merge result, so two PRs touching opposite sides of an interface both pass and main breaks; cost is misattributed blame, and a build canary would collapse it |

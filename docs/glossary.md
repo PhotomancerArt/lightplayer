@@ -32,6 +32,20 @@ of implementation — code can lag these names during the transition.
   (module model)
 - **Workbench project** — the wrapper project synthesized to open a bare
   module standalone (preview fixture, clock, etc.). (module model)
+- **Catalog** — the checked-in, compiled-in content tree (`catalog/`):
+  the projects and patterns Studio's home page, Explore and the device
+  picker list. Not the user's *library* (their own store) and not the
+  future public library. Formerly `examples/`; ids are `catalog/<slug>`
+  (`docs/adr/2026-09-06-catalog-content-tree.md`).
+- **Bucket** — a directory under `catalog/` (`projects/`, `patterns/`,
+  reserved `templates/`) mirroring the manifest `kind` of the entries
+  inside; a filing convenience for authors, kept honest by a test — the
+  manifest is the truth.
+- **Pattern** — a `kind: pattern` project: a single effect on a test
+  rig, exporting a module folder (`effect/`) other projects import by
+  copy. The catalog's `patterns/` bucket holds the built-in ones.
+- **Examples** — the old name for the catalog; the `examples/<slug>` id
+  spelling still resolves for libraries seeded before the move.
 
 ## Bus & dataflow
 
