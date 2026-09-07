@@ -62,7 +62,12 @@ section, so every visit captured it.
    the data-dependent runaway the static check cannot. The GPU cannot
    trap, so an exhausted budget exits the loop and the invocation
    completes with whatever it has: bounded, not faulted (recorded as the
-   accepted gap in the ADR).
+   accepted gap in the ADR). **Closed 2026-09-07**
+   (`docs/adr/2026-09-07-gpu-tier-spent-budget-faults.md`): the
+   invocation that crosses the budget counts itself on a per-shader
+   storage flag the host reads after every dispatch, and a non-zero
+   count is `GfxError::FuelExhausted` — the fault pattern paints on the
+   GPU tiers too (same-frame natively, one frame late in the browser).
 3. **Bounded product read-back waits.** The three native product
    read-back paths (`read_back`, the raw-float probe, the sample pass)
    now wait `PRODUCT_READ_BACK_WAIT` (10 s) instead of forever; a device
