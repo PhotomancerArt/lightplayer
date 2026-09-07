@@ -137,10 +137,21 @@ pub enum CatalogOp {
     /// and here; this and [`CatalogOp::ForgetRegisteredDevice`] are its two
     /// writers, and both are driven by the roster, never by a UI flow.
     UpsertRegisteredDevice(Box<crate::app::places::RegisteredDevice>),
-    /// Remove a device from the registry (`Command::DeleteRecord`).
-    /// Idempotent — forgetting an unknown row is a no-op.
+    /// Remove a device from the registry (`Command::DeleteRecord`) and its
+    /// last-frame sidecar with it. Idempotent — forgetting an unknown row
+    /// is a no-op.
     ForgetRegisteredDevice {
         uid: String,
+    },
+    /// Write a fed board's newest composed frame to its per-uid sidecar
+    /// (`app/devices/device_frame_snapshot.rs`), already encoded so the
+    /// host stays codec-free. Store-only, like the registry writes, and
+    /// driven by the controller's feed lane at most every ten seconds per
+    /// board — the caller deliberately does NOT schedule a gallery
+    /// re-hydration after it (nothing the gallery lists changed).
+    StoreDeviceFrame {
+        uid: String,
+        bytes: Vec<u8>,
     },
     /// Record a completed push (M3 of the round-2 rebuild, restoring the
     /// pre-teardown op): a history `Pushed` event on the project, plus the
@@ -421,6 +432,19 @@ pub fn apply_catalog_op(
             crate::app::places::DeviceRegistry::new(store.fs_handle())
                 .forget(&uid)
                 .map_err(LibraryHostError::from)?;
+            // The picture goes with the row: a forgotten board leaves no
+            // sidecar behind to be shown again on a later re-register.
+            let fs = store.fs_handle();
+            let fs = fs.borrow();
+            crate::app::devices::device_frame_snapshot::delete_snapshot(&*fs, &uid)
+                .map_err(|error| LibraryHostError::Host(error.to_string()))?;
+            None
+        }
+        CatalogOp::StoreDeviceFrame { uid, bytes } => {
+            let fs = store.fs_handle();
+            let fs = fs.borrow();
+            crate::app::devices::device_frame_snapshot::write_snapshot(&*fs, &uid, &bytes)
+                .map_err(|error| LibraryHostError::Host(error.to_string()))?;
             None
         }
         CatalogOp::RecordPush {
