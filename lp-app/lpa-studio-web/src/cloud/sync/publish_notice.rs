@@ -57,8 +57,7 @@ impl PublishNotices {
     /// answer with the generation it was filed under.
     pub fn record(&mut self, uid: &str) -> u64 {
         self.generation += 1;
-        self.per_project
-            .insert(uid.to_string(), self.generation);
+        self.per_project.insert(uid.to_string(), self.generation);
         self.generation
     }
 
@@ -138,7 +137,11 @@ impl Future for ChangedSince {
                 return Poll::Ready(generation);
             }
             // A spurious re-poll must not grow the list without bound.
-            if !board.waiting.iter().any(|waker| waker.will_wake(cx.waker())) {
+            if !board
+                .waiting
+                .iter()
+                .any(|waker| waker.will_wake(cx.waker()))
+            {
                 board.waiting.push(cx.waker().clone());
             }
             Poll::Pending
