@@ -524,11 +524,25 @@ cargo run -p lp-cli -- validate record emu-m3 --config lp-emu:esp32c6:t1 \
     --image boot-idle=target/emu-ref/d6cfaa205-boot-idle-memfs/fw-esp32c6
 ```
 
+M4 adds the set `emu-m4`, whose two payloads run the **flash-backed** image:
+
+```bash
+cargo run -p lp-cli -- validate record emu-m4 --config lp-emu:esp32c6:t1 \
+    --date <today> --commit d6cfaa2051ae --dirty --timeout-secs 20 \
+    --image boot-idle-flash=target/emu-ref/d6cfaa205-boot-idle/fw-esp32c6 \
+    --image upload-walk=target/emu-ref/d6cfaa205-boot-idle/fw-esp32c6
+```
+
+`upload-walk` carries a `host_script` — `walks/examples-basic.script`, which
+the driver passes as `--uart0-script`. That is the whole of what makes a
+*walk* a payload: the host half of the conversation, recorded so the run is a
+function of guest time. See `walks/README.md`.
+
 The driver builds nothing this machine does not need: it turns a payload into
 one invocation of the CLI above — `--elf`, `--time-grade`, `--uart0 file:`,
-`--exit-on`, `--timeout`, `--strict-bus`, `--efuse-mac`, `--efuse-rev` — so
-the plan a `--dry-run` prints is the entire protocol, and the sidecar records
-it verbatim as `source`. `--image` is per payload because a set runs several
+`--exit-on`, `--uart0-script`, `--timeout`, `--strict-bus`, `--efuse-mac`,
+`--efuse-rev` — so the plan a `--dry-run` prints is the entire protocol, and
+the sidecar records it verbatim as `source`. `--image` is per payload because a set runs several
 and a reference image is built per feature set. The eFuse identity comes from
 the configuration's entry in `validate.toml` (the desk board's
 `a0:f2:62:87:b4:8c`, rev `v0.2`), so a hello frame's identity fields compare
@@ -543,7 +557,7 @@ feature set — recorded in `note`.
 Every class is graded `modeled`, with byte-equality written into the reason as
 evidence rather than as a promotion; `validate.toml` is where those reasons
 live and `tests/m3_replays.rs` is where strict mode's refusal of them is
-pinned.
+pinned. `tests/m4_replays.rs` reads the two M4 transcripts the same way.
 
 ## Tests
 
@@ -552,18 +566,28 @@ boot tests are `#[ignore]`d, because a workspace test run must not start a
 cross-target firmware build; `just test-emu-c6` sets the environment and runs
 them. `test_support` resolves the ELF from `LP_EMU_C6_ELF_<SLUG>`, then the
 conventional target path, and only builds when `LP_EMU_BUILD_FW=1`. The
-reference-image tests (`harness_parity`, `boot_idle`) resolve theirs from
-`LP_EMU_C6_REF_<SLUG>`, then `target/emu-ref/`, and with `LP_EMU_BUILD_FW=1`
-run `scripts/emu/build-reference-image.sh` — which needs the repository's
-history for the reference commit (a shallow CI checkout cannot do it), so it
-is a local affair.
+reference-image tests (`harness_parity`, `boot_idle`, `flash_persistence`,
+`upload_walk`) resolve theirs from `LP_EMU_C6_REF_<SLUG>`, then
+`target/emu-ref/`, and with `LP_EMU_BUILD_FW=1` run
+`scripts/emu/build-reference-image.sh` — which needs the repository's history
+for the reference commit (a shallow CI checkout cannot do it), so it is a
+local affair.
 
-`just test-emu-c6` is the whole set: the machine's boot tests, the M3 replays
-of the committed transcripts, and the registry parity test. About **70 s** on
-a warm cargo cache with the reference images absent — roughly 25 s of firmware
-build and 45 s of emulation. The replays alone
-(`cargo test -p lp-emu-validate --test m3_replays`) need no firmware at all
-and already run in `cargo test`, so the four gates cost CI nothing.
+| file | what it holds |
+|---|---|
+| `harness_parity` | M3's memory gate: the compile harness replayed against silicon, in process |
+| `boot_idle` | the memfs image's hello and §5.4 heartbeat, **and** the flash-backed image's `[FS]` pair and §5.1 heartbeat — M4's first gate, which replaced the test that pinned the `SPI1.cmd` spin |
+| `flash_persistence` | a chip survives the machine: format once, mount twice, `--flash-copy` writes nothing |
+| `upload_walk` | the thirteen-frame upload from `walks/examples-basic.script`, the second boot that auto-loads what it wrote, and determinism |
+| `host_absent`, `boot_no_radio`, `boot`, `rom_*`, `stack_guard` | M3's |
+
+`just test-emu-c6` is the whole set: the machine's boot tests, the M3 and M4
+replays of the committed transcripts, and the registry parity test. About
+**70 s** on a warm cargo cache with the reference images absent — roughly
+25 s of firmware build and 45 s of emulation. The replays alone
+(`cargo test -p lp-emu-validate --test m3_replays --test m4_replays`) need no
+firmware at all and already run in `cargo test`, so the gates cost CI
+nothing.
 
 ## Provenance
 

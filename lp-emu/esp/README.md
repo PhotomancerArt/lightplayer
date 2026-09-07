@@ -65,6 +65,7 @@ just test-emu-c6
 
 # 3. a recorded, replayable run — the one that produces a transcript
 cargo run -p lp-cli -- validate run emu-m3 --config lp-emu:esp32c6:t1 --dry-run
+cargo run -p lp-cli -- validate run emu-m4 --config lp-emu:esp32c6:t1 --dry-run
 ```
 
 Door 3 is the one that makes a claim. `lp-emu:esp32c6:t1` and `:t2` are
@@ -78,8 +79,8 @@ protocol.
 
 ## What it is trusted for
 
-Every field class of `lp-emu:esp32c6:*` is graded **`modeled`** in M3, each
-with its reason in `validate.toml`. That is not modesty and it is not a
+Every field class of `lp-emu:esp32c6:*` is graded **`modeled`**, each with its
+reason in `validate.toml`. That is not modesty and it is not a
 placeholder:
 
 | class | why it is `modeled` |
@@ -88,7 +89,7 @@ placeholder:
 | timing | `t1` counts instructions, `t2` uses the per-class model, and no transcript grades either yet (the vision's graded ladder) |
 | boot-log | a direct load prints no ROM banner and no bootloader lines at all; M7 boots from reset |
 | usb-serial-jtag | the host-absent state and only that; M6 brings the attached and not-draining ones |
-| pin | nothing is observed; M5 brings the RMT channels and the WS281x decoder |
+| pin | nothing is observed; M5 brings the RMT channels and the WS281x decoder. M4's walk found the other end of the same gap: the WS281x driver waits for the RMT **interrupt**, which an accept block cannot raise, so a loaded project's frames never complete |
 | wire | the bytes are the guest's; a live socket's arrival times are the host's |
 
 The rule behind the table is the vision's: **never trust an emulated number

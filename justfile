@@ -2052,10 +2052,11 @@ lint-emu-fence:
 #
 # NOT in `test-rust-core`: two firmware builds is minutes, and the director
 # log's CI cost rule says a gated job or a nightly, never the default path.
-# `m3_replays` needs no firmware and does run everywhere.
+# `m3_replays` and `m4_replays` need no firmware and do run everywhere.
 test-emu-c6:
     LP_EMU_BUILD_FW=1 cargo test -p lp-emu-esp32c6 -- --include-ignored
     cargo test -p lp-emu-validate --test m3_replays
+    cargo test -p lp-emu-validate --test m4_replays
     cargo test -p lp-cli --test validate_registry_parity
 
 # Run one image on the C6 machine — the human front door.
