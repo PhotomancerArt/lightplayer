@@ -10,7 +10,7 @@ use lpa_server::{
     ButtonService, ConsumerPolicy, LpGraphics, LpServer, RadioService, RenderTextureRequest,
     TextureRenderProduct, VisualProduct, VisualSpace,
 };
-use lpc_hardware::{HardwareSystem, HwRegistry, default_esp32c6_hardware_manifest};
+use lpc_hardware::{HardwareManifestFile, HardwareSystem, HwRegistry};
 use lpc_model::AsLpPath;
 use lpc_shared::output::MemoryOutputProvider;
 use lpc_shared::time::TimeProvider;
@@ -23,7 +23,7 @@ use lps_shared::TextureStorageFormat;
 
 use lp_gfx_wgpu::GpuGraphics;
 
-use crate::envelope::{BrowserInputEnvelope, BrowserOutputEnvelope};
+use crate::envelope::{BrowserInputEnvelope, BrowserOutputEnvelope, BrowserRuntimeOptions};
 use crate::executor::block_on;
 use crate::gpu::{self, WorkerGpu};
 use crate::manual_time_provider::ManualTimeProvider;
@@ -130,15 +130,27 @@ impl BrowserFirmwareRuntime {
     /// reason recorded (visible state, not an error — the CPU tier is always
     /// functional). The selection is emitted as one structured log line and
     /// returned to the worker script for the `runtime_created` message.
-    pub(crate) fn new(id: u32, label: &str, requested: RuntimeTier) -> Result<Self, String> {
-        let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new_permissive()));
+    pub(crate) fn new(id: u32, label: &str, options: &BrowserRuntimeOptions) -> Result<Self, String> {
+        // The board this runtime wears. ONE manifest, ONE registry: outputs
+        // resolve against it and so do buttons and the radio, which is what
+        // makes a board sim honest — an endpoint the board does not have is
+        // refused here exactly as the firmware would refuse it. A manifest
+        // that will not parse fails creation rather than falling back to
+        // some other board: the hello is about to name this one.
+        let manifest = HardwareManifestFile::read_json(&options.hardware_manifest_json)
+            .and_then(|file| file.to_manifest())
+            .map_err(|error| format!("boot options carry an unusable hardware manifest: {error}"))?;
+        let board_id = manifest.board_id().to_string();
         let hardware = Rc::new(HardwareSystem::with_virtual_drivers(Rc::new(
-            HwRegistry::new(default_esp32c6_hardware_manifest()),
+            HwRegistry::new(manifest),
+        )));
+        let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::with_hardware_system(
+            hardware.clone(),
         )));
         let button_service: Rc<dyn ButtonService> = hardware.clone();
         let radio_service: Rc<dyn RadioService> = hardware;
 
-        let (tier, gpu) = match requested {
+        let (tier, gpu) = match options.tier {
             RuntimeTier::Cpu => (TierSelection::granted(RuntimeTier::Cpu), None),
             RuntimeTier::Gpu => match gpu::device() {
                 Ok(worker_gpu) => {
@@ -195,6 +207,20 @@ impl BrowserFirmwareRuntime {
                 "release"
             },
         ));
+        // The board this runtime is running AS, from the manifest it just
+        // wore — the same call, from the same source, that the three ESP
+        // firmwares make. A card's "as <board>" line now comes from the
+        // hello for the sim too, not from what the host remembers pushing.
+        server.set_board_id(Some(board_id.clone()));
+        // The synthetic identity, when Studio minted one. A browser runtime
+        // has no efuse, so this is the ONLY way it can have a MAC; without
+        // it the hello reports none, like any embedder with no silicon.
+        if let Some(identity) = &options.identity {
+            server.set_hardware_identity(lpc_wire::HardwareIdentity {
+                base_mac: Some(identity.base_mac.clone()),
+                ..Default::default()
+            });
+        }
 
         let mut transport = BrowserServerTransport::new();
         // Wire hello: queued before anything else so it flushes as the first

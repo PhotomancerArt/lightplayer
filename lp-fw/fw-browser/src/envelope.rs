@@ -8,6 +8,47 @@ use serde::{Deserialize, Serialize};
 
 use lpc_wire::OutputFrameEntry;
 
+use crate::tier::RuntimeTier;
+
+/// What a runtime is created AS: the tier it asks for, the board it wears,
+/// and the identity it answers with.
+///
+/// These are the boot parameters — the whole of them — and they arrive as
+/// one JSON object on `create_runtime` rather than as positional strings,
+/// because the manifest is a document and the identity is optional. The
+/// host mirror is
+/// `lpa_link::providers::browser_worker::BrowserRuntimeOptions`; like the
+/// rest of this envelope it is an internal boundary between two halves of
+/// one build, so it is never versioned or shimmed.
+///
+/// The hardware manifest travels as TEXT — `lpa-link` forwards it opaquely
+/// and never learns to parse a board — and is parsed here, once, into the
+/// one registry this runtime's outputs, buttons and radio all resolve
+/// against. A manifest that does not parse fails runtime creation: a sim
+/// that silently fell back to some other board would report a board id it
+/// is not.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct BrowserRuntimeOptions {
+    pub(crate) tier: RuntimeTier,
+    /// A `lpc_hardware::HardwareManifestFile` as JSON text — verbatim from
+    /// `lpa_boards::runtime_manifest_json`.
+    pub(crate) hardware_manifest_json: String,
+    /// The synthetic identity Studio minted for this sim device, when it
+    /// has one. Absent runtimes report no MAC, exactly as a host server
+    /// with no efuse does.
+    #[serde(default)]
+    pub(crate) identity: Option<BrowserRuntimeIdentity>,
+}
+
+/// The identity half of [`BrowserRuntimeOptions`].
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct BrowserRuntimeIdentity {
+    /// Lowercase colon hex, like the efuse MAC a real chip reports.
+    pub(crate) base_mac: String,
+}
+
 /// Message sent from JavaScript into one browser firmware runtime.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]

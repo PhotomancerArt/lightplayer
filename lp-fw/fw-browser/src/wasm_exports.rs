@@ -4,8 +4,7 @@ use lpc_wire::ControlDisplayLayoutRead;
 use lpvm_wasm::rt_browser::init_host_exports;
 use wasm_bindgen::prelude::*;
 
-use crate::envelope::{BrowserInputEnvelope, PreviewOutputFrameMessage};
-use crate::tier::RuntimeTier;
+use crate::envelope::{BrowserInputEnvelope, BrowserRuntimeOptions, PreviewOutputFrameMessage};
 use crate::{logger, runtime_registry};
 
 /// Initialize LPVM browser host exports.
@@ -38,8 +37,13 @@ pub async fn init_gpu_device() -> String {
     }
 }
 
-/// Create a browser-local firmware runtime on the requested tier
-/// (`"cpu"` or `"gpu"`).
+/// Create a browser-local firmware runtime from its boot options.
+///
+/// `options_json` is a [`BrowserRuntimeOptions`]: the requested tier
+/// (`"cpu"` / `"gpu"`), the hardware manifest the runtime wears as JSON
+/// text, and an optional synthetic identity. Unparseable options — or a
+/// manifest the hardware layer refuses — fail the call rather than booting
+/// a runtime that is not what was asked for.
 ///
 /// Returns a JSON object string carrying the recorded tier selection:
 /// `{"runtime_id":N,"tier":"gpu","tier_reason":null}`. A `"gpu"` request
@@ -47,20 +51,30 @@ pub async fn init_gpu_device() -> String {
 /// `tier_reason` set — the worker script forwards all three fields on the
 /// `runtime_created` message so hosts can show the tier badge.
 #[wasm_bindgen]
-pub fn create_runtime(label: &str, tier: &str) -> Result<String, String> {
+pub fn create_runtime(label: &str, options_json: &str) -> Result<String, String> {
     logger::install();
-    let requested = match tier {
-        "gpu" => RuntimeTier::Gpu,
-        "cpu" => RuntimeTier::Cpu,
-        other => return Err(format!("unknown runtime tier request: {other:?}")),
-    };
-    let (runtime_id, selection) = runtime_registry::create_runtime(label, requested)?;
+    let options: BrowserRuntimeOptions = serde_json::from_str(options_json)
+        .map_err(|error| format!("parse runtime boot options: {error}"))?;
+    let (runtime_id, selection) = runtime_registry::create_runtime(label, &options)?;
     serde_json::to_string(&serde_json::json!({
         "runtime_id": runtime_id,
         "tier": selection.tier.as_str(),
         "tier_reason": selection.reason,
     }))
     .map_err(|error| format!("serialize runtime creation result: {error}"))
+}
+
+/// The compiled-in DESKTOP board manifest as JSON text, for embedders that
+/// have no board catalog of their own to read it from.
+///
+/// Studio hands `create_runtime` a manifest it took from `lpa-boards`
+/// (whichever board the project targets); the standalone smoke page has no
+/// such catalog, so it asks the firmware for the one board a computer can
+/// always be. Same bytes either way — both read
+/// `boards/lightplayer/desktop.json`.
+#[wasm_bindgen]
+pub fn desktop_hardware_manifest_json() -> String {
+    String::from(lpc_hardware::DESKTOP_BOARD_MANIFEST_JSON)
 }
 
 /// Destroy a runtime created by [`create_runtime`], dropping its firmware

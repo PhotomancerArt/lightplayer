@@ -247,18 +247,23 @@ pub struct HardwareFacts {
     /// The board id from the unit's loaded board manifest, when it has
     /// one.
     ///
-    /// Always `None` today: nothing on the device writes a board identity
-    /// yet. It becomes populatable once provisioning writes
-    /// `/hardware.json` (board-selection roadmap M5); the field exists so
-    /// that lands as a population change, not a wire change.
+    /// Every embedder that wears a manifest reports it: the three ESP
+    /// firmwares from their compiled-in board profile, and `fw-browser`
+    /// from the manifest its boot options carried — so a SIM names the
+    /// board it is simulating here, and a card's `as <board>` line reads
+    /// the same field whatever is at the far end. `None` from embedders
+    /// that wear no board at all (`fw-host`, `lp-cli`).
     pub board_id: Option<String>,
     /// The chip's factory MAC, lowercase colon hex (`aa:bb:cc:dd:ee:ff`).
     ///
     /// THE permanent identity of this unit: burned into efuse at
     /// manufacture, unique per chip, and — unlike the `dev…` uid Studio
     /// stamps into the filesystem — it survives an erase. `None` from
-    /// embedders with no efuse to read (the host server, the browser
-    /// worker, `lp-cli`).
+    /// embedders with no efuse to read (the host server, `lp-cli`) — with
+    /// one deliberate exception: a browser runtime reports the SYNTHETIC,
+    /// locally-administered MAC its host minted for it and handed in with
+    /// its boot options, because a sim device needs an identity of the
+    /// same shape as silicon's to be folded like one.
     ///
     /// Deliberately the BASE address and not a list of per-interface
     /// ones: Wi-Fi STA *is* the base, and SoftAP/BLE are derived from it
@@ -288,13 +293,14 @@ pub struct HardwareFacts {
     pub eui64: Option<String>,
 }
 
-/// Chip-level identity the server CANNOT derive: it lives in efuse, and
-/// only the embedder can read it.
+/// Chip-level identity the server CANNOT derive: it lives in efuse (or, on
+/// a sim, in what the host minted), and only the embedder can supply it.
 ///
 /// The counterpart of [`HelloIdentity`] for hardware rather than build
-/// provenance. Embedders without efuse (the host server, the browser
-/// worker, `lp-cli`) simply never call the setter and report `None`,
-/// exactly as they already do for build identity.
+/// provenance. Embedders with nothing to report (the host server,
+/// `lp-cli`) simply never call the setter and report `None`, exactly as
+/// they already do for build identity; a browser runtime calls it when its
+/// boot options carried a synthetic identity.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HardwareIdentity {
     /// See [`HardwareFacts::base_mac`].

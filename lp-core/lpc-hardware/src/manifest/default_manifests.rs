@@ -8,7 +8,14 @@ use crate::{
 const XIAO_ESP32_C6_JSON: &str = include_str!("../../boards/seeed/xiao-esp32-c6.json");
 const XIAO_ESP32_S3_PLUS_JSON: &str = include_str!("../../boards/seeed/xiao-esp32-s3-plus.json");
 const DOM_Z_102_JSON: &str = include_str!("../../boards/domraem/dom-z-102.json");
-const DESKTOP_JSON: &str = include_str!("../../boards/lightplayer/desktop.json");
+/// The checked-in DESKTOP board manifest, verbatim.
+///
+/// Public because embedders with no board catalog need the text itself:
+/// `fw-browser` re-exports it to its standalone smoke page, which boots a
+/// runtime by handing the manifest back in. A `const`, so an image that
+/// never mentions it (every ESP firmware) carries none of these bytes.
+pub const DESKTOP_BOARD_MANIFEST_JSON: &str =
+    include_str!("../../boards/lightplayer/desktop.json");
 
 pub fn default_esp32c6_hardware_manifest() -> HwManifest {
     HardwareManifestFile::read_json(XIAO_ESP32_C6_JSON)
@@ -71,7 +78,7 @@ pub fn default_esp32v3_hardware_manifest() -> HwManifest {
 /// sim honest without being permissive: outputs still resolve against a
 /// manifest, and that manifest simply has room for everything.
 pub fn default_desktop_hardware_manifest() -> HwManifest {
-    HardwareManifestFile::read_json(DESKTOP_JSON)
+    HardwareManifestFile::read_json(DESKTOP_BOARD_MANIFEST_JSON)
         .and_then(|manifest| manifest.to_manifest())
         .expect("checked-in lightplayer/desktop board manifest must parse")
 }
