@@ -43,8 +43,6 @@ use std::path::Path;
 
 use lp_emu_esp_common::{ElfImage, SocBus};
 
-use crate::memmap;
-
 /// Force an `include_bytes!` blob to 8-byte alignment.
 ///
 /// `include_bytes!` promises nothing about alignment, and `object`'s ELF
