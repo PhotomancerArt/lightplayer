@@ -655,7 +655,9 @@ mod tests {
              2500 \"\\x41\\t\"\n",
         )
         .unwrap();
-        assert_eq!(src.remaining(), 12 + 3 + 2);
+        // `M!{"id":1}` is ten bytes plus the newline; then three hex bytes;
+        // then `A` and a tab.
+        assert_eq!(src.remaining(), 11 + 3 + 2);
         assert_eq!(
             src.next_ready(),
             Some(1_500 * 1_000 * memmap::CYCLES_PER_US)

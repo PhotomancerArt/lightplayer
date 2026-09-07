@@ -335,6 +335,7 @@ mod tests {
         let img = ElfImage {
             entry: 0,
             segments: Vec::new(),
+            init_sections: Vec::new(),
             symbols: alloc::vec![
                 Symbol {
                     name: "uart_tx_one_char".to_string(),
