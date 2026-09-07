@@ -35,6 +35,10 @@
 //! the miniature of this module; the discipline (drain the wire, then the due
 //! timers, generation-stamped) is the same.
 
+/// Sims backed by `fw-browser` workers. wasm-only, and only when the studio
+/// is built with the provider that owns them.
+#[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
+pub mod browser_sim_source;
 /// The browser Web Serial transport. wasm-only, and only when the studio is
 /// built with the provider that owns the port.
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
@@ -58,6 +62,8 @@ pub mod shared_link_client_io;
 pub mod sim_record;
 pub mod sim_transport;
 
+#[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
+pub use browser_sim_source::BrowserSimLinkSource;
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub use browser_transport::BrowserSerialTransport;
 pub use composite_transport::CompositeDeviceTransport;

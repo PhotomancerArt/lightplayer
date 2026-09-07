@@ -344,8 +344,9 @@ pub fn App() -> Element {
         // The rebuilt device layer (M3): the roster's effects run device IO
         // in spawned futures on the browser's executor, and reach real ports
         // through the Web Serial provider. A browser without Web Serial
-        // installs no transport, and the devices page says so rather than
-        // showing an empty roster that reads like "you have none".
+        // installs no serial transport, and the devices page says so rather
+        // than showing an empty roster that reads like "you have none" —
+        // but it still reaches SIMS, which are workers, not ports.
         #[cfg(target_arch = "wasm32")]
         {
             controller.set_device_spawner(wasm_bindgen_futures::spawn_local);
@@ -354,8 +355,14 @@ pub fn App() -> Element {
             ));
             match lpa_studio_core::BrowserSerialTransport::new(provider) {
                 Some(transport) => controller.set_device_transport(Rc::new(transport)),
-                None => log::info!("this browser has no Web Serial; devices are unavailable"),
+                None => log::info!("this browser has no Web Serial; only sims are reachable"),
             }
+            // Sims are made, not discovered, so installing this costs a page
+            // with none exactly nothing: the transport serves what has been
+            // powered on, and nothing has.
+            controller.set_device_sim_transport(Rc::new(lpa_studio_core::SimDeviceTransport::new(
+                Rc::new(lpa_studio_core::BrowserSimLinkSource::resolving()),
+            )));
         }
         let (actor, handle) = StudioActor::new(controller, make_pull_timer);
         let mut view_rx = handle.view;

@@ -63,18 +63,27 @@ pub struct SimSession {
     pub base_mac: String,
 }
 
-/// The two things an effect does to a running sim's runtime, as opposed to
-/// the things the model does to its link.
+/// A handle on ONE running sim's runtime: what an effect does to it, as
+/// opposed to what the model does to its link.
 ///
 /// Shared with the link, not a replacement for it: a restart must leave the
 /// effects layer holding the same link it borrowed, or every effect that
-/// ends in one would hand the roster a different port.
+/// ends in one would hand the roster a different port. The channel is the
+/// link's channel too, which is what makes the exclusive borrow mean
+/// something — the pump is paused, so an io built here is the only reader
+/// for as long as the conversation runs.
 pub trait SimRuntimeControl {
     /// Throw the runtime away and start a fresh one.
     fn restart(&self) -> DeviceTransportFuture<Result<(), String>>;
 
     /// Replace the hardware manifest the NEXT runtime wears.
     fn set_hardware_manifest(&self, manifest_json: String);
+
+    /// An `lpa-client` io on this runtime's protocol channel, for the
+    /// exclusive-borrow conversations. `tap` receives every whole line the
+    /// io drains, so the fold keeps hearing the sim while a conversation
+    /// owns the channel.
+    fn client_io(&self, tap: Option<LensLineTap>) -> Result<Box<dyn lpa_client::ClientIo>, String>;
 }
 
 /// A powered-on sim's live backing.
@@ -90,16 +99,6 @@ pub trait SimLinkSource {
     /// a sim on is minting its port, and opening it stays the model's
     /// decision, exactly as it is for a granted serial port.
     fn open(&self, session: &SimSession) -> Result<SimBacking, String>;
-
-    /// An `lpa-client` io on `session`'s protocol channel for the
-    /// exclusive-borrow conversations. `tap` receives every whole line the
-    /// io drains, so the fold keeps hearing the sim while a conversation
-    /// owns the channel.
-    fn client_io(
-        &self,
-        session: &SimSession,
-        tap: Option<LensLineTap>,
-    ) -> Result<Box<dyn lpa_client::ClientIo>, String>;
 }
 
 /// The sims this tab has powered on.
@@ -110,7 +109,6 @@ pub struct SimDeviceTransport {
 }
 
 struct PoweredSim {
-    session: SimSession,
     control: Rc<dyn SimRuntimeControl>,
     /// The link, until a discovery hands it to the effects layer. `None`
     /// afterwards: a sim is not re-discoverable while it is already routed,
@@ -139,9 +137,8 @@ impl SimDeviceTransport {
         }
         let backing = self.source.open(&session)?;
         self.powered.borrow_mut().insert(
-            session.uid.clone(),
+            session.uid,
             PoweredSim {
-                session,
                 control: backing.control,
                 link: Some(backing.link),
             },
@@ -163,15 +160,6 @@ impl SimDeviceTransport {
     /// The uids of every running sim.
     pub fn powered_uids(&self) -> Vec<String> {
         self.powered.borrow().keys().cloned().collect()
-    }
-
-    /// The session behind a link's endpoint, when it is one of ours.
-    fn session_at(&self, info: &LinkInfo) -> Option<SimSession> {
-        let uid = uid_from_sim_endpoint(&info.endpoint.0)?;
-        self.powered
-            .borrow()
-            .get(uid)
-            .map(|powered| powered.session.clone())
     }
 
     /// The runtime control behind a link's endpoint, when it is one of ours.
@@ -224,11 +212,6 @@ impl DeviceTransport for SimDeviceTransport {
         call: DeviceEffectCall,
         progress: DeviceEffectProgress,
     ) -> DeviceTransportFuture<Result<DeviceEffectFacts, String>> {
-        let Some(session) = self.session_at(&info) else {
-            return Box::pin(core::future::ready(Err(
-                "this sim is not running any more".to_string()
-            )));
-        };
         let Some(control) = self.control_at(&info) else {
             return Box::pin(core::future::ready(Err(
                 "this sim is not running any more".to_string()
@@ -236,7 +219,7 @@ impl DeviceTransport for SimDeviceTransport {
         };
         let io = match call {
             DeviceEffectCall::PushProject { .. } | DeviceEffectCall::RemoveProject { .. } => {
-                match self.source.client_io(&session, None) {
+                match control.client_io(None) {
                     Ok(io) => Some(io),
                     Err(error) => return Box::pin(core::future::ready(Err(error))),
                 }
@@ -333,10 +316,9 @@ impl DeviceTransport for SimDeviceTransport {
         info: LinkInfo,
         tap: LensLineTap,
     ) -> Result<Box<dyn lpa_client::ClientIo>, String> {
-        let session = self
-            .session_at(&info)
-            .ok_or_else(|| "this sim is not running any more".to_string())?;
-        self.source.client_io(&session, Some(tap))
+        self.control_at(&info)
+            .ok_or_else(|| "this sim is not running any more".to_string())?
+            .client_io(Some(tap))
     }
 }
 
@@ -368,6 +350,13 @@ mod tests {
 
         fn set_hardware_manifest(&self, manifest_json: String) {
             self.manifests.borrow_mut().push(manifest_json);
+        }
+
+        fn client_io(
+            &self,
+            _tap: Option<LensLineTap>,
+        ) -> Result<Box<dyn lpa_client::ClientIo>, String> {
+            Err("this control has no channel".to_string())
         }
     }
 
@@ -401,14 +390,6 @@ mod tests {
                     manifests: Rc::clone(&self.manifests),
                 }),
             })
-        }
-
-        fn client_io(
-            &self,
-            _session: &SimSession,
-            _tap: Option<LensLineTap>,
-        ) -> Result<Box<dyn lpa_client::ClientIo>, String> {
-            Err("this source has no channel".to_string())
         }
     }
 

@@ -35,6 +35,8 @@ pub use app::bus::{
 };
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub use app::devices::BrowserSerialTransport;
+#[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
+pub use app::devices::BrowserSimLinkSource;
 pub use app::devices::{
     CompletedPush, CompositeDeviceTransport, DEVICE_FEED_PARK_AFTER_FAILURES,
     DEVICE_FRAME_SNAPSHOT_INTERVAL_SECS, DeviceCardFeedView, DeviceEffectCall, DeviceEffectFacts,

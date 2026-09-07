@@ -353,6 +353,7 @@ struct ScriptedSimSource {
 }
 
 struct ScriptedSimControl {
+    device: FakeEsp32Device,
     restarts: Rc<Cell<usize>>,
     manifests: Rc<RefCell<Vec<String>>>,
 }
@@ -365,6 +366,16 @@ impl SimRuntimeControl for ScriptedSimControl {
 
     fn set_hardware_manifest(&self, manifest_json: String) {
         self.manifests.borrow_mut().push(manifest_json);
+    }
+
+    fn client_io(&self, tap: Option<LensLineTap>) -> Result<Box<dyn lpa_client::ClientIo>, String> {
+        // The real conversation over the fake's real `M!` wire, teed: the
+        // push and the removal on a sim are not scripted at all.
+        let io = FakeDeviceIo::new(&self.device);
+        Ok(Box::new(match tap {
+            Some(tap) => io.with_tap(tap),
+            None => io,
+        }))
     }
 }
 
@@ -380,22 +391,11 @@ impl SimLinkSource for ScriptedSimSource {
                 info,
             },
             control: Rc::new(ScriptedSimControl {
+                device: self.device.clone(),
                 restarts: Rc::clone(&self.restarts),
                 manifests: Rc::clone(&self.manifests),
             }),
         })
-    }
-
-    fn client_io(
-        &self,
-        _session: &SimSession,
-        tap: Option<LensLineTap>,
-    ) -> Result<Box<dyn lpa_client::ClientIo>, String> {
-        let io = FakeDeviceIo::new(&self.device);
-        Ok(Box::new(match tap {
-            Some(tap) => io.with_tap(tap),
-            None => io,
-        }))
     }
 }
 
