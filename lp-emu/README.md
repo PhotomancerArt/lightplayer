@@ -276,5 +276,7 @@ just emu-c6 <elf> --strict-bus --timeout 6s   # one image, by hand
 
 Next: M4 (SPI1 flash and the MMU windows — the flash-backed image still stops
 at `SPIN SPI1+0x000 cmd` at 11 ms), M5 (RMT and the WS281x decoder, which is
-what makes a pin claim possible), M6 (the honest USB-Serial-JTAG with a
-control channel), M7 (ROM-up boot, where the boot-log class becomes a claim).
+what makes a pin claim possible), M6 (the honest USB-Serial-JTAG: the host's
+three states and the control channel that moves between them —
+`esp/README.md` has the protocol), M7 (ROM-up boot, where the boot-log class
+becomes a claim).
