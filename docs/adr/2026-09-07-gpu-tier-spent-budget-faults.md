@@ -50,6 +50,15 @@ at once without charging. The flag is therefore the **number of
 invocations** of the dispatch that spent their budget, not the number of
 loop exits. A loop-free module gets no flag and no binding.
 
+The statement order in `continuing` is part of the decision: the budget
+is stored first and **read back** for both the crossing test and the
+`break if`. The obvious shape — compute the sum once, test it, store it,
+break on it — bounds the loop correctly on Metal but the guarded
+`atomicAdd` never executes for a top-level loop
+(`docs/defects/2026-09-07-metal-drops-atomic-guarded-by-loop-exit-sum.md`);
+every shape whose `break if` reads the variable back after the store
+counts. The device test holds the working shape.
+
 The payload is a count, not a coordinate. The LPVM reports the pixel or
 sample that trapped because it stops there; a GPU runs every invocation
 to its bound and reports afterwards, and a coordinate would need
@@ -103,9 +112,14 @@ flag on the same slot as the render unit, as its uniforms already are.
 - Every shader with loops carries one more `@group(0)` binding and one
   4-byte storage buffer; a shader with loops but no uniforms or textures
   now has a bind group where it had none. Loop-free shaders are unchanged.
-- The per-back-edge cost grows by one compare and a never-taken branch;
-  the atomic runs once per invocation that faults, never on a healthy
-  frame. The parity envelopes hold (`just test-gfx`).
+- The per-back-edge cost grows by one compare, a never-taken branch and
+  a read-back of the budget (a register after the driver's own
+  promotion); the atomic runs once per invocation that faults, never on
+  a healthy frame. The parity envelopes hold (`just test-gfx`).
+- The crossing charge is pinned on a device, not only on the IR: the
+  Metal miscompile shows a shape can validate, bound the loop and still
+  not count. `tests/loop_fault.rs` is the guard; it runs wherever an
+  adapter exists (the M2 Max), not in CI.
 - Native `render` is synchronous now. The harness's per-tick timings
   include the wait; the browser's frame cadence is untouched.
 - WebGPU compatibility mode, where a fragment stage may have no storage

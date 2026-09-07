@@ -139,8 +139,11 @@ pub fn bound_loop_iterations(module: &mut Module, budget: u32) -> LoopBounds {
     let fault = module.global_variables.append(
         GlobalVariable {
             name: Some(String::from(LOOP_FAULT_GLOBAL)),
+            // LOAD | STORE is `var<storage, read_write>`; the ATOMIC flag would
+            // write naga's own `var<storage, atomic>`, which the browser's
+            // WGSL compiler does not know.
             space: AddressSpace::Storage {
-                access: StorageAccess::LOAD | StorageAccess::STORE | StorageAccess::ATOMIC,
+                access: StorageAccess::LOAD | StorageAccess::STORE,
             },
             binding: Some(ResourceBinding {
                 group: 0,
@@ -434,8 +437,8 @@ fn bound_block(
     bounded
 }
 
-/// Append to `continuing`: `if (budget + 1u == cap + 1u) { atomicAdd(&fault,
-/// 1u); } budget = budget + 1u;` and make the loop `break if budget > cap`
+/// Append to `continuing`: `budget = budget + 1u; if (budget == cap + 1u)
+/// { atomicAdd(&fault, 1u); }` and make the loop `break if budget > cap`
 /// (OR-ed onto an existing `break if`).
 ///
 /// `continuing` runs once per back-edge — including the ones a `continue`
@@ -443,6 +446,15 @@ fn bound_block(
 /// check sit exactly where the LPVM's fuel decrement does. The flag is
 /// charged on the crossing only, so an invocation counts once however many
 /// loops it runs through afterwards (each of which breaks at once).
+///
+/// The order is load-bearing: the budget is **stored first and loaded
+/// back** for both the crossing test and the `break if`. With the checks on
+/// the pre-store sum (`let e = budget + 1u; …; budget = e; break if e >
+/// cap`) Metal bounds the loop correctly but drops the guarded `atomicAdd`
+/// entirely — a top-level loop never counted, a nested one did
+/// (`docs/defects/2026-09-07-metal-drops-atomic-guarded-by-loop-exit-sum.md`).
+/// Every shape whose `break if` reads the variable back after the store
+/// counts; `tests/loop_fault.rs` holds it on a device.
 fn charge_loop(
     continuing: &mut Block,
     break_if: &mut Option<Handle<Expression>>,
@@ -450,6 +462,7 @@ fn charge_loop(
     charge: &BudgetCharge,
     span: Span,
 ) {
+    // budget = budget + 1u;
     let load = expressions.append(
         Expression::Load {
             pointer: charge.pointer,
@@ -464,10 +477,25 @@ fn charge_loop(
         },
         span,
     );
+    continuing.push(Statement::Emit(Range::new_from_bounds(load, spent)), span);
+    continuing.push(
+        Statement::Store {
+            pointer: charge.pointer,
+            value: spent,
+        },
+        span,
+    );
+    // Then read it back for the checks (see the doc comment).
+    let charged = expressions.append(
+        Expression::Load {
+            pointer: charge.pointer,
+        },
+        span,
+    );
     let exhausted = expressions.append(
         Expression::Binary {
             op: BinaryOperator::Greater,
-            left: spent,
+            left: charged,
             right: charge.cap,
         },
         span,
@@ -475,7 +503,7 @@ fn charge_loop(
     let crossed = expressions.append(
         Expression::Binary {
             op: BinaryOperator::Equal,
-            left: spent,
+            left: charged,
             right: charge.cap_plus_one,
         },
         span,
@@ -494,7 +522,7 @@ fn charge_loop(
         }
         None => (exhausted, crossed),
     };
-    continuing.push(Statement::Emit(Range::new_from_bounds(load, last)), span);
+    continuing.push(Statement::Emit(Range::new_from_bounds(charged, last)), span);
     let mut count_fault = Block::new();
     count_fault.push(
         Statement::Atomic {
@@ -510,13 +538,6 @@ fn charge_loop(
             condition: crossed,
             accept: count_fault,
             reject: Block::new(),
-        },
-        span,
-    );
-    continuing.push(
-        Statement::Store {
-            pointer: charge.pointer,
-            value: spent,
         },
         span,
     );
@@ -693,7 +714,7 @@ mod tests {
     }
 
     #[test]
-    fn the_charge_lands_in_continuing_after_the_authored_increment() {
+    fn the_charge_lands_in_continuing_after_the_authored_increment_and_is_read_back() {
         let (mut module, _) = parse_fragment(
             "float acc = 0.0;\n\
              for (int i = 0; i < 8; i++) { acc += 0.1; }\n\
@@ -703,22 +724,38 @@ mod tests {
         let function = looping_function(&module);
         let (continuing, break_if) = find_first_loop(&function.body).expect("one loop");
         assert!(break_if.is_some(), "break_if is set");
-        let (last_store, _) = continuing
+        let statements: Vec<&Statement> = continuing.iter().collect();
+        let (last_store, _) = statements
             .iter()
             .enumerate()
             .rev()
             .find(|(_, s)| matches!(s, Statement::Store { .. }))
             .expect("charge store");
-        assert_eq!(
-            last_store + 1,
-            continuing.len(),
-            "the charge is the last statement of continuing"
-        );
-        let stores = continuing
+        let stores = statements
             .iter()
             .filter(|s| matches!(s, Statement::Store { .. }))
             .count();
         assert_eq!(stores, 2, "the authored `i++` store precedes the charge");
+        // After the charge: one `Emit` (the read-back and the checks) and the
+        // fault guard, nothing else. The `break if` reads the read-back, not
+        // the sum that was stored — the Metal miscompile guard.
+        assert!(
+            matches!(statements[last_store + 1], Statement::Emit(_)),
+            "the checks are emitted after the store"
+        );
+        assert!(
+            matches!(statements[last_store + 2], Statement::If { .. }),
+            "the fault guard follows"
+        );
+        assert_eq!(statements.len(), last_store + 3);
+        let condition = break_if.expect("break_if");
+        let Expression::Binary { left, .. } = function.expressions[condition] else {
+            panic!("break_if is a comparison");
+        };
+        assert!(
+            matches!(function.expressions[left], Expression::Load { .. }),
+            "the break if compares the budget read back after the store"
+        );
     }
 
     #[test]
@@ -732,13 +769,16 @@ mod tests {
         let bounds = bound_loop_iterations(&mut module, BUDGET);
         assert_eq!(bounds.loops, 3);
         let wgsl = validate_and_write(&module);
+        assert_eq!(
+            bounds.fault_binding,
+            Some(0),
+            "the next free group-0 binding"
+        );
         assert!(
             wgsl.contains(&format!(
-                "@group(0) @binding(0) \nvar<storage, read_write> {LOOP_FAULT_GLOBAL}: atomic<u32>;"
-            )) || wgsl.contains(&format!(
-                "@group(0) @binding(0) var<storage, read_write> {LOOP_FAULT_GLOBAL}: atomic<u32>;"
+                "var<storage, read_write> {LOOP_FAULT_GLOBAL}: atomic<u32>;"
             )),
-            "one storage atomic on the next free group-0 binding:\n{wgsl}"
+            "a read_write storage atomic (standard WGSL, not naga's `atomic` access):\n{wgsl}"
         );
         assert_eq!(
             wgsl.matches(&format!("var<storage, read_write> {LOOP_FAULT_GLOBAL}"))
