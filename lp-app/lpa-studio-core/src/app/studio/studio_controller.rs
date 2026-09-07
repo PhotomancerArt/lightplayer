@@ -108,6 +108,12 @@ pub struct StudioController {
     /// The door to the simulator runtime: the link provider registry plus
     /// the injected timer factory its connect ladder sleeps on.
     sim_link: crate::SimLink,
+    /// The target the RUNNING sim wears, when one is running. A sim is
+    /// created as a board and cannot be re-dressed into another, so an open
+    /// whose project targets something else powers this one off and starts a
+    /// fresh sim (D37's shape, one phase early). `None` when no sim is
+    /// running — or when a test installed a stub that never wore anything.
+    sim_worn_target: Option<crate::app::library::ProjectTarget>,
     /// The rebuilt device layer (M3): the `lpa-devices` roster plus the
     /// effects layer that performs its commands. The ONLY device path —
     /// there is no device lens in the runtime pool and no device arm on any
@@ -305,6 +311,7 @@ impl StudioController {
         let device_events = Rc::new(std::cell::RefCell::new(DeviceEventLog::new()));
         Self {
             sim_link: crate::SimLink::new(),
+            sim_worn_target: None,
             devices: crate::DeviceRoster::new(device_roster_config()),
             device_feeds: crate::DeviceFrameFeeds::new(),
             pending_device_lens: None,
@@ -2318,7 +2325,7 @@ impl StudioController {
             .pool
             .session(sim_id)
             .and_then(|session| session.sim_loaded_project().cloned());
-        self.teardown_crashed_sim(sim_id).await;
+        self.teardown_sim(sim_id).await;
         // The crashed session's project still holds its host-side tab lock
         // (quiesce parks it for the settle points, which run at batch end —
         // too late for this same-batch reopen). Release it now so the
@@ -2378,11 +2385,15 @@ impl StudioController {
         Some(sim_id)
     }
 
-    /// Tear down a crashed sim session: quiesce the editor lens when it
-    /// sits on it, take the session out of the pool, and close its payload
-    /// (terminating the dead Worker). Close errors are logged, not fatal —
-    /// the worker is already dead.
-    async fn teardown_crashed_sim(&mut self, sim_id: crate::RuntimeId) {
+    /// Power a sim session off: quiesce the editor lens when it sits on it,
+    /// take the session out of the pool, and close its payload (terminating
+    /// its Worker). Close errors are logged, not fatal.
+    ///
+    /// Two callers: a crashed sim (its wasm instance is poisoned and the
+    /// worker will never answer again) and an open whose project targets a
+    /// different board — a sim is created as one board and cannot be
+    /// re-dressed into another.
+    async fn teardown_sim(&mut self, sim_id: crate::RuntimeId) {
         if self.pool.lens() == Some(sim_id) {
             self.quiesce_lens();
         }
@@ -2393,6 +2404,8 @@ impl StudioController {
         {
             close_runtime_payload(sim).await;
         }
+        // Nothing is worn once nothing is running.
+        self.sim_worn_target = None;
     }
 
     /// Install a connected attachment into the pool under the capacity
@@ -2401,8 +2414,15 @@ impl StudioController {
     /// When the install replaces the session the lens is on (a re-connect
     /// under an open editor), the mirror resets — the replacement inherits
     /// the lens with a clean slate.
-    async fn install_session(&mut self, payload: SimAttachment) -> crate::RuntimeId {
+    async fn install_session(
+        &mut self,
+        payload: SimAttachment,
+        worn_target: crate::app::library::ProjectTarget,
+    ) -> crate::RuntimeId {
         let install_endpoint = payload.session.endpoint_id.as_str().to_string();
+        // What this sim WEARS, recorded at the one place a sim enters the
+        // pool: the next open compares against it.
+        self.sim_worn_target = Some(worn_target);
         // Read BEFORE the install: the question is whether THIS install
         // replaces the session the editor is a lens on.
         let lens_replaced = self.pool.lens_session().is_some();
@@ -2764,7 +2784,7 @@ impl StudioController {
         }) {
             let sim_id = self.pool.sim_session().map(crate::RuntimeSession::id);
             if let Some(sim_id) = sim_id {
-                self.teardown_crashed_sim(sim_id).await;
+                self.teardown_sim(sim_id).await;
                 // Free the dead session's project tab lock now — the settle
                 // points run after this open, which needs the lock itself.
                 self.project.release_closed_library_projects().await;
@@ -2776,6 +2796,43 @@ impl StudioController {
         // the teardown it did was work the newer open wanted anyway.
         if crate::app::open_progress::open_superseded() {
             return Ok(UiNotices::new());
+        }
+        // WHAT HARDWARE this project is for, decided before anything is
+        // reused: the sim is created wearing a board and cannot be
+        // re-dressed into another, so a running sim on the wrong board is
+        // powered off here and a fresh one opens below (D37's shape, one
+        // phase early). An untargeted project reads as Desktop.
+        let (worn_target, target_notice) = self.pending_open_target().await.resolve_for_sim();
+        if let Some(notice) = target_notice {
+            self.push_log(UiLogDraft::new(
+                UiLogLevel::Warn,
+                UiLogOrigin::Studio,
+                notice,
+            ));
+        }
+        let wears_another_board = self
+            .sim_worn_target
+            .as_ref()
+            .is_some_and(|worn| worn != &worn_target);
+        if wears_another_board
+            && let Some(sim_id) = self.pool.sim_session().map(crate::RuntimeSession::id)
+        {
+            self.push_log(UiLogDraft::new(
+                UiLogLevel::Info,
+                UiLogOrigin::Studio,
+                format!(
+                    "Simulator restarts as {} — the running one is {}",
+                    worn_target.board_id(),
+                    self.sim_worn_target
+                        .as_ref()
+                        .map_or("unknown", |worn| worn.board_id())
+                ),
+            ));
+            self.teardown_sim(sim_id).await;
+            // Free the powered-off session's project tab lock before the
+            // fresh install below needs it — same reason as the crashed
+            // path above.
+            self.project.release_closed_library_projects().await;
         }
         // The open targets THE sim session: reuse it when it exists — the
         // lens moves onto it (the editor mirror opens on the sim) — and
@@ -2812,16 +2869,67 @@ impl StudioController {
             }
             return self.connect_server_from_link(sim_id, updates).await;
         }
-        // No sim yet: start the simulator runtime. A failed start leaves
-        // the pool untouched (nothing was installed).
-        match self.sim_link.open().await {
+        // No sim yet: start the simulator runtime wearing the project's
+        // board. A failed start leaves the pool untouched (nothing was
+        // installed).
+        match self.sim_link.open(&worn_target).await {
             Ok((payload, logs)) => {
                 self.record_logs(logs);
-                let id = self.install_session(payload).await;
+                let id = self.install_session(payload, worn_target).await;
                 self.attach_runtime(id, updates).await
             }
             Err(error) => Err(error),
         }
+    }
+
+    /// What hardware the PENDING open's project declares, read before the
+    /// project is opened (that is the point: it decides which sim the open
+    /// lands on).
+    ///
+    /// Read leniently and never fatally — a manifest this cannot read is
+    /// the open's problem to report a moment later, with a better error
+    /// than "unknown target" — so every failure path here reads as the
+    /// default, Desktop.
+    async fn pending_open_target(&mut self) -> crate::app::library::ProjectTarget {
+        use crate::app::library::ProjectTarget;
+
+        match self.pending_open.clone() {
+            Some(PendingOpen::Package(key)) => self
+                .read_library_project_manifest(&key)
+                .await
+                .as_deref()
+                .map_or(ProjectTarget::Desktop, ProjectTarget::from_manifest_bytes),
+            Some(PendingOpen::Example(id)) => {
+                crate::app::home::embedded_example::embedded_example(&id)
+                    .and_then(|example| example.file("project.json"))
+                    .map_or(ProjectTarget::Desktop, ProjectTarget::from_manifest_bytes)
+            }
+            Some(PendingOpen::SharedTransient { package_files, .. }) => package_files
+                .iter()
+                .find(|(path, _)| path == "project.json")
+                .map_or(ProjectTarget::Desktop, |(_, bytes)| {
+                    ProjectTarget::from_manifest_bytes(bytes)
+                }),
+            None => ProjectTarget::Desktop,
+        }
+    }
+
+    /// One library package's `project.json` bytes, or `None` when the
+    /// library, the key or the file is unavailable.
+    async fn read_library_project_manifest(&mut self, key: &str) -> Option<Vec<u8>> {
+        let host = self.library_host().ok()?;
+        let fs = host.catalog_snapshot().await.ok()?;
+        let store = crate::app::library::LibraryStore::read_only(fs);
+        let uid = store.resolve_key(key).ok()?;
+        let handle = store.open(uid).ok()?;
+        let manifest = handle
+            .package_fs
+            .borrow()
+            .read_file(lpc_model::AsLpPath::as_path(
+                &crate::app::library::package_manifest::MANIFEST_PATH,
+            ))
+            .ok()?;
+        Some(manifest)
     }
 
     /// Attach the server protocol to an installed session whose link is
@@ -4393,10 +4501,13 @@ impl StudioController {
                     "Starting",
                     "Starting the docs simulator",
                 );
-                match self.sim_link.open().await {
+                // A docs sim runs the desktop firmware as itself: the page
+                // is a computer, and a docs example targets no board.
+                let target = crate::app::library::ProjectTarget::Desktop;
+                match self.sim_link.open(&target).await {
                     Ok((payload, logs)) => {
                         self.record_logs(logs);
-                        let id = self.install_session(payload).await;
+                        let id = self.install_session(payload, target).await;
                         // The fresh install claims a lens-less pool's lens;
                         // set it explicitly anyway so the invariant is local.
                         self.pool.set_lens(id);
@@ -4478,6 +4589,21 @@ impl StudioController {
             .active_library_uid()
             .zip(self.project.active_library_slug());
         let target = self.project.active_target();
+        // The board the card claims and the board the sim WEARS are now
+        // the same fact reached two ways — the project's `target` here, and
+        // `manifest.board_id()` in the hello `fw-browser` sends. They can
+        // only disagree through a bug in the open path, so say so loudly in
+        // debug builds rather than letting a card lie quietly.
+        debug_assert!(
+            match (target.as_deref(), self.sim_worn_target.as_ref()) {
+                (Some(claimed), Some(worn)) => claimed == worn.board_id(),
+                // No claim, or a sim nothing recorded a target for (a test
+                // stub): nothing to contradict.
+                _ => true,
+            },
+            "the sim claims board {target:?} but wears {:?}",
+            self.sim_worn_target.as_ref().map(|worn| worn.board_id()),
+        );
         if let Some((uid, name)) = project
             && let Ok(session) = self.pool.lens_session_mut()
         {
@@ -4744,6 +4870,16 @@ impl StudioController {
         self.pool.install(crate::RuntimePayload::Sim(
             crate::SimAttachment::stub_for_test(),
         ))
+    }
+
+    /// Tell the controller what board the stubbed sim wears — a stub never
+    /// went through `SimLink`, so nothing recorded one.
+    #[cfg(test)]
+    pub(crate) fn set_sim_worn_target_for_test(
+        &mut self,
+        target: crate::app::library::ProjectTarget,
+    ) {
+        self.sim_worn_target = Some(target);
     }
 
     /// Install a stubbed SIM session with an injected wire client.
@@ -5482,6 +5618,103 @@ mod tests {
         assert!(view.panes.is_empty(), "home replaces the pane layout");
         assert!(!home.library_available, "no store attached on host");
         assert!(!home.examples.is_empty(), "examples always show");
+    }
+
+    /// A sim is created wearing a board and cannot be re-dressed into
+    /// another, so opening a project that targets a DIFFERENT board powers
+    /// the running sim off (the fresh one then fails to start on host,
+    /// which has no worker — the teardown is what this pins).
+    #[test]
+    fn opening_a_project_for_another_board_powers_the_running_sim_off() {
+        use crate::app::library::{
+            LibraryStore, MemoryLibraryHost, PackageProvenance, ProjectTarget,
+        };
+        use crate::{HOME_NODE_ID, HomeOp};
+        use lpfs::LpFsMemory;
+
+        let mut studio = StudioController::new(|| 42.0);
+        let store = LibraryStore::new(
+            Rc::new(RefCell::new(LpFsMemory::new())),
+            Rc::new(|| [7u8; 16]),
+            Rc::new(|| "2026-09-07-1200".to_string()),
+        );
+        let targeted = store
+            .install_package(
+                "Targeted",
+                &[(
+                    "project.json".to_string(),
+                    br#"{"format":6,"name":"Targeted","target":"seeed/xiao-esp32-c6"}"#.to_vec(),
+                )],
+                PackageProvenance::Created,
+                1.0,
+            )
+            .expect("install");
+        studio.attach_library(Rc::new(MemoryLibraryHost::new(store, Rc::new(|| 42.0))));
+
+        // A Desktop sim is already running.
+        studio.install_stub_sim_for_test();
+        studio.set_sim_worn_target_for_test(ProjectTarget::Desktop);
+        assert!(studio.pool.sim_session().is_some());
+
+        block_on_ready(studio.dispatch(UiAction::from_op(
+            ControllerId::new(HOME_NODE_ID),
+            HomeOp::OpenPackage {
+                key: targeted.uid.to_string(),
+            },
+        )))
+        .expect_err("host test builds have no sim runtime to start");
+
+        assert!(
+            studio.pool.sim_session().is_none(),
+            "the Desktop sim must be powered off — a C6 project cannot run on it"
+        );
+    }
+
+    /// The other half: a project for the SAME board reuses the running sim
+    /// (a restart would throw away a live worker for nothing).
+    #[test]
+    fn opening_a_project_for_the_same_board_keeps_the_running_sim() {
+        use crate::app::library::{
+            LibraryStore, MemoryLibraryHost, PackageProvenance, ProjectTarget,
+        };
+        use crate::{HOME_NODE_ID, HomeOp};
+        use lpfs::LpFsMemory;
+
+        let mut studio = StudioController::new(|| 42.0);
+        let store = LibraryStore::new(
+            Rc::new(RefCell::new(LpFsMemory::new())),
+            Rc::new(|| [8u8; 16]),
+            Rc::new(|| "2026-09-07-1200".to_string()),
+        );
+        // No `target` at all — which reads as Desktop, the board the
+        // running sim already wears.
+        let untargeted = store
+            .install_package(
+                "Untargeted",
+                &[(
+                    "project.json".to_string(),
+                    br#"{"format":6,"name":"Untargeted"}"#.to_vec(),
+                )],
+                PackageProvenance::Created,
+                1.0,
+            )
+            .expect("install");
+        studio.attach_library(Rc::new(MemoryLibraryHost::new(store, Rc::new(|| 42.0))));
+
+        studio.install_stub_sim_for_test();
+        studio.set_sim_worn_target_for_test(ProjectTarget::Desktop);
+
+        let _ = block_on_ready(studio.dispatch(UiAction::from_op(
+            ControllerId::new(HOME_NODE_ID),
+            HomeOp::OpenPackage {
+                key: untargeted.uid.to_string(),
+            },
+        )));
+
+        assert!(
+            studio.pool.sim_session().is_some(),
+            "the sim wears the right board already — it must survive the open"
+        );
     }
 
     /// The New menu's optional name: a typed name is what the library dates

@@ -17,7 +17,8 @@ pub use browser_worker_options::resolved_engine_urls;
 pub use engine_cache::{EngineAssetPhase, engine_asset_phase, warm_engine_cache};
 pub use provider::{BrowserWorkerProvider, descriptor};
 pub use worker_envelope::{
-    BrowserInputEnvelope, BrowserOutputEnvelope, BrowserRuntimeTier, BrowserTickMode,
+    BrowserInputEnvelope, BrowserOutputEnvelope, BrowserRuntimeIdentity, BrowserRuntimeOptions,
+    BrowserRuntimeTier, BrowserTickMode,
 };
 pub use worker_handle::{BrowserWorkerHandle, OutputWait, PosterPixelFrame, PreviewPixelFrame};
 

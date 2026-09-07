@@ -18,6 +18,7 @@ use lpa_link::{
     LinkProvider, LinkProviderKind, LinkSessionId,
 };
 
+use crate::app::library::ProjectTarget;
 use crate::{UiError, UiLogDraft, UiLogLevel, UiLogOrigin, UiLogSource};
 
 use super::runtime_session::SimAttachment;
@@ -51,9 +52,20 @@ impl SimLink {
         self.timers = timers;
     }
 
-    /// Start a simulator runtime: discover the browser-worker endpoint and
-    /// connect it, walking the bounded retry ladder.
-    pub async fn open(&mut self) -> Result<(SimAttachment, Vec<UiLogDraft>), UiError> {
+    /// Start a simulator runtime WEARING `target`: discover the
+    /// browser-worker endpoint and connect it, walking the bounded retry
+    /// ladder.
+    ///
+    /// The target is a boot parameter, not something a running sim can be
+    /// re-dressed with — a device does not become another board — so the
+    /// provider is rebuilt from it here. Callers that want a different
+    /// board power the sim off first and open a new one (the caller in
+    /// `studio_controller` does exactly that).
+    pub async fn open(
+        &mut self,
+        target: &ProjectTarget,
+    ) -> Result<(SimAttachment, Vec<UiLogDraft>), UiError> {
+        self.registry = LinkProviderRegistry::from_env(sim_link_env(target)?);
         let connector = self
             .registry
             .create_connector(LinkProviderKind::BrowserWorker)
@@ -74,6 +86,49 @@ impl Default for SimLink {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// The link environment for a sim wearing `target`: the browser-worker
+/// provider's boot options carry the target's board manifest as text, plus
+/// the tier the session asks for.
+///
+/// **The GPU tier is requested** (fidelity-tiers ADR + PD12): the worker
+/// grants it when it has a device and records a reason when it does not.
+/// Nothing reads the granted tier in this phase; the runtime band shows it
+/// later.
+///
+/// Off wasm there is no browser-worker provider to configure at all, so
+/// this only checks that the target is one a sim could wear — host tests
+/// never reach a worker.
+fn sim_link_env(target: &ProjectTarget) -> Result<LinkEnv, UiError> {
+    let manifest_json = target.runtime_manifest_json().ok_or_else(|| {
+        UiError::UnsupportedAction(format!(
+            "no hardware profile is checked in for {}",
+            target.board_id()
+        ))
+    })?;
+    Ok(link_env_wearing(manifest_json))
+}
+
+#[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
+fn link_env_wearing(hardware_manifest_json: &'static str) -> LinkEnv {
+    use lpa_link::providers::browser_worker::{
+        BrowserRuntimeOptions, BrowserRuntimeTier, BrowserWorkerOptions,
+    };
+    LinkEnv {
+        browser_worker: BrowserWorkerOptions::default().with_runtime(
+            BrowserRuntimeOptions::new(BrowserRuntimeTier::Gpu, hardware_manifest_json),
+        ),
+        ..LinkEnv::default()
+    }
+}
+
+/// Off wasm there is no browser-worker provider to configure — host tests
+/// never reach a worker — so the target has nothing to set here. It was
+/// still resolved above, which is the half that matters on host.
+#[cfg(not(all(feature = "browser-worker", target_arch = "wasm32")))]
+fn link_env_wearing(_hardware_manifest_json: &'static str) -> LinkEnv {
+    LinkEnv::default()
 }
 
 /// Open the simulator attachment, walking a bounded RETRY LADDER:

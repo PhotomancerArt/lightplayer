@@ -21,6 +21,7 @@ pub mod package_meta;
 pub mod package_slug;
 pub mod package_upgrade;
 pub mod package_zip;
+pub mod project_target;
 pub mod transient;
 
 pub use library_host::{
@@ -31,6 +32,7 @@ pub use library_store::{LibraryError, LibraryStore, PackageHandle, PackageSummar
 pub use package_format::{PackageHealth, classify_package, health_for};
 pub use package_meta::{PackageMeta, PackageProvenance};
 pub use package_upgrade::migrate_handle_to_current;
+pub use project_target::{DESKTOP_BOARD_ID, ProjectTarget};
 pub use package_zip::{ImportOutcome, export_package, import_json, import_zip};
 
 /// Package directories live here (absolute path inside the store).
