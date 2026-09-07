@@ -133,10 +133,40 @@ impl TriggerUnit {
 
     /// Write `tdata1`. The written `hit` bit is kept verbatim, which is what
     /// makes `clear_watchpoint`'s `csrrw tdata1, 0` clear a stale hit.
+    ///
+    /// WARL for the two fields this unit implements only some values of:
+    /// `action` reads back 0 unless 0 was written (only "raise a breakpoint
+    /// exception" exists here), and `match` reads back 0 unless 0 (exact)
+    /// or 1 (NAPOT) was written. This is not a nicety. esp-hal 1.1.1's
+    /// `clear_watchpoint` (`debugger.rs:135-155`) is
+    /// `csrrw {tdata1}, 0x7a1, {tdata2}` with `tdata2` declared `out(reg)`
+    /// — the register's *initial* contents are whatever the compiler left
+    /// there — and the comment above it says "tdata1 is a WARL register. We
+    /// can just write 0 to it". So on every `enable_direct` and every
+    /// `bind_handler` the firmware writes a garbage word to `tdata1` and
+    /// relies on the hardware to legalise it; a unit that kept the garbage
+    /// would disarm the slot and log a warning for every context switch.
     #[inline]
     pub fn write_tdata1(&mut self, value: u32) {
         let slot = self.selected();
-        self.triggers[slot].tdata1 = value & TDATA1_WRITE_MASK;
+        let mut v = value & TDATA1_WRITE_MASK;
+        let action = (v >> TDATA1_ACTION_SHIFT) & 0xF;
+        if action != 0 {
+            log::debug!(
+                "mach: tdata1 write requests action {action}; only 0 is implemented, \
+                 legalised to 0 (WARL)"
+            );
+            v &= !(0xF << TDATA1_ACTION_SHIFT);
+        }
+        let mode = (v >> TDATA1_MATCH_SHIFT) & 0xF;
+        if mode > 1 {
+            log::debug!(
+                "mach: tdata1 write requests match mode {mode}; only 0 (exact) and 1 (NAPOT) \
+                 are implemented, legalised to 0 (WARL)"
+            );
+            v &= !(0xF << TDATA1_MATCH_SHIFT);
+        }
+        self.triggers[slot].tdata1 = v;
     }
 
     #[inline]

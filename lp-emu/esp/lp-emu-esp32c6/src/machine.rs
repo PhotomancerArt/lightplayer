@@ -62,10 +62,18 @@ use crate::memmap;
 use crate::rom::{self, HookResult, HookTable, PlacedSegment, RomError};
 use crate::snapshot::Snapshot;
 
-/// The largest slice the machine ever asks for, so `--exit-on` and
-/// `--wall-timeout` are checked at a bounded guest interval (≈6.5 ms at
-/// 160 MHz) without the hot loop leaving the hart.
-const MAX_SLICE_CYCLES: u64 = 1_000_000;
+/// The largest slice the machine ever asks for: 8,192 cycles, 51 µs.
+///
+/// A slice's deadline is fixed when it starts, from the schedule as it was
+/// then. An MMIO write *inside* the slice can schedule an event sooner than
+/// that deadline — esp-rtos arming a 1 ms tick, say — and nothing in the
+/// hart looks at the schedule again until the slice ends. So the cap is the
+/// worst-case lateness of any event a peripheral schedules mid-slice, and
+/// 51 µs is 0.5 % of the 10 ms tick and 5 % of the 1 ms one. The cost is one
+/// scheduler peek and one matrix resample per 8,192 cycles, which the
+/// no-radio boot does not notice. (P4 had 1,000,000 here, when no peripheral
+/// could schedule anything.)
+const MAX_SLICE_CYCLES: u64 = 8_192;
 
 /// The slice cap while strict mode is on.
 ///
@@ -83,32 +91,46 @@ const STRICT_SLICE_CYCLES: u64 = 1_024;
 /// The list is the blocks the M3 discovery reports name on the C6 boot and
 /// runtime path, in the order the boot meets them. A block a later phase
 /// needs is added **in its place in this list**, never appended for
-/// convenience.
+/// convenience. [`crate::periph::boot_set`] registers exactly this order.
 pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     // Reached inside `esp_hal::init`, in `init` order (discovery §4).
     "LP_APM",
+    "LP_APM0",
+    "HP_APM",
     "LP_AON",
     "PMU",
     "LP_CLKRST",
     "LP_WDT",
+    "MODEM_SYSCON",
+    "MODEM_LPCON",
     "I2C_ANA_MST",
+    "LP_I2C_ANA_MST",
     "PCR",
     "TIMG0",
     "TIMG1",
     "EFUSE",
+    "LP_TIMER",
     "APB_SARADC",
     "SYSTIMER",
     "ASSIST_DEBUG",
-    // The interrupt path (P5).
+    // The interrupt path.
     "INTERRUPT_CORE0",
     "PLIC_MX",
     "INTPRI",
-    // Consoles (P6) and the rest of the product path (M4, M5).
+    // The rest of what the no-radio image touches.
+    "HP_SYS",
+    "TEE",
+    "LP_TEE",
+    "LP_IO",
+    "RNG",
+    "EXTMEM",
+    // Consoles (accept in P5, modelled in P6) and the product path (M4, M5).
     "UART0",
     "UART1",
     "USB_DEVICE",
     "IO_MUX",
     "GPIO",
+    "SPI0",
     "SPI1",
     "RMT",
 ];
@@ -197,6 +219,14 @@ pub enum Outcome {
     /// Strict mode refused an access. Carries the access itself, not where
     /// the hart ended up after taking the fault for it.
     StrictBus { violation: StrictViolation },
+    /// A peripheral asked for a reset the machine cannot perform: the RWDT
+    /// expired with a reset action. The chip would reboot; the emulator
+    /// reports it (M7 owns the boot chain). Exit code 2, like a fault —
+    /// on silicon this is `rst:0x10 (RTCWDT_RTC_RST)` in the boot log.
+    Reset {
+        cycle: Cycles,
+        source: &'static str,
+    },
     /// The wall-clock safety net fired. The only non-deterministic outcome,
     /// and it can only end a run.
     WallTimeout { cycle: Cycles },
@@ -207,7 +237,7 @@ impl Outcome {
     pub const fn exit_code(&self) -> i32 {
         match self {
             Outcome::ExitMatched { .. } | Outcome::Deadline { .. } => 0,
-            Outcome::Fault { .. } => 2,
+            Outcome::Fault { .. } | Outcome::Reset { .. } => 2,
             Outcome::StrictBus { .. } => 3,
             Outcome::WallTimeout { .. } => 4,
         }
@@ -313,6 +343,11 @@ impl ByteSink for TeeSink {
 
 /// Assemble a machine. Code-first, as the vision asks: start from the chip,
 /// attach the ROM and the app, pick the time grade, build.
+///
+/// [`Esp32C6Builder::new`] is the C6 with its boot peripheral set
+/// ([`crate::periph::boot_set`]); [`Esp32C6Builder::bare`] is the memory
+/// map and the ROM with **no** peripherals, for tests that bring their own
+/// and for reading what an unmodelled boot looks like.
 pub struct Esp32C6Builder {
     rom: RomSource,
     app: AppSource,
@@ -323,6 +358,8 @@ pub struct Esp32C6Builder {
     trace_blocks: Vec<String>,
     uart0: Uart0Sink,
     seed: u64,
+    /// Register the boot set before `peripherals`.
+    boot_set: bool,
     peripherals: Vec<(u32, u32, BoxedPeripheral)>,
 }
 
@@ -333,6 +370,7 @@ impl Default for Esp32C6Builder {
 }
 
 impl Esp32C6Builder {
+    /// A C6 with its boot peripheral set.
     pub fn new() -> Self {
         Self {
             rom: RomSource::Vendored,
@@ -344,7 +382,17 @@ impl Esp32C6Builder {
             trace_blocks: Vec::new(),
             uart0: Uart0Sink::default(),
             seed: 0,
+            boot_set: true,
             peripherals: Vec::new(),
+        }
+    }
+
+    /// The map and the ROM with no peripherals at all. Every MMIO access is
+    /// unmapped until [`peripheral`](Self::peripheral) adds a block.
+    pub fn bare() -> Self {
+        Self {
+            boot_set: false,
+            ..Self::new()
         }
     }
 
@@ -437,6 +485,7 @@ impl Esp32C6Builder {
             trace_blocks,
             uart0,
             seed,
+            boot_set,
             peripherals,
         } = self;
 
@@ -483,10 +532,17 @@ impl Esp32C6Builder {
             Box::new(lp_emu_esp_common::host::NullSource),
         );
 
-        // Peripherals, in the declared order. P4 registers none; the check
-        // is here so P5 cannot quietly re-sort them.
-        check_registration_order(&peripherals)?;
-        for (base, len, periph) in peripherals {
+        // Peripherals, in the declared order: the boot set first, then
+        // whatever the caller added. The check is what stops a re-sort from
+        // re-pointing scheduled events.
+        let mut all = if boot_set {
+            crate::periph::boot_set(efuse, seed)
+        } else {
+            Vec::new()
+        };
+        all.extend(peripherals);
+        check_registration_order(&all)?;
+        for (base, len, periph) in all {
             bus.add_peripheral(base, len, periph);
         }
 
@@ -523,6 +579,7 @@ impl Esp32C6Builder {
             app_segments,
             uart0_log,
             hook_calls: 0,
+            idle_skips: 0,
         })
     }
 }
@@ -589,6 +646,7 @@ pub struct Esp32C6Machine {
     app_segments: Vec<PlacedAppSegment>,
     uart0_log: ByteLog,
     hook_calls: u64,
+    idle_skips: u64,
 }
 
 impl Esp32C6Machine {
@@ -633,6 +691,13 @@ impl Esp32C6Machine {
     /// How many times a ROM hook has stood in for a routine.
     pub fn hook_calls(&self) -> u64 {
         self.hook_calls
+    }
+
+    /// How many times the hart parked in `wfi` and the machine moved guest
+    /// time to the next event — the deterministic idle skip. The count is
+    /// the evidence that the idle hook was reached.
+    pub fn idle_skips(&self) -> u64 {
+        self.idle_skips
     }
 
     /// Everything UART0 has produced. Empty until P6 models the peripheral.
@@ -763,6 +828,7 @@ impl Esp32C6Machine {
                         .unwrap_or(stop_cycle)
                         .min(stop_cycle);
                     self.harts[0].advance_to_cycle(wake);
+                    self.idle_skips += 1;
                 }
                 SliceEnd::Ebreak { pc } => {
                     if !self.serve_breakpoint(pc) {
@@ -799,6 +865,11 @@ impl Esp32C6Machine {
 
             if let Some(violation) = self.bus.first_strict_violation() {
                 return Outcome::StrictBus { violation };
+            }
+            if let Some(lp_emu_esp_common::MachineRequest::Reset { source, at }) =
+                self.bus.take_request()
+            {
+                return Outcome::Reset { cycle: at, source };
             }
             if let Some(needle) = &stop.exit_on
                 && let Some(cycle) = self.exit_on_match(needle, &mut matched)
@@ -972,20 +1043,20 @@ mod tests {
     #[test]
     fn the_registration_order_is_checked_not_just_documented() {
         // In order: fine.
-        let ok = Esp32C6Builder::new()
+        let ok = Esp32C6Builder::bare()
             .peripheral(0x6000_8000, 0x100, Box::new(RegFile::new("TIMG0", 0x100)))
             .peripheral(0x6000_0000, 0x100, Box::new(RegFile::new("UART0", 0x100)))
             .build();
         assert!(ok.is_ok());
 
         // Reversed: refused, because event ids pack the index.
-        let bad = Esp32C6Builder::new()
+        let bad = Esp32C6Builder::bare()
             .peripheral(0x6000_0000, 0x100, Box::new(RegFile::new("UART0", 0x100)))
             .peripheral(0x6000_8000, 0x100, Box::new(RegFile::new("TIMG0", 0x100)))
             .build();
         assert!(matches!(bad, Err(BuildError::RegistrationOrder { .. })));
 
-        let undeclared = Esp32C6Builder::new()
+        let undeclared = Esp32C6Builder::bare()
             .peripheral(0x6000_0000, 0x100, Box::new(RegFile::new("NOPE", 0x100)))
             .build();
         assert!(matches!(
@@ -1000,6 +1071,64 @@ mod tests {
         for name in PERIPHERAL_REGISTRATION_ORDER {
             assert!(seen.insert(*name), "`{name}` is listed twice");
         }
+    }
+
+    #[test]
+    fn the_boot_set_is_registered_in_the_declared_order_and_a_bare_machine_has_none() {
+        let m = Esp32C6Builder::new().build().unwrap();
+        let names: Vec<&str> = (0..m.bus.peripheral_count())
+            .map(|i| m.bus.peripheral(i).unwrap().name())
+            .collect();
+        // Every registered block is in the declared order, in that order.
+        let mut cursor = 0;
+        for name in &names {
+            let at = PERIPHERAL_REGISTRATION_ORDER[cursor..]
+                .iter()
+                .position(|d| d == name)
+                .unwrap_or_else(|| panic!("`{name}` out of order"));
+            cursor += at + 1;
+        }
+        // And the declared order names nothing the boot set lacks.
+        let missing: Vec<&&str> = PERIPHERAL_REGISTRATION_ORDER
+            .iter()
+            .filter(|d| !names.contains(d))
+            .collect();
+        assert!(missing.is_empty(), "declared but not registered: {missing:?}");
+        assert!(matches!(m.bus.matrix().as_any().downcast_ref::<Esp32C6IntMatrix>(), Some(_)));
+
+        let bare = Esp32C6Builder::bare().build().unwrap();
+        assert_eq!(bare.bus.peripheral_count(), 0);
+    }
+
+    #[test]
+    fn a_reset_request_from_a_peripheral_ends_the_run_with_exit_code_two() {
+        assert_eq!(
+            Outcome::Reset {
+                cycle: 5,
+                source: "LP_WDT stage 0 (ResetSystem)"
+            }
+            .exit_code(),
+            2
+        );
+        let mut m = Esp32C6Builder::new().build().unwrap();
+        // A guest that does nothing: `j .` in HP SRAM, so time passes
+        // without the ROM's reset path (which is M7's) being run.
+        m.bus
+            .load_image(memmap::HP_SRAM_BASE, &0x0000_006fu32.to_le_bytes())
+            .unwrap();
+        m.harts[0].set_pc(memmap::HP_SRAM_BASE);
+        // Arm the RWDT from the host side the way the firmware does: unlock,
+        // hold of one tick, wdt_en + stage 0 = ResetSystem, lock.
+        let base = memmap::periph::LP_WDT;
+        m.bus.write_word(base + 0x18, 0x50D8_3AA1).unwrap();
+        m.bus.write_word(base + 0x04, 1).unwrap();
+        m.bus.write_word(base + 0x00, (1u32 << 31 | 4 << 28) as i32).unwrap();
+        m.bus.write_word(base + 0x18, 0).unwrap();
+        let out = m.run_until(&StopCondition::after_micros(10_000));
+        assert!(
+            matches!(out, Outcome::Reset { source: "LP_WDT stage 0 (ResetSystem)", .. }),
+            "{out:?}"
+        );
     }
 
     #[test]

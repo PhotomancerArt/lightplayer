@@ -100,6 +100,53 @@ pub const MMIO_HIGH_LEN: u32 = 0x0010_0000;
 /// mapped. Named so a reader of a fault log can recognise it.
 pub const MEM_INTERNAL2_BASE: u32 = 0x600F_E000;
 
+/// Peripheral base addresses, from `esp32c6-0.23.2/src/lib.rs` (every
+/// peripheral is `Periph<RegisterBlock, BASE>`; the line numbers are in
+/// `m3/discovery-esp-hal-timers-uart-usb-pac.md` §7). The window each block
+/// gets is decided where it is registered ([`crate::periph::boot_set`]).
+pub mod periph {
+    pub const PLIC_MX: u32 = 0x2000_1000;
+    pub const UART0: u32 = 0x6000_0000;
+    pub const UART1: u32 = 0x6000_1000;
+    pub const SPI0: u32 = 0x6000_2000;
+    pub const SPI1: u32 = 0x6000_3000;
+    pub const RMT: u32 = 0x6000_6000;
+    pub const TIMG0: u32 = 0x6000_8000;
+    pub const TIMG1: u32 = 0x6000_9000;
+    pub const SYSTIMER: u32 = 0x6000_A000;
+    pub const APB_SARADC: u32 = 0x6000_E000;
+    pub const USB_DEVICE: u32 = 0x6000_F000;
+    pub const INTERRUPT_CORE0: u32 = 0x6001_0000;
+    pub const IO_MUX: u32 = 0x6009_0000;
+    pub const GPIO: u32 = 0x6009_1000;
+    pub const HP_SYS: u32 = 0x6009_5000;
+    pub const PCR: u32 = 0x6009_6000;
+    pub const TEE: u32 = 0x6009_8000;
+    pub const HP_APM: u32 = 0x6009_9000;
+    pub const LP_APM0: u32 = 0x6009_9800;
+    /// The WiFi MAC/BB window; `IEEE802154` is at `0x600A_3000`. Not mapped
+    /// on purpose (P5: the radio stub is P6).
+    pub const MODEM_WINDOW: u32 = 0x600A_0000;
+    pub const MODEM_SYSCON: u32 = 0x600A_9800;
+    pub const MODEM_LPCON: u32 = 0x600A_F000;
+    pub const I2C_ANA_MST: u32 = 0x600A_F800;
+    pub const PMU: u32 = 0x600B_0000;
+    pub const LP_CLKRST: u32 = 0x600B_0400;
+    pub const EFUSE: u32 = 0x600B_0800;
+    pub const LP_TIMER: u32 = 0x600B_0C00;
+    pub const LP_AON: u32 = 0x600B_1000;
+    pub const LP_WDT: u32 = 0x600B_1C00;
+    pub const LP_IO: u32 = 0x600B_2000;
+    pub const LP_I2C_ANA_MST: u32 = 0x600B_2400;
+    /// `LP_PERI` and `RNG` share this base; `rng_data` is at `+0x08`.
+    pub const RNG: u32 = 0x600B_2800;
+    pub const LP_TEE: u32 = 0x600B_3400;
+    pub const LP_APM: u32 = 0x600B_3800;
+    pub const ASSIST_DEBUG: u32 = 0x600C_2000;
+    pub const INTPRI: u32 = 0x600C_5000;
+    pub const EXTMEM: u32 = 0x600C_8000;
+}
+
 /// CPU clock: 160 MHz (`fw-esp32c6/src/board/esp32c6/constants.rs:12`,
 /// esp-hal `CpuClock::max()`). Guest microseconds are `cycles / 160`.
 pub const CPU_HZ: u64 = 160_000_000;

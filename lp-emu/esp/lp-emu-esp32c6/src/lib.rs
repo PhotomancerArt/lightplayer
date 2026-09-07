@@ -40,18 +40,21 @@
 //!    names every access to an address nothing claims. The bring-up loop is:
 //!    run strict, read the first fault, model that block, run again.
 //!
-//! # What this phase does *not* have
+//! # The peripherals
 //!
-//! No peripherals. Not one — the P4 gate is the first unmapped access inside
-//! `esp_hal::init`, and a machine that had guessed at a few register blocks
-//! would have moved that fault somewhere less informative. The interrupt
-//! matrix ([`intmatrix`]) is likewise a seam with no semantics behind it.
-//! P5 fills both in.
+//! [`periph`] is the boot set: the interrupt matrix ([`intmatrix`]),
+//! SYSTIMER, TIMG0 (the esp-rtos tick), the RWDT, software interrupts,
+//! eFuse, the RNG — and every other block the no-radio image touches as an
+//! accept-and-remember register file with its spin bits pinned. The README's
+//! peripheral table lists each with its grade. What is *not* there is left
+//! unmapped on purpose (the radio window, RMT, the flash controller), so a
+//! strict run stops on the first block a later milestone owns.
 
 pub mod intmatrix;
 pub mod loader;
 pub mod machine;
 pub mod memmap;
+pub mod periph;
 pub mod regs;
 pub mod rom;
 pub mod snapshot;

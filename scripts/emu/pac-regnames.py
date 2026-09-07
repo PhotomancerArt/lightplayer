@@ -249,6 +249,11 @@ TARGETS = [
         static="LP_TIMER",
         out="lp-emu/esp/lp-emu-esp32c6/src/regs/lp_timer.rs",
     ),
+    Target(
+        block="rmt",
+        static="RMT",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/rmt.rs",
+    ),
 ]
 
 
