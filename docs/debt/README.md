@@ -53,6 +53,7 @@ stay in place when retired; the log is the history).
 
 | Entry | Status | Since | Area | Cost in one line |
 | --- | --- | --- | --- | --- |
+| [relationship-face-stale-after-publish](relationship-face-stale-after-publish.md) | retired | 2026-08-30 | lpa-studio-web share (relationship control) + cloud sync driver | the bar's face read "Private" until a reload for a project this tab published after its one roster fetch; retired 2026-09-07 when the driver's publish notices woke the roster hook into re-asking |
 | [rename-while-open-slug-lags](rename-while-open-slug-lags.md) | carried | 2026-09-06 | lpa-studio-core library / project controller | renaming the OPEN project patches the manifest name at once but the gallery card (titled by the dated directory slug) only follows after the project closes; the catalog refuses the directory move under an open handle |
 | [espressif-devkit-led-wire-label-mismatch](espressif-devkit-led-wire-label-mismatch.md) | carried | 2026-07-31 | lpa-boards sidecars + lpc-hardware runtime manifests | the two Espressif devkits name their LED wire `18` in the sidecar and `GPIO18` on the device, so a generated starter opens no output there; blocks the catalog follow-up's positional board rewire |
 | [gpu-tests-run-only-on-a-desk-with-an-adapter](gpu-tests-run-only-on-a-desk-with-an-adapter.md) | carried | 2026-07-10 | lp-gfx-wgpu tests + CI Validate GFX | every device test is adapter-gated and CI has no adapter, so GPU-tier regressions (a Metal miscompile on 2026-09-07) are caught only by `just test-gfx` on the desk |
