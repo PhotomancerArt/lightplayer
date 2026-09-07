@@ -15,8 +15,8 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use lp_emu_esp_common::{RegGrade, ScriptedSource};
-use lp_emu_esp32c6::loader::EfuseIdentity;
 use lp_emu_esp32c6::control::parse_usb_script;
+use lp_emu_esp32c6::loader::EfuseIdentity;
 use lp_emu_esp32c6::machine::{
     AppSource, Esp32C6Builder, Esp32C6Machine, Outcome, RomSource, StopCondition, TimeGrade,
     Uart0Sink, UsbHost, UsbSjDrain, UsbSjSink,

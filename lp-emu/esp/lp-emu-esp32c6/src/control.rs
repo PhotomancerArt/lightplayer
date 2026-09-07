@@ -140,7 +140,10 @@ impl ControlCommand {
             if rest.is_empty() {
                 Ok(cmd)
             } else {
-                Err(format!("`{verb}` takes no arguments, got `{}`", rest.join(" ")))
+                Err(format!(
+                    "`{verb}` takes no arguments, got `{}`",
+                    rest.join(" ")
+                ))
             }
         };
 
@@ -248,15 +251,9 @@ pub struct HostReport {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ControlReply {
     /// `ok <verb> cyc=<cycle> us=<micros>` — applied, at that guest cycle.
-    Ok {
-        verb: &'static str,
-        cycle: Cycles,
-    },
+    Ok { verb: &'static str, cycle: Cycles },
     /// `ok state cyc=… us=… host=… draining=… sof=… in_pending=… out_queued=…`
-    State {
-        cycle: Cycles,
-        host: HostReport,
-    },
+    State { cycle: Cycles, host: HostReport },
     /// `err <reason>` — nothing was applied, and the reason says why.
     Err(String),
 }
@@ -449,7 +446,10 @@ mod tests {
                     rts: Some(true),
                 },
             ),
-            ("usb-write 4d 21 0a", ControlCommand::UsbWrite(vec![0x4d, 0x21, 0x0a])),
+            (
+                "usb-write 4d 21 0a",
+                ControlCommand::UsbWrite(vec![0x4d, 0x21, 0x0a]),
+            ),
             ("wait 250", ControlCommand::Wait(250)),
         ];
         for (line, want) in cases {
@@ -490,7 +490,9 @@ mod tests {
             assert!(!err.is_empty(), "`{line}` must say why");
         }
         assert!(
-            ControlCommand::parse("nope").unwrap_err().contains("attach"),
+            ControlCommand::parse("nope")
+                .unwrap_err()
+                .contains("attach"),
             "an unknown command lists the ones that exist"
         );
     }

@@ -131,7 +131,10 @@ fn run(script: &str, micros: u64) -> Option<Run> {
         .filter_map(|line| {
             let cyc = line.strip_prefix("cyc=")?.split_whitespace().next()?;
             let cyc: u64 = cyc.parse().ok()?;
-            Some((cyc as f64 / memmap::CYCLES_PER_US as f64 / 1_000.0, line.to_string()))
+            Some((
+                cyc as f64 / memmap::CYCLES_PER_US as f64 / 1_000.0,
+                line.to_string(),
+            ))
         })
         .collect();
     Some(Run { m, lines, outcome })
@@ -214,11 +217,7 @@ fn g3_1_the_cable_comes_out_at_six_seconds_and_the_link_comes_back_at_nine() {
     );
 
     // Liveness: the guest kept running through the whole detached window.
-    assert!(
-        r.m.idle_skips() > 1_000,
-        "idle skips {}",
-        r.m.idle_skips()
-    );
+    assert!(r.m.idle_skips() > 1_000, "idle skips {}", r.m.idle_skips());
     assert!(r.m.uart0().is_empty(), "the link is USB, not UART0");
 }
 
@@ -259,10 +258,11 @@ fn g3_1b_a_port_held_closed_after_the_replug_holds_a_packet_until_it_opens() {
     // Bytes written past the committed packet are dropped, and the model
     // says so once rather than pretending they went.
     assert!(
-        r.lines.iter().any(|(ms, line)| (9_000.0..13_000.0)
-            .contains(ms)
-            && line.contains("(host attached-idle): byte")
-            && line.contains("dropped")),
+        r.lines
+            .iter()
+            .any(|(ms, line)| (9_000.0..13_000.0).contains(ms)
+                && line.contains("(host attached-idle): byte")
+                && line.contains("dropped")),
         "no dropped byte recorded while the port was closed:\n{}",
         r.window(10_000.0, 11_000.0)
     );
@@ -413,11 +413,16 @@ fn g3_4_the_hosts_own_dances_over_the_channel_reach_the_two_straps() {
             at_ms * MS,
             "the reset is stamped with the cycle the last RTS edge was drained at"
         );
-        assert_eq!(r.outcome.exit_code(), 2, "a reset the emulator cannot perform");
+        assert_eq!(
+            r.outcome.exit_code(),
+            2,
+            "a reset the emulator cannot perform"
+        );
         // `chip_rst` bit 0 records that the serial channel asked.
         assert!(
-            r.lines.iter().any(|(_, line)| line
-                .contains(&format!("chip reset from the serial channel, strap = {strap}"))),
+            r.lines.iter().any(|(_, line)| line.contains(&format!(
+                "chip reset from the serial channel, strap = {strap}"
+            ))),
             "the trace does not name the strap"
         );
     }

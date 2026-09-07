@@ -46,7 +46,11 @@ fn bound_port(reader: &mut BufReader<ChildStderr>, prefix: &str) -> u16 {
     let mut line = String::new();
     while Instant::now() < deadline {
         line.clear();
-        if reader.read_line(&mut line).expect("reading the child's stderr") == 0 {
+        if reader
+            .read_line(&mut line)
+            .expect("reading the child's stderr")
+            == 0
+        {
             break;
         }
         if let Some(rest) = line.trim().strip_prefix(prefix)
@@ -98,7 +102,9 @@ struct Control(BufReader<TcpStream>);
 impl Control {
     fn connect(port: u16) -> Self {
         let stream = TcpStream::connect(("127.0.0.1", port)).expect("connecting to --control");
-        stream.set_read_timeout(Some(READ_TIMEOUT)).expect("timeout");
+        stream
+            .set_read_timeout(Some(READ_TIMEOUT))
+            .expect("timeout");
         Self(BufReader::new(stream))
     }
 
@@ -178,7 +184,8 @@ fn g3_3_a_byte_client_and_a_control_client_drive_one_machine() {
     });
 
     // Connecting to the byte socket IS an application opening the port.
-    let mut bytes = TcpStream::connect(("127.0.0.1", emu.usb_port)).expect("connecting to --usb-sj");
+    let mut bytes =
+        TcpStream::connect(("127.0.0.1", emu.usb_port)).expect("connecting to --usb-sj");
     bytes.set_read_timeout(Some(READ_TIMEOUT)).expect("timeout");
     wait_for(&mut control, "draining", "true");
 
@@ -217,7 +224,10 @@ fn g3_3_a_byte_client_and_a_control_client_drive_one_machine() {
     // A command that cannot be applied answers `err` and changes nothing,
     // and so does one that is not a command at all.
     let refused = control.cmd("open");
-    assert!(refused.starts_with("err open: no host is attached"), "{refused}");
+    assert!(
+        refused.starts_with("err open: no host is attached"),
+        "{refused}"
+    );
     assert!(control.cmd("nonsense").starts_with("err unknown command "));
     assert!(
         control.cmd("wait 5").starts_with("err "),

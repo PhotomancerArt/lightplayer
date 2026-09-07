@@ -1494,8 +1494,8 @@ impl Esp32C6Machine {
     /// `wfi` from jumping over the whole script.
     fn next_host_service(&self) -> Option<Cycles> {
         let scripted = self.script.front().map(|(at, _)| *at);
-        let polled = (self.control.is_some() || self.usb_sj_tcp.is_some())
-            .then_some(self.next_host_poll);
+        let polled =
+            (self.control.is_some() || self.usb_sj_tcp.is_some()).then_some(self.next_host_poll);
         match (scripted, polled) {
             (Some(a), Some(b)) => Some(a.min(b)),
             (a, b) => a.or(b),
@@ -2138,7 +2138,10 @@ mod tests {
         ] {
             let reply = m.apply_control(&command, 160);
             let ControlReply::Err(reason) = &reply else {
-                panic!("`{}` should have been refused, got {reply:?}", command.verb());
+                panic!(
+                    "`{}` should have been refused, got {reply:?}",
+                    command.verb()
+                );
             };
             assert!(reason.contains(needle), "{reason:?}");
         }
@@ -2162,7 +2165,10 @@ mod tests {
         for command in [ControlCommand::Reset, ControlCommand::DownloadMode] {
             let reply = m.apply_control(&command, 160);
             let ControlReply::Err(reason) = &reply else {
-                panic!("`{}` should have been refused, got {reply:?}", command.verb());
+                panic!(
+                    "`{}` should have been refused, got {reply:?}",
+                    command.verb()
+                );
             };
             assert!(reason.contains("chip_rst bit 2"), "{reason:?}");
         }
@@ -2176,7 +2182,8 @@ mod tests {
             .write_word(memmap::periph::USB_DEVICE + 0x4c, 0)
             .unwrap();
         assert_eq!(
-            m.apply_control(&ControlCommand::DownloadMode, 320).to_string(),
+            m.apply_control(&ControlCommand::DownloadMode, 320)
+                .to_string(),
             "ok download-mode cyc=320 us=2"
         );
         assert!(matches!(
