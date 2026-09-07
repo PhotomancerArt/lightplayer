@@ -52,7 +52,9 @@ use lp_emu_core::sched::Cycles;
 use lp_emu_core::{Bus, CycleModel};
 use lp_emu_esp_common::bus::StrictViolation;
 use lp_emu_esp_common::periph::BoxedPeripheral;
-use lp_emu_esp_common::{ByteLog, ByteSink, ByteSource, ElfImage, RamRegion, SocBus, Strap};
+use lp_emu_esp_common::{
+    ByteLog, ByteSink, ByteSource, ElfImage, RamRegion, RegGrade, SocBus, Strap,
+};
 use lp_riscv_emu::mach::trigger::TRIGGER_COUNT;
 use lp_riscv_emu::mach::{HartFault, MachineHart, SliceEnd};
 
@@ -217,9 +219,11 @@ pub enum Uart0Sink {
     Tcp(String),
 }
 
-/// Where USB-Serial-JTAG's IN-endpoint bytes are observed: what the guest
-/// tried to print with no host attached (esp-println's `[INIT] …` lines).
-/// Always also kept in memory ([`Esp32C6Machine::usb_sj`]).
+/// Where USB-Serial-JTAG's bytes go. Used twice: for the `usb-sj` stream —
+/// what a **host received** from the IN endpoint (`--usb-sj`) — and for the
+/// observation stream — what the guest handed over that no host took
+/// (`--usb-sj-tried`). Both are always also kept in memory
+/// ([`Esp32C6Machine::usb_sj`], [`Esp32C6Machine::usb_sj_tried`]).
 #[derive(Clone, Debug, Default)]
 pub enum UsbSjSink {
     #[default]
@@ -227,6 +231,11 @@ pub enum UsbSjSink {
     Stderr,
     File(PathBuf),
 }
+
+/// The USB host's state at power-on: the builder's stand-in for M6 P3's
+/// control channel. See [`crate::periph::usb_sj`] for what each state does
+/// at the registers.
+pub use crate::periph::usb_sj::HostState as UsbHost;
 
 /// Why a run stopped.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -387,6 +396,7 @@ pub struct Esp32C6Builder {
     efuse: EfuseIdentity,
     time_grade: TimeGrade,
     strict: bool,
+    strict_grade: Option<RegGrade>,
     trace: Option<Box<dyn std::io::Write + Send>>,
     trace_blocks: Vec<String>,
     uart0: Uart0Sink,
@@ -394,6 +404,11 @@ pub struct Esp32C6Builder {
     /// sink is `Tcp`, whose client is the source.
     uart0_source: Option<Box<dyn ByteSource>>,
     usb_sj: UsbSjSink,
+    usb_sj_tried: UsbSjSink,
+    /// Scripted host input on the USB link: what the host sends to the OUT
+    /// endpoint, at declared cycles.
+    usb_sj_source: Option<Box<dyn ByteSource>>,
+    usb_host: UsbHost,
     seed: u64,
     /// Register the boot set before `peripherals`.
     boot_set: bool,
@@ -415,11 +430,15 @@ impl Esp32C6Builder {
             efuse: EfuseIdentity::default(),
             time_grade: TimeGrade::default(),
             strict: false,
+            strict_grade: None,
             trace: None,
             trace_blocks: Vec::new(),
             uart0: Uart0Sink::default(),
             uart0_source: None,
             usb_sj: UsbSjSink::default(),
+            usb_sj_tried: UsbSjSink::default(),
+            usb_sj_source: None,
+            usb_host: UsbHost::Absent,
             seed: 0,
             boot_set: true,
             peripherals: Vec::new(),
@@ -479,8 +498,38 @@ impl Esp32C6Builder {
         self
     }
 
+    /// Where what a host **receives** on the USB link goes.
     pub fn usb_sj(mut self, sink: UsbSjSink) -> Self {
         self.usb_sj = sink;
+        self
+    }
+
+    /// Where the bytes the guest handed to the USB IN endpoint that **no
+    /// host took** go (the observation stream, `--usb-sj-tried`).
+    pub fn usb_sj_tried(mut self, sink: UsbSjSink) -> Self {
+        self.usb_sj_tried = sink;
+        self
+    }
+
+    /// Deterministic host input on the USB link: bytes a host sends to the
+    /// OUT endpoint at declared cycles. They land only while the host is
+    /// attached and draining.
+    pub fn usb_sj_source(mut self, source: Box<dyn ByteSource>) -> Self {
+        self.usb_sj_source = Some(source);
+        self
+    }
+
+    /// The USB host's state at power-on (`--usb-host`). `Absent` is P6's
+    /// machine and the default.
+    pub fn usb_host(mut self, host: UsbHost) -> Self {
+        self.usb_host = host;
+        self
+    }
+
+    /// Refuse every register graded below `level` (`--strict-grade`). See
+    /// [`SocBus::set_strict_grade`].
+    pub fn strict_grade(mut self, level: Option<RegGrade>) -> Self {
+        self.strict_grade = level;
         self
     }
 
@@ -533,11 +582,15 @@ impl Esp32C6Builder {
             efuse,
             time_grade,
             strict,
+            strict_grade,
             trace,
             trace_blocks,
             uart0,
             uart0_source,
             usb_sj,
+            usb_sj_tried,
+            usb_sj_source,
+            usb_host,
             seed,
             boot_set,
             peripherals,
@@ -609,21 +662,35 @@ impl Esp32C6Builder {
             source,
         );
 
-        let usb_sj_log = ByteLog::new();
-        let usb_inner: Box<dyn ByteSink> = match &usb_sj {
-            UsbSjSink::Memory => Box::new(lp_emu_esp_common::host::NullSink),
-            UsbSjSink::Stderr => Box::new(StderrSink),
-            UsbSjSink::File(path) => {
-                let file = std::fs::File::create(path)
-                    .map_err(|e| BuildError::Io(format!("creating {}: {e}", path.display())))?;
-                Box::new(FileSink(file))
-            }
+        // The USB link: `usb-sj` is what a host receives (and, from its
+        // source, what it sends); `usb-sj-tried` is the observation stream.
+        let usb_sink = |sink: &UsbSjSink| -> Result<Box<dyn ByteSink>, BuildError> {
+            Ok(match sink {
+                UsbSjSink::Memory => Box::new(lp_emu_esp_common::host::NullSink),
+                UsbSjSink::Stderr => Box::new(StderrSink),
+                UsbSjSink::File(path) => {
+                    let file = std::fs::File::create(path).map_err(|e| {
+                        BuildError::Io(format!("creating {}: {e}", path.display()))
+                    })?;
+                    Box::new(FileSink(file))
+                }
+            })
         };
+        let usb_sj_log = ByteLog::new();
         let usb_sj_id = bus.host.add(
             "usb-sj",
             Box::new(TeeSink {
                 log: usb_sj_log.clone(),
-                inner: usb_inner,
+                inner: usb_sink(&usb_sj)?,
+            }),
+            usb_sj_source.unwrap_or_else(|| Box::new(lp_emu_esp_common::host::NullSource)),
+        );
+        let usb_sj_tried_log = ByteLog::new();
+        let usb_sj_tried_id = bus.host.add(
+            "usb-sj-tried",
+            Box::new(TeeSink {
+                log: usb_sj_tried_log.clone(),
+                inner: usb_sink(&usb_sj_tried)?,
             }),
             Box::new(lp_emu_esp_common::host::NullSource),
         );
@@ -639,13 +706,14 @@ impl Esp32C6Builder {
             uart0: Some(uart0_id),
             uart1: Some(uart1_id),
             usb_sj: Some(usb_sj_id),
+            usb_sj_tried: Some(usb_sj_tried_id),
         };
 
         // Peripherals, in the declared order: the boot set first, then
         // whatever the caller added. The check is what stops a re-sort from
         // re-pointing scheduled events.
         let mut all = if boot_set {
-            crate::periph::boot_set(efuse, seed, streams)
+            crate::periph::boot_set(efuse, seed, streams, usb_host)
         } else {
             Vec::new()
         };
@@ -671,6 +739,7 @@ impl Esp32C6Builder {
         }
 
         bus.set_strict(strict);
+        bus.set_strict_grade(strict_grade);
 
         // Guest time is zero and the schedule is empty: the peripherals that
         // need a first event (a UART polling its host source) take it now.
@@ -697,6 +766,8 @@ impl Esp32C6Builder {
             app_segments,
             uart0_log,
             usb_sj_log,
+            usb_sj_tried_log,
+            usb_host,
             uart0_tcp,
             hook_calls: 0,
             idle_skips: 0,
@@ -781,6 +852,10 @@ pub struct Esp32C6Machine {
     app_segments: Vec<PlacedAppSegment>,
     uart0_log: ByteLog,
     usb_sj_log: ByteLog,
+    usb_sj_tried_log: ByteLog,
+    /// The USB host's state at power-on (P3's control channel moves it from
+    /// there; the machine records where it started).
+    usb_host: UsbHost,
     /// The UART0 listener, when the sink is `Tcp`; held so it lives as long
     /// as the machine and so a runner can ask whether a client ever came.
     uart0_tcp: Option<lp_emu_esp_common::TcpHost>,
@@ -904,11 +979,25 @@ impl Esp32C6Machine {
         &self.uart0_log
     }
 
-    /// Everything the guest handed to USB-Serial-JTAG's IN endpoint with no
-    /// host attached: an observation of what it *tried* to print, never
-    /// guest output that reached anyone.
+    /// Everything a **host received** on the USB-Serial-JTAG link: IN
+    /// packets a draining host took, in the guest's order. With no host, or
+    /// the port closed, this stays empty — see [`usb_sj_tried`](Self::usb_sj_tried).
     pub fn usb_sj(&self) -> &ByteLog {
         &self.usb_sj_log
+    }
+
+    /// Everything the guest handed to the USB IN endpoint that **no host
+    /// took**: pushed with no host attached (esp-println's `[INIT] …`
+    /// lines), dropped into a committed FIFO (io_task's probe), or dropped
+    /// by a bus reset. An observation of what it *tried*, never guest output
+    /// that reached anyone.
+    pub fn usb_sj_tried(&self) -> &ByteLog {
+        &self.usb_sj_tried_log
+    }
+
+    /// The USB host's state at power-on.
+    pub fn usb_host(&self) -> UsbHost {
+        self.usb_host
     }
 
     /// The UART0 TCP listener, when `Uart0Sink::Tcp` was chosen.
@@ -1291,6 +1380,7 @@ impl Esp32C6Machine {
             hook_calls: self.hook_calls,
             uart0: self.uart0_log.bytes(),
             usb_sj: self.usb_sj_log.bytes(),
+            usb_sj_tried: self.usb_sj_tried_log.bytes(),
         }
     }
 
@@ -1308,6 +1398,7 @@ impl Esp32C6Machine {
         self.hook_calls = s.hook_calls;
         self.uart0_log.replace(&s.uart0);
         self.usb_sj_log.replace(&s.usb_sj);
+        self.usb_sj_tried_log.replace(&s.usb_sj_tried);
 
         for slot in 0..TRIGGER_COUNT {
             let wp = self.harts[0].triggers().watchpoint(slot);
