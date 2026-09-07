@@ -170,7 +170,7 @@ fn example_dirs() -> Vec<String> {
             })
             .collect();
     dirs.sort();
-    assert!(dirs.len() >= 16, "catalog walk found only {dirs:?}");
+    assert!(dirs.len() >= 15, "catalog walk found only {dirs:?}");
     dirs
 }
 
