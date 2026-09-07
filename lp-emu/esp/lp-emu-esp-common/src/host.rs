@@ -190,6 +190,13 @@ impl ByteLog {
         String::from_utf8_lossy(&self.bytes()).into_owned()
     }
 
+    /// Run `f` over the log in place, under the lock — no clone. For a
+    /// caller that scans the log often (`--exit-on` checks after every
+    /// slice) and must not pay for a copy each time.
+    pub fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        f(&self.0.lock().expect("byte log poisoned"))
+    }
+
     pub fn len(&self) -> usize {
         self.0.lock().expect("byte log poisoned").len()
     }

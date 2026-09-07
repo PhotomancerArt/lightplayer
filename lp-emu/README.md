@@ -191,6 +191,62 @@ The payload itself is `fw-checks`' `uart-bridge` (see that crate's README); the
 fixture and its current blocker are
 `docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md`.
 
+## Speed
+
+The interpreter's throughput is a product concern, not a curiosity: the
+emulator is on its way to being a *device* in Studio, and a machine that runs
+at a fifth of real time cannot stand in for a board someone is watching.
+
+**The opt-level rule.** The workspace `[profile.release]` is `opt-level = "z"`,
+chosen for firmware flash, and a size-optimizing pass is exactly what an
+interpreter loop cannot afford — it cost 2.3x here. The root `Cargo.toml`
+therefore names the five host-side emulator crates in
+`[profile.release.package.*]` at `opt-level = 3`: `lp-emu-core`,
+`lp-riscv-emu`, `lp-emu-esp-common`, `lp-emu-esp32c6`, `lp-xt-emu`.
+
+It names crates rather than flipping a profile because `lp-riscv-inst`,
+`lp-xt-inst` and `lp-emu-abi` are in firmware graphs and `release-esp32`
+inherits `release` — an override reaching those would grow flash. **Anything
+added under `lp-emu/` that a firmware links must stay off that list**;
+`cargo tree -p fw-esp32c6 --target riscv32imac-unknown-none-elf` is the check.
+
+**The probe.**
+
+```bash
+just bench-emu-c6                     # both reference images, both grades
+just bench-emu-c6 --json out.json
+scripts/emu/bench-c6.sh --bin <saved-binary> --no-build --no-promote
+```
+
+It reports user seconds, instructions/second, two real-time ratios and the
+load average, and `cmp`s the UART0 bytes against the previous run. It is an
+**oracle, not a gate** — nothing in CI runs it, and no number it prints gates
+anything (see "never gate on emulated microseconds", above and in AGENTS.md).
+Read the user-seconds column: this desk is often at load 150+ with other
+agents building, and a wall-clock ratio measured there is not a result. A
+before/after belongs in a PR body as a same-window A/B with the load quoted.
+
+**The measured ladder** (compile-stress harness, `t1`, M2 Max):
+
+| build | instr/s | vs stock |
+|---|---:|---:|
+| stock release (`opt-level = "z"`) | 33.6 M | 1.00x |
+| + opt-level 3 on the five crates | 76.9 M | 2.29x |
+| + the bookkeeping pass (both shipped) | 103.5 M | 3.08x |
+| + PGO (a recipe, never a default) | 149 M | 4.45x |
+
+Those are quiet-machine figures. The same-window A/B that landed the two
+shipped rungs, on a desk at load ~190, read 25.5 M -> 75.8 M (2.97x) with the
+`stopped after` line, the UART bytes and a 20 ms `--trace` byte-identical
+either side — which is the bar every rung of this work is held to (PD5, ADR
+2026-09-06: a run is a pure function of the instruction stream).
+
+Evidence, and the rungs not yet climbed (MMIO fast path, poll-loop skip, block
+cache, the wasm/phone rig): the planning workspace's
+`2026-09-06-1001-esp-emulator/2026-09-07-speed-ladder-research.md` and its
+`speed-research/` directory, executed by the `2026-09-07-0827-emu-speed-ladder`
+plan.
+
 ## Roadmap
 
 `lp-emu-validate/` and the first two transcripts landed with M2 of the

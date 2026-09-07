@@ -2068,6 +2068,22 @@ test-emu-c6:
 emu-c6 elf *args:
     cargo run -p lp-emu-esp32c6 --release -- --elf {{ elf }} {{ args }}
 
+# The C6 machine's speed probe: both pinned reference images, both time
+# grades, best of two runs, reported as user seconds, instructions/second and
+# a real-time ratio, with the load average and a `cmp` of the UART bytes
+# against the previous run.
+#
+#   just bench-emu-c6                                   # table, promote to prev/
+#   just bench-emu-c6 --json target/emu-bench/new.json
+#   scripts/emu/bench-c6.sh --bin <saved> --no-build --no-promote   # the A/B half
+#
+# It is an ORACLE, not a gate — no CI job runs it and no number it prints
+# gates anything (AGENTS.md "never gate on emulated microseconds"). A
+# before/after belongs in a PR body as a same-window A/B with the load
+# average quoted; see the script's header.
+bench-emu-c6 *args:
+    scripts/emu/bench-c6.sh {{ args }}
+
 # The generated `RegNames` tables (offset -> register name) are derived from
 # the esp32c6 PAC's svd2rust offset comments and carry a provenance header.
 # A hand edit is reverted by the next regeneration and takes its provenance

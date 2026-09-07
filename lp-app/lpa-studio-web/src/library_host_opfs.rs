@@ -533,6 +533,7 @@ fn sync_trigger_for(op: &CatalogOp) -> Option<SyncTrigger> {
         // is the picture it published.
         CatalogOp::UpsertRegisteredDevice(_)
         | CatalogOp::ForgetRegisteredDevice { .. }
+        | CatalogOp::CreateSimDevice { .. }
         | CatalogOp::StoreDeviceFrame { .. } => None,
         _ => Some(SyncTrigger::Installed),
     }
@@ -750,11 +751,12 @@ fn structural_target_uid(op: &CatalogOp) -> Option<&str> {
         | CatalogOp::ImportZip { .. }
         | CatalogOp::ImportJson { .. }
         | CatalogOp::GenerateForBoard { .. }
-        // Registry-only: the device rows (and their last-frame sidecars)
-        // live beside the packages, not inside one, so no project lock is
-        // involved.
+        // Registry-only: the device rows (and their per-device sidecars —
+        // the last frame, the sim record) live beside the packages, not
+        // inside one, so no project lock is involved.
         | CatalogOp::UpsertRegisteredDevice(_)
         | CatalogOp::ForgetRegisteredDevice { .. }
+        | CatalogOp::CreateSimDevice { .. }
         | CatalogOp::StoreDeviceFrame { .. }
         // Creation-shaped: the transient fork mints a fresh uid, and the
         // synced install refuses a uid the library already holds, so

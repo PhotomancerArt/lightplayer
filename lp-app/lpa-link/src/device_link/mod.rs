@@ -23,6 +23,8 @@
 //! | `byte_stream` | the sync `DeviceByteStream` seam → `Link` (host) |
 //! | `fake` | the scripted `FakeEsp32Device` → `Link` (host tests) |
 //! | `browser_serial` | the Web Serial provider → `Link` (wasm) |
+//! | `browser_worker` | a `fw-browser` worker → `Link`, i.e. the sim as a device (wasm) |
+//! | `browser_worker_io` | that worker's protocol channel → `lpa_client::ClientIo` (wasm) |
 //!
 //! What is NOT here: the effects layer. Pumping `poll_event` into
 //! `Event::Link`, running timers, persisting records and revoking grants are
@@ -44,6 +46,25 @@ pub mod fake;
 
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub mod browser_serial;
+
+/// The sim as a `Link`. wasm-only like the provider it wraps
+/// (`providers/mod.rs`), and it needs the model's contract to implement.
+#[cfg(all(
+    feature = "browser-worker",
+    feature = "device-link",
+    target_arch = "wasm32"
+))]
+pub mod browser_worker;
+
+/// The sim's exclusive-borrow io. Needs `lpa-client` on top of the link's
+/// own features, which `device-session` is what brings.
+#[cfg(all(
+    feature = "browser-worker",
+    feature = "device-link",
+    feature = "device-session",
+    target_arch = "wasm32"
+))]
+pub mod browser_worker_io;
 
 #[cfg(all(test, feature = "fake-device"))]
 mod tests;

@@ -131,6 +131,19 @@ pub struct StudioController {
     /// A granted-port sweep is due (boot, or a `navigator.serial` connect).
     /// Drained by the actor's device step so a hotplug storm costs one sweep.
     device_sweep_pending: bool,
+    /// The transport that reaches SILICON, when this build has one (browser
+    /// Web Serial; a scripted fake in the benches). Held so installing the
+    /// sim half can rebuild the composite without the caller re-supplying
+    /// it — the effects layer takes one transport, on purpose.
+    serial_transport: Option<Rc<dyn crate::DeviceTransport>>,
+    /// The transport that reaches SIMS, when this build has one. Concrete
+    /// rather than `dyn` because powering a sim on and off is not part of
+    /// the `DeviceTransport` vocabulary and must not become part of it.
+    sim_transport: Option<Rc<crate::SimDeviceTransport>>,
+    /// The `/device-sims/<uid>.json` sidecars, read off the library
+    /// snapshot at settle. The sole "this device is a sim" fact, cached so
+    /// powering one on does not read the store from inside a fold.
+    device_sims: std::collections::BTreeMap<String, crate::SimRecord>,
     /// The runtime sessions the studio is attached to, plus the editor
     /// lens. Every network op resolves its wire client through the pool's
     /// lens-bound seam.
@@ -316,6 +329,9 @@ impl StudioController {
             device_feeds: crate::DeviceFrameFeeds::new(),
             pending_device_lens: None,
             device_sweep_pending: false,
+            serial_transport: None,
+            sim_transport: None,
+            device_sims: std::collections::BTreeMap::new(),
             pool: RuntimePool::new(),
             project: ProjectController::new(),
             sync_timer: None,
@@ -447,8 +463,177 @@ impl StudioController {
     /// see ports should show what it already has permission for, without the
     /// user asking twice.
     pub fn set_device_transport(&mut self, transport: Rc<dyn crate::DeviceTransport>) {
+        self.serial_transport = Some(transport);
+        self.install_device_transport();
+    }
+
+    /// Install the transport that serves SIMS. Install before the actor
+    /// takes ownership, beside (or instead of) the serial one.
+    ///
+    /// A build with both installs a `CompositeDeviceTransport` routing by
+    /// the link's endpoint: the effects layer holds exactly one transport,
+    /// and a per-kind fork inside it is how a second device flow grows.
+    pub fn set_device_sim_transport(&mut self, transport: Rc<crate::SimDeviceTransport>) {
+        self.sim_transport = Some(transport);
+        self.install_device_transport();
+    }
+
+    /// (Re)install whichever transport this build's halves add up to, and
+    /// arm the first sweep: a page that CAN see devices should show what it
+    /// already has, without the user asking twice.
+    fn install_device_transport(&mut self) {
+        let transport: Option<Rc<dyn crate::DeviceTransport>> = match &self.sim_transport {
+            Some(sim) => Some(Rc::new(crate::CompositeDeviceTransport::new(
+                self.serial_transport.clone(),
+                Rc::clone(sim) as Rc<dyn crate::DeviceTransport>,
+            ))),
+            None => self.serial_transport.clone(),
+        };
+        let Some(transport) = transport else {
+            return;
+        };
         self.devices.effects_mut().set_transport(transport);
         self.device_sweep_pending = true;
+    }
+
+    /// Mint a sim of `target` and remember it: one registry row
+    /// (`transport: "sim"`, keyed on the derived uid) and one
+    /// `/device-sims/<uid>.json` sidecar, written in a single library
+    /// settle so a half-created sim cannot exist.
+    ///
+    /// `random` is the caller's six bytes (the web shell's
+    /// `crypto.getRandomValues`, a test's fixed bytes): minting decides
+    /// identity, and where entropy comes from is the platform's business,
+    /// not the model's. Returns the uid the sim is remembered under.
+    ///
+    /// The sim is NOT powered on. It loads as a detached record like any
+    /// remembered board, and `Action::Connect` is what starts it.
+    pub async fn create_sim_record(
+        &mut self,
+        target: &str,
+        name: Option<&str>,
+        random: &[u8; 6],
+    ) -> Result<String, UiError> {
+        let minted = crate::new_sim_record(target, name, random, (self.now_secs)());
+        let sidecar_bytes = serde_json::to_vec(&minted.sidecar).unwrap_or_default();
+        self.run_catalog_op(CatalogOp::CreateSimDevice {
+            device: Box::new(minted.row.clone()),
+            sidecar_bytes,
+        })
+        .await?;
+        self.device_sims
+            .insert(minted.uid.clone(), minted.sidecar.clone());
+        Ok(minted.uid)
+    }
+
+    /// The sims remembered in this library, by uid.
+    pub fn device_sims(&self) -> &std::collections::BTreeMap<String, crate::SimRecord> {
+        &self.device_sims
+    }
+
+    /// Read every remembered sim's sidecar off the library snapshot.
+    ///
+    /// Only rows the registry already labels `sim` are looked at, so a
+    /// library full of boards reads nothing. Absence is the answer for
+    /// everything else — a board without a sidecar is not a sim, which is
+    /// every board in every existing library.
+    fn seed_device_sim_records(&mut self, fs: &Rc<std::cell::RefCell<dyn lpfs::LpFs>>) {
+        let Some(inputs) = self.home_inputs.as_ref() else {
+            return;
+        };
+        let uids: Vec<String> = inputs
+            .registered
+            .iter()
+            .filter(|row| row.transport == crate::SIM_TRANSPORT)
+            .map(|row| row.uid.clone())
+            .collect();
+        let fs = fs.borrow();
+        self.device_sims = uids
+            .into_iter()
+            .filter_map(|uid| crate::read_sim_record(&*fs, &uid).map(|record| (uid, record)))
+            .collect();
+    }
+
+    /// The session a sim device would run as, or `None` when this device is
+    /// not a sim (no sidecar) or has no uid to be keyed on.
+    fn sim_session_for(&self, device: crate::DeviceId) -> Option<crate::SimSession> {
+        let entry = self
+            .devices
+            .roster()
+            .devices()
+            .iter()
+            .find(|entry| entry.id == device)?;
+        let uid = entry
+            .identity
+            .uid
+            .as_ref()
+            .map(|uid| uid.0.clone())
+            .or_else(|| self.device_registry_key(device))?;
+        let sidecar = self.device_sims.get(&uid)?;
+        Some(crate::SimSession {
+            uid,
+            target: sidecar.target.clone(),
+            display_name: entry.title(),
+            base_mac: sidecar.base_mac.clone(),
+        })
+    }
+
+    /// Power a sim on, if this gesture is a `Connect` at one.
+    ///
+    /// The EFFECTS layer starts the runtime, never the model: `Connect` on a
+    /// sim is `Connect` (PD8, Q15), and the sweep this arms is what attaches
+    /// the link the model then opens. The hello carries the uid, so the fold
+    /// adopts the link into this very record through its own identity join —
+    /// no new arm, no new event.
+    fn power_on_sim_for(&mut self, action: &crate::DeviceAction) {
+        let crate::DeviceAction::Connect { device } = action else {
+            return;
+        };
+        let (Some(sim), Some(session)) =
+            (self.sim_transport.clone(), self.sim_session_for(*device))
+        else {
+            return;
+        };
+        if sim.is_powered(&session.uid) {
+            return;
+        }
+        match sim.power_on(session) {
+            Ok(()) => self.device_sweep_pending = true,
+            Err(error) => log::warn!("the sim did not start: {error}"),
+        }
+    }
+
+    /// Power a sim off, if this gesture was a `Disconnect` (or a `Forget`)
+    /// at one.
+    ///
+    /// Runs AFTER the fold, which has already evicted and closed the link.
+    /// The detach has to be raised explicitly: `Disconnect` alone closes a
+    /// port and keeps the card attached, which is right for a board still
+    /// sitting on the desk and wrong for a runtime that no longer exists. A
+    /// powered-off sim leaves the roster the way an unplugged board does,
+    /// and its record stays on the remembered line (Q5).
+    fn power_off_sim_for(&mut self, action: &crate::DeviceAction) {
+        let uid = match action {
+            crate::DeviceAction::Disconnect { device } | crate::DeviceAction::Forget { device } => {
+                self.sim_session_for(*device).map(|session| session.uid)
+            }
+            _ => None,
+        };
+        let (Some(sim), Some(uid)) = (self.sim_transport.clone(), uid) else {
+            return;
+        };
+        let link = self
+            .devices
+            .effects()
+            .link_for_endpoint(&crate::sim_endpoint(&uid));
+        if !sim.power_off(&uid) {
+            return;
+        }
+        if let Some(link) = link {
+            self.fold_device_input(crate::DeviceInput::Event(
+                lpa_devices::Event::LinkDetached { link },
+            ));
+        }
     }
 
     /// Install the platform task spawner for device IO (`spawn_local` on
@@ -542,6 +727,16 @@ impl StudioController {
             log::debug!("device records not persisted: no library host");
             return;
         }
+        // The uids this batch WRITES. A merge (`reconcile_identities`) emits
+        // `DeleteRecord` for the discarded handle and `PersistRecord` for the
+        // surviving one in the SAME batch, and both resolve to the same
+        // registry key — because being the same device is what a merge
+        // discovered. Deleting on that would take away the row this very
+        // batch just wrote, and, worse, the device's sidecars with it: a
+        // remembered board whose port came back would silently lose its last
+        // picture, and a sim would lose the file that says it is one.
+        // (`docs/defects/2026-09-07-merge-delete-erased-the-merged-row.md`.)
+        let mut written: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         for record in writes.persist {
             let Some(row) = crate::app::devices::registry_row_from_record(&record) else {
                 // An anonymous board has no honest registry key; adopting one
@@ -552,6 +747,7 @@ impl StudioController {
             // the device is gone from the fold, and the row key is its
             // identity, not its handle.
             self.devices.remember_key(record.device, row.uid.clone());
+            written.insert(row.uid.clone());
             if let Err(error) = self
                 .run_catalog_op(CatalogOp::UpsertRegisteredDevice(Box::new(row)))
                 .await
@@ -567,6 +763,10 @@ impl StudioController {
             else {
                 continue;
             };
+            if written.contains(&uid) {
+                log::debug!("device {device:?} merged into the row it shares; {uid} stays");
+                continue;
+            }
             if let Err(error) = self
                 .run_catalog_op(CatalogOp::ForgetRegisteredDevice { uid })
                 .await
@@ -2067,6 +2267,7 @@ impl StudioController {
         // off the same snapshot, so the tile shows what it last did.
         self.load_device_records_if_due();
         if let Some(fs) = snapshot_fs.as_ref() {
+            self.seed_device_sim_records(fs);
             self.seed_device_frame_snapshots(fs);
         }
         self.mark_dirty();
@@ -3043,7 +3244,11 @@ impl StudioController {
         if let Some(name_first) = self.derive_flash_name_action(op.action()) {
             self.fold_device_input(crate::DeviceInput::Action(name_first));
         }
-        self.fold_device_input(crate::DeviceInput::Action(op.0));
+        // A sim's runtime is started HERE, before the fold, so the sweep the
+        // model's own `Connect` triggers finds a link to attach.
+        self.power_on_sim_for(op.action());
+        self.fold_device_input(crate::DeviceInput::Action(op.action.clone()));
+        self.power_off_sim_for(op.action());
         self.settle_device_records().await;
         Ok(UiNotices::new())
     }

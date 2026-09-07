@@ -698,6 +698,7 @@ USB-Serial-JTAG with no host attached. It is the configuration
 ```bash
 just emu-c6 <elf> --strict-bus --timeout 6s     # one image, by hand
 just test-emu-c6                                # its gates (builds firmware, ~70 s)
+just bench-emu-c6                               # its speed probe (an oracle, never a gate)
 cargo run -p lp-cli -- validate run emu-m3 --config lp-emu:esp32c6:t1 --dry-run
 ```
 

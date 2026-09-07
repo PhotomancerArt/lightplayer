@@ -226,6 +226,8 @@ and `fake-device`):
 | `device_link::byte_stream` | `ByteStreamLink<S>` over the sync `DeviceByteStream` seam — no executor, because `read_available` already means "whatever is ready" |
 | `device_link::fake` | `FakeDeviceLink` = `ByteStreamLink<FakeDeviceByteStream>`: the model's host test vehicle |
 | `device_link::browser_serial` | `BrowserSerialLink` — a WRAPPER over `BrowserSerialEsp32Provider` and the shipped JS controller (wasm only) |
+| `device_link::browser_worker` | `BrowserWorkerLink` — a `fw-browser` worker as a device, i.e. the **sim** (wasm only) |
+| `device_link::browser_worker_io` | `BrowserWorkerLinkIo` — that worker's protocol channel as an `lpa_client::ClientIo`, for the exclusive-borrow conversations (wasm only) |
 
 The browser adapter is where the executor lives: Web Serial is promise-shaped,
 so each command runs in a `spawn_local` future that pushes events onto a shared
@@ -245,6 +247,18 @@ Two adapter limits worth knowing:
   re-open, whose `openProtocol` performs exactly that dance). The other kinds
   are refused loudly rather than silently performing a different reset;
   `BothThenDrop` (the CH34x sequence) is not in the JS controller at all yet.
+- `BrowserWorkerLink` collapses every `ResetKind` onto destroy-and-recreate
+  and reports `ok: true`. That is not a silent substitution: a worker has no
+  DTR, no RTS and no boot ROM, so there is no other sequence to run and no
+  downloader to be in. Its `LinkInfo` is fabricated by the caller — the
+  studio's sim transport owns the `sim:<uid>` endpoint scheme and the
+  `Sim · <name>` label, because those are device-registry facts, not
+  transport facts.
+
+A worker link's provider kind names itself `sim` through
+`LinkProviderKind::transport_label()` (host process: `host`, the serial kinds
+and the fake: `USB`). Nothing is "not a device" there any more — a runtime is
+reached over a channel like anything else.
 
 End-to-end host coverage lives in `device_link::tests`: a real `Roster` driven
 through a real `Link` over the scripted fake device, including the mid-stream
