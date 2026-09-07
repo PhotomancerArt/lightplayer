@@ -1585,6 +1585,125 @@ fn the_feed_never_pulls_while_the_lens_holds_the_wire() {
     );
 }
 
+/// While the lens holds the wire the card is not a dimmed last frame: it
+/// draws the LENS session's own composed picture, live, and that picture's
+/// revision keeps advancing with the editor's pulls — while the feed's own
+/// pull still never runs under the borrow.
+#[test]
+fn the_card_shows_the_lens_sessions_frames_while_the_editor_holds_the_wire() {
+    let (mut bench, tasks) = running_board_wanting_a_picture("dev000000daqf6dvvt5", "usb-feed-5");
+    let device = bench.view().devices[0].id;
+    feed_tick(&mut bench, &tasks, 5.0);
+    for _ in 0..40 {
+        bench.step(&tasks);
+    }
+    feed_tick(&mut bench, &tasks, 5.0);
+    let own_revision = feed_frame_revision(&bench, device).expect("the feed pulled once");
+    let stamp_before = bench
+        .controller
+        .device_feeds()
+        .get(device)
+        .and_then(|feed| feed.last_pull_completed_at())
+        .expect("the feed has pulled");
+    let uid = bench.registry()[0].uid.clone();
+
+    bench
+        .open_lens(&uid)
+        .expect("the running board opens in the editor");
+    let link = bench.controller.devices_for_test().roster().devices()[0]
+        .link()
+        .expect("on a link");
+    assert!(
+        bench
+            .controller
+            .devices_for_test()
+            .effects()
+            .lens_holds_wire(link)
+    );
+
+    // The lens pulls at its own cadence; each pull carries the published
+    // frame. Drive it until the card's picture is the lens's and has moved
+    // past the feed's last one, then again until it moves once more.
+    let card_revision = |bench: &DeviceBench| {
+        bench
+            .controller
+            .device_roster_view()
+            .feeds
+            .get(&device)
+            .and_then(|feed| feed.frame.as_ref().map(|frame| frame.revision))
+    };
+    let mut lens_revisions: Vec<i64> = Vec::new();
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    while lens_revisions.len() < 2 {
+        let refresh = UiAction::from_op(ProjectController::NODE_ID, ProjectOp::RefreshProject);
+        let _ = drive(bench.controller.dispatch(refresh));
+        for _ in 0..40 {
+            bench.step(&tasks);
+        }
+        feed_tick(&mut bench, &tasks, 5.0);
+        let feeds = bench.controller.device_roster_view().feeds;
+        let Some(feed_view) = feeds.get(&device) else {
+            continue;
+        };
+        if feed_view.liveness != crate::FeedLiveness::Live {
+            assert_eq!(
+                feed_view.liveness,
+                crate::FeedLiveness::Lens,
+                "before the lens has a frame the card keeps the dimmed last one: {feed_view:?}"
+            );
+            continue;
+        }
+        let revision = card_revision(&bench).expect("a live card has a frame");
+        if revision > own_revision && lens_revisions.last() != Some(&revision) {
+            lens_revisions.push(revision);
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the card's picture never advanced under the lens: {lens_revisions:?}"
+        );
+    }
+    assert!(
+        lens_revisions[1] > lens_revisions[0],
+        "the card's frame revision advances while the lens is open: {lens_revisions:?}"
+    );
+
+    // The feed itself never asked: the frame came from the lens's pull.
+    let stamp_under_lens = bench
+        .controller
+        .device_feeds()
+        .get(device)
+        .and_then(|feed| feed.last_pull_completed_at());
+    assert_eq!(stamp_under_lens, Some(stamp_before), "no second pull");
+    assert_eq!(
+        feed_frame_revision(&bench, device),
+        Some(own_revision),
+        "the feed's own last frame is untouched by the lens's"
+    );
+
+    // The wire comes back: the card is the feed's own again.
+    bench.detach_lens();
+    bench.run_until(&tasks, "the wire to come back", |bench| {
+        !bench
+            .controller
+            .devices_for_test()
+            .effects()
+            .wire_borrowed(link)
+    });
+    for _ in 0..40 {
+        bench.step(&tasks);
+    }
+    feed_tick(&mut bench, &tasks, 5.0);
+    assert!(
+        bench
+            .controller
+            .device_feeds()
+            .get(device)
+            .and_then(|feed| feed.last_pull_completed_at())
+            > Some(stamp_before),
+        "the feed resumed once the lens let go"
+    );
+}
+
 /// AC4: a board that stops answering parks the feed after three failed
 /// pulls, and a fresh hello (a reconnect) re-arms it.
 #[test]

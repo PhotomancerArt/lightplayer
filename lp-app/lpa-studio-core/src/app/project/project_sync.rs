@@ -336,6 +336,14 @@ impl ProjectSync {
         self.output_frames.composed_frame(nodes)
     }
 
+    /// The picture EVERY published output composes together — the whole
+    /// board's wire, as the device card draws it (the card's own feed folds
+    /// every output the same way). `None` until a read has carried a frame.
+    pub fn composed_published_frame(&self) -> Option<UiControlProductPreview> {
+        let nodes: Vec<lpc_model::NodeId> = self.output_frames.outputs().collect();
+        self.output_frames.composed_frame(&nodes)
+    }
+
     /// How one output's wire is cut — the runs behind the published frame,
     /// in the output's own planning order. The patch bay's data (D34a).
     pub fn output_placements(&self, node: lpc_model::NodeId) -> &[lpc_wire::WireOutputPlacement] {

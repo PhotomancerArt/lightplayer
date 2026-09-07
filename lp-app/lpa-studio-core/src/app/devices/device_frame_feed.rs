@@ -46,6 +46,7 @@
 //! actor's passive tick runs due pulls beside the sim's and a preempting
 //! gesture cancels the in-flight read at its next frame boundary.
 
+use core::cell::Cell;
 use core::future::Future;
 use core::time::Duration;
 use std::collections::BTreeMap;
@@ -201,6 +202,23 @@ pub struct DeviceFrameFeeds {
     /// The page is visible (`document.visibilityState`); a hidden tab
     /// feeds nothing.
     page_visible: bool,
+    /// The editor lens's frame clock as the card view last saw it: which
+    /// lens session, its `frames_seen`, and when this view FIRST read that
+    /// value. While the lens holds a device's wire the card draws the
+    /// lens's own picture (the feed never pulls under the borrow), and this
+    /// stamp is what ages it — a board that stops publishing goes amber
+    /// under the lens exactly as it does under the feed. An observation
+    /// stamp taken while building the view, hence the `Cell`; the lens
+    /// mirror keeps no clock of its own.
+    lens_clock: Cell<Option<LensFrameClock>>,
+}
+
+/// See [`DeviceFrameFeeds::observe_lens_frames`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct LensFrameClock {
+    lens: crate::RuntimeId,
+    frames_seen: u64,
+    moved_at: f64,
 }
 
 impl Default for DeviceFrameFeeds {
@@ -216,7 +234,25 @@ impl DeviceFrameFeeds {
             // Honest default for a page that has not said otherwise: the
             // studio's own visibility signal flips it on first paint.
             page_visible: true,
+            lens_clock: Cell::new(None),
         }
+    }
+
+    /// Note the lens session's frame clock at `now` and answer how old its
+    /// newest frame is: zero when `frames_seen` moved (or the lens is a
+    /// different session — a reopened lens counts from one again), else
+    /// the seconds since it last moved.
+    pub fn observe_lens_frames(&self, lens: crate::RuntimeId, frames_seen: u64, now: f64) -> f64 {
+        let moved_at = match self.lens_clock.get() {
+            Some(clock) if clock.lens == lens && clock.frames_seen == frames_seen => clock.moved_at,
+            _ => now,
+        };
+        self.lens_clock.set(Some(LensFrameClock {
+            lens,
+            frames_seen,
+            moved_at,
+        }));
+        (now - moved_at).max(0.0)
     }
 
     pub fn get(&self, device: DeviceId) -> Option<&DeviceFrameFeed> {
@@ -549,6 +585,32 @@ mod tests {
 
         assert!(feed.is_parked());
         assert_eq!(feed.state.pull_completed_at(), Some(2.0));
+    }
+
+    #[test]
+    fn the_lens_frame_clock_ages_from_the_first_sight_of_each_frame_count() {
+        let feeds = DeviceFrameFeeds::new();
+        let lens = crate::RuntimeId::new(1);
+        assert_eq!(feeds.observe_lens_frames(lens, 1, 10.0), 0.0);
+        assert_eq!(
+            feeds.observe_lens_frames(lens, 1, 12.5),
+            2.5,
+            "no new frame: it ages"
+        );
+        assert_eq!(
+            feeds.observe_lens_frames(lens, 2, 13.0),
+            0.0,
+            "a frame moved: fresh"
+        );
+        // A reopened lens is a new session whose count starts over; the
+        // same count on a different session is not the same frame.
+        let reopened = crate::RuntimeId::new(2);
+        assert_eq!(feeds.observe_lens_frames(reopened, 2, 20.0), 0.0);
+        assert_eq!(
+            feeds.observe_lens_frames(reopened, 2, 19.0),
+            0.0,
+            "never negative"
+        );
     }
 
     #[test]

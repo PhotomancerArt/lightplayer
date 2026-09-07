@@ -1122,6 +1122,15 @@ impl ProjectController {
         }
     }
 
+    /// The lens session's newest composed picture across every output the
+    /// board has published, with the lens's own frame clock
+    /// ([`ProjectSync::frames_seen`]) — what the device card draws while
+    /// the editor holds the wire. `None` until a read has carried a frame.
+    pub fn lens_published_frame(&self) -> Option<(crate::UiControlProductPreview, u64)> {
+        let sync = self.sync.as_ref()?;
+        Some((sync.composed_published_frame()?, sync.frames_seen()))
+    }
+
     /// Root node controllers in project tree order.
     pub fn root_nodes(&self) -> &[NodeController] {
         &self.root_nodes
