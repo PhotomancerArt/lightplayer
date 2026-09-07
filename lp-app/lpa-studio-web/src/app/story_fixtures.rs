@@ -272,6 +272,12 @@ pub(crate) fn project_editor_fixture(phase: ProjectSyncPhase) -> ProjectEditorVi
     .with_project_name("Demo")
     .with_root_slots(project_root_slots())
     .with_manifest(Some(project_manifest()))
+    // A library package backs the demo, so the settings section's name row
+    // is the editable one (a project with no package has no rename).
+    .with_library_identity(Some((
+        "prj7k2mQx4vN8pL".to_string(),
+        "2026-08-27-1200-demo".to_string(),
+    )))
 }
 
 pub(crate) fn project_editor_empty_fixture(phase: ProjectSyncPhase) -> ProjectEditorView {

@@ -42,9 +42,9 @@ fn workspace_root() -> &'static Path {
 
 fn examples_basic() -> PathBuf {
     workspace_root()
-        .join("examples/basic")
+        .join("projects/test/basic")
         .canonicalize()
-        .expect("resolve examples/basic")
+        .expect("resolve projects/test/basic")
 }
 
 fn manifest_path() -> PathBuf {

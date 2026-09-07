@@ -2,7 +2,7 @@
 //! compile-transient OOM shape,
 //! `docs/defects/2026-08-29-shader-jit-compile-transient-starves-classic-heap.md`).
 //!
-//! The device compiles `examples/zook-dome/shader.glsl` through exactly this
+//! The device compiles `catalog/projects/zook-dome/shader.glsl` through exactly this
 //! path — `lps-glsl` staged frontend, the two synthesised render wrappers,
 //! `NativeCompileJob` for [`IsaTarget::Xtensa`] in Q32 with fuel on — and the
 //! defect shows the *transient* working set of that compile exhausting the
@@ -88,8 +88,8 @@ fn zook_glsl() -> String {
         .nth(2)
         .expect("repo root is two levels above this crate")
         .to_path_buf();
-    std::fs::read_to_string(root.join("examples/zook-dome/shader.glsl"))
-        .expect("read examples/zook-dome/shader.glsl")
+    std::fs::read_to_string(root.join("catalog/projects/zook-dome/shader.glsl"))
+        .expect("read catalog/projects/zook-dome/shader.glsl")
 }
 
 /// Measure the zook-dome compile's peak allocation profile and print the

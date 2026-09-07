@@ -62,7 +62,7 @@ fn labelled(mut surface: UiPatchSurface) -> UiPatchSurface {
 
 /// One embedded small-dome file's text, by example-relative path.
 fn small_dome_text(path: &str) -> String {
-    let example = lpa_studio_core::app::home::embedded_example("examples/small-dome")
+    let example = lpa_studio_core::app::home::embedded_example("catalog/small-dome")
         .expect("small-dome embedded");
     let bytes = example
         .files
@@ -421,7 +421,7 @@ fn props_stack_surface() -> UiPatchSurface {
 /// The dome fixture's real document (the embedded example's bytes — the
 /// same resolver the device runs).
 fn dome_doc() -> Map2dDoc {
-    let example = lpa_studio_core::app::home::embedded_example("examples/small-dome")
+    let example = lpa_studio_core::app::home::embedded_example("catalog/small-dome")
         .expect("small-dome embedded");
     let bytes = example
         .files

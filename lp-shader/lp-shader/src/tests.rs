@@ -615,7 +615,7 @@ fn compile_px_desc_lps_glsl_basic_shader() {
     let engine = test_engine();
     let shader = engine
         .compile_px_desc(CompilePxDesc::new(
-            include_str!("../../../examples/basic/shader.glsl"),
+            include_str!("../../../projects/test/basic/shader.glsl"),
             TextureStorageFormat::Rgba16Unorm,
             lpir::CompilerConfig::default(),
             ShaderFrontend::LpsGlsl,

@@ -495,21 +495,38 @@ fn resolve_project_dir(root: &Path, project: &Path) -> Result<PathBuf> {
             .with_context(|| format!("resolve project directory {}", direct.display()));
     }
 
+    // A bare name resolves through the checked-in roots, catalog buckets
+    // first (`just demo-esp32c6-check pulse`).
     if project.components().count() == 1 {
-        let example = root.join("examples").join(project);
-        if example.exists() {
-            return example
-                .canonicalize()
-                .with_context(|| format!("resolve project directory {}", example.display()));
+        for root_dir in BARE_NAME_ROOTS {
+            let candidate = root.join(root_dir).join(project);
+            if candidate.exists() {
+                return candidate
+                    .canonicalize()
+                    .with_context(|| format!("resolve project directory {}", candidate.display()));
+            }
         }
     }
 
+    let tried = BARE_NAME_ROOTS
+        .iter()
+        .map(|root_dir| format!("{root_dir}/{}", project.display()))
+        .collect::<Vec<_>>()
+        .join(", ");
     bail!(
-        "project directory not found: {} (also tried examples/{})",
-        direct.display(),
-        project.display()
+        "project directory not found: {} (also tried {tried})",
+        direct.display()
     );
 }
+
+/// Workspace-relative roots a bare project name is looked up under, in
+/// order: the catalog buckets, then the test rigs.
+const BARE_NAME_ROOTS: &[&str] = &[
+    "catalog/patterns",
+    "catalog/projects",
+    "catalog/templates",
+    "projects/test",
+];
 
 fn slug_from_project_dir(project_dir: &Path) -> String {
     project_dir

@@ -1,9 +1,11 @@
-//! G6-3: the shipped image with no host on USB-Serial-JTAG. The observable
-//! is register and static state, not a log line (`periph/usb_sj.rs`):
-//! esp-println's `TIMED_OUT` latches after its one 50,000-iteration wait,
-//! the connected path never arms `int_ena.serial_out_recv_pkt`, the sink
-//! holds what the guest tried to print, and the machine is idle in `wfi`
-//! with the tick and the RWDT feeds alive.
+//! G6-3 / M6 G2-2: the shipped image with no host on USB-Serial-JTAG. The
+//! observable is register and static state, not a log line
+//! (`periph/usb_sj.rs`): esp-println's `TIMED_OUT` latches after its one
+//! 50,000-iteration wait, the connected path never arms
+//! `int_ena.serial_out_recv_pkt`, the **observation** log holds what the
+//! guest tried to print while the **delivered** log is empty (nobody
+//! received anything), and the machine is idle in `wfi` with the tick and
+//! the RWDT feeds alive.
 //!
 //! The image is `esp32c6,server,radio,memory_fs` — the shipped set minus
 //! flash (director note 2; the flash-backed one spins on `SPI1.cmd` until
@@ -74,10 +76,12 @@ fn with_no_host_the_printer_times_out_once_and_the_rx_path_is_never_armed() {
         })
         .collect();
     assert!(armed.is_empty(), "{armed:?}");
-    // What the guest tried to print sits in the observation sink: the first
-    // esp-println line, committed by its newline before the FIFO filled.
-    let usb = m.usb_sj().text();
+    // What the guest tried to print sits on the observation stream: the
+    // first esp-println line, committed by its newline before the FIFO
+    // filled. Nothing reached a host: the delivered log is empty.
+    let usb = m.usb_sj_tried().text();
     assert!(usb.starts_with("[INIT] "), "{usb:?}");
+    assert!(m.usb_sj().is_empty(), "{:?}", m.usb_sj().text());
     assert!(
         lines
             .iter()

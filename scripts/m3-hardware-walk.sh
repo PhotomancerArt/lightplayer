@@ -24,7 +24,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 LOG="${TMPDIR:-/tmp}/m3-walk-$$.log"
-PROJECT="${PROJECT:-examples/basic}"
+PROJECT="${PROJECT:-projects/test/basic}"
 
 port="${1:-}"
 if [[ -z "$port" ]]; then

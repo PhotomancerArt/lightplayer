@@ -99,6 +99,23 @@ impl CardFeedState {
         self.frame.as_ref()
     }
 
+    /// Seed the feed with a frame captured EARLIER — the persisted last
+    /// frame a remembered board's sidecar carries — stamped at
+    /// `captured_at` so it ages from when the board actually published it.
+    ///
+    /// Only an EMPTY feed takes a seed: a frame this session pulled is
+    /// newer than anything on disk, and the seed must never regress it.
+    /// The per-output claims stay untouched, so the first live pull is a
+    /// moved revision and replaces the seed. Returns whether it seeded.
+    pub fn seed(&mut self, frame: UiControlProductPreview, captured_at: f64) -> bool {
+        if self.frame.is_some() {
+            return false;
+        }
+        self.frame = Some(frame);
+        self.last_frame_at = Some(captured_at);
+        true
+    }
+
     /// When the newest frame arrived (injected-clock epoch seconds).
     pub fn last_frame_at(&self) -> Option<f64> {
         self.last_frame_at
@@ -362,6 +379,34 @@ mod tests {
         assert_eq!(feed.display_layout_read(), ControlDisplayLayoutRead::Always);
         assert_eq!(feed.frame().expect("last frame").revision, 1);
         assert_eq!(feed.frame_age_secs(NOW + 9.0), Some(9.0));
+    }
+
+    #[test]
+    fn a_seed_fills_only_an_empty_feed_and_ages_from_its_own_stamp() {
+        let mut feed = CardFeedState::default();
+        feed.apply(&[entry(4, 1, vec![1, 0, 2, 0, 3, 0])], NOW);
+        let stored = feed.frame().expect("frame").clone();
+
+        let mut fresh = CardFeedState::default();
+        assert!(fresh.seed(stored.clone(), NOW - 3_600.0));
+        assert_eq!(fresh.frame(), Some(&stored));
+        assert_eq!(fresh.frame_age_secs(NOW), Some(3_600.0));
+        // The seed is memory, not a connection claim: the first live pull
+        // still asks for the layout and lands as a new frame.
+        assert_eq!(
+            fresh.display_layout_read(),
+            ControlDisplayLayoutRead::Always
+        );
+        assert!(
+            fresh
+                .apply(&[entry(4, 1, vec![9, 0, 8, 0, 7, 0])], NOW)
+                .new_frame,
+            "a pulled frame replaces the seed even at the same revision"
+        );
+
+        // A feed that already has a picture keeps it.
+        assert!(!feed.seed(stored, NOW - 3_600.0));
+        assert_eq!(feed.last_frame_at(), Some(NOW));
     }
 
     #[test]

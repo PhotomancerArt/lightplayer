@@ -50,7 +50,7 @@ MAX_CYCLES=400000000
 # steady-render captures after the compile, so its other windows would only
 # record zeros.
 STEADY_WINDOWS='["frame"]'
-DEFAULT_PROJECTS=(examples/basic examples/meteor)
+DEFAULT_PROJECTS=(projects/test/basic catalog/patterns/meteor)
 
 command -v jq >/dev/null 2>&1 || {
     echo "jq not found. Install it (brew install jq / apt-get install jq) to run the heap-budget gate."

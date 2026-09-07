@@ -25,6 +25,7 @@ use crate::app::share::project_relationship_panel::{
 use crate::app::share::relationship::ProjectRelationship;
 use crate::app::share::share_person::SharePerson;
 use crate::app::share::share_url::ShareUrl;
+use crate::cloud::sync::sync_status::SyncOutcomeKind;
 
 #[story(
     label = "Project popover — example",
@@ -44,7 +45,7 @@ pub(crate) fn project_popover_example() -> Element {
 
 #[story(
     label = "Project popover — mine, local",
-    description = "A project in this browser's library that the cloud has never answered for. Access has no controls because there is nothing published to control — the honest sentence stands in — and the Where section carries the publish line from the tab's auto-publish ledger (here: a retry, which is the state most worth reading). Slot 1 is the quiet owned verb, Duplicate (D11)."
+    description = "A project in this browser's library that the cloud has never answered for. Access has no controls because there is nothing published to control, and its sentence is the tab's auto-publish ledger's last word on THIS project (here: a retry, the state most worth reading — in the warning tone, in place of the generic \"Not shared\"). Slot 1 is the quiet owned verb, Duplicate (D11)."
 )]
 pub(crate) fn project_popover_mine_local() -> Element {
     panel(rsx! {
@@ -53,9 +54,8 @@ pub(crate) fn project_popover_mine_local() -> Element {
             relationship: ProjectRelationship::MineLocal,
             url: project_url(),
             publish: PublishStatus {
-                label: "retrying".to_string(),
-                detail: "Last attempt could not reach the cloud.".to_string(),
-                trouble: true,
+                kind: SyncOutcomeKind::Retrying,
+                detail: "the service was unreachable".to_string(),
             },
             export: export(),
             on_fork: EventHandler::new(|()| {}),

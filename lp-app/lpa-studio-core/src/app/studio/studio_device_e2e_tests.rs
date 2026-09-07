@@ -40,6 +40,8 @@ use lpa_link::providers::fake_device::{
     FakeBootState, FakeDeviceIdentity, FakeDeviceScript, FakeEsp32Device, FakeLightPlayerState,
 };
 
+use lpfs::AsLpPath;
+
 use crate::app::library::{LibraryStore, MemoryLibraryHost};
 use crate::app::places::DeviceRegistry;
 use crate::{
@@ -583,13 +585,35 @@ impl DeviceBench {
         chooser_grants: bool,
     ) -> (Self, TaskPool) {
         let clock = Rc::new(Cell::new(1_000.0));
+        let store = memory_store(Rc::clone(&clock));
+        Self::build_on(device, endpoint, granted, chooser_grants, clock, store)
+    }
+
+    /// A reload: a FRESH controller (empty roster, empty feeds) over the
+    /// store an earlier bench wrote to, with the clock carried forward —
+    /// the registry rows and the last-frame sidecars are what survive a
+    /// page reload, and nothing else does. No port grant: the board is
+    /// remembered, not seen.
+    fn reloaded(previous: &Self, device: &FakeEsp32Device, endpoint: &str) -> (Self, TaskPool) {
+        let clock = Rc::new(Cell::new(previous.clock.get()));
+        let store = memory_store_sharing(&previous.store);
+        Self::build_on(device, endpoint, false, false, clock, store)
+    }
+
+    fn build_on(
+        device: &FakeEsp32Device,
+        endpoint: &str,
+        granted: bool,
+        chooser_grants: bool,
+        clock: Rc<Cell<f64>>,
+        store: LibraryStore,
+    ) -> (Self, TaskPool) {
         let tasks: TaskPool = Rc::new(RefCell::new(Vec::new()));
         let inbox: Rc<RefCell<VecDeque<DeviceInput>>> = Rc::new(RefCell::new(VecDeque::new()));
         let granted = Rc::new(Cell::new(granted));
         let chooser_grants = Rc::new(Cell::new(chooser_grants));
         let revoked = Rc::new(RefCell::new(Vec::new()));
 
-        let store = memory_store(Rc::clone(&clock));
         let host = MemoryLibraryHost::new(memory_store_sharing(&store), {
             let clock = Rc::clone(&clock);
             Rc::new(move || clock.get())
@@ -1513,6 +1537,129 @@ fn a_running_board_feeds_its_card_over_the_shared_link() {
     );
 }
 
+/// The persisted last frame (honest-device-preview follow-up): a fed
+/// board's newest picture is written to its per-uid sidecar at most every
+/// ten seconds, and a RELOAD — a fresh controller over the same store, no
+/// port — rehydrates the remembered board's tile with that picture, dimmed
+/// as Offline, aged from the STORED capture stamp rather than from now.
+#[test]
+fn a_fed_boards_last_frame_survives_a_reload() {
+    let uid = "dev000000daqf6dvvt9";
+    let (mut bench, tasks) = running_board_wanting_a_picture(uid, "usb-feed-9");
+    let device = bench.view().devices[0].id;
+    let sidecar = crate::app::devices::device_frame_snapshot::snapshot_path(uid);
+    let sidecar_bytes = |bench: &DeviceBench| {
+        bench
+            .store
+            .fs_handle()
+            .borrow()
+            .read_file(sidecar.as_path())
+            .ok()
+    };
+
+    // The first frame is written as soon as it lands (nothing was written
+    // before, so the window does not apply).
+    let mut pulls = 0;
+    while feed_frame_revision(&bench, device).is_none() {
+        feed_tick(&mut bench, &tasks, 5.0);
+        pulls += 1;
+        assert!(pulls <= 2, "no frame after two pulls");
+        for _ in 0..40 {
+            bench.step(&tasks);
+        }
+    }
+    let first = sidecar_bytes(&bench).expect("the first frame is written at once");
+    let (stored, stored_at) =
+        crate::app::devices::device_frame_snapshot::decode(&first).expect("decodes");
+    let feed = bench.controller.device_feeds().get(device).expect("a feed");
+    let live = feed.frame().expect("the feed's frame");
+    // The packed layout form quantizes lamp centers, so the picture is
+    // compared by what a slot would draw from it, not bit for bit.
+    assert_eq!(stored.revision, live.revision);
+    assert_eq!(stored.bytes, live.bytes);
+    assert_eq!(stored.extent, live.extent);
+    assert!(stored.display_layout.is_some() && live.display_layout.is_some());
+    let live_at = feed
+        .frame_age_secs(bench.clock.get())
+        .map(|age| bench.clock.get() - age)
+        .expect("aged");
+    assert!(
+        (stored_at - live_at).abs() < 1e-6,
+        "the sidecar carries the frame's own capture stamp: {stored_at} vs {live_at}"
+    );
+
+    // Newer frames inside the ten-second window do not rewrite the file;
+    // once the window elapses, the newest one does.
+    for _ in 0..40 {
+        bench.step(&tasks);
+    }
+    feed_tick(&mut bench, &tasks, 5.0);
+    assert!(
+        feed_frame_revision(&bench, device).is_some_and(|rev| rev > stored.revision),
+        "the engine kept publishing"
+    );
+    assert_eq!(
+        sidecar_bytes(&bench).as_deref(),
+        Some(first.as_slice()),
+        "inside the window the sidecar stands"
+    );
+    bench
+        .clock
+        .set(bench.clock.get() + crate::DEVICE_FRAME_SNAPSHOT_INTERVAL_SECS);
+    feed_tick(&mut bench, &tasks, 5.0);
+    let second = sidecar_bytes(&bench).expect("still there");
+    let (newer, newer_at) =
+        crate::app::devices::device_frame_snapshot::decode(&second).expect("decodes");
+    assert!(newer.revision > stored.revision, "{newer:?} vs {stored:?}");
+    assert!(newer_at > stored_at);
+
+    // Reload: a fresh controller over the same store, the board unplugged
+    // an hour later. The registry row rehydrates the remembered board; the
+    // sidecar rehydrates its picture.
+    let (mut reloaded, _tasks) =
+        DeviceBench::reloaded(&bench, &empty_light_player(uid), "usb-feed-9");
+    reloaded.clock.set(reloaded.clock.get() + 3_600.0);
+    drive(reloaded.controller.settle_library());
+    let roster = reloaded.controller.device_roster_view();
+    let card = roster.roster.devices.first().expect("the remembered board");
+    assert_eq!(
+        card.status,
+        lpa_devices::device::DeviceStatus::Offline,
+        "{card:?}"
+    );
+    let feed_view = roster
+        .feeds
+        .get(&card.id)
+        .expect("the remembered board carries its last picture");
+    assert_eq!(feed_view.liveness, crate::FeedLiveness::Offline);
+    assert_eq!(feed_view.frame.as_ref(), Some(&newer));
+    let age = feed_view
+        .frame_age_secs
+        .expect("aged from the stored stamp");
+    assert!(
+        (age - (reloaded.clock.get() - newer_at)).abs() < 1e-6,
+        "age {age} should be measured from the stored stamp {newer_at}"
+    );
+    // The split the page draws puts it on the remembered line, picture
+    // attached.
+    let split = crate::split_roster(&roster);
+    assert!(split.connected.is_empty());
+    assert_eq!(split.remembered.len(), 1);
+
+    // What came from the store is never written back, and a second settle
+    // reads nothing new (idempotent).
+    reloaded.clock.set(reloaded.clock.get() + 60.0);
+    drive(reloaded.controller.settle_library());
+    assert!(
+        reloaded
+            .controller
+            .device_feeds()
+            .snapshots_due(reloaded.clock.get())
+            .is_empty()
+    );
+    assert_eq!(sidecar_bytes(&reloaded).as_deref(), Some(second.as_slice()));
+}
+
 /// AC3: while the editor lens holds the wire the feed does not pull — not
 /// one request — and it resumes the moment the wire comes back.
 #[test]
@@ -1920,11 +2067,30 @@ fn forgetting_an_identified_device_deletes_its_row_and_gives_the_grant_back() {
     assert_eq!(bench.registry().len(), 1);
     let device_id = bench.view().devices[0].id;
 
+    // A last-frame sidecar under the same uid, as a fed session leaves.
+    crate::app::devices::device_frame_snapshot::write_snapshot(
+        &*bench.store.fs_handle().borrow(),
+        "dev_forget",
+        b"{}",
+    )
+    .unwrap();
+
     bench.gesture(DeviceAction::Forget { device: device_id });
     bench.step(&tasks);
 
     assert!(bench.view().devices.is_empty(), "the card is gone");
     assert!(bench.registry().is_empty(), "so is the remembered row");
+    assert!(
+        !bench
+            .store
+            .fs_handle()
+            .borrow()
+            .file_exists(
+                crate::app::devices::device_frame_snapshot::snapshot_path("dev_forget").as_path()
+            )
+            .unwrap(),
+        "and so is any last-frame sidecar"
+    );
     assert_eq!(
         bench.revoked.borrow().len(),
         1,
@@ -2040,6 +2206,7 @@ fn a_flash_from_the_blank_pending_card_runs_to_ready_named_and_registered() {
         board_id: choice.board_id.clone(),
         build_id: choice.build_id.clone(),
         park_first: false,
+        name: None,
     });
 
     // The gesture adopts: the pending card becomes a device card, busy
@@ -2097,6 +2264,50 @@ fn a_flash_from_the_blank_pending_card_runs_to_ready_named_and_registered() {
     );
 }
 
+/// The same walk with a name typed into the board pick (the setup surface's
+/// optional field): the Flash carries it, the model records it as the user's
+/// name before the flash spawns, and the derived "<board> · <Mon D>" is
+/// never minted — the card and the registry row wear the typed name.
+#[test]
+fn a_flash_with_a_typed_name_wears_it_instead_of_the_derived_one() {
+    let device = blank_board();
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-flash-named");
+
+    bench.run_until(&tasks, "the blank verdict to settle", |bench| {
+        bench
+            .view()
+            .pending
+            .first()
+            .is_some_and(|pending| pending.needs_firmware())
+    });
+    let target = bench.view().pending[0].device;
+    let choice = c6_board_choice();
+
+    bench.gesture(DeviceAction::Flash {
+        device: target,
+        board_id: choice.board_id.clone(),
+        build_id: choice.build_id.clone(),
+        park_first: false,
+        name: Some("Porch lantern".to_string()),
+    });
+    bench.run_until(&tasks, "the flashed board to land Ready", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Ready" && card.activity.is_none())
+    });
+
+    let card = &bench.view().devices[0];
+    assert_eq!(
+        card.title, "Porch lantern",
+        "the typed name is the title (the surface trims before dispatching)"
+    );
+    let rows = bench.registry();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].name, "Porch lantern");
+}
+
 /// A mid-write failure lands on an honest problem face: outcome line with
 /// the tool's message, the needs-firmware face re-offered (retry in place),
 /// and every escape still present.
@@ -2120,6 +2331,7 @@ fn a_mid_write_failure_lands_on_an_honest_face_with_retry_in_place() {
         board_id: choice.board_id,
         build_id: choice.build_id,
         park_first: false,
+        name: None,
     });
     bench.run_until(&tasks, "the failure to settle", |bench| {
         bench
@@ -2167,6 +2379,7 @@ fn post_flash_silence_climbs_the_ladder_then_fails_with_honest_guidance() {
         board_id: choice.board_id,
         build_id: choice.build_id,
         park_first: false,
+        name: None,
     });
     bench.run_until(&tasks, "the ladder to exhaust", |bench| {
         bench
@@ -2215,6 +2428,7 @@ fn forgetting_mid_flash_evicts_the_hung_effect_and_cleans_up() {
         board_id: choice.board_id,
         build_id: choice.build_id,
         park_first: false,
+        name: None,
     });
     bench.run_until(&tasks, "the flash to be visibly running", |bench| {
         bench
@@ -2347,6 +2561,59 @@ fn the_empty_face_pushes_an_example_and_the_card_ends_up_running() {
     );
 }
 
+/// The New tab's naming: a starter pushed with a project name lands in the
+/// library under that name (not the board's), and the "name the board the
+/// same" offer, ticked, renames the board in the same gesture — folded as
+/// the user's own `SetName` before the push, so the card wears it whether or
+/// not the wire accepts the project.
+#[test]
+fn a_named_starter_push_names_the_library_package_and_the_board() {
+    let device = empty_light_player("dev000000daqf6dvvr9");
+    let (mut bench, tasks) = identified(&device, "usb-push-named");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let device_id = bench.view().devices[0].id;
+    assert_ne!(bench.view().devices[0].title, "Porch sign");
+
+    let action = crate::DevicePushOp {
+        device: device_id,
+        source: crate::PushSource::NewForBoard {
+            board_id: "seeed/xiao-esp32-c6".to_string(),
+            name: Some("Porch sign".to_string()),
+        },
+        device_name: Some("Porch sign".to_string()),
+    }
+    .into_action();
+    drive(bench.controller.dispatch(action)).expect("a push gesture never fails loudly");
+    bench.run_until(&tasks, "the push to settle", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+
+    let card = &bench.view().devices[0];
+    assert_eq!(
+        card.title, "Porch sign",
+        "the board took the project's name"
+    );
+    let library = bench.library();
+    assert_eq!(library.len(), 1, "{library:?}");
+    assert_eq!(
+        library[0].name, "Porch sign",
+        "the starter is named, not the board"
+    );
+    let rows = bench.registry();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].name, "Porch sign");
+}
+
 /// A push the board refuses lands on the problem face: the outcome line says
 /// what happened, the picker is still there (retry in place), and every
 /// escape survives.
@@ -2410,6 +2677,7 @@ fn a_project_that_cannot_be_prepared_fails_on_the_card_not_in_a_log() {
         device_id,
         crate::PushSource::NewForBoard {
             board_id: "no-such-board".to_string(),
+            name: None,
         },
     );
     bench.run_until(&tasks, "the refusal to settle", |bench| {
@@ -2688,6 +2956,111 @@ fn a_refused_removal_leaves_the_running_face_and_says_why() {
         "the board is still running it, and the card says so: {card:?}"
     );
     assert!(!card.escapes.is_empty(), "always a way out");
+}
+
+/// A removal whose conversation never ends. The cancel is HELD rather than
+/// honoured mid-delete (the board's project dir is already part-gone;
+/// stopping there would leave it loading half a project), so the push grace
+/// is what bounds the hold and eviction is the backstop — the same physics
+/// the push has, from the other direction.
+///
+/// What the card must come back saying: not a success, always escapable, and
+/// — the part only this scenario reaches — NOT empty. The removal was never
+/// confirmed by the board, and the empty face is drawn from the board's own
+/// report or not at all.
+#[test]
+fn cancelling_mid_removal_is_held_then_bounded_by_eviction() {
+    let device = empty_light_player("dev000000daqf6dvvr6");
+    let (mut bench, tasks) = identified(&device, "usb-remove-3");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let device_id = bench.view().devices[0].id;
+    bench.push_gesture(device_id, bundled_example());
+    bench.run_until(&tasks, "the board to be running it", |bench| {
+        bench.view().devices.first().is_some_and(|card| {
+            card.activity.is_none()
+                && matches!(
+                    card.loaded_project,
+                    lpa_devices::view::LoadedProject::Running { .. }
+                )
+        })
+    });
+
+    // The delete takes the wire and never gives it back.
+    bench.remove_plan.set(RemovePlan::Hang);
+    bench.gesture(DeviceAction::RemoveProject { device: device_id });
+    bench.run_until(&tasks, "the removal to be visibly running", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_some())
+    });
+
+    bench.gesture(DeviceAction::CancelActivity { device: device_id });
+    let asked_at = bench.controller.device_now_for_test().0;
+    assert!(
+        bench.view().devices[0]
+            .activity
+            .as_ref()
+            .is_some_and(|activity| activity.cancel_requested),
+        "the card says it is cancelling rather than stopping mid-delete"
+    );
+
+    // The cancel does not end the activity by itself: the hung effect still
+    // owns the wire, so the hold outlives the request. 40 turns is 200 ms of
+    // the 500 ms grace — the card is still mid-removal here, and what ends
+    // it below is the grace expiring, not the asking.
+    for _ in 0..40 {
+        bench.step(&tasks);
+    }
+    assert!(
+        bench.view().devices[0].activity.is_some(),
+        "still mid-removal 200 ms in: the asking alone does not end it: {:?}",
+        bench.view().devices[0]
+    );
+
+    bench.run_until(&tasks, "the cancel grace to bound the hold", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none())
+    });
+
+    // It is the push GRACE that bounded the hold — the removal shares the
+    // push's physics — and not the far-off supervision deadline that would
+    // leave the card mid-removal for another twenty seconds. Pinning the
+    // window is what tells those two apart.
+    let held_ms = bench.controller.device_now_for_test().0 - asked_at;
+    assert!(
+        held_ms < 2_000,
+        "the hold ended on the 500 ms push grace, not the 20 s deadline; held {held_ms} ms"
+    );
+
+    let card = bench.view().devices[0].clone();
+    assert!(
+        card.last_outcome
+            .as_ref()
+            .is_some_and(|outcome| !outcome.ok),
+        "an interrupted removal is not a success: {card:?}"
+    );
+    assert!(!card.escapes.is_empty(), "always a way out");
+    assert_ne!(
+        card.loaded_project,
+        lpa_devices::view::LoadedProject::Empty,
+        "no board ever reported empty, so the card must not claim it: {card:?}"
+    );
+    assert_eq!(
+        bench.library().len(),
+        1,
+        "the library copy is untouched by a removal that never landed"
+    );
 }
 
 /// C2 (G1 bench, 2026-08-31): an effect that outlives its activity must give

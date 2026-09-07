@@ -460,6 +460,12 @@ opt-level = 3
 # cap. See third_party/esp-alloc/README-LP.md.
 esp-alloc = { path = "third_party/esp-alloc" }
 esp-storage = { path = "third_party/esp-storage" }
+# esp-hal 1.1.1 fork: `#[ram]` on the three helpers the `#[ram]` Xtensa
+# level-1/2/3 interrupt entries call on every peripheral interrupt
+# (`InterruptStatus::current`, `InterruptStatusIterator::next`, `mapped_to_raw`),
+# so the RMT refill interrupt's dispatch never fetches from flash. See
+# third_party/esp-hal/README-LP.md and docs/debt/classic-iram-handlers-reach-flash.md.
+esp-hal = { path = "third_party/esp-hal" }
 # naga 29.0.0 fork: glsl-in lowers `&&`/`||` with side-effecting right operands
 # to control flow so they short-circuit per the GLSL spec (upstream evaluates
 # eagerly). See third_party/naga/README-LP.md; candidate for an upstream PR.

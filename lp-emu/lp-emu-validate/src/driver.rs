@@ -36,7 +36,17 @@ pub const RV32_TARGET: &str = "riscv32imac-unknown-none-elf";
 pub const FW_ESP32C6_PROFILE: &str = "release-esp32";
 pub const C6_FLASH_SIZE: &str = "4mb";
 pub const C6_PARTITIONS: &str = "lp-fw/fw-esp32c6/partitions.csv";
-pub const FW_ESP32C6_MANIFEST: &str = "lp-fw/fw-esp32c6/Cargo.toml";
+/// The firmware package's directory, and the only place its build may run
+/// from. `lp-fw/fw-esp32c6/.cargo/config.toml` carries `-Tlinkall.x`,
+/// `-Zbuild-std` and the flash-budget flags, and Cargo resolves a config from
+/// the **current directory** upward — never from `--manifest-path`. Building
+/// this package from the repository root therefore links without a linker
+/// script and dies on every symbol in `__EXTERNAL_INTERRUPTS` (`undefined
+/// symbol: GPIO`, `WIFI_MAC`, …). The `justfile` has always `cd`-ed here
+/// (`build-fw-esp32c6`), and so does
+/// `scripts/emu/build-reference-image.sh`; this constant is that same rule for
+/// the runner's plans. Found at G3 sitting 1, 2026-09-07.
+pub const FW_ESP32C6_DIR: &str = "lp-fw/fw-esp32c6";
 pub const DESK_STEP_SCRIPT: &str = "scripts/spike/esp-emu/desk-espflash-step.sh";
 
 /// The environment variable naming the `esp-emu` binary (spike report §1, §10).
@@ -124,6 +134,10 @@ pub struct PlanStep {
     pub describe: String,
     pub command: Vec<String>,
     pub env: Vec<(String, String)>,
+    /// Run this step somewhere other than the plan's `cwd`, relative to it.
+    /// Only the firmware build needs it, and it needs it absolutely: see
+    /// [`FW_ESP32C6_DIR`].
+    pub cwd: Option<String>,
     /// Why this step is shaped this way, when the shape is load-bearing.
     pub note: Option<String>,
 }
@@ -134,12 +148,18 @@ impl PlanStep {
             describe: describe.into(),
             command,
             env: Vec::new(),
+            cwd: None,
             note: None,
         }
     }
 
     fn with_env(mut self, k: &str, v: impl Into<String>) -> Self {
         self.env.push((k.to_string(), v.into()));
+        self
+    }
+
+    fn in_dir(mut self, dir: &str) -> Self {
+        self.cwd = Some(dir.to_string());
         self
     }
 
@@ -155,7 +175,13 @@ impl PlanStep {
             .map(|(k, v)| format!("{k}={}", shell_quote(v)))
             .collect::<Vec<_>>();
         let argv = self.command.iter().map(|a| shell_quote(a));
-        env.into_iter().chain(argv).collect::<Vec<_>>().join(" ")
+        let line = env.into_iter().chain(argv).collect::<Vec<_>>().join(" ");
+        // A printed plan is meant to be pasted from the repository root, so a
+        // step that runs elsewhere has to say so in the line itself.
+        match &self.cwd {
+            Some(dir) => format!("(cd {} && {line})", shell_quote(dir)),
+            None => line,
+        }
     }
 }
 
@@ -256,8 +282,6 @@ impl ConfigurationDriver for SiliconDriver {
                 vec![
                     "cargo".into(),
                     "build".into(),
-                    "--manifest-path".into(),
-                    FW_ESP32C6_MANIFEST.into(),
                     "--target".into(),
                     RV32_TARGET.into(),
                     "--profile".into(),
@@ -265,7 +289,8 @@ impl ConfigurationDriver for SiliconDriver {
                     "--features".into(),
                     req.features().join(","),
                 ],
-            ),
+            )
+            .in_dir(FW_ESP32C6_DIR),
             PlanStep::new(
                 "flash and monitor in the foreground, stop at the sentinel",
                 vec![
@@ -360,8 +385,6 @@ impl ConfigurationDriver for EspEmuDriver {
                 vec![
                     "cargo".into(),
                     "build".into(),
-                    "--manifest-path".into(),
-                    FW_ESP32C6_MANIFEST.into(),
                     "--target".into(),
                     RV32_TARGET.into(),
                     "--profile".into(),
@@ -370,6 +393,7 @@ impl ConfigurationDriver for EspEmuDriver {
                     req.features().join(","),
                 ],
             )
+            .in_dir(FW_ESP32C6_DIR)
             .with_note(
                 "spike_uart0_link is on because the emulator has no USB host: the shipped \
                  image's USB-Serial-JTAG link cannot be served there (spike report §4, §5.1)",
@@ -502,8 +526,6 @@ impl ConfigurationDriver for LpEmuDriver {
                         vec![
                             "cargo".into(),
                             "build".into(),
-                            "--manifest-path".into(),
-                            FW_ESP32C6_MANIFEST.into(),
                             "--target".into(),
                             RV32_TARGET.into(),
                             "--profile".into(),
@@ -512,6 +534,7 @@ impl ConfigurationDriver for LpEmuDriver {
                             req.features().join(","),
                         ],
                     )
+                    .in_dir(FW_ESP32C6_DIR)
                     .with_note(
                         "spike_uart0_link is on for the same reason it is on for esp-emu: this \
                          machine models the USB-Serial-JTAG block with no host attached (M6 owns \
@@ -710,7 +733,10 @@ fn run_steps(plan: &RunPlan) -> Result<()> {
             .split_first()
             .with_context(|| format!("step {} has no command", i + 1))?;
         let mut cmd = Command::new(program);
-        cmd.current_dir(&plan.cwd);
+        match &step.cwd {
+            Some(dir) => cmd.current_dir(plan.cwd.join(dir)),
+            None => cmd.current_dir(&plan.cwd),
+        };
         cmd.args(args);
         for (k, v) in &step.env {
             cmd.env(k, v);

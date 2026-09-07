@@ -76,12 +76,12 @@ is the reminder mechanism. The ritual, alongside `just format-bump`:
   recovered whole from the same commit.
 - `tests/corpus/v4/_expected/<project>/` — what this crate produces. These
   are **our** contract, human-reviewed once and frozen thereafter. They
-  deliberately do not match today's `examples/` and `projects/test/`, which
+  deliberately do not match today's `catalog/` and `projects/test/`, which
   were hand-polished past behavior preservation.
 - `tests/corpus/v5/<project>/` — real format-5 projects: the two frozen
   `schemas/history/v5/fixtures/` snapshots (`quad-strips-v3`, a bare
   single-shader project; `fyeah-sign`, multi-shader), plus `basic` (pulled
-  from `examples/basic/`), chosen because its `shader.glsl` has two comments
+  from `projects/test/basic/`), chosen because its `shader.glsl` has two comments
   that literally contain the word `render` next to the entry — proof the
   signature-anchored rename does not touch comment text.
 - `tests/corpus/v5/_expected/<project>/` — same contract as the v4 goldens,

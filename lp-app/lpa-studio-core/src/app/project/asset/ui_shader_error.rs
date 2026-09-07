@@ -12,6 +12,20 @@
 //!   | ^^^
 //! ```
 //!
+//! The GPU preview tier (`lp-gfx-wgpu/src/wgsl_compile.rs`) renders naga's
+//! codespan diagnostics and its own unbounded-loop refusal behind a stage
+//! tag, with the marker already in authored coordinates (the producer
+//! shifts spans out of its assembled unit, as the CPU-tier naga frontend
+//! does):
+//!
+//! ```text
+//! shader compile: naga glsl-in: error: Expected ';', found '}'
+//!   ┌─ glsl:3:13
+//!   │
+//! 3 │     float bad = ;
+//!   │             ^
+//! ```
+//!
 //! Parsing is a **client-side presentation concern** — the wire keeps
 //! carrying one string, and not every error has a location (recovery-denied
 //! "compilation blocked" text, panic messages). Unparseable input degrades
@@ -58,17 +72,27 @@ impl UiShaderError {
 /// Observed live wrappings include
 /// `shader compile: Error: validation: ...`,
 /// `shader compile: parse: error: ...`,
-/// `shader compile: parse: GLSL parse error: error: ...`, and the
+/// `shader compile: parse: GLSL parse error: error: ...`, the
 /// render-time double prefix `shader render: render: ...` (the engine's
 /// `err_ctx("shader render")` around `LpsError::Render`'s own `render:`
-/// tag) — the pieces interleave, so peel case-insensitive `error:` around
-/// each tag.
+/// tag), and the GPU tier's `shader compile: naga glsl-in: error: ...` /
+/// `shader compile: naga validation: error: ...` — the pieces interleave,
+/// so peel case-insensitive `error:` around each tag.
 fn strip_error_prefixes(line: &str) -> &str {
     const STAGE_PREFIXES: [&str; 5] = ["parse:", "lower:", "compile:", "render:", "validation:"];
     const CONTEXT_PREFIXES: [&str; 2] = ["shader compile:", "shader render:"];
+    /// The GPU tier names the naga stage that failed
+    /// (`lp-gfx-wgpu/src/wgsl_compile.rs`).
+    const GPU_STAGE_PREFIXES: [&str; 3] = ["naga glsl-in:", "naga validation:", "naga wgsl-out:"];
 
     let mut line = line.trim_start();
     for prefix in CONTEXT_PREFIXES {
+        if let Some(rest) = line.strip_prefix(prefix) {
+            line = rest.trim_start();
+            break;
+        }
+    }
+    for prefix in GPU_STAGE_PREFIXES {
         if let Some(rest) = line.strip_prefix(prefix) {
             line = rest.trim_start();
             break;
@@ -164,6 +188,41 @@ mod tests {
         let parsed = UiShaderError::parse(text);
         assert_eq!(parsed.message, "Expected ';', found '}'");
         assert_eq!(parsed.line_col, Some((4, 13)));
+    }
+
+    #[test]
+    fn parses_the_gpu_tier_loop_refusal_at_the_authored_line() {
+        // The exact text `lp-gfx-wgpu`'s loop refusal produces for the
+        // fault-demo rig (`loop_bound_pass::describe_unbounded_loop`, pinned
+        // by `fault_demo_is_refused_at_gpu_compile_time`), behind the
+        // engine's `shader compile:` wrapper. Line 14 is the rig's authored
+        // `while (true)` line — the assembled unit the GPU tier compiles
+        // puts the lpfn prelude and prototypes in front of it.
+        let text = "shader compile: unbounded loop in `render_2d` at line 14 (`while (true) { acc += 0.001; }`): no path through the loop body breaks, returns or discards. The GPU tier has no fuel meter, so it refuses to compile a loop that can never exit.\n   ┌─ glsl:14:5\n   │\n14 │     while (true) { acc += 0.001; }\n   │     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n";
+        let parsed = UiShaderError::parse(text);
+        assert!(
+            parsed
+                .message
+                .starts_with("unbounded loop in `render_2d` at line 14 (`while (true)"),
+            "{}",
+            parsed.message
+        );
+        assert_eq!(parsed.line_col, Some((14, 5)));
+    }
+
+    #[test]
+    fn strips_the_gpu_tier_naga_stage_tags() {
+        // naga glsl-in through the GPU tier, at authored coordinates.
+        let text = "shader compile: naga glsl-in: error: Expected ';', found '}'\n  ┌─ glsl:3:13\n  │\n3 │     float bad = ;\n  │             ^";
+        let parsed = UiShaderError::parse(text);
+        assert_eq!(parsed.message, "Expected ';', found '}'");
+        assert_eq!(parsed.line_col, Some((3, 13)));
+
+        // naga validation, relabelled `glsl` by the producer.
+        let text = "shader compile: naga validation: error: Global variable [1] 'weights' is invalid\n  ┌─ glsl:2:21\n  │\n2 │ layout(binding = 1) uniform float weights[4];\n  │                     ^^^^^^^^^^^^^^^^^^^^^^^^^ naga::GlobalVariable [1]\n  │\n  = Alignment requirements for address space Uniform are not met by float";
+        let parsed = UiShaderError::parse(text);
+        assert_eq!(parsed.message, "Global variable [1] 'weights' is invalid");
+        assert_eq!(parsed.line_col, Some((2, 21)));
     }
 
     #[test]

@@ -24,7 +24,7 @@
 //! `(`, as a whole word in both directions. A comment mentioning the word
 //! `render` — `// define helpers before render().` — never carries that
 //! exact four-token shape immediately adjacent, so it survives untouched;
-//! the corpus fixture `basic` (pulled from `examples/basic/shader.glsl`,
+//! the corpus fixture `basic` (pulled from `projects/test/basic/shader.glsl`,
 //! which has exactly such a comment right above its entry) proves it.
 //!
 //! `project.json`'s own `format` field is bumped `7` → `8` the same way

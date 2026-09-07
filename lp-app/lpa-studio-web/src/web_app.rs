@@ -1372,9 +1372,10 @@ fn project_popover_inputs(
         _ => None,
     };
 
-    // The publish line, from the ledger the auto-publish driver keeps for
-    // this tab. No row is not a failure — it is a driver that has not
-    // concluded a trip for this project — and the panel says so.
+    // The `MineLocal` Access sentence's source: this project's row in the
+    // ledger the auto-publish driver keeps for this tab. No row is not a
+    // failure — it is a driver that has not concluded a trip for this
+    // project — and the panel keeps its static wording for that.
     let publish = library_uid
         .as_ref()
         .filter(|_| relationship == ProjectRelationship::MineLocal)
@@ -1385,9 +1386,8 @@ fn project_popover_inputs(
                 .find(|row| &row.uid == uid)
         })
         .map(|row| PublishStatus {
-            label: row.kind.label().to_string(),
+            kind: row.kind,
             detail: row.detail,
-            trouble: row.kind.is_failure(),
         });
 
     let transient = matches!(
@@ -1940,6 +1940,7 @@ mod tests {
         UiChromeSessionControl {
             kind: UiChromeSessionKind::Sim,
             key: "runtime-sim".to_string(),
+            device: None,
             name: "Sim".to_string(),
             board: Some("ESP32-C6".to_string()),
             status: UiChromeSessionStatus::Run,

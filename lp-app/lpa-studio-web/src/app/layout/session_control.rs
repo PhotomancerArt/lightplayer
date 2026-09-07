@@ -68,6 +68,7 @@ use lpa_studio_core::{
 use lpc_cloud_api::Access;
 
 use crate::app::affordance::affordance_trigger_style;
+use crate::app::home::device_roster_card::DeviceRenameSection;
 use crate::app::home::package_export::ExportTarget;
 use crate::app::project::pending_edit_section::{
     PendingEditBucket, PendingEditList, bucket_section_tint, entries_in,
@@ -273,7 +274,10 @@ pub fn SessionProjectControl(control: ChromeSessionControl) -> Element {
                     },
                     match section() {
                         ControlSegment::Device => rsx! {
-                            SessionDevicePanel { session: device_panel_session.clone() }
+                            SessionDevicePanel {
+                                session: device_panel_session.clone(),
+                                on_action: Some(on_action),
+                            }
                         },
                         ControlSegment::Project => rsx! {
                             // THE relationship skeleton (D9, amended by D14:
@@ -296,6 +300,7 @@ pub fn SessionProjectControl(control: ChromeSessionControl) -> Element {
                                     created: project.created().map(str::to_string),
                                     fork_generation: project_popover.fork_generation,
                                     details: Some(project.clone()),
+                                    on_action: Some(on_action),
                                     on_fork: project_popover.on_fork,
                                     fork_blocked: project_popover.fork_blocked.clone(),
                                     on_copy: project_popover.on_copy,
@@ -557,10 +562,21 @@ fn next_panel_state(
 /// when it retires (D13); nothing new is plumbed for it here.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn SessionDevicePanel(session: UiChromeSessionControl) -> Element {
+pub fn SessionDevicePanel(
+    session: UiChromeSessionControl,
+    /// Dispatch for the rename form. `None` renders the panel read-only
+    /// (a surface with nowhere to send the gesture — stories, previews).
+    #[props(default)]
+    on_action: Option<EventHandler<UiAction>>,
+) -> Element {
     let run = run_word(&session);
     let stat_line = device_stat_line(&session);
     let hint = session_hint(session.kind);
+    // The one verb the panel carries: a DEVICE lens has a name of its own
+    // to change (the sim is the sim). The same section the device card's
+    // header menu holds, because this panel is the other place the name
+    // is shown.
+    let rename = session.device.zip(on_action);
     rsx! {
         section { class: "tw:grid tw:gap-0.5 tw:bg-card-muted tw:px-3 tw:py-2",
             div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2",
@@ -580,6 +596,9 @@ pub fn SessionDevicePanel(session: UiChromeSessionControl) -> Element {
                     "{stat_line}"
                 }
             }
+        }
+        if let Some((device, on_action)) = rename {
+            DeviceRenameSection { device, title: session.name.clone(), on_action }
         }
         section { class: "tw:border-t tw:border-border-muted tw:px-3 tw:py-1.5",
             p { class: "tw:m-0 tw:text-[10px] tw:italic tw:leading-snug tw:text-dim-foreground",
@@ -1037,6 +1056,7 @@ mod tests {
         UiChromeSessionControl {
             kind: UiChromeSessionKind::Sim,
             key: "runtime-sim".to_string(),
+            device: None,
             name: "Sim".to_string(),
             board: board.map(str::to_string),
             status: UiChromeSessionStatus::Run,

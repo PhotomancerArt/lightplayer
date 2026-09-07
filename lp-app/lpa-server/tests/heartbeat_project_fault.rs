@@ -6,7 +6,7 @@
 //! above is decoration (2026-09-01 bench: a C6 read "Running" for two days
 //! while its only shader was quarantined).
 //!
-//! `examples/fault-demo` is the subject on purpose: a shader that compiles
+//! `projects/test/fault-demo` is the subject on purpose: a shader that compiles
 //! and then traps on fuel every frame, deterministic on every backend and
 //! incapable of crashing a board.
 
@@ -32,9 +32,11 @@ fn workspace_dir() -> PathBuf {
         .to_path_buf()
 }
 
-/// A server whose project store IS the checked-in `examples/` directory, so
-/// `/fault-demo` loads the real example rather than a rebuilt lookalike.
-fn server_over_examples() -> (
+/// A server whose project store IS one checked-in project root (`projects/test/` for the fault-demo rig, `catalog/patterns/` for pulse), so
+/// `/fault-demo` loads the real rig rather than a rebuilt lookalike.
+fn server_over(
+    root: &str,
+) -> (
     LpServer,
     Rc<RefCell<dyn lpc_shared::output::OutputProvider>>,
 ) {
@@ -42,7 +44,7 @@ fn server_over_examples() -> (
         Rc::new(RefCell::new(MemoryOutputProvider::new()));
     let graphics: Arc<dyn LpGraphics> =
         Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
-    let base_fs = Box::new(LpFsStd::new(workspace_dir().join("examples")));
+    let base_fs = Box::new(LpFsStd::new(workspace_dir().join(root)));
     let server = LpServer::new(
         output_provider.clone(),
         base_fs,
@@ -81,7 +83,7 @@ fn load(
 
 #[test]
 fn a_faulting_project_reports_its_fault_to_the_heartbeat() {
-    let (mut server, output) = server_over_examples();
+    let (mut server, output) = server_over("projects/test");
     load(&mut server, output, "fault-demo");
 
     // Warm past the compile-window deferral: the first render only REQUESTS
@@ -122,7 +124,7 @@ fn a_faulting_project_reports_its_fault_to_the_heartbeat() {
 fn a_healthy_project_reports_no_fault() {
     // The other half of the guard: the card must never wear a degraded face
     // over a board that is simply running.
-    let (mut server, output) = server_over_examples();
+    let (mut server, output) = server_over("catalog/patterns");
     load(&mut server, output, "pulse");
 
     for _ in 0..5 {

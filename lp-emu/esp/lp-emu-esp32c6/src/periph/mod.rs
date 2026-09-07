@@ -9,12 +9,13 @@
 //!   back, with the bits it spins on pinned to the value the discovery cites.
 //! - **modelled, P6** — [`uart`] (the FIFOs, the shifter at baud, the
 //!   thresholds and receive timeout, a host stream outside), [`usb_sj`] (the
-//!   honest *no host attached* USB-Serial-JTAG), [`pcr`] (the P5 accept
+//!   honest USB-Serial-JTAG: host absent, attached-idle or attached-draining,
+//!   M6 P2), [`pcr`] (the P5 accept
 //!   block, now also feeding the UART clock lines), [`wifi_stub`] (the radio
 //!   window as one accept block driven by the spin detector).
 //! - **not modelled** — left unmapped on purpose, so a strict run stops on
 //!   them: RMT's channels (M5), SPI flash behaviour (M4 — SPI0/SPI1 are
-//!   accept), the attached/draining USB states (M6).
+//!   accept).
 //!
 //! Every constant that is a *guess* is marked `modeled` where it is defined;
 //! the README's peripheral table repeats the grades.
@@ -63,19 +64,25 @@ pub struct HostStreams {
     /// UART1's outside. The firmware never opens UART1; a machine that
     /// wants its bytes gives it a stream.
     pub uart1: Option<StreamId>,
-    /// Where USB-Serial-JTAG's IN-endpoint bytes are **observed** — what the
-    /// guest tried to print with no host to read it.
+    /// USB-Serial-JTAG's outside: what a host **received** from the IN
+    /// endpoint (sink) and what it **sent** to the OUT endpoint (source).
     pub usb_sj: Option<StreamId>,
+    /// USB-Serial-JTAG's observation stream: bytes the guest handed to the
+    /// IN endpoint that no host took (pushed with no host, dropped past a
+    /// committed FIFO, dropped by a bus reset).
+    pub usb_sj_tried: Option<StreamId>,
 }
 
 /// The whole boot set, in [`crate::machine::PERIPHERAL_REGISTRATION_ORDER`].
 ///
 /// `efuse` seeds the EFUSE block; `seed` seeds the RNG; `streams` are the
-/// consoles' outsides. Everything else is the same on every machine.
+/// consoles' outsides; `usb_host` is the USB host's state at power-on.
+/// Everything else is the same on every machine.
 pub fn boot_set(
     efuse: EfuseIdentity,
     seed: u64,
     streams: HostStreams,
+    usb_host: usb_sj::HostState,
 ) -> Vec<(u32, u32, BoxedPeripheral)> {
     let clocks = pcr::UartClockLines::default();
     vec![
@@ -128,7 +135,11 @@ pub fn boot_set(
         (
             base::USB_DEVICE,
             0x100,
-            Box::new(usb_sj::UsbSerialJtag::new(streams.usb_sj)),
+            Box::new(usb_sj::UsbSerialJtag::new(
+                streams.usb_sj,
+                streams.usb_sj_tried,
+                usb_host,
+            )),
         ),
         (base::IO_MUX, 0x100, Box::new(accept::io_mux())),
         (base::GPIO, 0x700, Box::new(accept::gpio())),

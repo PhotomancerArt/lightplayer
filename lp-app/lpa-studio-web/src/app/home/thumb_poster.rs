@@ -231,7 +231,7 @@ mod tests {
     #[test]
     fn a_stored_poster_comes_back_for_its_source() {
         clear();
-        let source = PreviewSource::Example("examples/plasma".to_string());
+        let source = PreviewSource::Example("catalog/plasma".to_string());
         assert_eq!(cached_poster(&source), None);
         store_poster(&source, "data:image/png;base64,AAA".to_string());
         assert_eq!(
@@ -240,7 +240,7 @@ mod tests {
         );
         // A different source is a different picture, never this one.
         assert_eq!(
-            cached_poster(&PreviewSource::ProjectUid("examples/plasma".to_string())),
+            cached_poster(&PreviewSource::ProjectUid("catalog/plasma".to_string())),
             None
         );
     }
