@@ -326,14 +326,6 @@ destination now is what keeps the next person from inventing a third home.
   forgotten; see the defect's round 2. No-saved-head projects are still
   not healed: the tick treats their `Nothing` as a settled verdict.
 - **`MineLocal` folds "service-silent" in** — unpublished, restricted, and
-  a driver that never got the project to the service all read as the same
-  "Not shared" sentence; only the `/account` ledger says which.
-  **Revisit when** the panel can read the ledger row for its own uid.
-- **Provenance prose** ("Forked from Plasma Duo") is not reachable from an
-  open project: it lives on `PackageMeta` and surfaces only on gallery
-  cards. The Where section says what this surface actually knows;
-  **revisit when** the editor view carries provenance.
-- **`MineLocal` folds "service-silent" in** — unpublished, restricted, and
   a driver that never got the project to the service all derive the same
   way, and the roster answer alone cannot tell them apart; only the
   `/account` ledger said which. *Closed 2026-09-07:* the panel now reads
@@ -348,3 +340,7 @@ destination now is what keeps the next person from inventing a third home.
   with no ledger row keeps the static wording: no row is a driver that has
   not run, not a failure. The driver's recorded sentence is now in a
   person's words for the actionable failures (`sync_trip::describe_error`).
+- **Provenance prose** ("Forked from Plasma Duo") is not reachable from an
+  open project: it lives on `PackageMeta` and surfaces only on gallery
+  cards. The Where section says what this surface actually knows;
+  **revisit when** the editor view carries provenance.
