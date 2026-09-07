@@ -147,5 +147,12 @@ pub fn boot_set(
             base::WIFI_PWR_LEN,
             Box::new(wifi_stub::WifiStub::pwr()),
         ),
+        // The PHY's I2C burst command memory, after the radio window: the
+        // first block `phy_i2c_master_cmd_mem_init` reaches past it.
+        (
+            base::I2C_MST_MEM,
+            base::I2C_MST_MEM_LEN,
+            Box::new(wifi_stub::WifiStub::i2c_mst_mem()),
+        ),
     ]
 }

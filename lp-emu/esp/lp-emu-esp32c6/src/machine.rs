@@ -138,6 +138,9 @@ pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     // gap is the first radio block the ROM's `tsf_hal_*` touches.
     "WIFI_MAC",
     "WIFI_PWR",
+    // The analog I2C master's command memory (P6, G6-2 finding 1): libphy
+    // fills it right after its first radio-window writes.
+    "I2C_MST_MEM",
 ];
 
 /// Which cycle model a run uses. Both grades are the same machine; only the

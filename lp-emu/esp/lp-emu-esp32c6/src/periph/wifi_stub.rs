@@ -67,6 +67,18 @@ pub const OVERRIDES: &[(u32, u32, u32, &str)] = &[];
 /// The `WIFI_PWR` block's override list; same rule, same shape.
 pub const PWR_OVERRIDES: &[(u32, u32, u32, &str)] = &[];
 
+/// Coarse names for the third block, `I2C_MST_MEM`
+/// (`memmap::periph::I2C_MST_MEM`, the analog I2C master's burst command
+/// memory at `I2C_ANA_MST + 0x400`). Not in the PAC (`i2c_ana_mst` ends at
+/// `date`, `+0x34`). P6's first G6-2 finding: the memfs boot-idle image ran
+/// strict to 27.8 ms and stopped on
+/// `W4 0x600afc00 = 0x00060267 from phy_i2c_master_cmd_mem_init+0xc`. That
+/// the words are the analog master's burst commands is an inference from
+/// the writer's name, the PAC's `burst_conf`/`burst_status` pair and the
+/// address (`+0x400` from the master's own block); nothing here executes
+/// them.
+pub const I2C_MST_MEM_COARSE_NAMES: &[(u32, u32, &str)] = &[(0x0000, 0x0400, "cmd_mem")];
+
 /// `WIFI_PWR + 0x3700` (`0x600A_D000`): a free-running **microsecond
 /// counter**, the one register in either block that is live rather than
 /// remembered. Evidence: the blob's `wait_i2c_sdm_stable`
@@ -120,6 +132,21 @@ impl WifiStub {
             name: "WIFI_PWR",
             names: PWR_COARSE_NAMES,
             regs,
+            touched: BTreeSet::new(),
+        }
+    }
+
+    /// `I2C_MST_MEM`: `0x600A_FC00..0x600B_0000`, the PHY's I2C burst command
+    /// memory as a plain accept-and-remember block with the touch log — the
+    /// PHY writes its command words here at init and the analog master
+    /// executes them from it; nothing reads them back from the CPU side, so
+    /// remembering is the whole model. No override list: no `SPIN` has ever
+    /// landed here.
+    pub fn i2c_mst_mem() -> Self {
+        Self {
+            name: "I2C_MST_MEM",
+            names: I2C_MST_MEM_COARSE_NAMES,
+            regs: RegFile::new("I2C_MST_MEM", crate::memmap::periph::I2C_MST_MEM_LEN),
             touched: BTreeSet::new(),
         }
     }
@@ -244,6 +271,13 @@ mod tests {
         assert_eq!(touches.len(), 2, "{touches:?}");
         assert!(touches[0].contains("WIFI_MAC TOUCH +0x1234 mac (W; 1 distinct so far)"));
         assert!(touches[1].contains("+0x97fc bb (R; 2 distinct so far)"));
+
+        let mut c = WifiStub::i2c_mst_mem();
+        assert_eq!(c.name(), "I2C_MST_MEM");
+        assert_eq!(c.reg_name(0x0000), Some("cmd_mem"));
+        assert_eq!(c.reg_name(0x0400), None);
+        sb.write(&mut c, 0x0000, 0x0006_0267);
+        assert_eq!(sb.read(&mut c, 0x0000), 0x0006_0267, "a command word is remembered");
 
         let mut p = WifiStub::pwr();
         assert_eq!(p.name(), "WIFI_PWR");

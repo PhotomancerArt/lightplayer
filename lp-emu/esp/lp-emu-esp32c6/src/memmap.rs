@@ -136,6 +136,15 @@ pub mod periph {
     pub const WIFI_PWR_LEN: u32 = 0x5700;
     pub const MODEM_LPCON: u32 = 0x600A_F000;
     pub const I2C_ANA_MST: u32 = 0x600A_F800;
+    /// The analog I2C master's burst **command memory**: `I2C_ANA_MST +
+    /// 0x400`, up to PMU. The PAC's `i2c_ana_mst` block has `burst_conf` /
+    /// `burst_status` and ends at `date` (`+0x34`); the memory the bursts
+    /// read their commands from is not in it. Found in P6 by the strict-bus
+    /// stop of the radio image at `0x600A_FC00`, written from libphy's
+    /// `phy_i2c_master_cmd_mem_init` (the second block the WiFi/PHY init
+    /// reaches after the radio window).
+    pub const I2C_MST_MEM: u32 = 0x600A_FC00;
+    pub const I2C_MST_MEM_LEN: u32 = 0x400;
     pub const PMU: u32 = 0x600B_0000;
     pub const LP_CLKRST: u32 = 0x600B_0400;
     pub const EFUSE: u32 = 0x600B_0800;
