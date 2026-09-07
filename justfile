@@ -2053,10 +2053,15 @@ lint-emu-fence:
 # NOT in `test-rust-core`: two firmware builds is minutes, and the director
 # log's CI cost rule says a gated job or a nightly, never the default path.
 # `m3_replays` needs no firmware and does run everywhere.
+#
+# `emu_usb_hello` is in `lp-cli` rather than the emulator because it sends a
+# real `M!` frame, and the single framer for those (`lpc_wire::json::to_serial_line`)
+# is a product crate the fence keeps out of `lp-emu/` — see the test's header.
 test-emu-c6:
     LP_EMU_BUILD_FW=1 cargo test -p lp-emu-esp32c6 -- --include-ignored
     cargo test -p lp-emu-validate --test m3_replays
     cargo test -p lp-cli --test validate_registry_parity
+    LP_EMU_BUILD_FW=1 cargo test -p lp-cli --test emu_usb_hello -- --include-ignored
 
 # Run one image on the C6 machine — the human front door.
 #
