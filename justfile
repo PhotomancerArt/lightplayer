@@ -2033,6 +2033,18 @@ lint-upgrade-fw:
 lint-emu-fence:
     ./scripts/check-emu-fence.sh
 
+# The ESP32-C6 machine's boot tests, which need the shipped firmware ELF.
+#
+# They are `#[ignore]`d so that `cargo test --workspace` never starts a
+# cross-target firmware build (a two-minute workspace run would become a
+# ten-minute one on every machine and every CI job that has nothing to do with
+# the emulator). This recipe is what sets the environment and runs them.
+#
+# `LP_EMU_BUILD_FW=1` lets the test build the ELF if it is not already there;
+# set `LP_EMU_C6_ELF_ESP32C6_SERVER_RADIO=<path>` instead to point at one.
+test-emu-c6:
+    LP_EMU_BUILD_FW=1 cargo test -p lp-emu-esp32c6 -- --include-ignored
+
 # The generated `RegNames` tables (offset -> register name) are derived from
 # the esp32c6 PAC's svd2rust offset comments and carry a provenance header.
 # A hand edit is reverted by the next regeneration and takes its provenance
