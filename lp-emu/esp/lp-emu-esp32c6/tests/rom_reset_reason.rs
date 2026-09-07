@@ -36,8 +36,8 @@ use lp_emu_core::Bus;
 use lp_emu_esp_common::{RegFile, SocBus};
 use lp_riscv_emu::mach::{MachineHart, SliceEnd};
 
-use lp_emu_esp32c6::machine::Esp32C6Builder;
 use lp_emu_esp32c6::Esp32C6Machine;
+use lp_emu_esp32c6::machine::Esp32C6Builder;
 
 /// `LP_CLKRST`'s base and the register the ROM reads. `0x600B_0410` is the
 /// address the trace shows on the first MMIO access of every boot.

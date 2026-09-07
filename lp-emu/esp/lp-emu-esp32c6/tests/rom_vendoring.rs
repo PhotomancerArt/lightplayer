@@ -35,7 +35,11 @@ fn the_embedded_rom_matches_the_checksum_the_fetch_script_recorded() {
 fn the_file_on_disk_is_the_same_file_that_is_embedded() {
     // `include_bytes!` is resolved at compile time, so a ROM replaced after
     // the last build would pass the test above and still be wrong on disk.
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../roms/", "esp32c6_rev0_rom.elf");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../roms/",
+        "esp32c6_rev0_rom.elf"
+    );
     let bytes = std::fs::read(path).expect("the vendored ROM is committed");
     assert_eq!(
         bytes.len(),
@@ -59,7 +63,10 @@ fn the_provenance_line_for_the_tarball_is_still_recorded() {
 fn the_apache_licence_travels_with_the_images() {
     for path in [
         concat!(env!("CARGO_MANIFEST_DIR"), "/../roms/LICENSE"),
-        concat!(env!("CARGO_MANIFEST_DIR"), "/../../../licenses/Apache-2.0.txt"),
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../licenses/Apache-2.0.txt"
+        ),
     ] {
         let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}"));
         assert!(

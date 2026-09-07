@@ -13,12 +13,12 @@
 //! 2. two runs produce byte-identical traces (PD5 determinism);
 //! 3. snapshot, run on, restore, run again → the same trace.
 
-use lp_emu_esp_common::trace::SharedBuffer;
 use lp_emu_esp_common::Trace;
+use lp_emu_esp_common::trace::SharedBuffer;
 
 use lp_emu_esp32c6::machine::{AppSource, Esp32C6Builder, Esp32C6Machine, Outcome, StopCondition};
 use lp_emu_esp32c6::memmap;
-use lp_emu_esp32c6::test_support::{fw_esp32c6_elf, skip_notice, SHIPPED_FEATURES};
+use lp_emu_esp32c6::test_support::{SHIPPED_FEATURES, fw_esp32c6_elf, skip_notice};
 
 /// `LP_CLKRST.reset_cause` (`0x600B_0400 + 0x10`) — the first MMIO access of
 /// every boot, from inside the ROM's `rtc_get_reset_reason`. Not LP_AON,
@@ -118,7 +118,10 @@ fn the_documented_boot_sequence_appears_in_the_trace_in_order() {
     );
 
     let lines = buf.lines();
-    let rom_read = line_with(&lines, &format!("R4 UNMAPPED+{LP_CLKRST_RESET_CAUSE:#010x}"));
+    let rom_read = line_with(
+        &lines,
+        &format!("R4 UNMAPPED+{LP_CLKRST_RESET_CAUSE:#010x}"),
+    );
     assert_eq!(rom_read, 0, "the ROM's reset-cause read comes first of all");
 
     let first_map = line_with(&lines, &format!("W4 UNMAPPED+{INTR_MAP_BASE:#010x}"));
@@ -154,7 +157,11 @@ fn the_documented_boot_sequence_appears_in_the_trace_in_order() {
 
     // Every line is stamped with the instruction that made it, not with the
     // slice it happened to fall in.
-    assert!(lines[0].starts_with("cyc=29 pc=0x40019684 "), "{}", lines[0]);
+    assert!(
+        lines[0].starts_with("cyc=29 pc=0x40019684 "),
+        "{}",
+        lines[0]
+    );
     assert!(
         lines[first_map].contains("pc=0x420971e0"),
         "{}",

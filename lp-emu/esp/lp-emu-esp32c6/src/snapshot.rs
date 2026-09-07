@@ -32,8 +32,8 @@
 //! that could disagree with it.
 
 use lp_emu_core::sched::{Cycles, EventId};
-use lp_emu_esp_common::bus::BusScalars;
 use lp_emu_esp_common::SocBus;
+use lp_emu_esp_common::bus::BusScalars;
 use lp_riscv_emu::mach::MachineHart;
 
 /// A machine's whole state at one cycle.

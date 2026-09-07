@@ -100,7 +100,11 @@ pub enum RomError {
     /// A `PT_LOAD` covers an address no region claims. The brief's
     /// stop-and-report case: either the ROM is not the chip we think it is,
     /// or [`crate::memmap`] is wrong.
-    Unmapped { vaddr: u32, memsz: u32, at: u32 },
+    Unmapped {
+        vaddr: u32,
+        memsz: u32,
+        at: u32,
+    },
     /// A hooked symbol is not in the ROM's symbol table.
     NoSuchSymbol(String),
 }

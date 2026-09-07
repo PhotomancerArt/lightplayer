@@ -78,7 +78,10 @@ pub fn fw_esp32c6_elf(features: &[&str]) -> Result<PathBuf, String> {
             if path.is_file() {
                 return Ok(path);
             }
-            return Err(format!("{var} points at {}, which is not a file", path.display()));
+            return Err(format!(
+                "{var} points at {}, which is not a file",
+                path.display()
+            ));
         }
     }
 

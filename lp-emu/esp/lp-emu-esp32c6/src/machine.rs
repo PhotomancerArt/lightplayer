@@ -247,9 +247,14 @@ pub enum BuildError {
     Load(LoadError),
     Io(String),
     /// A peripheral was registered out of [`PERIPHERAL_REGISTRATION_ORDER`].
-    RegistrationOrder { name: String, after: String },
+    RegistrationOrder {
+        name: String,
+        after: String,
+    },
     /// A peripheral name that is not in the declared order at all.
-    UndeclaredPeripheral { name: String },
+    UndeclaredPeripheral {
+        name: String,
+    },
 }
 
 impl fmt::Display for BuildError {
@@ -682,10 +687,7 @@ impl Esp32C6Machine {
                 }
             })
         };
-        self.app
-            .as_ref()
-            .and_then(from)
-            .or_else(|| from(&self.rom))
+        self.app.as_ref().and_then(from).or_else(|| from(&self.rom))
     }
 
     /// Read a word of guest memory from the host side (a `--probe`, a test).
@@ -821,11 +823,7 @@ impl Esp32C6Machine {
         };
         log::trace!("HOOK {} at {:#010x}", hook.symbol, hook.address);
         if self.bus.trace.is_enabled() {
-            let line = format!(
-                "cyc={} pc={pc:#010x} HOOK {}",
-                self.cycles(),
-                hook.symbol
-            );
+            let line = format!("cyc={} pc={pc:#010x} HOOK {}", self.cycles(), hook.symbol);
             self.bus.trace.note(&line);
         }
         self.hook_calls += 1;
@@ -985,10 +983,7 @@ mod tests {
             .peripheral(0x6000_0000, 0x100, Box::new(RegFile::new("UART0", 0x100)))
             .peripheral(0x6000_8000, 0x100, Box::new(RegFile::new("TIMG0", 0x100)))
             .build();
-        assert!(matches!(
-            bad,
-            Err(BuildError::RegistrationOrder { .. })
-        ));
+        assert!(matches!(bad, Err(BuildError::RegistrationOrder { .. })));
 
         let undeclared = Esp32C6Builder::new()
             .peripheral(0x6000_0000, 0x100, Box::new(RegFile::new("NOPE", 0x100)))

@@ -237,9 +237,7 @@ fn parse_duration_us(text: &str) -> Result<u64, String> {
             "`{text}` has no unit — write 5s, 1500ms or 900us (emulated time)"
         ));
     };
-    let n: u64 = digits
-        .parse()
-        .map_err(|e| format!("`{text}`: {e}"))?;
+    let n: u64 = digits.parse().map_err(|e| format!("`{text}`: {e}"))?;
     Ok(n * scale)
 }
 

@@ -157,7 +157,9 @@ pub enum LoadError {
     /// `entry != 0` is **not** a usable check in this repository: the rv32
     /// guest images under `lp-emu/` link at zero on purpose. "The entry lies
     /// in a segment we placed" is the check that means something.
-    EntryNotLoadable { entry: u32 },
+    EntryNotLoadable {
+        entry: u32,
+    },
     /// No loadable segment at all.
     NothingToLoad,
 }
