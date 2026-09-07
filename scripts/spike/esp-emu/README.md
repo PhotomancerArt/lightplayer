@@ -1,5 +1,14 @@
 # esp-emu spike scripts
 
+> **What has been promoted lives in `scripts/emu/`.** `build-reference-image.sh`
+> (the pinned firmware tree the committed C6 transcripts came from),
+> `pac-regnames.py` (the generated register-name tables) and the bench
+> instruments (`board-port.py`, `tty-capture.py`, `flash-image.sh`, the
+> `uart-bridge-*` pair, `reset-and-capture.py`) are there, with `just
+> lint-emu-regnames` and `just test-emu-c6` over them. `mask-transcript.sh`'s
+> rules are now code, in `lp-emu/lp-emu-validate/src/mask.rs`, where each
+> carries its field class and the reason it is ignored.
+>
 > **`desk-espflash-step.sh` is no longer spike-only.** The validation runner
 > (`lp-cli validate run --config silicon:…`) shells out to it rather than
 > re-deriving the port discipline, so its foreground-`script(1)`,

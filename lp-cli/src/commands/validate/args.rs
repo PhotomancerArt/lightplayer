@@ -54,7 +54,18 @@ pub struct RunArgs {
     /// with `lp-cli fwcheck port --chip esp32c6`.
     #[arg(long)]
     pub port: Option<String>,
-    /// Seconds to wait for the payload's sentinel.
+    /// An already-built image to run, for the emulated configurations:
+    /// `--image <payload>=<path>`, or a bare path for every payload in the
+    /// set. Repeatable.
+    ///
+    /// The committed C6 transcripts are at a pinned firmware commit with the
+    /// `spike_uart0_link` feature applied as a dirty tree, which is not what a
+    /// checkout builds; `scripts/emu/build-reference-image.sh` reproduces that
+    /// tree and this is how the runner is pointed at what it produced.
+    #[arg(long)]
+    pub image: Vec<String>,
+    /// Seconds to wait for the payload's sentinel. EMULATED seconds on an
+    /// emulated configuration.
     #[arg(long, default_value_t = 120)]
     pub timeout_secs: u64,
     /// Print the exact commands and stop.
@@ -80,6 +91,15 @@ pub struct RecordArgs {
     /// derived from HEAD would then be quietly wrong.
     #[arg(long = "commit")]
     pub firmware_commit: String,
+    /// The image was built from a dirty tree. Stated for the same reason the
+    /// commit is: the reference images are a commit plus a staged cherry-pick,
+    /// and their hello frame says `"dirty":true`.
+    #[arg(long = "dirty")]
+    pub firmware_dirty: bool,
+    /// An already-built image, for the emulated configurations. See
+    /// `validate run --image`.
+    #[arg(long)]
+    pub image: Vec<String>,
     #[arg(long, default_value_t = 120)]
     pub timeout_secs: u64,
     /// Print the exact commands and the destination paths, and stop.

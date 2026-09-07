@@ -34,8 +34,11 @@ pub fn list(cfg: &ValidateConfig, repo_root: &Path) -> Result<String> {
         };
         let _ = writeln!(
             s,
-            "  {:<24} {:<40} feature={} {}",
-            p.name, p.display_name, p.firmware_feature, sentinel
+            "  {:<24} {:<40} features={} {}",
+            p.name,
+            p.display_name,
+            p.firmware_features.join(","),
+            sentinel
         );
     }
 
@@ -178,13 +181,101 @@ pub fn replay_against_configuration(
     }
 }
 
+/// What the operator chose for one `run` or `record`.
+///
+/// A struct rather than five positional arguments because the two that matter
+/// most are easy to swap: `port` is silicon's and `image` is the emulators',
+/// and a runner that mixed them up would flash a board with somebody else's
+/// ELF, or replay a transcript of an image nobody can name.
+#[derive(Clone, Copy, Debug)]
+pub struct RunOptions<'a> {
+    /// Serial port, silicon only.
+    pub port: Option<&'a str>,
+    /// Already-built images, emulated configurations only. The reference
+    /// images `scripts/emu/build-reference-image.sh` produces are what this is
+    /// for.
+    pub images: &'a ImageOverrides,
+    /// Seconds to wait for the payload's sentinel. **Emulated** seconds on an
+    /// emulated configuration, host seconds on silicon.
+    pub timeout_secs: u64,
+}
+
+/// No `--image` at all: build what the plan says to build.
+static NO_IMAGES: ImageOverrides = ImageOverrides {
+    entries: Vec::new(),
+};
+
+impl Default for RunOptions<'_> {
+    fn default() -> Self {
+        Self {
+            port: None,
+            images: &NO_IMAGES,
+            // The CLI's default, so a `RunOptions::default()` in a test is the
+            // same run an operator would get.
+            timeout_secs: 120,
+        }
+    }
+}
+
+/// `--image [<payload>=]<path>`, repeatable.
+///
+/// A set is several payloads and a reference image is built per feature set,
+/// so one path cannot serve a set: `emu-m3` runs the compile harness on
+/// `d6cfaa205-harness` and the shipped-image walk on
+/// `d6cfaa205-boot-idle-memfs`. A bare path is the fallback for every payload
+/// that has no entry of its own, which is what a one-payload set wants.
+#[derive(Clone, Debug, Default)]
+pub struct ImageOverrides {
+    entries: Vec<(Option<String>, PathBuf)>,
+}
+
+impl ImageOverrides {
+    /// Parse `<payload>=<path>` and bare `<path>` specs, refusing a payload
+    /// name nobody knows — a typo there would otherwise silently build the
+    /// image instead of using the pinned one, and the transcript would be of
+    /// a different image than its header says.
+    pub fn parse(specs: &[String]) -> Result<Self> {
+        let mut entries: Vec<(Option<String>, PathBuf)> = Vec::new();
+        for spec in specs {
+            let entry = match spec.split_once('=') {
+                Some((name, path)) => {
+                    find_payload(name).with_context(|| {
+                        format!("in --image `{spec}` (write `<payload>=<path>` or just a path)")
+                    })?;
+                    (Some(name.to_string()), PathBuf::from(path))
+                }
+                None => (None, PathBuf::from(spec)),
+            };
+            if entries.iter().any(|(n, _)| *n == entry.0) {
+                bail!(
+                    "--image names {} twice",
+                    entry.0.as_deref().unwrap_or("the default image")
+                );
+            }
+            entries.push(entry);
+        }
+        Ok(Self { entries })
+    }
+
+    pub fn for_payload(&self, payload: &str) -> Option<&Path> {
+        self.entries
+            .iter()
+            .find(|(name, _)| name.as_deref() == Some(payload))
+            .or_else(|| self.entries.iter().find(|(name, _)| name.is_none()))
+            .map(|(_, path)| path.as_path())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
 /// `validate run <set> --config <name>` — plan, then (unless dry) execute.
 pub fn run_set(
     cfg: &ValidateConfig,
     set: &str,
     configuration: &str,
-    port: Option<&str>,
-    timeout_secs: u64,
+    opts: &RunOptions<'_>,
     repo_root: &Path,
     dry_run: bool,
 ) -> Result<String> {
@@ -192,7 +283,7 @@ pub fn run_set(
     let config = entry.parsed()?;
     let payloads = cfg.payloads_in(set)?;
     let driver = driver_for(&config);
-    let out_dir = default_out_dir(repo_root);
+    let out_dir = default_out_dir();
 
     let mut s = format!(
         "set `{set}` on `{}` ({})\n",
@@ -207,14 +298,7 @@ pub fn run_set(
             driver.availability()
         );
         for payload in payloads {
-            let plan = driver.plan(&request(
-                payload,
-                &config,
-                port,
-                timeout_secs,
-                repo_root,
-                &out_dir,
-            ))?;
+            let plan = driver.plan(&request(payload, entry, &config, opts, repo_root, &out_dir))?;
             s.push('\n');
             s.push_str(&plan.render());
         }
@@ -222,13 +306,13 @@ pub fn run_set(
     }
 
     for payload in payloads {
-        let req = request(payload, &config, port, timeout_secs, repo_root, &out_dir);
+        let req = request(payload, entry, &config, opts, repo_root, &out_dir);
         let plan = driver.plan(&req)?;
         s.push('\n');
         s.push_str(&plan.render());
         if !dry_run {
-            std::fs::create_dir_all(&out_dir)
-                .with_context(|| format!("creating {}", out_dir.display()))?;
+            let dir = repo_root.join(&out_dir);
+            std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
             let capture = driver.execute(&plan)?;
             let _ = writeln!(s, "  captured {}", capture.display());
         }
@@ -250,6 +334,10 @@ pub fn run_set(
 pub struct RecordProvenance<'a> {
     pub date: &'a str,
     pub firmware_commit: &'a str,
+    /// Was the image built from a dirty tree? Stated, like the commit: the
+    /// reference images are a commit plus a staged cherry-pick, so `true` is
+    /// the honest answer for them and the hello frame says so too.
+    pub firmware_dirty: Option<bool>,
 }
 
 /// `validate record <set> --config <name>` — run, then write each capture into
@@ -258,8 +346,7 @@ pub fn record_set(
     cfg: &ValidateConfig,
     set: &str,
     configuration: &str,
-    port: Option<&str>,
-    timeout_secs: u64,
+    opts: &RunOptions<'_>,
     repo_root: &Path,
     provenance: &RecordProvenance<'_>,
     dry_run: bool,
@@ -267,6 +354,7 @@ pub fn record_set(
     let RecordProvenance {
         date,
         firmware_commit,
+        ..
     } = *provenance;
     let entry = cfg.configuration(configuration)?;
     let config = entry.parsed()?;
@@ -279,11 +367,11 @@ pub fn record_set(
             driver.availability()
         );
     }
-    let out_dir = default_out_dir(repo_root);
+    let out_dir = default_out_dir();
     let mut s = String::new();
 
     for payload in payloads {
-        let req = request(payload, &config, port, timeout_secs, repo_root, &out_dir);
+        let req = request(payload, entry, &config, opts, repo_root, &out_dir);
         let plan = driver.plan(&req)?;
         let header = TranscriptHeader {
             schema: crate::header::HEADER_SCHEMA,
@@ -293,11 +381,14 @@ pub fn record_set(
             date: date.to_string(),
             firmware_commit: firmware_commit.to_string(),
             firmware_features: req.features().iter().map(|f| (*f).to_string()).collect(),
-            firmware_dirty: None,
-            silicon_rev: None,
-            board: None,
-            mac: None,
-            tools: Default::default(),
+            firmware_dirty: provenance.firmware_dirty,
+            silicon_rev: entry.silicon_rev.clone(),
+            board: entry.board.clone(),
+            mac: entry.mac.clone(),
+            // What ran it. The driver fills this: silicon's tools are
+            // espflash's, an emulator's are its own commit and the ROM it
+            // loaded, and only the driver knows which.
+            tools: plan.tools.clone(),
             source: Some(
                 plan.steps
                     .iter()
@@ -308,7 +399,11 @@ pub fn record_set(
             capture: Some(format!(
                 "lp-cli validate record {set} --config {configuration}"
             )),
-            note: None,
+            note: if plan.notes.is_empty() {
+                None
+            } else {
+                Some(plan.notes.join(" "))
+            },
             trust: entry.trust.clone(),
         };
         header.validate()?;
@@ -321,8 +416,8 @@ pub fn record_set(
         if dry_run {
             continue;
         }
-        std::fs::create_dir_all(&out_dir)?;
-        let capture = driver.execute(&plan)?;
+        std::fs::create_dir_all(repo_root.join(&out_dir))?;
+        let capture = repo_root.join(driver.execute(&plan)?);
         let body = std::fs::read_to_string(&capture)
             .with_context(|| format!("reading capture {}", capture.display()))?;
         // Parse before committing: a capture that does not parse is not a
@@ -359,19 +454,21 @@ pub fn record_set(
 
 fn request(
     payload: &'static crate::payload::Payload,
+    entry: &crate::config::ConfigurationEntry,
     config: &Configuration,
-    port: Option<&str>,
-    timeout_secs: u64,
+    opts: &RunOptions<'_>,
     repo_root: &Path,
     out_dir: &Path,
 ) -> RunRequest {
     RunRequest {
         payload,
         configuration: config.clone(),
-        port: port.map(str::to_string),
-        timeout_secs,
+        port: opts.port.map(str::to_string),
+        timeout_secs: opts.timeout_secs,
         repo_root: repo_root.to_path_buf(),
         out_dir: out_dir.to_path_buf(),
+        image: opts.images.for_payload(payload.name).map(Path::to_path_buf),
+        identity: entry.identity(),
     }
 }
 
@@ -392,47 +489,73 @@ mod tests {
         assert!(out.contains("gpio-calibrate"), "{out}");
         assert!(out.contains("compile-parity"), "{out}");
         assert!(out.contains("silicon:esp32c6"), "{out}");
-        assert!(out.contains("unavailable until M3"), "{out}");
+        assert!(out.contains("lp-emu:esp32c6:t1"), "{out}");
         assert!(out.contains("timing=modeled"), "{out}");
         assert!(out.contains("(none)"), "{out}");
     }
 
     #[test]
-    fn run_on_an_unavailable_configuration_runs_nothing() {
+    fn run_on_the_lp_emu_configuration_plans_a_machine_run() {
         let cfg = ValidateConfig::embedded();
         let out = run_set(
             &cfg,
             "compile-parity",
             "lp-emu:esp32c6:t1",
-            None,
-            60,
+            &RunOptions {
+                timeout_secs: 60,
+                ..RunOptions::default()
+            },
             Path::new("/repo"),
-            false,
+            true,
         )
         .unwrap();
-        assert!(out.contains("Nothing was run"), "{out}");
-        assert!(out.contains("unavailable until M3"), "{out}");
+        // M3 P7: it is available, and the plan is the whole protocol.
+        assert!(out.contains("available"), "{out}");
+        assert!(out.contains("cargo run -q -p lp-emu-esp32c6"), "{out}");
+        assert!(out.contains("dry run"), "{out}");
     }
 
     #[test]
-    fn record_on_an_unavailable_configuration_refuses() {
+    fn recording_the_emu_m3_set_names_both_committed_destinations() {
         let cfg = ValidateConfig::embedded();
-        let err = record_set(
+        let images = ImageOverrides::parse(&[
+            "shader-compile-stress=target/emu-ref/d6cfaa205-harness/fw-esp32c6".to_string(),
+            "boot-idle=target/emu-ref/d6cfaa205-boot-idle-memfs/fw-esp32c6".to_string(),
+        ])
+        .unwrap();
+        let out = record_set(
             &cfg,
-            "compile-parity",
+            "emu-m3",
             "lp-emu:esp32c6:t1",
-            None,
-            60,
+            &RunOptions {
+                images: &images,
+                timeout_secs: 6,
+                ..RunOptions::default()
+            },
             Path::new("/repo"),
             &RecordProvenance {
                 date: "2026-09-06",
-                firmware_commit: "abc123456",
+                firmware_commit: "d6cfaa2051ae",
+                firmware_dirty: Some(true),
             },
             true,
         )
-        .unwrap_err()
-        .to_string();
-        assert!(err.contains("unavailable until M3"), "{err}");
+        .unwrap();
+        assert!(
+            out.contains(
+                "/repo/lp-emu/transcripts/esp32c6/boot-idle/\
+                 lp-emu-esp32c6-t1-2026-09-06-d6cfaa205.txt"
+            ),
+            "{out}"
+        );
+        assert!(
+            out.contains(
+                "/repo/lp-emu/transcripts/esp32c6/shader-compile-stress/\
+                 lp-emu-esp32c6-t1-2026-09-06-d6cfaa205.txt"
+            ),
+            "{out}"
+        );
+        assert!(out.contains("--efuse-mac a0:f2:62:87:b4:8c"), "{out}");
     }
 
     #[test]
@@ -442,12 +565,15 @@ mod tests {
             &cfg,
             "compile-parity",
             "esp-emu:0.42.0",
-            None,
-            90,
+            &RunOptions {
+                timeout_secs: 90,
+                ..RunOptions::default()
+            },
             Path::new("/repo"),
             &RecordProvenance {
                 date: "2026-09-06",
                 firmware_commit: "d6cfaa2051ae",
+                firmware_dirty: None,
             },
             true,
         )
@@ -473,8 +599,10 @@ mod tests {
                 &cfg,
                 "compile-parity",
                 "silicon:esp32c6",
-                None,
-                90,
+                &RunOptions {
+                    timeout_secs: 90,
+                    ..RunOptions::default()
+                },
                 Path::new("/repo"),
                 true,
             )
