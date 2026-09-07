@@ -62,9 +62,9 @@ use crate::control::{ControlCommand, ControlReply, HostReport};
 use crate::intmatrix::Esp32C6IntMatrix;
 use crate::loader::{self, EfuseIdentity, LoadError, PlacedAppSegment, ResetCause};
 use crate::memmap;
+use crate::periph;
 use crate::periph::uart::LIVE_POLL_CYCLES;
 use crate::periph::usb_sj::UsbSerialJtag;
-use crate::periph;
 use crate::rom::{self, HookResult, HookTable, PlacedSegment, RomError};
 use crate::snapshot::Snapshot;
 

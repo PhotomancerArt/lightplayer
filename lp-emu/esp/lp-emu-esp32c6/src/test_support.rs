@@ -282,8 +282,10 @@ pub fn fw_esp32c6_image(image: &FwImage) -> Result<PathBuf, String> {
     // Serialise with every other image build in this process, then look
     // again: the thread that held the lock may have built this very image.
     let _build = BUILD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    if cached.is_file() {
-        return Ok(cached);
+    if let Some(cached) = &cached
+        && cached.is_file()
+    {
+        return Ok(cached.clone());
     }
 
     if std::env::var("LP_EMU_BUILD_FW").as_deref() != Ok("1") {
