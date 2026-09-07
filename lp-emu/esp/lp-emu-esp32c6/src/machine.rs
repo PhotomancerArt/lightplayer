@@ -669,9 +669,8 @@ impl Esp32C6Builder {
                 UsbSjSink::Memory => Box::new(lp_emu_esp_common::host::NullSink),
                 UsbSjSink::Stderr => Box::new(StderrSink),
                 UsbSjSink::File(path) => {
-                    let file = std::fs::File::create(path).map_err(|e| {
-                        BuildError::Io(format!("creating {}: {e}", path.display()))
-                    })?;
+                    let file = std::fs::File::create(path)
+                        .map_err(|e| BuildError::Io(format!("creating {}: {e}", path.display())))?;
                     Box::new(FileSink(file))
                 }
             })

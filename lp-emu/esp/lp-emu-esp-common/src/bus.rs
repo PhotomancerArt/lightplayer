@@ -1790,7 +1790,14 @@ mod tests {
         ));
         let v = bus.first_strict_violation().expect("recorded");
         assert_eq!(
-            (v.cycle, v.pc, v.address, v.access, v.in_mmio_window, v.grade),
+            (
+                v.cycle,
+                v.pc,
+                v.address,
+                v.access,
+                v.in_mmio_window,
+                v.grade
+            ),
             (
                 9,
                 0x4200_0000,

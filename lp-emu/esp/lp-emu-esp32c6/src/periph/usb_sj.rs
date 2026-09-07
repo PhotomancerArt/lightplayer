@@ -719,8 +719,7 @@ impl UsbSerialJtag {
         }
         let due = from.saturating_add(OUT_LAND_LATENCY_CYCLES);
         self.out_land_due = Some(due);
-        cx.sched
-            .schedule_at(due, event_id(self.index, EV_OUT_LAND));
+        cx.sched.schedule_at(due, event_id(self.index, EV_OUT_LAND));
     }
 
     fn land_out(&mut self, cx: &mut BusCx<'_>) {
@@ -1055,7 +1054,8 @@ impl Peripheral for UsbSerialJtag {
             r.0 = rest;
             Some(head.to_vec())
         };
-        let (Some(in_fifo), Some(out_pkt), Some(out_staging)) = (take(&mut r), take(&mut r), take(&mut r))
+        let (Some(in_fifo), Some(out_pkt), Some(out_staging)) =
+            (take(&mut r), take(&mut r), take(&mut r))
         else {
             log::warn!("USB_DEVICE: load_state blob too short, ignored");
             return;
@@ -1363,7 +1363,10 @@ mod tests {
             mut u,
             delivered,
             tried,
-        } = rig_with(HostState::Attached { draining: true }, ScriptedSource::new());
+        } = rig_with(
+            HostState::Attached { draining: true },
+            ScriptedSource::new(),
+        );
         let input = init_lines();
         let mut timed_out = false;
         let mut longest = 0;
@@ -1379,7 +1382,11 @@ mod tests {
         // The last flush is still in flight.
         let end = sb.now + IN_DRAIN_LATENCY_CYCLES;
         sb.run_to(&mut u, end);
-        assert_eq!(delivered.bytes(), input, "the delivered log equals the input");
+        assert_eq!(
+            delivered.bytes(),
+            input,
+            "the delivered log equals the input"
+        );
         assert!(tried.is_empty(), "nothing was merely tried");
         assert_eq!(u.in_delivered(), 875);
         assert_eq!(u.dropped(), 0);
@@ -1398,7 +1405,10 @@ mod tests {
             mut u,
             delivered,
             ..
-        } = rig_with(HostState::Attached { draining: true }, ScriptedSource::new());
+        } = rig_with(
+            HostState::Attached { draining: true },
+            ScriptedSource::new(),
+        );
         // `UsbSerialJtag::new`: both interrupts off.
         sb.write(
             &mut u,
@@ -1455,7 +1465,10 @@ mod tests {
             mut u,
             delivered,
             tried,
-        } = rig_with(HostState::Attached { draining: false }, ScriptedSource::new());
+        } = rig_with(
+            HostState::Attached { draining: false },
+            ScriptedSource::new(),
+        );
         sb.write(&mut u, INT_CLR, INT_SERIAL_IN_EMPTY);
         for &b in b"[INIT] Initializing board...\n" {
             sb.write(&mut u, EP1, u32::from(b));
@@ -1463,7 +1476,11 @@ mod tests {
         sb.write(&mut u, EP1_CONF, EP1_CONF_WR_DONE);
         sb.write(&mut u, INT_ENA, INT_SERIAL_IN_EMPTY);
         sb.run_to(&mut u, 300 * MS);
-        assert_eq!(sb.read(&mut u, EP1_CONF) & 0b010, 0, "free stays 0 for 300 ms");
+        assert_eq!(
+            sb.read(&mut u, EP1_CONF) & 0b010,
+            0,
+            "free stays 0 for 300 ms"
+        );
         assert_eq!(sb.read(&mut u, INT_RAW) & INT_SERIAL_IN_EMPTY, 0);
         assert!(!sb.irq.level(source::USB_DEVICE));
         assert!(delivered.is_empty() && tried.is_empty());
@@ -1494,7 +1511,10 @@ mod tests {
             mut u,
             delivered,
             tried,
-        } = rig_with(HostState::Attached { draining: false }, ScriptedSource::new());
+        } = rig_with(
+            HostState::Attached { draining: false },
+            ScriptedSource::new(),
+        );
         sb.write(&mut u, INT_CLR, INT_SERIAL_IN_EMPTY);
         sb.write(&mut u, INT_ENA, 0);
         let chunk = |sb: &mut Sandbox, u: &mut UsbSerialJtag, fill: u8| {
@@ -1547,9 +1567,12 @@ mod tests {
         let script = ScriptedSource::new()
             .at(2 * MS, b"M!ab\n")
             .at(3 * MS, vec![b'x'; 70]);
-        let Rig { mut sb, mut u, .. } =
-            rig_with(HostState::Attached { draining: true }, script);
-        sb.write(&mut u, INT_CLR, INT_SERIAL_IN_EMPTY | INT_SERIAL_OUT_RECV_PKT);
+        let Rig { mut sb, mut u, .. } = rig_with(HostState::Attached { draining: true }, script);
+        sb.write(
+            &mut u,
+            INT_CLR,
+            INT_SERIAL_IN_EMPTY | INT_SERIAL_OUT_RECV_PKT,
+        );
         sb.write(&mut u, INT_ENA, 0);
         // `read_serial`: drain (nothing), then the future arms bit 2 …
         assert_eq!(sb.read(&mut u, EP1_CONF) & 0b100, 0);
@@ -1560,7 +1583,11 @@ mod tests {
         assert_eq!(sb.read(&mut u, INT_ENA), INT_SERIAL_OUT_RECV_PKT);
         // The packet lands after the latency.
         sb.run_to(&mut u, 2 * MS + OUT_LAND_LATENCY_CYCLES - 1);
-        assert_eq!(sb.read(&mut u, EP1_CONF) & 0b100, 0, "not before the latency");
+        assert_eq!(
+            sb.read(&mut u, EP1_CONF) & 0b100,
+            0,
+            "not before the latency"
+        );
         sb.run_to(&mut u, 2 * MS + OUT_LAND_LATENCY_CYCLES);
         assert_eq!(sb.read(&mut u, EP1_CONF) & 0b100, 0b100, "avail = 1");
         assert_eq!(
@@ -1596,7 +1623,10 @@ mod tests {
         let popped_at = sb.now;
         sb.run_to(&mut u, popped_at + OUT_LAND_LATENCY_CYCLES);
         assert_eq!(sb.read(&mut u, EP1_CONF) & 0b100, 0b100);
-        assert_eq!(sb.read(&mut u, OUT_EP1_ST) & 0x7f << EP_ST_WR_ADDR_SHIFT, 66 << 2);
+        assert_eq!(
+            sb.read(&mut u, OUT_EP1_ST) & 0x7f << EP_ST_WR_ADDR_SHIFT,
+            66 << 2
+        );
         let mut n = 0;
         while sb.read(&mut u, EP1_CONF) & 0b100 != 0 {
             assert_eq!(sb.read(&mut u, EP1), u32::from(b'x'));
@@ -1606,7 +1636,10 @@ mod tests {
         assert_eq!(u.out_pending(), 6, "the rest waits");
         let at = sb.now;
         sb.run_to(&mut u, at + OUT_LAND_LATENCY_CYCLES);
-        assert_eq!(sb.read(&mut u, OUT_EP1_ST) >> OUT_EP_REC_CNT_SHIFT & 0x7f, 6);
+        assert_eq!(
+            sb.read(&mut u, OUT_EP1_ST) >> OUT_EP_REC_CNT_SHIFT & 0x7f,
+            6
+        );
         // Reading past the packet answers 0 and is counted.
         for _ in 0..6 {
             sb.read(&mut u, EP1);
@@ -1617,8 +1650,10 @@ mod tests {
 
     #[test]
     fn sof_arrives_every_millisecond_while_attached_and_the_monitor_counts_misses() {
-        let Rig { mut sb, mut u, .. } =
-            rig_with(HostState::Attached { draining: false }, ScriptedSource::new());
+        let Rig { mut sb, mut u, .. } = rig_with(
+            HostState::Attached { draining: false },
+            ScriptedSource::new(),
+        );
         assert_eq!(
             sb.read(&mut u, INT_RAW) & INT_USB_BUS_RESET,
             INT_USB_BUS_RESET,
@@ -1688,7 +1723,10 @@ mod tests {
             mut u,
             delivered,
             tried,
-        } = rig_with(HostState::Attached { draining: false }, ScriptedSource::new());
+        } = rig_with(
+            HostState::Attached { draining: false },
+            ScriptedSource::new(),
+        );
         sb.write(&mut u, INT_CLR, INT_SERIAL_IN_EMPTY);
         for &b in b"held\n" {
             sb.write(&mut u, EP1, u32::from(b));
@@ -1726,8 +1764,10 @@ mod tests {
 
     #[test]
     fn the_dtr_rts_dances_decode_like_the_fake_device() {
-        let Rig { mut sb, mut u, .. } =
-            rig_with(HostState::Attached { draining: true }, ScriptedSource::new());
+        let Rig { mut sb, mut u, .. } = rig_with(
+            HostState::Attached { draining: true },
+            ScriptedSource::new(),
+        );
         sb.write(&mut u, INT_CLR, INT_MASK);
         // `hardware.rs:228-236`, the USB-Serial-JTAG hard reset:
         // D0; sleep; R1; D0; R1; sleep; R0.
@@ -1840,7 +1880,8 @@ mod tests {
         bus.add_peripheral(memmap::periph::USB_DEVICE, 0x100, Box::new(u));
         bus.set_strict_grade(Some(RegGrade::Documented));
         assert_eq!(
-            bus.read_word(memmap::periph::USB_DEVICE + FRAM_NUM).unwrap(),
+            bus.read_word(memmap::periph::USB_DEVICE + FRAM_NUM)
+                .unwrap(),
             0
         );
         assert!(bus.read_word(memmap::periph::USB_DEVICE + EP1).is_err());
@@ -1862,7 +1903,10 @@ mod tests {
             Some(HostState::Attached { draining: false })
         );
         assert_eq!(HostState::parse("draining"), None);
-        assert_eq!(HostState::Attached { draining: false }.to_string(), "attached-idle");
+        assert_eq!(
+            HostState::Attached { draining: false }.to_string(),
+            "attached-idle"
+        );
         assert!(HostState::Attached { draining: false }.attached());
         assert!(!HostState::Attached { draining: false }.draining());
     }

@@ -145,7 +145,10 @@ fn g2_1_attached_and_draining_from_boot_delivers_the_boot_the_hello_and_a_heartb
     assert!(init_lines.len() >= 5, "{init_lines:?}");
     let hello_at = text.find("M!{\"id\":0,\"msg\":{\"hello\"").unwrap();
     let last_init_at = text.rfind("[INIT] ").unwrap();
-    assert!(last_init_at < hello_at, "every [INIT] line precedes the hello");
+    assert!(
+        last_init_at < hello_at,
+        "every [INIT] line precedes the hello"
+    );
     assert!(
         r.m.usb_sj_tried().is_empty(),
         "tried: {:?}",
@@ -210,10 +213,23 @@ fn g2_3_attached_idle_from_boot_shows_the_not_draining_signature_and_the_probe()
     let Some(r) = run(UsbHost::Attached { draining: false }) else {
         return;
     };
-    // Nothing reached a host; the boot line was tried.
+    // Nothing reached a host. The first `[INIT]` line is committed and
+    // HELD in the endpoint for the whole run (a closed port never takes
+    // it), so it is on neither log; what was merely tried starts with the
+    // hello's first 64-byte chunk, dropped into the committed FIFO.
     assert!(r.m.usb_sj().is_empty(), "{:?}", r.m.usb_sj().text());
     let tried = r.m.usb_sj_tried().text();
-    assert!(tried.starts_with("[INIT] "), "{tried:?}");
+    assert!(
+        tried.starts_with("\nM!{\"id\":0,\"msg\":{\"hello\":{\"proto\":20,"),
+        "{tried:?}"
+    );
+    assert!(!tried.contains("[INIT]"), "{tried:?}");
+    assert!(
+        r.lines
+            .iter()
+            .any(|l| l.contains("wr_done: 28 bytes committed") && l.contains("port closed")),
+        "the [INIT] line is held"
+    );
     assert!(
         !r.lines.iter().any(|l| l.contains("delivered to the host")),
         "no delivery"
@@ -221,32 +237,38 @@ fn g2_3_attached_idle_from_boot_shows_the_not_draining_signature_and_the_probe()
     // esp-println latched after its one wait, like host-absent.
     assert_eq!(r.timed_out, (1, 1), "TIMED_OUT at 3 s and at the end");
 
-    // The commits: `wr_done` writes, each with the `ep1` writes since the
-    // previous one.
+    // The commits: `wr_done` writes with the `ep1` writes since the previous
+    // one. A `wr_done` with nothing pushed is esp-println's `Printer::flush`
+    // on the `TIMED_OUT` path (a flush of nothing, one per formatted
+    // fragment) — counted, not a commit.
     let mut commits: Vec<(Cycles, usize, Vec<u8>)> = Vec::new();
+    let mut empty_flushes = 0usize;
     let mut pushed: Vec<u8> = Vec::new();
     for l in &r.lines {
         if l.contains("W4 USB_DEVICE+0x000 ep1 ") {
             pushed.push(value_of(l) as u8);
         } else if l.contains("W4 USB_DEVICE+0x004 ep1_conf") && value_of(l) & 1 != 0 {
-            commits.push((cycle_of(l), pushed.len(), std::mem::take(&mut pushed)));
+            if pushed.is_empty() {
+                empty_flushes += 1;
+            } else {
+                commits.push((cycle_of(l), pushed.len(), std::mem::take(&mut pushed)));
+            }
         }
     }
-    // Before 2 s: at least two protocol commits ≥ 250 ms apart — the two
-    // write timeouts that latch "not draining".
+    // Before 2 s: the boot line, then at least two protocol commits with
+    // the 250 ms write timeout between them — the two timeouts that latch
+    // "not draining".
     let early: Vec<&(Cycles, usize, Vec<u8>)> =
         commits.iter().filter(|c| c.0 < 2_000 * MS).collect();
-    assert!(early.len() >= 2, "{} commits before 2 s", early.len());
-    let spaced = early
+    assert!(early.len() >= 3, "{} commits before 2 s", early.len());
+    let timeouts = early
         .windows(2)
-        .any(|w| w[1].0 - w[0].0 >= 250 * MS && w[1].1 > 1);
+        .filter(|w| w[1].0 - w[0].0 >= 250 * MS && w[1].0 - w[0].0 < 260 * MS)
+        .count();
     assert!(
-        spaced,
-        "no two commits ≥ 250 ms apart before 2 s: {:?}",
-        early
-            .iter()
-            .map(|c| (c.0 / MS, c.1))
-            .collect::<Vec<_>>()
+        timeouts >= 2,
+        "fewer than two 250 ms write timeouts before 2 s: {:?}",
+        early.iter().map(|c| (c.0 / MS, c.1)).collect::<Vec<_>>()
     );
     // After the latch: one-byte `\n` probes, ≈ 2 s apart, and nothing else.
     let late: Vec<&(Cycles, usize, Vec<u8>)> =
@@ -265,15 +287,26 @@ fn g2_3_attached_idle_from_boot_shows_the_not_draining_signature_and_the_probe()
         assert!((1_800..=2_300).contains(&gap), "probe gap {gap} ms");
     }
     assert_alive(&r);
+    // io_task is sequential: while its writes time out it never reaches
+    // `read_serial`, and after the latch it is not connected — so the RX
+    // path is never armed here, exactly as with no host.
+    let rx_armed = r
+        .lines
+        .iter()
+        .filter(|l| l.contains("W4 USB_DEVICE+0x010 int_ena"))
+        .any(|l| value_of(l) & SERIAL_OUT_RECV_PKT != 0);
+    assert!(!rx_armed, "int_ena.serial_out_recv_pkt was written set");
 
-    println!("G2-3 commits (ms, bytes):");
+    println!("G2-3 commits (ms, bytes), plus {empty_flushes} empty flushes:");
     for c in &commits {
         println!(
             "  {:>5} ms  {} byte(s){}",
             c.0 / MS,
             c.1,
-            if c.1 == 1 && c.2 == b"\n" {
+            if c.1 == 1 && c.2 == b"\n" && c.0 >= 2_500 * MS {
                 "  (probe)"
+            } else if c.1 == 1 && c.2 == b"\n" {
+                "  (a log line's leading newline, timed out)"
             } else {
                 ""
             }
