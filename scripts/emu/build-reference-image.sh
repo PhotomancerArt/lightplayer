@@ -47,6 +47,47 @@ esac
 
 out_dir="$repo/target/emu-ref/$commit-$slug"
 wt="$repo/target/emu-ref/wt-$commit"
+elf="$out_dir/fw-esp32c6"
+
+# ---------------------------------------------------------------------------
+# One builder at a time, across PROCESSES.
+#
+# `cargo test` runs each test binary as its own process, in parallel, and in
+# M4 three of them (`boot_idle`, `flash_persistence`, `upload_walk`) all want
+# the same reference image. Two consequences, both seen in CI:
+#
+#   * two `git worktree add`/`cherry-pick`/`cargo build` sequences share one
+#     detached worktree and one target directory, and
+#   * a reader that opens `$elf` while another process is still `cp`ing into
+#     it gets half a file — which is what
+#     `Rom(Elf("ELF parse failed: Invalid ELF header size or alignment"))` on
+#     PR #567's `Emulator C6 (x64)` run was.
+#
+# `mkdir` is the portable atomic test-and-set (no `flock` on macOS). The
+# loser waits, then re-checks: the winner's image is the one it wanted. The
+# publish below is a `mv`, so `$elf` never exists half-written.
+lock="$repo/target/emu-ref/.build.lock"
+mkdir -p "$(dirname "$lock")"
+waited=0
+until mkdir "$lock" 2>/dev/null; do
+    if [[ -f "$elf" ]]; then
+        echo "build-reference-image: another process published $elf while we waited"
+        exit 0
+    fi
+    if (( waited >= ${LOCK_TIMEOUT:-900} )); then
+        echo "build-reference-image: waited ${waited}s for $lock; remove it if it is stale" >&2
+        exit 4
+    fi
+    sleep 1
+    waited=$((waited + 1))
+done
+trap 'rmdir "$lock" 2>/dev/null || true' EXIT
+# Re-check under the lock: the process we queued behind may have built
+# exactly this image.
+if [[ -f "$elf" ]]; then
+    echo "build-reference-image: $elf was built while we waited for the lock"
+    exit 0
+fi
 
 full_commit="$(git -C "$repo" rev-parse "$commit")"
 spike_parent="$(git -C "$repo" rev-parse "$spike^")"
@@ -85,11 +126,16 @@ touch "$wt/lp-fw/fw-esp32c6/src/main.rs"
     cargo build --target "$target" --profile "$profile" --features "$features"
 )
 
+# Publish atomically. A reader outside the lock — a test binary that found
+# the file present and went straight to it — must see either no file or a
+# whole one, so the ELF arrives by `mv` within the same filesystem and never
+# by a `cp` a reader can catch half-done.
 mkdir -p "$out_dir"
-cp "$wt/target/$target/$profile/fw-esp32c6" "$out_dir/fw-esp32c6"
+cp "$wt/target/$target/$profile/fw-esp32c6" "$out_dir/.fw-esp32c6.partial"
 (
     cd "$out_dir"
-    shasum -a 256 fw-esp32c6 | tee SHA256SUMS
+    shasum -a 256 .fw-esp32c6.partial | sed 's|\.fw-esp32c6\.partial|fw-esp32c6|' | tee SHA256SUMS
 )
 echo "features=$features commit=$full_commit spike=$spike" > "$out_dir/PROVENANCE"
-echo "build-reference-image: done → $out_dir/fw-esp32c6"
+mv "$out_dir/.fw-esp32c6.partial" "$elf"
+echo "build-reference-image: done → $elf"

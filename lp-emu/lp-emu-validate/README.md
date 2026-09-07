@@ -151,6 +151,29 @@ For silicon the runner does not reinvent the port discipline; it shells out to
 payload's sentinel, SIGINTs **that pid only**, and post-checks `lsof`/`pgrep`.
 Every clause there is a sitting that broke.
 
+### One payload is watched differently, and that is the payload
+
+`usb-negative-control` (M6 P1b) asks what the device did while **nobody** was
+reading it, so a monitor at the flash would destroy the thing it measures.
+`Payload::capture` says so — `Capture::FlashThenOpenAfter(8)` against every
+other payload's `Capture::Monitor` — and the silicon plan becomes three steps
+instead of one:
+
+1. `scripts/emu/desk-flash-no-monitor.sh` — the same pre-check, foreground
+   `script(1)` and post-check, with no `--monitor`: espflash exits and the port
+   goes back to closed.
+2. `sleep 8` — the measurement. The board is enumerated and undrained: its
+   writes time out, the connection monitor latches, and both log lines about it
+   are dropped by that latch.
+3. `scripts/emu/tty-capture.py --dev … --until <sentinel>` — a non-resetting
+   reader (`os.open` + raw termios, `HUPCL` cleared, DTR/RTS untouched), the
+   same open Studio and lp-cli make. `--until` stops at the **end** of the
+   first line containing the sentinel, because the figures worth capturing come
+   after a sentinel that is a line prefix.
+
+They are three plan steps rather than one wrapper script on purpose: a desk
+protocol is only reviewable if `--dry-run` prints the whole of it.
+
 For `esp-emu:*` it builds a merged image and runs the binary named by
 `$LP_ESP_EMU` with `--exit-on` the payload's done marker (install per spike
 report §10 — a checksum-verified release asset, outside the repo).

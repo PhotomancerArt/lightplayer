@@ -32,6 +32,31 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
+
+/// One firmware build at a time per process.
+///
+/// From M5 P1 (PR #569, `claude/emu-m5-p1-rmt-tx`), whose reasoning stands as
+/// written: three tests in one binary each resolve an image on their own
+/// thread, and with `LP_EMU_BUILD_FW=1` and no image on disk each would start
+/// `build-reference-image.sh` — into the **same** detached worktree and the
+/// same output path. Two `git worktree add`s race (the loser exits 128 and
+/// its test SKIPs), and two `cherry-pick -n` + `cargo build` + `cp` sequences
+/// race into one ELF: M5 P1's CI run loaded a memfs image built that way and
+/// read a stack high-water 128 B off the pinned figure.
+///
+/// M4 hit the same race one level out and it needed a second fix. `cargo
+/// test` runs each test *binary* as its own **process**, so a mutex cannot
+/// see the other builder at all: `boot_idle`, `flash_persistence` and
+/// `upload_walk` are three processes wanting one image, and PR #567's
+/// `Emulator C6 (x64)` run failed with `Rom(Elf("ELF parse failed: Invalid
+/// ELF header size or alignment"))` — a reader that opened the file while
+/// another process was still `cp`ing into it. The cross-process half lives in
+/// `scripts/emu/build-reference-image.sh`: a `mkdir` lock around the shared
+/// worktree, and a `mv` publish so the ELF is never half-written. This mutex
+/// is still worth keeping — it stops N threads of one binary from queueing on
+/// that file lock for a build the first of them already did.
+static BUILD_LOCK: Mutex<()> = Mutex::new(());
 
 /// The profile and target `fw-esp32c6` is built with (`justfile`:
 /// `build-fw-esp32c6`).
@@ -181,6 +206,13 @@ pub fn fw_esp32c6_image(image: &FwImage) -> Result<PathBuf, String> {
     }
     let conventional = conventional_path(&root);
 
+    // Serialise with every other image build in this process, then look
+    // again: the thread that held the lock may have built this very image.
+    let _build = BUILD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    if cached.is_file() {
+        return Ok(cached);
+    }
+
     if std::env::var("LP_EMU_BUILD_FW").as_deref() != Ok("1") {
         return Err(format!(
             "no fw-esp32c6 ELF for `{slug}`. Set LP_EMU_C6_ELF_{slug} to one, or LP_EMU_BUILD_FW=1 \
@@ -291,6 +323,13 @@ pub fn reference_image(image: &ReferenceImage) -> Result<PathBuf, String> {
     }
     let root = workspace_root().ok_or("could not find the workspace root")?;
     let path = image.conventional_path(&root);
+    if path.is_file() {
+        return Ok(path);
+    }
+    // The script shares one detached worktree between every reference
+    // image: never run it twice at once (see `BUILD_LOCK`). Across
+    // processes the script's own lock does it.
+    let _build = BUILD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     if path.is_file() {
         return Ok(path);
     }
