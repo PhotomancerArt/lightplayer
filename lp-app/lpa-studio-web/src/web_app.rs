@@ -1009,18 +1009,14 @@ pub fn App() -> Element {
         .then(|| current_route.with_play(!play).path());
     // The workbench view tabs' targets: same-session view suffixes on the
     // current lens address, plain links like the play/patch toggles — one
-    // slot per view-table row. Only the default view is addressable on a
-    // device lens (no mapping address yet), so the other tabs hide there.
+    // slot per view-table row. Every lens route addresses every view (the
+    // device lens gained its `/mapping` and `/patch` suffixes with
+    // `/device/<uid>`), so no tab hides on a lens.
     let workbench_hrefs = current_route.is_lens().then(|| {
         workbench::WorkbenchHrefs::from_entries(workbench::VIEWS.iter().map(|spec| {
-            let addressable = spec.view == workbench::WorkbenchView::default()
-                || matches!(
-                    &current_route,
-                    StudioRoute::Project { .. } | StudioRoute::Example { .. }
-                );
             (
                 spec.view,
-                addressable.then(|| current_route.with_view(spec.route_view).path()),
+                Some(current_route.with_view(spec.route_view).path()),
             )
         }))
     });
