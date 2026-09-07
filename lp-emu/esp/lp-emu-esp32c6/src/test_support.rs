@@ -39,6 +39,19 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
+
+/// One firmware build at a time per process. Three tests in one binary
+/// (`boot_idle`'s two memfs runs and its flash-backed one) all resolve an
+/// image on their own thread, and with `LP_EMU_BUILD_FW=1` and no image on
+/// disk each would start `build-reference-image.sh` — into the **same**
+/// detached worktree and the same output path. Two `git worktree add`s race
+/// (the loser exits 128 and its test SKIPs), and two `cherry-pick -n` +
+/// `cargo build` + `cp` sequences race into one ELF: M5 P1's CI run loaded
+/// a memfs image built that way and read a stack high-water 128 B off the
+/// pinned figure, and the rerun of the same commit was green. The lock makes
+/// the first thread build and the rest find the file.
+static BUILD_LOCK: Mutex<()> = Mutex::new(());
 
 /// The profile and target `fw-esp32c6` is built with (`justfile`:
 /// `build-fw-esp32c6`).
@@ -266,6 +279,13 @@ pub fn fw_esp32c6_image(image: &FwImage) -> Result<PathBuf, String> {
     }
     let conventional = conventional_path(&root);
 
+    // Serialise with every other image build in this process, then look
+    // again: the thread that held the lock may have built this very image.
+    let _build = BUILD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    if cached.is_file() {
+        return Ok(cached);
+    }
+
     if std::env::var("LP_EMU_BUILD_FW").as_deref() != Ok("1") {
         return Err(format!(
             "no fw-esp32c6 ELF for `{slug}`. Set LP_EMU_C6_ELF_{slug} to one, or LP_EMU_BUILD_FW=1 \
@@ -382,6 +402,12 @@ pub fn reference_image(image: &ReferenceImage) -> Result<PathBuf, String> {
     }
     let root = workspace_root().ok_or("could not find the workspace root")?;
     let path = image.conventional_path(&root);
+    if path.is_file() {
+        return Ok(path);
+    }
+    // The script shares one detached worktree between every reference
+    // image: never run it twice at once (see `BUILD_LOCK`).
+    let _build = BUILD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     if path.is_file() {
         return Ok(path);
     }
