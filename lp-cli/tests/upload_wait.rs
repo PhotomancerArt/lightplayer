@@ -107,14 +107,14 @@ fn upload_wait_times_out_nonzero_when_no_evidence_arrives() {
     );
 }
 
-/// Copy `examples/shader-oracle` into a fresh temp dir, optionally
+/// Copy `projects/test/shader-oracle` into a fresh temp dir, optionally
 /// overwriting `shader.glsl` with `shader_override`.
 fn shader_oracle_project(shader_override: Option<&str>) -> (TempDir, PathBuf) {
     let temp_dir = TempDir::new().expect("tempdir");
     let project_dir = temp_dir.path().join("project");
     std::fs::create_dir_all(&project_dir).expect("create project dir");
 
-    let source_dir = workspace_dir().join("examples").join("shader-oracle");
+    let source_dir = workspace_dir().join("projects/test/shader-oracle");
     for entry in std::fs::read_dir(&source_dir).expect("read shader-oracle") {
         let entry = entry.expect("dir entry");
         let path = entry.path();

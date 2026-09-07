@@ -143,7 +143,10 @@ mod tests {
             lpa_studio_core::ProjectTemplate::Pattern2d,
         ] {
             assert!(action_replaces_loaded_project(&home(
-                HomeOp::CreateProject { template }
+                HomeOp::CreateProject {
+                    template,
+                    name: None
+                }
             )));
         }
     }

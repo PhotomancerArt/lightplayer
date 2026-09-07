@@ -233,6 +233,8 @@ impl FirmwareVerb {
                 board_id: choice.board_id.clone(),
                 build_id: choice.build_id.clone(),
                 park_first: choice.park_first,
+                // An update never renames: the board already has a name.
+                name: None,
             })
             .with_label(self.label())
             .with_summary(self.summary()),

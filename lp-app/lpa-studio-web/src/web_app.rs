@@ -344,8 +344,9 @@ pub fn App() -> Element {
         // The rebuilt device layer (M3): the roster's effects run device IO
         // in spawned futures on the browser's executor, and reach real ports
         // through the Web Serial provider. A browser without Web Serial
-        // installs no transport, and the devices page says so rather than
-        // showing an empty roster that reads like "you have none".
+        // installs no serial transport, and the devices page says so rather
+        // than showing an empty roster that reads like "you have none" —
+        // but it still reaches SIMS, which are workers, not ports.
         #[cfg(target_arch = "wasm32")]
         {
             controller.set_device_spawner(wasm_bindgen_futures::spawn_local);
@@ -354,8 +355,14 @@ pub fn App() -> Element {
             ));
             match lpa_studio_core::BrowserSerialTransport::new(provider) {
                 Some(transport) => controller.set_device_transport(Rc::new(transport)),
-                None => log::info!("this browser has no Web Serial; devices are unavailable"),
+                None => log::info!("this browser has no Web Serial; only sims are reachable"),
             }
+            // Sims are made, not discovered, so installing this costs a page
+            // with none exactly nothing: the transport serves what has been
+            // powered on, and nothing has.
+            controller.set_device_sim_transport(Rc::new(lpa_studio_core::SimDeviceTransport::new(
+                Rc::new(lpa_studio_core::BrowserSimLinkSource::resolving()),
+            )));
         }
         let (actor, handle) = StudioActor::new(controller, make_pull_timer);
         let mut view_rx = handle.view;
@@ -1372,9 +1379,10 @@ fn project_popover_inputs(
         _ => None,
     };
 
-    // The publish line, from the ledger the auto-publish driver keeps for
-    // this tab. No row is not a failure — it is a driver that has not
-    // concluded a trip for this project — and the panel says so.
+    // The `MineLocal` Access sentence's source: this project's row in the
+    // ledger the auto-publish driver keeps for this tab. No row is not a
+    // failure — it is a driver that has not concluded a trip for this
+    // project — and the panel keeps its static wording for that.
     let publish = library_uid
         .as_ref()
         .filter(|_| relationship == ProjectRelationship::MineLocal)
@@ -1385,9 +1393,8 @@ fn project_popover_inputs(
                 .find(|row| &row.uid == uid)
         })
         .map(|row| PublishStatus {
-            label: row.kind.label().to_string(),
+            kind: row.kind,
             detail: row.detail,
-            trouble: row.kind.is_failure(),
         });
 
     let transient = matches!(
@@ -1940,6 +1947,7 @@ mod tests {
         UiChromeSessionControl {
             kind: UiChromeSessionKind::Sim,
             key: "runtime-sim".to_string(),
+            device: None,
             name: "Sim".to_string(),
             board: Some("ESP32-C6".to_string()),
             status: UiChromeSessionStatus::Run,

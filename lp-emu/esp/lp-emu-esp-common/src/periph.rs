@@ -66,11 +66,39 @@ impl Width {
     }
 }
 
+/// What the chip's boot strap says when a reset lands: run the app, or
+/// stay in the ROM's download console.
+///
+/// On the C6 the strap is GPIO9 at the reset edge, and the USB-Serial-JTAG
+/// block can pull it from the host side: the download dance (DTR high, then
+/// an RTS falling edge) resets the chip into the ROM console, the plain
+/// dance (an RTS falling edge with DTR never high) resets it into the app.
+/// The RWDT always resets into the app. Until M7 performs resets, the
+/// machine only reports the strap in [`crate::periph::MachineRequest::Reset`]'s
+/// outcome message.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Strap {
+    /// Boot the application (GPIO9 high).
+    App,
+    /// Stay in the mask ROM's download console (GPIO9 low).
+    Download,
+}
+
+impl core::fmt::Display for Strap {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Strap::App => "app",
+            Strap::Download => "download",
+        })
+    }
+}
+
 /// Something a peripheral needs the *machine* to do, because it cannot do
 /// it itself: a reset. The bus holds at most one (the first wins) and the
 /// machine takes it at the next slice boundary.
 ///
-/// The one producer today is a watchdog whose stage action is a reset. The
+/// The producers are a watchdog whose stage action is a reset and the
+/// USB-Serial-JTAG block's `chip_rst` path (a host's DTR/RTS dance). The
 /// peripheral cannot reset the hart — it does not see the hart — and a
 /// reset the emulator cannot yet perform (M7 owns the boot chain) is
 /// reported as a run outcome instead, which is also the more useful answer:
@@ -78,10 +106,106 @@ impl Width {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MachineRequest {
     Reset {
-        /// Who asked: `"LP_WDT stage 0"`.
+        /// Who asked: `"LP_WDT stage 0"`, `"USB_DEVICE chip_rst (serial)"`.
         source: &'static str,
         at: Cycles,
+        /// What the chip would boot into. See [`Strap`].
+        strap: Strap,
     },
+}
+
+/// How much of a register's behaviour is backed by evidence.
+///
+/// The validation system grades whole classes (`lp-emu-validate`'s
+/// `Modeled < Documented < Measured`); this is the same ladder applied to
+/// one register of one block, so a run can refuse to *touch* a register
+/// whose behaviour is a guess. Every register is `Modeled` unless its
+/// block says otherwise — a default that is honest about the accept
+/// tables, where nothing was measured.
+///
+/// - `Modeled`: the behaviour is our reading of the PAC and the drivers,
+///   and nothing on silicon has confirmed it.
+/// - `Documented`: the behaviour is what a document states (the PAC's
+///   description, a USB specification constant), unmeasured here.
+/// - `Measured`: a committed silicon transcript shows the guest's
+///   observable behaviour at this register agreeing with the model.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum RegGrade {
+    #[default]
+    Modeled,
+    Documented,
+    Measured,
+}
+
+impl RegGrade {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            RegGrade::Modeled => "modeled",
+            RegGrade::Documented => "documented",
+            RegGrade::Measured => "measured",
+        }
+    }
+
+    /// `modeled` | `documented` | `measured`, as the CLI spells them.
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "modeled" => Some(RegGrade::Modeled),
+            "documented" => Some(RegGrade::Documented),
+            "measured" => Some(RegGrade::Measured),
+            _ => None,
+        }
+    }
+}
+
+impl core::fmt::Display for RegGrade {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// A block's per-register grade table: register offset → [`RegGrade`],
+/// `Modeled` for anything not listed.
+///
+/// Kept as a sorted list rather than a map: a block has a few dozen
+/// registers and a handful of entries above `Modeled`, and a reviewer reads
+/// the table in the block's file header — the same rows, in the same order.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RegGrades {
+    /// Sorted by offset, one entry per offset.
+    entries: Vec<(u32, RegGrade)>,
+}
+
+impl RegGrades {
+    pub const fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+        }
+    }
+
+    /// Grade the register at `off` (word-aligned). A later call for the
+    /// same offset replaces the earlier one.
+    pub fn with_grade(mut self, off: u32, grade: RegGrade) -> Self {
+        let off = off & !3;
+        match self.entries.binary_search_by_key(&off, |(o, _)| *o) {
+            Ok(i) => self.entries[i].1 = grade,
+            Err(i) => self.entries.insert(i, (off, grade)),
+        }
+        self
+    }
+
+    /// The grade at `off`; `Modeled` when unlisted.
+    pub fn grade(&self, off: u32) -> RegGrade {
+        let off = off & !3;
+        self.entries
+            .binary_search_by_key(&off, |(o, _)| *o)
+            .map(|i| self.entries[i].1)
+            .unwrap_or_default()
+    }
+
+    /// Every listed `(offset, grade)`, ascending by offset.
+    pub fn entries(&self) -> &[(u32, RegGrade)] {
+        &self.entries
+    }
 }
 
 /// A `Peripheral`'s view of the machine for the duration of one access.
@@ -389,6 +513,13 @@ pub trait Peripheral {
     /// `self.names.name(off)` against a generated table.
     fn reg_name(&self, _off: u32) -> Option<&'static str> {
         None
+    }
+
+    /// How much evidence backs the register at `off`. See [`RegGrade`];
+    /// `Modeled` unless the block keeps a [`RegGrades`] table. The bus
+    /// consults it under [`crate::bus::SocBus::set_strict_grade`].
+    fn reg_grade(&self, _off: u32) -> RegGrade {
+        RegGrade::Modeled
     }
 
     /// Snapshot this peripheral's state. The machine composes the

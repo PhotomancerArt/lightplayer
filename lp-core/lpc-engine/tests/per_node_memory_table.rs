@@ -13,7 +13,7 @@
 //! per-pair slope leaves the per-node remainder — the dataflow/bus/registry
 //! entries, the node structs, the per-port buffers, the names and paths.
 //!
-//! The fixtures are generated in-test from `examples/basic` (241 lamps: a 1×1
+//! The fixtures are generated in-test from `projects/test/basic` (241 lamps: a 1×1
 //! centre grid plus a 240-lamp 8-ring disc on a 10×10 canvas, Direct sampling,
 //! one output with interpolation and LUT on) by the same rules as the committed
 //! projects `projects/test/basic-{2n,4n,2n-half}`, so the host probe and the
@@ -109,7 +109,7 @@ struct Fixture {
     lamps: u32,
 }
 
-/// `examples/basic`'s 8-ring disc, per ring, inner..outer as authored.
+/// `projects/test/basic`'s 8-ring disc, per ring, inner..outer as authored.
 const BASIC_RING_COUNTS: [u32; 8] = [60, 48, 40, 32, 24, 16, 12, 8];
 
 /// One board pin per pair, in `projects/test/quad-strips`'s order and starting
@@ -134,7 +134,7 @@ fn synthetic_from_basic(label: &'static str, pairs: u32, half: bool) -> Fixture 
         "only {} board pins are wired up",
         PINS.len()
     );
-    let src = workspace_dir().join("examples/basic");
+    let src = workspace_dir().join("projects/test/basic");
     let dir = std::env::temp_dir().join(format!(
         "lp-per-node-{}-{label}-{pairs}{}",
         std::process::id(),
@@ -246,11 +246,11 @@ fn write_node_def(path: &Path, kind: &str, value: &serde_json::Value) {
         .expect("write node def");
 }
 
-/// `examples/basic` itself: the k = 1 point, and the warm-up run.
+/// `projects/test/basic` itself: the k = 1 point, and the warm-up run.
 fn parent_fixture(label: &'static str) -> Fixture {
     Fixture {
         label,
-        dir: workspace_dir().join("examples/basic"),
+        dir: workspace_dir().join("projects/test/basic"),
         pairs: 1,
         lamps: 241,
     }
@@ -435,7 +435,7 @@ fn print_slopes(label: &str, axis: Axis, a: (&Fixture, &[Phase]), b: (&Fixture, 
 /// The figures the slopes are taken on.
 ///
 /// ⚠️ The phase table cannot be sloped row by row: the host compile does not
-/// land in the same tick for every fixture (`examples/basic` defers it to tick
+/// land in the same tick for every fixture (`projects/test/basic` defers it to tick
 /// 2, a multi-pair project takes it in tick 1), and it is a ~1 MB wasmtime cost
 /// that dwarfs the per-pair signal wherever it lands. So the compile tick is
 /// found per fixture (the tick with the largest transient), reported on its own

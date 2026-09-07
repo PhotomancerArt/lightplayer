@@ -11,6 +11,7 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{DeviceCardFeedView, FeedLiveness};
 use lpa_studio_web_story_macros::story;
+use lpc_model::ProjectKind;
 
 use lpa_studio_core::app::library::PackageHealth;
 use lpa_studio_core::{
@@ -39,12 +40,26 @@ use crate::app::home::{DevicesPage, ExplorePage, ProjectsPage};
 /// A fixed "now" so relative times in baselines never drift.
 const STORY_NOW: f64 = 1_800_000_000.0;
 
+/// One of each kind, so the grouped surfaces show both sections.
 fn examples() -> Vec<UiExampleCard> {
-    vec![UiExampleCard {
-        id: "examples/basic".to_string(),
-        name: "Basic".to_string(),
-        kind: "Module".to_string(),
-    }]
+    vec![
+        UiExampleCard {
+            id: "catalog/fyeah-sign".to_string(),
+            name: "Fyeah Sign".to_string(),
+            kind: ProjectKind::General,
+            description: "A porch sign on the full bus: clock, button and radio share one trigger."
+                .to_string(),
+        },
+        UiExampleCard {
+            id: "catalog/plasma".to_string(),
+            name: "Plasma".to_string(),
+            kind: ProjectKind::Pattern {
+                exports: vec!["effect".to_string()],
+            },
+            description: "The smallest non-empty panel: one plasma shader with three bound knobs."
+                .to_string(),
+        },
+    ]
 }
 
 fn packages() -> Vec<UiPackageCard> {
@@ -264,7 +279,7 @@ fn live_thumb_states() -> Element {
             }
             article { class: "tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
                 CardThumb {
-                    seed: "examples/basic".to_string(),
+                    seed: "catalog/plasma".to_string(),
                     label: "failed".to_string(),
                     static_badge: Some(ThumbPreviewBadge::Error {
                         reason: "deploy: shader compile failed".to_string(),
@@ -512,6 +527,43 @@ fn devices_page_story(remembered_open: bool) -> Element {
     rsx! {
         section { class: "tw:p-4",
             DevicesPage { home, remembered_open, on_action: |_| {} }
+        }
+    }
+}
+
+#[story(
+    description = "The remembered line open, with the board's LAST PICTURE (the honest-device-preview follow-up, 2026-09-07): the same page as `devices_page_remembered_open`, but the remembered board's feed carries the frame Studio persisted to its per-uid sidecar the last time the board was fed. The tile's 120px slot draws that frame exactly as a card's Offline look does — the lamp field dimmed and desaturated, the neutral pill \"last frame · 3 h ago\" with the age measured from when the board actually published it (the STORED capture stamp, not the reload) — instead of the \"Not connected — …\" sentence. Nothing else on the tile moves: same dashed border, same height, same board · last-heard meta line, same Reconnect / Forget verbs. Compare against `devices_page_remembered_open`, whose remembered board has no sidecar and keeps its sentence."
+)]
+fn devices_page_remembered_last_frame() -> Element {
+    let mut devices = roster_page_fixture();
+    let remembered = devices
+        .roster
+        .devices
+        .iter()
+        .find(|device| device.status == DeviceStatus::Offline)
+        .map(|device| device.id)
+        .expect("the page fixture has a remembered board");
+    devices.feeds.insert(
+        remembered,
+        DeviceCardFeedView {
+            frame: Some(thumb_lamp_frame()),
+            frame_age_secs: Some(3.0 * 3_600.0),
+            engine_fps: None,
+            liveness: FeedLiveness::Offline,
+        },
+    );
+    let home = UiHomeView {
+        sim: None,
+        projects: packages(),
+        examples: examples(),
+        devices,
+        library_available: true,
+        opening: None,
+        issue: None,
+    };
+    rsx! {
+        section { class: "tw:p-4",
+            DevicesPage { home, remembered_open: true, on_action: |_| {} }
         }
     }
 }
@@ -1714,23 +1766,72 @@ fn pick_popover_library() -> Vec<UiPackageCard> {
         .collect()
 }
 
-/// Six bundled examples, so the Examples tab is a grid rather than a row.
+/// Six bundled examples, three of each kind, so the Examples tab shows
+/// both of its sections as grids rather than rows.
 fn pick_popover_examples() -> Vec<UiExampleCard> {
     [
-        "Basic",
-        "Meteor",
-        "Plasma",
-        "Rainbow",
-        "Logo sign",
-        "Candle",
+        ("Logo sign", false),
+        ("Meteor", true),
+        ("Porch sign", false),
+        ("Plasma", true),
+        ("Zook dome", false),
+        ("Candle", true),
     ]
     .into_iter()
-    .map(|name| UiExampleCard {
-        id: format!("examples/{}", name.to_lowercase().replace(' ', "-")),
+    .map(|(name, pattern)| UiExampleCard {
+        id: format!("catalog/{}", name.to_lowercase().replace(' ', "-")),
         name: name.to_string(),
-        kind: "Module".to_string(),
+        kind: if pattern {
+            ProjectKind::Pattern {
+                exports: vec!["effect".to_string()],
+            }
+        } else {
+            ProjectKind::General
+        },
+        description: format!("{name}, in one sentence."),
     })
     .collect()
+}
+
+#[story(
+    description = "The gallery pick popover open on its NEW tab, the one source that has no name yet. Under the starter card sits the optional Project name field, prefilled with the board's own title — a piece and the board that runs it usually share a name, so leaving it is the common case and the hint says so. Typing a different name swaps the hint for one offer, ticked by default: name the board the same. Nothing here is a step — the CTA in the verb row still dispatches one Push, now carrying the project's name (and, when ticked, the board's rename) as parameters. The board's rename is only ever offered on a NEW project; an example or a library project pushed to the board never renames it."
+)]
+fn device_pick_popover_new_tab() -> Element {
+    rsx! {
+        section { class: "tw:min-h-[520px] tw:w-[420px] tw:p-4",
+            div { class: "tw:flex tw:h-[30px] tw:min-w-0 tw:items-center tw:gap-1.5 tw:overflow-hidden tw:whitespace-nowrap",
+                ProjectPickPopover {
+                    card: pick_popover_card(),
+                    projects: pick_popover_library(),
+                    examples: pick_popover_examples(),
+                    initially_open: true,
+                    initial_pick: Some("new:seeed/xiao-esp32-c6".to_string()),
+                    on_action: |_| {},
+                }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The device card's header ⋯ menu, open: the project card's menu grammar on the device card, holding the one verb that acts on the ENTRY rather than the board — Rename, as an inline form prefilled with the card's current title (here the derived \"<board> · <Mon D>\" a flash minted). Submitting dispatches the model's own SetName and closes the menu; the name is Studio's (persisted to the registry) and is never written to the board. Every board verb keeps its zone; this is a menu, not a fourth verb row. The pending card carries no menu — a link that has not identified itself has no intent to write a name into, and names itself through the board pick's name field instead."
+)]
+fn devices_card_menu_open() -> Element {
+    let card = roster_fixture().roster.devices.remove(0);
+    rsx! {
+        section { class: "tw:min-h-[560px] tw:p-4",
+            div { class: "tw:w-[400px]",
+                DeviceRosterCard {
+                    card,
+                    open_uid: Some("dev000000daqf6dvvqz".to_string()),
+                    projects: packages(),
+                    examples: examples(),
+                    menu_initially_open: true,
+                    on_action: |_| {},
+                }
+            }
+        }
+    }
 }
 
 #[story(
@@ -1753,7 +1854,7 @@ fn device_pick_popover_open() -> Element {
 }
 
 #[story(
-    description = "The board pick popover, open and filtered (P6, AC4; renderings P10). The chip the boot banner named narrows the served catalog, and the panel SAYS so — which chip, which source answered it, how many boards fit — with \"show all\" as the escape; the flash preflight's chip guard, not the filter, is what makes a wrong pick fail safely, which is what the foot line is for. Each tile now LEADS with the board as lpa-boards draws it — the same sidecar and the same renderer the boards page uses, turned a quarter turn and fitted to a 56px band, so a devkit lies along the band instead of standing in it as a sliver and tiles of a three-to-one height range still line their names up — over the name, its manufacturer and flash, and its family, marked green only where it matches the detected chip. The trigger's swatch carries the picked board's own silhouette. Two C6 boards fit, so nothing is preselected and the Flash verb waits: the pin map is written to the device, so the card never guesses."
+    description = "The board pick popover, open and filtered (P6, AC4; renderings P10). The chip the boot banner named narrows the served catalog, and the panel SAYS so — which chip, which source answered it, how many boards fit — with \"show all\" as the escape; the flash preflight's chip guard, not the filter, is what makes a wrong pick fail safely, which is what the foot line is for. Each tile now LEADS with the board as lpa-boards draws it — the same sidecar and the same renderer the boards page uses, turned a quarter turn and fitted to a 56px band, so a devkit lies along the band instead of standing in it as a sliver and tiles of a three-to-one height range still line their names up — over the name, its manufacturer and flash, and its family, marked green only where it matches the detected chip. The trigger's swatch carries the picked board's own silhouette. Two C6 boards fit, so nothing is preselected and the Flash verb waits: the pin map is written to the device, so the card never guesses. Above the foot line sits the optional Board name field: blank keeps the derived \"<board> · <Mon D>\" the app mints at flash (shown as the placeholder once a board is picked), and a typed name rides the Flash gesture itself — the only road a still-pending link's name can take, since it has no intent to rename until this gesture adopts it. The Update verb's pick carries no field: that board already has its name."
 )]
 fn device_board_pick_open() -> Element {
     board_pick_story(BoardPickMode::Row, ("esp32c6", ChipSource::BootBanner))

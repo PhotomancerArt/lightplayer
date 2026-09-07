@@ -137,6 +137,45 @@ fn compile_error() -> Element {
 }
 
 #[story(
+    description = "The GPU preview tier's unbounded-loop refusal, verbatim from `lp-gfx-wgpu` for the fault-demo rig: the codespan-style marker lands the gutter mark on the AUTHORED line 14 (`while (true)`), not on the assembled unit's line; the headline names the function, the line and the loop head."
+)]
+fn compile_error_gpu_loop_refusal() -> Element {
+    // The rig's authored shader (`examples/fault-demo/shader.glsl`,
+    // `projects/test/fault-demo` once the catalog tree lands), so the
+    // marker's line 14 IS the `while (true)` line here. A copy, not an
+    // `include_str!`: the rig moves, the story must not.
+    const FAULT_DEMO_GLSL: &str = "\
+layout(binding = 0) uniform vec2 outputSize;
+layout(binding = 1) uniform float phase;
+
+// Deliberately faults every frame: the loop never ends, the per-pixel fuel
+// tank drains, and the runtime traps — a RUNTIME failure of a shader that
+// compiled fine. The engine reports the node as `Fault`, and every output
+// of this project shows the fault pattern instead of black
+// (docs/adr/2026-09-02-fault-is-never-black.md). Fuel metering is on for every backend
+// (`lpvm-native` NativeOptions.fuel defaults true; the browser sim's
+// `infinite_loop_shader_reports_fuel_error_and_keeps_ticking` pins it),
+// so this never hangs or reboots a board.
+vec4 render_2d(vec2 pos) {
+    float acc = 0.0;
+    while (true) { acc += 0.001; }
+    return vec4(acc, 0.0, 0.0, 1.0);
+}
+";
+    let mut editor = editor_fixture(Some(UiAssetContent::from_bytes(
+        FAULT_DEMO_GLSL.as_bytes(),
+        true,
+        4,
+    )));
+    editor.shader_error = Some(UiShaderError::parse(
+        "shader compile: unbounded loop in `render_2d` at line 14 (`while (true) { acc += 0.001; }`): no path through the loop body breaks, returns or discards. The GPU tier has no fuel meter, so it refuses to compile a loop that can never exit.\n   ┌─ glsl:14:5\n   │\n14 │     while (true) { acc += 0.001; }\n   │     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n",
+    ));
+    rsx! {
+        EditorStoryCard { editor }
+    }
+}
+
+#[story(
     description = "A location-less compile error (recovery-blocked): the message with no line:col; full-error popup available."
 )]
 fn compile_error_no_location() -> Element {

@@ -330,7 +330,9 @@ fn picker_with_imports(patterns: &[(&str, &str, &str, bool)]) -> Element {
     let patterns: Vec<UiImportablePattern> = patterns
         .iter()
         .map(|(uid, label, export, family)| UiImportablePattern {
-            package_uid: (*uid).to_string(),
+            source: lpa_studio_core::ImportSource::Library {
+                package_uid: (*uid).to_string(),
+            },
             package_label: (*label).to_string(),
             export: (*export).to_string(),
             family: *family,

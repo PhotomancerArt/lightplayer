@@ -64,7 +64,7 @@ fn measure(source: &str) -> Option<(usize, usize)> {
 
 /// Grow a shader by repeating expression-heavy statements inside the entry
 /// point, so the HIR expression count scales with source size the way a real
-/// bigger shader's would. Shape follows `examples/basic/shader.glsl`: a
+/// bigger shader's would. Shape follows `projects/test/basic/shader.glsl`: a
 /// `vec4 render_2d(vec2)` entry point with `layout(binding = N) uniform` inputs.
 fn synthetic(repeats: usize) -> String {
     let mut s = String::from(
@@ -96,18 +96,18 @@ fn measure_lex(source: &str) -> (usize, usize) {
 fn main() {
     println!("host pointer width: {} bits\n", usize::BITS);
 
-    let real = std::fs::read_to_string("../../examples/basic/shader.glsl")
-        .expect("examples/basic/shader.glsl");
+    let real = std::fs::read_to_string("../../projects/test/basic/shader.glsl")
+        .expect("projects/test/basic/shader.glsl");
     println!("=== the real shader ===");
     match measure(&real) {
         Some((peak, largest)) => println!(
-            "examples/basic/shader.glsl: {} B of GLSL -> peak {} B, largest single alloc {} B  ({:.1}x source)",
+            "projects/test/basic/shader.glsl: {} B of GLSL -> peak {} B, largest single alloc {} B  ({:.1}x source)",
             real.len(),
             peak,
             largest,
             peak as f64 / real.len() as f64
         ),
-        None => println!("examples/basic/shader.glsl: did not compile"),
+        None => println!("projects/test/basic/shader.glsl: did not compile"),
     }
 
     let (lex_peak, lex_largest) = measure_lex(&real);

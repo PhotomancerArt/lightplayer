@@ -33,7 +33,8 @@ use lp_emu_core::sched::{Cycles, EventId, Scheduler};
 
 use crate::host::HostSinks;
 use crate::periph::{
-    BoxedPeripheral, BusCx, CpuIntMatrix, IrqLines, MachineRequest, NoCpuInterrupts, Width,
+    BoxedPeripheral, BusCx, CpuIntMatrix, IrqLines, MachineRequest, NoCpuInterrupts, RegGrade,
+    Width,
 };
 use crate::trace::{Access, MmioEvent, Trace};
 
@@ -134,6 +135,11 @@ pub struct StrictViolation {
     /// The address was inside a declared MMIO window — an unmodelled block,
     /// not a wild pointer.
     pub in_mmio_window: bool,
+    /// `Some(grade)` when the refusal was a strict-**grade** one: the
+    /// register exists and is modelled, but its [`RegGrade`] is below the
+    /// level [`SocBus::set_strict_grade`] asked for. `None` for an unmapped
+    /// access.
+    pub grade: Option<RegGrade>,
 }
 
 /// The bus's scalar state, for a machine snapshot.
@@ -170,6 +176,11 @@ pub struct SocBus {
     /// "Last region hit" cache. The common case — the same stack or heap
     /// region twice in a row — is then one compare instead of a search.
     last_region: usize,
+    /// The same cache for instruction fetch, kept apart from `last_region`:
+    /// code runs from the flash window while data lives in HP SRAM, so one
+    /// shared cache missed on nearly every instruction (fetch, load, fetch…)
+    /// and each miss was a binary search.
+    last_fetch_region: usize,
     /// Insertion order, so a peripheral's index — which [`event_id`] packs
     /// into the scheduler's event tags — never moves under it.
     mmio: Vec<MmioRange>,
@@ -181,6 +192,9 @@ pub struct SocBus {
     mmio_windows: Vec<(u32, u32)>,
 
     strict: bool,
+    /// `Some(level)`: an access to a register graded below `level` is
+    /// refused like an unmapped one. See [`SocBus::set_strict_grade`].
+    strict_grade: Option<RegGrade>,
     sideband: bool,
     /// The chip's misaligned-access policy, mirrored from the hart. The C6
     /// core performs misaligned data accesses in hardware, so its machine
@@ -188,8 +202,12 @@ pub struct SocBus {
     /// component that actually decides.
     allow_unaligned: bool,
     watchpoints: [Option<Watchpoint>; WATCHPOINT_SLOTS],
-    /// Bit per armed slot; `0` short-circuits the per-access check.
-    armed: u32,
+    /// Bit per armed slot that wants each access kind, indexed by
+    /// [`kind_index`]; `0` short-circuits the per-access check. esp-hal keeps
+    /// a store trigger on the stack guard for the whole run, so *something*
+    /// is armed almost always; a fetch or a load still has to cost one test,
+    /// not a four-slot walk.
+    armed_for: [u32; 3],
 
     unmapped_sites: BTreeSet<(u32, u32)>,
     unmapped_reads: u64,
@@ -243,14 +261,16 @@ impl SocBus {
         Self {
             regions: Vec::new(),
             last_region: 0,
+            last_fetch_region: 0,
             mmio: Vec::new(),
             mmio_by_base: Vec::new(),
             mmio_windows: Vec::new(),
             strict: false,
+            strict_grade: None,
             sideband: false,
             allow_unaligned: false,
             watchpoints: [None; WATCHPOINT_SLOTS],
-            armed: 0,
+            armed_for: [0; 3],
             unmapped_sites: BTreeSet::new(),
             unmapped_reads: 0,
             unmapped_writes: 0,
@@ -290,6 +310,7 @@ impl SocBus {
         self.regions.push(region);
         self.regions.sort_by_key(|r| r.base);
         self.last_region = 0;
+        self.last_fetch_region = 0;
     }
 
     /// Add a peripheral at `base` covering `len` bytes. Returns its index —
@@ -340,6 +361,28 @@ impl SocBus {
 
     pub fn strict(&self) -> bool {
         self.strict
+    }
+
+    /// Refuse every access to a register whose [`RegGrade`] is **below**
+    /// `level` — the honest-peripheral policy one rung up from
+    /// [`set_strict`](Self::set_strict): not "is this block modelled" but
+    /// "is what the model says about this register backed by evidence".
+    /// The refusal is a [`StrictViolation`] with `grade` set and
+    /// `in_mmio_window` true, reported the same way as an unmapped access
+    /// and, like it, before the peripheral sees the access.
+    ///
+    /// `Some(RegGrade::Modeled)` refuses nothing (no grade is below it);
+    /// `Some(Documented)` stops on the first `Modeled` register any block
+    /// answers — which on a chip whose accept tables are all `Modeled` is
+    /// the first MMIO access of the boot. That is the point: the level says
+    /// what the run is allowed to trust, and a register outside it is a
+    /// stop with its name in the report, not a silent guess.
+    pub fn set_strict_grade(&mut self, level: Option<RegGrade>) {
+        self.strict_grade = level;
+    }
+
+    pub fn strict_grade(&self) -> Option<RegGrade> {
+        self.strict_grade
     }
 
     /// Mirror the hart's misaligned-access policy onto the bus.
@@ -577,6 +620,7 @@ impl SocBus {
             region.data.copy_from_slice(bytes);
         }
         self.last_region = 0;
+        self.last_fetch_region = 0;
     }
 
     /// Each peripheral's own blob, named, in registration order.
@@ -647,6 +691,7 @@ impl SocBus {
 
     // ---- decode -------------------------------------------------------
 
+    #[inline(always)]
     fn region_index(&self, address: u32) -> Option<usize> {
         // The "last hit" cache: one compare for the common case.
         if let Some(r) = self.regions.get(self.last_region)
@@ -654,6 +699,23 @@ impl SocBus {
         {
             return Some(self.last_region);
         }
+        self.region_index_slow(address)
+    }
+
+    /// [`region_index`](Self::region_index) for instruction fetch, with its
+    /// own last-hit cache.
+    #[inline(always)]
+    fn fetch_region_index(&self, address: u32) -> Option<usize> {
+        if let Some(r) = self.regions.get(self.last_fetch_region)
+            && r.contains(address)
+        {
+            return Some(self.last_fetch_region);
+        }
+        self.region_index_slow(address)
+    }
+
+    #[inline(never)]
+    fn region_index_slow(&self, address: u32) -> Option<usize> {
         let i = self.regions.partition_point(|r| r.base <= address);
         let i = i.checked_sub(1)?;
         self.regions[i].contains(address).then_some(i)
@@ -694,27 +756,38 @@ impl SocBus {
 
     // ---- watchpoints --------------------------------------------------
 
+    /// One test for the common case: no armed slot wants this access kind.
+    #[inline(always)]
     fn check_watchpoints(
         &self,
         address: u32,
         len: u32,
         kind: MemoryAccessKind,
     ) -> Result<(), MemoryError> {
+        let mask = self.armed_for[kind_index(kind)];
+        if mask == 0 {
+            return Ok(());
+        }
+        self.check_watchpoints_slow(address, len, kind, mask)
+    }
+
+    /// The slot walk, in slot order, over the slots `mask` names — the same
+    /// slots the four-way filter used to select one at a time.
+    #[inline(never)]
+    fn check_watchpoints_slow(
+        &self,
+        address: u32,
+        len: u32,
+        kind: MemoryAccessKind,
+        mask: u32,
+    ) -> Result<(), MemoryError> {
         for slot in 0..WATCHPOINT_SLOTS {
-            if self.armed & (1 << slot) == 0 {
+            if mask & (1 << slot) == 0 {
                 continue;
             }
             let Some(wp) = self.watchpoints[slot] else {
                 continue;
             };
-            let wanted = match kind {
-                MemoryAccessKind::Read => wp.on_load,
-                MemoryAccessKind::Write => wp.on_store,
-                MemoryAccessKind::InstructionFetch => wp.on_execute,
-            };
-            if !wanted {
-                continue;
-            }
             if watchpoint_overlaps(&wp, address, len) {
                 return Err(MemoryError::Watchpoint {
                     address,
@@ -728,36 +801,54 @@ impl SocBus {
 
     // ---- the access paths ---------------------------------------------
 
+    #[inline]
     fn read(&mut self, address: u32, width: Width) -> Result<u32, MemoryError> {
         let len = width.bytes();
         self.check_watchpoints(address, len, MemoryAccessKind::Read)?;
 
         if let Some(i) = self.region_index(address) {
-            if !self.regions[i].span_fits(address, len) {
-                return Err(MemoryError::InvalidAccess {
-                    address,
-                    size: len as usize,
-                    kind: MemoryAccessKind::Read,
-                });
-            }
+            // `region_index` guarantees `address` is inside the region, so
+            // "the span fits" is exactly "the slice exists".
             self.last_region = i;
             let off = (address - self.regions[i].base) as usize;
             let data = &self.regions[i].data;
-            let mut v = 0u32;
-            for k in 0..len as usize {
-                v |= u32::from(data[off + k]) << (8 * k);
-            }
-            return Ok(v);
+            let v = match width {
+                Width::Word => data
+                    .get(off..off + 4)
+                    .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]])),
+                Width::Half => data
+                    .get(off..off + 2)
+                    .map(|b| u32::from(u16::from_le_bytes([b[0], b[1]]))),
+                Width::Byte => data.get(off).map(|b| u32::from(*b)),
+            };
+            return v.ok_or(MemoryError::InvalidAccess {
+                address,
+                size: len as usize,
+                kind: MemoryAccessKind::Read,
+            });
         }
 
+        self.read_mmio(address, width)
+    }
+
+    /// The MMIO and unmapped halves of [`read`](Self::read), out of line so
+    /// the RAM path stays small enough to inline into the executors.
+    #[inline(never)]
+    fn read_mmio(&mut self, address: u32, width: Width) -> Result<u32, MemoryError> {
         if let Some(i) = self.mmio_index(address) {
             self.require_mmio_alignment(address, width)?;
             let base = self.mmio[i].base;
             let off = address - base;
-            let (block, name) = {
+            // Names are for the trace line only; `reg_name` is a table walk
+            // and this runs on every MMIO access, traced or not.
+            let traced = self.trace.is_enabled();
+            let (block, name) = if traced {
                 let p = &self.mmio[i].periph;
                 (p.name(), p.reg_name(off))
+            } else {
+                ("", None)
             };
+            self.check_grade(i, off, address, width, Access::Read)?;
             let (now, pc, hart) = (self.now, self.pc, self.hart);
             let value = {
                 let range = &mut self.mmio[i];
@@ -796,35 +887,54 @@ impl SocBus {
         Ok(0)
     }
 
+    #[inline]
     fn write(&mut self, address: u32, width: Width, value: u32) -> Result<(), MemoryError> {
         let len = width.bytes();
         self.check_watchpoints(address, len, MemoryAccessKind::Write)?;
 
         if let Some(i) = self.region_index(address) {
-            if !self.regions[i].writable || !self.regions[i].span_fits(address, len) {
-                return Err(MemoryError::InvalidAccess {
-                    address,
-                    size: len as usize,
-                    kind: MemoryAccessKind::Write,
-                });
+            let fault = MemoryError::InvalidAccess {
+                address,
+                size: len as usize,
+                kind: MemoryAccessKind::Write,
+            };
+            if !self.regions[i].writable {
+                return Err(fault);
             }
             self.last_region = i;
             let off = (address - self.regions[i].base) as usize;
             let data = &mut self.regions[i].data;
-            for k in 0..len as usize {
-                data[off + k] = (value >> (8 * k)) as u8;
-            }
-            return Ok(());
+            let stored = match width {
+                Width::Word => data
+                    .get_mut(off..off + 4)
+                    .map(|b| b.copy_from_slice(&value.to_le_bytes())),
+                Width::Half => data
+                    .get_mut(off..off + 2)
+                    .map(|b| b.copy_from_slice(&(value as u16).to_le_bytes())),
+                Width::Byte => data.get_mut(off).map(|b| *b = value as u8),
+            };
+            return stored.ok_or(fault);
         }
 
+        self.write_mmio(address, width, value)
+    }
+
+    /// The MMIO and unmapped halves of [`write`](Self::write); see
+    /// [`read_mmio`](Self::read_mmio).
+    #[inline(never)]
+    fn write_mmio(&mut self, address: u32, width: Width, value: u32) -> Result<(), MemoryError> {
         if let Some(i) = self.mmio_index(address) {
             self.require_mmio_alignment(address, width)?;
             let base = self.mmio[i].base;
             let off = address - base;
-            let (block, name) = {
+            let traced = self.trace.is_enabled();
+            let (block, name) = if traced {
                 let p = &self.mmio[i].periph;
                 (p.name(), p.reg_name(off))
+            } else {
+                ("", None)
             };
+            self.check_grade(i, off, address, width, Access::Write)?;
             let (now, pc, hart) = (self.now, self.pc, self.hart);
             {
                 let range = &mut self.mmio[i];
@@ -865,6 +975,61 @@ impl SocBus {
         self.unmapped(address, width, Access::Write, value)
     }
 
+    /// The strict-grade policy ([`set_strict_grade`](Self::set_strict_grade)):
+    /// a register graded below the level is refused before the peripheral
+    /// sees the access, recorded as the first violation if none is yet, and
+    /// noted in the trace with its name and grade.
+    fn check_grade(
+        &mut self,
+        index: usize,
+        off: u32,
+        address: u32,
+        width: Width,
+        access: Access,
+    ) -> Result<(), MemoryError> {
+        let Some(level) = self.strict_grade else {
+            return Ok(());
+        };
+        let grade = self.mmio[index].periph.reg_grade(off);
+        if grade >= level {
+            return Ok(());
+        }
+        if self.first_strict_violation.is_none() {
+            self.first_strict_violation = Some(StrictViolation {
+                cycle: self.now,
+                pc: self.pc,
+                address,
+                width,
+                access,
+                in_mmio_window: true,
+                grade: Some(grade),
+            });
+            let p = &self.mmio[index].periph;
+            let line = alloc::format!(
+                "cyc={} pc=0x{:08x} STRICT-GRADE {} of {}+0x{off:03x} {}: graded {grade}, the \
+                 run trusts {level} and above",
+                self.now,
+                self.pc,
+                match access {
+                    Access::Read => "read",
+                    Access::Write => "write",
+                },
+                p.name(),
+                p.reg_name(off).unwrap_or("?"),
+            );
+            self.trace.note(&line);
+            log::warn!("{line}");
+        }
+        Err(MemoryError::InvalidAccess {
+            address,
+            size: width.bytes() as usize,
+            kind: match access {
+                Access::Read => MemoryAccessKind::Read,
+                Access::Write => MemoryAccessKind::Write,
+            },
+        })
+    }
+
     /// The unmapped-access policy: count always, log the first time this
     /// exact `(pc, address)` appears, fault in strict mode.
     fn unmapped(
@@ -890,6 +1055,7 @@ impl SocBus {
                 width,
                 access,
                 in_mmio_window: self.in_mmio_window(address),
+                grade: None,
             });
         }
 
@@ -933,6 +1099,16 @@ impl SocBus {
     }
 }
 
+/// Index into [`SocBus::armed_for`] for an access kind.
+#[inline(always)]
+const fn kind_index(kind: MemoryAccessKind) -> usize {
+    match kind {
+        MemoryAccessKind::Read => 0,
+        MemoryAccessKind::Write => 1,
+        MemoryAccessKind::InstructionFetch => 2,
+    }
+}
+
 /// Does the watchpoint cover any byte of `[address, address + len)`?
 ///
 /// NAPOT is the RISC-V debug spec's `tdata2` encoding: the trailing ones of
@@ -952,6 +1128,7 @@ fn watchpoint_overlaps(wp: &Watchpoint, address: u32, len: u32) -> bool {
 }
 
 impl Bus for SocBus {
+    #[inline]
     fn fetch_instruction(&mut self, address: u32) -> Result<u32, MemoryError> {
         if address % 2 != 0 {
             return Err(MemoryError::Unaligned {
@@ -970,51 +1147,56 @@ impl Bus for SocBus {
         // Fetch never routes to MMIO: a jump into peripheral space is a
         // wild branch, and returning a register's value as an instruction
         // would turn it into a puzzle.
-        let i = self.region_index(address).ok_or_else(fault)?;
+        let i = self.fetch_region_index(address).ok_or_else(fault)?;
         if !self.regions[i].exec {
             return Err(fault());
         }
-        self.last_region = i;
+        self.last_fetch_region = i;
         let region = &self.regions[i];
         let off = (address - region.base) as usize;
+        let d = &region.data;
+        if let Some(b) = d.get(off..off + 4) {
+            return Ok(u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+        }
         // Two bytes are enough: a compressed instruction at the very end of
         // a region is legal, and the decoder asks for no more than it needs.
-        if off + 2 > region.data.len() {
-            return Err(fault());
-        }
-        let d = &region.data;
-        let lo = u32::from(d[off]) | (u32::from(d[off + 1]) << 8);
-        if off + 4 <= d.len() {
-            Ok(lo | (u32::from(d[off + 2]) << 16) | (u32::from(d[off + 3]) << 24))
-        } else {
-            Ok(lo)
+        match d.get(off..off + 2) {
+            Some(b) => Ok(u32::from(u16::from_le_bytes([b[0], b[1]]))),
+            None => Err(fault()),
         }
     }
 
+    #[inline]
     fn read_word(&mut self, address: u32) -> Result<i32, MemoryError> {
         self.read(address, Width::Word).map(|v| v as i32)
     }
 
+    #[inline]
     fn read_halfword(&mut self, address: u32) -> Result<i16, MemoryError> {
         self.read(address, Width::Half).map(|v| v as u16 as i16)
     }
 
+    #[inline]
     fn read_byte(&mut self, address: u32) -> Result<i8, MemoryError> {
         self.read(address, Width::Byte).map(|v| v as u8 as i8)
     }
 
+    #[inline]
     fn read_u8(&mut self, address: u32) -> Result<u8, MemoryError> {
         self.read(address, Width::Byte).map(|v| v as u8)
     }
 
+    #[inline]
     fn write_word(&mut self, address: u32, value: i32) -> Result<(), MemoryError> {
         self.write(address, Width::Word, value as u32)
     }
 
+    #[inline]
     fn write_halfword(&mut self, address: u32, value: i16) -> Result<(), MemoryError> {
         self.write(address, Width::Half, value as u16 as u32)
     }
 
+    #[inline]
     fn write_byte(&mut self, address: u32, value: i8) -> Result<(), MemoryError> {
         self.write(address, Width::Byte, value as u8 as u32)
     }
@@ -1051,10 +1233,21 @@ impl Bus for SocBus {
             self.trace.note(&line);
         }
         self.watchpoints[slot] = wp;
-        if wp.is_some() {
-            self.armed |= 1 << slot;
-        } else {
-            self.armed &= !(1 << slot);
+        let bit = 1u32 << slot;
+        for (kind, wanted) in [
+            (MemoryAccessKind::Read, wp.is_some_and(|w| w.on_load)),
+            (MemoryAccessKind::Write, wp.is_some_and(|w| w.on_store)),
+            (
+                MemoryAccessKind::InstructionFetch,
+                wp.is_some_and(|w| w.on_execute),
+            ),
+        ] {
+            let mask = &mut self.armed_for[kind_index(kind)];
+            if wanted {
+                *mask |= bit;
+            } else {
+                *mask &= !bit;
+            }
         }
     }
 
@@ -1076,7 +1269,7 @@ impl Bus for SocBus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::periph::Peripheral;
+    use crate::periph::{Peripheral, RegGrades, Strap};
     use crate::regfile::RegFile;
     use crate::trace::SharedBuffer;
 
@@ -1590,6 +1783,7 @@ mod tests {
             cx.request(MachineRequest::Reset {
                 source: "WDT stage 0",
                 at,
+                strap: Strap::App,
             });
         }
 
@@ -1614,11 +1808,150 @@ mod tests {
             bus.take_request(),
             Some(MachineRequest::Reset {
                 source: "WDT stage 0",
-                at: 77
+                at: 77,
+                strap: Strap::App,
             }),
             "the first request is the one the machine sees"
         );
         assert_eq!(bus.take_request(), None, "take clears");
+    }
+
+    /// A block with one `documented` register at `+0x24` and everything
+    /// else `modeled`.
+    struct Graded {
+        grades: RegGrades,
+        reads: u32,
+    }
+
+    impl Peripheral for Graded {
+        fn name(&self) -> &'static str {
+            "USB_DEVICE"
+        }
+
+        fn read(&mut self, _off: u32, _width: Width, _cx: &mut BusCx<'_>) -> u32 {
+            self.reads += 1;
+            0x55
+        }
+
+        fn write(&mut self, _off: u32, _width: Width, _value: u32, _cx: &mut BusCx<'_>) {}
+
+        fn reg_name(&self, off: u32) -> Option<&'static str> {
+            match off & !3 {
+                0x00 => Some("ep1"),
+                0x24 => Some("fram_num"),
+                _ => None,
+            }
+        }
+
+        fn reg_grade(&self, off: u32) -> RegGrade {
+            self.grades.grade(off)
+        }
+
+        fn save_state(&self) -> Vec<u8> {
+            Vec::new()
+        }
+
+        fn load_state(&mut self, _bytes: &[u8]) {}
+    }
+
+    #[test]
+    fn strict_grade_refuses_a_register_below_the_level_before_the_peripheral_sees_it() {
+        let buf = SharedBuffer::new();
+        let mut bus = bus_with_ram();
+        bus.trace = Trace::to_sink(Box::new(buf.clone()));
+        bus.add_mmio_window(0x6000_0000, 0x0010_0000);
+        bus.add_peripheral(
+            0x6000_f000,
+            0x100,
+            Box::new(Graded {
+                grades: RegGrades::new().with_grade(0x24, RegGrade::Documented),
+                reads: 0,
+            }),
+        );
+        bus.set_time(9);
+        bus.set_pc(0x4200_0000);
+
+        // No level: everything is answered.
+        assert_eq!(bus.read_word(0x6000_f000).unwrap(), 0x55);
+        // `modeled` is the floor, so it refuses nothing.
+        bus.set_strict_grade(Some(RegGrade::Modeled));
+        assert_eq!(bus.read_word(0x6000_f000).unwrap(), 0x55);
+        assert!(bus.first_strict_violation().is_none());
+
+        bus.set_strict_grade(Some(RegGrade::Documented));
+        assert_eq!(bus.strict_grade(), Some(RegGrade::Documented));
+        // The documented register still answers …
+        assert_eq!(bus.read_word(0x6000_f024).unwrap(), 0x55);
+        // … the modeled one is refused, and the peripheral never saw it.
+        let err = bus.read_word(0x6000_f000).unwrap_err();
+        assert!(matches!(
+            err,
+            MemoryError::InvalidAccess {
+                kind: MemoryAccessKind::Read,
+                ..
+            }
+        ));
+        let v = bus.first_strict_violation().expect("recorded");
+        assert_eq!(
+            (
+                v.cycle,
+                v.pc,
+                v.address,
+                v.access,
+                v.in_mmio_window,
+                v.grade
+            ),
+            (
+                9,
+                0x4200_0000,
+                0x6000_f000,
+                Access::Read,
+                true,
+                Some(RegGrade::Modeled)
+            )
+        );
+        assert!(bus.write_word(0x6000_f000, 1).is_err());
+        assert_eq!(
+            bus.unmapped_reads() + bus.unmapped_writes(),
+            0,
+            "a grade refusal is not an unmapped access"
+        );
+        let lines = buf.lines();
+        assert_eq!(lines.len(), 4, "{lines:?}");
+        assert_eq!(
+            lines[3],
+            "cyc=9 pc=0x42000000 STRICT-GRADE read of USB_DEVICE+0x000 ep1: graded modeled, \
+             the run trusts documented and above"
+        );
+        // `measured` refuses the documented one too.
+        bus.clear_strict_violation();
+        bus.set_strict_grade(Some(RegGrade::Measured));
+        assert!(bus.read_word(0x6000_f024).is_err());
+        assert_eq!(
+            bus.first_strict_violation().unwrap().grade,
+            Some(RegGrade::Documented)
+        );
+    }
+
+    #[test]
+    fn reg_grades_default_to_modeled_and_replace_by_offset() {
+        let g = RegGrades::new()
+            .with_grade(0x24, RegGrade::Documented)
+            .with_grade(0x18, RegGrade::Documented)
+            .with_grade(0x25, RegGrade::Measured);
+        assert_eq!(g.grade(0x00), RegGrade::Modeled);
+        assert_eq!(g.grade(0x18), RegGrade::Documented);
+        assert_eq!(g.grade(0x24), RegGrade::Measured, "0x25 aliases 0x24");
+        assert_eq!(g.grade(0x26), RegGrade::Measured);
+        assert_eq!(
+            g.entries(),
+            [(0x18, RegGrade::Documented), (0x24, RegGrade::Measured)]
+        );
+        assert!(RegGrade::Modeled < RegGrade::Documented);
+        assert!(RegGrade::Documented < RegGrade::Measured);
+        assert_eq!(RegGrade::parse("documented"), Some(RegGrade::Documented));
+        assert_eq!(RegGrade::parse("strict"), None);
+        assert_eq!(RegGrade::Measured.to_string(), "measured");
     }
 
     #[test]

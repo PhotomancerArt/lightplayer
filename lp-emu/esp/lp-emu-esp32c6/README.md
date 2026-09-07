@@ -268,7 +268,7 @@ milestone owns.
 | `IO_MUX` | `0x6009_0000` | accept | all 31 pads at reset `0x0800` |
 | `PMU`, `LP_AON`, `LP_APM`, `LP_APM0`, `HP_APM`, `MODEM_SYSCON`, `MODEM_LPCON`, `APB_SARADC`, `HP_SYS`, `TEE`, `LP_TEE`, `LP_IO`, `LP_TIMER`, `EXTMEM` | — | accept | written by `esp_hal::init`, read back as written; `LP_AON.store1` carries the calibration value |
 | `UART0`, `UART1` | `0x6000_0000/1000` | modelled | 128-byte FIFOs; the shifter drains **at the configured baud in emulated time** (PCR clock line × `clkdiv`; reset `clkdiv = 347 + 3/16` = 115,200 from XTAL, *modeled* "as the ROM boot leaves it"); `rxfifo_full`/`txfifo_empty` as levels (`>`/`<` the `conf1` thresholds, per the TRM), `rxfifo_tout` in bit-times, `tx_done`, `rxfifo_ovf`, `reg_update` pulse; `at_cmd_char_det` never fires (stated, not modelled); sources 43/44. See "UART0 and the outside" |
-| `USB_DEVICE` | `0x6000_F000` | modelled | **no host attached**: `ep1_conf.serial_in_ep_data_free` = 1 until a `wr_done` with bytes, then 0 for ever; `serial_out_ep_data_avail` = 0; `int_raw.sof` never; `serial_in_empty` set at reset, never re-set after the seal; source 48. IN bytes go to the `usb-sj` observation sink. The attached / draining states are M6 |
+| `USB_DEVICE` | `0x6000_F000` | modelled (M6 P2) | the host's side in three states (`--usb-host absent\|attached\|attached-idle`, the transitions for P3's control channel): **absent** — `sof` never, `free` = 0 for ever after the first `wr_done`, nothing arrives; **attached, port closed** — `int_raw.sof` every 1 ms (*documented*), `fram_num` counts, a committed IN packet is held until the port opens; **attached, draining** — the packet reaches the `usb-sj` stream 100 µs after `wr_done` (*modeled*), `free` returns, `serial_in_empty` and `in_token_rec_in_ep1` rise; host bytes land as ≤ 64 B OUT packets, one resident at a time (*modeled*), `avail` + `serial_out_recv_pkt` + `out_ep1_st.wr_addr/rec_data_cnt`. The DTR/RTS dance → `chip_rst` bit 0 + `MachineRequest::Reset { strap }`. Per-register grades: `fram_num`, `conf0` *documented*, the rest *modeled* (the file header's table; `--strict-grade`). The PCR reset of the block is **not** modelled (stated). Source 48 |
 | `SPI1` | `0x6000_3000` | modelled | **the legacy flash controller**, against a `flash::FlashImage`: `flash_rdid` (esp-storage's own size probe), the `usr` engine (command/address/dummy/data phases from `user`/`user1`/`user2`/`addr`/`w0..w15`), the dedicated `flash_read`/`pp`/`se`/`be`/`ce`/`wren`/`wrdi`/`rdsr`/`wrsr` bits, and a real status register (WIP always clear, WEL set by `wren` and consumed by a program or erase). Every trigger self-clears and `mst_st` reads idle, which is what `Wait_SPI_Idle` waits for. **Every PAC reset value is carried**, `user = 0x8000_0000` above all: the mask ROM's read path never sets `usr_command` because reset already did |
 | `SPI0` | `0x6000_2000` | modelled | the cache controller's block: `mmu_item_content`/`mmu_item_index`/`mmu_power_ctrl` drive `cache::CacheMmu`; the rest accept, with the PAC's reset values |
 | `RMT` | `0x6000_6000` | accept | `Rmt::new` runs in every image; channels, blocks and the WS281x waveform are M5 |
@@ -325,9 +325,15 @@ Beyond the MMIO lines, three kinds of note appear in the same stream:
   descriptor ring (`mac_rxbuf_init`), the first artefact of the virtual-air
   work.
 - `USB_DEVICE wr_done: 28 bytes committed to the IN endpoint; no host will
-  drain them` and `… ep1 write with the IN FIFO committed (host absent):
-  byte 0x0a dropped` — the host-absent USB model saying what the guest
-  tried.
+  drain them` / `… the host is attached but not draining (port closed)` /
+  `… the host takes them in 100 us`, then `IN packet of 64 bytes delivered
+  to the host`, `OUT packet of 5 bytes landed`, `ep1 write with the IN FIFO
+  committed (host attached-idle): byte 0x0a dropped`, `host attached`,
+  `port opened`, `chip reset from the serial channel, strap = download` —
+  the USB model narrating the host's side.
+- `STRICT-GRADE read of USB_DEVICE+0x000 ep1: graded modeled, the run
+  trusts documented and above` — the one line a `--strict-grade` stop
+  leaves before the report.
 
 A 3 s no-radio run with `--trace SYSTIMER,PLIC_MX,INTPRI,INTERRUPT_CORE0,LP_WDT,TIMG0`
 is about 780 k lines, half of them the RTC-calibration poll at boot. Without
@@ -357,25 +363,58 @@ at whatever cycle the 1 ms poll landed on when the host wrote them; two
 runs with the same client are two different runs. The script is the
 deterministic path, and the determinism tests use it (or no input at all).
 
-### USB-Serial-JTAG with no host
+### USB-Serial-JTAG and the host
 
-The model is the *no host attached* state and only that (`periph/usb_sj.rs`
-says what each register does and what the two drivers then do). The
-observable is register and static state, not a log line: esp-println
-fills 64 bytes, commits them, spins 50,000 times on
-`ep1_conf.serial_in_ep_data_free`, latches `TIMED_OUT` and falls silent;
-`UsbConnectionMonitor` never sees a SOF, so the connected path that arms
-`int_ena.serial_out_recv_pkt` is never taken; `io_task`'s probe writes time
-out. `--probe esp_println::serial_jtag_printer::TIMED_OUT@3000` reads the
-latch, `--usb-sj stderr|file:` shows what the guest tried to print, and
-`tests/host_absent.rs` pins all of it.
+The model is the **host's side** of the shipped image's link
+(`periph/usb_sj.rs` says what each register does in each state and what
+the two drivers then do). `--usb-host` picks the state at power-on; the
+transitions (`attach`, `detach`, `open`, `close`, the DTR/RTS dance) are
+methods on the block that M6 P3's control channel will drive.
 
-Attach, detach and a host that drains are M6's, behind a **control
-channel** the emulator does not have yet: a host-side command stream
-(alongside `--uart0-script`) that says "a host attached at 1,500 ms" and
-"it stopped draining at 4 s" so the transitions in spike report §11.5 can
-be scripted. That paragraph is the whole design so far (plan PD8); nothing
-here is a protocol.
+- **absent** (the default, P6's machine): no SOF, `free` never returns
+  after the first `wr_done`. esp-println fills 64 bytes, commits them,
+  spins 50,000 times on `ep1_conf.serial_in_ep_data_free`, latches
+  `TIMED_OUT` and falls silent; `UsbConnectionMonitor` never sees a SOF, so
+  the connected path that arms `int_ena.serial_out_recv_pkt` is never
+  taken. `tests/host_absent.rs`.
+- **attached-idle** (a cable, no application reading): SOF every 1 ms, so
+  the firmware believes it is connected, but a committed packet is never
+  taken. The first `[INIT]` line sits in the endpoint for the whole run;
+  the hello's first 64-byte chunk is dropped into the committed FIFO and
+  its write waits out 250 ms, a log line's leading newline waits out
+  another, the monitor latches "not draining", and from then on the only
+  IN traffic is one `\n` probe every 2 s — the vehicle-neutral signature
+  `tests/usb_attached.rs` reads from the trace (on the shipped image:
+  143 ms, 393 ms, 643 ms, then 2,143 ms, 4,143 ms). `TIMED_OUT` = 1 and
+  the RX path never armed, as with no host: io_task is sequential and
+  never reaches `read_serial` while its writes time out.
+- **attached** (a host draining): each `wr_done` packet reaches the
+  `usb-sj` stream 100 µs later (*modeled*: sub-millisecond, under every
+  timeout the firmware uses), `serial_in_empty` fires and esp-hal's write
+  future completes through the ISR; host bytes (a scripted source today,
+  P3's socket next) land as ≤ 64 B OUT packets one at a time. The boot
+  lines, the hello, the heartbeats: 2.9 KB in 5.5 s, `TIMED_OUT` never
+  set.
+
+Two logs, because the sink's meaning changed with the host: `--usb-sj`
+(`Esp32C6Machine::usb_sj`) is **what a host received**, and is empty with
+no host or the port closed; `--usb-sj-tried` (`usb_sj_tried`) is the
+observation stream — what the guest handed over that nobody took (pushed
+with no host, dropped into a committed FIFO, dropped by a bus reset).
+`--probe esp_println::serial_jtag_printer::TIMED_OUT@3000` reads the
+printer's latch in any state.
+
+The block carries the first **per-register grade table** (`fram_num` and
+`conf0` *documented*; everything else *modeled* until P4 promotes what the
+transcripts cover). `--strict-grade documented` refuses the first access to
+a register below that grade — on this machine that is the first MMIO access
+of the boot, since every accept table is *modeled* — and reports it as a
+strict-bus stop with the grade in the message. The level is a claim about
+what the run trusts, not a switch that makes the machine more accurate.
+
+Not modelled, stated: the PCR reset of the block on esp-hal's first enable
+(whether it re-enumerates on silicon is the sitting-1 transcript's to say),
+the JTAG channel, line coding, the bus-error and zero-payload bits.
 
 ### The radio window
 
@@ -461,10 +500,12 @@ is a function of every access the machine makes.
 lp-emu-esp32c6 --elf <app.elf> [--rom <path>] [--time-grade t1|t2]
     [--timeout 5s|1500ms|900us] [--wall-timeout <s>] [--exit-on <substr>]
     [--uart0 stdout|memory|file:<path>|tcp:<host:port>] [--uart0-script <file>]
-    [--usb-sj stderr|memory|file:<path>]
     [--flash <file>] [--flash-copy <file>] [--flash-size 4M]
+    [--usb-host absent|attached|attached-idle]
+    [--usb-sj stderr|memory|file:<path>] [--usb-sj-tried stderr|memory|file:<path>]
     [--efuse-mac a0:f2:62:87:b4:8c] [--efuse-rev 0.2] [--seed <u64>]
     [--trace [BLOCK,BLOCK…]] [--trace-file <path>] [--strict-bus]
+    [--strict-grade modeled|documented|measured]
     [--probe <symbol>@<ms>] [--break-at <symbol>] [--hooks] [--map]
 ```
 
@@ -492,8 +533,9 @@ on a loaded CI box. A duration without a unit is refused rather than guessed:
 too short.
 
 Exit codes are a contract: `0` on an `--exit-on` match or a clean timeout,
-`2` on a hart fault (symbolized against the app ELF) or a reset request,
-`3` on a strict-bus violation, `4` on the wall-clock safety net, `5` on a
+`2` on a hart fault (symbolized against the app ELF) or a reset request
+(the report names the strap: `app` or `download`), `3` on a strict-bus or
+strict-grade violation, `4` on the wall-clock safety net, `5` on a
 `--break-at`.
 
 ## Bring-up loop
@@ -588,6 +630,14 @@ replays of the committed transcripts, and the registry parity test. About
 (`cargo test -p lp-emu-validate --test m3_replays --test m4_replays`) need no
 firmware at all and already run in `cargo test`, so the gates cost CI
 nothing.
+
+`just bench-emu-c6` is the speed side of the same two images: both reference
+images at both grades, reported as user seconds, instructions/second and a
+real-time ratio, with the load average and a `cmp` of the UART0 bytes against
+the previous run. It builds `--release` deliberately — that is the profile
+users get, and the root `Cargo.toml` lifts this crate to `opt-level = 3`
+there (`lp-emu/README.md`, "Speed"). No CI job runs it and nothing gates on
+what it prints.
 
 ## Provenance
 

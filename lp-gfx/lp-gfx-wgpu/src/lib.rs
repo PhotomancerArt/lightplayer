@@ -26,9 +26,18 @@
 //! (`blend_textures` — a small fixed pipeline); `read_back` is for sinks
 //! that inherently need bytes and is native-only (explicit error on the
 //! browser tier). See the crate README for the full policy.
+//!
+//! # Loop bounds
+//!
+//! Every loop is bounded at compile time (`loop_bound_pass`): a loop with
+//! no exit is refused, every other loop charges the LPVM's per-invocation
+//! fuel budget, and an invocation that spends it counts itself on a
+//! per-shader fault flag (`fault_flag`) the host reads after each dispatch
+//! and reports as `GfxError::FuelExhausted` — the GPU tier's fuel trap.
 
 pub mod assembly;
 pub mod blend;
+pub mod fault_flag;
 pub mod gpu_graphics;
 pub mod loop_bound_pass;
 pub mod read_back;

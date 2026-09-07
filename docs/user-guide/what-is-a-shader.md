@@ -62,7 +62,7 @@ way it was. That's what simulators are for.
 The page you're on is a sandbox; the real editor is one click away —
 same project, plus everything else Studio can do:
 
-```embed open-in-studio example=examples/plasma-duo
+```embed open-in-studio example=catalog/plasma-duo
 ```
 
 It lands in your projects and it's yours to keep, break, and rebuild.
@@ -94,7 +94,7 @@ Fixtures have the mirror image of that control, one row of the same
 tiles: *along the wire* (run the pattern in wire order and ignore the
 map — what a WLED-style strip does, with a forward/reversed choice),
 *follow the source* (take whatever the shader declared), or an explicit
-shape that overrides the shader. `examples/palette-waves` is the whole
+shape that overrides the shader. `catalog/patterns/palette-waves` is the whole
 idea in one project: a strip effect declaring `radial`, landing on a
 disc fixture as rings.
 

@@ -16,8 +16,11 @@
 //!   several op variants funnel through `install_package`.
 //! - **Every save** (`library_host_opfs::notify_saved`), debounced.
 //! - **Sign-in**, which sweeps the whole library.
-//! - **A coarse timer**, which is the retry path for everything the service
-//!   was not reachable for.
+//! - **A coarse timer**, which re-derives from the library: the retry path
+//!   for everything the service was not reachable for, and the catch-all
+//!   for a project whose install-time request never made it into the queue
+//!   (installed before `whoami` answered) or was refused and forgotten.
+//!   `SyncQueue::sweep` keeps it cheap by skipping what already settled.
 //!
 //! # Locks
 //!
@@ -50,7 +53,7 @@ use lpc_history::PrefixedUid;
 use super::sidecar_producer::read_identity;
 use super::sync_queue::{DueProject, SyncQueue, SyncTrigger, TripResult};
 use super::sync_status::{self, SyncOutcomeKind};
-use super::sync_trip::{TripReport, classify, run_trip};
+use super::sync_trip::{TripReport, classify, describe_error, run_trip};
 use crate::cloud::FetchCloudPort;
 use crate::local_store::opfs_library_host;
 
@@ -213,15 +216,49 @@ impl SyncEngine {
     }
 
     /// The coarse retry loop. Started once, runs for the life of the tab.
+    ///
+    /// Each tick is a sweep over the library, not over the queue: an entry
+    /// the queue forgot (a refusal, before it backed off instead) or never
+    /// had (an install that landed while `whoami` was pending, a sign-in
+    /// sweep that found no library host yet) is still a project in OPFS
+    /// with no cloud record, and the roster is the only place it shows.
+    /// The queue's own memory of what settled keeps this from re-pushing a
+    /// quiet library once a minute.
     async fn sweep_forever(self: Rc<Self>) {
         loop {
             TimeoutFuture::new(SWEEP_INTERVAL_MS).await;
             if !self.signed_in.get() {
                 continue;
             }
-            self.queue.borrow_mut().arm_all(now_ms());
-            self.pump().await;
+            self.tick().await;
         }
+    }
+
+    /// One tick of the coarse timer: offer the library to the queue's
+    /// sweep, then pump whatever came out due.
+    async fn tick(self: &Rc<Self>) {
+        // Read the library BEFORE touching the queue (see `sweep`).
+        let library = roster().await;
+        let now = now_ms();
+        // A sign-in sweep that gave up on the library host recorded that
+        // nothing was offered; the first tick that does offer supersedes it,
+        // so `/account` stops telling the user to reload.
+        if !library.is_empty() {
+            sync_status::record(|board| {
+                if board
+                    .engine
+                    .last_sweep
+                    .as_ref()
+                    .is_some_and(|sweep| sweep.host_missing)
+                {
+                    board.record_sweep(library.len(), false, now);
+                }
+            });
+        }
+        self.queue
+            .borrow_mut()
+            .sweep(library.keys().map(String::as_str), now);
+        self.pump().await;
     }
 
     /// One project's trip: snapshot, publish, bank — in that order, and
@@ -287,7 +324,7 @@ impl SyncEngine {
                     TripResult::Denied => SyncOutcomeKind::Denied,
                     TripResult::Settled | TripResult::Refused => SyncOutcomeKind::Refused,
                 };
-                conclude(kind, &error.to_string());
+                conclude(kind, &describe_error(&error));
                 verdict
             }
         }

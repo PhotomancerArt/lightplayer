@@ -318,6 +318,28 @@ destination now is what keeps the next person from inventing a third home.
   (D13).
 - **Sweep-time healing of no-saved-head projects** — unchanged from `#465`;
   the state is now visible as product, which was the precondition.
+  *2026-09-06:* a neighbouring gap closed — a project whose one
+  install-time trip was refused (or that was installed before `whoami`
+  answered) stayed `MineLocal` forever, because the coarse tick only
+  re-armed what the queue still tracked. The tick now re-derives from the
+  library (`SyncQueue::sweep`), and refusals back off instead of being
+  forgotten; see the defect's round 2. No-saved-head projects are still
+  not healed: the tick treats their `Nothing` as a settled verdict.
+- **`MineLocal` folds "service-silent" in** — unpublished, restricted, and
+  a driver that never got the project to the service all derive the same
+  way, and the roster answer alone cannot tell them apart; only the
+  `/account` ledger said which. *Closed 2026-09-07:* the panel now reads
+  the tab's auto-publish ledger row for its own uid (`PublishStatus` is
+  the row's `SyncOutcomeKind` plus the driver's sentence), and when the
+  driver's last trip failed or is unfinished the Access sentence says so —
+  "Publishing is retrying — the service was unreachable", "Publishing was
+  refused: …", "Not published yet — there is no saved version to send" —
+  in place of the generic "Not shared". The derivation is unchanged (the
+  bar still reads "Private", which is true), the ledger stays
+  diagnostic-only everywhere else, and no controls were added. A project
+  with no ledger row keeps the static wording: no row is a driver that has
+  not run, not a failure. The driver's recorded sentence is now in a
+  person's words for the actionable failures (`sync_trip::describe_error`).
 - **Provenance prose** ("Forked from Plasma Duo") is not reachable from an
   open project: it lives on `PackageMeta` and surfaces only on gallery
   cards. The Where section says what this surface actually knows;

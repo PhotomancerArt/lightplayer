@@ -1,0 +1,18 @@
+[INIT] fw-esp32 initialized, starting server loop... proto=20 commit=1e1b79464f03 dirty=true
+[INFO] fw_esp32_common::server_loop: [perf] frame=93 fps=18 elapsed=5045ms recv=0ms tick=51ms send=0ms total=51ms responses=0
+[RTOS-TICK] t_ms=10011 dt_ms=10011 ticks=182 tick_cycles=252685 tick_max=1504 yields=369 yield_cycles=1287275 yield_max=13559
+[INFO] fw_esp32_common::server_loop: [perf] frame=188 fps=18 elapsed=5025ms recv=0ms tick=52ms send=0ms total=52ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frame=283 fps=18 elapsed=5025ms recv=0ms tick=51ms send=0ms total=51ms responses=0
+[RTOS-TICK] t_ms=20060 dt_ms=10049 ticks=190 tick_cycles=264049 tick_max=1501 yields=384 yield_cycles=1328337 yield_max=13607
+[INFO] fw_esp32_common::server_loop: [perf] frame=378 fps=18 elapsed=5024ms recv=0ms tick=51ms send=1ms total=52ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frame=473 fps=18 elapsed=5027ms recv=0ms tick=52ms send=0ms total=52ms responses=0
+[RTOS-TICK] t_ms=30060 dt_ms=10000 ticks=189 tick_cycles=262848 tick_max=1504 yields=382 yield_cycles=1321508 yield_max=13604
+[INFO] fw_esp32_common::server_loop: [perf] frame=568 fps=18 elapsed=5024ms recv=0ms tick=51ms send=0ms total=51ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frame=663 fps=18 elapsed=5026ms recv=0ms tick=51ms send=0ms total=51ms responses=0
+[RTOS-TICK] t_ms=40105 dt_ms=10045 ticks=190 tick_cycles=263938 tick_max=1503 yields=384 yield_cycles=1327928 yield_max=13564
+[RTOS-TICK] t_ms=942214 dt_ms=10048 ticks=190 tick_cycles=264023 tick_max=1501 yields=384 yield_cycles=1326198 yield_max=13621
+[INFO] fw_esp32_common::server_loop: [perf] frame=17858 fps=18 elapsed=5029ms recv=1ms tick=51ms send=0ms total=52ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frame=17953 fps=18 elapsed=5023ms recv=0ms tick=51ms send=0ms total=52ms responses=0
+[RTOS-TICK] t_ms=952214 dt_ms=10000 ticks=189 tick_cycles=262851 tick_max=1500 yields=382 yield_cycles=1317205 yield_max=13562
+[INFO] fw_esp32_common::server_loop: [perf] frame=18048 fps=18 elapsed=5027ms recv=0ms tick=51ms send=0ms total=51ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frame=18143 fps=18 elapsed=5027ms recv=0ms tick=51ms send=0ms total=51ms responses=0

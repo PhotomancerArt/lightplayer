@@ -285,9 +285,13 @@ fn readme_home_view() -> UiHomeView {
         sim,
         projects,
         examples: vec![UiExampleCard {
-            id: "examples/basic".to_string(),
-            name: "Basic".to_string(),
-            kind: "Module".to_string(),
+            id: "catalog/plasma".to_string(),
+            name: "Plasma".to_string(),
+            kind: lpc_model::ProjectKind::Pattern {
+                exports: vec!["effect".to_string()],
+            },
+            description: "The smallest non-empty panel: one plasma shader with three bound knobs."
+                .to_string(),
         }],
         devices: Default::default(),
         library_available: true,

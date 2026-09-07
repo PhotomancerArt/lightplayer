@@ -28,7 +28,7 @@ const HERO_FPS: f32 = 30.0;
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn DocsHeroPreview(
-    /// Embedded example id (`examples/plasma`).
+    /// Embedded example id (`catalog/plasma`).
     example_id: String,
 ) -> Element {
     let preview = use_preview_lease(

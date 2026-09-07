@@ -28,8 +28,8 @@ pub enum ProfileSubcommand {
 
 #[derive(Debug, Args)]
 pub struct ProfileArgs {
-    /// Workload directory (defaults to examples/basic).
-    #[arg(default_value = "examples/basic")]
+    /// Workload directory (defaults to projects/test/basic).
+    #[arg(default_value = "projects/test/basic")]
     pub dir: PathBuf,
 
     /// Collectors to enable (comma-separated). m2 supports: alloc, events, cpu.
@@ -198,13 +198,13 @@ mod tests {
 
     #[test]
     fn default_collect_is_cpu() {
-        let cli = ProfileCli::parse_from(["lp-cli", "examples/basic"]);
+        let cli = ProfileCli::parse_from(["lp-cli", "projects/test/basic"]);
         assert_eq!(cli.run.collect, vec!["cpu".to_string()]);
     }
 
     #[test]
     fn default_cycle_model_is_esp32c6() {
-        let cli = ProfileCli::parse_from(["lp-cli", "examples/basic"]);
+        let cli = ProfileCli::parse_from(["lp-cli", "projects/test/basic"]);
         assert!(matches!(cli.run.cycle_model, CycleModelArg::Esp32C6));
     }
 
@@ -212,7 +212,7 @@ mod tests {
     fn discount_sites_are_repeatable() {
         let cli = ProfileCli::parse_from([
             "lp-cli",
-            "examples/basic",
+            "projects/test/basic",
             "--frag-discount-site",
             "VirtualWs281xDriver::endpoints",
             "--frag-discount-site",
@@ -229,7 +229,7 @@ mod tests {
 
     #[test]
     fn frag_layout_defaults_to_classic() {
-        let cli = ProfileCli::parse_from(["lp-cli", "examples/basic"]);
+        let cli = ProfileCli::parse_from(["lp-cli", "projects/test/basic"]);
         assert_eq!(cli.run.frag_layout, FragLayoutArg::Classic);
         assert_eq!(cli.run.frag_top, 10);
         assert!(cli.run.frag_regions.is_empty());
@@ -239,7 +239,7 @@ mod tests {
     fn explicit_frag_regions_win_over_the_named_layout() {
         let cli = ProfileCli::parse_from([
             "lp-cli",
-            "examples/basic",
+            "projects/test/basic",
             "--frag-layout",
             "guest",
             "--frag-regions",
@@ -255,7 +255,7 @@ mod tests {
     fn counterfactuals_are_repeatable_and_validated() {
         let cli = ProfileCli::parse_from([
             "lp-cli",
-            "examples/basic",
+            "projects/test/basic",
             "--cf",
             "scratch=shader-compile,project-read",
             "--cf",
@@ -265,7 +265,7 @@ mod tests {
         assert_eq!(specs.len(), 2);
         assert_eq!(specs[0].label, "scratch=shader-compile,project-read");
 
-        let bad = ProfileCli::parse_from(["lp-cli", "examples/basic", "--cf", "scratch"]);
+        let bad = ProfileCli::parse_from(["lp-cli", "projects/test/basic", "--cf", "scratch"]);
         assert!(
             bad.run.counterfactuals().is_err(),
             "a transform with no window list is a typo, not an empty request"
@@ -274,16 +274,17 @@ mod tests {
 
     #[test]
     fn workload_defaults_to_frames() {
-        let cli = ProfileCli::parse_from(["lp-cli", "examples/basic"]);
+        let cli = ProfileCli::parse_from(["lp-cli", "projects/test/basic"]);
         assert_eq!(cli.run.workload, WorkloadArg::Frames);
         let sync =
-            ProfileCli::parse_from(["lp-cli", "examples/basic", "--workload", "studio-sync"]);
+            ProfileCli::parse_from(["lp-cli", "projects/test/basic", "--workload", "studio-sync"]);
         assert_eq!(sync.run.workload, WorkloadArg::StudioSync);
     }
 
     #[test]
     fn cycle_model_uniform_parses() {
-        let cli = ProfileCli::parse_from(["lp-cli", "examples/basic", "--cycle-model", "uniform"]);
+        let cli =
+            ProfileCli::parse_from(["lp-cli", "projects/test/basic", "--cycle-model", "uniform"]);
         assert!(matches!(cli.run.cycle_model, CycleModelArg::Uniform));
     }
 }

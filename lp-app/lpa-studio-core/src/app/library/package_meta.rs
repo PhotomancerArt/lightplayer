@@ -18,7 +18,7 @@ pub const META_PATH: &str = "/.lp/meta.json";
 pub enum PackageProvenance {
     /// Created from scratch in this library.
     Created,
-    /// Seeded from a bundled source (e.g. `examples/basic`).
+    /// Seeded from a bundled source (e.g. `catalog/plasma`).
     SeededFrom { source: String },
     /// Imported from a zip archive; the archive's own uid, if it had one.
     ImportedZip { original_uid: Option<String> },
@@ -93,7 +93,7 @@ mod tests {
         assert!(read_meta(&fs).unwrap().is_none());
         let meta = PackageMeta {
             provenance: PackageProvenance::SeededFrom {
-                source: "examples/basic".to_string(),
+                source: "catalog/plasma".to_string(),
             },
             created_at: 1700000000.5,
         };

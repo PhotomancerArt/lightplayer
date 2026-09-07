@@ -183,7 +183,7 @@ The core is IO-free state machines; async belongs to platform edges. See
   could not be read" — because the classifier had no version to key an
   upgrade on. The drill: `just format-bump` (snapshot + step scaffold),
   bump `PROJECT_FORMAT_VERSION`, write the `lpa-upgrade` step, bless the
-  corpus goldens, and migrate `examples/` + `projects/` in the same change.
+  corpus goldens, and migrate `catalog/` + `projects/` in the same change.
   The v5→v6 step (`lp-app/lpa-upgrade/src/steps/v5_to_v6.rs`) is the
   worked example — value-preserving transcode, keyed off shape, never off
   field names.
@@ -698,6 +698,7 @@ USB-Serial-JTAG with no host attached. It is the configuration
 ```bash
 just emu-c6 <elf> --strict-bus --timeout 6s     # one image, by hand
 just test-emu-c6                                # its gates (builds firmware, ~70 s)
+just bench-emu-c6                               # its speed probe (an oracle, never a gate)
 cargo run -p lp-cli -- validate run emu-m3 --config lp-emu:esp32c6:t1 --dry-run
 ```
 

@@ -14,12 +14,12 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use lp_emu_esp_common::ScriptedSource;
+use lp_emu_esp_common::{RegGrade, ScriptedSource};
 use lp_emu_esp32c6::flash::FlashBacking;
 use lp_emu_esp32c6::loader::EfuseIdentity;
 use lp_emu_esp32c6::machine::{
     AppSource, Esp32C6Builder, Esp32C6Machine, Outcome, RomSource, StopCondition, TimeGrade,
-    Uart0Sink, UsbSjSink,
+    Uart0Sink, UsbHost, UsbSjSink,
 };
 use lp_emu_esp32c6::memmap;
 
@@ -53,16 +53,32 @@ OPTIONS:
                             flash, surviving a run
     --flash-copy <file>     the same file read once and never written
     --flash-size <4M|8M>    the modelled chip's size [4M]
+    --usb-host absent|attached|attached-idle
+                            the USB-Serial-JTAG host at power-on: no cable
+                            (P6's machine), a host with the port open and
+                            draining, or a host with the port closed [absent]
     --usb-sj stderr|file:<path>
-                            where USB-Serial-JTAG's IN-endpoint bytes are
-                            OBSERVED — what the guest tried to print with no
-                            host attached [kept in memory, summarised at exit]
+                            where the bytes a USB host RECEIVED go — IN
+                            packets a draining host took [kept in memory,
+                            summarised at exit]
+    --usb-sj-tried stderr|file:<path>
+                            the observation stream: bytes the guest handed to
+                            the IN endpoint that no host took (pushed with no
+                            host, dropped into a committed FIFO, dropped by a
+                            bus reset) [kept in memory, summarised at exit]
     --efuse-mac <a0:f2:..>  the MAC the eFuse block reports [the desk board]
     --efuse-rev <0.2>       wafer major.minor [0.2]
     --seed <u64>            the machine PRNG's seed [0]
     --trace [BLOCK,BLOCK]   log every MMIO access; an optional block filter
     --trace-file <path>     write the trace here instead of stderr
     --strict-bus            an access nothing claims is fatal; exits 3
+    --strict-grade modeled|documented|measured
+                            an access to a register graded BELOW this level is
+                            fatal (exits 3): `documented` stops on the first
+                            register whose behaviour is only our reading of
+                            the PAC — on this machine that is most of them.
+                            Per-register grades live in each block's file
+                            header (USB_DEVICE carries the first table)
     --probe <symbol>@<ms>   print a static's word at an emulated time
     --break-at <symbol>     stop when the symbol is entered; print a0..a7, sp
                             and the backtrace; exits 5
@@ -102,12 +118,15 @@ struct Args {
     usb_sj: UsbSjSink,
     flash: FlashBacking,
     flash_len: Option<u32>,
+    usb_sj_tried: UsbSjSink,
+    usb_host: UsbHost,
     efuse: EfuseIdentity,
     seed: u64,
     trace: bool,
     trace_blocks: Vec<String>,
     trace_file: Option<PathBuf>,
     strict: bool,
+    strict_grade: Option<RegGrade>,
     probes: Vec<(u64, String)>,
     break_at: Vec<String>,
     hooks: bool,
@@ -125,11 +144,14 @@ fn run() -> Result<ExitCode, String> {
     let mut builder = Esp32C6Builder::new()
         .time_grade(args.time_grade)
         .strict(args.strict)
+        .strict_grade(args.strict_grade)
         .efuse(args.efuse)
         .seed(args.seed)
         .uart0(args.uart0.clone())
         .usb_sj(args.usb_sj.clone())
-        .flash(args.flash.clone());
+        .flash(args.flash.clone())
+        .usb_sj_tried(args.usb_sj_tried.clone())
+        .usb_host(args.usb_host);
     if let Some(len) = args.flash_len {
         builder = builder.flash_len(len);
     }
@@ -228,6 +250,19 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--flash-size" => {
                 let text = value("--flash-size")?;
                 args.flash_len = Some(parse_flash_size(&text)?);
+            }
+            "--usb-sj-tried" => args.usb_sj_tried = parse_usb_sj(&value("--usb-sj-tried")?)?,
+            "--usb-host" => {
+                let text = value("--usb-host")?;
+                args.usb_host = UsbHost::parse(&text).ok_or_else(|| {
+                    format!("--usb-host `{text}`: expected absent, attached or attached-idle")
+                })?;
+            }
+            "--strict-grade" => {
+                let text = value("--strict-grade")?;
+                args.strict_grade = Some(RegGrade::parse(&text).ok_or_else(|| {
+                    format!("--strict-grade `{text}`: expected modeled, documented or measured")
+                })?);
             }
             "--efuse-mac" => args.efuse.mac = EfuseIdentity::parse_mac(&value("--efuse-mac")?)?,
             "--efuse-rev" => {
@@ -633,13 +668,18 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
         Ok(false) => {}
         Err(e) => eprintln!("flash: could not write the image back: {e}"),
     }
-    let usb = machine.usb_sj();
-    if !usb.is_empty() {
+    eprintln!(
+        "usb-sj: host {} at power-on; {} bytes reached the host",
+        machine.usb_host(),
+        machine.usb_sj().len()
+    );
+    let tried = machine.usb_sj_tried();
+    if !tried.is_empty() {
         eprintln!(
-            "usb-sj: host absent; the guest handed {} bytes to the IN endpoint that no host \
-             read:\n{}",
-            usb.len(),
-            usb.text()
+            "usb-sj tried: the guest handed {} bytes to the IN endpoint that no host took:\n{}",
+            tried.len(),
+            tried
+                .text()
                 .lines()
                 .map(|l| format!("  | {l}"))
                 .collect::<Vec<_>>()
@@ -650,9 +690,13 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
     match outcome {
         Outcome::ExitMatched { .. } => eprintln!("--exit-on matched"),
         Outcome::Deadline { .. } => eprintln!("emulated timeout reached, no fault"),
-        Outcome::Reset { cycle, source } => eprintln!(
-            "RESET requested by {source} at cycle {cycle} ({} us) — the chip would reboot; \
-             the emulator reports it (M7 owns the boot chain)",
+        Outcome::Reset {
+            cycle,
+            source,
+            strap,
+        } => eprintln!(
+            "RESET requested by {source} at cycle {cycle} ({} us), strap = {strap} — the chip \
+             would reboot; the emulator reports it (M7 owns the boot chain)",
             cycle / memmap::CYCLES_PER_US
         ),
         Outcome::Fault { pc, fault, .. } => eprintln!(
@@ -667,10 +711,17 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
                 .symbolize(violation.pc)
                 .map(|s| format!(" ({s})"))
                 .unwrap_or_default();
+            let grade = violation
+                .grade
+                .map(|g| format!(" of a register graded {g}, below --strict-grade"))
+                .unwrap_or_default();
             eprintln!(
-                "STRICT-BUS {:?}{} of {} bytes at {:#010x} from pc={:#010x}{symbol} at cycle {}",
+                "STRICT-BUS {:?}{}{grade} of {} bytes at {:#010x} from pc={:#010x}{symbol} at \
+                 cycle {}",
                 violation.access,
-                if violation.in_mmio_window {
+                if violation.grade.is_some() {
+                    ""
+                } else if violation.in_mmio_window {
                     " inside a declared MMIO window — an unmodelled block"
                 } else {
                     ""
@@ -786,6 +837,25 @@ mod tests {
             parse_usb_sj("file:/tmp/usb.log").unwrap(),
             UsbSjSink::File(_)
         ));
+    }
+
+    #[test]
+    fn the_usb_host_and_strict_grade_flags_take_the_spelled_values_only() {
+        let a = parse(vec![
+            "--usb-host".into(),
+            "attached-idle".into(),
+            "--strict-grade".into(),
+            "documented".into(),
+            "--usb-sj-tried".into(),
+            "stderr".into(),
+        ])
+        .unwrap();
+        assert_eq!(a.usb_host, UsbHost::Attached { draining: false });
+        assert_eq!(a.strict_grade, Some(RegGrade::Documented));
+        assert!(matches!(a.usb_sj_tried, UsbSjSink::Stderr));
+        assert_eq!(parse(vec![]).unwrap().usb_host, UsbHost::Absent);
+        assert!(parse(vec!["--usb-host".into(), "draining".into()]).is_err());
+        assert!(parse(vec!["--strict-grade".into(), "strict".into()]).is_err());
     }
 
     #[test]

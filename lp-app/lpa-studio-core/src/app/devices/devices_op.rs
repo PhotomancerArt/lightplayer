@@ -14,29 +14,104 @@ use lpa_devices::Action;
 
 use crate::{ActionClass, ActionConfirmation, ActionMeta, ActionPriority, ControllerOp};
 
+/// How the device this gesture targets is reached.
+///
+/// The ONLY thing it forks is meta TEXT. There is no second action, no second
+/// flow and no `is_sim` in the fold: `Connect` and `Disconnect` are what
+/// power a sim on and off (PD8, Q15), because a sim's link is a link and
+/// opening it is opening it. What differs is what the words mean to a
+/// person — nobody "connects" to a simulator they just started.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum DeviceFace {
+    /// A board at the end of a wire.
+    #[default]
+    Wire,
+    /// A sim: a runtime this tab started.
+    Sim,
+}
+
+impl DeviceFace {
+    /// The face for a device whose registry row records `transport`.
+    pub fn from_transport(transport: &str) -> Self {
+        match transport == super::device_records::SIM_TRANSPORT {
+            true => Self::Sim,
+            false => Self::Wire,
+        }
+    }
+}
+
 /// One device gesture, verbatim from the model's action vocabulary.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DevicesOp(pub Action);
+pub struct DevicesOp {
+    pub action: Action,
+    /// What the device is, for the two verbs whose words depend on it.
+    pub face: DeviceFace,
+}
 
 impl DevicesOp {
     /// The node id device actions target. Routed by `StudioController`
     /// directly — there is no controller struct behind it, only the roster.
     pub const NODE_ID: &'static str = "studio|devices";
 
+    /// One gesture on a board at the end of a wire.
+    pub fn new(action: Action) -> Self {
+        Self {
+            action,
+            face: DeviceFace::Wire,
+        }
+    }
+
+    /// One gesture on a sim.
+    pub fn on_sim(action: Action) -> Self {
+        Self {
+            action,
+            face: DeviceFace::Sim,
+        }
+    }
+
     /// The action this op carries.
     pub fn action(&self) -> &Action {
-        &self.0
+        &self.action
     }
 
     /// This op as a dispatchable [`UiAction`](crate::UiAction).
     pub fn action_for(action: Action) -> crate::UiAction {
-        crate::UiAction::from_op(crate::ControllerId::new(Self::NODE_ID), Self(action))
+        crate::UiAction::from_op(crate::ControllerId::new(Self::NODE_ID), Self::new(action))
+    }
+
+    /// The same, for a device whose transport is a sim: identical dispatch,
+    /// different words on the two power verbs.
+    pub fn sim_action_for(action: Action) -> crate::UiAction {
+        crate::UiAction::from_op(
+            crate::ControllerId::new(Self::NODE_ID),
+            Self::on_sim(action),
+        )
     }
 }
 
 impl ControllerOp for DevicesOp {
     fn default_action_meta(&self) -> ActionMeta {
-        match &self.0 {
+        // The two verbs whose words are about the device, not the act.
+        // Everything else reads the same on either face: a push is a push,
+        // and Forget takes the same things away.
+        match (&self.action, self.face) {
+            (Action::Connect { .. }, DeviceFace::Sim) => {
+                return ActionMeta::new(
+                    "Power on",
+                    "Start this sim and open it.",
+                    ActionPriority::Primary,
+                );
+            }
+            (Action::Disconnect { .. }, DeviceFace::Sim) => {
+                return ActionMeta::new(
+                    "Power off",
+                    "Stop this sim. Studio keeps it, so you can power it on again.",
+                    ActionPriority::Secondary,
+                );
+            }
+            _ => {}
+        }
+        match &self.action {
             // The verb names the TRANSPORT, not the abstract act: the add
             // card's invitation stays transport-open ("connect a board"),
             // and this button is the USB way in — a future network path
@@ -242,6 +317,7 @@ mod tests {
                 board_id: "seeed-xiao-esp32c6".to_string(),
                 build_id: "esp32c6-4mb".to_string(),
                 park_first: false,
+                name: None,
             },
             Action::SetName {
                 device,
@@ -254,13 +330,63 @@ mod tests {
             Action::ResetBoard { device },
             Action::ClearFaults { device },
         ] {
-            let op = DevicesOp(action.clone());
+            let op = DevicesOp::new(action.clone());
             assert!(
                 !op.default_action_meta().label.is_empty(),
                 "{action:?} renders nothing"
             );
             assert_eq!(op.action_class(), ActionClass::Recovery, "{action:?}");
         }
+    }
+
+    /// The one fork, and its bounds: a sim is powered on and off, and
+    /// every other verb reads exactly the same on either face. There is no
+    /// second action behind the words — the model still sees `Connect` and
+    /// `Disconnect`, which is what keeps a sim from being a fifth flow.
+    #[test]
+    fn a_sim_is_powered_on_and_off_and_nothing_else_changes() {
+        let device = DeviceId(1);
+
+        let on = DevicesOp::on_sim(Action::Connect { device }).default_action_meta();
+        assert_eq!(on.label, "Power on");
+        assert_eq!(on.priority, ActionPriority::Primary);
+
+        let off = DevicesOp::on_sim(Action::Disconnect { device }).default_action_meta();
+        assert_eq!(off.label, "Power off");
+        assert!(
+            off.summary.contains("power it on again"),
+            "powering off must not read as losing the device: {}",
+            off.summary
+        );
+
+        for action in [
+            Action::Forget { device },
+            Action::Identify { device },
+            Action::ResetBoard { device },
+            Action::Erase { device },
+            Action::RemoveProject { device },
+        ] {
+            assert_eq!(
+                DevicesOp::on_sim(action.clone())
+                    .default_action_meta()
+                    .label,
+                DevicesOp::new(action.clone()).default_action_meta().label,
+                "{action:?} is the same verb on either face"
+            );
+        }
+    }
+
+    /// The face is read off the registry column, so the words and the row
+    /// cannot drift apart.
+    #[test]
+    fn the_face_comes_from_the_transport_column() {
+        assert_eq!(DeviceFace::from_transport("sim"), DeviceFace::Sim);
+        assert_eq!(DeviceFace::from_transport("USB"), DeviceFace::Wire);
+        assert_eq!(
+            DeviceFace::from_transport(""),
+            DeviceFace::Wire,
+            "a row that predates transport recording is not a sim"
+        );
     }
 
     /// Clear faults asks nothing and threatens nothing: it takes no
@@ -270,7 +396,7 @@ mod tests {
     /// matter.
     #[test]
     fn clearing_faults_is_reversible_and_asks_nothing() {
-        let meta = DevicesOp(Action::ClearFaults {
+        let meta = DevicesOp::new(Action::ClearFaults {
             device: DeviceId(1),
         })
         .default_action_meta();
@@ -298,7 +424,7 @@ mod tests {
                 link: lpa_devices::LinkId(1),
             },
         ] {
-            let meta = DevicesOp(action.clone()).default_action_meta();
+            let meta = DevicesOp::new(action.clone()).default_action_meta();
             assert!(meta.destructive, "{action:?}");
             assert!(meta.confirmation.is_some(), "{action:?}");
         }

@@ -533,7 +533,7 @@ fn sync_engine_note(sync: &SyncStatusSnapshot, now_secs: f64) -> String {
     match &sync.engine.last_sweep {
         None => "on — projects publish as they are created and saved".to_string(),
         Some(sweep) if sweep.host_missing => {
-            "the project library was not ready at sign-in, so nothing was offered — reload to retry"
+            "the project library was not ready at sign-in, so nothing was offered yet — the timer retries every minute"
                 .to_string()
         }
         Some(sweep) => format!(

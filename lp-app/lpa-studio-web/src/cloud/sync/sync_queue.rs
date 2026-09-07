@@ -11,6 +11,16 @@
 //! (binding present? heads behind?), so a lost queue costs at most one
 //! deferred trip: the next save, the next sign-in, or the coarse sweep
 //! re-derives everything worth doing.
+//!
+//! What it does hold, per tab, is the little it needs to keep the coarse
+//! sweep cheap: which uids it has already settled with the service since
+//! their last trigger (so a tick does not re-push an up-to-date library —
+//! an up-to-date push still costs two round trips and a snapshot), which
+//! are latched off by a denial, and which were refused and are waiting out
+//! a backoff. Everything else in the library is fair game for the tick —
+//! that is how a project whose only trip was dropped, or that was installed
+//! before the account was known, still gets its first publish
+//! (`docs/defects/2026-08-28-auto-publish-outcomes-invisible.md`).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -20,6 +30,14 @@ pub const SAVE_DEBOUNCE_MS: f64 = 2_000.0;
 /// The coarse retry cadence. A failed trip is not queued anywhere durable;
 /// it simply stays in the map until this comes around.
 pub const RETRY_DELAY_MS: f64 = 60_000.0;
+
+/// How long a refused trip waits before the coarse sweep may offer the
+/// project again. Long, because a refusal is an answer that repeating soon
+/// will not change — but not forever, because "the situation changed" has
+/// more causes than a save or a sign-in (a library host that was not there
+/// yet, a lock held during the open that followed the create). An explicit
+/// trigger (save, rename) pre-empts it.
+pub const REFUSED_BACKOFF_MS: f64 = 5.0 * 60_000.0;
 
 /// Why a project wants a trip to the service.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,8 +80,10 @@ pub enum TripResult {
     /// on the coarse timer.
     Retry,
     /// The service considered the request and refused in a way that
-    /// repeating will not fix (not ours, malformed slug, archived). Drop it
-    /// — the next save or sign-in will ask again if the situation changed.
+    /// repeating will not fix (not ours, malformed slug, archived), or the
+    /// local state could not be read. Backed off, not dropped: the next
+    /// save or sign-in asks again at once, and the coarse sweep asks again
+    /// after [`REFUSED_BACKOFF_MS`] in case the situation changed.
     Refused,
     /// The service knows the project and this caller may not write it — a
     /// visitor's push against a `View` link, or a session that expired
@@ -90,6 +110,11 @@ pub struct SyncQueue {
     /// are suppressed until [`Self::clear_denied`] (an observed access
     /// change) or [`Self::clear`] (sign-out / account switch).
     denied: BTreeSet<String>,
+    /// Uids whose last trip settled and that nothing has asked about since.
+    /// The coarse sweep leaves these alone — the service and the library
+    /// agreed, and any later change fires its own trigger — which is what
+    /// keeps a tick over a large, quiet library free of traffic.
+    settled: BTreeSet<String>,
 }
 
 impl SyncQueue {
@@ -111,11 +136,44 @@ impl SyncQueue {
         if self.denied.contains(uid) {
             return delay;
         }
+        self.settled.remove(uid);
         let entry = self.entries.entry(uid.to_string()).or_default();
         entry.due_at = now + delay;
         entry.restate |= trigger.restates();
         entry.pending = true;
+        entry.backing_off = false;
         delay
+    }
+
+    /// The coarse sweep, re-derived from the library: `library` is every
+    /// project uid the library holds right now.
+    ///
+    /// Offers everything the queue has no current verdict on — a project
+    /// installed before the account was known, one whose only trip was
+    /// dropped, one this tab has simply never looked at — and re-arms the
+    /// retries it is tracking, without touching the ones that settled, the
+    /// ones a denial latched, or the ones still waiting out a refusal's
+    /// backoff. Forgets settled verdicts for projects the library no
+    /// longer has.
+    pub fn sweep<'a>(&mut self, library: impl IntoIterator<Item = &'a str>, now: f64) {
+        let library: BTreeSet<&str> = library.into_iter().collect();
+        self.settled.retain(|uid| library.contains(uid.as_str()));
+        for uid in library {
+            if self.denied.contains(uid) || self.settled.contains(uid) {
+                continue;
+            }
+            match self.entries.get_mut(uid) {
+                Some(entry) => {
+                    if !entry.in_flight && !entry.backing_off {
+                        entry.pending = true;
+                        entry.due_at = now;
+                    }
+                }
+                None => {
+                    self.request(uid, SyncTrigger::Swept, now);
+                }
+            }
+        }
     }
 
     /// The projects whose wait is over, marked in flight.
@@ -147,15 +205,26 @@ impl SyncQueue {
         };
         entry.in_flight = false;
         match result {
-            TripResult::Settled => {}
+            TripResult::Settled => {
+                if !entry.pending {
+                    self.settled.insert(uid.to_string());
+                }
+            }
             TripResult::Retry => {
                 entry.pending = true;
                 entry.due_at = now + RETRY_DELAY_MS;
             }
             TripResult::Refused => {
-                // A refusal that repeating will not fix: forget the request,
-                // but keep anything that arrived while the trip was running.
+                // A refusal that repeating soon will not fix: wait out the
+                // backoff before the sweep may ask again — unless work
+                // arrived while the trip was running, which asks on its own
+                // schedule and stands.
                 entry.restate = false;
+                if !entry.pending {
+                    entry.pending = true;
+                    entry.due_at = now + REFUSED_BACKOFF_MS;
+                    entry.backing_off = true;
+                }
             }
             TripResult::Denied => {
                 // Latch: drop the entry outright — including work that
@@ -194,24 +263,15 @@ impl SyncQueue {
         self.entries.is_empty()
     }
 
-    /// Re-arm every tracked project for an immediate attempt — the coarse
-    /// sweep, which is how a failed trip eventually gets its retry.
-    pub fn arm_all(&mut self, now: f64) {
-        for entry in self.entries.values_mut() {
-            if !entry.in_flight {
-                entry.pending = true;
-                entry.due_at = now;
-            }
-        }
-    }
-
     /// Forget everything (sign-out): the cloud is not ours to converge on
     /// anymore, and a stale queue would push the next account's first pump.
-    /// Denials go too — they were answers to a caller that no longer
-    /// exists, and the next account deserves its own first answer.
+    /// Denials and settled verdicts go too — they were answers to a caller
+    /// that no longer exists, and the next account deserves its own first
+    /// answer.
     pub fn clear(&mut self) {
         self.entries.clear();
         self.denied.clear();
+        self.settled.clear();
     }
 }
 
@@ -226,6 +286,9 @@ struct Entry {
     in_flight: bool,
     /// The next trip must restate the project's slug.
     restate: bool,
+    /// The wait is a refusal's backoff: the sweep must not shorten it (an
+    /// explicit trigger may).
+    backing_off: bool,
 }
 
 #[cfg(test)]
@@ -313,14 +376,93 @@ mod tests {
         assert_eq!(queue.take_due(3_000.0).len(), 1);
     }
 
+    /// The bug this pins (`docs/defects/2026-08-28-auto-publish-outcomes-invisible.md`,
+    /// 2026-09-06 finding): a freshly generated project's install-time trip
+    /// is its ONLY trip, and a refusal used to forget the entry outright —
+    /// the coarse timer only re-armed what was still tracked, so the
+    /// project never reached the cloud until a save happened to land.
+    /// Now a refusal backs off, and the sweep offers the project again
+    /// once the backoff is over.
     #[test]
-    fn a_terminal_refusal_is_forgotten() {
+    fn a_refused_project_is_offered_again_after_the_backoff() {
         let mut queue = SyncQueue::new();
         queue.request("prj1", SyncTrigger::Installed, 0.0);
         queue.take_due(0.0);
         queue.finish("prj1", TripResult::Refused, 0.0);
-        assert!(queue.is_idle());
-        assert!(queue.take_due(1e9).is_empty());
+        assert!(!queue.is_idle(), "still tracked");
+
+        queue.sweep(["prj1"], 60_000.0);
+        assert!(
+            queue.take_due(60_000.0).is_empty(),
+            "the sweep does not shorten a refusal's backoff"
+        );
+        queue.sweep(["prj1"], REFUSED_BACKOFF_MS);
+        assert_eq!(queue.take_due(REFUSED_BACKOFF_MS).len(), 1);
+    }
+
+    /// …but a save does not wait five minutes for it: an explicit trigger
+    /// pre-empts the backoff, the way it pre-empts a retry.
+    #[test]
+    fn a_save_pre_empts_a_refusals_backoff() {
+        let mut queue = SyncQueue::new();
+        queue.request("prj1", SyncTrigger::Installed, 0.0);
+        queue.take_due(0.0);
+        queue.finish("prj1", TripResult::Refused, 0.0);
+
+        queue.request("prj1", SyncTrigger::Saved, 1_000.0);
+        assert_eq!(queue.take_due(3_000.0).len(), 1);
+    }
+
+    /// The other half of the same bug: a project installed while the
+    /// account was still unknown (`note` is a no-op signed out) is in the
+    /// library and in no queue. The sweep re-derives from the library, so
+    /// the next tick offers it.
+    #[test]
+    fn the_sweep_offers_a_project_the_queue_has_never_seen() {
+        let mut queue = SyncQueue::new();
+        queue.sweep(["prj1"], 0.0);
+        assert_eq!(
+            queue.take_due(0.0),
+            vec![DueProject {
+                uid: "prj1".to_string(),
+                restate: false,
+            }]
+        );
+    }
+
+    /// What keeps the tick cheap: a project whose trip settled is not
+    /// offered again by the sweep — an up-to-date push still costs two round
+    /// trips — until something asks about it.
+    #[test]
+    fn the_sweep_leaves_settled_projects_alone() {
+        let mut queue = SyncQueue::new();
+        queue.request("prj1", SyncTrigger::Installed, 0.0);
+        queue.take_due(0.0);
+        queue.finish("prj1", TripResult::Settled, 0.0);
+
+        queue.sweep(["prj1"], 60_000.0);
+        assert!(queue.take_due(60_000.0).is_empty(), "settled stays settled");
+
+        queue.request("prj1", SyncTrigger::Saved, 61_000.0);
+        assert_eq!(queue.take_due(63_000.0).len(), 1, "a save asks again");
+        queue.finish("prj1", TripResult::Retry, 63_000.0);
+        queue.sweep(["prj1"], 64_000.0);
+        assert_eq!(queue.take_due(64_000.0).len(), 1, "a retry is re-armed");
+    }
+
+    /// A settled verdict follows the project out of the library: if the uid
+    /// comes back (re-imported), it is a new project to the sweep.
+    #[test]
+    fn the_sweep_forgets_verdicts_for_projects_the_library_lost() {
+        let mut queue = SyncQueue::new();
+        queue.request("prj1", SyncTrigger::Installed, 0.0);
+        queue.take_due(0.0);
+        queue.finish("prj1", TripResult::Settled, 0.0);
+
+        queue.sweep(["prj2"], 1.0);
+        assert_eq!(queue.take_due(1.0)[0].uid, "prj2");
+        queue.sweep(["prj1", "prj2"], 2.0);
+        assert_eq!(queue.take_due(2.0)[0].uid, "prj1");
     }
 
     /// A save that lands while the trip is in flight must not be swallowed:
@@ -347,7 +489,7 @@ mod tests {
     /// The sweep re-arms what is still tracked — the retry path a coarse
     /// timer drives — without disturbing a trip that is running.
     #[test]
-    fn arming_all_skips_projects_already_in_flight() {
+    fn the_sweep_skips_projects_already_in_flight() {
         let mut queue = SyncQueue::new();
         queue.request("prj1", SyncTrigger::Installed, 0.0);
         queue.request("prj2", SyncTrigger::Installed, 0.0);
@@ -355,7 +497,7 @@ mod tests {
         queue.finish("prj1", TripResult::Retry, 0.0);
         // prj2's trip is still running.
 
-        queue.arm_all(10.0);
+        queue.sweep(["prj1", "prj2"], 10.0);
         assert_eq!(
             queue.take_due(10.0),
             vec![DueProject {
@@ -378,6 +520,7 @@ mod tests {
 
         queue.request("prj1", SyncTrigger::Saved, 3_000.0);
         queue.request("prj1", SyncTrigger::Swept, 4_000.0);
+        queue.sweep(["prj1"], 5_000.0);
         assert!(queue.take_due(1e9).is_empty(), "the latch holds");
     }
 

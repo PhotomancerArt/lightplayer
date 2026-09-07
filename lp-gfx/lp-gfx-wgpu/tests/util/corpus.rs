@@ -3,7 +3,7 @@
 //! prototypes for authored functions, so the spike's per-shader
 //! `forward_decls` field is gone.
 
-/// One corpus shader, sourced verbatim from `examples/`.
+/// One corpus shader, sourced verbatim from `catalog/` and `projects/test/`.
 #[derive(Debug, Clone, Copy)]
 pub struct CorpusShader {
     /// Short name used for output files and test labels.
@@ -44,8 +44,8 @@ pub struct CorpusPalette {
 pub const CORPUS: &[CorpusShader] = &[
     CorpusShader {
         name: "basic",
-        path: "examples/basic/shader.glsl",
-        source: include_str!("../../../../examples/basic/shader.glsl"),
+        path: "projects/test/basic/shader.glsl",
+        source: include_str!("../../../../projects/test/basic/shader.glsl"),
         extra_uniforms: &[],
         phasors: &[
             ("palettePhase01", 25.0),
@@ -56,8 +56,8 @@ pub const CORPUS: &[CorpusShader] = &[
     },
     CorpusShader {
         name: "basic2",
-        path: "examples/basic2/shader.glsl",
-        source: include_str!("../../../../examples/basic2/shader.glsl"),
+        path: "projects/test/basic2/shader.glsl",
+        source: include_str!("../../../../projects/test/basic2/shader.glsl"),
         extra_uniforms: &[],
         phasors: &[
             ("panPhase", 20.9439516),
@@ -68,8 +68,8 @@ pub const CORPUS: &[CorpusShader] = &[
     },
     CorpusShader {
         name: "fyeah_idle",
-        path: "examples/fyeah-sign/idle.glsl",
-        source: include_str!("../../../../examples/fyeah-sign/idle.glsl"),
+        path: "catalog/projects/fyeah-sign/idle.glsl",
+        source: include_str!("../../../../catalog/projects/fyeah-sign/idle.glsl"),
         extra_uniforms: &[("glow", 0.5)],
         phasors: &[
             ("zoomPhase", 19.6349546),
@@ -92,8 +92,8 @@ pub const CORPUS: &[CorpusShader] = &[
     },
     CorpusShader {
         name: "fyeah_blast",
-        path: "examples/fyeah-sign/blast.glsl",
-        source: include_str!("../../../../examples/fyeah-sign/blast.glsl"),
+        path: "catalog/projects/fyeah-sign/blast.glsl",
+        source: include_str!("../../../../catalog/projects/fyeah-sign/blast.glsl"),
         extra_uniforms: &[("progress", 0.35)],
         // Entry-relative: `blast` binds `node:..#entry_time`, which the
         // TimeProduct break deliberately left as an f32 `time` uniform.
@@ -102,8 +102,8 @@ pub const CORPUS: &[CorpusShader] = &[
     },
     CorpusShader {
         name: "rocaille",
-        path: "examples/rocaille/shader.glsl",
-        source: include_str!("../../../../examples/rocaille/shader.glsl"),
+        path: "catalog/projects/rocaille/shader.glsl",
+        source: include_str!("../../../../catalog/projects/rocaille/shader.glsl"),
         extra_uniforms: &[],
         phasors: &[("cycle", 20.0)],
         palettes: &[],

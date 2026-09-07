@@ -37,6 +37,11 @@ description = "Payloads that make a claim about a pin."
 payloads = ["gpio-calibrate"]
 
 [[set]]
+name = "shipped-image"
+description = "The shipped image at rest: boot to the first idle heartbeat, and the hello frame that precedes it. A scenario rather than a check — nothing here is behind a `test_*` feature — and the only set that says what the product does when nobody is asking it for anything. It is a set of one because `emu-m3` pairs it with the compile harness, and a desk sitting that wants only the idle walk cannot ask for that pair twice."
+payloads = ["boot-idle"]
+
+[[set]]
 name = "emu-m3"
 description = "The M3 gate set for our own C6 machine: the compile harness (heap parity against silicon, the first point on the time ladder) and the shipped image's boot to the idle heartbeat. Both run against the reference images `scripts/emu/build-reference-image.sh` builds, so `--image` is part of the recipe."
 payloads = ["shader-compile-stress", "boot-idle"]

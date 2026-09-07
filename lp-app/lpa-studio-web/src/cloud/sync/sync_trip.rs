@@ -111,6 +111,32 @@ pub fn classify(error: &SyncError) -> TripResult {
     }
 }
 
+/// The one human sentence the ledger keeps for a failed trip
+/// ([`ProjectSyncStatus::detail`](super::sync_status::ProjectSyncStatus)):
+/// the failures a person can act on are said in their words, everything
+/// else verbatim. `error.to_string()` was honest but spoke the transport's
+/// language (`transport: offline`), and the relationship panel now
+/// composes this into "Publishing is retrying — {detail}", so each
+/// sentence reads as the clause after a dash: lower case, no period.
+pub fn describe_error(error: &SyncError) -> String {
+    match error {
+        SyncError::Transport(TransportError::Offline) => "the service was unreachable".to_string(),
+        SyncError::Cloud(CloudError::VersionMismatch { .. }) => {
+            "this tab is older than the service; reload to publish".to_string()
+        }
+        SyncError::Cloud(CloudError::NotAuthorized) => {
+            "the service says this project is not yours to write".to_string()
+        }
+        SyncError::Cloud(CloudError::NotAuthenticated) => {
+            "the service no longer recognizes this sign-in; sign in again".to_string()
+        }
+        SyncError::Cloud(CloudError::MissingBlobs { .. }) => {
+            "the service and this tab disagreed about which content it holds".to_string()
+        }
+        other => other.to_string(),
+    }
+}
+
 /// The access the service already records for this project, or
 /// [`DEFAULT_ACCESS`] when it has never heard of it.
 ///
@@ -140,6 +166,31 @@ mod tests {
     use lpc_history::{EventKind, HistoryEvent, PrefixedUid, UidPrefix};
     use lpfs::{LpFs, LpFsMemory, LpPath};
     use std::rc::Rc;
+
+    /// The ledger's detail sentence: the actionable failures in a person's
+    /// words, the rest verbatim — nothing the driver concluded is lost.
+    #[test]
+    fn describe_error_names_the_actionable_failures() {
+        assert_eq!(
+            describe_error(&SyncError::Transport(TransportError::Offline)),
+            "the service was unreachable"
+        );
+        assert_eq!(
+            describe_error(&SyncError::Cloud(CloudError::VersionMismatch {
+                client: 3,
+                server: 4
+            })),
+            "this tab is older than the service; reload to publish"
+        );
+        assert_eq!(
+            describe_error(&SyncError::Cloud(CloudError::NotAuthorized)),
+            "the service says this project is not yours to write"
+        );
+        assert_eq!(
+            describe_error(&SyncError::NoLocalHistory),
+            SyncError::NoLocalHistory.to_string()
+        );
+    }
 
     /// The publish-on-create path end to end: an unbound project's first
     /// trip mints its cloud record at the slug its name produces, sends its

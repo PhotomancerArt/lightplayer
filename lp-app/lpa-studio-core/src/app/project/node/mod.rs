@@ -29,7 +29,7 @@ pub use node_clear_debug_op::NodeClearDebugOp;
 pub(in crate::app::project) use node_controller::root_slot_key;
 pub use node_controller::{NodeController, NodeControllerState, ProjectProductSubscriptionIntent};
 pub use node_create_op::{NodeCreateOp, UiAttachTarget};
-pub use node_import_op::NodeImportOp;
+pub use node_import_op::{ImportSource, NodeImportOp};
 pub use node_remove_op::NodeRemoveOp;
 pub use node_remove_preflight::UiNodeRemovePreflight;
 pub use node_revert_op::NodeRevertOp;
@@ -39,6 +39,6 @@ pub use playlist_activate_op::PlaylistActivateOp;
 pub use project_node_address::ProjectNodeAddress;
 pub use project_node_target::ProjectNodeTarget;
 pub use ui_add_node_menu::{
-    UiAddNodeMenu, UiAddNodeMenuEntry, UiImportablePattern, add_node_menu, gate_add_node_menu,
-    set_import_source,
+    IMPORT_BUILTIN_SECTION, IMPORT_LIBRARY_SECTION, UiAddNodeMenu, UiAddNodeMenuEntry,
+    UiImportablePattern, add_node_menu, gate_add_node_menu, set_import_source,
 };

@@ -130,7 +130,7 @@ fn parse_args() -> Result<Args, String> {
     })
 }
 
-/// `examples/basic` relative to the workspace this binary was built from.
+/// `projects/test/basic` relative to the workspace this binary was built from.
 /// Recursively copy a project directory into the scratch root.
 fn copy_dir(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
     std::fs::create_dir_all(to)?;
@@ -147,7 +147,7 @@ fn copy_dir(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()>
 }
 
 fn default_project_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/basic")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../projects/test/basic")
 }
 
 fn run(args: &Args) -> Result<(), String> {

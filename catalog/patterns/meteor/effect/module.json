@@ -1,0 +1,16 @@
+{
+  "kind": "Module",
+  "nodes": {
+    "render": {
+      "ref": "./render.json"
+    },
+    "sim": {
+      "ref": "./sim.json"
+    }
+  },
+  "provenance": {
+    "author": "Photomancer",
+    "version": "1",
+    "license": "CC0-1.0"
+  }
+}

@@ -529,8 +529,12 @@ fn sync_trigger_for(op: &CatalogOp) -> Option<SyncTrigger> {
             ..
         } => None,
         // The device registry is local hardware bookkeeping, not project
-        // content: a board saying hello is nothing to publish.
-        CatalogOp::UpsertRegisteredDevice(_) | CatalogOp::ForgetRegisteredDevice { .. } => None,
+        // content: a board saying hello is nothing to publish, and neither
+        // is the picture it published.
+        CatalogOp::UpsertRegisteredDevice(_)
+        | CatalogOp::ForgetRegisteredDevice { .. }
+        | CatalogOp::CreateSimDevice { .. }
+        | CatalogOp::StoreDeviceFrame { .. } => None,
         _ => Some(SyncTrigger::Installed),
     }
 }
@@ -747,10 +751,13 @@ fn structural_target_uid(op: &CatalogOp) -> Option<&str> {
         | CatalogOp::ImportZip { .. }
         | CatalogOp::ImportJson { .. }
         | CatalogOp::GenerateForBoard { .. }
-        // Registry-only: the device rows live beside the packages, not
+        // Registry-only: the device rows (and their per-device sidecars —
+        // the last frame, the sim record) live beside the packages, not
         // inside one, so no project lock is involved.
         | CatalogOp::UpsertRegisteredDevice(_)
         | CatalogOp::ForgetRegisteredDevice { .. }
+        | CatalogOp::CreateSimDevice { .. }
+        | CatalogOp::StoreDeviceFrame { .. }
         // Creation-shaped: the transient fork mints a fresh uid, and the
         // synced install refuses a uid the library already holds, so
         // neither has an existing project to lock.

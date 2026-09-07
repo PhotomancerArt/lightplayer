@@ -80,8 +80,11 @@ pub struct UiChromeSessionControl {
     /// the render key. The sim needs no teardown target:
     /// `StopSimulator` is unique by construction.
     pub key: String,
+    /// The roster device a DEVICE lens is on — what the panel's rename
+    /// addresses. `None` for the sim, which has no name to change.
+    pub device: Option<lpa_devices::DeviceId>,
     /// "Sim" for the simulator (the control renders the board as a
-    /// suffix).
+    /// suffix); the device's live title for a device lens.
     pub name: String,
     /// Human board name via
     /// [`board_display_name`](crate::app::roster::board_display_name) —

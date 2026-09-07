@@ -390,6 +390,48 @@ The console model lives in `core/log/` (ADR
   device action at actor intake. Not persisted device-side; tracked
   optimistically per connection.
 
+## Devices: One Layer, Two Transports
+
+A **sim** is a device. Not "a runtime that looks like one" — a row in the
+same registry, a record in the same `lpa-devices` fold, the same card, the
+same verbs. `lpa-devices` has no arm for it and never will: what a sim adds
+is a `Link` implementor and an effect backend, never a flow.
+
+Three pieces in `app/devices/` make that true:
+
+- **`sim_record.rs` — identity and the sidecar.** Studio mints a
+  locally-administered MAC from caller-supplied random bytes (sans-IO) and
+  derives the uid through `HardwareId::device_uid`, the one G1-approved
+  derivation. The registry row therefore records `hardware_id: "efuse:<mac>"`
+  like any board and every identity join is untouched. The sole "this is a
+  sim" fact is `/device-sims/<uid>.json`, beside `/device-frames/<uid>.json`:
+  absence means not a sim, an unreadable or foreign-version file reads as
+  absent, and `Forget` deletes it. Nothing about a sim rides the wire.
+- **`sim_transport.rs` — the sims this tab powered on.** A
+  `DeviceTransport` answering a differently-shaped question — sims are
+  **made**, not discovered — behind the same trait. What a running sim IS
+  arrives through `SimLinkSource`: a `fw-browser` worker in the browser
+  (`browser_sim_source.rs`, wasm-only), a scripted fake in the host e2e
+  bench. Effects say what actually happened: a flash writes nothing and
+  reports no probed MAC or chip name, an erase says the storage was memory,
+  a manifest write is worn by the next runtime, and push/remove run the real
+  `lpa-client` conversation.
+- **`composite_transport.rs` — one transport, two halves.** `DeviceEffects`
+  holds exactly one `DeviceTransport`, on purpose (a per-kind fork inside it
+  is how a second device flow grows), so a build that reaches both installs a
+  composite that routes by the link's endpoint — already the effects layer's
+  routing key, and already what the registry `transport` column is derived
+  from. A build with no serial half still serves sims; only the chooser
+  degrades, and it says why.
+
+Power on and off are `Action::Connect` and `Action::Disconnect`. The effects
+layer starts the runtime before the fold so the sweep finds a link; the hello
+carries the uid and the fold adopts the link into the record that was already
+there. Powering off raises the detach explicitly, because `Disconnect` alone
+keeps a card attached — right for a board still on the desk, wrong for a
+runtime that no longer exists. Only the two verbs' WORDS fork ("Power on" /
+"Power off", via `DevicesOp`'s `face`); every other verb reads the same.
+
 ## Device Management UX
 
 Blank-device provisioning and recovery are modeled as Device actions backed by

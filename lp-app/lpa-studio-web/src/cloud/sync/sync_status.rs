@@ -9,9 +9,12 @@
 //! (`docs/defects/2026-08-28-auto-publish-outcomes-invisible.md`). This
 //! module is the smallest correction: the driver records what each trip
 //! concluded — including the conclusions that produce **no network traffic
-//! at all** (nothing saved yet, skipped, refused local state) — and one
-//! diagnostic surface renders the ledger. Nothing here schedules, retries,
-//! or renders; it is a notebook, not a nervous system.
+//! at all** (nothing saved yet, skipped, refused local state) — and two
+//! surfaces read it: the `/account` page's "Cloud sync" rows render the
+//! whole ledger (diagnostic, no controls), and the relationship panel's
+//! `MineLocal` Access sentence reads only its own project's row
+//! (`app::share::project_relationship_panel`). Nothing here schedules,
+//! retries, or renders; it is a notebook, not a nervous system.
 //!
 //! Like the queue, the ledger is per-tab and never persisted: it describes
 //! this tab's driver, and a fresh page load re-derives everything the next

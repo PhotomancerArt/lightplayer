@@ -35,26 +35,33 @@ pub use app::bus::{
 };
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub use app::devices::BrowserSerialTransport;
+#[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
+pub use app::devices::BrowserSimLinkSource;
 pub use app::devices::{
-    CompletedPush, DEVICE_FEED_PARK_AFTER_FAILURES, DeviceCardFeedView, DeviceEffectCall,
-    DeviceEffectFacts, DeviceEffectProgress, DeviceEffects, DeviceFeedOp, DeviceFrameFeed,
+    CompletedPush, CompositeDeviceTransport, DEVICE_FEED_PARK_AFTER_FAILURES,
+    DEVICE_FRAME_SNAPSHOT_INTERVAL_SECS, DeviceCardFeedView, DeviceEffectCall, DeviceEffectFacts,
+    DeviceEffectProgress, DeviceEffects, DeviceFace, DeviceFeedOp, DeviceFrameFeed,
     DeviceFrameFeeds, DeviceIdentityFirmware, DeviceIdentityLine, DevicePushOp, DeviceRoster,
     DeviceRosterView, DeviceTaskFuture, DeviceTimerFuture, DeviceTransport, DeviceTransportFuture,
     DevicesOp, FeedLiveness, FirmwareVerb, FlashBoardChoice, FlashOffer, GrantedLink, JournalLine,
-    LensLineTap, LensTapEvent, PushOffer, PushPayload, PushSource, PushSourceChoice,
-    PushSourceGroup, RememberedView, RosterSplit, StagedPush, device_card_feed_view,
-    device_card_feed_views, device_chip, device_escape_action, device_firmware_line,
-    device_identity_line, device_status_kind, feed_liveness, firmware_face_preview_sentence,
-    firmware_verb, first_bundled_example_id, flash_offer, flash_offer_for, pending_escape_action,
-    pending_firmware_line, pending_identity_rows, push_offer, reflash_choice, split_roster,
+    LensLineTap, LensTapEvent, NewSimRecord, PushOffer, PushPayload, PushSource, PushSourceChoice,
+    PushSourceGroup, RememberedView, RosterSplit, SIM_TRANSPORT, SimBacking, SimDeviceTransport,
+    SimLinkSource, SimRecord, SimRuntimeControl, SimSession, StagedPush, delete_sim_record,
+    device_card_feed_view, device_card_feed_views, device_chip, device_escape_action,
+    device_firmware_line, device_identity_line, device_status_kind, feed_liveness,
+    firmware_face_preview_sentence, firmware_verb, first_bundled_example_id, flash_offer,
+    flash_offer_for, mint_sim_identity, new_sim_record, pending_escape_action,
+    pending_firmware_line, pending_identity_rows, push_offer, read_sim_record, reflash_choice,
+    sim_endpoint, sim_link_info, split_roster, transport_label_for_endpoint, uid_from_sim_endpoint,
+    write_sim_record,
 };
 pub use app::docs_host::DocsSimHost;
 pub use app::frame_feed::{CardFeedApply, CardFeedState};
 pub use app::home::{
     CardSheet, CardUiOp, CardUiState, CardVerb, DEFAULT_STRIP_PIXELS, GenerateProjectError,
     GeneratedProject, HOME_NODE_ID, HomeOp, HomePoolEvidence, HomeSimEvidence, ProjectTemplate,
-    SIM_CARD_KEY, UiExampleCard, UiHomeView, UiPackageCard, UiSimCard, UiSimProjectChip, ZipBytes,
-    generate_board_project, template_project_files,
+    SIM_CARD_KEY, UiExampleCard, UiExampleGroup, UiHomeView, UiPackageCard, UiSimCard,
+    UiSimProjectChip, ZipBytes, example_groups, generate_board_project, template_project_files,
 };
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,
@@ -91,10 +98,11 @@ pub use app::preview_host::{
 pub use app::project::{
     AgentEngineStatus, AssetContentFetchOp, AssetEditOp, DirtySummary, EDIT_JOURNAL_CAP,
     EDITOR_META_PATH, EditorMetaFetchOp, EditorMetaFixture, EditorMetaOp, EditorMetaSet,
-    EditorMetaVerb, FROZEN_PREVIEW_PHASE, HISTORY_ROW_CAP, LoadedProjectChoice,
-    MAX_ASSET_BODY_BYTES, ModuleExportOp, ModuleHeroProduct, NodeCardDrawer, NodeCardUiState,
-    NodeClearDebugOp, NodeController, NodeControllerState, NodeCopyOp, NodeCreateOp, NodeImportOp,
-    NodePasteOp, NodeRemoveOp, NodeRevertOp, NodeUiOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp,
+    EditorMetaVerb, FROZEN_PREVIEW_PHASE, HISTORY_ROW_CAP, IMPORT_BUILTIN_SECTION,
+    IMPORT_LIBRARY_SECTION, ImportSource, LoadedProjectChoice, MAX_ASSET_BODY_BYTES,
+    ModuleExportOp, ModuleHeroProduct, NodeCardDrawer, NodeCardUiState, NodeClearDebugOp,
+    NodeController, NodeControllerState, NodeCopyOp, NodeCreateOp, NodeImportOp, NodePasteOp,
+    NodeRemoveOp, NodeRevertOp, NodeUiOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp,
     PatchPulseLamps, PatchPulseLanguage, PatchPulseOp, PatchPulseSpace, PatchPulseSubject,
     PatchVerbFixture, PatchVerbKind, PatchVerbOp, PatchVerbSubject, PatchVerbWindow,
     PendingAssetEdit, PendingEdit, PendingEditOp, PendingEditPhase, PlaylistActivateOp,
@@ -179,4 +187,4 @@ pub use lpa_devices::{
     TerminalLine as DeviceTerminalLine, WireVersion as DeviceWireVersion,
 };
 
-pub const STUDIO_DEMO_PROJECT_ID: &str = "examples/fyeah-sign";
+pub const STUDIO_DEMO_PROJECT_ID: &str = "catalog/fyeah-sign";

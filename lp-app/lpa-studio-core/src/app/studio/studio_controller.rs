@@ -125,6 +125,19 @@ pub struct StudioController {
     /// A granted-port sweep is due (boot, or a `navigator.serial` connect).
     /// Drained by the actor's device step so a hotplug storm costs one sweep.
     device_sweep_pending: bool,
+    /// The transport that reaches SILICON, when this build has one (browser
+    /// Web Serial; a scripted fake in the benches). Held so installing the
+    /// sim half can rebuild the composite without the caller re-supplying
+    /// it — the effects layer takes one transport, on purpose.
+    serial_transport: Option<Rc<dyn crate::DeviceTransport>>,
+    /// The transport that reaches SIMS, when this build has one. Concrete
+    /// rather than `dyn` because powering a sim on and off is not part of
+    /// the `DeviceTransport` vocabulary and must not become part of it.
+    sim_transport: Option<Rc<crate::SimDeviceTransport>>,
+    /// The `/device-sims/<uid>.json` sidecars, read off the library
+    /// snapshot at settle. The sole "this device is a sim" fact, cached so
+    /// powering one on does not read the store from inside a fold.
+    device_sims: std::collections::BTreeMap<String, crate::SimRecord>,
     /// The runtime sessions the studio is attached to, plus the editor
     /// lens. Every network op resolves its wire client through the pool's
     /// lens-bound seam.
@@ -189,6 +202,12 @@ pub struct StudioController {
     /// Cached gallery inputs, hydrated from a host catalog snapshot by
     /// [`Self::refresh_library`] — `view()` never reads a live store.
     home_inputs: Option<HomeInputs>,
+    /// The library half of a rename made while the project was OPEN: the
+    /// `(uid, name)` whose directory slug still has to move. The manifest
+    /// name was patched at once through the open handle; the catalog rename
+    /// (a directory move under a lock the open project holds) waits for the
+    /// close, and runs at the next library settle after it.
+    pending_reslug: Option<(String, String)>,
     /// A library re-hydration is due (attach, home op, save, close, or a
     /// cross-tab `LibraryChanged` ping). Drained at the end of every
     /// dispatch and by the actor after each batch.
@@ -303,6 +322,9 @@ impl StudioController {
             device_feeds: crate::DeviceFrameFeeds::new(),
             pending_device_lens: None,
             device_sweep_pending: false,
+            serial_transport: None,
+            sim_transport: None,
+            device_sims: std::collections::BTreeMap::new(),
             pool: RuntimePool::new(),
             project: ProjectController::new(),
             sync_timer: None,
@@ -320,6 +342,7 @@ impl StudioController {
             last_log_only_publish: f64::NEG_INFINITY,
             library_host: None,
             home_inputs: None,
+            pending_reslug: None,
             library_refresh_pending: false,
             pending_open: None,
             card_ui: std::collections::HashMap::new(),
@@ -433,8 +456,177 @@ impl StudioController {
     /// see ports should show what it already has permission for, without the
     /// user asking twice.
     pub fn set_device_transport(&mut self, transport: Rc<dyn crate::DeviceTransport>) {
+        self.serial_transport = Some(transport);
+        self.install_device_transport();
+    }
+
+    /// Install the transport that serves SIMS. Install before the actor
+    /// takes ownership, beside (or instead of) the serial one.
+    ///
+    /// A build with both installs a `CompositeDeviceTransport` routing by
+    /// the link's endpoint: the effects layer holds exactly one transport,
+    /// and a per-kind fork inside it is how a second device flow grows.
+    pub fn set_device_sim_transport(&mut self, transport: Rc<crate::SimDeviceTransport>) {
+        self.sim_transport = Some(transport);
+        self.install_device_transport();
+    }
+
+    /// (Re)install whichever transport this build's halves add up to, and
+    /// arm the first sweep: a page that CAN see devices should show what it
+    /// already has, without the user asking twice.
+    fn install_device_transport(&mut self) {
+        let transport: Option<Rc<dyn crate::DeviceTransport>> = match &self.sim_transport {
+            Some(sim) => Some(Rc::new(crate::CompositeDeviceTransport::new(
+                self.serial_transport.clone(),
+                Rc::clone(sim) as Rc<dyn crate::DeviceTransport>,
+            ))),
+            None => self.serial_transport.clone(),
+        };
+        let Some(transport) = transport else {
+            return;
+        };
         self.devices.effects_mut().set_transport(transport);
         self.device_sweep_pending = true;
+    }
+
+    /// Mint a sim of `target` and remember it: one registry row
+    /// (`transport: "sim"`, keyed on the derived uid) and one
+    /// `/device-sims/<uid>.json` sidecar, written in a single library
+    /// settle so a half-created sim cannot exist.
+    ///
+    /// `random` is the caller's six bytes (the web shell's
+    /// `crypto.getRandomValues`, a test's fixed bytes): minting decides
+    /// identity, and where entropy comes from is the platform's business,
+    /// not the model's. Returns the uid the sim is remembered under.
+    ///
+    /// The sim is NOT powered on. It loads as a detached record like any
+    /// remembered board, and `Action::Connect` is what starts it.
+    pub async fn create_sim_record(
+        &mut self,
+        target: &str,
+        name: Option<&str>,
+        random: &[u8; 6],
+    ) -> Result<String, UiError> {
+        let minted = crate::new_sim_record(target, name, random, (self.now_secs)());
+        let sidecar_bytes = serde_json::to_vec(&minted.sidecar).unwrap_or_default();
+        self.run_catalog_op(CatalogOp::CreateSimDevice {
+            device: Box::new(minted.row.clone()),
+            sidecar_bytes,
+        })
+        .await?;
+        self.device_sims
+            .insert(minted.uid.clone(), minted.sidecar.clone());
+        Ok(minted.uid)
+    }
+
+    /// The sims remembered in this library, by uid.
+    pub fn device_sims(&self) -> &std::collections::BTreeMap<String, crate::SimRecord> {
+        &self.device_sims
+    }
+
+    /// Read every remembered sim's sidecar off the library snapshot.
+    ///
+    /// Only rows the registry already labels `sim` are looked at, so a
+    /// library full of boards reads nothing. Absence is the answer for
+    /// everything else — a board without a sidecar is not a sim, which is
+    /// every board in every existing library.
+    fn seed_device_sim_records(&mut self, fs: &Rc<std::cell::RefCell<dyn lpfs::LpFs>>) {
+        let Some(inputs) = self.home_inputs.as_ref() else {
+            return;
+        };
+        let uids: Vec<String> = inputs
+            .registered
+            .iter()
+            .filter(|row| row.transport == crate::SIM_TRANSPORT)
+            .map(|row| row.uid.clone())
+            .collect();
+        let fs = fs.borrow();
+        self.device_sims = uids
+            .into_iter()
+            .filter_map(|uid| crate::read_sim_record(&*fs, &uid).map(|record| (uid, record)))
+            .collect();
+    }
+
+    /// The session a sim device would run as, or `None` when this device is
+    /// not a sim (no sidecar) or has no uid to be keyed on.
+    fn sim_session_for(&self, device: crate::DeviceId) -> Option<crate::SimSession> {
+        let entry = self
+            .devices
+            .roster()
+            .devices()
+            .iter()
+            .find(|entry| entry.id == device)?;
+        let uid = entry
+            .identity
+            .uid
+            .as_ref()
+            .map(|uid| uid.0.clone())
+            .or_else(|| self.device_registry_key(device))?;
+        let sidecar = self.device_sims.get(&uid)?;
+        Some(crate::SimSession {
+            uid,
+            target: sidecar.target.clone(),
+            display_name: entry.title(),
+            base_mac: sidecar.base_mac.clone(),
+        })
+    }
+
+    /// Power a sim on, if this gesture is a `Connect` at one.
+    ///
+    /// The EFFECTS layer starts the runtime, never the model: `Connect` on a
+    /// sim is `Connect` (PD8, Q15), and the sweep this arms is what attaches
+    /// the link the model then opens. The hello carries the uid, so the fold
+    /// adopts the link into this very record through its own identity join —
+    /// no new arm, no new event.
+    fn power_on_sim_for(&mut self, action: &crate::DeviceAction) {
+        let crate::DeviceAction::Connect { device } = action else {
+            return;
+        };
+        let (Some(sim), Some(session)) =
+            (self.sim_transport.clone(), self.sim_session_for(*device))
+        else {
+            return;
+        };
+        if sim.is_powered(&session.uid) {
+            return;
+        }
+        match sim.power_on(session) {
+            Ok(()) => self.device_sweep_pending = true,
+            Err(error) => log::warn!("the sim did not start: {error}"),
+        }
+    }
+
+    /// Power a sim off, if this gesture was a `Disconnect` (or a `Forget`)
+    /// at one.
+    ///
+    /// Runs AFTER the fold, which has already evicted and closed the link.
+    /// The detach has to be raised explicitly: `Disconnect` alone closes a
+    /// port and keeps the card attached, which is right for a board still
+    /// sitting on the desk and wrong for a runtime that no longer exists. A
+    /// powered-off sim leaves the roster the way an unplugged board does,
+    /// and its record stays on the remembered line (Q5).
+    fn power_off_sim_for(&mut self, action: &crate::DeviceAction) {
+        let uid = match action {
+            crate::DeviceAction::Disconnect { device } | crate::DeviceAction::Forget { device } => {
+                self.sim_session_for(*device).map(|session| session.uid)
+            }
+            _ => None,
+        };
+        let (Some(sim), Some(uid)) = (self.sim_transport.clone(), uid) else {
+            return;
+        };
+        let link = self
+            .devices
+            .effects()
+            .link_for_endpoint(&crate::sim_endpoint(&uid));
+        if !sim.power_off(&uid) {
+            return;
+        }
+        if let Some(link) = link {
+            self.fold_device_input(crate::DeviceInput::Event(
+                lpa_devices::Event::LinkDetached { link },
+            ));
+        }
     }
 
     /// Install the platform task spawner for device IO (`spawn_local` on
@@ -528,6 +720,16 @@ impl StudioController {
             log::debug!("device records not persisted: no library host");
             return;
         }
+        // The uids this batch WRITES. A merge (`reconcile_identities`) emits
+        // `DeleteRecord` for the discarded handle and `PersistRecord` for the
+        // surviving one in the SAME batch, and both resolve to the same
+        // registry key — because being the same device is what a merge
+        // discovered. Deleting on that would take away the row this very
+        // batch just wrote, and, worse, the device's sidecars with it: a
+        // remembered board whose port came back would silently lose its last
+        // picture, and a sim would lose the file that says it is one.
+        // (`docs/defects/2026-09-07-merge-delete-erased-the-merged-row.md`.)
+        let mut written: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         for record in writes.persist {
             let Some(row) = crate::app::devices::registry_row_from_record(&record) else {
                 // An anonymous board has no honest registry key; adopting one
@@ -538,6 +740,7 @@ impl StudioController {
             // the device is gone from the fold, and the row key is its
             // identity, not its handle.
             self.devices.remember_key(record.device, row.uid.clone());
+            written.insert(row.uid.clone());
             if let Err(error) = self
                 .run_catalog_op(CatalogOp::UpsertRegisteredDevice(Box::new(row)))
                 .await
@@ -553,6 +756,10 @@ impl StudioController {
             else {
                 continue;
             };
+            if written.contains(&uid) {
+                log::debug!("device {device:?} merged into the row it shares; {uid} stays");
+                continue;
+            }
             if let Err(error) = self
                 .run_catalog_op(CatalogOp::ForgetRegisteredDevice { uid })
                 .await
@@ -1258,7 +1465,102 @@ impl StudioController {
         if new_frame {
             self.mark_dirty();
         }
+        self.persist_due_device_frames().await;
         preempted
+    }
+
+    /// Write every feed's newest frame to its board's sidecar when one is
+    /// due ([`crate::DeviceFrameFeed::snapshot_due`]: a frame newer than the
+    /// written one, at most every ten seconds per board), so a remembered
+    /// board keeps its last picture across reloads.
+    ///
+    /// Runs in the feed lane, after the pulls, and never in a fold (I7).
+    /// The write goes straight to the host — NOT through `run_catalog_op`,
+    /// whose gallery re-hydration would rebuild the home view every ten
+    /// seconds for nothing the gallery lists. A failed write is logged and
+    /// still stamped as written: a store that refuses today would refuse
+    /// again every tick, and the board's picture is a convenience, not the
+    /// source of truth.
+    async fn persist_due_device_frames(&mut self) {
+        let now = (self.now_secs)();
+        let due = self.device_feeds.snapshots_due(now);
+        if due.is_empty() {
+            return;
+        }
+        let Ok(host) = self.library_host() else {
+            return;
+        };
+        for (device, frame, captured_at) in due {
+            let Some(uid) = self.device_registry_key(device).or_else(|| {
+                self.devices
+                    .roster()
+                    .device(device)
+                    .and_then(|device| device.identity.uid.as_ref())
+                    .map(|uid| uid.0.clone())
+            }) else {
+                // An anonymous board has no honest key; its picture lives
+                // for the session only, like its record.
+                continue;
+            };
+            let bytes = crate::app::devices::device_frame_snapshot::encode(&frame, captured_at);
+            if let Err(error) = host
+                .catalog(CatalogOp::StoreDeviceFrame { uid, bytes })
+                .await
+            {
+                log::warn!("device last frame not persisted: {error}");
+            }
+            self.device_feeds
+                .mark_snapshot_written(device, captured_at, now);
+        }
+    }
+
+    /// Seed the feeds of remembered boards from their persisted last frames
+    /// (`device_frame_snapshot`), read off the library snapshot `fs` at
+    /// settle. Only a board whose feed has NO picture reads its sidecar, so
+    /// after the first settle nothing is read again, and a frame this
+    /// session pulled is never displaced by an older one on disk.
+    fn seed_device_frame_snapshots(&mut self, fs: &Rc<std::cell::RefCell<dyn lpfs::LpFs>>) {
+        let Some(inputs) = self.home_inputs.as_ref() else {
+            return;
+        };
+        let mut seeded = false;
+        let rows: Vec<(String, Option<u64>)> = inputs
+            .registered
+            .iter()
+            .map(|row| (row.uid.clone(), row.device_id))
+            .collect();
+        for (uid, device_id) in rows {
+            let device = self
+                .devices
+                .roster()
+                .devices()
+                .iter()
+                .find(|device| {
+                    device_id == Some(device.id.0)
+                        || device
+                            .identity
+                            .uid
+                            .as_ref()
+                            .is_some_and(|known| known.0 == uid)
+                })
+                .map(|device| device.id);
+            let Some(device) = device else {
+                continue;
+            };
+            if self.device_feeds.has_frame(device) {
+                continue;
+            }
+            let snapshot = {
+                let fs = fs.borrow();
+                crate::app::devices::device_frame_snapshot::read_snapshot(&*fs, &uid)
+            };
+            if let Some((frame, captured_at)) = snapshot {
+                seeded |= self.device_feeds.seed_snapshot(device, frame, captured_at);
+            }
+        }
+        if seeded {
+            self.mark_dirty();
+        }
     }
 
     /// The card's mount lease for its live frame feed: a mounted
@@ -1547,6 +1849,7 @@ impl StudioController {
         Some(crate::UiChromeSessionControl {
             kind: crate::UiChromeSessionKind::Sim,
             key: card.identity_key().to_string(),
+            device: None,
             // The control renders the sim's board as a suffix, so the
             // name stays the kind.
             name: "Sim".to_string(),
@@ -1606,7 +1909,13 @@ impl StudioController {
         Some(crate::UiChromeSessionControl {
             kind: crate::UiChromeSessionKind::Device,
             key: format!("device:{}", attachment.uid),
-            name: attachment.name.clone(),
+            device: Some(attachment.device),
+            // The roster's LIVE title, so a rename made from this very
+            // panel shows up in the segment at once; the attach-time
+            // snapshot only covers a device the roster has since dropped.
+            name: device
+                .map(lpa_devices::Device::title)
+                .unwrap_or_else(|| attachment.name.clone()),
             board: attachment
                 .board_id
                 .as_deref()
@@ -1882,8 +2191,38 @@ impl StudioController {
     /// settle. Called at the end of every dispatch and by the actor after
     /// each command batch, so host futures always get driven even when a
     /// close happened on a synchronous path.
+    /// The deferred half of a rename made while its project was open: once
+    /// the project is no longer the active library package (its close has
+    /// been released just above), move the library directory to the new
+    /// name with the ordinary catalog rename — the same op the gallery's
+    /// kebab runs, so the slug, the manifest and the cloud's `Renamed`
+    /// trigger all land the way a closed-project rename lands them.
+    ///
+    /// A rename that never gets its close (the tab is shut first) keeps the
+    /// manifest name it already wrote; only the dated directory slug stays
+    /// behind, which the next gallery rename fixes.
+    async fn run_pending_reslug(&mut self) {
+        let Some((uid, name)) = self.pending_reslug.clone() else {
+            return;
+        };
+        if self.project.active_library_uid().as_deref() == Some(uid.as_str()) {
+            return;
+        }
+        self.pending_reslug = None;
+        if let Err(error) = self
+            .run_catalog_op(CatalogOp::Rename {
+                uid: uid.clone(),
+                new_slug: name,
+            })
+            .await
+        {
+            log::warn!("library slug of {uid} did not follow its rename: {error}");
+        }
+    }
+
     pub async fn settle_library(&mut self) {
         self.project.release_closed_library_projects().await;
+        self.run_pending_reslug().await;
         if !self.library_refresh_pending {
             return;
         }
@@ -1892,15 +2231,18 @@ impl StudioController {
             return;
         };
         let open_elsewhere = host.open_elsewhere_uids().await;
+        let mut snapshot_fs = None;
         match host.catalog_snapshot().await {
             Ok(fs) => {
-                let inputs = home_view_builder::hydrate_home_inputs(fs, &open_elsewhere);
+                let inputs =
+                    home_view_builder::hydrate_home_inputs(Rc::clone(&fs), &open_elsewhere);
                 // The add-node picker's import source is derived from the
                 // same walk (P5) — one snapshot read feeds both the
                 // gallery and the picker.
                 self.project
                     .set_import_patterns(home_view_builder::importable_patterns(&inputs));
                 self.home_inputs = Some(inputs);
+                snapshot_fs = Some(fs);
             }
             Err(error) => {
                 log::warn!("library snapshot failed: {error}");
@@ -1914,8 +2256,13 @@ impl StudioController {
         }
         // The registry rows come off the same snapshot walk; the roster
         // rehydrates from them the first time they land, so a remembered
-        // board has a card before any port is open.
+        // board has a card before any port is open — and its last picture,
+        // off the same snapshot, so the tile shows what it last did.
         self.load_device_records_if_due();
+        if let Some(fs) = snapshot_fs.as_ref() {
+            self.seed_device_sim_records(fs);
+            self.seed_device_frame_snapshots(fs);
+        }
         self.mark_dirty();
     }
 
@@ -2324,19 +2671,22 @@ impl StudioController {
                     )
                     .await;
             }
-            HomeOp::CreateProject { template } => {
+            HomeOp::CreateProject { template, name } => {
                 // Create-and-open (the D17 deviation, 2026-07-27): the
                 // package lands in the library — slugged/dated/deduped by
-                // the store from the template's label; rename lives on the
-                // card kebab — then opens like any card, so the user lands
-                // in the editor with something to do next. `Blank` sends no
-                // files at all, so the historical path is untouched.
+                // the store from the name the menu's optional field carried,
+                // else the template's label; rename lives on the card kebab
+                // and in the project's settings — then opens like any card,
+                // so the user lands in the editor with something to do next.
+                // `Blank` sends no files at all, so the historical path is
+                // untouched.
                 let files = crate::app::home::template_project_files(template)?;
+                let name = name
+                    .map(|name| name.trim().to_string())
+                    .filter(|name| !name.is_empty())
+                    .unwrap_or_else(|| template.default_project_name().to_string());
                 let outcome = self
-                    .run_catalog_op(CatalogOp::Create {
-                        name: template.default_project_name().to_string(),
-                        files,
-                    })
+                    .run_catalog_op(CatalogOp::Create { name, files })
                     .await?;
                 let created = outcome.summary.ok_or_else(|| {
                     UiError::MissingSession("create produced no package".to_string())
@@ -2378,6 +2728,22 @@ impl StudioController {
                     return Err(UiError::UnsupportedAction(
                         "a project name cannot be empty".to_string(),
                     ));
+                }
+                // The project OPEN in this tab — the one whose settings row
+                // or gallery card was just edited while it runs — cannot go
+                // through the catalog: the host refuses structural ops on
+                // it (`OpenInThisTab`, the project-before-catalog rule).
+                // Its name is patched through its own handle instead, and
+                // the library directory follows when the project closes
+                // (`run_pending_reslug`).
+                if self.project.active_library_uid().as_deref() == Some(uid.as_str()) {
+                    let renamed = {
+                        let server = self.pool.lens_session_mut()?.client_mut()?;
+                        self.project.rename_active_project(server, name).await?
+                    };
+                    self.pending_reslug = Some((uid, renamed.clone()));
+                    return Ok(UiNotices::new()
+                        .with_notice(UiNotice::info(format!("Renamed to {renamed}"))));
                 }
                 let outcome = self
                     .run_catalog_op(CatalogOp::Rename {
@@ -2770,7 +3136,11 @@ impl StudioController {
         if let Some(name_first) = self.derive_flash_name_action(op.action()) {
             self.fold_device_input(crate::DeviceInput::Action(name_first));
         }
-        self.fold_device_input(crate::DeviceInput::Action(op.0));
+        // A sim's runtime is started HERE, before the fold, so the sweep the
+        // model's own `Connect` triggers finds a link to attach.
+        self.power_on_sim_for(op.action());
+        self.fold_device_input(crate::DeviceInput::Action(op.action.clone()));
+        self.power_off_sim_for(op.action());
         self.settle_device_records().await;
         Ok(UiNotices::new())
     }
@@ -2820,6 +3190,15 @@ impl StudioController {
     /// instead of one of them being a toast the card never hears about.
     async fn execute_device_push_op(&mut self, op: crate::DevicePushOp) -> UiResult {
         self.yield_lens_wire_for(&crate::DeviceAction::Push { device: op.device });
+        // The picker's "name the board to match" offer: a user-stream
+        // rename, folded before the push exactly as the card's own Rename
+        // would be.
+        if let Some(name) = op.device_name.clone() {
+            self.fold_device_input(crate::DeviceInput::Action(crate::DeviceAction::SetName {
+                device: op.device,
+                name,
+            }));
+        }
         let staged = self.prepare_push(&op.source).await;
         if let Err(reason) = &staged {
             log::warn!("nothing to push to {:?}: {reason}", op.device);
@@ -2858,9 +3237,10 @@ impl StudioController {
                 })
                 .await?
             }
-            crate::PushSource::NewForBoard { board_id } => {
+            crate::PushSource::NewForBoard { board_id, name } => {
                 self.install_for_push(CatalogOp::GenerateForBoard {
                     board_id: board_id.clone(),
+                    name: name.clone(),
                 })
                 .await?
             }
@@ -2989,17 +3369,25 @@ impl StudioController {
 
     /// The auto-name that precedes a Flash on a still-unnamed board, if one
     /// is due. `None` for every other gesture, for a named board (a re-flash
-    /// must not rename), and for a target the roster does not hold.
+    /// must not rename), for a Flash that carries the name the user typed
+    /// at setup (the model records that one itself), and for a target the
+    /// roster does not hold.
     fn derive_flash_name_action(
         &self,
         action: &crate::DeviceAction,
     ) -> Option<crate::DeviceAction> {
         let crate::DeviceAction::Flash {
-            device, board_id, ..
+            device,
+            board_id,
+            name,
+            ..
         } = action
         else {
             return None;
         };
+        if name.is_some() {
+            return None;
+        }
         let named = self
             .devices
             .roster()
@@ -3867,14 +4255,15 @@ impl StudioController {
         self.record_project_edit_run(run)
     }
 
-    /// Vendor a library pattern export into the open project (module
-    /// authoring unit, P5). The source bytes come from the library, the
-    /// write goes over the wire as an ordinary `CreateNode`.
+    /// Vendor a pattern export into the open project (module authoring
+    /// unit, P5; built-ins, catalog content tree P6). The source bytes come
+    /// from the library or the compiled-in catalog, the write goes over the
+    /// wire as an ordinary `CreateNode`.
     async fn execute_node_import_op(&mut self, op: NodeImportOp) -> UiResult {
         let run = {
             let server = self.pool.lens_session_mut()?.client_mut()?;
             self.project
-                .import_pattern(server, &op.package_uid, &op.export)
+                .import_pattern(server, &op.source, &op.export)
                 .await
         };
         // The vendored files landed in the library through the create's
@@ -5300,6 +5689,60 @@ mod tests {
         assert!(!home.examples.is_empty(), "examples always show");
     }
 
+    /// The New menu's optional name: a typed name is what the library dates
+    /// and slugs; blank falls back to the template's label. The follow-on
+    /// open errs on host (no sim runtime), exactly as the create test below
+    /// documents — the package sticks either way.
+    #[test]
+    fn home_create_project_takes_the_menus_optional_name() {
+        use crate::app::library::{LibraryStore, MemoryLibraryHost};
+        use crate::{HOME_NODE_ID, HomeOp};
+        use lpfs::LpFsMemory;
+
+        let mut studio = StudioController::new(|| 42.0);
+        let counter = Rc::new(RefCell::new(0u8));
+        let store = LibraryStore::new(
+            Rc::new(RefCell::new(LpFsMemory::new())),
+            Rc::new(move || {
+                *counter.borrow_mut() += 1;
+                [*counter.borrow(); 16]
+            }),
+            Rc::new(|| "2026-09-06-1010".to_string()),
+        );
+        studio.attach_library(Rc::new(MemoryLibraryHost::new(
+            store.clone(),
+            Rc::new(|| 42.0),
+        )));
+        let home_action = |op: HomeOp| UiAction::from_op(ControllerId::new(HOME_NODE_ID), op);
+
+        block_on_ready(studio.dispatch(home_action(HomeOp::CreateProject {
+            template: crate::ProjectTemplate::Blank,
+            name: Some("  Porch sign ".to_string()),
+        })))
+        .expect_err("host test builds have no sim runtime to open into");
+        block_on_ready(studio.dispatch(home_action(HomeOp::CreateProject {
+            template: crate::ProjectTemplate::Blank,
+            name: Some("   ".to_string()),
+        })))
+        .expect_err("host test builds have no sim runtime to open into");
+
+        let mut slugs: Vec<String> = store
+            .list()
+            .expect("library lists")
+            .into_iter()
+            .map(|summary| summary.slug)
+            .collect();
+        slugs.sort();
+        assert_eq!(
+            slugs,
+            vec![
+                "2026-09-06-1010-porch-sign".to_string(),
+                "2026-09-06-1010-project".to_string(),
+            ],
+            "typed name slugged and dated; blank fell back to the template's label"
+        );
+    }
+
     #[test]
     fn home_ops_rename_duplicate_import_and_delete_library_packages() {
         use crate::app::library::{
@@ -5419,6 +5862,7 @@ mod tests {
         for _ in 0..2 {
             block_on_ready(studio.dispatch(home_action(HomeOp::CreateProject {
                 template: crate::ProjectTemplate::Blank,
+                name: None,
             })))
             .expect_err("host test builds have no sim runtime to open into");
         }

@@ -15,7 +15,7 @@ use crate::app::home::embedded_example::embedded_example;
 use crate::app::library::LibraryStore;
 
 /// Deploy files for a compiled-in example package
-/// ([`crate::UiExampleCard`] ids, e.g. `examples/fyeah-sign`).
+/// ([`crate::UiExampleCard`] ids, e.g. `catalog/fyeah-sign`).
 pub fn example_deploy_files(id: &str) -> Result<Vec<ProjectDeployFile>, String> {
     let example = embedded_example(id).ok_or_else(|| format!("unknown example {id:?}"))?;
     Ok(example
@@ -66,8 +66,8 @@ mod tests {
 
     #[test]
     fn unknown_example_id_is_an_error() {
-        let error = example_deploy_files("examples/unknown").unwrap_err();
-        assert!(error.contains("examples/unknown"), "{error}");
+        let error = example_deploy_files("catalog/unknown").unwrap_err();
+        assert!(error.contains("catalog/unknown"), "{error}");
     }
 
     #[test]

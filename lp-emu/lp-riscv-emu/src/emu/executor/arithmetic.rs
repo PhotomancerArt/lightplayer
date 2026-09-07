@@ -8,6 +8,7 @@ use lp_emu_core::Bus;
 use lp_riscv_inst::{Gpr, format::TypeR};
 
 /// Decode and execute R-type arithmetic instructions.
+#[inline(always)]
 pub(super) fn decode_execute_rtype<M: LoggingMode, B: Bus>(
     inst_word: u32,
     pc: u32,

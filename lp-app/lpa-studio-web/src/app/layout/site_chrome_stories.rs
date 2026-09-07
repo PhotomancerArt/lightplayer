@@ -173,6 +173,18 @@ pub(crate) fn control_relationship_faces() -> Element {
 }
 
 #[story(
+    label = "Device popover open — hardware lens, rename",
+    description = "The shared panel on its DEVICE tab for a hardware lens: the device's live title (the roster's, not an attach-time snapshot, so a rename shows in the segment at once), its run word and the lens client's rate — and, because a board has a name of its own to change where the sim does not, the same Rename section the device card's header menu holds, prefilled with the current title. Submitting dispatches SetName and closes the panel."
+)]
+pub(crate) fn control_device_popover_open_hardware() -> Element {
+    rsx! {
+        div { class: "tw:min-h-[320px] tw:p-4",
+            {control_row(700, hardware_control(), Some(control_content(0, 0, UiStatus::good("Ready"))), Some(ControlSegment::Device))}
+        }
+    }
+}
+
+#[story(
     label = "Device popover open — sim with board",
     description = "The DEVICE segment's popover: what is running. Kind glyph, name, run word, the \"simulating ESP32-C6\" stat line, and the \"this tab is the session\" hint that names what leaving actually ends. No switcher (R8-1 ruling) — there is nothing to switch to. This is the declared landing zone for the desktop device panel's facts when it retires (D13)."
 )]
@@ -475,6 +487,7 @@ fn sim_control(board: Option<&str>) -> UiChromeSessionControl {
     UiChromeSessionControl {
         kind: UiChromeSessionKind::Sim,
         key: "runtime-sim".to_string(),
+        device: None,
         name: "Sim".to_string(),
         board: board.map(str::to_string),
         status: UiChromeSessionStatus::Run,
@@ -489,6 +502,7 @@ fn hardware_control() -> UiChromeSessionControl {
     UiChromeSessionControl {
         kind: UiChromeSessionKind::Device,
         key: "device:dev000000daqf6dvvqz".to_string(),
+        device: Some(lpa_studio_core::DeviceId(1)),
         name: "XIAO ESP32-C6 · Sep 1".to_string(),
         board: None,
         status: UiChromeSessionStatus::Run,

@@ -1,7 +1,7 @@
 # quad-wire-oracle — the shader-oracle frame, split across four wires
 
 The hardware-walk DEVICE variant for the multi-endpoint output node: the same
-clock-free 64-LED render as `examples/shader-oracle`, but the output node's
+clock-free 64-LED render as `projects/test/shader-oracle`, but the output node's
 `channels` map splits that one control buffer across the DOM-Z-102's four
 data pins. Because the shader, fixture and pipeline options are byte-identical
 to the oracle project, each wire's `[OUT] dump` must equal the corresponding
