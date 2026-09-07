@@ -426,6 +426,33 @@ debug = 1
 opt-level = 3
 codegen-units = 4
 
+# Host-side emulator crates. The interpreter's hot loop needs opt-level 3: the
+# workspace "z" costs 2.3-2.5x on the ESP32-C6 machine (measured 2026-09-07,
+# planning speed-research; the same-window A/B in PR #566 reads 2.32x on the
+# compile harness). Nothing here is size-constrained — these are host binaries.
+#
+# None of these five crates is in a firmware graph, which is the whole reason
+# the override names crates rather than flipping a profile: `lp-riscv-inst`,
+# `lp-xt-inst` and `lp-emu-abi` ARE in one (lpvm-native's isa-rv32 / isa-xt,
+# and fw-emu's guest graph), and `release-esp32` inherits `release`, so an
+# override reaching them would grow flash. Verified with `cargo tree -p
+# fw-esp32c6 --target riscv32imac-unknown-none-elf` and the same for fw-esp32
+# on the xtensa target: neither graph contains any of these names.
+#
+# A profile, not a `[profile.release-emu]` build, because `lp-cli` and the
+# validation runner link these crates too and must get the fast code without
+# anyone remembering a flag. (D2, plan 2026-09-07-0827-emu-speed-ladder.)
+[profile.release.package.lp-emu-core]
+opt-level = 3
+[profile.release.package.lp-riscv-emu]
+opt-level = 3
+[profile.release.package.lp-emu-esp-common]
+opt-level = 3
+[profile.release.package.lp-emu-esp32c6]
+opt-level = 3
+[profile.release.package.lp-xt-emu]
+opt-level = 3
+
 [patch.crates-io]
 # esp-alloc 0.10.0 fork: the per-allocator region cap is 5, not 3. The classic
 # ESP32 registers four regions (arena, SRAM1 tail, and the two ROM boot-stack
