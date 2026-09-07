@@ -210,7 +210,11 @@ impl Emulator {
 
     /// Reload the innermost (caller) frame's owned registers from its stack save
     /// area (located from its callee's SP, `callee_sp`) and mark it resident.
-    fn reload_frame<T: Tracer + ?Sized>(&mut self, callee_sp: u32, tracer: &mut T) -> Result<(), Trap> {
+    fn reload_frame<T: Tracer + ?Sized>(
+        &mut self,
+        callee_sp: u32,
+        tracer: &mut T,
+    ) -> Result<(), Trap> {
         let idx = self.cpu.call_stack.len() - 1;
         let f = self.cpu.call_stack[idx];
         let nregs = 4 * f.inc;

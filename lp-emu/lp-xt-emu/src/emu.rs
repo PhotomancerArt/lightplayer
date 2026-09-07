@@ -485,14 +485,19 @@ impl Emulator {
         tracer: &mut dyn Tracer,
         handler: Option<&mut dyn SyscallHandler>,
     ) -> RunOutcome {
-        if tracer.discards_events() {
-            self.run_loop_with(&mut crate::trace::NoopTracer, handler)
-        } else {
-            self.run_loop_with(tracer, handler)
+        // The instruction-log level cannot change mid-run, so it picks a loop
+        // here instead of being re-tested on every instruction (the rv32 side
+        // chooses its loop the same way, `run_loops.rs`).
+        let log = self.log_level == LogLevel::Instructions;
+        match (tracer.discards_events(), log) {
+            (true, false) => self.run_loop_with::<false, _>(&mut crate::trace::NoopTracer, handler),
+            (true, true) => self.run_loop_with::<true, _>(&mut crate::trace::NoopTracer, handler),
+            (false, false) => self.run_loop_with::<false, _>(tracer, handler),
+            (false, true) => self.run_loop_with::<true, _>(tracer, handler),
         }
     }
 
-    fn run_loop_with<T: Tracer + ?Sized>(
+    fn run_loop_with<const LOG: bool, T: Tracer + ?Sized>(
         &mut self,
         tracer: &mut T,
         mut handler: Option<&mut dyn SyscallHandler>,
@@ -513,7 +518,7 @@ impl Emulator {
                 });
             }
             steps += 1;
-            match self.step(tracer) {
+            match self.step::<LOG, _>(tracer) {
                 Ok(Step::Normal) => {}
                 Ok(Step::Syscall { next_pc }) => match handler.as_mut() {
                     // No handler: model unhandled hardware behavior (a
@@ -545,7 +550,7 @@ impl Emulator {
     }
 
     /// Fetch, decode, and execute one instruction, updating `pc`.
-    fn step<T: Tracer + ?Sized>(&mut self, tracer: &mut T) -> Result<Step, Trap> {
+    fn step<const LOG: bool, T: Tracer + ?Sized>(&mut self, tracer: &mut T) -> Result<Step, Trap> {
         let pc = self.cpu.pc;
         let mut bytes = [0u8; 3];
         let got = self.mem.fetch(pc, &mut bytes)?;
@@ -556,7 +561,7 @@ impl Emulator {
             vaddr: 0,
         })?;
         // Log before executing so a trapping instruction is the log's last line.
-        if self.log_level == LogLevel::Instructions {
+        if LOG {
             if self.inst_log.len() >= lp_emu_core::config::INSTRUCTION_LOG_BUFFER_SIZE {
                 self.inst_log.pop_front();
             }
@@ -572,12 +577,11 @@ impl Emulator {
             len,
             inst: &inst,
         });
-        let flow = self.execute(&inst, pc, tracer)?;
+        // The cost class comes back from the executor arm that already knew
+        // it, instead of a second full walk of the decoded `Inst`.
+        let (flow, class) = self.execute_classed(&inst, pc, tracer)?;
         self.instruction_count += 1;
-        self.cycle_count += u64::from(
-            self.cycle_model
-                .cycles_for(crate::executor::inst_class(&inst, &flow)),
-        );
+        self.cycle_count += u64::from(self.cycle_model.cycles_for(class));
         match flow {
             Flow::Next => self.cpu.pc = pc.wrapping_add(len as u32),
             Flow::Jump(addr) => self.cpu.pc = addr,
