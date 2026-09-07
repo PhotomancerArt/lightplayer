@@ -23,11 +23,13 @@
 //! - **(b)** after `mret`, after `wfi`, and after any CSR write to
 //!   `mstatus` or `mie` — the three instructions that can turn delivery on;
 //! - **(c)** after a Store- or System-class instruction whose bus reports
-//!   [`Bus::take_sideband`] `== true`, which is how an MMIO store that
-//!   raises a peripheral interrupt gets noticed before the next
-//!   instruction. (Atomics are included: an AMO is a store.) On a RAM-only
-//!   `Bus` this is an inlined constant `false` the optimizer deletes;
-//!   `Memory` never overrides it.
+//!   [`Bus::take_sideband`] `== true`: the hart re-reads
+//!   [`Bus::pending_cpu_interrupt`] and polls, which is how an MMIO store
+//!   that raises a peripheral interrupt is delivered before the next
+//!   instruction retires — and how one that lowers a line stops being
+//!   pending in the same breath. (Atomics are included: an AMO is a store.)
+//!   On a RAM-only `Bus` both calls are inlined constants the optimizer
+//!   deletes; `Memory` overrides neither.
 //! - **(d)** whenever the owning machine calls
 //!   [`MachineHart::poll_interrupts`] at a scheduler event.
 //!
@@ -159,7 +161,9 @@ pub struct MachineHart<B: Bus> {
     wfi: bool,
     /// The highest-priority CPU interrupt the SoC's matrix currently
     /// asserts, if any. The matrix decides *which*; the hart is told one
-    /// number (see [`MachineHart::set_external`]).
+    /// number, either by the owning machine at a scheduler event
+    /// ([`MachineHart::set_external`]) or by the bus itself inside a slice
+    /// ([`Bus::pending_cpu_interrupt`], polling point (c)).
     external: Option<u8>,
     /// The C6 core performs misaligned data accesses in hardware. The flag
     /// is the hart's copy of that fact — P4 sets it, and mirrors it onto the
@@ -474,10 +478,25 @@ impl<B: Bus> MachineHart<B> {
 
         // (c) an MMIO store may have changed interrupt state.
         if matches!(result.class, InstClass::Store | InstClass::Atomic) && bus.take_sideband() {
-            self.poll_interrupts();
+            self.resample_external(bus);
         }
 
         StepOutcome::Continue
+    }
+
+    /// Answer a raised bus side-band: re-read the matrix and poll.
+    ///
+    /// The re-read is what makes polling point (c) able to change an outcome
+    /// at all. Before it, the hart's `external` was only ever written by the
+    /// owning machine at a scheduler event, so an MMIO store that raised a
+    /// line inside a slice could not be delivered until the next event —
+    /// which for a UART's TX-done or a software interrupt is "never".
+    /// [`Bus::pending_cpu_interrupt`] is the bus's answer, and a bus that
+    /// raises the side-band is required to implement it.
+    #[inline]
+    fn resample_external(&mut self, bus: &B) {
+        self.external = bus.pending_cpu_interrupt();
+        self.poll_interrupts();
     }
 
     /// `SYSTEM` (`0x73`): `ecall`, `ebreak`, `mret`, `wfi`, and the six CSR
@@ -591,7 +610,7 @@ impl<B: Bus> MachineHart<B> {
         }
         // (c) System-class: consume any side-band the bus is holding.
         if bus.take_sideband() {
-            self.poll_interrupts();
+            self.resample_external(bus);
         }
 
         StepOutcome::Continue

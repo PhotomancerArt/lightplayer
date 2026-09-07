@@ -42,6 +42,25 @@ pub trait Bus {
     fn take_sideband(&mut self) -> bool {
         false
     }
+
+    /// The CPU interrupt this bus's interrupt matrix asserts *right now* for
+    /// the hart that is executing, or `None` for "nothing asserted".
+    ///
+    /// This is the other half of [`Bus::take_sideband`], and the two are a
+    /// pair: when the side-band says an MMIO store may have changed interrupt
+    /// state, the privileged stepper **replaces** its pending-interrupt input
+    /// with this value and polls, so a store that raises a peripheral line is
+    /// delivered before the next instruction retires — and a store that
+    /// *lowers* one stops being pending in the same breath.
+    ///
+    /// Therefore: **a bus that ever returns `true` from `take_sideband` must
+    /// implement this method.** A bus that never raises the side-band never
+    /// has it called, which is why the default is a constant the optimizer
+    /// removes rather than an `unimplemented!()`.
+    #[inline(always)]
+    fn pending_cpu_interrupt(&self) -> Option<u8> {
+        None
+    }
 }
 
 /// A hardware watchpoint slot's configuration.
