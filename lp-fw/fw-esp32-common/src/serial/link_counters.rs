@@ -3,7 +3,7 @@
 //! zero evidence).
 //!
 //! Each drop site bumps one relaxed atomic; the heartbeat attaches a
-//! [`LinkCounters`] snapshot every interval. Bumps are bare atomics only, so
+//! `LinkCounters` snapshot every interval. Bumps are bare atomics only, so
 //! they are safe from any context — including the classic's io_task, which
 //! polls on an interrupt executor where logging and allocation are banned
 //! (ADR 2026-08-25 hard rules). Reporting happens thread-side in the server
@@ -47,7 +47,7 @@ pub static NOT_DRAINING_COUNT: AtomicU32 = AtomicU32::new(0);
 ///
 /// `u32::MAX` rather than `0`, because 0 ms since boot is a real instant and a
 /// latch there is exactly what a host-absent boot would produce. The wire
-/// spelling is `None` — [`current`] does the translation once, here, so no
+/// spelling is `None` — `current()` does the translation once, here, so no
 /// reader ever has to know the sentinel.
 pub const NEVER: u32 = u32::MAX;
 
