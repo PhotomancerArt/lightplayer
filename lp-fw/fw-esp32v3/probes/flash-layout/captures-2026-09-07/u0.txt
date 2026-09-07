@@ -1,0 +1,12 @@
+[INIT] fw-esp32v3 boot
+[INIT] chip=esp32 arch=xtensa heap=15072+112640+98304+15536=241552 (ROM PRO stack + dram_seg arena + SRAM1 tail + ROM APP stack)
+[INIT] heap regions: 0 0x3ffe0440+15072 (ROM PRO stack), 1 .bss+112640 (dram_seg arena), 2 0x3ffe8000+98304 (SRAM1 tail), 3 0x3ffe4350+15536 (ROM APP stack, after core bind)
+[INIT] main stack 45488 B
+[INIT] runtime started
+[INIT] I/O task spawned (uart0 921600 8N1, swi2 executor prio2, timg0t1 pacer 1ms)
+[INIT] flash filesystem mounted
+[INIT] RMT ISR on APP core
+[INIT] heap region 3 live: 0x3ffe4350+15536 (ROM APP stack)
+[INIT] JIT code region: sram0 ibus 0x40088000..0x40098000 (64 KiB, placed, rwtext_end=0x40083e00); SRAM1 heap tail dbus 0x3ffe8000+98304 B
+[INIT] fw-esp32 initialized, starting server loop... proto=20 commit=2e21b6226bcd dirty=false
+[INFO] fw_esp32_common::server_loop: [perf] frame=85 fps=16 elapsed=5023ms recv=0ms tick=57ms send=0ms total=57ms responses=0
