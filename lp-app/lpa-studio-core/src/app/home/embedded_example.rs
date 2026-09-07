@@ -264,7 +264,7 @@ mod tests {
         registered.sort();
         assert_eq!(registered, on_disk);
         assert!(
-            on_disk.len() >= 16,
+            on_disk.len() >= 15,
             "the catalog walk is vacuous: {on_disk:?}"
         );
     }

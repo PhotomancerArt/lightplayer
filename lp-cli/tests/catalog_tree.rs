@@ -232,7 +232,7 @@ fn entries() -> Result<Vec<Entry>> {
     }
     entries.sort_by(|a, b| (&a.bucket, &a.slug).cmp(&(&b.bucket, &b.slug)));
     assert!(
-        entries.len() >= 16,
+        entries.len() >= 15,
         "the catalog walk is vacuous: {} entries",
         entries.len()
     );

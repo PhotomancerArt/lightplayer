@@ -1,4 +1,4 @@
-//! The checked-in `catalog/patterns/fault-demo` must actually reach the never-black
+//! The checked-in `projects/test/fault-demo` must actually reach the never-black
 //! path, end to end, on the same engine the device and the browser sim run.
 //!
 //! The example's shader compiles and then traps on fuel every frame — the
@@ -29,10 +29,10 @@ fn workspace_dir() -> PathBuf {
 }
 
 fn load_fault_demo() -> LoadedProjectRuntime {
-    let fs = LpFsStd::new(workspace_dir().join("catalog/patterns/fault-demo"));
+    let fs = LpFsStd::new(workspace_dir().join("projects/test/fault-demo"));
     let services = EngineServices::new(TreePath::parse("/fault_demo.show").expect("root path"));
     let mut rt =
-        ProjectLoader::load_from_root(&fs, services).expect("load catalog/patterns/fault-demo");
+        ProjectLoader::load_from_root(&fs, services).expect("load projects/test/fault-demo");
     rt.engine_mut()
         .set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
             lp_shader::ShaderFrontend::LpsGlsl,

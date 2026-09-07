@@ -15,7 +15,7 @@ use support::{
 };
 
 /// `(id, name, files)` for every catalog entry whose manifest says
-/// `pattern`; at least the eight that adopted the shape, so an empty walk
+/// `pattern`; at least the seven that adopted the shape, so an empty walk
 /// cannot pass.
 fn catalog_patterns() -> Vec<(String, String, Files)> {
     let patterns: Vec<_> = embedded_examples()
@@ -30,8 +30,8 @@ fn catalog_patterns() -> Vec<(String, String, Files)> {
         })
         .collect();
     assert!(
-        patterns.len() >= 8,
-        "the catalog holds at least eight patterns: {:?}",
+        patterns.len() >= 7,
+        "the catalog holds at least seven patterns: {:?}",
         patterns.iter().map(|(id, _, _)| id).collect::<Vec<_>>()
     );
     patterns

@@ -11,7 +11,7 @@
 //! host server (and the browser sim) installs no recovery region at all, so
 //! `false` there is the honest answer rather than a failure.
 //!
-//! `catalog/patterns/fault-demo` is the engine-side subject for the same reason the
+//! `projects/test/fault-demo` is the engine-side subject for the same reason the
 //! heartbeat test uses it: a shader that compiles and then traps on fuel
 //! every frame, deterministic on every backend and incapable of crashing a
 //! board.
@@ -46,14 +46,16 @@ fn graphics() -> Arc<dyn LpGraphics> {
     Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND))
 }
 
-/// A server whose project store IS the checked-in `catalog/patterns/` directory.
-fn server_over_examples() -> (
+/// A server whose project store IS one checked-in project root (`projects/test/` for the fault-demo rig, `catalog/patterns/` for pulse).
+fn server_over(
+    root: &str,
+) -> (
     LpServer,
     Rc<RefCell<dyn lpc_shared::output::OutputProvider>>,
 ) {
     let output_provider: Rc<RefCell<dyn lpc_shared::output::OutputProvider>> =
         Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let base_fs = Box::new(LpFsStd::new(workspace_dir().join("catalog/patterns")));
+    let base_fs = Box::new(LpFsStd::new(workspace_dir().join(root)));
     let server = LpServer::new(
         output_provider.clone(),
         base_fs,
@@ -153,7 +155,7 @@ fn ledger_cleared(response: &lpc_wire::WireServerMessage) -> bool {
 /// condition and the verb the user pressed is on the device card.
 #[test]
 fn clearing_faults_re_arms_every_loaded_engine() {
-    let (mut server, output) = server_over_examples();
+    let (mut server, output) = server_over("projects/test");
     load(&mut server, output.clone(), "fault-demo");
 
     // Warm past the compile-window deferral: the first render only REQUESTS

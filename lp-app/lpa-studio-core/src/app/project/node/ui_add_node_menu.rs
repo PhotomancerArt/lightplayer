@@ -455,7 +455,7 @@ mod tests {
         assert!(menu.imports.is_empty());
         assert_eq!(menu.imports_empty, None);
         assert!(
-            menu.imports_builtin.len() >= 8,
+            menu.imports_builtin.len() >= 7,
             "every catalog pattern is offered: {:?}",
             menu.imports_builtin
                 .iter()

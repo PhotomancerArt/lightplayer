@@ -117,9 +117,15 @@ the docs' live figure), `plasma-duo` (one shader, two fixtures — its
 shader and clock stay byte-identical with `plasma`, test-pinned),
 `meteor` (a compute/render pair over a `node:` binding; the board-project
 generator vendors its export), `pulse` (the hardware-walk subject: if a
-strip is dark under it, that is the wiring), `fault-demo` (compiles,
-faults every frame on purpose — "a fault is never black"), and the three
-WLED ports below.
+strip is dark under it, that is the wiring), and the three WLED ports
+below.
+
+Not here on purpose: `projects/test/fault-demo`, the shader that faults
+every frame to demonstrate "a fault is never black". Its loop never ends
+and only the LPVM's fuel meter stops it; a GPU tier has no meter, so a
+gallery card previewing it hangs the GPU
+(`docs/defects/2026-09-06-gpu-tier-executes-unbounded-shaders.md`). It
+stays a rig for `lp-cli dev` and the engine/server tests.
 
 ## Ports from WLED
 
