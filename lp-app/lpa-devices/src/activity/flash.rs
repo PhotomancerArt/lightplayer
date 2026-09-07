@@ -11,7 +11,9 @@
 //! What the reducer DOES own is the part the old system got wrong: the
 //! **post-flash reconnect ladder**. A USB-Serial-JTAG chip (the C6)
 //! re-enumerates on the flasher's closing hard reset, so the port under the
-//! link dies exactly when the flash succeeds. The ladder is:
+//! link dies exactly when the flash succeeds. The ladder's first two rungs
+//! are shared; its third differs by bridge, keyed off `park_first` — the
+//! activity's existing native-USB signal (D3):
 //!
 //! 1. **Reopen**, on a retry cadence — session adoption in the platform
 //!    layer re-derives the handle for a re-enumerated port, so an open that
@@ -19,11 +21,27 @@
 //!    hello: a board that booted while the port was down never volunteers
 //!    one again.
 //! 2. Still quiet? [`ResetKind::Normal`] — the ordinary DTR/RTS reboot.
-//! 3. Still quiet? [`ResetKind::BothThenDrop`] — the CH34x sequence that
-//!    works where `Normal` does not (M1's bench-proven fallback).
-//! 4. Still quiet? **Fail honestly**, with the V3/CH340 guidance: on those
-//!    bridges a replug kills the browser's grant, and Reconnect is the way
-//!    back.
+//! 3. Native USB (`park_first`): still quiet? **Fail honestly** — no CH340
+//!    clause, and no [`ResetKind::BothThenDrop`]. That rung is the CH34x
+//!    whole-status sequence, and a USB-Serial-JTAG chip reads it as a ROM
+//!    download request rather than a reset — a flash that had just
+//!    succeeded then read "Waiting in ROM download mode" (bench,
+//!    2026-09-06). A native-USB replug keeps the browser's grant, so
+//!    Reconnect — not a physical replug — is the way back.
+//! 4. Classic (CH34x bridge): still quiet? [`ResetKind::BothThenDrop`] —
+//!    the sequence that works where `Normal` does not (M1's bench-proven
+//!    fallback).
+//! 5. Classic only, still quiet? **Fail honestly**, with the V3/CH340
+//!    guidance: on those bridges a replug kills the browser's grant, and
+//!    Reconnect is the way back.
+//!
+//! A `Saved PC:` boot line inside the detected chip's bootloader **code**
+//! (D4, [`crate::bootloader::bootloader_code_ranges`]) ends the ladder EARLY
+//! — on the line event itself, not a rung deadline — because a hung
+//! bootloader is not a silent one: no amount of reopening or resetting
+//! answers it short of a power cycle (bench, 2026-09-06: `Saved
+//! PC:0x4086ed7a`, busy in `rtc_clk_init` on the second-stage bootloader
+//! shipped inside the merged image).
 //!
 //! The hello is **fold evidence**, never a sticky gate: the reducer settles
 //! the moment the fold has heard one, whichever rung caused it. All waiting
@@ -76,10 +94,30 @@ use super::activity_cell::{
 /// How long a parked port gets to re-enumerate before esptool takes it.
 const PARK_SETTLE_MS: u64 = 2_500;
 
-/// The honest failure copy when every rung of the ladder stayed quiet.
+/// The honest failure copy when every rung of the classic (CH34x) ladder
+/// stayed quiet.
 const LADDER_EXHAUSTED: &str = "firmware was written, but the board never answered. If it is \
      on a CH340/V3 bridge, unplug it, plug it back in, and use Reconnect — a replug loses the \
      browser's permission for the port.";
+
+/// The honest failure copy when a native-USB (`park_first`) board's shorter
+/// ladder stayed quiet. No CH340 clause — that bridge never reaches this
+/// board — and no warning about losing the browser's grant: a native-USB
+/// replug keeps it (D3).
+const NATIVE_USB_LADDER_EXHAUSTED: &str = "firmware was written, but the board never answered. Unplug it, plug it back in, and use \
+     Reconnect.";
+
+/// The honest failure copy for D4's hung-bootloader signature: a `Saved PC`
+/// inside the chip's bootloader code during the ladder. Names the address —
+/// a bug report needs it — and points at Reconnect, same as every other
+/// ladder failure: only a power cycle clears the latched hang, and a
+/// native-USB replug already keeps the browser's grant.
+fn hung_bootloader_message(pc: u32) -> String {
+    format!(
+        "firmware was written, but the board's bootloader hung after the reset (Saved PC \
+         0x{pc:08x}). Unplug it, plug it back in, then use Reconnect."
+    )
+}
 
 /// Where the flash currently is.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -123,6 +161,12 @@ enum FlashPhase {
 /// The escalation order. Each rung's *name* is the reset it fires on entry;
 /// the first rung fires no reset — the flasher's own closing hard reset
 /// already rebooted the board.
+///
+/// `BothThenDrop` is classic-only (D3): a native-USB board (`park_first`)
+/// fails right after `NormalReset` instead of ever climbing to it — see
+/// [`FlashActivity::escalate`]. A hung-bootloader `Saved PC` (D4) can end
+/// the ladder from ANY rung, outside this order entirely — see
+/// [`FlashActivity::handle_link_event`].
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 enum ReconnectRung {
     Reopen,
@@ -454,6 +498,16 @@ impl FlashActivity {
     ) -> ActivityStep {
         let next = match rung {
             ReconnectRung::Reopen => ReconnectRung::NormalReset,
+            // Native USB (D3): BothThenDrop is the CH34x whole-status
+            // sequence, and a USB-Serial-JTAG chip reads it as a ROM
+            // download request rather than a reset — never send it. The
+            // ladder is one rung shorter here, and fails right from
+            // NormalReset instead of ever climbing to it.
+            ReconnectRung::NormalReset if self.park_first => {
+                return ActivityStep::done(ActivityOutcome::Failed {
+                    message: NATIVE_USB_LADDER_EXHAUSTED.to_string(),
+                });
+            }
             ReconnectRung::NormalReset => ReconnectRung::BothThenDrop,
             ReconnectRung::BothThenDrop => {
                 return ActivityStep::done(ActivityOutcome::Failed {
@@ -515,7 +569,9 @@ impl FlashActivity {
                 ActivityStep::nothing()
             }
             // Opens, boot lines, reset outcomes and errors are diagnosis the
-            // fold already recorded; the timers decide.
+            // fold already recorded; the timers decide — except a boot line
+            // during the ladder, which may itself be D4's hung-bootloader
+            // signature and end things early.
             LinkEvent::ResetOutcome { .. }
                 if matches!(self.phase, FlashPhase::Parking { .. }) && !self.winding_down =>
             {
@@ -531,10 +587,28 @@ impl FlashActivity {
                 }
                 ActivityStep::nothing()
             }
-            LinkEvent::Opened { .. }
-            | LinkEvent::Line(_)
-            | LinkEvent::ResetOutcome { .. }
-            | LinkEvent::Error(_) => ActivityStep::nothing(),
+            LinkEvent::Line(_) => {
+                // A hung bootloader is not a silent one: the fold has
+                // already counted the Saved PC by the time this fires (the
+                // line landed in the SAME event), so there is no reason to
+                // wait out a rung deadline that a latched hang will never
+                // answer (D4). `heard_flashed_firmware` guards against a
+                // false end on a board that already hello'd for real.
+                if !self.winding_down
+                    && matches!(self.phase, FlashPhase::Reconnecting { .. })
+                    && ctx.evidence.bootloader_hung_resets() > 0
+                    && !self.heard_flashed_firmware(ctx)
+                {
+                    let pc = ctx.evidence.last_bootloader_hung_pc().unwrap_or_default();
+                    return ActivityStep::done(ActivityOutcome::Failed {
+                        message: hung_bootloader_message(pc),
+                    });
+                }
+                ActivityStep::nothing()
+            }
+            LinkEvent::Opened { .. } | LinkEvent::ResetOutcome { .. } | LinkEvent::Error(_) => {
+                ActivityStep::nothing()
+            }
         }
     }
 }

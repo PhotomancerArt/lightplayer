@@ -1006,6 +1006,223 @@ fn a_silent_board_after_a_flash_climbs_the_ladder_then_fails_honestly() {
     );
 }
 
+/// D3: a native-USB board (`park_first`) never gets the CH34x rung — that
+/// sequence reads as a ROM download request on a USB-Serial-JTAG chip. The
+/// ladder is one rung shorter and fails right after `Normal`, with copy
+/// that carries no CH340 clause (a native-USB replug keeps the browser's
+/// grant).
+#[test]
+fn a_native_usb_board_after_a_flash_never_gets_the_ch34x_rung() {
+    let config = RosterConfig::default();
+    let mut replay = ready_device_with(config);
+    let device = first_device(&replay);
+    // Bypasses the Step vocabulary (it always sends `park_first: false`) to
+    // reach the native-USB path directly through the public `Action`.
+    replay.feed(
+        Millis(2_000),
+        Input::Action(Action::Flash {
+            device,
+            board_id: "seeed-xiao-esp32c6".to_string(),
+            build_id: "esp32c6-4mb".to_string(),
+            park_first: true,
+        }),
+    );
+    replay.step(
+        Millis(30_000),
+        Step::EffectEnded {
+            device: device.0,
+            ok: true,
+            message: None,
+            effect: None,
+            kind: None,
+        },
+    );
+    replay.step(Millis(30_100), Step::opened(1));
+
+    // Silence through both of the native-USB ladder's rungs.
+    let exhausted = 30_000 + 2 * config.flash_rung_ms + 1_000;
+    replay.advance_to(Millis(exhausted));
+
+    let commands: Vec<&lpa_devices::Command> = replay
+        .commands()
+        .iter()
+        .map(|(_, command)| command)
+        .collect();
+    let resets: Vec<&lpa_devices::ResetKind> = commands
+        .iter()
+        .filter_map(|command| match command {
+            lpa_devices::Command::Link {
+                command: lpa_devices::LinkCommand::RunReset(kind),
+                ..
+            } => Some(kind),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        resets,
+        vec![
+            &lpa_devices::ResetKind::UsbJtagDownload,
+            &lpa_devices::ResetKind::Normal
+        ],
+        "native USB parks first (unrelated to the ladder), then the ladder climbs to Normal \
+         and stops there — never BothThenDrop (D3): {resets:?}"
+    );
+
+    let view = replay.view();
+    assert!(!view.devices[0].status.eq(&DeviceStatus::Busy));
+    let outcome = view.devices[0].last_outcome.as_ref().expect("an outcome");
+    assert!(!outcome.ok);
+    assert!(
+        !outcome.summary.contains("CH340"),
+        "no CH34x clause for native USB: {outcome:?}"
+    );
+    assert!(
+        outcome.summary.contains("Reconnect"),
+        "still points at Reconnect: {outcome:?}"
+    );
+}
+
+/// D4: a `Saved PC:` boot line inside the C6 bootloader's code ranges ends
+/// the ladder EARLY — well before even the first rung's deadline, and never
+/// reaching `BothThenDrop` — because a hung bootloader will not answer a
+/// reopen or a reset. The failure copy names the address.
+#[test]
+fn a_hung_bootloader_saved_pc_ends_the_ladder_early_with_replug_guidance() {
+    let config = RosterConfig::default();
+    let mut replay = ready_device_with(config);
+    let device = first_device(&replay);
+    replay.step(
+        Millis(2_000),
+        Step::Flash {
+            device: device.0,
+            board: "dig-uno".to_string(),
+            build: "esp32-4mb".to_string(),
+        },
+    );
+    replay.step(
+        Millis(30_000),
+        Step::EffectEnded {
+            device: device.0,
+            ok: true,
+            message: None,
+            effect: None,
+            kind: None,
+        },
+    );
+    replay.step(Millis(30_100), Step::opened(1));
+
+    // The bench's boot-loop variant: the ROM watchdog fires while the
+    // bootloader is busy, over and over, then the Saved PC line.
+    replay.step(
+        Millis(30_200),
+        Step::Line {
+            link: 1,
+            text: "ESP-ROM:esp32c6-20220919".to_string(),
+        },
+    );
+    replay.step(
+        Millis(30_210),
+        Step::Line {
+            link: 1,
+            text: "rst:0x7 (TG0_WDT_HPSYS),boot:0x1f (SPI_FAST_FLASH_BOOT)".to_string(),
+        },
+    );
+    replay.step(
+        Millis(30_220),
+        Step::Line {
+            link: 1,
+            text: "Saved PC:0x4086ed7a".to_string(),
+        },
+    );
+
+    let view = replay.view();
+    assert!(
+        !view.devices[0].status.eq(&DeviceStatus::Busy),
+        "the ladder ended on the line, not a rung deadline: {view:?}"
+    );
+    let outcome = view.devices[0].last_outcome.as_ref().expect("an outcome");
+    assert!(!outcome.ok);
+    assert!(outcome.summary.contains("0x4086ed7a"), "{outcome:?}");
+    assert!(outcome.summary.contains("Reconnect"), "{outcome:?}");
+
+    let commands: Vec<&lpa_devices::Command> = replay
+        .commands()
+        .iter()
+        .map(|(_, command)| command)
+        .collect();
+    assert!(
+        !commands.iter().any(|command| matches!(
+            command,
+            lpa_devices::Command::Link {
+                command: lpa_devices::LinkCommand::RunReset(lpa_devices::ResetKind::BothThenDrop),
+                ..
+            }
+        )),
+        "ended before ever reaching BothThenDrop: {commands:?}"
+    );
+}
+
+/// The stub's own PC (`0x40800832`) is outside the bootloader's ranges: a
+/// live board answering through esptool's stub is not a hang, and the
+/// ladder keeps climbing.
+#[test]
+fn a_saved_pc_outside_the_bootloader_is_not_a_hang() {
+    let config = RosterConfig::default();
+    let mut replay = ready_device_with(config);
+    let device = first_device(&replay);
+    replay.step(
+        Millis(2_000),
+        Step::Flash {
+            device: device.0,
+            board: "dig-uno".to_string(),
+            build: "esp32-4mb".to_string(),
+        },
+    );
+    replay.step(
+        Millis(30_000),
+        Step::EffectEnded {
+            device: device.0,
+            ok: true,
+            message: None,
+            effect: None,
+            kind: None,
+        },
+    );
+    replay.step(Millis(30_100), Step::opened(1));
+
+    replay.step(
+        Millis(30_200),
+        Step::Line {
+            link: 1,
+            text: "ESP-ROM:esp32c6-20220919".to_string(),
+        },
+    );
+    replay.step(
+        Millis(30_220),
+        Step::Line {
+            link: 1,
+            text: "Saved PC:0x40800832".to_string(),
+        },
+    );
+
+    let view = replay.view();
+    assert!(
+        view.devices[0].status.eq(&DeviceStatus::Busy),
+        "the ladder is still running: {view:?}"
+    );
+    // `last_outcome` still only carries the WRITE effect's own success (set
+    // when it ended, before the ladder started climbing) — the ladder
+    // itself has not concluded, honestly or otherwise.
+    assert!(
+        view.devices[0]
+            .last_outcome
+            .as_ref()
+            .is_some_and(|outcome| outcome.ok),
+        "{:?}",
+        view.devices[0].last_outcome
+    );
+}
+
 /// The bench defect of 2026-09-04 (classic V3 on a CH340 bridge): the board
 /// was running LightPlayer BEFORE the flash, so its pre-flash hello sat in
 /// the observation window — a window a close does not clear, by the ADR's

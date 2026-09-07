@@ -22,6 +22,7 @@ use std::collections::VecDeque;
 use serde::{Deserialize, Serialize};
 
 use crate::activity::ActivityOutcome;
+use crate::bootloader::bootloader_code_ranges;
 use crate::event::{ActivityMarker, Event};
 use crate::identity::IdentityChain;
 use crate::journal::JournalNote;
@@ -261,6 +262,24 @@ impl Evidence {
     /// Chip identity read from a passive boot banner, when one named it.
     pub fn detected_chip(&self) -> Option<&str> {
         self.observations.detected_chip.as_deref()
+    }
+
+    /// How many `Saved PC:` boot lines in the CURRENT window landed inside
+    /// the detected chip's bootloader code ranges (D4,
+    /// [`crate::bootloader::bootloader_code_ranges`]) — the hung-bootloader
+    /// signature: the second-stage bootloader was running, not the app, when
+    /// the reset hit. Window-scoped like every other observation — a reopen
+    /// or a successful reset restarts the count, which is what the Flash
+    /// ladder wants (a fresh rung gets a fresh chance).
+    pub fn bootloader_hung_resets(&self) -> usize {
+        self.observations.bootloader_hung_resets
+    }
+
+    /// The last `Saved PC` that landed inside the bootloader's ranges, if
+    /// any this window. Kept for the failure copy — a bug report needs the
+    /// address, not just "it hung".
+    pub fn last_bootloader_hung_pc(&self) -> Option<u32> {
+        self.observations.last_bootloader_hung_pc
     }
 
     /// What the board last reported having loaded.
@@ -738,6 +757,14 @@ struct Observations {
     server_started: bool,
     detected_chip: Option<String>,
     frames_seen: usize,
+    /// Count of `Saved PC:` boot lines this window that landed inside the
+    /// detected chip's bootloader code ranges — D4's hung-bootloader
+    /// signature. See [`Evidence::bootloader_hung_resets`].
+    #[serde(default)]
+    bootloader_hung_resets: usize,
+    /// The last such PC, kept for the failure copy.
+    #[serde(default)]
+    last_bootloader_hung_pc: Option<u32>,
     hello: Option<HelloFacts>,
     /// When this window's hello was heard. The Flash ladder asks whether a
     /// hello is NEWER than its write effect's end: a close does not clear
@@ -836,6 +863,19 @@ impl Observations {
         if normalized.contains(SERVER_STARTED_SIGNATURE) {
             self.server_started = true;
         }
+        if let Some(pc) = saved_pc(&normalized) {
+            let in_bootloader = self
+                .detected_chip
+                .as_deref()
+                .map(bootloader_code_ranges)
+                .unwrap_or(&[])
+                .iter()
+                .any(|range| range.contains(&pc));
+            if in_bootloader {
+                self.bootloader_hung_resets += 1;
+                self.last_bootloader_hung_pc = Some(pc);
+            }
+        }
         self.lines.push_back(line.to_string());
         while self.lines.len() > RECENT_LINE_LIMIT {
             self.lines.pop_front();
@@ -912,6 +952,18 @@ fn chip_from_boot_line(normalized: &str) -> Option<String> {
         return Some("esp32".to_string());
     }
     None
+}
+
+/// Parse a `Saved PC:0x<hex>` boot line (already lowercased), the ROM's own
+/// report of where execution was when a reset landed. `None` if the line
+/// carries no such field, or the hex fails to parse.
+fn saved_pc(normalized: &str) -> Option<u32> {
+    let rest = normalized.split("saved pc:0x").nth(1)?;
+    let hex: String = rest
+        .chars()
+        .take_while(|character| character.is_ascii_hexdigit())
+        .collect();
+    u32::from_str_radix(&hex, 16).ok()
 }
 
 /// The [`TerminalKind`] a raw serial line earns, for the terminal panel.
@@ -1422,6 +1474,72 @@ mod tests {
             hello_line.text,
             "hello · proto 9 · dig-uno · fw-esp32c6 abc1234"
         );
+    }
+
+    /// D4: a `Saved PC` inside the detected chip's bootloader ranges counts
+    /// as a hang and is kept for the failure copy.
+    #[test]
+    fn a_saved_pc_inside_the_bootloader_range_counts_as_a_hang() {
+        let mut evidence = Evidence::default();
+        let mut identity = IdentityChain::default();
+        fold(&mut evidence, &mut identity, Millis(0), opened());
+        fold(
+            &mut evidence,
+            &mut identity,
+            Millis(10),
+            line("ESP-ROM:esp32c6-20220919"),
+        );
+        fold(
+            &mut evidence,
+            &mut identity,
+            Millis(20),
+            line("Saved PC:0x4086ed7a"),
+        );
+
+        assert_eq!(evidence.bootloader_hung_resets(), 1);
+        assert_eq!(evidence.last_bootloader_hung_pc(), Some(0x4086ed7a));
+    }
+
+    /// The stub's own PC (`0x40800832`) is not inside the bootloader's
+    /// ranges: a live board answering through the stub is not a hang.
+    #[test]
+    fn a_saved_pc_outside_the_bootloader_range_is_not_a_hang() {
+        let mut evidence = Evidence::default();
+        let mut identity = IdentityChain::default();
+        fold(&mut evidence, &mut identity, Millis(0), opened());
+        fold(
+            &mut evidence,
+            &mut identity,
+            Millis(10),
+            line("ESP-ROM:esp32c6-20220919"),
+        );
+        fold(
+            &mut evidence,
+            &mut identity,
+            Millis(20),
+            line("Saved PC:0x40800832"),
+        );
+
+        assert_eq!(evidence.bootloader_hung_resets(), 0);
+        assert_eq!(evidence.last_bootloader_hung_pc(), None);
+    }
+
+    /// No chip named yet (no `ESP-ROM:` line this window): the range table
+    /// has nothing to check against, so a `Saved PC` line never counts.
+    #[test]
+    fn a_saved_pc_with_no_detected_chip_never_counts() {
+        let mut evidence = Evidence::default();
+        let mut identity = IdentityChain::default();
+        fold(&mut evidence, &mut identity, Millis(0), opened());
+        fold(
+            &mut evidence,
+            &mut identity,
+            Millis(20),
+            line("Saved PC:0x4086ed7a"),
+        );
+
+        assert_eq!(evidence.detected_chip(), None);
+        assert_eq!(evidence.bootloader_hung_resets(), 0);
     }
 
     fn fold(

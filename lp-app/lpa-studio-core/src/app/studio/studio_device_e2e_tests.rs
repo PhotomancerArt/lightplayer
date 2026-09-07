@@ -1699,10 +1699,13 @@ fn a_mid_write_failure_lands_on_an_honest_face_with_retry_in_place() {
     assert!(!card.escapes.is_empty(), "always a way out");
 }
 
-/// Post-flash silence: the tool claims success but the board never answers.
-/// The ladder climbs (reopen → Normal → BothThenDrop, real reset commands
-/// through the real link) and then fails with the honest replug/Reconnect
-/// guidance.
+/// Post-flash silence on a native-USB (C6) board: the tool claims success
+/// but the board never answers. The ladder climbs (reopen → Normal, real
+/// reset commands through the real link) and then fails with the honest
+/// Reconnect guidance — no `BothThenDrop` and no CH340 clause, because that
+/// rung is classic-only (D3): on a USB-Serial-JTAG chip it reads as a ROM
+/// download request, and a native-USB replug keeps the browser's grant
+/// anyway.
 #[test]
 fn post_flash_silence_climbs_the_ladder_then_fails_with_honest_guidance() {
     let device = blank_board();
@@ -1722,7 +1725,7 @@ fn post_flash_silence_climbs_the_ladder_then_fails_with_honest_guidance() {
         device: target,
         board_id: choice.board_id,
         build_id: choice.build_id,
-        park_first: false,
+        park_first: true,
     });
     bench.run_until(&tasks, "the ladder to exhaust", |bench| {
         bench
@@ -1739,7 +1742,11 @@ fn post_flash_silence_climbs_the_ladder_then_fails_with_honest_guidance() {
     assert!(!outcome.ok);
     assert!(
         outcome.summary.contains("Reconnect"),
-        "the V3/CH340 guidance: {outcome:?}"
+        "the native-USB guidance: {outcome:?}"
+    );
+    assert!(
+        !outcome.summary.contains("CH340"),
+        "no CH34x clause for native USB (D3): {outcome:?}"
     );
     // The identity STILL joined off the preflight MAC — a failed reconnect
     // does not orphan the board.
