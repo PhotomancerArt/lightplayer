@@ -720,6 +720,16 @@ impl StudioController {
             log::debug!("device records not persisted: no library host");
             return;
         }
+        // The uids this batch WRITES. A merge (`reconcile_identities`) emits
+        // `DeleteRecord` for the discarded handle and `PersistRecord` for the
+        // surviving one in the SAME batch, and both resolve to the same
+        // registry key — because being the same device is what a merge
+        // discovered. Deleting on that would take away the row this very
+        // batch just wrote, and, worse, the device's sidecars with it: a
+        // remembered board whose port came back would silently lose its last
+        // picture, and a sim would lose the file that says it is one.
+        // (`docs/defects/2026-09-07-merge-delete-erased-the-merged-row.md`.)
+        let mut written: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         for record in writes.persist {
             let Some(row) = crate::app::devices::registry_row_from_record(&record) else {
                 // An anonymous board has no honest registry key; adopting one
@@ -730,6 +740,7 @@ impl StudioController {
             // the device is gone from the fold, and the row key is its
             // identity, not its handle.
             self.devices.remember_key(record.device, row.uid.clone());
+            written.insert(row.uid.clone());
             if let Err(error) = self
                 .run_catalog_op(CatalogOp::UpsertRegisteredDevice(Box::new(row)))
                 .await
@@ -745,6 +756,10 @@ impl StudioController {
             else {
                 continue;
             };
+            if written.contains(&uid) {
+                log::debug!("device {device:?} merged into the row it shares; {uid} stays");
+                continue;
+            }
             if let Err(error) = self
                 .run_catalog_op(CatalogOp::ForgetRegisteredDevice { uid })
                 .await

@@ -47,7 +47,8 @@ use crate::app::places::DeviceRegistry;
 use crate::{
     DeviceAction, DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceInput,
     DeviceTaskFuture, DeviceTransport, DeviceTransportFuture, DevicesOp, GrantedLink, LensLineTap,
-    LensTapEvent, ProjectController, ProjectOp, StudioController, UiAction,
+    LensTapEvent, ProjectController, ProjectOp, SimBacking, SimDeviceTransport, SimLinkSource,
+    SimRuntimeControl, SimSession, StudioController, UiAction,
 };
 
 /// Wall-clock ceiling on a `run_until`. Generous: the fake boots a real host
@@ -335,6 +336,69 @@ impl DeviceTransport for ScriptedTransport {
     }
 }
 
+/// A [`SimLinkSource`] over the SAME scripted fake the serial rows drive.
+///
+/// The test double for the browser worker, and the reason the whole model
+/// half of "a sim is a device" is `just test`-covered: what these rows prove
+/// is the record, the power verbs, the fold, the registry and the sidecar —
+/// none of which care whether the bytes came from a worker or a thread. The
+/// worker half (`lpa_link::device_link::browser_worker`) is wasm-only and is
+/// covered by the fw-browser smoke and the browser walk instead.
+struct ScriptedSimSource {
+    device: FakeEsp32Device,
+    /// How many times an effect restarted the runtime.
+    restarts: Rc<Cell<usize>>,
+    /// `/hardware.json` payloads the manifest-write effect handed the sim.
+    manifests: Rc<RefCell<Vec<String>>>,
+}
+
+struct ScriptedSimControl {
+    restarts: Rc<Cell<usize>>,
+    manifests: Rc<RefCell<Vec<String>>>,
+}
+
+impl SimRuntimeControl for ScriptedSimControl {
+    fn restart(&self) -> DeviceTransportFuture<Result<(), String>> {
+        self.restarts.set(self.restarts.get() + 1);
+        Box::pin(core::future::ready(Ok(())))
+    }
+
+    fn set_hardware_manifest(&self, manifest_json: String) {
+        self.manifests.borrow_mut().push(manifest_json);
+    }
+}
+
+impl SimLinkSource for ScriptedSimSource {
+    fn open(&self, session: &SimSession) -> Result<SimBacking, String> {
+        // The sim's OWN link info — `sim:<uid>`, no USB ids — over the fake's
+        // real byte wire, so the endpoint routing, the registry column and
+        // the framing are all the shipped ones.
+        let info = crate::sim_link_info(&session.uid, &session.display_name);
+        Ok(SimBacking {
+            link: GrantedLink {
+                link: Box::new(fake_device_link(info.clone(), &self.device)),
+                info,
+            },
+            control: Rc::new(ScriptedSimControl {
+                restarts: Rc::clone(&self.restarts),
+                manifests: Rc::clone(&self.manifests),
+            }),
+        })
+    }
+
+    fn client_io(
+        &self,
+        _session: &SimSession,
+        tap: Option<LensLineTap>,
+    ) -> Result<Box<dyn lpa_client::ClientIo>, String> {
+        let io = FakeDeviceIo::new(&self.device);
+        Ok(Box::new(match tap {
+            Some(tap) => io.with_tap(tap),
+            None => io,
+        }))
+    }
+}
+
 /// A `ClientIo` over the fake device's byte wire.
 ///
 /// The mirror of `lpa-link`'s browser `PortLineIo`: `M!<json>` lines out,
@@ -560,6 +624,10 @@ struct DeviceBench {
     manifest_writes: Rc<RefCell<Vec<String>>>,
     push_plan: Rc<Cell<PushPlan>>,
     remove_plan: Rc<Cell<RemovePlan>>,
+    /// The sim half of the transport, when this bench has one. Held so a
+    /// row can assert what is RUNNING as opposed to what is remembered.
+    sims: Option<Rc<SimDeviceTransport>>,
+    sim_restarts: Rc<Cell<usize>>,
     started: std::time::Instant,
 }
 
@@ -576,6 +644,40 @@ impl DeviceBench {
     /// A bench with no grants yet: the roster is empty until the user asks.
     fn ungranted(device: &FakeEsp32Device, endpoint: &str) -> (Self, TaskPool) {
         Self::build(device, endpoint, false, true)
+    }
+
+    /// A bench holding ONE created sim of `target`, powered OFF.
+    ///
+    /// The whole creation path runs: the identity is minted from
+    /// [`SIM_RANDOM`], the row and the sidecar are written in one catalog
+    /// op, and the library settle rehydrates them — so the record the rows
+    /// below act on is the one a picker would have made. The serial half is
+    /// installed too (with no grants), because a build with both halves is
+    /// what ships and the composite has to route.
+    ///
+    /// `device` must wear the identity [`sim_identity`] mints, or the hello
+    /// would describe a different board and the fold would (correctly)
+    /// refuse to adopt it into this record.
+    fn with_sim(device: &FakeEsp32Device, target: &str) -> (Self, TaskPool, String) {
+        let (mut bench, tasks) = Self::build(device, "unused-serial-port", false, false);
+        let restarts = Rc::new(Cell::new(0));
+        let sims = Rc::new(SimDeviceTransport::new(Rc::new(ScriptedSimSource {
+            device: device.clone(),
+            restarts: Rc::clone(&restarts),
+            manifests: Rc::new(RefCell::new(Vec::new())),
+        })));
+        bench.sims = Some(Rc::clone(&sims));
+        bench.sim_restarts = restarts;
+        bench.controller.set_device_sim_transport(sims);
+
+        let uid = drive(
+            bench
+                .controller
+                .create_sim_record(target, None, &SIM_RANDOM),
+        )
+        .expect("a sim is created");
+        bench.settle_library();
+        (bench, tasks, uid)
     }
 
     fn build(
@@ -685,6 +787,8 @@ impl DeviceBench {
             manifest_writes,
             push_plan,
             remove_plan,
+            sims: None,
+            sim_restarts: Rc::new(Cell::new(0)),
             started: std::time::Instant::now(),
         };
         (bench, tasks)
@@ -764,6 +868,22 @@ impl DeviceBench {
             .device_session()
             .and_then(crate::RuntimeSession::device_attachment)
             .map(|attachment| attachment.uid.clone())
+    }
+
+    /// Re-hydrate the library snapshot the way the actor does, so a row
+    /// this bench just wrote reaches the roster (and its sidecar reaches
+    /// the sim cache).
+    fn settle_library(&mut self) {
+        drive(self.controller.settle_library());
+    }
+
+    /// The sim sidecar bytes on disk, or `None` when there is none.
+    fn sim_sidecar(&self, uid: &str) -> Option<Vec<u8>> {
+        self.store
+            .fs_handle()
+            .borrow()
+            .read_file(crate::app::devices::sim_record::sim_record_path(uid).as_path())
+            .ok()
     }
 
     fn registry(&self) -> Vec<crate::app::places::RegisteredDevice> {
@@ -2466,6 +2586,30 @@ fn empty_light_player(uid: &str) -> FakeEsp32Device {
     )))
 }
 
+/// The six bytes every bench sim mints its identity from. Fixed on purpose:
+/// the fake has to wear the identity the mint produces, or the hello would
+/// describe a different board.
+const SIM_RANDOM: [u8; 6] = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66];
+
+/// The uid and base MAC [`SIM_RANDOM`] mints, as strings.
+fn sim_identity() -> (String, String) {
+    let (mac, uid) = crate::mint_sim_identity(&SIM_RANDOM);
+    (uid.0, mac.0)
+}
+
+/// A fake standing in for a sim's runtime: a LightPlayer wearing the
+/// identity Studio minted for it, exactly as `fw-browser` will once it boots
+/// with the identity option (P1).
+fn sim_light_player() -> FakeEsp32Device {
+    let (uid, base_mac) = sim_identity();
+    FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_identity(FakeDeviceIdentity::new(&uid, "Sim"))
+            .with_base_mac(&base_mac)
+            .with_heartbeat_interval(Duration::from_millis(20)),
+    )))
+}
+
 /// The example the picker's first entry resolves to.
 fn bundled_example() -> crate::PushSource {
     crate::PushSource::Example {
@@ -3271,5 +3415,323 @@ fn an_unrelated_disconnect_leaves_a_still_granted_port_alone() {
         bench.view().devices[0].state_label,
         "Attached — not listening",
         "a port the browser still grants us has not departed"
+    );
+}
+
+// ---------------------------------------------------------------------
+// P2: the sim as a roster device (the model half)
+// ---------------------------------------------------------------------
+
+/// The target every bench sim runs. A board id, so the row's `board_id`
+/// carries something the catalog can name.
+const SIM_TARGET: &str = "seeed/xiao-esp32-c6";
+
+/// Drive a created sim to its settled card: Power on, then wait out the
+/// identify the way `identified` does for a board.
+fn powered_on_sim() -> (DeviceBench, TaskPool, String, FakeEsp32Device) {
+    let device = sim_light_player();
+    let (mut bench, tasks, uid) = DeviceBench::with_sim(&device, SIM_TARGET);
+    let target = bench.view().devices[0].id;
+
+    bench.gesture(DeviceAction::Connect { device: target });
+    bench.run_until(&tasks, "the sim to identify", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+    });
+    (bench, tasks, uid, device)
+}
+
+/// AC3, the creation half: a minted sim is an ORDINARY remembered device.
+/// It loads detached from the registry like any board, keyed on the uid
+/// derived from its minted MAC, and the only thing marking it is the
+/// transport column plus a sidecar beside the row.
+#[test]
+fn a_created_sim_loads_as_a_detached_device_that_says_sim_in_one_column() {
+    let device = sim_light_player();
+    let (bench, _tasks, uid) = DeviceBench::with_sim(&device, SIM_TARGET);
+    let (minted_uid, minted_mac) = sim_identity();
+
+    assert_eq!(uid, minted_uid, "the uid is derived, never invented");
+
+    let rows = bench.registry();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].uid, uid);
+    assert_eq!(rows[0].transport, "sim");
+    assert_eq!(rows[0].board_id.as_deref(), Some(SIM_TARGET));
+    assert_eq!(
+        rows[0].hardware_id.as_deref(),
+        Some(format!("efuse:{minted_mac}").as_str()),
+        "the efuse form, so every identity join stays exactly as it is"
+    );
+
+    let sidecar = bench.sim_sidecar(&uid).expect("the sidecar was written");
+    let sidecar = crate::app::devices::sim_record::decode(&sidecar).expect("it decodes");
+    assert_eq!(sidecar.target, SIM_TARGET);
+    assert_eq!(sidecar.base_mac, minted_mac);
+
+    // The roster rehydrated it like any remembered board: one card, no
+    // port, and the target it will run already on it.
+    let view = bench.view();
+    assert_eq!(view.devices.len(), 1, "{view:?}");
+    assert!(view.pending.is_empty());
+    assert_eq!(view.devices[0].board_id.as_deref(), Some(SIM_TARGET));
+    assert!(
+        !bench
+            .sims
+            .as_ref()
+            .expect("a sim transport")
+            .is_powered(&uid),
+        "creating a sim does not start one"
+    );
+}
+
+/// AC3, the power half (PD8, Q15): `Connect` starts the runtime, the sweep
+/// attaches its link, and the hello's uid makes the fold adopt it into the
+/// record that was already there — ONE card, not a second one beside it.
+#[test]
+fn powering_a_sim_on_attaches_it_and_the_hello_adopts_the_record() {
+    let (bench, _tasks, uid, _device) = powered_on_sim();
+
+    let view = bench.view();
+    assert_eq!(view.devices.len(), 1, "adopted, not duplicated: {view:?}");
+    assert!(view.pending.is_empty(), "{view:?}");
+    let card = &view.devices[0];
+    assert_eq!(card.state_label, "Ready");
+    assert_eq!(
+        card.board_id.as_deref(),
+        Some(SIM_TARGET),
+        "the card wears the target it was created for"
+    );
+
+    let record = bench.controller.devices_for_test().roster().devices()[0].clone();
+    assert_eq!(
+        record.identity.uid.as_ref().map(|uid| uid.0.as_str()),
+        Some(uid.as_str()),
+        "the hello's uid is the derived one"
+    );
+    assert_eq!(
+        record.identity.endpoint.as_ref().map(|key| key.0.as_str()),
+        Some(format!("sim:{uid}").as_str())
+    );
+
+    let rows = bench.registry();
+    assert_eq!(rows.len(), 1, "still one row: {rows:?}");
+    assert_eq!(rows[0].uid, uid);
+    assert_eq!(rows[0].transport, "sim", "and it still says sim");
+    assert!(
+        bench
+            .sims
+            .as_ref()
+            .expect("a sim transport")
+            .is_powered(&uid)
+    );
+}
+
+/// Power off keeps the device. The runtime stops and the card leaves the
+/// grid — a stopped sim is not "attached but closed", because there is
+/// nothing left to be attached to — but the row and the sidecar survive, so
+/// it can be powered on again (Q5: the remembered line).
+#[test]
+fn powering_a_sim_off_keeps_the_record_and_its_sidecar() {
+    let (mut bench, tasks, uid, _device) = powered_on_sim();
+    let target = bench.view().devices[0].id;
+
+    bench.gesture(DeviceAction::Disconnect { device: target });
+    for _ in 0..40 {
+        bench.step(&tasks);
+    }
+
+    assert!(
+        !bench
+            .sims
+            .as_ref()
+            .expect("a sim transport")
+            .is_powered(&uid),
+        "the runtime stopped"
+    );
+    let rows = bench.registry();
+    assert_eq!(rows.len(), 1, "the device is remembered: {rows:?}");
+    assert_eq!(rows[0].uid, uid);
+    assert_eq!(
+        rows[0].transport, "sim",
+        "a powered-off sim must not be relabelled a serial board"
+    );
+    assert!(
+        bench.sim_sidecar(&uid).is_some(),
+        "and it is still a sim when it comes back"
+    );
+}
+
+/// Forget takes BOTH: the registry row and the sidecar. A sim whose sidecar
+/// outlived its row would come back as a device the moment its uid was
+/// re-derived.
+#[test]
+fn forgetting_a_sim_takes_its_record_and_its_sidecar() {
+    let (mut bench, tasks, uid, _device) = powered_on_sim();
+    let target = bench.view().devices[0].id;
+    assert!(bench.sim_sidecar(&uid).is_some());
+
+    bench.gesture(DeviceAction::Forget { device: target });
+    for _ in 0..40 {
+        bench.step(&tasks);
+    }
+
+    assert!(bench.view().devices.is_empty(), "the card is gone");
+    assert!(bench.registry().is_empty(), "and so is the row");
+    assert_eq!(bench.sim_sidecar(&uid), None, "and so is the sidecar");
+    assert!(
+        !bench
+            .sims
+            .as_ref()
+            .expect("a sim transport")
+            .is_powered(&uid),
+        "and the runtime stopped"
+    );
+}
+
+/// A flash on a sim runs the whole ladder and ends honestly: nothing was
+/// written, the effect says so in the terminal in its own words, and NO
+/// fact the effect did not learn reaches the record. A scripted flash that
+/// reported a probed MAC — the way the serial bench's does — would break
+/// the fold's "facts are stated when reported" rule from underneath, and
+/// would bind this device to an identity nothing ever read.
+#[test]
+fn flashing_a_sim_ends_with_the_scripted_summary_and_no_fake_facts() {
+    let (mut bench, tasks, _uid, _device) = powered_on_sim();
+    let target = bench.view().devices[0].id;
+    let (_, minted_mac) = sim_identity();
+    let choice = c6_board_choice();
+
+    bench.gesture(DeviceAction::Flash {
+        device: target,
+        board_id: choice.board_id.clone(),
+        build_id: choice.build_id.clone(),
+        park_first: false,
+        name: None,
+    });
+    bench.run_until(&tasks, "the sim flash to end", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+
+    let card = bench.view().devices[0].clone();
+    assert!(
+        card.last_outcome.as_ref().is_some_and(|outcome| outcome.ok),
+        "{card:?}"
+    );
+    assert!(
+        card.terminal
+            .iter()
+            .any(|line| line.text == "a sim runs the build it was started with"),
+        "the effect's own words reach the card: {card:?}"
+    );
+    // Twice, and honestly so: the flash ladder's two writing rungs are the
+    // firmware write and the board-manifest write, and on a sim each of
+    // them IS a restart — there is nothing else for either to do.
+    assert_eq!(
+        bench.sim_restarts.get(),
+        2,
+        "the runtime restarted, so the card sees a fresh boot"
+    );
+
+    // The evidence half: the ladder learned nothing a sim cannot report.
+    // The serial bench's scripted flash answers with SCRIPTED_PREFLIGHT_MAC
+    // here; a sim's answers with nothing, so the record still carries the
+    // MAC Studio minted for it.
+    let record = bench.controller.devices_for_test().roster().devices()[0].clone();
+    assert_eq!(
+        record.identity.mac.as_ref().map(|mac| mac.0.as_str()),
+        Some(minted_mac.as_str()),
+        "no preflight read an efuse, so no second identity was learned"
+    );
+    assert!(
+        !card
+            .terminal
+            .iter()
+            .any(|line| line.text.contains(SCRIPTED_PREFLIGHT_MAC)),
+        "{card:?}"
+    );
+}
+
+/// The card's live picture works on a sim: the same shared-link app
+/// conversation, the same `Passthrough` classification, the same feed. The
+/// point is that nothing in the feed lane knows what a sim is.
+#[test]
+fn a_running_sim_feeds_its_card_over_the_shared_link() {
+    let (mut bench, tasks, _uid, _device) = powered_on_sim();
+    bench.run_until(&tasks, "the sim to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let device = bench.view().devices[0].id;
+
+    bench.push_gesture(device, bundled_example());
+    bench.run_until(&tasks, "the push to finish", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+    assert!(
+        bench.view().devices[0]
+            .last_outcome
+            .as_ref()
+            .is_some_and(|outcome| outcome.ok),
+        "the REAL push conversation ran over the sim's channel: {:?}",
+        bench.view().devices[0]
+    );
+    bench.run_until(&tasks, "the running face", |bench| {
+        matches!(
+            bench.view().devices[0].loaded_project,
+            lpa_devices::view::LoadedProject::Running { .. }
+        )
+    });
+    bench.controller.set_device_feed_wanted(device, true);
+
+    let mut pulls = 0;
+    while feed_frame_revision(&bench, device).is_none() {
+        feed_tick(&mut bench, &tasks, 5.0);
+        pulls += 1;
+        assert!(pulls <= 2, "no frame after two pulls");
+        for _ in 0..40 {
+            bench.step(&tasks);
+        }
+    }
+    let frame = bench
+        .controller
+        .device_feeds()
+        .get(device)
+        .and_then(|feed| feed.frame())
+        .expect("a frame")
+        .clone();
+    assert!(
+        frame.display_layout.is_some(),
+        "the sim's own display layout came with the picture"
+    );
+    assert!(frame.extent.rows >= 1 && !frame.bytes.is_empty());
+
+    // And the fold never heard the conversation: frames are not evidence,
+    // whatever the transport underneath.
+    let journal: Vec<String> = bench
+        .controller
+        .devices_for_test()
+        .roster()
+        .journal()
+        .entries()
+        .map(|entry| format!("{entry:?}"))
+        .collect();
+    assert!(
+        !journal.iter().any(|line| line.contains("Passthrough")),
+        "{journal:#?}"
     );
 }
