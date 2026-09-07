@@ -5,7 +5,10 @@
 //!   cable pulled at 6 s, back in at 9 s, the port re-opened at 9.5 s. The
 //!   delivered log carries the hello and the first heartbeat before 6 s,
 //!   **nothing** between the detach and the re-open, and a full 64-byte
-//!   commit drained plus the 10 s heartbeat after it.
+//!   commit drained plus the 10 s heartbeat after it. P1b's stamps are all
+//!   still their "never" sentinel: through this whole unplug the firmware
+//!   noticed nothing, because its latch resets optimistically on a cable
+//!   loss and it had nothing to write in the 500 ms the port was closed.
 //! - **G3-1b** the same unplug with the port held closed to 13 s — long
 //!   enough for the firmware to have something to say while nobody is
 //!   reading. That is where the transition is actually visible: a 64-byte
@@ -15,7 +18,9 @@
 //!   P1 exists to measure, reproduced with no rig, because a control
 //!   channel can open a port at a chosen moment. Its twin, "host not
 //!   draining", is absent from the delivered log, exactly as the monitor's
-//!   own gating predicts (M6 discovery §4).
+//!   own gating predicts (M6 discovery §4) — and P1b's stamp **pair** is
+//!   there to say so on the firmware's own clock (DD38: the pair is the
+//!   claim, never the count).
 //! - **G3-2** determinism: G3-1 twice, byte-identical delivered logs and
 //!   identical cycle counts. The scripted form only — the socket form is
 //!   host time, and says so.
@@ -86,6 +91,28 @@ impl Run {
         self.events("USB_DEVICE IN packet of ", " bytes delivered")
     }
 
+    /// M6 P1b's vehicle, read straight out of the guest's memory: the
+    /// firmware's own account of its link, on its own clock.
+    /// `(host_not_draining_ms, host_draining_again_ms, not_draining_count)`,
+    /// each stamp `None` when it is still the "never" sentinel.
+    ///
+    /// Per DD38 the **pair** is the transition claim, not the count: with no
+    /// host at all the monitor latches once during boot and never recovers,
+    /// so `not_draining_count == 1` alone says nothing.
+    fn link_stamps(&mut self) -> (Option<u32>, Option<u32>, u32) {
+        let read = |m: &mut Esp32C6Machine, name: &str| {
+            m.peek_symbol(&format!("fw_esp32_common::serial::link_counters::{name}"))
+                .unwrap_or_else(|| panic!("the image carries {name}"))
+                .1
+        };
+        let never = |v: u32| (v != u32::MAX).then_some(v);
+        (
+            never(read(&mut self.m, "HOST_NOT_DRAINING_MS")),
+            never(read(&mut self.m, "HOST_DRAINING_AGAIN_MS")),
+            read(&mut self.m, "NOT_DRAINING_COUNT"),
+        )
+    }
+
     /// `(millisecond, bytes)` for every `wr_done` that committed a packet.
     fn commits(&self) -> Vec<(f64, usize)> {
         self.events("USB_DEVICE wr_done: ", " bytes committed")
@@ -143,7 +170,7 @@ fn run(script: &str, micros: u64) -> Option<Run> {
 #[test]
 #[ignore = "needs a built fw-esp32c6 ELF; `just test-emu-c6` runs it"]
 fn g3_1_the_cable_comes_out_at_six_seconds_and_the_link_comes_back_at_nine() {
-    let Some(r) = run(S7, 12_000_000) else {
+    let Some(mut r) = run(S7, 12_000_000) else {
         return;
     };
     assert!(
@@ -219,12 +246,24 @@ fn g3_1_the_cable_comes_out_at_six_seconds_and_the_link_comes_back_at_nine() {
     // Liveness: the guest kept running through the whole detached window.
     assert!(r.m.idle_skips() > 1_000, "idle skips {}", r.m.idle_skips());
     assert!(r.m.uart0().is_empty(), "the link is USB, not UART0");
+
+    // P1b's vehicle, and the finding it makes exact: through this whole
+    // unplug the firmware **noticed nothing**. The monitor resets its latch
+    // optimistically on a cable loss, so when SOF returns at 9 s it already
+    // believes it is connected — and it had nothing to write in the 500 ms
+    // before the port re-opened. No write, no timeout, no latch, no
+    // recovery, no stamp of either kind.
+    assert_eq!(
+        r.link_stamps(),
+        (None, None, 0),
+        "the firmware recorded a link transition the register trace says never happened"
+    );
 }
 
 #[test]
 #[ignore = "needs a built fw-esp32c6 ELF; `just test-emu-c6` runs it"]
 fn g3_1b_a_port_held_closed_after_the_replug_holds_a_packet_until_it_opens() {
-    let Some(r) = run(S7_WIDE, 16_000_000) else {
+    let Some(mut r) = run(S7_WIDE, 16_000_000) else {
         return;
     };
     assert!(
@@ -313,6 +352,33 @@ fn g3_1b_a_port_held_closed_after_the_replug_holds_a_packet_until_it_opens() {
         !delivered.contains("\"uptime_ms\":10000"),
         "the heartbeat written into a closed port arrived whole, which would mean the \
          committed endpoint took bytes it had no room for"
+    );
+
+    // And P1b's vehicle agrees, on the firmware's own clock. Per DD38 the
+    // PAIR is the claim — with no host at all the monitor latches once
+    // during boot and never recovers, so a count alone proves nothing. Here
+    // both stamps exist, in order, and each lands where the script put it.
+    let (not_draining, again, count) = r.link_stamps();
+    let not_draining = not_draining.expect("the firmware never latched `host not draining`");
+    let again = again.expect("the firmware never recorded a recovery");
+    assert_eq!(count, 1, "exactly one silence in this run");
+    assert!(
+        (9_000..13_000).contains(&not_draining),
+        "the latch is stamped at {not_draining} ms, outside the window the port was closed"
+    );
+    assert!(
+        again > 13_000 && again > not_draining,
+        "the recovery is stamped at {again} ms, not after the open at 13,000 ms"
+    );
+    // The recovery waits for the next 2 s probe rather than landing on the
+    // open: after the latch the firmware's only traffic is one `\n` every
+    // PROBE_INTERVAL, and it is that write succeeding that flips the latch
+    // back. So the recorded latency is the firmware's cadence, not the
+    // model's — which is exactly the sort of number the emulator may report
+    // and may not gate (PD9/D13, DD33).
+    eprintln!(
+        "G3-1b link stamps: not_draining {not_draining} ms, draining_again {again} ms \
+         (open at 13,000 ms; the gap is io_task's 2 s probe interval), count {count}"
     );
 }
 
