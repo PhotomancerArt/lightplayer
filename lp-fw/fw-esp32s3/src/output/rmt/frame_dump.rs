@@ -50,7 +50,7 @@ use lpc_hardware::HwEndpointId;
 const REPORT_EVERY_FRAMES: u32 = 60;
 
 /// Cap on the one-shot full dump, in LEDs. 64 LEDs is 192 bytes ≈ 400 hex
-/// characters — one long line, not a flood. `examples/shader-oracle` is sized
+/// characters — one long line, not a flood. `projects/test/shader-oracle` is sized
 /// to exactly this so its dump is the *whole* frame.
 pub const MAX_DUMP_LEDS: usize = 64;
 

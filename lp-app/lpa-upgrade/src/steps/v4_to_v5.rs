@@ -149,7 +149,7 @@ fn remove_authored_time_value(
 /// - a declarative `"default_bind": "bus:time"` on the slot
 ///   (`schemas/history/v4/fixtures/fyeah-sign/idle.json`), and
 /// - an explicit `bindings` entry sourcing `bus:time`
-///   (`examples/meteor/sim.json`, `examples/events/event_a.json` at
+///   (`catalog/patterns/meteor/sim.json`, `projects/test/events/event_a.json` at
 ///   `f9d6981dc^`).
 ///
 /// Both lose the `bus:time` reference: a `seconds` slot reads the scope's

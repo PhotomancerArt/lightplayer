@@ -1924,7 +1924,7 @@ mod tests {
     /// out as one body of one lit loop wearing a cell per drawn lamp.
     #[test]
     fn the_small_dome_panels_draw_as_closed_runs_of_cells() {
-        let example = lpa_studio_core::app::home::embedded_example("examples/small-dome")
+        let example = lpa_studio_core::app::home::embedded_example("catalog/small-dome")
             .expect("the small-dome example is embedded");
         let text = example
             .files

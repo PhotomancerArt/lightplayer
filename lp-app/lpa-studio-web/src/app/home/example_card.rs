@@ -15,11 +15,7 @@ use crate::app::home::project_opening_frame::OpeningProgressLine;
 pub(crate) fn embedded_example_cards() -> Vec<UiExampleCard> {
     lpa_studio_core::app::home::embedded_examples()
         .iter()
-        .map(|example| UiExampleCard {
-            id: example.id.to_string(),
-            name: example.name.to_string(),
-            kind: example.kind.to_string(),
-        })
+        .map(UiExampleCard::from_embedded)
         .collect()
 }
 
@@ -73,13 +69,13 @@ pub(crate) fn ExampleCard(
                 mode: ThumbMode::PosterFirst,
             }
             // The face is the art; the words are one shallow glass bar
-            // (card-overlay redesign). Title ONLY — no menu, no glyphs,
-            // no "Example" label (the shelf's section header already
-            // says it), and no authored blurb: examples are just shared
-            // projects, and their cards wear the same quiet title-only
-            // bar a project card does (landing round 2026-08-29). Any
-            // per-example words will come from project DATA when the
-            // content system lands, not a compiled-in table.
+            // (card-overlay redesign). Title ONLY — no menu, no glyphs, no
+            // "Example" label (the section heading already says it), and
+            // no blurb: the entry's `description` exists as project data
+            // (catalog content tree D7), but the G1 ruling (2026-09-06)
+            // kept it off the face — "the names and pictures speak for
+            // themselves" — so the card wears the same quiet title-only
+            // bar a project card does.
             CardGlassFooter {
                 title: card.name.clone(),
                 if opening {

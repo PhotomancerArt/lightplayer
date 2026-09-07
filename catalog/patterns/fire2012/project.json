@@ -1,0 +1,9 @@
+{
+  "format": 10,
+  "name": "Fire 2012",
+  "description": "Fire climbing the strip: white-hot at the base, tongues cooling as they rise, sparks thrown clear. Ported from WLED as a stateless shader.",
+  "kind": "pattern",
+  "exports": [
+    "effect"
+  ]
+}

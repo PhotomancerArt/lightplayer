@@ -464,28 +464,28 @@ mod tests {
     use std::path::Path;
 
     #[test]
-    fn relative_path_examples_basic() {
+    fn relative_path_test_basic() {
         assert_eq!(
-            derive_dir_label(Path::new("examples/basic"), Path::new("/any/cwd")),
-            "examples-basic"
+            derive_dir_label(Path::new("projects/test/basic"), Path::new("/any/cwd")),
+            "projects-test-basic"
         );
     }
 
     #[test]
     fn relative_path_with_dot_slash_prefix() {
         assert_eq!(
-            derive_dir_label(Path::new("./examples/basic"), Path::new("/any/cwd")),
-            "examples-basic"
+            derive_dir_label(Path::new("./projects/test/basic"), Path::new("/any/cwd")),
+            "projects-test-basic"
         );
     }
 
     #[test]
     fn absolute_under_cwd() {
         let tmp = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(tmp.path().join("examples/basic")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("projects/test/basic")).unwrap();
         let cwd = tmp.path().canonicalize().unwrap();
-        let input = cwd.join("examples/basic");
-        assert_eq!(derive_dir_label(&input, &cwd), "examples-basic");
+        let input = cwd.join("projects/test/basic");
+        assert_eq!(derive_dir_label(&input, &cwd), "projects-test-basic");
     }
 
     #[test]
@@ -518,8 +518,8 @@ mod tests {
     #[test]
     fn weird_chars_kebab_per_component() {
         assert_eq!(
-            derive_dir_label(Path::new("examples/foo bar.shader"), Path::new("/cwd"),),
-            "examples-foo-bar-shader"
+            derive_dir_label(Path::new("projects/foo bar.shader"), Path::new("/cwd"),),
+            "projects-foo-bar-shader"
         );
     }
 }

@@ -224,18 +224,18 @@ impl CodeRegion {
     /// # What the corpus says (measured, unchanged by the move)
     ///
     /// `tests/xt_classic_codemem_corpus.rs` compiles every shader in
-    /// `examples/` and `projects/` through the device's own pipeline, at the
+    /// `catalog/` and `projects/` through the device's own pipeline, at the
     /// device's own settings (Q32, fuel on):
     ///
     /// | figure | measured |
     /// |---|---|
-    /// | largest single shader (`examples/basic`) | 6,516 B |
+    /// | largest single shader (`projects/test/basic`) | 6,516 B |
     /// | mean over 27 shaders | 3,348 B |
     /// | worst real project (`fyeah-button`, 2 shaders) | 10,260 B |
     /// | + one keep-last-good recompile copy | **16,776 B** |
     ///
     /// Those are device figures, not a host estimate of them: the classic
-    /// reported 2,444 B for `examples/shader-oracle`, M3 measured 2,032 B for
+    /// reported 2,444 B for `projects/test/shader-oracle`, M3 measured 2,032 B for
     /// `quad-strips-v3`, and the 2026-08-04 dome walk measured 2,116 B for
     /// `zook-dome-1500` — the corpus test reproduces all of them exactly.
     /// 16,776 B is the peak model, because `shader_node.rs` holds the old

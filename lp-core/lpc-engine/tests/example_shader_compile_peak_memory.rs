@@ -83,16 +83,19 @@ enum ShaderKind {
     },
 }
 
-/// Every shader def in `examples/<example>`, composed through the nodes'
+/// Every shader def in `catalog/<example>`, composed through the nodes'
 /// own seams against the loaded project (for meteor's compute shader the
 /// header declares the `lp::fluid::Emitter` struct and the `meteors[4]`
 /// sentinel-map global from it).
 fn example_compiler_inputs(example: &str) -> Vec<CompilerInput> {
-    let root = workspace_dir().join("examples").join(example);
+    let root = workspace_dir().join("catalog").join(example);
+    // Labels (and the `LP_PROBE_CENSUS` matches) stay `<slug>/<file>`: the
+    // catalog bucket is a filing detail, not part of the shader's name.
+    let slug = example.rsplit('/').next().unwrap_or(example);
     let fs = LpFsStd::new(root.clone());
     let services = EngineServices::new(TreePath::parse("/probe.show").expect("root path"));
     let rt = ProjectLoader::load_from_root(&fs, services)
-        .unwrap_or_else(|e| panic!("load examples/{example}: {e}"));
+        .unwrap_or_else(|e| panic!("load {example}: {e}"));
     let (engine, registry) = rt.into_parts();
     let mut inputs = Vec::new();
     // A def's `source` path is relative to the def file's own directory
@@ -102,7 +105,7 @@ fn example_compiler_inputs(example: &str) -> Vec<CompilerInput> {
                        artifact: Option<&lpc_model::ArtifactSpec>|
      -> (String, String) {
         let Some(lpc_model::ArtifactSpec::Path(path)) = artifact else {
-            panic!("examples/{example}: shader source is not a path");
+            panic!("{example}: shader source is not a path");
         };
         let def_path = def_location.artifact.file_path().as_str();
         let def_dir = def_path
@@ -116,7 +119,7 @@ fn example_compiler_inputs(example: &str) -> Vec<CompilerInput> {
             format!("{def_dir}/{source_rel}")
         };
         let source = std::fs::read_to_string(root.join(&file))
-            .unwrap_or_else(|e| panic!("read examples/{example}/{file}: {e}"));
+            .unwrap_or_else(|e| panic!("read {example}/{file}: {e}"));
         (file, source)
     };
     for entry in registry.inventory().defs.values() {
@@ -126,9 +129,9 @@ fn example_compiler_inputs(example: &str) -> Vec<CompilerInput> {
         if let Some(def) = def.as_compute_shader() {
             let (file, source) = read_source(&entry.location, def.source.artifact_value());
             let (glsl, _header_lines) = compute_glsl_source(def, &source, engine.slot_shapes())
-                .unwrap_or_else(|e| panic!("examples/{example}/{file}: compose header: {e}"));
+                .unwrap_or_else(|e| panic!("{example}/{file}: compose header: {e}"));
             inputs.push(CompilerInput {
-                label: format!("{example}/{file}"),
+                label: format!("{slug}/{file}"),
                 glsl,
                 kind: ShaderKind::Compute,
             });
@@ -136,7 +139,7 @@ fn example_compiler_inputs(example: &str) -> Vec<CompilerInput> {
             let (file, glsl) = read_source(&entry.location, def.source.artifact_value());
             let (textures, space) = px_compile_inputs(def);
             inputs.push(CompilerInput {
-                label: format!("{example}/{file}"),
+                label: format!("{slug}/{file}"),
                 glsl,
                 kind: ShaderKind::Px { textures, space },
             });
@@ -146,18 +149,28 @@ fn example_compiler_inputs(example: &str) -> Vec<CompilerInput> {
     inputs
 }
 
+/// Every catalog entry as `<bucket>/<slug>`, sorted: the buckets under
+/// `catalog/` are walked one level deep for a `project.json`.
 fn example_dirs() -> Vec<String> {
-    let mut dirs: Vec<String> = std::fs::read_dir(workspace_dir().join("examples"))
-        .expect("examples dir")
-        .filter_map(|entry| {
-            let entry = entry.ok()?;
-            let path = entry.path();
-            path.join("project.json")
-                .is_file()
-                .then(|| entry.file_name().to_string_lossy().into_owned())
-        })
-        .collect();
+    let catalog = workspace_dir().join("catalog");
+    let mut dirs: Vec<String> =
+        std::fs::read_dir(&catalog)
+            .expect("catalog dir")
+            .filter_map(|bucket| bucket.ok().filter(|b| b.path().is_dir()))
+            .flat_map(|bucket| {
+                let bucket_name = bucket.file_name().to_string_lossy().into_owned();
+                std::fs::read_dir(bucket.path())
+                    .expect("catalog bucket dir")
+                    .filter_map(move |entry| {
+                        let entry = entry.ok()?;
+                        entry.path().join("project.json").is_file().then(|| {
+                            format!("{bucket_name}/{}", entry.file_name().to_string_lossy())
+                        })
+                    })
+            })
+            .collect();
     dirs.sort();
+    assert!(dirs.len() >= 15, "catalog walk found only {dirs:?}");
     dirs
 }
 
@@ -372,8 +385,8 @@ fn example_shader_compile_peaks() {
     );
 
     assert!(
-        rows.iter().any(|r| r.label == "meteor/sim.glsl"),
-        "meteor/sim.glsl (the flagship compute case) was not measured"
+        rows.iter().any(|r| r.label == "meteor/effect/sim.glsl"),
+        "meteor/effect/sim.glsl (the flagship compute case) was not measured"
     );
     assert!(
         rows.iter().any(|r| r.label == "zook-dome/shader.glsl"),

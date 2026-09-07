@@ -79,7 +79,7 @@ fn real_source_defs_sync_as_slot_roots() {
         ),
         LpValue::String(String::from("bus:visual.out")),
     );
-    // `examples/basic` authors no representation pin, so the wire carries the
+    // `projects/test/basic` authors no representation pin, so the wire carries the
     // option in its absent (Auto) state rather than a value. An option that
     // synced as a bare value would be a shape the client cannot round-trip.
     assert_option_none(select(
@@ -162,7 +162,7 @@ fn real_source_defs_sync_as_slot_roots() {
 
 fn read_basic_node_def(name: &str) -> NodeDef {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../examples/basic")
+        .join("../../projects/test/basic")
         .join(name);
     let text = std::fs::read_to_string(path).unwrap();
     let registry = SlotShapeRegistry::default();

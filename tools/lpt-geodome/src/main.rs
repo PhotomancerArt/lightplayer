@@ -660,7 +660,7 @@ fn main() {
         .join("../..")
         .canonicalize()
         .expect("workspace root");
-    let example = root.join("examples/small-dome");
+    let example = root.join("catalog/projects/small-dome");
     for (path, json) in [
         (
             example.join("dome/dome.map2d.json"),

@@ -5,7 +5,7 @@ use lpc_model::{LpFeature, NodeKind};
 use crate::{ControllerId, UiAction};
 
 use super::node_create_op::{NodeCreateOp, UiAttachTarget};
-use super::node_import_op::NodeImportOp;
+use super::node_import_op::{ImportSource, NodeImportOp};
 use super::node_naming::{node_kind_label, node_kind_slug};
 
 /// Picker order: the common authoring targets first, hardware-/niche kinds
@@ -49,9 +49,15 @@ pub struct UiAddNodeMenu {
     ///
     /// The picker's third source after kinds and the clipboard. Empty on
     /// every non-root menu — this round vendors into the project `nodes`
-    /// map only — in which case [`Self::imports_empty`] is `None` too and
-    /// the renderer draws no section at all.
+    /// map only — in which case [`Self::imports_builtin`] is empty and
+    /// [`Self::imports_empty`] is `None` too, and the renderer draws no
+    /// section at all.
     pub imports: Vec<UiAddNodeMenuEntry>,
+    /// The same source's second half (catalog content tree, P6): one row
+    /// per built-in catalog pattern export, vendored from the compiled-in
+    /// bytes. Rendered under [`IMPORT_BUILTIN_SECTION`] after the library's
+    /// rows when both exist, heading-less when the library offers none.
+    pub imports_builtin: Vec<UiAddNodeMenuEntry>,
     /// Why the import section has nothing to offer, when the section is
     /// still worth drawing: an empty library should say so (one disabled
     /// row) rather than leave a hole where a source used to be. `None`
@@ -60,16 +66,19 @@ pub struct UiAddNodeMenu {
     pub imports_empty: Option<String>,
 }
 
-/// One pattern export the local library can vendor into the open project.
+/// One pattern export the picker can vendor into the open project: a
+/// library package's, or a built-in catalog pattern's.
 ///
-/// Built from the same gallery snapshot the home cards come from (the
-/// studio controller pushes it in at each library settle) — the picker is
-/// a view, and a view never reaches for a store.
+/// Library rows are built from the same gallery snapshot the home cards
+/// come from (the studio controller pushes them in at each library settle)
+/// — the picker is a view, and a view never reaches for a store. Built-in
+/// rows come from the catalog registry, which is compiled in.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiImportablePattern {
-    /// Source package `prj_…` uid — what the import op resolves.
-    pub package_uid: String,
-    /// The package's slug: the row's package half.
+    /// Where the export is read from — what the import op resolves.
+    pub source: ImportSource,
+    /// The package's slug (library) or the entry's name (built-in): the
+    /// row's package half.
     pub package_label: String,
     /// The export folder's name inside that package (`effect`, `fire`).
     pub export: String,
@@ -79,12 +88,20 @@ pub struct UiImportablePattern {
     pub family: bool,
 }
 
-/// Copy for the empty import section.
-const NO_PATTERNS_COPY: &str = "No patterns in your library";
+/// Copy for the empty import section — reachable only when the catalog
+/// ships no patterns either, which a green tree never does.
+const NO_PATTERNS_COPY: &str = "No patterns to import";
+
+/// The heading over the library's rows when the built-in rows follow.
+pub const IMPORT_LIBRARY_SECTION: &str = "Your library";
+/// The heading over the catalog's rows when the library's rows precede.
+pub const IMPORT_BUILTIN_SECTION: &str = "Built-in";
 
 /// Attach the import source to a menu: one row per `patterns` entry,
 /// skipping `exclude_uid` (the open project cannot import from itself —
-/// its export folder is already right there).
+/// its export folder is already right there), then one row per built-in
+/// catalog pattern export (self-exclusion is a library matter; a catalog
+/// entry is never the open project).
 ///
 /// Only the project-root site gets the source this round; a playlist's
 /// picker keeps the two it had, with no empty-state row to explain a
@@ -96,17 +113,25 @@ pub fn set_import_source(
 ) {
     if !matches!(menu.attach, UiAttachTarget::ProjectRoot) {
         menu.imports = Vec::new();
+        menu.imports_builtin = Vec::new();
         menu.imports_empty = None;
         return;
     }
+    let excluded = |pattern: &&UiImportablePattern| match &pattern.source {
+        ImportSource::Library { package_uid } => exclude_uid == Some(package_uid.as_str()),
+        ImportSource::BuiltIn { .. } => false,
+    };
     menu.imports = patterns
         .iter()
-        .filter(|pattern| exclude_uid != Some(pattern.package_uid.as_str()))
+        .filter(|pattern| matches!(pattern.source, ImportSource::Library { .. }))
+        .filter(|pattern| !excluded(pattern))
         .map(|pattern| import_entry(pattern, &menu.attach))
         .collect();
-    menu.imports_empty = menu
-        .imports
-        .is_empty()
+    menu.imports_builtin = crate::app::home::home_view_builder::builtin_importable_patterns()
+        .iter()
+        .map(|pattern| import_entry(pattern, &menu.attach))
+        .collect();
+    menu.imports_empty = (menu.imports.is_empty() && menu.imports_builtin.is_empty())
         .then(|| NO_PATTERNS_COPY.to_string());
 }
 
@@ -118,6 +143,16 @@ fn import_entry(pattern: &UiImportablePattern, attach: &UiAttachTarget) -> UiAdd
     } else {
         pattern.package_label.clone()
     };
+    let summary = match &pattern.source {
+        ImportSource::Library { .. } => format!(
+            "Copy {}'s {} module into this project.",
+            pattern.package_label, pattern.export
+        ),
+        ImportSource::BuiltIn { .. } => format!(
+            "Copy the built-in {} pattern's {} module into this project.",
+            pattern.package_label, pattern.export
+        ),
+    };
     UiAddNodeMenuEntry {
         kind: NodeKind::Module,
         label,
@@ -125,16 +160,13 @@ fn import_entry(pattern: &UiImportablePattern, attach: &UiAttachTarget) -> UiAdd
         action: UiAction::from_op(
             ControllerId::new(crate::ProjectController::NODE_ID),
             NodeImportOp {
-                package_uid: pattern.package_uid.clone(),
+                source: pattern.source.clone(),
                 export: pattern.export.clone(),
                 attach: attach.clone(),
             },
         )
         .with_label(format!("Import {}", pattern.export))
-        .with_summary(format!(
-            "Copy {}'s {} module into this project.",
-            pattern.package_label, pattern.export
-        )),
+        .with_summary(summary),
         unavailable: None,
     }
 }
@@ -189,6 +221,7 @@ pub fn add_node_menu(attach: &UiAttachTarget) -> UiAddNodeMenu {
         // where the library snapshot is known — same "build then narrow"
         // shape as the device gate below.
         imports: Vec::new(),
+        imports_builtin: Vec::new(),
         imports_empty: None,
         entries: PICKER_KINDS
             .iter()
@@ -369,7 +402,9 @@ mod tests {
 
     fn pattern(uid: &str, label: &str, export: &str, family: bool) -> UiImportablePattern {
         UiImportablePattern {
-            package_uid: uid.to_string(),
+            source: ImportSource::Library {
+                package_uid: uid.to_string(),
+            },
             package_label: label.to_string(),
             export: export.to_string(),
             family,
@@ -400,19 +435,39 @@ mod tests {
             .action
             .op_as::<NodeImportOp>()
             .expect("import op");
-        assert_eq!(op.package_uid, "prj_b");
+        assert_eq!(
+            op.source,
+            ImportSource::Library {
+                package_uid: "prj_b".to_string()
+            }
+        );
         assert_eq!(op.export, "fire");
         assert_eq!(op.attach, UiAttachTarget::ProjectRoot);
         assert_eq!(menu.imports[1].kind, NodeKind::Module);
     }
 
-    /// An empty library says so on a row rather than dropping the source.
+    /// An empty library still fills the section with the catalog's own
+    /// patterns (P6), heading-less — never a hole where the source was.
     #[test]
-    fn an_empty_library_keeps_the_section_and_explains_itself() {
+    fn an_empty_library_still_offers_the_built_in_patterns() {
         let mut menu = add_node_menu(&UiAttachTarget::ProjectRoot);
         set_import_source(&mut menu, &[], None);
         assert!(menu.imports.is_empty());
-        assert_eq!(menu.imports_empty.as_deref(), Some(NO_PATTERNS_COPY));
+        assert_eq!(menu.imports_empty, None);
+        assert!(
+            menu.imports_builtin.len() >= 7,
+            "every catalog pattern is offered: {:?}",
+            menu.imports_builtin
+                .iter()
+                .map(|e| e.label.as_str())
+                .collect::<Vec<_>>()
+        );
+        let op = menu.imports_builtin[0]
+            .action
+            .op_as::<NodeImportOp>()
+            .expect("import op");
+        assert!(matches!(op.source, ImportSource::BuiltIn { .. }));
+        assert_eq!(op.export, "effect");
     }
 
     /// This round vendors into the project `nodes` map only, so a
