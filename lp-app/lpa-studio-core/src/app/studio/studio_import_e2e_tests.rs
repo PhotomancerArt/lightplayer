@@ -256,7 +256,12 @@ fn importing_a_pattern_vendors_the_folder_stamps_it_and_dedupes_a_second_copy() 
             entry
                 .action
                 .op_as::<crate::NodeImportOp>()
-                .is_some_and(|op| op.package_uid == source_uid)
+                .is_some_and(|op| {
+                    op.source
+                        == crate::ImportSource::Library {
+                            package_uid: source_uid.clone(),
+                        }
+                })
         }),
         "the open project is never offered as an import source"
     );
@@ -374,11 +379,11 @@ fn importing_a_pattern_vendors_the_folder_stamps_it_and_dedupes_a_second_copy() 
     );
 }
 
-/// A library with nothing to import says so on a disabled row rather than
-/// dropping the source — a hole where an affordance was is worse than a
-/// sentence explaining it.
+/// A library with nothing to import still offers the catalog's own
+/// patterns (P6): the built-in rows fill the section heading-less, so
+/// there is never a hole where the affordance was.
 #[test]
-fn an_empty_library_shows_the_import_sources_empty_state() {
+fn an_empty_library_still_offers_the_built_in_patterns() {
     let (mut actor, handle, store, _server) = studio_with_library!();
     let mut view = handle.view;
     let workbench_uid = install(&store, "Workbench", workbench_files());
@@ -396,11 +401,135 @@ fn an_empty_library_shows_the_import_sources_empty_state() {
         .expect("the picker is there");
     assert!(
         menu.imports.is_empty(),
-        "a library holding only general projects offers nothing to import"
+        "a library holding only general projects offers nothing of its own to import"
     );
+    assert_eq!(menu.imports_empty, None, "the built-ins fill the section");
+    let labels: Vec<&str> = menu
+        .imports_builtin
+        .iter()
+        .map(|entry| entry.label.as_str())
+        .collect();
     assert_eq!(
-        menu.imports_empty.as_deref(),
-        Some("No patterns in your library")
+        labels.len(),
+        8,
+        "every catalog pattern is offered, none excluded: {labels:?}"
+    );
+    assert!(
+        labels.contains(&"Comet") && labels.contains(&"Pulse"),
+        "rows read as the entries' names: {labels:?}"
+    );
+    assert!(
+        menu.imports_builtin.iter().all(|entry| entry
+            .action
+            .op_as::<crate::NodeImportOp>()
+            .is_some_and(|op| matches!(op.source, crate::ImportSource::BuiltIn { .. }))),
+        "built-in rows dispatch built-in imports"
+    );
+}
+
+/// Importing a built-in pattern vendors its `effect/` folder out of the
+/// compiled-in bytes: the copy lands under `modules/<slug>/` with the
+/// catalog's own provenance intact, attaches at the root, and its shader
+/// child mounts — the relative refs survived the move.
+#[test]
+fn importing_a_built_in_pattern_vendors_its_effect_folder_under_its_slug() {
+    let (mut actor, handle, store, server) = studio_with_library!();
+    let mut view = handle.view;
+    let workbench_uid = install(&store, "Workbench", workbench_files());
+
+    handle.tx.send(StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(HOME_NODE_ID),
+        HomeOp::OpenPackage {
+            key: workbench_uid.clone(),
+        },
+    )));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("open emits a snapshot");
+
+    let comet = project_editor(&snapshot)
+        .add_node_menu
+        .clone()
+        .expect("the picker is there")
+        .imports_builtin
+        .iter()
+        .find(|entry| entry.label == "Comet")
+        .expect("the comet row")
+        .action
+        .clone();
+
+    handle.tx.send(StudioCommand::Action(comet));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("import emits a snapshot");
+
+    // The folder landed whole, keyed by the SLUG (every catalog pattern
+    // exports `effect`, so the export name alone would collide).
+    assert!(runtime_has(&server, "modules/comet/module.json"));
+    assert!(runtime_has(&server, "modules/comet/shader.json"));
+    assert!(runtime_has(&server, "modules/comet/shader.glsl"));
+    let root = runtime_file(&server, "module.json");
+    assert!(
+        root.contains("modules/comet/module.json"),
+        "the vendored module is attached at the project root: {root}"
+    );
+
+    // The catalog's provenance rides along unchanged — MIT, the WLED port.
+    let vendored = runtime_file(&server, "modules/comet/module.json");
+    let def = lpc_model::NodeDef::from_json_str(&vendored).expect("vendored module parses");
+    let provenance = def
+        .as_module()
+        .expect("module def")
+        .provenance
+        .data
+        .clone()
+        .expect("the built-in export carries its own provenance");
+    assert_eq!(provenance.license.data.clone().unwrap().value(), "MIT");
+    let catalog_bytes = crate::app::home::embedded_example("catalog/comet")
+        .expect("comet is in the catalog")
+        .file("effect/module.json")
+        .expect("comet exports effect/module.json");
+    assert_eq!(
+        vendored.as_bytes(),
+        catalog_bytes,
+        "an export that states its provenance is copied byte for byte"
+    );
+
+    // Healthy: the module loaded and its shader child mounted.
+    let labels = child_labels(&snapshot);
+    assert!(
+        labels
+            .iter()
+            .any(|label| label.eq_ignore_ascii_case("comet")),
+        "the vendored module is a card on the canvas: {labels:?}"
+    );
+    let comet_card = project_editor(&snapshot).nodes[0]
+        .children
+        .iter()
+        .find(|child| child.label.eq_ignore_ascii_case("comet"))
+        .expect("comet card");
+    assert!(
+        comet_card
+            .children
+            .iter()
+            .any(|child| child.label.eq_ignore_ascii_case("shader")),
+        "the vendored module's shader loaded — the relative refs resolved: {:?}",
+        comet_card
+            .children
+            .iter()
+            .map(|child| child.label.clone())
+            .collect::<Vec<_>>()
+    );
+
+    // The save-pull put the same bytes in the library.
+    let library_files = store
+        .open(workbench_uid.parse().expect("uid"))
+        .expect("library reopens")
+        .read_all_files()
+        .expect("library files");
+    assert!(
+        library_files
+            .iter()
+            .any(|(path, bytes)| path == "modules/comet/module.json" && bytes == catalog_bytes),
+        "the vendored module reached the library byte-identical"
     );
 }
 

@@ -6252,25 +6252,29 @@ impl ProjectController {
             .await
     }
 
-    /// Vendor one library pattern export into this project
-    /// ([`crate::NodeImportOp`], module authoring unit, P5).
+    /// Vendor one pattern export — a library package's, or a built-in
+    /// catalog pattern's — into this project ([`crate::NodeImportOp`],
+    /// module authoring unit P5; catalog content tree P6).
     ///
-    /// Copy-to-own: the source package is read through a fresh read-only
+    /// Copy-to-own: a library source is read through a fresh read-only
     /// catalog snapshot (no lock, no write — the source project may well be
-    /// open in another tab), its `<export>/**` files are re-rooted under
-    /// `modules/<key>/`, and the whole folder goes out as ONE `CreateNode`
-    /// — the def plus every other file as assets. The folder's internal
-    /// refs are relative, so re-rooting preserves them untouched; nothing
-    /// here rewrites a path inside the copy.
+    /// open in another tab); a built-in source is the registry entry's
+    /// compiled-in bytes. Either way its `<export>/**` files are re-rooted
+    /// under `modules/<key>/`, and the whole folder goes out as ONE
+    /// `CreateNode` — the def plus every other file as assets. The folder's
+    /// internal refs are relative, so re-rooting preserves them untouched;
+    /// nothing here rewrites a path inside the copy.
     ///
-    /// `key` is the export's own name, deduped against the project's taken
-    /// names (`fire`, then `fire_2`) exactly as the create and paste paths
-    /// do — so importing the same pattern twice lands two independent
-    /// copies rather than a rejection.
+    /// `key` is the export's own name for a library import (`fire`) and the
+    /// catalog slug for a built-in one (`comet` — every catalog pattern
+    /// exports `effect`, so the export name alone would collide), deduped
+    /// against the project's taken names (`fire`, then `fire_2`) exactly as
+    /// the create and paste paths do — so importing the same pattern twice
+    /// lands two independent copies rather than a rejection.
     pub async fn import_pattern(
         &mut self,
         server: &mut StudioServerClient,
-        package_uid: &str,
+        source: &crate::ImportSource,
         export: &str,
     ) -> Result<ProjectEditRun, UiError> {
         use crate::app::project::node::import_pattern::{
@@ -6283,21 +6287,33 @@ impl ProjectController {
                 "an import names an export folder".to_string(),
             ));
         }
-        let host = {
-            let context = self.library.as_ref().ok_or_else(no_library_error)?;
-            std::rc::Rc::clone(&context.host)
-        };
-        // Read-only snapshot: the SOURCE is somebody else's project, and a
-        // read must never take its lock (the `package_export` precedent).
-        let snapshot = host.catalog_snapshot().await?;
-        let source_files = {
-            let store = crate::app::library::LibraryStore::read_only(snapshot);
-            let uid = store.resolve_key(package_uid).map_err(library_ui_error)?;
-            store
-                .open(uid)
-                .map_err(library_ui_error)?
-                .read_all_files()
-                .map_err(library_ui_error)?
+        let (source_files, key_stem): (Vec<(String, Vec<u8>)>, String) = match source {
+            crate::ImportSource::Library { package_uid } => {
+                let host = {
+                    let context = self.library.as_ref().ok_or_else(no_library_error)?;
+                    std::rc::Rc::clone(&context.host)
+                };
+                // Read-only snapshot: the SOURCE is somebody else's project,
+                // and a read must never take its lock (the `package_export`
+                // precedent).
+                let snapshot = host.catalog_snapshot().await?;
+                let store = crate::app::library::LibraryStore::read_only(snapshot);
+                let uid = store.resolve_key(package_uid).map_err(library_ui_error)?;
+                let files = store
+                    .open(uid)
+                    .map_err(library_ui_error)?
+                    .read_all_files()
+                    .map_err(library_ui_error)?;
+                (files, export.to_string())
+            }
+            crate::ImportSource::BuiltIn { example_id } => {
+                let example = crate::app::home::embedded_example(example_id).ok_or_else(|| {
+                    UiError::UnsupportedAction(format!(
+                        "{example_id} is not a built-in catalog entry"
+                    ))
+                })?;
+                (example.files(), example.slug().to_string())
+            }
         };
 
         let vendored = collect_export_folder(&source_files, export)?;
@@ -6310,7 +6326,7 @@ impl ProjectController {
             &self.slot_shapes,
         )?;
 
-        let key = self.unique_node_name_from(export);
+        let key = self.unique_node_name_from(&key_stem);
         let (site, parent, expected_name) =
             match self.resolve_attach_site(&UiAttachTarget::ProjectRoot, &key)? {
                 Some(resolved) => resolved,
