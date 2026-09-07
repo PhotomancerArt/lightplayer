@@ -341,19 +341,22 @@ impl ConfigurationDriver for SiliconDriver {
                 // `--monitor` goes before the ELF, where espflash wants it.
                 args.insert(args.len() - 1, "--monitor".into());
                 command.extend(args);
-                steps.push(PlanStep::new(
-                    "flash and monitor in the foreground, stop at the sentinel",
-                    command,
-                )
-                .with_env("PORT_DEV", port)
-                .with_note(
-                    "the script pre-checks lsof/pgrep, runs espflash in the foreground under \
+                steps.push(
+                    PlanStep::new(
+                        "flash and monitor in the foreground, stop at the sentinel",
+                        command,
+                    )
+                    .with_env("PORT_DEV", port)
+                    .with_note(
+                        "the script pre-checks lsof/pgrep, runs espflash in the foreground under \
                      script(1) with a SIG_DFL exec shim, SIGINTs that pid only, and post-checks \
                      that the port is free. Never run two of these at once.",
-                ));
+                    ),
+                );
             }
             Capture::FlashThenOpenAfter(open_after_secs) => {
-                let mut command: Vec<String> = vec![DESK_FLASH_NO_MONITOR_SCRIPT.into(), "--".into()];
+                let mut command: Vec<String> =
+                    vec![DESK_FLASH_NO_MONITOR_SCRIPT.into(), "--".into()];
                 command.extend(flash_args(elf));
                 steps.push(
                     PlanStep::new("flash in the foreground and RELEASE the port", command)
@@ -390,13 +393,15 @@ impl ConfigurationDriver for SiliconDriver {
                     open.push("--until".into());
                     open.push(marker.into());
                 }
-                steps.push(PlanStep::new("open a non-resetting reader", open).with_note(
-                    "os.open + raw termios with HUPCL cleared and DTR/RTS untouched: opening \
+                steps.push(
+                    PlanStep::new("open a non-resetting reader", open).with_note(
+                        "os.open + raw termios with HUPCL cleared and DTR/RTS untouched: opening \
                      the port is the only line-state change, which is the same one Studio and \
                      lp-cli make. espflash --monitor would assert the reset dance instead and \
                      the board would boot again with a reader already attached — the very \
                      thing this payload must not do.",
-                ));
+                    ),
+                );
             }
         }
 
@@ -924,7 +929,10 @@ mod tests {
             !commands.iter().any(|c| c.contains("--monitor")),
             "a monitor at the flash answers a different question: {commands:?}"
         );
-        assert!(rendered.contains(DESK_FLASH_NO_MONITOR_SCRIPT), "{rendered}");
+        assert!(
+            rendered.contains(DESK_FLASH_NO_MONITOR_SCRIPT),
+            "{rendered}"
+        );
         assert!(rendered.contains("--after hard-reset"), "{rendered}");
         assert!(rendered.contains("sleep 8"), "{rendered}");
         assert!(rendered.contains(TTY_CAPTURE_SCRIPT), "{rendered}");
