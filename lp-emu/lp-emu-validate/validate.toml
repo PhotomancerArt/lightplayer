@@ -42,6 +42,11 @@ description = "The M3 gate set for our own C6 machine: the compile harness (heap
 payloads = ["shader-compile-stress", "boot-idle"]
 
 [[set]]
+name = "emu-m4"
+description = "The M4 gate set: the flash-backed shipped image booting to the idle heartbeat (the `[FS]` mount pair and spike report §5.1's heap and stack figures, which M3 could not reach because it stopped on SPI1.cmd), and the project-upload walk (§5.3's load gate and compile outputs, replayed from the committed host script so the transcript is a function of guest time). Both run against the reference image `scripts/emu/build-reference-image.sh` builds, so `--image` is part of the recipe."
+payloads = ["boot-idle-flash", "upload-walk"]
+
+[[set]]
 name = "jit-math-perf"
 description = "The Q32 math kernel cycle-cost payload (Q12 ledger, cheapest test_* migration): mul/div/sin kernels and LUT access cost against the PMU cycle counter. Timing only — never a gate under esp-emu, which has no cycle model."
 payloads = ["jit-math-perf"]

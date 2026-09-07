@@ -551,6 +551,15 @@ impl ConfigurationDriver for LpEmuDriver {
             emu.push("--exit-on".into());
             emu.push(marker.into());
         }
+        // The host half of a walk. Deterministic by construction: each
+        // request waits for the answer to the one before it, and the wait is
+        // resolved in guest cycles, so the transcript does not move with the
+        // recorder's laptop. (On silicon this is the client on a port, which
+        // is why the file is a *payload* field and not a machine flag.)
+        if let Some(script) = req.payload.host_script {
+            emu.push("--uart0-script".into());
+            emu.push(script.into());
+        }
         if let Some(mac) = &req.identity.mac {
             emu.push("--efuse-mac".into());
             emu.push(mac.clone());
