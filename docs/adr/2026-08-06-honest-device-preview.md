@@ -130,8 +130,20 @@ re-squishes).
 
 ## Follow-ups
 
-- Persistent last-frame snapshots (offline cards across app runs) via
-  the M6 project-thumb `<img>` seam / LibraryStore metadata.
+- ~~Persistent last-frame snapshots (offline cards across app runs) via
+  the M6 project-thumb `<img>` seam / LibraryStore metadata~~ — **landed
+  2026-09-07**: not the `<img>` seam (web-only, session cache, no native
+  test) but a per-uid sidecar in the library store,
+  `/device-frames/<uid>.json` (`app/devices/device_frame_snapshot.rs`):
+  the composed frame + display layout + capture stamp, written from the
+  feed lane at most every 10 s per board (`CatalogOp::StoreDeviceFrame`,
+  no gallery re-hydration), deleted with the registry row on Forget, and
+  seeded into the board's `DeviceFrameFeed` at library settle so the
+  remembered tile draws it dimmed with "last frame · <age>" aged from the
+  STORED stamp. Posture: a cache, not user data — additive, own
+  `version`, and an unreadable or foreign-version sidecar reads as absent
+  rather than migrating (AGENTS.md persisted-format rule, the additive
+  way).
 - 3D fixture models inherit the ▶ tab slot when they land.
 - GPU render tier (PR #299 parked) relates via the D1/D2 display-policy
   tension recorded above.
