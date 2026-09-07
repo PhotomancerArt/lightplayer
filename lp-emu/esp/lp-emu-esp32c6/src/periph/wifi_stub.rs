@@ -62,7 +62,17 @@ pub const PWR_COARSE_NAMES: &[(u32, u32, &str)] = &[(0x0000, 0x5700, "pwr")];
 /// default image; the value is the one that lets the poll exit. **Starts
 /// empty and grows by evidence** — never add one without the `SPIN` line
 /// that asked for it.
-pub const OVERRIDES: &[(u32, u32, u32, &str)] = &[];
+pub const OVERRIDES: &[(u32, u32, u32, &str)] = &[
+    // `SPIN WIFI_MAC+0x418 mac = 0x00000003 x10000` from `txdc_cal_new`
+    // (`0x4221dd98` in the memfs reference image, 30.2 ms into the boot).
+    // The blob read-modify-writes `+0x418` to set bit 1, clear bit 0, set
+    // bit 0 (a start strobe), then loops `lw a4,0x418(s5); slli a3,a4,9;
+    // bgez a3` — until **bit 22** reads 1, the calibration's done flag —
+    // and afterwards tests bit 29 (`slli a3,a4,2; bltz`) as an error flag.
+    // Blob spins here; esp-emu evidently satisfies it; value chosen so the
+    // poll exits (bit 22 set, bit 29 left 0 so the no-error path is taken).
+    (0x0418, 1 << 22, 1 << 22, "txdc_cal_new done flag"),
+];
 
 /// The `WIFI_PWR` block's override list; same rule, same shape.
 pub const PWR_OVERRIDES: &[(u32, u32, u32, &str)] = &[];
