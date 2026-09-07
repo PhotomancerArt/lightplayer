@@ -21,7 +21,8 @@ pub use lamp_presets::{LampPreset, PowerProvenance, preset_for};
 pub use lamp_type::LampType;
 pub use mapping::{MappingConfig, PatchConfig, PathSpec};
 pub use mapping_points::{
-    MappingPoint, for_each_mapping_point, generate_mapping_points, mapping_point_count,
+    MappingCenters, MappingPoint, for_each_mapping_point, generate_mapping_points, mapping_centers,
+    mapping_point_count,
 };
 pub use power::FixturePower;
 pub use power_model::PowerModel;

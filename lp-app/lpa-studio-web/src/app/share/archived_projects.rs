@@ -16,7 +16,8 @@
 //! [`ArchivedProjectsSection`] is the live half — one `ListMyProjects` per
 //! signed-in account, split on [`ProjectMeta::archived`]. Everything visible
 //! is [`ArchivedProjectsList`], which takes pure props so the story renders
-//! it with no service and no session.
+//! it with no service and no session. [`archive_project`] is the verb going
+//! the other way, called by the chrome's ⋯ menu row.
 //!
 //! # What a row can say (P2 friction)
 //!
@@ -30,7 +31,7 @@
 
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{Archive, ChevronDown, ChevronRight};
-use lpc_cloud_api::request::{ListMyProjects, RestoreProject};
+use lpc_cloud_api::request::{ArchiveProject, ListMyProjects, RestoreProject};
 use lpc_cloud_api::{ProjectMeta, share_link};
 use lpc_history::PrefixedUid;
 
@@ -123,6 +124,40 @@ pub fn ArchivedProjectsSection() -> Element {
     rsx! {
         ArchivedProjectsList { projects, on_restore }
     }
+}
+
+/// Archive the project at `uid`, then run `on_archived` if the service
+/// agreed — the other half of this module's one reversible verb.
+///
+/// Lives here rather than in the chrome because the ⋯ menu's row is only
+/// the door: what "archive" means to the service — owner-only, reversible,
+/// nothing deleted — is this module's concern, the same way Restore is. A
+/// refusal is reported and nothing moves; the caller's `on_archived` is
+/// what navigates away.
+///
+/// (It arrived with the standalone Share pill's mount, which retired in
+/// relationship-control P5; the verb outlived its old neighbour.)
+pub fn archive_project(
+    uid: PrefixedUid,
+    toasts: Option<Toasts>,
+    on_archived: impl FnOnce() + 'static,
+) {
+    spawn(async move {
+        match lpa_cloud_client::call(&FetchCloudPort::new(), ArchiveProject { uid }).await {
+            Ok(_) => {
+                on_archived();
+                if let Some(mut toasts) = toasts {
+                    toasts.say("Archived — Restore from the Projects page.");
+                }
+            }
+            Err(error) => {
+                log::warn!("share: could not archive {uid}: {error}");
+                if let Some(mut toasts) = toasts {
+                    toasts.warn("Could not archive this project — it is still where it was.");
+                }
+            }
+        }
+    });
 }
 
 /// The drawer itself. Pure — the story mounts it with fixtures.

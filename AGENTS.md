@@ -32,6 +32,14 @@ LightPlayer is AGPL-3.0 **by choice**; relicensing stays possible only while
 provenance is provable. See
 `docs/adr/2026-07-29-license-provenance-discipline.md`.
 
+**One exception, and it is fenced: everything under `lp-emu/` is MIT**
+(`lp-emu/LICENSE-MIT`) — the emulator family is meant to be usable outside
+this product. `just lint-emu-fence` (in `check-lint`, so in CI) fails if a
+crate there stops declaring MIT or grows a dependency on a workspace crate
+outside `lp-emu/` that is not on the script's allowlist. When you add a
+dependency to an `lp-emu/` crate, the first question is whether it can be
+avoided. See `docs/adr/2026-09-06-lp-emu-home-and-mit-fence.md`.
+
 - **NEVER copy, transliterate, or line-by-line adapt GPL source** into this
   repo. QEMU, binutils/GDB, and GCC are **behavioral references only** — run
   them, read them to understand semantics, then implement independently from
@@ -227,6 +235,14 @@ runtime.
 | `lpa-devices`    | Device model: event fold, no IO, no UI | no (host + wasm) |
 | `fw-esp32c6`       | ESP32 firmware                         | yes (bare metal) |
 | `fw-emu`         | RISC-V emulator firmware (CI)          | yes (bare metal) |
+| `lp-riscv-emu`   | RV32 emulator (host) — in `lp-emu/`    | yes (+std feat)  |
+| `lp-xt-emu`      | Xtensa emulator (host) — in `lp-emu/`  | yes (+std feat)  |
+
+Every emulator crate lives under **`lp-emu/`** and is **MIT**, not AGPL —
+see the license rule above and `lp-emu/README.md`. The rv32/Xtensa
+*instruction models and ELF loaders* (`lp-riscv/lp-riscv-inst`,
+`lp-riscv-elf`, `lp-xt/lp-xt-inst`, `lp-xt-elf`) are compiler-backend
+crates and stay outside that fence, AGPL like the rest of the product.
 
 ## Native backends (`lpvm-native`)
 
@@ -619,6 +635,57 @@ Rules of the desk:
 - Passive listing can't tell an S3 from a C6 — Espressif native USB shares
   one PID (`303a:1001`). The USB serial number (the MAC) does distinguish
   individual boards; chip identity needs `--probe`.
+- With **two boards of the same chip** on the bus, "the C6" is not an answer
+  and `fwcheck port --chip esp32c6` cannot become one. Name the board by MAC
+  and resolve it passively: `scripts/emu/board-port.py <MAC>` (or `--list`).
+  The rest of `scripts/emu/` is the bench-instrument kit — a reader that
+  never touches DTR/RTS (`tty-capture.py`, because `stty` and `screen` assert
+  it on open and that is the reset sequence), and the UART-bridge flash and
+  wiring-check procedures. See `lp-emu/README.md`.
+
+## Hardware validation — one system, no board most days
+
+Claims about what firmware does on a chip go through **one** system:
+`lp-cli validate`, over `lp-emu/lp-emu-validate` and `lp-fw/fw-checks`. Read
+`lp-emu/lp-emu-validate/README.md` before adding to it; the short version is
+four nouns:
+
+- a **payload** is a module in `fw-checks` behind a cargo feature, runnable
+  many per image, printing a header, records and parseable log lines;
+- a **configuration** is the named thing it ran on —
+  `silicon:esp32c6`, `esp-emu:0.42.0`, `lp-emu:esp32c6:t1` —
+  carrying, per field class, what it is trusted for **and why**.
+  **Identity is the chip, not the board**: this is chip simulation, and a board
+  cannot be determined programmatically anyway. The board is sidecar metadata;
+- a **transcript** is the verbatim bytes, committed under
+  `lp-emu/transcripts/<chip>/<payload>/`, with a `.meta.json` sidecar for its
+  provenance;
+- a **replay** diffs two of them: a memory or pin difference fails, a timing
+  difference is reported with its ratio, and `--strict` refuses a claim the
+  configuration is not measured for.
+
+```bash
+cargo run -q -p lp-cli -- validate list
+cargo run -q -p lp-cli -- validate replay <transcript> --against esp-emu:0.42.0
+cargo run -q -p lp-cli -- validate run <set> --config <name> --port … --dry-run
+```
+
+**Never edit a transcript.** A mismatch is a regression or a re-capture, never
+a fixture to refresh — the rule
+`lp-emu/lp-xt-emu/tests/fp_silicon_replay.rs` established and the only reason
+a committed capture means anything.
+
+**Never trust an emulator's number outside what a transcript proves.** The
+2026-09-06 spike found esp-emu byte-equal to silicon on memory and 2.4x wrong
+on time *in the same run*, with the compile harness's own 5 ms slice budget
+passing under the emulator and failing on the board. That is why grading is
+per field class and why `--strict` exists.
+
+Hardware sessions are **batched**: one desk sitting per milestone records every
+transcript, then agents work for weeks with no board. An agent does not open
+the port (see below); it writes the protocol file and Yona runs it.
+
+`lp-cli fwcheck` remains the older single-check front door and still works.
 
 ## Validation Commands
 

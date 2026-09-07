@@ -53,7 +53,18 @@
 // the same feature xtensa-lx-rt itself builds with.
 #![cfg_attr(
     all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)),
-    feature(alloc_error_handler, asm_experimental_arch)
+    feature(alloc_error_handler)
+)]
+// The SRAM0 probe harness also needs the asm feature, for its explicit
+// `isync` barrier trial. A harness build cfg's the app path out (`fw_harness`
+// is set), so the two arms never both declare it — `#![feature]` twice is an
+// error, which is why this is one attribute with an `any`, not two.
+#![cfg_attr(
+    any(
+        all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)),
+        feature = "test_sram0_exec"
+    ),
+    feature(asm_experimental_arch)
 )]
 #![allow(
     unstable_features,
@@ -112,6 +123,8 @@ mod output;
 mod recovery;
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 mod serial;
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
+mod stack_probe;
 
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 use {
@@ -163,18 +176,47 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// M3-P2 may reasonably trade some of that stack for heap once it has
 /// measured what an on-device compile actually needs of each.
 ///
-/// ⚠️ This is no longer the whole heap. `dram2_seg`'s tail is now a **second**
-/// `esp_alloc` region worth 72 KiB — see [`add_sram1_heap_region`]. This
-/// constant sizes only the `dram_seg` arena, which is the one in zero-sum
-/// competition with `.stack`; the second region costs `.stack` nothing,
-/// which is exactly why it was worth reclaiming. Total heap is
-/// `HEAP_SIZE + 73,728`.
+/// ⚠️ **Measured 2026-09-05, and the trade above is off the table: there is no
+/// spare stack.** `stack_probe` paints the main stack at boot and the heartbeat
+/// reports the watermark. On the DOM-Z-102, booting and auto-loading the
+/// startup project reaches a high-water of **32,608 B of 35,536 B — 2,928 B of
+/// headroom**, reproducibly, to the byte, across boots. This constant has never
+/// been the cautious number the paragraphs above assume; 110 KB was already at
+/// or past the edge.
+///
+/// Applying the sizing rule (floor = `max(1.5 × high-water, high-water +
+/// 12 KiB)`, rounded up to 4 KiB) gives a floor of **49,152 B**, which is
+/// 13,616 B *more* stack than the image has. `.stack` is below the floor, so
+/// the rule leaves this constant alone rather than raising it: shrinking the
+/// arena by 13.6 KB would cost more than the margin buys on a chip whose
+/// binding constraint is heap residency, and the image has demonstrably been
+/// running at this margin. The right fix is to stop spending stack, not to
+/// re-cut the split — recorded as the follow-up it is.
+///
+/// What P5's ~12 KB of `.data` savings buys, therefore, is not arena: `.stack`
+/// takes the residual automatically, so those bytes land where the measurement
+/// says they are needed.
+///
+/// ⚠️ This is no longer the whole heap. There are **four** `esp_alloc` regions:
+/// this arena, the whole 98,304 B SRAM1 tail ([`add_sram1_heap_region`] — the
+/// JIT region lives in SRAM0 now), and the ROM's two boot stacks in SRAM1,
+/// 15,072 + 15,536 B
+/// ([`add_rom_pro_stack_region`], [`add_rom_app_stack_region`]). This constant
+/// sizes only the `dram_seg` arena, which is the one in zero-sum competition
+/// with `.stack`; the other three cost `.stack` nothing, which is exactly why
+/// they were worth reclaiming. Total heap is `HEAP_SIZE + 128,912`.
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 const HEAP_SIZE: usize = 110 * 1024;
 
 /// Bare hello build (`--no-default-features --features esp32`): M2-P1's
-/// skeleton, kept buildable as the minimal bring-up image.
-#[cfg(all(not(feature = "server"), not(feature = "radio_ram_probe")))]
+/// skeleton, kept buildable as the minimal bring-up image. Not a harness's:
+/// a `--no-default-features` harness build (`test_sram0_exec`) installs no
+/// heap, and an unused constant is a warning the clippy gate denies.
+#[cfg(all(
+    not(feature = "server"),
+    not(feature = "radio_ram_probe"),
+    not(fw_harness)
+))]
 const HEAP_SIZE: usize = 100 * 1024;
 
 /// Probe heap: the radio stack's own DRAM statics come out of the same 192 KB
@@ -401,6 +443,11 @@ fn reboot_now() {
 
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 fn esp32_memory_stats() -> Option<(u32, u32)> {
+    // Piggybacks on the heartbeat cadence: one scan of the main stack per
+    // second, a log line only when the mark grows. On this chip `.stack` is the
+    // residual of a 192 KB `dram_seg`, so its high-water mark is what sizes
+    // `HEAP_SIZE` — see `stack_probe`.
+    stack_probe::log_if_grown("heartbeat");
     let free = esp_alloc::HEAP.free();
     let used = esp_alloc::HEAP.used();
     let largest = recovery::panic_path::largest_free_block();
@@ -409,8 +456,8 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
         "[MEM] free={free} used={used} largest_free={largest} retry_saves={retry_saves}"
     );
     // The JIT code region is NOT part of the heap above — it is a separate
-    // fixed SRAM1 reservation, and its residency is the number that decides
-    // how much of it can be handed back. `peak` is the high-water mark of
+    // fixed SRAM0 reservation (memory no heap can use), and its residency is
+    // the number that decides how big it has to be. `peak` is the high-water mark of
     // concurrent residency since boot; `allocs`/`frees` diverging while the
     // board sits idle is a span leak, which must be read before any figure
     // here is used to justify a smaller region.
@@ -442,22 +489,34 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
 /// `.data`, `.bss` and `.stack`; esp-hal also declares `dram2_seg`
 /// (`0x3FFE_7E30`, 98,768 B), which no linker section targets — esp-idf uses
 /// the same span as heap. It could not join the heap here because the JIT
-/// code region sat in the middle of it. Now that the region is measured down
-/// to 24 KiB (32 KiB until the 2026-08-04 dome work), 72 KiB of it is free.
+/// code region sat in the middle of it: 24 KiB of it after the 2026-08-04
+/// shrink, leaving 72 KiB. Since 2026-09-05 the JIT code lives in SRAM0
+/// (which no heap can use — word-only bus, no D-bus view), and the WHOLE
+/// tail `0x3FFE_8000..0x4000_0000` — 96 KiB — is the allocator's.
 ///
 /// ⚠️ The boundary is **computed from the region**, never restated: the base
 /// and length come from [`CodeRegion::reclaimable_heap_span`], whose
-/// const-asserts pin it to abut `dbus_end()` exactly. That is deliberate.
-/// Before this, the rule lived as prose warnings in two files, and prose does
-/// not fail to compile when someone changes the region and forgets — which
-/// would hand the allocator and the JIT the same bytes, a corruption whose
-/// symptom is a shader overwriting the heap.
+/// const-asserts pin it (to the full tail under SRAM0 placement, to abut the
+/// region under the legacy SRAM1 placement). That is deliberate. Before this,
+/// the rule lived as prose warnings in two files, and prose does not fail to
+/// compile when someone changes the region and forgets — which would hand the
+/// allocator and the JIT the same bytes, a corruption whose symptom is a
+/// shader overwriting the heap.
 ///
 /// The span carries no ROM hazard. esp-hal's four ROM reservations
 /// (`reserved_rom_data_pro/app`, `reserved_rom_stack_pro/app`) all sit
 /// *below* `dram2_seg`, the last of them ending exactly at its origin — the
 /// ROM's stacks and data are in the middle of SRAM1, and `dram2_seg` is
 /// precisely the part above them.
+///
+/// Those reservations are no longer entirely off limits, though: the two ROM
+/// *stack* blocks (and the unnamed holes beside them, and the 464 B head of
+/// `dram2_seg` under the code region) are now heap too — see
+/// [`add_rom_pro_stack_region`] and [`add_rom_app_stack_region`], which bracket
+/// this one in registration order. Only the two ROM *data* blocks stay
+/// reserved. SRAM1's ownership is now: ROM data (2,160 B, theirs), everything
+/// else below the code region (30,608 B, region 0 and region 3), the code
+/// region (24 KiB, the JIT's), and this tail (73,728 B, region 2).
 ///
 /// # Safety
 /// The span is `'static` (a fixed hardware address), exclusively the
@@ -476,6 +535,152 @@ fn add_sram1_heap_region() -> usize {
     len as usize
 }
 
+/// The ROM's **PRO-CPU** boot stack, handed to the allocator as its FIRST
+/// region, and its size.
+///
+/// esp-hal reserves 32,304 B of SRAM1 for the ROM in four blocks and never
+/// hands any of them back; esp-idf gives the two *stack* blocks to its heap
+/// once the ROM is out of them, and so does this. The span
+/// ([`SRAM1_ROM_PRO_STACK_SPAN`]) is dead from the first Rust instruction:
+/// xtensa-lx-rt's reset sets `a1 = _stack_start`, which is in `dram_seg`, so
+/// nothing has run on the ROM's stack since before `main`. The two ROM *data*
+/// blocks are not in the span and stay reserved — ROM routines the image still
+/// calls (`esp_rom_spiflash_*`) read them.
+///
+/// **Registered first on purpose**, before `heap_allocator!` carves the arena.
+/// esp-alloc is first-fit across regions in registration order, so region 0 is
+/// where the boot-time residents land — the recovery instance, the runtime, the
+/// server's small objects. That is PR #516's residents-first packing, achieved
+/// by placement rather than by policy: 15 KB of long-lived small allocations
+/// that would otherwise be scattered through the arena instead fill a region
+/// nothing else wants, and the arena stays whole for the project.
+///
+/// # Safety
+/// The span is `'static` (a fixed hardware address), exclusively the
+/// allocator's (the ROM is out of it and no linker section targets it —
+/// esp-hal's reservation is precisely what keeps the linker away), and
+/// non-empty. The const-asserts in `codemem_esp32` pin it against the ROM data
+/// blocks either side.
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
+fn add_rom_pro_stack_region() -> usize {
+    let (base, len) = lpvm_native::codemem_esp32::SRAM1_ROM_PRO_STACK_SPAN;
+    unsafe {
+        esp_alloc::HEAP.add_region(esp_alloc::HeapRegion::new(
+            base as *mut u8,
+            len as usize,
+            esp_alloc::MemoryCapability::Internal.into(),
+        ));
+    }
+    len as usize
+}
+
+/// Size of the ROM APP-CPU stack region. Const so the boot banner can state
+/// the four-term heap total before the region itself is registered, hundreds of
+/// lines later.
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
+const ROM_APP_HEAP_BYTES: usize =
+    (lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT.sram1_claim_base()
+        - lpvm_native::codemem_esp32::SRAM1_ROM_APP_STACK_BASE) as usize;
+
+/// The ROM's **APP-CPU** boot stack, plus the unreserved hole beside it and the
+/// 464 B head of `dram2_seg` below the JIT region, and its size.
+///
+/// ⚠️ **Registration order is a correctness property here, not a preference.**
+/// Unlike the PRO stack, this span is live during boot: the APP core runs on it
+/// while it comes up through the ROM, until esp-hal's `start_core1_init`
+/// switches it to `APP_CORE_STACK`. This must therefore be called only after
+/// `start_app_core_isr` has returned — which it does after the bind, and also
+/// after a `false` result, because a core that never started never used its ROM
+/// stack either. It is consequently the LAST region: not for packing reasons,
+/// but because it is the only moment it is safe.
+///
+/// The end is computed, never restated: everything from
+/// [`SRAM1_ROM_APP_STACK_BASE`] up to the lowest SRAM1 address the JIT-or-heap
+/// span claims (`0x3FFE_8000` now that the JIT lives in SRAM0). This span and
+/// [`add_sram1_heap_region`]'s tail are contiguous in memory but are separate
+/// allocator regions, because they are registered at different moments.
+///
+/// # Safety
+/// As [`add_rom_pro_stack_region`], plus the ordering above.
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
+fn add_rom_app_stack_region() -> usize {
+    let base = lpvm_native::codemem_esp32::SRAM1_ROM_APP_STACK_BASE;
+    unsafe {
+        esp_alloc::HEAP.add_region(esp_alloc::HeapRegion::new(
+            base as *mut u8,
+            ROM_APP_HEAP_BYTES,
+            esp_alloc::MemoryCapability::Internal.into(),
+        ));
+    }
+    ROM_APP_HEAP_BYTES
+}
+
+/// Where the linker's `.rwtext` ends in SRAM0 — the byte after the last
+/// IRAM-resident function — decoded from esp-hal's `_rwtext_len` symbol.
+///
+/// ⚠️ `_rwtext_len` is not a length. esp-hal's `rwtext.x` assigns
+/// `_rwtext_len = . - ORIGIN(RWTEXT)` *inside* the `.rwtext.wifi` output
+/// section, and GNU ld resolves a symbol assigned inside an output section as
+/// section-relative: the symbol's ADDRESS comes out as `.rwtext.wifi`'s start
+/// (= `.rwtext`'s end) plus the length, i.e. `ORIGIN + 2·len`. Measured on the
+/// 2026-09-05 probe (`test_sram0_exec`, `[SRAM0] rwtext_end`): `readelf -S`
+/// put `.rwtext` at `0x4008_0400 + 0x10DC` and `nm` showed `_rwtext_len =
+/// 0x4008_25B8` = `0x4008_14DC + 0x10DC`. So `len = (sym − ORIGIN) / 2` and
+/// `end = ORIGIN + len`, which reproduced `readelf`'s end exactly.
+///
+/// The decode is guarded: the result must land inside SRAM0's IRAM. A future
+/// ld (or esp-hal) that makes the symbol a plain length would put the naive
+/// decode near `ORIGIN`, still inside the window — so the guard also refuses a
+/// decoded end at or below the lowest `.rwtext`-placed function this image
+/// has (`rwtext_floor`), which a plain-length symbol cannot satisfy by
+/// accident (its decode would be half the real length). Either way the boot
+/// stops with the raw value printed rather than installing a JIT region on
+/// top of live code.
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
+fn linker_rwtext_end() -> u32 {
+    unsafe extern "C" {
+        static _rwtext_len: u32;
+    }
+    const ORIGIN: u32 = lpvm_native::codemem_esp32::SRAM0_IRAM_BASE;
+    const END: u32 = lpvm_native::codemem_esp32::SRAM0_IRAM_END;
+    let sym = core::ptr::addr_of!(_rwtext_len) as u32;
+    let len = sym.wrapping_sub(ORIGIN) / 2;
+    let end = ORIGIN.wrapping_add(len);
+    // A function this image places in `.rwtext`: its address is a floor the
+    // decoded end must clear.
+    #[esp_hal::ram]
+    fn rwtext_floor() -> u32 {
+        core::hint::black_box(0)
+    }
+    let floor = rwtext_floor as *const () as u32 + rwtext_floor();
+    assert!(
+        end > floor && end <= END && floor >= ORIGIN,
+        "_rwtext_len={sym:#010x} does not decode as a section-relative .rwtext end \
+         (decoded end {end:#010x}, a .rwtext fn at {floor:#010x}, IRAM {ORIGIN:#010x}..{END:#010x}) \
+         — the linker-script symbol changed meaning; re-measure with test_sram0_exec"
+    );
+    end
+}
+
+/// The link-layout guard for the SRAM0 JIT placement: `.rwtext` (which the
+/// linker grows upward from the IRAM origin) must end at or below the code
+/// region's base, or the arena would hand out addresses that hold live
+/// interrupt handlers and flash routines. Refusing to boot is the right
+/// answer — this can only change when the image is relinked, and the number
+/// to fix is in the panic.
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
+fn assert_jit_region_clear_of_rwtext(region: &lpvm_native::codemem_esp32::CodeRegion) {
+    if let lpvm_native::codemem_esp32::Placement::Sram0 { ibus_base } = region.placement {
+        let rwtext_end = linker_rwtext_end();
+        assert!(
+            rwtext_end <= ibus_base,
+            ".rwtext ends at {rwtext_end:#010x}, above the SRAM0 JIT code region base \
+             {ibus_base:#010x} — the linked image has grown into the JIT region; \
+             move the region (codemem_esp32::CodeRegion::ESP32_DEFAULT) or shrink IRAM code"
+        );
+    }
+}
+
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 struct FirmwareApp {
     server: LpServer,
@@ -490,12 +695,39 @@ fn boot_firmware() -> FirmwareApp {
     // twice panics. This is the app path's ONLY call to `esp_hal::init`.
     let (sw_int, timg0, uart0, flash, rmt_peripheral, cpu_ctrl) = init_board();
     // The heap is main.rs's, not the board's — mirroring fw-esp32s3.
+    //
+    // Four regions, and the ORDER is load-bearing twice over. esp-alloc is
+    // first-fit in registration order, so the ROM PRO-CPU stack goes first and
+    // absorbs the boot residents (see `add_rom_pro_stack_region`); the ROM
+    // APP-CPU stack goes last because it is still in use until the APP core is
+    // bound, hundreds of lines below (see `add_rom_app_stack_region`).
+    let rom_pro_heap = add_rom_pro_stack_region();
     esp_alloc::heap_allocator!(size: HEAP_SIZE);
     let sram1_heap = add_sram1_heap_region();
+    // Paint the main stack before anything deep runs, so the heartbeat's
+    // high-water report measures the whole app (see `stack_probe`). After the
+    // arena is carved, because the paint runs on the main stack and the arena
+    // is `.bss`, not stack.
+    stack_probe::paint();
     esp_println::println!("[INIT] fw-esp32v3 boot");
     esp_println::println!(
-        "[INIT] chip=esp32 arch=xtensa heap={HEAP_SIZE}+{sram1_heap} (dram_seg arena + SRAM1 tail)"
+        "[INIT] chip=esp32 arch=xtensa heap={rom_pro_heap}+{HEAP_SIZE}+{sram1_heap}+{ROM_APP_HEAP_BYTES}={} \
+         (ROM PRO stack + dram_seg arena + SRAM1 tail + ROM APP stack)",
+        rom_pro_heap + HEAP_SIZE + sram1_heap + ROM_APP_HEAP_BYTES
     );
+    // The arena has no address here: `heap_allocator!` owns its `.bss` static
+    // and does not expose it. The three fixed spans are the ones whose bases
+    // are a correctness claim, so those are the ones printed.
+    esp_println::println!(
+        "[INIT] heap regions: 0 {:#010x}+{rom_pro_heap} (ROM PRO stack), 1 .bss+{HEAP_SIZE} (dram_seg arena), \
+         2 {:#010x}+{sram1_heap} (SRAM1 tail), 3 {:#010x}+{ROM_APP_HEAP_BYTES} (ROM APP stack, after core bind)",
+        lpvm_native::codemem_esp32::SRAM1_ROM_PRO_STACK_SPAN.0,
+        lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT
+            .reclaimable_heap_span()
+            .0,
+        lpvm_native::codemem_esp32::SRAM1_ROM_APP_STACK_BASE,
+    );
+    esp_println::println!("[INIT] main stack {} B", stack_probe::total_bytes());
 
     // Crash recovery first, before anything crash-prone runs: this both reports
     // the previous run and gives everything after it somewhere to leave a
@@ -611,6 +843,16 @@ fn boot_firmware() -> FirmwareApp {
             "[INIT] APP core unavailable; RMT ISR on PRO core (single-core semantics)"
         );
     }
+    // The last heap region, and this is the earliest safe moment for it: the
+    // APP core runs on the ROM's stack while it comes up, and `start_app_core_isr`
+    // returns only after the bind — or after deciding the core never started, in
+    // which case that stack was never used either. Both outcomes free the span,
+    // so this sits outside the branch rather than inside the success arm.
+    let rom_app_heap = add_rom_app_stack_region();
+    esp_println::println!(
+        "[INIT] heap region 3 live: {:#010x}+{rom_app_heap} (ROM APP stack)",
+        lpvm_native::codemem_esp32::SRAM1_ROM_APP_STACK_BASE
+    );
 
     // The RMT peripheral becomes the WS281x driver's, clock and all. The
     // classic's RMT runs off APB and esp-hal's `validate_clock` for this chip
@@ -665,40 +907,44 @@ fn boot_firmware() -> FirmwareApp {
     // Xtensa: GLSL pushed here compiles to Xtensa machine code ON THE BOARD.
     // On this chip the engine's link step takes the **placed** path
     // (`lpvm-native` feature `xt-placed-code`, see Cargo.toml): the heap has
-    // no I-bus view, so every module is linked at a span of the fixed SRAM1
-    // code region and installed through the word-mirrored D-bus walk. The
-    // install below hands the engine that region; without it the first
-    // compile fails with a clean "arena not installed" error.
+    // no I-bus view, so every module is linked at a span of the fixed code
+    // region and installed with aligned word stores. The install below hands
+    // the engine that region; without it the first compile fails with a clean
+    // "arena not installed" error.
     //
     // Region facts (measured; see `lpvm_native::codemem_esp32`):
-    //   * `CodeRegion::ESP32_DEFAULT` = D-bus `0x3FFE_8000..0x3FFF_0000`,
-    //     I-bus image `0x400B_0000..0x400B_8000` (32 KiB of JIT code), sized
-    //     from the measured shader corpus — 2.06× the keep-last-good peak.
-    //   * The linker cannot collide with it — esp-hal's `dram_seg` ends at
-    //     `0x3FFE_0000`.
-    //   * The rest of `dram2_seg` above it (`0x3FFF_0000..0x4000_0000`,
-    //     64 KiB) IS the heap's second region, added at boot by
-    //     `add_sram1_heap_region`. The two abut exactly and the split is
-    //     const-asserted in `codemem_esp32`, so this is a fact the compiler
-    //     keeps rather than a rule a reader has to remember.
+    //   * `CodeRegion::ESP32_DEFAULT` = **SRAM0** I-bus `0x4008_8000..
+    //     0x4009_8000` (64 KiB of JIT code), written at the I-bus address
+    //     itself — SRAM0 has no D-bus view and takes word accesses only, so
+    //     no heap could ever use it (measured 2026-09-05, `test_sram0_exec`).
+    //   * The linker CAN collide with it: `.vectors` + `.rwtext` share SRAM0,
+    //     growing upward from `0x4008_0000`. `.rwtext` ends at `0x4008_3DF0`
+    //     on this image today; the region starts 16,400 B above that, and
+    //     `assert_jit_region_clear_of_rwtext` below refuses to boot an image
+    //     whose `.rwtext` has grown into it — a link-layout bug, not a
+    //     runtime condition, so it panics with both numbers.
+    //   * The whole SRAM1 tail (`0x3FFE_8000..0x4000_0000`, 96 KiB) IS the
+    //     heap's second region, added at boot by `add_sram1_heap_region` from
+    //     `reclaimable_heap_span()`, which `codemem_esp32` const-asserts —
+    //     a fact the compiler keeps rather than a rule a reader remembers.
     //   * The frontend is passed, never defaulted: `LpGraphics::glsl_frontend`
     //     has no default impl so every host states its choice, and the device
     //     ships `LpsGlsl`.
-    lpvm_native::codemem_esp32::global::install(
-        lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT,
-    );
+    let jit_region = lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT;
+    assert_jit_region_clear_of_rwtext(&jit_region);
+    lpvm_native::codemem_esp32::global::install(jit_region);
+    let (heap_tail_base, heap_tail_len) = jit_region.reclaimable_heap_span();
     esp_println::println!(
-        "[INIT] JIT code region: ibus {:#010x}..{:#010x} ({} KiB, placed); \
-         SRAM1 heap tail dbus {:#010x}+{} B",
-        lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT.ibus_base(),
-        lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT.ibus_end(),
-        lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT.len_bytes / 1024,
-        lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT
-            .reclaimable_heap_span()
-            .0,
-        lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT
-            .reclaimable_heap_span()
-            .1,
+        "[INIT] JIT code region: {} ibus {:#010x}..{:#010x} ({} KiB, placed, rwtext_end={:#010x}); \
+         SRAM1 heap tail dbus {heap_tail_base:#010x}+{heap_tail_len} B",
+        match jit_region.placement {
+            lpvm_native::codemem_esp32::Placement::Sram0 { .. } => "sram0",
+            lpvm_native::codemem_esp32::Placement::Sram1Mirrored { .. } => "sram1-mirrored",
+        },
+        jit_region.ibus_base(),
+        jit_region.ibus_end(),
+        jit_region.len_bytes / 1024,
+        linker_rwtext_end(),
     );
     let graphics: Arc<dyn LpGraphics> =
         Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
@@ -876,7 +1122,9 @@ fn main() -> ! {
     .with_rx(peripherals.GPIO3);
 
     #[cfg(feature = "test_xt_fp_conformance")]
-    tests::xt_fp_conformance::run_all()
+    tests::xt_fp_conformance::run_all();
+    #[cfg(feature = "test_sram0_exec")]
+    tests::sram0_exec::run()
 }
 
 /// Boot-to-hello entrypoint: the M2-P1 skeleton (bare build) and the M2-P3

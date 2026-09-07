@@ -8,4 +8,4 @@ license = "AGPL-3.0-or-later"
 description = "Integer-only no_std Rust fixture programs for lp-xt-emu (built with the esp toolchain)."
 
 [dependencies]
-lp-xt-emu-guest = { path = "../../lp-xt-emu-guest" }
+lp-xt-emu-guest = { path = "../../../lp-emu/lp-xt-emu-guest" }

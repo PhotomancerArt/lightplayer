@@ -289,7 +289,7 @@ three different classes.** `silent-black-under-node-quarantine` (this one,
 same underlying mechanism as `classic-rmt-open-fault` (`misattributed-
 symptom`, 2026-08-01), `boot-compile-oom-crash-loop` (`silent-drop`,
 2026-08-07), and `shader-jit-compile-transient-starves-classic-heap`
-(2026-08-29, still open) — in every one, an OOM at a compile safe point read
+(2026-08-29, closed 2026-09-06 by a silicon bracket) — in every one, an OOM at a compile safe point read
 as something else entirely (an RMT fault, a vanished board, a heap-starved
 device, a healthy card) because nothing between the recovery ledger and the
 eyes looking at the result carried a typed "fault" signal. They are classed
@@ -301,8 +301,9 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| nondeterministic-capture | 2026-09-06 | [heap-budget-capture-truncated-by-cycle-cap](2026-09-06-heap-budget-capture-truncated-by-cycle-cap.md) | fixed | scripts/heap-budget-check.sh: the startup capture hit `--max-cycles` mid-compile and recorded the cut as a figure |
 | stand-in-divergence | 2026-09-04 | [read-gate-refuses-on-largest-block-proxy](2026-09-04-read-gate-refuses-on-largest-block-proxy.md) | **open** | lpa-server ProjectRead headroom gate vs the classic's two-region heap |
-| stand-in-divergence | 2026-09-04 | [unload-leaves-classic-unloadable-until-power-cycle](2026-09-04-unload-leaves-classic-unloadable-until-power-cycle.md) | **open** | after stopAllProjects the classic's largest block is 39.7 KB and the 64 KiB load gate refuses every load |
+| stand-in-divergence | 2026-09-04 | [unload-leaves-classic-unloadable-until-power-cycle](2026-09-04-unload-leaves-classic-unloadable-until-power-cycle.md) | **open** (not reproducing on the four-region heap 2026-09-06: reload accepted at 72,954 B, margin ~7 KB) | after stopAllProjects the classic's largest block is 39.7 KB and the 64 KiB load gate refuses every load |
 | crash-loop | 2026-09-04 | [tlsf-build-hits-stack-guard-at-project-load](2026-09-04-tlsf-build-hits-stack-guard-at-project-load.md) | **open** | fw-esp32v3 with esp-alloc TLSF panics on the stack-guard watchpoint during project load |
 | assumed-context | 2026-09-02 | [flash-from-running-board-parks-until-reset](2026-09-02-flash-from-running-board-parks-until-reset.md) | open | lpa-devices Flash activity post-write wait; browser flasher closing reset |
 | state-conflation | 2026-09-04 | [pre-flash-hello-stamps-over-a-closed-port](2026-09-04-pre-flash-hello-stamps-over-a-closed-port.md) | fixed | lpa-devices Flash activity ladder → manifest stamp; evidence window hello timestamp |
@@ -395,11 +396,12 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 | unbounded-restatement | 2026-07-28 | [tick-error-restated-every-frame](2026-07-28-tick-error-restated-every-frame.md) | fixed | lpa-server (advance_frame) |
 | unsynchronized-shared-artifact | 2026-07-29 | [builtins-elf-uplift-race](2026-07-29-builtins-elf-uplift-race.md) | fixed | justfile `test` + lpvm-cranelift/build.rs |
 | missing-coverage | 2026-07-29 | [uniform-struct-array-runtime-index](2026-07-29-uniform-struct-array-runtime-index.md) | fixed | examples/effects/meteor + lps-frontend lowering |
-| arena-retained-transient | 2026-08-29 | [shader-jit-compile-transient-starves-classic-heap](2026-08-29-shader-jit-compile-transient-starves-classic-heap.md) | open (host + emulator attribution done 2026-09-02; silicon re-measure pending) | lps-glsl HIR build transient vs the classic's arena; probes `xt_compile_peak_memory`, `example_shader_compile_peak_memory` |
+| arena-retained-transient | 2026-08-29 | [shader-jit-compile-transient-starves-classic-heap](2026-08-29-shader-jit-compile-transient-starves-classic-heap.md) | fixed (silicon bracket 2026-09-06: compile retains 2,160 B, zook green at 19 fps) | lps-glsl HIR build transient vs the classic's arena; probes `xt_compile_peak_memory`, `example_shader_compile_peak_memory` |
 | arena-retained-transient | 2026-09-01 | [hir-place-clones-exhaust-c6-heap-at-compute-compile](2026-09-01-hir-place-clones-exhaust-c6-heap-at-compute-compile.md) | fixed (recurrence 2026-09-02 on every other node kind — fixed, PR #497; module-wide interning open) | lps-glsl hir/typeck + hir/place + lower/place; lpc-engine shader nodes ([mem] bracket) |
 | deadline-margin-by-accident | 2026-09-02 | [c6-ws281x-first-three-leds-then-stale](2026-09-02-c6-ws281x-first-three-leds-then-stale.md) | fixed | fw-esp32c6 output/rmt + lp-ws281x refill path placement |
 | untested-path | 2026-09-02 | [studio-flasher-cannot-recover-a-boot-looping-c6](2026-09-02-studio-flasher-cannot-recover-a-boot-looping-c6.md) | **open** | lpa-studio-web device card flash flow (esptool-js ladder) |
 | lifecycle-ownership | 2026-09-02 | [same-gpio-rebind-disconnects-the-pad](2026-09-02-same-gpio-rebind-disconnects-the-pad.md) | fixed | fw-esp32c6 + fw-esp32s3 output/rmt `bind_channel` (esp-hal `with_pin` guard order) |
+| untested-path | 2026-09-06 | [emu-transport-drops-unprefixed-client-lines](2026-09-06-emu-transport-drops-unprefixed-client-lines.md) | fixed | lpa-client transport_serial/emulator (async `M!` framing) + lp-cli `emu` host spec |
 
 ## Predecessor: `docs/bugs/`
 

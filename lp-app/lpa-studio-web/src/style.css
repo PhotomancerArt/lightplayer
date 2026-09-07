@@ -5624,8 +5624,16 @@ label:has(> input:not(:disabled)) {
    - NOT border-image — border-image ignores border-radius and paints a
      square frame (the spike's round-1 defect). Two solid mask layers XOR'd
      leave only the 1px padding band, clipped to the host's own radius;
-   - the spin runs ONLY while hovered/active (or explicitly pinned on for a
-     drag), so an idle app pays no compositor cost;
+   - the spin is declared on the pseudo at rest but PAUSED (a paused
+     animation is never ticked, so an idle app pays no compositor cost, and
+     at time 0 it holds 0deg — the rest paint is unchanged); hover/active
+     (or an explicit pin for a drag) only flips its play-state to running;
+   - on mouse-out the spin PAUSES where it stands — it is never removed.
+     Removing it would snap the registered angle back to 0deg on the next
+     frame, a visible jump under any fade-out (the Primary's halo showed
+     it). A transition on the angle can't rescue that: Chrome starts no
+     transition from an animated value when the animation goes away.
+     Record: spikes/spectrum-halo/index.html §3;
    - prefers-reduced-motion drops every spin and leaves the gradient static
      at --ux-ir-angle's initial 0deg — the logo sets that precedent.
    ========================================================================== */
@@ -5642,6 +5650,14 @@ label:has(> input:not(:disabled)) {
     to {
         --ux-ir-angle: 360deg;
     }
+}
+
+/* The Primary's "still lit" flag (see .ux-spectrum-cta). An integer so a
+   step-end transition holds it at exactly 1 until the hold is over. */
+@property --ux-ir-hot {
+    syntax: "<integer>";
+    initial-value: 0;
+    inherits: false;
 }
 
 /* Ring host. `--ux-ir-inset` is the one knob: -1px hugs the OUTSIDE of the
@@ -5670,6 +5686,7 @@ label:has(> input:not(:disabled)) {
     -webkit-mask-composite: xor;
     opacity: 0;
     pointer-events: none;
+    animation: ux-ir-spin 3.2s linear infinite paused;
 }
 
 /* Clipping hosts (cards, anything overflow-hidden) opt the ring inward. */
@@ -5683,7 +5700,7 @@ label:has(> input:not(:disabled)) {
 .ux-ir-ring:active:not(:disabled)::before,
 .ux-ir-ring-on::before {
     opacity: 1;
-    animation: ux-ir-spin 3.2s linear infinite;
+    animation-play-state: running;
 }
 
 /* The soft bloom that rides with the ring. */
@@ -5693,6 +5710,7 @@ label:has(> input:not(:disabled)) {
 }
 
 @media (prefers-reduced-motion: reduce) {
+    .ux-ir-ring::before,
     .ux-ir-ring:hover:not(:disabled)::before,
     .ux-ir-ring:active:not(:disabled)::before,
     .ux-ir-ring-on::before {
@@ -5895,12 +5913,38 @@ select:focus-visible {
    `.ux-ir-ring` (they would fight over the pseudo). Amends Aurora D1: the
    ring marks THE standing action, exactly the slot the gradient fill held.
    Design record: spikes/devices-page-treatments/index.html (1F/1G).
-   -------------------------------------------------------------------------- */
+
+   Mouse-out (spectrum-halo §3, 2026-09-03): the ring and halo keep
+   TURNING while they fade, and only then pause. `--ux-ir-hot` is the
+   "still lit" flag the pseudos read through `@container style()`: 1 the
+   instant the pointer arrives (0s transition on the hover rule) and, on
+   leave, held at 1 for 0.35s by a step-end transition — the value flips
+   only at the end — which outlives the fade-out (ring 0.2s, halo 0.3s;
+   tightened from 0.3s/0.45s on 2026-09-04, "could be a bit faster").
+   Read from the host because if(style()) on the pseudo sees the cascaded
+   flag, not the transitioned one (measured, Chrome 148). Owning the host's
+   transition list is the price; Tailwind's layered `tw:transition-colors`
+   loses to this rule anyway, so the color trio it carried is kept here. */
 .ux-spectrum-cta {
     position: relative;
     border-color: transparent;
     background: transparent;
     color: var(--studio-color-text-strong);
+    --ux-ir-hot: 0;
+    transition:
+        --ux-ir-hot 0.35s step-end,
+        color 150ms ease,
+        background-color 150ms ease,
+        border-color 150ms ease;
+}
+
+.ux-spectrum-cta:hover:not(:disabled) {
+    --ux-ir-hot: 1;
+    transition:
+        --ux-ir-hot 0s,
+        color 150ms ease,
+        background-color 150ms ease,
+        border-color 150ms ease;
 }
 
 .ux-spectrum-cta::before {
@@ -5921,20 +5965,22 @@ select:focus-visible {
     -webkit-mask-composite: xor;
     opacity: 0.62;
     pointer-events: none;
-    transition: opacity 0.3s;
+    transition: opacity 0.2s;
+    animation: ux-ir-spin 3.2s linear infinite paused;
 }
 
 .ux-spectrum-cta:hover:not(:disabled)::before {
     opacity: 1;
-    animation: ux-ir-spin 3.2s linear infinite;
+    animation-play-state: running;
 }
 
 /* The glow bump: the ring's OWN light. The halo is the same conic as the
    ring (same `--ux-ir-angle`, same spin, so the two turn in lockstep),
    painted as a 5px band just outside the button and blurred, at 0.28 —
    ruled "about right" after 0.85 read much too strong: a whisper of
-   light, not a stage; it fades and
-   grows in over 450ms instead of popping. Geometry is the whole trick:
+   light, not a stage; it fades and grows in over 300ms instead of
+   popping, and keeps turning as it fades out (the host's `--ux-ir-hot`
+   hold, above). Geometry is the whole trick:
    `filter` runs before `mask`, so a mask would cut the blur off hard at
    the box (the first spike pass), and `mask-clip: no-clip` parses in
    Chrome but still clips. An even-odd `clip-path` polygon punches the
@@ -5969,17 +6015,28 @@ select:focus-visible {
     transform: scale(0.94);
     pointer-events: none;
     transition:
-        opacity 0.45s ease,
-        transform 0.45s ease;
+        opacity 0.3s ease,
+        transform 0.3s ease;
+    animation: ux-ir-spin 3.2s linear infinite paused;
 }
 
 .ux-spectrum-cta:hover:not(:disabled)::after {
     opacity: 0.28;
     transform: scale(1);
-    animation: ux-ir-spin 3.2s linear infinite;
+    animation-play-state: running;
+}
+
+/* The hold: while the host still says lit, both pseudos keep turning. */
+@container style(--ux-ir-hot: 1) {
+    .ux-spectrum-cta::before,
+    .ux-spectrum-cta::after {
+        animation-play-state: running;
+    }
 }
 
 @media (prefers-reduced-motion: reduce) {
+    .ux-spectrum-cta::before,
+    .ux-spectrum-cta::after,
     .ux-spectrum-cta:hover:not(:disabled)::before,
     .ux-spectrum-cta:hover:not(:disabled)::after {
         animation: none;

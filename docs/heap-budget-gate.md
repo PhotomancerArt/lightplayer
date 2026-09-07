@@ -94,6 +94,19 @@ profile is unaffected). Not sampled down: a fragmentation figure that skips
 holes to save time is a figure that can miss the one hole a later window
 needed.
 
+The walk also scales the run's **cycle count** with the guest's free heap:
+every byte a change frees is another unit for every marker's walk to take
+and give back. `lp-cli profile`'s `--max-cycles` safety cap defaults to
+200 M, and zook-dome's `startup` run crossed it mid-walk on 2026-09-06
+(the bounded sample window freed ~21 KB of the guest heap), which ends the
+trace before the compile window's `"t":"F"` row — its two free-list figures
+then read as missing rather than failing. `heap-budget-check.sh` passes
+`--max-cycles 400000000` for that reason; a run that ends with a
+`max-cycles` warning is a run whose last window's figures cannot be
+trusted — and the script refuses such a run outright (`terminated_by:
+max_cycles` in the session's `meta.json`; see the fidelity limit below and
+`docs/defects/2026-09-06-heap-budget-capture-truncated-by-cycle-cap.md`).
+
 **`server-boot`** brackets fw-emu's boot from recovery init through server
 and transport construction, before the first tick (`lp-fw/fw-emu/src/main.rs`).
 Its `retained` figure is what the server holds before any project exists —
@@ -163,8 +176,14 @@ what the classic adds on top (its `DisplayPipeline` buffers), is measured
 per owner in `docs/reports/2026-09-02-per-lamp-memory-table.md`; the host
 probe `lp-core/lpc-engine/tests/per_lamp_memory_table.rs` pins the slopes.
 `examples/small-dome` (6,310 lamps) is not in the record: it halts the 320 K
-guest in its first frame, by about the sample buffers it still has to
-allocate at that point (a 47,600 B ask with ~18 KB free).
+guest in its first frame. Since #527 (bounded sample windows — the two 8 B/lamp
+graphics buffers and the coordinate transient are gone) it gets past every
+per-lamp ask and halts in the frame's port opens on the emulator-only
+20,480 B `Vec<HwEndpoint>` (the permissive manifest re-enumerated per open,
+see "Discounting emulator-only artifacts") with 25,625 B free but no hole
+that size. The emulator's own overheads — that Vec, the 36,864 B manifest,
+the ~30 KB in-RAM deploy — are what stand between this project and the
+record now; `docs/reports/2026-09-06-small-dome-first-frame-budget.md`.
 
 ## Ratchet, not ceiling
 
@@ -193,7 +212,7 @@ margin over. **Never widen the margin to make the gate pass.**
 
 ## Why deltas, not absolutes
 
-The guest heap (`lp-riscv/lp-riscv-emu-guest/memory.ld`, `HEAP_SIZE`) is
+The guest heap (`lp-emu/lp-riscv-emu-guest/memory.ld`, `HEAP_SIZE`) is
 deliberately **not** the device arena. Measured 2026-08-02: the guest carries
 ~52 KB of harness baseline the firmware does not (63,596 B live at
 project-load start vs ~10,936 B idle on a classic ESP32), so a device-sized
@@ -214,6 +233,16 @@ A harness that overstates its fidelity is worse than none. This gate does
   markers is ratcheted at all. A workload can hold both figures and still
   fail on device mid-window. The fragmentation and counterfactual sections
   below are the tools for that question; they are reports, not ratchets.
+- **A capture the cycle cap ended.** Every session runs under
+  `--max-cycles` (`MAX_CYCLES` in `scripts/heap-budget-check.sh`, 400M).
+  A window still open when the cap falls has no `"E"`, and its figures are
+  whatever the collector held at that instant — a function of where the cap
+  fell, not of what the window costs. Meteor's startup capture did exactly
+  that under the profiler's 200M default for a month, recording its
+  `shader-compile` window as zeros and its cold-start `frame` as frame 1
+  alone (`docs/defects/2026-09-06-heap-budget-capture-truncated-by-cycle-cap.md`).
+  The script now refuses a session whose `meta.json` says
+  `terminated_by: max_cycles`; raise `MAX_CYCLES` rather than record it.
 - **Two-region arenas / contiguity.** The guest heap is a single region. The
   classic's post-#288 arena is two regions, where a large allocation can fail
   while total free is ample. The `largest_alloc` ratchet is the proxy: it

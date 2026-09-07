@@ -11,7 +11,7 @@ workspace = true
 
 [dependencies]
 lp-riscv-inst = { path = "../lp-riscv-inst" }
-lp-riscv-emu = { path = "../lp-riscv-emu", default-features = false }
+lp-riscv-emu = { path = "../../lp-emu/lp-riscv-emu", default-features = false }
 lp-riscv-elf = { path = "../lp-riscv-elf", optional = true }
 
 [features]

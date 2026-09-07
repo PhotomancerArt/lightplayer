@@ -40,8 +40,11 @@
 //!
 //! ## What is actually dropped today
 //!
-//! Only the fluid solver's simulation grid, and only at `Critical`
-//! (`nodes/fluid/fluid_node.rs`). **Every `High` handler is a no-op.**
+//! Only at `Critical`: the fluid solver's simulation grid
+//! (`nodes/fluid/fluid_node.rs`) and, since 2026-09-06, the playlist's
+//! crossfade buffers (`nodes/playlist/playlist_node.rs` — two sample-outs
+//! plus the blend scratch, alive only while a transition runs and rebuilt
+//! at the next transition frame). **Every `High` handler is a no-op.**
 //!
 //! It did not start that way: the fixture node dropped `precomputed`,
 //! `direct_channels`, `sample_points`, `sample_target` and `render_target`,

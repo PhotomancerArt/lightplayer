@@ -59,3 +59,22 @@ a proxy (the same shape as lever 7 for reads). A cheaper stopgap is to
 make `stopAllProjects` drop the residents that only the unloaded project
 needed (the JIT link metadata and per-project maps) — verify with the
 heartbeat's `largest_free_block` returning toward the boot figure.
+
+**Re-measured 2026-09-06 on the four-region heap (PRs #521/#522; DOM-Z-102,
+tree `d6cfaa2051ae`; report `docs/reports/2026-09-06-classic-not-enough-heap.md`)**
+— the same cycle, twice, both times with the reload **accepted**:
+
+| cycle | before unload (largest) | after `stopAllProjects` | `load_project before` | gate |
+|---|---:|---:|---:|---|
+| studio resident → stop-all → load zook (`lp-cli upload`) | — | 221,036 free | **73,693** | accepted |
+| zook resident → stop-all → reload zook | 65,022 | 221,440 free / 20,112 used | **72,954** | accepted |
+
+The mechanism is unchanged: boot idle offers 109,446 B; one load/compile/
+unload cycle leaves 4.8 KB of residents standing and the largest block at
+72,943 B (36.5 KB of contiguity gone for 4.8 KB of bytes). What changed is
+the ceiling: the SRAM1 tail is now 98,304 B and is registered after the two
+ROM stack regions, so the survivors land ahead of it and the tail's remaining
+hole clears the 64 KiB gate by ~7.4 KB. Stays `open`: the proxy is still a
+proxy, the margin is one mid-size resident wide, and a project that leaves
+more behind than zook (studio's leftovers were 4.6 KB on the old heap) will
+find it. The residents-first / fallible-load fixes above are still the fix.

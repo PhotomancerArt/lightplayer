@@ -47,8 +47,14 @@ pub struct GpuShader {
     /// call, and how many lanes a packed sample point carries.
     space: ShaderEntrySpace,
     /// Sample-point pass (the LED-output path), built on the first
-    /// `sample_rgba16` call — render-only consumers never pay for it.
+    /// `bind_uniforms` call — render-only consumers never pay for it.
     sample_pass: Option<SamplePass>,
+    /// Whether `bind_uniforms` has run since construction: a bound sample
+    /// without a binding would read whatever the uniform buffer last held.
+    sample_uniforms_bound: bool,
+    /// The per-bind group `bind_uniforms` builds when texture bindings make
+    /// the static group impossible; `None` while the static group serves.
+    bound_sample_bind_group: Option<wgpu::BindGroup>,
     /// Validated naga module (drives uniform encoding offsets).
     module: naga::Module,
     table: UniformTable,
@@ -228,6 +234,8 @@ impl GpuShader {
             texture_specs: textures.clone(),
             space,
             sample_pass: None,
+            sample_uniforms_bound: false,
+            bound_sample_bind_group: None,
         })
     }
 
@@ -515,28 +523,15 @@ impl LpShader for GpuShader {
     /// readback); the browser tier serves them with one frame of latency
     /// via `map_async` (black on the very first frame) — see the sample-pass
     /// module docs.
-    fn sample_rgba16(
-        &mut self,
-        points: &mut SamplePointsHandle,
-        out: &mut SampleOutHandle,
-        uniforms: &LpsValueF32,
-    ) -> Result<(), GfxError> {
-        use crate::sample_backing::{sample_out_mut, sample_points};
-
-        if points.count() != out.count() {
-            return Err(GfxError::Render(format!(
-                "sample_rgba16: point count {} does not match output count {}",
-                points.count(),
-                out.count()
-            )));
-        }
+    fn bind_uniforms(&mut self, uniforms: &LpsValueF32) -> Result<(), GfxError> {
         self.ensure_sample_pass()?;
 
         // Uniform writes + bind group exactly as the render path builds
-        // them (shared layout; textures resolve per call).
+        // them (shared layout; textures resolve per bind). The per-bind
+        // group outlives every bound sample until the next bind.
         let encoded = encode_uniforms(&self.module, &self.table, uniforms)?;
         let texture_views = self.resolve_texture_views(uniforms)?;
-        let mut per_call_bind_group = None;
+        self.bound_sample_bind_group = None;
         if let Some(bindings) = &self.bindings {
             if let Some(shader_uniforms) = &bindings.uniforms {
                 for ((_, bytes), &offset) in encoded.iter().zip(&shader_uniforms.offsets) {
@@ -546,7 +541,7 @@ impl LpShader for GpuShader {
                 }
             }
             if bindings.static_bind_group.is_none() {
-                per_call_bind_group = Some(build_bind_group(
+                self.bound_sample_bind_group = Some(build_bind_group(
                     &self.shared.device,
                     &bindings.layout,
                     &self.table,
@@ -555,27 +550,55 @@ impl LpShader for GpuShader {
                 ));
             }
         }
+        self.sample_uniforms_bound = true;
+        Ok(())
+    }
+
+    /// Sample the first `count` points with the uniforms last bound. The
+    /// pass is slice-driven, so a prefix is a shorter slice; the tails of
+    /// both buffers stay as they were.
+    fn sample_rgba16_bound(
+        &mut self,
+        points: &mut SamplePointsHandle,
+        out: &mut SampleOutHandle,
+        count: u32,
+    ) -> Result<(), GfxError> {
+        use crate::sample_backing::{sample_out_mut, sample_points};
+
+        if count > points.count() || count > out.count() {
+            return Err(GfxError::Render(format!(
+                "sample_rgba16_bound: count {count} exceeds the point buffer ({}) or the output buffer ({})",
+                points.count(),
+                out.count()
+            )));
+        }
+        if !self.sample_uniforms_bound {
+            return Err(GfxError::Render(String::from(
+                "sample_rgba16_bound: no uniforms bound (call bind_uniforms first)",
+            )));
+        }
 
         // The point buffer is allocated pair-sized in both spaces; a 1D
         // shader reads the tightly packed `[t0, t1, …]` prefix and the rest
         // of the allocation is slack (see `lp_shader::synth::render_samples`).
         let lanes = self.space.coord_lanes();
-        let point_coords = &sample_points(points)?.0[..points.count() as usize * lanes];
-        let out_channels = &mut sample_out_mut(out)?.0;
+        let point_coords = &sample_points(points)?.0[..count as usize * lanes];
+        let out_channels = &mut sample_out_mut(out)?.0[..count as usize * 4];
         let Self {
             shared,
             bindings,
             sample_pass,
+            bound_sample_bind_group,
             ..
         } = self;
-        let bind_group = per_call_bind_group.as_ref().or_else(|| {
+        let bind_group = bound_sample_bind_group.as_ref().or_else(|| {
             bindings
                 .as_ref()
                 .and_then(|bindings| bindings.static_bind_group.as_ref())
         });
         sample_pass
             .as_mut()
-            .expect("sample pass was ensured above")
+            .expect("sample pass was ensured by bind_uniforms")
             .run(shared, point_coords, bind_group, out_channels)
     }
 }

@@ -1,0 +1,365 @@
+//! Board-profile tests: the classic-ESP32 (LX6) memory map, emulator-side.
+//!
+//! The classic map is hardware-measured (FINDINGS.md, classic C1–C5 section,
+//! plus the 2026-09-05 SRAM0 probe): JIT code lives in **SRAM0**, which is
+//! identity-mapped and **word-only**; SRAM1's dual mapping — the legacy code
+//! placement — is **word-mirrored** (`iram = 0x400B_FFFC − (dram −
+//! 0x3FFE_0000)`); and the plain data RAM (SRAM2) is not executable. These
+//! tests pin the emulator to that model; agreement with silicon is the
+//! hardware walks' job.
+//!
+//! Payload bytes are assembler-derived golden vectors from FINDINGS.md,
+//! never hand-encoded.
+
+use lp_xt_emu::board::BoardProfile;
+use lp_xt_emu::emu::{
+    CODE_DBUS_BASE, CODE_REGION_LEN, INITIAL_SP, RunOutcome, STACK_DBUS_BASE, STACK_REGION_LEN,
+};
+use lp_xt_emu::memory::{AliasRule, EXC_INSTR_FETCH_ERROR, EXC_LOAD_STORE_ERROR, Memory};
+use lp_xt_emu::{Emulator, TrapKind};
+
+/// GV1 `spike_stub42` (FINDINGS.md): entry a1,32; movi a2,42; retw. f(_) = 42.
+/// Ran byte-for-byte unmodified on LX6 in all three regions (C2x/C3).
+const GV1: &[u8] = &[0x36, 0x41, 0x00, 0x22, 0xa0, 0x2a, 0x90, 0x00, 0x00];
+
+/// The S3 profile is exactly the legacy constants — `Emulator::new()` is
+/// unchanged for every pre-profile consumer.
+#[test]
+fn s3_profile_matches_legacy_constants() {
+    let p = BoardProfile::esp32s3();
+    assert_eq!(p.code_dbus_base, CODE_DBUS_BASE);
+    assert_eq!(p.code_region_len, CODE_REGION_LEN);
+    assert_eq!(p.stack_dbus_base, STACK_DBUS_BASE);
+    assert_eq!(p.stack_region_len, STACK_REGION_LEN);
+    assert_eq!(p.initial_sp(), INITIAL_SP);
+    assert_eq!(p.code_ibus_base(), Memory::ibus_alias(CODE_DBUS_BASE));
+    assert_eq!(Emulator::new().profile, p);
+}
+
+/// The word-mirror rule reproduces P1's C2b sentinel probes exactly.
+///
+/// FINDINGS C2b (dram probe base 0x3FFF_0000):
+///   off=0x0    h2 @ 0x400A_FFFC   (h1-linear @ 0x400B_0000 read garbage)
+///   off=0x100  h2 @ 0x400A_FEFC
+#[test]
+fn classic_alias_rule_matches_c2b_measurements() {
+    let rule = BoardProfile::esp32_sram1_legacy().alias;
+    assert_eq!(rule.dbus_to_ibus(0x3FFF_0000), 0x400A_FFFC);
+    assert_eq!(rule.dbus_to_ibus(0x3FFF_0100), 0x400A_FEFC);
+    // Byte offsets within a word are preserved (bytes are verbatim, C2b).
+    assert_eq!(rule.dbus_to_ibus(0x3FFF_0001), 0x400A_FFFD);
+    assert_eq!(rule.dbus_to_ibus(0x3FFF_0003), 0x400A_FFFF);
+    // ibus_to_dbus is the exact inverse at byte granularity.
+    for dbus in [0x3FFE_8000u32, 0x3FFF_0000, 0x3FFF_0102, 0x3FFF_EFFF] {
+        assert_eq!(rule.ibus_to_dbus(rule.dbus_to_ibus(dbus)), dbus);
+    }
+    // Adjacent I-bus words come from D-bus words walking DOWNWARD.
+    assert_eq!(rule.ibus_to_dbus(0x400A_FFFC), 0x3FFF_0000);
+    assert_eq!(rule.ibus_to_dbus(0x400B_0000), 0x3FFE_FFFC);
+}
+
+/// Data written via the D-bus view reads back at the mirrored I-bus address
+/// (H2) and NOT at the linear one (H1) — the emulator has the same *shape*
+/// C2b measured, with word contents verbatim little-endian.
+#[test]
+fn classic_sram1_is_word_mirrored_not_linear() {
+    let p = BoardProfile::esp32_sram1_legacy();
+    let mut emu = Emulator::with_profile(p);
+
+    // Two distinct sentinels at two D-bus offsets so the mapping's shape is
+    // identifiable, not just one point (the C2b methodology).
+    //
+    // Taken relative to `code_dbus_base` rather than written as literals: the
+    // emulator only backs the modeled code region, so absolute sentinels stop
+    // being addressable the moment the region is resized. They were literals
+    // until 2026-08-02, when the classic region shrank from 92 KiB to 32 KiB
+    // and this test failed on an unmapped write rather than on anything to do
+    // with the alias rule it exists to check.
+    let d0: u32 = p.code_dbus_base;
+    let d1: u32 = p.code_dbus_base + 0x100;
+    emu.mem.write_u32(d0, 0xC0DE_0000).unwrap();
+    emu.mem.write_u32(d1, 0xC0DE_0100).unwrap();
+
+    // H2 (word-mirrored) holds the sentinels...
+    assert_eq!(
+        emu.mem.read_u32(p.alias.dbus_to_ibus(d0)).unwrap(),
+        0xC0DE_0000
+    );
+    assert_eq!(
+        emu.mem.read_u32(p.alias.dbus_to_ibus(d1)).unwrap(),
+        0xC0DE_0100
+    );
+    // ...and the H1-linear addresses (0x400A_0000 + (dram − 0x3FFE_0000)) do
+    // not. Since the 2026-08-02 resize the linear image of the code region
+    // falls entirely *below* the mirrored image, so those addresses are not
+    // backed at all and the read traps. That refutes H1 at least as firmly as
+    // reading a different value did — but it is a different observation, so
+    // it is asserted as what it is rather than papered over.
+    let linear = |d: u32| 0x400A_0000 + (d - 0x3FFE_0000);
+    for (d, sentinel) in [(d0, 0xC0DE_0000u32), (d1, 0xC0DE_0100)] {
+        match emu.mem.read_u32(linear(d)) {
+            Err(_) => {}
+            Ok(v) => assert_ne!(
+                v,
+                sentinel,
+                "the linear address {:#010x} must not hold the sentinel written at {d:#010x}",
+                linear(d)
+            ),
+        }
+    }
+    // Bytes within the word are verbatim little-endian — no byte swap.
+    let i0 = p.alias.dbus_to_ibus(d0);
+    let bytes: Vec<u8> = (0..4).map(|k| emu.mem.read_u8(i0 + k).unwrap()).collect();
+    assert_eq!(bytes, 0xC0DE_0000u32.to_le_bytes());
+}
+
+/// GV1 executes from classic SRAM0 and returns 42 — the emulator-side half
+/// of the 2026-09-05 `[SRAM0] exec` fact (word-written code at `0x4008_8000`
+/// executes on the PRO core).
+#[test]
+fn classic_profile_runs_gv1_from_sram0() {
+    let p = BoardProfile::esp32();
+    // The executable image sits inside SRAM0's IRAM, above `.vectors`, and
+    // the identity alias means the D-bus base IS the I-bus base.
+    assert!((0x4008_0400..0x400A_0000).contains(&p.code_ibus_base()));
+    assert_eq!(p.code_ibus_base(), p.code_dbus_base);
+    assert_eq!(p.alias, AliasRule::Identity);
+
+    let mut emu = Emulator::with_profile(p);
+    match emu.run(GV1, 0, 0) {
+        RunOutcome::Ok(v) => assert_eq!(v, 42),
+        other => panic!("GV1 on the classic profile must return 42, got {other:?}"),
+    }
+    // The blob is I-bus-contiguous and its first word reads back verbatim
+    // at the base — with a word load, the only width SRAM0 takes.
+    assert_eq!(
+        emu.mem.read_u32(p.code_ibus_base()).unwrap(),
+        u32::from_le_bytes([GV1[0], GV1[1], GV1[2], GV1[3]])
+    );
+}
+
+/// GV1 executes at classic SRAM1 addresses under the legacy profile and
+/// returns 42 (the emulator-side half of C2x `region=sram1_word_mirrored
+/// value=42`).
+#[test]
+fn classic_legacy_profile_runs_gv1_from_sram1() {
+    let p = BoardProfile::esp32_sram1_legacy();
+    // The executable image sits inside classic SRAM1's I-bus window.
+    assert!((0x400A_0000..0x400C_0000).contains(&p.code_ibus_base()));
+
+    let mut emu = Emulator::with_profile(p);
+    match emu.run(GV1, 0, 0) {
+        RunOutcome::Ok(v) => assert_eq!(v, 42),
+        other => panic!("GV1 on the legacy classic profile must return 42, got {other:?}"),
+    }
+    // The blob really is I-bus-contiguous: its first word (`entry a1,32` =
+    // 0x00004136 plus the first movi byte) reads back verbatim at the I-bus
+    // base, and the backing D-bus image sits at the TOP of the code region.
+    assert_eq!(
+        emu.mem.read_u32(p.code_ibus_base()).unwrap(),
+        u32::from_le_bytes([GV1[0], GV1[1], GV1[2], GV1[3]])
+    );
+    assert_eq!(
+        p.alias.ibus_to_dbus(p.code_ibus_base()),
+        p.code_dbus_base + p.code_region_len as u32 - 4
+    );
+}
+
+/// GV1 also runs entered at a nonzero offset within the blob (padding words
+/// before the entry cross I-bus word boundaries — under the mirror, and
+/// under SRAM0's word-only bus).
+#[test]
+fn classic_profiles_run_gv1_at_offset() {
+    for p in [BoardProfile::esp32(), BoardProfile::esp32_sram1_legacy()] {
+        // 4 bytes of padding, then GV1: entry_offset = 4.
+        let mut blob = vec![0u8; 4];
+        blob.extend_from_slice(GV1);
+        let mut emu = Emulator::with_profile(p);
+        match emu.run(&blob, 4, 7) {
+            RunOutcome::Ok(v) => assert_eq!(v, 42, "{}", p.name),
+            other => panic!("{}: offset GV1 must return 42, got {other:?}", p.name),
+        }
+    }
+}
+
+/// SRAM0 takes aligned word accesses only: the `[SRAM0] byte_access` fact
+/// (a byte store at `0x4008_8000` → `LoadStoreError`, EXCCAUSE 3, EXCVADDR
+/// = that address) and its halfword/misaligned siblings, while word access
+/// and fetch are unaffected.
+#[test]
+fn classic_sram0_is_word_only() {
+    let p = BoardProfile::esp32();
+    let mut emu = Emulator::with_profile(p);
+    let base = p.code_dbus_base;
+
+    emu.mem.write_u32(base, 0xC0DE_0000).unwrap();
+    assert_eq!(emu.mem.read_u32(base).unwrap(), 0xC0DE_0000);
+
+    let store = emu.mem.write_u8(base, 0xA5).unwrap_err();
+    assert_eq!(store.kind, TrapKind::Exception);
+    assert_eq!(store.cause, EXC_LOAD_STORE_ERROR);
+    assert_eq!(store.vaddr, base);
+    // The faulting store changed nothing.
+    assert_eq!(emu.mem.read_u32(base).unwrap(), 0xC0DE_0000);
+
+    assert_eq!(
+        emu.mem.read_u8(base).unwrap_err().cause,
+        EXC_LOAD_STORE_ERROR
+    );
+    assert_eq!(
+        emu.mem.read_u16(base + 2).unwrap_err().cause,
+        EXC_LOAD_STORE_ERROR
+    );
+    assert_eq!(
+        emu.mem.write_u16(base + 2, 1).unwrap_err().cause,
+        EXC_LOAD_STORE_ERROR
+    );
+    // Misaligned word access is a fault too, at the address that was asked.
+    let mis = emu.mem.read_u32(base + 2).unwrap_err();
+    assert_eq!(mis.cause, EXC_LOAD_STORE_ERROR);
+    assert_eq!(mis.vaddr, base + 2);
+    assert_eq!(
+        emu.mem.write_u32(base + 1, 0).unwrap_err().cause,
+        EXC_LOAD_STORE_ERROR
+    );
+
+    // Fetch is unaffected, and so is the neighbouring plain RAM.
+    let mut out = [0u8; 3];
+    assert!(emu.mem.fetch(base, &mut out).is_ok());
+    emu.mem.write_u8(p.stack_dbus_base, 0xA5).unwrap();
+    assert_eq!(emu.mem.read_u8(p.stack_dbus_base).unwrap(), 0xA5);
+
+    // The legacy SRAM1 window is ordinary RAM: byte access is fine there.
+    let legacy = BoardProfile::esp32_sram1_legacy();
+    let mut emu = Emulator::with_profile(legacy);
+    emu.mem.write_u8(legacy.code_dbus_base, 0x5A).unwrap();
+    assert_eq!(emu.mem.read_u8(legacy.code_dbus_base).unwrap(), 0x5A);
+}
+
+/// Fetching from classic's plain data RAM (the stack region models SRAM2,
+/// which has no I-bus view) faults with EXCCAUSE=2, the emulator-side mirror
+/// of C2g (`InstrError` executing at a D-bus address).
+#[test]
+fn classic_data_ram_is_not_executable() {
+    let p = BoardProfile::esp32();
+    let emu = Emulator::with_profile(p);
+    let mut out = [0u8; 3];
+    // The stack region (SRAM2 model) — mapped for data, not fetchable.
+    let err = emu.mem.fetch(p.stack_dbus_base, &mut out).unwrap_err();
+    assert_eq!(err.kind, TrapKind::Exception);
+    assert_eq!(err.cause, EXC_INSTR_FETCH_ERROR);
+    // Under the legacy placement the code region's own D-bus addresses are
+    // not fetchable either (C2g executed GV1 at its D-bus address and got
+    // EXCCAUSE=2).
+    let legacy = BoardProfile::esp32_sram1_legacy();
+    let emu = Emulator::with_profile(legacy);
+    let err = emu.mem.fetch(legacy.code_dbus_base, &mut out).unwrap_err();
+    assert_eq!(err.cause, EXC_INSTR_FETCH_ERROR);
+}
+
+/// The S3 default still runs GV1 exactly as before profiles existed.
+#[test]
+fn s3_default_still_runs_gv1() {
+    let mut emu = Emulator::new();
+    match emu.run(GV1, 0, 0) {
+        RunOutcome::Ok(v) => assert_eq!(v, 42),
+        other => panic!("GV1 on the S3 default must return 42, got {other:?}"),
+    }
+    // Loading via the I-bus base is byte-identical to the historical D-bus
+    // write under the S3's offset alias.
+    assert_eq!(
+        emu.mem.read_u32(CODE_DBUS_BASE).unwrap(),
+        u32::from_le_bytes([GV1[0], GV1[1], GV1[2], GV1[3]])
+    );
+}
+
+/// Both profiles model flash, and none of the five regions collide.
+///
+/// `install` is what asserts disjointness, so building the emulator is the
+/// test; the explicit checks below are about *which* region answers to what,
+/// which a silent shadowing bug would get wrong without panicking.
+#[test]
+fn both_profiles_install_disjoint_flash_and_sram_regions() {
+    for p in [BoardProfile::esp32s3(), BoardProfile::esp32()] {
+        let emu = Emulator::with_profile(p);
+
+        // Flash is readable and, for the instruction window, fetchable.
+        assert!(
+            emu.mem.read_u32(p.irom_base).is_ok(),
+            "{}: IROM read",
+            p.name
+        );
+        assert!(
+            emu.mem.read_u32(p.drom_base).is_ok(),
+            "{}: DROM read",
+            p.name
+        );
+        let mut out = [0u8; 3];
+        assert!(
+            emu.mem.fetch(p.irom_base, &mut out).is_ok(),
+            "{}: IROM must be executable at its own address",
+            p.name
+        );
+        assert_eq!(
+            emu.mem.fetch(p.drom_base, &mut out).unwrap_err().cause,
+            EXC_INSTR_FETCH_ERROR,
+            "{}: DROM is data only",
+            p.name
+        );
+
+        // The image's .data/.bss region is plain SRAM: writable, not fetchable.
+        let mut emu = emu;
+        assert!(
+            emu.mem.write_u32(p.image_data_base, 0x1234).is_ok(),
+            "{}: image DRAM write",
+            p.name
+        );
+        assert_eq!(emu.mem.read_u32(p.image_data_base).unwrap(), 0x1234);
+        assert_eq!(
+            emu.mem
+                .fetch(p.image_data_base, &mut out)
+                .unwrap_err()
+                .cause,
+            EXC_INSTR_FETCH_ERROR,
+            "{}: image DRAM is not executable",
+            p.name
+        );
+
+        // No flash address is mistaken for the JIT's code region, in either view.
+        assert!(p.code_region_offset(p.irom_base).is_none(), "{}", p.name);
+        assert!(p.code_region_offset(p.drom_base).is_none(), "{}", p.name);
+        assert!(
+            p.code_region_offset(p.code_ibus_base()).is_some(),
+            "{}: the code region must recognise its own I-bus base",
+            p.name
+        );
+    }
+}
+
+/// The flash bases are the ones the linker script and `lpc-shared`'s backtrace
+/// validator already use. Pinned so a profile edit cannot drift away from the
+/// image it has to load.
+#[test]
+fn flash_bases_match_the_documented_chip_maps() {
+    let s3 = BoardProfile::esp32s3();
+    assert_eq!(s3.irom_base, 0x4200_0000, "S3 irom_seg (esp-hal memory.x)");
+    assert_eq!(s3.drom_base, 0x3C00_0000, "S3 drom_seg (esp-hal memory.x)");
+
+    let classic = BoardProfile::esp32();
+    assert_eq!(classic.irom_base, 0x400D_0000, "classic irom_seg");
+    assert_eq!(classic.drom_base, 0x3F40_0000, "classic drom_seg");
+
+    // Classic's IROM begins above SRAM1's I-bus window rather than inside it.
+    assert!(classic.irom_base >= 0x400C_0000);
+}
+
+/// Offset and Identity rules stay trivial.
+#[test]
+fn offset_and_identity_rules() {
+    let off = AliasRule::Offset(0x006F_0000);
+    assert_eq!(off.dbus_to_ibus(0x3FC8_8000), 0x4037_8000);
+    assert_eq!(off.ibus_to_dbus(0x4037_8000), 0x3FC8_8000);
+    let id = AliasRule::Identity;
+    assert_eq!(id.dbus_to_ibus(0x4008_0400), 0x4008_0400);
+    assert_eq!(id.ibus_to_dbus(0x4008_0400), 0x4008_0400);
+}

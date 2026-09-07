@@ -28,7 +28,7 @@ ALLOWLIST=(
 
 hits=$(grep -rnE '^\s*#\[serde\((tag|untagged|flatten)' \
     --include='*.rs' \
-    lp-core lp-app lp-cli lp-base lp-fw lp-shader lp-riscv 2>/dev/null || true)
+    lp-core lp-app lp-cli lp-base lp-fw lp-shader lp-riscv lp-emu 2>/dev/null || true)
 
 fail=0
 while IFS= read -r hit; do

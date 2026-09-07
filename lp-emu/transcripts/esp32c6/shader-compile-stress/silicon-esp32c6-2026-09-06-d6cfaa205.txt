@@ -1,0 +1,232 @@
+^D[2026-09-06T16:21:41Z INFO ] 🚀 A new version of espflash is available: v4.5.0
+[2026-09-06T16:21:41Z INFO ] Serial port: '/dev/cu.usbmodem1433201'
+[2026-09-06T16:21:41Z INFO ] Connecting...
+[2026-09-06T16:21:41Z INFO ] Using flash stub
+Chip type:         esp32c6 (revision v0.2)
+Crystal frequency: 40 MHz
+Flash size:        4MB
+Features:          WiFi 6, BT 5
+MAC address:       a0:f2:62:87:b4:8c
+Partition table:   lp-fw/fw-esp32c6/partitions.csv
+App/part. size:    598,928/3,145,728 bytes, 19.04%
+[2026-09-06T16:21:42Z INFO ] Segment at address '0x0' has not changed, skipping write
+[2026-09-06T16:21:42Z INFO ] Segment at address '0x8000' has not changed, skipping write
+[00:00:00] [>                                       ]       1/311     0x10000   [2K[00:00:00] [>                                       ]       2/311     0x10000   [2K[00:00:00] [>                                       ]       3/311     0x10000   [2K[00:00:00] [>                                       ]       4/311     0x10000   [2K[00:00:00] [>                                       ]       5/311     0x10000   [2K[00:00:00] [>                                       ]       6/311     0x10000   [2K[00:00:00] [>                                       ]       7/311     0x10000   [2K[00:00:00] [=>                                      ]       8/311     0x10000   [2K[00:00:00] [=>                                      ]       9/311     0x10000   [2K[00:00:00] [=>                                      ]      10/311     0x10000   [2K[00:00:00] [=>                                      ]      11/311     0x10000   [2K[00:00:00] [=>                                      ]      12/311     0x10000   [2K[00:00:00] [=>                                      ]      13/311     0x10000   [2K[00:00:00] [=>                                      ]      14/311     0x10000   [2K[00:00:00] [=>                                      ]      15/311     0x10000   [2K[00:00:00] [==>                                     ]      16/311     0x10000   [2K[00:00:00] [==>                                     ]      17/311     0x10000   [2K[00:00:00] [==>                                     ]      18/311     0x10000   [2K[00:00:00] [==>                                     ]      19/311     0x10000   [2K[00:00:00] [==>                                     ]      20/311     0x10000   [2K[00:00:00] [==>                                     ]      21/311     0x10000   [2K[00:00:00] [==>                                     ]      22/311     0x10000   [2K[00:00:00] [==>                                     ]      23/311     0x10000   [2K[00:00:00] [===>                                    ]      25/311     0x10000   [2K[00:00:00] [====>                                   ]      37/311     0x10000   [2K[00:00:00] [=====>                                  ]      44/311     0x10000   [2K[00:00:00] [=====>                                  ]      45/311     0x10000   [2K[00:00:00] [=====>                                  ]      46/311     0x10000   [2K[00:00:00] [======>                                 ]      47/311     0x10000   [2K[00:00:00] [======>                                 ]      50/311     0x10000   [2K[00:00:00] [========>                               ]      64/311     0x10000   [2K[00:00:00] [========>                               ]      65/311     0x10000   [2K[00:00:00] [========>                               ]      66/311     0x10000   [2K[00:00:00] [=========>                              ]      77/311     0x10000   [2K[00:00:00] [==========>                             ]      83/311     0x10000   [2K[00:00:00] [============>                           ]      98/311     0x10000   [2K[00:00:00] [=============>                          ]     105/311     0x10000   [2K[00:00:00] [=============>                          ]     106/311     0x10000   [2K[00:00:00] [=============>                          ]     107/311     0x10000   [2K[00:00:01] [===============>                        ]     121/311     0x10000   [2K[00:00:01] [===============>                        ]     124/311     0x10000   [2K[00:00:01] [=================>                      ]     138/311     0x10000   [2K[00:00:01] [==================>                     ]     142/311     0x10000   [2K[00:00:01] [==================>                     ]     143/311     0x10000   [2K[00:00:01] [==================>                     ]     144/311     0x10000   [2K[00:00:01] [====================>                   ]     160/311     0x10000   [2K[00:00:01] [=====================>                  ]     166/311     0x10000   [2K[00:00:01] [======================>                 ]     176/311     0x10000   [2K[00:00:01] [======================>                 ]     177/311     0x10000   [2K[00:00:01] [======================>                 ]     178/311     0x10000   [2K[00:00:01] [========================>               ]     189/311     0x10000   [2K[00:00:01] [=========================>              ]     196/311     0x10000   [2K[00:00:01] [==========================>             ]     209/311     0x10000   [2K[00:00:01] [===========================>            ]     214/311     0x10000   [2K[00:00:01] [===========================>            ]     215/311     0x10000   [2K[00:00:01] [===========================>            ]     216/311     0x10000   [2K[00:00:01] [=============================>          ]     231/311     0x10000   [2K[00:00:01] [=============================>          ]     233/311     0x10000   [2K[00:00:02] [===============================>        ]     248/311     0x10000   [2K[00:00:02] [================================>       ]     249/311     0x10000   [2K[00:00:02] [================================>       ]     250/311     0x10000   [2K[00:00:02] [=================================>      ]     257/311     0x10000   [2K[00:00:02] [==================================>     ]     267/311     0x10000   [2K[00:00:02] [===================================>    ]     278/311     0x10000   [2K[00:00:02] [====================================>   ]     287/311     0x10000   [2K[00:00:02] [=====================================>  ]     288/311     0x10000   [2K[00:00:02] [=====================================>  ]     289/311     0x10000   [2K[00:00:02] [======================================> ]     301/311     0x10000   [2K[00:00:02] [=======================================>]     306/311     0x10000   [2K[00:00:02] [========================================]     311/311     0x10000   [2026-09-06T16:21:45Z INFO ] Flashing has completed!
+Commands:
+    CTRL+R    Reset chip
+    CTRL+C    Exit
+
+ESP-ROM:esp32c6-20220919
+Build:Sep 19 2022
+rst:0x15 (USB_UART_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)
+Saved PC:0x4080054a
+0x4080054a - swint_handler_trampoline
+    at ??:??
+SPIWP:0xee
+mode:DIO, clock div:2
+load:0x4086c410,len:0xd48
+load:0x4086e610,len:0x2d68
+0x4086e610 - fw_esp32c6::board::esp32c6::init::init_board::HEAP
+    at ??:??
+load:0x40875720,len:0x1800
+0x40875720 - fw_esp32c6::board::esp32c6::init::init_board::HEAP
+    at ??:??
+entry 0x4086c410
+I (23) boot: ESP-IDF v5.1-beta1-378-gea5e0ff298-dirt 2nd stage bootloader
+I (23) boot: compile time Jun  7 2023 08:02:08
+I (24) boot: chip revision: v0.2
+I (28) boot.esp32c6: SPI Speed      : 40MHz
+I (33) boot.esp32c6: SPI Mode       : DIO
+I (37) boot.esp32c6: SPI Flash Size : 4MB
+I (42) boot: Enabling RNG early entropy source...
+I (48) boot: Partition Table:
+I (51) boot: ## Label            Usage          Type ST Offset   Length
+I (58) boot:  0 nvs              WiFi data        01 02 00009000 00005000
+I (66) boot:  1 bootctl          Unknown data     01 06 0000e000 00001000
+I (73) boot:  2 phy_init         RF data          01 01 0000f000 00001000
+I (81) boot:  3 factory          factory app      00 00 00010000 00300000
+I (88) boot:  4 lpfs             Unknown data     01 82 00310000 000f0000
+I (96) boot: End of partition table
+I (100) esp_image: segment 0: paddr=00010020 vaddr=42000020 size=1131ch ( 70428) map
+I (123) esp_image: segment 1: paddr=00021344 vaddr=40800000 size=02d98h ( 11672) load
+I (127) esp_image: segment 2: paddr=000240e4 vaddr=00000000 size=0bf34h ( 48948) 
+I (138) esp_image: segment 3: paddr=00030020 vaddr=42020020 size=72348h (467784) map
+I (235) boot: Loaded app from partition at offset 0x10000
+I (235) boot: Disabling RNG early entropy source...
+[INFO] fw_esp32c6::tests::incremental_shader_compile: [inc-shader-compile] === incremental shader compile experiment starting ===
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] compile budget: frontend_steps=1 backend_steps=1
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] --- case=examples-basic ---
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=1 stage= slice_cycles=173595 slice_us=1084 mem_before=321600 free/3936 used mem_after=308508 free/17028 used
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=2 stage= slice_cycles=247192 slice_us=1544 mem_before=308508 free/17028 used mem_after=304620 free/20916 used
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=3 stage= slice_cycles=992434 slice_us=6202 mem_before=304620 free/20916 used mem_after=285536 free/40000 used
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=4 stage= slice_cycles=257700 slice_us=1610 mem_before=285536 free/40000 used mem_after=294252 free/31284 used
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=5 stage= slice_cycles=232624 slice_us=1453 mem_before=294252 free/31284 used mem_after=293516 free/32020 used
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=6 stage= slice_cycles=189921 slice_us=1187 mem_before=293516 free/32020 used mem_after=293188 free/32348 used
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=7 stage= slice_cycles=152176 slice_us=951 mem_before=293188 free/32348 used mem_after=292612 free/32924 used
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=8 stage= slice_cycles=220311 slice_us=1376 mem_before=292612 free/32924 used mem_after=292244 free/33292 used
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=9 stage= slice_cycles=214058 slice_us=1337 mem_before=292244 free/33292 used mem_after=291436 free/34100 used
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=10 stage= slice_cycles=171691 slice_us=1073 mem_before=291436 free/34100 used mem_after=291156 free/34380 used
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=11 stage= slice_cycles=285648 slice_us=1785 mem_before=291156 free/34380 used mem_after=290588 free/34948 used
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=12 stage= slice_cycles=282022 slice_us=1762 mem_before=290588 free/34948 used mem_after=290248 free/35288 used
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=13 stage= slice_cycles=492032 slice_us=3075 mem_before=290248 free/35288 used mem_after=288436 free/37100 used
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=14 stage= slice_cycles=745422 slice_us=4658 mem_before=288436 free/37100 used mem_after=288008 free/37528 used
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=15 stage= slice_cycles=5240 slice_us=32 mem_before=288008 free/37528 used mem_after=288008 free/37528 used
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=16 stage= slice_cycles=88830 slice_us=555 mem_before=288008 free/37528 used mem_after=293460 free/32076 used
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=17 stage= slice_cycles=1679775 slice_us=10498 mem_before=293460 free/32076 used mem_after=302820 free/22716 used
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=18 stage= slice_cycles=397086 slice_us=2481 mem_before=302820 free/22716 used mem_after=294316 free/31220 used
+[INFO] lpvm_native::compile::module_job: [native-compile] stage=SetupModule functions=12
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=19 stage= slice_cycles=1425315 slice_us=8908 mem_before=294316 free/31220 used mem_after=286212 free/39324 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=0 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=20 stage= slice_cycles=1115805 slice_us=6973 mem_before=286212 free/39324 used mem_after=286212 free/39324 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=0 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=21 stage= slice_cycles=1118680 slice_us=6991 mem_before=286212 free/39324 used mem_after=285380 free/40156 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=0 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=22 stage= slice_cycles=1117169 slice_us=6982 mem_before=285380 free/40156 used mem_after=285380 free/40156 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=0 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=23 stage= slice_cycles=1118118 slice_us=6988 mem_before=285380 free/40156 used mem_after=284912 free/40624 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=0 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=24 stage= slice_cycles=1120001 slice_us=7000 mem_before=284912 free/40624 used mem_after=286040 free/39496 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=0 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=25 stage= slice_cycles=1117859 slice_us=6986 mem_before=286040 free/39496 used mem_after=286024 free/39512 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=1 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=26 stage= slice_cycles=1117378 slice_us=6983 mem_before=286024 free/39512 used mem_after=286024 free/39512 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=1 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=27 stage= slice_cycles=1120986 slice_us=7006 mem_before=286024 free/39512 used mem_after=281420 free/44116 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=1 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=28 stage= slice_cycles=1118026 slice_us=6987 mem_before=281420 free/44116 used mem_after=281420 free/44116 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=1 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=29 stage= slice_cycles=1126053 slice_us=7037 mem_before=281420 free/44116 used mem_after=279952 free/45584 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=1 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=30 stage= slice_cycles=1118846 slice_us=6992 mem_before=279952 free/45584 used mem_after=285296 free/40240 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=1 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=31 stage= slice_cycles=1119195 slice_us=6994 mem_before=285296 free/40240 used mem_after=285280 free/40256 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=2 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=32 stage= slice_cycles=1116694 slice_us=6979 mem_before=285280 free/40256 used mem_after=285280 free/40256 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=2 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=33 stage= slice_cycles=1112735 slice_us=6954 mem_before=285280 free/40256 used mem_after=284044 free/41492 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=2 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=34 stage= slice_cycles=1116407 slice_us=6977 mem_before=284044 free/41492 used mem_after=284044 free/41492 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=2 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=35 stage= slice_cycles=1125426 slice_us=7033 mem_before=284044 free/41492 used mem_after=283608 free/41928 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=2 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=36 stage= slice_cycles=1120149 slice_us=7000 mem_before=283608 free/41928 used mem_after=285156 free/40380 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=2 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=37 stage= slice_cycles=1118381 slice_us=6989 mem_before=285156 free/40380 used mem_after=285144 free/40392 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=3 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=38 stage= slice_cycles=1117358 slice_us=6983 mem_before=285144 free/40392 used mem_after=285144 free/40392 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=3 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=39 stage= slice_cycles=1118457 slice_us=6990 mem_before=285144 free/40392 used mem_after=283708 free/41828 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=3 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=40 stage= slice_cycles=1113678 slice_us=6960 mem_before=283708 free/41828 used mem_after=283708 free/41828 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=3 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=41 stage= slice_cycles=1127022 slice_us=7043 mem_before=283708 free/41828 used mem_after=282876 free/42660 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=3 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=42 stage= slice_cycles=1121950 slice_us=7012 mem_before=282876 free/42660 used mem_after=284996 free/40540 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=3 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=43 stage= slice_cycles=1110874 slice_us=6942 mem_before=284996 free/40540 used mem_after=284984 free/40552 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=4 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=44 stage= slice_cycles=1117338 slice_us=6983 mem_before=284984 free/40552 used mem_after=284984 free/40552 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=4 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=45 stage= slice_cycles=1118809 slice_us=6992 mem_before=284984 free/40552 used mem_after=283548 free/41988 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=4 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=46 stage= slice_cycles=1118536 slice_us=6990 mem_before=283548 free/41988 used mem_after=283548 free/41988 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=4 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=47 stage= slice_cycles=1126817 slice_us=7042 mem_before=283548 free/41988 used mem_after=282716 free/42820 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=4 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=48 stage= slice_cycles=1121034 slice_us=7006 mem_before=282716 free/42820 used mem_after=284836 free/40700 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=4 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=49 stage= slice_cycles=1118808 slice_us=6992 mem_before=284836 free/40700 used mem_after=284824 free/40712 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=5 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=50 stage= slice_cycles=1113456 slice_us=6959 mem_before=284824 free/40712 used mem_after=284824 free/40712 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=5 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=51 stage= slice_cycles=1120859 slice_us=7005 mem_before=284824 free/40712 used mem_after=283536 free/42000 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=5 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=52 stage= slice_cycles=1117840 slice_us=6986 mem_before=283536 free/42000 used mem_after=283536 free/42000 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=5 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=53 stage= slice_cycles=1115598 slice_us=6972 mem_before=283536 free/42000 used mem_after=282736 free/42800 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=5 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=54 stage= slice_cycles=1121946 slice_us=7012 mem_before=282736 free/42800 used mem_after=284576 free/40960 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=5 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=55 stage= slice_cycles=1119527 slice_us=6997 mem_before=284576 free/40960 used mem_after=284564 free/40972 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=6 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=56 stage= slice_cycles=1117370 slice_us=6983 mem_before=284564 free/40972 used mem_after=284564 free/40972 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=6 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=57 stage= slice_cycles=1122250 slice_us=7014 mem_before=284564 free/40972 used mem_after=283900 free/41636 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=6 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=58 stage= slice_cycles=1117176 slice_us=6982 mem_before=283900 free/41636 used mem_after=283900 free/41636 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=6 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=59 stage= slice_cycles=1127178 slice_us=7044 mem_before=283900 free/41636 used mem_after=283412 free/42124 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=6 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=60 stage= slice_cycles=1115070 slice_us=6969 mem_before=283412 free/42124 used mem_after=284412 free/41124 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=6 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=61 stage= slice_cycles=1119925 slice_us=6999 mem_before=284412 free/41124 used mem_after=284400 free/41136 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=7 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=62 stage= slice_cycles=1115676 slice_us=6972 mem_before=284400 free/41136 used mem_after=284400 free/41136 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=7 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=63 stage= slice_cycles=1123641 slice_us=7022 mem_before=284400 free/41136 used mem_after=283268 free/42268 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=7 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=64 stage= slice_cycles=1117721 slice_us=6985 mem_before=283268 free/42268 used mem_after=283268 free/42268 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=7 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=65 stage= slice_cycles=1125643 slice_us=7035 mem_before=283268 free/42268 used mem_after=282552 free/42984 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=7 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=66 stage= slice_cycles=1119749 slice_us=6998 mem_before=282552 free/42984 used mem_after=284056 free/41480 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=7 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=67 stage= slice_cycles=1118202 slice_us=6988 mem_before=284056 free/41480 used mem_after=284048 free/41488 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=8 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=68 stage= slice_cycles=1114634 slice_us=6966 mem_before=284048 free/41488 used mem_after=284048 free/41488 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=8 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=69 stage= slice_cycles=1120842 slice_us=7005 mem_before=284048 free/41488 used mem_after=282412 free/43124 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=8 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=70 stage= slice_cycles=1110720 slice_us=6942 mem_before=282412 free/43124 used mem_after=282412 free/43124 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=8 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=71 stage= slice_cycles=1126805 slice_us=7042 mem_before=282412 free/43124 used mem_after=281368 free/44168 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=8 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=72 stage= slice_cycles=1119792 slice_us=6998 mem_before=281368 free/44168 used mem_after=283900 free/41636 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=8 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=73 stage= slice_cycles=1122244 slice_us=7014 mem_before=283900 free/41636 used mem_after=283888 free/41648 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=9 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=74 stage= slice_cycles=1116836 slice_us=6980 mem_before=283888 free/41648 used mem_after=283888 free/41648 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=9 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=75 stage= slice_cycles=1122519 slice_us=7015 mem_before=283888 free/41648 used mem_after=280068 free/45468 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=9 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=76 stage= slice_cycles=1118147 slice_us=6988 mem_before=280068 free/45468 used mem_after=280068 free/45468 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=9 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=77 stage= slice_cycles=1258504 slice_us=7865 mem_before=280068 free/45468 used mem_after=277404 free/48132 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=9 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=78 stage= slice_cycles=1121983 slice_us=7012 mem_before=277404 free/48132 used mem_after=283120 free/42416 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=9 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=79 stage= slice_cycles=1118896 slice_us=6993 mem_before=283120 free/42416 used mem_after=283108 free/42428 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=10 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=80 stage= slice_cycles=1123878 slice_us=7024 mem_before=283108 free/42428 used mem_after=283108 free/42428 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=10 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=81 stage= slice_cycles=1134177 slice_us=7088 mem_before=283108 free/42428 used mem_after=281704 free/43832 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=10 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=82 stage= slice_cycles=1130613 slice_us=7066 mem_before=281704 free/43832 used mem_after=281704 free/43832 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=10 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=83 stage= slice_cycles=1139370 slice_us=7121 mem_before=281704 free/43832 used mem_after=280776 free/44760 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=10 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=84 stage= slice_cycles=1133394 slice_us=7083 mem_before=280776 free/44760 used mem_after=282800 free/42736 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=10 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=85 stage= slice_cycles=1125284 slice_us=7033 mem_before=282800 free/42736 used mem_after=282776 free/42760 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=11 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=86 stage= slice_cycles=1130099 slice_us=7063 mem_before=282776 free/42760 used mem_after=282776 free/42760 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=11 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=87 stage= slice_cycles=1134001 slice_us=7087 mem_before=282776 free/42760 used mem_after=281676 free/43860 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=11 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=88 stage= slice_cycles=1135497 slice_us=7096 mem_before=281676 free/43860 used mem_after=281676 free/43860 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=11 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=89 stage= slice_cycles=1139452 slice_us=7121 mem_before=281676 free/43860 used mem_after=280968 free/44568 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=11 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=90 stage= slice_cycles=1125354 slice_us=7033 mem_before=280968 free/44568 used mem_after=282500 free/43036 used
+[INFO] lpvm_native::compile::module_job: [native-compile] function=11 stage= done
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=91 stage= slice_cycles=1131832 slice_us=7073 mem_before=282500 free/43036 used mem_after=282476 free/43060 used
+[INFO] lpvm_native::compile::module_job: [native-compile] stage=AssembleModule completed_functions=12
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic tick=92 stage= slice_cycles=1875861 slice_us=11724 mem_before=282476 free/43060 used mem_after=306604 free/18932 used
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic finished ticks=92 total_cycles=91001222 total_us=568757 max_slice_cycles=1875861 max_slice_us=11724 max_slice_stage= heap_start=321600 free/3936 used heap_peak_used=48132 heap_resident=306604 free/18932 used
+[WARN] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic exceeded target slice budget: 11724us > 5000us
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] case=examples-basic after_drop=321560 free/3976 used
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] summary case=examples-basic build=568.8ms ticks=92 max_slice=11.7ms max_slice_stage= peak=47.0KiB resident=18.5KiB after_drop=3.9KiB
+[INFO] fw_checks: [fw-check-json] {"kind":"case-summary","check":"shader-compile-stress","case":"examples-basic","build_us":568757,"ticks":92,"max_slice_us":11724,"max_slice_stage":"","peak_used":48132,"resident_used":18932,"after_drop_used":3976}
+[INFO] fw_esp32c6::tests::incremental_shader_compile::runner: [inc-shader-compile] summary total_build=568.8ms cases=1 worst_slice=11.7ms worst_peak=47.0KiB
+[INFO] fw_checks: [fw-check-json] {"kind":"total-summary","check":"shader-compile-stress","build_us":568757,"cases":1,"worst_slice_us":11724,"worst_peak_used":48132}
+[INFO] fw_esp32c6::tests::incremental_shader_compile: [inc-shader-compile] === DONE ===

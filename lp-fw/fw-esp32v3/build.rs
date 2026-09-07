@@ -31,6 +31,7 @@ fn main() {
 
     emit_build_provenance();
     emit_partition_facts();
+    emit_linker_search_path();
 
     println!("cargo::rustc-check-cfg=cfg(fw_harness)");
     let harness = std::env::vars().any(|(k, _)| k.starts_with("CARGO_FEATURE_TEST_"));
@@ -61,6 +62,23 @@ fn emit_build_provenance() {
     println!("cargo:rustc-env=LP_BUILD_COMMIT={commit}");
     println!("cargo:rustc-env=LP_BUILD_DIRTY={dirty}");
     println!("cargo:rustc-env=LP_BUILD_PROFILE={profile}");
+}
+
+/// Put this crate's directory on the linker search path so esp-hal's
+/// `INCLUDE "rwdata_hook.x"` resolves to `rwdata_hook.x` next to this file.
+///
+/// esp-hal's `ld/sections/rwdata.x` ends the `.data` output section with that
+/// INCLUDE, gated on `ESP_HAL_CONFIG_USE_RWDATA_LD_HOOK` (set in
+/// `.cargo/config.toml`). The INCLUDE is resolved by the linker's `-L` path,
+/// and esp-hal only adds its own OUT_DIR — a firmware that wants to supply the
+/// hook has to add its own directory, which is all this does.
+///
+/// See `rwdata_hook.x` for what the hook keeps in RAM and why.
+fn emit_linker_search_path() {
+    println!(
+        "cargo:rustc-link-search={}",
+        PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR")).display()
+    );
 }
 
 fn git_output(args: &[&str]) -> Option<String> {

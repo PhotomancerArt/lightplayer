@@ -44,7 +44,7 @@ pub use app::devices::{
     RememberedView, RosterSplit, StagedPush, device_chip, device_escape_action,
     device_firmware_line, device_identity_line, device_status_kind, firmware_face_preview_sentence,
     firmware_verb, first_bundled_example_id, flash_offer, flash_offer_for, pending_escape_action,
-    pending_firmware_line, push_offer, reflash_choice, split_roster,
+    pending_firmware_line, pending_identity_rows, push_offer, reflash_choice, split_roster,
 };
 pub use app::docs_host::DocsSimHost;
 pub use app::home::{
@@ -88,10 +88,10 @@ pub use app::preview_host::{
 pub use app::project::{
     AgentEngineStatus, AssetContentFetchOp, AssetEditOp, DirtySummary, EDIT_JOURNAL_CAP,
     EDITOR_META_PATH, EditorMetaFetchOp, EditorMetaFixture, EditorMetaOp, EditorMetaSet,
-    EditorMetaVerb, FROZEN_PREVIEW_PHASE, LoadedProjectChoice, MAX_ASSET_BODY_BYTES,
-    ModuleExportOp, ModuleHeroProduct, NodeCardDrawer, NodeCardUiState, NodeClearDebugOp,
-    NodeController, NodeControllerState, NodeCopyOp, NodeCreateOp, NodeImportOp, NodePasteOp,
-    NodeRemoveOp, NodeRevertOp, NodeUiOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp,
+    EditorMetaVerb, FROZEN_PREVIEW_PHASE, HISTORY_ROW_CAP, LoadedProjectChoice,
+    MAX_ASSET_BODY_BYTES, ModuleExportOp, ModuleHeroProduct, NodeCardDrawer, NodeCardUiState,
+    NodeClearDebugOp, NodeController, NodeControllerState, NodeCopyOp, NodeCreateOp, NodeImportOp,
+    NodePasteOp, NodeRemoveOp, NodeRevertOp, NodeUiOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp,
     PatchPulseLamps, PatchPulseLanguage, PatchPulseOp, PatchPulseSpace, PatchPulseSubject,
     PatchVerbFixture, PatchVerbKind, PatchVerbOp, PatchVerbSubject, PatchVerbWindow,
     PendingAssetEdit, PendingEdit, PendingEditOp, PendingEditPhase, PlaylistActivateOp,
@@ -104,11 +104,12 @@ pub use app::project::{
     ProjectSyncSummary, SlotController, SlotControllerState, SlotEditOp, SlotKind, UiAddNodeMenu,
     UiAddNodeMenuEntry, UiAffordance, UiArrangeFootprint, UiArrangeMeta, UiArrangeTransform,
     UiAssetContent, UiAssetContentBody, UiAttachTarget, UiEditJournalEntry, UiEditJournalEvent,
-    UiEditorMode, UiImportablePattern, UiNodeRemovePreflight, UiPatchChasePreview, UiPatchInstance,
-    UiPatchSurface, UiPatchSurfaceFixture, UiPatchSurfaceModule, UiPatchSurfaceOutput,
-    UiPatchTarget, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiPreviewSpaces,
-    UiProductSpaceRequest, UiProjectManifest, UiSelection, UiShaderError, UiTimebaseRead,
-    chase_preview, editor_meta_artifact, preview_phase, visual_probe_request,
+    UiEditorMode, UiHistoryKind, UiImportablePattern, UiNodeRemovePreflight, UiPatchChasePreview,
+    UiPatchInstance, UiPatchSurface, UiPatchSurfaceFixture, UiPatchSurfaceModule,
+    UiPatchSurfaceOutput, UiPatchTarget, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase,
+    UiPreviewSpaces, UiProductSpaceRequest, UiProjectHistory, UiProjectHistoryEntry,
+    UiProjectManifest, UiSelection, UiShaderError, UiTimebaseRead, chase_preview,
+    editor_meta_artifact, preview_phase, visual_probe_request,
 };
 pub use app::rich_object::{
     RichChip, RichLine, RichObjectView, RichRollup, RichSection, RichWeight,

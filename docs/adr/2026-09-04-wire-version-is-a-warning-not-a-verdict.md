@@ -178,6 +178,8 @@ verdict — and a known board's identity includes what it last ran. So:
 - `device_identity_line` reads `IdentityFirmware::{Reported, Remembered,
   None}`: this window's hello first; else, when the window holds no
   verdict about the flash (`Unknown`, `Silent`), the memory as
-  `fw … (last seen)`; a verdict that there is no LightPlayer on the flash
+  `… · last seen` (originally `fw … (last seen)`; reworded when the header
+  went to two rows, ADR 2026-09-03 amendment); a verdict that there is no
+  LightPlayer on the flash
   (Blank, Bootloader, Foreign, NoHello) outranks the memory and reads
   "no firmware".

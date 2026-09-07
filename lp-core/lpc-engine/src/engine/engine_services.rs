@@ -17,7 +17,9 @@ use lpc_hardware::{
 };
 use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
 use lpc_model::{HwEndpointSpec, NodeId, Revision, TreePath};
-use lpc_shared::output::{OutputDriverOptions, OutputFormat, OutputPortHandle, OutputProvider};
+use lpc_shared::output::{
+    OutputDriverOptions, OutputFormat, OutputPortHandle, OutputPortSmoothing, OutputProvider,
+};
 use lpc_shared::time::TimeProvider;
 
 use crate::resource::{RuntimeBufferId, RuntimeBufferStore};
@@ -341,6 +343,32 @@ impl EngineServices {
     ///
     /// Temporarily removes the boxed [`OutputProvider`] from `self` so sinks can be mutated without
     /// violating borrow rules.
+    /// What the provider took from this output node's smoothing — the
+    /// most-reduced of its open wires, or `None` when every wire runs
+    /// exactly what was authored. The output node wears it as its `Warn`
+    /// status, so a rougher wall is never a silent one.
+    ///
+    /// Asked of the provider live rather than cached on the wire: a port
+    /// opening or closing elsewhere on the board re-tiers this one too, so
+    /// a cache would need refreshing every flush anyway, and the per-wire
+    /// field was 24 B of heap per wire on every board — including the ones
+    /// whose provider never reduces (the emulator's heap ratchet noticed).
+    /// Called once per output per tick; each wire costs one lookup.
+    pub fn output_smoothing_notice(&self, node: NodeId) -> Option<OutputPortSmoothing> {
+        let provider = self.output_provider.as_deref()?;
+        self.output_sinks
+            .values()
+            .filter(|sink| sink.node == node)
+            .flat_map(|sink| sink.wires.iter().filter_map(|wire| wire.port_handle))
+            .filter_map(|handle| provider.port_smoothing(handle))
+            .max_by_key(|notice| {
+                (
+                    notice.interpolation_off_above.is_some(),
+                    notice.dithering_off_above.is_some(),
+                )
+            })
+    }
+
     pub fn flush_dirty_output_sinks(
         &mut self,
         revision: Revision,
@@ -886,7 +914,8 @@ mod tests {
     use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig, OutputPortDef};
     use lpc_model::{HwEndpointSpec, NodeId, OptionSlot, Revision, TreePath, WithRevision};
     use lpc_shared::output::{
-        MemoryOutputProvider, OutputDriverOptions, OutputFormat, OutputPortHandle, OutputProvider,
+        MemoryOutputProvider, OutputDriverOptions, OutputFormat, OutputPortHandle,
+        OutputPortSmoothing, OutputProvider,
     };
 
     use super::EngineServices;
@@ -921,6 +950,64 @@ mod tests {
             "dropping runtime services should release output endpoints"
         );
         assert!(!provider.is_pin_open(18));
+    }
+
+    /// The provider's smoothing notice reaches the node it belongs to and
+    /// no other, exists only for wires with an open port (so the badge
+    /// appears with the first flush), and leaves with the sink. A provider
+    /// that never reduces — the host `MemoryOutputProvider` — yields nothing.
+    #[test]
+    fn output_smoothing_notice_follows_the_provider_per_node() {
+        let notice = OutputPortSmoothing {
+            total_lamps: 1500,
+            interpolation_off_above: Some(500),
+            dithering_off_above: Some(1000),
+        };
+        let recording = Rc::new(RecordingOutputProvider::new());
+        let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
+        services.set_output_provider(Some(Box::new(ReducedSmoothingProvider {
+            inner: SharedRecordingProvider(Rc::clone(&recording)),
+            notice,
+        })));
+
+        let mut buffers = RuntimeBufferStore::new();
+        let buffer_id = buffers.insert(WithRevision::new(
+            Revision::new(1),
+            RuntimeBuffer::output_channels_u16(6, vec![256, 512, 768, 1024, 1280, 1536]),
+        ));
+        services.register_output_sink(buffer_id, node(7), &triple_port_output());
+        assert_eq!(
+            services.output_smoothing_notice(node(7)),
+            None,
+            "nothing is known before the first flush opens the ports"
+        );
+
+        services
+            .flush_dirty_output_sinks(Revision::new(1), &buffers)
+            .expect("flush");
+        assert_eq!(services.output_smoothing_notice(node(7)), Some(notice));
+        assert_eq!(
+            services.output_smoothing_notice(node(8)),
+            None,
+            "another node's badge does not wear this output's trade"
+        );
+
+        services.unregister_output_sink(buffer_id);
+        assert_eq!(services.output_smoothing_notice(node(7)), None);
+
+        // The host provider reduces nothing, and says nothing.
+        let mut host = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
+        host.set_output_provider(Some(Box::new(SharedMemoryOutputProvider(Rc::new(
+            MemoryOutputProvider::new(),
+        )))));
+        host.register_output_sink(
+            buffer_id,
+            node(7),
+            &OutputDef::new(endpoint("ws281x:local:D10")),
+        );
+        host.flush_dirty_output_sinks(Revision::new(1), &buffers)
+            .expect("flush");
+        assert_eq!(host.output_smoothing_notice(node(7)), None);
     }
 
     #[test]
@@ -2078,6 +2165,37 @@ mod tests {
 
         fn hardware_generation(&self) -> u64 {
             0
+        }
+    }
+
+    /// A provider that reports every port it opens as reduced — what the
+    /// classic answers once the board's open lamps cross its limits.
+    struct ReducedSmoothingProvider {
+        inner: SharedRecordingProvider,
+        notice: OutputPortSmoothing,
+    }
+
+    impl OutputProvider for ReducedSmoothingProvider {
+        fn open(
+            &self,
+            endpoint: &HwEndpointSpec,
+            byte_count: u32,
+            format: OutputFormat,
+            options: Option<OutputDriverOptions>,
+        ) -> Result<OutputPortHandle, OutputError> {
+            self.inner.open(endpoint, byte_count, format, options)
+        }
+
+        fn write(&self, handle: OutputPortHandle, data: &[u16]) -> Result<(), OutputError> {
+            self.inner.write(handle, data)
+        }
+
+        fn close(&self, handle: OutputPortHandle) -> Result<(), OutputError> {
+            self.inner.close(handle)
+        }
+
+        fn port_smoothing(&self, _handle: OutputPortHandle) -> Option<OutputPortSmoothing> {
+            Some(self.notice)
         }
     }
 }

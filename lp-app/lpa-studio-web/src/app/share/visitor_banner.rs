@@ -14,6 +14,25 @@
 //! the spike; one line, live palette, no fork nag): their saves go live
 //! for everyone, and the line says exactly that.
 //!
+//! # The strip states; it no longer offers the fork twice
+//!
+//! Relationship-control D2/P5: the project segment's popover owns the
+//! fork-family verb for every standing, and for a visit (a TRANSIENT view
+//! session — the shape every `/p/` View link opens as since the examples
+//! vision) its hero slot is "Fork — make it yours". The pristine strip's
+//! own Fork button was the same offer one row lower, so it retired; the
+//! strip keeps Copy link and says what world the copy is in.
+//!
+//! The EDITED variant keeps its fork, and deliberately. That state is only
+//! reachable on a **persistent tracking copy** (an Edit link, or a
+//! pre-examples-vision View copy the Q4 leave-alone ruling preserves),
+//! which derives as `MineLocal` — the popover offers Duplicate there, not
+//! [`VisitorSession::fork`](super::visitor_session::VisitorSession::fork)'s
+//! fork-at-the-copy's-head with its provenance. Dropping it would take the
+//! only affordance that names what happened to those sessions. Noted for
+//! G1: the honest fix is teaching the derivation about tracking copies, not
+//! deleting the button.
+//!
 //! # State detection is local-first, service-checked
 //!
 //! [`banner_state`] classifies the **last-seen service frontier**
@@ -93,7 +112,8 @@ pub fn should_apply_fast_forward(can_fast_forward: bool, overlay_dirty: bool) ->
 /// What the strip renders — the two §3-A states plus the edit-link line.
 #[derive(Clone, Debug, PartialEq)]
 pub enum VisitorBannerView {
-    /// View-visitor, copy pristine: live tint, Copy link + Fork.
+    /// View-visitor, copy pristine: live tint, Copy link (the fork offer
+    /// is the project popover's now — see the module docs).
     ViewPristine { name: String },
     /// View-visitor, copy edited: warn tint, Discard + Fork-to-keep.
     ViewEdited,
@@ -123,7 +143,6 @@ pub fn VisitorBanner(
                 }
                 span { class: ACTIONS,
                     QuietButton { label: "Copy link", on_press: on_copy_link }
-                    ForkButton { label: "Fork", on_press: on_fork }
                 }
             }
         },
@@ -182,7 +201,9 @@ fn QuietButton(label: &'static str, on_press: Option<EventHandler<()>>) -> Eleme
     }
 }
 
-/// The gradient-primary action — the banner is the fork's home (§3-A note).
+/// The one loud action left in the strip: the diverged tracking copy's
+/// fork. Every other fork offer moved to the project popover's action row
+/// (P5) — see the module docs for why this one stayed.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ForkButton(label: &'static str, on_press: Option<EventHandler<()>>) -> Element {

@@ -195,6 +195,16 @@ test_xt_fp_conformance = ["dep:lp-xt-fp-harness"]
 # Empty on purpose: it rides the default features' dependency cohort (esp-rtos,
 # embassy) and only swaps the entrypoint — run `just fwtest-iexec-esp32v3`.
 test_interrupt_executor = []
+# SRAM0 execute probe (classic RAM track B): does word-written code at
+# `0x4008_8000` execute on the PRO core, does a byte access there fault, is a
+# barrier needed, and what does esp-hal's `_rwtext_len` symbol mean. The
+# measured facts behind `codemem_esp32`'s SRAM0 placement. Empty on purpose,
+# like the interrupt-executor rig: it only swaps the entrypoint — run
+# `just fwtest-sram0-esp32v3 <port>`. Build (touch src/main.rs first when
+# flipping features — same caveat as the probe features above):
+#   cargo build --profile release-esp32v3 --no-default-features \
+#       --features esp32,test_sram0_exec
+test_sram0_exec = []
 
 [dependencies]
 # Pins below come from the experiment repo's `fw/xt-runner-esp32/Cargo.toml`
@@ -212,6 +222,12 @@ esp-bootloader-esp-idf = { version = "0.5.0", features = ["esp32"] }
 # so no build re-enables `global-allocator` and `RetryingHeap` is the one
 # allocator in every feature combination, `radio_ram_probe` included.
 esp-alloc = { version = "0.10.0", default-features = false, features = ["compat", "internal-heap-stats"] }
+
+# Direct dep for `stack_probe::paint`, which masks interrupts while it writes
+# the paint pattern into the unused main stack. The implementation comes from
+# esp-hal (already in the tree); this is the trait crate, mirroring
+# fw-esp32c6, whose probe this one is ported from.
+critical-section = "1"
 
 # UART variant, not `jtag-serial`: classic ESP32 has no USB-Serial-JTAG
 # peripheral. `esp-println`'s `uart` feature only writes UART0's FIFO — it

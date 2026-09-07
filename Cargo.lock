@@ -3074,8 +3074,6 @@ checksum = "dea2df4cf52843e0452895c455a1a2cfbb842a1e7329671acf418fdc53ed4c59"
 [[package]]
 name = "esp-alloc"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46ced060d4085858283df950b80a4da2348e1707d7d07b1e966308582dae79f5"
 dependencies = [
  "allocator-api2 0.3.1",
  "cfg-if",
@@ -3920,6 +3918,7 @@ name = "fw-checks"
 version = "40.0.0"
 dependencies = [
  "log",
+ "lps-builtins",
  "serde",
  "serde_json",
 ]
@@ -4083,6 +4082,7 @@ dependencies = [
 name = "fw-esp32v3"
 version = "40.0.0"
 dependencies = [
+ "critical-section",
  "embassy-executor",
  "embassy-futures",
  "embassy-sync 0.8.0",
@@ -5527,6 +5527,7 @@ dependencies = [
  "log",
  "lp-collection 1.0.0",
  "lp-emu-core",
+ "lp-emu-validate",
  "lp-gfx-lpvm",
  "lp-perf",
  "lp-riscv-elf",
@@ -5664,6 +5665,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-emu-esp-common"
+version = "40.0.0"
+dependencies = [
+ "log",
+ "lp-emu-core",
+ "object 0.37.3",
+ "test-log",
+]
+
+[[package]]
+name = "lp-emu-validate"
+version = "40.0.0"
+dependencies = [
+ "anyhow",
+ "regex",
+ "serde",
+ "serde_json",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "lp-gfx"
 version = "40.0.0"
 dependencies = [
@@ -5790,7 +5812,6 @@ dependencies = [
  "lp-emu-abi",
  "lp-perf",
  "lp-recovery",
- "lpc-shared",
 ]
 
 [[package]]

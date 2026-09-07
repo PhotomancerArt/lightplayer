@@ -121,7 +121,7 @@ The guard set differs per backend, and that is itself part of the decision.
 Cranelift guards both the zero divisor and `i32::MIN / -1` because its `sdiv`
 traps on both. Xtensa guards only the zero divisor: its divide already yields
 `i32::MIN` for `i32::MIN / -1` and `0` for `i32::MIN % -1`, verified in
-`lp-xt/lp-xt-emu/src/executor/arith.rs`, which traps only when the divisor is
+`lp-emu/lp-xt-emu/src/executor/arith.rs`, which traps only when the divisor is
 zero and otherwise falls through to `wrapping_div` / `wrapping_rem`. A uniform
 guard on Xtensa would be wasted instructions for a case its hardware already
 gets right. Worth saying honestly: the Xtensa oracle here is this repo's own

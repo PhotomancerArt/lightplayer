@@ -25,7 +25,7 @@ float-f32 = ["lps-builtins/float-f32"]
 
 [dependencies]
 lps-builtins = { path = "../lps-builtins" }
-lp-riscv-emu-guest = { path = "../../lp-riscv/lp-riscv-emu-guest" }
+lp-riscv-emu-guest = { path = "../../lp-emu/lp-riscv-emu-guest" }
 
 [build-dependencies]
 

@@ -243,6 +243,20 @@ pub trait LpGraphics: Send + Sync {
     /// Read all `count × 2` Q16.16 point coordinates back.
     fn read_sample_points(&self, points: &SamplePointsHandle) -> Result<Vec<i32>, GfxError>;
 
+    /// Borrow all `count × 2` coordinate words of `points` in place, to
+    /// write.
+    ///
+    /// Every backend keeps the point buffer host-visible (the CPU backend's
+    /// is engine memory the host addresses directly; the GPU backend's is a
+    /// CPU-side `Vec` its sample pass uploads from), so a consumer streaming
+    /// a product fills each batch straight into the handle — no scratch of
+    /// its own and no per-batch copy (`write_sample_points` is the one-shot
+    /// form). The slice borrows the handle, not the backend.
+    fn sample_points_data_mut<'a>(
+        &self,
+        points: &'a mut SamplePointsHandle,
+    ) -> Result<&'a mut [i32], GfxError>;
+
     /// Allocate a zeroed buffer for `count` RGBA16 sample results.
     fn create_sample_out(&self, count: u32) -> Result<SampleOutHandle, GfxError>;
 
@@ -290,4 +304,21 @@ pub trait LpGraphics: Send + Sync {
 
     /// Zero every channel of `out`.
     fn clear_sample_out(&self, out: &mut SampleOutHandle) -> Result<(), GfxError>;
+
+    /// Points per sampling call this backend prefers.
+    ///
+    /// A consumer streaming a product through [`LpShader::sample_rgba16_bound`]
+    /// sizes its window — sample points, sample out, coordinate scratch — to
+    /// `min(product points, this)`. `u32::MAX` (the default) means "one call
+    /// for the whole product": a GPU sampling call is a device round trip, so
+    /// batching it costs more than it saves. CPU backends answer a small
+    /// constant: a call there is a function call, and a bounded window keeps
+    /// the consumer's residency at O(window) instead of O(points)
+    /// (`docs/adr/2026-09-06-direct-sampling-bounded-batches.md`).
+    ///
+    /// Decorators forward this. One that does not silently un-batches its
+    /// inner backend — the bytes stay right, the memory does not.
+    fn sample_batch_capacity(&self) -> u32 {
+        u32::MAX
+    }
 }

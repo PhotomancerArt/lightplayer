@@ -102,6 +102,15 @@ pub fn PopoverButton(
     #[props(default = String::new())] chrome_class: String,
     #[props(default = PopoverPlacement::BottomEnd)] placement: PopoverPlacement,
     #[props(default = false)] initially_open: bool,
+    /// Controlled mode: the CALLER owns the open state. The popover reads
+    /// and writes this signal instead of its internal one — the trigger
+    /// still toggles it, the backdrop still clears it — so several sibling
+    /// controls can drive ONE panel (the header session·project control's
+    /// segments-as-tabs, relationship-control D15). The caller should keep
+    /// `initially_open` in agreement with the signal's initial value (the
+    /// entrance animation's start state reads the prop).
+    #[props(default = None)]
+    open_signal: Option<Signal<bool>>,
     /// Anchored mode: id of the in-flow element whose rect anchors the
     /// merged outline (instead of the trigger button's own rect).
     #[props(default = None)]
@@ -133,7 +142,10 @@ pub fn PopoverButton(
     min_panel_width_px: Option<f64>,
     children: Element,
 ) -> Element {
-    let mut open = use_signal(|| initially_open);
+    // The uncontrolled signal always exists (hooks are unconditional); a
+    // controlled caller's signal simply shadows it everywhere below.
+    let internal_open = use_signal(|| initially_open);
+    let mut open = open_signal.unwrap_or(internal_open);
     use_context_provider(|| PopoverCloseHandle { open });
     let trigger_id = use_hook(|| {
         let id = NEXT_POPOVER_ID.fetch_add(1, Ordering::Relaxed);

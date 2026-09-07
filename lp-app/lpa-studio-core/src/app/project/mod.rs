@@ -42,6 +42,7 @@ pub mod project_controller;
 pub mod project_editor_op;
 pub mod project_editor_target;
 pub mod project_editor_view;
+pub mod project_history_view;
 pub mod project_inventory_summary;
 pub mod project_node_tree_view;
 pub mod project_op;
@@ -96,6 +97,9 @@ pub use project_controller::{
 pub use project_editor_op::ProjectEditorOp;
 pub use project_editor_target::ProjectEditorTarget;
 pub use project_editor_view::{ProjectEditorView, UiProjectManifest};
+pub use project_history_view::{
+    HISTORY_ROW_CAP, UiHistoryKind, UiProjectHistory, UiProjectHistoryEntry,
+};
 pub use project_inventory_summary::ProjectInventorySummary;
 pub use project_node_tree_view::{
     ProjectNodeStatusTone, ProjectNodeStatusView, ProjectNodeTreeItem, ProjectNodeTreeView,

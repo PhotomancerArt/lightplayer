@@ -801,6 +801,34 @@ clippy-fw-esp32s3:
     cargo clippy --release --no-default-features \
         --features esp32s3,server,test_xt_jit_corpus -- --no-deps -D warnings
 
+# The ISR-in-RAM guard for fw-esp32v3: which RAM-resident functions load a
+# constant out of FLASH.
+#
+# Putting a function in IRAM is only half of the ISR-in-RAM rule (see the memory
+# note `isr-path-in-ram-rule`). On Xtensa the constants it cannot encode as
+# immediates come through `l32r`, and that literal pool can be in flash even
+# when the code is not — a cache miss in the middle of an interrupt, which is
+# precisely what the rule forbids. Attributes do not answer this at
+# `opt-level=z`; the linked image does.
+#
+# The committed table next to it is the contract. `.data` placement decisions
+# (esp-hal's `place-switch-tables-in-ram`, the `rwdata_hook.x` beside it) are
+# allowed to move constants to flash — but never a constant that an
+# interrupt-path function reads. Run this after any such change; a nonzero exit
+# names the functions that regressed.
+#
+#   just iram-flash-literals-esp32v3                     # check against the baseline
+#   just iram-flash-literals-esp32v3 --write-baseline    # re-bless it, deliberately
+iram-flash-literals-esp32v3 *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir xtensa-esp32-elf-gcc)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    python3 scripts/iram-flash-literals.py {{ fw_esp32v3_elf }} \
+        --baseline {{ fw_esp32v3_dir }}/iram-flash-literals.baseline.txt {{ args }}
+
 # Lint gate for fw-esp32v3, mirroring clippy-fw-esp32s3. Separate from
 # `clippy-host` for the same reason as the S3: the crate is excluded there
 # (it cross-compiles for Xtensa under a different toolchain), so nothing else
@@ -849,7 +877,7 @@ clippy-fw-esp32v3:
     # whole app path out, so linting the defaults leaves harness code completely
     # uncovered. That is exactly how 13 fw-esp32 harnesses once rotted
     # uncompiled. Add new `test_*` features to this list.
-    for feat in test_xt_fp_conformance test_interrupt_executor; do
+    for feat in test_xt_fp_conformance test_interrupt_executor test_sram0_exec; do
       echo "clippy: --features $feat"
       cargo clippy --profile release-esp32v3 --features "$feat" -- --no-deps -D warnings
     done
@@ -1113,7 +1141,7 @@ fwtest-loopback-esp32s3 port="":
 # family or grid; 0 runs all of it.
 #
 # ORDERING RULE, same as fwtest-xt-jit-esp32s3 and for the same reason: the host
-# predictions in `lp-xt/lp-xt-emu/tests/fixtures/fp/` are committed FIRST, by
+# predictions in `lp-emu/lp-xt-emu/tests/fixtures/fp/` are committed FIRST, by
 # `cargo test -p lp-xt-emu --test fp_conformance`, which needs no board. A
 # device disagreement is a finding to triage — never a reason to edit a golden.
 # Regenerating a prediction from device output turns the whole campaign into a
@@ -1251,6 +1279,51 @@ fwtest-iexec-esp32v3 port="":
     echo "--- [IEXEC] lines ---"
     grep -a 'IEXEC' "$out" || echo "NO IEXEC OUTPUT (see $out)"
 
+# SRAM0 execute probe on the classic (classic RAM track B): flashes the
+# `test_sram0_exec` harness and captures its `[SRAM0]` fact lines. The byte-
+# access fact deliberately faults and resets the chip; the SECOND boot reports
+# it and prints `END-SRAM0`, so the capture spans two boots — read the whole
+# file, not only the tail. Foreground flash + pty'd monitor for the same chip
+# reasons as the FP recipe.
+fwtest-sram0-esp32v3 port="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir xtensa-esp32-elf-gcc)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    mkdir -p target/fp-capture
+    out="target/fp-capture/sram0-v3-$(date +%Y%m%d-%H%M%S).txt"
+    (cd {{ fw_esp32v3_dir }} && touch src/main.rs && \
+      cargo build --profile release-esp32v3 --no-default-features --features esp32,test_sram0_exec)
+    args=(--chip esp32 --partition-table {{ fw_esp32v3_dir }}/partitions.csv --flash-size {{ v3_flash_size }} --monitor --monitor-baud 921600 --after hard-reset)
+    if [[ -n "{{ port }}" ]]; then
+      args+=(--port "{{ port }}")
+    fi
+    echo "capturing to $out"
+    : > "$out"
+    # The SIGINT is scoped to THIS port when one was given: an unscoped
+    # `pkill -f 'espflash flash'` kills every espflash on the machine,
+    # including another board's mid-write flash (two classic lanes ran in
+    # parallel on 2026-09-05 and found out).
+    if [[ -n "{{ port }}" ]]; then
+      pkill_pattern='espflash flash.*--port {{ port }}'
+    else
+      pkill_pattern='espflash flash.*--chip esp32'
+    fi
+    (
+      for _ in $(seq 1 180); do
+        if grep -q 'END-SRAM0' "$out" 2>/dev/null; then break; fi
+        sleep 1
+      done
+      pkill -INT -f "$pkill_pattern" || true
+    ) &
+    watcher=$!
+    script -q "$out" espflash flash "${args[@]}" {{ fw_esp32v3_elf }} || true
+    kill "$watcher" 2>/dev/null || true
+    echo "--- [SRAM0] lines ---"
+    grep -a 'SRAM0\|Exception\|PANIC\|msg:' "$out" || echo "NO SRAM0 OUTPUT (see $out)"
+
 fwtest-xt-fp-esp32v3 port="" family="" limit="0":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1315,7 +1388,7 @@ fwtest-xt-fp-esp32v3 port="" family="" limit="0":
       just fp-diff "$out"
     else
       echo "$mode capture done; compare it against the S3's committed capture in"
-      echo "lp-xt/lp-xt-emu/tests/fixtures/fp/captures/ — there is no host prediction."
+      echo "lp-emu/lp-xt-emu/tests/fixtures/fp/captures/ — there is no host prediction."
     fi
 
 # Diff an FP conformance capture against the committed host predictions.
@@ -1522,7 +1595,7 @@ esp-stack-sizes pattern="": install-rv32-target
 
 # riscv32: emu-guest-test-app
 build-rv32-emu-guest-test-app: install-rv32-target
-    cd lp-riscv/lp-riscv-emu-guest-test-app && RUSTFLAGS="-C target-feature=-c" cargo build --target {{ rv32_target }} --release
+    cd lp-emu/lp-riscv-emu-guest-test-app && RUSTFLAGS="-C target-feature=-c" cargo build --target {{ rv32_target }} --release
 
 # riscv32: fw-emu (firmware that runs in RISC-V emulator)
 build-fw-emu: install-rv32-target
@@ -1695,9 +1768,22 @@ check-lpc-engine-gates:
     cargo test -p lpc-engine --no-default-features --features "std,$on" \
         disabled_node_kind_still_loads_project
 
+# lpa-studio-core's minimal shape: the lib alone, default features, no
+# dev-deps. Nothing else in the repo compiles it — `cargo test` unifies the
+# dev-only `fake-device` feature of lpa-link in, the wasm app unifies the
+# browser features in, and a workspace-wide `just check` unifies everything —
+# so a call into a feature-gated lpa-link module (the `device_link` demux tap
+# in `app/devices/device_effects.rs`, 2026-09) broke `cargo check -p
+# lpa-studio-core` for a while with every green gate. Same rot shape as the
+# lpc-engine gates above: the configuration nobody builds is the one that
+# breaks. Wired into `check-lint` (and so CI's Lint job).
+check-studio-core-minimal:
+    echo "==> lpa-studio-core: lib only, default features"
+    cargo check -p lpa-studio-core
+
 # riscv32: emu-guest-test-app clippy
 clippy-rv32-emu-guest-test-app: install-rv32-target
-    cd lp-riscv/lp-riscv-emu-guest-test-app && cargo clippy --target {{ rv32_target }} --release -- --no-deps -D warnings
+    cd lp-emu/lp-riscv-emu-guest-test-app && cargo clippy --target {{ rv32_target }} --release -- --no-deps -D warnings
 
 clippy: clippy-host clippy-rv32
 
@@ -1896,7 +1982,7 @@ test-glsl-filetests:
 # (which need chip builds this gate deliberately avoids). Note the narrow
 # residue: drift unique to the emu fixture itself is only caught locally.
 [parallel]
-check-lint: fmt-check clippy check-lpc-engine-gates lint-serde-content lint-schemars-fw lint-upgrade-fw lint-torture-corpus lint-vec-corpus lint-tw-utilities
+check-lint: fmt-check clippy check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
@@ -1940,6 +2026,21 @@ lint-schemars-fw:
 # refuses old project formats, it never migrates them; see script).
 lint-upgrade-fw:
     ./scripts/check-upgrade-fw.sh
+
+# The lp-emu MIT fence: everything under lp-emu/ declares MIT and imports no
+# AGPL product crate. Vision D2 / plan PD2; the allowlist of edges out of the
+# fence lives in the script, one line of reason each.
+lint-emu-fence:
+    ./scripts/check-emu-fence.sh
+
+# The generated `RegNames` tables (offset -> register name) are derived from
+# the esp32c6 PAC's svd2rust offset comments and carry a provenance header.
+# A hand edit is reverted by the next regeneration and takes its provenance
+# with it, so this checks them the way `lint-vec-corpus` checks the shader
+# corpus. It prints a notice and passes when the PAC sources are not in this
+# machine's cargo registry — see the script's header for why.
+lint-emu-regnames:
+    python3 scripts/emu/pac-regnames.py --check
 
 # Build RV32 builtins before check/build/test so host crates that embed the
 # builtins ELF do not compile a stale "builtins missing" artifact.
@@ -2199,6 +2300,14 @@ fixture-fw variant port="":
 device-scenario *args:
     node scripts/device-scenario.mjs {{ args }}
 
+# The hardware-validation system: payloads, configurations, transcripts,
+# replay. `just validate list` with no other args; `replay <transcript>
+# --against <transcript|configuration>`; `run <set> --config <name> --port …
+# [--dry-run]`; `record <set> --config <name> --commit …`. See
+# lp-emu/lp-emu-validate/README.md. Never opens a port on `list` or `replay`.
+validate *args:
+    cargo run -q -p lp-cli -- validate {{ args }}
+
 # ============================================================================
 # Demo projects
 # ============================================================================
@@ -2276,6 +2385,21 @@ fwtest-gpio-calibrate-esp32c6: install-rv32-target
     port="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32c6)"
     echo "Using ESPFLASH_PORT=$port"
     cd lp-fw/fw-esp32c6 && ESPFLASH_PORT="$port" cargo run --features test_gpio_calibrate,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
+
+# Build the UART bridge harness, the lab's USB-to-UART tap (fast=1 -> 921,600)
+fwtest-uart-bridge-esp32c6 fast="": install-rv32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # BUILD ONLY, and the missing flash step is the point: the bench that wants
+    # this has TWO identical C6s on it, and `fwcheck port` can only say that a
+    # C6 is present, not which one. Putting the bridge on the board under test
+    # destroys the measurement in silence, so the flash lives in
+    # scripts/emu/uart-bridge-flash.sh, which takes a MAC and refuses to guess.
+    features="test_uart_bridge,esp32c6"
+    if [[ -n "{{ fast }}" ]]; then features="$features,uart_bridge_fast"; fi
+    cd lp-fw/fw-esp32c6 && cargo build --features "$features" --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
+    echo "built {{ fw_esp32c6_elf }} with $features"
+    echo "flash it with: scripts/emu/uart-bridge-flash.sh <bridge-MAC>"
 
 # Flash GPIO calibration firmware, then run the host-side GPIO calibration prompt
 calibrate-gpio board="seeed/xiao-esp32-c6" label="": install-rv32-target

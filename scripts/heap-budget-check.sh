@@ -38,6 +38,14 @@ cd "$(dirname "$0")/.."
 
 RECORD="scripts/heap-budget-record.json"
 MODES=(startup steady-render)
+# Emulator cycle cap per profile session. The startup capture must reach the
+# END of the frame that contains the first shader compile; a capture the cap
+# cuts short leaves that window OPEN, and an open window's figures are an
+# artifact of where the cap fell (meteor's compile begins ~165M cycles in
+# and needs well past 200M — docs/defects/2026-09-06-heap-budget-capture-
+# truncated-by-cycle-cap.md). `budget_for` refuses a truncated capture rather
+# than comparing or recording its numbers.
+MAX_CYCLES=400000000
 # Windows recorded per mode. Startup records everything the trace has;
 # steady-render captures after the compile, so its other windows would only
 # record zeros.
@@ -52,7 +60,15 @@ command -v jq >/dev/null 2>&1 || {
 # Run one profile session; prints the profile output directory.
 run_profile() {
     local project="$1" mode="$2"
-    cargo run -q -p lp-cli -- profile "$project" --collect alloc --mode "$mode" 2>/dev/null | tail -1
+    # The safety cap is raised over lp-cli's 200 M default: the per-marker
+    # free-list walk grows with the guest's free heap, and a startup run of
+    # zook-dome crossed 200 M cycles mid-walk on 2026-09-06 (after the sample
+    # window change freed ~21 KB), which silently drops the last window's
+    # free-list figures. See docs/heap-budget-gate.md "Cost". Meteor's startup
+    # capture never fit the default at all (`MAX_CYCLES` above); a session
+    # that still hits the cap is refused by `budget_for`.
+    cargo run -q -p lp-cli -- profile "$project" --collect alloc --mode "$mode" \
+        --max-cycles "$MAX_CYCLES" 2>/dev/null | tail -1
 }
 
 budget_for() {
@@ -62,6 +78,15 @@ budget_for() {
     local budget="${dir}/budget.json"
     if [ ! -f "$budget" ]; then
         echo "::error::heap-budget: ${project} (${mode}): no budget.json at ${dir} (was --collect alloc dropped?)" >&2
+        exit 1
+    fi
+    # A capture the cycle cap ended is not a measurement: the window it cut
+    # is still open and its figures depend on where the cap fell, not on
+    # what the window costs. Refuse it in both `check` and `baseline`.
+    local terminated_by
+    terminated_by="$(jq -r '.terminated_by // empty' "${dir}/meta.json" 2>/dev/null || true)"
+    if [ "$terminated_by" = "max_cycles" ]; then
+        echo "::error::heap-budget: ${project} (${mode}): capture hit --max-cycles ${MAX_CYCLES} before the mode's gate closed (${dir}); its figures are truncation artifacts. Raise MAX_CYCLES in scripts/heap-budget-check.sh." >&2
         exit 1
     fi
     echo "$budget"

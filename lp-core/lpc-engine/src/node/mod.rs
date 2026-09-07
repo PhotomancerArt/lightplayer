@@ -14,13 +14,8 @@ pub mod node_tree;
 mod render_node;
 mod runtime_state_shape;
 pub mod scope;
-// Every current caller is a feature-gated node runtime, so the helper is
-// gated on their union to keep minimal builds warning-clean.
-#[cfg(any(
-    feature = "node-fixture",
-    feature = "node-playlist",
-    feature = "node-shader"
-))]
+// Fallible sizing for resident tick-path scratches: used by every node with a
+// per-frame buffer, the always-on output node included, so it is not gated.
 mod scratch;
 pub mod sync;
 pub mod tree_error;
@@ -41,11 +36,6 @@ pub use node_tree::RuntimeNodeTree;
 pub use render_node::RenderNode;
 pub use runtime_state_shape::RuntimeStateShape;
 pub use scope::ScopeRef;
-#[cfg(any(
-    feature = "node-fixture",
-    feature = "node-playlist",
-    feature = "node-shader"
-))]
 pub(crate) use scratch::ensure_scratch_len;
 pub use sync::{tree_deltas_since, tree_deltas_since_iter};
 pub use tree_error::TreeError;
