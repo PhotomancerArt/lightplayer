@@ -366,19 +366,45 @@ fn g3_1b_a_port_held_closed_after_the_replug_holds_a_packet_until_it_opens() {
         (9_000..13_000).contains(&not_draining),
         "the latch is stamped at {not_draining} ms, outside the window the port was closed"
     );
+    // The recovery is **the first probe that finds the endpoint free**, and
+    // that is the whole assertion: at or after the open, never before it,
+    // and within one probe interval of it.
+    //
+    // Not "strictly after the open", which is what this first said and what
+    // CI caught. After the latch the firmware's only traffic is one `\n`
+    // every `PROBE_INTERVAL` (io_task, 2 s), and while the port is closed
+    // even that byte is dropped into the still-committed endpoint. So which
+    // millisecond the recovery lands on is decided by where that 2 s grid
+    // falls relative to the open, and the grid is anchored at io_task's
+    // start — a few milliseconds of boot that differ between two builds of
+    // the firmware. This machine's grid sits at 12,899 / 14,899 ms, so the
+    // open at 13,000 just misses one probe and waits 1,899 ms for the next;
+    // CI's sits within the same millisecond as the open, so it recovers at
+    // 13,000. Both are the same behaviour seen from either side of a
+    // one-millisecond boundary, and pinning either number would be pinning
+    // the build, not the firmware.
+    const PROBE_INTERVAL_MS: u32 = 2_000;
     assert!(
-        again > 13_000 && again > not_draining,
-        "the recovery is stamped at {again} ms, not after the open at 13,000 ms"
+        again >= 13_000,
+        "the recovery is stamped at {again} ms, before the port opened at 13,000 ms"
     );
-    // The recovery waits for the next 2 s probe rather than landing on the
-    // open: after the latch the firmware's only traffic is one `\n` every
-    // PROBE_INTERVAL, and it is that write succeeding that flips the latch
-    // back. So the recorded latency is the firmware's cadence, not the
-    // model's — which is exactly the sort of number the emulator may report
-    // and may not gate (PD9/D13, DD33).
+    assert!(
+        again > not_draining,
+        "the recovery at {again} ms precedes the latch at {not_draining} ms"
+    );
+    assert!(
+        again <= 13_000 + PROBE_INTERVAL_MS,
+        "the recovery is stamped at {again} ms, more than one {PROBE_INTERVAL_MS} ms probe \
+         interval after the open — the probe is the recovery path (M6 discovery §4), so a \
+         longer gap means something else woke the link"
+    );
+    // The latency itself is the firmware's cadence, not the model's, and is
+    // reported rather than gated (PD9/D13, DD33).
     eprintln!(
         "G3-1b link stamps: not_draining {not_draining} ms, draining_again {again} ms \
-         (open at 13,000 ms; the gap is io_task's 2 s probe interval), count {count}"
+         ({} ms after the open at 13,000 ms — the first probe of io_task's \
+         {PROBE_INTERVAL_MS} ms grid to find the endpoint free), count {count}",
+        again - 13_000
     );
 }
 
