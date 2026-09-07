@@ -97,6 +97,10 @@ store (invariant I8) round 2 exists to end.
   the pump resumes; the lens learns about a dead port from its own
   client's failures and from the model ceasing to route the link, which is
   what makes the unplug road (3) the honest one.
+- The device card's live frame feed (`2026-09-06-shared-link-conversations-
+  and-the-card-feed.md`) runs on the SHARED link and never pulls while the
+  lens (or any effect) holds the wire; the card shows its last frame dimmed
+  with "editor has the wire" until the borrow ends.
 
 ## References
 

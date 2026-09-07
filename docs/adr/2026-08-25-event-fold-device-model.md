@@ -205,6 +205,11 @@ renders something honest, and every card carries at least one escape.
   Setup activity plus the user's choices.
 - The crate boundary keeps `lp-cli` adoption possible without forcing it
   in round one.
+- A device link carries a third traffic class since 2026-09-06: app
+  conversations in a reserved request-id range, routed past the fold by
+  the effects layer (`2026-09-06-shared-link-conversations-and-the-card-
+  feed.md`). Frames are not evidence; the fold's `LinkEvent::Passthrough`
+  arm does nothing.
 
 ## Alternatives Considered
 

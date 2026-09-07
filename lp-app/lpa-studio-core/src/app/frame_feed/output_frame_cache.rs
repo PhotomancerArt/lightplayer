@@ -25,7 +25,7 @@
 //! - **Revision-only change detection.** A repeated revision leaves the
 //!   cached preview, and its `Rc`s, exactly as they were.
 //!
-//! The device card's feed (`crate::app::runtime_pool::card_feed`) and the
+//! The device card's feed (`crate::app::frame_feed::card_feed`) and the
 //! preview host's (`crate::app::preview_host::preview_output_feed`) keep the
 //! same guarantees for their own transports; this one owns no pacing, no
 //! connection, and no fallback, because the lens read already has all three.

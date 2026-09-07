@@ -534,7 +534,8 @@ impl FlashActivity {
             LinkEvent::Opened { .. }
             | LinkEvent::Line(_)
             | LinkEvent::ResetOutcome { .. }
-            | LinkEvent::Error(_) => ActivityStep::nothing(),
+            | LinkEvent::Error(_)
+            | LinkEvent::Passthrough { .. } => ActivityStep::nothing(),
         }
     }
 }

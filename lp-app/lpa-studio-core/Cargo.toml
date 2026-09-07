@@ -51,7 +51,9 @@ log = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 zip = { version = "2", default-features = false, features = ["deflate"] }
-async-trait = { version = "0.1", optional = true }
+# Always on: the shared-link conversation io (`app/devices/shared_link_client_io.rs`)
+# implements `lpa_client::ClientIo` on every target, not only the browser ones.
+async-trait = { version = "0.1" }
 js-sys = { version = "0.3", optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 wasm-bindgen-futures = { version = "0.4", optional = true }
@@ -79,7 +81,6 @@ lpa-server = { path = "../lpa-server" }
 # The link e2e tests drive the REAL provider path (DeviceSession over the
 # scripted fake device); the feature is dev-only.
 lpa-link = { path = "../lpa-link", features = ["fake-device"] }
-async-trait = { version = "0.1" }
 # Scripted model-provider streams in the agent e2e tests.
 futures-util = "0.3"
 lpc-shared = { path = "../../lp-core/lpc-shared", features = ["std"] }
@@ -97,7 +98,6 @@ lpfs = { path = "../../lp-base/lpfs", features = ["std"] }  # std for host tests
 default = []
 browser-worker = [
     "lpa-link/browser-worker",
-    "dep:async-trait",
     "dep:js-sys",
     "dep:wasm-bindgen",
     "dep:wasm-bindgen-futures",
@@ -105,7 +105,6 @@ browser-worker = [
 ]
 browser-serial-esp32 = [
     "lpa-link/browser-serial-esp32",
-    "dep:async-trait",
     "dep:js-sys",
     "dep:wasm-bindgen",
     "dep:wasm-bindgen-futures",

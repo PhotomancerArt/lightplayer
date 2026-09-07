@@ -115,6 +115,9 @@ pub fn DevicesPage(
                                 // device's editor address (its registry
                                 // uid); a board still identifying has none.
                                 open_uid: devices.open_addresses.get(&card.id.0).cloned(),
+                                // The board's own picture, joined at the
+                                // app view; absent = the slot's sentence.
+                                feed: devices.feeds.get(&card.id).cloned(),
                                 card,
                                 // The empty face's picker reads the SAME two
                                 // lists the gallery does — there is no
@@ -405,6 +408,7 @@ mod tests {
             roster,
             transport_available,
             open_addresses: Default::default(),
+            feeds: Default::default(),
         }
     }
 
@@ -660,6 +664,7 @@ mod tests {
             remembered_firmware: None,
             degraded: None,
             loaded_project: lpa_studio_core::DeviceLoadedProject::Unknown,
+            engine_fps: None,
             can_receive_project: false,
             can_remove_project: false,
             activity: None,

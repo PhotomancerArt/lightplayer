@@ -9,6 +9,7 @@
 //! covers the library pages and the live sim card.
 
 use dioxus::prelude::*;
+use lpa_studio_core::{DeviceCardFeedView, FeedLiveness};
 use lpa_studio_web_story_macros::story;
 
 use lpa_studio_core::app::library::PackageHealth;
@@ -546,6 +547,57 @@ fn devices_card_states() -> Element {
 }
 
 #[story(
+    description = "The preview slot with the live feed (plan 2026-09-06 device-card-live-feed): the same Running card five times at 400px, each with the board's own published frame (a canned 72-lamp sign) joined at the app view. LIVE — calm green pill \"live · 43 fps\" (the board's engine rate off its heartbeat); STALE — the frame stays, amber \"last frame · 12 s ago\" past the 5 s threshold; OFFLINE — the last in-session frame dimmed and desaturated, neutral \"last frame · 12 s ago\" (last known, not current); LENS — the editor holds the wire, the feed is paused, the last frame dimmed with \"editor has the wire\"; NO LAYOUT — frames arrive but the board's lamp layout exceeded the wire's read budget, so the slot says so instead of painting nothing. The lamp field is aspect-fit and letterboxed INSIDE the fixed 120px slot — the slot never follows the layout's aspect — so all five cards measure exactly the height of `devices_card_states`' cards: the picture arriving moves nothing. Compare against `devices_card_states` for the never-fed sentence."
+)]
+fn devices_card_live_feed() -> Element {
+    let running = card_state_fixtures().remove(0);
+    let (_, card, open_uid) = running;
+    let frame = thumb_lamp_frame();
+    let feed = |liveness: FeedLiveness, with_layout: bool| DeviceCardFeedView {
+        frame: Some(match with_layout {
+            true => frame.clone(),
+            false => UiControlProductPreview {
+                display_layout: None,
+                ..frame.clone()
+            },
+        }),
+        frame_age_secs: Some(12.0),
+        engine_fps: Some(43),
+        liveness,
+    };
+    let looks = [
+        ("Live", feed(FeedLiveness::Live, true)),
+        ("Stale", feed(FeedLiveness::Stale, true)),
+        ("Offline", feed(FeedLiveness::Offline, true)),
+        ("Lens", feed(FeedLiveness::Lens, true)),
+        ("No layout", feed(FeedLiveness::Live, false)),
+    ];
+    rsx! {
+        section { class: "tw:p-4",
+            // Two per row like `devices_card_states`, so the sheet holds
+            // every card whole at the capture width.
+            div { class: "tw:grid tw:grid-cols-[repeat(2,400px)] tw:items-start tw:gap-3",
+                for (label , feed) in looks {
+                    div { key: "{label}", class: "tw:grid tw:gap-2",
+                        p { class: "tw:m-0 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:tracking-wide tw:text-subtle-foreground",
+                            "{label}"
+                        }
+                        DeviceRosterCard {
+                            card: card.clone(),
+                            open_uid: open_uid.clone(),
+                            feed: Some(feed),
+                            projects: packages(),
+                            examples: examples(),
+                            on_action: |_| {},
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[story(
     description = "The pending card at each identification stage, beside a settled neighbour (follow-up filed at the ship of PR #518). The header's identity is the SAME two fixed mono rows the settled card prints — hardware above, binding · firmware below — decided in core per stage (`pending_identity_rows`), so a link still identifying reads like the cards around it instead of one sentence sitting in a two-row slot. NOTHING HEARD (a board parked in ROM or saying nothing): \"chip unknown\" over \"no identity until flashed\" — neither row blank, because an empty first row under an Identifying chip reads as a fault. CHIP ONLY (the boot banner named it, still identifying): \"esp32c6\" over the same sentence, exactly the row a settled pre-hello board prints. CHIP + MAC (the flash preflight probed it, verdict settled blank): \"esp32c6\" over \"60:55:f9:0a:0b:0c · no firmware\" — the settled card's own words the moment a binding exists, and never \"until flashed\" beside a MAC. SETTLED (the running neighbour from devices_card_states) is here for the level check: headers stay 90px, so a pending card's zones start where its neighbour's do (ADR 2026-09-03, amended 2026-09-04). The pending card keeps its own zone set — FIRMWARE + terminal and DEVICE, no project zone — so it is shorter by design; what must line up is the header."
 )]
 fn devices_card_pending() -> Element {
@@ -711,6 +763,7 @@ fn degraded_card_fixture() -> DeviceView {
 fn roster_fixture() -> DeviceRosterView {
     DeviceRosterView {
         transport_available: true,
+        feeds: Default::default(),
         // The running card has earned a registry row, so it has an editor
         // address and the running face wears Open (round-2 M5).
         open_addresses: [(1, "dev000000daqf6dvvqz".to_string())]
@@ -765,6 +818,7 @@ fn roster_fixture() -> DeviceRosterView {
                     degraded: None,
                     // The RUNNING face (M3): what the board itself reports,
                     // named by the storage dir it runs from.
+                    engine_fps: None,
                     loaded_project: DeviceLoadedProject::Running {
                         label: "2026-07-09-1421-porch-sign".to_string(),
                     },
@@ -824,6 +878,7 @@ fn roster_fixture() -> DeviceRosterView {
                     remembered_firmware: None,
                     degraded: None,
                     loaded_project: DeviceLoadedProject::Unknown,
+                    engine_fps: None,
                     // Busy: one activity per device, so no second verb.
                     can_receive_project: false,
                     can_remove_project: false,
@@ -866,6 +921,7 @@ fn roster_fixture() -> DeviceRosterView {
                     remembered_firmware: None,
                     degraded: None,
                     loaded_project: DeviceLoadedProject::Unknown,
+                    engine_fps: None,
                     can_receive_project: false,
                     can_remove_project: false,
                     activity: None,
@@ -913,6 +969,7 @@ fn roster_fixture() -> DeviceRosterView {
                     remembered_firmware: None,
                     degraded: None,
                     loaded_project: DeviceLoadedProject::Empty,
+                    engine_fps: None,
                     can_receive_project: true,
                     // Nothing on it to remove — the empty face's picker is
                     // the verb here.
@@ -971,6 +1028,7 @@ fn roster_fixture() -> DeviceRosterView {
                     remembered_firmware: Some("fw-esp32c6 abc1234".to_string()),
                     degraded: None,
                     loaded_project: DeviceLoadedProject::Unknown,
+                    engine_fps: None,
                     can_receive_project: false,
                     can_remove_project: false,
                     activity: None,
@@ -1022,6 +1080,7 @@ fn roster_page_fixture() -> DeviceRosterView {
     let running = devices.remove(0);
     DeviceRosterView {
         transport_available: true,
+        feeds: Default::default(),
         open_addresses: full.open_addresses,
         roster: RosterView {
             // The blank board's link, the one a fresh plug actually looks
@@ -1095,6 +1154,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
             },
         },
         degraded: Some("Recovery red: /studio.show/s disabled after repeated crashes".to_string()),
+        engine_fps: None,
         loaded_project: DeviceLoadedProject::Running {
             label: "studio".to_string(),
         },
@@ -1191,6 +1251,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         remembered_firmware: None,
         degraded: None,
         loaded_project: DeviceLoadedProject::Unknown,
+        engine_fps: None,
         can_receive_project: false,
         can_remove_project: false,
         activity: None,
@@ -1289,6 +1350,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         remembered_firmware: Some("fw-esp32v3 7c80a27".to_string()),
         degraded: None,
         loaded_project: DeviceLoadedProject::Unknown,
+        engine_fps: None,
         can_receive_project: false,
         can_remove_project: false,
         activity: None,

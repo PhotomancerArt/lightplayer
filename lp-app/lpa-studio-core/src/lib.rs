@@ -36,17 +36,20 @@ pub use app::bus::{
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub use app::devices::BrowserSerialTransport;
 pub use app::devices::{
-    CompletedPush, DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceEffects,
-    DeviceIdentityFirmware, DeviceIdentityLine, DevicePushOp, DeviceRoster, DeviceRosterView,
-    DeviceTaskFuture, DeviceTimerFuture, DeviceTransport, DeviceTransportFuture, DevicesOp,
-    FirmwareVerb, FlashBoardChoice, FlashOffer, GrantedLink, JournalLine, LensLineTap,
-    LensTapEvent, PushOffer, PushPayload, PushSource, PushSourceChoice, PushSourceGroup,
-    RememberedView, RosterSplit, StagedPush, device_chip, device_escape_action,
-    device_firmware_line, device_identity_line, device_status_kind, firmware_face_preview_sentence,
+    CompletedPush, DEVICE_FEED_PARK_AFTER_FAILURES, DeviceCardFeedView, DeviceEffectCall,
+    DeviceEffectFacts, DeviceEffectProgress, DeviceEffects, DeviceFeedOp, DeviceFrameFeed,
+    DeviceFrameFeeds, DeviceIdentityFirmware, DeviceIdentityLine, DevicePushOp, DeviceRoster,
+    DeviceRosterView, DeviceTaskFuture, DeviceTimerFuture, DeviceTransport, DeviceTransportFuture,
+    DevicesOp, FeedLiveness, FirmwareVerb, FlashBoardChoice, FlashOffer, GrantedLink, JournalLine,
+    LensLineTap, LensTapEvent, PushOffer, PushPayload, PushSource, PushSourceChoice,
+    PushSourceGroup, RememberedView, RosterSplit, StagedPush, device_card_feed_view,
+    device_card_feed_views, device_chip, device_escape_action, device_firmware_line,
+    device_identity_line, device_status_kind, feed_liveness, firmware_face_preview_sentence,
     firmware_verb, first_bundled_example_id, flash_offer, flash_offer_for, pending_escape_action,
     pending_firmware_line, pending_identity_rows, push_offer, reflash_choice, split_roster,
 };
 pub use app::docs_host::DocsSimHost;
+pub use app::frame_feed::{CardFeedApply, CardFeedState};
 pub use app::home::{
     CardSheet, CardUiOp, CardUiState, CardVerb, DEFAULT_STRIP_PIXELS, GenerateProjectError,
     GeneratedProject, HOME_NODE_ID, HomeOp, HomePoolEvidence, HomeSimEvidence, ProjectTemplate,
@@ -120,9 +123,8 @@ pub use app::roster::{
     sim_rich_object,
 };
 pub use app::runtime_pool::{
-    CardFeedApply, CardFeedState, DeviceLensAttachment, RuntimeId, RuntimeKind, RuntimeOp,
-    RuntimePayload, RuntimePool, RuntimeSession, SIM_SESSION_CAPACITY, SimAttachment, SimLink,
-    SimLoadedProject,
+    DeviceLensAttachment, RuntimeId, RuntimeKind, RuntimeOp, RuntimePayload, RuntimePool,
+    RuntimeSession, SIM_SESSION_CAPACITY, SimAttachment, SimLink, SimLoadedProject,
 };
 pub use app::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerFailureKind, ServerSnapshot, ServerState,

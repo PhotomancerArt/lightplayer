@@ -34,23 +34,31 @@
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub mod browser_transport;
 pub mod device_affordance;
+pub mod device_card_feed_view;
 pub mod device_effects;
+pub mod device_feed_op;
 pub mod device_firmware_face;
 pub mod device_flash;
+pub mod device_frame_feed;
 pub mod device_identity;
 pub mod device_push;
 pub mod device_records;
 pub mod device_roster;
 pub mod device_transport;
 pub mod devices_op;
+pub mod shared_link_client_io;
 
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub use browser_transport::BrowserSerialTransport;
 pub use device_affordance::{device_escape_action, device_status_kind, pending_escape_action};
+pub use device_card_feed_view::{
+    DeviceCardFeedView, FeedLiveness, device_card_feed_view, device_card_feed_views, feed_liveness,
+};
 pub use device_effects::{
     CompletedPush, DeviceEffects, DeviceTaskFuture, DeviceTimerFuture, PendingWrites, PushPayload,
     StagedPush,
 };
+pub use device_feed_op::DeviceFeedOp;
 pub use device_firmware_face::{
     device_firmware_line, firmware_face_preview_sentence, pending_firmware_line,
 };
@@ -58,6 +66,7 @@ pub use device_flash::{
     FirmwareVerb, FlashBoardChoice, FlashOffer, derive_flash_name, firmware_verb, flash_offer,
     flash_offer_for, reflash_choice, taken_device_titles,
 };
+pub use device_frame_feed::{DEVICE_FEED_PARK_AFTER_FAILURES, DeviceFrameFeed, DeviceFrameFeeds};
 pub use device_identity::{
     DeviceIdentityLine, IdentityFirmware as DeviceIdentityFirmware, IdentityRows, device_chip,
     device_identity_line, pending_identity_rows,
@@ -75,3 +84,4 @@ pub use device_transport::{
     DeviceTransportFuture, GrantedLink, LensLineTap, LensTapEvent,
 };
 pub use devices_op::DevicesOp;
+pub use shared_link_client_io::{ConversationInbox, SharedLinkClientIo};

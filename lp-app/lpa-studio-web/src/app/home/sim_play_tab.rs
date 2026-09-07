@@ -39,6 +39,7 @@ use lpa_studio_core::{
 };
 
 use crate::app::home::card_thumb::thumb_swatch_style;
+pub(crate) use crate::app::home::play_feed_text::frame_age_label;
 use crate::app::node::lamp_view::LampView;
 use crate::base::icon::StudioIconName;
 use crate::base::inline_button::InlineButton;
@@ -225,20 +226,6 @@ pub(crate) fn play_meta_text(card: &UiSimCard, liveness: PlayLiveness) -> Option
             Some(fps) => format!("{} fps from simulator", fps.round() as i64),
             None => "frames from simulator".to_string(),
         }),
-    }
-}
-
-/// A frame age in units that read naturally (the unit-awareness principle):
-/// seconds while seconds are meaningful, then minutes, then hours. A stale
-/// pill counting "412 s" is arithmetic homework.
-pub(crate) fn frame_age_label(age_secs: f64) -> String {
-    let age = age_secs.max(0.0);
-    if age < 90.0 {
-        format!("{} s ago", age.round() as i64)
-    } else if age < 5400.0 {
-        format!("{} min ago", (age / 60.0).round() as i64)
-    } else {
-        format!("{} h ago", (age / 3600.0).round() as i64)
     }
 }
 
