@@ -146,7 +146,12 @@ enum StepOutcome {
 /// Generic over the bus rather than boxing it: the slice loop monomorphizes,
 /// so a `Bus` whose `take_sideband` is the trait default costs nothing per
 /// store. See the module docs for the polling points and the reset contract.
-#[derive(Clone, Debug)]
+/// `Clone` and `Debug` are written out rather than derived: a derive would
+/// add a `B: Clone` / `B: Debug` bound for the sake of a
+/// `PhantomData<fn(&mut B)>`, which needs neither, and a machine could then
+/// not snapshot a hart whose bus is not itself cloneable. Snapshotting the
+/// hart is exactly the case that matters — the clone *is* the architectural
+/// state.
 pub struct MachineHart<B: Bus> {
     regs: [i32; 32],
     pc: u32,
@@ -176,6 +181,43 @@ pub struct MachineHart<B: Bus> {
     /// constructed per instruction so the slice loop stays a loop.
     fp_unused: FpRegs,
     _bus: PhantomData<fn(&mut B)>,
+}
+
+impl<B: Bus> Clone for MachineHart<B> {
+    fn clone(&self) -> Self {
+        Self {
+            regs: self.regs,
+            pc: self.pc,
+            csr: self.csr.clone(),
+            triggers: self.triggers.clone(),
+            instruction_count: self.instruction_count,
+            cycle_count: self.cycle_count,
+            cycle_model: self.cycle_model,
+            hart_id: self.hart_id,
+            wfi: self.wfi,
+            external: self.external,
+            allow_unaligned: self.allow_unaligned,
+            fp_unused: self.fp_unused.clone(),
+            _bus: PhantomData,
+        }
+    }
+}
+
+impl<B: Bus> core::fmt::Debug for MachineHart<B> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("MachineHart")
+            .field("hart_id", &self.hart_id)
+            .field("pc", &format_args!("{:#010x}", self.pc))
+            .field("csr", &self.csr)
+            .field("triggers", &self.triggers)
+            .field("instruction_count", &self.instruction_count)
+            .field("cycle_count", &self.cycle_count)
+            .field("cycle_model", &self.cycle_model)
+            .field("wfi", &self.wfi)
+            .field("external", &self.external)
+            .field("allow_unaligned", &self.allow_unaligned)
+            .finish()
+    }
 }
 
 impl<B: Bus> MachineHart<B> {
@@ -332,6 +374,22 @@ impl<B: Bus> MachineHart<B> {
         }
     }
 
+    /// Jump guest time forward to `cycle` — the deterministic idle skip.
+    ///
+    /// After [`SliceEnd::Wfi`] the hart is parked with nothing to do until
+    /// the scheduler's next event, and simulating the wait one `wfi` at a
+    /// time would burn host seconds to produce no guest state. The machine
+    /// moves the clock instead.
+    ///
+    /// Never moves backwards: a machine that could rewind the cycle counter
+    /// would make `mcycle` non-monotonic, and the one CSR the C6 firmware
+    /// reads for spacing (`PCCR`) reads from it.
+    pub fn advance_to_cycle(&mut self, cycle: u64) {
+        if cycle > self.cycle_count {
+            self.cycle_count = cycle;
+        }
+    }
+
     // --- interrupt input ---------------------------------------------------
 
     /// Tell the hart which CPU interrupt the SoC's matrix currently asserts,
@@ -411,6 +469,9 @@ impl<B: Bus> MachineHart<B> {
             }
 
             let pc = self.pc;
+            // The bus's trace and spin detector are only worth having if the
+            // pc and the cycle on each line are this instruction's.
+            bus.set_issuing(pc, self.cycle_count);
             let inst_word = match bus.fetch_instruction(pc) {
                 Ok(word) => word,
                 Err(e) => match self.deliver_fetch_error(e, pc) {

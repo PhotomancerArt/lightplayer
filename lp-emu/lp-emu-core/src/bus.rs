@@ -34,6 +34,27 @@ pub trait Bus {
     #[inline(always)]
     fn set_watchpoint(&mut self, _slot: usize, _wp: Option<Watchpoint>) {}
 
+    /// Tell the bus which instruction is about to issue accesses, and at
+    /// what cycle.
+    ///
+    /// A bus log is worth having because it says *who* and *when*: `cyc=41288
+    /// pc=0x42009a1c R4 TIMG0+0x068 rtccalicfg` answers "which status bit is
+    /// it spinning on" in one line. Both halves have to arrive per
+    /// instruction to be that line — a machine that set them once per
+    /// scheduler slice would stamp a million accesses with the same value,
+    /// and the unmapped-site dedup (keyed on `(pc, address)`) would collapse
+    /// unrelated sites onto one.
+    ///
+    /// `cycle` is the count *before* this instruction is charged, which is
+    /// the only reading that composes: two accesses one instruction apart
+    /// differ by exactly that instruction's cost.
+    ///
+    /// Called before each instruction the privileged stepper executes. The
+    /// default is empty and inlines away; only a bus that keeps a trace or a
+    /// spin detector implements it.
+    #[inline(always)]
+    fn set_issuing(&mut self, _pc: u32, _cycle: u64) {}
+
     /// Side-band after an MMIO-class access: `true` when the bus's
     /// interrupt state may have changed (an MMIO store). Consumed by the
     /// privileged stepper after Store/System-class instructions only; the

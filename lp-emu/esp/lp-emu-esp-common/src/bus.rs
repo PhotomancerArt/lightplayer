@@ -377,6 +377,10 @@ impl SocBus {
 
     /// Tell the bus which PC is issuing accesses. This is what makes the
     /// trace and the spin detector worth having.
+    ///
+    /// The privileged hart calls it per instruction through
+    /// [`Bus::set_issuing`]; the machine calls it directly only when it
+    /// touches memory on the guest's behalf (a `--probe` read, a snapshot).
     pub fn set_pc(&mut self, pc: u32) {
         self.pc = pc;
     }
@@ -983,6 +987,12 @@ impl Bus for SocBus {
         } else {
             self.armed &= !(1 << slot);
         }
+    }
+
+    #[inline(always)]
+    fn set_issuing(&mut self, pc: u32, cycle: u64) {
+        self.pc = pc;
+        self.now = cycle;
     }
 
     fn take_sideband(&mut self) -> bool {
