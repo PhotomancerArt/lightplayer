@@ -132,7 +132,7 @@ re-squishes).
 
 - ~~Persistent last-frame snapshots (offline cards across app runs) via
   the M6 project-thumb `<img>` seam / LibraryStore metadata~~ — **landed
-  2026-09-07**: not the `<img>` seam (web-only, session cache, no native
+  2026-09-07** (PR #572): not the `<img>` seam (web-only, session cache, no native
   test) but a per-uid sidecar in the library store,
   `/device-frames/<uid>.json` (`app/devices/device_frame_snapshot.rs`):
   the composed frame + display layout + capture stamp, written from the
