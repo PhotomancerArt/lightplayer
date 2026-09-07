@@ -210,16 +210,6 @@ pub fn gpio() -> RegFile {
         .with_read_override(0x05c, 0xffff_ffff, 0)
 }
 
-/// SPI0/SPI1: accept; the flash controller and cache MMU are M4.
-pub fn spi(name: &'static str) -> RegFile {
-    let names = if name == "SPI0" {
-        regs::SPI0
-    } else {
-        regs::SPI1
-    };
-    RegFile::new(name, 0x400).with_names(names)
-}
-
 /// `RMT`: accept. The brief expected the no-radio image not to touch it;
 /// it does — `Rmt::new(rmt_peripheral, RMT_CLOCK)` runs unconditionally in
 /// `main.rs:286` and was the first strict stop of P5 (`RMT+0x068`
@@ -309,7 +299,6 @@ mod tests {
         assert_eq!(uart("UART1").name(), "UART1");
         assert_eq!(uart("UART1").reg_name(0x01c), Some("status"));
         assert_eq!(usb_device().reg_name(0x004), Some("ep1_conf"));
-        assert_eq!(spi("SPI1").name(), "SPI1");
         assert_eq!(extmem().reg_name(0x000).is_some(), true);
     }
 }

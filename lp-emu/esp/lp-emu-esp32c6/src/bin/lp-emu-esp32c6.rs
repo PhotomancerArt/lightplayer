@@ -15,6 +15,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use lp_emu_esp_common::ScriptedSource;
+use lp_emu_esp32c6::flash::FlashBacking;
 use lp_emu_esp32c6::loader::EfuseIdentity;
 use lp_emu_esp32c6::machine::{
     AppSource, Esp32C6Builder, Esp32C6Machine, Outcome, RomSource, StopCondition, TimeGrade,
@@ -45,6 +46,11 @@ OPTIONS:
                             one chunk per line: <ms> then a double-quoted
                             string (\\n \\r \\t \\xNN escapes) or hex bytes
                             (`1500 \"M!{...}\\n\"`, `2000 4d 21 0a`)
+    --flash <file>          the flash chip's bytes: read at start, written back
+                            at exit (created blank if absent) — the board's
+                            flash, surviving a run
+    --flash-copy <file>     the same file read once and never written
+    --flash-size <4M|8M>    the modelled chip's size [4M]
     --usb-sj stderr|file:<path>
                             where USB-Serial-JTAG's IN-endpoint bytes are
                             OBSERVED — what the guest tried to print with no
@@ -92,6 +98,8 @@ struct Args {
     uart0: Uart0Sink,
     uart0_script: Option<PathBuf>,
     usb_sj: UsbSjSink,
+    flash: FlashBacking,
+    flash_len: Option<u32>,
     efuse: EfuseIdentity,
     seed: u64,
     trace: bool,
@@ -118,7 +126,11 @@ fn run() -> Result<ExitCode, String> {
         .efuse(args.efuse)
         .seed(args.seed)
         .uart0(args.uart0.clone())
-        .usb_sj(args.usb_sj.clone());
+        .usb_sj(args.usb_sj.clone())
+        .flash(args.flash.clone());
+    if let Some(len) = args.flash_len {
+        builder = builder.flash_len(len);
+    }
 
     if let Some(rom) = args.rom.clone() {
         builder = builder.rom(RomSource::Path(rom));
@@ -209,6 +221,12 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--uart0" => args.uart0 = parse_uart0(&value("--uart0")?)?,
             "--uart0-script" => args.uart0_script = Some(value("--uart0-script")?.into()),
             "--usb-sj" => args.usb_sj = parse_usb_sj(&value("--usb-sj")?)?,
+            "--flash" => args.flash = FlashBacking::File(value("--flash")?.into()),
+            "--flash-copy" => args.flash = FlashBacking::Copy(value("--flash-copy")?.into()),
+            "--flash-size" => {
+                let text = value("--flash-size")?;
+                args.flash_len = Some(parse_flash_size(&text)?);
+            }
             "--efuse-mac" => args.efuse.mac = EfuseIdentity::parse_mac(&value("--efuse-mac")?)?,
             "--efuse-rev" => {
                 let (major, minor) = EfuseIdentity::parse_rev(&value("--efuse-rev")?)?;
@@ -244,6 +262,31 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
         i += 1;
     }
     Ok(args)
+}
+
+/// `4M`, `8M`, `524288` → bytes. A flash size that is not a power of two is
+/// refused: the JEDEC capacity byte is an exponent, so there is no honest
+/// id for one.
+fn parse_flash_size(text: &str) -> Result<u32, String> {
+    let (digits, scale) = match text.strip_suffix(['M', 'm']) {
+        Some(d) => (d, 1024 * 1024u32),
+        None => match text.strip_suffix(['K', 'k']) {
+            Some(d) => (d, 1024),
+            None => (text, 1),
+        },
+    };
+    let len: u32 = digits
+        .parse::<u32>()
+        .map_err(|e| format!("--flash-size `{text}`: {e}"))?
+        .checked_mul(scale)
+        .ok_or_else(|| format!("--flash-size `{text}` overflows"))?;
+    if !len.is_power_of_two() || len < 64 * 1024 {
+        return Err(format!(
+            "--flash-size `{text}` is {len} bytes; it must be a power of two of at least 64 KiB \
+             (the JEDEC capacity byte is an exponent and the cache pages by 64 KiB)"
+        ));
+    }
+    Ok(len)
 }
 
 /// `5s`, `1500ms`, `900us` → microseconds.
@@ -490,6 +533,18 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
             None => String::new(),
         }
     );
+    let census = machine.flash_census();
+    if census.commands() > 0 || census.status_reads > 0 || machine.cache_fills() > 0 {
+        eprintln!(
+            "flash: {census}; {} page(s) filled into the cache window",
+            machine.cache_fills()
+        );
+    }
+    match machine.flush_flash() {
+        Ok(true) => eprintln!("flash: image written back"),
+        Ok(false) => {}
+        Err(e) => eprintln!("flash: could not write the image back: {e}"),
+    }
     let usb = machine.usb_sj();
     if !usb.is_empty() {
         eprintln!(

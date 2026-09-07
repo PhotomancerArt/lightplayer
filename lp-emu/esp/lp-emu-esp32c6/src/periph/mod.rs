@@ -12,9 +12,11 @@
 //!   honest *no host attached* USB-Serial-JTAG), [`pcr`] (the P5 accept
 //!   block, now also feeding the UART clock lines), [`wifi_stub`] (the radio
 //!   window as one accept block driven by the spin detector).
+//! - **modelled, M4** — [`spi1`] (the legacy flash controller the mask ROM
+//!   drives, against a [`crate::flash::FlashImage`]) and [`spi0`] (the cache
+//!   MMU's item registers, feeding [`crate::cache::CacheMmu`]).
 //! - **not modelled** — left unmapped on purpose, so a strict run stops on
-//!   them: RMT's channels (M5), SPI flash behaviour (M4 — SPI0/SPI1 are
-//!   accept), the attached/draining USB states (M6).
+//!   them: RMT's channels (M5), the attached/draining USB states (M6).
 //!
 //! Every constant that is a *guess* is marked `modeled` where it is defined;
 //! the README's peripheral table repeats the grades.
@@ -25,6 +27,8 @@ pub mod intpri;
 pub mod lp_wdt;
 pub mod pcr;
 pub mod rng;
+pub mod spi0;
+pub mod spi1;
 pub mod systimer;
 pub mod timg;
 pub mod uart;
@@ -34,6 +38,8 @@ pub mod wifi_stub;
 use lp_emu_esp_common::StreamId;
 use lp_emu_esp_common::periph::BoxedPeripheral;
 
+use crate::cache::CacheHandle;
+use crate::flash::FlashHandle;
 use crate::intmatrix::{InterruptCore0View, PlicMxView};
 use crate::loader::EfuseIdentity;
 use crate::memmap::periph as base;
@@ -71,11 +77,14 @@ pub struct HostStreams {
 /// The whole boot set, in [`crate::machine::PERIPHERAL_REGISTRATION_ORDER`].
 ///
 /// `efuse` seeds the EFUSE block; `seed` seeds the RNG; `streams` are the
-/// consoles' outsides. Everything else is the same on every machine.
+/// consoles' outsides; `flash` is the chip SPI1 drives and `mmu` the page
+/// table SPI0 programs. Everything else is the same on every machine.
 pub fn boot_set(
     efuse: EfuseIdentity,
     seed: u64,
     streams: HostStreams,
+    flash: FlashHandle,
+    mmu: CacheHandle,
 ) -> Vec<(u32, u32, BoxedPeripheral)> {
     let clocks = pcr::UartClockLines::default();
     vec![
@@ -132,8 +141,8 @@ pub fn boot_set(
         ),
         (base::IO_MUX, 0x100, Box::new(accept::io_mux())),
         (base::GPIO, 0x700, Box::new(accept::gpio())),
-        (base::SPI0, 0x400, Box::new(accept::spi("SPI0"))),
-        (base::SPI1, 0x400, Box::new(accept::spi("SPI1"))),
+        (base::SPI0, 0x400, Box::new(spi0::Spi0::new(mmu))),
+        (base::SPI1, 0x400, Box::new(spi1::Spi1::new(flash))),
         (base::RMT, 0x400, Box::new(accept::rmt())),
         // The radio window, after RMT: `Rmt::new` runs before esp-radio's
         // init in `main`, so this is the order the boot meets them.

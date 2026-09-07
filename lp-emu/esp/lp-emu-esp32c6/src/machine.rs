@@ -389,6 +389,11 @@ pub struct Esp32C6Builder {
     uart0_source: Option<Box<dyn ByteSource>>,
     usb_sj: UsbSjSink,
     seed: u64,
+    /// Where the flash chip's bytes come from and whether they go back.
+    flash: crate::flash::FlashBacking,
+    /// The modelled chip's size. `--flash` a larger file and the build
+    /// fails rather than truncating it.
+    flash_len: u32,
     /// Register the boot set before `peripherals`.
     boot_set: bool,
     peripherals: Vec<(u32, u32, BoxedPeripheral)>,
@@ -415,6 +420,8 @@ impl Esp32C6Builder {
             uart0_source: None,
             usb_sj: UsbSjSink::default(),
             seed: 0,
+            flash: crate::flash::FlashBacking::Blank,
+            flash_len: crate::flash::DEFAULT_FLASH_LEN,
             boot_set: true,
             peripherals: Vec::new(),
         }
@@ -483,6 +490,22 @@ impl Esp32C6Builder {
         self
     }
 
+    /// Where the flash chip's bytes come from, and whether they go back
+    /// ([`crate::flash::FlashBacking`]). The default is a blank chip that
+    /// lives and dies with the machine.
+    pub fn flash(mut self, backing: crate::flash::FlashBacking) -> Self {
+        self.flash = backing;
+        self
+    }
+
+    /// The modelled chip's size, in bytes. Defaults to
+    /// [`crate::flash::DEFAULT_FLASH_LEN`], which is what the C6 boards
+    /// carry and what `partitions.csv` fills exactly.
+    pub fn flash_len(mut self, len: u32) -> Self {
+        self.flash_len = len;
+        self
+    }
+
     /// Register a peripheral. Order matters — see
     /// [`PERIPHERAL_REGISTRATION_ORDER`].
     pub fn peripheral(mut self, base: u32, len: u32, periph: BoxedPeripheral) -> Self {
@@ -533,6 +556,8 @@ impl Esp32C6Builder {
             uart0_source,
             usb_sj,
             seed,
+            flash,
+            flash_len,
             boot_set,
             peripherals,
         } = self;
@@ -638,8 +663,24 @@ impl Esp32C6Builder {
         // Peripherals, in the declared order: the boot set first, then
         // whatever the caller added. The check is what stops a re-sort from
         // re-pointing scheduled events.
+        // The flash chip and the cache MMU are shared state, not
+        // peripherals: SPI1 executes commands against the chip, SPI0
+        // programs the table, and the machine's fill reads both.
+        let flash_handle: crate::flash::FlashHandle = std::sync::Arc::new(std::sync::Mutex::new(
+            crate::flash::FlashImage::open(flash, flash_len)
+                .map_err(|e| BuildError::Io(format!("opening the flash image: {e}")))?,
+        ));
+        let cache_handle: crate::cache::CacheHandle =
+            std::sync::Arc::new(std::sync::Mutex::new(crate::cache::CacheMmu::new()));
+
         let mut all = if boot_set {
-            crate::periph::boot_set(efuse, seed, streams)
+            crate::periph::boot_set(
+                efuse,
+                seed,
+                streams,
+                flash_handle.clone(),
+                cache_handle.clone(),
+            )
         } else {
             Vec::new()
         };
@@ -658,10 +699,26 @@ impl Esp32C6Builder {
         let rom_data = rom::seed_data(&mut bus, &rom_image)?;
         let mut app_segments = Vec::new();
         let mut entry = rom_image.entry;
+        let mut staging = loader::FlashStaging::default();
+        let mut cache_fills = 0u64;
         if let Some(app) = &app_image {
             app_segments = loader::load_app(&mut bus, app)?;
             loader::clear_dram2(&mut bus)?;
             entry = app.entry;
+            // What the second-stage bootloader would have done: the
+            // flash-resident half of the image into the chip, the cache MMU
+            // programmed for it, and the ROM told how big the part is.
+            staging =
+                loader::stage_image_in_flash(&flash_handle, &cache_handle, &[&rom_image, app]);
+            loader::seed_rom_flash_chip(&mut bus, staging.chip_size);
+            // Everything the loader staged was already placed into the
+            // window by `rom::load` / `load_app`; filling now proves the
+            // table and the placement agree, and is what serves the window
+            // from here on.
+            cache_fills = crate::cache::fill(&mut bus, &flash_handle, &cache_handle) as u64;
+            // The staging is what a flasher left behind, not a guest write:
+            // the window has just been filled from it, so nothing is stale.
+            flash_handle.lock().unwrap().take_written_blocks();
         }
 
         bus.set_strict(strict);
@@ -695,6 +752,10 @@ impl Esp32C6Builder {
             hook_calls: 0,
             idle_skips: 0,
             stop_at: None,
+            flash: flash_handle,
+            cache: cache_handle,
+            staging,
+            cache_fills,
         })
     }
 }
@@ -783,6 +844,14 @@ pub struct Esp32C6Machine {
     /// Set by a hook that answered [`HookResult::Stop`]; the run loop ends
     /// with [`Outcome::Breakpoint`] at that pc.
     stop_at: Option<u32>,
+    /// The flash chip SPI1 drives.
+    flash: crate::flash::FlashHandle,
+    /// The cache MMU SPI0 programs, and the window's page table.
+    cache: crate::cache::CacheHandle,
+    /// What the direct load put into flash and mapped.
+    staging: loader::FlashStaging,
+    /// Pages refilled from flash since the machine was built.
+    cache_fills: u64,
 }
 
 impl Esp32C6Machine {
@@ -790,6 +859,65 @@ impl Esp32C6Machine {
 
     pub fn time_grade(&self) -> TimeGrade {
         self.time_grade
+    }
+
+    /// The flash chip SPI1 drives.
+    pub fn flash(&self) -> &crate::flash::FlashHandle {
+        &self.flash
+    }
+
+    /// The cache MMU behind the `0x4200_0000` window.
+    pub fn cache(&self) -> &crate::cache::CacheHandle {
+        &self.cache
+    }
+
+    /// What the direct load put into flash and mapped.
+    pub fn flash_staging(&self) -> &loader::FlashStaging {
+        &self.staging
+    }
+
+    /// Pages refilled from flash since the machine was built (the initial
+    /// fill included).
+    pub fn cache_fills(&self) -> u64 {
+        self.cache_fills
+    }
+
+    /// What the guest asked the flash to do.
+    pub fn flash_census(&self) -> crate::flash::FlashCensus {
+        self.flash.lock().unwrap().command_census()
+    }
+
+    /// Write the flash image back if its backing says to.
+    pub fn flush_flash(&mut self) -> std::io::Result<bool> {
+        self.flash.lock().unwrap().flush()
+    }
+
+    /// Refill any window page whose mapping or backing bytes moved.
+    ///
+    /// Called once per slice. Almost always a `bool` check and nothing else:
+    /// only a write to `mmu_item_content`, a page-mode change or a flash
+    /// write under a mapped page puts anything in the list.
+    fn refill_cache(&mut self) {
+        // A flash write anywhere may fall under a mapped page.
+        let written = self.flash.lock().unwrap().take_written_blocks();
+        if !written.is_empty() {
+            let mut cache = self.cache.lock().unwrap();
+            let page_len = cache.page_len();
+            for block in written {
+                // A 64 KiB flash block can hold several pages at a finer
+                // page mode; mark each.
+                let base = block * crate::flash::BLOCK_LEN;
+                let mut at = base;
+                while at < base + crate::flash::BLOCK_LEN {
+                    cache.invalidate_page_at(at);
+                    at += page_len;
+                }
+            }
+        }
+        if !self.cache.lock().unwrap().has_dirty() {
+            return;
+        }
+        self.cache_fills += crate::cache::fill(&mut self.bus, &self.flash, &self.cache) as u64;
     }
 
     pub fn efuse(&self) -> EfuseIdentity {
@@ -1164,6 +1292,7 @@ impl Esp32C6Machine {
             // hart's side-band would have reported; consume it so the next
             // slice's entry poll is not answering a stale flag.
             let _ = self.bus.take_sideband();
+            self.refill_cache();
 
             if let Some(violation) = self.bus.first_strict_violation() {
                 return Outcome::StrictBus { violation };
