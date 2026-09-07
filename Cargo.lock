@@ -5535,6 +5535,7 @@ dependencies = [
  "lp-shader",
  "lpa-boards",
  "lpa-client",
+ "lpa-devices",
  "lpa-link",
  "lpa-server",
  "lpa-upgrade",

@@ -47,6 +47,13 @@ pub struct BuildDef {
     pub partitions_csv: String,
     /// espflash chip identity.
     pub chip: BuildChip,
+    /// Repo-relative second-stage bootloader to merge instead of the one the
+    /// installed espflash bundles (`espflash save-image --bootloader`). See
+    /// `lp-fw/bootloaders/README.md`; changing it moves the ROM `Saved PC`
+    /// ranges `lpa_devices::bootloader` names, and the packager refuses the
+    /// image until that table follows.
+    #[serde(default)]
+    pub bootloader: Option<String>,
 }
 
 /// Chip identity block of a build def.
@@ -84,6 +91,23 @@ impl BuildDef {
             );
         }
         Ok(dir)
+    }
+
+    /// The vendored bootloader this def merges, if it names one.
+    pub fn bootloader_path(&self, repo_root: &Path) -> Result<Option<PathBuf>> {
+        let Some(relative) = &self.bootloader else {
+            return Ok(None);
+        };
+        let path = repo_root.join(relative);
+        if !path.exists() {
+            bail!(
+                "build def `{}` names bootloader `{}`, but {} does not exist",
+                self.id,
+                relative,
+                path.display()
+            );
+        }
+        Ok(Some(path))
     }
 
     /// Path of the linked ELF this def's build produces.

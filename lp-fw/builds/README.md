@@ -27,6 +27,7 @@ justfile recipes.
 | `flashSizeMb` | Physical flash the image header declares. Must match `partitionsCsv` — the bootloader validates the table against the header, not the chip. |
 | `partitionsCsv` | Repo-relative partition table, the same file espflash flashes with. |
 | `chip.family` / `chip.name` | espflash chip identity (`--chip`). |
+| `bootloader` | Optional. Repo-relative second-stage bootloader to merge instead of the one the installed espflash bundles (`--bootloader`). Provenance and the rule for changing it: `lp-fw/bootloaders/README.md`. |
 
 ## Authoring rules
 
