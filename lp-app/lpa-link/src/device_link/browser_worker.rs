@@ -50,8 +50,8 @@ use wasm_bindgen_futures::spawn_local;
 use crate::device_link::demux::demux_line;
 use crate::device_link::wire::client_message;
 use crate::providers::browser_worker::{
-    BrowserInputEnvelope, BrowserOutputEnvelope, BrowserRuntimeOptions, BrowserWorkerHandle,
-    BrowserWorkerOptions,
+    BrowserInputEnvelope, BrowserOutputEnvelope, BrowserRuntimeOptions, BrowserRuntimeTier,
+    BrowserWorkerHandle, BrowserWorkerOptions,
 };
 
 /// One [`Link`] over a `fw-browser` worker.
@@ -82,6 +82,7 @@ impl BrowserWorkerLink {
                 events: RefCell::new(VecDeque::new()),
                 queue: RefCell::new(VecDeque::new()),
                 open: Cell::new(false),
+                granted_tier: Cell::new(None),
                 draining: Cell::new(false),
             }),
         }
@@ -160,6 +161,14 @@ impl BrowserWorkerControl {
         self.inner.options.borrow().runtime.clone()
     }
 
+    /// The tier the worker GRANTED the running runtime, or `None` while
+    /// nothing has booted. The request lives in [`Self::runtime_options`];
+    /// this is what was actually given, which is the only one a card may
+    /// state.
+    pub fn granted_tier(&self) -> Option<BrowserRuntimeTier> {
+        self.inner.granted_tier.get()
+    }
+
     /// Post one envelope at the worker, for the conversations that speak the
     /// protocol channel directly (`browser_worker_io`).
     pub(crate) fn post(&self, envelope: &BrowserInputEnvelope) -> Result<(), String> {
@@ -190,6 +199,12 @@ struct WorkerLinkInner {
     events: RefCell<VecDeque<LinkEvent>>,
     queue: RefCell<VecDeque<LinkCommand>>,
     open: Cell<bool>,
+    /// The tier the worker actually GRANTED the boot runtime, read off the
+    /// `RuntimeCreated` envelope the boot handshake returned. `None` until a
+    /// boot answered — the request is not the grant, and a card that showed
+    /// the request would claim a GPU the browser refused (fidelity-tiers
+    /// ADR: recorded and surfaced, never silent).
+    granted_tier: Cell<Option<BrowserRuntimeTier>>,
     /// A future is already draining [`Self::queue`]. Keeps commands ordered
     /// without a channel.
     draining: Cell<bool>,
@@ -296,6 +311,12 @@ impl WorkerLinkInner {
         // become lines so a sim that complained on the way up says so on its
         // card instead of only in the console.
         for output in outputs {
+            // The boot runtime's own `RuntimeCreated` is the ONE place the
+            // granted tier is stated. Recorded here, before `Opened` is
+            // pushed, so the card that renders on the open already has it.
+            if let BrowserOutputEnvelope::RuntimeCreated { tier, .. } = &output {
+                self.granted_tier.set(Some(*tier));
+            }
             for event in worker_events(output) {
                 self.push(event);
             }

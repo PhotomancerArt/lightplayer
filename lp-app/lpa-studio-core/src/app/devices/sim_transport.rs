@@ -84,6 +84,18 @@ pub trait SimRuntimeControl {
     /// io drains, so the fold keeps hearing the sim while a conversation
     /// owns the channel.
     fn client_io(&self, tap: Option<LensLineTap>) -> Result<Box<dyn lpa_client::ClientIo>, String>;
+
+    /// The shader tier the runtime was actually GRANTED (`"gpu"` / `"cpu"`),
+    /// or `None` while nothing has booted yet.
+    ///
+    /// The GRANT, never the request (PD12, fidelity-tiers ADR): a `gpu`
+    /// request the browser could not honour comes back `cpu`, and the
+    /// runtime band must say `cpu` — a band that repeated the request would
+    /// claim a device that was refused. Absent is absent: the band drops
+    /// the tail rather than guessing.
+    fn granted_tier(&self) -> Option<&'static str> {
+        None
+    }
 }
 
 /// A powered-on sim's live backing.
@@ -160,6 +172,12 @@ impl SimDeviceTransport {
     /// The uids of every running sim.
     pub fn powered_uids(&self) -> Vec<String> {
         self.powered.borrow().keys().cloned().collect()
+    }
+
+    /// The shader tier this sim's runtime was granted, when it is running
+    /// and has booted (see [`SimRuntimeControl::granted_tier`]).
+    pub fn granted_tier(&self, uid: &str) -> Option<&'static str> {
+        self.powered.borrow().get(uid)?.control.granted_tier()
     }
 
     /// The runtime control behind a link's endpoint, when it is one of ours.

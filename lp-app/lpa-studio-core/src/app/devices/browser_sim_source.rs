@@ -133,6 +133,16 @@ impl SimRuntimeControl for WorkerRuntimeControl {
         self.control.set_hardware_manifest(manifest_json);
     }
 
+    fn granted_tier(&self) -> Option<&'static str> {
+        // Read off the boot's own `RuntimeCreated`, not off the options we
+        // asked with: a `gpu` request the browser refused comes back `cpu`
+        // and the band has to say so.
+        self.control.granted_tier().map(|tier| match tier {
+            BrowserRuntimeTier::Gpu => "gpu",
+            BrowserRuntimeTier::Cpu => "cpu",
+        })
+    }
+
     fn client_io(&self, tap: Option<LensLineTap>) -> Result<Box<dyn lpa_client::ClientIo>, String> {
         let io = BrowserWorkerLinkIo::new(self.control.clone());
         Ok(Box::new(match tap {
