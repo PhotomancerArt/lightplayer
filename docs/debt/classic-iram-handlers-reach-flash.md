@@ -6,7 +6,7 @@ area: fw-esp32v3 interrupt paths (esp-hal 1.1.1 Xtensa dispatch, esp-rtos 0.3.0)
 related:
   - docs/reports/2026-09-04-classic-ram-budget.md (lever 3, "side finding")
   - docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.md
-  - scripts/fw-iram-flash-refs.py
+  - scripts/iram-flash-literals.py
   - lp-fw/fw-esp32v3/src/output/rmt/shared_driver.rs (`with_app_core_stalled`)
 ---
 # The classic's `#[ram]` interrupt paths still fetch from flash — in esp-hal and esp-rtos, not in ours
@@ -14,10 +14,12 @@ related:
 **Shape** — the RAM budget report's lever-3 side finding counted 63
 flash-resident constants referenced from IRAM functions in the default
 `release-esp32v3` build. Verified 2026-09-05 on main `0c2c06fd3` with
-`scripts/fw-iram-flash-refs.py` (every `l32r` in `.rwtext`/`.vectors`
+`scripts/iram-flash-literals.py` (every `l32r` in `.rwtext`/`.vectors`
 resolved and classified; 82 `l32r` instructions, 70 literal slots, 63 unique
-values — the report's number). Read per branch, the picture splits three
-ways:
+values — the report's number), and re-verified 2026-09-06 on main
+`2cf7301d3` after #521 turned `place-switch-tables-in-ram` off with
+`rwdata_hook.x`: the table below is unchanged and `fill_half` still loads
+zero flash literals. Read per branch, the picture splits three ways:
 
 1. **Our two handlers are clean on their executed paths.**
    `shared_driver::rmt_isr` (APP core, level 3): its 3 constants are
@@ -43,10 +45,11 @@ ways:
    | esp-hal UART0/1/2 irq trampolines | PRO | the `PERIPHERAL` info pointer; UART0's fires for the async host link, UART1/2 unused | the whole esp-hal UART handler is flash anyway |
    | `__user_exception`, `__default_*_exception` | — | crash-path `Debug` formatting only | — |
 
-   The jump tables escape esp-hal's `place-switch-tables-in-ram` (default
-   on) because that option's `rwdata.x` patterns match `.rodata..Lswitch.table.*`
-   (LLVM's switch *lookup* tables) and `.rodata.*_esp_hal_internal_handler*`;
-   a `#[ram]` function's *jump* table is emitted as `.rodata.<function>`
+   The jump tables escape both esp-hal's `place-switch-tables-in-ram`
+   patterns and the classic's own `lp-fw/fw-esp32v3/rwdata_hook.x` (#521),
+   because both match `.rodata..Lswitch.table.*` (LLVM's switch *lookup*
+   tables) and `.rodata.*_esp_hal_internal_handler*`; a `#[ram]` function's
+   *jump* table is emitted as `.rodata.<function>`
    (`.rodata.__level_3_interrupt`, `.rodata.__pender`,
    `.rodata.*default_gpio_interrupt_handler` in the linker map) and falls
    through to flash `.rodata`.
@@ -85,10 +88,11 @@ before spending RAM on it — the classic's heap is the scarcer resource
 
 **Workarounds** —
 - Re-verify after any esp-hal / esp-rtos bump or a change to a `#[ram]`
-  path: `python3 scripts/fw-iram-flash-refs.py target/xtensa-esp32-none-elf/release-esp32v3/fw-esp32v3`
-  (Xtensa binutils on PATH), then `--dump <fn>` and read the branch each hit
-  sits on. A hit is a defect only if it is on the executed path; panic tails
-  and `MAX_LOG_LEVEL_FILTER`-gated `debug!` bodies are not.
+  path: `just iram-flash-literals-esp32v3` is the baseline gate (no function
+  may gain a literal); `just iram-flash-literals-esp32v3 --dump rmt_isr
+  fill_half` prints the annotated disassembly so each hit can be read on the
+  branch it sits on. A hit is a defect only if it is on the executed path;
+  panic tails and `MAX_LOG_LEVEL_FILTER`-gated `debug!` bodies are not.
 - Never raise the runtime log level to Debug/Trace on a running classic: it
   turns the 24 + 21 gated reads in the tick and yield handlers into live
   flash reads *and* serial traffic from interrupt context (see the memory
@@ -98,8 +102,8 @@ before spending RAM on it — the classic's heap is the scarcer resource
 1. esp-hal upstream (or a local patch under `[patch.crates-io]`): `#[ram]` on
    `InterruptStatus::current`, `InterruptStatusIterator::next` and
    `mapped_to_raw` (288 B), and an `rwdata.x` pattern for `.rodata.__level_*_interrupt`
-   / `.rodata.__pender`. Locally, the report's lever-3 `rwdata_hook.x` can
-   route those three input sections into `.data` for ~0xd0 bytes.
+   / `.rodata.__pender`. Locally, `lp-fw/fw-esp32v3/rwdata_hook.x` can route
+   those three input sections into `.data` for ~0xd0 bytes today.
 2. esp-rtos upstream: `#[ram]` on `now`, `arm_next_wakeup`, `set_state`,
    `ensure_no_stack_overflow`, and `#[inline(always)]` on `Priority::new`
    (~900 B if all moved).

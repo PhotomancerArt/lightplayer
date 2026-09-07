@@ -31,7 +31,7 @@
 //! resident. The work the loop drives is NOT: `Pusher::dispose_through` /
 //! `release_wire_slot`, `Ws281xDriver::start_frame`, `ChannelState::stats`
 //! and the `v3_rmt` pad ops run from flash (~1.3 KB, measured 2026-09-05
-//! with `scripts/fw-iram-flash-refs.py`; see
+//! with `scripts/iram-flash-literals.py`; see
 //! docs/debt/classic-iram-handlers-reach-flash.md). That is accepted, not
 //! an oversight: the PRO core's flash traffic can stall a core-1 flash
 //! fetch, but a *stalled pusher* is only a delayed wave (thread context has
