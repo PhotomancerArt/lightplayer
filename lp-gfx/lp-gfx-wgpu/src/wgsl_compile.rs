@@ -1,13 +1,21 @@
 //! GLSL → WGSL translation: assembly → naga `glsl-in` → bounded-tanh pass →
 //! loop bounds → validation → `wgsl-out`.
 //!
-//! naga parse/validation failures surface as [`GfxError::Compile`] carrying
-//! the naga diagnostic text (consumed by browser-integration UX later).
+//! naga parse/validation failures and the loop refusal surface as
+//! [`GfxError::Compile`] carrying a codespan-style diagnostic whose
+//! `┌─ glsl:LINE:COL` marker is in **authored** coordinates: spans are
+//! shifted out of the assembled unit ([`AssembledGlsl::to_authored`]) before
+//! rendering, so the Studio editor (`ui_shader_error.rs`) highlights the line
+//! the author wrote, exactly as it does for the LPVM tiers (whose naga
+//! frontend remaps over its own prefix in `lps-frontend/src/parse.rs`). A
+//! diagnostic whose span lies outside the authored text — the lpfn prelude,
+//! a hoisted declaration's copy, a texture helper, the wrapper `main` —
+//! renders as a message with no location rather than a misleading line.
 
 use lp_gfx::GfxError;
 use lp_shader::{DEFAULT_INVOCATION_FUEL, ShaderEntrySpace, TextureBindingSpecs};
 
-use crate::assembly::{assemble_fragment_glsl, assemble_sample_fragment_glsl};
+use crate::assembly::{AssembledGlsl, assemble_fragment_glsl, assemble_sample_fragment_glsl};
 use crate::loop_bound_pass::{bound_loop_iterations, refuse_loops_without_exit};
 use crate::tanh_pass::bound_tanh;
 use crate::uniform_layout::assign_texture_bindings;
@@ -57,13 +65,13 @@ pub fn compile_sample_wgsl(
 
 /// naga `glsl-in` → bounded-tanh pass → loop bounds → validation →
 /// `wgsl-out` on an already-assembled fragment compilation unit.
-fn translate_assembled_glsl(assembled_glsl: String) -> Result<WgslShader, GfxError> {
+fn translate_assembled_glsl(assembled: AssembledGlsl) -> Result<WgslShader, GfxError> {
     let mut frontend = naga::front::glsl::Frontend::default();
     let options = naga::front::glsl::Options::from(naga::ShaderStage::Fragment);
-    let mut module = frontend.parse(&options, &assembled_glsl).map_err(|e| {
+    let mut module = frontend.parse(&options, &assembled.glsl).map_err(|e| {
         GfxError::Compile(format!(
             "naga glsl-in: {}",
-            e.emit_to_string(&assembled_glsl)
+            render_parse_errors_at_authored_lines(&e, &assembled)
         ))
     })?;
 
@@ -75,7 +83,7 @@ fn translate_assembled_glsl(assembled_glsl: String) -> Result<WgslShader, GfxErr
     // the invocations that spend it on the module's fault flag. The flag
     // takes the next free group-0 binding, so this runs after every other
     // binding is assigned.
-    refuse_loops_without_exit(&module, &assembled_glsl).map_err(GfxError::Compile)?;
+    refuse_loops_without_exit(&module, &assembled).map_err(GfxError::Compile)?;
     let bounds = bound_loop_iterations(&mut module, DEFAULT_INVOCATION_FUEL);
 
     let mut validator = naga::valid::Validator::new(
@@ -85,7 +93,7 @@ fn translate_assembled_glsl(assembled_glsl: String) -> Result<WgslShader, GfxErr
     let info = validator.validate(&module).map_err(|e| {
         GfxError::Compile(format!(
             "naga validation: {}",
-            e.emit_to_string(&assembled_glsl)
+            render_validation_error_at_authored_lines(e, &assembled)
         ))
     })?;
 
@@ -94,12 +102,53 @@ fn translate_assembled_glsl(assembled_glsl: String) -> Result<WgslShader, GfxErr
             .map_err(|e| GfxError::Compile(format!("naga wgsl-out: {e}")))?;
 
     Ok(WgslShader {
-        assembled_glsl,
+        assembled_glsl: assembled.glsl,
         wgsl,
         module,
         info,
         fault_binding: bounds.fault_binding,
     })
+}
+
+/// Render naga parse errors with their `┌─ glsl:LINE:COL` marker in authored
+/// coordinates: every span is shifted out of the assembled unit and the
+/// diagnostic is drawn against the authored slice, so the gutter shows the
+/// authored line too. A span outside the authored text becomes undefined,
+/// which naga renders as the message alone.
+fn render_parse_errors_at_authored_lines(
+    errors: &naga::front::glsl::ParseErrors,
+    unit: &AssembledGlsl,
+) -> String {
+    let remapped: Vec<naga::front::glsl::Error> = errors
+        .errors
+        .iter()
+        .map(|e| naga::front::glsl::Error {
+            kind: e.kind.clone(),
+            meta: unit.to_authored(e.meta),
+        })
+        .collect();
+    naga::front::glsl::ParseErrors::from(remapped)
+        .emit_to_string_with_path(unit.authored_text(), "glsl")
+}
+
+/// The same remap for a validation error. naga labels these `wgsl` by
+/// default, a marker the Studio parser does not know; the unit is GLSL, so
+/// the label says so and the editor locates validation errors as well.
+fn render_validation_error_at_authored_lines(
+    error: naga::WithSpan<naga::valid::ValidationError>,
+    unit: &AssembledGlsl,
+) -> String {
+    let spans: Vec<(naga::Span, String)> = error
+        .spans()
+        .map(|(span, description)| (unit.to_authored(*span), description.clone()))
+        .collect();
+    // `with_span` drops an undefined span, so out-of-region labels vanish
+    // instead of pointing at line 1.
+    let mut remapped = naga::WithSpan::new(error.into_inner());
+    for (span, description) in spans {
+        remapped = remapped.with_span(span, description);
+    }
+    remapped.emit_to_string_with_path(unit.authored_text(), "glsl")
 }
 
 #[cfg(test)]
@@ -200,9 +249,84 @@ mod tests {
                     message.contains("while (true)"),
                     "quotes the loop head: {message}"
                 );
+                // The line is the AUTHORED one (read from the rig, not
+                // hard-coded), carried both in the headline and in the
+                // codespan-style marker the Studio parser locates by.
+                let authored_line = source
+                    .lines()
+                    .position(|line| line.contains("while (true)"))
+                    .expect("loop head line")
+                    + 1;
+                assert!(
+                    message.contains(&format!("at line {authored_line} (")),
+                    "authored line in the headline: {message}"
+                );
+                assert!(
+                    message.contains(&format!("┌─ glsl:{authored_line}:")),
+                    "authored line in the marker: {message}"
+                );
             }
             other => panic!("expected GfxError::Compile, got {other:?}"),
         }
+    }
+
+    fn compile_error_message(authored: &str) -> String {
+        match compile_wgsl_no_textures(authored) {
+            Err(GfxError::Compile(message)) => message,
+            Err(other) => panic!("expected GfxError::Compile, got {other:?}"),
+            Ok(_) => panic!("must not compile:\n{authored}"),
+        }
+    }
+
+    /// A parse error on authored line 3 reports line 3, although the
+    /// assembled unit puts a version line, an lpfn prelude and a prototype
+    /// in front of the authored text.
+    #[test]
+    fn parse_errors_are_reported_at_the_authored_line() {
+        let message = compile_error_message(
+            "layout(binding = 0) uniform vec2 outputSize;\n\
+             vec4 render_2d(vec2 pos) {\n\
+                 float bad = ;\n\
+                 return vec4(lpfn_saturate(pos.x));\n\
+             }\n",
+        );
+        assert!(message.starts_with("naga glsl-in:"), "{message}");
+        assert!(message.contains("┌─ glsl:3:"), "authored line: {message}");
+        assert!(
+            message.contains("3 │"),
+            "the gutter shows the authored line too: {message}"
+        );
+    }
+
+    /// A validation error carries the `glsl` label (naga's default for
+    /// `WithSpan` is `wgsl`, which the Studio parser ignores) and an authored
+    /// line.
+    #[test]
+    fn validation_errors_are_reported_at_the_authored_line() {
+        // A scalar uniform array fails naga's uniform-buffer layout
+        // validation after parsing cleanly
+        // (`docs/debt/wgpu-refuses-scalar-uniform-arrays.md`).
+        let message = compile_error_message(
+            "layout(binding = 0) uniform vec2 outputSize;\n\
+             layout(binding = 1) uniform float weights[4];\n\
+             vec4 render_2d(vec2 pos) { return vec4(weights[0]); }\n",
+        );
+        assert!(message.starts_with("naga validation:"), "{message}");
+        assert!(!message.contains("┌─ wgsl:"), "{message}");
+        assert!(message.contains("┌─ glsl:2:"), "authored line: {message}");
+    }
+
+    /// An error whose span lies outside the authored text (here, the wrapper
+    /// `main` calling an entry the shader never defined) reports no location
+    /// rather than a line past the end of the editor.
+    #[test]
+    fn errors_outside_the_authored_text_carry_no_location() {
+        let message = compile_error_message("vec4 render_1d(float pos) { return vec4(pos); }\n");
+        assert!(message.starts_with("naga glsl-in:"), "{message}");
+        assert!(
+            !message.contains("┌─ glsl:"),
+            "no authored line for a wrapper span: {message}"
+        );
     }
 
     #[test]

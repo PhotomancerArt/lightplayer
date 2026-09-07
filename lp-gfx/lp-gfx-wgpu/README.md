@@ -33,6 +33,16 @@ authored GLSL (byte-identical to what the device compiles)
                                    own layout reflection)
 ```
 
+Diagnostics — naga glsl-in, naga validation, and the unbounded-loop
+refusal (`loop_bound_pass`) — render with a `┌─ glsl:LINE:COL` marker in
+**authored** coordinates: `assembly::AssembledGlsl` records the byte range
+the authored text occupies in the unit, and `wgsl_compile` shifts every
+span out of it before rendering (the CPU-tier naga frontend does the same
+over its own prefix). A span outside the authored text — prelude, hoisted
+declaration copy, texture helper, wrapper `main` — renders location-less.
+The Studio parser (`lpa-studio-core` `ui_shader_error.rs`) reads the marker
+verbatim.
+
 No pipeline cache: compiles cost ≈26 ms worst-case warm; cards are
 independent backends (device sharing belongs to the browser-integration
 milestone).

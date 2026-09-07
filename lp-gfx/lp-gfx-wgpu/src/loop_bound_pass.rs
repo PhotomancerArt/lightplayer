@@ -11,7 +11,9 @@
 //!
 //! 1. [`refuse_loops_without_exit`] — a loop whose body has no `break`,
 //!    `return` or `discard` on any path is a compile error naming the
-//!    function and the assembled-source line. Constant `if` conditions are
+//!    function and the authored line (with the same `┌─ glsl:LINE:COL`
+//!    marker naga's diagnostics carry, in the same authored coordinates —
+//!    see [`crate::assembly::AssembledGlsl`]). Constant `if` conditions are
 //!    folded first, because glsl-in lowers `while (true)` to a loop whose
 //!    body opens with `if (!true) { break; }` — the demo's exit is
 //!    syntactically present and semantically dead. The check is
@@ -46,6 +48,8 @@ use naga::{
     StorageAccess, Type, TypeInner, UnaryOperator,
 };
 
+use crate::assembly::AssembledGlsl;
+
 /// Name of the injected per-invocation budget global (`var<private>`).
 pub const LOOP_BUDGET_GLOBAL: &str = "lp_gfx_loop_budget";
 
@@ -66,19 +70,20 @@ pub struct LoopBounds {
 
 /// Refuse any loop whose body has no exit on any path.
 ///
-/// `source` is the text the module was parsed from (the assembled GLSL), used
-/// to name the offending line. Call after `glsl-in`, before validation.
-pub fn refuse_loops_without_exit(module: &Module, source: &str) -> Result<(), String> {
+/// `unit` is the assembled GLSL the module was parsed from, with its
+/// authored range; the refusal names the offending loop's authored line.
+/// Call after `glsl-in`, before validation.
+pub fn refuse_loops_without_exit(module: &Module, unit: &AssembledGlsl) -> Result<(), String> {
     for handle in reachable_functions(module) {
         let function = &module.functions[handle];
-        check_block(module, function, &function.body, source)?;
+        check_block(module, function, &function.body, unit)?;
     }
     for entry_point in &module.entry_points {
         check_block(
             module,
             &entry_point.function,
             &entry_point.function.body,
-            source,
+            unit,
         )?;
     }
     Ok(())
@@ -236,18 +241,18 @@ fn check_block(
     module: &Module,
     function: &Function,
     block: &Block,
-    source: &str,
+    unit: &AssembledGlsl,
 ) -> Result<(), String> {
     for (statement, span) in block.span_iter() {
         match statement {
-            Statement::Block(inner) => check_block(module, function, inner, source)?,
+            Statement::Block(inner) => check_block(module, function, inner, unit)?,
             Statement::If { accept, reject, .. } => {
-                check_block(module, function, accept, source)?;
-                check_block(module, function, reject, source)?;
+                check_block(module, function, accept, unit)?;
+                check_block(module, function, reject, unit)?;
             }
             Statement::Switch { cases, .. } => {
                 for case in cases {
-                    check_block(module, function, &case.body, source)?;
+                    check_block(module, function, &case.body, unit)?;
                 }
             }
             Statement::Loop {
@@ -261,10 +266,10 @@ fn check_block(
                 // naga forbids `return`, `discard`, and a `break` targeting
                 // this loop inside `continuing`, so only the body can exit.
                 if !break_if_exits && !block_has_exit(module, function, body, true) {
-                    return Err(describe_unbounded_loop(function, *span, source));
+                    return Err(describe_unbounded_loop(function, *span, unit));
                 }
-                check_block(module, function, body, source)?;
-                check_block(module, function, continuing, source)?;
+                check_block(module, function, body, unit)?;
+                check_block(module, function, continuing, unit)?;
             }
             _ => {}
         }
@@ -341,20 +346,55 @@ fn is_bool(module: &Module, ty: Handle<Type>) -> bool {
 
 /// The compile diagnostic: function, assembled-source line, and the line's
 /// text, so the author sees the loop head rather than a naga handle.
-fn describe_unbounded_loop(function: &Function, span: Span, source: &str) -> String {
+/// The refusal text: a headline naming the function, the authored line and
+/// the loop head, then the codespan-style marker block naga's own
+/// diagnostics carry (`┌─ glsl:LINE:COL`, gutter line, carets), so the
+/// Studio parser locates it by the same marker with no new shape to learn.
+/// A loop outside the authored text (a canonical builtin, generated code)
+/// keeps the headline and drops the location.
+fn describe_unbounded_loop(function: &Function, span: Span, unit: &AssembledGlsl) -> String {
+    const WHY: &str = "no path through the loop body breaks, returns or discards. The GPU \
+                       tier has no fuel meter, so it refuses to compile a loop that can \
+                       never exit.";
     let name = function.name.as_deref().unwrap_or("<entry point>");
-    let location = span.location(source);
+    let authored = unit.to_authored(span);
+    if !authored.is_defined() {
+        let text = span
+            .to_range()
+            .map(|_| line_at(&unit.glsl, span.location(&unit.glsl).line_number))
+            .unwrap_or_default();
+        return format!("unbounded loop in `{name}` (`{}`): {WHY}", text.trim());
+    }
+    let source = unit.authored_text();
+    let location = authored.location(source);
     let line = location.line_number;
-    let text = source
+    let col = location.line_position;
+    let raw = line_at(source, line);
+    let text = raw.trim();
+    // Carets under the loop head, from the span's column to the end of its
+    // first line (a multi-line loop body is not underlined).
+    let head_len = (raw.len() + 1)
+        .saturating_sub(col as usize)
+        .min(location.length as usize)
+        .max(1);
+    let pad = " ".repeat(line.to_string().len() + 1);
+    let caret_pad = " ".repeat(col.saturating_sub(1) as usize);
+    let carets = "^".repeat(head_len);
+    format!(
+        "unbounded loop in `{name}` at line {line} (`{text}`): {WHY}\n\
+         {pad}┌─ glsl:{line}:{col}\n\
+         {pad}│\n\
+         {line} │ {raw}\n\
+         {pad}│ {caret_pad}{carets}\n"
+    )
+}
+
+/// The 1-based `line` of `source`, or empty past the end.
+fn line_at(source: &str, line: u32) -> &str {
+    source
         .lines()
         .nth(line.saturating_sub(1) as usize)
-        .map(str::trim)
-        .unwrap_or_default();
-    format!(
-        "unbounded loop in `{name}` at line {line} (`{text}`): no path through the loop body \
-         breaks, returns or discards. The GPU tier has no fuel meter, so it refuses to \
-         compile a loop that can never exit."
-    )
+        .unwrap_or_default()
 }
 
 // ---- layer 2: the injected back-edge budget --------------------------------
@@ -641,6 +681,60 @@ mod tests {
         refuse_loops_without_exit(&module, &source).expect_err("inner loop never exits");
     }
 
+    /// The refusal reports the AUTHORED line with naga's marker shape: a
+    /// unit whose authored range starts after a prefix maps the loop back
+    /// to its line within that range.
+    #[test]
+    fn refusal_marks_the_authored_line_with_the_codespan_marker() {
+        let helpers = "float spin() {\n\
+                       \x20   float acc = 0.0;\n\
+                       \x20   while (true) { acc += 0.1; }\n\
+                       \x20   return acc;\n\
+                       }\n";
+        let (module, unit) = parse_fragment_with_helpers(helpers, "color = vec4(spin());\n");
+        // Treat the helper text as the authored region: the version and
+        // output-declaration lines before it play the assembled prefix.
+        let start = unit.glsl.find(helpers).expect("helpers spliced verbatim");
+        let unit = AssembledGlsl {
+            authored: start..start + helpers.len(),
+            glsl: unit.glsl,
+        };
+        let message = refuse_loops_without_exit(&module, &unit).expect_err("refused");
+        assert!(
+            message.starts_with(
+                "unbounded loop in `spin` at line 3 (`while (true) { acc += 0.1; }`): no path"
+            ),
+            "{message}"
+        );
+        assert!(message.contains("\n  ┌─ glsl:3:5\n"), "{message}");
+        assert!(
+            message.contains("\n3 │     while (true) { acc += 0.1; }\n"),
+            "{message}"
+        );
+        assert!(message.contains("\n  │     ^^^^^"), "carets: {message}");
+    }
+
+    /// A loop outside the authored range (a builtin, generated code) is
+    /// still refused and named, without a location that would point the
+    /// editor at the wrong line.
+    #[test]
+    fn refusal_outside_the_authored_range_carries_no_location() {
+        let helpers =
+            "float spin() { float acc = 0.0; while (true) { acc += 0.1; } return acc; }\n";
+        let main_body = "color = vec4(spin());\n";
+        let (module, unit) = parse_fragment_with_helpers(helpers, main_body);
+        let start = unit.glsl.find(main_body).expect("body spliced verbatim");
+        let unit = AssembledGlsl {
+            authored: start..start + main_body.len(),
+            glsl: unit.glsl,
+        };
+        let message = refuse_loops_without_exit(&module, &unit).expect_err("refused");
+        assert!(message.contains("`spin`"), "{message}");
+        assert!(message.contains("while (true)"), "{message}");
+        assert!(!message.contains("at line"), "{message}");
+        assert!(!message.contains("┌─ glsl:"), "{message}");
+    }
+
     #[test]
     fn a_loop_in_a_helper_function_is_checked_too() {
         let (module, source) = parse_fragment_with_helpers(
@@ -919,11 +1013,16 @@ mod tests {
 
     // ---- helpers ------------------------------------------------------------
 
-    fn parse_fragment(main_body: &str) -> (naga::Module, String) {
+    fn parse_fragment(main_body: &str) -> (naga::Module, AssembledGlsl) {
         parse_fragment_with_helpers("", main_body)
     }
 
-    fn parse_fragment_with_helpers(helpers: &str, main_body: &str) -> (naga::Module, String) {
+    /// The whole source counts as authored (`AssembledGlsl::unassembled`);
+    /// the authored-range tests above narrow it.
+    fn parse_fragment_with_helpers(
+        helpers: &str,
+        main_body: &str,
+    ) -> (naga::Module, AssembledGlsl) {
         let source = format!(
             "#version 450 core\n\
              layout(location = 0) out vec4 color;\n\
@@ -935,7 +1034,7 @@ mod tests {
         let module = frontend
             .parse(&options, &source)
             .unwrap_or_else(|e| panic!("glsl parses: {}", e.emit_to_string(&source)));
-        (module, source)
+        (module, AssembledGlsl::unassembled(source))
     }
 
     fn validate_and_write(module: &naga::Module) -> String {
