@@ -9,8 +9,8 @@ use crate::OutputError;
 
 use crate::{
     HardwareEndpointError, HardwareLease, HwAddress, HwCapability, HwClaim, HwDriver, HwEndpoint,
-    HwEndpointId, HwEndpointKind, HwEndpointSpec, HwEndpointStatus, HwRegistry, Ws281xConfig,
-    Ws281xDriver, Ws281xOutput,
+    HwEndpointId, HwEndpointKind, HwEndpointSpec, HwEndpointStatus, HwRegistry, HwResource,
+    Ws281xConfig, Ws281xDriver, Ws281xOutput,
 };
 
 /// Manifest-backed virtual WS281x driver for tests and emulation.
@@ -103,9 +103,11 @@ impl VirtualWs281xDriver {
 
     /// A GPIO's own status first — a claimed or reserved pin names its own
     /// reason — and otherwise the shared timing verdict from
-    /// [`Self::timing_status`].
-    fn endpoint_status(&self, gpio: &HwAddress, timing: &HwEndpointStatus) -> HwEndpointStatus {
-        let gpio_status = self.registry.endpoint_status_for(gpio);
+    /// [`Self::timing_status`]. Asked of the resource in hand, not by address:
+    /// the by-address form re-searches the manifest, and this runs once per
+    /// declared GPIO.
+    fn endpoint_status(&self, gpio: &HwResource, timing: &HwEndpointStatus) -> HwEndpointStatus {
+        let gpio_status = self.registry.endpoint_status_of(gpio);
         if !gpio_status.is_available() {
             return gpio_status;
         }
@@ -173,7 +175,7 @@ impl Ws281xDriver for VirtualWs281xDriver {
                 self.driver_id(),
                 address,
                 resource.display_label(),
-                self.endpoint_status(resource.address(), &timing),
+                self.endpoint_status(resource, &timing),
             ));
         }
         endpoints
