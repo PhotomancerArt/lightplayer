@@ -2690,6 +2690,111 @@ fn a_refused_removal_leaves_the_running_face_and_says_why() {
     assert!(!card.escapes.is_empty(), "always a way out");
 }
 
+/// A removal whose conversation never ends. The cancel is HELD rather than
+/// honoured mid-delete (the board's project dir is already part-gone;
+/// stopping there would leave it loading half a project), so the push grace
+/// is what bounds the hold and eviction is the backstop — the same physics
+/// the push has, from the other direction.
+///
+/// What the card must come back saying: not a success, always escapable, and
+/// — the part only this scenario reaches — NOT empty. The removal was never
+/// confirmed by the board, and the empty face is drawn from the board's own
+/// report or not at all.
+#[test]
+fn cancelling_mid_removal_is_held_then_bounded_by_eviction() {
+    let device = empty_light_player("dev000000daqf6dvvr6");
+    let (mut bench, tasks) = identified(&device, "usb-remove-3");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let device_id = bench.view().devices[0].id;
+    bench.push_gesture(device_id, bundled_example());
+    bench.run_until(&tasks, "the board to be running it", |bench| {
+        bench.view().devices.first().is_some_and(|card| {
+            card.activity.is_none()
+                && matches!(
+                    card.loaded_project,
+                    lpa_devices::view::LoadedProject::Running { .. }
+                )
+        })
+    });
+
+    // The delete takes the wire and never gives it back.
+    bench.remove_plan.set(RemovePlan::Hang);
+    bench.gesture(DeviceAction::RemoveProject { device: device_id });
+    bench.run_until(&tasks, "the removal to be visibly running", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_some())
+    });
+
+    bench.gesture(DeviceAction::CancelActivity { device: device_id });
+    let asked_at = bench.controller.device_now_for_test().0;
+    assert!(
+        bench.view().devices[0]
+            .activity
+            .as_ref()
+            .is_some_and(|activity| activity.cancel_requested),
+        "the card says it is cancelling rather than stopping mid-delete"
+    );
+
+    // The cancel does not end the activity by itself: the hung effect still
+    // owns the wire, so the hold outlives the request. 40 turns is 200 ms of
+    // the 500 ms grace — the card is still mid-removal here, and what ends
+    // it below is the grace expiring, not the asking.
+    for _ in 0..40 {
+        bench.step(&tasks);
+    }
+    assert!(
+        bench.view().devices[0].activity.is_some(),
+        "still mid-removal 200 ms in: the asking alone does not end it: {:?}",
+        bench.view().devices[0]
+    );
+
+    bench.run_until(&tasks, "the cancel grace to bound the hold", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none())
+    });
+
+    // It is the push GRACE that bounded the hold — the removal shares the
+    // push's physics — and not the far-off supervision deadline that would
+    // leave the card mid-removal for another twenty seconds. Pinning the
+    // window is what tells those two apart.
+    let held_ms = bench.controller.device_now_for_test().0 - asked_at;
+    assert!(
+        held_ms < 2_000,
+        "the hold ended on the 500 ms push grace, not the 20 s deadline; held {held_ms} ms"
+    );
+
+    let card = bench.view().devices[0].clone();
+    assert!(
+        card.last_outcome
+            .as_ref()
+            .is_some_and(|outcome| !outcome.ok),
+        "an interrupted removal is not a success: {card:?}"
+    );
+    assert!(!card.escapes.is_empty(), "always a way out");
+    assert_ne!(
+        card.loaded_project,
+        lpa_devices::view::LoadedProject::Empty,
+        "no board ever reported empty, so the card must not claim it: {card:?}"
+    );
+    assert_eq!(
+        bench.library().len(),
+        1,
+        "the library copy is untouched by a removal that never landed"
+    );
+}
+
 /// C2 (G1 bench, 2026-08-31): an effect that outlives its activity must give
 /// the wire back. The bench proves the consequence rather than the flag —
 /// after the eviction, the board is HEARD FROM again, which can only happen
