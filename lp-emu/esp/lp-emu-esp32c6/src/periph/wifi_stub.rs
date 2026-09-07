@@ -72,6 +72,13 @@ pub const OVERRIDES: &[(u32, u32, u32, &str)] = &[
     // Blob spins here; esp-emu evidently satisfies it; value chosen so the
     // poll exits (bit 22 set, bit 29 left 0 so the no-error path is taken).
     (0x0418, 1 << 22, 1 << 22, "txdc_cal_new done flag"),
+    // `SPIN WIFI_MAC+0x814 mac = 0x00003008 x10000` from
+    // `ram_pwdet_tone_start` (`0x4221b06c`, 30.4 ms). The blob strobes
+    // `+0x810` bit 0 and loops `lw a5,0x814(a3); srli a5,a5,14; andi a5,a5,7;
+    // bne a5,a4(=7)` — until the 3-bit state field at bits 14:16 reads 7.
+    // Blob spins here; esp-emu evidently satisfies it; value chosen so the
+    // poll exits (the field reads 7).
+    (0x0814, 0x7 << 14, 0x7 << 14, "ram_pwdet_tone_start state field == 7"),
 ];
 
 /// The `WIFI_PWR` block's override list; same rule, same shape.
