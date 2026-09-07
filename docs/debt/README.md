@@ -53,6 +53,7 @@ stay in place when retired; the log is the history).
 
 | Entry | Status | Since | Area | Cost in one line |
 | --- | --- | --- | --- | --- |
+| [gpu-tests-run-only-on-a-desk-with-an-adapter](gpu-tests-run-only-on-a-desk-with-an-adapter.md) | carried | 2026-07-10 | lp-gfx-wgpu tests + CI Validate GFX | every device test is adapter-gated and CI has no adapter, so GPU-tier regressions (a Metal miscompile on 2026-09-07) are caught only by `just test-gfx` on the desk |
 | [gpu-preview-compile-status-invisible](gpu-preview-compile-status-invisible.md) | carried | 2026-08-24 | Studio preview host + gallery cards (GPU tier) | a shader the GPU tier refuses/fails shows a placeholder card and a black hover canvas, no badge or message; the editor is CPU-tier-only so the authored-line diagnostics (#561) are reachable only via the worker console |
 | [bounds-asserted-in-the-wrong-unit](bounds-asserted-in-the-wrong-unit.md) | carried | 2026-06-12 | cross-cutting — lp-collection, lps-glsl, lpvm-native regalloc | limits written in the unit that was easy to count, not the one the consumer enforces; all three instances passed their tests, and one miscompiles silently |
 | [shared-uart-io-task-starvation](shared-uart-io-task-starvation.md) | carried | 2026-08-02 | fw serial io_task + classic UART0 | while a project plays, serial is silently lossy BOTH directions (RX FifoOverflow >~128 B, TX responses dropped); three incidents in three weeks, workaround = stopAllProjects before big transfers |

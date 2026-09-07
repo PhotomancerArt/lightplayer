@@ -7,6 +7,8 @@
 //! - **native**: copy to a mapped buffer and block on
 //!   `device.poll(wait)` — bounded and synchronous; the native server host
 //!   can afford it (LED output path).
+//!   The loop fault flag ([`crate::fault_flag`]) rides the same wait: each
+//!   dispatch reads its own count on native.
 //! - **wasm32**: the blocking form is an explicit `GfxError::Backend` — the
 //!   browser cannot block on a map. Fixture sampling — the per-frame browser
 //!   consumer that needs bytes — does not come through here: the sample pass
