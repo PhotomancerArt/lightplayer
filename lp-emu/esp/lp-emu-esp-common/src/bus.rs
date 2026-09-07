@@ -32,7 +32,9 @@ use lp_emu_core::memory::{MemoryAccessKind, MemoryError};
 use lp_emu_core::sched::{Cycles, EventId, Scheduler};
 
 use crate::host::HostSinks;
-use crate::periph::{BoxedPeripheral, BusCx, CpuIntMatrix, IrqLines, NoCpuInterrupts, Width};
+use crate::periph::{
+    BoxedPeripheral, BusCx, CpuIntMatrix, IrqLines, MachineRequest, NoCpuInterrupts, Width,
+};
 use crate::trace::{Access, MmioEvent, Trace};
 
 /// Hardware trigger slots, matching the RISC-V debug spec's count on the
@@ -151,6 +153,7 @@ pub struct BusScalars {
     pub unmapped_reads: u64,
     pub unmapped_writes: u64,
     pub first_strict_violation: Option<StrictViolation>,
+    pub request: Option<MachineRequest>,
 }
 
 /// One entry in the MMIO decode table.
@@ -196,6 +199,8 @@ pub struct SocBus {
     /// Source levels → "the CPU interrupt this hart should take". Installed
     /// by the chip crate; [`NoCpuInterrupts`] until then.
     matrix: Box<dyn CpuIntMatrix>,
+    /// A peripheral's request to the machine. See [`MachineRequest`].
+    request: Option<MachineRequest>,
 
     now: Cycles,
     pc: u32,
@@ -251,6 +256,7 @@ impl SocBus {
             unmapped_writes: 0,
             first_strict_violation: None,
             matrix: Box::new(NoCpuInterrupts),
+            request: None,
             now: 0,
             pc: 0,
             hart: 0,
@@ -294,7 +300,8 @@ impl SocBus {
     /// order lives in a side table, because an index that shifted when a
     /// lower-based peripheral was registered later would silently re-point
     /// every already-scheduled event.
-    pub fn add_peripheral(&mut self, base: u32, len: u32, periph: BoxedPeripheral) -> usize {
+    pub fn add_peripheral(&mut self, base: u32, len: u32, mut periph: BoxedPeripheral) -> usize {
+        periph.attached(self.mmio.len());
         for r in &self.mmio {
             let overlaps = base < r.base + r.len && r.base < base + len;
             assert!(
@@ -478,9 +485,16 @@ impl SocBus {
                 irq: &mut self.irq,
                 trace: &mut self.trace,
                 host: &mut self.host,
+                matrix: &mut *self.matrix,
+                request: &mut self.request,
             };
             range.periph.on_event(id, &mut cx);
         }
+    }
+
+    /// The request a peripheral left for the machine, if any, clearing it.
+    pub fn take_request(&mut self) -> Option<MachineRequest> {
+        self.request.take()
     }
 
     // ---- diagnostics --------------------------------------------------
@@ -584,6 +598,7 @@ impl SocBus {
             unmapped_reads: self.unmapped_reads,
             unmapped_writes: self.unmapped_writes,
             first_strict_violation: self.first_strict_violation,
+            request: self.request,
         }
     }
 
@@ -597,6 +612,7 @@ impl SocBus {
         self.unmapped_reads = s.unmapped_reads;
         self.unmapped_writes = s.unmapped_writes;
         self.first_strict_violation = s.first_strict_violation;
+        self.request = s.request;
     }
 
     /// `true` if `address` falls in a declared MMIO window.
@@ -730,6 +746,8 @@ impl SocBus {
                     irq: &mut self.irq,
                     trace: &mut self.trace,
                     host: &mut self.host,
+                    matrix: &mut *self.matrix,
+                    request: &mut self.request,
                 };
                 range.periph.read(off, width, &mut cx)
             };
@@ -795,6 +813,8 @@ impl SocBus {
                     irq: &mut self.irq,
                     trace: &mut self.trace,
                     host: &mut self.host,
+                    matrix: &mut *self.matrix,
+                    request: &mut self.request,
                 };
                 range.periph.write(off, width, value, &mut cx);
             }
@@ -980,6 +1000,31 @@ impl Bus for SocBus {
         if slot >= WATCHPOINT_SLOTS {
             log::warn!("SocBus: watchpoint slot {slot} is out of range, ignored");
             return;
+        }
+        // A trigger CSR write is not an MMIO access, so it has no line of
+        // its own; the arming it produces is worth one, because "the stack
+        // guard moved to X" is exactly what a boot trace is read for. Only
+        // when the slot's effective watchpoint actually changes — esp-hal
+        // rewrites all four trigger CSRs on every context switch, and four
+        // lines per switch would bury the ones that matter.
+        if self.trace.is_enabled() && self.watchpoints[slot] != wp {
+            let line = match wp {
+                Some(w) => alloc::format!(
+                    "cyc={} pc=0x{:08x} WATCHPOINT slot={slot} armed at 0x{:08x}{}{}{}{}",
+                    self.now,
+                    self.pc,
+                    w.address,
+                    if w.napot { " napot" } else { "" },
+                    if w.on_store { " store" } else { "" },
+                    if w.on_load { " load" } else { "" },
+                    if w.on_execute { " exec" } else { "" },
+                ),
+                None => alloc::format!(
+                    "cyc={} pc=0x{:08x} WATCHPOINT slot={slot} disarmed",
+                    self.now, self.pc
+                ),
+            };
+            self.trace.note(&line);
         }
         self.watchpoints[slot] = wp;
         if wp.is_some() {
@@ -1494,6 +1539,88 @@ mod tests {
         fn cpu_interrupt(&self, _hart: usize, irq: &IrqLines) -> Option<u8> {
             (0u8..16).find(|n| irq.level(u16::from(*n) + 40))
         }
+
+        fn as_any(&self) -> &dyn core::any::Any {
+            self
+        }
+
+        fn as_any_mut(&mut self) -> &mut dyn core::any::Any {
+            self
+        }
+    }
+
+    /// A peripheral whose only behaviour is to ask for a reset when written.
+    struct Resetter;
+
+    impl Peripheral for Resetter {
+        fn name(&self) -> &'static str {
+            "WDT"
+        }
+
+        fn read(&mut self, _off: u32, _width: Width, _cx: &mut BusCx<'_>) -> u32 {
+            0
+        }
+
+        fn write(&mut self, _off: u32, _width: Width, _value: u32, cx: &mut BusCx<'_>) {
+            let at = cx.now;
+            cx.request(MachineRequest::Reset {
+                source: "WDT stage 0",
+                at,
+            });
+        }
+
+        fn save_state(&self) -> Vec<u8> {
+            Vec::new()
+        }
+
+        fn load_state(&mut self, _bytes: &[u8]) {}
+    }
+
+    #[test]
+    fn a_peripheral_can_ask_the_machine_for_a_reset_and_the_first_request_wins() {
+        let mut bus = SocBus::new();
+        bus.add_peripheral(0x6000_8000, 0x100, Box::new(Resetter));
+        assert_eq!(bus.take_request(), None);
+
+        bus.set_time(77);
+        bus.write_word(0x6000_8000, 1).unwrap();
+        bus.set_time(78);
+        bus.write_word(0x6000_8000, 1).unwrap();
+        assert_eq!(
+            bus.take_request(),
+            Some(MachineRequest::Reset {
+                source: "WDT stage 0",
+                at: 77
+            }),
+            "the first request is the one the machine sees"
+        );
+        assert_eq!(bus.take_request(), None, "take clears");
+    }
+
+    #[test]
+    fn arming_a_watchpoint_is_one_trace_line_and_rewriting_the_same_one_is_none() {
+        let buf = SharedBuffer::new();
+        let mut bus = bus_with_ram();
+        bus.trace = Trace::to_sink(Box::new(buf.clone()));
+        bus.set_time(5);
+        bus.set_pc(0x4200_0010);
+        let wp = Watchpoint {
+            address: 0x4080_0101,
+            napot: true,
+            on_store: true,
+            on_load: false,
+            on_execute: false,
+        };
+        bus.set_watchpoint(0, Some(wp));
+        bus.set_watchpoint(0, Some(wp));
+        bus.set_watchpoint(0, None);
+        assert_eq!(
+            buf.lines(),
+            [
+                "cyc=5 pc=0x42000010 WATCHPOINT slot=0 armed at 0x40800101 napot store",
+                "cyc=5 pc=0x42000010 WATCHPOINT slot=0 disarmed",
+            ]
+        );
     }
 
     #[test]
