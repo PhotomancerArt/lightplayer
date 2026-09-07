@@ -343,6 +343,22 @@ pub static HEARTBEAT: SeriesSpec = SeriesSpec {
 /// reported with their ratio (PD9/D13 — no host gate on emulated
 /// microseconds), which is exactly the shape the director ruled in DD33.
 ///
+/// # `notDrainingCount: 1` on its own is not evidence of a host
+///
+/// Measured on our own machine with **no host at all** (M6 P1b, gate G1b-4,
+/// `tests/host_absent.rs`): `notDrainingCount` is 1, `hostNotDrainingMs` is
+/// 893, and `hostDrainingAgainMs` is absent. The monitor starts optimistic
+/// and the enumeration verdict takes three polls, while one blocked write
+/// costs 250 ms and holds io_task's loop for all of it — so two writes are
+/// attempted and time out before "no cable" is ever concluded. The third poll
+/// then declares the link unenumerated, which resets the latch and gates
+/// every write after it.
+///
+/// The M6 discovery's "absent" row predicted zero and is wrong. So the
+/// discriminator is the **pair**, which is why this pattern requires both
+/// stamps: absent latches once and never recovers; attached-but-unread
+/// latches once and *does* recover the moment somebody opens the port.
+///
 /// # The same facts without a heartbeat
 ///
 /// The three numbers are relaxed atomics in the image, so a configuration
