@@ -1,0 +1,978 @@
+{
+  "id": "lightplayer/desktop",
+  "target": "desktop",
+  "vendor": "lightplayer",
+  "product": "Desktop",
+  "description": "The desktop board profile: a computer running the desktop firmware, which has no pins at all. The table is therefore VIRTUAL and deliberately unlimited — no reservations, no scarcity — so a project authored for any board opens here without a hardware error. Wire labels are grouped in bands: IO0–IO47 at /gpio/0–/gpio/47 (label number = address number), D0–D13 at /gpio/100+, A01–A13 at /gpio/200+, B01–B13 at /gpio/220+. Thirty-two WS281x timing resources let every wire of the largest checked-in project run at once, and /radio/0 answers radio:local:0.",
+  "gpio": [
+    {
+      "address": "/gpio/0",
+      "display_label": "IO0",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/1",
+      "display_label": "IO1",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/2",
+      "display_label": "IO2",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/3",
+      "display_label": "IO3",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/4",
+      "display_label": "IO4",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/5",
+      "display_label": "IO5",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/6",
+      "display_label": "IO6",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/7",
+      "display_label": "IO7",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/8",
+      "display_label": "IO8",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/9",
+      "display_label": "IO9",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/10",
+      "display_label": "IO10",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/11",
+      "display_label": "IO11",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/12",
+      "display_label": "IO12",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/13",
+      "display_label": "IO13",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/14",
+      "display_label": "IO14",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/15",
+      "display_label": "IO15",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/16",
+      "display_label": "IO16",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/17",
+      "display_label": "IO17",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/18",
+      "display_label": "IO18",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/19",
+      "display_label": "IO19",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/20",
+      "display_label": "IO20",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/21",
+      "display_label": "IO21",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/22",
+      "display_label": "IO22",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/23",
+      "display_label": "IO23",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/24",
+      "display_label": "IO24",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/25",
+      "display_label": "IO25",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/26",
+      "display_label": "IO26",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/27",
+      "display_label": "IO27",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/28",
+      "display_label": "IO28",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/29",
+      "display_label": "IO29",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/30",
+      "display_label": "IO30",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/31",
+      "display_label": "IO31",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/32",
+      "display_label": "IO32",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/33",
+      "display_label": "IO33",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/34",
+      "display_label": "IO34",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/35",
+      "display_label": "IO35",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/36",
+      "display_label": "IO36",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/37",
+      "display_label": "IO37",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/38",
+      "display_label": "IO38",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/39",
+      "display_label": "IO39",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/40",
+      "display_label": "IO40",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/41",
+      "display_label": "IO41",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/42",
+      "display_label": "IO42",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/43",
+      "display_label": "IO43",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/44",
+      "display_label": "IO44",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/45",
+      "display_label": "IO45",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/46",
+      "display_label": "IO46",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/47",
+      "display_label": "IO47",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/100",
+      "display_label": "D0",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/101",
+      "display_label": "D1",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/102",
+      "display_label": "D2",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/103",
+      "display_label": "D3",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/104",
+      "display_label": "D4",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/105",
+      "display_label": "D5",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/106",
+      "display_label": "D6",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/107",
+      "display_label": "D7",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/108",
+      "display_label": "D8",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/109",
+      "display_label": "D9",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/110",
+      "display_label": "D10",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/111",
+      "display_label": "D11",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/112",
+      "display_label": "D12",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/113",
+      "display_label": "D13",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/200",
+      "display_label": "A01",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/201",
+      "display_label": "A02",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/202",
+      "display_label": "A03",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/203",
+      "display_label": "A04",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/204",
+      "display_label": "A05",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/205",
+      "display_label": "A06",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/206",
+      "display_label": "A07",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/207",
+      "display_label": "A08",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/208",
+      "display_label": "A09",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/209",
+      "display_label": "A10",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/210",
+      "display_label": "A11",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/211",
+      "display_label": "A12",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/212",
+      "display_label": "A13",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/220",
+      "display_label": "B01",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/221",
+      "display_label": "B02",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/222",
+      "display_label": "B03",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/223",
+      "display_label": "B04",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/224",
+      "display_label": "B05",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/225",
+      "display_label": "B06",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/226",
+      "display_label": "B07",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/227",
+      "display_label": "B08",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/228",
+      "display_label": "B09",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/229",
+      "display_label": "B10",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/230",
+      "display_label": "B11",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/231",
+      "display_label": "B12",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    },
+    {
+      "address": "/gpio/232",
+      "display_label": "B13",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ]
+    }
+  ],
+  "resource": [
+    {
+      "address": "/rmt/ws281x0",
+      "display_label": "WS281x channel 0",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x1",
+      "display_label": "WS281x channel 1",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x2",
+      "display_label": "WS281x channel 2",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x3",
+      "display_label": "WS281x channel 3",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x4",
+      "display_label": "WS281x channel 4",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x5",
+      "display_label": "WS281x channel 5",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x6",
+      "display_label": "WS281x channel 6",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x7",
+      "display_label": "WS281x channel 7",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x8",
+      "display_label": "WS281x channel 8",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x9",
+      "display_label": "WS281x channel 9",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x10",
+      "display_label": "WS281x channel 10",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x11",
+      "display_label": "WS281x channel 11",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x12",
+      "display_label": "WS281x channel 12",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x13",
+      "display_label": "WS281x channel 13",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x14",
+      "display_label": "WS281x channel 14",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x15",
+      "display_label": "WS281x channel 15",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x16",
+      "display_label": "WS281x channel 16",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x17",
+      "display_label": "WS281x channel 17",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x18",
+      "display_label": "WS281x channel 18",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x19",
+      "display_label": "WS281x channel 19",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x20",
+      "display_label": "WS281x channel 20",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x21",
+      "display_label": "WS281x channel 21",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x22",
+      "display_label": "WS281x channel 22",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x23",
+      "display_label": "WS281x channel 23",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x24",
+      "display_label": "WS281x channel 24",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x25",
+      "display_label": "WS281x channel 25",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x26",
+      "display_label": "WS281x channel 26",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x27",
+      "display_label": "WS281x channel 27",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x28",
+      "display_label": "WS281x channel 28",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x29",
+      "display_label": "WS281x channel 29",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x30",
+      "display_label": "WS281x channel 30",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x31",
+      "display_label": "WS281x channel 31",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/radio/0",
+      "display_label": "Virtual radio 0",
+      "capabilities": [
+        "radio"
+      ]
+    }
+  ]
+}

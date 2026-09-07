@@ -16,7 +16,10 @@ use serde::Serialize;
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
 use crate::envelope::BrowserOutputEnvelope;
-use crate::{create_runtime, fw_browser_init_exports, handle_envelope_json, tick_runtime};
+use crate::{
+    create_runtime, desktop_hardware_manifest_json, fw_browser_init_exports, handle_envelope_json,
+    tick_runtime,
+};
 
 wasm_bindgen_test_configure!(run_in_browser);
 
@@ -713,6 +716,201 @@ fn load_project_tolerates_library_artifacts() {
     case("lib-both", true, true);
 }
 
+/// A board sim WEARS the manifest its boot options carried, and a project
+/// authored for a wire that manifest lacks neither fails to load nor stalls
+/// the sim: the engine refuses the wire, parks it, and keeps rendering. The
+/// board here is a two-line manifest rather than a real profile — what is
+/// under test is the fw-browser boot wiring, not which board it happens to
+/// be.
+///
+/// ⚠️ WHAT THIS TEST CANNOT ASSERT, AND WHY. The refusal is real and it does
+/// name the endpoint — `EngineServices::flush_dirty_output_sinks` builds
+/// `OutputFlushError::Provider` ("output node 3 port 0 ws281x:local:D9:
+/// Invalid config: unknown Ws281x hardware endpoint")
+/// (`lp-core/lpc-engine/src/engine/engine_services.rs:711`) and
+/// `Engine::tick` returns it as `EngineError::OutputFlush`
+/// (`lp-core/lpc-engine/src/engine/engine.rs:666`). But
+/// `LpServer::advance_frame` (`lp-app/lpa-server/src/server.rs:577`) drops
+/// that error into a `log::warn!` and a failure COUNT, and no wire message
+/// carries either. The output node's `NodeRuntimeStatus` cannot carry it
+/// either: node statuses are written only from the node walk
+/// (`engine.rs:1568`, `:2285`), and the flush runs outside it. So through
+/// the wire a refused wire and an opened one are INDISTINGUISHABLE — that is
+/// a product gap, filed as `docs/debt/output-flush-refusal-is-log-only.md`,
+/// not a property. The `Ok` asserted below is pinned deliberately: when the
+/// gap closes, this test must fail so it can be upgraded to assert the named
+/// refusal. Until then the strictness itself is proven where it IS
+/// observable — `a_failing_output_sink_does_not_suppress_the_others`
+/// (`engine_services.rs:1219`) asserts the flush error names the endpoint it
+/// refused.
+#[wasm_bindgen_test]
+fn board_manifest_boot_wears_the_board_and_survives_a_wire_it_lacks() {
+    fw_browser_init_exports(wasm_bindgen::exports());
+
+    let one_wire_board = r#"{
+        "id": "test/one-wire",
+        "target": "esp32c6",
+        "vendor": "test",
+        "product": "One Wire",
+        "gpio": [
+            {
+                "address": "/gpio/18",
+                "display_label": "D10",
+                "capabilities": ["gpio-output", "gpio-input"]
+            }
+        ],
+        "resource": [
+            {
+                "address": "/rmt/ws281x0",
+                "display_label": "RMT WS281x 0",
+                "capabilities": ["rmt", "ws281x-output"]
+            }
+        ]
+    }"#;
+    let runtime_id = create_runtime_with_options(
+        "board-strictness-test",
+        &boot_options(one_wire_board.to_string(), None),
+    );
+    let mut next_id = 1;
+
+    // The manifest the boot options carried is the one the runtime answers
+    // with — the one half of "the manifest decides" a wire client CAN read
+    // back, and the reason this test boots a board of its own at all.
+    assert_eq!(
+        boot_hello(runtime_id).hardware.board_id.as_deref(),
+        Some("test/one-wire"),
+        "the sim must wear the manifest its boot options carried"
+    );
+
+    let declared = build_project_with_output_endpoint("ws281x:local:D10");
+    let declared_handle =
+        push_and_load_project(runtime_id, "declared", &declared.borrow(), &mut next_id);
+    assert_eq!(
+        output_node_status(runtime_id, declared_handle, &mut next_id),
+        NodeRuntimeStatus::Ok,
+        "D10 is declared by this board"
+    );
+    let (_, declared_red) = output_frame(runtime_id, declared_handle, &mut next_id);
+    assert!(
+        declared_red > 0,
+        "a project on a declared wire must render: red {declared_red}"
+    );
+
+    // D9 exists on a real XIAO C6 but not on THIS board. The engine refuses
+    // the open and parks the wire; ticking must keep returning (a refused
+    // wire is not a wedge) and the output must keep publishing (a refused
+    // wire is not a black sim) — those are the two things the refusal is
+    // allowed to cost, and the only two a client can check.
+    let absent = build_project_with_output_endpoint("ws281x:local:D9");
+    let absent_handle = push_and_load_project(runtime_id, "absent", &absent.borrow(), &mut next_id);
+    for _ in 0..3 {
+        tick_runtime(runtime_id, 40).expect("a wire the board lacks must not wedge the sim");
+    }
+    let (absent_frame, absent_red) = output_frame(runtime_id, absent_handle, &mut next_id);
+    assert!(
+        absent_red > 0,
+        "a parked wire must not blank the sim: red {absent_red}"
+    );
+    let (absent_frame_later, _) = output_frame(runtime_id, absent_handle, &mut next_id);
+    assert!(
+        absent_frame_later > absent_frame,
+        "the sim must keep ticking with a wire it cannot open: \
+         {absent_frame} -> {absent_frame_later}"
+    );
+
+    // Pinned, not endorsed: see this test's doc comment. The refusal reaches
+    // no wire query today, so the output node reports exactly what an opened
+    // wire reports. Closing
+    // `docs/debt/output-flush-refusal-is-log-only.md` must break this line.
+    assert_eq!(
+        output_node_status(runtime_id, absent_handle, &mut next_id),
+        NodeRuntimeStatus::Ok,
+        "GAP PINNED: no wire query carries an output-flush refusal, so a \
+         refused wire still reads Ok. Closing the debt entry should turn \
+         this into an assertion that the status NAMES ws281x:local:D9."
+    );
+}
+
+/// A project authored for `B13` — a dome wire label no silicon profile in
+/// the repo carries — loads and renders on a Desktop sim.
+///
+/// ⚠️ That the Desktop MANIFEST actually opens `B13` is asserted where the
+/// open is observable:
+/// `default_desktop_manifest_opens_every_catalog_wire_label_at_once`
+/// (`lp-core/lpc-hardware/src/manifest/default_manifests.rs:306`). It cannot
+/// be asserted from here — no wire query reports whether a wire opened, so
+/// `NodeRuntimeStatus::Ok` below would read the same on a board that refused
+/// it. See `board_manifest_boot_wears_the_board_and_survives_a_wire_it_lacks`
+/// for the whole shape of that gap.
+#[wasm_bindgen_test]
+fn desktop_boot_accepts_a_dome_wire_label() {
+    fw_browser_init_exports(wasm_bindgen::exports());
+
+    let runtime_id = create_cpu_runtime("desktop-wire-test");
+    let mut next_id = 1;
+    let project = build_project_with_output_endpoint("ws281x:local:B13");
+    let handle = push_and_load_project(runtime_id, "dome-wire", &project.borrow(), &mut next_id);
+
+    assert_eq!(
+        output_node_status(runtime_id, handle, &mut next_id),
+        NodeRuntimeStatus::Ok,
+        "a dome wire label must not fault the project"
+    );
+    let (frame, red) = output_frame(runtime_id, handle, &mut next_id);
+    assert!(frame > 0, "the Desktop sim must have ticked");
+    assert!(red > 0, "the dome-wire project must render: red {red}");
+}
+
+/// The hello reports the board the runtime WEARS, and the identity it was
+/// given — the two facts a card reads to say "as <board>" and to key a
+/// device row. Without an identity it reports no MAC, like any embedder
+/// with no efuse.
+#[wasm_bindgen_test]
+fn hello_reports_the_worn_board_and_the_supplied_identity() {
+    fw_browser_init_exports(wasm_bindgen::exports());
+
+    let anonymous = create_cpu_runtime("hello-desktop-test");
+    let hello = boot_hello(anonymous);
+    assert_eq!(hello.build.package, "fw-browser");
+    assert_eq!(
+        hello.hardware.board_id.as_deref(),
+        Some("lightplayer/desktop")
+    );
+    assert_eq!(hello.hardware.base_mac, None);
+
+    let identified = create_runtime_with_options(
+        "hello-identity-test",
+        &desktop_options(Some("02:00:00:ab:cd:ef")),
+    );
+    let hello = boot_hello(identified);
+    assert_eq!(
+        hello.hardware.base_mac.as_deref(),
+        Some("02:00:00:ab:cd:ef")
+    );
+    assert_eq!(
+        hello.hardware.board_id.as_deref(),
+        Some("lightplayer/desktop")
+    );
+}
+
+/// Boot options that carry a manifest the hardware layer refuses fail the
+/// creation outright: a runtime that quietly fell back to another board
+/// would report a board id it is not.
+#[wasm_bindgen_test]
+fn unusable_boot_manifest_fails_runtime_creation() {
+    fw_browser_init_exports(wasm_bindgen::exports());
+
+    let error = create_runtime(
+        "bad-manifest-test",
+        &boot_options("{\"id\":\"broken\"}".to_string(), None),
+    )
+    .expect_err("a manifest that will not parse must fail creation");
+    assert!(
+        error.contains("hardware manifest"),
+        "the error must say what was wrong: {error}"
+    );
+}
+
 fn next_request_id(next_id: &mut u64) -> u64 {
     let id = *next_id;
     *next_id += 1;
@@ -787,6 +985,51 @@ fn build_smoke_project() -> Rc<RefCell<LpFsMemory>> {
     builder.fixture_basic(&output_path, &texture_path);
     builder.build();
     fs
+}
+
+/// The smoke project with its output pointed at one endpoint spec (see
+/// [`build_smoke_project`]) — how a project authored for a wire the worn
+/// board may or may not have is expressed.
+fn build_project_with_output_endpoint(endpoint: &str) -> Rc<RefCell<LpFsMemory>> {
+    let fs = Rc::new(RefCell::new(LpFsMemory::new()));
+    let mut builder = ProjectBuilder::new(fs.clone());
+    builder.clock_basic();
+    let texture_path = builder.texture().width(2).height(2).add(&mut builder);
+    builder.shader_basic(&texture_path);
+    let output_path = builder.output().endpoint_str(endpoint).add(&mut builder);
+    builder.fixture_basic(&output_path, &texture_path);
+    builder.build();
+    fs
+}
+
+/// The loaded project's output-node status after a tick.
+fn output_node_status(
+    runtime_id: u32,
+    handle: WireProjectHandle,
+    next_id: &mut u64,
+) -> NodeRuntimeStatus {
+    let view = read_nodes_view(runtime_id, handle, next_id, 16);
+    view.tree
+        .nodes
+        .values()
+        .find(|entry| entry.path.to_string().contains("output"))
+        .map(|entry| entry.status.clone())
+        .expect("output node present")
+}
+
+/// The loaded project's `(frame_num, red)` after a tick — what a client can
+/// see of an output that is publishing: that the sim advanced, and that the
+/// output node put light in its buffer.
+///
+/// This is the PUBLISHED buffer, engine-side. It says nothing about whether
+/// the wire behind it opened; nothing on the wire does (see
+/// `board_manifest_boot_wears_the_board_and_survives_a_wire_it_lacks`).
+fn output_frame(runtime_id: u32, handle: WireProjectHandle, next_id: &mut u64) -> (u64, u16) {
+    let nodes_view = read_nodes_view(runtime_id, handle, next_id, 16);
+    let output_id = output_node_id(&nodes_view);
+    let view = read_runtime_and_resources(runtime_id, handle, next_id, 40);
+    let sample = read_output_sample(&view, output_id);
+    (sample.runtime_frame_num, sample.red)
 }
 
 /// The smoke project with a custom shader source (see [`build_smoke_project`]).
@@ -987,11 +1230,44 @@ enum BrowserInputEnvelopeForTest {
     ProtocolIn { frame: String },
 }
 
-/// Create a CPU-tier runtime and return its id (tests never request GPU:
-/// wasm-bindgen-test pages have no guaranteed WebGPU device).
+/// Create a CPU-tier DESKTOP runtime and return its id (tests never request
+/// GPU: wasm-bindgen-test pages have no guaranteed WebGPU device).
 fn create_cpu_runtime(label: &str) -> u32 {
-    let created = create_runtime(label, "cpu").expect("create runtime");
+    create_runtime_with_options(label, &desktop_options(None))
+}
+
+/// Boot options for the Desktop board — what Studio hands a Desktop
+/// project's sim, minus the identity unless a test asks for one.
+fn desktop_options(base_mac: Option<&str>) -> String {
+    boot_options(desktop_hardware_manifest_json(), base_mac)
+}
+
+fn boot_options(hardware_manifest_json: String, base_mac: Option<&str>) -> String {
+    let mut options = serde_json::json!({
+        "tier": "cpu",
+        "hardware_manifest_json": hardware_manifest_json,
+    });
+    if let Some(base_mac) = base_mac {
+        options["identity"] = serde_json::json!({ "base_mac": base_mac });
+    }
+    serde_json::to_string(&options).expect("boot options")
+}
+
+fn create_runtime_with_options(label: &str, options_json: &str) -> u32 {
+    let created = create_runtime(label, options_json).expect("create runtime");
     let value: serde_json::Value = serde_json::from_str(&created).expect("creation json");
     assert_eq!(value["tier"], "cpu");
     u32::try_from(value["runtime_id"].as_u64().expect("runtime_id")).expect("u32 id")
+}
+
+/// The runtime's boot hello. It is queued before anything else, so draining
+/// without ticking is enough to read it.
+fn boot_hello(runtime_id: u32) -> lpc_wire::ServerHello {
+    let drained = crate::drain_output_json(runtime_id).expect("drain");
+    for message in collect_protocol_out(&drained) {
+        if let WireServerMsgBody::Hello(hello) = message.msg {
+            return hello;
+        }
+    }
+    panic!("no hello in the boot drain");
 }

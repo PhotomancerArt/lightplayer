@@ -239,6 +239,7 @@ impl BrowserWorkerHandle {
             fw_browser_module_path,
             fw_browser_wasm_path,
             tick_mode: options.tick_mode,
+            runtime: options.runtime.clone(),
             module_delivery: delivery.wire_value().to_string(),
         })?;
         if let Some(module) = &shared_module {

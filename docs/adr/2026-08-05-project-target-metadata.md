@@ -5,6 +5,14 @@
 - **Deciders:** Photomancer
 - **Supersedes:** None
 - **Superseded by:** None
+- **Amended:** 2026-09-07 — `target` now DRIVES the simulator's hardware
+  manifest: opening a project starts a sim wearing that board's profile
+  (absent reads as the new Desktop board), so outputs resolve strictly
+  against real board tables instead of a permissive stand-in. The field
+  stays advisory in the sense this ADR means — it names *which* board,
+  never *how* to drive it — and `project.json` bytes are unchanged. The
+  full decision is the "always a device" ADR that lands with P3 of the
+  studio-emulated-boards plan; this line records the change P1 made.
 - **Relates:** `2026-08-03-multi-endpoint-output-node.md` (refines, does not
   reverse — see below), `2026-08-01-project-module-mitosis-container-format-gate.md`
   (the container manifest this field joins), gallery-rework

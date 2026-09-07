@@ -51,6 +51,7 @@ self.onmessage = async (event) => {
           message.fw_browser_wasm_path,
           message.tick_mode || "self_ticking",
           message.module_delivery || "path",
+          message.runtime,
         );
         break;
       case "boot_module":
@@ -66,7 +67,11 @@ self.onmessage = async (event) => {
       case "create_runtime": {
         requireBooted();
         const label = message.label || "browser-runtime";
-        const created = JSON.parse(fwBrowser.create_runtime(label, message.tier || "cpu"));
+        // The boot options are the host's, forwarded verbatim — the board
+        // manifest inside them is opaque text on this side.
+        const created = JSON.parse(
+          fwBrowser.create_runtime(label, JSON.stringify(message.runtime ?? {})),
+        );
         postMany(fwBrowser.drain_output_json(created.runtime_id));
         self.postMessage({
           kind: "runtime_created",
@@ -168,7 +173,7 @@ function isTeardownAbort(error) {
 // below is protocol, not logging. The vocabulary (booting → instantiating
 // → gpu-init → runtime-create → ready) is documented in the boot-protocol
 // ADR; keep the strings stable.
-async function boot(label, modulePath, wasmPath, mode, moduleDelivery) {
+async function boot(label, modulePath, wasmPath, mode, moduleDelivery, runtimeOptions) {
   if (!booted) {
     if (!modulePath) {
       throw new Error("missing fw_browser_module_path");
@@ -200,9 +205,13 @@ async function boot(label, modulePath, wasmPath, mode, moduleDelivery) {
     if (!gpuInit.available) {
       console.info("[fw-browser-worker] webgpu unavailable:", gpuInit.reason);
     }
-    // The boot runtime is always CPU-tier (the authoritative sim tier).
+    // The boot runtime is created from the host's options like any other:
+    // the board it wears, the tier it asks for, the identity it answers
+    // with. Opaque here — the manifest inside is text this side never reads.
     self.postMessage({ kind: "status", status: "runtime-create" });
-    bootRuntimeId = JSON.parse(fwBrowser.create_runtime(label, "cpu")).runtime_id;
+    bootRuntimeId = JSON.parse(
+      fwBrowser.create_runtime(label, JSON.stringify(runtimeOptions ?? {})),
+    ).runtime_id;
     booted = true;
     tickMode = mode;
     postMany(fwBrowser.drain_output_json(bootRuntimeId));
