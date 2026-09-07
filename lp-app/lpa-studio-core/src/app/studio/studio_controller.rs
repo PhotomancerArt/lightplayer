@@ -23,6 +23,7 @@ use std::rc::Rc;
 
 use lpa_client::{CancelSignal, ProgressDeadline};
 
+use crate::app::frame_feed::output_frame_entries::output_frame_entries;
 use crate::app::home::home_view_builder::HomeInputs;
 use crate::app::home::{HOME_NODE_ID, HomeOp, UiHomeView, home_view_builder};
 use crate::app::library::{CatalogOp, LibraryHost};
@@ -112,6 +113,10 @@ pub struct StudioController {
     /// there is no device lens in the runtime pool and no device arm on any
     /// other op, by design (the anti-fifth-machine rule).
     devices: crate::DeviceRoster,
+    /// The device cards' live frame feeds (one per wanted device), pulled
+    /// as app conversations on each board's shared link. Frame state only —
+    /// every device fact they need is read off `devices` at tick time.
+    device_feeds: crate::DeviceFrameFeeds,
     /// A `/device/<uid>` open that arrived before the board was ready (a
     /// reload: the route asks for the lens while the granted port is still
     /// identifying). Held until the board says hello, then attached from
@@ -295,6 +300,7 @@ impl StudioController {
         Self {
             sim_link: crate::SimLink::new(),
             devices: crate::DeviceRoster::new(device_roster_config()),
+            device_feeds: crate::DeviceFrameFeeds::new(),
             pending_device_lens: None,
             device_sweep_pending: false,
             pool: RuntimePool::new(),
@@ -470,6 +476,8 @@ impl StudioController {
             );
         }
         self.drop_device_lens_if_wireless();
+        // A forgotten device takes its feed (and last frame) with it.
+        self.device_feeds.retain_devices(self.devices.roster());
         self.mark_dirty();
     }
 
@@ -674,7 +682,15 @@ impl StudioController {
 
     /// The devices surface's projection.
     pub fn device_roster_view(&self) -> crate::DeviceRosterView {
-        self.devices.view(self.device_now())
+        let mut view = self.devices.view(self.device_now());
+        view.feeds = crate::device_card_feed_views(
+            self.devices.roster(),
+            &view.roster.devices,
+            &self.device_feeds,
+            self.devices.effects(),
+            (self.now_secs)(),
+        );
+        view
     }
 
     /// Install the platform's user-settings persistence sink (localStorage
@@ -964,6 +980,10 @@ impl StudioController {
         if let Some(feed) = self.card_feed_due_in(now) {
             delay = Some(delay.map_or(feed, |current| current.min(feed)));
         }
+        // The device cards' feeds pace the same way, for the same reason.
+        if let Some(feed) = self.device_feed_due_in(now) {
+            delay = Some(delay.map_or(feed, |current| current.min(feed)));
+        }
         delay.unwrap_or_else(|| RefreshCadence::default().interval())
     }
 
@@ -1191,6 +1211,71 @@ impl StudioController {
                     .due_in(now, session.card_feed_interval())
             })
             .min()
+    }
+
+    /// Time until the earliest due DEVICE card feed pull (the roster's
+    /// boards, as opposed to the runtime pool's sim). `None` when no card
+    /// is feeding.
+    fn device_feed_due_in(&self, now: f64) -> Option<Duration> {
+        self.device_feeds.due_in(
+            now,
+            crate::DEVICE_CARD_FEED_INTERVAL,
+            self.devices.roster(),
+            self.devices.effects(),
+        )
+    }
+
+    /// Pull one published frame per feeding DEVICE card whose completion
+    /// gap elapsed — the roster boards' half of the card feed lane, under
+    /// the same passive class and preempt watch as the sim's.
+    ///
+    /// Returns whether a due pull was skipped or cut short by cancellation.
+    pub async fn run_due_device_feeds<MakeTimer, Timer, Cancel>(
+        &mut self,
+        make_timer: MakeTimer,
+        cancel: &Cancel,
+    ) -> bool
+    where
+        MakeTimer: FnMut(Duration) -> Timer + Clone,
+        Timer: Future<Output = ()>,
+        Cancel: CancelSignal + ?Sized,
+    {
+        let now_secs = Rc::clone(&self.now_secs);
+        let (preempted, new_frame) = self
+            .device_feeds
+            .run_due(
+                &*now_secs,
+                crate::DEVICE_CARD_FEED_INTERVAL,
+                crate::DEVICE_CARD_FEED_CLASS
+                    .deadline()
+                    .unwrap_or(crate::PASSIVE_REFRESH_DEADLINE),
+                self.devices.roster(),
+                self.devices.effects(),
+                make_timer,
+                cancel,
+            )
+            .await;
+        if new_frame {
+            self.mark_dirty();
+        }
+        preempted
+    }
+
+    /// The card's mount lease for its live frame feed: a mounted
+    /// `DeviceRosterCard` wants its device fed; an unmounted one does not.
+    pub fn set_device_feed_wanted(&mut self, device: crate::DeviceId, wanted: bool) {
+        self.device_feeds.set_wanted(device, wanted);
+        self.mark_dirty();
+    }
+
+    /// The page's visibility, for the feeds: a hidden tab feeds nothing.
+    pub fn set_device_feeds_page_visible(&mut self, visible: bool) {
+        self.device_feeds.set_page_visible(visible);
+    }
+
+    /// The device feeds, for the view join and the tests.
+    pub fn device_feeds(&self) -> &crate::DeviceFrameFeeds {
+        &self.device_feeds
     }
 
     /// Pull one published frame per feeding session whose completion gap
@@ -1946,6 +2031,11 @@ impl StudioController {
         if node_id.as_str() == crate::DevicePushOp::NODE_ID {
             let op = action.into_op::<crate::DevicePushOp>()?;
             return self.execute_device_push_op(op).await;
+        }
+        if node_id.as_str() == crate::DeviceFeedOp::NODE_ID {
+            let op = action.into_op::<crate::DeviceFeedOp>()?;
+            self.set_device_feed_wanted(op.device, op.wanted);
+            return Ok(UiNotices::new());
         }
         if node_id == project_node_id {
             // Slot edits and node-level reverts target the project node too
@@ -4645,56 +4735,6 @@ fn project_sync_notice(synced: bool, success: &str, needs_attention: &str) -> Ui
 }
 
 /// Constructor-default randomness: clock-derived bytes. Unique enough
-/// The published-frame entries carried by a card-feed read's event stream.
-///
-/// The feed asks for exactly one probe, so this walks the stream for probe
-/// index 0 and reassembles it: a small result arrives whole, and a
-/// dome-scale frame arrives as a header plus bounded chunks the transport
-/// already validated for coverage. Anything else in the stream (the
-/// begin/end revision markers) is not this read's business.
-///
-/// A malformed stream yields no entries rather than an error: the feed's
-/// answer to "no frame this time" is to keep the last one, and there is no
-/// user-facing failure to raise for a picture that did not arrive.
-fn output_frame_entries(events: &[lpc_wire::ProjectReadEvent]) -> Vec<lpc_wire::OutputFrameEntry> {
-    use lpc_wire::{
-        OutputFrameProbeResult, ProjectProbeResult, ProjectProbeResultHeader, ProjectReadEvent,
-        ProjectReadProbeEvent,
-    };
-
-    let mut pending: Option<(ProjectProbeResultHeader, Vec<u8>)> = None;
-    for event in events {
-        let ProjectReadEvent::Probe { event, .. } = event else {
-            continue;
-        };
-        match event {
-            ProjectReadProbeEvent::Result(ProjectProbeResult::OutputFrame(
-                OutputFrameProbeResult::Frame { outputs },
-            )) => return outputs.clone(),
-            ProjectReadProbeEvent::ResultBegin { header, .. } => {
-                pending = Some((header.clone(), Vec::new()));
-            }
-            ProjectReadProbeEvent::ResultBytes { bytes, .. } => {
-                if let Some((_, buffer)) = pending.as_mut() {
-                    buffer.extend_from_slice(bytes);
-                }
-            }
-            ProjectReadProbeEvent::ResultEnd => {
-                let Some((header, bytes)) = pending.take() else {
-                    continue;
-                };
-                if let ProjectProbeResult::OutputFrame(OutputFrameProbeResult::Frame { outputs }) =
-                    header.into_result(bytes)
-                {
-                    return outputs;
-                }
-            }
-            _ => {}
-        }
-    }
-    Vec::new()
-}
-
 /// for tests; the web shell replaces it with crypto randomness via
 /// [`StudioController::set_random`].
 fn clock_fallback_random() -> [u8; 16] {

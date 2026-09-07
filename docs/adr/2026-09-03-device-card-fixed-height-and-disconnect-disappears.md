@@ -151,6 +151,9 @@ already running LightPlayer firmware when it first hello'd.
   per-layout aspect ratio was cut for this pass; the preview FEED is its
   own later milestone, and an honest "no picture yet" sentence costs
   nothing to maintain in the meantime. Aspect-fit returns with the feed.
+  **Landed 2026-09-06** (`2026-09-06-shared-link-conversations-and-the-
+  card-feed.md`): the lamp field aspect-fits INSIDE the fixed 120 px slot
+  — the slot never follows the layout's aspect, so the height rule holds.
 - **Collapsing a zone's rows during an activity** — tried in the spike and
   ruled out for the state zone ("I'll need to feel it," Yona, spike gate
   2026-09-02): a section disappearing while its own activity runs reads as

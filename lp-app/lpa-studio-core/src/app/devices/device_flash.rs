@@ -502,6 +502,7 @@ mod tests {
             remembered_firmware: None,
             degraded: None,
             loaded_project: LoadedProject::Empty,
+            engine_fps: None,
             can_receive_project: true,
             can_remove_project: false,
             activity: None,
@@ -547,6 +548,7 @@ mod tests {
             firmware_face: face,
             remembered_firmware: None,
             degraded: None,
+            engine_fps: None,
             loaded_project: LoadedProject::Running {
                 label: "studio".to_string(),
             },

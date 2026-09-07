@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use lp_emu_validate::ValidateConfig;
 use lp_emu_validate::replay::ReplayOptions;
-use lp_emu_validate::run::{self, RecordProvenance};
+use lp_emu_validate::run::{self, ImageOverrides, RecordProvenance, RunOptions};
 
 use super::args::{RecordArgs, ReplayArgs, ValidateCli, ValidateCommand};
 
@@ -18,14 +18,18 @@ pub fn handle_validate(cli: ValidateCli) -> Result<()> {
         }
         ValidateCommand::Replay(args) => replay(args, &repo_root),
         ValidateCommand::Run(args) => {
+            let images = ImageOverrides::parse(&args.image)?;
             print!(
                 "{}",
                 run::run_set(
                     &config,
                     &args.set,
                     &args.configuration,
-                    args.port.as_deref(),
-                    args.timeout_secs,
+                    &RunOptions {
+                        port: args.port.as_deref(),
+                        images: &images,
+                        timeout_secs: args.timeout_secs,
+                    },
                     &repo_root,
                     args.dry_run,
                 )?
@@ -63,18 +67,23 @@ fn record(args: RecordArgs, config: &ValidateConfig, repo_root: &Path) -> Result
         Some(d) => d,
         None => chrono::Local::now().format("%Y-%m-%d").to_string(),
     };
+    let images = ImageOverrides::parse(&args.image)?;
     print!(
         "{}",
         run::record_set(
             config,
             &args.set,
             &args.configuration,
-            args.port.as_deref(),
-            args.timeout_secs,
+            &RunOptions {
+                port: args.port.as_deref(),
+                images: &images,
+                timeout_secs: args.timeout_secs,
+            },
             repo_root,
             &RecordProvenance {
                 date: &date,
                 firmware_commit: &args.firmware_commit,
+                firmware_dirty: Some(args.firmware_dirty),
             },
             args.dry_run,
         )?

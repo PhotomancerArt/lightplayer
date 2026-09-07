@@ -14,6 +14,7 @@
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
+use core::any::Any;
 use lp_emu_core::sched::{Cycles, EventId, Scheduler};
 
 use crate::host::HostSinks;
@@ -65,12 +66,38 @@ impl Width {
     }
 }
 
+/// Something a peripheral needs the *machine* to do, because it cannot do
+/// it itself: a reset. The bus holds at most one (the first wins) and the
+/// machine takes it at the next slice boundary.
+///
+/// The one producer today is a watchdog whose stage action is a reset. The
+/// peripheral cannot reset the hart — it does not see the hart — and a
+/// reset the emulator cannot yet perform (M7 owns the boot chain) is
+/// reported as a run outcome instead, which is also the more useful answer:
+/// "the RWDT expired at cycle N" is what a bring-up wants to read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MachineRequest {
+    Reset {
+        /// Who asked: `"LP_WDT stage 0"`.
+        source: &'static str,
+        at: Cycles,
+    },
+}
+
 /// A `Peripheral`'s view of the machine for the duration of one access.
 ///
 /// Deliberately small: cycles, the PC that issued the access, the hart index
 /// (PD6 — one hart today, the field is what makes a per-core register block
 /// possible without reshaping this trait), the scheduler, the interrupt
-/// source lines, the bus trace, and the host byte streams.
+/// source lines, the bus trace, the host byte streams, the chip's interrupt
+/// matrix, and a slot for a [`MachineRequest`].
+///
+/// The matrix is here for one reason (the C6 plan's DD22): the register
+/// blocks that *configure* it (`INTERRUPT_CORE0`, `PLIC_MX`) are ordinary
+/// peripherals on the decode table, and the matrix is the single copy of
+/// that configuration. Those peripherals are register **views** that write
+/// into it through this handle and read back from it, so there is one state
+/// and nothing to keep in sync. Every other peripheral ignores the field.
 pub struct BusCx<'a> {
     /// Guest cycle count at the access.
     pub now: Cycles,
@@ -84,6 +111,24 @@ pub struct BusCx<'a> {
     pub irq: &'a mut IrqLines,
     pub trace: &'a mut Trace,
     pub host: &'a mut HostSinks,
+    /// The chip's interrupt matrix. Downcast with
+    /// [`CpuIntMatrix::as_any_mut`] to the chip's concrete type.
+    pub matrix: &'a mut dyn CpuIntMatrix,
+    /// See [`MachineRequest`]. Set through [`BusCx::request`].
+    pub request: &'a mut Option<MachineRequest>,
+}
+
+impl BusCx<'_> {
+    /// Ask the machine for something the peripheral cannot do itself. The
+    /// first request in a slice wins; a second is logged and dropped, since
+    /// the machine stops at the first anyway.
+    pub fn request(&mut self, request: MachineRequest) {
+        if let Some(existing) = *self.request {
+            log::warn!("BusCx: {request:?} dropped, the bus already holds {existing:?}");
+            return;
+        }
+        *self.request = Some(request);
+    }
 }
 
 /// Chip-wide interrupt **source** levels.
@@ -161,6 +206,144 @@ impl IrqLines {
     }
 }
 
+/// Turns chip-wide interrupt **source** levels into "the CPU interrupt this
+/// hart should take right now", or `None`.
+///
+/// The half of the interrupt path that is chip-specific: which source is
+/// routed to which CPU interrupt, which are enabled, and what the priority
+/// threshold is are all PLIC_MX / INTERRUPT_CORE0 questions, and this crate
+/// holds no chip numbers. [`crate::bus::SocBus`] holds one of these and
+/// answers `Bus::pending_cpu_interrupt` from it, which is what lets an MMIO
+/// store that raises a line be delivered before the next instruction
+/// retires.
+///
+/// It is asked on every side-band consumption, so it must be cheap and it
+/// must be a **pure function of the levels and its own configuration** — no
+/// scheduling, no logging per call.
+///
+/// Its configuration arrives as MMIO writes to chip-specific register
+/// blocks, which reach it through [`BusCx::matrix`] and the two `as_any`
+/// accessors: the chip's register-view peripherals downcast to the chip's
+/// concrete matrix type. This crate never learns what that type is.
+pub trait CpuIntMatrix: Send + 'static {
+    /// The highest-priority CPU interrupt asserted for `hart`, or `None`.
+    fn cpu_interrupt(&self, hart: usize, irq: &IrqLines) -> Option<u8>;
+
+    /// The downcast seam for the chip's register views.
+    fn as_any(&self) -> &dyn Any;
+
+    fn as_any_mut(&mut self) -> &mut dyn Any;
+
+    /// Snapshot the matrix's configuration. Defaults to "no state", which is
+    /// right for a matrix that is a pure routing table.
+    fn save_state(&self) -> Vec<u8> {
+        Vec::new()
+    }
+
+    fn load_state(&mut self, _bytes: &[u8]) {}
+}
+
+/// The default matrix: nothing is ever asserted.
+///
+/// What a bus has before a chip crate installs its own. A stub that returns
+/// `None` is honest about having no routing where a stub that guessed would
+/// not be.
+#[derive(Copy, Clone, Debug, Default)]
+pub struct NoCpuInterrupts;
+
+impl CpuIntMatrix for NoCpuInterrupts {
+    fn cpu_interrupt(&self, _hart: usize, _irq: &IrqLines) -> Option<u8> {
+        None
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+/// A stand-alone context for driving a [`Peripheral`] with no bus: the
+/// test harness. Holds everything a [`BusCx`] borrows, so a unit test can
+/// write a register, run the events that came due, and read the source
+/// levels back, without building a machine.
+pub struct Sandbox {
+    pub now: Cycles,
+    pub pc: u32,
+    pub hart: usize,
+    pub sched: Scheduler,
+    pub irq: IrqLines,
+    pub trace: Trace,
+    pub host: HostSinks,
+    pub matrix: Box<dyn CpuIntMatrix>,
+    pub request: Option<MachineRequest>,
+}
+
+impl Default for Sandbox {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Sandbox {
+    pub fn new() -> Self {
+        Self {
+            now: 0,
+            pc: 0,
+            hart: 0,
+            sched: Scheduler::new(),
+            irq: IrqLines::new(),
+            trace: Trace::disabled(),
+            host: HostSinks::new(),
+            matrix: Box::new(NoCpuInterrupts),
+            request: None,
+        }
+    }
+
+    /// A sandbox whose matrix is the chip's.
+    pub fn with_matrix(mut self, matrix: Box<dyn CpuIntMatrix>) -> Self {
+        self.matrix = matrix;
+        self
+    }
+
+    pub fn cx(&mut self) -> BusCx<'_> {
+        BusCx {
+            now: self.now,
+            pc: self.pc,
+            hart: self.hart,
+            sched: &mut self.sched,
+            irq: &mut self.irq,
+            trace: &mut self.trace,
+            host: &mut self.host,
+            matrix: &mut *self.matrix,
+            request: &mut self.request,
+        }
+    }
+
+    /// Read a register through the peripheral, at `self.now`.
+    pub fn read(&mut self, p: &mut dyn Peripheral, off: u32) -> u32 {
+        p.read(off, Width::Word, &mut self.cx())
+    }
+
+    /// Write a register through the peripheral, at `self.now`.
+    pub fn write(&mut self, p: &mut dyn Peripheral, off: u32, value: u32) {
+        p.write(off, Width::Word, value, &mut self.cx());
+    }
+
+    /// Move time to `now` and deliver every event of `p` that came due.
+    ///
+    /// The sandbox holds one peripheral's events, so every popped id is
+    /// handed to `p` whatever peripheral index it encodes.
+    pub fn run_to(&mut self, p: &mut dyn Peripheral, now: Cycles) {
+        self.now = now;
+        while let Some(id) = self.sched.pop_due(now) {
+            p.on_event(id, &mut self.cx());
+        }
+    }
+}
+
 /// A register window with behaviour.
 ///
 /// Offsets are **relative to the peripheral's base** and register-aligned:
@@ -180,6 +363,22 @@ pub trait Peripheral {
     fn read(&mut self, off: u32, width: Width, cx: &mut BusCx<'_>) -> u32;
 
     fn write(&mut self, off: u32, width: Width, value: u32, cx: &mut BusCx<'_>);
+
+    /// The bus has given this peripheral index `index`. Called once, from
+    /// [`crate::bus::SocBus::add_peripheral`]; a peripheral that schedules
+    /// events keeps it, because [`crate::bus::event_id`] packs it into every
+    /// event tag and the bus routes the event back by it.
+    fn attached(&mut self, _index: usize) {}
+
+    /// The machine is about to run: guest time is zero and the schedule is
+    /// empty. Called once per peripheral from
+    /// [`crate::bus::SocBus::start_peripherals`], after every block is
+    /// attached, with a full [`BusCx`] — the one place a peripheral can
+    /// schedule something *before* the guest touches it. A UART polling a
+    /// host source for bytes that may arrive before the guest has configured
+    /// the block is the case; nothing else needs it and the default is a
+    /// no-op.
+    fn started(&mut self, _cx: &mut BusCx<'_>) {}
 
     /// A scheduled event came due. `id` is whatever this peripheral passed
     /// to [`Scheduler::schedule_at`]; the bus routes it back by the

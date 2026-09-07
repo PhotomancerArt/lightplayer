@@ -37,7 +37,7 @@
 use lpc_wire::{ControlDisplayLayoutRead, OutputFrameEntry};
 
 use crate::UiControlProductPreview;
-use crate::app::project::output_frame_cache::OutputFrameCache;
+use crate::app::frame_feed::output_frame_cache::OutputFrameCache;
 
 /// What applying a pulled answer did, for the caller's follow-up work.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -12,6 +12,22 @@ use serde::{Deserialize, Serialize};
 use crate::identity::EndpointKey;
 use crate::wire::{ClientFrame, ServerFrame};
 
+/// Request ids at or above this base belong to **app conversations**: an
+/// `lpa-client` exchange the effects layer runs on the shared link beside
+/// the model's own frames (the device card's frame feed is the first). The
+/// transport classifies a reply by its id BEFORE the mirror — one at or
+/// above the base surfaces as [`LinkEvent::Passthrough`], verbatim, for the
+/// conversation that asked — and the model never folds it. Model-minted ids
+/// (the identify hello re-ask, the two `ClearFaults` constants) stay far
+/// below; a conversation mints upward from here.
+///
+/// Why a range and not a second wire: frames are not evidence. A picture
+/// stream at ~5 fps through a fold that journals every input and lines
+/// every unknown frame on the terminal would drown both, and the model has
+/// no use for the bytes — what a board is RUNNING reaches it on the
+/// heartbeat regardless.
+pub const APP_CONVERSATION_ID_BASE: u32 = 0x4000_0000;
+
 /// Handle for one open (or opening) transport. Minted by the effects layer,
 /// meaningless to the model beyond routing.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
@@ -68,6 +84,15 @@ pub enum LinkEvent {
         ok: bool,
     },
     Error(String),
+    /// A reply to an app conversation (`request_id` ≥
+    /// [`APP_CONVERSATION_ID_BASE`]): the raw `M!` line, verbatim, so the
+    /// conversation can decode it with the full wire vocabulary. The
+    /// effects layer routes it to whoever asked; the fold ignores it
+    /// entirely — no terminal line, no freshness, no anomaly count.
+    Passthrough {
+        request_id: u32,
+        line: String,
+    },
 }
 
 /// Everything the model can ask a transport to do.

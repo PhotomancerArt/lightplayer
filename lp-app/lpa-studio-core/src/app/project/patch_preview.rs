@@ -43,7 +43,7 @@ const PREVIEW_SWEEP_FRAMES: u64 = 24;
 pub const FROZEN_PREVIEW_PHASE: f32 = 0.25;
 
 /// The preview's phase after `frames_seen` engine frames (see
-/// [`super::output_frame_cache::OutputFrameCache::frames_seen`]).
+/// [`crate::app::frame_feed::OutputFrameCache::frames_seen`]).
 ///
 /// Zero frames = nothing has ever played here = the frozen still. Every
 /// story renders in that state, and so does a project whose engine is idle.

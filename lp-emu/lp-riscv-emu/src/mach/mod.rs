@@ -23,11 +23,13 @@
 //! - **(b)** after `mret`, after `wfi`, and after any CSR write to
 //!   `mstatus` or `mie` — the three instructions that can turn delivery on;
 //! - **(c)** after a Store- or System-class instruction whose bus reports
-//!   [`Bus::take_sideband`] `== true`, which is how an MMIO store that
-//!   raises a peripheral interrupt gets noticed before the next
-//!   instruction. (Atomics are included: an AMO is a store.) On a RAM-only
-//!   `Bus` this is an inlined constant `false` the optimizer deletes;
-//!   `Memory` never overrides it.
+//!   [`Bus::take_sideband`] `== true`: the hart re-reads
+//!   [`Bus::pending_cpu_interrupt`] and polls, which is how an MMIO store
+//!   that raises a peripheral interrupt is delivered before the next
+//!   instruction retires — and how one that lowers a line stops being
+//!   pending in the same breath. (Atomics are included: an AMO is a store.)
+//!   On a RAM-only `Bus` both calls are inlined constants the optimizer
+//!   deletes; `Memory` overrides neither.
 //! - **(d)** whenever the owning machine calls
 //!   [`MachineHart::poll_interrupts`] at a scheduler event.
 //!
@@ -144,7 +146,12 @@ enum StepOutcome {
 /// Generic over the bus rather than boxing it: the slice loop monomorphizes,
 /// so a `Bus` whose `take_sideband` is the trait default costs nothing per
 /// store. See the module docs for the polling points and the reset contract.
-#[derive(Clone, Debug)]
+/// `Clone` and `Debug` are written out rather than derived: a derive would
+/// add a `B: Clone` / `B: Debug` bound for the sake of a
+/// `PhantomData<fn(&mut B)>`, which needs neither, and a machine could then
+/// not snapshot a hart whose bus is not itself cloneable. Snapshotting the
+/// hart is exactly the case that matters — the clone *is* the architectural
+/// state.
 pub struct MachineHart<B: Bus> {
     regs: [i32; 32],
     pc: u32,
@@ -159,7 +166,9 @@ pub struct MachineHart<B: Bus> {
     wfi: bool,
     /// The highest-priority CPU interrupt the SoC's matrix currently
     /// asserts, if any. The matrix decides *which*; the hart is told one
-    /// number (see [`MachineHart::set_external`]).
+    /// number, either by the owning machine at a scheduler event
+    /// ([`MachineHart::set_external`]) or by the bus itself inside a slice
+    /// ([`Bus::pending_cpu_interrupt`], polling point (c)).
     external: Option<u8>,
     /// The C6 core performs misaligned data accesses in hardware. The flag
     /// is the hart's copy of that fact — P4 sets it, and mirrors it onto the
@@ -172,6 +181,43 @@ pub struct MachineHart<B: Bus> {
     /// constructed per instruction so the slice loop stays a loop.
     fp_unused: FpRegs,
     _bus: PhantomData<fn(&mut B)>,
+}
+
+impl<B: Bus> Clone for MachineHart<B> {
+    fn clone(&self) -> Self {
+        Self {
+            regs: self.regs,
+            pc: self.pc,
+            csr: self.csr.clone(),
+            triggers: self.triggers.clone(),
+            instruction_count: self.instruction_count,
+            cycle_count: self.cycle_count,
+            cycle_model: self.cycle_model,
+            hart_id: self.hart_id,
+            wfi: self.wfi,
+            external: self.external,
+            allow_unaligned: self.allow_unaligned,
+            fp_unused: self.fp_unused.clone(),
+            _bus: PhantomData,
+        }
+    }
+}
+
+impl<B: Bus> core::fmt::Debug for MachineHart<B> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("MachineHart")
+            .field("hart_id", &self.hart_id)
+            .field("pc", &format_args!("{:#010x}", self.pc))
+            .field("csr", &self.csr)
+            .field("triggers", &self.triggers)
+            .field("instruction_count", &self.instruction_count)
+            .field("cycle_count", &self.cycle_count)
+            .field("cycle_model", &self.cycle_model)
+            .field("wfi", &self.wfi)
+            .field("external", &self.external)
+            .field("allow_unaligned", &self.allow_unaligned)
+            .finish()
+    }
 }
 
 impl<B: Bus> MachineHart<B> {
@@ -328,6 +374,22 @@ impl<B: Bus> MachineHart<B> {
         }
     }
 
+    /// Jump guest time forward to `cycle` — the deterministic idle skip.
+    ///
+    /// After [`SliceEnd::Wfi`] the hart is parked with nothing to do until
+    /// the scheduler's next event, and simulating the wait one `wfi` at a
+    /// time would burn host seconds to produce no guest state. The machine
+    /// moves the clock instead.
+    ///
+    /// Never moves backwards: a machine that could rewind the cycle counter
+    /// would make `mcycle` non-monotonic, and the one CSR the C6 firmware
+    /// reads for spacing (`PCCR`) reads from it.
+    pub fn advance_to_cycle(&mut self, cycle: u64) {
+        if cycle > self.cycle_count {
+            self.cycle_count = cycle;
+        }
+    }
+
     // --- interrupt input ---------------------------------------------------
 
     /// Tell the hart which CPU interrupt the SoC's matrix currently asserts,
@@ -407,6 +469,9 @@ impl<B: Bus> MachineHart<B> {
             }
 
             let pc = self.pc;
+            // The bus's trace and spin detector are only worth having if the
+            // pc and the cycle on each line are this instruction's.
+            bus.set_issuing(pc, self.cycle_count);
             let inst_word = match bus.fetch_instruction(pc) {
                 Ok(word) => word,
                 Err(e) => match self.deliver_fetch_error(e, pc) {
@@ -474,10 +539,25 @@ impl<B: Bus> MachineHart<B> {
 
         // (c) an MMIO store may have changed interrupt state.
         if matches!(result.class, InstClass::Store | InstClass::Atomic) && bus.take_sideband() {
-            self.poll_interrupts();
+            self.resample_external(bus);
         }
 
         StepOutcome::Continue
+    }
+
+    /// Answer a raised bus side-band: re-read the matrix and poll.
+    ///
+    /// The re-read is what makes polling point (c) able to change an outcome
+    /// at all. Before it, the hart's `external` was only ever written by the
+    /// owning machine at a scheduler event, so an MMIO store that raised a
+    /// line inside a slice could not be delivered until the next event —
+    /// which for a UART's TX-done or a software interrupt is "never".
+    /// [`Bus::pending_cpu_interrupt`] is the bus's answer, and a bus that
+    /// raises the side-band is required to implement it.
+    #[inline]
+    fn resample_external(&mut self, bus: &B) {
+        self.external = bus.pending_cpu_interrupt();
+        self.poll_interrupts();
     }
 
     /// `SYSTEM` (`0x73`): `ecall`, `ebreak`, `mret`, `wfi`, and the six CSR
@@ -591,7 +671,7 @@ impl<B: Bus> MachineHart<B> {
         }
         // (c) System-class: consume any side-band the bus is holding.
         if bus.take_sideband() {
-            self.poll_interrupts();
+            self.resample_external(bus);
         }
 
         StepOutcome::Continue

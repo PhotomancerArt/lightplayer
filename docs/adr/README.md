@@ -195,6 +195,8 @@ holds the full context.
 | `kind: template` + the positional board rewire (provisioning preferring a template, the rewire op) — sequenced to a follow-up plan by the board audit | `2026-09-06-catalog-content-tree` | The follow-up plan "templates and board rewire" is planned from the catalog plan's audit |
 | A `featured` manifest flag and a curated home page (D17 end state); today every catalog entry is on the landing, grouped | `2026-09-06-catalog-content-tree` | Explore returns as the full list, or the landing outgrows scrolling |
 | Whether the ISA/ELF crates (`lp-riscv-inst`, `lp-riscv-elf`, `lp-xt-inst`, `lp-xt-elf`, `lp-xt-fp-vectors`) flip to MIT too — they are the reason the `lp-emu/` MIT unit is not externally self-contained; likewise `lp-recovery` / `lp-perf` on the rv32 guest's edges | `2026-09-06-lp-emu-home-and-mit-fence` | Gate G1 of the esp-emulator plan, or any move to extract/publish `lp-emu/` |
+| The ESP SoC emulator's architecture ADR is a **draft**: the direct loader's seven-item list of what it does not reproduce is the cross-check nobody has run, and the `boot-log` field class has nothing to grade because a direct load prints no banner | `2026-09-06-esp-soc-emulator-architecture` | M7 boots the same image from the reset vector through the real ROM and the IDF bootloader |
+| The C6 machine's idle heartbeat reads `freeBytes 266688` against esp-emu's 266,792 at the 5 s sample (4 B apart by 15 s) — a transient in silent guest state, not a loader fact; pinned as measured, never tuned | `2026-09-06-esp-soc-emulator-architecture` | A desk sitting captures the `memory_fs` shipped image on silicon (esp-emulator plan G3) |
 
 ## Relationship To Shared Planning
 

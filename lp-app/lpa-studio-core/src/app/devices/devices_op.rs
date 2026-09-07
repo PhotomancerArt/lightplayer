@@ -158,8 +158,11 @@ impl ControllerOp for DevicesOp {
             // Destructive on the BOARD and nowhere else, which is exactly
             // what the confirm has to say: the library copy is a different
             // object and this does not touch it.
+            // "Remove" alone read as nothing in particular beside a running
+            // picture (G1 2026-09-06): the verb names its subject, and the
+            // armed reading is "Confirm remove".
             Action::RemoveProject { .. } => ActionMeta::new(
-                "Remove",
+                "Remove project",
                 "Stop what this board is running and delete it from the board.",
                 ActionPriority::Tertiary,
             )
@@ -170,7 +173,7 @@ impl ControllerOp for DevicesOp {
                     "The board stops running it and the project is deleted from the \
                      board's storage. The firmware stays, and your copy in the \
                      library is untouched.",
-                    "Remove",
+                    "remove",
                 )
                 .inline(),
             ),

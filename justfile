@@ -2033,6 +2033,41 @@ lint-upgrade-fw:
 lint-emu-fence:
     ./scripts/check-emu-fence.sh
 
+# The ESP32-C6 machine's boot tests, which need firmware ELFs, plus the M3
+# replays of the committed transcripts.
+#
+# The boot tests are `#[ignore]`d so that `cargo test --workspace` never starts
+# a cross-target firmware build (a two-minute workspace run would become a
+# ten-minute one on every machine and every CI job that has nothing to do with
+# the emulator). This recipe is what sets the environment and runs them.
+#
+# `LP_EMU_BUILD_FW=1` lets a test build what it needs if it is not already
+# there: `cargo build` for a plain feature set, and
+# `scripts/emu/build-reference-image.sh` for the pinned reference images the
+# gates use (which needs this repository's history for the reference commit, so
+# it is a local affair). Point at prebuilt ones instead with
+# `LP_EMU_C6_ELF_<SLUG>` / `LP_EMU_C6_REF_<SLUG>`; both are cached under
+# `target/lp-emu-c6/` and `target/emu-ref/` once built, so a second run of this
+# recipe rebuilds nothing.
+#
+# NOT in `test-rust-core`: two firmware builds is minutes, and the director
+# log's CI cost rule says a gated job or a nightly, never the default path.
+# `m3_replays` needs no firmware and does run everywhere.
+test-emu-c6:
+    LP_EMU_BUILD_FW=1 cargo test -p lp-emu-esp32c6 -- --include-ignored
+    cargo test -p lp-emu-validate --test m3_replays
+    cargo test -p lp-cli --test validate_registry_parity
+
+# Run one image on the C6 machine — the human front door.
+#
+#   just emu-c6 target/emu-ref/d6cfaa205-boot-idle-memfs/fw-esp32c6 --timeout 6s --strict-bus
+#
+# Every timeout is EMULATED time and needs its unit; `--help` lists the rest.
+# For a recorded, replayable run use the runner instead:
+# `lp-cli validate record emu-m3 --config lp-emu:esp32c6:t1 …`.
+emu-c6 elf *args:
+    cargo run -p lp-emu-esp32c6 --release -- --elf {{ elf }} {{ args }}
+
 # The generated `RegNames` tables (offset -> register name) are derived from
 # the esp32c6 PAC's svd2rust offset comments and carry a provenance header.
 # A hand edit is reverted by the next regeneration and takes its provenance

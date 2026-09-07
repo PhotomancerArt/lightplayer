@@ -1804,7 +1804,13 @@ fn install_library_listeners(tx: &CommandSender) {
         let visible_tx = tx.clone();
         let document_for_check = document.clone();
         let on_visible = Closure::wrap(Box::new(move |_event: web_sys::Event| {
-            if document_for_check.visibility_state() == web_sys::VisibilityState::Visible {
+            let visible =
+                document_for_check.visibility_state() == web_sys::VisibilityState::Visible;
+            // The device cards' live feeds stop pulling while the tab is
+            // hidden — a picture nobody can see is serial time the board
+            // would rather spend on the wire's other traffic.
+            visible_tx.send(StudioCommand::PageVisibility { visible });
+            if visible {
                 visible_tx.send(StudioCommand::LibraryChanged);
             }
         }) as Box<dyn FnMut(_)>);

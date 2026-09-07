@@ -277,6 +277,12 @@ impl Evidence {
     /// `None` means it never said — an embedder with no recovery region
     /// (browser sim, host server) or firmware too old to report. It is NOT
     /// "green", and no caller may render it as healthy.
+    /// The engine's reported frame rate, off the latest heartbeat this
+    /// window that carried one.
+    pub fn engine_fps(&self) -> Option<u16> {
+        self.observations.engine_fps
+    }
+
     pub fn recovery(&self) -> Option<&RecoveryFacts> {
         self.observations.recovery.as_ref()
     }
@@ -452,6 +458,12 @@ impl Evidence {
             LinkEvent::Error(_) => {
                 self.observations.errors += 1;
             }
+            // Frames are not evidence. An app conversation's reply (the
+            // card's frame feed) is routed to its asker by the effects
+            // layer and never reaches here by design; one that strays in
+            // proves nothing the heartbeat does not, so it moves nothing —
+            // not `frames_seen`, not freshness, not the terminal.
+            LinkEvent::Passthrough { .. } => {}
         }
         notes
     }
@@ -754,6 +766,10 @@ struct Observations {
     /// for the same reason, and — like `loaded` — only REPLACED by a frame
     /// that carries one.
     recovery: Option<RecoveryFacts>,
+    /// The engine's reported frame rate off the latest heartbeat that
+    /// carried one. Window-scoped; read by the card's live-feed pill.
+    #[serde(default)]
+    engine_fps: Option<u16>,
     /// The wire-version notice has been journaled for this window.
     #[serde(default)]
     wire_mismatch_noted: bool,
@@ -784,9 +800,15 @@ impl Observations {
             // Absorbed, never condemned: a running server heartbeats, so a
             // mid-stream attach sees frames before any hello answer.
             ServerFrameBody::Heartbeat {
-                loaded, recovery, ..
+                loaded,
+                recovery,
+                engine_fps,
+                ..
             } => {
                 self.frames_seen += 1;
+                if engine_fps.is_some() {
+                    self.engine_fps = *engine_fps;
+                }
                 // Only a heartbeat that CARRIES the report replaces it:
                 // older firmware sends none, and treating its silence as
                 // "nothing loaded" would offer to overwrite a live project.
@@ -1107,6 +1129,46 @@ mod tests {
             )),
         );
         assert!(evidence.classification.is_light_player());
+    }
+
+    /// Frames are not evidence: an app conversation's reply that strays
+    /// into the fold moves nothing — not the frame count, not freshness,
+    /// not the terminal.
+    #[test]
+    fn a_passthrough_leaves_evidence_untouched() {
+        let config = RosterConfig::default();
+        let mut evidence = Evidence::default();
+        let mut identity = IdentityChain::default();
+        fold(&mut evidence, &mut identity, Millis(0), opened());
+        fold(
+            &mut evidence,
+            &mut identity,
+            Millis(10),
+            frame(ServerFrame::hello(
+                1,
+                HelloFacts {
+                    proto: config.expected_proto,
+                    ..Default::default()
+                },
+            )),
+        );
+        let before = evidence.clone();
+
+        let notes = fold(
+            &mut evidence,
+            &mut identity,
+            Millis(20),
+            Event::Link {
+                link: LinkId(1),
+                event: LinkEvent::Passthrough {
+                    request_id: crate::link::APP_CONVERSATION_ID_BASE + 1,
+                    line: "M!{\"id\":1073741825,\"msg\":\"projectRead\"}".to_string(),
+                },
+            },
+        );
+
+        assert!(notes.is_empty(), "{notes:?}");
+        assert_eq!(evidence, before);
     }
 
     #[test]

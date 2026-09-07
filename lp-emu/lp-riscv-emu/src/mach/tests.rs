@@ -52,6 +52,12 @@ struct TestBus {
     sideband: bool,
     /// How many times the hart has called [`Bus::take_sideband`].
     sideband_reads: u32,
+    /// The stand-in for an SoC interrupt matrix: what
+    /// [`Bus::pending_cpu_interrupt`] answers.
+    pending: Option<u8>,
+    /// When set, an access to [`MMIO`] latches this into `pending` — a
+    /// peripheral raising its line from inside the store.
+    raise_on_mmio: Option<u8>,
 }
 
 impl TestBus {
@@ -61,6 +67,8 @@ impl TestBus {
             watchpoints: [None; 4],
             sideband: false,
             sideband_reads: 0,
+            pending: None,
+            raise_on_mmio: None,
         }
     }
 
@@ -119,6 +127,9 @@ impl TestBus {
     fn note_access(&mut self, address: u32) {
         if address == MMIO {
             self.sideband = true;
+            if let Some(n) = self.raise_on_mmio {
+                self.pending = Some(n);
+            }
         }
     }
 
@@ -206,6 +217,10 @@ impl Bus for TestBus {
     fn take_sideband(&mut self) -> bool {
         self.sideband_reads += 1;
         core::mem::take(&mut self.sideband)
+    }
+
+    fn pending_cpu_interrupt(&self) -> Option<u8> {
+        self.pending
     }
 }
 
@@ -643,14 +658,11 @@ fn sideband_triggers_a_poll() {
     // not consume it — a raised flag has to survive until an instruction
     // class the hart actually checks.
     //
-    // What this cannot pin, said plainly: with the `Bus` trait as it stands
-    // on main, nothing the bus does can change the hart's `external` input
-    // mid-slice (the bus has no way to reach the hart), so a side-band poll
-    // can only ever deliver an interrupt that the entry poll (a) would
-    // already have delivered. The delivery half is pinned by
-    // `vectored_interrupt_lands_at_base_plus_4n`; the *wiring* is pinned
-    // here. P3/P4 need a bus-side "what is the matrix asserting now?"
-    // accessor before (c) can change an outcome — see the phase report.
+    // This test pins the *wiring* — who reads the flag, and after which
+    // instruction classes. That a raised side-band can change an outcome is
+    // pinned separately by `an_mmio_store_that_raises_a_line_traps_before_
+    // the_next_instruction_retires`, which is the half P4 closed by adding
+    // `Bus::pending_cpu_interrupt`.
     let mut rig = Rig::new();
     rig.set_reg(10, MMIO);
     rig.load(
@@ -691,6 +703,63 @@ fn sideband_triggers_a_poll() {
         "read once, right after the store"
     );
     assert!(!rig.bus.sideband, "and consumed");
+}
+
+#[test]
+fn an_mmio_store_that_raises_a_line_traps_before_the_next_instruction_retires() {
+    // The gap DD21 named and P4 closed. Polling point (c) now re-reads
+    // `Bus::pending_cpu_interrupt` instead of trusting a field only the
+    // machine can write, so a peripheral that raises its line *inside* a
+    // store is delivered without waiting for the next scheduler event.
+    let mut rig = Rig::new();
+    assert!(rig.hart.set_csr_raw(MIE, 0xFFFF_FFFF));
+    rig.bus.raise_on_mmio = Some(9);
+    rig.trap_to_ebreak();
+
+    rig.set_reg(10, MMIO);
+    rig.load(
+        RAM_BASE,
+        &[
+            encode::sw(Gpr::new(10), Gpr::new(0), 0),
+            // The instruction that must NOT retire.
+            encode::addi(Gpr::new(11), Gpr::new(0), 0x7f),
+            encode::ebreak(),
+        ],
+    );
+
+    assert_eq!(rig.run(500), SliceEnd::Ebreak { pc: VEC });
+    assert_eq!(rig.hart.csr().mcause, 0x8000_0009, "interrupt 9, not 3");
+    assert_eq!(
+        rig.hart.csr().mepc,
+        RAM_BASE + 4,
+        "mepc names the instruction the store was followed by"
+    );
+    assert_eq!(rig.reg(11), 0, "and that instruction has not retired");
+    assert_eq!(rig.hart.external(), Some(9), "resampled from the bus");
+}
+
+#[test]
+fn a_store_that_lowers_the_last_line_leaves_nothing_pending() {
+    // The other direction, and the reason (c) *replaces* rather than
+    // or-ing: an `int_clr` write that drops the only asserted source must
+    // leave the hart with nothing to take.
+    let mut rig = Rig::new();
+    // Inside a critical section (MIE clear) so the entry poll does not
+    // deliver interrupt 9 before the store ever runs.
+    assert!(rig.hart.set_csr_raw(MSTATUS, MSTATUS_MPP | MSTATUS_MPIE));
+    assert!(rig.hart.set_csr_raw(MIE, 0xFFFF_FFFF));
+    rig.hart.set_external(Some(9));
+    // The bus's matrix says "nothing asserted" — the store cleared it.
+    rig.bus.raise_on_mmio = None;
+
+    rig.set_reg(10, MMIO);
+    rig.load(
+        RAM_BASE,
+        &[encode::sw(Gpr::new(10), Gpr::new(0), 0), encode::ebreak()],
+    );
+
+    assert_eq!(rig.run(500), SliceEnd::Ebreak { pc: RAM_BASE + 4 });
+    assert_eq!(rig.hart.external(), None, "the store cleared the line");
 }
 
 // --- beyond the twelve ------------------------------------------------------

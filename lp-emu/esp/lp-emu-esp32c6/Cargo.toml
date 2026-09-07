@@ -1,0 +1,40 @@
+[package]
+name = "lp-emu-esp32c6"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+# MIT as a unit with the rest of `lp-emu/`, NOT the workspace's AGPL.
+# See lp-emu/LICENSE-MIT and `just lint-emu-fence`.
+license = "MIT"
+description = "The ESP32-C6 machine: memory map, mask-ROM loader, direct load, scheduler loop, snapshot, CLI"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "lp-emu-esp32c6"
+path = "src/bin/lp-emu-esp32c6.rs"
+
+[dependencies]
+lp-emu-core = { path = "../../lp-emu-core", features = ["std"] }
+lp-emu-esp-common = { path = "../lp-emu-esp-common" }
+lp-riscv-emu = { path = "../../lp-riscv-emu", features = ["std"] }
+log = { workspace = true }
+env_logger = { workspace = true }
+# `--probe esp_println::serial_jtag_printer::TIMED_OUT@3000`: the static's
+# ELF name is mangled with a hash nobody can type, so a probe is resolved by
+# demangling every symbol and matching the path. MIT/Apache-2.0, already in
+# the tree through the workspace's dependencies.
+rustc-demangle = "0.1"
+
+[dev-dependencies]
+test-log = { workspace = true }
+# The vendored ROM's checksum test. Reading `SHA256SUMS` and re-deriving the
+# digest in-process is what makes a swapped ROM fail the build's tests rather
+# than a boot; shelling out to `shasum` would make the assertion depend on
+# which host ran it.
+sha2 = "0.10"
+# `tests/harness_parity.rs` replays the harness capture against the committed
+# silicon transcript with M2's runner. Inside the `lp-emu/` fence (MIT), and
+# it mirrors `fw-checks` rather than importing it, so the fence lint passes.
+lp-emu-validate = { path = "../../lp-emu-validate" }
