@@ -214,8 +214,20 @@ additive, old rows parse as legacy (`hardware_id: None`).
 - **Endpoint-grant continuity demotes to a pre-identity hint.**
   `migrate_card_op` stays (op flows are session-scoped and the replug
   case is real); it just stops being the board's identity.
-- **Sim unchanged.** The sim is not a device (D22); `"runtime-sim"`
-  reserved key stays; no `HardwareId` for it.
+- **Sims are devices, and their identity is minted the same way.**
+  Superseded 2026-09-07 (plan `2026-09-07-0118-studio-emulated-boards`, P2;
+  D22 retired). A sim is a roster device with a registry row and a record.
+  Studio mints it a **locally administered** base MAC — the `0x02` bit set,
+  the multicast `0x01` bit cleared, the IEEE range reserved for addresses
+  nobody bought — and derives the uid from it through the SAME
+  `HardwareId::device_uid` derivation a real board's efuse MAC goes through.
+  So the row's `hardware_id` is the ordinary `"efuse:<mac>"` form, the
+  `identity_key()` cascade is untouched, and `rekey_or_merge` cannot tell
+  the two apart, which is the point. What says "sim" is Studio's own
+  bookkeeping and nothing on the wire: the registry row's `transport`
+  column, backed by a `/device-sims/<uid>.json` sidecar. The
+  trust-on-first-sight posture below applies unchanged — a minted MAC
+  identifies, it does not authenticate.
 - **`identity_key()` cascade unchanged in shape** (`uid ?? session_key
   ?? name`) — uid simply exists earlier and more often.
 - **Spoofing is an explicit non-goal.** A MAC identifies; it never
