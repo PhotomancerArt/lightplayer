@@ -44,8 +44,8 @@ gap in it is visible.
 
 ### The layering
 
-Five layers; each knows strictly less than the one above it, and the bottom
-three know nothing about ESP32 at all.
+Five layers; each knows strictly less than the one above it. The bottom two
+know nothing about Espressif at all, and the third holds no chip numbers.
 
 ```text
 lp-emu-validate      payload, configuration, transcript, replay, trust grading

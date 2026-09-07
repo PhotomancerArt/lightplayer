@@ -14,8 +14,8 @@ just emu-c6 target/emu-ref/d6cfaa205-boot-idle-memfs/fw-esp32c6 --timeout 6s --s
 
 ## The layering
 
-Four layers, and each one knows strictly less than the one above it. That is
-what lets a second chip reuse three of them.
+The runner on top, and four layers under it, each knowing strictly less than
+the one above. That is what lets a second chip reuse the bottom three.
 
 ```text
 lp-cli validate            payloads, transcripts, replay, trust grading
