@@ -65,6 +65,34 @@
 //!   writes a mapped page — the app lives in `factory` and littlefs in
 //!   `lpfs`, and only `lpfs` is ever written — so the difference is
 //!   documented rather than exercised.
+//!
+//! # What the *unwritten* part of a mapped page reads as, and why it moved
+//!
+//! A fill copies a whole page, so every byte of a mapped page that no
+//! segment covers now reads as **`0xff`** — erased flash. Under M3 the
+//! window was a zeroed RAM region with the segments placed into it, and the
+//! same bytes read as `0x00`. On the shipped memfs image that is 26,262
+//! bytes, `0x4223996a..0x4224_0000`: the tail of the last page the app's
+//! `.text` reaches into.
+//!
+//! `0xff` is the honest answer — a flasher writes an image and leaves the
+//! rest of the sector erased, and the cache window on a board reads erased
+//! flash there — but it is a change to emulated memory that no flash
+//! *controller* required, so it is worth naming. It was checked and is
+//! **inert on the images this milestone runs**: the memfs boot is
+//! instruction-for-instruction identical either way (47,681,337 to the 5.5 s
+//! deadline, `[stack] high-water 11432 B of 71960 B`, verified by running the
+//! same ELF against a `0x00`-filled chip). The guest never reads past the end
+//! of its own `.text`.
+//!
+//! It is written down because the *address* of that boundary is a property
+//! of the ELF, not of the model: a firmware that did read past `.text` would
+//! do it at a different offset in every build, and the symptom would look
+//! like the machine being nondeterministic when it is not. (M5 P1 chased a
+//! neighbouring illusion to the same root — DD45: the CI runner compiles the
+//! pinned reference firmware into a *different binary* than a local build,
+//! so a figure that depends on code layout differs between them while every
+//! register access is identical.)
 
 use std::sync::{Arc, Mutex};
 
