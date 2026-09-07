@@ -1009,17 +1009,8 @@ pub fn App() -> Element {
         .then(|| current_route.with_play(!play).path());
     // The workbench view tabs' targets: same-session view suffixes on the
     // current lens address, plain links like the play/patch toggles — one
-    // slot per view-table row. Every lens route addresses every view (the
-    // device lens gained its `/mapping` and `/patch` suffixes with
-    // `/device/<uid>`), so no tab hides on a lens.
-    let workbench_hrefs = current_route.is_lens().then(|| {
-        workbench::WorkbenchHrefs::from_entries(workbench::VIEWS.iter().map(|spec| {
-            (
-                spec.view,
-                Some(current_route.with_view(spec.route_view).path()),
-            )
-        }))
-    });
+    // slot per view-table row, every slot filled on every lens.
+    let workbench_hrefs = workbench::WorkbenchHrefs::for_lens(&current_route);
     // Workbench routes trade the scrolling-document page for a
     // full-height app frame: the docks and center scroll INTERNALLY.
     // Keyed off an actually-open editor so opening frames, galleries,
