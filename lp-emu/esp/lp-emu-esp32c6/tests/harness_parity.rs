@@ -21,6 +21,9 @@ use lp_emu_validate::{FieldClass, ReplayOptions, Transcript, TranscriptHeader, r
 const DONE: &str = "[inc-shader-compile] === DONE ===";
 const SILICON: &str =
     "lp-emu/transcripts/esp32c6/shader-compile-stress/silicon-esp32c6-2026-09-06-d6cfaa205.txt";
+/// What M3 P7's runner recorded on this machine, committed beside it.
+const COMMITTED_T1: &str =
+    "lp-emu/transcripts/esp32c6/shader-compile-stress/lp-emu-esp32c6-t1-2026-09-06-d6cfaa205.txt";
 
 /// The sidecar a capture from this machine carries. The configuration is
 /// the one `validate.toml` names for M3; the trust table says memory is
@@ -53,6 +56,10 @@ struct Run {
 }
 
 fn run_harness() -> Option<Run> {
+    run_harness_at(TimeGrade::T1)
+}
+
+fn run_harness_at(grade: TimeGrade) -> Option<Run> {
     let elf = match reference_image(&ReferenceImage::HARNESS) {
         Ok(path) => path,
         Err(reason) => {
@@ -63,7 +70,7 @@ fn run_harness() -> Option<Run> {
     let mut m = Esp32C6Builder::new()
         .app(AppSource::Path(elf))
         .strict(true)
-        .time_grade(TimeGrade::T1)
+        .time_grade(grade)
         .uart0(Uart0Sink::Memory)
         .build()
         .expect("the harness image builds a machine");
@@ -137,6 +144,67 @@ fn the_harness_transcript_is_byte_equal_to_silicon_in_the_memory_class() {
         assert!(text.contains(needle), "missing `{needle}`");
     }
     assert_eq!(text.matches("mem_before").count(), 92, "92 ticks");
+}
+
+/// A time grade must not move a heap byte.
+///
+/// `t1` counts one cycle per instruction and `t2` uses the measured per-class
+/// model, so every timing figure in the harness moves between them. Every
+/// memory figure must not: the allocator sees the same calls in the same order
+/// whatever the clock says, and this payload is single-task, so there is no
+/// interleaving for a grade to change. (The idle boot is a different case —
+/// its stack high-water mark *is* grade-dependent, 11,432 B under `t1` and
+/// 11,752 B under `t2`, because there the deepest interrupted call chain
+/// depends on when the interrupts landed. That is why this test is scoped to
+/// the harness and `tests/boot_idle.rs` states the other half.)
+///
+/// The `t2` capture is compared against the **committed** `t1` transcript, so
+/// what this checks is a fact about the recorded artefact, not about two runs
+/// in one process.
+#[test]
+#[ignore = "needs the harness reference image; run through `just test-emu-c6`"]
+fn t2_memory_equals_t1() {
+    let Some(Run { m, outcome, text }) = run_harness_at(TimeGrade::T2) else {
+        return;
+    };
+    assert!(matches!(outcome, Outcome::ExitMatched { .. }), "{outcome:?}");
+    assert_eq!(m.bus.unmapped_reads() + m.bus.unmapped_writes(), 0);
+
+    let root = workspace_root().expect("workspace root");
+    let sidecar = SIDECAR.replace("lp-emu:esp32c6:t1", "lp-emu:esp32c6:t2");
+    let ours = Transcript::from_parts(
+        TranscriptHeader::from_json(&sidecar).expect("the sidecar parses"),
+        &text,
+    )
+    .expect("our t2 capture is a transcript");
+    let recorded = Transcript::load(root.join(COMMITTED_T1)).expect("the committed t1 transcript");
+    let report = replay(
+        &ours,
+        &recorded,
+        ReplayOptions {
+            strict: false,
+            strict_timing: false,
+        },
+    )
+    .expect("the replay runs");
+    println!("{}", report.render());
+
+    assert!(report.is_ok(), "{:?}", report.failures());
+    assert_eq!(report.compared(FieldClass::Memory), 372);
+    assert_eq!(
+        report.differences_in(FieldClass::Memory).count(),
+        0,
+        "a time grade moved a heap byte: {:?}",
+        report
+            .differences_in(FieldClass::Memory)
+            .map(|d| format!("{}.{}: {} vs {}", d.scope, d.field, d.left, d.right))
+            .collect::<Vec<_>>()
+    );
+    // Time did move, or the grades would be the same thing.
+    assert!(
+        report.differences_in(FieldClass::Timing).count() > 0,
+        "t2 produced t1's timings"
+    );
 }
 
 #[test]
