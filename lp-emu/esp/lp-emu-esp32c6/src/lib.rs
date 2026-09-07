@@ -50,6 +50,8 @@
 //! unmapped on purpose (the radio window, RMT, the flash controller), so a
 //! strict run stops on the first block a later milestone owns.
 
+pub mod cache;
+pub mod flash;
 pub mod intmatrix;
 pub mod loader;
 pub mod machine;
@@ -60,6 +62,8 @@ pub mod rom;
 pub mod snapshot;
 pub mod test_support;
 
+pub use cache::CacheMmu;
+pub use flash::{FlashBacking, FlashCensus, FlashImage};
 pub use loader::{EfuseIdentity, ResetCause};
 pub use machine::{
     AppSource, Esp32C6Builder, Esp32C6Machine, Outcome, RomSource, StopCondition, TimeGrade,
