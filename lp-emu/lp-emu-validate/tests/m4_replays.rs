@@ -113,9 +113,15 @@ fn the_upload_walk_matches_spike_5_3() {
     assert!(t.sentinel_line().is_some(), "the shader compiled");
 
     // Every file the upload wrote, and the device's answer to each.
+    //
+    // `Transcript::series` returns one sample per matching **line** — the key
+    // is what a *replay* indexes by, not what this collapses — so
+    // `shader.glsl` appears twice: 4,365 bytes arrive as two `writeChunk`s.
     let writes = t.series(series(payload, "fs-write"));
+    assert_eq!(writes.len(), 9, "eight files, one of them in two chunks");
     let mut paths: Vec<&str> = writes.iter().map(|r| r.key.as_str()).collect();
     paths.sort_unstable();
+    paths.dedup();
     assert_eq!(
         paths,
         vec![
@@ -132,16 +138,12 @@ fn the_upload_walk_matches_spike_5_3() {
     for row in &writes {
         assert_eq!(row.values["error"], "null", "{} was refused", row.key);
     }
-    // `shader.glsl` is 4,365 bytes and arrives as two `writeChunk`s; the
-    // series is keyed on the path, so its row is the last of them.
-    assert_eq!(
-        writes
-            .iter()
-            .find(|r| r.key.ends_with("shader.glsl"))
-            .unwrap()
-            .values["op"],
-        "writeChunk"
-    );
+    let chunks: Vec<_> = writes
+        .iter()
+        .filter(|r| r.values["op"] == "writeChunk")
+        .collect();
+    assert_eq!(chunks.len(), 2, "only the shader is written in chunks");
+    assert!(chunks.iter().all(|r| r.key.ends_with("shader.glsl")));
 
     // The heap gates around the load. §5.3's esp-emu figures, verbatim.
     let gates = t.series(series(payload, "load-gate"));
@@ -152,15 +154,18 @@ fn the_upload_walk_matches_spike_5_3() {
             .unwrap_or_else(|| panic!("gate `{name}` in {gates:?}"))
             .values
     };
+    // All three gates §5.3 prints, byte-equal — which is more than the report
+    // itself managed: §11.2 records that the *bridged* silicon walk sat 64 B
+    // off esp-emu on every one of them, because the host's connect moment
+    // against the 5 s heartbeat differs by wall clock and everything after
+    // inherits the offset (§7, det1/det2: 2,560 B). A script has no wall
+    // clock, so there is no offset to inherit.
+    assert_eq!(gate("stop_all_projects before")["free_bytes"], "264716");
+    assert_eq!(gate("stop_all_projects before")["used_bytes"], "60820");
+    assert_eq!(gate("load_project before")["free_bytes"], "258348");
+    assert_eq!(gate("load_project before")["used_bytes"], "67188");
     assert_eq!(gate("load_project after")["free_bytes"], "220532");
     assert_eq!(gate("load_project after")["used_bytes"], "105004");
-    // The other three gates, as measured on this configuration. `stop_all_
-    // projects before` is 264,712 here against §5.3's 264,716 — 4 B, the
-    // same 4 B §11.2 records between esp-emu and silicon heartbeats on one
-    // image, and the walk's own host-connect drift (§7) is 64 B, so this is
-    // inside the noise the report already documents.
-    assert_eq!(gate("stop_all_projects before")["free_bytes"], "264712");
-    assert_eq!(gate("load_project before")["free_bytes"], "258284");
 
     // The compiler's outputs: the same source produces the same numbers
     // wherever it compiles, and §5.3 has these.
