@@ -113,6 +113,31 @@ pub const ALL_CHECKS: &[FwCheckConfig] = &[
         emits_header: false,
     },
     FwCheckConfig {
+        check: FwCheck::UsbNegativeControl,
+        display_name: "Shipped image with the port closed from boot",
+        // The shipped image itself, flash-backed — `boot-idle` minus
+        // `memory_fs`. No check module and no `test_*` feature: what is under
+        // test is the product's own USB-Serial-JTAG link, and swapping the
+        // filesystem out would change the image for a reason that has nothing
+        // to do with the question.
+        //
+        // What makes it a different payload from `boot-idle` is not the image
+        // at all — it is when the host side opens the port. `boot-idle` is
+        // watched from its first byte; this one is flashed with no monitor,
+        // left alone for several seconds, and then read by a non-resetting
+        // reader. The registry that carries that difference is the host's
+        // (`lp-emu-validate`'s `Payload::capture`), because it is a fact
+        // about the operator, not about the firmware.
+        firmware_features: &["server", "radio"],
+        // The first stack heartbeat AFTER the reader attaches. The ones
+        // before it went into a closed port and are gone.
+        done_marker: Some("[stack] heartbeat: high-water"),
+        trace_slug: "usb-negative-control",
+        supported_targets: ESP32_ONLY,
+        emits_records: false,
+        emits_header: false,
+    },
+    FwCheckConfig {
         check: FwCheck::Json,
         display_name: "JSON serial validation",
         firmware_features: &["test_json"],
