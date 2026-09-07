@@ -173,11 +173,14 @@ pub enum Step {
     Identify {
         device: u64,
     },
-    /// The Flash gesture: board picked, build resolved by the app.
+    /// The Flash gesture: board picked, build resolved by the app, and the
+    /// name the user typed at setup when they typed one.
     Flash {
         device: u64,
         board: String,
         build: String,
+        #[serde(default)]
+        name: Option<String>,
     },
     /// The Push gesture. The payload is the app's to stage; the model's
     /// gesture names only the board.
@@ -436,11 +439,13 @@ impl Step {
                 device,
                 board,
                 build,
+                name,
             } => Input::Action(Action::Flash {
                 device: DeviceId(device),
                 board_id: board,
                 build_id: build,
                 park_first: false,
+                name,
             }),
             Self::Push { device } => Input::Action(Action::Push {
                 device: DeviceId(device),

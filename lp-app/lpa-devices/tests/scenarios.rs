@@ -193,6 +193,7 @@ fn a_marker_from_an_evicted_effect_never_ends_the_activity_that_replaced_it() {
         device: device.0,
         board: "seeed-xiao-esp32c6".to_string(),
         build: "esp32c6-4mb".to_string(),
+        name: None,
     };
     let commands = replay.step(Millis(6_000), flash.clone());
     let evicted_effect = commands
@@ -855,6 +856,7 @@ fn flashing_a_blank_pending_link_adopts_joins_identity_and_lands_ready() {
             device: device.0,
             board: "seeed-xiao-esp32c6".to_string(),
             build: "esp32c6-4mb".to_string(),
+            name: None,
         },
     );
     assert!(replay.roster().pending().is_empty(), "flash adopts");
@@ -992,6 +994,7 @@ fn a_silent_board_after_a_flash_climbs_the_ladder_then_fails_honestly() {
             device: device.0,
             board: "dig-uno".to_string(),
             build: "esp32-4mb".to_string(),
+            name: None,
         },
     );
     replay.step(
@@ -1064,6 +1067,7 @@ fn a_pre_flash_hello_never_starts_the_stamp_before_the_port_comes_back() {
             device: device.0,
             board: "dig-uno".to_string(),
             build: "esp32-4mb".to_string(),
+            name: None,
         },
     );
     // The flasher closed the port under its borrow (the release half of the
@@ -1180,6 +1184,7 @@ fn a_stamp_that_hears_nothing_back_says_unconfirmed_not_that_the_default_stands(
             device: device.0,
             board: "dig-uno".to_string(),
             build: "esp32-4mb".to_string(),
+            name: None,
         },
     );
     replay.step(Millis(29_000), Step::closed(1));
@@ -1242,6 +1247,7 @@ fn a_stamp_the_board_refused_carries_the_conversations_words_not_a_pin_map_verdi
             device: device.0,
             board: "dig-uno".to_string(),
             build: "esp32-4mb".to_string(),
+            name: None,
         },
     );
     replay.step(Millis(29_000), Step::closed(1));
@@ -1303,6 +1309,7 @@ fn forget_mid_flash_evicts_and_cleans_up() {
             device: device.0,
             board: "dig-uno".to_string(),
             build: "esp32-4mb".to_string(),
+            name: None,
         },
     );
     assert!(replay.roster().device(device).expect("device").is_busy());
@@ -1561,6 +1568,7 @@ fn the_terminal_panel_keeps_boot_lines_and_effect_narration_across_a_reopen() {
             device: device.0,
             board: "dig-uno".to_string(),
             build: "esp32-4mb".to_string(),
+            name: None,
         },
     );
     for at in [500_u64, 520, 540] {
