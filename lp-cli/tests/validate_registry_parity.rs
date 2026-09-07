@@ -34,10 +34,14 @@ fn every_payload_has_a_matching_fw_check() {
         let check = fw_check_for(payload.fw_check_slug);
 
         assert_eq!(
-            check.firmware_features,
-            [payload.firmware_feature],
-            "payload `{}`: firmware feature disagrees",
+            check.firmware_features, payload.firmware_features,
+            "payload `{}`: firmware features disagree",
             payload.name
+        );
+        assert_eq!(
+            check.emits_header, payload.emits_header,
+            "payload `{}`: fw-checks says emits_header={}, the registry says {}",
+            payload.name, check.emits_header, payload.emits_header
         );
         assert_eq!(
             check.done_marker,
@@ -198,6 +202,10 @@ fn every_payloads_header_line_is_pinned() {
         ),
     ];
     for (payload, firmware_features, expected) in cases {
+        assert!(
+            find_check(payload).expect("registered").emits_header,
+            "`{payload}` has a pinned header line but does not claim to print one"
+        );
         let header = PayloadHeader {
             payload,
             chip: "esp32c6",
@@ -210,15 +218,65 @@ fn every_payloads_header_line_is_pinned() {
         assert_eq!(&out, expected, "payload `{payload}`");
     }
 
-    // A payload with no row above is a payload this test forgot, not one that
-    // needs no header — every payload prints one.
+    // A payload with no row above is a payload this test forgot — unless it
+    // says it prints no header at all. `boot-idle` is the one of those: it has
+    // no `fw-checks` module, because the payload IS the shipped image, so its
+    // provenance is the transcript's sidecar and nothing else.
     for payload in ALL_PAYLOADS {
-        assert!(
+        assert_eq!(
             cases.iter().any(|(name, ..)| *name == payload.name),
-            "payload `{}` has no pinned header line in this test",
-            payload.name
+            payload.emits_header,
+            "payload `{}` (emits_header={}) has no pinned header line in this test",
+            payload.name,
+            payload.emits_header,
         );
     }
+}
+
+/// A payload that prints no in-band header has no `fw-checks` module either,
+/// and the other way round. The two are the same fact — a module is what
+/// prints the line — and stating it here keeps a future payload from claiming
+/// half of it.
+#[test]
+fn a_payload_without_a_module_prints_no_header() {
+    for payload in ALL_PAYLOADS {
+        assert_eq!(
+            payload.fw_checks_feature.is_some(),
+            payload.emits_header,
+            "payload `{}`: fw_checks_feature={:?} but emits_header={}",
+            payload.name,
+            payload.fw_checks_feature,
+            payload.emits_header
+        );
+    }
+}
+
+/// The shipped-image payload, whose whole point is that it is not a `test_*`
+/// module: several features, no done marker of its own making, no records and
+/// no header. It is the one entry where the two registries could drift into
+/// something meaningless without anybody noticing, because there is no
+/// firmware code on the other side to fail to compile.
+#[test]
+fn the_boot_idle_payload_is_the_shipped_image_on_both_sides() {
+    let payload = ALL_PAYLOADS
+        .iter()
+        .find(|p| p.name == "boot-idle")
+        .expect("boot-idle is registered");
+    let check = fw_check_for(payload.fw_check_slug);
+
+    assert_eq!(payload.firmware_features, ["server", "radio", "memory_fs"]);
+    assert_eq!(check.firmware_features, payload.firmware_features);
+    assert_eq!(payload.fw_checks_feature, None);
+    assert!(!payload.emits_header && !check.emits_header);
+    assert!(!check.emits_records && payload.record_kinds.is_empty());
+    assert_eq!(
+        payload.sentinel,
+        Sentinel::Done("[stack] heartbeat: high-water")
+    );
+    assert_eq!(check.done_marker, Some("[stack] heartbeat: high-water"));
+    // The three series it parses out of a boot.
+    let names: Vec<&str> = payload.series.iter().map(|s| s.name).collect();
+    assert_eq!(names, ["hello", "heartbeat", "stack-heartbeat"]);
 }
 
 /// The two prefixes must not collide, and the header schema must match.

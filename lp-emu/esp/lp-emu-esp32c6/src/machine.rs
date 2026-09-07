@@ -1231,17 +1231,39 @@ impl Esp32C6Machine {
         }
     }
 
+    /// `--exit-on`: stop at the **end of the line** the match is on.
+    ///
+    /// Not at the match. UART0 drains one byte at a time in emulated time and
+    /// this is checked between bytes, so a needle that is a *prefix* of its
+    /// line would stop the run mid-line and leave the rest of it unsent —
+    /// which is how M3 P7 first recorded `[stack] heartbeat: high-water` with
+    /// neither of the two figures the payload exists to report. A transcript
+    /// is lines; committing a truncated one would be worse than not stopping.
+    ///
+    /// If the newline never arrives the run goes on to its deadline, which is
+    /// the safe direction: a run that ran too long says so in its own report,
+    /// while a capture cut in half looks like data.
     fn exit_on_match(&self, needle: &str, from: &mut usize) -> Option<Cycles> {
         let text = self.uart0_log.text();
         if text.len() <= *from {
             return None;
         }
-        let found = text[*from..].find(needle).map(|i| *from + i);
-        // Keep the search anchored so a long run does not rescan the whole
-        // console every slice; back off by the needle so a match split
-        // across two slices is still found.
-        *from = text.len().saturating_sub(needle.len());
-        found.map(|_| self.cycles())
+        match text[*from..].find(needle).map(|i| *from + i) {
+            Some(at) if text[at + needle.len()..].contains('\n') => Some(self.cycles()),
+            // Matched, but the line is still arriving: hold the anchor here so
+            // the next byte re-checks this same match rather than the tail.
+            Some(at) => {
+                *from = at;
+                None
+            }
+            // Keep the search anchored so a long run does not rescan the whole
+            // console every slice; back off by the needle so a match split
+            // across two slices is still found.
+            None => {
+                *from = text.len().saturating_sub(needle.len());
+                None
+            }
+        }
     }
 
     // ---- snapshot -------------------------------------------------------

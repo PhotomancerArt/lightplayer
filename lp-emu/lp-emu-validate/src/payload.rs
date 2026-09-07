@@ -98,10 +98,22 @@ pub struct Payload {
     pub display_name: &'static str,
     /// The `fw-checks` `FwCheck::slug()` this mirrors.
     pub fw_check_slug: &'static str,
-    /// The cargo feature on the firmware crate that builds it.
-    pub firmware_feature: &'static str,
-    /// The cargo feature on `fw-checks` that compiles its shared module.
-    pub fw_checks_feature: &'static str,
+    /// The cargo features on the firmware crate that build it, on top of the
+    /// crate's defaults.
+    ///
+    /// A list rather than one feature because of `boot-idle`: a shipped-image
+    /// payload is not a `test_*` module, it is the product image, and what
+    /// names it is the feature set the image was built with.
+    pub firmware_features: &'static [&'static str],
+    /// The cargo feature on `fw-checks` that compiles its shared module, or
+    /// `None` for a payload with no module of its own.
+    pub fw_checks_feature: Option<&'static str>,
+    /// Does the image print the in-band `[fw-checks-header] ` line?
+    ///
+    /// Only a payload with a `fw-checks` module does. `boot-idle` does not, so
+    /// its provenance is the sidecar alone — which the loader already allows
+    /// (the in-band header is optional; when present it must agree).
+    pub emits_header: bool,
     pub sentinel: Sentinel,
     /// Structured record kinds it emits behind `[fw-check-json] `.
     pub record_kinds: &'static [&'static str],
@@ -194,6 +206,120 @@ pub static BRIDGE_READY: SeriesSpec = SeriesSpec {
     compiled: OnceLock::new(),
 };
 
+/// The shipped image's hello frame, the first thing a boot puts on the wire.
+///
+/// ```text
+/// M!{"id":0,"msg":{"hello":{"proto":20,"build":{"features":["node.button",…],
+///   "package":"fw-esp32c6","commit":"d6cfaa2051ae","dirty":true,
+///   "profile":"release-esp32"},"hardware":{"radio":true,"totalLedBudget":null,
+///   "button":true,"boardId":"seeed/xiao-esp32-c6","baseMac":"a0:f2:62:87:b4:8c",
+///   "chipRevision":"0.2","eui64":"a0:f2:62:87:b4:8c:00:00"},"deviceUid":null}}}
+/// ```
+///
+/// `proto` is `Wire`: it is the protocol version the device announces, and a
+/// configuration that got it wrong would be lying about the link. Everything
+/// else here is `Structural` — which build, which board profile.
+///
+/// Three fields are matched and deliberately **not** captured. `commit` and
+/// `dirty` are build provenance, which the sidecar carries as
+/// `firmware_commit` / `firmware_dirty`; the identity trio
+/// (`baseMac`, `chipRevision`, `eui64`) is eFuse content, which the sidecar
+/// carries as `mac` / `silicon_rev` and which the runner seeds an emulated
+/// configuration's eFuse from, so the two agree by construction rather than by
+/// luck. Both are masked in the human view by [`crate::mask::BOOT_IDLE`].
+pub static HELLO: SeriesSpec = SeriesSpec {
+    name: "hello",
+    description: "the wire hello frame: protocol version, build and board profile",
+    pattern: concat!(
+        r#""hello":\{"proto":(?<proto>\d+),"build":\{"features":\[(?<features>[^\]]*)\],"#,
+        r#""package":"(?<package>[^"]+)","commit":"[0-9a-f]*","dirty":(?:true|false),"#,
+        r#""profile":"(?<profile>[^"]+)"\},"hardware":\{"radio":(?<radio>true|false),"#,
+        r#""totalLedBudget":(?<total_led_budget>[^,]+),"button":(?<button>true|false),"#,
+        r#""boardId":"(?<board_id>[^"]+)""#,
+    ),
+    key: "package",
+    fields: &[
+        ("proto", FieldClass::Wire),
+        ("features", FieldClass::Structural),
+        ("profile", FieldClass::Structural),
+        ("radio", FieldClass::Structural),
+        ("total_led_budget", FieldClass::Structural),
+        ("button", FieldClass::Structural),
+        ("board_id", FieldClass::Structural),
+    ],
+    compiled: OnceLock::new(),
+};
+
+/// The idle heartbeat's heap sample and the counters beside it.
+///
+/// Keyed on the literal message name, so a run that printed several
+/// heartbeats compares its **last** one (`Transcript::series` is last-writes,
+/// as it is for the calibration payload). The `boot-idle` payload's sentinel
+/// stops the run at the first stack heartbeat, so in practice there is one.
+///
+/// `largestFreeBlock` is `Timing`, not `Memory`, and that is a decision worth
+/// stating: it is a fragmentation *snapshot*, whose value depends on which
+/// allocations happened to be live at the microsecond the sample was taken.
+/// `freeBytes`/`usedBytes`/`totalBytes` are the allocator's own ledger.
+pub static HEARTBEAT: SeriesSpec = SeriesSpec {
+    name: "heartbeat",
+    description: "one idle heartbeat: the heap ledger, the frame counters and the recovery state",
+    pattern: concat!(
+        r#""msg":\{"(?<msg>heartbeat)":\{"fps":\{"avg":(?<fps_avg>[0-9.]+)[^}]*\},"#,
+        r#""frame_count":(?<frame_count>\d+),"loaded_projects":\[(?<loaded_projects>[^\]]*)\],"#,
+        r#""uptime_ms":(?<uptime_ms>\d+),"memory":\{"freeBytes":(?<free_bytes>\d+),"#,
+        r#""usedBytes":(?<used_bytes>\d+),"totalBytes":(?<total_bytes>\d+),"#,
+        r#""largestFreeBlock":(?<largest_free_block>\d+)\},"#,
+        r#""recovery":\{"level":"(?<recovery_level>[^"]+)","resetReason":"(?<reset_reason>[^"]+)","#,
+        r#""bootCount":(?<boot_count>\d+)"#,
+    ),
+    key: "msg",
+    fields: &[
+        ("free_bytes", FieldClass::Memory),
+        ("used_bytes", FieldClass::Memory),
+        ("total_bytes", FieldClass::Memory),
+        ("largest_free_block", FieldClass::Timing),
+        ("fps_avg", FieldClass::Timing),
+        ("frame_count", FieldClass::Timing),
+        ("uptime_ms", FieldClass::Timing),
+        ("loaded_projects", FieldClass::Structural),
+        ("recovery_level", FieldClass::Structural),
+        ("reset_reason", FieldClass::Structural),
+        ("boot_count", FieldClass::Structural),
+    ],
+    compiled: OnceLock::new(),
+};
+
+/// The stack probe's heartbeat line.
+///
+/// ```text
+/// [stack] heartbeat: high-water 11432 B of 71960 B (60528 B headroom)
+/// ```
+///
+/// Keyed on the stack's size, which is a link-time constant: two transcripts
+/// of the same image are talking about the same stack or they are not
+/// comparable at all. Both figures are `Memory`.
+///
+/// The high-water mark **moves with the time grade** — 11,432 B under `t1`
+/// and 11,752 B under `t2` on the same image (M3 P6) — because interleaving
+/// decides how deep the deepest interrupted call chain got. That is not a
+/// memory-model difference, and it is why `t2_memory_equals_t1` is scoped to
+/// the single-task harness.
+pub static STACK_HEARTBEAT: SeriesSpec = SeriesSpec {
+    name: "stack-heartbeat",
+    description: "the stack probe's high-water mark against the stack it was given",
+    pattern: concat!(
+        r"\[stack\] heartbeat: high-water (?<high_water>\d+) B of (?<stack_bytes>\d+) B ",
+        r"\((?<headroom>\d+) B headroom\)",
+    ),
+    key: "stack_bytes",
+    fields: &[
+        ("high_water", FieldClass::Memory),
+        ("headroom", FieldClass::Memory),
+    ],
+    compiled: OnceLock::new(),
+};
+
 /// One `jit-math-perf` bench measurement.
 ///
 /// ```text
@@ -254,8 +380,9 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         name: "shader-compile-stress",
         display_name: "Incremental shader compile stress",
         fw_check_slug: "shader-compile-stress",
-        firmware_feature: "test_shader_compile_incremental",
-        fw_checks_feature: "check-shader-compile",
+        firmware_features: &["test_shader_compile_incremental"],
+        fw_checks_feature: Some("check-shader-compile"),
+        emits_header: true,
         sentinel: Sentinel::Done("[inc-shader-compile] === DONE ==="),
         record_kinds: &["case-summary", "total-summary"],
         mask_set: "compile-harness",
@@ -337,8 +464,9 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         name: "gpio-calibrate",
         display_name: "Host-driven GPIO square-wave calibration",
         fw_check_slug: "gpio-calibrate",
-        firmware_feature: "test_gpio_calibrate",
-        fw_checks_feature: "check-gpio-calibrate",
+        firmware_features: &["test_gpio_calibrate"],
+        fw_checks_feature: Some("check-gpio-calibrate"),
+        emits_header: true,
         sentinel: Sentinel::Ready("CAL READY target="),
         record_kinds: &[],
         mask_set: "normalize",
@@ -349,8 +477,9 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         name: "uart-bridge",
         display_name: "Transparent USB-Serial-JTAG <-> UART0 bridge",
         fw_check_slug: "uart-bridge",
-        firmware_feature: "test_uart_bridge",
-        fw_checks_feature: "check-uart-bridge",
+        firmware_features: &["test_uart_bridge"],
+        fw_checks_feature: Some("check-uart-bridge"),
+        emits_header: true,
         sentinel: Sentinel::Ready("UART-BRIDGE READY "),
         record_kinds: &[],
         mask_set: "normalize",
@@ -361,13 +490,45 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         name: "jit-math-perf",
         display_name: "JIT Q32 math perf",
         fw_check_slug: "jit-math-perf",
-        firmware_feature: "test_jit_math_perf",
-        fw_checks_feature: "check-jit-math-perf",
+        firmware_features: &["test_jit_math_perf"],
+        fw_checks_feature: Some("check-jit-math-perf"),
+        emits_header: true,
         sentinel: Sentinel::Done("[jit-math-perf] === DONE ==="),
         record_kinds: &["jit-bench"],
         mask_set: "jit-math-perf",
         fields: JIT_BENCH_FIELDS,
         series: &[],
+    },
+    Payload {
+        name: "boot-idle",
+        display_name: "Shipped image to the idle loop",
+        fw_check_slug: "boot-idle",
+        // The shipped-image walk as a payload (vision Q1: "shipped-image walks
+        // are a distinct scenario kind"). There is no `test_*` module and no
+        // `fw-checks` feature — the payload IS the product image, and the
+        // features are the image's own, on top of the crate's defaults.
+        //
+        // `memory_fs` is the firmware's "no flash" switch. The flash-backed
+        // shipped image mounts `lpfs` through the SPI1 controller, which is M4
+        // (DD23): on `lp-emu:esp32c6:*` it stops at `SPIN SPI1+0x000 cmd` at
+        // 11 ms, and the figures it would then print — spike report §5.1's
+        // `freeBytes 265392`, `[stack] high-water 11844 B of 71328 B` and the
+        // `[FS] Mount failed … Formatted and mounted` pair — are recorded as
+        // **expected at M4**, not compared now. What this payload records is
+        // the §5.4 variant.
+        firmware_features: &["server", "radio", "memory_fs"],
+        fw_checks_feature: None,
+        emits_header: false,
+        // The first stack heartbeat, at 5 s of uptime; a run has to be at
+        // least 5.5 s long to reach it. The marker is a prefix of its line,
+        // so the machine's `--exit-on` runs on to that line's newline before
+        // it stops — otherwise the two figures the payload exists for would
+        // be cut off mid-line.
+        sentinel: Sentinel::Done("[stack] heartbeat: high-water"),
+        record_kinds: &[],
+        mask_set: "boot-idle",
+        fields: &[],
+        series: &[&HELLO, &HEARTBEAT, &STACK_HEARTBEAT],
     },
 ];
 
@@ -485,6 +646,64 @@ mod tests {
             &dirty["prev_drop_to_usb"], "4294967295",
             "the hardware-overrun sentinel value must survive the parse"
         );
+    }
+
+    /// The three `boot-idle` series against the lines an M3 P6 run actually
+    /// produced (`target/emu-ref/d6cfaa205-boot-idle-memfs`, `t1`, strict).
+    #[test]
+    fn the_boot_idle_series_parse_the_lines_the_shipped_image_prints() {
+        let hello = concat!(
+            r#"M!{"id":0,"msg":{"hello":{"proto":20,"build":{"features":["node.button","#,
+            r#""gfx.lpvm"],"package":"fw-esp32c6","commit":"d6cfaa2051ae","dirty":true,"#,
+            r#""profile":"release-esp32"},"hardware":{"radio":true,"totalLedBudget":null,"#,
+            r#""button":true,"boardId":"seeed/xiao-esp32-c6","baseMac":"a0:f2:62:87:b4:8c","#,
+            r#""chipRevision":"0.2","eui64":"a0:f2:62:87:b4:8c:00:00"},"deviceUid":null}}}"#,
+        );
+        let caps = HELLO.regex().captures(hello).expect("the hello parses");
+        assert_eq!(&caps["proto"], "20");
+        assert_eq!(&caps["package"], "fw-esp32c6");
+        assert_eq!(&caps["profile"], "release-esp32");
+        assert_eq!(&caps["board_id"], "seeed/xiao-esp32-c6");
+        assert_eq!(&caps["total_led_budget"], "null");
+        // Provenance and identity are matched, never captured.
+        let names: Vec<_> = HELLO.regex().capture_names().flatten().collect();
+        for absent in ["commit", "dirty", "baseMac", "chipRevision", "eui64"] {
+            assert!(!names.contains(&absent), "`{absent}` must not be captured");
+        }
+
+        let beat = concat!(
+            r#"M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":967,"sdev":0,"min":967,"max":967},"#,
+            r#""frame_count":4835,"loaded_projects":[],"uptime_ms":5000,"#,
+            r#""memory":{"freeBytes":266688,"usedBytes":58848,"totalBytes":325536,"#,
+            r#""largestFreeBlock":200633},"recovery":{"level":"green","#,
+            r#""resetReason":"power-on","bootCount":1,"safeMode":false}}}}"#,
+        );
+        let caps = HEARTBEAT
+            .regex()
+            .captures(beat)
+            .expect("the heartbeat parses");
+        assert_eq!(&caps["msg"], "heartbeat");
+        assert_eq!(&caps["free_bytes"], "266688");
+        assert_eq!(&caps["total_bytes"], "325536");
+        assert_eq!(&caps["largest_free_block"], "200633");
+        assert_eq!(&caps["reset_reason"], "power-on");
+        assert_eq!(&caps["boot_count"], "1");
+        // esp-emu's sample prints a fractional average (spike report §5.1).
+        let float = beat.replace(r#""avg":967"#, r#""avg":491.60336"#);
+        assert_eq!(
+            &HEARTBEAT.regex().captures(&float).unwrap()["fps_avg"],
+            "491.60336"
+        );
+
+        let stack = "[INFO] fw_esp32c6::stack_probe: [stack] heartbeat: \
+                     high-water 11432 B of 71960 B (60528 B headroom)";
+        let caps = STACK_HEARTBEAT
+            .regex()
+            .captures(stack)
+            .expect("the stack line parses");
+        assert_eq!(&caps["high_water"], "11432");
+        assert_eq!(&caps["stack_bytes"], "71960");
+        assert_eq!(&caps["headroom"], "60528");
     }
 
     #[test]

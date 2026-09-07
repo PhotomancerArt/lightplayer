@@ -237,6 +237,7 @@ runtime.
 | `fw-emu`         | RISC-V emulator firmware (CI)          | yes (bare metal) |
 | `lp-riscv-emu`   | RV32 emulator (host) — in `lp-emu/`    | yes (+std feat)  |
 | `lp-xt-emu`      | Xtensa emulator (host) — in `lp-emu/`  | yes (+std feat)  |
+| `lp-emu-esp32c6` | ESP32-C6 SoC emulator (host) — `lp-emu/esp/` | no        |
 
 Every emulator crate lives under **`lp-emu/`** and is **MIT**, not AGPL —
 see the license rule above and `lp-emu/README.md`. The rv32/Xtensa
@@ -686,6 +687,40 @@ transcript, then agents work for weeks with no board. An agent does not open
 the port (see below); it writes the protocol file and Yona runs it.
 
 `lp-cli fwcheck` remains the older single-check front door and still works.
+
+### The ESP32-C6 emulator
+
+`lp-emu/esp/lp-emu-esp32c6` runs the shipped `fw-esp32c6` image on the host:
+mask ROM loaded, direct load, the boot peripheral set, UART0 draining at baud,
+USB-Serial-JTAG with no host attached. It is the configuration
+`lp-emu:esp32c6:t1` (and `:t2`) in the validation system above.
+
+```bash
+just emu-c6 <elf> --strict-bus --timeout 6s     # one image, by hand
+just test-emu-c6                                # its gates (builds firmware, ~70 s)
+cargo run -p lp-cli -- validate run emu-m3 --config lp-emu:esp32c6:t1 --dry-run
+```
+
+Three rules before you use a number from it:
+
+- **Never gate on emulated microseconds** (plan PD9, vision D13). Time is a
+  graded ladder and no rung is a promise: `t1` counts one cycle per
+  instruction, `t2` uses a per-class model, and neither is graded by a
+  transcript. Memory figures transfer; clocks do not. A replay *reports* a
+  timing difference with its ratio and *fails* on a memory one, which is the
+  same rule in code.
+- **A claim needs a transcript.** Every class of `lp-emu:esp32c6:*` is graded
+  `modeled` in `validate.toml`, each with a reason; byte-equality with silicon
+  on one payload is evidence written into that reason, not a promotion. Record
+  through `lp-cli validate record`, never by hand, and never edit what it
+  wrote.
+- **The fence still applies.** These crates are MIT and may not import a
+  product crate. The payload registry mirrors `fw-checks`; `lp-cli` owns the
+  parity test.
+
+Run it under `--strict-bus` while bringing anything up: an access nothing
+claims is then a fault with a pc and a symbol, instead of a zero the guest
+believes.
 
 ## Validation Commands
 

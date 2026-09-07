@@ -1,0 +1,26 @@
+
+M!{"id":0,"msg":{"hello":{"proto":20,"build":{"features":["node.button","node.clock","node.fluid","node.fixture","node.playlist","node.radio","node.shader","node.texture","svc.button","svc.radio-espnow","gfx.lpvm"],"package":"fw-esp32c6","commit":"d6cfaa2051ae","dirty":true,"profile":"release-esp32"},"hardware":{"radio":true,"totalLedBudget":null,"button":true,"boardId":"seeed/xiao-esp32-c6","baseMac":"a0:f2:62:87:b4:8c","chipRevision":"0.2","eui64":"a0:f2:62:87:b4:8c:00:00"},"deviceUid":null}}}
+
+[INFO] fw_esp32c6: [fw-esp32c6] Shader backend: native JIT (lpvm-native rt_jit)
+
+[INFO] fw_esp32c6: [fw-esp32c6] Hardware manifest: seeed/xiao-esp32-c6 (XIAO ESP32-C6)
+
+[INFO] fw_esp32c6::output::rmt::esp32c6_rmt_ws281x_driver: Esp32C6RmtWs281xDriver: 2 WS281x channels for 2 declared (ch0_blocks=1 ch0_window_words=48 ch0_half_words=24)
+
+[INFO] fw_esp32c6: [fw-esp32c6] ESP-NOW radio ready: device_id= channel=11
+
+[INFO] fw_esp32_common::boot: Boot: scanning /projects for projects
+
+[INFO] fw_esp32_common::boot: Boot: found 0 entries in /projects
+
+[INFO] fw_esp32_common::boot: Boot: 0 valid projects found
+
+[INFO] fw_esp32_common::boot: Boot: no projects to auto-load
+
+[INFO] fw_esp32_common::server_loop: [RECOVERY] boot complete (first frame served)
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":967,"sdev":0,"min":967,"max":967},"frame_count":4835,"loaded_projects":[],"uptime_ms":5000,"memory":{"freeBytes":266688,"usedBytes":58848,"totalBytes":325536,"largestFreeBlock":200633},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]},"outputs":null,"link":{"parseFailures":0,"rxErrors":0,"queueFullDrops":0,"stalePartialFlushes":0},"identity":{"baseMac":"a0:f2:62:87:b4:8c"}}}}
+
+[INFO] fw_esp32_common::server_loop: [perf] frame=4835 fps=967 elapsed=5000ms recv=0ms tick=0ms send=0ms total=0ms responses=0
+
+[INFO] fw_esp32c6::stack_probe: [stack] heartbeat: high-water 11432 B of 71960 B (60528 B headroom)

@@ -207,3 +207,28 @@ so the same file can be read under different rules forever.
   to the host, UART0 to the board under test). Both are small, neither is
   useful without the other, and both are recorded in `g3-desk-batch.md` and
   assigned to M6's first phase.
+
+## Amendment, 2026-09-06 (M3 P7, PR #555)
+
+Two claims above are the state at M2 and no longer describe the tree; the
+decisions are unchanged.
+
+- `lp-emu:*` is **no longer "unavailable until M3"**. `lp-emu:esp32c6:t1` and
+  `:t2` are runnable configurations with a driver behind them, and the trait
+  really was the only seam: nothing else in `lp-emu-validate` changed shape to
+  accept the machine. Both are graded `modeled` in every field class, with the
+  compile harness's byte-equality recorded as *evidence in the reason* rather
+  than as a promotion to `measured`.
+- A payload's `firmware_feature` is now a **list**, and a payload declares
+  whether it prints the in-band header. Both fell out of the same case: the
+  `boot-idle` payload is the shipped image itself (vision Q1's shipped-image
+  walk), which has no `fw-checks` module to print a header and is named by a
+  feature set rather than one `test_*` switch. The parity test carries the new
+  fields, and gained one more: a payload with no module must claim no header.
+- The identity a configuration reports (`mac`, `silicon_rev`, `board`) can now
+  be stated in `validate.toml`, because an emulator has no eFuse to read. That
+  does not touch "identity is the chip": the configuration name is still the
+  chip, and those fields are what the runner passes to the machine so that a
+  hello frame's identity compares equal to silicon's instead of differing over
+  who was told what.
+
