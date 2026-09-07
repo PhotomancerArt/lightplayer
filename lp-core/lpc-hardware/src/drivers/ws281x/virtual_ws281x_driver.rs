@@ -70,12 +70,13 @@ impl VirtualWs281xDriver {
             .find(|address| self.registry.endpoint_status_for(address).is_available())
     }
 
-    fn endpoint_status(&self, gpio: &HwAddress) -> HwEndpointStatus {
-        let gpio_status = self.registry.endpoint_status_for(gpio);
-        if !gpio_status.is_available() {
-            return gpio_status;
-        }
-
+    /// Whether a WS281x timing channel can be had right now, and if not, why.
+    ///
+    /// Independent of the GPIO being asked about, so [`Self::endpoints`]
+    /// computes it once per enumeration rather than once per endpoint: on the
+    /// virtual board that is 256 endpoints, each of which used to re-walk the
+    /// timing channels through the registry.
+    fn timing_status(&self) -> HwEndpointStatus {
         if self.free_timing_address().is_some() {
             return HwEndpointStatus::Available;
         }
@@ -98,6 +99,17 @@ impl VirtualWs281xDriver {
             },
             HwEndpointStatus::Unavailable { reason } => HwEndpointStatus::Unavailable { reason },
         }
+    }
+
+    /// A GPIO's own status first — a claimed or reserved pin names its own
+    /// reason — and otherwise the shared timing verdict from
+    /// [`Self::timing_status`].
+    fn endpoint_status(&self, gpio: &HwAddress, timing: &HwEndpointStatus) -> HwEndpointStatus {
+        let gpio_status = self.registry.endpoint_status_for(gpio);
+        if !gpio_status.is_available() {
+            return gpio_status;
+        }
+        timing.clone()
     }
 
     /// The GPIO an endpoint id names, without building the endpoint list.
@@ -147,6 +159,7 @@ impl Ws281xDriver for VirtualWs281xDriver {
             return endpoints;
         }
 
+        let timing = self.timing_status();
         for resource in self.registry.manifest().resources() {
             if !resource.supports(HwCapability::GpioOutput) {
                 continue;
@@ -160,7 +173,7 @@ impl Ws281xDriver for VirtualWs281xDriver {
                 self.driver_id(),
                 address,
                 resource.display_label(),
-                self.endpoint_status(resource.address()),
+                self.endpoint_status(resource.address(), &timing),
             ));
         }
         endpoints
