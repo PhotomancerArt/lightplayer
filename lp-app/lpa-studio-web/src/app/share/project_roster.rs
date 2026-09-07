@@ -179,20 +179,42 @@ pub fn use_project_roster(uid: Option<PrefixedUid>) -> ProjectRoster {
     // asks, so the two can never disagree about what was asked.
     let mut watched = use_signal(|| None::<PrefixedUid>);
 
+    // Which ask the answer in `state` is allowed to come from. Two can be
+    // in flight at once now — the route's and a publish notice's — and
+    // nothing orders the replies, so a late answer to the OLDER ask would
+    // overwrite the newer, truer one with exactly the staleness this hook
+    // exists to shed. Every write below claims a ticket too: a `GetProject`
+    // sent before a `SetAccess` cannot land on top of what that write came
+    // back with. Peeked, never read reactively — reading it would subscribe
+    // the effect below to a signal that effect's own ask writes.
+    let asks = use_signal(|| 0u64);
+    let claim_ticket = move || {
+        let mut asks = asks;
+        let ticket = *asks.peek() + 1;
+        asks.set(ticket);
+        ticket
+    };
+
     // The `GetProject`, as one closure both askers call. It never sets
     // `Loading`: that is the caller's call, and only a caller that is
     // changing the SUBJECT should blank the answer it holds.
     let ask = move |uid: PrefixedUid| {
+        let mut state = state;
+        let ticket = claim_ticket();
         spawn(async move {
-            match lpa_cloud_client::call(&FetchCloudPort::new(), GetProject { uid }).await {
-                Ok(info) => state.set(RosterState::of_info(&info)),
-                Err(error) => {
-                    // Silence, not a badge: an unpublished project, a
-                    // project somebody else owns, and an unreachable
-                    // service all mean "no sharing door here".
-                    log::debug!("share: no administrable project at {uid}: {error}");
-                    state.set(RosterState::Absent);
-                }
+            let answer =
+                match lpa_cloud_client::call(&FetchCloudPort::new(), GetProject { uid }).await {
+                    Ok(info) => RosterState::of_info(&info),
+                    Err(error) => {
+                        // Silence, not a badge: an unpublished project, a
+                        // project somebody else owns, and an unreachable
+                        // service all mean "no sharing door here".
+                        log::debug!("share: no administrable project at {uid}: {error}");
+                        RosterState::Absent
+                    }
+                };
+            if *asks.peek() == ticket {
+                state.set(answer);
             }
         });
     };
@@ -250,6 +272,9 @@ pub fn use_project_roster(uid: Option<PrefixedUid>) -> ProjectRoster {
         };
         state.write().set_access(level);
         busy.set(true);
+        // This write is the newest word on the project; a `GetProject`
+        // still in flight is not (see `claim_ticket`).
+        claim_ticket();
         spawn(async move {
             let result =
                 lpa_cloud_client::call(&FetchCloudPort::new(), SetAccess { uid, access: level })
@@ -271,6 +296,7 @@ pub fn use_project_roster(uid: Option<PrefixedUid>) -> ProjectRoster {
         let Some(uid) = uid else {
             return;
         };
+        claim_ticket();
         spawn(async move {
             match lpa_cloud_client::call(&FetchCloudPort::new(), AddMember { uid, email }).await {
                 Ok(info) => state.set(RosterState::of_info(&info)),
@@ -287,6 +313,7 @@ pub fn use_project_roster(uid: Option<PrefixedUid>) -> ProjectRoster {
         let Some(uid) = uid else {
             return;
         };
+        claim_ticket();
         spawn(async move {
             match lpa_cloud_client::call(&FetchCloudPort::new(), RemoveMember { uid, email }).await
             {
