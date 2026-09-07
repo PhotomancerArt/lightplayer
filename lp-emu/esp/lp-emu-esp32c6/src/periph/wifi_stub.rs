@@ -79,6 +79,14 @@ pub const OVERRIDES: &[(u32, u32, u32, &str)] = &[
     // Blob spins here; esp-emu evidently satisfies it; value chosen so the
     // poll exits (the field reads 7).
     (0x0814, 0x7 << 14, 0x7 << 14, "ram_pwdet_tone_start state field == 7"),
+    // `SPIN WIFI_MAC+0x0cc mac = 0x25824e50 x10000` from
+    // `ram_set_chan_freq_sw_start` (`0x4221a72a`, 30.3 ms): after the ROM's
+    // `freq_chan_en_sw` and a 10 µs delay it loops `lw a5,0xcc(a4); andi
+    // a5,a5,256; beqz a5` — until **bit 8** reads 1, the channel/frequency
+    // lock flag (`freq_reg_init` wrote the register with bit 8 clear). Blob
+    // spins here; esp-emu evidently satisfies it; value chosen so the poll
+    // exits.
+    (0x00cc, 1 << 8, 1 << 8, "ram_set_chan_freq_sw_start lock flag"),
 ];
 
 /// The `WIFI_PWR` block's override list; same rule, same shape.
