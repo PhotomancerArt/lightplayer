@@ -35,7 +35,27 @@ const GATE_US: u64 = 5_500_000;
 /// as measured for this configuration; never tuned.
 const HEARTBEAT_MEMORY: &str =
     r#""memory":{"freeBytes":266688,"usedBytes":58848,"totalBytes":325536"#;
-const STACK_LINE: &str = "[stack] heartbeat: high-water 11432 B of 71960 B";
+/// The stack line is checked for its shape and its total, and its
+/// high-water for a band — not the exact §5.4 figure the memory line still
+/// gets. The high-water is the deepest point an interrupt ever landed on
+/// the main task, and P6 already recorded it as interleaving-dependent
+/// (11432 B under `t1`, 11752 under `t2`, DD26). M5 P1's CI runs added the
+/// other axis: the reference image `build-reference-image.sh` produces on
+/// the GitHub runner is not the binary it produces here — three CI runs of
+/// one commit and one path gave three sha256s (`63b5b658…`, `f74b310b…`,
+/// `207ba410…`), 4,772 B larger than the local `55d810a9…`, with the code
+/// shifted (`Rmt::new`'s `sys_conf` write at pc `0x4207713e` vs
+/// `0x42076e6c`), 1,517 fewer instructions to the 5.5 s deadline and one
+/// idle skip fewer — and on that binary the same emulator reads
+/// `11560 B` where this one reads `11432 B`, every register the guest asks
+/// the RMT and PCR models for answering identically on both hosts and the
+/// heap figures byte-equal. A tick that lands on a different instruction
+/// of a differently laid-out image is a different deepest point. The band
+/// is the documented spread with room, not a fitted number: the memory
+/// class stays exact, the stack figure is reported by `digest`.
+const STACK_LINE_PREFIX: &str = "[stack] heartbeat: high-water ";
+const STACK_TOTAL: &str = " B of 71960 B";
+const STACK_HIGH_WATER_BAND: std::ops::RangeInclusive<u64> = 11_000..=12_000;
 
 /// The lines the brief asks for, in order.
 const BOOT_LINES: &[&str] = &[
@@ -47,7 +67,7 @@ const BOOT_LINES: &[&str] = &[
     "[fw-esp32c6] ESP-NOW radio ready: device_id= channel=11",
     "[RECOVERY] boot complete (first frame served)",
     "M!{\"id\":0,\"msg\":{\"heartbeat\":{",
-    STACK_LINE,
+    STACK_LINE_PREFIX,
 ];
 
 struct Run {
@@ -202,6 +222,20 @@ fn the_memfs_spike_image_says_hello_and_heartbeats_with_the_5_4_figures() {
         from += at + needle.len();
     }
     assert!(text.contains(HEARTBEAT_MEMORY), "{text}");
+    // The stack line: its shape and total exactly, its high-water in the
+    // band (see `STACK_HIGH_WATER_BAND`).
+    let stack = text
+        .lines()
+        .find(|l| l.contains(STACK_LINE_PREFIX))
+        .expect("the stack line follows the heartbeat");
+    let after = &stack[stack.find(STACK_LINE_PREFIX).unwrap() + STACK_LINE_PREFIX.len()..];
+    let (used, rest) = after.split_at(after.find(' ').unwrap_or(after.len()));
+    assert!(rest.starts_with(STACK_TOTAL), "{stack}");
+    let used: u64 = used.parse().unwrap_or_else(|_| panic!("{stack}"));
+    assert!(
+        STACK_HIGH_WATER_BAND.contains(&used),
+        "high-water {used} B outside {STACK_HIGH_WATER_BAND:?}: {stack}"
+    );
     // No `[FS]` mount pair: `memory_fs` is the no-flash switch; the flash-
     // backed hello is M4's.
     assert!(!text.contains("[FS]"));
