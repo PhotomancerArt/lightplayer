@@ -30,6 +30,7 @@
 pub mod assembly;
 pub mod blend;
 pub mod gpu_graphics;
+pub mod loop_bound_pass;
 pub mod read_back;
 pub mod render;
 pub mod sample_backing;
