@@ -290,6 +290,22 @@ call it the toolchain-bound end of this milestone's ladder; the overnight
 research's opt-3-plus-patch-tree figure (103.5 M -> 149 M, ≈1.45x) is the
 pre-M2 baseline this rung was designed against.
 
+**The Xtensa core** (`lp-xt-emu`) has its own probe and its own ladder:
+
+```bash
+just bench-emu-xt                     # the fixture corpus, repeated to >=100 M
+scripts/emu/bench-xt.sh --bin <saved-binary> --no-build --no-promote
+```
+
+It reports instructions/second only — that core is an ISA core with no SoC
+around it, so there is no emulated clock and no real-time ratio — and `cmp`s
+the guest output *and* a capped text trace against the previous run. M6 took
+it from 21.4 to 31.2 M instr/s on the recursion-heavy `ackermann` fixture and
+54.5 to 61.3 M on `fib_rec`, with both captures byte-identical; the win is
+almost entirely one memory resolution per access instead of four or five.
+`lp-emu/lp-xt-emu/README.md` has the rung-by-rung table and the
+generic-codegen trap that per-package `opt-level` overrides hide.
+
 Evidence, and the rungs not yet climbed (poll-loop skip, block cache, the
 wasm/phone rig): the planning workspace's
 `2026-09-06-1001-esp-emulator/2026-09-07-speed-ladder-research.md` and its

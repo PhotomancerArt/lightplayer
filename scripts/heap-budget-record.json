@@ -1,7 +1,7 @@
 {
   "comment": "Measured heap-budget record — a ratchet, not a target. These are what the projects cost TODAY on the RV32 emulator, not what any product may use. Per project and profile mode; steady-render records only the frame window. Regenerate with `just heap-budget-baseline`; see docs/heap-budget-gate.md.",
-  "recorded": "2026-09-06",
-  "commit": "fece9b9ed",
+  "recorded": "2026-09-07",
+  "commit": "357222797",
   "projects": {
     "catalog/patterns/meteor": {
       "modes": {
@@ -22,7 +22,7 @@
               "largest_alloc": 3584,
               "alloc_count": 4917,
               "alloc_bytes": 291857,
-              "largest_free_at_close": 211288,
+              "largest_free_at_close": 211224,
               "holes_at_close": 44
             },
             "frame": {
@@ -88,8 +88,8 @@
               "largest_alloc": 12000,
               "alloc_count": 3579,
               "alloc_bytes": 225911,
-              "largest_free_at_close": 224152,
-              "holes_at_close": 24
+              "largest_free_at_close": 224064,
+              "holes_at_close": 25
             },
             "frame": {
               "transient": 86856,
@@ -154,7 +154,7 @@
               "largest_alloc": 4365,
               "alloc_count": 3680,
               "alloc_bytes": 227442,
-              "largest_free_at_close": 215304,
+              "largest_free_at_close": 215240,
               "holes_at_close": 25
             },
             "frame": {

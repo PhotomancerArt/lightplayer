@@ -7,11 +7,11 @@ use crate::error::Trap;
 use crate::trace::{TraceEvent, Tracer};
 
 impl Emulator {
-    pub(super) fn exec_load_store(
+    pub(super) fn exec_load_store<T: Tracer + ?Sized>(
         &mut self,
         inst: &Inst,
         pc: u32,
-        tracer: &mut dyn Tracer,
+        tracer: &mut T,
     ) -> Result<Flow, Trap> {
         match *inst {
             Inst::Load(op, rt, rs, off) => {

@@ -77,6 +77,7 @@ desk session gets wasted.
 | `uart-bridge` | `test_uart_bridge` | `UART-BRIDGE READY ` (it serves until unplugged) | `checks::uart_bridge` (the bounded queue, the pump step, the ready line) |
 | `jit-math-perf` | `test_jit_math_perf` | `[jit-math-perf] === DONE ===` | `checks::jit_math_perf` (the corpus, the Q32 kernels, the benchmark runner — the cycle counter itself is injected as a `fn() -> u32`, since reading it is a chip fact rather than portable arithmetic) |
 | `boot-idle` | *(none — the shipped image)* | `[stack] heartbeat: high-water` | *(none)* |
+| `usb-negative-control` | *(none — the shipped image)* | `[stack] heartbeat: high-water` | *(none)* |
 
 ### `boot-idle` is the shipped image, not a module
 
@@ -94,6 +95,30 @@ transcript's `.meta.json` sidecar is the whole provenance. An emulated
 configuration adds `spike_uart0_link` on top, because neither emulator has a
 USB host to serve the shipped link over. Steps 1–4 of the recipe above do not
 apply to a payload like this; step 5 does, and it is the only step it needs.
+
+### `usb-negative-control` is the same image, watched differently
+
+Two payloads share a sentinel and nearly a feature list, and the difference
+between them is not in this crate at all.
+
+`usb-negative-control` is the shipped image built `server,radio` — flash-backed,
+the product's own bytes — and what makes it a distinct payload is **when the
+host side opens the port**. `boot-idle` is flashed with `espflash --monitor`
+and watched from its first byte. This one is flashed with no monitor at all,
+left alone for several seconds, and only then read by a non-resetting reader.
+
+That is the only way to observe the state the firmware cannot report on while
+it is in it: a host attached (SOF arriving) with nobody draining the port.
+Every protocol write times out, the connection monitor latches, and the log
+line saying so is dropped by the latch that emitted it — the outgoing queue is
+gated on `is_connected()`. What survives is a pair of timestamps on the
+device's own clock, in the next heartbeat's `link` object
+(`hostNotDrainingMs`, `hostDrainingAgainMs`, `notDrainingCount`; M6 P1b).
+
+The registry that carries that difference is the **host's**
+(`lp-emu-validate`'s `Payload::capture`), not this one. `FwCheckConfig`
+describes what the firmware is and prints; when the operator opens the port is
+a fact about the operator.
 
 ### `uart-bridge` is an instrument, not a measurement
 

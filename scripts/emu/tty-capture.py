@@ -18,6 +18,13 @@ the same one Studio and lp-cli make.
 Prints a byte count to stderr and exits 0 when the time is up, or on SIGINT.
 `--baud` is accepted and applied; a native-USB port ignores it, a real UART
 does not.
+
+`--until <text>` stops at the END of the first line containing <text>, not at
+the match: the validation runner's sentinels are line prefixes
+(`[stack] heartbeat: high-water`) and the figures that make the line worth
+capturing come after them, so stopping at the match would cut the transcript
+mid-number. Nothing is dropped — bytes already read past the sentinel are
+written out too; the reader simply stops asking for more.
 """
 
 from __future__ import annotations
@@ -49,7 +56,13 @@ def main() -> int:
         default=0.0,
         help="stop early after this many seconds with no bytes (0 = never)",
     )
+    ap.add_argument(
+        "--until",
+        default=None,
+        help="stop at the end of the first line containing this text",
+    )
     args = ap.parse_args()
+    until = args.until.encode() if args.until else None
 
     fd = os.open(args.dev, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
     try:
@@ -66,6 +79,9 @@ def main() -> int:
         deadline = time.monotonic() + args.seconds
         last_byte = time.monotonic()
         total = 0
+        # Only the tail since the last newline needs re-scanning for the
+        # sentinel; a match is not acted on until its line is terminated.
+        pending = b""
         with open(args.out, "wb") as out:
             while time.monotonic() < deadline:
                 r, _, _ = select.select([fd], [], [], 0.25)
@@ -82,6 +98,17 @@ def main() -> int:
                         out.flush()
                         total += len(data)
                         last_byte = time.monotonic()
+                        if until is not None:
+                            pending += data
+                            done = False
+                            for line in pending.split(b"\n")[:-1]:
+                                if until in line:
+                                    done = True
+                                    break
+                            pending = pending.rsplit(b"\n", 1)[-1]
+                            if done:
+                                print("UNTIL", file=sys.stderr, flush=True)
+                                break
                 if args.quiet_exit and time.monotonic() - last_byte > args.quiet_exit:
                     print("QUIET", file=sys.stderr, flush=True)
                     break

@@ -40,16 +40,44 @@ pub enum TraceEvent<'a> {
     WindowReload { base: u8, sp: u32, nregs: u8 },
 }
 
-/// Sink for [`TraceEvent`]s. The default impl ignores everything, so an emulator
-/// generic over `&mut dyn Tracer` pays nothing when handed [`NoopTracer`].
+/// Sink for [`TraceEvent`]s. The default impl ignores everything.
+///
+/// The emulator's public entry points take `&mut dyn Tracer`, but its run loop
+/// and every executor below it are generic over `T: Tracer + ?Sized`. The loop
+/// asks [`discards_events`](Tracer::discards_events) once per run and picks
+/// either the [`NoopTracer`] monomorphisation — where the empty body and the
+/// event that would have been passed to it both vanish, so an untraced run
+/// pays nothing per instruction and nothing per register write — or the
+/// `dyn Tracer` one, which behaves exactly as it always did. Both
+/// instantiations live inside this crate, which is what keeps them at the
+/// release opt-level the workspace grants `lp-xt-emu`; a generic public entry
+/// point would instead be codegen'd in each caller, at *its* opt-level.
 pub trait Tracer {
+    #[inline]
     fn event(&mut self, _event: TraceEvent<'_>) {}
+
+    /// `true` if this tracer throws every event away, so the emulator may skip
+    /// emitting them at all.
+    ///
+    /// Default `false`, which is the safe answer: overriding it to `true`
+    /// means [`event`](Tracer::event) will not be called, so only a tracer
+    /// whose `event` does nothing may say so. [`NoopTracer`] is the one such
+    /// tracer here.
+    #[inline]
+    fn discards_events(&self) -> bool {
+        false
+    }
 }
 
 /// A tracer that discards every event.
 pub struct NoopTracer;
 
-impl Tracer for NoopTracer {}
+impl Tracer for NoopTracer {
+    #[inline]
+    fn discards_events(&self) -> bool {
+        true
+    }
+}
 
 /// A tracer that appends a readable line per event to an in-memory log.
 #[derive(Default)]

@@ -46,6 +46,30 @@ impl Sentinel {
     }
 }
 
+/// How a silicon run watches the board.
+///
+/// A host-side property, deliberately not mirrored in `fw-checks`: the image
+/// is the same bytes either way, and what differs is when the operator's side
+/// opens the port. It lives on the payload because it is not a free choice —
+/// a payload whose subject is *what the device did while nobody was reading*
+/// is destroyed by a reader that attaches at the flash.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Capture {
+    /// espflash's own `--monitor`, opened the instant the flash finishes. The
+    /// board is watched from its first byte, which is what every payload that
+    /// makes a claim about output wants.
+    Monitor,
+    /// Flash with **no** monitor, leave the port closed for this many
+    /// seconds, then open a non-resetting reader.
+    ///
+    /// The negative control: for the whole of the wait a host is attached
+    /// (the cable is in, SOF keeps arriving) and no application is draining
+    /// the port, which is the one state the firmware cannot report on at the
+    /// time and can only remember. Everything the device says during the wait
+    /// is lost on purpose — that is the measurement.
+    FlashThenOpenAfter(u64),
+}
+
 /// One field of one structured record, and what class of claim it makes.
 #[derive(Clone, Copy, Debug)]
 pub struct FieldSpec {
@@ -121,6 +145,8 @@ pub struct Payload {
     pub mask_set: &'static str,
     pub fields: &'static [FieldSpec],
     pub series: &'static [&'static SeriesSpec],
+    /// When the host side opens the port, on a silicon run. See [`Capture`].
+    pub capture: Capture,
 }
 
 impl Payload {
@@ -286,6 +312,82 @@ pub static HEARTBEAT: SeriesSpec = SeriesSpec {
         ("recovery_level", FieldClass::Structural),
         ("reset_reason", FieldClass::Structural),
         ("boot_count", FieldClass::Structural),
+    ],
+    compiled: OnceLock::new(),
+};
+
+/// The connection monitor's own record of a silence, riding the heartbeat's
+/// `link` object (M6 P1b).
+///
+/// ```text
+/// …,"link":{"parseFailures":0,"rxErrors":0,"queueFullDrops":0,
+///   "stalePartialFlushes":0,"hostNotDrainingMs":1402,
+///   "hostDrainingAgainMs":8137,"notDrainingCount":1},…
+/// ```
+///
+/// The capture order is serde's struct order on `lpc_wire::server::
+/// LinkCounters`, and the pattern pins it: the four loss counters, then the
+/// two stamps, then the count. Reordering those fields would be a wire change
+/// and this is one of the things that would say so.
+///
+/// **The match is itself the claim.** Both stamps are
+/// `skip_serializing_if = "Option::is_none"`, so this pattern matches only a
+/// frame from a device that both latched and recovered — the "latched then
+/// resumed" transition, present and in that order. A run where the host was
+/// reading from the first byte produces no entry in this series at all,
+/// which is what the negative control's *positive* control looks like.
+///
+/// `count` is the `UsbSerialJtag` field, and that class is **hard** in
+/// replay: a configuration that says one silence where another says two is a
+/// difference, not a ratio. The two millisecond figures are `Timing` and are
+/// reported with their ratio (PD9/D13 — no host gate on emulated
+/// microseconds), which is exactly the shape the director ruled in DD33.
+///
+/// # `notDrainingCount: 1` on its own is not evidence of a host
+///
+/// Measured on our own machine with **no host at all** (M6 P1b, gate G1b-4,
+/// `tests/host_absent.rs`): `notDrainingCount` is 1, `hostNotDrainingMs` is
+/// 893, and `hostDrainingAgainMs` is absent. The monitor starts optimistic
+/// and the enumeration verdict takes three polls, while one blocked write
+/// costs 250 ms and holds io_task's loop for all of it — so two writes are
+/// attempted and time out before "no cable" is ever concluded. The third poll
+/// then declares the link unenumerated, which resets the latch and gates
+/// every write after it.
+///
+/// The M6 discovery's "absent" row predicted zero and is wrong. So the
+/// discriminator is the **pair**, which is why this pattern requires both
+/// stamps: absent latches once and never recovers; attached-but-unread
+/// latches once and *does* recover the moment somebody opens the port.
+///
+/// # The same facts without a heartbeat
+///
+/// The three numbers are relaxed atomics in the image, so a configuration
+/// that has no host reading it at all can still be asked. Their demangled
+/// paths, for `lp-emu-esp32c6 --probe <path>@<ms>` and for `peek_symbol`:
+///
+/// ```text
+/// fw_esp32_common::serial::link_counters::HOST_NOT_DRAINING_MS
+/// fw_esp32_common::serial::link_counters::HOST_DRAINING_AGAIN_MS
+/// fw_esp32_common::serial::link_counters::NOT_DRAINING_COUNT
+/// ```
+///
+/// The two `_MS` cells read `u32::MAX` for "never this boot" — the sentinel
+/// the wire spells `None`, translated once inside `link_counters::current()`,
+/// so a probe reads the raw form and a transcript reads the wire form. M6 P2's
+/// attached-idle gate probes exactly these.
+pub static LINK_MONITOR: SeriesSpec = SeriesSpec {
+    name: "link-monitor",
+    description: "the USB link's own record of when it stopped being drained, and when it resumed",
+    pattern: concat!(
+        r#""(?<link>link)":\{[^}]*"hostNotDrainingMs":(?<not_draining_ms>\d+)"#,
+        r#"[^}]*"hostDrainingAgainMs":(?<draining_again_ms>\d+)"#,
+        r#"[^}]*"notDrainingCount":(?<count>\d+)"#,
+    ),
+    key: "link",
+    fields: &[
+        ("count", FieldClass::UsbSerialJtag),
+        ("not_draining_ms", FieldClass::Timing),
+        ("draining_again_ms", FieldClass::Timing),
     ],
     compiled: OnceLock::new(),
 };
@@ -459,6 +561,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
             },
         ],
         series: &[&COMPILE_TICK],
+        capture: Capture::Monitor,
     },
     Payload {
         name: "gpio-calibrate",
@@ -472,6 +575,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         mask_set: "normalize",
         fields: &[],
         series: &[&CAL_PULSE],
+        capture: Capture::Monitor,
     },
     Payload {
         name: "uart-bridge",
@@ -485,6 +589,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         mask_set: "normalize",
         fields: &[],
         series: &[&BRIDGE_READY],
+        capture: Capture::Monitor,
     },
     Payload {
         name: "jit-math-perf",
@@ -498,6 +603,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         mask_set: "jit-math-perf",
         fields: JIT_BENCH_FIELDS,
         series: &[],
+        capture: Capture::Monitor,
     },
     Payload {
         name: "boot-idle",
@@ -529,6 +635,38 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         mask_set: "boot-idle",
         fields: &[],
         series: &[&HELLO, &HEARTBEAT, &STACK_HEARTBEAT],
+        capture: Capture::Monitor,
+    },
+    Payload {
+        name: "usb-negative-control",
+        display_name: "Shipped image with the port closed from boot",
+        fw_check_slug: "usb-negative-control",
+        // The shipped image, flash-backed — `boot-idle` minus `memory_fs`.
+        // The subject here is the USB link, not the heap, and the link is the
+        // same one the product ships; running a `memory_fs` variant would
+        // measure a different image for no reason on the only configuration
+        // that can answer the question today. M6 P4's emulator twin does use
+        // `memory_fs` until M4 lands SPI1, and says so.
+        firmware_features: &["server", "radio"],
+        fw_checks_feature: None,
+        emits_header: false,
+        // The stack heartbeat that FOLLOWS the first heartbeat after the
+        // open, so the run captures one whole heartbeat — the `link` object
+        // is the entire point and a sentinel on the heartbeat itself would
+        // cut the capture off inside it.
+        sentinel: Sentinel::Done("[stack] heartbeat: high-water"),
+        record_kinds: &[],
+        mask_set: "boot-idle",
+        fields: &[],
+        // No `HELLO`. The hello goes out at server start, seconds before the
+        // reader attaches, into a port nobody has open — it is dropped, and
+        // expecting it here would make every run of this payload fail for the
+        // reason the payload exists to demonstrate.
+        series: &[&HEARTBEAT, &STACK_HEARTBEAT, &LINK_MONITOR],
+        // Boot ≈ 1 s, the hello plus two 250 ms write timeouts ≈ +0.6 s, and
+        // one 5 s heartbeat interval of margin so the wait cannot land inside
+        // the transition it is trying to observe.
+        capture: Capture::FlashThenOpenAfter(8),
     },
 ];
 
@@ -704,6 +842,79 @@ mod tests {
         assert_eq!(&caps["high_water"], "11432");
         assert_eq!(&caps["stack_bytes"], "71960");
         assert_eq!(&caps["headroom"], "60528");
+    }
+
+    /// The `link` object as `lpc_wire::server::LinkCounters` serialises it,
+    /// in serde's declaration order. The three P1b fields come last, after
+    /// the four loss counters, and the two stamps are only there at all
+    /// because this device both latched and recovered.
+    #[test]
+    fn the_link_monitor_series_parses_a_heartbeat_from_a_link_that_went_quiet() {
+        let beat = concat!(
+            r#"M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":967,"sdev":0,"min":967,"max":967},"#,
+            r#""frame_count":9670,"loaded_projects":[],"uptime_ms":10000,"#,
+            r#""memory":{"freeBytes":266688,"usedBytes":58848,"totalBytes":325536,"#,
+            r#""largestFreeBlock":200633},"recovery":{"level":"green","#,
+            r#""resetReason":"power-on","bootCount":1,"safeMode":false},"#,
+            r#""link":{"parseFailures":0,"rxErrors":0,"queueFullDrops":0,"#,
+            r#""stalePartialFlushes":0,"hostNotDrainingMs":1402,"#,
+            r#""hostDrainingAgainMs":8137,"notDrainingCount":1},"#,
+            r#""identity":{"baseMac":"a0:f2:62:87:b4:8c"}}}}"#,
+        );
+        let caps = LINK_MONITOR
+            .regex()
+            .captures(beat)
+            .expect("a latched-then-resumed link parses");
+        assert_eq!(&caps["link"], "link");
+        assert_eq!(&caps["not_draining_ms"], "1402");
+        assert_eq!(&caps["draining_again_ms"], "8137");
+        assert_eq!(&caps["count"], "1");
+
+        // The same heartbeat also carries the heap ledger and the frame
+        // counter, which is how the negative control proves the device kept
+        // rendering throughout the silence rather than sitting wedged.
+        let beat_caps = HEARTBEAT.regex().captures(beat).expect("heartbeat parses");
+        assert_eq!(&beat_caps["frame_count"], "9670");
+
+        // A link that has been drained since boot sends neither stamp, so the
+        // series is empty rather than zero — presence IS the claim.
+        let quiet = beat.replace(
+            r#""stalePartialFlushes":0,"hostNotDrainingMs":1402,"hostDrainingAgainMs":8137,"#,
+            r#""stalePartialFlushes":0,"#,
+        );
+        assert!(
+            LINK_MONITOR.regex().captures(&quiet).is_none(),
+            "a link that never latched must not match: {quiet}"
+        );
+
+        // Latched but not yet recovered is also not a transition: the second
+        // stamp is absent, and half a silence is not a measurement.
+        let still_quiet = beat.replace(r#""hostDrainingAgainMs":8137,"#, "");
+        assert!(
+            LINK_MONITOR.regex().captures(&still_quiet).is_none(),
+            "a link that never came back must not match: {still_quiet}"
+        );
+    }
+
+    /// The negative control does not expect a hello: it went out before the
+    /// reader attached, into a port nobody had open.
+    #[test]
+    fn the_negative_control_watches_the_board_only_after_a_wait() {
+        let p = find_payload("usb-negative-control").unwrap();
+        assert_eq!(p.capture, Capture::FlashThenOpenAfter(8));
+        let names: Vec<_> = p.series.iter().map(|s| s.name).collect();
+        assert_eq!(names, vec!["heartbeat", "stack-heartbeat", "link-monitor"]);
+        assert!(
+            !names.contains(&"hello"),
+            "the hello is dropped by the state this payload measures"
+        );
+        // The shipped image, flash-backed: the product's own link.
+        assert_eq!(p.firmware_features, &["server", "radio"]);
+
+        // Every other payload is watched from its first byte.
+        for other in ALL_PAYLOADS.iter().filter(|o| o.name != p.name) {
+            assert_eq!(other.capture, Capture::Monitor, "{}", other.name);
+        }
     }
 
     #[test]
