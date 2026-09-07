@@ -716,13 +716,35 @@ fn load_project_tolerates_library_artifacts() {
     case("lib-both", true, true);
 }
 
-/// A board sim is STRICT: an endpoint the worn manifest declares opens, and
-/// one it does not is refused — the honesty the permissive output provider
-/// used to hide. The board here is a two-line manifest rather than a real
-/// profile: what is under test is that the manifest decides, not which
-/// board it happens to be.
+/// A board sim WEARS the manifest its boot options carried, and a project
+/// authored for a wire that manifest lacks neither fails to load nor stalls
+/// the sim: the engine refuses the wire, parks it, and keeps rendering. The
+/// board here is a two-line manifest rather than a real profile — what is
+/// under test is the fw-browser boot wiring, not which board it happens to
+/// be.
+///
+/// ⚠️ WHAT THIS TEST CANNOT ASSERT, AND WHY. The refusal is real and it does
+/// name the endpoint — `EngineServices::flush_dirty_output_sinks` builds
+/// `OutputFlushError::Provider` ("output node 3 port 0 ws281x:local:D9:
+/// Invalid config: unknown Ws281x hardware endpoint")
+/// (`lp-core/lpc-engine/src/engine/engine_services.rs:711`) and
+/// `Engine::tick` returns it as `EngineError::OutputFlush`
+/// (`lp-core/lpc-engine/src/engine/engine.rs:666`). But
+/// `LpServer::advance_frame` (`lp-app/lpa-server/src/server.rs:577`) drops
+/// that error into a `log::warn!` and a failure COUNT, and no wire message
+/// carries either. The output node's `NodeRuntimeStatus` cannot carry it
+/// either: node statuses are written only from the node walk
+/// (`engine.rs:1568`, `:2285`), and the flush runs outside it. So through
+/// the wire a refused wire and an opened one are INDISTINGUISHABLE — that is
+/// a product gap, filed as `docs/debt/output-flush-refusal-is-log-only.md`,
+/// not a property. The `Ok` asserted below is pinned deliberately: when the
+/// gap closes, this test must fail so it can be upgraded to assert the named
+/// refusal. Until then the strictness itself is proven where it IS
+/// observable — `a_failing_output_sink_does_not_suppress_the_others`
+/// (`engine_services.rs:1219`) asserts the flush error names the endpoint it
+/// refused.
 #[wasm_bindgen_test]
-fn board_manifest_boot_refuses_an_endpoint_the_board_lacks() {
+fn board_manifest_boot_wears_the_board_and_survives_a_wire_it_lacks() {
     fw_browser_init_exports(wasm_bindgen::exports());
 
     let one_wire_board = r#"{
@@ -751,34 +773,75 @@ fn board_manifest_boot_refuses_an_endpoint_the_board_lacks() {
     );
     let mut next_id = 1;
 
-    let declared = build_project_with_output_endpoint("ws281x:local:D10");
-    let handle = push_and_load_project(runtime_id, "declared", &declared.borrow(), &mut next_id);
+    // The manifest the boot options carried is the one the runtime answers
+    // with — the one half of "the manifest decides" a wire client CAN read
+    // back, and the reason this test boots a board of its own at all.
     assert_eq!(
-        output_node_status(runtime_id, handle, &mut next_id),
-        NodeRuntimeStatus::Ok,
-        "D10 is declared by this board and must open"
+        boot_hello(runtime_id).hardware.board_id.as_deref(),
+        Some("test/one-wire"),
+        "the sim must wear the manifest its boot options carried"
     );
 
-    // D9 exists on a real XIAO C6 but not on THIS board, so the sim refuses
-    // it — and says which endpoint it refused.
+    let declared = build_project_with_output_endpoint("ws281x:local:D10");
+    let declared_handle =
+        push_and_load_project(runtime_id, "declared", &declared.borrow(), &mut next_id);
+    assert_eq!(
+        output_node_status(runtime_id, declared_handle, &mut next_id),
+        NodeRuntimeStatus::Ok,
+        "D10 is declared by this board"
+    );
+    let (_, declared_red) = output_frame(runtime_id, declared_handle, &mut next_id);
+    assert!(
+        declared_red > 0,
+        "a project on a declared wire must render: red {declared_red}"
+    );
+
+    // D9 exists on a real XIAO C6 but not on THIS board. The engine refuses
+    // the open and parks the wire; ticking must keep returning (a refused
+    // wire is not a wedge) and the output must keep publishing (a refused
+    // wire is not a black sim) — those are the two things the refusal is
+    // allowed to cost, and the only two a client can check.
     let absent = build_project_with_output_endpoint("ws281x:local:D9");
-    let handle = push_and_load_project(runtime_id, "absent", &absent.borrow(), &mut next_id);
-    match output_node_status(runtime_id, handle, &mut next_id) {
-        NodeRuntimeStatus::Ok => {
-            panic!("an endpoint the board does not declare must not open")
-        }
-        other => {
-            let message = format!("{other:?}");
-            assert!(
-                message.contains("D9"),
-                "the refusal must name the endpoint: {message}"
-            );
-        }
+    let absent_handle = push_and_load_project(runtime_id, "absent", &absent.borrow(), &mut next_id);
+    for _ in 0..3 {
+        tick_runtime(runtime_id, 40).expect("a wire the board lacks must not wedge the sim");
     }
+    let (absent_frame, absent_red) = output_frame(runtime_id, absent_handle, &mut next_id);
+    assert!(
+        absent_red > 0,
+        "a parked wire must not blank the sim: red {absent_red}"
+    );
+    let (absent_frame_later, _) = output_frame(runtime_id, absent_handle, &mut next_id);
+    assert!(
+        absent_frame_later > absent_frame,
+        "the sim must keep ticking with a wire it cannot open: \
+         {absent_frame} -> {absent_frame_later}"
+    );
+
+    // Pinned, not endorsed: see this test's doc comment. The refusal reaches
+    // no wire query today, so the output node reports exactly what an opened
+    // wire reports. Closing
+    // `docs/debt/output-flush-refusal-is-log-only.md` must break this line.
+    assert_eq!(
+        output_node_status(runtime_id, absent_handle, &mut next_id),
+        NodeRuntimeStatus::Ok,
+        "GAP PINNED: no wire query carries an output-flush refusal, so a \
+         refused wire still reads Ok. Closing the debt entry should turn \
+         this into an assertion that the status NAMES ws281x:local:D9."
+    );
 }
 
-/// The Desktop board is unlimited by its TABLE: `B13` — a wire label no
-/// silicon profile in the repo carries — opens on it.
+/// A project authored for `B13` — a dome wire label no silicon profile in
+/// the repo carries — loads and renders on a Desktop sim.
+///
+/// ⚠️ That the Desktop MANIFEST actually opens `B13` is asserted where the
+/// open is observable:
+/// `default_desktop_manifest_opens_every_catalog_wire_label_at_once`
+/// (`lp-core/lpc-hardware/src/manifest/default_manifests.rs:306`). It cannot
+/// be asserted from here — no wire query reports whether a wire opened, so
+/// `NodeRuntimeStatus::Ok` below would read the same on a board that refused
+/// it. See `board_manifest_boot_wears_the_board_and_survives_a_wire_it_lacks`
+/// for the whole shape of that gap.
 #[wasm_bindgen_test]
 fn desktop_boot_accepts_a_dome_wire_label() {
     fw_browser_init_exports(wasm_bindgen::exports());
@@ -791,8 +854,11 @@ fn desktop_boot_accepts_a_dome_wire_label() {
     assert_eq!(
         output_node_status(runtime_id, handle, &mut next_id),
         NodeRuntimeStatus::Ok,
-        "the Desktop board declares every catalog wire label"
+        "a dome wire label must not fault the project"
     );
+    let (frame, red) = output_frame(runtime_id, handle, &mut next_id);
+    assert!(frame > 0, "the Desktop sim must have ticked");
+    assert!(red > 0, "the dome-wire project must render: red {red}");
 }
 
 /// The hello reports the board the runtime WEARS, and the identity it was
@@ -949,6 +1015,21 @@ fn output_node_status(
         .find(|entry| entry.path.to_string().contains("output"))
         .map(|entry| entry.status.clone())
         .expect("output node present")
+}
+
+/// The loaded project's `(frame_num, red)` after a tick — what a client can
+/// see of an output that is publishing: that the sim advanced, and that the
+/// output node put light in its buffer.
+///
+/// This is the PUBLISHED buffer, engine-side. It says nothing about whether
+/// the wire behind it opened; nothing on the wire does (see
+/// `board_manifest_boot_wears_the_board_and_survives_a_wire_it_lacks`).
+fn output_frame(runtime_id: u32, handle: WireProjectHandle, next_id: &mut u64) -> (u64, u16) {
+    let nodes_view = read_nodes_view(runtime_id, handle, next_id, 16);
+    let output_id = output_node_id(&nodes_view);
+    let view = read_runtime_and_resources(runtime_id, handle, next_id, 40);
+    let sample = read_output_sample(&view, output_id);
+    (sample.runtime_frame_num, sample.red)
 }
 
 /// The smoke project with a custom shader source (see [`build_smoke_project`]).
