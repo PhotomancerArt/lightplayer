@@ -96,6 +96,7 @@ jobs:
       browser: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.browser }}
       studio: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.studio }}
       firmware: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.firmware }}
+      emu_c6: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.emu_c6 }}
     steps:
       # Default quantifier ("some"): a filter is true when ANY changed file
       # matches one of its globs. Each list is the *dependency closure* of what
@@ -231,6 +232,24 @@ jobs:
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'rust-toolchain.toml'
+              - 'justfile'
+              - '.github/workflows/pre-merge.yml'
+            # emu_c6 gates the ESP32-C6 emulator's OWN boot-test + replay suite
+            # (`just test-emu-c6`, DD27 of the 2026-09-06 esp-emulator plan):
+            # the machine and its tests live in lp-emu/, and the two reference
+            # firmware images it builds and boots
+            # (`scripts/emu/build-reference-image.sh`, at a pinned historical
+            # commit) come from lp-fw/fw-esp32c6. Deliberately narrower than
+            # `firmware` above, which is the full link closure of the SHIPPED
+            # device image: this job's ~69s (measured, warm cargo cache) is
+            # dominated by building two extra reference images at that pinned
+            # commit, cost a shared-crate bump gains nothing from re-paying
+            # here when `firmware-size` already rebuilds the shipped image for
+            # exactly that case. Caching prebuilt ELFs instead of building them
+            # was considered and rejected (DD27).
+            emu_c6:
+              - 'lp-emu/**'
+              - 'lp-fw/fw-esp32c6/**'
               - 'justfile'
               - '.github/workflows/pre-merge.yml'
 
@@ -774,6 +793,109 @@ jobs:
       # embedded manifest core and diff against the checked-in expectation.
       - name: Check esp32c6 embedded manifest
         run: cd lp2025 && just fw-manifest-check-esp32c6
+
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: |
+          if command -v sccache >/dev/null; then
+            { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # The ESP32-C6 emulator's own boot-test + replay suite (`just test-emu-c6`,
+  # L3 of the 2026-09-06 esp-emulator plan, DD27). This builds TWO reference
+  # `fw-esp32c6` images at a pinned historical commit
+  # (`scripts/emu/build-reference-image.sh`: `git worktree add --detach` at
+  # d6cfaa205, `git cherry-pick -n` of e8d64eeff on top) and boots them against
+  # the `#[ignore]`d boot tests in `lp-emu-esp32c6` under `LP_EMU_BUILD_FW=1`,
+  # then runs the `lp-emu-validate` M3 replays and lp-cli's registry-parity
+  # test. Before this job, that whole suite was inert in CI — the boot tests
+  # are `#[ignore]`d specifically so a bare `cargo test --workspace` (which
+  # `validate-x64` runs) never starts a firmware build, so nothing exercised
+  # them.
+  #
+  # fetch-depth: 0, unlike every other job here: the two commits above are
+  # ordinary history, not refs, and the script's `git worktree add` /
+  # `git cherry-pick` both need them present locally — a shallow checkout
+  # would fail with "unknown revision".
+  #
+  # Same toolchain family as `firmware-size` (RISC-V, not Xtensa —
+  # fw-esp32c6 is a RISC-V core, unlike the S3/v3 Xtensa firmware): the
+  # pinned nightly with rust-src (build-std) plus the riscv32imac target.
+  # No espflash: this job builds and boots an emulator, never touches
+  # hardware.
+  #
+  # Path-gated on `emu_c6` (narrower than `firmware`) rather than the full
+  # device-image dependency closure — see that filter's comment in
+  # detect-changes for why. Not added to any required-check list here; see
+  # the PR description for that call.
+  emu-c6:
+    name: Emulator C6 (x64)
+    runs-on: ubuntu-24.04
+    # Measured 69s wall-clock on an M2 Max, warm cargo cache (2026-09-06, see
+    # the PR that added this job for the CI-measured number). Sized well above
+    # that per this workflow's timeout philosophy (see the top-of-file
+    # comment) until this job has its own p95 from real runs.
+    timeout-minutes: 15
+    needs: detect-changes
+    if: needs.detect-changes.outputs.emu_c6 == 'true'
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "false"
+      CARGO_PROFILE_TEST_DEBUG: "false"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+    steps:
+      - name: Install system deps (libudev for serialport)
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+
+      - name: Checkout lp2025
+        uses: actions/checkout@v4
+        with:
+          path: lp2025
+          # build-reference-image.sh does `git worktree add --detach` at a
+          # pinned historical commit and a `git cherry-pick -n` on top of it —
+          # both need history a shallow (depth-1) checkout does not have.
+          fetch-depth: 0
+
+      - name: Checkout lp-regalloc2
+        uses: actions/checkout@v4
+        with:
+          repository: PhotomancerArt/lp-regalloc2
+          path: lp-regalloc2
+
+      # Toolchain is pinned in lp2025/rust-toolchain.toml; keep this in sync.
+      # rust-src is required: fw-esp32c6 builds core/alloc from source
+      # (build-std) for its release-esp32 profile, same as firmware-size.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-27
+          components: rust-src
+
+      - name: Install RISC-V target
+        run: rustup target add ${{ env.RISC_V_TARGET }}
+
+      - name: Run sccache
+        uses: mozilla/sccache-action@v0.0.10
+
+      # rust-cache keys on the job id; save-if main-only (see the lint job's
+      # cache step for the rationale). The reference-image builds happen
+      # inside a detached worktree under lp2025/target/emu-ref/, which is
+      # still under this workspace root, so sccache (content-addressed) still
+      # covers them even though target/ itself is not cached.
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lp2025 -> target
+          cache-targets: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      - name: Emulator C6 boot tests + replays
+        run: cd lp2025 && just test-emu-c6
 
       - name: sccache stats
         if: always()
