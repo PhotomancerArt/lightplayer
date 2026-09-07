@@ -184,7 +184,7 @@ because = "the model is the host-absent state and only that — EP1 free until t
 [[configuration.trust]]
 class = "pin"
 grade = "modeled"
-because = "no pin is observed: GPIO and IO_MUX accept and remember, RMT accepts, and no waveform is produced or decoded. M5 brings the RMT channels and the WS281x decoder that make a pin claim possible"
+because = "no pin is observed: GPIO and IO_MUX accept and remember; the RMT TX engines (M5 P1) produce each channel's pulses in cycles, but no pad carries them and nothing decodes them. M5 P2 brings the signal fabric, the pin log and the WS281x decoder that make a pin claim possible"
 
 [[configuration.trust]]
 class = "wire"
