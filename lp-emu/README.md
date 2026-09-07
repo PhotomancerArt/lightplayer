@@ -213,6 +213,11 @@ just test-emu-c6                              # the machine's gates + the replay
 just emu-c6 <elf> --strict-bus --timeout 6s   # one image, by hand
 ```
 
+`just test-emu-c6` runs in CI as the path-gated `Emulator C6 (x64)` job
+(`.github/workflows/pre-merge.yml`), gated on changes under `lp-emu/**` or
+`lp-fw/fw-esp32c6/**` (see the `emu_c6` filter in that workflow's
+`detect-changes` job).
+
 Next: M4 (SPI1 flash and the MMU windows — the flash-backed image still stops
 at `SPIN SPI1+0x000 cmd` at 11 ms), M5 (RMT and the WS281x decoder, which is
 what makes a pin claim possible), M6 (the honest USB-Serial-JTAG with a
