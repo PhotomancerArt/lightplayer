@@ -32,7 +32,7 @@ impl Default for PreviewHostConfig {
 /// What a preview slot renders.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PreviewSource {
-    /// A compiled-in example package by id (e.g. `examples/fyeah-sign` —
+    /// A compiled-in example package by id (e.g. `catalog/fyeah-sign` —
     /// the id [`crate::UiExampleCard`] carries); materialized via
     /// [`super::example_deploy_files`].
     Example(String),

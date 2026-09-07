@@ -1398,7 +1398,7 @@ fn the_panel_transport_drives_all_three_clock_channels() {
 /// both of this gate's display defects took.
 #[test]
 fn the_peaches_open_onto_a_live_hero() {
-    for id in ["examples/peach-1d", "examples/peach-2d"] {
+    for id in ["catalog/peach-1d", "catalog/peach-2d"] {
         let example = crate::app::home::embedded_example(id).expect("the peach is embedded");
         let server = Rc::new(RefCell::new(example_e2e_server(&example)));
         let io = InProcessServerIo {
@@ -1540,7 +1540,7 @@ fn the_peaches_open_onto_a_live_hero() {
 /// That disagreement IS the patch.
 #[test]
 fn the_peaches_patch_bay_shows_the_same_cells_from_both_ends() {
-    for id in ["examples/peach-1d", "examples/peach-2d"] {
+    for id in ["catalog/peach-1d", "catalog/peach-2d"] {
         let example = crate::app::home::embedded_example(id).expect("the peach is embedded");
         let server = Rc::new(RefCell::new(example_e2e_server(&example)));
         let io = InProcessServerIo {
@@ -1678,7 +1678,7 @@ fn the_peaches_patch_bay_shows_the_same_cells_from_both_ends() {
 #[test]
 fn a_patch_pulse_lights_the_subjects_lamps_on_the_live_wire() {
     let example =
-        crate::app::home::embedded_example("examples/peach-1d").expect("the peach is embedded");
+        crate::app::home::embedded_example("catalog/peach-1d").expect("the peach is embedded");
     let server = Rc::new(RefCell::new(example_e2e_server(&example)));
     let io = InProcessServerIo {
         server: Rc::clone(&server),
@@ -2084,7 +2084,7 @@ fn a_one_product_module_falls_back_to_whichever_product_it_has() {
 /// straight from the probe.
 #[test]
 fn a_dome_scale_layout_arrives_over_the_wire() {
-    let example = crate::app::home::embedded_example("examples/zook-dome")
+    let example = crate::app::home::embedded_example("catalog/zook-dome")
         .expect("the zook-dome example ships in the bundle");
     let server = Rc::new(RefCell::new(example_e2e_server(&example)));
     let io = InProcessServerIo {
@@ -2174,7 +2174,7 @@ fn fixture_display_layout(view: &UiStudioView) -> Option<lpc_model::ControlLayou
 // -- harness -----------------------------------------------------------------
 
 /// A server holding one embedded gallery example, loaded from the very
-/// bytes the wasm bundle ships (`include_bytes!` of `examples/<name>/`).
+/// bytes the wasm bundle ships (`build.rs` embeds `catalog/<bucket>/<slug>/`).
 fn example_e2e_server(example: &crate::app::home::EmbeddedExample) -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
     let graphics: Arc<dyn LpGraphics> =
@@ -3623,7 +3623,7 @@ fn no_gallery_example_opens_onto_a_warning_badge() {
 fn the_patch_surface_derives_both_grains_and_selection_round_trips() {
     use crate::UiPatchTarget;
 
-    for (id, expect_instances) in [("examples/small-dome", true), ("examples/peach-1d", false)] {
+    for (id, expect_instances) in [("catalog/small-dome", true), ("catalog/peach-1d", false)] {
         let example = crate::app::home::embedded_example(id).expect("example embedded");
         let server = Rc::new(RefCell::new(example_e2e_server(&example)));
         let io = InProcessServerIo {
@@ -3821,7 +3821,7 @@ fn verbs_author_the_small_dome_install_byte_identically() {
     use crate::{PatchVerbKind, PatchVerbOp, PatchVerbSubject};
 
     let example =
-        crate::app::home::embedded_example("examples/small-dome").expect("small-dome embedded");
+        crate::app::home::embedded_example("catalog/small-dome").expect("small-dome embedded");
     let shipped: std::collections::BTreeMap<&str, &[u8]> = example
         .files
         .iter()
@@ -4047,7 +4047,7 @@ fn the_flow_flag_and_unmap_all_are_one_undo_step_each() {
     use crate::{PatchVerbKind, PatchVerbOp, PatchVerbSubject};
 
     let example =
-        crate::app::home::embedded_example("examples/small-dome").expect("small-dome embedded");
+        crate::app::home::embedded_example("catalog/small-dome").expect("small-dome embedded");
     let server = Rc::new(RefCell::new(example_e2e_server(&example)));
     let io = InProcessServerIo {
         server: Rc::clone(&server),
@@ -4249,7 +4249,7 @@ fn editor_meta_arranges_a_fixture_with_byte_stable_undo() {
     use crate::{EditorMetaFixture, EditorMetaOp, EditorMetaVerb, UiArrangeTransform};
 
     let example =
-        crate::app::home::embedded_example("examples/small-dome").expect("small-dome embedded");
+        crate::app::home::embedded_example("catalog/small-dome").expect("small-dome embedded");
     let server = Rc::new(RefCell::new(example_e2e_server(&example)));
     let io = InProcessServerIo {
         server: Rc::clone(&server),
@@ -4631,7 +4631,7 @@ fn edit_seq_interleaves_verbs_meta_ops_and_switch_events() {
     };
 
     let example =
-        crate::app::home::embedded_example("examples/small-dome").expect("small-dome embedded");
+        crate::app::home::embedded_example("catalog/small-dome").expect("small-dome embedded");
     let server = Rc::new(RefCell::new(example_e2e_server(&example)));
     let io = InProcessServerIo {
         server: Rc::clone(&server),
@@ -4821,7 +4821,7 @@ fn every_patch_target_arm_round_trips_through_selection() {
     use crate::UiPatchTarget;
 
     let example =
-        crate::app::home::embedded_example("examples/small-dome").expect("small-dome embedded");
+        crate::app::home::embedded_example("catalog/small-dome").expect("small-dome embedded");
     let server = Rc::new(RefCell::new(example_e2e_server(&example)));
     let io = InProcessServerIo {
         server: Rc::clone(&server),
@@ -4901,7 +4901,7 @@ fn a_fully_unmapped_project_keeps_its_outputs_and_their_free_ports() {
     use crate::{PatchVerbKind, PatchVerbOp, PatchVerbSubject};
 
     let example =
-        crate::app::home::embedded_example("examples/small-dome").expect("small-dome embedded");
+        crate::app::home::embedded_example("catalog/small-dome").expect("small-dome embedded");
     let server = Rc::new(RefCell::new(example_e2e_server(&example)));
     let io = InProcessServerIo {
         server: Rc::clone(&server),

@@ -221,7 +221,7 @@ mod tests {
         for op in [
             ProjectOp::LoadDemoProject,
             ProjectOp::OpenDocsExample {
-                example_id: "examples/plasma".to_string(),
+                example_id: "catalog/plasma".to_string(),
             },
         ] {
             assert_eq!(

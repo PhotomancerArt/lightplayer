@@ -20,6 +20,11 @@ pub struct ManifestFields {
     pub format: Option<u32>,
     pub uid: Option<String>,
     pub name: Option<String>,
+    /// Card blurb: one sentence describing what the project shows off
+    /// (manifest `description`; catalog content tree, P1). `None` for the
+    /// common case — most projects author no blurb. Passed through
+    /// read-only, same as `target` — the library never writes it.
+    pub description: Option<String>,
     /// Provenance: ISO date the project was created (manifest `created`).
     pub created: Option<String>,
     /// Advisory board target (gallery-rework vision D3); `None` for an
@@ -59,6 +64,7 @@ pub fn read_manifest(fs: &dyn LpFs) -> Result<ManifestFields, LibraryError> {
         format: manifest.format,
         uid: manifest.uid,
         name: manifest.name,
+        description: manifest.description,
         created: manifest.created,
         target: manifest.target,
         kind,
@@ -149,6 +155,27 @@ mod tests {
         assert_eq!(
             read_manifest(&fs).unwrap().target.as_deref(),
             Some("espressif/esp32-c6-devkitc-1")
+        );
+    }
+
+    /// P1: `description` reads through the same seam as `target`, and is
+    /// `None` when the container omits it — the common, blurb-less case.
+    #[test]
+    fn read_manifest_reads_description_when_present() {
+        let fs = LpFsMemory::new();
+        fs.write_file(MANIFEST_PATH.as_path(), MANIFEST).unwrap();
+        assert_eq!(read_manifest(&fs).unwrap().description, None);
+
+        let described: &[u8] = br#"{
+  "format": 10,
+  "name": "demo",
+  "description": "A porch sign that spells hello"
+}
+"#;
+        fs.write_file(MANIFEST_PATH.as_path(), described).unwrap();
+        assert_eq!(
+            read_manifest(&fs).unwrap().description.as_deref(),
+            Some("A porch sign that spells hello")
         );
     }
 

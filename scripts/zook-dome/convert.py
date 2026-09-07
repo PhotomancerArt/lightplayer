@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Convert Zook's dome wiring sketch (mapping-attempt.svg) into the
-examples/zook-dome fixture.map2d.json.
+catalog/projects/zook-dome fixture.map2d.json.
 
 One-off tooling for one specific Illustrator export — NOT the product SVG
 importer. The sketch encodes:
@@ -28,7 +28,7 @@ Usage:
   python3 scripts/zook-dome/convert.py            # per-channel form: 10 path objects, format 1
   python3 scripts/zook-dome/convert.py --repeat   # 1 gapped sector x repeat 5, format 2 (the shipped form)
 
-Both modes write examples/zook-dome/fixture.map2d.json and
+Both modes write catalog/projects/zook-dome/fixture.map2d.json and
 scripts/zook-dome/validation.svg. `--repeat` authors channel 1 as a single
 gapped path wrapped in a 5-count rotational repeat, and runs a fidelity
 check against the per-channel form: per-lamp deviation instance-by-instance,
@@ -46,7 +46,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 SVG_PATH = HERE / "mapping-attempt.svg"
-OUT_DOC = REPO / "examples" / "zook-dome" / "fixture.map2d.json"
+OUT_DOC = REPO / "catalog" / "projects" / "zook-dome" / "fixture.map2d.json"
 OUT_VALIDATION = HERE / "validation.svg"
 
 LAMPS_PER_CHANNEL = 300
@@ -77,7 +77,7 @@ REPEAT_CENTER = (581.5, 573.9)  # the apex hub = the dome's rotational axis
 
 # The sketch's sectors run COUNTERCLOCKWISE in document (= sketch channel)
 # order, while a map2d repeat turns clockwise, so repeat instance k lands on
-# physical channel INSTANCE_CHANNELS[k]. examples/zook-dome/output.json lists
+# physical channel INSTANCE_CHANNELS[k]. catalog/projects/zook-dome/output.json lists
 # its pins in instance order so every physical sector keeps the pin the
 # per-channel form assigned it (ch1..ch5 = IO18/IO16/IO14/IO2/IO13).
 INSTANCE_CHANNELS = (1, 5, 4, 3, 2)

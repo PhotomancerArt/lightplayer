@@ -48,9 +48,11 @@ pub struct Snapshot {
     pub rng: u64,
     pub hook_calls: u64,
     pub uart0: Vec<u8>,
-    /// The USB-Serial-JTAG observation log — same rule as `uart0`: a restored
-    /// run must not still hold bytes from a future it no longer has.
+    /// What a USB host received — same rule as `uart0`: a restored run must
+    /// not still hold bytes from a future it no longer has.
     pub usb_sj: Vec<u8>,
+    /// The USB-Serial-JTAG observation log, the same rule.
+    pub usb_sj_tried: Vec<u8>,
 }
 
 impl Snapshot {
@@ -66,5 +68,6 @@ impl Snapshot {
             + self.periph.iter().map(|(_, b)| b.len()).sum::<usize>()
             + self.uart0.len()
             + self.usb_sj.len()
+            + self.usb_sj_tried.len()
     }
 }

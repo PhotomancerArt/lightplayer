@@ -98,7 +98,7 @@ fn long_code_scrolls_inside() -> Element {
 }
 
 #[story(
-    description = "The registered `plasma-shader` figure, compiled in from examples/plasma/shader.glsl with its hand-authored range on the uniform the Scale knob drives."
+    description = "The registered `plasma-shader` figure, compiled in from catalog/plasma/shader.glsl with its hand-authored range on the uniform the Scale knob drives."
 )]
 fn registered_plasma_figure() -> Element {
     let figure = code_figure("plasma-shader").expect("the plasma figure is registered");

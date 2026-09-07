@@ -10,7 +10,7 @@
 //! testing-strategy decision recorded 2026-04-19.
 //!
 //! Smoke test: `lp-cli profile --collect events --mode startup` end-to-end against
-//! `examples/basic`. Uses startup mode so the profile gate stops after the first
+//! `projects/test/basic`. Uses startup mode so the profile gate stops after the first
 //! frame completes (fast, like `profile_alloc_smoke`). Verifies `events.jsonl` and
 //! the m1 `meta.json` schema.
 
@@ -25,9 +25,9 @@ fn lp_cli_profile_events_startup_smoke() {
         .expect("lp-cli crate should live one level under the workspace root");
 
     let examples_basic = workspace_root
-        .join("examples/basic")
+        .join("projects/test/basic")
         .canonicalize()
-        .expect("resolve examples/basic");
+        .expect("resolve projects/test/basic");
 
     let note = format!("ci-events-smoke-{}", std::process::id());
     let manifest_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");

@@ -54,6 +54,9 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 # Always on: the shared-link conversation io (`app/devices/shared_link_client_io.rs`)
 # implements `lpa_client::ClientIo` on every target, not only the browser ones.
 async-trait = { version = "0.1" }
+# The persisted last-frame sidecar (`app/devices/device_frame_snapshot.rs`)
+# carries sample bytes as base64.
+base64 = { workspace = true }
 js-sys = { version = "0.3", optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 wasm-bindgen-futures = { version = "0.4", optional = true }

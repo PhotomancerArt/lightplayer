@@ -41,8 +41,10 @@ use lpa_studio_core::{
 };
 
 use crate::app::home::device_roster_card::{DeviceRosterCard, PendingLinkCard};
+use crate::app::home::play_feed_text::frame_age_label;
 use crate::app::home::sim_card::SimCard;
 use crate::app::home::{device_grid_class, section_title_class};
+use crate::app::node::lamp_view::LampView;
 use crate::core::{ActionButton, ActionButtonVariant};
 
 /// The runtime roster page (roadmap M4's gallery top, re-homed).
@@ -256,14 +258,19 @@ fn RememberedLine(
 /// nothing here is live.
 ///
 /// The tile carries the same 120px preview slot the cards do so the row
-/// reads as the same family — with the "last seen" sentence in it, because
-/// there IS no picture: the feed is a later milestone, and a board that is
-/// not connected would have nothing to feed it anyway.
+/// reads as the same family. When the board's last picture is known — this
+/// session pulled one before the port went, or a sidecar remembered one
+/// across a reload — the slot draws it exactly as a card's Offline look
+/// does: dimmed, with the neutral "last frame · <age>" pill, the age
+/// measured from when the board actually published it. Otherwise the
+/// "last seen" sentence: never a stale picture passed off as current, and
+/// never an empty box.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn RememberedTile(entry: RememberedView, on_action: EventHandler<UiAction>) -> Element {
     let device = entry.id;
     let meta = remembered_meta_text(&entry);
+    let slot = remembered_slot(&entry);
 
     rsx! {
         div { class: remembered_tile_class(),
@@ -273,9 +280,22 @@ fn RememberedTile(entry: RememberedView, on_action: EventHandler<UiAction>) -> E
                     title: "{entry.title}",
                     "{entry.title}"
                 }
-                div { class: "ux-play-frame ux-play-frame-slot",
-                    div { class: "ux-play-empty",
-                        p { class: "tw:m-0", "{remembered_preview_sentence(&entry)}" }
+                div { class: "{slot.frame_class}",
+                    if let Some(picture) = slot.picture {
+                        div { class: "ux-play-lamps",
+                            LampView { preview: picture }
+                        }
+                    }
+                    if let Some(sentence) = slot.sentence {
+                        div { class: "ux-play-empty",
+                            p { class: "tw:m-0", "{sentence}" }
+                        }
+                    }
+                    if let Some(pill) = slot.pill {
+                        span { class: "ux-play-pill ux-play-pill-offline",
+                            span { class: "ux-play-dot" }
+                            "{pill}"
+                        }
                     }
                 }
                 p {
@@ -319,6 +339,55 @@ fn remembered_meta_text(entry: &RememberedView) -> String {
         (Some(board), None) => board.to_string(),
         (None, Some(last)) => last.to_string(),
         (None, None) => "not heard this session".to_string(),
+    }
+}
+
+/// What a remembered tile's preview slot draws.
+#[derive(Debug, PartialEq)]
+struct RememberedSlot {
+    /// The slot's classes: the fixed frame, dimmed when a picture is in it.
+    frame_class: String,
+    /// The last picture, when it has geometry to draw.
+    picture: Option<lpa_studio_core::UiControlProductPreview>,
+    /// "last frame · <age>", beside a picture.
+    pill: Option<String>,
+    /// The honest sentence when there is no picture to draw.
+    sentence: Option<String>,
+}
+
+/// The slot's contents: the last picture with its age when the entry
+/// carries a frame WITH a layout; a frame without geometry (the board's
+/// layout exceeded the wire budget when it was captured) has nothing to
+/// draw and keeps the sentence, like the card does.
+fn remembered_slot(entry: &RememberedView) -> RememberedSlot {
+    let picture = entry
+        .feed
+        .as_ref()
+        .and_then(|feed| feed.frame.as_ref())
+        .filter(|frame| frame.display_layout.is_some())
+        .cloned();
+    match picture {
+        Some(picture) => RememberedSlot {
+            frame_class: "ux-play-frame ux-play-frame-slot ux-play-frame-dim".to_string(),
+            picture: Some(picture),
+            pill: Some(format!(
+                "last frame · {}",
+                frame_age_label(
+                    entry
+                        .feed
+                        .as_ref()
+                        .and_then(|feed| feed.frame_age_secs)
+                        .unwrap_or_default()
+                )
+            )),
+            sentence: None,
+        },
+        None => RememberedSlot {
+            frame_class: "ux-play-frame ux-play-frame-slot".to_string(),
+            picture: None,
+            pill: None,
+            sentence: Some(remembered_preview_sentence(entry)),
+        },
     }
 }
 
@@ -646,7 +715,72 @@ mod tests {
             board: Some("seeed-xiao-esp32c6".to_string()),
             last_seen_label: Some("last heard 4 min ago".to_string()),
             escapes: vec![DeviceEscape::Reconnect, DeviceEscape::Forget],
+            feed: None,
         }
+    }
+
+    fn remembered_feed(with_layout: bool) -> lpa_studio_core::DeviceCardFeedView {
+        use std::rc::Rc;
+        let layout = with_layout.then(|| {
+            Rc::new(lpa_studio_core::ControlDisplayLayout::Layout2d(
+                lpa_studio_core::ControlLayout2d::new(
+                    lpa_studio_core::Revision::new(7),
+                    4,
+                    1,
+                    Vec::new(),
+                ),
+            ))
+        });
+        lpa_studio_core::DeviceCardFeedView {
+            frame: Some(lpa_studio_core::UiControlProductPreview {
+                revision: 3,
+                extent: lpa_studio_core::ControlExtent::new(1, 12),
+                sample_format: lpa_studio_core::UiControlSampleFormat::U16,
+                sample_layout: lpa_studio_core::ControlSampleLayout { spans: Vec::new() },
+                display_layout: layout,
+                bytes: Rc::from(vec![0u8; 24]),
+            }),
+            frame_age_secs: Some(3.0 * 3_600.0),
+            engine_fps: None,
+            liveness: lpa_studio_core::FeedLiveness::Offline,
+        }
+    }
+
+    /// The tile's slot: the last picture, dimmed and aged from its own
+    /// stamp, when the entry carries one with geometry — and the honest
+    /// sentence otherwise (no feed, or a frame the board never gave a
+    /// layout for).
+    #[test]
+    fn the_slot_draws_the_last_picture_or_says_why_there_is_none() {
+        let entry = remembered_fixture();
+        let plain = remembered_slot(&entry);
+        assert!(plain.picture.is_none());
+        assert_eq!(plain.pill, None);
+        assert_eq!(
+            plain.sentence.as_deref(),
+            Some("Not connected — last heard 4 min ago.")
+        );
+        assert!(!plain.frame_class.contains("ux-play-frame-dim"));
+
+        let with_picture = remembered_slot(&RememberedView {
+            feed: Some(remembered_feed(true)),
+            ..remembered_fixture()
+        });
+        assert!(with_picture.picture.is_some());
+        assert_eq!(with_picture.pill.as_deref(), Some("last frame · 3 h ago"));
+        assert_eq!(with_picture.sentence, None);
+        assert!(with_picture.frame_class.contains("ux-play-frame-dim"));
+
+        let no_layout = remembered_slot(&RememberedView {
+            feed: Some(remembered_feed(false)),
+            ..remembered_fixture()
+        });
+        assert!(
+            no_layout.picture.is_none(),
+            "bytes without geometry draw nothing"
+        );
+        assert_eq!(no_layout.pill, None);
+        assert_eq!(no_layout.sentence, plain.sentence);
     }
 
     fn bare_card() -> DeviceView {

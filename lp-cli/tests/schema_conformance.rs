@@ -31,7 +31,7 @@ use anyhow::{Context, Result, bail};
 use serde_json::Value;
 
 /// Workspace-relative roots that hold authored project/node artifacts.
-const ARTIFACT_ROOTS: &[&str] = &["projects", "examples", "lp-fw/fw-browser/www/smoke-project"];
+const ARTIFACT_ROOTS: &[&str] = &["projects", "catalog", "lp-fw/fw-browser/www/smoke-project"];
 
 /// Workspace-relative roots that hold hardware board manifests.
 const HARDWARE_ROOTS: &[&str] = &["lp-core/lpc-hardware/boards"];
@@ -255,7 +255,7 @@ fn validate_patch_file(file: &Path, rel: &str, failures: &mut Vec<String>) -> Re
 ///
 /// It is NOT a node artifact: it carries per-node editor presentation state
 /// (Arrange placements) and is deliberately absent from the node schema, so
-/// the node validator refuses it. An example may ship one — `examples/small-dome`
+/// the node validator refuses it. An example may ship one — `catalog/projects/small-dome`
 /// arranges its dome and door in one plan — which is what surfaced this
 /// classification gap.
 fn validate_editor_meta_file(file: &Path, rel: &str, failures: &mut Vec<String>) -> Result<()> {

@@ -1,0 +1,5 @@
+{
+  "format": 10,
+  "name": "Peach (2D)",
+  "description": "The same peach and the same wiring, declared 2D: shader planes sampled at the lamps' mapped positions, so presentation and sampling stay separate."
+}

@@ -519,7 +519,7 @@ mod tests {
         UiAction::from_op(
             ControllerId::new(HOME_NODE_ID),
             HomeOp::OpenExample {
-                id: "examples/fyeah-sign".to_string(),
+                id: "catalog/fyeah-sign".to_string(),
             },
         )
     }
