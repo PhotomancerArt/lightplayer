@@ -336,7 +336,7 @@ impl SamplePass {
             resources.width,
             resources.height,
             TextureStorageFormat::Rgba16Unorm,
-            None,
+            Some(crate::read_back::PRODUCT_READ_BACK_WAIT),
         )?;
         for (dst, &v) in out.iter_mut().zip(&pixels) {
             *dst = quantize_unorm16(v);
