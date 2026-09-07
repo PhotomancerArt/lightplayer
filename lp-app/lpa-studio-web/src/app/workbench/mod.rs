@@ -116,7 +116,9 @@ pub fn view_for_route(route_view: crate::router::ProjectView) -> WorkbenchView {
 }
 
 /// The view tabs' targets, one slot per [`VIEWS`] row: `None` hides the
-/// tab (a device lens has no mapping address yet). Stories default to
+/// tab. Every lens route (project, example, device) addresses every
+/// view, so the app fills every slot; the `None` arm stays for surfaces
+/// that render the frame without a lens address. Stories default to
 /// inert fragments.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WorkbenchHrefs {
