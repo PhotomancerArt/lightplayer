@@ -189,6 +189,24 @@ impl ByteLog {
     pub fn clear(&mut self) {
         self.0.lock().expect("byte log poisoned").clear();
     }
+
+    /// Append bytes from the host side — what a tee'ing sink does, and what
+    /// a peripheral does when its outside is only a log.
+    pub fn append(&self, bytes: &[u8]) {
+        self.0
+            .lock()
+            .expect("byte log poisoned")
+            .extend_from_slice(bytes);
+    }
+
+    /// Replace the whole log. Snapshot restore: a run that came back to an
+    /// earlier cycle must not still be holding console bytes from a future
+    /// it no longer has.
+    pub fn replace(&self, bytes: &[u8]) {
+        let mut guard = self.0.lock().expect("byte log poisoned");
+        guard.clear();
+        guard.extend_from_slice(bytes);
+    }
 }
 
 /// Collects bytes into a [`ByteLog`].

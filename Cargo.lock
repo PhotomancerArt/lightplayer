@@ -5675,6 +5675,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-emu-esp32c6"
+version = "40.0.0"
+dependencies = [
+ "env_logger 0.11.9",
+ "log",
+ "lp-emu-core",
+ "lp-emu-esp-common",
+ "lp-riscv-emu",
+ "sha2",
+ "test-log",
+]
+
+[[package]]
 name = "lp-emu-validate"
 version = "40.0.0"
 dependencies = [

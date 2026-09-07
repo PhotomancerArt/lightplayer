@@ -238,6 +238,19 @@ impl Trace {
         self.emit(&line);
     }
 
+    /// Write one line the bus did not produce — a machine-level note that
+    /// belongs in the same stream and the same order as the MMIO lines
+    /// (`HOOK <symbol>`, and whatever later phases need).
+    ///
+    /// Never filtered: the block filter selects peripherals, and a note is
+    /// not a peripheral.
+    pub fn note(&mut self, line: &str) {
+        if self.sink.is_none() {
+            return;
+        }
+        self.emit(line);
+    }
+
     /// Reset the spin detector. The bus calls this on any write, because a
     /// write is exactly the thing that could have unstuck the loop.
     pub fn note_write_anywhere(&mut self) {

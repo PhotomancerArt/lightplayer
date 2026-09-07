@@ -161,6 +161,48 @@ impl IrqLines {
     }
 }
 
+/// Turns chip-wide interrupt **source** levels into "the CPU interrupt this
+/// hart should take right now", or `None`.
+///
+/// The half of the interrupt path that is chip-specific: which source is
+/// routed to which CPU interrupt, which are enabled, and what the priority
+/// threshold is are all PLIC_MX / INTERRUPT_CORE0 questions, and this crate
+/// holds no chip numbers. [`crate::bus::SocBus`] holds one of these and
+/// answers `Bus::pending_cpu_interrupt` from it, which is what lets an MMIO
+/// store that raises a line be delivered before the next instruction
+/// retires.
+///
+/// It is asked on every side-band consumption, so it must be cheap and it
+/// must be a **pure function of the levels and its own configuration** — no
+/// scheduling, no logging per call.
+pub trait CpuIntMatrix: Send {
+    /// The highest-priority CPU interrupt asserted for `hart`, or `None`.
+    fn cpu_interrupt(&self, hart: usize, irq: &IrqLines) -> Option<u8>;
+
+    /// Snapshot the matrix's configuration. Defaults to "no state", which is
+    /// right for a matrix that is a pure routing table.
+    fn save_state(&self) -> Vec<u8> {
+        Vec::new()
+    }
+
+    fn load_state(&mut self, _bytes: &[u8]) {}
+}
+
+/// The default matrix: nothing is ever asserted.
+///
+/// What a bus has before a chip crate installs its own, and what P4's C6
+/// machine ships with — the interrupt matrix proper is a P5 deliverable, and
+/// a stub that returns `None` is honest about that where a stub that guessed
+/// would not be.
+#[derive(Copy, Clone, Debug, Default)]
+pub struct NoCpuInterrupts;
+
+impl CpuIntMatrix for NoCpuInterrupts {
+    fn cpu_interrupt(&self, _hart: usize, _irq: &IrqLines) -> Option<u8> {
+        None
+    }
+}
+
 /// A register window with behaviour.
 ///
 /// Offsets are **relative to the peripheral's base** and register-aligned:

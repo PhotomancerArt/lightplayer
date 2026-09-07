@@ -33,6 +33,7 @@
 //! not "cancel the one I scheduled most recently".
 
 use alloc::collections::{BTreeMap, BinaryHeap};
+use alloc::vec::Vec;
 use core::cmp::Reverse;
 
 /// Guest cycles. The unit the whole machine agrees on; a `CycleModel`
@@ -161,6 +162,44 @@ impl Scheduler {
         self.seq = 0;
     }
 
+    /// Every **live** pending event as `(deadline, seq, id)`, in pop order.
+    ///
+    /// The snapshot form. Tombstones are dropped rather than carried: a
+    /// cancelled entry is unobservable, and restoring one would only make a
+    /// restored machine's heap differ from a machine that had reached the
+    /// same state by running. `seq` is kept because it is the tie-breaker
+    /// two events at the same cycle are ordered by, and losing it would let
+    /// a restore reorder them.
+    pub fn save(&self) -> Vec<(Cycles, u64, EventId)> {
+        let mut out: Vec<(Cycles, u64, EventId)> = self
+            .heap
+            .iter()
+            .filter(|Reverse(e)| self.is_live(e))
+            .map(|Reverse(e)| (e.at, e.seq, e.id))
+            .collect();
+        out.sort_unstable();
+        out
+    }
+
+    /// Replace the queue with the entries from [`Scheduler::save`].
+    ///
+    /// The sequence counter resumes past the highest restored `seq`, so an
+    /// event scheduled after a restore still sorts after everything the
+    /// snapshot carried — the property [`Scheduler::save`] preserves `seq`
+    /// for.
+    pub fn restore(&mut self, entries: &[(Cycles, u64, EventId)]) {
+        self.clear();
+        for &(at, seq, id) in entries {
+            self.heap.push(Reverse(Entry {
+                at,
+                seq,
+                id,
+                epoch: 0,
+            }));
+            self.seq = self.seq.max(seq + 1);
+        }
+    }
+
     fn is_live(&self, entry: &Entry) -> bool {
         self.epoch.get(&entry.id).copied().unwrap_or(0) == entry.epoch
     }
@@ -169,7 +208,6 @@ impl Scheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::vec::Vec;
 
     fn drain(sched: &mut Scheduler, now: Cycles) -> Vec<u32> {
         let mut out = Vec::new();
@@ -289,6 +327,36 @@ mod tests {
         s.clear();
         s.schedule_at(10, EventId(1));
         assert_eq!(s.pop_due(10), Some(EventId(1)));
+    }
+
+    #[test]
+    fn save_and_restore_reproduce_the_pop_order() {
+        let mut s = Scheduler::new();
+        for (at, id) in [(7, 4), (3, 1), (7, 2), (3, 9), (11, 0)] {
+            s.schedule_at(at, EventId(id));
+        }
+        s.cancel(EventId(9));
+
+        let saved = s.save();
+        // Tombstones are not carried: 5 scheduled, 1 cancelled.
+        assert_eq!(saved.len(), 4);
+
+        let mut restored = Scheduler::new();
+        restored.restore(&saved);
+        assert_eq!(restored.next_deadline(), s.next_deadline());
+        assert_eq!(drain(&mut restored, 100), drain(&mut s, 100));
+    }
+
+    #[test]
+    fn an_event_scheduled_after_a_restore_still_sorts_last_at_its_cycle() {
+        let mut s = Scheduler::new();
+        s.schedule_at(50, EventId(1));
+        s.schedule_at(50, EventId(2));
+
+        let mut restored = Scheduler::new();
+        restored.restore(&s.save());
+        restored.schedule_at(50, EventId(3));
+        assert_eq!(drain(&mut restored, 50), [1, 2, 3]);
     }
 
     /// The property PD5 rests on: the same calls give the same pop order.
