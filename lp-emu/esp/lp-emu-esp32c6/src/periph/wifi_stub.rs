@@ -87,6 +87,14 @@ pub const OVERRIDES: &[(u32, u32, u32, &str)] = &[
     // spins here; esp-emu evidently satisfies it; value chosen so the poll
     // exits.
     (0x00cc, 1 << 8, 1 << 8, "ram_set_chan_freq_sw_start lock flag"),
+    // `SPIN WIFI_MAC+0x4a0 mac = 0x00000000 x10000` from the ROM's
+    // `rom_iq_est_enable` (`0x40005dba`, 30.3 ms): it sets `+0x470` bit 26,
+    // programs `+0x474` (bit 20, a length field, then bits 0 and 1 as
+    // strobes) and loops `lw a5,0x4a0(a4); slli a3,a5,15; bgez a3` — until
+    // **bit 16** reads 1, the IQ-estimate done flag. Blob (via the ROM)
+    // spins here; esp-emu evidently satisfies it; value chosen so the poll
+    // exits.
+    (0x04a0, 1 << 16, 1 << 16, "rom_iq_est_enable done flag"),
 ];
 
 /// The `WIFI_PWR` block's override list; same rule, same shape.
