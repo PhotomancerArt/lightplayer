@@ -384,7 +384,7 @@ impl Riscv32Emulator {
 
             // Handle logging
             if let Some(log) = exec_result.log {
-                let log_with_cycle = log.set_cycle(self.instruction_count);
+                let log_with_cycle = (*log).set_cycle(self.instruction_count);
                 self.log_instruction(log_with_cycle);
             }
 
@@ -727,20 +727,20 @@ impl Riscv32Emulator {
                     return Err(EmulatorError::Trap {
                         code,
                         pc: self.pc,
-                        regs: self.regs,
+                        regs: alloc::boxed::Box::new(self.regs),
                     });
                 }
                 StepResult::Panic(info) => {
                     return Err(EmulatorError::Panic {
                         info,
                         pc: self.pc,
-                        regs: self.regs,
+                        regs: alloc::boxed::Box::new(self.regs),
                     });
                 }
                 StepResult::Oom(info) => {
                     return Err(EmulatorError::Oom {
                         info,
-                        regs: self.regs,
+                        regs: alloc::boxed::Box::new(self.regs),
                     });
                 }
                 StepResult::FuelExhausted(_) => {
@@ -751,7 +751,7 @@ impl Riscv32Emulator {
                         pc: self.pc,
                         instruction: 0,
                         reason: String::from("Unexpected ECALL in run_until_ebreak"),
-                        regs: self.regs,
+                        regs: alloc::boxed::Box::new(self.regs),
                     });
                 }
                 StepResult::Continue => {
@@ -760,7 +760,7 @@ impl Riscv32Emulator {
                 StepResult::ProfileStop => {
                     return Err(EmulatorError::ProfileStopped {
                         pc: self.pc,
-                        regs: self.regs,
+                        regs: alloc::boxed::Box::new(self.regs),
                     });
                 }
             }
@@ -779,7 +779,7 @@ impl Riscv32Emulator {
                         pc: self.pc,
                         instruction: 0,
                         reason: String::from("Unexpected EBREAK in run_until_ecall"),
-                        regs: self.regs,
+                        regs: alloc::boxed::Box::new(self.regs),
                     });
                 }
                 StepResult::Trap(_) => {
@@ -787,20 +787,20 @@ impl Riscv32Emulator {
                         pc: self.pc,
                         instruction: 0,
                         reason: String::from("Unexpected trap in run_until_ecall"),
-                        regs: self.regs,
+                        regs: alloc::boxed::Box::new(self.regs),
                     });
                 }
                 StepResult::Panic(info) => {
                     return Err(EmulatorError::Panic {
                         info,
                         pc: self.pc,
-                        regs: self.regs,
+                        regs: alloc::boxed::Box::new(self.regs),
                     });
                 }
                 StepResult::Oom(info) => {
                     return Err(EmulatorError::Oom {
                         info,
-                        regs: self.regs,
+                        regs: alloc::boxed::Box::new(self.regs),
                     });
                 }
                 StepResult::FuelExhausted(_) => {
@@ -812,7 +812,7 @@ impl Riscv32Emulator {
                 StepResult::ProfileStop => {
                     return Err(EmulatorError::ProfileStopped {
                         pc: self.pc,
-                        regs: self.regs,
+                        regs: alloc::boxed::Box::new(self.regs),
                     });
                 }
             }
@@ -846,27 +846,27 @@ impl Riscv32Emulator {
                         pc: self.pc,
                         instruction: 0,
                         reason: String::from("Unexpected EBREAK in run_until_yield"),
-                        regs: self.regs,
+                        regs: alloc::boxed::Box::new(self.regs),
                     });
                 }
                 StepResult::Trap(code) => {
                     return Err(EmulatorError::Trap {
                         code,
                         pc: self.pc,
-                        regs: self.regs,
+                        regs: alloc::boxed::Box::new(self.regs),
                     });
                 }
                 StepResult::Panic(info) => {
                     return Err(EmulatorError::Panic {
                         info,
                         pc: self.pc,
-                        regs: self.regs,
+                        regs: alloc::boxed::Box::new(self.regs),
                     });
                 }
                 StepResult::Oom(info) => {
                     return Err(EmulatorError::Oom {
                         info,
-                        regs: self.regs,
+                        regs: alloc::boxed::Box::new(self.regs),
                     });
                 }
                 StepResult::FuelExhausted(_) => {
@@ -874,7 +874,7 @@ impl Riscv32Emulator {
                         limit: max_steps,
                         executed: max_steps,
                         pc: self.pc,
-                        regs: self.regs,
+                        regs: alloc::boxed::Box::new(self.regs),
                     });
                 }
                 StepResult::Continue => {
@@ -883,7 +883,7 @@ impl Riscv32Emulator {
                 StepResult::ProfileStop => {
                     return Err(EmulatorError::ProfileStopped {
                         pc: self.pc,
-                        regs: self.regs,
+                        regs: alloc::boxed::Box::new(self.regs),
                     });
                 }
             }

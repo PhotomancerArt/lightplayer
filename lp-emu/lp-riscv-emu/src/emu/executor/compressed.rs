@@ -33,7 +33,7 @@ pub(super) fn decode_execute_compressed<M: LoggingMode, B: Bus>(
             pc,
             instruction: inst_word,
             reason: alloc::format!("Invalid compressed instruction opcode: 0x{opcode:x}"),
-            regs: *regs,
+            regs: alloc::boxed::Box::new(*regs),
         }),
     }
 }
@@ -60,7 +60,7 @@ fn decode_execute_c0<M: LoggingMode, B: Bus>(
                     pc,
                     instruction: inst as u32,
                     reason: alloc::string::String::from("C.ADDI4SPN with nzuimm=0 is reserved"),
-                    regs: *regs,
+                    regs: alloc::boxed::Box::new(*regs),
                 });
             }
             execute_c_addi4spn::<M>(rd, nzuimm as i32, inst as u32, pc, regs)
@@ -91,7 +91,7 @@ fn decode_execute_c0<M: LoggingMode, B: Bus>(
             pc,
             instruction: inst as u32,
             reason: alloc::format!("Unknown C0 instruction: funct3={funct3:03b}"),
-            regs: *regs,
+            regs: alloc::boxed::Box::new(*regs),
         }),
     }
 }
@@ -128,7 +128,7 @@ fn decode_execute_c1<M: LoggingMode, B: Bus>(
                     pc,
                     instruction: inst as u32,
                     reason: alloc::string::String::from("C.LI with rd=x0 is a hint (nop)"),
-                    regs: *regs,
+                    regs: alloc::boxed::Box::new(*regs),
                 });
             }
             let rd_gpr = Gpr::new(rd);
@@ -153,7 +153,7 @@ fn decode_execute_c1<M: LoggingMode, B: Bus>(
                         pc,
                         instruction: inst as u32,
                         reason: alloc::string::String::from("C.ADDI16SP with nzimm=0 is reserved"),
-                        regs: *regs,
+                        regs: alloc::boxed::Box::new(*regs),
                     });
                 }
                 execute_c_addi16sp::<M>(nzimm, inst as u32, pc, regs)
@@ -164,7 +164,7 @@ fn decode_execute_c1<M: LoggingMode, B: Bus>(
                         pc,
                         instruction: inst as u32,
                         reason: alloc::string::String::from("C.LUI with rd=x0 is a hint (nop)"),
-                        regs: *regs,
+                        regs: alloc::boxed::Box::new(*regs),
                     });
                 }
                 let nzimm = sign_extend(((inst >> 7) & 0x20) | ((inst >> 2) & 0x1f), 6);
@@ -173,7 +173,7 @@ fn decode_execute_c1<M: LoggingMode, B: Bus>(
                         pc,
                         instruction: inst as u32,
                         reason: alloc::string::String::from("C.LUI with nzimm=0 is reserved"),
-                        regs: *regs,
+                        regs: alloc::boxed::Box::new(*regs),
                     });
                 }
                 let imm = nzimm << 12;
@@ -221,7 +221,7 @@ fn decode_execute_c1<M: LoggingMode, B: Bus>(
                             reason: alloc::format!(
                                 "Unknown C.MISC_ALU instruction: funct6={funct6:06b}, funct2_low={funct2_low:02b}",
                             ),
-                            regs: *regs,
+                            regs: alloc::boxed::Box::new(*regs),
                         }),
                     }
                 }
@@ -268,7 +268,7 @@ fn decode_execute_c2<M: LoggingMode, B: Bus>(
                     pc,
                     instruction: inst as u32,
                     reason: alloc::string::String::from("C.SLLI with rd=x0 is a hint (nop)"),
-                    regs: *regs,
+                    regs: alloc::boxed::Box::new(*regs),
                 });
             }
             let rd_gpr = Gpr::new(rd);
@@ -283,7 +283,7 @@ fn decode_execute_c2<M: LoggingMode, B: Bus>(
                     pc,
                     instruction: inst as u32,
                     reason: alloc::string::String::from("C.LWSP with rd=x0 is reserved"),
-                    regs: *regs,
+                    regs: alloc::boxed::Box::new(*regs),
                 });
             }
             let rd_gpr = Gpr::new(rd);
@@ -331,7 +331,7 @@ fn decode_execute_c2<M: LoggingMode, B: Bus>(
                     reason: alloc::format!(
                         "Unknown C.MISC_CR instruction: funct4={funct4:04b}, rd_rs1={rd_rs1}, rs2={rs2}",
                     ),
-                    regs: *regs,
+                    regs: alloc::boxed::Box::new(*regs),
                 }),
             }
         }
@@ -347,7 +347,7 @@ fn decode_execute_c2<M: LoggingMode, B: Bus>(
             pc,
             instruction: inst as u32,
             reason: alloc::format!("Unknown C2 instruction: funct3={funct3:03b}"),
-            regs: *regs,
+            regs: alloc::boxed::Box::new(*regs),
         }),
     }
 }
@@ -392,7 +392,7 @@ fn execute_c_addi4spn<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 2,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -441,7 +441,7 @@ fn execute_c_lw<M: LoggingMode, B: Bus>(
         syscall: false,
         class: InstClass::Load,
         inst_size: 2,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -492,7 +492,7 @@ fn execute_c_sw<M: LoggingMode, B: Bus>(
         syscall: false,
         class: InstClass::Store,
         inst_size: 2,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -532,7 +532,7 @@ fn execute_c_addi<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 2,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -563,7 +563,7 @@ fn execute_c_nop<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 2,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -597,7 +597,7 @@ fn execute_c_jal<M: LoggingMode>(
         syscall: false,
         class: InstClass::JalCall,
         inst_size: 2,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -635,7 +635,7 @@ fn execute_c_li<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 2,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -672,7 +672,7 @@ fn execute_c_addi16sp<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 2,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -708,7 +708,7 @@ fn execute_c_lui<M: LoggingMode>(
         syscall: false,
         class: InstClass::Lui,
         inst_size: 2,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -749,7 +749,7 @@ fn execute_c_srli<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 2,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -790,7 +790,7 @@ fn execute_c_srai<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 2,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -830,7 +830,7 @@ fn execute_c_andi<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 2,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -871,7 +871,7 @@ fn execute_c_sub<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 2,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -912,7 +912,7 @@ fn execute_c_xor<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 2,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -953,7 +953,7 @@ fn execute_c_or<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 2,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -994,7 +994,7 @@ fn execute_c_and<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 2,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -1026,7 +1026,7 @@ fn execute_c_j<M: LoggingMode>(
         syscall: false,
         class: InstClass::JalTail,
         inst_size: 2,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -1072,7 +1072,7 @@ fn execute_c_beqz<M: LoggingMode>(
         syscall: false,
         class: branch_class,
         inst_size: 2,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -1118,7 +1118,7 @@ fn execute_c_bnez<M: LoggingMode>(
         syscall: false,
         class: branch_class,
         inst_size: 2,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -1159,7 +1159,7 @@ fn execute_c_slli<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 2,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -1207,7 +1207,7 @@ fn execute_c_lwsp<M: LoggingMode, B: Bus>(
         syscall: false,
         class: InstClass::Load,
         inst_size: 2,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -1245,7 +1245,7 @@ fn execute_c_jr<M: LoggingMode>(
         syscall: false,
         class,
         inst_size: 2,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -1284,7 +1284,7 @@ fn execute_c_mv<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 2,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -1319,7 +1319,7 @@ fn execute_c_jalr<M: LoggingMode>(
         syscall: false,
         class: InstClass::JalrCall,
         inst_size: 2,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -1360,7 +1360,7 @@ fn execute_c_add<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 2,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -1410,7 +1410,7 @@ fn execute_c_swsp<M: LoggingMode, B: Bus>(
         syscall: false,
         class: InstClass::Store,
         inst_size: 2,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -1437,7 +1437,7 @@ fn execute_c_ebreak<M: LoggingMode>(
         syscall: false,
         class: InstClass::System,
         inst_size: 2,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 

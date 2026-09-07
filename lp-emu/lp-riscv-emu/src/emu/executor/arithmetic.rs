@@ -75,7 +75,7 @@ pub(super) fn decode_execute_rtype<M: LoggingMode, B: Bus>(
             reason: alloc::format!(
                 "Unknown R-type instruction: funct3=0x{funct3:x}, funct7=0x{funct7:x}"
             ),
-            regs: *regs,
+            regs: alloc::boxed::Box::new(*regs),
         }),
     }
 }
@@ -114,7 +114,7 @@ fn execute_zexth<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -154,7 +154,7 @@ fn execute_add<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -194,7 +194,7 @@ fn execute_sub<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -234,7 +234,7 @@ fn execute_mul<M: LoggingMode>(
         syscall: false,
         class: InstClass::Mul,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -278,7 +278,7 @@ fn execute_mulh<M: LoggingMode>(
         syscall: false,
         class: InstClass::Mul,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -322,7 +322,7 @@ fn execute_mulhsu<M: LoggingMode>(
         syscall: false,
         class: InstClass::Mul,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -366,7 +366,7 @@ fn execute_mulhu<M: LoggingMode>(
         syscall: false,
         class: InstClass::Mul,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -415,7 +415,7 @@ fn execute_div<M: LoggingMode>(
         syscall: false,
         class: InstClass::DivRem,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -463,7 +463,7 @@ fn execute_divu<M: LoggingMode>(
         syscall: false,
         class: InstClass::DivRem,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -511,7 +511,7 @@ fn execute_rem<M: LoggingMode>(
         syscall: false,
         class: InstClass::DivRem,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -559,7 +559,7 @@ fn execute_remu<M: LoggingMode>(
         syscall: false,
         class: InstClass::DivRem,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -599,7 +599,7 @@ fn execute_slt<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -639,7 +639,7 @@ fn execute_sltu<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -679,7 +679,7 @@ fn execute_xor<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -719,7 +719,7 @@ fn execute_or<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -759,7 +759,7 @@ fn execute_and<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -800,7 +800,7 @@ fn execute_sll<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -841,7 +841,7 @@ fn execute_srl<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -883,7 +883,7 @@ fn execute_sra<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -925,7 +925,7 @@ fn execute_rol<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -967,7 +967,7 @@ fn execute_ror<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -1007,7 +1007,7 @@ fn execute_andn<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -1047,7 +1047,7 @@ fn execute_orn<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -1087,7 +1087,7 @@ fn execute_xnor<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -1127,7 +1127,7 @@ fn execute_min<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -1169,7 +1169,7 @@ fn execute_minu<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -1209,7 +1209,7 @@ fn execute_max<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -1251,7 +1251,7 @@ fn execute_maxu<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -1293,7 +1293,7 @@ fn execute_bclr<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -1334,7 +1334,7 @@ fn execute_bext<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -1376,7 +1376,7 @@ fn execute_binv<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -1418,7 +1418,7 @@ fn execute_bset<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -1458,7 +1458,7 @@ fn execute_sh1add<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -1498,7 +1498,7 @@ fn execute_sh2add<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -1538,7 +1538,7 @@ fn execute_sh3add<M: LoggingMode>(
         syscall: false,
         class: InstClass::Alu,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -1587,7 +1587,9 @@ mod tests {
 
         assert_eq!(regs[3], 30);
         assert!(result.log.is_some());
-        if let Some(InstLog::Arithmetic { rd_new, .. }) = result.log {
+        if let Some(log) = result.log
+            && let InstLog::Arithmetic { rd_new, .. } = *log
+        {
             assert_eq!(rd_new, 30);
         }
     }

@@ -36,7 +36,7 @@ pub(super) fn decode_execute_load<M: LoggingMode, B: Bus>(
             reason: alloc::format!(
                 "Invalid load instruction: funct3=0x{funct3:x} (reserved on RV32)"
             ),
-            regs: *regs,
+            regs: alloc::boxed::Box::new(*regs),
         }),
     }
 }
@@ -63,7 +63,7 @@ pub(super) fn decode_execute_store<M: LoggingMode, B: Bus>(
             pc,
             instruction: inst_word,
             reason: alloc::format!("Unknown store instruction: funct3=0x{funct3:x}"),
-            regs: *regs,
+            regs: alloc::boxed::Box::new(*regs),
         }),
     }
 }
@@ -113,7 +113,7 @@ fn execute_lb<M: LoggingMode, B: Bus>(
         syscall: false,
         class: InstClass::Load,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -162,7 +162,7 @@ fn execute_lh<M: LoggingMode, B: Bus>(
         syscall: false,
         class: InstClass::Load,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -210,7 +210,7 @@ fn execute_lw<M: LoggingMode, B: Bus>(
         syscall: false,
         class: InstClass::Load,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -259,7 +259,7 @@ fn execute_lbu<M: LoggingMode, B: Bus>(
         syscall: false,
         class: InstClass::Load,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -308,7 +308,7 @@ fn execute_lhu<M: LoggingMode, B: Bus>(
         syscall: false,
         class: InstClass::Load,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -360,7 +360,7 @@ fn execute_sb<M: LoggingMode, B: Bus>(
         syscall: false,
         class: InstClass::Store,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -412,7 +412,7 @@ fn execute_sh<M: LoggingMode, B: Bus>(
         syscall: false,
         class: InstClass::Store,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -463,7 +463,7 @@ fn execute_sw<M: LoggingMode, B: Bus>(
         syscall: false,
         class: InstClass::Store,
         inst_size: 4,
-        log,
+        log: log.map(alloc::boxed::Box::new),
     })
 }
 
@@ -511,7 +511,9 @@ mod tests {
 
         assert_eq!(regs[3], 0x12345678);
         assert!(result.log.is_some());
-        if let Some(InstLog::Load { mem_val, .. }) = result.log {
+        if let Some(log) = result.log
+            && let InstLog::Load { mem_val, .. } = *log
+        {
             assert_eq!(mem_val, 0x12345678);
         }
     }

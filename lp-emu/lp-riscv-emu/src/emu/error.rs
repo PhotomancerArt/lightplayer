@@ -2,6 +2,7 @@
 
 extern crate alloc;
 
+use alloc::boxed::Box;
 use alloc::string::String;
 
 use lp_riscv_inst::Gpr;
@@ -26,7 +27,7 @@ pub enum EmulatorError {
         limit: u64,
         executed: u64,
         pc: u32,
-        regs: [i32; 32],
+        regs: Box<[i32; 32]>,
     },
     /// Invalid memory access (out of bounds).
     InvalidMemoryAccess {
@@ -34,21 +35,21 @@ pub enum EmulatorError {
         size: usize,
         kind: MemoryAccessKind,
         pc: u32,
-        regs: [i32; 32],
+        regs: Box<[i32; 32]>,
     },
     /// Invalid instruction encoding.
     InvalidInstruction {
         pc: u32,
         instruction: u32,
         reason: String,
-        regs: [i32; 32],
+        regs: Box<[i32; 32]>,
     },
     /// Unaligned memory access.
     UnalignedAccess {
         address: u32,
         alignment: usize,
         pc: u32,
-        regs: [i32; 32],
+        regs: Box<[i32; 32]>,
     },
     /// A hardware watchpoint fired before the access. The user-mode
     /// emulator's `Memory` never returns this (it has no watchpoints to
@@ -58,14 +59,14 @@ pub enum EmulatorError {
         kind: MemoryAccessKind,
         slot: u8,
         pc: u32,
-        regs: [i32; 32],
+        regs: Box<[i32; 32]>,
     },
     /// Unknown or unsupported opcode.
     UnknownOpcode {
         opcode: u8,
         pc: u32,
         instruction: u32,
-        regs: [i32; 32],
+        regs: Box<[i32; 32]>,
     },
     /// Invalid register access.
     InvalidRegister { reg: Gpr, pc: u32, reason: String },
@@ -73,18 +74,18 @@ pub enum EmulatorError {
     Trap {
         code: TrapCode,
         pc: u32,
-        regs: [i32; 32],
+        regs: Box<[i32; 32]>,
     },
     /// Panic occurred in the emulated program.
     Panic {
         info: lp_emu_core::PanicInfo,
         pc: u32,
-        regs: [i32; 32],
+        regs: Box<[i32; 32]>,
     },
     /// Guest ran out of memory.
     Oom {
         info: lp_emu_core::OomInfo,
-        regs: [i32; 32],
+        regs: Box<[i32; 32]>,
     },
     /// Profile gate requested stop while the emulator was inside a
     /// `run_until_*` helper that expected to reach a syscall first.
@@ -94,7 +95,7 @@ pub enum EmulatorError {
     /// further responses will arrive", not as a guest crash. Distinct
     /// from `InvalidInstruction` so callers can suppress noisy state
     /// dumps and avoid logging it as an error.
-    ProfileStopped { pc: u32, regs: [i32; 32] },
+    ProfileStopped { pc: u32, regs: Box<[i32; 32]> },
 }
 
 impl EmulatorError {
@@ -113,13 +114,13 @@ impl EmulatorError {
                 size,
                 kind,
                 pc,
-                regs,
+                regs: Box::new(regs),
             },
             MemoryError::Unaligned { address, alignment } => EmulatorError::UnalignedAccess {
                 address,
                 alignment,
                 pc,
-                regs,
+                regs: Box::new(regs),
             },
             MemoryError::Watchpoint {
                 address,
@@ -130,7 +131,7 @@ impl EmulatorError {
                 kind,
                 slot,
                 pc,
-                regs,
+                regs: Box::new(regs),
             },
         }
     }

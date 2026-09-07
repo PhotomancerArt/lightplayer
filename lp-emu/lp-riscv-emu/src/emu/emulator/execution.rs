@@ -91,7 +91,7 @@ impl Riscv32Emulator {
 
         // Log instruction with cycle count (only if logging is enabled)
         if let Some(log) = exec_result.log {
-            let log_with_cycle = log.set_cycle(self.instruction_count);
+            let log_with_cycle = (*log).set_cycle(self.instruction_count);
             self.log_instruction(log_with_cycle);
         }
 
