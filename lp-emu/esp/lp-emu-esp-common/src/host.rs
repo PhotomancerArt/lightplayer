@@ -309,6 +309,12 @@ impl ScriptedSource {
     pub fn remaining(&self) -> usize {
         self.chunks.iter().map(|(_, b)| b.len()).sum()
     }
+
+    /// Chunks still undelivered — how many separate `<ms> <bytes>` entries
+    /// of a script are left, which is what a load report counts.
+    pub fn chunks(&self) -> usize {
+        self.chunks.len()
+    }
 }
 
 impl ByteSource for ScriptedSource {

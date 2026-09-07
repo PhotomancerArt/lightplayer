@@ -16,9 +16,10 @@ use std::time::Duration;
 
 use lp_emu_esp_common::{RegGrade, ScriptedSource};
 use lp_emu_esp32c6::loader::EfuseIdentity;
+use lp_emu_esp32c6::control::parse_usb_script;
 use lp_emu_esp32c6::machine::{
     AppSource, Esp32C6Builder, Esp32C6Machine, Outcome, RomSource, StopCondition, TimeGrade,
-    Uart0Sink, UsbHost, UsbSjSink,
+    Uart0Sink, UsbHost, UsbSjDrain, UsbSjSink,
 };
 use lp_emu_esp32c6::memmap;
 
@@ -36,7 +37,9 @@ OPTIONS:
     --timeout <5s|1500ms|900us>
                             EMULATED time to run for [100ms]
     --wall-timeout <s>      host-clock safety net; exits 4
-    --exit-on <substr>      stop when this appears on UART0
+    --exit-on <substr>      stop at the end of the line this appears on, on
+                            EITHER console (UART0 or the USB link — the
+                            shipped image's console is the USB one)
     --uart0 stdout|file:<path>|tcp:<host:port>
                             where UART0's bytes go; tcp: LISTENS, one client at a
                             time, and the client's bytes are UART0's RX (not
@@ -49,10 +52,35 @@ OPTIONS:
                             the USB-Serial-JTAG host at power-on: no cable
                             (P6's machine), a host with the port open and
                             draining, or a host with the port closed [absent]
-    --usb-sj stderr|file:<path>
+    --usb-sj stderr|file:<path>|tcp:<host:port>
                             where the bytes a USB host RECEIVED go — IN
                             packets a draining host took [kept in memory,
-                            summarised at exit]
+                            summarised at exit]. tcp: LISTENS, one client at
+                            a time, and the client's bytes are the OUT
+                            endpoint's source: `lp-cli … serial:tcp://<addr>`
+                            connects to it (not deterministic — wall clock
+                            decides which cycle a byte lands on)
+    --usb-sj-drain auto|manual
+                            whether a client on that socket means an
+                            application opened the port: auto couples
+                            connect/disconnect to open/close, manual leaves
+                            both to the control channel [auto]. A cable is
+                            never implied — attach/detach are control
+                            commands
+    --control tcp:<host:port>
+                            LISTEN for the host control channel: one line
+                            per command, one reply per command, in the
+                            scripted fake device's vocabulary (attach,
+                            detach, open, close, dtr, rts, signals, reset,
+                            download-mode, state, usb-write). Not the wire:
+                            no M! frame is ever sent or expected here.
+                            Protocol: lp-emu/esp/README.md
+    --usb-script <file>     scripted host input on the USB link,
+                            deterministic: --uart0-script's grammar plus the
+                            control words above, one entry per line
+                            (`0 attach`, `1500 \"M!{...}\\n\"`, `6000 detach`,
+                            `0 wait 500`). Byte lines feed the OUT endpoint;
+                            file order is wire order
     --usb-sj-tried stderr|file:<path>
                             the observation stream: bytes the guest handed to
                             the IN endpoint that no host took (pushed with no
@@ -110,6 +138,9 @@ struct Args {
     usb_sj: UsbSjSink,
     usb_sj_tried: UsbSjSink,
     usb_host: UsbHost,
+    usb_sj_drain: UsbSjDrain,
+    usb_script: Option<PathBuf>,
+    control: Option<String>,
     efuse: EfuseIdentity,
     seed: u64,
     trace: bool,
@@ -140,7 +171,25 @@ fn run() -> Result<ExitCode, String> {
         .uart0(args.uart0.clone())
         .usb_sj(args.usb_sj.clone())
         .usb_sj_tried(args.usb_sj_tried.clone())
-        .usb_host(args.usb_host);
+        .usb_host(args.usb_host)
+        .usb_sj_drain(args.usb_sj_drain);
+
+    if let Some(addr) = args.control.clone() {
+        builder = builder.control(addr);
+    }
+    if let Some(path) = &args.usb_script {
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| format!("reading {}: {e}", path.display()))?;
+        let script = parse_usb_script(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+        eprintln!(
+            "usb script: {} byte(s) of host input in {} chunk(s) and {} control command(s)",
+            script.bytes.remaining(),
+            script.bytes.chunks(),
+            script.commands.len()
+        );
+        builder = builder.usb_script(script.commands);
+        builder = builder.usb_sj_source(Box::new(script.bytes));
+    }
 
     if let Some(rom) = args.rom.clone() {
         builder = builder.rom(RomSource::Path(rom));
@@ -238,6 +287,16 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                     format!("--usb-host `{text}`: expected absent, attached or attached-idle")
                 })?;
             }
+            "--usb-sj-drain" => {
+                let text = value("--usb-sj-drain")?;
+                args.usb_sj_drain = UsbSjDrain::parse(&text)
+                    .ok_or_else(|| format!("--usb-sj-drain `{text}`: expected auto or manual"))?;
+            }
+            "--usb-script" => args.usb_script = Some(value("--usb-script")?.into()),
+            "--control" => {
+                let text = value("--control")?;
+                args.control = Some(parse_control(&text)?);
+            }
             "--strict-grade" => {
                 let text = value("--strict-grade")?;
                 args.strict_grade = Some(RegGrade::parse(&text).ok_or_else(|| {
@@ -321,10 +380,31 @@ fn parse_usb_sj(text: &str) -> Result<UsbSjSink, String> {
         "memory" => Ok(UsbSjSink::Memory),
         other => match other.split_once(':') {
             Some(("file", path)) => Ok(UsbSjSink::File(path.into())),
+            Some(("tcp", addr)) if addr.contains(':') => Ok(UsbSjSink::Tcp(addr.to_string())),
+            Some(("tcp", addr)) => Err(format!(
+                "--usb-sj tcp:{addr}: write tcp:<host:port>, e.g. tcp:127.0.0.1:5556"
+            )),
             _ => Err(format!(
-                "`{other}` is not a USB-SJ destination (stderr, memory, file:<path>)"
+                "`{other}` is not a USB-SJ destination (stderr, memory, file:<path>, \
+                 tcp:<host:port>)"
             )),
         },
+    }
+}
+
+/// `--control tcp:<host:port>`. Only `tcp:` exists: a control channel with
+/// nobody on the other end is a flag with no effect, and the scripted form
+/// (`--usb-script`) is the file-shaped way to say the same thing.
+fn parse_control(text: &str) -> Result<String, String> {
+    match text.split_once(':') {
+        Some(("tcp", addr)) if addr.contains(':') => Ok(addr.to_string()),
+        Some(("tcp", addr)) => Err(format!(
+            "--control tcp:{addr}: write tcp:<host:port>, e.g. tcp:127.0.0.1:5557"
+        )),
+        _ => Err(format!(
+            "`{text}` is not a control channel (tcp:<host:port>; --usb-script is the \
+             deterministic form)"
+        )),
     }
 }
 
@@ -526,10 +606,32 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
         }
     );
     eprintln!(
-        "usb-sj: host {} at power-on; {} bytes reached the host",
+        "usb-sj: host {} at power-on; {} bytes reached the host{}",
         machine.usb_host(),
-        machine.usb_sj().len()
+        machine.usb_sj().len(),
+        match machine.usb_sj_tcp() {
+            Some(tcp) => format!(
+                " ({} listened, {} client(s) attached)",
+                tcp.local_addr(),
+                tcp.clients_seen()
+            ),
+            None => String::new(),
+        }
     );
+    if let Some(tcp) = machine.control_tcp() {
+        eprintln!(
+            "control: {} listened, {} client(s) attached, {} command(s) applied",
+            tcp.local_addr(),
+            tcp.clients_seen(),
+            machine.control_lines()
+        );
+    } else if machine.control_lines() > 0 || machine.scripted_commands_left() > 0 {
+        eprintln!(
+            "control: {} scripted command(s) applied, {} never came due",
+            machine.control_lines(),
+            machine.scripted_commands_left()
+        );
+    }
     let tried = machine.usb_sj_tried();
     if !tried.is_empty() {
         eprintln!(
@@ -713,6 +815,37 @@ mod tests {
         assert_eq!(parse(vec![]).unwrap().usb_host, UsbHost::Absent);
         assert!(parse(vec!["--usb-host".into(), "draining".into()]).is_err());
         assert!(parse(vec!["--strict-grade".into(), "strict".into()]).is_err());
+    }
+
+    #[test]
+    fn the_two_listeners_and_the_coupling_flag_parse_the_way_the_usage_spells_them() {
+        let a = parse(vec![
+            "--usb-sj".into(),
+            "tcp:127.0.0.1:5556".into(),
+            "--control".into(),
+            "tcp:127.0.0.1:5557".into(),
+            "--usb-sj-drain".into(),
+            "manual".into(),
+            "--usb-script".into(),
+            "s.txt".into(),
+        ])
+        .unwrap();
+        assert!(matches!(a.usb_sj, UsbSjSink::Tcp(addr) if addr == "127.0.0.1:5556"));
+        assert_eq!(a.control.as_deref(), Some("127.0.0.1:5557"));
+        assert_eq!(a.usb_sj_drain, UsbSjDrain::Manual);
+        assert_eq!(a.usb_script, Some("s.txt".into()));
+
+        // The default is the coupling every host program expects.
+        assert_eq!(parse(vec![]).unwrap().usb_sj_drain, UsbSjDrain::Auto);
+        assert!(parse(vec![]).unwrap().control.is_none());
+
+        // A bare port is refused on both sockets, as it is on --uart0.
+        assert!(parse(vec!["--usb-sj".into(), "tcp:5556".into()]).is_err());
+        assert!(parse(vec!["--control".into(), "tcp:5557".into()]).is_err());
+        // The control channel has no in-memory form: it would be a flag with
+        // no effect, and --usb-script is the file-shaped way to say it.
+        assert!(parse(vec!["--control".into(), "memory".into()]).is_err());
+        assert!(parse(vec!["--usb-sj-drain".into(), "always".into()]).is_err());
     }
 
     #[test]

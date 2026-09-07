@@ -50,9 +50,11 @@ use crate::memmap;
 
 /// One command on the control channel.
 ///
-/// [`Bytes`](ControlCommand::Bytes) and [`Wait`](ControlCommand::Wait) are
-/// the scripted form's own: a socket client sends bytes on the byte socket
-/// and waits by waiting.
+/// [`Wait`](ControlCommand::Wait) is the scripted form's own — a socket
+/// client waits by waiting — and the parser consumes it rather than handing
+/// it on. Host **bytes** never appear here either: a script's byte lines
+/// become [`UsbScript::bytes`], and a socket client writes them to the byte
+/// socket.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ControlCommand {
     /// The cable goes in: bus reset, SOF starts, the port is closed.
@@ -80,9 +82,6 @@ pub enum ControlCommand {
     UsbWrite(Vec<u8>),
     /// Scripted form only: shift every later line by this many milliseconds.
     Wait(u64),
-    /// Scripted form only: host → device bytes on the OUT path, at this
-    /// line's millisecond.
-    Bytes(Vec<u8>),
 }
 
 impl ControlCommand {
@@ -109,7 +108,6 @@ impl ControlCommand {
             ControlCommand::State => "state",
             ControlCommand::UsbWrite(_) => "usb-write",
             ControlCommand::Wait(_) => "wait",
-            ControlCommand::Bytes(_) => "bytes",
         }
     }
 
