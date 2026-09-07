@@ -279,7 +279,11 @@ mod tests {
         sb.write(w, WDTWPROTECT, WDT_WKEY);
         sb.write(w, WDTCONFIG1, hold);
         // wdt_en, stg0 = ResetSystem(4), reset lengths 7/7, pause_in_slp.
-        sb.write(w, WDTCONFIG0, WDT_EN | (4 << STG0_SHIFT) | (7 << 16) | (7 << 13) | (1 << 9));
+        sb.write(
+            w,
+            WDTCONFIG0,
+            WDT_EN | (4 << STG0_SHIFT) | (7 << 16) | (7 << 13) | (1 << 9),
+        );
         sb.write(w, WDTWPROTECT, 0);
     }
 

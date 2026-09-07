@@ -1021,7 +1021,8 @@ impl Bus for SocBus {
                 ),
                 None => alloc::format!(
                     "cyc={} pc=0x{:08x} WATCHPOINT slot={slot} disarmed",
-                    self.now, self.pc
+                    self.now,
+                    self.pc
                 ),
             };
             self.trace.note(&line);

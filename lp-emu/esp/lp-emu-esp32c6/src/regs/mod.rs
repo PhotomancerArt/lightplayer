@@ -163,7 +163,10 @@ mod tests {
     #[test]
     fn the_arrays_the_discovery_counts_are_fully_expanded() {
         let count = |t: &lp_emu_esp_common::RegNames, prefix: &str| {
-            t.entries.iter().filter(|(_, n)| n.starts_with(prefix)).count()
+            t.entries
+                .iter()
+                .filter(|(_, n)| n.starts_with(prefix))
+                .count()
         };
         assert_eq!(count(&PLIC_MX, "mxint") - 5, 32, "32 mxintN_pri"); // + enable/type/clear/thresh/claim
         assert_eq!(count(&INTPRI, "cpu_int_pri"), 32);

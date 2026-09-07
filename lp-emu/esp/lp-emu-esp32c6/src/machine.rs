@@ -223,10 +223,7 @@ pub enum Outcome {
     /// expired with a reset action. The chip would reboot; the emulator
     /// reports it (M7 owns the boot chain). Exit code 2, like a fault —
     /// on silicon this is `rst:0x10 (RTCWDT_RTC_RST)` in the boot log.
-    Reset {
-        cycle: Cycles,
-        source: &'static str,
-    },
+    Reset { cycle: Cycles, source: &'static str },
     /// The wall-clock safety net fired. The only non-deterministic outcome,
     /// and it can only end a run.
     WallTimeout { cycle: Cycles },
@@ -1093,8 +1090,14 @@ mod tests {
             .iter()
             .filter(|d| !names.contains(d))
             .collect();
-        assert!(missing.is_empty(), "declared but not registered: {missing:?}");
-        assert!(matches!(m.bus.matrix().as_any().downcast_ref::<Esp32C6IntMatrix>(), Some(_)));
+        assert!(
+            missing.is_empty(),
+            "declared but not registered: {missing:?}"
+        );
+        assert!(matches!(
+            m.bus.matrix().as_any().downcast_ref::<Esp32C6IntMatrix>(),
+            Some(_)
+        ));
 
         let bare = Esp32C6Builder::bare().build().unwrap();
         assert_eq!(bare.bus.peripheral_count(), 0);
@@ -1122,11 +1125,19 @@ mod tests {
         let base = memmap::periph::LP_WDT;
         m.bus.write_word(base + 0x18, 0x50D8_3AA1).unwrap();
         m.bus.write_word(base + 0x04, 1).unwrap();
-        m.bus.write_word(base + 0x00, (1u32 << 31 | 4 << 28) as i32).unwrap();
+        m.bus
+            .write_word(base + 0x00, (1u32 << 31 | 4 << 28) as i32)
+            .unwrap();
         m.bus.write_word(base + 0x18, 0).unwrap();
         let out = m.run_until(&StopCondition::after_micros(10_000));
         assert!(
-            matches!(out, Outcome::Reset { source: "LP_WDT stage 0 (ResetSystem)", .. }),
+            matches!(
+                out,
+                Outcome::Reset {
+                    source: "LP_WDT stage 0 (ResetSystem)",
+                    ..
+                }
+            ),
             "{out:?}"
         );
     }

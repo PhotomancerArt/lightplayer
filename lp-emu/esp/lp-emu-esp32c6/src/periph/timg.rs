@@ -183,7 +183,8 @@ impl Timg {
             return self.base_ticks;
         }
         let delta = u128::from(now.saturating_sub(self.base_cycle));
-        let ticks = delta * u128::from(XTAL_HZ) / (u128::from(self.divider()) * u128::from(memmap::CPU_HZ));
+        let ticks =
+            delta * u128::from(XTAL_HZ) / (u128::from(self.divider()) * u128::from(memmap::CPU_HZ));
         (self.base_ticks + ticks as u64) & COUNTER_MASK
     }
 
@@ -221,7 +222,8 @@ impl Timg {
         let num = ticks * u128::from(self.divider()) * u128::from(memmap::CPU_HZ);
         let den = u128::from(XTAL_HZ);
         let cycles = num.div_ceil(den) as u64;
-        cx.sched.schedule_at(self.base_cycle.saturating_add(cycles), ev);
+        cx.sched
+            .schedule_at(self.base_cycle.saturating_add(cycles), ev);
     }
 
     fn write_config(&mut self, value: u32, cx: &mut BusCx<'_>) {
@@ -229,7 +231,10 @@ impl Timg {
         let mut new = value;
         if new & CFG_INCREASE == 0 && !self.warned_decrement {
             self.warned_decrement = true;
-            log::warn!("{}: t0config.increase cleared; decrementing mode is not modelled", self.name);
+            log::warn!(
+                "{}: t0config.increase cleared; decrementing mode is not modelled",
+                self.name
+            );
         }
         if (old ^ new) & CFG_EN != 0 {
             if new & CFG_EN == 0 {

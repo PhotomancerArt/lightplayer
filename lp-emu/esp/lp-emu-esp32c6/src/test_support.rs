@@ -15,14 +15,17 @@
 //!    `ESP32C6_SERVER`. `LP_EMU_C6_ELF` with no slug is accepted as a
 //!    fallback for the shipped set.
 //! 2. This crate's own copy, `target/lp-emu-c6/<SLUG>/fw-esp32c6`, left by
-//!    an earlier build through step 4.
-//! 3. For the **shipped** set only: the conventional target path, if the
-//!    file is already there. (Every feature set builds to the same path,
-//!    so for any other set the conventional file cannot be trusted to be
-//!    the one asked for.)
-//! 4. `LP_EMU_BUILD_FW=1` — and only then — run the build, and copy the
+//!    an earlier build through step 3.
+//! 3. `LP_EMU_BUILD_FW=1` — and only then — run the build, and copy the
 //!    result to the per-slug path of step 2.
-//! 5. Otherwise `None`, and the caller prints a skip notice.
+//! 4. Otherwise `None`, and the caller prints a skip notice.
+//!
+//! The conventional `target/<triple>/release-esp32/fw-esp32c6` is **never**
+//! trusted: every feature set builds to that one path, so whatever is there
+//! is whatever was built last — P5 found the shipped-image test running
+//! against a no-radio build that way. (`cargo build` is cheap when the
+//! artifact is up to date, so step 3 costs a fraction of a second when
+//! nothing changed.)
 //!
 //! `just test-emu-c6` is what sets the environment; a boot test is
 //! `#[ignore]`d so a bare `cargo test` never reaches it either way.
@@ -52,8 +55,19 @@ impl FwImage {
         default_features: true,
     };
 
-    /// The P5 gate image: `--no-default-features --features esp32c6,server`.
+    /// The P5 gate image: `--no-default-features --features
+    /// esp32c6,server,memory_fs`. `memory_fs` is the firmware's own "no
+    /// flash" switch: without it the image reads the boot-control sector
+    /// and mounts `lpfs` from flash at boot, which is the SPI flash
+    /// controller — M4. See [`FwImage::NO_RADIO_FLASH`].
     pub const NO_RADIO: FwImage = FwImage {
+        features: &["esp32c6", "server", "memory_fs"],
+        default_features: false,
+    };
+
+    /// The brief's `esp32c6,server` image, which reads flash at boot and
+    /// spins on `SPI1.cmd` until M4. Kept so that fact stays pinned.
+    pub const NO_RADIO_FLASH: FwImage = FwImage {
         features: &["esp32c6", "server"],
         default_features: false,
     };
@@ -156,9 +170,6 @@ pub fn fw_esp32c6_image(image: &FwImage) -> Result<PathBuf, String> {
         return Ok(cached);
     }
     let conventional = conventional_path(&root);
-    if image.default_features && conventional.is_file() {
-        return Ok(conventional);
-    }
 
     if std::env::var("LP_EMU_BUILD_FW").as_deref() != Ok("1") {
         return Err(format!(
@@ -169,8 +180,13 @@ pub fn fw_esp32c6_image(image: &FwImage) -> Result<PathBuf, String> {
     }
 
     let mut cmd = Command::new("cargo");
-    cmd.current_dir(root.join("lp-fw/fw-esp32c6"))
-        .args(["build", "--target", FW_TARGET, "--profile", FW_PROFILE]);
+    cmd.current_dir(root.join("lp-fw/fw-esp32c6")).args([
+        "build",
+        "--target",
+        FW_TARGET,
+        "--profile",
+        FW_PROFILE,
+    ]);
     if !image.default_features {
         cmd.arg("--no-default-features");
     }
@@ -209,7 +225,8 @@ mod tests {
         assert_eq!(slug(SHIPPED_FEATURES), "ESP32C6_SERVER_RADIO");
         assert_eq!(slug(&["esp32c6"]), "ESP32C6");
         assert_eq!(slug(&["a-b"]), "A_B");
-        assert_eq!(FwImage::NO_RADIO.slug(), "ESP32C6_SERVER");
+        assert_eq!(FwImage::NO_RADIO.slug(), "ESP32C6_SERVER_MEMORY_FS");
+        assert_eq!(FwImage::NO_RADIO_FLASH.slug(), "ESP32C6_SERVER");
         assert_eq!(FwImage::SHIPPED.slug(), "ESP32C6_SERVER_RADIO");
     }
 
@@ -220,7 +237,7 @@ mod tests {
         assert!(conventional_path(&root).ends_with("fw-esp32c6"));
         assert!(
             cached_path(&root, &FwImage::NO_RADIO)
-                .ends_with("lp-emu-c6/ESP32C6_SERVER/fw-esp32c6")
+                .ends_with("lp-emu-c6/ESP32C6_SERVER_MEMORY_FS/fw-esp32c6")
         );
     }
 }

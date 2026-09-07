@@ -158,20 +158,88 @@ globals, the `rst:0x1 (POWERON)` banner, early RNG entropy, real eFuse, and
 the derived reset cause. That list is the seed for M7's cross-check, and it is
 worth more than the code around it.
 
-## Peripherals — there are none
+## Peripherals
 
-Not one. The phase gate is the first access nothing claims, and a machine that
-had guessed at a few register blocks would have moved that fault somewhere
-less informative. The interrupt matrix (`intmatrix.rs`) is likewise a seam
-with no semantics behind it. P5 fills both in.
+`periph/` is the boot set: what the no-radio image
+(`--no-default-features --features esp32c6,server,memory_fs`) touches between
+`_start` and the esp-rtos idle loop, with every register access either
+**modelled** (a real type with behaviour and scheduled events) or **accepted**
+(a `RegFile` that remembers writes, with a short table of pinned bits, each
+citing the esp-hal line that reads or spins on it). Everything else stays
+unmapped on purpose, so a strict run stops on the first block a later
+milestone owns.
 
-What P4 does own is the *order* they will be registered in.
-`event_id` packs a peripheral's index into the scheduler's event tags, and the
-index is insertion order — so re-sorting the registrations (by base address,
-say, for tidiness) would silently re-point every already-scheduled event.
-`PERIPHERAL_REGISTRATION_ORDER` is that order written down, and the builder
-refuses a sequence that is not a subsequence of it. Adding a block is an edit
-to that list, which a reviewer sees, rather than a call site nobody diffs.
+| Block | Base | Grade | What is real |
+|---|---|---|---|
+| `INTERRUPT_CORE0` | `0x6001_0000` | modelled | `core_0_intr_map[0..77]` (31 = disabled), live `core_0_intr_status[0..3]` — a view into the matrix |
+| `PLIC_MX` | `0x2000_1000` | modelled | `enable`, `type`, `clear` (pulse, reads 0), `pri[0..32]` (4 bits), `thresh` (8 bits, resets **1**), `emip_status`; fires iff `enable && pri >= thresh`; ties → higher number (*modeled*); edge type stored, modelled as level |
+| `INTPRI` | `0x600C_5000` | modelled | `cpu_intr_from_cpu[0..4]` bit 0 = level of source 22+n; rest accept |
+| `SYSTIMER` | `0x6000_A000` | modelled | two 52-bit units at cycles/10 (16 MHz), `unit_op.update`/`value_valid`, three comparators armed by `comp_load`, period mode, `int_*`; sources 57..59 |
+| `TIMG0` | `0x6000_8000` | modelled | **the esp-rtos tick**: T0 at XTAL/2 (*modeled*: esp-hal's default source and prescaler reading), `update` pulse, alarm as a scheduled event, `alarm_en` self-clearing, auto-reload; RTC calibration as a timed event (value *modeled* `40e6·max/136e3`); MWDT accepted behind its key, arming leaves a `WDT ARMED` note |
+| `TIMG1` | `0x6000_9000` | modelled | same type, sources 54/56; the firmware only disables its WDT |
+| `LP_WDT` | `0x600B_1C00` | modelled | RWDT: key-gated config/feed, stage-0 expiry as a scheduled event at `hold·2/136 kHz` (*modeled* from esp-hal's `>> 1` shift); a reset action ends the run with `Outcome::Reset`; interrupt action drives source 18; SWD accepted; `+0x54` named `reserved_054` |
+| `EFUSE` | `0x600B_0800` | modelled | memory seeded from `--efuse-mac`/`--efuse-rev` in esp-hal's byte order (`rd_mac_spi_sys_0/1/3`) |
+| `RNG` | `0x600B_2800` | modelled | `rng_data` (+0x08) = xorshift64\* from `--seed`; deterministic by design; other `LP_PERI` offsets accept |
+| `LP_CLKRST` | `0x600B_0400` | accept | `reset_cause` seeded 1 (POWERON) — the mask ROM's `rtc_get_reset_reason` reads it; `lp_clk_conf` = RC_SLOW |
+| `PCR` | `0x6009_6000` | accept | `sysclk_conf.clk_xtal_freq` pinned 40; `cpu_waiti_conf.cpu_wait_mode_force_on` pinned 0; `timergroup.timer_clk_conf` reset = XTAL |
+| `I2C_ANA_MST` | `0x600A_F800` | accept | `ana_conf0.cal_done` pinned 1; `i2c_ctrl(0/1).busy` pinned 0; `ana_conf2` reset 0 (master 1) |
+| `LP_I2C_ANA_MST` | `0x600B_2400` | accept | `i2c0_ctrl.I2C0_BUSY` (bit 25) pinned 0 — the bench's fourth spin site |
+| `ASSIST_DEBUG` | `0x600C_2000` | accept | `cpu0.debug_mode` pinned 0 (no debugger: watchpoints arm, `wfi` runs) |
+| `GPIO` | `0x6009_1000` | accept | `in_` and `pcpu_int` pinned 0; `enable`/`out` writes are trace lines (pins: M5) |
+| `IO_MUX` | `0x6009_0000` | accept | all 31 pads at reset `0x0800` |
+| `PMU`, `LP_AON`, `LP_APM`, `LP_APM0`, `HP_APM`, `MODEM_SYSCON`, `MODEM_LPCON`, `APB_SARADC`, `HP_SYS`, `TEE`, `LP_TEE`, `LP_IO`, `LP_TIMER`, `EXTMEM` | — | accept | written by `esp_hal::init`, read back as written; `LP_AON.store1` carries the calibration value |
+| `UART0`, `UART1` | `0x6000_0000/1000` | accept | the FIFO, thresholds and `RXFIFO_TOUT` are P6 |
+| `USB_DEVICE` | `0x6000_F000` | accept | reads 0: "host absent, FIFO full" — esp-println spins 50,000 iterations once and then drops output; the honest model is P6/M6 |
+| `SPI0`, `SPI1` | `0x6000_2000/3000` | accept | a flash access spins on `SPI1.cmd` (the `SPIN` line names it) until M4 |
+| `RMT` | `0x6000_6000` | accept | `Rmt::new` runs in every image; channels, blocks and the WS281x waveform are M5 |
+| radio window | `0x600A_0000..9800` | **unmapped** | `IEEE802154` / WiFi MAC/BB — P6's stub; the shipped image's strict run stops here |
+
+Two values worth repeating because they are *modeled*, not measured: the RTC
+slow clock is taken as 136 kHz (so the calibration value is 301,176 for 1,024
+cycles, and the RWDT's 30 s boot timeout is 30 s), and a comparator or alarm
+whose target is already past fires immediately rather than never.
+
+The tick is TIMG0 T0, not a SYSTIMER comparator: `esp_rtos::start` is handed
+`timg0.timer0` (`board/esp32c6/init.rs`). esp-rtos 0.3.0's tick is one-shot —
+`arm_next_wakeup` programs the next wakeup and `timer_tick_handler` re-arms —
+so there is no periodic 10 ms tick: the gaps between ticks are the sleeps the
+firmware asked for, up to 250 ms while every task sleeps.
+
+The registration *order* is a contract. `event_id` packs a peripheral's index
+into the scheduler's event tags, and the index is insertion order — so
+re-sorting the registrations would silently re-point every already-scheduled
+event. `PERIPHERAL_REGISTRATION_ORDER` is that order written down, the builder
+refuses a sequence that is not a subsequence of it, and `periph::boot_set`
+registers exactly it. `Esp32C6Builder::bare()` builds the map and the ROM with
+no peripherals at all, for tests that bring their own.
+
+### Two seams the peripherals needed
+
+The interrupt matrix on the bus is the single copy of the routing
+configuration (plan DD22); `INTERRUPT_CORE0` and `PLIC_MX` are register
+*views* that write into it through `BusCx::matrix` and read back from it.
+One state, nothing to keep in sync, and `Bus::pending_cpu_interrupt` stays a
+pure function of the source levels.
+
+A peripheral cannot reset the chip. When the RWDT's stage 0 expires with a
+reset action it leaves a `MachineRequest::Reset` on the bus, and the run ends
+with `Outcome::Reset` (exit code 2): the emulator reports the reboot it cannot
+yet perform, which is also the more useful answer during bring-up.
+
+### Reading the trace
+
+Beyond the MMIO lines, three kinds of note appear in the same stream:
+
+- `SPIN <BLOCK>+<off> <name> = <value> x<n>` — the same register read `n`
+  times in a row from the same PC with no write in between. Unfiltered.
+- `WATCHPOINT slot=<n> armed at <tdata2> napot store` / `disarmed` — a
+  trigger CSR write that changed a slot's effective watchpoint (esp-hal
+  rewrites all four on every context switch; only changes are logged).
+- `<BLOCK> WDT ARMED` / `LP_WDT RWDT EXPIRED: …` — the watchdogs.
+
+A 3 s no-radio run with `--trace SYSTIMER,PLIC_MX,INTPRI,INTERRUPT_CORE0,LP_WDT,TIMG0`
+is about 780 k lines, half of them the RTC-calibration poll at boot. Without
+a filter it is 18 M lines; write it to a file on a disk with room.
 
 ## Snapshot
 

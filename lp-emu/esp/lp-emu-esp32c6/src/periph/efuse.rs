@@ -35,10 +35,17 @@ pub const RD_MAC_SPI_SYS_3: u32 = 0x50;
 /// The three words an identity occupies, in esp-hal's layout.
 pub fn words(id: &EfuseIdentity) -> [(u32, u32); 3] {
     let m = id.mac;
-    let w0 = (u32::from(m[2]) << 24) | (u32::from(m[3]) << 16) | (u32::from(m[4]) << 8) | u32::from(m[5]);
+    let w0 = (u32::from(m[2]) << 24)
+        | (u32::from(m[3]) << 16)
+        | (u32::from(m[4]) << 8)
+        | u32::from(m[5]);
     let w1 = (u32::from(m[0]) << 8) | u32::from(m[1]);
     let w3 = (u32::from(id.wafer_minor & 0xf) << 18) | (u32::from(id.wafer_major & 0x3) << 22);
-    [(RD_MAC_SPI_SYS_0, w0), (RD_MAC_SPI_SYS_1, w1), (RD_MAC_SPI_SYS_3, w3)]
+    [
+        (RD_MAC_SPI_SYS_0, w0),
+        (RD_MAC_SPI_SYS_1, w1),
+        (RD_MAC_SPI_SYS_3, w3),
+    ]
 }
 
 /// esp-hal's extraction, applied to the three words.
@@ -76,7 +83,10 @@ mod tests {
         };
         let [(_, w0), (_, w1), (_, w3)] = words(&id);
         assert_eq!(w0, 0x6287_b48c, "MAC[2..6] big-endian in rd_mac_spi_sys_0");
-        assert_eq!(w1, 0x0000_a0f2, "MAC[0..2] in the low half of rd_mac_spi_sys_1");
+        assert_eq!(
+            w1, 0x0000_a0f2,
+            "MAC[0..2] in the low half of rd_mac_spi_sys_1"
+        );
         assert_eq!(w3, 2 << 18);
         assert_eq!(identity(w0, w1, w3), id);
 

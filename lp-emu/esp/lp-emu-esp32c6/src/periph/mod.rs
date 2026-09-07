@@ -50,7 +50,11 @@ pub const WDT_WKEY: u32 = 0x50D8_3AA1;
 /// the same on every machine.
 pub fn boot_set(efuse: EfuseIdentity, seed: u64) -> Vec<(u32, u32, BoxedPeripheral)> {
     vec![
-        (base::LP_APM, 0x100, Box::new(accept::lp_apm()) as BoxedPeripheral),
+        (
+            base::LP_APM,
+            0x100,
+            Box::new(accept::lp_apm()) as BoxedPeripheral,
+        ),
         (base::LP_APM0, 0x800, Box::new(accept::lp_apm0())),
         (base::HP_APM, 0x800, Box::new(accept::hp_apm())),
         (base::LP_AON, 0x400, Box::new(accept::lp_aon())),
@@ -60,7 +64,11 @@ pub fn boot_set(efuse: EfuseIdentity, seed: u64) -> Vec<(u32, u32, BoxedPeripher
         (base::MODEM_SYSCON, 0x100, Box::new(accept::modem_syscon())),
         (base::MODEM_LPCON, 0x100, Box::new(accept::modem_lpcon())),
         (base::I2C_ANA_MST, 0x100, Box::new(accept::i2c_ana_mst())),
-        (base::LP_I2C_ANA_MST, 0x400, Box::new(accept::lp_i2c_ana_mst())),
+        (
+            base::LP_I2C_ANA_MST,
+            0x400,
+            Box::new(accept::lp_i2c_ana_mst()),
+        ),
         (base::PCR, 0x1000, Box::new(accept::pcr())),
         (base::TIMG0, 0x100, Box::new(timg::Timg::timg0())),
         (base::TIMG1, 0x100, Box::new(timg::Timg::timg1())),

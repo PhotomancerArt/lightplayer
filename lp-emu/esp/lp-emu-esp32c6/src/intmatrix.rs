@@ -536,12 +536,20 @@ mod tests {
         assert_eq!(sb.read(&mut core0, CORE0_STATUS0 + 4), 1 << 19);
         assert_eq!(sb.read(&mut core0, CORE0_STATUS0 + 8), 1 << 12);
         sb.irq.set_level(source::TG0_T0_LEVEL, false);
-        assert_eq!(sb.read(&mut core0, CORE0_STATUS0 + 4), 0, "live, not latched");
+        assert_eq!(
+            sb.read(&mut core0, CORE0_STATUS0 + 4),
+            0,
+            "live, not latched"
+        );
 
         sb.write(&mut core0, 4 * 43, 31);
         assert_eq!(sb.read(&mut core0, 4 * 43), 31);
         sb.write(&mut core0, 4 * 43, 0xffff);
-        assert_eq!(sb.read(&mut core0, 4 * 43), 31, "anything past 30 is disabled");
+        assert_eq!(
+            sb.read(&mut core0, 4 * 43),
+            31,
+            "anything past 30 is disabled"
+        );
         assert_eq!(matrix_of(&sb).map(43), Some(31));
         assert_eq!(matrix_of(&sb).map(77), None);
     }

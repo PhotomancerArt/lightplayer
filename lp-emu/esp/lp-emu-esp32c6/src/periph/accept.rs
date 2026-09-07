@@ -212,7 +212,11 @@ pub fn gpio() -> RegFile {
 
 /// SPI0/SPI1: accept; the flash controller and cache MMU are M4.
 pub fn spi(name: &'static str) -> RegFile {
-    let names = if name == "SPI0" { regs::SPI0 } else { regs::SPI1 };
+    let names = if name == "SPI0" {
+        regs::SPI0
+    } else {
+        regs::SPI1
+    };
     RegFile::new(name, 0x400).with_names(names)
 }
 
@@ -245,7 +249,11 @@ mod tests {
         sb.write(&mut i2c, 0x004, 0xffff_ffff);
         assert_eq!(sb.read(&mut i2c, 0x000) & (1 << 25), 0, "i2c0 busy");
         assert_eq!(sb.read(&mut i2c, 0x004) & (1 << 25), 0, "i2c1 busy");
-        assert_eq!(sb.read(&mut i2c, 0x020), 0, "ana_conf2 resets to 0: master 1");
+        assert_eq!(
+            sb.read(&mut i2c, 0x020),
+            0,
+            "ana_conf2 resets to 0: master 1"
+        );
 
         let mut lp = lp_i2c_ana_mst();
         sb.write(&mut lp, 0x000, 0xffff_ffff);
@@ -255,7 +263,11 @@ mod tests {
         assert_eq!((sb.read(&mut p, 0x110) >> 24) & 0x7f, 40);
         sb.write(&mut p, 0x110, 0);
         assert_eq!((sb.read(&mut p, 0x110) >> 24) & 0x7f, 40, "pinned");
-        assert_eq!(sb.read(&mut p, 0x114) & (1 << 3), 0, "cpu_wait_mode_force_on");
+        assert_eq!(
+            sb.read(&mut p, 0x114) & (1 << 3),
+            0,
+            "cpu_wait_mode_force_on"
+        );
         assert_eq!(sb.read(&mut p, 0x040), 0x0040_0000);
 
         let mut a = assist_debug();
@@ -288,7 +300,10 @@ mod tests {
     #[test]
     fn the_blocks_carry_their_names() {
         assert_eq!(lp_apm().reg_name(0x0c4), Some("func_ctrl"));
-        assert_eq!(lp_aon().reg_name(0x0c4).is_some(), regs::LP_AON.name(0x0c4).is_some());
+        assert_eq!(
+            lp_aon().reg_name(0x0c4).is_some(),
+            regs::LP_AON.name(0x0c4).is_some()
+        );
         assert_eq!(pmu().reg_name(0x000).is_some(), true);
         assert_eq!(lp_timer().reg_name(0x010).is_some(), true);
         assert_eq!(uart("UART1").name(), "UART1");

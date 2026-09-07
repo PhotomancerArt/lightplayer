@@ -450,7 +450,10 @@ mod tests {
     fn read_count(sb: &mut Sandbox, t: &mut Systimer, u: usize) -> u64 {
         let op = if u == 0 { UNIT0_OP } else { UNIT1_OP };
         sb.write(t, op, OP_UPDATE);
-        assert!(sb.read(t, op) & OP_VALUE_VALID != 0, "value_valid after update");
+        assert!(
+            sb.read(t, op) & OP_VALUE_VALID != 0,
+            "value_valid after update"
+        );
         let base = UNIT0_VALUE_HI + 8 * u as u32;
         let lo = sb.read(t, base + 4);
         let hi = sb.read(t, base);
