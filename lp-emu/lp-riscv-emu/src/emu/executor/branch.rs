@@ -32,7 +32,7 @@ pub(super) fn decode_execute_branch<M: LoggingMode, B: Bus>(
             pc,
             instruction: inst_word,
             reason: alloc::format!("Unknown branch instruction: funct3=0x{funct3:x}"),
-            regs: alloc::boxed::Box::new(*regs),
+            regs: *regs,
         }),
     }
 }
@@ -80,7 +80,7 @@ fn execute_beq<M: LoggingMode>(
         syscall: false,
         class: branch_class,
         inst_size: 4,
-        log: log.map(alloc::boxed::Box::new),
+        log,
     })
 }
 
@@ -127,7 +127,7 @@ fn execute_bne<M: LoggingMode>(
         syscall: false,
         class: branch_class,
         inst_size: 4,
-        log: log.map(alloc::boxed::Box::new),
+        log,
     })
 }
 
@@ -174,7 +174,7 @@ fn execute_blt<M: LoggingMode>(
         syscall: false,
         class: branch_class,
         inst_size: 4,
-        log: log.map(alloc::boxed::Box::new),
+        log,
     })
 }
 
@@ -221,7 +221,7 @@ fn execute_bge<M: LoggingMode>(
         syscall: false,
         class: branch_class,
         inst_size: 4,
-        log: log.map(alloc::boxed::Box::new),
+        log,
     })
 }
 
@@ -268,7 +268,7 @@ fn execute_bltu<M: LoggingMode>(
         syscall: false,
         class: branch_class,
         inst_size: 4,
-        log: log.map(alloc::boxed::Box::new),
+        log,
     })
 }
 
@@ -315,7 +315,7 @@ fn execute_bgeu<M: LoggingMode>(
         syscall: false,
         class: branch_class,
         inst_size: 4,
-        log: log.map(alloc::boxed::Box::new),
+        log,
     })
 }
 
@@ -375,9 +375,7 @@ mod tests {
 
         assert_eq!(result.new_pc, Some(4));
         assert!(result.log.is_some());
-        if let Some(log) = result.log
-            && let InstLog::Branch { taken, .. } = *log
-        {
+        if let Some(InstLog::Branch { taken, .. }) = result.log {
             assert!(taken);
         }
     }

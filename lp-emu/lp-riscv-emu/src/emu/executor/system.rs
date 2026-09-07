@@ -37,7 +37,7 @@ pub(super) fn decode_execute_system<M: LoggingMode, B: Bus>(
                 reason: alloc::format!(
                     "Unknown system instruction: funct3=0x{funct3:x}, funct12=0x{funct12:x}"
                 ),
-                regs: alloc::boxed::Box::new(*regs),
+                regs: *regs,
             }),
         }
     } else {
@@ -57,7 +57,7 @@ pub(super) fn decode_execute_system<M: LoggingMode, B: Bus>(
                     pc,
                     instruction: inst_word,
                     reason: alloc::format!("Unknown CSR instruction: funct3=0x{funct3:x}"),
-                    regs: alloc::boxed::Box::new(*regs),
+                    regs: *regs,
                 });
             }
         };
@@ -141,7 +141,7 @@ fn execute_csr<M: LoggingMode>(
         syscall: false,
         class: InstClass::System,
         inst_size: 4,
-        log: log.map(alloc::boxed::Box::new),
+        log,
     })
 }
 
@@ -166,7 +166,7 @@ fn execute_ecall<M: LoggingMode>(
         syscall: true,
         class: InstClass::System,
         inst_size: 4,
-        log: log.map(alloc::boxed::Box::new),
+        log,
     })
 }
 
@@ -191,7 +191,7 @@ fn execute_ebreak<M: LoggingMode>(
         syscall: false,
         class: InstClass::System,
         inst_size: 4,
-        log: log.map(alloc::boxed::Box::new),
+        log,
     })
 }
 
@@ -239,7 +239,7 @@ fn execute_fence<M: LoggingMode>(
         syscall: false,
         class: InstClass::Fence,
         inst_size: 4,
-        log: log.map(alloc::boxed::Box::new),
+        log,
     })
 }
 
@@ -265,7 +265,7 @@ fn execute_fence_i<M: LoggingMode>(
         syscall: false,
         class: InstClass::Fence,
         inst_size: 4,
-        log: log.map(alloc::boxed::Box::new),
+        log,
     })
 }
 
@@ -339,9 +339,7 @@ mod tests {
 
         assert!(result.syscall);
         assert!(result.log.is_some());
-        if let Some(log) = result.log
-            && let InstLog::System { kind, .. } = *log
-        {
+        if let Some(InstLog::System { kind, .. }) = result.log {
             assert_eq!(kind, SystemKind::Ecall);
         }
     }

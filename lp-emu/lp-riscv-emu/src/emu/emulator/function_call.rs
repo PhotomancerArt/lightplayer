@@ -55,7 +55,7 @@ impl Riscv32Emulator {
                 reason: String::from(
                     "StructReturn requires explicit struct size - use call_function_with_struct_return",
                 ),
-                regs: alloc::boxed::Box::new(self.regs),
+                regs: self.regs,
             });
         }
 
@@ -69,7 +69,7 @@ impl Riscv32Emulator {
                     pc: self.pc,
                     instruction: 0,
                     reason: format!("Failed to compute return locations: {e:?}"),
-                    regs: alloc::boxed::Box::new(self.regs),
+                    regs: self.regs,
                 }
             })?;
 
@@ -82,7 +82,7 @@ impl Riscv32Emulator {
                 pc: self.pc,
                 instruction: 0,
                 reason: format!("Failed to compute argument locations: {e:?}"),
-                regs: alloc::boxed::Box::new(self.regs),
+                regs: self.regs,
             })?;
 
         // Setup stack and return area (needs arg_locations to compute stack space)
@@ -122,7 +122,7 @@ impl Riscv32Emulator {
                     limit,
                     executed: limit,
                     pc: self.pc,
-                    regs: alloc::boxed::Box::new(self.regs),
+                    regs: self.regs,
                 });
             }
 
@@ -147,20 +147,20 @@ impl Riscv32Emulator {
                     return Err(EmulatorError::Trap {
                         code,
                         pc: self.pc,
-                        regs: alloc::boxed::Box::new(self.regs),
+                        regs: self.regs,
                     });
                 }
                 StepResult::Panic(info) => {
                     return Err(EmulatorError::Panic {
                         info,
                         pc: self.pc,
-                        regs: alloc::boxed::Box::new(self.regs),
+                        regs: self.regs,
                     });
                 }
                 StepResult::Oom(info) => {
                     return Err(EmulatorError::Oom {
                         info,
-                        regs: alloc::boxed::Box::new(self.regs),
+                        regs: self.regs,
                     });
                 }
                 StepResult::Continue => {
@@ -171,7 +171,7 @@ impl Riscv32Emulator {
                         pc: self.pc,
                         instruction: 0,
                         reason: String::from("Unexpected ECALL in function call"),
-                        regs: alloc::boxed::Box::new(self.regs),
+                        regs: self.regs,
                     });
                 }
                 StepResult::FuelExhausted(_) => {
@@ -180,7 +180,7 @@ impl Riscv32Emulator {
                 StepResult::ProfileStop => {
                     return Err(EmulatorError::ProfileStopped {
                         pc: self.pc,
-                        regs: alloc::boxed::Box::new(self.regs),
+                        regs: self.regs,
                     });
                 }
             }
@@ -216,7 +216,7 @@ impl Riscv32Emulator {
                 pc: self.pc,
                 instruction: 0,
                 reason: String::from("Function does not use StructReturn"),
-                regs: alloc::boxed::Box::new(self.regs),
+                regs: self.regs,
             });
         }
 
@@ -233,7 +233,7 @@ impl Riscv32Emulator {
                 pc: self.pc,
                 instruction: 0,
                 reason: String::from("StructReturn parameter not found in signature"),
-                regs: alloc::boxed::Box::new(self.regs),
+                regs: self.regs,
             })?;
 
         let struct_ret_slots = signature
@@ -248,7 +248,7 @@ impl Riscv32Emulator {
                 reason: format!(
                     "expected exactly one StructReturn parameter, got {struct_ret_slots}"
                 ),
-                regs: alloc::boxed::Box::new(self.regs),
+                regs: self.regs,
             });
         }
 
@@ -261,7 +261,7 @@ impl Riscv32Emulator {
                     "StructReturn call: expected {expected_without_sret} caller args (vmctx + user, no sret pointer), got {}",
                     args.len()
                 ),
-                regs: alloc::boxed::Box::new(self.regs),
+                regs: self.regs,
             });
         }
 
@@ -275,7 +275,7 @@ impl Riscv32Emulator {
                     pc: self.pc,
                     instruction: 0,
                     reason: format!("Failed to compute argument locations: {e:?}"),
-                    regs: alloc::boxed::Box::new(self.regs),
+                    regs: self.regs,
                 }
             })?;
 
@@ -291,7 +291,7 @@ impl Riscv32Emulator {
                         pc: self.pc,
                         instruction: 0,
                         reason: format!("missing argument value at caller index {ai}"),
-                        regs: alloc::boxed::Box::new(self.regs),
+                        regs: self.regs,
                     })?;
                 combined.push(dv.clone());
                 ai += 1;
@@ -331,7 +331,7 @@ impl Riscv32Emulator {
                     limit,
                     executed: limit,
                     pc: self.pc,
-                    regs: alloc::boxed::Box::new(self.regs),
+                    regs: self.regs,
                 });
             }
 
@@ -356,20 +356,20 @@ impl Riscv32Emulator {
                     return Err(EmulatorError::Trap {
                         code,
                         pc: self.pc,
-                        regs: alloc::boxed::Box::new(self.regs),
+                        regs: self.regs,
                     });
                 }
                 StepResult::Panic(info) => {
                     return Err(EmulatorError::Panic {
                         info,
                         pc: self.pc,
-                        regs: alloc::boxed::Box::new(self.regs),
+                        regs: self.regs,
                     });
                 }
                 StepResult::Oom(info) => {
                     return Err(EmulatorError::Oom {
                         info,
-                        regs: alloc::boxed::Box::new(self.regs),
+                        regs: self.regs,
                     });
                 }
                 StepResult::Continue => {
@@ -380,7 +380,7 @@ impl Riscv32Emulator {
                         pc: self.pc,
                         instruction: 0,
                         reason: String::from("Unexpected ECALL in function call"),
-                        regs: alloc::boxed::Box::new(self.regs),
+                        regs: self.regs,
                     });
                 }
                 StepResult::FuelExhausted(_) => {
@@ -389,7 +389,7 @@ impl Riscv32Emulator {
                 StepResult::ProfileStop => {
                     return Err(EmulatorError::ProfileStopped {
                         pc: self.pc,
-                        regs: alloc::boxed::Box::new(self.regs),
+                        regs: self.regs,
                     });
                 }
             }
@@ -413,7 +413,7 @@ fn create_flags_with_multi_ret() -> Result<Flags, EmulatorError> {
             pc: 0,
             instruction: 0,
             reason: format!("Failed to set flags: {e:?}"),
-            regs: alloc::boxed::Box::new([0; 32]),
+            regs: [0; 32],
         })?;
     Ok(Flags::new(builder))
 }
@@ -513,7 +513,7 @@ fn setup_call_stack(
             reason: format!(
                 "Not enough RAM for stack (need {total_stack_space} bytes, have {ram_size} bytes)"
             ),
-            regs: alloc::boxed::Box::new(emulator.regs),
+            regs: emulator.regs,
         });
     }
 
@@ -564,7 +564,7 @@ fn allocate_struct_return_buffer(
             pc: emulator.pc,
             instruction: 0,
             reason: format!("Not enough RAM for struct return buffer (need {aligned_size} bytes)"),
-            regs: alloc::boxed::Box::new(emulator.regs),
+            regs: emulator.regs,
         });
     }
 
@@ -592,7 +592,7 @@ fn place_register_argument(
             pc: emulator.pc,
             instruction: 0,
             reason: format!("Invalid register index: {reg_enc}"),
-            regs: alloc::boxed::Box::new(emulator.regs),
+            regs: emulator.regs,
         });
     }
 
@@ -607,7 +607,7 @@ fn place_register_argument(
                     pc: emulator.pc,
                     instruction: 0,
                     reason: format!("i8 only has 1 slot, got slot_idx {slot_idx}"),
-                    regs: alloc::boxed::Box::new(emulator.regs),
+                    regs: emulator.regs,
                 });
             }
         }
@@ -619,7 +619,7 @@ fn place_register_argument(
                     pc: emulator.pc,
                     instruction: 0,
                     reason: format!("i16 only has 1 slot, got slot_idx {slot_idx}"),
-                    regs: alloc::boxed::Box::new(emulator.regs),
+                    regs: emulator.regs,
                 });
             }
         }
@@ -631,7 +631,7 @@ fn place_register_argument(
                     pc: emulator.pc,
                     instruction: 0,
                     reason: format!("i32 only has 1 slot, got slot_idx {slot_idx}"),
-                    regs: alloc::boxed::Box::new(emulator.regs),
+                    regs: emulator.regs,
                 });
             }
         }
@@ -651,7 +651,7 @@ fn place_register_argument(
                         pc: emulator.pc,
                         instruction: 0,
                         reason: format!("i64 only has 2 slots, got slot_idx {slot_idx}"),
-                        regs: alloc::boxed::Box::new(emulator.regs),
+                        regs: emulator.regs,
                     });
                 }
             }
@@ -668,7 +668,7 @@ fn place_register_argument(
                         pc: emulator.pc,
                         instruction: 0,
                         reason: format!("i128 only has 4 slots, got slot_idx {slot_idx}"),
-                        regs: alloc::boxed::Box::new(emulator.regs),
+                        regs: emulator.regs,
                     });
                 }
             }
@@ -678,7 +678,7 @@ fn place_register_argument(
                 pc: emulator.pc,
                 instruction: 0,
                 reason: format!("Unsupported DataValue type for register argument"),
-                regs: alloc::boxed::Box::new(emulator.regs),
+                regs: emulator.regs,
             });
         }
     }
@@ -708,14 +708,14 @@ fn place_stack_argument(
                         reason: format!(
                             "Failed to write i8 stack argument at 0x{stack_addr:08x}: {e}"
                         ),
-                        regs: alloc::boxed::Box::new(emulator.regs),
+                        regs: emulator.regs,
                     })?;
             } else {
                 return Err(EmulatorError::InvalidInstruction {
                     pc: emulator.pc,
                     instruction: 0,
                     reason: format!("i8 only has 1 slot, got slot_idx {slot_idx}"),
-                    regs: alloc::boxed::Box::new(emulator.regs),
+                    regs: emulator.regs,
                 });
             }
         }
@@ -730,14 +730,14 @@ fn place_stack_argument(
                         reason: format!(
                             "Failed to write i16 stack argument at 0x{stack_addr:08x}: {e}"
                         ),
-                        regs: alloc::boxed::Box::new(emulator.regs),
+                        regs: emulator.regs,
                     })?;
             } else {
                 return Err(EmulatorError::InvalidInstruction {
                     pc: emulator.pc,
                     instruction: 0,
                     reason: format!("i16 only has 1 slot, got slot_idx {slot_idx}"),
-                    regs: alloc::boxed::Box::new(emulator.regs),
+                    regs: emulator.regs,
                 });
             }
         }
@@ -750,7 +750,7 @@ fn place_stack_argument(
                         reason: format!(
                             "Failed to write i32 stack argument at 0x{stack_addr:08x}: {e}"
                         ),
-                        regs: alloc::boxed::Box::new(emulator.regs),
+                        regs: emulator.regs,
                     }
                 })?;
             } else {
@@ -758,7 +758,7 @@ fn place_stack_argument(
                     pc: emulator.pc,
                     instruction: 0,
                     reason: format!("i32 only has 1 slot, got slot_idx {slot_idx}"),
-                    regs: alloc::boxed::Box::new(emulator.regs),
+                    regs: emulator.regs,
                 });
             }
         }
@@ -778,7 +778,7 @@ fn place_stack_argument(
                         pc: emulator.pc,
                         instruction: 0,
                         reason: format!("i64 only has 2 slots, got slot_idx {slot_idx}"),
-                        regs: alloc::boxed::Box::new(emulator.regs),
+                        regs: emulator.regs,
                     });
                 }
             };
@@ -792,7 +792,7 @@ fn place_stack_argument(
                     reason: format!(
                         "Failed to write i64 slot {slot_idx} stack argument at 0x{stack_addr:08x}: {e}"
                     ),
-                    regs: alloc::boxed::Box::new(emulator.regs),
+                    regs: emulator.regs,
                 })?;
         }
         DataValue::I128(v) => {
@@ -807,7 +807,7 @@ fn place_stack_argument(
                         pc: emulator.pc,
                         instruction: 0,
                         reason: format!("i128 only has 4 slots, got slot_idx {slot_idx}"),
-                        regs: alloc::boxed::Box::new(emulator.regs),
+                        regs: emulator.regs,
                     });
                 }
             };
@@ -821,7 +821,7 @@ fn place_stack_argument(
                     reason: format!(
                         "Failed to write i128 slot {slot_idx} stack argument at 0x{stack_addr:08x}: {e}"
                     ),
-                    regs: alloc::boxed::Box::new(emulator.regs),
+                    regs: emulator.regs,
                 })?;
         }
         _ => {
@@ -829,7 +829,7 @@ fn place_stack_argument(
                 pc: emulator.pc,
                 instruction: 0,
                 reason: format!("Unsupported DataValue type for stack argument"),
-                regs: alloc::boxed::Box::new(emulator.regs),
+                regs: emulator.regs,
             });
         }
     }
@@ -853,7 +853,7 @@ fn place_arguments(
                 args.len(),
                 arg_locations.len()
             ),
-            regs: alloc::boxed::Box::new(emulator.regs),
+            regs: emulator.regs,
         });
     }
 
@@ -884,7 +884,7 @@ fn extract_register_return_value(
             pc: emulator.pc,
             instruction: 0,
             reason: format!("Invalid register index: {reg_enc}"),
-            regs: alloc::boxed::Box::new(emulator.regs),
+            regs: emulator.regs,
         });
     }
 
@@ -906,7 +906,7 @@ fn extract_stack_return_value(
                 pc: emulator.pc,
                 instruction: 0,
                 reason: format!("Failed to read stack return value at 0x{stack_addr:08x}: {e}"),
-                regs: alloc::boxed::Box::new(emulator.regs),
+                regs: emulator.regs,
             })?;
     Ok(word_value as u32)
 }
@@ -929,7 +929,7 @@ fn extract_single_return_value(
                         retval_location.ty,
                         retval_location.slots.len()
                     ),
-                    regs: alloc::boxed::Box::new(emulator.regs),
+                    regs: emulator.regs,
                 });
             }
 
@@ -960,7 +960,7 @@ fn extract_single_return_value(
                         "Expected 2 slots for i64 return value, got {}",
                         retval_location.slots.len()
                     ),
-                    regs: alloc::boxed::Box::new(emulator.regs),
+                    regs: emulator.regs,
                 });
             }
 
@@ -996,7 +996,7 @@ fn extract_single_return_value(
                         "Expected 4 slots for i128 return value, got {}",
                         retval_location.slots.len()
                     ),
-                    regs: alloc::boxed::Box::new(emulator.regs),
+                    regs: emulator.regs,
                 });
             }
 
@@ -1024,7 +1024,7 @@ fn extract_single_return_value(
             pc: emulator.pc,
             instruction: 0,
             reason: format!("Unsupported return type: {:?}", retval_location.ty),
-            regs: alloc::boxed::Box::new(emulator.regs),
+            regs: emulator.regs,
         }),
     }
 }
@@ -1065,7 +1065,7 @@ fn extract_struct_return_value(
                     reason: format!(
                         "Failed to read struct return value word {i} at 0x{addr:08x}: {e}"
                     ),
-                    regs: alloc::boxed::Box::new(emulator.regs),
+                    regs: emulator.regs,
                 })?;
         results.push(DataValue::I32(word_value));
     }

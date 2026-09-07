@@ -496,7 +496,7 @@ fn rounding_mode(
             "Reserved floating-point rounding mode: rm=0b{rm_field:03b}, frm=0b{:03b}",
             fp.frm()
         ),
-        regs: alloc::boxed::Box::new(*regs),
+        regs: *regs,
     })
 }
 
@@ -527,7 +527,7 @@ fn invalid(
         pc,
         instruction: inst_word,
         reason,
-        regs: alloc::boxed::Box::new(*regs),
+        regs: *regs,
     }
 }
 

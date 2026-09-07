@@ -40,14 +40,8 @@ pub struct ExecutionResult {
     pub class: InstClass,
     /// Instruction width in bytes: `2` for compressed (RVC), `4` for 32-bit.
     pub inst_size: u8,
-    /// Log entry for this instruction (None if logging is disabled).
-    ///
-    /// Boxed: `InstLog` is the largest field the hot path carries (40 bytes),
-    /// and `LoggingDisabled` — the interpreter loop's mode — always leaves
-    /// this `None`. Boxing turns that dead weight into one pointer's worth
-    /// of `ExecutionResult`, which every `Ok(...)` on the hot path returns
-    /// whether or not logging is on.
-    pub log: Option<alloc::boxed::Box<InstLog>>,
+    /// Log entry for this instruction (None if logging is disabled)
+    pub log: Option<InstLog>,
 }
 
 /// Helper to read register (x0 always returns 0)
@@ -148,7 +142,7 @@ pub(crate) fn decode_execute<M: LoggingMode, B: Bus>(
             pc,
             instruction: inst_word,
             reason: alloc::format!("Unknown opcode: 0x{opcode:02x}"),
-            regs: alloc::boxed::Box::new(*regs),
+            regs: *regs,
         }),
     }
 }

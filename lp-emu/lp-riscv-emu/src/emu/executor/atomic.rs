@@ -31,7 +31,7 @@ pub(super) fn decode_execute_atomic<M: LoggingMode, B: Bus>(
             pc,
             instruction: inst_word,
             reason: alloc::format!("Unsupported atomic width: funct3=0x{funct3:x}"),
-            regs: alloc::boxed::Box::new(*regs),
+            regs: *regs,
         });
     }
 
@@ -47,7 +47,7 @@ pub(super) fn decode_execute_atomic<M: LoggingMode, B: Bus>(
             pc,
             instruction: inst_word,
             reason: alloc::format!("Unknown atomic instruction: funct5=0x{funct5:x}"),
-            regs: alloc::boxed::Box::new(*regs),
+            regs: *regs,
         }),
     }
 }
@@ -97,7 +97,7 @@ fn execute_lr_w<M: LoggingMode, B: Bus>(
         syscall: false,
         class: InstClass::Atomic,
         inst_size: 4,
-        log: log.map(alloc::boxed::Box::new),
+        log,
     })
 }
 
@@ -154,7 +154,7 @@ fn execute_sc_w<M: LoggingMode, B: Bus>(
         syscall: false,
         class: InstClass::Atomic,
         inst_size: 4,
-        log: log.map(alloc::boxed::Box::new),
+        log,
     })
 }
 
@@ -208,7 +208,7 @@ fn execute_amoswap_w<M: LoggingMode, B: Bus>(
         syscall: false,
         class: InstClass::Atomic,
         inst_size: 4,
-        log: log.map(alloc::boxed::Box::new),
+        log,
     })
 }
 
@@ -263,7 +263,7 @@ fn execute_amoadd_w<M: LoggingMode, B: Bus>(
         syscall: false,
         class: InstClass::Atomic,
         inst_size: 4,
-        log: log.map(alloc::boxed::Box::new),
+        log,
     })
 }
 
@@ -318,7 +318,7 @@ fn execute_amoxor_w<M: LoggingMode, B: Bus>(
         syscall: false,
         class: InstClass::Atomic,
         inst_size: 4,
-        log: log.map(alloc::boxed::Box::new),
+        log,
     })
 }
 
@@ -373,7 +373,7 @@ fn execute_amoand_w<M: LoggingMode, B: Bus>(
         syscall: false,
         class: InstClass::Atomic,
         inst_size: 4,
-        log: log.map(alloc::boxed::Box::new),
+        log,
     })
 }
 
@@ -428,7 +428,7 @@ fn execute_amoor_w<M: LoggingMode, B: Bus>(
         syscall: false,
         class: InstClass::Atomic,
         inst_size: 4,
-        log: log.map(alloc::boxed::Box::new),
+        log,
     })
 }
 

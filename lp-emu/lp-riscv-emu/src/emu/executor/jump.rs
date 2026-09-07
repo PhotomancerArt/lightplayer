@@ -1,7 +1,5 @@
 //! Jump and immediate generation instruction execution (JAL, JALR, LUI, AUIPC)
 
-extern crate alloc;
-
 use super::{ExecutionResult, InstClass, LoggingMode, read_reg};
 use crate::emu::{error::EmulatorError, logging::InstLog};
 use lp_emu_core::Bus;
@@ -109,7 +107,7 @@ fn execute_jal<M: LoggingMode>(
         syscall: false,
         class,
         inst_size: 4,
-        log: log.map(alloc::boxed::Box::new),
+        log,
     })
 }
 
@@ -159,7 +157,7 @@ fn execute_jalr<M: LoggingMode>(
         syscall: false,
         class,
         inst_size: 4,
-        log: log.map(alloc::boxed::Box::new),
+        log,
     })
 }
 
@@ -202,7 +200,7 @@ fn execute_lui<M: LoggingMode>(
         syscall: false,
         class: InstClass::Lui,
         inst_size: 4,
-        log: log.map(alloc::boxed::Box::new),
+        log,
     })
 }
 
@@ -240,7 +238,7 @@ fn execute_auipc<M: LoggingMode>(
         syscall: false,
         class: InstClass::Auipc,
         inst_size: 4,
-        log: log.map(alloc::boxed::Box::new),
+        log,
     })
 }
 
