@@ -57,6 +57,16 @@ description = "M6's negative control, rig-free: flash the shipped image, leave t
 payloads = ["usb-negative-control"]
 
 [[set]]
+name = "emu-m6"
+description = "M6's four USB-Serial-JTAG scenarios on our own machine, all four over the link the product actually ships: the shipped image with a host attached and reading (the DD26/DD30 arbitration against sitting 1's silicon capture of the same bytes), the port held closed from boot and opened after eight seconds (the emulator twin of the silicon negative control), the cable out mid-session and back in (`s7-unplug-mid-op`'s device side, which has had no trace since M2), and no cable at all — which silicon cannot record, because recording is what a host does."
+payloads = [
+    "boot-idle",
+    "usb-negative-control",
+    "usb-detach-reattach",
+    "usb-host-absent",
+]
+
+[[set]]
 name = "jit-math-perf"
 description = "The Q32 math kernel cycle-cost payload (Q12 ledger, cheapest test_* migration): mul/div/sin kernels and LUT access cost against the PMU cycle counter. Timing only — never a gate under esp-emu, which has no cycle model."
 payloads = ["jit-math-perf"]
