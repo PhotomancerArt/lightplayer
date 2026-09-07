@@ -65,14 +65,33 @@ fn machine(image: &ReferenceImage, buf: &SharedBuffer) -> Option<Esp32C6Machine>
             return None;
         }
     };
+    if let Ok(bytes) = std::fs::read(&elf) {
+        use sha2::Digest;
+        let sha = sha2::Sha256::digest(&bytes);
+        println!(
+            "boot_idle: {} = {} ({} bytes)",
+            elf.display(),
+            sha.iter().map(|b| format!("{b:02x}")).collect::<String>(),
+            bytes.len()
+        );
+    }
     Some(
         Esp32C6Builder::new()
             .app(AppSource::Path(elf))
             .strict(true)
             .time_grade(TimeGrade::T1)
-            // A filter that matches no block: only the notes (SPIN, TOUCH,
-            // WIFI RX config, …) come through.
-            .trace(Box::new(buf.clone()), vec!["NOTHING".to_string()])
+            // The notes (SPIN, TOUCH, WIFI RX config, …) plus the three
+            // blocks the M5 P1 CI diagnosis reads (`digest`): the RMT block,
+            // PCR (its clock lines), and the interrupt-entry timeline
+            // (`core_0_intr_status` reads, one per `handle_interrupts`).
+            .trace(
+                Box::new(buf.clone()),
+                vec![
+                    "RMT".to_string(),
+                    "PCR".to_string(),
+                    "INTERRUPT_CORE0".to_string(),
+                ],
+            )
             .build()
             .expect("the reference image builds a machine"),
     )
@@ -89,6 +108,66 @@ fn run_memfs() -> Option<Run> {
         text,
         notes: buf.lines(),
     })
+}
+
+/// The M5 P1 CI diagnosis (PR #569): the memfs image's `[stack]` high-water
+/// read 11560 B on the GitHub runner and 11432 B here with the rest of the
+/// boot text byte-identical. Printed on every run (`--nocapture` in
+/// `just test-emu-c6`) so the two hosts can be compared line by line: the
+/// image's sha, the stack line, every RMT and PCR-RMT register access, and
+/// the interrupt-entry timeline as a count, its first entries, and an FNV
+/// digest over every entry's cycle.
+fn digest(m: &Esp32C6Machine, text: &str, notes: &[String]) {
+    let stack = text
+        .lines()
+        .find(|l| l.contains("[stack] heartbeat"))
+        .unwrap_or("<no stack line>");
+    println!("digest: stack: {stack}");
+    println!(
+        "digest: cycles={} instructions={} idle_skips={} rmt_frames={}/{}",
+        m.cycles(),
+        m.instructions(),
+        m.idle_skips(),
+        m.rmt_frames_ended(0),
+        m.rmt_frames_ended(1)
+    );
+    let entries: Vec<&String> = notes
+        .iter()
+        .filter(|l| l.contains("R4 INTERRUPT_CORE0+0x134 core_0_intr_status0"))
+        .collect();
+    let mut fnv: u64 = 0xcbf2_9ce4_8422_2325;
+    for e in &entries {
+        for b in e.split_whitespace().next().unwrap_or("").bytes() {
+            fnv ^= u64::from(b);
+            fnv = fnv.wrapping_mul(0x0100_0000_01b3);
+        }
+    }
+    println!(
+        "digest: interrupt entries={} fnv={fnv:016x} first={:?} last={:?}",
+        entries.len(),
+        entries
+            .iter()
+            .take(24)
+            .map(|l| l.split_whitespace().next().unwrap_or(""))
+            .collect::<Vec<_>>(),
+        entries
+            .iter()
+            .rev()
+            .take(4)
+            .map(|l| l.split_whitespace().next().unwrap_or(""))
+            .collect::<Vec<_>>()
+    );
+    for l in notes
+        .iter()
+        .filter(|l| l.contains(" RMT") || l.contains("PCR+0x02c") || l.contains("PCR+0x030"))
+    {
+        println!("digest: {l}");
+    }
+    let ints = notes
+        .iter()
+        .filter(|l| l.contains("INTERRUPT_CORE0"))
+        .count();
+    println!("digest: notes={} interrupt_core0_lines={ints}", notes.len());
 }
 
 #[test]
@@ -112,6 +191,7 @@ fn the_memfs_spike_image_says_hello_and_heartbeats_with_the_5_4_figures() {
         0,
         "unmapped"
     );
+    digest(&m, &text, &notes);
 
     // The boot lines, in order.
     let mut from = 0;
