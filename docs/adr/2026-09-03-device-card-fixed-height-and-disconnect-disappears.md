@@ -62,8 +62,8 @@ firmware sits in the project section"):
 | zone | fixed rows | measured height (400px column) |
 |---|---|---|
 | header | title · status chip (24), then the identity as two fixed 16px mono rows: board · chip / MAC · firmware (amended 2026-09-04 — one 16px line before, 74px measured; this table's original 72 predates the 24px chip) | 90px |
-| Project | preview (120) · info (17) · bar (4) · verbs (30) | 220px |
-| Firmware + Terminal | info (17) · bar (4) · verbs (30), then the terminal flush as the zone's last block | 252px |
+| Project | preview (120) · info (17) + bar (4) · verbs (30) | 212px (220 before the 2026-09-07 amendment) |
+| Firmware + Terminal | info (17) + bar (4) · verbs (30), then the terminal flush as the zone's last block | 244px (252 before the 2026-09-07 amendment) |
 | Device | info (17) · verbs (30) | 80px |
 
 All six idle/active states (Running, Nothing-loaded, Needs-firmware,
@@ -72,7 +72,8 @@ tested (320/400/420px+), confirmed by a CDP measurement pass against the
 served `devices_card_states` story — **644px** (header 90) since the
 2026-09-04 amendment below gave the header its second identity row,
 re-measured the same way on both `devices_card_states` and
-`devices_card_firmware_faces`. No zone ever grows past its own fixed
+`devices_card_firmware_faces`, and **628px** since the 2026-09-07
+amendment folded each info line and its bar slot into one gapless block. No zone ever grows past its own fixed
 rows; the only two cases where the card DOES reflow are a user-triggered
 popover pick panel (which floats in the browser's top layer and never
 touches in-flow layout) and the footer-style wrap of the Device zone's
@@ -186,6 +187,27 @@ already running LightPlayer firmware when it first hello'd.
   ADR's Project/Firmware zoning opened up for pickers.
 
 ## Amendments
+
+- **2026-09-07 — an info line and its bar slot are one gapless block (Project and Firmware zones −8px each, cards 644 → 628px, measured at the 400px column).**
+  Each zone laid its 4px bar slot out as a row of the zone's own `gap-2`
+  grid, so an unlit slot collected an 8px gap on each side: 20px between
+  an info line and the verbs that act on it, in every idle card. G1
+  (2026-09-06, the device-card live-feed walk) read that as "lots of dead
+  space". The line and its slot are now one gapless grid
+  (`device_roster_card.rs::line_and_bar_class`, and
+  `armed_line_and_bar_class` for the zones whose whole dimmable block they
+  are), so the slot rides flush under its line and the zone's single 8px
+  row gap runs from the slot to the verb row — 20px becomes 12px, twice
+  per card. The pending card's firmware zone wears the same block.
+
+  This is a height-table change, never a reflow: the slot still occupies
+  its 4px lit or unlit, so the rule above holds unchanged — a heartbeat, a
+  fault, a flash's percent ticking up still moves nothing. Verified by the
+  same CDP measurement pass this ADR's numbers come from: all six
+  `devices-card-states` cards measure 628px and 12px line-to-verbs in both
+  zones, with the project bar lit (Sending), the firmware bar lit
+  (Flashing · 62%) and every idle state. The Device zone has no bar slot
+  and is unchanged at 80px. PR #565.
 
 - **2026-09-04 — the identity line is two fixed rows (header 74 → 90px, cards 628 → 644px, measured at the 400px column).**
   The header's identity was one truncated mono line, `board · chip · MAC ·

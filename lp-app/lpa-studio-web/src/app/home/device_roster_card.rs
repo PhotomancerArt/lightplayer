@@ -15,13 +15,20 @@
 //!   header      title · status chip
 //!               board · chip  /  MAC · firmware  (two fixed mono rows)
 //!   ──────────── (full bleed)
-//!   Project     preview slot (120) · info (17) · bar (4) · verbs (30)
+//!   Project     preview slot (120) · info (17) + bar (4) · verbs (30)
 //!   ────────────
-//!   Firmware    info (17) · bar (4) · verbs (30)
+//!   Firmware    info (17) + bar (4) · verbs (30)
 //!               terminal — FLUSH, edge to edge, no hairline above it
 //!   ────────────
 //!   Device      info (17) · verbs (30)
 //! ```
+//!
+//! `info + bar` is one block ([`line_and_bar_class`]): the bar slot rides
+//! FLUSH under its info line with no row gap on either side of it, so an
+//! unlit slot costs the zone 4px rather than 20 (G1 2026-09-06 read the
+//! old `gap · bar · gap` as "lots of dead space" between the line and its
+//! verbs). The slot still occupies its 4px in every state — the card's
+//! height is the same lit or unlit, which is the rule below.
 //!
 //! The terminal shares the firmware's zone rather than owning one (G1's
 //! second ruling, 2026-09-03): it is the same subject said twice — what
@@ -286,14 +293,17 @@ pub(crate) fn DeviceRosterCard(
                     // sits top-right INSIDE the frame, so the picture
                     // arriving moves nothing: the frame's height is fixed.
                     {preview_slot(&card, feed.as_ref())}
-                    // info line (17px, one line, full text on hover)
-                    p {
-                        class: if project_line_is_fault { fault_line_class() } else { info_line_class() },
-                        title: "{project_line}",
-                        "{project_line}"
+                    div { class: line_and_bar_class(),
+                        // info line (17px, one line, full text on hover)
+                        p {
+                            class: if project_line_is_fault { fault_line_class() } else { info_line_class() },
+                            title: "{project_line}",
+                            "{project_line}"
+                        }
+                        // bar slot (4px, flush under the line) — lit only
+                        // for PROJECT work.
+                        ZoneBar { activity: card.activity.clone(), lit: busy_zone == Some(ZoneKind::Project) }
                     }
-                    // bar slot (4px) — lit only for PROJECT work.
-                    ZoneBar { activity: card.activity.clone(), lit: busy_zone == Some(ZoneKind::Project) }
                 }
                 // verb row (30px) — outside `ux-armed-dim`: arming dims what
                 // the card says, never what it offers.
@@ -358,7 +368,7 @@ pub(crate) fn DeviceRosterCard(
             // last block, flush to both edges, with no hairline between them.
             section { class: combined_zone_class(),
                 div { class: zone_rows_class(),
-                div { class: "ux-armed-dim tw:grid tw:min-w-0 tw:gap-2",
+                div { class: armed_line_and_bar_class(),
                     p { class: info_line_class(), title: "{firmware_line}", "{firmware_line}" }
                     ZoneBar { activity: card.activity.clone(), lit: busy_zone == Some(ZoneKind::Firmware) }
                 }
@@ -599,7 +609,7 @@ pub(crate) fn PendingLinkCard(
             // that answers it, and whatever it has said so far.
             section { class: combined_zone_class(),
                 div { class: zone_rows_class(),
-                    div { class: "ux-armed-dim tw:grid tw:min-w-0 tw:gap-2",
+                    div { class: armed_line_and_bar_class(),
                         p { class: info_line_class(), title: "{firmware_line}", "{firmware_line}" }
                         // Identification carries no percentage, so the slot
                         // sits unlit — present so the pending card and the
@@ -918,6 +928,25 @@ fn fault_line_class() -> &'static str {
     "tw:m-0 tw:h-[17px] tw:truncate tw:text-xs tw:font-semibold tw:leading-[17px] tw:text-status-attention-foreground"
 }
 
+/// An info line and its bar slot as ONE block: a gapless grid, so the 4px
+/// slot rides flush under the line and the zone's row gap (8px) runs from
+/// the slot to the verb row. With the slot inside the zone grid as a row of
+/// its own it collected a gap on each side — 20px between the line and its
+/// verbs, unlit, in every zone (G1 2026-09-06: "lots of dead space").
+///
+/// The block is the same height lit or unlit — the slot never leaves —
+/// which is what keeps a board event from moving the card (ADR
+/// 2026-09-03, "fixed height").
+fn line_and_bar_class() -> &'static str {
+    "tw:grid tw:min-w-0"
+}
+
+/// [`line_and_bar_class`] as a zone's whole dimmable block, for the zones
+/// whose only rows above the verbs ARE the line and its bar.
+fn armed_line_and_bar_class() -> &'static str {
+    "ux-armed-dim tw:grid tw:min-w-0"
+}
+
 /// A zone's bar slot: 4px, transparent (and therefore invisible) when this
 /// zone has no activity, a track when it does. It occupies its 4px either
 /// way, which is the point.
@@ -1181,6 +1210,13 @@ mod tests {
         assert!(verb_row_class().contains("tw:h-[30px]"));
         // The unlit bar slot is invisible but still occupies its row.
         assert!(progress_slot_class(false).contains("tw:bg-transparent"));
+        // The line and its bar are one gapless block: the slot rides flush
+        // under the line, and no row gap surrounds it (G1 2026-09-06).
+        for class in [line_and_bar_class(), armed_line_and_bar_class()] {
+            assert!(class.contains("tw:grid"), "{class}");
+            assert!(!class.contains("gap"), "{class}");
+        }
+        assert!(armed_line_and_bar_class().contains("ux-armed-dim"));
         // A two-word verb in a narrow card must not wrap and burst the row:
         // `white-space: nowrap` inherits from the row into every chip in it
         // ("Clear faults" broke to two lines before this).
