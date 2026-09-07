@@ -95,10 +95,16 @@ one that measures dispatch alone: buckets 0..4 went from
 481,675 : 60,563 : 134,668 : 100,974 : 72 to 611,554 : 117,506 : 29,575 :
 1,396 : 1 — services delayed 8–16 words (10–20 µs) fell from ~30 % to ~4 %,
 and `entry_max` fell 34 → 32 (ch 0), 42 → 39, 45 → 35, 43 → 35 (ch 2/4/6).
-So the earlier claim that the APP core's private cache makes this a
-**boot-only** miss was wrong: the dispatch path was missing on a large share
-of refill interrupts, ~10 µs a time against a 40 µs half. Nothing was at the
-deadline, which is why the counters that matter did not move; the margin did.
+That is consistent with the dispatch path missing the APP core's cache on a
+large share of refill interrupts, ~10 µs a time against a 40 µs half — which
+would make the earlier "boot-only miss" claim wrong. One caveat before
+treating it as proven: this was one image pair, and flash code layout alone
+moves things on this board (the sibling esp-rtos measurement saw zook frame
+time move 50–56 ms between images whose hot path was unchanged), so a
+layout-only control — same helpers left in flash, some other cold code moved
+— was not run and would be the next measurement if the number ever matters.
+Nothing was at the deadline, which is why the counters that matter did not
+move; the margin did.
 Before that measurement the reasoning here was: on the APP core the private
 32 KB cache should hold its whole flash working set (~1.6 KB: the 288 B of
 dispatch plus the pusher path) after warm-up, so refill-interrupt entry would
@@ -138,6 +144,7 @@ before spending RAM on it — the classic's heap is the scarcer resource
 3. Firmware: `#[esp_hal::ram]` on `io_pacer_isr` is free but only moves the
    trampoline; its callees are embassy's. Moving the pusher path costs
    ~1.3 KB of IRAM for no deadline it currently misses — the 2026-09-07
-   measurement above says APP-core misses are real, not boot-only, so this is
-   now a priced option (~1.3 KB IRAM for the thread-context path) rather than
-   a closed one; the refill ISR itself is already clean.
+   measurement above suggests APP-core misses are real, not boot-only (with
+   the layout caveat there), so this is a priced option (~1.3 KB IRAM for the
+   thread-context path) rather than a closed one; the refill ISR itself is
+   already clean.
