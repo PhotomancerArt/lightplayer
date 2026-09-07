@@ -202,6 +202,14 @@ this is deterministic on every backend and never crashes a board). It is the
 repeatable, non-destructive demonstration of the red pattern, independent of
 the Meteor/C6 OOM which needs real hardware pressure to reproduce.
 
+> Amended 2026-09-06: `fault-demo` is no longer a gallery example. Its
+> `while (true)` is safe only under the fuel meter, and the gallery's
+> preview runs on a GPU tier that has none — the card hung the browser
+> and, through the driver watchdog, the host. It lives at
+> `projects/test/fault-demo` as the tests' and `lp-cli dev`'s rig
+> (`docs/defects/2026-09-06-gpu-tier-executes-unbounded-shaders.md`,
+> `2026-09-06-catalog-content-tree`).
+
 ## Alternatives considered
 
 - **Dependency-path fault taint + per-fragment verdict.** The original

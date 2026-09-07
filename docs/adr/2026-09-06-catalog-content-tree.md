@@ -90,10 +90,18 @@ The module authoring unit (T1, PR #380) had shipped the pattern shape —
 
 ## Consequences
 
+- `fault-demo` is not catalog content: its deliberately unbounded loop
+  is only safe under the LPVM's fuel meter, and a gallery card previews on
+  a GPU tier that has none — the G1 walk hung Brave, crashed Firefox's
+  host, and a native wgpu run of it glitched the desktop
+  (`docs/defects/2026-09-06-gpu-tier-executes-unbounded-shaders.md`). It
+  lives under `projects/test/` as the engine/server tests' rig; the
+  catalog holds 15 entries (8 pieces, 7 patterns).
 - `examples/` no longer exists; ~370 path and id sites moved with it.
   Dated ADR, defect and report narratives keep their `examples/`
   spelling as records of commands run at the time.
-- The eight patterns are real `kind: pattern` projects and pass the four
+- The eight restructured patterns (seven in the catalog, fault-demo as a
+  rig) are real `kind: pattern` projects; the catalog seven pass the four
   oracles the templates are held to (schemas, loader, library round
   trip, export lint from the installed copy). The board-project generator
   vendors meteor's export folder rather than an inline module.
@@ -135,5 +143,8 @@ The module authoring unit (T1, PR #380) had shipped the pattern shape —
   the full list (D17 end state).
 - Widen the byte-identity gate to `projects/test/` on the merge of
   PR #543.
+- A GPU-tier guard for unbounded shaders (static loop-exit refusal, or
+  an injected iteration cap) so content authored for the fuel-metered
+  tiers cannot hang a GPU — the open defect above.
 - The pattern submodule's 15.6 KB largest-free-block cost on the classic
   is worth a look when the classic's load gate is next re-measured.
