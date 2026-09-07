@@ -53,7 +53,17 @@ dialoguer = "0.11"
 chrono = "0.4"
 # `firmware package` hashes the merged image for the distribution manifest.
 sha2 = { workspace = true }
-fw-checks = { path = "../lp-fw/fw-checks", features = ["std", "check-shader-compile"] }
+# Both halves of the validation system, so the registry-parity test can see
+# them at once: fw-checks is the payload crate (AGPL, outside the lp-emu MIT
+# fence) and lp-emu-validate is the host side, which deliberately mirrors its
+# registry rather than importing it.
+fw-checks = { path = "../lp-fw/fw-checks", features = [
+    "std",
+    "check-shader-compile",
+    "check-gpio-calibrate",
+    "check-uart-bridge",
+] }
+lp-emu-validate = { path = "../lp-emu/lp-emu-validate" }
 lpir = { path = "../lp-shader/lpir" }
 lps-frontend = { path = "../lp-shader/lps-frontend" }
 lps-shared = { path = "../lp-shader/lps-shared" }

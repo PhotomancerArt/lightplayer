@@ -44,7 +44,7 @@ pub use app::devices::{
     RememberedView, RosterSplit, StagedPush, device_chip, device_escape_action,
     device_firmware_line, device_identity_line, device_status_kind, firmware_face_preview_sentence,
     firmware_verb, first_bundled_example_id, flash_offer, flash_offer_for, pending_escape_action,
-    pending_firmware_line, push_offer, reflash_choice, split_roster,
+    pending_firmware_line, pending_identity_rows, push_offer, reflash_choice, split_roster,
 };
 pub use app::docs_host::DocsSimHost;
 pub use app::home::{

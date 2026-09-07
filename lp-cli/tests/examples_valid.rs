@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 #[test]
 fn checked_in_catalog_entries_load_as_core_projects() -> Result<()> {
     let workspace_dir = workspace_dir();
-    let project_dirs = checked_in_project_dirs(&workspace_dir, LOAD_GATE_ROOTS)?;
+    let project_dirs = checked_in_project_dirs(&workspace_dir, GATE_ROOTS)?;
 
     let mut failures = Vec::new();
     for project_dir in project_dirs {
@@ -42,7 +42,7 @@ fn checked_in_catalog_entries_rewrite_byte_identically() -> Result<()> {
     use lpc_model::{NodeDef, ProjectManifest, SlotShapeRegistry};
 
     let workspace_dir = workspace_dir();
-    let project_dirs = checked_in_project_dirs(&workspace_dir, BYTE_GATE_ROOTS)?;
+    let project_dirs = checked_in_project_dirs(&workspace_dir, GATE_ROOTS)?;
     let registry = SlotShapeRegistry::default();
 
     let mut failures = Vec::new();
@@ -104,15 +104,9 @@ fn checked_in_project_dirs(workspace_dir: &Path, roots: &[&str]) -> Result<Vec<P
     Ok(project_dirs)
 }
 
-/// Roots the load gate walks: the catalog (the content Studio embeds) and
-/// every test rig under `projects/test/`.
-const LOAD_GATE_ROOTS: &[&str] = &["catalog", "projects/test"];
-
-/// Roots the byte-identity gate walks. Only the catalog: the hardware rigs
-/// that predate the catalog under `projects/test/` were never held to the
-/// canonical-writer order and would need a one-off rewrite before that
-/// root can join this list.
-const BYTE_GATE_ROOTS: &[&str] = &["catalog"];
+/// Roots both gates walk: the catalog (the content Studio embeds) and
+/// every test rig under `projects/test/` — canonical since PR #543.
+const GATE_ROOTS: &[&str] = &["catalog", "projects/test"];
 
 fn workspace_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))

@@ -7,15 +7,15 @@ extern crate alloc;
 
 use super::{ExecutionResult, InstClass, LoggingMode, read_reg};
 use crate::emu::{error::EmulatorError, logging::InstLog};
-use lp_emu_core::Memory;
+use lp_emu_core::Bus;
 use lp_riscv_inst::{Gpr, format::TypeR};
 
 /// Decode and execute atomic instructions (R-type, opcode 0x2f).
-pub(super) fn decode_execute_atomic<M: LoggingMode>(
+pub(super) fn decode_execute_atomic<M: LoggingMode, B: Bus>(
     inst_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    memory: &mut Memory,
+    memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     let r = TypeR::from_riscv(inst_word);
     let rd = Gpr::new(r.rd);
@@ -35,13 +35,13 @@ pub(super) fn decode_execute_atomic<M: LoggingMode>(
     }
 
     match funct5 {
-        0x02 => execute_lr_w::<M>(rd, rs1, inst_word, pc, regs, memory),
-        0x03 => execute_sc_w::<M>(rd, rs1, rs2, inst_word, pc, regs, memory),
-        0x01 => execute_amoswap_w::<M>(rd, rs1, rs2, inst_word, pc, regs, memory),
-        0x00 => execute_amoadd_w::<M>(rd, rs1, rs2, inst_word, pc, regs, memory),
-        0x04 => execute_amoxor_w::<M>(rd, rs1, rs2, inst_word, pc, regs, memory),
-        0x0c => execute_amoand_w::<M>(rd, rs1, rs2, inst_word, pc, regs, memory),
-        0x08 => execute_amoor_w::<M>(rd, rs1, rs2, inst_word, pc, regs, memory),
+        0x02 => execute_lr_w::<M, B>(rd, rs1, inst_word, pc, regs, memory),
+        0x03 => execute_sc_w::<M, B>(rd, rs1, rs2, inst_word, pc, regs, memory),
+        0x01 => execute_amoswap_w::<M, B>(rd, rs1, rs2, inst_word, pc, regs, memory),
+        0x00 => execute_amoadd_w::<M, B>(rd, rs1, rs2, inst_word, pc, regs, memory),
+        0x04 => execute_amoxor_w::<M, B>(rd, rs1, rs2, inst_word, pc, regs, memory),
+        0x0c => execute_amoand_w::<M, B>(rd, rs1, rs2, inst_word, pc, regs, memory),
+        0x08 => execute_amoor_w::<M, B>(rd, rs1, rs2, inst_word, pc, regs, memory),
         _ => Err(EmulatorError::InvalidInstruction {
             pc,
             instruction: inst_word,
@@ -52,13 +52,13 @@ pub(super) fn decode_execute_atomic<M: LoggingMode>(
 }
 
 #[inline(always)]
-fn execute_lr_w<M: LoggingMode>(
+fn execute_lr_w<M: LoggingMode, B: Bus>(
     rd: Gpr,
     rs1: Gpr,
     inst_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    memory: &mut Memory,
+    memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     // LR.W: Load reserved word (just a regular load in single-threaded)
     let base = read_reg(regs, rs1);
@@ -101,14 +101,14 @@ fn execute_lr_w<M: LoggingMode>(
 }
 
 #[inline(always)]
-fn execute_sc_w<M: LoggingMode>(
+fn execute_sc_w<M: LoggingMode, B: Bus>(
     rd: Gpr,
     rs1: Gpr,
     rs2: Gpr,
     inst_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    memory: &mut Memory,
+    memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     // SC.W: Store conditional word (always succeeds in single-threaded)
     let base = read_reg(regs, rs1);
@@ -117,7 +117,9 @@ fn execute_sc_w<M: LoggingMode>(
 
     let error_regs = *regs;
     let old_value = if M::ENABLED {
-        memory.read_word(address).unwrap_or(0)
+        memory
+            .read_word(address)
+            .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?
     } else {
         0
     };
@@ -156,14 +158,14 @@ fn execute_sc_w<M: LoggingMode>(
 }
 
 #[inline(always)]
-fn execute_amoswap_w<M: LoggingMode>(
+fn execute_amoswap_w<M: LoggingMode, B: Bus>(
     rd: Gpr,
     rs1: Gpr,
     rs2: Gpr,
     inst_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    memory: &mut Memory,
+    memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     // AMOSWAP.W: Atomically swap word
     let base = read_reg(regs, rs1);
@@ -210,14 +212,14 @@ fn execute_amoswap_w<M: LoggingMode>(
 }
 
 #[inline(always)]
-fn execute_amoadd_w<M: LoggingMode>(
+fn execute_amoadd_w<M: LoggingMode, B: Bus>(
     rd: Gpr,
     rs1: Gpr,
     rs2: Gpr,
     inst_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    memory: &mut Memory,
+    memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     // AMOADD.W: Atomically add word
     let base = read_reg(regs, rs1);
@@ -265,14 +267,14 @@ fn execute_amoadd_w<M: LoggingMode>(
 }
 
 #[inline(always)]
-fn execute_amoxor_w<M: LoggingMode>(
+fn execute_amoxor_w<M: LoggingMode, B: Bus>(
     rd: Gpr,
     rs1: Gpr,
     rs2: Gpr,
     inst_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    memory: &mut Memory,
+    memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     // AMOXOR.W: Atomically XOR word
     let base = read_reg(regs, rs1);
@@ -320,14 +322,14 @@ fn execute_amoxor_w<M: LoggingMode>(
 }
 
 #[inline(always)]
-fn execute_amoand_w<M: LoggingMode>(
+fn execute_amoand_w<M: LoggingMode, B: Bus>(
     rd: Gpr,
     rs1: Gpr,
     rs2: Gpr,
     inst_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    memory: &mut Memory,
+    memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     // AMOAND.W: Atomically AND word
     let base = read_reg(regs, rs1);
@@ -375,14 +377,14 @@ fn execute_amoand_w<M: LoggingMode>(
 }
 
 #[inline(always)]
-fn execute_amoor_w<M: LoggingMode>(
+fn execute_amoor_w<M: LoggingMode, B: Bus>(
     rd: Gpr,
     rs1: Gpr,
     rs2: Gpr,
     inst_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    memory: &mut Memory,
+    memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     // AMOOR.W: Atomically OR word
     let base = read_reg(regs, rs1);
@@ -502,7 +504,7 @@ mod tests {
 
         let inst_word = encode_lr_w(Gpr::A0, Gpr::A0);
         let result =
-            decode_execute_atomic::<LoggingEnabled>(inst_word, 0x1000, &mut regs, &mut memory)
+            decode_execute_atomic::<LoggingEnabled, _>(inst_word, 0x1000, &mut regs, &mut memory)
                 .unwrap();
 
         assert_eq!(regs[10], 0x12345678);
@@ -523,7 +525,7 @@ mod tests {
 
         let inst_word = encode_sc_w(Gpr::A0, Gpr::A0, Gpr::A1);
         let result =
-            decode_execute_atomic::<LoggingEnabled>(inst_word, 0x1000, &mut regs, &mut memory)
+            decode_execute_atomic::<LoggingEnabled, _>(inst_word, 0x1000, &mut regs, &mut memory)
                 .unwrap();
 
         assert_eq!(regs[10], 0); // SC.W returns 0 on success
@@ -541,7 +543,7 @@ mod tests {
 
         let inst_word = encode_amoswap_w(Gpr::A0, Gpr::A0, Gpr::A1);
         let result =
-            decode_execute_atomic::<LoggingEnabled>(inst_word, 0x1000, &mut regs, &mut memory)
+            decode_execute_atomic::<LoggingEnabled, _>(inst_word, 0x1000, &mut regs, &mut memory)
                 .unwrap();
 
         assert_eq!(regs[10], 0x12345678); // Returns old value
@@ -562,7 +564,7 @@ mod tests {
 
         let inst_word = encode_amoadd_w(Gpr::A0, Gpr::A0, Gpr::A1);
         let result =
-            decode_execute_atomic::<LoggingEnabled>(inst_word, 0x1000, &mut regs, &mut memory)
+            decode_execute_atomic::<LoggingEnabled, _>(inst_word, 0x1000, &mut regs, &mut memory)
                 .unwrap();
 
         assert_eq!(regs[10], 10); // Returns old value
@@ -580,7 +582,7 @@ mod tests {
 
         let inst_word = encode_amoxor_w(Gpr::A0, Gpr::A0, Gpr::A1);
         let _result =
-            decode_execute_atomic::<LoggingEnabled>(inst_word, 0x1000, &mut regs, &mut memory)
+            decode_execute_atomic::<LoggingEnabled, _>(inst_word, 0x1000, &mut regs, &mut memory)
                 .unwrap();
 
         assert_eq!(regs[10], 0x12345678); // Returns old value
@@ -600,7 +602,7 @@ mod tests {
 
         let inst_word = encode_amoand_w(Gpr::A0, Gpr::A0, Gpr::A1);
         let _result =
-            decode_execute_atomic::<LoggingEnabled>(inst_word, 0x1000, &mut regs, &mut memory)
+            decode_execute_atomic::<LoggingEnabled, _>(inst_word, 0x1000, &mut regs, &mut memory)
                 .unwrap();
 
         assert_eq!(regs[10], 0x12345678); // Returns old value
@@ -620,7 +622,7 @@ mod tests {
 
         let inst_word = encode_amoor_w(Gpr::A0, Gpr::A0, Gpr::A1);
         let _result =
-            decode_execute_atomic::<LoggingEnabled>(inst_word, 0x1000, &mut regs, &mut memory)
+            decode_execute_atomic::<LoggingEnabled, _>(inst_word, 0x1000, &mut regs, &mut memory)
                 .unwrap();
 
         assert_eq!(regs[10], 0x12340000); // Returns old value
@@ -639,7 +641,7 @@ mod tests {
 
         let inst_word = encode_lr_w(Gpr::A0, Gpr::A0);
         let result =
-            decode_execute_atomic::<LoggingDisabled>(inst_word, 0x1000, &mut regs, &mut memory)
+            decode_execute_atomic::<LoggingDisabled, _>(inst_word, 0x1000, &mut regs, &mut memory)
                 .unwrap();
 
         assert_eq!(regs[10], 0x12345678);

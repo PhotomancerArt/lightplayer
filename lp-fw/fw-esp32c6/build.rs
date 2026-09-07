@@ -26,8 +26,10 @@ use std::process::Command;
 /// Emit build provenance for the wire hello (`ServerHello.fw`):
 /// `LP_BUILD_COMMIT` (short git commit or "unknown"), `LP_BUILD_DIRTY`
 /// ("true"/"false", false when git is absent so vendored builds still
-/// compile), and `LP_BUILD_PROFILE` (the cargo profile directory name,
-/// e.g. "release-esp32", falling back to the coarse `PROFILE` env).
+/// compile), `LP_BUILD_PROFILE` (the cargo profile directory name,
+/// e.g. "release-esp32", falling back to the coarse `PROFILE` env), and
+/// `LP_BUILD_FEATURES` (this crate's enabled cargo features, comma-separated
+/// and sorted) for the validation system's transcript header.
 fn emit_build_provenance() {
     let commit =
         git_output(&["rev-parse", "--short=12", "HEAD"]).unwrap_or_else(|| "unknown".into());
@@ -41,6 +43,29 @@ fn emit_build_provenance() {
     println!("cargo:rustc-env=LP_BUILD_COMMIT={commit}");
     println!("cargo:rustc-env=LP_BUILD_DIRTY={dirty}");
     println!("cargo:rustc-env=LP_BUILD_PROFILE={profile}");
+    println!("cargo:rustc-env=LP_BUILD_FEATURES={}", enabled_features());
+}
+
+/// This crate's enabled cargo features, from cargo's own `CARGO_FEATURE_*`
+/// environment.
+///
+/// Cargo uppercases a feature name and turns `-` into `_` to build those
+/// variable names, so `check-json` arrives as `CARGO_FEATURE_CHECK_JSON`. The
+/// inverse is not unique — this lowercases and leaves `_` alone, which is
+/// exact for every feature this crate declares (they all use `_`, never `-`).
+///
+/// The point is that a transcript's header should state the image's feature set
+/// without anyone retyping it. Sorted so two builds of the same feature set
+/// produce the same string.
+fn enabled_features() -> String {
+    let mut features: Vec<String> = std::env::vars()
+        .filter_map(|(key, _)| {
+            key.strip_prefix("CARGO_FEATURE_")
+                .map(str::to_ascii_lowercase)
+        })
+        .collect();
+    features.sort();
+    features.join(",")
 }
 
 fn git_output(args: &[&str]) -> Option<String> {

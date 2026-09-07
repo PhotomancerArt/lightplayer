@@ -3918,6 +3918,7 @@ name = "fw-checks"
 version = "40.0.0"
 dependencies = [
  "log",
+ "lps-builtins",
  "serde",
  "serde_json",
 ]
@@ -5526,6 +5527,7 @@ dependencies = [
  "log",
  "lp-collection 1.0.0",
  "lp-emu-core",
+ "lp-emu-validate",
  "lp-gfx-lpvm",
  "lp-perf",
  "lp-riscv-elf",
@@ -5660,6 +5662,27 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "lp-emu-esp-common"
+version = "40.0.0"
+dependencies = [
+ "log",
+ "lp-emu-core",
+ "object 0.37.3",
+ "test-log",
+]
+
+[[package]]
+name = "lp-emu-validate"
+version = "40.0.0"
+dependencies = [
+ "anyhow",
+ "regex",
+ "serde",
+ "serde_json",
+ "toml 0.8.23",
 ]
 
 [[package]]

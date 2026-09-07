@@ -18,10 +18,16 @@ lpa-client = { path = "../lpa-client", default-features = false }
 # and serde-only, so every target pays the same nothing for it; the transport
 # that implements its `Link` contract is feature-gated below.
 lpa-devices = { path = "../lpa-devices" }
-# device-session everywhere (RuntimeAttachment::Device drives it); the host
-# transport wire arrives via feature unification when a host provider
-# feature is enabled (tests: fake-device below; wasm: the browser features).
-lpa-link = { path = "../lpa-link", features = ["device-session"] }
+# device-session everywhere (RuntimeAttachment::Device drives it), and
+# device-link everywhere too: the effects layer's lens tap demuxes wire lines
+# through `lpa_link::device_link` unconditionally, so the minimal lib build
+# (`cargo check -p lpa-studio-core`, gated by `just check-studio-core-minimal`)
+# must see the module without relying on the dev-only `fake-device` or the
+# wasm browser features to unify it in. It only pulls lpa-devices + lpc-wire,
+# both already in this crate's graph. The host transport WIRE still arrives
+# via unification when a host provider feature is enabled (tests: fake-device
+# below; wasm: the browser features).
+lpa-link = { path = "../lpa-link", features = ["device-session", "device-link"] }
 # Format classification + offline migration for authored projects. Studio is
 # the only crate that gets this dep: the library classifies every package it
 # lists, and opening an older-but-supported one migrates it in place.

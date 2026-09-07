@@ -1,5 +1,14 @@
 # esp-emu spike scripts
 
+> **`desk-espflash-step.sh` is no longer spike-only.** The validation runner
+> (`lp-cli validate run --config silicon:…`) shells out to it rather than
+> re-deriving the port discipline, so its foreground-`script(1)`,
+> `SIG_DFL`-shim, SIGINT-by-pid, `lsof`-post-check behaviour is now a product
+> dependency. Change it with that in mind. Promotion of these scripts to
+> `scripts/emu/` is deliberately deferred: the spike report's §10 reproduce
+> section names these paths, and moving them would invalidate it.
+
+
 Host-only tooling from the 2026-09-06 spike that ran `fw-esp32c6` under
 Espressif's binary emulator (`esp-emu` 0.42.0). Report:
 `docs/reports/2026-09-07-esp-emu-c6-spike.md`. The emulator scripts never

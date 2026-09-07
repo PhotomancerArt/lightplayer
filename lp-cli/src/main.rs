@@ -11,7 +11,7 @@ mod server;
 
 use commands::{
     create, dev, firmware, fwcheck, hardware, profile, project, schema, serve, shader_debug,
-    shader_lpir, upload,
+    shader_lpir, upload, validate,
 };
 
 #[derive(Parser)]
@@ -80,6 +80,9 @@ enum Cli {
     Firmware(firmware::FirmwareCli),
     /// Run firmware checks on hardware or firmware targets.
     Fwcheck(fwcheck::FwcheckCli),
+    /// Hardware validation: payloads, configurations, transcripts, replay
+    #[command(subcommand_help_heading = "Validation")]
+    Validate(validate::ValidateCli),
     /// Developer hardware manifest and calibration tools.
     Hardware(hardware::HardwareCli),
     /// Classify or upgrade a project directory's on-disk format.
@@ -146,6 +149,7 @@ fn main() -> Result<()> {
         },
         Cli::Firmware(cli) => firmware::handle_firmware(cli),
         Cli::Fwcheck(cli) => fwcheck::handle_fwcheck(cli),
+        Cli::Validate(cli) => validate::handle_validate(cli),
         Cli::ShaderLpir {
             path,
             stats,

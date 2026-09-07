@@ -61,3 +61,13 @@ framer, the framing belongs in one shared function (or at minimum one
 test per framer against the real parser), and "no response, no error,
 busy CPU" from an emulated guest should be read first as *the guest
 never saw the message* rather than as a guest fault.
+
+**Follow-up (2026-09-06)** — the framing now lives in one place:
+`lpc_wire::json::to_serial_line` (with `json::SERIAL_LINE_PREFIX`). All
+three lpa-client serial transports and fw-core's buffered server writer
+call it, and a fw-core unit test
+(`shared_framer_output_round_trips_through_receive`) feeds the framer's
+output through the real `SerialTransport::receive` parser. The lpa-link
+writers (`device_link/wire.rs`, `browser_serial.rs`,
+`fake_device_core.rs`, `port_client_io.rs`) still frame by hand and can
+adopt the same function.

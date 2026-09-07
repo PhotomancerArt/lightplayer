@@ -117,6 +117,10 @@ def generate(name: str, title: str, pairs: int, half: bool) -> int:
         nodes[f"fixture{index}"] = OrderedDict(ref=f"./fixture{index}.json")
         nodes[f"output{index}"] = OrderedDict(ref=f"./output{index}.json")
 
+    # The canonical module writer (`NodeDef::write_json`) emits the node map
+    # sorted by name, and `lp-cli/tests/examples_valid.rs` holds every rig to
+    # that byte order — so sort here rather than emitting in build order.
+    nodes = OrderedDict(sorted(nodes.items()))
     dump_ordered(out / "module.json", OrderedDict(kind="Module", nodes=nodes))
     parent_project = load_ordered(PARENT / "project.json")
     parent_project["name"] = title

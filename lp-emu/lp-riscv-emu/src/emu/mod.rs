@@ -2,7 +2,10 @@ pub mod abi_helper;
 mod decoder;
 pub mod emulator;
 pub mod error;
-mod executor;
+// `pub(crate)`, not private: the privileged hart (P2) lives elsewhere in
+// this crate and steps instructions through `decode_execute` directly,
+// handling only SYSTEM-opcode instructions itself.
+pub(crate) mod executor;
 pub mod fp_regs;
 pub mod logging;
 
@@ -10,5 +13,11 @@ pub mod logging;
 pub use emulator::FrameOutcome;
 pub use emulator::{DEFAULT_CALL_INSTRUCTION_LIMIT, Riscv32Emulator};
 pub use error::{EmulatorError, trap_code_from_cranelift};
+// Crate-level surface for the privileged hart ([`crate::mach`]), which lives
+// outside `emu` and steps instructions through `decode_execute` directly,
+// handling only SYSTEM-opcode instructions itself. `execution.rs` /
+// `run_loops.rs` still reach `executor::` directly, so this is exactly what
+// `mach` needs and nothing more.
+pub(crate) use executor::{LoggingDisabled, decode_execute};
 pub use fp_regs::{FpRegs, RoundingMode};
 pub use logging::InstLog;

@@ -1768,6 +1768,19 @@ check-lpc-engine-gates:
     cargo test -p lpc-engine --no-default-features --features "std,$on" \
         disabled_node_kind_still_loads_project
 
+# lpa-studio-core's minimal shape: the lib alone, default features, no
+# dev-deps. Nothing else in the repo compiles it — `cargo test` unifies the
+# dev-only `fake-device` feature of lpa-link in, the wasm app unifies the
+# browser features in, and a workspace-wide `just check` unifies everything —
+# so a call into a feature-gated lpa-link module (the `device_link` demux tap
+# in `app/devices/device_effects.rs`, 2026-09) broke `cargo check -p
+# lpa-studio-core` for a while with every green gate. Same rot shape as the
+# lpc-engine gates above: the configuration nobody builds is the one that
+# breaks. Wired into `check-lint` (and so CI's Lint job).
+check-studio-core-minimal:
+    echo "==> lpa-studio-core: lib only, default features"
+    cargo check -p lpa-studio-core
+
 # riscv32: emu-guest-test-app clippy
 clippy-rv32-emu-guest-test-app: install-rv32-target
     cd lp-emu/lp-riscv-emu-guest-test-app && cargo clippy --target {{ rv32_target }} --release -- --no-deps -D warnings
@@ -1969,7 +1982,7 @@ test-glsl-filetests:
 # (which need chip builds this gate deliberately avoids). Note the narrow
 # residue: drift unique to the emu fixture itself is only caught locally.
 [parallel]
-check-lint: fmt-check clippy check-lpc-engine-gates lint-serde-content lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-torture-corpus lint-vec-corpus lint-tw-utilities
+check-lint: fmt-check clippy check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
@@ -2019,6 +2032,15 @@ lint-upgrade-fw:
 # fence lives in the script, one line of reason each.
 lint-emu-fence:
     ./scripts/check-emu-fence.sh
+
+# The generated `RegNames` tables (offset -> register name) are derived from
+# the esp32c6 PAC's svd2rust offset comments and carry a provenance header.
+# A hand edit is reverted by the next regeneration and takes its provenance
+# with it, so this checks them the way `lint-vec-corpus` checks the shader
+# corpus. It prints a notice and passes when the PAC sources are not in this
+# machine's cargo registry — see the script's header for why.
+lint-emu-regnames:
+    python3 scripts/emu/pac-regnames.py --check
 
 # Build RV32 builtins before check/build/test so host crates that embed the
 # builtins ELF do not compile a stale "builtins missing" artifact.
@@ -2278,6 +2300,14 @@ fixture-fw variant port="":
 device-scenario *args:
     node scripts/device-scenario.mjs {{ args }}
 
+# The hardware-validation system: payloads, configurations, transcripts,
+# replay. `just validate list` with no other args; `replay <transcript>
+# --against <transcript|configuration>`; `run <set> --config <name> --port …
+# [--dry-run]`; `record <set> --config <name> --commit …`. See
+# lp-emu/lp-emu-validate/README.md. Never opens a port on `list` or `replay`.
+validate *args:
+    cargo run -q -p lp-cli -- validate {{ args }}
+
 # ============================================================================
 # Demo projects
 # ============================================================================
@@ -2356,6 +2386,21 @@ fwtest-gpio-calibrate-esp32c6: install-rv32-target
     port="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32c6)"
     echo "Using ESPFLASH_PORT=$port"
     cd lp-fw/fw-esp32c6 && ESPFLASH_PORT="$port" cargo run --features test_gpio_calibrate,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
+
+# Build the UART bridge harness, the lab's USB-to-UART tap (fast=1 -> 921,600)
+fwtest-uart-bridge-esp32c6 fast="": install-rv32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # BUILD ONLY, and the missing flash step is the point: the bench that wants
+    # this has TWO identical C6s on it, and `fwcheck port` can only say that a
+    # C6 is present, not which one. Putting the bridge on the board under test
+    # destroys the measurement in silence, so the flash lives in
+    # scripts/emu/uart-bridge-flash.sh, which takes a MAC and refuses to guess.
+    features="test_uart_bridge,esp32c6"
+    if [[ -n "{{ fast }}" ]]; then features="$features,uart_bridge_fast"; fi
+    cd lp-fw/fw-esp32c6 && cargo build --features "$features" --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
+    echo "built {{ fw_esp32c6_elf }} with $features"
+    echo "flash it with: scripts/emu/uart-bridge-flash.sh <bridge-MAC>"
 
 # Flash GPIO calibration firmware, then run the host-side GPIO calibration prompt
 calibrate-gpio board="seeed/xiao-esp32-c6" label="": install-rv32-target

@@ -202,6 +202,19 @@ already running LightPlayer firmware when it first hello'd.
   at 400px. Spike: `spikes/device-card-identity-line/index.html`
   (treatment E, board·chip / MAC·fw split).
 
+- **2026-09-06 — the pending card fills both identity rows (no height change).**
+  `PendingLinkCard` printed its identity as ONE mono sentence ("chip:
+  esp32c6 · no identity until flashed") inside the same fixed 32px slot,
+  so a pending card was level with its neighbours but did not read like
+  them. It now prints the settled card's two rows, decided in core per
+  identification stage (`pending_identity_rows`): the chip alone above
+  (`chip unknown` when no banner named one — never a blank first row under
+  an Identifying chip), and below either `no identity until flashed`
+  while nothing is bound or the settled `MAC · no firmware` once the flash
+  preflight has probed a MAC. `PendingLinkView` carries that MAC (only the
+  MAC — a port name is where the link is, not who the board is). Header
+  stays 90px; `devices_card_pending` is the sheet.
+
 ## Spike and gate record
 
 - Spike: `spikes/device-card-v2/index.html`, rounds 1–3, commits

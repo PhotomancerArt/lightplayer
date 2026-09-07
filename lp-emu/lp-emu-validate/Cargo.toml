@@ -1,0 +1,21 @@
+[package]
+name = "lp-emu-validate"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+# MIT as a unit with the rest of lp-emu/ (lp-emu/LICENSE-MIT,
+# scripts/check-emu-fence.sh). This crate must never grow a dependency on a
+# product crate — not even `fw-checks`, whose payload registry it deliberately
+# mirrors rather than imports. `lp-cli` sees both and owns the parity test.
+license = "MIT"
+rust-version.workspace = true
+
+[dependencies]
+anyhow = { workspace = true, features = ["std"] }
+regex = { workspace = true }
+serde = { workspace = true, features = ["std", "derive"] }
+serde_json = { workspace = true, features = ["std"] }
+toml = "0.8"
+
+[lints]
+workspace = true

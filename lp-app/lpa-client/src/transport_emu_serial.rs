@@ -232,26 +232,19 @@ impl SerialEmuClientTransport {
 #[async_trait]
 impl crate::transport::ClientTransport for SerialEmuClientTransport {
     async fn send(&mut self, msg: ClientMessage) -> Result<(), TransportError> {
-        // Serialize message to JSON (M! prefix per protocol)
-        let json = json::to_string(&msg)
+        // Frame as one `M!{json}\n` line (the shared framer).
+        let line = json::to_serial_line(&msg)
             .map_err(|e| TransportError::Serialization(format!("JSON serialize error: {e}")))?;
-
-        let mut data = b"M!".to_vec();
-        data.extend_from_slice(json.as_bytes());
-        data.push(b'\n');
-        let total_bytes = data.len();
+        let total_bytes = line.len();
 
         log::debug!(
             "SerialEmuClientTransport: Sending message id={} ({} bytes): {}",
             msg.id,
             total_bytes,
-            json
+            line.trim_end()
         );
 
-        log::trace!(
-            "SerialEmuClientTransport: Serialized message ({} bytes)",
-            json.len()
-        );
+        let data = line.into_bytes();
 
         log::trace!(
             "SerialEmuClientTransport: Writing {total_bytes} bytes to emulator serial input"
