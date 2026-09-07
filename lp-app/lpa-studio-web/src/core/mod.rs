@@ -31,14 +31,12 @@ pub mod view;
 pub(crate) use action::confirmation_confirmed;
 pub use action::{
     ActionButton, ActionButtonVariant, ActionStrip, inline_link_row_class, menu_item_action_class,
-    outline_action_class, quiet_action_class, quiet_destructive_action_class,
-    solid_action_class,
+    outline_action_class, quiet_action_class, quiet_destructive_action_class, solid_action_class,
 };
 pub use issue_view::IssueView;
 pub use log_list::LogList;
 pub use metric_grid::MetricGrid;
 pub use progress_bar::ProgressBar;
-pub use rich_detail::RichDetailSection;
 pub(crate) use rich_detail::chip_status;
 pub use status_chip::StatusChip;
 pub use terminal_output::TerminalOutput;
