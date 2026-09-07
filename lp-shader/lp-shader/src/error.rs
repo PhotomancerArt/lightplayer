@@ -59,6 +59,11 @@ pub enum ShaderFuelTrapEntry {
     RenderTexture { x: u32, y: u32 },
     /// Sample index of the trapping invocation.
     RenderSamples { sample: u32 },
+    /// A GPU pass in which `spent` invocations ran their tank dry. The GPU
+    /// cannot trap at the first one — every invocation of the pass runs to
+    /// its bound and the pass reports afterwards — so the report is a
+    /// count, not a coordinate (`lp-gfx-wgpu`'s loop-bound pass).
+    Invocations { spent: u32 },
 }
 
 impl fmt::Display for ShaderFuelTrap {
@@ -72,6 +77,11 @@ impl fmt::Display for ShaderFuelTrap {
             ShaderFuelTrapEntry::RenderSamples { sample } => write!(
                 f,
                 "shader fuel exhausted: render_samples sample {sample} exceeded {} iterations",
+                self.budget
+            ),
+            ShaderFuelTrapEntry::Invocations { spent } => write!(
+                f,
+                "shader fuel exhausted: {spent} invocation(s) exceeded {} iterations",
                 self.budget
             ),
         }

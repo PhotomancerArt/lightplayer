@@ -93,6 +93,167 @@ TARGETS = [
         static="INTERRUPT_CORE0",
         out="lp-emu/esp/lp-emu-esp32c6/src/regs/interrupt_core0.rs",
     ),
+    # P5: every block the no-radio boot path touches (modelled or accept).
+    Target(
+        block="plic_mx",
+        static="PLIC_MX",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/plic_mx.rs",
+    ),
+    Target(
+        block="intpri",
+        static="INTPRI",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/intpri.rs",
+    ),
+    Target(
+        block="systimer",
+        static="SYSTIMER",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/systimer.rs",
+    ),
+    Target(
+        block="timg0",
+        static="TIMG0",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/timg0.rs",
+    ),
+    Target(
+        block="lp_wdt",
+        static="LP_WDT",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/lp_wdt.rs",
+    ),
+    Target(
+        block="pcr",
+        static="PCR",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/pcr.rs",
+    ),
+    Target(
+        block="pmu",
+        static="PMU",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/pmu.rs",
+    ),
+    Target(
+        block="lp_aon",
+        static="LP_AON",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/lp_aon.rs",
+    ),
+    Target(
+        block="lp_apm",
+        static="LP_APM",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/lp_apm.rs",
+    ),
+    Target(
+        block="lp_apm0",
+        static="LP_APM0",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/lp_apm0.rs",
+    ),
+    Target(
+        block="hp_apm",
+        static="HP_APM",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/hp_apm.rs",
+    ),
+    Target(
+        block="modem_syscon",
+        static="MODEM_SYSCON",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/modem_syscon.rs",
+    ),
+    Target(
+        block="modem_lpcon",
+        static="MODEM_LPCON",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/modem_lpcon.rs",
+    ),
+    Target(
+        block="i2c_ana_mst",
+        static="I2C_ANA_MST",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/i2c_ana_mst.rs",
+    ),
+    Target(
+        block="lp_i2c_ana_mst",
+        static="LP_I2C_ANA_MST",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/lp_i2c_ana_mst.rs",
+    ),
+    Target(
+        block="apb_saradc",
+        static="APB_SARADC",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/apb_saradc.rs",
+    ),
+    Target(
+        block="hp_sys",
+        static="HP_SYS",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/hp_sys.rs",
+    ),
+    Target(
+        block="tee",
+        static="TEE",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/tee.rs",
+    ),
+    Target(
+        block="lp_tee",
+        static="LP_TEE",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/lp_tee.rs",
+    ),
+    Target(
+        block="lp_io",
+        static="LP_IO",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/lp_io.rs",
+    ),
+    Target(
+        block="gpio",
+        static="GPIO",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/gpio.rs",
+    ),
+    Target(
+        block="io_mux",
+        static="IO_MUX",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/io_mux.rs",
+    ),
+    Target(
+        block="assist_debug",
+        static="ASSIST_DEBUG",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/assist_debug.rs",
+    ),
+    Target(
+        block="extmem",
+        static="EXTMEM",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/extmem.rs",
+    ),
+    Target(
+        block="usb_device",
+        static="USB_DEVICE",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/usb_device.rs",
+    ),
+    Target(
+        block="spi0",
+        static="SPI0",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/spi0.rs",
+    ),
+    Target(
+        block="spi1",
+        static="SPI1",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/spi1.rs",
+    ),
+    Target(
+        block="efuse",
+        static="EFUSE",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/efuse.rs",
+    ),
+    Target(
+        block="lp_peri",
+        static="LP_PERI",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/lp_peri.rs",
+    ),
+    Target(
+        block="uart0",
+        static="UART0",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/uart0.rs",
+    ),
+    Target(
+        block="lp_timer",
+        static="LP_TIMER",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/lp_timer.rs",
+    ),
+    Target(
+        block="rmt",
+        static="RMT",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/rmt.rs",
+    ),
 ]
 
 
@@ -194,6 +355,11 @@ ARRAY_ACCESSOR = re.compile(r"^\s*pub const fn (\w+)\(&self, n: usize\) -> &(\w+
 # `    trgt: [TRGT; 3],` in the `struct RegisterBlock` declaration: the only
 # place the element count is written down.
 ARRAY_FIELD = re.compile(r"^\s*(\w+): \[(\w+); (\d+)\],")
+# `[(); 1][n];` — the bounds check inside an array accessor's body. A cluster
+# array whose struct field svd2rust flattened into `_reserved_0_cpu: [u8; 0x9c]`
+# (ASSIST_DEBUG's `cpu(n)`) has no `[TYPE; N]` field, so this is the only place
+# its element count is written down.
+ARRAY_BOUND = re.compile(r"^\s*\[\(\); (\d+)\]\[n\];")
 
 IMPL_HEAD = re.compile(r"^impl (\w+) \{")
 
@@ -246,7 +412,9 @@ def parse_impl(text: str, type_name: str) -> list[Accessor]:
 
 
 def array_lengths(text: str) -> dict[str, int]:
-    """`field -> element count` from the `struct RegisterBlock` declaration."""
+    """`field -> element count`, from the `struct RegisterBlock` declaration
+    or, for a cluster array svd2rust flattened into a `_reserved` byte field,
+    from the `[(); N][n]` bounds check in the array accessor's body."""
     out: dict[str, int] = {}
     for line in text.splitlines():
         if line.startswith("}"):
@@ -254,6 +422,16 @@ def array_lengths(text: str) -> dict[str, int]:
         m = ARRAY_FIELD.match(line)
         if m:
             out[m.group(1)] = int(m.group(3))
+    pending: str | None = None
+    for line in text.splitlines():
+        m = ARRAY_ACCESSOR.match(line)
+        if m:
+            pending = m.group(1)
+            continue
+        m = ARRAY_BOUND.match(line)
+        if m and pending is not None:
+            out.setdefault(pending, int(m.group(1)))
+            pending = None
     return out
 
 
@@ -301,6 +479,56 @@ def collect(pac: PacSource, block: str) -> list[tuple[int, str]]:
             place(a.offset + i * stride, f"{a.name}{i}", a.type_name)
 
     return sorted(entries.items())
+
+
+# --------------------------------------------------------------------------
+# the interrupt-source table
+
+# Where the peripheral interrupt source numbers go. `esp32c6::Interrupt` is
+# `#[repr(u16)]` with one `#[doc = "N - NAME"]` per variant; the numbers are
+# the indices of `INTERRUPT_CORE0.core_0_intr_map[n]`, so they are as much
+# SVD-derived data as a register offset and carry the same header.
+SOURCES_OUT = "lp-emu/esp/lp-emu-esp32c6/src/regs/interrupt_sources.rs"
+SOURCE_DOC = re.compile(r'#\[doc = "(\d+) - (\w+)"\]')
+
+
+def collect_sources(pac: PacSource) -> list[tuple[int, str]]:
+    text = pac.read("src/interrupt.rs")
+    if text is None:
+        raise SystemExit(f"pac-regnames: {PAC_CRATE} has no src/interrupt.rs")
+    out = [(int(m.group(1)), m.group(2)) for m in SOURCE_DOC.finditer(text)]
+    return sorted(out)
+
+
+def render_sources(entries: list[tuple[int, str]], svd2rust: str) -> str:
+    lines = [
+        "// Peripheral interrupt source numbers derived from esp-rs/esp-pacs:",
+        f"//   {PAC_CRATE}/src/interrupt.rs  (crate {PAC_CRATE} {PAC_VERSION},",
+        f"//   generated by {svd2rust})",
+        f"// Repository: {PAC_REPO}",
+        f"// {PAC_LICENSE}; MIT text vendored at {VENDORED_LICENSE}.",
+        "// Generated by scripts/emu/pac-regnames.py — do not hand-edit.",
+        "// Regenerate and check with `just lint-emu-regnames`.",
+        "",
+        f"/// Every peripheral interrupt source, `(number, name)`, sorted "
+        f"({len(entries)} sources).",
+        "///",
+        "/// The number is the index into `INTERRUPT_CORE0.core_0_intr_map`.",
+        "pub static INTERRUPT_SOURCES: &[(u16, &str)] = &[",
+    ]
+    for n, name in entries:
+        lines.append(f'    ({n}, "{name}"),')
+    lines += [
+        "];",
+        "",
+        "/// The same numbers as named constants.",
+        "#[allow(dead_code, reason = \"generated: every source, used or not\")]",
+        "pub mod source {",
+    ]
+    for n, name in entries:
+        lines.append(f"    pub const {name}: u16 = {n};")
+    lines += ["}", ""]
+    return "\n".join(lines)
 
 
 # --------------------------------------------------------------------------
@@ -387,6 +615,27 @@ def main() -> int:
             f.write(text)
         print(f"  wrote      {target.out} ({len(entries)} registers)")
 
+    # The interrupt-source table, same discipline.
+    sources = collect_sources(pac)
+    if len(sources) < 2:
+        print("pac-regnames: no interrupt sources parsed — the PAC's shape changed", file=sys.stderr)
+        return 1
+    text = render_sources(sources, svd2rust)
+    path = os.path.join(REPO, SOURCES_OUT)
+    current = None
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            current = f.read()
+    if args.check:
+        if current != text:
+            stale.append(SOURCES_OUT)
+    elif current == text:
+        print(f"  unchanged  {SOURCES_OUT} ({len(sources)} sources)")
+    else:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+        print(f"  wrote      {SOURCES_OUT} ({len(sources)} sources)")
+
     if args.check:
         if stale:
             print("pac-regnames: these generated tables are out of date:")
@@ -401,8 +650,8 @@ def main() -> int:
             print()
             return 1
         print(
-            f"pac-regnames: {len(TARGETS)} generated table(s) up to date "
-            f"(source: {pac.origin})"
+            f"pac-regnames: {len(TARGETS)} generated table(s) + the interrupt-source "
+            f"table up to date (source: {pac.origin})"
         )
     return 0
 

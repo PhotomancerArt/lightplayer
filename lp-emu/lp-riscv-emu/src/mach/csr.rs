@@ -87,9 +87,23 @@ pub const MIP: u16 = 0x344;
 /// illegal-instruction trap.
 pub const MHCR: u16 = 0x7C1;
 
-/// `pccr` (machine) — Espressif's performance counter. **The only cycle-ish
-/// CSR the C6 firmware actually reads**, and only from the RNG entropy
-/// spacing loop (discovery §5). Reads `cycle_count` truncated to 32 bits.
+/// `mpcer` — the performance counter's event select (`1` = CPU cycles).
+/// Scratch: the counter below counts cycles whatever is selected, so the
+/// write is remembered and nothing else. Written by the firmware's
+/// `cycle_counter::setup()` (`board/esp32c6/cycle_counter.rs`), which the
+/// shader-compile harness runs before its first tick — an illegal-
+/// instruction trap here was the M3 P6 harness's "PANIC" (esp-hal's
+/// `ExceptionHandler`) before the counter was measured.
+pub const MPCER: u16 = 0x7E0;
+/// `mpcmr` — the performance counter's mode / enable (`1` = enabled).
+/// Scratch, same reasoning as [`MPCER`]: the count runs from reset here
+/// (*modeled*; on silicon it runs from the enable), and every reader takes
+/// `wrapping_sub` deltas, so the offset is never observed.
+pub const MPCMR: u16 = 0x7E1;
+/// `pccr` / `mpccr` (machine) — Espressif's performance counter, the
+/// cycle-ish CSR the C6 firmware reads: the RNG entropy spacing loop
+/// (discovery §5) and the harness's per-tick `slice_cycles`. Reads
+/// `cycle_count` truncated to 32 bits.
 pub const PCCR_MACHINE: u16 = 0x7E2;
 /// `pccr` (user) — compiled but statically unreachable on the C6
 /// (`tee_enabled()` is a `const false`, discovery §5). Same value as
@@ -201,7 +215,7 @@ pub const fn class(csr: u16) -> CsrClass {
 
         TSELECT | TDATA1 | TDATA2 | TCONTROL => CsrClass::Trigger,
 
-        MTVT | MHCR => CsrClass::Scratch,
+        MTVT | MHCR | MPCER | MPCMR => CsrClass::Scratch,
         // `0x802` inside this range is PCCR_USER, matched above.
         GPIO_CSR_FIRST..=GPIO_CSR_LAST => CsrClass::Scratch,
 
@@ -224,10 +238,13 @@ pub struct CsrFile {
     pub mepc: u32,
     pub mcause: u32,
     pub mtval: u32,
-    /// `mtvt`, `mhcr`, and the five dedicated-GPIO CSRs, in the order
-    /// [`CsrFile::scratch_index`] assigns.
-    scratch: [u32; 7],
+    /// `mtvt`, `mhcr`, the five dedicated-GPIO CSRs, `mpcer` and `mpcmr`,
+    /// in the order [`CsrFile::scratch_index`] assigns.
+    scratch: [u32; SCRATCH_COUNT],
 }
+
+/// How many [`CsrClass::Scratch`] CSRs there are.
+const SCRATCH_COUNT: usize = 9;
 
 impl Default for CsrFile {
     fn default() -> Self {
@@ -246,7 +263,7 @@ impl CsrFile {
             mepc: 0,
             mcause: 0,
             mtval: 0,
-            scratch: [0; 7],
+            scratch: [0; SCRATCH_COUNT],
         }
     }
 
@@ -262,6 +279,8 @@ impl CsrFile {
             0x803 => Some(4),
             0x804 => Some(5),
             0x805 => Some(6),
+            MPCER => Some(7),
+            MPCMR => Some(8),
             _ => None,
         }
     }
@@ -372,5 +391,34 @@ mod tests {
         assert_eq!(class(0x801), CsrClass::Scratch);
         assert_eq!(class(0x803), CsrClass::Scratch);
         assert!(CsrFile::scratch_index(PCCR_USER).is_none());
+    }
+
+    #[test]
+    fn the_performance_counter_control_csrs_are_accepted_not_illegal() {
+        // `cycle_counter::setup()`: `csrw 0x7E0, 1; csrw 0x7E1, 1`. An
+        // illegal-instruction trap here is a guest panic before the first
+        // harness tick.
+        assert_eq!(class(MPCER), CsrClass::Scratch);
+        assert_eq!(class(MPCMR), CsrClass::Scratch);
+        assert_eq!(class(PCCR_MACHINE), CsrClass::Derived);
+        let mut f = CsrFile::new();
+        assert!(f.write_scratch(MPCER, 1));
+        assert!(f.write_scratch(MPCMR, 1));
+        assert_eq!(f.read_scratch(MPCER), Some(1));
+        assert_eq!(f.read_scratch(MPCMR), Some(1));
+        assert_eq!(
+            f.read_scratch(0x805),
+            Some(0),
+            "the GPIO slots are untouched"
+        );
+        // Every scratch slot is reachable by exactly one CSR.
+        let mut seen = [false; SCRATCH_COUNT];
+        for csr in 0u16..0x1000 {
+            if let Some(i) = CsrFile::scratch_index(csr) {
+                assert!(!seen[i], "slot {i} claimed twice (csr {csr:#05x})");
+                seen[i] = true;
+            }
+        }
+        assert!(seen.iter().all(|s| *s), "every slot has a CSR");
     }
 }

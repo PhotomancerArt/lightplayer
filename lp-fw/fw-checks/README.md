@@ -59,6 +59,11 @@ them JSON objects with a `kind`.
    this crate rather than importing it (the `lp-emu/` MIT fence), and
    `lp-cli/tests/validate_registry_parity.rs` is what keeps the two honest.
 
+A payload that has **no module** — a shipped-image walk, where the product
+image itself is the subject — skips 1 to 4 and does only 5, plus an
+`ALL_CHECKS` entry naming the image's own features with `emits_header: false`.
+See `boot-idle` below.
+
 **Do not move a wire format in the same change as a refactor.** `lp-cli`
 parses these lines, and a protocol change hidden inside a migration is how a
 desk session gets wasted.
@@ -71,6 +76,24 @@ desk session gets wasted.
 | `gpio-calibrate` | `test_gpio_calibrate` | `CAL READY target=` (it serves; it never finishes) | `checks::gpio_calibrate` (the `CAL` line protocol, the duty ramp) |
 | `uart-bridge` | `test_uart_bridge` | `UART-BRIDGE READY ` (it serves until unplugged) | `checks::uart_bridge` (the bounded queue, the pump step, the ready line) |
 | `jit-math-perf` | `test_jit_math_perf` | `[jit-math-perf] === DONE ===` | `checks::jit_math_perf` (the corpus, the Q32 kernels, the benchmark runner — the cycle counter itself is injected as a `fn() -> u32`, since reading it is a chip fact rather than portable arithmetic) |
+| `boot-idle` | *(none — the shipped image)* | `[stack] heartbeat: high-water` | *(none)* |
+
+### `boot-idle` is the shipped image, not a module
+
+The other odd one out, and the reason two fields on `FwCheckConfig` exist.
+`boot-idle` is the product image built `server,radio,memory_fs` on top of the
+defaults, run to its first idle stack heartbeat — a **shipped-image walk**
+(vision Q1), which is a scenario kind rather than a check. There is no
+`check-boot-idle` feature and no `src/checks/boot_idle/`, because there is no
+arithmetic over bytes to share: what it prints is what the firmware prints on
+any boot.
+
+So `firmware_features` is a list here rather than one `test_*` switch, and
+`emits_header` is `false` — nothing in the image calls `write_header`, so the
+transcript's `.meta.json` sidecar is the whole provenance. An emulated
+configuration adds `spike_uart0_link` on top, because neither emulator has a
+USB host to serve the shipped link over. Steps 1–4 of the recipe above do not
+apply to a payload like this; step 5 does, and it is the only step it needs.
 
 ### `uart-bridge` is an instrument, not a measurement
 

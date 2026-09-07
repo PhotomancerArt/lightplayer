@@ -7,6 +7,8 @@
 //! - **native**: copy to a mapped buffer and block on
 //!   `device.poll(wait)` — bounded and synchronous; the native server host
 //!   can afford it (LED output path).
+//!   The loop fault flag ([`crate::fault_flag`]) rides the same wait: each
+//!   dispatch reads its own count on native.
 //! - **wasm32**: the blocking form is an explicit `GfxError::Backend` — the
 //!   browser cannot block on a map. Fixture sampling — the per-frame browser
 //!   consumer that needs bytes — does not come through here: the sample pass
@@ -20,6 +22,14 @@ use lps_shared::TextureStorageFormat;
 
 use crate::texture_backing::GpuTexture;
 
+/// Bound on the product read-back waits (native). Every shader this tier
+/// compiles is loop-bounded (`crate::loop_bound_pass`), so a submission that
+/// has not completed in this long is a lost or wedged device, not a slow
+/// frame — the wait surfaces [`GfxError::Backend`] instead of hanging the
+/// host process behind a device the driver has already reset.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) const PRODUCT_READ_BACK_WAIT: core::time::Duration = core::time::Duration::from_secs(10);
+
 /// Read a GPU texture back as logical-format bytes (native).
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn read_back_texture(
@@ -32,7 +42,15 @@ pub(crate) fn read_back_texture(
 ) -> Result<TextureData, GfxError> {
     use crate::texture_backing::f32_to_texels;
 
-    let pixels = read_back_f32(device, queue, backing, width, height, format, None)?;
+    let pixels = read_back_f32(
+        device,
+        queue,
+        backing,
+        width,
+        height,
+        format,
+        Some(PRODUCT_READ_BACK_WAIT),
+    )?;
     Ok(TextureData::new(
         width,
         height,
@@ -44,10 +62,12 @@ pub(crate) fn read_back_texture(
 /// Read the raw backing floats (pre-quantization) — the conformance/probe
 /// path (e.g. non-finite-lane detection, which quantization would mask).
 ///
-/// `timeout`: bound the device wait. The filetest probe passes a bound
-/// because corpus shaders may not terminate (CPU targets rely on fuel
-/// exhaustion; the GPU has none — an unbounded wait hangs the process).
-/// Product paths pass `None` (wait indefinitely, matching `read_back`).
+/// `timeout`: bound the device wait. Every shader this tier compiles is
+/// loop-bounded (`crate::loop_bound_pass`, the GPU's stand-in for the CPU
+/// tiers' fuel meter), so a wait that outlives its bound is a lost or wedged
+/// device and the poll surfaces `PollError::Timeout` instead of hanging the
+/// process. Product paths pass [`PRODUCT_READ_BACK_WAIT`]; the filetest
+/// probe passes its own, longer bound. `None` waits indefinitely.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn read_back_f32(
     device: &wgpu::Device,

@@ -253,41 +253,7 @@ impl Peripheral for RegFile {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::host::HostSinks;
-    use crate::periph::IrqLines;
-    use crate::trace::Trace;
-    use lp_emu_core::sched::Scheduler;
-
-    /// A `BusCx` with nothing attached, for peripherals that ignore it.
-    struct Env {
-        sched: Scheduler,
-        irq: IrqLines,
-        trace: Trace,
-        host: HostSinks,
-    }
-
-    impl Env {
-        fn new() -> Self {
-            Self {
-                sched: Scheduler::new(),
-                irq: IrqLines::new(),
-                trace: Trace::disabled(),
-                host: HostSinks::new(),
-            }
-        }
-
-        fn cx(&mut self) -> BusCx<'_> {
-            BusCx {
-                now: 0,
-                pc: 0,
-                hart: 0,
-                sched: &mut self.sched,
-                irq: &mut self.irq,
-                trace: &mut self.trace,
-                host: &mut self.host,
-            }
-        }
-    }
+    use crate::periph::Sandbox as Env;
 
     static NAMES: RegNames = RegNames {
         block: "uart0",

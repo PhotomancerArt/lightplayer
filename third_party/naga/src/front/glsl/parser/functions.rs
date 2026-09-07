@@ -382,38 +382,19 @@ impl ParsingContext<'_> {
             TokenValue::Do => {
                 let mut meta = self.bump(frontend)?.meta;
 
+                // [lp2025 fork] `do { body } while (cond);` lowers with the
+                // condition in the loop's `continuing` block as `break_if`,
+                // not as a trailing `if (!cond) { break; }` in the body.
+                // Upstream's trailing-`if` shape makes `continue` inside the
+                // body skip the condition entirely: `continue` jumps to the
+                // (empty) continuing block and back to the top, so the loop
+                // re-enters unconditionally — GLSL ES 3.0 §6.3 says a
+                // do-while `continue` proceeds to the condition test. This is
+                // the shape wgsl-in produces for `loop { … continuing { break
+                // if !cond; } }`, and the one every backend already handles.
                 let loop_body = ctx.new_body(|ctx| {
                     let mut terminator = None;
                     self.parse_statement(frontend, ctx, &mut terminator, true)?;
-
-                    let mut stmt = ctx.stmt_ctx();
-
-                    self.expect(frontend, TokenValue::While)?;
-                    self.expect(frontend, TokenValue::LeftParen)?;
-                    let root = self.parse_expression(frontend, ctx, &mut stmt)?;
-                    let end_meta = self.expect(frontend, TokenValue::RightParen)?.meta;
-
-                    meta.subsume(end_meta);
-
-                    let (expr, expr_meta) = ctx.lower_expect(stmt, frontend, root, ExprPos::Rhs)?;
-                    let condition = ctx.add_expression(
-                        Expression::Unary {
-                            op: UnaryOperator::LogicalNot,
-                            expr,
-                        },
-                        expr_meta,
-                    )?;
-
-                    ctx.emit_restart();
-
-                    ctx.body.push(
-                        Statement::If {
-                            condition,
-                            accept: new_break(),
-                            reject: Block::new(),
-                        },
-                        Span::default(),
-                    );
 
                     if let Some(idx) = terminator {
                         ctx.body.cull(idx..)
@@ -421,11 +402,33 @@ impl ParsingContext<'_> {
                     Ok(())
                 })?;
 
+                self.expect(frontend, TokenValue::While)?;
+                self.expect(frontend, TokenValue::LeftParen)?;
+
+                // The condition may read variables the body writes, so it is
+                // evaluated in `continuing` (after the body / after a
+                // `continue`), never hoisted into the body.
+                let (continuing, condition) = ctx.new_body_with_ret(|ctx| {
+                    let mut stmt = ctx.stmt_ctx();
+                    let root = self.parse_expression(frontend, ctx, &mut stmt)?;
+                    let (expr, expr_meta) = ctx.lower_expect(stmt, frontend, root, ExprPos::Rhs)?;
+                    ctx.add_expression(
+                        Expression::Unary {
+                            op: UnaryOperator::LogicalNot,
+                            expr,
+                        },
+                        expr_meta,
+                    )
+                })?;
+
+                let end_meta = self.expect(frontend, TokenValue::RightParen)?.meta;
+                meta.subsume(end_meta);
+
                 ctx.body.push(
                     Statement::Loop {
                         body: loop_body,
-                        continuing: Block::new(),
-                        break_if: None,
+                        continuing,
+                        break_if: Some(condition),
                     },
                     meta,
                 );

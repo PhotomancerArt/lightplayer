@@ -38,6 +38,25 @@ pub struct ConfigurationEntry {
     pub name: String,
     pub description: String,
     pub chip: String,
+    /// The chip identity this configuration reports, when it has to be told.
+    ///
+    /// Silicon reads its own eFuse and leaves these empty — a transcript from
+    /// a board records what that board said. An emulator has no eFuse to read,
+    /// so ours is given the desk board's MAC and revision here, and the runner
+    /// passes them on the machine's command line. That is what makes the
+    /// identity fields of a hello frame compare equal across a silicon
+    /// transcript and an emulated one instead of differing for a reason that
+    /// says nothing about the model.
+    ///
+    /// Still **not** identity in the PD4 sense: the configuration is the chip
+    /// (`lp-emu:esp32c6:t1`), and which board these numbers came from is said
+    /// in `board`, here and in every transcript's sidecar.
+    #[serde(default)]
+    pub mac: Option<String>,
+    #[serde(default)]
+    pub silicon_rev: Option<String>,
+    #[serde(default)]
+    pub board: Option<String>,
     #[serde(default)]
     pub trust: TrustTable,
 }
@@ -45,6 +64,15 @@ pub struct ConfigurationEntry {
 impl ConfigurationEntry {
     pub fn parsed(&self) -> Result<Configuration> {
         Configuration::parse(&self.name)
+    }
+
+    /// The identity to hand a driver.
+    pub fn identity(&self) -> crate::driver::Identity {
+        crate::driver::Identity {
+            mac: self.mac.clone(),
+            silicon_rev: self.silicon_rev.clone(),
+            board: self.board.clone(),
+        }
     }
 }
 

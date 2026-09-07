@@ -50,8 +50,10 @@ pub use bus::{
     BusScalars, RamRegion, SocBus, StrictViolation, event_id, event_local, event_peripheral,
 };
 pub use elf::{ElfImage, LoadSegment};
-pub use host::{ByteLog, ByteSink, ByteSource, HostSinks, ScriptedSource, StreamId};
-pub use periph::{BusCx, CpuIntMatrix, IrqLines, NoCpuInterrupts, Peripheral, Width};
+pub use host::{ByteLog, ByteSink, ByteSource, HostSinks, ScriptedSource, StreamId, TcpHost};
+pub use periph::{
+    BusCx, CpuIntMatrix, IrqLines, MachineRequest, NoCpuInterrupts, Peripheral, Sandbox, Width,
+};
 pub use regfile::RegFile;
 pub use regnames::RegNames;
 pub use trace::{Access, MmioEvent, Trace};

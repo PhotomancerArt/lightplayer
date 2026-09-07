@@ -52,7 +52,7 @@ use lp_emu_core::sched::Cycles;
 use lp_emu_core::{Bus, CycleModel};
 use lp_emu_esp_common::bus::StrictViolation;
 use lp_emu_esp_common::periph::BoxedPeripheral;
-use lp_emu_esp_common::{ByteLog, ByteSink, ElfImage, RamRegion, SocBus};
+use lp_emu_esp_common::{ByteLog, ByteSink, ByteSource, ElfImage, RamRegion, SocBus};
 use lp_riscv_emu::mach::trigger::TRIGGER_COUNT;
 use lp_riscv_emu::mach::{HartFault, MachineHart, SliceEnd};
 
@@ -62,10 +62,18 @@ use crate::memmap;
 use crate::rom::{self, HookResult, HookTable, PlacedSegment, RomError};
 use crate::snapshot::Snapshot;
 
-/// The largest slice the machine ever asks for, so `--exit-on` and
-/// `--wall-timeout` are checked at a bounded guest interval (≈6.5 ms at
-/// 160 MHz) without the hot loop leaving the hart.
-const MAX_SLICE_CYCLES: u64 = 1_000_000;
+/// The largest slice the machine ever asks for: 8,192 cycles, 51 µs.
+///
+/// A slice's deadline is fixed when it starts, from the schedule as it was
+/// then. An MMIO write *inside* the slice can schedule an event sooner than
+/// that deadline — esp-rtos arming a 1 ms tick, say — and nothing in the
+/// hart looks at the schedule again until the slice ends. So the cap is the
+/// worst-case lateness of any event a peripheral schedules mid-slice, and
+/// 51 µs is 0.5 % of the 10 ms tick and 5 % of the 1 ms one. The cost is one
+/// scheduler peek and one matrix resample per 8,192 cycles, which the
+/// no-radio boot does not notice. (P4 had 1,000,000 here, when no peripheral
+/// could schedule anything.)
+const MAX_SLICE_CYCLES: u64 = 8_192;
 
 /// The slice cap while strict mode is on.
 ///
@@ -83,34 +91,56 @@ const STRICT_SLICE_CYCLES: u64 = 1_024;
 /// The list is the blocks the M3 discovery reports name on the C6 boot and
 /// runtime path, in the order the boot meets them. A block a later phase
 /// needs is added **in its place in this list**, never appended for
-/// convenience.
+/// convenience. [`crate::periph::boot_set`] registers exactly this order.
 pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     // Reached inside `esp_hal::init`, in `init` order (discovery §4).
     "LP_APM",
+    "LP_APM0",
+    "HP_APM",
     "LP_AON",
     "PMU",
     "LP_CLKRST",
     "LP_WDT",
+    "MODEM_SYSCON",
+    "MODEM_LPCON",
     "I2C_ANA_MST",
+    "LP_I2C_ANA_MST",
     "PCR",
     "TIMG0",
     "TIMG1",
     "EFUSE",
+    "LP_TIMER",
     "APB_SARADC",
     "SYSTIMER",
     "ASSIST_DEBUG",
-    // The interrupt path (P5).
+    // The interrupt path.
     "INTERRUPT_CORE0",
     "PLIC_MX",
     "INTPRI",
-    // Consoles (P6) and the rest of the product path (M4, M5).
+    // The rest of what the no-radio image touches.
+    "HP_SYS",
+    "TEE",
+    "LP_TEE",
+    "LP_IO",
+    "RNG",
+    "EXTMEM",
+    // Consoles (accept in P5, modelled in P6) and the product path (M4, M5).
     "UART0",
     "UART1",
     "USB_DEVICE",
     "IO_MUX",
     "GPIO",
+    "SPI0",
     "SPI1",
     "RMT",
+    // The radio window (P6): esp-radio's init runs after `Rmt::new` in
+    // `main`, and nothing else in the boot reaches `0x600A_0000`. The PWR
+    // gap is the first radio block the ROM's `tsf_hal_*` touches.
+    "WIFI_MAC",
+    "WIFI_PWR",
+    // The analog I2C master's command memory (P6, G6-2 finding 1): libphy
+    // fills it right after its first radio-window writes.
+    "I2C_MST_MEM",
 ];
 
 /// Which cycle model a run uses. Both grades are the same machine; only the
@@ -169,14 +199,32 @@ pub enum AppSource {
     Bytes(Vec<u8>),
 }
 
-/// Where a run's UART0 bytes go. P6 attaches the peripheral that produces
-/// them; P4 builds the stream so the plumbing and the flag are settled.
+/// Where a run's UART0 bytes go — and, for `Tcp`, where its RX bytes come
+/// from. Whatever the choice, the bytes are also kept in memory for
+/// `--exit-on` and [`Esp32C6Machine::uart0`].
 #[derive(Clone, Debug, Default)]
 pub enum Uart0Sink {
     /// Collected in memory only (and matched against `--exit-on`).
     #[default]
     Memory,
     Stdout,
+    File(PathBuf),
+    /// **Listen** on this address (`127.0.0.1:5555`) for one client at a
+    /// time — as esp-emu's `--uart-tcp` did for the spike's proxy, and what
+    /// `lp-cli … serial:tcp://127.0.0.1:5555` connects to. The client's bytes
+    /// are UART0's RX. A run with a live socket is not deterministic; see
+    /// [`lp_emu_esp_common::TcpHost`].
+    Tcp(String),
+}
+
+/// Where USB-Serial-JTAG's IN-endpoint bytes are observed: what the guest
+/// tried to print with no host attached (esp-println's `[INIT] …` lines).
+/// Always also kept in memory ([`Esp32C6Machine::usb_sj`]).
+#[derive(Clone, Debug, Default)]
+pub enum UsbSjSink {
+    #[default]
+    Memory,
+    Stderr,
     File(PathBuf),
 }
 
@@ -197,9 +245,17 @@ pub enum Outcome {
     /// Strict mode refused an access. Carries the access itself, not where
     /// the hart ended up after taking the fault for it.
     StrictBus { violation: StrictViolation },
+    /// A peripheral asked for a reset the machine cannot perform: the RWDT
+    /// expired with a reset action. The chip would reboot; the emulator
+    /// reports it (M7 owns the boot chain). Exit code 2, like a fault —
+    /// on silicon this is `rst:0x10 (RTCWDT_RTC_RST)` in the boot log.
+    Reset { cycle: Cycles, source: &'static str },
     /// The wall-clock safety net fired. The only non-deterministic outcome,
     /// and it can only end a run.
     WallTimeout { cycle: Cycles },
+    /// A `--break-at` symbol was reached; the guest is stopped at its first
+    /// instruction with every register as the caller left it.
+    Breakpoint { cycle: Cycles, pc: u32 },
 }
 
 impl Outcome {
@@ -207,9 +263,10 @@ impl Outcome {
     pub const fn exit_code(&self) -> i32 {
         match self {
             Outcome::ExitMatched { .. } | Outcome::Deadline { .. } => 0,
-            Outcome::Fault { .. } => 2,
+            Outcome::Fault { .. } | Outcome::Reset { .. } => 2,
             Outcome::StrictBus { .. } => 3,
             Outcome::WallTimeout { .. } => 4,
+            Outcome::Breakpoint { .. } => 5,
         }
     }
 }
@@ -313,6 +370,11 @@ impl ByteSink for TeeSink {
 
 /// Assemble a machine. Code-first, as the vision asks: start from the chip,
 /// attach the ROM and the app, pick the time grade, build.
+///
+/// [`Esp32C6Builder::new`] is the C6 with its boot peripheral set
+/// ([`crate::periph::boot_set`]); [`Esp32C6Builder::bare`] is the memory
+/// map and the ROM with **no** peripherals, for tests that bring their own
+/// and for reading what an unmodelled boot looks like.
 pub struct Esp32C6Builder {
     rom: RomSource,
     app: AppSource,
@@ -322,7 +384,13 @@ pub struct Esp32C6Builder {
     trace: Option<Box<dyn std::io::Write + Send>>,
     trace_blocks: Vec<String>,
     uart0: Uart0Sink,
+    /// Scripted host input for UART0 (`--uart0-script`). Ignored when the
+    /// sink is `Tcp`, whose client is the source.
+    uart0_source: Option<Box<dyn ByteSource>>,
+    usb_sj: UsbSjSink,
     seed: u64,
+    /// Register the boot set before `peripherals`.
+    boot_set: bool,
     peripherals: Vec<(u32, u32, BoxedPeripheral)>,
 }
 
@@ -333,6 +401,7 @@ impl Default for Esp32C6Builder {
 }
 
 impl Esp32C6Builder {
+    /// A C6 with its boot peripheral set.
     pub fn new() -> Self {
         Self {
             rom: RomSource::Vendored,
@@ -343,8 +412,20 @@ impl Esp32C6Builder {
             trace: None,
             trace_blocks: Vec::new(),
             uart0: Uart0Sink::default(),
+            uart0_source: None,
+            usb_sj: UsbSjSink::default(),
             seed: 0,
+            boot_set: true,
             peripherals: Vec::new(),
+        }
+    }
+
+    /// The map and the ROM with no peripherals at all. Every MMIO access is
+    /// unmapped until [`peripheral`](Self::peripheral) adds a block.
+    pub fn bare() -> Self {
+        Self {
+            boot_set: false,
+            ..Self::new()
         }
     }
 
@@ -381,6 +462,19 @@ impl Esp32C6Builder {
 
     pub fn uart0(mut self, sink: Uart0Sink) -> Self {
         self.uart0 = sink;
+        self
+    }
+
+    /// Deterministic host input for UART0: bytes at declared cycles
+    /// ([`lp_emu_esp_common::ScriptedSource`], or anything else that is not
+    /// a socket).
+    pub fn uart0_source(mut self, source: Box<dyn ByteSource>) -> Self {
+        self.uart0_source = Some(source);
+        self
+    }
+
+    pub fn usb_sj(mut self, sink: UsbSjSink) -> Self {
+        self.usb_sj = sink;
         self
     }
 
@@ -436,7 +530,10 @@ impl Esp32C6Builder {
             trace,
             trace_blocks,
             uart0,
+            uart0_source,
+            usb_sj,
             seed,
+            boot_set,
             peripherals,
         } = self;
 
@@ -461,39 +558,104 @@ impl Esp32C6Builder {
             bus.trace = lp_emu_esp_common::Trace::to_sink(sink).with_block_filter(trace_blocks);
         }
 
-        // UART0's host stream exists from P4 so the flag, the `--exit-on`
-        // match and the snapshot all have one thing to point at; P6 attaches
-        // the peripheral that writes to it.
+        // The host streams first, so the peripherals that hold their ids can
+        // be built. UART0's bytes are always tee'd into memory for
+        // `--exit-on` and the snapshot, whatever else they go to.
         let uart0_log = ByteLog::new();
-        let inner: Box<dyn ByteSink> = match &uart0 {
-            Uart0Sink::Memory => Box::new(lp_emu_esp_common::host::NullSink),
-            Uart0Sink::Stdout => Box::new(lp_emu_esp_common::host::StdoutSink),
+        let mut uart0_tcp: Option<lp_emu_esp_common::TcpHost> = None;
+        let (inner, source): (Box<dyn ByteSink>, Box<dyn ByteSource>) = match &uart0 {
+            Uart0Sink::Memory => (
+                Box::new(lp_emu_esp_common::host::NullSink),
+                uart0_source.unwrap_or_else(|| Box::new(lp_emu_esp_common::host::NullSource)),
+            ),
+            Uart0Sink::Stdout => (
+                Box::new(lp_emu_esp_common::host::StdoutSink),
+                uart0_source.unwrap_or_else(|| Box::new(lp_emu_esp_common::host::NullSource)),
+            ),
             Uart0Sink::File(path) => {
                 let file = std::fs::File::create(path)
                     .map_err(|e| BuildError::Io(format!("creating {}: {e}", path.display())))?;
-                Box::new(FileSink(file))
+                (
+                    Box::new(FileSink(file)),
+                    uart0_source.unwrap_or_else(|| Box::new(lp_emu_esp_common::host::NullSource)),
+                )
+            }
+            Uart0Sink::Tcp(addr) => {
+                let host = lp_emu_esp_common::TcpHost::listen(addr)
+                    .map_err(|e| BuildError::Io(format!("listening on {addr}: {e}")))?;
+                log::info!("UART0 listening on {}", host.local_addr());
+                if uart0_source.is_some() {
+                    log::warn!(
+                        "--uart0-script is ignored with --uart0 tcp: the client is the source"
+                    );
+                }
+                let halves = host.split();
+                uart0_tcp = Some(host);
+                halves
             }
         };
-        bus.host.add(
+        let uart0_id = bus.host.add(
             "uart0",
             Box::new(TeeSink {
                 log: uart0_log.clone(),
                 inner,
             }),
-            Box::new(lp_emu_esp_common::host::NullSource),
+            source,
         );
 
-        // Peripherals, in the declared order. P4 registers none; the check
-        // is here so P5 cannot quietly re-sort them.
-        check_registration_order(&peripherals)?;
-        for (base, len, periph) in peripherals {
+        let usb_sj_log = ByteLog::new();
+        let usb_inner: Box<dyn ByteSink> = match &usb_sj {
+            UsbSjSink::Memory => Box::new(lp_emu_esp_common::host::NullSink),
+            UsbSjSink::Stderr => Box::new(StderrSink),
+            UsbSjSink::File(path) => {
+                let file = std::fs::File::create(path)
+                    .map_err(|e| BuildError::Io(format!("creating {}: {e}", path.display())))?;
+                Box::new(FileSink(file))
+            }
+        };
+        let usb_sj_id = bus.host.add(
+            "usb-sj",
+            Box::new(TeeSink {
+                log: usb_sj_log.clone(),
+                inner: usb_inner,
+            }),
+            Box::new(lp_emu_esp_common::host::NullSource),
+        );
+        // UART1: the firmware never opens it; its bytes go nowhere, on
+        // purpose, but the block is a real UART so a guest that does open it
+        // is answered by a model rather than a table.
+        let uart1_id = bus.host.add(
+            "uart1",
+            Box::new(lp_emu_esp_common::host::NullSink),
+            Box::new(lp_emu_esp_common::host::NullSource),
+        );
+        let streams = crate::periph::HostStreams {
+            uart0: Some(uart0_id),
+            uart1: Some(uart1_id),
+            usb_sj: Some(usb_sj_id),
+        };
+
+        // Peripherals, in the declared order: the boot set first, then
+        // whatever the caller added. The check is what stops a re-sort from
+        // re-pointing scheduled events.
+        let mut all = if boot_set {
+            crate::periph::boot_set(efuse, seed, streams)
+        } else {
+            Vec::new()
+        };
+        all.extend(peripherals);
+        check_registration_order(&all)?;
+        for (base, len, periph) in all {
             bus.add_peripheral(base, len, periph);
         }
 
         // The ROM first, then the app on top of it: the ROM's `.bss` reaches
         // across what the app calls RAM, and the real bootloader overwrites
-        // it the same way.
+        // it the same way. Then the ROM's initialised data, as its startup
+        // would have left it (`rom::seed_data`) — all of it above the app's
+        // memory.
         let rom_segments = rom::load(&mut bus, &rom_image)?;
+        let rom_data = rom::seed_data(&mut bus, &rom_image)?;
         let mut app_segments = Vec::new();
         let mut entry = rom_image.entry;
         if let Some(app) = &app_image {
@@ -503,6 +665,11 @@ impl Esp32C6Builder {
         }
 
         bus.set_strict(strict);
+
+        // Guest time is zero and the schedule is empty: the peripherals that
+        // need a first event (a UART polling its host source) take it now.
+        bus.set_time(0);
+        bus.start_peripherals();
 
         let mut hart = MachineHart::new(0);
         loader::reset_hart(&mut hart, &mut bus, entry);
@@ -520,10 +687,28 @@ impl Esp32C6Builder {
             seed,
             rng: seed,
             rom_segments,
+            rom_data,
             app_segments,
             uart0_log,
+            usb_sj_log,
+            uart0_tcp,
             hook_calls: 0,
+            idle_skips: 0,
+            stop_at: None,
         })
+    }
+}
+
+/// A `ByteSink` over the host's stderr — the `--usb-sj stderr` observation
+/// channel, kept off stdout so it never mixes with `--uart0 stdout`.
+struct StderrSink;
+
+impl ByteSink for StderrSink {
+    fn write(&mut self, bytes: &[u8]) {
+        use std::io::Write;
+        let mut err = std::io::stderr().lock();
+        let _ = err.write_all(bytes);
+        let _ = err.flush();
     }
 }
 
@@ -586,9 +771,18 @@ pub struct Esp32C6Machine {
     seed: u64,
     rng: u64,
     rom_segments: Vec<PlacedSegment>,
+    rom_data: Vec<rom::SeededSection>,
     app_segments: Vec<PlacedAppSegment>,
     uart0_log: ByteLog,
+    usb_sj_log: ByteLog,
+    /// The UART0 listener, when the sink is `Tcp`; held so it lives as long
+    /// as the machine and so a runner can ask whether a client ever came.
+    uart0_tcp: Option<lp_emu_esp_common::TcpHost>,
     hook_calls: u64,
+    idle_skips: u64,
+    /// Set by a hook that answered [`HookResult::Stop`]; the run loop ends
+    /// with [`Outcome::Breakpoint`] at that pc.
+    stop_at: Option<u32>,
 }
 
 impl Esp32C6Machine {
@@ -618,6 +812,12 @@ impl Esp32C6Machine {
         &self.rom_segments
     }
 
+    /// The ROM's initialised-data sections seeded after its segments
+    /// ([`rom::seed_data`]).
+    pub fn rom_data(&self) -> &[rom::SeededSection] {
+        &self.rom_data
+    }
+
     pub fn app_segments(&self) -> &[PlacedAppSegment] {
         &self.app_segments
     }
@@ -630,14 +830,84 @@ impl Esp32C6Machine {
         &mut self.hooks
     }
 
+    /// Stop the run when `symbol` (app first, then ROM; resolved like a
+    /// `--probe`) is entered, with the guest untouched. The bring-up
+    /// question "who calls this, with what in `a0..a7`" answered without a
+    /// debugger.
+    pub fn break_at(&mut self, symbol: &str) -> Result<u32, RomError> {
+        let address = self
+            .resolve_symbol(symbol)
+            .ok_or_else(|| RomError::NoSuchSymbol(symbol.to_string()))?;
+        // The hook table wants a `'static` name for the `--hooks` listing.
+        let name: &'static str = Box::leak(symbol.to_string().into_boxed_str());
+        self.hooks
+            .install_at(&mut self.bus, address, name, |_| HookResult::Stop)
+    }
+
+    /// The NUL-terminated printable string at `address`, up to `limit`
+    /// bytes, or `None` if the bytes there are not text. For a break
+    /// report: `a0` at `ets_printf` is a format string worth reading.
+    pub fn peek_string(&mut self, address: u32, limit: usize) -> Option<String> {
+        let mut out = Vec::new();
+        for i in 0..limit as u32 {
+            let word = self.peek_word(address.wrapping_add(i) & !3)?;
+            let byte = (word >> (8 * (address.wrapping_add(i) & 3))) as u8;
+            if byte == 0 {
+                break;
+            }
+            if !(byte.is_ascii_graphic() || byte == b' ' || byte == b'\n' || byte == b'\t') {
+                return None;
+            }
+            out.push(byte);
+        }
+        (!out.is_empty()).then(|| String::from_utf8_lossy(&out).into_owned())
+    }
+
+    /// `(mcause, mepc, mtval)` — what the last trap said. At a `--break-at
+    /// ExceptionHandler` these name the instruction that faulted.
+    pub fn trap_csrs(&self) -> (u32, u32, u32) {
+        let csr = self.harts[0].csr();
+        (csr.mcause, csr.mepc, csr.mtval)
+    }
+
+    /// The hart's integer registers, `x0..x31`.
+    pub fn registers(&self) -> [u32; 32] {
+        let regs = self.harts[0].regs();
+        let mut out = [0u32; 32];
+        for (i, r) in out.iter_mut().enumerate() {
+            *r = regs[i] as u32;
+        }
+        out
+    }
+
     /// How many times a ROM hook has stood in for a routine.
     pub fn hook_calls(&self) -> u64 {
         self.hook_calls
     }
 
-    /// Everything UART0 has produced. Empty until P6 models the peripheral.
+    /// How many times the hart parked in `wfi` and the machine moved guest
+    /// time to the next event — the deterministic idle skip. The count is
+    /// the evidence that the idle hook was reached.
+    pub fn idle_skips(&self) -> u64 {
+        self.idle_skips
+    }
+
+    /// Everything UART0 has put on the wire — bytes that left the shifter,
+    /// in the guest's order. Bytes still in the TX FIFO are not here yet.
     pub fn uart0(&self) -> &ByteLog {
         &self.uart0_log
+    }
+
+    /// Everything the guest handed to USB-Serial-JTAG's IN endpoint with no
+    /// host attached: an observation of what it *tried* to print, never
+    /// guest output that reached anyone.
+    pub fn usb_sj(&self) -> &ByteLog {
+        &self.usb_sj_log
+    }
+
+    /// The UART0 TCP listener, when `Uart0Sink::Tcp` was chosen.
+    pub fn uart0_tcp(&self) -> Option<&lp_emu_esp_common::TcpHost> {
+        self.uart0_tcp.as_ref()
     }
 
     // ---- time ----------------------------------------------------------
@@ -690,6 +960,46 @@ impl Esp32C6Machine {
         self.app.as_ref().and_then(from).or_else(|| from(&self.rom))
     }
 
+    /// The hart's call chain, outermost last, walked through the `s0`
+    /// frame-pointer chain the firmware keeps (`-C force-frame-pointers`,
+    /// the ADR that keeps it for `lpc-shared`'s crash report): at every
+    /// frame `ra` is at `s0 - 4` and the caller's `s0` at `s0 - 8`. Stops at
+    /// the first frame pointer outside HP SRAM, or after 64 frames.
+    ///
+    /// What a fault report wants: a strict-bus refusal inside `core::fmt`
+    /// says nothing until the frames above it say "the panic handler, called
+    /// from `X`".
+    pub fn backtrace(&mut self) -> Vec<(u32, String)> {
+        let regs = self.harts[0].regs();
+        let pc = self.harts[0].pc();
+        let ra = regs[1] as u32;
+        let mut s0 = regs[8] as u32;
+        let mut frames = vec![pc, ra];
+        for _ in 0..64 {
+            let in_sram =
+                s0 >= memmap::HP_SRAM_BASE + 8 && s0 <= memmap::HP_SRAM_BASE + memmap::HP_SRAM_LEN;
+            if !in_sram {
+                break;
+            }
+            let (Some(next_ra), Some(next_s0)) = (self.peek_word(s0 - 4), self.peek_word(s0 - 8))
+            else {
+                break;
+            };
+            if next_ra == 0 || next_s0 == s0 {
+                break;
+            }
+            frames.push(next_ra);
+            s0 = next_s0;
+        }
+        frames
+            .into_iter()
+            .map(|a| {
+                let sym = self.symbolize(a).unwrap_or_else(|| "?".to_string());
+                (a, sym)
+            })
+            .collect()
+    }
+
     /// Read a word of guest memory from the host side (a `--probe`, a test).
     /// Uses the bus's own decode, so an address nothing claims answers the
     /// same way it would for the guest.
@@ -702,14 +1012,71 @@ impl Esp32C6Machine {
     }
 
     /// The word at a symbol, for `--probe <symbol>@<ms>`.
+    ///
+    /// Resolution: the exact ELF name first (a C symbol, or a mangled name
+    /// pasted from `nm`); then the demangled path without its hash, so
+    /// `esp_println::serial_jtag_printer::TIMED_OUT` finds
+    /// `_ZN11esp_println19serial_jtag_printer9TIMED_OUT17h…E`; then, as a
+    /// last resort, a **unique** symbol whose demangled path ends with the
+    /// query, so a bare `TIMED_OUT` works when only one exists. An ambiguous
+    /// short name is refused rather than guessed — the alternatives are in
+    /// the log.
     pub fn peek_symbol(&mut self, name: &str) -> Option<(u32, u32)> {
-        let address = self
+        let address = self.resolve_symbol(name)?;
+        self.peek_word(address).map(|v| (address, v))
+    }
+
+    /// See [`peek_symbol`](Self::peek_symbol).
+    pub fn resolve_symbol(&self, name: &str) -> Option<u32> {
+        if let Some(s) = self
             .app
             .as_ref()
             .and_then(|a| a.symbol(name))
-            .or_else(|| self.rom.symbol(name))?
-            .address;
-        self.peek_word(address).map(|v| (address, v))
+            .or_else(|| self.rom.symbol(name))
+        {
+            return Some(s.address);
+        }
+        let images = self.app.iter().chain(std::iter::once(&self.rom));
+        let mut path_matches = Vec::new();
+        let mut suffix_matches = Vec::new();
+        for image in images {
+            for s in image.symbols() {
+                let mut demangled = format!("{:#}", rustc_demangle::demangle(&s.name));
+                // LLVM's renaming suffix on a static that was split or
+                // duplicated (`…::TIMED_OUT.0`): not part of the path.
+                while let Some((head, tail)) = demangled.rsplit_once('.')
+                    && !tail.is_empty()
+                    && tail.bytes().all(|b| b.is_ascii_digit())
+                {
+                    demangled = head.to_string();
+                }
+                if demangled == name {
+                    path_matches.push((s.address, demangled));
+                } else if demangled.ends_with(name)
+                    && demangled[..demangled.len() - name.len()].ends_with("::")
+                {
+                    suffix_matches.push((s.address, demangled));
+                }
+            }
+        }
+        for (label, matches) in [("path", path_matches), ("suffix", suffix_matches)] {
+            match matches.as_slice() {
+                [] => {}
+                [(address, _)] => return Some(*address),
+                many => {
+                    log::warn!(
+                        "probe `{name}`: {} {label} matches, refusing to guess: {}",
+                        many.len(),
+                        many.iter()
+                            .map(|(a, n)| format!("{n} @ {a:#010x}"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    );
+                    return None;
+                }
+            }
+        }
+        None
     }
 
     // ---- the run loop ---------------------------------------------------
@@ -763,6 +1130,7 @@ impl Esp32C6Machine {
                         .unwrap_or(stop_cycle)
                         .min(stop_cycle);
                     self.harts[0].advance_to_cycle(wake);
+                    self.idle_skips += 1;
                 }
                 SliceEnd::Ebreak { pc } => {
                     if !self.serve_breakpoint(pc) {
@@ -800,6 +1168,17 @@ impl Esp32C6Machine {
             if let Some(violation) = self.bus.first_strict_violation() {
                 return Outcome::StrictBus { violation };
             }
+            if let Some(pc) = self.stop_at.take() {
+                return Outcome::Breakpoint {
+                    cycle: self.cycles(),
+                    pc,
+                };
+            }
+            if let Some(lp_emu_esp_common::MachineRequest::Reset { source, at }) =
+                self.bus.take_request()
+            {
+                return Outcome::Reset { cycle: at, source };
+            }
             if let Some(needle) = &stop.exit_on
                 && let Some(cycle) = self.exit_on_match(needle, &mut matched)
             {
@@ -835,6 +1214,10 @@ impl Esp32C6Machine {
                 true
             }
             HookResult::Breakpoint => false,
+            HookResult::Stop => {
+                self.stop_at = Some(pc);
+                true
+            }
         }
     }
 
@@ -848,17 +1231,39 @@ impl Esp32C6Machine {
         }
     }
 
+    /// `--exit-on`: stop at the **end of the line** the match is on.
+    ///
+    /// Not at the match. UART0 drains one byte at a time in emulated time and
+    /// this is checked between bytes, so a needle that is a *prefix* of its
+    /// line would stop the run mid-line and leave the rest of it unsent —
+    /// which is how M3 P7 first recorded `[stack] heartbeat: high-water` with
+    /// neither of the two figures the payload exists to report. A transcript
+    /// is lines; committing a truncated one would be worse than not stopping.
+    ///
+    /// If the newline never arrives the run goes on to its deadline, which is
+    /// the safe direction: a run that ran too long says so in its own report,
+    /// while a capture cut in half looks like data.
     fn exit_on_match(&self, needle: &str, from: &mut usize) -> Option<Cycles> {
         let text = self.uart0_log.text();
         if text.len() <= *from {
             return None;
         }
-        let found = text[*from..].find(needle).map(|i| *from + i);
-        // Keep the search anchored so a long run does not rescan the whole
-        // console every slice; back off by the needle so a match split
-        // across two slices is still found.
-        *from = text.len().saturating_sub(needle.len());
-        found.map(|_| self.cycles())
+        match text[*from..].find(needle).map(|i| *from + i) {
+            Some(at) if text[at + needle.len()..].contains('\n') => Some(self.cycles()),
+            // Matched, but the line is still arriving: hold the anchor here so
+            // the next byte re-checks this same match rather than the tail.
+            Some(at) => {
+                *from = at;
+                None
+            }
+            // Keep the search anchored so a long run does not rescan the whole
+            // console every slice; back off by the needle so a match split
+            // across two slices is still found.
+            None => {
+                *from = text.len().saturating_sub(needle.len());
+                None
+            }
+        }
     }
 
     // ---- snapshot -------------------------------------------------------
@@ -875,6 +1280,7 @@ impl Esp32C6Machine {
             rng: self.rng,
             hook_calls: self.hook_calls,
             uart0: self.uart0_log.bytes(),
+            usb_sj: self.usb_sj_log.bytes(),
         }
     }
 
@@ -891,6 +1297,7 @@ impl Esp32C6Machine {
         self.rng = s.rng;
         self.hook_calls = s.hook_calls;
         self.uart0_log.replace(&s.uart0);
+        self.usb_sj_log.replace(&s.usb_sj);
 
         for slot in 0..TRIGGER_COUNT {
             let wp = self.harts[0].triggers().watchpoint(slot);
@@ -972,20 +1379,20 @@ mod tests {
     #[test]
     fn the_registration_order_is_checked_not_just_documented() {
         // In order: fine.
-        let ok = Esp32C6Builder::new()
+        let ok = Esp32C6Builder::bare()
             .peripheral(0x6000_8000, 0x100, Box::new(RegFile::new("TIMG0", 0x100)))
             .peripheral(0x6000_0000, 0x100, Box::new(RegFile::new("UART0", 0x100)))
             .build();
         assert!(ok.is_ok());
 
         // Reversed: refused, because event ids pack the index.
-        let bad = Esp32C6Builder::new()
+        let bad = Esp32C6Builder::bare()
             .peripheral(0x6000_0000, 0x100, Box::new(RegFile::new("UART0", 0x100)))
             .peripheral(0x6000_8000, 0x100, Box::new(RegFile::new("TIMG0", 0x100)))
             .build();
         assert!(matches!(bad, Err(BuildError::RegistrationOrder { .. })));
 
-        let undeclared = Esp32C6Builder::new()
+        let undeclared = Esp32C6Builder::bare()
             .peripheral(0x6000_0000, 0x100, Box::new(RegFile::new("NOPE", 0x100)))
             .build();
         assert!(matches!(
@@ -1000,6 +1407,78 @@ mod tests {
         for name in PERIPHERAL_REGISTRATION_ORDER {
             assert!(seen.insert(*name), "`{name}` is listed twice");
         }
+    }
+
+    #[test]
+    fn the_boot_set_is_registered_in_the_declared_order_and_a_bare_machine_has_none() {
+        let m = Esp32C6Builder::new().build().unwrap();
+        let names: Vec<&str> = (0..m.bus.peripheral_count())
+            .map(|i| m.bus.peripheral(i).unwrap().name())
+            .collect();
+        // Every registered block is in the declared order, in that order.
+        let mut cursor = 0;
+        for name in &names {
+            let at = PERIPHERAL_REGISTRATION_ORDER[cursor..]
+                .iter()
+                .position(|d| d == name)
+                .unwrap_or_else(|| panic!("`{name}` out of order"));
+            cursor += at + 1;
+        }
+        // And the declared order names nothing the boot set lacks.
+        let missing: Vec<&&str> = PERIPHERAL_REGISTRATION_ORDER
+            .iter()
+            .filter(|d| !names.contains(d))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "declared but not registered: {missing:?}"
+        );
+        assert!(matches!(
+            m.bus.matrix().as_any().downcast_ref::<Esp32C6IntMatrix>(),
+            Some(_)
+        ));
+
+        let bare = Esp32C6Builder::bare().build().unwrap();
+        assert_eq!(bare.bus.peripheral_count(), 0);
+    }
+
+    #[test]
+    fn a_reset_request_from_a_peripheral_ends_the_run_with_exit_code_two() {
+        assert_eq!(
+            Outcome::Reset {
+                cycle: 5,
+                source: "LP_WDT stage 0 (ResetSystem)"
+            }
+            .exit_code(),
+            2
+        );
+        let mut m = Esp32C6Builder::new().build().unwrap();
+        // A guest that does nothing: `j .` in HP SRAM, so time passes
+        // without the ROM's reset path (which is M7's) being run.
+        m.bus
+            .load_image(memmap::HP_SRAM_BASE, &0x0000_006fu32.to_le_bytes())
+            .unwrap();
+        m.harts[0].set_pc(memmap::HP_SRAM_BASE);
+        // Arm the RWDT from the host side the way the firmware does: unlock,
+        // hold of one tick, wdt_en + stage 0 = ResetSystem, lock.
+        let base = memmap::periph::LP_WDT;
+        m.bus.write_word(base + 0x18, 0x50D8_3AA1).unwrap();
+        m.bus.write_word(base + 0x04, 1).unwrap();
+        m.bus
+            .write_word(base + 0x00, (1u32 << 31 | 4 << 28) as i32)
+            .unwrap();
+        m.bus.write_word(base + 0x18, 0).unwrap();
+        let out = m.run_until(&StopCondition::after_micros(10_000));
+        assert!(
+            matches!(
+                out,
+                Outcome::Reset {
+                    source: "LP_WDT stage 0 (ResetSystem)",
+                    ..
+                }
+            ),
+            "{out:?}"
+        );
     }
 
     #[test]
