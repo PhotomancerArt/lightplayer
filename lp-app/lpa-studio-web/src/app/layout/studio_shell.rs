@@ -48,8 +48,8 @@ pub fn StudioShell(
     #[props(default)]
     project_view: ProjectView,
     /// The workbench view tabs' hrefs, one slot per view-table row; a
-    /// `None` slot hides its tab (a device lens has no mapping address
-    /// yet). Stories default to inert fragments.
+    /// `None` slot hides its tab. Every lens route (project, example,
+    /// device) fills every slot. Stories default to inert fragments.
     #[props(default)]
     workbench_hrefs: Option<WorkbenchHrefs>,
     on_action: EventHandler<UiAction>,
