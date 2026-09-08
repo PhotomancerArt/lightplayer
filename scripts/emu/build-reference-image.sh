@@ -137,6 +137,28 @@ fi
 #      `-x86_64-unknown-linux-gnu`). `--remap-path-prefix` rewrites all three
 #      to host-independent names.
 #
+#   3. A LINKER SCRIPT RACE. `fw-esp32c6/build.rs` patches esp-hal's
+#      generated `rodata.x` to merge `.rodata_desc` and `.rodata` into one
+#      output section, and cargo gives it no ordering edge against esp-hal's
+#      own script — esp-hal has no `links` key, which that build script warns
+#      about in capitals. In a FRESH target dir ours runs first, finds no
+#      `esp-hal-*/out` to patch, and the link takes esp-hal's stock script:
+#      an image with `.flash.appdesc` first and `.rodata_merge` /
+#      `.rodata.wifi` as sections of their own. Every later build in that
+#      tree re-patches (that script watches a path that does not exist yet,
+#      so it always re-runs) and links the merged layout. So the first build
+#      of a cold tree is a different image from the second — and CI's tree is
+#      always cold. Measured here: a fresh worktree's first build and its
+#      second differ by 108 B and by the whole `.rodata` layout, and the
+#      second matches this host's other worktree byte for byte.
+#
+#      This is NOT the `rom_index < 2` bootloader assert build.rs describes,
+#      and the stock layout was not tested on silicon: it keeps its own merge
+#      section (that is what esp-hal's `.rodata_merge` is for) and its flash
+#      sections are contiguous, so it would very likely boot. The point is
+#      narrower and enough: it is a different image from the one the desk
+#      flashes and the transcripts were recorded against.
+#
 # Cargo's `-C metadata` is NOT one of the causes — measured: the same package
 # built at two different absolute paths gets the same metadata hash, so no
 # mangled symbol moves with the directory.
@@ -148,21 +170,6 @@ fi
 # joins with them. This tree is a pinned build scratch, never the shipped
 # source, and the shipped image keeps its real build stamp and its real
 # paths: nothing here changes what a `just build-fw-esp32c6` produces.
-#
-#   3. A LINKER SCRIPT RACE, the one `fw-esp32c6/build.rs` warns about in
-#      capitals. That script patches esp-hal's generated `rodata.x` to merge
-#      `.rodata_desc` and `.rodata` into one output section (the ESP32
-#      bootloader maps at most two ROM segments), and cargo gives it no
-#      ordering edge against esp-hal's own script — esp-hal has no `links`
-#      key. In a FRESH target dir ours runs first, finds no
-#      `esp-hal-*/out` to patch, and the link takes esp-hal's pristine
-#      script: an image with `.rodata_merge` and `.rodata.wifi` as their own
-#      sections. Every later build in that tree re-patches and links the
-#      merged layout. So the first build of a cold tree is a different image
-#      from the second — and CI's tree is always cold. Measured here: a
-#      fresh worktree's first build and its second differ by 108 B and by
-#      the whole `.rodata` layout, and the second matches this host's other
-#      worktree byte for byte.
 #
 # Cargo's `-C metadata` is NOT one of the causes — measured: the same package
 # built at two different absolute paths gets the same metadata hash, so no
