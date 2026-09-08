@@ -297,3 +297,84 @@ fn the_payload_says_it_is_the_emulators_boot_chain() {
     assert!(p.fresh_chip, "a ROM-up boot starts from a chip nobody used");
     assert_eq!(p.firmware_features, ["server", "radio"]);
 }
+
+// --------------------------------------------------------------------------
+// The desk board's own chase, recorded 2026-09-08 (the walk record's §9 item).
+// --------------------------------------------------------------------------
+
+/// The silicon `rmt-chase` capture, `A0:F2:62:87:B4:8C` on 2026-09-08.
+const SILICON_CHASE: &str = "silicon-esp32c6-2026-09-08-7d7ebfa62.txt";
+/// The emulator's, from M5 P3.
+const EMU_CHASE: &str = "lp-emu-esp32c6-t1-2026-09-07-c0d62e360.txt";
+
+/// **The chase is the same chase on both machines, frame for frame.**
+///
+/// 768 frames of a 256-LED white dot walking the strip, each carrying the
+/// guest's own FNV-1a checksum of the bytes it handed the driver. Every one
+/// of them agrees with the emulator's — 3,073 structural comparisons, all
+/// equal — which is the thing the walk record's §9 listed as not run and
+/// this is it run.
+///
+/// **The replay still reports two problems, and they are a filed defect
+/// rather than a result**
+/// (`docs/defects/2026-09-08-a-pin-capture-is-a-property-of-the-configuration-not-the-payload.md`):
+/// the payload declares a per-frame pin capture, `replay()` asks both sides
+/// for one, and silicon cannot give one because reading a real pad needs an
+/// instrument nobody has put on this bench — which the trust table and the
+/// walk record both already say. This test asserts the half that is real and
+/// names the other half, rather than asserting `is_ok()` on a comparison the
+/// system has written down as impossible.
+#[test]
+fn the_silicon_chase_agrees_frame_for_frame() {
+    let silicon = load("rmt-chase", SILICON_CHASE);
+    let ours = load("rmt-chase", EMU_CHASE);
+    assert_eq!(silicon.header.configuration, "silicon:esp32c6");
+    assert!(
+        silicon.header.firmware_dirty == Some(false),
+        "recorded from a clean tree, so the commit in the sidecar rebuilds it"
+    );
+
+    let report = replay(&silicon, &ours, ReplayOptions::default()).expect("the replay runs");
+    println!("{}", report.render());
+
+    // The claim: every frame the two machines' guests checksummed agrees.
+    assert_eq!(
+        report.differences_in(FieldClass::Structural).count(),
+        0,
+        "{:?}",
+        diffs(&report, FieldClass::Structural)
+    );
+    assert_eq!(
+        report.differences_in(FieldClass::Pin).count(),
+        0,
+        "{:?}",
+        diffs(&report, FieldClass::Pin)
+    );
+    // 768 frames, and the count is asserted so a truncated capture cannot
+    // pass by having nothing to disagree about.
+    assert_eq!(
+        silicon
+            .lines
+            .iter()
+            .filter(|l| l.contains("\"kind\":\"rmt-frame\""))
+            .count(),
+        768
+    );
+
+    // And the two problems that are the filed defect, named exactly. If this
+    // list ever changes, the defect moved or something else broke.
+    let failures: Vec<String> = report.failures().iter().map(|f| f.to_string()).collect();
+    assert_eq!(failures.len(), 2, "{failures:?}");
+    assert!(
+        failures
+            .iter()
+            .any(|f| f.contains("claims a pin capture and has none")),
+        "{failures:?}"
+    );
+    assert!(
+        failures
+            .iter()
+            .any(|f| f.contains("0 decoded frames on the left")),
+        "{failures:?}"
+    );
+}
