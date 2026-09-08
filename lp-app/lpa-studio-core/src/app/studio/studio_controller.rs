@@ -557,6 +557,9 @@ impl StudioController {
             target: sidecar.target.clone(),
             display_name: entry.title(),
             base_mac: sidecar.base_mac.clone(),
+            // PD12: a device asks for the GPU tier; the worker answers with
+            // what it granted, and the band says which.
+            tier: crate::SimTier::Gpu,
         })
     }
 
@@ -2621,7 +2624,7 @@ impl StudioController {
             // A sim with no roster device is one that never said hello:
             // the transport still holds its worker, and powering it off is
             // the whole of the teardown.
-            let Some(device) = self.device_at_address(&uid).map(|device| device.id) else {
+            let Some(device) = self.lens_facts_at_address(&uid).map(|facts| facts.device) else {
                 transport.power_off(&uid);
                 continue;
             };
@@ -3206,15 +3209,15 @@ impl StudioController {
     /// The lens's handle on the device registered as `uid`, or the honest
     /// reason it cannot be opened right now.
     fn device_lens_attachment(&self, uid: &str) -> Result<crate::DeviceLensAttachment, UiError> {
-        let device = self
-            .device_at_address(uid)
+        let facts = self
+            .lens_facts_at_address(uid)
             .ok_or_else(|| UiError::MissingSession(format!("no device is registered as {uid}")))?;
-        let link = device
-            .link()
+        let link = facts
+            .link
             .ok_or_else(|| UiError::MissingSession("this board is not connected".to_string()))?;
         // Attached is not open: a port the model closed (Disconnect, a
         // cancelled identify) has stale hello evidence and no wire to lend.
-        if !device.evidence.presence.is_open() {
+        if !facts.open {
             return Err(UiError::MissingSession(
                 "this board's port is closed — connect it first".to_string(),
             ));
@@ -3223,29 +3226,28 @@ impl StudioController {
         // hope-it-works terms Yona ruled (2026-09-04) — the fold has
         // journaled the version difference, and a request the old firmware
         // cannot answer fails the way any request fails.
-        let hello = device.evidence.classification.hello().ok_or_else(|| {
+        let board_id = facts.hello.ok_or_else(|| {
             UiError::MissingSession(
                 "this board has not identified itself as a LightPlayer yet".to_string(),
             )
         })?;
-        if device.is_busy() {
+        if facts.busy {
             return Err(UiError::MissingSession(
                 "this board is busy with an activity; wait for it to finish".to_string(),
             ));
         }
         Ok(crate::DeviceLensAttachment {
-            device: device.id,
+            device: facts.device,
             link,
             uid: uid.to_string(),
-            name: device.title(),
-            board_id: hello.board_id.clone(),
+            name: facts.name,
+            board_id,
             // Read off the device's own endpoint rung: `sim:<uid>` is the
             // sim transport's scheme, and nothing else answers to it.
-            transport: device
-                .identity
+            transport: facts
                 .endpoint
-                .as_ref()
-                .map(|endpoint| crate::LinkTransport::from_endpoint(&endpoint.0))
+                .as_deref()
+                .map(crate::LinkTransport::from_endpoint)
                 .unwrap_or(crate::LinkTransport::Serial),
             // The hello the fold mirrors carries no build features; the
             // attach reads them off the lens's own wire (`read_device_build`)
@@ -3272,6 +3274,60 @@ impl StudioController {
             .devices()
             .iter()
             .find(|device| device.identity.endpoint.as_ref() == Some(&endpoint))
+    }
+
+    /// What the lens needs to know about the thing at an address, whether
+    /// the fold holds it as a device or as a still-PENDING link.
+    ///
+    /// The docs page's sim is the pending case, permanently: it is minted
+    /// with no MAC (PD10 — identity-less, never a registry row), so its
+    /// hello names no identity, the fold never promotes its link to a
+    /// device, and the only handle it ever has is the `sim:<key>` endpoint
+    /// its link wears. `device_at_address` promised to resolve it and
+    /// searched only the devices, which is why the docs embeds stayed at
+    /// "Starting the simulator" with a booted, identified runtime behind
+    /// them (G1, 2026-09-07). The pending entry carries the same evidence
+    /// a device does, so the lens reads the same facts off it.
+    fn lens_facts_at_address(&self, uid: &str) -> Option<LensFacts> {
+        if let Some(device) = self.device_at_address(uid) {
+            return Some(LensFacts {
+                device: device.id,
+                link: device.link(),
+                open: device.evidence.presence.is_open(),
+                hello: device
+                    .evidence
+                    .classification
+                    .hello()
+                    .map(|hello| hello.board_id.clone()),
+                busy: device.is_busy(),
+                name: device.title(),
+                endpoint: device
+                    .identity
+                    .endpoint
+                    .as_ref()
+                    .map(|endpoint| endpoint.0.clone()),
+            });
+        }
+        let endpoint = crate::sim_endpoint(uid);
+        let pending = self
+            .devices
+            .roster()
+            .pending()
+            .iter()
+            .find(|pending| pending.info.endpoint == endpoint)?;
+        let evidence = pending.evidence();
+        Some(LensFacts {
+            device: pending.device_id(),
+            link: evidence.link(),
+            open: evidence.presence.is_open(),
+            hello: evidence
+                .classification
+                .hello()
+                .map(|hello| hello.board_id.clone()),
+            busy: pending.is_identifying(),
+            name: pending.info.label.clone(),
+            endpoint: Some(endpoint.0.clone()),
+        })
     }
 
     /// The hardware request deadline: the device-session default budget,
@@ -3332,11 +3388,11 @@ impl StudioController {
             return;
         };
         let link = attachment.link;
+        // By address, not by device id: the docs sim's lens is on a pending
+        // link, which `roster().device()` never finds.
         let port_open = self
-            .devices
-            .roster()
-            .device(attachment.device)
-            .is_some_and(|device| device.evidence.presence.is_open());
+            .lens_facts_at_address(&attachment.uid)
+            .is_some_and(|facts| facts.open);
         if self.devices.link_is_routable(link) && port_open {
             return;
         }
@@ -3355,8 +3411,8 @@ impl StudioController {
         let Some(uid) = self.pending_device_lens.clone() else {
             return;
         };
-        if let Some(name) = self.sim_that_did_not_start(&uid) {
-            self.release_hold_on_a_sim_that_did_not_start(&uid, &name);
+        if let Some((name, detail)) = self.sim_that_did_not_start(&uid) {
+            self.release_hold_on_a_sim_that_did_not_start(&uid, &name, &detail);
             return;
         }
         if self.device_lens_attachment(&uid).is_err() {
@@ -3398,15 +3454,23 @@ impl StudioController {
     /// closes under it — are over), and the port is either closed again or
     /// open with nothing said in its window. A booting sim is busy; an
     /// adopted one is open with a hello; a sim the sweep has not reached
-    /// yet is on no link at all — each of those keeps the hold.
+    /// yet is on no link at all; one whose runtime is still starting says
+    /// so through its control — each of those keeps the hold.
     ///
     /// The browser case (G1, 2026-09-07): a worker that could not fetch its
     /// engine posts `fatal`, the link raises `Error` + `Closed`, the fold
     /// re-asks twice more and stops, and the project card said "Opening…"
     /// for as long as anyone watched.
-    fn sim_that_did_not_start(&self, uid: &str) -> Option<String> {
+    fn sim_that_did_not_start(&self, uid: &str) -> Option<(String, String)> {
         let sim = self.sim_transport.as_ref()?;
-        if !sim.is_powered(uid) {
+        if !sim.is_powered(uid) || sim.is_starting(uid) {
+            // Off, or still coming up. The second matters: the fold's
+            // identify deadline (5 s) is shorter than a cold worker boot,
+            // and each eviction closes and re-opens the link — which
+            // KILLS the worker and boots a fresh one — so at the retry
+            // cap the last boot is still in flight while the link reads
+            // "attached, idle, not open" below. Only the runtime knows it
+            // is starting, so it is asked first.
             return None;
         }
         let endpoint = crate::sim_endpoint(uid);
@@ -3441,12 +3505,19 @@ impl StudioController {
             // Adopted and listening: the ordinary attach lands this tick.
             return None;
         }
-        Some(
-            self.devices
-                .device_for_key(uid)
-                .map(|device| device.title())
-                .unwrap_or_else(|| "The sim".to_string()),
-        )
+        let name = self
+            .devices
+            .device_for_key(uid)
+            .map(|device| device.title())
+            .unwrap_or_else(|| "The sim".to_string());
+        // The evidence the verdict rests on, for the console line: a
+        // release that turns out premature has to be arguable from the log.
+        let detail = format!(
+            "port {}, hello {}",
+            if presence.is_open() { "open" } else { "closed" },
+            if hello { "heard" } else { "not heard" },
+        );
+        Some((name, detail))
     }
 
     /// End a held open on a sim that did not start: power the sim off (so
@@ -3454,13 +3525,13 @@ impl StudioController {
     /// open's own Retry can start it again — a "powered" entry with no
     /// runtime behind it could never be powered on again), and hand the
     /// opening frame its verdict, naming the device.
-    fn release_hold_on_a_sim_that_did_not_start(&mut self, uid: &str, name: &str) {
+    fn release_hold_on_a_sim_that_did_not_start(&mut self, uid: &str, name: &str, detail: &str) {
         self.pending_device_lens = None;
         let message = format!("{name} did not start");
         self.push_log(UiLogDraft::new(
             UiLogLevel::Warn,
             UiLogOrigin::Studio,
-            format!("{message}: its runtime closed before it said hello; powered off"),
+            format!("{message}: its runtime gave up before it said hello ({detail}); powered off"),
         ));
         self.power_off_sim(Some(uid.to_string()));
         if let Some(pending) = self.pending_open.take() {
@@ -4217,6 +4288,13 @@ impl StudioController {
                 // No MAC: the runtime answers with no identity, which is
                 // what keeps this device out of the registry.
                 base_mac: String::new(),
+                // The docs embed draws the runtime's BYTES (the rendered
+                // frame is a byte preview, like the preview pool's host),
+                // and a GPU-tier product has none to read back — the embed
+                // showed the probe's refusal where the lamps go (G1,
+                // 2026-09-07). PD12's GPU request is for devices with a
+                // present path; this one has only the embed.
+                tier: crate::SimTier::Cpu,
             })
             .map_err(UiError::Link)?;
         self.device_sweep_pending = true;
@@ -4738,6 +4816,23 @@ fn project_tree_item_actions(
 /// The per-operation shape of one device management flow (reset / flash /
 /// wipe): the link request plus the notice/log wording that differs between
 /// them. Everything else — quiesce, capture, manage, reopen, reattach,
+/// The lens's view of the thing at an address: the facts
+/// `StudioController::device_lens_attachment` decides on, read the same way
+/// off a roster device or off a pending link (`lens_facts_at_address`).
+struct LensFacts {
+    device: lpa_devices::DeviceId,
+    link: Option<lpa_devices::LinkId>,
+    /// The port is open right now (attached is not open).
+    open: bool,
+    /// `Some(board_id)` when a hello was heard in the current window.
+    hello: Option<Option<String>>,
+    /// An activity is running on it.
+    busy: bool,
+    name: String,
+    /// The endpoint rung, for the transport fork (`sim:` vs a port).
+    endpoint: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;

@@ -115,5 +115,5 @@ pub use sim_record::{
     sim_endpoint, sim_link_info, uid_from_sim_endpoint, write_sim_record,
 };
 pub use sim_transport::{
-    SimBacking, SimDeviceTransport, SimLinkSource, SimRuntimeControl, SimSession,
+    SimBacking, SimDeviceTransport, SimLinkSource, SimRuntimeControl, SimSession, SimTier,
 };

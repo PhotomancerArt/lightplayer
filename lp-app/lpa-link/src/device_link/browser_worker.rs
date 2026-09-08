@@ -83,6 +83,7 @@ impl BrowserWorkerLink {
                 queue: RefCell::new(VecDeque::new()),
                 open: Cell::new(false),
                 granted_tier: Cell::new(None),
+                starting: Cell::new(false),
                 draining: Cell::new(false),
             }),
         }
@@ -114,6 +115,12 @@ impl Link for BrowserWorkerLink {
     }
 
     fn submit(&mut self, command: LinkCommand) {
+        // Raised at SUBMISSION, not when the drain reaches it: a reader
+        // asking "is this runtime still coming up?" between the two must
+        // hear yes.
+        if matches!(command, LinkCommand::Open { .. } | LinkCommand::RunReset(_)) {
+            self.inner.starting.set(true);
+        }
         self.inner.queue.borrow_mut().push_back(command);
         WorkerLinkInner::drain(&self.inner);
     }
@@ -169,6 +176,18 @@ impl BrowserWorkerControl {
         self.inner.granted_tier.get()
     }
 
+    /// Whether a boot is in flight: an `Open`, a reset or a restart has
+    /// been asked for and has not yet answered (with `Opened`, or with the
+    /// error-and-close a boot that failed ends in).
+    ///
+    /// The model cannot tell "closed and coming back" from "closed for
+    /// good" — both are a link that is attached and not open — and a boot
+    /// takes seconds, so anyone deciding that a sim has given up must ask
+    /// this first (the studio's held open does).
+    pub fn is_starting(&self) -> bool {
+        self.inner.starting.get()
+    }
+
     /// Post one envelope at the worker, for the conversations that speak the
     /// protocol channel directly (`browser_worker_io`).
     pub(crate) fn post(&self, envelope: &BrowserInputEnvelope) -> Result<(), String> {
@@ -205,6 +224,10 @@ struct WorkerLinkInner {
     /// the request would claim a GPU the browser refused (fidelity-tiers
     /// ADR: recorded and surfaced, never silent).
     granted_tier: Cell<Option<BrowserRuntimeTier>>,
+    /// A boot is in flight (see [`BrowserWorkerControl::is_starting`]):
+    /// raised when an `Open`/`RunReset` is submitted or a restart begins,
+    /// cleared when that command has answered.
+    starting: Cell<bool>,
     /// A future is already draining [`Self::queue`]. Keeps commands ordered
     /// without a channel.
     draining: Cell<bool>,
@@ -237,9 +260,15 @@ impl WorkerLinkInner {
             // The baud is meaningless to a worker and deliberately ignored
             // rather than faked into a field: a sim has no wire rate, and
             // recording one would invite somebody to trust it.
-            LinkCommand::Open { .. } => self.open_worker().await,
+            LinkCommand::Open { .. } => {
+                self.open_worker().await;
+                self.starting.set(false);
+            }
             LinkCommand::Close => self.close_worker("closed by request"),
-            LinkCommand::RunReset(kind) => self.run_reset(kind).await,
+            LinkCommand::RunReset(kind) => {
+                self.run_reset(kind).await;
+                self.starting.set(false);
+            }
             LinkCommand::SendFrame(frame) => match client_message(&frame) {
                 Ok(message) => match lpc_wire::json::to_string(&message) {
                     Ok(json) => self.send_protocol(json),
@@ -275,12 +304,7 @@ impl WorkerLinkInner {
             return;
         }
         match self.spawn_and_boot().await {
-            Ok(()) => {
-                self.open.set(true);
-                self.push(LinkEvent::Opened {
-                    info: self.info.clone(),
-                });
-            }
+            Ok(boot_events) => self.push_opened_then(boot_events),
             Err(error) => {
                 self.push(LinkEvent::Error(error));
                 self.push(LinkEvent::Closed {
@@ -292,7 +316,17 @@ impl WorkerLinkInner {
 
     /// The spawn + boot half, without the eventing: shared by `Open` and the
     /// destroy-and-recreate a reset performs.
-    async fn spawn_and_boot(&self) -> Result<(), String> {
+    ///
+    /// Returns the boot output as the model's events instead of pushing
+    /// them, because their ORDER against `Opened` is the caller's to get
+    /// right: the boot output carries the runtime's boot hello, and the
+    /// fold begins a fresh evidence window on `Opened` — a hello pushed
+    /// before it was heard, adopted the sim, and was then thrown away with
+    /// the window, leaving a record that was open, identified by nothing in
+    /// its window, and waiting on the runtime's next periodic hello before
+    /// a project could open on it (40–60 s; G1, 2026-09-07). `Opened`
+    /// first, then what the runtime said.
+    async fn spawn_and_boot(&self) -> Result<Vec<LinkEvent>, String> {
         // Cloned, never borrowed across the await: an effect may re-dress
         // the next boot (`set_hardware_manifest`) while this one is still
         // in flight, and a live `Ref` would make that a panic instead of
@@ -315,6 +349,7 @@ impl WorkerLinkInner {
         // Boot output is evidence like any other: the studio's log envelopes
         // become lines so a sim that complained on the way up says so on its
         // card instead of only in the console.
+        let mut events = Vec::new();
         for output in outputs {
             // The boot runtime's own `RuntimeCreated` is the ONE place the
             // granted tier is stated. Recorded here, before `Opened` is
@@ -322,11 +357,22 @@ impl WorkerLinkInner {
             if let BrowserOutputEnvelope::RuntimeCreated { tier, .. } = &output {
                 self.granted_tier.set(Some(*tier));
             }
-            for event in worker_events(output) {
-                self.push(event);
-            }
+            events.extend(worker_events(output));
         }
-        Ok(())
+        Ok(events)
+    }
+
+    /// Announce the open, then what the runtime said on its way up — in
+    /// that order, so the boot hello lands inside the window the open
+    /// begins (see [`Self::spawn_and_boot`]).
+    fn push_opened_then(&self, boot_events: Vec<LinkEvent>) {
+        self.open.set(true);
+        self.push(LinkEvent::Opened {
+            info: self.info.clone(),
+        });
+        for event in boot_events {
+            self.push(event);
+        }
     }
 
     /// Terminate the worker and SAY so, even if there was nothing running —
@@ -356,12 +402,9 @@ impl WorkerLinkInner {
             return;
         }
         match self.spawn_and_boot().await {
-            Ok(()) => {
-                self.open.set(true);
+            Ok(boot_events) => {
                 self.push(LinkEvent::ResetOutcome { kind, ok: true });
-                self.push(LinkEvent::Opened {
-                    info: self.info.clone(),
-                });
+                self.push_opened_then(boot_events);
             }
             Err(error) => {
                 self.push(LinkEvent::Error(error));
@@ -377,14 +420,13 @@ impl WorkerLinkInner {
     /// the outcome returned instead of raised (an effect reports through its
     /// activity, not through the link's event queue).
     async fn restart(&self) -> Result<(), String> {
+        self.starting.set(true);
         let handle = self.handle.borrow_mut().take();
         drop(handle);
         self.open.set(false);
-        self.spawn_and_boot().await?;
-        self.open.set(true);
-        self.push(LinkEvent::Opened {
-            info: self.info.clone(),
-        });
+        let booted = self.spawn_and_boot().await;
+        self.starting.set(false);
+        self.push_opened_then(booted?);
         Ok(())
     }
 

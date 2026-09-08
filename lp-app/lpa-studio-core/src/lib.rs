@@ -46,7 +46,7 @@ pub use app::devices::{
     DevicesOp, FeedLiveness, FirmwareVerb, FlashBoardChoice, FlashOffer, GrantedLink, JournalLine,
     LensLineTap, LensTapEvent, NewSimRecord, PushOffer, PushPayload, PushSource, PushSourceChoice,
     PushSourceGroup, RememberedView, RosterSplit, SIM_TRANSPORT, SimBacking, SimDeviceTransport,
-    SimLinkSource, SimRecord, SimRuntimeControl, SimSession, StagedPush, UiRuntimeBand,
+    SimLinkSource, SimRecord, SimRuntimeControl, SimSession, SimTier, StagedPush, UiRuntimeBand,
     delete_sim_record, device_card_feed_view, device_card_feed_views, device_chip,
     device_escape_action, device_escape_action_for, device_firmware_line, device_identity_line,
     device_status_kind, feed_liveness, firmware_face_preview_sentence, firmware_verb,

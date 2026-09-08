@@ -31,7 +31,7 @@ use crate::app::library::ProjectTarget;
 
 use super::device_transport::{DeviceTransportFuture, GrantedLink, LensLineTap, LensTapEvent};
 use super::sim_record::sim_link_info;
-use super::sim_transport::{SimBacking, SimLinkSource, SimRuntimeControl, SimSession};
+use super::sim_transport::{SimBacking, SimLinkSource, SimRuntimeControl, SimSession, SimTier};
 
 /// Sims backed by `fw-browser` workers.
 pub struct BrowserSimLinkSource {
@@ -90,8 +90,12 @@ impl SimLinkSource for BrowserSimLinkSource {
         // manifest, so the `None` arm is unreachable by construction — it
         // is a refusal rather than an unwrap because a sim that cannot say
         // what it is should fail to power on, not panic the tab.
+        let tier = match session.tier {
+            SimTier::Gpu => BrowserRuntimeTier::Gpu,
+            SimTier::Cpu => BrowserRuntimeTier::Cpu,
+        };
         let runtime = worn
-            .runtime_options(BrowserRuntimeTier::Gpu)
+            .runtime_options(tier)
             .ok_or_else(|| format!("no hardware profile is checked in for {}", worn.board_id()))?
             .with_identity(session.base_mac.clone());
         let link = BrowserWorkerLink::new(info.clone(), self.options.clone().with_runtime(runtime));
@@ -133,6 +137,10 @@ impl SimRuntimeControl for WorkerRuntimeControl {
             BrowserRuntimeTier::Gpu => "gpu",
             BrowserRuntimeTier::Cpu => "cpu",
         })
+    }
+
+    fn is_starting(&self) -> bool {
+        self.control.is_starting()
     }
 
     fn client_io(&self, tap: Option<LensLineTap>) -> Result<Box<dyn lpa_client::ClientIo>, String> {

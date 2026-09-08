@@ -61,6 +61,22 @@ pub struct SimSession {
     pub display_name: String,
     /// The minted base MAC the runtime reports as its identity.
     pub base_mac: String,
+    /// The shader tier the runtime is ASKED for. What it is granted is the
+    /// worker's answer ([`SimRuntimeControl::granted_tier`]).
+    pub tier: SimTier,
+}
+
+/// The shader tier a sim asks its runtime for (PD12).
+///
+/// A device asks for `Gpu` and the worker falls back to `Cpu` with a reason
+/// the band reports. A sim whose only consumer reads the runtime's BYTES —
+/// the docs embed's rendered frame — asks for `Cpu` outright: a GPU-tier
+/// product is GPU-resident and has no bytes to read back, so the request
+/// would buy the embed a refusal where its lamps go.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SimTier {
+    Gpu,
+    Cpu,
 }
 
 /// A handle on ONE running sim's runtime: what an effect does to it, as
@@ -95,6 +111,18 @@ pub trait SimRuntimeControl {
     /// the tail rather than guessing.
     fn granted_tier(&self) -> Option<&'static str> {
         None
+    }
+
+    /// Whether the runtime is still coming up: an open, reset or restart
+    /// has been asked for and has not answered yet.
+    ///
+    /// The fold cannot see this — a link that is attached and not open
+    /// looks the same whether a boot is in flight behind it or nothing is
+    /// — and a boot takes seconds, so the studio asks here before it
+    /// decides a sim has given up. A source whose runtimes start
+    /// instantly (the bench) never needs to say yes.
+    fn is_starting(&self) -> bool {
+        false
     }
 }
 
@@ -178,6 +206,16 @@ impl SimDeviceTransport {
     /// and has booted (see [`SimRuntimeControl::granted_tier`]).
     pub fn granted_tier(&self, uid: &str) -> Option<&'static str> {
         self.powered.borrow().get(uid)?.control.granted_tier()
+    }
+
+    /// Whether this sim's runtime is still coming up (see
+    /// [`SimRuntimeControl::is_starting`]). `false` for a sim that is not
+    /// powered on.
+    pub fn is_starting(&self, uid: &str) -> bool {
+        self.powered
+            .borrow()
+            .get(uid)
+            .is_some_and(|powered| powered.control.is_starting())
     }
 
     /// The runtime control behind a link's endpoint, when it is one of ours.
@@ -424,6 +462,7 @@ mod tests {
             target: "lightplayer/desktop".to_string(),
             display_name: "Desktop".to_string(),
             base_mac: "12:22:33:44:55:66".to_string(),
+            tier: SimTier::Gpu,
         }
     }
 
