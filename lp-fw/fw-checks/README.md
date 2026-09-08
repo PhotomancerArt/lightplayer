@@ -76,6 +76,7 @@ desk session gets wasted.
 | `gpio-calibrate` | `test_gpio_calibrate` | `CAL READY target=` (it serves; it never finishes) | `checks::gpio_calibrate` (the `CAL` line protocol, the duty ramp) |
 | `uart-bridge` | `test_uart_bridge` | `UART-BRIDGE READY ` (it serves until unplugged) | `checks::uart_bridge` (the bounded queue, the pump step, the ready line) |
 | `jit-math-perf` | `test_jit_math_perf` | `[jit-math-perf] === DONE ===` | `checks::jit_math_perf` (the corpus, the Q32 kernels, the benchmark runner — the cycle counter itself is injected as a `fn() -> u32`, since reading it is a chip fact rather than portable arithmetic) |
+| `cycle-probe` | `test_cycle_probe` | `[cycle-probe] === DONE ===` | `checks::cycle_probe` (the two-clock bracket, the repetition, the record, and the kernels that need no chip fact) |
 | `rmt-chase` | `test_rmt`, `ws281x_telemetry` | `[rmt-chase] === DONE ===` | `checks::rmt_chase` (the chase pattern, the FNV-1a checksum, the per-frame record) |
 | `boot-idle` | *(none — the shipped image)* | `[stack] heartbeat: high-water` | *(none)* |
 | `usb-negative-control` | *(none — the shipped image)* | `"hostDrainingAgainMs"` (the recovery stamp itself) | *(none)* |
@@ -144,6 +145,31 @@ The registry that carries that difference is the **host's**
 (`lp-emu-validate`'s `Payload::capture`), not this one. `FwCheckConfig`
 describes what the firmware is and prints; when the operator opens the port is
 a fact about the operator.
+
+### `cycle-probe` measures a model's terms, not a workload
+
+Every other timing payload here measures something the product does.
+`cycle-probe` measures the **terms** a cycle model is built from: a kernel
+exists to move exactly one cost and nothing else, so a difference between
+silicon and an emulated configuration can be attributed rather than admired.
+
+Two properties are contract rather than implementation.
+
+- **Two clocks on every bracket, always.** The cycle counter and a microsecond
+  clock that is not derived from it, the microsecond reads outside the cycle
+  reads on both sides. If the two disagree about how long a kernel took, that
+  disagreement is a finding and is meant to be visible — a payload that
+  reported one clock could not tell "the model is wrong" from "the counter
+  stopped". Plan one lost a sitting to exactly that ambiguity (`notes.md` F3).
+- **Nothing is reduced.** Every repetition reaches the record; there is no
+  mean, and `bracket_overhead` is reported rather than subtracted. Variance on
+  silicon is data, and a payload that hides it hands the model a precision it
+  has not got.
+
+`insns` is on a record only where the count is *exact* — an assembly loop of
+known length times its iteration count. The kernels whose bodies are compiled
+Rust carry no `insns` field at all, because an estimate in a calibration
+record is worse than a gap in one.
 
 ### `rmt-chase` is the first payload whose claim is checked off a pin
 

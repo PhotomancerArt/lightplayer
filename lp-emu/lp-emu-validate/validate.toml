@@ -86,6 +86,11 @@ name = "jit-math-perf"
 description = "The Q32 math kernel cycle-cost payload (Q12 ledger, cheapest test_* migration): mul/div/sin kernels and LUT access cost against the PMU cycle counter. Timing only — never a gate under esp-emu, which has no cycle model."
 payloads = ["jit-math-perf"]
 
+[[set]]
+name = "cycle-probe"
+description = "The cycle-model calibration kernels: an IRAM/flash pair, a code walk larger than any plausible cache, a .rodata stride curve, two MMIO poll loops, a mul and a div chain, and a slice-shaped case — each bracketed by BOTH the PMU cycle counter and SYSTIMER microseconds, five repetitions each, nothing averaged. It calibrates a time grade; it never gates one."
+payloads = ["cycle-probe"]
+
 # ---------------------------------------------------------------------------
 # Configurations
 # ---------------------------------------------------------------------------

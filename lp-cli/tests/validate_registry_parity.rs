@@ -137,6 +137,13 @@ fn the_host_side_properties_are_not_mirrored_and_that_is_the_point() {
     assert_eq!(
         scenarios,
         vec![
+            // M1 P2's calibration kernels: the same case as `rmt-chase` — not
+            // a scenario, a harness image whose records go out over the
+            // USB-Serial-JTAG it logs on, against a `--usb-host` that defaults
+            // to `absent`. M1 P1 measured what happens without this: a USB
+            // payload with no host plan records **0 bytes** on the emulator,
+            // because the firmware serves into the void from power-on.
+            "cycle-probe",
             "boot-idle",
             "usb-negative-control",
             "usb-detach-reattach",
@@ -344,6 +351,11 @@ fn every_payloads_header_line_is_pinned() {
             "jit-math-perf",
             "esp32c6,test_jit_math_perf",
             "[fw-checks-header] {\"schema\":1,\"payload\":\"jit-math-perf\",\"chip\":\"esp32c6\",\"firmware_commit\":\"d6cfaa2051ae\",\"firmware_features\":\"esp32c6,test_jit_math_perf\",\"firmware_dirty\":false}\n",
+        ),
+        (
+            "cycle-probe",
+            "esp32c6,test_cycle_probe",
+            "[fw-checks-header] {\"schema\":1,\"payload\":\"cycle-probe\",\"chip\":\"esp32c6\",\"firmware_commit\":\"d6cfaa2051ae\",\"firmware_features\":\"esp32c6,test_cycle_probe\",\"firmware_dirty\":false}\n",
         ),
         (
             "rmt-chase",

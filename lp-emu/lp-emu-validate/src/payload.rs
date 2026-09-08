@@ -866,6 +866,67 @@ static JIT_BENCH_FIELDS: &[FieldSpec] = &[
     },
 ];
 
+/// One `cycle-probe` kernel measurement: one kernel, one repetition.
+///
+/// ```text
+/// [fw-check-json] {"kind":"cycle-probe","kernel":"iram_loop","rep":0,
+///   "iters":250000,"cycles":1500042,"us":9375,"insns":1500000,"acc":305419896}
+/// ```
+///
+/// **`cycles` and `us` are both `Timing`, and that is the decision this
+/// series exists to record.** The second clock is not a check on the first —
+/// it is a second reading of the same span, off a counter that is not derived
+/// from it, so that a disagreement between them is visible in a replay rather
+/// than being argued about afterwards. Grading `us` anything but `Timing`
+/// would make a configuration with an honest time model fail for having one.
+///
+/// Everything else is `Structural`, including `acc`. `acc` is the kernel's
+/// accumulator read back out of a `black_box`: pure arithmetic over constants,
+/// identical on every machine that runs the same instructions. A configuration
+/// whose `acc` differs did not run the kernel — which is exactly the failure a
+/// hard class should catch, and exactly what a timing class would hide.
+///
+/// `insns` is present only on the kernels whose bodies are hand-written
+/// assembly of known length. The rest omit the field rather than estimate it,
+/// on both sides, so the comparison stays field-for-field.
+static CYCLE_PROBE_FIELDS: &[FieldSpec] = &[
+    FieldSpec {
+        record: "cycle-probe",
+        field: "kernel",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "cycle-probe",
+        field: "rep",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "cycle-probe",
+        field: "iters",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "cycle-probe",
+        field: "insns",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "cycle-probe",
+        field: "acc",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "cycle-probe",
+        field: "cycles",
+        class: FieldClass::Timing,
+    },
+    FieldSpec {
+        record: "cycle-probe",
+        field: "us",
+        class: FieldClass::Timing,
+    },
+];
+
 /// The WS281x driver's own account of the refill race, one line per
 /// configured channel every ten seconds (`ws281x_telemetry`).
 ///
@@ -1146,6 +1207,43 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         link: Link::Uart0Spike,
         emulator_features: None,
         host_plan: None,
+        probes: &[],
+        run_secs: None,
+        fresh_chip: false,
+        pin_capture: PinCapture::Off,
+        emulator_only: None,
+        boot: BootPath::Direct,
+    },
+    Payload {
+        name: "cycle-probe",
+        display_name: "Cycle-model kernels, two clocks each",
+        fw_check_slug: "cycle-probe",
+        firmware_features: &["test_cycle_probe"],
+        fw_checks_feature: Some("check-cycle-probe"),
+        emits_header: true,
+        sentinel: Sentinel::Done("[cycle-probe] === DONE ==="),
+        host_script: None,
+        record_kinds: &["cycle-probe"],
+        mask_set: "cycle-probe",
+        fields: CYCLE_PROBE_FIELDS,
+        series: &[],
+        capture: Capture::Monitor,
+        // The product's own link, and for this payload that is not a
+        // preference — it is the premise. The whole claim is that silicon and
+        // an emulated configuration run the SAME image over the SAME link, so
+        // that a cycle difference is the machine's and not the link driver's.
+        // `spike_uart0_link` would put a 115,200-baud ROM spin inside every
+        // bracket that logs (DD30, and `notes.md` F3 is what that costs).
+        link: Link::UsbSerialJtag,
+        emulator_features: None,
+        // A cable in and an application reading, from the first byte. Without
+        // this an emulated USB payload records nothing at all — the host is
+        // `absent` by default and the firmware serves into the void (M1 P1's
+        // finding, "usb-sj: host absent at power-on").
+        host_plan: Some(HostPlan {
+            host: "attached",
+            script: "",
+        }),
         probes: &[],
         run_secs: None,
         fresh_chip: false,

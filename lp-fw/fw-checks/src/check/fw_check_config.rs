@@ -84,6 +84,20 @@ pub const ALL_CHECKS: &[FwCheckConfig] = &[
         emits_header: true,
     },
     FwCheckConfig {
+        check: FwCheck::CycleProbe,
+        display_name: "Cycle-model kernels, two clocks each",
+        firmware_features: &["test_cycle_probe"],
+        // The literal, not `checks::cycle_probe::DONE_MARKER`: this table is
+        // a `const` that exists whether or not `check-cycle-probe` compiles
+        // the module. `the_cycle_probe_marker_is_the_modules` below pins the
+        // two equal.
+        done_marker: Some("[cycle-probe] === DONE ==="),
+        trace_slug: "cycle-probe",
+        supported_targets: ESP32_ONLY,
+        emits_records: true,
+        emits_header: true,
+    },
+    FwCheckConfig {
         check: FwCheck::BootIdle,
         display_name: "Shipped image to the idle loop",
         // The shipped-image walk as a payload (vision Q1): no check module,
@@ -365,15 +379,24 @@ pub fn find_check(slug: &str) -> Option<FwCheckConfig> {
 mod tests {
     use super::*;
 
-    /// The one entry whose done marker is written twice — once as a literal
-    /// in the table above, once as the module's own constant, because a
-    /// `const` table cannot name a feature-gated item.
+    /// Entries whose done marker is written twice — once as a literal in the
+    /// table above, once as the module's own constant, because a `const`
+    /// table cannot name a feature-gated item.
     #[test]
     fn the_rmt_chase_marker_is_the_modules() {
         let check = find_check("rmt-chase").expect("registered");
         assert_eq!(
             check.done_marker,
             Some(crate::checks::rmt_chase::DONE_MARKER)
+        );
+    }
+
+    #[test]
+    fn the_cycle_probe_marker_is_the_modules() {
+        let check = find_check("cycle-probe").expect("registered");
+        assert_eq!(
+            check.done_marker,
+            Some(crate::checks::cycle_probe::DONE_MARKER)
         );
     }
 }
