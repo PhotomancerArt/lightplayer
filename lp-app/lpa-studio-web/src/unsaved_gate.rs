@@ -170,7 +170,7 @@ mod tests {
     fn ending_the_session_is_not_a_replacement() {
         let stop = UiAction::from_op(
             lpa_studio_core::RuntimeOp::NODE_ID,
-            lpa_studio_core::RuntimeOp::StopSimulator,
+            lpa_studio_core::RuntimeOp::CloseDeviceLens,
         );
         assert!(!action_replaces_loaded_project(&stop));
     }

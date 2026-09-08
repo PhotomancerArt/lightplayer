@@ -269,9 +269,15 @@ fn boot_sim(spec: &'static DocsSimSpec) -> DocsSim {
     use lpa_studio_core::StudioController;
 
     let mut controller = StudioController::new(crate::web_app::now_secs);
-    // The simulator's connect-ladder backoff runs on browser timers;
-    // without this the core default resolves every sleep immediately.
-    controller.set_sim_timers(crate::web_app::make_device_timers());
+    // The two device seams a docs sim needs and nothing else: the task
+    // spawner its link's IO runs on, and the transport that turns "power
+    // this sim on" into a `fw-browser` worker (PD9 — the docs sim is a
+    // device, it is simply an anonymous one). No SERIAL transport: a docs
+    // page must never reach for the reader's boards.
+    controller.set_device_spawner(wasm_bindgen_futures::spawn_local);
+    controller.set_device_sim_transport(Rc::new(lpa_studio_core::SimDeviceTransport::new(Rc::new(
+        lpa_studio_core::BrowserSimLinkSource::resolving(),
+    ))));
     controller.set_random(crate::library_host_opfs::random_bytes);
 
     let mut host = DocsSimHost::boot(

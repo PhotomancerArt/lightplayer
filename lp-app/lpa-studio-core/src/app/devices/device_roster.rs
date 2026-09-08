@@ -61,6 +61,11 @@ pub struct DeviceRosterView {
     /// Absent for a card with nothing honest to draw — it keeps its
     /// sentence.
     pub feeds: std::collections::BTreeMap<lpa_devices::DeviceId, super::DeviceCardFeedView>,
+    /// Each sim-backed device's runtime band (PD11), joined here for the
+    /// same reason the feeds are: the band is a fact about the RUNTIME
+    /// behind a device, and the model deliberately does not know that a
+    /// sim is a sim. Absent = a real board, which wears no band (D38).
+    pub runtime_bands: std::collections::BTreeMap<lpa_devices::DeviceId, super::UiRuntimeBand>,
 }
 
 impl Default for DeviceRosterView {
@@ -73,6 +78,7 @@ impl Default for DeviceRosterView {
             transport_available: false,
             open_addresses: std::collections::BTreeMap::new(),
             feeds: std::collections::BTreeMap::new(),
+            runtime_bands: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -318,8 +324,10 @@ impl DeviceRoster {
             roster: roster_view(&self.roster, now),
             transport_available: self.effects.is_wired(),
             open_addresses: self.keys.clone(),
-            // Filled by the controller, which owns the feeds.
+            // Filled by the controller, which owns the feeds and the
+            // sidecars a band is read from.
             feeds: std::collections::BTreeMap::new(),
+            runtime_bands: std::collections::BTreeMap::new(),
         }
     }
 
@@ -580,6 +588,7 @@ mod tests {
             transport_available: true,
             open_addresses: Default::default(),
             feeds: std::collections::BTreeMap::new(),
+            runtime_bands: std::collections::BTreeMap::new(),
         };
 
         let split = split_roster(&view);

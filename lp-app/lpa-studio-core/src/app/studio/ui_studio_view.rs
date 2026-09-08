@@ -52,7 +52,12 @@ pub enum UiChromeSessionStatus {
 /// runtime (PD9); a sim wears the runtime band and nothing else.
 #[derive(Clone, Debug, PartialEq)]
 pub enum UiLensCard {
-    Device(crate::DeviceView),
+    Device {
+        card: crate::DeviceView,
+        /// The runtime band, for a lens on a sim (PD11) — the docked pane
+        /// draws the SAME card the grid does, band and all.
+        runtime: Option<crate::UiRuntimeBand>,
+    },
 }
 
 /// The tab's ONE runtime session, projected for the header
@@ -64,6 +69,10 @@ pub enum UiLensCard {
 /// of a route target.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiChromeSessionControl {
+    /// What this device IS, for the two verbs whose words depend on it
+    /// ([`DeviceFace`](crate::DeviceFace)): leaving the studio powers a
+    /// sim off and closes the lens on a board.
+    pub face: crate::DeviceFace,
     /// The card's render key (`device:<uid>`).
     pub key: String,
     /// The roster device this session is on — what the panel's rename

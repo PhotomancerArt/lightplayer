@@ -6,7 +6,6 @@
 
 pub(crate) mod brand_hero;
 pub(crate) mod card_footer;
-pub(crate) mod card_sheet;
 pub(crate) mod card_thumb;
 pub(crate) mod device_pick_popover;
 pub(crate) mod device_roster_card;
@@ -37,8 +36,6 @@ pub mod project_opening_frame;
 #[cfg(feature = "stories")]
 pub(crate) mod project_opening_frame_stories;
 pub mod projects_page;
-pub(crate) mod sim_card;
-pub(crate) mod sim_play_tab;
 /// Poster capture is the wasm thumb path; host builds of this crate render
 /// no live preview at all and only run the cache's unit tests.
 #[cfg_attr(

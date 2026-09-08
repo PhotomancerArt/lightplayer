@@ -78,6 +78,7 @@
 //!
 //! | row | height |
 //! |---|---|
+//! | runtime band | 24px, **sim/emu cards only** — a real board has none (D38), so a real card's height is unchanged |
 //! | info line | 17px, one line, ellipsised, `title` = the full text |
 //! | bar slot | 4px, unlit when its zone has no activity |
 //! | preview slot | 120px, the board's own picture (aspect-fit, letterboxed) or an honest sentence (AC10) |
@@ -127,7 +128,8 @@ use dioxus::prelude::*;
 use lpa_studio_core::{
     DeviceAction, DeviceActivityView, DeviceCardFeedView, DeviceEscape, DeviceFeedOp, DeviceId,
     DeviceLoadedProject, DeviceStatus, DeviceView, DevicesOp, FeedLiveness, FirmwareVerb,
-    PendingLinkView, UiAction, UiExampleCard, UiPackageCard, UiStatus, device_escape_action,
+    PendingLinkView, UiAction, UiExampleCard, UiPackageCard, UiRuntimeBand, UiStatus,
+    device_escape_action,
     device_firmware_line, device_identity_line, device_status_kind, firmware_face_preview_sentence,
     firmware_verb, pending_escape_action, pending_firmware_line, pending_identity_rows,
 };
@@ -171,6 +173,11 @@ pub(crate) fn DeviceRosterCard(
     /// `None` = nothing honest to draw: the slot keeps its sentence.
     #[props(default)]
     feed: Option<DeviceCardFeedView>,
+    /// The runtime band (PD11), for a device that is not silicon. `None`
+    /// for a real board, which wears no band at all (D38) — and which is
+    /// why a real card's height is unchanged by this phase.
+    #[props(default)]
+    runtime: Option<UiRuntimeBand>,
     /// Open the header's ⋯ menu immediately (stories only).
     #[props(default = false)]
     menu_initially_open: bool,
@@ -294,6 +301,14 @@ pub(crate) fn DeviceRosterCard(
                                 span { class: "tw:text-dim-foreground", " · {mark}" }
                             }
                         }
+                    }
+                    // The runtime band (PD11/D49): the ONE mark that says
+                    // this device is not silicon. Under the identity rows,
+                    // bound-family tone, 24px, and absent entirely on a
+                    // real board — which is what keeps every real card's
+                    // height exactly what it was.
+                    if let Some(runtime) = runtime.clone() {
+                        RuntimeBand { runtime }
                     }
                 }
             }
@@ -1245,6 +1260,33 @@ fn mono_line_class() -> &'static str {
 /// short stays level with its neighbours rather than sitting 16px higher.
 fn identity_rows_class() -> &'static str {
     "tw:grid tw:h-8 tw:min-w-0 tw:content-start"
+}
+
+/// The runtime band: 24px, bound-family tone, one line, ellipsised with the
+/// full text on its `title`.
+///
+/// Bound-family because that is the studio's "this is standing in for
+/// something" colour (`studio-bound-violet-convention`), and it is the ONLY
+/// place on a card it appears — no title prefix, no tinted edge, no second
+/// glyph (D38). A person reading a wall of cards sees one extra row on the
+/// ones that are not boards, and everything else is identical, which is the
+/// whole claim of "always a device".
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn RuntimeBand(runtime: UiRuntimeBand) -> Element {
+    let line = runtime.line();
+    rsx! {
+        p {
+            class: runtime_band_class(),
+            title: "{line}",
+            "\u{25b6} {line}"
+        }
+    }
+}
+
+fn runtime_band_class() -> &'static str {
+    "tw:m-0 tw:flex tw:h-6 tw:min-w-0 tw:items-center tw:truncate tw:text-[0.68rem] \
+     tw:leading-6 tw:text-status-bound-foreground"
 }
 
 #[cfg(test)]

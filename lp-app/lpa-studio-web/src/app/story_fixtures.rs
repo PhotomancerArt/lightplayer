@@ -11,11 +11,11 @@ use dioxus::prelude::*;
 use lpa_studio_core::{
     ControllerId, ProjectController, ProjectEditorOp, ProjectEditorView, ProjectInventorySummary,
     ProjectNodeStatusTone, ProjectNodeStatusView, ProjectNodeTreeItem, ProjectNodeTreeView,
-    ProjectRuntimeSummary, ProjectState, ProjectSyncPhase, ProjectSyncSummary, SimCardState,
+    ProjectRuntimeSummary, ProjectState, ProjectSyncPhase, ProjectSyncSummary,
     UiAction, UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot, UiConsoleView, UiIssue,
     UiLensCard, UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource, UiMetric, UiNodeChild,
     UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView, UiPaneView, UiProducedProduct,
-    UiProducedValue, UiSimCard, UiSimProjectChip, UiSlotAsset, UiSlotSourceState, UiSlotValue,
+    UiProducedValue, UiRuntimeBand, UiSlotAsset, UiSlotSourceState, UiSlotValue,
     UiStatus, UiStudioView, UiViewContent,
 };
 
@@ -30,31 +30,53 @@ pub(crate) const STORY_LOG_TIMESTAMP: f64 = 1_720_000_000.0;
 fn story_view(panes: Vec<UiPaneView>, logs: Vec<UiLogEntry>) -> UiStudioView {
     let mut console = UiConsoleView::empty();
     console.entries = logs;
-    UiStudioView::new(panes, console).with_lens_card(Some(UiLensCard::Sim(simulator_lens_card())))
+    UiStudioView::new(panes, console).with_lens_card(Some(simulator_lens_card()))
 }
 
-/// The editor's runtime surface (D43): a running simulator as the LENS
-/// card. Every pane-layout story carries one — the shell renders no other
-/// runtime surface since the step-stack pane retired, and core pins
-/// "panes non-empty ⇒ lens card".
-pub(crate) fn simulator_lens_card() -> UiSimCard {
-    UiSimCard {
-        state: SimCardState::Running,
-        project: Some(UiSimProjectChip {
-            uid: "prj9sLm2Xc44dQnUv7BgWkEyt".to_string(),
-            name: "demo-project".to_string(),
-        }),
-        board_id: None,
-        console_tail: vec![UiLogEntry::new(
-            STORY_LOG_TIMESTAMP,
-            UiLogLevel::Info,
-            UiLogSource::with_detail(UiLogOrigin::Device, "fw-browser"),
-            "engine: project loaded",
-        )],
-        frame_preview: None,
-        frame_age_secs: None,
-        frame_fps: None,
-        ui: Default::default(),
+/// The editor's runtime surface (D43): the lens DEVICE's card, which for
+/// a library open is a Desktop sim wearing the runtime band (PD9/PD11).
+/// Every pane-layout story carries one — the shell renders no other
+/// runtime surface since the step-stack pane retired.
+pub(crate) fn simulator_lens_card() -> UiLensCard {
+    UiLensCard::Device {
+        card: sim_lens_device_view(),
+        runtime: Some(UiRuntimeBand::sim("lightplayer/desktop", Some("gpu"))),
+    }
+}
+
+/// The lens device behind [`simulator_lens_card`]: a Desktop sim running
+/// the demo project, with nothing a real board would not also report.
+fn sim_lens_device_view() -> lpa_studio_core::DeviceView {
+    lpa_studio_core::DeviceView {
+        id: lpa_studio_core::DeviceId(1),
+        title: "Desktop sim".to_string(),
+        status: lpa_studio_core::DeviceStatus::Ready,
+        state_label: "Ready".to_string(),
+        detail: None,
+        freshness_label: None,
+        identity_label: Some("02:1a:2b:3c:4d:5e".to_string()),
+        detected_chip: None,
+        board_id: Some("lightplayer/desktop".to_string()),
+        firmware_face: lpa_studio_core::DeviceFirmwareFace::LightPlayer {
+            firmware: Some("fw-browser 0000000".to_string()),
+            wire: lpa_studio_core::DeviceWireVersion::Match,
+        },
+        remembered_firmware: Some("fw-browser 0000000".to_string()),
+        degraded: None,
+        loaded_project: lpa_studio_core::DeviceLoadedProject::Running {
+            label: "demo-project".to_string(),
+        },
+        engine_fps: Some(60),
+        can_receive_project: true,
+        can_remove_project: true,
+        activity: None,
+        last_outcome: None,
+        terminal: Vec::new(),
+        terminal_dropped: 0,
+        escapes: vec![
+            lpa_studio_core::DeviceEscape::Disconnect,
+            lpa_studio_core::DeviceEscape::Forget,
+        ],
     }
 }
 

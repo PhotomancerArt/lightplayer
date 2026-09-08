@@ -186,7 +186,7 @@ fn face_context_line(blocked: Option<&(String, String)>, opening: bool) -> Optio
 /// D24 rule), the sim glyph = running in simulator, amber "!" = the
 /// card is blocked. Both runtimes live = both glyphs ("Live in 2
 /// places" stays a popup/tooltip phrasing).
-fn face_status_glyphs(card: &UiPackageCard, blocked: bool) -> Vec<CardStatusGlyph> {
+fn face_status_glyphs(_card: &UiPackageCard, blocked: bool) -> Vec<CardStatusGlyph> {
     if blocked {
         return vec![CardStatusGlyph {
             icon: StudioIconName::StepAttention,
@@ -597,7 +597,6 @@ struct LivePresenceLine {
     title: Option<String>,
 }
 
-const LIVE_LINE_GOOD: &str = "tw:m-0 tw:truncate tw:text-xs tw:text-status-good-foreground";
 
 /// The card's runtime-presence line (D28).
 ///
@@ -651,7 +650,7 @@ mod target_display_name_tests {
 mod tests {
     use super::*;
 
-    fn card(running_in_sim: bool) -> UiPackageCard {
+    fn card(_running_in_sim: bool) -> UiPackageCard {
         UiPackageCard {
             uid: "prj1".to_string(),
             kind: "Module".to_string(),
@@ -662,7 +661,6 @@ mod tests {
             provenance: None,
             on_device: None,
             open_elsewhere: false,
-            running_in_sim,
             target: None,
             health: PackageHealth::Ready,
         }
@@ -714,13 +712,13 @@ mod tests {
         }
     }
 
+    /// The runtime-presence line has no producer while the device pairing
+    /// is the registry association a card Push banks (see
+    /// `live_presence_line`): a card claims nothing rather than claiming
+    /// something nobody reported.
     #[test]
-    fn the_sim_line_appears_exactly_while_the_sim_runs_this_project() {
-        let sim = live_presence_line(&card(true)).expect("the sim line");
-        assert_eq!(sim.text, "Running in simulator");
-        assert_eq!(sim.class, LIVE_LINE_GOOD, "the sim always runs the head");
-        assert_eq!(sim.title, None);
-
+    fn no_presence_line_is_claimed_without_a_banked_pairing() {
+        assert_eq!(live_presence_line(&card(true)), None);
         assert_eq!(live_presence_line(&card(false)), None);
     }
 }

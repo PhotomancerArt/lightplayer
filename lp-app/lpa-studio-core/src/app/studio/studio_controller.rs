@@ -886,7 +886,34 @@ impl StudioController {
             self.devices.effects(),
             (self.now_secs)(),
         );
+        view.runtime_bands = self.runtime_bands(&view);
         view
+    }
+
+    /// The runtime band for every SIM in the roster (PD11), joined here
+    /// because the model does not know a sim from silicon: the sidecar
+    /// says which devices are sims and what they wear, and the transport
+    /// says what tier their worker was granted.
+    fn runtime_bands(
+        &self,
+        view: &crate::DeviceRosterView,
+    ) -> std::collections::BTreeMap<crate::DeviceId, crate::UiRuntimeBand> {
+        if self.device_sims.is_empty() {
+            return std::collections::BTreeMap::new();
+        }
+        view.roster
+            .devices
+            .iter()
+            .filter_map(|card| {
+                let uid = view.open_addresses.get(&card.id.0)?;
+                let sidecar = self.device_sims.get(uid)?;
+                let tier = self
+                    .sim_transport
+                    .as_ref()
+                    .and_then(|transport| transport.granted_tier(uid));
+                Some((card.id, crate::UiRuntimeBand::sim(&sidecar.target, tier)))
+            })
+            .collect()
     }
 
     /// Install the platform's user-settings persistence sink (localStorage
@@ -1545,12 +1572,13 @@ impl StudioController {
     /// draws, band and all (PD11).
     fn lens_card(&self) -> Option<crate::UiLensCard> {
         let attachment = self.pool.attached_session()?.attachment();
-        self.device_roster_view()
-            .roster
+        let view = self.device_roster_view();
+        let runtime = view.runtime_bands.get(&attachment.device).cloned();
+        view.roster
             .devices
             .into_iter()
             .find(|card| card.id == attachment.device)
-            .map(crate::UiLensCard::Device)
+            .map(|card| crate::UiLensCard::Device { card, runtime })
     }
 
     /// The header session·project control's ONE session (single-session
@@ -1582,6 +1610,10 @@ impl StudioController {
             facts.push(format!("{} fps", fps.round() as i64));
         }
         Some(crate::UiChromeSessionControl {
+            face: match attachment.transport {
+                crate::LinkTransport::Sim => crate::DeviceFace::Sim,
+                crate::LinkTransport::Serial => crate::DeviceFace::Wire,
+            },
             key: format!("device:{}", attachment.uid),
             device: Some(attachment.device),
             // The roster's LIVE title, so a rename made from this very
