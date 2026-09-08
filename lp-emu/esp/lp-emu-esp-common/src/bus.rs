@@ -1094,19 +1094,31 @@ impl SocBus {
             // claim — the alternative, "the same address and value as last
             // time", would have to reason about how many stores the loop
             // makes and in what order.
+            //
+            // Both halves are written against **fixed-size arrays**, not
+            // slices. `&mut [u8] != [u8; 4]` is a slice comparison: a length
+            // check and a `memcmp` call, on the hottest store path in the
+            // machine. `[u8; 4] != [u8; 4]` is a four-byte compare. The
+            // first cost 12 % of a memory-heavy image's run.
             let changed = match width {
-                Width::Word => data.get_mut(off..off + 4).map(|b| {
-                    let new = value.to_le_bytes();
-                    let changed = b != new;
-                    b.copy_from_slice(&new);
-                    changed
-                }),
-                Width::Half => data.get_mut(off..off + 2).map(|b| {
-                    let new = (value as u16).to_le_bytes();
-                    let changed = b != new;
-                    b.copy_from_slice(&new);
-                    changed
-                }),
+                Width::Word => data
+                    .get_mut(off..off + 4)
+                    .and_then(|b| <&mut [u8; 4]>::try_from(b).ok())
+                    .map(|b| {
+                        let new = value.to_le_bytes();
+                        let changed = *b != new;
+                        *b = new;
+                        changed
+                    }),
+                Width::Half => data
+                    .get_mut(off..off + 2)
+                    .and_then(|b| <&mut [u8; 2]>::try_from(b).ok())
+                    .map(|b| {
+                        let new = (value as u16).to_le_bytes();
+                        let changed = *b != new;
+                        *b = new;
+                        changed
+                    }),
                 Width::Byte => data.get_mut(off).map(|b| {
                     let new = value as u8;
                     let changed = *b != new;

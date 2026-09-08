@@ -62,7 +62,9 @@ pub mod trigger;
 
 use core::marker::PhantomData;
 
-use lp_emu_core::{Bus, CycleModel, InstClass, MemoryAccessKind, MemoryError, PollSample};
+use lp_emu_core::{
+    Bus, CycleModel, InstClass, MemoryAccessKind, MemoryError, PollSample, PureRead,
+};
 
 use crate::emu::{EmulatorError, FpRegs, LoggingDisabled, decode_execute};
 use csr::CsrFile;
@@ -194,6 +196,18 @@ impl PollDetector {
         self.key = None;
         self.hits = 0;
         self.saturated = false;
+    }
+
+    /// [`reset`](Self::reset), but free when there is nothing to forget.
+    ///
+    /// This runs on every store and every impure load of every image,
+    /// including the many that never form a poll loop at all, so the idle
+    /// case is one load and one branch rather than three stores.
+    #[inline(always)]
+    fn forget(&mut self) {
+        if self.key.is_some() {
+            self.reset();
+        }
     }
 
     #[inline]
@@ -719,26 +733,43 @@ impl<B: Bus> MachineHart<B> {
         // (M4) the poll-loop skip. A Load is the only instruction that can
         // *be* the read a pure loop spins on; a Store may or may not disturb
         // one and the bus is asked which; an atomic or a fence always does.
+        //
+        // The shape matters as much as the rule. Everything here is a
+        // discriminant test on a value the bus already has in a register,
+        // and the only call is [`Self::credit_pure_read`] — reached on a
+        // pure MMIO read and nowhere else. An image that never forms a poll
+        // loop (a `wfi`-idle boot, a render loop over JIT'd shaders) must
+        // not pay for this, and an earlier draft that called into the
+        // detector on *every* load cost 9-12 % on exactly those images: the
+        // call forced spills around the hottest branch in the interpreter.
         if self.poll_skip {
             match result.class {
-                InstClass::Load => {
-                    if self.observe_load(bus, pc, horizon) {
-                        // Guest time moved. End the slice so the machine
-                        // fires whatever came due and resamples the matrix,
-                        // exactly as it does after `wfi`.
-                        return StepOutcome::End(SliceEnd::BudgetExhausted);
+                InstClass::Load => match bus.take_poll_sample() {
+                    PollSample::Pure(read) => {
+                        if self.credit_pure_read(bus, read, pc, horizon) {
+                            // Guest time moved. End the slice so the machine
+                            // fires whatever came due and resamples the
+                            // matrix, exactly as it does after `wfi`.
+                            return StepOutcome::End(SliceEnd::BudgetExhausted);
+                        }
                     }
-                }
+                    // A load that read unchanged memory: no new evidence,
+                    // and no reason to discard what there is.
+                    PollSample::Inert => {}
+                    // An impure MMIO read, an unmapped read, or a bus that
+                    // makes no claim: forget everything.
+                    PollSample::Impure => self.poll.forget(),
+                },
                 InstClass::Store => {
                     // A store that wrote the bytes already there left memory
                     // exactly as it found it — the stack spill a real poll
                     // loop makes every iteration. Any other store is a
                     // reason to forget everything the detector had.
                     if bus.take_poll_sample() != PollSample::Inert {
-                        self.poll.reset();
+                        self.poll.forget();
                     }
                 }
-                InstClass::Atomic | InstClass::Fence => self.poll.reset(),
+                InstClass::Atomic | InstClass::Fence => self.poll.forget(),
                 _ => {}
             }
         }
@@ -746,9 +777,15 @@ impl<B: Bus> MachineHart<B> {
         StepOutcome::Continue
     }
 
-    /// Feed the detector what this Load-class instruction read, and credit
-    /// whole iterations when the loop it belongs to has proved itself a
-    /// fixed point. Returns `true` when guest time was moved.
+    /// Feed the detector a pure MMIO read, and credit whole iterations when
+    /// the loop it belongs to has proved itself a fixed point. Returns
+    /// `true` when guest time was moved.
+    ///
+    /// Deliberately out of line and reached only from the `Pure` arm of
+    /// [`Self::step`]'s sample match: a load that read plain memory cannot
+    /// be the read a poll loop spins on, so nothing is lost by not calling
+    /// here for one — and the interpreter's hottest branch keeps its
+    /// registers.
     ///
     /// The fixed-point claim, and why crediting is exact: at the moment this
     /// returns, the hart is one instruction past the load at `pc`. Two
@@ -775,20 +812,7 @@ impl<B: Bus> MachineHart<B> {
     /// before it means the run without the skip passes through this very
     /// state at this very cycle, which is why the two runs print the same
     /// transcript.
-    fn observe_load(&mut self, bus: &mut B, pc: u32, horizon: u64) -> bool {
-        let read = match bus.take_poll_sample() {
-            PollSample::Pure(read) => read,
-            // A load that read unchanged memory: no new evidence, and no
-            // reason to discard what there is.
-            PollSample::Inert => return false,
-            // An impure MMIO read, an unmapped read, or a bus that makes no
-            // claim: forget everything.
-            PollSample::Impure => {
-                self.poll.reset();
-                return false;
-            }
-        };
-
+    fn credit_pure_read(&mut self, bus: &mut B, read: PureRead, pc: u32, horizon: u64) -> bool {
         let key = (pc, read.address, read.value);
         if self.poll.key != Some(key) {
             self.poll
