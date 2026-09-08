@@ -287,6 +287,19 @@ impl LibraryStore {
             if fields.name.is_none() {
                 package_manifest::set_name(&*view, label)?;
             }
+            // D32/PD17: a project CREATED here declares Desktop, so every
+            // new project states its hardware instead of relying on the
+            // read-time default. Creation only — an import, a fork or a
+            // device pull carries whatever target its source declared, and
+            // patching one would be inventing a fact about someone else's
+            // project. A generator that already wrote a board (the board
+            // starter) keeps it.
+            if matches!(provenance, PackageProvenance::Created) && fields.target.is_none() {
+                package_manifest::set_target(
+                    &*view,
+                    Some(super::project_target::DESKTOP_BOARD_ID),
+                )?;
+            }
             package_manifest::ensure_uid(&*view, &(self.random)())?;
             package_meta::write_meta(
                 &*view,
@@ -829,6 +842,68 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(meta.provenance, PackageProvenance::Created);
+    }
+
+    /// D32/PD17: a project made HERE declares Desktop. A project that
+    /// arrived from somewhere else keeps whatever target it came with —
+    /// including none, which still reads as Desktop but is that project's
+    /// own statement to make, not this library's.
+    #[test]
+    fn a_created_project_declares_desktop_and_an_installed_one_keeps_its_own() {
+        let store = store();
+
+        let created = store.create("My Project!", 1.0).unwrap();
+        let handle = store.open(created.uid).unwrap();
+        assert_eq!(
+            package_manifest::read_manifest(&*handle.package_fs.borrow())
+                .unwrap()
+                .target
+                .as_deref(),
+            Some(super::super::project_target::DESKTOP_BOARD_ID),
+        );
+
+        let seeded = store
+            .install_package(
+                "fallback",
+                &demo_files(),
+                PackageProvenance::SeededFrom {
+                    source: "catalog/plasma".to_string(),
+                },
+                2.0,
+            )
+            .unwrap();
+        let handle = store.open(seeded.uid).unwrap();
+        assert_eq!(
+            package_manifest::read_manifest(&*handle.package_fs.borrow())
+                .unwrap()
+                .target,
+            None,
+            "an installed project's manifest is not patched"
+        );
+    }
+
+    /// A generator that already declared a board keeps it: the Desktop
+    /// default fills a gap, it does not overwrite an answer.
+    #[test]
+    fn a_created_project_that_names_a_board_keeps_the_board() {
+        let store = store();
+        let files = vec![(
+            "project.json".to_string(),
+            br#"{"format":10,"name":"porch","target":"seeed/xiao-esp32-c6"}"#.to_vec(),
+        )];
+
+        let summary = store
+            .install_package("porch", &files, PackageProvenance::Created, 3.0)
+            .unwrap();
+
+        let handle = store.open(summary.uid).unwrap();
+        assert_eq!(
+            package_manifest::read_manifest(&*handle.package_fs.borrow())
+                .unwrap()
+                .target
+                .as_deref(),
+            Some("seeed/xiao-esp32-c6"),
+        );
     }
 
     #[test]

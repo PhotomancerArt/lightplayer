@@ -23,13 +23,19 @@ pub struct ManifestFields {
     /// Card blurb: one sentence describing what the project shows off
     /// (manifest `description`; catalog content tree, P1). `None` for the
     /// common case — most projects author no blurb. Passed through
-    /// read-only, same as `target` — the library never writes it.
+    /// read-only: the library never writes it.
     pub description: Option<String>,
     /// Provenance: ISO date the project was created (manifest `created`).
     pub created: Option<String>,
-    /// Advisory board target (gallery-rework vision D3); `None` for an
-    /// untargeted project. Passed through read-only — the library never
-    /// writes it (P02 scope: reading only; the generator writes it, P03).
+    /// The hardware this project declares it runs on (D41): a catalog board
+    /// id, or [`DESKTOP_BOARD_ID`](super::project_target::DESKTOP_BOARD_ID).
+    /// `None` reads as Desktop
+    /// ([`ProjectTarget`](super::project_target::ProjectTarget)) and is what
+    /// every project written before 2026-09-07 says.
+    ///
+    /// Written by [`set_target`] — the project settings' Hardware row — and
+    /// by the two generators (the board starter, and the Desktop default a
+    /// library-made project is created with).
     pub target: Option<String>,
     /// Authored project kind, resolved (`ProjectKind::General` when the
     /// manifest states no `kind`; module authoring unit, P1). Patched
@@ -90,6 +96,23 @@ pub fn ensure_uid(fs: &dyn LpFs, random: &[u8; 16]) -> Result<PrefixedUid, Libra
 pub fn set_name(fs: &dyn LpFs, name: &str) -> Result<(), LibraryError> {
     let mut manifest = read(fs)?;
     manifest.name = Some(name.to_string());
+    write(fs, &manifest)
+}
+
+/// Set (or clear) the project's hardware target — the Hardware settings
+/// row's write, and the first time the library writes this field.
+///
+/// Canonical read-modify-write like [`set_name`]: the strict reader refuses
+/// unknown fields, so the rewrite is lossless by construction and the
+/// manifest's bytes change in exactly one place. NOT a format bump — the
+/// field has been in `project.json` since 2026-08-05 and an absent one
+/// still reads as Desktop.
+///
+/// `None` clears the key, which is the same target as `lightplayer/desktop`
+/// and is how a project written before targets meant anything looks.
+pub fn set_target(fs: &dyn LpFs, target: Option<&str>) -> Result<(), LibraryError> {
+    let mut manifest = read(fs)?;
+    manifest.target = target.map(str::to_string);
     write(fs, &manifest)
 }
 
@@ -230,6 +253,56 @@ mod tests {
         let fields = read_manifest(&fs).unwrap();
         assert_eq!(fields.name.as_deref(), Some("renamed"));
         assert_eq!(fields.uid.as_deref(), Some(minted.to_string().as_str()));
+    }
+
+    /// D41/PD17, the library's first write of `target`: the Hardware row
+    /// patches one key, everything else survives, and choosing Desktop
+    /// CLEARS the key rather than writing a second spelling of the default.
+    #[test]
+    fn set_target_patches_only_the_target_and_desktop_clears_it() {
+        let fs = LpFsMemory::new();
+        fs.write_file(MANIFEST_PATH.as_path(), MANIFEST).unwrap();
+        let minted = ensure_uid(&fs, &[7u8; 16]).unwrap();
+
+        set_target(&fs, Some("seeed/xiao-esp32-c6")).unwrap();
+        let fields = read_manifest(&fs).unwrap();
+        assert_eq!(fields.target.as_deref(), Some("seeed/xiao-esp32-c6"));
+        assert_eq!(fields.name.as_deref(), Some("demo"));
+        assert_eq!(fields.uid.as_deref(), Some(minted.to_string().as_str()));
+
+        set_target(&fs, None).unwrap();
+        let fields = read_manifest(&fs).unwrap();
+        assert_eq!(fields.target, None, "Desktop is the absence of a target");
+        assert_eq!(fields.name.as_deref(), Some("demo"));
+    }
+
+    /// The Hardware row's write goes through the strict reader on the way
+    /// back in — the rewrite is canonical, so a project whose hardware
+    /// changed is not a project whose file churned.
+    #[test]
+    fn a_target_write_round_trips_through_the_strict_reader() {
+        let fs = LpFsMemory::new();
+        fs.write_file(MANIFEST_PATH.as_path(), MANIFEST).unwrap();
+        ensure_uid(&fs, &[5u8; 16]).unwrap();
+
+        let before = read_manifest(&fs).unwrap();
+        set_target(&fs, Some("domraem/dom-z-102")).unwrap();
+        let after = fs.read_file(MANIFEST_PATH.as_path()).unwrap();
+
+        let text = core::str::from_utf8(&after).unwrap();
+        let manifest = lpc_model::ProjectManifest::read_json(text)
+            .unwrap_or_else(|e| panic!("manifest rejected after a target write: {e}\n{text}"));
+        assert_eq!(manifest.write_json(), text, "canonical bytes");
+        assert_eq!(manifest.target.as_deref(), Some("domraem/dom-z-102"));
+
+        // Everything else is what it was: the hardware row edits hardware.
+        let fields = read_manifest(&fs).unwrap();
+        assert_eq!(fields.format, before.format);
+        assert_eq!(fields.uid, before.uid);
+        assert_eq!(fields.name, before.name);
+        assert_eq!(fields.description, before.description);
+        assert_eq!(fields.created, before.created);
+        assert_eq!(fields.kind, before.kind);
     }
 
     #[test]

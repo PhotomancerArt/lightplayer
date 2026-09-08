@@ -411,6 +411,9 @@ pub(crate) fn project_manifest() -> lpa_studio_core::UiProjectManifest {
         name: Some("Demo".to_string()),
         created: Some("2026-08-27".to_string()),
         kind: "General".to_string(),
+        // No declared hardware: the Desktop default, which is what every
+        // project written before 2026-09-07 looks like.
+        target: None,
     }
 }
 

@@ -109,15 +109,37 @@ impl ControllerOp for DevicesOp {
                     ActionPriority::Secondary,
                 );
             }
+            // Same verb, same priority, same destruction — but a sim has no
+            // port grant to hand back and nothing on a board to leave
+            // untouched, so the confirm says what is actually at stake
+            // (D46: a sim is a thin record, and this is the record).
+            (Action::Forget { .. }, DeviceFace::Sim) => {
+                return ActionMeta::new(
+                    "Forget",
+                    "Remove this sim and the name you gave it. There is nothing else to remove.",
+                    ActionPriority::Tertiary,
+                )
+                .destructive()
+                .with_confirmation(
+                    ActionConfirmation::new(
+                        "Forget this sim?",
+                        "Its record and name go; nothing else exists.",
+                        "Forget",
+                    )
+                    .inline(),
+                );
+            }
             _ => {}
         }
         match &self.action {
-            // The verb names the TRANSPORT, not the abstract act: the add
-            // card's invitation stays transport-open ("connect a board"),
-            // and this button is the USB way in — a future network path
-            // gets its own verb beside it instead of a mode switch.
+            // The slot now offers two ways a card can appear — this one and
+            // "start a board here" (D44) — so the verb says which of the
+            // two the user is claiming: the board is here and CONNECTED,
+            // as opposed to one Studio is about to start. The USB
+            // specifics stay in the summary; a future network path gets its
+            // own verb beside it instead of a mode switch.
             Action::AddFromUsb => ActionMeta::new(
-                "It's plugged in",
+                "It's connected",
                 "Pick the USB port your LightPlayer board is plugged into.",
                 ActionPriority::Primary,
             )
@@ -374,6 +396,51 @@ mod tests {
                 "{action:?} is the same verb on either face"
             );
         }
+    }
+
+    /// D44: the slot's core verb claims the board is HERE, because the
+    /// slot's other verb starts one that is not.
+    #[test]
+    fn the_add_slots_verb_says_the_board_is_connected() {
+        let meta = DevicesOp::new(Action::AddFromUsb).default_action_meta();
+
+        assert_eq!(meta.label, "It's connected");
+        assert_eq!(meta.priority, ActionPriority::Primary);
+        assert!(
+            meta.summary.contains("USB port"),
+            "the transport specifics stay in the summary: {}",
+            meta.summary
+        );
+    }
+
+    /// D46: forgetting a sim takes a record and a name, and the confirm
+    /// says exactly that — no port grant handed back, nothing on a board
+    /// left untouched, because there is no board.
+    #[test]
+    fn forgetting_a_sim_promises_only_what_a_sim_has() {
+        let meta = DevicesOp::on_sim(Action::Forget {
+            device: DeviceId(1),
+        })
+        .default_action_meta();
+        let confirmation = meta.confirmation.expect("forget always asks first");
+
+        assert!(meta.destructive);
+        assert_eq!(confirmation.title, "Forget this sim?");
+        assert_eq!(
+            confirmation.message,
+            "Its record and name go; nothing else exists."
+        );
+        let wire = DevicesOp::new(Action::Forget {
+            device: DeviceId(1),
+        })
+        .default_action_meta()
+        .confirmation
+        .expect("forget always asks first");
+        assert!(
+            wire.message.contains("permission for its port"),
+            "a board's confirm still names the grant: {}",
+            wire.message
+        );
     }
 
     /// The face is read off the registry column, so the words and the row

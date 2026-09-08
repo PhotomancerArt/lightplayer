@@ -36,6 +36,7 @@ pub mod project_opening_frame;
 #[cfg(feature = "stories")]
 pub(crate) mod project_opening_frame_stories;
 pub mod projects_page;
+pub(crate) mod target_pick_popover;
 /// Poster capture is the wasm thumb path; host builds of this crate render
 /// no live preview at all and only run the cache's unit tests.
 #[cfg_attr(
