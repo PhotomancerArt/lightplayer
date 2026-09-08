@@ -255,13 +255,23 @@ pub const ALL_CHECKS: &[FwCheckConfig] = &[
     },
     FwCheckConfig {
         check: FwCheck::Rmt,
-        display_name: "RMT output",
-        firmware_features: &["test_rmt"],
-        done_marker: None,
+        display_name: "RMT chase (256 LEDs, three passes)",
+        // `ws281x_telemetry` beside the harness switch, because the payload's
+        // subject is not only the frames: the `[WS281X]` line is what the
+        // driver believes about its own refill race, and a capture without it
+        // can say the frames arrived but not at what cost. Three chases is
+        // 13.9 s, which is what puts one such line in the transcript
+        // (`checks::rmt_chase::CHASES`).
+        firmware_features: &["test_rmt", "ws281x_telemetry"],
+        // The literal, not `checks::rmt_chase::DONE_MARKER`: this table is a
+        // `const` that exists whether or not `check-rmt` compiles the module,
+        // so it cannot name a constant that may not be there. The two are
+        // pinned equal by `the_rmt_chase_marker_is_the_module's` below.
+        done_marker: Some("[rmt-chase] === DONE ==="),
         trace_slug: "rmt",
         supported_targets: ESP32_ONLY,
-        emits_records: false,
-        emits_header: false,
+        emits_records: true,
+        emits_header: true,
     },
     FwCheckConfig {
         check: FwCheck::Dither,
@@ -304,4 +314,21 @@ pub fn find_check(slug: &str) -> Option<FwCheckConfig> {
         .iter()
         .copied()
         .find(|check| check.slug() == slug)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The one entry whose done marker is written twice — once as a literal
+    /// in the table above, once as the module's own constant, because a
+    /// `const` table cannot name a feature-gated item.
+    #[test]
+    fn the_rmt_chase_marker_is_the_modules() {
+        let check = find_check("rmt").expect("registered");
+        assert_eq!(
+            check.done_marker,
+            Some(crate::checks::rmt_chase::DONE_MARKER)
+        );
+    }
 }

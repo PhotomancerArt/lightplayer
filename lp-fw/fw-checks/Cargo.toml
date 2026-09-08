@@ -17,6 +17,10 @@ check-json = []
 check-gpio-calibrate = []
 check-uart-bridge = []
 check-oom = []
+# The `rmt-chase` payload: the chase pattern, the FNV-1a checksum and the
+# per-frame record (`checks::rmt_chase`). No chip dependency at all — the
+# harness half (board init, `Rmt`, `LedChannel`, `embassy_time`) stays in
+# `fw-esp32c6`.
 check-rmt = []
 check-dither = []
 check-fluid-demo = []
