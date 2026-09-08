@@ -179,7 +179,8 @@ impl RunRequest {
         if self.payload.host_plan.is_some() {
             return self.payload.host_plan;
         }
-        if self.link_override == Some(Link::UsbSerialJtag) && self.payload.link != Link::UsbSerialJtag
+        if self.link_override == Some(Link::UsbSerialJtag)
+            && self.payload.link != Link::UsbSerialJtag
         {
             return Some(HostPlan {
                 host: "attached",
@@ -1514,7 +1515,11 @@ mod tests {
         let mut req = request("lp-emu:esp32c6:t1", "shader-compile-stress", None);
         req.identity = desk_identity();
         req.link_override = Some(Link::UsbSerialJtag);
-        assert_eq!(req.payload.link, Link::Uart0Spike, "the registry is untouched");
+        assert_eq!(
+            req.payload.link,
+            Link::Uart0Spike,
+            "the registry is untouched"
+        );
         assert_eq!(req.effective_link(), Link::UsbSerialJtag);
         assert_eq!(
             req.features(),
