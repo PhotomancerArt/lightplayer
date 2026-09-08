@@ -62,7 +62,7 @@ pub mod trigger;
 
 use core::marker::PhantomData;
 
-use lp_emu_core::{Bus, CycleModel, InstClass, MemoryAccessKind, MemoryError};
+use lp_emu_core::{Bus, CycleModel, InstClass, MemoryAccessKind, MemoryError, PollSample};
 
 use crate::emu::{EmulatorError, FpRegs, LoggingDisabled, decode_execute};
 use csr::CsrFile;
@@ -717,19 +717,28 @@ impl<B: Bus> MachineHart<B> {
         }
 
         // (M4) the poll-loop skip. A Load is the only instruction that can
-        // *be* the read a pure loop spins on; a Store, an atomic or a fence
-        // is a reason to forget everything the detector had.
+        // *be* the read a pure loop spins on; a Store may or may not disturb
+        // one and the bus is asked which; an atomic or a fence always does.
         if self.poll_skip {
             match result.class {
                 InstClass::Load => {
-                    if self.observe_pure_read(bus, pc, horizon) {
+                    if self.observe_load(bus, pc, horizon) {
                         // Guest time moved. End the slice so the machine
                         // fires whatever came due and resamples the matrix,
                         // exactly as it does after `wfi`.
                         return StepOutcome::End(SliceEnd::BudgetExhausted);
                     }
                 }
-                InstClass::Store | InstClass::Atomic | InstClass::Fence => self.poll.reset(),
+                InstClass::Store => {
+                    // A store that wrote the bytes already there left memory
+                    // exactly as it found it — the stack spill a real poll
+                    // loop makes every iteration. Any other store is a
+                    // reason to forget everything the detector had.
+                    if bus.take_poll_sample() != PollSample::Inert {
+                        self.poll.reset();
+                    }
+                }
+                InstClass::Atomic | InstClass::Fence => self.poll.reset(),
                 _ => {}
             }
         }
@@ -737,33 +746,47 @@ impl<B: Bus> MachineHart<B> {
         StepOutcome::Continue
     }
 
-    /// Feed the detector the pure read this Load-class instruction performed,
-    /// if it performed one, and credit whole iterations when the loop it
-    /// belongs to has proved itself a fixed point. Returns `true` when guest
-    /// time was moved.
+    /// Feed the detector what this Load-class instruction read, and credit
+    /// whole iterations when the loop it belongs to has proved itself a
+    /// fixed point. Returns `true` when guest time was moved.
     ///
     /// The fixed-point claim, and why crediting is exact: at the moment this
     /// returns, the hart is one instruction past the load at `pc`. Two
     /// earlier passes through this same point had the identical register
     /// file, the same `pc`, and the same value out of the same address, and
     /// took the same number of cycles and instructions to get from one to
-    /// the next. Nothing else can have moved: no store or atomic ran (either
-    /// resets the detector), no `SYSTEM` instruction ran, no trap or
-    /// interrupt was delivered, and every memory access in between was a
-    /// read of a register the bus declares side-effect free. So machine
-    /// state at this point is a fixed point except for the two counters, and
-    /// `n` more iterations cost exactly `n` times what one cost.
+    /// the next. Nothing else can have moved:
+    ///
+    /// - no atomic, fence or `SYSTEM` instruction ran, and no trap or
+    ///   interrupt was delivered — each resets the detector;
+    /// - every store in between wrote bytes that were already there, so
+    ///   memory is what it was ([`PollSample::Inert`]);
+    /// - every load in between either read one of those unchanged bytes or
+    ///   read a register the bus declares side-effect free.
+    ///
+    /// So machine state at this point is a fixed point except for the two
+    /// counters, and `n` more iterations cost exactly `n` times what one
+    /// cost.
     ///
     /// `n` is bounded by `horizon`, the earliest cycle at which anything
-    /// outside the hart can change what the guest sees. Landing at or before
-    /// it means the run without the skip passes through this very state at
-    /// this very cycle — which is why the two runs print the same transcript.
-    fn observe_pure_read(&mut self, bus: &mut B, pc: u32, horizon: u64) -> bool {
-        let Some(read) = bus.take_pure_read() else {
-            // A RAM load, an impure MMIO read, or a load that faulted:
-            // no evidence, and no evidence is a reason to forget the rest.
-            self.poll.reset();
-            return false;
+    /// outside the hart can change what the guest sees — which is also what
+    /// makes reading RAM safe: a peripheral writes memory only at a
+    /// scheduled event, and the horizon stops at the next one. Landing at or
+    /// before it means the run without the skip passes through this very
+    /// state at this very cycle, which is why the two runs print the same
+    /// transcript.
+    fn observe_load(&mut self, bus: &mut B, pc: u32, horizon: u64) -> bool {
+        let read = match bus.take_poll_sample() {
+            PollSample::Pure(read) => read,
+            // A load that read unchanged memory: no new evidence, and no
+            // reason to discard what there is.
+            PollSample::Inert => return false,
+            // An impure MMIO read, an unmapped read, or a bus that makes no
+            // claim: forget everything.
+            PollSample::Impure => {
+                self.poll.reset();
+                return false;
+            }
         };
 
         let key = (pc, read.address, read.value);

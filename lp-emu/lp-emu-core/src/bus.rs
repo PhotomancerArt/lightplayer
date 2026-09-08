@@ -83,33 +83,26 @@ pub trait Bus {
         None
     }
 
-    /// Side-band after a Load-class instruction: the **pure** MMIO read it
-    /// performed, if that is all it did.
+    /// What the accesses of the instruction now retiring did to the bus, as
+    /// far as a poll-loop skip is concerned. See [`PollSample`].
     ///
-    /// A pure read is one the peripheral declares side-effect free *and*
-    /// whose value can change only through a write or a scheduled event —
-    /// never as a function of the current cycle. Reading one twice with
-    /// nothing in between returns the same value, and reading it a thousand
-    /// times leaves the machine in the state one read leaves it in. That is
-    /// exactly the property a poll-loop skip needs, which is why it is the
-    /// bus — the only component that knows what a register *is* — that
-    /// declares it.
+    /// The contract a bus that overrides this must keep:
     ///
-    /// The contract, which a bus that overrides this must keep:
+    /// - It answers about **this instruction**, not an older one. A bus
+    ///   resets it per instruction (`set_issuing` is the natural place).
+    /// - It answers [`PollSample::Pure`] only when the instruction's *only*
+    ///   MMIO access was one read of a register the peripheral declares
+    ///   side-effect free.
+    /// - It answers [`PollSample::Inert`] only when it is certain the
+    ///   instruction left the machine's state exactly as it found it.
+    /// - Everything else is [`PollSample::Impure`], which is always the safe
+    ///   answer.
     ///
-    /// - It reports **this instruction's** access, not an older one. A bus
-    ///   clears it per instruction (`set_issuing` is the natural place).
-    /// - It is `Some` only when the instruction's *only* MMIO access was one
-    ///   pure read. A RAM load, an impure read (a FIFO pop, a clear-on-read
-    ///   register), or any MMIO write leaves it `None`.
-    ///
-    /// The privileged stepper consumes it after Load-class instructions and
-    /// treats `None` as "no evidence", which is always safe: the detector
-    /// resets and nothing is skipped. The default is a constant the
-    /// optimizer removes.
+    /// The default is `Impure`: a bus that makes no claim gets no skip. It
+    /// is a constant the optimizer removes.
     #[inline(always)]
-    fn take_pure_read(&mut self) -> Option<PureRead> {
-        None
+    fn take_poll_sample(&mut self) -> PollSample {
+        PollSample::Impure
     }
 
     /// The stepper skipped `iterations` whole iterations of a pure poll loop
@@ -122,12 +115,47 @@ pub trait Bus {
     fn note_poll_skip(&mut self, _pc: u32, _address: u32, _iterations: u64) {}
 }
 
-/// One side-effect-free MMIO read, as [`Bus::take_pure_read`] reports it.
+/// One side-effect-free MMIO read, as [`PollSample::Pure`] carries it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PureRead {
     pub address: u32,
     /// The value the peripheral returned, zero-extended to a word.
     pub value: u32,
+}
+
+/// What one instruction's bus accesses did, for the poll-loop skip.
+///
+/// The three answers are graded by how much they let the privileged stepper
+/// conclude, and a bus that is unsure always has [`Impure`](Self::Impure)
+/// available.
+///
+/// The distinction between `Inert` and `Impure` is the whole reason this is
+/// an enum rather than an `Option`. Real poll loops are not three
+/// instructions long: the ROM's `uart_serial_tx_one_char` spins on
+/// `uart_hal_get_txfifo_count` with the character it is about to send spilled
+/// to the stack and reloaded every iteration. Those two accesses touch no
+/// peripheral and leave memory holding exactly what it held before, so they
+/// cannot move a fixed point — but a bus that could only say "pure read" or
+/// "no" would have to say "no", and the skip would never fire on the loop it
+/// was written for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PollSample {
+    /// The instruction changed nothing the guest can observe: it touched no
+    /// MMIO, and any store it performed wrote bytes that were already there.
+    ///
+    /// A RAM **read** is inert because within the skip's horizon nothing
+    /// outside the hart writes memory — a peripheral acts only at a
+    /// scheduled event, and the horizon stops at the next one. A RAM
+    /// **write** of the value already in place is inert because memory after
+    /// it equals memory before it.
+    Inert,
+    /// Exactly one MMIO read, of a register the peripheral declares
+    /// side-effect free (see the ESP crates' `Peripheral::pure_read`).
+    Pure(PureRead),
+    /// Anything else: an MMIO write, an MMIO read the peripheral does not
+    /// declare pure, a store that changed memory, an access that faulted, or
+    /// a bus that does not answer the question at all.
+    Impure,
 }
 
 /// A hardware watchpoint slot's configuration.

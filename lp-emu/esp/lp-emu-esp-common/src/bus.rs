@@ -27,7 +27,7 @@ use alloc::collections::BTreeSet;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use lp_emu_core::bus::{Bus, PureRead, Watchpoint};
+use lp_emu_core::bus::{Bus, PollSample, PureRead, Watchpoint};
 use lp_emu_core::memory::{MemoryAccessKind, MemoryError};
 use lp_emu_core::sched::{Cycles, EventId, Scheduler};
 
@@ -211,16 +211,17 @@ pub struct SocBus {
     /// refused like an unmapped one. See [`SocBus::set_strict_grade`].
     strict_grade: Option<RegGrade>,
     sideband: bool,
-    /// The pure-read side-band ([`Bus::take_pure_read`]): the side-effect-free
-    /// MMIO read the instruction now issuing performed, if it performed
-    /// exactly that and nothing else.
+    /// The poll-loop side-band ([`Bus::take_poll_sample`]): what the
+    /// accesses of the instruction now issuing did.
     ///
-    /// Cleared in [`set_issuing`](Bus::set_issuing) — once per instruction,
-    /// before its first access — so it can never carry a stale answer from
-    /// an earlier instruction into the stepper's poll detector. Deliberately
-    /// **not** part of [`BusScalars`]: it is per-instruction scratch, and a
-    /// restored run rewrites it before it is next read.
-    pure_read: Option<PureRead>,
+    /// Reset to [`PollSample::Inert`] in [`set_issuing`](Bus::set_issuing) —
+    /// once per instruction, before its first access — so it can never carry
+    /// a stale answer from an earlier instruction into the stepper's poll
+    /// detector. An instruction that performs no access at all is inert,
+    /// which is the truth. Deliberately **not** part of [`BusScalars`]: it is
+    /// per-instruction scratch, and a restored run rewrites it before it is
+    /// next read.
+    poll_sample: PollSample,
     /// The chip's misaligned-access policy, mirrored from the hart. The C6
     /// core performs misaligned data accesses in hardware, so its machine
     /// sets both permissive; the flag lives here because the bus is the
@@ -305,7 +306,7 @@ impl SocBus {
             strict: false,
             strict_grade: None,
             sideband: false,
-            pure_read: None,
+            poll_sample: PollSample::Inert,
             allow_unaligned: false,
             watchpoints: [None; WATCHPOINT_SLOTS],
             armed_for: [0; 3],
@@ -1041,14 +1042,14 @@ impl SocBus {
                 let value = range.periph.read(off, width, &mut cx);
                 (value, range.periph.pure_read(off))
             };
-            // The pure-read side-band (M4). Asked *after* the read so a
+            // The poll-loop side-band (M4). Asked *after* the read so a
             // block whose purity depends on which lane was addressed answers
-            // about the access that actually happened. `set_issuing` cleared
-            // the slot before this instruction, so leaving it alone is the
-            // right answer for an impure read.
-            if pure {
-                self.pure_read = Some(PureRead { address, value });
-            }
+            // about the access that actually happened.
+            self.poll_sample = if pure {
+                PollSample::Pure(PureRead { address, value })
+            } else {
+                PollSample::Impure
+            };
             if self.trace.is_enabled() {
                 self.trace.mmio(
                     now,
@@ -1087,16 +1088,40 @@ impl SocBus {
             }
             let off = (address - self.regions[i].base) as usize;
             let data = &mut self.regions[i].data;
-            let stored = match width {
-                Width::Word => data
-                    .get_mut(off..off + 4)
-                    .map(|b| b.copy_from_slice(&value.to_le_bytes())),
-                Width::Half => data
-                    .get_mut(off..off + 2)
-                    .map(|b| b.copy_from_slice(&(value as u16).to_le_bytes())),
-                Width::Byte => data.get_mut(off).map(|b| *b = value as u8),
+            // `changed` is the poll-loop side-band (M4): a store that writes
+            // the bytes already there leaves memory exactly as it found it,
+            // so it cannot move a fixed point. The compare is what earns the
+            // claim — the alternative, "the same address and value as last
+            // time", would have to reason about how many stores the loop
+            // makes and in what order.
+            let changed = match width {
+                Width::Word => data.get_mut(off..off + 4).map(|b| {
+                    let new = value.to_le_bytes();
+                    let changed = b != new;
+                    b.copy_from_slice(&new);
+                    changed
+                }),
+                Width::Half => data.get_mut(off..off + 2).map(|b| {
+                    let new = (value as u16).to_le_bytes();
+                    let changed = b != new;
+                    b.copy_from_slice(&new);
+                    changed
+                }),
+                Width::Byte => data.get_mut(off).map(|b| {
+                    let new = value as u8;
+                    let changed = *b != new;
+                    *b = new;
+                    changed
+                }),
             };
-            return stored.ok_or(fault);
+            return match changed {
+                Some(true) => {
+                    self.poll_sample = PollSample::Impure;
+                    Ok(())
+                }
+                Some(false) => Ok(()),
+                None => Err(fault),
+            };
         }
 
         self.write_mmio(address, width, value)
@@ -1138,12 +1163,9 @@ impl SocBus {
             // An MMIO store is the only thing that can have changed the
             // interrupt state under the stepper's feet.
             self.sideband = true;
-            // …and it is never part of a pure poll loop. `set_issuing` has
-            // already cleared the slot for this instruction; clearing it
-            // again keeps the contract true for an instruction that both
-            // reads and writes MMIO (an AMO), whatever order it does them
-            // in.
-            self.pure_read = None;
+            // …and it is never part of a pure poll loop, whatever else the
+            // instruction did (an AMO reads before it writes).
+            self.poll_sample = PollSample::Impure;
             if self.trace.is_enabled() {
                 self.trace.mmio(
                     now,
@@ -1233,6 +1255,10 @@ impl SocBus {
         access: Access,
         value: u32,
     ) -> Result<(), MemoryError> {
+        // An unmapped access moves the counters the exit report prints and
+        // may record a strict violation, so it is never inert however
+        // harmless the returned zero looks (M4).
+        self.poll_sample = PollSample::Impure;
         match access {
             Access::Read => self.unmapped_reads += 1,
             Access::Write => {
@@ -1456,11 +1482,11 @@ impl Bus for SocBus {
     fn set_issuing(&mut self, pc: u32, cycle: u64) {
         self.pc = pc;
         self.now = cycle;
-        // One clear per instruction, before its first access: the
-        // pure-read side-band's whole contract is that it answers about
-        // *this* instruction, and a load that never touched MMIO must not
-        // inherit the previous load's answer.
-        self.pure_read = None;
+        // One reset per instruction, before its first access: the
+        // side-band's whole contract is that it answers about *this*
+        // instruction, and a load that reached plain RAM must not inherit
+        // the previous load's answer.
+        self.poll_sample = PollSample::Inert;
     }
 
     fn take_sideband(&mut self) -> bool {
@@ -1468,8 +1494,8 @@ impl Bus for SocBus {
     }
 
     #[inline]
-    fn take_pure_read(&mut self) -> Option<PureRead> {
-        self.pure_read.take()
+    fn take_poll_sample(&mut self) -> PollSample {
+        self.poll_sample
     }
 
     fn note_poll_skip(&mut self, pc: u32, address: u32, iterations: u64) {
@@ -1876,11 +1902,11 @@ mod tests {
         fn load_state(&mut self, _bytes: &[u8]) {}
     }
 
-    /// The pure-read side-band answers about the instruction now issuing and
-    /// about no other. Every one of these cases is a way the detector could
-    /// be handed a stale `Some` and skip a loop that is not a fixed point.
+    /// The poll-loop side-band answers about the instruction now issuing and
+    /// about no other. Every case here is a way the detector could be handed
+    /// a stale answer and skip a loop that is not a fixed point.
     #[test]
-    fn the_pure_read_sideband_is_per_instruction() {
+    fn the_poll_sample_answers_about_this_instruction_only() {
         let mut bus = bus_with_ram();
         bus.add_peripheral(
             0x6000_0000,
@@ -1895,39 +1921,84 @@ mod tests {
         bus.set_issuing(0x4200_0000, 10);
         assert_eq!(bus.read_word(0x6000_001c).unwrap(), 0x0000_2a00);
         assert_eq!(
-            bus.take_pure_read(),
-            Some(PureRead {
+            bus.take_poll_sample(),
+            PollSample::Pure(PureRead {
                 address: 0x6000_001c,
                 value: 0x0000_2a00,
             })
         );
-        assert_eq!(bus.take_pure_read(), None, "take clears");
 
-        // The FIFO pops: never reported.
+        // The FIFO pops: impure, however constant its answer looks.
         bus.set_issuing(0x4200_0004, 20);
         bus.read_word(0x6000_0000).unwrap();
-        assert_eq!(bus.take_pure_read(), None);
+        assert_eq!(bus.take_poll_sample(), PollSample::Impure);
 
         // A RAM load after a pure read must not inherit the pure read's
-        // answer — this is the stale-`Some` case, and `set_issuing` is what
-        // rules it out.
+        // answer — the stale-answer case `set_issuing` rules out. It is
+        // *inert*, not impure: memory cannot change inside the horizon.
         bus.set_issuing(0x4200_0008, 30);
         bus.read_word(0x6000_001c).unwrap();
         bus.set_issuing(0x4200_000c, 40);
         bus.read_word(0x4080_0000).unwrap();
-        assert_eq!(bus.take_pure_read(), None);
+        assert_eq!(bus.take_poll_sample(), PollSample::Inert);
 
-        // An unmapped read is not pure either.
+        // An unmapped read moves the counters the exit report prints.
         bus.set_issuing(0x4200_0010, 50);
         let _ = bus.read_word(0x6001_0000);
-        assert_eq!(bus.take_pure_read(), None);
+        assert_eq!(bus.take_poll_sample(), PollSample::Impure);
 
-        // A write to the block clears the slot even when the same
-        // instruction read a pure register first (an AMO).
+        // An MMIO write is impure even when the same instruction read a
+        // pure register first (an AMO).
         bus.set_issuing(0x4200_0014, 60);
         bus.read_word(0x6000_001c).unwrap();
         bus.write_word(0x6000_0020, 1).unwrap();
-        assert_eq!(bus.take_pure_read(), None);
+        assert_eq!(bus.take_poll_sample(), PollSample::Impure);
+    }
+
+    /// A RAM store is inert exactly when it changed nothing. This is the
+    /// rule that lets the real firmware's poll loop be skipped at all — the
+    /// ROM spills the character it is sending to the stack on every
+    /// iteration — so it is worth pinning at every width, including the
+    /// case where only one byte lane of a word differs.
+    #[test]
+    fn a_ram_store_is_inert_exactly_when_it_changed_nothing() {
+        let mut bus = bus_with_ram();
+
+        bus.set_issuing(0x4200_0000, 10);
+        bus.write_word(0x4080_0000, 0x1234_5678).unwrap();
+        assert_eq!(
+            bus.take_poll_sample(),
+            PollSample::Impure,
+            "the first write changed the word"
+        );
+
+        bus.set_issuing(0x4200_0004, 20);
+        bus.write_word(0x4080_0000, 0x1234_5678).unwrap();
+        assert_eq!(
+            bus.take_poll_sample(),
+            PollSample::Inert,
+            "writing what is already there changes nothing"
+        );
+
+        // Half-words and bytes answer the same question about their own
+        // span, not about the word around it.
+        bus.set_issuing(0x4200_0008, 30);
+        bus.write_halfword(0x4080_0000, 0x5678).unwrap();
+        assert_eq!(bus.take_poll_sample(), PollSample::Inert);
+        bus.set_issuing(0x4200_000c, 40);
+        bus.write_halfword(0x4080_0000, 0x5679).unwrap();
+        assert_eq!(bus.take_poll_sample(), PollSample::Impure);
+
+        bus.set_issuing(0x4200_0010, 50);
+        bus.write_byte(0x4080_0000, 0x79).unwrap();
+        assert_eq!(bus.take_poll_sample(), PollSample::Inert);
+        bus.set_issuing(0x4200_0014, 60);
+        bus.write_byte(0x4080_0000, 0x7a).unwrap();
+        assert_eq!(bus.take_poll_sample(), PollSample::Impure);
+
+        // An instruction that touched nothing at all is inert.
+        bus.set_issuing(0x4200_0018, 70);
+        assert_eq!(bus.take_poll_sample(), PollSample::Inert);
     }
 
     #[test]

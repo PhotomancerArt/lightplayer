@@ -11,7 +11,7 @@ extern crate alloc;
 use alloc::{vec, vec::Vec};
 
 use lp_emu_core::{
-    Bus, CycleModel, InstClass, MemoryAccessKind, MemoryError, PureRead, Watchpoint,
+    Bus, CycleModel, InstClass, MemoryAccessKind, MemoryError, PollSample, PureRead, Watchpoint,
 };
 use lp_riscv_inst::{Gpr, encode};
 
@@ -68,9 +68,9 @@ struct TestBus {
     raise_on_mmio: Option<u8>,
     /// What [`PURE`] reads as. The test moves it; nothing else does.
     pure_value: u32,
-    /// The pure-read side-band, cleared per instruction in `set_issuing`
+    /// The poll-loop side-band, reset per instruction in `set_issuing`
     /// exactly as `SocBus` does it.
-    pure_read: Option<PureRead>,
+    poll_sample: PollSample,
     /// Every [`Bus::note_poll_skip`] the hart emitted: `(pc, address, n)`.
     poll_notes: Vec<(u32, u32, u64)>,
     /// [`FIFO`] pops on every read.
@@ -87,7 +87,7 @@ impl TestBus {
             pending: None,
             raise_on_mmio: None,
             pure_value: 0,
-            pure_read: None,
+            poll_sample: PollSample::Inert,
             poll_notes: Vec::new(),
             fifo_pops: 0,
         }
@@ -148,9 +148,19 @@ impl TestBus {
     fn note_access(&mut self, address: u32) {
         if address == MMIO {
             self.sideband = true;
+            self.poll_sample = PollSample::Impure;
             if let Some(n) = self.raise_on_mmio {
                 self.pending = Some(n);
             }
+        }
+    }
+
+    /// The poll-loop side-band for a store: `SocBus` compares the bytes it
+    /// is about to write with the bytes already there, and this does the
+    /// same. A store that changed nothing left the machine as it found it.
+    fn note_store(&mut self, address: u32, changed: bool) {
+        if changed || address == MMIO {
+            self.poll_sample = PollSample::Impure;
         }
     }
 
@@ -184,7 +194,7 @@ impl Bus for TestBus {
         // The two register shapes M4 is written against, ahead of the plain
         // RAM answer.
         if address == PURE {
-            self.pure_read = Some(PureRead {
+            self.poll_sample = PollSample::Pure(PureRead {
                 address,
                 value: self.pure_value,
             });
@@ -196,6 +206,7 @@ impl Bus for TestBus {
             // fixed point — and the read still changes hidden state. Only
             // the bus's refusal to call it pure stops the skip.
             self.fifo_pops += 1;
+            self.poll_sample = PollSample::Impure;
             return Ok(0);
         }
         Ok(i32::from_le_bytes([
@@ -227,7 +238,9 @@ impl Bus for TestBus {
     fn write_word(&mut self, address: u32, value: i32) -> Result<(), MemoryError> {
         self.check(address, 4, MemoryAccessKind::Write)?;
         let o = self.offset(address, 4, MemoryAccessKind::Write)?;
-        self.ram[o..o + 4].copy_from_slice(&value.to_le_bytes());
+        let new = value.to_le_bytes();
+        self.note_store(address, self.ram[o..o + 4] != new);
+        self.ram[o..o + 4].copy_from_slice(&new);
         self.note_access(address);
         Ok(())
     }
@@ -235,7 +248,9 @@ impl Bus for TestBus {
     fn write_halfword(&mut self, address: u32, value: i16) -> Result<(), MemoryError> {
         self.check(address, 2, MemoryAccessKind::Write)?;
         let o = self.offset(address, 2, MemoryAccessKind::Write)?;
-        self.ram[o..o + 2].copy_from_slice(&value.to_le_bytes());
+        let new = value.to_le_bytes();
+        self.note_store(address, self.ram[o..o + 2] != new);
+        self.ram[o..o + 2].copy_from_slice(&new);
         self.note_access(address);
         Ok(())
     }
@@ -243,6 +258,7 @@ impl Bus for TestBus {
     fn write_byte(&mut self, address: u32, value: i8) -> Result<(), MemoryError> {
         self.check(address, 1, MemoryAccessKind::Write)?;
         let o = self.offset(address, 1, MemoryAccessKind::Write)?;
+        self.note_store(address, self.ram[o] != value as u8);
         self.ram[o] = value as u8;
         self.note_access(address);
         Ok(())
@@ -257,14 +273,14 @@ impl Bus for TestBus {
         core::mem::take(&mut self.sideband)
     }
 
-    /// One clear per instruction, as `SocBus` does it: a load that reached
+    /// One reset per instruction, as `SocBus` does it: a load that reached
     /// plain RAM must never inherit the previous load's answer.
     fn set_issuing(&mut self, _pc: u32, _cycle: u64) {
-        self.pure_read = None;
+        self.poll_sample = PollSample::Inert;
     }
 
-    fn take_pure_read(&mut self) -> Option<PureRead> {
-        self.pure_read.take()
+    fn take_poll_sample(&mut self) -> PollSample {
+        self.poll_sample
     }
 
     fn note_poll_skip(&mut self, pc: u32, address: u32, iterations: u64) {
@@ -1083,27 +1099,100 @@ fn a_poll_loop_with_a_countdown_is_never_skipped() {
     assert_eq!(skipped_regs, executed_regs);
 }
 
-/// **Test 3.** The same loop with a store in the body. A store can change
-/// anything, so the detector forgets everything it had — the
-/// timeout-in-memory case.
+/// **Test 3.** The same loop with a **timeout kept in memory**: load a word,
+/// decrement it, store it back. The store changes memory every iteration, so
+/// the loop is not a fixed point and nothing is credited.
+///
+/// This is the milestone's "a store in the body is never skipped" case, in
+/// the form that makes the claim worth making. The blanket rule it replaces
+/// — *any* store disqualifies — was measured against the real firmware and
+/// found to skip nothing at all: the ROM's `uart_serial_tx_one_char` spins on
+/// the TX FIFO with the character spilled to the stack and reloaded every
+/// iteration, and that stack slot holds the same word every time. See
+/// [`a_poll_loop_whose_store_changes_nothing_is_skipped`] for that half, and
+/// the ADR for the argument.
 #[test]
-fn a_poll_loop_with_a_store_is_never_skipped() {
-    // `sw a0, 0(a4)` with a4 pointing at a scratch word.
+fn a_poll_loop_with_a_memory_countdown_is_never_skipped() {
+    // `lw a3, 0(a4); addi a3, a3, -1; sw a3, 0(a4)` — a4 at a scratch word.
+    let body = [
+        encode::lw(Gpr::new(13), Gpr::new(14), 0),
+        encode::addi(Gpr::new(13), Gpr::new(13), -1),
+        encode::sw(Gpr::new(14), Gpr::new(13), 0),
+    ];
+    fn run(body: &[u32], skip: bool) -> Drive {
+        let mut rig = Rig::new();
+        rig.hart.set_poll_skip(skip);
+        rig.load_poll_loop(PURE, body);
+        rig.set_reg(14, GUARD);
+        rig.load(GUARD, &[1_000_000]);
+        rig.drive(40_000, 30_000, 1)
+    }
+
+    let skipped = run(&body, true);
+    let executed = run(&body, false);
+
+    assert_eq!(
+        skipped.skips, 0,
+        "a countdown in memory is not a fixed point"
+    );
+    assert_eq!(skipped.cycles, executed.cycles);
+    assert_eq!(skipped.instructions, executed.instructions);
+}
+
+/// The other half of test 3, and the reason the real firmware's poll loop is
+/// skippable at all: a store that writes the bytes already there leaves
+/// memory exactly as it found it, so it cannot move a fixed point.
+///
+/// The body is the ROM's shape — spill a register to a scratch word, reload
+/// it — and the first iteration's store *does* change memory, so the run
+/// that follows is evidence gathered after it.
+#[test]
+fn a_poll_loop_whose_store_changes_nothing_is_skipped() {
+    // `sw a0, 0(a4); lw a3, 0(a4)`
+    let body = [
+        encode::sw(Gpr::new(14), Gpr::new(10), 0),
+        encode::lw(Gpr::new(13), Gpr::new(14), 0),
+    ];
+    fn run(body: &[u32], skip: bool) -> (Drive, [i32; 32], u32) {
+        let mut rig = Rig::new();
+        rig.hart.set_poll_skip(skip);
+        rig.load_poll_loop(PURE, body);
+        rig.set_reg(14, GUARD);
+        // Bit 0 clear, so the loop spins; and something the first store
+        // will overwrite, so the store starts out changing memory.
+        rig.bus.pure_value = 2;
+        rig.load(GUARD, &[0x1234_5678]);
+        let drive = rig.drive(40_000, 30_000, 1);
+        let guard = rig.bus.word_at(GUARD);
+        (drive, *rig.hart.regs(), guard)
+    }
+
+    let (skipped, skipped_regs, skipped_guard) = run(&body, true);
+    let (executed, executed_regs, executed_guard) = run(&body, false);
+
+    assert!(skipped.skips > 0, "the ROM's loop shape is skippable");
+    assert!(skipped.iterations > 1_000, "and credited in bulk");
+    assert_eq!(skipped.cycles, executed.cycles);
+    assert_eq!(skipped.instructions, executed.instructions);
+    assert_eq!(skipped.end, executed.end);
+    assert_eq!(skipped_regs, executed_regs);
+    assert_eq!(
+        skipped_guard, executed_guard,
+        "the word the loop kept storing holds the same thing either way"
+    );
+}
+
+/// A store to MMIO is never inert, whatever value it writes: writing a
+/// register can raise a line, arm a sequence or pop a FIFO, and the bus says
+/// so regardless of what the register held before.
+#[test]
+fn a_poll_loop_that_writes_mmio_is_never_skipped() {
     let body = [encode::sw(Gpr::new(14), Gpr::new(10), 0)];
     let mut rig = Rig::new();
     rig.load_poll_loop(PURE, &body);
-    rig.set_reg(14, GUARD);
-    let skipped = rig.drive(40_000, 30_000, 1);
-
-    let mut rig = Rig::new();
-    rig.hart.set_poll_skip(false);
-    rig.load_poll_loop(PURE, &body);
-    rig.set_reg(14, GUARD);
-    let executed = rig.drive(40_000, 30_000, 1);
-
-    assert_eq!(skipped.skips, 0, "a store in the body is not a fixed point");
-    assert_eq!(skipped.cycles, executed.cycles);
-    assert_eq!(skipped.instructions, executed.instructions);
+    rig.set_reg(14, MMIO);
+    let drive = rig.drive(40_000, 30_000, 1);
+    assert_eq!(drive.skips, 0, "an MMIO store is never inert");
 }
 
 /// **Test 4.** The same loop reading `mcycle`. A cycle-based timeout writes
