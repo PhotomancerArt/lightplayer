@@ -114,6 +114,10 @@ pub struct RememberedView {
     /// re-derived, so the split can never offer an escape the model did not
     /// grant (invariant I3).
     pub escapes: Vec<Escape>,
+    /// What this device IS, for the two verbs whose words depend on it: a
+    /// powered-off SIM wears Power on in the Reconnect slot (Q5), because
+    /// a runtime this tab makes has no port grant to ask back for.
+    pub face: super::DeviceFace,
     /// The board's last picture, when this session pulled one before the
     /// port went away or a sidecar remembered one across a reload
     /// (`device_frame_snapshot`) — always `FeedLiveness::Offline` here,
@@ -135,6 +139,10 @@ pub fn split_roster(roster: &DeviceRosterView) -> RosterSplit {
                 board: device_identity_line(device).board,
                 last_seen_label: device.freshness_label.clone(),
                 escapes: device.escapes.clone(),
+                face: match roster.runtime_bands.contains_key(&device.id) {
+                    true => super::DeviceFace::Sim,
+                    false => super::DeviceFace::Wire,
+                },
                 feed: roster.feeds.get(&device.id).cloned(),
             });
         } else {

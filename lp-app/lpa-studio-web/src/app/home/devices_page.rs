@@ -37,7 +37,7 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     DeviceAction, DeviceEscape, DeviceRosterView, DevicesOp, RememberedView, UiAction, UiHomeView,
-    device_escape_action, split_roster,
+    device_escape_action_for, split_roster,
 };
 
 use crate::app::home::device_roster_card::{DeviceRosterCard, PendingLinkCard};
@@ -301,7 +301,7 @@ fn RememberedTile(entry: RememberedView, on_action: EventHandler<UiAction>) -> E
                 for escape in entry.escapes.iter().copied() {
                     ActionButton {
                         key: "{escape:?}",
-                        action: device_escape_action(escape, device),
+                        action: device_escape_action_for(escape, device, entry.face),
                         running: false,
                         variant: remembered_escape_variant(escape),
                         on_action,
@@ -705,6 +705,7 @@ mod tests {
             board: Some("seeed-xiao-esp32c6".to_string()),
             last_seen_label: Some("last heard 4 min ago".to_string()),
             escapes: vec![DeviceEscape::Reconnect, DeviceEscape::Forget],
+            face: lpa_studio_core::DeviceFace::Wire,
             feed: None,
         }
     }

@@ -48,12 +48,17 @@ pub fn device_escape_action_for(
     device: DeviceId,
     face: super::DeviceFace,
 ) -> UiAction {
-    let action = match escape {
-        Escape::Cancel => Action::CancelActivity { device },
-        Escape::Retry => Action::Identify { device },
-        Escape::Reconnect => Action::Reconnect { device },
-        Escape::Disconnect => Action::Disconnect { device },
-        Escape::Forget => Action::Forget { device },
+    let action = match (escape, face) {
+        (Escape::Cancel, _) => Action::CancelActivity { device },
+        (Escape::Retry, _) => Action::Identify { device },
+        // Reconnect asks the browser's chooser for a port back, which is
+        // meaningless for a runtime this tab makes: the remembered line's
+        // Reconnect slot is where a powered-off sim's **Power on** lives
+        // (Q5), and Power on is `Connect` (PD8).
+        (Escape::Reconnect, super::DeviceFace::Sim) => Action::Connect { device },
+        (Escape::Reconnect, super::DeviceFace::Wire) => Action::Reconnect { device },
+        (Escape::Disconnect, _) => Action::Disconnect { device },
+        (Escape::Forget, _) => Action::Forget { device },
     };
     match face {
         super::DeviceFace::Sim => DevicesOp::sim_action_for(action),
