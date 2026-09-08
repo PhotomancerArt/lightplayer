@@ -53,8 +53,8 @@ payloads = ["boot-idle-flash", "upload-walk"]
 
 [[set]]
 name = "emu-m5"
-description = "M5's gate set: the RMT chase. A 256-LED white dot walks the strip three times on GPIO18 through the shipping `lp-ws281x` refill path, printing one `rmt-frame` record per frame with an FNV-1a checksum of the bytes it handed the driver, and — because three chases cross the telemetry module's ten-second period — one `[WS281X]` line saying what the driver believes about its own refill race. It is the first payload whose claims are checked against a **pin**: the machine decodes the same frames off the pad and the two checksums must agree, frame for frame. The image is the harness's own, over the link it ships with, so a silicon capture of it would be the same bytes."
-payloads = ["rmt-chase"]
+description = "M5's gate set: the RMT chase. A 256-LED white dot walks the strip three times on GPIO18 through the shipping `lp-ws281x` refill path, printing one `rmt-frame` record per frame with an FNV-1a checksum of the bytes it handed the driver, and — because three chases cross the telemetry module's ten-second period — one `[WS281X]` line saying what the driver believes about its own refill race. It is the first payload whose claims are checked against a **pin**: the machine decodes the same frames off the pad and the two checksums must agree, frame for frame. The image is the harness's own, over the link it ships with, so a silicon capture of it would be the same bytes. Then the pin claim on the SHIPPED image (M5 P4): `lp-cli upload projects/test/shader-oracle` replayed over the USB link, with the frames the pad carried recorded beside the console, so the first lit frame off gpio18 can be held against the host oracle's `[ORACLE] rgb=` line — the walk's own PASS criterion, with the decoder standing in for the frame-dump line the C6 does not have."
+payloads = ["rmt-chase", "shader-oracle-walk"]
 
 [[set]]
 name = "usb-negative-control"

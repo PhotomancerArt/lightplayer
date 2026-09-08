@@ -189,6 +189,37 @@ impl std::fmt::Debug for SeriesSpec {
     }
 }
 
+/// Whether a payload's recording carries a pin capture, and — because the
+/// replay compares two captures frame by frame — whose the frame count is.
+///
+/// The distinction turned up with the second payload to carry one. The
+/// `rmt-chase` harness sends exactly 768 frames and then parks, so a capture
+/// with 767 is a broken recording. A walk on the **shipped** image is the
+/// other shape: the project keeps rendering at the engine's pace until the
+/// run ends on a console line, so how many frames the pad carried by then is
+/// what the clock decided — the same frames, one grade a few further along —
+/// and calling that a structural difference would make every cross-grade
+/// replay of a shipped-image walk red for the reason the validation ADR
+/// rejects by name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PinCapture {
+    /// No pin capture: the payload makes no claim about a wire.
+    Off,
+    /// The payload's frame count is its own. Every frame is compared, and a
+    /// capture with a different number of them is a structural problem.
+    EveryFrame,
+    /// The pad runs on past the sentinel at the clock's pace. The frames the
+    /// two captures share are compared as `Pin`; the counts are reported as
+    /// `Timing`, with their ratio, and nothing else.
+    WhileRunning,
+}
+
+impl PinCapture {
+    pub const fn is_on(self) -> bool {
+        !matches!(self, PinCapture::Off)
+    }
+}
+
 /// A payload: one named, runnable question.
 #[derive(Debug)]
 pub struct Payload {
@@ -272,7 +303,8 @@ pub struct Payload {
     /// operator's side did to the board first.
     pub fresh_chip: bool,
     /// Does a recording of this payload carry a **pin capture** beside the
-    /// transcript — `<stem>.txt.pins.jsonl`, one decoded frame per line?
+    /// transcript — `<stem>.txt.pins.jsonl`, one decoded frame per line —
+    /// and, if it does, whose is the frame count? See [`PinCapture`].
     ///
     /// Only a payload whose claim is about a wire. The runner passes
     /// `--dump-frames file:…` to a configuration that can observe a pad,
@@ -283,7 +315,7 @@ pub struct Payload {
     /// silicon, without a logic analyser on the desk — records the console
     /// half and says nothing about the pad, which is exactly what its
     /// `validate.toml` grade already says.
-    pub pin_capture: bool,
+    pub pin_capture: PinCapture,
     /// Why silicon cannot record this payload, when it cannot.
     ///
     /// `usb-host-absent` is the case, and the reason is the payload: an
@@ -1009,7 +1041,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         probes: &[],
         run_secs: None,
         fresh_chip: false,
-        pin_capture: false,
+        pin_capture: PinCapture::Off,
         emulator_only: None,
     },
     Payload {
@@ -1032,7 +1064,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         probes: &[],
         run_secs: None,
         fresh_chip: false,
-        pin_capture: false,
+        pin_capture: PinCapture::Off,
         emulator_only: None,
     },
     Payload {
@@ -1055,7 +1087,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         probes: &[],
         run_secs: None,
         fresh_chip: false,
-        pin_capture: false,
+        pin_capture: PinCapture::Off,
         emulator_only: None,
     },
     Payload {
@@ -1078,7 +1110,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         probes: &[],
         run_secs: None,
         fresh_chip: false,
-        pin_capture: false,
+        pin_capture: PinCapture::Off,
         emulator_only: None,
     },
     Payload {
@@ -1129,7 +1161,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         probes: &[],
         run_secs: None,
         fresh_chip: false,
-        pin_capture: false,
+        pin_capture: PinCapture::Off,
         emulator_only: None,
     },
     Payload {
@@ -1200,7 +1232,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // pair, which stops the run.
         run_secs: Some(12),
         fresh_chip: false,
-        pin_capture: false,
+        pin_capture: PinCapture::Off,
         emulator_only: None,
     },
     Payload {
@@ -1245,7 +1277,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         probes: &[],
         run_secs: Some(12),
         fresh_chip: false,
-        pin_capture: false,
+        pin_capture: PinCapture::Off,
         emulator_only: None,
     },
     Payload {
@@ -1292,7 +1324,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         ],
         run_secs: Some(6),
         fresh_chip: false,
-        pin_capture: false,
+        pin_capture: PinCapture::Off,
         emulator_only: Some(
             "an absent host records nothing: recording IS what a host does. On silicon this \
              payload is `unplug the board and watch the port that is no longer there`, which is \
@@ -1334,7 +1366,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // blank part produces. On silicon that means an erase before the
         // write, or the board's leftover filesystem is in the measurement.
         fresh_chip: true,
-        pin_capture: false,
+        pin_capture: PinCapture::Off,
         emulator_only: None,
     },
     Payload {
@@ -1379,7 +1411,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // blank part produces. On silicon that means an erase before the
         // write, or the board's leftover filesystem is in the measurement.
         fresh_chip: true,
-        pin_capture: false,
+        pin_capture: PinCapture::Off,
         emulator_only: None,
     },
     Payload {
@@ -1418,7 +1450,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         probes: &[],
         run_secs: None,
         fresh_chip: true,
-        pin_capture: false,
+        pin_capture: PinCapture::Off,
         emulator_only: None,
     },
     Payload {
@@ -1475,7 +1507,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // steady is the second, at twenty-five.
         run_secs: Some(26),
         fresh_chip: true,
-        pin_capture: false,
+        pin_capture: PinCapture::Off,
         emulator_only: None,
     },
     Payload {
@@ -1529,7 +1561,54 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // exists: its claim is about a wire, so a recording that held only
         // what the device said would be missing the half that can contradict
         // it.
-        pin_capture: true,
+        pin_capture: PinCapture::EveryFrame,
+        emulator_only: None,
+    },
+    Payload {
+        name: "shader-oracle-walk",
+        display_name: "Project upload walk (projects/test/shader-oracle), over the USB link, with the pad observed",
+        fw_check_slug: "shader-oracle-walk",
+        // The same flash-backed product image as `upload-walk-usb`, walking
+        // the host oracle's own project (M5 P4). `projects/test/shader-oracle`
+        // is clock-free — every rendered frame is the same bytes — and
+        // `lp-app/lpa-server/tests/shader_oracle_frame.rs` prints those bytes
+        // from two host engines as `[ORACLE] rgb=` / `[ORACLE-RV32] rgb=`,
+        // which is what `scripts/m4-hardware-walk.sh` compares a device's
+        // frame-dump line against. The C6 has no frame-dump line; this
+        // payload's pin capture is the line's twin, read off gpio18 by the
+        // decoder instead of printed by the driver. The claim it lets the
+        // milestone make: the first lit frame the SHIPPED image puts on the
+        // pad is the oracle's frame, byte for byte, and every frame after it
+        // is the same (`tests/m5_replays.rs`).
+        firmware_features: &["server", "radio"],
+        fw_checks_feature: None,
+        emits_header: false,
+        host_script: Some("lp-emu/esp/lp-emu-esp32c6/walks/shader-oracle.script"),
+        // The last frame of the `projectRead` answer — the walk's own end,
+        // the way `upload-walk`'s is (request 11 here: the oracle project has
+        // no `clock.json`, so the client sends one file fewer than `basic`).
+        // The lit frames start at the compile behind request 10 and run on
+        // while the read streams, which is a few dozen of them: enough for
+        // the claim, small enough to commit. The in-process gate
+        // (`tests/shader_oracle_pin.rs`) runs on for seconds.
+        sentinel: Sentinel::Done("\"id\":11,\"seq\":2,"),
+        record_kinds: &[],
+        mask_set: "boot-idle",
+        fields: &[],
+        series: &[&HELLO, &FS_MOUNT, &FS_WRITE, &LOAD_GATE, &SHADER_COMPILE],
+        capture: Capture::Monitor,
+        link: Link::UsbSerialJtag,
+        emulator_features: None,
+        host_plan: Some(HostPlan {
+            host: "attached",
+            script: "",
+        }),
+        probes: &[],
+        run_secs: None,
+        fresh_chip: true,
+        // The pad runs on at the engine's pace after the sentinel's line is
+        // printed, so the count is the clock's; the frames are not.
+        pin_capture: PinCapture::WhileRunning,
         emulator_only: None,
     },
 ];

@@ -158,9 +158,13 @@ fn the_host_side_properties_are_not_mirrored_and_that_is_the_point() {
             // and `--usb-host` defaults to `absent`. Somebody has to be
             // draining the port or the transcript is empty.
             "rmt-chase",
+            // M5 P4's walk of the host oracle's project on the shipped image
+            // over the shipped link, with the pad observed: the same shape as
+            // P5's two walks, plus a pin capture.
+            "shader-oracle-walk",
         ],
-        "the emu-m6 set, M4's flash-backed boot, P5's two walks and M5's chase drive the \
-         host; nothing else"
+        "the emu-m6 set, M4's flash-backed boot, P5's two walks, M5's chase and M5's oracle \
+         walk drive the host; nothing else"
     );
 }
 
