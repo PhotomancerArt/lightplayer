@@ -1,4 +1,4 @@
-//! Sim identity and its sidecar: what makes a simulator a remembered device.
+//! Sim identity and its sidecar: what makes a sim a remembered device.
 //!
 //! A sim is a device with a link and a record — no new flow, no `is_sim`
 //! anywhere in the fold. Two facts make that work, and this module owns

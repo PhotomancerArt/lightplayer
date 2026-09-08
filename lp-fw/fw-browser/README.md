@@ -4,7 +4,7 @@
 LightPlayer runtime a computer runs, hosted in a Web Worker instead of on a
 machine or a chip.
 
-It exists for Studio simulation and browser-local project testing. It is not the
+It exists to power Studio's sim and browser-local project testing. It is not the
 embedded product path and it is not a replacement for ESP32 runtime shader
 compilation. The browser runtime still uses the real shader frontend and
 `lpvm-wasm` browser backend to compile and execute shaders in the browser, but
@@ -96,7 +96,7 @@ The runtime never owns a clock; it advances its `ManualTimeProvider` by exactly
 the delta each `tick` envelope carries. Who supplies that delta is a *worker*
 concern, selected at boot:
 
-- **Self-ticking** (Studio simulator default): the worker JS runs its own timer
+- **Self-ticking** (Studio's sim default): the worker JS runs its own timer
   (~30 fps) and ticks the runtime with the *real* elapsed time measured via
   `performance.now()`. Previews animate at roughly real time even when no
   protocol request is in flight. The Studio client transport is a pure consumer

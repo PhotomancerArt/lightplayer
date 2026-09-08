@@ -6,6 +6,10 @@
 - **Supersedes:** None (builds on `2026-07-15-device-session-model.md`
   and `2026-07-17-rich-object-pattern.md`)
 - **Superseded by:** None
+- **Amended by:** [2026-09-07-always-a-device-target-real-emu-sim.md](2026-09-07-always-a-device-target-real-emu-sim.md)
+  (`RuntimePayload` collapses to one arm, `Device`; pool capacity is one,
+  kind-agnostically; the `#/sim/` follow-up is closed by the `?on=`
+  grammar)
 
 ## Context
 
@@ -59,6 +63,13 @@ One concept module, `lpa-studio-core/src/app/runtime_pool/`:
   (cadence-by-kind, `BackoffPolicy`, heartbeat bookkeeping). There is
   no `None` arm: absence of a runtime is absence from the pool, and
   "connected" MEANS "a session exists in the pool".
+
+  > **Amended 2026-09-07** — `RuntimePayload` is now one arm,
+  > `Device(DeviceLensAttachment)`. D22 is retired: a sim is a roster
+  > device like any other, and what the `Sim` arm used to carry
+  > (transport bandwidth facts) survives as `LinkTransport` on the
+  > attachment, not as a payload kind. See
+  > `2026-09-07-always-a-device-target-real-emu-sim.md`.
 - **`RuntimePool`** is the keyed collection (`BTreeMap<RuntimeId,
   RuntimeSession>`) plus `lens: Option<RuntimeId>`, owned by
   `StudioController`. `RuntimeId` is minted per session and is the
@@ -93,6 +104,13 @@ capacity (oldest first), and refuses the replace while an operation is
 in flight on the session it would evict (the payload is handed back,
 never leaked). "+ new simulator", N sims, and the radio-sim bus raise a
 number, not the shape.
+
+> **Amended 2026-09-07** — one payload means one capacity:
+> `SESSION_CAPACITY = 1`, kind-agnostically. Opening a project resolves
+> a device (a sim, or the board that last ran it) and powers it on; if
+> another device was on, it powers off (silently for a sim, D37) and
+> its record stays. See
+> `2026-09-07-always-a-device-target-real-emu-sim.md`.
 
 ### Install preserves the lens
 
@@ -279,6 +297,12 @@ glyph + status + project chip, per the plan's Q6 fallback.
 - **M5 (D29/D30/D37)**: `#/sim/<key>` + `#/device/<uid>` routes over
   `attach_lens`; reload re-derivation; the diverged-resolution popup on
   the D29 click path.
+
+  > **Amended 2026-09-07** — closed by the `?on=` grammar
+  > (`/p/<slug>-prj<uid>?on=emu|sim|mac:|ws:`): the project is always the
+  > URL, and `?on=` names the device. `/device/<uid>` becomes a
+  > resolver rather than a route of its own. See
+  > `2026-09-07-always-a-device-target-real-emu-sim.md`.
 - **Live sim-card frames**: the deferred stretch — a core-owned present
   service for pool sessions sharing PreviewHost's CPU blit seam, plus
   the gallery routing rule (sim frames instead of a preview lease for

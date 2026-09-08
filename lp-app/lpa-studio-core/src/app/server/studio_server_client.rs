@@ -45,7 +45,7 @@ pub struct StudioServerClient {
     ///
     /// Real firmware only: `fw-esp32-common`'s server loop heartbeats every
     /// 5 s, the host/browser runtimes never do — so this stays `None` on a
-    /// simulator session and for the first seconds of a device one.
+    /// sim session and for the first seconds of a device one.
     last_fps: Option<f32>,
     /// The projects the latest heartbeat said are loaded. The device card's
     /// frame feed needs a `WireProjectHandle`, and the heartbeat already
@@ -900,7 +900,7 @@ fn node_def_artifacts(
         .collect()
 }
 
-/// The simulator's server io. Hardware and fake-device links no longer pass
+/// The sim's server io. Hardware and fake-device links no longer pass
 /// through here — their io IS the device session's channel (M4/P5); the old
 /// per-kind match (browser serial io, test-edge fake io, host holes) is
 /// gone with them.

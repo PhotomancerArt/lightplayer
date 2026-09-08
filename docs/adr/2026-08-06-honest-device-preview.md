@@ -10,6 +10,9 @@
   conversations-and-the-card-feed.md` records what stands (geometry comes
   only from the wire; over-budget layouts are named, not drawn) and brings
   this feed to the round-2 device card over the SHARED link
+- **Amended by:** [2026-09-07-always-a-device-target-real-emu-sim.md](2026-09-07-always-a-device-target-real-emu-sim.md)
+  (one card-feed lane, the roster's — the violet SIM pill becomes the
+  runtime band)
 
 ## Context
 
@@ -61,6 +64,15 @@ the frames the sim engine actually published — as real as a board's —
 wearing a violet SIM pill as identity dress over the shared
 live/stale/offline/waiting states. The browser re-simulation canvas
 left the play tab entirely (project thumbnails keep theirs).
+
+> **Amended 2026-09-07** — the violet SIM pill is retired in favor of
+> the runtime band: a 24px row under the identity rows, in the same
+> bound family, reading `▶ Sim · <target> · in this tab · <granted
+> tier>` (D38/D49). A sim is drawn by the ordinary `DeviceRosterCard`
+> now, not a separate `sim_card.rs`, and its feed is fed through
+> `device_feeds` like any card — including the Lens treatment (paused,
+> "the editor has the wire") while the editor holds its wire. See
+> `2026-09-07-always-a-device-target-real-emu-sim.md`.
 
 **Post-gamma colors ARE the honest view** (Q2): the published buffer
 holds what the board drives onto the wire. Gamma is lossy to invert,

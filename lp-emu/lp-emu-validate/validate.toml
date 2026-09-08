@@ -72,6 +72,11 @@ payloads = [
 ]
 
 [[set]]
+name = "rmt-chase"
+description = "The RMT chase on its own, and the reason it is a set of one: `emu-m5` pairs it with `shader-oracle-walk`, whose recipe ERASES THE FLASH CHIP before it flashes (the erase is what gives that payload the blank filesystem and `bootCount 1` it needs). A silicon capture of the chase wants none of that — the chase is a harness image that never reaches `bootctl` — and a sitting that asks for one should not have to wipe a board's filesystem to get it. The payload is the same on either machine, so this set is how the emulator's committed captures and the desk's are of one recipe."
+payloads = ["rmt-chase"]
+
+[[set]]
 name = "emu-m6-walk"
 description = "M6 P5: the shipped flash-backed image doing a day's work over the link it ships with. `lp-cli upload examples/basic` (the same script M4 replayed over the spike's UART0 link, so the pair is a controlled comparison of the two link drivers on one image) and `lp-cli upload examples/meteor`, which runs on past the load to the steady heartbeat the spike report §11.2 measured on the desk. Both run against `scripts/emu/build-reference-image.sh esp32c6,server,radio d6cfaa205 none` — the commit §5.3 and §11.2 are at, built with NO cherry-pick, so the bytes are silicon's own merged-default.bin."
 payloads = ["upload-walk-usb", "meteor-walk-usb"]

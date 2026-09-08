@@ -80,7 +80,7 @@ impl ControllerOp for ProjectOp {
             ),
             Self::OpenDocsExample { .. } => ActionMeta::new(
                 "Open docs example",
-                "Run a compiled-in example on this docs page's simulator.",
+                "Run a compiled-in example on this docs page's sim.",
                 ActionPriority::Secondary,
             ),
             Self::RefreshProject => ActionMeta::new(

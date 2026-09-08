@@ -32,7 +32,7 @@ const STORY_NOW: f64 = 1_800_000_000.0;
 
 #[story(
     screenshot,
-    description = "README front-page hero: the full Studio editing a loaded show — sidebar node tree, the focused Aurora shader card (TRACKED visual preview with rendered output, knob row, agent chat, code drawer), and the connected simulator pane. Single-state and deterministic on purpose; the repo README embeds the lg capture."
+    description = "README front-page hero: the full Studio editing a loaded show — sidebar node tree, the focused Aurora shader card (TRACKED visual preview with rendered output, knob row, agent chat, code drawer), and the connected sim's device pane. Single-state and deterministic on purpose; the repo README embeds the lg capture."
 )]
 fn studio_hero() -> Element {
     // The right column is the D43 LENS CARD — the same DeviceCard the
@@ -51,7 +51,7 @@ fn studio_hero() -> Element {
 
 #[story(
     screenshot,
-    description = "README home shot: the gallery with the simulator running a project, the project library, and examples. Single-state, fixed clock, seeded thumbs; the repo README embeds the lg capture."
+    description = "README home shot: the gallery with a sim running a project, the project library, and examples. Single-state, fixed clock, seeded thumbs; the repo README embeds the lg capture."
 )]
 fn home_gallery() -> Element {
     rsx! {

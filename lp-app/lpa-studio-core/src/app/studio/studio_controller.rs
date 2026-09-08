@@ -208,7 +208,7 @@ pub struct StudioController {
     /// dispatch and by the actor after each batch.
     library_refresh_pending: bool,
     /// A home-card open in flight: keeps the gallery on screen (card busy)
-    /// while the simulator opens, and tells the connect flow which package
+    /// while the sim opens, and tells the connect flow which package
     /// to push instead of probing running projects.
     pending_open: Option<PendingOpen>,
     /// The open that stopped at the mismatch page (D50). Cleared the

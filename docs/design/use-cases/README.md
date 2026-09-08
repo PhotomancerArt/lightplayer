@@ -37,7 +37,7 @@ with **unmap all** beside it once a fixture is manual.
 
 - **A real-hardware walk of all three cases.** Everything here is
   reasoned from experience with the pieces and verified in the
-  simulator; none of the three has been walked end-to-end on the
+  sim; none of the three has been walked end-to-end on the
   hardware since the flow flag landed.
 - **Creation-time flow defaults** — should a Strip preset create an
   `auto` fixture and a drawn shape a `manual` one? Decided at that walk,

@@ -130,7 +130,7 @@ pub(crate) fn DocsEditorSurface(
                 },
                 None => rsx! {
                     EmbedLoading {
-                        message: "Starting the simulator — the shader's source appears here."
+                        message: "Starting Desktop (sim) — the shader's source appears here."
                             .to_string(),
                         min_height: EDITOR_HEIGHT,
                     }

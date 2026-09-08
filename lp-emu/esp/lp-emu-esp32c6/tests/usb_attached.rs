@@ -356,10 +356,11 @@ fn g2_4_two_attached_runs_are_the_same_run() {
 /// run stops with the register's name, which is what the level is for.
 ///
 /// It is **not** a claim about the chip. `--strict-grade` applies to the
-/// blocks that publish a grade table, and today that is one; the run report
-/// says so and so does `blocks_in_strict_grade_scope`. Every accept table on
-/// the boot path is ungraded, which is an unanswered question rather than a
-/// pass, and grading them is the honest-peripheral policy's next milestone.
+/// blocks that publish a grade table, and since M2 P1 that is two —
+/// `USB_DEVICE` and `GPIO`; the run report says so and so does
+/// `blocks_in_strict_grade_scope`. Every accept table on the boot path is
+/// still ungraded, which is an unanswered question rather than a pass, and
+/// grading them is the honest-peripheral policy's next milestone.
 #[test]
 #[ignore = "needs the fw-esp32c6 ELF; run through `just test-emu-c6`"]
 fn g4_4_the_shipped_image_crosses_no_modeled_usb_register() {
@@ -385,8 +386,14 @@ fn g4_4_the_shipped_image_crosses_no_modeled_usb_register() {
     );
     assert!(m.bus.first_strict_violation().is_none());
 
-    // The scope, named — a pass here is a pass about one block.
-    assert_eq!(m.bus.blocks_in_strict_grade_scope(), vec!["USB_DEVICE"]);
+    // The scope, named — a pass here is a pass about the blocks that publish
+    // a grade table, and M2 P1 made that two: `GPIO` grades its registers
+    // too now, so the shipped image crossing none of ITS modeled registers
+    // in five and a half seconds is part of what this run proves.
+    assert_eq!(
+        m.bus.blocks_in_strict_grade_scope(),
+        vec!["USB_DEVICE", "GPIO"]
+    );
     // And the run really did do the whole boot, so the pass is not a pass by
     // never getting there.
     assert!(
@@ -394,10 +401,16 @@ fn g4_4_the_shipped_image_crosses_no_modeled_usb_register() {
         "the run reached the idle loop"
     );
 
-    // The list the README publishes, printed for the record.
+    // The lists the README publishes, printed for the record.
     println!(
         "G4-4: {} modeled USB_DEVICE registers, none crossed in {GATE_US} us: {}",
         UsbSerialJtag::modeled_registers().len(),
         UsbSerialJtag::modeled_registers().join(", ")
+    );
+    let gpio = lp_emu_esp32c6::periph::gpio::Gpio::modeled_registers();
+    println!(
+        "G4-4: {} modeled GPIO registers, none crossed either: {}",
+        gpio.len(),
+        gpio.join(", ")
     );
 }

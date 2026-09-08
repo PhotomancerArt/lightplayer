@@ -1,13 +1,9 @@
 //! The Devices page (`/devices`, vision D9): the runtime roster.
 //!
-//! Two sections, from two different places:
-//!
-//! - **Runtimes** — the live simulator's card, while a sim session exists
-//!   (D36). Unchanged by the device-model rebuild; the sim is not a device
-//!   (D22) and keeps its own path through round 1.
-//! - **Devices** — the `lpa-devices` roster's projection: one card per known
-//!   device, one entry per link still being identified, and one button to ask
-//!   the browser for another port.
+//! One section, one source: the `lpa-devices` roster's projection — one
+//! card per known device (real, emu, or sim; a sim is a device, same as
+//! any board), one entry per link still being identified, and one button
+//! to ask the browser for another port.
 //!
 //! The device half renders `RosterView` DIRECTLY. There is no `Ui*` mirror of
 //! it, on purpose: the projection is already a pure function of the fold, so
@@ -212,7 +208,7 @@ fn UnavailableNote() -> Element {
             }
             p { class: "tw:m-0 tw:max-w-prose tw:text-xs tw:leading-relaxed tw:text-subtle-foreground",
                 "Studio reaches boards over Web Serial, which Chrome, Edge and \
-                 other Chromium browsers support. The simulator works everywhere."
+                 other Chromium browsers support. A sim runs anywhere."
             }
         }
     }

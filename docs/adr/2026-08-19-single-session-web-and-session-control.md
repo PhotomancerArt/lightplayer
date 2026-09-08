@@ -9,6 +9,9 @@
   "Every segment of the lockup opens the panel". Everything else stands.
 - **Supersedes:** None
 - **Superseded by:** None
+- **Amended by:** [2026-09-07-always-a-device-target-real-emu-sim.md](2026-09-07-always-a-device-target-real-emu-sim.md)
+  (the header control has one kind now — kind-based teardown becomes
+  device-based, and the "Simulator stopped" toast is gone)
 
 ## Context
 
@@ -47,6 +50,14 @@ device connect, open-from-home, provider link, the docs example — inherits
 it for free. An operation in flight refuses the install rather than
 silently interrupting it, naming the operation (`InstallRefusal`).
 
+> **Amended 2026-09-07** — there is only one kind now. `RuntimePayload`
+> collapses to `Device`, so "tears the other KIND of session down first"
+> becomes "opens the device the new project or connect resolves to,
+> replacing whatever device this tab held" — same one-session-per-tab
+> shape, no kind fork. `StopSimulator` is gone; `Disconnect` covers a
+> sim and a board alike. See
+> `2026-09-07-always-a-device-target-real-emu-sim.md`.
+
 **The pool's shape is untouched.** `RuntimePool` still models N device
 sessions and keeps `DEVICE_SESSION_CAPACITY = 4`; this is a WEB UX policy
 layered on top, not a model change. A desktop-app shell — which is not
@@ -70,6 +81,12 @@ saved as a draft.") on both idle and dirty. The ONLY thing that refuses a
 nav-away is an operation in flight (a deploy or a flash): refusing there
 and nowhere else is what makes "leaving never prompts on dirty" true
 without also letting a click strand a hardware write mid-flash.
+
+> **Amended 2026-09-07** — the "Simulator stopped" toast is gone (Q5,
+> Yona at G1: "what use is saying it?"). A sim powering off is silent,
+> the ordinary case under always-a-device; a board still says "the board
+> keeps running." See
+> `2026-09-07-always-a-device-target-real-emu-sim.md`.
 
 **Docs and Boards are the deliberate exception.** From a lens route they
 open in a NEW tab (`NavTab`'s `new_tab` prop; the router's click

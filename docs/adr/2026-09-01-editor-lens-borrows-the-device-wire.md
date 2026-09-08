@@ -8,6 +8,10 @@
   `2026-07-15-device-session-model.md`'s editor-side `DeviceSession`
   ownership)
 - **Superseded by:** None
+- **Amended by:** [2026-09-07-always-a-device-target-real-emu-sim.md](2026-09-07-always-a-device-target-real-emu-sim.md)
+  (the lens borrows a sim's wire the same way it borrows silicon's — it
+  is always a device lens; the `/device/<uid>` address rule is superseded
+  by the `?on=` hint)
 
 ## Context
 
@@ -72,6 +76,13 @@ store (invariant I8) round 2 exists to end.
    the device route never shows an opening frame. Opening requires an
    OPEN port: an attached-but-closed link has stale hello evidence and no
    wire to lend.
+
+   > **Amended 2026-09-07** — `/device/<uid>` is superseded by the
+   > `?on=` grammar (`/p/<slug>-prj<uid>?on=emu|sim|mac:|ws:`): the
+   > project is always the URL, and `?on=` is the hint that resolves to
+   > a device. `/device/<uid>` becomes a resolver that redirects to that
+   > form rather than a route of its own. See
+   > `2026-09-07-always-a-device-target-real-emu-sim.md`.
 5. **Probe policy follows the lens kind.** A device lens pulls at the
    150 ms device cadence, probes visuals at the 16×16 device tier, and
    subscribes the focused node's products only — every subscribed product
@@ -83,6 +94,12 @@ store (invariant I8) round 2 exists to end.
 - The runtime pool regains a device arm (`RuntimePayload::Device`), but as
   a lens handle, not a device store. Single-session policy is kind-
   agnostic: a device lens replaces the sim and vice versa.
+
+  > **Amended 2026-09-07** — there is no other kind to be agnostic
+  > about: `RuntimePayload` is one arm, `Device`, and the lens is always
+  > a device lens — on a sim exactly as on silicon, borrowing its wire
+  > the same way. See
+  > `2026-09-07-always-a-device-target-real-emu-sim.md`.
 - Effects and the lens are mutually exclusive on a wire by construction
   (the borrow token), and both refusals are honest: an effect on a
   lens-held wire ends with the reason; a lens on an effect-held wire is

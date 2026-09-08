@@ -1,6 +1,6 @@
 //! End-to-end edit flow against an in-process LightPlayer server.
 //!
-//! Harness-level, no UI: a real `LpServer` (simulator session) runs behind a
+//! Harness-level, no UI: a real `LpServer` (sim session) runs behind a
 //! `ClientIo` adapter that pumps every client message through
 //! `LpServer::tick_and_send`. The studio actor drives the same command path
 //! the web shell uses: connect → `SetValue` on a clock control (transient)
@@ -2444,7 +2444,7 @@ pub(crate) fn asset_e2e_server() -> LpServer {
 const PROJECT_DIR: &str = "/projects/edit-e2e";
 
 /// A real server with a loaded clock + fixture project (no shader, so the
-/// simulator session runs entirely host-side).
+/// sim session runs entirely host-side).
 /// A "device" fixture: a real in-process server with NOTHING loaded.
 /// Connect-time pulls discover the device's LOADED project, so device
 /// tests must not run the edit-e2e project — an idle device falls back to

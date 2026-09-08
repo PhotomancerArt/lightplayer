@@ -62,7 +62,7 @@ pub const PROJECTS_LABEL: &str = "Projects";
 /// The heading over the single-effect patterns.
 pub const PATTERNS_LABEL: &str = "Patterns";
 pub const PROJECTS_LEDE: &str =
-    "Real pieces, wired the way they were built. Open one in the simulator, then make it yours.";
+    "Real pieces, wired the way they were built. Open one here, then make it yours.";
 pub const PATTERNS_LEDE: &str =
     "Single effects on a test rig. Each exports an effect you can import into your own project.";
 

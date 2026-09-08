@@ -7,6 +7,7 @@ use lp_emu_esp32c6::machine::{
     StopCondition, TimeGrade, Uart0Sink, UsbHost, UsbSjDrain, UsbSjSink,
 };
 use lp_emu_esp32c6::memmap;
+use lp_emu_esp32c6::pinscript::{PinScript, parse_pin_script, parse_wire};
 
 use super::args::{EmuChip, EmuCli, EmuCommand, Grade, LinkKind, RunArgs};
 
@@ -106,6 +107,31 @@ fn run(args: RunArgs) -> Result<()> {
     }
     if let Some(path) = &args.pin_log {
         builder = builder.pin_log(PinLogSink::File(path.clone()));
+    }
+    // `--pin-log` is mirrored here, so its input twin is mirrored too: a run
+    // driven from `lp-cli emu run` can script the pads and read the edges
+    // back the same way the bin does. The script *grammar* stays one
+    // implementation (`lp_emu_esp32c6::pinscript`); this is the flag, not a
+    // second dialect.
+    for text in &args.wire {
+        let (a, b) = parse_wire(text).map_err(|e| anyhow::anyhow!("--wire: {e}"))?;
+        builder = builder.wire(a, b);
+    }
+    if !args.pin_script.is_empty() {
+        let mut script = PinScript::new();
+        for path in &args.pin_script {
+            let text = std::fs::read_to_string(path)
+                .with_context(|| format!("reading {}", path.display()))?;
+            script.extend(
+                parse_pin_script(&text).map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?,
+            );
+        }
+        eprintln!(
+            "emu: pin script: {} level(s) in {} step(s)",
+            script.remaining(),
+            script.steps_left()
+        );
+        builder = builder.pin_script(script);
     }
 
     let mut machine = builder

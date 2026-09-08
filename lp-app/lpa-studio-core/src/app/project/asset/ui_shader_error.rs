@@ -161,7 +161,7 @@ mod tests {
 
     #[test]
     fn strips_the_observed_live_validation_wrapping() {
-        // Verbatim from a live simulator session (2026-07-06).
+        // Verbatim from a live sim session (2026-07-06).
         let parsed =
             UiShaderError::parse("shader compile: Error: validation: no `render` function found");
         assert_eq!(parsed.message, "no `render` function found");
