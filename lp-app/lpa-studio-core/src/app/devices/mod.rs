@@ -68,7 +68,9 @@ pub use browser_sim_source::BrowserSimLinkSource;
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub use browser_transport::BrowserSerialTransport;
 pub use composite_transport::CompositeDeviceTransport;
-pub use device_affordance::{device_escape_action, device_status_kind, pending_escape_action};
+pub use device_affordance::{
+    device_escape_action, device_escape_action_for, device_status_kind, pending_escape_action,
+};
 pub use device_card_feed_view::{
     DeviceCardFeedView, FeedLiveness, device_card_feed_view, device_card_feed_views, feed_liveness,
 };

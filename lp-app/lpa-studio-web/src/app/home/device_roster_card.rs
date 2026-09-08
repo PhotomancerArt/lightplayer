@@ -129,7 +129,7 @@ use lpa_studio_core::{
     DeviceAction, DeviceActivityView, DeviceCardFeedView, DeviceEscape, DeviceFeedOp, DeviceId,
     DeviceLoadedProject, DeviceStatus, DeviceView, DevicesOp, FeedLiveness, FirmwareVerb,
     PendingLinkView, UiAction, UiExampleCard, UiPackageCard, UiRuntimeBand, UiStatus,
-    device_escape_action, device_firmware_line, device_identity_line, device_status_kind,
+    device_escape_action_for, device_firmware_line, device_identity_line, device_status_kind,
     firmware_face_preview_sentence, firmware_verb, pending_escape_action, pending_firmware_line,
     pending_identity_rows,
 };
@@ -184,6 +184,13 @@ pub(crate) fn DeviceRosterCard(
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let device = card.id;
+    // The two verbs whose WORDS depend on what the device is (PD8/Q15): a
+    // sim is powered on and off, a board is connected and disconnected.
+    // The band is the fact — a device with one is not silicon.
+    let face = match runtime.is_some() {
+        true => lpa_studio_core::DeviceFace::Sim,
+        false => lpa_studio_core::DeviceFace::Wire,
+    };
     // The mount lease: a card on screen wants its board's picture; a card
     // leaving the page stops the pull (frames nobody sees are serial time
     // the board would rather spend elsewhere). The feed keeps the last
@@ -342,7 +349,7 @@ pub(crate) fn DeviceRosterCard(
                         if let Some(escape) = cancel {
                             ActionButton {
                                 key: "{\"cancel-project\"}",
-                                action: device_escape_action(escape, device),
+                                action: device_escape_action_for(escape, device, face),
                                 running: false,
                                 variant: ActionButtonVariant::Quiet,
                                 on_action,
@@ -406,7 +413,7 @@ pub(crate) fn DeviceRosterCard(
                         if let Some(escape) = cancel {
                             ActionButton {
                                 key: "{\"cancel-firmware\"}",
-                                action: device_escape_action(escape, device),
+                                action: device_escape_action_for(escape, device, face),
                                 running: false,
                                 variant: ActionButtonVariant::Quiet,
                                 on_action,
@@ -504,7 +511,7 @@ pub(crate) fn DeviceRosterCard(
                         if let Some(escape) = cancel {
                             ActionButton {
                                 key: "{\"cancel-device\"}",
-                                action: device_escape_action(escape, device),
+                                action: device_escape_action_for(escape, device, face),
                                 running: false,
                                 variant: ActionButtonVariant::Quiet,
                                 on_action,
@@ -532,7 +539,7 @@ pub(crate) fn DeviceRosterCard(
                     {
                         ActionButton {
                             key: "{escape:?}",
-                            action: device_escape_action(escape, device),
+                            action: device_escape_action_for(escape, device, face),
                             running: false,
                             variant: ActionButtonVariant::Quiet,
                             on_action,
@@ -542,7 +549,7 @@ pub(crate) fn DeviceRosterCard(
                     if card.escapes.contains(&DeviceEscape::Forget) {
                         ActionButton {
                             key: "{\"forget\"}",
-                            action: device_escape_action(DeviceEscape::Forget, device),
+                            action: device_escape_action_for(DeviceEscape::Forget, device, face),
                             running: false,
                             variant: ActionButtonVariant::Quiet,
                             armed_preview,
