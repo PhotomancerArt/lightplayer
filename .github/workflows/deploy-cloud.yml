@@ -134,7 +134,6 @@ jobs:
           version: 1.95.0.0
           buildtargets: esp32s3,esp32
           default: false
-          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       # target/ is deliberately NOT cached (cache-targets: false): the old
       # multi-GB `cloud-cargo` actions/cache entry was LRU-evicted between

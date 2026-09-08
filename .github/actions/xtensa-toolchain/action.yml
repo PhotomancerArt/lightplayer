@@ -1,7 +1,7 @@
-name: Xtensa Rust toolchain (cached, retried)
+name: Xtensa Rust toolchain (authenticated, retried)
 description: >
   Install the Espressif Xtensa Rust fork the way esp-rs/xtensa-toolchain does,
-  but authenticated, cached and retried.
+  but with an authenticated GitHub API and a bounded retry.
 
 # WHY THIS EXISTS
 #
@@ -20,23 +20,40 @@ description: >
 #   PR #557 https://github.com/PhotomancerArt/lightplayer/actions/runs/34098208425/job/101666493090
 #   PR #596 https://github.com/PhotomancerArt/lightplayer/actions/runs/34190629728/job/101947822790
 #
-# Three layers, cheapest first:
+# Two layers:
 #
 #   1. GITHUB_TOKEN. espup reads it (src/toolchain/mod.rs: `if let
 #      Some(token) = env::var_os("GITHUB_TOKEN")` -> Bearer header) and the
 #      limit becomes 1000/hour scoped to THIS repository rather than 60/hour
-#      shared with the planet. This alone removes the observed failure.
-#   2. A bounded retry. Layer 1 does nothing for a genuine api.github.com
-#      blip, a 5xx from objects.githubusercontent.com, or a truncated tarball.
-#      Three attempts, 15s/30s backoff.
-#   3. An Actions cache of the installed tree, so the warm path makes no
-#      network calls at all and neither of the above can fire.
+#      shared with the platform. The debug log says `Auth header added` when
+#      it lands. This removes the observed failure.
+#   2. A bounded retry, three attempts with 15s/30s backoff. Layer 1 does
+#      nothing for a genuine api.github.com blip, a 5xx from
+#      objects.githubusercontent.com, or a truncated tarball.
+#
+# NOT A THIRD LAYER: caching the installed toolchain. That was implemented,
+# measured on PR #600, and removed. It works — and it is a net loss here:
+#
+#   - The tree is 499 MB packed. Saving it cost 42 s, which is most of the
+#     ~56 s install it was meant to avoid.
+#   - This repository sits at 10.59 GB against a 10 GB Actions-cache budget,
+#     spread over 5,529 entries that are overwhelmingly small sccache objects
+#     — and sccache IS the compile reuse here (see the cache notes in
+#     pre-merge.yml and deploy-cloud.yml). A 499 MB entry does not coexist
+#     with that; it evicts ~499 MB of sccache to buy back ~35 s.
+#   - It doesn't even survive: the entry saved at 07:06:35 UTC was gone
+#     inside 25 minutes, LRU-evicted by the ordinary sccache write rate.
+#     Exactly the fate deploy-cloud.yml already records for its multi-GB
+#     `cloud-cargo` entry.
+#
+#   If the budget ever changes, the two things to re-check first are the
+#   entry's survival time and what it displaces — not just the step's clock.
 #
 # Upstream is inlined rather than wrapped because a composite action cannot
 # put `continue-on-error` on a step, so a `uses:` step cannot be retried from
 # inside one. The inlined bash is a faithful copy of v1.6's Linux/macOS path
 # (the callers are all ubuntu-24.04); the only intentional differences are the
-# token, the loop, and skipping the whole thing on a verified cache hit.
+# token and the loop.
 
 inputs:
   version:
@@ -51,24 +68,12 @@ inputs:
   override:
     description: Clear any rustup directory override, as upstream does.
     default: "true"
-  save-cache:
-    description: >
-      Populate the Actions cache on a miss. Pass the branch test the rest of
-      this repo uses for rust-cache (`github.ref == 'refs/heads/main'`): PR
-      branches read main's entry and write nothing, so the repo pays for one
-      entry per (version, targets) pair rather than one per branch.
-    default: "false"
-
-outputs:
-  cache-hit:
-    description: '"true" when the install was skipped because the cache was usable.'
-    value: ${{ steps.verify.outputs.usable }}
 
 runs:
   using: composite
   steps:
     # Upstream's first step. Every current caller is on an image that ships
-    # rustup, but a caller that is not would otherwise fail three steps later
+    # rustup, but a caller that is not would otherwise fail two steps later
     # with a confusing message.
     - name: Ensure rustup is installed
       shell: bash
@@ -82,62 +87,7 @@ runs:
         echo "HOST_TARGET=$(rustup show | grep 'Default host' | sed -e 's/.* //')" >> "$GITHUB_ENV"
         echo "ESPUP_EXPORT_FILE=$HOME/exports" >> "$GITHUB_ENV"
 
-    # espup lays the whole ecosystem under the toolchain directory:
-    #   ~/.rustup/toolchains/esp                              (the Rust fork)
-    #   ~/.rustup/toolchains/esp/xtensa-esp-elf/<ver>         (GNU binutils/gcc)
-    #   ~/.rustup/toolchains/esp/xtensa-esp32-elf-clang/<ver> (LLVM libs)
-    # plus a ~/.espup/esp-clang symlink into that tree and the ~/exports file
-    # that carries PATH and LIBCLANG_PATH. All four are cached together; the
-    # symlink survives because its target is in the same archive.
-    #
-    # The key is the pin plus the chip list: espup's layout is a function of
-    # both, and a floating key would silently serve the wrong fork after a
-    # version bump.
-    - name: Restore the Xtensa toolchain
-      id: restore
-      uses: actions/cache/restore@v4
-      with:
-        path: |
-          ~/.rustup/toolchains/esp
-          ~/.espup
-          ~/exports
-        key: xtensa-toolchain-${{ runner.os }}-${{ runner.arch }}-${{ inputs.version }}-${{ inputs.buildtargets }}-v1
-
-    # A cache hit is a claim, not a fact: a half-written entry, or one saved by
-    # a job that died mid-install, would hand the build a toolchain that fails
-    # 300 lines into a compile. Prove the three things the callers actually
-    # use — the fork runs, the export file exists, and every requested chip's
-    # gcc is on the exported PATH — and fall through to a real install if any
-    # of them is missing. Cheap insurance against a poisoned cache.
-    - name: Verify the restored toolchain
-      id: verify
-      shell: bash
-      run: |
-        set -uo pipefail
-        usable=false
-        if [[ "${{ steps.restore.outputs.cache-hit }}" == "true" ]]; then
-          if [[ -f "$HOME/exports" ]] && rustup run esp rustc -vV >/dev/null 2>&1; then
-            # shellcheck disable=SC1091
-            source "$HOME/exports"
-            missing=""
-            IFS=',' read -ra chips <<< "${{ inputs.buildtargets }}"
-            for chip in "${chips[@]}"; do
-              command -v "xtensa-${chip}-elf-gcc" >/dev/null 2>&1 || missing="$missing $chip"
-            done
-            if [[ -z "$missing" ]]; then
-              usable=true
-            else
-              echo "::warning::Cached Xtensa toolchain is missing gcc for:$missing — reinstalling."
-            fi
-          else
-            echo "::warning::Cached Xtensa toolchain did not run — reinstalling."
-          fi
-        fi
-        echo "usable=$usable" >> "$GITHUB_OUTPUT"
-        echo "Cache usable: $usable"
-
     - name: Install the Xtensa toolchain (espup)
-      if: steps.verify.outputs.usable != 'true'
       shell: bash
       env:
         # The fix for the observed 403. Read by espup for every
@@ -175,22 +125,9 @@ runs:
         echo "::error::Xtensa toolchain install failed after 3 attempts."
         exit 1
 
-    # Save before exporting, so a job that later fails for its own reasons has
-    # still paid the download forward. Only on a miss, and only where the
-    # caller says so.
-    - name: Save the Xtensa toolchain
-      if: inputs.save-cache == 'true' && steps.verify.outputs.usable != 'true'
-      uses: actions/cache/save@v4
-      with:
-        path: |
-          ~/.rustup/toolchains/esp
-          ~/.espup
-          ~/exports
-        key: ${{ steps.restore.outputs.cache-primary-key }}
-
-    # Upstream's export block, run on BOTH paths: the cache carries the files
-    # but not the process environment, so a warm job still has to publish
-    # PATH and LIBCLANG_PATH itself.
+    # Upstream's export block. espup writes PATH and LIBCLANG_PATH into
+    # $ESPUP_EXPORT_FILE; publishing them is what puts xtensa-*-elf-gcc on the
+    # PATH for the link steps that follow.
     - name: Export the toolchain environment
       shell: bash
       run: |

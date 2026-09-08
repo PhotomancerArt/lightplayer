@@ -418,7 +418,6 @@ jobs:
           version: 1.95.0.0
           buildtargets: esp32s3
           default: true
-          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
@@ -495,7 +494,6 @@ jobs:
           version: 1.95.0.0
           buildtargets: esp32
           default: true
-          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       # `lp2025 -> target`, mirroring firmware-xtensa: this crate is a
       # repo-root workspace member (M3-P1 folded it in) and writes into the
@@ -602,9 +600,6 @@ jobs:
           version: 1.95.0.0
           buildtargets: esp32s3
           default: false
-          # TEMPORARY (reverted in the next commit): populate the cache from
-          # this branch so the PR's own runs can measure the warm path.
-          save-cache: "true"
 
       # Compile cache, mirroring every other compile-heavy job here (see
       # validate-x64 for the design: cache-targets is off repo-wide, sccache IS
