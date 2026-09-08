@@ -149,11 +149,7 @@ fn EditableNameRow(uid: String, name: String, on_action: EventHandler<UiAction>)
 /// Open.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn HardwareRow(
-    uid: String,
-    target: Option<String>,
-    on_action: EventHandler<UiAction>,
-) -> Element {
+fn HardwareRow(uid: String, target: Option<String>, on_action: EventHandler<UiAction>) -> Element {
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-1",
             div { class: "tw:flex tw:min-w-0 tw:items-center tw:justify-between tw:gap-3 tw:text-xs tw:leading-snug",

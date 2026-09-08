@@ -39,7 +39,6 @@ impl Backing {
             Self::Sim => "sim",
         }
     }
-
 }
 
 /// The targets this build ships an emulator for.

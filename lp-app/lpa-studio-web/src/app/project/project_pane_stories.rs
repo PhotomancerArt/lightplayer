@@ -14,8 +14,8 @@ use lpa_studio_core::{
 use lpa_studio_web_story_macros::story;
 use lpc_model::{GradientConfig, ToLpValue};
 
-use crate::app::node::node_story_fixtures::{palette_cycle, sunset_gradient};
 use crate::app::home::target_pick_popover::HardwarePickPopover;
+use crate::app::node::node_story_fixtures::{palette_cycle, sunset_gradient};
 use crate::app::project::{ProjectPane, ProjectSettingsSection};
 use crate::app::story_fixtures::project_editor_fixture;
 

@@ -59,13 +59,13 @@ pub use app::devices::{
 pub use app::docs_host::DocsSimHost;
 // The project's declared hardware (D41): the web shell's Hardware row and
 // the gallery card's "for <board>" badge both read it.
-pub use app::library::{DESKTOP_BOARD_ID, ProjectTarget};
 pub use app::frame_feed::{CardFeedApply, CardFeedState};
 pub use app::home::{
     DEFAULT_STRIP_PIXELS, GenerateProjectError, GeneratedProject, HOME_NODE_ID, HomeOp,
     ProjectTemplate, UiExampleCard, UiExampleGroup, UiHomeView, UiPackageCard, ZipBytes,
     example_groups, generate_board_project, template_project_files,
 };
+pub use app::library::{DESKTOP_BOARD_ID, ProjectTarget};
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,
     UiBindingEndpoint, UiCellProjection, UiChannelChoice, UiClockFace, UiClockTransport,

@@ -295,7 +295,10 @@ impl LibraryStore {
             // project. A generator that already wrote a board (the board
             // starter) keeps it.
             if matches!(provenance, PackageProvenance::Created) && fields.target.is_none() {
-                package_manifest::set_target(&*view, Some(super::project_target::DESKTOP_BOARD_ID))?;
+                package_manifest::set_target(
+                    &*view,
+                    Some(super::project_target::DESKTOP_BOARD_ID),
+                )?;
             }
             package_manifest::ensure_uid(&*view, &(self.random)())?;
             package_meta::write_meta(

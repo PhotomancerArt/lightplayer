@@ -2880,7 +2880,9 @@ impl StudioController {
             .unwrap_or_else(|| crate::sim_device_name(&target_id));
 
         let random = self.random_bytes6();
-        let uid = self.create_sim_record(&target_id, Some(&name), &random).await?;
+        let uid = self
+            .create_sim_record(&target_id, Some(&name), &random)
+            .await?;
         // The roster learns the row at the next library settle, and the
         // power-on below needs a device to aim at.
         self.settle_library().await;
@@ -2889,8 +2891,10 @@ impl StudioController {
                 "the new device did not reach the roster".to_string(),
             ));
         };
-        self.execute_devices_op(crate::DevicesOp::on_sim(crate::DeviceAction::Connect { device }))
-            .await?;
+        self.execute_devices_op(crate::DevicesOp::on_sim(crate::DeviceAction::Connect {
+            device,
+        }))
+        .await?;
         Ok(UiNotices::new().with_notice(UiNotice::info(format!("{name} is on"))))
     }
 

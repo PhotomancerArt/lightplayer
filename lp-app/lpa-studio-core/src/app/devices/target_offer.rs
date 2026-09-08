@@ -110,9 +110,8 @@ const EMU_SIM_HINT: &str = "Emu runs the board's real firmware; sim runs the des
 /// twice — it is a catalog board file, and the Boards page is the one
 /// surface that hides it (P1's revised DD8).
 pub fn every_target() -> impl Iterator<Item = &'static str> {
-    core::iter::once(DESKTOP_BOARD_ID).chain(
-        lpa_boards::purchasable_boards().map(|board| board.board_id.as_str()),
-    )
+    core::iter::once(DESKTOP_BOARD_ID)
+        .chain(lpa_boards::purchasable_boards().map(|board| board.board_id.as_str()))
 }
 
 /// The targets a menu of `scope` offers.
@@ -171,7 +170,10 @@ mod tests {
         assert!(offer.choices.iter().all(|choice| choice.runnable));
         for missing in ["quinled/dig-uno", "espressif/esp32-devkitc-v4"] {
             assert!(
-                !offer.choices.iter().any(|choice| choice.board_id == missing),
+                !offer
+                    .choices
+                    .iter()
+                    .any(|choice| choice.board_id == missing),
                 "{missing} has no runtime manifest and cannot be started"
             );
         }

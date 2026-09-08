@@ -103,7 +103,10 @@ mod tests {
     #[test]
     fn a_minted_sim_is_named_after_its_target() {
         assert_eq!(sim_device_name("lightplayer/desktop"), "Desktop (sim)");
-        assert_eq!(sim_device_name("seeed/xiao-esp32-c6"), "XIAO ESP32-C6 (sim)");
+        assert_eq!(
+            sim_device_name("seeed/xiao-esp32-c6"),
+            "XIAO ESP32-C6 (sim)"
+        );
     }
 
     /// The op carries the target and nothing else the model could disagree

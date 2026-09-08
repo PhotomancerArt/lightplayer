@@ -317,9 +317,15 @@ fn group_head_class() -> &'static str {
 /// in the list because a project may legitimately be FOR that board.
 fn row_class(runnable: bool, picked: bool) -> &'static str {
     match (runnable, picked) {
-        (false, _) => "tw:relative tw:flex tw:w-full tw:min-w-0 tw:cursor-not-allowed tw:items-center tw:gap-2 tw:border-0 tw:bg-transparent tw:px-2.5 tw:py-1.5 tw:text-left tw:opacity-50",
-        (true, false) => "ux-focus-ring tw:relative tw:flex tw:w-full tw:min-w-0 tw:cursor-pointer tw:items-center tw:gap-2 tw:border-0 tw:bg-transparent tw:px-2.5 tw:py-1.5 tw:text-left tw:hover:bg-card-raised",
-        (true, true) => "ux-focus-ring tw:relative tw:flex tw:w-full tw:min-w-0 tw:cursor-pointer tw:items-center tw:gap-2 tw:border-0 tw:bg-card-raised tw:px-2.5 tw:py-1.5 tw:text-left",
+        (false, _) => {
+            "tw:relative tw:flex tw:w-full tw:min-w-0 tw:cursor-not-allowed tw:items-center tw:gap-2 tw:border-0 tw:bg-transparent tw:px-2.5 tw:py-1.5 tw:text-left tw:opacity-50"
+        }
+        (true, false) => {
+            "ux-focus-ring tw:relative tw:flex tw:w-full tw:min-w-0 tw:cursor-pointer tw:items-center tw:gap-2 tw:border-0 tw:bg-transparent tw:px-2.5 tw:py-1.5 tw:text-left tw:hover:bg-card-raised"
+        }
+        (true, true) => {
+            "ux-focus-ring tw:relative tw:flex tw:w-full tw:min-w-0 tw:cursor-pointer tw:items-center tw:gap-2 tw:border-0 tw:bg-card-raised tw:px-2.5 tw:py-1.5 tw:text-left"
+        }
     }
 }
 
