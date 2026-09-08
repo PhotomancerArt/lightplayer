@@ -1,5 +1,5 @@
 {
-  "comment": "Measured heap-budget record — a ratchet, not a target. These are what the projects cost TODAY on the RV32 emulator, not what any product may use. Per project and profile mode; steady-render records only the frame window. Regenerate with `just heap-budget-baseline`; see docs/heap-budget-gate.md.",
+  "comment": "Measured heap-budget record \u2014 a ratchet, not a target. These are what the projects cost TODAY on the RV32 emulator, not what any product may use. Per project and profile mode; steady-render records only the frame window. Regenerate with `just heap-budget-baseline`; see docs/heap-budget-gate.md.",
   "recorded": "2026-09-07",
   "commit": "357222797",
   "projects": {
@@ -209,16 +209,16 @@
         "usedBytes": 60432,
         "totalBytes": 325536,
         "largestFreeBlock": 198876,
-        "stackHighWater": 13428,
-        "stackTotal": 70736,
+        "stackHighWater": 11908,
+        "stackTotal": 71152,
         "stackHighWaterBand": [
-          12900,
-          14000
+          11400,
+          12500
         ]
       },
       "recorded": "2026-09-08",
-      "commit": "daa49d58f",
-      "comment": "What the FIRMWARE costs, not what a project costs: the shipped image (esp32c6,server,radio — the bytes a board is flashed with) booted whole on lp-emu:esp32c6:t1 and read from the allocator figures its own first heartbeat reports. `measured` is this tree, and is the ratchet; `silicon_reference` is a committed silicon capture and is NEVER gated — it is printed every run so the gap between the two cannot widen unseen. Regenerate `measured` with `just heap-budget-baseline-chips`; see docs/heap-budget-gate.md, \"The second source\".",
+      "commit": "194344c33",
+      "comment": "What the FIRMWARE costs, not what a project costs: the shipped image (esp32c6,server,radio \u2014 the bytes a board is flashed with) booted whole on lp-emu:esp32c6:t1 and read from the allocator figures its own first heartbeat reports. `measured` is this tree, and is the ratchet; `silicon_reference` is a committed silicon capture and is NEVER gated \u2014 it is printed every run so the gap between the two cannot widen unseen. Regenerate `measured` with `just heap-budget-baseline-chips`; see docs/heap-budget-gate.md, \"The second source\".",
       "image": "esp32c6,server,radio",
       "configuration": "lp-emu:esp32c6:t1",
       "sample": "the first heartbeat (the 5 s tick)",
@@ -234,7 +234,7 @@
           "stackTotal": 71512
         },
         "gap_note": "freeBytes +8 / usedBytes -8 on our side, constant across boot 3 and boot 10, two commits, both links and both boot paths: one live 8-byte block silicon has and we do not. Sampling, boot history and the loader are all refuted; naming it needs a true power-on capture. docs/debt/emulator-heap-ledger-differs-from-silicon-by-eight-bytes.md",
-        "not_a_gate": "A different image at a different commit — totalBytes and stackTotal move with the tree, and comparing them across commits would be comparing two linker scripts. Read the four allocator figures and the 8 B; gate on `measured`."
+        "not_a_gate": "A different image at a different commit \u2014 totalBytes and stackTotal move with the tree, and comparing them across commits would be comparing two linker scripts. Read the four allocator figures and the 8 B; gate on `measured`."
       }
     }
   }
