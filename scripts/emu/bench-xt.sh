@@ -15,15 +15,27 @@
 #     report: the columns are instructions per second, user seconds and wall
 #     seconds, with the load average beside them.
 #
-#   * There is no long-running Xtensa image in this repo. The workload is the
-#     `lp-xt/fixtures` corpus (built by `lp-xt/fixtures/build.sh` with the esp
-#     toolchain), whose longest program retires 292 k instructions — three
-#     orders of magnitude short of a probe-sized run. So the probe REPEATS
-#     each program from a clean emulator until it has retired >=100 M
-#     instructions. Per-repeat setup (region allocation plus the ELF load) is
-#     ~40 us against ~16 ms of execution, so it is a rounding error in the
-#     rate, not a hidden constant. If a long-running image ever exists, it
-#     replaces the repeats and this note goes with them.
+#   * There is no long-running Xtensa *application* image in this repo, so the
+#     workload is a fixture written for the probe: `bench_loop`, which reads
+#     the `arg` the emulator hands `main` as a round count (see
+#     `lp-xt/fixtures/corpus/src/bin/bench_loop.rs`). One run at `--arg 50000`
+#     retires 111.6 M instructions inside a single emulator, so the probe
+#     passes `--repeat 1` and nothing but the run loop is in the rate.
+#
+#     THERE ARE NO REPEATS ANY MORE. The probe used to re-create the emulator
+#     and reload the ELF 400 times (`ackermann`) / 800 times (`fib_rec`) to
+#     reach 100 M, because the conformance fixtures top out at 292 k retired
+#     instructions. That per-repeat setup was ~40 us against ~16 ms of
+#     execution — a rounding error rather than a bug, but measurement overhead
+#     the probe had no reason to carry.
+#
+#     Those two rows are gone with it. At `--repeat 1` they retire 292 k and
+#     138 k instructions, ~14 ms and ~3 ms of user time, which `/usr/bin/time`
+#     cannot resolve at 10 ms; a row nobody can read says nothing useful.
+#     Their correctness is covered by `cargo test -p lp-xt-elf`, and the
+#     shapes they contributed — deep recursion past the 64-AR window ring, a
+#     non-inlined call per element, a working set read and written every
+#     round — are folded into `bench_loop`'s round.
 #
 # Columns:
 #
@@ -66,7 +78,9 @@ while [[ $# -gt 0 ]]; do
         --no-promote) do_promote=0; shift ;;
         --runs) runs="${2:?--runs needs a count}"; shift 2 ;;
         --trace-lines) trace_lines="${2:?--trace-lines needs a count}"; shift 2 ;;
-        -h|--help) sed -n '2,45p' "$0"; exit 0 ;;
+        # The header block, however long it grows: every comment line after
+        # the shebang, stopping at the first line that is not one.
+        -h|--help) awk 'NR>1 && /^#/ {print; next} NR>1 {exit}' "$0"; exit 0 ;;
         *) echo "bench-xt: unknown option $1" >&2; exit 2 ;;
     esac
 done
@@ -74,16 +88,16 @@ done
 mkdir -p "$bench_dir"
 
 # --- the workload ----------------------------------------------------------
-# slug|repeats  — repeats chosen so each row retires >=100 M instructions.
-# ackermann      292,394 instructions/run: deep recursion, heavy window
-#                spill/reload traffic (the windowed-ABI stress case).
-# fib_rec        137,527 instructions/run: a wide call tree, shallower frames.
-# They are the only two fixtures long enough to be worth repeating; the rest
-# of the corpus retires a few thousand instructions each and is covered by
-# `cargo test -p lp-xt-elf` instead.
+# slug|arg  — `arg` is the guest entry argument, chosen so ONE run retires
+# >=100 M instructions. Every row runs with `--repeat 1`.
+# bench_loop     ~2,232 instructions/round; at 50,000 rounds, 111.6 M
+#                instructions per run. One round is a 64-word working set read
+#                and written through a non-inlined call per element, plus one
+#                24-deep recursion (window overflow/underflow traffic).
+# The rest of the corpus retires a few thousand instructions each and is
+# covered by `cargo test -p lp-xt-elf` instead.
 images=(
-    "ackermann|400"
-    "fib_rec|800"
+    "bench_loop|50000"
 )
 
 if ! ls "$elf_dir"/*.elf >/dev/null 2>&1; then
@@ -104,7 +118,7 @@ lines=()
 json_rows=()
 
 for spec in "${images[@]}"; do
-    IFS='|' read -r slug repeats <<<"$spec"
+    IFS='|' read -r slug arg <<<"$spec"
     elf="$elf_dir/$slug.elf"
     [[ -f "$elf" ]] || { echo "bench-xt: $elf missing — run lp-xt/fixtures/build.sh" >&2; exit 1; }
 
@@ -119,7 +133,7 @@ for spec in "${images[@]}"; do
         out="$(mktemp)"
         load="$(loadavg)"
         set +e
-        /usr/bin/time -p "$bin" --elf "$elf" --repeat "$repeats" \
+        /usr/bin/time -p "$bin" --elf "$elf" --repeat 1 --arg "$arg" \
             --out "$out_file" --trace "$trace_file" --trace-lines "$trace_lines" \
             >"$out" 2>&1
         rc=$?
@@ -140,7 +154,7 @@ for spec in "${images[@]}"; do
         fi
     done
 
-    # stopped after N cycles (I instructions, R repeats)
+    # stopped after N cycles (I instructions, 1 repeats)
     read -r cycles instr <<<"$(sed -E 's/^stopped after ([0-9]+) cycles \(([0-9]+) instructions.*/\1 \2/' <<<"$stopped")"
 
     instr_s=$(awk -v i="$instr" -v u="$best_user" 'BEGIN{printf "%.1f", i / u / 1e6}')
@@ -158,16 +172,16 @@ for spec in "${images[@]}"; do
     trace_cmp="$(cmp_of "$slug.trace" "$trace_file")"
 
     rows+=("$(printf '%-16s %8s %8s %8s %10s %7s %8s %8s' \
-        "$slug" "$repeats" "$best_user" "$best_real" "${instr_s}M" \
+        "$slug" "$arg" "$best_user" "$best_real" "${instr_s}M" \
         "$best_load" "$out_cmp" "$trace_cmp")")
     lines+=("$slug: $stopped")
-    json_rows+=("$(printf '{"image":"%s","repeats":%s,"user_s":%s,"wall_s":%s,"instr_per_s":%s,"cycles":%s,"instructions":%s,"loadavg_1m":%s,"out_cmp":"%s","trace_cmp":"%s"}' \
-        "$slug" "$repeats" "$best_user" "$best_real" "$instr_raw" \
+    json_rows+=("$(printf '{"image":"%s","arg":%s,"user_s":%s,"wall_s":%s,"instr_per_s":%s,"cycles":%s,"instructions":%s,"loadavg_1m":%s,"out_cmp":"%s","trace_cmp":"%s"}' \
+        "$slug" "$arg" "$best_user" "$best_real" "$instr_raw" \
         "$cycles" "$instr" "$best_load" "$out_cmp" "$trace_cmp")")
 done
 
 echo
-printf '%-16s %8s %8s %8s %10s %7s %8s %8s\n' image repeats "user s" "wall s" "instr/s" load out trace
+printf '%-16s %8s %8s %8s %10s %7s %8s %8s\n' image arg "user s" "wall s" "instr/s" load out trace
 printf '%-16s %8s %8s %8s %10s %7s %8s %8s\n' ---------------- -------- -------- -------- ---------- ------- -------- --------
 for row in "${rows[@]}"; do echo "$row"; done
 echo

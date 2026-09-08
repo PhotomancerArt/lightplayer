@@ -5,14 +5,16 @@
 //! completion `--repeat` times, reporting the retired-instruction and cycle
 //! totals on a `stopped after` line shaped like the C6 machine's.
 //!
-//! **Why repeats.** There is no long-running Xtensa image in this repo — the
-//! fixture corpus is a set of short programs, the longest of which retires a
-//! few hundred thousand instructions. The probe needs a CPU-bound stretch of
-//! ≥100 M instructions to say anything about throughput, so it re-runs the
-//! same program from a clean emulator. Each repeat is a full
-//! parse-free / load / stage / run cycle, so the reported instructions per
-//! second include the loader and the region allocation, exactly as a host
-//! engine calling into guest code repeatedly would pay them.
+//! **Why the probe no longer repeats.** A probe-sized run is ≥100 M retired
+//! instructions, and the conformance fixtures are short programs — the
+//! longest, `ackermann`, retires 292 k. So the probe used to run one of them
+//! 400–800 times from a clean emulator, paying an ELF load and a region
+//! allocation (~40 us against ~16 ms of execution) that it had no reason to
+//! measure. `bench_loop` replaced that: it reads `--arg` as a round count, so
+//! `--repeat 1 --arg 50000` retires 111.6 M instructions inside a single
+//! emulator and the reported rate is the run loop alone. `--repeat` stays for
+//! the thing it is actually good at — cross-checking that N clean runs of one
+//! program produce identical output.
 //!
 //! **This is an ORACLE, not a gate.** Nothing in CI runs it and no number it
 //! prints gates anything. See `scripts/emu/bench-xt.sh` for the A/B protocol.
@@ -28,8 +30,10 @@ const USAGE: &str = "\
 usage: xt-bench --elf <path> [options]
 
   --elf <path>          linked Xtensa ELF to run (required)
-  --repeat <n>          run it n times from a fresh emulator (default 1)
-  --arg <n>             argument passed to the guest entry (default 0)
+  --repeat <n>          run it n times from a fresh emulator (default 1);
+                        every repeat must produce identical output
+  --arg <n>             argument passed to the guest entry (default 0);
+                        `bench_loop` reads it as a round count
   --out <path>          write the guest's collected output here
   --trace <path>        write a text trace of the FIRST repeat here
   --trace-lines <n>     cap the trace at n lines (default 200000)
