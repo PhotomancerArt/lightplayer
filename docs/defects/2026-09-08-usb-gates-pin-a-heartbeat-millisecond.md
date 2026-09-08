@@ -5,6 +5,7 @@ area: lp-emu/esp/lp-emu-esp32c6/tests/usb_control.rs (G3-1 :195, G3-1b :344);
       mechanism reaches lp-fw/fw-esp32-common/src/server_loop.rs (heartbeat cadence)
 class: unenforced-test-precondition
 related:
+  - 2026-09-08-cold-target-dir-links-esp-hals-stock-rodata.md
   - 2026-09-08-the-roms-usb-console-drops-what-the-drain-latency-delays.md
   - 2026-08-05-cross-core-panic-races-the-isr-thread.md
   - lp2025/2026-09-06-1001-esp-emulator/m6-honest-usb-serial-jtag.md
@@ -48,6 +49,7 @@ which makes the delivered log comparable across runs:
 | 34174911311 | `de754622c` | ok | 3569 B | `4255775f48…` | 24,197 |
 | **34177006492** | **`e1e1f3b9e`** | **FAIL** | **3587 B** | **`be1b38763f…`** | **24,566** |
 | 34178163836 | `f23e97847` | ok | 3569 B | `a271116337…` | 24,858 |
+| 34200662366 | `140ac6327` (main) | ok | **3628 B** | `a4f43282ef…` | 23,812 |
 
 Read it carefully — each row is a **different tree**, so the differences are not
 run-to-run noise on one input. What the table does establish:
@@ -58,10 +60,12 @@ run-to-run noise on one input. What the table does establish:
   so an *undelivered* heartbeat would show as a large negative delta. The link
   was not starved; the search string was absent from a log that was, if
   anything, fuller.
-- The digest differs on **every** run including the three passing ones, at an
-  identical length. The delivered bytes carry per-build content (memory figures,
-  identity), so a stable length with a moving digest is expected — and it means
-  the digest is not a usable cross-run invariant, only the length is.
+- The digest differs on **every** run. The delivered bytes carry per-build
+  content (memory figures, identity), so a moving digest is expected.
+  **Neither the digest nor the length is a cross-run invariant** — the fifth row
+  is a *passing* run at 3628 B, longer than the failing run's 3587 B. So "18
+  bytes longer" carries no significance on its own; what survives is only the
+  bound above, that no run is short by anything like a 512 B frame.
 
 **Correcting one thing about how this was reported.** The failure was *not*
 cleared by a rerun of the same tree. Run 34177006492 is the **only** CI run
@@ -117,16 +121,39 @@ compatible with the failure, and why the two failures were the two
 exact-millisecond assertions — but nobody has yet printed the uptime values the
 failing run actually delivered.
 
-**The hypothesis that was suggested and does not fit on its own** — that the
-runner's firmware image differs from a local build because the `LP_EMU_BUILD_FW=1`
-path is not reproducible. It is real as a *contributing* input: the image the
-runner builds decides the guest's instruction timing, and the guest's timing is
-what moves the sampled millisecond. But image difference alone predicts a
-**deterministic** failure on the runner, and the register should not record that
-as the cause of a one-off. Note also that this cuts the other way than it first
-appears: since a non-reproducible build can produce a different ELF per run, an
-image explanation is not *excluded* by intermittency either — it is simply not
-tested, because no two runs here shared a tree.
+**The image half of this stopped being a hypothesis hours after this entry was
+filed.** It was suggested at filing time that the runner's firmware image
+differs from a local build because the `LP_EMU_BUILD_FW=1` path is not
+reproducible, and this entry recorded that as untested. It is now filed,
+measured and fixed as its own defect —
+[`2026-09-08-cold-target-dir-links-esp-hals-stock-rodata`](2026-09-08-cold-target-dir-links-esp-hals-stock-rodata.md)
+(PR #601, merged `d2f38170b`): `fw-esp32c6/build.rs` patched esp-hal's
+`rodata.x` by *scanning* for a directory cargo had not been told to write
+first, and returned quietly when it was absent, so **build 1 of a cold target
+dir linked esp-hal's stock four-section layout and build 2 the merged one**. A
+CI tree is always cold. Every run in the table above therefore ran a firmware
+image with a different rodata layout from any warm local build — including the
+local `just test-emu-c6` passes this entry compares against.
+
+That is precisely the input the mechanism above needs: rodata layout moves code
+and data placement, placement moves the guest's instruction timing, and guest
+timing is what decides which millisecond the server loop samples first past the
+5 s boundary. The two halves are one story, not competing explanations.
+
+**What is still open is whether it explains the *intermittency*.** The two
+sources disagree in a way worth resolving rather than papering over: that
+entry's symptom section says a cold tree deterministically gets build 1, while
+PR #601's own title and its first commit say cargo "ordered nothing, so on a
+cold tree the guess **could** run first and find nothing" — an ordering hazard
+in a parallel, load-dependent build-script schedule, which would vary run to
+run. Deterministic-on-cold cannot produce a one-off; racy-on-cold can. Deciding
+which it was is now the sharpest question here, and it is answerable by reading
+that build's ordering rather than by re-running anything.
+
+**Everything above is era-bound, and the era ended at `d2f38170b`.** Since that
+commit the `Emulator C6 (x64)` job builds a *different image* than the one every
+row of the table ran. A recurrence after it is new evidence about a new image,
+and the byte counts here are not comparable to it.
 
 **Regression coverage** — none, and that is the point of this entry: the flake
 is recorded, not fixed, so the next person to hit it starts from the evidence
@@ -141,10 +168,10 @@ above instead of re-deriving it.
 2. Print what actually arrived. The tests already hold `delivered`; a
    failure-path dump of every `uptime_ms` substring in it turns "the string is
    missing" into "the string is 5001", which decides the whole entry in one run.
-3. Only then compare images — `sha256` the two `fw-esp32c6` ELFs (runner vs
-   local) for the same tree. If they differ, the reproducibility problem is real
-   and worth its own entry; it is still not, by itself, an explanation for an
-   intermittent failure.
+3. ~~Compare images between runner and local for the same tree.~~ **Done, from
+   the other side, by PR #601** — they differed, and it has its own entry. What
+   is left of this step is the narrower question above: was the cold-tree
+   ordering a race or a certainty.
 
 **The trap for whoever fixes this.** Do not relax the exact strings globally.
 G3-1b's next assertion is a **negative** one —
