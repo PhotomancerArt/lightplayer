@@ -191,15 +191,25 @@ fn the_boot_log_is_silicons_line_for_line() {
         run.outcome
     );
 
-    // UART0 is the console this gate reads, and the reason is written down
-    // in the PR: the ROM writes both consoles with the same bytes, and the
-    // USB one carries a *modeled* number (`IN_DRAIN_LATENCY_US`) that the
-    // ROM's own console meets by dropping rather than waiting. Gating the
-    // boot log on UART0 keeps the boot under test and the USB host model
-    // out of it; the divergence is a reported finding, not a hidden one.
+    // The USB link, which is the console silicon's own capture came over —
+    // so this is like for like, not two links that ought to agree.
+    //
+    // It was UART0 for a day. The mask ROM's console **drops** a character
+    // rather than waiting when the IN endpoint is not free, so the modelled
+    // drain latency was losing runs of the densest output; M5 P3's IN-FIFO
+    // auto-commit (PR #595) closed it, and the two consoles now carry
+    // identical bytes across this whole window. The UART0 copy is asserted
+    // to be identical below, so a regression in either shows up here.
     let ours = boot_window(&device_lines(&String::from_utf8_lossy(
+        &run.machine.usb_sj().bytes(),
+    )));
+    let on_uart0 = boot_window(&device_lines(&String::from_utf8_lossy(
         &run.machine.uart0().bytes(),
     )));
+    assert_eq!(
+        ours, on_uart0,
+        "the ROM writes both consoles with the same bytes; these two disagree"
+    );
 
     let (path, silicon_text) = lp_emu_esp32c6::test_support::transcript(
         "boot-idle-flash",

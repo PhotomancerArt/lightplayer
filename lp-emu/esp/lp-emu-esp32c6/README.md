@@ -245,10 +245,16 @@ Three things the direct path never needed:
 - **`periph::sha`.** The bootloader hashes the image before it loads it, so
   this is the one block that has to compute rather than remember.
 
+`--reboot-on-reset` turns a reset request into the real thing rather than
+ending the run: the host's DTR/RTS dance reboots a running application into
+the ROM's download console, in one log with two boots in it. Off by default,
+because three recorded M6 scenarios read the exit code as their evidence.
+
 `tests/rom_up_boot.rs` is the gate: the boot log line for line against
-silicon, 2.4 MB of app segments byte-equal between the two paths, DD40's
-flash offsets and chip-size word, the download strap, and a first heartbeat
-that is byte-identical whichever way the app arrived.
+silicon over the same link silicon used, 2.4 MB of app segments byte-equal
+between the two paths, DD40's flash offsets and chip-size word, the download
+strap, a reboot into it, and a first heartbeat that is byte-identical
+whichever way the app arrived.
 
 ## Flash, and the cache window
 

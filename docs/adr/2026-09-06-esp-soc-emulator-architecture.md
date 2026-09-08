@@ -310,11 +310,14 @@ The list the direct loader carries has a counterpart, and it is short:
 3. **Three `pll_cal exceeds 2ms` lines**, from the ROM's `wait_rfpll_cal_end`
    polling an analog register the `I2C_ANA_MST` accept block cannot answer
    per-register (`docs/defects/2026-09-08-regi2c-is-one-data-register-not-a-register-file.md`).
-4. **The USB console loses characters the UART one keeps**, because the mask
-   ROM's console drops rather than waits when the endpoint is not free, and
-   `IN_DRAIN_LATENCY_US` is a *modeled* 100 µs
-   (`docs/defects/2026-09-08-the-roms-usb-console-drops-what-the-drain-latency-delays.md`).
-   The boot-log gate reads UART0 for that reason, and says so.
+(A fourth item lasted one day. The mask ROM's console drops a character
+rather than waiting when the IN endpoint is not free, so the modelled
+`IN_DRAIN_LATENCY_US` was losing runs of the densest output over USB while
+UART0 kept everything. M5 P3's IN-FIFO auto-commit closed it from the other
+side, and the two consoles now carry identical bytes across the whole boot
+window; the gate reads the USB link, which is silicon's own, and asserts
+UART0 agrees. The defect file keeps the bound silicon's capture puts on that
+still-modelled number.)
 
 ### Honest peripherals: strict bus, `modeled` grades, and no invented answers
 

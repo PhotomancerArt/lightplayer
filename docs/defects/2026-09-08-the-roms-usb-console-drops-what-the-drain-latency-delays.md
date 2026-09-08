@@ -1,5 +1,5 @@
 ---
-status: open — bounded by silicon, not yet re-measured
+status: FIXED same day by M5 P3 (PR #595), from the other side
 found: 2026-09-08      # M7 of the esp-emulator plan, on the ROM-up boot log
 area: lp-emu/esp/lp-emu-esp32c6/src/periph/usb_sj.rs (`IN_DRAIN_LATENCY_US`)
 class: modeled-number-meets-a-new-path
@@ -51,9 +51,19 @@ to M6 P5's byte-equal walk, and moving it because a new path is unhappy is
 tuning. What M7 does instead is **gate the boot log on UART0**, where the ROM
 writes the same bytes with no host model in the way, and say so in the test.
 
-**What would close it** — a measurement rather than a choice: a desk capture
-that times a `wr_done` to the byte arriving at a host, or a derivation from
-the USB full-speed frame (a bulk IN is polled within one 1 ms frame, but the
-CDC host queues several transfers per frame). Whichever it is, re-run every
-M6 gate and M6 P5's walk against it: this number decides when a firmware
+**What closed it** — not this number, and not a desk sitting. M5 P3 (PR #595)
+made the IN FIFO **auto-commit when it fills**, which is the fidelity fix a
+different payload needed: a log line longer than 64 bytes used to sit in an
+uncommitted FIFO until the writer's next `wr_done`. With it, the ROM's
+64-byte-at-a-time console never finds the endpoint stuck for a whole drain
+latency, and on a rebase onto that change the two consoles carry **identical
+bytes** across the entire boot window — 32 lines each, checked by
+`tests/rom_up_boot.rs`, which now reads the USB link (silicon's own) and
+asserts UART0 matches it.
+
+`IN_DRAIN_LATENCY_US` is untouched and still *modeled*. The bound silicon's
+capture puts on it stands, and is worth keeping written down: a complete boot
+log over that link from this ROM says the real latency is short enough that
+the ROM's dropping path never fires. If the number is ever measured, re-run
+every M6 gate and M6 P5's walk against it — it decides when a firmware
 writer's `write` future completes.
