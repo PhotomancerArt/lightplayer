@@ -65,10 +65,17 @@ pub struct RunArgs {
     #[arg(long, group = "image")]
     pub merged: Option<PathBuf>,
 
-    /// Address to serve the link on. `lp-cli upload <project>
-    /// serial:tcp://<addr>` connects to exactly this.
-    #[arg(long, default_value = "127.0.0.1:5591")]
-    pub link: String,
+    /// Address to serve the link on, for example `127.0.0.1:5591`. `lp-cli
+    /// upload <project> serial:tcp://<addr>` connects to exactly this.
+    ///
+    /// Omitted, the machine still boots and still talks — the console is kept
+    /// in memory and written by `--console` — but nothing is listening and
+    /// nothing can be uploaded to it. That is the right mode for "boot this
+    /// image and show me what it says", and it is deliberately what you get
+    /// by default: a tool that binds a port without being asked is a tool
+    /// that collides with the one already running.
+    #[arg(long)]
+    pub link: Option<String>,
 
     #[arg(long = "link-kind", value_enum, default_value_t = LinkKind::Usb)]
     pub link_kind: LinkKind,
@@ -76,8 +83,23 @@ pub struct RunArgs {
     /// Pretend no USB host is attached at power-on. The firmware's connection
     /// monitor sees an unplugged cable; nothing a client sends is delivered
     /// until it connects.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "monitor")]
     pub host_absent: bool,
+
+    /// Hold a reader on the link for the whole run, the way
+    /// `espflash flash --monitor` holds a port.
+    ///
+    /// Without it, a client connecting to `--link` is an application OPENING
+    /// the port and disconnecting is it CLOSING one — which is what a Web
+    /// Serial `open()`/`close()` means and what `lp-cli upload`'s readiness
+    /// engine expects, so it is the default. It also means the guest's output
+    /// after the client leaves goes nowhere, exactly as it would on a board
+    /// with nothing plugged in. A walk wants both: a client that uploads and
+    /// leaves, AND a transcript of everything the device said afterwards.
+    /// This gives it one, by declaring the host attached and draining from
+    /// power-on and leaving the socket as bytes only.
+    #[arg(long)]
+    pub monitor: bool,
 
     #[arg(long = "time-grade", value_enum, default_value_t = Grade::T1)]
     pub time_grade: Grade,

@@ -10,8 +10,8 @@ mod messages;
 mod server;
 
 use commands::{
-    create, dev, emu, firmware, fwcheck, hardware, profile, project, schema, serve,
-    shader_debug, shader_lpir, upload, validate,
+    create, dev, emu, firmware, fwcheck, hardware, profile, project, schema, serve, shader_debug,
+    shader_lpir, upload, validate,
 };
 
 #[derive(Parser)]

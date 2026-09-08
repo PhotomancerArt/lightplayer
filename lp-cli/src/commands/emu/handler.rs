@@ -4,7 +4,7 @@ use anyhow::{Context, Result, bail};
 use lp_emu_esp32c6::flash::FlashBacking;
 use lp_emu_esp32c6::machine::{
     AppSource, BootMode, Esp32C6Builder, Esp32C6Machine, FrameSink, Outcome, PinLogSink,
-    StopCondition, TimeGrade, Uart0Sink, UsbHost, UsbSjSink,
+    StopCondition, TimeGrade, Uart0Sink, UsbHost, UsbSjDrain, UsbSjSink,
 };
 use lp_emu_esp32c6::memmap;
 
@@ -32,6 +32,15 @@ fn run(args: RunArgs) -> Result<()> {
             UsbHost::Absent
         } else {
             UsbHost::Attached { draining: true }
+        })
+        // `--monitor` takes the socket out of the port's open/close story:
+        // the host is declared attached and draining from power-on and stays
+        // that way, so a client that uploads and leaves does not take the
+        // console with it.
+        .usb_sj_drain(if args.monitor {
+            UsbSjDrain::Manual
+        } else {
+            UsbSjDrain::Auto
         });
 
     // The image, and with it the boot path. `--merged` is the whole chip:
@@ -59,14 +68,17 @@ fn run(args: RunArgs) -> Result<()> {
             let len = std::fs::metadata(merged)
                 .with_context(|| format!("reading {}", merged.display()))?
                 .len();
-            let len = u32::try_from(len).ok().filter(|n| n.is_power_of_two()).with_context(|| {
-                format!(
-                    "{} is {len} bytes, which is not a whole flash part. A merged image is the \
+            let len = u32::try_from(len)
+                .ok()
+                .filter(|n| n.is_power_of_two())
+                .with_context(|| {
+                    format!(
+                        "{} is {len} bytes, which is not a whole flash part. A merged image is the \
                      WHOLE chip padded to its size — `espflash save-image --merge`, or \
                      scripts/emu/build-merged-image.sh.",
-                    merged.display()
-                )
-            })?;
+                        merged.display()
+                    )
+                })?;
             builder = builder
                 .boot_mode(BootMode::RomUp)
                 .flash(FlashBacking::Copy(merged.clone()))
@@ -81,10 +93,14 @@ fn run(args: RunArgs) -> Result<()> {
 
     // The link. Both kinds listen; the difference is which of the chip's two
     // serials the socket is, and a shipped image only speaks on the USB one.
-    builder = match args.link_kind {
-        LinkKind::Usb => builder.usb_sj(UsbSjSink::Tcp(args.link.clone())),
-        LinkKind::Uart0 => builder.uart0(Uart0Sink::Tcp(args.link.clone())),
-    };
+    // With no `--link` neither is a socket: the console is still collected in
+    // memory, and `--console` still writes it.
+    if let Some(addr) = &args.link {
+        builder = match args.link_kind {
+            LinkKind::Usb => builder.usb_sj(UsbSjSink::Tcp(addr.clone())),
+            LinkKind::Uart0 => builder.uart0(Uart0Sink::Tcp(addr.clone())),
+        };
+    }
     if let Some(path) = &args.dump_frames {
         builder = builder.dump_frames(FrameSink::File(path.clone()));
     }
@@ -100,14 +116,20 @@ fn run(args: RunArgs) -> Result<()> {
         LinkKind::Usb => "usb-serial-jtag",
         LinkKind::Uart0 => "uart0",
     };
-    eprintln!(
-        "emu: esp32c6 {} boot, grade {}, {link} on {} — connect with `lp-cli upload <project> \
-         serial:tcp://{}`",
-        machine.boot_mode().as_str(),
-        grade.configuration(),
-        args.link,
-        args.link,
-    );
+    match &args.link {
+        Some(addr) => eprintln!(
+            "emu: esp32c6 {} boot, grade {}, {link} on {addr} — connect with `lp-cli upload \
+             <project> serial:tcp://{addr}`",
+            machine.boot_mode().as_str(),
+            grade.configuration(),
+        ),
+        None => eprintln!(
+            "emu: esp32c6 {} boot, grade {}, no socket (console in memory; pass --link \
+             <addr> to serve the {link} link)",
+            machine.boot_mode().as_str(),
+            grade.configuration(),
+        ),
+    }
     eprintln!(
         "emu: running for {micros} us of EMULATED time (wall-clock net: {} s)",
         args.wall_timeout_secs
@@ -128,7 +150,11 @@ fn run(args: RunArgs) -> Result<()> {
     if let Some(path) = &args.console {
         std::fs::write(path, &console)
             .with_context(|| format!("writing the console transcript to {}", path.display()))?;
-        eprintln!("emu: console → {} ({} bytes)", path.display(), console.len());
+        eprintln!(
+            "emu: console → {} ({} bytes)",
+            path.display(),
+            console.len()
+        );
     }
 
     eprintln!(
@@ -138,6 +164,24 @@ fn run(args: RunArgs) -> Result<()> {
         machine.instructions(),
         console.len(),
     );
+    // Unmapped accesses, always, even on a clean run. An address no
+    // peripheral claims reads as zero and the guest believes it — a run that
+    // ends well with a hundred of them has told you less than it appears to,
+    // and `--strict-bus` is the flag that turns each one into a fault with a
+    // pc. Reported rather than gated because a walk is not a bring-up.
+    let (reads, writes) = (
+        machine.bus.unmapped_reads(),
+        machine.bus.unmapped_writes(),
+    );
+    if reads + writes > 0 {
+        eprintln!(
+            "emu: {reads} unmapped read(s), {writes} unmapped write(s) at {} distinct site(s) — \
+             each read zero and was believed. Re-run with --strict-bus to fault on them.",
+            machine.bus.unmapped_sites(),
+        );
+    } else {
+        eprintln!("emu: no unmapped accesses");
+    }
 
     // The machine's own exit code, in this door's vocabulary. `Deadline` and
     // `ExitMatched` are the two ways a run ends well; everything else is a

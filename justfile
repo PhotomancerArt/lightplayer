@@ -1630,8 +1630,34 @@ heap-budget-check margin_pct="0": install-rv32-target
     scripts/heap-budget-check.sh check {{ margin_pct }}
 
 # Regenerate the heap-budget measured record from the current tree.
+#
+# The `chips` section is carried through untouched — it comes from a different
+# emulator and needs a firmware build. `heap-budget-baseline-chips` is its
+# half.
 heap-budget-baseline: install-rv32-target
     scripts/heap-budget-check.sh baseline
+
+# The heap-budget record's OTHER source: the shipped ESP32-C6 firmware booted
+# whole on `lp-emu-esp32c6`, read from the allocator figures its own first
+# heartbeat reports.
+#
+# `heap-budget-check` measures what a PROJECT costs, on an emulator that has
+# no firmware in it. This measures what the FIRMWARE costs, on the bytes a
+# board is flashed with — and M3 through M7 established that figure byte-equal
+# to silicon on every memory-class value but a constant 8 B, which the record
+# carries beside it. It is what "the heap gates are read from the emulator"
+# means (plan 2026-09-06-1001-esp-emulator, acceptance 8).
+#
+# Separate from `heap-budget-check` because it needs a cross-target firmware
+# build: the required test job must not start one, so `heap-budget-check`
+# prints a named SKIP there and CI's path-gated `emu-c6` job — which builds
+# firmware anyway — runs this, where a skip would be a failure.
+heap-budget-check-chips margin_pct="0": install-rv32-target
+    LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips {{ margin_pct }}
+
+# Re-measure the chip figures into scripts/heap-budget-record.json.
+heap-budget-baseline-chips: install-rv32-target
+    LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips-baseline
 
 # Emit RV32 stack-size metadata for the ESP32 firmware.
 # The direct cargo build can fail at final link on local ESP linker-script setup,
@@ -2163,6 +2189,32 @@ test-emu-c6:
     cargo test -p lp-emu-validate --test m6_replays
     cargo test -p lp-cli --test validate_registry_parity
     LP_EMU_BUILD_FW=1 cargo test -p lp-cli --test emu_usb_hello -- --include-ignored
+
+# The hardware walk, with the emulator where the board goes.
+#
+# `scripts/m4-hardware-walk.sh --chip esp32c6` asks one question of a board:
+# does the shader it compiled and executed on its own JIT render the bytes a
+# host render produces? This asks it of `lp-emu-esp32c6`, on the same image
+# bytes, over the same wire protocol, against the same oracle — and gets TWO
+# independent answers where a board gives one: the firmware's own `[OUT] dump`
+# line, and the WS281x waveform decoded back off the emulated pad by a decoder
+# that never spoke to the firmware.
+#
+# ROM-up from a merged 4 MiB image by default (the closer twin of flashing and
+# resetting a board); `LP_WALK_BOOT=direct` takes M7's faster direct load,
+# which reaches a byte-equal state at app entry.
+#
+# NOT in `test-emu-c6`: it builds a firmware image, a merged flash image and a
+# release lp-cli, and then runs the machine for twelve emulated seconds — it
+# is a walk, and a walk is something you run, not something every PR pays for.
+# What it proves per-tick lives in `tests/shader_oracle_pin.rs`, which does
+# run there. See docs/reports/2026-09-08-esp32c6-emulator-walk.md.
+# `build-rv32-builtins` and not the whole `ci-prereqs`: the host oracle's
+# second engine is `lpvm-native`'s rv32 code generator, which renders black
+# without its builtins image — and a black host frame is not an oracle. The
+# Xtensa half of `ci-prereqs` has nothing to do with this chip.
+walk-esp32c6-emu *args: install-rv32-target build-rv32-builtins
+    scripts/emu/m4-walk.sh {{ args }}
 
 # Run one image on the C6 machine — the human front door.
 #

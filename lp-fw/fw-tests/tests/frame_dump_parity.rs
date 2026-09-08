@@ -99,7 +99,12 @@ fn the_three_firmware_frame_dump_modules_are_the_same_code() {
             .zip(other.lines())
             .enumerate()
             .find(|(_, (a, b))| a != b)
-            .map(|(i, (a, b))| format!("line {} of the code:\n  {first_chip}: {a}\n  {chip}: {b}", i + 1))
+            .map(|(i, (a, b))| {
+                format!(
+                    "line {} of the code:\n  {first_chip}: {a}\n  {chip}: {b}",
+                    i + 1
+                )
+            })
             .unwrap_or_else(|| {
                 format!(
                     "same {} lines then a length difference ({} vs {})",
