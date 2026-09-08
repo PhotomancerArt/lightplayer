@@ -3782,16 +3782,13 @@ fn library_package(bench: &DeviceBench, name: &str, target: &str) -> String {
 fn open_package(bench: &mut DeviceBench, tasks: &TaskPool, uid: &str) {
     bench.controller.request_library_refresh();
     drive(bench.controller.settle_library());
-    let outcome = drive(bench.controller.dispatch(UiAction::from_op(
+    drive(bench.controller.dispatch(UiAction::from_op(
         crate::ControllerId::new(crate::HOME_NODE_ID),
         crate::HomeOp::OpenPackage {
             key: uid.to_string(),
         },
-    )));
-    eprintln!(
-        "OPEN OUTCOME {outcome:?} pending={:?}",
-        bench.controller.pending_device_lens_for_test()
-    );
+    )))
+    .expect("the gallery's open never fails loudly");
     // The lens is HELD until the device says hello (the fold that produces
     // it runs on the actor's queue, which is what the bench's step IS), so
     // the tick's own attach has to run here the way the actor runs it.
@@ -3828,6 +3825,14 @@ fn open_package(bench: &mut DeviceBench, tasks: &TaskPool, uid: &str) {
             "timed out waiting for the open to land its lens; roster now: {:?}",
             bench.view()
         );
+        // Paced like `run_until`, and for the same reason: a step is 5 fake
+        // ms, and the sim this open just powered on boots a real host
+        // runtime on a real thread. Spinning steps as fast as the CPU allows
+        // would spend the fold's 5 s identify budget (~1000 steps) in a few
+        // real milliseconds and give that thread no chance to say hello —
+        // the open would then read a booting sim as one that never started
+        // and drop the hold, which is precisely what a loaded CI box saw.
+        std::thread::sleep(Duration::from_millis(1));
     }
 }
 
