@@ -2,7 +2,7 @@
 //!
 //! A UART is a FIFO with an outside. `HostSinks` is that outside, named and
 //! indexed so a peripheral holds a [`StreamId`] and nothing else: it does
-//! not know whether its bytes end in a `Vec`, on stdout, or (from M6) on a
+//! not know whether its bytes end in a `Vec`, on stdout, or on a
 //! TCP socket, and it cannot be made to care.
 //!
 //! The RX half is deliberately a **scripted** source by default. Plan PD5

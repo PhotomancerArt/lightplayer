@@ -31,15 +31,20 @@ pub fn list(cfg: &ValidateConfig, repo_root: &Path) -> Result<String> {
         let sentinel = match p.sentinel {
             Sentinel::Done(m) => format!("done `{m}`"),
             Sentinel::Ready(m) => format!("ready `{m}`"),
+            Sentinel::State(m) => format!("state `{m}`"),
         };
         let _ = writeln!(
             s,
-            "  {:<24} {:<40} features={} {}",
+            "  {:<24} {:<40} link={:<15} features={} {}",
             p.name,
             p.display_name,
+            p.link.slug(),
             p.firmware_features.join(","),
             sentinel
         );
+        if let Some(why) = p.emulator_only {
+            let _ = writeln!(s, "  {:<24} emulator-only: {why}", "");
+        }
     }
 
     let _ = writeln!(s, "\nsets");

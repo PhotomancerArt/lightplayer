@@ -2061,6 +2061,7 @@ test-emu-c6:
     LP_EMU_BUILD_FW=1 cargo test -p lp-emu-esp32c6 -- --include-ignored --nocapture
     cargo test -p lp-emu-validate --test m3_replays
     cargo test -p lp-emu-validate --test m4_replays
+    cargo test -p lp-emu-validate --test m6_replays
     cargo test -p lp-cli --test validate_registry_parity
     LP_EMU_BUILD_FW=1 cargo test -p lp-cli --test emu_usb_hello -- --include-ignored
 
@@ -2089,6 +2090,19 @@ emu-c6 elf *args:
 # average quoted; see the script's header.
 bench-emu-c6 *args:
     scripts/emu/bench-c6.sh {{ args }}
+
+# The C6 machine's browser/phone speed probe: builds the wasip1 module,
+# stages it with the two pinned reference images plus a page and worker
+# under a JS WASI shim, and serves it on the LAN (port from
+# scripts/dev-port.sh, never pinned) so a phone can run it and upload its
+# result. D6: no source changes, no wasm32-unknown-unknown entry point.
+#
+#   just bench-emu-web              # build, stage, serve — open the printed URL
+#   just bench-emu-web --collect    # print every uploaded result-*.json as a table
+#
+# Also an ORACLE, not a gate — see the script's header.
+bench-emu-web *args:
+    scripts/emu/bench-web.sh {{ args }}
 
 # The Xtensa core's speed probe: the two longest fixture programs, repeated
 # until each row has retired >=100 M instructions, reported as user seconds,

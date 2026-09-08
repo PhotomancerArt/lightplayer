@@ -80,20 +80,23 @@ protocol.
 ## What it is trusted for
 
 Every field class of `lp-emu:esp32c6:*` is graded **`modeled`**, each with its
-reason in `validate.toml`. That is not modesty and it is not a
-placeholder:
+reason in `validate.toml`. That is not modesty and it is not a placeholder:
 
 | class | why it is `modeled` |
 |---|---|
 | memory | byte-equal to silicon on the compile harness — 372/372 values — which is *evidence in the reason*, not a promotion. `measured` would want a transcript per class |
 | timing | `t1` counts instructions, `t2` uses the per-class model, and no transcript grades either yet (the vision's graded ladder) |
 | boot-log | a direct load prints no ROM banner and no bootloader lines at all; M7 boots from reset |
-| usb-serial-jtag | the host's three states and the transitions between them (M6 P2/P3), every register in the block still graded `modeled` or `documented` in its own table; P4 promotes what the transcripts cover |
+| usb-serial-jtag | the host's three states and the transitions between them, with four committed transcripts behind them (M6) — `boot-idle` over the shipped link against silicon's capture of the *same image bytes*, the port held closed from boot, an unplug mid-session, and no cable at all. The block's own data path is graded `measured` register by register in `periph/usb_sj.rs`; the **class** stays `modeled` by the rule below, and what would earn it is a silicon transcript of this class — `usb-negative-control` on the desk board, still owed |
 | pin | nothing is observed at a pad; the RMT TX engines (M5 P1) produce each channel's pulses in cycles, and M5 P2 routes them through the GPIO matrix to a pin log and the WS281x decoder |
 | wire | the bytes are the guest's; a live socket's arrival times are the host's |
 
 The rule behind the table is the vision's: **never trust an emulated number
-outside what a transcript proves.** The spike found esp-emu byte-equal on
+outside what a transcript proves.** Note the two levels it now runs at. A
+*class* is graded here, for a whole configuration, and a *register* is graded
+in its block's own table (`--strict-grade`); the second is finer and does not
+promote the first. USB-Serial-JTAG is the worked example: six registers
+measured, the class still `modeled`. The spike found esp-emu byte-equal on
 memory and 2.4x wrong on time in the same run, and the compile harness's own
 5 ms slice budget passing there while failing on the board.
 

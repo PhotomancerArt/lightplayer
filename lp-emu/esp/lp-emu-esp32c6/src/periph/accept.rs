@@ -183,7 +183,7 @@ pub fn uart(name: &'static str) -> RegFile {
 /// drops output from then on (`esp-println/src/lib.rs:275-296` — silence,
 /// not a hang); `int_raw.sof` is 0, so the connection monitor decides the
 /// host is not enumerated. The honest model, with the attach/detach
-/// control channel, is P6/M6.
+/// control channel, is M3 P6 and M6.
 pub fn usb_device() -> RegFile {
     RegFile::new("USB_DEVICE", 0x100).with_names(regs::USB_DEVICE)
 }

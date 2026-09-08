@@ -40,8 +40,18 @@
 //!
 //! The overlap phase is over: the pill that used to call this hook
 //! alongside the popover retired at P5, so a project route asks the
-//! service exactly once, from `web_app`, and the answer feeds both the
-//! derivation and the panel.
+//! service once, from `web_app`, and the answer feeds both the derivation
+//! and the panel.
+//!
+//! The one thing that earns a SECOND trip is this tab publishing the
+//! project it is looking at. The answer to "is there a door here" changes
+//! the moment the auto-publish driver creates the cloud record, and the
+//! ask above already happened — so the hook also parks on the driver's
+//! publish notices ([`crate::cloud::sync::publish_notice`]) and re-asks
+//! when one names the project it is watching. Push, not poll: the driver's
+//! ledger stays the diagnostic notebook it was built as, and a face that
+//! would otherwise read "Private" until the next reload flips on its own
+//! (`docs/debt/relationship-face-stale-after-publish.md`).
 
 use dioxus::prelude::*;
 use lpc_cloud_api::request::{AddMember, GetProject, RemoveMember, SetAccess};
@@ -163,6 +173,51 @@ pub fn use_project_roster(uid: Option<PrefixedUid>) -> ProjectRoster {
         use_memo(move || session.and_then(|session| session().me().map(|me| me.email.clone())));
     let mut state = use_signal(|| RosterState::Loading);
     let mut busy = use_signal(|| false);
+    // The uid the answer in `state` is ABOUT, for the publish listener
+    // below: `use_future` spawns once and would otherwise keep watching the
+    // project this tab had open at boot. Written only by the effect that
+    // asks, so the two can never disagree about what was asked.
+    let mut watched = use_signal(|| None::<PrefixedUid>);
+
+    // Which ask the answer in `state` is allowed to come from. Two can be
+    // in flight at once now — the route's and a publish notice's — and
+    // nothing orders the replies, so a late answer to the OLDER ask would
+    // overwrite the newer, truer one with exactly the staleness this hook
+    // exists to shed. Every write below claims a ticket too: a `GetProject`
+    // sent before a `SetAccess` cannot land on top of what that write came
+    // back with. Peeked, never read reactively — reading it would subscribe
+    // the effect below to a signal that effect's own ask writes.
+    let asks = use_signal(|| 0u64);
+    let claim_ticket = move || {
+        let mut asks = asks;
+        let ticket = *asks.peek() + 1;
+        asks.set(ticket);
+        ticket
+    };
+
+    // The `GetProject`, as one closure both askers call. It never sets
+    // `Loading`: that is the caller's call, and only a caller that is
+    // changing the SUBJECT should blank the answer it holds.
+    let ask = move |uid: PrefixedUid| {
+        let mut state = state;
+        let ticket = claim_ticket();
+        spawn(async move {
+            let answer =
+                match lpa_cloud_client::call(&FetchCloudPort::new(), GetProject { uid }).await {
+                    Ok(info) => RosterState::of_info(&info),
+                    Err(error) => {
+                        // Silence, not a badge: an unpublished project, a
+                        // project somebody else owns, and an unreachable
+                        // service all mean "no sharing door here".
+                        log::debug!("share: no administrable project at {uid}: {error}");
+                        RosterState::Absent
+                    }
+                };
+            if *asks.peek() == ticket {
+                state.set(answer);
+            }
+        });
+    };
 
     // `use_reactive` because `uid` is a plain value, not a signal: without
     // it the effect would capture the uid it first saw and keep answering
@@ -170,23 +225,46 @@ pub fn use_project_roster(uid: Option<PrefixedUid>) -> ProjectRoster {
     use_effect(use_reactive!(|(uid,)| {
         let signed_in = me_email().is_some();
         let Some(uid) = uid.filter(|_| signed_in) else {
+            watched.set(None);
             state.set(RosterState::Absent);
             return;
         };
+        watched.set(Some(uid));
+        // A new subject: what we hold is about a different project, so
+        // `Loading` is the honest state until the answer lands.
         state.set(RosterState::Loading);
-        spawn(async move {
-            match lpa_cloud_client::call(&FetchCloudPort::new(), GetProject { uid }).await {
-                Ok(info) => state.set(RosterState::of_info(&info)),
-                Err(error) => {
-                    // Silence, not a badge: an unpublished project, a
-                    // project somebody else owns, and an unreachable
-                    // service all mean "no sharing door here".
-                    log::debug!("share: no administrable project at {uid}: {error}");
-                    state.set(RosterState::Absent);
-                }
-            }
-        });
+        ask(uid);
     }));
+
+    // The other trigger: THIS TAB just published the open project.
+    //
+    // The effect above asks once per project route, so a project this tab
+    // publishes AFTER that ask kept the "no door here" answer — and the
+    // relationship face read "Private" — until a reload
+    // (`docs/debt/relationship-face-stale-after-publish.md`). The fix parks
+    // on the driver's conclusions rather than polling its ledger: the
+    // notice board wakes this task only when a trip put something in the
+    // cloud, and only a notice for the project we are watching costs a
+    // round trip.
+    use_future(move || async move {
+        let mut seen = crate::cloud::sync::publish_notice::generation();
+        loop {
+            let next = crate::cloud::sync::publish_notice::changed_since(seen).await;
+            // `Option<PrefixedUid>` is `Copy`; take it out of the signal
+            // rather than holding a borrow across the next await.
+            let watching = *watched.peek();
+            if let Some(uid) = watching
+                && crate::cloud::sync::publish_notice::published_since(&uid.to_string(), seen)
+            {
+                // No `Loading` on the way: the answer we hold is the one
+                // the service last gave, and blinking the face through
+                // "Private" to reach "Shared" is the staleness this fixes
+                // wearing a different hat.
+                ask(uid);
+            }
+            seen = next;
+        }
+    });
 
     let on_access = EventHandler::new(move |level: Access| {
         let (Some(uid), Some(previous)) = (uid, state.peek().access()) else {
@@ -194,6 +272,9 @@ pub fn use_project_roster(uid: Option<PrefixedUid>) -> ProjectRoster {
         };
         state.write().set_access(level);
         busy.set(true);
+        // This write is the newest word on the project; a `GetProject`
+        // still in flight is not (see `claim_ticket`).
+        claim_ticket();
         spawn(async move {
             let result =
                 lpa_cloud_client::call(&FetchCloudPort::new(), SetAccess { uid, access: level })
@@ -215,6 +296,7 @@ pub fn use_project_roster(uid: Option<PrefixedUid>) -> ProjectRoster {
         let Some(uid) = uid else {
             return;
         };
+        claim_ticket();
         spawn(async move {
             match lpa_cloud_client::call(&FetchCloudPort::new(), AddMember { uid, email }).await {
                 Ok(info) => state.set(RosterState::of_info(&info)),
@@ -231,6 +313,7 @@ pub fn use_project_roster(uid: Option<PrefixedUid>) -> ProjectRoster {
         let Some(uid) = uid else {
             return;
         };
+        claim_ticket();
         spawn(async move {
             match lpa_cloud_client::call(&FetchCloudPort::new(), RemoveMember { uid, email }).await
             {

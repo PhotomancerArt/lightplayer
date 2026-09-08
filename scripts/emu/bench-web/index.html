@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Emulator Bench</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; padding: 20px; font: 16px/1.5 -apple-system, system-ui, sans-serif; background: #eef1f3; color: #1b2229; }
+  @media (prefers-color-scheme: dark) { body { background: #151b20; color: #e6ecef; } }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { opacity: .7; font-size: 13px; word-break: break-all; }
+  button { font: inherit; padding: 10px 18px; border-radius: 6px; border: 1px solid #0e6e6a; background: #0e6e6a; color: #fff; margin: 14px 0; }
+  button:disabled { opacity: .5; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; font-size: 15px; margin-bottom: 10px; }
+  th, td { text-align: right; padding: 6px 8px; border-bottom: 1px solid rgba(128,128,128,.35); }
+  th:first-child, td:first-child { text-align: left; }
+  th:nth-child(2), td:nth-child(2) { text-align: left; }
+  .headline { margin: 4px 0 16px; }
+  .big { font-size: 24px; font-weight: 700; color: #0e6e6a; }
+  @media (prefers-color-scheme: dark) { .big { color: #4fb8b2; } }
+  pre { font-size: 12px; white-space: pre-wrap; opacity: .8; }
+  #status { min-height: 1.5em; }
+</style>
+</head>
+<body>
+<h1>Emulator Bench</h1>
+<div class="sub" id="ua"></div>
+<button id="run">Run again</button>
+<div id="status">Loading…</div>
+<div id="headlines"></div>
+<table id="results" hidden>
+  <thead><tr><th>run</th><th>image</th><th>grade</th><th>wall s</th><th>instr/s</th><th>real time</th><th>inst. ms</th></tr></thead>
+  <tbody></tbody>
+</table>
+<pre id="tail"></pre>
+<script>
+  const ua = document.getElementById('ua');
+  ua.textContent = navigator.userAgent + ' · cores ' + (navigator.hardwareConcurrency || '?');
+  const status = document.getElementById('status'), tbody = document.querySelector('#results tbody');
+  const table = document.getElementById('results'), headlines = document.getElementById('headlines'), tail = document.getElementById('tail');
+  const btn = document.getElementById('run');
+  let worker = null, results = [], manifest = null;
+
+  async function loadManifest() {
+    if (manifest) return manifest;
+    manifest = await (await fetch('manifest.json')).json();
+    return manifest;
+  }
+
+  // Build the run plan: for each image in manifest order, repeat its full
+  // grade list `repeats` times (e.g. t1,t2,t1,t2) so a first-run vs warm
+  // comparison is available per grade without waiting for every image.
+  function buildPlan(m) {
+    const plan = [];
+    for (const image of m.images) {
+      for (let r = 0; r < m.repeats; r++) {
+        for (const grade of m.grades) plan.push({ slug: image.slug, grade });
+      }
+    }
+    return plan;
+  }
+
+  function renderHeadlines() {
+    const bySlug = {};
+    for (const r of results) {
+      if (r.grade !== 't2' || !r.realtime) continue;
+      (bySlug[r.slug] ||= []).push(r.realtime);
+    }
+    headlines.innerHTML = Object.entries(bySlug).map(([slug, rts]) => {
+      const best = Math.max(...rts);
+      return '<div class="headline"><span class="big">' + best.toFixed(2) + '× real time</span> at t2, ' + slug + ' (best of ' + rts.length + ')</div>';
+    }).join('');
+  }
+
+  async function start() {
+    const m = await loadManifest();
+    const plan = buildPlan(m);
+    if (worker) worker.terminate();
+    worker = new Worker('worker.js');
+    results = []; tbody.innerHTML = ''; headlines.innerHTML = ''; table.hidden = true; btn.disabled = true;
+    status.textContent = 'Loading module…';
+    worker.onmessage = (ev) => {
+      const d = ev.data;
+      if (d.type === 'loaded') status.textContent = 'Compiled in ' + d.compileMs.toFixed(0) + ' ms';
+      if (d.type === 'progress') status.textContent = 'Run ' + (d.i + 1) + ' of ' + d.n + ' (' + d.slug + ' ' + d.grade + ')… keep the screen on';
+      if (d.type === 'result') {
+        const r = d.r; results.push(r); table.hidden = false;
+        const tr = document.createElement('tr');
+        tr.innerHTML = '<td>' + (d.i + 1) + '</td><td>' + r.slug + '</td><td>' + r.grade + '</td><td>' + (r.wallMs / 1000).toFixed(2) + '</td><td>' +
+          (r.ips ? (r.ips / 1e6).toFixed(1) + ' M' : 'exit ' + r.exit) + '</td><td>' + (r.realtime ? r.realtime.toFixed(2) + '×' : '–') + '</td><td>' + r.instantiateMs.toFixed(0) + '</td>';
+        tbody.appendChild(tr);
+        tail.textContent = r.tail;
+        renderHeadlines();
+      }
+      if (d.type === 'done') { btn.disabled = false; send(m); }
+      if (d.type === 'error') { status.textContent = 'Error: ' + d.message; btn.disabled = false; }
+    };
+    worker.postMessage({ plan, images: m.images });
+  }
+
+  async function send(m) {
+    const payload = { ua: navigator.userAgent, cores: navigator.hardwareConcurrency, at: new Date().toISOString(),
+      results: results.map(r => ({ slug: r.slug, grade: r.grade, exit: r.exit, wallMs: r.wallMs, instr: r.instr, us: r.us, ips: r.ips, realtime: r.realtime, instantiateMs: r.instantiateMs })) };
+    const name = 'result-' + payload.at.replace(/[:.]/g, '-') + '.json';
+    const fd = new FormData();
+    fd.append('file_to_upload', new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), name);
+    try {
+      const resp = await fetch('/upload?path=/', { method: 'POST', body: fd });
+      status.textContent = resp.ok ? 'Done. Results sent to the Mac as ' + name + '.' : 'Done, but sending failed (' + resp.status + '). Paste the table into the chat.';
+    } catch (e) { status.textContent = 'Done, but sending failed. Paste the table into the chat.'; }
+  }
+  btn.addEventListener('click', start);
+  start();
+</script>
+</body>
+</html>

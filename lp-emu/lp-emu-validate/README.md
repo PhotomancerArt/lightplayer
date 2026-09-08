@@ -48,6 +48,47 @@ That is also the payload whose series are the most interesting: `fs-write`
 report §5.3's) and `shader-compile` (the compiler's outputs `Structural`, its
 `elapsed` `Timing`).
 
+### What a payload says about the host (M6)
+
+Four more fields on `Payload` are host-side rather than firmware-side, and
+each exists because a scenario could not be expressed without it. (They join
+`host_script`, above: that one is the UART0 walk's *wire conversation*, these
+are the USB link's *cable*. M6 P5 is where the two links' scripts meet, and
+where it will be worth asking whether they should be one field.)
+
+- **`link`** — `UsbSerialJtag` or `Uart0Spike`. Until M6 every emulated run
+  got the `spike_uart0_link` feature, which moves the host link onto UART0,
+  because "neither emulator has a USB host". That stopped being true, and it
+  mattered: comparing a UART0-link image on our machine with a USB-link image
+  on the board compares two link drivers' allocations, not two machines
+  (DD30). `esp-emu:*` still gets the workaround unconditionally — its USB
+  model asserts SOF for ever (spike report §4) — and so do the two payloads
+  whose committed transcripts are of that image. A transcript is never
+  re-baselined to suit a later idea.
+- **`host_plan`** — the `--usb-host` state a run starts in and the
+  `--usb-script` that follows, in absolute emulated milliseconds. The script
+  is written by a plan *step*, so its whole text lands in the sidecar's
+  `source`: a scenario referenced only by a path is a scenario nobody can
+  check. Sockets are host time and have no place in a transcript.
+- **`run_secs`** — a scenario is a schedule ("the port opens at eight
+  seconds"), and one `--timeout-secs` across a whole set cannot say so.
+- **`emulator_only`** — the reason silicon cannot record it, in a sentence.
+  `usb-host-absent` is the one: an absent host records nothing, because
+  recording is what a host does. The silicon and esp-emu drivers refuse it
+  with that sentence rather than writing an empty file and calling it
+  evidence.
+
+`Sentinel` grew a third shape for the same payload. `Done` is a line the
+device prints and `Ready` is a line it prints before serving for ever;
+`State` is for a payload whose subject is machine **state** — with no cable
+the device says nothing at all, which is the finding, so the transcript is
+the machine's own `--probe` report and no `--exit-on` is passed.
+
+The M6 set is `emu-m6`: `boot-idle` (the shipped image with a host attached
+and reading), `usb-negative-control` (the port held closed from boot),
+`usb-detach-reattach` (the cable out mid-session and back in) and
+`usb-host-absent`.
+
 The registry is `src/payload.rs`. It **mirrors** `fw-checks` rather than
 importing it: `fw-checks` is AGPL and outside the `lp-emu/` MIT fence, so an
 import would fail `just lint-emu-fence`. `lp-cli` depends on both and owns the
@@ -188,18 +229,23 @@ For `esp-emu:*` it builds a merged image and runs the binary named by
 report §10 — a checksum-verified release asset, outside the repo).
 
 For `lp-emu:*` there is no port, no reset dance and no `lsof` pre-check,
-because there is no board. Its plan is two commands — build the payload image
-(with `spike_uart0_link`, because that machine models USB-Serial-JTAG with no
-host attached), then run the machine with UART0 pointed at a file — and every
-decision that shapes the run is a flag on the second one, so the printed plan
-is the whole protocol. That was the seam M2 left as
-`driver::ConfigurationDriver`, and M3 filling it changed nothing else here.
+because there is no board. Its plan is two commands — build the payload
+image, then run the machine with a console pointed at a file — plus a third
+when the payload carries a host script, and every decision that shapes the
+run is a flag on the machine's command line, so the printed plan is the whole
+protocol. Which console depends on the payload's `link`: a USB-link payload
+gets `--usb-sj file:<capture>` (the bytes a reader on the silicon port would
+see) with `--usb-sj-tried` beside it for what the guest handed over that
+nobody took, and a spike-link payload gets `--uart0 file:`. That was the seam
+M2 left as `driver::ConfigurationDriver`, and neither M3 nor M6 changed
+anything else here.
 
 `--image [<payload>=]<path>` runs an already-built image instead of building
 one. It exists for provenance: the committed C6 transcripts are at firmware
-`d6cfaa205` with `spike_uart0_link` applied as a dirty tree, which is not what
-a checkout builds, and `scripts/emu/build-reference-image.sh` is what
-reproduces it. It takes a payload name because a set runs several payloads and
+commits a checkout does not build — `d6cfaa205` with `spike_uart0_link`
+applied as a dirty tree for the M2/M3 ones, and for M6 two clean trees with
+no cherry-pick at all — and `scripts/emu/build-reference-image.sh <features>
+[<commit>] [<spike>|none]` is what reproduces them. It takes a payload name because a set runs several payloads and
 a reference image is built per feature set. Silicon refuses it — a run that
 flashes somebody else's ELF cannot honestly report `firmware_features`.
 
