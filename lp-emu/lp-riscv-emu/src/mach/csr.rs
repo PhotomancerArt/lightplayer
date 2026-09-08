@@ -59,6 +59,29 @@ pub const MTVEC: u16 = 0x305;
 /// (discovery §1h). Scratch, not illegal.
 pub const MTVT: u16 = 0x307;
 
+// --- the two user-mode CSRs the mask ROM writes ----------------------------
+
+/// `ustatus` (spec, the retired N extension). The C6's **mask ROM** writes
+/// it twice inside `_init`, before anything else runs:
+///
+/// ```text
+/// 40001708 <clr_sdio_pin_pu_done>:
+/// 40001708:  csrw ustatus, zero
+/// 4000170c:  csrw mie, zero
+/// 40001710:  csrw uie, zero
+/// ...
+/// 4000176e:  csrw ustatus, t1     ; t1 = 1
+/// ```
+///
+/// So on silicon these writes do not trap — a boot that reaches `_start` is
+/// the proof — and here they are [`CsrClass::Scratch`]: remembered, read by
+/// nothing. Found by M7's first ROM-up run, which faulted 14 instructions in
+/// with `TrapVectorFetch { vector: 0 }` because an illegal-instruction trap
+/// took a hart whose `mtvec` the ROM had not written yet.
+pub const USTATUS: u16 = 0x000;
+/// `uie`, the other one, written in the same three-instruction run above.
+pub const UIE: u16 = 0x004;
+
 // --- machine trap handling (spec §3.1.14-3.1.17) ---------------------------
 
 /// `mscratch` — a working scratch CSR: `_pre_default_start_trap` parks `t0`
@@ -215,7 +238,7 @@ pub const fn class(csr: u16) -> CsrClass {
 
         TSELECT | TDATA1 | TDATA2 | TCONTROL => CsrClass::Trigger,
 
-        MTVT | MHCR | MPCER | MPCMR => CsrClass::Scratch,
+        MTVT | MHCR | MPCER | MPCMR | USTATUS | UIE => CsrClass::Scratch,
         // `0x802` inside this range is PCCR_USER, matched above.
         GPIO_CSR_FIRST..=GPIO_CSR_LAST => CsrClass::Scratch,
 
@@ -244,7 +267,7 @@ pub struct CsrFile {
 }
 
 /// How many [`CsrClass::Scratch`] CSRs there are.
-const SCRATCH_COUNT: usize = 9;
+const SCRATCH_COUNT: usize = 11;
 
 impl Default for CsrFile {
     fn default() -> Self {
@@ -273,6 +296,8 @@ impl CsrFile {
         match csr {
             MTVT => Some(0),
             MHCR => Some(1),
+            USTATUS => Some(9),
+            UIE => Some(10),
             0x800 => Some(2),
             0x801 => Some(3),
             // 0x802 is PCCR_USER, not scratch.
