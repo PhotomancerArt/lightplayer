@@ -262,8 +262,24 @@ image, grade, wall seconds, instr/s and the real-time ratio. Baseline numbers
 and the method are in
 `docs/reports/2026-09-07-emu-web-bench-baseline.md`.
 
-Evidence, and the rungs not yet climbed (MMIO fast path, poll-loop skip,
-block cache): the planning workspace's
+**The Xtensa core** (`lp-xt-emu`) has its own probe and its own ladder:
+
+```bash
+just bench-emu-xt                     # the fixture corpus, repeated to >=100 M
+scripts/emu/bench-xt.sh --bin <saved-binary> --no-build --no-promote
+```
+
+It reports instructions/second only — that core is an ISA core with no SoC
+around it, so there is no emulated clock and no real-time ratio — and `cmp`s
+the guest output *and* a capped text trace against the previous run. M6 took
+it from 21.4 to 31.2 M instr/s on the recursion-heavy `ackermann` fixture and
+54.5 to 61.3 M on `fib_rec`, with both captures byte-identical; the win is
+almost entirely one memory resolution per access instead of four or five.
+`lp-emu/lp-xt-emu/README.md` has the rung-by-rung table and the
+generic-codegen trap that per-package `opt-level` overrides hide.
+
+Evidence, and the rungs not yet climbed (MMIO fast path, poll-loop skip, block
+cache): the planning workspace's
 `2026-09-06-1001-esp-emulator/2026-09-07-speed-ladder-research.md` and its
 `speed-research/` directory, executed by the `2026-09-07-0827-emu-speed-ladder`
 plan.
@@ -297,5 +313,7 @@ just emu-c6 <elf> --strict-bus --timeout 6s   # one image, by hand
 
 Next: M4 (SPI1 flash and the MMU windows — the flash-backed image still stops
 at `SPIN SPI1+0x000 cmd` at 11 ms), M5 (RMT and the WS281x decoder, which is
-what makes a pin claim possible), M6 (the honest USB-Serial-JTAG with a
-control channel), M7 (ROM-up boot, where the boot-log class becomes a claim).
+what makes a pin claim possible), M6 (the honest USB-Serial-JTAG: the host's
+three states and the control channel that moves between them —
+`esp/README.md` has the protocol), M7 (ROM-up boot, where the boot-log class
+becomes a claim).

@@ -1,7 +1,7 @@
 //! `BoardsCatalogPage`: the public "what should I buy" page (`/boards`).
 //!
 //! Boundary: catalog data in, nothing out. The page renders the embedded
-//! display sidecars ([`crate::all_boards`]) through [`BoardDiagram`] and
+//! display sidecars ([`crate::purchasable_boards`]) through [`BoardDiagram`] and
 //! knows nothing about projects, devices, or studio state. The host app
 //! passes the detected [`HostOs`] so driver warnings (plan decision D5) stay
 //! platform-blind here. Styling rides `lpb-cat-*` / `lpb-det-*` classes
@@ -22,7 +22,7 @@ use crate::firmware_join::{
 };
 use crate::geometry::DiagramMode;
 use crate::usb_bridge::{DriverGuidance, DriverNeedLevel, HostOs};
-use crate::{BoardDiagram, all_boards, board_by_id};
+use crate::{BoardDiagram, board_by_id, purchasable_boards};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SortBy {
@@ -130,7 +130,7 @@ fn fit_sentence(board: &BoardDisplayFile, matched: &CompatibleBuild) -> String {
 /// the first board carrying the family.
 fn family_chips() -> Vec<(String, String)> {
     let mut chips: Vec<(String, String)> = Vec::new();
-    for board in all_boards() {
+    for board in purchasable_boards() {
         if !chips.iter().any(|(family, _)| *family == board.family) {
             chips.push((board.family.clone(), board.soc.clone()));
         }
@@ -183,8 +183,7 @@ pub fn BoardsCatalogPage(os: HostOs, #[props(default)] initial_board: Option<Str
         }
     });
 
-    let mut boards: Vec<&'static BoardDisplayFile> = all_boards()
-        .iter()
+    let mut boards: Vec<&'static BoardDisplayFile> = purchasable_boards()
         .filter(|board| {
             family_filter()
                 .map(|family| board.family == family)

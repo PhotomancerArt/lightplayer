@@ -11,6 +11,7 @@ use lpa_link::providers::browser_worker::{
     BrowserInputEnvelope, BrowserOutputEnvelope, BrowserRuntimeTier, BrowserTickMode,
     BrowserWorkerHandle, PreviewPixelFrame, resolved_engine_urls,
 };
+use lpa_studio_core::app::library::ProjectTarget;
 
 /// One failed `preview_frame` / `present_frame` / `attach_surface` request.
 pub(super) struct PreviewError {
@@ -52,9 +53,16 @@ pub(super) struct WorkerRig {
 impl WorkerRig {
     /// Spawn and boot one explicit-tick worker.
     pub(super) async fn boot(label: String) -> Result<Self, String> {
+        // The lab's boot runtime idles, but it is still created AS
+        // something: the Desktop board, like the cards it hosts.
         let options = resolved_engine_urls()
             .await
-            .with_tick_mode(BrowserTickMode::Explicit);
+            .with_tick_mode(BrowserTickMode::Explicit)
+            .with_runtime(
+                ProjectTarget::Desktop
+                    .runtime_options(BrowserRuntimeTier::Cpu)
+                    .ok_or_else(|| "the Desktop board manifest is missing".to_string())?,
+            );
         let mut handle = BrowserWorkerHandle::new(&options.worker_script_path())
             .map_err(|error| format!("spawn worker: {error}"))?;
         handle

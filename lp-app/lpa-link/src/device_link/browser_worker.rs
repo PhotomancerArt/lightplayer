@@ -50,31 +50,9 @@ use wasm_bindgen_futures::spawn_local;
 use crate::device_link::demux::demux_line;
 use crate::device_link::wire::client_message;
 use crate::providers::browser_worker::{
-    BrowserInputEnvelope, BrowserOutputEnvelope, BrowserRuntimeTier, BrowserWorkerHandle,
+    BrowserInputEnvelope, BrowserOutputEnvelope, BrowserRuntimeOptions, BrowserWorkerHandle,
     BrowserWorkerOptions,
 };
-
-/// What the runtime behind a worker link wears when it boots.
-///
-/// ⚠️ **Seam pending P1.** The plan's PD1 puts exactly these three facts in
-/// `BrowserRuntimeOptions`, carried by `create_runtime(label, options_json)`
-/// and mirrored in `worker_envelope.rs`. Until that lands the worker's
-/// `Boot` envelope has nowhere to put them, so a link carries them, hands
-/// them to whoever asks, and passes nothing extra to the worker: the sim
-/// boots as it does today. Reconciling is one edit — pass this struct's
-/// fields into the boot envelope and delete the type.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SimRuntimeOptions {
-    /// Requested shader-execution tier (PD12: sims ask for GPU, the worker
-    /// answers with what it granted).
-    pub tier: BrowserRuntimeTier,
-    /// The target's runtime manifest, as JSON. Empty = whatever the worker
-    /// defaults to.
-    pub hardware_manifest_json: String,
-    /// The synthetic base MAC this sim reports as its hardware identity
-    /// (PD6: Studio-minted, locally administered).
-    pub base_mac: String,
-}
 
 /// One [`Link`] over a `fw-browser` worker.
 ///
@@ -90,16 +68,16 @@ impl BrowserWorkerLink {
     /// A link over a not-yet-spawned worker.
     ///
     /// `info` is fabricated by the caller (the studio's sim transport owns
-    /// the `sim:<uid>` endpoint scheme and the `Sim · <name>` label); the
-    /// worker `options` say where the engine assets live; `runtime` is what
-    /// the sim will wear once P1's boot options exist.
-    pub fn new(info: LinkInfo, options: BrowserWorkerOptions, runtime: SimRuntimeOptions) -> Self {
+    /// the `sim:<uid>` endpoint scheme and the `Sim · <name>` label);
+    /// `options` say where the engine assets live AND, in their
+    /// [`BrowserWorkerOptions::runtime`], what the sim wears when it boots
+    /// — the board manifest, the requested tier, the minted identity.
+    pub fn new(info: LinkInfo, options: BrowserWorkerOptions) -> Self {
         Self {
             inner: Rc::new(WorkerLinkInner {
                 label: info.label.clone(),
                 info,
-                options,
-                runtime: RefCell::new(runtime),
+                options: RefCell::new(options),
                 handle: RefCell::new(None),
                 events: RefCell::new(VecDeque::new()),
                 queue: RefCell::new(VecDeque::new()),
@@ -170,12 +148,16 @@ impl BrowserWorkerControl {
     /// next boot" a `/hardware.json` write has on silicon (board-selection
     /// D4) — the sim keeps the promise the verb already makes.
     pub fn set_hardware_manifest(&self, manifest_json: String) {
-        self.inner.runtime.borrow_mut().hardware_manifest_json = manifest_json;
+        self.inner
+            .options
+            .borrow_mut()
+            .runtime
+            .hardware_manifest_json = manifest_json;
     }
 
     /// The options the next runtime boots with.
-    pub fn runtime_options(&self) -> SimRuntimeOptions {
-        self.inner.runtime.borrow().clone()
+    pub fn runtime_options(&self) -> BrowserRuntimeOptions {
+        self.inner.options.borrow().runtime.clone()
     }
 
     /// Post one envelope at the worker, for the conversations that speak the
@@ -197,8 +179,11 @@ struct WorkerLinkInner {
     /// The worker's boot label, taken from the link's own label so worker
     /// logs and the card name the same thing.
     label: String,
-    options: BrowserWorkerOptions,
-    runtime: RefCell<SimRuntimeOptions>,
+    /// Where the engine assets live, and what the NEXT runtime is created
+    /// as. Mutable because `set_hardware_manifest` re-dresses the next boot
+    /// — the same "effective next boot" a `/hardware.json` write has on
+    /// silicon — and a restart is a boot.
+    options: RefCell<BrowserWorkerOptions>,
     /// `None` until `Open` spawns one; dropped (which terminates it) by
     /// `Close`.
     handle: RefCell<Option<BrowserWorkerHandle>>,
@@ -293,12 +278,17 @@ impl WorkerLinkInner {
     /// The spawn + boot half, without the eventing: shared by `Open` and the
     /// destroy-and-recreate a reset performs.
     async fn spawn_and_boot(&self) -> Result<(), String> {
-        let script = self.options.worker_script_path();
+        // Cloned, never borrowed across the await: an effect may re-dress
+        // the next boot (`set_hardware_manifest`) while this one is still
+        // in flight, and a live `Ref` would make that a panic instead of
+        // the "effective next boot" the verb promises.
+        let options = self.options.borrow().clone();
+        let script = options.worker_script_path();
         let mut handle = BrowserWorkerHandle::new(&script).map_err(|error| error.to_string())?;
-        // P1 reconciliation point: the boot envelope grows the runtime
-        // options (`self.runtime`) and this call passes them.
+        // The boot envelope carries `options.runtime` — the board manifest,
+        // the requested tier and the minted identity this sim wears.
         let outputs = handle
-            .boot(&self.label, &self.options)
+            .boot(&self.label, &options)
             .await
             .map_err(|error| error.to_string())?;
         *self.handle.borrow_mut() = Some(handle);

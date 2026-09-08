@@ -522,6 +522,20 @@ pub trait Peripheral {
         RegGrade::Modeled
     }
 
+    /// The downcast seam for a block the **machine** drives from outside the
+    /// guest, through [`crate::bus::SocBus::with_peripheral`].
+    ///
+    /// Today there is one: `USB_DEVICE`, whose host transitions (attach,
+    /// detach, open, close, the DTR/RTS lines) come from the control channel
+    /// plan PD8 names, not from a guest store. The default is `None` — a
+    /// block nothing outside the bus drives needs no downcast, and the trait
+    /// stays a register interface for every other peripheral. The `'static`
+    /// bound an `Any` would impose on `Self` is not on the trait: only the
+    /// override that returns `Some(self)` pays it.
+    fn as_any_mut(&mut self) -> Option<&mut dyn Any> {
+        None
+    }
+
     /// Snapshot this peripheral's state. The machine composes the
     /// per-peripheral blobs; the format is the peripheral's own business,
     /// and only it ever reads one back.
@@ -529,6 +543,15 @@ pub trait Peripheral {
 
     /// Restore from a blob produced by [`save_state`](Self::save_state).
     fn load_state(&mut self, bytes: &[u8]);
+
+    /// The downcast seam for a machine that wants to *observe* a peripheral
+    /// it built — the matrix's `as_any` precedent (plan DD22), read-only.
+    /// `None` by default: most blocks have nothing to show beyond their
+    /// registers, and a peripheral that does (the RMT's pulse and word logs)
+    /// opts in with `Some(self)`. Nothing on the guest side can reach it.
+    fn as_any(&self) -> Option<&dyn Any> {
+        None
+    }
 }
 
 /// A boxed peripheral, as the bus stores them.

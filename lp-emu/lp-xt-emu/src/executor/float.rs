@@ -47,11 +47,11 @@ use crate::trace::{TraceEvent, Tracer};
 
 impl Emulator {
     /// Execute one FP / Boolean / special-register instruction.
-    pub(super) fn exec_float(
+    pub(super) fn exec_float<T: Tracer + ?Sized>(
         &mut self,
         inst: &Inst,
         pc: u32,
-        tracer: &mut dyn Tracer,
+        tracer: &mut T,
     ) -> Result<Flow, Trap> {
         match *inst {
             // --- FR ↔ AR transfers: pure bit moves, no interpretation ---
@@ -201,7 +201,7 @@ impl Emulator {
         }
     }
 
-    fn write_special(&mut self, sreg: SpecialReg, v: u32, tracer: &mut dyn Tracer) {
+    fn write_special<T: Tracer + ?Sized>(&mut self, sreg: SpecialReg, v: u32, tracer: &mut T) {
         match sreg {
             SpecialReg::Br => {
                 let new = v as u16;
