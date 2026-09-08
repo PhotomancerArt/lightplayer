@@ -6,7 +6,7 @@
 //! later the service holds it, and the address already in the bar is the
 //! link. The one place outcomes are visible is diagnostic: the driver
 //! records every trip's conclusion in [`sync_status`] and the `/account`
-//! page renders the ledger. Five pieces:
+//! page renders the ledger. Six pieces:
 //!
 //! - [`sync_queue`] — *when*. The debounce, the retry cadence, and the
 //!   in-flight bookkeeping, as a pure state machine.
@@ -16,7 +16,11 @@
 //!   against the in-process service.
 //! - [`sync_status`] — *what just happened*. The per-tab ledger of trip
 //!   conclusions, including the ones that make no network traffic.
-//! - `sync_engine` (wasm only) — the driver that wires the four to the OPFS
+//! - [`publish_notice`] — *it just happened*. The one push out of the
+//!   driver: a trip that concluded published or pushed wakes whoever must
+//!   re-ask the service (the relationship control's roster), so a face is
+//!   never stale until the next reload.
+//! - `sync_engine` (wasm only) — the driver that wires the five to the OPFS
 //!   library, `FetchCloudPort`, and the browser's timers.
 //!
 //! # The rules that do not bend
@@ -29,6 +33,7 @@
 //! sign-in sweep re-derives everything worth doing from OPFS, which is why
 //! nothing here is persisted.
 
+pub mod publish_notice;
 pub mod sidecar_producer;
 pub mod sync_queue;
 pub mod sync_status;

@@ -7,6 +7,13 @@
 //! link, and the only visible consequence of it failing is that the link
 //! lags (see the crate's P5 for the affordances that do speak).
 //!
+//! What it does leave behind is bookkeeping, not UI: every trip's
+//! conclusion goes to [`sync_status`](super::sync_status) for the
+//! `/account` page to read, and a trip that put something in the cloud
+//! files a [`publish_notice`] so a surface holding a now-stale
+//! `GetProject` answer knows to re-ask. Neither is a control, and neither
+//! says anything to the user on its own.
+//!
 //! # Where the triggers come from
 //!
 //! - **Every catalog transaction** that produced a package
@@ -50,6 +57,7 @@ use lpa_cloud_client::LocalProject;
 use lpa_studio_core::app::library::{LibraryStore, PackageSummary};
 use lpc_history::PrefixedUid;
 
+use super::publish_notice;
 use super::sidecar_producer::read_identity;
 use super::sync_queue::{DueProject, SyncQueue, SyncTrigger, TripResult};
 use super::sync_status::{self, SyncOutcomeKind};
@@ -314,6 +322,16 @@ impl SyncEngine {
                 log::debug!("cloud sync: {} {report:?}", due.uid);
                 let (kind, detail) = describe(&report);
                 conclude(kind, detail);
+                // The one push out of the driver (`publish_notice`): a
+                // trip that PUT something in the cloud can change what
+                // `GetProject` answers about this project, and a surface
+                // that asked before the trip is now holding a stale
+                // answer. Published and pushed both count — a push lands
+                // on a project whose roster fetch may have run while
+                // there was still no cloud record to find.
+                if matches!(kind, SyncOutcomeKind::Published | SyncOutcomeKind::Pushed) {
+                    publish_notice::record(&due.uid);
+                }
                 TripResult::Settled
             }
             Err(error) => {

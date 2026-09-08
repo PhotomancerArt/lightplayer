@@ -176,3 +176,17 @@ a person's words (`sync_trip::describe_error`: "the service was
 unreachable" rather than `transport: offline`), so `/account` and the
 panel read the same sentence. `/account` is unchanged in role — still the
 only surface that lists every project.
+
+## The face follows the driver (2026-09-07)
+
+Reading the ledger fixed the panel's sentence and left the bar's face
+stale: a project this tab published after its one `GetProject` kept the
+"Private" face until a reload
+(`docs/debt/relationship-face-stale-after-publish.md`, now retired). The
+ledger was the wrong thing to subscribe to — it is a notebook, and giving
+it a nervous system would have made every reader a poller — so the driver
+grew the one push it was missing: `cloud::sync::publish_notice`, a per-tab
+board of published/pushed uids behind a generation counter. The roster
+hook parks on it and re-asks only when a notice names the project it is
+watching. The ledger's role is unchanged: still diagnostic, still
+poll-copied once a second by `/account`, still nothing's dependency.
