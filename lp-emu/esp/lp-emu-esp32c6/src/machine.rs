@@ -2233,6 +2233,28 @@ impl Esp32C6Machine {
         value
     }
 
+    /// Write a word of guest memory from the host side — the same decode
+    /// [`peek_word`](Self::peek_word) reads through, so a register written
+    /// here behaves exactly as it would for the guest.
+    ///
+    /// A bench's hand on the chip, and it is one on purpose: a gate that
+    /// wants "this pad's input buffer is on" should turn it on the way the
+    /// driver does, through `IO_MUX`, rather than by reaching into the
+    /// fabric behind the block that owns the bit.
+    pub fn poke_word(&mut self, address: u32, value: u32) -> bool {
+        let saved = self.bus.pc();
+        self.bus.set_pc(0);
+        let ok = self.bus.write_word(address, value as i32).is_ok();
+        self.bus.set_pc(saved);
+        ok
+    }
+
+    /// Both sides of every pad the machine has anything to say about — the
+    /// `pins` verb's answer, without a socket.
+    pub fn pads(&self) -> Vec<PadReport> {
+        self.pad_reports()
+    }
+
     /// The word at a symbol, for `--probe <symbol>@<ms>`.
     ///
     /// Resolution: the exact ELF name first (a C symbol, or a mangled name
@@ -2527,8 +2549,12 @@ impl Esp32C6Machine {
         if due.is_empty() {
             return;
         }
-        for event in due {
-            self.bus.pins.drive_pad(event.pad, event.level, now);
+        // The edge is stamped with the SCRIPT's cycle, not the boundary the
+        // machine noticed it at: the file's times are the contract, and a
+        // pin log that read them back a cycle or two late could not be
+        // checked against the file that produced it.
+        for (at, event) in due {
+            self.bus.pins.drive_pad(event.pad, event.level, at);
         }
         self.bus.set_time(now);
         self.drain_pins();

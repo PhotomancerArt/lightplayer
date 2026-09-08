@@ -1097,6 +1097,40 @@ mod tests {
         ));
     }
 
+    /// `--pin-script` and `--wire` are both repeatable, and `--wire`'s pad
+    /// policy is checked at the flag rather than at the first edge.
+    #[test]
+    fn the_pin_flags_are_repeatable_and_the_wire_policy_is_checked_at_the_flag() {
+        let a = parse(vec![
+            "--pin-script".into(),
+            "button.pins".into(),
+            "--pin-script".into(),
+            "encoder.pins".into(),
+            "--wire".into(),
+            "20:21".into(),
+            "--wire".into(),
+            "18:19".into(),
+        ])
+        .unwrap();
+        assert_eq!(a.pin_script.len(), 2, "the files concatenate in order");
+        assert_eq!(
+            a.wires,
+            vec![
+                (PadId(20), PadId(21)),
+                // gpio18 on the TX side is the loopback exception.
+                (PadId(18), PadId(19)),
+            ]
+        );
+        assert_eq!(parse(vec![]).unwrap().wires, vec![]);
+
+        for bad in ["9:20", "20:12", "19:18", "20:20", "20", "20:99"] {
+            let Err(err) = parse(vec!["--wire".into(), bad.into()]) else {
+                panic!("`--wire {bad}` should have been refused");
+            };
+            assert!(err.starts_with("--wire:"), "`{bad}` gave {err:?}");
+        }
+    }
+
     #[test]
     fn the_usb_host_and_strict_grade_flags_take_the_spelled_values_only() {
         let a = parse(vec![

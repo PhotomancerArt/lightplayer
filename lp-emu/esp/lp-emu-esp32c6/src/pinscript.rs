@@ -255,15 +255,21 @@ impl PinScript {
         }
     }
 
-    /// Every event due by `now`, in file order.
-    pub fn take_due(&mut self, now: Cycles) -> Vec<PinEvent> {
+    /// Every event due by `now`, in file order, each with **its own** cycle.
+    ///
+    /// The step's cycle, not the boundary's: a machine that stamped a
+    /// scripted edge with the slice boundary it noticed it at would put the
+    /// edge a cycle or two late in the pin log and make the file's own times
+    /// unverifiable. An `after` or `then` step's cycle is the one its wait
+    /// resolved to.
+    pub fn take_due(&mut self, now: Cycles) -> Vec<(Cycles, PinEvent)> {
         let mut out = Vec::new();
         while let Some(at) = self.ready_at(now) {
             if at > now {
                 break;
             }
             let step = self.steps.pop_front().expect("checked");
-            out.extend_from_slice(step.events());
+            out.extend(step.events().iter().map(|e| (at, *e)));
         }
         out
     }
@@ -651,7 +657,7 @@ mod tests {
         script
             .take_due(us * US)
             .into_iter()
-            .map(|e| (e.pad.0, e.level))
+            .map(|(_, e)| (e.pad.0, e.level))
             .collect()
     }
 
@@ -665,7 +671,8 @@ mod tests {
             if due.is_empty() {
                 break;
             }
-            for e in due {
+            for (cycle, e) in due {
+                assert_eq!(cycle, at, "an absolute step carries its own cycle");
                 out.push((at / US, e.pad.0, e.level));
             }
         }
