@@ -185,6 +185,70 @@ that size. The emulator's own overheads — that Vec, the 36,864 B manifest,
 the ~30 KB in-RAM deploy — are what stand between this project and the
 record now; `docs/reports/2026-09-06-small-dome-first-frame-budget.md`.
 
+## The second source: a whole chip, not an engine
+
+Everything above measures a **project** on the RV32 engine emulator. That
+emulator has no firmware in it — it is `lp-cli profile` running the render
+engine on a host — so it can say what a project's windows cost and nothing at
+all about what the firmware around them costs.
+
+`scripts/heap-budget-record.json`'s `chips` section is the other half. It comes
+from the **SoC** emulator (`lp-emu/esp/lp-emu-esp32c6`, plan
+`2026-09-06-1001-esp-emulator`): the shipped `fw-esp32c6` image — the bytes a
+board is flashed with — booted whole, run to its first heartbeat, and read from
+the allocator figures the firmware itself reports over its own link.
+
+```bash
+just heap-budget-check-chips     # the ratchet
+just heap-budget-baseline-chips  # re-measure into the record
+```
+
+Five figures, each with its own direction, and one band:
+
+| figure | direction | why |
+|---|---|---|
+| `totalBytes` | **exact** | the heap region's size. A change is a linker-script or memory-map change, never a budget. |
+| `stackTotal` | **exact** | the main task's stack, same reasoning. |
+| `usedBytes` | ratchet on **growth** | what the firmware holds resident at idle. |
+| `freeBytes` | ratchet on **shrinking** | the same fact from the other side; both are recorded so a change that moves one and not the other is visibly wrong. |
+| `largestFreeBlock` | ratchet on **shrinking** | the contiguity proxy — the read gate on device refuses on this, not on free bytes (`docs/defects/2026-09-04-read-gate-refuses-on-largest-block-proxy.md`). |
+| `stackHighWater` | **band** | see below. |
+
+The stack high-water is a band and the memory figures are not, and that
+asymmetry is measured rather than cautious. A reference image built here and
+one built on a CI runner differ by ~4.7 KB — the rustc binary's own host build,
+not anything a build can be told — so the code lands at different addresses.
+Every memory-class figure survives that; the high-water does not, because it
+is the deepest point an interrupt ever landed on the main task and a tick that
+lands on a different instruction of a differently laid-out image has a
+different deepest point (11,432 B here, 11,560 B on a runner). See
+`docs/debt/reference-images-are-not-reproducible-across-hosts.md`. The band is
+the measured spread with room; it is never widened to make a run pass.
+
+### Silicon, printed beside it
+
+The record also carries `silicon_reference`: the same figures from a committed
+silicon transcript, with the commit that produced them. It is **never gated** —
+it is a different image at a different commit — but it is printed on every
+chip check, because the entire reason this source is trusted is that the two
+agree, and a gap nobody looks at is a gap nobody notices widening. Today they
+agree on every figure except a constant **8 bytes** (`freeBytes` +8,
+`usedBytes` −8), which is one live allocation silicon has and the emulator does
+not; three explanations have been tested and refuted, and naming it needs a
+true power-on capture. `docs/debt/emulator-heap-ledger-differs-from-silicon-by-eight-bytes.md`.
+
+### Why it does not run in the required job
+
+The chip half needs a cross-target firmware build, and the rule that keeps one
+out of every workspace test run applies here too. `just heap-budget-check`
+therefore prints a named SKIP for it when there is no image, and the projects
+half still gates; CI's path-gated `emu-c6` job — which builds firmware anyway —
+runs `just heap-budget-check-chips`, where a skip is a failure. The direct load
+is used rather than the ROM-up boot: M7 measured the two paths' idle heap
+byte-identical, so the bootloader adds seconds of wall clock and nothing to the
+answer. The place that boots the whole chain is the walk,
+`scripts/emu/m4-walk.sh`.
+
 ## Ratchet, not ceiling
 
 The record holds **today's measured values** — descriptive ("what this
@@ -436,3 +500,10 @@ Runs in the `Validate (x64)` job of `.github/workflows/pre-merge.yml` when
 core paths changed — four emulator runs (two projects × two modes), after the
 tests so `lp-cli` and `fw-emu` reuse warm dependencies. Referenced from
 `docs/adr/2026-08-01-esp32v3-flash-budget.md`.
+
+The **chip** half runs elsewhere: the path-gated `emu-c6` job, as
+`just heap-budget-check-chips`, because it needs a cross-target firmware
+build — which that job has already done by the time it runs, so the step
+costs one emulator boot and nothing else. In `Validate (x64)` the same code
+prints a named SKIP rather than starting a firmware build, and the projects
+half still gates. See "The second source" above.

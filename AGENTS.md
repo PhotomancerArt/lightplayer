@@ -697,20 +697,50 @@ the port (see below); it writes the protocol file and Yona runs it.
 
 ### The ESP32-C6 emulator
 
-`lp-emu/esp/lp-emu-esp32c6` runs the shipped `fw-esp32c6` image on the host:
-mask ROM loaded, direct load, the boot peripheral set, UART0 draining at baud,
-USB-Serial-JTAG with no host attached. It is the configuration
-`lp-emu:esp32c6:t1` (and `:t2`) in the validation system above.
+`lp-emu/esp/lp-emu-esp32c6` runs the shipped `fw-esp32c6` image on the host —
+the bytes a board is flashed with, not a variant. It boots either way a board
+can: **ROM-up** from a merged 4 MiB flash image, where the hart starts at the
+reset vector and the real mask ROM and ESP-IDF second-stage bootloader load
+the app, or a **direct load** straight to the entry point, which M7 measured
+byte-equal to ROM-up at app entry and which is what the per-tick gates use. It
+speaks the link the product ships on (emulated USB-Serial-JTAG, with a host
+that can be attached, detached, opened and closed), serves a project over it,
+renders, and drives a WS281x waveform onto a pad that a decoder reads back at
+the datasheet's ±150 ns. It is the configuration `lp-emu:esp32c6:t1` (and
+`:t2`) in the validation system above.
 
 ```bash
-just emu-c6 <elf> --strict-bus --timeout 6s     # one image, by hand
-just test-emu-c6                                # its gates (builds firmware, ~70 s)
+lp-cli emu run --merged <chip.bin> --link 127.0.0.1:5591 --monitor   # a C6 you can talk to
+lp-cli upload projects/test/basic serial:tcp://127.0.0.1:5591        # …in another terminal
+
+just walk-esp32c6-emu                           # THE WALK (see below) — minutes, not seconds
+just test-emu-c6                                # its gates (builds firmware)
+just heap-budget-check-chips                    # the firmware's own heap ledger, ratcheted
+just emu-c6 <elf> --strict-bus --timeout 6s     # the workshop binary, thirty flags
 just bench-emu-c6                               # its speed probe (an oracle, never a gate)
 just bench-emu-c6-pgo                           # PGO recipe on top of the probe (opt-in, never a default build)
 just bench-emu-web                              # the same probe in a browser (wasip1 + JS WASI shim, LAN-served)
 just bench-emu-xt                               # the Xtensa core's probe (same rules)
 cargo run -p lp-cli -- validate run emu-m3 --config lp-emu:esp32c6:t1 --dry-run
 ```
+
+#### The walk, and what still needs a board
+
+`just walk-esp32c6-emu` is the emulator twin of
+`scripts/m4-hardware-walk.sh --chip esp32c6`: same image bytes, same wire
+protocol, same host oracle, and the same question — does the shader the device
+compiled and executed on its own JIT render the bytes a host render produces?
+It answers **twice**, where a board answers once: the firmware's own
+`[OUT] dump` line (the `frame-dump` feature, ported to this chip for exactly
+this) and the waveform decoded off the emulated pad. The walk record is
+`docs/reports/2026-09-08-esp32c6-emulator-walk.md`, and it is where to look
+before quoting any of this.
+
+**It does not replace a board.** The emulator has no Chromium USB stack, no
+radio traffic, no analog anything, no RX pins, and its clock is a model. The
+walk record lists what it does not cover; a change to any of that is still a
+desk sitting. What the walk replaces is the *routine* C6 walk — the one that
+used to be run to check that a render still renders.
 
 Three rules before you use a number from it:
 

@@ -77,6 +77,11 @@ description = "M6 P5: the shipped flash-backed image doing a day's work over the
 payloads = ["upload-walk-usb", "meteor-walk-usb"]
 
 [[set]]
+name = "emu-m7"
+description = "M7's boot chain as a RECORDED claim rather than an integration test (M8's sweep, the item M7 filed): the shipped image reached from the reset vector through the real mask ROM and the ESP-IDF second-stage bootloader, `--reset-cause poweron --strap app`. Its transcript is `boot-idle-flash`'s with the boot chain in front of it, so replaying the two against each other is what keeps 'everything after `[INIT] Initializing board...` is the same lines' true. Emulator only: on silicon every boot is a ROM-up boot, so the silicon side of this claim IS the committed `boot-idle-flash` capture."
+payloads = ["rom-up-boot"]
+
+[[set]]
 name = "jit-math-perf"
 description = "The Q32 math kernel cycle-cost payload (Q12 ledger, cheapest test_* migration): mul/div/sin kernels and LUT access cost against the PMU cycle counter. Timing only — never a gate under esp-emu, which has no cycle model."
 payloads = ["jit-math-perf"]

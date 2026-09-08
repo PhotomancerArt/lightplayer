@@ -12,7 +12,7 @@
 # `validate run … --dry-run` shows the whole protocol before a board is
 # plugged in, which is the only reason a desk step is reviewable at all.
 #
-# Port discipline is `scripts/spike/esp-emu/desk-espflash-step.sh`'s, and for
+# Port discipline is `scripts/emu/desk-espflash-step.sh`'s, and for
 # the same reasons it learned them:
 #
 #   * pre-check `lsof`/`pgrep` and refuse if either is dirty — one holder at a

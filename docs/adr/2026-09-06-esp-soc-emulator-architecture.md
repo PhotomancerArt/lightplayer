@@ -322,6 +322,28 @@ window; the gate reads the USB link, which is silicon's own, and asserts
 UART0 agrees. The defect file keeps the bound silicon's capture puts on that
 still-modelled number.)
 
+#### Which path is the default, and for what (settled at M8)
+
+Both are real boots of the same bytes and the cross-check above shows them
+equivalent where it matters. The question M7 left open was which one anything
+should *default* to, and M8 answered it by what each is for:
+
+- **ROM-up is the walk's path** (`scripts/emu/m4-walk.sh`,
+  `just walk-esp32c6-emu`). The walk exists to be the twin of a script whose
+  first act is to flash and reset a board, and "the app was already in memory"
+  is not nothing. It also means the boot chain is exercised on every walk,
+  which is the only routine exercise it gets.
+- **Direct load is the gates' path** — the `#[ignore]`d boot tests, the pin
+  gate, and the heap ratchet (`just heap-budget-check-chips`). They run on
+  every emulator PR, and G7-4 measured the idle heap byte-identical on the two
+  paths, so the bootloader costs them seconds of wall clock and tells them
+  nothing.
+
+`LP_WALK_BOOT=direct` takes the fast path in the walk when iterating, and
+`Payload::boot` (`BootPath::{Direct, RomUp}`) is how a recorded payload says
+which one it means — `rom-up-boot` is the first and, for now, only `RomUp`
+one.
+
 ### Honest peripherals: strict bus, `modeled` grades, and no invented answers
 
 A peripheral is either **modelled** (a real type with behaviour and scheduled
