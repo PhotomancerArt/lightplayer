@@ -83,7 +83,17 @@ jobs:
       # firmware.
       - name: Install Xtensa Rust toolchain
         if: inputs.channel == 'beta'
-        uses: ./.github/actions/xtensa-toolchain
+        # Referenced as owner/repo/path@main, NOT `./`. This workflow's file
+        # comes from the default branch, but its checkout is an arbitrary
+        # older ref (workflow_run.head_sha / inputs.ref) — so a `./` local
+        # action resolves against a tree that may predate the action and
+        # dies with "Can't find 'action.yml'". That is not hypothetical:
+        # run 34204176179 failed exactly that way, deploying #601's commit
+        # under main's newer workflow. `@main` resolves from the repository
+        # instead of the workspace, so the two are decoupled. pre-merge.yml
+        # deliberately keeps `./` — there the PR's own copy is what CI must
+        # validate.
+        uses: PhotomancerArt/lightplayer/.github/actions/xtensa-toolchain@main
         with:
           version: 1.95.0.0
           buildtargets: esp32s3,esp32
