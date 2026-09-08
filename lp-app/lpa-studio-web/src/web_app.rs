@@ -2195,9 +2195,8 @@ mod tests {
     /// what is running — that is what the page is for.
     #[test]
     fn a_mac_hint_names_the_device_and_never_pushes_over_on_arrival() {
-        let resolved = ResolvedHint::for_hint(Some(DeviceHint::Mac(
-            "60:55:f9:0a:0b:0c".to_string(),
-        )));
+        let resolved =
+            ResolvedHint::for_hint(Some(DeviceHint::Mac("60:55:f9:0a:0b:0c".to_string())));
         assert_eq!(resolved.notice(), None);
         assert_eq!(resolved.dropped_hint_route(&project_route()), None);
         match resolved.open_op("prj0000000000000000".to_string()) {
