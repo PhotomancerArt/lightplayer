@@ -244,12 +244,26 @@ Masking here means *reported but not compared*, never *deleted*.
 ```bash
 cargo run -p lp-cli -- validate list
 cargo run -p lp-cli -- validate replay <transcript> --against <transcript|configuration>
-cargo run -p lp-cli -- validate run <set> --config <name> [--port …] [--image …] [--dry-run]
-cargo run -p lp-cli -- validate record <set> --config <name> --date … --commit … [--dry-run]
+cargo run -p lp-cli -- validate run <set> --config <name> [--port …] [--image …] [--link real|spike] [--dry-run]
+cargo run -p lp-cli -- validate record <set> --config <name> --date … --commit … [--link real|spike] [--dry-run]
 ```
 
 `--dry-run` prints the exact commands and stops, which is what makes a desk
 protocol reviewable before a board is plugged in.
+
+`--link real|spike` (`lp-emu:*` only; M1 P1, DD8) forces a payload's effective
+link for this one run, overriding its registry [`Link`](src/payload.rs) —
+`real` takes the shipped USB-Serial-JTAG path (no `spike_uart0_link`), `spike`
+takes the UART0 workaround. It exists for payloads such as
+`shader-compile-stress`, whose `link` field stays `Uart0Spike` in the registry
+because three committed transcripts are of that image and moving the field
+would invalidate them, but which can still be *recorded* over the real link
+into a **new stem** for a like-for-like comparison against a silicon capture
+that used it. The override never touches `validate.toml` or the payload row;
+the sidecar's `firmware_features` line (present/absent `spike_uart0_link`) and
+its `note` (present only when the override actually changed something) are how
+a reader of the transcript alone tells it apart from a run of the payload's
+own default link.
 
 For silicon the runner does not reinvent the port discipline; it shells out to
 `scripts/emu/desk-espflash-step.sh`, which runs espflash in the
