@@ -25,9 +25,15 @@
 //! neither has, or should need, a per-chip branch. Changing a format string
 //! here without changing it in all four places breaks the comparison silently,
 //! which is the worst way for a correctness gate to fail. Duplicated rather
-//! than shared because the two firmwares are separate crates under separate
+//! than shared because the firmwares are separate crates under separate
 //! toolchains with no common chip-side library; the constants below and the
 //! host test's copies are transcribed constants, same as the S3's already are.
+//!
+//! ⚠️ There is now a **third** firmware copy:
+//! `lp-fw/fw-esp32c6/src/output/rmt/frame_dump.rs`, added for the ESP32-C6's
+//! hardware walk and its emulator twin. All three must stay identical below
+//! the header, and `lp-fw/fw-tests/tests/frame_dump_parity.rs` fails if they
+//! do not.
 //!
 //! ## Why it is a cargo feature and not a runtime flag
 //!

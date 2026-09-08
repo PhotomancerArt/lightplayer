@@ -1750,7 +1750,21 @@ clippy-rv32: install-rv32-target clippy-fw-esp32c6 clippy-fw-esp32c6-harnesses c
 
 # riscv32: fw-esp32c6 clippy
 clippy-fw-esp32c6: install-rv32-target
-    cd lp-fw/fw-esp32c6 && cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6 -- --no-deps -D warnings
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd lp-fw/fw-esp32c6
+    # The app path, default features.
+    cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
+        --features esp32c6 -- --no-deps -D warnings
+    # The app path again with the serial frame readout bolted on. It is `cfg`'d
+    # out of the default build entirely, so linting the defaults leaves it
+    # completely uncovered — the same hole the harness recipe below exists to
+    # close, and the same pass `clippy-fw-esp32s3` makes for the same module.
+    # The C6's walk (and its emulator twin) is only a byte comparison because
+    # this build exists.
+    echo "clippy: --features frame-dump"
+    cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
+        --features esp32c6,frame-dump -- --no-deps -D warnings
 
 # riscv32: every fw-esp32c6 hardware-harness feature (one build per harness).
 #

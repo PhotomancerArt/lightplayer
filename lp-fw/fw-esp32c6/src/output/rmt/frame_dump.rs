@@ -2,11 +2,45 @@
 //!
 //! An LED strip is not a measuring instrument: it shows that *something*
 //! rendered, never *which bytes*. So this module decorates the RMT output's
-//! write path with the same transcript the M3/M4 `SerialReadoutWs281xDriver`
-//! printed before real output existed — and for the same reason. The M4
-//! hardware walk (`scripts/m4-hardware-walk.sh`) diffs these lines against a
-//! host render byte for byte, which is how "the S3's Xtensa JIT renders
+//! write path with a transcript of what actually went to the wire.
+//! `scripts/m4-hardware-walk.sh --chip esp32c6` diffs these lines against a
+//! host render byte for byte, which is how "the C6's RV32 JIT renders
 //! correctly" is a claim with a number attached rather than a photograph.
+//!
+//! # Why this chip gained it last, and what it is worth here
+//!
+//! The C6 shipped without a frame dump because it was the chip whose walk was
+//! never automated: the S3 had one from its M4 gate and the classic got a
+//! byte-for-byte port for its M7 gate, and the C6's frame was only ever read
+//! by eye off a strip. The emulator plan (`2026-09-06-1001-esp-emulator`)
+//! changed what the line is worth. `lp-emu-esp32c6` decodes the WS281x
+//! waveform off the emulated **pad** — the RMT model produces it, our decoder
+//! reads it back — and M5 P4's gate showed that decoded frame is the host
+//! oracle's. But both of those readings are ours. This line is the third,
+//! independent one: the *firmware's own* record of the bytes it handed the
+//! driver, printed over the serial link, which the walk twin reads on the same
+//! run as the decoder and which a silicon walk reads off a real board. Where
+//! they agree, "the pad carried what the render produced" stops being an
+//! inference about our own model. See `docs/reports/`'s C6 walk record.
+//!
+//! # A byte-for-byte port of `fw-esp32s3`'s module
+//!
+//! This is `lp-fw/fw-esp32s3/src/output/rmt/frame_dump.rs` — and so is
+//! `lp-fw/fw-esp32v3/src/output/rmt/frame_dump.rs`, the classic ESP32's copy,
+//! which arrived one chip earlier for the same reason. The **emitted
+//! line shapes are identical to it on purpose**. `scripts/m4-hardware-walk.sh`
+//! greps for `[OUT] dump` and for the `rgb=` token, and
+//! `lp-app/lpa-server/tests/shader_oracle_frame.rs` mirrors them on the host —
+//! neither has, or should need, a per-chip branch. Changing a format string
+//! here without changing it in all four places (S3, classic, C6, host) breaks
+//! the comparison silently, which is the worst way for a correctness gate to
+//! fail. `lp-fw/fw-tests/tests/frame_dump_parity.rs` is the guard: it holds
+//! the three firmware copies' code bodies against each other, so a format
+//! string that drifts fails `cargo test` rather than a walk.
+//! Duplicated rather than shared because the three firmwares are separate
+//! crates under separate toolchains with no common chip-side library; the
+//! constants below and the host test's copies are transcribed constants, same
+//! as the other two chips' already are.
 //!
 //! ## Why it is a cargo feature and not a runtime flag
 //!
@@ -15,7 +49,9 @@
 //! still compile the formatting in and still branch on it per frame. `cfg`
 //! means an app build that did not ask for the readout contains none of this —
 //! no formatter, no checksum, not even the counter — which is the only version
-//! of "opt-in" worth the observability.
+//! of "opt-in" worth the observability. It also keeps
+//! `just fw-esp32c6-size-check` measuring an unchanged image (ADR
+//! `2026-07-28-esp32c6-flash-budget`).
 //!
 //! ## Volume
 //!
@@ -31,23 +67,6 @@
 //!   pixels. The checksum is what distinguishes "rendering, and the picture is
 //!   changing" from "rendering the same frame forever" from "not rendering" —
 //!   the three states a walk actually needs to tell apart.
-//!
-//! The line shapes are load-bearing, not cosmetic: `scripts/m4-hardware-walk.sh`
-//! greps for `[OUT] dump` and for the `rgb=` token, and
-//! `lp-app/lpa-server/tests/shader_oracle_frame.rs` mirrors them on the host so
-//! the two transcripts line up without either side being sliced by hand.
-//!
-//! ⚠️ There are **two more** copies of the code below:
-//! `lp-fw/fw-esp32v3/src/output/rmt/frame_dump.rs` (the classic ESP32, for its
-//! M7 gate) and `lp-fw/fw-esp32c6/src/output/rmt/frame_dump.rs` (the C6, for
-//! the emulator plan's walk twin) are byte-for-byte ports of this module, so
-//! all three chips reuse the same walk script and the same host comparator
-//! with no per-chip branch. Three firmwares under separate toolchains with no
-//! shared chip-side library, so the duplication is deliberate — but a format
-//! string changed here and not there silently breaks the other two chips'
-//! gates. `lp-fw/fw-tests/tests/frame_dump_parity.rs` holds the three copies
-//! against each other so that failure is a red `cargo test`, not a red walk.
-
 use lpc_hardware::HwEndpointId;
 
 /// How many frames pass between summary lines. ~1 s at 60 fps.
