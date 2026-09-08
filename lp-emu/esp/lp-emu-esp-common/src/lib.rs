@@ -42,6 +42,7 @@ pub mod bus;
 pub mod elf;
 pub mod host;
 pub mod periph;
+pub mod pins;
 pub mod regfile;
 pub mod regnames;
 pub mod trace;
@@ -55,6 +56,7 @@ pub use periph::{
     BusCx, CpuIntMatrix, IrqLines, MachineRequest, NoCpuInterrupts, Peripheral, RegGrade,
     RegGrades, Sandbox, Strap, Width,
 };
+pub use pins::{Edge, Fabric, PadId, Route, RouteSource, SignalId};
 pub use regfile::RegFile;
 pub use regnames::RegNames;
 pub use trace::{Access, MmioEvent, Trace};
