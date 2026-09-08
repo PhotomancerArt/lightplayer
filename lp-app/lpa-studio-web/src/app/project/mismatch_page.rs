@@ -186,11 +186,11 @@ pub fn MismatchPage(
 fn headline(mismatch: &UiOpenMismatch) -> String {
     match &mismatch.running {
         Some(running) => format!(
-            "It has {} on it, not {}. Switching leaves the device alone; pushing {} replaces what is running — {} stays in your library either way.",
-            running.name, mismatch.project_name, mismatch.project_name, running.name,
+            "{} is on it, not {}. Switching leaves the device alone. Pushing replaces {} — your library keeps it.",
+            running.name, mismatch.project_name, running.name,
         ),
         None => format!(
-            "It is running a project that isn't in your library, so there is nothing here to switch to and nothing to put back if {} replaced it. Open the device from the Devices page to see what it has.",
+            "It is running a project your library doesn't have. There is nothing to switch to, and nothing to put back if {} replaced it.",
             mismatch.project_name,
         ),
     }
