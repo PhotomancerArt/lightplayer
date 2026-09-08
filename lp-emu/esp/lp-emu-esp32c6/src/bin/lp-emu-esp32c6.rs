@@ -128,6 +128,16 @@ OPTIONS:
     --pin-log file:<path>   every edge on every routed pad: `<us> gpio18 0|1`.
                             12,288 lines per 256-LED frame — never a default,
                             capped at 2,000,000 lines
+    --reset-cause poweron|usb-uart
+                            what LP_CLKRST.reset_cause says, and so what the
+                            mask ROM prints as `rst:0x..`: a cold chip, or a
+                            host's DTR/RTS dance on the serial bridge (the
+                            silicon boot transcripts were captured after one
+                            of those) [poweron]
+    --strap app|download    where the strapping pins were at reset, and so
+                            what the ROM prints as `boot:0x..`: the flash
+                            bootloader, or the ROM's own download console
+                            [app]
     --efuse-mac <a0:f2:..>  the MAC the eFuse block reports [the desk board]
     --efuse-rev <0.2>       wafer major.minor [0.2]
     --seed <u64>            the machine PRNG's seed [0]
@@ -191,6 +201,10 @@ struct Args {
     usb_script: Vec<PathBuf>,
     control: Option<String>,
     efuse: EfuseIdentity,
+    reset_cause: lp_emu_esp32c6::loader::ResetCause,
+    /// `Option` only because `Args` derives `Default` and a strapping
+    /// word has no neutral value; `None` is the app strap.
+    strap: Option<lp_emu_esp_common::Strap>,
     seed: u64,
     trace: bool,
     trace_blocks: Vec<String>,
@@ -219,6 +233,8 @@ fn run() -> Result<ExitCode, String> {
         .strict(args.strict)
         .strict_grade(args.strict_grade)
         .efuse(args.efuse)
+        .reset_cause(args.reset_cause)
+        .strap(args.strap.unwrap_or(lp_emu_esp_common::Strap::App))
         .seed(args.seed)
         .uart0(args.uart0.clone())
         .usb_sj(args.usb_sj.clone())
@@ -414,6 +430,19 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                 args.strict_grade = Some(RegGrade::parse(&text).ok_or_else(|| {
                     format!("--strict-grade `{text}`: expected modeled, documented or measured")
                 })?);
+            }
+            "--reset-cause" => {
+                let text = value("--reset-cause")?;
+                args.reset_cause = lp_emu_esp32c6::loader::ResetCause::parse(&text)
+                    .ok_or_else(|| format!("--reset-cause `{text}`: expected poweron or usb-uart"))?;
+            }
+            "--strap" => {
+                let text = value("--strap")?;
+                args.strap = Some(match text.as_str() {
+                    "app" => lp_emu_esp_common::Strap::App,
+                    "download" => lp_emu_esp_common::Strap::Download,
+                    other => return Err(format!("--strap `{other}`: expected app or download")),
+                });
             }
             "--efuse-mac" => args.efuse.mac = EfuseIdentity::parse_mac(&value("--efuse-mac")?)?,
             "--efuse-rev" => {

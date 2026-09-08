@@ -112,6 +112,10 @@ pub mod periph {
     pub const SPI0: u32 = 0x6000_2000;
     pub const SPI1: u32 = 0x6000_3000;
     pub const RMT: u32 = 0x6000_6000;
+    /// SDIO slave host interface — the mask ROM stamps a device id into it.
+    pub const HINF: u32 = 0x6001_6000;
+    /// SDIO slave DMA — one word the mask ROM reads on the download path.
+    pub const SLC: u32 = 0x6001_7000;
     pub const TIMG0: u32 = 0x6000_8000;
     pub const TIMG1: u32 = 0x6000_9000;
     pub const SYSTIMER: u32 = 0x6000_A000;

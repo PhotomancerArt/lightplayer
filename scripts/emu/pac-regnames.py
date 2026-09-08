@@ -104,6 +104,18 @@ TARGETS = [
         static="PLIC_UX",
         out="lp-emu/esp/lp-emu-esp32c6/src/regs/plic_ux.rs",
     ),
+    # M7: the two SDIO-slave blocks the mask ROM touches on its way to the
+    # flash bootloader, and nothing else ever does.
+    Target(
+        block="hinf",
+        static="HINF",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/hinf.rs",
+    ),
+    Target(
+        block="slc",
+        static="SLC",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/slc.rs",
+    ),
     Target(
         block="intpri",
         static="INTPRI",

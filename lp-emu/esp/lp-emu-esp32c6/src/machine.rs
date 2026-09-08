@@ -157,6 +157,13 @@ pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     // The analog I2C master's command memory (P6, G6-2 finding 1): libphy
     // fills it right after its first radio-window writes.
     "I2C_MST_MEM",
+    // M7: the two SDIO-slave blocks only the mask ROM touches — `HINF`'s
+    // device id and the one `SLC` word `ets_spi_download_disabled` reads.
+    // Last, not first, even though a ROM-up boot meets them before
+    // everything else: the list is read as "what the application's boot
+    // walks through", and the ROM's own corner is an appendix to it.
+    "HINF",
+    "SLC",
 ];
 
 /// Which cycle model a run uses. Both grades are the same machine; only the
@@ -616,6 +623,12 @@ pub struct Esp32C6Builder {
     app: AppSource,
     /// Direct load, or the chip booting itself out of flash.
     boot_mode: BootMode,
+    /// What `LP_CLKRST.reset_cause` says, and so what the mask ROM's banner
+    /// prints as `rst:0x..`.
+    reset_cause: ResetCause,
+    /// What `GPIO.strap` reads, and so what the banner prints as `boot:0x..`
+    /// and which of the ROM's two paths runs.
+    strap: Strap,
     efuse: EfuseIdentity,
     time_grade: TimeGrade,
     strict: bool,
@@ -671,6 +684,8 @@ impl Esp32C6Builder {
             rom: RomSource::Vendored,
             app: AppSource::None,
             boot_mode: BootMode::default(),
+            reset_cause: ResetCause::default(),
+            strap: Strap::App,
             efuse: EfuseIdentity::default(),
             time_grade: TimeGrade::default(),
             strict: false,
@@ -728,6 +743,22 @@ impl Esp32C6Builder {
     /// runs come from the chip.
     pub fn boot_mode(mut self, mode: BootMode) -> Self {
         self.boot_mode = mode;
+        self
+    }
+
+    /// Why the chip is starting. Seeds `LP_CLKRST.reset_cause`, which the
+    /// mask ROM reads before anything else and prints as `rst:0x..`; the
+    /// firmware's recovery ledger reads the same register later.
+    pub fn reset_cause(mut self, cause: ResetCause) -> Self {
+        self.reset_cause = cause;
+        self
+    }
+
+    /// Where the strapping pins were at reset. Seeds `GPIO.strap`, which the
+    /// ROM prints as `boot:0x..` and uses to choose between the flash
+    /// bootloader and its own download console.
+    pub fn strap(mut self, strap: Strap) -> Self {
+        self.strap = strap;
         self
     }
 
@@ -935,6 +966,8 @@ impl Esp32C6Builder {
             rom,
             app,
             boot_mode,
+            reset_cause,
+            strap,
             efuse,
             time_grade,
             strict,
@@ -1140,6 +1173,8 @@ impl Esp32C6Builder {
                 flash_handle.clone(),
                 cache_handle.clone(),
                 usb_host,
+                reset_cause,
+                strap,
             )
         } else {
             Vec::new()
@@ -1269,7 +1304,8 @@ impl Esp32C6Builder {
             rom: rom_image,
             app: app_image,
             efuse,
-            reset_cause: ResetCause::PowerOn,
+            reset_cause,
+            strap,
             seed,
             rng: seed,
             rom_segments,
@@ -1448,6 +1484,7 @@ pub struct Esp32C6Machine {
     app: Option<ElfImage>,
     efuse: EfuseIdentity,
     reset_cause: ResetCause,
+    strap: Strap,
     seed: u64,
     rng: u64,
     rom_segments: Vec<PlacedSegment>,
@@ -1574,6 +1611,11 @@ impl Esp32C6Machine {
 
     pub fn reset_cause(&self) -> ResetCause {
         self.reset_cause
+    }
+
+    /// The strapping the chip was started with.
+    pub fn strap(&self) -> Strap {
+        self.strap
     }
 
     pub fn rom(&self) -> &ElfImage {

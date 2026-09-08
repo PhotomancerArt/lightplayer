@@ -49,8 +49,10 @@ mod modem_lpcon;
 mod modem_syscon;
 pub mod output_signals;
 mod pcr;
+mod hinf;
 mod plic_mx;
 mod plic_ux;
+mod slc;
 mod pmu;
 mod rmt;
 mod spi0;
@@ -86,8 +88,10 @@ pub use lp_wdt::LP_WDT;
 pub use modem_lpcon::MODEM_LPCON;
 pub use modem_syscon::MODEM_SYSCON;
 pub use pcr::PCR;
+pub use hinf::HINF;
 pub use plic_mx::PLIC_MX;
 pub use plic_ux::PLIC_UX;
+pub use slc::SLC;
 pub use pmu::PMU;
 pub use rmt::RMT;
 pub use spi0::SPI0;
@@ -124,8 +128,10 @@ pub const ALL: &[&lp_emu_esp_common::RegNames] = &[
     &MODEM_LPCON,
     &MODEM_SYSCON,
     &PCR,
+    &HINF,
     &PLIC_MX,
     &PLIC_UX,
+    &SLC,
     &PMU,
     &RMT,
     &SPI0,

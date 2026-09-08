@@ -99,6 +99,8 @@ pub fn boot_set(
     flash: FlashHandle,
     mmu: CacheHandle,
     usb_host: usb_sj::HostState,
+    reset_cause: crate::loader::ResetCause,
+    strap: lp_emu_esp_common::Strap,
 ) -> Vec<(u32, u32, BoxedPeripheral)> {
     let clocks = pcr::UartClockLines::default();
     let rmt_clock = pcr::RmtClockLine::default();
@@ -112,7 +114,11 @@ pub fn boot_set(
         (base::HP_APM, 0x800, Box::new(accept::hp_apm())),
         (base::LP_AON, 0x400, Box::new(accept::lp_aon())),
         (base::PMU, 0x400, Box::new(accept::pmu())),
-        (base::LP_CLKRST, 0x400, Box::new(accept::lp_clkrst())),
+        (
+            base::LP_CLKRST,
+            0x400,
+            Box::new(accept::lp_clkrst(reset_cause)),
+        ),
         (base::LP_WDT, 0x400, Box::new(lp_wdt::LpWdt::new())),
         (base::MODEM_SYSCON, 0x100, Box::new(accept::modem_syscon())),
         (base::MODEM_LPCON, 0x100, Box::new(accept::modem_lpcon())),
@@ -168,7 +174,11 @@ pub fn boot_set(
             )),
         ),
         (base::IO_MUX, 0x100, Box::new(accept::io_mux())),
-        (base::GPIO, gpio::LEN, Box::new(gpio::Gpio::new())),
+        (
+            base::GPIO,
+            gpio::LEN,
+            Box::new(gpio::Gpio::new(crate::loader::strap_word(strap))),
+        ),
         (base::SPI0, 0x400, Box::new(spi0::Spi0::new(mmu))),
         (base::SPI1, 0x400, Box::new(spi1::Spi1::new(flash))),
         // Registers, the gap, and the RAM at `+0x400..+0x700` — P5's accept
@@ -195,5 +205,11 @@ pub fn boot_set(
             base::I2C_MST_MEM_LEN,
             Box::new(wifi_stub::WifiStub::i2c_mst_mem()),
         ),
+        // M7: blocks only the mask ROM touches. They are last because the
+        // application never reaches them, so a `--map` reader meets the
+        // boot set in the order an app boot does and finds the ROM's own
+        // corner at the end.
+        (base::HINF, 0x1000, Box::new(accept::hinf())),
+        (base::SLC, 0x1000, Box::new(accept::slc())),
     ]
 }

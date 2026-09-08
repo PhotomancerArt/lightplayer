@@ -46,11 +46,40 @@ pub fn pmu() -> RegFile {
 ///
 /// `lp_clk_conf` resets to `0x04` (`slow_clk_sel = 0`, RC_SLOW), which
 /// `RtcSlowClockSource::current()` reads (`rtc/esp32c6.rs:126`).
-pub fn lp_clkrst() -> RegFile {
+pub fn lp_clkrst(cause: crate::loader::ResetCause) -> RegFile {
     RegFile::new("LP_CLKRST", 0x400)
         .with_names(regs::LP_CLKRST)
-        .with_reset(0x010, crate::loader::ResetCause::PowerOn.rom_code())
+        .with_reset(0x010, cause.rom_code())
         .with_reset(0x000, 0x04)
+}
+
+/// `SLC`, the SDIO slave DMA controller. Nothing in any image this machine
+/// runs is an SDIO slave — but the **mask ROM** reads one word of it while
+/// deciding whether the SPI download path is available:
+///
+/// ```text
+/// 40018772 <ets_spi_download_disabled>:
+/// 40018772:  lui  a5, 0x60017
+/// 40018776:  lw   a5, 504(a5)     ; SLC + 0x1f8
+/// 4001877a:  bnez a5, +0x18       ; non-zero -> consult eFuse
+/// ```
+///
+/// The PAC's `slc` block ends at `+0x17c`, so `+0x1f8` is unnamed; it reads
+/// **0** here, which is the RegFile's own reset and takes the ROM down the
+/// short arm. That the boot then reaches the flash bootloader and prints
+/// silicon's log line for line is the evidence for the value.
+pub fn slc() -> RegFile {
+    RegFile::new("SLC", 0x1000).with_names(regs::SLC)
+}
+
+/// `HINF`, the SDIO slave host interface. Two read-modify-writes from
+/// `sdio_slv_hal_init_device_id` (`0x40020fd4`), which the ROM's startup
+/// calls unconditionally: it stamps `0x100d` into the low half of `+0x00`
+/// and `0x200d` into the low half of `+0x40` — a device id for a slave
+/// nothing will ever enumerate. Accept-and-remember; the ROM reads back only
+/// what it wrote.
+pub fn hinf() -> RegFile {
+    RegFile::new("HINF", 0x1000).with_names(regs::HINF)
 }
 
 /// `PLIC_UX`, the user-mode half of the interrupt controller. The C6's
@@ -177,8 +206,51 @@ pub fn lp_io() -> RegFile {
     RegFile::new("LP_IO", 0x400).with_names(regs::LP_IO)
 }
 
+/// `EXTMEM` — the cache controller.
+///
+/// The application never waits for this block. The **mask ROM** does, four
+/// times, and each one is a `set the enable, then spin until done` pair:
+///
+/// ```text
+/// Cache_Invalidate_ICache_Items  +0x098 bit 4  cache_sync_done
+/// Cache_Lock/Unlock_ICache_Items +0x088 bit 2  cache_lock_done
+/// Cache_Suspend_ICache           +0x0d8 bit 1  l1_cache_preload_done
+/// Cache_Suspend_ICache_Autoload  +0x134 bit 1  l1_cache_autoload_done
+/// ```
+///
+/// e.g. `lw a5,308(a4); andi a5,a5,2; beqz a5,-4` at `0x40027780`. An accept
+/// block that only remembered writes holds every one of those at zero, and
+/// the ROM-up boot hangs in the first of them the instant after its banner.
+///
+/// So the four `done` bits read **1**, and the enables that the PAC says
+/// "will be cleared by hardware after the operation is done"
+/// (`cache_invalidate/clean/writeback/writeback_invalidate_ena`,
+/// `cache_lock_ena`, `cache_unlock_ena`, `l1_cache_preload_ena`) read
+/// **0**. Together those two are one statement: *the operation the guest
+/// just asked for has already finished* — which is the truthful reading of
+/// a machine with no cache timing model, and the only reading that is
+/// self-consistent (a `done` that is always 1 beside an `ena` that is
+/// always 1 describes a cache that is permanently mid-operation).
+///
+/// `l1_cache_autoload_ena` is **not** in that list: the PAC calls it a
+/// plain enable/disable and the ROM reads it back to decide whether to
+/// restore autoload later, so it is stored like any other bit.
 pub fn extmem() -> RegFile {
-    RegFile::new("EXTMEM", 0x400).with_names(regs::EXTMEM)
+    RegFile::new("EXTMEM", 0x400)
+        .with_names(regs::EXTMEM)
+        // cache_lock_ctrl: lock_ena, unlock_ena clear; lock_done sets.
+        .with_read_override(0x088, 0b111, 0b100)
+        // cache_sync_ctrl: the four sync enables clear; sync_done sets.
+        .with_read_override(0x098, 0b1_1111, 0b1_0000)
+        // l1_cache_preload_ctrl: preload_ena clears; preload_done sets.
+        .with_read_override(0x0d8, 0b11, 0b10)
+        // l1_cache_autoload_ctrl: autoload_done sets; ena is stored.
+        .with_read_override(0x134, 0b10, 0b10)
+        // l1_cache_freeze_ctrl: freeze_done (bit 18) MIRRORS freeze_ena
+        // (bit 16). `Cache_Freeze_ICache_Enable` spins until it is 1 and
+        // `Cache_Freeze_ICache_Disable` spins until it is 0, so no constant
+        // works; see `RegFile::with_read_mirror`.
+        .with_read_mirror(0x02c, 1 << 16, 1 << 18)
 }
 
 /// UART0/UART1: accept in P5 so the ROM's `uart_tx_one_char` does not fault
@@ -268,9 +340,29 @@ mod tests {
         assert_eq!(sb.read(&mut a, 0x074), 0, "no debugger");
         assert_eq!(a.reg_name(0x074), Some("cpu0.debug_mode"));
 
-        let mut c = lp_clkrst();
+        let mut c = lp_clkrst(crate::loader::ResetCause::PowerOn);
         assert_eq!(sb.read(&mut c, 0x010) & 0x1f, 1, "POWERON");
         assert_eq!(sb.read(&mut c, 0x000) & 0b11, 0, "RC_SLOW");
+        // The other cause the ROM's banner can print, from the same seed.
+        let mut c = lp_clkrst(crate::loader::ResetCause::UsbUartHpSys);
+        assert_eq!(sb.read(&mut c, 0x010) & 0x1f, 0x15, "USB_UART_HPSYS");
+
+        // EXTMEM's four `done` bits, and the freeze mirror the ROM waits
+        // for in both directions.
+        let mut e = extmem();
+        sb.write(&mut e, 0x098, 0b1);
+        assert_eq!(sb.read(&mut e, 0x098), 0b1_0000, "sync done, ena cleared");
+        sb.write(&mut e, 0x088, 0b10);
+        assert_eq!(sb.read(&mut e, 0x088), 0b100, "lock done, ena cleared");
+        sb.write(&mut e, 0x0d8, 0b1);
+        assert_eq!(sb.read(&mut e, 0x0d8), 0b10, "preload done, ena cleared");
+        sb.write(&mut e, 0x134, 0b1);
+        assert_eq!(sb.read(&mut e, 0x134), 0b11, "autoload done, ena stored");
+        assert_eq!(sb.read(&mut e, 0x02c), 0, "not frozen, not freeze-done");
+        sb.write(&mut e, 0x02c, 1 << 16);
+        assert_eq!(sb.read(&mut e, 0x02c), (1 << 16) | (1 << 18), "freeze done");
+        sb.write(&mut e, 0x02c, 0);
+        assert_eq!(sb.read(&mut e, 0x02c), 0, "unfreeze done");
     }
 
     #[test]
