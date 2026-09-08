@@ -59,7 +59,7 @@ pub use regfile::RegFile;
 pub use regnames::RegNames;
 pub use trace::{Access, MmioEvent, Trace};
 
-// The crate is `std` (it hosts stdout sinks now and sockets from M6), but
+// The crate is `std` (it hosts stdout sinks and sockets), but
 // the module bodies are written against `alloc` types so a `no_std` split
 // stays cheap if a wasm host ever needs one.
 extern crate alloc;

@@ -151,7 +151,7 @@ generator writes the real tables into the chip crate.
 
 `HostSinks` is a set of named bidirectional byte streams; a peripheral holds
 a `StreamId` and cannot tell whether its bytes end in a `Vec`, on stdout, or
-(from M6) on a socket. The RX side is a **scripted** source by default
+on a socket. The RX side is a **scripted** source by default
 (`at_cycle → bytes`), because host connect timing was the one drift the
 vendor emulator showed and plan PD5 says wall clock never enters the
 machine.

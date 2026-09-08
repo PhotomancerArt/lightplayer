@@ -36,7 +36,7 @@ use std::process::Command;
 use anyhow::{Context, Result, bail};
 
 use crate::configuration::{Availability, Configuration, ConfigurationKind};
-use crate::payload::{Capture, Payload, Sentinel};
+use crate::payload::{Capture, Link, Payload, Sentinel};
 
 /// Build constants, kept equal to the `justfile`'s variables of the same name.
 pub const RV32_TARGET: &str = "riscv32imac-unknown-none-elf";
@@ -119,26 +119,64 @@ impl Identity {
 }
 
 impl RunRequest {
-    /// The cargo feature list for this payload on this configuration.
-    ///
-    /// `spike_uart0_link` is added for `esp-emu:*` and `lp-emu:*`, and only
-    /// there: neither emulator has a USB host, so the host link has to be
-    /// UART0 (spike report §4, §5.1). Adding it on silicon would change the
-    /// image under test.
-    pub fn features(&self) -> Vec<&'static str> {
-        let mut f = vec!["esp32c6"];
-        f.extend_from_slice(self.payload.firmware_features);
-        if matches!(
+    pub fn emulated(&self) -> bool {
+        matches!(
             self.configuration.kind,
             ConfigurationKind::EspEmu | ConfigurationKind::LpEmu
-        ) {
+        )
+    }
+
+    /// The cargo feature list for this payload on this configuration.
+    ///
+    /// `spike_uart0_link` moves the host link onto UART0, and it is added for
+    /// exactly two reasons. `esp-emu:*` gets it unconditionally: that machine
+    /// asserts SOF for ever and reports EP1 free for ever, so the firmware
+    /// serves into the void believing a host is there (spike report §4) — its
+    /// USB is a lie, and the workaround is the only honest way to hear it.
+    /// `lp-emu:*` gets it only for a payload whose [`Link`] says
+    /// `Uart0Spike`, which since M6 means only the payloads whose committed
+    /// transcripts are of that image. Adding it on silicon would change the
+    /// image under test; adding it to a USB-link payload on our own machine
+    /// would defeat the comparison the milestone exists for (DD30).
+    pub fn features(&self) -> Vec<&'static str> {
+        let mut f = vec!["esp32c6"];
+        f.extend_from_slice(self.payload.features_for(self.emulated()));
+        let spike = match self.configuration.kind {
+            ConfigurationKind::EspEmu => true,
+            ConfigurationKind::LpEmu => self.payload.link == Link::Uart0Spike,
+            ConfigurationKind::Silicon => false,
+        };
+        if spike {
             f.push("spike_uart0_link");
         }
         f
     }
 
+    /// How long the run is given, in emulated seconds: the payload's own
+    /// figure when its subject is a timeline, and the runner's otherwise.
+    ///
+    /// A scenario is a schedule — a port that opens at eight seconds, a cable
+    /// out at six — and a run shorter than its own schedule records the
+    /// beginning of a story. One `--timeout-secs` across a whole set cannot
+    /// express that, so the payload that knows says.
+    pub fn run_secs(&self) -> u64 {
+        self.payload.run_secs.unwrap_or(self.timeout_secs)
+    }
+
     pub fn capture_path(&self) -> PathBuf {
         self.out_dir.join(format!("{}.cap", self.payload.name))
+    }
+
+    /// Where the bytes the guest handed over that no host took are written —
+    /// an observation beside the capture, never part of it.
+    pub fn tried_path(&self) -> PathBuf {
+        self.out_dir.join(format!("{}.tried", self.payload.name))
+    }
+
+    /// Where the payload's `--usb-script` is written, when it has one.
+    pub fn usb_script_path(&self) -> PathBuf {
+        self.out_dir
+            .join(format!("{}.usbscript", self.payload.name))
     }
 }
 
@@ -153,6 +191,15 @@ pub struct PlanStep {
     pub cwd: Option<String>,
     /// Why this step is shaped this way, when the shape is load-bearing.
     pub note: Option<String>,
+    /// Send this step's stdout to a file, relative to the plan's `cwd`.
+    ///
+    /// Two steps need it and both are honest uses. A payload whose subject is
+    /// machine state has no console output to capture, so its transcript IS
+    /// the machine's `--probe` report on stdout. And a scenario's host script
+    /// is content rather than a command, so it is written by a step whose
+    /// whole text then lands in the sidecar's `source` — a script referenced
+    /// by path alone would be a provenance hole.
+    pub stdout_to: Option<String>,
 }
 
 impl PlanStep {
@@ -163,7 +210,13 @@ impl PlanStep {
             env: Vec::new(),
             cwd: None,
             note: None,
+            stdout_to: None,
         }
+    }
+
+    fn to_file(mut self, path: &Path) -> Self {
+        self.stdout_to = Some(path.display().to_string());
+        self
     }
 
     fn with_env(mut self, k: &str, v: impl Into<String>) -> Self {
@@ -191,6 +244,10 @@ impl PlanStep {
         let line = env.into_iter().chain(argv).collect::<Vec<_>>().join(" ");
         // A printed plan is meant to be pasted from the repository root, so a
         // step that runs elsewhere has to say so in the line itself.
+        let line = match &self.stdout_to {
+            Some(path) => format!("{line} > {}", shell_quote(path)),
+            None => line,
+        };
         match &self.cwd {
             Some(dir) => format!("(cd {} && {line})", shell_quote(dir)),
             None => line,
@@ -274,6 +331,12 @@ impl ConfigurationDriver for SiliconDriver {
     }
 
     fn plan(&self, req: &RunRequest) -> Result<RunPlan> {
+        if let Some(why) = req.payload.emulator_only {
+            bail!(
+                "payload `{}` cannot be recorded on silicon: {why}.",
+                req.payload.name
+            );
+        }
         let port = req.port.as_deref().context(
             "a silicon run needs an explicit --port. The resolver is \
              `cargo run -q -p lp-cli -- fwcheck port --chip esp32c6`; this runner will \
@@ -389,7 +452,7 @@ impl ConfigurationDriver for SiliconDriver {
                     "--seconds".into(),
                     req.timeout_secs.to_string(),
                 ];
-                if let Sentinel::Done(marker) = req.payload.sentinel {
+                if let Some(marker) = req.payload.sentinel.exit_on() {
                     open.push("--until".into());
                     open.push(marker.into());
                 }
@@ -442,6 +505,25 @@ impl ConfigurationDriver for EspEmuDriver {
     }
 
     fn plan(&self, req: &RunRequest) -> Result<RunPlan> {
+        if let Some(why) = req.payload.emulator_only {
+            // Emulator-only does not mean *this* emulator: reading a static
+            // out of the guest is how these payloads answer, and esp-emu has
+            // no such door.
+            bail!(
+                "payload `{}` reads state out of the guest, which this configuration cannot do \
+                 ({why}).",
+                req.payload.name
+            );
+        }
+        if req.payload.host_plan.is_some() {
+            bail!(
+                "payload `{}` makes a claim about the USB host, and this configuration's USB \
+                 model asserts SOF for ever and reports EP1 free for ever (spike report §4): it \
+                 would answer every question the same way whatever the host did. \
+                 `validate.toml` grades its `usb-serial-jtag` class `modeled` for that reason.",
+                req.payload.name
+            );
+        }
         let binary = std::env::var(ESP_EMU_ENV).unwrap_or_else(|_| "esp-emu".into());
         let elf = format!("target/{RV32_TARGET}/{FW_ESP32C6_PROFILE}/fw-esp32c6");
         let image = req.out_dir.join(format!("{}.bin", req.payload.name));
@@ -458,7 +540,7 @@ impl ConfigurationDriver for EspEmuDriver {
             "--log-color".into(),
             "never".into(),
         ];
-        if let Sentinel::Done(marker) = req.payload.sentinel {
+        if let Some(marker) = req.payload.sentinel.exit_on() {
             emu.push("--exit-on".into());
             emu.push(marker.into());
         }
@@ -589,46 +671,74 @@ impl ConfigurationDriver for LpEmuDriver {
         let mut steps = Vec::new();
         let mut notes = Vec::new();
 
+        let usb = req.payload.link == Link::UsbSerialJtag;
         let elf = match &req.image {
             Some(path) => {
-                notes.push(format!(
-                    "running the pinned image {} rather than building one: the committed \
-                     transcripts are at firmware {} with `spike_uart0_link` applied as a dirty \
-                     tree, which is not what this checkout builds. \
-                     `scripts/emu/build-reference-image.sh {}` reproduces that tree in a \
-                     detached worktree and builds it there.",
-                    path.display(),
-                    REFERENCE_FIRMWARE_COMMIT,
-                    req.features().join(","),
-                ));
+                notes.push(if usb {
+                    format!(
+                        "running the pinned image {} rather than building one. It is the \
+                         shipped image over its own USB-Serial-JTAG link — no \
+                         `spike_uart0_link`, no cherry-pick — so that it is the same bytes a \
+                         silicon flash of the same commit puts on the board, which is what \
+                         makes a memory comparison a comparison of two machines rather than of \
+                         two link drivers (DD30). \
+                         `scripts/emu/build-reference-image.sh {} <commit> none` builds it in a \
+                         detached worktree at that commit.",
+                        path.display(),
+                        req.features().join(","),
+                    )
+                } else {
+                    format!(
+                        "running the pinned image {} rather than building one: the committed \
+                         transcripts are at firmware {} with `spike_uart0_link` applied as a \
+                         dirty tree, which is not what this checkout builds. \
+                         `scripts/emu/build-reference-image.sh {}` reproduces that tree in a \
+                         detached worktree and builds it there.",
+                        path.display(),
+                        REFERENCE_FIRMWARE_COMMIT,
+                        req.features().join(","),
+                    )
+                });
                 path.display().to_string()
             }
             None => {
-                steps.push(
-                    PlanStep::new(
-                        "build the payload image (UART0 host link)",
-                        vec![
-                            "cargo".into(),
-                            "build".into(),
-                            "--target".into(),
-                            RV32_TARGET.into(),
-                            "--profile".into(),
-                            FW_ESP32C6_PROFILE.into(),
-                            "--features".into(),
-                            req.features().join(","),
-                        ],
-                    )
-                    .in_dir(FW_ESP32C6_DIR)
-                    .with_note(
-                        "spike_uart0_link is on for the same reason it is on for esp-emu: this \
-                         machine models the USB-Serial-JTAG block with no host attached (M6 owns \
-                         the attached states), so the host link has to be UART0",
-                    ),
-                );
+                let mut build = PlanStep::new(
+                    if usb {
+                        "build the payload image (its own USB-Serial-JTAG link)"
+                    } else {
+                        "build the payload image (UART0 host link)"
+                    },
+                    vec![
+                        "cargo".into(),
+                        "build".into(),
+                        "--target".into(),
+                        RV32_TARGET.into(),
+                        "--profile".into(),
+                        FW_ESP32C6_PROFILE.into(),
+                        "--features".into(),
+                        req.features().join(","),
+                    ],
+                )
+                .in_dir(FW_ESP32C6_DIR);
+                build = build.with_note(if usb {
+                    "no spike_uart0_link: this machine models the host's side of the \
+                     USB-Serial-JTAG block (M6), so the shipped image runs on the link it \
+                     ships with"
+                } else {
+                    "spike_uart0_link is on for the same reason it is on for esp-emu: this \
+                     payload's committed transcripts are of that image, and a transcript is \
+                     never re-baselined to suit a later idea"
+                });
+                steps.push(build);
                 built
             }
         };
 
+        // A payload whose subject is machine state has no console output at
+        // all — with no cable the device says nothing, which is the finding —
+        // so its transcript is the machine's own `--probe` report on stdout.
+        let state_payload = matches!(req.payload.sentinel, Sentinel::State(_));
+        let secs = req.run_secs();
         let mut emu: Vec<String> = vec![
             "cargo".into(),
             "run".into(),
@@ -641,20 +751,46 @@ impl ConfigurationDriver for LpEmuDriver {
             elf,
             "--time-grade".into(),
             grade.into(),
-            "--uart0".into(),
-            format!("file:{}", capture.display()),
+        ];
+        if usb {
+            // The capture is the USB byte stream: the same bytes a reader on
+            // the silicon port sees, and nothing else. What the guest handed
+            // over that no host took is an observation and goes beside it.
+            if !state_payload {
+                emu.push("--usb-sj".into());
+                emu.push(format!("file:{}", capture.display()));
+            }
+            emu.push("--usb-sj-tried".into());
+            emu.push(format!("file:{}", req.tried_path().display()));
+        } else {
+            emu.push("--uart0".into());
+            emu.push(format!("file:{}", capture.display()));
+        }
+        if let Some(plan) = &req.payload.host_plan {
+            emu.push("--usb-host".into());
+            emu.push(plan.host.into());
+            if !plan.script.is_empty() {
+                emu.push("--usb-script".into());
+                emu.push(req.usb_script_path().display().to_string());
+            }
+        }
+        for (symbol, ms) in req.payload.probes {
+            emu.push("--probe".into());
+            emu.push(format!("{symbol}@{ms}"));
+        }
+        emu.extend([
             // Emulated time, always: a run is the same run on a laptop and on
             // a loaded CI box.
             "--timeout".into(),
-            format!("{}s", req.timeout_secs),
+            format!("{secs}s"),
             "--wall-timeout".into(),
-            (req.timeout_secs * WALL_TIMEOUT_FACTOR).to_string(),
+            (secs * WALL_TIMEOUT_FACTOR).to_string(),
             // An access nothing claims is a fault, not a zero. A transcript
             // recorded with the bus in permissive mode would be a transcript
             // of a machine quietly answering questions it cannot answer.
             "--strict-bus".into(),
-        ];
-        if let Sentinel::Done(marker) = req.payload.sentinel {
+        ]);
+        if let Some(marker) = req.payload.sentinel.exit_on() {
             emu.push("--exit-on".into());
             emu.push(marker.into());
         }
@@ -676,14 +812,43 @@ impl ConfigurationDriver for LpEmuDriver {
             emu.push(rev.to_string());
         }
 
-        steps.push(
-            PlanStep::new("run the machine, UART0 to the capture", emu).with_note(
-                "the eFuse identity comes from this configuration's entry in validate.toml, so the \
+        if let Some(plan) = &req.payload.host_plan
+            && !plan.script.is_empty()
+        {
+            // Written by a step rather than behind the runner's back, so the
+            // whole script text lands in the sidecar's `source`: a scenario
+            // referenced only by a path is a scenario nobody can check.
+            steps.push(
+                PlanStep::new(
+                    "write the host script (absolute emulated milliseconds)",
+                    vec!["printf".into(), "%s".into(), plan.script.into()],
+                )
+                .to_file(&req.usb_script_path())
+                .with_note(
+                    "the deterministic twin of the control socket: a socket is host time and \
+                     has no place in a transcript",
+                ),
+            );
+        }
+
+        let mut run = PlanStep::new(
+            match (usb, state_payload) {
+                (_, true) => "run the machine, its own report to the capture",
+                (true, false) => "run the machine, the USB link to the capture",
+                (false, false) => "run the machine, UART0 to the capture",
+            },
+            emu,
+        )
+        .with_note(
+            "the eFuse identity comes from this configuration's entry in validate.toml, so the \
              hello frame's baseMac / chipRevision / eui64 read the same as the desk board's and \
              a replay against a silicon transcript compares chip identity rather than a \
              difference in who was told what",
-            ),
         );
+        if state_payload {
+            run = run.to_file(&capture);
+        }
+        steps.push(run);
 
         Ok(RunPlan {
             configuration: req.configuration.name(),
@@ -834,6 +999,16 @@ fn run_steps(plan: &RunPlan) -> Result<()> {
         for (k, v) in &step.env {
             cmd.env(k, v);
         }
+        if let Some(path) = &step.stdout_to {
+            let path = plan.cwd.join(path);
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir)
+                    .with_context(|| format!("creating {}", dir.display()))?;
+            }
+            let file = std::fs::File::create(&path)
+                .with_context(|| format!("creating {}", path.display()))?;
+            cmd.stdout(file);
+        }
         let status = cmd
             .status()
             .with_context(|| format!("running step {}: {}", i + 1, step.shell()))?;
@@ -950,7 +1125,7 @@ mod tests {
             "{rendered}"
         );
         assert!(
-            rendered.contains("--until '[stack] heartbeat: high-water'"),
+            rendered.contains("--until '\"hostDrainingAgainMs\"'"),
             "{rendered}"
         );
         assert!(rendered.contains("--seconds 120"), "{rendered}");
@@ -1031,33 +1206,31 @@ mod tests {
         assert!(rendered.contains("--efuse-rev 0.2"), "{rendered}");
     }
 
-    /// The `boot-idle` payload is the shipped image: several features, no
-    /// `test_*` module, and the spike link on top because there is no host.
+    /// The `boot-idle` payload is the shipped image, and since M6 it runs on
+    /// the link the shipped image ships with: **no** `spike_uart0_link`, the
+    /// capture off the USB byte stream, and a host attached and draining from
+    /// the first byte — the state `espflash --monitor` puts a board in. That
+    /// is the whole of DD30: the same bytes on both sides, or the comparison
+    /// is of two link drivers.
     #[test]
     fn lp_emu_runs_a_pinned_image_for_the_shipped_image_payload() {
         let mut req = request("lp-emu:esp32c6:t2", "boot-idle", None);
         req.identity = desk_identity();
         req.image = Some(PathBuf::from(
-            "target/emu-ref/d6cfaa205-boot-idle-memfs/fw-esp32c6",
+            "target/emu-ref/735af98ae-boot-idle-memfs-usb/fw-esp32c6",
         ));
         req.timeout_secs = 6;
         assert_eq!(
             req.features(),
-            vec![
-                "esp32c6",
-                "server",
-                "radio",
-                "memory_fs",
-                "spike_uart0_link"
-            ]
+            vec!["esp32c6", "server", "radio", "memory_fs"],
+            "the shipped image over its own link builds no spike feature"
         );
         let plan = LpEmuDriver.plan(&req).unwrap();
         assert_eq!(plan.steps.len(), 1, "a pinned image is not built here");
         let rendered = plan.render();
         assert!(rendered.contains("build-reference-image.sh"), "{rendered}");
-        assert!(rendered.contains("d6cfaa2051ae"), "{rendered}");
         assert!(
-            rendered.contains("--elf target/emu-ref/d6cfaa205-boot-idle-memfs/fw-esp32c6"),
+            rendered.contains("--elf target/emu-ref/735af98ae-boot-idle-memfs-usb/fw-esp32c6"),
             "{rendered}"
         );
         assert!(rendered.contains("--time-grade t2"), "{rendered}");
@@ -1065,6 +1238,114 @@ mod tests {
             rendered.contains("'[stack] heartbeat: high-water'"),
             "{rendered}"
         );
+        // The capture is the USB link; UART0 is not even opened.
+        assert!(
+            rendered.contains("--usb-sj file:target/validate/boot-idle.cap"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("--uart0 "), "{rendered}");
+        assert!(rendered.contains("--usb-host attached"), "{rendered}");
+        // And what nobody took is kept beside the capture, never in it.
+        assert!(
+            rendered.contains("--usb-sj-tried file:target/validate/boot-idle.tried"),
+            "{rendered}"
+        );
+    }
+
+    /// A scenario is a schedule, and the plan writes it down before it runs
+    /// it — so the sidecar's `source` carries the script itself rather than a
+    /// path to a file nobody kept.
+    #[test]
+    fn a_scenario_payload_writes_its_host_script_as_a_step() {
+        let mut req = request("lp-emu:esp32c6:t1", "usb-detach-reattach", None);
+        req.identity = desk_identity();
+        let plan = LpEmuDriver.plan(&req).unwrap();
+        let rendered = plan.render();
+        // build, write the script, run.
+        assert_eq!(plan.steps.len(), 3, "{rendered}");
+        assert!(
+            rendered.contains("printf '%s' '6000  detach"),
+            "the script's own text is in the plan: {rendered}"
+        );
+        assert!(
+            rendered.contains("> target/validate/usb-detach-reattach.usbscript"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("--usb-script target/validate/usb-detach-reattach.usbscript"),
+            "{rendered}"
+        );
+        // The payload's own schedule, not the runner's default.
+        assert!(rendered.contains("--timeout 12s"), "{rendered}");
+        assert!(rendered.contains("'\"uptime_ms\":10000'"), "{rendered}");
+    }
+
+    /// The negative control's emulator twin is a different image, and the
+    /// plan says which and why in the same breath.
+    #[test]
+    fn the_negative_controls_emulator_twin_runs_the_memfs_variant() {
+        let mut req = request("lp-emu:esp32c6:t1", "usb-negative-control", None);
+        req.identity = desk_identity();
+        assert_eq!(
+            req.features(),
+            vec!["esp32c6", "server", "radio", "memory_fs"]
+        );
+        let rendered = LpEmuDriver.plan(&req).unwrap().render();
+        assert!(rendered.contains("--usb-host attached-idle"), "{rendered}");
+        assert!(rendered.contains("printf '%s' '8000  open"), "{rendered}");
+        assert!(rendered.contains("--timeout 12s"), "{rendered}");
+
+        // On silicon it is the product's own flash-backed image, watched
+        // after a wait.
+        let mut sil = request("silicon:esp32c6", "usb-negative-control", None);
+        sil.port = Some("/dev/cu.usbmodem1433201".into());
+        assert_eq!(sil.features(), vec!["esp32c6", "server", "radio"]);
+        let rendered = SiliconDriver.plan(&sil).unwrap().render();
+        assert!(rendered.contains("desk-flash-no-monitor.sh"), "{rendered}");
+        assert!(!rendered.contains("--usb-host"), "{rendered}");
+    }
+
+    /// A payload silicon cannot record is refused with the reason, not with
+    /// an empty file.
+    #[test]
+    fn the_absent_host_payload_is_refused_everywhere_but_our_own_machine() {
+        let mut sil = request("silicon:esp32c6", "usb-host-absent", None);
+        sil.port = Some("/dev/cu.usbmodem1433201".into());
+        let err = SiliconDriver.plan(&sil).unwrap_err().to_string();
+        assert!(err.contains("records nothing"), "{err}");
+
+        let esp = request("esp-emu:0.42.0", "usb-host-absent", None);
+        let err = EspEmuDriver.plan(&esp).unwrap_err().to_string();
+        assert!(err.contains("reads state out of the guest"), "{err}");
+
+        // And on ours it is the machine's own report, with no `--exit-on`:
+        // there is no console to match on.
+        let mut req = request("lp-emu:esp32c6:t1", "usb-host-absent", None);
+        req.identity = desk_identity();
+        let plan = LpEmuDriver.plan(&req).unwrap();
+        let rendered = plan.render();
+        assert!(rendered.contains("--usb-host absent"), "{rendered}");
+        assert!(!rendered.contains("--exit-on"), "{rendered}");
+        assert!(!rendered.contains("--usb-sj file:"), "{rendered}");
+        assert!(
+            rendered.contains("> target/validate/usb-host-absent.cap"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains(
+                "--probe fw_esp32_common::serial::link_counters::NOT_DRAINING_COUNT@5000"
+            ),
+            "{rendered}"
+        );
+    }
+
+    /// esp-emu's USB model would answer every host question the same way, so
+    /// it is not asked.
+    #[test]
+    fn esp_emu_refuses_a_payload_that_asks_about_the_host() {
+        let req = request("esp-emu:0.42.0", "usb-negative-control", None);
+        let err = EspEmuDriver.plan(&req).unwrap_err().to_string();
+        assert!(err.contains("asserts SOF for ever"), "{err}");
     }
 
     #[test]

@@ -57,6 +57,16 @@ description = "M6's negative control, rig-free: flash the shipped image, leave t
 payloads = ["usb-negative-control"]
 
 [[set]]
+name = "emu-m6"
+description = "M6's four USB-Serial-JTAG scenarios on our own machine, all four over the link the product actually ships: the shipped image with a host attached and reading (the DD26/DD30 arbitration against sitting 1's silicon capture of the same bytes), the port held closed from boot and opened after eight seconds (the emulator twin of the silicon negative control), the cable out mid-session and back in (`s7-unplug-mid-op`'s device side, which has had no trace since M2), and no cable at all — which silicon cannot record, because recording is what a host does."
+payloads = [
+    "boot-idle",
+    "usb-negative-control",
+    "usb-detach-reattach",
+    "usb-host-absent",
+]
+
+[[set]]
 name = "jit-math-perf"
 description = "The Q32 math kernel cycle-cost payload (Q12 ledger, cheapest test_* migration): mul/div/sin kernels and LUT access cost against the PMU cycle counter. Timing only — never a gate under esp-emu, which has no cycle model."
 payloads = ["jit-math-perf"]
@@ -184,7 +194,7 @@ because = "there is no boot log: a direct load places the app's segments and jum
 [[configuration.trust]]
 class = "usb-serial-jtag"
 grade = "modeled"
-because = "the model is the host-absent state and only that — EP1 free until the first committed write, no SOF ever, `serial_in_empty` sealed. It is honest about what the shipped image then does (esp-println times out and falls silent), and it cannot answer any question about an attached or a stalled host until M6's control channel"
+because = "M6 built the host's side — absent, attached with the port closed, attached and draining — and four committed transcripts under `lp-emu/transcripts/esp32c6/` are what it has to show for it: `boot-idle` over the shipped link against sitting 1's silicon capture of the SAME image bytes (stack high-water 11,784 B equal, heap 8 B apart); `usb-negative-control`, the port held closed from boot and opened at eight seconds, latching at 893 ms and recovering at 8,145; `usb-detach-reattach`, the cable out at six seconds and back at nine, recovering with exactly one hello and the firmware noticing nothing; and `usb-host-absent`, where the stamp pair reads 893 / never — the discriminator absent-vs-unread. The block's own registers are graded one by one (`--strict-grade`, the table in `periph/usb_sj.rs`) and the data path is `measured` there. This class stays `modeled` all the same, by the rule the ADR states and DD33 Q4 confirmed: byte-equality and agreement are EVIDENCE, weighed here where a reader can see them, not a promotion. What earns `measured` is a silicon transcript of this class, and the one M6 needs — `usb-negative-control` on the desk board — is owed"
 
 [[configuration.trust]]
 class = "pin"
@@ -222,7 +232,7 @@ because = "direct load prints no ROM or bootloader banner; the time grade change
 [[configuration.trust]]
 class = "usb-serial-jtag"
 grade = "modeled"
-because = "the same host-absent-only model as t1; M6 owns the attached and not-draining states"
+because = "the same host model as t1, and the same four transcripts stand behind it — `boot-idle` is recorded on this grade too and its heap figures are t1's to the byte, which is what a time grade must never move. `modeled` for t1's reason: the evidence is here to be weighed, and the silicon half of the negative control is owed"
 
 [[configuration.trust]]
 class = "pin"

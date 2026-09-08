@@ -243,7 +243,10 @@ fn boot_idle_replays_against_itself_field_for_field() {
     // 3 memory (free/used/total) + 2 memory (high-water/headroom).
     assert_eq!(report.compared(FieldClass::Memory), 5);
     assert_eq!(report.compared(FieldClass::Wire), 1, "the hello's proto");
-    assert!(report.compared(FieldClass::Timing) >= 4);
+    // Three now, not four: `uptime_ms` became the heartbeat series' KEY in
+    // M6 P4, so the five-second sample is compared with the five-second
+    // sample rather than with whatever a longer capture ended on.
+    assert!(report.compared(FieldClass::Timing) >= 3);
     assert!(report.compared(FieldClass::Structural) >= 10);
 }
 

@@ -77,7 +77,9 @@ desk session gets wasted.
 | `uart-bridge` | `test_uart_bridge` | `UART-BRIDGE READY ` (it serves until unplugged) | `checks::uart_bridge` (the bounded queue, the pump step, the ready line) |
 | `jit-math-perf` | `test_jit_math_perf` | `[jit-math-perf] === DONE ===` | `checks::jit_math_perf` (the corpus, the Q32 kernels, the benchmark runner — the cycle counter itself is injected as a `fn() -> u32`, since reading it is a chip fact rather than portable arithmetic) |
 | `boot-idle` | *(none — the shipped image)* | `[stack] heartbeat: high-water` | *(none)* |
-| `usb-negative-control` | *(none — the shipped image)* | `[stack] heartbeat: high-water` | *(none)* |
+| `usb-negative-control` | *(none — the shipped image)* | `"hostDrainingAgainMs"` (the recovery stamp itself) | *(none)* |
+| `usb-detach-reattach` | *(none — the shipped image)* | `"uptime_ms":10000` (a whole heartbeat after the re-open) | *(none)* |
+| `usb-host-absent` | *(none — the shipped image)* | *(none — it prints nothing; see below)* | *(none)* |
 
 ### `boot-idle` is the shipped image, not a module
 
@@ -91,10 +93,32 @@ any boot.
 
 So `firmware_features` is a list here rather than one `test_*` switch, and
 `emits_header` is `false` — nothing in the image calls `write_header`, so the
-transcript's `.meta.json` sidecar is the whole provenance. An emulated
-configuration adds `spike_uart0_link` on top, because neither emulator has a
-USB host to serve the shipped link over. Steps 1–4 of the recipe above do not
-apply to a payload like this; step 5 does, and it is the only step it needs.
+transcript's `.meta.json` sidecar is the whole provenance. Steps 1–4 of the
+recipe above do not apply to a payload like this; step 5 does, and it is the
+only step it needs.
+
+(`esp-emu:*` adds `spike_uart0_link` on top, which moves the host link to
+UART0, because that emulator's USB model asserts SOF for ever and the
+firmware would serve into the void believing a host was there. Our own C6
+machine models the host, so since M6 it runs the shipped image on the shipped
+link — the link is a property of the payload, in the host-side registry.)
+
+### The three USB scenarios are the same image asked about its link
+
+`usb-detach-reattach` and `usb-host-absent` join `usb-negative-control` as
+shipped-image scenarios with no module: what differs between them is not the
+firmware, it is what the **host** does. So the difference lives in the
+host-side registry (`Payload::host_plan`, `Payload::capture`), and this side
+carries only the sentinel each one can actually reach.
+
+Two of those sentinels are worth the sentence. `usb-negative-control` cannot
+use a stack heartbeat: `stack_probe` reports only when the high-water mark
+has grown, so the one report it could have seen went into a closed port and
+there may never be another — measured on the emulator twin, one `[stack]`
+line in a twenty-second run, at five seconds, into the dark. And
+`usb-host-absent` has no marker at all, because with no cable the device says
+nothing: its transcript is the emulator reading statics out of the guest, and
+only an emulator can record it.
 
 ### `usb-negative-control` is the same image, watched differently
 

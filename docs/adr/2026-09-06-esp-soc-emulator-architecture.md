@@ -18,7 +18,10 @@
   PAC-derived tables carry provenance headers).
 - **Context:** M3 of the 2026-09-06 esp-emulator plan (PD5, PD6, PD7), phases
   P1–P7, PRs #529–#555. The spike that preceded it is
-  `docs/reports/2026-09-07-esp-emu-c6-spike.md`.
+  `docs/reports/2026-09-07-esp-emu-c6-spike.md`. **Amended by M6 P4**
+  (PR #587): the honest-peripheral section gains per-register grades and
+  `--strict-grade`, with the USB-Serial-JTAG block as the worked example.
+  Status is unchanged — the ROM-up half is still M7's (DD29).
 
 ## Context
 
@@ -243,6 +246,59 @@ each with its reason in `validate.toml`, even the one where the machine is
 byte-equal to silicon on 372 values. Byte-equality on one payload is evidence,
 written where a reader can weigh it; it is not a promotion. `measured` will
 mean a transcript per class.
+
+#### Amendment (M6, 2026-09-07): the grade is also per **register**
+
+A block-level grade turned out to be too coarse to be useful, in both
+directions. "Modelled" covered a USB-Serial-JTAG block whose data path four
+transcripts had exercised byte for byte *and* twenty registers in the same
+block that no driver on this chip has ever touched. Saying one word about
+both hides the difference that matters when somebody asks "can I trust what
+this run did?".
+
+So a peripheral may publish a **`RegGrades`** table — register offset to
+`RegGrade::{Modeled, Documented, Measured}` — in its own file header, where a
+reviewer reads it beside the code it grades, and `--strict-grade <level>`
+refuses an access to a register below that level, before the peripheral sees
+it, reported like a strict-bus stop with the register's name and its grade.
+
+Three rules make it a policy rather than a feature.
+
+1. **A grade moves only with a transcript.** `documented` means a document
+   states the behaviour and the implementation follows it — the SOF period is
+   the USB full-speed frame, cited to the firmware's own module doc.
+   `measured` means a committed transcript exercised it. Nothing is promoted
+   because it looks right or because a test passes.
+2. **A grade is as coarse as the table, and the file says where it is coarser
+   than the evidence.** `RegGrades` is per register; three of USB_DEVICE's
+   `measured` registers are measured only in bits 1–3, and the header names
+   the bits it means and the bits it does not. A per-bit table is the obvious
+   refinement the day something depends on it.
+3. **The level applies to the blocks that published a table.** A block with
+   no table is passed over, because "nobody graded this block" is a different
+   statement from "this block is modelled" — and conflating them made
+   `documented` stop at the first MMIO access of any boot, on an accept table
+   nobody had said anything about, which measured how much of the chip had
+   been graded rather than what the run was allowed to trust. The run report
+   names the blocks it checked, so an ungraded one reads as an unanswered
+   question and never as a pass.
+
+**The worked example is USB_DEVICE** (`periph/usb_sj.rs`, M6). `ep1`,
+`ep1_conf` and the four `int_*` registers are `measured` — SOF present while
+attached and gone when the cable is out, `serial_in_ep_data_free` returning
+only once a host has drained the packet, `serial_in_empty` completing
+esp-hal's write future, `serial_out_recv_pkt` on the host's own bytes, all
+under `lp-emu/transcripts/esp32c6/`. `fram_num` and `conf0` are `documented`.
+Twenty are `modeled`, with one reason for all of them: neither esp-hal 1.1.1
+nor esp-println 0.17 touches them on the C6. The shipped image runs 5.5 s
+attached under `--strict-grade documented` and crosses none of them.
+
+**The two levels do not promote each other.** A class in `validate.toml` is
+graded for a whole configuration and a register is graded in its block; six
+`measured` registers do not make the `usb-serial-jtag` *class* `measured`,
+and it is not. What would is a silicon transcript of that class — which is
+exactly what the amendment is for: it lets the block say what it has earned
+without letting the configuration overclaim.
 
 ### Provenance on everything derived
 

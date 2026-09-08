@@ -1,0 +1,5 @@
+[INIT] Initializing board...
+
+[INFO] fw_esp32_common::serial::usb_connection: [io_task] host draining again; resuming protocol writes
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":967,"sdev":0,"min":967,"max":967.2},"frame_count":9670,"loaded_projects":[],"uptime_ms":10000,"memory":{"freeBytes":266504,"usedBytes":59032,"totalBytes":325536,"largestFreeBlock":200365},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]},"outputs":null,"link":{"parseFailures":0,"rxErrors":0,"queueFullDrops":0,"stalePartialFlushes":0,"hostNotDrainingMs":893,"hostDrainingAgainMs":8145,"notDrainingCount":1},"identity":{"baseMac":"a0:f2:62:87:b4:8c"}}}}

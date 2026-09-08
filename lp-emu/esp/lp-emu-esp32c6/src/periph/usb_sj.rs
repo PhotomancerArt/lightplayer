@@ -72,13 +72,49 @@
 //!   reset returns the device to its default state; nothing here observed
 //!   it.
 //!
-//! # Per-register grades (`--strict-grade`; revised by P4 once transcripts exist)
+//! # Per-register grades (`--strict-grade`)
+//!
+//! Revised by M6 P4 once the transcripts existed. A grade moves only with a
+//! transcript, and the four under `lp-emu/transcripts/esp32c6/` are what
+//! moved these: `boot-idle` (a host attached and draining, replayed against
+//! silicon's capture of the same image bytes), `usb-negative-control` (the
+//! port held closed from boot and opened at eight seconds),
+//! `usb-detach-reattach` and `usb-host-absent`.
 //!
 //! | grade | registers | why |
 //! |---|---|---|
-//! | `measured` | none yet | P4 promotes `ep1`, `ep1_conf` bits 0–2, `int_raw/int_st/int_ena/int_clr` bits 1–3 after the negative-control and boot-idle-over-USB transcripts land |
-//! | `documented` | `fram_num` (the SOF period), `conf0` (the PAC bit map; never written by the shipped image on the C6) | a document states the behaviour; nothing measured it |
-//! | `modeled` | everything else | our reading of the PAC and the drivers |
+//! | `measured` | `ep1`, `ep1_conf`, `int_raw`, `int_st`, `int_ena`, `int_clr` | the transitions those transcripts prove: SOF present while attached and absent when the cable is out; `serial_in_ep_data_free` returning only once a host has drained the packet; `serial_in_empty` completing esp-hal's write future; `serial_out_recv_pkt` on host bytes (`lp-cli`'s hello, `emu_usb_hello`); and the whole path exercised byte for byte by both drivers |
+//! | `documented` | `fram_num` (the SOF period is the USB full-speed frame), `conf0` (the PAC bit map; never written by the shipped image on the C6) | a document states the behaviour; nothing measured it |
+//! | `modeled` | everything else — listed under "Modeled registers" below | our reading of the PAC and the drivers |
+//!
+//! **The grade is per register, and three of these registers are only
+//! measured bit by bit.** What the transcripts prove of `int_raw` / `int_st`
+//! / `int_ena` / `int_clr` is bits 1–3 (`sof`, `serial_out_recv_pkt`,
+//! `serial_in_empty`) and of `ep1_conf` bits 0–2 (`wr_done`,
+//! `serial_in_ep_data_free`, `serial_out_ep_data_avail`). The rest of those
+//! registers — the four bus-error bits, `in_token_rec_in_ep1`,
+//! `usb_bus_reset`, the two zero-payload bits, `rts_chg`/`dtr_chg`, the two
+//! line-coding bits — is still our reading of the PAC, and the firmware
+//! never enables or reads any of them. Grading them with the register they
+//! live in is coarser than the evidence; a per-bit table would be honest to
+//! the bit and is the obvious refinement if anything ever depends on it.
+//! Recorded here rather than smoothed over.
+//!
+//! # Modeled registers (the strict gate's list)
+//!
+//! `test`, `jfifo_st`, `in_ep0_st`, `in_ep1_st`, `in_ep2_st`, `in_ep3_st`,
+//! `out_ep0_st`, `out_ep1_st`, `out_ep2_st`, `misc_conf`, `mem_conf`,
+//! `chip_rst`, `set_line_code_w0`, `set_line_code_w1`, `get_line_code_w0`,
+//! `get_line_code_w1`, `config_update`, `ser_afifo_config`, `bus_reset_st`,
+//! `date`. Reset values are the PAC's and reads answer them; the behaviour
+//! behind them is not modelled, for one reason each time: **neither esp-hal
+//! 1.1.1 nor esp-println 0.17 touches them on the C6**. A run under
+//! `--strict-grade documented` therefore crosses none of them, and one that
+//! did would stop with the register's name — which is the point of the flag.
+//! (`out_ep1_st` is the exception that proves it: the OUT path writes it and
+//! the drivers read `wr_addr`, but only through `drain_rx_fifo`'s `avail`
+//! test, and no transcript here sends enough host bytes to exercise its
+//! wrap. Modeled, and said so.)
 //!
 //! # Not modelled, on purpose
 //!
@@ -351,10 +387,34 @@ impl UsbSerialJtag {
     }
 
     /// The per-register grade table (the file header's).
+    ///
+    /// Anything unlisted is `Modeled`, which for this block is a considered
+    /// answer rather than a default: the header lists those registers by
+    /// name, with the reason the firmware never reaches them.
     pub fn grades() -> RegGrades {
         RegGrades::new()
+            // The data path and the three interrupt bits the M6 transcripts
+            // exercise end to end. See the header for the bit-level caveat.
+            .with_grade(EP1, RegGrade::Measured)
+            .with_grade(EP1_CONF, RegGrade::Measured)
+            .with_grade(INT_RAW, RegGrade::Measured)
+            .with_grade(INT_ST, RegGrade::Measured)
+            .with_grade(INT_ENA, RegGrade::Measured)
+            .with_grade(INT_CLR, RegGrade::Measured)
             .with_grade(FRAM_NUM, RegGrade::Documented)
             .with_grade(CONF0, RegGrade::Documented)
+    }
+
+    /// Every register this block grades `Modeled`, in offset order — the
+    /// list the README and `--strict-grade` both mean by "the modeled
+    /// registers".
+    pub fn modeled_registers() -> Vec<&'static str> {
+        let grades = Self::grades();
+        (0..0x100u32)
+            .step_by(4)
+            .filter(|off| grades.grade(*off) == RegGrade::Modeled)
+            .filter_map(|off| regs::USB_DEVICE.name(off))
+            .collect()
     }
 
     // ---- what a test or the machine reads back ---------------------------
@@ -1001,8 +1061,8 @@ impl Peripheral for UsbSerialJtag {
         regs::USB_DEVICE.name(off)
     }
 
-    fn reg_grade(&self, off: u32) -> RegGrade {
-        self.grades.grade(off)
+    fn reg_grade(&self, off: u32) -> Option<RegGrade> {
+        Some(self.grades.grade(off))
     }
 
     /// The one block the machine drives from outside the guest: M6 P3's
@@ -1903,28 +1963,86 @@ mod tests {
         assert_eq!(other.save_state(), blob);
     }
 
+    /// The promoted table, and the flag that reads it. `fram_num` passes
+    /// under `measured` because nothing below `measured` is; `jfifo_st` — a
+    /// register no driver on this chip touches — fails, which is what the
+    /// list in the file header is a list of.
     #[test]
-    fn strict_grade_refuses_ep1_and_answers_fram_num() {
+    fn strict_grade_answers_the_measured_path_and_refuses_a_modeled_register() {
         let mut bus = SocBus::new();
         bus.add_mmio_window(memmap::periph::USB_DEVICE, 0x100);
         let mut u = UsbSerialJtag::absent(None);
-        assert_eq!(u.reg_grade(EP1), RegGrade::Modeled);
-        assert_eq!(u.reg_grade(FRAM_NUM), RegGrade::Documented);
-        assert_eq!(u.reg_grade(CONF0), RegGrade::Documented);
-        assert_eq!(u.reg_grade(EP1_CONF), RegGrade::Modeled);
+        // M6 P4's promotions, each backed by a committed transcript.
+        for off in [EP1, EP1_CONF, INT_RAW, INT_ST, INT_ENA, INT_CLR] {
+            assert_eq!(u.reg_grade(off), Some(RegGrade::Measured), "{off:#05x}");
+        }
+        assert_eq!(u.reg_grade(FRAM_NUM), Some(RegGrade::Documented));
+        assert_eq!(u.reg_grade(CONF0), Some(RegGrade::Documented));
+        assert_eq!(u.reg_grade(JFIFO_ST), Some(RegGrade::Modeled));
         u.attached(0);
         bus.add_peripheral(memmap::periph::USB_DEVICE, 0x100, Box::new(u));
+
+        // `documented`: the whole data path answers, and so does fram_num.
         bus.set_strict_grade(Some(RegGrade::Documented));
-        assert_eq!(
-            bus.read_word(memmap::periph::USB_DEVICE + FRAM_NUM)
-                .unwrap(),
-            0
+        assert!(bus.read_word(memmap::periph::USB_DEVICE + EP1).is_ok());
+        assert!(bus.read_word(memmap::periph::USB_DEVICE + FRAM_NUM).is_ok());
+        assert!(
+            bus.read_word(memmap::periph::USB_DEVICE + JFIFO_ST)
+                .is_err(),
+            "a register no driver on this chip touches is not documented"
         );
-        assert!(bus.read_word(memmap::periph::USB_DEVICE + EP1).is_err());
         let v = bus.first_strict_violation().unwrap();
         assert_eq!(v.grade, Some(RegGrade::Modeled));
-        assert_eq!(v.address, memmap::periph::USB_DEVICE);
+        assert_eq!(v.address, memmap::periph::USB_DEVICE + JFIFO_ST);
         assert!(v.in_mmio_window);
+
+        // `measured`: the data path still answers, fram_num no longer does.
+        let mut bus = SocBus::new();
+        bus.add_mmio_window(memmap::periph::USB_DEVICE, 0x100);
+        let mut u = UsbSerialJtag::absent(None);
+        u.attached(0);
+        bus.add_peripheral(memmap::periph::USB_DEVICE, 0x100, Box::new(u));
+        bus.set_strict_grade(Some(RegGrade::Measured));
+        assert!(bus.read_word(memmap::periph::USB_DEVICE + EP1_CONF).is_ok());
+        assert!(
+            bus.read_word(memmap::periph::USB_DEVICE + FRAM_NUM)
+                .is_err(),
+            "the SOF period is documented, never measured here"
+        );
+        assert_eq!(
+            bus.first_strict_violation().unwrap().grade,
+            Some(RegGrade::Documented)
+        );
+    }
+
+    /// The list the README publishes is generated from the table, so the two
+    /// cannot drift: a register promoted here leaves the list by itself.
+    #[test]
+    fn the_modeled_register_list_is_the_table_read_back() {
+        let modeled = UsbSerialJtag::modeled_registers();
+        for measured in ["ep1", "ep1_conf", "int_raw", "int_st", "int_ena", "int_clr"] {
+            assert!(!modeled.contains(&measured), "{measured}");
+        }
+        for documented in ["fram_num", "conf0"] {
+            assert!(!modeled.contains(&documented), "{documented}");
+        }
+        for m in [
+            "test",
+            "jfifo_st",
+            "in_ep0_st",
+            "out_ep1_st",
+            "misc_conf",
+            "mem_conf",
+            "chip_rst",
+            "set_line_code_w0",
+            "get_line_code_w1",
+            "config_update",
+            "ser_afifo_config",
+            "bus_reset_st",
+            "date",
+        ] {
+            assert!(modeled.contains(&m), "`{m}` is missing from the list");
+        }
     }
 
     #[test]

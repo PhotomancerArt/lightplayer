@@ -252,7 +252,14 @@ destination now is what keeps the next person from inventing a third home.
 - **One `GetProject` per project route.** The pill and the popover both
   mounted the roster hook during the overlap phase; with the pill gone,
   `web_app` holds the single mount and its answer feeds both the
-  derivation and the panel.
+  derivation and the panel. *Amended 2026-09-07:* one per route **plus one
+  per publish** of the watched project. The route's single ask routinely
+  precedes this tab's own first publish, which left the face reading
+  "Private" until a reload (`docs/debt/relationship-face-stale-after-publish.md`,
+  retired); the driver now files a publish notice
+  (`cloud::sync::publish_notice`) and the hook re-asks when one names the
+  project it is watching. A notice for any other project costs nothing, so
+  a sign-in sweep over a whole library is still one round trip here.
 - **The visitor banner shrank to a status strip** (vision Q4: shrink
   first, retire later) — it keeps the pristine/edited/edit-live line,
   Copy link, and Discard. It kept exactly one fork: the **edited** state's,
@@ -340,6 +347,12 @@ destination now is what keeps the next person from inventing a third home.
   with no ledger row keeps the static wording: no row is a driver that has
   not run, not a failure. The driver's recorded sentence is now in a
   person's words for the actionable failures (`sync_trip::describe_error`).
+  *2026-09-07, later:* the sentence was honest about a published project
+  whose roster had not been re-asked, but the FACE was not — it stayed
+  "Private" until a reload. The roster now re-asks on the driver's publish
+  notice (above), so `MineLocal` is left holding only what it should:
+  unpublished, restricted, and the projects a driver is still trying to
+  get to the service.
 - **Provenance prose** ("Forked from Plasma Duo") is not reachable from an
   open project: it lives on `PackageMeta` and surfaces only on gallery
   cards. The Where section says what this surface actually knows;

@@ -391,17 +391,41 @@ impl SocBus {
     /// and, like it, before the peripheral sees the access.
     ///
     /// `Some(RegGrade::Modeled)` refuses nothing (no grade is below it);
-    /// `Some(Documented)` stops on the first `Modeled` register any block
-    /// answers — which on a chip whose accept tables are all `Modeled` is
-    /// the first MMIO access of the boot. That is the point: the level says
-    /// what the run is allowed to trust, and a register outside it is a
-    /// stop with its name in the report, not a silent guess.
+    /// `Some(Documented)` refuses a register a graded block calls `Modeled`,
+    /// and `Some(Measured)` refuses everything a transcript has not proved.
+    ///
+    /// # Scope: the blocks that published a table (M6 P4)
+    ///
+    /// The level applies to a block that **answers** `reg_grade` — one whose
+    /// registers somebody read against the PAC, the drivers and a transcript
+    /// and then wrote down. A block that publishes no table is passed over,
+    /// because "nobody graded this" is a different statement from "this is
+    /// modelled", and conflating them made the level useless: with every
+    /// accept table ungraded, `documented` stopped at the first MMIO access
+    /// of the boot (M6 P2, deviation 4) and the flag measured how much of
+    /// the chip had been graded rather than what the run was allowed to
+    /// trust.
+    ///
+    /// [`blocks_in_strict_grade_scope`](Self::blocks_in_strict_grade_scope)
+    /// is what keeps that honest: the run report names the blocks that were
+    /// actually checked, so an ungraded one reads as an unanswered question
+    /// and never as a pass.
     pub fn set_strict_grade(&mut self, level: Option<RegGrade>) {
         self.strict_grade = level;
     }
 
     pub fn strict_grade(&self) -> Option<RegGrade> {
         self.strict_grade
+    }
+
+    /// The names of the blocks a `--strict-grade` run actually checks: those
+    /// that publish a per-register grade table.
+    pub fn blocks_in_strict_grade_scope(&self) -> Vec<&'static str> {
+        self.mmio
+            .iter()
+            .filter(|w| w.periph.reg_grade(0).is_some())
+            .map(|w| w.periph.name())
+            .collect()
     }
 
     /// Mirror the hart's misaligned-access policy onto the bus.
@@ -1113,7 +1137,11 @@ impl SocBus {
         let Some(level) = self.strict_grade else {
             return Ok(());
         };
-        let grade = self.mmio[index].periph.reg_grade(off);
+        // A block that publishes no grade table is out of scope, not
+        // `Modeled`: see `Peripheral::reg_grade`.
+        let Some(grade) = self.mmio[index].periph.reg_grade(off) else {
+            return Ok(());
+        };
         if grade >= level {
             return Ok(());
         }
@@ -2011,8 +2039,8 @@ mod tests {
             }
         }
 
-        fn reg_grade(&self, off: u32) -> RegGrade {
-            self.grades.grade(off)
+        fn reg_grade(&self, off: u32) -> Option<RegGrade> {
+            Some(self.grades.grade(off))
         }
 
         fn save_state(&self) -> Vec<u8> {
@@ -2020,6 +2048,59 @@ mod tests {
         }
 
         fn load_state(&mut self, _bytes: &[u8]) {}
+    }
+
+    /// A block that publishes no grade table — every accept table on the
+    /// chip today.
+    struct Ungraded;
+
+    impl Peripheral for Ungraded {
+        fn name(&self) -> &'static str {
+            "PCR"
+        }
+
+        fn read(&mut self, _off: u32, _width: Width, _cx: &mut BusCx<'_>) -> u32 {
+            0x77
+        }
+
+        fn write(&mut self, _off: u32, _width: Width, _value: u32, _cx: &mut BusCx<'_>) {}
+
+        fn save_state(&self) -> Vec<u8> {
+            Vec::new()
+        }
+
+        fn load_state(&mut self, _bytes: &[u8]) {}
+    }
+
+    /// M6 P4's scoping rule. "Nobody graded this block" is not "this block
+    /// is modelled": a run under `--strict-grade documented` crosses an
+    /// accept table without stopping, and the report says which blocks were
+    /// actually checked so that the pass cannot be mistaken for a verdict on
+    /// the whole chip.
+    #[test]
+    fn strict_grade_passes_over_a_block_that_publishes_no_table_and_says_which_it_checked() {
+        let mut bus = bus_with_ram();
+        bus.add_mmio_window(0x6000_0000, 0x0010_0000);
+        bus.add_peripheral(
+            0x6000_f000,
+            0x100,
+            Box::new(Graded {
+                grades: RegGrades::new().with_grade(0x24, RegGrade::Documented),
+                reads: 0,
+            }),
+        );
+        bus.add_peripheral(0x6009_6000, 0x100, Box::new(Ungraded));
+
+        bus.set_strict_grade(Some(RegGrade::Documented));
+        // The ungraded block answers, at any level.
+        assert_eq!(bus.read_word(0x6009_6000).unwrap(), 0x77);
+        bus.set_strict_grade(Some(RegGrade::Measured));
+        assert_eq!(bus.read_word(0x6009_6004).unwrap(), 0x77);
+        assert!(bus.first_strict_violation().is_none());
+        // And the graded one is still checked.
+        assert!(bus.read_word(0x6000_f000).is_err());
+
+        assert_eq!(bus.blocks_in_strict_grade_scope(), vec!["USB_DEVICE"]);
     }
 
     #[test]
