@@ -2664,9 +2664,7 @@ impl StudioController {
         // connect for silicon is `open_device_lens`'s own job, and it has
         // been doing it since the device route existed.
         let is_sim = self.device_sims.contains_key(&uid);
-        if is_sim
-            && let Some(device) = self.devices.device_for_key(&uid).map(|device| device.id)
-        {
+        if is_sim && let Some(device) = self.devices.device_for_key(&uid).map(|device| device.id) {
             self.execute_devices_op(crate::DevicesOp::on_sim(crate::DeviceAction::Connect {
                 device,
             }))
