@@ -10,7 +10,9 @@ extern crate alloc;
 
 use alloc::{vec, vec::Vec};
 
-use lp_emu_core::{Bus, CycleModel, InstClass, MemoryAccessKind, MemoryError, Watchpoint};
+use lp_emu_core::{
+    Bus, CycleModel, InstClass, MemoryAccessKind, MemoryError, PureRead, Watchpoint,
+};
 use lp_riscv_inst::{Gpr, encode};
 
 use super::csr::{
@@ -37,6 +39,12 @@ const VEC: u32 = RAM_BASE + 0x200;
 const GUARD: u32 = RAM_BASE + 0x300;
 /// The address whose accesses raise the bus's side-band.
 const MMIO: u32 = RAM_BASE + 0x380;
+/// A register the bus declares **pure**: reading it has no side effect and
+/// its value moves only when the test moves it. M4's poll-loop skip.
+const PURE: u32 = RAM_BASE + 0x390;
+/// A register whose read is a **pop** — the FIFO shape. Never pure, however
+/// tightly the guest spins on it.
+const FIFO: u32 = RAM_BASE + 0x394;
 
 // --- the bus double ---------------------------------------------------------
 
@@ -58,6 +66,15 @@ struct TestBus {
     /// When set, an access to [`MMIO`] latches this into `pending` — a
     /// peripheral raising its line from inside the store.
     raise_on_mmio: Option<u8>,
+    /// What [`PURE`] reads as. The test moves it; nothing else does.
+    pure_value: u32,
+    /// The pure-read side-band, cleared per instruction in `set_issuing`
+    /// exactly as `SocBus` does it.
+    pure_read: Option<PureRead>,
+    /// Every [`Bus::note_poll_skip`] the hart emitted: `(pc, address, n)`.
+    poll_notes: Vec<(u32, u32, u64)>,
+    /// [`FIFO`] pops on every read.
+    fifo_pops: u32,
 }
 
 impl TestBus {
@@ -69,6 +86,10 @@ impl TestBus {
             sideband_reads: 0,
             pending: None,
             raise_on_mmio: None,
+            pure_value: 0,
+            pure_read: None,
+            poll_notes: Vec::new(),
+            fifo_pops: 0,
         }
     }
 
@@ -160,6 +181,23 @@ impl Bus for TestBus {
         self.check(address, 4, MemoryAccessKind::Read)?;
         let o = self.offset(address, 4, MemoryAccessKind::Read)?;
         self.note_access(address);
+        // The two register shapes M4 is written against, ahead of the plain
+        // RAM answer.
+        if address == PURE {
+            self.pure_read = Some(PureRead {
+                address,
+                value: self.pure_value,
+            });
+            return Ok(self.pure_value as i32);
+        }
+        if address == FIFO {
+            // The FIFO shape in its sharpest form: the *value* repeats, so
+            // `(pc, address, value)` and the register file both look like a
+            // fixed point — and the read still changes hidden state. Only
+            // the bus's refusal to call it pure stops the skip.
+            self.fifo_pops += 1;
+            return Ok(0);
+        }
         Ok(i32::from_le_bytes([
             self.ram[o],
             self.ram[o + 1],
@@ -219,6 +257,20 @@ impl Bus for TestBus {
         core::mem::take(&mut self.sideband)
     }
 
+    /// One clear per instruction, as `SocBus` does it: a load that reached
+    /// plain RAM must never inherit the previous load's answer.
+    fn set_issuing(&mut self, _pc: u32, _cycle: u64) {
+        self.pure_read = None;
+    }
+
+    fn take_pure_read(&mut self) -> Option<PureRead> {
+        self.pure_read.take()
+    }
+
+    fn note_poll_skip(&mut self, pc: u32, address: u32, iterations: u64) {
+        self.poll_notes.push((pc, address, iterations));
+    }
+
     fn pending_cpu_interrupt(&self) -> Option<u8> {
         self.pending
     }
@@ -229,6 +281,10 @@ impl Bus for TestBus {
 struct Rig {
     hart: MachineHart<TestBus>,
     bus: TestBus,
+    /// The poll-skip horizon `run` passes. `u64::MAX` — "nothing outside can
+    /// change anything, ever" — for every test that is not about the skip;
+    /// the poll tests set it.
+    horizon: u64,
 }
 
 impl Rig {
@@ -244,6 +300,7 @@ impl Rig {
         Self {
             hart,
             bus: TestBus::new(),
+            horizon: u64::MAX,
         }
     }
 
@@ -261,7 +318,7 @@ impl Rig {
     }
 
     fn run(&mut self, budget: u64) -> SliceEnd {
-        self.hart.run_slice(&mut self.bus, budget)
+        self.hart.run_slice(&mut self.bus, budget, self.horizon)
     }
 
     fn reg(&self, n: u8) -> u32 {
@@ -845,4 +902,315 @@ fn scratch_csrs_read_back_what_was_written() {
     assert_eq!(rig.run(500), SliceEnd::Ebreak { pc: RAM_BASE + 16 });
     assert_eq!(rig.reg(6), 0x1234_5678);
     assert_eq!(rig.reg(7), 0x1234_5678);
+}
+
+// --- M4: the pure poll-loop skip --------------------------------------------
+//
+// The claim under test is *exactness*, not speed: a run that credits whole
+// iterations of a pure poll loop must reach the same cycle, the same
+// instruction count and the same architectural state as a run that executes
+// every one of them. So every test here runs the same program twice — once
+// with the skip and once with `set_poll_skip(false)` — and compares.
+//
+// Tests 2, 3, 4 and 6 are the other half: each takes the same loop and adds
+// one thing that makes it *not* a fixed point, and asserts that nothing was
+// skipped at all. A detector that only ever fired would pass test 1.
+
+/// Where one drive ended, and what it cost.
+#[derive(Debug, PartialEq, Eq)]
+struct Drive {
+    end: SliceEnd,
+    cycles: u64,
+    instructions: u64,
+    pc: u32,
+    skips: u64,
+    iterations: u64,
+}
+
+impl Rig {
+    /// `lw a0, 0(a1); <body>; andi a2, a0, 1; beq a2, x0, loop; ebreak`
+    ///
+    /// The shape every real poll loop has: load a status word, test a bit,
+    /// go round while it is clear. `a1` holds the register's address.
+    fn poll_loop(body: &[u32]) -> Vec<u32> {
+        let mut words = vec![encode::lw(Gpr::new(10), Gpr::new(11), 0)];
+        words.extend_from_slice(body);
+        words.push(encode::andi(Gpr::new(12), Gpr::new(10), 1));
+        let back = -4 * (words.len() as i32);
+        words.push(encode::beq(Gpr::new(12), Gpr::new(0), back));
+        words.push(encode::ebreak());
+        words
+    }
+
+    /// Load a poll loop on `reg` and put the hart at its first instruction.
+    fn load_poll_loop(&mut self, reg: u32, body: &[u32]) {
+        let program = Self::poll_loop(body);
+        self.load(RAM_BASE, &program);
+        self.set_reg(11, reg);
+    }
+
+    /// Drive the hart the way `Esp32C6Machine::run_until` does: short capped
+    /// slices, an *event* at `event_at` that gives the pure register a new
+    /// value, and a **horizon** that names the earliest cycle at which
+    /// anything outside the hart can change what the guest sees — uncapped,
+    /// which is the whole point of M4's second `run_slice` argument.
+    ///
+    /// A 64-cycle slice cap stands in for the machine's 8,192: the same
+    /// shape, small enough that a run to `stop` crosses many boundaries.
+    fn drive(&mut self, stop: u64, event_at: u64, event_value: u32) -> Drive {
+        const SLICE: u64 = 64;
+        loop {
+            let now = self.hart.cycle_count();
+            if now >= event_at {
+                self.bus.pure_value = event_value;
+            }
+            if now >= stop {
+                return self.drive_end(SliceEnd::BudgetExhausted);
+            }
+            let horizon = if now < event_at { event_at } else { stop };
+            let deadline = horizon.min(now + SLICE).min(stop);
+            let budget = deadline.saturating_sub(now).max(1);
+            let end = self
+                .hart
+                .run_slice(&mut self.bus, budget, horizon.max(now + budget));
+            if !matches!(end, SliceEnd::BudgetExhausted) {
+                return self.drive_end(end);
+            }
+        }
+    }
+
+    /// The same, but what arrives at `irq_at` is a CPU interrupt rather than
+    /// a new register value. The horizon is bounded by it exactly as the
+    /// real machine's is, because an interrupt reaches the hart from a
+    /// scheduled event.
+    fn drive_irq(&mut self, stop: u64, irq_at: u64, cpu_int: u8) -> Drive {
+        const SLICE: u64 = 64;
+        loop {
+            let now = self.hart.cycle_count();
+            if now >= irq_at {
+                self.bus.pending = Some(cpu_int);
+                self.hart.set_external(Some(cpu_int));
+            }
+            if now >= stop {
+                return self.drive_end(SliceEnd::BudgetExhausted);
+            }
+            let horizon = if now < irq_at { irq_at } else { stop };
+            let deadline = horizon.min(now + SLICE).min(stop);
+            let budget = deadline.saturating_sub(now).max(1);
+            let end = self
+                .hart
+                .run_slice(&mut self.bus, budget, horizon.max(now + budget));
+            if !matches!(end, SliceEnd::BudgetExhausted) {
+                return self.drive_end(end);
+            }
+        }
+    }
+
+    fn drive_end(&self, end: SliceEnd) -> Drive {
+        Drive {
+            end,
+            cycles: self.hart.cycle_count(),
+            instructions: self.hart.instruction_count(),
+            pc: self.hart.pc(),
+            skips: self.hart.poll_skips(),
+            iterations: self.hart.polls_skipped(),
+        }
+    }
+}
+
+/// Build a rig, load a poll loop on `reg` with `body` spliced into it, and
+/// drive it to `stop` with the register changing at `event_at`. `skip` picks
+/// which half of the oracle this is.
+fn poll_run(reg: u32, body: &[u32], skip: bool, stop: u64, event_at: u64) -> (Drive, [i32; 32]) {
+    let mut rig = Rig::new();
+    rig.hart.set_poll_skip(skip);
+    rig.load_poll_loop(reg, body);
+    let drive = rig.drive(stop, event_at, 1);
+    (drive, *rig.hart.regs())
+}
+
+/// **Test 1.** A pure `lw`/`andi`/`beq` poll is credited in whole
+/// iterations, and the run that skipped is indistinguishable from the run
+/// that did not — same stopping cycle, same instruction count, same `pc`,
+/// same registers. The event that changes the register still lands on time:
+/// both runs leave the loop at the same cycle.
+#[test]
+fn a_pure_poll_loop_is_skipped_and_the_run_is_unchanged() {
+    let (skipped, skipped_regs) = poll_run(PURE, &[], true, 40_000, 30_000);
+    let (executed, executed_regs) = poll_run(PURE, &[], false, 40_000, 30_000);
+
+    assert_eq!(
+        skipped.end,
+        SliceEnd::Ebreak {
+            pc: RAM_BASE + 4 * 3
+        },
+        "the loop leaves through its `ebreak` once the register changes"
+    );
+    assert_eq!(skipped.cycles, executed.cycles, "same cycle");
+    assert_eq!(
+        skipped.instructions, executed.instructions,
+        "same instruction count"
+    );
+    assert_eq!(skipped.pc, executed.pc);
+    assert_eq!(skipped.end, executed.end);
+    assert_eq!(skipped_regs, executed_regs, "same register file");
+
+    assert!(skipped.skips > 0, "the loop was recognised");
+    assert!(
+        skipped.iterations > 1_000,
+        "and credited in bulk, not one at a time: {} iterations",
+        skipped.iterations
+    );
+    assert_eq!(executed.skips, 0, "--no-poll-skip skips nothing");
+    assert_eq!(executed.iterations, 0);
+}
+
+/// **Test 2.** The same loop with a countdown in a register. The register
+/// file differs on every iteration, so it is not a fixed point and nothing
+/// is credited — this is the timeout-in-a-register case, and the one a
+/// register-file comparison exists to catch.
+#[test]
+fn a_poll_loop_with_a_countdown_is_never_skipped() {
+    // `addi a3, a3, -1`
+    let body = [encode::addi(Gpr::new(13), Gpr::new(13), -1)];
+    let (skipped, skipped_regs) = poll_run(PURE, &body, true, 40_000, 30_000);
+    let (executed, executed_regs) = poll_run(PURE, &body, false, 40_000, 30_000);
+
+    assert_eq!(skipped.skips, 0, "a countdown is not a fixed point");
+    assert_eq!(skipped.iterations, 0);
+    assert_eq!(skipped.cycles, executed.cycles);
+    assert_eq!(skipped.instructions, executed.instructions);
+    assert_eq!(skipped_regs, executed_regs);
+}
+
+/// **Test 3.** The same loop with a store in the body. A store can change
+/// anything, so the detector forgets everything it had — the
+/// timeout-in-memory case.
+#[test]
+fn a_poll_loop_with_a_store_is_never_skipped() {
+    // `sw a0, 0(a4)` with a4 pointing at a scratch word.
+    let body = [encode::sw(Gpr::new(14), Gpr::new(10), 0)];
+    let mut rig = Rig::new();
+    rig.load_poll_loop(PURE, &body);
+    rig.set_reg(14, GUARD);
+    let skipped = rig.drive(40_000, 30_000, 1);
+
+    let mut rig = Rig::new();
+    rig.hart.set_poll_skip(false);
+    rig.load_poll_loop(PURE, &body);
+    rig.set_reg(14, GUARD);
+    let executed = rig.drive(40_000, 30_000, 1);
+
+    assert_eq!(skipped.skips, 0, "a store in the body is not a fixed point");
+    assert_eq!(skipped.cycles, executed.cycles);
+    assert_eq!(skipped.instructions, executed.instructions);
+}
+
+/// **Test 4.** The same loop reading `mcycle`. A cycle-based timeout writes
+/// a different register value every iteration *and* is a `SYSTEM`
+/// instruction, either of which is disqualifying; the test asserts the
+/// outcome rather than which of the two rules did it.
+#[test]
+fn a_poll_loop_reading_mcycle_is_never_skipped() {
+    // `csrrs a3, x0, mcycle`
+    let body = [encode::csrrs(Gpr::new(13), Gpr::new(0), MCYCLE)];
+    let (skipped, _) = poll_run(PURE, &body, true, 40_000, 30_000);
+    let (executed, _) = poll_run(PURE, &body, false, 40_000, 30_000);
+
+    assert_eq!(skipped.skips, 0, "a loop that reads the clock is a delay");
+    assert_eq!(skipped.cycles, executed.cycles);
+    assert_eq!(skipped.instructions, executed.instructions);
+}
+
+/// **Test 5.** An interrupt asserted at cycle X while a skip is in flight is
+/// taken at the same cycle as it would have been without the skip. The
+/// horizon is what makes this true: it never reaches past the event that
+/// raises the line.
+#[test]
+fn an_interrupt_during_a_skip_is_taken_at_the_same_cycle() {
+    fn run(skip: bool) -> Drive {
+        let mut rig = Rig::new();
+        rig.hart.set_poll_skip(skip);
+        rig.trap_to_ebreak();
+        assert!(rig.hart.set_csr_raw(MIE, 1 << 7));
+        rig.load_poll_loop(PURE, &[]);
+        // The register never changes: the only way out is the interrupt.
+        rig.drive_irq(40_000, 30_000, 7)
+    }
+
+    let skipped = run(true);
+    let executed = run(false);
+
+    assert_eq!(skipped.end, SliceEnd::Ebreak { pc: VEC }, "the handler ran");
+    assert_eq!(skipped.end, executed.end);
+    assert_eq!(
+        skipped.cycles, executed.cycles,
+        "the trap was taken at the same cycle"
+    );
+    assert_eq!(skipped.instructions, executed.instructions);
+    assert!(skipped.skips > 0, "there was a skip to be interrupted");
+}
+
+/// **Test 6.** A poll on a register the bus does *not* declare pure — a FIFO
+/// whose read pops — is never skipped, however tight the loop is.
+#[test]
+fn a_poll_loop_on_an_impure_register_is_never_skipped() {
+    let mut rig = Rig::new();
+    rig.load_poll_loop(FIFO, &[]);
+    // The FIFO answers 0 for ever, so the loop spins to the stop cycle and
+    // looks *exactly* like the loop test 1 skips — same instructions, same
+    // repeating value, same registers. The one difference is that the bus
+    // does not declare the read pure.
+    let drive = rig.drive(4_000, u64::MAX, 0);
+    assert_eq!(drive.skips, 0, "reading a FIFO pops it");
+    assert_eq!(drive.iterations, 0);
+    assert_eq!(rig.bus.poll_notes, Vec::new());
+    assert!(
+        rig.bus.fifo_pops > 100,
+        "the loop really did spin on it: {} reads",
+        rig.bus.fifo_pops
+    );
+}
+
+/// The trace note is one line per skip, naming the load's `pc`, the address
+/// and how many iterations were credited — and the iterations it claims add
+/// up to the counter the exit report prints.
+#[test]
+fn each_skip_emits_exactly_one_note() {
+    let mut rig = Rig::new();
+    rig.load_poll_loop(PURE, &[]);
+    let drive = rig.drive(40_000, 30_000, 1);
+
+    assert_eq!(rig.bus.poll_notes.len() as u64, drive.skips);
+    assert!(!rig.bus.poll_notes.is_empty());
+    for (pc, address, n) in &rig.bus.poll_notes {
+        assert_eq!(*pc, RAM_BASE, "the note names the load, not the branch");
+        assert_eq!(*address, PURE);
+        assert!(*n > 0);
+    }
+    let claimed: u64 = rig.bus.poll_notes.iter().map(|(_, _, n)| *n).sum();
+    assert_eq!(claimed, drive.iterations);
+}
+
+/// The detector is slice-scoped: evidence gathered before a `wfi` — which
+/// moves guest time without retiring instructions — cannot be used after
+/// one. Left in, the loop's measured cost would be a lie about the cycles
+/// the idle skip jumped.
+#[test]
+fn moving_guest_time_forgets_the_detector() {
+    let mut rig = Rig::new();
+    rig.load_poll_loop(PURE, &[]);
+    // Four iterations is exactly what the detector needs, so it is armed.
+    let _ = rig.hart.run_slice(&mut rig.bus, 40, 40);
+    rig.hart.advance_to_cycle(20_000);
+    // With the evidence forgotten, the next four iterations rebuild it and
+    // the credited cycles still land at the horizon, not past it.
+    let drive = rig.drive(40_000, 30_000, 1);
+    assert!(drive.cycles <= 40_000 + 64);
+    assert_eq!(
+        drive.end,
+        SliceEnd::Ebreak {
+            pc: RAM_BASE + 4 * 3
+        }
+    );
 }

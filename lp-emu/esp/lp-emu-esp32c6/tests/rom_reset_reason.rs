@@ -65,7 +65,7 @@ fn call_rtc_get_reset_reason(machine: &mut Esp32C6Machine) -> u32 {
     machine.harts[0].set_pc(entry);
     machine.harts[0].regs_mut()[1] = RETURN_TO as i32; // ra
 
-    match machine.harts[0].run_slice(&mut machine.bus, 1_000) {
+    match machine.harts[0].run_slice(&mut machine.bus, 1_000, u64::MAX) {
         SliceEnd::Ebreak { pc } => assert_eq!(pc, RETURN_TO, "returned somewhere unexpected"),
         other => panic!("the ROM routine did not return: {other:?}"),
     }

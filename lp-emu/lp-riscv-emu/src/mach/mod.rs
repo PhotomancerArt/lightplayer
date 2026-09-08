@@ -132,6 +132,80 @@ pub enum HartFault {
     UnmappedExecutorError { pc: u32 },
 }
 
+/// Consecutive matching pure reads before the hart will credit whole
+/// iterations of the loop that produced them.
+///
+/// The first establishes the key. The second measures the per-iteration
+/// cycle and instruction deltas and snapshots the register file. The third
+/// and fourth each have to reproduce both deltas *and* the register file
+/// exactly — two independent confirmations of the same claim. Three would
+/// very probably do; the fourth costs one iteration of a loop that is about
+/// to be skipped thousands of times, and buys the property that a two-state
+/// alternation (a loop whose registers ping-pong) can never be mistaken for
+/// a fixed point.
+const POLL_FIXED_POINT_HITS: u32 = 4;
+
+/// Evidence that the guest is spinning on a side-effect-free register.
+///
+/// **Slice-scoped**: [`MachineHart::run_slice`] resets it on entry, so every
+/// piece of evidence in it was gathered during one slice, with nothing but
+/// the hart touching the machine in between. That is what makes the
+/// fixed-point argument local — no reasoning is needed about what the owning
+/// machine does at a slice boundary, because no evidence survives one.
+#[derive(Clone, Copy, Debug)]
+struct PollDetector {
+    /// `(pc of the load, address read, value returned)` — what this run of
+    /// evidence is about. `None` means "no run in progress".
+    key: Option<(u32, u32, u32)>,
+    /// Consecutive reads matching `key`, counting the one that set it.
+    hits: u32,
+    /// `cycle_count` and `instruction_count` at the previous matching read.
+    last_cycle: u64,
+    last_instr: u64,
+    /// One iteration's cost, measured between hit 1 and hit 2 and confirmed
+    /// by every later hit.
+    iter_cycles: u64,
+    iter_instr: u64,
+    /// The register file as of hit 2. Every later hit must reproduce it.
+    regs: [i32; 32],
+    /// Set when the fixed point is established but no whole iteration fits
+    /// before the horizon. The horizon does not move inside a slice, so
+    /// asking again on the next iteration would spend a divide to get the
+    /// same answer.
+    saturated: bool,
+}
+
+impl PollDetector {
+    const fn new() -> Self {
+        Self {
+            key: None,
+            hits: 0,
+            last_cycle: 0,
+            last_instr: 0,
+            iter_cycles: 0,
+            iter_instr: 0,
+            regs: [0; 32],
+            saturated: false,
+        }
+    }
+
+    #[inline]
+    fn reset(&mut self) {
+        self.key = None;
+        self.hits = 0;
+        self.saturated = false;
+    }
+
+    #[inline]
+    fn start(&mut self, key: (u32, u32, u32), cycle: u64, instr: u64) {
+        self.key = Some(key);
+        self.hits = 1;
+        self.last_cycle = cycle;
+        self.last_instr = instr;
+        self.saturated = false;
+    }
+}
+
 /// What one instruction did to the slice loop.
 enum StepOutcome {
     /// Keep going — the instruction retired, or trapped and the handler's
@@ -180,6 +254,17 @@ pub struct MachineHart<B: Bus> {
     /// the call, and the three F CSRs are illegal here. Held rather than
     /// constructed per instruction so the slice loop stays a loop.
     fp_unused: FpRegs,
+    /// The pure-poll-loop detector (M4). Slice-scoped; see [`PollDetector`].
+    poll: PollDetector,
+    /// Whether the detector runs at all. `false` is `--no-poll-skip`: the
+    /// bring-up switch that makes the hart execute every iteration, which is
+    /// the other half of the identity oracle.
+    poll_skip: bool,
+    /// How many times a pure poll loop was credited, and how many whole
+    /// iterations that came to. Statistics for the exit report, not state
+    /// the run depends on.
+    poll_skips: u64,
+    polls_skipped: u64,
     _bus: PhantomData<fn(&mut B)>,
 }
 
@@ -198,6 +283,14 @@ impl<B: Bus> Clone for MachineHart<B> {
             external: self.external,
             allow_unaligned: self.allow_unaligned,
             fp_unused: self.fp_unused.clone(),
+            // A clone is a snapshot, and the detector is evidence about a
+            // slice that the restored run will not be in the middle of. It
+            // starts empty; the counters, being a report of what the run
+            // did, carry.
+            poll: PollDetector::new(),
+            poll_skip: self.poll_skip,
+            poll_skips: self.poll_skips,
+            polls_skipped: self.polls_skipped,
             _bus: PhantomData,
         }
     }
@@ -216,6 +309,9 @@ impl<B: Bus> core::fmt::Debug for MachineHart<B> {
             .field("wfi", &self.wfi)
             .field("external", &self.external)
             .field("allow_unaligned", &self.allow_unaligned)
+            .field("poll_skip", &self.poll_skip)
+            .field("poll_skips", &self.poll_skips)
+            .field("polls_skipped", &self.polls_skipped)
             .finish()
     }
 }
@@ -238,6 +334,10 @@ impl<B: Bus> MachineHart<B> {
             external: None,
             allow_unaligned: false,
             fp_unused: FpRegs::new(),
+            poll: PollDetector::new(),
+            poll_skip: true,
+            poll_skips: 0,
+            polls_skipped: 0,
             _bus: PhantomData,
         }
     }
@@ -329,6 +429,42 @@ impl<B: Bus> MachineHart<B> {
         self.wfi
     }
 
+    // --- the poll-loop skip (M4) ------------------------------------------
+
+    /// Turn the pure-poll-loop skip off (`--no-poll-skip`) or on. On by
+    /// default.
+    ///
+    /// Off, the hart executes every iteration of every loop, which is the
+    /// no-skip half of the identity oracle: the two runs must print the same
+    /// transcript and differ only in wall time.
+    #[inline]
+    pub fn set_poll_skip(&mut self, enabled: bool) {
+        self.poll_skip = enabled;
+        if !enabled {
+            self.poll.reset();
+        }
+    }
+
+    #[inline]
+    #[must_use]
+    pub const fn poll_skip(&self) -> bool {
+        self.poll_skip
+    }
+
+    /// How many times a pure poll loop was credited in whole iterations.
+    #[inline]
+    #[must_use]
+    pub const fn poll_skips(&self) -> u64 {
+        self.poll_skips
+    }
+
+    /// How many whole loop iterations those skips came to.
+    #[inline]
+    #[must_use]
+    pub const fn polls_skipped(&self) -> u64 {
+        self.polls_skipped
+    }
+
     // --- machine-side state seeding ---------------------------------------
 
     /// Write a machine-mode CSR from *outside* the guest — the reset-vector
@@ -388,6 +524,10 @@ impl<B: Bus> MachineHart<B> {
         if cycle > self.cycle_count {
             self.cycle_count = cycle;
         }
+        // Guest time moved without instructions retiring, so every cycle
+        // delta the poll detector holds is now a lie about the loop it
+        // measured.
+        self.poll.reset();
     }
 
     // --- interrupt input ---------------------------------------------------
@@ -436,6 +576,9 @@ impl<B: Bus> MachineHart<B> {
         if !self.csr.mie_enabled() {
             return false;
         }
+        // Delivery is a control transfer the detector's evidence says
+        // nothing about.
+        self.poll.reset();
         self.pc = trap::deliver_interrupt(&mut self.csr, n, self.pc);
         true
     }
@@ -458,9 +601,25 @@ impl<B: Bus> MachineHart<B> {
     /// before each fetch, so the last instruction of a slice may overshoot
     /// by its own cost and no more. Cycles consumed are
     /// `cycle_count()` differenced across the call.
-    pub fn run_slice(&mut self, bus: &mut B, budget: u64) -> SliceEnd {
+    ///
+    /// `horizon` is an absolute cycle at or after the slice's own end: the
+    /// earliest cycle at which anything outside the hart can change what the
+    /// guest sees — the next scheduled event, the next host service, the
+    /// stop cycle, the next probe. It bounds the **poll-loop skip** and
+    /// nothing else, and it is deliberately *not* capped by the machine's
+    /// slice cap: the cap exists because an MMIO write inside a slice can
+    /// schedule an event sooner than the deadline the slice started with,
+    /// and a pure poll loop performs no write. A machine with no skip to
+    /// offer passes `horizon = cycle_count + budget`, which makes every
+    /// candidate skip zero iterations long.
+    pub fn run_slice(&mut self, bus: &mut B, budget: u64, horizon: u64) -> SliceEnd {
         // (a) poll on entry.
         self.poll_interrupts();
+        // The detector's evidence is slice-scoped. See [`PollDetector`]: a
+        // run of matching reads means something only if nothing but the hart
+        // touched the machine between them, and that is exactly what one
+        // slice is.
+        self.poll.reset();
 
         // The deadline as an absolute cycle: one compare per instruction
         // instead of a subtract and a compare. `saturating_add` keeps a
@@ -477,13 +636,16 @@ impl<B: Bus> MachineHart<B> {
             bus.set_issuing(pc, self.cycle_count);
             let inst_word = match bus.fetch_instruction(pc) {
                 Ok(word) => word,
-                Err(e) => match self.deliver_fetch_error(e, pc) {
-                    Ok(()) => continue,
-                    Err(fault) => return SliceEnd::Fault(fault),
-                },
+                Err(e) => {
+                    self.poll.reset();
+                    match self.deliver_fetch_error(e, pc) {
+                        Ok(()) => continue,
+                        Err(fault) => return SliceEnd::Fault(fault),
+                    }
+                }
             };
 
-            match self.step(bus, pc, inst_word) {
+            match self.step(bus, pc, inst_word, horizon) {
                 StepOutcome::Continue => {}
                 StepOutcome::End(end) => return end,
             }
@@ -492,19 +654,27 @@ impl<B: Bus> MachineHart<B> {
 
     /// One instruction: the hart's own `SYSTEM` handling, the FP rejection,
     /// or the shared executors.
-    fn step(&mut self, bus: &mut B, pc: u32, inst_word: u32) -> StepOutcome {
+    fn step(&mut self, bus: &mut B, pc: u32, inst_word: u32, horizon: u64) -> StepOutcome {
         let compressed = (inst_word & 0b11) != 0b11;
 
         if compressed {
             if inst_word & 0xFFFF == C_EBREAK {
+                self.poll.reset();
                 return StepOutcome::End(SliceEnd::Ebreak { pc });
             }
         } else {
             let opcode = (inst_word & 0x7F) as u8;
             if opcode == OPCODE_SYSTEM {
+                // Every `SYSTEM` instruction is a reason to forget the
+                // detector's evidence: `ecall`/`ebreak` trap, `mret` and
+                // `wfi` change delivery, and a CSR read is the one way a
+                // loop can observe the passing of time — `rdcycle` in a
+                // spin means the loop is a delay, not a fixed point.
+                self.poll.reset();
                 return self.execute_system(bus, pc, inst_word);
             }
             if is_fp_opcode(opcode) {
+                self.poll.reset();
                 self.charge(InstClass::System);
                 self.deliver_illegal(pc, inst_word, "RV32F opcode on a hart with no FPU");
                 return StepOutcome::Continue;
@@ -521,6 +691,7 @@ impl<B: Bus> MachineHart<B> {
         let result = match executed {
             Ok(result) => result,
             Err(e) => {
+                self.poll.reset();
                 self.charge(InstClass::System);
                 return match self.deliver_executor_error(e, pc, inst_word) {
                     Ok(()) => StepOutcome::Continue,
@@ -545,7 +716,115 @@ impl<B: Bus> MachineHart<B> {
             self.resample_external(bus);
         }
 
+        // (M4) the poll-loop skip. A Load is the only instruction that can
+        // *be* the read a pure loop spins on; a Store, an atomic or a fence
+        // is a reason to forget everything the detector had.
+        if self.poll_skip {
+            match result.class {
+                InstClass::Load => {
+                    if self.observe_pure_read(bus, pc, horizon) {
+                        // Guest time moved. End the slice so the machine
+                        // fires whatever came due and resamples the matrix,
+                        // exactly as it does after `wfi`.
+                        return StepOutcome::End(SliceEnd::BudgetExhausted);
+                    }
+                }
+                InstClass::Store | InstClass::Atomic | InstClass::Fence => self.poll.reset(),
+                _ => {}
+            }
+        }
+
         StepOutcome::Continue
+    }
+
+    /// Feed the detector the pure read this Load-class instruction performed,
+    /// if it performed one, and credit whole iterations when the loop it
+    /// belongs to has proved itself a fixed point. Returns `true` when guest
+    /// time was moved.
+    ///
+    /// The fixed-point claim, and why crediting is exact: at the moment this
+    /// returns, the hart is one instruction past the load at `pc`. Two
+    /// earlier passes through this same point had the identical register
+    /// file, the same `pc`, and the same value out of the same address, and
+    /// took the same number of cycles and instructions to get from one to
+    /// the next. Nothing else can have moved: no store or atomic ran (either
+    /// resets the detector), no `SYSTEM` instruction ran, no trap or
+    /// interrupt was delivered, and every memory access in between was a
+    /// read of a register the bus declares side-effect free. So machine
+    /// state at this point is a fixed point except for the two counters, and
+    /// `n` more iterations cost exactly `n` times what one cost.
+    ///
+    /// `n` is bounded by `horizon`, the earliest cycle at which anything
+    /// outside the hart can change what the guest sees. Landing at or before
+    /// it means the run without the skip passes through this very state at
+    /// this very cycle — which is why the two runs print the same transcript.
+    fn observe_pure_read(&mut self, bus: &mut B, pc: u32, horizon: u64) -> bool {
+        let Some(read) = bus.take_pure_read() else {
+            // A RAM load, an impure MMIO read, or a load that faulted:
+            // no evidence, and no evidence is a reason to forget the rest.
+            self.poll.reset();
+            return false;
+        };
+
+        let key = (pc, read.address, read.value);
+        if self.poll.key != Some(key) {
+            self.poll
+                .start(key, self.cycle_count, self.instruction_count);
+            return false;
+        }
+
+        let iter_cycles = self.cycle_count - self.poll.last_cycle;
+        let iter_instr = self.instruction_count - self.poll.last_instr;
+        self.poll.last_cycle = self.cycle_count;
+        self.poll.last_instr = self.instruction_count;
+        self.poll.hits += 1;
+
+        if self.poll.hits == 2 {
+            // The first measurement of what one iteration costs, and the
+            // register file every later iteration has to reproduce.
+            self.poll.iter_cycles = iter_cycles;
+            self.poll.iter_instr = iter_instr;
+            self.poll.regs = self.regs;
+            return false;
+        }
+
+        if iter_cycles != self.poll.iter_cycles
+            || iter_instr != self.poll.iter_instr
+            || self.regs != self.poll.regs
+        {
+            // The loop came back to the same read with something changed —
+            // a counter counting down, a value alternating. Not a fixed
+            // point; this read starts a fresh run of evidence.
+            self.poll
+                .start(key, self.cycle_count, self.instruction_count);
+            return false;
+        }
+
+        if self.poll.hits < POLL_FIXED_POINT_HITS || self.poll.saturated {
+            return false;
+        }
+        // A zero-cost iteration would divide by zero and could never reach
+        // the horizon anyway. `CycleModel` charges at least one cycle per
+        // instruction, so this is unreachable rather than merely unlikely.
+        if self.poll.iter_cycles == 0 {
+            self.poll.saturated = true;
+            return false;
+        }
+
+        let n = horizon.saturating_sub(self.cycle_count) / self.poll.iter_cycles;
+        if n == 0 {
+            self.poll.saturated = true;
+            return false;
+        }
+
+        self.cycle_count += n * self.poll.iter_cycles;
+        self.instruction_count += n * self.poll.iter_instr;
+        self.poll.last_cycle = self.cycle_count;
+        self.poll.last_instr = self.instruction_count;
+        self.poll_skips += 1;
+        self.polls_skipped += n;
+        bus.note_poll_skip(pc, read.address, n);
+        true
     }
 
     /// Answer a raised bus side-band: re-read the matrix and poll.

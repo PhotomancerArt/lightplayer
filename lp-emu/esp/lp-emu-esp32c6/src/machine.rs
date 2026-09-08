@@ -5,7 +5,8 @@
 //! ```text
 //! loop {
 //!   deadline = min(next scheduler event, stop cycle, next probe, slice cap)
-//!   match hart.run_slice(bus, deadline - now) {
+//!   horizon  = the same WITHOUT the slice cap (M4: it bounds the poll skip)
+//!   match hart.run_slice(bus, deadline - now, horizon) {
 //!     BudgetExhausted => fire every due event, then resample the matrix and poll
 //!     Wfi             => jump guest time to the next event (or the stop cycle), then the same
 //!     Ebreak { pc }   => the ROM hook table gets first refusal; otherwise deliver the breakpoint
@@ -571,6 +572,9 @@ pub struct Esp32C6Builder {
     time_grade: TimeGrade,
     strict: bool,
     strict_grade: Option<RegGrade>,
+    /// The pure-poll-loop skip (M4). On by default; `--no-poll-skip` turns
+    /// it off for bring-up and for the identity oracle.
+    poll_skip: bool,
     trace: Option<Box<dyn std::io::Write + Send>>,
     trace_blocks: Vec<String>,
     uart0: Uart0Sink,
@@ -625,6 +629,7 @@ impl Esp32C6Builder {
             time_grade: TimeGrade::default(),
             strict: false,
             strict_grade: None,
+            poll_skip: true,
             trace: None,
             trace_blocks: Vec::new(),
             uart0: Uart0Sink::default(),
@@ -681,6 +686,16 @@ impl Esp32C6Builder {
 
     pub fn strict(mut self, strict: bool) -> Self {
         self.strict = strict;
+        self
+    }
+
+    /// Turn the pure-poll-loop skip off (`--no-poll-skip`). On by default.
+    ///
+    /// Off, the machine executes every iteration of every loop. The two runs
+    /// must print the same transcript — that is M4's identity oracle — and
+    /// differ only in wall time.
+    pub fn poll_skip(mut self, enabled: bool) -> Self {
+        self.poll_skip = enabled;
         self
     }
 
@@ -876,6 +891,7 @@ impl Esp32C6Builder {
             time_grade,
             strict,
             strict_grade,
+            poll_skip,
             trace,
             trace_blocks,
             uart0,
@@ -1160,6 +1176,7 @@ impl Esp32C6Builder {
         let mut hart = MachineHart::new(0);
         loader::reset_hart(&mut hart, &mut bus, entry);
         hart.set_cycle_model(time_grade.cycle_model());
+        hart.set_poll_skip(poll_skip);
 
         // The control channel's listener, and the block it drives. The index
         // is looked up once: it is the peripheral's identity for the whole
@@ -1214,6 +1231,7 @@ impl Esp32C6Builder {
             control_lines: 0,
             hook_calls: 0,
             idle_skips: 0,
+            poll_skip,
             stop_at: None,
             flash: flash_handle,
             cache: cache_handle,
@@ -1403,6 +1421,9 @@ pub struct Esp32C6Machine {
     control_lines: u64,
     hook_calls: u64,
     idle_skips: u64,
+    /// Whether the pure-poll-loop skip is on. Mirrored from the hart so the
+    /// run loop can skip computing a horizon it will not use.
+    poll_skip: bool,
     /// Set by a hook that answered [`HookResult::Stop`]; the run loop ends
     /// with [`Outcome::Breakpoint`] at that pc.
     stop_at: Option<u32>,
@@ -1582,6 +1603,20 @@ impl Esp32C6Machine {
     /// the evidence that the idle hook was reached.
     pub fn idle_skips(&self) -> u64 {
         self.idle_skips
+    }
+
+    /// How many times the hart credited a pure poll loop in whole
+    /// iterations, and how many iterations that came to (M4).
+    ///
+    /// Both are statistics: with `--no-poll-skip` they are zero and the run
+    /// prints the same transcript.
+    pub fn poll_skips(&self) -> (u64, u64) {
+        (self.harts[0].poll_skips(), self.harts[0].polls_skipped())
+    }
+
+    /// Whether the pure-poll-loop skip is on.
+    pub fn poll_skip(&self) -> bool {
+        self.poll_skip
     }
 
     /// Everything UART0 has put on the wire — bytes that left the shifter,
@@ -2022,8 +2057,45 @@ impl Esp32C6Machine {
             }
             let budget = deadline.saturating_sub(now).max(1);
 
+            // The horizon (M4): the earliest cycle at which anything outside
+            // the hart can change what the guest sees. The deadline's terms
+            // **without** either slice cap — the caps bound the lateness of
+            // an event an MMIO write schedules mid-slice, and of a strict
+            // violation the guest is already trapping on, and a pure poll
+            // loop does neither. It bounds the poll-loop skip and nothing
+            // else: the slice boundaries themselves are exactly where they
+            // were before M4.
+            let horizon = if self.poll_skip {
+                let mut horizon = stop_cycle;
+                if let Some(event) = self.bus.sched.next_deadline() {
+                    horizon = horizon.min(event.max(now + 1));
+                }
+                if let Some((at, _)) = probes.get(next_probe) {
+                    horizon = horizon.min((*at).max(now + 1));
+                }
+                if let Some(at) = self.next_host_service() {
+                    horizon = horizon.min(at.max(now + 1));
+                }
+                // A scripted byte due at a known cycle reaches the guest
+                // through the owning peripheral's next poll, which *is* on
+                // the schedule — but a source that gains one later would not
+                // be, and naming it here costs one `min` per slice.
+                if let Some(at) = self.bus.host.next_ready() {
+                    horizon = horizon.min(at.max(now + 1));
+                }
+                // `budget` has a floor of one cycle, so a horizon at `now`
+                // would otherwise sit behind the slice's own end.
+                horizon.max(now.saturating_add(budget))
+            } else {
+                // `--no-poll-skip`: the horizon is the deadline, which makes
+                // every candidate skip zero iterations long. The detector is
+                // inert as well; either alone would do, and the pair says so
+                // twice.
+                now.saturating_add(budget)
+            };
+
             self.bus.set_time(now);
-            let end = self.harts[0].run_slice(&mut self.bus, budget);
+            let end = self.harts[0].run_slice(&mut self.bus, budget, horizon);
 
             match end {
                 SliceEnd::BudgetExhausted => {}

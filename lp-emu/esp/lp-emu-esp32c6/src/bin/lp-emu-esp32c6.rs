@@ -122,6 +122,12 @@ OPTIONS:
     --trace [BLOCK,BLOCK]   log every MMIO access; an optional block filter
     --trace-file <path>     write the trace here instead of stderr
     --strict-bus            an access nothing claims is fatal; exits 3
+    --no-poll-skip          execute every iteration of a guest poll loop
+                            instead of crediting whole iterations of one that
+                            has proved itself a fixed point. Slower, never
+                            different: the two runs print the same transcript,
+                            which is what makes it the identity oracle for
+                            the skip. For bring-up
     --strict-grade modeled|documented|measured
                             an access to a register graded BELOW this level is
                             fatal (exits 3): `documented` stops on a register
@@ -183,6 +189,9 @@ struct Args {
     trace_blocks: Vec<String>,
     trace_file: Option<PathBuf>,
     strict: bool,
+    /// `--no-poll-skip`. Negated because `Args` derives `Default` and the
+    /// skip is on unless the flag is given.
+    no_poll_skip: bool,
     strict_grade: Option<RegGrade>,
     probes: Vec<(u64, String)>,
     break_at: Vec<String>,
@@ -204,6 +213,7 @@ fn run() -> Result<ExitCode, String> {
     let mut builder = Esp32C6Builder::new()
         .time_grade(args.time_grade)
         .strict(args.strict)
+        .poll_skip(!args.no_poll_skip)
         .strict_grade(args.strict_grade)
         .efuse(args.efuse)
         .seed(args.seed)
@@ -409,6 +419,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                     .ok_or_else(|| format!("--strip-timing `{text}`: expected ws2812 or ws2811"))?;
             }
             "--strict-bus" => args.strict = true,
+            "--no-poll-skip" => args.no_poll_skip = true,
             "--probe" => args.probes.push(parse_probe(&value("--probe")?)?),
             "--break-at" => args.break_at.push(value("--break-at")?),
             "--hooks" => args.hooks = true,
@@ -680,12 +691,20 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
         machine.instructions(),
         machine.time_grade().configuration()
     );
+    let (poll_skips, polls_skipped) = machine.poll_skips();
     eprintln!(
-        "unmapped: {} reads, {} writes, {} distinct sites; {} idle skips (wfi)",
+        "unmapped: {} reads, {} writes, {} distinct sites; {} idle skips (wfi); {} poll skips \
+         ({polls_skipped} iterations){}",
         machine.bus.unmapped_reads(),
         machine.bus.unmapped_writes(),
         machine.bus.unmapped_sites(),
-        machine.idle_skips()
+        machine.idle_skips(),
+        poll_skips,
+        if machine.poll_skip() {
+            ""
+        } else {
+            " [--no-poll-skip]"
+        }
     );
     if let Some(level) = machine.bus.strict_grade() {
         // Which blocks the level actually covered. A run that passed says so
