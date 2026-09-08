@@ -28,8 +28,8 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
-use crate::periph::{BusCx, Peripheral, Width};
-use crate::regnames::{self, RegNames};
+use crate::periph::{BusCx, Peripheral, RegGrade, Width};
+use crate::regnames::{self, Access, RegNames};
 
 /// A masked value applied to one register.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -63,6 +63,11 @@ pub struct RegFile {
     write_one_to_clear: Vec<MaskEntry>,
     write_one_pulse: Vec<MaskEntry>,
     read_only: Vec<MaskEntry>,
+    /// `Some` once the block has been graded — see
+    /// [`with_pac_grades`](RegFile::with_pac_grades). `None` means "nobody
+    /// has asked this block the question", which `--strict-grade` passes
+    /// over and is not the same statement as `Some(Modeled)`.
+    grades: Option<Vec<(u32, RegGrade)>>,
 }
 
 impl RegFile {
@@ -80,6 +85,7 @@ impl RegFile {
             write_one_to_clear: Vec::new(),
             write_one_pulse: Vec::new(),
             read_only: Vec::new(),
+            grades: None,
         }
     }
 
@@ -120,6 +126,72 @@ impl RegFile {
         names.assert_sorted();
         self.names = names;
         self
+    }
+
+    /// Grade every register of this block from the PAC, and start answering
+    /// [`Peripheral::reg_grade`].
+    ///
+    /// Until 2026-09-08 the only block on the C6 that published a grade
+    /// table was `USB_DEVICE`, so `--strict-grade documented` passed over
+    /// every accept block in the chip — which made the flag mean "did we
+    /// finish grading" rather than "is this register's behaviour backed by
+    /// evidence". This is the rule that brings them in, and it is one line:
+    ///
+    /// - **`Documented`** when the PAC says the register is read-write and
+    ///   this block pretends nothing about it. Accept-and-remember *is* the
+    ///   documented behaviour of a read-write register: the document says it
+    ///   holds what you write, and a `RegFile` holds what you write.
+    /// - **`Modeled`** otherwise — a read-only register (the value comes
+    ///   from hardware nobody here models, so whatever we answer is a
+    ///   stand-in), a write-only one (the document does not say what a read
+    ///   returns), an offset the block names no register at, or **any
+    ///   register this block has an exception for**: a read override, a
+    ///   mirror, a write-one-to-clear or -pulse mask, a read-only mask. A
+    ///   register we pretend about is a register we modelled.
+    ///
+    /// Nothing here is ever `Measured`: that grade needs a committed silicon
+    /// transcript naming the register, which is a promotion somebody makes by
+    /// hand with [`with_grade`](Self::with_grade) and a reason.
+    ///
+    /// Call it **after** the exception builders, so it can see them.
+    pub fn with_pac_grades(mut self) -> Self {
+        let mut grades: Vec<(u32, RegGrade)> = Vec::new();
+        for (off, _) in self.names.entries {
+            let pretended = self.pretends_about(*off);
+            let rw = self.names.access(*off) == Some(Access::ReadWrite);
+            let grade = if rw && !pretended {
+                RegGrade::Documented
+            } else {
+                RegGrade::Modeled
+            };
+            grades.push((*off, grade));
+        }
+        self.grades = Some(grades);
+        self
+    }
+
+    /// Say what one register's grade is, overriding
+    /// [`with_pac_grades`](Self::with_pac_grades). For a promotion a
+    /// transcript earns, or a demotion the PAC cannot see. Call it after.
+    pub fn with_grade(mut self, off: u32, grade: RegGrade) -> Self {
+        let off = off & !3;
+        let grades = self.grades.get_or_insert_with(Vec::new);
+        match grades.binary_search_by_key(&off, |(o, _)| *o) {
+            Ok(i) => grades[i].1 = grade,
+            Err(i) => grades.insert(i, (off, grade)),
+        }
+        self
+    }
+
+    /// Does this block answer `off` with anything other than what was
+    /// written? Every exception table is one way of saying yes.
+    fn pretends_about(&self, off: u32) -> bool {
+        let off = off & !3;
+        self.read_overrides.iter().any(|e| e.off == off)
+            || self.read_mirrors.iter().any(|e| e.off == off)
+            || self.write_one_to_clear.iter().any(|e| e.off == off)
+            || self.write_one_pulse.iter().any(|e| e.off == off)
+            || self.read_only.iter().any(|e| e.off == off)
     }
 
     /// The value this register reads as before anyone writes it. Also what
@@ -318,6 +390,21 @@ impl Peripheral for RegFile {
         self.names.name(off)
     }
 
+    /// `None` until [`with_pac_grades`](RegFile::with_pac_grades) is called;
+    /// once it is, `Some` for **every** offset in the window, as the trait's
+    /// contract requires — `Modeled` for the ones the table does not list,
+    /// which is the right answer for an offset that names no register.
+    fn reg_grade(&self, off: u32) -> Option<RegGrade> {
+        let grades = self.grades.as_ref()?;
+        let off = off & !3;
+        Some(
+            grades
+                .binary_search_by_key(&off, |(o, _)| *o)
+                .map(|i| grades[i].1)
+                .unwrap_or(RegGrade::Modeled),
+        )
+    }
+
     fn save_state(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(self.regs.len() * 4);
         for r in &self.regs {
@@ -351,6 +438,7 @@ mod tests {
         block: "uart0",
         entries: &[(0x000, "fifo"), (0x004, "int_raw"), (0x01c, "status")],
         resets: &[],
+        access: &[(0x01c, Access::ReadOnly)],
     };
 
     #[test]
@@ -456,6 +544,7 @@ mod tests {
             entries: &[(0x000, "cmd"), (0x01c, "user")],
             // SPI1's `user`, the one that made this whole mechanism exist.
             resets: &[(0x01c, 0x8000_0000)],
+            access: &[],
         };
         let mut rf = RegFile::new("SPI1", 0x20).with_names(SPI1);
         assert_eq!(rf.read(0x1c, Width::Word, &mut env.cx()), 0x8000_0000);
@@ -487,10 +576,47 @@ mod tests {
             block: "wide",
             entries: &[(0x000, "a"), (0x100, "b")],
             resets: &[(0x000, 0xaa), (0x100, 0xbb)],
+            access: &[],
         };
         let mut rf = RegFile::new("NARROW", 0x10).with_names(WIDE);
         assert_eq!(rf.read(0x00, Width::Word, &mut env.cx()), 0xaa);
         assert_eq!(rf.read(0x100, Width::Word, &mut env.cx()), 0);
+    }
+
+    /// The grading rule, on a table with one of each kind in it.
+    #[test]
+    fn a_graded_block_documents_what_it_only_remembers_and_models_the_rest() {
+        let rf = RegFile::new("UART0", 0x100).with_names(NAMES);
+        assert_eq!(rf.reg_grade(0x000), None, "ungraded: nobody asked");
+
+        let rf = RegFile::new("UART0", 0x100)
+            .with_names(NAMES)
+            // `int_raw` is read-write in this fixture, but the block forces
+            // a bit of it, so it is something we pretend about.
+            .with_read_override(0x004, 1, 1)
+            .with_pac_grades();
+        assert_eq!(rf.reg_grade(0x000), Some(RegGrade::Documented), "fifo: rw");
+        assert_eq!(
+            rf.reg_grade(0x004),
+            Some(RegGrade::Modeled),
+            "int_raw: a read override is a pretence"
+        );
+        assert_eq!(
+            rf.reg_grade(0x01c),
+            Some(RegGrade::Modeled),
+            "status: read-only, so our answer stands in for hardware"
+        );
+        // The contract: `Some` for every offset once a table is published.
+        assert_eq!(rf.reg_grade(0x008), Some(RegGrade::Modeled), "unnamed");
+        assert_eq!(rf.reg_grade(0x0fc), Some(RegGrade::Modeled));
+
+        // A hand promotion wins, and only over the register named.
+        let rf = RegFile::new("UART0", 0x100)
+            .with_names(NAMES)
+            .with_pac_grades()
+            .with_grade(0x01c, RegGrade::Measured);
+        assert_eq!(rf.reg_grade(0x01c), Some(RegGrade::Measured));
+        assert_eq!(rf.reg_grade(0x000), Some(RegGrade::Documented));
     }
 
     #[test]
