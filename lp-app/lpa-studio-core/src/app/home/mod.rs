@@ -16,6 +16,7 @@ pub mod template_project;
 pub mod ui_example_card;
 pub mod ui_example_groups;
 pub mod ui_home_view;
+pub mod ui_open_mismatch;
 pub mod ui_package_card;
 
 pub use board_project::{
@@ -32,4 +33,5 @@ pub use template_project::template_project_files;
 pub use ui_example_card::UiExampleCard;
 pub use ui_example_groups::{PATTERNS_LABEL, PROJECTS_LABEL, UiExampleGroup, example_groups};
 pub use ui_home_view::UiHomeView;
+pub use ui_open_mismatch::{UiOpenMismatch, UiRunningProject};
 pub use ui_package_card::UiPackageCard;
