@@ -14,8 +14,15 @@
 //!    shipped set is `ESP32C6_SERVER_RADIO`, the no-radio one
 //!    `ESP32C6_SERVER`. `LP_EMU_C6_ELF` with no slug is accepted as a
 //!    fallback for the shipped set.
-//! 2. This crate's own copy, `target/lp-emu-c6/<SLUG>/fw-esp32c6`, left by
-//!    an earlier build through step 3.
+//! 2. This crate's own copy, `target/lp-emu-c6/<SLUG>-<SOURCE>/fw-esp32c6`,
+//!    left by an earlier build through step 3. `<SOURCE>` is a hash of the
+//!    **source tree that produced it** ([`source_key`]), because a copy keyed
+//!    by feature set alone is a stale ELF waiting to pass a gate: M6 P3
+//!    rebased onto P1b, whose firmware gained three statics, and
+//!    `host_absent` then failed looking for a symbol the cached ELF
+//!    predated. A changed source tree is a different key, so the copy is
+//!    missed and step 3 rebuilds. Where the key cannot be computed (no git),
+//!    the copy is not used at all — the trap is worse than the rebuild.
 //! 3. `LP_EMU_BUILD_FW=1` — and only then — run the build, and copy the
 //!    result to the per-slug path of step 2.
 //! 4. Otherwise `None`, and the caller prints a skip notice.
@@ -32,6 +39,19 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
+
+/// One firmware build at a time per process. Three tests in one binary
+/// (`boot_idle`'s two memfs runs and its flash-backed one) all resolve an
+/// image on their own thread, and with `LP_EMU_BUILD_FW=1` and no image on
+/// disk each would start `build-reference-image.sh` — into the **same**
+/// detached worktree and the same output path. Two `git worktree add`s race
+/// (the loser exits 128 and its test SKIPs), and two `cherry-pick -n` +
+/// `cargo build` + `cp` sequences race into one ELF: M5 P1's CI run loaded
+/// a memfs image built that way and read a stack high-water 128 B off the
+/// pinned figure, and the rerun of the same commit was green. The lock makes
+/// the first thread build and the rest find the file.
+static BUILD_LOCK: Mutex<()> = Mutex::new(());
 
 /// The profile and target `fw-esp32c6` is built with (`justfile`:
 /// `build-fw-esp32c6`).
@@ -82,6 +102,18 @@ impl FwImage {
         default_features: false,
     };
 
+    /// The M5 P1 gate image: the `test_rmt` hardware harness — a 256-LED
+    /// white chase on GPIO18 through the shipped `lp-ws281x` refill path,
+    /// no server loop, no radio init, no filesystem (a harness build never
+    /// reaches `bootctl`, so no `memory_fs` is needed). `server` is in the
+    /// set because on today's main `recovery/panic_path.rs` uses
+    /// `lpc_shared` unconditionally and only `server`/`radio` bring that
+    /// crate: the brief's bare `esp32c6,test_rmt` does not link.
+    pub const TEST_RMT: FwImage = FwImage {
+        features: &["esp32c6", "server", "test_rmt"],
+        default_features: false,
+    };
+
     pub fn slug(&self) -> String {
         slug(self.features)
     }
@@ -122,12 +154,76 @@ pub fn conventional_path(root: &Path) -> PathBuf {
         .join("fw-esp32c6")
 }
 
-/// Where this crate keeps its per-feature-set copy.
-pub fn cached_path(root: &Path, image: &FwImage) -> PathBuf {
-    root.join("target")
-        .join("lp-emu-c6")
-        .join(image.slug())
-        .join("fw-esp32c6")
+/// Where this crate keeps its copy of a build: per feature set **and per
+/// source tree**. `None` when the source tree cannot be identified, which
+/// means "do not use a cached copy at all" — see the module docs.
+pub fn cached_path(root: &Path, image: &FwImage) -> Option<PathBuf> {
+    let key = source_key(root)?;
+    Some(
+        root.join("target")
+            .join("lp-emu-c6")
+            .join(format!("{}-{}", image.slug(), key))
+            .join("fw-esp32c6"),
+    )
+}
+
+/// A short hash of the source tree that a firmware build would read: the
+/// commit, plus whatever is dirty in the directories the image is built
+/// from. Computed once per process.
+///
+/// Git rather than a file walk because it is one subprocess instead of tens
+/// of thousands of `stat` calls, and because it already knows what is
+/// committed and what is not. `None` when this is not a git checkout or git
+/// is unavailable — the caller then skips the cache rather than risk a hit
+/// it cannot validate.
+pub fn source_key(root: &Path) -> Option<String> {
+    static KEY: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    KEY.get_or_init(|| compute_source_key(root)).clone()
+}
+
+/// The directories a `fw-esp32c6` build reads. Deliberately wider than
+/// `lp-fw/`: P1b changed `lpc-wire` and the image changed with it.
+const SOURCE_PATHS: &[&str] = &[
+    "lp-fw",
+    "lp-core",
+    "lp-base",
+    "lp-shader",
+    "lp-gfx",
+    "Cargo.toml",
+    "Cargo.lock",
+];
+
+fn compute_source_key(root: &Path) -> Option<String> {
+    let git = |args: &[&str]| -> Option<Vec<u8>> {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(args)
+            .output()
+            .ok()?;
+        out.status.success().then_some(out.stdout)
+    };
+    // The commit, and then the content of everything dirty under the source
+    // paths — `--porcelain` lists the names, and the names alone are not
+    // enough (an edit that keeps a file's name would not move the key).
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    let mut eat = |bytes: &[u8]| {
+        for b in bytes {
+            hash ^= u64::from(*b);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    };
+    eat(&git(&["rev-parse", "HEAD"])?);
+    let mut status_args = vec!["status", "--porcelain", "-z", "--"];
+    status_args.extend_from_slice(SOURCE_PATHS);
+    let status = git(&status_args)?;
+    eat(&status);
+    // `git diff` over the same paths carries the dirty content itself, so an
+    // uncommitted edit moves the key even though the file list did not.
+    let mut diff_args = vec!["diff", "HEAD", "--"];
+    diff_args.extend_from_slice(SOURCE_PATHS);
+    eat(&git(&diff_args)?);
+    Some(format!("{hash:016x}"))
 }
 
 /// The `fw-esp32c6` ELF for the shipped feature set, or `None` with a
@@ -176,10 +272,21 @@ pub fn fw_esp32c6_image(image: &FwImage) -> Result<PathBuf, String> {
 
     let root = workspace_root().ok_or("could not find the workspace root")?;
     let cached = cached_path(&root, image);
-    if cached.is_file() {
-        return Ok(cached);
+    if let Some(cached) = &cached
+        && cached.is_file()
+    {
+        return Ok(cached.clone());
     }
     let conventional = conventional_path(&root);
+
+    // Serialise with every other image build in this process, then look
+    // again: the thread that held the lock may have built this very image.
+    let _build = BUILD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(cached) = &cached
+        && cached.is_file()
+    {
+        return Ok(cached.clone());
+    }
 
     if std::env::var("LP_EMU_BUILD_FW").as_deref() != Ok("1") {
         return Err(format!(
@@ -213,6 +320,12 @@ pub fn fw_esp32c6_image(image: &FwImage) -> Result<PathBuf, String> {
             conventional.display()
         ));
     }
+    // Keep a copy only when it can be keyed to this source tree. Without a
+    // key there is nothing to invalidate it, and an ELF nobody can date is
+    // exactly what let a gate pass against firmware it was not built from.
+    let Some(cached) = cached else {
+        return Ok(conventional);
+    };
     if let Some(dir) = cached.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
     }
@@ -294,6 +407,12 @@ pub fn reference_image(image: &ReferenceImage) -> Result<PathBuf, String> {
     if path.is_file() {
         return Ok(path);
     }
+    // The script shares one detached worktree between every reference
+    // image: never run it twice at once (see `BUILD_LOCK`).
+    let _build = BUILD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    if path.is_file() {
+        return Ok(path);
+    }
     if std::env::var("LP_EMU_BUILD_FW").as_deref() != Ok("1") {
         return Err(format!(
             "no reference image `{}` at {}. Set {var} to one, or LP_EMU_BUILD_FW=1 to build it \
@@ -335,6 +454,7 @@ mod tests {
             FwImage::SHIPPED_NO_FLASH.slug(),
             "ESP32C6_SERVER_RADIO_MEMORY_FS"
         );
+        assert_eq!(FwImage::TEST_RMT.slug(), "ESP32C6_SERVER_TEST_RMT");
         assert_eq!(
             ReferenceImage::BOOT_IDLE_MEMFS.env_var(),
             "LP_EMU_C6_REF_BOOT_IDLE_MEMFS"
@@ -346,9 +466,89 @@ mod tests {
         let root = workspace_root().expect("found");
         assert!(root.join("lp-emu/esp/lp-emu-esp32c6/Cargo.toml").is_file());
         assert!(conventional_path(&root).ends_with("fw-esp32c6"));
-        assert!(
-            cached_path(&root, &FwImage::NO_RADIO)
-                .ends_with("lp-emu-c6/ESP32C6_SERVER_MEMORY_FS/fw-esp32c6")
+        // This repository is a git checkout, so the cached path exists and
+        // carries the source key after the feature slug.
+        let cached = cached_path(&root, &FwImage::NO_RADIO).expect("a git checkout has a key");
+        assert!(cached.ends_with("fw-esp32c6"));
+        let dir = cached
+            .parent()
+            .and_then(|d| d.file_name())
+            .and_then(|d| d.to_str())
+            .expect("a named directory");
+        let key = dir
+            .strip_prefix("ESP32C6_SERVER_MEMORY_FS-")
+            .unwrap_or_else(|| panic!("`{dir}` is not <slug>-<source key>"));
+        assert_eq!(key.len(), 16, "`{key}` is not a 16-hex-digit key");
+        assert!(key.bytes().all(|b| b.is_ascii_hexdigit()), "`{key}`");
+    }
+
+    #[test]
+    fn the_source_key_is_stable_within_a_run_and_differs_between_feature_sets_only_by_slug() {
+        let root = workspace_root().expect("found");
+        // The key is the tree's, not the image's: two feature sets share it,
+        // and it is computed once.
+        let a = cached_path(&root, &FwImage::NO_RADIO).expect("a key");
+        let b = cached_path(&root, &FwImage::SHIPPED_NO_FLASH).expect("a key");
+        let key = |p: &Path| {
+            p.parent()
+                .and_then(|d| d.file_name())
+                .and_then(|d| d.to_str())
+                .and_then(|d| d.rsplit_once('-'))
+                .map(|(_, k)| k.to_string())
+                .expect("a key")
+        };
+        assert_eq!(key(&a), key(&b));
+        assert_ne!(a, b, "but the feature slug still separates them");
+        assert_eq!(source_key(&root), Some(key(&a)));
+        eprintln!("source key: {}", key(&a));
+    }
+
+    /// The trap this key exists to close: a source tree that changed must
+    /// not answer with the ELF the previous one built. Checked on the
+    /// function that computes it, against a scratch git repository, because
+    /// the real one must not be dirtied by a test.
+    #[test]
+    fn a_changed_source_tree_is_a_different_key() {
+        let dir = std::env::temp_dir().join(format!("lp-emu-c6-key-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("lp-fw")).expect("scratch dir");
+        let git = |args: &[&str]| {
+            let ok = Command::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(args)
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+            assert!(ok, "git {args:?} failed in the scratch repo");
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "t@example.invalid"]);
+        git(&["config", "user.name", "t"]);
+        std::fs::write(dir.join("lp-fw/a.rs"), "fn main() {}\n").expect("write");
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "one"]);
+        let committed = compute_source_key(&dir).expect("a key");
+
+        // An uncommitted edit to a tracked file moves it.
+        std::fs::write(dir.join("lp-fw/a.rs"), "fn main() { let _ = 1; }\n").expect("write");
+        let dirty = compute_source_key(&dir).expect("a key");
+        assert_ne!(
+            committed, dirty,
+            "an edit that git can see must move the key"
         );
+
+        // So does an untracked file — the P1b trap arrived as new symbols in
+        // files the previous build never had.
+        std::fs::write(dir.join("lp-fw/a.rs"), "fn main() {}\n").expect("write");
+        assert_eq!(compute_source_key(&dir), Some(committed.clone()));
+        std::fs::write(dir.join("lp-fw/b.rs"), "// new\n").expect("write");
+        assert_ne!(
+            compute_source_key(&dir),
+            Some(committed),
+            "an untracked source file must move the key"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -270,6 +270,32 @@ refuted against Espressif's primary GPIO reference while writing its profile.
 When a vendor page and a primary source disagree, the primary source wins and
 the refutation belongs in the profile's `note`.
 
+## The Desktop board — a virtual table, deliberately unlimited
+
+`lightplayer/desktop.json` is the odd one out: it describes a **computer**
+running the desktop firmware (`fw-browser` in a Studio tab, `fw-host` on a
+machine), and a computer has no pins. Every rule above is about not lying
+about silicon; there is no silicon here to lie about, so the profile is a
+virtual table sized to say **yes**:
+
+- no `reserved_reason` anywhere — nothing on a computer is dangerous to
+  claim, so nothing is withheld;
+- one resource per wire label the checked-in catalog authors, grouped in
+  bands: `IO0`–`IO47` at `/gpio/0`–`/gpio/47` (label number = address
+  number), `D0`–`D13` at `/gpio/100`+, `A01`–`A13` at `/gpio/200`+,
+  `B01`–`B13` at `/gpio/220`+. A label is only claimable as an endpoint if
+  it is a resource's `display_label` (aliases do not mint endpoints), which
+  is why the bands exist at all;
+- thirty-two `/rmt/ws281xN` timing resources, so the widest checked-in
+  project (`catalog/projects/small-dome`, 26 wires) runs every wire at once;
+- `/radio/0`, so `radio:local:0` answers.
+
+"Unlimited" is a property of THIS TABLE, not of a permissive validator: a
+Desktop sim resolves its outputs against a manifest exactly like a board sim
+does — the manifest simply has room for everything. Its `family` is
+`desktop`, which matches no firmware build, so the catalog computes "no
+build" for it and always will: the desktop firmware is built, never flashed.
+
 ## Display sidecars (`*.display.json`)
 
 Each board may carry a catalog sidecar next to its runtime manifest:

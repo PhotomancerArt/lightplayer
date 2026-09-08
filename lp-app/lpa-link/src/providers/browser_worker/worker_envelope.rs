@@ -66,6 +66,62 @@ pub enum BrowserRuntimeTier {
     Gpu,
 }
 
+/// What a runtime is created AS: the tier it asks for, the board it wears,
+/// and the identity it answers with.
+///
+/// The whole of a runtime's boot parameters, and the payload of BOTH
+/// [`BrowserInputEnvelope::Boot`] (the boot runtime) and
+/// [`BrowserInputEnvelope::CreateRuntime`] — a runtime is a runtime, however
+/// it came to exist. The worker mirror is
+/// `fw_browser::envelope::BrowserRuntimeOptions`.
+///
+/// The hardware manifest travels as TEXT: this crate forwards it opaquely
+/// and never learns to parse a board (the JS side likewise just passes it
+/// along). Callers take the text from `lpa_boards::runtime_manifest_json`
+/// for whatever board the project targets.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct BrowserRuntimeOptions {
+    pub tier: BrowserRuntimeTier,
+    /// A `lpc_hardware` board manifest as JSON text. **Empty declares no
+    /// board**, which is what [`Default`] produces: a worker booted from it
+    /// fails runtime creation loudly, rather than silently wearing a board
+    /// nobody chose. Every real caller sets one.
+    pub hardware_manifest_json: String,
+    /// The synthetic identity the host minted for this device, when it has
+    /// one. Absent runtimes report no MAC.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identity: Option<BrowserRuntimeIdentity>,
+}
+
+impl BrowserRuntimeOptions {
+    /// Boot options for `hardware_manifest_json` on the requested tier, with
+    /// no identity.
+    pub fn new(tier: BrowserRuntimeTier, hardware_manifest_json: impl Into<String>) -> Self {
+        Self {
+            tier,
+            hardware_manifest_json: hardware_manifest_json.into(),
+            identity: None,
+        }
+    }
+
+    /// Give the runtime a synthetic identity to answer with.
+    pub fn with_identity(mut self, base_mac: impl Into<String>) -> Self {
+        self.identity = Some(BrowserRuntimeIdentity {
+            base_mac: base_mac.into(),
+        });
+        self
+    }
+}
+
+/// The identity half of [`BrowserRuntimeOptions`].
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct BrowserRuntimeIdentity {
+    /// Lowercase colon hex, like the efuse MAC a real chip reports.
+    pub base_mac: String,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BrowserInputEnvelope {
@@ -74,6 +130,8 @@ pub enum BrowserInputEnvelope {
         fw_browser_module_path: String,
         fw_browser_wasm_path: String,
         tick_mode: BrowserTickMode,
+        /// What the BOOT runtime is created as (board, tier, identity).
+        runtime: BrowserRuntimeOptions,
         /// How the wasm reaches the worker (boot protocol v2): `"message"`
         /// = a page-compiled `WebAssembly.Module` follows in a raw
         /// `boot_module` message (workers only instantiate); `"path"` =
@@ -87,10 +145,12 @@ pub enum BrowserInputEnvelope {
     /// which records the granted tier (and the reason when a `gpu` request
     /// resolved to `cpu`). Preview surfaces that host several runtimes per
     /// worker use this; the boot runtime keeps serving single-runtime
-    /// consumers untouched and is always CPU-tier (the authoritative sim).
+    /// consumers untouched.
     CreateRuntime {
         label: String,
-        tier: BrowserRuntimeTier,
+        /// What this runtime is created as — the same payload the boot
+        /// runtime gets.
+        runtime: BrowserRuntimeOptions,
     },
     /// Destroy a runtime previously created with [`Self::CreateRuntime`],
     /// releasing everything it owns (GPU-tier runtimes drop their graphics

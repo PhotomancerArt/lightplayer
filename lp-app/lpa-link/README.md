@@ -316,6 +316,24 @@ preconfigured instance for the kind, so scripted state survives re-opens.
 | `browser-websocket` | future `providers::browser_websocket::BrowserWebsocketProvider` | already-running server over browser networking | remote endpoint | browser permission/discovery/connect/status; limited management | future |
 | `host-webserver` | future `providers::host_webserver::HostWebserverProvider` | host service owning `fw-host` runtimes | service-managed runtime endpoint | create/stop runtimes, logs, diagnostics | future |
 
+### What a browser-worker runtime is created as
+
+`BrowserWorkerOptions` carries `runtime: BrowserRuntimeOptions` — the whole
+of a runtime's boot parameters — and it is the payload of BOTH the `Boot`
+envelope (the worker's boot runtime) and `CreateRuntime` (every later one):
+
+- `tier` — `cpu` or `gpu`; the worker records what it actually granted.
+- `hardware_manifest_json` — **the board the runtime wears**, as TEXT. This
+  crate never parses it and grows no `lpc-hardware` dependency; the JS side
+  forwards it opaquely too. Callers take the bytes from
+  `lpa_boards::runtime_manifest_json` for whatever board the project
+  targets. The default is EMPTY, which declares no board: a worker booted
+  from it fails runtime creation loudly rather than running as something
+  nobody chose.
+- `identity` — the synthetic MAC the host minted for this device, when it
+  has one. `fw-browser` reports it in its hello, which is what lets a sim be
+  folded like silicon.
+
 The ESP32 serial providers are intentionally ESP32-specific. Flashing,
 resetting, boot-mode handling, and raw filesystem access are target-family
 details; a generic serial abstraction can come later if another target earns it.

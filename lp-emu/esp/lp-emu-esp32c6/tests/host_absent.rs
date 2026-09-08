@@ -18,6 +18,7 @@ use lp_emu_esp32c6::test_support::{FwImage, fw_esp32c6_image, skip_notice};
 
 const GATE_US: u64 = 5_000_000;
 const USB_INT_ENA: u32 = memmap::periph::USB_DEVICE + 0x10;
+const RMT_CH0_TX_CONF0: u32 = memmap::periph::RMT + 0x10;
 const SERIAL_OUT_RECV_PKT: u32 = 1 << 2;
 
 #[test]
@@ -165,4 +166,17 @@ fn with_no_host_the_printer_times_out_once_and_the_rx_path_is_never_armed() {
         "[P1b] host absent: notDrainingCount={silences} \
          hostNotDrainingMs={latched_at} hostDrainingAgainMs=NEVER"
     );
+
+    // M5 P1 G1-2: the boot configures two RMT channels (`mem_size 1` each,
+    // the shipped two-channel plan) and never starts one — no project is
+    // loaded, so no frame is ever sent.
+    assert_eq!(m.rmt_frames_ended(0), 0);
+    assert_eq!(m.rmt_frames_ended(1), 0);
+    assert!(m.rmt_words(0).is_empty() && m.rmt_pulses(0).is_empty());
+    let conf0 = m.peek_word(RMT_CH0_TX_CONF0).expect("RMT.ch0_tx_conf0");
+    assert_eq!(conf0 & (1 << 6), 1 << 6, "idle_out_en: {conf0:#010x}");
+    assert_eq!(conf0 & (1 << 5), 0, "idle_out_lv 0: {conf0:#010x}");
+    assert_eq!((conf0 >> 8) & 0xff, 1, "div_cnt 1: {conf0:#010x}");
+    assert_eq!((conf0 >> 16) & 0x7, 1, "mem_size 1: {conf0:#010x}");
+    assert_eq!(conf0 & 0x0100_0007, 0, "the strobes read 0: {conf0:#010x}");
 }
