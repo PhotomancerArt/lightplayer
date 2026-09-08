@@ -217,6 +217,11 @@ pub struct RunPlan {
     pub notes: Vec<String>,
     /// Tool name -> version, for the sidecar's `tools` map.
     pub tools: BTreeMap<String, String>,
+    /// The image this plan runs, relative to `cwd` — the ELF a machine loads
+    /// or the merged binary a chip is flashed with. The recorder hashes it
+    /// into the sidecar's `firmware_sha256`, so a transcript says which BYTES
+    /// produced it and not only which commit (L4).
+    pub image: Option<PathBuf>,
 }
 
 impl RunPlan {
@@ -288,6 +293,7 @@ impl ConfigurationDriver for SiliconDriver {
             );
         }
         let elf = format!("target/{RV32_TARGET}/{FW_ESP32C6_PROFILE}/fw-esp32c6");
+        let image = PathBuf::from(&elf);
         let capture = req.capture_path();
         // One build step, whichever way the board is then watched: the
         // negative control flashes the same image as everyone else, and it is
@@ -419,6 +425,7 @@ impl ConfigurationDriver for SiliconDriver {
             ],
             notes: Vec::new(),
             tools: BTreeMap::new(),
+            image: Some(image),
         })
     }
 
@@ -520,6 +527,8 @@ impl ConfigurationDriver for EspEmuDriver {
             },
             notes: Vec::new(),
             tools: BTreeMap::new(),
+            // The merged binary, not the ELF: it is what this emulator loads.
+            image: Some(image),
         })
     }
 
@@ -629,6 +638,7 @@ impl ConfigurationDriver for LpEmuDriver {
             }
         };
 
+        let image = PathBuf::from(&elf);
         let mut emu: Vec<String> = vec![
             "cargo".into(),
             "run".into(),
@@ -695,6 +705,7 @@ impl ConfigurationDriver for LpEmuDriver {
             warnings: Vec::new(),
             notes,
             tools: emulator_tools(&req.repo_root),
+            image: Some(image),
         })
     }
 
@@ -785,6 +796,23 @@ fn rom_sha256(repo_root: &Path) -> Option<String> {
         .find(|l| l.ends_with(C6_ROM_ELF))
         .and_then(|l| l.split_whitespace().next())
         .map(str::to_string)
+}
+
+/// The sha256 of a file, lower-case hex — `None` when it is not there.
+///
+/// Used for the sidecar's `firmware_sha256`: the image a recorded transcript
+/// came from, by its bytes. Not an error when missing, because a `--dry-run`
+/// records nothing and a plan that builds its image has none to hash until it
+/// has run.
+pub fn sha256_file(path: &Path) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    let bytes = std::fs::read(path).ok()?;
+    Some(
+        Sha256::digest(&bytes)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect(),
+    )
 }
 
 pub fn driver_for(config: &Configuration) -> Box<dyn ConfigurationDriver> {
