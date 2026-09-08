@@ -53,6 +53,17 @@ pub fn lp_clkrst() -> RegFile {
         .with_reset(0x000, 0x04)
 }
 
+/// `PLIC_UX`, the user-mode half of the interrupt controller. The C6's
+/// `tee_enabled()` is a `const false`, so nothing this machine runs uses
+/// user mode — but the **mask ROM** writes the last word of this aperture
+/// (`0x2000_17fc`) in `_init`, three instructions after it writes the
+/// machine-mode one, and a strict boot stops there. Accept-and-remember with
+/// the PAC's names; every register in it is *modeled*, and no image has ever
+/// read one back.
+pub fn plic_ux() -> RegFile {
+    RegFile::new("PLIC_UX", 0x400).with_names(regs::PLIC_UX)
+}
+
 // ---- MODEM_*: written by `modem_clock_*`, never read back.
 
 pub fn modem_syscon() -> RegFile {

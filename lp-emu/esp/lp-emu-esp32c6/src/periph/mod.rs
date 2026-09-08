@@ -135,7 +135,12 @@ pub fn boot_set(
         (base::SYSTIMER, 0x100, Box::new(systimer::Systimer::new())),
         (base::ASSIST_DEBUG, 0x400, Box::new(accept::assist_debug())),
         (base::INTERRUPT_CORE0, 0x800, Box::new(InterruptCore0View)),
-        (base::PLIC_MX, 0x100, Box::new(PlicMxView)),
+        // The aperture is 0x400 (the PAC puts PLIC_UX at the next one), not
+        // the 0x100 its named registers fill: the mask ROM writes the last
+        // word of it before anything else runs. See `intmatrix`'s
+        // `PLIC_UNDOCUMENTED_3FC`.
+        (base::PLIC_MX, 0x400, Box::new(PlicMxView)),
+        (base::PLIC_UX, 0x400, Box::new(accept::plic_ux())),
         (base::INTPRI, 0x400, Box::new(intpri::Intpri::new())),
         (base::HP_SYS, 0x400, Box::new(accept::hp_sys())),
         (base::TEE, 0x1000, Box::new(accept::tee())),

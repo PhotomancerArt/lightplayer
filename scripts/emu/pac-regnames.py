@@ -100,6 +100,11 @@ TARGETS = [
         out="lp-emu/esp/lp-emu-esp32c6/src/regs/plic_mx.rs",
     ),
     Target(
+        block="plic_ux",
+        static="PLIC_UX",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/plic_ux.rs",
+    ),
+    Target(
         block="intpri",
         static="INTPRI",
         out="lp-emu/esp/lp-emu-esp32c6/src/regs/intpri.rs",

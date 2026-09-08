@@ -106,6 +106,7 @@ pub const MEM_INTERNAL2_BASE: u32 = 0x600F_E000;
 /// gets is decided where it is registered ([`crate::periph::boot_set`]).
 pub mod periph {
     pub const PLIC_MX: u32 = 0x2000_1000;
+    pub const PLIC_UX: u32 = 0x2000_1400;
     pub const UART0: u32 = 0x6000_0000;
     pub const UART1: u32 = 0x6000_1000;
     pub const SPI0: u32 = 0x6000_2000;
