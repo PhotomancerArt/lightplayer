@@ -167,6 +167,39 @@ fn run(script: &str, micros: u64) -> Option<Run> {
     Some(Run { m, lines, outcome })
 }
 
+/// Where the delivered heartbeat for the `ms` tick starts, if it arrived
+/// whole.
+///
+/// **Not an exact match on `"uptime_ms":10000`, and that mattered twice.**
+/// The firmware's heartbeat rides a 5 s tick of the guest's own clock, and
+/// which millisecond it lands on is a TIMING figure — PD9 says no host gate
+/// runs on emulated microseconds, and a model change that moves an
+/// instruction count by a few thousand moves this by one. The regi2c model
+/// (#612) moved it from 10000 to 10001 on this host while CI's own build of
+/// the same firmware still landed on 10000, so the exact digit was a
+/// host-dependent assertion the whole time.
+///
+/// It broke two claims in opposite directions, and the second is the reason
+/// this helper exists rather than a wider `contains`:
+///
+/// - `g3_1`'s "the 10 s heartbeat reached the re-attached host" went red on
+///   a heartbeat that had in fact arrived;
+/// - `g3_1b`'s "the heartbeat written into a closed port never arrived
+///   whole" went **green for the wrong reason** — a negative assertion that
+///   an exact digit makes vacuous the moment the digit moves. That one would
+///   have hidden a real regression in the committed-endpoint model.
+///
+/// So the tolerance is deliberately small next to the 5 s spacing: it cannot
+/// confuse one tick for its neighbour, and it still fails if the heartbeat is
+/// absent, truncated, or a whole tick late.
+fn heartbeat_at(delivered: &str, ms: u64) -> Option<usize> {
+    /// One tick is 5,000 ms; a hundred is far inside it and far outside the
+    /// millisecond of jitter a model change moves.
+    const TOLERANCE_MS: u64 = 100;
+    (ms.saturating_sub(TOLERANCE_MS)..=ms + TOLERANCE_MS)
+        .find_map(|at| delivered.find(&format!("\"uptime_ms\":{at},")))
+}
+
 #[test]
 #[ignore = "needs a built fw-esp32c6 ELF; `just test-emu-c6` runs it"]
 fn g3_1_the_cable_comes_out_at_six_seconds_and_the_link_comes_back_at_nine() {
@@ -190,9 +223,7 @@ fn g3_1_the_cable_comes_out_at_six_seconds_and_the_link_comes_back_at_nine() {
     let hello = delivered
         .find("\nM!{\"id\":0,\"msg\":{\"hello\":{\"proto\":20,")
         .expect("the unsolicited hello reached the host");
-    let first_beat = delivered
-        .find("\"uptime_ms\":5000")
-        .expect("the 5 s heartbeat reached the host");
+    let first_beat = heartbeat_at(&delivered, 5_000).expect("the 5 s heartbeat reached the host");
     assert!(
         delivered.starts_with("[INIT] Initializing board...\n"),
         "the first line a host attached from cycle zero sees"
@@ -239,7 +270,7 @@ fn g3_1_the_cable_comes_out_at_six_seconds_and_the_link_comes_back_at_nine() {
         "no full 64 B commit drained after the re-open: {after:?}"
     );
     assert!(
-        delivered.contains("\"uptime_ms\":10000"),
+        heartbeat_at(&delivered, 10_000).is_some(),
         "the 10 s heartbeat never reached the re-attached host"
     );
 
@@ -339,9 +370,7 @@ fn g3_1b_a_port_held_closed_after_the_replug_holds_a_packet_until_it_opens() {
         !delivered.contains("host not draining"),
         "the self-erasing line reached a host, which contradicts the monitor's own gating"
     );
-    let beat = delivered
-        .find("\"uptime_ms\":15000")
-        .expect("no heartbeat after the recovery");
+    let beat = heartbeat_at(&delivered, 15_000).expect("no heartbeat after the recovery");
     assert!(again < beat, "the recovery line precedes the heartbeat");
 
     // What the held packet itself was: the first 64 bytes of the 10 s
@@ -349,7 +378,7 @@ fn g3_1b_a_port_held_closed_after_the_replug_holds_a_packet_until_it_opens() {
     // committed endpoint and was lost, so that heartbeat never arrives
     // whole — the drops above are those bytes.
     assert!(
-        !delivered.contains("\"uptime_ms\":10000"),
+        heartbeat_at(&delivered, 10_000).is_none(),
         "the heartbeat written into a closed port arrived whole, which would mean the \
          committed endpoint took bytes it had no room for"
     );
