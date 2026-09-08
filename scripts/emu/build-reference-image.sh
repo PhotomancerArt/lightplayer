@@ -180,17 +180,34 @@ fi
 #      narrower and enough: it is a different image from the one the desk
 #      flashes and the transcripts were recorded against.
 
-#      FIXED IN THE PRODUCT 2026-09-08, and the heal below still has to stay.
-#      `third_party/esp-hal` now carries `links = "esp-hal"` and publishes its
-#      linker-script OUT_DIR as `DEP_ESP_HAL_LINKER_SCRIPTS`, which gives cargo
-#      the ordering edge it was missing; `fw-esp32c6/build.rs` is told the
-#      directory instead of scanning for it, and aborts rather than skipping.
-#      See docs/defects/2026-09-08-cold-target-dir-links-esp-hals-stock-rodata.md.
-#      But THIS recipe builds a pinned historical commit (d6cfaa205), which
-#      predates that fix and still has the race — so `image_drift`'s
+#      FIXED IN THE PRODUCT 2026-09-08 by d2f38170b (#601), and the heal below
+#      still has to stay. `third_party/esp-hal` now carries `links = "esp-hal"`
+#      and publishes its linker-script OUT_DIR as `DEP_ESP_HAL_LINKER_SCRIPTS`,
+#      which gives cargo the ordering edge it was missing; `fw-esp32c6/build.rs`
+#      is told the directory instead of scanning for it, and aborts rather than
+#      skipping. See
+#      docs/defects/2026-09-08-cold-target-dir-links-esp-hals-stock-rodata.md.
+#      But THIS recipe builds pinned historical commits (d6cfaa205, 735af98ae),
+#      which predate that fix and still have the race — so `image_drift`'s
 #      `.rodata_merge` check and the rebuild it triggers are load-bearing here
-#      for as long as the pin stays where it is. If the pin ever moves past
-#      2026-09-08, the heal can go and the check should become a hard failure.
+#      for as long as the pins stay where they are.
+#
+#      MEASURED AGAIN 2026-09-08, three times, and the shape of it matters:
+#      it is a RACE, so it does not fire every time. A cold `target/emu-ref`
+#      fired it on the first build of both d6cfaa205 images; a `--verify` run
+#      fired it on the cold second tree and not on the warm first; a third run
+#      fired it on neither. Every one of those runs published sha256
+#      61027da9…, healed or not — which is the claim to hold on to: the heal
+#      restores the canonical image rather than producing a third thing.
+#      Remove it and the runs that lose the race publish an image with
+#      `.flash.appdesc` first and `.rodata_merge` as a section of its own — a
+#      different image from the one the desk flashed and the transcripts were
+#      recorded against, on a schedule nobody controls.
+#
+#      That "if the pin ever moves past the fix" is now code rather than a
+#      comment: `heal_is_expected` asks git whether the reference commit
+#      already contains d2f38170b, and a drift at a commit that does is a
+#      hard failure. Nobody has to remember to delete this.
 #
 # Cargo's `-C metadata` is NOT one of the causes — measured: the same package
 # built at two different absolute paths gets the same metadata hash, so no
@@ -273,6 +290,17 @@ rustflags = [
 CONFIG
 }
 
+# The product commit that ended the linker-script race (#601). A reference
+# commit that already contains it must not need the heal.
+LINKS_FIX_COMMIT="d2f38170b"
+
+# Is the `.rodata_merge` heal still expected to be needed at `$full_commit`?
+# Yes while the pin predates the fix; no once it contains it, and then a
+# drift is a bug in the fix rather than a known race to rebuild around.
+heal_is_expected() {
+    ! git -C "$repo" merge-base --is-ancestor "$LINKS_FIX_COMMIT" "$full_commit" 2>/dev/null
+}
+
 # Why an image is not the canonical one, one reason per line; silent when it
 # is. Both checks read the artefact rather than trusting the environment,
 # because both causes are cargo deciding not to re-run a build script.
@@ -301,6 +329,14 @@ build_image() {
     local drift
     drift="$(image_drift "$built")"
     if [[ -n "$drift" ]]; then
+        if [[ "$drift" == *"rodata.x"* ]] && ! heal_is_expected; then
+            echo "build-reference-image: $full_commit contains $LINKS_FIX_COMMIT (#601), which" >&2
+            echo "  ended the linker-script race — but the first build still took esp-hal's" >&2
+            echo "  stock rodata.x. That is a regression in the fix, not a race to rebuild" >&2
+            echo "  around. See docs/defects/2026-09-08-cold-target-dir-links-esp-hals-stock-rodata.md" >&2
+            exit 7
+        fi
+        healed=$((healed + 1))
         echo "build-reference-image: rebuilding — $drift" | tr '\n' ';'
         echo
         if [[ "$drift" == *"app descriptor"* ]]; then
@@ -315,6 +351,13 @@ build_image() {
         fi
     fi
 }
+
+# How many of this run's builds needed the linker-script heal. `--verify`
+# reports it, because "both builds healed" and "the cold one healed and the
+# warm one did not" are two different observations and the second is the one
+# that actually happens: a warm target dir has esp-hal's out dir already, so
+# only a cold tree takes the stock script.
+healed=0
 
 prepare_worktree "$wt"
 echo "build-reference-image: $features at $commit (+$spike) → $out_dir"
@@ -372,7 +415,14 @@ if (( verify )); then
         echo "build-reference-image: sizes $(wc -c < "$elf") and $(wc -c < "$built2") bytes; both trees kept — compare readelf -S, strings, and the app descriptor stamp" >&2
         exit 6
     fi
-    echo "build-reference-image: reproducible — two builds, two directories, one sha256"
+    if (( healed )); then
+        echo "build-reference-image: reproducible — two builds, two directories, one sha256;" \
+             "$healed of them needed the linker-script heal (a cold target dir takes esp-hal's" \
+             "stock rodata.x on its first build, and this commit predates $LINKS_FIX_COMMIT)"
+    else
+        echo "build-reference-image: reproducible — two builds, two directories, one sha256," \
+             "neither needing the linker-script heal"
+    fi
     # Nothing needs the second tree once it has agreed, and it is a whole
     # target dir on a CI runner's disk. Removing it also means the next
     # `--verify` builds cold again, which is the case that catches the
