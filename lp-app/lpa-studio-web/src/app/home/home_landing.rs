@@ -1,6 +1,6 @@
 //! The Home landing page (`/`, vision D14; landing-cohesion spike, ruled
 //! 2026-08-30): the centered brand hero, then ONE 880px sectioned column —
-//! centered dividers, a four-door "Get started" row (device, simulator,
+//! centered dividers, a four-door "Get started" row (device, sim,
 //! docs, boards), the catalog grouped by kind (Projects, then Patterns),
 //! and a quiet reference footer.
 //! Still no marketing depth — but
@@ -88,8 +88,8 @@ pub fn HomePage(
                 // device-model rebuild, so "Connect a device" is a plain
                 // door to Devices, whose empty state IS the add-device
                 // flow now (card-is-the-flow); opening any example puts a
-                // project on the simulator, which is what "try the
-                // simulator" now means. Explore's own card stays gone —
+                // project on a sim, which is what "try it here" now
+                // means. Explore's own card stays gone —
                 // it only showed the examples this page lists in full.
                 nav { class: "tw:grid tw:grid-cols-4 tw:gap-3 tw:max-[820px]:grid-cols-2 tw:max-[480px]:grid-cols-1",
                     DiveInCard {
@@ -100,7 +100,7 @@ pub fn HomePage(
                     }
                     DiveInCard {
                         icon: StudioIconName::Simulator,
-                        title: "Try the simulator",
+                        title: "Try it here",
                         detail: "Open an example and watch it run — no hardware needed.",
                         href: "/explore",
                     }

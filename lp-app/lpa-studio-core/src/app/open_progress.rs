@@ -213,11 +213,11 @@ mod tests {
         reset_for_test();
         note_open_requested();
         note_open_started();
-        note_open_failed("the simulator did not connect", open_action("prjx"));
+        note_open_failed("the device did not start", open_action("prjx"));
         let OpenStage::Failed(failure) = open_stage() else {
             panic!("failed stage expected");
         };
-        assert_eq!(failure.message, "the simulator did not connect");
+        assert_eq!(failure.message, "the device did not start");
         assert_eq!(failure.retry, open_action("prjx"));
 
         // The REQUEST clears it, not the start: the action can sit in the
