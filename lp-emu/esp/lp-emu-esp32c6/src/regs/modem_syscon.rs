@@ -23,8 +23,5 @@ pub static MODEM_SYSCON: RegNames = RegNames {
         (0x020, "mem_conf"),
         (0x024, "date"),
     ],
-    resets: &[
-        (0x004, 0x00200000),
-        (0x020, 0x00000020),
-    ],
+    resets: &[(0x004, 0x00200000), (0x020, 0x00000020)],
 };

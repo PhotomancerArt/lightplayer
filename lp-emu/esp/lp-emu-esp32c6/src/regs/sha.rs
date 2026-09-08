@@ -49,6 +49,5 @@ pub static SHA: RegNames = RegNames {
         (0x0b8, "m_mem14"),
         (0x0bc, "m_mem15"),
     ],
-    resets: &[
-    ],
+    resets: &[],
 };

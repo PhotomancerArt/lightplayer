@@ -497,8 +497,7 @@ fn note(cx: &mut BusCx<'_>, f: impl FnOnce() -> String) {
 
 impl Rmt {
     pub fn new(clock: RmtClockLine) -> Self {
-        let regs = RegFile::new("RMT", REGS_LEN)
-            .with_names(regs::RMT);
+        let regs = RegFile::new("RMT", REGS_LEN).with_names(regs::RMT);
         Self {
             index: 0,
             regs,

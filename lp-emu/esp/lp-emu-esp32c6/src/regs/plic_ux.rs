@@ -51,6 +51,5 @@ pub static PLIC_UX: RegNames = RegNames {
         (0x090, "uxint_thresh"),
         (0x094, "uxint_claim"),
     ],
-    resets: &[
-    ],
+    resets: &[],
 };

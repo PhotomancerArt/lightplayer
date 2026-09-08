@@ -95,7 +95,5 @@ pub static INTERRUPT_CORE0: RegNames = RegNames {
         (0x140, "clock_gate"),
         (0x7fc, "interrupt_reg_date"),
     ],
-    resets: &[
-        (0x140, 0x00000001),
-    ],
+    resets: &[(0x140, 0x00000001)],
 };

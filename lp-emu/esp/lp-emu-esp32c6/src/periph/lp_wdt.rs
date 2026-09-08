@@ -98,8 +98,7 @@ impl LpWdt {
     pub fn new() -> Self {
         Self {
             index: 0,
-            regs: RegFile::new("LP_WDT", 0x400)
-                .with_names(regs::LP_WDT),
+            regs: RegFile::new("LP_WDT", 0x400).with_names(regs::LP_WDT),
             expired: false,
         }
     }

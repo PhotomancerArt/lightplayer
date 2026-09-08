@@ -1,7 +1,7 @@
 ---
-status: open — one instance fixed, the class is not swept
+status: FIXED 2026-09-08 — swept from the PAC; `accept.rs::DEVIATIONS` is the list
 found: 2026-09-07      # M4 of the esp-emulator plan, on the second-boot gate
-fixed: SPI1 and SPI0 only
+fixed: every block, from the PAC (was: SPI1 and SPI0 only)
 area: lp-emu/esp/lp-emu-esp32c6/src/periph/ (every `accept::*` RegFile)
 class: silent-wrong-default
 related: [lp2025/2026-09-06-1001-esp-emulator/m4-flash-and-upload.md, docs/adr/2026-09-06-esp-soc-emulator-architecture.md]
@@ -57,3 +57,46 @@ block's non-zero reset values as derived data with the same provenance
 header, and `accept::*` can seed from it. That turns "the resets we noticed"
 into "the resets the PAC states", and makes a hand-written exception
 something a reader sees. It was out of M4's scope.
+
+## Closed, 2026-09-08
+
+Swept the way the last paragraph describes. `scripts/emu/pac-regnames.py`
+now reads each register's `impl crate::Resettable` alongside the offset
+comments and emits the non-zero values as a second table in the same
+generated file; `RegNames` carries them and `RegFile::with_names` seeds
+from them, so a block reads what the part reads before anyone writes it.
+
+Every hand-written reset in the tree was compared against the PAC before
+being deleted, and **all 68 agreed to the bit** — SPI0's 38, SPI1's 14,
+UART's 12, TIMG's 4, and the rest. The two hand tables, the IO_MUX pad
+loop, the GPIO `func_out_sel` loop and PCR's four are gone.
+
+What the sweep brought in that nobody had noticed:
+
+- **TIMG0 comes out of reset unlocked.** `wdtwprotect` resets to the write
+  key itself (`0x50d8_3aa1`), so the MWDT's first `wdtconfig0` write takes
+  without one. LP_WDT's `wdtwprotect` has no non-zero reset and starts
+  locked. The model held both locked. Nothing on the boot path depends on
+  it — esp-hal writes the key first either way.
+- **`LP_WDT.wdtconfig1` reads `0x0003_0d40`**, visible in the boot trace
+  where it used to read 0.
+- **`accept::usb_device`'s doc was stale**: it claimed `ep1_conf` and
+  `int_raw` read 0 and the PAC says `0x02` and `0x08`. That block and
+  `accept::uart` had both been unmapped since P6/M6 gave them models; they
+  are retired rather than swept.
+- **UART0's `clkdiv` is the only deliberate deviation left in a modelled
+  block** (the ROM's `Uart_Init` leaves 115,200 where the PAC's reset is the
+  pre-boot value), and `LP_CLKRST.reset_cause` the only one in an accept
+  block (it is an input to the run, not a property of the part).
+
+`accept.rs::DEVIATIONS` is that list, with a reason per row, and two tests
+hold it: one fails on an unlisted difference, the other on a listed one that
+has stopped being a difference.
+
+**The evidence.** Every `#[ignore]` boot test and the m3–m6 replays are
+green, and every memory-class figure is byte-identical before and after
+(`freeBytes`, `usedBytes`, `totalBytes`, `largestFreeBlock`, the stack
+high-water — a diff of the two runs' figures is empty). Instruction counts
+move by a few thousand in eight-second runs and one link stamp moves 1 ms,
+because a register that reads a different value changes what a poll loop
+does; nothing was tuned toward a number.

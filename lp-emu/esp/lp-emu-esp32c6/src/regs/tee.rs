@@ -47,7 +47,5 @@ pub static TEE: RegNames = RegNames {
         (0x080, "clock_gate"),
         (0xffc, "date"),
     ],
-    resets: &[
-        (0x080, 0x00000001),
-    ],
+    resets: &[(0x080, 0x00000001)],
 };

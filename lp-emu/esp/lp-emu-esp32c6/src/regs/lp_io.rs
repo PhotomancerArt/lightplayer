@@ -44,7 +44,5 @@ pub static LP_IO: RegNames = RegNames {
         (0x074, "lpi2c"),
         (0x3fc, "date"),
     ],
-    resets: &[
-        (0x074, 0xc0000000),
-    ],
+    resets: &[(0x074, 0xc0000000)],
 };

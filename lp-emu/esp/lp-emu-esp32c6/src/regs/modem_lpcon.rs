@@ -25,7 +25,5 @@ pub static MODEM_LPCON: RegNames = RegNames {
         (0x028, "mem_conf"),
         (0x02c, "date"),
     ],
-    resets: &[
-        (0x028, 0x00020015),
-    ],
+    resets: &[(0x028, 0x00020015)],
 };

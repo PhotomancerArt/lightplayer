@@ -131,30 +131,15 @@ pub fn modem_lpcon() -> RegFile {
     RegFile::new("MODEM_LPCON", 0x100).with_names(regs::MODEM_LPCON)
 }
 
-/// `I2C_ANA_MST` — the analog I2C master, three spin sites:
-///
-/// - `ana_conf0.cal_done` (`+0x18` bit 24) must read **1**:
-///   `while I2C_ANA_MST::regs().ana_conf0().read().cal_done().bit_is_clear() {}`
-///   at `soc/esp32c6/clocks.rs:181-186` (the BBPLL calibration wait).
-/// - `i2c_ctrl(n).busy` (`+0x00`/`+0x04` bit 25) must read **0**:
-///   `while ...i2c_ctrl(master).read().busy().bit() {}` at
-///   `soc/esp32c6/regi2c.rs:187, 194, 209`.
-/// - `ana_conf2` (`+0x20`) picks the master index (`regi2c.rs:160-170`):
-///   bit set → master 0, clear → master 1. It resets to 0 in the PAC, so
-///   every block uses master 1, and both `i2c_ctrl` registers carry the
-///   override so the pick cannot matter.
-///
-/// `i2c_ctrl.data` (bits 16:23) reads back what was written, so a
-/// `regi2c_read` returns the last value written to that register — the
-/// accept-and-remember reading of an analog register, stated here so the
-/// PLL "readback" is not mistaken for a measurement.
-pub fn i2c_ana_mst() -> RegFile {
-    RegFile::new("I2C_ANA_MST", 0x100)
-        .with_names(regs::I2C_ANA_MST)
-        .with_read_override(0x018, 1 << 24, 1 << 24)
-        .with_read_override(0x000, 1 << 25, 0)
-        .with_read_override(0x004, 1 << 25, 0)
-}
+// `I2C_ANA_MST` was an accept block here from P5 until 2026-09-08, and it
+// is the reason the defect it closed has a class of its own. The block is a
+// transaction port onto two hundred analog registers; a `RegFile` gave it
+// **one** `data` byte, so `regi2c_read(block, reg)` answered with whatever
+// was last written to any other pair. `super::i2c_ana_mst` gives it the
+// `{block, register}` store the drivers and the mask ROM both address, and
+// carries the two read overrides (`busy` 0, `cal_done` 1) unchanged.
+//
+// `docs/defects/2026-09-08-regi2c-is-one-data-register-not-a-register-file.md`
 
 /// `LP_I2C_ANA_MST` — the fourth spin site, found the hard way on the bench
 /// (director note 6, `docs/defects/2026-09-06-c6-analog-master-wedges-the-
@@ -325,19 +310,8 @@ mod tests {
     #[test]
     fn the_spin_bits_read_the_way_the_discovery_says_whatever_was_written() {
         let mut sb = Sandbox::new();
-        let mut i2c = i2c_ana_mst();
-        sb.write(&mut i2c, 0x018, 0);
-        assert!(sb.read(&mut i2c, 0x018) & (1 << 24) != 0, "cal_done");
-        sb.write(&mut i2c, 0x000, 0xffff_ffff);
-        sb.write(&mut i2c, 0x004, 0xffff_ffff);
-        assert_eq!(sb.read(&mut i2c, 0x000) & (1 << 25), 0, "i2c0 busy");
-        assert_eq!(sb.read(&mut i2c, 0x004) & (1 << 25), 0, "i2c1 busy");
-        assert_eq!(
-            sb.read(&mut i2c, 0x020),
-            0,
-            "ana_conf2 resets to 0: master 1"
-        );
-
+        // `I2C_ANA_MST`'s own spin bits moved to `super::i2c_ana_mst` with
+        // the block; `LP_I2C_ANA_MST` is still an accept block.
         let mut lp = lp_i2c_ana_mst();
         sb.write(&mut lp, 0x000, 0xffff_ffff);
         assert_eq!(sb.read(&mut lp, 0x000) & (1 << 25), 0, "I2C0_BUSY");
@@ -414,7 +388,6 @@ mod tests {
             (plic_ux(), regs::PLIC_UX),
             (modem_syscon(), regs::MODEM_SYSCON),
             (modem_lpcon(), regs::MODEM_LPCON),
-            (i2c_ana_mst(), regs::I2C_ANA_MST),
             (lp_i2c_ana_mst(), regs::LP_I2C_ANA_MST),
             (pcr(), regs::PCR),
             (lp_timer(), regs::LP_TIMER),

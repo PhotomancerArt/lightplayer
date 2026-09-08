@@ -340,8 +340,7 @@ impl UsbSerialJtag {
     /// `tried` the observation stream; `host` the state at power-on.
     pub fn new(delivered: Option<StreamId>, tried: Option<StreamId>, host: HostState) -> Self {
         Self {
-            regs: RegFile::new("USB_DEVICE", 0x100)
-                .with_names(regs::USB_DEVICE),
+            regs: RegFile::new("USB_DEVICE", 0x100).with_names(regs::USB_DEVICE),
             grades: Self::grades(),
             index: 0,
             delivered,

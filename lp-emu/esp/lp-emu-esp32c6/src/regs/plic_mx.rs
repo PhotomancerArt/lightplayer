@@ -51,6 +51,5 @@ pub static PLIC_MX: RegNames = RegNames {
         (0x090, "mxint_thresh"),
         (0x094, "mxint_claim"),
     ],
-    resets: &[
-    ],
+    resets: &[],
 };

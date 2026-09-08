@@ -49,7 +49,5 @@ pub static SYSTIMER: RegNames = RegNames {
         (0x088, "real_target2.hi"),
         (0x0fc, "date"),
     ],
-    resets: &[
-        (0x000, 0x46000000),
-    ],
+    resets: &[(0x000, 0x46000000)],
 };

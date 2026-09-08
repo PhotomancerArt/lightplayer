@@ -111,8 +111,7 @@ pub struct Pcr {
 
 impl Pcr {
     pub fn new(lines: UartClockLines, rmt: RmtClockLine) -> Self {
-        let regs = super::accept::pcr()
-;
+        let regs = super::accept::pcr();
         Self { regs, lines, rmt }
     }
 

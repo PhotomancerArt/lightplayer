@@ -32,6 +32,5 @@ pub static LP_TIMER: RegNames = RegNames {
         (0x044, "lp_int_clr"),
         (0x3fc, "date"),
     ],
-    resets: &[
-    ],
+    resets: &[],
 };

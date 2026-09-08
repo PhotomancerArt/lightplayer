@@ -17,8 +17,5 @@ pub static LP_TEE: RegNames = RegNames {
         (0x090, "force_acc_hp"),
         (0x0fc, "date"),
     ],
-    resets: &[
-        (0x000, 0x00000003),
-        (0x004, 0x00000001),
-    ],
+    resets: &[(0x000, 0x00000003), (0x004, 0x00000001)],
 };

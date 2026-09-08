@@ -25,8 +25,5 @@ pub static I2C_ANA_MST: RegNames = RegNames {
         (0x028, "i2c1_ctrl1"),
         (0x034, "date"),
     ],
-    resets: &[
-        (0x024, 0x00000042),
-        (0x028, 0x00000042),
-    ],
+    resets: &[(0x024, 0x00000042), (0x028, 0x00000042)],
 };

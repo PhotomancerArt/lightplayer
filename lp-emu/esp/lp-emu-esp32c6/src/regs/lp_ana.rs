@@ -26,8 +26,5 @@ pub static LP_ANA: RegNames = RegNames {
         (0x02c, "lp_int_clr"),
         (0x3fc, "date"),
     ],
-    resets: &[
-        (0x000, 0x0ffc0100),
-        (0x00c, 0xffffffff),
-    ],
+    resets: &[(0x000, 0x0ffc0100), (0x00c, 0xffffffff)],
 };

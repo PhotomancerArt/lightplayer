@@ -20,8 +20,5 @@ pub static LP_I2C_ANA_MST: RegNames = RegNames {
         (0x014, "device_en"),
         (0x3fc, "date"),
     ],
-    resets: &[
-        (0x004, 0x07000000),
-        (0x008, 0x00000900),
-    ],
+    resets: &[(0x004, 0x07000000), (0x008, 0x00000900)],
 };

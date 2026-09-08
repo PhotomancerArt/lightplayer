@@ -700,3 +700,105 @@ fn read_span(m: &Esp32C6Machine, address: u32, len: u32) -> Vec<u8> {
     }
     panic!("{address:#010x}+{len} is not in one RAM region");
 }
+
+/// The mask ROM's PLL calibration wait, and the whole of what the app says
+/// on its way up, are the same on both boot paths.
+///
+/// `wait_rfpll_cal_end` (`0x40005984`) polls one analog register through the
+/// PHY function table — block `0x62`, register 7, bit 1 — and prints
+/// `error: pll_cal exceeds 2ms!!!` when it gives up. Silicon never prints
+/// it. This machine printed it three times for as long as `I2C_ANA_MST` was
+/// an accept block with a single shared `data` byte: the ROM's own `regi2c`
+/// traffic had left something else in it, so the flag read back as whatever
+/// the last unrelated transaction wrote
+/// (`docs/defects/2026-09-08-regi2c-is-one-data-register-not-a-register-file.md`).
+///
+/// The assertion is deliberately the *whole console*, not a grep for that
+/// one string. A model that answers `regi2c` reads differently changes what
+/// the clock and radio paths of every image see, and the way to notice is a
+/// line appearing or disappearing anywhere — so this compares the app's
+/// output line for line against the direct-load path, which is the same
+/// application on the same chip with a loader instead of a bootloader.
+#[test]
+#[ignore = "needs a firmware ELF and a merged image; run with `just test-emu-c6`"]
+fn the_app_says_the_same_thing_on_both_boot_paths() {
+    let elf = match reference_image(&IMAGE) {
+        Ok(p) => p,
+        Err(reason) => {
+            skip_notice("the_app_says_the_same_thing_on_both_boot_paths", &reason);
+            return;
+        }
+    };
+    let merged = merged_image(&IMAGE).expect("the merged image");
+    let len = std::fs::metadata(&merged).unwrap().len() as u32;
+    let stop = StopCondition::after_micros(APP_US).exit_on(APP_LAST);
+
+    let mut rom_up = Esp32C6Builder::new()
+        .boot_mode(BootMode::RomUp)
+        .app(AppSource::Path(elf.clone()))
+        .flash(lp_emu_esp32c6::flash::FlashBacking::Copy(merged.clone()))
+        .flash_len(len)
+        .reset_cause(ResetCause::UsbUartHpSys)
+        .strap(Strap::App)
+        .uart0(Uart0Sink::Memory)
+        .usb_host(lp_emu_esp32c6::machine::UsbHost::Attached { draining: true })
+        .build()
+        .expect("the ROM-up machine builds");
+    let outcome = rom_up.run_until(&stop);
+    assert!(
+        matches!(outcome, Outcome::ExitMatched { .. }),
+        "the ROM-up boot never reached `{APP_LAST}`: {outcome:?}"
+    );
+
+    let mut direct = Esp32C6Builder::new()
+        .app(AppSource::Path(elf))
+        .flash(lp_emu_esp32c6::flash::FlashBacking::Copy(merged))
+        .flash_len(len)
+        .uart0(Uart0Sink::Memory)
+        .usb_host(lp_emu_esp32c6::machine::UsbHost::Attached { draining: true })
+        .build()
+        .expect("the direct machine builds");
+    let outcome = direct.run_until(&stop);
+    assert!(
+        matches!(outcome, Outcome::ExitMatched { .. }),
+        "{outcome:?}"
+    );
+
+    let app_lines = |m: &Esp32C6Machine| -> Vec<String> {
+        let text = String::from_utf8_lossy(&m.usb_sj().bytes()).into_owned();
+        device_lines(&text)
+            .into_iter()
+            .skip_while(|l| !l.starts_with(APP_FIRST))
+            .filter(|l| !PATH_DEPENDENT.iter().any(|p| l.contains(p)))
+            .collect()
+    };
+    let ours = app_lines(&rom_up);
+    let theirs = app_lines(&direct);
+    assert!(
+        ours.len() > 20,
+        "the ROM-up app printed almost nothing: {ours:#?}"
+    );
+    assert_eq!(
+        ours, theirs,
+        "the app says different things depending on how it was loaded"
+    );
+    assert!(
+        !ours.iter().any(|l| l.contains("pll_cal")),
+        "the ROM's PLL calibration timed out: {ours:?}"
+    );
+}
+
+/// The app's first line, and the line this comparison runs to. `boot
+/// complete` is the server loop's own first-frame line, which is well past
+/// the radio bring-up — and the radio bring-up is where the ROM's
+/// PLL-calibration wait runs and where the three `pll_cal` lines appeared.
+const APP_FIRST: &str = "[INIT] Initializing board";
+const APP_LAST: &str = "[RECOVERY] boot complete";
+/// Three emulated seconds: `boot complete` lands around 2.4 s of them.
+const APP_US: u64 = 3_000_000;
+
+/// Lines the two paths are *supposed* to disagree about: the recovery
+/// ledger records how the chip was reset, and a ROM-up boot after a serial
+/// reset is a user reset where a direct load asserts a power-on. Everything
+/// else is the same application doing the same thing.
+const PATH_DEPENDENT: &[&str] = &["[RECOVERY]"];

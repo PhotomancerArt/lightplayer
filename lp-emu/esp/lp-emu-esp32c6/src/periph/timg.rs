@@ -137,8 +137,7 @@ impl Timg {
         Self {
             name,
             index: 0,
-            regs: RegFile::new(name, 0x100)
-                .with_names(regs::TIMG0),
+            regs: RegFile::new(name, 0x100).with_names(regs::TIMG0),
             base_ticks: 0,
             base_cycle: 0,
             latched: 0,

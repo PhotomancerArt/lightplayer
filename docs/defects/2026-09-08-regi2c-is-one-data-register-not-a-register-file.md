@@ -1,5 +1,5 @@
 ---
-status: open — reported, not modelled
+status: FIXED 2026-09-08 — `lp-emu/esp/lp-emu-esp32c6/src/periph/i2c_ana_mst.rs`
 found: 2026-09-08      # M7 of the esp-emulator plan, on the ROM-up boot
 area: lp-emu/esp/lp-emu-esp32c6/src/periph/accept.rs (`i2c_ana_mst`)
 class: accept-block-too-coarse
@@ -65,3 +65,27 @@ changes value is a change to the clock and radio paths of every image.
 
 **Where it belongs** — the same lab task as the accept-block reset-value
 sweep (DD40 b), which is already M8's.
+
+## Closed, 2026-09-08
+
+Done as described. `I2C_ANA_MST` is a modelled peripheral now
+(`periph/i2c_ana_mst.rs`): a write to `i2c_ctrl(n)` with `read_write` set
+stores the `data` byte at `{slave_addr, slave_reg_addr}`, a write with it
+clear looks the pair up and leaves the answer in the `data` field, and a
+pair nobody has written answers 0 — the same answer the accept block gave,
+but only for the register actually asked about. The two read overrides
+(`busy` 0, `ana_conf0.cal_done` 1) came across unchanged.
+
+`ANALOG_SEED` has exactly one entry, block `0x62` register 7 bit 1, and it
+carries the disassembly that justifies it: `wait_rfpll_cal_end` calls
+`rom_i2c_readReg_Mask(0x62, 1, 7, 1, 1)` and gives up after a hundred tries.
+
+**The evidence.** `tests/rom_up_boot.rs::the_app_says_the_same_thing_on_both_boot_paths`
+compares the app's whole console, line for line, between the ROM-up boot and
+a direct load of the same ELF — 27 lines from `[INIT] Initializing board` to
+`[RECOVERY] boot complete`. It passes. With `ANALOG_SEED` emptied, it fails
+with **exactly** the three `pll_cal` lines inserted after `[INIT] Flash
+filesystem mounted` and nothing else moved, which is the differential the
+fix was asked for. Every other boot gate, the m3–m6 replays and every
+memory-class figure are unchanged; the accept-block sweep landed in the same
+PR and the two were measured separately.

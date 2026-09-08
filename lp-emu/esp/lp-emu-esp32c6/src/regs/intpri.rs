@@ -59,8 +59,5 @@ pub static INTPRI: RegNames = RegNames {
         (0x0b0, "rnd_eco_low"),
         (0x3fc, "rnd_eco_high"),
     ],
-    resets: &[
-        (0x0a4, 0x00000001),
-        (0x3fc, 0xffffffff),
-    ],
+    resets: &[(0x0a4, 0x00000001), (0x3fc, 0xffffffff)],
 };

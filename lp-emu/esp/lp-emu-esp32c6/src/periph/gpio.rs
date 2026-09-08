@@ -69,7 +69,6 @@ const OUT_SEL_MASK: u32 = 0xff;
 const INV_SEL: u32 = 1 << 8;
 const OEN_SEL: u32 = 1 << 9;
 
-
 /// The GPIO block.
 #[derive(Debug)]
 pub struct Gpio {
