@@ -36,6 +36,7 @@ use crate::periph::{
     BoxedPeripheral, BusCx, CpuIntMatrix, IrqLines, MachineRequest, NoCpuInterrupts, RegGrade,
     Width,
 };
+use crate::pins::Fabric;
 use crate::trace::{Access, MmioEvent, Trace};
 
 /// Hardware trigger slots, matching the RISC-V debug spec's count on the
@@ -160,6 +161,10 @@ pub struct BusScalars {
     pub unmapped_writes: u64,
     pub first_strict_violation: Option<StrictViolation>,
     pub request: Option<MachineRequest>,
+    /// The signal fabric: routing and pad levels (plan DD34 e). Part of the
+    /// bus's state, so a snapshot that forgot it would restore a machine
+    /// whose pads had lost their routing.
+    pub pins: Fabric,
 }
 
 /// One entry in the MMIO decode table.
@@ -245,6 +250,10 @@ pub struct SocBus {
     pub irq: IrqLines,
     pub trace: Trace,
     pub host: HostSinks,
+    /// Where a peripheral's output signal goes: the routing the chip's GPIO
+    /// view writes and the levels its output blocks drive. See
+    /// [`crate::pins`].
+    pub pins: Fabric,
 }
 
 impl Default for SocBus {
@@ -303,6 +312,7 @@ impl SocBus {
             irq: IrqLines::new(),
             trace: Trace::disabled(),
             host: HostSinks::new(),
+            pins: Fabric::new(),
         }
     }
 
@@ -541,6 +551,7 @@ impl SocBus {
             host: &mut self.host,
             matrix: &mut *self.matrix,
             request: &mut self.request,
+            pins: &mut self.pins,
         };
         Some(f(periph, &mut cx))
     }
@@ -609,6 +620,7 @@ impl SocBus {
                 host: &mut self.host,
                 matrix: &mut *self.matrix,
                 request: &mut self.request,
+                pins: &mut self.pins,
             };
             range.periph.on_event(id, &mut cx);
         }
@@ -632,6 +644,7 @@ impl SocBus {
                 host: &mut self.host,
                 matrix: &mut *self.matrix,
                 request: &mut self.request,
+                pins: &mut self.pins,
             };
             range.periph.started(&mut cx);
         }
@@ -745,6 +758,7 @@ impl SocBus {
             unmapped_writes: self.unmapped_writes,
             first_strict_violation: self.first_strict_violation,
             request: self.request,
+            pins: self.pins.clone(),
         }
     }
 
@@ -759,6 +773,7 @@ impl SocBus {
         self.unmapped_writes = s.unmapped_writes;
         self.first_strict_violation = s.first_strict_violation;
         self.request = s.request;
+        self.pins = s.pins.clone();
     }
 
     /// `true` if `address` falls in a declared MMIO window.
@@ -1010,6 +1025,7 @@ impl SocBus {
                     host: &mut self.host,
                     matrix: &mut *self.matrix,
                     request: &mut self.request,
+                    pins: &mut self.pins,
                 };
                 range.periph.read(off, width, &mut cx)
             };
@@ -1095,6 +1111,7 @@ impl SocBus {
                     host: &mut self.host,
                     matrix: &mut *self.matrix,
                     request: &mut self.request,
+                    pins: &mut self.pins,
                 };
                 range.periph.write(off, width, value, &mut cx);
             }

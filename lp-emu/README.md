@@ -314,7 +314,7 @@ and the method are in
 **The Xtensa core** (`lp-xt-emu`) has its own probe and its own ladder:
 
 ```bash
-just bench-emu-xt                     # the fixture corpus, repeated to >=100 M
+just bench-emu-xt                     # one `bench_loop` run, >=100 M instructions
 scripts/emu/bench-xt.sh --bin <saved-binary> --no-build --no-promote
 ```
 
@@ -324,7 +324,9 @@ the guest output *and* a capped text trace against the previous run. M6 took
 it from 21.4 to 31.2 M instr/s on the recursion-heavy `ackermann` fixture and
 54.5 to 61.3 M on `fib_rec`, with both captures byte-identical; the win is
 almost entirely one memory resolution per access instead of four or five.
-`lp-emu/lp-xt-emu/README.md` has the rung-by-rung table and the
+(Those two fixtures were the workload while the probe reached 100 M by
+repeating a short program; it now runs the trip-counted `bench_loop` once
+instead.) `lp-emu/lp-xt-emu/README.md` has the rung-by-rung table and the
 generic-codegen trap that per-package `opt-level` overrides hide.
 
 Evidence, and the rungs not yet climbed (poll-loop skip, block cache): the

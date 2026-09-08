@@ -16,6 +16,12 @@
 //! every block in [`crate::periph::boot_set`] has its row here — plus
 //! [`INTERRUPT_SOURCES`], the PAC's `Interrupt` enum: the numbers are the
 //! indices of `core_0_intr_map`, so they are SVD-derived data too.
+//!
+//! One table here is **hand-written**, and says so in its own header:
+//! [`output_signals`], the GPIO matrix's output-signal numbers (M5 P2). They
+//! are not a register block and not in the PAC — they live in esp-hal's
+//! generated metadata — so the generator cannot produce them; the file
+//! carries the same provenance citation instead.
 
 mod apb_saradc;
 mod assist_debug;
@@ -41,6 +47,7 @@ mod lp_timer;
 mod lp_wdt;
 mod modem_lpcon;
 mod modem_syscon;
+pub mod output_signals;
 mod pcr;
 mod plic_mx;
 mod pmu;

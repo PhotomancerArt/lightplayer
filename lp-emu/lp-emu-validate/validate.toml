@@ -199,7 +199,7 @@ because = "M6 built the host's side — absent, attached with the port closed, a
 [[configuration.trust]]
 class = "pin"
 grade = "modeled"
-because = "no pin is observed: GPIO and IO_MUX accept and remember; the RMT TX engines (M5 P1) produce each channel's pulses in cycles, but no pad carries them and nothing decodes them. M5 P2 brings the signal fabric, the pin log and the WS281x decoder that make a pin claim possible"
+because = "a pin IS observed (M5 P2): GPIO is a routing view over the bus's signal fabric, the RMT drives RMT_SIG_0/1 into it, and a WS281x decoder reads a routed pad's edges at the datasheet's +/-150 ns into frames (--dump-frames, --pin-log). Those frames are byte-equal to the word-level decode of the same transmission, which is two readings of one model and not a measurement: nothing on silicon has confirmed a pad here and no capture is committed. The grade moves when one is (M5 P4 puts the first lit frame against the host oracle)"
 
 [[configuration.trust]]
 class = "wire"
@@ -237,7 +237,7 @@ because = "the same host model as t1, and the same four transcripts stand behind
 [[configuration.trust]]
 class = "pin"
 grade = "modeled"
-because = "the same absence of pin observation as t1; M5 owns it"
+because = "the same pin observation as t1 (M5 P2), and the same reason for the grade: the fabric and the decoder are in the machine, not on a scope"
 
 [[configuration.trust]]
 class = "wire"

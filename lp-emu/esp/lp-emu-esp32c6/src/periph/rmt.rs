@@ -71,11 +71,12 @@
 
 use lp_emu_core::sched::{Cycles, EventId};
 use lp_emu_esp_common::regfile::{lane_of, merge_lane};
-use lp_emu_esp_common::{BusCx, Peripheral, RegFile, Width, event_id, event_local};
+use lp_emu_esp_common::{BusCx, Peripheral, RegFile, SignalId, Width, event_id, event_local};
 
 use super::pcr::RmtClockLine;
 use super::systimer::Reader;
 use crate::memmap;
+use crate::regs::output_signals::RMT_SIG_0;
 use crate::regs::{self, source};
 
 // Register offsets (`regs::RMT`).
@@ -162,6 +163,13 @@ pub const CLOCK_POLL_CYCLES: u64 = 1_000 * memmap::CYCLES_PER_US;
 /// replaces the logs.
 pub const PULSE_LOG_CAP: usize = 4_000_000;
 pub const WORD_LOG_CAP: usize = 2_000_000;
+
+/// The GPIO-matrix output signal TX channel `ch` drives: `RMT_SIG_0 + ch`
+/// (M5 discovery §8). Whether any pad listens is the fabric's business, and
+/// the RMT never learns the answer — it cannot see the GPIO block.
+pub const fn signal_of(ch: usize) -> SignalId {
+    SignalId(RMT_SIG_0 + ch as u16)
+}
 
 /// One level held for `ticks` channel ticks from cycle `at`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -349,6 +357,13 @@ pub struct Rmt {
     warned_gap: bool,
     warned_ref_cnt: [bool; 4],
     warned_late_start: [bool; TX_CHANNELS],
+    /// Whether the pulse and word logs are kept. **Off by default**: since
+    /// P2 the waveform reaches the fabric, and the logs are the word-level
+    /// oracle a test compares the decoder against — a 24-frame run holds
+    /// 305,490 pulses, which a long CLI run has no use for. `just
+    /// test-emu-c6`'s gates turn them on through
+    /// [`crate::machine::Esp32C6Builder::rmt_logs`].
+    keep_logs: bool,
 }
 
 /// A trace note, formatted only when the trace is on.
@@ -381,7 +396,17 @@ impl Rmt {
             warned_gap: false,
             warned_ref_cnt: [false; 4],
             warned_late_start: [false; TX_CHANNELS],
+            keep_logs: false,
         }
+    }
+
+    /// Keep the per-channel pulse and word logs. See [`Rmt::keep_logs`].
+    pub fn set_keep_logs(&mut self, keep: bool) {
+        self.keep_logs = keep;
+    }
+
+    pub fn keep_logs(&self) -> bool {
+        self.keep_logs
     }
 
     // ---- observation --------------------------------------------------------
@@ -525,8 +550,10 @@ impl Rmt {
         e.running = false;
         e.stalled = false;
         e.ending = Ending::No;
-        let idle = u8::from(e.idle_level());
+        let idle_level = e.idle_level();
+        let idle = u8::from(idle_level);
         let now = cx.now;
+        cx.pins.drive(signal_of(ch), idle_level, now);
         note(cx, || format!("cyc={now} RMT ch{ch} stop idle={idle}"));
     }
 
@@ -539,7 +566,9 @@ impl Rmt {
         e.ending = Ending::No;
         e.frames_ended += 1;
         let words = e.frame_words;
-        let idle = u8::from(e.idle_level());
+        let idle_level = e.idle_level();
+        let idle = u8::from(idle_level);
+        cx.pins.drive(signal_of(ch), idle_level, at);
         self.raise(ch, INT_TX_END_SHIFT);
         note(cx, || {
             format!("cyc={at} RMT ch{ch} end words={words} idle={idle}")
@@ -568,7 +597,20 @@ impl Rmt {
         }
     }
 
+    /// The channel's output goes to `pulse.level` at `pulse.at`, and the log
+    /// (if it is being kept) records it.
+    ///
+    /// The two halves of a word are emitted together, at the fetch, each
+    /// stamped with the cycle it actually starts at — so the fabric can see
+    /// an edge up to one word ahead of the slice boundary. They are never
+    /// out of order (a word's second half starts after its first, and the
+    /// next word is fetched at this one's end), which is all a decoder or a
+    /// pin log needs.
     fn push_pulse(&mut self, ch: usize, pulse: Pulse, cx: &mut BusCx<'_>) {
+        cx.pins.drive(signal_of(ch), pulse.level, pulse.at);
+        if !self.keep_logs {
+            return;
+        }
         let e = &mut self.ch[ch];
         if e.pulses.len() < PULSE_LOG_CAP {
             e.pulses.push(pulse);
@@ -589,6 +631,10 @@ impl Rmt {
     fn log_word(&mut self, ch: usize, now: Cycles, word: u32, cx: &mut BusCx<'_>) {
         let e = &mut self.ch[ch];
         e.frame_words += 1;
+        if !self.keep_logs {
+            return;
+        }
+        let e = &mut self.ch[ch];
         if e.words.len() < WORD_LOG_CAP {
             e.words.push((now, word));
         } else if !e.word_cap_noted {
@@ -720,6 +766,8 @@ impl Rmt {
                 let e = &mut self.ch[ch];
                 e.running = false;
                 e.ending = Ending::No;
+                let idle_level = e.idle_level();
+                cx.pins.drive(signal_of(ch), idle_level, due);
                 note(cx, || {
                     format!("cyc={due} RMT ch{ch} stopped after mem_empty")
                 });
@@ -951,7 +999,8 @@ impl Peripheral for Rmt {
             | (u32::from(self.warned_ref_cnt[2]) << 6)
             | (u32::from(self.warned_ref_cnt[3]) << 7)
             | (u32::from(self.warned_late_start[0]) << 8)
-            | (u32::from(self.warned_late_start[1]) << 9);
+            | (u32::from(self.warned_late_start[1]) << 9)
+            | (u32::from(self.keep_logs) << 10);
         out.extend_from_slice(&flags.to_le_bytes());
         for w in self.ram.iter() {
             out.extend_from_slice(&w.to_le_bytes());
@@ -1101,6 +1150,7 @@ impl Peripheral for Rmt {
             self.warned_ref_cnt[bit] = flags & (16 << bit) != 0;
         }
         self.warned_late_start = [flags & (1 << 8) != 0, flags & (1 << 9) != 0];
+        self.keep_logs = flags & (1 << 10) != 0;
         *self.ram = ram;
         let mut it = engines.into_iter();
         self.ch = [
@@ -1111,6 +1161,13 @@ impl Peripheral for Rmt {
     }
 
     fn as_any(&self) -> Option<&dyn core::any::Any> {
+        Some(self)
+    }
+
+    /// The machine-side seam, for one thing only: turning the pulse and word
+    /// logs on at build time (`Esp32C6Builder::rmt_logs`). Nothing on the
+    /// guest side can reach it.
+    fn as_any_mut(&mut self) -> Option<&mut dyn core::any::Any> {
         Some(self)
     }
 }
@@ -1144,6 +1201,9 @@ mod tests {
         clock.sclk.set(0x0050_0000);
         let mut r = Rmt::new(clock.clone());
         r.attached(7);
+        // The word and pulse logs are the oracle these tests read; a machine
+        // leaves them off (see `Rmt::keep_logs`).
+        r.set_keep_logs(true);
         (Sandbox::new(), r, clock)
     }
 
