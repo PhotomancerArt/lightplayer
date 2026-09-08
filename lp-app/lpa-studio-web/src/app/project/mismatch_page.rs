@@ -18,23 +18,29 @@
 //! project's gallery card. Nothing here is a second rendering of a device
 //! that could drift from the Devices page.
 //!
-//! # What "backing up first" means here (Q7)
+//! # Why nothing here backs anything up (Q7, DD19)
 //!
-//! The plan asked for the running project to be **pulled off the device
-//! into the library before the push**. There is no pull: `Action::Pull`,
+//! D50 says the push happens "backing up what is on it", and the plan
+//! asked for the running project to be **pulled off the device into the
+//! library before the push**. There is no pull: `Action::Pull`,
 //! `EffectRequest::Pull` and `ActivityKind::Pull` are the round-2 (M4)
-//! variants that never landed, and building them is a model phase, not
+//! variants that never landed, and building one is a model phase, not
 //! this one.
 //!
-//! It turns out the page does not need one. This page can only be drawn
-//! when Studio can *name* the running project, and it can only name it
-//! from the library — so by construction, everything the page offers to
-//! push over is already in the library. The backup is not skipped; it is
-//! already satisfied. A device running something this library does not
-//! have gets no verbs at all rather than a push with nothing behind it.
-//! (A board whose copy has been edited since it was pushed is the case
-//! neither this page nor any other surface covers today, and it is the
-//! question the advanced version of this page should answer.)
+//! In this build the requirement is **vacuous**, which is why the page
+//! ships without it (ruled 2026-09-08). The page can only be drawn when
+//! Studio can *name* the running project, and the only place it can name
+//! it from is the library — so everything the page offers to push over is
+//! in the library already. A device running something this library does
+//! not have gets **no verbs at all**, rather than a push with nothing
+//! behind it.
+//!
+//! So the copy claims no backup, because none happens: the verb is "Push
+//! <project> here", and the sentence above it says only the true thing —
+//! your library keeps what is being replaced. A real pull is future work,
+//! and it is what would cover the case neither this page nor any other
+//! surface covers today: a board whose copy has been EDITED since it was
+//! pushed, where the library's copy is no longer what is on the device.
 //!
 //! # Plain on purpose
 //!

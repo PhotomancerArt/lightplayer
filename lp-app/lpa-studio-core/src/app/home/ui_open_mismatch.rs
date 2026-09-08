@@ -58,9 +58,12 @@ impl UiOpenMismatch {
     ///
     /// "Switch" needs an address to switch TO, and a project this library
     /// does not have has no `/p/…`. "Push here" needs the same fact for a
-    /// different reason: the library copy is what stands behind the push
-    /// (Q7's backup, satisfied by the project already being here), and
-    /// without one a push would destroy the only copy of something.
+    /// different reason: the library copy is what stands behind the push.
+    /// Nothing is backed up — D50's "backing up what is on it" is vacuous
+    /// in this build (Q7, DD19), because the page can only NAME a running
+    /// project it found in the library, so what a push replaces is already
+    /// there. Without that copy a push would destroy the only one, which
+    /// is why the answer then is no verbs rather than a careful push.
     pub fn can_act(&self) -> bool {
         self.running.is_some()
     }

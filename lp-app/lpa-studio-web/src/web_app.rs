@@ -1618,7 +1618,10 @@ fn resolve_project_route(
         route.set(StudioRoute::Home);
         return true;
     }
-    let resolved = resolve_device_hint(on, &mut toasts);
+    let resolved = ResolvedHint::for_hint(on);
+    if let Some(said) = resolved.notice() {
+        toasts.say(said);
+    }
     // A hint this build cannot honour is DROPPED from the address bar as
     // well as from the open (PD14): leaving it there would promise a
     // device on every reload that the app has already declined once.
@@ -1645,8 +1648,9 @@ enum ResolvedHint {
     /// there or stops at the mismatch page (D50).
     Device(String),
     /// The hint named something this build has no backing for. The open is
-    /// the ordinary one, and the address loses the hint.
-    Unbacked,
+    /// the ordinary one, the address loses the hint, and `said` is the one
+    /// line that explains why.
+    Unbacked { said: &'static str },
 }
 
 impl ResolvedHint {
@@ -1659,37 +1663,48 @@ impl ResolvedHint {
                 // running project: that is what the page is for.
                 over_running_project: false,
             },
-            ResolvedHint::Resolve | ResolvedHint::Unbacked => HomeOp::OpenPackage { key },
+            ResolvedHint::Resolve | ResolvedHint::Unbacked { .. } => HomeOp::OpenPackage { key },
         }
     }
 
     /// The route this address should become when the hint could not be
     /// honoured, or `None` when it stands.
     fn dropped_hint_route(&self, current: &StudioRoute) -> Option<StudioRoute> {
-        matches!(self, ResolvedHint::Unbacked).then(|| current.with_device_hint(None))
+        matches!(self, ResolvedHint::Unbacked { .. }).then(|| current.with_device_hint(None))
     }
-}
 
-/// The `?on=` hint, as this build can answer it (PD14, Q9).
-///
-/// Two of the four forms have no backing here and say so once rather than
-/// failing silently or pretending: **emu** is the whole of the emulator
-/// roadmap (this plan deliberately ships with no emulator dependency,
-/// D48), and **ws:** is a device over the network, which nothing in this
-/// build speaks. Both fall through to the ordinary open — you asked to run
-/// this project somewhere, and a sim of its target is somewhere — with the
-/// hint dropped so the address stops claiming otherwise.
-fn resolve_device_hint(on: Option<DeviceHint>, toasts: &mut crate::base::Toasts) -> ResolvedHint {
-    match on {
-        None | Some(DeviceHint::Sim) => ResolvedHint::Resolve,
-        Some(DeviceHint::Mac(base_mac)) => ResolvedHint::Device(base_mac),
-        Some(DeviceHint::Emu) => {
-            toasts.say("No emulator in this build — opening on a sim");
-            ResolvedHint::Unbacked
+    /// The one line an unbacked hint leaves behind, if any.
+    fn notice(&self) -> Option<&'static str> {
+        match self {
+            ResolvedHint::Unbacked { said } => Some(said),
+            _ => None,
         }
-        Some(DeviceHint::Ws(_)) => {
-            toasts.say("No network devices in this build — opening on a sim");
-            ResolvedHint::Unbacked
+    }
+
+    /// The `?on=` hint, as this build can answer it (PD14, Q9).
+    ///
+    /// Two of the four forms have no backing here and say so once rather
+    /// than failing silently or pretending: **emu** is the whole of the
+    /// emulator roadmap (this plan deliberately ships with no emulator
+    /// dependency, D48), and **ws:** is a device over the network, which
+    /// nothing in this build speaks. Both fall through to the ordinary
+    /// open — you asked to run this project somewhere, and a sim of its
+    /// target is somewhere — with the hint dropped so the address stops
+    /// claiming otherwise.
+    ///
+    /// Pure: the caller says the line and rewrites the address. What is
+    /// decided here is only what this build can do about each form, which
+    /// is the part worth pinning down in a test.
+    fn for_hint(on: Option<DeviceHint>) -> Self {
+        match on {
+            None | Some(DeviceHint::Sim) => ResolvedHint::Resolve,
+            Some(DeviceHint::Mac(base_mac)) => ResolvedHint::Device(base_mac),
+            Some(DeviceHint::Emu) => ResolvedHint::Unbacked {
+                said: "No emulator in this build — opening on a sim",
+            },
+            Some(DeviceHint::Ws(_)) => ResolvedHint::Unbacked {
+                said: "No network devices in this build — opening on a sim",
+            },
         }
     }
 }
@@ -2146,6 +2161,91 @@ mod tests {
                 ),
                 "{} kept the session alive",
                 target.path()
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // `?on=` resolution at the route (PD14, Q9)
+    // -----------------------------------------------------------------
+
+    /// No hint and `?on=sim` both mean the same thing: let the model pick
+    /// a sim of the project's target (D33). Neither says anything, and
+    /// neither touches the address.
+    #[test]
+    fn a_kind_hint_is_the_ordinary_open() {
+        for on in [None, Some(DeviceHint::Sim)] {
+            let resolved = ResolvedHint::for_hint(on.clone());
+            assert!(matches!(resolved, ResolvedHint::Resolve), "{on:?}");
+            assert_eq!(resolved.notice(), None, "{on:?}");
+            assert_eq!(
+                resolved.dropped_hint_route(&project_route()),
+                None,
+                "{on:?}"
+            );
+            assert!(matches!(
+                resolved.open_op("prj0000000000000000".to_string()),
+                HomeOp::OpenPackage { .. }
+            ));
+        }
+    }
+
+    /// A MAC names an INSTANCE, and that is the op that can stop at the
+    /// mismatch page. Arriving from a URL never authorises a push over
+    /// what is running — that is what the page is for.
+    #[test]
+    fn a_mac_hint_names_the_device_and_never_pushes_over_on_arrival() {
+        let resolved = ResolvedHint::for_hint(Some(DeviceHint::Mac(
+            "60:55:f9:0a:0b:0c".to_string(),
+        )));
+        assert_eq!(resolved.notice(), None);
+        assert_eq!(resolved.dropped_hint_route(&project_route()), None);
+        match resolved.open_op("prj0000000000000000".to_string()) {
+            HomeOp::OpenPackageOnDevice {
+                base_mac,
+                over_running_project,
+                ..
+            } => {
+                assert_eq!(base_mac, "60:55:f9:0a:0b:0c");
+                assert!(!over_running_project, "a URL is not an answer");
+            }
+            other => panic!("a MAC names a device: {other:?}"),
+        }
+    }
+
+    /// `emu` and `ws:` parse — the addresses people write down keep
+    /// working when a backing lands — but this build has neither (D48,
+    /// Q9). Each says so once and falls through to the ordinary open, and
+    /// the address LOSES the hint: a bar that kept promising a device the
+    /// app already declined would ask for it again on every reload.
+    #[test]
+    fn an_unbacked_hint_says_so_once_and_leaves_the_address() {
+        for (on, said) in [
+            (
+                DeviceHint::Emu,
+                "No emulator in this build — opening on a sim",
+            ),
+            (
+                DeviceHint::Ws("192.168.0.21:1234".to_string()),
+                "No network devices in this build — opening on a sim",
+            ),
+        ] {
+            let resolved = ResolvedHint::for_hint(Some(on.clone()));
+            assert_eq!(resolved.notice(), Some(said), "{on:?}");
+            assert!(
+                matches!(
+                    resolved.open_op("prj0000000000000000".to_string()),
+                    HomeOp::OpenPackage { .. }
+                ),
+                "{on:?} opens the ordinary way"
+            );
+            let hinted = project_route().with_device_hint(Some(on.clone()));
+            assert_eq!(
+                resolved
+                    .dropped_hint_route(&hinted)
+                    .map(|route| route.path()),
+                Some(project_route().path()),
+                "{on:?} leaves the address"
             );
         }
     }
