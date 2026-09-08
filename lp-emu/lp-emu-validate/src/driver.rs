@@ -874,10 +874,7 @@ impl ConfigurationDriver for LpEmuDriver {
                 emu.push("--elf".into());
                 emu.push(elf.clone());
             }
-            BootPath::RomUp {
-                reset_cause,
-                strap,
-            } => {
+            BootPath::RomUp { reset_cause, strap } => {
                 let merged = image.with_file_name("merged.bin");
                 steps.push(
                     PlanStep::new(

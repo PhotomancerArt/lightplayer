@@ -169,10 +169,7 @@ fn run(args: RunArgs) -> Result<()> {
     // ends well with a hundred of them has told you less than it appears to,
     // and `--strict-bus` is the flag that turns each one into a fault with a
     // pc. Reported rather than gated because a walk is not a bring-up.
-    let (reads, writes) = (
-        machine.bus.unmapped_reads(),
-        machine.bus.unmapped_writes(),
-    );
+    let (reads, writes) = (machine.bus.unmapped_reads(), machine.bus.unmapped_writes());
     if reads + writes > 0 {
         eprintln!(
             "emu: {reads} unmapped read(s), {writes} unmapped write(s) at {} distinct site(s) — \
