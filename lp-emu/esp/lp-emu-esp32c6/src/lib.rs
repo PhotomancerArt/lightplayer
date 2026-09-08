@@ -59,6 +59,7 @@ pub mod loader;
 pub mod machine;
 pub mod memmap;
 pub mod periph;
+pub mod pinscript;
 pub mod regs;
 pub mod rom;
 pub mod snapshot;

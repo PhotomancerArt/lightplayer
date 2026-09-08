@@ -14,6 +14,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
+use lp_emu_esp_common::pins::PadId;
 use lp_emu_esp_common::{RegGrade, ScriptedSource};
 use lp_emu_esp32c6::control::parse_usb_script;
 use lp_emu_esp32c6::flash::FlashBacking;
@@ -24,6 +25,7 @@ use lp_emu_esp32c6::machine::{
 };
 use lp_emu_esp32c6::memmap;
 use lp_emu_esp32c6::periph::rmt::RefillStats;
+use lp_emu_esp32c6::pinscript::{parse_pin_script, parse_wire};
 
 const USAGE: &str = "\
 lp-emu-esp32c6 — the ESP32-C6 machine
@@ -128,6 +130,22 @@ OPTIONS:
     --pin-log file:<path>   every edge on every routed pad: `<us> gpio18 0|1`.
                             12,288 lines per 256-LED frame — never a default,
                             capped at 2,000,000 lines
+    --pin-script <file>     scripted host input on the PADS, deterministic:
+                            `<us> pin <n> <0|1>` at absolute guest time, plus
+                            --usb-script's walk forms `after \"<line>\" pin …`
+                            and `then +<ms> pin …`, plus the generators
+                            `button <n> press at <us> [bounce <k> edges over
+                            <us>] hold <ms>` and `encoder <a> <b> <steps>
+                            cw|ccw from <us> at <hz>`. The leading number is
+                            MICROSECONDS here (a contact bounce is tens of
+                            them); `us` and `ms` suffixes are accepted.
+                            Repeatable: the files concatenate in the order
+                            given. GPIO9, 12, 13, 16, 17 and 18 are refused
+    --wire <a>:<b>          tie two pads before the guest starts, so whatever
+                            <a> carries <b> carries — a jumper on the header.
+                            Repeatable, and transitive. `<a>` is the TX side
+                            and is the only place gpio18 is allowed
+                            (`--wire 18:19`, the strip pad into an RX pad)
     --reset-cause poweron|usb-uart
                             what LP_CLKRST.reset_cause says, and so what the
                             mask ROM prints as `rst:0x..`: a cold chip, or a
@@ -206,6 +224,8 @@ struct Args {
     usb_host: UsbHost,
     usb_sj_drain: UsbSjDrain,
     usb_script: Vec<PathBuf>,
+    pin_script: Vec<PathBuf>,
+    wires: Vec<(PadId, PadId)>,
     control: Option<String>,
     efuse: EfuseIdentity,
     reset_cause: lp_emu_esp32c6::loader::ResetCause,
@@ -285,6 +305,31 @@ fn run() -> Result<ExitCode, String> {
         );
         builder = builder.usb_script(commands);
         builder = builder.usb_script_source(bytes);
+    }
+
+    for (a, b) in &args.wires {
+        eprintln!("wire: {a} -> {b}");
+        builder = builder.wire(*a, *b);
+    }
+    if !args.pin_script.is_empty() {
+        let mut script = lp_emu_esp32c6::pinscript::PinScript::new();
+        for path in &args.pin_script {
+            let text = std::fs::read_to_string(path)
+                .map_err(|e| format!("reading {}: {e}", path.display()))?;
+            script.extend(parse_pin_script(&text).map_err(|e| format!("{}: {e}", path.display()))?);
+        }
+        let pads: Vec<String> = script.pads().iter().map(|p| format!("gpio{p}")).collect();
+        eprintln!(
+            "pin script: {} level(s) in {} step(s) on {}",
+            script.remaining(),
+            script.steps_left(),
+            if pads.is_empty() {
+                "no pad".to_string()
+            } else {
+                pads.join(", ")
+            }
+        );
+        builder = builder.pin_script(script);
     }
 
     if let Some(rom) = args.rom.clone() {
@@ -430,6 +475,12 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                     .ok_or_else(|| format!("--usb-sj-drain `{text}`: expected auto or manual"))?;
             }
             "--usb-script" => args.usb_script.push(value("--usb-script")?.into()),
+            "--pin-script" => args.pin_script.push(value("--pin-script")?.into()),
+            "--wire" => {
+                let text = value("--wire")?;
+                args.wires
+                    .push(parse_wire(&text).map_err(|e| format!("--wire: {e}"))?);
+            }
             "--control" => {
                 let text = value("--control")?;
                 args.control = Some(parse_control(&text)?);

@@ -63,13 +63,15 @@ use lp_riscv_emu::mach::trigger::TRIGGER_COUNT;
 use lp_riscv_emu::mach::{HartFault, MachineHart, SliceEnd};
 use lp_ws281x::{ChannelTiming, ColorOrder};
 
-use crate::control::{ControlCommand, ControlReply, HostReport};
+use crate::control::{ControlCommand, ControlReply, HostReport, PadReport};
 use crate::intmatrix::Esp32C6IntMatrix;
 use crate::loader::{self, EfuseIdentity, LoadError, PlacedAppSegment, ResetCause};
 use crate::memmap;
 use crate::periph;
+use crate::periph::gpio::Gpio;
 use crate::periph::uart::LIVE_POLL_CYCLES;
 use crate::periph::usb_sj::UsbSerialJtag;
+use crate::pinscript::PinScript;
 use crate::rom::{self, HookResult, HookTable, PlacedSegment, RomError};
 use crate::snapshot::Snapshot;
 
@@ -665,6 +667,10 @@ pub struct Esp32C6Builder {
     control: Option<String>,
     /// Scripted control commands (`--usb-script`), in file order.
     usb_script: Vec<(Cycles, ControlCommand)>,
+    /// Scripted pad levels (`--pin-script`), in file order.
+    pin_script: PinScript,
+    /// `--wire a:b`: pads tied in the fabric before the guest starts.
+    wires: Vec<(PadId, PadId)>,
     seed: u64,
     /// Where the flash chip's bytes come from and whether they go back.
     flash: crate::flash::FlashBacking,
@@ -714,6 +720,8 @@ impl Esp32C6Builder {
             usb_sj_drain: UsbSjDrain::default(),
             control: None,
             usb_script: Vec::new(),
+            pin_script: PinScript::new(),
+            wires: Vec::new(),
             seed: 0,
             flash: crate::flash::FlashBacking::Blank,
             flash_len: crate::flash::DEFAULT_FLASH_LEN,
@@ -903,6 +911,21 @@ impl Esp32C6Builder {
         self
     }
 
+    /// Scripted pad levels at declared guest times — the deterministic twin
+    /// of the `pin` control verb (`--pin-script`, plan RD6). Repeatable:
+    /// a second file's steps queue behind the first's.
+    pub fn pin_script(mut self, script: PinScript) -> Self {
+        self.pin_script.extend(script);
+        self
+    }
+
+    /// Tie two pads in the fabric before the guest starts (`--wire a:b`).
+    /// `a` is the TX side. Repeatable, and transitive.
+    pub fn wire(mut self, a: PadId, b: PadId) -> Self {
+        self.wires.push((a, b));
+        self
+    }
+
     /// Refuse every register graded below `level` (`--strict-grade`). See
     /// [`SocBus::set_strict_grade`].
     pub fn strict_grade(mut self, level: Option<RegGrade>) -> Self {
@@ -1020,6 +1043,8 @@ impl Esp32C6Builder {
             usb_sj_drain,
             control,
             usb_script,
+            pin_script,
+            wires,
             seed,
             flash,
             flash_len,
@@ -1306,6 +1331,26 @@ impl Esp32C6Builder {
         loader::reset_hart(&mut hart, &mut bus, entry);
         hart.set_cycle_model(time_grade.cycle_model());
 
+        // `--wire a:b`, before the guest runs: a jumper is on the header
+        // when the board powers up, not put there later.
+        for (a, b) in &wires {
+            bus.pins
+                .wire(*a, *b, 0)
+                .map_err(|e| BuildError::Io(format!("--wire: {e}")))?;
+        }
+        // A pin script's `after` needles watch the device's consoles — both
+        // of them, because a pin script says nothing about which link the
+        // payload prints on.
+        let pin_script = pin_script
+            .watching(uart0_log.clone())
+            .watching(usb_sj_log.clone());
+        let gpio_index = bus.peripheral_index("GPIO");
+        if gpio_index.is_none() && !pin_script.is_empty() {
+            return Err(BuildError::Io(
+                "--pin-script needs a GPIO block, and this machine has none".to_string(),
+            ));
+        }
+
         // The control channel's listener, and the block it drives. The index
         // is looked up once: it is the peripheral's identity for the whole
         // run (see PERIPHERAL_REGISTRATION_ORDER).
@@ -1361,6 +1406,9 @@ impl Esp32C6Builder {
             usb_index,
             control,
             script: usb_script.into(),
+            pin_script,
+            gpio_index,
+            next_pin_poll: 0,
             next_host_poll: 0,
             control_lines: 0,
             hook_calls: 0,
@@ -1562,6 +1610,13 @@ pub struct Esp32C6Machine {
     /// `USB_DEVICE`'s peripheral index, the control channel's target.
     usb_index: Option<usize>,
     control: Option<ControlChannel>,
+    /// Scripted pad levels still to drive (`--pin-script`).
+    pin_script: PinScript,
+    /// `GPIO`'s peripheral index: the block the drained edges are handed to.
+    gpio_index: Option<usize>,
+    /// The guest-cycle grid a pin script's unresolved `after` is looked at
+    /// on. Guest time, so two runs resolve at the same cycle.
+    next_pin_poll: Cycles,
     /// Scripted control commands still to apply, in file order.
     script: std::collections::VecDeque<(Cycles, ControlCommand)>,
     /// The next guest cycle at which the sockets are polled. Guest time,
@@ -2017,6 +2072,13 @@ impl Esp32C6Machine {
         if edges.is_empty() {
             return;
         }
+        // The GPIO block reads the same stream the pin log and the decoders
+        // do, so `status` latches exactly the edges that were on the wire —
+        // including two in one slice.
+        if let Some(index) = self.gpio_index {
+            self.bus
+                .with_peripheral::<Gpio, _>(index, |g, cx| g.observe_edges(&edges, cx));
+        }
         for edge in edges {
             let pad = edge.pad.0;
             *self.pins.state.edges.entry(pad).or_default() += 1;
@@ -2270,7 +2332,7 @@ impl Esp32C6Machine {
             if let Some((at, _)) = probes.get(next_probe) {
                 deadline = deadline.min((*at).max(now + 1));
             }
-            if let Some(at) = self.next_host_service() {
+            if let Some(at) = self.next_host_service(now) {
                 deadline = deadline.min(at.max(now + 1));
             }
             if self.bus.strict() {
@@ -2299,7 +2361,7 @@ impl Esp32C6Machine {
                         .next_deadline()
                         .or_else(|| self.bus.host.next_ready())
                         .unwrap_or(stop_cycle);
-                    if let Some(at) = self.next_host_service() {
+                    if let Some(at) = self.next_host_service(now) {
                         wake = wake.min(at);
                     }
                     let wake = wake.max(self.cycles() + 1).min(stop_cycle);
@@ -2392,14 +2454,15 @@ impl Esp32C6Machine {
     /// A scripted command's own cycle, or the socket poll cadence. It bounds
     /// the slice and the idle skip, which is what stops a guest sitting in
     /// `wfi` from jumping over the whole script.
-    fn next_host_service(&self) -> Option<Cycles> {
+    fn next_host_service(&self, now: Cycles) -> Option<Cycles> {
         let scripted = self.script.front().map(|(at, _)| *at);
         let polled =
             (self.control.is_some() || self.usb_sj_tcp.is_some()).then_some(self.next_host_poll);
-        match (scripted, polled) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
-        }
+        let pins = self
+            .pin_script
+            .next_service(now, LIVE_POLL_CYCLES)
+            .map(|at| at.max(self.next_pin_poll.min(at)));
+        [scripted, polled, pins].into_iter().flatten().min()
     }
 
     /// Apply everything the host has asked for by cycle `now`.
@@ -2410,6 +2473,7 @@ impl Esp32C6Machine {
     /// between two instructions of one slice, and the reply names the cycle
     /// it was drained at.
     fn service_host(&mut self, now: Cycles) {
+        self.service_pins(now);
         while self.script.front().is_some_and(|(at, _)| *at <= now) {
             let (_, command) = self.script.pop_front().expect("checked");
             let reply = self.apply_control(&command, now);
@@ -2446,6 +2510,70 @@ impl Esp32C6Machine {
         }
 
         self.service_control(now);
+    }
+
+    /// Drive every pad a `--pin-script` line is due for, then hand the
+    /// edges straight on.
+    ///
+    /// The drain is repeated here rather than left to the next slice
+    /// boundary: an edge a script caused at cycle N should raise the GPIO
+    /// interrupt at cycle N, not one slice later.
+    fn service_pins(&mut self, now: Cycles) {
+        if self.pin_script.is_empty() {
+            return;
+        }
+        self.next_pin_poll = now.saturating_add(LIVE_POLL_CYCLES);
+        let due = self.pin_script.take_due(now);
+        if due.is_empty() {
+            return;
+        }
+        for event in due {
+            self.bus.pins.drive_pad(event.pad, event.level, now);
+        }
+        self.bus.set_time(now);
+        self.drain_pins();
+    }
+
+    /// Both sides of every pad the machine has anything to say about — what
+    /// the `pins` verb answers.
+    ///
+    /// "Anything to say about" is: routed, input-enabled, driven from
+    /// outside, or tied by a `--wire`. Listing all 31 would bury the two a
+    /// run cares about.
+    fn pad_reports(&self) -> Vec<PadReport> {
+        let pins = &self.bus.pins;
+        (0..crate::periph::gpio::PAD_COUNT as u8)
+            .filter_map(|n| {
+                let pad = PadId(n);
+                let wired_to: Vec<u8> = pins
+                    .wired_group(pad)
+                    .into_iter()
+                    .filter(|p| *p != pad)
+                    .map(|p| p.0)
+                    .collect();
+                let route = pins.route_of(pad).map(|r| match r.source {
+                    RouteSource::GpioOut => "gpio-out".to_string(),
+                    RouteSource::Signal(sig, invert) => {
+                        let name = crate::regs::output_signals::output_signal_name(sig.0)
+                            .map_or_else(|| format!("sig{}", sig.0), str::to_string);
+                        if invert { format!("~{name}") } else { name }
+                    }
+                });
+                let driven = pins.driven_level(pad);
+                let input_enable = pins.pad_input_enable(pad);
+                if route.is_none() && driven.is_none() && !input_enable && wired_to.is_empty() {
+                    return None;
+                }
+                Some(PadReport {
+                    pad: n,
+                    route,
+                    input_enable,
+                    driven,
+                    level: pins.pad_level(pad),
+                    wired_to,
+                })
+            })
+            .collect()
     }
 
     /// Read whole lines off the control socket, apply each, answer each.
@@ -2503,6 +2631,32 @@ impl Esp32C6Machine {
     /// changes nothing, so a script that has drifted out of step is visible
     /// rather than quietly ineffective.
     fn apply_control(&mut self, command: &ControlCommand, now: Cycles) -> ControlReply {
+        // The pads are the bus's, not the USB block's: a machine with no USB
+        // console still has pins, and a `pin` verb on one must work.
+        match command {
+            ControlCommand::Pin { pad, level } => {
+                self.bus.set_time(now);
+                self.bus.pins.drive_pad(PadId(*pad), *level, now);
+                self.drain_pins();
+                self.control_lines += 1;
+                if self.bus.trace.is_enabled() {
+                    let line = format!("cyc={now} CONTROL pin gpio{pad} {}", u8::from(*level));
+                    self.bus.trace.note(&line);
+                }
+                return ControlReply::Ok {
+                    verb: "pin",
+                    cycle: now,
+                };
+            }
+            ControlCommand::Pins => {
+                self.control_lines += 1;
+                return ControlReply::Pins {
+                    cycle: now,
+                    pads: self.pad_reports(),
+                };
+            }
+            _ => {}
+        }
         let Some(index) = self.usb_index else {
             return ControlReply::Err("no USB_DEVICE block in this machine".to_string());
         };
@@ -2589,6 +2743,10 @@ impl Esp32C6Machine {
                     "`wait` is a --usb-script command; a client on this socket waits by waiting"
                         .to_string(),
                 ),
+                // Handled above: the pads are not this block's.
+                ControlCommand::Pin { .. } | ControlCommand::Pins => {
+                    Err("unreachable: a pin verb never reaches USB_DEVICE".to_string())
+                }
             });
 
         match outcome {
