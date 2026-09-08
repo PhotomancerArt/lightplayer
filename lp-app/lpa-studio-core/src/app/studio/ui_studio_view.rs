@@ -19,12 +19,19 @@ pub enum UiLensRuntime {
     Device {
         /// The device's registered `dev…` uid.
         uid: String,
-        /// How its link is reached — the router's interim fork until P4's
-        /// `?on=` grammar lands: a lens on a SIM emits the project route,
-        /// a lens on silicon emits `/device/<uid>`.
+        /// How its link is reached. The router spells the `?on=` hint off
+        /// this (D43): a sim binds the KIND (`?on=sim` — a reload
+        /// re-resolves, so pinning the instance would only make the
+        /// address fail when the record goes away), silicon binds the
+        /// INSTANCE, which is [`Self::Device::base_mac`].
         transport: crate::LinkTransport,
-        /// The library project this device is running, when the roster's
-        /// heartbeat named one Studio can pair to the library. The whole of
+        /// The device's base MAC in canonical form, when it has one — the
+        /// instance half of the hint grammar. `None` for a device whose
+        /// identity has not landed (and for the docs page's identity-less
+        /// sim, which is never addressed at all).
+        base_mac: Option<String>,
+        /// The library project the editor is looking at through this lens.
+        /// The whole of
         /// the project route's identity; the slug that decorates the
         /// address is cosmetic and comes from
         /// [`UiStudioView::open_project_name`], which tracks renames live.
@@ -139,6 +146,10 @@ pub struct UiStudioView {
     /// THE session this tab runs, for the header session·project control
     /// (single-session web policy). `None` with nothing attached.
     pub session: Option<UiChromeSessionControl>,
+    /// An open that stopped because the address named a device already
+    /// running a different project (D50) — the shell renders the mismatch
+    /// page in place of the opening frame. `None` in every ordinary open.
+    pub open_mismatch: Option<Box<crate::app::home::UiOpenMismatch>>,
     /// The layered-settings slice (effective values, provenance, override
     /// state) for the shell's settings popover.
     pub settings: crate::app::settings::UiSettingsView,
@@ -164,9 +175,19 @@ impl UiStudioView {
             transient_fork_generation: 0,
             lens_card: None,
             session: None,
+            open_mismatch: None,
             settings: crate::app::settings::UiSettingsView::default(),
             dirty: crate::DirtySummary::clean(),
         }
+    }
+
+    /// The open stopped at the mismatch page (D50).
+    pub fn with_open_mismatch(
+        mut self,
+        mismatch: Option<crate::app::home::UiOpenMismatch>,
+    ) -> Self {
+        self.open_mismatch = mismatch.map(Box::new);
+        self
     }
 
     pub fn with_home(mut self, home: Option<crate::app::home::UiHomeView>) -> Self {

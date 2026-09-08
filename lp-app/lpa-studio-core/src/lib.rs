@@ -59,8 +59,8 @@ pub use app::docs_host::DocsSimHost;
 pub use app::frame_feed::{CardFeedApply, CardFeedState};
 pub use app::home::{
     DEFAULT_STRIP_PIXELS, GenerateProjectError, GeneratedProject, HOME_NODE_ID, HomeOp,
-    ProjectTemplate, UiExampleCard, UiExampleGroup, UiHomeView, UiPackageCard, ZipBytes,
-    example_groups, generate_board_project, template_project_files,
+    ProjectTemplate, UiExampleCard, UiExampleGroup, UiHomeView, UiOpenMismatch, UiPackageCard,
+    UiRunningProject, ZipBytes, example_groups, generate_board_project, template_project_files,
 };
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,

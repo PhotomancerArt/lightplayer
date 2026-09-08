@@ -211,6 +211,10 @@ pub struct StudioController {
     /// while the simulator opens, and tells the connect flow which package
     /// to push instead of probing running projects.
     pending_open: Option<PendingOpen>,
+    /// The open that stopped at the mismatch page (D50). Cleared the
+    /// moment any open starts — a new gesture supersedes the question the
+    /// page was asking, exactly as it supersedes an open in flight.
+    open_mismatch: Option<Box<crate::UiOpenMismatch>>,
     /// Injected randomness for uid minting. The web shell installs crypto
     /// randomness at startup; the default is a clock-derived fallback good
     /// enough for tests.
@@ -240,11 +244,43 @@ pub struct StudioController {
     agent: crate::AgentController,
 }
 
+/// Which device an open lands on — the model half of the URL's `?on=`
+/// hint (D43).
+///
+/// The two arms are the two halves of the grammar, and they differ in
+/// exactly one way that matters: whether the open may settle for a
+/// different device than the one asked for.
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum OpenOn {
+    /// A kind, or nothing at all: Studio resolves a sim of the project's
+    /// target and is free to reuse its own (D33) — the sim that last ran
+    /// this project, an idle one, else a fresh record.
+    Resolve,
+    /// An INSTANCE, named by base MAC. Silicon or a sim; this device or
+    /// none. It is the naming that makes the mismatch page's stop
+    /// worthwhile (D50).
+    Device {
+        base_mac: String,
+        /// The mismatch page's "push here": the person chose to replace
+        /// what is running, with both projects named in front of them.
+        over_running_project: bool,
+    },
+}
+
+/// Why a named device did not take this open.
+enum NamedDeviceRefusal {
+    /// Nothing this library knows answers to that MAC.
+    Unknown,
+    /// It is running a different project (D50) — the page, not a push.
+    Mismatch(crate::UiOpenMismatch),
+}
+
 /// What a home card asked to open.
 #[derive(Clone, Debug)]
 enum PendingOpen {
-    /// A library package, by key (`prj…` uid or slug).
-    Package(String),
+    /// A library package, by key (`prj…` uid or slug), on the device the
+    /// address named (or on the resolver's choice — see [`OpenOn`]).
+    Package { key: String, on: OpenOn },
     /// An embedded example, by id (opened as a transient view session).
     Example(String),
     /// A compiled-in docs example, deployed directly onto the docs sim
@@ -265,7 +301,7 @@ impl PendingOpen {
     /// The card key the gallery marks busy.
     fn card_key(&self) -> &str {
         match self {
-            PendingOpen::Package(key) => key,
+            PendingOpen::Package { key, .. } => key,
             PendingOpen::Example(id) => id,
             PendingOpen::DocsExample(id) => id,
             PendingOpen::SharedTransient { uid, .. } => uid,
@@ -277,7 +313,17 @@ impl PendingOpen {
     /// Retry can never drift from what was actually attempted.
     fn retry_action(&self) -> UiAction {
         let op = match self {
-            PendingOpen::Package(key) => HomeOp::OpenPackage { key: key.clone() },
+            PendingOpen::Package { key, on } => match on {
+                OpenOn::Resolve => HomeOp::OpenPackage { key: key.clone() },
+                OpenOn::Device {
+                    base_mac,
+                    over_running_project,
+                } => HomeOp::OpenPackageOnDevice {
+                    key: key.clone(),
+                    base_mac: base_mac.clone(),
+                    over_running_project: *over_running_project,
+                },
+            },
             PendingOpen::Example(id) | PendingOpen::DocsExample(id) => {
                 HomeOp::OpenExample { id: id.clone() }
             }
@@ -336,6 +382,7 @@ impl StudioController {
             pending_reslug: None,
             library_refresh_pending: false,
             pending_open: None,
+            open_mismatch: None,
             random: Rc::new(clock_fallback_random),
             local_stamp: {
                 let clock = Rc::clone(&now_secs_for_stamp);
@@ -1531,6 +1578,7 @@ impl StudioController {
                 .with_home(Some(home))
                 .with_lens(self.lens_runtime())
                 .with_session(self.session_control())
+                .with_open_mismatch(self.open_mismatch.as_deref().cloned())
                 .with_settings(self.settings.ui_view());
         }
         // gallery-always (D24): home covers every no-project state, so the
@@ -1691,6 +1739,7 @@ impl StudioController {
     fn lens_runtime(&self) -> Option<crate::UiLensRuntime> {
         let attachment = self.pool.lens_session()?.attachment();
         Some(crate::UiLensRuntime::Device {
+            base_mac: self.base_mac_of(&attachment.uid),
             uid: attachment.uid.clone(),
             transport: attachment.transport,
             // The library binding the mirror holds: what the editor is
@@ -1699,6 +1748,23 @@ impl StudioController {
             // example, a shared link) and for the storeless demo path.
             project_uid: self.project.active_library_uid(),
         })
+    }
+
+    /// A device's base MAC in canonical form, off the roster's identity
+    /// chain — the instance half of the `?on=` grammar (D43).
+    ///
+    /// `None` for a device whose identity has not landed, and for the docs
+    /// page's identity-less sim (PD10), which is never addressed at all.
+    fn base_mac_of(&self, uid: &str) -> Option<String> {
+        Some(
+            self.devices
+                .device_for_key(uid)?
+                .identity
+                .mac
+                .as_ref()?
+                .0
+                .clone(),
+        )
     }
 
     /// The home gallery: shown whenever NO project is open — always
@@ -2192,7 +2258,31 @@ impl StudioController {
         match op {
             HomeOp::OpenPackage { key } => {
                 return self
-                    .open_from_home(PendingOpen::Package(key), updates)
+                    .open_from_home(
+                        PendingOpen::Package {
+                            key,
+                            on: OpenOn::Resolve,
+                        },
+                        updates,
+                    )
+                    .await;
+            }
+            HomeOp::OpenPackageOnDevice {
+                key,
+                base_mac,
+                over_running_project,
+            } => {
+                return self
+                    .open_from_home(
+                        PendingOpen::Package {
+                            key,
+                            on: OpenOn::Device {
+                                base_mac,
+                                over_running_project,
+                            },
+                        },
+                        updates,
+                    )
                     .await;
             }
             HomeOp::OpenExample { id } => {
@@ -2237,7 +2327,13 @@ impl StudioController {
                     UiError::MissingSession("create produced no package".to_string())
                 })?;
                 return self
-                    .open_from_home(PendingOpen::Package(created.uid.to_string()), updates)
+                    .open_from_home(
+                        PendingOpen::Package {
+                            key: created.uid.to_string(),
+                            on: OpenOn::Resolve,
+                        },
+                        updates,
+                    )
                     .await;
             }
             HomeOp::CreateFromPattern { uid, export, name } => {
@@ -2264,7 +2360,13 @@ impl StudioController {
                     UiError::MissingSession("create produced no package".to_string())
                 })?;
                 return self
-                    .open_from_home(PendingOpen::Package(created.uid.to_string()), updates)
+                    .open_from_home(
+                        PendingOpen::Package {
+                            key: created.uid.to_string(),
+                            on: OpenOn::Resolve,
+                        },
+                        updates,
+                    )
                     .await;
             }
             HomeOp::RenamePackage { uid, name } => {
@@ -2397,6 +2499,9 @@ impl StudioController {
         // the whole future being dropped. See `app::open_priority`.
         let _open_priority = crate::app::open_priority::begin_user_open();
         crate::app::open_progress::note_open_started();
+        // A new open supersedes the mismatch page's question: whatever the
+        // person is doing now, it is not answering that page.
+        self.open_mismatch = None;
         let retry = pending.retry_action();
         // The missing-library refusal rides the SAME reporting as every
         // other failure below (it used to `?` straight out, which left the
@@ -2473,15 +2578,53 @@ impl StudioController {
         if crate::app::open_progress::open_superseded() {
             return Ok(UiNotices::new());
         }
-        // The tab's own sim already wears this target: reuse it outright.
-        // The first arm of the resolution (the device that last ran this
-        // project) and the second (an idle sim of the target) both land
-        // here, and there is nothing to power on or hand a wire to — the
-        // lens is already holding it.
-        if let Some(id) = self.lens_on_a_sim_wearing(&target) {
-            return self.attach_lens(id, updates).await;
-        }
-        let uid = self.resolve_open_device(&target).await?;
+        // A NAMED device (`?on=mac:…`) settles the question outright, and
+        // is the one arm with a stop in it: the mismatch page (D50).
+        let named = match self.pending_open_on() {
+            OpenOn::Device {
+                base_mac,
+                over_running_project,
+            } => match self.open_on_named_device(&base_mac, over_running_project) {
+                Ok(uid) => Some(uid),
+                // The open stopped at the mismatch page. Not a failure —
+                // the person has a page with two verbs on it — so the
+                // opening frame's error state stays out of this.
+                Err(NamedDeviceRefusal::Mismatch(mismatch)) => {
+                    self.open_mismatch = Some(Box::new(mismatch));
+                    self.pending_open = None;
+                    self.mark_dirty();
+                    updates.emit(UxUpdate::View(self.view()));
+                    return Ok(UiNotices::new());
+                }
+                // The device went away between the address being read and
+                // this open running. PD14's rule for an unknown hint: drop
+                // it and take the default, saying so once.
+                Err(NamedDeviceRefusal::Unknown) => {
+                    self.push_log(UiLogDraft::new(
+                        UiLogLevel::Warn,
+                        UiLogOrigin::Studio,
+                        format!("no device answers to {base_mac}; opening on a sim instead"),
+                    ));
+                    None
+                }
+            },
+            OpenOn::Resolve => None,
+        };
+        let uid = match named {
+            Some(uid) => uid,
+            None => {
+                // The tab's own sim already wears this target: reuse it
+                // outright. The first arm of the resolution (the device
+                // that last ran this project) and the second (an idle sim
+                // of the target) both land here, and there is nothing to
+                // power on or hand a wire to — the lens is already holding
+                // it.
+                if let Some(id) = self.lens_on_a_sim_wearing(&target) {
+                    return self.attach_lens(id, updates).await;
+                }
+                self.resolve_open_device(&target).await?
+            }
+        };
         // The open's own narration names the DEVICE it is starting, not
         // "the simulator": there is one device per open and it has a board.
         emit_activity(
@@ -2512,7 +2655,16 @@ impl StudioController {
         // the card's own Power on raises, so nothing here is a second flow.
         // A sim already on is a no-op at the transport, and the fold
         // re-opens a port it had closed.
-        if let Some(device) = self.devices.device_for_key(&uid).map(|device| device.id) {
+        //
+        // **Sims only.** A board is not powered on by Studio: it is on a
+        // desk, reached over a port the browser already granted, and
+        // `Connect`ing it would close and reopen a wire that was working —
+        // which drops the card back through Connecting and leaves the lens
+        // held behind a board that was Ready a moment ago. Attach-or-
+        // connect for silicon is `open_device_lens`'s own job, and it has
+        // been doing it since the device route existed.
+        let is_sim = self.device_sims.contains_key(&uid);
+        if is_sim && let Some(device) = self.devices.device_for_key(&uid).map(|device| device.id) {
             self.execute_devices_op(crate::DevicesOp::on_sim(crate::DeviceAction::Connect {
                 device,
             }))
@@ -2528,6 +2680,170 @@ impl StudioController {
         // held as `pending_device_lens` and attached from the tick the
         // moment it does. Either way the push rides `attach_lens`.
         self.open_device_lens(&uid, updates).await
+    }
+
+    /// Bank an open that NAMED a device, the way a card push is banked:
+    /// the registry row records the project it was last given.
+    ///
+    /// This open really did push — the lens deploy sends the package over
+    /// the board's own wire — and the association is what the mismatch
+    /// page reads to answer "what is on this device?" (D50). Without this,
+    /// answering the page once would leave the row still naming the
+    /// project that was replaced, and the next reload would raise the same
+    /// page offering to switch to something that is no longer running:
+    /// the page would lie, which is worse than the page not existing.
+    ///
+    /// Scoped to the named arm on purpose. A device the address named is
+    /// the only one whose association gets *read* back as a promise; the
+    /// resolver's own sims are Studio's scratch devices and no surface
+    /// asks them this question. Banking every open would be a broader
+    /// change to what a push means, and that belongs with the pull the
+    /// backup story still needs (Q7), not here.
+    ///
+    /// Best-effort, exactly like [`Self::bank_completed_push`]: the
+    /// project is open and running either way, and a bookkeeping failure
+    /// is a log line, never a failed open. `record_push` refuses a version
+    /// the project's history never recorded (an unsaved working copy), and
+    /// that refusal is correct — an event may not name a snapshot the
+    /// library cannot produce.
+    async fn bank_open_on_named_device(&mut self) {
+        let OpenOn::Device { .. } = self.pending_open_on() else {
+            return;
+        };
+        let Some(uid) = self.pending_open_key() else {
+            return;
+        };
+        let Some(project_uid) = self.library_uid_for_key(&uid) else {
+            return;
+        };
+        let Some(attachment) = self
+            .pool
+            .lens_session()
+            .map(|session| session.attachment().uid.clone())
+        else {
+            return;
+        };
+        let Some(row) = self
+            .devices
+            .device_for_key(&attachment)
+            .and_then(|device| device.record.as_ref())
+            .and_then(crate::app::devices::registry_row_from_record)
+        else {
+            return;
+        };
+        let version = match self.library_head_hash(&project_uid).await {
+            Some(version) => version,
+            None => return,
+        };
+        if let Err(error) = self
+            .run_catalog_op(CatalogOp::RecordPush {
+                project_uid,
+                device: Box::new(row),
+                version,
+            })
+            .await
+        {
+            log::warn!("open on a named device not banked: {error}");
+        }
+    }
+
+    /// One library project's head content hash, or `None` when the
+    /// library, the key or the package is unavailable.
+    async fn library_head_hash(&mut self, key: &str) -> Option<lpc_history::ContentHash> {
+        let host = self.library_host().ok()?;
+        let fs = host.catalog_snapshot().await.ok()?;
+        let store = crate::app::library::LibraryStore::read_only(fs);
+        let uid = store.resolve_key(key).ok()?;
+        store.open(uid).ok()?.content_hash().ok()
+    }
+
+    /// Which device the pending open was told to land on.
+    fn pending_open_on(&self) -> OpenOn {
+        match &self.pending_open {
+            Some(PendingOpen::Package { on, .. }) => on.clone(),
+            _ => OpenOn::Resolve,
+        }
+    }
+
+    /// The device a `?on=mac:` address named, if this open may have it.
+    ///
+    /// The refusal is the point of the whole arm: a device already running
+    /// a *different* library project is never pushed over silently (D50).
+    /// What comes back instead is the page's material — both projects by
+    /// name, and the device — so the person decides with the consequence
+    /// in front of them.
+    fn open_on_named_device(
+        &self,
+        base_mac: &str,
+        over_running_project: bool,
+    ) -> Result<String, NamedDeviceRefusal> {
+        let registry = self
+            .home_inputs
+            .as_ref()
+            .map(|inputs| inputs.registered.as_slice())
+            .unwrap_or_default();
+        let found = crate::app::devices::device_by_base_mac(
+            self.devices.roster().devices(),
+            registry,
+            &self.device_sims,
+            base_mac,
+        )
+        .ok_or(NamedDeviceRefusal::Unknown)?;
+        let Some(key) = self.pending_open_key() else {
+            return Ok(found.key);
+        };
+        let project_uid = self.library_uid_for_key(&key).unwrap_or(key);
+        if over_running_project || !found.would_push_over(&project_uid) {
+            return Ok(found.key);
+        }
+        let running = found
+            .last_given_project
+            .as_deref()
+            .and_then(|uid| self.library_project_named(uid));
+        Err(NamedDeviceRefusal::Mismatch(crate::UiOpenMismatch {
+            project_name: self
+                .library_project_named(&project_uid)
+                .map(|project| project.name)
+                .unwrap_or_else(|| project_uid.clone()),
+            project_uid,
+            device_key: found.key,
+            device_name: found.name,
+            device_base_mac: base_mac.to_string(),
+            running,
+        }))
+    }
+
+    /// The pending open's library key, when it has one.
+    fn pending_open_key(&self) -> Option<String> {
+        match &self.pending_open {
+            Some(PendingOpen::Package { key, .. }) => Some(key.clone()),
+            _ => None,
+        }
+    }
+
+    /// One library project as the mismatch page names it — `None` when
+    /// this library does not have that uid, which is the whole of the
+    /// "nothing to switch to" test.
+    fn library_project_named(&self, uid: &str) -> Option<crate::UiRunningProject> {
+        self.home_inputs
+            .as_ref()?
+            .projects
+            .iter()
+            .find(|card| card.uid == uid)
+            .map(|card| crate::UiRunningProject {
+                uid: card.uid.clone(),
+                name: card.slug.clone(),
+            })
+    }
+
+    /// A library key (a `prj…` uid, or the slug a URL carried) as the uid
+    /// the registry's associations are written against.
+    fn library_uid_for_key(&self, key: &str) -> Option<String> {
+        let projects = &self.home_inputs.as_ref()?.projects;
+        projects
+            .iter()
+            .find(|card| card.uid == key || card.slug == key)
+            .map(|card| card.uid.clone())
     }
 
     /// The session the lens already holds, when it is a SIM wearing
@@ -2568,7 +2884,7 @@ impl StudioController {
         // lens is the only place that pairing is known before P4's `?on=`
         // grammar, and it is the common case (reopening what you just had).
         let pending_key = match &self.pending_open {
-            Some(PendingOpen::Package(key)) => Some(key.clone()),
+            Some(PendingOpen::Package { key, .. }) => Some(key.clone()),
             _ => None,
         };
         if let Some(key) = pending_key
@@ -2654,7 +2970,7 @@ impl StudioController {
         use crate::app::library::ProjectTarget;
 
         match self.pending_open.clone() {
-            Some(PendingOpen::Package(key)) => self
+            Some(PendingOpen::Package { key, .. }) => self
                 .read_library_project_manifest(&key)
                 .await
                 .as_deref()
@@ -2728,7 +3044,9 @@ impl StudioController {
         let result = {
             let server = self.pool.lens_session_mut()?.client_mut()?;
             match &pending {
-                PendingOpen::Package(key) => self.project.open_library_package(server, key).await,
+                PendingOpen::Package { key, .. } => {
+                    self.project.open_library_package(server, &key).await
+                }
                 // Examples open as TRANSIENT view sessions (vision D2):
                 // no seed, no library entry, no persisted uid. The
                 // explicit-save gesture is what installs a copy.
@@ -2765,6 +3083,7 @@ impl StudioController {
                     notices = notices.with_notice(notice);
                 }
                 let sync = self.sync_project_after_attach(updates).await?;
+                self.bank_open_on_named_device().await;
                 Ok(notices.with_notice(project_sync_notice(
                     sync.synced,
                     "Project opened",
