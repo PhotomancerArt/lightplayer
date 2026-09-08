@@ -500,3 +500,10 @@ Runs in the `Validate (x64)` job of `.github/workflows/pre-merge.yml` when
 core paths changed — four emulator runs (two projects × two modes), after the
 tests so `lp-cli` and `fw-emu` reuse warm dependencies. Referenced from
 `docs/adr/2026-08-01-esp32v3-flash-budget.md`.
+
+The **chip** half runs elsewhere: the path-gated `emu-c6` job, as
+`just heap-budget-check-chips`, because it needs a cross-target firmware
+build — which that job has already done by the time it runs, so the step
+costs one emulator boot and nothing else. In `Validate (x64)` the same code
+prints a named SKIP rather than starting a firmware build, and the projects
+half still gates. See "The second source" above.
