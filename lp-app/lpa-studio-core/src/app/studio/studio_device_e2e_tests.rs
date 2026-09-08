@@ -3633,6 +3633,98 @@ fn powered_on_sim() -> (DeviceBench, TaskPool, String, FakeEsp32Device) {
     (bench, tasks, uid, device)
 }
 
+/// AC7, the picker's half (D44): picking a board in the add slot's dropdown
+/// mints a sim of THAT target, names it after the board, and powers it on —
+/// one gesture, ending in a card in the grid rather than a record on the
+/// remembered line. The device is an ordinary registry row; the picker
+/// invented no runtime beside the roster.
+#[test]
+fn the_picker_mints_a_sim_of_the_picked_target_and_powers_it_on() {
+    let device = sim_light_player();
+    let (mut bench, tasks) = DeviceBench::build(&device, "unused-serial-port", false, false);
+    let sims = Rc::new(SimDeviceTransport::new(Rc::new(ScriptedSimSource {
+        device: device.clone(),
+        restarts: Rc::new(Cell::new(0)),
+        manifests: Rc::new(RefCell::new(Vec::new())),
+    })));
+    bench.sims = Some(Rc::clone(&sims));
+    bench.controller.set_device_sim_transport(sims);
+    bench.controller.set_random(|| {
+        let mut bytes = [0u8; 16];
+        bytes[..6].copy_from_slice(&SIM_RANDOM);
+        bytes
+    });
+
+    assert!(bench.registry().is_empty(), "nothing before the pick");
+
+    drive(
+        bench
+            .controller
+            .dispatch(crate::SimCreateOp::action_for(SIM_TARGET)),
+    )
+    .expect("the pick starts a device");
+
+    let rows = bench.registry();
+    assert_eq!(rows.len(), 1, "the pick created ONE device: {rows:?}");
+    assert_eq!(rows[0].transport, "sim");
+    assert_eq!(rows[0].board_id.as_deref(), Some(SIM_TARGET));
+    assert_eq!(
+        rows[0].name, "XIAO ESP32-C6 (sim)",
+        "named after the board it acts as, renameable from the card"
+    );
+    assert!(
+        bench.sim_sidecar(&rows[0].uid).is_some(),
+        "the record is complete: row AND sidecar"
+    );
+
+    // Powered on, not merely remembered: the sim's own runtime is running
+    // and the card settles on Ready like a board that just said hello.
+    assert!(
+        bench
+            .sims
+            .as_ref()
+            .expect("the sim transport")
+            .is_powered(&rows[0].uid),
+        "the picked target is started, not filed away"
+    );
+    bench.run_until(&tasks, "the picked sim to identify", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+    });
+    let home = bench.controller.view().home.expect("the home view");
+    let split = crate::split_roster(&home.devices);
+    assert_eq!(split.connected.len(), 1, "{split:?}");
+    assert!(
+        split.remembered.is_empty(),
+        "a picked device belongs in the grid: {split:?}"
+    );
+}
+
+/// A target with no checked-in runtime manifest is refused with its reason
+/// rather than started as something else (Q10). The picker never offers
+/// one, so this is the guard behind the offer, not a path a user walks.
+#[test]
+fn a_target_with_no_hardware_manifest_is_refused_rather_than_swapped() {
+    let device = sim_light_player();
+    let (mut bench, _tasks) = DeviceBench::build(&device, "unused-serial-port", false, false);
+
+    let error = drive(
+        bench
+            .controller
+            .dispatch(crate::SimCreateOp::action_for("quinled/dig-uno")),
+    )
+    .expect_err("a target nothing can wear is refused");
+
+    assert!(
+        format!("{error}").contains("quinled/dig-uno"),
+        "the refusal names the target: {error}"
+    );
+    assert!(bench.registry().is_empty(), "and nothing was written");
+}
+
 /// AC3, the creation half: a minted sim is an ORDINARY remembered device.
 /// It loads detached from the registry like any board, keyed on the uid
 /// derived from its minted MAC, and the only thing marking it is the
@@ -3969,6 +4061,14 @@ fn library_package(bench: &DeviceBench, name: &str, target: &str) -> String {
 fn open_package(bench: &mut DeviceBench, tasks: &TaskPool, uid: &str) {
     bench.controller.request_library_refresh();
     drive(bench.controller.settle_library());
+    open_package_cold(bench, tasks, uid);
+}
+
+/// The same open, on a controller that has NEVER settled its library — a
+/// cold page whose first gesture is the open. What the resolution knows
+/// about remembered sims at that moment is exactly nothing, which is the
+/// state the duplicate-mint row below is about.
+fn open_package_cold(bench: &mut DeviceBench, tasks: &TaskPool, uid: &str) {
     drive(bench.controller.dispatch(UiAction::from_op(
         crate::ControllerId::new(crate::HOME_NODE_ID),
         crate::HomeOp::OpenPackage {
@@ -4064,6 +4164,180 @@ fn opening_a_project_with_no_sim_creates_one_and_lands_the_lens_on_it() {
         .expect("the lens landed");
     assert_eq!(session.transport(), crate::LinkTransport::Sim);
     assert_eq!(session.attachment().uid, rows[0].uid);
+}
+
+/// The six bytes a SECOND mint would use. Different from [`SIM_RANDOM`] on
+/// purpose: a duplicate mint from the same bytes derives the same uid and
+/// overwrites the one row, which would hide the very thing the reload row
+/// below is looking for.
+const SIM_RANDOM_SECOND: [u8; 6] = [0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc];
+
+/// Install a sim transport and fixed randomness on a bench that has none.
+fn install_sims(bench: &mut DeviceBench, device: &FakeEsp32Device, random: [u8; 6]) {
+    let sims = Rc::new(SimDeviceTransport::new(Rc::new(ScriptedSimSource {
+        device: device.clone(),
+        restarts: Rc::new(Cell::new(0)),
+        manifests: Rc::new(RefCell::new(Vec::new())),
+    })));
+    bench.sims = Some(Rc::clone(&sims));
+    bench.controller.set_device_sim_transport(sims);
+    bench.controller.set_random(move || {
+        let mut bytes = [0u8; 16];
+        bytes[..6].copy_from_slice(&random);
+        bytes
+    });
+}
+
+/// A bench holding one library package of [`SIM_TARGET`], with sims
+/// installed and nothing opened yet. Returns the package key.
+fn sim_open_bench() -> (DeviceBench, TaskPool, FakeEsp32Device, String) {
+    let device = sim_light_player();
+    let (mut bench, tasks) = DeviceBench::build(&device, "unused-serial-port", false, false);
+    install_sims(&mut bench, &device, SIM_RANDOM);
+    let key = library_package(&bench, "Porch sign", SIM_TARGET);
+    (bench, tasks, device, key)
+}
+
+/// A RELOAD opens on the sim the library remembers instead of minting a
+/// second one (2026-09-08 outage, half one).
+///
+/// The resolution reads the remembered sims out of a map the first library
+/// settle fills. A cold page's first gesture can BE the open, and reading
+/// "no sim of this target" off a map that is merely empty-so-far minted a
+/// fresh record every time the page was reloaded — a devices page filling
+/// up with scratch boards, each one a worker the tab would start.
+#[test]
+fn a_cold_reload_opens_on_the_remembered_sim_instead_of_minting_a_second() {
+    let (mut bench, tasks, device, key) = sim_open_bench();
+    open_package(&mut bench, &tasks, &key);
+    let first = bench.registry();
+    assert_eq!(first.len(), 1, "the first open made one sim: {first:?}");
+
+    // The page comes back: same store, fresh controller, every worker gone
+    // — and a mint here would use different bytes, so a second record
+    // would be visibly a second row rather than the same one rewritten.
+    let (mut reloaded, tasks) = DeviceBench::reloaded(&bench, &device, "unused-serial-port");
+    install_sims(&mut reloaded, &device, SIM_RANDOM_SECOND);
+    open_package_cold(&mut reloaded, &tasks, &key);
+
+    let rows = reloaded.registry();
+    assert_eq!(
+        rows.len(),
+        1,
+        "the reload reused the remembered sim: {rows:?}"
+    );
+    assert_eq!(rows[0].uid, first[0].uid);
+    let session = reloaded
+        .controller
+        .runtime_pool_for_test()
+        .lens_session()
+        .expect("the reload landed its lens");
+    assert_eq!(session.attachment().uid, first[0].uid);
+}
+
+/// Power the sim off from its card, then open the project again: it starts
+/// back up and the editor lands (2026-09-08 outage, half two).
+///
+/// A sim only ever runs because this tab started it, so a hold on a sim
+/// that is OFF is a hold on something that will never happen. The open's
+/// own power-on covers the ordinary path; the tick's wake-up is what makes
+/// it true whatever skipped it.
+#[test]
+fn powering_the_sim_off_and_reopening_the_project_starts_it_again() {
+    let (mut bench, tasks, _device, key) = sim_open_bench();
+    open_package(&mut bench, &tasks, &key);
+    let uid = bench.registry()[0].uid.clone();
+    let card = bench.view().devices[0].id;
+
+    bench.gesture(DeviceAction::Disconnect { device: card });
+    assert!(
+        !bench
+            .sims
+            .as_ref()
+            .expect("a sim transport")
+            .is_powered(&uid),
+        "Power off stopped the runtime"
+    );
+    bench.step(&tasks);
+
+    open_package(&mut bench, &tasks, &key);
+
+    assert!(
+        bench
+            .sims
+            .as_ref()
+            .expect("a sim transport")
+            .is_powered(&uid),
+        "the reopen started it again"
+    );
+    let session = bench
+        .controller
+        .runtime_pool_for_test()
+        .lens_session()
+        .expect("the reopen landed its lens");
+    assert_eq!(session.attachment().uid, uid);
+    assert_eq!(
+        bench.registry().len(),
+        1,
+        "and reused the record rather than minting one"
+    );
+}
+
+/// The wake-up itself: a held `/device/<uid>` intent on a sim that is OFF
+/// powers it on rather than waiting for a runtime nobody will start.
+///
+/// This is the address path — a reload landing on a lens route — where
+/// nothing upstream issues a power-on at all. Before the fix the console
+/// said "waiting for the device before opening it: missing session: this
+/// board is not connected" and then nothing, forever.
+#[test]
+fn a_held_lens_on_a_sim_that_is_off_powers_it_on_and_lands() {
+    let device = sim_light_player();
+    let (mut bench, tasks, uid) = DeviceBench::with_sim(&device, SIM_TARGET);
+
+    drive(bench.controller.dispatch(UiAction::from_op(
+        crate::RuntimeOp::NODE_ID,
+        crate::RuntimeOp::OpenDeviceLens { uid: uid.clone() },
+    )))
+    .expect("the address is an intent to hold, never a refusal");
+    assert_eq!(
+        bench.controller.pending_device_lens_for_test().as_deref(),
+        Some(uid.as_str()),
+        "the lens is held on a sim that is not running"
+    );
+    assert!(
+        !bench
+            .sims
+            .as_ref()
+            .expect("a sim transport")
+            .is_powered(&uid),
+        "nothing has started it yet"
+    );
+
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    while bench
+        .controller
+        .runtime_pool_for_test()
+        .lens_session()
+        .is_none()
+    {
+        bench.step(&tasks);
+        drive(bench.controller.try_pending_device_lens());
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the held lens never woke its sim; roster now: {:?}",
+            bench.view()
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(
+        bench
+            .sims
+            .as_ref()
+            .expect("a sim transport")
+            .is_powered(&uid),
+        "the hold powered it on"
+    );
 }
 
 /// A sim whose runtime dies before it ever says hello — the browser worker

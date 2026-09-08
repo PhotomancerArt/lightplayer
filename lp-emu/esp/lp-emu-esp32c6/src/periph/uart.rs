@@ -41,7 +41,10 @@
 //! 5555` → `clkdiv = 347, frag = 3` — and a direct load never runs the ROM
 //! boot, so this block starts there ([`CLKDIV_RESET`]). PCR's
 //! `uart(n).clk_conf` reset is the PAC's `0x0070_0000` (XTAL, enabled), which
-//! agrees.
+//! agrees. Every *other* register in the block starts at the PAC's own
+//! reset, seeded from the generated table — `status` included, which is why
+//! a boot trace shows `status = 0xe000c000` (`txd`, `rtsn`, `dtrn`, `rxd`,
+//! `ctsn` all high) before the driver touches it.
 //!
 //! # Interrupts (source 43 / 44, level = `int_raw & int_ena != 0`)
 //!
@@ -86,46 +89,28 @@ const INT_ST: u32 = 0x08;
 const INT_ENA: u32 = 0x0c;
 const INT_CLR: u32 = 0x10;
 const CLKDIV: u32 = 0x14;
-const RX_FILT: u32 = 0x18;
 const STATUS: u32 = 0x1c;
 const CONF0: u32 = 0x20;
 const CONF1: u32 = 0x24;
-const IDLE_CONF: u32 = 0x48;
-const AT_CMD_PRECNT: u32 = 0x50;
-const AT_CMD_POSTCNT: u32 = 0x54;
-const AT_CMD_GAPTOUT: u32 = 0x58;
 const AT_CMD_CHAR: u32 = 0x5c;
 const TOUT_CONF: u32 = 0x64;
 const MEM_TX_STATUS: u32 = 0x68;
 const MEM_RX_STATUS: u32 = 0x6c;
 const FSM_STATUS: u32 = 0x70;
-const CLK_CONF: u32 = 0x88;
 const AFIFO_STATUS: u32 = 0x90;
 const REG_UPDATE: u32 = 0x98;
-const ID: u32 = 0x9c;
 
 /// FIFO depth, both directions (`esp-metadata` `uart.ram_size` = 128).
 pub const FIFO_DEPTH: usize = 128;
 
 /// `clkdiv` as the ROM boot leaves it: 115,200 from XTAL (see the module
 /// docs). `frag` is bits 20:23, `clkdiv` bits 0:11.
+///
+/// **The one register in this block that does not start where the PAC says.**
+/// Everything else — `conf0`, `conf1`, `tout_conf`, `at_cmd_*`, `idle_conf`,
+/// `clk_conf`, `afifo_status`, `id`, `rx_filt`, `status`, and the pulse
+/// counters — is seeded from the generated table by `with_names`.
 pub const CLKDIV_RESET: u32 = (3 << 20) | 347;
-/// `conf0` PAC reset: 8 data bits, 1 stop bit, `mem_clk_en`.
-const CONF0_RESET: u32 = 0x0010_001c;
-/// `conf1` PAC reset: both thresholds 96.
-const CONF1_RESET: u32 = 0x6060;
-/// `tout_conf` PAC reset: `rx_tout_thrhd = 10`, timeout off.
-const TOUT_CONF_RESET: u32 = 0x28;
-/// `at_cmd_char` PAC reset: `'+'` ×3.
-const AT_CMD_CHAR_RESET: u32 = 0x032b;
-const IDLE_CONF_RESET: u32 = 0x0004_0100;
-const CLK_CONF_RESET: u32 = 0x0370_1000;
-const AFIFO_STATUS_RESET: u32 = 0x0a;
-const ID_RESET: u32 = 0x0500;
-const RX_FILT_RESET: u32 = 0x08;
-const AT_CMD_PRECNT_RESET: u32 = 0x0901;
-const AT_CMD_POSTCNT_RESET: u32 = 0x0901;
-const AT_CMD_GAPTOUT_RESET: u32 = 0x0b;
 /// `status` PAC reset: `txd`, `rtsn`, `dtrn` high; `rxd`, `ctsn` high.
 const STATUS_IDLE: u32 = 0xe000_c000;
 const STATUS_TXD: u32 = 1 << 31;
@@ -209,19 +194,9 @@ impl Uart {
             irq_source,
             regs: RegFile::new(name, 0x100)
                 .with_names(regs::UART0)
-                .with_reset(CLKDIV, CLKDIV_RESET)
-                .with_reset(CONF0, CONF0_RESET)
-                .with_reset(CONF1, CONF1_RESET)
-                .with_reset(TOUT_CONF, TOUT_CONF_RESET)
-                .with_reset(AT_CMD_CHAR, AT_CMD_CHAR_RESET)
-                .with_reset(IDLE_CONF, IDLE_CONF_RESET)
-                .with_reset(CLK_CONF, CLK_CONF_RESET)
-                .with_reset(AFIFO_STATUS, AFIFO_STATUS_RESET)
-                .with_reset(ID, ID_RESET)
-                .with_reset(RX_FILT, RX_FILT_RESET)
-                .with_reset(AT_CMD_PRECNT, AT_CMD_PRECNT_RESET)
-                .with_reset(AT_CMD_POSTCNT, AT_CMD_POSTCNT_RESET)
-                .with_reset(AT_CMD_GAPTOUT, AT_CMD_GAPTOUT_RESET),
+                // The one deviation from the PAC in this block: see
+                // `CLKDIV_RESET` and the module docs.
+                .with_reset(CLKDIV, CLKDIV_RESET),
             clock,
             stream,
             tx: VecDeque::with_capacity(FIFO_DEPTH),
@@ -761,6 +736,14 @@ mod tests {
     use super::*;
     use lp_emu_esp_common::{ByteLog, Sandbox, ScriptedSource};
 
+    /// The PAC's reset for one register of this block, from the generated
+    /// table — the same value `with_names` seeded, so a test can never
+    /// drift from the model by carrying its own copy.
+    fn pac(off: u32) -> u32 {
+        regs::UART0
+            .reset(off)
+            .expect("the PAC gives this register a non-zero reset")
+    }
     /// A sandbox with the `uart0` stream on a memory sink, a scripted
     /// source, and a UART0 on it.
     fn rig(script: ScriptedSource) -> (Sandbox, Uart, ByteLog) {
@@ -1003,8 +986,8 @@ mod tests {
             "12 dropped"
         );
         // A FIFO reset (esp-hal's rxfifo_reset on overflow) empties it.
-        sb.write(&mut u, CONF0, CONF0_RESET | CONF0_RXFIFO_RST);
-        sb.write(&mut u, CONF0, CONF0_RESET);
+        sb.write(&mut u, CONF0, pac(CONF0) | CONF0_RXFIFO_RST);
+        sb.write(&mut u, CONF0, pac(CONF0));
         assert_eq!(sb.read(&mut u, STATUS) & 0xff, 0);
         assert_eq!(sb.read(&mut u, INT_RAW) & INT_RXFIFO_FULL, 0);
         sb.write(&mut u, INT_CLR, INT_RXFIFO_OVF);

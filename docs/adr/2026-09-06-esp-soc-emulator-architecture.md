@@ -310,9 +310,14 @@ The list the direct loader carries has a counterpart, and it is short:
    `low_pulse_cnt`, `high_pulse_cnt`), which the UART model does not drive.
    That is one measurable thing with a name, and plan two's shim is where it
    belongs.
-3. **Three `pll_cal exceeds 2ms` lines**, from the ROM's `wait_rfpll_cal_end`
-   polling an analog register the `I2C_ANA_MST` accept block cannot answer
-   per-register (`docs/defects/2026-09-08-regi2c-is-one-data-register-not-a-register-file.md`).
+3. ~~**Three `pll_cal exceeds 2ms` lines**, from the ROM's
+   `wait_rfpll_cal_end` polling an analog register the `I2C_ANA_MST` accept
+   block cannot answer per-register.~~ **Closed 2026-09-08**: the block is
+   modelled as the `{slave_addr, slave_reg_addr}` store the drivers and the
+   ROM both address, so a `regi2c` read answers the register it asked for
+   (`periph/i2c_ana_mst.rs`,
+   `docs/defects/2026-09-08-regi2c-is-one-data-register-not-a-register-file.md`).
+   The list is two items now.
 (A fourth item lasted one day. The mask ROM's console drops a character
 rather than waiting when the IN endpoint is not free, so the modelled
 `IN_DRAIN_LATENCY_US` was losing runs of the densest output over USB while

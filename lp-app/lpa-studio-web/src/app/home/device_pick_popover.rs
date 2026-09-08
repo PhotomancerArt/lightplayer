@@ -1008,7 +1008,7 @@ fn BoardFigure(board_id: String) -> Element {
 /// the trigger's label there for the name.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn BoardSwatch(board_id: Option<String>) -> Element {
+pub(crate) fn BoardSwatch(board_id: Option<String>) -> Element {
     let board = board_id.as_deref().and_then(lpa_boards::board_by_id);
     rsx! {
         span { class: board_swatch_class(), aria_hidden: "true",

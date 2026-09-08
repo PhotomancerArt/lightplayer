@@ -447,6 +447,26 @@ keeps a card attached — right for a board still on the desk, wrong for a
 runtime that no longer exists. Only the two verbs' WORDS fork ("Power on" /
 "Power off", via `DevicesOp`'s `face`); every other verb reads the same.
 
+**Creating one** is `SimCreateOp` (`devices/sim_create_op.rs`), the Devices
+page add slot's second verb — its own op rather than a `DevicesOp` variant
+because creating a device is not something the fold does: the record is
+written in the library (row + sidecar, one settle), the roster meets it as
+an ordinary device at the settle that follows, and only then is there a
+`DeviceId` for the ordinary `Connect` to aim at. What the menu offers is
+decided in `devices/target_offer.rs` (Desktop first, then the catalog
+boards) and tagged from `devices/runtime_backing.rs`, the one-row
+capability table that says what this build runs a target AS — `sim`
+everywhere until an emulator lands behind a device.
+
+A project's own hardware is the container manifest's `target`
+(`library/project_target.rs`), and the project settings' **Hardware** row is
+the first thing that writes it: `HomeOp::SetPackageTarget` patches the open
+project's manifest through its own handle and mirrors it to the runtime,
+exactly as the rename does. Desktop writes no key — an absent `target` has
+always meant Desktop, and one spelling on disk is enough. Projects created
+in this library declare Desktop at creation (D32); imports and forks keep
+whatever they arrived with.
+
 ## Device Management UX
 
 Blank-device provisioning and recovery are modeled as Device actions backed by

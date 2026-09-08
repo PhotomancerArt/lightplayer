@@ -299,7 +299,7 @@ pinned container — which is an infrastructure decision with a per-PR cost, and
 it was raised with this milestone's report rather than taken inside it.
 `docs/debt/reference-images-are-not-reproducible-across-hosts.md`.
 
-### 7.3 `regi2c` is one data register, not a register file
+### 7.3 `regi2c` is one data register, not a register file — **closed 2026-09-08**
 
 The mask ROM's `wait_rfpll_cal_end` polls an analog register that the
 `I2C_ANA_MST` accept block answers with a single shared `data` byte, so a
@@ -309,6 +309,15 @@ nor the direct load prints. Filed, not fixed: the fix changes what every
 the accept-block reset-value sweep.
 `docs/defects/2026-09-08-regi2c-is-one-data-register-not-a-register-file.md`
 and `docs/defects/2026-09-07-accept-blocks-carry-only-the-reset-values-a-boot-needed.md`.
+
+Both were done the day after this report. The generator emits the PAC's
+reset values beside the names and every block seeds from them, with an
+`accept.rs::DEVIATIONS` list of the two places this machine differs on
+purpose; `I2C_ANA_MST` became a `{block, register}` store, and the ROM-up
+boot's app console is now line-for-line identical to the direct load's. The
+sweep also found that TIMG0's MWDT comes out of reset *unlocked*. Every
+memory-class figure in this report survived both changes unchanged, which is
+the only reason they could land together.
 
 ## 8. What every milestone deviated on, in one place
 
@@ -323,7 +332,7 @@ should know. Full detail is in each `m*-_DONE.md` in the plan directory.
 | M4 | the SPI1 accept block's reset values were wrong in a way no boot checks — an accept block's reset values are facts, and the sweep for the rest is still open. |
 | M5 | the **pin grade stays `modeled`** even with the oracle equality: the RMT model produces the waveform and our decoder reads it, so both readings of the pad are ours. `measured` needs an instrument. The `LedChannel` harness double-swaps colour order; the shipped path does not. |
 | M6 | `usb-serial-jtag` stays `modeled` with the silicon transcript landed — byte-equality is evidence in the reason, not a promotion. |
-| M7 | `--reboot-on-reset` is **off** by default; `Saved PC:` is subtracted from silicon's side of the boot-log diff; three `pll_cal` lines (§7.3); the six-vs-five segment split (§7.2). |
+| M7 | `--reboot-on-reset` is **off** by default; `Saved PC:` is subtracted from silicon's side of the boot-log diff; three `pll_cal` lines (§7.3, closed 2026-09-08); the six-vs-five segment split (§7.2). |
 | M8 | this report. The walk is one run where the hardware walk is two flashes — espflash's `--monitor` holds the port and a socket does not — so the "project survives a second boot" half of the hardware walk's round 2 is `tests/flash_persistence.rs`'s gate, not this walk's. |
 
 ## 9. Not run

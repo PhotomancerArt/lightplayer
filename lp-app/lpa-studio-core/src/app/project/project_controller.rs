@@ -4728,6 +4728,73 @@ impl ProjectController {
         Ok(name.to_string())
     }
 
+    /// Write the OPEN project's hardware target (D41, PD17) — the Hardware
+    /// settings row.
+    ///
+    /// The same two-copy dance the rename does, and for the same reason:
+    /// the manifest's home is the library, and the runtime holds a copy
+    /// whose bytes must stay hash-identical or the next save reads as a
+    /// change nobody made. `None` clears the key (Desktop).
+    ///
+    /// Not a format bump: `target` has been in `project.json` since
+    /// 2026-08-05, the strict writer rewrites the canonical form, and every
+    /// other byte is unchanged.
+    pub async fn set_active_project_target(
+        &mut self,
+        server: &mut StudioServerClient,
+        target: Option<&str>,
+    ) -> Result<(), UiError> {
+        let root = self.project_fs_root.clone().ok_or_else(|| {
+            UiError::Project(
+                "the connected project's filesystem root is unknown; cannot set its hardware"
+                    .to_string(),
+            )
+        })?;
+        let now = {
+            let context = self.library.as_ref().ok_or_else(no_library_error)?;
+            (context.now_secs)()
+        };
+
+        // --- library write (the manifest's home) --------------------------
+        let (bytes, uid) = {
+            let context = self.library.as_ref().ok_or_else(no_library_error)?;
+            let active = context.active.as_ref().ok_or_else(|| {
+                UiError::UnsupportedAction(
+                    "this project is not in your library, so its hardware cannot be changed"
+                        .to_string(),
+                )
+            })?;
+            if active.transient.is_some() {
+                // Someone else's document (or an example's): declaring what
+                // hardware it runs on means owning it first.
+                return Err(UiError::UnsupportedAction(
+                    "save a copy of this project first, then choose its hardware".to_string(),
+                ));
+            }
+            let fs = active.handle.package_fs.borrow();
+            crate::app::library::package_manifest::set_target(&*fs, target)
+                .map_err(library_ui_error)?;
+            let bytes = fs
+                .read_file(lpc_model::AsLpPath::as_path(
+                    &crate::app::library::package_manifest::MANIFEST_PATH,
+                ))
+                .map_err(|e| library_ui_error(crate::app::library::LibraryError::from(e)))?;
+            (bytes, active.handle.uid.to_string())
+        };
+
+        // --- runtime mirror (keeps the two copies hash-identical) ---------
+        server.fs_write(&root.join("project.json"), &bytes).await?;
+
+        {
+            let context = self.library.as_mut().ok_or_else(no_library_error)?;
+            if let Some(active) = context.active.as_mut() {
+                active.handle.record_save(now).map_err(library_ui_error)?;
+            }
+            context.host.notify_saved(&uid);
+        }
+        Ok(())
+    }
+
     /// Every panel control a card subtree already derived whose
     /// `panel_target` names `scope`, deduplicated per channel.
     ///
@@ -5404,6 +5471,7 @@ impl ProjectController {
             name: fields.name,
             created: fields.created,
             kind,
+            target: fields.target,
         })
     }
 

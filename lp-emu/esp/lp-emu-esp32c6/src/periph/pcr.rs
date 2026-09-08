@@ -111,11 +111,7 @@ pub struct Pcr {
 
 impl Pcr {
     pub fn new(lines: UartClockLines, rmt: RmtClockLine) -> Self {
-        let regs = super::accept::pcr()
-            .with_reset(UART0_CLK_CONF, UART_CLK_CONF_RESET)
-            .with_reset(UART1_CLK_CONF, UART_CLK_CONF_RESET)
-            .with_reset(RMT_CONF, RMT_CONF_RESET)
-            .with_reset(RMT_SCLK_CONF, RMT_SCLK_CONF_RESET);
+        let regs = super::accept::pcr();
         Self { regs, lines, rmt }
     }
 

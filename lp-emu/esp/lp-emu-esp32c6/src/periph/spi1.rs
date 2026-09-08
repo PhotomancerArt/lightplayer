@@ -199,29 +199,9 @@ impl core::fmt::Debug for Spi1 {
 /// because the mount's reads moved no data. The `[FS]` pair and the §5.1
 /// heap figures had already matched, since a read that returns nothing and a
 /// read of a blank chip both fail the superblock check the same way.
-const RESETS: &[(u32, u32)] = &[
-    (0x008, 0x002c_a00c), // ctrl
-    (0x00c, 0x0000_0ffc), // ctrl1
-    (0x014, 0x0003_0103), // clock
-    (0x018, 0x8000_0000), // user — usr_command
-    (0x01c, 0x5c00_0007), // user1 — 24-bit address, 8 dummy cycles
-    (0x020, 0x7000_0000), // user2 — 8-bit command phase
-    (0x034, 0x0000_0002), // misc
-    (0x038, 0xffff_ffff), // tx_crc
-    (0x098, 0x0005_0001), // flash_waiti_ctrl
-    (0x09c, 0x0800_2000), // flash_sus_ctrl
-    (0x0a0, 0x0005_7575), // flash_sus_cmd
-    (0x0a4, 0x7a7a_0000), // sus_status
-    (0x0d4, 0x0000_0020), // ddr
-    (0x200, 0x0000_0001), // clock_gate
-];
-
 impl Spi1 {
     pub fn new(flash: FlashHandle) -> Self {
-        let mut regs = RegFile::new("SPI1", 0x400).with_names(regs::SPI1);
-        for (off, value) in RESETS {
-            regs = regs.with_reset(*off, *value);
-        }
+        let regs = RegFile::new("SPI1", 0x400).with_names(regs::SPI1);
         Self {
             regs,
             flash,

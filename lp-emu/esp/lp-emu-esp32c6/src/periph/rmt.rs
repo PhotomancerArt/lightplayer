@@ -139,11 +139,7 @@ const CONF_CONF_UPDATE: u32 = 1 << 24;
 const CONF_PULSES: u32 = CONF_TX_START | CONF_MEM_RD_RST | CONF_APB_MEM_RST | CONF_CONF_UPDATE;
 /// PAC reset: `div_cnt 2`, `mem_size 1`, the carrier bits set.
 const CH_TX_CONF0_RESET: u32 = 0x0071_0200;
-/// PAC reset: `tx_lim 128`.
-const CH_TX_LIM_RESET: u32 = 0x80;
 const TX_LIM_MASK: u32 = 0x1ff;
-/// PAC reset: `mem_clk_force_on`, `clk_en`.
-const SYS_CONF_RESET: u32 = 0x0500_0010;
 const SYS_CONF_APB_FIFO_MASK: u32 = 1 << 0;
 
 // `int_*` bits: TX and RX interleave in pairs (`rmt/int_raw.rs`).
@@ -501,13 +497,7 @@ fn note(cx: &mut BusCx<'_>, f: impl FnOnce() -> String) {
 
 impl Rmt {
     pub fn new(clock: RmtClockLine) -> Self {
-        let regs = RegFile::new("RMT", REGS_LEN)
-            .with_names(regs::RMT)
-            .with_reset(CH_TX_CONF0[0], CH_TX_CONF0_RESET)
-            .with_reset(CH_TX_CONF0[1], CH_TX_CONF0_RESET)
-            .with_reset(CH_TX_LIM[0], CH_TX_LIM_RESET)
-            .with_reset(CH_TX_LIM[1], CH_TX_LIM_RESET)
-            .with_reset(SYS_CONF, SYS_CONF_RESET);
+        let regs = RegFile::new("RMT", REGS_LEN).with_names(regs::RMT);
         Self {
             index: 0,
             regs,
