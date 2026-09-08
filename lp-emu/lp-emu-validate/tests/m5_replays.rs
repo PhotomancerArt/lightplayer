@@ -1,16 +1,20 @@
-//! M5's gates, as replays of the committed `rmt-chase` transcripts.
+//! M5's gates, as replays of the committed `rmt-chase` and
+//! `shader-oracle-walk` transcripts.
 //!
 //! No firmware, no board, no emulator run: these read what the runner
 //! recorded — the console capture, its sidecar, and the **pin capture**
 //! beside it — and check the claims the milestone is allowed to make. The
-//! machine's own tests (`lp-emu/esp/lp-emu-esp32c6/tests/rmt_chase_replay.rs`)
-//! run the image and are `#[ignore]`d for it; these are what makes the gate
-//! outlive the sitting.
+//! machine's own tests (`lp-emu/esp/lp-emu-esp32c6/tests/rmt_chase_replay.rs`,
+//! `shader_oracle_pin.rs`) run the image and are `#[ignore]`d for it; these
+//! are what makes the gate outlive the sitting.
 //!
 //! ```bash
 //! cargo run -p lp-cli -- validate record emu-m5 --config lp-emu:esp32c6:t1 \
 //!   --date 2026-09-07 --commit c0d62e360 --dirty --timeout-secs 20
 //! cargo run -p lp-cli -- validate record emu-m5 --config lp-emu:esp32c6:t2 …
+//! # the oracle walk alone, at the commit its script and its gate are at:
+//! cargo run -p lp-cli -- validate record shader-oracle-walk --config lp-emu:esp32c6:t1 \
+//!   --date 2026-09-07 --commit 681ea97ca --timeout-secs 20
 //! ```
 //!
 //! **Never edit a transcript.** A failure here is a regression or a
@@ -26,6 +30,8 @@ use lp_emu_validate::{FieldClass, Payload, ReplayOptions, find_payload, replay};
 
 const T1: &str = "lp-emu-esp32c6-t1-2026-09-07-c0d62e360.txt";
 const T2: &str = "lp-emu-esp32c6-t2-2026-09-07-c0d62e360.txt";
+const ORACLE_T1: &str = "lp-emu-esp32c6-t1-2026-09-07-681ea97ca.txt";
+const ORACLE_T2: &str = "lp-emu-esp32c6-t2-2026-09-07-681ea97ca.txt";
 const LEDS: usize = 256;
 const FRAMES: usize = LEDS * 3;
 
@@ -37,6 +43,41 @@ fn load(file: &str) -> (&'static Payload, Transcript) {
     let path = dir().join(file);
     let t = Transcript::load(&path).unwrap_or_else(|e| panic!("loading {}: {e:#}", path.display()));
     (find_payload("rmt-chase").unwrap(), t)
+}
+
+fn load_oracle(file: &str) -> (&'static Payload, Transcript) {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../transcripts/esp32c6/shader-oracle-walk")
+        .join(file);
+    let t = Transcript::load(&path).unwrap_or_else(|e| panic!("loading {}: {e:#}", path.display()));
+    (find_payload("shader-oracle-walk").unwrap(), t)
+}
+
+/// `cargo test -p lpa-server --test shader_oracle_frame -- --nocapture`, run
+/// at `7e043ae2d` after `just ci-prereqs`, 2026-09-07 — `[ORACLE] rgb=` and
+/// `[ORACLE-RV32] rgb=` were the same 384 characters (`[ORACLE-DIFF] … 0
+/// differing bytes of 192`), so one constant stands for both. The frame **as
+/// the driver's `write(data)` received it**, RGB order, 64 LEDs;
+/// `ORACLE_CRC` is the oracle's own FNV-1a over the same bytes. Restated
+/// here rather than read from `lpa-server`, which is outside the `lp-emu/`
+/// fence: the number has to be pinned somewhere the replay can reach.
+const ORACLE_RGB: &str = "324a0208376a1c2889007668098b4b0375544602631253162b0f7051068a838b000097890b63b208a1601b30951b1c72660069af481900a49554e3212b48e41955cdad4d154f047b103e90441ec10ed47200bcb627f657019fb523c13e3794161c952e04a8743b36e681e90e225ef47f09d1174ebc035c8009447f3fb11b6112ca048dc419dd5fae02903ab21f015c6f026047006a750aa45b69b20834c32b7e8f0012913c086a360144365600567c064d430e9127239632148702475f4c2d05";
+const ORACLE_CRC: &str = "0x55772254";
+
+fn fnv1a_hex(bytes: &[u8]) -> String {
+    let mut hash = 0x811c_9dc5u32;
+    for byte in bytes {
+        hash ^= u32::from(*byte);
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    format!("0x{hash:08x}")
+}
+
+fn unhex(text: &str) -> Vec<u8> {
+    (0..text.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&text[i..i + 2], 16).expect("hex"))
+        .collect()
 }
 
 fn series(payload: &Payload, name: &str) -> &'static SeriesSpec {
@@ -292,5 +333,177 @@ fn a_corrupted_pin_capture_is_a_pin_difference() {
         vec![format!("pin[{n}].wire_crc")],
         "exactly one frame's wire should differ"
     );
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// **G4-1, outliving the sitting.** The recorded `shader-oracle-walk`: the
+/// first lit frame the shipped image put on gpio18 is the host oracle's
+/// frame — `rgb` (the wire unpermuted from GRB) equal to `[ORACLE] rgb=`,
+/// its FNV-1a the oracle's `crc=` — and every frame after it in the capture
+/// is the same bytes. On both time grades.
+#[test]
+fn the_first_lit_frame_of_the_oracle_walk_is_the_oracles_on_both_grades() {
+    assert_eq!(
+        fnv1a_hex(&unhex(ORACLE_RGB)),
+        ORACLE_CRC,
+        "the pinned pair agrees"
+    );
+    for file in [ORACLE_T1, ORACLE_T2] {
+        let (_, t) = load_oracle(file);
+        assert!(
+            t.sentinel_line().is_some(),
+            "{file}: the walk reached the end of projectRead"
+        );
+        // The console half: the load landed, on the pad the oracle names.
+        let text = t.lines.join("\n");
+        assert!(text.contains("\"loadProject\":{\"handle\":1}"), "{file}");
+        assert!(
+            text.contains("gpio=/gpio/18 ws281x_ch=0 rmt_slot=0 bytes=192"),
+            "{file}: 64 LEDs on D10"
+        );
+        assert!(
+            !text.contains("dropping unparseable"),
+            "{file}: the guest lost bytes"
+        );
+
+        let pins = t.pin_records().expect("the pin capture loads");
+        assert!(!pins.is_empty(), "{file}: no frame on the pad");
+        let rgb_of = |r: &lp_emu_validate::Record| {
+            r.get("rgb")
+                .and_then(|v| v.as_str())
+                .expect("rgb")
+                .to_string()
+        };
+        let lit = pins
+            .iter()
+            .position(|r| rgb_of(r).bytes().any(|c| c != b'0'))
+            .unwrap_or_else(|| panic!("{file}: every frame on the pad is black"));
+        println!(
+            "m5_replays[{file}]: {} frames on the pad, first lit n={lit}, {} after it",
+            pins.len(),
+            pins.len() - lit - 1
+        );
+        // Exactly one compile-window black frame before it (ADR
+        // 2026-08-03-memory-pressure-at-compile-safe-points); more would be
+        // a change in the load path worth knowing about.
+        assert_eq!(lit, 1, "{file}: dark frames before the first lit one");
+        let first = &pins[lit];
+        for (k, v) in [("pad", 18u64), ("leds", 64), ("bits", 1536), ("errors", 0)] {
+            assert_eq!(
+                first.get(k).and_then(|x| x.as_u64()),
+                Some(v),
+                "{file}: {k}"
+            );
+        }
+        assert_eq!(
+            first.get("signal").and_then(|v| v.as_str()),
+            Some("RMT_SIG_0")
+        );
+        assert_eq!(first.get("complete").and_then(|v| v.as_bool()), Some(true));
+        let rgb = rgb_of(first);
+        assert_eq!(
+            rgb, ORACLE_RGB,
+            "{file}: the first lit frame is not the oracle's"
+        );
+        assert_eq!(fnv1a_hex(&unhex(&rgb)), ORACLE_CRC, "{file}");
+        for later in &pins[lit + 1..] {
+            // The capture ends on a console line, so its last frame may be
+            // the one the run cut; that one is not evidence either way.
+            if later.get("complete").and_then(|v| v.as_bool()) != Some(true) {
+                assert_eq!(later.get("n"), pins.last().unwrap().get("n"), "{file}");
+                continue;
+            }
+            assert_eq!(
+                rgb_of(later),
+                ORACLE_RGB,
+                "{file}: frame {:?} differs",
+                later.get("n")
+            );
+        }
+        assert!(
+            pins.len() - lit - 1 >= 5,
+            "{file}: too few frames after the first lit one"
+        );
+    }
+}
+
+/// **G4-5.** The two grades' oracle walks replay against each other: every
+/// frame the two captures share is the same bytes (`Pin`, equal), the
+/// memory-class load gates are equal, and the frame COUNT by the sentinel is
+/// reported as timing — the pad ran on at the clock's pace, and the two
+/// clocks differ.
+#[test]
+fn the_oracle_walks_two_grades_replay_against_each_other() {
+    let (_, a) = load_oracle(ORACLE_T1);
+    let (_, b) = load_oracle(ORACLE_T2);
+    let report = replay(&a, &b, ReplayOptions::default()).expect("replay");
+    assert!(report.is_ok(), "{}", report.render());
+    let shared = a
+        .pin_records()
+        .unwrap()
+        .len()
+        .min(b.pin_records().unwrap().len());
+    assert_eq!(report.compared(FieldClass::Pin), shared * 7);
+    assert_eq!(report.differences_in(FieldClass::Pin).count(), 0);
+    assert!(
+        report.compared(FieldClass::Memory) > 0,
+        "the load gates are in the replay"
+    );
+    assert_eq!(report.differences_in(FieldClass::Memory).count(), 0);
+    let frames: Vec<_> = report
+        .comparisons_in(FieldClass::Timing)
+        .filter(|c| c.scope == "pin" && c.field == "frames")
+        .map(|c| format!("{} vs {}", c.left, c.right))
+        .collect();
+    assert_eq!(
+        frames.len(),
+        1,
+        "the frame count is reported once, as timing"
+    );
+    println!("m5_replays: oracle walk pin frames t1 vs t2: {}", frames[0]);
+}
+
+/// The negative control on the oracle walk: one nibble of the first lit
+/// frame's wire bytes changed in a copy is a `Pin` difference against the
+/// committed capture, and the oracle check above would name the frame.
+#[test]
+fn a_corrupted_oracle_frame_is_a_pin_difference() {
+    let (_, real) = load_oracle(ORACLE_T1);
+    let pins_text = std::fs::read_to_string(real.pins_path().expect("a pin capture")).unwrap();
+    let tmp = std::env::temp_dir().join(format!("lp-emu-m5-oracle-replays-{}", std::process::id()));
+    std::fs::create_dir_all(&tmp).unwrap();
+    let txt = tmp.join(ORACLE_T1);
+    std::fs::copy(real.path.as_ref().unwrap(), &txt).unwrap();
+    std::fs::copy(
+        lp_emu_validate::transcript::sidecar_path(real.path.as_ref().unwrap()),
+        lp_emu_validate::transcript::sidecar_path(&txt),
+    )
+    .unwrap();
+    let mut lines: Vec<String> = pins_text.lines().map(str::to_string).collect();
+    let n = 1;
+    lines[n] = lines[n].replacen("\"wire\":\"4", "\"wire\":\"5", 1);
+    assert_ne!(
+        lines[n],
+        pins_text.lines().nth(n).unwrap(),
+        "the line changed"
+    );
+    std::fs::write(
+        txt.with_file_name(real.header.pins.clone().unwrap()),
+        lines.join("\n"),
+    )
+    .unwrap();
+
+    let corrupted = Transcript::load(&txt).expect("loads");
+    let report = replay(&corrupted, &real, ReplayOptions::default()).expect("replay");
+    assert!(
+        !report.is_ok(),
+        "a changed wire byte must fail:\n{}",
+        report.render()
+    );
+    let pin_diffs: Vec<_> = report
+        .differences_in(FieldClass::Pin)
+        .map(|c| format!("{}.{}", c.scope, c.field))
+        .collect();
+    assert_eq!(pin_diffs, vec![format!("pin[{n}].wire_crc")]);
     let _ = std::fs::remove_dir_all(&tmp);
 }

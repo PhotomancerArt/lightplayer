@@ -186,6 +186,27 @@ pub const ALL_CHECKS: &[FwCheckConfig] = &[
         emits_header: false,
     },
     FwCheckConfig {
+        check: FwCheck::ShaderOracleWalk,
+        display_name: "Project upload walk (projects/test/shader-oracle), over the USB link, with the pad observed",
+        // The same flash-backed product image as `upload-walk-usb`, walking
+        // the host oracle's own project (M5 P4): `projects/test/shader-oracle`
+        // renders the same bytes every frame, and the host prints them from
+        // two engines (`lpa-server/tests/shader_oracle_frame.rs`). On an
+        // emulated configuration the recording carries a pin capture beside
+        // the console — the frames decoded off gpio18 — and that is where
+        // the oracle's bytes are looked for. Silicon has no frame-dump line
+        // on this chip (M8's port), so a silicon recording of this payload
+        // is the console half only.
+        firmware_features: &["server", "radio"],
+        // The last frame of the `projectRead` answer: request 11, one fewer
+        // than `basic`'s twelve because the oracle project has no clock.json.
+        done_marker: Some("\"id\":11,\"seq\":2,"),
+        trace_slug: "shader-oracle-walk",
+        supported_targets: ESP32_ONLY,
+        emits_records: false,
+        emits_header: false,
+    },
+    FwCheckConfig {
         check: FwCheck::UsbNegativeControl,
         display_name: "Shipped image with the port closed from boot",
         // The shipped image itself, flash-backed — `boot-idle` minus

@@ -20,6 +20,7 @@ use std::fmt::Write as _;
 use anyhow::{Result, bail};
 
 use crate::grade::{FieldClass, Grade};
+use crate::payload::PinCapture;
 use crate::transcript::Transcript;
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -402,19 +403,34 @@ pub fn replay(
     //  2. **Between** the two, the pad's own bytes per frame, as a `Pin`
     //     comparison. That is the claim the class exists for and the one
     //     that fails a replay.
-    if payload.pin_capture {
+    if payload.pin_capture.is_on() {
         for (t, side) in [(left, "left"), (right, "right")] {
             for problem in pin_self_disagreements(t, side)? {
                 structural_problems.push(problem);
             }
         }
         let (lp, rp) = (left.pin_records()?, right.pin_records()?);
-        if lp.len() != rp.len() {
-            structural_problems.push(format!(
-                "pin capture: {} decoded frames on the left, {} on the right",
-                lp.len(),
-                rp.len()
-            ));
+        match payload.pin_capture {
+            PinCapture::EveryFrame if lp.len() != rp.len() => {
+                structural_problems.push(format!(
+                    "pin capture: {} decoded frames on the left, {} on the right",
+                    lp.len(),
+                    rp.len()
+                ));
+            }
+            // A shipped-image walk's pad runs on at the engine's pace until
+            // the run ends on a console line, so the count is the clock's:
+            // reported with its ratio, like every other timing figure, while
+            // the frames the two share are compared below as `Pin`.
+            PinCapture::WhileRunning => comparisons.push(compare(
+                "pin",
+                "frames",
+                FieldClass::Timing,
+                lp.len().to_string(),
+                rp.len().to_string(),
+                false,
+            )),
+            PinCapture::EveryFrame | PinCapture::Off => {}
         }
         for (n, (l, r)) in lp.iter().zip(rp.iter()).enumerate() {
             let scope = format!("pin[{n}]");
@@ -573,6 +589,14 @@ fn pin_self_disagreements(t: &Transcript, side: &str) -> Result<Vec<String>> {
             "{side} transcript's payload `{}` claims a pin capture and has none",
             t.payload.name
         )]);
+    }
+    // A payload with no per-frame claim of its own — a walk on the shipped
+    // image, which prints no record per frame — has nothing here to disagree
+    // with: its pad stands alone, and what it is compared against is the
+    // other transcript (and, for `shader-oracle-walk`, the host oracle in
+    // `tests/m5_replays.rs`).
+    if !t.payload.record_kinds.contains(&"rmt-frame") {
+        return Ok(Vec::new());
     }
     let claims = t.records()?;
     let claims: Vec<_> = claims.iter().filter(|r| r.kind == "rmt-frame").collect();

@@ -22,8 +22,11 @@
   `docs/reports/2026-09-07-esp-emu-c6-spike.md`. **Amended by M6 P4**
   (PR #587): the honest-peripheral section gains per-register grades and
   `--strict-grade`, with the USB-Serial-JTAG block as the worked example.
-  **Completed by M7** (PR #596): ROM-up boot, the cross-check, and the two
-  new seams the boot needed (`Bus::take_yield`, `RegFile::with_read_mirror`).
+  **Amended by M5 P4** (PR #598): the signal fabric, and what the `pin`
+  grade means now that the shipped image's frame is held against the host
+  oracle. **Completed by M7** (PR #596): ROM-up boot, the cross-check, and
+  the two new seams the boot needed (`Bus::take_yield`,
+  `RegFile::with_read_mirror`).
 
 ## Context
 
@@ -397,6 +400,40 @@ and it is not. What would is a silicon transcript of that class — which is
 exactly what the amendment is for: it lets the block say what it has earned
 without letting the configuration overclaim.
 
+#### Amendment (M5, 2026-09-07): the signal fabric, and the pin grade
+
+A peripheral never sees another peripheral, and the pin is the place that
+rule bites: the RMT block cannot read `GPIO.func_out_sel_cfg[18]` to learn
+which pad carries its waveform, and the GPIO block cannot ask the RMT what
+level its signal is at. The routing is one fact two blocks share, which is
+the shape the interrupt matrix already had (DD22), and it gets the same
+answer — **one state on the bus, register views writing into it**. The
+**signal fabric** (`lp-emu-esp-common::pins`, `BusCx.pins`; DD34 e) holds
+pads, signals and edges and no chip numbers: the chip's GPIO block is a
+routing *view* that writes `route`/`set_gpio_out` into it, an output
+peripheral `drive`s its signal into it and never learns whether anyone is
+listening, and the machine drains the edges every slice into whatever
+watches the wire — a WS281x decoder per routed pad (`strip::ws281x`,
+±150 ns, the datasheet's tolerance and not a knob) and a raw pin log. The
+decoder knows nothing about who produced the edges, which is what makes its
+frames a second reading rather than the peripheral's own word log restated.
+
+What the `pin` class is graded on, then, and why it is still `modeled`. Two
+captures are committed beside their transcripts (the additive `pins`
+companion, E3). On `rmt-chase` the guest's own per-frame checksum agrees
+with the pad on all 768 frames. On `shader-oracle-walk` the **shipped**
+image's first lit frame off gpio18 is byte-equal to the host oracle's
+`[ORACLE] rgb=` and `[ORACLE-RV32] rgb=` — the walk's own PASS criterion
+for the S3, with the decoder standing in for the frame-dump line the C6
+does not have — and every later frame is the same bytes, on both time
+grades. The oracle is rendered by two host engines that never touched the
+machine, so this is the nearest independent check there is short of an
+instrument. It is not a measurement, because both readings of the *pad*
+are ours: the RMT model produces the waveform and our decoder reads it.
+By the rule above, byte-equality is evidence weighed in the `because`, and
+`measured` waits for a silicon pin transcript — a logic analyser on the
+desk, or the C6 `frame-dump` port (M8's) read beside the decoder.
+
 ### Provenance on everything derived
 
 Per `2026-07-29-license-provenance-discipline.md`. The register-name tables in
@@ -445,8 +482,8 @@ the second chip is the test of the design, and a flat crate fails it.
   `measured` runs through transcripts rather than through confidence.
 - The gaps are visible and named, each owned by a milestone: flash and the MMU
   windows (M4 — the flash-backed shipped image still stops at
-  `SPIN SPI1+0x000 cmd` at 11 ms), RMT and a decoded WS281x frame (M5 — the
-  `pin` class), an honest USB-Serial-JTAG with attach/detach over a control
+  `SPIN SPI1+0x000 cmd` at 11 ms), RMT and a decoded WS281x frame (M5, done — the
+  `pin` class, `modeled` with the oracle equality as its evidence), an honest USB-Serial-JTAG with attach/detach over a control
   channel (M6 — the `usb-serial-jtag` class), ROM-up boot (M7 — the
   `boot-log` class).
 - One open number, recorded rather than tuned: the idle heartbeat's

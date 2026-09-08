@@ -882,7 +882,7 @@ impl ConfigurationDriver for LpEmuDriver {
                 emu.push(req.usb_script_path().display().to_string());
             }
         }
-        if req.payload.pin_capture {
+        if req.payload.pin_capture.is_on() {
             // The other half of the recording: what the pad carried, decoded
             // from the waveform by something that never spoke to the
             // firmware. It goes beside the console capture, never into it —
@@ -993,7 +993,11 @@ impl ConfigurationDriver for LpEmuDriver {
             availability: Availability::Available,
             steps,
             capture,
-            pins: req.payload.pin_capture.then(|| req.pin_capture_path()),
+            pins: req
+                .payload
+                .pin_capture
+                .is_on()
+                .then(|| req.pin_capture_path()),
             cwd: req.repo_root.clone(),
             warnings: Vec::new(),
             notes,
