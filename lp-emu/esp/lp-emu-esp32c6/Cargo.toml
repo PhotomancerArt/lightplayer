@@ -51,3 +51,4 @@ lp-emu-validate = { path = "../../lp-emu-validate" }
 default = []
 selfprof = []
 block-profile = ["lp-riscv-emu/block-profile", "lp-emu-esp-common/block-profile"]
+fetch-cache = ["lp-riscv-emu/fetch-cache"]

@@ -25,6 +25,10 @@ libc = { version = "0.2", optional = true }
 [features]
 # THROWAWAY (M5 P1) — never merge.
 block-profile = ["std"]
+# THROWAWAY (M5 P1) ABLATION — never merge. Skips the per-instruction bus
+# fetch with a direct-mapped pc->word cache, to measure the fetch bucket
+# directly. NOT correct in general (no invalidation).
+fetch-cache = []
 std = [
     "lp-emu-core/std",
     "env_logger",

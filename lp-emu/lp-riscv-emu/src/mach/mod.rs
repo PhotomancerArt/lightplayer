@@ -59,7 +59,7 @@
 /// THROWAWAY (M5 P1) — never merge.
 #[cfg(feature = "block-profile")]
 pub mod blockprof;
-#[cfg(feature = "block-profile")]
+#[cfg(any(feature = "block-profile", feature = "fetch-cache"))]
 extern crate alloc;
 pub mod csr;
 pub mod trap;
@@ -189,6 +189,11 @@ pub struct MachineHart<B: Bus> {
     /// the call, and the three F CSRs are illegal here. Held rather than
     /// constructed per instruction so the slice loop stays a loop.
     fp_unused: FpRegs,
+    /// THROWAWAY (M5 P1) ABLATION — never merge. A direct-mapped
+    /// pc -> instruction-word cache with no invalidation, used only to
+    /// measure how much host time the per-instruction bus fetch costs.
+    #[cfg(feature = "fetch-cache")]
+    icache: alloc::boxed::Box<[(u32, u32); 8192]>,
     /// THROWAWAY (M5 P1) — never merge.
     #[cfg(feature = "block-profile")]
     pub prof: alloc::boxed::Box<blockprof::BlockProf>,
@@ -210,6 +215,8 @@ impl<B: Bus> Clone for MachineHart<B> {
             external: self.external,
             allow_unaligned: self.allow_unaligned,
             fp_unused: self.fp_unused.clone(),
+            #[cfg(feature = "fetch-cache")]
+            icache: self.icache.clone(),
             #[cfg(feature = "block-profile")]
             prof: alloc::boxed::Box::new(blockprof::BlockProf::new()),
             _bus: PhantomData,
@@ -252,6 +259,8 @@ impl<B: Bus> MachineHart<B> {
             external: None,
             allow_unaligned: false,
             fp_unused: FpRegs::new(),
+            #[cfg(feature = "fetch-cache")]
+            icache: alloc::boxed::Box::new([(u32::MAX, 0); 8192]),
             #[cfg(feature = "block-profile")]
             prof: alloc::boxed::Box::new(blockprof::BlockProf::new()),
             _bus: PhantomData,
@@ -494,6 +503,26 @@ impl<B: Bus> MachineHart<B> {
             // The bus's trace and spin detector are only worth having if the
             // pc and the cycle on each line are this instruction's.
             bus.set_issuing(pc, self.cycle_count);
+            // THROWAWAY (M5 P1) ABLATION — never merge.
+            #[cfg(feature = "fetch-cache")]
+            let inst_word = {
+                let slot = &mut self.icache[((pc >> 1) as usize) & 8191];
+                if slot.0 == pc {
+                    slot.1
+                } else {
+                    match bus.fetch_instruction(pc) {
+                        Ok(word) => {
+                            self.icache[((pc >> 1) as usize) & 8191] = (pc, word);
+                            word
+                        }
+                        Err(e) => match self.deliver_fetch_error(e, pc) {
+                            Ok(()) => continue,
+                            Err(fault) => return SliceEnd::Fault(fault),
+                        },
+                    }
+                }
+            };
+            #[cfg(not(feature = "fetch-cache"))]
             let inst_word = match bus.fetch_instruction(pc) {
                 Ok(word) => word,
                 Err(e) => match self.deliver_fetch_error(e, pc) {
