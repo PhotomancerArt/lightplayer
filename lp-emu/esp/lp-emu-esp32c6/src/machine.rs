@@ -1322,6 +1322,10 @@ impl Esp32C6Builder {
         loader::reset_hart(&mut hart, &mut bus, entry);
         hart.set_cycle_model(time_grade.cycle_model());
         hart.set_poll_skip(poll_skip);
+        // …and stop the BUS producing a side-band nobody will take. The hart
+        // flag alone leaves the compare-before-copy on the store path and the
+        // `pure_read` call on the MMIO read path being paid on every access.
+        bus.set_poll_sampling(poll_skip);
 
         // The control channel's listener, and the block it drives. The index
         // is looked up once: it is the peripheral's identity for the whole

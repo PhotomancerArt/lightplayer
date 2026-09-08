@@ -225,6 +225,17 @@ pub struct SocBus {
     /// per-instruction scratch, and a restored run rewrites it before it is
     /// next read.
     poll_sample: PollSample,
+    /// Whether the bus produces the poll-loop side-band at all.
+    ///
+    /// `false` is `--no-poll-skip`: the hart will never ask, so nothing here
+    /// needs to answer, and every site that would compute an answer is
+    /// skipped. That matters because the side-band is not free to *produce*
+    /// — the store path's compare-before-copy and the MMIO read path's
+    /// `pure_read` call are paid on every access whether or not anyone reads
+    /// the result. With this `false` the bus does what a bus with no poll
+    /// detector does, which is what makes the flag's "off" position cost
+    /// nothing rather than ~5 %.
+    poll_sampling: bool,
     /// See [`BusCx::yield_to_machine`].
     yield_now: bool,
     /// The chip's misaligned-access policy, mirrored from the hart. The C6
@@ -312,6 +323,7 @@ impl SocBus {
             strict_grade: None,
             sideband: false,
             poll_sample: PollSample::Inert,
+            poll_sampling: true,
             yield_now: false,
             allow_unaligned: false,
             watchpoints: [None; WATCHPOINT_SLOTS],
@@ -438,6 +450,15 @@ impl SocBus {
     /// is what keeps that honest: the run report names the blocks that were
     /// actually checked, so an ungraded one reads as an unanswered question
     /// and never as a pass.
+    /// Turn the poll-loop side-band's *production* on or off.
+    ///
+    /// The hart's `--no-poll-skip` stops it **taking** the sample; this stops
+    /// the bus **making** one. Both are needed for the flag's off position to
+    /// cost nothing: see [`SocBus::poll_sampling`].
+    pub fn set_poll_sampling(&mut self, on: bool) {
+        self.poll_sampling = on;
+    }
+
     pub fn set_strict_grade(&mut self, level: Option<RegGrade>) {
         self.strict_grade = level;
     }
@@ -1052,16 +1073,21 @@ impl SocBus {
                     pins: &mut self.pins,
                 };
                 let value = range.periph.read(off, width, &mut cx);
-                (value, range.periph.pure_read(off))
+                // `pure_read` is a virtual call per MMIO read; with the
+                // side-band off its answer is never looked at.
+                let pure = self.poll_sampling && range.periph.pure_read(off);
+                (value, pure)
             };
             // The poll-loop side-band (M4). Asked *after* the read so a
             // block whose purity depends on which lane was addressed answers
             // about the access that actually happened.
-            self.poll_sample = if pure {
-                PollSample::Pure(PureRead { address, value })
-            } else {
-                PollSample::Impure
-            };
+            if self.poll_sampling {
+                self.poll_sample = if pure {
+                    PollSample::Pure(PureRead { address, value })
+                } else {
+                    PollSample::Impure
+                };
+            }
             if self.trace.is_enabled() {
                 self.trace.mmio(
                     now,
@@ -1112,6 +1138,24 @@ impl SocBus {
             // check and a `memcmp` call, on the hottest store path in the
             // machine. `[u8; 4] != [u8; 4]` is a four-byte compare. The
             // first cost 12 % of a memory-heavy image's run.
+            //
+            // With the side-band off nobody will ask what this store did, so
+            // the compare is pure overhead: write and report `true`, which
+            // is the answer a bus that does not track purity would give.
+            if !self.poll_sampling {
+                let wrote = match width {
+                    Width::Word => data
+                        .get_mut(off..off + 4)
+                        .and_then(|b| <&mut [u8; 4]>::try_from(b).ok())
+                        .map(|b| *b = value.to_le_bytes()),
+                    Width::Half => data
+                        .get_mut(off..off + 2)
+                        .and_then(|b| <&mut [u8; 2]>::try_from(b).ok())
+                        .map(|b| *b = (value as u16).to_le_bytes()),
+                    Width::Byte => data.get_mut(off).map(|b| *b = value as u8),
+                };
+                return if wrote.is_some() { Ok(()) } else { Err(fault) };
+            }
             let changed = match width {
                 Width::Word => data
                     .get_mut(off..off + 4)
@@ -1510,8 +1554,10 @@ impl Bus for SocBus {
         // One reset per instruction, before its first access: the
         // side-band's whole contract is that it answers about *this*
         // instruction, and a load that reached plain RAM must not inherit
-        // the previous load's answer.
-        self.poll_sample = PollSample::Inert;
+        // the previous load's answer. Skipped when nothing is asking.
+        if self.poll_sampling {
+            self.poll_sample = PollSample::Inert;
+        }
     }
 
     fn take_sideband(&mut self) -> bool {
@@ -1982,6 +2028,50 @@ mod tests {
         bus.read_word(0x6000_001c).unwrap();
         bus.write_word(0x6000_0020, 1).unwrap();
         assert_eq!(bus.take_poll_sample(), PollSample::Impure);
+    }
+
+    /// With the side-band switched off the bus must still be a correct memory,
+    /// and must stop paying for an answer nobody will read.
+    ///
+    /// The observable contract is only the first half — the bytes. The second
+    /// half is why the flag exists: `--no-poll-skip` costs ~5 % if the bus
+    /// keeps comparing before it copies, which is what this switch removes.
+    #[test]
+    fn with_sampling_off_the_bus_still_stores_exactly_and_claims_nothing() {
+        let mut bus = bus_with_ram();
+        bus.set_poll_sampling(false);
+
+        // Every width writes the bytes it was given, changed or unchanged.
+        bus.set_issuing(0x4200_0000, 10);
+        bus.write_word(0x4080_0000, 0x1234_5678).unwrap();
+        assert_eq!(bus.read_word(0x4080_0000).unwrap(), 0x1234_5678);
+
+        bus.set_issuing(0x4200_0004, 20);
+        bus.write_word(0x4080_0000, 0x1234_5678).unwrap();
+        assert_eq!(
+            bus.read_word(0x4080_0000).unwrap(),
+            0x1234_5678,
+            "a rewrite of the same bytes is still a correct store"
+        );
+
+        bus.set_issuing(0x4200_0008, 30);
+        bus.write_halfword(0x4080_0000, 0x2bef).unwrap();
+        assert_eq!(bus.read_word(0x4080_0000).unwrap(), 0x1234_2bef);
+
+        bus.set_issuing(0x4200_000c, 40);
+        bus.write_byte(0x4080_0000, 0x0d).unwrap();
+        assert_eq!(bus.read_word(0x4080_0000).unwrap(), 0x1234_2b0d);
+
+        // Turning it back on restores the side-band, so the switch is a
+        // switch and not a one-way door.
+        bus.set_poll_sampling(true);
+        bus.set_issuing(0x4200_0014, 60);
+        bus.write_word(0x4080_0000, 0x1234_2b0d).unwrap();
+        assert_eq!(
+            bus.take_poll_sample(),
+            PollSample::Inert,
+            "the side-band answers again once it is switched back on"
+        );
     }
 
     /// A RAM store is inert exactly when it changed nothing. This is the
