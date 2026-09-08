@@ -2599,6 +2599,7 @@ impl Esp32C6Machine {
 mod tests {
     use super::*;
     use lp_emu_esp_common::RegFile;
+    use lp_emu_esp_common::trace::SharedBuffer;
 
     #[test]
     fn a_rom_only_machine_boots_at_the_reset_vector_with_mie_set() {
@@ -2969,5 +2970,124 @@ mod tests {
             4,
             "the wall-clock net is its own code — it is not a fault"
         );
+    }
+
+    // --- M4 test 7: the poll skip under `--trace` and `--strict-bus` -------
+
+    /// A guest that spins on UART0's TX-FIFO status word, in HP SRAM:
+    ///
+    /// ```text
+    ///     lui  a1, 0x60000       # UART0
+    /// loop:
+    ///     lw   a0, 0x1c(a1)      # status
+    ///     srli a0, a0, 16
+    ///     andi a0, a0, 0xff      # tx.len()
+    ///     bne  a0, x0, loop      # spin while the FIFO has anything in it
+    ///     ebreak
+    /// ```
+    ///
+    /// The same shape as the mask ROM's `uart_serial_tx_one_char` wait, minus
+    /// the call and the stack spill: a pure read, two masks, a branch. It
+    /// leaves the loop when the last byte has left the shifter.
+    ///
+    /// Hand-encoded rather than built with `lp_riscv_inst::encode`, because
+    /// this crate does not depend on that one and M4 is not the milestone to
+    /// widen the fence for a test program (`a_reset_request_from_a_peripheral`
+    /// spells its `j .` the same way).
+    fn uart_spin_machine(strict: bool, trace: Option<SharedBuffer>) -> Esp32C6Machine {
+        let mut builder = Esp32C6Builder::new().strict(strict);
+        if let Some(buf) = trace {
+            builder = builder.trace(Box::new(buf), Vec::new());
+        }
+        let mut m = builder.build().unwrap();
+
+        let program = [
+            0x6000_05b7u32, // lui  a1, 0x60000
+            0x01c5_a503,    // lw   a0, 28(a1)
+            0x0105_5513,    // srli a0, a0, 16
+            0x0ff5_7513,    // andi a0, a0, 255
+            0xfe05_1ae3,    // bne  a0, zero, -12
+            0x0010_0073,    // ebreak
+        ];
+        let mut bytes = Vec::new();
+        for word in program {
+            bytes.extend_from_slice(&word.to_le_bytes());
+        }
+        m.bus.load_image(memmap::HP_SRAM_BASE, &bytes).unwrap();
+        m.harts[0].set_pc(memmap::HP_SRAM_BASE);
+
+        // Give the FIFO something to drain, so the loop has a reason to
+        // spin and the schedule has an event to bound the horizon with. The
+        // status word changes as each byte leaves, which is what makes this
+        // several skips rather than one.
+        for byte in b"M4 poll skip" {
+            m.bus
+                .write_word(memmap::periph::UART0, i32::from(*byte))
+                .unwrap();
+        }
+        m
+    }
+
+    /// **Test 7.** A run with the skip on and a run with it off reach the
+    /// same cycle with the same instruction count and the same UART0 bytes,
+    /// whether or not `--strict-bus` is on; and a traced run carries exactly
+    /// one `POLL-SKIP` note per skip, naming the register.
+    ///
+    /// `--strict-bus` deliberately does **not** disable the skip: strict mode
+    /// refuses accesses nothing claims, and a pure poll loop makes none.
+    #[test]
+    fn a_traced_strict_run_skips_and_notes_every_skip() {
+        for strict in [false, true] {
+            let trace = SharedBuffer::new();
+            let mut skipped = uart_spin_machine(strict, Some(trace.clone()));
+            let out_skipped = skipped.run_until(&StopCondition::after_micros(20_000));
+
+            let mut plain = uart_spin_machine(strict, None);
+            plain.harts[0].set_poll_skip(false);
+            let out_plain = plain.run_until(&StopCondition::after_micros(20_000));
+
+            assert_eq!(out_skipped, out_plain, "strict={strict}");
+            assert_eq!(skipped.cycles(), plain.cycles(), "strict={strict}");
+            assert_eq!(
+                skipped.instructions(),
+                plain.instructions(),
+                "strict={strict}"
+            );
+            assert_eq!(
+                skipped.uart0().bytes(),
+                plain.uart0().bytes(),
+                "strict={strict}"
+            );
+            assert!(
+                skipped.bus.first_strict_violation().is_none(),
+                "a pure poll loop touches nothing unmapped (strict={strict})"
+            );
+
+            let (skips, iterations) = skipped.poll_skips();
+            assert!(skips > 1, "several skips, strict={strict}: {skips}");
+            assert!(iterations > skips, "strict={strict}");
+            assert_eq!(plain.poll_skips(), (0, 0), "strict={strict}");
+
+            let notes: Vec<String> = trace
+                .lines()
+                .into_iter()
+                .filter(|l| l.contains("POLL-SKIP"))
+                .collect();
+            assert_eq!(
+                notes.len() as u64,
+                skips,
+                "one note per skip, strict={strict}: {notes:?}"
+            );
+            for note in &notes {
+                assert!(note.contains("UART0+0x01c status"), "{note}");
+                assert!(note.contains(" x"), "the note carries a count: {note}");
+            }
+            let claimed: u64 = notes
+                .iter()
+                .filter_map(|l| l.rsplit(" x").next())
+                .filter_map(|n| n.parse::<u64>().ok())
+                .sum();
+            assert_eq!(claimed, iterations, "strict={strict}");
+        }
     }
 }
