@@ -250,6 +250,11 @@ jobs:
             emu_c6:
               - 'lp-emu/**'
               - 'lp-fw/fw-esp32c6/**'
+              # The recipe that builds every image this job boots. It was
+              # missing until L4, so a change to the reference build — the
+              # thing that decides WHICH BYTES the gates run against — ran no
+              # gate at all unless it happened to touch something else.
+              - 'scripts/emu/**'
               - 'justfile'
               - '.github/workflows/pre-merge.yml'
 
@@ -833,10 +838,11 @@ jobs:
     name: Emulator C6 (x64)
     runs-on: ubuntu-24.04
     # Measured 69s wall-clock on an M2 Max, warm cargo cache (2026-09-06, see
-    # the PR that added this job for the CI-measured number). Sized well above
-    # that per this workflow's timeout philosophy (see the top-of-file
-    # comment) until this job has its own p95 from real runs.
-    timeout-minutes: 15
+    # the PR that added this job for the CI-measured number); 9m34s on this
+    # runner (2026-09-08, main at #567), which is three cold reference-image
+    # builds and the suite. L4's `--verify` step adds a fourth build, so the
+    # ceiling moves with it rather than the job living at 90 % of its budget.
+    timeout-minutes: 20
     needs: detect-changes
     if: needs.detect-changes.outputs.emu_c6 == 'true'
     env:
@@ -893,6 +899,18 @@ jobs:
 
       - name: Install just
         uses: extractions/setup-just@v3
+
+      # The reference image is reproducible (L4): the same sha256 on this
+      # runner and on a Mac, for the same pinned firmware commit. This step is
+      # what keeps that true — it builds the memfs image twice, in two cold
+      # worktrees at different paths, and fails if the bytes differ.
+      #
+      # One image, not all three: the claim is about the recipe, and the other
+      # two go through the same code path. It runs BEFORE the suite so its
+      # first build is the one the tests then use (the script publishes to the
+      # path they resolve), which is why it does not simply double the job.
+      - name: Reference image reproducibility (--verify)
+        run: cd lp2025 && ./scripts/emu/build-reference-image.sh --verify esp32c6,server,radio,spike_uart0_link,memory_fs
 
       - name: Emulator C6 boot tests + replays
         run: cd lp2025 && just test-emu-c6

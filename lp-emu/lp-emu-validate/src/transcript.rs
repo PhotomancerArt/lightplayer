@@ -222,6 +222,7 @@ mod tests {
             firmware_commit: "d6cfaa2051ae".into(),
             firmware_features: vec!["esp32c6".into()],
             firmware_dirty: None,
+            firmware_sha256: None,
             silicon_rev: None,
             board: None,
             mac: None,

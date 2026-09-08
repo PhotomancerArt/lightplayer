@@ -437,6 +437,7 @@ pub fn record_set(
             firmware_commit: firmware_commit.to_string(),
             firmware_features: req.features().iter().map(|f| (*f).to_string()).collect(),
             firmware_dirty: provenance.firmware_dirty,
+            firmware_sha256: None,
             silicon_rev: entry.silicon_rev.clone(),
             board: entry.board.clone(),
             mac: entry.mac.clone(),
@@ -475,7 +476,14 @@ pub fn record_set(
         let capture = repo_root.join(driver.execute(&plan)?);
         let body = std::fs::read_to_string(&capture)
             .with_context(|| format!("reading capture {}", capture.display()))?;
-        let header = adopt_inband_features(header, &body)?;
+        let mut header = adopt_inband_features(header, &body)?;
+        // Which BYTES ran, not only which commit (L4). Hashed after the plan
+        // executed, because a plan that builds its own image has nothing to
+        // hash before it does.
+        header.firmware_sha256 = plan
+            .image
+            .as_ref()
+            .and_then(|image| crate::driver::sha256_file(&plan.cwd.join(image)));
         // Parse before committing: a capture that does not parse is not a
         // transcript, and writing it would make the tree lie.
         let parsed = Transcript::from_parts(header.clone(), &body)?;

@@ -55,6 +55,23 @@ pub struct TranscriptHeader {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub firmware_dirty: Option<bool>,
+    /// The sha256 of the image that produced this transcript, lower-case hex.
+    ///
+    /// Additive and optional: the two transcripts this system was built on
+    /// predate it, and an added optional field needs no schema bump (see
+    /// [`HEADER_SCHEMA`]).
+    ///
+    /// The commit and the feature set say which SOURCE ran; this says which
+    /// BYTES did, and until L4 those were not the same question. M5 P1's
+    /// digest (PR #569) found three CI runs of one pinned firmware commit
+    /// producing three different ELFs — a wall-clock stamp in the ESP-IDF
+    /// application descriptor, absolute paths in `.debug_str`, and a
+    /// linker-script patch that lost a race on a cold build tree.
+    /// `scripts/emu/build-reference-image.sh` removes all three and its
+    /// `--verify` proves it, so a recorded sha is a fact another host can
+    /// reproduce rather than a serial number.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub firmware_sha256: Option<String>,
     /// Silicon revision as the chip reports it (`v0.2`), or as the
     /// configuration synthesises it (esp-emu's eFuse says `v0.3` on a `v0.2`
     /// board — that disagreement is a fact worth carrying).
@@ -282,6 +299,7 @@ mod tests {
                 "test_shader_compile_incremental".into(),
             ],
             firmware_dirty: Some(false),
+            firmware_sha256: None,
             silicon_rev: Some("v0.2".into()),
             board: Some("seeed/xiao-esp32-c6".into()),
             mac: Some("a0:f2:62:87:b4:8c".into()),
@@ -313,6 +331,39 @@ mod tests {
         assert_eq!(back.payload, h.payload);
         assert_eq!(back.mac, h.mac);
         assert_eq!(back.firmware_features, h.firmware_features);
+    }
+
+    /// `firmware_sha256` is additive in both directions: a sidecar written
+    /// before it existed still loads, and one that carries it keeps it
+    /// through a round trip. That is the whole M2 contract for adding a
+    /// field — no schema bump, no committed transcript touched.
+    #[test]
+    fn the_image_sha_is_an_additive_field() {
+        let mut h = header();
+        h.firmware_sha256 = None;
+        let without = h.to_json().unwrap();
+        assert!(
+            !without.contains("firmware_sha256"),
+            "an absent sha is not written at all: {without}"
+        );
+
+        h.firmware_sha256 =
+            Some("61027da9eabbf137a2f3ed5846350293f2bc79fea91fd9ee5592fa9f4aa16ba8".to_string());
+        let with = h.to_json().unwrap();
+        assert_eq!(
+            TranscriptHeader::from_json(&with)
+                .unwrap()
+                .firmware_sha256
+                .as_deref(),
+            Some("61027da9eabbf137a2f3ed5846350293f2bc79fea91fd9ee5592fa9f4aa16ba8")
+        );
+        // And the pre-L4 sidecars, which have no such key.
+        assert_eq!(
+            TranscriptHeader::from_json(&without)
+                .unwrap()
+                .firmware_sha256,
+            None
+        );
     }
 
     #[test]

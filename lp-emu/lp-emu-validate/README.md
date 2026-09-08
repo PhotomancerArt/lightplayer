@@ -150,6 +150,15 @@ transcript with no provenance is not a transcript. It carries chip, silicon
 revision, board id, MAC, firmware commit and feature set, date, tool versions,
 the capture method, and the trust table.
 
+`firmware_sha256` (added by L4, **additive**: optional, no schema bump, and
+every committed sidecar without it still loads) is the sha256 of the image the
+run loaded. The commit says which source ran; this says which bytes did, and
+those were not the same question until the reference recipe became
+reproducible — M5 P1's digest caught three CI runs of one pinned firmware
+commit producing three different ELFs (`scripts/emu/build-reference-image.sh`
+names all three causes, and its `--verify` proves they are gone). A sha here is
+now something another host can reproduce.
+
 When the payload also printed an in-band header (`[fw-checks-header] {…}`), the
 two must agree; `Transcript::load` refuses them if they do not.
 

@@ -274,6 +274,11 @@ pub struct RunPlan {
     pub notes: Vec<String>,
     /// Tool name -> version, for the sidecar's `tools` map.
     pub tools: BTreeMap<String, String>,
+    /// The image this plan runs, relative to `cwd` — the ELF a machine loads
+    /// or the merged binary a chip is flashed with. The recorder hashes it
+    /// into the sidecar's `firmware_sha256`, so a transcript says which BYTES
+    /// produced it and not only which commit (L4).
+    pub image: Option<PathBuf>,
 }
 
 impl RunPlan {
@@ -418,6 +423,13 @@ impl ConfigurationDriver for SiliconDriver {
             }
         };
 
+        // The image this plan flashes, kept before the command line consumes
+        // it: the recorder hashes it into the sidecar's `firmware_sha256`
+        // (L4), which is what makes DD30's "the SAME bytes" checkable rather
+        // than asserted — the directory name above says which features, this
+        // says which bytes.
+        let image = PathBuf::from(&elf);
+
         // A payload whose subject starts on a blank part has to be given one.
         // The emulated side gets it for free (`--flash` is blank unless a file
         // is named); the board keeps whatever the last sitting left on it, and
@@ -557,6 +569,7 @@ impl ConfigurationDriver for SiliconDriver {
             ],
             notes,
             tools: BTreeMap::new(),
+            image: Some(image),
         })
     }
 
@@ -677,6 +690,8 @@ impl ConfigurationDriver for EspEmuDriver {
             },
             notes: Vec::new(),
             tools: BTreeMap::new(),
+            // The merged binary, not the ELF: it is what this emulator loads.
+            image: Some(image),
         })
     }
 
@@ -809,6 +824,9 @@ impl ConfigurationDriver for LpEmuDriver {
             }
         };
 
+        // The ELF this plan runs, kept before the command line consumes it:
+        // the recorder hashes it into the sidecar's `firmware_sha256` (L4).
+        let image = PathBuf::from(&elf);
         // A payload whose subject is machine state has no console output at
         // all — with no cable the device says nothing, which is the finding —
         // so its transcript is the machine's own `--probe` report on stdout.
@@ -955,6 +973,7 @@ impl ConfigurationDriver for LpEmuDriver {
             warnings: Vec::new(),
             notes,
             tools: emulator_tools(&req.repo_root),
+            image: Some(image),
         })
     }
 
@@ -1063,6 +1082,23 @@ fn rom_sha256(repo_root: &Path) -> Option<String> {
         .find(|l| l.ends_with(C6_ROM_ELF))
         .and_then(|l| l.split_whitespace().next())
         .map(str::to_string)
+}
+
+/// The sha256 of a file, lower-case hex — `None` when it is not there.
+///
+/// Used for the sidecar's `firmware_sha256`: the image a recorded transcript
+/// came from, by its bytes. Not an error when missing, because a `--dry-run`
+/// records nothing and a plan that builds its image has none to hash until it
+/// has run.
+pub fn sha256_file(path: &Path) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    let bytes = std::fs::read(path).ok()?;
+    Some(
+        Sha256::digest(&bytes)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect(),
+    )
 }
 
 pub fn driver_for(config: &Configuration) -> Box<dyn ConfigurationDriver> {

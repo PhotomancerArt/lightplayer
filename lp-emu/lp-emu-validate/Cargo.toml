@@ -15,6 +15,9 @@ anyhow = { workspace = true, features = ["std"] }
 regex = { workspace = true }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std"] }
+# For the sidecar's `firmware_sha256`: which BYTES a transcript came from
+# (L4). No product crate, so the fence holds.
+sha2 = { workspace = true }
 toml = "0.8"
 
 [lints]
