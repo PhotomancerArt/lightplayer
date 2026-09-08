@@ -8,6 +8,7 @@ related:
   - docs/reports/2026-09-08-esp32c6-emulator-walk.md
   - lp-emu/transcripts/esp32c6/boot-idle-flash/
   - lp-emu/transcripts/esp32c6/upload-walk-usb/
+  - lp-emu/transcripts/esp32c6/rom-up-boot/
 ---
 # The emulated C6's idle heap is 8 bytes freer than silicon's, and nobody can say why
 
@@ -27,7 +28,7 @@ the plan could test are all refuted:
 |---|---|
 | a heartbeat sampled at different moments | M6 P4 keyed the series on the 5 s tick; the gap is identical at 5 s and 10 s |
 | the board's boot history (`bootCount`) | M6 P5 measured it constant across boot 3 and boot 10, two commits, both links |
-| the loader — an app placed rather than loaded | M7 booted ROM-up through the real mask ROM and IDF bootloader; the ledger is byte-identical to the direct load's, so the bootloader is not where it comes from |
+| the loader — an app placed rather than loaded | M7 booted ROM-up through the real mask ROM and IDF bootloader; the ledger is byte-identical to the direct load's, so the bootloader is not where it comes from. **Committed 2026-09-08**: `lp-emu/transcripts/esp32c6/rom-up-boot/lp-emu-esp32c6-t1-2026-09-08-735af98ae.txt`, held by `m7_replays.rs::the_eight_byte_gap_survives_the_rom_up_boot` — the refutation is a file now, not a run |
 
 This is structural rather than a bug because the thing that would name it is a
 measurement nobody has: a **power-on** capture. Every silicon transcript in

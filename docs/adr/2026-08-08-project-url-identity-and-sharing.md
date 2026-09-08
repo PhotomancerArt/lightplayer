@@ -3,6 +3,10 @@
 - Status: accepted
 - Date: 2026-08-08
 - Plan: lp2025/2026-08-07-1630-project-identity-sharing
+- Amended by: [2026-09-07-always-a-device-target-real-emu-sim.md](2026-09-07-always-a-device-target-real-emu-sim.md)
+  ("the project loads the sim; the sim has no identity" becomes "the
+  project is the URL, `?on=` names the device"; the share address is
+  unchanged)
 
 ## Context
 
@@ -23,7 +27,18 @@ the project **in the simulator**, and the old `/sim/` route retired with
 no shim (the sim has no identity of its own; the project loads the sim;
 multiple sim instances of one project is a deliberately uncrossed
 bridge). Device routes are unaffected — a device has its own `dev_`
-identity. Sharing is copying the address bar; the Share popover is
+identity.
+
+> **Amended 2026-09-07** — a sim now DOES have identity (a minted
+> locally-administered MAC, the same derivation silicon uses), because
+> it is a device. What stands: the project is still the thing in the
+> URL, and the plain `/p/…` address still opens it on a sim by default.
+> What changes: `?on=` is now the general grammar for naming ANY device
+> — `emu`, `sim`, `mac:`, or `ws:` — not only a fallback for the device
+> route this ADR's "Device routes are unaffected" line described. See
+> `2026-09-07-always-a-device-target-real-emu-sim.md`.
+
+Sharing is copying the address bar; the Share popover is
 access control only. The uid is authoritative and immutable; the slug is
 cosmetic, generated from the display name, and changes freely with it.
 Old links never break: routing extracts the uid, ignores the slug, and

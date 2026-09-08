@@ -24,7 +24,7 @@ target if needed, and sets up the pre-commit hook (which runs `just check`).
 - `just ci-prereqs` — build the emulator/builtin artifacts some test suites
   load at runtime. If an oracle or filetest suite fails strangely (for
   example, shaders rendering black), run this first.
-- `just studio-dev` — the browser Studio with the built-in simulator.
+- `just studio-dev` — the browser Studio with the built-in sim.
   (Web dev builds compile under the `wasm-dev` cargo profile —
   `line-tables-only` debuginfo, configured in the root `Cargo.toml` —
   so the dev wasm stays tens of MB instead of ~300; panic locations in

@@ -31,7 +31,7 @@ inventory reads belong below the UI in `lpa-studio-core`, `lpa-link`, and
 ## Current Surface
 
 The active first screen is the Device pane, rendered from stack sections and
-actions owned by the core layer. In the browser build it starts with simulator
+actions owned by the core layer. In the browser build it starts with sim
 and ESP32 connection actions:
 
 ```text
@@ -41,10 +41,10 @@ lpa-studio-web -> lpa-studio-core -> DeviceUx -> LinkProviderRegistry -> browser
 `DeviceUx` is the user-facing workflow for selecting a connection, opening the
 device session, attaching the LightPlayer server protocol, and handing off to
 project controls. It owns the lower-level `LinkUx` and `ServerUx` internals, so
-the web UI does not present separate Link and Server panes. The simulator
+the web UI does not present separate Link and Server panes. The sim
 provider auto-discovers and connects its single browser-worker endpoint, opens
 the server protocol, and auto-loads the demo project when no project is already
-running. Starting the simulator is one click.
+running. Starting the sim is one click.
 
 The WebSerial ESP32 provider is visible as a provider action when browser serial
 support is compiled in. The browser still owns the serial port picker and

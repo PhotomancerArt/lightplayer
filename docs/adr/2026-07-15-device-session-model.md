@@ -4,7 +4,9 @@
 - **Date:** 2026-07-15
 - **Deciders:** Photomancer
 - **Supersedes:** None
-- **Superseded by:** None
+- **Superseded by:** [2026-09-07-always-a-device-target-real-emu-sim.md](2026-09-07-always-a-device-target-real-emu-sim.md)
+  (the "Sim is not a device" section only — D22 is retired, because the
+  claim is no longer true; the rest of this ADR stands)
 
 ## Context
 
@@ -161,6 +163,15 @@ no hello, and no management plane; the device arm is always a
 `DeviceSession`. Deploy environment, pane visibility, and transport
 labels derive from the attachment kind and session state — the old
 sim-detection flags are deleted.
+
+> **Superseded 2026-09-07** — D22 is retired by
+> `2026-09-07-always-a-device-target-real-emu-sim.md`: "the sim is not a
+> device" stopped being true, and the type system no longer says it is.
+> `RuntimeAttachment` collapses to one arm, `Device`; a sim is a roster
+> device, a `Link`, and an effect backend, same as silicon. The rest of
+> this ADR (hello-first readiness, the erase/flash shape, identity riding
+> the hello) is unaffected — it describes the device arm, which a sim now
+> simply is.
 
 ### Identity rides the hello
 

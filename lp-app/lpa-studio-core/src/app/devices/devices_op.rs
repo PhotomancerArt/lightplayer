@@ -20,7 +20,7 @@ use crate::{ActionClass, ActionConfirmation, ActionMeta, ActionPriority, Control
 /// flow and no `is_sim` in the fold: `Connect` and `Disconnect` are what
 /// power a sim on and off (PD8, Q15), because a sim's link is a link and
 /// opening it is opening it. What differs is what the words mean to a
-/// person — nobody "connects" to a simulator they just started.
+/// person — nobody "connects" to a sim they just started.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum DeviceFace {
     /// A board at the end of a wire.

@@ -88,10 +88,10 @@ pub fn hydrate_home_inputs(fs: Rc<RefCell<dyn LpFs>>, open_elsewhere: &[String])
 }
 
 /// Assemble the gallery view model from cached inputs. `inputs` is `None`
-/// when no local store mounted (the gallery still shows examples). `pool`
-/// is the runtime pool's evidence; the D28 sim pairing happens here — the
-/// sim session's loaded project stamps its card's "Running in simulator"
-/// indication.
+/// when no local store mounted (the gallery still shows examples). The D28
+/// runtime-presence line (a card's "running on a sim" indication) has no
+/// source since a sim became a device (`package_card.rs`'s
+/// `live_presence_line`) and is not stamped here.
 pub fn build_home_view(
     inputs: Option<&HomeInputs>,
     opening: Option<String>,

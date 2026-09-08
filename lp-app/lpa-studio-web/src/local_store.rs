@@ -5,7 +5,7 @@
 //! the per-project [`OpfsLibraryHost`](crate::library_host_opfs), and
 //! attaches it to the actor. Locks are per project (acquired on open)
 //! plus a short-lived catalog lock inside transactions — see
-//! `library_host_opfs` for the model. The simulator never sees this
+//! `library_host_opfs` for the model. The sim never sees this
 //! store: persistence belongs to the local project store and the sim is
 //! an ephemeral place (roadmap D19/D20).
 

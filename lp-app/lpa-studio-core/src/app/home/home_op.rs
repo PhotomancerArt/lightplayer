@@ -80,7 +80,7 @@ impl ProjectTemplate {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum HomeOp {
     /// Open a library package — by slug (URLs) or `prj…` uid (cards) —
-    /// pushing its head to the simulator (D13/D19).
+    /// pushing its head to the sim (D13/D19).
     OpenPackage {
         key: String,
     },
@@ -230,7 +230,7 @@ impl ControllerOp for HomeOp {
         match self {
             Self::OpenPackage { .. } => ActionMeta::new(
                 "Open",
-                "Open this project in the simulator.",
+                "Open this project on a sim.",
                 ActionPriority::Primary,
             )
             .with_icon("play"),
