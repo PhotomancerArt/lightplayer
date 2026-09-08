@@ -645,6 +645,7 @@ pub struct Esp32C6Builder {
     time_grade: TimeGrade,
     strict: bool,
     strict_grade: Option<RegGrade>,
+    strict_grade_blocks: Option<Vec<&'static str>>,
     trace: Option<Box<dyn std::io::Write + Send>>,
     trace_blocks: Vec<String>,
     uart0: Uart0Sink,
@@ -707,6 +708,7 @@ impl Esp32C6Builder {
             time_grade: TimeGrade::default(),
             strict: false,
             strict_grade: None,
+            strict_grade_blocks: None,
             trace: None,
             trace_blocks: Vec::new(),
             uart0: Uart0Sink::default(),
@@ -933,6 +935,14 @@ impl Esp32C6Builder {
         self
     }
 
+    /// Narrow `--strict-grade` to a named set of blocks; `None` (the
+    /// default) is every block that publishes a table. See
+    /// [`SocBus::set_strict_grade_blocks`].
+    pub fn strict_grade_blocks(mut self, blocks: Option<Vec<&'static str>>) -> Self {
+        self.strict_grade_blocks = blocks;
+        self
+    }
+
     /// Where decoded WS281x frames go. They are always also kept in memory
     /// for [`Esp32C6Machine::frames`].
     pub fn dump_frames(mut self, sink: FrameSink) -> Self {
@@ -1030,6 +1040,7 @@ impl Esp32C6Builder {
             time_grade,
             strict,
             strict_grade,
+            strict_grade_blocks,
             trace,
             trace_blocks,
             uart0,
@@ -1321,6 +1332,7 @@ impl Esp32C6Builder {
 
         bus.set_strict(strict);
         bus.set_strict_grade(strict_grade);
+        bus.set_strict_grade_blocks(strict_grade_blocks);
 
         // Guest time is zero and the schedule is empty: the peripherals that
         // need a first event (a UART polling its host source) take it now.
