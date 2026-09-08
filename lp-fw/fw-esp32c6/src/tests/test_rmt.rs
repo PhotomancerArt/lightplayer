@@ -67,8 +67,6 @@ pub async fn run_rmt_test(_: embassy_executor::Spawner) -> ! {
             firmware_dirty: fw_checks::str_is_true(env!("LP_BUILD_DIRTY")),
         },
     );
-    info!("[rmt-chase] {LEDS} LEDs on gpio18, {CHASES} chases ({FRAMES} frames)");
-
     // Configure RMT (we already have rmt_peripheral from init_board)
     let rmt = Rmt::new(rmt_peripheral, crate::output::rmt::shared_driver::RMT_CLOCK)
         .expect("Failed to initialize RMT");
@@ -78,8 +76,7 @@ pub async fn run_rmt_test(_: embassy_executor::Spawner) -> ! {
     let pin = gpio18;
 
     let mut channel = LedChannel::new(rmt, pin, LEDS).expect("Failed to initialize LED channel");
-
-    info!("[rmt-chase] LedChannel ready, starting the chase");
+    info!("[rmt-chase] {LEDS} LEDs on gpio18, {CHASES} chases ({FRAMES} frames)");
 
     let mut data = [0u8; frame_bytes(LEDS)];
     for n in 0..FRAMES {

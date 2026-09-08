@@ -131,6 +131,24 @@ impl FwImage {
         default_features: false,
     };
 
+    /// The M5 P3 `rmt-chase` payload image: **exactly what the runner
+    /// builds**, so the in-process gate and the committed transcript are of
+    /// one binary.
+    ///
+    /// `LpEmuDriver::plan` runs `cargo build --features esp32c6,<the
+    /// payload's>` with no `--no-default-features`, and Cargo resolves that
+    /// against the package's defaults — which is why `default_features` is
+    /// true here and why the in-band header a run prints lists
+    /// `default,esp32c6,esp_radio,…` (`run.rs::adopt_inband_features`).
+    ///
+    /// `ws281x_telemetry` is in the payload's own feature list: without it
+    /// the image prints no `[WS281X]` line, and that line is half of what
+    /// the payload exists to record.
+    pub const RMT_CHASE: FwImage = FwImage {
+        features: &["esp32c6", "test_rmt", "ws281x_telemetry"],
+        default_features: true,
+    };
+
     pub fn slug(&self) -> String {
         slug(self.features)
     }

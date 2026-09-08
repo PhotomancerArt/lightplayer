@@ -1646,9 +1646,7 @@ impl Esp32C6Machine {
     /// other side. Reported, never gated (D13/PD9); see
     /// [`periph::rmt::RefillStats`].
     pub fn rmt_refill_stats(&self, ch: usize) -> periph::rmt::RefillStats {
-        self.rmt()
-            .map(|r| r.refill_stats(ch))
-            .unwrap_or_default()
+        self.rmt().map(|r| r.refill_stats(ch)).unwrap_or_default()
     }
 
     // ---- the pads ------------------------------------------------------

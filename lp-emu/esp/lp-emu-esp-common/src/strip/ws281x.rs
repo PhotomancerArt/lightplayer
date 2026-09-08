@@ -279,6 +279,15 @@ impl Ws281xDecoder {
     /// is what a plain GPIO output looks like, and calling it an incomplete
     /// WS281x frame would be an invention. A single *bad* pulse is a
     /// finding, and is reported.
+    ///
+    /// A frame whose latch has **already run long enough** by `at` is closed
+    /// by that latch, not by the run ending: the decoder's rule is "a low of
+    /// at least [`reset_min_ns`](Self::reset_min_ns) closes the frame", and
+    /// at `at` that has happened whether or not another rising edge came
+    /// along to notice it. Waiting for the next edge would report the last
+    /// frame of every finished run as incomplete, which is a statement about
+    /// where the run stopped rather than about the wire (M5 P3: the chase's
+    /// 768th frame, with 11 ms of latch behind it).
     pub fn flush(&mut self, at: Cycles) -> Option<Frame> {
         let open = self.open.as_mut()?;
         if open.bits == 0 && open.error_count == 0 {
@@ -289,8 +298,15 @@ impl Ws281xDecoder {
         if matches!(self.state, State::High(_)) {
             open.last_edge = open.last_edge.max(at);
         }
+        let latched = match self.state {
+            State::Low(since) => {
+                let gap = at.saturating_sub(since);
+                (gap >= self.reset_min).then_some(gap)
+            }
+            _ => None,
+        };
         self.state = State::Idle;
-        Some(self.close(None))
+        Some(self.close(latched))
     }
 
     fn open_frame(&mut self, at: Cycles) {
@@ -591,6 +607,50 @@ mod tests {
         assert_eq!(f.reset_cycles, None);
         assert!(!f.is_complete(), "cut short and never latched");
         assert!(d.flush(now).is_none(), "nothing is open any more");
+    }
+
+    /// The last frame of a finished run is closed by its latch, not left
+    /// incomplete because the run stopped before another frame started.
+    #[test]
+    fn a_flush_after_the_latch_closes_the_frame_and_before_it_does_not() {
+        let timing = ChannelTiming::WS2812;
+        let codes = PulseCodes::new(&timing, 80_000_000).expect("codes");
+        let mut edges = Vec::new();
+        let mut now = 0u64;
+        for i in 0..8 {
+            let item = PulseItem::decode(codes.bit(i % 2 == 0)).expect("not STOP");
+            edges.push(Edge {
+                at: now,
+                pad: PAD,
+                level: true,
+            });
+            now += u64::from(item.first.ticks) * CYCLES_PER_TICK;
+            edges.push(Edge {
+                at: now,
+                pad: PAD,
+                level: false,
+            });
+            now += u64::from(item.second.ticks) * CYCLES_PER_TICK;
+        }
+        let last_falling = edges.last().expect("edges").at;
+
+        // Flushed while the low is still shorter than a reset: no latch was
+        // observed, and the frame says so.
+        let mut d = decoder(timing);
+        assert!(feed_all(&mut d, &edges).is_empty());
+        let f = d.flush(last_falling + ns(49_000)).expect("reported");
+        assert_eq!(f.reset_cycles, None);
+        assert!(!f.is_complete());
+
+        // Flushed after a full latch: the reset happened, and the frame is
+        // complete even though no rising edge ever came to notice it.
+        let mut d = decoder(timing);
+        assert!(feed_all(&mut d, &edges).is_empty());
+        let f = d.flush(last_falling + ns(300_000)).expect("reported");
+        assert_eq!(f.bits, 8);
+        assert_eq!(f.trailing_bits, 0);
+        assert_eq!(f.reset_cycles, Some(ns(300_000)));
+        assert!(f.is_complete(), "eight whole bits and a latch behind them");
     }
 
     #[test]
