@@ -548,6 +548,7 @@ mod tests {
                     liveness: super::super::FeedLiveness::Offline,
                 },
             )]),
+            runtime_bands: std::collections::BTreeMap::new(),
         };
 
         let split = split_roster(&view);

@@ -2570,7 +2570,13 @@ impl StudioController {
         // Else make one. Until P5's picker, a board-target project mints
         // its sim silently on open — which is D33.
         let random = self.random_bytes6();
-        self.create_sim_record(&target_id, None, &random).await
+        let uid = self.create_sim_record(&target_id, None, &random).await?;
+        // The record is in the LIBRARY; the roster learns it at the next
+        // settle, and the power-on below needs a device to aim at. Settle
+        // here rather than waiting for the dispatch's own settle point,
+        // which runs after this open has already finished.
+        self.settle_library().await;
+        Ok(uid)
     }
 
     /// Power off every sim that is NOT the one this open lands on (D37,
@@ -4392,6 +4398,10 @@ impl StudioController {
     #[cfg(test)]
     pub(crate) fn project_for_test(&self) -> &ProjectController {
         &self.project
+    }
+
+    pub(crate) fn pending_device_lens_for_test(&self) -> Option<String> {
+        self.pending_device_lens.clone()
     }
 
     pub(crate) fn devices_for_test(&self) -> &crate::DeviceRoster {

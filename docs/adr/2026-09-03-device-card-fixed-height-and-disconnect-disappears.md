@@ -65,6 +65,7 @@ firmware sits in the project section"):
 | Project | preview (120) · info (17) + bar (4) · verbs (30) | 212px (220 before the 2026-09-07 amendment) |
 | Firmware + Terminal | info (17) + bar (4) · verbs (30), then the terminal flush as the zone's last block | 244px (252 before the 2026-09-07 amendment) |
 | Device | info (17) · verbs (30) | 80px |
+| runtime band | one 24px row under the header's identity rows — **sim/emu cards only** (added 2026-09-07, see the amendment below) | +24px on those cards, 0 on a real board |
 
 All six idle/active states (Running, Nothing-loaded, Needs-firmware,
 Flashing, Sending, Degraded) measured **626px** total at every column width
@@ -73,7 +74,9 @@ served `devices_card_states` story — **644px** (header 90) since the
 2026-09-04 amendment below gave the header its second identity row,
 re-measured the same way on both `devices_card_states` and
 `devices_card_firmware_faces`, and **628px** since the 2026-09-07
-amendment folded each info line and its bar slot into one gapless block. No zone ever grows past its own fixed
+amendment folded each info line and its bar slot into one gapless block —
+and **668px on a sim or emu card**, which is the same card plus the one
+24px runtime band a runtime that is not silicon wears. No zone ever grows past its own fixed
 rows; the only two cases where the card DOES reflow are a user-triggered
 popover pick panel (which floats in the browser's top layer and never
 touches in-flow layout) and the footer-style wrap of the Device zone's
@@ -187,6 +190,27 @@ already running LightPlayer firmware when it first hello'd.
   ADR's Project/Firmware zoning opened up for pickers.
 
 ## Amendments
+
+- **2026-09-07 — the runtime band is a sim/emu-only row (those cards 628 → 668px; a real board is unchanged at 628px).**
+  "Always a device" (`2026-09-07-always-a-device-target-real-emu-sim.md`)
+  put sims in the Devices grid as ordinary devices, drawn by this card.
+  The ONE mark that a device is not silicon is a 24px row under the
+  header's identity rows, in the bound family, reading
+  `▶ Sim · <target> · in this tab · <granted tier>` (D38/D49). It
+  renders only when a band exists, so a real board's card has no such row
+  and measures exactly what it measured before — which is what makes the
+  real-card story baselines byte-identical across that change, and what
+  this amendment exists to pin.
+
+  Like every row above it, the band is FIXED: its text is one line,
+  ellipsised, with the full text on its `title`. A tier arriving (or not
+  arriving — the tier clause is dropped until a boot answers) changes the
+  line, never the height.
+
+  This is the first row in the table whose presence depends on the
+  DEVICE rather than on its state, and the rule it does not break is the
+  one that matters: no card ever changes its own height while it is on
+  screen. A sim card is 668px from its first paint to its last. PR #586.
 
 - **2026-09-07 — an info line and its bar slot are one gapless block (Project and Firmware zones −8px each, cards 644 → 628px, measured at the 400px column).**
   Each zone laid its 4px bar slot out as a row of the zone's own `gap-2`
