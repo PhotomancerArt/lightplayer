@@ -47,6 +47,7 @@ pub use local::{
     AsyncLocalClientTransport, AsyncLocalServerTransport, create_local_transport_pair,
 };
 pub use project_deploy::ProjectDeployFile;
+pub use protocol_session::{BORROWED_WIRE_REQUEST_ID_BASE, next_borrowed_wire_request_id_base};
 pub use pull_loop::{
     BackoffPolicy, CancelSignal, NeverCancel, ProgressDeadline, PullOutcome, run_project_read,
 };
