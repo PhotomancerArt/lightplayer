@@ -178,6 +178,14 @@ impl RunRequest {
         self.out_dir
             .join(format!("{}.usbscript", self.payload.name))
     }
+
+    /// Where the pin capture goes for a payload that has one: the decoded
+    /// frames, one JSON line each, beside the console capture rather than
+    /// inside it.
+    pub fn pin_capture_path(&self) -> PathBuf {
+        self.out_dir
+            .join(format!("{}.pins.jsonl", self.payload.name))
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -264,6 +272,11 @@ pub struct RunPlan {
     /// Where the transcript body will be after the plan runs, relative to
     /// `cwd`.
     pub capture: PathBuf,
+    /// Where the **pin capture** will be, relative to `cwd`, for a payload
+    /// that declares one and a configuration that can observe a pad. `None`
+    /// everywhere else, including on silicon, where a pad is only observable
+    /// with an instrument nobody has attached.
+    pub pins: Option<PathBuf>,
     /// The directory the steps run in: the repository root.
     pub cwd: PathBuf,
     pub warnings: Vec<String>,
@@ -561,6 +574,7 @@ impl ConfigurationDriver for SiliconDriver {
             availability: Availability::Available,
             steps,
             capture,
+            pins: None,
             cwd: req.repo_root.clone(),
             warnings: vec![
                 "never open this port while Studio holds it — check `just hardware-list` \
@@ -680,6 +694,7 @@ impl ConfigurationDriver for EspEmuDriver {
             availability: Availability::Available,
             steps,
             capture,
+            pins: None,
             cwd: req.repo_root.clone(),
             warnings: if std::env::var(ESP_EMU_ENV).is_err() {
                 vec![format!(
@@ -867,6 +882,15 @@ impl ConfigurationDriver for LpEmuDriver {
                 emu.push(req.usb_script_path().display().to_string());
             }
         }
+        if req.payload.pin_capture {
+            // The other half of the recording: what the pad carried, decoded
+            // from the waveform by something that never spoke to the
+            // firmware. It goes beside the console capture, never into it —
+            // a transcript is the bytes a reader on the port saw, and a
+            // decoded frame is not one of those.
+            emu.push("--dump-frames".into());
+            emu.push(format!("file:{}", req.pin_capture_path().display()));
+        }
         for (symbol, ms) in req.payload.probes {
             emu.push("--probe".into());
             emu.push(format!("{symbol}@{ms}"));
@@ -969,6 +993,7 @@ impl ConfigurationDriver for LpEmuDriver {
             availability: Availability::Available,
             steps,
             capture,
+            pins: req.payload.pin_capture.then(|| req.pin_capture_path()),
             cwd: req.repo_root.clone(),
             warnings: Vec::new(),
             notes,
@@ -981,10 +1006,15 @@ impl ConfigurationDriver for LpEmuDriver {
         // The machine writes the capture itself; a stale one from an earlier
         // run would otherwise be appended to or, worse, left behind by a run
         // that produced nothing.
-        let capture = plan.cwd.join(&plan.capture);
-        if capture.exists() {
-            std::fs::remove_file(&capture)
-                .with_context(|| format!("clearing {}", capture.display()))?;
+        for stale in [Some(&plan.capture), plan.pins.as_ref()]
+            .into_iter()
+            .flatten()
+        {
+            let path = plan.cwd.join(stale);
+            if path.exists() {
+                std::fs::remove_file(&path)
+                    .with_context(|| format!("clearing {}", path.display()))?;
+            }
         }
         run_steps(plan)?;
         Ok(plan.capture.clone())

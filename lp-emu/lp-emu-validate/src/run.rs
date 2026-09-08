@@ -460,15 +460,31 @@ pub fn record_set(
             } else {
                 Some(plan.notes.join(" "))
             },
+            // The companion file's name, when this configuration can observe
+            // a pad and this payload makes a claim about one. A file name,
+            // not a path: it is resolved against the transcript's own
+            // directory (E3, the additive widening).
+            pins: None,
             trust: entry.trust.clone(),
         };
+        let mut header = header;
+        if plan.pins.is_some() {
+            header.pins = Some(header.pins_file_name()?);
+        }
         header.validate()?;
         let dest = repo_root
             .join(TRANSCRIPTS_DIR)
             .join(header.relative_path()?);
+        let pins_dest = header
+            .pins
+            .as_ref()
+            .map(|name| dest.with_file_name(name.clone()));
         let _ = writeln!(s, "{}", plan.render());
         let _ = writeln!(s, "  would write {}", dest.display());
         let _ = writeln!(s, "           + {}", sidecar_path(&dest).display());
+        if let Some(p) = &pins_dest {
+            let _ = writeln!(s, "           + {}", p.display());
+        }
         if dry_run {
             continue;
         }
@@ -498,17 +514,45 @@ pub fn record_set(
         if let Some(parent) = dest.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        if dest.exists() {
-            bail!(
-                "{} already exists. Transcripts are never edited or overwritten — \
-                 a new capture is a new file, and a differing one is a regression \
-                 to investigate.",
-                dest.display()
-            );
+        for existing in [Some(&dest), pins_dest.as_ref()].into_iter().flatten() {
+            if existing.exists() {
+                bail!(
+                    "{} already exists. Transcripts are never edited or overwritten — \
+                     a new capture is a new file, and a differing one is a regression \
+                     to investigate.",
+                    existing.display()
+                );
+            }
+        }
+        // The pin capture, before the transcript: a transcript whose sidecar
+        // names a companion that is not there is worse than no companion, so
+        // the file lands first and its absence stops the recording.
+        if let (Some(src), Some(dst)) = (&plan.pins, &pins_dest) {
+            let src = repo_root.join(src);
+            let pins = std::fs::read_to_string(&src).with_context(|| {
+                format!(
+                    "reading the pin capture {} — payload `{}` declares one, so a recording \
+                     without it would claim a pad nobody observed",
+                    src.display(),
+                    payload.name
+                )
+            })?;
+            if pins.trim().is_empty() {
+                bail!(
+                    "the pin capture {} is empty: payload `{}` claims a pad and this run \
+                     decoded no frame on one. Not recording it.",
+                    src.display(),
+                    payload.name
+                );
+            }
+            std::fs::write(dst, &pins)?;
         }
         std::fs::write(&dest, &body)?;
         std::fs::write(sidecar_path(&dest), header.to_json()?)?;
         let _ = writeln!(s, "  wrote {}", dest.display());
+        if let Some(p) = &pins_dest {
+            let _ = writeln!(s, "  wrote {}", p.display());
+        }
     }
     if dry_run {
         let _ = writeln!(s, "(dry run: nothing was executed or written)");

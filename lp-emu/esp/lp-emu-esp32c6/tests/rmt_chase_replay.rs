@@ -177,6 +177,7 @@ fn transcript(capture: &str, grade: &str) -> Transcript {
         source: None,
         capture: None,
         note: None,
+        pins: None,
         trust: Default::default(),
     };
     Transcript::from_parts(header, capture).expect("the capture parses as a transcript")

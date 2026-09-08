@@ -389,6 +389,59 @@ pub fn replay(
         }
     }
 
+    // --- the pin capture ---------------------------------------------------
+    //
+    // The half of a recording that is not something the device said. Two
+    // claims are checked, and they are different claims:
+    //
+    //  1. **Within** each transcript, the guest's own checksum against the
+    //     bytes the pad carried, frame by frame. A disagreement there means
+    //     the driver and the wire disagree on one machine, which is not a
+    //     difference between configurations at all — it is a structural
+    //     problem in that recording, and it is named as one.
+    //  2. **Between** the two, the pad's own bytes per frame, as a `Pin`
+    //     comparison. That is the claim the class exists for and the one
+    //     that fails a replay.
+    if payload.pin_capture {
+        for (t, side) in [(left, "left"), (right, "right")] {
+            for problem in pin_self_disagreements(t, side)? {
+                structural_problems.push(problem);
+            }
+        }
+        let (lp, rp) = (left.pin_records()?, right.pin_records()?);
+        if lp.len() != rp.len() {
+            structural_problems.push(format!(
+                "pin capture: {} decoded frames on the left, {} on the right",
+                lp.len(),
+                rp.len()
+            ));
+        }
+        for (n, (l, r)) in lp.iter().zip(rp.iter()).enumerate() {
+            let scope = format!("pin[{n}]");
+            for field in ["pad", "signal", "n", "leds", "bits", "complete"] {
+                comparisons.push(compare(
+                    &scope,
+                    field,
+                    FieldClass::Pin,
+                    l.get(field).map(render_json).unwrap_or_default(),
+                    r.get(field).map(render_json).unwrap_or_default(),
+                    true,
+                ));
+            }
+            // The bytes themselves, as a checksum: a per-frame hex string of
+            // 768 bytes in a failure message helps nobody, and the checksum
+            // is the same function the guest's record uses.
+            comparisons.push(compare(
+                &scope,
+                "wire_crc",
+                FieldClass::Pin,
+                pin_wire_crc(l),
+                pin_wire_crc(r),
+                true,
+            ));
+        }
+    }
+
     // --- strict mode -------------------------------------------------------
     let mut grade_problems = Vec::new();
     if options.strict {
@@ -478,6 +531,74 @@ fn accumulate(slot: &mut Option<f64>, value: &str) {
         (Some(_), Err(_)) => *slot = None,
         (None, _) => {}
     }
+}
+
+/// FNV-1a, 32-bit, over a pin record's `wire` hex.
+///
+/// The sixth transcription of these two constants in the repository, and the
+/// point of it is that this side must not be able to agree with the guest by
+/// sharing its code: the firmware computes the same function over the bytes
+/// it *handed the driver*, this computes it over the bytes the pad *carried*,
+/// and the two agreeing is the claim.
+///
+/// `wire`, not `rgb`, and that is a decision the harness forces. `rgb` is the
+/// wire bytes unpermuted by the configured colour order; but the harness's
+/// `LedChannel` already swaps RGB into GRB before `lp-ws281x` permutes again,
+/// so the bytes on the wire *are* the frame the payload checksummed and
+/// `rgb` is that frame swapped once more. Comparing against `rgb` would
+/// therefore fail on any frame that is not grey (DD34 d, the double colour
+/// swap — filed, not fixed).
+fn pin_wire_crc(record: &crate::transcript::Record) -> String {
+    let Some(hex) = record.get("wire").and_then(serde_json::Value::as_str) else {
+        return String::new();
+    };
+    let mut hash = 0x811c_9dc5u32;
+    for pair in hex.as_bytes().chunks_exact(2) {
+        let Ok(byte) = u8::from_str_radix(std::str::from_utf8(pair).unwrap_or("zz"), 16) else {
+            return format!("<not hex: {hex}>");
+        };
+        hash ^= u32::from(byte);
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    format!("0x{hash:08x}")
+}
+
+/// Does this transcript's guest agree with its own pin capture, frame by
+/// frame? A disagreement is a problem with **this** recording, not a
+/// difference between two of them.
+fn pin_self_disagreements(t: &Transcript, side: &str) -> Result<Vec<String>> {
+    let pins = t.pin_records()?;
+    if pins.is_empty() {
+        return Ok(vec![format!(
+            "{side} transcript's payload `{}` claims a pin capture and has none",
+            t.payload.name
+        )]);
+    }
+    let claims = t.records()?;
+    let claims: Vec<_> = claims.iter().filter(|r| r.kind == "rmt-frame").collect();
+    let mut out = Vec::new();
+    if claims.len() != pins.len() {
+        out.push(format!(
+            "{side}: the guest recorded {} frames and the pad carried {}",
+            claims.len(),
+            pins.len()
+        ));
+    }
+    for (claim, pin) in claims.iter().zip(pins.iter()) {
+        let claimed = claim.get("crc").map(render_json).unwrap_or_default();
+        let observed = pin_wire_crc(pin);
+        if claimed != observed {
+            out.push(format!(
+                "{side}: frame {} — the guest claims {claimed}, the pad carried {observed}",
+                claim.get("n").map(render_json).unwrap_or_default()
+            ));
+            if out.len() > 8 {
+                out.push(format!("{side}: … and more"));
+                break;
+            }
+        }
+    }
+    Ok(out)
 }
 
 fn render_json(v: &serde_json::Value) -> String {

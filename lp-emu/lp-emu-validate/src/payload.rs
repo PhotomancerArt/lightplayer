@@ -271,6 +271,19 @@ pub struct Payload {
     /// the image is the same bytes either way, and what differs is what the
     /// operator's side did to the board first.
     pub fresh_chip: bool,
+    /// Does a recording of this payload carry a **pin capture** beside the
+    /// transcript — `<stem>.txt.pins.jsonl`, one decoded frame per line?
+    ///
+    /// Only a payload whose claim is about a wire. The runner passes
+    /// `--dump-frames file:…` to a configuration that can observe a pad,
+    /// copies the file next to the `.txt`, and names it in the sidecar's
+    /// `pins`; [`crate::transcript::Transcript::pin_records`] reads it back
+    /// and the replay compares the frames as `Pin`-class claims (E3,
+    /// approved 2026-09-07). A configuration with no pin observation —
+    /// silicon, without a logic analyser on the desk — records the console
+    /// half and says nothing about the pad, which is exactly what its
+    /// `validate.toml` grade already says.
+    pub pin_capture: bool,
     /// Why silicon cannot record this payload, when it cannot.
     ///
     /// `usb-host-absent` is the case, and the reason is the payload: an
@@ -983,6 +996,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         probes: &[],
         run_secs: None,
         fresh_chip: false,
+        pin_capture: false,
         emulator_only: None,
     },
     Payload {
@@ -1005,6 +1019,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         probes: &[],
         run_secs: None,
         fresh_chip: false,
+        pin_capture: false,
         emulator_only: None,
     },
     Payload {
@@ -1027,6 +1042,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         probes: &[],
         run_secs: None,
         fresh_chip: false,
+        pin_capture: false,
         emulator_only: None,
     },
     Payload {
@@ -1049,6 +1065,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         probes: &[],
         run_secs: None,
         fresh_chip: false,
+        pin_capture: false,
         emulator_only: None,
     },
     Payload {
@@ -1099,6 +1116,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         probes: &[],
         run_secs: None,
         fresh_chip: false,
+        pin_capture: false,
         emulator_only: None,
     },
     Payload {
@@ -1169,6 +1187,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // pair, which stops the run.
         run_secs: Some(12),
         fresh_chip: false,
+        pin_capture: false,
         emulator_only: None,
     },
     Payload {
@@ -1213,6 +1232,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         probes: &[],
         run_secs: Some(12),
         fresh_chip: false,
+        pin_capture: false,
         emulator_only: None,
     },
     Payload {
@@ -1259,6 +1279,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         ],
         run_secs: Some(6),
         fresh_chip: false,
+        pin_capture: false,
         emulator_only: Some(
             "an absent host records nothing: recording IS what a host does. On silicon this \
              payload is `unplug the board and watch the port that is no longer there`, which is \
@@ -1300,6 +1321,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // blank part produces. On silicon that means an erase before the
         // write, or the board's leftover filesystem is in the measurement.
         fresh_chip: true,
+        pin_capture: false,
         emulator_only: None,
     },
     Payload {
@@ -1336,6 +1358,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // blank part produces. On silicon that means an erase before the
         // write, or the board's leftover filesystem is in the measurement.
         fresh_chip: true,
+        pin_capture: false,
         emulator_only: None,
     },
     Payload {
@@ -1374,6 +1397,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         probes: &[],
         run_secs: None,
         fresh_chip: true,
+        pin_capture: false,
         emulator_only: None,
     },
     Payload {
@@ -1430,6 +1454,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // steady is the second, at twenty-five.
         run_secs: Some(26),
         fresh_chip: true,
+        pin_capture: false,
         emulator_only: None,
     },
     Payload {
@@ -1475,6 +1500,15 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // own timeline; `--exit-on` ends it at the done marker well before
         // the deadline.
         run_secs: Some(20),
+        // Nothing on this chip is left over between runs: the harness never
+        // touches the filesystem, and an emulated run starts on a blank part
+        // anyway.
+        fresh_chip: false,
+        // The only payload with a pin capture, and the reason the field
+        // exists: its claim is about a wire, so a recording that held only
+        // what the device said would be missing the half that can contradict
+        // it.
+        pin_capture: true,
         emulator_only: None,
     },
 ];
