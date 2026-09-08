@@ -494,7 +494,7 @@ pub fn App() -> Element {
                     // same document, and the lens's own route always reads
                     // non-play — comparing by equality would rewrite the
                     // user straight back out of `/…/play`.
-                    if let Some(target) = bound
+                    if let Some(target) = bound.clone()
                         && !target.same_session(&current)
                     {
                         if matches!(
@@ -547,6 +547,31 @@ pub fn App() -> Element {
                     if open_ended {
                         router::replace(&StudioRoute::Devices);
                         route.set(StudioRoute::Devices);
+                    }
+                }
+
+                // The HINT heals, the way the slug does (D43). The lens
+                // sync above compares with `same_session`, which ignores
+                // `?on=` on purpose — a hint appearing or being dropped
+                // must never read as a move to another document — so that
+                // comparison can never WRITE one. This is what writes it:
+                // the address should say which device is running the
+                // project, only the lens knows which, and saying it is a
+                // `replaceState`, not a navigation.
+                //
+                // It runs on any lens route, not only the shell ones: the
+                // hint is a fact about the session, and a session watched
+                // from `/p/…/play` has the same one.
+                if editor_showing && !loop_leaving.get() {
+                    let current = route.peek().clone();
+                    if let Some(target) = &bound
+                        && current.is_lens()
+                        && current.same_session(target)
+                        && current.device_hint() != target.device_hint()
+                    {
+                        let healed = current.with_device_hint(target.device_hint().cloned());
+                        router::replace(&healed);
+                        route.set(healed);
                     }
                 }
 
