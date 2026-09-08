@@ -701,7 +701,11 @@ mod tests {
              then they would have been in the ELF and nothing needed rebuilding",
             image.span.0
         );
-        assert!(image.span.1 <= memmap::DROM_MASK_BASE, "{:#010x}", image.span.1);
+        assert!(
+            image.span.1 <= memmap::DROM_MASK_BASE,
+            "{:#010x}",
+            image.span.1
+        );
 
         // The table entry for `ets_ops_table_ptr` now reads the same word at
         // its source as at its destination: the ROM's unpack loop copies the

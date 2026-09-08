@@ -1714,9 +1714,10 @@ impl Esp32C6Machine {
                 .with_peripheral::<periph::gpio::Gpio, _>(i, |g, _| g.set_strap(strap_word));
         }
         if let Some(i) = self.bus.peripheral_index("LP_CLKRST") {
-            self.bus.with_peripheral::<lp_emu_esp_common::RegFile, _>(i, |r, _| {
-                r.poke(LP_CLKRST_RESET_CAUSE, cause)
-            });
+            self.bus
+                .with_peripheral::<lp_emu_esp_common::RegFile, _>(i, |r, _| {
+                    r.poke(LP_CLKRST_RESET_CAUSE, cause)
+                });
         }
         // The cache MMU is shared state outside the snapshot, like the flash
         // part — but unlike the part it is *inside* the chip, so a reset
@@ -2358,9 +2359,7 @@ impl Esp32C6Machine {
                 self.bus.take_request()
             {
                 if self.reboot_on_reset && self.reboot(strap) {
-                    log::info!(
-                        "machine: {source} at cycle {at} — rebooting into strap {strap}"
-                    );
+                    log::info!("machine: {source} at cycle {at} — rebooting into strap {strap}");
                     matched = [0usize; 2];
                     continue;
                 }

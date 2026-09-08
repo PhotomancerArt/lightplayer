@@ -117,8 +117,7 @@ impl Gpio {
     /// Re-latch the strapping pins, as a chip reset does. The word is a
     /// read override, so this replaces the rule rather than a stored value.
     pub fn set_strap(&mut self, strap: u32) {
-        self.regs
-            .set_read_override(STRAP, 0xffff_ffff, strap);
+        self.regs.set_read_override(STRAP, 0xffff_ffff, strap);
     }
 
     /// The `out` bitmap as last written.

@@ -35,12 +35,12 @@
 //!
 //! `#[ignore]`d for the usual reason (`test_support`).
 
+use lp_emu_esp_common::Strap;
 use lp_emu_esp32c6::image::MergedImage;
 use lp_emu_esp32c6::loader::ResetCause;
 use lp_emu_esp32c6::machine::{
     AppSource, BootMode, Esp32C6Builder, Esp32C6Machine, Outcome, StopCondition, Uart0Sink,
 };
-use lp_emu_esp_common::Strap;
 use lp_emu_esp32c6::test_support::{ReferenceImage, merged_image, reference_image, skip_notice};
 
 /// Long enough for the ROM, the bootloader and the app's whole `[INIT]`
@@ -186,7 +186,10 @@ fn the_boot_log_is_silicons_line_for_line() {
         }
     };
     assert!(
-        !matches!(run.outcome, Outcome::StrictBus { .. } | Outcome::Fault { .. }),
+        !matches!(
+            run.outcome,
+            Outcome::StrictBus { .. } | Outcome::Fault { .. }
+        ),
         "{:?}",
         run.outcome
     );
@@ -211,11 +214,9 @@ fn the_boot_log_is_silicons_line_for_line() {
         "the ROM writes both consoles with the same bytes; these two disagree"
     );
 
-    let (path, silicon_text) = lp_emu_esp32c6::test_support::transcript(
-        "boot-idle-flash",
-        "silicon-esp32c6-",
-    )
-    .expect("the committed silicon boot-idle-flash transcript");
+    let (path, silicon_text) =
+        lp_emu_esp32c6::test_support::transcript("boot-idle-flash", "silicon-esp32c6-")
+            .expect("the committed silicon boot-idle-flash transcript");
     let mut silicon = boot_window(&device_lines(&silicon_text));
     // A fresh chip has no memory of a previous run. `Saved PC:` is printed
     // only when `ASSIST_DEBUG.core_0_lastpc_before_exception` is non-zero,
@@ -319,9 +320,8 @@ fn rom_up_and_direct_load_agree_on_what_the_app_sees() {
         .usb_host(lp_emu_esp32c6::machine::UsbHost::Attached { draining: true })
         .build()
         .expect("the ROM-up machine builds");
-    let outcome = rom_up.run_until(
-        &StopCondition::after_micros(GATE_US).exit_on("[INIT] Board initialized"),
-    );
+    let outcome =
+        rom_up.run_until(&StopCondition::after_micros(GATE_US).exit_on("[INIT] Board initialized"));
     assert!(
         matches!(outcome, Outcome::ExitMatched { .. }),
         "the ROM-up boot never reached the app's first line: {outcome:?}"
@@ -336,10 +336,12 @@ fn rom_up_and_direct_load_agree_on_what_the_app_sees() {
         .usb_host(lp_emu_esp32c6::machine::UsbHost::Attached { draining: true })
         .build()
         .expect("the direct machine builds");
-    let outcome = direct.run_until(
-        &StopCondition::after_micros(GATE_US).exit_on("[INIT] Board initialized"),
+    let outcome =
+        direct.run_until(&StopCondition::after_micros(GATE_US).exit_on("[INIT] Board initialized"));
+    assert!(
+        matches!(outcome, Outcome::ExitMatched { .. }),
+        "{outcome:?}"
     );
-    assert!(matches!(outcome, Outcome::ExitMatched { .. }), "{outcome:?}");
 
     // 1. The app's own segments, byte for byte in RAM and through the
     //    window. This is the whole claim: the bootloader put the same bytes
@@ -455,7 +457,10 @@ fn the_heap_ledger_is_the_same_whichever_way_the_app_arrived() {
     let elf = match reference_image(&IMAGE) {
         Ok(p) => p,
         Err(reason) => {
-            skip_notice("the_heap_ledger_is_the_same_whichever_way_the_app_arrived", &reason);
+            skip_notice(
+                "the_heap_ledger_is_the_same_whichever_way_the_app_arrived",
+                &reason,
+            );
             return;
         }
     };
@@ -521,7 +526,8 @@ fn the_heap_ledger_is_the_same_whichever_way_the_app_arrived() {
             .expect("the committed silicon transcript");
     let silicon = memory_object(&silicon_text);
     assert_eq!(
-        silicon, SILICON_MEMORY,
+        silicon,
+        SILICON_MEMORY,
         "the transcript at {} is not the one this gate was written against",
         path.display()
     );
@@ -582,7 +588,10 @@ fn the_download_strap_reaches_the_roms_console() {
         }
     };
     assert!(
-        !matches!(run.outcome, Outcome::StrictBus { .. } | Outcome::Fault { .. }),
+        !matches!(
+            run.outcome,
+            Outcome::StrictBus { .. } | Outcome::Fault { .. }
+        ),
         "{:?}",
         run.outcome
     );
@@ -653,7 +662,12 @@ fn a_reset_request_reboots_the_running_app_into_the_download_console() {
 
     let log = device_lines(&String::from_utf8_lossy(&m.uart0().bytes()));
     let banners: Vec<&String> = log.iter().filter(|l| l.starts_with(FIRST)).collect();
-    assert_eq!(banners.len(), 2, "two boots in one log:\n{}", log.join("\n"));
+    assert_eq!(
+        banners.len(),
+        2,
+        "two boots in one log:\n{}",
+        log.join("\n")
+    );
     // The first boot ran the application; the second is the ROM's console.
     let second = log
         .iter()
@@ -669,7 +683,9 @@ fn a_reset_request_reboots_the_running_app_into_the_download_console() {
         ]
     );
     assert!(
-        log[..second].iter().any(|l| l.contains("Loaded app from partition")),
+        log[..second]
+            .iter()
+            .any(|l| l.contains("Loaded app from partition")),
         "the first boot loaded the app"
     );
 }

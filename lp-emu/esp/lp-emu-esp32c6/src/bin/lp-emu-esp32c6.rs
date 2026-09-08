@@ -442,8 +442,10 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             }
             "--reset-cause" => {
                 let text = value("--reset-cause")?;
-                args.reset_cause = lp_emu_esp32c6::loader::ResetCause::parse(&text)
-                    .ok_or_else(|| format!("--reset-cause `{text}`: expected poweron or usb-uart"))?;
+                args.reset_cause =
+                    lp_emu_esp32c6::loader::ResetCause::parse(&text).ok_or_else(|| {
+                        format!("--reset-cause `{text}`: expected poweron or usb-uart")
+                    })?;
             }
             "--reboot-on-reset" => args.reboot_on_reset = true,
             "--strap" => {

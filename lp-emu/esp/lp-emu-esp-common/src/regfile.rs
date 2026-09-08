@@ -47,7 +47,6 @@ struct MirrorEntry {
     to: u32,
 }
 
-
 /// A register window that remembers what was written, with a table of the
 /// exceptions.
 #[derive(Debug)]
@@ -213,7 +212,11 @@ impl RegFile {
         let stored = self.stored(word);
         for m in &self.read_mirrors {
             if m.off == word {
-                v = if stored & m.from != 0 { v | m.to } else { v & !m.to };
+                v = if stored & m.from != 0 {
+                    v | m.to
+                } else {
+                    v & !m.to
+                };
             }
         }
         v

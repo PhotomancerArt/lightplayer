@@ -71,7 +71,8 @@ impl ImageSegment {
     /// into RAM? The bootloader's line ends `map` for these and `load` for
     /// the rest.
     pub fn is_mapped(&self) -> bool {
-        (crate::memmap::FLASH_CACHE_BASE..crate::memmap::FLASH_CACHE_BASE + crate::cache::WINDOW_LEN)
+        (crate::memmap::FLASH_CACHE_BASE
+            ..crate::memmap::FLASH_CACHE_BASE + crate::cache::WINDOW_LEN)
             .contains(&self.vaddr)
     }
 }
@@ -117,9 +118,9 @@ impl EspImage {
     /// divides an 80 MHz source, so `40MHz` is `clock div:2`.
     pub fn clock_div(&self) -> u32 {
         match self.spi_speed {
-            0 => 2,  // 40 MHz
-            1 => 1,  // 80 MHz
-            2 => 4,  // 20 MHz
+            0 => 2,   // 40 MHz
+            1 => 1,   // 80 MHz
+            2 => 4,   // 20 MHz
             0xf => 1, // 80 MHz (the "fast" encoding)
             _ => 0,
         }
@@ -429,9 +430,6 @@ mod tests {
     fn a_segment_reaching_past_the_chip_is_truncated_not_a_panic() {
         let mut chip = synthetic();
         chip.truncate(40);
-        assert!(matches!(
-            parse(&chip, 0),
-            Err(ImageError::Truncated { .. })
-        ));
+        assert!(matches!(parse(&chip, 0), Err(ImageError::Truncated { .. })));
     }
 }
