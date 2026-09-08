@@ -57,6 +57,21 @@ pub struct ConfigurationEntry {
     pub silicon_rev: Option<String>,
     #[serde(default)]
     pub board: Option<String>,
+    /// Can this configuration produce a decoded pin capture?
+    ///
+    /// **Stated, never inferred**, for the same reason trust is: silence is
+    /// not a capability. An `lp-emu:*` machine decodes the pad off its own
+    /// signal fabric and says `records_pins = true`; silicon says nothing and
+    /// therefore records none, because reading a real pad needs an instrument
+    /// nobody has put on this bench.
+    ///
+    /// Deliberately not derived from the `lp-emu:` name prefix. That would be
+    /// right by accident and wrong the first time a configuration is a board
+    /// with a logic analyser on it — which is exactly the capture the `pin`
+    /// class is waiting for
+    /// (`docs/defects/2026-09-08-a-pin-capture-is-a-property-of-the-configuration-not-the-payload.md`).
+    #[serde(default)]
+    pub records_pins: bool,
     #[serde(default)]
     pub trust: TrustTable,
 }

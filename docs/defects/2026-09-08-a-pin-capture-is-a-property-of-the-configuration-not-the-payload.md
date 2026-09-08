@@ -1,5 +1,5 @@
 ---
-status: open — found by the first silicon capture of a pin payload
+status: FIXED 2026-09-08 — `records_pins` on `[[configuration]]`
 found: 2026-09-08      # the emulator debt sweep, recording `rmt-chase` on the desk C6
 area: lp-emu/lp-emu-validate/src/replay.rs (`pin_self_disagreements`, the `PinCapture::EveryFrame` arm)
 class: gate-cannot-be-satisfied
@@ -88,3 +88,43 @@ found it. Until then
 `lp-emu/lp-emu-validate/tests/m7_replays.rs::the_silicon_chase_agrees_frame_for_frame`
 pins the half that is real — structural equality against the emulator — and
 names these two problems as this defect rather than as a result.
+
+## Closed, 2026-09-08
+
+Done as the shape above describes, the same day it was filed.
+
+`ConfigurationEntry` gains `records_pins`, `#[serde(default)]` false, and
+`validate.toml` states it on `lp-emu:esp32c6:t1` and `:t2` and nowhere else.
+`replay()` reads it out of the embedded table for each side — the file is
+compiled in with `include_str!`, so this needed no plumbing and no sidecar
+change, and no transcript had to be re-recorded.
+
+Where a side records none, the pad is not compared and the report says so **in
+the table**:
+
+```text
+  class             compared     equal    differ
+  timing                  11         2         9
+  pin                      3         3         0
+  structural            3073      3073         0
+  pin capture      not compared   — silicon:esp32c6 records none
+```
+
+The row is labelled `pin capture` rather than `pin` for a reason worth
+keeping: the `pin` **class** was compared on the line above and agreed.
+`ws281x-telemetry`'s trips, skips and errors are pin-class claims the guest
+makes about its own driver and they arrive in the console. What is missing is
+the decoded **pad** — a different reading of the same pin, and the only one an
+instrument could confirm. Two rows saying "pin" with different answers would
+have been worse than the failure this replaces.
+
+The silicon chase now replays clean: 3,073 structural comparisons equal, the
+pin class compared and equal, the pad not compared and named.
+
+**Gates.** `m3`–`m6` replays re-run unchanged (7 / 4 / 9 / 12). `m7_replays`
+is 9 tests, three of them this rule: the silicon chase reports the pad as not
+compared and passes; two emulator grades that both record pins still compare
+the pad as before, with no note; and `validate.toml` states the capability on
+exactly the two configurations that have a modelled fabric. That last one is
+what keeps the rule stated — a board with a logic analyser on it sets `true`
+and needs no code change.
