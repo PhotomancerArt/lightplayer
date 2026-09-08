@@ -99,20 +99,33 @@ pub fn set_name(fs: &dyn LpFs, name: &str) -> Result<(), LibraryError> {
     write(fs, &manifest)
 }
 
-/// Set (or clear) the project's hardware target — the Hardware settings
-/// row's write, and the first time the library writes this field.
+/// Set the project's hardware target — the Hardware settings row's write,
+/// and the first time the library writes this field.
 ///
 /// Canonical read-modify-write like [`set_name`]: the strict reader refuses
 /// unknown fields, so the rewrite is lossless by construction and the
 /// manifest's bytes change in exactly one place. NOT a format bump — the
-/// field has been in `project.json` since 2026-08-05 and an absent one
-/// still reads as Desktop.
+/// field has been in `project.json` since 2026-08-05.
 ///
-/// `None` clears the key, which is the same target as `lightplayer/desktop`
-/// and is how a project written before targets meant anything looks.
+/// `None` is the DESKTOP CHOICE, and it writes
+/// [`DESKTOP_BOARD_ID`](super::project_target::DESKTOP_BOARD_ID)
+/// explicitly rather than clearing the key (Yona's ruling, 2026-09-08).
+/// Choosing hardware is a statement, and a project that says
+/// `lightplayer/desktop` has made it; an empty key is indistinguishable
+/// from a project that was never asked, which is what every project
+/// written before 2026-09-07 is. Creation writes the same explicit value
+/// (`LibraryStore::install_package`), so the two agree.
+///
+/// Reading is unchanged and stays lenient: an ABSENT key still reads as
+/// Desktop ([`ProjectTarget`](super::project_target::ProjectTarget)), so
+/// nothing already on disk needs rewriting.
 pub fn set_target(fs: &dyn LpFs, target: Option<&str>) -> Result<(), LibraryError> {
     let mut manifest = read(fs)?;
-    manifest.target = target.map(str::to_string);
+    manifest.target = Some(
+        target
+            .unwrap_or(super::project_target::DESKTOP_BOARD_ID)
+            .to_string(),
+    );
     write(fs, &manifest)
 }
 
@@ -257,12 +270,18 @@ mod tests {
 
     /// D41/PD17, the library's first write of `target`: the Hardware row
     /// patches one key, everything else survives, and choosing Desktop
-    /// CLEARS the key rather than writing a second spelling of the default.
+    /// WRITES the default explicitly (Yona's ruling, 2026-09-08) rather
+    /// than clearing the key — a project that was asked and answered
+    /// "Desktop" is not the same as one that was never asked, even though
+    /// both RUN as Desktop.
     #[test]
-    fn set_target_patches_only_the_target_and_desktop_clears_it() {
+    fn set_target_patches_only_the_target_and_desktop_is_written_explicitly() {
         let fs = LpFsMemory::new();
         fs.write_file(MANIFEST_PATH.as_path(), MANIFEST).unwrap();
         let minted = ensure_uid(&fs, &[7u8; 16]).unwrap();
+
+        // Never asked: the key is absent, and that still reads as Desktop.
+        assert_eq!(read_manifest(&fs).unwrap().target, None);
 
         set_target(&fs, Some("seeed/xiao-esp32-c6")).unwrap();
         let fields = read_manifest(&fs).unwrap();
@@ -272,8 +291,20 @@ mod tests {
 
         set_target(&fs, None).unwrap();
         let fields = read_manifest(&fs).unwrap();
-        assert_eq!(fields.target, None, "Desktop is the absence of a target");
+        assert_eq!(
+            fields.target.as_deref(),
+            Some(super::super::project_target::DESKTOP_BOARD_ID),
+            "the Desktop choice is stated, not implied"
+        );
         assert_eq!(fields.name.as_deref(), Some("demo"));
+
+        // …and it is the same value creation writes, so a created project
+        // and a project switched back to Desktop read alike.
+        set_target(&fs, Some(super::super::project_target::DESKTOP_BOARD_ID)).unwrap();
+        assert_eq!(
+            read_manifest(&fs).unwrap().target.as_deref(),
+            Some(super::super::project_target::DESKTOP_BOARD_ID),
+        );
     }
 
     /// The Hardware row's write goes through the strict reader on the way
@@ -303,6 +334,19 @@ mod tests {
         assert_eq!(fields.description, before.description);
         assert_eq!(fields.created, before.created);
         assert_eq!(fields.kind, before.kind);
+
+        // The Desktop choice takes the same road back in: an explicit
+        // value, canonical bytes, nothing else touched.
+        set_target(&fs, None).unwrap();
+        let after = fs.read_file(MANIFEST_PATH.as_path()).unwrap();
+        let text = core::str::from_utf8(&after).unwrap();
+        let manifest = lpc_model::ProjectManifest::read_json(text)
+            .unwrap_or_else(|e| panic!("manifest rejected after a Desktop write: {e}\n{text}"));
+        assert_eq!(manifest.write_json(), text, "canonical bytes");
+        assert_eq!(
+            manifest.target.as_deref(),
+            Some(super::super::project_target::DESKTOP_BOARD_ID)
+        );
     }
 
     #[test]

@@ -577,14 +577,27 @@ impl StudioController {
             .map(|row| row.uid.clone())
             .collect();
         let fs = fs.borrow();
+        // A sidecar this snapshot cannot read does NOT unmake the sim: the
+        // row says it is one, and the record this tab already holds is the
+        // better answer than nothing. Dropping it here was an eternal
+        // "Opening…" — `sim_session_for` reads this map, so a sim without
+        // an entry cannot be powered on, and a held lens on it waits for a
+        // runtime nobody will ever start (2026-09-08 outage). The one thing
+        // that removes an entry is the row going away, which is Forget.
+        let held = std::mem::take(&mut self.device_sims);
         self.device_sims = uids
             .into_iter()
-            .filter_map(|uid| crate::read_sim_record(&*fs, &uid).map(|record| (uid, record)))
+            .filter_map(|uid| {
+                crate::read_sim_record(&*fs, &uid)
+                    .or_else(|| held.get(&uid).cloned())
+                    .map(|record| (uid, record))
+            })
             .collect();
     }
 
     /// The session a sim device would run as, or `None` when this device is
-    /// not a sim (no sidecar) or has no uid to be keyed on.
+    /// not a sim (no sidecar, no `sim` registry row) or has no uid to be
+    /// keyed on.
     fn sim_session_for(&self, device: crate::DeviceId) -> Option<crate::SimSession> {
         let entry = self
             .devices
@@ -598,16 +611,60 @@ impl StudioController {
             .as_ref()
             .map(|uid| uid.0.clone())
             .or_else(|| self.device_registry_key(device))?;
-        let sidecar = self.device_sims.get(&uid)?;
+        let (target, base_mac) = self.sim_backing_facts(&uid)?;
         Some(crate::SimSession {
             uid,
-            target: sidecar.target.clone(),
+            target,
             display_name: entry.title(),
-            base_mac: sidecar.base_mac.clone(),
+            base_mac,
             // PD12: a device asks for the GPU tier; the worker answers with
             // what it granted, and the band says which.
             tier: crate::SimTier::Gpu,
         })
+    }
+
+    /// What a sim's runtime has to be started with — the board it wears and
+    /// the minted MAC it reports — read from its sidecar, or rebuilt from
+    /// its registry row when the sidecar is unreadable.
+    ///
+    /// The row is not a second source of truth, it is the SAME two facts
+    /// written a second time: `new_sim_record` puts the target in
+    /// `board_id` and the minted MAC in `hardware_id`. Reading them back
+    /// costs nothing and is the difference between a sim that can be
+    /// powered on and one that can only be waited for.
+    fn sim_backing_facts(&self, uid: &str) -> Option<(String, String)> {
+        if let Some(sidecar) = self.device_sims.get(uid) {
+            return Some((sidecar.target.clone(), sidecar.base_mac.clone()));
+        }
+        let row = self
+            .home_inputs
+            .as_ref()?
+            .registered
+            .iter()
+            .find(|row| row.uid == uid && row.transport == crate::SIM_TRANSPORT)?;
+        // `efuse:<the minted base MAC>` — the same text the sidecar holds,
+        // validated rather than trusted so a hand-edited row cannot boot a
+        // runtime claiming an identity that is not a MAC.
+        let base_mac = row.hardware_id.as_deref()?.strip_prefix("efuse:")?;
+        crate::app::places::HardwareId::from_base_mac(base_mac)?;
+        Some((row.board_id.clone()?, base_mac.to_ascii_lowercase()))
+    }
+
+    /// Whether the device remembered as `uid` is a SIM — a runtime this tab
+    /// starts — rather than silicon on a desk.
+    ///
+    /// Either witness is enough. The sidecar is the record; the registry
+    /// row's `transport` is what survives a sidecar this tab could not read
+    /// back, and reading only the sidecar meant an open skipped the
+    /// power-on and then waited for it forever.
+    fn is_sim_device(&self, uid: &str) -> bool {
+        self.device_sims.contains_key(uid)
+            || self.home_inputs.as_ref().is_some_and(|inputs| {
+                inputs
+                    .registered
+                    .iter()
+                    .any(|row| row.uid == uid && row.transport == crate::SIM_TRANSPORT)
+            })
     }
 
     /// Power a sim on, if this gesture is a `Connect` at one.
@@ -2418,9 +2475,13 @@ impl StudioController {
                         "open this project to choose the hardware it runs on".to_string(),
                     ));
                 }
-                // Desktop is what an absent target has always meant, so it
-                // writes no key: one spelling on disk, and a project that
-                // says nothing is not a project someone forgot to answer.
+                // Desktop is a CHOICE and is written as one (Yona's
+                // ruling, 2026-09-08): `set_target` puts
+                // `lightplayer/desktop` in the manifest, the same value
+                // creation writes. An absent key still reads as Desktop,
+                // so nothing on disk needs rewriting — but a project that
+                // was asked and answered no longer looks like one that was
+                // never asked.
                 let target = crate::app::library::ProjectTarget::from_manifest(target.as_deref());
                 let written = match &target {
                     crate::app::library::ProjectTarget::Desktop => None,
@@ -2696,7 +2757,7 @@ impl StudioController {
         // held behind a board that was Ready a moment ago. Attach-or-
         // connect for silicon is `open_device_lens`'s own job, and it has
         // been doing it since the device route existed.
-        let is_sim = self.device_sims.contains_key(&uid);
+        let is_sim = self.is_sim_device(&uid);
         if is_sim && let Some(device) = self.devices.device_for_key(&uid).map(|device| device.id) {
             self.execute_devices_op(crate::DevicesOp::on_sim(crate::DeviceAction::Connect {
                 device,
@@ -2907,6 +2968,16 @@ impl StudioController {
         target: &crate::app::library::ProjectTarget,
     ) -> Result<String, UiError> {
         let target_id = target.board_id().to_string();
+        // The remembered sims, READ FIRST. A cold page has an empty map
+        // until the first library settle fills it, and this resolution
+        // reads "no sim of this target" off an empty map and mints one —
+        // so every cold open left a second, third, fourth record behind
+        // for the same tab. One settle here and the answer is the
+        // library's; a settle that is not due costs nothing.
+        if self.device_sims.is_empty() {
+            self.request_library_refresh();
+            self.settle_library().await;
+        }
         let of_target: Vec<String> = self
             .device_sims
             .iter()
@@ -3815,8 +3886,41 @@ impl StudioController {
         let Some(uid) = self.pending_device_lens.clone() else {
             return;
         };
+        // THE WAKE-UP. A hold waits for a device to become ready; a sim
+        // only ever becomes ready because this tab started it. Nothing else
+        // will, so if the sim under a held lens is off — the open's own
+        // power-on was skipped, the page reloaded and the workers died with
+        // it, or somebody used Power off — this is where it goes back on.
+        // Without it the hold is eternal: the runtime never boots, so it
+        // never says hello, so the attach below never fires, and the card
+        // reads "Opening…" for as long as anyone watches (2026-09-08
+        // outage). Silicon is untouched: a board is on a desk, and waiting
+        // for it is the correct behaviour.
+        match self.wake_held_sim(&uid) {
+            SimWake::NotOurs | SimWake::AlreadyRunning => {}
+            SimWake::Started => return,
+            SimWake::Refused(reason) => {
+                let name = self
+                    .devices
+                    .device_for_key(&uid)
+                    .map(|device| device.title())
+                    .unwrap_or_else(|| "The sim".to_string());
+                self.release_hold_on_a_sim_that_did_not_start(
+                    &uid,
+                    &name,
+                    "its runtime could not be started",
+                    &reason,
+                );
+                return;
+            }
+        }
         if let Some((name, detail)) = self.sim_that_did_not_start(&uid) {
-            self.release_hold_on_a_sim_that_did_not_start(&uid, &name, &detail);
+            self.release_hold_on_a_sim_that_did_not_start(
+                &uid,
+                &name,
+                "its runtime gave up before it said hello",
+                &detail,
+            );
             return;
         }
         if self.device_lens_attachment(&uid).is_err() {
@@ -3843,6 +3947,52 @@ impl StudioController {
                     );
                 }
             }
+        }
+    }
+
+    /// Start the sim a held lens is waiting on, if it is a sim and it is
+    /// off.
+    ///
+    /// The power-on is the transport's, not the fold's, on purpose: the
+    /// fold's `Connect` needs a roster `DeviceId`, and the states this has
+    /// to recover from include "the row is there but the roster has not
+    /// adopted it yet". Arming the sweep is the whole of the handover —
+    /// the link reaches the model exactly as it does from the card's own
+    /// Power on.
+    fn wake_held_sim(&mut self, uid: &str) -> SimWake {
+        let Some(sim) = self.sim_transport.clone() else {
+            return SimWake::NotOurs;
+        };
+        if !self.is_sim_device(uid) {
+            return SimWake::NotOurs;
+        }
+        if sim.is_powered(uid) {
+            return SimWake::AlreadyRunning;
+        }
+        let Some((target, base_mac)) = self.sim_backing_facts(uid) else {
+            return SimWake::Refused(
+                "its record does not say what board it is or what identity it reports".to_string(),
+            );
+        };
+        let display_name = self
+            .devices
+            .device_for_key(uid)
+            .map(|device| device.title())
+            .unwrap_or_else(|| crate::sim_device_name(&target));
+        let session = crate::SimSession {
+            uid: uid.to_string(),
+            target,
+            display_name,
+            base_mac,
+            tier: crate::SimTier::Gpu,
+        };
+        match sim.power_on(session) {
+            Ok(()) => {
+                self.device_sweep_pending = true;
+                self.mark_dirty();
+                SimWake::Started
+            }
+            Err(error) => SimWake::Refused(error),
         }
     }
 
@@ -3929,13 +4079,19 @@ impl StudioController {
     /// open's own Retry can start it again — a "powered" entry with no
     /// runtime behind it could never be powered on again), and hand the
     /// opening frame its verdict, naming the device.
-    fn release_hold_on_a_sim_that_did_not_start(&mut self, uid: &str, name: &str, detail: &str) {
+    fn release_hold_on_a_sim_that_did_not_start(
+        &mut self,
+        uid: &str,
+        name: &str,
+        why: &str,
+        detail: &str,
+    ) {
         self.pending_device_lens = None;
         let message = format!("{name} did not start");
         self.push_log(UiLogDraft::new(
             UiLogLevel::Warn,
             UiLogOrigin::Studio,
-            format!("{message}: its runtime gave up before it said hello ({detail}); powered off"),
+            format!("{message}: {why} ({detail}); powered off"),
         ));
         self.power_off_sim(Some(uid.to_string()));
         if let Some(pending) = self.pending_open.take() {
@@ -5235,6 +5391,23 @@ struct LensFacts {
     name: String,
     /// The endpoint rung, for the transport fork (`sim:` vs a port).
     endpoint: Option<String>,
+}
+
+/// What [`StudioController::wake_held_sim`] did about the device a held
+/// lens is waiting on.
+#[derive(Debug, PartialEq, Eq)]
+enum SimWake {
+    /// Not a sim (or this build runs none): waiting is the right answer.
+    NotOurs,
+    /// A sim, already running: whatever the hold is waiting for, it is not
+    /// a power-on.
+    AlreadyRunning,
+    /// A sim that was off and is now booting. The hold stands; the boot is
+    /// what it was waiting for.
+    Started,
+    /// A sim that cannot be started at all, with the reason. The hold has
+    /// to END — nothing is coming.
+    Refused(String),
 }
 
 #[cfg(test)]
