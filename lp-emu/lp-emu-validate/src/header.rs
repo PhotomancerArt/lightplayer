@@ -347,9 +347,8 @@ mod tests {
             "an absent sha is not written at all: {without}"
         );
 
-        h.firmware_sha256 = Some(
-            "61027da9eabbf137a2f3ed5846350293f2bc79fea91fd9ee5592fa9f4aa16ba8".to_string(),
-        );
+        h.firmware_sha256 =
+            Some("61027da9eabbf137a2f3ed5846350293f2bc79fea91fd9ee5592fa9f4aa16ba8".to_string());
         let with = h.to_json().unwrap();
         assert_eq!(
             TranscriptHeader::from_json(&with)
