@@ -40,11 +40,82 @@ code identical to the S3's and the classic's, guarded by
 emulator gives you. **The walk's claim rests on the two agreeing with each
 other and with the oracle.**
 
-<!-- WALK RESULT -->
+### The run
+
+`just walk-esp32c6-emu`, 2026-09-08, on the tree at `194344c33`, ROM-up from
+a merged image with sha256 `0f7c4523…6eac6` (espflash 3.3.0):
+
+```text
+===== COMPARISON =====
+  pad 18: 1110 frame(s) decoded, 1109 lit, 1 distinct lit frame(s)
+PASS: the frame is byte-identical on all three readings (384 hex chars).
+  [OUT] dump == pad 18 == [ORACLE] rgb
+
+emu: esp32c6 rom-up boot, grade lp-emu:esp32c6:t1, usb-serial-jtag on 127.0.0.1:5597
+emu: reached its deadline — 8000000 us emulated, 857789067 instructions
+emu: no unmapped accesses
+```
+
+The three readings, in full:
+
+| reading | value |
+|---|---|
+| `[OUT] dump frame=31` | `crc=0x55772254`, `rgb=324a0208376a1c28…4c2d05` |
+| pad 18, first lit frame (`n=1`, at 1.973 s of emulated time) | 64 LEDs, 1536 bits, 0 errors, signal `RMT_SIG_0`, `rgb=324a0208376a1c28…4c2d05` |
+| `[ORACLE] rgb` (wasmtime) | `crc=0x55772254`, `rgb=324a0208376a1c28…4c2d05` |
+| `[ORACLE-RV32] rgb` (`lpvm-native` rv32 under `rt_emu`) | identical — `[ORACLE-DIFF] 0 differing bytes of 192` |
+
+Four things in that block are worth more than the PASS.
+
+**`1 distinct lit frame`** of 1,109. The project is clock-free, so a render
+that is a function of the project alone must produce one frame forever; the
+walk asserts that rather than assuming it, because comparing a single frame
+to the oracle when the frames differ would be luck rather than evidence.
+
+**The two readings are of different things.** `[OUT] dump frame=31` is the
+firmware's record of what it handed the driver, taken 30 frames after the
+first lit one (the deferral is on purpose — a dump printed into the
+post-compile log burst is dropped end to end). The pad's frame is `n=1` at
+1.97 s, decoded from a waveform. They agree, so what the render produced is
+what left the chip.
+
+**`no unmapped accesses`** over the whole boot, upload, compile and render.
+An address no peripheral claims reads zero and the guest believes it; a run
+that ends well with a hundred of those has told you less than it looks like.
+
+**`[ORACLE-DIFF] 0 differing bytes of 192`.** The two host engines share
+nothing below the project file, and one of them is the same code generator
+the C6 itself JITs, on the same ISA.
+
 
 ## 2. Every gate, beside silicon's figure
 
-<!-- GATE TABLE -->
+| # | gate | result |
+|---|---|---|
+| **G8-1** | `just walk-esp32c6-emu` green end to end | **MET** — PASS above, from a clean tree, ROM-up |
+| **G8-2** | the frame dump equals the pin decoder's frame | **MET** — 192 of 192 bytes, and both equal the oracle |
+| **G8-3** | heap figures equal the last walk's for the same commit | **MET** — see below |
+| **G8-4** | `just heap-budget-check` passes with the emulator as the C6 source | **MET** — `heap-budget-check-chips` green; the required job's `check` prints a named SKIP with no image |
+
+G8-3 in figures. `just heap-budget-check-chips` on this tree, beside the
+committed silicon capture (`boot-idle-flash`, `735af98ae`) and beside what
+M6 P5 measured on the emulator at that commit:
+
+| figure | this tree (emulator) | M6 P5 (emulator, `735af98ae`) | silicon (`735af98ae`) |
+|---|---:|---:|---:|
+| `totalBytes` | 325,536 | 325,536 | 325,536 |
+| `usedBytes` | 60,432 | 60,432 | 60,440 |
+| `freeBytes` | 265,104 | 265,104 | 265,096 |
+| `largestFreeBlock` | 198,876 | 198,876 | 198,886 |
+| `[stack]` high-water | 11,908 B | 11,908 B | 11,908 B |
+| of a stack of | 71,152 B | 71,512 B | 71,512 B |
+
+The first four are byte-identical between this tree's image and the one the
+transcripts were recorded against, which is what G8-3 asks. The stack TOTAL
+moved 360 B with the tree — a linker fact, gated exactly on today's value —
+and the high-water did not move at all. The gap to silicon is §7.1's eight
+bytes, unchanged.
+
 
 ## 3. Timing: what the numbers are, and why none of them is a gate
 
@@ -126,7 +197,18 @@ source", for the full rules; the short version:
   paths' idle heap byte-identical, so the bootloader would add seconds of wall
   clock and nothing to the answer.
 
-<!-- HEAP TABLE -->
+```text
+heap-budget: booting esp32c6 (esp32c6,server,radio) on lp-emu:esp32c6:t1
+  ok: totalBytes: 325536          ok: usedBytes: 60432
+  ok: freeBytes: 265104           ok: largestFreeBlock: 198876
+  ok: stackTotal: 71152           ok: stackHighWater: 11908 B (band 11400..12500)
+  silicon reference (735af98ae, boot-idle-flash):
+    freeBytes: silicon 265096 / this tree 265104
+    usedBytes: silicon 60440  / this tree 60432
+    totalBytes: silicon 325536 / this tree 325536
+    largestFreeBlock: silicon 198886 / this tree 198876
+```
+
 
 ## 5. ROM-up or direct load: which path the walk runs, and why
 
