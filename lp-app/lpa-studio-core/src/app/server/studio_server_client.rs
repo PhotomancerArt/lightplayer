@@ -26,16 +26,6 @@ use crate::{
     LoadedProjectChoice, ProjectInventorySummary, UiError, UiLogDraft, UiLogLevel, UiLogOrigin,
 };
 
-/// Where the editor lens's request ids start on a borrowed roster wire.
-///
-/// The roster model and its coarse effects number their frames from 1 in
-/// small `u32` counters, and a reply to one of them (a push's trailing
-/// "what are you running now?") can still be in flight when the lens takes
-/// the port. Starting the lens above the whole `u32` range keeps that reply
-/// the roster's (it reaches the fold through the lens tap) instead of the
-/// lens's first answer.
-const LENS_REQUEST_ID_BASE: u64 = 1 << 32;
-
 pub struct StudioServerClient {
     client: LpClient<Box<dyn ClientIo>>,
     protocol: String,
@@ -110,8 +100,9 @@ impl StudioServerClient {
     /// Carries a total per-request deadline like every hardware client:
     /// real firmware can drop a response while heartbeating, and only a
     /// total bound in the correlation layer turns that into an error
-    /// instead of an unbounded wait. Its request ids start at
-    /// [`LENS_REQUEST_ID_BASE`], above the roster's own counters.
+    /// instead of an unbounded wait. Its request ids come from
+    /// [`LpClient::on_borrowed_wire`], above the roster's own counters and
+    /// above every earlier conversation on the same wire.
     pub fn from_lens_io(
         io: Box<dyn ClientIo>,
         deadline: lpa_client::RequestDeadline,
@@ -119,7 +110,7 @@ impl StudioServerClient {
     ) -> Self {
         Self {
             client: LpClient::new(io)
-                .with_request_ids_from(LENS_REQUEST_ID_BASE)
+                .on_borrowed_wire()
                 .with_request_deadline(deadline),
             protocol: protocol.into(),
             pending_logs: Rc::new(RefCell::new(Vec::new())),

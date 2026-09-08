@@ -4,7 +4,7 @@ found: 2026-09-08      # ci — Validate (x64) on main (5aa8dae55), after the P3
 fixed: 70b9f352e
 area: lp-app/lpa-client/src/protocol_session.rs (response_disposition)
 class: shared-namespace-collision
-related: [2026-08-24-request-idle-budget-blind-to-dropped-responses.md, lp-app/lpa-devices/src/activity/identify.rs, lp-app/lpa-studio-core/src/app/devices/shared_link_client_io.rs, lp2025/2026-09-07-0118-studio-emulated-boards]
+related: [2026-08-24-request-idle-budget-blind-to-dropped-responses.md, lp-app/lpa-devices/src/activity/identify.rs, lp-app/lpa-studio-core/src/app/devices/shared_link_client_io.rs, lp2025/2026-09-07-0118-studio-emulated-boards, 9fa574ea8]
 ---
 # A hello the device model asked for became a push's answer, because they numbered their requests from the same 1
 

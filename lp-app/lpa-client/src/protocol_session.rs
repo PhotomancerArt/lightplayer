@@ -3,7 +3,51 @@
 //! Keeping this separate lets host and browser adapters share correlation
 //! behavior even when their I/O mechanics differ.
 
+use core::sync::atomic::{AtomicU64, Ordering};
+
 use lpc_wire::{ClientRequest, WireServerMessage, WireServerMsgBody};
+
+/// Where the id space of a conversation on a BORROWED wire starts.
+///
+/// A coarse effect (push, remove, manifest stamp) and the editor lens both
+/// take a device's wire away from the model's pump for the length of one
+/// conversation. The model was already talking on that wire with ids of
+/// its own — the identify hello re-ask counts from 1 — and the board's
+/// answer to its last ask can still be in the buffer when the borrow
+/// starts. A conversation that also counted from 1 would read that answer,
+/// find the id it is waiting for, and hand a `Hello` back as the reply to
+/// `project.list_loaded` (the flake this constant exists to make
+/// impossible: CI, 2026-09-07).
+///
+/// The model and its coarse effects number their frames from 1 in small
+/// `u32` counters, so starting far above the whole `u32` range makes every
+/// straggler of theirs classify as [`ResponseDisposition::PriorOwner`] — a
+/// quiet discard, and for the lens still the roster's own evidence through
+/// the lens tap — whatever the timing was.
+pub const BORROWED_WIRE_REQUEST_ID_BASE: u64 = 1 << 32;
+
+/// How far apart two borrowed-wire conversations' id spaces sit.
+///
+/// The base alone only separates a conversation from the MODEL. Two
+/// conversations in a row on the same wire (a push, then a removal) would
+/// share one id space, and a straggler from the first could land on the id
+/// the second is waiting for — the same collision one level up. So each
+/// conversation takes the next stride, and no conversation ever mints an
+/// id an earlier one could have used. 16.7 M requests per conversation is
+/// far past any conversation this protocol has (a chunked write of a large
+/// project is thousands), and a `u64` holds ~2^40 conversations.
+const BORROWED_WIRE_ID_STRIDE: u64 = 1 << 24;
+
+/// The next unused borrowed-wire id space. Process-global because the
+/// wires are: two studios in one process would still each need their own.
+static NEXT_BORROWED_WIRE_BASE: AtomicU64 = AtomicU64::new(BORROWED_WIRE_REQUEST_ID_BASE);
+
+/// Claim the next borrowed-wire id space, for a conversation taking a
+/// device's wire over from the model's pump (or from an earlier
+/// conversation). See [`BORROWED_WIRE_REQUEST_ID_BASE`].
+pub fn next_borrowed_wire_request_id_base() -> u64 {
+    NEXT_BORROWED_WIRE_BASE.fetch_add(BORROWED_WIRE_ID_STRIDE, Ordering::Relaxed)
+}
 
 /// How many abandoned request ids the session remembers for stale-response
 /// classification. Late frames of an abandoned request arrive during the
@@ -81,10 +125,19 @@ impl ProtocolSession {
     /// session is waiting on. Frames the server sends on its OWN initiative
     /// (a hello, a heartbeat, a log) are the ones that make the collision
     /// dangerous, because they can appear at ANY time, so they are ruled out
-    /// as answers before the id is consulted at all
+    /// as answers before the id is consulted for a MATCH
     /// ([`ResponseDisposition::ServerOriginated`]). The single exception is
     /// a hello the client ASKED for: `Hello` is both the bootstrap
     /// announcement and the response to [`ClientRequest::Hello`].
+    ///
+    /// A response-shaped id is still consulted first for one thing: whether
+    /// it predates this session's id space entirely
+    /// ([`ResponseDisposition::PriorOwner`]). A wire handed over from a
+    /// previous owner (the roster model's pump, or an earlier borrow) can
+    /// still be carrying that owner's OWN server-originated straggler — its
+    /// unanswered identify hello, say — and that frame is the previous
+    /// owner's business, not this session's event stream, whether or not it
+    /// happens to look like an answer.
     pub fn response_disposition(
         &self,
         response: &WireServerMessage,
@@ -96,16 +149,16 @@ impl ProtocolSession {
             ResponseDisposition::Matched
         } else if response.id == 0 {
             ResponseDisposition::Unsolicited
+        } else if response.id < self.first_request_id {
+            ResponseDisposition::PriorOwner {
+                response_id: response.id,
+            }
         } else if !answers_anything {
             ResponseDisposition::ServerOriginated {
                 response_id: response.id,
             }
         } else if self.abandoned_request_ids.contains(&response.id) {
             ResponseDisposition::StaleAbandoned {
-                response_id: response.id,
-            }
-        } else if response.id < self.first_request_id {
-            ResponseDisposition::PriorOwner {
                 response_id: response.id,
             }
         } else {

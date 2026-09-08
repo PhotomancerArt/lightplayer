@@ -1438,6 +1438,55 @@ fw-esp32c6-size-check margin="65536": install-rv32-target
     # lp-fw/fw-esp32c6/partitions.csv.
     just _fw-size-check esp32c6 esp32c6 {{ c6_flash_size }} {{ fw_esp32c6_elf }} 3145728 {{ margin }} \
         "See docs/adr/2026-07-28-esp32c6-flash-budget.md."
+    just fw-esp32c6-rodata-layout-check
+
+# The image just linked must carry `build.rs`'s MERGED rodata layout, not
+# esp-hal's stock one.
+#
+# esp-hal's `ld/sections/rodata.x` defines `.flash.appdesc`, `.rodata_merge`,
+# `.rodata` and `.rodata.wifi` as four output sections; `build.rs` replaces it
+# with one `.rodata`, because espflash turns the gaps between those sections
+# into extra ROM-mapped image segments and the ESP32 bootloader asserts
+# `rom_index < 2`. Until 2026-09-08 that patch could silently miss on a cold
+# target dir and the stock layout would link instead
+# (docs/defects/2026-09-08-cold-target-dir-links-esp-hals-stock-rodata.md).
+# `build.rs` now fails the build rather than skip, so this is the second line
+# of defence — it reads the artefact instead of trusting the recipe, which is
+# what the defect turned out to need.
+#
+# Two signatures of the stock script, either one enough: a `.rodata_merge` or
+# `.rodata.wifi` output section exists, or `.flash.appdesc` is placed BELOW
+# `.rodata` (stock puts it first in the region; under the patch it is an
+# orphan and lands after).
+fw-esp32c6-rodata-layout-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    table="$(python3 scripts/emu/elf-section-digest.py {{ fw_esp32c6_elf }})"
+    # Drop the `[ 8]` / `[10]` index column before splitting: it is one awk
+    # field when the index is two digits and two when it is one, which silently
+    # moves every column after it. Normalised, $1 is the name and $3 the addr.
+    rows="$(echo "$table" | sed -E 's/^ *\[ *[0-9]+\] *//')"
+    # BSD awk on macOS has no `strtonum`, so the hex address comes out as
+    # written and the shell converts it.
+    addr_of() { echo "$rows" | awk -v n="$1" '$1 == n { print $3; exit }'; }
+    stock="$(echo "$rows" | awk '$1 == ".rodata_merge" || $1 == ".rodata.wifi" { print $1 }' | tr '\n' ' ')"
+    rodata="$(addr_of .rodata)"
+    appdesc="$(addr_of .flash.appdesc)"
+    out_of_order=0
+    if [ -n "$rodata" ] && [ -n "$appdesc" ] && [ "$((appdesc))" -lt "$((rodata))" ]; then
+        out_of_order=1
+    fi
+    if [ -n "$stock" ] || [ "$out_of_order" -eq 1 ]; then
+        echo "fw-esp32c6-rodata-layout-check: this image has esp-hal's STOCK rodata layout." >&2
+        [ -n "$stock" ] && echo "  stock-only sections present: $stock" >&2
+        echo "  lp-fw/fw-esp32c6/build.rs's rodata.x patch did not reach this link." >&2
+        echo "  espflash will emit >2 ROM segments and the bootloader will assert" >&2
+        echo "  'unpack_load_app, bootloader_utility.c:762 (rom_index < 2)'." >&2
+        echo "  See docs/defects/2026-09-08-cold-target-dir-links-esp-hals-stock-rodata.md." >&2
+        echo "$rows" | grep -E "rodata|appdesc" >&2
+        exit 1
+    fi
+    echo "fw-esp32c6-rodata-layout-check: one merged .rodata section, appdesc after it — patch applied"
 
 # Drift checks: the manifest core embedded in a built firmware must match the
 # checked-in expected fixture (provenance fields stripped). The firmware

@@ -333,7 +333,7 @@ impl DeviceTransport for SimDeviceTransport {
                     fallback_storage_id,
                 } => {
                     let io = io.ok_or_else(|| "the sim has no channel".to_string())?;
-                    let mut client = lpa_client::LpClient::new(io);
+                    let mut client = lpa_client::LpClient::new(io).on_borrowed_wire();
                     let mut report = |label: String, percent: Option<u8>| progress(label, percent);
                     let report = lpa_client::push_project(
                         &mut client,
@@ -353,7 +353,7 @@ impl DeviceTransport for SimDeviceTransport {
                     fallback_storage_id,
                 } => {
                     let io = io.ok_or_else(|| "the sim has no channel".to_string())?;
-                    let mut client = lpa_client::LpClient::new(io);
+                    let mut client = lpa_client::LpClient::new(io).on_borrowed_wire();
                     let mut report = |label: String, percent: Option<u8>| progress(label, percent);
                     let report =
                         lpa_client::remove_project(&mut client, &fallback_storage_id, &mut report)
