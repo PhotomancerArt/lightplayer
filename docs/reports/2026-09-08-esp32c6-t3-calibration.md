@@ -343,7 +343,10 @@ Every kernel is bracketed by `mpccr` **and** by SYSTIMER microseconds
 (`embassy_time::Instant`, Unit0 at XTAL/2.5 = 16 MHz), the microsecond reads
 outside the cycle reads on both sides. On silicon, for every kernel whose
 span is a millisecond or more, `cycles / 160e6` and `us / 1e6` agree to
-within **0.229 %** — worst case, over all 65 such readings.
+within **0.229 %** (`code_walk/warm` rep 1) — worst case, over all 70 such
+readings. "A millisecond or more" is 160,000 cycles at 160 MHz, which is
+`LONG_ENOUGH_CYCLES` in the test; 70 of the 80 records clear it and the
+remaining 10 are the two short kernels below.
 
 The two kernels below a millisecond are explained rather than exempted.
 `bracket_overhead` and `slice_shape` run 0.3–150 µs, and the bracket itself
