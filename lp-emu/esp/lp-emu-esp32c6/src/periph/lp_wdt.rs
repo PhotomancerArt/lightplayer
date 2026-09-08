@@ -64,8 +64,6 @@ const INT_ENA: u32 = 0x2c;
 const INT_CLR: u32 = 0x30;
 const RESERVED_054: u32 = 0x54;
 
-const WDTCONFIG0_RESET: u32 = 0x0001_3214;
-const SWD_CONF_RESET: u32 = 0x12c0_0000;
 const WDT_EN: u32 = 1 << 31;
 const STG0_SHIFT: u32 = 28;
 const STG_MASK: u32 = 0b111;
@@ -100,10 +98,7 @@ impl LpWdt {
     pub fn new() -> Self {
         Self {
             index: 0,
-            regs: RegFile::new("LP_WDT", 0x400)
-                .with_names(regs::LP_WDT)
-                .with_reset(WDTCONFIG0, WDTCONFIG0_RESET)
-                .with_reset(SWD_CONF, SWD_CONF_RESET),
+            regs: RegFile::new("LP_WDT", 0x400).with_names(regs::LP_WDT),
             expired: false,
         }
     }
@@ -275,6 +270,14 @@ mod tests {
     use super::*;
     use lp_emu_esp_common::Sandbox;
 
+    /// The PAC's reset for one register of this block, from the generated
+    /// table — the same value `with_names` seeded, so a test can never
+    /// drift from the model by carrying its own copy.
+    fn pac(off: u32) -> u32 {
+        regs::LP_WDT
+            .reset(off)
+            .expect("the PAC gives this register a non-zero reset")
+    }
     /// esp-hal's `Rwdt::enable` + `set_timeout(Stage0, 30 s)` as the
     /// feeder does at boot: unlock, config, lock. `hold` is what
     /// `us_to_rtc_ticks(30_000_000) >> 1` gives at 136 kHz.
@@ -302,10 +305,10 @@ mod tests {
     fn disabled_at_reset_and_write_protected() {
         let mut sb = Sandbox::new();
         let mut w = LpWdt::new();
-        assert_eq!(sb.read(&mut w, WDTCONFIG0), WDTCONFIG0_RESET);
+        assert_eq!(sb.read(&mut w, WDTCONFIG0), pac(WDTCONFIG0));
         assert!(!w.armed());
         sb.write(&mut w, WDTCONFIG0, WDT_EN | (4 << STG0_SHIFT));
-        assert_eq!(sb.read(&mut w, WDTCONFIG0), WDTCONFIG0_RESET, "locked");
+        assert_eq!(sb.read(&mut w, WDTCONFIG0), pac(WDTCONFIG0), "locked");
         assert!(sb.sched.next_deadline().is_none());
         // esp_hal::init's disable: unlock, clear, lock.
         sb.write(&mut w, WDTWPROTECT, WDT_WKEY);
@@ -314,7 +317,7 @@ mod tests {
         assert_eq!(sb.read(&mut w, WDTCONFIG0), 0);
         // The SWD: its own key, auto-feed on.
         sb.write(&mut w, SWD_CONF, 1 << 18);
-        assert_eq!(sb.read(&mut w, SWD_CONF), SWD_CONF_RESET, "locked");
+        assert_eq!(sb.read(&mut w, SWD_CONF), pac(SWD_CONF), "locked");
         sb.write(&mut w, SWD_WPROTECT, WDT_WKEY);
         sb.write(&mut w, SWD_CONF, 1 << 18);
         sb.write(&mut w, SWD_WPROTECT, 0);

@@ -69,9 +69,6 @@ const OUT_SEL_MASK: u32 = 0xff;
 const INV_SEL: u32 = 1 << 8;
 const OEN_SEL: u32 = 1 << 9;
 
-/// `func_out_sel_cfg[n]` after reset: `out_sel = 128`, everything else 0.
-const FUNC_OUT_SEL_RESET: u32 = 0x80;
-
 /// The GPIO block.
 #[derive(Debug)]
 pub struct Gpio {
@@ -103,14 +100,11 @@ impl Gpio {
     /// it is a **read override**: a guest that wrote here would otherwise be
     /// able to change what the chip booted as.
     pub fn new(strap: u32) -> Self {
-        let mut regs = RegFile::new("GPIO", LEN)
+        let regs = RegFile::new("GPIO", LEN)
             .with_names(regs::GPIO)
             .with_read_override(STRAP, 0xffff_ffff, strap)
             .with_read_override(IN, 0xffff_ffff, 0)
             .with_read_override(PCPU_INT, 0xffff_ffff, 0);
-        for pad in 0..PAD_COUNT {
-            regs = regs.with_reset(FUNC_OUT_SEL_CFG + 4 * pad, FUNC_OUT_SEL_RESET);
-        }
         Self { regs }
     }
 

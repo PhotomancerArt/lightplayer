@@ -16,6 +16,9 @@
 //! - **modelled, M4** — [`spi1`] (the legacy flash controller the mask ROM
 //!   drives, against a [`crate::flash::FlashImage`]) and [`spi0`] (the cache
 //!   MMU's item registers, feeding [`crate::cache::CacheMmu`]).
+//! - **modelled, 2026-09-08** — [`i2c_ana_mst`] (the analog I2C master as a
+//!   `{block, register}` store rather than one shared `data` byte, so a
+//!   `regi2c` read answers the register it asked for).
 //! - **modelled, M5 P1** — [`rmt`] (the register file, the 192-word RAM,
 //!   two TX engines on the scheduler consuming words at PCR's clock:
 //!   position-semantics `tx_lim`, wrap, STOP, `tx_end`/`tx_thr_event`/
@@ -30,6 +33,7 @@
 pub mod accept;
 pub mod efuse;
 pub mod gpio;
+pub mod i2c_ana_mst;
 pub mod intpri;
 pub mod lp_wdt;
 pub mod pcr;
@@ -123,7 +127,11 @@ pub fn boot_set(
         (base::LP_WDT, 0x400, Box::new(lp_wdt::LpWdt::new())),
         (base::MODEM_SYSCON, 0x100, Box::new(accept::modem_syscon())),
         (base::MODEM_LPCON, 0x100, Box::new(accept::modem_lpcon())),
-        (base::I2C_ANA_MST, 0x100, Box::new(accept::i2c_ana_mst())),
+        (
+            base::I2C_ANA_MST,
+            0x100,
+            Box::new(i2c_ana_mst::I2cAnaMst::new()),
+        ),
         (
             base::LP_I2C_ANA_MST,
             0x400,

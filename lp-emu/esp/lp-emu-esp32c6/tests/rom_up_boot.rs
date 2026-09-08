@@ -438,7 +438,74 @@ fn rom_up_and_direct_load_agree_on_what_the_app_sees() {
         direct_log.contains("[RECOVERY] boot: cause=power-on"),
         "{direct_log}"
     );
+
+    // 5. **What the app SAYS**, line for line, once both have run past the
+    //    radio bring-up.
+    //
+    //    The mask ROM's `wait_rfpll_cal_end` (`0x40005984`) polls one analog
+    //    register through the PHY function table — block `0x62`, register 7,
+    //    bit 1 — and prints `error: pll_cal exceeds 2ms!!!` when it gives up.
+    //    Silicon never prints it. This machine printed it three times for as
+    //    long as `I2C_ANA_MST` was an accept block with a single shared
+    //    `data` byte, because the ROM's own `regi2c` traffic had left
+    //    something else in it
+    //    (`docs/defects/2026-09-08-regi2c-is-one-data-register-not-a-register-file.md`).
+    //
+    //    The assertion is the whole console rather than a grep for that one
+    //    string: a model that answers `regi2c` reads differently changes what
+    //    the clock and radio paths of every image see, and the way to notice
+    //    is a line appearing or disappearing anywhere. M7's own boot-log
+    //    window stops at `Disabling RNG early entropy source`, which is why
+    //    it never saw these three.
+    let past_the_radio = StopCondition::after_micros(APP_US).exit_on("[INIT] fw-esp32 initialized");
+    assert!(
+        matches!(
+            rom_up.run_until(&past_the_radio),
+            Outcome::ExitMatched { .. }
+        ),
+        "the ROM-up boot never finished initialising"
+    );
+    assert!(
+        matches!(
+            direct.run_until(&past_the_radio),
+            Outcome::ExitMatched { .. }
+        ),
+        "the direct boot never finished initialising"
+    );
+    let app_lines = |m: &Esp32C6Machine| -> Vec<String> {
+        let text = String::from_utf8_lossy(&m.usb_sj().bytes()).into_owned();
+        device_lines(&text)
+            .into_iter()
+            .skip_while(|l| !l.starts_with(APP_FIRST))
+            .filter(|l| !PATH_DEPENDENT.iter().any(|p| l.contains(p)))
+            .collect()
+    };
+    let ours = app_lines(&rom_up);
+    let theirs = app_lines(&direct);
+    assert!(
+        ours.len() > 15,
+        "the ROM-up app printed almost nothing: {ours:#?}"
+    );
+    assert_eq!(
+        ours, theirs,
+        "the app says different things depending on how it was loaded"
+    );
+    assert!(
+        !ours.iter().any(|l| l.contains("pll_cal")),
+        "the ROM's PLL calibration timed out: {ours:#?}"
+    );
 }
+
+/// The app's first line, and the line the console comparison runs to.
+/// `fw-esp32 initialized` is the end of the `[INIT]` chain and, more to the
+/// point, it is past the radio bring-up — which is where the ROM's
+/// PLL-calibration wait runs.
+const APP_FIRST: &str = "[INIT] Initializing board";
+/// Two emulated seconds: `fw-esp32 initialized` lands well inside them, and
+/// this test already has both machines built, so the whole console
+/// comparison costs one extra stretch of guest time rather than a second
+/// pair of boots.
+const APP_US: u64 = 2_000_000;
 
 /// G7-4: what the app reports after booting itself is what it reports after
 /// being placed — and what silicon reports.
@@ -700,3 +767,9 @@ fn read_span(m: &Esp32C6Machine, address: u32, len: u32) -> Vec<u8> {
     }
     panic!("{address:#010x}+{len} is not in one RAM region");
 }
+
+/// Lines the two paths are *supposed* to disagree about: the recovery
+/// ledger records how the chip was reset, and a ROM-up boot after a serial
+/// reset is a user reset where a direct load asserts a power-on. Everything
+/// else is the same application doing the same thing.
+const PATH_DEPENDENT: &[&str] = &["[RECOVERY]"];

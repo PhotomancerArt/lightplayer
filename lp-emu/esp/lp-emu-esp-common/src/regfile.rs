@@ -17,6 +17,8 @@
 //!   clears the corresponding status bit.
 //! - **read-only** — bits the firmware may write but hardware ignores.
 //! - **reset values** — what the block reads as before anyone writes it.
+//!   Seeded wholesale from the PAC by [`RegFile::with_names`]; a
+//!   [`with_reset`](RegFile::with_reset) after it is a deliberate exception.
 //!
 //! Anything a block does beyond that table gets a real type. The rule the
 //! vision states as the *honest-peripheral policy* applies here too: a
@@ -81,8 +83,40 @@ impl RegFile {
         }
     }
 
-    /// Attach a generated register-name table, for the bus trace.
+    /// Attach a generated register-name table — and **seed the block's
+    /// reset values from it**.
+    ///
+    /// The names are for the bus trace; the resets are the model. A
+    /// `RegFile` whose registers all read 0 is a claim about silicon, and it
+    /// was a wrong one: SPI1's `user` resets to `0x8000_0000` with
+    /// `usr_command` already set, the mask ROM's read path never sets it,
+    /// and a block that read 0 there moved no bytes while looking exactly
+    /// like a blank chip
+    /// (`docs/defects/2026-09-07-accept-blocks-carry-only-the-reset-values-a-boot-needed.md`).
+    /// The PAC states every one of those values, so this takes them all
+    /// rather than the ones a boot was observed to need.
+    ///
+    /// Resets past the end of the window are skipped: the window is what
+    /// this machine maps, and a register outside it reads 0 for the guest
+    /// whatever the part does. Call [`with_reset`](Self::with_reset)
+    /// *after* this to override one — a hand-written exception then reads
+    /// as an exception, which is the point.
     pub fn with_names(mut self, names: RegNames) -> Self {
+        names.assert_sorted();
+        self.names = names;
+        for (off, value) in names.resets {
+            if let Some(i) = self.index(*off) {
+                self.reset[i] = *value;
+                self.regs[i] = *value;
+            }
+        }
+        self
+    }
+
+    /// Attach a name table **without** its reset values: the block is
+    /// modelled by a type that computes its own, or the machine deliberately
+    /// starts it at zero. Rare, and the caller says why.
+    pub fn with_names_only(mut self, names: RegNames) -> Self {
         names.assert_sorted();
         self.names = names;
         self
@@ -316,6 +350,7 @@ mod tests {
     static NAMES: RegNames = RegNames {
         block: "uart0",
         entries: &[(0x000, "fifo"), (0x004, "int_raw"), (0x01c, "status")],
+        resets: &[],
     };
 
     #[test]
@@ -411,6 +446,51 @@ mod tests {
         assert_eq!(rf.read(0x04, Width::Word, &mut env.cx()), 0);
         rf.reset();
         assert_eq!(rf.read(0x04, Width::Word, &mut env.cx()), 0x0000_1234);
+    }
+
+    #[test]
+    fn with_names_seeds_the_pac_reset_values() {
+        let mut env = Env::new();
+        static SPI1: RegNames = RegNames {
+            block: "spi1",
+            entries: &[(0x000, "cmd"), (0x01c, "user")],
+            // SPI1's `user`, the one that made this whole mechanism exist.
+            resets: &[(0x01c, 0x8000_0000)],
+        };
+        let mut rf = RegFile::new("SPI1", 0x20).with_names(SPI1);
+        assert_eq!(rf.read(0x1c, Width::Word, &mut env.cx()), 0x8000_0000);
+        assert_eq!(rf.read(0x00, Width::Word, &mut env.cx()), 0);
+        // And it is a reset, not just an initial value.
+        rf.write(0x1c, Width::Word, 0, &mut env.cx());
+        rf.reset();
+        assert_eq!(rf.read(0x1c, Width::Word, &mut env.cx()), 0x8000_0000);
+
+        // A later `with_reset` is the exception, and wins.
+        let mut rf = RegFile::new("SPI1", 0x20)
+            .with_names(SPI1)
+            .with_reset(0x01c, 0x1234);
+        assert_eq!(rf.read(0x1c, Width::Word, &mut env.cx()), 0x1234);
+
+        // `with_names_only` takes the names and leaves the resets.
+        let mut rf = RegFile::new("SPI1", 0x20).with_names_only(SPI1);
+        assert_eq!(rf.read(0x1c, Width::Word, &mut env.cx()), 0);
+        assert_eq!(rf.reg_name(0x01c), Some("user"));
+    }
+
+    /// A window narrower than the block drops the resets past its end
+    /// instead of panicking: those registers are not mapped, and an
+    /// unmapped register reads 0 for the guest whatever the part does.
+    #[test]
+    fn resets_past_the_window_are_skipped() {
+        let mut env = Env::new();
+        static WIDE: RegNames = RegNames {
+            block: "wide",
+            entries: &[(0x000, "a"), (0x100, "b")],
+            resets: &[(0x000, 0xaa), (0x100, 0xbb)],
+        };
+        let mut rf = RegFile::new("NARROW", 0x10).with_names(WIDE);
+        assert_eq!(rf.read(0x00, Width::Word, &mut env.cx()), 0xaa);
+        assert_eq!(rf.read(0x100, Width::Word, &mut env.cx()), 0);
     }
 
     #[test]

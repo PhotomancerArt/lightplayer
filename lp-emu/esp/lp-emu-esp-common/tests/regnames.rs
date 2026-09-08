@@ -86,6 +86,9 @@ fn a_regfile_with_a_generated_table_names_registers_in_the_bus_trace() {
     bus.write_byte(0x6000_0000, b'H' as i8).unwrap();
     bus.write_word(0x6000_0098, 1).unwrap();
     bus.read_word(0x6000_0098).unwrap();
+    // `status` was never written, so this is the PAC's own reset value,
+    // seeded by `with_names` — a trace line that says what the part says
+    // rather than the zero an empty window would have shown.
     bus.read_word(0x6000_001c).unwrap();
 
     assert_eq!(
@@ -94,9 +97,10 @@ fn a_regfile_with_a_generated_table_names_registers_in_the_bus_trace() {
             "cyc=1000 pc=0x42001234 W1 UART0+0x000 fifo = 0x00000048",
             "cyc=1000 pc=0x42001234 W4 UART0+0x098 reg_update = 0x00000001",
             "cyc=1000 pc=0x42001234 R4 UART0+0x098 reg_update = 0x00000000",
-            "cyc=1000 pc=0x42001234 R4 UART0+0x01c status = 0x00000000",
+            "cyc=1000 pc=0x42001234 R4 UART0+0x01c status = 0xe000c000",
         ]
     );
+    assert_eq!(uart0::UART0.reset(0x01c), Some(0xe000_c000));
 }
 
 /// The bring-up tool, end to end: a firmware polling a status bit that never

@@ -5,6 +5,18 @@
 //! The rule (`lp_emu_esp_common::regfile`): a `RegFile` never invents
 //! behaviour, it only remembers, and everything it pretends about is one
 //! line here. Values marked *modeled* are plausible, not measured.
+//!
+//! **Reset values are not among the exceptions.** `with_names` seeds every
+//! block from the PAC's own `Resettable` impls, generated into `crate::regs`
+//! beside the names, so a block reads what the part reads before anyone
+//! writes it. Until 2026-09-08 each block carried only the resets a boot had
+//! been *observed* to need and read 0 everywhere else — which is how SPI1's
+//! `user` came to read 0 with `usr_command` clear and every flash read moved
+//! no bytes while looking exactly like a blank chip
+//! (`docs/defects/2026-09-07-accept-blocks-carry-only-the-reset-values-a-boot-needed.md`).
+//! A `with_reset` in this file is now a **deviation from the PAC**, and
+//! `the_only_deviations_from_the_pacs_resets_are_the_listed_ones` below is
+//! the list.
 
 use lp_emu_esp_common::RegFile;
 
@@ -45,12 +57,18 @@ pub fn pmu() -> RegFile {
 /// `tests/rom_reset_reason.rs` for both halves pinned.
 ///
 /// `lp_clk_conf` resets to `0x04` (`slow_clk_sel = 0`, RC_SLOW), which
-/// `RtcSlowClockSource::current()` reads (`rtc/esp32c6.rs:126`).
+/// `RtcSlowClockSource::current()` reads (`rtc/esp32c6.rs:126`) — that one
+/// comes from the PAC now, like the rest of the block.
+///
+/// `reset_cause` is the deviation. The PAC's reset is `0x20`; this machine
+/// asserts a cause instead, because the cause is an input to the run and
+/// not a property of the part. `rtc_get_reset_reason` masks to five bits
+/// (`andi a0, a0, 31`), so the `0x20` the PAC states never reaches the
+/// comparison either way.
 pub fn lp_clkrst(cause: crate::loader::ResetCause) -> RegFile {
     RegFile::new("LP_CLKRST", 0x400)
         .with_names(regs::LP_CLKRST)
         .with_reset(0x010, cause.rom_code())
-        .with_reset(0x000, 0x04)
 }
 
 /// `SLC`, the SDIO slave DMA controller. Nothing in any image this machine
@@ -113,30 +131,15 @@ pub fn modem_lpcon() -> RegFile {
     RegFile::new("MODEM_LPCON", 0x100).with_names(regs::MODEM_LPCON)
 }
 
-/// `I2C_ANA_MST` — the analog I2C master, three spin sites:
-///
-/// - `ana_conf0.cal_done` (`+0x18` bit 24) must read **1**:
-///   `while I2C_ANA_MST::regs().ana_conf0().read().cal_done().bit_is_clear() {}`
-///   at `soc/esp32c6/clocks.rs:181-186` (the BBPLL calibration wait).
-/// - `i2c_ctrl(n).busy` (`+0x00`/`+0x04` bit 25) must read **0**:
-///   `while ...i2c_ctrl(master).read().busy().bit() {}` at
-///   `soc/esp32c6/regi2c.rs:187, 194, 209`.
-/// - `ana_conf2` (`+0x20`) picks the master index (`regi2c.rs:160-170`):
-///   bit set → master 0, clear → master 1. It resets to 0 in the PAC, so
-///   every block uses master 1, and both `i2c_ctrl` registers carry the
-///   override so the pick cannot matter.
-///
-/// `i2c_ctrl.data` (bits 16:23) reads back what was written, so a
-/// `regi2c_read` returns the last value written to that register — the
-/// accept-and-remember reading of an analog register, stated here so the
-/// PLL "readback" is not mistaken for a measurement.
-pub fn i2c_ana_mst() -> RegFile {
-    RegFile::new("I2C_ANA_MST", 0x100)
-        .with_names(regs::I2C_ANA_MST)
-        .with_read_override(0x018, 1 << 24, 1 << 24)
-        .with_read_override(0x000, 1 << 25, 0)
-        .with_read_override(0x004, 1 << 25, 0)
-}
+// `I2C_ANA_MST` was an accept block here from P5 until 2026-09-08, and it
+// is the reason the defect it closed has a class of its own. The block is a
+// transaction port onto two hundred analog registers; a `RegFile` gave it
+// **one** `data` byte, so `regi2c_read(block, reg)` answered with whatever
+// was last written to any other pair. `super::i2c_ana_mst` gives it the
+// `{block, register}` store the drivers and the mask ROM both address, and
+// carries the two read overrides (`busy` 0, `cal_done` 1) unchanged.
+//
+// `docs/defects/2026-09-08-regi2c-is-one-data-register-not-a-register-file.md`
 
 /// `LP_I2C_ANA_MST` — the fourth spin site, found the hard way on the bench
 /// (director note 6, `docs/defects/2026-09-06-c6-analog-master-wedges-the-
@@ -167,12 +170,8 @@ pub fn lp_i2c_ana_mst() -> RegFile {
 pub fn pcr() -> RegFile {
     RegFile::new("PCR", 0x1000)
         .with_names(regs::PCR)
-        .with_reset(0x110, 0x2800_0200)
         .with_read_override(0x110, 0x7f << 24, 40 << 24)
-        .with_reset(0x114, 0x0d)
         .with_read_override(0x114, 1 << 3, 0)
-        .with_reset(0x040, 0x0040_0000)
-        .with_reset(0x04c, 0x0040_0000)
 }
 
 /// `LP_TIMER` at `0x600B_0C00`: the block *after* EFUSE. The vendor
@@ -263,33 +262,27 @@ pub fn extmem() -> RegFile {
         .with_read_mirror(0x02c, 1 << 16, 1 << 18)
 }
 
-/// UART0/UART1: accept in P5 so the ROM's `uart_tx_one_char` does not fault
-/// and the no-radio image (which prints nothing on UART0) boots; the FIFO,
-/// the thresholds and `RXFIFO_TOUT` are P6. Both share `uart0`'s layout.
-pub fn uart(name: &'static str) -> RegFile {
-    RegFile::new(name, 0x100).with_names(regs::UART0)
-}
-
-/// `USB_DEVICE`: accept in P5, reading 0 everywhere. That is the *host
-/// absent, FIFO full* reading: `ep1_conf.serial_in_ep_data_free` is 0, so
-/// esp-println spins its 50,000 iterations once, latches `TIMED_OUT`, and
-/// drops output from then on (`esp-println/src/lib.rs:275-296` — silence,
-/// not a hang); `int_raw.sof` is 0, so the connection monitor decides the
-/// host is not enumerated. The honest model, with the attach/detach
-/// control channel, is M3 P6 and M6.
-pub fn usb_device() -> RegFile {
-    RegFile::new("USB_DEVICE", 0x100).with_names(regs::USB_DEVICE)
-}
+// `uart(name)` was an accept block here from P5 — so the ROM's
+// `uart_tx_one_char` would not fault and the no-radio image would boot —
+// until P6 gave both instances a model with FIFOs, a shifter at baud and
+// `RXFIFO_TOUT` (`super::uart`). The machine has mapped `uart::Uart` at
+// UART0 and UART1 ever since; the accept block was left behind, unmapped,
+// and is retired here rather than swept.
+//
+// `USB_DEVICE` was one too, reading 0 everywhere — the *host absent, FIFO
+// full* reading: `ep1_conf.serial_in_ep_data_free` 0, `int_raw.sof` 0. Two
+// of the three claims in that sentence are things the PAC contradicts
+// (`ep1_conf` resets to `0x02`, `int_raw` to `0x08`), which the reset sweep
+// makes visible and `super::usb_sj` makes moot: it computes `ep1_conf`,
+// `int_raw` and both `ep_st` registers from the link's own state, so the
+// stored word is never what a guest reads. M6 owns that block.
 
 /// `IO_MUX`: `pin_ctrl` plus all **31** pads at `+0x04 + 4n` (the PAC's
-/// `gpio: [GPIO; 31]`; the vendor emulator stopped at 15), each at the PAC
-/// reset value `0x0800`.
+/// `gpio: [GPIO; 31]`; the vendor emulator stopped at 15). Each pad resets
+/// to `0x0800` and `pin_ctrl` to `0x1def` — from the generated table, which
+/// expands the array the same way the name table does.
 pub fn io_mux() -> RegFile {
-    let mut rf = RegFile::new("IO_MUX", 0x100).with_names(regs::IO_MUX);
-    for pad in 0..31u32 {
-        rf = rf.with_reset(0x004 + 4 * pad, 0x0800);
-    }
-    rf
+    RegFile::new("IO_MUX", 0x100).with_names(regs::IO_MUX)
 }
 
 // `GPIO` was an accept block here from P5 (`in_` and `pcpu_int` reading 0,
@@ -317,19 +310,8 @@ mod tests {
     #[test]
     fn the_spin_bits_read_the_way_the_discovery_says_whatever_was_written() {
         let mut sb = Sandbox::new();
-        let mut i2c = i2c_ana_mst();
-        sb.write(&mut i2c, 0x018, 0);
-        assert!(sb.read(&mut i2c, 0x018) & (1 << 24) != 0, "cal_done");
-        sb.write(&mut i2c, 0x000, 0xffff_ffff);
-        sb.write(&mut i2c, 0x004, 0xffff_ffff);
-        assert_eq!(sb.read(&mut i2c, 0x000) & (1 << 25), 0, "i2c0 busy");
-        assert_eq!(sb.read(&mut i2c, 0x004) & (1 << 25), 0, "i2c1 busy");
-        assert_eq!(
-            sb.read(&mut i2c, 0x020),
-            0,
-            "ana_conf2 resets to 0: master 1"
-        );
-
+        // `I2C_ANA_MST`'s own spin bits moved to `super::i2c_ana_mst` with
+        // the block; `LP_I2C_ANA_MST` is still an accept block.
         let mut lp = lp_i2c_ana_mst();
         sb.write(&mut lp, 0x000, 0xffff_ffff);
         assert_eq!(sb.read(&mut lp, 0x000) & (1 << 25), 0, "I2C0_BUSY");
@@ -382,9 +364,112 @@ mod tests {
         for pad in 0..31u32 {
             assert_eq!(sb.read(&mut m, 0x004 + 4 * pad), 0x0800);
         }
+        assert_eq!(sb.read(&mut m, 0x000), 0x1def, "pin_ctrl");
         assert_eq!(m.reg_name(0x07c), Some("gpio30"));
         assert_eq!(m.reg_name(0x080), None, "there is no pad 31");
         // GPIO's own reads are `super::gpio`'s tests now.
+    }
+
+    /// The accept blocks, each with the generated table it is built from.
+    fn every_block() -> Vec<(RegFile, lp_emu_esp_common::regnames::RegNames)> {
+        vec![
+            (lp_apm(), regs::LP_APM),
+            (lp_apm0(), regs::LP_APM0),
+            (hp_apm(), regs::HP_APM),
+            (lp_aon(), regs::LP_AON),
+            (pmu(), regs::PMU),
+            (
+                lp_clkrst(crate::loader::ResetCause::PowerOn),
+                regs::LP_CLKRST,
+            ),
+            (slc(), regs::SLC),
+            (lp_ana(), regs::LP_ANA),
+            (hinf(), regs::HINF),
+            (plic_ux(), regs::PLIC_UX),
+            (modem_syscon(), regs::MODEM_SYSCON),
+            (modem_lpcon(), regs::MODEM_LPCON),
+            (lp_i2c_ana_mst(), regs::LP_I2C_ANA_MST),
+            (pcr(), regs::PCR),
+            (lp_timer(), regs::LP_TIMER),
+            (apb_saradc(), regs::APB_SARADC),
+            (assist_debug(), regs::ASSIST_DEBUG),
+            (hp_sys(), regs::HP_SYS),
+            (tee(), regs::TEE),
+            (lp_tee(), regs::LP_TEE),
+            (lp_io(), regs::LP_IO),
+            (extmem(), regs::EXTMEM),
+            (io_mux(), regs::IO_MUX),
+        ]
+    }
+
+    /// Where an accept block's power-on state differs from what the PAC
+    /// states, and why. Anything not on this list is a bug in the seeding
+    /// or an undocumented hand exception — the whole point of the sweep
+    /// (`docs/defects/2026-09-07-accept-blocks-carry-only-the-reset-values-a-boot-needed.md`).
+    ///
+    /// `(block, offset, what this machine reads instead, why)`.
+    const DEVIATIONS: &[(&str, u32, u32, &str)] = &[(
+        "LP_CLKRST",
+        0x010,
+        1,
+        "reset_cause is an input to the run, not a property of the part: the machine          asserts a power-on and the ROM masks to five bits",
+    )];
+
+    #[test]
+    fn the_only_deviations_from_the_pacs_resets_are_the_listed_ones() {
+        let mut unlisted = Vec::new();
+        for (block, names) in every_block() {
+            let name = Peripheral::name(&block);
+            for (off, _) in names.entries {
+                if *off >= block.len_bytes() {
+                    // Not mapped by this machine: reads 0 for the guest
+                    // whatever the part does.
+                    continue;
+                }
+                let want = names.reset(*off).unwrap_or(0);
+                let got = block.stored(*off);
+                if got == want {
+                    continue;
+                }
+                match DEVIATIONS
+                    .iter()
+                    .find(|(b, o, _, _)| *b == name && o == off)
+                {
+                    Some((_, _, expected, _)) => assert_eq!(
+                        got, *expected,
+                        "{name}+{off:#05x} is a listed deviation, but it reads {got:#010x}                          rather than the {expected:#010x} the list says"
+                    ),
+                    None => unlisted.push(format!(
+                        "  {name}+{off:#05x} {}: reads {got:#010x}, the PAC says {want:#010x}",
+                        names.name(*off).unwrap_or("?")
+                    )),
+                }
+            }
+        }
+        assert!(
+            unlisted.is_empty(),
+            "these accept-block registers do not read what the PAC says, and are not on \
+             DEVIATIONS:\n{}",
+            unlisted.join("\n")
+        );
+    }
+
+    /// The other half: every listed deviation is real. A stale entry would
+    /// otherwise sit here excusing something that no longer happens.
+    #[test]
+    fn every_listed_deviation_is_one() {
+        for (name, off, _, why) in DEVIATIONS {
+            let (block, names) = every_block()
+                .into_iter()
+                .find(|(b, _)| Peripheral::name(b) == *name)
+                .unwrap_or_else(|| panic!("DEVIATIONS names `{name}`, which is not a block"));
+            assert!(!why.is_empty(), "{name}+{off:#05x} has no reason");
+            assert_ne!(
+                block.stored(*off),
+                names.reset(*off).unwrap_or(0),
+                "{name}+{off:#05x} agrees with the PAC now; take it off the list"
+            );
+        }
     }
 
     #[test]
@@ -396,9 +481,6 @@ mod tests {
         );
         assert_eq!(pmu().reg_name(0x000).is_some(), true);
         assert_eq!(lp_timer().reg_name(0x010).is_some(), true);
-        assert_eq!(uart("UART1").name(), "UART1");
-        assert_eq!(uart("UART1").reg_name(0x01c), Some("status"));
-        assert_eq!(usb_device().reg_name(0x004), Some("ep1_conf"));
         assert_eq!(extmem().reg_name(0x000).is_some(), true);
     }
 }
