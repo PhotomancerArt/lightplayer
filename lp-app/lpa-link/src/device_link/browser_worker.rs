@@ -297,7 +297,12 @@ impl WorkerLinkInner {
         // the next boot (`set_hardware_manifest`) while this one is still
         // in flight, and a live `Ref` would make that a panic instead of
         // the "effective next boot" the verb promises.
-        let options = self.options.borrow().clone();
+        //
+        // Resolved for THIS boot: a source built with `discovered()`
+        // options reads the page's hashed engine URLs here, at power-on,
+        // which is the earliest moment that can await them. The borrow is
+        // released before the await for the same reason as above.
+        let options = self.options.borrow().clone().resolved_for_boot().await;
         let script = options.worker_script_path();
         let mut handle = BrowserWorkerHandle::new(&script).map_err(|error| error.to_string())?;
         // The boot envelope carries `options.runtime` — the board manifest,
