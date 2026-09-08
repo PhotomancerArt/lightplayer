@@ -84,6 +84,25 @@ pub enum HomeOp {
     OpenPackage {
         key: String,
     },
+    /// Open a library package **on the device the address named** —
+    /// `?on=mac:<base mac>` (D43), or the mismatch page's "push here".
+    ///
+    /// The sibling of [`Self::OpenPackage`] and not a parameter on it,
+    /// because they are different gestures: one asks Studio to resolve a
+    /// device and is free to reuse the tab's sim, the other names one
+    /// device and will not settle for another. A hint naming a device this
+    /// library does not know drops back to [`Self::OpenPackage`] at the
+    /// edge that read the URL, with a notice — the model is never handed a
+    /// device it cannot find and asked to improvise.
+    OpenPackageOnDevice {
+        key: String,
+        /// The named device's base MAC, canonical (lowercase colon hex).
+        base_mac: String,
+        /// The person has seen the mismatch page and chose to push over
+        /// what is running (D50). `false` — every arrival from a URL —
+        /// stops at that page instead.
+        over_running_project: bool,
+    },
     /// Open an example as a TRANSIENT view session (examples vision D2):
     /// nothing installed, nothing seeded; the explicit save forks it.
     /// (Until 2026-08-28 this seeded a library copy — the seed-once model
@@ -166,6 +185,7 @@ impl HomeOp {
         matches!(
             self,
             Self::OpenPackage { .. }
+                | Self::OpenPackageOnDevice { .. }
                 | Self::OpenExample { .. }
                 | Self::OpenSharedTransient { .. }
                 | Self::CreateProject { .. }
@@ -183,7 +203,10 @@ impl HomeOp {
     pub fn is_pure_open(&self) -> bool {
         matches!(
             self,
-            Self::OpenPackage { .. } | Self::OpenExample { .. } | Self::OpenSharedTransient { .. }
+            Self::OpenPackage { .. }
+                | Self::OpenPackageOnDevice { .. }
+                | Self::OpenExample { .. }
+                | Self::OpenSharedTransient { .. }
         )
     }
 }
@@ -194,6 +217,12 @@ impl ControllerOp for HomeOp {
             Self::OpenPackage { .. } => ActionMeta::new(
                 "Open",
                 "Open this project in the simulator.",
+                ActionPriority::Primary,
+            )
+            .with_icon("play"),
+            Self::OpenPackageOnDevice { .. } => ActionMeta::new(
+                "Open",
+                "Open this project on that device.",
                 ActionPriority::Primary,
             )
             .with_icon("play"),
@@ -285,6 +314,7 @@ impl ControllerOp for HomeOp {
             // demo-load quiet-gap budget fits. Create-and-open ends in the
             // same open, so it shares the budget.
             Self::OpenPackage { .. }
+            | Self::OpenPackageOnDevice { .. }
             | Self::OpenExample { .. }
             | Self::OpenSharedTransient { .. }
             | Self::CreateProject { .. }
