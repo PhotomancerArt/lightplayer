@@ -391,20 +391,34 @@ the previous run: the guest's collected output and a capped text trace. Those
 two are the identity oracle — the speed work must not change one byte of
 either (PD5, ADR 2026-09-06).
 
-The workload is the `lp-xt/fixtures` corpus, which the recipe builds (esp
-toolchain) if it is missing. **The corpus is short**: its longest program,
-`ackermann`, retires 292 k instructions, three orders of magnitude under a
-probe-sized run, so each row is repeated from a clean emulator until it has
-retired ≥100 M. Per-repeat setup (region allocation plus the ELF load) measures
-~40 µs against ~16 ms of execution, so it is a rounding error in the rate and
-not a hidden constant. A long-running Xtensa image would replace the repeats.
+The workload is `bench_loop`, a `lp-xt/fixtures` program written for this
+probe (the recipe builds the corpus with the esp toolchain if it is missing).
+It reads the `arg` the emulator hands `main` as a round count, so **one run at
+`--arg 50000` retires 111.6 M instructions** from a single emulator: the probe
+passes `--repeat 1`, and nothing but the run loop is in the rate. A round is a
+64-word working set read and written through a non-inlined call per element,
+plus one 24-deep recursion past the 64-AR window ring — the memory, call and
+window-spill traffic in one program.
+
+**There are no repeats any more.** The conformance fixtures are short (the
+longest, `ackermann`, retires 292 k instructions), so the probe used to
+re-create the emulator and reload the ELF 400–800 times to reach 100 M. That
+setup measured ~40 µs against ~16 ms of execution — a rounding error in the
+rate rather than a bug, but measurement overhead the probe had no reason to
+carry. The `ackermann` and `fib_rec` rows went with it: at `--repeat 1` they
+retire 292 k and 138 k instructions, ~14 ms and ~3 ms of user time, which
+`/usr/bin/time`'s 10 ms resolution cannot report. They stay in the corpus, run
+against their host-side oracles by `cargo test -p lp-xt-elf`.
 
 Like the C6 probe it is an **oracle, not a gate**: nothing in CI runs it, and
 no number it prints gates anything.
 
 **The measured ladder** (M6, 2026-09-07; best of three runs, two interleaved
 same-window rounds on an M2 Max at load 10–28; the spread between rounds is
-±8%, which is the resolution this desk offers):
+±8%, which is the resolution this desk offers). These numbers predate
+`bench_loop` and were taken with the repeat-based probe on the two fixtures it
+used to run — they are kept because they are what the ladder was measured on,
+not because the probe still prints those rows:
 
 | rung | ackermann instr/s | fib_rec instr/s |
 |---|---:|---:|

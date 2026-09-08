@@ -58,6 +58,9 @@ literal pool at the head of `.text` as garbage "instructions" (`ule.s`,
    ```
 2. Keep it deterministic (no time/random; use an explicit LCG for
    pseudo-random data) and integer-only. Print `key=value` lines; return 0.
+   Keep it short unless it is a probe workload: `bench_loop` is the one
+   long-running fixture, and it is long only when `scripts/emu/bench-xt.sh`
+   passes it a large `arg` (its default, `arg = 0`, is one round).
 3. Add a matching `#[test]` in `lp-xt-elf/tests/fixtures.rs` whose **expected
    output is a host-side oracle**: the same computation and the same format
    strings, run on the host (differential: host Rust vs emulated Xtensa —
@@ -82,6 +85,7 @@ literal pool at the head of `.text` as garbage "instructions" (`ule.s`,
 | `sort_insertion` | nested loops, element moves |
 | `alloc_vec` | bump allocator, Vec growth, sort_unstable, String |
 | `panic_report` | the SYS_PANIC trap (message + exit 101) |
+| `bench_loop` | the speed probe's workload: `arg` rounds of memory + calls + window spill |
 
 ## Device dual-run decision (M4)
 
