@@ -58,10 +58,13 @@ pub mod device_records;
 pub mod device_roster;
 pub mod device_transport;
 pub mod devices_op;
+pub mod runtime_backing;
 pub mod runtime_band;
 pub mod shared_link_client_io;
+pub mod sim_create_op;
 pub mod sim_record;
 pub mod sim_transport;
+pub mod target_offer;
 
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use browser_sim_source::BrowserSimLinkSource;
@@ -108,8 +111,10 @@ pub use device_transport::{
     DeviceTransportFuture, GrantedLink, LensLineTap, LensTapEvent,
 };
 pub use devices_op::{DeviceFace, DevicesOp};
+pub use runtime_backing::{Backing, EMULATED_TARGETS, backing_for};
 pub use runtime_band::UiRuntimeBand;
 pub use shared_link_client_io::{ConversationInbox, SharedLinkClientIo};
+pub use sim_create_op::{SimCreateOp, sim_device_name};
 pub use sim_record::{
     NewSimRecord, SimRecord, delete_sim_record, mint_sim_identity, new_sim_record, read_sim_record,
     sim_endpoint, sim_link_info, uid_from_sim_endpoint, write_sim_record,
@@ -117,3 +122,4 @@ pub use sim_record::{
 pub use sim_transport::{
     SimBacking, SimDeviceTransport, SimLinkSource, SimRuntimeControl, SimSession, SimTier,
 };
+pub use target_offer::{TargetChoice, TargetGroup, TargetOffer, TargetScope, target_offer};

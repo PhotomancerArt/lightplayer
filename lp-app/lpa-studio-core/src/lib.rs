@@ -38,22 +38,23 @@ pub use app::devices::BrowserSerialTransport;
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::devices::BrowserSimLinkSource;
 pub use app::devices::{
-    CompletedPush, CompositeDeviceTransport, DEVICE_FEED_PARK_AFTER_FAILURES,
+    Backing, CompletedPush, CompositeDeviceTransport, DEVICE_FEED_PARK_AFTER_FAILURES,
     DEVICE_FRAME_SNAPSHOT_INTERVAL_SECS, DeviceCardFeedView, DeviceEffectCall, DeviceEffectFacts,
     DeviceEffectProgress, DeviceEffects, DeviceFace, DeviceFeedOp, DeviceFrameFeed,
     DeviceFrameFeeds, DeviceIdentityFirmware, DeviceIdentityLine, DevicePushOp, DeviceRoster,
     DeviceRosterView, DeviceTaskFuture, DeviceTimerFuture, DeviceTransport, DeviceTransportFuture,
     DevicesOp, FeedLiveness, FirmwareVerb, FlashBoardChoice, FlashOffer, GrantedLink, JournalLine,
     LensLineTap, LensTapEvent, NewSimRecord, PushOffer, PushPayload, PushSource, PushSourceChoice,
-    PushSourceGroup, RememberedView, RosterSplit, SIM_TRANSPORT, SimBacking, SimDeviceTransport,
-    SimLinkSource, SimRecord, SimRuntimeControl, SimSession, SimTier, StagedPush, UiRuntimeBand,
+    PushSourceGroup, RememberedView, RosterSplit, SIM_TRANSPORT, SimBacking, SimCreateOp,
+    SimDeviceTransport, SimLinkSource, SimRecord, SimRuntimeControl, SimSession, SimTier,
+    StagedPush, TargetChoice, TargetGroup, TargetOffer, TargetScope, UiRuntimeBand, backing_for,
     delete_sim_record, device_card_feed_view, device_card_feed_views, device_chip,
     device_escape_action, device_escape_action_for, device_firmware_line, device_identity_line,
     device_status_kind, feed_liveness, firmware_face_preview_sentence, firmware_verb,
     first_bundled_example_id, flash_offer, flash_offer_for, mint_sim_identity, new_sim_record,
     pending_escape_action, pending_firmware_line, pending_identity_rows, push_offer,
-    read_sim_record, reflash_choice, sim_endpoint, sim_link_info, split_roster,
-    transport_label_for_endpoint, uid_from_sim_endpoint, write_sim_record,
+    read_sim_record, reflash_choice, sim_device_name, sim_endpoint, sim_link_info, split_roster,
+    target_offer, transport_label_for_endpoint, uid_from_sim_endpoint, write_sim_record,
 };
 pub use app::docs_host::DocsSimHost;
 pub use app::frame_feed::{CardFeedApply, CardFeedState};

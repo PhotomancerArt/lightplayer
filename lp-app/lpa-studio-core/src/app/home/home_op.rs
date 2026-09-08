@@ -136,6 +136,20 @@ pub enum HomeOp {
         uid: String,
         name: String,
     },
+    /// Declare what hardware a project runs on (D41, PD17) — the project
+    /// settings' **Hardware** row.
+    ///
+    /// The first library write of the container manifest's `target`. It
+    /// names a KIND of board, never an instance (D32): putting a project on
+    /// the board on your desk is that board's own card verb.
+    ///
+    /// `target` is a catalog board id, or `None` for Desktop — the same
+    /// thing an absent field has always meant, so choosing Desktop writes
+    /// no key rather than a redundant one.
+    SetPackageTarget {
+        uid: String,
+        target: Option<String>,
+    },
     DuplicatePackage {
         uid: String,
     },
@@ -251,6 +265,12 @@ impl ControllerOp for HomeOp {
                 ActionMeta::new("Rename", "Rename this project.", ActionPriority::Secondary)
                     .with_icon("edit")
             }
+            Self::SetPackageTarget { .. } => ActionMeta::new(
+                "Set hardware",
+                "Choose the hardware this project runs on.",
+                ActionPriority::Secondary,
+            )
+            .with_icon("edit"),
             Self::DuplicatePackage { .. } => ActionMeta::new(
                 "Duplicate",
                 "Fork an independent copy of this project.",
@@ -295,6 +315,7 @@ impl ControllerOp for HomeOp {
             // live write-back is one small wire write); the standard budget
             // bounds it.
             Self::RenamePackage { .. }
+            | Self::SetPackageTarget { .. }
             | Self::DuplicatePackage { .. }
             | Self::DeletePackage { .. }
             | Self::ImportZip { .. }

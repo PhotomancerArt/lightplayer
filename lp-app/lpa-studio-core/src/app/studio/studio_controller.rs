@@ -2060,6 +2060,10 @@ impl StudioController {
             let op = action.into_op::<crate::DevicePushOp>()?;
             return self.execute_device_push_op(op).await;
         }
+        if node_id.as_str() == crate::SimCreateOp::NODE_ID {
+            let op = action.into_op::<crate::SimCreateOp>()?;
+            return self.execute_sim_create_op(op).await;
+        }
         if node_id.as_str() == crate::DeviceFeedOp::NODE_ID {
             let op = action.into_op::<crate::DeviceFeedOp>()?;
             self.set_device_feed_wanted(op.device, op.wanted);
@@ -2301,6 +2305,35 @@ impl StudioController {
                     .map(|summary| summary.slug)
                     .unwrap_or_else(|| name.to_string());
                 Ok(UiNotices::new().with_notice(UiNotice::info(format!("Renamed to {renamed}"))))
+            }
+            HomeOp::SetPackageTarget { uid, target } => {
+                // The Hardware row lives in the OPEN project's settings, so
+                // this is the open project's manifest — patched through its
+                // own handle like the name is, because the host refuses
+                // structural catalog ops on a project this tab holds.
+                if self.project.active_library_uid().as_deref() != Some(uid.as_str()) {
+                    return Err(UiError::UnsupportedAction(
+                        "open this project to choose the hardware it runs on".to_string(),
+                    ));
+                }
+                // Desktop is what an absent target has always meant, so it
+                // writes no key: one spelling on disk, and a project that
+                // says nothing is not a project someone forgot to answer.
+                let target = crate::app::library::ProjectTarget::from_manifest(target.as_deref());
+                let written = match &target {
+                    crate::app::library::ProjectTarget::Desktop => None,
+                    crate::app::library::ProjectTarget::Board(board_id) => Some(board_id.clone()),
+                };
+                {
+                    let server = self.pool.lens_session_mut()?.client_mut()?;
+                    self.project
+                        .set_active_project_target(server, written.as_deref())
+                        .await?;
+                }
+                Ok(UiNotices::new().with_notice(UiNotice::info(format!(
+                    "Hardware set to {}",
+                    crate::board_display_name(target.board_id())
+                ))))
             }
             HomeOp::DuplicatePackage { uid } => {
                 let outcome = self.run_catalog_op(CatalogOp::Duplicate { uid }).await?;
@@ -2811,6 +2844,54 @@ impl StudioController {
         self.power_off_sim(power_off);
         self.settle_device_records().await;
         Ok(UiNotices::new())
+    }
+
+    /// The picker's gesture (D44): mint a sim of the target and power it on.
+    ///
+    /// Two steps that must not come apart. The record is LIBRARY work — a
+    /// registry row and a sidecar in one settle — and the roster meets it
+    /// as an ordinary device at the settle that follows; only then is there
+    /// a `DeviceId` for the `Connect` to aim at. A minted sim nobody
+    /// powered on would land on the remembered line, which is the wrong
+    /// answer to "start a board here".
+    ///
+    /// The power-on is the SAME `execute_devices_op` the card's own Power
+    /// on runs, and the target is normalized through [`ProjectTarget`] so a
+    /// picked "lightplayer/desktop" and an absent target are one target.
+    ///
+    /// [`ProjectTarget`]: crate::app::library::ProjectTarget
+    async fn execute_sim_create_op(&mut self, op: crate::SimCreateOp) -> UiResult {
+        let target = crate::app::library::ProjectTarget::from_manifest(Some(&op.target));
+        let target_id = target.board_id().to_string();
+        if target.runtime_manifest_json().is_none() {
+            // The picker only offers startable targets, so this is a
+            // programming error or a hand-made action — refused with the
+            // reason rather than silently started as Desktop.
+            return Err(UiError::UnsupportedAction(format!(
+                "no hardware profile is checked in for {target_id}, so it cannot be started here"
+            )));
+        }
+        let name = op
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| crate::sim_device_name(&target_id));
+
+        let random = self.random_bytes6();
+        let uid = self.create_sim_record(&target_id, Some(&name), &random).await?;
+        // The roster learns the row at the next library settle, and the
+        // power-on below needs a device to aim at.
+        self.settle_library().await;
+        let Some(device) = self.devices.device_for_key(&uid).map(|device| device.id) else {
+            return Err(UiError::MissingSession(
+                "the new device did not reach the roster".to_string(),
+            ));
+        };
+        self.execute_devices_op(crate::DevicesOp::on_sim(crate::DeviceAction::Connect { device }))
+            .await?;
+        Ok(UiNotices::new().with_notice(UiNotice::info(format!("{name} is on"))))
     }
 
     /// One wire, one owner: a card gesture that needs the board's wire
