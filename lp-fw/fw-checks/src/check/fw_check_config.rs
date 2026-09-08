@@ -325,7 +325,7 @@ mod tests {
     /// `const` table cannot name a feature-gated item.
     #[test]
     fn the_rmt_chase_marker_is_the_modules() {
-        let check = find_check("rmt").expect("registered");
+        let check = find_check("rmt-chase").expect("registered");
         assert_eq!(
             check.done_marker,
             Some(crate::checks::rmt_chase::DONE_MARKER)

@@ -52,6 +52,11 @@ description = "The M4 gate set: the flash-backed shipped image booting to the id
 payloads = ["boot-idle-flash", "upload-walk"]
 
 [[set]]
+name = "emu-m5"
+description = "M5's gate set: the RMT chase. A 256-LED white dot walks the strip three times on GPIO18 through the shipping `lp-ws281x` refill path, printing one `rmt-frame` record per frame with an FNV-1a checksum of the bytes it handed the driver, and — because three chases cross the telemetry module's ten-second period — one `[WS281X]` line saying what the driver believes about its own refill race. It is the first payload whose claims are checked against a **pin**: the machine decodes the same frames off the pad and the two checksums must agree, frame for frame. The image is the harness's own, over the link it ships with, so a silicon capture of it would be the same bytes."
+payloads = ["rmt-chase"]
+
+[[set]]
 name = "usb-negative-control"
 description = "M6's negative control, rig-free: flash the shipped image, leave the port CLOSED for several seconds, then open a non-resetting reader and read the first heartbeat. The device is enumerated and undrained throughout, which is the one link state it cannot report on at the time — the `link` object's `hostNotDrainingMs` / `hostDrainingAgainMs` / `notDrainingCount` are its own record of it, on its own clock. Runs on silicon today; M6 P4 adds the emulator twin."
 payloads = ["usb-negative-control"]

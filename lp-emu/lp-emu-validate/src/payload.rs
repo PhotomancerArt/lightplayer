@@ -785,6 +785,107 @@ static JIT_BENCH_FIELDS: &[FieldSpec] = &[
     },
 ];
 
+/// The WS281x driver's own account of the refill race, one line per
+/// configured channel every ten seconds (`ws281x_telemetry`).
+///
+/// ```text
+/// [WS281X] t_ms=13936 ch=0 half=96 frames=768 complete=768 trips=0 skips=0 errors=0
+///   refills=49152 wanted=49152 lag_avg=1.0 lag_max=2 over_half=0 hist=768:49152:0:0:0:0:0:0:0
+///   entry_max=1 entry_hist=49152:0:0:0:0:0:0:0:0 trip_at=0
+/// ```
+///
+/// **Seven of these fields are `Pin`, and that is the decision this series
+/// exists to record.** `frames`, `complete`, `trips`, `skips`, `errors`,
+/// `refills` and `wanted` are not statistics about the firmware — they are
+/// claims about what reached the wire. `frames` counts `tx_end`s, `complete`
+/// is `frames − guard_trips`, and a trip means the transmitter ran out of
+/// refilled words and sent a truncated frame down a real strip. Until M5 P2
+/// there was no pad to check them against and they would have been
+/// `Structural` by default; now the decoder reads the same frames off GPIO18
+/// and a difference in any of them is a difference in what a logic analyser
+/// would have seen. `Pin` fails a replay (`replay.rs::HARD_CLASSES`), which
+/// is the point.
+///
+/// The rest is `Timing` and is reported with its ratio, never compared
+/// (PD9/D13). `lag_avg`, `lag_max`, `hist`, `entry_max`, `entry_hist` and
+/// `trip_at` all measure how *close* the ISR came to the deadline, in words,
+/// and the emulator has no flash-miss cost and a RAM-resident ISR — the
+/// discovery's §4 says so in as many words. `over_half` is timing for the
+/// same reason: it counts refills that took longer than half a window, which
+/// is a statement about the host CPU's speed rather than about the wire.
+///
+/// `half` is `Structural`: it is the block plan, and two configurations
+/// running the same image must agree on it or they are not running the same
+/// image. `t_ms` is matched and deliberately not captured — the module
+/// reports on *its* ten-second period, so the stamp says when the run started
+/// printing (masked in the human view by [`crate::mask::WS281X_TIMESTAMP`]).
+///
+/// Keyed on `ch`, because a two-channel board prints two lines and the
+/// comparison is channel against channel.
+pub static WS281X_TELEMETRY: SeriesSpec = SeriesSpec {
+    name: "ws281x-telemetry",
+    description: "the WS281x driver's frame counters, refill counts and lag histograms",
+    pattern: concat!(
+        r"\[WS281X\] t_ms=\d+ ch=(?<ch>\d+) half=(?<half>\d+) frames=(?<frames>\d+) ",
+        r"complete=(?<complete>\d+) trips=(?<trips>\d+) skips=(?<skips>\d+) ",
+        r"errors=(?<errors>\d+) refills=(?<refills>\d+) wanted=(?<wanted>\d+) ",
+        r"lag_avg=(?<lag_avg>[0-9]+\.[0-9]+) lag_max=(?<lag_max>-?\d+) ",
+        r"over_half=(?<over_half>\d+) hist=(?<hist>[0-9:]+) entry_max=(?<entry_max>-?\d+) ",
+        r"entry_hist=(?<entry_hist>[0-9:]+) trip_at=(?<trip_at>\d+)",
+    ),
+    key: "ch",
+    fields: &[
+        ("half", FieldClass::Structural),
+        ("frames", FieldClass::Pin),
+        ("complete", FieldClass::Pin),
+        ("trips", FieldClass::Pin),
+        ("skips", FieldClass::Pin),
+        ("errors", FieldClass::Pin),
+        ("refills", FieldClass::Pin),
+        ("wanted", FieldClass::Pin),
+        ("lag_avg", FieldClass::Timing),
+        ("lag_max", FieldClass::Timing),
+        ("over_half", FieldClass::Timing),
+        ("hist", FieldClass::Timing),
+        ("entry_max", FieldClass::Timing),
+        ("entry_hist", FieldClass::Timing),
+        ("trip_at", FieldClass::Timing),
+    ],
+    compiled: OnceLock::new(),
+};
+
+/// The `rmt-chase` payload's per-frame record: what the guest handed the
+/// driver, and the checksum the pin is compared against.
+static RMT_FRAME_FIELDS: &[FieldSpec] = &[
+    FieldSpec {
+        record: "rmt-frame",
+        field: "n",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "rmt-frame",
+        field: "leds",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "rmt-frame",
+        field: "lit",
+        class: FieldClass::Structural,
+    },
+    // Structural, not Pin, and the distinction is worth the sentence: this
+    // checksum is the *guest's* claim about the bytes it built, which two
+    // configurations running one image must reproduce identically because it
+    // is arithmetic and nothing else. What makes it a pin claim is comparing
+    // it with the checksum of the decoded waveform, and that comparison lives
+    // in `Transcript::pin_records` and the replay's `ws281x-frame` pairing —
+    // where it carries `FieldClass::Pin`.
+    FieldSpec {
+        record: "rmt-frame",
+        field: "crc",
+        class: FieldClass::Structural,
+    },
+];
+
 pub static ALL_PAYLOADS: &[Payload] = &[
     Payload {
         name: "shader-compile-stress",
@@ -1329,6 +1430,51 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // steady is the second, at twenty-five.
         run_secs: Some(26),
         fresh_chip: true,
+        emulator_only: None,
+    },
+    Payload {
+        name: "rmt-chase",
+        display_name: "RMT chase (256 LEDs, three passes)",
+        fw_check_slug: "rmt-chase",
+        firmware_features: &["test_rmt", "ws281x_telemetry"],
+        fw_checks_feature: Some("check-rmt"),
+        emits_header: true,
+        sentinel: Sentinel::Done("[rmt-chase] === DONE ==="),
+        host_script: None,
+        record_kinds: &["rmt-frame"],
+        mask_set: "rmt-chase",
+        fields: RMT_FRAME_FIELDS,
+        series: &[&WS281X_TELEMETRY],
+        capture: Capture::Monitor,
+        // The harness's own link, not the spike's, and this is the first
+        // payload with a `fw-checks` module for which that is true. Two
+        // reasons, and the second is what settles it. Since M6 the machine
+        // models the USB host, so there is no need for the workaround. And
+        // the `[WS281X]` line goes out through `esp_println`, which
+        // `spike_uart0_link` does **not** tee: that feature tees
+        // `Esp32UsbSerialIo::write` — the *logger's* sink — to UART0 through
+        // the ROM (`serial/usb_serial.rs`), and `esp_println` has its own
+        // USB-Serial-JTAG writer. A UART0 capture of this image would
+        // therefore hold the log lines and lose the telemetry line the
+        // payload exists to record. On the shipped link both arrive, and a
+        // silicon capture of the same image would be the same bytes.
+        link: Link::UsbSerialJtag,
+        emulator_features: None,
+        // A host with the port open from the first byte. Not a scenario —
+        // nothing here asks a question about the link — but a payload whose
+        // output is on the USB link needs somebody draining it, and
+        // `--usb-host` defaults to `absent`.
+        host_plan: Some(HostPlan {
+            host: "attached",
+            script: "",
+        }),
+        probes: &[],
+        // Three chases at the measured 18.10 ms a frame is ≈ 13.9 s, and the
+        // telemetry module reports on a ten-second period, so a run shorter
+        // than this holds no `[WS281X]` line at all. The payload knows its
+        // own timeline; `--exit-on` ends it at the done marker well before
+        // the deadline.
+        run_secs: Some(20),
         emulator_only: None,
     },
 ];
