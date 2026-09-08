@@ -3355,6 +3355,10 @@ impl StudioController {
         let Some(uid) = self.pending_device_lens.clone() else {
             return;
         };
+        if let Some(name) = self.sim_that_did_not_start(&uid) {
+            self.release_hold_on_a_sim_that_did_not_start(&uid, &name);
+            return;
+        }
         if self.device_lens_attachment(&uid).is_err() {
             // Still loading, identifying, or booting: keep holding.
             return;
@@ -3379,6 +3383,88 @@ impl StudioController {
                     );
                 }
             }
+        }
+    }
+
+    /// The name of the sim at `uid` when its runtime has been given up on
+    /// before it ever said hello — a held lens on it would hold forever.
+    ///
+    /// A sim is powered on by this tab and cannot come back on its own the
+    /// way a board can be replugged, so "the fold stopped asking" is final
+    /// for it. That state is read off the fold's own evidence, not off a
+    /// timer of this controller's: the sim's link is attached to the
+    /// roster (the sweep handed it over), nothing is running on it (the
+    /// identify — and the auto-retries the fold spends on a link that
+    /// closes under it — are over), and the port is either closed again or
+    /// open with nothing said in its window. A booting sim is busy; an
+    /// adopted one is open with a hello; a sim the sweep has not reached
+    /// yet is on no link at all — each of those keeps the hold.
+    ///
+    /// The browser case (G1, 2026-09-07): a worker that could not fetch its
+    /// engine posts `fatal`, the link raises `Error` + `Closed`, the fold
+    /// re-asks twice more and stops, and the project card said "Opening…"
+    /// for as long as anyone watched.
+    fn sim_that_did_not_start(&self, uid: &str) -> Option<String> {
+        let sim = self.sim_transport.as_ref()?;
+        if !sim.is_powered(uid) {
+            return None;
+        }
+        let endpoint = crate::sim_endpoint(uid);
+        let roster = self.devices.roster();
+        let (busy, presence, hello) = if let Some(pending) = roster
+            .pending()
+            .iter()
+            .find(|pending| pending.info.endpoint == endpoint)
+        {
+            let evidence = pending.evidence();
+            (
+                pending.is_identifying(),
+                evidence.presence,
+                evidence.classification.hello().is_some(),
+            )
+        } else if let Some(device) = roster.devices().iter().find(|device| {
+            device.link().is_some() && device.identity.endpoint.as_ref() == Some(&endpoint)
+        }) {
+            (
+                device.is_busy(),
+                device.evidence.presence,
+                device.evidence.classification.hello().is_some(),
+            )
+        } else {
+            // Not handed to the fold yet: the sweep is still pending.
+            return None;
+        };
+        if busy || !presence.is_attached() {
+            return None;
+        }
+        if presence.is_open() && hello {
+            // Adopted and listening: the ordinary attach lands this tick.
+            return None;
+        }
+        Some(
+            self.devices
+                .device_for_key(uid)
+                .map(|device| device.title())
+                .unwrap_or_else(|| "The sim".to_string()),
+        )
+    }
+
+    /// End a held open on a sim that did not start: power the sim off (so
+    /// the record goes back to the remembered line, where Power on and the
+    /// open's own Retry can start it again — a "powered" entry with no
+    /// runtime behind it could never be powered on again), and hand the
+    /// opening frame its verdict, naming the device.
+    fn release_hold_on_a_sim_that_did_not_start(&mut self, uid: &str, name: &str) {
+        self.pending_device_lens = None;
+        let message = format!("{name} did not start");
+        self.push_log(UiLogDraft::new(
+            UiLogLevel::Warn,
+            UiLogOrigin::Studio,
+            format!("{message}: its runtime closed before it said hello; powered off"),
+        ));
+        self.power_off_sim(Some(uid.to_string()));
+        if let Some(pending) = self.pending_open.take() {
+            crate::app::open_progress::note_open_failed(message, pending.retry_action());
         }
     }
 

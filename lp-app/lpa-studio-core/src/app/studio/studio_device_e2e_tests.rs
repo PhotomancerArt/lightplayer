@@ -3872,6 +3872,123 @@ fn opening_a_project_with_no_sim_creates_one_and_lands_the_lens_on_it() {
     assert_eq!(session.attachment().uid, rows[0].uid);
 }
 
+/// A sim whose runtime dies before it ever says hello — the browser worker
+/// that could not fetch its engine (G1, 2026-09-07) — must not hold the
+/// open forever. The fold hears Error + Closed, spends its identify
+/// retries and stops; the tick then ends the open with a verdict naming
+/// the device, powers the sim off so it can be started again, and leaves
+/// the record where it was. Nothing hangs, and nothing is forgotten.
+#[test]
+fn a_sim_that_never_says_hello_fails_the_open_instead_of_holding_it() {
+    let device = sim_light_player();
+    // The wire is dead from the first byte: every open lands, then closes
+    // on its first read — what the link does for a worker that posted
+    // `fatal` on the way up.
+    device.set_failure_plan(
+        lpa_link::providers::fake_device::FakeFailurePlan::none().with_disconnect_after_bytes(0),
+    );
+    let (mut bench, tasks) = DeviceBench::build(&device, "unused-serial-port", false, false);
+    let sims = Rc::new(SimDeviceTransport::new(Rc::new(ScriptedSimSource {
+        device: device.clone(),
+        restarts: Rc::new(Cell::new(0)),
+        manifests: Rc::new(RefCell::new(Vec::new())),
+    })));
+    bench.sims = Some(Rc::clone(&sims));
+    bench.controller.set_device_sim_transport(sims);
+    bench.controller.set_random(|| {
+        let mut bytes = [0u8; 16];
+        bytes[..6].copy_from_slice(&SIM_RANDOM);
+        bytes
+    });
+    let key = library_package(&bench, "Porch sign", SIM_TARGET);
+    bench.controller.request_library_refresh();
+    drive(bench.controller.settle_library());
+
+    let outcome = drive(bench.controller.dispatch(UiAction::from_op(
+        crate::ControllerId::new(crate::HOME_NODE_ID),
+        crate::HomeOp::OpenPackage { key: key.clone() },
+    )));
+    assert!(outcome.is_ok(), "the open is held, never refused: {outcome:?}");
+    let sim_uid = bench
+        .controller
+        .pending_device_lens_for_test()
+        .expect("the lens is held while the sim boots");
+    assert!(
+        bench.sims.as_ref().expect("a sim transport").is_powered(&sim_uid),
+        "the open powered the sim on"
+    );
+
+    // The fold asks, the wire closes, the fold re-asks up to its cap and
+    // stops; the tick then notices and ends the open.
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    while bench.controller.pending_device_lens_for_test().is_some() {
+        bench.step(&tasks);
+        drive(bench.controller.try_pending_device_lens());
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the hold on a sim that never said hello was never released; roster now: {:?}",
+            bench.view()
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+
+    assert!(
+        bench.controller.runtime_pool_for_test().lens_session().is_none(),
+        "nothing landed"
+    );
+    let crate::app::open_progress::OpenStage::Failed(failure) =
+        crate::app::open_progress::open_stage()
+    else {
+        panic!(
+            "the opening frame got no verdict: {:?}",
+            crate::app::open_progress::open_stage()
+        );
+    };
+    assert!(
+        failure.message.ends_with("did not start"),
+        "the verdict names the device: {:?}",
+        failure.message
+    );
+    assert_eq!(
+        failure.retry,
+        UiAction::from_op(
+            crate::ControllerId::new(crate::HOME_NODE_ID),
+            crate::HomeOp::OpenPackage { key },
+        ),
+        "Retry is the same open"
+    );
+    assert!(
+        !bench.sims.as_ref().expect("a sim transport").is_powered(&sim_uid),
+        "the sim was powered off, so Power on and Retry can start it again"
+    );
+    let rows = bench.registry();
+    assert_eq!(rows.len(), 1, "the record survives: {rows:?}");
+    assert_eq!(rows[0].uid, sim_uid);
+    assert_eq!(rows[0].transport, "sim");
+    // Settle the detach the power-off raised, then read the roster: the
+    // record is back on the remembered line, and no pending card is left
+    // behind for the dead link.
+    bench.step(&tasks);
+    let view = bench.view();
+    assert!(view.pending.is_empty(), "no orphaned pending card: {view:?}");
+    assert_eq!(view.devices.len(), 1, "{view:?}");
+    assert!(
+        !view.devices[0].state_label.starts_with("Ready"),
+        "the record is not claiming a runtime it does not have: {:?}",
+        view.devices[0].state_label
+    );
+    let last = bench
+        .controller
+        .view()
+        .console
+        .entries
+        .iter()
+        .rev()
+        .find(|entry| entry.message.contains("did not start"))
+        .map(|entry| entry.message.clone());
+    assert!(last.is_some(), "the console says why");
+}
+
 /// D37: the tab runs ONE device. Opening a project for another target
 /// powers the running sim off — silently, and keeping its record, which is
 /// what puts it on the remembered line with Power on (Q5).
