@@ -84,6 +84,18 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         println!("cargo:rustc-link-search={}", out.display());
 
+        // LP fork (README-LP.md, "The second diff"): publish that directory to
+        // dependents as `DEP_ESP_HAL_LINKER_SCRIPTS`, which the `links` key in
+        // Cargo.toml is what makes possible. A firmware that patches one of the
+        // scripts generated below — fw-esp32c6 merges `.rodata_desc` into
+        // `.rodata` so the image keeps to the 2 ROM segments the ESP32
+        // bootloader accepts — needs this path, and used to guess it by
+        // scanning `target/<triple>/<profile>/build/esp-hal-*/out`. The guess
+        // is only right after this script has run, and without `links` cargo
+        // ordered nothing: on a cold target dir the firmware's script could run
+        // first, patch nothing, and link the stock layout.
+        println!("cargo::metadata=linker-scripts={}", out.display());
+
         if chip.is_xtensa() {
             #[cfg(feature = "esp32")]
             File::create(out.join("memory_extras.x"))?.write_all(&generate_memory_extras())?;
