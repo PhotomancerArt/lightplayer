@@ -273,9 +273,20 @@ impl Ws281xDecoder {
     ///
     /// `at` is the cycle the run stopped at; it becomes the frame's `end`
     /// when the frame's last edge is still high (the wire stopped mid-bit).
+    ///
+    /// A frame that decoded **nothing** — no bit and no bad pulse — is not
+    /// reported: that is a pad which went high once and stayed there, which
+    /// is what a plain GPIO output looks like, and calling it an incomplete
+    /// WS281x frame would be an invention. A single *bad* pulse is a
+    /// finding, and is reported.
     pub fn flush(&mut self, at: Cycles) -> Option<Frame> {
-        self.open.as_ref()?;
-        if let (State::High(_), Some(open)) = (self.state, self.open.as_mut()) {
+        let open = self.open.as_mut()?;
+        if open.bits == 0 && open.error_count == 0 {
+            self.open = None;
+            self.state = State::Idle;
+            return None;
+        }
+        if matches!(self.state, State::High(_)) {
             open.last_edge = open.last_edge.max(at);
         }
         self.state = State::Idle;
@@ -644,6 +655,44 @@ mod tests {
                 .collect();
             assert_eq!(unpermute(&wire, order), rgb, "{order:?}");
         }
+    }
+
+    #[test]
+    fn a_pad_that_only_went_high_is_not_an_incomplete_frame() {
+        // What a plain GPIO output looks like: one rising edge, forever.
+        let mut d = decoder(ChannelTiming::WS2812);
+        assert!(
+            d.feed(&Edge {
+                at: 10,
+                pad: PAD,
+                level: true
+            })
+            .is_none()
+        );
+        assert!(d.is_mid_frame());
+        assert!(d.flush(1_000_000).is_none(), "nothing was decoded");
+        assert_eq!(d.frames_decoded(), 0);
+        // But one *bad* pulse is a finding, and is reported.
+        let mut d = decoder(ChannelTiming::WS2812);
+        let _ = feed_all(
+            &mut d,
+            &[
+                Edge {
+                    at: 0,
+                    pad: PAD,
+                    level: true,
+                },
+                Edge {
+                    at: ns(5_000),
+                    pad: PAD,
+                    level: false,
+                },
+            ],
+        );
+        let f = d.flush(ns(6_000)).expect("a bad pulse is reported");
+        assert_eq!(f.bits, 0);
+        assert_eq!(f.error_count, 1);
+        assert!(!f.is_complete());
     }
 
     #[test]

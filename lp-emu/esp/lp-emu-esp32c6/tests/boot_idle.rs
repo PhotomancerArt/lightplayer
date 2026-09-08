@@ -17,6 +17,7 @@
 //!
 //! `#[ignore]`d for the usual reason (`test_support`).
 
+use lp_emu_esp_common::pins::{PadId, RouteSource};
 use lp_emu_esp_common::trace::SharedBuffer;
 use lp_emu_esp32c6::machine::{
     AppSource, Esp32C6Builder, Esp32C6Machine, Outcome, StopCondition, TimeGrade,
@@ -271,6 +272,21 @@ fn the_memfs_spike_image_says_hello_and_heartbeats_with_the_5_4_figures() {
     assert_eq!(m.rmt_frames_ended(0), 0);
     assert_eq!(m.rmt_frames_ended(1), 0);
     assert!(m.rmt_words(0).is_empty());
+    // M5 P2 G2-2: no endpoint opens without a project, so `with_pin` never
+    // runs and **no peripheral signal reaches a pad**. The boot does route
+    // one pad — `init_board`'s plain GPIO output on gpio16
+    // (`out_w1ts`/`enable_w1ts` bit 16, then `func16_out_sel_cfg = 0x80` at
+    // pc 0x42095ed4) — which is a pad following `GPIO_OUT`, not a waveform.
+    let routed = m.routed_pads();
+    assert_eq!(routed.len(), 1, "{routed:?}");
+    assert_eq!(routed[0].0, PadId(16));
+    assert_eq!(routed[0].1, RouteSource::GpioOut, "no signal is routed");
+    assert!(m.frames(18).is_empty());
+    assert_eq!(m.pin_edges(18), 0);
+    assert!(m.frames(16).is_empty(), "one rising edge is not a frame");
+    let pins: Vec<&String> = notes.iter().filter(|l| l.contains("PIN gpio")).collect();
+    assert_eq!(pins.len(), 1, "{pins:?}");
+    assert!(pins[0].contains("PIN gpio16 <- GPIO_OUT"), "{}", pins[0]);
     let conf0 = m
         .peek_word(lp_emu_esp32c6::memmap::periph::RMT + 0x10)
         .expect("RMT.ch0_tx_conf0");
