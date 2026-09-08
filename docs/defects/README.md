@@ -204,6 +204,15 @@ genuinely fits none of these, and define it here in one line.
   pass, so the working set scales with references × payload size instead
   of with the result. Presents as an allocation failure far larger than
   the input could justify.
+- **`shared-namespace-collision`** — two independent producers mint
+  identifiers from the same namespace onto one shared channel, and a
+  consumer correlates on the identifier alone, so one producer's frame
+  satisfies the other's pending request. Disjoint bases (start your ids
+  high) are the usual mitigation and are the trap: they make the
+  collision rare rather than impossible, so the defect presents as flake
+  landing on a different test each time. The fix is a shape check — ask
+  whether the frame *could* answer this request before asking whether
+  its number matches.
 
 ## Index
 
@@ -337,6 +346,7 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 | config-masked-defect | 2026-08-29 | [lamp-views-latch-one-output](2026-08-29-lamp-views-latch-one-output.md) | fixed | lpa-studio-core lamp compositors (card feed, preview feed, module hero) |
 | state-conflation | 2026-08-28 | [wire-load-skips-link-engine-state](2026-08-28-wire-load-skips-link-engine-state.md) | fixed | lpa-server (wire load handler) + lpc-engine (display-layout budget) |
 | assumed-context | 2026-08-24 | [power-gate-black-scan-counts-alpha](2026-08-24-power-gate-black-scan-counts-alpha.md) | **open** | fw-esp32-common output/power_gate (is_all_black) |
+| unenforced-test-precondition | 2026-09-08 | [usb-gates-pin-a-heartbeat-millisecond](2026-09-08-usb-gates-pin-a-heartbeat-millisecond.md) | **open** (the image half closed by [cold-target-dir-links-esp-hals-stock-rodata](2026-09-08-cold-target-dir-links-esp-hals-stock-rodata.md); the precondition stands) | lp-emu-esp32c6 `tests/usb_control.rs` G3-1/G3-1b: an exact `"uptime_ms":5000` pins a millisecond the firmware's loop only samples by luck |
 | unenforced-test-precondition | 2026-08-05 | [cross-core-panic-races-the-isr-thread](2026-08-05-cross-core-panic-races-the-isr-thread.md) | fixed | lp-fw/lp-ws281x tests (cross_core) |
 | reclaim-ordered-behind-its-own-rebuild | 2026-08-04 | [compile-window-drops-rebuilt-before-compile](2026-08-04-compile-window-drops-rebuilt-before-compile.md) | fixed | lpc-engine nodes (fixture + output pressure handlers) |
 | assumed-context | 2026-08-02 | [provisioning-flashes-one-image-unchecked](2026-08-02-provisioning-flashes-one-image-unchecked.md) | fixed | lpa-link serial ESP32 providers + lpa-boards + justfile |
@@ -417,6 +427,7 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 | untested-path | 2026-09-02 | [studio-flasher-cannot-recover-a-boot-looping-c6](2026-09-02-studio-flasher-cannot-recover-a-boot-looping-c6.md) | **open** | lpa-studio-web device card flash flow (esptool-js ladder) |
 | lifecycle-ownership | 2026-09-02 | [same-gpio-rebind-disconnects-the-pad](2026-09-02-same-gpio-rebind-disconnects-the-pad.md) | fixed | fw-esp32c6 + fw-esp32s3 output/rmt `bind_channel` (esp-hal `with_pin` guard order) |
 | untested-path | 2026-09-06 | [emu-transport-drops-unprefixed-client-lines](2026-09-06-emu-transport-drops-unprefixed-client-lines.md) | fixed | lpa-client transport_serial/emulator (async `M!` framing) + lp-cli `emu` host spec |
+| shared-namespace-collision | 2026-09-08 | [a-stray-hello-answered-a-request-that-never-asked](2026-09-08-a-stray-hello-answered-a-request-that-never-asked.md) | fixed | lpa-client protocol_session/client/tokio_client/project_read_stream (correlation) |
 
 ## Predecessor: `docs/bugs/`
 

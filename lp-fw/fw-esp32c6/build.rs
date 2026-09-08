@@ -95,9 +95,20 @@ fn profile_dir_name() -> Option<String> {
 /// the epoch mtime, only a regeneration by esp-hal's build script (which
 /// writes with a real timestamp) registers as a change.
 fn patch_file(path: &std::path::Path, contents: &str) {
-    if !path.exists() {
-        return;
-    }
+    // Absent is a hard error, never a skip. A skipped patch links esp-hal's
+    // stock layout, which produces a THREE-ROM-segment image that builds
+    // clean and then dies in the bootloader — see the `rom_index < 2` note
+    // in `main`. There is no situation in which carrying on is better than
+    // saying so here.
+    assert!(
+        path.exists(),
+        "esp-hal generated no {}, so there is nothing to patch. \
+         DEP_ESP_HAL_LINKER_SCRIPTS pointed at {}; if esp-hal stopped \
+         generating this script, this patch needs rewriting against the new \
+         layout rather than skipping.",
+        path.file_name().unwrap_or_default().to_string_lossy(),
+        path.parent().unwrap_or(path).display(),
+    );
     std::fs::write(path, contents)
         .unwrap_or_else(|e| panic!("failed to patch {}: {e}", path.display()));
     std::fs::File::options()
@@ -147,8 +158,48 @@ fn main() {
     // emitted one. With the no-op and no KEEP in `text.x`, `.eh_frame` has no
     // home and is dropped entirely — verified: the linked ELF has no
     // `.eh_frame` section and no `__eh_frame` symbol.
-    let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
-    let build_dir = out_dir.parent().unwrap().parent().unwrap();
+
+    // WHERE esp-hal's generated linker scripts are, told to us by esp-hal
+    // itself rather than guessed.
+    //
+    // This used to scan `target/<triple>/<profile>/build/` for an `esp-hal-*`
+    // directory with an `out/` in it, and skip quietly when it found none.
+    // The skip was the bug (docs/defects/2026-09-08-cold-target-dir-
+    // links-esp-hals-stock-rodata.md): cargo runs build scripts concurrently unless
+    // something orders them, and esp-hal declared no `links` key, so on a
+    // COLD target dir this script could run before esp-hal's, find no out
+    // dir, patch nothing, and link the stock layout. Every later build in
+    // that tree re-patched — so build 1 and build 2 of one commit were
+    // different images, and a CI tree is always cold.
+    //
+    // The LP esp-hal fork now carries `links = "esp-hal"` and emits
+    // `cargo::metadata=linker-scripts=$OUT_DIR` (third_party/esp-hal,
+    // README-LP.md "The second diff"). The `links` key is what buys both
+    // halves of the fix: cargo runs esp-hal's build script first, and its
+    // metadata arrives here as `DEP_ESP_HAL_LINKER_SCRIPTS`. Cargo also makes
+    // this script's fingerprint depend on esp-hal's, so a rerun of esp-hal's
+    // script (which regenerates the scripts pristine) re-runs this one after
+    // it — closing the same-build half of the race that the `rerun-if-changed`
+    // watches below could only catch on the NEXT build.
+    let esp_hal_ld = PathBuf::from(std::env::var("DEP_ESP_HAL_LINKER_SCRIPTS").unwrap_or_else(
+        |_| {
+            panic!(
+                "DEP_ESP_HAL_LINKER_SCRIPTS is unset: esp-hal did not publish where it \
+                 generated its linker scripts, so the two patches below cannot be applied.\n\
+                 \n\
+                 That variable comes from `links = \"esp-hal\"` plus \
+                 `cargo::metadata=linker-scripts=…` in third_party/esp-hal (see its \
+                 README-LP.md). If the fork was dropped for an upstream esp-hal release, \
+                 those two lines have to move with it — otherwise cargo orders nothing \
+                 between esp-hal's build script and this one, and a cold target dir links \
+                 esp-hal's stock rodata.x. That image builds clean and then asserts in the \
+                 bootloader (`unpack_load_app, bootloader_utility.c:762, rom_index < 2`).\n\
+                 \n\
+                 Failing the build here is deliberate. See \
+                 docs/defects/2026-09-08-cold-target-dir-links-esp-hals-stock-rodata.md."
+            )
+        },
+    ));
 
     // The ESP32 bootloader only supports 2 ROM-mapped segments. espflash creates
     // image segments from ELF sections, splitting on gaps between sections. The
@@ -175,61 +226,35 @@ SECTIONS {
 }
 ";
 
-    // Patch all esp-hal-* build dirs; Cargo may use any of them depending on feature set.
-    let mut found_esp_hal_out = false;
-    if let Ok(entries) = std::fs::read_dir(build_dir) {
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            if name.to_string_lossy().starts_with("esp-hal-") {
-                let out_path = entry.path().join("out");
-                if out_path.exists() {
-                    found_esp_hal_out = true;
-                    // Watch the files we patch: if esp-hal's build script
-                    // re-runs it regenerates them pristine, and (with no
-                    // `links` key on esp-hal) cargo gives no ordering edge
-                    // between its script and ours — so the fresh mtimes must
-                    // dirty this script for the next build to re-patch.
-                    for file in ["eh_frame.x", "rodata.x"] {
-                        println!("cargo:rerun-if-changed={}", out_path.join(file).display());
-                    }
-                    patch_file(
-                        &out_path.join("eh_frame.x"),
-                        "/* patched: this image is abort tier and emits no unwind tables */\n",
-                    );
-                    patch_file(&out_path.join("rodata.x"), patched_rodata);
-                }
-            }
-        }
+    // Watch the files we patch: if esp-hal's build script re-runs it
+    // regenerates them pristine, and the fresh mtimes must dirty this script
+    // so the patch is re-applied. (With the `links` edge above, cargo's own
+    // fingerprint propagation already does this; the watches are the belt to
+    // that braces, and they cost nothing.)
+    for file in ["eh_frame.x", "rodata.x"] {
+        println!("cargo:rerun-if-changed={}", esp_hal_ld.join(file).display());
     }
+    patch_file(
+        &esp_hal_ld.join("eh_frame.x"),
+        "/* patched: this image is abort tier and emits no unwind tables */\n",
+    );
+    patch_file(&esp_hal_ld.join("rodata.x"), patched_rodata);
 
     // Emitting rerun-if-changed disables cargo's default rule (re-run when any
-    // package file changes), so restate it as the package dir. Together with
-    // the esp-hal watches above this is the staleness guard: if esp-hal's
-    // script re-runs while ours stays fingerprint-fresh, the regenerated
-    // files dirty this script and the next build re-patches. A same-build
-    // regeneration can still slip one bad link through — there is no ordering
-    // guarantee between the two scripts.
+    // package file changes), so restate it as the package dir.
     //
-    // ⚠️ That failure is now SILENT AT BUILD TIME, and it did not used to be.
-    // While `text.x` carried our `__eh_frame` symbol, a pristine copy always
-    // killed the link with `undefined symbol: __eh_frame`, which was the
-    // tripwire for the whole stale set. With the unwind tier gone there is no
-    // such reference: a pristine `rodata.x` links fine and produces THREE
-    // ROM-mapped segments, and the board then fails at boot inside the
-    // bootloader (`Assert failed in unpack_load_app, bootloader_utility.c:762
-    // (rom_index < 2)`). So the symptom moved from the build to the device.
-    // If a freshly built image asserts there, suspect this patch before
-    // suspecting the image: one rebuild re-patches and self-heals.
+    // ⚠️ If this patch ever stops being applied, the failure is SILENT AT
+    // BUILD TIME and it did not use to be. While `text.x` carried our
+    // `__eh_frame` symbol, a pristine copy always killed the link with
+    // `undefined symbol: __eh_frame`, which was the tripwire for the whole
+    // stale set. With the unwind tier gone there is no such reference: a
+    // pristine `rodata.x` links fine and produces THREE ROM-mapped segments,
+    // and the board then fails at boot inside the bootloader (`Assert failed
+    // in unpack_load_app, bootloader_utility.c:762 (rom_index < 2)`). That is
+    // why the two failure modes this script CAN see — no
+    // `DEP_ESP_HAL_LINKER_SCRIPTS`, or a missing script inside it — both abort
+    // the build instead of carrying on.
     println!("cargo:rerun-if-changed={}", manifest_dir.display());
-    if !found_esp_hal_out {
-        // esp-hal's out dir doesn't exist yet (its script hasn't run).
-        // Watching a path that never exists forces a re-run every build
-        // until the dir appears and gets patched.
-        println!(
-            "cargo:rerun-if-changed={}",
-            build_dir.join("esp-hal-out-pending").display()
-        );
-    }
 }
 
 /// Emit `LP_FLASH_APP_BYTES` from partitions.csv's `app` row, so the embedded

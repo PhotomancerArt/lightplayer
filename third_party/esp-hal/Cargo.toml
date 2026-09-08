@@ -15,6 +15,12 @@ rust-version = "1.88.0"
 name = "esp-hal"
 version = "1.1.1"
 build = "build.rs"
+# LP fork: see README-LP.md, "The second diff: a `links` key". Not a native
+# library — the key is here for the two things cargo attaches to it: an
+# ordering edge that runs this build script before every dependent's, and
+# `DEP_ESP_HAL_LINKER_SCRIPTS` naming the OUT_DIR the generated linker
+# scripts land in. fw-esp32c6 patches two of those scripts and had neither.
+links = "esp-hal"
 exclude = [
     "api-baseline",
     "MIGRATING-*",

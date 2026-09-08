@@ -77,7 +77,7 @@
     const m = await loadManifest();
     const plan = buildPlan(m);
     if (worker) worker.terminate();
-    worker = new Worker('worker.js');
+    worker = new Worker('worker.js?v=wasi-stubs-1');
     results = []; tbody.innerHTML = ''; headlines.innerHTML = ''; table.hidden = true; btn.disabled = true;
     status.textContent = 'Loading module…';
     worker.onmessage = (ev) => {
