@@ -68,6 +68,7 @@ pub struct FrameStats {
     total_cycles: u64,
     min_cycles: u32,
     max_cycles: u32,
+    first_cycles: u32,
 }
 
 impl Default for FrameStats {
@@ -83,6 +84,7 @@ impl FrameStats {
             total_cycles: 0,
             min_cycles: u32::MAX,
             max_cycles: 0,
+            first_cycles: 0,
         }
     }
 
@@ -90,6 +92,9 @@ impl FrameStats {
     /// inside the loop being measured.
     #[inline]
     pub fn record(&mut self, cycles: u32) {
+        if self.frames == 0 {
+            self.first_cycles = cycles;
+        }
         self.frames = self.frames.saturating_add(1);
         self.total_cycles = self.total_cycles.saturating_add(cycles as u64);
         if cycles < self.min_cycles {
@@ -116,6 +121,18 @@ impl FrameStats {
 
     pub const fn max_cycles(&self) -> u32 {
         self.max_cycles
+    }
+
+    /// The first frame, separately — because it is not like the others.
+    ///
+    /// The engine compiles a shader **lazily**, on the first frame that
+    /// samples it, not during `load_project`. So frame 1 carries the whole
+    /// compile (52 ms for `projects/test/basic`, against a ~15 ms steady
+    /// frame) and is reliably the run's `max`. Reporting it on its own is what
+    /// keeps `max` meaning "the worst steady frame" to a reader who knows to
+    /// look, instead of meaning "the compile" every single time.
+    pub const fn first_cycles(&self) -> u32 {
+        self.first_cycles
     }
 
     pub const fn mean_cycles(&self) -> u64 {
@@ -178,8 +195,9 @@ pub fn emit_summary_record(
 ) {
     let mean = stats.mean_cycles();
     emit_record_json(format_args!(
-        r#"{{"kind":"render-loop-summary","frames":{frames},"delta_ms":{delta_ms},"uptime_us":{uptime_us},"render_us_total":{total},"render_us_min":{min},"render_us_max":{max},"render_us_mean":{mean_us},"fps_centi":{fps},"heap_free":{heap_free},"heap_used":{heap_used},"largest_free_block":{largest_free_block}}}"#,
+        r#"{{"kind":"render-loop-summary","frames":{frames},"delta_ms":{delta_ms},"uptime_us":{uptime_us},"render_us_total":{total},"render_us_first":{first},"render_us_min":{min},"render_us_max":{max},"render_us_mean":{mean_us},"fps_centi":{fps},"heap_free":{heap_free},"heap_used":{heap_used},"largest_free_block":{largest_free_block}}}"#,
         frames = stats.frames(),
+        first = cycles_to_us(stats.first_cycles() as u64, cpu_hz),
         total = cycles_to_us(stats.total_cycles(), cpu_hz),
         min = cycles_to_us(stats.min_cycles() as u64, cpu_hz),
         max = cycles_to_us(stats.max_cycles() as u64, cpu_hz),
@@ -199,6 +217,20 @@ mod tests {
         assert_eq!(stats.min_cycles(), 0, "u32::MAX must never reach a record");
         assert_eq!(stats.max_cycles(), 0);
         assert_eq!(stats.mean_cycles(), 0);
+    }
+
+    #[test]
+    fn the_first_frame_is_kept_apart_because_it_carries_the_compile() {
+        let mut stats = FrameStats::new();
+        stats.record(10_000_000);
+        stats.record(2_400_000);
+        stats.record(2_500_000);
+        assert_eq!(stats.first_cycles(), 10_000_000);
+        assert_eq!(
+            stats.max_cycles(),
+            10_000_000,
+            "max still reports the truth; `first` is what lets a reader discount it"
+        );
     }
 
     #[test]

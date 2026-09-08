@@ -888,6 +888,11 @@ static RENDER_LOOP_FIELDS: &[FieldSpec] = &[
     },
     FieldSpec {
         record: "render-loop-summary",
+        field: "render_us_first",
+        class: FieldClass::Timing,
+    },
+    FieldSpec {
+        record: "render-loop-summary",
         field: "render_us_min",
         class: FieldClass::Timing,
     },

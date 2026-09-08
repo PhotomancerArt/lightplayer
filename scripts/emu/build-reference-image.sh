@@ -39,6 +39,15 @@
 #   harness   = test_shader_compile_incremental,esp32c6,spike_uart0_link
 #   boot-idle = esp32c6,server,radio,spike_uart0_link
 #   boot-idle-memfs = esp32c6,server,radio,spike_uart0_link,memory_fs   (the §5.4 diagnostic variant)
+#   render-basic    = …,memory_fs,bench_render_loop        (M5 P0: the render loop)
+#   render-rocaille = …,memory_fs,bench_project_rocaille   (M5 P0: the pressure test)
+#
+# ⚠️ The two render-loop images are pinned at a DIFFERENT commit from the other
+# three, and must be: `bench_render_loop` does not exist at d6cfaa205. They also
+# take `<spike>=none` — the feature is in their own tree, so there is nothing to
+# cherry-pick and `build.rs` stamps `dirty: false`. Their pin is also PAST the
+# 2026-09-08 `links = "esp-hal"` fix, so `image_drift`'s `.rodata_merge` heal
+# should never fire for them; if it does, that is a finding, not a heal.
 #
 # `--features` adds to the crate's defaults (`esp32c6,server,radio`), which is
 # how the spike built them (§5.4: "defaults on").
@@ -65,6 +74,8 @@ case "$features" in
     esp32c6,server,radio,spike_uart0_link) slug=boot-idle ;;
     esp32c6,server,radio,spike_uart0_link,memory_fs) slug=boot-idle-memfs ;;
     esp32c6,server,radio,memory_fs) slug=boot-idle-memfs-usb ;;
+    esp32c6,server,radio,spike_uart0_link,memory_fs,bench_render_loop) slug=render-basic ;;
+    esp32c6,server,radio,spike_uart0_link,memory_fs,bench_project_rocaille) slug=render-rocaille ;;
     *) slug="${features//,/+}" ;;
 esac
 

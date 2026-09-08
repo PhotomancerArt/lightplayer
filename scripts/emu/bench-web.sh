@@ -99,28 +99,41 @@ fi
 wasm_bin="target/wasm32-wasip1/release/lp-emu-esp32c6.wasm"
 [[ -f "$wasm_bin" ]] || { echo "bench-web: $wasm_bin missing (run without --no-build first)" >&2; exit 1; }
 
-# The two pinned reference images `bench-emu-c6` uses (same commit, same
-# feature lists) — built once and cached under target/emu-ref/, arch-neutral
+# The pinned reference images `bench-emu-c6` uses (same rows, same feature
+# lists, same pins) — built once and cached under target/emu-ref/, arch-neutral
 # (riscv32imac-unknown-none-elf) so the host running this script does not
 # matter.
-reference_commit="d6cfaa205"
+#
+# slug|env var|features|emulated timeout|--exit-on substring|commit|spike
+#
+# The last two columns are per image, because the two render-loop rows cannot
+# share the historical pin: `bench_render_loop` does not exist at d6cfaa205.
+# They take no cherry-pick (`none`) — the spike feature is already in their
+# tree.
+#
+# ⚠️ Four images is ~36 MB of ELF staged for the phone to download. If that
+# becomes the reason a phone run is slow to start, stage a subset rather than
+# stripping the images: the whole point of the pin is that these are the bytes
+# `bench-emu-c6` measured.
 images=(
-    "harness|LP_EMU_C6_REF_HARNESS|test_shader_compile_incremental,esp32c6,spike_uart0_link|5s|[inc-shader-compile] === DONE ==="
-    "boot-idle-memfs|LP_EMU_C6_REF_BOOT_IDLE_MEMFS|esp32c6,server,radio,spike_uart0_link,memory_fs|3s|"
+    "harness|LP_EMU_C6_REF_HARNESS|test_shader_compile_incremental,esp32c6,spike_uart0_link|5s|[inc-shader-compile] === DONE ===|d6cfaa205|e8d64eeff"
+    "boot-idle-memfs|LP_EMU_C6_REF_BOOT_IDLE_MEMFS|esp32c6,server,radio,spike_uart0_link,memory_fs|3s||d6cfaa205|e8d64eeff"
+    "render-basic|LP_EMU_C6_REF_RENDER_BASIC|esp32c6,server,radio,spike_uart0_link,memory_fs,bench_render_loop|8s|[render-loop] === DONE ===|6b22ee18b|none"
+    "render-rocaille|LP_EMU_C6_REF_RENDER_ROCAILLE|esp32c6,server,radio,spike_uart0_link,memory_fs,bench_project_rocaille|8s|[render-loop] === DONE ===|6b22ee18b|none"
 )
 
 resolve_image() {
-    local slug="$1" var="$2" features="$3" path
+    local slug="$1" var="$2" features="$3" commit="$4" spike="$5" path
     path="${!var:-}"
     if [[ -n "$path" ]]; then
         [[ -f "$path" ]] || { echo "bench-web: $var points at $path, which is not a file" >&2; exit 1; }
         echo "$path"
         return
     fi
-    path="target/emu-ref/$reference_commit-$slug/fw-esp32c6"
+    path="target/emu-ref/$commit-$slug/fw-esp32c6"
     if [[ ! -f "$path" ]]; then
         echo "bench-web: building the $slug reference image" >&2
-        scripts/emu/build-reference-image.sh "$features" >&2
+        scripts/emu/build-reference-image.sh "$features" "$commit" "$spike" >&2
     fi
     echo "$path"
 }
@@ -131,8 +144,8 @@ cp "$rig_dir/index.html" "$rig_dir/worker.js" "$stage_dir/"
 
 manifest_images="[]"
 for spec in "${images[@]}"; do
-    IFS='|' read -r slug var features timeout exit_on <<<"$spec"
-    elf="$(resolve_image "$slug" "$var" "$features")"
+    IFS='|' read -r slug var features timeout exit_on commit spike <<<"$spec"
+    elf="$(resolve_image "$slug" "$var" "$features" "$commit" "$spike")"
     cp "$elf" "$stage_dir/fw-$slug.elf"
     entry="$(jq -n --arg slug "$slug" --arg elf "fw-$slug.elf" --arg timeout "$timeout" \
         --arg exitOn "$exit_on" '{slug: $slug, elf: $elf, timeout: $timeout, exitOn: (if $exitOn == "" then null else $exitOn end)}')"

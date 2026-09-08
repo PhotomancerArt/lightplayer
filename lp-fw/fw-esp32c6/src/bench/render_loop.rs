@@ -264,10 +264,11 @@ pub fn report(
     let mean_us = render_loop::cycles_to_us(stats.mean_cycles(), CPU_HZ);
     let fps = render_loop::fps_centi(stats.mean_cycles(), CPU_HZ);
     log::info!(
-        "[render-loop] project={PROJECT_NAME} lamps={LAMPS} frames={} mean={mean_us}us min={}us max={}us fps={}.{:02}",
+        "[render-loop] project={PROJECT_NAME} lamps={LAMPS} frames={} mean={mean_us}us min={}us max={}us first={}us fps={}.{:02}",
         stats.frames(),
         render_loop::cycles_to_us(stats.min_cycles() as u64, CPU_HZ),
         render_loop::cycles_to_us(stats.max_cycles() as u64, CPU_HZ),
+        render_loop::cycles_to_us(stats.first_cycles() as u64, CPU_HZ),
         fps / 100,
         fps % 100,
     );

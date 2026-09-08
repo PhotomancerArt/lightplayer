@@ -61,24 +61,32 @@ mkdir -p "$bench_dir"
 
 # --- the reference images ---------------------------------------------------
 # slug|env var|features|emulated timeout|--exit-on substring (empty = none)
+# slug|env var|features|emulated timeout|--exit-on substring|commit|spike
+#
+# The last two columns are per image. The three original rows carry the
+# historical pin the committed transcripts were recorded at; the two
+# render-loop rows CANNOT — `bench_render_loop` does not exist at d6cfaa205 —
+# so they name their own commit and take no cherry-pick (`none`), because the
+# spike feature is already in their tree.
 images=(
-    "harness|LP_EMU_C6_REF_HARNESS|test_shader_compile_incremental,esp32c6,spike_uart0_link|5s|[inc-shader-compile] === DONE ==="
-    "boot-idle-memfs|LP_EMU_C6_REF_BOOT_IDLE_MEMFS|esp32c6,server,radio,spike_uart0_link,memory_fs|3s|"
+    "harness|LP_EMU_C6_REF_HARNESS|test_shader_compile_incremental,esp32c6,spike_uart0_link|5s|[inc-shader-compile] === DONE ===|d6cfaa205|e8d64eeff"
+    "boot-idle-memfs|LP_EMU_C6_REF_BOOT_IDLE_MEMFS|esp32c6,server,radio,spike_uart0_link,memory_fs|3s||d6cfaa205|e8d64eeff"
+    "render-basic|LP_EMU_C6_REF_RENDER_BASIC|esp32c6,server,radio,spike_uart0_link,memory_fs,bench_render_loop|8s|[render-loop] === DONE ===|6b22ee18b|none"
+    "render-rocaille|LP_EMU_C6_REF_RENDER_ROCAILLE|esp32c6,server,radio,spike_uart0_link,memory_fs,bench_project_rocaille|8s|[render-loop] === DONE ===|6b22ee18b|none"
 )
-reference_commit="d6cfaa205"
 
 resolve_image() {
-    local slug="$1" var="$2" features="$3" path
+    local slug="$1" var="$2" features="$3" commit="$4" spike="$5" path
     path="${!var:-}"
     if [[ -n "$path" ]]; then
         [[ -f "$path" ]] || { echo "bench-c6: $var points at $path, which is not a file" >&2; exit 1; }
         echo "$path"
         return
     fi
-    path="target/emu-ref/$reference_commit-$slug/fw-esp32c6"
+    path="target/emu-ref/$commit-$slug/fw-esp32c6"
     if [[ ! -f "$path" ]]; then
         echo "bench-c6: building the $slug reference image" >&2
-        scripts/emu/build-reference-image.sh "$features" >&2
+        scripts/emu/build-reference-image.sh "$features" "$commit" "$spike" >&2
     fi
     echo "$path"
 }
@@ -96,8 +104,8 @@ lines=()
 json_rows=()
 
 for spec in "${images[@]}"; do
-    IFS='|' read -r slug var features timeout exit_on <<<"$spec"
-    elf="$(resolve_image "$slug" "$var" "$features")"
+    IFS='|' read -r slug var features timeout exit_on commit spike <<<"$spec"
+    elf="$(resolve_image "$slug" "$var" "$features" "$commit" "$spike")"
 
     for grade in t1 t2; do
         uart="$bench_dir/$slug-$grade.txt"
@@ -187,7 +195,7 @@ fi
 if [[ $do_promote -eq 1 ]]; then
     mkdir -p "$prev_dir"
     for spec in "${images[@]}"; do
-        IFS='|' read -r slug _ _ _ _ <<<"$spec"
+        IFS='|' read -r slug _ _ _ _ _ _ <<<"$spec"
         for grade in t1 t2; do
             cp "$bench_dir/$slug-$grade.txt" "$prev_dir/$slug-$grade.txt"
         done

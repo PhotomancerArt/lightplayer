@@ -670,7 +670,7 @@ async fn main(spawner: embassy_executor::Spawner) {
             // image that disarmed it would differ from the product in a third
             // way, for no measurement.
             let mut watchdog = app.watchdog;
-            server_loop::run_server_loop_bounded(
+            let server = server_loop::run_server_loop_bounded(
                 app.server,
                 app.transport,
                 app.time_provider,
@@ -682,7 +682,11 @@ async fn main(spawner: embassy_executor::Spawner) {
             .await;
 
             let uptime_us = started.elapsed().as_micros();
+            // Report BEFORE the server is dropped: the summary's heap figures
+            // are meant to describe a machine with the project loaded, and
+            // dropping it first would report one that had just unloaded.
             bench::render_loop::report(&stats, load_us, uptime_us, heap_after_load);
+            drop(server);
 
             // Idle, yielding, so the I/O task drains the records and the
             // marker to the host link. `--exit-on` fires on those bytes; a

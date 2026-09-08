@@ -134,7 +134,7 @@ pub async fn run_server_loop_bounded<T: ServerTransport>(
     mut feed_watchdog: impl FnMut(u64),
     budget: FrameBudget,
     mut on_frame: impl FnMut(u32),
-) {
+) -> LpServer {
     // Wire hello: the first id-0 frame this loop ever sends, so clients can
     // check the protocol version before anything else arrives (see
     // docs/adr/2026-07-14-wire-hello-versioning.md).
@@ -344,7 +344,12 @@ pub async fn run_server_loop_bounded<T: ServerTransport>(
         if let Some(limit) = budget.frames
             && frame_count >= limit
         {
-            return;
+            // Handed back rather than dropped: the caller's summary wants the
+            // heap figures for a machine with the project still loaded, and
+            // dropping the server here would report a machine that had just
+            // unloaded one. (Measured: 316 kB free after the drop against
+            // 219 kB with the project live.)
+            return server;
         }
     }
 }
