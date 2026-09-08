@@ -31,6 +31,7 @@ them: nothing here parses or rebuilds a wire message, and the framing rule
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 
@@ -43,9 +44,35 @@ CLOSE = b" >>"
 FIRST_NEEDLE = "[RECOVERY] boot complete (first frame served)"
 
 
-def host_chunks(blob: bytes) -> list[bytes]:
-    """Every `<<HOST … >>` record's payload, in order."""
-    out: list[bytes] = []
+def host_chunks(blob: bytes, times: str | None) -> list[bytes]:
+    """Every `<<HOST … >>` record's payload, in order.
+
+    The proxy writes a `.times` sidecar beside the transcript — one line per
+    record, `<seconds> <dev|host> <offset> <length>` — and that is the
+    authoritative framing: a request's bytes can contain the close marker
+    themselves (`projects/test/shader-oracle`'s README says `(v + 0x80) >> 8`,
+    and the first cut of M5 P4's walk lost the tail of that request to it).
+    The marker scan is the fallback for a transcript with no sidecar, and it
+    says so when a record it found looks cut short.
+    """
+    if times is not None:
+        out: list[bytes] = []
+        for n, line in enumerate(open(times), 1):
+            parts = line.split()
+            if len(parts) != 4:
+                raise SystemExit(f"{times}:{n}: expected `<t> <dir> <offset> <len>`")
+            _, direction, offset, length = parts
+            if direction != "host":
+                continue
+            rec = blob[int(offset) : int(offset) + int(length)]
+            if not (rec.startswith(OPEN) and rec.endswith(CLOSE)):
+                raise SystemExit(
+                    f"{times}:{n}: the record at {offset}+{length} is not a "
+                    f"<<HOST … >> record — is the sidecar from this transcript?"
+                )
+            out.append(rec[len(OPEN) : -len(CLOSE)])
+        return out
+    out = []
     at = 0
     while True:
         start = blob.find(OPEN, at)
@@ -54,7 +81,15 @@ def host_chunks(blob: bytes) -> list[bytes]:
         end = blob.find(CLOSE, start)
         if end < 0:
             raise SystemExit(f"unterminated <<HOST record at byte {start}")
-        out.append(blob[start + len(OPEN) : end])
+        chunk = blob[start + len(OPEN) : end]
+        if not chunk.endswith(b"\n"):
+            print(
+                f"walk-script: the host record at byte {start} does not end in a "
+                f"newline — a request containing ` >>` was probably cut at the marker; "
+                f"pass the proxy's `.times` sidecar (or keep it beside the transcript)",
+                file=sys.stderr,
+            )
+        out.append(chunk)
         at = end + len(CLOSE)
 
 
@@ -100,6 +135,11 @@ def main() -> int:
     ap.add_argument("transcript")
     ap.add_argument("-o", "--out")
     ap.add_argument(
+        "--times",
+        help="the proxy's `.times` sidecar (default: <transcript>.times), the "
+        "authoritative record framing",
+    )
+    ap.add_argument(
         "--first-needle",
         default=FIRST_NEEDLE,
         help="what the first request waits for",
@@ -140,7 +180,11 @@ def main() -> int:
     args = ap.parse_args()
 
     blob = open(args.transcript, "rb").read()
-    chunks = host_chunks(blob)
+    times = args.times or f"{args.transcript}.times"
+    if not os.path.exists(times):
+        print(f"walk-script: no {times}; framing host records by their markers", file=sys.stderr)
+        times = None
+    chunks = host_chunks(blob, times)
     if not chunks:
         raise SystemExit(f"{args.transcript} has no <<HOST records")
 

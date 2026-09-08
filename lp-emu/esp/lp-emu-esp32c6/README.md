@@ -654,6 +654,41 @@ between frames and an 18.1 ms frame period. Two runs write byte-identical
 `--dump-frames` files, and a snapshot taken with the decoder mid-bit
 restores to decode the same frames.
 
+**The M5 gates**, mirroring "Reference images and the gates" (all
+`--strict-bus`, the desk board's eFuse identity; the shipped-image ones over
+the USB link with a host attached from power-on):
+
+- **G1** (P1, `tests/rmt_chase.rs`): the `test_rmt` chase transmitted
+  word-exact — 24 frames × 6,144 data words + latch + STOP, 64 `thr` a
+  frame, 200 cycles a bit; `t2` sends the same words.
+- **G2** (P2, the same file): the pad carries the words — gpio18's decoded
+  frames byte-equal to the word log, above.
+- **G3** (P3, `tests/rmt_chase_replay.rs`, transcripts under
+  `lp-emu/transcripts/esp32c6/rmt-chase/`): the `rmt-chase` payload's 768
+  `rmt-frame` checksums against the 768 frames the pad carried, on both
+  grades; `[WS281X]` `trips 0 skips 0 errors 0`, `complete == frames`; the
+  refill histograms reported beside silicon's, never gated.
+- **G4-1** (P4, `tests/shader_oracle_pin.rs`, transcripts under
+  `shader-oracle-walk/`): the **shipped** image walking
+  `projects/test/shader-oracle` (`walks/shader-oracle.script`) puts, after
+  exactly one compile-window black frame, the host oracle's frame on
+  gpio18 — `unpermute(wire, GRB)` equal to `[ORACLE] rgb=` and
+  `[ORACLE-RV32] rgb=`, FNV-1a `0x55772254` — and every later frame in
+  three seconds is the same bytes (57 of them under `t1`, 37 under `t2`;
+  the first lit at 2.58 / 2.63 s). Two runs dump identical files.
+- **G4-2** (P4, `tests/basic_pin.rs`): `examples/basic` on the shipped
+  two-channel plan — every frame 241 LEDs, 5,784 bits, 0 errors, latched
+  by a reset ≥ 300 µs, at a period that does not wander; contents never
+  compared (the project is clock-driven); two runs dump identical files.
+
+The double colour swap, measured (DD34 Q4): the shipped driver opens GRB
+and `lp-ws281x` permutes once, so the wire carries GRB and `rgb`
+(unpermuted GRB) is the driver's input — the oracle's bytes, above. The
+`LedChannel` harness swaps RGB→GRB *itself* before handing the frame to
+the same encoder, so on `rmt-chase` the wire carries the caller's RGB and
+`rgb` is that swapped once more; the chase is white-on-black and invariant
+under it. A harness-only fact, filed here rather than fixed.
+
 ### The radio window
 
 Everything esp-radio's blob and the ROM's PHY code touch between
@@ -888,6 +923,9 @@ is a local affair.
 | `boot_idle` | the memfs image's hello and §5.4 heartbeat, **and** the flash-backed image's `[FS]` pair and §5.1 heartbeat — M4's first gate, which replaced the test that pinned the `SPI1.cmd` spin |
 | `flash_persistence` | a chip survives the machine: format once, mount twice, `--flash-copy` writes nothing |
 | `upload_walk` | the thirteen-frame upload from `walks/examples-basic.script`, the second boot that auto-loads what it wrote, and determinism |
+| `rmt_chase`, `rmt_chase_replay` | M5's chase: the words, the pad, the payload's checksums against the pad, the telemetry line |
+| `shader_oracle_pin` | M5 P4's pin claim on the shipped image: `walks/shader-oracle.script`'s first lit frame off gpio18 against the host oracle, under both grades |
+| `basic_pin` | `examples/basic` on the pad: whole, latched 241-LED frames at a steady period, never their contents |
 | `host_absent`, `boot_no_radio`, `boot`, `rom_*`, `stack_guard` | M3's |
 
 `just test-emu-c6` is the whole set: the machine's boot tests, the M3 and M4

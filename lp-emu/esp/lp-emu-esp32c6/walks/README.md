@@ -8,6 +8,7 @@ time alone.
 |---|---|
 | `examples-basic.script` | `lp-cli upload examples/basic` — 13 wire frames, from the hello request to `projectRead` |
 | `examples-meteor.script` | `lp-cli upload examples/meteor` — 14 frames, the two-shader project the spike report §11.2 measured its heap ledger on |
+| `shader-oracle.script` | `lp-cli upload projects/test/shader-oracle` — 12 frames (no `clock.json`), the host oracle's own project, captured at `7e043ae2d` over the USB link; the walk M5 P4's pin gate replays |
 
 **A walk is not a link.** The same file replays on either: `after "<line>"`
 matches what a host *on the link the run used* received, so `upload-walk`
@@ -37,6 +38,14 @@ machine over a socket and `uart-tcp-proxy.py` transcribes both directions;
 script. So the bytes are the ones `lp-cli` actually sent — nothing here
 parses or rebuilds a wire message, and the framing rule
 (`lpc_wire::json::to_serial_line`, PR #538) stays lp-cli's.
+
+The generator frames the host records by the proxy's `.times` sidecar
+(`walk.uart.bin.times`: one line per record, offset and length), not by the
+`<<HOST … >>` markers alone. A request can contain the close marker itself
+— `projects/test/shader-oracle`'s README says `(v + 0x80) >> 8`, and the
+marker scan cut that request at 1,440 of its 3,271 bytes — so keep the
+sidecar beside the transcript; without it the generator falls back to the
+markers and warns about a record that does not end in a newline.
 
 To regenerate after a change to the project or the client:
 
