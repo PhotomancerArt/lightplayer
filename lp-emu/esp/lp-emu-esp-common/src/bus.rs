@@ -155,6 +155,9 @@ pub struct BusScalars {
     pub pc: u32,
     pub hart: usize,
     pub sideband: bool,
+    /// A peripheral asked the machine to take over before the next
+    /// instruction ([`BusCx::yield_to_machine`]).
+    pub yield_now: bool,
     pub irq: IrqLines,
     pub unmapped_sites: BTreeSet<(u32, u32)>,
     pub unmapped_reads: u64,
@@ -211,6 +214,8 @@ pub struct SocBus {
     /// refused like an unmapped one. See [`SocBus::set_strict_grade`].
     strict_grade: Option<RegGrade>,
     sideband: bool,
+    /// See [`BusCx::yield_to_machine`].
+    yield_now: bool,
     /// The chip's misaligned-access policy, mirrored from the hart. The C6
     /// core performs misaligned data accesses in hardware, so its machine
     /// sets both permissive; the flag lives here because the bus is the
@@ -295,6 +300,7 @@ impl SocBus {
             strict: false,
             strict_grade: None,
             sideband: false,
+            yield_now: false,
             allow_unaligned: false,
             watchpoints: [None; WATCHPOINT_SLOTS],
             armed_for: [0; 3],
@@ -551,6 +557,7 @@ impl SocBus {
             host: &mut self.host,
             matrix: &mut *self.matrix,
             request: &mut self.request,
+            yield_now: &mut self.yield_now,
             pins: &mut self.pins,
         };
         Some(f(periph, &mut cx))
@@ -620,6 +627,7 @@ impl SocBus {
                 host: &mut self.host,
                 matrix: &mut *self.matrix,
                 request: &mut self.request,
+                yield_now: &mut self.yield_now,
                 pins: &mut self.pins,
             };
             range.periph.on_event(id, &mut cx);
@@ -644,6 +652,7 @@ impl SocBus {
                 host: &mut self.host,
                 matrix: &mut *self.matrix,
                 request: &mut self.request,
+                yield_now: &mut self.yield_now,
                 pins: &mut self.pins,
             };
             range.periph.started(&mut cx);
@@ -752,6 +761,7 @@ impl SocBus {
             pc: self.pc,
             hart: self.hart,
             sideband: self.sideband,
+            yield_now: self.yield_now,
             irq: self.irq.clone(),
             unmapped_sites: self.unmapped_sites.clone(),
             unmapped_reads: self.unmapped_reads,
@@ -767,6 +777,7 @@ impl SocBus {
         self.pc = s.pc;
         self.hart = s.hart;
         self.sideband = s.sideband;
+        self.yield_now = s.yield_now;
         self.irq = s.irq.clone();
         self.unmapped_sites = s.unmapped_sites.clone();
         self.unmapped_reads = s.unmapped_reads;
@@ -1025,6 +1036,7 @@ impl SocBus {
                     host: &mut self.host,
                     matrix: &mut *self.matrix,
                     request: &mut self.request,
+                    yield_now: &mut self.yield_now,
                     pins: &mut self.pins,
                 };
                 range.periph.read(off, width, &mut cx)
@@ -1111,6 +1123,7 @@ impl SocBus {
                     host: &mut self.host,
                     matrix: &mut *self.matrix,
                     request: &mut self.request,
+                    yield_now: &mut self.yield_now,
                     pins: &mut self.pins,
                 };
                 range.periph.write(off, width, value, &mut cx);
@@ -1434,6 +1447,10 @@ impl Bus for SocBus {
 
     fn take_sideband(&mut self) -> bool {
         core::mem::replace(&mut self.sideband, false)
+    }
+
+    fn take_yield(&mut self) -> bool {
+        core::mem::replace(&mut self.yield_now, false)
     }
 
     fn pending_cpu_interrupt(&self) -> Option<u8> {

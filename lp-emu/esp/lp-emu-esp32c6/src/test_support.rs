@@ -472,6 +472,17 @@ impl ReferenceImage {
         commit: REFERENCE_COMMIT,
         spike: false,
     };
+    /// The image the silicon `boot-idle-flash` transcript came from: the
+    /// shipped feature set, no spike, at the commit sitting 1 flashed.
+    /// M7's boot-log diff runs the ROM-up boot on a merged image built
+    /// from exactly this ELF.
+    pub const SHIPPED_USB_SILICON: ReferenceImage = ReferenceImage {
+        slug: "esp32c6+server+radio",
+        features: "esp32c6,server,radio",
+        commit: SILICON_BOOT_IDLE_COMMIT,
+        spike: false,
+    };
+
     /// The same image at [`SCENARIO_COMMIT`], for the three M6 scenarios
     /// whose vehicle is the connection monitor's own stamps. Sitting 1's
     /// commit predates them, so the DD30 image cannot answer those payloads
@@ -704,5 +715,104 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// The **merged** flash image for a reference build: the second-stage
+/// bootloader at `0x0`, the partition table at `0x8000` and the app in the
+/// `factory` partition, in one 4 MiB file — the bytes a flasher writes, and
+/// the only input a ROM-up boot takes.
+///
+/// Resolves the ELF the same way [`reference_image`] does, then runs
+/// `scripts/emu/build-merged-image.sh` beside it. The script pins the
+/// espflash version, because espflash is where the second-stage bootloader
+/// comes from and a different one is a different program.
+///
+/// The result is cached next to the ELF, so the second test to ask for it
+/// pays nothing; like the ELF, it is never built by a bare `cargo test`.
+pub fn merged_image(image: &ReferenceImage) -> Result<PathBuf, String> {
+    let elf = reference_image(image)?;
+    let merged = elf.with_file_name("merged.bin");
+    if merged.is_file() {
+        return Ok(merged);
+    }
+    let _build = BUILD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    if merged.is_file() {
+        return Ok(merged);
+    }
+    let root = workspace_root().ok_or("could not find the workspace root")?;
+    let script = root.join("scripts/emu/build-merged-image.sh");
+    let status = Command::new(&script)
+        .arg(&elf)
+        .arg(&merged)
+        .status()
+        .map_err(|e| format!("running {}: {e}", script.display()))?;
+    // Past the ELF, a failure is not a skip: the ELF exists, so the Rust
+    // toolchain is here and only espflash can be missing or wrong — which
+    // is a thing to fix, not to pass around.
+    //
+    // 127 is called out by name because that is what a missing binary looks
+    // like, and because the first CI run of these tests showed exactly it
+    // with nothing else: the script's `set -euo pipefail` killed it at the
+    // command substitution that probed for espflash, before its own
+    // missing-tool message could print. The script names the tool now; this
+    // says where to look if a future one does not.
+    assert!(
+        status.success(),
+        "{} on {} failed: {status}{}",
+        script.display(),
+        elf.display(),
+        if status.code() == Some(127) {
+            "\n  127 is `command not found`. The script's own stderr, just above, \
+             names the tool it wanted; if it printed nothing, the script died \
+             before its check. CI installs espflash in the `emu-c6` job of \
+             .github/workflows/pre-merge.yml."
+        } else {
+            ""
+        }
+    );
+    assert!(
+        merged.is_file(),
+        "the script reported success but {} is missing",
+        merged.display()
+    );
+    Ok(merged)
+}
+
+/// A committed transcript's text, by payload and configuration prefix.
+///
+/// The transcripts are the plan's contract (PD3) and a test that wants one
+/// should name it, not glob for it — but a capture's filename carries its
+/// date and firmware commit, so the *prefix* is the name and the rest is
+/// provenance. Exactly one file must match.
+pub fn transcript(payload: &str, prefix: &str) -> Result<(PathBuf, String), String> {
+    let root = workspace_root().ok_or("could not find the workspace root")?;
+    let dir = root.join("lp-emu/transcripts/esp32c6").join(payload);
+    let mut found: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .map_err(|e| format!("reading {}: {e}", dir.display()))?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| {
+            p.extension().is_some_and(|e| e == "txt")
+                && p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with(prefix))
+        })
+        .collect();
+    found.sort();
+    match found.len() {
+        1 => {
+            let path = found.remove(0);
+            let text = std::fs::read_to_string(&path)
+                .map_err(|e| format!("reading {}: {e}", path.display()))?;
+            Ok((path, text))
+        }
+        0 => Err(format!(
+            "no transcript in {} starts with `{prefix}`",
+            dir.display()
+        )),
+        n => Err(format!(
+            "{n} transcripts in {} start with `{prefix}`; name one",
+            dir.display()
+        )),
     }
 }

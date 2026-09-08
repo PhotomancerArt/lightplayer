@@ -84,6 +84,9 @@ use crate::snapshot::Snapshot;
 /// scheduler peek and one matrix resample per 8,192 cycles, which the
 /// no-radio boot does not notice. (P4 had 1,000,000 here, when no peripheral
 /// could schedule anything.)
+/// `LP_CLKRST + 0x10`, the register the mask ROM reads before anything else.
+const LP_CLKRST_RESET_CAUSE: u32 = 0x010;
+
 const MAX_SLICE_CYCLES: u64 = 8_192;
 
 /// The slice cap while strict mode is on.
@@ -127,6 +130,11 @@ pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     // The interrupt path.
     "INTERRUPT_CORE0",
     "PLIC_MX",
+    // M7: the mask ROM's `_init` writes the last word of BOTH PLIC
+    // apertures before it has a stack. The user-mode one is nothing else's
+    // business on this chip (`tee_enabled()` is a const false), so it is
+    // accept-and-remember with the PAC's names.
+    "PLIC_UX",
     "INTPRI",
     // The rest of what the no-radio image touches.
     "HP_SYS",
@@ -152,6 +160,17 @@ pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     // The analog I2C master's command memory (P6, G6-2 finding 1): libphy
     // fills it right after its first radio-window writes.
     "I2C_MST_MEM",
+    // M7: the two SDIO-slave blocks only the mask ROM touches — `HINF`'s
+    // device id and the one `SLC` word `ets_spi_download_disabled` reads.
+    // Last, not first, even though a ROM-up boot meets them before
+    // everything else: the list is read as "what the application's boot
+    // walks through", and the ROM's own corner is an appendix to it.
+    "LP_ANA",
+    // The one block on the boot path that has to compute the right answer:
+    // the bootloader hashes the image before it loads it.
+    "SHA",
+    "HINF",
+    "SLC",
 ];
 
 /// Which cycle model a run uses. Both grades are the same machine; only the
@@ -204,10 +223,52 @@ pub enum RomSource {
 #[derive(Clone, Debug)]
 pub enum AppSource {
     /// No app: a machine with the ROM in place and nothing else. What M7's
-    /// ROM-up boot will start from, and what the ROM tests use.
+    /// ROM-up boot starts from, and what the ROM tests use.
     None,
     Path(PathBuf),
     Bytes(Vec<u8>),
+}
+
+/// How the machine arrives at the application: the plan's two boot paths.
+///
+/// They are not two implementations of one thing — they are two *different*
+/// amounts of chip. [`BootMode::Direct`] is M3's: the app's segments are
+/// placed by the host, the flash-resident half is staged at offsets the
+/// loader computes, the ROM's chip-size word is written for it, and the hart
+/// starts at the app's `_start` in the state the bootloader would have left.
+/// [`BootMode::RomUp`] is M7's: **nothing** is placed. The chip holds a
+/// merged image a flasher wrote, the hart starts at the mask ROM's reset
+/// vector, and the ROM and the second-stage bootloader do every one of those
+/// things themselves, for real, out of flash.
+///
+/// `loader`'s module documentation lists what direct load does not
+/// reproduce; each line of it is a place the two paths can disagree, and
+/// `tests/rom_up_boot.rs` is where they are made to agree.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BootMode {
+    /// Place the app and start at its entry point (M3, M4).
+    #[default]
+    Direct,
+    /// Start at the mask ROM's reset vector and let the chip boot itself
+    /// out of flash (M7).
+    RomUp,
+}
+
+impl BootMode {
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "direct" => Some(BootMode::Direct),
+            "rom-up" => Some(BootMode::RomUp),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BootMode::Direct => "direct",
+            BootMode::RomUp => "rom-up",
+        }
+    }
 }
 
 /// Where a run's UART0 bytes go — and, for `Tcp`, where its RX bytes come
@@ -567,6 +628,17 @@ impl ByteSink for TeeSink {
 pub struct Esp32C6Builder {
     rom: RomSource,
     app: AppSource,
+    /// Direct load, or the chip booting itself out of flash.
+    boot_mode: BootMode,
+    /// What `LP_CLKRST.reset_cause` says, and so what the mask ROM's banner
+    /// prints as `rst:0x..`.
+    reset_cause: ResetCause,
+    /// What `GPIO.strap` reads, and so what the banner prints as `boot:0x..`
+    /// and which of the ROM's two paths runs.
+    strap: Strap,
+    /// Perform a reset request instead of reporting it. See
+    /// [`Esp32C6Builder::reboot_on_reset`].
+    reboot_on_reset: bool,
     efuse: EfuseIdentity,
     time_grade: TimeGrade,
     strict: bool,
@@ -621,6 +693,10 @@ impl Esp32C6Builder {
         Self {
             rom: RomSource::Vendored,
             app: AppSource::None,
+            boot_mode: BootMode::default(),
+            reset_cause: ResetCause::default(),
+            strap: Strap::App,
+            reboot_on_reset: false,
             efuse: EfuseIdentity::default(),
             time_grade: TimeGrade::default(),
             strict: false,
@@ -666,6 +742,57 @@ impl Esp32C6Builder {
 
     pub fn app(mut self, app: AppSource) -> Self {
         self.app = app;
+        self
+    }
+
+    /// Direct load (the default) or the ROM-up boot.
+    ///
+    /// Under [`BootMode::RomUp`] an [`AppSource`] is still accepted and is
+    /// still parsed — it is just never *placed*. The ELF is the symbol table
+    /// `--probe`, `--break-at` and the boot report read, and the image the
+    /// cross-check compares the booted state against; the bytes the machine
+    /// runs come from the chip.
+    pub fn boot_mode(mut self, mode: BootMode) -> Self {
+        self.boot_mode = mode;
+        self
+    }
+
+    /// Why the chip is starting. Seeds `LP_CLKRST.reset_cause`, which the
+    /// mask ROM reads before anything else and prints as `rst:0x..`; the
+    /// firmware's recovery ledger reads the same register later.
+    pub fn reset_cause(mut self, cause: ResetCause) -> Self {
+        self.reset_cause = cause;
+        self
+    }
+
+    /// Where the strapping pins were at reset. Seeds `GPIO.strap`, which the
+    /// ROM prints as `boot:0x..` and uses to choose between the flash
+    /// bootloader and its own download console.
+    pub fn strap(mut self, strap: Strap) -> Self {
+        self.strap = strap;
+        self
+    }
+
+    /// **Perform** a reset request rather than reporting it: reboot the chip
+    /// into the strap the request names, and carry on.
+    ///
+    /// A peripheral that asks for a reset (the RWDT's stage action, the
+    /// USB-Serial-JTAG `chip_rst` a host's DTR/RTS dance drives) ends the run
+    /// with [`Outcome::Reset`] by default, because until this milestone there
+    /// was no boot chain to reboot **into**. There is one now, and this turns
+    /// the request into the real thing: the machine goes back to the state it
+    /// was built in, with the new strap and a `USB_UART_HPSYS` reset cause,
+    /// and the mask ROM runs again.
+    ///
+    /// It is **off** by default and that is deliberate. Three merged M6
+    /// scenarios read the exit code and the reported strap as their evidence,
+    /// and a default that reboots would change what those transcripts mean.
+    /// Only a run that asks for it gets it. What is *not* reset is everything
+    /// outside the chip: the flash part keeps what the guest wrote to it, the
+    /// USB host stays attached or absent as it was, and both consoles keep
+    /// every byte from before the reset — a reboot is not a new process.
+    pub fn reboot_on_reset(mut self, reboot: bool) -> Self {
+        self.reboot_on_reset = reboot;
         self
     }
 
@@ -872,6 +999,10 @@ impl Esp32C6Builder {
         let Self {
             rom,
             app,
+            boot_mode,
+            reset_cause,
+            strap,
+            reboot_on_reset,
             efuse,
             time_grade,
             strict,
@@ -1077,6 +1208,8 @@ impl Esp32C6Builder {
                 flash_handle.clone(),
                 cache_handle.clone(),
                 usb_host,
+                reset_cause,
+                strap,
             )
         } else {
             Vec::new()
@@ -1094,11 +1227,23 @@ impl Esp32C6Builder {
         // memory.
         let rom_segments = rom::load(&mut bus, &rom_image)?;
         let rom_data = rom::seed_data(&mut bus, &rom_image)?;
+        // …and the mask ROM's own copy of those bytes, so that `_init`'s
+        // unpack loop — which a ROM-up boot really runs — copies them rather
+        // than the zeros the ELF leaves at their source addresses.
+        let rom_data_image = rom::seed_data_image(&mut bus, &rom_image)?;
         let mut app_segments = Vec::new();
         let mut entry = rom_image.entry;
         let mut staging = loader::FlashStaging::default();
         let mut cache_fills = 0u64;
-        if let Some(app) = &app_image {
+        // The ROM-up boot places nothing. The hart starts at the ROM's reset
+        // vector, the chip holds a merged image, and every one of the four
+        // steps below happens for real: the ROM reads the bootloader out of
+        // flash over SPI1, the bootloader reads the partition table and the
+        // app, programs the MMU, and jumps. An `app` given here is a symbol
+        // table and a cross-check reference, never a load.
+        if let Some(app) = &app_image
+            && boot_mode == BootMode::Direct
+        {
             app_segments = loader::load_app(&mut bus, app)?;
             loader::clear_dram2(&mut bus)?;
             entry = app.entry;
@@ -1185,19 +1330,25 @@ impl Esp32C6Builder {
             ));
         }
 
-        Ok(Esp32C6Machine {
+        let mut machine = Esp32C6Machine {
             harts: vec![hart],
             bus,
             time_grade,
+            boot_mode,
             hooks: HookTable::new(),
             rom: rom_image,
             app: app_image,
             efuse,
-            reset_cause: ResetCause::PowerOn,
+            reset_cause,
+            strap,
+            reboot_on_reset,
+            power_on: None,
+            reboots: 0,
             seed,
             rng: seed,
             rom_segments,
             rom_data,
+            rom_data_image,
             app_segments,
             uart0_log,
             usb_sj_log,
@@ -1229,7 +1380,15 @@ impl Esp32C6Builder {
                 pin_log_lines: 0,
                 pin_log_capped: false,
             },
-        })
+        };
+        // The state a reboot goes back to, taken before a single
+        // instruction runs. Only when a run asked to perform resets: it is
+        // a whole copy of guest memory (~17 MiB), and a run that will never
+        // reboot should not pay for it.
+        if reboot_on_reset {
+            machine.power_on = Some(machine.snapshot());
+        }
+        Ok(machine)
     }
 }
 
@@ -1365,15 +1524,25 @@ pub struct Esp32C6Machine {
     pub harts: Vec<MachineHart<SocBus>>,
     pub bus: SocBus,
     time_grade: TimeGrade,
+    boot_mode: BootMode,
     hooks: HookTable,
     rom: ElfImage,
     app: Option<ElfImage>,
     efuse: EfuseIdentity,
     reset_cause: ResetCause,
+    strap: Strap,
+    reboot_on_reset: bool,
+    /// The machine as it was built, kept only when
+    /// [`Esp32C6Builder::reboot_on_reset`] asked for it — a reboot is a
+    /// restore of this.
+    power_on: Option<Snapshot>,
+    /// How many reset requests this run performed.
+    reboots: u64,
     seed: u64,
     rng: u64,
     rom_segments: Vec<PlacedSegment>,
     rom_data: Vec<rom::SeededSection>,
+    rom_data_image: rom::DataImage,
     app_segments: Vec<PlacedAppSegment>,
     uart0_log: ByteLog,
     usb_sj_log: ByteLog,
@@ -1420,6 +1589,11 @@ pub struct Esp32C6Machine {
 
 impl Esp32C6Machine {
     // ---- what it is made of -------------------------------------------
+
+    /// Which of the plan's two boot paths this machine took.
+    pub fn boot_mode(&self) -> BootMode {
+        self.boot_mode
+    }
 
     pub fn time_grade(&self) -> TimeGrade {
         self.time_grade
@@ -1492,6 +1666,74 @@ impl Esp32C6Machine {
         self.reset_cause
     }
 
+    /// The strapping the chip was started with, or the one the last reboot
+    /// used.
+    pub fn strap(&self) -> Strap {
+        self.strap
+    }
+
+    /// How many reset requests this run performed
+    /// ([`Esp32C6Builder::reboot_on_reset`]).
+    pub fn reboots(&self) -> u64 {
+        self.reboots
+    }
+
+    /// Reboot into `strap`, as a chip does when something asserts its reset.
+    ///
+    /// The machine goes back to the state it was built in and the two
+    /// registers the mask ROM reads before anything else are re-seeded: the
+    /// strap it prints as `boot:0x..` and chooses a path with, and the reset
+    /// cause it prints as `rst:0x..`, which is `USB_UART_HPSYS` because
+    /// every producer of a reset request on this chip is the serial bridge or
+    /// a watchdog and the ROM has one code for "not a power-on" that the
+    /// firmware maps to `user-reset`.
+    ///
+    /// The consoles keep their bytes: a restore would put back the empty logs
+    /// the machine was built with, and a boot log that lost everything before
+    /// the reset would be a worse record than one that has both boots in it.
+    pub fn reboot(&mut self, strap: Strap) -> bool {
+        let Some(power_on) = self.power_on.clone() else {
+            return false;
+        };
+        let (uart0, usb_sj, tried) = (
+            self.uart0_log.bytes(),
+            self.usb_sj_log.bytes(),
+            self.usb_sj_tried_log.bytes(),
+        );
+        self.restore(&power_on);
+        self.uart0_log.replace(&uart0);
+        self.usb_sj_log.replace(&usb_sj);
+        self.usb_sj_tried_log.replace(&tried);
+
+        self.strap = strap;
+        self.reset_cause = ResetCause::UsbUartHpSys;
+        let strap_word = loader::strap_word(strap);
+        let cause = self.reset_cause.rom_code();
+        if let Some(i) = self.bus.peripheral_index("GPIO") {
+            self.bus
+                .with_peripheral::<periph::gpio::Gpio, _>(i, |g, _| g.set_strap(strap_word));
+        }
+        if let Some(i) = self.bus.peripheral_index("LP_CLKRST") {
+            self.bus
+                .with_peripheral::<lp_emu_esp_common::RegFile, _>(i, |r, _| {
+                    r.poke(LP_CLKRST_RESET_CAUSE, cause)
+                });
+        }
+        // The cache MMU is shared state outside the snapshot, like the flash
+        // part — but unlike the part it is *inside* the chip, so a reset
+        // clears it. The ROM's `Cache_MMU_Init` would rewrite every entry
+        // anyway; doing it here is what makes the two statements agree.
+        {
+            let mut mmu = self.cache.lock().unwrap();
+            for index in 0..crate::cache::ENTRIES as u32 {
+                mmu.set_entry(index, 0);
+            }
+            mmu.take_dirty();
+        }
+        self.reboots += 1;
+        true
+    }
+
     pub fn rom(&self) -> &ElfImage {
         &self.rom
     }
@@ -1508,6 +1750,12 @@ impl Esp32C6Machine {
     /// ([`rom::seed_data`]).
     pub fn rom_data(&self) -> &[rom::SeededSection] {
         &self.rom_data
+    }
+
+    /// What `rom::seed_data_image` reconstructed of the mask ROM's own
+    /// data image.
+    pub fn rom_data_image(&self) -> rom::DataImage {
+        self.rom_data_image
     }
 
     pub fn app_segments(&self) -> &[PlacedAppSegment] {
@@ -2035,6 +2283,10 @@ impl Esp32C6Machine {
 
             match end {
                 SliceEnd::BudgetExhausted => {}
+                // A peripheral asked for the machine's attention before the
+                // next instruction — today, the cache MMU after an entry
+                // write. Everything below the match is that attention.
+                SliceEnd::BusYield => {}
                 SliceEnd::Wfi => {
                     // The deterministic idle skip: nothing can happen before
                     // the next scheduled event, so move guest time there —
@@ -2106,6 +2358,11 @@ impl Esp32C6Machine {
             if let Some(lp_emu_esp_common::MachineRequest::Reset { source, at, strap }) =
                 self.bus.take_request()
             {
+                if self.reboot_on_reset && self.reboot(strap) {
+                    log::info!("machine: {source} at cycle {at} — rebooting into strap {strap}");
+                    matched = [0usize; 2];
+                    continue;
+                }
                 return Outcome::Reset {
                     cycle: at,
                     source,

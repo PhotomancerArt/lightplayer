@@ -37,6 +37,16 @@ struct MaskEntry {
     value: u32,
 }
 
+/// One "these bits read as a copy of those bits" rule.
+#[derive(Clone, Copy, Debug)]
+struct MirrorEntry {
+    off: u32,
+    /// The bits watched, in the stored word.
+    from: u32,
+    /// The bits driven.
+    to: u32,
+}
+
 /// A register window that remembers what was written, with a table of the
 /// exceptions.
 #[derive(Debug)]
@@ -47,6 +57,7 @@ pub struct RegFile {
     regs: Vec<u32>,
     reset: Vec<u32>,
     read_overrides: Vec<MaskEntry>,
+    read_mirrors: Vec<MirrorEntry>,
     write_one_to_clear: Vec<MaskEntry>,
     write_one_pulse: Vec<MaskEntry>,
     read_only: Vec<MaskEntry>,
@@ -63,6 +74,7 @@ impl RegFile {
             regs: vec![0; words],
             reset: vec![0; words],
             read_overrides: Vec::new(),
+            read_mirrors: Vec::new(),
             write_one_to_clear: Vec::new(),
             write_one_pulse: Vec::new(),
             read_only: Vec::new(),
@@ -92,6 +104,39 @@ impl RegFile {
     /// re-deriving the state.
     pub fn with_read_override(mut self, off: u32, mask: u32, value: u32) -> Self {
         self.read_overrides.push(MaskEntry { off, mask, value });
+        self
+    }
+
+    /// Replace (or add) a read override after construction — a hardware-side
+    /// change, like [`poke`](Self::poke): the C6's strapping pins are
+    /// re-latched by a chip reset, and nothing the guest can do moves them.
+    pub fn set_read_override(&mut self, off: u32, mask: u32, value: u32) {
+        if let Some(e) = self
+            .read_overrides
+            .iter_mut()
+            .find(|e| e.off == off && e.mask == mask)
+        {
+            e.value = value;
+            return;
+        }
+        self.read_overrides.push(MaskEntry { off, mask, value });
+    }
+
+    /// "These bits read as 1 exactly when those bits are set."
+    ///
+    /// The `done` half of a `set the enable, spin until done` pair, where the
+    /// operation has no duration in this model: the C6 mask ROM's
+    /// `Cache_Freeze_ICache_Enable` sets `l1_cache_freeze_ctrl` bit 16 and
+    /// spins until bit 18 is 1, and `Cache_Freeze_ICache_Disable` clears bit
+    /// 16 and spins until bit 18 is **0**. No constant satisfies both. A
+    /// mirror does, and says the true thing while it is at it: the freeze
+    /// finished, in whichever direction it was asked for.
+    ///
+    /// Prefer [`with_read_override`](Self::with_read_override) where a
+    /// constant is honest; reach for this only when the guest waits for the
+    /// bit to go both ways.
+    pub fn with_read_mirror(mut self, off: u32, from: u32, to: u32) -> Self {
+        self.read_mirrors.push(MirrorEntry { off, from, to });
         self
     }
 
@@ -159,6 +204,19 @@ impl RegFile {
         for e in &self.read_overrides {
             if e.off == word {
                 v = (v & !e.mask) | (e.value & e.mask);
+            }
+        }
+        // Mirrors read the STORED word, not the overridden one: a `done`
+        // bit follows what the guest wrote, and would otherwise chase
+        // whatever an override had just forced.
+        let stored = self.stored(word);
+        for m in &self.read_mirrors {
+            if m.off == word {
+                v = if stored & m.from != 0 {
+                    v | m.to
+                } else {
+                    v & !m.to
+                };
             }
         }
         v

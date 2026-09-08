@@ -1,0 +1,17 @@
+# The ROM's USB download console, driven the way esptool drives it.
+#
+# Written by hand rather than by esptool so the exchange is
+# deterministic: every chunk carries the EMULATED microsecond it
+# arrives at, and the reply is whatever the real mask ROM makes of
+# it. Nothing here is a model of esptool — these are the bytes on
+# the wire, SLIP-framed, with the 36-byte SYNC payload the protocol
+# fixes (0x07 0x07 0x12 0x20 then 32 x 0x55).
+
+# The ROM has printed `waiting for download` well before this.
+20000 c0 00 08 24 00 00 00 00 00 07 07 12 20 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 c0
+
+# READ_REG on EFUSE_RD_MAC_SPI_SYS_0 (0x600b0844): the low four
+# bytes of the MAC, which `--efuse-mac` decides and the eFuse
+# block serves. A reply proves the console is executing commands,
+# not just echoing a sync.
+40000 c0 00 0a 04 00 00 00 00 00 44 08 0b 60 c0

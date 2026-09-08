@@ -64,6 +64,27 @@ pub trait Bus {
         false
     }
 
+    /// Did a peripheral ask the machine to take over before the next
+    /// instruction runs?
+    ///
+    /// The side-band above says "interrupt state may have changed", which
+    /// the hart can answer by itself. This says "something changed that only
+    /// the machine can act on", and the hart's answer is to end the slice.
+    ///
+    /// It exists for exactly one shape of thing, and the ESP32-C6's cache
+    /// MMU is the first of it: a store that changes what an address
+    /// *means*. The guest programs an MMU entry and reads through the
+    /// window a few instructions later, in the same slice; a machine that
+    /// refills the window at the next slice boundary serves it stale bytes.
+    /// The C6's second-stage bootloader does exactly that, and read its own
+    /// image header as zeros until this existed.
+    ///
+    /// Checked only after a store, and only when the store was to MMIO, so
+    /// a bus that never sets it costs one already-loaded bool per store.
+    fn take_yield(&mut self) -> bool {
+        false
+    }
+
     /// The CPU interrupt this bus's interrupt matrix asserts *right now* for
     /// the hart that is executing, or `None` for "nothing asserted".
     ///

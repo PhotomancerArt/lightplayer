@@ -59,6 +59,7 @@ const OUT_W1TC: u32 = 0x00c;
 const ENABLE: u32 = 0x020;
 const ENABLE_W1TS: u32 = 0x024;
 const ENABLE_W1TC: u32 = 0x028;
+const STRAP: u32 = 0x038;
 const IN: u32 = 0x03c;
 const PCPU_INT: u32 = 0x05c;
 const FUNC_OUT_SEL_CFG: u32 = 0x554;
@@ -79,7 +80,7 @@ pub struct Gpio {
 
 impl Default for Gpio {
     fn default() -> Self {
-        Self::new()
+        Self::new(crate::loader::STRAP_APP)
     }
 }
 
@@ -96,15 +97,27 @@ fn signal_name(sel: u16) -> String {
 }
 
 impl Gpio {
-    pub fn new() -> Self {
+    /// `strap` is the word the pads were latched into at reset
+    /// (`crate::loader::strap_word`). It is read-only on the chip and the
+    /// mask ROM prints it verbatim as the `boot:0x%x` half of its banner, so
+    /// it is a **read override**: a guest that wrote here would otherwise be
+    /// able to change what the chip booted as.
+    pub fn new(strap: u32) -> Self {
         let mut regs = RegFile::new("GPIO", LEN)
             .with_names(regs::GPIO)
+            .with_read_override(STRAP, 0xffff_ffff, strap)
             .with_read_override(IN, 0xffff_ffff, 0)
             .with_read_override(PCPU_INT, 0xffff_ffff, 0);
         for pad in 0..PAD_COUNT {
             regs = regs.with_reset(FUNC_OUT_SEL_CFG + 4 * pad, FUNC_OUT_SEL_RESET);
         }
         Self { regs }
+    }
+
+    /// Re-latch the strapping pins, as a chip reset does. The word is a
+    /// read override, so this replaces the rule rather than a stored value.
+    pub fn set_strap(&mut self, strap: u32) {
+        self.regs.set_read_override(STRAP, 0xffff_ffff, strap);
     }
 
     /// The `out` bitmap as last written.
@@ -242,6 +255,14 @@ impl Peripheral for Gpio {
         }
     }
 
+    fn as_any(&self) -> Option<&dyn core::any::Any> {
+        Some(self)
+    }
+
+    fn as_any_mut(&mut self) -> Option<&mut dyn core::any::Any> {
+        Some(self)
+    }
+
     fn reg_name(&self, off: u32) -> Option<&'static str> {
         regs::GPIO.name(off)
     }
@@ -270,7 +291,7 @@ mod tests {
     #[test]
     fn the_esp_hal_with_pin_sequence_routes_the_pad_to_the_rmt_signal() {
         let mut sb = Sandbox::new();
-        let mut g = Gpio::new();
+        let mut g = Gpio::new(crate::loader::STRAP_APP);
         sb.now = 1_000;
         // `out_w1tc` bit 18 (idle low), `enable_w1ts` bit 18, then the route.
         sb.write(&mut g, OUT_W1TC, 1 << GPIO18);
@@ -303,7 +324,7 @@ mod tests {
     #[test]
     fn the_guard_drop_puts_the_pad_back_on_gpio_out() {
         let mut sb = Sandbox::new();
-        let mut g = Gpio::new();
+        let mut g = Gpio::new(crate::loader::STRAP_APP);
         sb.write(&mut g, FUNC18, RMT_SIG_0);
         sb.now = 10;
         sb.write(&mut g, FUNC18, u32::from(OUT_SEL_GPIO));
@@ -328,7 +349,7 @@ mod tests {
     #[test]
     fn inv_sel_and_oen_sel_are_carried_into_the_route() {
         let mut sb = Sandbox::new();
-        let mut g = Gpio::new();
+        let mut g = Gpio::new(crate::loader::STRAP_APP);
         sb.write(&mut g, FUNC18, RMT_SIG_0 | INV_SEL | OEN_SEL);
         let route = sb.pins.route_of(PadId(18)).expect("routed");
         assert_eq!(
@@ -343,7 +364,7 @@ mod tests {
     #[test]
     fn the_set_and_clear_registers_fold_into_out_and_read_zero() {
         let mut sb = Sandbox::new();
-        let mut g = Gpio::new();
+        let mut g = Gpio::new(crate::loader::STRAP_APP);
         sb.write(&mut g, OUT_W1TS, 0b1010);
         assert_eq!(g.out(), 0b1010);
         sb.write(&mut g, OUT_W1TC, 0b0010);
@@ -364,7 +385,7 @@ mod tests {
     #[test]
     fn a_byte_lane_reaches_only_its_own_bits() {
         let mut sb = Sandbox::new();
-        let mut g = Gpio::new();
+        let mut g = Gpio::new(crate::loader::STRAP_APP);
         // A byte store to `out_w1ts + 2` sets bits 16..23.
         g.write(OUT_W1TS + 2, Width::Byte, 0x04, &mut sb.cx());
         assert_eq!(g.out(), 1 << 18);
@@ -373,7 +394,7 @@ mod tests {
     #[test]
     fn an_untouched_pad_is_not_routed_and_records_nothing() {
         let mut sb = Sandbox::new();
-        let mut g = Gpio::new();
+        let mut g = Gpio::new(crate::loader::STRAP_APP);
         // Its `out` bit is tracked, so a later route starts at the right
         // level — but nothing is observed until something routes it.
         sb.write(&mut g, OUT_W1TS, 1 << 5);
@@ -396,7 +417,7 @@ mod tests {
     #[test]
     fn the_accept_block_behaviour_the_boot_path_relies_on_is_unchanged() {
         let mut sb = Sandbox::new();
-        let mut g = Gpio::new();
+        let mut g = Gpio::new(crate::loader::STRAP_APP);
         sb.write(&mut g, IN, 0xffff_ffff);
         assert_eq!(sb.read(&mut g, IN), 0, "no pin is driven from outside");
         assert_eq!(sb.read(&mut g, PCPU_INT), 0);
@@ -414,11 +435,11 @@ mod tests {
     #[test]
     fn the_state_blob_round_trips_the_registers() {
         let mut sb = Sandbox::new();
-        let mut g = Gpio::new();
+        let mut g = Gpio::new(crate::loader::STRAP_APP);
         sb.write(&mut g, FUNC18, RMT_SIG_0);
         sb.write(&mut g, OUT_W1TS, 0x1234);
         let blob = g.save_state();
-        let mut other = Gpio::new();
+        let mut other = Gpio::new(crate::loader::STRAP_APP);
         other.load_state(&blob);
         assert_eq!(other.func_out_sel_cfg(GPIO18), RMT_SIG_0);
         assert_eq!(other.out(), 0x1234);

@@ -115,6 +115,10 @@ pub enum SliceEnd {
     /// [`MachineHart::deliver_breakpoint`] to give the guest the
     /// architectural answer.
     Ebreak { pc: u32 },
+    /// A peripheral asked the machine to take over before the next
+    /// instruction ([`lp_emu_core::Bus::take_yield`]). `pc` already points
+    /// at the next instruction, so the machine acts and resumes.
+    BusYield,
     /// The hart cannot continue.
     Fault(HartFault),
 }
@@ -540,9 +544,15 @@ impl<B: Bus> MachineHart<B> {
             .new_pc
             .unwrap_or(pc.wrapping_add(u32::from(result.inst_size)));
 
-        // (c) an MMIO store may have changed interrupt state.
-        if matches!(result.class, InstClass::Store | InstClass::Atomic) && bus.take_sideband() {
-            self.resample_external(bus);
+        // (c) an MMIO store may have changed interrupt state, and it may
+        // have changed something only the machine can act on.
+        if matches!(result.class, InstClass::Store | InstClass::Atomic) {
+            if bus.take_sideband() {
+                self.resample_external(bus);
+            }
+            if bus.take_yield() {
+                return StepOutcome::End(SliceEnd::BusYield);
+            }
         }
 
         StepOutcome::Continue

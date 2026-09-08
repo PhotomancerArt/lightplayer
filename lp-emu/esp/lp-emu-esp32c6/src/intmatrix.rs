@@ -88,6 +88,24 @@ const PLIC_PRI31: u32 = 0x8c;
 const PLIC_THRESH: u32 = 0x90;
 const PLIC_CLAIM: u32 = 0x94;
 
+/// The last word of the PLIC_MX aperture (`0x2000_13fc`), which the PAC does
+/// not name and the mask ROM writes `1` to before anything else runs:
+///
+/// ```text
+/// 40001718:  li   t0, 1
+/// 4000171a:  lui  t1, 0x20001
+/// 4000171e:  addi t1, t1, 1020    ; 0x200013fc
+/// 40001722:  sw   t0, 0(t1)
+/// ```
+///
+/// (and the same three instructions again for `PLIC_UX + 0x3fc`). The ROM
+/// never reads it back, and nothing else in the ROM or in any image this
+/// machine runs touches it, so it is **accept-and-remember**: the write is
+/// kept so a read would answer with it rather than with a zero nobody
+/// measured. Found by M7's first ROM-up run, as the first strict stop after
+/// the reset vector.
+const PLIC_UNDOCUMENTED_3FC: u32 = 0x3fc;
+
 /// The C6's interrupt matrix. See the module docs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Esp32C6IntMatrix {
@@ -104,6 +122,8 @@ pub struct Esp32C6IntMatrix {
     /// `MXINT_THRESH`, eight bits.
     thresh: u8,
     claim: u32,
+    /// [`PLIC_UNDOCUMENTED_3FC`]'s remembered word.
+    undocumented_3fc: u32,
 }
 
 impl Default for Esp32C6IntMatrix {
@@ -123,6 +143,7 @@ impl Esp32C6IntMatrix {
             pri: [0; CPU_INTERRUPT_COUNT],
             thresh: MXINT_THRESH_RESET,
             claim: 0,
+            undocumented_3fc: 0,
         }
     }
 
@@ -226,6 +247,7 @@ impl Esp32C6IntMatrix {
             PLIC_PRI0..=PLIC_PRI31 => u32::from(self.pri[((off - PLIC_PRI0) / 4) as usize]),
             PLIC_THRESH => u32::from(self.thresh),
             PLIC_CLAIM => self.claim,
+            PLIC_UNDOCUMENTED_3FC => self.undocumented_3fc,
             _ => 0,
         }
     }
@@ -251,6 +273,7 @@ impl Esp32C6IntMatrix {
             }
             PLIC_THRESH => self.thresh = (value & 0xff) as u8,
             PLIC_CLAIM => self.claim = value,
+            PLIC_UNDOCUMENTED_3FC => self.undocumented_3fc = value,
             _ => {}
         }
     }
