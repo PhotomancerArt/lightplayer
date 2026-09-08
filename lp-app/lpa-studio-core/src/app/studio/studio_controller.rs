@@ -595,12 +595,27 @@ impl StudioController {
     /// powered-off sim leaves the roster the way an unplugged board does,
     /// and its record stays on the remembered line (Q5).
     fn power_off_sim_for(&mut self, action: &crate::DeviceAction) {
-        let uid = match action {
+        let uid = self.sim_uid_to_power_off(action);
+        self.power_off_sim(uid);
+    }
+
+    /// The uid a gesture will power off, read BEFORE the fold.
+    ///
+    /// Before, because a `Forget` DELETES the device: read afterwards, the
+    /// roster no longer holds the entry the uid comes from, and the sim
+    /// would be forgotten while its worker kept running (`just test`, P3).
+    /// `Disconnect` would survive either order; one rule for both is
+    /// cheaper than remembering which.
+    fn sim_uid_to_power_off(&self, action: &crate::DeviceAction) -> Option<String> {
+        match action {
             crate::DeviceAction::Disconnect { device } | crate::DeviceAction::Forget { device } => {
                 self.sim_session_for(*device).map(|session| session.uid)
             }
             _ => None,
-        };
+        }
+    }
+
+    fn power_off_sim(&mut self, uid: Option<String>) {
         let (Some(sim), Some(uid)) = (self.sim_transport.clone(), uid) else {
             return;
         };
@@ -2785,8 +2800,12 @@ impl StudioController {
         // A sim's runtime is started HERE, before the fold, so the sweep the
         // model's own `Connect` triggers finds a link to attach.
         self.power_on_sim_for(op.action());
+        // …and the uid a power-off will need is read before it too: a
+        // `Forget` takes the device with it, and the roster is where that
+        // uid comes from.
+        let power_off = self.sim_uid_to_power_off(op.action());
         self.fold_device_input(crate::DeviceInput::Action(op.action.clone()));
-        self.power_off_sim_for(op.action());
+        self.power_off_sim(power_off);
         self.settle_device_records().await;
         Ok(UiNotices::new())
     }

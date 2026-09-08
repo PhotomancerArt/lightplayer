@@ -215,12 +215,19 @@ impl DeviceTransport for SimDeviceTransport {
         )))
     }
 
-    fn revoke_grant(&self, info: LinkInfo) -> DeviceTransportFuture<Result<(), String>> {
-        // Handing a sim's "grant" back is powering it off: there is no
-        // permission to return, only a runtime to stop.
-        if let Some(uid) = uid_from_sim_endpoint(&info.endpoint.0) {
-            self.power_off(uid);
-        }
+    fn revoke_grant(&self, _info: LinkInfo) -> DeviceTransportFuture<Result<(), String>> {
+        // Nothing to hand back, and nothing to stop.
+        //
+        // A sim has no browser permission to return, so the serial meaning
+        // of this verb is empty here. It must ALSO not be read as "power
+        // this off": the fold revokes a grant when it dismisses a
+        // provisional pending link, which is exactly what ADOPTING a sim
+        // into its record does — so powering off here stopped the sim
+        // Studio had just started, 0.3 s after it started, every time
+        // (browser walk, P3). The runtime's lifetime belongs to power
+        // on/off alone: `Action::Disconnect` and `Action::Forget` reach
+        // `power_off` through the controller, which is the one place that
+        // decision is made (PD8, Q15).
         Box::pin(core::future::ready(Ok(())))
     }
 
@@ -477,16 +484,25 @@ mod tests {
         assert!(!transport.power_off("dev1"), "off is the goal state");
     }
 
-    /// Revoking a sim's grant is powering it off — there is no browser
-    /// permission to hand back, only a runtime to stop.
+    /// Revoking a sim's grant leaves the runtime ALONE.
+    ///
+    /// The fold revokes a grant when it dismisses a provisional pending
+    /// link — which is what adopting a sim into its record does — so a
+    /// revoke that powered off would stop the sim Studio had just started
+    /// (browser walk, P3). There is no permission to hand back and no
+    /// decision to make here: power on/off is the controller's, through
+    /// `Connect`/`Disconnect` (PD8, Q15).
     #[test]
-    fn revoking_a_sims_grant_powers_it_off() {
+    fn revoking_a_sims_grant_leaves_the_runtime_running() {
         let transport = SimDeviceTransport::new(Rc::new(CountingSource::default()));
         transport.power_on(session("dev1")).unwrap();
 
         block_on(transport.revoke_grant(sim_link_info("dev1", "Desktop"))).unwrap();
 
-        assert!(!transport.is_powered("dev1"));
+        assert!(
+            transport.is_powered("dev1"),
+            "adopting a sim must not stop it"
+        );
     }
 
     /// The chooser has nothing to say about a sim, and says so rather than
