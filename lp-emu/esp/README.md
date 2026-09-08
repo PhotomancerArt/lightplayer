@@ -89,7 +89,7 @@ reason in `validate.toml`. That is not modesty and it is not a placeholder:
 | memory | byte-equal to silicon on the compile harness — 372/372 values — which is *evidence in the reason*, not a promotion. `measured` would want a transcript per class |
 | timing | `t1` counts instructions, `t2` uses the per-class model, and no transcript grades either yet (the vision's graded ladder) |
 | boot-log | a direct load prints no ROM banner and no bootloader lines at all; M7 boots from reset |
-| usb-serial-jtag | the host's three states and the transitions between them, with four committed transcripts behind them (M6) — `boot-idle` over the shipped link against silicon's capture of the *same image bytes*, the port held closed from boot, an unplug mid-session, and no cable at all. The block's own data path is graded `measured` register by register in `periph/usb_sj.rs`; the **class** stays `modeled` by the rule below, and what would earn it is a silicon transcript of this class — `usb-negative-control` on the desk board, still owed |
+| usb-serial-jtag | the host's three states and the transitions between them, with four committed transcripts behind them (M6) — `boot-idle` over the shipped link against silicon's capture of the *same image bytes*, the port held closed from boot, an unplug mid-session, and no cable at all. M6 P5 adds the working half: the shipped image from flash takes a real `lp-cli upload` over this link, and every filesystem write, heap gate and compiler output is identical to the same script run over UART0. The block's own data path is graded `measured` register by register in `periph/usb_sj.rs`; the **class** stays `modeled` by the rule below. The silicon transcript that would let anybody argue otherwise has landed (`usb-negative-control/silicon-…-b18360ea6.txt`); whether it promotes the class is the director's to rule |
 | pin | a pad IS observed (M5 P2): GPIO is a routing view over the bus's signal fabric, the RMT drives `RMT_SIG_0/1` into it, and a WS281x decoder reads a routed pad's edges into frames. But the decoded frames agreeing with the word-level decode is two readings of one model — nothing on silicon has confirmed a pad here, and no capture is committed. M5 P4 puts a lit frame against the host oracle |
 | wire | the bytes are the guest's; a live socket's arrival times are the host's |
 
@@ -201,6 +201,32 @@ line shifts every **later** line, so a relative script survives an edit.
 Bytes and commands are told apart by the first token: a quoted string is
 bytes, a known verb is a command, anything else is hex — and no verb is a
 pair of hex digits, so the rule never guesses.
+
+Two lines carry no absolute time at all, and they are what makes a **walk**
+a walk (M6 P5):
+
+```text
+after "[RECOVERY] boot complete (first frame served)" "M!{\"id\":1,…}\n"
+after "\"id\":1," +5ms "M!{\"id\":2,…}\n"
+then  +2ms "…the next 64 bytes of the same request…"
+```
+
+`after` waits for something the device said, `then` paces the host after its
+own last chunk. A client sends its next request when the answer to the last
+one arrives, not at a wall-clock offset, and a script written as absolute
+milliseconds is brittle one way and full of dead time the other. The needle
+is matched against what a host **on this link** received, so one walk file
+replays on either link — `lp-emu/esp/lp-emu-esp32c6/walks/examples-basic.script`
+is run over UART0 by the `upload-walk` payload and over this socket by
+`upload-walk-usb`, and the two transcripts' heap ledgers are equal to the
+byte. The wait resolves in guest cycles, so the determinism below is
+unaffected. A `wait` offset moves the absolute lines only: a wait-for step
+has no absolute time to shift.
+
+`--usb-script` is **repeatable** and the files concatenate in the order
+given. A scenario's cable schedule is three lines the runner writes inline;
+a walk's wire conversation is a 12 KB generated file; a link that carries
+both should not force them into one.
 
 **The emulator never builds a frame.** `lpc_wire::json::to_serial_line` is
 the single framer for every `M!` line in the repository (PR #538) and
