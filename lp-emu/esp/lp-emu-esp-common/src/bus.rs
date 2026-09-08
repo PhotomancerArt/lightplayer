@@ -218,6 +218,13 @@ pub struct SocBus {
     /// is armed almost always; a fetch or a load still has to cost one test,
     /// not a four-slot walk.
     armed_for: [u32; 3],
+    /// `Some((lo, hi, slot))` when **exactly one** store-kind watchpoint slot
+    /// is armed — esp-hal's stack guard holds this for the whole run.
+    /// [`SocBus::write`] then costs one range compare instead of the general
+    /// slot walk; recomputed in [`set_watchpoint`](Bus::set_watchpoint)
+    /// whenever the armed set changes, so more than one store watchpoint
+    /// (rare, and the general path still handles it) falls back to `None`.
+    single_store_watch: Option<(u64, u64, u8)>,
 
     unmapped_sites: BTreeSet<(u32, u32)>,
     unmapped_reads: u64,
@@ -282,6 +289,7 @@ impl SocBus {
             allow_unaligned: false,
             watchpoints: [None; WATCHPOINT_SLOTS],
             armed_for: [0; 3],
+            single_store_watch: None,
             unmapped_sites: BTreeSet::new(),
             unmapped_reads: 0,
             unmapped_writes: 0,
@@ -839,6 +847,46 @@ impl SocBus {
         Ok(())
     }
 
+    /// [`check_watchpoints`](Self::check_watchpoints) specialised for
+    /// stores: when [`single_store_watch`](Self::single_store_watch) is
+    /// armed — the common case, esp-hal's stack guard — this is one range
+    /// compare instead of the slot walk. Zero or more-than-one store
+    /// watchpoints fall back to the general path, which still gives the
+    /// zero case its one-test short-circuit.
+    #[inline(always)]
+    fn check_store_watchpoint(&self, address: u32, len: u32) -> Result<(), MemoryError> {
+        if let Some((lo, hi, slot)) = self.single_store_watch {
+            let a0 = u64::from(address);
+            let a1 = a0 + u64::from(len);
+            return if a0 < hi && lo < a1 {
+                Err(MemoryError::Watchpoint {
+                    address,
+                    kind: MemoryAccessKind::Write,
+                    slot,
+                })
+            } else {
+                Ok(())
+            };
+        }
+        self.check_watchpoints(address, len, MemoryAccessKind::Write)
+    }
+
+    /// Recompute [`single_store_watch`](Self::single_store_watch) from
+    /// `armed_for`/`watchpoints`. Called whenever either changes
+    /// ([`set_watchpoint`](Bus::set_watchpoint)); `None` when zero or more
+    /// than one store-kind slot is armed, so [`check_store_watchpoint`]
+    /// falls back to the general walk in both of those cases.
+    fn recompute_single_store_watch(&mut self) {
+        let mask = self.armed_for[kind_index(MemoryAccessKind::Write)];
+        self.single_store_watch = (mask.count_ones() == 1)
+            .then(|| mask.trailing_zeros() as usize)
+            .and_then(|slot| self.watchpoints[slot].map(|wp| (slot, wp)))
+            .map(|(slot, wp)| {
+                let (lo, hi) = watchpoint_span(&wp);
+                (lo, hi, slot as u8)
+            });
+    }
+
     // ---- the access paths ---------------------------------------------
 
     #[inline]
@@ -930,7 +978,7 @@ impl SocBus {
     #[inline]
     fn write(&mut self, address: u32, width: Width, value: u32) -> Result<(), MemoryError> {
         let len = width.bytes();
-        self.check_watchpoints(address, len, MemoryAccessKind::Write)?;
+        self.check_store_watchpoint(address, len)?;
 
         if let Some(i) = self.region_index(address) {
             let fault = MemoryError::InvalidAccess {
@@ -1155,15 +1203,21 @@ const fn kind_index(kind: MemoryAccessKind) -> usize {
 /// compare ignores — so `mask = value ^ (value + 1)` and the region is
 /// `value & !mask` of size `mask + 1`.
 fn watchpoint_overlaps(wp: &Watchpoint, address: u32, len: u32) -> bool {
+    let (b0, b1) = watchpoint_span(wp);
+    let (a0, a1) = (u64::from(address), u64::from(address) + u64::from(len));
+    a0 < b1 && b0 < a1
+}
+
+/// The `[lo, hi)` byte range a watchpoint covers — the NAPOT decode shared by
+/// [`watchpoint_overlaps`] and [`SocBus::single_store_watch`]'s precompute.
+fn watchpoint_span(wp: &Watchpoint) -> (u64, u64) {
     let (base, size) = if wp.napot {
         let mask = wp.address ^ wp.address.wrapping_add(1);
         (wp.address & !mask, u64::from(mask) + 1)
     } else {
         (wp.address, 1)
     };
-    let (a0, a1) = (u64::from(address), u64::from(address) + u64::from(len));
-    let (b0, b1) = (u64::from(base), u64::from(base) + size);
-    a0 < b1 && b0 < a1
+    (u64::from(base), u64::from(base) + size)
 }
 
 impl Bus for SocBus {
@@ -1288,6 +1342,7 @@ impl Bus for SocBus {
                 *mask &= !bit;
             }
         }
+        self.recompute_single_store_watch();
     }
 
     #[inline(always)]
