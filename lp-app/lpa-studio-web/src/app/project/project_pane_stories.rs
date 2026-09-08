@@ -15,7 +15,8 @@ use lpa_studio_web_story_macros::story;
 use lpc_model::{GradientConfig, ToLpValue};
 
 use crate::app::node::node_story_fixtures::{palette_cycle, sunset_gradient};
-use crate::app::project::ProjectPane;
+use crate::app::home::target_pick_popover::HardwarePickPopover;
+use crate::app::project::{ProjectPane, ProjectSettingsSection};
 use crate::app::story_fixtures::project_editor_fixture;
 
 #[story(
@@ -592,4 +593,53 @@ fn assign_edit(
         },
         phase,
     )
+}
+
+#[story(
+    description = "The project settings' Hardware row (D41, PD17, spike 3D). A project declares the hardware it runs on — Desktop or a catalog board — and this is where that is said and changed, in the row under the name. Three columns: a project on DESKTOP (the default every library-made project is now created with, and what an absent `target` has always meant); one on a BOARD, where the row names the board the way its card would; and the MENU OPEN, which is the same two-group menu the Devices page's add slot opens — Desktop alone at the top, then the boards in catalog order, each with its catalog id under the name, because `target` is a value people paste into manifests. Nothing here says emu or sim: a board is just a board, and what a DEVICE is is the device's own business. The two boards Studio has no runtime manifest for are listed and INERT, saying \"no hardware manifest yet\" rather than quietly missing — a project may legitimately be for a board this build cannot start yet. The hint under the row is the one place the consequence is spelled out, because hardware on a project is a new idea and the reader's next question is what pressing Open will do with it."
+)]
+pub(crate) fn project_settings_hardware_row() -> Element {
+    let columns: Vec<(&str, Option<String>, bool)> = vec![
+        ("Desktop — the default", None, false),
+        ("A board", Some("seeed/xiao-esp32-c6".to_string()), false),
+        ("The menu open", None, true),
+    ];
+    rsx! {
+        section { class: "tw:grid tw:min-h-[560px] tw:grid-cols-[repeat(3,300px)] tw:items-start tw:gap-6 tw:p-4",
+            for (label , target , open) in columns {
+                div { key: "{label}", class: "tw:grid tw:gap-2",
+                    p { class: "tw:m-0 tw:text-[0.68rem] tw:font-bold tw:tracking-wide tw:text-subtle-foreground tw:uppercase",
+                        "{label}"
+                    }
+                    if open {
+                        HardwarePickPopover {
+                            uid: "prj000000000000000001".to_string(),
+                            target,
+                            initially_open: true,
+                            on_action: |_| {},
+                        }
+                    } else {
+                        ProjectSettingsSection {
+                            manifest: settings_manifest(target),
+                            rename_uid: "prj000000000000000001".to_string(),
+                            on_action: EventHandler::new(|_| {}),
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A settled container manifest for the settings rows: the identity fields
+/// a saved project has, plus the target under test.
+fn settings_manifest(target: Option<String>) -> lpa_studio_core::UiProjectManifest {
+    lpa_studio_core::UiProjectManifest {
+        format: Some(lpc_model::PROJECT_FORMAT_VERSION),
+        uid: Some("prj000000000000000001".to_string()),
+        name: Some("Porch sign".to_string()),
+        created: None,
+        kind: "General".to_string(),
+        target,
+    }
 }

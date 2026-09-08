@@ -57,6 +57,9 @@ pub use app::devices::{
     target_offer, transport_label_for_endpoint, uid_from_sim_endpoint, write_sim_record,
 };
 pub use app::docs_host::DocsSimHost;
+// The project's declared hardware (D41): the web shell's Hardware row and
+// the gallery card's "for <board>" badge both read it.
+pub use app::library::{DESKTOP_BOARD_ID, ProjectTarget};
 pub use app::frame_feed::{CardFeedApply, CardFeedState};
 pub use app::home::{
     DEFAULT_STRIP_PIXELS, GenerateProjectError, GeneratedProject, HOME_NODE_ID, HomeOp,

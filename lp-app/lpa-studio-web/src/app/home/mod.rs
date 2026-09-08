@@ -45,6 +45,7 @@ pub mod projects_page;
         reason = "called only by the wasm poster-first thumb path; host builds render no preview and only run the cache unit tests"
     )
 )]
+pub(crate) mod target_pick_popover;
 pub(crate) mod thumb_poster;
 
 pub use devices_page::DevicesPage;
