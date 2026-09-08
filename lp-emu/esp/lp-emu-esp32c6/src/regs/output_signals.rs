@@ -17,11 +17,8 @@
 
 /// `func_out_sel_cfg[n].out_sel` values this crate can name, `(number, name)`,
 /// sorted by number.
-pub static OUTPUT_SIGNALS: &[(u16, &str)] = &[
-    (71, "RMT_SIG_0"),
-    (72, "RMT_SIG_1"),
-    (128, "GPIO_OUT"),
-];
+pub static OUTPUT_SIGNALS: &[(u16, &str)] =
+    &[(71, "RMT_SIG_0"), (72, "RMT_SIG_1"), (128, "GPIO_OUT")];
 
 /// `out_sel == 128`: the pad follows `GPIO_OUT_REG[n]` rather than any
 /// peripheral. The reset value of `func_out_sel_cfg[n]` is `0x80`, so every

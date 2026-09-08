@@ -261,7 +261,9 @@ impl Fabric {
 
     /// The GPIO output-enable bit for `pad`, as last written.
     pub fn gpio_enable(&self, pad: PadId) -> bool {
-        Self::index(pad).map(|i| self.gpio_enable[i]).unwrap_or(false)
+        Self::index(pad)
+            .map(|i| self.gpio_enable[i])
+            .unwrap_or(false)
     }
 
     /// Every routed pad, ascending.
@@ -372,7 +374,12 @@ mod tests {
     fn only_the_pads_routed_to_the_driven_signal_move() {
         let mut f = Fabric::new();
         f.route(PAD, RouteSource::Signal(SIG, false), false, 0);
-        f.route(PadId(20), RouteSource::Signal(SignalId(72), false), false, 0);
+        f.route(
+            PadId(20),
+            RouteSource::Signal(SignalId(72), false),
+            false,
+            0,
+        );
         f.drive(SIG, true, 100);
         let edges = f.take_edges();
         assert_eq!(edges.len(), 1);

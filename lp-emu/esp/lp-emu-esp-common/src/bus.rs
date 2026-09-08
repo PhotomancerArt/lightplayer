@@ -32,11 +32,11 @@ use lp_emu_core::memory::{MemoryAccessKind, MemoryError};
 use lp_emu_core::sched::{Cycles, EventId, Scheduler};
 
 use crate::host::HostSinks;
-use crate::pins::Fabric;
 use crate::periph::{
     BoxedPeripheral, BusCx, CpuIntMatrix, IrqLines, MachineRequest, NoCpuInterrupts, RegGrade,
     Width,
 };
+use crate::pins::Fabric;
 use crate::trace::{Access, MmioEvent, Trace};
 
 /// Hardware trigger slots, matching the RISC-V debug spec's count on the

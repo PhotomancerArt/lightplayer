@@ -609,7 +609,11 @@ mod tests {
             })
             .expect("closed");
         assert_eq!(f.wire, rgb);
-        assert_eq!(unpermute(&f.wire, timing.color_order), rgb, "RGB is identity");
+        assert_eq!(
+            unpermute(&f.wire, timing.color_order),
+            rgb,
+            "RGB is identity"
+        );
         assert!(f.is_complete());
         // And a WS2812 decoder would have refused those pulses: 300 ns is
         // 100 ns off WS2812's T0H, inside the tolerance, but 900 ns is 100 ns

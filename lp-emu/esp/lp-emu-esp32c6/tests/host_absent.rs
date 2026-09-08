@@ -179,7 +179,9 @@ fn with_no_host_the_printer_times_out_once_and_the_rx_path_is_never_armed() {
     // `GPIO_OUT` — not a waveform, and nothing decodable on it.
     let routed = m.routed_pads();
     assert!(
-        routed.iter().all(|(_, source)| *source == RouteSource::GpioOut),
+        routed
+            .iter()
+            .all(|(_, source)| *source == RouteSource::GpioOut),
         "a peripheral signal reached a pad: {routed:?}"
     );
     assert!(m.frames(18).is_empty());

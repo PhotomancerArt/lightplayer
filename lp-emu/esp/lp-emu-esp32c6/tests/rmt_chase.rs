@@ -285,7 +285,12 @@ fn wire_from_words(frame: &Frame<'_>) -> Vec<u8> {
 #[test]
 #[ignore = "needs the fw-esp32c6 test_rmt ELF; run through `just test-emu-c6`"]
 fn the_pad_carries_the_frames_the_words_describe() {
-    let Some(Run { mut m, outcome, notes }) = run(TimeGrade::T1) else {
+    let Some(Run {
+        mut m,
+        outcome,
+        notes,
+    }) = run(TimeGrade::T1)
+    else {
         return;
     };
     assert!(
@@ -346,7 +351,11 @@ fn the_pad_carries_the_frames_the_words_describe() {
         // And the chase is where it should be: pixel k lit, the rest black.
         let rgb = unpermute(&frame.wire, ColorOrder::Grb);
         for (i, px) in rgb.chunks_exact(3).enumerate() {
-            let expected = if i == k % LEDS { [10, 10, 10] } else { [0, 0, 0] };
+            let expected = if i == k % LEDS {
+                [10, 10, 10]
+            } else {
+                [0, 0, 0]
+            };
             assert_eq!(px, expected, "frame {k}, pixel {i}");
         }
     }
@@ -454,7 +463,10 @@ fn two_runs_dump_identical_frames_and_a_snapshot_carries_a_decoder_mid_frame() {
         "rmt_chase: --dump-frames sha256 {} and {}",
         digests[0].0, digests[1].0
     );
-    assert_eq!(digests[0].0, digests[1].0, "two runs dumped different frames");
+    assert_eq!(
+        digests[0].0, digests[1].0,
+        "two runs dumped different frames"
+    );
     assert_eq!(digests[0].1, digests[1].1);
     let first = String::from_utf8(digests[0].1.clone()).expect("utf-8");
     println!("rmt_chase: first record {}", first.lines().next().unwrap());

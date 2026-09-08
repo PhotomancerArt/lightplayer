@@ -54,14 +54,14 @@ use lp_emu_core::sched::Cycles;
 use lp_emu_core::{Bus, CycleModel};
 use lp_emu_esp_common::bus::StrictViolation;
 use lp_emu_esp_common::periph::BoxedPeripheral;
+use lp_emu_esp_common::pins::{PadId, RouteSource};
+use lp_emu_esp_common::strip::ws281x::{Frame, Ws281xDecoder, unpermute};
 use lp_emu_esp_common::{
     ByteLog, ByteSink, ByteSource, ElfImage, RamRegion, RegGrade, SocBus, Strap,
 };
-use lp_emu_esp_common::pins::{PadId, RouteSource};
-use lp_emu_esp_common::strip::ws281x::{Frame, Ws281xDecoder, unpermute};
 use lp_riscv_emu::mach::trigger::TRIGGER_COUNT;
-use lp_ws281x::{ChannelTiming, ColorOrder};
 use lp_riscv_emu::mach::{HartFault, MachineHart, SliceEnd};
+use lp_ws281x::{ChannelTiming, ColorOrder};
 
 use crate::control::{ControlCommand, ControlReply, HostReport};
 use crate::intmatrix::Esp32C6IntMatrix;

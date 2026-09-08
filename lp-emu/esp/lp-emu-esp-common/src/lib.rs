@@ -59,8 +59,8 @@ pub use periph::{
 };
 pub use pins::{Edge, Fabric, PadId, Route, RouteSource, SignalId};
 pub use regfile::RegFile;
-pub use strip::ws281x::{Frame, Ws281xDecoder};
 pub use regnames::RegNames;
+pub use strip::ws281x::{Frame, Ws281xDecoder};
 pub use trace::{Access, MmioEvent, Trace};
 
 // The crate is `std` (it hosts stdout sinks and sockets), but
