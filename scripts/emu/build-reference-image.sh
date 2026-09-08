@@ -37,6 +37,8 @@
 # the feature list with `,` → `+`.
 #
 #   harness   = test_shader_compile_incremental,esp32c6,spike_uart0_link
+#   jit-math-perf = test_jit_math_perf,esp32c6,spike_uart0_link   (M4: a render-loop
+#               shape — JIT'd Q32 kernels, where the poll skip never fires)
 #   boot-idle = esp32c6,server,radio,spike_uart0_link
 #   boot-idle-memfs = esp32c6,server,radio,spike_uart0_link,memory_fs   (the §5.4 diagnostic variant)
 #
@@ -62,6 +64,7 @@ profile="release-esp32"
 
 case "$features" in
     test_shader_compile_incremental,esp32c6,spike_uart0_link) slug=harness ;;
+    test_jit_math_perf,esp32c6,spike_uart0_link) slug=jit-math-perf ;;
     esp32c6,server,radio,spike_uart0_link) slug=boot-idle ;;
     esp32c6,server,radio,spike_uart0_link,memory_fs) slug=boot-idle-memfs ;;
     esp32c6,server,radio,memory_fs) slug=boot-idle-memfs-usb ;;
