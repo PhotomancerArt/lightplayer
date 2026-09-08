@@ -42,6 +42,7 @@ use lpa_studio_core::{
 
 use crate::app::home::device_roster_card::{DeviceRosterCard, PendingLinkCard};
 use crate::app::home::play_feed_text::frame_age_label;
+use crate::app::home::target_pick_popover::TargetPickPopover;
 use crate::app::home::{device_grid_class, section_title_class};
 use crate::app::node::lamp_view::LampView;
 use crate::core::{ActionButton, ActionButtonVariant};
@@ -57,6 +58,11 @@ pub fn DevicesPage(
     /// closed and stays where the user leaves it.
     #[props(default)]
     remembered_open: bool,
+    /// Story-only: mount the add slot's target menu open, for the same
+    /// reason — a capture cannot click a trigger, and the dropdown is the
+    /// half of D44 worth reviewing.
+    #[props(default)]
+    target_pick_open: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let devices = home.devices.clone();
@@ -121,7 +127,7 @@ pub fn DevicesPage(
                         // Adding lives IN the roster, at the insertion point
                         // (the house rule: add buttons sit where the new
                         // entry will appear, never in headers).
-                        AddDeviceCard { on_action }
+                        AddDeviceCard { pick_open: target_pick_open, on_action }
                     }
                 }
 
@@ -148,15 +154,29 @@ pub fn DevicesPage(
 /// the round-1 dodge for the too-bold gradient fill, and the spike gate
 /// (2026-08-31, "1F for the primary") made Primary the spectrum outline
 /// the slot wanted all along.
+///
+/// # Two verbs, one slot (D44, spike 2a)
+///
+/// The house rule taken literally: the slot where the next card appears
+/// offers both ways a card can appear. **"It's connected"** stays the
+/// spectrum CTA — a board on the desk is the common case — and **"start a
+/// board here ▾"** is the quiet second verb that opens the target menu. Its
+/// panel floats in the top layer, so the slot is the same height open or
+/// shut and the grid never reflows.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn AddDeviceCard(on_action: EventHandler<UiAction>) -> Element {
+fn AddDeviceCard(
+    /// Stories only: mount the target menu open (a capture cannot click).
+    #[props(default = false)]
+    pick_open: bool,
+    on_action: EventHandler<UiAction>,
+) -> Element {
     rsx! {
         div { class: "tw:flex tw:min-h-40 tw:flex-col tw:items-center tw:justify-center tw:gap-3 tw:rounded-md tw:border tw:border-dashed tw:border-border-strong tw:bg-transparent tw:px-5 tw:py-6",
             // The invitation is transport-OPEN: connecting is the goal, and
-            // the USB specifics live on the verb below ("It's plugged in"),
-            // so a network path can join later as a sibling verb rather
-            // than a rewrite.
+            // the USB specifics live in the verb's own summary, so a
+            // network path can join later as a sibling verb rather than a
+            // rewrite.
             p { class: "tw:m-0 tw:max-w-56 tw:text-center tw:text-xs tw:leading-relaxed tw:text-muted-foreground",
                 "Connect a LightPlayer board to control\u{a0}it."
             }
@@ -165,8 +185,17 @@ fn AddDeviceCard(on_action: EventHandler<UiAction>) -> Element {
                 running: false,
                 on_action,
             }
+            span { class: add_slot_or_class(), "or" }
+            TargetPickPopover { initially_open: pick_open, on_action }
         }
     }
+}
+
+/// The "or" between the slot's two verbs: the quietest possible separator,
+/// because the two offers are not equal — one is the common case and the
+/// other is the deliberate detour.
+fn add_slot_or_class() -> &'static str {
+    "tw:text-[10px] tw:tracking-wide tw:text-dim-foreground tw:uppercase"
 }
 
 /// No transport: this build (or this browser) cannot reach a USB port at all.
@@ -469,6 +498,26 @@ mod tests {
             feeds: Default::default(),
             runtime_bands: Default::default(),
         }
+    }
+
+    /// D44: the slot offers BOTH ways a card can appear, and each verb's
+    /// words come from the place that owns them — core's action vocabulary
+    /// for the board already connected, the target menu for the one Studio
+    /// is about to start.
+    #[test]
+    fn the_add_slot_offers_both_ways_a_card_can_appear() {
+        let connected = DevicesOp::action_for(DeviceAction::AddFromUsb);
+
+        assert_eq!(connected.meta().label, "It's connected");
+        assert_eq!(
+            crate::app::home::target_pick_popover::SLOT_VERB_LABEL,
+            "start a board here"
+        );
+        assert_ne!(
+            connected.meta().label,
+            crate::app::home::target_pick_popover::SLOT_VERB_LABEL,
+            "two offers, two verbs"
+        );
     }
 
     /// A host build (or a Firefox) has no transport, and the page says that

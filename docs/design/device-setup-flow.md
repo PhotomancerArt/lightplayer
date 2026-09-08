@@ -38,6 +38,14 @@ the round-2 plan):
   everywhere keeps the derived name.
 - **`/hardware.json` written at provision** (D4) — now the flash
   activity's post-hello stamp.
+- **The add slot is the creation surface.** The wizard's `ItsConnected`
+  entry survives as the slot's own CTA. 2026-09-07 (always-a-device, P5)
+  gave the slot a second, quiet verb — "start a board here ▾", a menu of
+  Desktop and the boards — and relabelled the CTA **"It's connected"** so
+  the two read as the two ways a card can appear: a board already at the
+  end of a wire, or a runtime Studio starts in this tab. There is no other
+  creation path and no wizard behind either verb; picking a target mints a
+  device record and powers it on.
 
 The §2 transition table below is the record of what the first
 implementation decided.

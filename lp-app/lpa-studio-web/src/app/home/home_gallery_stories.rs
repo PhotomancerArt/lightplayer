@@ -35,6 +35,7 @@ use crate::app::home::device_pick_popover::{
 use crate::app::home::device_roster_card::{DeviceRosterCard, PendingLinkCard};
 use crate::app::home::device_terminal::DeviceTerminal;
 use crate::app::home::gallery_preview::ThumbPreviewBadge;
+use crate::app::home::target_pick_popover::TargetPickPopover;
 use crate::app::home::{DevicesPage, ExplorePage, ProjectsPage};
 
 /// A fixed "now" so relative times in baselines never drift.
@@ -463,6 +464,62 @@ fn devices_page_story(remembered_open: bool) -> Element {
         section { class: "tw:p-4",
             DevicesPage { home, remembered_open, on_action: |_| {} }
         }
+    }
+}
+
+#[story(
+    description = "The add slot's target menu, open (D44, PD16, spike 2 + 2b). The slot keeps \"It's connected\" as its spectrum CTA — a board on the desk is the common case — and grows a quiet second verb, \"start a board here ▾\", because the slot where the next card appears should offer BOTH ways a card can appear. The menu is two groups: Desktop alone at the top (it is the default target and the one every new project gets), then every catalog board this build can actually start, in catalog order, each row a silhouette · name · tag. The tag is a lowercase WORD — the same word the runtime band and the `?on=` grammar use — rather than a chip or a sentence, and it says what this build would run the row AS: `sim` everywhere today, because nothing is emulated yet. For the same reason the emu-versus-sim hint line is absent: it explains a choice nobody has, and inert text is noise. Picking a row mints a sim record of that target, powers it on, and the card lands in the grid next to the slot that made it. The panel floats in the top layer, so the slot is exactly as tall open as shut and the roster never reflows."
+)]
+fn devices_target_pick_open() -> Element {
+    rsx! {
+        section { class: "tw:grid tw:min-h-[520px] tw:w-[360px] tw:place-items-center tw:p-4",
+            TargetPickPopover { initially_open: true, on_action: |_| {} }
+        }
+    }
+}
+
+#[story(
+    description = "A powered-off sim, where Q5 put it: on the remembered line, in the same dashed tile an unplugged board gets. Powering a sim off keeps its record and takes everything else — so the tile says what it has (a name, the board it acts as) and nothing it does not, and its preview slot carries the honest sentence rather than a stale picture. The one thing that differs from a board's tile is the verb in the Reconnect slot: a runtime this tab makes has no port grant to ask the browser back for, so the escape reads POWER ON, in the same outline voice, dispatching the same `Connect` the model already has (PD8/Q15 — a sim adds a link and an effect backend, never a fifth flow). Forget keeps its inline confirm, whose words are the sim's own: \"Forget this sim? Its record and name go; nothing else exists.\" (D46)."
+)]
+fn devices_card_sim_powered_off() -> Element {
+    let home = UiHomeView {
+        projects: packages(),
+        examples: examples(),
+        devices: powered_off_sim_fixture(),
+        library_available: true,
+        opening: None,
+        issue: None,
+    };
+    rsx! {
+        section { class: "tw:p-4",
+            DevicesPage { home, remembered_open: true, on_action: |_| {} }
+        }
+    }
+}
+
+/// A roster holding exactly one device: a sim that has been powered off.
+///
+/// The band map is what makes it a sim to [`split_roster`] — the model
+/// deliberately does not know — and that is what turns the tile's
+/// Reconnect slot into Power on.
+fn powered_off_sim_fixture() -> DeviceRosterView {
+    let mut card = sim_card_view(21, "XIAO ESP32-C6 (sim)", "seeed/xiao-esp32-c6");
+    card.status = DeviceStatus::Offline;
+    card.state_label = "Powered off".to_string();
+    card.escapes = vec![DeviceEscape::Reconnect, DeviceEscape::Forget];
+    card.freshness_label = Some("last heard 4 min ago".to_string());
+    let id = card.id;
+    DeviceRosterView {
+        transport_available: true,
+        feeds: Default::default(),
+        runtime_bands: [(id, UiRuntimeBand::sim("seeed/xiao-esp32-c6", Some("cpu")))]
+            .into_iter()
+            .collect(),
+        open_addresses: Default::default(),
+        roster: RosterView {
+            pending: Vec::new(),
+            devices: vec![card],
+        },
     }
 }
 
