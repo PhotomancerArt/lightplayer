@@ -7,7 +7,7 @@
 //!
 //! The silicon driver does not reinvent the port discipline that the spike and
 //! the device-scenarios runner arrived at the hard way. It shells out to
-//! `scripts/spike/esp-emu/desk-espflash-step.sh`, which runs espflash in the
+//! `scripts/emu/desk-espflash-step.sh`, which runs espflash in the
 //! **foreground** under `script(1)` with a `SIG_DFL` exec shim, polls the
 //! capture for the payload's sentinel, sends SIGINT **to that pid only**, and
 //! post-checks with `lsof`/`pgrep`. Every clause there is a sitting that broke:
@@ -54,7 +54,7 @@ pub const C6_PARTITIONS: &str = "lp-fw/fw-esp32c6/partitions.csv";
 /// `scripts/emu/build-reference-image.sh`; this constant is that same rule for
 /// the runner's plans. Found at G3 sitting 1, 2026-09-07.
 pub const FW_ESP32C6_DIR: &str = "lp-fw/fw-esp32c6";
-pub const DESK_STEP_SCRIPT: &str = "scripts/spike/esp-emu/desk-espflash-step.sh";
+pub const DESK_STEP_SCRIPT: &str = "scripts/emu/desk-espflash-step.sh";
 /// The flash half of a [`Capture::FlashThenOpenAfter`] run: the same port
 /// discipline as `DESK_STEP_SCRIPT`, and no monitor.
 pub const DESK_FLASH_NO_MONITOR_SCRIPT: &str = "scripts/emu/desk-flash-no-monitor.sh";

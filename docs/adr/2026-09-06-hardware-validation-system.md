@@ -147,7 +147,7 @@ nothing. **Masking means reported-but-not-compared, never deleted.**
 `list`, `replay`, `run`, `record`. Drivers **plan first and execute second**,
 so `--dry-run` prints the exact commands — which is what makes a desk protocol
 reviewable before a board is plugged in. The silicon driver shells out to
-`scripts/spike/esp-emu/desk-espflash-step.sh` rather than re-deriving the port
+`scripts/emu/desk-espflash-step.sh` rather than re-deriving the port
 discipline: foreground espflash under `script(1)` with a `SIG_DFL` exec shim,
 sentinel poll, SIGINT to that pid only, `lsof`/`pgrep` post-check. Every clause
 there is a sitting that broke.

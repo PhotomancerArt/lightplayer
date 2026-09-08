@@ -49,7 +49,7 @@ cap="${CAPTURE:-$(mktemp -t flash-image)}"
 echo "capture: $cap"
 
 status=0
-PORT_DEV="$port" scripts/spike/esp-emu/desk-espflash-step.sh \
+PORT_DEV="$port" scripts/emu/desk-espflash-step.sh \
     "$cap" "$sentinel" "$max" -- \
     flash --chip esp32c6 --port "$port" --no-stub \
     --partition-table lp-fw/fw-esp32c6/partitions.csv \
