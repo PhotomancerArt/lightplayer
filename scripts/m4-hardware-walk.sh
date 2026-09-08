@@ -1,18 +1,31 @@
 #!/usr/bin/env bash
-# Hardware walk — a shader compiled and executed on a device's on-chip Xtensa
-# JIT, verified against a host render rather than against an LED.
+# Hardware walk — a shader compiled and executed on a device's on-chip JIT,
+# verified against a host render rather than against an LED.
 #
 # Usage:
-#   scripts/m4-hardware-walk.sh [port]                 # ESP32-S3   (M4 gate)
-#   scripts/m4-hardware-walk.sh --chip esp32 [port]    # classic ESP32 (M7 gate)
+#   scripts/m4-hardware-walk.sh [port]                   # ESP32-S3   (M4 gate)
+#   scripts/m4-hardware-walk.sh --chip esp32 [port]      # classic ESP32 (M7 gate)
+#   scripts/m4-hardware-walk.sh --chip esp32c6 [port]    # ESP32-C6
 #
 # Named for the S3's M4 gate, which it was written for; the classic ESP32's
 # M7 FINAL gate asks the identical question ("does the on-device JIT render
 # bit-exactly against the host oracle?") of a chip whose JIT installs code by a
 # completely different route — the classic heap has no I-bus view, so compiled
 # code is walked into a fixed SRAM1 region through a word-mirrored D-bus
-# aperture. Two chips, one question, so one script: everything chip-specific
-# lives in the `case` block below, and nothing downstream of it branches.
+# aperture. The ESP32-C6 asks it a third time of a RISC-V core running the
+# native rv32 code generator the host oracle's second engine also runs, which
+# is why its `[ORACLE-RV32]` line stops being only a triage aid there and
+# becomes the same code path. Three chips, one question, so one script:
+# everything chip-specific lives in the `case` block below, and nothing
+# downstream of it branches.
+#
+# The C6 has a fourth caller too: `scripts/emu/m4-walk.sh` runs this walk's
+# every step against the `lp-emu-esp32c6` emulator instead of a board, on the
+# same image bytes, and compares both its answers — the firmware's `[OUT] dump`
+# line AND the WS281x waveform decoded off the emulated pad — against the same
+# host oracle. That twin is the reason the C6 grew a `frame-dump` build at all
+# (`lp-fw/fw-esp32c6/src/output/rmt/frame_dump.rs`). Keep the two scripts'
+# comparison sections saying the same thing.
 #
 # The walk is in two flashes because espflash's `--monitor` HOLDS the port,
 # so `lp-cli` cannot open it at the same time. Round 1 flashes and pushes the
@@ -51,7 +64,7 @@ PROJECT="${PROJECT:-projects/test/shader-oracle}"
 FLASH_FEATURES="${FLASH_FEATURES:-frame-dump}"
 
 usage() {
-    sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 # ------------------------------------------------------------ arguments
@@ -108,8 +121,23 @@ case "$chip" in
         VERIFY_CHIP="${VERIFY_CHIP:-1}"
         PORT_HINT="/dev/cu.wchusbserial*"
         ;;
+    esp32c6)
+        FLASH_RECIPE="flash-fw-esp32c6"
+        # The XIAO ESP32-C6 carries the same `D10` pad the oracle project is
+        # authored for (it is gpio18 there — see the driver's open line in
+        # `lp-emu/esp/lp-emu-esp32c6/tests/shader_oracle_pin.rs`), so unlike
+        # the classic this chip needs no retarget and `prepare_project` below
+        # uploads the project unmodified.
+        ENDPOINT_LABEL="${ENDPOINT_LABEL:-D10}"
+        # Off for the same reason it is off for the S3: `board-info` on a
+        # USB-Serial-JTAG port resets the board, and the C6's real ambiguity
+        # is not "which chip" but "which of two C6s" — which `board-info`
+        # cannot answer and `board-port.py` can, without opening anything.
+        VERIFY_CHIP="${VERIFY_CHIP:-0}"
+        PORT_HINT="/dev/cu.usbmodem* (resolve by MAC: scripts/emu/board-port.py --list)"
+        ;;
     *)
-        echo "unsupported --chip '$chip' (known: esp32s3, esp32)" >&2
+        echo "unsupported --chip '$chip' (known: esp32s3, esp32, esp32c6)" >&2
         exit 2
         ;;
 esac
@@ -117,6 +145,24 @@ esac
 echo "==> chip=$chip recipe=just $FLASH_RECIPE endpoint=ws281x:local:$ENDPOINT_LABEL"
 
 # ------------------------------------------------------------ port
+#
+# `LP_BOARD_MAC` short-circuits the probe entirely. Two ESP32-C6s (or two S3s)
+# on one bus are indistinguishable by port name — both enumerate as
+# `303a:1001` and macOS names both `/dev/cu.usbmodem14332xx` — and a probe that
+# picks "the first one" flashes a board another session is using.
+# `board-port.py` walks IOKit for the USB serial number, which IS the MAC: it
+# opens nothing, resets nothing, and cannot pick the wrong board.
+#
+#   LP_BOARD_MAC=A0:F2:62:87:B4:8C scripts/m4-hardware-walk.sh --chip esp32c6
+if [[ -z "$port" && -n "${LP_BOARD_MAC:-}" ]]; then
+    echo "==> resolving $LP_BOARD_MAC (passively, by USB serial number)"
+    port="$(scripts/emu/board-port.py "$LP_BOARD_MAC")" || {
+        echo "FAIL: no board with MAC $LP_BOARD_MAC on the bus." >&2
+        scripts/emu/board-port.py --list >&2 || true
+        exit 1
+    }
+    echo "    found: $port"
+fi
 if [[ -z "$port" ]]; then
     echo "==> identifying the $chip"
     # Probes with per-port timeouts (bare `espflash board-info` can hang on a
@@ -156,13 +202,22 @@ if [[ "$VERIFY_CHIP" != 0 ]]; then
     echo "    confirmed: $probed"
 fi
 
+# Interrupt only the espflash that holds OUR port.
+#
+# The pattern carries `$port` on purpose. `pkill -f "espflash flash"` kills
+# every espflash on the machine, which on a desk running two boards means one
+# walk SIGINTs the other lane's flash mid-write — and the `flash_and_watch`
+# child below passes `--port` explicitly, so the port name is always on the
+# command line to match against. SIGINT, never TERM or KILL: a killed espflash
+# wedges the port until someone physically replugs the board (M3's lesson, at
+# the top of this file).
 release_port() {
-    pkill -INT -f "espflash flash" 2>/dev/null || true
+    pkill -INT -f "espflash flash.*$port" 2>/dev/null || true
     for _ in $(seq 1 15); do
-        pgrep -f "espflash flash" >/dev/null 2>&1 || return 0
+        pgrep -f "espflash flash.*$port" >/dev/null 2>&1 || return 0
         sleep 1
     done
-    echo "WARNING: espflash still holding the port." >&2
+    echo "WARNING: espflash still holding $port." >&2
 }
 trap release_port EXIT
 
@@ -262,9 +317,15 @@ strip_ansi "$LOG" \
 
 echo
 echo "===== ORACLE ====="
-# One run, two engines: `[ORACLE]` is wasmtime, `[ORACLE-RV32]` is the same
-# native code generator both Xtensa chips JIT, one ISA over. Both are printed
-# because which of them a device byte agrees with is the whole triage.
+# One run, two engines: `[ORACLE]` is wasmtime, `[ORACLE-RV32]` is
+# `lpvm-native`'s rv32 code generator under `rt_emu`. Both are printed because
+# which of them a device byte agrees with is the whole triage — and what that
+# triage MEANS is chip-dependent. On the two Xtensa chips the rv32 engine is
+# the same code generator one ISA over, so agreeing with it and not with
+# wasmtime is a codegen-vs-wasmtime finding. On the C6 it is the same code
+# generator on the SAME ISA: a C6 that agrees with `[ORACLE-RV32]` and not
+# with `[ORACLE]` has reproduced the host engine exactly, and the difference
+# is wasmtime's.
 oracle_out="$(cargo test -q -p lpa-server --test shader_oracle_frame -- --nocapture 2>/dev/null)"
 echo "$oracle_out" | grep -a "\[ORACLE" || {
     echo "oracle test did not run" >&2
@@ -313,7 +374,18 @@ echo "  wasmtime: $oracle_hex"
 echo "  rv32-emu: $rv32_hex"
 if [[ "$device_hex" == "$rv32_hex" ]]; then
     echo "  TRIAGE: the device agrees with rv32-emu, so this is a native-codegen"
-    echo "          versus wasmtime difference, NOT an Xtensa-specific one."
+    if [[ "$chip" == "esp32c6" ]]; then
+        echo "          versus wasmtime difference. On this chip the two are the SAME"
+        echo "          code generator on the SAME ISA, so the device is right and the"
+        echo "          finding is wasmtime's — start at lpvm-native, not at the board."
+    else
+        echo "          versus wasmtime difference, NOT an Xtensa-specific one."
+    fi
+elif [[ "$chip" == "esp32c6" ]]; then
+    echo "  TRIAGE: the device agrees with NEITHER host engine. On this chip that is"
+    echo "          the strong case: rv32-emu runs the device's own code generator on"
+    echo "          the device's own ISA, so a difference is the CHIP — the JIT's"
+    echo "          install path, the cache, or a peripheral — not the compiler."
 else
     echo "  TRIAGE: the device agrees with NEITHER host engine — Xtensa-specific."
 fi

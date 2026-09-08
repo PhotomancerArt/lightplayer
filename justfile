@@ -749,8 +749,18 @@ build-rv32: install-rv32-target build-rv32-builtins build-fw-esp32c6 build-rv32-
 build-rv32-release: build-rv32
 
 # riscv32: fw-esp32c6 (uses release-esp32 profile: nightly for -Zbuild-std)
-build-fw-esp32c6: install-rv32-target
-    cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6
+#
+# The optional argument is extra features, in the shape `build-fw-esp32s3`
+# takes them. `esp32c6` is always added — it is the chip gate, not an option.
+build-fw-esp32c6 features="": install-rv32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    features="esp32c6"
+    if [[ -n "{{ features }}" ]]; then
+      features="$features,{{ features }}"
+    fi
+    cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} \
+        --profile {{ fw_esp32c6_profile }} --features "$features"
 
 # Build the ESP32-S3 firmware. Xtensa has no upstream Rust target, so this uses
 # Espressif's fork via the crate's own `rust-toolchain.toml` (channel = "esp").
@@ -1027,6 +1037,31 @@ flash-fw-esp32s3 port="" features="": (build-fw-esp32s3 features)
       args+=(--port "{{ port }}")
     fi
     espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
+
+# Flash fw-esp32c6 to a connected ESP32-C6 and open the serial monitor.
+#
+# The S3 recipe above, one chip over, and it exists for the same caller:
+# `scripts/m4-hardware-walk.sh --chip esp32c6` needs one command that builds,
+# flashes and monitors, and owns the partition table and flash size so the
+# walk script duplicates neither. The optional second argument is passed to
+# `build-fw-esp32c6`; the one that matters is `frame-dump`, which makes the
+# board print every transmitted frame, because an LED cannot be diffed against
+# a host render:
+#
+#   just flash-fw-esp32c6 /dev/cu.usbmodemXXXX frame-dump
+#
+# ⚠️ Two C6s on one bus are indistinguishable by port name — both enumerate as
+# `303a:1001` and both come up as `/dev/cu.usbmodem14332xx`. Resolve by MAC
+# first (`scripts/emu/board-port.py A0:F2:62:87:B4:8C`) and pass the port
+# explicitly rather than letting espflash pick.
+flash-fw-esp32c6 port="" features="": (build-fw-esp32c6 features)
+    #!/usr/bin/env bash
+    set -euo pipefail
+    args=(--chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} --monitor --after hard-reset)
+    if [[ -n "{{ port }}" ]]; then
+      args+=(--port "{{ port }}")
+    fi
+    espflash flash "${args[@]}" {{ fw_esp32c6_elf }}
 
 # Run the Xtensa JIT corpus on a connected ESP32-S3 and print PASS/FAIL per case.
 #
