@@ -257,6 +257,36 @@ regression, not the plan's required >=3% gain), so it was reverted rather
 than kept — smaller `Result<T, E>` types did not translate into a faster
 interpreter loop here, at least not enough to clear load noise.
 
+**M4's pure poll-loop skip** is the largest rung so far, and the first that
+is a semantic change rather than a codegen one — it has an ADR
+(`docs/adr/2026-09-08-emulator-poll-loop-skip.md`) and a flag,
+`--no-poll-skip`, that turns it off. A boot spends most of its cycles
+spinning on `UART0+0x01c` while the console drains at baud; the hart
+recognises such a loop as a fixed point of machine state except for time and
+credits whole iterations of it to both counters. Same-window interleaved A/B
+against `origin/main`, minimum USER seconds, this desk at load 60-110:
+
+| image | grade | `main` | M4 | |
+|---|---|---:|---:|---:|
+| harness | t1 | 4.79 s | 0.80 s | **5.99x** |
+| harness | t2 | 2.83 s | 0.57 s | **4.96x** |
+| jit-math-perf | t1 | 1.99 s | 0.71 s | **2.80x** |
+| jit-math-perf | t2 | 1.43 s | 0.60 s | **2.38x** |
+| boot-idle-memfs | t1 | 0.73 s | 0.90 s | **0.81x** |
+| boot-idle-memfs | t2 | 0.78 s | 0.88 s | **0.89x** |
+
+The last two rows are the trade, recorded rather than hidden:
+`boot-idle-memfs` is a `wfi`-idle image where the skip fires zero times, and
+it pays 11-19% for the per-instruction bookkeeping that lets the machine
+notice a poll loop at all. `jit-math-perf` — JIT'd Q32 kernels, the shape of
+the product's render loop — gains 2.4x, so the loss is not a property of
+"images the skip does not help" in general. The ADR's Consequences section
+records what was tried against it.
+
+Identity, at `boot_idle.rs`'s real 5.5 s deadline on all three images and
+both grades: 25/25 artefacts byte-identical both with-vs-without the skip and
+against `origin/main`.
+
 **PGO** is `just bench-emu-c6-pgo` / `scripts/emu/pgo-c6.sh`: an instrumented
 build, one training run of each pinned reference image, a merge, an
 optimized rebuild, then the probe on the result — each phase in its own

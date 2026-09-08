@@ -791,7 +791,7 @@ lp-emu-esp32c6 --elf <app.elf> [--rom <path>] [--time-grade t1|t2]
     [--control tcp:<host:port>] [--usb-script <file>]
     [--efuse-mac a0:f2:62:87:b4:8c] [--efuse-rev 0.2] [--seed <u64>]
     [--trace [BLOCK,BLOCK…]] [--trace-file <path>] [--strict-bus]
-    [--strict-grade modeled|documented|measured]
+    [--strict-grade modeled|documented|measured] [--no-poll-skip]
     [--probe <symbol>@<ms>] [--break-at <symbol>] [--hooks] [--map]
 ```
 
@@ -819,6 +819,27 @@ instruction with every register as the caller left it and prints
 text, and the `s0` frame-pointer backtrace — inside a panic path that
 chain walks the panic machinery's own frames, so break at
 `ExceptionHandler` or `core::panicking::panic_fmt` for a clean one.
+
+`--no-poll-skip` turns off the **pure poll-loop skip** (ADR
+2026-09-08-emulator-poll-loop-skip): with it on — the default — the hart
+recognises a loop that returns to the same `pc` with the same registers,
+reading the same value out of a register the peripheral declares
+side-effect free, and credits whole iterations of it to both counters
+instead of executing them. A boot spends 45 % of its cycles waiting for the
+console to drain at baud, so this is worth 2.4x to 6x on an image that
+logs.
+
+It is **exact**: a run with the skip prints the same `stopped after` line
+and the same console bytes as a run with `--no-poll-skip`, which is the
+oracle the milestone was validated against. The exit report counts the
+skips beside the `wfi` idle skips.
+
+The one thing that does differ is `--trace`: a skipped iteration's MMIO
+reads are not in the log, because they did not happen, and one
+`POLL-SKIP UART0+0x01c status x1149` note stands in their place. **Capture
+a trace with `--no-poll-skip` when comparing two traces byte for byte.**
+`--strict-bus` does *not* disable the skip; a pure poll loop touches
+nothing unmapped.
 
 Every timeout is **emulated** time, so a run is the same run on a laptop and
 on a loaded CI box. A duration without a unit is refused rather than guessed:

@@ -733,6 +733,16 @@ Run it under `--strict-bus` while bringing anything up: an access nothing
 claims is then a fault with a pc and a symbol, instead of a zero the guest
 believes.
 
+- **The poll-loop skip is on by default and is exact** (ADR
+  `docs/adr/2026-09-08-emulator-poll-loop-skip.md`). The hart credits whole
+  iterations of a loop that returns to the same `pc` with the same registers
+  reading the same side-effect-free register. Transcripts are identical
+  either way — `--no-poll-skip` is the oracle, not a correctness switch.
+  **A `--trace` is the exception: a skipped iteration's MMIO reads are not in
+  it, so capture both sides of a trace comparison with `--no-poll-skip`.**
+  A peripheral that writes guest RAM outside a scheduled event would
+  invalidate the skip's safety argument — read the ADR before adding one.
+
 ## Validation Commands
 
 These commands must pass for any change touching the shader pipeline:
