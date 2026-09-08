@@ -126,6 +126,9 @@ pub struct Fabric {
     edges: Vec<Edge>,
     /// Edges dropped because [`EDGE_CAP`] was reached.
     dropped: u64,
+    /// Bumped whenever a pad's routing changed. A machine that watches the
+    /// routing compares this instead of walking every pad every slice.
+    epoch: u64,
 }
 
 impl Default for Fabric {
@@ -144,7 +147,13 @@ impl Fabric {
             signals: Vec::new(),
             edges: Vec::new(),
             dropped: 0,
+            epoch: 0,
         }
+    }
+
+    /// Bumped on every routing change. See [`Fabric::routes`].
+    pub fn route_epoch(&self) -> u64 {
+        self.epoch
     }
 
     fn index(pad: PadId) -> Option<usize> {
@@ -168,6 +177,7 @@ impl Fabric {
             at,
             oen_from_gpio,
         });
+        self.epoch += 1;
         self.settle(i, at);
     }
 
@@ -178,6 +188,7 @@ impl Fabric {
             return;
         }
         self.routes[i] = None;
+        self.epoch += 1;
         if self.level[i] {
             self.level[i] = false;
             self.push(Edge {

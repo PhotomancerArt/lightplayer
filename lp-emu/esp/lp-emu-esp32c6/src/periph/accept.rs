@@ -199,16 +199,10 @@ pub fn io_mux() -> RegFile {
     rf
 }
 
-/// `GPIO`: RW registers. `in_` (`+0x3c`) reads the pad levels — all 0, no
-/// pin is driven from outside; `pcpu_int` (`+0x5c`) reads 0 — no GPIO
-/// interrupt is ever pending. `enable`/`out` writes are visible as the
-/// ordinary trace lines; pins are M5's concern.
-pub fn gpio() -> RegFile {
-    RegFile::new("GPIO", 0x700)
-        .with_names(regs::GPIO)
-        .with_read_override(0x03c, 0xffff_ffff, 0)
-        .with_read_override(0x05c, 0xffff_ffff, 0)
-}
+// `GPIO` was an accept block here from P5 (`in_` and `pcpu_int` reading 0,
+// `out`/`enable` remembered) until M5 P2 made it a routing view over the
+// bus's signal fabric: `super::gpio`. Both read-zero overrides moved with
+// it, unchanged.
 
 // `RMT` was an accept block here from P5 (its `sys_conf` write from
 // `esp_hal::rmt::Rmt::new` was P5's first strict stop) until M5 P1 gave it a
@@ -269,7 +263,7 @@ mod tests {
     }
 
     #[test]
-    fn io_mux_has_thirty_one_pads_and_gpio_reads_no_input() {
+    fn io_mux_has_thirty_one_pads() {
         let mut sb = Sandbox::new();
         let mut m = io_mux();
         for pad in 0..31u32 {
@@ -277,12 +271,7 @@ mod tests {
         }
         assert_eq!(m.reg_name(0x07c), Some("gpio30"));
         assert_eq!(m.reg_name(0x080), None, "there is no pad 31");
-        let mut g = gpio();
-        sb.write(&mut g, 0x03c, 0xffff_ffff);
-        assert_eq!(sb.read(&mut g, 0x03c), 0);
-        sb.write(&mut g, 0x020, 0x40);
-        assert_eq!(sb.read(&mut g, 0x020), 0x40, "enable is remembered");
-        assert_eq!(g.reg_name(0x020), Some("enable"));
+        // GPIO's own reads are `super::gpio`'s tests now.
     }
 
     #[test]

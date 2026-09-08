@@ -26,6 +26,13 @@ env_logger = { workspace = true }
 # demangling every symbol and matching the path. MIT/Apache-2.0, already in
 # the tree through the workspace's dependencies.
 rustc-demangle = "0.1"
+# The strip decoder's wire timing and byte order (`--strip-timing`,
+# `--strip-order`), and `PulseItem::decode` in `tests/rmt_chase.rs`. The same
+# crate the firmware encodes with, so the emulator's idea of a bit cannot
+# drift from the driver's. MIT, on the fence allowlist
+# (`scripts/check-emu-fence.sh`); no `mock` — the emulator is the cycle-time
+# model of the same peripheral.
+lp-ws281x = { path = "../../../lp-fw/lp-ws281x", default-features = false }
 
 [dev-dependencies]
 test-log = { workspace = true }
@@ -38,8 +45,3 @@ sha2 = "0.10"
 # silicon transcript with M2's runner. Inside the `lp-emu/` fence (MIT), and
 # it mirrors `fw-checks` rather than importing it, so the fence lint passes.
 lp-emu-validate = { path = "../../lp-emu-validate" }
-# `tests/rmt_chase.rs` decodes the RMT model's fetched words with the same
-# `PulseItem::decode` the firmware encodes them with. MIT, and on the fence's
-# allowlist for exactly this (`scripts/check-emu-fence.sh`). No `mock`: the
-# emulator is the cycle-time model of the same peripheral.
-lp-ws281x = { path = "../../../lp-fw/lp-ws281x", default-features = false }
