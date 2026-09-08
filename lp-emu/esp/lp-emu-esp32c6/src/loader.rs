@@ -43,10 +43,16 @@
 //! 1. **The partition table is never read or validated.** No
 //!    `esp_app_desc` check, no image-hash check, no secure-boot or
 //!    flash-encryption path. A corrupt image boots here and does not there.
-//! 2. **No MMU page table.** The flash cache window is flat RAM holding the
-//!    ELF's flash-mapped segments; the real bootloader programs the cache
-//!    MMU, which is why esp-hal's link base is `0x4200_0020` and not
-//!    `0x4200_0000`. M4 replaces it.
+//! 2. **The MMU page table is programmed by the loader, not by a
+//!    bootloader** ([`stage_image_in_flash`], M4). The bytes go into the
+//!    flash chip at `factory + (vaddr - 0x4200_0000)` and the table maps
+//!    them back, so the window really does read through the MMU — but the
+//!    flash offsets are the loader's arithmetic, not an `esptool` image's
+//!    segment layout, and no image header, hash or partition table was
+//!    involved in choosing them. Likewise the flash **chip size** is
+//!    written into the ROM's legacy chip struct by
+//!    [`seed_rom_flash_chip`] in place of the bootloader's
+//!    `esp_rom_spiflash_config_param` call.
 //! 3. **The ROM's console is never initialised.** `uartAttach`,
 //!    `ets_install_uart_printf`, the printf-channel selection and every ROM
 //!    global they set are untouched, so `ets_get_printf_channel` answers from
@@ -65,6 +71,8 @@
 use lp_emu_esp_common::{ElfImage, SocBus};
 use lp_riscv_emu::mach::{MachineHart, csr};
 
+use crate::cache::CacheHandle;
+use crate::flash::{FACTORY_OFFSET, FlashHandle};
 use crate::memmap;
 use crate::rom::{RomError, place_spanning};
 
@@ -247,6 +255,176 @@ pub fn reset_hart(hart: &mut MachineHart<SocBus>, bus: &mut SocBus, entry: u32) 
     // called this out and P4 is where it lands).
     hart.set_allow_unaligned(true);
     bus.set_allow_unaligned(true);
+}
+
+/// One page a direct load put into flash and mapped into the cache window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StagedPage {
+    /// Where the guest sees it: `0x4200_0000 + n * 64 KiB`.
+    pub vaddr: u32,
+    /// Where it lives in the flash image.
+    pub paddr: u32,
+}
+
+/// What the direct load put into flash.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FlashStaging {
+    /// Every page written and mapped, in address order.
+    pub pages: Vec<StagedPage>,
+    /// Bytes copied out of the ELF (not counting the zero tails).
+    pub bytes: u32,
+    /// The chip size written into `rom_spiflash_legacy_data`.
+    pub chip_size: u32,
+}
+
+/// Put the flash-resident half of an image into the flash chip and program
+/// the cache MMU for it — the two things the second-stage bootloader does
+/// that a direct load otherwise skips.
+///
+/// # Why this exists at all
+///
+/// M3's direct load placed the ELF's `0x4200_0000` segments straight into
+/// the RAM region behind the window and left the MMU empty
+/// (`the module docs, item 2`). That works right up until something asks the
+/// flash *chip* a question, and this milestone's firmware does: littlefs
+/// mounts `lpfs` at `0x0031_0000` through the mask ROM's
+/// `esp_rom_spiflash_read`, which reads the same part the app's `.text`
+/// lives in. So the chip has to hold the app too, or the two halves of the
+/// address space would be describing different boards.
+///
+/// # The mapping, and why it is this one
+///
+/// `paddr = 0x0001_0000 + (vaddr - 0x4200_0000)` — the `factory` partition's
+/// offset (`lp-fw/fw-esp32c6/partitions.csv`) plus the offset into the
+/// window. `0x0001_0000` is a whole number of 64 KiB pages, so
+/// `paddr % 64K == vaddr % 64K` holds for every page, which is the cache
+/// MMU's constraint and the reason esp-hal links at `0x4200_0020`.
+///
+/// It is **not** what an `esptool` image would produce: a real flashed image
+/// has a header and per-segment headers, and its flash offsets fall where
+/// those leave them. This is the direct-load equivalent of what a flasher
+/// did — the bytes are in `factory`, at page-consistent offsets, and the
+/// table says where. M7 boots a real merged image through the real
+/// bootloader and gets the real offsets; that is the cross-check, and this
+/// function is one of the things it checks.
+///
+/// The ROM's own `0x4200_0000` segment is staged first and the app's on top,
+/// in the same order [`load_app`] places them into the window, so the flash
+/// image and the window agree byte for byte.
+pub fn stage_image_in_flash(
+    flash: &FlashHandle,
+    mmu: &CacheHandle,
+    images: &[&ElfImage],
+) -> FlashStaging {
+    let page_len = mmu.lock().unwrap().page_len();
+    let mut staging = FlashStaging::default();
+    let mut touched: Vec<u32> = Vec::new();
+
+    for image in images {
+        for seg in &image.segments {
+            if seg.memsz == 0 {
+                continue;
+            }
+            let Some(offset) = seg.vaddr.checked_sub(memmap::FLASH_CACHE_BASE) else {
+                continue;
+            };
+            if offset >= crate::cache::WINDOW_LEN {
+                continue;
+            }
+            let paddr = FACTORY_OFFSET + offset;
+            let mut chip = flash.lock().unwrap();
+            if !seg.data.is_empty() && chip.stage(paddr, &seg.data) {
+                staging.bytes += seg.data.len() as u32;
+            }
+            // The `memsz - filesz` tail is zeroed in the window, so it must
+            // be zeroed in flash too — erased flash is `0xff`, and a `.bss`
+            // that read as ones would not be a `.bss`.
+            let tail = seg.memsz.saturating_sub(seg.data.len() as u32);
+            if tail > 0 {
+                let zeros = vec![0u8; tail as usize];
+                chip.stage(paddr + seg.data.len() as u32, &zeros);
+            }
+            drop(chip);
+
+            let first = offset / page_len;
+            let last = (offset + seg.memsz - 1) / page_len;
+            for page in first..=last {
+                if !touched.contains(&page) {
+                    touched.push(page);
+                }
+            }
+        }
+    }
+
+    touched.sort_unstable();
+    let mut mmu = mmu.lock().unwrap();
+    for page in touched {
+        let vaddr = memmap::FLASH_CACHE_BASE + page * page_len;
+        let paddr = FACTORY_OFFSET + page * page_len;
+        if mmu.map(vaddr, paddr) {
+            staging.pages.push(StagedPage { vaddr, paddr });
+        } else {
+            log::warn!("loader: could not map {vaddr:#010x} to flash {paddr:#010x}");
+        }
+    }
+    staging.chip_size = flash.lock().unwrap().len();
+    staging
+}
+
+/// Tell the mask ROM how big the flash chip is, the way the second-stage
+/// bootloader does.
+///
+/// `rom_spiflash_legacy_data` (`0x4087_ffec`) is a **pointer** to the chip
+/// description, and the ROM's startup data seeds it to
+/// `rom_default_spiflash_legacy_data` at `0x4087_fa08`, whose
+/// `chip_size` word is `0x0020_0000` — **2 MiB**, the ROM's default part.
+/// `SPI_read_data` (`0x4002_4100`) refuses any read past it:
+///
+/// ```text
+/// c.lw  a5, 4(a0)          ; chip->chip_size
+/// add   a4, a3, a1         ; len + addr
+/// bltu  a5, a4, +0xae      ; → return 1
+/// ```
+///
+/// and `lpfs` starts at `0x0031_0000`, which is past 2 MiB. On silicon the
+/// bootloader calls `esp_rom_spiflash_config_param` with the size from the
+/// image header's flash-size field; here the loader writes the same word,
+/// derived from the image the machine was actually given. Without it every
+/// littlefs read returns error 1 and the mount fails for a reason that has
+/// nothing to do with the filesystem.
+///
+/// Returns the pointer it followed and the size it wrote, or `None` if the
+/// ROM data was not seeded (which would mean the ROM ELF changed shape).
+pub fn seed_rom_flash_chip(bus: &mut SocBus, chip_size: u32) -> Option<(u32, u32)> {
+    let mut word = [0u8; 4];
+    read_bytes(bus, memmap::ROM_SPIFLASH_LEGACY_DATA, &mut word)?;
+    let chip = u32::from_le_bytes(word);
+    if chip == 0 {
+        log::warn!(
+            "loader: rom_spiflash_legacy_data at {:#010x} is null; the ROM's initialised data \
+             was not seeded and the flash chip description does not exist",
+            memmap::ROM_SPIFLASH_LEGACY_DATA
+        );
+        return None;
+    }
+    // `chip_size` is the second word of the struct (`SPI_read_data` reads it
+    // at `+4`); `device_id` is the first and stays the ROM's own.
+    bus.load_image(chip + 4, &chip_size.to_le_bytes()).ok()?;
+    Some((chip, chip_size))
+}
+
+/// Read `out.len()` bytes out of a RAM region, or `None` if the address is
+/// not in one. (`SocBus` has `load_image` for the other direction; this is
+/// the small counterpart the loader needs and nothing else does.)
+fn read_bytes(bus: &SocBus, address: u32, out: &mut [u8]) -> Option<()> {
+    for region in bus.regions() {
+        if region.contains(address) && region.contains(address + out.len() as u32 - 1) {
+            let at = (address - region.base) as usize;
+            out.copy_from_slice(&region.data[at..at + out.len()]);
+            return Some(());
+        }
+    }
+    None
 }
 
 /// `dram2_seg` after the bootloader has gone: 64 KiB of zeroed RAM.

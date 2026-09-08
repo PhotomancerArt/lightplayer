@@ -139,6 +139,17 @@ pub struct Payload {
     /// (the in-band header is optional; when present it must agree).
     pub emits_header: bool,
     pub sentinel: Sentinel,
+    /// A `--uart0-script` this payload's walk needs, repo-root-relative, or
+    /// `None` for a payload the host never speaks to.
+    ///
+    /// A walk is a conversation, and the half a *payload* owns is what the
+    /// host says. Recording it as a file the configuration driver hands to
+    /// the machine is what makes the walk a payload at all: without it the
+    /// only reproducible transcript is a boot. On silicon the same
+    /// conversation is the client's, over a port — the file is the
+    /// emulated configurations' stand-in for it, and a driver that cannot
+    /// use one says so in its plan.
+    pub host_script: Option<&'static str>,
     /// Structured record kinds it emits behind `[fw-check-json] `.
     pub record_kinds: &'static [&'static str],
     /// The mask set that makes two of its transcripts comparable.
@@ -422,6 +433,117 @@ pub static STACK_HEARTBEAT: SeriesSpec = SeriesSpec {
     compiled: OnceLock::new(),
 };
 
+/// The littlefs mount's outcome on the flash partition.
+///
+/// ```text
+/// [FS] Mount failed (filesystem corrupt), formatting partition...
+/// [FS] Formatted and mounted fresh filesystem
+/// ```
+///
+/// Two rows, keyed on which of the two lines it is, because the pair is the
+/// claim: a first boot on an erased chip formats and says so, and a second
+/// boot on the same chip prints neither line. Structural, not memory —
+/// *whether* the filesystem mounted is a fact about the flash controller,
+/// and the heap it costs is the heartbeat's business.
+pub static FS_MOUNT: SeriesSpec = SeriesSpec {
+    name: "fs-mount",
+    description: "the littlefs mount's outcome on the lpfs partition",
+    pattern: r"lp_fs: \[FS\] (?<action>Mount failed|Formatted and mounted)(?<detail>[^\r\n]*)",
+    key: "action",
+    fields: &[("detail", FieldClass::Structural)],
+    compiled: OnceLock::new(),
+};
+
+/// The server's heap gates around a project load.
+///
+/// ```text
+/// [mem] load_project after: 220532 B free / 105004 B used (215k / 102k)
+/// ```
+///
+/// One row per gate name, all four figures `Memory`: these are the numbers
+/// the spike report's §5.3 and §11.2 compare across silicon, esp-emu and
+/// this machine, and the load gate is the one the heap-budget record is
+/// built from. The `Nk / Nk` suffix is the same numbers rounded, so it is
+/// not captured twice.
+pub static LOAD_GATE: SeriesSpec = SeriesSpec {
+    name: "load-gate",
+    description: "the allocator's ledger at each of the server's project-load gates",
+    pattern: concat!(
+        r"\[mem\] (?<gate>[a-z_]+ (?:before|after)): (?<free_bytes>\d+) B free / ",
+        r"(?<used_bytes>\d+) B used",
+    ),
+    key: "gate",
+    fields: &[
+        ("free_bytes", FieldClass::Memory),
+        ("used_bytes", FieldClass::Memory),
+    ],
+    compiled: OnceLock::new(),
+};
+
+/// A filesystem write acknowledgement on the wire.
+///
+/// ```text
+/// M!{"id":2,"msg":{"filesystem":{"write":{"path":"/projects/Basic/clock.json","error":null}}}}
+/// ```
+///
+/// Keyed on the path, so the series is "every file the upload wrote, and
+/// whether the device took it". `error` is structural and is the point:
+/// `null` on all of them or the upload did not happen.
+pub static FS_WRITE: SeriesSpec = SeriesSpec {
+    name: "fs-write",
+    description: "each filesystem write the upload made, and the device's answer",
+    // `writeChunk`'s answer carries `"offset"` and `"written"` between the
+    // path and the error; `write`'s does not. The middle is skipped rather
+    // than made optional, because what the series claims is *which file, and
+    // did it land* — a chunk's offset is the client's bookkeeping.
+    pattern: concat!(
+        r#""filesystem":\{"(?<op>write|writeChunk)":\{"path":"(?<path>[^"]+)""#,
+        r#"[^}]*?"error":(?<error>null|\{[^}]*\})"#,
+    ),
+    key: "path",
+    fields: &[
+        ("op", FieldClass::Structural),
+        ("error", FieldClass::Structural),
+    ],
+    compiled: OnceLock::new(),
+};
+
+/// The on-device shader compile's summary line.
+///
+/// ```text
+/// [shader-node] compilation succeeded (node=, elapsed=51ms, lpir_inst_count=573,
+///   lpir_func_count=12, lpir_import_count=7, final_inst_count=2048,
+///   final_code_size=8192 bytes, float=fixed)
+/// ```
+///
+/// The counts and the code size are compiler **outputs** — the same source
+/// produces the same numbers wherever it compiles, and §11.2 records that
+/// they are identical on silicon and esp-emu. `elapsed` is the one clock in
+/// the line and is graded `Timing`: it reads 51 ms under this machine's
+/// script and 52 ms under the live client on the same image.
+pub static SHADER_COMPILE: SeriesSpec = SeriesSpec {
+    name: "shader-compile",
+    description: "the on-device shader compile's outputs, and how long it took",
+    pattern: concat!(
+        r"\[shader-node\] (?<kind>compilation succeeded) \(node=[^,]*, ",
+        r"elapsed=(?<elapsed_ms>\d+)ms, lpir_inst_count=(?<lpir_inst_count>\d+), ",
+        r"lpir_func_count=(?<lpir_func_count>\d+), lpir_import_count=(?<lpir_import_count>\d+), ",
+        r"final_inst_count=(?<final_inst_count>\d+), final_code_size=(?<final_code_size>\d+) bytes, ",
+        r"float=(?<float_mode>\w+)\)",
+    ),
+    key: "kind",
+    fields: &[
+        ("elapsed_ms", FieldClass::Timing),
+        ("lpir_inst_count", FieldClass::Structural),
+        ("lpir_func_count", FieldClass::Structural),
+        ("lpir_import_count", FieldClass::Structural),
+        ("final_inst_count", FieldClass::Structural),
+        ("final_code_size", FieldClass::Structural),
+        ("float_mode", FieldClass::Structural),
+    ],
+    compiled: OnceLock::new(),
+};
+
 /// One `jit-math-perf` bench measurement.
 ///
 /// ```text
@@ -486,6 +608,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         fw_checks_feature: Some("check-shader-compile"),
         emits_header: true,
         sentinel: Sentinel::Done("[inc-shader-compile] === DONE ==="),
+        host_script: None,
         record_kinds: &["case-summary", "total-summary"],
         mask_set: "compile-harness",
         fields: &[
@@ -571,6 +694,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         fw_checks_feature: Some("check-gpio-calibrate"),
         emits_header: true,
         sentinel: Sentinel::Ready("CAL READY target="),
+        host_script: None,
         record_kinds: &[],
         mask_set: "normalize",
         fields: &[],
@@ -585,6 +709,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         fw_checks_feature: Some("check-uart-bridge"),
         emits_header: true,
         sentinel: Sentinel::Ready("UART-BRIDGE READY "),
+        host_script: None,
         record_kinds: &[],
         mask_set: "normalize",
         fields: &[],
@@ -599,6 +724,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         fw_checks_feature: Some("check-jit-math-perf"),
         emits_header: true,
         sentinel: Sentinel::Done("[jit-math-perf] === DONE ==="),
+        host_script: None,
         record_kinds: &["jit-bench"],
         mask_set: "jit-math-perf",
         fields: JIT_BENCH_FIELDS,
@@ -631,6 +757,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // it stops — otherwise the two figures the payload exists for would
         // be cut off mid-line.
         sentinel: Sentinel::Done("[stack] heartbeat: high-water"),
+        host_script: None,
         record_kinds: &[],
         mask_set: "boot-idle",
         fields: &[],
@@ -655,6 +782,9 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // is the entire point and a sentinel on the heartbeat itself would
         // cut the capture off inside it.
         sentinel: Sentinel::Done("[stack] heartbeat: high-water"),
+        // Nothing is sent to it: the measurement is what the device says
+        // while nobody is listening.
+        host_script: None,
         record_kinds: &[],
         mask_set: "boot-idle",
         fields: &[],
@@ -667,6 +797,48 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // one 5 s heartbeat interval of margin so the wait cannot land inside
         // the transition it is trying to observe.
         capture: Capture::FlashThenOpenAfter(8),
+    },
+    Payload {
+        name: "boot-idle-flash",
+        display_name: "Shipped image to the idle loop, from flash",
+        fw_check_slug: "boot-idle-flash",
+        // `boot-idle` without `memory_fs`: the image that mounts `lpfs` from
+        // the flash chip. M3 could not run it — it stopped at
+        // `SPIN SPI1+0x000 cmd` at 11 ms — and M4's first gate is that it
+        // now prints the `[FS]` pair and reaches the same idle heartbeat
+        // with the spike report §5.1 figures.
+        firmware_features: &["server", "radio"],
+        fw_checks_feature: None,
+        emits_header: false,
+        host_script: None,
+        sentinel: Sentinel::Done("[stack] heartbeat: high-water"),
+        record_kinds: &[],
+        mask_set: "boot-idle",
+        fields: &[],
+        series: &[&HELLO, &FS_MOUNT, &HEARTBEAT, &STACK_HEARTBEAT],
+        // Watched from the first byte, like every other boot payload.
+        capture: Capture::Monitor,
+    },
+    Payload {
+        name: "upload-walk",
+        display_name: "Project upload walk (examples/basic)",
+        fw_check_slug: "upload-walk",
+        // The same flash-backed image with a host on the other end. The
+        // conversation is `lp-cli upload examples/basic`, captured from the
+        // real client over a socket and replayed from a script so the
+        // transcript is a function of guest time (`walks/README.md`).
+        firmware_features: &["server", "radio"],
+        fw_checks_feature: None,
+        emits_header: false,
+        host_script: Some("lp-emu/esp/lp-emu-esp32c6/walks/examples-basic.script"),
+        sentinel: Sentinel::Done("[shader-node] compilation succeeded"),
+        record_kinds: &[],
+        mask_set: "boot-idle",
+        fields: &[],
+        series: &[&HELLO, &FS_MOUNT, &FS_WRITE, &LOAD_GATE, &SHADER_COMPILE],
+        // The walk needs the port open from boot: its first request waits
+        // for `[RECOVERY] boot complete`, which a late reader would miss.
+        capture: Capture::Monitor,
     },
 ];
 

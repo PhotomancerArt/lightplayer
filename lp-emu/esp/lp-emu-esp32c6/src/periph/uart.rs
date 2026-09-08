@@ -422,6 +422,19 @@ impl Uart {
     /// A byte arrived on the wire at cycle `at`.
     fn push_rx(&mut self, byte: u8, at: u64, cx: &mut BusCx<'_>) {
         if self.rx.len() >= FIFO_DEPTH {
+            // A dropped byte is a corrupt line three layers up ("dropping
+            // unparseable N B M! line"), so the first one says so here
+            // rather than only as a sticky bit nobody reads.
+            if self.sticky & INT_RXFIFO_OVF == 0 {
+                cx.trace.note(&format!(
+                    "cyc={at} {} RX FIFO overflow: {FIFO_DEPTH} bytes unread and another \
+                     arrived; it is dropped, as the part drops it. The host is sending faster \
+                     than the guest is reading — at {} baud, {} cycles a symbol",
+                    self.name,
+                    self.baud(),
+                    self.symbol_cycles().unwrap_or(0),
+                ));
+            }
             self.sticky |= INT_RXFIFO_OVF;
         } else {
             self.rx.push_back(byte);

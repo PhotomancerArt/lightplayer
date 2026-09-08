@@ -16,6 +16,7 @@ use std::time::Duration;
 
 use lp_emu_esp_common::{RegGrade, ScriptedSource};
 use lp_emu_esp32c6::control::parse_usb_script;
+use lp_emu_esp32c6::flash::FlashBacking;
 use lp_emu_esp32c6::loader::EfuseIdentity;
 use lp_emu_esp32c6::machine::{
     AppSource, Esp32C6Builder, Esp32C6Machine, Outcome, RomSource, StopCondition, TimeGrade,
@@ -45,9 +46,16 @@ OPTIONS:
                             time, and the client's bytes are UART0's RX (not
                             deterministic: wall clock decides their cycle)
     --uart0-script <file>   scripted host input for UART0, deterministic:
-                            one chunk per line: <ms> then a double-quoted
-                            string (\\n \\r \\t \\xNN escapes) or hex bytes
-                            (`1500 \"M!{...}\\n\"`, `2000 4d 21 0a`)
+                            one chunk per line, either at an EMULATED time
+                            (`1500 \"M!{...}\\n\"`, `2000 4d 21 0a`) or waiting
+                            for something the device said
+                            (`after \"boot complete\" +5ms \"M!{...}\\n\"`).
+                            Strings take \\n \\r \\t \\0 \\\\ \\\" \\xNN escapes.
+    --flash <file>          the flash chip's bytes: read at start, written back
+                            at exit (created blank if absent) — the board's
+                            flash, surviving a run
+    --flash-copy <file>     the same file read once and never written
+    --flash-size <4M|8M>    the modelled chip's size [4M]
     --usb-host absent|attached|attached-idle
                             the USB-Serial-JTAG host at power-on: no cable
                             (P6's machine), a host with the port open and
@@ -136,6 +144,8 @@ struct Args {
     uart0: Uart0Sink,
     uart0_script: Option<PathBuf>,
     usb_sj: UsbSjSink,
+    flash: FlashBacking,
+    flash_len: Option<u32>,
     usb_sj_tried: UsbSjSink,
     usb_host: UsbHost,
     usb_sj_drain: UsbSjDrain,
@@ -170,10 +180,14 @@ fn run() -> Result<ExitCode, String> {
         .seed(args.seed)
         .uart0(args.uart0.clone())
         .usb_sj(args.usb_sj.clone())
+        .flash(args.flash.clone())
         .usb_sj_tried(args.usb_sj_tried.clone())
         .usb_host(args.usb_host)
         .usb_sj_drain(args.usb_sj_drain);
 
+    if let Some(len) = args.flash_len {
+        builder = builder.flash_len(len);
+    }
     if let Some(addr) = args.control.clone() {
         builder = builder.control(addr);
     }
@@ -213,7 +227,7 @@ fn run() -> Result<ExitCode, String> {
         let text = std::fs::read_to_string(script)
             .map_err(|e| format!("reading {}: {e}", script.display()))?;
         let source = parse_uart0_script(&text).map_err(|e| format!("{}: {e}", script.display()))?;
-        builder = builder.uart0_source(Box::new(source));
+        builder = builder.uart0_script(source);
     }
 
     let mut machine = builder.build().map_err(|e| e.to_string())?;
@@ -280,6 +294,12 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--uart0" => args.uart0 = parse_uart0(&value("--uart0")?)?,
             "--uart0-script" => args.uart0_script = Some(value("--uart0-script")?.into()),
             "--usb-sj" => args.usb_sj = parse_usb_sj(&value("--usb-sj")?)?,
+            "--flash" => args.flash = FlashBacking::File(value("--flash")?.into()),
+            "--flash-copy" => args.flash = FlashBacking::Copy(value("--flash-copy")?.into()),
+            "--flash-size" => {
+                let text = value("--flash-size")?;
+                args.flash_len = Some(parse_flash_size(&text)?);
+            }
             "--usb-sj-tried" => args.usb_sj_tried = parse_usb_sj(&value("--usb-sj-tried")?)?,
             "--usb-host" => {
                 let text = value("--usb-host")?;
@@ -338,6 +358,31 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
         i += 1;
     }
     Ok(args)
+}
+
+/// `4M`, `8M`, `524288` → bytes. A flash size that is not a power of two is
+/// refused: the JEDEC capacity byte is an exponent, so there is no honest
+/// id for one.
+fn parse_flash_size(text: &str) -> Result<u32, String> {
+    let (digits, scale) = match text.strip_suffix(['M', 'm']) {
+        Some(d) => (d, 1024 * 1024u32),
+        None => match text.strip_suffix(['K', 'k']) {
+            Some(d) => (d, 1024),
+            None => (text, 1),
+        },
+    };
+    let len: u32 = digits
+        .parse::<u32>()
+        .map_err(|e| format!("--flash-size `{text}`: {e}"))?
+        .checked_mul(scale)
+        .ok_or_else(|| format!("--flash-size `{text}` overflows"))?;
+    if !len.is_power_of_two() || len < 64 * 1024 {
+        return Err(format!(
+            "--flash-size `{text}` is {len} bytes; it must be a power of two of at least 64 KiB \
+             (the JEDEC capacity byte is an exponent and the cache pages by 64 KiB)"
+        ));
+    }
+    Ok(len)
 }
 
 /// `5s`, `1500ms`, `900us` → microseconds.
@@ -414,6 +459,33 @@ fn parse_control(text: &str) -> Result<String, String> {
 /// skipped. The millisecond is emulated time from cycle zero; chunks keep
 /// file order on the wire whatever their times say (a serial line has an
 /// order).
+/// The `--uart0-script` grammar.
+///
+/// Two kinds of line, each ending in the bytes to send — a double-quoted
+/// string with `\n \r \t \0 \\ \" \xNN` escapes, or whitespace-separated hex
+/// bytes:
+///
+/// ```text
+/// # at 1500 ms of EMULATED time
+/// 1500 "M!{...}\n"
+/// 2000 4d 21 0a
+///
+/// # 5 ms after the device says this, whatever cycle that lands on
+/// after "[RECOVERY] boot complete" +5ms "M!{...}\n"
+/// after "\"stopAllProjects\"" "M!{...}\n"
+///
+/// # 2 ms after the previous chunk finished — a host that paces itself
+/// then +2ms "…the next 64 bytes…"
+/// ```
+///
+/// `after` is what makes a walk a walk: a host client sends its next
+/// request when the answer to the last one arrives, not at a wall-clock
+/// offset. The wait is still resolved entirely in guest time (see
+/// [`ScriptedSource`]), so two runs of the same script against the same
+/// image deliver the same bytes at the same cycles.
+///
+/// The needle is matched against the device's UART0 output *after* the
+/// previous step, so the same line can be waited for twice.
 fn parse_uart0_script(text: &str) -> Result<ScriptedSource, String> {
     let mut source = ScriptedSource::new();
     for (n, raw) in text.lines().enumerate() {
@@ -421,30 +493,89 @@ fn parse_uart0_script(text: &str) -> Result<ScriptedSource, String> {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let (ms, rest) = line
-            .split_once(char::is_whitespace)
-            .ok_or_else(|| format!("line {}: expected `<ms> <bytes>`", n + 1))?;
+        let at = |e: String| format!("line {}: {e}", n + 1);
+        if let Some(rest) = line.strip_prefix("after ") {
+            let (needle, rest) = take_quoted(rest.trim()).map_err(&at)?;
+            let (delay_ms, rest) = parse_delay(rest.trim()).map_err(&at)?;
+            let bytes = parse_script_bytes(rest).map_err(&at)?;
+            source.push_after(needle, delay_ms * 1_000 * memmap::CYCLES_PER_US, bytes);
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("then ") {
+            let (delay_ms, rest) = parse_delay(rest.trim()).map_err(&at)?;
+            let bytes = parse_script_bytes(rest).map_err(&at)?;
+            source.push_then(delay_ms * 1_000 * memmap::CYCLES_PER_US, bytes);
+            continue;
+        }
+        let (ms, rest) = line.split_once(char::is_whitespace).ok_or_else(|| {
+            at("expected `<ms> <bytes>` or `after \"<line>\" <bytes>`".to_string())
+        })?;
         let ms: u64 = ms
             .trim_end_matches("ms")
             .parse()
-            .map_err(|e| format!("line {}: `{ms}` is not a millisecond count: {e}", n + 1))?;
-        let rest = rest.trim();
-        let bytes = if let Some(quoted) = rest.strip_prefix('"') {
-            let body = quoted
-                .strip_suffix('"')
-                .ok_or_else(|| format!("line {}: unterminated string", n + 1))?;
-            unescape(body).map_err(|e| format!("line {}: {e}", n + 1))?
-        } else {
-            rest.split_whitespace()
-                .map(|h| {
-                    u8::from_str_radix(h.trim_start_matches("0x"), 16)
-                        .map_err(|e| format!("line {}: `{h}` is not a hex byte: {e}", n + 1))
-                })
-                .collect::<Result<Vec<u8>, String>>()?
-        };
+            .map_err(|e| at(format!("`{ms}` is not a millisecond count: {e}")))?;
+        let bytes = parse_script_bytes(rest.trim()).map_err(&at)?;
         source.push(ms * 1_000 * memmap::CYCLES_PER_US, bytes);
     }
     Ok(source)
+}
+
+/// An optional leading `+<ms>` delay, and the rest.
+fn parse_delay(text: &str) -> Result<(u64, &str), String> {
+    let Some(after_plus) = text.strip_prefix('+') else {
+        return Ok((0, text));
+    };
+    let (num, tail) = after_plus
+        .split_once(char::is_whitespace)
+        .ok_or_else(|| "`+<ms>` needs bytes after it".to_string())?;
+    let ms: u64 = num
+        .trim_end_matches("ms")
+        .parse()
+        .map_err(|e| format!("`{num}` is not a millisecond count: {e}"))?;
+    Ok((ms, tail.trim()))
+}
+
+/// A double-quoted, escaped string at the start of `text`, and the rest.
+fn take_quoted(text: &str) -> Result<(Vec<u8>, &str), String> {
+    let body = text
+        .strip_prefix('"')
+        .ok_or_else(|| "expected a double-quoted string".to_string())?;
+    // The closing quote is the first unescaped one.
+    let mut end = None;
+    let mut escaped = false;
+    for (i, c) in body.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match c {
+            '\\' => escaped = true,
+            '"' => {
+                end = Some(i);
+                break;
+            }
+            _ => {}
+        }
+    }
+    let end = end.ok_or_else(|| "unterminated string".to_string())?;
+    Ok((unescape(&body[..end])?, &body[end + 1..]))
+}
+
+/// A quoted string, or whitespace-separated hex bytes.
+fn parse_script_bytes(rest: &str) -> Result<Vec<u8>, String> {
+    if rest.starts_with('"') {
+        let (bytes, tail) = take_quoted(rest)?;
+        if !tail.trim().is_empty() {
+            return Err(format!("trailing `{}` after the string", tail.trim()));
+        }
+        return Ok(bytes);
+    }
+    rest.split_whitespace()
+        .map(|h| {
+            u8::from_str_radix(h.trim_start_matches("0x"), 16)
+                .map_err(|e| format!("`{h}` is not a hex byte: {e}"))
+        })
+        .collect()
 }
 
 fn unescape(body: &str) -> Result<Vec<u8>, String> {
@@ -605,6 +736,18 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
             None => String::new(),
         }
     );
+    let census = machine.flash_census();
+    if census.commands() > 0 || census.status_reads > 0 || machine.cache_fills() > 0 {
+        eprintln!(
+            "flash: {census}; {} page(s) filled into the cache window",
+            machine.cache_fills()
+        );
+    }
+    match machine.flush_flash() {
+        Ok(true) => eprintln!("flash: image written back"),
+        Ok(false) => {}
+        Err(e) => eprintln!("flash: could not write the image back: {e}"),
+    }
     eprintln!(
         "usb-sj: host {} at power-on; {} bytes reached the host{}",
         machine.usb_host(),

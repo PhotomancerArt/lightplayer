@@ -28,6 +28,18 @@ def main() -> int:
     ap.add_argument("--listen", required=True)
     ap.add_argument("--log")
     ap.add_argument("--connect-timeout", type=float, default=30.0)
+    ap.add_argument(
+        "--pace-bytes",
+        type=int,
+        default=0,
+        help="forward host->device this many bytes at a time (0 = as they arrive)",
+    )
+    ap.add_argument(
+        "--pace-ms",
+        type=float,
+        default=20.0,
+        help="wall-clock milliseconds between paced chunks",
+    )
     ap.add_argument("--replay", action="store_true", default=True)
     args = ap.parse_args()
 
@@ -70,10 +82,20 @@ def main() -> int:
 
     client = None
     backlog = bytearray()
+    # Host->device pacing. The emulated UART0 RX FIFO is 128 bytes and at
+    # 921,600 baud the firmware's reader takes 64 bytes per turn of its
+    # server loop, so a host that streams a 739-byte request without pausing
+    # overruns it and the device logs "dropping unparseable N B M! line". A
+    # bridge board does not stream like that, and neither does this when
+    # --pace-bytes is set. Wall-clock milliseconds, because that is the only
+    # clock a host process has.
+    outbound = bytearray()
+    next_send = 0.0
     try:
         while True:
             rl = [dev, srv] + ([client] if client else [])
-            r, _, _ = select.select(rl, [], [], 1.0)
+            timeout = min(args.pace_ms / 4000.0, 1.0) if args.pace_bytes > 0 else 1.0
+            r, _, _ = select.select(rl, [], [], timeout)
             if dev in r:
                 try:
                     data = dev.recv(65536)
@@ -118,7 +140,17 @@ def main() -> int:
                     client.close(); client = None
                     continue
                 logw("host", data)
-                dev.sendall(data)
+                if args.pace_bytes > 0:
+                    outbound += data
+                else:
+                    dev.sendall(data)
+            if args.pace_bytes > 0 and outbound:
+                now = time.monotonic()
+                if now >= next_send:
+                    chunk = bytes(outbound[: args.pace_bytes])
+                    del outbound[: len(chunk)]
+                    dev.sendall(chunk)
+                    next_send = now + args.pace_ms / 1000.0
     except KeyboardInterrupt:
         return 0
     finally:

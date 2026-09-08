@@ -30,6 +30,24 @@ series are the hello frame, the idle heartbeat and the stack probe's line, and
 the numbers it exists for are `freeBytes`/`totalBytes` and the stack
 high-water mark.
 
+**One payload is a conversation.** `upload-walk` (M4) is the same shipped
+image with a host on the other end: the thirteen wire frames `lp-cli upload
+examples/basic` sends. Its host half is a field —
+`host_script: Some("lp-emu/esp/lp-emu-esp32c6/walks/examples-basic.script")` —
+which an emulated configuration's driver passes as `--uart0-script`, and
+which on silicon is the client itself over a port. Recording it on the
+*payload* is what makes a walk reproducible at all: without it the only
+transcript a runner can produce is a boot. The script is generated from a
+real client capture, never hand-written (`walks/README.md`), and each of its
+requests waits for the answer to the one before it, so the run is a function
+of guest time and two recordings are byte-identical.
+
+That is also the payload whose series are the most interesting: `fs-write`
+(every file the upload wrote and the device's answer to each), `load-gate`
+(the server's four heap gates, all `Memory` — and all byte-equal to the spike
+report §5.3's) and `shader-compile` (the compiler's outputs `Structural`, its
+`elapsed` `Timing`).
+
 The registry is `src/payload.rs`. It **mirrors** `fw-checks` rather than
 importing it: `fw-checks` is AGPL and outside the `lp-emu/` MIT fence, so an
 import would fail `just lint-emu-fence`. `lp-cli` depends on both and owns the
