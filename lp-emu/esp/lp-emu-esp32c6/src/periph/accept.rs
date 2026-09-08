@@ -5,6 +5,18 @@
 //! The rule (`lp_emu_esp_common::regfile`): a `RegFile` never invents
 //! behaviour, it only remembers, and everything it pretends about is one
 //! line here. Values marked *modeled* are plausible, not measured.
+//!
+//! **Reset values are not among the exceptions.** `with_names` seeds every
+//! block from the PAC's own `Resettable` impls, generated into `crate::regs`
+//! beside the names, so a block reads what the part reads before anyone
+//! writes it. Until 2026-09-08 each block carried only the resets a boot had
+//! been *observed* to need and read 0 everywhere else — which is how SPI1's
+//! `user` came to read 0 with `usr_command` clear and every flash read moved
+//! no bytes while looking exactly like a blank chip
+//! (`docs/defects/2026-09-07-accept-blocks-carry-only-the-reset-values-a-boot-needed.md`).
+//! A `with_reset` in this file is now a **deviation from the PAC**, and
+//! `the_only_deviations_from_the_pacs_resets_are_the_listed_ones` below is
+//! the list.
 
 use lp_emu_esp_common::RegFile;
 
@@ -45,12 +57,18 @@ pub fn pmu() -> RegFile {
 /// `tests/rom_reset_reason.rs` for both halves pinned.
 ///
 /// `lp_clk_conf` resets to `0x04` (`slow_clk_sel = 0`, RC_SLOW), which
-/// `RtcSlowClockSource::current()` reads (`rtc/esp32c6.rs:126`).
+/// `RtcSlowClockSource::current()` reads (`rtc/esp32c6.rs:126`) — that one
+/// comes from the PAC now, like the rest of the block.
+///
+/// `reset_cause` is the deviation. The PAC's reset is `0x20`; this machine
+/// asserts a cause instead, because the cause is an input to the run and
+/// not a property of the part. `rtc_get_reset_reason` masks to five bits
+/// (`andi a0, a0, 31`), so the `0x20` the PAC states never reaches the
+/// comparison either way.
 pub fn lp_clkrst(cause: crate::loader::ResetCause) -> RegFile {
     RegFile::new("LP_CLKRST", 0x400)
         .with_names(regs::LP_CLKRST)
         .with_reset(0x010, cause.rom_code())
-        .with_reset(0x000, 0x04)
 }
 
 /// `SLC`, the SDIO slave DMA controller. Nothing in any image this machine
@@ -167,12 +185,8 @@ pub fn lp_i2c_ana_mst() -> RegFile {
 pub fn pcr() -> RegFile {
     RegFile::new("PCR", 0x1000)
         .with_names(regs::PCR)
-        .with_reset(0x110, 0x2800_0200)
         .with_read_override(0x110, 0x7f << 24, 40 << 24)
-        .with_reset(0x114, 0x0d)
         .with_read_override(0x114, 1 << 3, 0)
-        .with_reset(0x040, 0x0040_0000)
-        .with_reset(0x04c, 0x0040_0000)
 }
 
 /// `LP_TIMER` at `0x600B_0C00`: the block *after* EFUSE. The vendor
@@ -263,33 +277,27 @@ pub fn extmem() -> RegFile {
         .with_read_mirror(0x02c, 1 << 16, 1 << 18)
 }
 
-/// UART0/UART1: accept in P5 so the ROM's `uart_tx_one_char` does not fault
-/// and the no-radio image (which prints nothing on UART0) boots; the FIFO,
-/// the thresholds and `RXFIFO_TOUT` are P6. Both share `uart0`'s layout.
-pub fn uart(name: &'static str) -> RegFile {
-    RegFile::new(name, 0x100).with_names(regs::UART0)
-}
-
-/// `USB_DEVICE`: accept in P5, reading 0 everywhere. That is the *host
-/// absent, FIFO full* reading: `ep1_conf.serial_in_ep_data_free` is 0, so
-/// esp-println spins its 50,000 iterations once, latches `TIMED_OUT`, and
-/// drops output from then on (`esp-println/src/lib.rs:275-296` — silence,
-/// not a hang); `int_raw.sof` is 0, so the connection monitor decides the
-/// host is not enumerated. The honest model, with the attach/detach
-/// control channel, is M3 P6 and M6.
-pub fn usb_device() -> RegFile {
-    RegFile::new("USB_DEVICE", 0x100).with_names(regs::USB_DEVICE)
-}
+// `uart(name)` was an accept block here from P5 — so the ROM's
+// `uart_tx_one_char` would not fault and the no-radio image would boot —
+// until P6 gave both instances a model with FIFOs, a shifter at baud and
+// `RXFIFO_TOUT` (`super::uart`). The machine has mapped `uart::Uart` at
+// UART0 and UART1 ever since; the accept block was left behind, unmapped,
+// and is retired here rather than swept.
+//
+// `USB_DEVICE` was one too, reading 0 everywhere — the *host absent, FIFO
+// full* reading: `ep1_conf.serial_in_ep_data_free` 0, `int_raw.sof` 0. Two
+// of the three claims in that sentence are things the PAC contradicts
+// (`ep1_conf` resets to `0x02`, `int_raw` to `0x08`), which the reset sweep
+// makes visible and `super::usb_sj` makes moot: it computes `ep1_conf`,
+// `int_raw` and both `ep_st` registers from the link's own state, so the
+// stored word is never what a guest reads. M6 owns that block.
 
 /// `IO_MUX`: `pin_ctrl` plus all **31** pads at `+0x04 + 4n` (the PAC's
-/// `gpio: [GPIO; 31]`; the vendor emulator stopped at 15), each at the PAC
-/// reset value `0x0800`.
+/// `gpio: [GPIO; 31]`; the vendor emulator stopped at 15). Each pad resets
+/// to `0x0800` and `pin_ctrl` to `0x1def` — from the generated table, which
+/// expands the array the same way the name table does.
 pub fn io_mux() -> RegFile {
-    let mut rf = RegFile::new("IO_MUX", 0x100).with_names(regs::IO_MUX);
-    for pad in 0..31u32 {
-        rf = rf.with_reset(0x004 + 4 * pad, 0x0800);
-    }
-    rf
+    RegFile::new("IO_MUX", 0x100).with_names(regs::IO_MUX)
 }
 
 // `GPIO` was an accept block here from P5 (`in_` and `pcpu_int` reading 0,
@@ -382,9 +390,113 @@ mod tests {
         for pad in 0..31u32 {
             assert_eq!(sb.read(&mut m, 0x004 + 4 * pad), 0x0800);
         }
+        assert_eq!(sb.read(&mut m, 0x000), 0x1def, "pin_ctrl");
         assert_eq!(m.reg_name(0x07c), Some("gpio30"));
         assert_eq!(m.reg_name(0x080), None, "there is no pad 31");
         // GPIO's own reads are `super::gpio`'s tests now.
+    }
+
+    /// The accept blocks, each with the generated table it is built from.
+    fn every_block() -> Vec<(RegFile, lp_emu_esp_common::regnames::RegNames)> {
+        vec![
+            (lp_apm(), regs::LP_APM),
+            (lp_apm0(), regs::LP_APM0),
+            (hp_apm(), regs::HP_APM),
+            (lp_aon(), regs::LP_AON),
+            (pmu(), regs::PMU),
+            (
+                lp_clkrst(crate::loader::ResetCause::PowerOn),
+                regs::LP_CLKRST,
+            ),
+            (slc(), regs::SLC),
+            (lp_ana(), regs::LP_ANA),
+            (hinf(), regs::HINF),
+            (plic_ux(), regs::PLIC_UX),
+            (modem_syscon(), regs::MODEM_SYSCON),
+            (modem_lpcon(), regs::MODEM_LPCON),
+            (i2c_ana_mst(), regs::I2C_ANA_MST),
+            (lp_i2c_ana_mst(), regs::LP_I2C_ANA_MST),
+            (pcr(), regs::PCR),
+            (lp_timer(), regs::LP_TIMER),
+            (apb_saradc(), regs::APB_SARADC),
+            (assist_debug(), regs::ASSIST_DEBUG),
+            (hp_sys(), regs::HP_SYS),
+            (tee(), regs::TEE),
+            (lp_tee(), regs::LP_TEE),
+            (lp_io(), regs::LP_IO),
+            (extmem(), regs::EXTMEM),
+            (io_mux(), regs::IO_MUX),
+        ]
+    }
+
+    /// Where an accept block's power-on state differs from what the PAC
+    /// states, and why. Anything not on this list is a bug in the seeding
+    /// or an undocumented hand exception — the whole point of the sweep
+    /// (`docs/defects/2026-09-07-accept-blocks-carry-only-the-reset-values-a-boot-needed.md`).
+    ///
+    /// `(block, offset, what this machine reads instead, why)`.
+    const DEVIATIONS: &[(&str, u32, u32, &str)] = &[(
+        "LP_CLKRST",
+        0x010,
+        1,
+        "reset_cause is an input to the run, not a property of the part: the machine          asserts a power-on and the ROM masks to five bits",
+    )];
+
+    #[test]
+    fn the_only_deviations_from_the_pacs_resets_are_the_listed_ones() {
+        let mut unlisted = Vec::new();
+        for (block, names) in every_block() {
+            let name = Peripheral::name(&block);
+            for (off, _) in names.entries {
+                if *off >= block.len_bytes() {
+                    // Not mapped by this machine: reads 0 for the guest
+                    // whatever the part does.
+                    continue;
+                }
+                let want = names.reset(*off).unwrap_or(0);
+                let got = block.stored(*off);
+                if got == want {
+                    continue;
+                }
+                match DEVIATIONS
+                    .iter()
+                    .find(|(b, o, _, _)| *b == name && o == off)
+                {
+                    Some((_, _, expected, _)) => assert_eq!(
+                        got, *expected,
+                        "{name}+{off:#05x} is a listed deviation, but it reads {got:#010x}                          rather than the {expected:#010x} the list says"
+                    ),
+                    None => unlisted.push(format!(
+                        "  {name}+{off:#05x} {}: reads {got:#010x}, the PAC says {want:#010x}",
+                        names.name(*off).unwrap_or("?")
+                    )),
+                }
+            }
+        }
+        assert!(
+            unlisted.is_empty(),
+            "these accept-block registers do not read what the PAC says, and are not on \
+             DEVIATIONS:\n{}",
+            unlisted.join("\n")
+        );
+    }
+
+    /// The other half: every listed deviation is real. A stale entry would
+    /// otherwise sit here excusing something that no longer happens.
+    #[test]
+    fn every_listed_deviation_is_one() {
+        for (name, off, _, why) in DEVIATIONS {
+            let (block, names) = every_block()
+                .into_iter()
+                .find(|(b, _)| Peripheral::name(b) == *name)
+                .unwrap_or_else(|| panic!("DEVIATIONS names `{name}`, which is not a block"));
+            assert!(!why.is_empty(), "{name}+{off:#05x} has no reason");
+            assert_ne!(
+                block.stored(*off),
+                names.reset(*off).unwrap_or(0),
+                "{name}+{off:#05x} agrees with the PAC now; take it off the list"
+            );
+        }
     }
 
     #[test]
@@ -396,9 +508,6 @@ mod tests {
         );
         assert_eq!(pmu().reg_name(0x000).is_some(), true);
         assert_eq!(lp_timer().reg_name(0x010).is_some(), true);
-        assert_eq!(uart("UART1").name(), "UART1");
-        assert_eq!(uart("UART1").reg_name(0x01c), Some("status"));
-        assert_eq!(usb_device().reg_name(0x004), Some("ep1_conf"));
         assert_eq!(extmem().reg_name(0x000).is_some(), true);
     }
 }

@@ -162,26 +162,14 @@ const INT_ST: u32 = 0x0c;
 const INT_ENA: u32 = 0x10;
 const INT_CLR: u32 = 0x14;
 const CONF0: u32 = 0x18;
-const TEST: u32 = 0x1c;
-const JFIFO_ST: u32 = 0x20;
 const FRAM_NUM: u32 = 0x24;
-const IN_EP0_ST: u32 = 0x28;
 const IN_EP1_ST: u32 = 0x2c;
-const IN_EP2_ST: u32 = 0x30;
-const IN_EP3_ST: u32 = 0x34;
 const OUT_EP1_ST: u32 = 0x3c;
-const MEM_CONF: u32 = 0x48;
 const CHIP_RST: u32 = 0x4c;
-const SER_AFIFO_CONFIG: u32 = 0x64;
 const BUS_RESET_ST: u32 = 0x68;
 
 // PAC `RESET_VALUE`s (discovery §1). Every other register resets to 0.
-const CONF0_RESET: u32 = 0x4200;
-const TEST_RESET: u32 = 0x30;
-const JFIFO_ST_RESET: u32 = 0x44;
 const IN_EPN_ST_RESET: u32 = 0x01;
-const MEM_CONF_RESET: u32 = 0x02;
-const SER_AFIFO_CONFIG_RESET: u32 = 0x10;
 const BUS_RESET_ST_RESET: u32 = 0x01;
 
 const EP1_CONF_WR_DONE: u32 = 1 << 0;
@@ -353,17 +341,7 @@ impl UsbSerialJtag {
     pub fn new(delivered: Option<StreamId>, tried: Option<StreamId>, host: HostState) -> Self {
         Self {
             regs: RegFile::new("USB_DEVICE", 0x100)
-                .with_names(regs::USB_DEVICE)
-                .with_reset(CONF0, CONF0_RESET)
-                .with_reset(TEST, TEST_RESET)
-                .with_reset(JFIFO_ST, JFIFO_ST_RESET)
-                .with_reset(IN_EP0_ST, IN_EPN_ST_RESET)
-                .with_reset(IN_EP1_ST, IN_EPN_ST_RESET)
-                .with_reset(IN_EP2_ST, IN_EPN_ST_RESET)
-                .with_reset(IN_EP3_ST, IN_EPN_ST_RESET)
-                .with_reset(MEM_CONF, MEM_CONF_RESET)
-                .with_reset(SER_AFIFO_CONFIG, SER_AFIFO_CONFIG_RESET)
-                .with_reset(BUS_RESET_ST, BUS_RESET_ST_RESET),
+                .with_names(regs::USB_DEVICE),
             grades: Self::grades(),
             index: 0,
             delivered,
@@ -1227,6 +1205,11 @@ mod tests {
     use lp_emu_esp_common::host::MemorySink;
     use lp_emu_esp_common::{ByteLog, Sandbox, ScriptedSource, SocBus};
 
+    /// `jfifo_st`, the one register in this block that no driver on this
+    /// chip touches — which is what makes it the strict-grade test's
+    /// example. Only tests name it, so it lives here.
+    const JFIFO_ST: u32 = 0x20;
+
     /// A sandbox with the `usb-sj` stream (delivered + a scripted source)
     /// and the observation stream, and a USB block on them in `host`.
     struct Rig {
@@ -1350,17 +1333,26 @@ mod tests {
         assert_eq!(sb.read(&mut u, BUS_RESET_ST), 0x01);
         assert_eq!(sb.read(&mut u, EP1), 0, "no OUT data");
         assert_eq!(u.reg_name(0x04), Some("ep1_conf"));
-        // The PAC resets P6 left at 0.
-        assert_eq!(sb.read(&mut u, JFIFO_ST), 0x44);
-        assert_eq!(sb.read(&mut u, MEM_CONF), 0x02);
-        assert_eq!(sb.read(&mut u, SER_AFIFO_CONFIG), 0x10);
-        assert_eq!(sb.read(&mut u, TEST), 0x30);
-        assert_eq!(sb.read(&mut u, IN_EP0_ST), 0x01);
-        assert_eq!(sb.read(&mut u, IN_EP2_ST), 0x01);
-        assert_eq!(sb.read(&mut u, IN_EP3_ST), 0x01);
         assert_eq!(sb.read(&mut u, FRAM_NUM), 0);
         assert_eq!(sb.read(&mut u, OUT_EP1_ST), 0);
         assert_eq!(sb.sched.live(), 0, "no host: nothing scheduled");
+
+        // And every other register the PAC gives a non-zero reset reads it,
+        // seeded by `with_names` rather than listed here — the four this
+        // block computes from the link's own state are the exceptions, and
+        // the lines above are what checks those.
+        let computed = [EP1_CONF, INT_RAW, IN_EP1_ST, OUT_EP1_ST];
+        for (off, want) in regs::USB_DEVICE.resets {
+            if computed.contains(off) {
+                continue;
+            }
+            assert_eq!(
+                sb.read(&mut u, *off),
+                *want,
+                "USB_DEVICE+{off:#05x} {}",
+                regs::USB_DEVICE.name(*off).unwrap_or("?")
+            );
+        }
     }
 
     #[test]

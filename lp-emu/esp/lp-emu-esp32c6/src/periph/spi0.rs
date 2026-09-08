@@ -47,51 +47,9 @@ impl core::fmt::Debug for Spi0 {
 /// The ROM says what a cleared table is instead — `Cache_MMU_Init` writes
 /// **0** to all 256 entries — so [`crate::cache::CacheMmu::new`] starts at 0
 /// and this table leaves those three alone.
-const RESETS: &[(u32, u32)] = &[
-    (0x008, 0x802c_200c), // ctrl
-    (0x00c, 0x28e0_0000), // ctrl1
-    (0x010, 0x0000_2c21), // ctrl2
-    (0x014, 0x0003_0103), // clock
-    (0x01c, 0x5c00_0047), // user1
-    (0x020, 0x7000_0000), // user2
-    (0x03c, 0xc000_0000), // cache_fctrl
-    (0x040, 0x0055_c070), // cache_sctrl
-    (0x044, 0xc040_0000), // sram_cmd
-    (0x050, 0x0003_0103), // sram_clk
-    (0x054, 0x0000_0200), // fsm
-    (0x0d4, 0x0000_3020), // ddr
-    (0x0d8, 0x0000_3020), // spi_smem_ddr
-    (0x168, 0x0100_5000), // ecc_ctrl
-    (0x170, 0xfc00_0000), // axi_err_addr
-    (0x174, 0x0008_0000), // spi_smem_ecc_ctrl
-    (0x180, 0x0000_0001), // timing_cali
-    (0x190, 0x0000_0001), // spi_smem_timing_cali
-    (0x1a0, 0x8000_b084), // spi_smem_ac
-    (0x200, 0x0000_0001), // clock_gate
-    (0x384, 0x1320_0004), // mmu_power_ctrl — page mode 0 (bits 4:3 clear)
-    (0x388, 0x0000_000f), // dpa_ctrl
-];
-
-/// The four-entry PMS arrays, whose reset value the PAC gives once for the
-/// array: `spi_{f,s}mem_pms<n>_attr` = 3, `…_size` = `0x1000`.
-const PMS_RESETS: &[(u32, u32)] = &[
-    (0x100, 0x0000_0003), // spi_fmem_pms0..3_attr
-    (0x120, 0x0000_1000), // spi_fmem_pms0..3_size
-    (0x130, 0x0000_0003), // spi_smem_pms0..3_attr
-    (0x150, 0x0000_1000), // spi_smem_pms0..3_size
-];
-
 impl Spi0 {
     pub fn new(mmu: CacheHandle) -> Self {
-        let mut regs = RegFile::new("SPI0", 0x400).with_names(regs::SPI0);
-        for (off, value) in RESETS {
-            regs = regs.with_reset(*off, *value);
-        }
-        for (base, value) in PMS_RESETS {
-            for n in 0..4 {
-                regs = regs.with_reset(base + 4 * n, *value);
-            }
-        }
+        let regs = RegFile::new("SPI0", 0x400).with_names(regs::SPI0);
         Self { regs, mmu }
     }
 }

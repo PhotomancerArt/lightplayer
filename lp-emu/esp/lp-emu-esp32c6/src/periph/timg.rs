@@ -51,6 +51,14 @@
 //! (`lib.rs:751-761`). Expiry is **not** modelled: a write that sets
 //! `wdt_en` puts a `WDT ARMED` note in the trace so an image that does arm
 //! it is visible.
+//!
+//! **`wdtwprotect` resets to the write key.** The PAC gives TIMG0's
+//! `wdtwprotect` a reset of `0x50d8_3aa1` — the same value a driver
+//! writes to unlock it — so the MWDT is *unlocked* out of reset, and the
+//! first write to `wdtconfig0` takes without a key. LP_WDT's own
+//! `wdtwprotect` has no non-zero reset and starts locked. Nothing on the
+//! boot path depends on the difference (esp-hal writes the key first
+//! either way); it is stated because the model used to hold both locked.
 
 use lp_emu_core::sched::EventId;
 use lp_emu_esp_common::regfile::{lane_of, merge_lane};
@@ -84,7 +92,6 @@ const INT_ST: u32 = 0x78;
 const INT_CLR: u32 = 0x7c;
 const RTCCALICFG2: u32 = 0x80;
 
-const CONFIG_RESET: u32 = 0x6000_2000;
 const CFG_ALARM_EN: u32 = 1 << 10;
 const CFG_DIVCNT_RST: u32 = 1 << 12;
 const CFG_DIVIDER_SHIFT: u32 = 13;
@@ -95,16 +102,13 @@ const CFG_EN: u32 = 1 << 31;
 const UPDATE_BIT: u32 = 1 << 31;
 const COUNTER_MASK: u64 = (1 << 54) - 1;
 
-const WDTCONFIG0_RESET: u32 = 0x0004_c000;
 const WDT_EN: u32 = 1 << 31;
 
-const CALI_RESET: u32 = 0x0001_1000;
 const CALI_RDY: u32 = 1 << 15;
 const CALI_START_CYCLING: u32 = 1 << 12;
 const CALI_MAX_SHIFT: u32 = 16;
 const CALI_MAX_MASK: u32 = 0x7fff;
 const CALI_START: u32 = 1 << 31;
-const CALI2_RESET: u32 = 0xffff_ff98;
 const CALI2_TIMEOUT: u32 = 1;
 
 const EV_ALARM: u16 = 0;
@@ -134,11 +138,7 @@ impl Timg {
             name,
             index: 0,
             regs: RegFile::new(name, 0x100)
-                .with_names(regs::TIMG0)
-                .with_reset(T0_CONFIG, CONFIG_RESET)
-                .with_reset(WDTCONFIG0, WDTCONFIG0_RESET)
-                .with_reset(RTCCALICFG, CALI_RESET)
-                .with_reset(RTCCALICFG2, CALI2_RESET),
+                .with_names(regs::TIMG0),
             base_ticks: 0,
             base_cycle: 0,
             latched: 0,
@@ -438,6 +438,14 @@ mod tests {
     use super::*;
     use lp_emu_esp_common::Sandbox;
 
+    /// The PAC's reset for one register of this block, from the generated
+    /// table — the same value `with_names` seeded, so a test can never
+    /// drift from the model by carrying its own copy.
+    fn pac(off: u32) -> u32 {
+        regs::TIMG0
+            .reset(off)
+            .expect("the PAC gives this register a non-zero reset")
+    }
     /// esp-hal's `now()` (`timg.rs:474-486`).
     fn now(sb: &mut Sandbox, t: &mut Timg) -> u64 {
         sb.write(t, T0_UPDATE, UPDATE_BIT);
@@ -482,18 +490,18 @@ mod tests {
     fn t0_ticks_at_twenty_megahertz_with_the_reset_prescaler() {
         let mut sb = Sandbox::new();
         let mut t = Timg::timg0();
-        assert_eq!(sb.read(&mut t, T0_CONFIG), CONFIG_RESET);
+        assert_eq!(sb.read(&mut t, T0_CONFIG), pac(T0_CONFIG));
         // Disabled at reset: holds 0.
         sb.now = 1_600_000;
         assert_eq!(now(&mut sb, &mut t), 0);
-        sb.write(&mut t, T0_CONFIG, CONFIG_RESET | CFG_EN);
+        sb.write(&mut t, T0_CONFIG, pac(T0_CONFIG) | CFG_EN);
         sb.now = 3_200_000; // +10 ms = 200_000 ticks at 20 MHz
         assert_eq!(now(&mut sb, &mut t), 200_000);
         // Stop freezes; restart continues.
-        sb.write(&mut t, T0_CONFIG, CONFIG_RESET);
+        sb.write(&mut t, T0_CONFIG, pac(T0_CONFIG));
         sb.now = 4_000_000;
         assert_eq!(now(&mut sb, &mut t), 200_000);
-        sb.write(&mut t, T0_CONFIG, CONFIG_RESET | CFG_EN);
+        sb.write(&mut t, T0_CONFIG, pac(T0_CONFIG) | CFG_EN);
         sb.now = 4_000_008;
         assert_eq!(now(&mut sb, &mut t), 200_001);
     }
@@ -532,13 +540,13 @@ mod tests {
         let mut sb = Sandbox::new();
         let mut t = Timg::timg0();
         sb.now = 5_000;
-        sb.write(&mut t, T0_CONFIG, CONFIG_RESET | CFG_EN);
+        sb.write(&mut t, T0_CONFIG, pac(T0_CONFIG) | CFG_EN);
         sb.now = 5_000 + 8 * 100;
         sb.write(&mut t, T0_ALARMLO, 50);
         let cfg = sb.read(&mut t, T0_CONFIG);
         sb.write(&mut t, T0_CONFIG, cfg | CFG_ALARM_EN);
         assert_eq!(sb.sched.next_deadline(), Some(5_800));
-        sb.write(&mut t, T0_CONFIG, CONFIG_RESET); // en = 0
+        sb.write(&mut t, T0_CONFIG, pac(T0_CONFIG)); // en = 0
         assert_eq!(sb.sched.next_deadline(), None);
     }
 
@@ -548,14 +556,24 @@ mod tests {
         let mut sb = Sandbox::new();
         sb.trace = lp_emu_esp_common::Trace::to_sink(Box::new(buf.clone()));
         let mut t = Timg::timg0();
-        assert_eq!(sb.read(&mut t, WDTCONFIG0), WDTCONFIG0_RESET);
+        assert_eq!(sb.read(&mut t, WDTCONFIG0), pac(WDTCONFIG0));
+        // **TIMG0 comes out of reset UNLOCKED.** `wdtwprotect` resets to
+        // the write key itself (`0x50d8_3aa1`), which the reset sweep
+        // brought in from the PAC; this model used to hold it at 0 and
+        // refuse the first write. LP_WDT is the other way round — its own
+        // `wdtwprotect` has no non-zero reset, so it starts locked — and
+        // the two blocks disagreeing is the part, not a mistake.
+        assert_eq!(sb.read(&mut t, WDTWPROTECT), WDT_WKEY, "unlocked at reset");
         sb.write(&mut t, WDTCONFIG0, 0);
-        assert_eq!(sb.read(&mut t, WDTCONFIG0), WDTCONFIG0_RESET, "locked");
+        assert_eq!(sb.read(&mut t, WDTCONFIG0), 0, "and the write took");
+        sb.write(&mut t, WDTCONFIG0, pac(WDTCONFIG0));
         // esp_hal::init's disable: unlock, clear wdt_en, lock.
         sb.write(&mut t, WDTWPROTECT, WDT_WKEY);
         sb.write(&mut t, WDTCONFIG0, 0);
         sb.write(&mut t, WDTWPROTECT, 0);
         assert_eq!(sb.read(&mut t, WDTCONFIG0), 0);
+        sb.write(&mut t, WDTCONFIG0, 0xffff_ffff);
+        assert_eq!(sb.read(&mut t, WDTCONFIG0), 0, "locked now");
         assert!(buf.lines().is_empty());
         sb.write(&mut t, WDTWPROTECT, WDT_WKEY);
         sb.write(&mut t, WDTCONFIG0, WDT_EN);
@@ -600,7 +618,7 @@ mod tests {
         let mut t = Timg::timg0();
         t.attached(9);
         sb.now = 777;
-        sb.write(&mut t, T0_CONFIG, CONFIG_RESET | CFG_EN);
+        sb.write(&mut t, T0_CONFIG, pac(T0_CONFIG) | CFG_EN);
         sb.now = 1_777;
         now(&mut sb, &mut t);
         let blob = t.save_state();
@@ -609,6 +627,6 @@ mod tests {
         assert_eq!(other.count(sb.now), t.count(sb.now));
         assert_eq!(other.latched, t.latched);
         assert_eq!(other.index, 9);
-        assert_eq!(other.regs.stored(T0_CONFIG), CONFIG_RESET | CFG_EN);
+        assert_eq!(other.regs.stored(T0_CONFIG), pac(T0_CONFIG) | CFG_EN);
     }
 }
