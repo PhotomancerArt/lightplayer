@@ -25,7 +25,7 @@ const SERIAL_OUT_RECV_PKT: u32 = 1 << 2;
 #[test]
 #[ignore = "needs the fw-esp32c6 ELF; run through `just test-emu-c6`"]
 fn with_no_host_the_printer_times_out_once_and_the_rx_path_is_never_armed() {
-    let elf = match fw_esp32c6_image(&FwImage::SHIPPED_NO_FLASH) {
+    let elf = match fw_esp32c6_image(&FwImage::SHIPPED) {
         Ok(path) => path,
         Err(reason) => {
             skip_notice("host_absent", &reason);

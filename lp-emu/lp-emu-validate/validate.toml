@@ -67,6 +67,11 @@ payloads = [
 ]
 
 [[set]]
+name = "emu-m6-walk"
+description = "M6 P5: the shipped flash-backed image doing a day's work over the link it ships with. `lp-cli upload examples/basic` (the same script M4 replayed over the spike's UART0 link, so the pair is a controlled comparison of the two link drivers on one image) and `lp-cli upload examples/meteor`, which runs on past the load to the steady heartbeat the spike report §11.2 measured on the desk. Both run against `scripts/emu/build-reference-image.sh esp32c6,server,radio d6cfaa205 none` — the commit §5.3 and §11.2 are at, built with NO cherry-pick, so the bytes are silicon's own merged-default.bin."
+payloads = ["upload-walk-usb", "meteor-walk-usb"]
+
+[[set]]
 name = "jit-math-perf"
 description = "The Q32 math kernel cycle-cost payload (Q12 ledger, cheapest test_* migration): mul/div/sin kernels and LUT access cost against the PMU cycle counter. Timing only — never a gate under esp-emu, which has no cycle model."
 payloads = ["jit-math-perf"]
@@ -170,7 +175,7 @@ because = "the masked UART0 walk transcript is content-identical to silicon's (s
 
 [[configuration]]
 name = "lp-emu:esp32c6:t1"
-description = "Our own C6 machine (lp-emu/esp/lp-emu-esp32c6) at time grade 1: one cycle per instruction. The gate configuration for M3."
+description = "Our own C6 machine (lp-emu/esp/lp-emu-esp32c6) at time grade 1: one cycle per instruction. The gate configuration from M3 onward. Since M6 P5 the image under test is the SHIPPED one — default features, mounted from a modelled flash chip, served over the modelled USB-Serial-JTAG link with a host attached — and `spike_uart0_link` survives only for the payloads whose committed transcripts are of that older image."
 chip = "esp32c6"
 mac = "a0:f2:62:87:b4:8c"
 silicon_rev = "v0.2"
@@ -179,7 +184,7 @@ board = "seeed/xiao-esp32-c6"
 [[configuration.trust]]
 class = "memory"
 grade = "modeled"
-because = "the allocator is the guest's own and the RAM model is byte-exact, and on the compile harness this configuration is byte-equal to silicon — 372/372 values, peak 48,132 / resident 18,932 / after-drop 3,976 B and all 184 per-tick figures (M3 P6). That is evidence, not a promotion: the boot-idle heap sample sits 104 B below esp-emu's §5.4 figure (266,688 vs 266,792 at 5 s; 266,788 by 15 s, 4 B away), a transient in silent guest state that only a silicon capture of the memfs variant can arbitrate. Never tuned toward it"
+because = "the allocator is the guest's own and the RAM model is byte-exact, and on the compile harness this configuration is byte-equal to silicon — 372/372 values, peak 48,132 / resident 18,932 / after-drop 3,976 B and all 184 per-tick figures (M3 P6). On the shipped image against the desk board, same commit and same bytes, the residual is EIGHT BYTES of `freeBytes` (complementary in `usedBytes`) and nothing else: `totalBytes` equal, the stack's first high-water mark equal to the byte on both the memfs pair (11,784 B, M6 P4) and the flash-backed pair (11,908 B, M6 P5). M3's 104 B was a sample of a live ~108 B allocation that comes and goes between heartbeats — silicon's own three read 266,392 / 266,496 / 266,388 — and §11.2's meteor `-4 B` is the same shape: one M6 P5 run reports both 152,316 and 152,320 five seconds apart. The eight bytes are not that: they repeat to the byte at 5 s and 10 s, across memfs and flash, across two commits, and across silicon boots 3 and 10, and the two machines agree to the byte on what the filesystem backing costs (1,296 B either side). One live 8-byte block silicon has and we do not, unnamed. Never tuned toward it"
 
 [[configuration.trust]]
 class = "timing"
@@ -194,7 +199,7 @@ because = "there is no boot log: a direct load places the app's segments and jum
 [[configuration.trust]]
 class = "usb-serial-jtag"
 grade = "modeled"
-because = "M6 built the host's side — absent, attached with the port closed, attached and draining — and four committed transcripts under `lp-emu/transcripts/esp32c6/` are what it has to show for it: `boot-idle` over the shipped link against sitting 1's silicon capture of the SAME image bytes (stack high-water 11,784 B equal, heap 8 B apart); `usb-negative-control`, the port held closed from boot and opened at eight seconds, latching at 893 ms and recovering at 8,145; `usb-detach-reattach`, the cable out at six seconds and back at nine, recovering with exactly one hello and the firmware noticing nothing; and `usb-host-absent`, where the stamp pair reads 893 / never — the discriminator absent-vs-unread. The block's own registers are graded one by one (`--strict-grade`, the table in `periph/usb_sj.rs`) and the data path is `measured` there. This class stays `modeled` all the same, by the rule the ADR states and DD33 Q4 confirmed: byte-equality and agreement are EVIDENCE, weighed here where a reader can see them, not a promotion. What earns `measured` is a silicon transcript of this class, and the one M6 needs — `usb-negative-control` on the desk board — is owed"
+because = "M6 built the host's side — absent, attached with the port closed, attached and draining — and four committed transcripts under `lp-emu/transcripts/esp32c6/` are what it has to show for it: `boot-idle` over the shipped link against sitting 1's silicon capture of the SAME image bytes (stack high-water 11,784 B equal, heap 8 B apart); `usb-negative-control`, the port held closed from boot and opened at eight seconds, latching at 893 ms and recovering at 8,145; `usb-detach-reattach`, the cable out at six seconds and back at nine, recovering with exactly one hello and the firmware noticing nothing; and `usb-host-absent`, where the stamp pair reads 893 / never — the discriminator absent-vs-unread. The block's own registers are graded one by one (`--strict-grade`, the table in `periph/usb_sj.rs`) and the data path is `measured` there. M6 P5 adds the working half: the shipped image FROM FLASH over this link takes a real `lp-cli upload` (`upload-walk-usb`, `meteor-walk-usb`) with every filesystem write, every heap gate and every compiler output identical to M4's run of the same script over the spike's UART0 link — so the host model carries a day's work and not just a boot, and the link driver is demonstrably not in the heap ledger. This class stays `modeled` all the same, by the rule the ADR states and DD33 Q4 confirmed: byte-equality and agreement are EVIDENCE, weighed here where a reader can see them, not a promotion. The silicon transcript that would let anybody argue otherwise has now landed (`usb-negative-control/silicon-esp32c6-2026-09-07-b18360ea6.txt`, G3 step 4); whether it promotes this class is the director's to rule, not a phase's to assume"
 
 [[configuration.trust]]
 class = "pin"

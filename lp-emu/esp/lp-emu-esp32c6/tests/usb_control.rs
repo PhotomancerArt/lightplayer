@@ -133,7 +133,7 @@ impl Run {
 /// Run the shipped-minus-flash image with `script` driving the host, with
 /// `USB_DEVICE` traced. `None` when there is no firmware to run.
 fn run(script: &str, micros: u64) -> Option<Run> {
-    let elf = match fw_esp32c6_image(&FwImage::SHIPPED_NO_FLASH) {
+    let elf = match fw_esp32c6_image(&FwImage::SHIPPED) {
         Ok(path) => path,
         Err(reason) => {
             skip_notice("usb_control", &reason);

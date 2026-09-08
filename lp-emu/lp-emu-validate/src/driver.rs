@@ -343,35 +343,110 @@ impl ConfigurationDriver for SiliconDriver {
              not pick a port for you, because a runner that grabs candidates[0] \
              eventually flashes the wrong board.",
         )?;
-        if req.image.is_some() {
-            bail!(
-                "--image is for the emulated configurations. A silicon run flashes what it \
-                 built, from the tree it is in; pointing it at somebody else's ELF would make \
-                 the transcript's `firmware_features` a guess."
-            );
-        }
-        let elf = format!("target/{RV32_TARGET}/{FW_ESP32C6_PROFILE}/fw-esp32c6");
         let capture = req.capture_path();
+        let mut notes: Vec<String> = Vec::new();
         // One build step, whichever way the board is then watched: the
         // negative control flashes the same image as everyone else, and it is
         // built from the firmware's own directory for the reason
         // `FW_ESP32C6_DIR` gives.
-        let mut steps = vec![
-            PlanStep::new(
-                "build the payload image",
-                vec![
-                    "cargo".into(),
-                    "build".into(),
-                    "--target".into(),
-                    RV32_TARGET.into(),
-                    "--profile".into(),
-                    FW_ESP32C6_PROFILE.into(),
-                    "--features".into(),
+        let mut steps = Vec::new();
+        let elf = match &req.image {
+            Some(path) => {
+                // A pinned image on silicon was refused outright until M6 P5,
+                // and the reason was good: an ELF from nowhere makes the
+                // sidecar's `firmware_features` a guess. What changed is that
+                // the milestone's central claim needs one. DD30 arbitrates two
+                // machines on the *same bytes*, and the tree a desk agent
+                // happens to be standing in is not the commit the emulator
+                // side is pinned to — so either both sides run the reference
+                // image or neither comparison is a comparison.
+                //
+                // The guess is closed rather than accepted:
+                // `build-reference-image.sh` names its output directory
+                // `<commit>-<feature slug>`, so the features are checkable
+                // against the ones this payload asks for, and the check is
+                // below. Anything outside `target/emu-ref/` is still refused.
+                let dir = path
+                    .parent()
+                    .and_then(|p| p.file_name())
+                    .and_then(|n| n.to_str())
+                    .unwrap_or_default()
+                    .to_string();
+                let under_ref = path.components().any(|c| c.as_os_str() == "emu-ref");
+                let slug = reference_image_slug(&req.features());
+                if !under_ref || !dir.ends_with(&slug) {
+                    bail!(
+                        "--image {} is not a reference image for this payload. A silicon run \
+                         flashes what it built from the tree it is in; the one exception is an \
+                         image `scripts/emu/build-reference-image.sh` produced, whose directory \
+                         is named `<commit>-<features>` so the sidecar's `firmware_features` is \
+                         checkable rather than a guess. Expected a path under `target/emu-ref/` \
+                         in a directory ending `{slug}`, got `{dir}`.",
+                        path.display(),
+                    );
+                }
+                notes.push(format!(
+                    "flashing the pinned reference image {} rather than building one: this \
+                     payload's claim is a comparison against an emulated run of the SAME bytes \
+                     (DD30), and the tree this runner stands in is not that commit. \
+                     `scripts/emu/build-reference-image.sh {} <commit> none` builds it in a \
+                     detached worktree; the directory name is the provenance, and the runner \
+                     checks its feature half.",
+                    path.display(),
                     req.features().join(","),
-                ],
-            )
-            .in_dir(FW_ESP32C6_DIR),
-        ];
+                ));
+                path.display().to_string()
+            }
+            None => {
+                steps.push(
+                    PlanStep::new(
+                        "build the payload image",
+                        vec![
+                            "cargo".into(),
+                            "build".into(),
+                            "--target".into(),
+                            RV32_TARGET.into(),
+                            "--profile".into(),
+                            FW_ESP32C6_PROFILE.into(),
+                            "--features".into(),
+                            req.features().join(","),
+                        ],
+                    )
+                    .in_dir(FW_ESP32C6_DIR),
+                );
+                format!("target/{RV32_TARGET}/{FW_ESP32C6_PROFILE}/fw-esp32c6")
+            }
+        };
+
+        // A payload whose subject starts on a blank part has to be given one.
+        // The emulated side gets it for free (`--flash` is blank unless a file
+        // is named); the board keeps whatever the last sitting left on it, and
+        // a leftover `startup_project` would be auto-loaded before the first
+        // heartbeat — a different measurement wearing the same name.
+        if req.payload.fresh_chip {
+            steps.push(
+                PlanStep::new(
+                    "erase the flash chip",
+                    vec![
+                        DESK_FLASH_NO_MONITOR_SCRIPT.into(),
+                        "--".into(),
+                        "erase-flash".into(),
+                        "--chip".into(),
+                        "esp32c6".into(),
+                        "--port".into(),
+                        port.into(),
+                    ],
+                )
+                .with_env("PORT_DEV", port)
+                .with_note(
+                    "the same foreground-under-script(1) port discipline as the write, for the \
+                     same reasons, and it releases the port when it is done. This erases the \
+                     filesystem AND the boot-control record, so the boot that follows is the \
+                     board's first: `bootCount 1`, no `startup_project`, `[FS] Mount failed … \
+                     formatting` — which is what the emulated twin's blank chip produces.",
+                ),
+            );
+        }
 
         // The espflash argument list, up to but not including `--monitor`.
         let flash_args = |elf: String| -> Vec<String> {
@@ -480,7 +555,7 @@ impl ConfigurationDriver for SiliconDriver {
                  and close the browser tab first"
                     .into(),
             ],
-            notes: Vec::new(),
+            notes,
             tools: BTreeMap::new(),
         })
     }
@@ -799,8 +874,28 @@ impl ConfigurationDriver for LpEmuDriver {
         // resolved in guest cycles, so the transcript does not move with the
         // recorder's laptop. (On silicon this is the client on a port, which
         // is why the file is a *payload* field and not a machine flag.)
+        //
+        // Which flag carries it is the *link's* business, not the walk's: the
+        // same file of `after "<line>"` steps replays on either, because the
+        // needle is matched against whatever a host on that link received.
+        // That is the whole of P5's answer to "should `host_script` and
+        // `host_plan` be one field" — they should not. `host_script` is the
+        // conversation an application had (a generated file of verbatim
+        // client bytes, 12 KB of it, provenance in `walks/README.md`);
+        // `host_plan` is the cable it had it over (three lines, written
+        // inline so the sidecar carries the whole text). One is content
+        // addressed by path, the other content itself, and merging them
+        // would force a 12 KB blob into the registry or a file onto a
+        // three-line schedule.
         if let Some(script) = req.payload.host_script {
-            emu.push("--uart0-script".into());
+            emu.push(
+                if usb {
+                    "--usb-script"
+                } else {
+                    "--uart0-script"
+                }
+                .into(),
+            );
             emu.push(script.into());
         }
         if let Some(mac) = &req.identity.mac {
@@ -874,6 +969,24 @@ impl ConfigurationDriver for LpEmuDriver {
         }
         run_steps(plan)?;
         Ok(plan.capture.clone())
+    }
+}
+
+/// The directory-name slug `scripts/emu/build-reference-image.sh` gives a
+/// build of these features.
+///
+/// Mirrored from that script's `case`, and the mirror is the point: it is what
+/// lets a silicon run check that a pinned `--image` was built for the payload
+/// being recorded instead of taking the operator's word for it. The two short
+/// names are the M3 gate images; everything else is the feature list with
+/// `,` -> `+`.
+pub fn reference_image_slug(features: &[&str]) -> String {
+    match features.join(",").as_str() {
+        "test_shader_compile_incremental,esp32c6,spike_uart0_link" => "harness".to_string(),
+        "esp32c6,server,radio,spike_uart0_link" => "boot-idle".to_string(),
+        "esp32c6,server,radio,spike_uart0_link,memory_fs" => "boot-idle-memfs".to_string(),
+        "esp32c6,server,radio,memory_fs" => "boot-idle-memfs-usb".to_string(),
+        other => other.replace(',', "+"),
     }
 }
 

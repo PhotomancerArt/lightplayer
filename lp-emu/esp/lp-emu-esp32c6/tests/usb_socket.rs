@@ -63,7 +63,7 @@ fn bound_port(reader: &mut BufReader<ChildStderr>, prefix: &str) -> u16 {
 }
 
 fn spawn() -> Option<(Emulator, BufReader<ChildStderr>)> {
-    let elf = match fw_esp32c6_image(&FwImage::SHIPPED_NO_FLASH) {
+    let elf = match fw_esp32c6_image(&FwImage::SHIPPED) {
         Ok(path) => path,
         Err(reason) => {
             skip_notice("usb_socket", &reason);

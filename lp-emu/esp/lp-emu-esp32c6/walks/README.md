@@ -1,11 +1,33 @@
 # `walks/` — deterministic host scripts
 
 One file per walk: the host half of a conversation with the machine, in the
-`--uart0-script` grammar, replayable in guest time alone.
+script grammar `--uart0-script` and `--usb-script` share, replayable in guest
+time alone.
 
 | file | what it is |
 |---|---|
 | `examples-basic.script` | `lp-cli upload examples/basic` — 13 wire frames, from the hello request to `projectRead` |
+| `examples-meteor.script` | `lp-cli upload examples/meteor` — 14 frames, the two-shader project the spike report §11.2 measured its heap ledger on |
+
+**A walk is not a link.** The same file replays on either: `after "<line>"`
+matches what a host *on the link the run used* received, so `upload-walk`
+runs `examples-basic.script` over the spike's UART0 workaround and
+`upload-walk-usb` runs the identical file over the modelled USB-Serial-JTAG
+socket, and their heap ledgers come out equal to the byte (M6 P5). Which
+flag carries the file is the payload's `link`, not the walk's business.
+
+**The projects these were captured against no longer exist at those paths.**
+Both were captured at firmware `d6cfaa205` against `examples/basic` and
+`examples/meteor` **as they stood at that commit**, because that is what the
+spike report's §5.3 and §11.2 figures are of. The catalog reorganisation has
+since moved them to `catalog/patterns/` with an `effect/` subdirectory, so
+the wire paths differ and the figures would not compare. To re-capture,
+materialise the originals first:
+
+```sh
+mkdir -p target/walk-projects
+git archive d6cfaa205 examples/basic examples/meteor | tar -x -C target/walk-projects
+```
 
 ## Where they come from
 
@@ -20,9 +42,13 @@ To regenerate after a change to the project or the client:
 
 ```sh
 cargo build --release -p lp-emu-esp32c6 -p lp-cli
-scripts/emu/upload-walk.sh <fw-esp32c6.elf> target/walk examples/basic
+# WALK_LINK=usb puts the machine's half on the link the product ships
+# (`--usb-sj tcp:` + `--usb-host attached`); the default is UART0.
+WALK_LINK=usb scripts/emu/upload-walk.sh <fw-esp32c6.elf> target/walk \
+    target/walk-projects/examples/meteor
 scripts/emu/walk-script.py target/walk/walk.uart.bin \
-    -o lp-emu/esp/lp-emu-esp32c6/walks/examples-basic.script
+    --note "Firmware: …, Project: …, Link: …" \
+    -o lp-emu/esp/lp-emu-esp32c6/walks/examples-meteor.script
 ```
 
 ## Why the script and not the live client

@@ -57,7 +57,7 @@ struct Run {
 }
 
 fn run(host: UsbHost) -> Option<Run> {
-    let elf = match fw_esp32c6_image(&FwImage::SHIPPED_NO_FLASH) {
+    let elf = match fw_esp32c6_image(&FwImage::SHIPPED) {
         Ok(path) => path,
         Err(reason) => {
             skip_notice("usb_attached", &reason);
@@ -363,7 +363,7 @@ fn g2_4_two_attached_runs_are_the_same_run() {
 #[test]
 #[ignore = "needs the fw-esp32c6 ELF; run through `just test-emu-c6`"]
 fn g4_4_the_shipped_image_crosses_no_modeled_usb_register() {
-    let elf = match fw_esp32c6_image(&FwImage::SHIPPED_NO_FLASH) {
+    let elf = match fw_esp32c6_image(&FwImage::SHIPPED) {
         Ok(path) => path,
         Err(reason) => {
             skip_notice("usb_attached", &reason);

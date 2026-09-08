@@ -255,6 +255,22 @@ pub struct Payload {
     /// The emulated seconds a scenario needs, when its subject is a timeline
     /// rather than a line. `None` leaves it to the runner's `--timeout-secs`.
     pub run_secs: Option<u64>,
+    /// Does the payload's subject start from an **erased flash chip**?
+    ///
+    /// On an emulated configuration this is the default and needs no saying:
+    /// `--flash` is blank unless a file is named, so every run starts on a
+    /// fresh part. On silicon it is the difference between a measurement and
+    /// a coincidence — the desk board keeps whatever the last sitting left
+    /// on it, so a flash-backed payload that expects to format `lpfs` and
+    /// report `bootCount 1` gets, on a board that already holds a project,
+    /// an auto-loaded project and a boot ledger three deep instead. An
+    /// `espflash erase-flash` before the write is what makes the two sides
+    /// the same experiment (M6 P5, DD30 on flash-backed bytes).
+    ///
+    /// Deliberately not mirrored in `fw-checks`, for [`Capture`]'s reason:
+    /// the image is the same bytes either way, and what differs is what the
+    /// operator's side did to the board first.
+    pub fresh_chip: bool,
     /// Why silicon cannot record this payload, when it cannot.
     ///
     /// `usb-host-absent` is the case, and the reason is the payload: an
@@ -865,6 +881,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         host_plan: None,
         probes: &[],
         run_secs: None,
+        fresh_chip: false,
         emulator_only: None,
     },
     Payload {
@@ -886,6 +903,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         host_plan: None,
         probes: &[],
         run_secs: None,
+        fresh_chip: false,
         emulator_only: None,
     },
     Payload {
@@ -907,6 +925,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         host_plan: None,
         probes: &[],
         run_secs: None,
+        fresh_chip: false,
         emulator_only: None,
     },
     Payload {
@@ -928,6 +947,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         host_plan: None,
         probes: &[],
         run_secs: None,
+        fresh_chip: false,
         emulator_only: None,
     },
     Payload {
@@ -977,6 +997,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         }),
         probes: &[],
         run_secs: None,
+        fresh_chip: false,
         emulator_only: None,
     },
     Payload {
@@ -1046,6 +1067,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // io_task's 2 s grid after it, and the 10 s heartbeat carrying the
         // pair, which stops the run.
         run_secs: Some(12),
+        fresh_chip: false,
         emulator_only: None,
     },
     Payload {
@@ -1089,6 +1111,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         }),
         probes: &[],
         run_secs: Some(12),
+        fresh_chip: false,
         emulator_only: None,
     },
     Payload {
@@ -1134,6 +1157,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
             ),
         ],
         run_secs: Some(6),
+        fresh_chip: false,
         emulator_only: Some(
             "an absent host records nothing: recording IS what a host does. On silicon this \
              payload is `unplug the board and watch the port that is no longer there`, which is \
@@ -1171,6 +1195,10 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         }),
         probes: &[],
         run_secs: None,
+        // Both `[FS]` lines its `fs-mount` series asserts are the lines a
+        // blank part produces. On silicon that means an erase before the
+        // write, or the board's leftover filesystem is in the measurement.
+        fresh_chip: true,
         emulator_only: None,
     },
     Payload {
@@ -1203,6 +1231,104 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         host_plan: None,
         probes: &[],
         run_secs: None,
+        // Both `[FS]` lines its `fs-mount` series asserts are the lines a
+        // blank part produces. On silicon that means an erase before the
+        // write, or the board's leftover filesystem is in the measurement.
+        fresh_chip: true,
+        emulator_only: None,
+    },
+    Payload {
+        name: "upload-walk-usb",
+        display_name: "Project upload walk (examples/basic), over the USB link",
+        fw_check_slug: "upload-walk-usb",
+        // The same image, the same conversation, the same series — and the
+        // link the product ships. That is the whole difference, and it is the
+        // reason for a second payload rather than a flag: `upload-walk`'s
+        // committed transcript is of the `spike_uart0_link` image, and a
+        // transcript is never re-baselined to suit a later idea. Two payloads,
+        // two images, one script, and the pair is the comparison.
+        //
+        // Silicon's own §11.3 walk went over USB-Serial-JTAG (through
+        // `usb-tcp-bridge.py` on the board's own port), so THIS is the
+        // like-for-like run and M4's was the proxy.
+        firmware_features: &["server", "radio"],
+        fw_checks_feature: None,
+        emits_header: false,
+        host_script: Some("lp-emu/esp/lp-emu-esp32c6/walks/examples-basic.script"),
+        sentinel: Sentinel::Done("[shader-node] compilation succeeded"),
+        record_kinds: &[],
+        mask_set: "boot-idle",
+        fields: &[],
+        series: &[&HELLO, &FS_MOUNT, &FS_WRITE, &LOAD_GATE, &SHADER_COMPILE],
+        capture: Capture::Monitor,
+        link: Link::UsbSerialJtag,
+        emulator_features: None,
+        // A cable in and an application reading, from boot. The walk's first
+        // request waits for `[RECOVERY] boot complete`, which a host that
+        // attached later would never see.
+        host_plan: Some(HostPlan {
+            host: "attached",
+            script: "",
+        }),
+        probes: &[],
+        run_secs: None,
+        fresh_chip: true,
+        emulator_only: None,
+    },
+    Payload {
+        name: "meteor-walk-usb",
+        display_name: "Project upload walk (examples/meteor), over the USB link",
+        fw_check_slug: "meteor-walk-usb",
+        // The spike report §11.2's ledger, which is the one heap comparison
+        // the desk made on a *loaded* device rather than an idle one: `[mem]
+        // load_project after` 216,056 B, steady `freeBytes` 152,320 and
+        // `[stack] high-water` 35,768 B. Silicon's column came over USB-SJ
+        // through the bridge, so this payload is the like-for-like twin of
+        // it; `upload-walk-usb` is the same walk on the smaller project.
+        firmware_features: &["server", "radio"],
+        fw_checks_feature: None,
+        emits_header: false,
+        host_script: Some("lp-emu/esp/lp-emu-esp32c6/walks/examples-meteor.script"),
+        // `Ready`, not `Done`, and the reason is the measurement. §11.2's
+        // "steady" figures are read from a heartbeat with the project
+        // **loaded and running** — silicon's came from the 20-60 s window —
+        // so the run has to keep going after the walk finishes rather than
+        // stop at the first line that matches. `Ready` passes no `--exit-on`
+        // and the marker is what says the payload got where it was going:
+        // the first heartbeat that names the loaded project.
+        //
+        // The obvious alternative, stopping at `[stack] heartbeat:
+        // high-water`, would end the run at five seconds — `stack_probe`
+        // reports on growth, and its first report is the idle one long
+        // before the load.
+        sentinel: Sentinel::Ready("\"path\":\"/projects/Meteor\""),
+        record_kinds: &[],
+        mask_set: "boot-idle",
+        fields: &[],
+        series: &[
+            &HELLO,
+            &FS_MOUNT,
+            &FS_WRITE,
+            &LOAD_GATE,
+            &SHADER_COMPILE,
+            &HEARTBEAT,
+            &STACK_HEARTBEAT,
+        ],
+        capture: Capture::Monitor,
+        link: Link::UsbSerialJtag,
+        emulator_features: None,
+        host_plan: Some(HostPlan {
+            host: "attached",
+            script: "",
+        }),
+        probes: &[],
+        // The load, two compiles, and then TWO heartbeats past it. The
+        // first heartbeat after a load is not the steady one — P4 measured
+        // a ~108 B live allocation that comes and goes between samples, and
+        // it is 104 B low at twenty seconds — so the figure §11.2 calls
+        // steady is the second, at twenty-five.
+        run_secs: Some(26),
+        fresh_chip: true,
         emulator_only: None,
     },
 ];

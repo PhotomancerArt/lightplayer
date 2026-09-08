@@ -1,0 +1,108 @@
+[INIT] Initializing board...
+[INIT] Board initialized, starting runtime... (main stack 71544 B)
+[RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true
+[RECOVERY] RWDT armed: boot 30000 ms, runtime 8000 ms
+[INIT] Runtime started
+[INIT] fw-esp32 starting...
+[INIT] Spawning I/O task...
+[INIT] I/O task spawned
+[INIT] Creating StreamingMessageRouterTransport...
+[INIT] StreamingMessageRouterTransport created
+[INIT] Initializing RMT peripheral at 80MHz...
+[INIT] RMT peripheral initialized
+[INIT] Flash filesystem mounted
+[INIT] Creating output provider...
+[INIT] Output provider created
+[INIT] Creating LpServer instance...
+[INIT] LpServer created
+[INIT] Creating time provider...
+[INIT] Time provider created
+[INIT] fw-esp32 initialized, starting server loop... proto=20 commit=d6cfaa2051ae dirty=false
+
+M!{"id":0,"msg":{"hello":{"proto":20,"build":{"features":["node.button","node.clock","node.fluid","node.fixture","node.playlist","node.radio","node.shader","node.texture","svc.button","svc.radio-espnow","gfx.lpvm"],"package":"fw-esp32c6","commit":"d6cfaa2051ae","dirty":false,"profile":"release-esp32"},"hardware":{"radio":true,"totalLedBudget":null,"button":true,"boardId":"seeed/xiao-esp32-c6","baseMac":"a0:f2:62:87:b4:8c","chipRevision":"0.2","eui64":"a0:f2:62:87:b4:8c:00:00"},"deviceUid":null}}}
+
+[INFO] fw_esp32c6: [fw-esp32c6] Shader backend: native JIT (lpvm-native rt_jit)
+
+[WARN] fw_esp32_common::lp_fs: [FS] Mount failed (filesystem corrupt), formatting partition...
+
+[INFO] fw_esp32_common::lp_fs: [FS] Formatted and mounted fresh filesystem
+
+[INFO] fw_esp32c6: [fw-esp32c6] Hardware manifest: seeed/xiao-esp32-c6 (XIAO ESP32-C6)
+
+[INFO] fw_esp32c6::output::rmt::esp32c6_rmt_ws281x_driver: Esp32C6RmtWs281xDriver: 2 WS281x channels for 2 declared (ch0_blocks=1 ch0_window_words=48 ch0_half_words=24)
+
+[INFO] fw_esp32c6: [fw-esp32c6] ESP-NOW radio ready: device_id= channel=11
+
+[INFO] fw_esp32_common::boot: Boot: scanning /projects for projects
+
+[WARN] fw_esp32_common::boot: Boot: failed to list /projects: Filesystem error: list_dir /projects: no such file or directory
+
+[INFO] fw_esp32_common::server_loop: [RECOVERY] boot complete (first frame served)
+
+M!{"id":18446744073709551615,"msg":{"hello":{"proto":20,"build":{"features":["node.button","node.clock","node.fluid","node.fixture","node.playlist","node.radio","node.shader","node.texture","svc.button","svc.radio-espnow","gfx.lpvm"],"package":"fw-esp32c6","commit":"d6cfaa2051ae","dirty":false,"profile":"release-esp32"},"hardware":{"radio":true,"totalLedBudget":null,"button":true,"boardId":"seeed/xiao-esp32-c6","baseMac":"a0:f2:62:87:b4:8c","chipRevision":"0.2","eui64":"a0:f2:62:87:b4:8c:00:00"},"deviceUid":null}}}
+
+M!{"id":1,"msg":"stopAllProjects"}
+
+[INFO] lpa_server::handlers: Stopping all projects (0 loaded)
+
+[INFO] lpa_server::handlers: [mem] stop_all_projects before: 264716 B free / 60820 B used (258k / 59k)
+
+[INFO] lpa_server::handlers: [mem] stop_all_projects after: 264612 B free / 60924 B used (258k / 59k)
+
+[INFO] lpa_server::handlers: Stopped all projects
+
+M!{"id":2,"msg":{"filesystem":{"write":{"path":"/projects/Basic/clock.json","error":null}}}}
+
+M!{"id":3,"msg":{"filesystem":{"write":{"path":"/projects/Basic/fixture.json","error":null}}}}
+
+M!{"id":4,"msg":{"filesystem":{"write":{"path":"/projects/Basic/fixture.map2d.json","error":null}}}}
+
+M!{"id":5,"msg":{"filesystem":{"write":{"path":"/projects/Basic/module.json","error":null}}}}
+
+M!{"id":6,"msg":{"filesystem":{"write":{"path":"/projects/Basic/output.json","error":null}}}}
+
+M!{"id":7,"msg":{"filesystem":{"write":{"path":"/projects/Basic/project.json","error":null}}}}
+
+M!{"id":8,"msg":{"filesystem":{"writeChunk":{"path":"/projects/Basic/shader.glsl","offset":0,"written":4096,"error":null}}}}
+
+M!{"id":9,"msg":{"filesystem":{"writeChunk":{"path":"/projects/Basic/shader.glsl","offset":4096,"written":269,"error":null}}}}
+
+M!{"id":10,"msg":{"filesystem":{"write":{"path":"/projects/Basic/shader.json","error":null}}}}
+
+M!{"id":11,"msg":{"loadProject":{"handle":1}}}
+
+[INFO] lpa_server::handlers: Loading project: projects/Basic
+
+[INFO] lpa_server::handlers: [mem] load_project before: 258348 B free / 67188 B used (252k / 65k)
+
+[INFO] lpa_server::project: [mem] project new start: 252k free / 65k used
+
+[INFO] lpa_server::project: [mem] project new after root path: 251k free / 65k used
+
+[INFO] lpa_server::project: [mem] project new after services: 251k free / 66k used
+
+[INFO] lpa_server::project: [mem] project new after core project: 219k free / 98k used
+
+[INFO] lpa_server::project: [mem] project new after graphics: 218k free / 98k used
+
+[INFO] lpa_server::project: [mem] project new after wrapper: 218k free / 99k used
+
+[INFO] lpa_server::project_manager: Project loaded: Basic
+
+[INFO] lpa_server::handlers: [mem] load_project after: 220532 B free / 105004 B used (215k / 102k)
+
+[INFO] lpa_server::handlers: load_project: startup_project set to Basic
+
+[WARN] lpc_engine::nodes::shader::shader_node: [shader-node] sampling black fallback (node=, frame 1): shader not compiled
+
+[INFO] fw_esp32c6::output::rmt::esp32c6_rmt_ws281x_driver: Esp32C6RmtWs281xDriver::open: endpoint=esp32c6-rmt-ws281x:ws281x:local:D10 gpio=/gpio/18 ws281x_ch=0 rmt_slot=0 bytes=723
+
+[INFO] fw_esp32_common::output::provider: Esp32OutputProvider::open: Opened port handle=1, endpoint=ws281x:local:D10, byte_count=723
+
+[INFO] lpc_engine::nodes::shader::shader_node: [shader-node] compilation starting (node=, 4365 bytes)
+
+[INFO] lpc_shared::memory: [mem] shader compile before: 171k free / 146k used
+
+[INFO] lpc_shared::memory: [mem] shader compile after: 156k free / 161k used
+
+[INFO] lpc_engine::nodes::shader::shader_node: [shader-node] compilation succeeded (node=, elapsed=52ms, lpir_inst_count=573, lpir_func_count=12, lpir_import_count=7, final_inst_count=2048, final_code_size=8192 bytes, float=fixed)
