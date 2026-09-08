@@ -84,6 +84,9 @@ use crate::snapshot::Snapshot;
 /// scheduler peek and one matrix resample per 8,192 cycles, which the
 /// no-radio boot does not notice. (P4 had 1,000,000 here, when no peripheral
 /// could schedule anything.)
+/// `LP_CLKRST + 0x10`, the register the mask ROM reads before anything else.
+const LP_CLKRST_RESET_CAUSE: u32 = 0x010;
+
 const MAX_SLICE_CYCLES: u64 = 8_192;
 
 /// The slice cap while strict mode is on.
@@ -633,6 +636,9 @@ pub struct Esp32C6Builder {
     /// What `GPIO.strap` reads, and so what the banner prints as `boot:0x..`
     /// and which of the ROM's two paths runs.
     strap: Strap,
+    /// Perform a reset request instead of reporting it. See
+    /// [`Esp32C6Builder::reboot_on_reset`].
+    reboot_on_reset: bool,
     efuse: EfuseIdentity,
     time_grade: TimeGrade,
     strict: bool,
@@ -690,6 +696,7 @@ impl Esp32C6Builder {
             boot_mode: BootMode::default(),
             reset_cause: ResetCause::default(),
             strap: Strap::App,
+            reboot_on_reset: false,
             efuse: EfuseIdentity::default(),
             time_grade: TimeGrade::default(),
             strict: false,
@@ -763,6 +770,29 @@ impl Esp32C6Builder {
     /// bootloader and its own download console.
     pub fn strap(mut self, strap: Strap) -> Self {
         self.strap = strap;
+        self
+    }
+
+    /// **Perform** a reset request rather than reporting it: reboot the chip
+    /// into the strap the request names, and carry on.
+    ///
+    /// A peripheral that asks for a reset (the RWDT's stage action, the
+    /// USB-Serial-JTAG `chip_rst` a host's DTR/RTS dance drives) ends the run
+    /// with [`Outcome::Reset`] by default, because until this milestone there
+    /// was no boot chain to reboot **into**. There is one now, and this turns
+    /// the request into the real thing: the machine goes back to the state it
+    /// was built in, with the new strap and a `USB_UART_HPSYS` reset cause,
+    /// and the mask ROM runs again.
+    ///
+    /// It is **off** by default and that is deliberate. Three merged M6
+    /// scenarios read the exit code and the reported strap as their evidence,
+    /// and a default that reboots would change what those transcripts mean.
+    /// Only a run that asks for it gets it. What is *not* reset is everything
+    /// outside the chip: the flash part keeps what the guest wrote to it, the
+    /// USB host stays attached or absent as it was, and both consoles keep
+    /// every byte from before the reset — a reboot is not a new process.
+    pub fn reboot_on_reset(mut self, reboot: bool) -> Self {
+        self.reboot_on_reset = reboot;
         self
     }
 
@@ -972,6 +1002,7 @@ impl Esp32C6Builder {
             boot_mode,
             reset_cause,
             strap,
+            reboot_on_reset,
             efuse,
             time_grade,
             strict,
@@ -1299,7 +1330,7 @@ impl Esp32C6Builder {
             ));
         }
 
-        Ok(Esp32C6Machine {
+        let mut machine = Esp32C6Machine {
             harts: vec![hart],
             bus,
             time_grade,
@@ -1310,6 +1341,9 @@ impl Esp32C6Builder {
             efuse,
             reset_cause,
             strap,
+            reboot_on_reset,
+            power_on: None,
+            reboots: 0,
             seed,
             rng: seed,
             rom_segments,
@@ -1346,7 +1380,15 @@ impl Esp32C6Builder {
                 pin_log_lines: 0,
                 pin_log_capped: false,
             },
-        })
+        };
+        // The state a reboot goes back to, taken before a single
+        // instruction runs. Only when a run asked to perform resets: it is
+        // a whole copy of guest memory (~17 MiB), and a run that will never
+        // reboot should not pay for it.
+        if reboot_on_reset {
+            machine.power_on = Some(machine.snapshot());
+        }
+        Ok(machine)
     }
 }
 
@@ -1489,6 +1531,13 @@ pub struct Esp32C6Machine {
     efuse: EfuseIdentity,
     reset_cause: ResetCause,
     strap: Strap,
+    reboot_on_reset: bool,
+    /// The machine as it was built, kept only when
+    /// [`Esp32C6Builder::reboot_on_reset`] asked for it — a reboot is a
+    /// restore of this.
+    power_on: Option<Snapshot>,
+    /// How many reset requests this run performed.
+    reboots: u64,
     seed: u64,
     rng: u64,
     rom_segments: Vec<PlacedSegment>,
@@ -1617,9 +1666,71 @@ impl Esp32C6Machine {
         self.reset_cause
     }
 
-    /// The strapping the chip was started with.
+    /// The strapping the chip was started with, or the one the last reboot
+    /// used.
     pub fn strap(&self) -> Strap {
         self.strap
+    }
+
+    /// How many reset requests this run performed
+    /// ([`Esp32C6Builder::reboot_on_reset`]).
+    pub fn reboots(&self) -> u64 {
+        self.reboots
+    }
+
+    /// Reboot into `strap`, as a chip does when something asserts its reset.
+    ///
+    /// The machine goes back to the state it was built in and the two
+    /// registers the mask ROM reads before anything else are re-seeded: the
+    /// strap it prints as `boot:0x..` and chooses a path with, and the reset
+    /// cause it prints as `rst:0x..`, which is `USB_UART_HPSYS` because
+    /// every producer of a reset request on this chip is the serial bridge or
+    /// a watchdog and the ROM has one code for "not a power-on" that the
+    /// firmware maps to `user-reset`.
+    ///
+    /// The consoles keep their bytes: a restore would put back the empty logs
+    /// the machine was built with, and a boot log that lost everything before
+    /// the reset would be a worse record than one that has both boots in it.
+    pub fn reboot(&mut self, strap: Strap) -> bool {
+        let Some(power_on) = self.power_on.clone() else {
+            return false;
+        };
+        let (uart0, usb_sj, tried) = (
+            self.uart0_log.bytes(),
+            self.usb_sj_log.bytes(),
+            self.usb_sj_tried_log.bytes(),
+        );
+        self.restore(&power_on);
+        self.uart0_log.replace(&uart0);
+        self.usb_sj_log.replace(&usb_sj);
+        self.usb_sj_tried_log.replace(&tried);
+
+        self.strap = strap;
+        self.reset_cause = ResetCause::UsbUartHpSys;
+        let strap_word = loader::strap_word(strap);
+        let cause = self.reset_cause.rom_code();
+        if let Some(i) = self.bus.peripheral_index("GPIO") {
+            self.bus
+                .with_peripheral::<periph::gpio::Gpio, _>(i, |g, _| g.set_strap(strap_word));
+        }
+        if let Some(i) = self.bus.peripheral_index("LP_CLKRST") {
+            self.bus.with_peripheral::<lp_emu_esp_common::RegFile, _>(i, |r, _| {
+                r.poke(LP_CLKRST_RESET_CAUSE, cause)
+            });
+        }
+        // The cache MMU is shared state outside the snapshot, like the flash
+        // part — but unlike the part it is *inside* the chip, so a reset
+        // clears it. The ROM's `Cache_MMU_Init` would rewrite every entry
+        // anyway; doing it here is what makes the two statements agree.
+        {
+            let mut mmu = self.cache.lock().unwrap();
+            for index in 0..crate::cache::ENTRIES as u32 {
+                mmu.set_entry(index, 0);
+            }
+            mmu.take_dirty();
+        }
+        self.reboots += 1;
+        true
     }
 
     pub fn rom(&self) -> &ElfImage {
@@ -2246,6 +2357,13 @@ impl Esp32C6Machine {
             if let Some(lp_emu_esp_common::MachineRequest::Reset { source, at, strap }) =
                 self.bus.take_request()
             {
+                if self.reboot_on_reset && self.reboot(strap) {
+                    log::info!(
+                        "machine: {source} at cycle {at} — rebooting into strap {strap}"
+                    );
+                    matched = [0usize; 2];
+                    continue;
+                }
                 return Outcome::Reset {
                     cycle: at,
                     source,

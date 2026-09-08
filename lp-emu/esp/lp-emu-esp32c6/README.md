@@ -79,7 +79,7 @@ whatever booted it: `rtc_get_reset_reason` from `__pre_init` *before `.bss` is
 zeroed*, `ets_delay_us` from every clock path, `memcpy` and the `str*` family
 because the linker resolves them there. So the ROM image is part of the memory
 map, not an extra for a ROM-up boot. What is optional is running the boot
-chain from reset, which is M7.
+chain from reset, which is `--merged` (below).
 
 The image is vendored at `../roms/` with its licence and checksums; a unit
 test re-derives the sha256 in-process, so a corrupted or swapped ROM fails the
@@ -168,8 +168,10 @@ left at the architectural reset value would idle in `wfi` forever.
 The file also carries a written-down list of the seven things direct load does
 **not** reproduce — the partition table, the MMU page table's *provenance*,
 the ROM's console globals, the `rst:0x1 (POWERON)` banner, early RNG entropy,
-real eFuse, and the derived reset cause. That list is the seed for M7's
-cross-check, and it is worth more than the code around it.
+real eFuse, and the derived reset cause. That list was the seed for the
+ROM-up cross-check, and it is worth more than the code around it. (It was
+also not complete: the ROM's **own** data image is an eighth item, and only a
+boot that runs `_init` could have found it — see below.)
 
 Two of those seven the loader now does, because M4's firmware asks the flash
 *chip* questions and the two halves of the address space have to describe one
@@ -180,8 +182,9 @@ board:
   partition's offset plus the offset into the window, which is a whole number
   of 64 KiB pages, so the cache MMU's `paddr % page == vaddr % page` holds —
   and programs the page table for them. It is **not** an `esptool` image
-  layout; M7 boots a real merged image through the real bootloader and gets
-  the real offsets, and this is one of the things that cross-check checks.
+  layout; a ROM-up boot reads a real merged image through the real bootloader
+  and gets the real offsets, and `tests/rom_up_boot.rs` checks that the two
+  agree.
 - **`seed_rom_flash_chip`** writes the chip size into
   `rom_spiflash_legacy_data->chip_size`, in place of the bootloader's
   `esp_rom_spiflash_config_param`. The ROM's own default chip is **2 MiB**
@@ -189,6 +192,63 @@ board:
   refuses any read past `chip_size`, and `lpfs` starts at `0x0031_0000` —
   so without this every filesystem read returns error 1 for a reason that has
   nothing to do with the filesystem.
+
+## Booting from the reset vector
+
+`--merged <chip.bin>` places **nothing**. The whole 4 MiB flash part goes
+into the chip — the ESP-IDF second-stage bootloader at `0x0`, the partition
+table at `0x8000`, the app in `factory`, the layout `espflash save-image
+--merge` writes (`scripts/emu/build-merged-image.sh`) — the hart starts at
+the mask ROM's reset vector, and the ROM and the bootloader do the rest for
+real, out of flash.
+
+```console
+$ lp-emu-esp32c6 --merged target/emu-ref/…/merged.bin \
+      --reset-cause usb-uart --strap app --uart0 stdout --timeout 400ms
+ESP-ROM:esp32c6-20220919
+Build:Sep 19 2022
+rst:0x15 (USB_UART_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:2
+load:0x4086c410,len:0xd48
+…
+I (441) boot: Loaded app from partition at offset 0x10000
+I (451) boot: Disabling RNG early entropy source...
+[INIT] Initializing board...
+```
+
+Two flags decide the banner, and both are inputs rather than choices:
+`--reset-cause` seeds `LP_CLKRST.reset_cause`, which the ROM prints as
+`rst:0x..`, and `--strap` seeds `GPIO.strap`, which it prints **verbatim** as
+`boot:0x..` and uses to choose between the flash bootloader and its own
+download console. `0x15` and `0x1e` are what the committed silicon
+`boot-idle-flash` transcript recorded; `--strap download` is `0x1e` with the
+one bit the ROM's decode tests cleared, and reaches `waiting for download`.
+
+An `--elf` given with `--merged` is never loaded: it is the symbol table
+`--probe` and `--break-at` read, and the reference the cross-check compares
+against.
+
+Three things the direct path never needed:
+
+- **The ROM's own data image** (`rom::seed_data_image`). `_init` copies 37
+  `{dst, dst_end, src}` triples, and every `src` is past the last byte of the
+  last `PT_LOAD` — the ELF holds the *result* of that copy as non-allocated
+  sections and not the mask ROM bytes it copies from. The image is derived
+  from the two and written back, so the ROM's loop copies what the ELF says.
+  Without it the loop writes zeros and the console dies at
+  `ets_ops_table_ptr`.
+- **`Bus::take_yield`.** The bootloader programs a cache-MMU entry and reads
+  through the window a dozen instructions later, in the same slice. SPI0's
+  entry write calls `BusCx::yield_to_machine`, the hart ends the slice, and
+  the machine refills the window before the guest runs again.
+- **`periph::sha`.** The bootloader hashes the image before it loads it, so
+  this is the one block that has to compute rather than remember.
+
+`tests/rom_up_boot.rs` is the gate: the boot log line for line against
+silicon, 2.4 MB of app segments byte-equal between the two paths, DD40's
+flash offsets and chip-size word, the download strap, and a first heartbeat
+that is byte-identical whichever way the app arrived.
 
 ## Flash, and the cache window
 

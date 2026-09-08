@@ -428,6 +428,138 @@ fn rom_up_and_direct_load_agree_on_what_the_app_sees() {
     );
 }
 
+/// G7-4: what the app reports after booting itself is what it reports after
+/// being placed — and what silicon reports.
+///
+/// DD50 named an 8 B block silicon's heap has and this machine's does not,
+/// constant across boot counts, commits and links, and told M7 not to
+/// "find" it by accident: *if the ROM-up path changes the idle heap by
+/// exactly 8 B, that is the finding of the plan.* It does not. The ROM-up
+/// boot's first heartbeat is **byte-identical** to direct load's, so the
+/// second-stage bootloader leaves nothing behind that the allocator sees,
+/// and the gap to silicon is the same 8 B it was — neither closed nor
+/// widened, and therefore still DD50's to answer with a power-on capture.
+#[test]
+#[ignore = "needs a fw-esp32c6 build; `just test-emu-c6`"]
+fn the_heap_ledger_is_the_same_whichever_way_the_app_arrived() {
+    let elf = match reference_image(&IMAGE) {
+        Ok(p) => p,
+        Err(reason) => {
+            skip_notice("the_heap_ledger_is_the_same_whichever_way_the_app_arrived", &reason);
+            return;
+        }
+    };
+    let merged = merged_image(&IMAGE).expect("the merged image");
+    let len = std::fs::metadata(&merged).unwrap().len() as u32;
+    // The first heartbeat is at 5 s.
+    let stop = StopCondition::after_micros(6_000_000).exit_on(STACK_LINE);
+
+    let mut rom_up = Esp32C6Builder::new()
+        .boot_mode(BootMode::RomUp)
+        .flash(lp_emu_esp32c6::flash::FlashBacking::Copy(merged.clone()))
+        .flash_len(len)
+        .reset_cause(ResetCause::UsbUartHpSys)
+        .strap(Strap::App)
+        .uart0(Uart0Sink::Memory)
+        .usb_host(lp_emu_esp32c6::machine::UsbHost::Attached { draining: true })
+        .build()
+        .expect("the ROM-up machine builds");
+    assert!(
+        matches!(rom_up.run_until(&stop), Outcome::ExitMatched { .. }),
+        "the ROM-up boot never heartbeated"
+    );
+
+    let mut direct = Esp32C6Builder::new()
+        .app(AppSource::Path(elf))
+        .flash(lp_emu_esp32c6::flash::FlashBacking::Copy(merged))
+        .flash_len(len)
+        .uart0(Uart0Sink::Memory)
+        .usb_host(lp_emu_esp32c6::machine::UsbHost::Attached { draining: true })
+        .build()
+        .expect("the direct machine builds");
+    assert!(
+        matches!(direct.run_until(&stop), Outcome::ExitMatched { .. }),
+        "the direct boot never heartbeated"
+    );
+
+    let ours = memory_object(&String::from_utf8_lossy(&rom_up.usb_sj().bytes()));
+    let theirs = memory_object(&String::from_utf8_lossy(&direct.usb_sj().bytes()));
+    assert_eq!(
+        ours, theirs,
+        "the ROM-up path moved the idle heap; DD50 says report the allocation, never pass"
+    );
+    assert_eq!(
+        ours, EMULATOR_MEMORY,
+        "the idle heap moved from what M6 P5 pinned"
+    );
+
+    // The stack high-water is exact here, not a band: this figure is
+    // silicon's own, and both boot paths land on it.
+    for (name, m) in [("rom-up", &rom_up), ("direct", &direct)] {
+        let log = String::from_utf8_lossy(&m.usb_sj().bytes()).into_owned();
+        let line = log
+            .lines()
+            .find(|l| l.contains(STACK_LINE))
+            .unwrap_or_else(|| panic!("{name} has no stack heartbeat"));
+        assert!(line.contains(SILICON_STACK), "{name}: {line}");
+    }
+
+    // And silicon's own figures, from the committed transcript, with the
+    // residual named rather than masked.
+    let (path, silicon_text) =
+        lp_emu_esp32c6::test_support::transcript("boot-idle-flash", "silicon-esp32c6-")
+            .expect("the committed silicon transcript");
+    let silicon = memory_object(&silicon_text);
+    assert_eq!(
+        silicon, SILICON_MEMORY,
+        "the transcript at {} is not the one this gate was written against",
+        path.display()
+    );
+    assert_eq!(
+        field(&ours, "freeBytes") - field(&silicon, "freeBytes"),
+        8,
+        "DD50's 8 B, in the direction it has always had"
+    );
+    assert_eq!(field(&silicon, "usedBytes") - field(&ours, "usedBytes"), 8);
+    assert_eq!(field(&ours, "totalBytes"), field(&silicon, "totalBytes"));
+}
+
+/// The sentinel the firmware's per-heartbeat stack line starts with.
+const STACK_LINE: &str = "[stack] heartbeat: high-water ";
+/// Silicon's own first-heartbeat stack figure for this image, exactly.
+const SILICON_STACK: &str = "high-water 11908 B of 71512 B";
+/// The first heartbeat's heap on this machine, both boot paths.
+const EMULATOR_MEMORY: &str =
+    r#"{"freeBytes":265104,"usedBytes":60432,"totalBytes":325536,"largestFreeBlock":198876}"#;
+/// Silicon's, from the committed `boot-idle-flash` transcript.
+const SILICON_MEMORY: &str =
+    r#"{"freeBytes":265096,"usedBytes":60440,"totalBytes":325536,"largestFreeBlock":198886}"#;
+
+/// The first `"memory":{…}` object in a log.
+fn memory_object(log: &str) -> String {
+    let at = log
+        .find(r#""memory":{"#)
+        .unwrap_or_else(|| panic!("no heartbeat memory object in:\n{log}"));
+    let start = at + r#""memory":"#.len();
+    let end = log[start..]
+        .find('}')
+        .unwrap_or_else(|| panic!("unterminated memory object"));
+    log[start..start + end + 1].to_string()
+}
+
+/// One `"name":<number>` out of a memory object.
+fn field(object: &str, name: &str) -> i64 {
+    let key = format!("\"{name}\":");
+    let at = object
+        .find(&key)
+        .unwrap_or_else(|| panic!("{object} has no {name}"));
+    let rest = &object[at + key.len()..];
+    let end = rest
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(rest.len());
+    rest[..end].parse().expect("a number")
+}
+
 /// G7-3: the download strap reaches the mask ROM's own console.
 #[test]
 #[ignore = "needs a fw-esp32c6 build; `just test-emu-c6`"]
@@ -459,6 +591,77 @@ fn the_download_strap_reaches_the_roms_console() {
     );
     // Nothing was loaded: the ROM never opened the image at 0x0.
     assert!(run.machine.app_segments().is_empty());
+}
+
+/// G7-5: the host's reset dance reboots a running application into the ROM's
+/// download console (DD50's second item).
+///
+/// M6 could only *report* a reset request — there was no boot chain to
+/// reboot into, so `MachineRequest::Reset` ended the run with exit 2 and the
+/// strap named. There is one now. The exit-2 behaviour stays the default,
+/// because three merged M6 scenarios read it as their evidence; a run that
+/// wants the real thing asks with `reboot_on_reset`.
+#[test]
+#[ignore = "needs a fw-esp32c6 build; `just test-emu-c6`"]
+fn a_reset_request_reboots_the_running_app_into_the_download_console() {
+    let merged = match merged_image(&IMAGE) {
+        Ok(p) => p,
+        Err(reason) => {
+            skip_notice(
+                "a_reset_request_reboots_the_running_app_into_the_download_console",
+                &reason,
+            );
+            return;
+        }
+    };
+    let len = std::fs::metadata(&merged).unwrap().len() as u32;
+    let mut m = Esp32C6Builder::new()
+        .boot_mode(BootMode::RomUp)
+        .flash(lp_emu_esp32c6::flash::FlashBacking::Copy(merged))
+        .flash_len(len)
+        .reset_cause(ResetCause::UsbUartHpSys)
+        .strap(Strap::App)
+        .reboot_on_reset(true)
+        .uart0(Uart0Sink::Memory)
+        .usb_host(lp_emu_esp32c6::machine::UsbHost::Attached { draining: true })
+        // The dance, well past `[INIT] fw-esp32 initialized`, so the reset
+        // lands on a running application rather than on the bootloader.
+        .usb_script(vec![(
+            1_200 * 1_000 * lp_emu_esp32c6::memmap::CYCLES_PER_US,
+            lp_emu_esp32c6::control::ControlCommand::DownloadMode,
+        )])
+        .build()
+        .expect("the machine builds");
+
+    let outcome = m.run_until(&StopCondition::after_micros(2_000_000));
+    assert!(
+        matches!(outcome, Outcome::Deadline { .. }),
+        "the run should have carried on past the reset, not ended: {outcome:?}"
+    );
+    assert_eq!(m.reboots(), 1, "one reset request, one reboot");
+    assert_eq!(m.strap(), Strap::Download, "the request named the strap");
+
+    let log = device_lines(&String::from_utf8_lossy(&m.uart0().bytes()));
+    let banners: Vec<&String> = log.iter().filter(|l| l.starts_with(FIRST)).collect();
+    assert_eq!(banners.len(), 2, "two boots in one log:\n{}", log.join("\n"));
+    // The first boot ran the application; the second is the ROM's console.
+    let second = log
+        .iter()
+        .rposition(|l| l.starts_with(FIRST))
+        .expect("the second banner");
+    assert_eq!(
+        &log[second..],
+        &[
+            "ESP-ROM:esp32c6-20220919".to_string(),
+            "Build:Sep 19 2022".to_string(),
+            "rst:0x15 (USB_UART_HPSYS),boot:0x16 (DOWNLOAD(USB/UART0/SDIO_REI_FEO))".to_string(),
+            "waiting for download".to_string(),
+        ]
+    );
+    assert!(
+        log[..second].iter().any(|l| l.contains("Loaded app from partition")),
+        "the first boot loaded the app"
+    );
 }
 
 /// Read `len` bytes out of whichever RAM region holds `address`.

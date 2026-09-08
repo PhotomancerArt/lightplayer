@@ -108,6 +108,21 @@ impl RegFile {
         self
     }
 
+    /// Replace (or add) a read override after construction — a hardware-side
+    /// change, like [`poke`](Self::poke): the C6's strapping pins are
+    /// re-latched by a chip reset, and nothing the guest can do moves them.
+    pub fn set_read_override(&mut self, off: u32, mask: u32, value: u32) {
+        if let Some(e) = self
+            .read_overrides
+            .iter_mut()
+            .find(|e| e.off == off && e.mask == mask)
+        {
+            e.value = value;
+            return;
+        }
+        self.read_overrides.push(MaskEntry { off, mask, value });
+    }
+
     /// "These bits read as 1 exactly when those bits are set."
     ///
     /// The `done` half of a `set the enable, spin until done` pair, where the

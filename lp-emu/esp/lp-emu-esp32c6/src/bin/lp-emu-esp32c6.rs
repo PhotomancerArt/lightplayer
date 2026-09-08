@@ -134,6 +134,13 @@ OPTIONS:
                             host's DTR/RTS dance on the serial bridge (the
                             silicon boot transcripts were captured after one
                             of those) [poweron]
+    --reboot-on-reset       PERFORM a reset request instead of reporting it:
+                            reboot the chip into the strap the request names
+                            (the USB reset dance, the RWDT's stage action) and
+                            carry on. Off by default — three recorded
+                            scenarios read the exit code as their evidence.
+                            Needs a boot chain, so it is only useful with
+                            --merged
     --strap app|download    where the strapping pins were at reset, and so
                             what the ROM prints as `boot:0x..`: the flash
                             bootloader, or the ROM's own download console
@@ -205,6 +212,7 @@ struct Args {
     /// `Option` only because `Args` derives `Default` and a strapping
     /// word has no neutral value; `None` is the app strap.
     strap: Option<lp_emu_esp_common::Strap>,
+    reboot_on_reset: bool,
     seed: u64,
     trace: bool,
     trace_blocks: Vec<String>,
@@ -235,6 +243,7 @@ fn run() -> Result<ExitCode, String> {
         .efuse(args.efuse)
         .reset_cause(args.reset_cause)
         .strap(args.strap.unwrap_or(lp_emu_esp_common::Strap::App))
+        .reboot_on_reset(args.reboot_on_reset)
         .seed(args.seed)
         .uart0(args.uart0.clone())
         .usb_sj(args.usb_sj.clone())
@@ -436,6 +445,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                 args.reset_cause = lp_emu_esp32c6::loader::ResetCause::parse(&text)
                     .ok_or_else(|| format!("--reset-cause `{text}`: expected poweron or usb-uart"))?;
             }
+            "--reboot-on-reset" => args.reboot_on_reset = true,
             "--strap" => {
                 let text = value("--strap")?;
                 args.strap = Some(match text.as_str() {
