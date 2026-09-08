@@ -162,9 +162,14 @@ fn the_host_side_properties_are_not_mirrored_and_that_is_the_point() {
             // over the shipped link, with the pad observed: the same shape as
             // P5's two walks, plus a pin capture.
             "shader-oracle-walk",
+            // M8's recorded ROM-up boot: `boot-idle-flash`'s image and link,
+            // reached from the reset vector. It needs a host for the same
+            // reason `boot-idle-flash` does — the boot log comes out over the
+            // product's own link, and nobody draining it is an empty file.
+            "rom-up-boot",
         ],
-        "the emu-m6 set, M4's flash-backed boot, P5's two walks, M5's chase and M5's oracle \
-         walk drive the host; nothing else"
+        "the emu-m6 set, M4's flash-backed boot, P5's two walks, M5's chase, M5's oracle \
+         walk and M8's ROM-up boot drive the host; nothing else"
     );
 }
 

@@ -749,8 +749,18 @@ build-rv32: install-rv32-target build-rv32-builtins build-fw-esp32c6 build-rv32-
 build-rv32-release: build-rv32
 
 # riscv32: fw-esp32c6 (uses release-esp32 profile: nightly for -Zbuild-std)
-build-fw-esp32c6: install-rv32-target
-    cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6
+#
+# The optional argument is extra features, in the shape `build-fw-esp32s3`
+# takes them. `esp32c6` is always added — it is the chip gate, not an option.
+build-fw-esp32c6 features="": install-rv32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    features="esp32c6"
+    if [[ -n "{{ features }}" ]]; then
+      features="$features,{{ features }}"
+    fi
+    cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} \
+        --profile {{ fw_esp32c6_profile }} --features "$features"
 
 # Build the ESP32-S3 firmware. Xtensa has no upstream Rust target, so this uses
 # Espressif's fork via the crate's own `rust-toolchain.toml` (channel = "esp").
@@ -1027,6 +1037,31 @@ flash-fw-esp32s3 port="" features="": (build-fw-esp32s3 features)
       args+=(--port "{{ port }}")
     fi
     espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
+
+# Flash fw-esp32c6 to a connected ESP32-C6 and open the serial monitor.
+#
+# The S3 recipe above, one chip over, and it exists for the same caller:
+# `scripts/m4-hardware-walk.sh --chip esp32c6` needs one command that builds,
+# flashes and monitors, and owns the partition table and flash size so the
+# walk script duplicates neither. The optional second argument is passed to
+# `build-fw-esp32c6`; the one that matters is `frame-dump`, which makes the
+# board print every transmitted frame, because an LED cannot be diffed against
+# a host render:
+#
+#   just flash-fw-esp32c6 /dev/cu.usbmodemXXXX frame-dump
+#
+# ⚠️ Two C6s on one bus are indistinguishable by port name — both enumerate as
+# `303a:1001` and both come up as `/dev/cu.usbmodem14332xx`. Resolve by MAC
+# first (`scripts/emu/board-port.py A0:F2:62:87:B4:8C`) and pass the port
+# explicitly rather than letting espflash pick.
+flash-fw-esp32c6 port="" features="": (build-fw-esp32c6 features)
+    #!/usr/bin/env bash
+    set -euo pipefail
+    args=(--chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} --monitor --after hard-reset)
+    if [[ -n "{{ port }}" ]]; then
+      args+=(--port "{{ port }}")
+    fi
+    espflash flash "${args[@]}" {{ fw_esp32c6_elf }}
 
 # Run the Xtensa JIT corpus on a connected ESP32-S3 and print PASS/FAIL per case.
 #
@@ -1595,8 +1630,34 @@ heap-budget-check margin_pct="0": install-rv32-target
     scripts/heap-budget-check.sh check {{ margin_pct }}
 
 # Regenerate the heap-budget measured record from the current tree.
+#
+# The `chips` section is carried through untouched — it comes from a different
+# emulator and needs a firmware build. `heap-budget-baseline-chips` is its
+# half.
 heap-budget-baseline: install-rv32-target
     scripts/heap-budget-check.sh baseline
+
+# The heap-budget record's OTHER source: the shipped ESP32-C6 firmware booted
+# whole on `lp-emu-esp32c6`, read from the allocator figures its own first
+# heartbeat reports.
+#
+# `heap-budget-check` measures what a PROJECT costs, on an emulator that has
+# no firmware in it. This measures what the FIRMWARE costs, on the bytes a
+# board is flashed with — and M3 through M7 established that figure byte-equal
+# to silicon on every memory-class value but a constant 8 B, which the record
+# carries beside it. It is what "the heap gates are read from the emulator"
+# means (plan 2026-09-06-1001-esp-emulator, acceptance 8).
+#
+# Separate from `heap-budget-check` because it needs a cross-target firmware
+# build: the required test job must not start one, so `heap-budget-check`
+# prints a named SKIP there and CI's path-gated `emu-c6` job — which builds
+# firmware anyway — runs this, where a skip would be a failure.
+heap-budget-check-chips margin_pct="0": install-rv32-target
+    LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips {{ margin_pct }}
+
+# Re-measure the chip figures into scripts/heap-budget-record.json.
+heap-budget-baseline-chips: install-rv32-target
+    LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips-baseline
 
 # Emit RV32 stack-size metadata for the ESP32 firmware.
 # The direct cargo build can fail at final link on local ESP linker-script setup,
@@ -1750,7 +1811,21 @@ clippy-rv32: install-rv32-target clippy-fw-esp32c6 clippy-fw-esp32c6-harnesses c
 
 # riscv32: fw-esp32c6 clippy
 clippy-fw-esp32c6: install-rv32-target
-    cd lp-fw/fw-esp32c6 && cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6 -- --no-deps -D warnings
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd lp-fw/fw-esp32c6
+    # The app path, default features.
+    cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
+        --features esp32c6 -- --no-deps -D warnings
+    # The app path again with the serial frame readout bolted on. It is `cfg`'d
+    # out of the default build entirely, so linting the defaults leaves it
+    # completely uncovered — the same hole the harness recipe below exists to
+    # close, and the same pass `clippy-fw-esp32s3` makes for the same module.
+    # The C6's walk (and its emulator twin) is only a byte comparison because
+    # this build exists.
+    echo "clippy: --features frame-dump"
+    cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
+        --features esp32c6,frame-dump -- --no-deps -D warnings
 
 # riscv32: every fw-esp32c6 hardware-harness feature (one build per harness).
 #
@@ -2114,6 +2189,32 @@ test-emu-c6:
     cargo test -p lp-emu-validate --test m6_replays
     cargo test -p lp-cli --test validate_registry_parity
     LP_EMU_BUILD_FW=1 cargo test -p lp-cli --test emu_usb_hello -- --include-ignored
+
+# The hardware walk, with the emulator where the board goes.
+#
+# `scripts/m4-hardware-walk.sh --chip esp32c6` asks one question of a board:
+# does the shader it compiled and executed on its own JIT render the bytes a
+# host render produces? This asks it of `lp-emu-esp32c6`, on the same image
+# bytes, over the same wire protocol, against the same oracle — and gets TWO
+# independent answers where a board gives one: the firmware's own `[OUT] dump`
+# line, and the WS281x waveform decoded back off the emulated pad by a decoder
+# that never spoke to the firmware.
+#
+# ROM-up from a merged 4 MiB image by default (the closer twin of flashing and
+# resetting a board); `LP_WALK_BOOT=direct` takes M7's faster direct load,
+# which reaches a byte-equal state at app entry.
+#
+# NOT in `test-emu-c6`: it builds a firmware image, a merged flash image and a
+# release lp-cli, and then runs the machine for eight emulated seconds — it
+# is a walk, and a walk is something you run, not something every PR pays for.
+# What it proves per-tick lives in `tests/shader_oracle_pin.rs`, which does
+# run there. See docs/reports/2026-09-08-esp32c6-emulator-walk.md.
+# `build-rv32-builtins` and not the whole `ci-prereqs`: the host oracle's
+# second engine is `lpvm-native`'s rv32 code generator, which renders black
+# without its builtins image — and a black host frame is not an oracle. The
+# Xtensa half of `ci-prereqs` has nothing to do with this chip.
+walk-esp32c6-emu *args: install-rv32-target build-rv32-builtins
+    scripts/emu/m4-walk.sh {{ args }}
 
 # Run one image on the C6 machine — the human front door.
 #

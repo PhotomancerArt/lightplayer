@@ -130,6 +130,26 @@ pub const ALL_CHECKS: &[FwCheckConfig] = &[
         emits_header: false,
     },
     FwCheckConfig {
+        check: FwCheck::RomUpBoot,
+        display_name: "Reset vector to the idle loop, through the real ROM",
+        // The same image bytes as `boot-idle-flash`, reached the other way:
+        // on an emulated configuration the machine is handed the whole
+        // merged flash part and starts at the reset vector, so the mask ROM
+        // and the ESP-IDF second-stage bootloader do the loading (M7). The
+        // image is identical, which is why the feature list is; what differs
+        // is entirely on the runner's side.
+        //
+        // Every silicon boot is already a ROM-up boot, so silicon's capture
+        // of this IS `boot-idle-flash`'s — the host-side payload says so and
+        // refuses a silicon run rather than recording one sitting twice.
+        firmware_features: &["server", "radio"],
+        done_marker: Some("[stack] heartbeat: high-water"),
+        trace_slug: "rom-up-boot",
+        supported_targets: ESP32_ONLY,
+        emits_records: false,
+        emits_header: false,
+    },
+    FwCheckConfig {
         check: FwCheck::UploadWalk,
         display_name: "Project upload walk (examples/basic)",
         // The same flash-backed product image as `boot-idle-flash`, with a

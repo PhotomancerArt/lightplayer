@@ -940,6 +940,18 @@ jobs:
       - name: Emulator C6 boot tests + replays
         run: cd lp2025 && just test-emu-c6
 
+      # The heap-budget record's chip half: the shipped image booted whole,
+      # read from the allocator figures its own first heartbeat reports
+      # (docs/heap-budget-gate.md, "The second source"). It lives HERE and not
+      # in the required `Validate (x64)` job because it needs a cross-target
+      # firmware build — which this job has already done by now, so the step
+      # costs one emulator run and nothing else. `heap-budget-check` in the
+      # required job prints a named SKIP for the same reason; a skip here
+      # would be a failure, and the recipe sets LP_EMU_BUILD_FW=1 so it cannot
+      # happen quietly.
+      - name: Heap budget ratchet — the C6's own ledger
+        run: cd lp2025 && just heap-budget-check-chips
+
       - name: sccache stats
         if: always()
         shell: bash

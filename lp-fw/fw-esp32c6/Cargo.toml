@@ -58,6 +58,29 @@ naga = ["lpa-server/naga"]
 #   cargo build --profile release-esp32 --features esp32c6,server,ws281x_telemetry
 ws281x_telemetry = []
 
+# Serial readout of every transmitted WS281x frame — OFF by default.
+#
+# `lp-fw/fw-esp32s3`'s feature of the same name, its module ported body for
+# body (the classic's `fw-esp32v3` is the same port, one chip earlier). The
+# emitted line shapes — `[OUT] open`, `[OUT] dump … rgb=`, `[OUT] frame= …
+# crc=` — are IDENTICAL on all three chips on purpose, because
+# `scripts/m4-hardware-walk.sh` and `lp-app/lpa-server/tests/
+# shader_oracle_frame.rs` parse them with no per-chip branch;
+# `lp-fw/fw-tests/tests/frame_dump_parity.rs` fails if a copy drifts.
+#
+# The C6 gained it last, for the emulator plan's walk twin: `lp-emu-esp32c6`
+# already decodes the WS281x waveform off the emulated pad, but both readings
+# of that pad are ours, and this line is the firmware's own independent record
+# of the bytes it handed the driver. The walk reads both on one run.
+#
+# It decorates the app path rather than replacing it, so a frame-dump build is
+# the real firmware plus a transcript, not a harness. Every hunk is `cfg`'d
+# out of a default build — no formatter, no checksum, not even the counter —
+# so `just fw-esp32c6-size-check` measures an unchanged image.
+#
+#   cargo build --profile release-esp32 --features esp32c6,server,radio,frame-dump
+frame-dump = []
+
 # P4 stress-matrix load generators (plan 2026-08-01-1459-rmt-priority-hli) —
 # OFF by default, never shipped. Each spawns a continuous radio-load task
 # beside the running server, replacing the ESP-NOW radio driver registration

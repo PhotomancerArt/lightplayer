@@ -344,27 +344,44 @@ the vendored C6 ROM with M3 P4; the boot peripheral set with P5; UART0, the
 host-absent USB-Serial-JTAG and the radio window with P6, which is where the
 shipped image first said hello.
 
-**M3 is closed by P7**: `lp-emu:esp32c6:t1` and `:t2` are runnable
-configurations, and the milestone's gates are committed transcripts under
-`transcripts/esp32c6/` that `cargo test` replays — the compile harness
-byte-equal to silicon in the memory class, and the shipped image's boot to its
-idle heartbeat. Everything the machine claims is graded `modeled`, with the
-byte-equality recorded as evidence in the reason rather than as a promotion.
+**Plan one is closed by M8.** `lp-emu:esp32c6:t1` and `:t2` are runnable
+configurations, and every claim is a committed transcript under
+`transcripts/esp32c6/` that `cargo test` replays. Milestone by milestone: M3
+brought the machine up to the shipped image's hello; M4 gave it SPI1 flash and
+the MMU windows, and with them a project upload transcript-identical to
+silicon's; M5 gave it RMT and a WS281x decoder, so a frame can be read back off
+a pad; M6 made the USB-Serial-JTAG honest, so the shipped image serves over the
+link it ships with; M7 booted it from the reset vector through the real mask
+ROM and the ESP-IDF bootloader; M8 put the hardware walk on it.
+
+Everything the machine claims is graded `modeled`, with byte-equality recorded
+as evidence in the reason rather than as a promotion. Promoting a class to
+`measured` needs an instrument, not another agreement between two of our own
+models.
 
 ```bash
-cargo run -p lp-cli -- validate list          # three configurations, all available
+cargo run -p lp-cli -- validate list          # the configurations
+lp-cli emu run --merged <chip.bin> --link 127.0.0.1:5591 --monitor   # a C6 to talk to
+just walk-esp32c6-emu                         # THE WALK — the hardware walk's twin
 just test-emu-c6                              # the machine's gates + the replays
-just emu-c6 <elf> --strict-bus --timeout 6s   # one image, by hand
+just heap-budget-check-chips                  # the firmware's own heap ledger
+just emu-c6 <elf> --strict-bus --timeout 6s   # the workshop binary
 ```
 
 `just test-emu-c6` runs in CI as the path-gated `Emulator C6 (x64)` job
-(`.github/workflows/pre-merge.yml`), gated on changes under `lp-emu/**` or
-`lp-fw/fw-esp32c6/**` (see the `emu_c6` filter in that workflow's
-`detect-changes` job).
+(`.github/workflows/pre-merge.yml`), gated on changes under `lp-emu/**`,
+`lp-fw/fw-esp32c6/**` or `scripts/emu/**` (see the `emu_c6` filter in that
+workflow's `detect-changes` job). The walk is not in it: it builds a firmware
+image, a merged flash image and a release `lp-cli`, then runs the machine for
+eight emulated seconds. What it proves per-tick is
+`esp/lp-emu-esp32c6/tests/shader_oracle_pin.rs`, which does run there.
 
-Next: M4 (SPI1 flash and the MMU windows — the flash-backed image still stops
-at `SPIN SPI1+0x000 cmd` at 11 ms), M5 (RMT and the WS281x decoder, which is
-what makes a pin claim possible), M6 (the honest USB-Serial-JTAG: the host's
-three states and the control channel that moves between them —
-`esp/README.md` has the protocol), M7 (ROM-up boot, where the boot-log class
-becomes a claim).
+What the emulator does **not** cover — the Chromium USB stack, radio traffic,
+anything analog, RX pins, and any claim about wall-clock time — is listed in
+`docs/reports/2026-09-08-esp32c6-emulator-walk.md`. Read that before quoting a
+number from here.
+
+Next: plan two (the browser shim, vision D16) and plan three (the classic
+ESP32). The interfaces both need are already in place — the machine takes N
+harts, the signal fabric is arch-neutral, and the host streams are byte
+sources with a control channel.

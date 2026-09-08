@@ -252,7 +252,7 @@ cargo run -p lp-cli -- validate record <set> --config <name> --date … --commit
 protocol reviewable before a board is plugged in.
 
 For silicon the runner does not reinvent the port discipline; it shells out to
-`scripts/spike/esp-emu/desk-espflash-step.sh`, which runs espflash in the
+`scripts/emu/desk-espflash-step.sh`, which runs espflash in the
 **foreground** under `script(1)` with a `SIG_DFL` exec shim, polls for the
 payload's sentinel, SIGINTs **that pid only**, and post-checks `lsof`/`pgrep`.
 Every clause there is a sitting that broke.
