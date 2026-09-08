@@ -2091,6 +2091,15 @@ emu-c6 elf *args:
 bench-emu-c6 *args:
     scripts/emu/bench-c6.sh {{ args }}
 
+# PGO recipe for the C6 machine binary (D4): instrumented build, one training
+# run of each reference image, merge, optimized rebuild, then the probe on
+# the result. Opt-in — never a default build or CI step, and the target is
+# met without it. Needs `rustup component add llvm-tools-preview` and
+# `cargo install cargo-binutils`; the script checks both first. See
+# `scripts/emu/pgo-c6.sh` and `lp-emu/README.md`'s Speed section.
+bench-emu-c6-pgo:
+    scripts/emu/pgo-c6.sh
+
 # The C6 machine's browser/phone speed probe: builds the wasip1 module,
 # stages it with the two pinned reference images plus a page and worker
 # under a JS WASI shim, and serves it on the LAN (port from
