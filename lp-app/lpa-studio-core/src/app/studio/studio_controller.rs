@@ -2475,9 +2475,13 @@ impl StudioController {
                         "open this project to choose the hardware it runs on".to_string(),
                     ));
                 }
-                // Desktop is what an absent target has always meant, so it
-                // writes no key: one spelling on disk, and a project that
-                // says nothing is not a project someone forgot to answer.
+                // Desktop is a CHOICE and is written as one (Yona's
+                // ruling, 2026-09-08): `set_target` puts
+                // `lightplayer/desktop` in the manifest, the same value
+                // creation writes. An absent key still reads as Desktop,
+                // so nothing on disk needs rewriting — but a project that
+                // was asked and answered no longer looks like one that was
+                // never asked.
                 let target = crate::app::library::ProjectTarget::from_manifest(target.as_deref());
                 let written = match &target {
                     crate::app::library::ProjectTarget::Desktop => None,
