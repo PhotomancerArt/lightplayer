@@ -118,8 +118,8 @@ wasm_bin="target/wasm32-wasip1/release/lp-emu-esp32c6.wasm"
 images=(
     "harness|LP_EMU_C6_REF_HARNESS|test_shader_compile_incremental,esp32c6,spike_uart0_link|5s|[inc-shader-compile] === DONE ===|d6cfaa205|e8d64eeff"
     "boot-idle-memfs|LP_EMU_C6_REF_BOOT_IDLE_MEMFS|esp32c6,server,radio,spike_uart0_link,memory_fs|3s||d6cfaa205|e8d64eeff"
-    "render-basic|LP_EMU_C6_REF_RENDER_BASIC|esp32c6,server,radio,spike_uart0_link,memory_fs,bench_render_loop|8s|[render-loop] === DONE ===|defd524cd|none"
-    "render-rocaille|LP_EMU_C6_REF_RENDER_ROCAILLE|esp32c6,server,radio,spike_uart0_link,memory_fs,bench_project_rocaille|8s|[render-loop] === DONE ===|defd524cd|none"
+    "render-basic|LP_EMU_C6_REF_RENDER_BASIC|esp32c6,server,radio,spike_uart0_link,memory_fs,bench_render_loop|8s|[render-loop] === DONE ===|8ffc4b325|none"
+    "render-rocaille|LP_EMU_C6_REF_RENDER_ROCAILLE|esp32c6,server,radio,spike_uart0_link,memory_fs,bench_project_rocaille|8s|[render-loop] === DONE ===|8ffc4b325|none"
 )
 
 resolve_image() {
