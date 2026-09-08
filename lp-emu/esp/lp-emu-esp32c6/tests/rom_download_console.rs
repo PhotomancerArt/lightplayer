@@ -132,7 +132,11 @@ fn run(mut m: Esp32C6Machine, micros: u64) -> Esp32C6Machine {
         "{:?}",
         m.bus.first_strict_violation()
     );
-    assert_eq!(m.bus.unmapped_reads() + m.bus.unmapped_writes(), 0, "unmapped");
+    assert_eq!(
+        m.bus.unmapped_reads() + m.bus.unmapped_writes(),
+        0,
+        "unmapped"
+    );
     assert!(m.hooks().is_empty(), "the ROM hook table is not empty");
     assert_eq!(m.hook_calls(), 0);
     // The scope the strict grade actually checked, by name.
@@ -227,8 +231,7 @@ fn a_different_efuse_mac_gives_a_different_read_reg_reply() {
 /// then READ_REG.
 #[test]
 fn the_uart0_console_answers_after_auto_baud_at_115200() {
-    let text =
-        std::fs::read_to_string(script_path("rom-download-sync.uart0")).expect("the script");
+    let text = std::fs::read_to_string(script_path("rom-download-sync.uart0")).expect("the script");
     let script: ScriptedSource = parse_byte_script(&text).expect("the script parses");
     let m = download_console(DESK_MAC)
         .uart0_script(script)

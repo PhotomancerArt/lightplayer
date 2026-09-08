@@ -1429,7 +1429,9 @@ mod tests {
     /// esptool's SYNC, SLIP-framed: the bytes `scripts/rom-download-sync.*`
     /// send.
     fn sync_frame() -> Vec<u8> {
-        let mut f = vec![0xc0, 0x00, 0x08, 0x24, 0, 0, 0, 0, 0, 0x07, 0x07, 0x12, 0x20];
+        let mut f = vec![
+            0xc0, 0x00, 0x08, 0x24, 0, 0, 0, 0, 0, 0x07, 0x07, 0x12, 0x20,
+        ];
         f.extend(std::iter::repeat_n(0x55u8, 32));
         f.push(0xc0);
         assert_eq!(f.len(), 46);
@@ -1470,7 +1472,11 @@ mod tests {
         assert_eq!(sb.read(&mut u, RXD_CNT), 364);
         assert_eq!(sb.read(&mut u, LOWPULSE), 347, "a 0x55's one-bit lows");
         assert_eq!(sb.read(&mut u, HIGHPULSE), 347, "and its one-bit highs");
-        assert_eq!(sb.read(&mut u, POSPULSE), 2 * 347, "rising edges two bits apart");
+        assert_eq!(
+            sb.read(&mut u, POSPULSE),
+            2 * 347,
+            "rising edges two bits apart"
+        );
         assert_eq!(sb.read(&mut u, NEGPULSE), 2 * 347);
         // The ROM's arithmetic on what it read (notes F21): the divisor in
         // sixteenths, then `uart_hal_clk_set_div`.
@@ -1500,7 +1506,11 @@ mod tests {
         u = u.with_host_baud(921_600);
         rom_enables_autobaud(&mut sb, &mut u);
         sb.run_to(&mut u, 1_000_000 + 46 * SYMBOL_115200);
-        assert_eq!(sb.read(&mut u, RXD_CNT), 364, "the edges do not depend on the rate");
+        assert_eq!(
+            sb.read(&mut u, RXD_CNT),
+            364,
+            "the edges do not depend on the rate"
+        );
         assert_eq!(sb.read(&mut u, LOWPULSE), 43);
         assert_eq!(sb.read(&mut u, HIGHPULSE), 43);
         let div16 = ((43 + 43) << 3) + 16;
@@ -1554,7 +1564,10 @@ mod tests {
         let script = ScriptedSource::new().at(1_000_000, b"x");
         let (mut sb, mut u, log) = rig(script);
         let clk_conf = pac(CLK_CONF);
-        assert_eq!(clk_conf & (CLK_CONF_TX_SCLK_EN | CLK_CONF_RX_SCLK_EN), 0x0300_0000);
+        assert_eq!(
+            clk_conf & (CLK_CONF_TX_SCLK_EN | CLK_CONF_RX_SCLK_EN),
+            0x0300_0000
+        );
         // The ROM's `uart_hal_clk_enable` value: both enables, nothing else.
         sb.write(&mut u, CLK_CONF, 0x0300_0000);
         sb.write(&mut u, FIFO, u32::from(b'A'));
