@@ -41,6 +41,7 @@ use crate::app::share::{
 use crate::app::workbench;
 use crate::base::{ToastHost, use_toast_provider};
 use crate::cloud::SharedOpenState;
+use crate::device_hint::DeviceHint;
 use crate::local_store::{self, LocalStoreStatus};
 use crate::router::{self, StudioRoute};
 use crate::unsaved_gate;
@@ -175,13 +176,16 @@ pub fn App() -> Element {
     // A `/p/<uid>` route waiting for that roster (boot, before the store
     // has attached). Resolved by the view loop on the first mounted
     // library; navigation mid-session answers straight from the latch.
-    let pending_project_route = use_hook(|| Rc::new(RefCell::new(None::<PrefixedUid>)));
+    let pending_project_route =
+        use_hook(|| Rc::new(RefCell::new(None::<(PrefixedUid, Option<DeviceHint>)>)));
     use_hook({
         let waiting = Rc::clone(&pending_project_route);
         let boot_route = boot_route.clone();
         move || {
-            if let StudioRoute::Project { uid, .. } = boot_route {
-                *waiting.borrow_mut() = Some(uid);
+            // The BOOT address, hint and all: a reload is a re-derivation
+            // by the same rules, so `?on=` has to survive it (D35).
+            if let StudioRoute::Project { uid, on, .. } = boot_route {
+                *waiting.borrow_mut() = Some((uid, on));
             }
         }
     });
@@ -405,15 +409,17 @@ pub fn App() -> Element {
                     *loop_library_uids.borrow_mut() =
                         Some(home.projects.iter().map(|card| card.uid.clone()).collect());
                 }
-                let waiting = *loop_pending_project.borrow();
-                if let Some(uid) = waiting
+                let waiting = loop_pending_project.borrow().clone();
+                if let Some((uid, on)) = waiting
                     && resolve_project_route(
                         uid,
+                        on,
                         &loop_library_uids,
                         &loop_tx,
                         &loop_pending_route_open,
                         shared_project,
                         route,
+                        loop_toasts,
                     )
                 {
                     *loop_pending_project.borrow_mut() = None;
@@ -548,7 +554,7 @@ pub fn App() -> Element {
                 // lens sync above never reads this rewrite as a move to
                 // some other document and never fights it.
                 let current = route.peek().clone();
-                if let StudioRoute::Project { uid, view, .. } = &current
+                if let StudioRoute::Project { uid, view, on, .. } = &current
                     && next.open_project_uid.as_deref() == Some(uid.to_string().as_str())
                 {
                     let canonical = StudioRoute::Project {
@@ -559,6 +565,10 @@ pub fn App() -> Element {
                             .map(share_link::slugify)
                             .filter(|slug| !slug.is_empty()),
                         view: *view,
+                        // The heal is about the SLUG. The hint the address
+                        // carries is the user's (or the lens sync's) and
+                        // survives it untouched.
+                        on: on.clone(),
                     };
                     if canonical != current {
                         router::replace(&canonical);
@@ -695,7 +705,9 @@ pub fn App() -> Element {
                     // line below says so.
                     nav_leaving.set(true);
                     nav_bridge.tx.send(StudioCommand::Action(teardown));
-                    nav_toasts.say(said);
+                    if let Some(said) = said {
+                        nav_toasts.say(said);
+                    }
                 }
                 NavSessionPlan::Keep => {
                     // This navigation supersedes any teardown still
@@ -708,7 +720,7 @@ pub fn App() -> Element {
             }
             route.set(new_route.clone());
             match &new_route {
-                StudioRoute::Project { uid, .. } => {
+                StudioRoute::Project { uid, on, .. } => {
                     // already the focused document? The uid is the whole
                     // comparison — a stale slug in the pasted link is the
                     // same project, and play is ignored on purpose:
@@ -732,16 +744,18 @@ pub fn App() -> Element {
                     if !already_bound
                         && !resolve_project_route(
                             *uid,
+                            on.clone(),
                             &nav_library_uids,
                             &nav_bridge.tx,
                             &nav_pending_route_open,
                             shared_project,
                             route,
+                            nav_toasts,
                         )
                     {
                         // the library has not mounted yet (a very early
                         // in-app link): hold the intent for the view loop
-                        *nav_pending_project.borrow_mut() = Some(*uid);
+                        *nav_pending_project.borrow_mut() = Some((*uid, on.clone()));
                     }
                 }
                 StudioRoute::Example { slug, .. } => {
@@ -776,11 +790,19 @@ pub fn App() -> Element {
                     }
                 }
                 StudioRoute::Device { uid, .. } => {
-                    // The device route (round-2 M5): attach the editor as a
-                    // lens on the board registered as `uid`. The actor
-                    // owns readiness — a board still identifying holds the
-                    // intent and attaches when it says hello — so this
-                    // dispatch never waits on the roster here.
+                    // The device route is a RESOLVER (D51), and this is
+                    // the whole of it: attach the lens, and the view→URL
+                    // sync above heals the address to the project that
+                    // device is running, plus its `?on=` hint. There is no
+                    // second redirect to write, because the lens's own
+                    // address IS the answer — a board whose project this
+                    // library does not have simply has no project address,
+                    // and the URL is left where the user put it rather
+                    // than being replaced with a guess.
+                    //
+                    // The actor owns readiness — a board still identifying
+                    // holds the intent and attaches when it says hello —
+                    // so this dispatch never waits on the roster here.
                     let already_bound = matches!(
                         &*nav_bound_route.borrow(),
                         Some(StudioRoute::Device { uid: bound, .. }) if bound == uid
@@ -1006,6 +1028,18 @@ pub fn App() -> Element {
         current_route,
         StudioRoute::Project { .. } | StudioRoute::Example { .. }
     ) && !current_route.project_matches_view(&current_view);
+    // …unless the open STOPPED at the mismatch page (D50). Route-framed
+    // like the opening frame is, and for the same reason: the page belongs
+    // to the address that asked for it, so a mismatch left over from
+    // another project's open never renders over this one.
+    let mismatch = current_view
+        .open_mismatch
+        .as_deref()
+        .filter(|mismatch| match &current_route {
+            StudioRoute::Project { uid, .. } => uid.to_string() == mismatch.project_uid,
+            _ => false,
+        })
+        .cloned();
     // Play mode (panel.md P12) is a zoom on the SAME session: the flag only
     // picks what the shell renders, and the toggle only rewrites the URL.
     let project_view = current_route.project_view();
@@ -1235,6 +1269,7 @@ pub fn App() -> Element {
                         running: false,
                         gallery: crate::app::layout::ShellGallery::Projects,
                         opening_frame,
+                        mismatch: mismatch.clone(),
                         play,
                         project_view,
                         workbench_hrefs: workbench_hrefs.clone(),
@@ -1248,6 +1283,7 @@ pub fn App() -> Element {
                         view: current_view,
                         running: false,
                         opening_frame,
+                        mismatch,
                         play,
                         project_view,
                         workbench_hrefs: workbench_hrefs.clone(),
@@ -1280,8 +1316,12 @@ const OPEN_DISCARDS_PROMPT: &str =
 enum NavSessionPlan {
     /// The session (if any) survives this arrival.
     Keep,
-    /// The studio is being left: run `teardown`, then say `said`.
-    Leave { teardown: UiAction, said: String },
+    /// The studio is being left: run `teardown`, then say `said` — when
+    /// there is anything to say. A sim powering off is silent (Q5).
+    Leave {
+        teardown: UiAction,
+        said: Option<String>,
+    },
 }
 
 /// Gather the project popover's live halves (relationship-control P3).
@@ -1497,23 +1537,36 @@ fn session_teardown(session: &UiChromeSessionControl) -> UiAction {
     }
 }
 
-/// The one line a teardown-by-nav leaves behind (ruled copy, R8-4).
+/// The one line a teardown-by-nav leaves behind — or `None` when there is
+/// nothing worth saying.
+///
+/// **A sim powering off says nothing** (Yona at G1, 2026-09-08: "what use
+/// is saying it?"). The power-off itself is unchanged; what went is the
+/// announcement. Under always-a-device the sim is the ordinary case —
+/// every project open starts one and every departure stops one — so the
+/// line fired on almost every navigation to report the thing the person
+/// had just asked for. A notice that names a FAILURE still fires; this one
+/// named a success.
+///
+/// A BOARD is different and keeps its line: "the board keeps running" is
+/// news, because the reasonable fear on leaving the editor is that the
+/// thing on your wall stopped.
 ///
 /// The draft clause is conditional: with nothing unsaved there is no
 /// draft to reassure anyone about, and a promise made on every stop is a
 /// promise nobody reads.
-fn session_stopped_line(session: &UiChromeSessionControl, dirty: bool) -> String {
+fn session_stopped_line(session: &UiChromeSessionControl, dirty: bool) -> Option<String> {
     let stopped = match session.face {
-        lpa_studio_core::DeviceFace::Sim => format!("{} powered off", session.name),
+        lpa_studio_core::DeviceFace::Sim => return None,
         lpa_studio_core::DeviceFace::Wire => {
             format!("Closed {} — the board keeps running", session.name)
         }
     };
-    if dirty {
+    Some(if dirty {
         format!("{stopped} — your edits are saved as a draft")
     } else {
         stopped
-    }
+    })
 }
 
 /// Act on a `/p/<uid>` route, once the library roster can say whether this
@@ -1536,11 +1589,13 @@ fn session_stopped_line(session: &UiChromeSessionControl, dirty: bool) -> String
 /// library has not mounted yet and the caller should hold the intent.
 fn resolve_project_route(
     uid: PrefixedUid,
+    on: Option<DeviceHint>,
     library_uids: &RefCell<Option<BTreeSet<String>>>,
     tx: &CommandSender,
     pending_route_open: &Rc<Cell<bool>>,
     mut shared_project: Signal<router::PendingSharedProject>,
     mut route: Signal<StudioRoute>,
+    mut toasts: crate::base::Toasts,
 ) -> bool {
     let uid_string = uid.to_string();
     let Some(in_library) = library_uids
@@ -1550,17 +1605,85 @@ fn resolve_project_route(
     else {
         return false;
     };
-    if in_library {
-        pending_route_open.set(true);
-        tx.send(StudioCommand::Action(UiAction::from_op(
-            HOME_NODE_ID,
-            HomeOp::OpenPackage { key: uid_string },
-        )));
-    } else {
+    if !in_library {
         shared_project.set(router::PendingSharedProject(Some(uid)));
         route.set(StudioRoute::Home);
+        return true;
     }
+    let resolved = resolve_device_hint(on, &mut toasts);
+    // A hint this build cannot honour is DROPPED from the address bar as
+    // well as from the open (PD14): leaving it there would promise a
+    // device on every reload that the app has already declined once.
+    let current = route.peek().clone();
+    if let Some(dropped) = resolved.dropped_hint_route(&current) {
+        router::replace(&dropped);
+        route.set(dropped);
+    }
+    pending_route_open.set(true);
+    tx.send(StudioCommand::Action(UiAction::from_op(
+        HOME_NODE_ID,
+        resolved.open_op(uid_string),
+    )));
     true
+}
+
+/// What a `?on=` hint asks the actor for, once the edge has said what this
+/// build can actually do about it (PD14).
+enum ResolvedHint {
+    /// No hint, or a hint that resolves to "a sim of this project's
+    /// target": the ordinary open, and the model picks the device (D33).
+    Resolve,
+    /// The hint named an instance. The model looks it up and either opens
+    /// there or stops at the mismatch page (D50).
+    Device(String),
+    /// The hint named something this build has no backing for. The open is
+    /// the ordinary one, and the address loses the hint.
+    Unbacked,
+}
+
+impl ResolvedHint {
+    fn open_op(&self, key: String) -> HomeOp {
+        match self {
+            ResolvedHint::Device(base_mac) => HomeOp::OpenPackageOnDevice {
+                key,
+                base_mac: base_mac.clone(),
+                // Arriving from a URL never authorises a push over a
+                // running project: that is what the page is for.
+                over_running_project: false,
+            },
+            ResolvedHint::Resolve | ResolvedHint::Unbacked => HomeOp::OpenPackage { key },
+        }
+    }
+
+    /// The route this address should become when the hint could not be
+    /// honoured, or `None` when it stands.
+    fn dropped_hint_route(&self, current: &StudioRoute) -> Option<StudioRoute> {
+        matches!(self, ResolvedHint::Unbacked).then(|| current.with_device_hint(None))
+    }
+}
+
+/// The `?on=` hint, as this build can answer it (PD14, Q9).
+///
+/// Two of the four forms have no backing here and say so once rather than
+/// failing silently or pretending: **emu** is the whole of the emulator
+/// roadmap (this plan deliberately ships with no emulator dependency,
+/// D48), and **ws:** is a device over the network, which nothing in this
+/// build speaks. Both fall through to the ordinary open — you asked to run
+/// this project somewhere, and a sim of its target is somewhere — with the
+/// hint dropped so the address stops claiming otherwise.
+fn resolve_device_hint(on: Option<DeviceHint>, toasts: &mut crate::base::Toasts) -> ResolvedHint {
+    match on {
+        None | Some(DeviceHint::Sim) => ResolvedHint::Resolve,
+        Some(DeviceHint::Mac(base_mac)) => ResolvedHint::Device(base_mac),
+        Some(DeviceHint::Emu) => {
+            toasts.say("No emulator in this build — opening on a sim");
+            ResolvedHint::Unbacked
+        }
+        Some(DeviceHint::Ws(_)) => {
+            toasts.say("No network devices in this build — opening on a sim");
+            ResolvedHint::Unbacked
+        }
+    }
 }
 
 /// Consume one pending shared-project intent (P6/P5): fetch the project
@@ -1945,6 +2068,7 @@ mod tests {
             uid: "prj0000000000000000".parse().expect("a project uid"),
             slug: Some("small-dome".to_string()),
             view: router::ProjectView::Workspace,
+            on: None,
         }
     }
 
@@ -1964,8 +2088,30 @@ mod tests {
                 .map(|op| op.action().clone()),
             Some(lpa_studio_core::DeviceAction::Disconnect { .. })
         ));
-        // Nothing unsaved: no draft to promise.
-        assert_eq!(said, "Desktop sim powered off");
+        // A sim powering off says NOTHING (Yona at G1, 2026-09-08): the
+        // power-off happens, the announcement does not.
+        assert_eq!(said, None);
+    }
+
+    /// A BOARD keeps its line, and this is the pair that shows why the
+    /// sim's went: "the board keeps running" is news, "the sim you just
+    /// left stopped" is not.
+    #[test]
+    fn leaving_a_board_lens_still_says_the_board_keeps_running() {
+        let wire = UiChromeSessionControl {
+            face: lpa_studio_core::DeviceFace::Wire,
+            name: "Porch sign".to_string(),
+            ..session()
+        };
+        let NavSessionPlan::Leave { said, .. } =
+            nav_session_plan(Some(&wire), &StudioRoute::Projects, false)
+        else {
+            panic!("a site route must end the session");
+        };
+        assert_eq!(
+            said,
+            Some("Closed Porch sign — the board keeps running".to_string())
+        );
     }
 
     /// Every site section, not just the galleries the old detach arm
@@ -1997,16 +2143,36 @@ mod tests {
     }
 
     /// The draft clause is evidence, not decoration: it appears only when
-    /// there is unsaved work the draft is holding.
+    /// there is unsaved work the draft is holding — and only on a line
+    /// that gets said at all, which after the Q5 ruling means a board's.
     #[test]
     fn the_draft_clause_follows_the_dirty_flag() {
-        let dirty = nav_session_plan(Some(&session()), &StudioRoute::Home, true);
-        let NavSessionPlan::Leave { said, .. } = dirty else {
+        let wire = UiChromeSessionControl {
+            face: lpa_studio_core::DeviceFace::Wire,
+            name: "Porch sign".to_string(),
+            ..session()
+        };
+        let NavSessionPlan::Leave { said, .. } =
+            nav_session_plan(Some(&wire), &StudioRoute::Home, true)
+        else {
             panic!("leaving");
         };
         assert_eq!(
             said,
-            "Desktop sim powered off — your edits are saved as a draft"
+            Some(
+                "Closed Porch sign — the board keeps running — your edits are saved as a draft"
+                    .to_string()
+            )
+        );
+        // …and a clean session says the bare line.
+        let NavSessionPlan::Leave { said, .. } =
+            nav_session_plan(Some(&wire), &StudioRoute::Home, false)
+        else {
+            panic!("leaving");
+        };
+        assert_eq!(
+            said,
+            Some("Closed Porch sign — the board keeps running".to_string())
         );
     }
 

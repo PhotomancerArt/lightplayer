@@ -6,6 +6,7 @@ pub mod project_node_tree;
 pub mod project_pane;
 #[cfg(feature = "stories")]
 pub(crate) mod project_pane_stories;
+pub mod mismatch_page;
 pub mod project_settings_section;
 pub mod project_workspace;
 #[cfg(feature = "stories")]
@@ -14,5 +15,6 @@ pub(crate) mod project_workspace_stories;
 pub use history_list::HistoryList;
 pub use project_node_tree::ProjectNodeTree;
 pub use project_pane::{ProjectChanges, ProjectDetailContent, ProjectDetailSections, ProjectPane};
+pub use mismatch_page::MismatchPage;
 pub use project_settings_section::ProjectSettingsSection;
 pub use project_workspace::ProjectNodeWorkspace;

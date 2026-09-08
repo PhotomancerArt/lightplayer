@@ -1530,21 +1530,64 @@ mod tests {
         assert!(device(ProjectView::Workspace).is_lens());
     }
 
-    /// The device lens binds its device's address, bare (the project comes
-    /// from the board, so no slug decorates it).
+    /// A lens on SILICON binds the PROJECT, with the board named as the
+    /// instance hint (D35/D43/D51). `/device/<uid>` is never emitted; it
+    /// is this healing that makes the device address a resolver.
     #[test]
-    fn a_device_lens_binds_the_device_route() {
+    fn a_lens_on_silicon_binds_the_project_with_the_boards_mac() {
         let view = editor_view(Some(UiLensRuntime::Device {
             uid: "dev000000daqf6dvvqz".to_string(),
             transport: lpa_studio_core::LinkTransport::Serial,
-            project_uid: None,
-        }));
+            project_uid: Some(SHARE_UID.to_string()),
+            base_mac: Some("60:55:f9:0a:0b:0c".to_string()),
+        }))
+        .with_open_project(Some(SHARE_UID.to_string()), Some("porch-sign".to_string()));
         assert_eq!(
             lens_route(&view),
-            Some(StudioRoute::Device {
-                uid: "dev000000daqf6dvvqz".to_string(),
+            Some(StudioRoute::Project {
+                uid: share_uid(),
+                slug: Some("porch-sign".to_string()),
                 view: ProjectView::Workspace,
+                on: Some(DeviceHint::Mac("60:55:f9:0a:0b:0c".to_string())),
             })
+        );
+        assert_eq!(
+            lens_route(&view).map(|route| route.path()),
+            Some(format!("/p/porch-sign-{SHARE_UID}?on=mac:60:55:f9:0a:0b:0c"))
+        );
+    }
+
+    /// A board whose project this library does NOT have is the one lens
+    /// with no honest project address: the URL is left where the user put
+    /// it (the `/device/<uid>` they followed) rather than replaced with a
+    /// guess.
+    #[test]
+    fn a_lens_on_a_foreign_project_binds_nothing() {
+        assert_eq!(
+            lens_route(&editor_view(Some(UiLensRuntime::Device {
+                uid: "dev000000daqf6dvvqz".to_string(),
+                transport: lpa_studio_core::LinkTransport::Serial,
+                project_uid: None,
+                base_mac: Some("60:55:f9:0a:0b:0c".to_string()),
+            }))),
+            None
+        );
+    }
+
+    /// Silicon whose identity has not landed has no instance to name, so
+    /// the address carries no hint — the project is still the address.
+    #[test]
+    fn a_board_with_no_mac_yet_binds_the_project_without_a_hint() {
+        let view = editor_view(Some(UiLensRuntime::Device {
+            uid: "dev000000daqf6dvvqz".to_string(),
+            transport: lpa_studio_core::LinkTransport::Serial,
+            project_uid: Some(SHARE_UID.to_string()),
+            base_mac: None,
+        }))
+        .with_open_project(Some(SHARE_UID.to_string()), Some("porch-sign".to_string()));
+        assert_eq!(
+            lens_route(&view).and_then(|route| route.device_hint().cloned()),
+            None
         );
     }
 
@@ -1578,7 +1621,8 @@ mod tests {
             StudioRoute::Project {
                 uid: share_uid(),
                 slug: Some("zook-dome".to_string()),
-                view: ProjectView::Play
+                view: ProjectView::Play,
+                on: None,
             }
         );
         // …and on the bare-uid form, which a chip link emits before the
@@ -1588,7 +1632,8 @@ mod tests {
             StudioRoute::Project {
                 uid: share_uid(),
                 slug: None,
-                view: ProjectView::Play
+                view: ProjectView::Play,
+                on: None,
             }
         );
         // …and on the device route, where play is the same zoom suffix.
@@ -1614,7 +1659,8 @@ mod tests {
             StudioRoute::Project {
                 uid: share_uid(),
                 slug: Some("zook-dome".to_string()),
-                view: ProjectView::Mapping
+                view: ProjectView::Mapping,
+                on: None,
             }
         );
         assert_eq!(route.path(), format!("/p/zook-dome-{SHARE_UID}/mapping"));
@@ -1673,6 +1719,7 @@ mod tests {
             StudioRoute::Example {
                 slug: "fyeah-sign".to_string(),
                 view: ProjectView::Workspace,
+                on: None,
             }
         );
         assert_eq!(
@@ -1680,6 +1727,7 @@ mod tests {
             StudioRoute::Example {
                 slug: "fyeah-sign".to_string(),
                 view: ProjectView::Play,
+                on: None,
             }
         );
         assert_eq!(
@@ -1695,6 +1743,7 @@ mod tests {
                 uid: share_uid(),
                 slug: Some("fyeah-sign".to_string()),
                 view: ProjectView::Workspace,
+                on: None,
             }
         );
         // depth junk under a slug is an unknown path, not a guess
@@ -1736,6 +1785,7 @@ mod tests {
             uid: "devsim".to_string(),
             transport: lpa_studio_core::LinkTransport::Sim,
             project_uid: Some(SHARE_UID.to_string()),
+            base_mac: None,
         }))
         .with_open_project(Some(SHARE_UID.to_string()), Some("Fyeah Sign".to_string()));
         assert_eq!(
@@ -1744,6 +1794,7 @@ mod tests {
                 uid: share_uid(),
                 slug: Some("Fyeah Sign".to_string()),
                 view: ProjectView::Workspace,
+                on: Some(DeviceHint::Sim),
             }),
             "an ordinary library session binds its project address"
         );
@@ -1753,6 +1804,7 @@ mod tests {
             Some(StudioRoute::Example {
                 slug: "fyeah-sign".to_string(),
                 view: ProjectView::Workspace,
+                on: Some(DeviceHint::Sim),
             }),
             "the transient marker wins over the loaded-project uid"
         );
@@ -1803,6 +1855,7 @@ mod tests {
                 uid: share_uid(),
                 slug: Some("Old-Name".to_string()),
                 view: ProjectView::Workspace,
+                on: None,
             }
         );
         // a bare uid carries no slug at all (not an empty one)
@@ -1812,6 +1865,7 @@ mod tests {
                 uid: share_uid(),
                 slug: None,
                 view: ProjectView::Workspace,
+                on: None,
             }
         );
     }
@@ -1855,6 +1909,7 @@ mod tests {
                 uid: share_uid(),
                 slug: Some("zook-dome".to_string()),
                 view: ProjectView::Workspace,
+                on: None,
             }
         );
         assert_eq!(
@@ -1867,8 +1922,126 @@ mod tests {
                 uid: share_uid(),
                 slug: None,
                 view: ProjectView::Workspace,
+                on: None,
             }
         );
+    }
+
+    // -----------------------------------------------------------------
+    // `?on=` — the device hint (D35/D43)
+    // -----------------------------------------------------------------
+
+    /// The hint parses off the query and is emitted back, on every `/p/`
+    /// arm — including the view suffixes and the bare-uid form.
+    #[test]
+    fn the_device_hint_parses_and_emits_on_every_project_address() {
+        for (path, on) in [
+            (
+                format!("/p/zook-dome-{SHARE_UID}?on=sim"),
+                Some(DeviceHint::Sim),
+            ),
+            (
+                format!("/p/zook-dome-{SHARE_UID}?on=emu"),
+                Some(DeviceHint::Emu),
+            ),
+            (
+                format!("/p/zook-dome-{SHARE_UID}/play?on=mac:60:55:f9:0a:0b:0c"),
+                Some(DeviceHint::Mac("60:55:f9:0a:0b:0c".to_string())),
+            ),
+            (
+                format!("/p/{SHARE_UID}?on=ws:192.168.0.21:1234"),
+                Some(DeviceHint::Ws("192.168.0.21:1234".to_string())),
+            ),
+            // the query is user input: junk is no hint, and the address
+            // opens on the default device
+            (format!("/p/zook-dome-{SHARE_UID}?on=banana"), None),
+            (format!("/p/zook-dome-{SHARE_UID}"), None),
+        ] {
+            let route = StudioRoute::parse(&path);
+            assert_eq!(route.device_hint(), on.as_ref(), "{path:?}");
+            if on.is_some() {
+                assert_eq!(route.path(), path, "{path:?} did not re-emit");
+            }
+        }
+    }
+
+    /// A hint on an example address too — a transient example runs on a
+    /// device like anything else.
+    #[test]
+    fn an_example_address_carries_the_hint() {
+        let route = StudioRoute::parse("/p/fyeah-sign?on=sim");
+        assert_eq!(route.device_hint(), Some(&DeviceHint::Sim));
+        assert_eq!(route.path(), "/p/fyeah-sign?on=sim");
+    }
+
+    /// Only the `/p/` arms read it. A stray `?on=` anywhere else is as
+    /// meaningless as it looks, and is never re-emitted.
+    #[test]
+    fn no_other_route_carries_a_hint() {
+        for path in ["/devices?on=sim", "/device/deva?on=sim", "/docs?on=sim"] {
+            let route = StudioRoute::parse(path);
+            assert_eq!(route.device_hint(), None, "{path:?}");
+            assert!(!route.path().contains("on="), "{path:?}");
+        }
+    }
+
+    /// **The share address is the bare path.** The hint is this tab's
+    /// business — which device is running the project right now — and
+    /// pasting it into somebody else's chat would hand them a device they
+    /// do not have.
+    #[test]
+    fn the_share_path_never_carries_a_hint() {
+        assert_eq!(
+            canonical_share_path("zook-dome", SHARE_UID),
+            format!("/p/zook-dome-{SHARE_UID}")
+        );
+        let hinted = StudioRoute::parse(&format!("/p/zook-dome-{SHARE_UID}?on=sim"));
+        let StudioRoute::Project { uid, slug, .. } = &hinted else {
+            panic!("a project route");
+        };
+        assert_eq!(
+            canonical_share_path(slug.as_deref().unwrap_or_default(), &uid.to_string()),
+            format!("/p/zook-dome-{SHARE_UID}")
+        );
+    }
+
+    /// The hint is ignored by `same_session`, exactly as the slug is: a
+    /// hint being written, healed or dropped is never a navigation to a
+    /// different document.
+    #[test]
+    fn the_hint_never_makes_it_a_different_session() {
+        let bare = StudioRoute::parse(&format!("/p/zook-dome-{SHARE_UID}"));
+        let hinted = StudioRoute::parse(&format!("/p/zook-dome-{SHARE_UID}?on=sim"));
+        let other = StudioRoute::parse(&format!("/p/zook-dome-{SHARE_UID}?on=emu"));
+        assert!(bare.same_session(&hinted));
+        assert!(hinted.same_session(&other));
+        // …and it survives the view zooms, which are suffixes on the one
+        // address
+        assert_eq!(
+            hinted.with_play(true).path(),
+            format!("/p/zook-dome-{SHARE_UID}/play?on=sim")
+        );
+        assert_eq!(hinted.with_device_hint(None).path(), bare.path());
+    }
+
+    /// A route with no hint REMOVES `on` from the query rather than
+    /// leaving it — an absent device the app already gave up on must not
+    /// keep being asked for on every reload. Everything else in the query
+    /// (the capture harness's params) rides through.
+    #[test]
+    fn a_hintless_route_rewrites_the_hint_out_of_the_query() {
+        let bare = StudioRoute::parse(&format!("/p/zook-dome-{SHARE_UID}"));
+        let hinted = StudioRoute::parse(&format!("/p/zook-dome-{SHARE_UID}?on=sim"));
+        assert_eq!(route_search("?on=mac:60:55:f9:0a:0b:0c", &bare), "");
+        assert_eq!(route_search("?on=emu&story-png=1", &bare), "?story-png=1");
+        assert_eq!(route_search("?on=emu", &hinted), "?on=sim");
+        assert_eq!(route_search("", &hinted), "?on=sim");
+        assert_eq!(
+            route_search("?story-png=1", &hinted),
+            "?story-png=1&on=sim"
+        );
+        // the legacy params still go, hint or no hint
+        assert_eq!(route_search("?connect=simulator&on=sim", &hinted), "?on=sim");
     }
 
     /// A stale slug and the canonical one are the SAME session, so the
@@ -1893,6 +2066,7 @@ mod tests {
             uid: share_uid(),
             slug: Some("basic".to_string()),
             view: ProjectView::Workspace,
+            on: None,
         };
         let playing = editing.with_play(true);
         assert_ne!(editing, playing);
@@ -1904,7 +2078,8 @@ mod tests {
         assert!(!playing.same_session(&StudioRoute::Project {
             uid: "prj0000000000000000".parse().expect("a project uid"),
             slug: Some("basic".to_string()),
-            view: ProjectView::Play
+            view: ProjectView::Play,
+            on: None,
         }));
         // non-lens routes have no play zoom and compare by equality
         assert_eq!(StudioRoute::Home.with_play(true), StudioRoute::Home);
@@ -1921,13 +2096,15 @@ mod tests {
             uid: "devsim".to_string(),
             transport: lpa_studio_core::LinkTransport::Sim,
             project_uid: Some(SHARE_UID.to_string()),
+            base_mac: None,
         }))
         .with_open_project(Some(SHARE_UID.to_string()), Some("basic".to_string()));
         assert!(
             StudioRoute::Project {
                 uid: share_uid(),
                 slug: Some("basic".to_string()),
-                view: ProjectView::Play
+                view: ProjectView::Play,
+                on: None,
             }
             .project_matches_view(&view)
         );
@@ -2070,13 +2247,16 @@ mod tests {
     }
 
     /// The lens binds the project route by UID; the open package's slug
-    /// rides along as the address's cosmetic half.
+    /// rides along as the address's cosmetic half, and the sim rides in
+    /// the hint as a KIND — a reload re-resolves, so pinning the instance
+    /// would only make the address fail once the record went away (D43).
     #[test]
     fn lens_on_the_sim_binds_the_project_route_by_uid() {
         let view = editor_view(Some(UiLensRuntime::Device {
             uid: "devsim".to_string(),
             transport: lpa_studio_core::LinkTransport::Sim,
             project_uid: Some(SHARE_UID.to_string()),
+            base_mac: None,
         }))
         .with_open_project(
             Some(SHARE_UID.to_string()),
@@ -2087,12 +2267,13 @@ mod tests {
             Some(StudioRoute::Project {
                 uid: share_uid(),
                 slug: Some("2026-07-09-1421-basic".to_string()),
-                view: ProjectView::Workspace
+                view: ProjectView::Workspace,
+                on: Some(DeviceHint::Sim),
             })
         );
         assert_eq!(
             lens_route(&view).map(|route| route.path()),
-            Some(format!("/p/2026-07-09-1421-basic-{SHARE_UID}"))
+            Some(format!("/p/2026-07-09-1421-basic-{SHARE_UID}?on=sim"))
         );
     }
 
@@ -2107,6 +2288,7 @@ mod tests {
                 uid: "devsim".to_string(),
                 transport: lpa_studio_core::LinkTransport::Sim,
                 project_uid: None,
+                base_mac: None,
             }))),
             None
         );
@@ -2118,6 +2300,7 @@ mod tests {
             uid: "devsim".to_string(),
             transport: lpa_studio_core::LinkTransport::Sim,
             project_uid: Some(SHARE_UID.to_string()),
+            base_mac: None,
         }))
         .with_open_project(
             Some(SHARE_UID.to_string()),
@@ -2130,6 +2313,7 @@ mod tests {
                 uid: share_uid(),
                 slug: slug.map(str::to_string),
                 view: ProjectView::Workspace,
+                on: None,
             };
             assert!(route.project_matches_view(&view), "{slug:?}");
         }
@@ -2137,7 +2321,8 @@ mod tests {
             !StudioRoute::Project {
                 uid: "prj0000000000000000".parse().expect("a project uid"),
                 slug: Some("2026-07-09-1421-basic".to_string()),
-                view: ProjectView::Workspace
+                view: ProjectView::Workspace,
+                on: None,
             }
             .project_matches_view(&view)
         );
