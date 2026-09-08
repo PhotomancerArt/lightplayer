@@ -399,7 +399,6 @@ mod tests {
         let view = build_home_view(None, None, None);
         assert!(!view.library_available);
         assert!(view.projects.is_empty());
-        assert!(view.sim.is_none());
         assert_eq!(view.examples.len(), embedded_examples().len());
         assert!(
             view.examples
@@ -527,7 +526,7 @@ mod tests {
             view.render_text_lines(),
             vec![
                 format!(
-                    "Home: 0 runtimes, 0 projects, {} examples",
+                    "Home: 0 projects, {} examples",
                     embedded_examples().len()
                 ),
                 "  opening prjx".to_string(),

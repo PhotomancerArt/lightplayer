@@ -865,8 +865,8 @@ impl DeviceBench {
     fn lens_device_uid(&self) -> Option<String> {
         self.controller
             .runtime_pool_for_test()
-            .device_session()
-            .and_then(crate::RuntimeSession::device_attachment)
+            .attached_session()
+            .map(crate::RuntimeSession::attachment)
             .map(|attachment| attachment.uid.clone())
     }
 
@@ -937,15 +937,15 @@ fn opening_the_lens_borrows_the_wire_and_the_card_keeps_folding() {
         .expect("the running board opens in the editor");
     assert_eq!(bench.lens_device_uid().as_deref(), Some(uid.as_str()));
     let pool = bench.controller.runtime_pool_for_test();
-    let session = pool.device_session().expect("a device session");
+    let session = pool.attached_session().expect("a device session");
     assert_eq!(
         pool.lens(),
         Some(session.id()),
         "the editor is the lens on it"
     );
     assert!(session.is_connected(), "the wire client is up");
-    assert_eq!(session.kind(), crate::RuntimeKind::Device);
-    let link = session.device_attachment().expect("attachment").link;
+    assert_eq!(session.transport(), crate::LinkTransport::Serial);
+    let link = session.attachment().link;
     assert!(
         bench
             .controller
@@ -1049,7 +1049,7 @@ fn opening_the_lens_reads_the_board_build_for_the_picker_gate() {
 
     bench.open_lens(&uid).expect("opens");
     let pool = bench.controller.runtime_pool_for_test();
-    let session = pool.device_session().expect("a device session");
+    let session = pool.attached_session().expect("a device session");
     let reported = session
         .device_features()
         .expect("the attach read the board's build off the wire");
@@ -1156,8 +1156,8 @@ fn a_card_verb_on_the_lens_device_closes_the_editor_and_then_runs() {
     let link = bench
         .controller
         .runtime_pool_for_test()
-        .device_session()
-        .and_then(crate::RuntimeSession::device_attachment)
+        .attached_session()
+        .map(crate::RuntimeSession::attachment)
         .expect("attachment")
         .link;
 

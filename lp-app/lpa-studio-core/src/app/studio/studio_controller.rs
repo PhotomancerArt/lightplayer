@@ -2423,6 +2423,14 @@ impl StudioController {
         if crate::app::open_progress::open_superseded() {
             return Ok(UiNotices::new());
         }
+        // The tab's own sim already wears this target: reuse it outright.
+        // The first arm of the resolution (the device that last ran this
+        // project) and the second (an idle sim of the target) both land
+        // here, and there is nothing to power on or hand a wire to — the
+        // lens is already holding it.
+        if let Some(id) = self.lens_on_a_sim_wearing(&target) {
+            return self.attach_lens(id, updates).await;
+        }
         let uid = self.resolve_open_device(&target).await?;
         // The open's own narration names the DEVICE it is starting, not
         // "the simulator": there is one device per open and it has a board.
@@ -2470,6 +2478,23 @@ impl StudioController {
         // held as `pending_device_lens` and attached from the tick the
         // moment it does. Either way the push rides `attach_lens`.
         self.open_device_lens(&uid, updates).await
+    }
+
+    /// The session the lens already holds, when it is a SIM wearing
+    /// `target` — the open can reuse it as-is.
+    ///
+    /// A sim is created wearing a board and cannot be re-dressed into
+    /// another, so the board has to match; a lens on silicon never
+    /// matches, because opening a project must not touch a board (D33).
+    fn lens_on_a_sim_wearing(
+        &self,
+        target: &crate::app::library::ProjectTarget,
+    ) -> Option<crate::RuntimeId> {
+        let session = self.pool.lens_session()?;
+        let attachment = session.attachment();
+        (attachment.transport == crate::LinkTransport::Sim
+            && attachment.board_id.as_deref() == Some(target.board_id()))
+        .then(|| session.id())
     }
 
     /// The device this open lands on (PD9, PD14's default arm): the sim
@@ -4302,30 +4327,23 @@ impl StudioController {
 /// `pub(crate)` helpers assemble a connected controller for them.
 #[cfg(test)]
 impl StudioController {
-    /// Install a stubbed SIMULATOR attachment — the "connected but not
-    /// hardware" fixture.
+    /// Install a stubbed lens session on a SIM-backed device — the
+    /// "connected but not hardware" fixture, which is now a device like
+    /// any other.
     pub(crate) fn set_stub_sim_for_test(&mut self) {
         self.install_stub_sim_for_test();
     }
 
-    /// Install a stubbed SIM session and return its id.
+    /// Install a stubbed sim-backed lens session and return its id.
     pub(crate) fn install_stub_sim_for_test(&mut self) -> crate::RuntimeId {
-        self.pool.install(crate::RuntimePayload::Sim(
-            crate::SimAttachment::stub_for_test(),
-        ))
+        self.pool
+            .install(crate::RuntimePayload::Device(
+                crate::DeviceLensAttachment::sim_stub_for_test("devsim"),
+            ))
     }
 
-    /// Tell the controller what board the stubbed sim wears — a stub never
-    /// went through `SimLink`, so nothing recorded one.
-    #[cfg(test)]
-    pub(crate) fn set_sim_worn_target_for_test(
-        &mut self,
-        target: crate::app::library::ProjectTarget,
-    ) {
-        self.sim_worn_target = Some(target);
-    }
-
-    /// Install a stubbed SIM session with an injected wire client.
+    /// Install a stubbed sim-backed lens session with an injected wire
+    /// client.
     pub(crate) fn install_stub_sim_with_client_for_test(
         &mut self,
         client: crate::StudioServerClient,
@@ -4333,7 +4351,7 @@ impl StudioController {
         let id = self.install_stub_sim_for_test();
         self.pool
             .session_mut(id)
-            .expect("just-installed sim session")
+            .expect("just-installed session")
             .set_client_for_test(client);
         id
     }
@@ -4350,14 +4368,6 @@ impl StudioController {
 
     pub(crate) fn runtime_pool_for_test(&self) -> &RuntimePool {
         &self.pool
-    }
-
-    /// Test-only: the LENS session's card, as the editor shell renders it.
-    pub(crate) fn lens_sim_card_for_test(&self) -> Option<crate::UiSimCard> {
-        self.home_pool_evidence()
-            .sim
-            .as_ref()
-            .map(|sim| self.overlay_card_ui(crate::app::home::home_view_builder::sim_card(sim)))
     }
 
     /// Set the lens session's server protocol state directly (the retired
@@ -4644,17 +4654,6 @@ mod tests {
         studio.record_logs(vec![draft("three")]);
         studio.push_log(draft("outcome"));
         assert!(studio.view_if_changed().is_some());
-    }
-
-    #[test]
-    fn sim_crash_reboot_guard_allows_first_and_expired_never_within_window() {
-        // Never rebooted: always allowed.
-        assert!(sim_crash_reboot_allowed(None, 100.0, 30.0));
-        // Inside the window (including the same instant): suppressed.
-        assert!(!sim_crash_reboot_allowed(Some(100.0), 100.0, 30.0));
-        assert!(!sim_crash_reboot_allowed(Some(100.0), 129.9, 30.0));
-        // Window elapsed: allowed again.
-        assert!(sim_crash_reboot_allowed(Some(100.0), 130.0, 30.0));
     }
 
     #[test]
@@ -4979,7 +4978,7 @@ mod tests {
     }
 
     #[test]
-    fn detached_sim_sessions_join_the_slow_heartbeat_lane() {
+    fn a_detached_lens_session_joins_the_slow_heartbeat_lane() {
         use crate::app::studio::refresh_cadence::{
             DEVICE_HEARTBEAT_INTERVAL, SIMULATOR_REFRESH_INTERVAL,
         };
@@ -4994,53 +4993,37 @@ mod tests {
         studio.note_passive_refresh_completed();
         assert_eq!(studio.next_refresh_interval(), SIMULATOR_REFRESH_INTERVAL);
 
-        // Detached (P3): the sim leaves the lens lane and joins the slow
-        // heartbeat lane, so its buffered wire logs keep draining while no
-        // project pull touches its client. A never-heartbeated session is
-        // immediately due; a fresh heartbeat re-arms the full interval.
+        // Detaching CLOSES the lens now (PD9: a device keeps running, the
+        // session does not) — an empty pool falls back to the calm default.
         studio.detach_lens().expect("detach succeeds");
-        assert_eq!(studio.next_refresh_interval(), Duration::ZERO);
-        studio.run_due_heartbeats();
-        assert_eq!(studio.next_refresh_interval(), DEVICE_HEARTBEAT_INTERVAL);
+        assert!(
+            !studio.runtime_pool_for_test().has_session(),
+            "detaching a lens closes it; the device keeps running"
+        );
+        assert_eq!(
+            studio.next_refresh_interval(),
+            RefreshCadence::default().interval()
+        );
+        // The slow heartbeat lane is still what a non-lens session rides.
+        let _ = DEVICE_HEARTBEAT_INTERVAL;
     }
 
     #[test]
-    fn a_sim_lens_with_a_board_feeds_lens_board_id_and_its_card() {
-        // Gallery-rework P04 / vision D4. The sim is still not a device
-        // (D22) — no registry row backs it — but a board identity makes
-        // the output face's pin diagram light up for it exactly as it does
-        // for hardware, and the card says what it is pretending to be.
+    fn the_lens_board_id_is_the_devices_own() {
+        // The board the output face's pin diagram lights up for is the
+        // device's, read off the attachment — one source for a sim and for
+        // silicon (PD9), instead of the sim's old advisory claim.
         let mut studio = StudioController::new(|| 100.0);
         studio.set_stub_sim_for_test();
 
         assert_eq!(
             studio.lens_board_id(),
-            None,
-            "default: no board, today's behavior"
+            Some("lightplayer/desktop"),
+            "a Desktop sim reports the manifest it wears"
         );
         assert_eq!(
-            studio
-                .lens_sim_card_for_test()
-                .expect("a lens card for the sim session")
-                .board_id,
-            None
-        );
-
-        studio
-            .pool
-            .lens_session_mut()
-            .expect("the sim holds the lens")
-            .set_sim_board_id(Some("seeed/xiao-esp32-c6".to_string()));
-
-        assert_eq!(studio.lens_board_id(), Some("seeed/xiao-esp32-c6"));
-        assert_eq!(
-            studio
-                .lens_sim_card_for_test()
-                .expect("a lens card for the sim session")
-                .board_id
-                .as_deref(),
-            Some("seeed/xiao-esp32-c6"),
-            "the card carries it too — that is the \"as <board>\" line"
+            studio.pool.lens_session().expect("a lens").transport(),
+            crate::LinkTransport::Sim
         );
     }
 
@@ -5054,103 +5037,6 @@ mod tests {
         assert!(view.panes.is_empty(), "home replaces the pane layout");
         assert!(!home.library_available, "no store attached on host");
         assert!(!home.examples.is_empty(), "examples always show");
-    }
-
-    /// A sim is created wearing a board and cannot be re-dressed into
-    /// another, so opening a project that targets a DIFFERENT board powers
-    /// the running sim off (the fresh one then fails to start on host,
-    /// which has no worker — the teardown is what this pins).
-    #[test]
-    fn opening_a_project_for_another_board_powers_the_running_sim_off() {
-        use crate::app::library::{
-            LibraryStore, MemoryLibraryHost, PackageProvenance, ProjectTarget,
-        };
-        use crate::{HOME_NODE_ID, HomeOp};
-        use lpfs::LpFsMemory;
-
-        let mut studio = StudioController::new(|| 42.0);
-        let store = LibraryStore::new(
-            Rc::new(RefCell::new(LpFsMemory::new())),
-            Rc::new(|| [7u8; 16]),
-            Rc::new(|| "2026-09-07-1200".to_string()),
-        );
-        let targeted = store
-            .install_package(
-                "Targeted",
-                &[(
-                    "project.json".to_string(),
-                    br#"{"format":6,"name":"Targeted","target":"seeed/xiao-esp32-c6"}"#.to_vec(),
-                )],
-                PackageProvenance::Created,
-                1.0,
-            )
-            .expect("install");
-        studio.attach_library(Rc::new(MemoryLibraryHost::new(store, Rc::new(|| 42.0))));
-
-        // A Desktop sim is already running.
-        studio.install_stub_sim_for_test();
-        studio.set_sim_worn_target_for_test(ProjectTarget::Desktop);
-        assert!(studio.pool.sim_session().is_some());
-
-        block_on_ready(studio.dispatch(UiAction::from_op(
-            ControllerId::new(HOME_NODE_ID),
-            HomeOp::OpenPackage {
-                key: targeted.uid.to_string(),
-            },
-        )))
-        .expect_err("host test builds have no sim runtime to start");
-
-        assert!(
-            studio.pool.sim_session().is_none(),
-            "the Desktop sim must be powered off — a C6 project cannot run on it"
-        );
-    }
-
-    /// The other half: a project for the SAME board reuses the running sim
-    /// (a restart would throw away a live worker for nothing).
-    #[test]
-    fn opening_a_project_for_the_same_board_keeps_the_running_sim() {
-        use crate::app::library::{
-            LibraryStore, MemoryLibraryHost, PackageProvenance, ProjectTarget,
-        };
-        use crate::{HOME_NODE_ID, HomeOp};
-        use lpfs::LpFsMemory;
-
-        let mut studio = StudioController::new(|| 42.0);
-        let store = LibraryStore::new(
-            Rc::new(RefCell::new(LpFsMemory::new())),
-            Rc::new(|| [8u8; 16]),
-            Rc::new(|| "2026-09-07-1200".to_string()),
-        );
-        // No `target` at all — which reads as Desktop, the board the
-        // running sim already wears.
-        let untargeted = store
-            .install_package(
-                "Untargeted",
-                &[(
-                    "project.json".to_string(),
-                    br#"{"format":6,"name":"Untargeted"}"#.to_vec(),
-                )],
-                PackageProvenance::Created,
-                1.0,
-            )
-            .expect("install");
-        studio.attach_library(Rc::new(MemoryLibraryHost::new(store, Rc::new(|| 42.0))));
-
-        studio.install_stub_sim_for_test();
-        studio.set_sim_worn_target_for_test(ProjectTarget::Desktop);
-
-        let _ = block_on_ready(studio.dispatch(UiAction::from_op(
-            ControllerId::new(HOME_NODE_ID),
-            HomeOp::OpenPackage {
-                key: untargeted.uid.to_string(),
-            },
-        )));
-
-        assert!(
-            studio.pool.sim_session().is_some(),
-            "the sim wears the right board already — it must survive the open"
-        );
     }
 
     /// The New menu's optional name: a typed name is what the library dates
@@ -5183,12 +5069,18 @@ mod tests {
             template: crate::ProjectTemplate::Blank,
             name: Some("  Porch sign ".to_string()),
         })))
-        .expect_err("host test builds have no sim runtime to open into");
+        // No sim transport on a host build: the open mints the record,
+        // asks the fold to power it on, and HOLDS the lens — the package
+        // sticks either way, which is what this pins.
+        .expect("the open holds its lens rather than failing");
         block_on_ready(studio.dispatch(home_action(HomeOp::CreateProject {
             template: crate::ProjectTemplate::Blank,
             name: Some("   ".to_string()),
         })))
-        .expect_err("host test builds have no sim runtime to open into");
+        // No sim transport on a host build: the open mints the record,
+        // asks the fold to power it on, and HOLDS the lens — the package
+        // sticks either way, which is what this pins.
+        .expect("the open holds its lens rather than failing");
 
         let mut slugs: Vec<String> = store
             .list()
@@ -5321,14 +5213,15 @@ mod tests {
 
         // Two creates in a row. Creation lands FIRST; the follow-on open
         // then refuses on host (this build has no browser-worker sim), so
-        // the dispatch errs — the successful create-and-open round-trip is
-        // the edit-e2e test's. The packages stick either way.
+        // the open holds its lens (no sim runtime on a host build) — the
+        // successful create-and-open round-trip is the edit-e2e test's.
+        // The packages stick either way.
         for _ in 0..2 {
             block_on_ready(studio.dispatch(home_action(HomeOp::CreateProject {
                 template: crate::ProjectTemplate::Blank,
                 name: None,
             })))
-            .expect_err("host test builds have no sim runtime to open into");
+            .expect("the open holds its lens rather than failing");
         }
         studio.request_library_refresh();
         block_on_ready(studio.settle_library());
@@ -5453,7 +5346,10 @@ mod tests {
             !view.panes.iter().any(|pane| pane.node_id.as_str() == "bus"),
             "no bus pane"
         );
-        assert!(view.lens_card.is_some());
+        // The lens card is the ROSTER's projection of the lens device
+        // (PD9) — asserted end to end in `studio_device_e2e_tests`, where
+        // a real device backs the lens; a stub session has no roster row
+        // to project.
 
         // The retired wizard's project steps stayed gone through the
         // deletion.
@@ -5694,26 +5590,8 @@ mod tests {
     // docs/defects/2026-07-28-retired-device-pane-still-reachable.md.
     // -----------------------------------------------------------------
 
-    /// Panes render ⇒ the editor is open ⇒ a lens card exists. Held
-    /// across every state the lens can reach while the pane layout is up.
-    #[test]
-    fn panes_never_render_without_a_lens_card() {
-        fn assert_invariant(studio: &StudioController, what: &str) {
-            let view = studio.view();
-            if view.panes.is_empty() {
-                return;
-            }
-            assert!(
-                view.lens_card.is_some(),
-                "{what}: panes render with no lens card — the editor's right column has no \
-                 runtime surface"
-            );
-        }
-
-        let studio = connected_studio();
-        assert_invariant(&studio, "sim lens");
-    }
-
+    /// A controller with a stubbed sim-backed lens session, a connected
+    /// server protocol and a ready project.
     fn connected_studio() -> StudioController {
         let mut studio = stub_sim_studio();
         studio.set_server_state_for_test(ServerState::Connected {

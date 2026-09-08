@@ -127,13 +127,13 @@ fn re_dispatching_open_docs_example_resets_on_the_live_sim() {
     drive(studio.dispatch(docs_open_action(DOCS_EXAMPLE))).expect("first open");
     let sim_id = studio
         .runtime_pool_for_test()
-        .sim_session()
+        .attached_session()
         .expect("a sim session")
         .id();
     drive(studio.dispatch(docs_open_action(DOCS_EXAMPLE))).expect("reset open");
 
     let pool = studio.runtime_pool_for_test();
-    let sim = pool.sim_session().expect("still exactly one sim session");
+    let sim = pool.attached_session().expect("still exactly one session");
     assert_eq!(sim.id(), sim_id, "the reset reuses the running session");
     assert!(
         sent_deploy_storage_ids(&sent).len() >= 2,

@@ -3231,14 +3231,18 @@ fn output_face_derives_multi_channel_wires_end_to_end() {
         Some(6),
         "the remainder is what the counted wires left"
     );
+    // PD9: the lens device REPORTS a board, and the stub is a Desktop sim
+    // — so the face lights up the Desktop pin map instead of the old
+    // sim's "no board known". A device that reports none still reads
+    // `None`; that is a fact about the device, not about the harness.
     assert_eq!(
-        face.board, None,
-        "this harness has no device registry — 'no board known' is a normal state"
+        face.board.as_ref().map(|board| board.board_id.as_str()),
+        Some("lightplayer/desktop")
     );
-    assert!(
-        face.ports.iter().all(|channel| channel.gpio.is_none()),
-        "and with no board, no pin resolves"
-    );
+    // The harness's wires name pins the Desktop manifest does not carry,
+    // so none of them resolves — which is the honest answer, not a
+    // missing board.
+    assert!(face.ports.iter().all(|channel| channel.gpio.is_none()));
     assert_eq!(face.input_binding.as_deref(), Some("bus:control.out"));
 
     // The addresses are real: editing a count rides the ordinary slot path

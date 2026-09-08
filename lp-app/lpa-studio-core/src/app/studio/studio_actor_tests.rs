@@ -357,11 +357,11 @@ fn refresh_action() -> UiAction {
     )
 }
 
-/// A recovery-class action (stop the simulator) — preempts everything.
+/// A recovery-class action (close the editor lens) — preempts everything.
 fn recovery_action() -> UiAction {
     UiAction::from_op(
         ControllerId::new(crate::RuntimeOp::NODE_ID),
-        crate::RuntimeOp::StopSimulator,
+        crate::RuntimeOp::CloseDeviceLens,
     )
 }
 

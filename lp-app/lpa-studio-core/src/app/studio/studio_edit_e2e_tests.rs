@@ -266,14 +266,19 @@ fn detach_with_an_edit_in_flight_quiesces_and_loses_nothing() {
         "the queued edit reached the wire (acked) BEFORE the mirror dropped"
     );
 
-    // Nothing lost: re-attach on the surviving session rebuilds the
-    // mirror over the server-side overlay.
+    // Nothing lost: the DEVICE keeps running (PD9 — detaching gives its
+    // wire back, it does not stop it), so a fresh attach on a session over
+    // the same runtime rebuilds the mirror over the server-side overlay.
     let sim_id = actor
         .controller_mut_for_test()
-        .runtime_pool_for_test()
-        .sim_session()
-        .expect("the sim session survives the detach")
-        .id();
+        .install_stub_sim_with_client_for_test(StudioServerClient::from_io_for_test(
+            "in-process",
+            Box::new(InProcessServerIo {
+                server: Rc::clone(&server),
+                inbox: Rc::new(RefCell::new(VecDeque::new())),
+                sent: Rc::clone(&sent),
+            }),
+        ));
     drive(
         actor
             .controller_mut_for_test()
@@ -354,7 +359,7 @@ fn home_open_package_pushes_the_library_head_end_to_end() {
         let bytes = server
             .borrow()
             .base_fs()
-            .read_file("/projects/studio/project.json".as_path())
+            .read_file(format!("{PROJECT_DIR}/project.json").as_path())
             .expect("pushed manifest exists in the runtime");
         String::from_utf8(bytes).expect("utf8 manifest")
     };
@@ -609,7 +614,7 @@ fn renaming_the_open_project_patches_its_name_now_and_its_slug_at_close() {
         let bytes = server
             .borrow()
             .base_fs()
-            .read_file("/projects/studio/project.json".as_path())
+            .read_file(format!("{PROJECT_DIR}/project.json").as_path())
             .expect("pushed manifest exists in the runtime");
         String::from_utf8(bytes).expect("utf8 manifest")
     };
@@ -735,7 +740,7 @@ fn home_create_project_creates_and_opens_a_blank_package_end_to_end() {
         let bytes = server
             .borrow()
             .base_fs()
-            .read_file("/projects/studio/project.json".as_path())
+            .read_file(format!("{PROJECT_DIR}/project.json").as_path())
             .expect("pushed manifest exists in the runtime");
         String::from_utf8(bytes).expect("utf8 manifest")
     };
@@ -879,7 +884,7 @@ fn home_create_project_from_the_1d_template_opens_a_designated_pattern_project()
         let bytes = server
             .borrow()
             .base_fs()
-            .read_file("/projects/studio/project.json".as_path())
+            .read_file(format!("{PROJECT_DIR}/project.json").as_path())
             .expect("pushed manifest exists in the runtime");
         String::from_utf8(bytes).expect("utf8 manifest")
     };
@@ -1023,12 +1028,13 @@ fn save_after_home_open_pulls_the_edit_into_the_library() {
     drive(actor.run_one_batch_for_test());
     let _ = view.try_recv().expect("save emits a snapshot");
 
-    // the runtime committed the edit… (home opens deploy to /projects/studio)
+    // the runtime committed the edit… (an open deploys into the dir the
+    // device says it runs from — PD9: a sim answers that like a board)
     let runtime_fixture: String = String::from_utf8(
         server
             .borrow()
             .base_fs()
-            .read_file("/projects/studio/fixture.json".as_path())
+            .read_file(format!("{PROJECT_DIR}/fixture.json").as_path())
             .expect("runtime fixture.json"),
     )
     .expect("utf8")
