@@ -167,6 +167,12 @@ encoder 21 22 8 cw from 4000 at 4000hz
         assert!(!bytes.is_empty(), "run {run} logged nothing");
         digests.push(format!("{:x}", Sha256::digest(&bytes)));
     }
+    // Printed, not just asserted: the shasum pair is the gate's evidence and
+    // a run that only says "ok" cannot be quoted in a ship report.
+    println!(
+        "G1-3 pin-log sha256 {} / {}; cycles {} / {}",
+        digests[0], digests[1], cycles[0], cycles[1]
+    );
     assert_eq!(
         digests[0], digests[1],
         "G1-3 pin-log sha256 {} / {}",

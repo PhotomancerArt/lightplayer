@@ -89,7 +89,7 @@ the chip's matrix, one layer up. `IrqLines` is chip-wide and per-source,
 `BusCx.hart` says who is asking — which is the whole of plan PD6's
 multi-hart shape until a second hart exists.
 
-### `pins` — the signal fabric (M5 P2)
+### `pins` — the signal fabric (M5 P2, input side M2 P1)
 
 Where a peripheral's output actually goes. A peripheral never sees another
 peripheral, so the RMT block cannot read `GPIO.func_out_sel_cfg[18]` to
@@ -104,7 +104,11 @@ and signals (plan DD34 e):
 - an output peripheral calls `drive(signal, level, at)` and never learns
   whether anyone is listening;
 - the machine drains `take_edges()` every slice and hands the edges to
-  whatever watches the wire — a strip decoder, a raw pin log.
+  whatever watches the wire — a strip decoder, a raw pin log, the chip's own
+  GPIO view;
+- something **outside** the chip holds a level on a pad with
+  `drive_pad(pad, level, at)` / `release_pad(pad, at)`, and `wire(a, b, at)`
+  ties two pads so that whatever one carries the other carries.
 
 **No chip numbers here either.** The fabric does not know that a C6 calls
 signal 71 `RMT_SIG_0` or that 128 means "follow the GPIO output register";
@@ -113,12 +117,38 @@ propagates. An edge is recorded for a pad that has a route, only when its
 level actually changes, so an unrouted signal is invisible — as it is on
 the pin header.
 
-Modelled: the routing, a signal's driven level, a routed pad's level, and
-the cycle it changed. **Not** modelled: input (nothing drives a pad from
-outside), output enable (`oen_sel` and the `enable` bitmap are recorded and
-reported in the chip's trace note, never gated on), drive strength, pulls,
-open-drain, pad filters. A logic analyser on the pin would not show those
-either.
+`pad_level(pad)` is the **resolved** level of the pad — what a scope on the
+pin header would read — and the rule is one paragraph, stated in full in the
+module doc: collect the pad and everything wired to it; an outside driver
+wins over the group's own output, lowest pad number breaking a tie; a routed
+output wins over nothing; a group with neither is unobserved and reads low.
+When the side the driver beat was an *enabled* output and the levels
+disagree, the **conflict** is logged with both levels and the cycle and
+counted in `conflicts()` — and then ignored. **Never gated**: an emulator
+that refused to run because a bench shorted an output would tell you less
+than one that says so and carries on. An edge an outside driver causes goes
+into the same `take_edges()` stream as one a peripheral caused.
+
+`set_pad_input_enable(pad, on)` records a pad's input enable (a chip's
+IO_MUX `fun_ie`). **Recorded, never gated on here**: it does not change what
+`pad_level` answers. The chip's GPIO view reads it back to decide whether to
+serve the pad's bit in its input register, which is where a chip fact
+belongs.
+
+Modelled: the routing, a signal's driven level, a pad's resolved level, the
+cycle it changed, an outside driver, a pad-to-pad wire, and the input enable
+as a recorded bit. **Not** modelled: output enable (`oen_sel` and the
+`enable` bitmap are recorded and reported in the chip's trace note, never
+gated on), drive strength, the *value* of a pull (an undriven pad reads low,
+not "pulled high"), open-drain, pad filters, analog, and the timing of an
+outside edge beyond the cycle the caller stated — no synchroniser, no
+metastability, no propagation delay. A logic analyser on the pin would not
+show those either.
+
+There is no `unwire`. A wire is a bench fact declared before the run, so a
+run is replayable from its flags alone; the method exists and returns an
+error saying so, rather than being a silent no-op for a caller that reached
+for it.
 
 ### `strip` — what was on the wire (M5 P2)
 

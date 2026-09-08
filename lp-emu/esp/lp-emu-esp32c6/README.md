@@ -330,8 +330,8 @@ milestone owns.
 | `I2C_ANA_MST` | `0x600A_F800` | accept | `ana_conf0.cal_done` pinned 1; `i2c_ctrl(0/1).busy` pinned 0; `ana_conf2` reset 0 (master 1) |
 | `LP_I2C_ANA_MST` | `0x600B_2400` | accept | `i2c0_ctrl.I2C0_BUSY` (bit 25) pinned 0 — the bench's fourth spin site |
 | `ASSIST_DEBUG` | `0x600C_2000` | accept | `cpu0.debug_mode` pinned 0 (no debugger: watchpoints arm, `wfi` runs) |
-| `GPIO` | `0x6009_1000` | modelled (M5 P2) | a routing **view** over the bus's signal fabric: `func_out_sel_cfg[n]` routes pad `n` to `out_sel` (128 = follow `GPIO_OUT[n]`, `inv_sel` inverts, `oen_sel` recorded and reported as `oe=`, never gated on), `out`/`out_w1ts`/`out_w1tc` are the output bitmap a `GPIO_OUT` pad follows, `enable`/`w1ts`/`w1tc` the OE bitmap. The `w1ts`/`w1tc` registers fold into `out`/`enable` and read back 0 (write-only in the PAC); `in_` and `pcpu_int` still pinned 0 — nothing drives a pad from outside and no GPIO interrupt is ever pending. Everything else is still a `RegFile`. A pad is **observed once the guest writes its routing**: seeding 31 routes from the `0x80` reset value would give a boot that drives nothing 31 pads to decode. See "The pin" |
-| `IO_MUX` | `0x6009_0000` | accept | all 31 pads at reset `0x0800` |
+| `GPIO` | `0x6009_1000` | modelled (M5 P2) | a routing **view** over the bus's signal fabric: `func_out_sel_cfg[n]` routes pad `n` to `out_sel` (128 = follow `GPIO_OUT[n]`, `inv_sel` inverts, `oen_sel` recorded and reported as `oe=`, never gated on), `out`/`out_w1ts`/`out_w1tc` are the output bitmap a `GPIO_OUT` pad follows, `enable`/`w1ts`/`w1tc` the OE bitmap. The `w1ts`/`w1tc` registers fold into `out`/`enable` and read back 0 (write-only in the PAC). Since M2 P1 it is a **two-way** view: `in_` is each pad's resolved fabric level for the pads whose input enable is set, `pin[n].int_type` is decoded (0 disable / 1 posedge / 2 negedge / 3 any edge / 4 low level / 5 high level, the PAC's own numbering), `status` is the sticky latch with `status_w1ts`/`status_w1tc` over it (write-only, read back 0), `pcpu_int` is `status` gated by `pin[n]` bit 13 (`int_ena` bit 0), and source **30** is held high as a LEVEL while any `pcpu_int` bit is pending. `pcpu_nmi_int` and source 31 are **not** raised (esp-hal never sets `int_ena` bit 14 on this chip); `in1`/`status1`/`pcpu_int1` read 0 — the C6 has 31 pads. Per-register grades (the file header's table; `--strict-grade`): the registers above plus `strap` and `func*_out_sel_cfg` *documented*, everything else *modeled*, nothing *measured* until M2 P2's transcript. Everything else is still a `RegFile`. A pad is **observed once the guest writes its routing**: seeding 31 routes from the `0x80` reset value would give a boot that drives nothing 31 pads to decode. See "The pin" |
+| `IO_MUX` | `0x6009_0000` | modelled (M2 P1) | the P5 accept block, all 31 pads at reset `0x0800`, plus one seam: `gpio[n].fun_ie` (bit 9) is pushed into the signal fabric as the pad's **input enable**, which is what `GPIO.in_` reads back. Everything else in the word — `fun_wpu`/`fun_wpd` (the *value* of a pull is not modelled), `fun_drv`, `filter_en`, the `slp_*` bits and `mcu_sel` — is accept-and-remember |
 | `PMU`, `LP_AON`, `LP_APM`, `LP_APM0`, `HP_APM`, `MODEM_SYSCON`, `MODEM_LPCON`, `APB_SARADC`, `HP_SYS`, `TEE`, `LP_TEE`, `LP_IO`, `LP_TIMER`, `EXTMEM` | — | accept | written by `esp_hal::init`, read back as written; `LP_AON.store1` carries the calibration value |
 | `UART0`, `UART1` | `0x6000_0000/1000` | modelled | 128-byte FIFOs; the shifter drains **at the configured baud in emulated time** (PCR clock line × `clkdiv`; reset `clkdiv = 347 + 3/16` = 115,200 from XTAL, *modeled* "as the ROM boot leaves it"); `rxfifo_full`/`txfifo_empty` as levels (`>`/`<` the `conf1` thresholds, per the TRM), `rxfifo_tout` in bit-times, `tx_done`, `rxfifo_ovf`, `reg_update` pulse; `at_cmd_char_det` never fires (stated, not modelled); sources 43/44. See "UART0 and the outside" |
 | `USB_DEVICE` | `0x6000_F000` | measured on its data path (M6) | the host's side in three states (`--usb-host absent\|attached\|attached-idle`, the transitions for P3's control channel): **absent** — `sof` never, `free` = 0 for ever after the first `wr_done`, nothing arrives; **attached, port closed** — `int_raw.sof` every 1 ms (*documented*), `fram_num` counts, a committed IN packet is held until the port opens; **attached, draining** — the packet reaches the `usb-sj` stream 100 µs after `wr_done` (*modeled*), `free` returns, `serial_in_empty` and `in_token_rec_in_ep1` rise; host bytes land as ≤ 64 B OUT packets, one resident at a time (*modeled*), `avail` + `serial_out_recv_pkt` + `out_ep1_st.wr_addr/rec_data_cnt`. The DTR/RTS dance → `chip_rst` bit 0 + `MachineRequest::Reset { strap }`. Per-register grades (the file header's table; `--strict-grade`): `ep1`, `ep1_conf` and the four `int_*` registers *measured* — four committed transcripts cover them, and the bits they cover are named there — `fram_num` and `conf0` *documented*, the twenty listed below *modeled*. The PCR reset of the block is **not** modelled (stated). Source 48 |
@@ -631,20 +631,63 @@ Flags (`--trace GPIO,RMT` shows the routing and the engine notes):
 At exit each routed pad gets a line on stderr:
 `pin gpio18: 24 frames, 24 complete, 0 errors, 256 leds`.
 
-**What is observed:** the level of a routed pad, and the cycle it changed.
-A pad becomes observed when the guest writes its `func_out_sel_cfg` — the
-memfs boot image routes exactly one, `init_board`'s plain GPIO output on
-gpio16, and no peripheral signal at all.
+**What is observed:** the level of a pad, and the cycle it changed. A pad
+becomes observed when the guest writes its `func_out_sel_cfg` — the memfs
+boot image routes exactly one, `init_board`'s plain GPIO output on gpio16,
+and no peripheral signal at all — **or** when something outside drives it
+(below).
 
-**What is not:** inputs (`in_` reads 0), output enable (`oen_sel` and
-`enable` are recorded and printed in the routing note, never gated on: a
-pad whose OE is low still records its edges), drive strength, pull-ups,
-open-drain, pad filters, and `IO_MUX.mcu_sel` — esp-hal writes `mcu_sel = 1`
-before every route and `IO_MUX` stays an accept block, so a pad routed here
-carries its signal whatever `mcu_sel` says. A word's two pulses reach the
-fabric together at the fetch, each stamped with the cycle it starts, so an
-edge can be recorded up to one word (200 cycles) ahead of the slice
-boundary — a timestamp, never a reordering.
+**What is not:** output enable (`oen_sel` and `enable` are recorded and
+printed in the routing note, never gated on: a pad whose OE is low still
+records its edges), drive strength, the *value* of a pull-up or pull-down
+(an undriven pad reads low, not "pulled high"), open-drain, pad filters,
+input glitch filters, the input synchroniser (`sync1_bypass`/`sync2_bypass`),
+`wakeup_enable`, analog anything, and `IO_MUX.mcu_sel` — esp-hal writes
+`mcu_sel = 1` before every route and only `fun_ie` is read out of `IO_MUX`,
+so a pad routed here carries its signal whatever `mcu_sel` says. A word's
+two pulses reach the fabric together at the fetch, each stamped with the
+cycle it starts, so an edge can be recorded up to one word (200 cycles)
+ahead of the slice boundary — a timestamp, never a reordering.
+
+### The pin, driven from outside (M2 P1)
+
+The fabric has a second side. Something **outside** the chip can hold a
+level on a pad, and two pads can be tied together, so a run can press a
+button, turn an encoder, or loop one pad's output into another's input.
+
+| flag | what it does |
+|---|---|
+| `--pin-script <file>` | scripted pad levels at declared guest times — the deterministic path. Repeatable |
+| `--wire <a>:<b>` | tie two pads before the guest starts: whatever `a` carries, `b` carries. Repeatable, and transitive |
+
+Both are mirrored on `lp-cli emu run`, the way `--pin-log` is.
+
+**The resolution rule** (`lp-emu-esp-common`'s `pins`): collect the pad and
+everything wired to it; if anything in the group has an outside driver the
+group carries that level (lowest pad number wins a disagreement); otherwise
+it carries the group's routed output; otherwise it is unobserved and reads
+low. **An outside driver always wins.** When the side it beat was an
+*enabled* output and the levels disagree, that is a **conflict**: logged
+with both levels and the cycle, counted, and then ignored. Never gated — an
+emulator that refused to run because a bench shorted an output would tell
+you less than one that says so and carries on.
+
+An edge an outside driver causes goes into the **same** stream as one the
+RMT caused, so `--pin-log` and the strip decoders see it with no change.
+
+**The pads a script may not name:** GPIO9 (the BOOT strap), GPIO12/13 (USB
+D−/D+), GPIO16/17 (the UART0 tap) and GPIO18 (the strip). Each is refused
+by name with the reason, at the flag. The one exception is `--wire 18:19` —
+GPIO18 as the **TX** side of a loopback, which is how the chase reaches an
+RX pad without a jumper.
+
+```bash
+# a button on gpio20 with contact bounce, and a quadrature encoder
+lp-emu-esp32c6 --elf fw --pin-script button.pins --pin-log file:pins.log
+
+# the strip pad looped into gpio19
+lp-emu-esp32c6 --elf fw --wire 18:19
+```
 
 The M5 P2 gate (`tests/rmt_chase.rs`): on the chase image the trace carries
 one routing note and it is gpio18's, and every frame the decoder reads off
@@ -789,6 +832,7 @@ lp-emu-esp32c6 --elf <app.elf> [--rom <path>] [--time-grade t1|t2]
     [--usb-sj stderr|memory|file:<path>|tcp:<host:port>] [--usb-sj-drain auto|manual]
     [--usb-sj-tried stderr|memory|file:<path>]
     [--control tcp:<host:port>] [--usb-script <file>]
+    [--pin-script <file>]... [--wire <a>:<b>]...
     [--efuse-mac a0:f2:62:87:b4:8c] [--efuse-rev 0.2] [--seed <u64>]
     [--trace [BLOCK,BLOCK…]] [--trace-file <path>] [--strict-bus]
     [--strict-grade modeled|documented|measured]
@@ -804,6 +848,11 @@ end the run mid-line — which is how M3 P7 first recorded `[stack] heartbeat:
 high-water` with neither of the two figures after it. If the newline never
 arrives the run goes on to its deadline, which is the safe direction: a run
 that ran too long says so, a capture cut in half looks like data.
+
+`--pin-script` and `--wire` are the host's side of the **pads**: a scripted
+button, a quadrature encoder, a pad-to-pad jumper. Both are mirrored on
+`lp-cli emu run`, the way `--pin-log` is; the grammar and the pad policy are
+under "The pin, driven from outside".
 
 `--control`, `--usb-script` and `--usb-sj tcp:` are the host's side of the
 USB link. The protocol — the command table, the replies, the coupling rule,

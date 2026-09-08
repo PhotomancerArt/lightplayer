@@ -138,6 +138,9 @@ cable, not the protocol on it.
 >  reset                    # what the hard-reset dance does: chip_rst + Reset { strap: App }
 >  download-mode            # what the download dance does: Reset { strap: Download }
 >  usb-write <hex bytes>    # host -> device bytes with no byte socket (tests)
+>  pin 20 1                 # a bench driver holds a level on a pad, from outside
+>  pins                     # both sides of every pad, one line
+<  ok pins cyc=160000 us=1000 pads=2 gpio18[route=sig71 ie=0 drv=- lvl=1 wire=gpio19] gpio19[route=- ie=1 drv=- lvl=1 wire=gpio18]
 >  state
 <  ok state cyc=368480001 us=2303000 host=attached draining=true sof=on in_pending=0 out_queued=0
 >  nonsense
@@ -150,7 +153,12 @@ Every reply is one line and begins with `ok` or `err`:
 |---|---|
 | `ok <verb> cyc=<cycle> us=<micros>` | applied, at that guest cycle. `<verb>` is the word the client typed — `dtr`, `rts` or `signals` |
 | `ok state cyc=… us=… host=absent\|attached draining=<bool> sof=on\|off in_pending=<n> out_queued=<n>` | the host's side. `in_pending` is bytes sitting in the IN endpoint that nobody has taken; `out_queued` is host bytes the guest has not read |
-| `err <reason>` | nothing was applied, and the reason says why: an unknown command, a bad argument, `open` with no cable, `close` on a closed port, `reset` while `chip_rst` bit 2 (the guest's own "no chip reset from the serial channel") is set |
+| `ok pins cyc=… us=… pads=<n> gpio<n>[route=… ie=… drv=… lvl=… wire=…] …` | every pad the machine has anything to say about — routed, input-enabled, driven from outside, or tied by a `--wire`. `route` is what the pad's level follows (`gpio-out`, `sig71`, `~sig71` inverted, `-` for none), `ie` its input enable, `drv` the level an outside driver is holding (`-` for none) and `lvl` the resolved level |
+| `err <reason>` | nothing was applied, and the reason says why: an unknown command, a bad argument, `open` with no cable, `close` on a closed port, `reset` while `chip_rst` bit 2 (the guest's own "no chip reset from the serial channel") is set, a `pin` on a pad this run may not drive |
+
+`pin` and `pins` need no USB block: the pads are the bus's, so they work on
+a machine whose only console is UART0. `pin` refuses GPIO9, 12, 13, 16, 17
+and 18 by name, exactly as `--pin-script` does.
 
 A precondition is checked before the model is touched, so a script that has
 drifted out of step says so instead of quietly doing nothing.
@@ -234,18 +242,53 @@ the single framer for every `M!` line in the repository (PR #538) and
 bytes; the runner and `lp-cli/tests/emu_usb_hello.rs` build the frame and
 write the script.
 
+### Scripted input on the pads (`--pin-script`)
+
+The same split, on the other kind of input. `--pin-script <file>` is this
+grammar with `pin <n> <0|1>` where the bytes go — the same `after` / `then`
+forms, the same `#` comments, the same file-order rule — plus two
+**generators**, so a payload does not hand-write forty lines of contact
+bounce:
+
+```text
+1500us  pin 20 0
+after "[INIT] ready" +5ms pin 20 1
+then +2ms pin 20 0
+button 20 press at 1000 bounce 5 edges over 200 hold 10ms
+encoder 21 22 8 cw from 4000 at 4000hz
+```
+
+**The leading number is microseconds here**, not the milliseconds a byte
+script uses: a contact bounce is tens of microseconds and an integer grammar
+should be able to say so. `after`/`then`'s `+<ms>` delays are unchanged, and
+both columns accept an explicit `us` or `ms` suffix. An `after` needle is
+matched against **either** console, because a pin script says nothing about
+which link the payload prints on.
+
+Both generators are deterministic functions of their parameters and the
+exact edge list each produces is in
+`lp-emu-esp32c6/src/pinscript.rs`'s module doc — a `button` rests high
+(a pull-up with a normally-open button to ground: **pressed is low**), an
+`encoder` walks the Gray sequence from `(0, 0)` one channel at a time.
+
 ### Determinism
 
 A **script** is deterministic: its times are guest time, and two runs of one
 script deliver byte-identical bytes at identical cycle counts (gate G3-2).
+The same holds for `--pin-script`: two runs write byte-identical pin logs at
+identical cycle counts (M2 P1's G1-3), and a scripted edge is stamped with
+the *script's* cycle rather than the slice boundary the machine noticed it
+at, so a pin log can be checked against the file that produced it.
 
 A **socket** is not, and cannot be. A client's command is applied at
 whichever slice boundary the poll landed on, which depends on the host's
 clock; the reply says which cycle that was, so a session is at least
-*auditable*. Wall clock still never enters the machine — it changes when a
-run notices the outside, never how fast the run goes. Gates use the scripted
-form; the socket form has one test (`tests/usb_socket.rs`) whose job is to
-prove the plumbing, with wall timeouts as its safety net.
+*auditable*. That is exactly the line between `--pin-script` and the `pin`
+verb, and the two never blur. Wall clock still never enters the machine — it
+changes when a run notices the outside, never how fast the run goes. Gates
+use the scripted form; the socket form has one test
+(`tests/usb_socket.rs`) whose job is to prove the plumbing, with wall
+timeouts as its safety net.
 
 ### What plan two's shim maps onto this
 
