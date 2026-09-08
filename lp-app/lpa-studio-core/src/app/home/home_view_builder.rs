@@ -454,13 +454,30 @@ mod tests {
         assert_eq!(scratch.kind, "Module");
     }
 
-    /// P02: the advisory `target` passes through from the container
-    /// manifest to the card, and stays `None` for an untargeted project
-    /// (the common case — `store.create` writes no `target`).
+    /// The container manifest's `target` passes through to the card.
+    ///
+    /// Two sources, two answers. A project CREATED in this library declares
+    /// **Desktop** since 2026-09-07 (D32/PD17 — every new project states
+    /// its hardware), and one whose manifest names a board carries the
+    /// board. `None` survives only for a manifest that arrived without the
+    /// field — an import, or anything written before targets meant
+    /// anything — and the card badge reads that and Desktop the same way:
+    /// it says nothing (`package_card::target_badge`).
     #[test]
     fn package_cards_carry_advisory_target() {
         let store = store();
         store.create("Untargeted", 1.0).unwrap();
+        store
+            .install_package(
+                "Imported",
+                &[(
+                    "project.json".to_string(),
+                    br#"{"format":4,"name":"Imported"}"#.to_vec(),
+                )],
+                PackageProvenance::ImportedZip { original_uid: None },
+                3.0,
+            )
+            .unwrap();
         store
             .install_package(
                 "Targeted",
@@ -485,12 +502,31 @@ mod tests {
             Some("espressif/esp32-c6-devkitc-1")
         );
 
+        // Created here: it declares the default rather than staying silent.
         let untargeted = view
             .projects
             .iter()
             .find(|card| card.slug == "2026-07-09-1421-untargeted")
             .unwrap();
-        assert_eq!(untargeted.target, None);
+        assert_eq!(
+            untargeted.target.as_deref(),
+            Some(crate::DESKTOP_BOARD_ID),
+            "a project created in this library declares Desktop"
+        );
+
+        // Arrived from elsewhere saying nothing: nothing is invented for
+        // it, and an absent target still reads as Desktop everywhere it
+        // matters.
+        let imported = view
+            .projects
+            .iter()
+            .find(|card| card.slug == "2026-07-09-1421-imported")
+            .unwrap();
+        assert_eq!(imported.target, None);
+        assert_eq!(
+            crate::ProjectTarget::from_manifest(imported.target.as_deref()),
+            crate::ProjectTarget::Desktop
+        );
     }
 
     #[test]
