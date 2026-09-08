@@ -62,6 +62,7 @@ pub(super) fn read_reg(regs: &[i32; 32], reg: lp_riscv_inst::Gpr) -> i32 {
 /// `fp` carries the RV32F architectural state (see [`FpRegs`]). Only the
 /// floating-point arms and the three F-extension CSRs in [`system`] read or
 /// write it; the integer categories never see it.
+#[inline(always)]
 pub(crate) fn decode_execute<M: LoggingMode, B: Bus>(
     inst_word: u32,
     pc: u32,

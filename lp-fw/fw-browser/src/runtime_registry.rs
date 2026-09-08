@@ -5,8 +5,9 @@
 
 use std::cell::{Cell, RefCell};
 
+use crate::envelope::BrowserRuntimeOptions;
 use crate::runtime::BrowserFirmwareRuntime;
-use crate::tier::{RuntimeTier, TierSelection};
+use crate::tier::TierSelection;
 
 thread_local! {
     static RUNTIMES: RefCell<Vec<BrowserFirmwareRuntime>> = const { RefCell::new(Vec::new()) };
@@ -16,12 +17,12 @@ thread_local! {
     static NEXT_RUNTIME_ID: Cell<u32> = const { Cell::new(1) };
 }
 
-/// Create a runtime on the requested tier; returns its stable id plus the
+/// Create a runtime from its boot options; returns its stable id plus the
 /// recorded tier selection (which may be CPU with a reason when a GPU
 /// request could not be granted — fidelity-tiers ADR).
 pub(crate) fn create_runtime(
     label: &str,
-    requested: RuntimeTier,
+    options: &BrowserRuntimeOptions,
 ) -> Result<(u32, TierSelection), String> {
     RUNTIMES.with(|runtimes| {
         let mut runtimes = runtimes.borrow_mut();
@@ -30,7 +31,7 @@ pub(crate) fn create_runtime(
             next.set(id + 1);
             id
         });
-        let runtime = BrowserFirmwareRuntime::new(id, label, requested)?;
+        let runtime = BrowserFirmwareRuntime::new(id, label, options)?;
         let selection = runtime.tier().clone();
         runtimes.push(runtime);
         Ok((id, selection))

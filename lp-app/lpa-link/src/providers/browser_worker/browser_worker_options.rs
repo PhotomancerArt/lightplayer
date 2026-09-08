@@ -1,4 +1,4 @@
-use crate::providers::browser_worker::BrowserTickMode;
+use crate::providers::browser_worker::{BrowserRuntimeOptions, BrowserTickMode};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BrowserWorkerOptions {
@@ -6,6 +6,11 @@ pub struct BrowserWorkerOptions {
     pub fw_browser_wasm_path: String,
     /// Clock ownership mode for spawned workers (defaults to self-ticking).
     pub tick_mode: BrowserTickMode,
+    /// What the worker's BOOT runtime is created as: the board it wears,
+    /// the tier it asks for, the identity it answers with. The default
+    /// declares no board, so a caller that forgets to set one fails at boot
+    /// instead of quietly running as something nobody chose.
+    pub runtime: BrowserRuntimeOptions,
 }
 
 impl BrowserWorkerOptions {
@@ -17,12 +22,19 @@ impl BrowserWorkerOptions {
             fw_browser_module_path: fw_browser_module_path.into(),
             fw_browser_wasm_path: fw_browser_wasm_path.into(),
             tick_mode: BrowserTickMode::SelfTicking,
+            runtime: BrowserRuntimeOptions::default(),
         }
     }
 
     /// Set the worker clock ownership mode.
     pub fn with_tick_mode(mut self, tick_mode: BrowserTickMode) -> Self {
         self.tick_mode = tick_mode;
+        self
+    }
+
+    /// Set what the boot runtime is created as.
+    pub fn with_runtime(mut self, runtime: BrowserRuntimeOptions) -> Self {
+        self.runtime = runtime;
         self
     }
 
@@ -81,6 +93,9 @@ async fn try_resolve_engine_urls() -> Option<BrowserWorkerOptions> {
         js_sys::Reflect::get(&manifest, &JsValue::from_str("fw_browser_wasm"))
             .ok()?
             .as_string()?;
+    // Only the URLs are discovered here; `tick_mode` and `runtime` are the
+    // caller's and are re-applied by whoever asked (see the provider's
+    // `connect`).
     Some(BrowserWorkerOptions::new(
         fw_browser_module_path,
         fw_browser_wasm_path,

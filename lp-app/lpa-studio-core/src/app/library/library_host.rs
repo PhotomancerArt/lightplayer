@@ -138,10 +138,23 @@ pub enum CatalogOp {
     /// writers, and both are driven by the roster, never by a UI flow.
     UpsertRegisteredDevice(Box<crate::app::places::RegisteredDevice>),
     /// Remove a device from the registry (`Command::DeleteRecord`) and its
-    /// last-frame sidecar with it. Idempotent — forgetting an unknown row
-    /// is a no-op.
+    /// per-device sidecars with it — the last frame, and the sim record
+    /// that said it was a sim. Idempotent — forgetting an unknown row is a
+    /// no-op.
     ForgetRegisteredDevice {
         uid: String,
+    },
+    /// Create a sim: its registry row and its `/device-sims/<uid>.json`
+    /// sidecar, in ONE settle.
+    ///
+    /// One op rather than two because a half-created sim is not a state
+    /// worth having: a row with no sidecar is a board that cannot be
+    /// started, and a sidecar with no row is a device nothing lists. The
+    /// bytes arrive already encoded, so the host stays codec-free like the
+    /// frame sidecar's write.
+    CreateSimDevice {
+        device: Box<crate::app::places::RegisteredDevice>,
+        sidecar_bytes: Vec<u8>,
     },
     /// Write a fed board's newest composed frame to its per-uid sidecar
     /// (`app/devices/device_frame_snapshot.rs`), already encoded so the
@@ -433,10 +446,28 @@ pub fn apply_catalog_op(
                 .forget(&uid)
                 .map_err(LibraryHostError::from)?;
             // The picture goes with the row: a forgotten board leaves no
-            // sidecar behind to be shown again on a later re-register.
+            // sidecar behind to be shown again on a later re-register. So
+            // does the sim record — a forgotten sim is gone, not a device
+            // that would come back the moment its uid was re-derived.
             let fs = store.fs_handle();
             let fs = fs.borrow();
             crate::app::devices::device_frame_snapshot::delete_snapshot(&*fs, &uid)
+                .map_err(|error| LibraryHostError::Host(error.to_string()))?;
+            crate::app::devices::delete_sim_record(&*fs, &uid)
+                .map_err(|error| LibraryHostError::Host(error.to_string()))?;
+            None
+        }
+        CatalogOp::CreateSimDevice {
+            device,
+            sidecar_bytes,
+        } => {
+            let uid = device.uid.clone();
+            crate::app::places::DeviceRegistry::new(store.fs_handle())
+                .upsert(*device)
+                .map_err(LibraryHostError::from)?;
+            let fs = store.fs_handle();
+            let fs = fs.borrow();
+            crate::app::devices::sim_record::write_sim_record_bytes(&*fs, &uid, &sidecar_bytes)
                 .map_err(|error| LibraryHostError::Host(error.to_string()))?;
             None
         }

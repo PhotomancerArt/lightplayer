@@ -34,6 +34,14 @@ pub const RUNTIME_MANIFEST_SOURCES: &[(&str, &str)] = &[
         "quinled/dig2go",
         include_str!("../../../lp-core/lpc-hardware/boards/quinled/dig2go.json"),
     ),
+    // Not silicon: the DESKTOP board profile, worn by the desktop firmware
+    // (`fw-browser` in a tab, `fw-host` on a machine). It travels the same
+    // road as a real board's — Studio hands the JSON verbatim to whatever
+    // runs the project — which is exactly why it is a board file.
+    (
+        "lightplayer/desktop",
+        include_str!("../../../lp-core/lpc-hardware/boards/lightplayer/desktop.json"),
+    ),
 ];
 
 /// The checked-in runtime manifest JSON for `board_id`, verbatim — `None`

@@ -7,10 +7,10 @@ use crate::error::{EXC_INTEGER_DIVIDE_BY_ZERO, Trap, TrapKind};
 use crate::trace::Tracer;
 
 impl Emulator {
-    pub(super) fn exec_arith(
+    pub(super) fn exec_arith<T: Tracer + ?Sized>(
         &mut self,
         inst: &Inst,
-        tracer: &mut dyn Tracer,
+        tracer: &mut T,
     ) -> Result<Flow, Trap> {
         match *inst {
             Inst::Rrr(op, rd, rs, rt) => {

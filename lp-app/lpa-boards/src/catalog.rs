@@ -49,6 +49,10 @@ pub const DISPLAY_MANIFEST_SOURCES: &[(&str, &str)] = &[
         "domraem/dom-z-102",
         include_str!("../../../lp-core/lpc-hardware/boards/domraem/dom-z-102.display.json"),
     ),
+    (
+        "lightplayer/desktop",
+        include_str!("../../../lp-core/lpc-hardware/boards/lightplayer/desktop.display.json"),
+    ),
 ];
 
 /// Every checked-in board, parsed once. Panics on malformed embedded data —
@@ -75,6 +79,24 @@ pub fn board_by_id(board_id: &str) -> Option<&'static BoardDisplayFile> {
     all_boards().iter().find(|board| board.board_id == board_id)
 }
 
+/// The `family` of boards that are not hardware — a computer running the
+/// desktop firmware.
+pub const DESKTOP_FAMILY: &str = "desktop";
+
+/// Every board the **Boards page** shows: [`all_boards`] minus the desktop
+/// family, because Desktop is a target, not a board anyone can buy, and the
+/// Boards page is a shopping page (vision D42).
+///
+/// The catalog itself keeps it — the device picker and a project's Hardware
+/// row both need Desktop to be a board like any other, and so does the sim
+/// that wears its manifest. This is presentation, and the one place it is
+/// decided.
+pub fn purchasable_boards() -> impl Iterator<Item = &'static BoardDisplayFile> {
+    all_boards()
+        .iter()
+        .filter(|board| board.family != DESKTOP_FAMILY)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -83,6 +105,26 @@ mod tests {
     fn all_embedded_boards_parse_and_validate() {
         let boards = all_boards();
         assert_eq!(boards.len(), DISPLAY_MANIFEST_SOURCES.len());
+    }
+
+    /// Desktop is IN the catalog — the picker, the Hardware row and the
+    /// sim's manifest all need it to be a board like any other — and off
+    /// the Boards page, which is a shopping page and has nothing to sell.
+    #[test]
+    fn the_desktop_target_is_in_the_catalog_but_not_on_the_boards_page() {
+        assert!(
+            board_by_id("lightplayer/desktop").is_some(),
+            "the catalog keeps Desktop"
+        );
+        assert!(
+            !purchasable_boards().any(|board| board.board_id == "lightplayer/desktop"),
+            "the Boards page does not offer Desktop"
+        );
+        assert_eq!(
+            purchasable_boards().count(),
+            all_boards().len() - 1,
+            "Desktop is the only entry the Boards page skips"
+        );
     }
 
     #[test]

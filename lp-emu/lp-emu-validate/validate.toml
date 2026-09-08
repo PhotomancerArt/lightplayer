@@ -47,6 +47,16 @@ description = "The M3 gate set for our own C6 machine: the compile harness (heap
 payloads = ["shader-compile-stress", "boot-idle"]
 
 [[set]]
+name = "emu-m4"
+description = "The M4 gate set: the flash-backed shipped image booting to the idle heartbeat (the `[FS]` mount pair and spike report §5.1's heap and stack figures, which M3 could not reach because it stopped on SPI1.cmd), and the project-upload walk (§5.3's load gate and compile outputs, replayed from the committed host script so the transcript is a function of guest time). Both run against the reference image `scripts/emu/build-reference-image.sh` builds, so `--image` is part of the recipe."
+payloads = ["boot-idle-flash", "upload-walk"]
+
+[[set]]
+name = "usb-negative-control"
+description = "M6's negative control, rig-free: flash the shipped image, leave the port CLOSED for several seconds, then open a non-resetting reader and read the first heartbeat. The device is enumerated and undrained throughout, which is the one link state it cannot report on at the time — the `link` object's `hostNotDrainingMs` / `hostDrainingAgainMs` / `notDrainingCount` are its own record of it, on its own clock. Runs on silicon today; M6 P4 adds the emulator twin."
+payloads = ["usb-negative-control"]
+
+[[set]]
 name = "jit-math-perf"
 description = "The Q32 math kernel cycle-cost payload (Q12 ledger, cheapest test_* migration): mul/div/sin kernels and LUT access cost against the PMU cycle counter. Timing only — never a gate under esp-emu, which has no cycle model."
 payloads = ["jit-math-perf"]
@@ -179,7 +189,7 @@ because = "the model is the host-absent state and only that — EP1 free until t
 [[configuration.trust]]
 class = "pin"
 grade = "modeled"
-because = "no pin is observed: GPIO and IO_MUX accept and remember, RMT accepts, and no waveform is produced or decoded. M5 brings the RMT channels and the WS281x decoder that make a pin claim possible"
+because = "no pin is observed: GPIO and IO_MUX accept and remember; the RMT TX engines (M5 P1) produce each channel's pulses in cycles, but no pad carries them and nothing decodes them. M5 P2 brings the signal fabric, the pin log and the WS281x decoder that make a pin claim possible"
 
 [[configuration.trust]]
 class = "wire"

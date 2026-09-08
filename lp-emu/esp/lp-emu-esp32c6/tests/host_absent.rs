@@ -18,6 +18,7 @@ use lp_emu_esp32c6::test_support::{FwImage, fw_esp32c6_image, skip_notice};
 
 const GATE_US: u64 = 5_000_000;
 const USB_INT_ENA: u32 = memmap::periph::USB_DEVICE + 0x10;
+const RMT_CH0_TX_CONF0: u32 = memmap::periph::RMT + 0x10;
 const SERIAL_OUT_RECV_PKT: u32 = 1 << 2;
 
 #[test]
@@ -112,4 +113,70 @@ fn with_no_host_the_printer_times_out_once_and_the_rx_path_is_never_armed() {
     assert!(!lines.iter().any(|l| l.contains("EXPIRED")));
     // UART0 is silent on the shipped image: the console is USB-Serial-JTAG.
     assert!(m.uart0().is_empty());
+
+    // M6 P1b, gate G1b-4 — what the connection stamps say when there is no
+    // host at all, and it is NOT what the phase brief predicted.
+    //
+    // The brief (and the M6 discovery's "absent" row) expected zero: no
+    // enumeration, so `is_connected()` false, so no write, so no timeout, so
+    // no latch. The machine says one, and the machine is right — the monitor
+    // starts OPTIMISTIC (`host_draining = true`, `no_sof_count = 0`) and the
+    // enumeration verdict needs three polls, while one blocked write costs
+    // 250 ms and holds the loop for the whole of it. So:
+    //
+    //   poll 1 -> no_sof 1, still "enumerated", write attempted, 250 ms, timeout
+    //   poll 2 -> no_sof 2, still "enumerated", write attempted, 250 ms, timeout
+    //             => two in a row: LATCH, and the stamp fires
+    //   poll 3 -> no_sof 3, NOT enumerated: the latch is reset to draining
+    //             (a disconnect starts the next enumeration from a clean
+    //             slate) and `is_connected()` is false from here on, so
+    //             nothing is ever written or timed out again.
+    //
+    // The number that matters is therefore not the count but the PAIR. With
+    // no host the link never recovers, because nothing ever drained it:
+    // `HOST_DRAINING_AGAIN_MS` stays at the never-happened sentinel. That is
+    // what makes the silicon figures mean something — a transcript showing
+    // both stamps is showing a transition this configuration cannot produce.
+    let mut stamp = |sym: &str| {
+        m.peek_symbol(sym)
+            .unwrap_or_else(|| panic!("the image carries {sym}"))
+            .1
+    };
+    let silences = stamp("fw_esp32_common::serial::link_counters::NOT_DRAINING_COUNT");
+    let latched_at = stamp("fw_esp32_common::serial::link_counters::HOST_NOT_DRAINING_MS");
+    let resumed_at = stamp("fw_esp32_common::serial::link_counters::HOST_DRAINING_AGAIN_MS");
+    const NEVER: u32 = u32::MAX;
+
+    assert_eq!(
+        resumed_at, NEVER,
+        "nothing ever drained this link, so it can never have resumed"
+    );
+    assert_eq!(
+        silences, 1,
+        "exactly one latch, from the optimistic window before enumeration \
+         lapses; after that `is_connected()` gates every write and no second \
+         silence is possible"
+    );
+    assert_ne!(latched_at, NEVER, "the one latch stamped its instant");
+    assert!(
+        u64::from(latched_at) < GATE_US / 1_000,
+        "the latch is inside the run it happened in: {latched_at} ms"
+    );
+    println!(
+        "[P1b] host absent: notDrainingCount={silences} \
+         hostNotDrainingMs={latched_at} hostDrainingAgainMs=NEVER"
+    );
+
+    // M5 P1 G1-2: the boot configures two RMT channels (`mem_size 1` each,
+    // the shipped two-channel plan) and never starts one — no project is
+    // loaded, so no frame is ever sent.
+    assert_eq!(m.rmt_frames_ended(0), 0);
+    assert_eq!(m.rmt_frames_ended(1), 0);
+    assert!(m.rmt_words(0).is_empty() && m.rmt_pulses(0).is_empty());
+    let conf0 = m.peek_word(RMT_CH0_TX_CONF0).expect("RMT.ch0_tx_conf0");
+    assert_eq!(conf0 & (1 << 6), 1 << 6, "idle_out_en: {conf0:#010x}");
+    assert_eq!(conf0 & (1 << 5), 0, "idle_out_lv 0: {conf0:#010x}");
+    assert_eq!((conf0 >> 8) & 0xff, 1, "div_cnt 1: {conf0:#010x}");
+    assert_eq!((conf0 >> 16) & 0x7, 1, "mem_size 1: {conf0:#010x}");
+    assert_eq!(conf0 & 0x0100_0007, 0, "the strobes read 0: {conf0:#010x}");
 }

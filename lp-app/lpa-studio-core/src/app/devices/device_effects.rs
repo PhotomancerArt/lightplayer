@@ -377,6 +377,21 @@ impl DeviceEffects {
         }
     }
 
+    /// The link routed to `endpoint`, if one is.
+    ///
+    /// The effects layer already routes by endpoint, so this is not a second
+    /// index — it is the question the app asks when it knows a device by its
+    /// endpoint and needs the handle: powering a sim off has to raise the
+    /// detach for the link that sim's endpoint owns, and the model's own
+    /// `Disconnect` closes the port without detaching (a serial board keeps
+    /// its card when its port closes; a stopped sim has nothing left to be
+    /// attached to).
+    pub fn link_for_endpoint(&self, endpoint: &EndpointKey) -> Option<LinkId> {
+        self.links
+            .iter()
+            .find_map(|(link, slot)| (slot.info.endpoint == *endpoint).then_some(*link))
+    }
+
     /// Whether the editor lens currently holds this link's wire.
     pub fn lens_holds_wire(&self, link: LinkId) -> bool {
         self.links

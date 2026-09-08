@@ -210,29 +210,17 @@ pub fn gpio() -> RegFile {
         .with_read_override(0x05c, 0xffff_ffff, 0)
 }
 
-/// SPI0/SPI1: accept; the flash controller and cache MMU are M4.
-pub fn spi(name: &'static str) -> RegFile {
-    let names = if name == "SPI0" {
-        regs::SPI0
-    } else {
-        regs::SPI1
-    };
-    RegFile::new(name, 0x400).with_names(names)
-}
-
-/// `RMT`: accept. The brief expected the no-radio image not to touch it;
-/// it does — `Rmt::new(rmt_peripheral, RMT_CLOCK)` runs unconditionally in
-/// `main.rs:286` and was the first strict stop of P5 (`RMT+0x068`
-/// `sys_conf`, from `esp_hal::rmt::Rmt::new`). Accepted so the boot can
-/// continue; the WS281x transmitter's channels, the 48-word blocks, the
-/// wrap and threshold interrupts are M5, and a frame sent into this block
-/// never completes — which is the honest reading of a block with no model.
-/// `sys_conf` resets to `0x0500_0010` (the PAC).
-pub fn rmt() -> RegFile {
-    RegFile::new("RMT", 0x400)
-        .with_names(regs::RMT)
-        .with_reset(0x068, 0x0500_0010)
-}
+// `RMT` was an accept block here from P5 (its `sys_conf` write from
+// `esp_hal::rmt::Rmt::new` was P5's first strict stop) until M5 P1 gave it a
+// model: `super::rmt`. M4's upload walk had already found the two edges of
+// what an accept block could not do for it — the channel RAM at `+0x400`
+// past the end of the mapped window, and, once that was widened,
+// `Ws281xOutput::write` spinning to its 50 ms deadline because completion
+// arrives as the RMT **interrupt** and a register file raises none.
+//
+// `SPI0`/`SPI1` were accept blocks here until M4 gave them models
+// (`super::spi0`, `super::spi1`): a flash access used to spin on `SPI1.cmd`,
+// which is what every flash-backed image stopped on at 11 ms.
 
 #[cfg(test)]
 mod tests {
@@ -309,7 +297,6 @@ mod tests {
         assert_eq!(uart("UART1").name(), "UART1");
         assert_eq!(uart("UART1").reg_name(0x01c), Some("status"));
         assert_eq!(usb_device().reg_name(0x004), Some("ep1_conf"));
-        assert_eq!(spi("SPI1").name(), "SPI1");
         assert_eq!(extmem().reg_name(0x000).is_some(), true);
     }
 }

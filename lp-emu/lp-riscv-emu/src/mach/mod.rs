@@ -462,9 +462,12 @@ impl<B: Bus> MachineHart<B> {
         // (a) poll on entry.
         self.poll_interrupts();
 
-        let start = self.cycle_count;
+        // The deadline as an absolute cycle: one compare per instruction
+        // instead of a subtract and a compare. `saturating_add` keeps a
+        // `u64::MAX` budget meaning "never", as the subtraction form did.
+        let end = self.cycle_count.saturating_add(budget);
         loop {
-            if self.cycle_count.wrapping_sub(start) >= budget {
+            if self.cycle_count >= end {
                 return SliceEnd::BudgetExhausted;
             }
 

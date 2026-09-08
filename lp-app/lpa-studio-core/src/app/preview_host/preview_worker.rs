@@ -71,9 +71,17 @@ impl PreviewWorker {
     /// Spawn and boot one explicit-tick worker. The boot runtime idles
     /// (never ticked); preview runtimes are created per lease.
     pub(super) async fn boot(label: &str) -> Result<Self, String> {
+        // The boot runtime idles here (preview runtimes are created per
+        // lease), but it is still created AS something: the Desktop board,
+        // like the previews it hosts.
         let options = resolved_engine_urls()
             .await
-            .with_tick_mode(BrowserTickMode::Explicit);
+            .with_tick_mode(BrowserTickMode::Explicit)
+            .with_runtime(
+                crate::app::library::ProjectTarget::Desktop
+                    .runtime_options(BrowserRuntimeTier::Cpu)
+                    .ok_or_else(|| "the Desktop board manifest is missing".to_string())?,
+            );
         let mut handle = BrowserWorkerHandle::new(&options.worker_script_path())
             .map_err(|error| format!("spawn worker: {error}"))?;
         handle

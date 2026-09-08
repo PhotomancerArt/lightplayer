@@ -13,9 +13,16 @@
 //!   M6 P2), [`pcr`] (the P5 accept
 //!   block, now also feeding the UART clock lines), [`wifi_stub`] (the radio
 //!   window as one accept block driven by the spin detector).
+//! - **modelled, M4** — [`spi1`] (the legacy flash controller the mask ROM
+//!   drives, against a [`crate::flash::FlashImage`]) and [`spi0`] (the cache
+//!   MMU's item registers, feeding [`crate::cache::CacheMmu`]).
+//! - **modelled, M5 P1** — [`rmt`] (the register file, the 192-word RAM,
+//!   two TX engines on the scheduler consuming words at PCR's clock:
+//!   position-semantics `tx_lim`, wrap, STOP, `tx_end`/`tx_thr_event`/
+//!   `tx_err` on source 49; RX channels accept-and-remember).
 //! - **not modelled** — left unmapped on purpose, so a strict run stops on
-//!   them: RMT's channels (M5), SPI flash behaviour (M4 — SPI0/SPI1 are
-//!   accept).
+//!   them: the USB host states M6 has not modelled yet, and where the RMT
+//!   waveform goes (M5 P2's signal fabric).
 //!
 //! Every constant that is a *guess* is marked `modeled` where it is defined;
 //! the README's peripheral table repeats the grades.
@@ -25,7 +32,10 @@ pub mod efuse;
 pub mod intpri;
 pub mod lp_wdt;
 pub mod pcr;
+pub mod rmt;
 pub mod rng;
+pub mod spi0;
+pub mod spi1;
 pub mod systimer;
 pub mod timg;
 pub mod uart;
@@ -35,6 +45,8 @@ pub mod wifi_stub;
 use lp_emu_esp_common::StreamId;
 use lp_emu_esp_common::periph::BoxedPeripheral;
 
+use crate::cache::CacheHandle;
+use crate::flash::FlashHandle;
 use crate::intmatrix::{InterruptCore0View, PlicMxView};
 use crate::loader::EfuseIdentity;
 use crate::memmap::periph as base;
@@ -76,15 +88,19 @@ pub struct HostStreams {
 /// The whole boot set, in [`crate::machine::PERIPHERAL_REGISTRATION_ORDER`].
 ///
 /// `efuse` seeds the EFUSE block; `seed` seeds the RNG; `streams` are the
-/// consoles' outsides; `usb_host` is the USB host's state at power-on.
+/// consoles' outsides; `flash` is the chip SPI1 drives and `mmu` the page
+/// table SPI0 programs; `usb_host` is the USB host's state at power-on.
 /// Everything else is the same on every machine.
 pub fn boot_set(
     efuse: EfuseIdentity,
     seed: u64,
     streams: HostStreams,
+    flash: FlashHandle,
+    mmu: CacheHandle,
     usb_host: usb_sj::HostState,
 ) -> Vec<(u32, u32, BoxedPeripheral)> {
     let clocks = pcr::UartClockLines::default();
+    let rmt_clock = pcr::RmtClockLine::default();
     vec![
         (
             base::LP_APM,
@@ -105,7 +121,11 @@ pub fn boot_set(
             0x400,
             Box::new(accept::lp_i2c_ana_mst()),
         ),
-        (base::PCR, 0x1000, Box::new(pcr::Pcr::new(clocks.clone()))),
+        (
+            base::PCR,
+            0x1000,
+            Box::new(pcr::Pcr::new(clocks.clone(), rmt_clock.clone())),
+        ),
         (base::TIMG0, 0x100, Box::new(timg::Timg::timg0())),
         (base::TIMG1, 0x100, Box::new(timg::Timg::timg1())),
         (base::EFUSE, 0x200, Box::new(efuse::efuse(efuse))),
@@ -143,9 +163,13 @@ pub fn boot_set(
         ),
         (base::IO_MUX, 0x100, Box::new(accept::io_mux())),
         (base::GPIO, 0x700, Box::new(accept::gpio())),
-        (base::SPI0, 0x400, Box::new(accept::spi("SPI0"))),
-        (base::SPI1, 0x400, Box::new(accept::spi("SPI1"))),
-        (base::RMT, 0x400, Box::new(accept::rmt())),
+        (base::SPI0, 0x400, Box::new(spi0::Spi0::new(mmu))),
+        (base::SPI1, 0x400, Box::new(spi1::Spi1::new(flash))),
+        // Registers, the gap, and the RAM at `+0x400..+0x700` — P5's accept
+        // block was `0x400` long and left the RAM unmapped (M5 discovery C4;
+        // M4's upload walk hit the other end of it, as a strict stop at
+        // `0x6000_6400` from `Ws281xDriver::open`).
+        (base::RMT, rmt::LEN, Box::new(rmt::Rmt::new(rmt_clock))),
         // The radio window, after RMT: `Rmt::new` runs before esp-radio's
         // init in `main`, so this is the order the boot meets them.
         (

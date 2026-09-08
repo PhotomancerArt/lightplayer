@@ -166,11 +166,14 @@ impl LinkProvider for BrowserWorkerProvider {
         // construction time (before `index.html`'s manifest fetch can have
         // settled), while `window.__lpEngineAssets` is a page-lifetime
         // promise that resolves once and then answers every later await
-        // instantly. `tick_mode` is the one field callers legitimately
-        // override (see `with_tick_mode`), so it rides along unchanged.
+        // instantly. `tick_mode` and `runtime` are the fields callers
+        // legitimately set (the clock, and the board the boot runtime
+        // wears), so they ride along unchanged — the discovery answers for
+        // the URLs only.
         let options = crate::providers::browser_worker::resolved_engine_urls()
             .await
-            .with_tick_mode(self.options.tick_mode);
+            .with_tick_mode(self.options.tick_mode)
+            .with_runtime(self.options.runtime.clone());
         // Boot the worker on locals so the boot await runs with no session
         // borrow held; only the finished state enters the map. A failed
         // boot returns here with the handle still local, and dropping it

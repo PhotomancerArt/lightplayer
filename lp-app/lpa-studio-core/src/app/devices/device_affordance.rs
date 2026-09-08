@@ -106,7 +106,7 @@ mod tests {
             let op = action
                 .op_as::<DevicesOp>()
                 .expect("an escape is a device action");
-            assert_eq!(op.0.device(), Some(device), "{escape:?}");
+            assert_eq!(op.action.device(), Some(device), "{escape:?}");
         }
     }
 
@@ -116,7 +116,7 @@ mod tests {
         for escape in [Escape::Cancel, Escape::Disconnect, Escape::Forget] {
             let action = pending_escape_action(escape, link);
             let op = action.op_as::<DevicesOp>().expect("a device action");
-            assert_eq!(op.0, Action::DismissLink { link }, "{escape:?}");
+            assert_eq!(op.action, Action::DismissLink { link }, "{escape:?}");
         }
     }
 }

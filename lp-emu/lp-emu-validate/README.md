@@ -30,6 +30,24 @@ series are the hello frame, the idle heartbeat and the stack probe's line, and
 the numbers it exists for are `freeBytes`/`totalBytes` and the stack
 high-water mark.
 
+**One payload is a conversation.** `upload-walk` (M4) is the same shipped
+image with a host on the other end: the thirteen wire frames `lp-cli upload
+examples/basic` sends. Its host half is a field —
+`host_script: Some("lp-emu/esp/lp-emu-esp32c6/walks/examples-basic.script")` —
+which an emulated configuration's driver passes as `--uart0-script`, and
+which on silicon is the client itself over a port. Recording it on the
+*payload* is what makes a walk reproducible at all: without it the only
+transcript a runner can produce is a boot. The script is generated from a
+real client capture, never hand-written (`walks/README.md`), and each of its
+requests waits for the answer to the one before it, so the run is a function
+of guest time and two recordings are byte-identical.
+
+That is also the payload whose series are the most interesting: `fs-write`
+(every file the upload wrote and the device's answer to each), `load-gate`
+(the server's four heap gates, all `Memory` — and all byte-equal to the spike
+report §5.3's) and `shader-compile` (the compiler's outputs `Structural`, its
+`elapsed` `Timing`).
+
 The registry is `src/payload.rs`. It **mirrors** `fw-checks` rather than
 importing it: `fw-checks` is AGPL and outside the `lp-emu/` MIT fence, so an
 import would fail `just lint-emu-fence`. `lp-cli` depends on both and owns the
@@ -132,6 +150,29 @@ For silicon the runner does not reinvent the port discipline; it shells out to
 **foreground** under `script(1)` with a `SIG_DFL` exec shim, polls for the
 payload's sentinel, SIGINTs **that pid only**, and post-checks `lsof`/`pgrep`.
 Every clause there is a sitting that broke.
+
+### One payload is watched differently, and that is the payload
+
+`usb-negative-control` (M6 P1b) asks what the device did while **nobody** was
+reading it, so a monitor at the flash would destroy the thing it measures.
+`Payload::capture` says so — `Capture::FlashThenOpenAfter(8)` against every
+other payload's `Capture::Monitor` — and the silicon plan becomes three steps
+instead of one:
+
+1. `scripts/emu/desk-flash-no-monitor.sh` — the same pre-check, foreground
+   `script(1)` and post-check, with no `--monitor`: espflash exits and the port
+   goes back to closed.
+2. `sleep 8` — the measurement. The board is enumerated and undrained: its
+   writes time out, the connection monitor latches, and both log lines about it
+   are dropped by that latch.
+3. `scripts/emu/tty-capture.py --dev … --until <sentinel>` — a non-resetting
+   reader (`os.open` + raw termios, `HUPCL` cleared, DTR/RTS untouched), the
+   same open Studio and lp-cli make. `--until` stops at the **end** of the
+   first line containing the sentinel, because the figures worth capturing come
+   after a sentinel that is a line prefix.
+
+They are three plan steps rather than one wrapper script on purpose: a desk
+protocol is only reviewable if `--dry-run` prints the whole of it.
 
 For `esp-emu:*` it builds a merged image and runs the binary named by
 `$LP_ESP_EMU` with `--exit-on` the payload's done marker (install per spike

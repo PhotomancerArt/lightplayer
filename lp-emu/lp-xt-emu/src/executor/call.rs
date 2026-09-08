@@ -13,11 +13,11 @@ use crate::error::Trap;
 use crate::trace::Tracer;
 
 impl Emulator {
-    pub(super) fn exec_call(
+    pub(super) fn exec_call<T: Tracer + ?Sized>(
         &mut self,
         inst: &Inst,
         pc: u32,
-        tracer: &mut dyn Tracer,
+        tracer: &mut T,
     ) -> Result<Flow, Trap> {
         let (inc, target) = match *inst {
             Inst::Call(op, off) => {

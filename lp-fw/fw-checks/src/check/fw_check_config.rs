@@ -113,6 +113,66 @@ pub const ALL_CHECKS: &[FwCheckConfig] = &[
         emits_header: false,
     },
     FwCheckConfig {
+        check: FwCheck::BootIdleFlash,
+        display_name: "Shipped image to the idle loop, from flash",
+        // The same product image as `boot-idle` **without** `memory_fs`: the
+        // one that mounts `lpfs` from the flash chip through the mask ROM's
+        // `esp_rom_spiflash_*` path. That is what M4 built, and what its
+        // first gate compares — spike report §5.1's `freeBytes 265392`,
+        // `largestFreeBlock 199173` and `[stack] high-water 11844 B of
+        // 71328 B`, plus the `[FS] Mount failed … Formatted and mounted`
+        // pair `boot-idle` cannot produce.
+        firmware_features: &["server", "radio"],
+        done_marker: Some("[stack] heartbeat: high-water"),
+        trace_slug: "boot-idle-flash",
+        supported_targets: ESP32_ONLY,
+        emits_records: false,
+        emits_header: false,
+    },
+    FwCheckConfig {
+        check: FwCheck::UploadWalk,
+        display_name: "Project upload walk (examples/basic)",
+        // The same flash-backed product image as `boot-idle-flash`, with a
+        // host on the other end: the thirteen wire frames `lp-cli upload
+        // examples/basic` sends. On an emulated configuration the host is a
+        // committed `--uart0-script`
+        // (`lp-emu/esp/lp-emu-esp32c6/walks/examples-basic.script`); on
+        // silicon it is the client itself, over a port.
+        firmware_features: &["server", "radio"],
+        // The shader compile is the last thing the load produces, and the
+        // last line before the walk would need M5's RMT model to go on.
+        done_marker: Some("[shader-node] compilation succeeded"),
+        trace_slug: "upload-walk",
+        supported_targets: ESP32_ONLY,
+        emits_records: false,
+        emits_header: false,
+    },
+    FwCheckConfig {
+        check: FwCheck::UsbNegativeControl,
+        display_name: "Shipped image with the port closed from boot",
+        // The shipped image itself, flash-backed — `boot-idle` minus
+        // `memory_fs`. No check module and no `test_*` feature: what is under
+        // test is the product's own USB-Serial-JTAG link, and swapping the
+        // filesystem out would change the image for a reason that has nothing
+        // to do with the question.
+        //
+        // What makes it a different payload from `boot-idle` is not the image
+        // at all — it is when the host side opens the port. `boot-idle` is
+        // watched from its first byte; this one is flashed with no monitor,
+        // left alone for several seconds, and then read by a non-resetting
+        // reader. The registry that carries that difference is the host's
+        // (`lp-emu-validate`'s `Payload::capture`), because it is a fact
+        // about the operator, not about the firmware.
+        firmware_features: &["server", "radio"],
+        // The first stack heartbeat AFTER the reader attaches. The ones
+        // before it went into a closed port and are gone.
+        done_marker: Some("[stack] heartbeat: high-water"),
+        trace_slug: "usb-negative-control",
+        supported_targets: ESP32_ONLY,
+        emits_records: false,
+        emits_header: false,
+    },
+    FwCheckConfig {
         check: FwCheck::Json,
         display_name: "JSON serial validation",
         firmware_features: &["test_json"],

@@ -1,0 +1,110 @@
+{
+  "board_id": "lightplayer/desktop",
+  "display_name": "Desktop",
+  "manufacturer": "LightPlayer",
+  "soc": "Desktop",
+  "family": "desktop",
+  "flash": "host storage",
+  "price_usd": 0.0,
+  "tier": "gold",
+  "capabilities": [
+    "unlimited wires",
+    "no reservations",
+    "runs in this tab"
+  ],
+  "blurb": "The desktop firmware — fw-host on a computer, or fw-browser in this tab.",
+  "default_led_wires": [
+    "D10"
+  ],
+  "hw": {
+    "width": 76,
+    "module": {
+      "x": 14,
+      "y": 6,
+      "w": 48,
+      "h": 30,
+      "label": "CPU",
+      "antenna": false
+    },
+    "left": [
+      {
+        "label": "D0",
+        "role": "io",
+        "gpio": 100
+      },
+      {
+        "label": "D1",
+        "role": "io",
+        "gpio": 101
+      },
+      {
+        "label": "D2",
+        "role": "io",
+        "gpio": 102
+      },
+      {
+        "label": "D3",
+        "role": "io",
+        "gpio": 103
+      },
+      {
+        "label": "D4",
+        "role": "io",
+        "gpio": 104
+      },
+      {
+        "label": "D5",
+        "role": "io",
+        "gpio": 105
+      },
+      {
+        "label": "D6",
+        "role": "io",
+        "gpio": 106
+      }
+    ],
+    "right": [
+      {
+        "label": "D7",
+        "role": "io",
+        "gpio": 107
+      },
+      {
+        "label": "D8",
+        "role": "io",
+        "gpio": 108
+      },
+      {
+        "label": "D9",
+        "role": "io",
+        "gpio": 109
+      },
+      {
+        "label": "D10",
+        "role": "io",
+        "gpio": 110,
+        "caps": [
+          {
+            "text": "WS281x default",
+            "kind": "note"
+          }
+        ]
+      },
+      {
+        "label": "D11",
+        "role": "io",
+        "gpio": 111
+      },
+      {
+        "label": "D12",
+        "role": "io",
+        "gpio": 112
+      },
+      {
+        "label": "D13",
+        "role": "io",
+        "gpio": 113
+      }
+    ]
+  }
+}

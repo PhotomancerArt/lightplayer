@@ -7,7 +7,11 @@
 //! mid-flight tier switching and no retry loop.
 
 /// Which shader-execution tier a runtime was created on.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+///
+/// Deserialized straight out of the boot options (`"cpu"` / `"gpu"`) —
+/// the same spelling the host's `BrowserRuntimeTier` serializes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum RuntimeTier {
     /// f32 on WebGPU via `lp-gfx-wgpu` (preview tier).
     Gpu,
