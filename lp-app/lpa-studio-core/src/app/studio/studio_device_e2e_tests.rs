@@ -260,7 +260,8 @@ impl DeviceTransport for ScriptedTransport {
                         // actual ask → stop → delete conversation runs over
                         // the fake's own `M!` wire into a real `LpServer`.
                         RemovePlan::Real => {
-                            let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(&device));
+                            let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(&device))
+                                .on_borrowed_wire();
                             let mut report = |label: String, percent: Option<u8>| {
                                 progress(label, percent);
                             };
@@ -311,7 +312,8 @@ impl DeviceTransport for ScriptedTransport {
                             // `M!` byte wire, into a real `LpServer` over
                             // `LpFsMemory`. Nothing about the stop/write/
                             // load order or the hash check is faked.
-                            let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(&device));
+                            let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(&device))
+                                .on_borrowed_wire();
                             let mut report = |label: String, percent: Option<u8>| {
                                 progress(label, percent);
                             };
