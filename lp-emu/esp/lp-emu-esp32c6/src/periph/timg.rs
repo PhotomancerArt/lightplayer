@@ -397,6 +397,23 @@ impl Peripheral for Timg {
         }
     }
 
+    /// The RTC calibration words (M4).
+    ///
+    /// `esp-hal`'s clock bring-up starts a calibration and then spins on
+    /// `rtccalicfg.rtc_cali_rdy` until the scheduled `EV_CALI` event sets
+    /// it; `rtccalicfg1` carries the result and `rtccalicfg2` the timeout
+    /// bit. All three are read out of stored state — this block's
+    /// [`read`](Peripheral::read) does not take a `cx` at all — and all
+    /// three move only on a write or on that event.
+    ///
+    /// The timer's own `t0_lo`/`t0_hi` are *not* listed even though they
+    /// read a latch rather than the clock: a guest that wants the current
+    /// count writes `t0_update` first, and a write is not a pure loop. The
+    /// rule is register by register and the ones nobody spins on stay out.
+    fn pure_read(&self, off: u32) -> bool {
+        matches!(off & !3, RTCCALICFG | RTCCALICFG1 | RTCCALICFG2)
+    }
+
     fn reg_name(&self, off: u32) -> Option<&'static str> {
         regs::TIMG0.name(off)
     }

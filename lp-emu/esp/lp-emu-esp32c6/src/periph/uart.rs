@@ -666,6 +666,24 @@ impl Peripheral for Uart {
         regs::UART0.name(off)
     }
 
+    /// The status words a driver spins on, and nothing else (M4).
+    ///
+    /// Each is derived in [`read_word`](Self::read_word) from `tx`, `rx`,
+    /// `shifter`, `sticky` and stored registers — state that moves only when
+    /// the guest writes a register or one of this block's scheduled events
+    /// fires. None of them reads `cx`, so none is a function of the current
+    /// cycle. `FIFO` is excluded for the obvious reason: reading it pops.
+    ///
+    /// `STATUS` is the one that matters: 86 % of a boot's MMIO traffic is
+    /// this register, read while `esp-println` waits for the TX FIFO to
+    /// drain at baud.
+    fn pure_read(&self, off: u32) -> bool {
+        matches!(
+            off & !3,
+            INT_RAW | INT_ST | STATUS | FSM_STATUS | MEM_TX_STATUS | MEM_RX_STATUS | AFIFO_STATUS
+        )
+    }
+
     fn save_state(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(0x100 + 2 * FIFO_DEPTH + 64);
         out.extend_from_slice(&(self.index as u64).to_le_bytes());

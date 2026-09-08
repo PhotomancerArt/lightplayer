@@ -82,6 +82,52 @@ pub trait Bus {
     fn pending_cpu_interrupt(&self) -> Option<u8> {
         None
     }
+
+    /// Side-band after a Load-class instruction: the **pure** MMIO read it
+    /// performed, if that is all it did.
+    ///
+    /// A pure read is one the peripheral declares side-effect free *and*
+    /// whose value can change only through a write or a scheduled event —
+    /// never as a function of the current cycle. Reading one twice with
+    /// nothing in between returns the same value, and reading it a thousand
+    /// times leaves the machine in the state one read leaves it in. That is
+    /// exactly the property a poll-loop skip needs, which is why it is the
+    /// bus — the only component that knows what a register *is* — that
+    /// declares it.
+    ///
+    /// The contract, which a bus that overrides this must keep:
+    ///
+    /// - It reports **this instruction's** access, not an older one. A bus
+    ///   clears it per instruction (`set_issuing` is the natural place).
+    /// - It is `Some` only when the instruction's *only* MMIO access was one
+    ///   pure read. A RAM load, an impure read (a FIFO pop, a clear-on-read
+    ///   register), or any MMIO write leaves it `None`.
+    ///
+    /// The privileged stepper consumes it after Load-class instructions and
+    /// treats `None` as "no evidence", which is always safe: the detector
+    /// resets and nothing is skipped. The default is a constant the
+    /// optimizer removes.
+    #[inline(always)]
+    fn take_pure_read(&mut self) -> Option<PureRead> {
+        None
+    }
+
+    /// The stepper skipped `iterations` whole iterations of a pure poll loop
+    /// whose read was of `address`, issued at `pc`.
+    ///
+    /// Bring-up only: a bus that keeps a trace writes one line per skip so a
+    /// reader can see where guest time went. The default is empty and
+    /// inlines away.
+    #[inline(always)]
+    fn note_poll_skip(&mut self, _pc: u32, _address: u32, _iterations: u64) {}
+}
+
+/// One side-effect-free MMIO read, as [`Bus::take_pure_read`] reports it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PureRead {
+    pub address: u32,
+    /// The value the peripheral returned, zero-extended to a word.
+    pub value: u32,
 }
 
 /// A hardware watchpoint slot's configuration.

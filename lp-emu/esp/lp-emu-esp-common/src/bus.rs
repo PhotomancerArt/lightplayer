@@ -27,7 +27,7 @@ use alloc::collections::BTreeSet;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use lp_emu_core::bus::{Bus, Watchpoint};
+use lp_emu_core::bus::{Bus, PureRead, Watchpoint};
 use lp_emu_core::memory::{MemoryAccessKind, MemoryError};
 use lp_emu_core::sched::{Cycles, EventId, Scheduler};
 
@@ -211,6 +211,16 @@ pub struct SocBus {
     /// refused like an unmapped one. See [`SocBus::set_strict_grade`].
     strict_grade: Option<RegGrade>,
     sideband: bool,
+    /// The pure-read side-band ([`Bus::take_pure_read`]): the side-effect-free
+    /// MMIO read the instruction now issuing performed, if it performed
+    /// exactly that and nothing else.
+    ///
+    /// Cleared in [`set_issuing`](Bus::set_issuing) — once per instruction,
+    /// before its first access — so it can never carry a stale answer from
+    /// an earlier instruction into the stepper's poll detector. Deliberately
+    /// **not** part of [`BusScalars`]: it is per-instruction scratch, and a
+    /// restored run rewrites it before it is next read.
+    pure_read: Option<PureRead>,
     /// The chip's misaligned-access policy, mirrored from the hart. The C6
     /// core performs misaligned data accesses in hardware, so its machine
     /// sets both permissive; the flag lives here because the bus is the
@@ -295,6 +305,7 @@ impl SocBus {
             strict: false,
             strict_grade: None,
             sideband: false,
+            pure_read: None,
             allow_unaligned: false,
             watchpoints: [None; WATCHPOINT_SLOTS],
             armed_for: [0; 3],
@@ -1013,7 +1024,7 @@ impl SocBus {
             };
             self.check_grade(i, off, address, width, Access::Read)?;
             let (now, pc, hart) = (self.now, self.pc, self.hart);
-            let value = {
+            let (value, pure) = {
                 let range = &mut self.mmio[i];
                 let mut cx = BusCx {
                     now,
@@ -1027,8 +1038,17 @@ impl SocBus {
                     request: &mut self.request,
                     pins: &mut self.pins,
                 };
-                range.periph.read(off, width, &mut cx)
+                let value = range.periph.read(off, width, &mut cx);
+                (value, range.periph.pure_read(off))
             };
+            // The pure-read side-band (M4). Asked *after* the read so a
+            // block whose purity depends on which lane was addressed answers
+            // about the access that actually happened. `set_issuing` cleared
+            // the slot before this instruction, so leaving it alone is the
+            // right answer for an impure read.
+            if pure {
+                self.pure_read = Some(PureRead { address, value });
+            }
             if self.trace.is_enabled() {
                 self.trace.mmio(
                     now,
@@ -1118,6 +1138,12 @@ impl SocBus {
             // An MMIO store is the only thing that can have changed the
             // interrupt state under the stepper's feet.
             self.sideband = true;
+            // …and it is never part of a pure poll loop. `set_issuing` has
+            // already cleared the slot for this instruction; clearing it
+            // again keeps the contract true for an instruction that both
+            // reads and writes MMIO (an AMO), whatever order it does them
+            // in.
+            self.pure_read = None;
             if self.trace.is_enabled() {
                 self.trace.mmio(
                     now,
@@ -1430,10 +1456,45 @@ impl Bus for SocBus {
     fn set_issuing(&mut self, pc: u32, cycle: u64) {
         self.pc = pc;
         self.now = cycle;
+        // One clear per instruction, before its first access: the
+        // pure-read side-band's whole contract is that it answers about
+        // *this* instruction, and a load that never touched MMIO must not
+        // inherit the previous load's answer.
+        self.pure_read = None;
     }
 
     fn take_sideband(&mut self) -> bool {
         core::mem::replace(&mut self.sideband, false)
+    }
+
+    #[inline]
+    fn take_pure_read(&mut self) -> Option<PureRead> {
+        self.pure_read.take()
+    }
+
+    fn note_poll_skip(&mut self, pc: u32, address: u32, iterations: u64) {
+        if !self.trace.is_enabled() {
+            return;
+        }
+        // Name the register the way every other trace line names one, so a
+        // reader can grep the same string: `UART0+0x01c status`.
+        let site = match self.mmio_index(address) {
+            Some(i) => {
+                let base = self.mmio[i].base;
+                let off = address - base;
+                let p = &self.mmio[i].periph;
+                match p.reg_name(off) {
+                    Some(name) => alloc::format!("{}+{off:#05x} {name}", p.name()),
+                    None => alloc::format!("{}+{off:#05x}", p.name()),
+                }
+            }
+            None => alloc::format!("{address:#010x}"),
+        };
+        let line = alloc::format!(
+            "cyc={} pc=0x{pc:08x} POLL-SKIP {site} x{iterations}",
+            self.now
+        );
+        self.trace.note(&line);
     }
 
     fn pending_cpu_interrupt(&self) -> Option<u8> {
@@ -1780,6 +1841,93 @@ mod tests {
         // Out-of-range slots are ignored, not fatal.
         bus.set_watchpoint(WATCHPOINT_SLOTS, Some(wp));
         assert!(bus.write_word(0x4080_0100, 0).is_ok());
+    }
+
+    /// A block with one pure status word at `+0x1c` and one popping FIFO at
+    /// `+0x00`, which is the shape M4's detector is written against.
+    struct PurityProbe {
+        answer: u32,
+        pops: u32,
+    }
+
+    impl Peripheral for PurityProbe {
+        fn name(&self) -> &'static str {
+            "PURE"
+        }
+
+        fn read(&mut self, off: u32, _width: Width, _cx: &mut BusCx<'_>) -> u32 {
+            if off & !3 == 0 {
+                self.pops += 1;
+                return self.pops;
+            }
+            self.answer
+        }
+
+        fn write(&mut self, _off: u32, _width: Width, _value: u32, _cx: &mut BusCx<'_>) {}
+
+        fn pure_read(&self, off: u32) -> bool {
+            off & !3 == 0x1c
+        }
+
+        fn save_state(&self) -> Vec<u8> {
+            Vec::new()
+        }
+
+        fn load_state(&mut self, _bytes: &[u8]) {}
+    }
+
+    /// The pure-read side-band answers about the instruction now issuing and
+    /// about no other. Every one of these cases is a way the detector could
+    /// be handed a stale `Some` and skip a loop that is not a fixed point.
+    #[test]
+    fn the_pure_read_sideband_is_per_instruction() {
+        let mut bus = bus_with_ram();
+        bus.add_peripheral(
+            0x6000_0000,
+            0x100,
+            Box::new(PurityProbe {
+                answer: 0x0000_2a00,
+                pops: 0,
+            }),
+        );
+
+        // A pure register: reported, with the address and the value read.
+        bus.set_issuing(0x4200_0000, 10);
+        assert_eq!(bus.read_word(0x6000_001c).unwrap(), 0x0000_2a00);
+        assert_eq!(
+            bus.take_pure_read(),
+            Some(PureRead {
+                address: 0x6000_001c,
+                value: 0x0000_2a00,
+            })
+        );
+        assert_eq!(bus.take_pure_read(), None, "take clears");
+
+        // The FIFO pops: never reported.
+        bus.set_issuing(0x4200_0004, 20);
+        bus.read_word(0x6000_0000).unwrap();
+        assert_eq!(bus.take_pure_read(), None);
+
+        // A RAM load after a pure read must not inherit the pure read's
+        // answer — this is the stale-`Some` case, and `set_issuing` is what
+        // rules it out.
+        bus.set_issuing(0x4200_0008, 30);
+        bus.read_word(0x6000_001c).unwrap();
+        bus.set_issuing(0x4200_000c, 40);
+        bus.read_word(0x4080_0000).unwrap();
+        assert_eq!(bus.take_pure_read(), None);
+
+        // An unmapped read is not pure either.
+        bus.set_issuing(0x4200_0010, 50);
+        let _ = bus.read_word(0x6001_0000);
+        assert_eq!(bus.take_pure_read(), None);
+
+        // A write to the block clears the slot even when the same
+        // instruction read a pure register first (an AMO).
+        bus.set_issuing(0x4200_0014, 60);
+        bus.read_word(0x6000_001c).unwrap();
+        bus.write_word(0x6000_0020, 1).unwrap();
+        assert_eq!(bus.take_pure_read(), None);
     }
 
     #[test]

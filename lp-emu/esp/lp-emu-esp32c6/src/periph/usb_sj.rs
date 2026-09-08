@@ -1061,6 +1061,22 @@ impl Peripheral for UsbSerialJtag {
         regs::USB_DEVICE.name(off)
     }
 
+    /// The endpoint status words a driver spins on (M4).
+    ///
+    /// `esp-println` over USB-Serial-JTAG waits for `ep1_conf.in_ep_data_free`
+    /// before every byte, which is the same shape as UART0's TX-FIFO poll.
+    /// All of these are derived in [`read_word`](Self::read_word) from the
+    /// two FIFOs, `int_raw`, `fram_num` and stored registers, and every one
+    /// of those moves only on a write or on one of this block's scheduled
+    /// events (`EV_SOF` for `fram_num`, `EV_IN_DELIVER` and `EV_OUT_LAND`
+    /// for the FIFOs). `EP1` is excluded: reading it pops the OUT FIFO.
+    fn pure_read(&self, off: u32) -> bool {
+        matches!(
+            off & !3,
+            EP1_CONF | INT_RAW | INT_ST | FRAM_NUM | IN_EP1_ST | OUT_EP1_ST
+        )
+    }
+
     fn reg_grade(&self, off: u32) -> Option<RegGrade> {
         Some(self.grades.grade(off))
     }

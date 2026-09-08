@@ -524,6 +524,34 @@ pub trait Peripheral {
         None
     }
 
+    /// `true` when reading the register at `off` has **no side effect** and
+    /// its value can change only through a write or a scheduled event.
+    ///
+    /// Two claims, and a register needs both:
+    ///
+    /// 1. **The read changes nothing.** A FIFO whose read pops, a
+    ///    clear-on-read status word, a register whose read arms a hardware
+    ///    sequence: none of those qualify.
+    /// 2. **The value is not a function of `cx.now`.** A free-running
+    ///    counter fails this even though reading it is harmless — a guest
+    ///    spinning on one is a *delay* loop, and a delay loop is not a fixed
+    ///    point of machine state. `SYSTIMER` is the case: deliberately not
+    ///    pure.
+    ///
+    /// Together they say a run of reads of this register, with nothing else
+    /// happening, is a fixed point except for time — which is what
+    /// [`lp_emu_core::Bus::take_pure_read`] reports and what lets the
+    /// privileged stepper skip whole poll-loop iterations. Getting it wrong
+    /// is a *correctness* bug, not a performance one, so the default is
+    /// `false` for every register of every block and a block opts in
+    /// register by register.
+    ///
+    /// `off` is the byte offset the bus passes to [`read`](Self::read), low
+    /// bits intact; an implementation selects the register with `off & !3`.
+    fn pure_read(&self, _off: u32) -> bool {
+        false
+    }
+
     /// How much evidence backs the register at `off`. See [`RegGrade`].
     ///
     /// `None` — the default — means this block **publishes no grade table**,

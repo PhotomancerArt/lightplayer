@@ -34,7 +34,7 @@ pub mod time;
 pub mod trap_code;
 
 // Re-exports for convenience
-pub use bus::{Bus, Watchpoint};
+pub use bus::{Bus, PureRead, Watchpoint};
 pub use cycle_model::{CycleModel, InstClass};
 pub use log_level::LogLevel;
 pub use memory::{DEFAULT_RAM_START, DEFAULT_SHARED_START, Memory, MemoryAccessKind, MemoryError};
