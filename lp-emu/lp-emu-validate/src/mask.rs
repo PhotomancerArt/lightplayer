@@ -366,6 +366,65 @@ pub static RMT_CHASE: MaskSet = MaskSet {
     rules: &[&ANSI, &BOOT_TIMESTAMP, &WS281X_TIMESTAMP],
 };
 
+/// The render-loop summary line's per-frame microseconds.
+///
+/// `PROSE_TIMING` does not reach them — it knows `elapsed=`, `frame=` and
+/// `tick=`, and this line says `mean=`, `min=`, `max=` and `first=` in
+/// microseconds. The numbers are not lost by masking them here: the
+/// `render-loop-summary` RECORD beside this line carries every one of them as
+/// a `Timing`-graded field, which is where a replay compares them properly.
+pub static RENDER_LOOP_FRAME_US: MaskRule = MaskRule::new(
+    "render-loop-frame-us",
+    "the summary line's per-frame microseconds; the record beside it carries      the same numbers as graded fields",
+    FieldClass::Timing,
+    r"(mean|min|max|first)=[0-9]+us",
+    "$1=Nus",
+);
+
+/// The render-loop summary line's frames-per-second.
+///
+/// Its own rule rather than `PROSE_TIMING`'s `fps=[0-9]+`, which would match
+/// the integer part of `fps=65.99` and leave `fps=N.99` behind — a half-masked
+/// number that still differs between two runs and reads as if it had been
+/// handled. Whole field or nothing.
+pub static RENDER_LOOP_FPS: MaskRule = MaskRule::new(
+    "render-loop-fps",
+    "the summary line's fps, masked whole rather than to its decimals",
+    FieldClass::Timing,
+    r"fps=[0-9]+\.[0-9]+",
+    "fps=N",
+);
+
+/// The `render-loop` set: everything with a clock in it, and **memory left
+/// alone**.
+///
+/// Same shape as `BOOT_IDLE` and for the same reason. What this payload exists
+/// to say is how long a frame takes and how much heap a loaded project costs,
+/// and those arrive as graded fields on its two records rather than as prose —
+/// so the prose restatements are masked and `HEAP_LEDGER_*` is deliberately
+/// absent, leaving the `[mem]` bracket around `load_project` comparable.
+///
+/// `PROSE_TIMING` is included, unlike in `RMT_CHASE`: it rewrites `frame=N`,
+/// and this payload's line says `frames=` — one character further along, which
+/// the regex's `=` anchor does not reach. It does reach the shader compile
+/// line's `elapsed=52ms`, which is exactly a clock and exactly what should go.
+pub static RENDER_LOOP: MaskSet = MaskSet {
+    name: "render-loop",
+    description: "ANSI, build provenance, chip identity and every clock-derived \
+                  field; the heap figures are left comparable",
+    rules: &[
+        &ANSI,
+        &HELLO_BUILD_PROVENANCE,
+        &WIRE_IDENTITY,
+        &HEARTBEAT_TIMING,
+        &SAMPLE_STATS,
+        &PROSE_TIMING,
+        &BOOT_TIMESTAMP,
+        &RENDER_LOOP_FRAME_US,
+        &RENDER_LOOP_FPS,
+    ],
+};
+
 pub static ALL_SETS: &[&MaskSet] = &[
     &NORMALIZE,
     &COMPILE_HARNESS,
@@ -374,6 +433,7 @@ pub static ALL_SETS: &[&MaskSet] = &[
     &JIT_MATH_PERF,
     &BOOT_IDLE,
     &RMT_CHASE,
+    &RENDER_LOOP,
 ];
 
 pub fn mask_set(name: &str) -> Result<&'static MaskSet> {

@@ -346,6 +346,11 @@ fn every_payloads_header_line_is_pinned() {
             "[fw-checks-header] {\"schema\":1,\"payload\":\"jit-math-perf\",\"chip\":\"esp32c6\",\"firmware_commit\":\"d6cfaa2051ae\",\"firmware_features\":\"esp32c6,test_jit_math_perf\",\"firmware_dirty\":false}\n",
         ),
         (
+            "render-loop",
+            "esp32c6,server,radio,memory_fs,bench_render_loop",
+            "[fw-checks-header] {\"schema\":1,\"payload\":\"render-loop\",\"chip\":\"esp32c6\",\"firmware_commit\":\"d6cfaa2051ae\",\"firmware_features\":\"esp32c6,server,radio,memory_fs,bench_render_loop\",\"firmware_dirty\":false}\n",
+        ),
+        (
             "rmt-chase",
             "esp32c6,test_rmt,ws281x_telemetry",
             "[fw-checks-header] {\"schema\":1,\"payload\":\"rmt-chase\",\"chip\":\"esp32c6\",\"firmware_commit\":\"d6cfaa2051ae\",\"firmware_features\":\"esp32c6,test_rmt,ws281x_telemetry\",\"firmware_dirty\":false}\n",

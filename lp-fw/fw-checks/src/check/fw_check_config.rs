@@ -150,6 +150,36 @@ pub const ALL_CHECKS: &[FwCheckConfig] = &[
         emits_header: false,
     },
     FwCheckConfig {
+        check: FwCheck::RenderLoop,
+        display_name: "Render loop (a real project, N frames, RMT on)",
+        // The shipped server image plus two things: an in-memory filesystem
+        // seeded with a real project, and a frame budget that stops the
+        // server loop instead of letting it run for ever. `bench_render_loop`
+        // carries both, and it is deliberately NOT named `test_*` —
+        // `fw-esp32c6/build.rs` turns any `CARGO_FEATURE_TEST_*` into
+        // `cfg(fw_harness)`, which replaces the product entry point, and a
+        // payload that replaced the product entry point would be measuring a
+        // re-implementation of the render loop rather than the render loop.
+        // `frame-dump` and `spike_uart0_link` are the same shape: features
+        // that decorate the app path without displacing it.
+        //
+        // `memory_fs` because the seed goes into RAM: the flash-backed boot
+        // would need the project written through `lpfs` first, which is a
+        // different payload (`upload-walk`) asking a different question.
+        //
+        // An emulated configuration adds `spike_uart0_link` on top, the same
+        // way `boot-idle`'s does, and for the same reason.
+        firmware_features: &["server", "radio", "memory_fs", "bench_render_loop"],
+        // The literal, not `checks::render_loop::DONE_MARKER`, for the reason
+        // given on `rmt-chase` above; pinned equal by
+        // `the_render_loop_marker_is_the_modules` below.
+        done_marker: Some("[render-loop] === DONE ==="),
+        trace_slug: "render-loop",
+        supported_targets: ESP32_ONLY,
+        emits_records: true,
+        emits_header: true,
+    },
+    FwCheckConfig {
         check: FwCheck::UploadWalk,
         display_name: "Project upload walk (examples/basic)",
         // The same flash-backed product image as `boot-idle-flash`, with a
@@ -374,6 +404,15 @@ mod tests {
         assert_eq!(
             check.done_marker,
             Some(crate::checks::rmt_chase::DONE_MARKER)
+        );
+    }
+
+    #[test]
+    fn the_render_loop_marker_is_the_modules() {
+        let check = find_check("render-loop").expect("registered");
+        assert_eq!(
+            check.done_marker,
+            Some(crate::checks::render_loop::DONE_MARKER)
         );
     }
 }

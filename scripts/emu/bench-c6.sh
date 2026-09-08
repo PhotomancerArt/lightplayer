@@ -5,10 +5,26 @@
 #   scripts/emu/bench-c6.sh --json out.json    # same, plus machine-readable
 #   scripts/emu/bench-c6.sh --bin <path> --no-promote --no-build
 #
-# Runs the two pinned reference images (`scripts/emu/build-reference-image.sh`,
+# Runs the four pinned reference images (`scripts/emu/build-reference-image.sh`,
 # building them if they are missing, same env-var convention as
-# `just test-emu-c6`: `LP_EMU_C6_REF_HARNESS`, `LP_EMU_C6_REF_BOOT_IDLE_MEMFS`)
-# at both time grades, twice each, and reports the best run of each pair:
+# `just test-emu-c6`: `LP_EMU_C6_REF_HARNESS`, `LP_EMU_C6_REF_BOOT_IDLE_MEMFS`,
+# `LP_EMU_C6_REF_RENDER_BASIC`, `LP_EMU_C6_REF_RENDER_ROCAILLE`) at both time
+# grades, twice each, and reports the best run of each pair:
+#
+# ⚠️ THE FOUR IMAGES ARE NOT INTERCHANGEABLE, and quoting one of them as "the
+# emulator's speed" is how this ladder spent four milestones measuring the
+# wrong thing. Measured 2026-09-08 on one loaded Mac, same window:
+#
+#   boot-idle-memfs   6.0x real time   — `wfi` with no project. Idle.
+#   harness           0.6x / 3.2x      — shader COMPILE, and console-bound:
+#                                        the M4 poll skip moves it 5.6x.
+#   render-basic      0.47x            — the product's render loop. The skip
+#                                        is worth nothing here, and slightly
+#                                        NEGATIVE at t1.
+#   render-rocaille   0.53x            — the same loop, 4x the shader.
+#
+# The render-loop rows are the ones the product cares about (M5 P0). They are
+# ~12x slower than boot-idle and they are the number to quote.
 #
 #   user s        USER CPU seconds — the only number that survives a busy
 #                 machine. Compare THESE across binaries.
@@ -61,24 +77,32 @@ mkdir -p "$bench_dir"
 
 # --- the reference images ---------------------------------------------------
 # slug|env var|features|emulated timeout|--exit-on substring (empty = none)
+# slug|env var|features|emulated timeout|--exit-on substring|commit|spike
+#
+# The last two columns are per image. The three original rows carry the
+# historical pin the committed transcripts were recorded at; the two
+# render-loop rows CANNOT — `bench_render_loop` does not exist at d6cfaa205 —
+# so they name their own commit and take no cherry-pick (`none`), because the
+# spike feature is already in their tree.
 images=(
-    "harness|LP_EMU_C6_REF_HARNESS|test_shader_compile_incremental,esp32c6,spike_uart0_link|5s|[inc-shader-compile] === DONE ==="
-    "boot-idle-memfs|LP_EMU_C6_REF_BOOT_IDLE_MEMFS|esp32c6,server,radio,spike_uart0_link,memory_fs|3s|"
+    "harness|LP_EMU_C6_REF_HARNESS|test_shader_compile_incremental,esp32c6,spike_uart0_link|5s|[inc-shader-compile] === DONE ===|d6cfaa205|e8d64eeff"
+    "boot-idle-memfs|LP_EMU_C6_REF_BOOT_IDLE_MEMFS|esp32c6,server,radio,spike_uart0_link,memory_fs|3s||d6cfaa205|e8d64eeff"
+    "render-basic|LP_EMU_C6_REF_RENDER_BASIC|esp32c6,server,radio,spike_uart0_link,memory_fs,bench_render_loop|8s|[render-loop] === DONE ===|8ffc4b325|none"
+    "render-rocaille|LP_EMU_C6_REF_RENDER_ROCAILLE|esp32c6,server,radio,spike_uart0_link,memory_fs,bench_project_rocaille|8s|[render-loop] === DONE ===|8ffc4b325|none"
 )
-reference_commit="d6cfaa205"
 
 resolve_image() {
-    local slug="$1" var="$2" features="$3" path
+    local slug="$1" var="$2" features="$3" commit="$4" spike="$5" path
     path="${!var:-}"
     if [[ -n "$path" ]]; then
         [[ -f "$path" ]] || { echo "bench-c6: $var points at $path, which is not a file" >&2; exit 1; }
         echo "$path"
         return
     fi
-    path="target/emu-ref/$reference_commit-$slug/fw-esp32c6"
+    path="target/emu-ref/$commit-$slug/fw-esp32c6"
     if [[ ! -f "$path" ]]; then
         echo "bench-c6: building the $slug reference image" >&2
-        scripts/emu/build-reference-image.sh "$features" >&2
+        scripts/emu/build-reference-image.sh "$features" "$commit" "$spike" >&2
     fi
     echo "$path"
 }
@@ -96,8 +120,8 @@ lines=()
 json_rows=()
 
 for spec in "${images[@]}"; do
-    IFS='|' read -r slug var features timeout exit_on <<<"$spec"
-    elf="$(resolve_image "$slug" "$var" "$features")"
+    IFS='|' read -r slug var features timeout exit_on commit spike <<<"$spec"
+    elf="$(resolve_image "$slug" "$var" "$features" "$commit" "$spike")"
 
     for grade in t1 t2; do
         uart="$bench_dir/$slug-$grade.txt"
@@ -187,7 +211,7 @@ fi
 if [[ $do_promote -eq 1 ]]; then
     mkdir -p "$prev_dir"
     for spec in "${images[@]}"; do
-        IFS='|' read -r slug _ _ _ _ <<<"$spec"
+        IFS='|' read -r slug _ _ _ _ _ _ <<<"$spec"
         for grade in t1 t2; do
             cp "$bench_dir/$slug-$grade.txt" "$prev_dir/$slug-$grade.txt"
         done
