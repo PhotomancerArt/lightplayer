@@ -18,8 +18,8 @@ use crate::app::story_fixtures::{
 };
 use crate::router::ProjectView;
 use lpa_studio_core::{
-    ArtifactLocation, NodeId, ProjectSyncPhase, UiArrangeMeta, UiArrangeTransform,
-    UiPatchSurface, UiPatchTarget, UiStudioView, UiViewContent,
+    ArtifactLocation, NodeId, ProjectSyncPhase, UiArrangeMeta, UiArrangeTransform, UiPatchSurface,
+    UiPatchTarget, UiStudioView, UiViewContent,
 };
 
 /// Stamp port/output labels onto every cell by id join — what

@@ -207,7 +207,10 @@ mod tests {
 
         // D37: the tab runs one device. A board lens takes the sim's slot.
         let device = pool.install(device_stub("devabc"));
-        assert!(pool.session(sim).is_none(), "the sim's session was replaced");
+        assert!(
+            pool.session(sim).is_none(),
+            "the sim's session was replaced"
+        );
         assert_eq!(
             pool.attached_session().map(RuntimeSession::id),
             Some(device)

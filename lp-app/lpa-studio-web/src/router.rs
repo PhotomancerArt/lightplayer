@@ -1910,10 +1910,10 @@ mod tests {
         // path) has no honest address
         assert_eq!(
             lens_route(&editor_view(Some(UiLensRuntime::Device {
-            uid: "devsim".to_string(),
-            transport: lpa_studio_core::LinkTransport::Sim,
-            project_uid: None,
-        }))),
+                uid: "devsim".to_string(),
+                transport: lpa_studio_core::LinkTransport::Sim,
+                project_uid: None,
+            }))),
             None
         );
     }

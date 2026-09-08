@@ -13,10 +13,8 @@ use lpa_studio_web_story_macros::story;
 use lpa_studio_core::app::library::PackageHealth;
 use lpa_studio_core::{
     ProjectController, ProjectEditorView, ProjectNodeStatusTone, ProjectNodeTreeView,
-    ProjectSyncPhase, UiAgentStatus, UiExampleCard, UiHomeView,
-    UiNodeFace, UiNodeHeader, UiNodeTab,
-    UiNodeView, UiPackageCard, UiPaneView, UiStatus, UiStudioView,
-    UiViewContent,
+    ProjectSyncPhase, UiAgentStatus, UiExampleCard, UiHomeView, UiNodeFace, UiNodeHeader,
+    UiNodeTab, UiNodeView, UiPackageCard, UiPaneView, UiStatus, UiStudioView, UiViewContent,
 };
 
 use crate::app::home::{DevicesPage, ExplorePage, ProjectsPage};

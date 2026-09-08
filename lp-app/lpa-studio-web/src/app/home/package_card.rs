@@ -597,7 +597,6 @@ struct LivePresenceLine {
     title: Option<String>,
 }
 
-
 /// The card's runtime-presence line (D28).
 ///
 /// ⚠️ Nothing produces one right now. The sim arm read

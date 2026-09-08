@@ -13,13 +13,13 @@ use std::rc::Rc;
 use lpc_history::EventKind;
 use lpfs::LpFs;
 
-use crate::UiIssue;
-use crate::app::library::{LibraryStore, PackageMeta, PackageProvenance};
-use crate::app::places::{DeviceRegistry, RegisteredDevice};
 use super::embedded_example::embedded_examples;
 use super::ui_example_card::UiExampleCard;
 use super::ui_home_view::UiHomeView;
 use super::ui_package_card::UiPackageCard;
+use crate::UiIssue;
+use crate::app::library::{LibraryStore, PackageMeta, PackageProvenance};
+use crate::app::places::{DeviceRegistry, RegisteredDevice};
 
 /// The gallery's hydrated library data: built asynchronously from a host
 /// catalog snapshot (`StudioController::refresh_library`) and cached —
@@ -117,11 +117,7 @@ pub fn build_home_view(
     };
 
     UiHomeView {
-        projects: dedupe_by_key(
-            inputs.projects.clone(),
-            |card| card.uid.clone(),
-            "project",
-        ),
+        projects: dedupe_by_key(inputs.projects.clone(), |card| card.uid.clone(), "project"),
         examples,
         // Filled by `StudioController::home_view` from the roster: the
         // builder reads the LIBRARY, and the device model is not in it.
@@ -525,14 +521,10 @@ mod tests {
         assert_eq!(
             view.render_text_lines(),
             vec![
-                format!(
-                    "Home: 0 projects, {} examples",
-                    embedded_examples().len()
-                ),
+                format!("Home: 0 projects, {} examples", embedded_examples().len()),
                 "  opening prjx".to_string(),
                 "  issue: boom".to_string(),
             ]
         );
     }
-
 }

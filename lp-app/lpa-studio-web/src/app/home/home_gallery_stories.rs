@@ -1406,7 +1406,12 @@ fn devices_card_sim_faces() -> Element {
         frame_age_secs: Some(2.0),
         engine_fps: None,
     };
-    let faces: Vec<(&str, DeviceView, Option<UiRuntimeBand>, Option<DeviceCardFeedView>)> = vec![
+    let faces: Vec<(
+        &str,
+        DeviceView,
+        Option<UiRuntimeBand>,
+        Option<DeviceCardFeedView>,
+    )> = vec![
         (
             "Ready · Desktop · GPU",
             desktop.clone(),

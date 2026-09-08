@@ -11,12 +11,12 @@ use dioxus::prelude::*;
 use lpa_studio_core::{
     ControllerId, ProjectController, ProjectEditorOp, ProjectEditorView, ProjectInventorySummary,
     ProjectNodeStatusTone, ProjectNodeStatusView, ProjectNodeTreeItem, ProjectNodeTreeView,
-    ProjectRuntimeSummary, ProjectState, ProjectSyncPhase, ProjectSyncSummary,
-    UiAction, UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot, UiConsoleView, UiIssue,
-    UiLensCard, UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource, UiMetric, UiNodeChild,
-    UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView, UiPaneView, UiProducedProduct,
-    UiProducedValue, UiRuntimeBand, UiSlotAsset, UiSlotSourceState, UiSlotValue,
-    UiStatus, UiStudioView, UiViewContent,
+    ProjectRuntimeSummary, ProjectState, ProjectSyncPhase, ProjectSyncSummary, UiAction,
+    UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot, UiConsoleView, UiIssue, UiLensCard,
+    UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource, UiMetric, UiNodeChild, UiNodeHeader,
+    UiNodeSection, UiNodeTab, UiNodeView, UiPaneView, UiProducedProduct, UiProducedValue,
+    UiRuntimeBand, UiSlotAsset, UiSlotSourceState, UiSlotValue, UiStatus, UiStudioView,
+    UiViewContent,
 };
 
 /// Timestamp shared by every story log fixture, so stories stay

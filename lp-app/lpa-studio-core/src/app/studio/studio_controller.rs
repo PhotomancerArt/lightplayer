@@ -46,10 +46,10 @@ use crate::{
     NodeClearDebugOp, NodeCopyOp, NodeCreateOp, NodeImportOp, NodePasteOp, NodeRemoveOp,
     NodeRevertOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp, PatchPulseOp, PlaylistActivateOp,
     ProjectConnectResult, ProjectController, ProjectEditRun, ProjectOp, ProjectRefreshOutcome,
-    ProjectState, ProjectSyncRun, RuntimePool, ServerSnapshot, ServerState,
-    SlotEditOp, StudioSnapshot, UiAction, UiActions, UiActivityView, UiError,
-    UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiNotice, UiResult, UiStatus, UiStudioView,
-    UiViewContent, UxActivityTarget, UxUpdate, UxUpdateSink,
+    ProjectState, ProjectSyncRun, RuntimePool, ServerSnapshot, ServerState, SlotEditOp,
+    StudioSnapshot, UiAction, UiActions, UiActivityView, UiError, UiLogDraft, UiLogEntry,
+    UiLogLevel, UiLogOrigin, UiNotice, UiResult, UiStatus, UiStudioView, UiViewContent,
+    UxActivityTarget, UxUpdate, UxUpdateSink,
 };
 
 /// Minimum gap between view publishes that carry *only* streamed log lines
@@ -4083,7 +4083,11 @@ impl StudioController {
     /// library.
     async fn open_docs_example(&mut self, example_id: &str, updates: UxUpdateSink) -> UiResult {
         // Live already: the reset path, re-deploying below onto the lens.
-        if self.pool.lens_session().is_some_and(crate::RuntimeSession::is_connected) {
+        if self
+            .pool
+            .lens_session()
+            .is_some_and(crate::RuntimeSession::is_connected)
+        {
             return self.deploy_docs_example(example_id, updates).await;
         }
         emit_activity(
@@ -4374,10 +4378,9 @@ impl StudioController {
 
     /// Install a stubbed sim-backed lens session and return its id.
     pub(crate) fn install_stub_sim_for_test(&mut self) -> crate::RuntimeId {
-        self.pool
-            .install(crate::RuntimePayload::Device(
-                crate::DeviceLensAttachment::sim_stub_for_test("devsim"),
-            ))
+        self.pool.install(crate::RuntimePayload::Device(
+            crate::DeviceLensAttachment::sim_stub_for_test("devsim"),
+        ))
     }
 
     /// Install a stubbed sim-backed lens session with an injected wire

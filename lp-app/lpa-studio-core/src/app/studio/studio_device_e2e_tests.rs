@@ -3786,7 +3786,10 @@ fn open_package(bench: &mut DeviceBench, tasks: &TaskPool, uid: &str) {
             key: uid.to_string(),
         },
     )));
-    eprintln!("OPEN OUTCOME {outcome:?} pending={:?}", bench.controller.pending_device_lens_for_test());
+    eprintln!(
+        "OPEN OUTCOME {outcome:?} pending={:?}",
+        bench.controller.pending_device_lens_for_test()
+    );
     // The lens is HELD until the device says hello (the fold that produces
     // it runs on the actor's queue, which is what the bench's step IS), so
     // the tick's own attach has to run here the way the actor runs it.

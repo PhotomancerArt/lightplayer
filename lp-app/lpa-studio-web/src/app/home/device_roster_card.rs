@@ -129,9 +129,9 @@ use lpa_studio_core::{
     DeviceAction, DeviceActivityView, DeviceCardFeedView, DeviceEscape, DeviceFeedOp, DeviceId,
     DeviceLoadedProject, DeviceStatus, DeviceView, DevicesOp, FeedLiveness, FirmwareVerb,
     PendingLinkView, UiAction, UiExampleCard, UiPackageCard, UiRuntimeBand, UiStatus,
-    device_escape_action,
-    device_firmware_line, device_identity_line, device_status_kind, firmware_face_preview_sentence,
-    firmware_verb, pending_escape_action, pending_firmware_line, pending_identity_rows,
+    device_escape_action, device_firmware_line, device_identity_line, device_status_kind,
+    firmware_face_preview_sentence, firmware_verb, pending_escape_action, pending_firmware_line,
+    pending_identity_rows,
 };
 
 use super::device_pick_popover::{

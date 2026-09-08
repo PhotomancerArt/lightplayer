@@ -62,8 +62,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DirtySummary, UiAction, UiAffordance, UiChromeSessionControl,
-    UiChromeSessionStatus, UiPaneAction,
+    DirtySummary, UiAction, UiAffordance, UiChromeSessionControl, UiChromeSessionStatus,
+    UiPaneAction,
 };
 use lpc_cloud_api::Access;
 
@@ -1123,8 +1123,11 @@ mod tests {
     /// question rather than the whole bar's.
     #[test]
     fn each_segment_names_only_its_own_question() {
-        assert_eq!(device_label(&session(Some("ESP32-C6"))), "Sim · ESP32-C6");
-        assert_eq!(device_label(&session(None)), "Sim");
+        assert_eq!(
+            device_label(&session(Some("ESP32-C6"))),
+            "Desktop sim · ESP32-C6"
+        );
+        assert_eq!(device_label(&session(None)), "Desktop sim");
 
         assert_eq!(
             project_label(Some("small dome"), ProjectRelationship::Example),
@@ -1161,8 +1164,9 @@ mod tests {
         };
         assert_eq!(board_suffix(&named), None);
         assert_eq!(
-            board_suffix(&session(Some("Desktop"))),
-            Some("Desktop".to_string())
+            board_suffix(&session(Some("XIAO ESP32-C6"))),
+            Some("XIAO ESP32-C6".to_string()),
+            "a name that does NOT carry its board wears the suffix"
         );
         assert_eq!(kind_icon(), StudioIconName::Usb);
         assert!(device_title(&named).contains("XIAO ESP32-C6"));

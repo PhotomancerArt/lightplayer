@@ -275,9 +275,9 @@ fn boot_sim(spec: &'static DocsSimSpec) -> DocsSim {
     // device, it is simply an anonymous one). No SERIAL transport: a docs
     // page must never reach for the reader's boards.
     controller.set_device_spawner(wasm_bindgen_futures::spawn_local);
-    controller.set_device_sim_transport(Rc::new(lpa_studio_core::SimDeviceTransport::new(Rc::new(
-        lpa_studio_core::BrowserSimLinkSource::resolving(),
-    ))));
+    controller.set_device_sim_transport(Rc::new(lpa_studio_core::SimDeviceTransport::new(
+        Rc::new(lpa_studio_core::BrowserSimLinkSource::resolving()),
+    )));
     controller.set_random(crate::library_host_opfs::random_bytes);
 
     let mut host = DocsSimHost::boot(

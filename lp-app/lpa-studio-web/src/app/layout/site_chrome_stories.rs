@@ -12,9 +12,8 @@ use dioxus::prelude::*;
 use lpa_studio_core::{
     ControllerId, DirtySummary, ProjectController, ProjectNodeAddress, ProjectOp,
     ProjectSlotAddress, ProjectSlotRoot, ProjectSyncPhase, SlotEditOp, SlotPath, UiAction,
-    UiChromeSessionControl, UiChromeSessionStatus, UiHistoryKind,
-    UiPaneAction, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiProjectHistory,
-    UiProjectHistoryEntry, UiStatus,
+    UiChromeSessionControl, UiChromeSessionStatus, UiHistoryKind, UiPaneAction, UiPendingEdit,
+    UiPendingEditKind, UiPendingEditPhase, UiProjectHistory, UiProjectHistoryEntry, UiStatus,
 };
 use lpa_studio_web_story_macros::story;
 

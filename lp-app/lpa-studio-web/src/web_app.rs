@@ -49,8 +49,8 @@ use gloo_timers::future::TimeoutFuture;
 use lpa_studio_core::app::studio::studio_view_channel::CommandSender;
 use lpa_studio_core::{
     HOME_NODE_ID, HomeOp, RuntimeOp, STUDIO_LOG_SINK, SettingsCommand, StudioActor, StudioCommand,
-    StudioController, UiAction, UiChromeSessionControl, UiLogEntry,
-    UiLogLevel, UiStudioView, has_unsaved_work,
+    StudioController, UiAction, UiChromeSessionControl, UiLogEntry, UiLogLevel, UiStudioView,
+    has_unsaved_work,
 };
 use lpc_cloud_api::share_link;
 use lpc_history::PrefixedUid;
@@ -2017,7 +2017,10 @@ mod tests {
         let NavSessionPlan::Leave { said, .. } = dirty else {
             panic!("leaving");
         };
-        assert_eq!(said, "Simulator stopped — your edits are saved as a draft");
+        assert_eq!(
+            said,
+            "Desktop sim powered off — your edits are saved as a draft"
+        );
     }
 
     /// A session moves freely INSIDE the studio: play, patch and mapping
