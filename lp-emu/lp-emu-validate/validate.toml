@@ -195,6 +195,11 @@ chip = "esp32c6"
 mac = "a0:f2:62:87:b4:8c"
 silicon_rev = "v0.2"
 board = "seeed/xiao-esp32-c6"
+# The pad is decoded off this machine's own signal fabric (M5 P2), so a
+# capture from it carries a per-frame pin log. Silicon says nothing here and
+# therefore records none: reading a real pad needs an instrument nobody has
+# put on this bench, which is the same thing the `pin` trust entry says.
+records_pins = true
 
 [[configuration.trust]]
 class = "memory"
@@ -233,6 +238,11 @@ chip = "esp32c6"
 mac = "a0:f2:62:87:b4:8c"
 silicon_rev = "v0.2"
 board = "seeed/xiao-esp32-c6"
+# The pad is decoded off this machine's own signal fabric (M5 P2), so a
+# capture from it carries a per-frame pin log. Silicon says nothing here and
+# therefore records none: reading a real pad needs an instrument nobody has
+# put on this bench, which is the same thing the `pin` trust entry says.
+records_pins = true
 
 [[configuration.trust]]
 class = "memory"
