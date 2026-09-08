@@ -5,6 +5,7 @@ logged: 2026-08-05
 area: lpa-studio-web / lpa-studio-core — dev-profile frame cost at dome scale
 related:
   - ../adr/2026-08-05-map2d-editor-selection-tree-model.md
+  - ../../lp-fw/fw-esp32v3/probes/flash-layout/README.md   # classic layout noise floor
 ---
 # Dome-scale dev frames sit near 50ms, not 16ms
 
@@ -43,6 +44,31 @@ symbolization — the binary was rebuilt under the trace):
    a small plan.
 4. WebGL/instanced LampView backend — the documented upgrade path;
    keyed to Radiance (~30k) scale, not this.
+
+## Layout noise floor on the classic (2026-09-07)
+
+The device-side counterpart of this entry has a measurement trap of its own.
+On the classic ESP32 (DOM-Z-102, `projects/test/zook-dome-1500`), flash code
+*placement* alone moves the frame time: the per-core flash cache is 32 KB
+two-way set-associative with 32-byte blocks (TRM 1.3.4), shared by IROM and
+DROM, and the per-lamp working set — the JIT's scalar-builtin trampolines in
+flash, their `libm`/`__divsf3` callees, the sample loop, the direct-lamp
+encode and the 2 KB GAMMA16 table in DROM — sat scattered across 1.7 MB of
+`.text`, so whether three of its lines shared a cache set depended on how
+much unrelated code lay between them. PR #562 saw 50–56 ms from that alone.
+Since `hot_text.x` (an ld section-ordering file, `lp-fw/fw-esp32v3/build.rs`)
+pins that working set to the head of `.text`, the same source renders the
+zook frame in 51–52 ms instead of 56 ms, and a shift sweep — the same LTO
+object relinked with 32 B … 12 KB of dead text at an ordered position —
+spreads 50–54 ms pinned against 52–60 ms unpinned. **Procedure**:
+a before/after `[perf] tick=` claim on the classic must (1) be built with
+`hot_text.x` in place and `cache-sets.py` showing every hot function inside
+the cluster, and (2) clear ±2 ms, the pinned sweep's spread, or be
+run as its own sweep (`probes/flash-layout/shift-sweep.sh`, ten relinks,
+minutes on the desk) and compared spread against spread. Details, captures
+and the two placements that do not work (a second IROM segment does not
+boot; `INSERT` cannot reach `-Tlinkall.x`) are in
+`lp-fw/fw-esp32v3/probes/flash-layout/README.md`.
 
 ## Exit criteria
 

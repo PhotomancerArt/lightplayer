@@ -32,6 +32,7 @@ fn main() {
     emit_build_provenance();
     emit_partition_facts();
     emit_linker_search_path();
+    emit_hot_text_order();
 
     println!("cargo::rustc-check-cfg=cfg(fw_harness)");
     let harness = std::env::vars().any(|(k, _)| k.starts_with("CARGO_FEATURE_TEST_"));
@@ -78,6 +79,30 @@ fn emit_linker_search_path() {
     println!(
         "cargo:rustc-link-search={}",
         PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR")).display()
+    );
+}
+
+/// Pin the per-lamp render path's flash code to the head of `.text` with a
+/// GNU ld section-ordering file (`hot_text.x`; binutils >= 2.43, which the
+/// esp toolchain's xtensa-esp32-elf-ld 2.43.1 is — an older ld fails the
+/// link loudly with "unrecognized option", never silently).
+///
+/// Why: the classic's per-core flash cache is 32 KB two-way set-associative
+/// with 32-byte blocks (TRM 1.3.4), shared by IROM and DROM, and whether the
+/// per-lamp working set fits its sets depended on where unrelated code had
+/// pushed each hot function — an unrelated change moved
+/// `projects/test/zook-dome-1500`'s frame across 50–56 ms. A contiguous
+/// cluster of at most 32 KB cannot evict itself. Procedure, sweep and numbers:
+/// `probes/flash-layout/README.md`.
+///
+/// The ordering file is opened by ld directly (not through `-L`), so the path
+/// is absolute.
+fn emit_hot_text_order() {
+    let path = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"))
+        .join("hot_text.x");
+    println!(
+        "cargo:rustc-link-arg=-Wl,--section-ordering-file={}",
+        path.display()
     );
 }
 

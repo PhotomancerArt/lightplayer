@@ -128,7 +128,12 @@ moves this project's frame time across 50–56 ms** (pristine main 56.0,
 the probe image 54.0, a control that shifted the same flash region without
 touching the hot path 51.2, the RAM-move image 50.3), so a before/after
 fps delta on the classic is not evidence of anything without a layout
-control.
+control. **Diagnosed 2026-09-07** (`lp-fw/fw-esp32v3/probes/flash-layout/`,
+the "Layout noise floor" paragraph of
+`docs/debt/dome-scale-dev-frames-miss-60fps.md`): the per-core flash cache
+is two-way with 32-byte blocks and the per-lamp working set was scattered
+over 1.7 MB of `.text`; `hot_text.x` now pins it to the head of `.text`,
+and the shift sweep there is the noise floor to quote.
 
 **Workarounds** —
 - Re-verify after any esp-hal / esp-rtos bump or a change to a `#[ram]`

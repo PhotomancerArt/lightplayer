@@ -1,0 +1,17 @@
+.text : {
+  *(.text.pad)
+  *(.literal.__lp_lpir_* .text.__lp_lpir_*)
+  *(.literal.*compiler_builtins*float*div* .text.*compiler_builtins*float*div*)
+  *(.literal.*__divsf3* .text.*__divsf3*)
+  *(.literal.*libm* .text.*libm*)
+  *(.literal.*sample_request*VisualSampleStream* .text.*sample_request*VisualSampleStream*)
+  *(.literal.*lpvm_shader*LpvmShader* .text.*lpvm_shader*LpvmShader*)
+  *(.literal.*px_shader*BackendAdapter* .text.*px_shader*BackendAdapter*)
+  *(.literal.*shader_node*sample_visual_into* .text.*shader_node*sample_visual_into*)
+  *(.literal.*fixture_node*DirectCoordFill* .text.*fixture_node*DirectCoordFill*)
+  *(.literal.*control_render_target*ControlRenderTarget* .text.*control_render_target*ControlRenderTarget*)
+  *(.literal.*fixture_node*stream_direct_lamps* .text.*fixture_node*stream_direct_lamps*)
+  *(.literal.*fixture_node*write_direct_lamps* .text.*fixture_node*write_direct_lamps*)
+  *(.literal.*fixture_node*encode_fixture_channel* .text.*fixture_node*encode_fixture_channel*)
+  *(.literal.*fixture_node*render_direct_fixture_control* .text.*fixture_node*render_direct_fixture_control*)
+}
