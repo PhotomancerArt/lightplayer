@@ -25,7 +25,7 @@ use crate::project_deploy::{
     ProjectDeployFile, project_deploy_requests, project_write_requests,
     validate_project_deploy_response,
 };
-use crate::protocol_session::{ProtocolSession, ResponseDisposition};
+use crate::protocol_session::{PendingAsk, ProtocolSession, ResponseDisposition};
 use crate::pull_loop::{
     CancelSignal, NeverCancel, ProgressDeadline, PullOutcome, run_project_read,
 };
@@ -208,6 +208,9 @@ where
         request_id: u64,
         request: ClientRequest,
     ) -> ClientResult<ClientOutcome<WireServerMessage>> {
+        // What this request asks for travels with it: a `Hello` answers
+        // `ClientRequest::Hello` and nothing else, whatever id it carries.
+        let asked = PendingAsk::of(&request);
         self.io
             .send(ClientMessage {
                 id: request_id,
@@ -219,12 +222,27 @@ where
         let mut events = Vec::new();
         loop {
             let response = self.io.receive().await.map_err(ClientError::from)?;
-            match self.protocol.response_disposition(&response, request_id) {
+            match self
+                .protocol
+                .response_disposition(&response, request_id, asked)
+            {
                 ResponseDisposition::Matched => {
                     if let WireServerMsgBody::Error { error } = &response.msg {
                         return Err(ClientError::Server(error.clone()));
                     }
                     return Ok(ClientOutcome::new(response, events));
+                }
+                ResponseDisposition::ServerOriginated { response_id } => {
+                    // Another id space's straggler, or a board that
+                    // re-announced itself mid-conversation. Either way it
+                    // is not our answer; say so once and keep waiting.
+                    log::debug!(
+                        "a server-originated frame arrived under request id {response_id}; \
+                         it is not this request's reply"
+                    );
+                    if let Some(event) = ClientEvent::from_unsolicited_message(response) {
+                        events.push(event);
+                    }
                 }
                 ResponseDisposition::Unsolicited => {
                     if let Some(event) = ClientEvent::from_unsolicited_message(response) {
@@ -1002,6 +1020,69 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    /// The 2026-09-08 defect, in one script: a hello arrives bearing the
+    /// id the push's first request is waiting on. Before the fix the
+    /// client matched it on the id and `project.list_loaded` failed with
+    /// `unexpected response for project.list_loaded: Hello(…)`; the real
+    /// answer was sitting right behind it on the wire.
+    #[tokio::test]
+    async fn a_stray_hello_under_the_pending_id_is_not_the_reply() {
+        let io = ScriptedClientIo::new([
+            WireServerMessage::new(1, WireServerMsgBody::Hello(a_boards_hello())),
+            WireServerMessage::new(
+                1,
+                WireServerMsgBody::ListLoadedProjects {
+                    projects: Vec::new(),
+                },
+            ),
+        ]);
+        let mut client = LpClient::new(io);
+
+        let outcome = client
+            .project_list_loaded()
+            .await
+            .expect("the answer behind the stray hello");
+
+        assert!(outcome.value.is_empty());
+        // The hello is not discarded — it is true, just not an answer — so
+        // it comes back as the side-channel event it always was.
+        assert!(
+            matches!(outcome.events.as_slice(), [ClientEvent::Hello(_)]),
+            "{:?}",
+            outcome.events
+        );
+    }
+
+    /// The exception the rule turns on: a client that ASKED for a hello
+    /// still gets one.
+    #[tokio::test]
+    async fn a_hello_request_is_still_answered_by_a_hello() {
+        let io = ScriptedClientIo::new([WireServerMessage::new(
+            1,
+            WireServerMsgBody::Hello(a_boards_hello()),
+        )]);
+        let mut client = LpClient::new(io);
+
+        let outcome = client.hello().await.expect("the hello answer");
+
+        assert_eq!(outcome.value.proto, lpc_wire::WIRE_PROTO_VERSION);
+    }
+
+    fn a_boards_hello() -> lpc_wire::ServerHello {
+        lpc_wire::ServerHello {
+            proto: lpc_wire::WIRE_PROTO_VERSION,
+            build: lpc_wire::server::hello::BuildFacts {
+                features: Vec::new(),
+                package: "fw-esp32c6".to_string(),
+                commit: "fake-firmware".to_string(),
+                dirty: false,
+                profile: "release-esp32".to_string(),
+            },
+            hardware: Default::default(),
+            device_uid: Some("dev000000daqf6dvvt2".to_string()),
+        }
     }
 
     #[tokio::test]

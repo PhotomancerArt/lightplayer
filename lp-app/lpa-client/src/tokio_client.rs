@@ -31,7 +31,7 @@ use crate::project_deploy::{
     ProjectDeployFile, project_deploy_requests, project_write_requests,
     validate_project_deploy_response,
 };
-use crate::protocol_session::{ProtocolSession, ResponseDisposition};
+use crate::protocol_session::{PendingAsk, ProtocolSession, ResponseDisposition};
 use crate::pull_loop::{NeverCancel, ProgressDeadline, PullIo, PullOutcome, run_project_read};
 use crate::transport::ClientTransport;
 
@@ -163,6 +163,8 @@ impl TokioLpClient {
     ) -> Result<ClientOutcome<WireServerMessage>> {
         let mut state = self.state.lock().await;
         let request_id = state.protocol.next_request_id();
+        // A `Hello` answers only a hello ask; see `PendingAsk`.
+        let asked = PendingAsk::of(&request);
         let mut transport = state.transport.lock().await;
         transport
             .send(ClientMessage {
@@ -178,12 +180,27 @@ impl TokioLpClient {
                 .receive()
                 .await
                 .map_err(|error| Error::msg(format!("Transport error: {error}")))?;
-            match state.protocol.response_disposition(&response, request_id) {
+            match state
+                .protocol
+                .response_disposition(&response, request_id, asked)
+            {
                 ResponseDisposition::Matched => {
                     if let WireServerMsgBody::Error { error } = &response.msg {
                         return Err(Error::msg(error.clone()));
                     }
                     return Ok(ClientOutcome::new(response, events));
+                }
+                ResponseDisposition::ServerOriginated { response_id } => {
+                    // Another id space's straggler on this wire, or a board
+                    // that re-announced itself mid-conversation. Not our
+                    // answer either way.
+                    log::debug!(
+                        "a server-originated frame arrived under request id {response_id}; \
+                         it is not this request's reply"
+                    );
+                    if let Some(event) = ClientEvent::from_unsolicited_message(response) {
+                        events.push(event);
+                    }
                 }
                 ResponseDisposition::Unsolicited => {
                     if let Some(event) = ClientEvent::from_unsolicited_message(response) {

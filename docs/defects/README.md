@@ -204,6 +204,15 @@ genuinely fits none of these, and define it here in one line.
   pass, so the working set scales with references × payload size instead
   of with the result. Presents as an allocation failure far larger than
   the input could justify.
+- **`shared-namespace-collision`** — two independent producers mint
+  identifiers from the same namespace onto one shared channel, and a
+  consumer correlates on the identifier alone, so one producer's frame
+  satisfies the other's pending request. Disjoint bases (start your ids
+  high) are the usual mitigation and are the trap: they make the
+  collision rare rather than impossible, so the defect presents as flake
+  landing on a different test each time. The fix is a shape check — ask
+  whether the frame *could* answer this request before asking whether
+  its number matches.
 
 ## Index
 
@@ -417,6 +426,7 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 | untested-path | 2026-09-02 | [studio-flasher-cannot-recover-a-boot-looping-c6](2026-09-02-studio-flasher-cannot-recover-a-boot-looping-c6.md) | **open** | lpa-studio-web device card flash flow (esptool-js ladder) |
 | lifecycle-ownership | 2026-09-02 | [same-gpio-rebind-disconnects-the-pad](2026-09-02-same-gpio-rebind-disconnects-the-pad.md) | fixed | fw-esp32c6 + fw-esp32s3 output/rmt `bind_channel` (esp-hal `with_pin` guard order) |
 | untested-path | 2026-09-06 | [emu-transport-drops-unprefixed-client-lines](2026-09-06-emu-transport-drops-unprefixed-client-lines.md) | fixed | lpa-client transport_serial/emulator (async `M!` framing) + lp-cli `emu` host spec |
+| shared-namespace-collision | 2026-09-08 | [a-stray-hello-answered-a-request-that-never-asked](2026-09-08-a-stray-hello-answered-a-request-that-never-asked.md) | fixed | lpa-client protocol_session/client/tokio_client/project_read_stream (correlation) |
 
 ## Predecessor: `docs/bugs/`
 
