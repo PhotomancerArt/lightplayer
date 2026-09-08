@@ -53,29 +53,218 @@ const HEARTBEAT_MESSAGE_ID: u64 = 0;
 /// This is the main async loop that processes incoming messages and sends responses.
 /// Runs at ~60 FPS to maintain consistent frame timing.
 /// Yields control back to Embassy runtime between iterations.
+///
+/// This is a deliberate duplicate of [`run_server_loop_bounded`]'s body under
+/// `FrameBudget::UNBOUNDED`, not a thin wrapper around it. A wrapper was
+/// tried first — it is what M5 P0 shipped initially — and the C6's own
+/// heap-budget ratchet caught its cost on the *shipped* image (no bench
+/// feature involved): the ESP32C6's async-fn-of-an-async-fn nesting moved the
+/// main task's `stackHighWater` from 11,908 B to 13,428 B and its
+/// `stackTotal` from 71,152 B to 70,736 B, and `#[inline(always)]` on the
+/// bounded function did not fold it back — that attribute reaches the
+/// function that constructs the `impl Future`, not the generated `poll`
+/// wired up by `.await`, so the nested state machine stayed nested. On a
+/// RAM-tight chip a ~1.5 KB stack regression on the product's own path is not
+/// something a benchmark PR gets to introduce, so this function is now byte-
+/// for-byte the pre-P0 implementation, and [`run_server_loop_bounded`] is a
+/// second, separate copy that only the `bench_render_loop` call site in
+/// `fw-esp32c6/src/main.rs` ever calls. Keep the two loop bodies in sync by
+/// hand if either changes.
 pub async fn run_server_loop<T: ServerTransport>(
-    server: LpServer,
-    transport: T,
+    mut server: LpServer,
+    mut transport: T,
     time_provider: Esp32TimeProvider,
     // Chip-injected seams: heap stats for the heartbeat (including the
     // fragmentation numbers only the chip can probe) and the watchdog feed.
     // Both are chip facts this crate must not know.
     memory_stats: fn() -> Option<lpc_wire::server::MemoryStats>,
-    feed_watchdog: impl FnMut(u64),
+    mut feed_watchdog: impl FnMut(u64),
 ) -> ! {
-    run_server_loop_bounded(
-        server,
-        transport,
-        time_provider,
-        memory_stats,
-        feed_watchdog,
-        FrameBudget::UNBOUNDED,
-        |_| {},
-    )
-    .await;
-    // `FrameBudget::UNBOUNDED` is the only budget whose loop never breaks, and
-    // it is the one this caller passes.
-    unreachable!("the unbounded server loop returned")
+    // Wire hello: the first id-0 frame this loop ever sends, so clients can
+    // check the protocol version before anything else arrives (see
+    // docs/adr/2026-07-14-wire-hello-versioning.md).
+    if let Err(e) = fw_core::send_unsolicited_hello(&server, &mut transport).await {
+        log::warn!("run_server_loop: failed to send hello: {e:?}");
+    }
+
+    let mut last_tick = time_provider.now_ms();
+    let mut frame_count = 0u32;
+    let mut fps_tracker = FpsTracker::new(time_provider.now_ms());
+    let mut heartbeat_last_sent = time_provider.now_ms();
+    let startup_time = time_provider.now_ms();
+    let mut fps_collector = WindowedStatsCollector::new();
+    let mut boot_completed = false;
+
+    // One legible error line if the previous run ended in a crash; flows to
+    // the client through the normal log transport.
+    if let Some(snapshot) = lp_recovery::snapshot()
+        && let Some(crash) = snapshot.last_crash
+        && crash.boots_ago == 1
+    {
+        log::error!(
+            "[RECOVERY] previous run crashed ({}): at {}: {}",
+            crash.cause.as_str(),
+            crash.path_display(),
+            crash.msg.as_str()
+        );
+    }
+
+    loop {
+        let frame_start = time_provider.now_ms();
+
+        // Collect incoming messages (non-blocking)
+        let receive_start = time_provider.now_ms();
+        let mut incoming_messages = Vec::new();
+        loop {
+            match transport.receive().await {
+                Ok(Some(msg)) => {
+                    incoming_messages.push(WireMessage::Client(msg));
+                }
+                Ok(None) => {
+                    // No more messages available
+                    break;
+                }
+                Err(e) => {
+                    // Transport error - log and continue
+                    log::warn!("run_server_loop: Transport error: {e:?}");
+                    break;
+                }
+            }
+        }
+        let receive_done = time_provider.now_ms();
+
+        // Calculate delta time since last tick
+        let delta_time = time_provider.elapsed_ms(last_tick);
+        let delta_ms = delta_time.min(u32::MAX as u64) as u32;
+
+        // Tick server (synchronous)
+        let tick_start = time_provider.now_ms();
+        let (tick_ms, send_ms, total_ms, response_count) = match server
+            .tick_and_send(delta_ms.max(1), incoming_messages, &mut transport)
+            .await
+        {
+            Ok(response_count) => {
+                let tick_done = time_provider.now_ms();
+                let send_done = time_provider.now_ms();
+                server.set_last_frame_time(send_done.saturating_sub(frame_start) * 1000);
+                if !boot_completed {
+                    // First successful frame: the boot survived. Recovery's
+                    // boot-loop counter resets at the next boot.
+                    boot_completed = true;
+                    lp_recovery::mark_boot_complete();
+                    log::info!("[RECOVERY] boot complete (first frame served)");
+                }
+                (
+                    tick_done.saturating_sub(tick_start),
+                    send_done.saturating_sub(tick_done),
+                    send_done.saturating_sub(frame_start),
+                    response_count,
+                )
+            }
+            Err(e) => {
+                let tick_done = time_provider.now_ms();
+                server.set_last_frame_time(tick_done.saturating_sub(frame_start) * 1000);
+                log::warn!("run_server_loop: Server tick error: {e:?}");
+                // Server error - continue
+                (
+                    tick_done.saturating_sub(tick_start),
+                    0,
+                    tick_done.saturating_sub(frame_start),
+                    0,
+                )
+            }
+        };
+
+        last_tick = frame_start;
+        frame_count += 1;
+
+        let current_time = time_provider.now_ms();
+        if current_time.saturating_sub(fps_tracker.last_log_time_ms()) >= PERF_LOG_INTERVAL_MS {
+            let elapsed_ms = current_time.saturating_sub(fps_tracker.last_log_time_ms());
+            if elapsed_ms > 0 {
+                let frames_done = frame_count.saturating_sub(fps_tracker.last_log_frame());
+                let fps = (frames_done as u64 * 1000) / elapsed_ms;
+                log::info!(
+                    "[perf] frame={} fps={} elapsed={}ms recv={}ms tick={}ms send={}ms total={}ms responses={}",
+                    frame_count,
+                    fps,
+                    elapsed_ms,
+                    receive_done.saturating_sub(receive_start),
+                    tick_ms,
+                    send_ms,
+                    total_ms,
+                    response_count,
+                );
+                fps_tracker.record_log(frame_count, current_time);
+            }
+        }
+
+        // Send heartbeat message periodically
+        // See prior art: fw-esp32/src/tests/test_usb.rs heartbeat_task()
+        // This implementation uses proper ServerMessage types with M! prefix
+        // Heartbeats flow on their interval even while responses are being
+        // served: a long multi-frame read is exactly when the memory and
+        // link-loss numbers matter most, and suppressing the heartbeat there
+        // made a busy device doubly invisible.
+        if current_time.saturating_sub(heartbeat_last_sent) >= HEARTBEAT_INTERVAL_MS {
+            // Get loaded projects from server, each carrying its fault
+            // verdict — the heartbeat is where "this board is degraded"
+            // reaches a card, so it asks the faulting variant.
+            let loaded_projects = server.project_manager().list_loaded_projects_with_faults();
+
+            let fps_current = fps_tracker
+                .instantaneous_fps(frame_count, current_time, startup_time)
+                .unwrap_or(0.0);
+
+            fps_collector.push(current_time, fps_current);
+            fps_collector.prune_older_than(current_time.saturating_sub(FPS_STATS_WINDOW_MS));
+            let fps_stats = fps_collector.compute_stats();
+
+            let memory = memory_stats();
+
+            // Create heartbeat message (unsolicited: id 0, single/final message).
+            let heartbeat_msg = WireServerMessage::new(
+                HEARTBEAT_MESSAGE_ID,
+                lpc_wire::server::ServerMsgBody::Heartbeat {
+                    fps: fps_stats,
+                    frame_count: frame_count as u64,
+                    loaded_projects,
+                    uptime_ms: current_time.saturating_sub(startup_time),
+                    memory,
+                    recovery: lpa_server::recovery_report::current_recovery_status().map(
+                        |mut status| {
+                            // The clamp is server state, not recovery-region
+                            // state — stamp it here where both are in scope.
+                            status.output_clamp = server.safe_output_clamp();
+                            status
+                        },
+                    ),
+                    outputs: crate::output::wire_stats_source::current(),
+                    link: crate::serial::link_counters::current(),
+                    // Who we are, on every heartbeat: a Studio that attached
+                    // mid-stream never saw our boot hello, and this resolves
+                    // it passively within one heartbeat period (R4a).
+                    identity: server.heartbeat_identity(),
+                },
+            );
+
+            // Send heartbeat (non-blocking, ignore errors)
+            if let Err(e) = transport.send(heartbeat_msg).await {
+                log::warn!("run_server_loop: Failed to send heartbeat: {e:?}");
+            }
+
+            heartbeat_last_sent = current_time;
+        }
+
+        // Feed the RWDT while the loop and the I/O task are both alive; a
+        // hang anywhere stops the feeding and the watchdog resets us with
+        // the recovery frame stack as the blame record.
+        feed_watchdog(current_time);
+
+        // Yield to Embassy runtime (allows other tasks to run)
+        // Use embassy_time::Timer to delay slightly
+        embassy_time::Timer::after(embassy_time::Duration::from_millis(1)).await;
+    }
 }
 
 /// How many frames the loop runs for, and on whose clock.
@@ -126,6 +315,11 @@ impl FrameBudget {
 /// min/max/sum accumulator and prints once, after the last frame — every
 /// earlier benchmark on this ladder turned out to be measuring its own
 /// logging.
+///
+/// Only `bench_render_loop`'s call site in `fw-esp32c6/src/main.rs` calls
+/// this — the shipped path calls [`run_server_loop`], a separate copy of the
+/// same loop, not this one. See that function's doc comment for why they are
+/// two copies instead of one wrapping the other.
 pub async fn run_server_loop_bounded<T: ServerTransport>(
     mut server: LpServer,
     mut transport: T,
