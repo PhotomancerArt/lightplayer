@@ -11,6 +11,7 @@
 //! flash (director note 2; the flash-backed one spins on `SPI1.cmd` until
 //! M4). `#[ignore]`d for the usual reason (`test_support`).
 
+use lp_emu_esp_common::pins::RouteSource;
 use lp_emu_esp_common::trace::SharedBuffer;
 use lp_emu_esp32c6::machine::{AppSource, Esp32C6Builder, Outcome, StopCondition, TimeGrade};
 use lp_emu_esp32c6::memmap;
@@ -173,6 +174,18 @@ fn with_no_host_the_printer_times_out_once_and_the_rx_path_is_never_armed() {
     assert_eq!(m.rmt_frames_ended(0), 0);
     assert_eq!(m.rmt_frames_ended(1), 0);
     assert!(m.rmt_words(0).is_empty() && m.rmt_pulses(0).is_empty());
+    // M5 P2 G2-2: and no peripheral signal reaches a pad. The one pad the
+    // boot routes is `init_board`'s plain GPIO output on gpio16, following
+    // `GPIO_OUT` — not a waveform, and nothing decodable on it.
+    let routed = m.routed_pads();
+    assert!(
+        routed
+            .iter()
+            .all(|(_, source)| *source == RouteSource::GpioOut),
+        "a peripheral signal reached a pad: {routed:?}"
+    );
+    assert!(m.frames(18).is_empty());
+    assert_eq!(m.pin_edges(18), 0);
     let conf0 = m.peek_word(RMT_CH0_TX_CONF0).expect("RMT.ch0_tx_conf0");
     assert_eq!(conf0 & (1 << 6), 1 << 6, "idle_out_en: {conf0:#010x}");
     assert_eq!(conf0 & (1 << 5), 0, "idle_out_lv 0: {conf0:#010x}");

@@ -36,6 +36,7 @@ use crate::periph::{
     BoxedPeripheral, BusCx, CpuIntMatrix, IrqLines, MachineRequest, NoCpuInterrupts, RegGrade,
     Width,
 };
+use crate::pins::Fabric;
 use crate::trace::{Access, MmioEvent, Trace};
 
 /// Hardware trigger slots, matching the RISC-V debug spec's count on the
@@ -160,6 +161,10 @@ pub struct BusScalars {
     pub unmapped_writes: u64,
     pub first_strict_violation: Option<StrictViolation>,
     pub request: Option<MachineRequest>,
+    /// The signal fabric: routing and pad levels (plan DD34 e). Part of the
+    /// bus's state, so a snapshot that forgot it would restore a machine
+    /// whose pads had lost their routing.
+    pub pins: Fabric,
 }
 
 /// One entry in the MMIO decode table.
@@ -173,11 +178,15 @@ struct MmioRange {
 pub struct SocBus {
     /// Sorted by base, non-overlapping.
     regions: Vec<RamRegion>,
-    /// "Last region hit" cache. The common case — the same stack or heap
-    /// region twice in a row — is then one compare instead of a search.
-    last_region: usize,
-    /// The same cache for instruction fetch, kept apart from `last_region`:
-    /// code runs from the flash window while data lives in HP SRAM, so one
+    /// Two-entry "last hit" data-region cache, checked before the binary
+    /// search. One slot missed on every other access: the harness
+    /// alternates between HP SRAM (data) and the flash-cache rodata window,
+    /// so a single cache thrashed between the two on every load. Slot 0 is
+    /// the most recent hit; a hit in slot 1 promotes it to slot 0 (a cheap
+    /// two-way LRU, not a full one).
+    last_regions: [usize; 2],
+    /// The same cache for instruction fetch, kept apart from `last_regions`:
+    /// code runs from the flash window while data lives in HP SRAM, so a
     /// shared cache missed on nearly every instruction (fetch, load, fetch…)
     /// and each miss was a binary search.
     last_fetch_region: usize,
@@ -186,6 +195,12 @@ pub struct SocBus {
     mmio: Vec<MmioRange>,
     /// Indices into `mmio`, sorted by base. The decode's binary search.
     mmio_by_base: Vec<usize>,
+    /// "Last hit" cache for the MMIO decode: the peripheral index plus its
+    /// `(base, len)`, checked with one subtract-compare before
+    /// `mmio_by_base`'s binary search. 86% of a boot's MMIO traffic is
+    /// UART0's TX-FIFO status register polled at baud, so the same
+    /// peripheral answers back-to-back almost always.
+    last_mmio: Option<(usize, u32, u32)>,
     /// Address ranges that belong to MMIO even where no peripheral claims
     /// them. The chip crate registers these; the common crate has no
     /// addresses of its own.
@@ -208,6 +223,13 @@ pub struct SocBus {
     /// is armed almost always; a fetch or a load still has to cost one test,
     /// not a four-slot walk.
     armed_for: [u32; 3],
+    /// `Some((lo, hi, slot))` when **exactly one** store-kind watchpoint slot
+    /// is armed — esp-hal's stack guard holds this for the whole run.
+    /// [`SocBus::write`] then costs one range compare instead of the general
+    /// slot walk; recomputed in [`set_watchpoint`](Bus::set_watchpoint)
+    /// whenever the armed set changes, so more than one store watchpoint
+    /// (rare, and the general path still handles it) falls back to `None`.
+    single_store_watch: Option<(u64, u64, u8)>,
 
     unmapped_sites: BTreeSet<(u32, u32)>,
     unmapped_reads: u64,
@@ -228,6 +250,10 @@ pub struct SocBus {
     pub irq: IrqLines,
     pub trace: Trace,
     pub host: HostSinks,
+    /// Where a peripheral's output signal goes: the routing the chip's GPIO
+    /// view writes and the levels its output blocks drive. See
+    /// [`crate::pins`].
+    pub pins: Fabric,
 }
 
 impl Default for SocBus {
@@ -260,10 +286,11 @@ impl SocBus {
     pub fn new() -> Self {
         Self {
             regions: Vec::new(),
-            last_region: 0,
+            last_regions: [0, 0],
             last_fetch_region: 0,
             mmio: Vec::new(),
             mmio_by_base: Vec::new(),
+            last_mmio: None,
             mmio_windows: Vec::new(),
             strict: false,
             strict_grade: None,
@@ -271,6 +298,7 @@ impl SocBus {
             allow_unaligned: false,
             watchpoints: [None; WATCHPOINT_SLOTS],
             armed_for: [0; 3],
+            single_store_watch: None,
             unmapped_sites: BTreeSet::new(),
             unmapped_reads: 0,
             unmapped_writes: 0,
@@ -284,6 +312,7 @@ impl SocBus {
             irq: IrqLines::new(),
             trace: Trace::disabled(),
             host: HostSinks::new(),
+            pins: Fabric::new(),
         }
     }
 
@@ -309,7 +338,7 @@ impl SocBus {
         }
         self.regions.push(region);
         self.regions.sort_by_key(|r| r.base);
-        self.last_region = 0;
+        self.last_regions = [0, 0];
         self.last_fetch_region = 0;
     }
 
@@ -522,6 +551,7 @@ impl SocBus {
             host: &mut self.host,
             matrix: &mut *self.matrix,
             request: &mut self.request,
+            pins: &mut self.pins,
         };
         Some(f(periph, &mut cx))
     }
@@ -590,6 +620,7 @@ impl SocBus {
                 host: &mut self.host,
                 matrix: &mut *self.matrix,
                 request: &mut self.request,
+                pins: &mut self.pins,
             };
             range.periph.on_event(id, &mut cx);
         }
@@ -613,6 +644,7 @@ impl SocBus {
                 host: &mut self.host,
                 matrix: &mut *self.matrix,
                 request: &mut self.request,
+                pins: &mut self.pins,
             };
             range.periph.started(&mut cx);
         }
@@ -679,7 +711,7 @@ impl SocBus {
             );
             region.data.copy_from_slice(bytes);
         }
-        self.last_region = 0;
+        self.last_regions = [0, 0];
         self.last_fetch_region = 0;
     }
 
@@ -726,6 +758,7 @@ impl SocBus {
             unmapped_writes: self.unmapped_writes,
             first_strict_violation: self.first_strict_violation,
             request: self.request,
+            pins: self.pins.clone(),
         }
     }
 
@@ -740,6 +773,7 @@ impl SocBus {
         self.unmapped_writes = s.unmapped_writes;
         self.first_strict_violation = s.first_strict_violation;
         self.request = s.request;
+        self.pins = s.pins.clone();
     }
 
     /// `true` if `address` falls in a declared MMIO window.
@@ -752,14 +786,25 @@ impl SocBus {
     // ---- decode -------------------------------------------------------
 
     #[inline(always)]
-    fn region_index(&self, address: u32) -> Option<usize> {
-        // The "last hit" cache: one compare for the common case.
-        if let Some(r) = self.regions.get(self.last_region)
+    fn region_index(&mut self, address: u32) -> Option<usize> {
+        // The two-entry "last hit" cache: one or two compares for the
+        // common case, instead of thrashing a single slot between the two
+        // working sets a run alternates over.
+        if let Some(r) = self.regions.get(self.last_regions[0])
             && r.contains(address)
         {
-            return Some(self.last_region);
+            return Some(self.last_regions[0]);
         }
-        self.region_index_slow(address)
+        if let Some(r) = self.regions.get(self.last_regions[1])
+            && r.contains(address)
+        {
+            self.last_regions.swap(0, 1);
+            return Some(self.last_regions[0]);
+        }
+        let i = self.region_index_slow(address)?;
+        self.last_regions[1] = self.last_regions[0];
+        self.last_regions[0] = i;
+        Some(i)
     }
 
     /// [`region_index`](Self::region_index) for instruction fetch, with its
@@ -781,13 +826,31 @@ impl SocBus {
         self.regions[i].contains(address).then_some(i)
     }
 
-    fn mmio_index(&self, address: u32) -> Option<usize> {
+    #[inline(always)]
+    fn mmio_index(&mut self, address: u32) -> Option<usize> {
+        // The last-hit cache: one subtract-compare, checked before the
+        // sorted-by-base binary search.
+        if let Some((i, base, len)) = self.last_mmio
+            && address.wrapping_sub(base) < len
+        {
+            return Some(i);
+        }
+        self.mmio_index_slow(address)
+    }
+
+    #[inline(never)]
+    fn mmio_index_slow(&mut self, address: u32) -> Option<usize> {
         let k = self
             .mmio_by_base
             .partition_point(|&i| self.mmio[i].base <= address);
         let i = self.mmio_by_base[k.checked_sub(1)?];
         let r = &self.mmio[i];
-        (address < r.base.wrapping_add(r.len)).then_some(i)
+        if address.wrapping_sub(r.base) < r.len {
+            self.last_mmio = Some((i, r.base, r.len));
+            Some(i)
+        } else {
+            None
+        }
     }
 
     /// MMIO accesses are register-aligned unless
@@ -859,6 +922,46 @@ impl SocBus {
         Ok(())
     }
 
+    /// [`check_watchpoints`](Self::check_watchpoints) specialised for
+    /// stores: when [`single_store_watch`](Self::single_store_watch) is
+    /// armed — the common case, esp-hal's stack guard — this is one range
+    /// compare instead of the slot walk. Zero or more-than-one store
+    /// watchpoints fall back to the general path, which still gives the
+    /// zero case its one-test short-circuit.
+    #[inline(always)]
+    fn check_store_watchpoint(&self, address: u32, len: u32) -> Result<(), MemoryError> {
+        if let Some((lo, hi, slot)) = self.single_store_watch {
+            let a0 = u64::from(address);
+            let a1 = a0 + u64::from(len);
+            return if a0 < hi && lo < a1 {
+                Err(MemoryError::Watchpoint {
+                    address,
+                    kind: MemoryAccessKind::Write,
+                    slot,
+                })
+            } else {
+                Ok(())
+            };
+        }
+        self.check_watchpoints(address, len, MemoryAccessKind::Write)
+    }
+
+    /// Recompute [`single_store_watch`](Self::single_store_watch) from
+    /// `armed_for`/`watchpoints`. Called whenever either changes
+    /// ([`set_watchpoint`](Bus::set_watchpoint)); `None` when zero or more
+    /// than one store-kind slot is armed, so [`check_store_watchpoint`]
+    /// falls back to the general walk in both of those cases.
+    fn recompute_single_store_watch(&mut self) {
+        let mask = self.armed_for[kind_index(MemoryAccessKind::Write)];
+        self.single_store_watch = (mask.count_ones() == 1)
+            .then(|| mask.trailing_zeros() as usize)
+            .and_then(|slot| self.watchpoints[slot].map(|wp| (slot, wp)))
+            .map(|(slot, wp)| {
+                let (lo, hi) = watchpoint_span(&wp);
+                (lo, hi, slot as u8)
+            });
+    }
+
     // ---- the access paths ---------------------------------------------
 
     #[inline]
@@ -868,8 +971,8 @@ impl SocBus {
 
         if let Some(i) = self.region_index(address) {
             // `region_index` guarantees `address` is inside the region, so
-            // "the span fits" is exactly "the slice exists".
-            self.last_region = i;
+            // "the span fits" is exactly "the slice exists"; it also updated
+            // its own cache, so there is nothing left to record here.
             let off = (address - self.regions[i].base) as usize;
             let data = &self.regions[i].data;
             let v = match width {
@@ -922,6 +1025,7 @@ impl SocBus {
                     host: &mut self.host,
                     matrix: &mut *self.matrix,
                     request: &mut self.request,
+                    pins: &mut self.pins,
                 };
                 range.periph.read(off, width, &mut cx)
             };
@@ -950,7 +1054,7 @@ impl SocBus {
     #[inline]
     fn write(&mut self, address: u32, width: Width, value: u32) -> Result<(), MemoryError> {
         let len = width.bytes();
-        self.check_watchpoints(address, len, MemoryAccessKind::Write)?;
+        self.check_store_watchpoint(address, len)?;
 
         if let Some(i) = self.region_index(address) {
             let fault = MemoryError::InvalidAccess {
@@ -961,7 +1065,6 @@ impl SocBus {
             if !self.regions[i].writable {
                 return Err(fault);
             }
-            self.last_region = i;
             let off = (address - self.regions[i].base) as usize;
             let data = &mut self.regions[i].data;
             let stored = match width {
@@ -1008,6 +1111,7 @@ impl SocBus {
                     host: &mut self.host,
                     matrix: &mut *self.matrix,
                     request: &mut self.request,
+                    pins: &mut self.pins,
                 };
                 range.periph.write(off, width, value, &mut cx);
             }
@@ -1180,15 +1284,21 @@ const fn kind_index(kind: MemoryAccessKind) -> usize {
 /// compare ignores — so `mask = value ^ (value + 1)` and the region is
 /// `value & !mask` of size `mask + 1`.
 fn watchpoint_overlaps(wp: &Watchpoint, address: u32, len: u32) -> bool {
+    let (b0, b1) = watchpoint_span(wp);
+    let (a0, a1) = (u64::from(address), u64::from(address) + u64::from(len));
+    a0 < b1 && b0 < a1
+}
+
+/// The `[lo, hi)` byte range a watchpoint covers — the NAPOT decode shared by
+/// [`watchpoint_overlaps`] and [`SocBus::single_store_watch`]'s precompute.
+fn watchpoint_span(wp: &Watchpoint) -> (u64, u64) {
     let (base, size) = if wp.napot {
         let mask = wp.address ^ wp.address.wrapping_add(1);
         (wp.address & !mask, u64::from(mask) + 1)
     } else {
         (wp.address, 1)
     };
-    let (a0, a1) = (u64::from(address), u64::from(address) + u64::from(len));
-    let (b0, b1) = (u64::from(base), u64::from(base) + size);
-    a0 < b1 && b0 < a1
+    (u64::from(base), u64::from(base) + size)
 }
 
 impl Bus for SocBus {
@@ -1313,6 +1423,7 @@ impl Bus for SocBus {
                 *mask &= !bit;
             }
         }
+        self.recompute_single_store_watch();
     }
 
     #[inline(always)]
@@ -1454,6 +1565,44 @@ mod tests {
         assert_eq!(p.name(), "UART0");
         assert_eq!(p.save_state(), alloc::vec![0]);
         assert_eq!(bus.read_word(0x6000_001c).unwrap(), 0);
+    }
+
+    /// `mmio_index`'s last-hit cache must never disagree with the sorted
+    /// binary search it shortcuts: every mapped block's first and last byte,
+    /// the first unmapped byte past it, and the gap before the next block —
+    /// with the cache pre-warmed on the *other* block each time, so a stale
+    /// neighbour would show up as a wrong answer instead of a lucky hit.
+    #[test]
+    fn mmio_last_hit_cache_agrees_with_the_slow_path_at_every_boundary() {
+        let mut bus = SocBus::new();
+        bus.add_peripheral(0x6000_0000, 0x100, Box::new(Probe::new("A")));
+        bus.add_peripheral(0x6000_1000, 0x100, Box::new(Probe::new("B")));
+
+        let probes: &[u32] = &[
+            0x6000_0000, // A's first byte
+            0x6000_00ff, // A's last byte
+            0x6000_0100, // first unmapped byte after A
+            0x6000_0fff, // last unmapped byte before B
+            0x6000_1000, // B's first byte
+            0x6000_10ff, // B's last byte
+            0x6000_1100, // first unmapped byte after B
+        ];
+
+        for &addr in probes {
+            // Warm the cache on the block the probe is *not* in, so a hit
+            // here can only come from the real decode, never a leftover.
+            let _ = bus.mmio_index(0x6000_0000);
+            let _ = bus.mmio_index(0x6000_1000);
+            let cached = bus.mmio_index(addr);
+
+            bus.last_mmio = None;
+            let slow = bus.mmio_index_slow(addr);
+
+            assert_eq!(
+                cached, slow,
+                "0x{addr:08x}: cache said {cached:?}, the slow path said {slow:?}"
+            );
+        }
     }
 
     #[test]

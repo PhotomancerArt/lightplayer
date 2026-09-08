@@ -5669,6 +5669,7 @@ version = "40.0.0"
 dependencies = [
  "log",
  "lp-emu-core",
+ "lp-ws281x",
  "object 0.37.3",
  "test-log",
 ]

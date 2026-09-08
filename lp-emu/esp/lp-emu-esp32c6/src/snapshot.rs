@@ -25,6 +25,7 @@
 //! | `matrix` | the interrupt matrix's configuration (nothing, until P5) |
 //! | `rng` | the seeded PRNG's position |
 //! | `hook_calls`, `uart0`, `usb_sj` | observables a test compares |
+//! | `pins` | the pads' WS281x decoders and their frames — a decoder caught mid-bit is state, and the routing it decodes rides `scalars` with the rest of the bus |
 //!
 //! Watchpoints are **not** here: they live on the bus but they are derived
 //! from the hart's trigger CSRs, so [`crate::machine::Esp32C6Machine::restore`]
@@ -53,6 +54,10 @@ pub struct Snapshot {
     pub usb_sj: Vec<u8>,
     /// The USB-Serial-JTAG observation log, the same rule.
     pub usb_sj_tried: Vec<u8>,
+    /// What the pads have decoded — including a decoder caught mid-bit,
+    /// which is exactly the state a restored run has to resume from
+    /// (M5 P2). The routing itself is the bus's, and rides `scalars`.
+    pub pins: crate::machine::PinState,
 }
 
 impl Snapshot {

@@ -33,8 +33,10 @@ lp-cli validate            payloads, transcripts, replay, trust grading
   bus (`SocBus`), the MMIO decode table, the `Peripheral` trait and its
   `BusCx`, `RegFile` (accept-and-remember with a table of exceptions), the
   bus trace with its spin detector, host byte streams, the interrupt-matrix
-  seam and the machine-request slot, and the PT_LOAD view of an ELF. It holds
-  **no chip numbers** — see its README.
+  seam, the machine-request slot, the **signal fabric** (pads, signals and
+  edges — where an output actually goes) with the WS281x decoder that reads
+  it, and the PT_LOAD view of an ELF. It holds **no chip numbers** — see its
+  README.
 
 - **`lp-emu-esp32c6/`** — the C6 machine: the memory map (every base cited to
   esp-hal's linker script), the mask-ROM loader and its deliberately empty
@@ -88,7 +90,7 @@ reason in `validate.toml`. That is not modesty and it is not a placeholder:
 | timing | `t1` counts instructions, `t2` uses the per-class model, and no transcript grades either yet (the vision's graded ladder) |
 | boot-log | a direct load prints no ROM banner and no bootloader lines at all; M7 boots from reset |
 | usb-serial-jtag | the host's three states and the transitions between them, with four committed transcripts behind them (M6) — `boot-idle` over the shipped link against silicon's capture of the *same image bytes*, the port held closed from boot, an unplug mid-session, and no cable at all. The block's own data path is graded `measured` register by register in `periph/usb_sj.rs`; the **class** stays `modeled` by the rule below, and what would earn it is a silicon transcript of this class — `usb-negative-control` on the desk board, still owed |
-| pin | nothing is observed at a pad; the RMT TX engines (M5 P1) produce each channel's pulses in cycles, and M5 P2 routes them through the GPIO matrix to a pin log and the WS281x decoder |
+| pin | a pad IS observed (M5 P2): GPIO is a routing view over the bus's signal fabric, the RMT drives `RMT_SIG_0/1` into it, and a WS281x decoder reads a routed pad's edges into frames. But the decoded frames agreeing with the word-level decode is two readings of one model — nothing on silicon has confirmed a pad here, and no capture is committed. M5 P4 puts a lit frame against the host oracle |
 | wire | the bytes are the guest's; a live socket's arrival times are the host's |
 
 The rule behind the table is the vision's: **never trust an emulated number

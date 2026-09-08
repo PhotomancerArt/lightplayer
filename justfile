@@ -2091,6 +2091,15 @@ emu-c6 elf *args:
 bench-emu-c6 *args:
     scripts/emu/bench-c6.sh {{ args }}
 
+# PGO recipe for the C6 machine binary (D4): instrumented build, one training
+# run of each reference image, merge, optimized rebuild, then the probe on
+# the result. Opt-in — never a default build or CI step, and the target is
+# met without it. Needs `rustup component add llvm-tools-preview` and
+# `cargo install cargo-binutils`; the script checks both first. See
+# `scripts/emu/pgo-c6.sh` and `lp-emu/README.md`'s Speed section.
+bench-emu-c6-pgo:
+    scripts/emu/pgo-c6.sh
+
 # The C6 machine's browser/phone speed probe: builds the wasip1 module,
 # stages it with the two pinned reference images plus a page and worker
 # under a JS WASI shim, and serves it on the LAN (port from
@@ -2104,8 +2113,8 @@ bench-emu-c6 *args:
 bench-emu-web *args:
     scripts/emu/bench-web.sh {{ args }}
 
-# The Xtensa core's speed probe: the two longest fixture programs, repeated
-# until each row has retired >=100 M instructions, reported as user seconds,
+# The Xtensa core's speed probe: the `bench_loop` fixture at a round count
+# that retires >=100 M instructions in ONE run, reported as user seconds,
 # instructions/second and the load average, with a `cmp` of the guest output
 # AND of a capped text trace against the previous run.
 #
@@ -2115,10 +2124,10 @@ bench-emu-web *args:
 #
 # `lp-xt-emu` is an ISA core with no SoC around it, so there is no emulated
 # clock and no real-time ratio — a cycle is an instruction
-# (`CycleModel::InstructionCount`). The workload is the `lp-xt/fixtures`
-# corpus, which the recipe builds (esp toolchain) if it is missing; the
-# repeats are there because no long-running Xtensa image exists in this repo.
-# See the script's header.
+# (`CycleModel::InstructionCount`). The workload comes from `lp-xt/fixtures`,
+# which the recipe builds (esp toolchain) if it is missing; `bench_loop` takes
+# its round count from the guest entry argument, so the probe no longer
+# repeats a short program to reach a probe-sized run. See the script's header.
 #
 # It is an ORACLE, not a gate — no CI job runs it and no number it prints
 # gates anything.

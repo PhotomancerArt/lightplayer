@@ -21,6 +21,12 @@ object = { version = "0.37.3", default-features = false, features = [
     "elf",
     "std",
 ] }
+# The WS281x wire timing and byte order the strip decoder reads against, from
+# the same crate the firmware encodes with — so the decoder cannot drift from
+# the driver's idea of a bit. MIT, and named on the fence allowlist
+# (`scripts/check-emu-fence.sh`). No default features: `mock` is the host
+# transmitter simulation and nothing here needs it.
+lp-ws281x = { path = "../../../lp-fw/lp-ws281x", default-features = false }
 
 [dev-dependencies]
 test-log = { workspace = true }

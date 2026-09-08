@@ -241,6 +241,55 @@ shipped rungs, on a desk at load ~190, read 25.5 M -> 75.8 M (2.97x) with the
 either side — which is the bar every rung of this work is held to (PD5, ADR
 2026-09-06: a run is a pure function of the instruction stream).
 
+**M2's MMIO fast path** (last-hit cache in `mmio_index`, a two-entry
+data-region cache, and a precomputed range compare for the single store
+watchpoint esp-hal keeps on the stack guard) landed on top: a same-window A/B
+against M1's binary, desk load ~65-83 both sides, read the harness (the
+longer-running, primary benchmark) up 6.5-11.8% (83.3 M -> 88.7 M at `t2`,
+85.6 M -> 95.7 M at `t1`); `boot-idle-memfs` — a 0.5 s run, too short for the
+load noise at this desk to average out — moved within +-8% either side of
+even. Identity: `stopped after`, UART and a 20 ms `--trace` byte-identical to
+M1's binary on both images, both grades (trace md5 `44015adf...`, unchanged
+from M1). The ABI-slimming item (`Box` the register dump in `EmulatorError`,
+`Option<Box<InstLog>>` on `ExecutionResult`) was implemented and measured
+against the MMIO-only build: the harness read 0 to -5.9% (a same-load-window
+regression, not the plan's required >=3% gain), so it was reverted rather
+than kept — smaller `Result<T, E>` types did not translate into a faster
+interpreter loop here, at least not enough to clear load noise.
+
+**PGO** is `just bench-emu-c6-pgo` / `scripts/emu/pgo-c6.sh`: an instrumented
+build, one training run of each pinned reference image, a merge, an
+optimized rebuild, then the probe on the result — each phase in its own
+`target/emu-pgo/*` dir so the RUSTFLAGS involved never invalidate the plain
+release build. Opt-in (D4): never a default build or CI step, and the target
+is met without it. Needs `rustup component add llvm-tools-preview`; the
+script checks for it first.
+
+The merge step calls `llvm-profdata` directly (resolved via `rustc --print
+sysroot`) rather than the plan's `cargo profdata -- merge`: `cargo-binutils`
+0.4.0 panics on any invocation on this toolchain (`cargo profdata -- merge
+--help` alone crashes inside its own clap parsing), reproduced fresh after
+reinstalling it — a real defect in that release, not an environment quirk.
+`llvm-profdata` is the exact binary `cargo profdata` shells out to, so the
+merge is unchanged; only the broken wrapper in front of it is gone.
+
+**Measured 2026-09-07**, same-window A/B against the plain (non-PGO) release
+build, desk load ~13-15 both sides:
+
+| image | grade | non-PGO instr/s | PGO instr/s | speedup |
+|---|---|---:|---:|---:|
+| harness | t1 | 109.0 M | 163.1 M | **1.50x** |
+| harness | t2 | 103.2 M | 161.1 M | **1.56x** |
+| boot-idle-memfs | t1 | 81.6 M | 138.3 M | **1.69x** |
+| boot-idle-memfs | t2 | 79.9 M | 134.4 M | **1.68x** |
+
+`stopped after`, UART0 and the identity oracles are unchanged from the
+non-PGO build (PGO changes codegen, never behaviour). On top of M1 and M2's
+MMIO fast path, the harness now reads 163 M instr/s at `t1` on this desk —
+call it the toolchain-bound end of this milestone's ladder; the overnight
+research's opt-3-plus-patch-tree figure (103.5 M -> 149 M, ≈1.45x) is the
+pre-M2 baseline this rung was designed against.
+
 **The browser/phone rig.** The same binary, unmodified, builds for
 `wasm32-wasip1` and runs in any browser under a small JavaScript WASI
 preview1 shim (D6: no `wasm32-unknown-unknown` entry point, zero source
@@ -265,7 +314,7 @@ and the method are in
 **The Xtensa core** (`lp-xt-emu`) has its own probe and its own ladder:
 
 ```bash
-just bench-emu-xt                     # the fixture corpus, repeated to >=100 M
+just bench-emu-xt                     # one `bench_loop` run, >=100 M instructions
 scripts/emu/bench-xt.sh --bin <saved-binary> --no-build --no-promote
 ```
 
@@ -275,11 +324,13 @@ the guest output *and* a capped text trace against the previous run. M6 took
 it from 21.4 to 31.2 M instr/s on the recursion-heavy `ackermann` fixture and
 54.5 to 61.3 M on `fib_rec`, with both captures byte-identical; the win is
 almost entirely one memory resolution per access instead of four or five.
-`lp-emu/lp-xt-emu/README.md` has the rung-by-rung table and the
+(Those two fixtures were the workload while the probe reached 100 M by
+repeating a short program; it now runs the trip-counted `bench_loop` once
+instead.) `lp-emu/lp-xt-emu/README.md` has the rung-by-rung table and the
 generic-codegen trap that per-package `opt-level` overrides hide.
 
-Evidence, and the rungs not yet climbed (MMIO fast path, poll-loop skip, block
-cache): the planning workspace's
+Evidence, and the rungs not yet climbed (poll-loop skip, block cache): the
+planning workspace's
 `2026-09-06-1001-esp-emulator/2026-09-07-speed-ladder-research.md` and its
 `speed-research/` directory, executed by the `2026-09-07-0827-emu-speed-ladder`
 plan.

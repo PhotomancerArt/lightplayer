@@ -29,6 +29,7 @@
 
 pub mod accept;
 pub mod efuse;
+pub mod gpio;
 pub mod intpri;
 pub mod lp_wdt;
 pub mod pcr;
@@ -162,7 +163,7 @@ pub fn boot_set(
             )),
         ),
         (base::IO_MUX, 0x100, Box::new(accept::io_mux())),
-        (base::GPIO, 0x700, Box::new(accept::gpio())),
+        (base::GPIO, gpio::LEN, Box::new(gpio::Gpio::new())),
         (base::SPI0, 0x400, Box::new(spi0::Spi0::new(mmu))),
         (base::SPI1, 0x400, Box::new(spi1::Spi1::new(flash))),
         // Registers, the gap, and the RAM at `+0x400..+0x700` — P5's accept

@@ -19,8 +19,8 @@ use lp_emu_esp32c6::control::parse_usb_script;
 use lp_emu_esp32c6::flash::FlashBacking;
 use lp_emu_esp32c6::loader::EfuseIdentity;
 use lp_emu_esp32c6::machine::{
-    AppSource, Esp32C6Builder, Esp32C6Machine, Outcome, RomSource, StopCondition, TimeGrade,
-    Uart0Sink, UsbHost, UsbSjDrain, UsbSjSink,
+    AppSource, Esp32C6Builder, Esp32C6Machine, FrameSink, Outcome, PinLogSink, RomSource,
+    StopCondition, StripConfig, TimeGrade, Uart0Sink, UsbHost, UsbSjDrain, UsbSjSink,
 };
 use lp_emu_esp32c6::memmap;
 
@@ -94,6 +94,22 @@ OPTIONS:
                             the IN endpoint that no host took (pushed with no
                             host, dropped into a committed FIFO, dropped by a
                             bus reset) [kept in memory, summarised at exit]
+    --dump-frames stdout|file:<path>
+                            one JSON line per WS281x frame decoded off a
+                            routed pad, as it completes: pad, signal, frame
+                            number, start/end in us, bits, leds, the wire
+                            bytes AND the same bytes unpermuted to the RGB
+                            the driver was handed, errors, the reset gap.
+                            Frames are always also kept in memory and
+                            summarised at exit
+    --strip-order grb|rgb|rbg|gbr|brg|bgr
+                            the byte order `rgb` is unpermuted with [grb]
+    --strip-timing ws2812|ws2811
+                            the wire timing a pad is decoded against
+                            (400/800 ns vs 300/900 ns highs) [ws2812]
+    --pin-log file:<path>   every edge on every routed pad: `<us> gpio18 0|1`.
+                            12,288 lines per 256-LED frame — never a default,
+                            capped at 2,000,000 lines
     --efuse-mac <a0:f2:..>  the MAC the eFuse block reports [the desk board]
     --efuse-rev <0.2>       wafer major.minor [0.2]
     --seed <u64>            the machine PRNG's seed [0]
@@ -166,6 +182,9 @@ struct Args {
     break_at: Vec<String>,
     hooks: bool,
     map: bool,
+    dump_frames: FrameSink,
+    pin_log: PinLogSink,
+    strip: StripConfig,
 }
 
 fn run() -> Result<ExitCode, String> {
@@ -187,7 +206,10 @@ fn run() -> Result<ExitCode, String> {
         .flash(args.flash.clone())
         .usb_sj_tried(args.usb_sj_tried.clone())
         .usb_host(args.usb_host)
-        .usb_sj_drain(args.usb_sj_drain);
+        .usb_sj_drain(args.usb_sj_drain)
+        .dump_frames(args.dump_frames.clone())
+        .pin_log(args.pin_log.clone())
+        .strip(args.strip.order, args.strip.timing);
 
     if let Some(len) = args.flash_len {
         builder = builder.flash_len(len);
@@ -262,6 +284,9 @@ fn run() -> Result<ExitCode, String> {
     };
 
     let outcome = machine.run_until(&stop);
+    // The run is over: a frame still open on a pad is reported as
+    // incomplete rather than silently dropped.
+    machine.flush_frames();
     report(&mut machine, &outcome);
     Ok(ExitCode::from(outcome.exit_code() as u8))
 }
@@ -352,6 +377,19 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                 args.trace = true;
                 args.trace_file = Some(value("--trace-file")?.into());
             }
+            "--dump-frames" => args.dump_frames = parse_dump_frames(&value("--dump-frames")?)?,
+            "--pin-log" => args.pin_log = parse_pin_log(&value("--pin-log")?)?,
+            "--strip-order" => {
+                let text = value("--strip-order")?;
+                args.strip.order = StripConfig::parse_order(&text).ok_or_else(|| {
+                    format!("--strip-order `{text}`: expected grb, rgb, rbg, gbr, brg or bgr")
+                })?;
+            }
+            "--strip-timing" => {
+                let text = value("--strip-timing")?;
+                args.strip.timing = StripConfig::parse_timing(&text)
+                    .ok_or_else(|| format!("--strip-timing `{text}`: expected ws2812 or ws2811"))?;
+            }
             "--strict-bus" => args.strict = true,
             "--probe" => args.probes.push(parse_probe(&value("--probe")?)?),
             "--break-at" => args.break_at.push(value("--break-at")?),
@@ -420,6 +458,29 @@ fn parse_uart0(text: &str) -> Result<Uart0Sink, String> {
                 "`{other}` is not a UART0 destination (stdout, memory, file:<path>, tcp:<host:port>)"
             )),
         },
+    }
+}
+
+fn parse_dump_frames(text: &str) -> Result<FrameSink, String> {
+    match text {
+        "stdout" => Ok(FrameSink::Stdout),
+        "memory" => Ok(FrameSink::Memory),
+        other => match other.split_once(':') {
+            Some(("file", path)) => Ok(FrameSink::File(path.into())),
+            _ => Err(format!(
+                "`{other}` is not a frame destination (stdout, memory, file:<path>)"
+            )),
+        },
+    }
+}
+
+fn parse_pin_log(text: &str) -> Result<PinLogSink, String> {
+    match text.split_once(':') {
+        Some(("file", path)) => Ok(PinLogSink::File(path.into())),
+        _ => Err(format!(
+            "`{text}` is not a pin-log destination (file:<path>); the log is an edge per line \
+             and never goes to a console"
+        )),
     }
 }
 
@@ -793,6 +854,9 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
             machine.control_lines(),
             machine.scripted_commands_left()
         );
+    }
+    for line in machine.pin_summaries() {
+        eprintln!("{line}");
     }
     let tried = machine.usb_sj_tried();
     if !tried.is_empty() {
