@@ -108,7 +108,9 @@ pub fn device_by_base_mac(
     // A sim minted a moment ago: the record is written, the roster row has
     // not settled. It runs nothing yet by construction, so there is
     // nothing to push over.
-    let (key, _) = sims.iter().find(|(_, record)| record.base_mac == base_mac)?;
+    let (key, _) = sims
+        .iter()
+        .find(|(_, record)| record.base_mac == base_mac)?;
     Some(DeviceByBaseMac {
         key: key.clone(),
         name: registry
@@ -163,7 +165,7 @@ mod tests {
         RegisteredDevice {
             uid: uid.to_string(),
             association: project.map(|project| lpc_history::DeviceAssociation {
-                device: uid.parse().expect("a device uid"),
+                device: "dev000000daqf6dvvqz".parse().expect("a device uid"),
                 project: project.parse().expect("a project uid"),
                 version: lpc_history::ContentHash::from_bytes([0u8; 32]),
                 at: 0.0,
@@ -233,11 +235,11 @@ mod tests {
     #[test]
     fn the_association_is_read_off_this_devices_row() {
         let registry = vec![
-            registered("devother", Some("prj0000000000000000")),
-            registered("devx", Some("prjh7kq9xy2mq4tb8wz")),
+            registered("dev000000daqf6dvvq1", Some("prj0000000000000000")),
+            registered("dev000000daqf6dvvq2", Some("prjh7kq9xy2mq4tb8wz")),
         ];
         assert_eq!(
-            last_given_project(&registry, "devx"),
+            last_given_project(&registry, "dev000000daqf6dvvq2"),
             Some("prjh7kq9xy2mq4tb8wz".to_string())
         );
         assert_eq!(last_given_project(&registry, "devmissing"), None);

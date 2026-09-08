@@ -532,8 +532,16 @@ pub fn App() -> Element {
                     // can use it; a route-dispatched open still connecting
                     // (pending) keeps it too — the gallery's connect
                     // evidence renders the window honestly in place.
+                    //
+                    // An open that stopped at the MISMATCH PAGE keeps its
+                    // route too, and for the plainest reason: the page is
+                    // rendered BY that address, so sending the URL to
+                    // `/devices` would close the question before it was
+                    // read. It is not an open that ended, it is an open
+                    // waiting for an answer.
                     let open_ended = next.home.is_some()
                         && !opening_now
+                        && next.open_mismatch.is_none()
                         && loop_saw_opening.get()
                         && !loop_pending_route_open.get();
                     if open_ended {

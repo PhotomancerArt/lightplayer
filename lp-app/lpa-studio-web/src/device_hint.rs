@@ -71,7 +71,8 @@ impl DeviceHint {
             // Host and port are the server's business, not ours — this
             // build has nothing to connect them to. An empty address is
             // still no address.
-            return (!address.trim().is_empty()).then(|| DeviceHint::Ws(address.trim().to_string()));
+            return (!address.trim().is_empty())
+                .then(|| DeviceHint::Ws(address.trim().to_string()));
         }
         match value {
             "emu" => Some(DeviceHint::Emu),

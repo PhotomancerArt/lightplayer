@@ -1553,7 +1553,9 @@ mod tests {
         );
         assert_eq!(
             lens_route(&view).map(|route| route.path()),
-            Some(format!("/p/porch-sign-{SHARE_UID}?on=mac:60:55:f9:0a:0b:0c"))
+            Some(format!(
+                "/p/porch-sign-{SHARE_UID}?on=mac:60:55:f9:0a:0b:0c"
+            ))
         );
     }
 
@@ -2036,12 +2038,12 @@ mod tests {
         assert_eq!(route_search("?on=emu&story-png=1", &bare), "?story-png=1");
         assert_eq!(route_search("?on=emu", &hinted), "?on=sim");
         assert_eq!(route_search("", &hinted), "?on=sim");
-        assert_eq!(
-            route_search("?story-png=1", &hinted),
-            "?story-png=1&on=sim"
-        );
+        assert_eq!(route_search("?story-png=1", &hinted), "?story-png=1&on=sim");
         // the legacy params still go, hint or no hint
-        assert_eq!(route_search("?connect=simulator&on=sim", &hinted), "?on=sim");
+        assert_eq!(
+            route_search("?connect=simulator&on=sim", &hinted),
+            "?on=sim"
+        );
     }
 
     /// A stale slug and the canonical one are the SAME session, so the

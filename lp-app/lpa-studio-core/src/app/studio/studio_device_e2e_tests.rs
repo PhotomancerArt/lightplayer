@@ -842,6 +842,31 @@ impl DeviceBench {
         drive(self.controller.dispatch(action)).expect("a push gesture never fails loudly");
     }
 
+    /// Open a library project ON a named device — the `?on=mac:` arrival
+    /// (D43), through the ordinary action path. `over` is the mismatch
+    /// page's "push here"; every arrival from a URL passes `false`.
+    fn open_on_device(
+        &mut self,
+        key: &str,
+        base_mac: &str,
+        over: bool,
+    ) -> Result<(), crate::UiError> {
+        let action = UiAction::from_op(
+            crate::HOME_NODE_ID,
+            crate::HomeOp::OpenPackageOnDevice {
+                key: key.to_string(),
+                base_mac: base_mac.to_string(),
+                over_running_project: over,
+            },
+        );
+        drive(self.controller.dispatch(action)).map(|_| ())
+    }
+
+    /// The open that stopped at the mismatch page (D50), if one did.
+    fn mismatch(&self) -> Option<crate::UiOpenMismatch> {
+        self.controller.view().open_mismatch.map(|boxed| *boxed)
+    }
+
     /// The running face's Open (round-2 M5), through the ordinary action
     /// path: the editor becomes a lens on the device registered as `uid`.
     fn open_lens(&mut self, uid: &str) -> Result<(), crate::UiError> {
@@ -2704,6 +2729,168 @@ fn the_empty_face_pushes_an_example_and_the_card_ends_up_running() {
         "the banked version is the verified content hash"
     );
 }
+// ---------------------------------------------------------------------
+// P4: `?on=mac:` and the mismatch page (D50)
+// ---------------------------------------------------------------------
+
+/// **Never a silent push**, and what gets past it.
+///
+/// One board, two projects, one story: the board is running project A; an
+/// address names it and asks for project B. The open STOPS — both projects
+/// named, nothing sent. Then the same op carries the person's answer, and
+/// the same open runs: B lands on the board.
+///
+/// The two halves are deliberately the same op with one flag changed. That
+/// is the claim the page rests on: it does not add a second push path, it
+/// withholds the ordinary one until somebody says yes.
+#[test]
+fn a_board_running_another_project_stops_the_open_until_push_here_answers_it() {
+    let device = empty_light_player("dev000000daqf6dvvqz");
+    let (mut bench, tasks) = identified(&device, "usb-mismatch");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+
+    // Project A, pushed the ordinary way: the board runs it and the
+    // registry row records what it was given.
+    let card = bench.view().devices[0].clone();
+    bench.push_gesture(card.id, bundled_example());
+    bench.run_until(&tasks, "the push to be banked", |bench| {
+        bench
+            .registry()
+            .first()
+            .is_some_and(|row| row.association.is_some())
+    });
+    // The board's OWN report is half the mismatch rule — the association
+    // says WHICH project, the heartbeat says one is running at all.
+    bench.run_until(&tasks, "the board to report it running", |bench| {
+        bench.view().devices.first().is_some_and(|card| {
+            matches!(
+                &card.loaded_project,
+                lpa_devices::view::LoadedProject::Running { .. }
+            )
+        })
+    });
+    let running = bench.registry()[0]
+        .association
+        .as_ref()
+        .expect("a banked push")
+        .project
+        .to_string();
+    // Project B, in the library, is what the address asks to open.
+    let other = bench
+        .store
+        .create("other-project", 0.0)
+        .expect("the library takes a second project")
+        .uid
+        .to_string();
+    // The gallery inputs are what the mismatch names both projects from.
+    drive(bench.controller.settle_library());
+
+    // --- the stop -----------------------------------------------------
+    let _ = bench.open_on_device(&other, BENCH_BOARD_MAC, false);
+
+    let mismatch = bench.mismatch().unwrap_or_else(|| {
+        panic!(
+            "the open stopped at the page; registry now: {:?}",
+            bench.registry()
+        )
+    });
+    assert_eq!(mismatch.project_uid, other, "{mismatch:?}");
+    assert_eq!(
+        mismatch.running.as_ref().map(|running| running.uid.clone()),
+        Some(running.clone()),
+        "the page names what is actually on the board: {mismatch:?}"
+    );
+    assert_eq!(mismatch.device_base_mac, BENCH_BOARD_MAC);
+    assert!(
+        mismatch.can_act(),
+        "both projects are in the library, so both verbs stand: {mismatch:?}"
+    );
+    assert_eq!(
+        bench.controller.view().open_project_uid,
+        None,
+        "nothing was opened, so nothing was pushed"
+    );
+    assert_eq!(
+        bench.registry()[0]
+            .association
+            .as_ref()
+            .expect("the first push is still banked")
+            .project
+            .to_string(),
+        running,
+        "the board still has what it had"
+    );
+
+    // --- the answer ---------------------------------------------------
+    bench
+        .open_on_device(&other, BENCH_BOARD_MAC, true)
+        .expect("the answered open runs");
+    assert!(
+        bench.mismatch().is_none(),
+        "an answered page does not ask again"
+    );
+    // The lens is HELD until the board answers the editor's own hello, so
+    // the open finishes on a later tick — the hold every device open rides.
+    bench.run_until(&tasks, "the lens to land on the board", |bench| {
+        bench.controller.view().open_project_uid.is_some()
+    });
+    let view = bench.controller.view();
+    assert_eq!(
+        view.open_project_uid.as_deref(),
+        Some(other.as_str()),
+        "the board is running what was pushed here, not {running}"
+    );
+    assert!(
+        matches!(
+            view.lens,
+            Some(crate::UiLensRuntime::Device {
+                transport: crate::LinkTransport::Serial,
+                ..
+            })
+        ),
+        "the lens landed on the named BOARD: {:?}",
+        view.lens
+    );
+}
+
+/// A MAC nothing answers to is not a failure and not a guess: the hint is
+/// dropped and the open takes its ordinary course (PD14). Nothing stops,
+/// because there is nothing to decide.
+#[test]
+fn an_unknown_mac_raises_no_page() {
+    let device = empty_light_player("dev000000daqf6dvvr8");
+    let (mut bench, tasks) = identified(&device, "usb-mismatch-absent");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let project = bench
+        .store
+        .create("a-project", 0.0)
+        .expect("the library takes a project")
+        .uid
+        .to_string();
+    drive(bench.controller.settle_library());
+
+    let _ = bench.open_on_device(&project, "02:ff:ff:ff:ff:fe", false);
+
+    assert!(
+        bench.mismatch().is_none(),
+        "an absent device raises no page"
+    );
+}
+
+/// The base MAC [`empty_light_player`] reports.
+const BENCH_BOARD_MAC: &str = "60:55:f9:0a:0b:0c";
 
 /// The New tab's naming: a starter pushed with a project name lands in the
 /// library under that name (not the board's), and the "name the board the

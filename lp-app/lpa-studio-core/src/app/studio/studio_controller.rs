@@ -2655,7 +2655,18 @@ impl StudioController {
         // the card's own Power on raises, so nothing here is a second flow.
         // A sim already on is a no-op at the transport, and the fold
         // re-opens a port it had closed.
-        if let Some(device) = self.devices.device_for_key(&uid).map(|device| device.id) {
+        //
+        // **Sims only.** A board is not powered on by Studio: it is on a
+        // desk, reached over a port the browser already granted, and
+        // `Connect`ing it would close and reopen a wire that was working —
+        // which drops the card back through Connecting and leaves the lens
+        // held behind a board that was Ready a moment ago. Attach-or-
+        // connect for silicon is `open_device_lens`'s own job, and it has
+        // been doing it since the device route existed.
+        let is_sim = self.device_sims.contains_key(&uid);
+        if is_sim
+            && let Some(device) = self.devices.device_for_key(&uid).map(|device| device.id)
+        {
             self.execute_devices_op(crate::DevicesOp::on_sim(crate::DeviceAction::Connect {
                 device,
             }))
@@ -2671,6 +2682,81 @@ impl StudioController {
         // held as `pending_device_lens` and attached from the tick the
         // moment it does. Either way the push rides `attach_lens`.
         self.open_device_lens(&uid, updates).await
+    }
+
+    /// Bank an open that NAMED a device, the way a card push is banked:
+    /// the registry row records the project it was last given.
+    ///
+    /// This open really did push — the lens deploy sends the package over
+    /// the board's own wire — and the association is what the mismatch
+    /// page reads to answer "what is on this device?" (D50). Without this,
+    /// answering the page once would leave the row still naming the
+    /// project that was replaced, and the next reload would raise the same
+    /// page offering to switch to something that is no longer running:
+    /// the page would lie, which is worse than the page not existing.
+    ///
+    /// Scoped to the named arm on purpose. A device the address named is
+    /// the only one whose association gets *read* back as a promise; the
+    /// resolver's own sims are Studio's scratch devices and no surface
+    /// asks them this question. Banking every open would be a broader
+    /// change to what a push means, and that belongs with the pull the
+    /// backup story still needs (Q7), not here.
+    ///
+    /// Best-effort, exactly like [`Self::bank_completed_push`]: the
+    /// project is open and running either way, and a bookkeeping failure
+    /// is a log line, never a failed open. `record_push` refuses a version
+    /// the project's history never recorded (an unsaved working copy), and
+    /// that refusal is correct — an event may not name a snapshot the
+    /// library cannot produce.
+    async fn bank_open_on_named_device(&mut self) {
+        let OpenOn::Device { .. } = self.pending_open_on() else {
+            return;
+        };
+        let Some(uid) = self.pending_open_key() else {
+            return;
+        };
+        let Some(project_uid) = self.library_uid_for_key(&uid) else {
+            return;
+        };
+        let Some(attachment) = self
+            .pool
+            .lens_session()
+            .map(|session| session.attachment().uid.clone())
+        else {
+            return;
+        };
+        let Some(row) = self
+            .devices
+            .device_for_key(&attachment)
+            .and_then(|device| device.record.as_ref())
+            .and_then(crate::app::devices::registry_row_from_record)
+        else {
+            return;
+        };
+        let version = match self.library_head_hash(&project_uid).await {
+            Some(version) => version,
+            None => return,
+        };
+        if let Err(error) = self
+            .run_catalog_op(CatalogOp::RecordPush {
+                project_uid,
+                device: Box::new(row),
+                version,
+            })
+            .await
+        {
+            log::warn!("open on a named device not banked: {error}");
+        }
+    }
+
+    /// One library project's head content hash, or `None` when the
+    /// library, the key or the package is unavailable.
+    async fn library_head_hash(&mut self, key: &str) -> Option<lpc_history::ContentHash> {
+        let host = self.library_host().ok()?;
+        let fs = host.catalog_snapshot().await.ok()?;
+        let store = crate::app::library::LibraryStore::read_only(fs);
+        let uid = store.resolve_key(key).ok()?;
+        store.open(uid).ok()?.content_hash().ok()
     }
 
     /// Which device the pending open was told to land on.
@@ -2999,6 +3085,7 @@ impl StudioController {
                     notices = notices.with_notice(notice);
                 }
                 let sync = self.sync_project_after_attach(updates).await?;
+                self.bank_open_on_named_device().await;
                 Ok(notices.with_notice(project_sync_notice(
                     sync.synced,
                     "Project opened",
