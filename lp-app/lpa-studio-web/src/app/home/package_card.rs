@@ -24,7 +24,7 @@ use crate::core::{ActionButton, ActionButtonVariant, menu_item_action_class, qui
 
 /// One package card: thumbnail, name, meta, and the card menu. Clicking the
 /// card opens the copy the card *is* — the library head, pushed to the
-/// simulator (D13).
+/// sim (D13).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn PackageCard(
@@ -183,7 +183,7 @@ fn face_context_line(blocked: Option<&(String, String)>, opening: bool) -> Optio
 /// The title row's status glyphs — the D28 runtime-presence facts
 /// compressed to icons (words ride the tooltip and the ⋯ popup):
 /// lightning = on the connected device (green only when current, the
-/// D24 rule), the sim glyph = running in simulator, amber "!" = the
+/// D24 rule), the sim glyph = running on a sim, amber "!" = the
 /// card is blocked. Both runtimes live = both glyphs ("Live in 2
 /// places" stays a popup/tooltip phrasing).
 fn face_status_glyphs(_card: &UiPackageCard, blocked: bool) -> Vec<CardStatusGlyph> {
@@ -199,7 +199,7 @@ fn face_status_glyphs(_card: &UiPackageCard, blocked: bool) -> Vec<CardStatusGly
 
 /// The card menu — the redesigned card's DEPTH surface ("the second
 /// click"): a status section carrying in words everything the slim face
-/// compressed to glyphs, then the actions — open in sim, put on an
+/// compressed to glyphs, then the actions — open, put on an
 /// empty device, push, rename, duplicate, export, delete. The rows are
 /// `UiAction`s rendered in the shared menu-item context (export is a
 /// web-side handler wearing the same classes) — one action vocabulary,
@@ -216,7 +216,7 @@ pub(crate) fn PackageCardMenu(
     #[props(default)]
     edited_line: Option<String>,
     /// The card's open link (D37: opening is navigation) for the
-    /// "Open in sim" row. `None` renders no row (blocked cards).
+    /// "Open" row. `None` renders no row (blocked cards).
     #[props(default)]
     open_href: Option<String>,
     /// This card's open is in flight — the open row holds navigation.
@@ -386,7 +386,7 @@ pub(crate) fn PackageCardMenu(
                         a {
                             class: "{menu_item_action_class()} tw:no-underline",
                             href: "{href}",
-                            title: "Open this project in the simulator.",
+                            title: "Open this project.",
                             onclick: move |event: MouseEvent| {
                                 if opening {
                                     event.prevent_default();
@@ -395,7 +395,7 @@ pub(crate) fn PackageCardMenu(
                             span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
                                 StudioIcon { name: StudioIconName::Play, size: 14 }
                             }
-                            span { "Open in sim" }
+                            span { "Open" }
                         }
                     }
                     if !blocked {

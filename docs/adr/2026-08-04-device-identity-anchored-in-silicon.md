@@ -5,6 +5,8 @@
 - **Deciders:** Photomancer
 - **Supersedes:** None (extends 2026-08-03-device-reports-its-chip-identity)
 - **Superseded by:** None
+- **Amended by:** [2026-09-07-always-a-device-target-real-emu-sim.md](2026-09-07-always-a-device-target-real-emu-sim.md)
+  (a sim carries a minted local-admin MAC through this same derivation)
 
 ## Context
 
@@ -118,6 +120,13 @@ row.
   #292 chip-name normalization, CH340 reset quirks. The read rides
   loader sessions that already exist; no new reset paths.
 - The sim is untouched (not a device, D22).
+
+  > **Amended 2026-09-07** — a sim is a device now, and it anchors
+  > identity the same way: a Studio-minted locally-administered MAC
+  > (`02:…`), run through this same `HardwareId::from_base_mac`
+  > derivation, minted once at record creation and stored in its
+  > `/device-sims/<uid>.json` sidecar. See
+  > `2026-09-07-always-a-device-target-real-emu-sim.md`.
 
 ## Alternatives Considered
 

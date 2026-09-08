@@ -21,10 +21,10 @@ running normally, and the client asks for an observation at one point in time.
 Probe resolution is client policy, per request. A `RenderProduct` probe
 request carries `width`/`height` and the engine renders natively at the
 requested size — there is no server-side default and no
-render-large-then-downsample. Studio tiers the size by runtime kind
-(32×32 on the simulator, 16×16 on a device) and likewise tiers which
-nodes it probes; how often probes run is Studio's completion-based
-refresh pacing, not a server concern. See
+render-large-then-downsample. Studio tiers the size by the lens's wire
+transport (32×32 in-process on a sim, 16×16 over serial to a board) and
+likewise tiers which nodes it probes; how often probes run is Studio's
+completion-based refresh pacing, not a server concern. See
 `docs/adr/2026-07-27-completion-based-refresh-pacing.md`.
 
 ## First Probe Families

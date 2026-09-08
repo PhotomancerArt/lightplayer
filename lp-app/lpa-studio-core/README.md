@@ -128,7 +128,7 @@ does not blur into a larger API rename.
 - `StudioSnapshot` and the node snapshots remain cloneable domain read models,
   but web rendering should prefer `StudioView`.
 
-The first slice supports the browser-worker simulator and browser Web Serial
+The first slice supports the browser-worker sim and browser Web Serial
 ESP32 entrypoints. It launches `fw-browser` through `lpa-link`, talks to the
 real `lp-server` protocol through `lpa-client`, attaches to a running project
 when one is already loaded, can load the demo project, and reads project

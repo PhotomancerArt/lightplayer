@@ -172,10 +172,27 @@ of implementation — code can lag these names during the transition.
 
 ## Runtime & tooling
 
+- **target** — what a project declares it runs on, and what a device acts
+  as: a **board** (a catalog id) or **desktop**. A kind, never an
+  instance. See [the device ADR](adr/2026-09-07-always-a-device-target-real-emu-sim.md).
+- **real** — silicon on the desk, or a real desktop LightPlayer server on
+  the network. See [the device ADR](adr/2026-09-07-always-a-device-target-real-emu-sim.md).
+- **emu** — the real firmware binary for the target's chip, running in
+  `lp-emu` (boards only — there is no desktop emu). Exact; slower. See
+  [the device ADR](adr/2026-09-07-always-a-device-target-real-emu-sim.md).
+- **sim** — the desktop firmware (`fw-browser` = fw-desktop running in
+  the browser) wearing the target's manifest — any target. Fast; not
+  exact. The desktop sim wears the desktop manifest; a board sim wears
+  that board's. See [the device ADR](adr/2026-09-07-always-a-device-target-real-emu-sim.md).
+- **preview** — the sim engine used internally for gallery previews.
+  Never a device. See [the device ADR](adr/2026-09-07-always-a-device-target-real-emu-sim.md).
+- **Emulator / simulator** — the things, never devices: an emulator runs
+  the real binary; the simulator is the desktop firmware running in the
+  browser (`fw-browser`).
 - **Engine** — the shared runtime (loader, binding index, resolver,
-  nodes); identical across sim and device via `lpa-server`.
-- **Sim / device parity** — the requirement that model semantics live in
-  the shared load path so browser-sim and firmware behave identically.
+  nodes); identical across real, emu, and sim via `lpa-server`.
+- **Sim / device parity** — the requirement that a sim and a real device
+  run the same load path, so model semantics behave identically.
 - **Probe** — a read-only wire query of runtime state (e.g. the
   binding-graph probe feeding bus views).
 - **Story** — a captured Studio component state used for visual baselines
