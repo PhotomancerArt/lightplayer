@@ -316,12 +316,11 @@ pub(crate) fn PackageCardMenu(
                     if let Some(edited) = edited_line {
                         p { class: "tw:m-0 tw:text-xs tw:text-muted-foreground", "Edited {edited}" }
                     }
-                    // Advisory board target (vision D3): a quiet fact, not
-                    // a warning.
-                    if let Some(target) = card.target.as_deref() {
-                        p { class: "tw:m-0 tw:text-xs tw:text-muted-foreground",
-                            "for {target_display_name(target)}"
-                        }
+                    // The board this project is for (D41): a quiet fact,
+                    // not a warning — and absent for Desktop, which is
+                    // what most projects are.
+                    if let Some(board) = target_badge(card.target.as_deref()) {
+                        p { class: "tw:m-0 tw:text-xs tw:text-muted-foreground", "for {board}" }
                     }
                     if let Some(provenance) = card.provenance.clone() {
                         p { class: "tw:m-0 tw:text-xs tw:text-dim-foreground", "{provenance}" }
@@ -543,6 +542,22 @@ fn target_display_name(target: &str) -> &str {
         .unwrap_or(target)
 }
 
+/// The "for \<board\>" badge, when the target is worth saying out loud.
+///
+/// **Desktop gets none.** Since 2026-09-07 every project declares a target
+/// and most of them declare Desktop (D32/PD17), so a badge for it would be
+/// a line on nearly every card carrying no information — "for Desktop" is
+/// what a project with no hardware opinion looks like. The badge exists to
+/// mark the projects that ARE about a board, and marking them means not
+/// marking the rest.
+fn target_badge(target: Option<&str>) -> Option<&str> {
+    let target = target?;
+    match lpa_studio_core::ProjectTarget::from_manifest(Some(target)) {
+        lpa_studio_core::ProjectTarget::Desktop => None,
+        lpa_studio_core::ProjectTarget::Board(_) => Some(target_display_name(target)),
+    }
+}
+
 pub(crate) fn home_action(op: HomeOp) -> UiAction {
     UiAction::from_op(ControllerId::new(HOME_NODE_ID), op)
 }
@@ -641,6 +656,27 @@ mod target_display_name_tests {
         assert_eq!(
             target_display_name("acme/future-board-9000"),
             "acme/future-board-9000"
+        );
+    }
+
+    /// D32/PD17: every project declares a target now, and Desktop is what
+    /// most of them declare — so the badge marks the ones that are about a
+    /// BOARD and stays quiet for the rest. Both spellings of Desktop (the
+    /// written id and the absent field) read the same.
+    #[test]
+    fn the_badge_marks_boards_and_says_nothing_about_desktop() {
+        use super::target_badge;
+
+        assert_eq!(
+            target_badge(Some("seeed/xiao-esp32-c6")),
+            Some("XIAO ESP32-C6")
+        );
+        assert_eq!(target_badge(Some("lightplayer/desktop")), None);
+        assert_eq!(target_badge(None), None);
+        assert_eq!(
+            target_badge(Some("acme/future-board-9000")),
+            Some("acme/future-board-9000"),
+            "a board this catalog does not carry is still a board"
         );
     }
 }

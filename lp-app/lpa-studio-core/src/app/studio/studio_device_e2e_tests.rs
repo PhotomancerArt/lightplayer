@@ -3633,6 +3633,98 @@ fn powered_on_sim() -> (DeviceBench, TaskPool, String, FakeEsp32Device) {
     (bench, tasks, uid, device)
 }
 
+/// AC7, the picker's half (D44): picking a board in the add slot's dropdown
+/// mints a sim of THAT target, names it after the board, and powers it on —
+/// one gesture, ending in a card in the grid rather than a record on the
+/// remembered line. The device is an ordinary registry row; the picker
+/// invented no runtime beside the roster.
+#[test]
+fn the_picker_mints_a_sim_of_the_picked_target_and_powers_it_on() {
+    let device = sim_light_player();
+    let (mut bench, tasks) = DeviceBench::build(&device, "unused-serial-port", false, false);
+    let sims = Rc::new(SimDeviceTransport::new(Rc::new(ScriptedSimSource {
+        device: device.clone(),
+        restarts: Rc::new(Cell::new(0)),
+        manifests: Rc::new(RefCell::new(Vec::new())),
+    })));
+    bench.sims = Some(Rc::clone(&sims));
+    bench.controller.set_device_sim_transport(sims);
+    bench.controller.set_random(|| {
+        let mut bytes = [0u8; 16];
+        bytes[..6].copy_from_slice(&SIM_RANDOM);
+        bytes
+    });
+
+    assert!(bench.registry().is_empty(), "nothing before the pick");
+
+    drive(
+        bench
+            .controller
+            .dispatch(crate::SimCreateOp::action_for(SIM_TARGET)),
+    )
+    .expect("the pick starts a device");
+
+    let rows = bench.registry();
+    assert_eq!(rows.len(), 1, "the pick created ONE device: {rows:?}");
+    assert_eq!(rows[0].transport, "sim");
+    assert_eq!(rows[0].board_id.as_deref(), Some(SIM_TARGET));
+    assert_eq!(
+        rows[0].name, "XIAO ESP32-C6 (sim)",
+        "named after the board it acts as, renameable from the card"
+    );
+    assert!(
+        bench.sim_sidecar(&rows[0].uid).is_some(),
+        "the record is complete: row AND sidecar"
+    );
+
+    // Powered on, not merely remembered: the sim's own runtime is running
+    // and the card settles on Ready like a board that just said hello.
+    assert!(
+        bench
+            .sims
+            .as_ref()
+            .expect("the sim transport")
+            .is_powered(&rows[0].uid),
+        "the picked target is started, not filed away"
+    );
+    bench.run_until(&tasks, "the picked sim to identify", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+    });
+    let home = bench.controller.view().home.expect("the home view");
+    let split = crate::split_roster(&home.devices);
+    assert_eq!(split.connected.len(), 1, "{split:?}");
+    assert!(
+        split.remembered.is_empty(),
+        "a picked device belongs in the grid: {split:?}"
+    );
+}
+
+/// A target with no checked-in runtime manifest is refused with its reason
+/// rather than started as something else (Q10). The picker never offers
+/// one, so this is the guard behind the offer, not a path a user walks.
+#[test]
+fn a_target_with_no_hardware_manifest_is_refused_rather_than_swapped() {
+    let device = sim_light_player();
+    let (mut bench, _tasks) = DeviceBench::build(&device, "unused-serial-port", false, false);
+
+    let error = drive(
+        bench
+            .controller
+            .dispatch(crate::SimCreateOp::action_for("quinled/dig-uno")),
+    )
+    .expect_err("a target nothing can wear is refused");
+
+    assert!(
+        format!("{error}").contains("quinled/dig-uno"),
+        "the refusal names the target: {error}"
+    );
+    assert!(bench.registry().is_empty(), "and nothing was written");
+}
+
 /// AC3, the creation half: a minted sim is an ORDINARY remembered device.
 /// It loads detached from the registry like any board, keyed on the uid
 /// derived from its minted MAC, and the only thing marking it is the
