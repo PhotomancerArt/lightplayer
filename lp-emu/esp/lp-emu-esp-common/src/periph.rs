@@ -515,11 +515,31 @@ pub trait Peripheral {
         None
     }
 
-    /// How much evidence backs the register at `off`. See [`RegGrade`];
-    /// `Modeled` unless the block keeps a [`RegGrades`] table. The bus
-    /// consults it under [`crate::bus::SocBus::set_strict_grade`].
-    fn reg_grade(&self, _off: u32) -> RegGrade {
-        RegGrade::Modeled
+    /// How much evidence backs the register at `off`. See [`RegGrade`].
+    ///
+    /// `None` — the default — means this block **publishes no grade table**,
+    /// and that is not the same as `Some(Modeled)`. A block with a table has
+    /// been read register by register against a document, a driver and a
+    /// transcript, and says where each one stands; a block without one has
+    /// not been asked the question at all. `--strict-grade`
+    /// ([`crate::bus::SocBus::set_strict_grade`]) is a claim about the
+    /// registers somebody graded, so it applies to the first kind and passes
+    /// over the second — otherwise `documented` would stop at the first MMIO
+    /// access of any boot, on an accept table nobody ever said anything
+    /// about, and the level would mean "did we finish the chip" rather than
+    /// "is this register's behaviour backed by evidence".
+    ///
+    /// The report says which blocks were in scope, so an ungraded block is
+    /// visible as an unanswered question rather than as a pass.
+    ///
+    /// The contract for an override: a block that publishes a table answers
+    /// `Some` for **every** offset in its window — `RegGrades::grade` returns
+    /// `Modeled` for anything unlisted, which is the right answer for a
+    /// register the table's author considered and did not raise. Answering
+    /// `None` for some offsets and `Some` for others would make the scope
+    /// depend on which register a boot happened to touch first.
+    fn reg_grade(&self, _off: u32) -> Option<RegGrade> {
+        None
     }
 
     /// The downcast seam for a block the **machine** drives from outside the

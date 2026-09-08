@@ -102,11 +102,15 @@ OPTIONS:
     --strict-bus            an access nothing claims is fatal; exits 3
     --strict-grade modeled|documented|measured
                             an access to a register graded BELOW this level is
-                            fatal (exits 3): `documented` stops on the first
-                            register whose behaviour is only our reading of
-                            the PAC — on this machine that is most of them.
-                            Per-register grades live in each block's file
-                            header (USB_DEVICE carries the first table)
+                            fatal (exits 3): `documented` stops on a register
+                            whose behaviour is only our reading of the PAC,
+                            `measured` on anything no transcript has proved.
+                            It applies to the blocks that PUBLISH a grade
+                            table — USB_DEVICE today — and passes over the
+                            rest, because `nobody graded this block` is not
+                            the same statement as `this block is modelled`.
+                            The report names the blocks it checked. Tables
+                            live in each block's file header
     --probe <symbol>@<ms>   print a static's word at an emulated time
     --break-at <symbol>     stop when the symbol is entered; print a0..a7, sp
                             and the backtrace; exits 5
@@ -724,6 +728,21 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
         machine.bus.unmapped_sites(),
         machine.idle_skips()
     );
+    if let Some(level) = machine.bus.strict_grade() {
+        // Which blocks the level actually covered. A run that passed says so
+        // about the blocks it checked and about no others.
+        let scope = machine.bus.blocks_in_strict_grade_scope();
+        eprintln!(
+            "strict-grade {level}: checked {} ({}); every other block publishes no grade table \
+             and was passed over",
+            scope.len(),
+            if scope.is_empty() {
+                "none".to_string()
+            } else {
+                scope.join(", ")
+            }
+        );
+    }
     eprintln!(
         "uart0: {} bytes left the wire{}",
         machine.uart0().len(),
