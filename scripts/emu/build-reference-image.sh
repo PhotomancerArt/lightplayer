@@ -312,6 +312,14 @@ echo "build-reference-image: sha256 $sha"
 # The cost is a second full firmware build (~2.5 min on an M2 Max, cold), so
 # CI runs it on one image, not all three.
 if (( verify )); then
+    # The report first, so that a log from one host can be read against a log
+    # from another. `--verify` proves the recipe is deterministic ON THIS
+    # HOST; the two hosts agreeing is a separate claim, and until the section
+    # table and the toolchain identity are both in the log there is no way to
+    # tell a codegen difference from an embedded path.
+    echo "build-reference-image: toolchain $(rustc -vV | tr '\n' ' ')"
+    python3 "$repo/scripts/emu/elf-section-digest.py" "$elf" || true
+
     wt2="$repo/target/emu-ref/wt-$commit-verify-$slug"
     echo "build-reference-image: --verify — a second build at $wt2"
     prepare_worktree "$wt2"
