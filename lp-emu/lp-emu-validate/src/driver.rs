@@ -888,7 +888,14 @@ impl ConfigurationDriver for LpEmuDriver {
         // would force a 12 KB blob into the registry or a file onto a
         // three-line schedule.
         if let Some(script) = req.payload.host_script {
-            emu.push(if usb { "--usb-script" } else { "--uart0-script" }.into());
+            emu.push(
+                if usb {
+                    "--usb-script"
+                } else {
+                    "--uart0-script"
+                }
+                .into(),
+            );
             emu.push(script.into());
         }
         if let Some(mac) = &req.identity.mac {

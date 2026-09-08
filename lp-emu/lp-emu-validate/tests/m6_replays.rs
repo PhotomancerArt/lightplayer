@@ -641,7 +641,10 @@ fn g5_1_the_walk_is_the_same_walk_on_either_link() {
     assert_eq!(writes.len(), 9);
     assert!(writes.iter().all(|w| w.values["error"] == "null"));
     let paths = |t: &Transcript, p: &str| -> Vec<String> {
-        let mut v: Vec<String> = series(t, p, "fs-write").into_iter().map(|w| w.key).collect();
+        let mut v: Vec<String> = series(t, p, "fs-write")
+            .into_iter()
+            .map(|w| w.key)
+            .collect();
         v.sort();
         v.dedup();
         v
@@ -725,7 +728,12 @@ fn g5_2_the_meteor_ledger_over_usb_matches_11_2() {
         "261100"
     );
     assert_eq!(
-        gate(&t, "meteor-walk-usb", "stop_all_projects before", "free_bytes"),
+        gate(
+            &t,
+            "meteor-walk-usb",
+            "stop_all_projects before",
+            "free_bytes"
+        ),
         "264716"
     );
 

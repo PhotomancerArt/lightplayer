@@ -169,7 +169,10 @@ fn the_walk_over_the_usb_link_lands_the_same_project_with_the_same_figures() {
         .expect("a machine on the walked chip");
     let outcome =
         second.run_until(&StopCondition::after_micros(6_000_000).exit_on("boot complete"));
-    assert!(matches!(outcome, Outcome::ExitMatched { .. }), "{outcome:?}");
+    assert!(
+        matches!(outcome, Outcome::ExitMatched { .. }),
+        "{outcome:?}"
+    );
     let boot = String::from_utf8_lossy(&second.usb_sj().bytes()).into_owned();
     assert!(
         !boot.contains("[FS]"),
