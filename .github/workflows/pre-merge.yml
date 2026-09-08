@@ -854,7 +854,18 @@ jobs:
     # runner (2026-09-08, main at #567), which is three cold reference-image
     # builds and the suite. L4's `--verify` step adds a fourth build, so the
     # ceiling moves with it rather than the job living at 90 % of its budget.
-    timeout-minutes: 20
+    #
+    # 20 → 30, 2026-09-08. The job had reached its cap ON MAIN: run
+    # 34249913019 (main, no PR's changes) took 19m52s to the end of its last
+    # real step and was then killed at 20m during the cache upload, with
+    # every step green — verify 2m47s, boot tests + replays 9m38s, heap
+    # ratchet 6m48s. Three branches hit the same wall inside half an hour.
+    # A 20-minute budget that a passing run exceeds is not a budget, it is a
+    # coin toss, and a red job whose every test passed teaches a reader to
+    # ignore it. Non-required and path-gated, so DD31's reasoning applies:
+    # this is not a new required check. If it grows again the answer is the
+    # emulator's speed (the M4/M5 speed ladder) or a nightly, not 40.
+    timeout-minutes: 30
     needs: detect-changes
     if: needs.detect-changes.outputs.emu_c6 == 'true'
     env:
