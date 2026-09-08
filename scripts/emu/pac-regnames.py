@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate `RegNames` tables from the esp32c6 PAC's svd2rust offset comments.
+"""Generate `RegNames` tables from the esp32c6 PAC: register names and resets.
 
 A bus log that says `UART0+0x01c` has to be decoded by hand against a PAC.
 One that says `UART0+0x01c status` can be read. The names come from the same
@@ -7,6 +7,15 @@ place the M3 register inventory came from — the `#[doc = "0xNN - ..."]`
 comments svd2rust writes above each register accessor — so they are derived
 data, not transcription, and each generated file carries the provenance
 header `docs/adr/2026-07-29-license-provenance-discipline.md` requires.
+
+Each table also carries the block's **non-zero reset values**, read from the
+`impl crate::Resettable for <REG>_SPEC { const RESET_VALUE: u32 = … }` that
+svd2rust writes beside every register (an empty impl means zero). A
+`RegFile` seeds itself from them, so an accept block reads what the part
+reads before anyone writes it rather than what a boot was observed to need
+— the sweep
+`docs/defects/2026-09-07-accept-blocks-carry-only-the-reset-values-a-boot-needed.md`
+asked for. Same source, same provenance, same `--check` lint.
 
 Two modes:
 
@@ -389,6 +398,13 @@ ARRAY_FIELD = re.compile(r"^\s*(\w+): \[(\w+); (\d+)\],")
 ARRAY_BOUND = re.compile(r"^\s*\[\(\); (\d+)\]\[n\];")
 
 IMPL_HEAD = re.compile(r"^impl (\w+) \{")
+# `impl crate::Resettable for USER_SPEC {` — svd2rust writes one per register.
+# An EMPTY body means "resets to 0"; a body carries the value:
+#     const RESET_VALUE: u32 = 0x8000_0000;
+RESETTABLE = re.compile(
+    r"impl crate::Resettable for (\w+)_SPEC \{(?:\s*const RESET_VALUE: u32 = "
+    r"([0-9a-fA-Fx_]+);)?\s*\}"
+)
 
 
 @dataclass(frozen=True)
@@ -462,8 +478,30 @@ def array_lengths(text: str) -> dict[str, int]:
     return out
 
 
-def collect(pac: PacSource, block: str) -> list[tuple[int, str]]:
-    """Every `(offset, name)` in a register block, clusters flattened.
+def reset_value(pac: PacSource, relpath: str, type_name: str) -> int:
+    """The PAC's reset value for one register, or 0.
+
+    svd2rust writes `impl crate::Resettable for <REG>_SPEC {}` for a register
+    that resets to zero and gives the impl a `const RESET_VALUE: u32` body
+    when it does not. A missing file is 0 too: a register whose module we
+    cannot read is one we have no reset for, and 0 is what the window held
+    before this pass existed.
+    """
+    text = pac.read(relpath)
+    if text is None:
+        return 0
+    for m in RESETTABLE.finditer(text):
+        if m.group(1) != type_name:
+            continue
+        if m.group(2) is None:
+            return 0
+        return int(m.group(2).replace("_", ""), 0)
+    return 0
+
+
+def collect(pac: PacSource, block: str) -> tuple[list[tuple[int, str]], list[tuple[int, int]]]:
+    """Every `(offset, name)` in a register block, clusters flattened, and
+    the non-zero `(offset, reset)` pairs beside them.
 
     Concrete accessors win over array ones: svd2rust expands most register
     arrays into per-index siblings under their datasheet names (`unit0_op`),
@@ -479,6 +517,7 @@ def collect(pac: PacSource, block: str) -> list[tuple[int, str]]:
     accessors = parse_impl(top, "RegisterBlock")
     lengths = array_lengths(top)
     entries: dict[int, str] = {}
+    resets: dict[int, int] = {}
 
     def cluster_members(type_name: str) -> list[Accessor]:
         text = pac.read(f"src/{block}/{type_name.lower()}.rs")
@@ -489,10 +528,27 @@ def collect(pac: PacSource, block: str) -> list[tuple[int, str]]:
     def place(base: int, name: str, type_name: str) -> None:
         members = cluster_members(type_name)
         if members:
+            # A cluster's member modules live one directory down, under the
+            # cluster type's own name (`src/systimer/unitload/hi.rs`).
             for m in members:
-                entries.setdefault(base + m.offset, f"{name}.{m.name}")
+                off = base + m.offset
+                if off in entries:
+                    continue
+                entries[off] = f"{name}.{m.name}"
+                rv = reset_value(
+                    pac,
+                    f"src/{block}/{type_name.lower()}/{m.type_name.lower()}.rs",
+                    m.type_name,
+                )
+                if rv:
+                    resets[off] = rv
         else:
-            entries.setdefault(base, name)
+            if base in entries:
+                return
+            entries[base] = name
+            rv = reset_value(pac, f"src/{block}/{type_name.lower()}.rs", type_name)
+            if rv:
+                resets[base] = rv
 
     for a in (x for x in accessors if not x.array):
         place(a.offset, a.name, a.type_name)
@@ -505,7 +561,7 @@ def collect(pac: PacSource, block: str) -> list[tuple[int, str]]:
         for i in range(count):
             place(a.offset + i * stride, f"{a.name}{i}", a.type_name)
 
-    return sorted(entries.items())
+    return sorted(entries.items()), sorted(resets.items())
 
 
 # --------------------------------------------------------------------------
@@ -562,9 +618,14 @@ def render_sources(entries: list[tuple[int, str]], svd2rust: str) -> str:
 # rendering
 
 
-def render(target: Target, entries: list[tuple[int, str]], svd2rust: str) -> str:
+def render(
+    target: Target,
+    entries: list[tuple[int, str]],
+    resets: list[tuple[int, int]],
+    svd2rust: str,
+) -> str:
     lines = [
-        "// Register offsets and names derived from esp-rs/esp-pacs:",
+        "// Register offsets, names and reset values derived from esp-rs/esp-pacs:",
         f"//   {PAC_CRATE}/src/{target.block}.rs  (crate {PAC_CRATE} {PAC_VERSION},",
         f"//   generated by {svd2rust})",
         f"// Repository: {PAC_REPO}",
@@ -575,7 +636,7 @@ def render(target: Target, entries: list[tuple[int, str]], svd2rust: str) -> str
         "use lp_emu_esp_common::regnames::RegNames;",
         "",
         f"/// Register names for the `{target.block}` block "
-        f"({len(entries)} registers).",
+        f"({len(entries)} registers, {len(resets)} with a non-zero reset).",
         f"pub static {target.static}: RegNames = RegNames {{",
         f'    block: "{target.block}",',
         "    entries: &[",
@@ -583,6 +644,9 @@ def render(target: Target, entries: list[tuple[int, str]], svd2rust: str) -> str
     width = max((len(f"{off:#05x}") for off, _ in entries), default=5)
     for off, name in entries:
         lines.append(f'        ({off:#0{width}x}, "{name}"),')
+    lines += ["    ],", "    resets: &["]
+    for off, value in resets:
+        lines.append(f"        ({off:#0{width}x}, {value:#010x}),")
     lines += ["    ],", "};", ""]
     return "\n".join(lines)
 
@@ -616,7 +680,7 @@ def main() -> int:
     svd2rust = pac.svd2rust_line()
     stale: list[str] = []
     for target in TARGETS:
-        entries = collect(pac, target.block)
+        entries, resets = collect(pac, target.block)
         if not entries:
             print(
                 f"pac-regnames: no registers parsed for `{target.block}` — the PAC's "
@@ -624,7 +688,7 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 1
-        text = render(target, entries, svd2rust)
+        text = render(target, entries, resets, svd2rust)
         path = os.path.join(REPO, target.out)
         current = None
         if os.path.exists(path):
@@ -635,12 +699,18 @@ def main() -> int:
                 stale.append(target.out)
             continue
         if current == text:
-            print(f"  unchanged  {target.out} ({len(entries)} registers)")
+            print(
+                f"  unchanged  {target.out} ({len(entries)} registers, "
+                f"{len(resets)} resets)"
+            )
             continue
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             f.write(text)
-        print(f"  wrote      {target.out} ({len(entries)} registers)")
+        print(
+            f"  wrote      {target.out} ({len(entries)} registers, "
+            f"{len(resets)} resets)"
+        )
 
     # The interrupt-source table, same discipline.
     sources = collect_sources(pac)
