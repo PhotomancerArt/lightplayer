@@ -78,6 +78,16 @@ pub fn slc() -> RegFile {
 /// and `0x200d` into the low half of `+0x40` — a device id for a slave
 /// nothing will ever enumerate. Accept-and-remember; the ROM reads back only
 /// what it wrote.
+/// `LP_ANA` — the LP analog block: brownout detector and the LP power
+/// switches. The **second-stage bootloader** reaches it before it loads a
+/// segment (`bootloader_init` → the BOD configuration at `0x4086ff60`),
+/// read-modify-writing `+0x04` and `+0x0c`. Nothing reads a status bit out
+/// of it, so accept-and-remember is the whole model; the brownout it
+/// configures cannot happen on a machine with no analog supply.
+pub fn lp_ana() -> RegFile {
+    RegFile::new("LP_ANA", 0x400).with_names(regs::LP_ANA)
+}
+
 pub fn hinf() -> RegFile {
     RegFile::new("HINF", 0x1000).with_names(regs::HINF)
 }

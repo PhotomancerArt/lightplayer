@@ -112,6 +112,10 @@ pub mod periph {
     pub const SPI0: u32 = 0x6000_2000;
     pub const SPI1: u32 = 0x6000_3000;
     pub const RMT: u32 = 0x6000_6000;
+    /// The SHA accelerator: the bootloader hashes the image with it.
+    pub const SHA: u32 = 0x6008_9000;
+    /// The LP analog block (brownout), configured by the bootloader.
+    pub const LP_ANA: u32 = 0x600B_2C00;
     /// SDIO slave host interface — the mask ROM stamps a device id into it.
     pub const HINF: u32 = 0x6001_6000;
     /// SDIO slave DMA — one word the mask ROM reads on the download path.

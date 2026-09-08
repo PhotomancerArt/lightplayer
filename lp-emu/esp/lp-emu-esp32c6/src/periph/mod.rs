@@ -35,6 +35,7 @@ pub mod lp_wdt;
 pub mod pcr;
 pub mod rmt;
 pub mod rng;
+pub mod sha;
 pub mod spi0;
 pub mod spi1;
 pub mod systimer;
@@ -209,6 +210,8 @@ pub fn boot_set(
         // application never reaches them, so a `--map` reader meets the
         // boot set in the order an app boot does and finds the ROM's own
         // corner at the end.
+        (base::LP_ANA, 0x400, Box::new(accept::lp_ana())),
+        (base::SHA, sha::LEN, Box::new(sha::Sha::new())),
         (base::HINF, 0x1000, Box::new(accept::hinf())),
         (base::SLC, 0x1000, Box::new(accept::slc())),
     ]

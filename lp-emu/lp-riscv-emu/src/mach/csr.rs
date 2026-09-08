@@ -82,6 +82,57 @@ pub const USTATUS: u16 = 0x000;
 /// `uie`, the other one, written in the same three-instruction run above.
 pub const UIE: u16 = 0x004;
 
+// --- memory protection: PMP (spec §3.7) and Espressif's PMA ---------------
+
+/// `pmpcfg0`. The four `pmpcfg` and sixteen `pmpaddr` registers, plus
+/// Espressif's own PMA pair below, are the whole of what
+/// `esp_cpu_configure_region_protection` writes — and the ESP-IDF
+/// second-stage bootloader calls it before it loads a single segment.
+///
+/// They are [`CsrClass::Scratch`], and that is a statement about this hart
+/// rather than a shortcut: **it enforces no memory protection**. The bus
+/// decides what an address means; a region marked no-execute here would
+/// still execute. Modelling PMP would be modelling a fault this emulator has
+/// never been asked to produce, and pretending to would be worse than saying
+/// so — an image that relied on a PMP fault would pass here and trap on
+/// silicon. What matters for the boot is that the writes do not trap, which
+/// on silicon they demonstrably do not.
+///
+/// Found by M7: the bootloader took an illegal instruction at
+/// `0x4086cbc0` with `mtval = 0xbd079073`, which is `csrw 0xbd0, a5` —
+/// `CSR_PMAADDR(0)`.
+pub const PMPCFG_FIRST: u16 = 0x3A0;
+/// `pmpcfg3`.
+pub const PMPCFG_LAST: u16 = 0x3A3;
+/// `pmpaddr0`.
+pub const PMPADDR_FIRST: u16 = 0x3B0;
+/// `pmpaddr15`.
+pub const PMPADDR_LAST: u16 = 0x3BF;
+/// `pmacfg0` — Espressif's physical-memory-attribute config, `0xBC0 + n`
+/// (`components/riscv/include/riscv/csr_pma.h`). Not a RISC-V standard CSR.
+pub const PMACFG_FIRST: u16 = 0xBC0;
+/// `pmacfg15`.
+pub const PMACFG_LAST: u16 = 0xBCF;
+/// `pmaaddr0` — `0xBD0 + n`, the pair to [`PMACFG_FIRST`].
+pub const PMAADDR_FIRST: u16 = 0xBD0;
+/// `pmaaddr15`.
+pub const PMAADDR_LAST: u16 = 0xBDF;
+
+/// How many memory-protection CSRs there are: 4 + 16 + 16 + 16.
+pub const PROTECTION_CSR_COUNT: usize = 52;
+
+/// Where `csr` sits in the protection block of [`CsrFile::scratch`], if it
+/// is one of them.
+const fn protection_index(csr: u16) -> Option<usize> {
+    match csr {
+        PMPCFG_FIRST..=PMPCFG_LAST => Some((csr - PMPCFG_FIRST) as usize),
+        PMPADDR_FIRST..=PMPADDR_LAST => Some(4 + (csr - PMPADDR_FIRST) as usize),
+        PMACFG_FIRST..=PMACFG_LAST => Some(20 + (csr - PMACFG_FIRST) as usize),
+        PMAADDR_FIRST..=PMAADDR_LAST => Some(36 + (csr - PMAADDR_FIRST) as usize),
+        _ => None,
+    }
+}
+
 // --- machine trap handling (spec §3.1.14-3.1.17) ---------------------------
 
 /// `mscratch` — a working scratch CSR: `_pre_default_start_trap` parks `t0`
@@ -239,6 +290,10 @@ pub const fn class(csr: u16) -> CsrClass {
         TSELECT | TDATA1 | TDATA2 | TCONTROL => CsrClass::Trigger,
 
         MTVT | MHCR | MPCER | MPCMR | USTATUS | UIE => CsrClass::Scratch,
+        PMPCFG_FIRST..=PMPCFG_LAST
+        | PMPADDR_FIRST..=PMPADDR_LAST
+        | PMACFG_FIRST..=PMACFG_LAST
+        | PMAADDR_FIRST..=PMAADDR_LAST => CsrClass::Scratch,
         // `0x802` inside this range is PCCR_USER, matched above.
         GPIO_CSR_FIRST..=GPIO_CSR_LAST => CsrClass::Scratch,
 
@@ -266,8 +321,13 @@ pub struct CsrFile {
     scratch: [u32; SCRATCH_COUNT],
 }
 
-/// How many [`CsrClass::Scratch`] CSRs there are.
-const SCRATCH_COUNT: usize = 11;
+/// The named scratch CSRs: `mtvt`, `mhcr`, the five dedicated-GPIO ones,
+/// `mpcer`, `mpcmr`, `ustatus`, `uie`.
+const FIXED_SCRATCH_COUNT: usize = 11;
+
+/// How many [`CsrClass::Scratch`] CSRs there are: the named ones plus the
+/// memory-protection block.
+const SCRATCH_COUNT: usize = FIXED_SCRATCH_COUNT + PROTECTION_CSR_COUNT;
 
 impl Default for CsrFile {
     fn default() -> Self {
@@ -296,8 +356,6 @@ impl CsrFile {
         match csr {
             MTVT => Some(0),
             MHCR => Some(1),
-            USTATUS => Some(9),
-            UIE => Some(10),
             0x800 => Some(2),
             0x801 => Some(3),
             // 0x802 is PCCR_USER, not scratch.
@@ -306,7 +364,12 @@ impl CsrFile {
             0x805 => Some(6),
             MPCER => Some(7),
             MPCMR => Some(8),
-            _ => None,
+            USTATUS => Some(9),
+            UIE => Some(10),
+            other => match protection_index(other) {
+                Some(i) => Some(FIXED_SCRATCH_COUNT + i),
+                None => None,
+            },
         }
     }
 

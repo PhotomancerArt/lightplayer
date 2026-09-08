@@ -117,6 +117,16 @@ TARGETS = [
         out="lp-emu/esp/lp-emu-esp32c6/src/regs/slc.rs",
     ),
     Target(
+        block="sha",
+        static="SHA",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/sha.rs",
+    ),
+    Target(
+        block="lp_ana",
+        static="LP_ANA",
+        out="lp-emu/esp/lp-emu-esp32c6/src/regs/lp_ana.rs",
+    ),
+    Target(
         block="intpri",
         static="INTPRI",
         out="lp-emu/esp/lp-emu-esp32c6/src/regs/intpri.rs",

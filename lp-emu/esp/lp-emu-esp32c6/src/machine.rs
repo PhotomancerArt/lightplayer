@@ -162,6 +162,10 @@ pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     // Last, not first, even though a ROM-up boot meets them before
     // everything else: the list is read as "what the application's boot
     // walks through", and the ROM's own corner is an appendix to it.
+    "LP_ANA",
+    // The one block on the boot path that has to compute the right answer:
+    // the bootloader hashes the image before it loads it.
+    "SHA",
     "HINF",
     "SLC",
 ];
@@ -2167,6 +2171,10 @@ impl Esp32C6Machine {
 
             match end {
                 SliceEnd::BudgetExhausted => {}
+                // A peripheral asked for the machine's attention before the
+                // next instruction — today, the cache MMU after an entry
+                // write. Everything below the match is that attention.
+                SliceEnd::BusYield => {}
                 SliceEnd::Wfi => {
                     // The deterministic idle skip: nothing can happen before
                     // the next scheduled event, so move guest time there —

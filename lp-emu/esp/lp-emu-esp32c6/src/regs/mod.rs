@@ -50,8 +50,10 @@ mod modem_syscon;
 pub mod output_signals;
 mod pcr;
 mod hinf;
+mod lp_ana;
 mod plic_mx;
 mod plic_ux;
+mod sha;
 mod slc;
 mod pmu;
 mod rmt;
@@ -89,8 +91,10 @@ pub use modem_lpcon::MODEM_LPCON;
 pub use modem_syscon::MODEM_SYSCON;
 pub use pcr::PCR;
 pub use hinf::HINF;
+pub use lp_ana::LP_ANA;
 pub use plic_mx::PLIC_MX;
 pub use plic_ux::PLIC_UX;
+pub use sha::SHA;
 pub use slc::SLC;
 pub use pmu::PMU;
 pub use rmt::RMT;
@@ -129,8 +133,10 @@ pub const ALL: &[&lp_emu_esp_common::RegNames] = &[
     &MODEM_SYSCON,
     &PCR,
     &HINF,
+    &LP_ANA,
     &PLIC_MX,
     &PLIC_UX,
+    &SHA,
     &SLC,
     &PMU,
     &RMT,

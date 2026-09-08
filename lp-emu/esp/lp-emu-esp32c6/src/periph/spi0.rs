@@ -119,6 +119,15 @@ impl Peripheral for Spi0 {
                 let index = mmu.index();
                 let word = merge_lane(mmu.entry(index), off, width, value);
                 mmu.set_entry(index, word);
+                drop(mmu);
+                // The entry is dirty and only the machine can fill the
+                // window from flash. Ending the slice here is the whole
+                // difference between "the guest reads what it just mapped"
+                // and "the guest reads what was there before": the
+                // second-stage bootloader maps its own image header and
+                // reads it a dozen instructions later, and read zeros until
+                // this line existed.
+                cx.yield_to_machine();
             }
             ITEM_INDEX => {
                 let mut mmu = self.mmu.lock().unwrap();
