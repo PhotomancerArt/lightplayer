@@ -3908,13 +3908,20 @@ fn a_sim_that_never_says_hello_fails_the_open_instead_of_holding_it() {
         crate::ControllerId::new(crate::HOME_NODE_ID),
         crate::HomeOp::OpenPackage { key: key.clone() },
     )));
-    assert!(outcome.is_ok(), "the open is held, never refused: {outcome:?}");
+    assert!(
+        outcome.is_ok(),
+        "the open is held, never refused: {outcome:?}"
+    );
     let sim_uid = bench
         .controller
         .pending_device_lens_for_test()
         .expect("the lens is held while the sim boots");
     assert!(
-        bench.sims.as_ref().expect("a sim transport").is_powered(&sim_uid),
+        bench
+            .sims
+            .as_ref()
+            .expect("a sim transport")
+            .is_powered(&sim_uid),
         "the open powered the sim on"
     );
 
@@ -3933,7 +3940,11 @@ fn a_sim_that_never_says_hello_fails_the_open_instead_of_holding_it() {
     }
 
     assert!(
-        bench.controller.runtime_pool_for_test().lens_session().is_none(),
+        bench
+            .controller
+            .runtime_pool_for_test()
+            .lens_session()
+            .is_none(),
         "nothing landed"
     );
     let crate::app::open_progress::OpenStage::Failed(failure) =
@@ -3958,7 +3969,11 @@ fn a_sim_that_never_says_hello_fails_the_open_instead_of_holding_it() {
         "Retry is the same open"
     );
     assert!(
-        !bench.sims.as_ref().expect("a sim transport").is_powered(&sim_uid),
+        !bench
+            .sims
+            .as_ref()
+            .expect("a sim transport")
+            .is_powered(&sim_uid),
         "the sim was powered off, so Power on and Retry can start it again"
     );
     let rows = bench.registry();
@@ -3970,7 +3985,10 @@ fn a_sim_that_never_says_hello_fails_the_open_instead_of_holding_it() {
     // behind for the dead link.
     bench.step(&tasks);
     let view = bench.view();
-    assert!(view.pending.is_empty(), "no orphaned pending card: {view:?}");
+    assert!(
+        view.pending.is_empty(),
+        "no orphaned pending card: {view:?}"
+    );
     assert_eq!(view.devices.len(), 1, "{view:?}");
     assert!(
         !view.devices[0].state_label.starts_with("Ready"),

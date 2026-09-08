@@ -113,6 +113,22 @@ pub fn note_boot_settled(label: &str) {
     });
 }
 
+/// Whether one status envelope is the WORKER's `ready` — the one that ends
+/// a boot wait.
+///
+/// The worker posts its lifecycle statuses with no `runtime_id`; a
+/// runtime's own statuses (`booting`, `ready`, …, drained from the wasm
+/// side and forwarded verbatim) carry the runtime's id. The two vocabularies
+/// share the word `ready`, and the boot runtime says it BEFORE the worker
+/// does — so a wait that settled on the first `ready` it saw returned to
+/// the host with the worker still talking, and the `runtime_created` that
+/// followed (the ONE place the granted tier is stated) landed in the
+/// pumped stream where nobody records it (G1, 2026-09-07: the band never
+/// showed its tier).
+pub fn settles_boot(status: &str, runtime_id: Option<u32>) -> bool {
+    runtime_id.is_none() && status == "ready"
+}
+
 /// One expired boot wait: which phase went quiet and for how long.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BootWaitExpired {
@@ -179,6 +195,17 @@ impl BootWaitClock {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_workers_own_ready_settles_a_boot() {
+        assert!(settles_boot("ready", None));
+        assert!(
+            !settles_boot("ready", Some(1)),
+            "the boot runtime's own `ready` is forwarded runtime output, not the worker's"
+        );
+        assert!(!settles_boot("runtime-create", None));
+        assert!(!settles_boot("booting", Some(1)));
+    }
 
     #[test]
     fn quiet_boot_expires_after_the_phase_budget() {
