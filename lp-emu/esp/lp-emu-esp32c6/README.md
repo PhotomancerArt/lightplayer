@@ -936,6 +936,31 @@ replays of the committed transcripts, and the registry parity test. About
 firmware at all and already run in `cargo test`, so the gates cost CI
 nothing.
 
+### The walk
+
+`just walk-esp32c6-emu` (`scripts/emu/m4-walk.sh`) is not in `test-emu-c6`
+and is not a test. It is `scripts/m4-hardware-walk.sh --chip esp32c6` with
+this machine where the board goes: the current tree's shipped image plus
+`frame-dump`, merged into a 4 MiB flash part, booted from the reset vector,
+served on a socket, `lp-cli upload projects/test/shader-oracle` against it,
+and the rendered frame held against the host oracle **twice** — the
+firmware's own `[OUT] dump` line and the waveform decoded off gpio18. It
+fails if those two disagree with each other, which is the comparison a board
+cannot be asked to make and the reason the C6 grew a `frame-dump` build.
+
+It builds a firmware image, a merged image and a release `lp-cli`, then runs
+twelve emulated seconds, so it costs minutes rather than seconds and belongs
+in a session rather than in a PR gate. What it proves per tick is
+`shader_oracle_pin`, which does run in `test-emu-c6`.
+`docs/reports/2026-09-08-esp32c6-emulator-walk.md` is its record — including
+the list of what this machine does not cover, which is the part to read
+before quoting a number from it.
+
+`just heap-budget-check-chips` is the other thing that reads this machine for
+a gate: the shipped image's own first-heartbeat allocator figures, ratcheted
+into `scripts/heap-budget-record.json` with silicon's beside them
+(`docs/heap-budget-gate.md`).
+
 `just bench-emu-c6` is the speed side of the same two images: both reference
 images at both grades, reported as user seconds, instructions/second and a
 real-time ratio, with the load average and a `cmp` of the UART0 bytes against
