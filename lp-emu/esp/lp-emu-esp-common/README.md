@@ -34,6 +34,7 @@ generator's proof, not the crate's data; see below.)
    |
   Trace                  every MMIO access, with the PC, plus SPIN
   HostSinks              where a UART's bytes actually go
+  Fabric                 pads, signals and edges — where an output goes
   Scheduler              (in lp-emu-core) guest time — plan PD5
 ```
 
@@ -87,6 +88,59 @@ schedules events; turning levels into a CPU interrupt number for a hart is
 the chip's matrix, one layer up. `IrqLines` is chip-wide and per-source,
 `BusCx.hart` says who is asking — which is the whole of plan PD6's
 multi-hart shape until a second hart exists.
+
+### `pins` — the signal fabric (M5 P2)
+
+Where a peripheral's output actually goes. A peripheral never sees another
+peripheral, so the RMT block cannot read `GPIO.func_out_sel_cfg[18]` to
+learn which pad carries its waveform, and the GPIO block cannot ask the RMT
+what level its signal is at. The routing is one fact two blocks share —
+the shape the interrupt matrix already has (plan DD22): **one state on the
+bus, register views writing into it.** `BusCx.pins` is that state for pads
+and signals (plan DD34 e):
+
+- a chip's GPIO block is a routing **view**: `route(pad, source, oe, at)`
+  and `set_gpio_out(pad, level, at)`;
+- an output peripheral calls `drive(signal, level, at)` and never learns
+  whether anyone is listening;
+- the machine drains `take_edges()` every slice and hands the edges to
+  whatever watches the wire — a strip decoder, a raw pin log.
+
+**No chip numbers here either.** The fabric does not know that a C6 calls
+signal 71 `RMT_SIG_0` or that 128 means "follow the GPIO output register";
+the chip crate decides what a write means and the fabric only remembers and
+propagates. An edge is recorded for a pad that has a route, only when its
+level actually changes, so an unrouted signal is invisible — as it is on
+the pin header.
+
+Modelled: the routing, a signal's driven level, a routed pad's level, and
+the cycle it changed. **Not** modelled: input (nothing drives a pad from
+outside), output enable (`oen_sel` and the `enable` bitmap are recorded and
+reported in the chip's trace note, never gated on), drive strength, pulls,
+open-drain, pad filters. A logic analyser on the pin would not show those
+either.
+
+### `strip` — what was on the wire (M5 P2)
+
+`strip::ws281x::Ws281xDecoder` reads a pad's edges the way a logic analyser
+would: a rising edge opens a bit, the falling edge gives its high time, the
+datasheet's **±150 ns** says whether that was a zero, a one, or a
+`BitError`, and a low of ≥ 50 µs is the latch that closes the frame. It
+knows nothing about who produced the edges, which is the point — it is a
+**second opinion** on the frames the peripheral's own word log describes,
+so the two agreeing is evidence rather than a tautology.
+
+`ChannelTiming` and `ColorOrder` come from `lp-ws281x`, the crate the
+firmware encodes with (MIT, on the fence allowlist), so the emulator's idea
+of a bit cannot drift from the driver's. `cpu_hz` is a parameter, not a
+constant: the C6 runs at 160 MHz and the classic ESP32 at 240. A `Frame`
+keeps the **wire** bytes and `unpermute` gives the RGB the driver was
+handed, both in the record, so a wrong colour-order assumption shows up as
+a difference between two fields instead of silently inside one.
+
+The tolerance is not a knob. A pulse outside ±150 ns is a finding about the
+transmitter; widening the window to make something pass would throw away
+the only thing that makes this an oracle.
 
 ### `regfile` — accept-and-remember
 

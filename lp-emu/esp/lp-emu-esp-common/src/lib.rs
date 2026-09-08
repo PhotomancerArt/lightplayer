@@ -42,8 +42,10 @@ pub mod bus;
 pub mod elf;
 pub mod host;
 pub mod periph;
+pub mod pins;
 pub mod regfile;
 pub mod regnames;
+pub mod strip;
 pub mod trace;
 
 pub use bus::{
@@ -55,8 +57,10 @@ pub use periph::{
     BusCx, CpuIntMatrix, IrqLines, MachineRequest, NoCpuInterrupts, Peripheral, RegGrade,
     RegGrades, Sandbox, Strap, Width,
 };
+pub use pins::{Edge, Fabric, PadId, Route, RouteSource, SignalId};
 pub use regfile::RegFile;
 pub use regnames::RegNames;
+pub use strip::ws281x::{Frame, Ws281xDecoder};
 pub use trace::{Access, MmioEvent, Trace};
 
 // The crate is `std` (it hosts stdout sinks and sockets), but

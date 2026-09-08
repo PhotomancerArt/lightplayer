@@ -264,14 +264,14 @@ milestone owns.
 | `I2C_ANA_MST` | `0x600A_F800` | accept | `ana_conf0.cal_done` pinned 1; `i2c_ctrl(0/1).busy` pinned 0; `ana_conf2` reset 0 (master 1) |
 | `LP_I2C_ANA_MST` | `0x600B_2400` | accept | `i2c0_ctrl.I2C0_BUSY` (bit 25) pinned 0 — the bench's fourth spin site |
 | `ASSIST_DEBUG` | `0x600C_2000` | accept | `cpu0.debug_mode` pinned 0 (no debugger: watchpoints arm, `wfi` runs) |
-| `GPIO` | `0x6009_1000` | accept | `in_` and `pcpu_int` pinned 0; `enable`/`out` writes are trace lines (pins: M5) |
+| `GPIO` | `0x6009_1000` | modelled (M5 P2) | a routing **view** over the bus's signal fabric: `func_out_sel_cfg[n]` routes pad `n` to `out_sel` (128 = follow `GPIO_OUT[n]`, `inv_sel` inverts, `oen_sel` recorded and reported as `oe=`, never gated on), `out`/`out_w1ts`/`out_w1tc` are the output bitmap a `GPIO_OUT` pad follows, `enable`/`w1ts`/`w1tc` the OE bitmap. The `w1ts`/`w1tc` registers fold into `out`/`enable` and read back 0 (write-only in the PAC); `in_` and `pcpu_int` still pinned 0 — nothing drives a pad from outside and no GPIO interrupt is ever pending. Everything else is still a `RegFile`. A pad is **observed once the guest writes its routing**: seeding 31 routes from the `0x80` reset value would give a boot that drives nothing 31 pads to decode. See "The pin" |
 | `IO_MUX` | `0x6009_0000` | accept | all 31 pads at reset `0x0800` |
 | `PMU`, `LP_AON`, `LP_APM`, `LP_APM0`, `HP_APM`, `MODEM_SYSCON`, `MODEM_LPCON`, `APB_SARADC`, `HP_SYS`, `TEE`, `LP_TEE`, `LP_IO`, `LP_TIMER`, `EXTMEM` | — | accept | written by `esp_hal::init`, read back as written; `LP_AON.store1` carries the calibration value |
 | `UART0`, `UART1` | `0x6000_0000/1000` | modelled | 128-byte FIFOs; the shifter drains **at the configured baud in emulated time** (PCR clock line × `clkdiv`; reset `clkdiv = 347 + 3/16` = 115,200 from XTAL, *modeled* "as the ROM boot leaves it"); `rxfifo_full`/`txfifo_empty` as levels (`>`/`<` the `conf1` thresholds, per the TRM), `rxfifo_tout` in bit-times, `tx_done`, `rxfifo_ovf`, `reg_update` pulse; `at_cmd_char_det` never fires (stated, not modelled); sources 43/44. See "UART0 and the outside" |
 | `USB_DEVICE` | `0x6000_F000` | measured on its data path (M6) | the host's side in three states (`--usb-host absent\|attached\|attached-idle`, the transitions for P3's control channel): **absent** — `sof` never, `free` = 0 for ever after the first `wr_done`, nothing arrives; **attached, port closed** — `int_raw.sof` every 1 ms (*documented*), `fram_num` counts, a committed IN packet is held until the port opens; **attached, draining** — the packet reaches the `usb-sj` stream 100 µs after `wr_done` (*modeled*), `free` returns, `serial_in_empty` and `in_token_rec_in_ep1` rise; host bytes land as ≤ 64 B OUT packets, one resident at a time (*modeled*), `avail` + `serial_out_recv_pkt` + `out_ep1_st.wr_addr/rec_data_cnt`. The DTR/RTS dance → `chip_rst` bit 0 + `MachineRequest::Reset { strap }`. Per-register grades (the file header's table; `--strict-grade`): `ep1`, `ep1_conf` and the four `int_*` registers *measured* — four committed transcripts cover them, and the bits they cover are named there — `fram_num` and `conf0` *documented*, the twenty listed below *modeled*. The PCR reset of the block is **not** modelled (stated). Source 48 |
 | `SPI1` | `0x6000_3000` | modelled | **the legacy flash controller**, against a `flash::FlashImage`: `flash_rdid` (esp-storage's own size probe), the `usr` engine (command/address/dummy/data phases from `user`/`user1`/`user2`/`addr`/`w0..w15`), the dedicated `flash_read`/`pp`/`se`/`be`/`ce`/`wren`/`wrdi`/`rdsr`/`wrsr` bits, and a real status register (WIP always clear, WEL set by `wren` and consumed by a program or erase). Every trigger self-clears and `mst_st` reads idle, which is what `Wait_SPI_Idle` waits for. **Every PAC reset value is carried**, `user = 0x8000_0000` above all: the mask ROM's read path never sets `usr_command` because reset already did |
 | `SPI0` | `0x6000_2000` | modelled | the cache controller's block: `mmu_item_content`/`mmu_item_index`/`mmu_power_ctrl` drive `cache::CacheMmu`; the rest accept, with the PAC's reset values |
-| `RMT` | `0x6000_6000` | modelled (M5 P1) | the PAC register file, the **192-word RAM** at `+0x400` (word/half/byte lanes, read live by the engine), and two TX engines on the scheduler: a word's two pulses at PCR's function clock (`rmt_sclk_conf` × `div_cnt`; one tick = 2 cycles, a WS2812 bit 200, the latch 48,000 — exact integer arithmetic over absolute ticks, anchored on the previous due cycle), **`tx_lim` as a position** (`== window_words` is the wrap), `mem_tx_wrap_en`, the all-zero STOP → `tx_end`, wrap off → `tx_err` + `mem_empty`, `int_st = raw & ena`, `int_clr` w1c, source 49. *Modeled* (discovery §10.1–5, each named where made): `mem_raddr_ex` = the next word to fetch; the strobes act at `conf_update` (a `tx_start` with no `conf_update` in the slice is acted on at the slice boundary, noted); the half-level end marker; `tx_stop` raises no `tx_end`; `ref_cnt_rst` accepted; no clock stalls the engine (1 ms poll resumes it), FOSC refused. RX channels 2/3 accept-and-remember (`rx_en` is noted once); the APB FIFO is not modelled. The waveform's pad is P2's fabric; until then `rmt_pulses`/`rmt_words`/`rmt_frames_ended` on the machine are the observation. See "The RMT chase" |
+| `RMT` | `0x6000_6000` | modelled (M5 P1) | the PAC register file, the **192-word RAM** at `+0x400` (word/half/byte lanes, read live by the engine), and two TX engines on the scheduler: a word's two pulses at PCR's function clock (`rmt_sclk_conf` × `div_cnt`; one tick = 2 cycles, a WS2812 bit 200, the latch 48,000 — exact integer arithmetic over absolute ticks, anchored on the previous due cycle), **`tx_lim` as a position** (`== window_words` is the wrap), `mem_tx_wrap_en`, the all-zero STOP → `tx_end`, wrap off → `tx_err` + `mem_empty`, `int_st = raw & ena`, `int_clr` w1c, source 49. *Modeled* (discovery §10.1–5, each named where made): `mem_raddr_ex` = the next word to fetch; the strobes act at `conf_update` (a `tx_start` with no `conf_update` in the slice is acted on at the slice boundary, noted); the half-level end marker; `tx_stop` raises no `tx_end`; `ref_cnt_rst` accepted; no clock stalls the engine (1 ms poll resumes it), FOSC refused. RX channels 2/3 accept-and-remember (`rx_en` is noted once); the APB FIFO is not modelled. Since P2 the waveform is **driven onto the bus's signal fabric** as `RMT_SIG_0 + ch` at every pulse start, with the idle level at end/stop; `rmt_pulses`/`rmt_words` are the word-level oracle a gate reads and are off unless `Esp32C6Builder::rmt_logs(true)` asks for them. See "The RMT chase" and "The pin" |
 | `WIFI_MAC` | `0x600A_0000..9800` | accept (*modeled*) | the radio window as **one** block with coarse names (`mac` / `ieee802154` / `bb` — ours, nothing documents it), a `TOUCH` note per distinct offset, and the override list `wifi_stub::OVERRIDES` (five entries, one per `SPIN` the boot showed, each with the poll's disassembly beside it); `+0x4084` is the RX DMA base the `WIFI RX config` line reports |
 | `WIFI_PWR` | `0x600A_9900..F000` | accept | the undocumented gap after MODEM_SYSCON (the ROM's `tsf_hal_*` touch it first); `+0x3700` is a live **microsecond counter** (*modeled* `cycles / 160`) — the blob's `wait_i2c_sdm_stable` latches it and gives up after 9,999 ticks, and a remembered 0 never lets it |
 | `I2C_MST_MEM` | `0x600A_FC00..600B_0000` | accept | the analog I2C master's burst **command memory**, `I2C_ANA_MST + 0x400`, which the PAC's block (ending at `date`, `+0x34`) does not cover; libphy's `phy_i2c_master_cmd_mem_init` fills it and nothing reads it back |
@@ -338,6 +338,10 @@ Beyond the MMIO lines, three kinds of note appear in the same stream:
   tx_lim=96`, `RMT ch0 thr pos=96`, `RMT ch0 end words=6146 idle=0`,
   `RMT ch0 err mem_empty (window end, wrap off)`, `RMT ch0 stop idle=0`,
   `RMT ch0 stalled: …` / `resumed` — the TX engines (M5 P1); `--trace RMT`
+- `PIN gpio18 <- RMT_SIG_0 (out_sel=71 inv=0 oen_sel=0 oe=1)` /
+  `PIN gpio16 <- GPIO_OUT (out_sel=128 …)` — one note per routing *change*
+  from the GPIO view (M5 P2); esp-hal rewriting the same routing on a
+  rebind is not a note
   adds the register and RAM writes around them, which is how a refill's
   timing against the read pointer is read off.
 
@@ -518,11 +522,62 @@ at ≈ 359 ms because the harness's logger pays a 250 ms drain timeout on
 the host-absent USB link first. Refill lag is *reported* from the trace
 (P3 adds the histogram), never gated (plan D13/PD9).
 
-What the machine exposes until P2 routes the signal to a pad:
-`rmt_pulses(ch)` (every level/duration with its start cycle),
-`rmt_words(ch)` (every fetched word with its cycle, STOPs included) and
-`rmt_frames_ended(ch)`. `GPIO.func_out_sel_cfg[18] = 71` is written by
-esp-hal's `with_pin` and sits in the GPIO accept block for P2's fabric.
+What the machine exposes: `rmt_pulses(ch)` (every level/duration with its
+start cycle), `rmt_words(ch)` (every fetched word with its cycle, STOPs
+included) and `rmt_frames_ended(ch)`. The first two are the **word-level
+oracle** the pin gate compares its decoder against, and they are off unless
+a builder asks (`rmt_logs(true)`): a 24-frame run holds 305,490 pulses, and
+since P2 the waveform reaches a pad anyway.
+
+### The pin
+
+`GPIO.func_out_sel_cfg[18] = 71` is written by esp-hal's `with_pin`
+(preceded by `out_w1tc` bit 18, `IO_MUX.gpio18.mcu_sel = 1` and
+`enable_w1ts` bit 18 — M5 discovery §2a, §8), and that write is what makes
+the RMT's channel-0 waveform reach gpio18. The GPIO block writes it into
+the bus's **signal fabric** (`lp-emu-esp-common`'s `pins`, plan DD34 e);
+the RMT drives signal `71 + ch` into the same fabric; neither sees the
+other. Every slice the machine drains the fabric's edges into one WS281x
+decoder per routed pad and, optionally, a raw pin log.
+
+```text
+cyc=57437313 PIN gpio18 <- RMT_SIG_0 (out_sel=71 inv=0 oen_sel=0 oe=1)
+```
+
+Flags (`--trace GPIO,RMT` shows the routing and the engine notes):
+
+| flag | what it does |
+|---|---|
+| `--dump-frames stdout\|file:<path>` | one JSON line per decoded frame as it completes: `{"kind":"ws281x-frame","pad":18,"signal":"RMT_SIG_0","n":0,"start_us":359136.931,"end_us":366816.081,"bits":6144,"leds":256,"wire":"0a0a0a00…","rgb":"0a0a0a00…","errors":0,"trailing_bits":0,"reset_us":10416.475,"complete":true}` |
+| `--strip-order grb\|rgb\|rbg\|gbr\|brg\|bgr` | the order `rgb` is unpermuted with (default `grb`) — `wire` is always what the wire carried |
+| `--strip-timing ws2812\|ws2811` | the wire timing a pad is decoded against (default `ws2812`) |
+| `--pin-log file:<path>` | every edge, `<us> gpio18 0\|1`; 12,288 lines per 256-LED frame, capped at 2,000,000 |
+
+At exit each routed pad gets a line on stderr:
+`pin gpio18: 24 frames, 24 complete, 0 errors, 256 leds`.
+
+**What is observed:** the level of a routed pad, and the cycle it changed.
+A pad becomes observed when the guest writes its `func_out_sel_cfg` — the
+memfs boot image routes exactly one, `init_board`'s plain GPIO output on
+gpio16, and no peripheral signal at all.
+
+**What is not:** inputs (`in_` reads 0), output enable (`oen_sel` and
+`enable` are recorded and printed in the routing note, never gated on: a
+pad whose OE is low still records its edges), drive strength, pull-ups,
+open-drain, pad filters, and `IO_MUX.mcu_sel` — esp-hal writes `mcu_sel = 1`
+before every route and `IO_MUX` stays an accept block, so a pad routed here
+carries its signal whatever `mcu_sel` says. A word's two pulses reach the
+fabric together at the fetch, each stamped with the cycle it starts, so an
+edge can be recorded up to one word (200 cycles) ahead of the slice
+boundary — a timestamp, never a reordering.
+
+The M5 P2 gate (`tests/rmt_chase.rs`): on the chase image the trace carries
+one routing note and it is gpio18's, and every frame the decoder reads off
+that pad is **byte-equal to the frame P1's word log describes** — 24 frames
+of 6,144 bits, 0 errors, the chase pixel where it belongs, a 10.4 ms reset
+between frames and an 18.1 ms frame period. Two runs write byte-identical
+`--dump-frames` files, and a snapshot taken with the decoder mid-bit
+restores to decode the same frames.
 
 ### The radio window
 

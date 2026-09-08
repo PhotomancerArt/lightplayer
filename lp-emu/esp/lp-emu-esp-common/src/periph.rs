@@ -18,6 +18,7 @@ use core::any::Any;
 use lp_emu_core::sched::{Cycles, EventId, Scheduler};
 
 use crate::host::HostSinks;
+use crate::pins::Fabric;
 use crate::trace::Trace;
 
 /// The width of a single bus access.
@@ -240,6 +241,11 @@ pub struct BusCx<'a> {
     pub matrix: &'a mut dyn CpuIntMatrix,
     /// See [`MachineRequest`]. Set through [`BusCx::request`].
     pub request: &'a mut Option<MachineRequest>,
+    /// The chip's signal fabric: where an output signal goes (plan DD34 e).
+    /// The same seam as `matrix`, for pads: the GPIO block is a routing
+    /// **view** that writes into it, an output peripheral drives its signal
+    /// into it, and neither has to see the other. See [`crate::pins`].
+    pub pins: &'a mut Fabric,
 }
 
 impl BusCx<'_> {
@@ -403,6 +409,7 @@ pub struct Sandbox {
     pub host: HostSinks,
     pub matrix: Box<dyn CpuIntMatrix>,
     pub request: Option<MachineRequest>,
+    pub pins: Fabric,
 }
 
 impl Default for Sandbox {
@@ -423,6 +430,7 @@ impl Sandbox {
             host: HostSinks::new(),
             matrix: Box::new(NoCpuInterrupts),
             request: None,
+            pins: Fabric::new(),
         }
     }
 
@@ -443,6 +451,7 @@ impl Sandbox {
             host: &mut self.host,
             matrix: &mut *self.matrix,
             request: &mut self.request,
+            pins: &mut self.pins,
         }
     }
 
