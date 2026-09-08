@@ -56,6 +56,11 @@
 //! cost: there is no measurement behind a number for those, and an invented
 //! one would be indistinguishable from a measured one six months from now.
 
+/// THROWAWAY (M5 P1) — never merge.
+#[cfg(feature = "block-profile")]
+pub mod blockprof;
+#[cfg(feature = "block-profile")]
+extern crate alloc;
 pub mod csr;
 pub mod trap;
 pub mod trigger;
@@ -184,6 +189,9 @@ pub struct MachineHart<B: Bus> {
     /// the call, and the three F CSRs are illegal here. Held rather than
     /// constructed per instruction so the slice loop stays a loop.
     fp_unused: FpRegs,
+    /// THROWAWAY (M5 P1) — never merge.
+    #[cfg(feature = "block-profile")]
+    pub prof: alloc::boxed::Box<blockprof::BlockProf>,
     _bus: PhantomData<fn(&mut B)>,
 }
 
@@ -202,6 +210,8 @@ impl<B: Bus> Clone for MachineHart<B> {
             external: self.external,
             allow_unaligned: self.allow_unaligned,
             fp_unused: self.fp_unused.clone(),
+            #[cfg(feature = "block-profile")]
+            prof: alloc::boxed::Box::new(blockprof::BlockProf::new()),
             _bus: PhantomData,
         }
     }
@@ -242,6 +252,8 @@ impl<B: Bus> MachineHart<B> {
             external: None,
             allow_unaligned: false,
             fp_unused: FpRegs::new(),
+            #[cfg(feature = "block-profile")]
+            prof: alloc::boxed::Box::new(blockprof::BlockProf::new()),
             _bus: PhantomData,
         }
     }
@@ -465,6 +477,9 @@ impl<B: Bus> MachineHart<B> {
     pub fn run_slice(&mut self, bus: &mut B, budget: u64) -> SliceEnd {
         // (a) poll on entry.
         self.poll_interrupts();
+        // THROWAWAY (M5 P1) — never merge.
+        #[cfg(feature = "block-profile")]
+        self.prof.restart(true);
 
         // The deadline as an absolute cycle: one compare per instruction
         // instead of a subtract and a compare. `saturating_add` keeps a
@@ -540,6 +555,45 @@ impl<B: Bus> MachineHart<B> {
 
         self.instruction_count += 1;
         self.charge(result.class);
+        // THROWAWAY (M5 P1) — never merge.
+        #[cfg(feature = "block-profile")]
+        {
+            use blockprof::Term;
+            let (term, mem) = match result.class {
+                InstClass::Store => {
+                    self.prof.stores += 1;
+                    (Term::Store, true)
+                }
+                InstClass::Load => {
+                    self.prof.loads += 1;
+                    (Term::None, true)
+                }
+                InstClass::Atomic => {
+                    self.prof.amo += 1;
+                    (Term::Both, true)
+                }
+                InstClass::Fence => {
+                    self.prof.fence += 1;
+                    (Term::Both, false)
+                }
+                InstClass::System => {
+                    self.prof.system += 1;
+                    (Term::Both, false)
+                }
+                InstClass::BranchTaken
+                | InstClass::BranchNotTaken
+                | InstClass::JalCall
+                | InstClass::JalTail
+                | InstClass::JalrCall
+                | InstClass::JalrReturn
+                | InstClass::JalrIndirect => {
+                    self.prof.control += 1;
+                    (Term::Both, false)
+                }
+                _ => (Term::None, false),
+            };
+            self.prof.retire(pc, term, mem);
+        }
         self.pc = result
             .new_pc
             .unwrap_or(pc.wrapping_add(u32::from(result.inst_size)));
@@ -594,6 +648,11 @@ impl<B: Bus> MachineHart<B> {
                 FUNCT12_MRET => {
                     self.charge(InstClass::System);
                     self.instruction_count += 1;
+                    #[cfg(feature = "block-profile")]
+                    {
+                        self.prof.system += 1;
+                        self.prof.retire(pc, blockprof::Term::Both, false);
+                    }
                     self.pc = trap::mret(&mut self.csr);
                     // (b) `mret` restores MIE.
                     self.poll_interrupts();
@@ -602,6 +661,11 @@ impl<B: Bus> MachineHart<B> {
                 FUNCT12_WFI => {
                     self.charge(InstClass::System);
                     self.instruction_count += 1;
+                    #[cfg(feature = "block-profile")]
+                    {
+                        self.prof.system += 1;
+                        self.prof.retire(pc, blockprof::Term::Both, false);
+                    }
                     self.pc = pc.wrapping_add(4);
                     self.wfi = true;
                     // (b) an already-pending interrupt un-parks immediately,
@@ -676,6 +740,11 @@ impl<B: Bus> MachineHart<B> {
             self.regs[rd] = old as i32;
         }
         self.instruction_count += 1;
+        #[cfg(feature = "block-profile")]
+        {
+            self.prof.system += 1;
+            self.prof.retire(pc, blockprof::Term::Both, false);
+        }
         self.pc = pc.wrapping_add(4);
 
         // (b) `mstatus` and `mie` are the two CSRs that turn delivery on.

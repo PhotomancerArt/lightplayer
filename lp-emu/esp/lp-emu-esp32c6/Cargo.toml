@@ -45,3 +45,9 @@ sha2 = "0.10"
 # silicon transcript with M2's runner. Inside the `lp-emu/` fence (MIT), and
 # it mirrors `fw-checks` rather than importing it, so the fence lint passes.
 lp-emu-validate = { path = "../../lp-emu-validate" }
+
+# THROWAWAY (M5 P1) — never merge.
+[features]
+default = []
+selfprof = []
+block-profile = ["lp-riscv-emu/block-profile", "lp-emu-esp-common/block-profile"]

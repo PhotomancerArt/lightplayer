@@ -30,3 +30,8 @@ lp-ws281x = { path = "../../../lp-fw/lp-ws281x", default-features = false }
 
 [dev-dependencies]
 test-log = { workspace = true }
+
+# THROWAWAY (M5 P1) — never merge.
+[features]
+default = []
+block-profile = []

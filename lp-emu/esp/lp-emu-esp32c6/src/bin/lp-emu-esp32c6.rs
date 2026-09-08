@@ -179,6 +179,9 @@ EXIT CODES:
 
 fn main() -> ExitCode {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+    // THROWAWAY (M5 P1) — never merge.
+    #[cfg(all(feature = "selfprof", target_os = "macos"))]
+    lp_emu_esp32c6::selfprof::install();
     match run() {
         Ok(code) => code,
         Err(message) => {
@@ -374,6 +377,9 @@ fn run() -> Result<ExitCode, String> {
     // The run is over: a frame still open on a pad is reported as
     // incomplete rather than silently dropped.
     machine.flush_frames();
+    // THROWAWAY (M5 P1) — never merge.
+    #[cfg(feature = "block-profile")]
+    lp_emu_esp32c6::blockdump::dump(&mut machine);
     report(&mut machine, &outcome);
     Ok(ExitCode::from(outcome.exit_code() as u8))
 }

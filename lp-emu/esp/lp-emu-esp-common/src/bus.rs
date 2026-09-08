@@ -170,6 +170,23 @@ pub struct BusScalars {
     pub pins: Fabric,
 }
 
+/// THROWAWAY (M5 P1) — never merge. Store-side facts for the SMC question.
+#[cfg(feature = "block-profile")]
+#[derive(Default)]
+pub struct BusProf {
+    pub stores: u64,
+    pub stores_mmio: u64,
+    /// stores landing in a region marked `exec`
+    pub stores_exec_region: u64,
+    /// per 4 KiB page of an `exec` region: bytes actually changed
+    pub exec_page_changed: alloc::collections::BTreeMap<u32, u64>,
+    /// per 4 KiB page of an `exec` region: the store wrote what was there
+    pub exec_page_same: alloc::collections::BTreeMap<u32, u64>,
+    pub load_image_calls: u64,
+    pub load_image_bytes: u64,
+    pub fetches: u64,
+}
+
 /// One entry in the MMIO decode table.
 struct MmioRange {
     base: u32,
@@ -254,6 +271,9 @@ pub struct SocBus {
     pub sched: Scheduler,
     pub irq: IrqLines,
     pub trace: Trace,
+    /// THROWAWAY (M5 P1) — never merge.
+    #[cfg(feature = "block-profile")]
+    pub prof: BusProf,
     pub host: HostSinks,
     /// Where a peripheral's output signal goes: the routing the chip's GPIO
     /// view writes and the levels its output blocks drive. See
@@ -290,6 +310,8 @@ pub const fn event_local(id: EventId) -> u16 {
 impl SocBus {
     pub fn new() -> Self {
         Self {
+            #[cfg(feature = "block-profile")]
+            prof: BusProf::default(),
             regions: Vec::new(),
             last_regions: [0, 0],
             last_fetch_region: 0,
@@ -575,6 +597,12 @@ impl SocBus {
     /// the bootloader's leftovers. Ignores `writable` (this is not the guest
     /// storing) and fires no watchpoints.
     pub fn load_image(&mut self, address: u32, bytes: &[u8]) -> Result<(), MemoryError> {
+        // THROWAWAY (M5 P1) — never merge.
+        #[cfg(feature = "block-profile")]
+        {
+            self.prof.load_image_calls += 1;
+            self.prof.load_image_bytes += bytes.len() as u64;
+        }
         let Some(i) = self.region_index(address) else {
             return Err(MemoryError::InvalidAccess {
                 address,
@@ -1078,6 +1106,24 @@ impl SocBus {
                 return Err(fault);
             }
             let off = (address - self.regions[i].base) as usize;
+            // THROWAWAY (M5 P1) — never merge.
+            #[cfg(feature = "block-profile")]
+            {
+                self.prof.stores += 1;
+                if self.regions[i].exec {
+                    self.prof.stores_exec_region += 1;
+                    let n = width.bytes() as usize;
+                    let old = self.regions[i].data.get(off..off + n);
+                    let new_bytes = value.to_le_bytes();
+                    let same = old.is_some_and(|o| o == &new_bytes[..n]);
+                    let page = address >> 12;
+                    if same {
+                        *self.prof.exec_page_same.entry(page).or_insert(0) += 1;
+                    } else {
+                        *self.prof.exec_page_changed.entry(page).or_insert(0) += 1;
+                    }
+                }
+            }
             let data = &mut self.regions[i].data;
             let stored = match width {
                 Width::Word => data
@@ -1334,6 +1380,11 @@ impl Bus for SocBus {
         // Fetch never routes to MMIO: a jump into peripheral space is a
         // wild branch, and returning a register's value as an instruction
         // would turn it into a puzzle.
+        // THROWAWAY (M5 P1) — never merge.
+        #[cfg(feature = "block-profile")]
+        {
+            self.prof.fetches += 1;
+        }
         let i = self.fetch_region_index(address).ok_or_else(fault)?;
         if !self.regions[i].exec {
             return Err(fault());

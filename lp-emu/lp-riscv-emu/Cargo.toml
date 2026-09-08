@@ -23,6 +23,8 @@ env_logger = { workspace = true, optional = true }
 libc = { version = "0.2", optional = true }
 
 [features]
+# THROWAWAY (M5 P1) — never merge.
+block-profile = ["std"]
 std = [
     "lp-emu-core/std",
     "env_logger",
