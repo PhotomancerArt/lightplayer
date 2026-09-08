@@ -25,7 +25,9 @@ use crate::project_deploy::{
     ProjectDeployFile, project_deploy_requests, project_write_requests,
     validate_project_deploy_response,
 };
-use crate::protocol_session::{ProtocolSession, ResponseDisposition};
+use crate::protocol_session::{
+    ProtocolSession, ResponseDisposition, next_borrowed_wire_request_id_base,
+};
 use crate::pull_loop::{
     CancelSignal, NeverCancel, ProgressDeadline, PullOutcome, run_project_read,
 };
@@ -140,6 +142,21 @@ where
     pub fn with_request_ids_from(mut self, first: u64) -> Self {
         self.protocol = ProtocolSession::starting_at(first);
         self
+    }
+
+    /// Allocate request ids for a conversation on a wire BORROWED from the
+    /// device model's pump — a coarse effect (push, remove, manifest
+    /// stamp) or the editor lens.
+    ///
+    /// The board may still owe the previous owner an answer when the
+    /// borrow starts; this takes an id space no previous owner could have
+    /// minted from, so that answer is a quiet
+    /// [`PriorOwner`](crate::protocol_session::ResponseDisposition::PriorOwner)
+    /// discard instead of a reply this conversation mistakes for its own.
+    /// See [`next_borrowed_wire_request_id_base`].
+    #[must_use]
+    pub fn on_borrowed_wire(self) -> Self {
+        self.with_request_ids_from(next_borrowed_wire_request_id_base())
     }
 
     /// Bound every single-response request with a total deadline.
@@ -1002,6 +1019,75 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    /// The flake this exists to keep fixed (CI, 2026-09-07): a coarse
+    /// effect took a device's wire over from the roster model's pump while
+    /// the board still owed that pump the answer to its identify hello.
+    /// The effect's client counted from 1 as the model did, so it read a
+    /// `Hello` carrying id 1, found the id it was waiting for, and reported
+    /// "unexpected response for project.list_loaded: Hello(…)" — a push
+    /// that failed for a board that was answering perfectly.
+    ///
+    /// On a borrowed-wire id space that straggler is the previous owner's,
+    /// so it is dropped and the real reply is the one that lands.
+    #[tokio::test]
+    async fn a_borrowed_wire_does_not_read_the_previous_owners_reply_as_its_own() {
+        let base = next_borrowed_wire_request_id_base();
+        let io = ScriptedClientIo::new([
+            // The model's identify hello, answered late.
+            WireServerMessage::new(
+                1,
+                WireServerMsgBody::Hello(lpc_wire::ServerHello {
+                    proto: lpc_wire::WIRE_PROTO_VERSION,
+                    build: lpc_wire::BuildFacts {
+                        features: Vec::new(),
+                        package: "fw-esp32c6".to_string(),
+                        commit: "abc1234".to_string(),
+                        dirty: false,
+                        profile: "release-esp32".to_string(),
+                    },
+                    hardware: lpc_wire::HardwareFacts::default(),
+                    device_uid: None,
+                }),
+            ),
+            // This conversation's own answer, right behind it.
+            WireServerMessage::new(
+                base,
+                WireServerMsgBody::ListLoadedProjects { projects: vec![] },
+            ),
+        ]);
+        let mut client = LpClient::new(io).with_request_ids_from(base);
+
+        let outcome = client
+            .project_list_loaded()
+            .await
+            .expect("the previous owner's reply is not this conversation's");
+
+        assert!(outcome.value.is_empty());
+        assert!(
+            outcome
+                .events
+                .iter()
+                .any(|event| matches!(event, ClientEvent::StaleResponseDropped { response_id: 1 })),
+            "and it is dropped as the prior owner's, not silently: {:?}",
+            outcome.events
+        );
+    }
+
+    /// Two conversations in a row on the same wire get id spaces that
+    /// cannot overlap either, so a straggler from the first can never land
+    /// on the id the second is waiting for.
+    #[test]
+    fn each_borrowed_wire_conversation_gets_a_fresh_id_space() {
+        let first = next_borrowed_wire_request_id_base();
+        let second = next_borrowed_wire_request_id_base();
+
+        assert!(first >= crate::BORROWED_WIRE_REQUEST_ID_BASE);
+        assert!(
+            second > first,
+            "a later conversation starts above every id an earlier one could mint"
+        );
     }
 
     #[tokio::test]
