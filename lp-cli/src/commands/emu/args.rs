@@ -131,6 +131,20 @@ pub struct RunArgs {
     #[arg(long = "pin-log")]
     pub pin_log: Option<PathBuf>,
 
+    /// Scripted host input on the PADS, deterministic: `<us> pin <n> <0|1>`,
+    /// the `after`/`then` walk forms, and the `button` / `encoder`
+    /// generators. Repeatable; the files concatenate in the order given.
+    /// The grammar is `lp-emu/esp/lp-emu-esp32c6/src/pinscript.rs`'s, and
+    /// `lp-emu-esp32c6 --help` spells it out.
+    #[arg(long = "pin-script")]
+    pub pin_script: Vec<PathBuf>,
+
+    /// Tie two pads before the guest starts, `<tx>:<rx>` — a jumper on the
+    /// header. Repeatable and transitive. GPIO9, 12, 13, 16, 17 and 18 are
+    /// refused; gpio18 on the TX side is the one exception.
+    #[arg(long = "wire")]
+    pub wire: Vec<String>,
+
     /// A flash image file to boot from and write back to, so a project
     /// uploaded in one run is still there in the next. Ignored with
     /// `--merged`, which carries the whole chip already.

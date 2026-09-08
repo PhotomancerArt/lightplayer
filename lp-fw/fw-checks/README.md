@@ -77,10 +77,61 @@ desk session gets wasted.
 | `uart-bridge` | `test_uart_bridge` | `UART-BRIDGE READY ` (it serves until unplugged) | `checks::uart_bridge` (the bounded queue, the pump step, the ready line) |
 | `jit-math-perf` | `test_jit_math_perf` | `[jit-math-perf] === DONE ===` | `checks::jit_math_perf` (the corpus, the Q32 kernels, the benchmark runner — the cycle counter itself is injected as a `fn() -> u32`, since reading it is a chip fact rather than portable arithmetic) |
 | `rmt-chase` | `test_rmt`, `ws281x_telemetry` | `[rmt-chase] === DONE ===` | `checks::rmt_chase` (the chase pattern, the FNV-1a checksum, the per-frame record) |
+| `render-loop` | `bench_render_loop` (with `server,radio,memory_fs`) | `[render-loop] === DONE ===` | `checks::render_loop` (the frame accumulator, the record shapes) |
 | `boot-idle` | *(none — the shipped image)* | `[stack] heartbeat: high-water` | *(none)* |
 | `usb-negative-control` | *(none — the shipped image)* | `"hostDrainingAgainMs"` (the recovery stamp itself) | *(none)* |
 | `usb-detach-reattach` | *(none — the shipped image)* | `"uptime_ms":10000` (a whole heartbeat after the re-open) | *(none)* |
 | `usb-host-absent` | *(none — the shipped image)* | *(none — it prints nothing; see below)* | *(none)* |
+
+### `render-loop` is the shipped image with a project in it
+
+The odd one out among the harnesses, and the only payload here whose feature
+is deliberately **not** called `test_*`.
+
+Every other payload in this crate either replaces the product entry point (the
+`test_*` harnesses, via `fw-esp32c6/build.rs`'s `CARGO_FEATURE_TEST_*` →
+`cfg(fw_harness)` rule) or *is* the product image untouched (the shipped-image
+walks below). `render-loop` is a third thing: the product image with two
+additions and no substitutions. Its in-memory filesystem arrives seeded with a
+real LightPlayer project, and its server loop stops after a fixed number of
+frames and prints a summary. Between those two, everything — `boot_firmware`,
+`auto_load_project`, the shader compile, the render, the RMT open and every
+frame — is the shipped code path.
+
+That shape is forced by what the payload is for. Neither `shader-compile-stress`
+nor `boot-idle` executes a shader: one compiles and stops, the other is `wfi`
+with an empty filesystem. `jit-math-perf` executes JIT'd kernels with no
+pipeline around them and `rmt-chase` drives the output with no shader at all.
+So the emulator speed ladder spent four milestones quoting numbers from images
+that do not do what the product does, and the first thing this payload
+measured was that the render loop runs about **twelve times slower** than the
+`boot-idle` image the ladder had been quoting. A payload that replaced `main`
+could not have found that, because it would have been measuring its own
+re-implementation of the loop.
+
+Two properties are contract:
+
+- **It prints nothing per frame.** Min, max, first and a running sum live in
+  registers and one summary record is emitted after the last frame. This is
+  not an optimisation; it is the correction. `jit-math-perf`'s 2.4× speedup
+  under the M4 poll skip was, measured by address, 100 % of the time spent
+  waiting for UART TX to drain its own logging.
+- **The tick delta is fixed, not measured.** Frame content is therefore a
+  function of the frame index alone, which is what lets two emulator binaries'
+  decoded output be compared frame for frame. The display pipeline's temporal
+  interpolation still reads the guest's real clock, so a frame dump is
+  comparable **within** a time grade and never across one.
+
+Two projects ship behind it, chosen because both address `ws281x:local:D10` —
+the only endpoints that resolve on the emulated board are `D0`–`D3` and
+`D6`–`D10`, built from the `seeed/xiao-esp32-c6` manifest's `display_label`
+alone, which is why the classic-board projects' `IO*` spellings open on
+nothing. `projects/test/basic` (default, 241 lamps, 256 frames, 66 fps) is the
+idiomatic one; `catalog/projects/rocaille` (`bench_project_rocaille`, the same
+241 lamps, 64 frames, 16 fps) is the pressure test — four times the shader per
+frame. The frame counts differ so that both cost the bench the same ~4 s of
+emulated time; what the payload reports is a per-frame mean, which does not
+care how many frames it averaged.
 
 ### `boot-idle` is the shipped image, not a module
 

@@ -36,7 +36,7 @@ use std::process::Command;
 use anyhow::{Context, Result, bail};
 
 use crate::configuration::{Availability, Configuration, ConfigurationKind};
-use crate::payload::{BootPath, Capture, Link, Payload, Sentinel};
+use crate::payload::{BootPath, Capture, HostPlan, Link, Payload, Sentinel};
 
 /// Build constants, kept equal to the `justfile`'s variables of the same name.
 pub const RV32_TARGET: &str = "riscv32imac-unknown-none-elf";
@@ -97,6 +97,20 @@ pub struct RunRequest {
     /// emulated configurations accept it — an image nobody can put on a board
     /// is not a silicon run.
     pub image: Option<PathBuf>,
+    /// Force this payload's effective [`Link`] on an `lp-emu:*`
+    /// configuration, overriding [`Payload::link`].
+    ///
+    /// `shader-compile-stress` stays pinned to `Link::Uart0Spike` in the
+    /// registry (its committed transcripts are of that image, and that field
+    /// is not this phase's to change — see the comment above it in
+    /// `payload.rs`). This is the escape hatch DD8/DD7 asked for instead: a
+    /// runner-level override that suppresses `spike_uart0_link` and takes the
+    /// `Link::UsbSerialJtag` path for exactly this run, so the same payload
+    /// can be recorded over the link its committed silicon transcript
+    /// actually used, without touching the payload row or adding a
+    /// `[[configuration]]`. `None` on every other request: the payload's own
+    /// `link` decides, as it always has.
+    pub link_override: Option<Link>,
     /// The chip identity the configuration reports, from `validate.toml`.
     ///
     /// Silicon reads its own eFuse; an emulator has to be told. Ours is told
@@ -133,6 +147,49 @@ impl RunRequest {
         )
     }
 
+    /// The [`Link`] this request actually runs over: `link_override` when one
+    /// is given, the payload's own [`Payload::link`] otherwise.
+    ///
+    /// This is the one seam `features()` and `LpEmuDriver::plan()` both read,
+    /// so an override changes the build and the run the same way a payload
+    /// whose own `link` said `UsbSerialJtag` would — the plan cannot tell the
+    /// two apart, which is the point (the sidecar's `firmware_features` line
+    /// is what a reader tells them apart *by*, after the fact).
+    pub fn effective_link(&self) -> Link {
+        self.link_override.unwrap_or(self.payload.link)
+    }
+
+    /// The host attachment this request actually runs with.
+    ///
+    /// A payload whose registry row already carries a `host_plan` is
+    /// unaffected: the override changes the LINK, never an application's own
+    /// choice of when a host reads it. What this covers is the payload that
+    /// has no `host_plan` at all because its registry row was written for
+    /// `Uart0Spike` — the UART0 model has no "host absent" state to schedule
+    /// — and a `link_override` now takes it onto `UsbSerialJtag`, which does.
+    /// Left unhandled, that combination is not a smaller USB run: it is no
+    /// run, because nothing ever attaches to drain the wire and the payload's
+    /// own sentinel then never reaches the capture (found recording this
+    /// phase's `t1`: "usb-sj: host absent at power-on; 0 bytes reached the
+    /// host", timeout with no fault). So this synthesises the one state a
+    /// bare link override needs to be honest about — `attached`, no script,
+    /// the same state `espflash --monitor` puts a board in from its first
+    /// byte — rather than silently recording a run that never happened.
+    pub fn effective_host_plan(&self) -> Option<HostPlan> {
+        if self.payload.host_plan.is_some() {
+            return self.payload.host_plan;
+        }
+        if self.link_override == Some(Link::UsbSerialJtag)
+            && self.payload.link != Link::UsbSerialJtag
+        {
+            return Some(HostPlan {
+                host: "attached",
+                script: "",
+            });
+        }
+        None
+    }
+
     /// The cargo feature list for this payload on this configuration.
     ///
     /// `spike_uart0_link` moves the host link onto UART0, and it is added for
@@ -140,9 +197,10 @@ impl RunRequest {
     /// asserts SOF for ever and reports EP1 free for ever, so the firmware
     /// serves into the void believing a host is there (spike report §4) — its
     /// USB is a lie, and the workaround is the only honest way to hear it.
-    /// `lp-emu:*` gets it only for a payload whose [`Link`] says
-    /// `Uart0Spike`, which since M6 means only the payloads whose committed
-    /// transcripts are of that image. Adding it on silicon would change the
+    /// `lp-emu:*` gets it only when [`effective_link`](Self::effective_link)
+    /// says `Uart0Spike`, which since M6 means only the payloads whose
+    /// committed transcripts are of that image — unless a `link_override`
+    /// says otherwise for this one run. Adding it on silicon would change the
     /// image under test; adding it to a USB-link payload on our own machine
     /// would defeat the comparison the milestone exists for (DD30).
     pub fn features(&self) -> Vec<&'static str> {
@@ -150,7 +208,7 @@ impl RunRequest {
         f.extend_from_slice(self.payload.features_for(self.emulated()));
         let spike = match self.configuration.kind {
             ConfigurationKind::EspEmu => true,
-            ConfigurationKind::LpEmu => self.payload.link == Link::Uart0Spike,
+            ConfigurationKind::LpEmu => self.effective_link() == Link::Uart0Spike,
             ConfigurationKind::Silicon => false,
         };
         if spike {
@@ -783,7 +841,20 @@ impl ConfigurationDriver for LpEmuDriver {
         let mut steps = Vec::new();
         let mut notes = Vec::new();
 
-        let usb = req.payload.link == Link::UsbSerialJtag;
+        let usb = req.effective_link() == Link::UsbSerialJtag;
+        if let Some(overridden) = req.link_override
+            && overridden != req.payload.link
+        {
+            notes.push(format!(
+                "--link override: this run's link is `{}`, not payload `{}`'s own `{}` \
+                 (`validate.toml`/`payload.rs` are unchanged — this is a per-run choice, \
+                 recorded here and in `firmware_features` so a reader of the transcript alone \
+                 can tell it from a run of the payload's default link).",
+                overridden.slug(),
+                req.payload.name,
+                req.payload.link.slug(),
+            ));
+        }
         let elf = match &req.image {
             Some(path) => {
                 notes.push(if usb {
@@ -918,7 +989,7 @@ impl ConfigurationDriver for LpEmuDriver {
             emu.push("--uart0".into());
             emu.push(format!("file:{}", capture.display()));
         }
-        if let Some(plan) = &req.payload.host_plan {
+        if let Some(plan) = req.effective_host_plan() {
             emu.push("--usb-host".into());
             emu.push(plan.host.into());
             if !plan.script.is_empty() {
@@ -993,7 +1064,7 @@ impl ConfigurationDriver for LpEmuDriver {
             emu.push(rev.to_string());
         }
 
-        if let Some(plan) = &req.payload.host_plan
+        if let Some(plan) = req.effective_host_plan()
             && !plan.script.is_empty()
         {
             // Written by a step rather than behind the runner's back, so the
@@ -1277,6 +1348,7 @@ mod tests {
             repo_root: PathBuf::from("/repo"),
             out_dir: default_out_dir(),
             image: None,
+            link_override: None,
             identity: Identity::default(),
         }
     }
@@ -1431,6 +1503,102 @@ mod tests {
             "{rendered}"
         );
         assert!(rendered.contains("--efuse-rev 0.2"), "{rendered}");
+    }
+
+    /// M1 P1 / DD8: `shader-compile-stress` stays pinned to `Link::Uart0Spike`
+    /// in the registry (its committed transcripts are of that image), but a
+    /// `link_override` records THIS run over the real link instead — no
+    /// `spike_uart0_link`, `--usb-sj` rather than `--uart0` — without touching
+    /// the payload row or adding a `[[configuration]]`.
+    #[test]
+    fn a_link_override_suppresses_spike_and_takes_the_usb_sj_path() {
+        let mut req = request("lp-emu:esp32c6:t1", "shader-compile-stress", None);
+        req.identity = desk_identity();
+        req.link_override = Some(Link::UsbSerialJtag);
+        assert_eq!(
+            req.payload.link,
+            Link::Uart0Spike,
+            "the registry is untouched"
+        );
+        assert_eq!(req.effective_link(), Link::UsbSerialJtag);
+        assert_eq!(
+            req.features(),
+            vec!["esp32c6", "test_shader_compile_incremental"],
+            "no spike_uart0_link in the overridden feature list"
+        );
+        let plan = LpEmuDriver.plan(&req).unwrap();
+        let rendered = plan.render();
+        // `req.features()` above is the precise check that `spike_uart0_link`
+        // is gone; the note that explains WHY says its own name in prose
+        // ("no spike_uart0_link: …"), so this checks the `--features` flag's
+        // exact value rather than the substring's absence anywhere at all.
+        assert!(
+            rendered.contains("--features esp32c6,test_shader_compile_incremental)"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("--usb-sj file:"), "{rendered}");
+        assert!(!rendered.contains("--uart0 file:"), "{rendered}");
+        assert!(
+            plan.notes.iter().any(|n| n.contains("--link override")),
+            "the sidecar's `note` must say a `link_override` is what changed this run: {:?}",
+            plan.notes
+        );
+    }
+
+    /// A `link_override` equal to the payload's own link is a no-op and
+    /// leaves no trace in `notes` — nothing changed, so nothing to explain.
+    #[test]
+    fn a_link_override_matching_the_payloads_own_link_notes_nothing() {
+        let mut req = request("lp-emu:esp32c6:t1", "shader-compile-stress", None);
+        req.identity = desk_identity();
+        req.link_override = Some(Link::Uart0Spike);
+        let plan = LpEmuDriver.plan(&req).unwrap();
+        assert!(
+            !plan.notes.iter().any(|n| n.contains("--link override")),
+            "{:?}",
+            plan.notes
+        );
+    }
+
+    /// `shader-compile-stress` has no `host_plan` of its own — its registry
+    /// row was written for `Uart0Spike`, which has no host to schedule.
+    /// A bare link override onto `UsbSerialJtag` with no host synthesised
+    /// would build and run a machine nothing ever drains: found recording
+    /// this phase's `t1` ("usb-sj: host absent at power-on; 0 bytes reached
+    /// the host", timeout with no fault, sentinel never recorded).
+    /// `effective_host_plan` is what closes that gap.
+    #[test]
+    fn a_link_override_onto_usb_synthesises_an_attached_host() {
+        let mut req = request("lp-emu:esp32c6:t1", "shader-compile-stress", None);
+        req.identity = desk_identity();
+        assert_eq!(req.effective_host_plan(), None, "no override, no host plan");
+        req.link_override = Some(Link::UsbSerialJtag);
+        assert_eq!(
+            req.effective_host_plan(),
+            Some(HostPlan {
+                host: "attached",
+                script: "",
+            })
+        );
+        let rendered = LpEmuDriver.plan(&req).unwrap().render();
+        assert!(rendered.contains("--usb-host attached"), "{rendered}");
+        assert!(!rendered.contains("--usb-script"), "{rendered}");
+    }
+
+    /// A payload that already carries its own `host_plan` (every registry
+    /// row whose `link` is `UsbSerialJtag`) is unaffected by a `link_override`
+    /// that only confirms the link it already runs on: the override changes
+    /// the LINK, never an application's own choice of when a host reads it.
+    #[test]
+    fn a_link_override_never_shadows_a_payloads_own_host_plan() {
+        let mut req = request("lp-emu:esp32c6:t1", "boot-idle", None);
+        req.identity = desk_identity();
+        req.link_override = Some(Link::UsbSerialJtag);
+        assert_eq!(
+            req.effective_host_plan(),
+            req.payload.host_plan,
+            "the payload's own host_plan wins"
+        );
     }
 
     /// The `boot-idle` payload is the shipped image, and since M6 it runs on

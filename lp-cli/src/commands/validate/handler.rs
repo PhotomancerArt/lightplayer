@@ -2,10 +2,22 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use lp_emu_validate::ValidateConfig;
+use lp_emu_validate::payload::Link;
 use lp_emu_validate::replay::ReplayOptions;
 use lp_emu_validate::run::{self, ImageOverrides, RecordProvenance, RunOptions};
 
 use super::args::{RecordArgs, ReplayArgs, ValidateCli, ValidateCommand};
+
+/// `--link real|spike` -> the [`Link`] it names. `clap`'s `value_parser`
+/// already refused any other string, so this is total.
+fn link_override(link: Option<&str>) -> Option<Link> {
+    match link {
+        None => None,
+        Some("real") => Some(Link::UsbSerialJtag),
+        Some("spike") => Some(Link::Uart0Spike),
+        Some(other) => unreachable!("clap's value_parser refuses `{other}`"),
+    }
+}
 
 pub fn handle_validate(cli: ValidateCli) -> Result<()> {
     let repo_root = resolve_repo_root(cli.repo_root.as_deref())?;
@@ -29,6 +41,7 @@ pub fn handle_validate(cli: ValidateCli) -> Result<()> {
                         port: args.port.as_deref(),
                         images: &images,
                         timeout_secs: args.timeout_secs,
+                        link_override: link_override(args.link.as_deref()),
                     },
                     &repo_root,
                     args.dry_run,
@@ -78,6 +91,7 @@ fn record(args: RecordArgs, config: &ValidateConfig, repo_root: &Path) -> Result
                 port: args.port.as_deref(),
                 images: &images,
                 timeout_secs: args.timeout_secs,
+                link_override: link_override(args.link.as_deref()),
             },
             repo_root,
             &RecordProvenance {

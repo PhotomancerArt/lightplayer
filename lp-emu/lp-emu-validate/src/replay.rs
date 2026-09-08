@@ -80,6 +80,17 @@ pub struct ReplayReport {
     pub structural_problems: Vec<String>,
     /// Strict-mode refusals.
     pub grade_problems: Vec<String>,
+    /// Why the decoded **pad** was not compared, when the payload declares a
+    /// pin capture and a configuration on one side or the other cannot produce
+    /// one. `None` means the question did not arise: either the payload makes
+    /// no pin claim, or both sides record pins and the pad was compared like
+    /// anything else. Never a silent skip — the report says it.
+    ///
+    /// Not the same as the `pin` field CLASS, which may be compared on the
+    /// same run: `ws281x-telemetry`'s trips, skips and errors are pin-class
+    /// claims the guest makes about its own driver and they arrive in the
+    /// console. This is about the pad itself.
+    pub pin_not_compared: Option<String>,
     pub options: ReplayOptions,
 }
 
@@ -165,6 +176,17 @@ impl ReplayReport {
                 compared - differ,
                 differ
             );
+        }
+        if let Some(why) = &self.pin_not_compared {
+            // A row, not a footnote: a reader scanning the table has to see
+            // this in the table. Labelled `pin capture` rather than `pin`
+            // because the CLASS may well have been compared on the line above
+            // — `ws281x-telemetry`'s trips, skips and errors are pin-class
+            // claims the guest makes about its own driver, and they travel in
+            // the console. What is missing is the decoded PAD, which is a
+            // different reading of the same pin and the only one an
+            // instrument could confirm.
+            let _ = writeln!(s, "  {:<16} {:>9}   — {why}", "pin capture", "not compared");
         }
 
         let timing: Vec<_> = self
@@ -403,7 +425,35 @@ pub fn replay(
     //  2. **Between** the two, the pad's own bytes per frame, as a `Pin`
     //     comparison. That is the claim the class exists for and the one
     //     that fails a replay.
-    if payload.pin_capture.is_on() {
+    //
+    // Whether a side can produce a pin log at all is a property of its
+    // CONFIGURATION, not of the payload: an `lp-emu:*` machine decodes the pad
+    // off its own signal fabric and silicon cannot, because reading a real pad
+    // needs an instrument nobody has put on this bench. Asking silicon for one
+    // made the first silicon capture of `rmt-chase` fail with 3,073 equal
+    // structural comparisons underneath the red
+    // (`docs/defects/2026-09-08-a-pin-capture-is-a-property-of-the-configuration-not-the-payload.md`).
+    //
+    // Stated in `validate.toml`, never inferred from the configuration's name.
+    let cfg = crate::config::ValidateConfig::embedded();
+    let records_pins = |t: &Transcript| -> Result<bool> {
+        Ok(cfg.configuration(&t.header.configuration)?.records_pins)
+    };
+    let (left_pins, right_pins) = (records_pins(left)?, records_pins(right)?);
+    // Said in the report rather than silently skipped: a replay that cannot
+    // compare pins must not read as one that compared them and agreed.
+    let pin_note = match (payload.pin_capture.is_on(), left_pins, right_pins) {
+        (false, _, _) => None,
+        (true, true, true) => None,
+        (true, false, false) => Some(format!(
+            "neither {} nor {} records pins",
+            left.header.configuration, right.header.configuration
+        )),
+        (true, false, true) => Some(format!("{} records none", left.header.configuration)),
+        (true, true, false) => Some(format!("{} records none", right.header.configuration)),
+    };
+
+    if payload.pin_capture.is_on() && left_pins && right_pins {
         for (t, side) in [(left, "left"), (right, "right")] {
             for problem in pin_self_disagreements(t, side)? {
                 structural_problems.push(problem);
@@ -494,6 +544,7 @@ pub fn replay(
         series_summaries,
         structural_problems,
         grade_problems,
+        pin_not_compared: pin_note,
         options,
     })
 }

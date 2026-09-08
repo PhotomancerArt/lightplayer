@@ -19,6 +19,10 @@
 //! - **modelled, 2026-09-08** — [`i2c_ana_mst`] (the analog I2C master as a
 //!   `{block, register}` store rather than one shared `data` byte, so a
 //!   `regi2c` read answers the register it asked for).
+//! - **modelled, M2 P1** — [`io_mux`] (the P5 accept block, now also
+//!   pushing each pad's `fun_ie` into the signal fabric as the pad's input
+//!   enable) and [`gpio`] as a **two-way** view: `in_`, `pin[n].int_type`,
+//!   `status` / `status_w1ts` / `status_w1tc`, `pcpu_int` and source 30.
 //! - **modelled, M5 P1** — [`rmt`] (the register file, the 192-word RAM,
 //!   two TX engines on the scheduler consuming words at PCR's clock:
 //!   position-semantics `tx_lim`, wrap, STOP, `tx_end`/`tx_thr_event`/
@@ -35,6 +39,7 @@ pub mod efuse;
 pub mod gpio;
 pub mod i2c_ana_mst;
 pub mod intpri;
+pub mod io_mux;
 pub mod lp_wdt;
 pub mod pcr;
 pub mod rmt;
@@ -182,7 +187,7 @@ pub fn boot_set(
                 usb_host,
             )),
         ),
-        (base::IO_MUX, 0x100, Box::new(accept::io_mux())),
+        (base::IO_MUX, io_mux::LEN, Box::new(io_mux::IoMux::new())),
         (
             base::GPIO,
             gpio::LEN,

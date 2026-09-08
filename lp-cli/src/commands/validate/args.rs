@@ -64,6 +64,13 @@ pub struct RunArgs {
     /// tree and this is how the runner is pointed at what it produced.
     #[arg(long)]
     pub image: Vec<String>,
+    /// Force the payload's effective link on an `lp-emu:*` configuration:
+    /// `real` (the shipped USB-Serial-JTAG link, no `spike_uart0_link`) or
+    /// `spike` (the UART0 workaround). Unset leaves the payload's own `link`
+    /// (`validate list`'s `link=` column) in charge, as it always has been.
+    /// Refused on any configuration that is not `lp-emu:*`.
+    #[arg(long, value_parser = ["real", "spike"])]
+    pub link: Option<String>,
     /// Seconds to wait for the payload's sentinel. EMULATED seconds on an
     /// emulated configuration.
     #[arg(long, default_value_t = 120)]
@@ -100,6 +107,10 @@ pub struct RecordArgs {
     /// `validate run --image`.
     #[arg(long)]
     pub image: Vec<String>,
+    /// Force the payload's effective link on an `lp-emu:*` configuration. See
+    /// `validate run --link`.
+    #[arg(long, value_parser = ["real", "spike"])]
+    pub link: Option<String>,
     #[arg(long, default_value_t = 120)]
     pub timeout_secs: u64,
     /// Print the exact commands and the destination paths, and stop.

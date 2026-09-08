@@ -9,6 +9,7 @@ pub mod constants;
     feature = "test_msafluid",
     feature = "test_jit_math_perf",
     feature = "test_shader_compile_incremental",
+    feature = "bench_render_loop",
 ))]
 pub mod cycle_counter;
 pub mod init;
