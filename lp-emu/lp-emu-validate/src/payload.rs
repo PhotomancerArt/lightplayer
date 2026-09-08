@@ -1349,7 +1349,15 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         fw_checks_feature: None,
         emits_header: false,
         host_script: Some("lp-emu/esp/lp-emu-esp32c6/walks/examples-basic.script"),
-        sentinel: Sentinel::Done("[shader-node] compilation succeeded"),
+        // The **last** frame of the `projectRead` answer, not the compile
+        // line M4 stopped on. The compile is where the walk ended while RMT
+        // was an accept block: `Ws281xOutput::write` waited for an interrupt
+        // nothing raised, the driver spun to its 50 ms deadline, and request
+        // 12 was never answered (M4 deviation 1, DD40). With M5's channel
+        // model the frame completes and the walk goes on, so the payload's
+        // sentinel goes where the conversation now ends — and `--exit-on`
+        // stops there rather than at a line the walk merely passes through.
+        sentinel: Sentinel::Done("\"id\":12,\"seq\":2,"),
         record_kinds: &[],
         mask_set: "boot-idle",
         fields: &[],

@@ -117,6 +117,19 @@ def main() -> int:
         help="milliseconds of emulated time between chunks",
     )
     ap.add_argument(
+        "--wait-for",
+        action="append",
+        default=[],
+        metavar="ID=LINE",
+        help="wait for LINE before sending request ID, instead of for the "
+        "answer to the request before it. Needed when a request's answer "
+        "arrives BEFORE the work it started: `loadProject` is acknowledged "
+        "and then the device loads and compiles, head-down for tens of "
+        "milliseconds, and a host that starts sending on the acknowledgement "
+        "fills the 128-byte RX FIFO and loses the rest of its request. The "
+        "line to wait for is the last one the load produces. Repeatable.",
+    )
+    ap.add_argument(
         "--note",
         action="append",
         default=[],
@@ -142,6 +155,13 @@ def main() -> int:
     ]
     lines.extend(f"# {n}" for n in args.note)
     lines.append("")
+    overrides: dict[str, str] = {}
+    for spec in args.wait_for:
+        fid, _, line = spec.partition("=")
+        if not line:
+            raise SystemExit(f"--wait-for wants ID=LINE, got {spec!r}")
+        overrides[fid] = line
+
     needle = args.first_needle
     count = 0
     for chunk in chunks:
@@ -149,7 +169,8 @@ def main() -> int:
             fid = frame_id(frame)
             size = args.chunk if args.chunk > 0 else len(frame)
             pieces = [frame[i : i + size] for i in range(0, len(frame), size)]
-            lines.append(f'after "{escape(needle.encode())}" "{escape(pieces[0])}"')
+            wait = overrides.pop(fid, needle) if fid is not None else needle
+            lines.append(f'after "{escape(wait.encode())}" "{escape(pieces[0])}"')
             for piece in pieces[1:]:
                 lines.append(f'then +{args.chunk_gap}ms "{escape(piece)}"')
             count += 1
@@ -163,6 +184,11 @@ def main() -> int:
                 # The answer to this request is the only device output that
                 # carries its id.
                 needle = f'"id":{fid},'
+    if overrides:
+        raise SystemExit(
+            f"--wait-for names request id(s) this capture has no frame for: "
+            f"{', '.join(sorted(overrides))}"
+        )
     lines.append("")
 
     text = "\n".join(lines)

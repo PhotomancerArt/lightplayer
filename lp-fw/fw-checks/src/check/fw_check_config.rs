@@ -139,9 +139,13 @@ pub const ALL_CHECKS: &[FwCheckConfig] = &[
         // (`lp-emu/esp/lp-emu-esp32c6/walks/examples-basic.script`); on
         // silicon it is the client itself, over a port.
         firmware_features: &["server", "radio"],
-        // The shader compile is the last thing the load produces, and the
-        // last line before the walk would need M5's RMT model to go on.
-        done_marker: Some("[shader-node] compilation succeeded"),
+        // The last frame of the `projectRead` answer. The shader compile
+        // used to be the marker, because it was the last line before the
+        // walk needed M5's RMT model to go on — `Ws281xOutput::write` waited
+        // for an interrupt an accept block never raised. With the channel
+        // model the frame completes, request 12 is answered, and the walk's
+        // end is where the conversation ends (M5 P3, DD40).
+        done_marker: Some("\"id\":12,\"seq\":2,"),
         trace_slug: "upload-walk",
         supported_targets: ESP32_ONLY,
         emits_records: false,

@@ -20,7 +20,8 @@ use std::path::PathBuf;
 
 use lp_emu_validate::payload::SeriesSpec;
 use lp_emu_validate::transcript::Transcript;
-use lp_emu_validate::{Payload, find_payload};
+use lp_emu_validate::{Payload, find_payload, mask_set};
+use sha2::{Digest, Sha256};
 
 const OURS: &str = "lp-emu-esp32c6-t1-2026-09-07-d6cfaa205.txt";
 
@@ -188,30 +189,73 @@ fn the_upload_walk_matches_spike_5_3() {
     assert_eq!(fs.len(), 2, "{fs:?}");
 }
 
-/// The walk stops where M5 begins, and the transcript says so rather than
-/// leaving a reader to wonder why there is no `projectRead` answer.
+/// **M5 P3, DD40: the walk's tail.** The gate M4 deliberately failed.
 ///
-/// `Ws281xOutput::write` waits for the **RMT interrupt**; RMT is an
-/// accept-and-remember register file, which raises no interrupt source at
-/// all; so the driver spins to its 50 ms deadline and `LpServer::tick`
-/// returns a project tick error before it answers request 12. Everything up
-/// to and including `loadProject` lands.
+/// At M4 this test asserted the opposite. `Ws281xOutput::write` waits for the
+/// **RMT interrupt**; RMT was an accept-and-remember register file, which
+/// raises no interrupt source at all; so the driver spun to its 50 ms
+/// deadline, `LpServer::tick` returned a project tick error, and request 12
+/// was never answered. With M5's channel model the frame completes, and the
+/// walk goes on to the answer it was always asking for.
+///
+/// The `projectRead` answer comes in three frames — the shapes stream's
+/// opening, `seq 1` carrying the shape catalogue, and `seq 2` the node tree
+/// — and the **`seq 1` frame is byte-identical to silicon's**. Masked with
+/// the payload's own mask set it is 16,139 bytes with sha256
+/// `7f32d25a…`, the same length and the same digest as the desk's
+/// `basic.masked.txt` (2026-09-06 spike desk captures), which was captured
+/// through a bridge board on a real C6.
+///
+/// `seq 2` is *not* byte-identical, and the difference is one number
+/// repeated: the project revision, 9 on silicon and 19 here, with the four
+/// `change_frame`, nine `changed_at` and three `revision` fields that carry
+/// it, plus the two clock values that follow from ten more engine frames
+/// having run. That is a consequence of *when* the read happens rather than
+/// of what the device answered, and it is the host's pacing: UART0 has no
+/// flow control, the 128-byte RX FIFO cannot hold a 230-byte request while
+/// the device is head-down in a 51 ms shader compile, so this walk's request
+/// 12 waits for the compile line where silicon's client did not have to
+/// (`walks/examples-basic.script`, and the header comment there). Not tuned
+/// toward the desk's number: the trigger says "wait until the device has
+/// finished what the last request started", and 19 is what that produces.
 #[test]
-fn the_walk_ends_at_the_rmt_frame_which_is_m5s() {
-    let (_, t) = load("upload-walk");
+fn the_walk_reaches_the_project_read_and_the_shape_frame_matches_silicon() {
+    let (payload, t) = load("upload-walk");
     let body = t.lines.join("\n");
     assert!(
         body.contains(r#""loadProject":{"handle":1}"#),
         "the project loaded"
     );
     assert!(
-        body.contains("RMT channel 0 frame did not complete within 50 ms"),
-        "the RMT gap should be visible in the transcript, not silent"
+        !body.contains("RMT channel 0 frame did not complete within 50 ms"),
+        "the RMT gap is closed; a frame that times out is a regression"
     );
-    assert!(
-        !body.contains(r#"M!{"id":12,"#),
-        "request 12 was answered — has M5's RMT model landed? Update this test \
-         and the walk's sentinel."
+    assert!(t.sentinel_line().is_some(), "the walk reached its sentinel");
+
+    let masked = t.masked(mask_set(payload.mask_set).expect("the payload's mask set"));
+    let frames: Vec<&String> = masked
+        .iter()
+        .filter(|l| l.contains(r#"M!{"id":12,"#))
+        .collect();
+    assert_eq!(
+        frames.len(),
+        3,
+        "the three frames of the projectRead answer"
+    );
+
+    let seq1 = frames
+        .iter()
+        .find(|l| l.contains(r#""id":12,"seq":1,"#))
+        .expect("the shape frame");
+    let start = seq1.find(r#"M!{"id":12,"#).expect("the frame's start");
+    let seq1 = &seq1[start..];
+    assert_eq!(seq1.len(), 16_139, "the shape frame's length");
+    let mut hasher = Sha256::new();
+    hasher.update(seq1.as_bytes());
+    assert_eq!(
+        format!("{:x}", hasher.finalize()),
+        "7f32d25a4af574cfb04b3a4575254a78dfbb3fe7f3c1924133a7f9fb569eaecd",
+        "the shape frame is not the one silicon sent"
     );
 }
 
