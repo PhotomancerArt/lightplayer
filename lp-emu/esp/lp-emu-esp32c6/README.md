@@ -949,7 +949,7 @@ fails if those two disagree with each other, which is the comparison a board
 cannot be asked to make and the reason the C6 grew a `frame-dump` build.
 
 It builds a firmware image, a merged image and a release `lp-cli`, then runs
-twelve emulated seconds, so it costs minutes rather than seconds and belongs
+eight emulated seconds, so it costs minutes rather than seconds and belongs
 in a session rather than in a PR gate. What it proves per tick is
 `shader_oracle_pin`, which does run in `test-emu-c6`.
 `docs/reports/2026-09-08-esp32c6-emulator-walk.md` is its record — including

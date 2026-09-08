@@ -373,7 +373,7 @@ just emu-c6 <elf> --strict-bus --timeout 6s   # the workshop binary
 `lp-fw/fw-esp32c6/**` or `scripts/emu/**` (see the `emu_c6` filter in that
 workflow's `detect-changes` job). The walk is not in it: it builds a firmware
 image, a merged flash image and a release `lp-cli`, then runs the machine for
-twelve emulated seconds. What it proves per-tick is
+eight emulated seconds. What it proves per-tick is
 `esp/lp-emu-esp32c6/tests/shader_oracle_pin.rs`, which does run there.
 
 What the emulator does **not** cover — the Chromium USB stack, radio traffic,

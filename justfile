@@ -2205,7 +2205,7 @@ test-emu-c6:
 # which reaches a byte-equal state at app entry.
 #
 # NOT in `test-emu-c6`: it builds a firmware image, a merged flash image and a
-# release lp-cli, and then runs the machine for twelve emulated seconds — it
+# release lp-cli, and then runs the machine for eight emulated seconds — it
 # is a walk, and a walk is something you run, not something every PR pays for.
 # What it proves per-tick lives in `tests/shader_oracle_pin.rs`, which does
 # run there. See docs/reports/2026-09-08-esp32c6-emulator-walk.md.

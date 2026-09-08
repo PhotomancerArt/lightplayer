@@ -169,17 +169,17 @@ chip_elf() {
         echo "LP_EMU_C6_ELF_${CHIP_SLUG} points at a file that is not there" >&2
         return 1
     fi
-    # The emulator's per-source-tree copy. Keyed by the tree, so a stale ELF
-    # is a miss rather than a wrong answer — the same reason `test_support`
-    # refuses `target/<triple>/release-esp32/fw-esp32c6`, which is where every
-    # feature set of that crate builds to and therefore holds whatever was
-    # built last.
-    local cached
-    cached="$(ls -1t target/lp-emu-c6/${CHIP_SLUG}-*/fw-esp32c6 2>/dev/null | head -1 || true)"
-    if [ -n "$cached" ] && [ -f "$cached" ]; then
-        echo "$cached"
-        return 0
-    fi
+    # No cache lookup, deliberately. `lp-emu-esp32c6`'s `test_support` keeps
+    # copies under `target/lp-emu-c6/<slug>-<source key>/`, and the key is the
+    # point: a copy whose tree has changed is a MISS, not a wrong answer. This
+    # script cannot compute that key without reimplementing it, and a glob
+    # that took the newest directory would take a stale ELF and gate on it —
+    # which is the exact trap the key exists to close. So: an explicit path,
+    # or a build. `cargo build` costs a fraction of a second when the artifact
+    # is already up to date, and the build below writes to
+    # `target/<triple>/release-esp32/fw-esp32c6`, which is where EVERY feature
+    # set of that crate lands — safe only because we just built this one into
+    # it, one line earlier.
     if [ "${LP_EMU_BUILD_FW:-}" != "1" ]; then
         echo "no fw-esp32c6 ELF for ${CHIP_FEATURES}. Set LP_EMU_C6_ELF_${CHIP_SLUG} to one, or \
 LP_EMU_BUILD_FW=1 to build it. Not built automatically: a workspace gate must not start a \
@@ -196,9 +196,14 @@ cross-target firmware build." >&2
 chip_measure() {
     local elf="$1" dir
     dir="$(mktemp -d "${TMPDIR:-/tmp}/heap-budget-chip.XXXXXX")"
+    # `--release`, and it is not optional: the emulator's interpreter loop IS
+    # this binary, and a debug build takes tens of minutes to reach a
+    # heartbeat that release reaches in seconds. A gate nobody will wait for
+    # is a gate nobody runs.
+    #
     # No `--link`: nothing needs to talk to it, and a gate that binds a port
     # collides with whatever is already using one.
-    if ! cargo run -q -p lp-cli -- emu run --elf "$elf" \
+    if ! cargo run -q --release -p lp-cli -- emu run --elf "$elf" \
             --timeout "$CHIP_TIMEOUT" --console "$dir/console.txt" \
             >"$dir/emu.out" 2>"$dir/emu.err"; then
         echo "::error::heap-budget: ${CHIP_ID}: the boot did not end cleanly" >&2

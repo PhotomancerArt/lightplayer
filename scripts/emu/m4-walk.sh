@@ -58,11 +58,18 @@ PROJECT="${PROJECT:-projects/test/shader-oracle}"
 # project already names — so, unlike the classic, no retarget.
 PAD="${LP_WALK_PAD:-18}"
 LINK="${LP_WALK_LINK:-127.0.0.1:5597}"
-# EMULATED seconds. The budget: ROM + bootloader + app boot, the upload and
-# its compile, and then the ~30 frames `frame_dump` waits before its deferred
-# lit dump (it defers on purpose — a dump printed into the post-compile log
-# burst is dropped end to end).
-TIMEOUT="${LP_WALK_TIMEOUT:-12s}"
+# EMULATED time, and the walk's whole cost: every microsecond of it is
+# instructions this host has to interpret. The budget, measured: the ROM and
+# bootloader reach `[INIT]` at ~0.5 s, the upload lands its project at ~1.4 s,
+# the shader compiles one frame later, and `frame_dump` then waits 30 frames
+# (~0.2 s at the ~5.5 ms/frame this project renders at) before the deferred
+# lit dump it defers on purpose — a dump printed into the post-compile log
+# burst is dropped end to end. So everything the gate needs has happened by
+# ~2 s, and the rest is the margin that makes "every later frame is the same
+# frame" mean something. 8 s leaves ~1,000 frames after the dump and costs
+# about a billion emulated instructions; raise it with LP_WALK_TIMEOUT if you
+# want a longer soak, and expect the wall clock to move with it.
+TIMEOUT="${LP_WALK_TIMEOUT:-8s}"
 # Wall-clock net. Emulated time runs several times slower than real time here.
 WALL="${LP_WALK_WALL_TIMEOUT:-900}"
 BOOT="${LP_WALK_BOOT:-rom-up}"
@@ -136,8 +143,8 @@ esac
 
 # Release, and it is the expensive step of the walk on a cold cache — minutes,
 # not seconds. It has to be: the emulator's interpreter loop IS this binary,
-# and a debug build of it runs the twelve emulated seconds below at a speed
-# nobody will wait for. The same binary serves the link and drives the upload,
+# and a debug build of it runs the emulated seconds below at a speed nobody
+# will wait for. The same binary serves the link and drives the upload,
 # so one build covers both halves of the walk.
 echo "==> building lp-cli (release — the emulator's own interpreter loop)"
 cargo build --quiet --release -p lp-cli
