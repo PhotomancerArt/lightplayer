@@ -75,7 +75,7 @@ pub async fn write_device_file(
         events: events.clone(),
         tap: None,
     };
-    let mut client = LpClient::new(io);
+    let mut client = LpClient::new(io).on_borrowed_wire();
     let mut progress = progress_reporter(&events);
     lpa_client::wait_until_ready(&mut client, lpa_client::READY_ATTEMPTS, &mut progress)
         .await
@@ -112,7 +112,7 @@ pub async fn remove_device_project(
         events: events.clone(),
         tap: None,
     };
-    let mut client = LpClient::new(io);
+    let mut client = LpClient::new(io).on_borrowed_wire();
     let mut progress = progress_reporter(&events);
     lpa_client::remove_project(&mut client, fallback_storage_id, &mut progress)
         .await
@@ -153,7 +153,7 @@ pub async fn push_device_project(
         events: events.clone(),
         tap: None,
     };
-    let mut client = LpClient::new(io);
+    let mut client = LpClient::new(io).on_borrowed_wire();
     let mut progress = progress_reporter(&events);
     lpa_client::push_project(
         &mut client,
