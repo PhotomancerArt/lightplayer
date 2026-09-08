@@ -11,11 +11,11 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 
 use crate::config::ValidateConfig;
-use crate::configuration::{Availability, Configuration};
+use crate::configuration::{Availability, Configuration, ConfigurationKind};
 use crate::driver::{RunRequest, default_out_dir, driver_for};
 use crate::grade::FieldClass;
 use crate::header::{InbandHeader, TranscriptHeader};
-use crate::payload::{ALL_PAYLOADS, Sentinel, find_payload};
+use crate::payload::{ALL_PAYLOADS, Link, Sentinel, find_payload};
 use crate::replay::{ReplayOptions, ReplayReport, replay};
 use crate::transcript::{Transcript, sidecar_path};
 
@@ -203,6 +203,13 @@ pub struct RunOptions<'a> {
     /// Seconds to wait for the payload's sentinel. **Emulated** seconds on an
     /// emulated configuration, host seconds on silicon.
     pub timeout_secs: u64,
+    /// Force the payload's effective link on an `lp-emu:*` configuration
+    /// (`--link real|spike`; M1 P1, DD8). `None` is the default: the
+    /// payload's own [`crate::payload::Payload::link`] decides, as it always
+    /// has. Refused on any configuration that is not `lp-emu:*` — the
+    /// override is `RunRequest::effective_link`'s seam, and only the
+    /// `lp-emu:*` driver reads it.
+    pub link_override: Option<Link>,
 }
 
 /// No `--image` at all: build what the plan says to build.
@@ -218,6 +225,7 @@ impl Default for RunOptions<'_> {
             // The CLI's default, so a `RunOptions::default()` in a test is the
             // same run an operator would get.
             timeout_secs: 120,
+            link_override: None,
         }
     }
 }
@@ -286,6 +294,7 @@ pub fn run_set(
 ) -> Result<String> {
     let entry = cfg.configuration(configuration)?;
     let config = entry.parsed()?;
+    check_link_override(opts, &config)?;
     let payloads = cfg.payloads_in(set)?;
     let driver = driver_for(&config);
     let out_dir = default_out_dir();
@@ -486,6 +495,7 @@ pub fn record_set(
     } = *provenance;
     let entry = cfg.configuration(configuration)?;
     let config = entry.parsed()?;
+    check_link_override(opts, &config)?;
     let payloads = cfg.payloads_in(set)?;
     let driver = driver_for(&config);
     if driver.availability() != Availability::Available {
@@ -653,8 +663,26 @@ fn request(
         repo_root: repo_root.to_path_buf(),
         out_dir: out_dir.to_path_buf(),
         image: opts.images.for_payload(payload.name).map(Path::to_path_buf),
+        link_override: opts.link_override,
         identity: entry.identity(),
     }
+}
+
+/// `--link` is `lp-emu:*` only: it is `RunRequest::effective_link`'s seam,
+/// and no other driver reads `link_override`. Silicon has one link because a
+/// board does; `esp-emu:*` gets `spike_uart0_link` unconditionally regardless
+/// of what a payload or an override says (`RunRequest::features`'s own
+/// doc). Refusing it elsewhere means a mistyped `--link real` on the wrong
+/// configuration fails loudly rather than being silently ignored.
+fn check_link_override(opts: &RunOptions<'_>, config: &Configuration) -> Result<()> {
+    if opts.link_override.is_some() && config.kind != ConfigurationKind::LpEmu {
+        bail!(
+            "--link only applies to `lp-emu:*` configurations; `{}` is `{}`",
+            config.name(),
+            config.kind
+        );
+    }
+    Ok(())
 }
 
 /// Resolve `find_payload` for the CLI layer without re-exporting the module.
