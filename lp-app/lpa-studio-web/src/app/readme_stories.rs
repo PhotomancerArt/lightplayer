@@ -13,10 +13,8 @@ use lpa_studio_web_story_macros::story;
 use lpa_studio_core::app::library::PackageHealth;
 use lpa_studio_core::{
     ProjectController, ProjectEditorView, ProjectNodeStatusTone, ProjectNodeTreeView,
-    ProjectSyncPhase, SimCardState, UiAgentStatus, UiExampleCard, UiHomeView, UiLensCard,
-    UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource, UiNodeFace, UiNodeHeader, UiNodeTab,
-    UiNodeView, UiPackageCard, UiPaneView, UiSimCard, UiSimProjectChip, UiStatus, UiStudioView,
-    UiViewContent,
+    ProjectSyncPhase, UiAgentStatus, UiExampleCard, UiHomeView, UiNodeFace, UiNodeHeader,
+    UiNodeTab, UiNodeView, UiPackageCard, UiPaneView, UiStatus, UiStudioView, UiViewContent,
 };
 
 use crate::app::home::{DevicesPage, ExplorePage, ProjectsPage};
@@ -45,7 +43,7 @@ fn studio_hero() -> Element {
             vec![readme_project_pane()],
             lpa_studio_core::UiConsoleView::empty(),
         )
-        .with_lens_card(Some(UiLensCard::Sim(readme_lens_card()))),
+        .with_lens_card(Some(crate::app::story_fixtures::simulator_lens_card())),
         true,
         Vec::new(),
     )
@@ -190,39 +188,10 @@ fn readme_playlist_node() -> UiNodeView {
     view
 }
 
-/// The hero's lens card: the simulator running this show, with a healthy
-/// console tail so the card's permanent console region reads as live.
-fn readme_lens_card() -> UiSimCard {
-    let line = |offset: f64, message: &str| {
-        UiLogEntry::new(
-            STORY_NOW + offset,
-            UiLogLevel::Info,
-            UiLogSource::with_detail(UiLogOrigin::Device, "fw-browser"),
-            message,
-        )
-    };
-    UiSimCard {
-        state: SimCardState::Running,
-        project: Some(UiSimProjectChip {
-            uid: "prj9sLm2Xc44dQnUv7BgWkEyt".to_string(),
-            name: "evening-glow".to_string(),
-        }),
-        board_id: None,
-        console_tail: vec![
-            line(0.0, "engine: project loaded · 241 points"),
-            line(1.0, "engine: frame 41022 · 60fps"),
-            line(2.0, "shader: aurora.glsl compiled · 3 uniforms"),
-            line(3.0, "engine: frame 41142 · 60fps"),
-        ],
-        frame_preview: None,
-        frame_age_secs: None,
-        frame_fps: None,
-        ui: Default::default(),
-    }
-}
-
-/// Home gallery content for the README shot: the simulator running a
-/// project, a small library, and the example row.
+/// Home gallery content for the README shot: a small library and the
+/// example row. The DEVICE half is the roster's own projection, joined by
+/// the controller in the app — a story that faked one would be inventing
+/// devices, so the README's gallery shows the library.
 fn readme_home_view() -> UiHomeView {
     let projects = vec![
         UiPackageCard {
@@ -235,7 +204,6 @@ fn readme_home_view() -> UiHomeView {
             provenance: None,
             on_device: None,
             open_elsewhere: false,
-            running_in_sim: true,
             target: None,
             health: PackageHealth::Ready,
         },
@@ -249,7 +217,6 @@ fn readme_home_view() -> UiHomeView {
             provenance: Some("Remixed from Basic".to_string()),
             on_device: None,
             open_elsewhere: false,
-            running_in_sim: true,
             target: None,
             health: PackageHealth::Ready,
         },
@@ -263,26 +230,11 @@ fn readme_home_view() -> UiHomeView {
             provenance: Some("Forked from 2026-07-02-0930-porch-sign".to_string()),
             on_device: None,
             open_elsewhere: false,
-            running_in_sim: false,
             target: None,
             health: PackageHealth::Ready,
         },
     ];
-    let sim = Some(UiSimCard {
-        state: SimCardState::Running,
-        project: Some(UiSimProjectChip {
-            uid: "prj3fKq8Zr21bTxYw0AhVmDpe".to_string(),
-            name: "2026-07-02-0930-porch-sign".to_string(),
-        }),
-        board_id: None,
-        console_tail: Vec::new(),
-        frame_preview: None,
-        frame_age_secs: None,
-        frame_fps: None,
-        ui: Default::default(),
-    });
     UiHomeView {
-        sim,
         projects,
         examples: vec![UiExampleCard {
             id: "catalog/plasma".to_string(),

@@ -78,6 +78,7 @@
 //!
 //! | row | height |
 //! |---|---|
+//! | runtime band | 24px, **sim/emu cards only** — a real board has none (D38), so a real card's height is unchanged |
 //! | info line | 17px, one line, ellipsised, `title` = the full text |
 //! | bar slot | 4px, unlit when its zone has no activity |
 //! | preview slot | 120px, the board's own picture (aspect-fit, letterboxed) or an honest sentence (AC10) |
@@ -127,9 +128,10 @@ use dioxus::prelude::*;
 use lpa_studio_core::{
     DeviceAction, DeviceActivityView, DeviceCardFeedView, DeviceEscape, DeviceFeedOp, DeviceId,
     DeviceLoadedProject, DeviceStatus, DeviceView, DevicesOp, FeedLiveness, FirmwareVerb,
-    PendingLinkView, UiAction, UiExampleCard, UiPackageCard, UiStatus, device_escape_action,
-    device_firmware_line, device_identity_line, device_status_kind, firmware_face_preview_sentence,
-    firmware_verb, pending_escape_action, pending_firmware_line, pending_identity_rows,
+    PendingLinkView, UiAction, UiExampleCard, UiPackageCard, UiRuntimeBand, UiStatus,
+    device_escape_action_for, device_firmware_line, device_identity_line, device_status_kind,
+    firmware_face_preview_sentence, firmware_verb, pending_escape_action, pending_firmware_line,
+    pending_identity_rows,
 };
 
 use super::device_pick_popover::{
@@ -171,12 +173,24 @@ pub(crate) fn DeviceRosterCard(
     /// `None` = nothing honest to draw: the slot keeps its sentence.
     #[props(default)]
     feed: Option<DeviceCardFeedView>,
+    /// The runtime band (PD11), for a device that is not silicon. `None`
+    /// for a real board, which wears no band at all (D38) — and which is
+    /// why a real card's height is unchanged by this phase.
+    #[props(default)]
+    runtime: Option<UiRuntimeBand>,
     /// Open the header's ⋯ menu immediately (stories only).
     #[props(default = false)]
     menu_initially_open: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let device = card.id;
+    // The two verbs whose WORDS depend on what the device is (PD8/Q15): a
+    // sim is powered on and off, a board is connected and disconnected.
+    // The band is the fact — a device with one is not silicon.
+    let face = match runtime.is_some() {
+        true => lpa_studio_core::DeviceFace::Sim,
+        false => lpa_studio_core::DeviceFace::Wire,
+    };
     // The mount lease: a card on screen wants its board's picture; a card
     // leaving the page stops the pull (frames nobody sees are serial time
     // the board would rather spend elsewhere). The feed keeps the last
@@ -295,6 +309,14 @@ pub(crate) fn DeviceRosterCard(
                             }
                         }
                     }
+                    // The runtime band (PD11/D49): the ONE mark that says
+                    // this device is not silicon. Under the identity rows,
+                    // bound-family tone, 24px, and absent entirely on a
+                    // real board — which is what keeps every real card's
+                    // height exactly what it was.
+                    if let Some(runtime) = runtime.clone() {
+                        RuntimeBand { runtime }
+                    }
                 }
             }
 
@@ -327,7 +349,7 @@ pub(crate) fn DeviceRosterCard(
                         if let Some(escape) = cancel {
                             ActionButton {
                                 key: "{\"cancel-project\"}",
-                                action: device_escape_action(escape, device),
+                                action: device_escape_action_for(escape, device, face),
                                 running: false,
                                 variant: ActionButtonVariant::Quiet,
                                 on_action,
@@ -391,7 +413,7 @@ pub(crate) fn DeviceRosterCard(
                         if let Some(escape) = cancel {
                             ActionButton {
                                 key: "{\"cancel-firmware\"}",
-                                action: device_escape_action(escape, device),
+                                action: device_escape_action_for(escape, device, face),
                                 running: false,
                                 variant: ActionButtonVariant::Quiet,
                                 on_action,
@@ -489,7 +511,7 @@ pub(crate) fn DeviceRosterCard(
                         if let Some(escape) = cancel {
                             ActionButton {
                                 key: "{\"cancel-device\"}",
-                                action: device_escape_action(escape, device),
+                                action: device_escape_action_for(escape, device, face),
                                 running: false,
                                 variant: ActionButtonVariant::Quiet,
                                 on_action,
@@ -517,7 +539,7 @@ pub(crate) fn DeviceRosterCard(
                     {
                         ActionButton {
                             key: "{escape:?}",
-                            action: device_escape_action(escape, device),
+                            action: device_escape_action_for(escape, device, face),
                             running: false,
                             variant: ActionButtonVariant::Quiet,
                             on_action,
@@ -527,7 +549,7 @@ pub(crate) fn DeviceRosterCard(
                     if card.escapes.contains(&DeviceEscape::Forget) {
                         ActionButton {
                             key: "{\"forget\"}",
-                            action: device_escape_action(DeviceEscape::Forget, device),
+                            action: device_escape_action_for(DeviceEscape::Forget, device, face),
                             running: false,
                             variant: ActionButtonVariant::Quiet,
                             armed_preview,
@@ -1245,6 +1267,33 @@ fn mono_line_class() -> &'static str {
 /// short stays level with its neighbours rather than sitting 16px higher.
 fn identity_rows_class() -> &'static str {
     "tw:grid tw:h-8 tw:min-w-0 tw:content-start"
+}
+
+/// The runtime band: 24px, bound-family tone, one line, ellipsised with the
+/// full text on its `title`.
+///
+/// Bound-family because that is the studio's "this is standing in for
+/// something" colour (`studio-bound-violet-convention`), and it is the ONLY
+/// place on a card it appears — no title prefix, no tinted edge, no second
+/// glyph (D38). A person reading a wall of cards sees one extra row on the
+/// ones that are not boards, and everything else is identical, which is the
+/// whole claim of "always a device".
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn RuntimeBand(runtime: UiRuntimeBand) -> Element {
+    let line = runtime.line();
+    rsx! {
+        p {
+            class: runtime_band_class(),
+            title: "{line}",
+            "\u{25b6} {line}"
+        }
+    }
+}
+
+fn runtime_band_class() -> &'static str {
+    "tw:m-0 tw:flex tw:h-6 tw:min-w-0 tw:items-center tw:truncate tw:text-[0.68rem] \
+     tw:leading-6 tw:text-status-bound-foreground"
 }
 
 #[cfg(test)]

@@ -46,22 +46,21 @@ pub use app::devices::{
     DevicesOp, FeedLiveness, FirmwareVerb, FlashBoardChoice, FlashOffer, GrantedLink, JournalLine,
     LensLineTap, LensTapEvent, NewSimRecord, PushOffer, PushPayload, PushSource, PushSourceChoice,
     PushSourceGroup, RememberedView, RosterSplit, SIM_TRANSPORT, SimBacking, SimDeviceTransport,
-    SimLinkSource, SimRecord, SimRuntimeControl, SimSession, StagedPush, delete_sim_record,
-    device_card_feed_view, device_card_feed_views, device_chip, device_escape_action,
-    device_firmware_line, device_identity_line, device_status_kind, feed_liveness,
-    firmware_face_preview_sentence, firmware_verb, first_bundled_example_id, flash_offer,
-    flash_offer_for, mint_sim_identity, new_sim_record, pending_escape_action,
-    pending_firmware_line, pending_identity_rows, push_offer, read_sim_record, reflash_choice,
-    sim_endpoint, sim_link_info, split_roster, transport_label_for_endpoint, uid_from_sim_endpoint,
-    write_sim_record,
+    SimLinkSource, SimRecord, SimRuntimeControl, SimSession, SimTier, StagedPush, UiRuntimeBand,
+    delete_sim_record, device_card_feed_view, device_card_feed_views, device_chip,
+    device_escape_action, device_escape_action_for, device_firmware_line, device_identity_line,
+    device_status_kind, feed_liveness, firmware_face_preview_sentence, firmware_verb,
+    first_bundled_example_id, flash_offer, flash_offer_for, mint_sim_identity, new_sim_record,
+    pending_escape_action, pending_firmware_line, pending_identity_rows, push_offer,
+    read_sim_record, reflash_choice, sim_endpoint, sim_link_info, split_roster,
+    transport_label_for_endpoint, uid_from_sim_endpoint, write_sim_record,
 };
 pub use app::docs_host::DocsSimHost;
 pub use app::frame_feed::{CardFeedApply, CardFeedState};
 pub use app::home::{
-    CardSheet, CardUiOp, CardUiState, CardVerb, DEFAULT_STRIP_PIXELS, GenerateProjectError,
-    GeneratedProject, HOME_NODE_ID, HomeOp, HomePoolEvidence, HomeSimEvidence, ProjectTemplate,
-    SIM_CARD_KEY, UiExampleCard, UiExampleGroup, UiHomeView, UiPackageCard, UiSimCard,
-    UiSimProjectChip, ZipBytes, example_groups, generate_board_project, template_project_files,
+    DEFAULT_STRIP_PIXELS, GenerateProjectError, GeneratedProject, HOME_NODE_ID, HomeOp,
+    ProjectTemplate, UiExampleCard, UiExampleGroup, UiHomeView, UiPackageCard, ZipBytes,
+    example_groups, generate_board_project, template_project_files,
 };
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,
@@ -126,13 +125,9 @@ pub use app::rich_object::{
     RichChip, RichLine, RichObjectView, RichRollup, RichSection, RichWeight,
 };
 pub use app::roster::board_display_name;
-pub use app::roster::{
-    CardTab, CardTabView, SimCardState, SimDetailAffordance, SimRichInput, card_tabs,
-    sim_rich_object,
-};
 pub use app::runtime_pool::{
-    DeviceLensAttachment, RuntimeId, RuntimeKind, RuntimeOp, RuntimePayload, RuntimePool,
-    RuntimeSession, SIM_SESSION_CAPACITY, SimAttachment, SimLink, SimLoadedProject,
+    DeviceLensAttachment, LinkTransport, RuntimeId, RuntimeOp, RuntimePayload, RuntimePool,
+    RuntimeSession, SESSION_CAPACITY,
 };
 pub use app::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerFailureKind, ServerSnapshot, ServerState,
@@ -155,11 +150,10 @@ pub use app::studio::{
     PASSIVE_PREEMPTIONS_BEFORE_PROMOTION, RefreshCadence, SIMULATOR_REFRESH_INTERVAL,
     STUDIO_LOG_SINK, StudioActor, StudioActorOptions, StudioCommand, StudioController,
     StudioHandle, StudioLogSink, StudioSnapshot, StudioViewReceiver, StudioViewSender,
-    UiChromeSessionControl, UiChromeSessionKind, UiChromeSessionStatus, UiConsoleView, UiError,
-    UiLensCard, UiLensRuntime, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource,
-    UiNotice, UiNoticeLevel, UiResult, UxActivityTarget, UxUpdate, UxUpdateSink,
-    VERDICT_CHASE_INTERVAL, VERDICT_CHASE_TICKS, ViewPublisher, has_unsaved_work,
-    studio_view_channel,
+    UiChromeSessionControl, UiChromeSessionStatus, UiConsoleView, UiError, UiLensCard,
+    UiLensRuntime, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource, UiNotice,
+    UiNoticeLevel, UiResult, UxActivityTarget, UxUpdate, UxUpdateSink, VERDICT_CHASE_INTERVAL,
+    VERDICT_CHASE_TICKS, ViewPublisher, has_unsaved_work, studio_view_channel,
 };
 pub use core::notice::UiNotices;
 pub use core::view::activity_view::UiActivityStep;

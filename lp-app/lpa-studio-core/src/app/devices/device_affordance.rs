@@ -35,13 +35,35 @@ pub fn device_status_kind(status: DeviceStatus) -> UiStatusKind {
 
 /// The action an escape on a device card dispatches.
 pub fn device_escape_action(escape: Escape, device: DeviceId) -> UiAction {
-    DevicesOp::action_for(match escape {
-        Escape::Cancel => Action::CancelActivity { device },
-        Escape::Retry => Action::Identify { device },
-        Escape::Reconnect => Action::Reconnect { device },
-        Escape::Disconnect => Action::Disconnect { device },
-        Escape::Forget => Action::Forget { device },
-    })
+    device_escape_action_for(escape, device, super::DeviceFace::Wire)
+}
+
+/// The same, for a device whose FACE decides the words on two of the verbs
+/// (PD8/Q15): a sim is powered on and off, a board is connected and
+/// disconnected. Identical dispatch — the action is the same `Connect` /
+/// `Disconnect` either way, because a sim's link is a link — and identical
+/// everywhere else, because a Forget takes the same things away.
+pub fn device_escape_action_for(
+    escape: Escape,
+    device: DeviceId,
+    face: super::DeviceFace,
+) -> UiAction {
+    let action = match (escape, face) {
+        (Escape::Cancel, _) => Action::CancelActivity { device },
+        (Escape::Retry, _) => Action::Identify { device },
+        // Reconnect asks the browser's chooser for a port back, which is
+        // meaningless for a runtime this tab makes: the remembered line's
+        // Reconnect slot is where a powered-off sim's **Power on** lives
+        // (Q5), and Power on is `Connect` (PD8).
+        (Escape::Reconnect, super::DeviceFace::Sim) => Action::Connect { device },
+        (Escape::Reconnect, super::DeviceFace::Wire) => Action::Reconnect { device },
+        (Escape::Disconnect, _) => Action::Disconnect { device },
+        (Escape::Forget, _) => Action::Forget { device },
+    };
+    match face {
+        super::DeviceFace::Sim => DevicesOp::sim_action_for(action),
+        super::DeviceFace::Wire => DevicesOp::action_for(action),
+    }
 }
 
 /// The action an escape on a PENDING LINK dispatches.

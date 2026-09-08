@@ -106,7 +106,7 @@ pub const DEVICE_CARD_FEED_INTERVAL: Duration = Duration::from_millis(150);
 /// flickers the treatment, and short enough that a board which actually
 /// stopped publishing says so before anyone trusts a frozen picture.
 /// Consumed by the ▶ tab renderer (P3) against
-/// [`UiSimCard::frame_age_secs`](crate::UiSimCard::frame_age_secs).
+/// the card's frame-age line.
 pub const FRAME_STALE_AFTER_SECS: f64 = 5.0;
 
 /// The default passive-refresh backoff base: start at 3 s (the retired flat

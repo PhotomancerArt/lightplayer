@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use lpa_client::{
     CancelSignal, ClientError, ClientEvent, ClientIo, LpClient, ProgressDeadline, PullOutcome,
 };
-use lpa_link::{LinkConnection, LinkConnectionKind, LinkConnector};
+use lpa_link::LinkConnectionKind;
 use lpc_model::{
     ArtifactLocation, CommitResult, MutationCmdBatch, MutationCmdBatchResult, NodeId,
     ProjectOverlay, Revision, SlotPath,
@@ -24,7 +24,6 @@ use crate::app::project::demo_project::{
 };
 use crate::{
     LoadedProjectChoice, ProjectInventorySummary, UiError, UiLogDraft, UiLogLevel, UiLogOrigin,
-    UxUpdateSink,
 };
 
 /// Where the editor lens's request ids start on a borrowed roster wire.
@@ -78,27 +77,6 @@ impl StudioServerClient {
             last_fps: None,
             last_loaded_projects: None,
         }
-    }
-
-    /// A client over the simulator's worker io (BrowserWorker only —
-    /// hardware attaches through [`Self::from_device_session`]).
-    pub fn from_sim_connection(
-        connector: Rc<LinkConnector>,
-        connection: &LinkConnection,
-        updates: UxUpdateSink,
-    ) -> Result<Self, UiError> {
-        let pending_logs = Rc::new(RefCell::new(Vec::new()));
-        let protocol = connection_protocol(&connection.kind);
-        let io = sim_server_io(connector, connection, Rc::clone(&pending_logs), updates)?;
-        Ok(Self {
-            client: LpClient::new(io),
-            protocol,
-            pending_logs,
-            last_recovery: None,
-            last_output_status: None,
-            last_fps: None,
-            last_loaded_projects: None,
-        })
     }
 
     /// A client over a hardware [`lpa_link::DeviceSession`]'s
@@ -935,31 +913,6 @@ fn node_def_artifacts(
 /// through here — their io IS the device session's channel (M4/P5); the old
 /// per-kind match (browser serial io, test-edge fake io, host holes) is
 /// gone with them.
-fn sim_server_io(
-    _connector: Rc<LinkConnector>,
-    connection: &LinkConnection,
-    _pending_logs: Rc<RefCell<Vec<UiLogDraft>>>,
-    _updates: UxUpdateSink,
-) -> Result<Box<dyn ClientIo>, UiError> {
-    match &connection.kind {
-        #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
-        LinkConnectionKind::BrowserWorker { .. } => Ok(Box::new(
-            super::browser_worker_client_io::BrowserWorkerClientIo::new(
-                _connector,
-                connection.session_id.clone(),
-                _pending_logs,
-            ),
-        )),
-        #[cfg(not(all(feature = "browser-worker", target_arch = "wasm32")))]
-        LinkConnectionKind::BrowserWorker { .. } => Err(UiError::UnsupportedFeature(
-            "browser worker server I/O requires the browser-worker feature on wasm".to_string(),
-        )),
-        kind => Err(UiError::UnsupportedFeature(format!(
-            "sim server I/O over a {kind:?} link; hardware attaches through its device session"
-        ))),
-    }
-}
-
 fn connection_protocol(kind: &LinkConnectionKind) -> String {
     match kind {
         LinkConnectionKind::BrowserWorker { protocol }

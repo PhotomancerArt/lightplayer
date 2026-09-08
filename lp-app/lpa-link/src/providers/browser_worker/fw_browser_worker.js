@@ -209,11 +209,27 @@ async function boot(label, modulePath, wasmPath, mode, moduleDelivery, runtimeOp
     // the board it wears, the tier it asks for, the identity it answers
     // with. Opaque here — the manifest inside is text this side never reads.
     self.postMessage({ kind: "status", status: "runtime-create" });
-    bootRuntimeId = JSON.parse(
+    const bootCreated = JSON.parse(
       fwBrowser.create_runtime(label, JSON.stringify(runtimeOptions ?? {})),
-    ).runtime_id;
+    );
+    bootRuntimeId = bootCreated.runtime_id;
     booted = true;
     tickMode = mode;
+    // The boot runtime announces itself exactly as an explicitly created
+    // one does — same envelope, same fields. The GRANTED tier lives only
+    // here (a `gpu` request the device could not honour comes back `cpu`
+    // with a reason), and the card's runtime band is not allowed to state
+    // a tier nobody granted. Posted BEFORE the runtime's own drained
+    // output: that output carries the runtime's `ready`, and a host that
+    // stops reading at a `ready` must already hold the announcement by
+    // then (G1, 2026-09-07 — it did not, and the band had no tier).
+    self.postMessage({
+      kind: "runtime_created",
+      runtime_id: bootRuntimeId,
+      label,
+      tier: bootCreated.tier,
+      tier_reason: bootCreated.tier_reason ?? null,
+    });
     postMany(fwBrowser.drain_output_json(bootRuntimeId));
     self.postMessage({ kind: "status", status: "ready" });
     if (tickMode === "self_ticking") {

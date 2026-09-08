@@ -37,12 +37,11 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     DeviceAction, DeviceEscape, DeviceRosterView, DevicesOp, RememberedView, UiAction, UiHomeView,
-    device_escape_action, split_roster,
+    device_escape_action_for, split_roster,
 };
 
 use crate::app::home::device_roster_card::{DeviceRosterCard, PendingLinkCard};
 use crate::app::home::play_feed_text::frame_age_label;
-use crate::app::home::sim_card::SimCard;
 use crate::app::home::{device_grid_class, section_title_class};
 use crate::app::node::lamp_view::LampView;
 use crate::core::{ActionButton, ActionButtonVariant};
@@ -77,19 +76,6 @@ pub fn DevicesPage(
                 }
             }
 
-            // The live simulator, while a session is running (D36: its
-            // card exists exactly as long as the session does).
-            if let Some(card) = home.sim.clone() {
-                section { class: "tw:grid tw:gap-3",
-                    header { class: "tw:flex tw:items-baseline tw:justify-between tw:gap-3",
-                        h2 { class: section_title_class(), "Runtimes" }
-                    }
-                    div { class: device_grid_class(),
-                        SimCard { key: "{card.render_key()}", card, on_action }
-                    }
-                }
-            }
-
             section { class: "tw:grid tw:gap-3",
                 header { class: "tw:flex tw:items-baseline tw:justify-between tw:gap-3",
                     h2 { class: section_title_class(), "Devices" }
@@ -120,6 +106,9 @@ pub fn DevicesPage(
                                 // The board's own picture, joined at the
                                 // app view; absent = the slot's sentence.
                                 feed: devices.feeds.get(&card.id).cloned(),
+                                // The runtime band, for a device that is
+                                // not silicon; absent = a real board.
+                                runtime: devices.runtime_bands.get(&card.id).cloned(),
                                 card,
                                 // The empty face's picker reads the SAME two
                                 // lists the gallery does — there is no
@@ -312,7 +301,7 @@ fn RememberedTile(entry: RememberedView, on_action: EventHandler<UiAction>) -> E
                 for escape in entry.escapes.iter().copied() {
                     ActionButton {
                         key: "{escape:?}",
-                        action: device_escape_action(escape, device),
+                        action: device_escape_action_for(escape, device, entry.face),
                         running: false,
                         variant: remembered_escape_variant(escape),
                         on_action,
@@ -478,6 +467,7 @@ mod tests {
             transport_available,
             open_addresses: Default::default(),
             feeds: Default::default(),
+            runtime_bands: Default::default(),
         }
     }
 
@@ -715,6 +705,7 @@ mod tests {
             board: Some("seeed-xiao-esp32c6".to_string()),
             last_seen_label: Some("last heard 4 min ago".to_string()),
             escapes: vec![DeviceEscape::Reconnect, DeviceEscape::Forget],
+            face: lpa_studio_core::DeviceFace::Wire,
             feed: None,
         }
     }

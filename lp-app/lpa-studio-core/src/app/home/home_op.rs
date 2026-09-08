@@ -152,15 +152,10 @@ pub enum HomeOp {
     ImportJson {
         text: String,
     },
-    /// Mutate a card's UI VIEW-STATE (select tab / open or close a sheet).
-    /// A pure, synchronous view-state change — no wire, no library — kept
-    /// core-owned so it survives the card ⇄ pane growth and is
-    /// e2e-drivable (2026-07-25 re-home).
-    CardUi(crate::app::home::card_ui_state::CardUiOp),
 }
 
 impl HomeOp {
-    /// Whether this op ends in a project being opened on the simulator.
+    /// Whether this op ends in a project being opened on a device.
     ///
     /// The supersede rule (D4) is keyed off this: enqueuing one of these
     /// makes it THE current open, and whatever open is already parked in
@@ -281,11 +276,6 @@ impl ControllerOp for HomeOp {
                 ActionPriority::Secondary,
             )
             .with_icon("upload"),
-            Self::CardUi(_) => ActionMeta::new(
-                "Card view",
-                "Change what this card is showing.",
-                ActionPriority::Tertiary,
-            ),
         }
     }
 
@@ -309,12 +299,6 @@ impl ControllerOp for HomeOp {
             | Self::DeletePackage { .. }
             | Self::ImportZip { .. }
             | Self::ImportJson { .. } => ActionClass::Foreground {
-                deadline: PROJECT_ACTION_DEADLINE,
-            },
-            // A pure view-state flip — synchronous, no wire; run it
-            // inline like any local gesture (the standard budget never
-            // engages because the handler never awaits).
-            Self::CardUi(_) => ActionClass::Foreground {
                 deadline: PROJECT_ACTION_DEADLINE,
             },
         }

@@ -186,7 +186,7 @@ fn face_context_line(blocked: Option<&(String, String)>, opening: bool) -> Optio
 /// D24 rule), the sim glyph = running in simulator, amber "!" = the
 /// card is blocked. Both runtimes live = both glyphs ("Live in 2
 /// places" stays a popup/tooltip phrasing).
-fn face_status_glyphs(card: &UiPackageCard, blocked: bool) -> Vec<CardStatusGlyph> {
+fn face_status_glyphs(_card: &UiPackageCard, blocked: bool) -> Vec<CardStatusGlyph> {
     if blocked {
         return vec![CardStatusGlyph {
             icon: StudioIconName::StepAttention,
@@ -194,15 +194,7 @@ fn face_status_glyphs(card: &UiPackageCard, blocked: bool) -> Vec<CardStatusGlyp
             words: "This project can't be opened by this Studio.".to_string(),
         }];
     }
-    let mut glyphs = Vec::new();
-    if card.running_in_sim {
-        glyphs.push(CardStatusGlyph {
-            icon: StudioIconName::Simulator,
-            tone: GlyphTone::Live,
-            words: "Running in simulator".to_string(),
-        });
-    }
-    glyphs
+    Vec::new()
 }
 
 /// The card menu — the redesigned card's DEPTH surface ("the second
@@ -605,22 +597,17 @@ struct LivePresenceLine {
     title: Option<String>,
 }
 
-const LIVE_LINE_GOOD: &str = "tw:m-0 tw:truncate tw:text-xs tw:text-status-good-foreground";
-
-/// The card's runtime-presence line (D28): "Running in simulator" while
-/// the sim runs this project's head — load-as-push always runs the head,
-/// so the sim is current (green).
+/// The card's runtime-presence line (D28).
 ///
-/// ⚠️ The DEVICE lines (the D24 connected line and the "Live in 2 places"
-/// aggregate) went with M2 of the device-model rebuild, along with the
-/// `connected_device` connection the card carried. The rebuilt device
-/// model re-adds them.
-fn live_presence_line(card: &UiPackageCard) -> Option<LivePresenceLine> {
-    card.running_in_sim.then(|| LivePresenceLine {
-        text: "Running in simulator".to_string(),
-        class: LIVE_LINE_GOOD,
-        title: None,
-    })
+/// ⚠️ Nothing produces one right now. The sim arm read
+/// `UiPackageCard::running_in_sim`, whose source — the runtime pool's own
+/// record of what the sim ran — retired with the sim session (PD9): a sim
+/// is a device, and the device pairing is the registry `association` a
+/// card Push banks, which a lens open does not write. The DEVICE lines
+/// (the D24 connected line and the "Live in 2 places" aggregate) went with
+/// M2 of the device-model rebuild. Both come back together.
+fn live_presence_line(_card: &UiPackageCard) -> Option<LivePresenceLine> {
+    None
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -662,7 +649,7 @@ mod target_display_name_tests {
 mod tests {
     use super::*;
 
-    fn card(running_in_sim: bool) -> UiPackageCard {
+    fn card(_running_in_sim: bool) -> UiPackageCard {
         UiPackageCard {
             uid: "prj1".to_string(),
             kind: "Module".to_string(),
@@ -673,7 +660,6 @@ mod tests {
             provenance: None,
             on_device: None,
             open_elsewhere: false,
-            running_in_sim,
             target: None,
             health: PackageHealth::Ready,
         }
@@ -725,13 +711,13 @@ mod tests {
         }
     }
 
+    /// The runtime-presence line has no producer while the device pairing
+    /// is the registry association a card Push banks (see
+    /// `live_presence_line`): a card claims nothing rather than claiming
+    /// something nobody reported.
     #[test]
-    fn the_sim_line_appears_exactly_while_the_sim_runs_this_project() {
-        let sim = live_presence_line(&card(true)).expect("the sim line");
-        assert_eq!(sim.text, "Running in simulator");
-        assert_eq!(sim.class, LIVE_LINE_GOOD, "the sim always runs the head");
-        assert_eq!(sim.title, None);
-
+    fn no_presence_line_is_claimed_without_a_banked_pairing() {
+        assert_eq!(live_presence_line(&card(true)), None);
         assert_eq!(live_presence_line(&card(false)), None);
     }
 }

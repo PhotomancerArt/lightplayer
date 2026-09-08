@@ -711,36 +711,42 @@ pub(crate) fn install_legacy_hash_shim() {}
 /// `play: false`; the caller compares with [`StudioRoute::same_session`] and
 /// leaves a play URL alone.
 pub(crate) fn lens_route(view: &UiStudioView) -> Option<StudioRoute> {
-    match view.lens.as_ref()? {
-        UiLensRuntime::Sim { project_uid } => {
-            // A TRANSIENT view session binds its example's bare address
-            // (examples vision D2/D4) — checked BEFORE the loaded-project
-            // uid, which for a transient session is the ephemeral RAM uid
-            // and must never reach the URL.
-            if let Some(example) = view
-                .open_transient_example
-                .as_deref()
-                .and_then(lpa_studio_core::app::home::embedded_example)
-            {
-                return Some(StudioRoute::Example {
-                    slug: example.slug().to_string(),
-                    view: ProjectView::Workspace,
-                });
-            }
-            let uid: PrefixedUid = project_uid.as_deref()?.parse().ok()?;
-            Some(StudioRoute::Project {
-                uid,
-                slug: view.open_project_name.clone(),
+    // INTERIM (P4 replaces both arms with the `?on=` grammar): a lens on a
+    // SIM emits the PROJECT — the sim is invisible infrastructure to the
+    // address bar until the hint exists — and a lens on silicon emits
+    // `/device/<uid>`, because a board is a place you went to.
+    let UiLensRuntime::Device {
+        uid,
+        transport,
+        project_uid,
+    } = view.lens.as_ref()?;
+    if *transport == lpa_studio_core::LinkTransport::Sim {
+        // A TRANSIENT view session binds its example's bare address
+        // (examples vision D2/D4) — checked BEFORE the loaded-project
+        // uid, which for a transient session is the ephemeral RAM uid
+        // and must never reach the URL.
+        if let Some(example) = view
+            .open_transient_example
+            .as_deref()
+            .and_then(lpa_studio_core::app::home::embedded_example)
+        {
+            return Some(StudioRoute::Example {
+                slug: example.slug().to_string(),
                 view: ProjectView::Workspace,
-            })
+            });
         }
-        // A device lens is addressed by the device's registered uid; the
-        // project comes from the board, so no slug decorates it.
-        UiLensRuntime::Device { uid } => Some(StudioRoute::Device {
-            uid: uid.clone(),
+        let uid: PrefixedUid = project_uid.as_deref()?.parse().ok()?;
+        return Some(StudioRoute::Project {
+            uid,
+            slug: view.open_project_name.clone(),
             view: ProjectView::Workspace,
-        }),
+        });
     }
+    // The project comes from the board, so no slug decorates it.
+    Some(StudioRoute::Device {
+        uid: uid.clone(),
+        view: ProjectView::Workspace,
+    })
 }
 
 /// The route at page boot: the path, verbatim (the legacy shim has already
@@ -1336,6 +1342,8 @@ mod tests {
     fn a_device_lens_binds_the_device_route() {
         let view = editor_view(Some(UiLensRuntime::Device {
             uid: "dev000000daqf6dvvqz".to_string(),
+            transport: lpa_studio_core::LinkTransport::Serial,
+            project_uid: None,
         }));
         assert_eq!(
             lens_route(&view),
@@ -1530,7 +1538,9 @@ mod tests {
     /// ephemeral uid the session runs under must never reach the URL.
     #[test]
     fn a_transient_lens_binds_the_bare_example_address() {
-        let mut view = editor_view(Some(UiLensRuntime::Sim {
+        let mut view = editor_view(Some(UiLensRuntime::Device {
+            uid: "devsim".to_string(),
+            transport: lpa_studio_core::LinkTransport::Sim,
             project_uid: Some(SHARE_UID.to_string()),
         }))
         .with_open_project(Some(SHARE_UID.to_string()), Some("Fyeah Sign".to_string()));
@@ -1713,7 +1723,9 @@ mod tests {
     /// project the view has not reached yet still frames.
     #[test]
     fn project_matches_view_ignores_play() {
-        let view = editor_view(Some(UiLensRuntime::Sim {
+        let view = editor_view(Some(UiLensRuntime::Device {
+            uid: "devsim".to_string(),
+            transport: lpa_studio_core::LinkTransport::Sim,
             project_uid: Some(SHARE_UID.to_string()),
         }))
         .with_open_project(Some(SHARE_UID.to_string()), Some("basic".to_string()));
@@ -1867,7 +1879,9 @@ mod tests {
     /// rides along as the address's cosmetic half.
     #[test]
     fn lens_on_the_sim_binds_the_project_route_by_uid() {
-        let view = editor_view(Some(UiLensRuntime::Sim {
+        let view = editor_view(Some(UiLensRuntime::Device {
+            uid: "devsim".to_string(),
+            transport: lpa_studio_core::LinkTransport::Sim,
             project_uid: Some(SHARE_UID.to_string()),
         }))
         .with_open_project(
@@ -1895,14 +1909,20 @@ mod tests {
         // a sim-run project with no library identity (the storeless demo
         // path) has no honest address
         assert_eq!(
-            lens_route(&editor_view(Some(UiLensRuntime::Sim { project_uid: None }))),
+            lens_route(&editor_view(Some(UiLensRuntime::Device {
+                uid: "devsim".to_string(),
+                transport: lpa_studio_core::LinkTransport::Sim,
+                project_uid: None,
+            }))),
             None
         );
     }
 
     #[test]
     fn a_project_route_matches_the_view_by_uid() {
-        let view = editor_view(Some(UiLensRuntime::Sim {
+        let view = editor_view(Some(UiLensRuntime::Device {
+            uid: "devsim".to_string(),
+            transport: lpa_studio_core::LinkTransport::Sim,
             project_uid: Some(SHARE_UID.to_string()),
         }))
         .with_open_project(

@@ -261,9 +261,15 @@ impl BrowserWorkerHandle {
                     // phase a click is waiting on (P6).
                     boot_wait::note_boot_phase(label, status);
                 }
+                // The WORKER's ready, never a runtime's: the boot runtime's
+                // own `{runtime_id, status: "ready"}` is forwarded output
+                // and arrives first, and returning on it left the
+                // `runtime_created` behind it unrecorded (`boot_wait::
+                // settles_boot`).
                 let ready = matches!(
                     &output,
-                    BrowserOutputEnvelope::Status { status, .. } if status == "ready"
+                    BrowserOutputEnvelope::Status { status, runtime_id, .. }
+                        if boot_wait::settles_boot(status, *runtime_id)
                 );
                 let error = boot_error_message(&output);
                 outputs.push(output);

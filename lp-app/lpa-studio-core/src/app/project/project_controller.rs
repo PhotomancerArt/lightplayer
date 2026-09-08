@@ -64,11 +64,14 @@ pub struct ProjectController {
     /// or a link that is not Ready): the add-node picker then offers every
     /// kind. Gating only ever narrows when a device affirmatively reports.
     lens_device_features: Option<Vec<lpc_model::LpFeature>>,
-    /// What kind of runtime the lens is on — the probe policy's key
-    /// (visual probe resolution, product-subscription node scope). Pushed
-    /// by the studio controller's `sync_lens_probe_policy` at every action
-    /// and tick that might move the lens; `None` while detached.
-    lens_runtime_kind: Option<crate::RuntimeKind>,
+    /// How the lens device is reached — the probe policy's key (visual
+    /// probe resolution, product-subscription node scope). Every runtime is
+    /// a device now (PD9), so what these forks were ever really about is
+    /// the WIRE: an in-process worker channel has no bandwidth bound, a
+    /// serial port does. Pushed by the studio controller's
+    /// `sync_lens_probe_policy` at every action and tick that might move
+    /// the lens; `None` while detached.
+    lens_transport: Option<crate::LinkTransport>,
     /// Every pattern export the local library offers, for the add-node
     /// picker's import source (module authoring unit, P5). Pushed down from
     /// the studio controller at each library settle — a view build must
@@ -438,7 +441,7 @@ impl ProjectController {
             state: ProjectState::NotLoaded,
             running_project_status: RunningProjectStatus::Unknown,
             lens_device_features: None,
-            lens_runtime_kind: None,
+            lens_transport: None,
             import_patterns: Vec::new(),
             active_editor_target: None,
             runtime_storage_id: crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID
@@ -4424,7 +4427,7 @@ impl ProjectController {
             // device lens, the bytes you would be editing are not the ones
             // in front of you, so the row disables and says so (planning
             // Q4).
-            device_session: self.lens_runtime_kind == Some(crate::RuntimeKind::Device),
+            device_session: self.lens_transport == Some(crate::LinkTransport::Serial),
         })
     }
 
@@ -5037,9 +5040,9 @@ impl ProjectController {
             // node only: every subscribed product is frames pulled over
             // serial, and a board asked for every expanded node's frames
             // stops answering heartbeats (round-2 M5 re-arms this).
-            ProjectProductSubscriptionIntent::Default => match self.lens_runtime_kind {
-                Some(crate::RuntimeKind::Sim) => !node.state().collapsed,
-                Some(crate::RuntimeKind::Device) | None => self.is_focused_node(node),
+            ProjectProductSubscriptionIntent::Default => match self.lens_transport {
+                Some(crate::LinkTransport::Sim) => !node.state().collapsed,
+                Some(crate::LinkTransport::Serial) | None => self.is_focused_node(node),
             },
             ProjectProductSubscriptionIntent::Subscribed => true,
             ProjectProductSubscriptionIntent::Unsubscribed => false,
@@ -5259,10 +5262,10 @@ impl ProjectController {
         self.lens_device_features = features;
     }
 
-    /// Record what kind of runtime the lens is on, so probe policy (visual
-    /// probe resolution, product-subscription node scope) tracks the lens.
-    pub fn set_lens_runtime_kind(&mut self, kind: Option<crate::RuntimeKind>) {
-        self.lens_runtime_kind = kind;
+    /// Record how the lens device is reached, so probe policy (visual probe
+    /// resolution, product-subscription node scope) tracks the lens.
+    pub fn set_lens_transport(&mut self, transport: Option<crate::LinkTransport>) {
+        self.lens_transport = transport;
     }
 
     /// Record what the library can be imported FROM (module authoring
@@ -5277,9 +5280,9 @@ impl ProjectController {
     /// tier over serial, the default everywhere else (a sim lens has always
     /// used the default; a detached mirror is not probing at all).
     fn visual_preview_frame(&self) -> crate::UiProductPreviewFrame {
-        match self.lens_runtime_kind {
-            Some(crate::RuntimeKind::Device) => crate::UiProductPreviewFrame::VISUAL_DEVICE,
-            Some(crate::RuntimeKind::Sim) | None => crate::UiProductPreviewFrame::VISUAL_DEFAULT,
+        match self.lens_transport {
+            Some(crate::LinkTransport::Serial) => crate::UiProductPreviewFrame::VISUAL_DEVICE,
+            Some(crate::LinkTransport::Sim) | None => crate::UiProductPreviewFrame::VISUAL_DEFAULT,
         }
     }
 
@@ -10707,7 +10710,7 @@ mod tests {
         let mut project = ProjectController::new();
         // This is a SIM-lens test: the device policy (focused-only) is the
         // conservative default for an unknown lens (round-2 M5).
-        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Sim));
+        project.set_lens_transport(Some(crate::LinkTransport::Sim));
 
         project.apply_project_view(&view).unwrap();
 
@@ -11771,7 +11774,7 @@ mod tests {
         let mut project = ProjectController::new();
         // This is a SIM-lens test: the device policy (focused-only) is the
         // conservative default for an unknown lens (round-2 M5).
-        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Sim));
+        project.set_lens_transport(Some(crate::LinkTransport::Sim));
         project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
         project.apply_project_view(&view).unwrap();
         clear_node_focus(&mut project.root_nodes);
@@ -11899,7 +11902,7 @@ mod tests {
         let mut project = ProjectController::new();
         // This is a SIM-lens test: the device policy (focused-only) is the
         // conservative default for an unknown lens (round-2 M5).
-        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Sim));
+        project.set_lens_transport(Some(crate::LinkTransport::Sim));
         project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
         project.apply_project_view(&view).unwrap();
         clear_node_focus(&mut project.root_nodes);
@@ -13323,13 +13326,13 @@ mod tests {
         clear_node_focus(&mut project.root_nodes);
 
         // Device lens (and unknown): an unfocused node contributes nothing.
-        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Device));
+        project.set_lens_transport(Some(crate::LinkTransport::Serial));
         assert_eq!(project.subscribed_products(), Vec::new());
-        project.set_lens_runtime_kind(None);
+        project.set_lens_transport(None);
         assert_eq!(project.subscribed_products(), Vec::new());
 
         // Sim lens: the unfocused (expanded) node's products stream too.
-        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Sim));
+        project.set_lens_transport(Some(crate::LinkTransport::Sim));
         assert_eq!(
             project.subscribed_products(),
             vec![
@@ -13356,12 +13359,12 @@ mod tests {
             project.visual_preview_frame(),
             crate::UiProductPreviewFrame::VISUAL_DEFAULT
         );
-        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Device));
+        project.set_lens_transport(Some(crate::LinkTransport::Serial));
         assert_eq!(
             project.visual_preview_frame(),
             crate::UiProductPreviewFrame::VISUAL_DEVICE
         );
-        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Sim));
+        project.set_lens_transport(Some(crate::LinkTransport::Sim));
         assert_eq!(
             project.visual_preview_frame(),
             crate::UiProductPreviewFrame::VISUAL_DEFAULT

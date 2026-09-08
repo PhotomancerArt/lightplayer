@@ -58,6 +58,7 @@ pub mod device_records;
 pub mod device_roster;
 pub mod device_transport;
 pub mod devices_op;
+pub mod runtime_band;
 pub mod shared_link_client_io;
 pub mod sim_record;
 pub mod sim_transport;
@@ -67,7 +68,9 @@ pub use browser_sim_source::BrowserSimLinkSource;
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub use browser_transport::BrowserSerialTransport;
 pub use composite_transport::CompositeDeviceTransport;
-pub use device_affordance::{device_escape_action, device_status_kind, pending_escape_action};
+pub use device_affordance::{
+    device_escape_action, device_escape_action_for, device_status_kind, pending_escape_action,
+};
 pub use device_card_feed_view::{
     DeviceCardFeedView, FeedLiveness, device_card_feed_view, device_card_feed_views, feed_liveness,
 };
@@ -105,11 +108,12 @@ pub use device_transport::{
     DeviceTransportFuture, GrantedLink, LensLineTap, LensTapEvent,
 };
 pub use devices_op::{DeviceFace, DevicesOp};
+pub use runtime_band::UiRuntimeBand;
 pub use shared_link_client_io::{ConversationInbox, SharedLinkClientIo};
 pub use sim_record::{
     NewSimRecord, SimRecord, delete_sim_record, mint_sim_identity, new_sim_record, read_sim_record,
     sim_endpoint, sim_link_info, uid_from_sim_endpoint, write_sim_record,
 };
 pub use sim_transport::{
-    SimBacking, SimDeviceTransport, SimLinkSource, SimRuntimeControl, SimSession,
+    SimBacking, SimDeviceTransport, SimLinkSource, SimRuntimeControl, SimSession, SimTier,
 };

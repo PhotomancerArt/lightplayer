@@ -45,11 +45,6 @@ pub enum ProjectOp {
     /// Nothing acked is ever lost; the acked overlay lives server-side and
     /// a re-attach rebuilds the mirror over it.
     DetachLens,
-    /// The sim-card click (runtime-pool P4): re-attach the editor lens to
-    /// THE sim session and open what it is running — the D29 grammar's sim
-    /// arm of the D29 grammar. The mirror rebuilds over the session's
-    /// server-side overlay.
-    OpenSimProject,
     /// Commit the pending-edit overlay: persisted edits are written back to
     /// def artifacts; Debug overrides stay pending (live-only).
     SaveOverlay,
@@ -108,11 +103,6 @@ impl ControllerOp for ProjectOp {
                 "Close the editor; every runtime keeps running.",
                 ActionPriority::Tertiary,
             ),
-            Self::OpenSimProject => ActionMeta::new(
-                "Open in editor",
-                "Edit the project running in the simulator.",
-                ActionPriority::Primary,
-            ),
             Self::SaveOverlay => ActionMeta::new(
                 "Save",
                 "Write pending persisted edits back to the project files.",
@@ -149,8 +139,7 @@ impl ControllerOp for ProjectOp {
             // Lens moves preempt an in-flight passive pull (clean cancel at
             // a frame boundary) — that preemption plus the actor's action
             // serialization IS the detach quiesce.
-            | Self::DetachLens
-            | Self::OpenSimProject => ActionClass::Foreground {
+            | Self::DetachLens => ActionClass::Foreground {
                 deadline: PROJECT_ACTION_DEADLINE,
             },
             // A reload re-pushes the whole package, the same wire work as
@@ -204,7 +193,6 @@ mod tests {
             ProjectOp::RefreshProject,
             ProjectOp::DisconnectProject,
             ProjectOp::DetachLens,
-            ProjectOp::OpenSimProject,
         ] {
             assert_eq!(
                 op.action_class(),
