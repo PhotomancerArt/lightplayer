@@ -265,6 +265,15 @@ its `note` (present only when the override actually changed something) are how
 a reader of the transcript alone tells it apart from a run of the payload's
 own default link.
 
+A payload that carries no `host_plan` — every row written for `Uart0Spike`,
+which has no host to schedule — gets one synthesised when `--link real` moves
+it onto `UsbSerialJtag`: `attached`, no script, the same state
+`espflash --monitor` puts a board in from its first byte. Without it the run
+builds and executes but nothing ever drains the wire, so the payload's own
+sentinel never reaches the capture and nothing is recorded. A payload that
+already carries its own `host_plan` is unaffected — the override changes the
+link, never an application's own choice of when a host reads it.
+
 For silicon the runner does not reinvent the port discipline; it shells out to
 `scripts/emu/desk-espflash-step.sh`, which runs espflash in the
 **foreground** under `script(1)` with a `SIG_DFL` exec shim, polls for the

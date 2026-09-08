@@ -36,7 +36,7 @@ use std::process::Command;
 use anyhow::{Context, Result, bail};
 
 use crate::configuration::{Availability, Configuration, ConfigurationKind};
-use crate::payload::{BootPath, Capture, Link, Payload, Sentinel};
+use crate::payload::{BootPath, Capture, HostPlan, Link, Payload, Sentinel};
 
 /// Build constants, kept equal to the `justfile`'s variables of the same name.
 pub const RV32_TARGET: &str = "riscv32imac-unknown-none-elf";
@@ -157,6 +157,36 @@ impl RunRequest {
     /// is what a reader tells them apart *by*, after the fact).
     pub fn effective_link(&self) -> Link {
         self.link_override.unwrap_or(self.payload.link)
+    }
+
+    /// The host attachment this request actually runs with.
+    ///
+    /// A payload whose registry row already carries a `host_plan` is
+    /// unaffected: the override changes the LINK, never an application's own
+    /// choice of when a host reads it. What this covers is the payload that
+    /// has no `host_plan` at all because its registry row was written for
+    /// `Uart0Spike` — the UART0 model has no "host absent" state to schedule
+    /// — and a `link_override` now takes it onto `UsbSerialJtag`, which does.
+    /// Left unhandled, that combination is not a smaller USB run: it is no
+    /// run, because nothing ever attaches to drain the wire and the payload's
+    /// own sentinel then never reaches the capture (found recording this
+    /// phase's `t1`: "usb-sj: host absent at power-on; 0 bytes reached the
+    /// host", timeout with no fault). So this synthesises the one state a
+    /// bare link override needs to be honest about — `attached`, no script,
+    /// the same state `espflash --monitor` puts a board in from its first
+    /// byte — rather than silently recording a run that never happened.
+    pub fn effective_host_plan(&self) -> Option<HostPlan> {
+        if self.payload.host_plan.is_some() {
+            return self.payload.host_plan;
+        }
+        if self.link_override == Some(Link::UsbSerialJtag) && self.payload.link != Link::UsbSerialJtag
+        {
+            return Some(HostPlan {
+                host: "attached",
+                script: "",
+            });
+        }
+        None
     }
 
     /// The cargo feature list for this payload on this configuration.
@@ -958,7 +988,7 @@ impl ConfigurationDriver for LpEmuDriver {
             emu.push("--uart0".into());
             emu.push(format!("file:{}", capture.display()));
         }
-        if let Some(plan) = &req.payload.host_plan {
+        if let Some(plan) = req.effective_host_plan() {
             emu.push("--usb-host".into());
             emu.push(plan.host.into());
             if !plan.script.is_empty() {
@@ -1033,7 +1063,7 @@ impl ConfigurationDriver for LpEmuDriver {
             emu.push(rev.to_string());
         }
 
-        if let Some(plan) = &req.payload.host_plan
+        if let Some(plan) = req.effective_host_plan()
             && !plan.script.is_empty()
         {
             // Written by a step rather than behind the runner's back, so the
@@ -1522,6 +1552,47 @@ mod tests {
             !plan.notes.iter().any(|n| n.contains("--link override")),
             "{:?}",
             plan.notes
+        );
+    }
+
+    /// `shader-compile-stress` has no `host_plan` of its own — its registry
+    /// row was written for `Uart0Spike`, which has no host to schedule.
+    /// A bare link override onto `UsbSerialJtag` with no host synthesised
+    /// would build and run a machine nothing ever drains: found recording
+    /// this phase's `t1` ("usb-sj: host absent at power-on; 0 bytes reached
+    /// the host", timeout with no fault, sentinel never recorded).
+    /// `effective_host_plan` is what closes that gap.
+    #[test]
+    fn a_link_override_onto_usb_synthesises_an_attached_host() {
+        let mut req = request("lp-emu:esp32c6:t1", "shader-compile-stress", None);
+        req.identity = desk_identity();
+        assert_eq!(req.effective_host_plan(), None, "no override, no host plan");
+        req.link_override = Some(Link::UsbSerialJtag);
+        assert_eq!(
+            req.effective_host_plan(),
+            Some(HostPlan {
+                host: "attached",
+                script: "",
+            })
+        );
+        let rendered = LpEmuDriver.plan(&req).unwrap().render();
+        assert!(rendered.contains("--usb-host attached"), "{rendered}");
+        assert!(!rendered.contains("--usb-script"), "{rendered}");
+    }
+
+    /// A payload that already carries its own `host_plan` (every registry
+    /// row whose `link` is `UsbSerialJtag`) is unaffected by a `link_override`
+    /// that only confirms the link it already runs on: the override changes
+    /// the LINK, never an application's own choice of when a host reads it.
+    #[test]
+    fn a_link_override_never_shadows_a_payloads_own_host_plan() {
+        let mut req = request("lp-emu:esp32c6:t1", "boot-idle", None);
+        req.identity = desk_identity();
+        req.link_override = Some(Link::UsbSerialJtag);
+        assert_eq!(
+            req.effective_host_plan(),
+            req.payload.host_plan,
+            "the payload's own host_plan wins"
         );
     }
 
