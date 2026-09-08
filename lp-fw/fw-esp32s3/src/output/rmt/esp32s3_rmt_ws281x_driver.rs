@@ -62,8 +62,8 @@ use esp_hal::time::Instant;
 use lp_ws281x::{ChannelTiming, StartError};
 use lpc_hardware::{
     HardwareEndpointError, HardwareLease, HwAddress, HwCapability, HwClaim, HwDriver, HwEndpoint,
-    HwEndpointId, HwEndpointKind, HwEndpointSpec, HwEndpointStatus, HwRegistry, OutputError,
-    Ws281xConfig, Ws281xDriver, Ws281xOutput,
+    HwEndpointId, HwEndpointKind, HwEndpointSpec, HwEndpointStatus, HwRegistry, HwResource,
+    OutputError, Ws281xConfig, Ws281xDriver, Ws281xOutput,
 };
 
 #[cfg(feature = "frame-dump")]
@@ -214,11 +214,13 @@ impl Esp32S3RmtWs281xDriver {
         self.channels.borrow().iter().flatten().count()
     }
 
-    fn endpoint_status(&self, gpio_address: &HwAddress) -> HwEndpointStatus {
-        let gpio_status = self.registry.endpoint_status_for(gpio_address);
-        if !gpio_status.is_available() {
-            return gpio_status;
-        }
+    /// Whether an RMT channel can be had right now, and if not, why.
+    ///
+    /// Independent of the GPIO being asked about, so [`Self::endpoints`]
+    /// computes it once per enumeration rather than once per endpoint: each
+    /// call re-borrows the slot table and asks the registry about every
+    /// declared `/rmt/ws281xK`, and the answer cannot change mid-enumeration.
+    fn channel_status(&self) -> HwEndpointStatus {
         match self.free_channel() {
             Some(_) => HwEndpointStatus::Available,
             None => HwEndpointStatus::Unavailable {
@@ -230,13 +232,41 @@ impl Esp32S3RmtWs281xDriver {
         }
     }
 
+    /// A GPIO's own status first — a claimed or reserved pin names its own
+    /// reason — and otherwise the shared verdict from [`Self::channel_status`].
+    /// Asked of the resource in hand, not by address: the by-address form
+    /// re-searches the manifest, and this runs once per declared GPIO.
+    fn endpoint_status(&self, gpio: &HwResource, channel: &HwEndpointStatus) -> HwEndpointStatus {
+        let gpio_status = self.registry.endpoint_status_of(gpio);
+        if !gpio_status.is_available() {
+            return gpio_status;
+        }
+        channel.clone()
+    }
+
+    /// The GPIO an endpoint id names, without building the endpoint list.
+    ///
+    /// Every entry in that list carries a freshly computed status — several
+    /// registry lookups each — and none of it is wanted here: the id already
+    /// determines the address. Walking the manifest under the same filter
+    /// [`Self::endpoints`] applies answers the same question for the cost of a
+    /// spec string per candidate.
     fn gpio_for_endpoint(
         &self,
         endpoint_id: &HwEndpointId,
     ) -> Result<HwAddress, HardwareEndpointError> {
-        for endpoint in self.endpoints() {
-            if endpoint.id() == endpoint_id {
-                return Ok(endpoint.address().clone());
+        // A board with no configured channel offers no endpoints at all, so no
+        // id can belong to this driver.
+        if self.offered_channels() > 0 {
+            for resource in self.registry.manifest().resources() {
+                if !resource.supports(HwCapability::GpioOutput)
+                    || !has_board_assigned_label(resource.address(), resource.display_label())
+                {
+                    continue;
+                }
+                if self.endpoint_id(&ws281x_local_spec(resource.display_label())) == *endpoint_id {
+                    return Ok(resource.address().clone());
+                }
             }
         }
 
@@ -323,6 +353,9 @@ impl Ws281xDriver for Esp32S3RmtWs281xDriver {
         }
 
         let mut endpoints = Vec::new();
+        // Once per enumeration, not once per endpoint: the free-channel verdict
+        // is the same for every GPIO the loop below visits.
+        let channel = self.channel_status();
         for resource in self.registry.manifest().resources() {
             if !resource.supports(HwCapability::GpioOutput)
                 || !has_board_assigned_label(resource.address(), resource.display_label())
@@ -338,7 +371,7 @@ impl Ws281xDriver for Esp32S3RmtWs281xDriver {
                 self.driver_id(),
                 address,
                 resource.display_label(),
-                self.endpoint_status(resource.address()),
+                self.endpoint_status(resource, &channel),
             ));
         }
         endpoints
