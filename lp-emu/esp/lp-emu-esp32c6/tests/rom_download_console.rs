@@ -142,7 +142,7 @@ fn run(mut m: Esp32C6Machine, micros: u64) -> Esp32C6Machine {
     // The scope the strict grade actually checked, by name.
     assert_eq!(
         m.bus.blocks_in_strict_grade_scope(),
-        vec!["UART0", "UART1", "USB_DEVICE"],
+        vec!["UART0", "UART1", "USB_DEVICE", "GPIO"],
         "the blocks that publish a grade table"
     );
     m
