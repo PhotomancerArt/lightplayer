@@ -1,7 +1,8 @@
 //! Manual hardware smoke for the host provider's espflash-lib `manage()`.
 //!
 //! Drives a real board through the M5 management cycle over the
-//! port-handover seam: connect → Ready → EraseDeviceFlash → BlankFlash →
+//! port-handover seam: connect → Ready (or Unresponsive/BlankFlash: a board
+//! that needs firmware is a valid start) → EraseDeviceFlash → BlankFlash →
 //! FlashFirmware → Ready → ResetRuntime → Ready. This is the manual driver
 //! until the `lp device matrix` runner subcommand lands.
 //!
@@ -75,9 +76,17 @@ async fn run(port: String, manifest: String) {
         .expect("device session connect");
     let state = session.wait_ready().await;
     println!("connected: {state:?}");
+    // Ready is the happy case; a board with no firmware to answer (blank,
+    // foreign, or hung in its bootloader — the induced fixture of
+    // scripts/c6-bootloader-hang-walk.sh) is exactly what the erase + flash
+    // below exist for, so it is not a failure here. Anything else is.
     assert!(
-        state.is_ready(),
-        "expected Ready after connect, got {state:?}"
+        state.is_ready()
+            || matches!(
+                state,
+                DeviceState::Unresponsive { .. } | DeviceState::BlankFlash
+            ),
+        "expected Ready or an unresponsive/blank board after connect, got {state:?}"
     );
 
     println!("\n== manage: EraseDeviceFlash (expect BlankFlash after rebuild) ==");

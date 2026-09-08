@@ -468,11 +468,46 @@ fn connect(
     .map_err(|error| LinkError::other(format!("espflash connect failed: {error}")))
 }
 
+/// Open the port, tolerating the brief window after a link release where the
+/// OS has not yet freed the USB serial FD.
+///
+/// `DeviceSession::manage` releases the wire (closing the byte-stream
+/// framing thread) and then immediately runs an operation whose first act is
+/// to reopen the port here; on macOS the just-closed `/dev/cu.*` reports
+/// "Resource busy" for a short beat after the previous holder dropped it
+/// (worsened by our own ROM pre-pass, which opens once more right before the
+/// stub connect). A bounded retry turns that transient into a non-event;
+/// anything else (a real second holder, a vanished port) surfaces after the
+/// budget, unchanged.
 fn open_port(port_name: &str) -> Result<serialport::TTYPort, LinkError> {
-    serialport::new(port_name, CONNECT_BAUD)
-        .flow_control(serialport::FlowControl::None)
-        .open_native()
-        .map_err(|error| LinkError::other(format!("failed to open {port_name}: {error}")))
+    const OPEN_ATTEMPTS: u32 = 20;
+    const OPEN_RETRY: Duration = Duration::from_millis(100);
+    let mut last: Option<serialport::Error> = None;
+    for attempt in 0..OPEN_ATTEMPTS {
+        match serialport::new(port_name, CONNECT_BAUD)
+            .flow_control(serialport::FlowControl::None)
+            .open_native()
+        {
+            Ok(port) => return Ok(port),
+            Err(error)
+                if error.kind() == serialport::ErrorKind::Io(std::io::ErrorKind::ResourceBusy) =>
+            {
+                last = Some(error);
+                if attempt + 1 < OPEN_ATTEMPTS {
+                    std::thread::sleep(OPEN_RETRY);
+                }
+            }
+            Err(error) => {
+                return Err(LinkError::other(format!(
+                    "failed to open {port_name}: {error}"
+                )));
+            }
+        }
+    }
+    Err(LinkError::other(format!(
+        "failed to open {port_name} after {OPEN_ATTEMPTS} attempts: {}",
+        last.map(|error| error.to_string()).unwrap_or_default()
+    )))
 }
 
 /// A ROM-only pass over the board BEFORE the stub is loaded: on a C6 whose
