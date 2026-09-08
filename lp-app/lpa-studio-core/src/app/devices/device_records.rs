@@ -42,13 +42,6 @@ use lpa_link::LinkProviderKind;
 
 use crate::app::places::{HardwareId, RegisteredDevice};
 
-/// Transport label for a device reached over a serial wire.
-///
-/// Not a constant the row is stamped with any more: it is what
-/// [`LinkProviderKind::transport_label`] answers for the serial kinds, and
-/// [`transport_label_for_endpoint`] is what picks between them.
-pub const USB_TRANSPORT: &str = "USB";
-
 /// Transport label for a device reached over a `fw-browser` worker — a sim.
 pub const SIM_TRANSPORT: &str = "sim";
 
