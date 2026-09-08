@@ -76,8 +76,8 @@ const LEDS: usize = 64;
 const BITS: usize = LEDS * 24;
 /// `RMT_SIG_0` (`regs::output_signals`).
 const RMT_SIG_0: u16 = 71;
-/// The walk lands the load a little over a second in; three seconds of
-/// guest time holds hundreds of frames past it.
+/// The walk lands the load about 2.5 s in (52 chunks of the README alone at
+/// 20 ms apart); three seconds of guest time holds dozens of frames past it.
 const GATE_US: u64 = 3_000_000;
 /// The last frame of the `projectRead` answer: the walk's own end (request
 /// 11 — the oracle project has no `clock.json`, so one file fewer than
