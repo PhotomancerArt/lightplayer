@@ -4,13 +4,16 @@
 //! `#[ignore]`d: needs the shipped ELF (`just test-emu-c6` builds it, or
 //! set `LP_EMU_C6_ELF_ESP32C6_SERVER_RADIO`). See `test_support`.
 //!
-//! In P5 the shipped image gets exactly as far as the plain no-radio one:
-//! `bootctl::read_and_consume` reads flash before anything radio-shaped
-//! runs, and a flash read is the ROM's `esp_rom_spiflash_read` spinning on
-//! `SPI1.cmd` until M4 models the controller. The radio window
-//! (`0x600A_0000..0x600A_9800`, left unmapped for P6's stub) is therefore
-//! not reached yet; the test pins the order — flash first — so the day M4
-//! lands, this test is the one that moves to the radio window.
+//! P5 pinned the order: `bootctl::read_and_consume` reads flash before
+//! anything radio-shaped runs, so the shipped image got exactly as far as
+//! the no-radio one — the ROM's `esp_rom_spiflash_read` spinning on
+//! `SPI1.cmd` — and the test said "the day M4 lands, this test is the one
+//! that moves to the radio window".
+//!
+//! **M4 landed.** The flash read completes, the boot-control sector reads
+//! as erased, the radio window is reached and P6's stub answers it, and the
+//! image runs to the idle loop. This test now pins that whole order in one
+//! run: flash first, radio after, idle at the end.
 
 use lp_emu_esp_common::Trace;
 use lp_emu_esp_common::trace::SharedBuffer;
@@ -40,7 +43,7 @@ fn shipped(strict: bool, buf: &SharedBuffer) -> Option<Esp32C6Machine> {
 
 #[test]
 #[ignore = "needs the fw-esp32c6 ELF; run through `just test-emu-c6`"]
-fn the_shipped_image_boots_to_the_flash_read_which_is_m4s_and_never_the_radio_window() {
+fn the_shipped_image_reads_flash_then_the_radio_window_then_idles() {
     let buf = SharedBuffer::new();
     let Some(mut m) = shipped(true, &buf) else {
         return;
@@ -48,29 +51,39 @@ fn the_shipped_image_boots_to_the_flash_read_which_is_m4s_and_never_the_radio_wi
     // Only SPIN/UNMAPPED lines: the filter names no block.
     m.bus.trace = Trace::to_sink(Box::new(buf.clone())).with_block_filter(["NOTHING"]);
 
-    let outcome = m.run_until(&StopCondition::after_micros(30_000));
+    let outcome = m.run_until(&StopCondition::after_micros(3_000_000));
     assert!(
         matches!(outcome, Outcome::Deadline { .. }),
         "no strict stop: every block it touches is mapped ({outcome:?})"
     );
     assert_eq!(m.bus.unmapped_reads() + m.bus.unmapped_writes(), 0);
-    let spins: Vec<String> = buf
-        .lines()
-        .into_iter()
-        .filter(|l| l.contains(" SPIN "))
-        .collect();
+
+    // The flash read that used to end this run now completes. `bootctl` and
+    // the littlefs mount are the traffic; the `SPI1.cmd` spin is gone.
+    let lines = buf.lines();
+    let spins: Vec<&String> = lines.iter().filter(|l| l.contains(" SPIN ")).collect();
     assert!(
-        spins
+        !spins.iter().any(|l| l.contains("SPI1")),
+        "M4 models the controller; a SPI1 spin is a regression: {spins:?}"
+    );
+    let census = m.flash_census();
+    assert!(census.reads > 0, "the boot read flash: {census}");
+    assert!(
+        census.sector_erases > 0 && census.programs > 0,
+        "and formatted an erased chip: {census}"
+    );
+
+    // The radio window comes after, and P6's stub answers it: the blob got
+    // far enough to publish its RX DMA base.
+    assert!(
+        lines
             .iter()
-            .any(|l| l.contains("SPIN SPI1+0x000 cmd = 0x10000000")),
-        "the flash read's spin on SPI1.cmd: {spins:?}"
+            .any(|l| l.contains("WIFI RX config: dma_base=0x408")),
+        "the radio window was not reached"
     );
-    assert_eq!(m.idle_skips(), 0, "stuck in the flash read, never idle");
-    // The radio window was not touched — it comes after the flash read.
-    assert!(
-        !buf.lines().iter().any(|l| l.contains("UNMAPPED+0x600a")),
-        "the radio window is reached before the flash read?"
-    );
+
+    // And the image reaches the idle loop, which is the whole point.
+    assert!(m.idle_skips() > 100, "{} idle skips", m.idle_skips());
 }
 
 #[test]

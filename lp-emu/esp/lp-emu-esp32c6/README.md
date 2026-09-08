@@ -166,10 +166,76 @@ bytes have to already be there), and the core arrives at `_start` with
 left at the architectural reset value would idle in `wfi` forever.
 
 The file also carries a written-down list of the seven things direct load does
-**not** reproduce — the partition table, the MMU page table, the ROM's console
-globals, the `rst:0x1 (POWERON)` banner, early RNG entropy, real eFuse, and
-the derived reset cause. That list is the seed for M7's cross-check, and it is
-worth more than the code around it.
+**not** reproduce — the partition table, the MMU page table's *provenance*,
+the ROM's console globals, the `rst:0x1 (POWERON)` banner, early RNG entropy,
+real eFuse, and the derived reset cause. That list is the seed for M7's
+cross-check, and it is worth more than the code around it.
+
+Two of those seven the loader now does, because M4's firmware asks the flash
+*chip* questions and the two halves of the address space have to describe one
+board:
+
+- **`stage_image_in_flash`** puts the image's flash-resident segments into
+  the chip at `paddr = 0x0001_0000 + (vaddr - 0x4200_0000)` — the `factory`
+  partition's offset plus the offset into the window, which is a whole number
+  of 64 KiB pages, so the cache MMU's `paddr % page == vaddr % page` holds —
+  and programs the page table for them. It is **not** an `esptool` image
+  layout; M7 boots a real merged image through the real bootloader and gets
+  the real offsets, and this is one of the things that cross-check checks.
+- **`seed_rom_flash_chip`** writes the chip size into
+  `rom_spiflash_legacy_data->chip_size`, in place of the bootloader's
+  `esp_rom_spiflash_config_param`. The ROM's own default chip is **2 MiB**
+  (`rom_default_spiflash_legacy_data` at `0x4087_fa08`), `SPI_read_data`
+  refuses any read past `chip_size`, and `lpfs` starts at `0x0031_0000` —
+  so without this every filesystem read returns error 1 for a reason that has
+  nothing to do with the filesystem.
+
+## Flash, and the cache window
+
+The chip is a `flash::FlashImage`: read, program (an `&=`, because a NOR cell
+only goes one to zero — programming twice without an erase corrupts here
+exactly as it does on the part), erase back to `0xff`, and a JEDEC id whose
+capacity byte is the image's real size. Where its bytes come from is
+`FlashBacking`:
+
+| flag | at start | at exit |
+|---|---|---|
+| *(none)* | a blank chip, all `0xff` | nothing |
+| `--flash <file>` | the file, `0xff`-padded (created if absent) | written back |
+| `--flash-copy <file>` | the file | nothing |
+
+`--flash-size` takes a power of two of at least 64 KiB; anything else is
+refused, because the JEDEC capacity byte is an exponent and there is no
+honest id for a chip that is not one.
+
+The `0x4200_0000` window reads **through the MMU**. `cache::CacheMmu` is the
+page table, and every number in it is read off the vendored ROM ELF rather
+than a datasheet: `Cache_MMU_Init` (`0x4002_7c76`) says 256 entries and that
+zero is invalid, `Cache_MSPI_MMU_Set` (`0x4002_7c90`) says an entry is
+`page | encrypt<<10 | VALID<<9` and gives the index arithmetic,
+`MMU_Get_Page_Mode` (`0x4002_75ea`) says the page mode is
+`mmu_power_ctrl[4:3]`. `CacheMmu::translate` is the whole address path in one
+function, on purpose: a later `t2` rung hangs its cache-miss wait states off
+exactly that lookup.
+
+The window is served as a **cache fill** — `cache::fill` copies a valid
+page's flash bytes into the RAM region behind `0x4200_0000` when the table
+changes or the flash under a mapped page is written — so instruction fetch
+stays a RAM read. That makes the model *stricter than silicon about
+staleness*: a real cache keeps serving old bytes until something invalidates
+it, and this one refills at the next slice boundary. Nothing in this
+milestone's images writes a mapped page (the app is in `factory`, littlefs in
+`lpfs`, and only `lpfs` is written), so the difference is documented rather
+than exercised.
+
+The run summary reports what the guest asked the flash to do, for comparison
+with the spike inventory's esp-emu figures:
+
+```text
+flash: 300 commands (287 reads, 4 page programs, 2 sector erases, 0 block
+erases, 7 write-enables; 60 status polls); 37 page(s) filled into the cache
+window
+```
 
 ## Peripherals
 
@@ -203,7 +269,8 @@ milestone owns.
 | `PMU`, `LP_AON`, `LP_APM`, `LP_APM0`, `HP_APM`, `MODEM_SYSCON`, `MODEM_LPCON`, `APB_SARADC`, `HP_SYS`, `TEE`, `LP_TEE`, `LP_IO`, `LP_TIMER`, `EXTMEM` | — | accept | written by `esp_hal::init`, read back as written; `LP_AON.store1` carries the calibration value |
 | `UART0`, `UART1` | `0x6000_0000/1000` | modelled | 128-byte FIFOs; the shifter drains **at the configured baud in emulated time** (PCR clock line × `clkdiv`; reset `clkdiv = 347 + 3/16` = 115,200 from XTAL, *modeled* "as the ROM boot leaves it"); `rxfifo_full`/`txfifo_empty` as levels (`>`/`<` the `conf1` thresholds, per the TRM), `rxfifo_tout` in bit-times, `tx_done`, `rxfifo_ovf`, `reg_update` pulse; `at_cmd_char_det` never fires (stated, not modelled); sources 43/44. See "UART0 and the outside" |
 | `USB_DEVICE` | `0x6000_F000` | modelled (M6 P2) | the host's side in three states (`--usb-host absent\|attached\|attached-idle`, the transitions for P3's control channel): **absent** — `sof` never, `free` = 0 for ever after the first `wr_done`, nothing arrives; **attached, port closed** — `int_raw.sof` every 1 ms (*documented*), `fram_num` counts, a committed IN packet is held until the port opens; **attached, draining** — the packet reaches the `usb-sj` stream 100 µs after `wr_done` (*modeled*), `free` returns, `serial_in_empty` and `in_token_rec_in_ep1` rise; host bytes land as ≤ 64 B OUT packets, one resident at a time (*modeled*), `avail` + `serial_out_recv_pkt` + `out_ep1_st.wr_addr/rec_data_cnt`. The DTR/RTS dance → `chip_rst` bit 0 + `MachineRequest::Reset { strap }`. Per-register grades: `fram_num`, `conf0` *documented*, the rest *modeled* (the file header's table; `--strict-grade`). The PCR reset of the block is **not** modelled (stated). Source 48 |
-| `SPI0`, `SPI1` | `0x6000_2000/3000` | accept | a flash access spins on `SPI1.cmd` (the `SPIN` line names it) until M4 |
+| `SPI1` | `0x6000_3000` | modelled | **the legacy flash controller**, against a `flash::FlashImage`: `flash_rdid` (esp-storage's own size probe), the `usr` engine (command/address/dummy/data phases from `user`/`user1`/`user2`/`addr`/`w0..w15`), the dedicated `flash_read`/`pp`/`se`/`be`/`ce`/`wren`/`wrdi`/`rdsr`/`wrsr` bits, and a real status register (WIP always clear, WEL set by `wren` and consumed by a program or erase). Every trigger self-clears and `mst_st` reads idle, which is what `Wait_SPI_Idle` waits for. **Every PAC reset value is carried**, `user = 0x8000_0000` above all: the mask ROM's read path never sets `usr_command` because reset already did |
+| `SPI0` | `0x6000_2000` | modelled | the cache controller's block: `mmu_item_content`/`mmu_item_index`/`mmu_power_ctrl` drive `cache::CacheMmu`; the rest accept, with the PAC's reset values |
 | `RMT` | `0x6000_6000` | modelled (M5 P1) | the PAC register file, the **192-word RAM** at `+0x400` (word/half/byte lanes, read live by the engine), and two TX engines on the scheduler: a word's two pulses at PCR's function clock (`rmt_sclk_conf` × `div_cnt`; one tick = 2 cycles, a WS2812 bit 200, the latch 48,000 — exact integer arithmetic over absolute ticks, anchored on the previous due cycle), **`tx_lim` as a position** (`== window_words` is the wrap), `mem_tx_wrap_en`, the all-zero STOP → `tx_end`, wrap off → `tx_err` + `mem_empty`, `int_st = raw & ena`, `int_clr` w1c, source 49. *Modeled* (discovery §10.1–5, each named where made): `mem_raddr_ex` = the next word to fetch; the strobes act at `conf_update` (a `tx_start` with no `conf_update` in the slice is acted on at the slice boundary, noted); the half-level end marker; `tx_stop` raises no `tx_end`; `ref_cnt_rst` accepted; no clock stalls the engine (1 ms poll resumes it), FOSC refused. RX channels 2/3 accept-and-remember (`rx_en` is noted once); the APB FIFO is not modelled. The waveform's pad is P2's fabric; until then `rmt_pulses`/`rmt_words`/`rmt_frames_ended` on the machine are the observation. See "The RMT chase" |
 | `WIFI_MAC` | `0x600A_0000..9800` | accept (*modeled*) | the radio window as **one** block with coarse names (`mac` / `ieee802154` / `bb` — ours, nothing documents it), a `TOUCH` note per distinct offset, and the override list `wifi_stub::OVERRIDES` (five entries, one per `SPIN` the boot showed, each with the poll's disassembly beside it); `+0x4084` is the RX DMA base the `WIFI RX config` line reports |
 | `WIFI_PWR` | `0x600A_9900..F000` | accept | the undocumented gap after MODEM_SYSCON (the ROM's `tsf_hal_*` touch it first); `+0x3700` is a live **microsecond counter** (*modeled* `cycles / 160`) — the blob's `wait_i2c_sdm_stable` latches it and gives up after 9,999 ticks, and a remembered 0 never lets it |
@@ -508,6 +575,7 @@ is a function of every access the machine makes.
 lp-emu-esp32c6 --elf <app.elf> [--rom <path>] [--time-grade t1|t2]
     [--timeout 5s|1500ms|900us] [--wall-timeout <s>] [--exit-on <substr>]
     [--uart0 stdout|memory|file:<path>|tcp:<host:port>] [--uart0-script <file>]
+    [--flash <file>] [--flash-copy <file>] [--flash-size 4M]
     [--usb-host absent|attached|attached-idle]
     [--usb-sj stderr|memory|file:<path>|tcp:<host:port>] [--usb-sj-drain auto|manual]
     [--usb-sj-tried stderr|memory|file:<path>]
@@ -582,11 +650,25 @@ cargo run -p lp-cli -- validate record emu-m3 --config lp-emu:esp32c6:t1 \
     --image boot-idle=target/emu-ref/d6cfaa205-boot-idle-memfs/fw-esp32c6
 ```
 
+M4 adds the set `emu-m4`, whose two payloads run the **flash-backed** image:
+
+```bash
+cargo run -p lp-cli -- validate record emu-m4 --config lp-emu:esp32c6:t1 \
+    --date <today> --commit d6cfaa2051ae --dirty --timeout-secs 20 \
+    --image boot-idle-flash=target/emu-ref/d6cfaa205-boot-idle/fw-esp32c6 \
+    --image upload-walk=target/emu-ref/d6cfaa205-boot-idle/fw-esp32c6
+```
+
+`upload-walk` carries a `host_script` — `walks/examples-basic.script`, which
+the driver passes as `--uart0-script`. That is the whole of what makes a
+*walk* a payload: the host half of the conversation, recorded so the run is a
+function of guest time. See `walks/README.md`.
+
 The driver builds nothing this machine does not need: it turns a payload into
 one invocation of the CLI above — `--elf`, `--time-grade`, `--uart0 file:`,
-`--exit-on`, `--timeout`, `--strict-bus`, `--efuse-mac`, `--efuse-rev` — so
-the plan a `--dry-run` prints is the entire protocol, and the sidecar records
-it verbatim as `source`. `--image` is per payload because a set runs several
+`--exit-on`, `--uart0-script`, `--timeout`, `--strict-bus`, `--efuse-mac`,
+`--efuse-rev` — so the plan a `--dry-run` prints is the entire protocol, and
+the sidecar records it verbatim as `source`. `--image` is per payload because a set runs several
 and a reference image is built per feature set. The eFuse identity comes from
 the configuration's entry in `validate.toml` (the desk board's
 `a0:f2:62:87:b4:8c`, rev `v0.2`), so a hello frame's identity fields compare
@@ -601,7 +683,7 @@ feature set — recorded in `note`.
 Every class is graded `modeled`, with byte-equality written into the reason as
 evidence rather than as a promotion; `validate.toml` is where those reasons
 live and `tests/m3_replays.rs` is where strict mode's refusal of them is
-pinned.
+pinned. `tests/m4_replays.rs` reads the two M4 transcripts the same way.
 
 ## Tests
 
@@ -614,18 +696,28 @@ images: `NO_RADIO` (`esp32c6,server,memory_fs`), `SHIPPED_NO_FLASH`
 (`esp32c6,server,radio,memory_fs`) and `TEST_RMT`
 (`esp32c6,server,test_rmt` — the bare `esp32c6,test_rmt` does not link on
 today's main, `panic_path.rs` needs `lpc_shared`). The
-reference-image tests (`harness_parity`, `boot_idle`) resolve theirs from
+reference-image tests (`harness_parity`, `boot_idle`, `flash_persistence`,
+`upload_walk`) resolve theirs from
 `LP_EMU_C6_REF_<SLUG>`, then `target/emu-ref/`, and with `LP_EMU_BUILD_FW=1`
 run `scripts/emu/build-reference-image.sh` — which needs the repository's
 history for the reference commit (a shallow CI checkout cannot do it), so it
 is a local affair.
 
-`just test-emu-c6` is the whole set: the machine's boot tests, the M3 replays
-of the committed transcripts, and the registry parity test. About **70 s** on
-a warm cargo cache with the reference images absent — roughly 25 s of firmware
-build and 45 s of emulation. The replays alone
-(`cargo test -p lp-emu-validate --test m3_replays`) need no firmware at all
-and already run in `cargo test`, so the four gates cost CI nothing.
+| file | what it holds |
+|---|---|
+| `harness_parity` | M3's memory gate: the compile harness replayed against silicon, in process |
+| `boot_idle` | the memfs image's hello and §5.4 heartbeat, **and** the flash-backed image's `[FS]` pair and §5.1 heartbeat — M4's first gate, which replaced the test that pinned the `SPI1.cmd` spin |
+| `flash_persistence` | a chip survives the machine: format once, mount twice, `--flash-copy` writes nothing |
+| `upload_walk` | the thirteen-frame upload from `walks/examples-basic.script`, the second boot that auto-loads what it wrote, and determinism |
+| `host_absent`, `boot_no_radio`, `boot`, `rom_*`, `stack_guard` | M3's |
+
+`just test-emu-c6` is the whole set: the machine's boot tests, the M3 and M4
+replays of the committed transcripts, and the registry parity test. About
+**70 s** on a warm cargo cache with the reference images absent — roughly
+25 s of firmware build and 45 s of emulation. The replays alone
+(`cargo test -p lp-emu-validate --test m3_replays --test m4_replays`) need no
+firmware at all and already run in `cargo test`, so the gates cost CI
+nothing.
 
 `just bench-emu-c6` is the speed side of the same two images: both reference
 images at both grades, reported as user seconds, instructions/second and a

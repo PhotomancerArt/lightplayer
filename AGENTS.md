@@ -700,6 +700,7 @@ just emu-c6 <elf> --strict-bus --timeout 6s     # one image, by hand
 just test-emu-c6                                # its gates (builds firmware, ~70 s)
 just bench-emu-c6                               # its speed probe (an oracle, never a gate)
 just bench-emu-c6-pgo                           # PGO recipe on top of the probe (opt-in, never a default build)
+just bench-emu-web                              # the same probe in a browser (wasip1 + JS WASI shim, LAN-served)
 just bench-emu-xt                               # the Xtensa core's probe (same rules)
 cargo run -p lp-cli -- validate run emu-m3 --config lp-emu:esp32c6:t1 --dry-run
 ```

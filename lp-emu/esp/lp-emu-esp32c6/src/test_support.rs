@@ -41,16 +41,28 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
 
-/// One firmware build at a time per process. Three tests in one binary
-/// (`boot_idle`'s two memfs runs and its flash-backed one) all resolve an
-/// image on their own thread, and with `LP_EMU_BUILD_FW=1` and no image on
-/// disk each would start `build-reference-image.sh` — into the **same**
-/// detached worktree and the same output path. Two `git worktree add`s race
-/// (the loser exits 128 and its test SKIPs), and two `cherry-pick -n` +
-/// `cargo build` + `cp` sequences race into one ELF: M5 P1's CI run loaded
-/// a memfs image built that way and read a stack high-water 128 B off the
-/// pinned figure, and the rerun of the same commit was green. The lock makes
-/// the first thread build and the rest find the file.
+/// One firmware build at a time per process.
+///
+/// From M5 P1 (PR #569, `claude/emu-m5-p1-rmt-tx`), whose reasoning stands as
+/// written: three tests in one binary each resolve an image on their own
+/// thread, and with `LP_EMU_BUILD_FW=1` and no image on disk each would start
+/// `build-reference-image.sh` — into the **same** detached worktree and the
+/// same output path. Two `git worktree add`s race (the loser exits 128 and
+/// its test SKIPs), and two `cherry-pick -n` + `cargo build` + `cp` sequences
+/// race into one ELF: M5 P1's CI run loaded a memfs image built that way and
+/// read a stack high-water 128 B off the pinned figure.
+///
+/// M4 hit the same race one level out and it needed a second fix. `cargo
+/// test` runs each test *binary* as its own **process**, so a mutex cannot
+/// see the other builder at all: `boot_idle`, `flash_persistence` and
+/// `upload_walk` are three processes wanting one image, and PR #567's
+/// `Emulator C6 (x64)` run failed with `Rom(Elf("ELF parse failed: Invalid
+/// ELF header size or alignment"))` — a reader that opened the file while
+/// another process was still `cp`ing into it. The cross-process half lives in
+/// `scripts/emu/build-reference-image.sh`: a `mkdir` lock around the shared
+/// worktree, and a `mv` publish so the ELF is never half-written. This mutex
+/// is still worth keeping — it stops N threads of one binary from queueing on
+/// that file lock for a build the first of them already did.
 static BUILD_LOCK: Mutex<()> = Mutex::new(());
 
 /// The profile and target `fw-esp32c6` is built with (`justfile`:
@@ -308,18 +320,22 @@ pub fn fw_esp32c6_image(image: &FwImage) -> Result<PathBuf, String> {
         cmd.arg("--no-default-features");
     }
     cmd.arg("--features").arg(image.features.join(","));
+    // Past this point a failure is not a skip — see `reference_image` for
+    // why (`LP_EMU_BUILD_FW=1` is a request, and a broken build is not a
+    // machine without a toolchain).
     let status = cmd
         .status()
-        .map_err(|e| format!("running cargo build for fw-esp32c6: {e}"))?;
-    if !status.success() {
-        return Err(format!("fw-esp32c6 build failed: {status}"));
-    }
-    if !conventional.is_file() {
-        return Err(format!(
-            "fw-esp32c6 built but {} is missing",
-            conventional.display()
-        ));
-    }
+        .unwrap_or_else(|e| panic!("running cargo build for fw-esp32c6: {e}"));
+    assert!(
+        status.success(),
+        "fw-esp32c6 build failed: {status} — LP_EMU_BUILD_FW=1 asked for this image, so a \
+         failed build is a failed test, not a skip"
+    );
+    assert!(
+        conventional.is_file(),
+        "fw-esp32c6 built but {} is missing",
+        conventional.display()
+    );
     // Keep a copy only when it can be keyed to this source tree. Without a
     // key there is nothing to invalidate it, and an ELF nobody can date is
     // exactly what let a gate pass against firmware it was not built from.
@@ -329,8 +345,13 @@ pub fn fw_esp32c6_image(image: &FwImage) -> Result<PathBuf, String> {
     if let Some(dir) = cached.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
     }
-    std::fs::copy(&conventional, &cached)
-        .map_err(|e| format!("copying the ELF to {}: {e}", cached.display()))?;
+    // Publish atomically, for the same reason the script does: another test
+    // *process* may be about to read this path.
+    let staging = cached.with_extension("partial");
+    std::fs::copy(&conventional, &staging)
+        .map_err(|e| format!("copying the ELF to {}: {e}", staging.display()))?;
+    std::fs::rename(&staging, &cached)
+        .map_err(|e| format!("publishing the ELF at {}: {e}", cached.display()))?;
     Ok(cached)
 }
 
@@ -408,7 +429,8 @@ pub fn reference_image(image: &ReferenceImage) -> Result<PathBuf, String> {
         return Ok(path);
     }
     // The script shares one detached worktree between every reference
-    // image: never run it twice at once (see `BUILD_LOCK`).
+    // image: never run it twice at once (see `BUILD_LOCK`). Across
+    // processes the script's own lock does it.
     let _build = BUILD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     if path.is_file() {
         return Ok(path);
@@ -421,19 +443,29 @@ pub fn reference_image(image: &ReferenceImage) -> Result<PathBuf, String> {
             path.display()
         ));
     }
+    // Past this point a failure is **not** a skip.
+    //
+    // Every `Err` above means "there is no image here and you did not ask me
+    // to make one", which a caller rightly turns into a `skip_notice` — a
+    // machine without the esp toolchain must not fail the suite. But
+    // `LP_EMU_BUILD_FW=1` *is* asking, and a build that then breaks is a
+    // broken build. Returning `Err` for it made three boot tests report
+    // `ok` in 0.2 s while building nothing at all: `git worktree add` was
+    // exiting 128 on a registered-but-deleted worktree, every test skipped,
+    // and the run was green and hollow. A panic cannot be swallowed.
     let status = Command::new(root.join("scripts/emu/build-reference-image.sh"))
         .arg(image.features)
         .current_dir(&root)
         .status()
-        .map_err(|e| format!("running build-reference-image.sh: {e}"))?;
-    if !status.success() {
-        return Err(format!(
-            "build-reference-image.sh {} failed: {status}",
-            image.features
-        ));
-    }
+        .unwrap_or_else(|e| panic!("running build-reference-image.sh: {e}"));
+    assert!(
+        status.success(),
+        "build-reference-image.sh {} failed: {status} — LP_EMU_BUILD_FW=1 asked for this \
+         image, so a failed build is a failed test, not a skip",
+        image.features
+    );
     if !path.is_file() {
-        return Err(format!("the script ran but {} is missing", path.display()));
+        panic!("the script ran but {} is missing", path.display());
     }
     Ok(path)
 }

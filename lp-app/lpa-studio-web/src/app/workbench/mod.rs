@@ -116,7 +116,9 @@ pub fn view_for_route(route_view: crate::router::ProjectView) -> WorkbenchView {
 }
 
 /// The view tabs' targets, one slot per [`VIEWS`] row: `None` hides the
-/// tab (a device lens has no mapping address yet). Stories default to
+/// tab. Every lens route (project, example, device) addresses every
+/// view, so the app fills every slot; the `None` arm stays for surfaces
+/// that render the frame without a lens address. Stories default to
 /// inert fragments.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WorkbenchHrefs {
@@ -130,6 +132,21 @@ impl WorkbenchHrefs {
         WorkbenchHrefs {
             entries: entries.into_iter().collect(),
         }
+    }
+
+    /// The app's targets on a lens route: every view's same-session
+    /// suffix on the current lens address, plain links like the play
+    /// toggle. Every lens (project, example, device) addresses every
+    /// view — `/device/<uid>/mapping` and `/device/<uid>/patch` arrived
+    /// with the device route — so no tab hides. `None` off a lens.
+    pub(crate) fn for_lens(route: &crate::router::StudioRoute) -> Option<Self> {
+        route.is_lens().then(|| {
+            Self::from_entries(
+                VIEWS
+                    .iter()
+                    .map(|spec| (spec.view, Some(route.with_view(spec.route_view).path()))),
+            )
+        })
     }
 
     /// The route-less fallback (stories through the shell): only the
@@ -1169,5 +1186,30 @@ mod tests {
             view_for_route(crate::router::ProjectView::Play),
             WorkbenchView::default()
         );
+    }
+
+    /// The device lens addresses every view: the Map and Patch tabs
+    /// were hidden there by a pre-`/device/<uid>` carve-out once.
+    #[test]
+    fn device_lens_addresses_every_view() {
+        let hrefs = WorkbenchHrefs::for_lens(&crate::router::StudioRoute::parse("/device/devx"))
+            .expect("a device route is a lens");
+        assert_eq!(
+            hrefs.href(WorkbenchView::Nodes).as_deref(),
+            Some("/device/devx")
+        );
+        assert_eq!(
+            hrefs.href(WorkbenchView::Mapping).as_deref(),
+            Some("/device/devx/mapping")
+        );
+        assert_eq!(
+            hrefs.href(WorkbenchView::Patching).as_deref(),
+            Some("/device/devx/patch")
+        );
+    }
+
+    #[test]
+    fn hrefs_only_on_a_lens() {
+        assert!(WorkbenchHrefs::for_lens(&crate::router::StudioRoute::Devices).is_none());
     }
 }

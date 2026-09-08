@@ -157,9 +157,60 @@ the core arrives at `_start` with `mstatus.MIE` already 1 — a hart left at the
 architectural reset value would idle in `wfi` forever.
 
 It also carries a written-down list of the seven things direct load does *not*
-reproduce: the partition table, the MMU page table, the ROM's console globals,
-the `rst:0x1 (POWERON)` banner, early RNG entropy, real eFuse, and the derived
-reset cause.
+reproduce: the partition table, the MMU page table's *provenance*, the ROM's
+console globals, the `rst:0x1 (POWERON)` banner, early RNG entropy, real
+eFuse, and the derived reset cause.
+
+**Amended at M4 (2026-09-07).** Two of the seven became things the loader
+does, because the moment a firmware asks the flash *chip* a question the two
+halves of the address space have to describe one board:
+
+- `stage_image_in_flash` puts the image's flash-resident segments into the
+  chip at `factory + (vaddr - 0x4200_0000)` and programs the cache MMU for
+  them, so the `0x4200_0000` window really is served through the page table.
+  The offsets are the loader's arithmetic, not an `esptool` image's layout,
+  and no header, hash or partition table was consulted to choose them — which
+  is precisely what M7's cross-check must catch.
+- `seed_rom_flash_chip` writes the chip size into
+  `rom_spiflash_legacy_data->chip_size`, in place of the bootloader's
+  `esp_rom_spiflash_config_param`. The ROM's own default part is 2 MiB and
+  `SPI_read_data` refuses any read past `chip_size`, so without it every
+  `lpfs` read at `0x0031_0000` returns error 1 for a reason that has nothing
+  to do with the filesystem.
+
+### The cache is a fill, and the MMU's format comes from the ROM
+
+The `0x4200_0000` window reads through `cache::CacheMmu`, whose every constant
+is read off the vendored ROM ELF rather than a datasheet: `Cache_MMU_Init`
+(`0x4002_7c76`) gives 256 entries and says zero is invalid, `Cache_MSPI_MMU_Set`
+(`0x4002_7c90`) gives the entry format `page | encrypt<<10 | VALID<<9` and the
+index arithmetic, `MMU_Get_Page_Mode` (`0x4002_75ea`) puts the page mode in
+`mmu_power_ctrl[4:3]`. `translate` is the whole address path in one function,
+because a later `t2` rung hangs its cache-miss wait states off that lookup.
+
+The window is served as a **cache fill** — a valid page's flash bytes are
+copied into the RAM region behind it when the table changes or the flash under
+it is written — so instruction fetch stays a RAM read and the machine stays
+fast enough to use. The cost is stated rather than hidden: the model is
+**stricter than silicon about staleness**, since a real cache serves old bytes
+until something invalidates it. No image in this plan writes a mapped page.
+
+### Reset values are part of the model, and a wrong one is silent
+
+M4 found this the expensive way. SPI1's `user` register resets to
+`0x8000_0000` — `usr_command` already set — and the mask ROM's flash-read path
+never sets it, because reset did. A register file that reset to zero therefore
+issued every flash read with **no command phase** and moved no bytes; the
+image booted, formatted `lpfs`, printed the right `[FS]` lines and the right
+heap figures, and only the *second boot from the same chip* revealed it, by
+reformatting a filesystem that was demonstrably on the disk.
+
+The rule that follows: an accept block's reset values are as load-bearing as
+its overrides, and they come from the PAC's `impl Resettable` — derived data
+with the same provenance as the register names. Blocks written before M4 carry
+only the reset values a boot was observed to need; that is a known gap, and
+the next one to bite will be found the same way (see
+`docs/defects/2026-09-07-accept-blocks-carry-only-the-reset-values-a-boot-needed.md`).
 
 > **To be filled at M7.** That list is the cross-check: booting the same image
 > from the reset vector through the real ROM and the IDF bootloader must

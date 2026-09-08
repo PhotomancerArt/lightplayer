@@ -290,6 +290,27 @@ call it the toolchain-bound end of this milestone's ladder; the overnight
 research's opt-3-plus-patch-tree figure (103.5 M -> 149 M, ≈1.45x) is the
 pre-M2 baseline this rung was designed against.
 
+**The browser/phone rig.** The same binary, unmodified, builds for
+`wasm32-wasip1` and runs in any browser under a small JavaScript WASI
+preview1 shim (D6: no `wasm32-unknown-unknown` entry point, zero source
+changes — the module is the CLI). `just bench-emu-web` builds it, stages it
+beside the two reference images plus a page and a dedicated-Worker runner,
+and serves it on the LAN (port via `scripts/dev-port.sh`, never pinned) so a
+phone can open it, run the sequence in the Worker, and upload its result
+JSON back to the Mac:
+
+```bash
+just bench-emu-web              # build, stage, serve — open the printed URL
+just bench-emu-web --collect    # print every uploaded result-*.json as a table
+```
+
+The page shows a live table (wall seconds, instr/s, real-time ratio per run)
+and a running best-of-t2 headline per image; `--collect` reads every
+`result-*.json` in the stage directory and prints device, engine guess,
+image, grade, wall seconds, instr/s and the real-time ratio. Baseline numbers
+and the method are in
+`docs/reports/2026-09-07-emu-web-bench-baseline.md`.
+
 **The Xtensa core** (`lp-xt-emu`) has its own probe and its own ladder:
 
 ```bash
@@ -306,8 +327,8 @@ almost entirely one memory resolution per access instead of four or five.
 `lp-emu/lp-xt-emu/README.md` has the rung-by-rung table and the
 generic-codegen trap that per-package `opt-level` overrides hide.
 
-Evidence, and the rungs not yet climbed (poll-loop skip, block cache, the
-wasm/phone rig): the planning workspace's
+Evidence, and the rungs not yet climbed (poll-loop skip, block cache): the
+planning workspace's
 `2026-09-06-1001-esp-emulator/2026-09-07-speed-ladder-research.md` and its
 `speed-research/` directory, executed by the `2026-09-07-0827-emu-speed-ladder`
 plan.

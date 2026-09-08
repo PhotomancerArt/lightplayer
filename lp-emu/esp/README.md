@@ -65,6 +65,7 @@ just test-emu-c6
 
 # 3. a recorded, replayable run — the one that produces a transcript
 cargo run -p lp-cli -- validate run emu-m3 --config lp-emu:esp32c6:t1 --dry-run
+cargo run -p lp-cli -- validate run emu-m4 --config lp-emu:esp32c6:t1 --dry-run
 ```
 
 Door 3 is the one that makes a claim. `lp-emu:esp32c6:t1` and `:t2` are
@@ -78,8 +79,8 @@ protocol.
 
 ## What it is trusted for
 
-Every field class of `lp-emu:esp32c6:*` is graded **`modeled`** in M3, each
-with its reason in `validate.toml`. That is not modesty and it is not a
+Every field class of `lp-emu:esp32c6:*` is graded **`modeled`**, each with its
+reason in `validate.toml`. That is not modesty and it is not a
 placeholder:
 
 | class | why it is `modeled` |
