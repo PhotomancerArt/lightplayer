@@ -1,8 +1,8 @@
 // Emulator speed bench worker: runs the wasip1 build of lp-emu-esp32c6 under a
-// minimal WASI preview1 shim (only the 15 imports the module declares).
+// minimal WASI preview1 shim (only the imports the module declares).
 'use strict';
 
-const EBADF = 8, ENOENT = 44;
+const EBADF = 8, ENOENT = 44, ENOTSUP = 58;
 const enc = new TextEncoder(), dec = new TextDecoder();
 
 let compiled = null;
@@ -72,12 +72,30 @@ function makeWasi(args, elfFilename, elfBytes) {
       dv.setBigUint64(buf + 8, 0xffffffffffffffffn, true); dv.setBigUint64(buf + 16, 0xffffffffffffffffn, true);
       return 0;
     },
+    // No fd carries real O_NONBLOCK/append semantics in this shim (every fd
+    // is either an in-memory file, an output-chunk sink, or a std stream),
+    // so there is nothing a flag change could affect — accept it as a no-op
+    // rather than fail a call the guest is allowed to make on any open fd.
+    fd_fdstat_set_flags(_fd, _flags) { return 0; },
     fd_filestat_get(fd, buf) {
       const f = files[fd]; if (!f && !out[fd]) return EBADF;
       const dv = mem(); u8().fill(0, buf, buf + 64);
       dv.setUint8(buf + 16, 4);
       dv.setBigUint64(buf + 24, 1n, true);
       dv.setBigUint64(buf + 32, BigInt(f ? f.data.length : 0), true);
+      return 0;
+    },
+    // Stat-by-path (no fd yet). The only path this shim actually holds
+    // bytes for is the staged ELF; anything else (e.g. a pre-open existence
+    // check on the uart0 output path) correctly reads as not-yet-created.
+    path_filestat_get(dirfd, _flags, pathPtr, pathLen, buf) {
+      if (dirfd !== 3) return EBADF;
+      const path = dec.decode(u8().subarray(pathPtr, pathPtr + pathLen));
+      if (path !== elfFilename) return ENOENT;
+      const dv = mem(); u8().fill(0, buf, buf + 64);
+      dv.setUint8(buf + 16, 4);
+      dv.setBigUint64(buf + 24, 1n, true);
+      dv.setBigUint64(buf + 32, BigInt(elfBytes.length), true);
       return 0;
     },
     fd_read(fd, iovs, iovsLen, nreadPtr) {
@@ -103,6 +121,10 @@ function makeWasi(args, elfFilename, elfBytes) {
       return 0;
     },
     fd_close() { return 0; },
+    // The bench never accepts a socket connection (there is no listener),
+    // so a clean not-supported refusal is the correct behavior, not a
+    // missing feature.
+    sock_accept(_fd, _flags, _resultFdPtr) { return ENOTSUP; },
     proc_exit(code) { throw { wasiExit: code }; },
   };
   return {

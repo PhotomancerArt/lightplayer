@@ -127,21 +127,94 @@ impl EfuseIdentity {
     }
 }
 
-/// The reset cause the machine asserts. Direct load is always
-/// [`ResetCause::PowerOn`]; M7 derives it from PMU registers.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Why the chip is starting, as `LP_CLKRST.reset_cause` says and as the mask
+/// ROM's banner prints it.
+///
+/// The ROM masks the register to five bits and indexes a 25-entry table of
+/// names at `0x4004_a8e8`; the codes and the spellings below are read out of
+/// that table in the vendored ROM, so `rst:0x15 (USB_UART_HPSYS)` is not a
+/// string this crate invented.
+///
+/// Only the two a run can actually start from are modelled. [`PowerOn`] is a
+/// cold chip and the direct loader's assertion; [`UsbUartHpSys`] is what a
+/// host's DTR/RTS dance over the USB-Serial-JTAG bridge leaves behind — the
+/// reset the silicon `boot-idle-flash` transcript was captured after, and
+/// therefore the one a boot-log diff has to be run with.
+///
+/// [`PowerOn`]: ResetCause::PowerOn
+/// [`UsbUartHpSys`]: ResetCause::UsbUartHpSys
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ResetCause {
+    #[default]
     PowerOn,
+    /// `0x15` — the serial bridge asserted `chip_rst`. What espflash's
+    /// `--after hard-reset` and M6's `reset` control command do.
+    UsbUartHpSys,
 }
 
 impl ResetCause {
     /// The value the ROM's `rtc_get_reset_reason` returns for this cause.
     pub const fn rom_code(self) -> u32 {
         match self {
-            // `POWERON_RESET` — the value `__pre_init` compares against 1
+            // `POWERON` — the value `__pre_init` compares against 1
             // before zeroing `.rtc_fast.persistent`.
             ResetCause::PowerOn => 1,
+            ResetCause::UsbUartHpSys => 0x15,
         }
+    }
+
+    /// The ROM's own name for it, from the table at `0x4004_a8e8`.
+    pub const fn rom_name(self) -> &'static str {
+        match self {
+            ResetCause::PowerOn => "POWERON",
+            ResetCause::UsbUartHpSys => "USB_UART_HPSYS",
+        }
+    }
+
+    /// `--reset-cause`'s spellings.
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "poweron" | "power-on" => Some(ResetCause::PowerOn),
+            "usb-uart" | "usb-uart-hpsys" => Some(ResetCause::UsbUartHpSys),
+            _ => None,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            ResetCause::PowerOn => "poweron",
+            ResetCause::UsbUartHpSys => "usb-uart",
+        }
+    }
+}
+
+/// What `GPIO.strap` (`0x6009_1038`) reads — the strapping pins latched at
+/// reset, which is the whole of what the mask ROM uses to pick a boot mode.
+///
+/// `main` prints the register **verbatim** as the `boot:0x%x` half of the
+/// banner (`lw a3, 56(a5)` at `0x40018aaa`, straight into the `ets_printf`),
+/// so the two constants here are the two boot logs.
+///
+/// - [`STRAP_APP`] is `0x1e`, **measured**: the silicon `boot-idle-flash`
+///   transcript on the desk board reads
+///   `rst:0x15 (USB_UART_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)`, and the
+///   ROM printed that number out of this register.
+/// - [`STRAP_DOWNLOAD`] is `0x16`, **modeled**: `0x1e` with bit 3 cleared,
+///   which is the one bit the ROM's own decode tests to choose flash boot
+///   (`andi a5,a5,8; beqz` at `0x400189c4` — the boot pin). `0x16 & 0xf == 6`
+///   lands on the ROM's `DOWNLOAD(USB/UART0/SDIO_REI_FEO)` arm and its
+///   download console. No transcript of a download-mode banner exists to
+///   promote this from *modeled*; M7's download-mode scenario records the
+///   line the emulator prints so a future desk sitting can arbitrate it.
+pub const STRAP_APP: u32 = 0x1e;
+/// See [`STRAP_APP`].
+pub const STRAP_DOWNLOAD: u32 = 0x16;
+
+/// The strapping word for a [`Strap`](lp_emu_esp_common::Strap).
+pub const fn strap_word(strap: lp_emu_esp_common::Strap) -> u32 {
+    match strap {
+        lp_emu_esp_common::Strap::App => STRAP_APP,
+        lp_emu_esp_common::Strap::Download => STRAP_DOWNLOAD,
     }
 }
 
@@ -464,5 +537,19 @@ mod tests {
     fn power_on_is_the_reason_code_pre_init_compares_against() {
         // `__pre_init` zeroes `.rtc_fast.persistent` iff the ROM returns 1.
         assert_eq!(ResetCause::PowerOn.rom_code(), 1);
+        assert_eq!(ResetCause::PowerOn.rom_name(), "POWERON");
+    }
+
+    #[test]
+    fn the_silicon_transcripts_banner_is_this_reset_cause_and_this_strap() {
+        // `rst:0x15 (USB_UART_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)`
+        let cause = ResetCause::parse("usb-uart").unwrap();
+        assert_eq!(cause.rom_code(), 0x15);
+        assert_eq!(cause.rom_name(), "USB_UART_HPSYS");
+        assert_eq!(strap_word(lp_emu_esp_common::Strap::App), 0x1e);
+        // The download word differs by the one bit the ROM's decode tests.
+        assert_eq!(STRAP_APP & !8, STRAP_DOWNLOAD);
+        assert_eq!(STRAP_DOWNLOAD & 0xf, 6, "the DOWNLOAD(...) arm");
+        assert!(ResetCause::parse("brownout").is_none());
     }
 }

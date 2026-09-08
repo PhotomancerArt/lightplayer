@@ -49,8 +49,8 @@ use gloo_timers::future::TimeoutFuture;
 use lpa_studio_core::app::studio::studio_view_channel::CommandSender;
 use lpa_studio_core::{
     HOME_NODE_ID, HomeOp, RuntimeOp, STUDIO_LOG_SINK, SettingsCommand, StudioActor, StudioCommand,
-    StudioController, UiAction, UiChromeSessionControl, UiChromeSessionKind, UiLogEntry,
-    UiLogLevel, UiStudioView, has_unsaved_work,
+    StudioController, UiAction, UiChromeSessionControl, UiLogEntry, UiLogLevel, UiStudioView,
+    has_unsaved_work,
 };
 use lpc_cloud_api::share_link;
 use lpc_history::PrefixedUid;
@@ -270,7 +270,6 @@ pub fn App() -> Element {
         crate::device_events_io::install(&mut controller);
         // The simulator's connect-ladder backoff runs on browser timers;
         // without this the core default resolves every sleep immediately.
-        controller.set_sim_timers(make_device_timers());
         // Crypto randomness for identity minting (`dev` uids). Host
         // builds keep the core's clock-derived fallback.
         #[cfg(target_arch = "wasm32")]
@@ -1482,16 +1481,19 @@ fn nav_session_plan(
     }
 }
 
-/// The action that ends `session`: the sim's own stop verb — the same op
-/// the card's danger-zone row dispatches, so leaving the studio and
-/// clicking Stop are literally the same teardown. A device lens closes
-/// instead (the board keeps running; only the editor's wire goes back).
+/// The action that ends `session`: for a SIM, `Power off` — the same
+/// gesture the card's Device zone offers, so leaving the studio and
+/// clicking Power off are literally the same teardown (the record stays;
+/// D46). A board's lens closes instead: the board keeps running, and only
+/// the editor's wire goes back.
 fn session_teardown(session: &UiChromeSessionControl) -> UiAction {
-    match session.kind {
-        UiChromeSessionKind::Sim => UiAction::from_op(RuntimeOp::NODE_ID, RuntimeOp::StopSimulator),
-        UiChromeSessionKind::Device => {
-            UiAction::from_op(RuntimeOp::NODE_ID, RuntimeOp::CloseDeviceLens)
+    match (session.face, session.device) {
+        (lpa_studio_core::DeviceFace::Sim, Some(device)) => {
+            lpa_studio_core::DevicesOp::sim_action_for(lpa_studio_core::DeviceAction::Disconnect {
+                device,
+            })
         }
+        _ => UiAction::from_op(RuntimeOp::NODE_ID, RuntimeOp::CloseDeviceLens),
     }
 }
 
@@ -1501,9 +1503,11 @@ fn session_teardown(session: &UiChromeSessionControl) -> UiAction {
 /// draft to reassure anyone about, and a promise made on every stop is a
 /// promise nobody reads.
 fn session_stopped_line(session: &UiChromeSessionControl, dirty: bool) -> String {
-    let stopped = match session.kind {
-        UiChromeSessionKind::Sim => "Simulator stopped".to_string(),
-        UiChromeSessionKind::Device => format!("Closed {} — the board keeps running", session.name),
+    let stopped = match session.face {
+        lpa_studio_core::DeviceFace::Sim => format!("{} powered off", session.name),
+        lpa_studio_core::DeviceFace::Wire => {
+            format!("Closed {} — the board keeps running", session.name)
+        }
     };
     if dirty {
         format!("{stopped} — your edits are saved as a draft")
@@ -1654,12 +1658,6 @@ fn detect_host_os() -> lpa_boards::HostOs {
 
 pub(crate) fn make_pull_timer(delay: Duration) -> TimeoutFuture {
     TimeoutFuture::new(delay.as_millis() as u32)
-}
-
-/// Link-session timers on wasm: the same `setTimeout` future, boxed for
-/// the session's injected factory (the `make_pull_timer` pattern).
-pub(crate) fn make_device_timers() -> lpa_link::DeviceTimers {
-    lpa_link::DeviceTimers::new(|delay| Box::pin(TimeoutFuture::new(delay.as_millis() as u32)))
 }
 
 /// Warm the browser engine's assets once, at page load.
@@ -1932,11 +1930,11 @@ mod tests {
     /// The tab's session, as the view loop latches it for the listener.
     fn session() -> UiChromeSessionControl {
         UiChromeSessionControl {
-            kind: UiChromeSessionKind::Sim,
-            key: "runtime-sim".to_string(),
-            device: None,
-            name: "Sim".to_string(),
-            board: Some("ESP32-C6".to_string()),
+            face: lpa_studio_core::DeviceFace::Sim,
+            key: "device:devsim".to_string(),
+            device: Some(lpa_studio_core::DeviceId(1)),
+            name: "Desktop sim".to_string(),
+            board: Some("Desktop".to_string()),
             status: UiChromeSessionStatus::Run,
             stat_line: None,
         }
@@ -1951,20 +1949,23 @@ mod tests {
     }
 
     /// The plan's central claim: a site route ENDS the tab's session, and
-    /// the sim's teardown is `StopSimulator` (never a detach).
+    /// a sim's teardown is Power off — `Action::Disconnect` at the fold,
+    /// never a detach (PD8/Q15). The record stays behind (D46).
     #[test]
-    fn leaving_the_studio_stops_the_sim() {
+    fn leaving_the_studio_powers_the_tabs_sim_off() {
         let plan = nav_session_plan(Some(&session()), &StudioRoute::Projects, false);
 
         let NavSessionPlan::Leave { teardown, said } = plan else {
             panic!("a site route must end the session");
         };
         assert!(matches!(
-            teardown.op_as::<RuntimeOp>(),
-            Some(RuntimeOp::StopSimulator)
+            teardown
+                .op_as::<lpa_studio_core::DevicesOp>()
+                .map(|op| op.action().clone()),
+            Some(lpa_studio_core::DeviceAction::Disconnect { .. })
         ));
         // Nothing unsaved: no draft to promise.
-        assert_eq!(said, "Simulator stopped");
+        assert_eq!(said, "Desktop sim powered off");
     }
 
     /// Every site section, not just the galleries the old detach arm
@@ -2003,7 +2004,10 @@ mod tests {
         let NavSessionPlan::Leave { said, .. } = dirty else {
             panic!("leaving");
         };
-        assert_eq!(said, "Simulator stopped — your edits are saved as a draft");
+        assert_eq!(
+            said,
+            "Desktop sim powered off — your edits are saved as a draft"
+        );
     }
 
     /// A session moves freely INSIDE the studio: play, patch and mapping

@@ -67,15 +67,18 @@ does not blur into a larger API rename.
 
 - `StudioController` is the top-level controller. It owns the
   `RuntimePool`, `DeviceController`, and `ProjectController`.
-- `RuntimePool` (`app/runtime_pool/`, runtime-pool ADR) holds the runtime
-  sessions Studio is attached to — each `RuntimeSession` bundles its
-  runtime payload (browser-worker sim or hardware `DeviceSession`), its
-  OWN `StudioServerClient` + server protocol state, and the per-device
-  reconcile bundle — plus the editor **lens** (the ≤1 session the editor
-  is bound to). Capacity is a policy (MVP: 1 sim + 1 device); "connected"
-  means "a session exists in the pool". Network ops resolve through two
-  named seams: lens-bound editor ops (`lens_session_mut`) and
-  session-targeted device/deploy/reconcile ops (`device_session_mut`).
+- `RuntimePool` (`app/runtime_pool/`, runtime-pool ADR + the always-a-device
+  ADR) holds the session Studio is attached to. There is **one payload**:
+  a `DeviceLensAttachment` — the editor is a lens on a roster device, and
+  a sim is a roster device like any other. A `RuntimeSession` bundles that
+  attachment, its OWN `StudioServerClient` + server protocol state, its
+  console tail and its pacing, plus the editor **lens** (the ≤1 session
+  the editor is bound to). Capacity is a policy and it is ONE
+  (`SESSION_CAPACITY` — one device per tab, D37); "connected" means "a
+  session exists in the pool". The one thing left that a session forks on
+  is `LinkTransport { Sim, Serial }`, read off the link's endpoint: a fact
+  about the WIRE (an in-process worker channel has no bandwidth bound, a
+  serial port does), never about the kind of device.
 - `DeviceController` owns the connect flow — the `LinkProviderRegistry`
   catalog and the picker view state (`ConnectFlowState`) — and is the
   session FACTORY: connect flows build and return a `RuntimePayload` that
@@ -200,8 +203,10 @@ it enqueues commands and renders change-gated snapshots. The pieces:
   visibility signal, and a card nobody is watching generates no traffic.
 - **Request scoping** stays core-owned and is runtime-tiered: the probe set
   (`node_subscribes_products`) subscribes every non-collapsed node's products
-  on the simulator and only the focused node (plus the primary visual) on a
-  device, and probe resolution tiers the same way (32×32 sim / 16×16 device).
+  over an in-process wire and only the focused node (plus the primary
+  visual) over serial, and probe resolution tiers the same way (32×32 /
+  16×16) — the fork is `LinkTransport`, because both are bandwidth
+  arguments.
   The set is picked up by the next pull; `Focus` completes synchronously with
   no bolt-on network refresh.
 
@@ -339,9 +344,12 @@ Project attach behavior is core-owned:
 - multiple loaded projects: show the selection in the Device open-project step
   and expose one action per loaded project.
 
-For the browser-worker simulator, the zero-loaded-project case auto-loads the
-demo project. Real hardware remains conservative and requires explicit project
-loading when nothing is running.
+Opening a project from the gallery is a push of the library head regardless
+of what is running (D19), and it lands through `attach_lens` — so a lens
+that arrives late, on a sim that was still booting when the click ran,
+pushes exactly as one that arrived at once. A `/device/<uid>` open with no
+pending package stays conservative and connects to whatever the device
+already runs.
 
 ## Feedback And Recovery
 
@@ -394,10 +402,17 @@ The console model lives in `core/log/` (ADR
 
 A **sim** is a device. Not "a runtime that looks like one" — a row in the
 same registry, a record in the same `lpa-devices` fold, the same card, the
-same verbs. `lpa-devices` has no arm for it and never will: what a sim adds
-is a `Link` implementor and an effect backend, never a flow.
+same verbs, and the same runtime pool session. `lpa-devices` has no arm
+for it and never will: what a sim adds is a `Link` implementor and an
+effect backend, never a flow.
 
-Three pieces in `app/devices/` make that true:
+The one mark on the card is the **runtime band**
+(`devices/runtime_band.rs`): 24px, bound-family,
+`▶ Sim · <target> · in this tab · <granted tier>`, joined at the app view
+in `DeviceRosterView::runtime_bands` like the card's feed. Real boards
+have none, so a real card's height is unchanged.
+
+Four pieces in `app/devices/` make that true:
 
 - **`sim_record.rs` — identity and the sidecar.** Studio mints a
   locally-administered MAC from caller-supplied random bytes (sans-IO) and

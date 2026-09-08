@@ -113,13 +113,18 @@ fn the_host_side_properties_are_not_mirrored_and_that_is_the_point() {
             "payload `{}`",
             payload.name
         );
-        // The three USB scenarios are one image asked three different
-        // questions, and `fw-checks` cannot tell them apart — which is
-        // exactly right, because nothing in the firmware differs.
+        // A host plan means the run is served over the product's own link, so
+        // there must be a link driver in the image to serve it: `server` for
+        // the shipped-image scenarios, a `fw-checks` module of its own for a
+        // payload that brings its own logger and printer. `rmt-chase` is the
+        // second kind and the first of it — before M5 P3 every payload with a
+        // host plan was the shipped image, which is why this clause used to
+        // read `contains("server")` alone.
         if payload.host_plan.is_some() {
             assert!(
-                check.firmware_features.contains(&"server"),
-                "payload `{}` asks about the host link, so it is the shipped image",
+                check.firmware_features.contains(&"server") || payload.fw_checks_feature.is_some(),
+                "payload `{}` is served over the USB link, so it is either the shipped image \
+                 or a harness with a module of its own",
                 payload.name
             );
         }
@@ -147,9 +152,19 @@ fn the_host_side_properties_are_not_mirrored_and_that_is_the_point() {
             // and no script, which is what made the distinction easy to miss.
             "upload-walk-usb",
             "meteor-walk-usb",
+            // M5's chase: not a scenario at all — nothing here asks a
+            // question about the link — but its records and its `[WS281X]`
+            // line go out over the USB-Serial-JTAG the harness image logs on,
+            // and `--usb-host` defaults to `absent`. Somebody has to be
+            // draining the port or the transcript is empty.
+            "rmt-chase",
+            // M5 P4's walk of the host oracle's project on the shipped image
+            // over the shipped link, with the pad observed: the same shape as
+            // P5's two walks, plus a pin capture.
+            "shader-oracle-walk",
         ],
-        "the emu-m6 set, M4's flash-backed boot and P5's two walks — and nothing else — drive \
-         the host"
+        "the emu-m6 set, M4's flash-backed boot, P5's two walks, M5's chase and M5's oracle \
+         walk drive the host; nothing else"
     );
 }
 
@@ -243,6 +258,59 @@ fn the_uart_bridges_ready_line_is_the_line_the_firmware_prints() {
     }
 }
 
+/// The `rmt-frame` record the firmware renders is the record the host
+/// classifies — every field named, none extra.
+///
+/// A field the registry does not classify is a `structural_problem` in a
+/// replay (`replay.rs`: "add a FieldSpec for it"), so a record that grew a
+/// field would fail every replay of the payload rather than being silently
+/// ignored. This catches it here, without a machine or a board.
+#[test]
+fn the_rmt_chase_record_is_the_line_the_firmware_prints() {
+    use fw_checks::checks::rmt_chase::{
+        DONE_MARKER, FrameRecord, LEDS, chase_frame, frame_bytes, write_frame_record,
+    };
+
+    let payload = ALL_PAYLOADS
+        .iter()
+        .find(|p| p.name == "rmt-chase")
+        .expect("rmt-chase is registered");
+    assert_eq!(payload.sentinel, Sentinel::Done(DONE_MARKER));
+    assert_eq!(payload.record_kinds, &["rmt-frame"]);
+
+    let mut frame = vec![0u8; frame_bytes(LEDS)];
+    let lit = chase_frame(7, LEDS, &mut frame);
+    let mut line = String::new();
+    write_frame_record(&mut line, &FrameRecord::of(7, LEDS, lit, &frame)).unwrap();
+    assert!(line.starts_with(RECORD_PREFIX), "{line}");
+
+    let json = line
+        .trim_end()
+        .strip_prefix(RECORD_PREFIX)
+        .expect("the prefix");
+    let value: serde_json::Value = serde_json::from_str(json).expect("the record is JSON");
+    let object = value.as_object().expect("a JSON object");
+    assert_eq!(object["kind"], "rmt-frame");
+    for field in object.keys() {
+        if field == "kind" {
+            continue;
+        }
+        assert_eq!(
+            payload.class_of("rmt-frame", field),
+            Some(FieldClass::Structural),
+            "record field `{field}` is unclassified; a replay would refuse it"
+        );
+    }
+    // …and nothing the registry classifies is missing from the line.
+    for spec in payload.fields {
+        assert!(
+            object.contains_key(spec.field),
+            "the registry classifies `{}`, which the firmware does not print",
+            spec.field
+        );
+    }
+}
+
 /// The header line every C6 harness now prints through
 /// `fw_checks::write_header(&mut esp_println::Printer, ..)` (G3 sitting-1
 /// blocker: `test_gpio_calibrate` installed no logger, so the log-based
@@ -271,6 +339,11 @@ fn every_payloads_header_line_is_pinned() {
             "jit-math-perf",
             "esp32c6,test_jit_math_perf",
             "[fw-checks-header] {\"schema\":1,\"payload\":\"jit-math-perf\",\"chip\":\"esp32c6\",\"firmware_commit\":\"d6cfaa2051ae\",\"firmware_features\":\"esp32c6,test_jit_math_perf\",\"firmware_dirty\":false}\n",
+        ),
+        (
+            "rmt-chase",
+            "esp32c6,test_rmt,ws281x_telemetry",
+            "[fw-checks-header] {\"schema\":1,\"payload\":\"rmt-chase\",\"chip\":\"esp32c6\",\"firmware_commit\":\"d6cfaa2051ae\",\"firmware_features\":\"esp32c6,test_rmt,ws281x_telemetry\",\"firmware_dirty\":false}\n",
         ),
     ];
     for (payload, firmware_features, expected) in cases {

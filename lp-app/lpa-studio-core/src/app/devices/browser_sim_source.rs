@@ -21,7 +21,6 @@
 //! here is the worker join itself, which the fw-browser smoke and the
 //! browser walk cover instead (the plan's validation strategy).
 
-use std::cell::RefCell;
 use std::rc::Rc;
 
 use lpa_link::device_link::browser_worker::{BrowserWorkerControl, BrowserWorkerLink};
@@ -32,42 +31,38 @@ use crate::app::library::ProjectTarget;
 
 use super::device_transport::{DeviceTransportFuture, GrantedLink, LensLineTap, LensTapEvent};
 use super::sim_record::sim_link_info;
-use super::sim_transport::{SimBacking, SimLinkSource, SimRuntimeControl, SimSession};
+use super::sim_transport::{SimBacking, SimLinkSource, SimRuntimeControl, SimSession, SimTier};
 
 /// Sims backed by `fw-browser` workers.
 pub struct BrowserSimLinkSource {
-    /// Where the engine assets live. Shared and late-filled because the
-    /// hashed names come from a fetch the shell starts in `index.html`, and
-    /// this source is built while the page is still assembling.
-    options: Rc<RefCell<BrowserWorkerOptions>>,
+    /// Where the engine assets live — or, for [`Self::resolving`], the
+    /// instruction to find out at every boot.
+    options: BrowserWorkerOptions,
 }
 
 impl BrowserSimLinkSource {
-    /// A source that resolves the page's hashed engine URLs in the
-    /// background — the SAME `resolved_engine_urls` every other worker boots
-    /// from, so there is one place those names come from.
+    /// A source whose workers resolve the page's hashed engine URLs at
+    /// POWER-ON, from the SAME `resolved_engine_urls` every other worker
+    /// boots from, so there is one place those names come from.
     ///
-    /// Until the resolution lands the unhashed defaults stand, which is the
-    /// documented degrade (a worker booted from them still boots, merely
-    /// revalidated rather than immutable-cached). Nothing can be powered on
-    /// before a user gesture, and the promise is one the page already
-    /// started, so the window is a microtask wide.
+    /// At power-on and not at construction, because the two are not the
+    /// same moment: this source is built while the page is still
+    /// assembling, and the first power-on can be the page's first action
+    /// (a docs embed boots on mount; a project card clicked the moment the
+    /// gallery paints powers a sim on; `?on=sim` will). A snapshot taken at
+    /// construction was the unhashed fallback for every one of those — the
+    /// served `pkg/` holds hashed names only, so the worker 404'd on
+    /// `/pkg/fw_browser.js` (G1, 2026-09-07). The link's own boot is the
+    /// one moment that can await the manifest, so that is where it is read
+    /// (`BrowserWorkerOptions::discovered`).
     pub fn resolving() -> Self {
-        let options = Rc::new(RefCell::new(BrowserWorkerOptions::default()));
-        let resolved = Rc::clone(&options);
-        wasm_bindgen_futures::spawn_local(async move {
-            *resolved.borrow_mut() =
-                lpa_link::providers::browser_worker::resolved_engine_urls().await;
-        });
-        Self { options }
+        Self::new(BrowserWorkerOptions::discovered())
     }
 
     /// A source pinned to `options` (the standalone smoke page, and any
     /// caller that already knows where its engine lives).
     pub fn new(options: BrowserWorkerOptions) -> Self {
-        Self {
-            options: Rc::new(RefCell::new(options)),
-        }
+        Self { options }
     }
 }
 
@@ -95,14 +90,15 @@ impl SimLinkSource for BrowserSimLinkSource {
         // manifest, so the `None` arm is unreachable by construction — it
         // is a refusal rather than an unwrap because a sim that cannot say
         // what it is should fail to power on, not panic the tab.
+        let tier = match session.tier {
+            SimTier::Gpu => BrowserRuntimeTier::Gpu,
+            SimTier::Cpu => BrowserRuntimeTier::Cpu,
+        };
         let runtime = worn
-            .runtime_options(BrowserRuntimeTier::Gpu)
+            .runtime_options(tier)
             .ok_or_else(|| format!("no hardware profile is checked in for {}", worn.board_id()))?
             .with_identity(session.base_mac.clone());
-        let link = BrowserWorkerLink::new(
-            info.clone(),
-            self.options.borrow().clone().with_runtime(runtime),
-        );
+        let link = BrowserWorkerLink::new(info.clone(), self.options.clone().with_runtime(runtime));
         // Taken BEFORE the link is boxed: the control shares the link's own
         // inner, so a restart is the same destroy-and-recreate a
         // `RunReset` performs and the effects layer keeps the link it
@@ -131,6 +127,20 @@ impl SimRuntimeControl for WorkerRuntimeControl {
 
     fn set_hardware_manifest(&self, manifest_json: String) {
         self.control.set_hardware_manifest(manifest_json);
+    }
+
+    fn granted_tier(&self) -> Option<&'static str> {
+        // Read off the boot's own `RuntimeCreated`, not off the options we
+        // asked with: a `gpu` request the browser refused comes back `cpu`
+        // and the band has to say so.
+        self.control.granted_tier().map(|tier| match tier {
+            BrowserRuntimeTier::Gpu => "gpu",
+            BrowserRuntimeTier::Cpu => "cpu",
+        })
+    }
+
+    fn is_starting(&self) -> bool {
+        self.control.is_starting()
     }
 
     fn client_io(&self, tap: Option<LensLineTap>) -> Result<Box<dyn lpa_client::ClientIo>, String> {

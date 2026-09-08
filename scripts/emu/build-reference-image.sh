@@ -182,10 +182,18 @@ fi
 #      sections are contiguous, so it would very likely boot. The point is
 #      narrower and enough: it is a different image from the one the desk
 #      flashes and the transcripts were recorded against.
-#
-# Cargo's `-C metadata` is NOT one of the causes — measured: the same package
-# built at two different absolute paths gets the same metadata hash, so no
-# mangled symbol moves with the directory.
+
+#      FIXED IN THE PRODUCT 2026-09-08, and the heal below still has to stay.
+#      `third_party/esp-hal` now carries `links = "esp-hal"` and publishes its
+#      linker-script OUT_DIR as `DEP_ESP_HAL_LINKER_SCRIPTS`, which gives cargo
+#      the ordering edge it was missing; `fw-esp32c6/build.rs` is told the
+#      directory instead of scanning for it, and aborts rather than skipping.
+#      See docs/defects/2026-09-08-cold-target-dir-links-esp-hals-stock-rodata.md.
+#      But THIS recipe builds a pinned historical commit (d6cfaa205), which
+#      predates that fix and still has the race — so `image_drift`'s
+#      `.rodata_merge` check and the rebuild it triggers are load-bearing here
+#      for as long as the pin stays where it is. If the pin ever moves past
+#      2026-09-08, the heal can go and the check should become a hard failure.
 #
 # Cargo's `-C metadata` is NOT one of the causes — measured: the same package
 # built at two different absolute paths gets the same metadata hash, so no

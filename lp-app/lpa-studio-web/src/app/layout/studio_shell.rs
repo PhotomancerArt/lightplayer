@@ -206,28 +206,21 @@ fn play_mode_face(
     }
 }
 
-/// The docked lens card, by session kind (round-2 M5): the sim's grown
-/// card, or the roster's device card — the SAME `DeviceView` the gallery
-/// renders, with no picker lists (a board the editor is open on is running
-/// something; the empty face's picker belongs to the gallery).
+/// The docked lens card: the roster's device card — the SAME `DeviceView`
+/// the gallery renders, for every runtime (PD9), with no picker lists (a
+/// device the editor is open on is running something; the empty face's
+/// picker belongs to the gallery).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn LensCardPane(card: UiLensCard, on_action: EventHandler<UiAction>) -> Element {
-    match card {
-        UiLensCard::Sim(card) => rsx! {
-            crate::app::home::sim_card::SimCard {
-                pane: true,
-                card,
-                on_action,
-            }
-        },
-        UiLensCard::Device(card) => rsx! {
-            crate::app::home::device_roster_card::DeviceRosterCard {
-                card,
-                projects: Vec::new(),
-                examples: Vec::new(),
-                on_action,
-            }
-        },
+    let UiLensCard::Device { card, runtime } = card;
+    rsx! {
+        crate::app::home::device_roster_card::DeviceRosterCard {
+            card,
+            runtime,
+            projects: Vec::new(),
+            examples: Vec::new(),
+            on_action,
+        }
     }
 }

@@ -62,8 +62,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DirtySummary, UiAction, UiAffordance, UiChromeSessionControl, UiChromeSessionKind,
-    UiChromeSessionStatus, UiPaneAction,
+    DirtySummary, UiAction, UiAffordance, UiChromeSessionControl, UiChromeSessionStatus,
+    UiPaneAction,
 };
 use lpc_cloud_api::Access;
 
@@ -388,7 +388,7 @@ fn segments_rsx(
     let style = affordance.map(affordance_trigger_style);
     let board = board_suffix(session);
     let name = session.name.clone();
-    let device_title = kind_title(session.kind);
+    let device_title = device_title(session);
     let device_label = device_label(session);
     let status = session.status;
 
@@ -428,7 +428,7 @@ fn segments_rsx(
                 press(ControlSegment::Device);
             },
             span { class: kind_glyph_class(),
-                StudioIcon { name: kind_icon(session.kind), size: 12 }
+                StudioIcon { name: kind_icon(), size: 12 }
             }
             span { class: dot_class(status) }
             // The md fold: below the 900px cut the glyph and the dot carry kind
@@ -571,7 +571,7 @@ pub fn SessionDevicePanel(
 ) -> Element {
     let run = run_word(&session);
     let stat_line = device_stat_line(&session);
-    let hint = session_hint(session.kind);
+    let hint = session_hint();
     // The one verb the panel carries: a DEVICE lens has a name of its own
     // to change (the sim is the sim). The same section the device card's
     // header menu holds, because this panel is the other place the name
@@ -581,7 +581,7 @@ pub fn SessionDevicePanel(
         section { class: "tw:grid tw:gap-0.5 tw:bg-card-muted tw:px-3 tw:py-2",
             div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2",
                 span { class: kind_glyph_class(),
-                    StudioIcon { name: kind_icon(session.kind), size: 13 }
+                    StudioIcon { name: kind_icon(), size: 13 }
                 }
                 strong { class: "tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:text-sm tw:text-strong-foreground",
                     "{session.name}"
@@ -749,19 +749,15 @@ fn save_receipt_line(next_version: Option<u64>) -> String {
 /// The session's kind glyph: the violet sim mark (the bound-family
 /// convention the sim card wears), or the USB mark for a board the editor
 /// is a lens on (round-2 M5).
-fn kind_icon(kind: UiChromeSessionKind) -> StudioIconName {
-    match kind {
-        UiChromeSessionKind::Sim => StudioIconName::Simulator,
-        UiChromeSessionKind::Device => StudioIconName::Usb,
-    }
+fn kind_icon() -> StudioIconName {
+    StudioIconName::Usb
 }
 
-/// The trigger's title for the kind segment.
-fn kind_title(kind: UiChromeSessionKind) -> &'static str {
-    match kind {
-        UiChromeSessionKind::Sim => "This tab's session — the simulator",
-        UiChromeSessionKind::Device => "This tab's session — the board the editor is open on",
-    }
+/// The trigger's title for the device segment: this tab's ONE device,
+/// named (PD9 — a sim is a device, and the band on its card is what says
+/// which kind of device it is).
+fn device_title(session: &UiChromeSessionControl) -> String {
+    format!("This tab's session — {}", device_label(session))
 }
 
 fn kind_glyph_class() -> &'static str {
@@ -851,15 +847,14 @@ fn changes_tint(dirty: DirtySummary) -> SegmentTint {
     }
 }
 
-/// The sim's board suffix (`· ESP32-C6`, ruling 8.1: the sim names the board
-/// it simulates). Every session is a sim while the legacy device system is
-/// torn down; hardware (which never wears a suffix — a board's own name IS
-/// the device name) returns with the rebuilt device model.
+/// The device's board suffix (`· ESP32-C6`), when its own name does not
+/// already carry one. A named board IS its name; a sim's title is the
+/// record's, so the board it acts as rides behind it.
 fn board_suffix(session: &UiChromeSessionControl) -> Option<String> {
-    match session.kind {
-        UiChromeSessionKind::Sim => session.board.clone().filter(|board| !board.is_empty()),
-        UiChromeSessionKind::Device => None,
-    }
+    session
+        .board
+        .clone()
+        .filter(|board| !board.is_empty() && !session.name.contains(board.as_str()))
 }
 
 /// Save and Revert, picked out of the editor's `header_actions` by their
@@ -918,15 +913,8 @@ fn run_word(session: &UiChromeSessionControl) -> RunWord {
 /// The panel's footer line: the single-session policy said plainly, because
 /// the consequence of navigating away is otherwise invisible. The document
 /// is durable (the draft overlay persists) — the SESSION is what ends.
-fn session_hint(kind: UiChromeSessionKind) -> &'static str {
-    match kind {
-        UiChromeSessionKind::Sim => {
-            "This tab is the session — close it or navigate away to stop the simulator."
-        }
-        UiChromeSessionKind::Device => {
-            "This tab is the editor on the board — navigate away to close it; the board keeps running."
-        }
-    }
+fn session_hint() -> &'static str {
+    "This tab is the editor on the device — navigate away to close it; the device keeps running."
 }
 
 /// The device segment's accessible name: the device and, for a sim, the
@@ -1054,10 +1042,10 @@ mod tests {
 
     fn session(board: Option<&str>) -> UiChromeSessionControl {
         UiChromeSessionControl {
-            kind: UiChromeSessionKind::Sim,
-            key: "runtime-sim".to_string(),
+            face: lpa_studio_core::DeviceFace::Sim,
+            key: "device:devsim".to_string(),
             device: None,
-            name: "Sim".to_string(),
+            name: "Desktop sim".to_string(),
             board: board.map(str::to_string),
             status: UiChromeSessionStatus::Run,
             stat_line: None,
@@ -1135,8 +1123,11 @@ mod tests {
     /// question rather than the whole bar's.
     #[test]
     fn each_segment_names_only_its_own_question() {
-        assert_eq!(device_label(&session(Some("ESP32-C6"))), "Sim · ESP32-C6");
-        assert_eq!(device_label(&session(None)), "Sim");
+        assert_eq!(
+            device_label(&session(Some("ESP32-C6"))),
+            "Desktop sim · ESP32-C6"
+        );
+        assert_eq!(device_label(&session(None)), "Desktop sim");
 
         assert_eq!(
             project_label(Some("small dome"), ProjectRelationship::Example),
@@ -1154,27 +1145,31 @@ mod tests {
         assert_eq!(changes_label(dirty(3, 2)), "Changes — 3 unsaved, 2 failed");
     }
 
-    /// Leaving costs a stop; the hint has to say so.
+    /// Leaving closes the editor and leaves the DEVICE running — for a sim
+    /// exactly as for silicon (PD9), and the hint has to say so.
     #[test]
     fn the_hint_names_what_leaving_actually_ends() {
-        assert!(session_hint(UiChromeSessionKind::Sim).ends_with("stop the simulator."));
-        assert!(session_hint(UiChromeSessionKind::Device).ends_with("the board keeps running."));
+        assert!(session_hint().ends_with("the device keeps running."));
     }
 
-    /// A device lens wears the board's own name: no board suffix (it would
-    /// read as two devices), the USB glyph, and a hint that names the
-    /// editor, not the simulator.
+    /// A device whose own NAME already carries its board wears no suffix
+    /// (it would read as two devices); one whose name does not — a sim
+    /// titled from its record — wears the board behind it.
     #[test]
-    fn a_device_session_wears_its_own_name_and_the_usb_glyph() {
-        let device = UiChromeSessionControl {
-            kind: UiChromeSessionKind::Device,
+    fn the_board_suffix_never_repeats_a_name_that_already_carries_it() {
+        let named = UiChromeSessionControl {
             name: "XIAO ESP32-C6 · Sep 1".to_string(),
             board: Some("XIAO ESP32-C6".to_string()),
             ..session(None)
         };
-        assert_eq!(board_suffix(&device), None);
-        assert_eq!(kind_icon(device.kind), StudioIconName::Usb);
-        assert!(kind_title(device.kind).contains("board"));
+        assert_eq!(board_suffix(&named), None);
+        assert_eq!(
+            board_suffix(&session(Some("XIAO ESP32-C6"))),
+            Some("XIAO ESP32-C6".to_string()),
+            "a name that does NOT carry its board wears the suffix"
+        );
+        assert_eq!(kind_icon(), StudioIconName::Usb);
+        assert!(device_title(&named).contains("XIAO ESP32-C6"));
     }
 
     /// The dirty wash lives on the CHANGES segment now, and failure

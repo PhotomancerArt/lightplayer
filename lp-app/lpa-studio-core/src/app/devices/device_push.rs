@@ -328,7 +328,6 @@ mod tests {
             provenance: None,
             on_device: None,
             open_elsewhere: false,
-            running_in_sim: false,
             target: None,
             health: crate::app::library::PackageHealth::Ready,
         }

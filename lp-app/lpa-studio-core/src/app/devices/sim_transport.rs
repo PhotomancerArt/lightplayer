@@ -61,6 +61,22 @@ pub struct SimSession {
     pub display_name: String,
     /// The minted base MAC the runtime reports as its identity.
     pub base_mac: String,
+    /// The shader tier the runtime is ASKED for. What it is granted is the
+    /// worker's answer ([`SimRuntimeControl::granted_tier`]).
+    pub tier: SimTier,
+}
+
+/// The shader tier a sim asks its runtime for (PD12).
+///
+/// A device asks for `Gpu` and the worker falls back to `Cpu` with a reason
+/// the band reports. A sim whose only consumer reads the runtime's BYTES —
+/// the docs embed's rendered frame — asks for `Cpu` outright: a GPU-tier
+/// product is GPU-resident and has no bytes to read back, so the request
+/// would buy the embed a refusal where its lamps go.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SimTier {
+    Gpu,
+    Cpu,
 }
 
 /// A handle on ONE running sim's runtime: what an effect does to it, as
@@ -84,6 +100,30 @@ pub trait SimRuntimeControl {
     /// io drains, so the fold keeps hearing the sim while a conversation
     /// owns the channel.
     fn client_io(&self, tap: Option<LensLineTap>) -> Result<Box<dyn lpa_client::ClientIo>, String>;
+
+    /// The shader tier the runtime was actually GRANTED (`"gpu"` / `"cpu"`),
+    /// or `None` while nothing has booted yet.
+    ///
+    /// The GRANT, never the request (PD12, fidelity-tiers ADR): a `gpu`
+    /// request the browser could not honour comes back `cpu`, and the
+    /// runtime band must say `cpu` — a band that repeated the request would
+    /// claim a device that was refused. Absent is absent: the band drops
+    /// the tail rather than guessing.
+    fn granted_tier(&self) -> Option<&'static str> {
+        None
+    }
+
+    /// Whether the runtime is still coming up: an open, reset or restart
+    /// has been asked for and has not answered yet.
+    ///
+    /// The fold cannot see this — a link that is attached and not open
+    /// looks the same whether a boot is in flight behind it or nothing is
+    /// — and a boot takes seconds, so the studio asks here before it
+    /// decides a sim has given up. A source whose runtimes start
+    /// instantly (the bench) never needs to say yes.
+    fn is_starting(&self) -> bool {
+        false
+    }
 }
 
 /// A powered-on sim's live backing.
@@ -162,6 +202,22 @@ impl SimDeviceTransport {
         self.powered.borrow().keys().cloned().collect()
     }
 
+    /// The shader tier this sim's runtime was granted, when it is running
+    /// and has booted (see [`SimRuntimeControl::granted_tier`]).
+    pub fn granted_tier(&self, uid: &str) -> Option<&'static str> {
+        self.powered.borrow().get(uid)?.control.granted_tier()
+    }
+
+    /// Whether this sim's runtime is still coming up (see
+    /// [`SimRuntimeControl::is_starting`]). `false` for a sim that is not
+    /// powered on.
+    pub fn is_starting(&self, uid: &str) -> bool {
+        self.powered
+            .borrow()
+            .get(uid)
+            .is_some_and(|powered| powered.control.is_starting())
+    }
+
     /// The runtime control behind a link's endpoint, when it is one of ours.
     fn control_at(&self, info: &LinkInfo) -> Option<Rc<dyn SimRuntimeControl>> {
         let uid = uid_from_sim_endpoint(&info.endpoint.0)?;
@@ -197,12 +253,19 @@ impl DeviceTransport for SimDeviceTransport {
         )))
     }
 
-    fn revoke_grant(&self, info: LinkInfo) -> DeviceTransportFuture<Result<(), String>> {
-        // Handing a sim's "grant" back is powering it off: there is no
-        // permission to return, only a runtime to stop.
-        if let Some(uid) = uid_from_sim_endpoint(&info.endpoint.0) {
-            self.power_off(uid);
-        }
+    fn revoke_grant(&self, _info: LinkInfo) -> DeviceTransportFuture<Result<(), String>> {
+        // Nothing to hand back, and nothing to stop.
+        //
+        // A sim has no browser permission to return, so the serial meaning
+        // of this verb is empty here. It must ALSO not be read as "power
+        // this off": the fold revokes a grant when it dismisses a
+        // provisional pending link, which is exactly what ADOPTING a sim
+        // into its record does — so powering off here stopped the sim
+        // Studio had just started, 0.3 s after it started, every time
+        // (browser walk, P3). The runtime's lifetime belongs to power
+        // on/off alone: `Action::Disconnect` and `Action::Forget` reach
+        // `power_off` through the controller, which is the one place that
+        // decision is made (PD8, Q15).
         Box::pin(core::future::ready(Ok(())))
     }
 
@@ -270,7 +333,7 @@ impl DeviceTransport for SimDeviceTransport {
                     fallback_storage_id,
                 } => {
                     let io = io.ok_or_else(|| "the sim has no channel".to_string())?;
-                    let mut client = lpa_client::LpClient::new(io);
+                    let mut client = lpa_client::LpClient::new(io).on_borrowed_wire();
                     let mut report = |label: String, percent: Option<u8>| progress(label, percent);
                     let report = lpa_client::push_project(
                         &mut client,
@@ -290,7 +353,7 @@ impl DeviceTransport for SimDeviceTransport {
                     fallback_storage_id,
                 } => {
                     let io = io.ok_or_else(|| "the sim has no channel".to_string())?;
-                    let mut client = lpa_client::LpClient::new(io);
+                    let mut client = lpa_client::LpClient::new(io).on_borrowed_wire();
                     let mut report = |label: String, percent: Option<u8>| progress(label, percent);
                     let report =
                         lpa_client::remove_project(&mut client, &fallback_storage_id, &mut report)
@@ -399,6 +462,7 @@ mod tests {
             target: "lightplayer/desktop".to_string(),
             display_name: "Desktop".to_string(),
             base_mac: "12:22:33:44:55:66".to_string(),
+            tier: SimTier::Gpu,
         }
     }
 
@@ -459,16 +523,25 @@ mod tests {
         assert!(!transport.power_off("dev1"), "off is the goal state");
     }
 
-    /// Revoking a sim's grant is powering it off — there is no browser
-    /// permission to hand back, only a runtime to stop.
+    /// Revoking a sim's grant leaves the runtime ALONE.
+    ///
+    /// The fold revokes a grant when it dismisses a provisional pending
+    /// link — which is what adopting a sim into its record does — so a
+    /// revoke that powered off would stop the sim Studio had just started
+    /// (browser walk, P3). There is no permission to hand back and no
+    /// decision to make here: power on/off is the controller's, through
+    /// `Connect`/`Disconnect` (PD8, Q15).
     #[test]
-    fn revoking_a_sims_grant_powers_it_off() {
+    fn revoking_a_sims_grant_leaves_the_runtime_running() {
         let transport = SimDeviceTransport::new(Rc::new(CountingSource::default()));
         transport.power_on(session("dev1")).unwrap();
 
         block_on(transport.revoke_grant(sim_link_info("dev1", "Desktop"))).unwrap();
 
-        assert!(!transport.is_powered("dev1"));
+        assert!(
+            transport.is_powered("dev1"),
+            "adopting a sim must not stop it"
+        );
     }
 
     /// The chooser has nothing to say about a sim, and says so rather than

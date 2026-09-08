@@ -372,6 +372,118 @@ pub fn seed_data(bus: &mut SocBus, rom: &ElfImage) -> Result<Vec<SeededSection>,
     Ok(seeded)
 }
 
+/// What [`seed_data_image`] reconstructed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DataImage {
+    /// The copy table's bounds, from the ROM's own symbols.
+    pub table: (u32, u32),
+    /// The lowest and highest source byte written back into the mask ROM.
+    pub span: (u32, u32),
+    pub entries: usize,
+    pub bytes: u32,
+}
+
+/// Put the mask ROM's **own data image** back where the ROM's startup will
+/// read it — the half of [`seed_data`] a ROM-up boot needs and a direct load
+/// never did.
+///
+/// # The quirk, stated twice
+///
+/// `_init` ends with a copy loop over a table of `{dst, dst_end, src}`
+/// triples between `_data_table_start` and `_bss_start`:
+///
+/// ```text
+/// 40001794 <unpackloop>:
+/// 40001794:  lw a3,0(a1)     ; dst
+/// 40001796:  lw a4,4(a1)     ; dst_end
+/// 40001798:  lw a5,8(a1)     ; src
+/// 4000179c:  lw t0,0(a5)     ; the copy
+/// ```
+///
+/// The 37 triples' `src` addresses run from `0x4004_2196` to `0x4004_25a0`,
+/// and **no `PT_LOAD` and no section of the ROM ELF reaches them**: the last
+/// loadable byte is `0x4004_2196` exclusive, and `.iram1.4` ends exactly
+/// there. On silicon those bytes are simply in the mask ROM. In the ELF they
+/// exist only as the *result* — the non-allocated `.data_*` and
+/// `.data.interface.*` sections [`seed_data`] places at the `dst` addresses.
+///
+/// So the image is derivable, and this derives it: for each triple, the
+/// bytes now at `dst` are written back at `src`. The ROM then runs its own
+/// unpack loop, for real, and copies exactly what the ELF says it should.
+///
+/// # Why it is not optional, and what it cost to find
+///
+/// Without it the loop copies **zeros** over everything [`seed_data`] had
+/// just placed. M7's second ROM-up run died 14,334 instructions in, at
+/// `usb_serial_device_tx_one_char+0x2a` — `lw a5, -8(s4)` reads
+/// `ets_ops_table_ptr` at `0x4087_fff8`, whose whole four-byte section
+/// (`.data.interface.common` = `0x4004_a680`) had been zeroed by the loop, and
+/// `lw a5, 0(a5)` then read address zero. The console cannot print its first
+/// character without this.
+///
+/// Called after [`seed_data`], whose output it reads. Harmless on the direct
+/// path: nothing there executes `_init`, and every byte written lands in the
+/// mask ROM's own address space, above everything the app owns.
+pub fn seed_data_image(bus: &mut SocBus, rom: &ElfImage) -> Result<DataImage, RomError> {
+    let start = rom
+        .symbol("_data_table_start")
+        .ok_or_else(|| RomError::NoSuchSymbol("_data_table_start".into()))?
+        .address;
+    let end = rom
+        .symbol("_bss_start")
+        .ok_or_else(|| RomError::NoSuchSymbol("_bss_start".into()))?
+        .address;
+
+    let mut image = DataImage {
+        table: (start, end),
+        span: (u32::MAX, 0),
+        entries: 0,
+        bytes: 0,
+    };
+    let mut at = start;
+    while at + 12 <= end {
+        let dst = read_word(bus, at)?;
+        let dst_end = read_word(bus, at + 4)?;
+        let src = read_word(bus, at + 8)?;
+        at += 12;
+        image.entries += 1;
+        let Some(len) = dst_end.checked_sub(dst) else {
+            log::warn!("rom: data table entry at {at:#010x} has dst_end < dst; skipped");
+            continue;
+        };
+        if len == 0 {
+            continue;
+        }
+        let mut bytes = vec![0u8; len as usize];
+        read_region_bytes(bus, dst, &mut bytes).ok_or(RomError::Unmapped {
+            vaddr: dst,
+            memsz: len,
+            at: dst,
+        })?;
+        place_spanning(bus, src, &bytes, len)?;
+        image.span.0 = image.span.0.min(src);
+        image.span.1 = image.span.1.max(src + len);
+        image.bytes += len;
+    }
+    if image.bytes == 0 {
+        image.span = (0, 0);
+    }
+    Ok(image)
+}
+
+/// Read `out.len()` bytes out of whichever RAM region holds `address`.
+fn read_region_bytes(bus: &SocBus, address: u32, out: &mut [u8]) -> Option<()> {
+    let end = address.checked_add(out.len() as u32)?.checked_sub(1)?;
+    for region in bus.regions() {
+        if region.contains(address) && region.contains(end) {
+            let at = (address - region.base) as usize;
+            out.copy_from_slice(&region.data[at..at + out.len()]);
+            return Some(());
+        }
+    }
+    None
+}
+
 /// Write `data` at `address`, then zero out to `memsz`, splitting the write
 /// at region boundaries and naming every region touched.
 ///
@@ -559,6 +671,58 @@ mod tests {
             let first = bus.read_u8(ptr).unwrap();
             assert!(first.is_ascii_graphic(), "{name} -> {first:#04x}");
         }
+    }
+
+    #[test]
+    fn the_roms_own_data_image_is_reconstructed_from_the_sections_it_unpacks_to() {
+        let rom = parse(VENDORED_C6_ROM).unwrap();
+        let mut bus = crate::machine::Esp32C6Builder::bare_bus();
+        load(&mut bus, &rom).unwrap();
+        seed_data(&mut bus, &rom).unwrap();
+
+        // `ets_ops_table_ptr`: the four bytes the ROM console dereferences
+        // on its way to `ets_delay_us`, and the ones a ROM-up boot lost.
+        let dst = rom.symbol("ets_ops_table_ptr").unwrap().address;
+        assert_eq!(dst, 0x4087_fff8);
+        let seeded = bus.read_word(dst).unwrap() as u32;
+        assert_eq!(seeded, 0x4004_a680, "seed_data placed the destination");
+
+        let image = seed_data_image(&mut bus, &rom).unwrap();
+        assert_eq!(image.table, (0x4004_1ea8, 0x4004_2064));
+        assert_eq!(image.entries, 37, "12 bytes each between those bounds");
+        assert!(image.bytes > 0x400, "{} bytes", image.bytes);
+
+        // Every source byte is inside the mask ROM and past the last
+        // `PT_LOAD`, which is the whole reason this function exists.
+        let last_loaded = 0x4000_0000 + 0x42196;
+        assert!(
+            image.span.0 >= last_loaded,
+            "the sources start at {:#010x}, before the last PT_LOAD byte {last_loaded:#010x} — \
+             then they would have been in the ELF and nothing needed rebuilding",
+            image.span.0
+        );
+        assert!(
+            image.span.1 <= memmap::DROM_MASK_BASE,
+            "{:#010x}",
+            image.span.1
+        );
+
+        // The table entry for `ets_ops_table_ptr` now reads the same word at
+        // its source as at its destination: the ROM's unpack loop copies the
+        // ELF's own value.
+        let mut found = None;
+        let mut at = image.table.0;
+        while at + 12 <= image.table.1 {
+            let d = bus.read_word(at).unwrap() as u32;
+            let e = bus.read_word(at + 4).unwrap() as u32;
+            let s = bus.read_word(at + 8).unwrap() as u32;
+            if d <= dst && dst < e {
+                found = Some(s + (dst - d));
+            }
+            at += 12;
+        }
+        let src = found.expect("a triple covers ets_ops_table_ptr");
+        assert_eq!(bus.read_word(src).unwrap() as u32, seeded);
     }
 
     #[test]

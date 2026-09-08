@@ -16,9 +16,9 @@ use lpc_model::ProjectKind;
 use lpa_studio_core::app::library::PackageHealth;
 use lpa_studio_core::{
     ColorOrder, ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d,
-    ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, Revision, SimCardState,
+    ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, Revision,
     UiControlProductPreview, UiControlSampleFormat, UiExampleCard, UiHomeView, UiIssue,
-    UiPackageCard, UiSimCard, UiSimProjectChip,
+    UiPackageCard, UiRuntimeBand,
 };
 
 use lpa_studio_core::UiAction;
@@ -74,7 +74,6 @@ fn packages() -> Vec<UiPackageCard> {
             provenance: None,
             on_device: Some("Luna's porch sign".to_string()),
             open_elsewhere: false,
-            running_in_sim: false,
             target: None,
             health: PackageHealth::Ready,
         },
@@ -88,7 +87,6 @@ fn packages() -> Vec<UiPackageCard> {
             provenance: Some("Remixed from Basic".to_string()),
             on_device: None,
             open_elsewhere: false,
-            running_in_sim: false,
             target: None,
             health: PackageHealth::Ready,
         },
@@ -102,7 +100,6 @@ fn packages() -> Vec<UiPackageCard> {
             provenance: Some("Forked from 2026-07-02-0930-porch-sign".to_string()),
             on_device: None,
             open_elsewhere: false,
-            running_in_sim: false,
             target: None,
             health: PackageHealth::Ready,
         },
@@ -116,7 +113,6 @@ fn first_run() -> Element {
     // no devices ever granted: the Connected section collapses to a slim
     // affordance; the library holds nothing yet
     let home = UiHomeView {
-        sim: None,
         projects: Vec::new(),
         examples: examples(),
         devices: Default::default(),
@@ -160,7 +156,6 @@ fn project_format_states() -> Element {
         provenance: None,
         on_device: None,
         open_elsewhere: false,
-        running_in_sim: false,
         target: None,
         health: PackageHealth::Blocked {
             headline: "project.json could not be read".to_string(),
@@ -171,7 +166,6 @@ fn project_format_states() -> Element {
         },
     });
     let home = UiHomeView {
-        sim: None,
         projects,
         examples: examples(),
         devices: Default::default(),
@@ -189,7 +183,6 @@ fn project_format_states() -> Element {
 #[story]
 fn populated() -> Element {
     let home = UiHomeView {
-        sim: Some(sim_card_fixture(true)),
         projects: packages(),
         examples: examples(),
         devices: Default::default(),
@@ -211,7 +204,6 @@ fn project_open_in_another_tab() -> Element {
     let mut projects = packages();
     projects[0].open_elsewhere = true;
     let home = UiHomeView {
-        sim: None,
         projects,
         examples: examples(),
         devices: Default::default(),
@@ -229,7 +221,6 @@ fn project_open_in_another_tab() -> Element {
 #[story]
 fn opening_a_project() -> Element {
     let mut home = UiHomeView {
-        sim: None,
         projects: packages(),
         examples: examples(),
         devices: Default::default(),
@@ -421,28 +412,6 @@ fn thumb_lamp_frame() -> UiControlProductPreview {
     }
 }
 
-/// The live sim card (D36) as the pool evidence produces it: Running with
-/// the loaded project's chip, or "nothing loaded".
-fn sim_card_fixture(with_project: bool) -> UiSimCard {
-    UiSimCard {
-        state: if with_project {
-            SimCardState::Running
-        } else {
-            SimCardState::Empty
-        },
-        project: with_project.then(|| UiSimProjectChip {
-            uid: "prj3fKq8Zr21bTxYw0AhVmDpe".to_string(),
-            name: "2026-07-02-0930-porch-sign".to_string(),
-        }),
-        board_id: None,
-        console_tail: Vec::new(),
-        frame_preview: None,
-        frame_age_secs: None,
-        frame_fps: None,
-        ui: Default::default(),
-    }
-}
-
 fn gallery(home: UiHomeView) -> Element {
     rsx! {
         section { class: "tw:p-4",
@@ -452,43 +421,10 @@ fn gallery(home: UiHomeView) -> Element {
 }
 
 #[story(
-    description = "D36: only the sim session lives — the roster leads with the sim card (Running + project chip) and the loaded project's card wears 'Running in simulator'."
-)]
-fn sim_running_only() -> Element {
-    let mut projects = packages();
-    projects[0].running_in_sim = true;
-    gallery(UiHomeView {
-        sim: Some(sim_card_fixture(true)),
-        projects,
-        examples: examples(),
-        devices: Default::default(),
-        library_available: true,
-        opening: None,
-        issue: None,
-    })
-}
-
-#[story(
-    description = "The sim session with nothing loaded: the card reads 'Connected — nothing loaded' and no project card claims a runtime."
-)]
-fn sim_with_nothing_loaded() -> Element {
-    gallery(UiHomeView {
-        sim: Some(sim_card_fixture(false)),
-        projects: packages(),
-        examples: examples(),
-        devices: Default::default(),
-        library_available: true,
-        opening: None,
-        issue: None,
-    })
-}
-
-#[story(
     description = "No transport (a browser without Web Serial, or a build without the provider): the Devices page says so rather than showing an empty roster, which would read as \"you have no devices\"."
 )]
 fn devices_page_without_a_transport() -> Element {
     gallery(UiHomeView {
-        sim: None,
         projects: packages(),
         examples: examples(),
         devices: DeviceRosterView::default(),
@@ -516,7 +452,6 @@ fn devices_page_remembered_open() -> Element {
 /// connected boards and one remembered board, with the line open or shut.
 fn devices_page_story(remembered_open: bool) -> Element {
     let home = UiHomeView {
-        sim: None,
         projects: packages(),
         examples: examples(),
         devices: roster_page_fixture(),
@@ -553,7 +488,6 @@ fn devices_page_remembered_last_frame() -> Element {
         },
     );
     let home = UiHomeView {
-        sim: None,
         projects: packages(),
         examples: examples(),
         devices,
@@ -816,6 +750,7 @@ fn roster_fixture() -> DeviceRosterView {
     DeviceRosterView {
         transport_available: true,
         feeds: Default::default(),
+        runtime_bands: Default::default(),
         // The running card has earned a registry row, so it has an editor
         // address and the running face wears Open (round-2 M5).
         open_addresses: [(1, "dev000000daqf6dvvqz".to_string())]
@@ -1133,6 +1068,7 @@ fn roster_page_fixture() -> DeviceRosterView {
     DeviceRosterView {
         transport_available: true,
         feeds: Default::default(),
+        runtime_bands: Default::default(),
         open_addresses: full.open_addresses,
         roster: RosterView {
             // The blank board's link, the one a fresh plug actually looks
@@ -1438,6 +1374,91 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
     ]
 }
 
+/// A sim-backed device card: the SAME `DeviceView` a board gets, plus the
+/// record's own title and board, so the only difference the sheet shows is
+/// the band.
+fn sim_card_view(id: u64, title: &str, board_id: &str) -> DeviceView {
+    let running = roster_fixture().roster.devices.remove(0);
+    DeviceView {
+        id: DeviceId(id),
+        title: title.to_string(),
+        board_id: Some(board_id.to_string()),
+        identity_label: Some("02:1a:2b:3c:4d:5e".to_string()),
+        ..running
+    }
+}
+
+#[story(
+    description = "The sim as a device (PD9/PD11): three faces of the SAME `DeviceRosterCard` a board gets, wearing the one thing that marks a runtime that is not silicon — the 24px runtime band under the identity rows, in the bound family, reading \"▶ Sim · <target> · in this tab · <granted tier>\". READY (Desktop, GPU) — the card a library open lands on; READY (a board sim, CPU) — the same card acting as a XIAO ESP32-C6, which is what makes \"it acts as its target\" legible; UNDER THE LENS — the editor holds the wire, so the preview slot says so and the feed is paused, exactly as it does for a board. No title prefix, no tinted edge, no second glyph: everything else on these cards is the device grammar verbatim (D38)."
+)]
+fn devices_card_sim_faces() -> Element {
+    let desktop = sim_card_view(11, "Desktop sim", "lightplayer/desktop");
+    let board = sim_card_view(12, "C6 sim", "seeed/xiao-esp32-c6");
+    let lens = DeviceView {
+        loaded_project: DeviceLoadedProject::Running {
+            label: "porch-sign".to_string(),
+        },
+        ..desktop.clone()
+    };
+    let lens_feed = DeviceCardFeedView {
+        frame: Some(thumb_lamp_frame()),
+        liveness: FeedLiveness::Lens,
+        frame_age_secs: Some(2.0),
+        engine_fps: None,
+    };
+    let faces: Vec<(
+        &str,
+        DeviceView,
+        Option<UiRuntimeBand>,
+        Option<DeviceCardFeedView>,
+    )> = vec![
+        (
+            "Ready · Desktop · GPU",
+            desktop.clone(),
+            Some(UiRuntimeBand::sim("lightplayer/desktop", Some("gpu"))),
+            None,
+        ),
+        (
+            "Ready · a board sim · CPU",
+            board,
+            Some(UiRuntimeBand::sim("seeed/xiao-esp32-c6", Some("cpu"))),
+            None,
+        ),
+        (
+            "Under the lens",
+            lens,
+            Some(UiRuntimeBand::sim("lightplayer/desktop", Some("gpu"))),
+            Some(lens_feed),
+        ),
+    ];
+    rsx! {
+        section { class: "tw:p-4 tw:grid tw:gap-4",
+            div { class: "tw:grid tw:grid-cols-[repeat(2,400px)] tw:items-start tw:gap-3",
+                for (label , card , runtime , feed) in faces {
+                    div { key: "{label}", class: "tw:grid tw:gap-2",
+                        p { class: "tw:m-0 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:tracking-wide tw:text-subtle-foreground",
+                            "{label}"
+                        }
+                        DeviceRosterCard {
+                            card,
+                            runtime,
+                            feed,
+                            open_uid: Some("dev000000daqf6dvvqz".to_string()),
+                            projects: packages(),
+                            examples: examples(),
+                            on_action: |_| {},
+                        }
+                    }
+                }
+            }
+            // Powered off: an offline sim is not a card at all — its
+            // record sits on the Devices page's remembered line with
+            // Power on in the Reconnect slot (Q5), which
+            // `devices_page_remembered_open` already captures.
+        }
+    }
+}
+
 fn card_state_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
     let running = roster_fixture().roster.devices.remove(0);
     let open_uid = Some("dev000000daqf6dvvqz".to_string());
@@ -1533,7 +1554,6 @@ fn armed_card_fixture() -> DeviceView {
 #[story]
 fn store_unavailable_with_issue() -> Element {
     let home = UiHomeView {
-        sim: None,
         projects: Vec::new(),
         examples: examples(),
         devices: Default::default(),
@@ -1759,7 +1779,6 @@ fn pick_popover_library() -> Vec<UiPackageCard> {
             provenance: None,
             on_device: None,
             open_elsewhere: false,
-            running_in_sim: false,
             target: None,
             health: PackageHealth::Ready,
         })

@@ -139,6 +139,22 @@ pub static PROSE_TIMING: MaskRule = MaskRule::new(
     "$1=N$2",
 );
 
+/// The `[WS281X]` telemetry line's own timestamp.
+///
+/// The one field in that line that is a clock rather than a count: the module
+/// reports when ten seconds of *its* uptime have passed, so `t_ms` is a
+/// property of when the run started printing, not of the refill race. Every
+/// other field on the line — the frame counters, the refill counts, the two
+/// histograms — is left comparable, because they are what the line exists to
+/// say.
+pub static WS281X_TIMESTAMP: MaskRule = MaskRule::new(
+    "ws281x-timestamp",
+    "the telemetry line's own uptime stamp; the counters beside it are the claim",
+    FieldClass::Timing,
+    r"(\[WS281X\] )t_ms=[0-9]+",
+    "${1}t_ms=N",
+);
+
 /// The stack high-water report.
 pub static STACK_HIGH_WATER: MaskRule = MaskRule::new(
     "stack-high-water",
@@ -334,6 +350,22 @@ pub static BOOT_IDLE: MaskSet = MaskSet {
     ],
 };
 
+/// The `rmt-chase` set: ANSI, the boot banner's stamps, and the telemetry
+/// line's own uptime stamp — and **nothing else**.
+///
+/// Deliberately the shortest set in the file after `normalize`. Every number
+/// this payload prints is a claim it exists to make: the per-frame checksums
+/// are the frames, and the `[WS281X]` counters are what the driver believes
+/// about the refill race. `PROSE_TIMING` is absent on purpose: it rewrites
+/// `frame=N`, which is one character from this payload's `frames=768`, and a
+/// mask that erases the gate is worse than no mask at all.
+pub static RMT_CHASE: MaskSet = MaskSet {
+    name: "rmt-chase",
+    description: "ANSI, boot timestamps and the telemetry line's t_ms; every \
+                  counter and checksum is left comparable",
+    rules: &[&ANSI, &BOOT_TIMESTAMP, &WS281X_TIMESTAMP],
+};
+
 pub static ALL_SETS: &[&MaskSet] = &[
     &NORMALIZE,
     &COMPILE_HARNESS,
@@ -341,6 +373,7 @@ pub static ALL_SETS: &[&MaskSet] = &[
     &BOOT_LOG,
     &JIT_MATH_PERF,
     &BOOT_IDLE,
+    &RMT_CHASE,
 ];
 
 pub fn mask_set(name: &str) -> Result<&'static MaskSet> {

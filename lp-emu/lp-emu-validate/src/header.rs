@@ -103,6 +103,27 @@ pub struct TranscriptHeader {
     /// Anything else a reader needs before trusting a number here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// The **pin capture** that goes with this transcript: the file name of a
+    /// JSON-lines companion sitting beside the `.txt`, one decoded frame per
+    /// line, as `lp-emu-esp32c6 --dump-frames` writes them.
+    ///
+    /// The one thing a console capture cannot hold. Everything else in a
+    /// transcript is something the device said; this is what a **pad**
+    /// carried, decoded from the waveform by something that never spoke to
+    /// the firmware — so `[fw-check-json] {"kind":"rmt-frame","crc":…}` (the
+    /// driver's claim) and `{"kind":"ws281x-frame","wire":…}` (the wire) can
+    /// be compared frame by frame, as a `Pin`-class comparison that fails a
+    /// replay. Approved as an additive widening of the G2 contract (E3,
+    /// 2026-09-07: "why wouldn't we want that?").
+    ///
+    /// **Additive, and deliberately so.** It is a file *name*, resolved
+    /// against the transcript's own directory, so a tree can be moved
+    /// wholesale. A sidecar without it — every sidecar written before M5 P3 —
+    /// loads exactly as it did, and a payload that makes no pin claim never
+    /// gains one: only a payload whose registry entry sets `pin_capture` is
+    /// recorded with a companion at all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pins: Option<String>,
     /// What this configuration is trusted for, per field class.
     #[serde(default)]
     pub trust: TrustTable,
@@ -129,6 +150,14 @@ impl TranscriptHeader {
             self.payload,
             self.file_stem()?
         ))
+    }
+
+    /// The pin capture's file name for this transcript: `<stem>.txt.pins.jsonl`,
+    /// the same shape as the sidecar's `<stem>.txt.meta.json` so that the
+    /// three files sort together and no reader has to guess which transcript
+    /// a companion belongs to.
+    pub fn pins_file_name(&self) -> Result<String> {
+        Ok(format!("{}.txt.pins.jsonl", self.file_stem()?))
     }
 
     pub fn from_json(text: &str) -> Result<Self> {
@@ -307,6 +336,7 @@ mod tests {
             source: None,
             capture: None,
             note: None,
+            pins: None,
             trust: TrustTable::default(),
         }
     }
@@ -364,6 +394,38 @@ mod tests {
                 .firmware_sha256,
             None
         );
+    }
+
+    /// The E3 widening is additive in the only sense that matters: a sidecar
+    /// written before it exists loads unchanged, and one written after it
+    /// does not gain a field when the payload makes no pin claim.
+    #[test]
+    fn the_pins_field_is_additive() {
+        let before = r#"{
+            "schema": 1,
+            "payload": "shader-compile-stress",
+            "chip": "esp32c6",
+            "configuration": "silicon:esp32c6",
+            "date": "2026-09-06",
+            "firmware_commit": "d6cfaa2051ae",
+            "firmware_features": ["esp32c6"]
+        }"#;
+        let h = TranscriptHeader::from_json(before).expect("an older sidecar still loads");
+        assert_eq!(h.pins, None);
+        assert!(
+            !h.to_json().unwrap().contains("pins"),
+            "a payload with no pin claim gains no field"
+        );
+
+        let mut h = header();
+        h.pins = Some(h.pins_file_name().unwrap());
+        assert_eq!(
+            h.pins.as_deref(),
+            Some("silicon-esp32c6-2026-09-06-d6cfaa205.txt.pins.jsonl"),
+            "the companion sorts beside the .txt and its .meta.json"
+        );
+        let back = TranscriptHeader::from_json(&h.to_json().unwrap()).unwrap();
+        assert_eq!(back.pins, h.pins);
     }
 
     #[test]

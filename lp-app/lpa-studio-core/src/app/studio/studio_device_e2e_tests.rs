@@ -260,7 +260,8 @@ impl DeviceTransport for ScriptedTransport {
                         // actual ask → stop → delete conversation runs over
                         // the fake's own `M!` wire into a real `LpServer`.
                         RemovePlan::Real => {
-                            let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(&device));
+                            let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(&device))
+                                .on_borrowed_wire();
                             let mut report = |label: String, percent: Option<u8>| {
                                 progress(label, percent);
                             };
@@ -311,7 +312,8 @@ impl DeviceTransport for ScriptedTransport {
                             // `M!` byte wire, into a real `LpServer` over
                             // `LpFsMemory`. Nothing about the stop/write/
                             // load order or the hash check is faked.
-                            let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(&device));
+                            let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(&device))
+                                .on_borrowed_wire();
                             let mut report = |label: String, percent: Option<u8>| {
                                 progress(label, percent);
                             };
@@ -865,8 +867,8 @@ impl DeviceBench {
     fn lens_device_uid(&self) -> Option<String> {
         self.controller
             .runtime_pool_for_test()
-            .device_session()
-            .and_then(crate::RuntimeSession::device_attachment)
+            .attached_session()
+            .map(crate::RuntimeSession::attachment)
             .map(|attachment| attachment.uid.clone())
     }
 
@@ -937,15 +939,15 @@ fn opening_the_lens_borrows_the_wire_and_the_card_keeps_folding() {
         .expect("the running board opens in the editor");
     assert_eq!(bench.lens_device_uid().as_deref(), Some(uid.as_str()));
     let pool = bench.controller.runtime_pool_for_test();
-    let session = pool.device_session().expect("a device session");
+    let session = pool.attached_session().expect("a device session");
     assert_eq!(
         pool.lens(),
         Some(session.id()),
         "the editor is the lens on it"
     );
     assert!(session.is_connected(), "the wire client is up");
-    assert_eq!(session.kind(), crate::RuntimeKind::Device);
-    let link = session.device_attachment().expect("attachment").link;
+    assert_eq!(session.transport(), crate::LinkTransport::Serial);
+    let link = session.attachment().link;
     assert!(
         bench
             .controller
@@ -1049,7 +1051,7 @@ fn opening_the_lens_reads_the_board_build_for_the_picker_gate() {
 
     bench.open_lens(&uid).expect("opens");
     let pool = bench.controller.runtime_pool_for_test();
-    let session = pool.device_session().expect("a device session");
+    let session = pool.attached_session().expect("a device session");
     let reported = session
         .device_features()
         .expect("the attach read the board's build off the wire");
@@ -1156,8 +1158,8 @@ fn a_card_verb_on_the_lens_device_closes_the_editor_and_then_runs() {
     let link = bench
         .controller
         .runtime_pool_for_test()
-        .device_session()
-        .and_then(crate::RuntimeSession::device_attachment)
+        .attached_session()
+        .map(crate::RuntimeSession::attachment)
         .expect("attachment")
         .link;
 
@@ -3733,5 +3735,399 @@ fn a_running_sim_feeds_its_card_over_the_shared_link() {
     assert!(
         !journal.iter().any(|line| line.contains("Passthrough")),
         "{journal:#?}"
+    );
+}
+
+// ---------------------------------------------------------------------
+// P3: opening a project starts a device (D33, D37, PD9)
+// ---------------------------------------------------------------------
+
+/// Install a library package targeting `target` and return its uid.
+///
+/// A real bundled example's files with the target stamped into its
+/// manifest: the open PUSHES this package into the runtime, and a runtime
+/// refuses a project that is only a manifest.
+fn library_package(bench: &DeviceBench, name: &str, target: &str) -> String {
+    let example = crate::app::home::embedded_example(
+        crate::first_bundled_example_id().expect("this build bundles examples"),
+    )
+    .expect("the bundled example");
+    let files: Vec<(String, Vec<u8>)> = example
+        .files()
+        .into_iter()
+        .map(|(path, bytes)| match path.as_str() {
+            "project.json" => {
+                let mut manifest: serde_json::Value =
+                    serde_json::from_slice(&bytes).expect("the example's manifest parses");
+                manifest["target"] = serde_json::Value::String(target.to_string());
+                (path, serde_json::to_vec(&manifest).expect("re-encode"))
+            }
+            _ => (path, bytes),
+        })
+        .collect();
+    bench
+        .store
+        .install_package(
+            name,
+            &files,
+            crate::app::library::PackageProvenance::Created,
+            1.0,
+        )
+        .expect("install")
+        .uid
+        .to_string()
+}
+
+/// Dispatch the gallery's own open and let the tick land whatever it held.
+fn open_package(bench: &mut DeviceBench, tasks: &TaskPool, uid: &str) {
+    bench.controller.request_library_refresh();
+    drive(bench.controller.settle_library());
+    drive(bench.controller.dispatch(UiAction::from_op(
+        crate::ControllerId::new(crate::HOME_NODE_ID),
+        crate::HomeOp::OpenPackage {
+            key: uid.to_string(),
+        },
+    )))
+    .expect("the gallery's open never fails loudly");
+    // The lens is HELD until the device says hello (the fold that produces
+    // it runs on the actor's queue, which is what the bench's step IS), so
+    // the tick's own attach has to run here the way the actor runs it.
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    while bench
+        .controller
+        .runtime_pool_for_test()
+        .lens_session()
+        .is_none()
+    {
+        bench.step(tasks);
+        drive(bench.controller.try_pending_device_lens());
+        assert!(
+            bench.controller.pending_device_lens_for_test().is_some()
+                || bench
+                    .controller
+                    .runtime_pool_for_test()
+                    .lens_session()
+                    .is_some(),
+            "the held lens was dropped without landing: {:?}",
+            bench
+                .controller
+                .view()
+                .console
+                .entries
+                .iter()
+                .rev()
+                .take(10)
+                .map(|entry| entry.message.clone())
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for the open to land its lens; roster now: {:?}",
+            bench.view()
+        );
+        // Paced like `run_until`, and for the same reason: a step is 5 fake
+        // ms, and the sim this open just powered on boots a real host
+        // runtime on a real thread. Spinning steps as fast as the CPU allows
+        // would spend the fold's 5 s identify budget (~1000 steps) in a few
+        // real milliseconds and give that thread no chance to say hello —
+        // the open would then read a booting sim as one that never started
+        // and drop the hold, which is precisely what a loaded CI box saw.
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+/// D33 + PD9: opening a library project with no sim MAKES one of the
+/// project's target, powers it on and lands the lens on it. The device is
+/// an ordinary registry row — the open did not invent a runtime beside
+/// the roster, it created a device.
+#[test]
+fn opening_a_project_with_no_sim_creates_one_and_lands_the_lens_on_it() {
+    let device = sim_light_player();
+    let (mut bench, tasks) = DeviceBench::build(&device, "unused-serial-port", false, false);
+    let sims = Rc::new(SimDeviceTransport::new(Rc::new(ScriptedSimSource {
+        device: device.clone(),
+        restarts: Rc::new(Cell::new(0)),
+        manifests: Rc::new(RefCell::new(Vec::new())),
+    })));
+    bench.sims = Some(Rc::clone(&sims));
+    bench.controller.set_device_sim_transport(sims);
+    bench.controller.set_random(|| {
+        let mut bytes = [0u8; 16];
+        bytes[..6].copy_from_slice(&SIM_RANDOM);
+        bytes
+    });
+
+    let uid = library_package(&bench, "Porch sign", SIM_TARGET);
+    assert!(bench.registry().is_empty(), "nothing before the open");
+
+    open_package(&mut bench, &tasks, &uid);
+
+    let rows = bench.registry();
+    assert_eq!(rows.len(), 1, "the open created ONE device: {rows:?}");
+    assert_eq!(rows[0].transport, "sim");
+    assert_eq!(
+        rows[0].board_id.as_deref(),
+        Some(SIM_TARGET),
+        "born wearing the project's target"
+    );
+    let session = bench
+        .controller
+        .runtime_pool_for_test()
+        .lens_session()
+        .expect("the lens landed");
+    assert_eq!(session.transport(), crate::LinkTransport::Sim);
+    assert_eq!(session.attachment().uid, rows[0].uid);
+}
+
+/// A sim whose runtime dies before it ever says hello — the browser worker
+/// that could not fetch its engine (G1, 2026-09-07) — must not hold the
+/// open forever. The fold hears Error + Closed, spends its identify
+/// retries and stops; the tick then ends the open with a verdict naming
+/// the device, powers the sim off so it can be started again, and leaves
+/// the record where it was. Nothing hangs, and nothing is forgotten.
+#[test]
+fn a_sim_that_never_says_hello_fails_the_open_instead_of_holding_it() {
+    let device = sim_light_player();
+    // The wire is dead from the first byte: every open lands, then closes
+    // on its first read — what the link does for a worker that posted
+    // `fatal` on the way up.
+    device.set_failure_plan(
+        lpa_link::providers::fake_device::FakeFailurePlan::none().with_disconnect_after_bytes(0),
+    );
+    let (mut bench, tasks) = DeviceBench::build(&device, "unused-serial-port", false, false);
+    let sims = Rc::new(SimDeviceTransport::new(Rc::new(ScriptedSimSource {
+        device: device.clone(),
+        restarts: Rc::new(Cell::new(0)),
+        manifests: Rc::new(RefCell::new(Vec::new())),
+    })));
+    bench.sims = Some(Rc::clone(&sims));
+    bench.controller.set_device_sim_transport(sims);
+    bench.controller.set_random(|| {
+        let mut bytes = [0u8; 16];
+        bytes[..6].copy_from_slice(&SIM_RANDOM);
+        bytes
+    });
+    let key = library_package(&bench, "Porch sign", SIM_TARGET);
+    bench.controller.request_library_refresh();
+    drive(bench.controller.settle_library());
+
+    let outcome = drive(bench.controller.dispatch(UiAction::from_op(
+        crate::ControllerId::new(crate::HOME_NODE_ID),
+        crate::HomeOp::OpenPackage { key: key.clone() },
+    )));
+    assert!(
+        outcome.is_ok(),
+        "the open is held, never refused: {outcome:?}"
+    );
+    let sim_uid = bench
+        .controller
+        .pending_device_lens_for_test()
+        .expect("the lens is held while the sim boots");
+    assert!(
+        bench
+            .sims
+            .as_ref()
+            .expect("a sim transport")
+            .is_powered(&sim_uid),
+        "the open powered the sim on"
+    );
+
+    // The fold asks, the wire closes, the fold re-asks up to its cap and
+    // stops; the tick then notices and ends the open.
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    while bench.controller.pending_device_lens_for_test().is_some() {
+        bench.step(&tasks);
+        drive(bench.controller.try_pending_device_lens());
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the hold on a sim that never said hello was never released; roster now: {:?}",
+            bench.view()
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+
+    assert!(
+        bench
+            .controller
+            .runtime_pool_for_test()
+            .lens_session()
+            .is_none(),
+        "nothing landed"
+    );
+    let crate::app::open_progress::OpenStage::Failed(failure) =
+        crate::app::open_progress::open_stage()
+    else {
+        panic!(
+            "the opening frame got no verdict: {:?}",
+            crate::app::open_progress::open_stage()
+        );
+    };
+    assert!(
+        failure.message.ends_with("did not start"),
+        "the verdict names the device: {:?}",
+        failure.message
+    );
+    assert_eq!(
+        failure.retry,
+        UiAction::from_op(
+            crate::ControllerId::new(crate::HOME_NODE_ID),
+            crate::HomeOp::OpenPackage { key },
+        ),
+        "Retry is the same open"
+    );
+    assert!(
+        !bench
+            .sims
+            .as_ref()
+            .expect("a sim transport")
+            .is_powered(&sim_uid),
+        "the sim was powered off, so Power on and Retry can start it again"
+    );
+    let rows = bench.registry();
+    assert_eq!(rows.len(), 1, "the record survives: {rows:?}");
+    assert_eq!(rows[0].uid, sim_uid);
+    assert_eq!(rows[0].transport, "sim");
+    // Settle the detach the power-off raised, then read the roster: the
+    // record is back on the remembered line, and no pending card is left
+    // behind for the dead link.
+    bench.step(&tasks);
+    let view = bench.view();
+    assert!(
+        view.pending.is_empty(),
+        "no orphaned pending card: {view:?}"
+    );
+    assert_eq!(view.devices.len(), 1, "{view:?}");
+    assert!(
+        !view.devices[0].state_label.starts_with("Ready"),
+        "the record is not claiming a runtime it does not have: {:?}",
+        view.devices[0].state_label
+    );
+    let last = bench
+        .controller
+        .view()
+        .console
+        .entries
+        .iter()
+        .rev()
+        .find(|entry| entry.message.contains("did not start"))
+        .map(|entry| entry.message.clone());
+    assert!(last.is_some(), "the console says why");
+}
+
+/// D37: the tab runs ONE device. Opening a project for another target
+/// powers the running sim off — silently, and keeping its record, which is
+/// what puts it on the remembered line with Power on (Q5).
+///
+/// The SECOND sim's landing is `opening_a_project_with_no_sim_…`'s claim:
+/// this bench has one fake identity, so two sims cannot both say hello on
+/// it. What this row pins is the eviction.
+#[test]
+fn opening_a_project_for_another_target_powers_the_first_sim_off_and_keeps_it() {
+    let (mut bench, tasks, first_uid, _device) = powered_on_sim();
+    assert!(
+        bench
+            .sims
+            .as_ref()
+            .expect("a sim transport")
+            .is_powered(&first_uid),
+        "the first sim is running before the open"
+    );
+
+    let other = library_package(&bench, "Desk lamp", "lightplayer/desktop");
+    bench.controller.request_library_refresh();
+    drive(bench.controller.settle_library());
+    let _ = drive(bench.controller.dispatch(UiAction::from_op(
+        crate::ControllerId::new(crate::HOME_NODE_ID),
+        crate::HomeOp::OpenPackage { key: other },
+    )));
+    for _ in 0..20 {
+        bench.step(&tasks);
+    }
+
+    assert!(
+        !bench
+            .sims
+            .as_ref()
+            .expect("a sim transport")
+            .is_powered(&first_uid),
+        "the first sim powered off — one device per tab"
+    );
+    assert!(
+        bench.registry().iter().any(|row| row.uid == first_uid),
+        "and its record stayed: power off is not Forget"
+    );
+    assert!(
+        bench
+            .registry()
+            .iter()
+            .any(|row| row.board_id.as_deref() == Some("lightplayer/desktop")),
+        "the open minted a device of the project\'s own target"
+    );
+}
+
+/// D33: an open must never touch silicon. With the editor held on a BOARD,
+/// opening a library project gives that board its wire back and reaches
+/// for a sim instead — and nothing at all is written to the board.
+#[test]
+fn opening_a_project_under_a_board_lens_never_touches_the_board() {
+    // A DIFFERENT identity from the sim's: the board and the sim must not
+    // fold into one record, which is the whole point of the assertion.
+    let board = empty_light_player("dev000000daqf6dvvqz");
+    let (mut bench, tasks) = identified(&board, "usb-1");
+    let sims = Rc::new(SimDeviceTransport::new(Rc::new(ScriptedSimSource {
+        device: sim_light_player(),
+        restarts: Rc::new(Cell::new(0)),
+        manifests: Rc::new(RefCell::new(Vec::new())),
+    })));
+    bench.sims = Some(Rc::clone(&sims));
+    bench.controller.set_device_sim_transport(sims);
+    bench.controller.set_random(|| {
+        let mut bytes = [0u8; 16];
+        bytes[..6].copy_from_slice(&SIM_RANDOM);
+        bytes
+    });
+
+    let board_uid = bench.registry()[0].uid.clone();
+    bench
+        .open_lens(&board_uid)
+        .expect("the board opens in the editor");
+    assert_eq!(bench.lens_device_uid().as_deref(), Some(board_uid.as_str()));
+    let writes_before = bench.manifest_writes.borrow().len();
+    let revoked_before = bench.revoked.borrow().len();
+
+    let uid = library_package(&bench, "Porch sign", SIM_TARGET);
+    bench.controller.request_library_refresh();
+    drive(bench.controller.settle_library());
+    let _ = drive(bench.controller.dispatch(UiAction::from_op(
+        crate::ControllerId::new(crate::HOME_NODE_ID),
+        crate::HomeOp::OpenPackage { key: uid },
+    )));
+    for _ in 0..20 {
+        bench.step(&tasks);
+    }
+
+    assert_ne!(
+        bench.lens_device_uid().as_deref(),
+        Some(board_uid.as_str()),
+        "the editor left the board rather than pushing at it"
+    );
+    assert_eq!(
+        bench.manifest_writes.borrow().len(),
+        writes_before,
+        "nothing was written to the board"
+    );
+    assert_eq!(
+        bench.revoked.borrow().len(),
+        revoked_before,
+        "and its port grant was left alone"
+    );
+    assert!(
+        bench
+            .view()
+            .devices
+            .iter()
+            .any(|card| card.board_id.as_deref() == Some(SIM_TARGET)),
+        "the open reached for a sim of the project\'s target: {:?}",
+        bench.view()
     );
 }

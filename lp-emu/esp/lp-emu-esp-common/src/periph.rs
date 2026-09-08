@@ -241,6 +241,8 @@ pub struct BusCx<'a> {
     pub matrix: &'a mut dyn CpuIntMatrix,
     /// See [`MachineRequest`]. Set through [`BusCx::request`].
     pub request: &'a mut Option<MachineRequest>,
+    /// Set through [`BusCx::yield_to_machine`].
+    pub yield_now: &'a mut bool,
     /// The chip's signal fabric: where an output signal goes (plan DD34 e).
     /// The same seam as `matrix`, for pads: the GPIO block is a routing
     /// **view** that writes into it, an output peripheral drives its signal
@@ -258,6 +260,18 @@ impl BusCx<'_> {
             return;
         }
         *self.request = Some(request);
+    }
+
+    /// End the slice after this store, so the machine acts before the guest
+    /// runs another instruction.
+    ///
+    /// Not a request and not an interrupt: the machine does whatever it
+    /// does between slices — fire due events, refill the cache window — and
+    /// the guest carries on. The C6's cache MMU is the reason it exists: an
+    /// entry write changes what an address *means*, and the bootloader
+    /// reads through the window a handful of instructions later.
+    pub fn yield_to_machine(&mut self) {
+        *self.yield_now = true;
     }
 }
 
@@ -409,6 +423,9 @@ pub struct Sandbox {
     pub host: HostSinks,
     pub matrix: Box<dyn CpuIntMatrix>,
     pub request: Option<MachineRequest>,
+    /// See [`BusCx::yield_to_machine`]; a test can assert a peripheral
+    /// asked for one.
+    pub yield_now: bool,
     pub pins: Fabric,
 }
 
@@ -430,6 +447,7 @@ impl Sandbox {
             host: HostSinks::new(),
             matrix: Box::new(NoCpuInterrupts),
             request: None,
+            yield_now: false,
             pins: Fabric::new(),
         }
     }
@@ -451,6 +469,7 @@ impl Sandbox {
             host: &mut self.host,
             matrix: &mut *self.matrix,
             request: &mut self.request,
+            yield_now: &mut self.yield_now,
             pins: &mut self.pins,
         }
     }

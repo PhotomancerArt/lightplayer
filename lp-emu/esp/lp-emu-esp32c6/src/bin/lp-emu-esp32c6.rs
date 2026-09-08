@@ -23,16 +23,28 @@ use lp_emu_esp32c6::machine::{
     StopCondition, StripConfig, TimeGrade, Uart0Sink, UsbHost, UsbSjDrain, UsbSjSink,
 };
 use lp_emu_esp32c6::memmap;
+use lp_emu_esp32c6::periph::rmt::RefillStats;
 
 const USAGE: &str = "\
 lp-emu-esp32c6 — the ESP32-C6 machine
 
 USAGE:
     lp-emu-esp32c6 --elf <app.elf> [options]
+    lp-emu-esp32c6 --merged <chip.bin> [--elf <app.elf>] [options]
     lp-emu-esp32c6 --hooks
 
 OPTIONS:
-    --elf <path>            the application image to direct-load
+    --elf <path>            the application image to direct-load. With
+                            --merged it is never loaded: it is the symbol
+                            table --probe/--break-at read and the image the
+                            boot report cross-checks against
+    --merged <path>         boot the chip from its RESET VECTOR with these
+                            bytes in flash: the second-stage bootloader at
+                            0x0, the partition table at 0x8000, the app in
+                            the factory partition — the layout a flasher
+                            writes (scripts/emu/build-merged-image.sh). The
+                            real mask ROM and the real bootloader do the
+                            loading. Read-only; implies the chip's size
     --rom <path>            a mask ROM ELF (default: the vendored C6 rev0 image)
     --time-grade t1|t2      t1 = instruction count, t2 = the per-class model [t1]
     --timeout <5s|1500ms|900us>
@@ -116,6 +128,23 @@ OPTIONS:
     --pin-log file:<path>   every edge on every routed pad: `<us> gpio18 0|1`.
                             12,288 lines per 256-LED frame — never a default,
                             capped at 2,000,000 lines
+    --reset-cause poweron|usb-uart
+                            what LP_CLKRST.reset_cause says, and so what the
+                            mask ROM prints as `rst:0x..`: a cold chip, or a
+                            host's DTR/RTS dance on the serial bridge (the
+                            silicon boot transcripts were captured after one
+                            of those) [poweron]
+    --reboot-on-reset       PERFORM a reset request instead of reporting it:
+                            reboot the chip into the strap the request names
+                            (the USB reset dance, the RWDT's stage action) and
+                            carry on. Off by default — three recorded
+                            scenarios read the exit code as their evidence.
+                            Needs a boot chain, so it is only useful with
+                            --merged
+    --strap app|download    where the strapping pins were at reset, and so
+                            what the ROM prints as `boot:0x..`: the flash
+                            bootloader, or the ROM's own download console
+                            [app]
     --efuse-mac <a0:f2:..>  the MAC the eFuse block reports [the desk board]
     --efuse-rev <0.2>       wafer major.minor [0.2]
     --seed <u64>            the machine PRNG's seed [0]
@@ -168,6 +197,7 @@ fn main() -> ExitCode {
 #[derive(Default)]
 struct Args {
     elf: Option<PathBuf>,
+    merged: Option<PathBuf>,
     rom: Option<PathBuf>,
     time_grade: TimeGrade,
     timeout: Option<u64>,
@@ -184,6 +214,11 @@ struct Args {
     usb_script: Vec<PathBuf>,
     control: Option<String>,
     efuse: EfuseIdentity,
+    reset_cause: lp_emu_esp32c6::loader::ResetCause,
+    /// `Option` only because `Args` derives `Default` and a strapping
+    /// word has no neutral value; `None` is the app strap.
+    strap: Option<lp_emu_esp_common::Strap>,
+    reboot_on_reset: bool,
     seed: u64,
     trace: bool,
     trace_blocks: Vec<String>,
@@ -216,6 +251,9 @@ fn run() -> Result<ExitCode, String> {
         .poll_skip(!args.no_poll_skip)
         .strict_grade(args.strict_grade)
         .efuse(args.efuse)
+        .reset_cause(args.reset_cause)
+        .strap(args.strap.unwrap_or(lp_emu_esp_common::Strap::App))
+        .reboot_on_reset(args.reboot_on_reset)
         .seed(args.seed)
         .uart0(args.uart0.clone())
         .usb_sj(args.usb_sj.clone())
@@ -264,8 +302,39 @@ fn run() -> Result<ExitCode, String> {
     }
     if let Some(elf) = args.elf.clone() {
         builder = builder.app(AppSource::Path(elf));
-    } else if !args.hooks {
-        return Err("--elf is required (or --hooks / --map)".to_string());
+    } else if !args.hooks && args.merged.is_none() {
+        return Err("--elf or --merged is required (or --hooks / --map)".to_string());
+    }
+    if let Some(image) = args.merged.clone() {
+        if !matches!(args.flash, FlashBacking::Blank) {
+            return Err(
+                "--merged is the chip's bytes; --flash / --flash-copy would be a second chip"
+                    .to_string(),
+            );
+        }
+        let len = std::fs::metadata(&image)
+            .map_err(|e| format!("{}: {e}", image.display()))?
+            .len();
+        let len = u32::try_from(len).map_err(|_| {
+            format!(
+                "{} is {len} bytes; no chip this machine models is that large",
+                image.display()
+            )
+        })?;
+        if !len.is_power_of_two() {
+            return Err(format!(
+                "{} is {len} bytes, which is not a whole chip — a merged image is the WHOLE \
+                 flash part, padded to its size (espflash `save-image --merge` does this)",
+                image.display()
+            ));
+        }
+        // Read-only on purpose: a merged image is an input, and a boot that
+        // wrote back into it would quietly stop being the image the gate
+        // named. `--flash` is how a run keeps its writes.
+        builder = builder
+            .boot_mode(lp_emu_esp32c6::machine::BootMode::RomUp)
+            .flash(FlashBacking::Copy(image))
+            .flash_len(args.flash_len.unwrap_or(len));
     }
     if args.trace {
         let sink: Box<dyn std::io::Write + Send> = match &args.trace_file {
@@ -336,6 +405,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                 std::process::exit(0);
             }
             "--elf" => args.elf = Some(value("--elf")?.into()),
+            "--merged" => args.merged = Some(value("--merged")?.into()),
             "--rom" => args.rom = Some(value("--rom")?.into()),
             "--time-grade" => args.time_grade = TimeGrade::parse(&value("--time-grade")?)?,
             "--timeout" => args.timeout = Some(parse_duration_us(&value("--timeout")?)?),
@@ -379,6 +449,22 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                 args.strict_grade = Some(RegGrade::parse(&text).ok_or_else(|| {
                     format!("--strict-grade `{text}`: expected modeled, documented or measured")
                 })?);
+            }
+            "--reset-cause" => {
+                let text = value("--reset-cause")?;
+                args.reset_cause =
+                    lp_emu_esp32c6::loader::ResetCause::parse(&text).ok_or_else(|| {
+                        format!("--reset-cause `{text}`: expected poweron or usb-uart")
+                    })?;
+            }
+            "--reboot-on-reset" => args.reboot_on_reset = true,
+            "--strap" => {
+                let text = value("--strap")?;
+                args.strap = Some(match text.as_str() {
+                    "app" => lp_emu_esp_common::Strap::App,
+                    "download" => lp_emu_esp_common::Strap::Download,
+                    other => return Err(format!("--strap `{other}`: expected app or download")),
+                });
             }
             "--efuse-mac" => args.efuse.mac = EfuseIdentity::parse_mac(&value("--efuse-mac")?)?,
             "--efuse-rev" => {
@@ -682,6 +768,43 @@ fn print_load_report(machine: &Esp32C6Machine) {
     }
 }
 
+/// The RMT's own reading of the refill race, per channel, at exit.
+///
+/// Two histograms in the shape the `[WS281X]` telemetry line prints its own —
+/// nine buckets, eighths of a half-window, the last one "≥ half" — so the two
+/// can be read side by side. **Reported, never gated** (D13/PD9): the entry
+/// half is a floor, because the emulated ISR path is RAM-resident and the
+/// machine has no flash-miss cost, and silicon's own entry delay is mostly
+/// those misses.
+///
+/// Silent for a run whose guest never started a channel, which is every run
+/// that does not load a project or drive a strip.
+fn report_refill_lag(machine: &Esp32C6Machine) {
+    for ch in 0..lp_emu_esp32c6::periph::rmt::TX_CHANNELS {
+        let s = machine.rmt_refill_stats(ch);
+        if s.refills == 0 && s.unanswered == 0 {
+            continue;
+        }
+        eprintln!(
+            "rmt refill ch{ch}: {} measured, half={} words; entry max {} hist {}; \
+             fill max {} hist {}{}",
+            s.refills,
+            s.half_words,
+            s.entry_max,
+            RefillStats::hist_string(&s.entry_hist),
+            s.fill_max,
+            RefillStats::hist_string(&s.fill_hist),
+            match s.unanswered {
+                0 => String::new(),
+                n => format!(
+                    "; {n} threshold(s) the guest never answered before the frame ended \
+                     (the last one of a frame is `finish`'s, not `refill`'s)"
+                ),
+            }
+        );
+    }
+}
+
 fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
     let cycles = machine.cycles();
     eprintln!(
@@ -775,6 +898,7 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
     for line in machine.pin_summaries() {
         eprintln!("{line}");
     }
+    report_refill_lag(machine);
     let tried = machine.usb_sj_tried();
     if !tried.is_empty() {
         eprintln!(

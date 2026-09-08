@@ -86,41 +86,12 @@ pub(crate) fn install(controller: &mut StudioController) {
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn install(_controller: &mut StudioController) {}
 
-/// The full readable trace: the previous session's persisted lines (if
-/// any) followed by the current session's. The copy affordance's payload.
-#[cfg(target_arch = "wasm32")]
-pub(crate) fn trace_jsonl() -> String {
-    let previous = read_storage(PREVIOUS_STORAGE_KEY).unwrap_or_default();
-    TRACE.with(|trace| {
-        let trace = trace.borrow();
-        let mut out = String::with_capacity(previous.len() + trace.bytes + 1);
-        out.push_str(&previous);
-        if !previous.is_empty() && !previous.ends_with('\n') {
-            out.push('\n');
-        }
-        for line in &trace.lines {
-            out.push_str(line);
-            out.push('\n');
-        }
-        out
-    })
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn trace_jsonl() -> String {
-    String::new()
-}
-
-/// Copy the full trace to the clipboard (best-effort, like every
-/// clipboard write).
-pub(crate) fn copy_trace() {
-    let trace = trace_jsonl();
-    if trace.is_empty() {
-        log::info!("device trace is empty; nothing copied");
-        return;
-    }
-    crate::clipboard::write_text(&trace);
-}
+// The readable-trace reader and its clipboard copy retired with the sim
+// card's Console tab, which was their only caller. The SINK stays — every
+// line still reaches `localStorage` and the optional HTTP sink, so a
+// crash's trace survives the reload that follows it; what is gone is the
+// button that read it back. The device card's Terminal zone is where an
+// affordance for it would live (flagged at P3's gate).
 
 #[cfg(target_arch = "wasm32")]
 fn on_line(line: String) {

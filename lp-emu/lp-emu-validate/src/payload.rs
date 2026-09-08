@@ -189,6 +189,37 @@ impl std::fmt::Debug for SeriesSpec {
     }
 }
 
+/// Whether a payload's recording carries a pin capture, and — because the
+/// replay compares two captures frame by frame — whose the frame count is.
+///
+/// The distinction turned up with the second payload to carry one. The
+/// `rmt-chase` harness sends exactly 768 frames and then parks, so a capture
+/// with 767 is a broken recording. A walk on the **shipped** image is the
+/// other shape: the project keeps rendering at the engine's pace until the
+/// run ends on a console line, so how many frames the pad carried by then is
+/// what the clock decided — the same frames, one grade a few further along —
+/// and calling that a structural difference would make every cross-grade
+/// replay of a shipped-image walk red for the reason the validation ADR
+/// rejects by name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PinCapture {
+    /// No pin capture: the payload makes no claim about a wire.
+    Off,
+    /// The payload's frame count is its own. Every frame is compared, and a
+    /// capture with a different number of them is a structural problem.
+    EveryFrame,
+    /// The pad runs on past the sentinel at the clock's pace. The frames the
+    /// two captures share are compared as `Pin`; the counts are reported as
+    /// `Timing`, with their ratio, and nothing else.
+    WhileRunning,
+}
+
+impl PinCapture {
+    pub const fn is_on(self) -> bool {
+        !matches!(self, PinCapture::Off)
+    }
+}
+
 /// A payload: one named, runnable question.
 #[derive(Debug)]
 pub struct Payload {
@@ -271,6 +302,20 @@ pub struct Payload {
     /// the image is the same bytes either way, and what differs is what the
     /// operator's side did to the board first.
     pub fresh_chip: bool,
+    /// Does a recording of this payload carry a **pin capture** beside the
+    /// transcript — `<stem>.txt.pins.jsonl`, one decoded frame per line —
+    /// and, if it does, whose is the frame count? See [`PinCapture`].
+    ///
+    /// Only a payload whose claim is about a wire. The runner passes
+    /// `--dump-frames file:…` to a configuration that can observe a pad,
+    /// copies the file next to the `.txt`, and names it in the sidecar's
+    /// `pins`; [`crate::transcript::Transcript::pin_records`] reads it back
+    /// and the replay compares the frames as `Pin`-class claims (E3,
+    /// approved 2026-09-07). A configuration with no pin observation —
+    /// silicon, without a logic analyser on the desk — records the console
+    /// half and says nothing about the pad, which is exactly what its
+    /// `validate.toml` grade already says.
+    pub pin_capture: PinCapture,
     /// Why silicon cannot record this payload, when it cannot.
     ///
     /// `usb-host-absent` is the case, and the reason is the payload: an
@@ -785,6 +830,120 @@ static JIT_BENCH_FIELDS: &[FieldSpec] = &[
     },
 ];
 
+/// The WS281x driver's own account of the refill race, one line per
+/// configured channel every ten seconds (`ws281x_telemetry`).
+///
+/// ```text
+/// [WS281X] t_ms=13936 ch=0 half=96 frames=768 complete=768 trips=0 skips=0 errors=0
+///   refills=49152 wanted=49152 lag_avg=1.0 lag_max=2 over_half=0 hist=768:49152:0:0:0:0:0:0:0
+///   entry_max=1 entry_hist=49152:0:0:0:0:0:0:0:0 trip_at=0
+/// ```
+///
+/// **`trips`, `skips` and `errors` are `Pin`, and that is the decision this
+/// series exists to record.** They are not statistics about the firmware —
+/// they are claims about what reached the wire. A trip means the transmitter
+/// ran out of refilled words and sent a truncated frame down a real strip; a
+/// skip means the guard could not be planted because the read pointer was
+/// already on it; an error is the block's own `tx_err`. Until M5 P2 there was
+/// no pad to check any of that against and it would have been `Structural` by
+/// default. `Pin` fails a replay (`replay.rs::HARD_CLASSES`), which is the
+/// point: a configuration that truncates frames another does not is not a
+/// slower configuration, it is a different wire.
+///
+/// **`frames`, `complete`, `refills` and `wanted` are `Timing`, and that is a
+/// correction to the phase brief made on measurement.** They read as pin
+/// claims and they are not, because of *when* the line is printed: the
+/// module reports once every ten seconds of the guest's own uptime, so each
+/// of these is a count over a fixed span of guest time — and how many frames
+/// fit in ten seconds is exactly what a time grade decides. Measured on one
+/// image: `t1` says `frames=517` and `t2` says `516`. Grading them `Pin`
+/// would make every honest cross-grade replay of this payload red, which is
+/// the failure mode the ADR rejects by name.
+///
+/// The claims they look like they carry are carried, harder, elsewhere:
+/// `complete == frames` and `refills == wanted` are invariants checked on
+/// each side (`tests/m5_replays.rs`), truncation is `trips`, and *which*
+/// frames went out is the 768 `rmt-frame` records and the pin capture beside
+/// them — where the comparison is per frame and byte for byte.
+///
+/// The rest is `Timing` for the ordinary reason (PD9/D13). `lag_avg`,
+/// `lag_max`, `hist`, `entry_max`, `entry_hist` and `trip_at` all measure how
+/// *close* the ISR came to the deadline, in words, and the emulator has no
+/// flash-miss cost and a RAM-resident ISR — the discovery's §4 says so in as
+/// many words. `over_half` is timing for the same reason.
+///
+/// `half` is `Structural`: it is the block plan, and two configurations
+/// running the same image must agree on it or they are not running the same
+/// image. `t_ms` is matched and deliberately not captured — the module
+/// reports on *its* ten-second period, so the stamp says when the run started
+/// printing (masked in the human view by [`crate::mask::WS281X_TIMESTAMP`]).
+///
+/// Keyed on `ch`, because a two-channel board prints two lines and the
+/// comparison is channel against channel.
+pub static WS281X_TELEMETRY: SeriesSpec = SeriesSpec {
+    name: "ws281x-telemetry",
+    description: "the WS281x driver's frame counters, refill counts and lag histograms",
+    pattern: concat!(
+        r"\[WS281X\] t_ms=\d+ ch=(?<ch>\d+) half=(?<half>\d+) frames=(?<frames>\d+) ",
+        r"complete=(?<complete>\d+) trips=(?<trips>\d+) skips=(?<skips>\d+) ",
+        r"errors=(?<errors>\d+) refills=(?<refills>\d+) wanted=(?<wanted>\d+) ",
+        r"lag_avg=(?<lag_avg>[0-9]+\.[0-9]+) lag_max=(?<lag_max>-?\d+) ",
+        r"over_half=(?<over_half>\d+) hist=(?<hist>[0-9:]+) entry_max=(?<entry_max>-?\d+) ",
+        r"entry_hist=(?<entry_hist>[0-9:]+) trip_at=(?<trip_at>\d+)",
+    ),
+    key: "ch",
+    fields: &[
+        ("half", FieldClass::Structural),
+        ("frames", FieldClass::Timing),
+        ("complete", FieldClass::Timing),
+        ("trips", FieldClass::Pin),
+        ("skips", FieldClass::Pin),
+        ("errors", FieldClass::Pin),
+        ("refills", FieldClass::Timing),
+        ("wanted", FieldClass::Timing),
+        ("lag_avg", FieldClass::Timing),
+        ("lag_max", FieldClass::Timing),
+        ("over_half", FieldClass::Timing),
+        ("hist", FieldClass::Timing),
+        ("entry_max", FieldClass::Timing),
+        ("entry_hist", FieldClass::Timing),
+        ("trip_at", FieldClass::Timing),
+    ],
+    compiled: OnceLock::new(),
+};
+
+/// The `rmt-chase` payload's per-frame record: what the guest handed the
+/// driver, and the checksum the pin is compared against.
+static RMT_FRAME_FIELDS: &[FieldSpec] = &[
+    FieldSpec {
+        record: "rmt-frame",
+        field: "n",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "rmt-frame",
+        field: "leds",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "rmt-frame",
+        field: "lit",
+        class: FieldClass::Structural,
+    },
+    // Structural, not Pin, and the distinction is worth the sentence: this
+    // checksum is the *guest's* claim about the bytes it built, which two
+    // configurations running one image must reproduce identically because it
+    // is arithmetic and nothing else. What makes it a pin claim is comparing
+    // it with the checksum of the decoded waveform, and that comparison lives
+    // in `Transcript::pin_records` and the replay's `ws281x-frame` pairing —
+    // where it carries `FieldClass::Pin`.
+    FieldSpec {
+        record: "rmt-frame",
+        field: "crc",
+        class: FieldClass::Structural,
+    },
+];
+
 pub static ALL_PAYLOADS: &[Payload] = &[
     Payload {
         name: "shader-compile-stress",
@@ -882,6 +1041,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         probes: &[],
         run_secs: None,
         fresh_chip: false,
+        pin_capture: PinCapture::Off,
         emulator_only: None,
     },
     Payload {
@@ -904,6 +1064,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         probes: &[],
         run_secs: None,
         fresh_chip: false,
+        pin_capture: PinCapture::Off,
         emulator_only: None,
     },
     Payload {
@@ -926,6 +1087,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         probes: &[],
         run_secs: None,
         fresh_chip: false,
+        pin_capture: PinCapture::Off,
         emulator_only: None,
     },
     Payload {
@@ -948,6 +1110,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         probes: &[],
         run_secs: None,
         fresh_chip: false,
+        pin_capture: PinCapture::Off,
         emulator_only: None,
     },
     Payload {
@@ -998,6 +1161,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         probes: &[],
         run_secs: None,
         fresh_chip: false,
+        pin_capture: PinCapture::Off,
         emulator_only: None,
     },
     Payload {
@@ -1068,6 +1232,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // pair, which stops the run.
         run_secs: Some(12),
         fresh_chip: false,
+        pin_capture: PinCapture::Off,
         emulator_only: None,
     },
     Payload {
@@ -1112,6 +1277,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         probes: &[],
         run_secs: Some(12),
         fresh_chip: false,
+        pin_capture: PinCapture::Off,
         emulator_only: None,
     },
     Payload {
@@ -1158,6 +1324,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         ],
         run_secs: Some(6),
         fresh_chip: false,
+        pin_capture: PinCapture::Off,
         emulator_only: Some(
             "an absent host records nothing: recording IS what a host does. On silicon this \
              payload is `unplug the board and watch the port that is no longer there`, which is \
@@ -1199,6 +1366,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // blank part produces. On silicon that means an erase before the
         // write, or the board's leftover filesystem is in the measurement.
         fresh_chip: true,
+        pin_capture: PinCapture::Off,
         emulator_only: None,
     },
     Payload {
@@ -1213,7 +1381,15 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         fw_checks_feature: None,
         emits_header: false,
         host_script: Some("lp-emu/esp/lp-emu-esp32c6/walks/examples-basic.script"),
-        sentinel: Sentinel::Done("[shader-node] compilation succeeded"),
+        // The **last** frame of the `projectRead` answer, not the compile
+        // line M4 stopped on. The compile is where the walk ended while RMT
+        // was an accept block: `Ws281xOutput::write` waited for an interrupt
+        // nothing raised, the driver spun to its 50 ms deadline, and request
+        // 12 was never answered (M4 deviation 1, DD40). With M5's channel
+        // model the frame completes and the walk goes on, so the payload's
+        // sentinel goes where the conversation now ends — and `--exit-on`
+        // stops there rather than at a line the walk merely passes through.
+        sentinel: Sentinel::Done("\"id\":12,\"seq\":2,"),
         record_kinds: &[],
         mask_set: "boot-idle",
         fields: &[],
@@ -1235,6 +1411,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // blank part produces. On silicon that means an erase before the
         // write, or the board's leftover filesystem is in the measurement.
         fresh_chip: true,
+        pin_capture: PinCapture::Off,
         emulator_only: None,
     },
     Payload {
@@ -1273,6 +1450,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         probes: &[],
         run_secs: None,
         fresh_chip: true,
+        pin_capture: PinCapture::Off,
         emulator_only: None,
     },
     Payload {
@@ -1329,6 +1507,108 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // steady is the second, at twenty-five.
         run_secs: Some(26),
         fresh_chip: true,
+        pin_capture: PinCapture::Off,
+        emulator_only: None,
+    },
+    Payload {
+        name: "rmt-chase",
+        display_name: "RMT chase (256 LEDs, three passes)",
+        fw_check_slug: "rmt-chase",
+        firmware_features: &["test_rmt", "ws281x_telemetry"],
+        fw_checks_feature: Some("check-rmt"),
+        emits_header: true,
+        sentinel: Sentinel::Done("[rmt-chase] === DONE ==="),
+        host_script: None,
+        record_kinds: &["rmt-frame"],
+        mask_set: "rmt-chase",
+        fields: RMT_FRAME_FIELDS,
+        series: &[&WS281X_TELEMETRY],
+        capture: Capture::Monitor,
+        // The harness's own link, not the spike's, and this is the first
+        // payload with a `fw-checks` module for which that is true. Two
+        // reasons, and the second is what settles it. Since M6 the machine
+        // models the USB host, so there is no need for the workaround. And
+        // the `[WS281X]` line goes out through `esp_println`, which
+        // `spike_uart0_link` does **not** tee: that feature tees
+        // `Esp32UsbSerialIo::write` — the *logger's* sink — to UART0 through
+        // the ROM (`serial/usb_serial.rs`), and `esp_println` has its own
+        // USB-Serial-JTAG writer. A UART0 capture of this image would
+        // therefore hold the log lines and lose the telemetry line the
+        // payload exists to record. On the shipped link both arrive, and a
+        // silicon capture of the same image would be the same bytes.
+        link: Link::UsbSerialJtag,
+        emulator_features: None,
+        // A host with the port open from the first byte. Not a scenario —
+        // nothing here asks a question about the link — but a payload whose
+        // output is on the USB link needs somebody draining it, and
+        // `--usb-host` defaults to `absent`.
+        host_plan: Some(HostPlan {
+            host: "attached",
+            script: "",
+        }),
+        probes: &[],
+        // Three chases at the measured 18.10 ms a frame is ≈ 13.9 s, and the
+        // telemetry module reports on a ten-second period, so a run shorter
+        // than this holds no `[WS281X]` line at all. The payload knows its
+        // own timeline; `--exit-on` ends it at the done marker well before
+        // the deadline.
+        run_secs: Some(20),
+        // Nothing on this chip is left over between runs: the harness never
+        // touches the filesystem, and an emulated run starts on a blank part
+        // anyway.
+        fresh_chip: false,
+        // The only payload with a pin capture, and the reason the field
+        // exists: its claim is about a wire, so a recording that held only
+        // what the device said would be missing the half that can contradict
+        // it.
+        pin_capture: PinCapture::EveryFrame,
+        emulator_only: None,
+    },
+    Payload {
+        name: "shader-oracle-walk",
+        display_name: "Project upload walk (projects/test/shader-oracle), over the USB link, with the pad observed",
+        fw_check_slug: "shader-oracle-walk",
+        // The same flash-backed product image as `upload-walk-usb`, walking
+        // the host oracle's own project (M5 P4). `projects/test/shader-oracle`
+        // is clock-free — every rendered frame is the same bytes — and
+        // `lp-app/lpa-server/tests/shader_oracle_frame.rs` prints those bytes
+        // from two host engines as `[ORACLE] rgb=` / `[ORACLE-RV32] rgb=`,
+        // which is what `scripts/m4-hardware-walk.sh` compares a device's
+        // frame-dump line against. The C6 has no frame-dump line; this
+        // payload's pin capture is the line's twin, read off gpio18 by the
+        // decoder instead of printed by the driver. The claim it lets the
+        // milestone make: the first lit frame the SHIPPED image puts on the
+        // pad is the oracle's frame, byte for byte, and every frame after it
+        // is the same (`tests/m5_replays.rs`).
+        firmware_features: &["server", "radio"],
+        fw_checks_feature: None,
+        emits_header: false,
+        host_script: Some("lp-emu/esp/lp-emu-esp32c6/walks/shader-oracle.script"),
+        // The last frame of the `projectRead` answer — the walk's own end,
+        // the way `upload-walk`'s is (request 11 here: the oracle project has
+        // no `clock.json`, so the client sends one file fewer than `basic`).
+        // The lit frames start at the compile behind request 10 and run on
+        // while the read streams, which is a few dozen of them: enough for
+        // the claim, small enough to commit. The in-process gate
+        // (`tests/shader_oracle_pin.rs`) runs on for seconds.
+        sentinel: Sentinel::Done("\"id\":11,\"seq\":2,"),
+        record_kinds: &[],
+        mask_set: "boot-idle",
+        fields: &[],
+        series: &[&HELLO, &FS_MOUNT, &FS_WRITE, &LOAD_GATE, &SHADER_COMPILE],
+        capture: Capture::Monitor,
+        link: Link::UsbSerialJtag,
+        emulator_features: None,
+        host_plan: Some(HostPlan {
+            host: "attached",
+            script: "",
+        }),
+        probes: &[],
+        run_secs: None,
+        fresh_chip: true,
+        // The pad runs on at the engine's pace after the sentinel's line is
+        // printed, so the count is the clock's; the frames are not.
+        pin_capture: PinCapture::WhileRunning,
         emulator_only: None,
     },
 ];

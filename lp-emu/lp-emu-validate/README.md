@@ -166,6 +166,62 @@ two must agree; `Transcript::load` refuses them if they do not.
 fixture to refresh. That is the FP replay rule, and it is the only reason a
 committed capture means anything.
 
+**And never overwrite one** (M5 P4, DD51). The stem names the firmware and
+the day and *not* the machine that ran it or the host script it ran — both of
+which can change under one firmware commit, and both did when M5 P3
+re-recorded M4's `upload-walk`. So the recorder refuses an existing stem, and
+a second recording of one lands **beside** the first as `<stem>-r2.txt` (then
+`-r3`, …), its sidecar and pin capture named the same way, with the sidecar's
+`note` saying which recording it is. A suffix rather than the emulator's
+commit in the name, because a silicon capture has no emulator and collides
+the same way (two sittings on one commit in one day), the sidecar already
+carries the tool versions, the source command and `firmware_sha256` — the
+provenance a name could only abbreviate — and the stem stays what
+`TranscriptHeader::file_stem` says, so nothing that names a transcript has to
+learn a second grammar.
+
+### The pin capture (M5 P3)
+
+A third file, for the payloads whose claim is about a **wire** rather than
+about what the device said:
+
+```text
+lp-emu/transcripts/<chip>/<payload>/<configuration>-<date>-<short-commit>.txt.pins.jsonl
+```
+
+One decoded frame per line, as `lp-emu-esp32c6 --dump-frames` writes them, and
+the sidecar's optional `pins` field is its **file name** — resolved against the
+transcript's own directory, so a tree can be moved wholesale and a companion
+can never point outside it.
+
+It exists because a console capture cannot hold it. Everything else in a
+transcript is something the firmware chose to say; this is what a pad carried,
+decoded from the waveform by something that never spoke to the firmware. So
+`rmt-chase`'s `[fw-check-json] {"kind":"rmt-frame","crc":…}` — the driver's
+claim about the frame it handed the hardware — can be checked against
+`{"kind":"ws281x-frame","wire":…}`, the bytes that actually went down the wire.
+`Transcript::pin_records()` reads it and `replay` compares the frames as
+**Pin**-class claims, which fail a replay; a transcript whose own guest and own
+pad disagree is a structural problem naming the frame.
+
+Whose the frame *count* is depends on the payload (`Payload::pin_capture`,
+M5 P4). `rmt-chase` sends exactly 768 frames and parks, so a capture with a
+different number is a broken recording (`PinCapture::EveryFrame`). A walk on
+the shipped image — `shader-oracle-walk` — keeps rendering at the engine's
+pace until the run ends on a console line, so how many frames the pad carried
+by then is what the clock decided: the frames the two captures share are
+compared as `Pin` and the counts are reported as `Timing` with their ratio
+(`PinCapture::WhileRunning`). A payload with no per-frame record of its own
+has no guest claim for its pad to disagree with; what its frames are held
+against is the other transcript and, for the oracle walk, the host oracle's
+line in `tests/m5_replays.rs`.
+
+**Additive, by construction** (E3, approved 2026-09-07). Every sidecar written
+before it loads unchanged, and only a payload whose registry entry sets
+`pin_capture` is recorded with a companion at all — a configuration that cannot
+observe a pad records the console half and says nothing about the wire, which
+is what its trust grade already said.
+
 ## Replay
 
 `replay(left, right, options)` compares the two field by field, each comparison

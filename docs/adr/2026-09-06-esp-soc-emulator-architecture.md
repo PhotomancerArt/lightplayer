@@ -1,11 +1,12 @@
 # ADR: The ESP SoC emulator — machine over bus over hart, deterministic time, ROM loaded always
 
-- **Status:** **Proposed (draft)** — to be accepted and backfilled at M7, once
-  ROM-up boot exists. (`Proposed` is this repository's word for it, per
-  `docs/adr/README.md`; the plan's word was "draft" and they mean the same
-  thing.) Everything below is implemented and load-bearing today; what is
-  deliberately missing is the half of the story only a boot-from-reset can
-  tell, and the section that will hold it is marked.
+- **Status:** **Proposed → Accepted (proposed at M7, 2026-09-08).** The draft
+  said it would be finished once ROM-up boot existed. It exists: the chip
+  boots itself from the reset vector through the real mask ROM and the real
+  ESP-IDF second-stage bootloader into the application, and its boot log is
+  silicon's line for line. The section that was marked *to be filled at M7* is
+  filled below, and the two boot paths are now one architecture with two
+  entries rather than one implemented path and one promise.
 - **Date:** 2026-09-06
 - **Deciders:** Photomancer
 - **Supersedes:** None
@@ -21,7 +22,11 @@
   `docs/reports/2026-09-07-esp-emu-c6-spike.md`. **Amended by M6 P4**
   (PR #587): the honest-peripheral section gains per-register grades and
   `--strict-grade`, with the USB-Serial-JTAG block as the worked example.
-  Status is unchanged — the ROM-up half is still M7's (DD29).
+  **Amended by M5 P4** (PR #598): the signal fabric, and what the `pin`
+  grade means now that the shipped image's frame is held against the host
+  oracle. **Completed by M7** (PR #596): ROM-up boot, the cross-check, and
+  the two new seams the boot needed (`Bus::take_yield`,
+  `RegFile::with_read_mirror`).
 
 ## Context
 
@@ -215,12 +220,107 @@ only the reset values a boot was observed to need; that is a known gap, and
 the next one to bite will be found the same way (see
 `docs/defects/2026-09-07-accept-blocks-carry-only-the-reset-values-a-boot-needed.md`).
 
-> **To be filled at M7.** That list is the cross-check: booting the same image
-> from the reset vector through the real ROM and the IDF bootloader must
-> arrive at the same machine state the direct loader hands over, and the boot
-> log must diff against silicon's and esp-emu's. Until then the `boot-log`
-> field class is graded `modeled` for the honest reason that there is no boot
-> log at all — a direct load prints no banner.
+### ROM-up: the chip boots itself, and the two paths cross-check (M7)
+
+`BootMode::RomUp` places **nothing**. A merged image — the second-stage
+bootloader at `0x0`, the partition table at `0x8000`, the app in `factory`,
+in one 4 MiB file `espflash save-image --merge` writes — goes into the flash
+chip, the hart starts at `0x4000_0000`, and the mask ROM and the bootloader
+do every one of the loader's jobs themselves, out of flash, for real.
+
+Three properties of the architecture were load-bearing for that, and one seam
+was missing.
+
+**The ROM ELF is a debug view, not a dump, and the difference matters twice.**
+`rom::seed_data` already existed because the ELF's `.data_*` and
+`.data.interface.*` sections are non-allocated `PROGBITS` that no `PT_LOAD`
+places. ROM-up needs the other half: `_init`'s copy loop reads those bytes
+from **source** addresses (`0x4004_2196`..`0x4004_25a0`) that no `PT_LOAD` and
+no section reaches at all. On silicon they are simply in the mask ROM; in the
+ELF they exist only as the result. `rom::seed_data_image` derives the image
+from the copy table and writes it back where the ROM will read it, so the
+ROM's own loop copies exactly what the ELF says. Without it the loop wrote
+zeros over everything, and the console died at `ets_ops_table_ptr`.
+
+**A store can change what an address means.** Everything until M7 could be
+answered by the hart or by the machine at a slice boundary. The cache MMU
+cannot: the bootloader programs an entry and reads through the window a dozen
+instructions later, in the same slice, and a machine that refills at the next
+boundary serves stale bytes (`E boot_comm: mismatch chip ID, expected 13,
+found 0`). `Bus::take_yield` is the seam — a peripheral calls
+`BusCx::yield_to_machine`, the hart ends the slice after that store with
+`SliceEnd::BusYield`, and the machine acts before the guest runs again. It is
+checked only after an MMIO store, so a bus that never sets it costs nothing.
+
+**One block cannot be honest by remembering.** The bootloader hashes the image
+it is about to load, so `periph::sha` is the real SHA-1/224/256 compression
+function driven exactly as the ROM's `ets_sha_process` drives it. It is the
+only computed peripheral in the crate, and the reason is written at the top of
+its file: an accept-and-remember SHA reads back zeros and the bootloader
+refuses a good image.
+
+**And a `done` bit sometimes has to go both ways.** `RegFile::with_read_mirror`
+("these bits read as 1 exactly when those bits are set") exists because
+`Cache_Freeze_ICache_Enable` spins until `l1_cache_freeze_done` is 1 and
+`Cache_Freeze_ICache_Disable` spins until it is 0. No constant satisfies both;
+a mirror says the true thing, which is that an operation with no duration in
+this model has finished in whichever direction it was asked for.
+
+#### What the cross-check found
+
+`tests/rom_up_boot.rs` runs both paths on one image and compares.
+
+- **The boot log is silicon's, line for line** — the ROM banner, `SPIWP`,
+  `mode`/`clock div`, the three bootloader `load:` lines and `entry`, the
+  bootloader's version and compile time, the SPI configuration, the whole
+  partition table, `Loaded app from partition at offset 0x10000` and
+  `Disabling RNG early entropy source`. Two lines are treated differently and
+  each says why: `Saved PC:` is a memory of the previous run that a fresh chip
+  cannot have, and the `esp_image: segment N` lines are compared against the
+  image the machine was handed, because gating them on a transcript would gate
+  on the linker (DD45).
+- **The app's bytes are identical.** 2.4 MB of placed segments, byte for byte,
+  at `[INIT] Board initialized`. The bootloader found the same bytes and put
+  them in the same places the loader does.
+- **DD40's two items hold.** The loader's synthetic flash offsets are the ones
+  the real image has, because every mapped segment of an `esptool` image obeys
+  the same 64 KiB congruence the loader's arithmetic assumes; and both paths
+  leave the same chip size in `rom_spiflash_legacy_data->chip_size`.
+- **The heap did not move.** The first heartbeat is byte-identical between the
+  two paths (`freeBytes 265104`), and the residual 8 B against silicon is
+  DD50's, unchanged — neither closed nor widened by having a real bootloader.
+  The stack high-water is silicon's own figure exactly, 11908 B of 71512 B.
+
+So the `boot-log` field class is graded `measured` for
+`lp-emu:esp32c6:*` on this path: there is a boot log, it came from the real
+ROM and the real bootloader, and a committed silicon capture is what it is
+compared against.
+
+#### What ROM-up does not reproduce
+
+The list the direct loader carries has a counterpart, and it is short:
+
+1. **`Saved PC:`** — `ASSIST_DEBUG.core_0_lastpc_before_exception` is zero on
+   a machine that has never run. Silicon's boot after an espflash reset had
+   the PC it interrupted in it.
+2. **The download console does not answer commands.** The strap reaches the
+   ROM's real download path and it prints `waiting for download`, but a
+   scripted esptool SYNC gets no reply: the ROM begins with baud-rate
+   auto-detection over `UART0`'s pulse-width counters (`rxd_cnt`,
+   `low_pulse_cnt`, `high_pulse_cnt`), which the UART model does not drive.
+   That is one measurable thing with a name, and plan two's shim is where it
+   belongs.
+3. **Three `pll_cal exceeds 2ms` lines**, from the ROM's `wait_rfpll_cal_end`
+   polling an analog register the `I2C_ANA_MST` accept block cannot answer
+   per-register (`docs/defects/2026-09-08-regi2c-is-one-data-register-not-a-register-file.md`).
+(A fourth item lasted one day. The mask ROM's console drops a character
+rather than waiting when the IN endpoint is not free, so the modelled
+`IN_DRAIN_LATENCY_US` was losing runs of the densest output over USB while
+UART0 kept everything. M5 P3's IN-FIFO auto-commit closed it from the other
+side, and the two consoles now carry identical bytes across the whole boot
+window; the gate reads the USB link, which is silicon's own, and asserts
+UART0 agrees. The defect file keeps the bound silicon's capture puts on that
+still-modelled number.)
 
 ### Honest peripherals: strict bus, `modeled` grades, and no invented answers
 
@@ -300,6 +400,40 @@ and it is not. What would is a silicon transcript of that class — which is
 exactly what the amendment is for: it lets the block say what it has earned
 without letting the configuration overclaim.
 
+#### Amendment (M5, 2026-09-07): the signal fabric, and the pin grade
+
+A peripheral never sees another peripheral, and the pin is the place that
+rule bites: the RMT block cannot read `GPIO.func_out_sel_cfg[18]` to learn
+which pad carries its waveform, and the GPIO block cannot ask the RMT what
+level its signal is at. The routing is one fact two blocks share, which is
+the shape the interrupt matrix already had (DD22), and it gets the same
+answer — **one state on the bus, register views writing into it**. The
+**signal fabric** (`lp-emu-esp-common::pins`, `BusCx.pins`; DD34 e) holds
+pads, signals and edges and no chip numbers: the chip's GPIO block is a
+routing *view* that writes `route`/`set_gpio_out` into it, an output
+peripheral `drive`s its signal into it and never learns whether anyone is
+listening, and the machine drains the edges every slice into whatever
+watches the wire — a WS281x decoder per routed pad (`strip::ws281x`,
+±150 ns, the datasheet's tolerance and not a knob) and a raw pin log. The
+decoder knows nothing about who produced the edges, which is what makes its
+frames a second reading rather than the peripheral's own word log restated.
+
+What the `pin` class is graded on, then, and why it is still `modeled`. Two
+captures are committed beside their transcripts (the additive `pins`
+companion, E3). On `rmt-chase` the guest's own per-frame checksum agrees
+with the pad on all 768 frames. On `shader-oracle-walk` the **shipped**
+image's first lit frame off gpio18 is byte-equal to the host oracle's
+`[ORACLE] rgb=` and `[ORACLE-RV32] rgb=` — the walk's own PASS criterion
+for the S3, with the decoder standing in for the frame-dump line the C6
+does not have — and every later frame is the same bytes, on both time
+grades. The oracle is rendered by two host engines that never touched the
+machine, so this is the nearest independent check there is short of an
+instrument. It is not a measurement, because both readings of the *pad*
+are ours: the RMT model produces the waveform and our decoder reads it.
+By the rule above, byte-equality is evidence weighed in the `because`, and
+`measured` waits for a silicon pin transcript — a logic analyser on the
+desk, or the C6 `frame-dump` port (M8's) read beside the decoder.
+
 ### Provenance on everything derived
 
 Per `2026-07-29-license-provenance-discipline.md`. The register-name tables in
@@ -348,8 +482,8 @@ the second chip is the test of the design, and a flat crate fails it.
   `measured` runs through transcripts rather than through confidence.
 - The gaps are visible and named, each owned by a milestone: flash and the MMU
   windows (M4 — the flash-backed shipped image still stops at
-  `SPIN SPI1+0x000 cmd` at 11 ms), RMT and a decoded WS281x frame (M5 — the
-  `pin` class), an honest USB-Serial-JTAG with attach/detach over a control
+  `SPIN SPI1+0x000 cmd` at 11 ms), RMT and a decoded WS281x frame (M5, done — the
+  `pin` class, `modeled` with the oracle equality as its evidence), an honest USB-Serial-JTAG with attach/detach over a control
   channel (M6 — the `usb-serial-jtag` class), ROM-up boot (M7 — the
   `boot-log` class).
 - One open number, recorded rather than tuned: the idle heartbeat's
@@ -357,5 +491,14 @@ the second chip is the test of the design, and a flat crate fails it.
   closing to 4 B by 15 s. It does not move with the time grade and it is not
   the USB host state (both ruled out in M3 P6). Only a silicon capture of the
   memfs image can arbitrate it, which is a desk item.
-- **To be revisited at M7**, when this ADR is finished: whether the direct
-  loader's seven-item list is complete, and what the boot-log diff says.
+- **Revisited at M7 and answered: both.** The direct path stays, because it is
+  what M4's and M6's gates run and because it is two orders of magnitude
+  cheaper to start; ROM-up is what proves the direct path is telling the truth,
+  and the cross-check is the proof. The next question — whether a
+  ROM-up boot should become the *default* for a walk — belongs to M8, where
+  the walk is.
+  (This replaces the draft's "to be revisited at M7: whether the direct
+  loader's seven-item list is complete, and what the boot-log diff says." It
+  was not complete — the ROM's own data image was missing from it, because
+  nothing on the direct path executes `_init` — and the boot-log diff is
+  above.)

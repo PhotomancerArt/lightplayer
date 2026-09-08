@@ -24,6 +24,19 @@
 //! | **detach** | stops | a committed packet stays committed | — | staged host bytes are dropped |
 //! | **re-attach** | bus reset, then SOF | a committed packet is **dropped** by the bus reset (modeled: the reset empties the endpoint) | set by the drop | — |
 //!
+//! **A full FIFO commits itself.** Writing the 64th byte to `ep1` is the same
+//! as writing `wr_done`: the block sends the packet without being asked. That
+//! is not a convenience — esp-hal's `write_byte_nb`, the only API that
+//! touches this register a byte at a time, documents it ("Requires manual
+//! flushing (automatically flushed every 64 bytes)",
+//! `esp-hal-1.1.1/src/usb_serial_jtag.rs:191-192`) and a driver written
+//! against that doc spins for ever on a full endpoint otherwise. M5 P3 found
+//! it: the `rmt-chase` harness's `Esp32UsbSerialIo` writes byte by byte and
+//! flushes only at the end of a write, so every log line over 64 bytes stalled
+//! until its 250 ms drain timeout and dropped its tail. The shipped image's
+//! `ChunkedWriter` chunks below 64 and writes `wr_done` itself, which is why
+//! M6 never reached the case.
+//!
 //! Two things distinguish the draining state from esp-emu's model (spike
 //! report §4: `INT_RAW = 0xA` with `INT_CLR` ignored, `EP1_CONF = 0x2` for
 //! ever): `sof` **clears** on `int_clr` and returns on the next frame, and a
@@ -901,6 +914,23 @@ impl UsbSerialJtag {
                 // What the guest tried to print with nobody there — an
                 // observation, not guest output that reached anyone.
                 self.observe(&[byte], cx);
+            }
+            // **The block commits a full FIFO by itself.** esp-hal says so on
+            // the only API that writes this register — `write_byte_nb`:
+            // "Requires manual flushing (automatically flushed every 64
+            // bytes)" (`esp-hal-1.1.1/src/usb_serial_jtag.rs:191-192`) — and
+            // a driver written against that doc will otherwise spin for ever
+            // on a full endpoint nothing will ever send.
+            //
+            // Found by M5 P3: the `rmt-chase` harness's `Esp32UsbSerialIo`
+            // writes byte by byte and flushes only at the end of a write, so
+            // any log line longer than 64 bytes stalled here until its 250 ms
+            // drain timeout and then dropped its tail — losing the payload's
+            // first record. Nothing had hit it before because the shipped
+            // image's `ChunkedWriter` chunks below 64 and writes `wr_done`
+            // itself, which is the one path M6 measured.
+            if self.in_fifo.len() >= IN_FIFO_DEPTH {
+                self.wr_done(cx);
             }
             return;
         }

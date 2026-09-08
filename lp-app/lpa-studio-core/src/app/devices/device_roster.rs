@@ -61,6 +61,11 @@ pub struct DeviceRosterView {
     /// Absent for a card with nothing honest to draw — it keeps its
     /// sentence.
     pub feeds: std::collections::BTreeMap<lpa_devices::DeviceId, super::DeviceCardFeedView>,
+    /// Each sim-backed device's runtime band (PD11), joined here for the
+    /// same reason the feeds are: the band is a fact about the RUNTIME
+    /// behind a device, and the model deliberately does not know that a
+    /// sim is a sim. Absent = a real board, which wears no band (D38).
+    pub runtime_bands: std::collections::BTreeMap<lpa_devices::DeviceId, super::UiRuntimeBand>,
 }
 
 impl Default for DeviceRosterView {
@@ -73,6 +78,7 @@ impl Default for DeviceRosterView {
             transport_available: false,
             open_addresses: std::collections::BTreeMap::new(),
             feeds: std::collections::BTreeMap::new(),
+            runtime_bands: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -108,6 +114,10 @@ pub struct RememberedView {
     /// re-derived, so the split can never offer an escape the model did not
     /// grant (invariant I3).
     pub escapes: Vec<Escape>,
+    /// What this device IS, for the two verbs whose words depend on it: a
+    /// powered-off SIM wears Power on in the Reconnect slot (Q5), because
+    /// a runtime this tab makes has no port grant to ask back for.
+    pub face: super::DeviceFace,
     /// The board's last picture, when this session pulled one before the
     /// port went away or a sidecar remembered one across a reload
     /// (`device_frame_snapshot`) — always `FeedLiveness::Offline` here,
@@ -129,6 +139,10 @@ pub fn split_roster(roster: &DeviceRosterView) -> RosterSplit {
                 board: device_identity_line(device).board,
                 last_seen_label: device.freshness_label.clone(),
                 escapes: device.escapes.clone(),
+                face: match roster.runtime_bands.contains_key(&device.id) {
+                    true => super::DeviceFace::Sim,
+                    false => super::DeviceFace::Wire,
+                },
                 feed: roster.feeds.get(&device.id).cloned(),
             });
         } else {
@@ -318,8 +332,10 @@ impl DeviceRoster {
             roster: roster_view(&self.roster, now),
             transport_available: self.effects.is_wired(),
             open_addresses: self.keys.clone(),
-            // Filled by the controller, which owns the feeds.
+            // Filled by the controller, which owns the feeds and the
+            // sidecars a band is read from.
             feeds: std::collections::BTreeMap::new(),
+            runtime_bands: std::collections::BTreeMap::new(),
         }
     }
 
@@ -540,6 +556,7 @@ mod tests {
                     liveness: super::super::FeedLiveness::Offline,
                 },
             )]),
+            runtime_bands: std::collections::BTreeMap::new(),
         };
 
         let split = split_roster(&view);
@@ -580,6 +597,7 @@ mod tests {
             transport_available: true,
             open_addresses: Default::default(),
             feeds: std::collections::BTreeMap::new(),
+            runtime_bands: std::collections::BTreeMap::new(),
         };
 
         let split = split_roster(&view);

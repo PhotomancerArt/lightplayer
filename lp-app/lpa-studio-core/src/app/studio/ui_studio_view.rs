@@ -10,24 +10,26 @@ use crate::{
 /// document**). The web shell's route reconciliation binds
 /// `/p/<slug>-<project-uid>` to this, never to raw project identity.
 ///
-/// The `Device` arm addresses a roster device by its registered uid (the
-/// `/device/<uid>` route, round-2 M5); a lens only attaches to an
-/// identified device, so the uid is always known.
+/// One arm, because there is one kind of runtime (PD9): a roster device,
+/// addressed by its registered uid. A lens only attaches to an identified
+/// device, so the uid is always known.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum UiLensRuntime {
-    /// The lens is on THE sim session. A sim runtime's identity is its
-    /// project: `project_uid` is the loaded project's `prj…` uid — the
-    /// whole of the project route's identity — read from the session's
-    /// loaded-project record so re-attach flows (the sim-card click)
-    /// address the same document; `None` while nothing library-backed is
-    /// loaded (the storeless demo path). The slug that decorates the
-    /// address is cosmetic and comes from
-    /// [`UiStudioView::open_project_name`], which tracks renames live.
-    Sim { project_uid: Option<String> },
-    /// The lens is on a roster device: `uid` is its registered `dev…` uid,
-    /// the whole of the device route's identity. The project comes from
-    /// the device.
-    Device { uid: String },
+    /// The lens is on a roster device.
+    Device {
+        /// The device's registered `dev…` uid.
+        uid: String,
+        /// How its link is reached — the router's interim fork until P4's
+        /// `?on=` grammar lands: a lens on a SIM emits the project route,
+        /// a lens on silicon emits `/device/<uid>`.
+        transport: crate::LinkTransport,
+        /// The library project this device is running, when the roster's
+        /// heartbeat named one Studio can pair to the library. The whole of
+        /// the project route's identity; the slug that decorates the
+        /// address is cosmetic and comes from
+        /// [`UiStudioView::open_project_name`], which tracks renames live.
+        project_uid: Option<String>,
+    },
 }
 
 /// The header session·project control's three-dot status vocabulary
@@ -38,30 +40,24 @@ pub enum UiChromeSessionStatus {
     /// Running the project cleanly (accent dot).
     Run,
     /// Any attention state (amber dot). The dot only marks that attention
-    /// is due — the card carries the story. Unreachable while the sim is
-    /// the only runtime; the rebuilt device model produces it again.
+    /// is due — the card carries the story.
     Attention,
     /// Connected with nothing running (hollow dot).
     Empty,
 }
 
-/// The LENS session's card, docked in the editor (D43): the same control
-/// panel the gallery shows for that session — the sim's live card, or the
-/// roster's own projection of the device the editor is open on (round-2
-/// M5: never a second device card, the gallery's `DeviceView` verbatim).
+/// The LENS session's card, docked in the editor (D43): the roster's own
+/// projection of the device the editor is open on — the gallery's
+/// `DeviceView` verbatim, never a second card. One arm, for one kind of
+/// runtime (PD9); a sim wears the runtime band and nothing else.
 #[derive(Clone, Debug, PartialEq)]
 pub enum UiLensCard {
-    Sim(crate::app::home::UiSimCard),
-    Device(crate::DeviceView),
-}
-
-/// What kind of runtime the header control's session is (D22: the sim is
-/// not a device) — the header picks its glyph, its hint copy and its
-/// teardown verb by this.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum UiChromeSessionKind {
-    Sim,
-    Device,
+    Device {
+        card: crate::DeviceView,
+        /// The runtime band, for a lens on a sim (PD11) — the docked pane
+        /// draws the SAME card the grid does, band and all.
+        runtime: Option<crate::UiRuntimeBand>,
+    },
 }
 
 /// The tab's ONE runtime session, projected for the header
@@ -73,23 +69,21 @@ pub enum UiChromeSessionKind {
 /// of a route target.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiChromeSessionControl {
-    /// Sim or device (see [`UiChromeSessionKind`]).
-    pub kind: UiChromeSessionKind,
-    /// The underlying card's identity key
-    /// ([`UiSimCard::identity_key`](crate::UiSimCard::identity_key)) —
-    /// the render key. The sim needs no teardown target:
-    /// `StopSimulator` is unique by construction.
+    /// What this device IS, for the two verbs whose words depend on it
+    /// ([`DeviceFace`](crate::DeviceFace)): leaving the studio powers a
+    /// sim off and closes the lens on a board.
+    pub face: crate::DeviceFace,
+    /// The card's render key (`device:<uid>`).
     pub key: String,
-    /// The roster device a DEVICE lens is on — what the panel's rename
-    /// addresses. `None` for the sim, which has no name to change.
+    /// The roster device this session is on — what the panel's rename
+    /// addresses, and what its close verb targets.
     pub device: Option<lpa_devices::DeviceId>,
-    /// "Sim" for the simulator (the control renders the board as a
-    /// suffix); the device's live title for a device lens.
+    /// The device's live title (the roster's, so a rename made from this
+    /// very panel shows up in the segment at once).
     pub name: String,
     /// Human board name via
-    /// [`board_display_name`](crate::app::roster::board_display_name) —
-    /// sim only, `None` when the project names no board (the control
-    /// shows a bare "Sim").
+    /// [`board_display_name`](crate::app::roster::board_display_name),
+    /// `None` while the device has reported none.
     pub board: Option<String>,
     /// The same three-dot vocabulary [`UiChromeSessionStatus`] defines.
     pub status: UiChromeSessionStatus,

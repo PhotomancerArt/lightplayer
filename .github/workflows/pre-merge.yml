@@ -143,6 +143,10 @@ jobs:
               - 'rust-toolchain.toml'
               - 'justfile'
               - '.github/workflows/pre-merge.yml'
+              # The Xtensa install is a local composite action now; a change
+              # to it must rebuild the jobs that use it (validate-xtensa here,
+              # the two firmware-* jobs via the `firmware` filter below).
+              - '.github/actions/**'
             gfx:
               - 'lp-gfx/**'
               - 'lp-shader/**'
@@ -234,6 +238,7 @@ jobs:
               - 'rust-toolchain.toml'
               - 'justfile'
               - '.github/workflows/pre-merge.yml'
+              - '.github/actions/**'
             # emu_c6 gates the ESP32-C6 emulator's OWN boot-test + replay suite
             # (`just test-emu-c6`, DD27 of the 2026-09-06 esp-emulator plan):
             # the machine and its tests live in lp-emu/, and the two reference
@@ -403,13 +408,16 @@ jobs:
       # pins so a fork release cannot turn a green PR red on its own. Needs
       # >= 1.90 for the workspace MSRV — on 1.88 lpc-model genuinely fails to
       # compile (70x E0716 from the Slotted derive). Bump deliberately.
+      #
+      # Wrapped by a local action rather than calling esp-rs/xtensa-toolchain
+      # directly: espup's release query was 403'ing on the shared runner-IP
+      # rate limit. See .github/actions/xtensa-toolchain/action.yml.
       - name: Install Xtensa Rust toolchain
-        uses: esp-rs/xtensa-toolchain@v1.6
+        uses: ./lp2025/.github/actions/xtensa-toolchain
         with:
           version: 1.95.0.0
           buildtargets: esp32s3
           default: true
-          ldproxy: false
 
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
@@ -481,12 +489,11 @@ jobs:
       # release cannot turn a green PR red on its own. Keep this version in
       # sync with firmware-xtensa's.
       - name: Install Xtensa Rust toolchain
-        uses: esp-rs/xtensa-toolchain@v1.6
+        uses: ./lp2025/.github/actions/xtensa-toolchain
         with:
           version: 1.95.0.0
           buildtargets: esp32
           default: true
-          ldproxy: false
 
       # `lp2025 -> target`, mirroring firmware-xtensa: this crate is a
       # repo-root workspace member (M3-P1 folded it in) and writes into the
@@ -588,12 +595,11 @@ jobs:
       # leaves the host nightly as the default toolchain — the image build
       # selects the esp channel itself through lp-xt/fixtures/rust-toolchain.toml.
       - name: Install Xtensa Rust toolchain
-        uses: esp-rs/xtensa-toolchain@v1.6
+        uses: ./lp2025/.github/actions/xtensa-toolchain
         with:
           version: 1.95.0.0
           buildtargets: esp32s3
           default: false
-          ldproxy: false
 
       # Compile cache, mirroring every other compile-heavy job here (see
       # validate-x64 for the design: cache-targets is off repo-wide, sccache IS
@@ -827,8 +833,14 @@ jobs:
   # Same toolchain family as `firmware-size` (RISC-V, not Xtensa —
   # fw-esp32c6 is a RISC-V core, unlike the S3/v3 Xtensa firmware): the
   # pinned nightly with rust-src (build-std) plus the riscv32imac target.
-  # No espflash: this job builds and boots an emulator, never touches
-  # hardware.
+  #
+  # espflash IS needed here, which it was not until M7, and not for a port:
+  # `save-image --merge` is what builds the merged flash image the ROM-up
+  # boot reads, and the second-stage bootloader in that image comes out of
+  # espflash's own bundled resources. It is installed **prebuilt**
+  # (`cargo binstall`), unlike the three hardware-adjacent jobs that
+  # `cargo install` it from source — this is the job already closest to its
+  # ceiling, and a source build of espflash is minutes it does not have.
   #
   # Path-gated on `emu_c6` (narrower than `firmware`) rather than the full
   # device-image dependency closure — see that filter's comment in
@@ -899,6 +911,19 @@ jobs:
 
       - name: Install just
         uses: extractions/setup-just@v3
+
+      # Prebuilt, not `cargo install`: the same call the two deploy workflows
+      # make, pinned to the same 3.3.0. The version is load-bearing rather
+      # than incidental — espflash bundles the ESP-IDF second-stage
+      # bootloader, `build-merged-image.sh` refuses any other version, and
+      # the boot-log gate diffs that bootloader's output against a silicon
+      # capture of the same binary. A different espflash is a different
+      # program in the image.
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@v1.21.1
+
+      - name: Install espflash (prebuilt — the merged image's bootloader)
+        run: cargo binstall --no-confirm --locked espflash@3.3.0
 
       # The reference image is reproducible (L4): the same sha256 on this
       # runner and on a Mac, for the same pinned firmware commit. This step is

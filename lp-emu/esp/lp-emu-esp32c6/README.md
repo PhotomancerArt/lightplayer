@@ -79,7 +79,7 @@ whatever booted it: `rtc_get_reset_reason` from `__pre_init` *before `.bss` is
 zeroed*, `ets_delay_us` from every clock path, `memcpy` and the `str*` family
 because the linker resolves them there. So the ROM image is part of the memory
 map, not an extra for a ROM-up boot. What is optional is running the boot
-chain from reset, which is M7.
+chain from reset, which is `--merged` (below).
 
 The image is vendored at `../roms/` with its licence and checksums; a unit
 test re-derives the sha256 in-process, so a corrupted or swapped ROM fails the
@@ -168,8 +168,10 @@ left at the architectural reset value would idle in `wfi` forever.
 The file also carries a written-down list of the seven things direct load does
 **not** reproduce — the partition table, the MMU page table's *provenance*,
 the ROM's console globals, the `rst:0x1 (POWERON)` banner, early RNG entropy,
-real eFuse, and the derived reset cause. That list is the seed for M7's
-cross-check, and it is worth more than the code around it.
+real eFuse, and the derived reset cause. That list was the seed for the
+ROM-up cross-check, and it is worth more than the code around it. (It was
+also not complete: the ROM's **own** data image is an eighth item, and only a
+boot that runs `_init` could have found it — see below.)
 
 Two of those seven the loader now does, because M4's firmware asks the flash
 *chip* questions and the two halves of the address space have to describe one
@@ -180,8 +182,9 @@ board:
   partition's offset plus the offset into the window, which is a whole number
   of 64 KiB pages, so the cache MMU's `paddr % page == vaddr % page` holds —
   and programs the page table for them. It is **not** an `esptool` image
-  layout; M7 boots a real merged image through the real bootloader and gets
-  the real offsets, and this is one of the things that cross-check checks.
+  layout; a ROM-up boot reads a real merged image through the real bootloader
+  and gets the real offsets, and `tests/rom_up_boot.rs` checks that the two
+  agree.
 - **`seed_rom_flash_chip`** writes the chip size into
   `rom_spiflash_legacy_data->chip_size`, in place of the bootloader's
   `esp_rom_spiflash_config_param`. The ROM's own default chip is **2 MiB**
@@ -189,6 +192,69 @@ board:
   refuses any read past `chip_size`, and `lpfs` starts at `0x0031_0000` —
   so without this every filesystem read returns error 1 for a reason that has
   nothing to do with the filesystem.
+
+## Booting from the reset vector
+
+`--merged <chip.bin>` places **nothing**. The whole 4 MiB flash part goes
+into the chip — the ESP-IDF second-stage bootloader at `0x0`, the partition
+table at `0x8000`, the app in `factory`, the layout `espflash save-image
+--merge` writes (`scripts/emu/build-merged-image.sh`) — the hart starts at
+the mask ROM's reset vector, and the ROM and the bootloader do the rest for
+real, out of flash.
+
+```console
+$ lp-emu-esp32c6 --merged target/emu-ref/…/merged.bin \
+      --reset-cause usb-uart --strap app --uart0 stdout --timeout 400ms
+ESP-ROM:esp32c6-20220919
+Build:Sep 19 2022
+rst:0x15 (USB_UART_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:2
+load:0x4086c410,len:0xd48
+…
+I (441) boot: Loaded app from partition at offset 0x10000
+I (451) boot: Disabling RNG early entropy source...
+[INIT] Initializing board...
+```
+
+Two flags decide the banner, and both are inputs rather than choices:
+`--reset-cause` seeds `LP_CLKRST.reset_cause`, which the ROM prints as
+`rst:0x..`, and `--strap` seeds `GPIO.strap`, which it prints **verbatim** as
+`boot:0x..` and uses to choose between the flash bootloader and its own
+download console. `0x15` and `0x1e` are what the committed silicon
+`boot-idle-flash` transcript recorded; `--strap download` is `0x1e` with the
+one bit the ROM's decode tests cleared, and reaches `waiting for download`.
+
+An `--elf` given with `--merged` is never loaded: it is the symbol table
+`--probe` and `--break-at` read, and the reference the cross-check compares
+against.
+
+Three things the direct path never needed:
+
+- **The ROM's own data image** (`rom::seed_data_image`). `_init` copies 37
+  `{dst, dst_end, src}` triples, and every `src` is past the last byte of the
+  last `PT_LOAD` — the ELF holds the *result* of that copy as non-allocated
+  sections and not the mask ROM bytes it copies from. The image is derived
+  from the two and written back, so the ROM's loop copies what the ELF says.
+  Without it the loop writes zeros and the console dies at
+  `ets_ops_table_ptr`.
+- **`Bus::take_yield`.** The bootloader programs a cache-MMU entry and reads
+  through the window a dozen instructions later, in the same slice. SPI0's
+  entry write calls `BusCx::yield_to_machine`, the hart ends the slice, and
+  the machine refills the window before the guest runs again.
+- **`periph::sha`.** The bootloader hashes the image before it loads it, so
+  this is the one block that has to compute rather than remember.
+
+`--reboot-on-reset` turns a reset request into the real thing rather than
+ending the run: the host's DTR/RTS dance reboots a running application into
+the ROM's download console, in one log with two boots in it. Off by default,
+because three recorded M6 scenarios read the exit code as their evidence.
+
+`tests/rom_up_boot.rs` is the gate: the boot log line for line against
+silicon over the same link silicon used, 2.4 MB of app segments byte-equal
+between the two paths, DD40's flash offsets and chip-size word, the download
+strap, a reboot into it, and a first heartbeat that is byte-identical
+whichever way the app arrived.
 
 ## Flash, and the cache window
 
@@ -342,8 +408,17 @@ Beyond the MMIO lines, three kinds of note appear in the same stream:
   `PIN gpio16 <- GPIO_OUT (out_sel=128 …)` — one note per routing *change*
   from the GPIO view (M5 P2); esp-hal rewriting the same routing on a
   rebind is not a note
-  adds the register and RAM writes around them, which is how a refill's
-  timing against the read pointer is read off.
+- `RMT REFILL ch=0 at=57456328 entry=1 fill=1` — one note per completed
+  refill (M5 P3): the words the transmitter consumed between the threshold
+  and the ISR's `ch_tx_lim` write (`entry`), and between that write and the
+  last word of the refill (`fill`), in the units `lp-ws281x` measures the
+  same race in. `--trace RMT` adds the register and RAM writes around them,
+  which is how a refill's timing against the read pointer is read off. The
+  totals are in the exit summary as `rmt refill ch0: … entry max … hist …;
+  fill max … hist …`, nine buckets in the same shape the `[WS281X]` line
+  prints. **Reported, never gated** (D13/PD9): the emulated ISR path is
+  RAM-resident and the machine has no flash-miss cost, so `entry` is a floor
+  rather than a prediction of silicon's 20–29 words.
 
 A 3 s no-radio run with `--trace SYSTIMER,PLIC_MX,INTPRI,INTERRUPT_CORE0,LP_WDT,TIMG0`
 is about 780 k lines, half of them the RTC-calibration poll at boot. Without
@@ -579,6 +654,41 @@ between frames and an 18.1 ms frame period. Two runs write byte-identical
 `--dump-frames` files, and a snapshot taken with the decoder mid-bit
 restores to decode the same frames.
 
+**The M5 gates**, mirroring "Reference images and the gates" (all
+`--strict-bus`, the desk board's eFuse identity; the shipped-image ones over
+the USB link with a host attached from power-on):
+
+- **G1** (P1, `tests/rmt_chase.rs`): the `test_rmt` chase transmitted
+  word-exact — 24 frames × 6,144 data words + latch + STOP, 64 `thr` a
+  frame, 200 cycles a bit; `t2` sends the same words.
+- **G2** (P2, the same file): the pad carries the words — gpio18's decoded
+  frames byte-equal to the word log, above.
+- **G3** (P3, `tests/rmt_chase_replay.rs`, transcripts under
+  `lp-emu/transcripts/esp32c6/rmt-chase/`): the `rmt-chase` payload's 768
+  `rmt-frame` checksums against the 768 frames the pad carried, on both
+  grades; `[WS281X]` `trips 0 skips 0 errors 0`, `complete == frames`; the
+  refill histograms reported beside silicon's, never gated.
+- **G4-1** (P4, `tests/shader_oracle_pin.rs`, transcripts under
+  `shader-oracle-walk/`): the **shipped** image walking
+  `projects/test/shader-oracle` (`walks/shader-oracle.script`) puts, after
+  exactly one compile-window black frame, the host oracle's frame on
+  gpio18 — `unpermute(wire, GRB)` equal to `[ORACLE] rgb=` and
+  `[ORACLE-RV32] rgb=`, FNV-1a `0x55772254` — and every later frame in
+  three seconds is the same bytes (57 of them under `t1`, 37 under `t2`;
+  the first lit at 2.58 / 2.63 s). Two runs dump identical files.
+- **G4-2** (P4, `tests/basic_pin.rs`): `examples/basic` on the shipped
+  two-channel plan — every frame 241 LEDs, 5,784 bits, 0 errors, latched
+  by a reset ≥ 300 µs, at a period that does not wander; contents never
+  compared (the project is clock-driven); two runs dump identical files.
+
+The double colour swap, measured (DD34 Q4): the shipped driver opens GRB
+and `lp-ws281x` permutes once, so the wire carries GRB and `rgb`
+(unpermuted GRB) is the driver's input — the oracle's bytes, above. The
+`LedChannel` harness swaps RGB→GRB *itself* before handing the frame to
+the same encoder, so on `rmt-chase` the wire carries the caller's RGB and
+`rgb` is that swapped once more; the chase is white-on-black and invariant
+under it. A harness-only fact, filed here rather than fixed.
+
 ### The radio window
 
 Everything esp-radio's blob and the ROM's PHY code touch between
@@ -813,6 +923,9 @@ is a local affair.
 | `boot_idle` | the memfs image's hello and §5.4 heartbeat, **and** the flash-backed image's `[FS]` pair and §5.1 heartbeat — M4's first gate, which replaced the test that pinned the `SPI1.cmd` spin |
 | `flash_persistence` | a chip survives the machine: format once, mount twice, `--flash-copy` writes nothing |
 | `upload_walk` | the thirteen-frame upload from `walks/examples-basic.script`, the second boot that auto-loads what it wrote, and determinism |
+| `rmt_chase`, `rmt_chase_replay` | M5's chase: the words, the pad, the payload's checksums against the pad, the telemetry line |
+| `shader_oracle_pin` | M5 P4's pin claim on the shipped image: `walks/shader-oracle.script`'s first lit frame off gpio18 against the host oracle, under both grades |
+| `basic_pin` | `examples/basic` on the pad: whole, latched 241-LED frames at a steady period, never their contents |
 | `host_absent`, `boot_no_radio`, `boot`, `rom_*`, `stack_guard` | M3's |
 
 `just test-emu-c6` is the whole set: the machine's boot tests, the M3 and M4

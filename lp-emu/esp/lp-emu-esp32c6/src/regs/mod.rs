@@ -28,6 +28,7 @@ mod assist_debug;
 mod efuse;
 mod extmem;
 mod gpio;
+mod hinf;
 mod hp_apm;
 mod hp_sys;
 mod i2c_ana_mst;
@@ -35,6 +36,7 @@ mod interrupt_core0;
 mod interrupt_sources;
 mod intpri;
 mod io_mux;
+mod lp_ana;
 mod lp_aon;
 mod lp_apm;
 mod lp_apm0;
@@ -50,8 +52,11 @@ mod modem_syscon;
 pub mod output_signals;
 mod pcr;
 mod plic_mx;
+mod plic_ux;
 mod pmu;
 mod rmt;
+mod sha;
+mod slc;
 mod spi0;
 mod spi1;
 mod systimer;
@@ -65,6 +70,7 @@ pub use assist_debug::ASSIST_DEBUG;
 pub use efuse::EFUSE;
 pub use extmem::EXTMEM;
 pub use gpio::GPIO;
+pub use hinf::HINF;
 pub use hp_apm::HP_APM;
 pub use hp_sys::HP_SYS;
 pub use i2c_ana_mst::I2C_ANA_MST;
@@ -72,6 +78,7 @@ pub use interrupt_core0::INTERRUPT_CORE0;
 pub use interrupt_sources::{INTERRUPT_SOURCES, source};
 pub use intpri::INTPRI;
 pub use io_mux::IO_MUX;
+pub use lp_ana::LP_ANA;
 pub use lp_aon::LP_AON;
 pub use lp_apm::LP_APM;
 pub use lp_apm0::LP_APM0;
@@ -86,8 +93,11 @@ pub use modem_lpcon::MODEM_LPCON;
 pub use modem_syscon::MODEM_SYSCON;
 pub use pcr::PCR;
 pub use plic_mx::PLIC_MX;
+pub use plic_ux::PLIC_UX;
 pub use pmu::PMU;
 pub use rmt::RMT;
+pub use sha::SHA;
+pub use slc::SLC;
 pub use spi0::SPI0;
 pub use spi1::SPI1;
 pub use systimer::SYSTIMER;
@@ -122,7 +132,12 @@ pub const ALL: &[&lp_emu_esp_common::RegNames] = &[
     &MODEM_LPCON,
     &MODEM_SYSCON,
     &PCR,
+    &HINF,
+    &LP_ANA,
     &PLIC_MX,
+    &PLIC_UX,
+    &SHA,
+    &SLC,
     &PMU,
     &RMT,
     &SPI0,

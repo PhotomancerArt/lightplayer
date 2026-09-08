@@ -11,6 +11,10 @@ pub struct BrowserWorkerOptions {
     /// declares no board, so a caller that forgets to set one fails at boot
     /// instead of quietly running as something nobody chose.
     pub runtime: BrowserRuntimeOptions,
+    /// Resolve the engine URLs from the page's manifest at EVERY boot
+    /// (`resolved_engine_urls`), treating the two path fields above as the
+    /// fallback only. See [`Self::discovered`].
+    pub discover_engine_urls: bool,
 }
 
 impl BrowserWorkerOptions {
@@ -23,7 +27,49 @@ impl BrowserWorkerOptions {
             fw_browser_wasm_path: fw_browser_wasm_path.into(),
             tick_mode: BrowserTickMode::SelfTicking,
             runtime: BrowserRuntimeOptions::default(),
+            discover_engine_urls: false,
         }
+    }
+
+    /// Options whose engine URLs are DISCOVERED at boot time, from the
+    /// manifest fetch `index.html` starts (`window.__lpEngineAssets`),
+    /// rather than pinned here.
+    ///
+    /// A served Studio build carries the engine under content-hashed names
+    /// only, so nothing that boots a worker can hold those URLs before the
+    /// manifest has answered — and a link is built at power-on, which can
+    /// be a page load's first action (a docs page's embed, a project card
+    /// clicked the moment the gallery paints, a `?on=sim` address). Boot is
+    /// the one moment that can await the answer, so boot is where the URLs
+    /// are read; a snapshot taken any earlier was the unhashed fallback
+    /// every time it mattered (G1 fix, 2026-09-07: the worker 404'd on
+    /// `/pkg/fw_browser.js`). The unhashed constants stay in the two path
+    /// fields as the documented degrade for a page with no manifest.
+    pub fn discovered() -> Self {
+        Self {
+            discover_engine_urls: true,
+            ..Self::default()
+        }
+    }
+
+    /// The options a boot should actually use: the page-resolved engine
+    /// URLs when [`Self::discover_engine_urls`] asks for them (the
+    /// `tick_mode` and `runtime` ride along unchanged — discovery answers
+    /// for the URLs only), or `self` as pinned.
+    ///
+    /// `window.__lpEngineAssets` is a page-lifetime promise that resolves
+    /// once and answers every later await instantly, so re-resolving on
+    /// every boot costs nothing after the first and waits exactly as long
+    /// as it must before it.
+    #[cfg(target_arch = "wasm32")]
+    pub async fn resolved_for_boot(self) -> Self {
+        if !self.discover_engine_urls {
+            return self;
+        }
+        resolved_engine_urls()
+            .await
+            .with_tick_mode(self.tick_mode)
+            .with_runtime(self.runtime)
     }
 
     /// Set the worker clock ownership mode.

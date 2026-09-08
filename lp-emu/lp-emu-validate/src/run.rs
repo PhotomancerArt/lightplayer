@@ -397,6 +397,79 @@ fn adopt_inband_features(mut header: TranscriptHeader, body: &str) -> Result<Tra
     Ok(header)
 }
 
+/// Where a recording lands, and which recording of its stem it is.
+///
+/// The committed stem is `<configuration>-<date>-<short-commit>`. It names
+/// the firmware and the day, and **not** the machine that ran it or the host
+/// script it ran — both of which can change under one firmware commit, and
+/// both did: M5 P3 re-recorded M4's `upload-walk` (a new emulator, a new
+/// pacing in the script) and had nowhere to put the new capture but where the
+/// old one was (DD51). So a second recording of a stem gets an additive
+/// suffix — `<stem>-r2.txt`, then `-r3`, … — beside the first, with its
+/// sidecar and pin capture named the same way, and the sidecar's `note` says
+/// which recording it is and why the name did not change. Nothing is ever
+/// overwritten and every earlier file keeps its name, which is what keeps
+/// every test that names a transcript valid.
+///
+/// Why a suffix, and not the emulator's commit in the name: a silicon capture
+/// has no emulator and collides the same way (two sittings on one commit in
+/// one day), the sidecar already carries the tool versions, the source
+/// command and the image digest — the provenance a name could only
+/// abbreviate — and the stem stays what `TranscriptHeader::file_stem` says,
+/// so nothing that parses one has to learn a second grammar.
+fn additive_destination(
+    header: &mut TranscriptHeader,
+    repo_root: &Path,
+) -> Result<(std::path::PathBuf, Option<std::path::PathBuf>, u32)> {
+    let base = repo_root
+        .join(TRANSCRIPTS_DIR)
+        .join(header.relative_path()?);
+    let stem = header.file_stem()?;
+    let has_pins = header.pins.is_some();
+    let candidate = |n: u32| {
+        let name = if n == 1 {
+            format!("{stem}.txt")
+        } else {
+            format!("{stem}-r{n}.txt")
+        };
+        let dest = base.with_file_name(&name);
+        let pins = has_pins.then(|| dest.with_file_name(format!("{name}.pins.jsonl")));
+        (dest, pins)
+    };
+    let taken = |dest: &Path, pins: &Option<std::path::PathBuf>| {
+        dest.exists() || sidecar_path(dest).exists() || pins.as_ref().is_some_and(|p| p.exists())
+    };
+    let mut n = 1;
+    let (mut dest, mut pins) = candidate(n);
+    while taken(&dest, &pins) {
+        n += 1;
+        (dest, pins) = candidate(n);
+    }
+    if let Some(p) = &pins {
+        header.pins = Some(
+            p.file_name()
+                .expect("a file name")
+                .to_string_lossy()
+                .into_owned(),
+        );
+    }
+    if n > 1 {
+        let first = candidate(1).0;
+        let sentence = format!(
+            "recording {n} of stem `{stem}`: {} already exists and a transcript is never \
+             overwritten (DD51). The stem names the firmware commit, not the machine or the \
+             host script that produced this file; `tools`, `source` and `firmware_sha256` \
+             here say which those were.",
+            first.file_name().expect("a file name").to_string_lossy()
+        );
+        header.note = Some(match header.note.take() {
+            Some(note) => format!("{note} {sentence}"),
+            None => sentence,
+        });
+    }
+    Ok((dest, pins, n))
+}
+
 pub fn record_set(
     cfg: &ValidateConfig,
     set: &str,
@@ -460,15 +533,32 @@ pub fn record_set(
             } else {
                 Some(plan.notes.join(" "))
             },
+            // The companion file's name, when this configuration can observe
+            // a pad and this payload makes a claim about one. A file name,
+            // not a path: it is resolved against the transcript's own
+            // directory (E3, the additive widening).
+            pins: None,
             trust: entry.trust.clone(),
         };
+        let mut header = header;
+        if plan.pins.is_some() {
+            header.pins = Some(header.pins_file_name()?);
+        }
         header.validate()?;
-        let dest = repo_root
-            .join(TRANSCRIPTS_DIR)
-            .join(header.relative_path()?);
+        let (dest, pins_dest, recording) = additive_destination(&mut header, repo_root)?;
         let _ = writeln!(s, "{}", plan.render());
+        if recording > 1 {
+            let _ = writeln!(
+                s,
+                "  recording {recording} of this stem: the earlier files stay where they are \
+                 (DD51); the sidecar's note says so"
+            );
+        }
         let _ = writeln!(s, "  would write {}", dest.display());
         let _ = writeln!(s, "           + {}", sidecar_path(&dest).display());
+        if let Some(p) = &pins_dest {
+            let _ = writeln!(s, "           + {}", p.display());
+        }
         if dry_run {
             continue;
         }
@@ -498,17 +588,48 @@ pub fn record_set(
         if let Some(parent) = dest.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        if dest.exists() {
-            bail!(
-                "{} already exists. Transcripts are never edited or overwritten — \
-                 a new capture is a new file, and a differing one is a regression \
-                 to investigate.",
-                dest.display()
-            );
+        // `additive_destination` chose a name nothing holds; this is the race
+        // guard for a recording that started in between, and the rule it
+        // states is the one that never changes.
+        for existing in [Some(&dest), pins_dest.as_ref()].into_iter().flatten() {
+            if existing.exists() {
+                bail!(
+                    "{} already exists. Transcripts are never edited or overwritten — \
+                     a new capture is a new file, and a differing one is a regression \
+                     to investigate.",
+                    existing.display()
+                );
+            }
+        }
+        // The pin capture, before the transcript: a transcript whose sidecar
+        // names a companion that is not there is worse than no companion, so
+        // the file lands first and its absence stops the recording.
+        if let (Some(src), Some(dst)) = (&plan.pins, &pins_dest) {
+            let src = repo_root.join(src);
+            let pins = std::fs::read_to_string(&src).with_context(|| {
+                format!(
+                    "reading the pin capture {} — payload `{}` declares one, so a recording \
+                     without it would claim a pad nobody observed",
+                    src.display(),
+                    payload.name
+                )
+            })?;
+            if pins.trim().is_empty() {
+                bail!(
+                    "the pin capture {} is empty: payload `{}` claims a pad and this run \
+                     decoded no frame on one. Not recording it.",
+                    src.display(),
+                    payload.name
+                );
+            }
+            std::fs::write(dst, &pins)?;
         }
         std::fs::write(&dest, &body)?;
         std::fs::write(sidecar_path(&dest), header.to_json()?)?;
         let _ = writeln!(s, "  wrote {}", dest.display());
+        if let Some(p) = &pins_dest {
+            let _ = writeln!(s, "  wrote {}", p.display());
+        }
     }
     if dry_run {
         let _ = writeln!(s, "(dry run: nothing was executed or written)");
@@ -577,6 +698,81 @@ mod tests {
         assert!(out.contains("available"), "{out}");
         assert!(out.contains("cargo run -q -p lp-emu-esp32c6"), "{out}");
         assert!(out.contains("dry run"), "{out}");
+    }
+
+    /// DD51: the stem names the firmware, and a second recording of it must
+    /// land beside the first rather than on top of it.
+    #[test]
+    fn a_second_recording_of_a_stem_gets_an_additive_suffix() {
+        let tmp = std::env::temp_dir().join(format!("lp-emu-run-stem-{}", std::process::id()));
+        let dir = tmp.join(TRANSCRIPTS_DIR).join("esp32c6/rmt-chase");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut header = TranscriptHeader {
+            schema: crate::header::HEADER_SCHEMA,
+            payload: "rmt-chase".into(),
+            chip: "esp32c6".into(),
+            configuration: "lp-emu:esp32c6:t1".into(),
+            date: "2026-09-07".into(),
+            firmware_commit: "c0d62e360".into(),
+            firmware_features: vec!["esp32c6".into()],
+            firmware_dirty: None,
+            firmware_sha256: None,
+            silicon_rev: None,
+            board: None,
+            mac: None,
+            tools: Default::default(),
+            source: None,
+            capture: None,
+            note: Some("a plan note.".into()),
+            pins: None,
+            trust: Default::default(),
+        };
+        header.pins = Some(header.pins_file_name().unwrap());
+        let stem = "lp-emu-esp32c6-t1-2026-09-07-c0d62e360";
+
+        // Nothing there yet: the plain stem, recording 1, note untouched.
+        let mut h1 = header.clone();
+        let (d1, p1, n1) = additive_destination(&mut h1, &tmp).unwrap();
+        assert_eq!(n1, 1);
+        assert_eq!(d1, dir.join(format!("{stem}.txt")));
+        assert_eq!(
+            p1.as_deref(),
+            Some(dir.join(format!("{stem}.txt.pins.jsonl")).as_path())
+        );
+        assert_eq!(h1.note.as_deref(), Some("a plan note."));
+
+        // The first recording exists: the second is `-r2`, all three files.
+        std::fs::write(&d1, "captured").unwrap();
+        let mut h2 = header.clone();
+        let (d2, p2, n2) = additive_destination(&mut h2, &tmp).unwrap();
+        assert_eq!(n2, 2);
+        assert_eq!(d2, dir.join(format!("{stem}-r2.txt")));
+        assert_eq!(
+            h2.pins.as_deref(),
+            Some(format!("{stem}-r2.txt.pins.jsonl").as_str())
+        );
+        assert_eq!(
+            p2.as_deref(),
+            Some(dir.join(format!("{stem}-r2.txt.pins.jsonl")).as_path())
+        );
+        let note = h2.note.unwrap();
+        assert!(
+            note.starts_with("a plan note. recording 2 of stem"),
+            "{note}"
+        );
+        assert!(
+            note.contains(&format!("{stem}.txt already exists")),
+            "{note}"
+        );
+
+        // A stray companion at `-r2` counts as taken too: `-r3`.
+        std::fs::write(p2.unwrap(), "frames").unwrap();
+        let mut h3 = header.clone();
+        let (d3, _, n3) = additive_destination(&mut h3, &tmp).unwrap();
+        assert_eq!(n3, 3);
+        assert_eq!(d3, dir.join(format!("{stem}-r3.txt")));
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
