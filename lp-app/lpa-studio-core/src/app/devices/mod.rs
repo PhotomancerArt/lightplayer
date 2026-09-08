@@ -45,6 +45,7 @@ pub mod browser_sim_source;
 pub mod browser_transport;
 pub mod composite_transport;
 pub mod device_affordance;
+pub mod device_by_base_mac;
 pub mod device_card_feed_view;
 pub mod device_effects;
 pub mod device_feed_op;
@@ -74,6 +75,7 @@ pub use composite_transport::CompositeDeviceTransport;
 pub use device_affordance::{
     device_escape_action, device_escape_action_for, device_status_kind, pending_escape_action,
 };
+pub use device_by_base_mac::{DeviceByBaseMac, device_by_base_mac};
 pub use device_card_feed_view::{
     DeviceCardFeedView, FeedLiveness, device_card_feed_view, device_card_feed_views, feed_liveness,
 };
