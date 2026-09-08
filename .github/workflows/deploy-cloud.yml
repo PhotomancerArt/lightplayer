@@ -129,12 +129,11 @@ jobs:
       # same reason: the wasm bundle and host tooling build on the pinned
       # nightly above. Keep the version in sync with the other workflows.
       - name: Install Xtensa Rust toolchain
-        uses: esp-rs/xtensa-toolchain@v1.6
+        uses: ./.github/actions/xtensa-toolchain
         with:
           version: 1.95.0.0
           buildtargets: esp32s3,esp32
           default: false
-          ldproxy: false
 
       # target/ is deliberately NOT cached (cache-targets: false): the old
       # multi-GB `cloud-cargo` actions/cache entry was LRU-evicted between

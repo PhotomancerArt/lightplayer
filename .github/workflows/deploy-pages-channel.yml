@@ -83,12 +83,11 @@ jobs:
       # firmware.
       - name: Install Xtensa Rust toolchain
         if: inputs.channel == 'beta'
-        uses: esp-rs/xtensa-toolchain@v1.6
+        uses: ./.github/actions/xtensa-toolchain
         with:
           version: 1.95.0.0
           buildtargets: esp32s3,esp32
           default: false
-          ldproxy: false
 
       # target/ is deliberately NOT cached (cache-targets: false): multi-GB
       # target payloads get LRU-evicted from the repo's 10 GB Actions-cache
