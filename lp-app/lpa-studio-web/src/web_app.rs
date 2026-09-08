@@ -1833,7 +1833,7 @@ pub(crate) fn make_pull_timer(delay: Duration) -> TimeoutFuture {
 
 /// Warm the browser engine's assets once, at page load.
 ///
-/// Every worker this page ever boots — the simulator's and each preview
+/// Every worker this page ever boots — the sim's and each preview
 /// pool member's — fetches the SAME multi-MB `fw_browser` wasm. Left to the
 /// first boot, that download starts only once the user has already clicked,
 /// and on a cold, throttled connection it is most of what a boot spends its
