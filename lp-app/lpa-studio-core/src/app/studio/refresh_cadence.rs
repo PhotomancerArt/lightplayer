@@ -20,14 +20,14 @@
 //! therefore pushes the next pull out instead of running back-to-back with
 //! zero idle.
 //!
-//! Per M7 Q3 the default is a single uniform cadence; the browser simulator
+//! Per M7 Q3 the default is a single uniform cadence; the browser sim
 //! keeps a faster gap only because it self-ticks and the UI re-reads
 //! previews at that rate (see the simulator-clock ADR), while a real device
 //! polls calmly.
 
 use core::time::Duration;
 
-/// Fast completion-gap for the self-ticking browser simulator: the UI re-reads
+/// Fast completion-gap for the self-ticking browser sim: the UI re-reads
 /// preview state at up to ~30 Hz so self-ticked previews stay visibly fresh.
 /// Retired web constant `SIMULATOR_PROJECT_REFRESH_INTERVAL_MS`.
 pub const SIMULATOR_REFRESH_INTERVAL: Duration = Duration::from_millis(33);
@@ -58,7 +58,7 @@ pub const DEVICE_REFRESH_INTERVAL: Duration = Duration::from_millis(150);
 /// One is the smallest value that bounds the starvation: a gesture stream
 /// cancels a pull, the next pull is protected and completes, so a drag
 /// refreshes the preview at half the tick rate instead of never — on the
-/// simulator that is ~15 pulls/s, which is the rate it already achieves at
+/// sim that is ~15 pulls/s, which is the rate it already achieves at
 /// rest, so dragging no longer changes how live the preview looks. The cost
 /// is bounded and symmetric: a gesture arriving during a promoted run waits
 /// for that ONE pull to finish (~35 ms on the sim, one frame read on a
@@ -123,7 +123,7 @@ pub const PASSIVE_REFRESH_BACKOFF_MAX: Duration = Duration::from_secs(30);
 /// device compiles on its next engine frame (~200 ms), so a couple of quick
 /// pulls surface the error/clean verdict without waiting a full
 /// [`DEVICE_REFRESH_INTERVAL`]. Only ever *tightens* the cadence — the
-/// simulator's 33 ms interval stays as-is.
+/// sim's 33 ms interval stays as-is.
 pub const VERDICT_CHASE_INTERVAL: Duration = Duration::from_millis(250);
 
 /// How many passive ticks run at [`VERDICT_CHASE_INTERVAL`] after an accepted
@@ -146,14 +146,14 @@ pub struct RefreshCadence {
 }
 
 impl RefreshCadence {
-    /// The default (device) cadence, used before a simulator connects.
+    /// The default (device) cadence, used before a sim connects.
     pub const fn device() -> Self {
         Self {
             interval: DEVICE_REFRESH_INTERVAL,
         }
     }
 
-    /// The simulator cadence.
+    /// The sim cadence.
     pub const fn simulator() -> Self {
         Self {
             interval: SIMULATOR_REFRESH_INTERVAL,

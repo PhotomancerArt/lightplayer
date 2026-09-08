@@ -19,7 +19,7 @@ pub(crate) fn embedded_example_cards() -> Vec<UiExampleCard> {
         .collect()
 }
 
-/// One example. Click → running simulator, zero choices, NOTHING
+/// One example. Click → running sim, zero choices, NOTHING
 /// installed (a transient view session, examples vision D2); an explicit
 /// save is what forks your copy into the library.
 #[component]

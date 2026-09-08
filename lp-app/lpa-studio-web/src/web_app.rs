@@ -272,7 +272,7 @@ pub fn App() -> Element {
         // Device event trace (M0): persist lifecycle records across
         // refreshes and stream to a capture sink when the URL asks.
         crate::device_events_io::install(&mut controller);
-        // The simulator's connect-ladder backoff runs on browser timers;
+        // The sim's connect-ladder backoff runs on browser timers;
         // without this the core default resolves every sleep immediately.
         // Crypto randomness for identity minting (`dev` uids). Host
         // builds keep the core's clock-derived fallback.
