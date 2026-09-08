@@ -114,6 +114,18 @@ impl FwImage {
         default_features: false,
     };
 
+    /// The M5 P1 gate image: the `test_rmt` hardware harness — a 256-LED
+    /// white chase on GPIO18 through the shipped `lp-ws281x` refill path,
+    /// no server loop, no radio init, no filesystem (a harness build never
+    /// reaches `bootctl`, so no `memory_fs` is needed). `server` is in the
+    /// set because on today's main `recovery/panic_path.rs` uses
+    /// `lpc_shared` unconditionally and only `server`/`radio` bring that
+    /// crate: the brief's bare `esp32c6,test_rmt` does not link.
+    pub const TEST_RMT: FwImage = FwImage {
+        features: &["esp32c6", "server", "test_rmt"],
+        default_features: false,
+    };
+
     pub fn slug(&self) -> String {
         slug(self.features)
     }
@@ -474,6 +486,7 @@ mod tests {
             FwImage::SHIPPED_NO_FLASH.slug(),
             "ESP32C6_SERVER_RADIO_MEMORY_FS"
         );
+        assert_eq!(FwImage::TEST_RMT.slug(), "ESP32C6_SERVER_TEST_RMT");
         assert_eq!(
             ReferenceImage::BOOT_IDLE_MEMFS.env_var(),
             "LP_EMU_C6_REF_BOOT_IDLE_MEMFS"

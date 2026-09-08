@@ -210,41 +210,17 @@ pub fn gpio() -> RegFile {
         .with_read_override(0x05c, 0xffff_ffff, 0)
 }
 
-/// `RMT`: accept. The brief expected the no-radio image not to touch it;
-/// it does — `Rmt::new(rmt_peripheral, RMT_CLOCK)` runs unconditionally in
-/// `main.rs:286` and was the first strict stop of P5 (`RMT+0x068`
-/// `sys_conf`, from `esp_hal::rmt::Rmt::new`). Accepted so the boot can
-/// continue; the WS281x transmitter's channels, the 48-word blocks, the
-/// wrap and threshold interrupts are M5, and a frame sent into this block
-/// never completes — which is the honest reading of a block with no model.
-/// `sys_conf` resets to `0x0500_0010` (the PAC).
-///
-/// The window is [`crate::memmap::periph::RMT_LEN`] (`0x700`), not the
-/// `0x400` M3 gave it: the block's **channel memory** starts at `+0x400`
-/// (`esp-metadata-generated`: `rmt.ram_start = 0x6000_6400`,
-/// `rmt.channel_ram_size = 48` words × four channels). Nothing reached it
-/// until a project with an output was loaded, and M4's upload walk did:
-/// `Ws281xDriver::open` writes `0x6000_6400` and the run stopped there.
-/// Accepted, like the registers; M5 replaces both with a model.
-///
-/// **What "a frame never completes" costs, measured.** M4's walk found the
-/// other end of the same fact: `Ws281xOutput::write` calls
-/// `DRIVER.send_blocking`, whose completion arrives as the **RMT
-/// interrupt** — `take_interrupts` reads `int_st` from the ISR — and an
-/// accept block raises no interrupt source at all. So the driver spins to
-/// its 50 ms deadline, `EngineServices` logs `RMT channel 0 frame did not
-/// complete within 50 ms`, `LpServer::tick` returns a project tick error,
-/// and the walk's `projectRead` request is never answered. Everything up to
-/// and including `loadProject` lands; the `projectRead` half of the walk
-/// waits for M5's channel model to raise source 51. (An `int_st` read
-/// override was tried and does nothing: nothing polls `int_st`, the ISR is
-/// what reads it, and there is no honest way for a register file to raise
-/// an interrupt.)
-pub fn rmt() -> RegFile {
-    RegFile::new("RMT", crate::memmap::periph::RMT_LEN)
-        .with_names(regs::RMT)
-        .with_reset(0x068, 0x0500_0010)
-}
+// `RMT` was an accept block here from P5 (its `sys_conf` write from
+// `esp_hal::rmt::Rmt::new` was P5's first strict stop) until M5 P1 gave it a
+// model: `super::rmt`. M4's upload walk had already found the two edges of
+// what an accept block could not do for it — the channel RAM at `+0x400`
+// past the end of the mapped window, and, once that was widened,
+// `Ws281xOutput::write` spinning to its 50 ms deadline because completion
+// arrives as the RMT **interrupt** and a register file raises none.
+//
+// `SPI0`/`SPI1` were accept blocks here until M4 gave them models
+// (`super::spi0`, `super::spi1`): a flash access used to spin on `SPI1.cmd`,
+// which is what every flash-backed image stopped on at 11 ms.
 
 #[cfg(test)]
 mod tests {
