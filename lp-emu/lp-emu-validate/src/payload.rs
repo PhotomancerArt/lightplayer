@@ -807,25 +807,38 @@ static JIT_BENCH_FIELDS: &[FieldSpec] = &[
 ///   entry_max=1 entry_hist=49152:0:0:0:0:0:0:0:0 trip_at=0
 /// ```
 ///
-/// **Seven of these fields are `Pin`, and that is the decision this series
-/// exists to record.** `frames`, `complete`, `trips`, `skips`, `errors`,
-/// `refills` and `wanted` are not statistics about the firmware — they are
-/// claims about what reached the wire. `frames` counts `tx_end`s, `complete`
-/// is `frames − guard_trips`, and a trip means the transmitter ran out of
-/// refilled words and sent a truncated frame down a real strip. Until M5 P2
-/// there was no pad to check them against and they would have been
-/// `Structural` by default; now the decoder reads the same frames off GPIO18
-/// and a difference in any of them is a difference in what a logic analyser
-/// would have seen. `Pin` fails a replay (`replay.rs::HARD_CLASSES`), which
-/// is the point.
+/// **`trips`, `skips` and `errors` are `Pin`, and that is the decision this
+/// series exists to record.** They are not statistics about the firmware —
+/// they are claims about what reached the wire. A trip means the transmitter
+/// ran out of refilled words and sent a truncated frame down a real strip; a
+/// skip means the guard could not be planted because the read pointer was
+/// already on it; an error is the block's own `tx_err`. Until M5 P2 there was
+/// no pad to check any of that against and it would have been `Structural` by
+/// default. `Pin` fails a replay (`replay.rs::HARD_CLASSES`), which is the
+/// point: a configuration that truncates frames another does not is not a
+/// slower configuration, it is a different wire.
 ///
-/// The rest is `Timing` and is reported with its ratio, never compared
-/// (PD9/D13). `lag_avg`, `lag_max`, `hist`, `entry_max`, `entry_hist` and
-/// `trip_at` all measure how *close* the ISR came to the deadline, in words,
-/// and the emulator has no flash-miss cost and a RAM-resident ISR — the
-/// discovery's §4 says so in as many words. `over_half` is timing for the
-/// same reason: it counts refills that took longer than half a window, which
-/// is a statement about the host CPU's speed rather than about the wire.
+/// **`frames`, `complete`, `refills` and `wanted` are `Timing`, and that is a
+/// correction to the phase brief made on measurement.** They read as pin
+/// claims and they are not, because of *when* the line is printed: the
+/// module reports once every ten seconds of the guest's own uptime, so each
+/// of these is a count over a fixed span of guest time — and how many frames
+/// fit in ten seconds is exactly what a time grade decides. Measured on one
+/// image: `t1` says `frames=517` and `t2` says `516`. Grading them `Pin`
+/// would make every honest cross-grade replay of this payload red, which is
+/// the failure mode the ADR rejects by name.
+///
+/// The claims they look like they carry are carried, harder, elsewhere:
+/// `complete == frames` and `refills == wanted` are invariants checked on
+/// each side (`tests/m5_replays.rs`), truncation is `trips`, and *which*
+/// frames went out is the 768 `rmt-frame` records and the pin capture beside
+/// them — where the comparison is per frame and byte for byte.
+///
+/// The rest is `Timing` for the ordinary reason (PD9/D13). `lag_avg`,
+/// `lag_max`, `hist`, `entry_max`, `entry_hist` and `trip_at` all measure how
+/// *close* the ISR came to the deadline, in words, and the emulator has no
+/// flash-miss cost and a RAM-resident ISR — the discovery's §4 says so in as
+/// many words. `over_half` is timing for the same reason.
 ///
 /// `half` is `Structural`: it is the block plan, and two configurations
 /// running the same image must agree on it or they are not running the same
@@ -849,13 +862,13 @@ pub static WS281X_TELEMETRY: SeriesSpec = SeriesSpec {
     key: "ch",
     fields: &[
         ("half", FieldClass::Structural),
-        ("frames", FieldClass::Pin),
-        ("complete", FieldClass::Pin),
+        ("frames", FieldClass::Timing),
+        ("complete", FieldClass::Timing),
         ("trips", FieldClass::Pin),
         ("skips", FieldClass::Pin),
         ("errors", FieldClass::Pin),
-        ("refills", FieldClass::Pin),
-        ("wanted", FieldClass::Pin),
+        ("refills", FieldClass::Timing),
+        ("wanted", FieldClass::Timing),
         ("lag_avg", FieldClass::Timing),
         ("lag_max", FieldClass::Timing),
         ("over_half", FieldClass::Timing),

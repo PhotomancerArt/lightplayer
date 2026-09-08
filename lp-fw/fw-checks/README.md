@@ -151,10 +151,16 @@ Every other payload here is believed because the device said so. This one
 prints what the driver *thinks* it sent — one `rmt-frame` record per frame,
 with an FNV-1a checksum over the RGB bytes — and the emulator reads the same
 frame back off **the pad**, decoding the WS281x waveform the RMT actually put
-on GPIO18. The gate is that the two checksums agree, frame by frame. That is
-why its record fields are graded `Structural` while the `[WS281X]` telemetry's
-counters are graded `Pin`: `frames`, `complete`, `trips`, `refills` are claims
-about what reached the wire, and the wire is now observable.
+on GPIO18. The gate is that the two checksums agree, frame by frame — and the
+decoded frames are committed beside the transcript as its pin capture, so the
+comparison outlives the run.
+
+Of the `[WS281X]` telemetry's counters, `trips`, `skips` and `errors` are
+graded `Pin`: a truncated frame is a claim about a real strip, and the wire is
+now observable. `frames`, `complete`, `refills` and `wanted` are graded
+`Timing` despite reading like pin claims, because the line is printed once
+every ten seconds of the guest's uptime and how many frames fit in ten seconds
+is exactly what a time grade decides.
 
 Its pattern is a white dot (`[10, 10, 10]`) on black, which is invariant under
 any permutation of the three colour channels — deliberately, because
