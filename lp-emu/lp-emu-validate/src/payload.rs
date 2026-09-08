@@ -323,6 +323,42 @@ pub struct Payload {
     /// The runner refuses a silicon run with this sentence rather than
     /// producing an empty file and calling it evidence.
     pub emulator_only: Option<&'static str>,
+    /// How an EMULATED configuration starts this payload's image.
+    ///
+    /// Silicon has only one answer — a board is flashed and reset — so this
+    /// is not mirrored in `fw-checks` and does not reach the sidecar as a
+    /// payload property; it is the emulator's arm of "what a board does",
+    /// and the recorded configuration name already says which machine ran.
+    pub boot: BootPath,
+}
+
+/// Which way an emulated run reaches the application.
+///
+/// Both are real boots of the same bytes and M7 measured them equivalent at
+/// app entry (2,412,746 B of app segments byte-equal, an identical idle
+/// heap). The choice is about what a payload is FOR.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BootPath {
+    /// Load the app straight to its entry point. Fast, and the right default:
+    /// most payloads are about what the application does once it is running,
+    /// and the seconds the bootloader costs buy them nothing.
+    #[default]
+    Direct,
+    /// Start the hart at the reset vector with a merged flash image in the
+    /// chip and let the real mask ROM and the ESP-IDF second-stage
+    /// bootloader do the loading — what a flasher's bytes actually do.
+    ///
+    /// For a payload whose subject IS the boot: the banner, the partition
+    /// table, the segment loads, the reset cause, the strap. `--reset-cause`
+    /// and `--strap` are the two inputs the ROM's own banner prints
+    /// verbatim, so a payload that names them is naming what its transcript
+    /// will say.
+    RomUp {
+        /// `poweron` or `usb-uart` — printed as `rst:0x…` by the ROM.
+        reset_cause: &'static str,
+        /// `app` or `download` — printed as `boot:0x…`.
+        strap: &'static str,
+    },
 }
 
 impl Payload {
@@ -1043,6 +1079,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         fresh_chip: false,
         pin_capture: PinCapture::Off,
         emulator_only: None,
+        boot: BootPath::Direct,
     },
     Payload {
         name: "gpio-calibrate",
@@ -1066,6 +1103,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         fresh_chip: false,
         pin_capture: PinCapture::Off,
         emulator_only: None,
+        boot: BootPath::Direct,
     },
     Payload {
         name: "uart-bridge",
@@ -1089,6 +1127,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         fresh_chip: false,
         pin_capture: PinCapture::Off,
         emulator_only: None,
+        boot: BootPath::Direct,
     },
     Payload {
         name: "jit-math-perf",
@@ -1112,6 +1151,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         fresh_chip: false,
         pin_capture: PinCapture::Off,
         emulator_only: None,
+        boot: BootPath::Direct,
     },
     Payload {
         name: "boot-idle",
@@ -1163,6 +1203,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         fresh_chip: false,
         pin_capture: PinCapture::Off,
         emulator_only: None,
+        boot: BootPath::Direct,
     },
     Payload {
         name: "usb-negative-control",
@@ -1234,6 +1275,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         fresh_chip: false,
         pin_capture: PinCapture::Off,
         emulator_only: None,
+        boot: BootPath::Direct,
     },
     Payload {
         name: "usb-detach-reattach",
@@ -1279,6 +1321,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         fresh_chip: false,
         pin_capture: PinCapture::Off,
         emulator_only: None,
+        boot: BootPath::Direct,
     },
     Payload {
         name: "usb-host-absent",
@@ -1331,6 +1374,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
              not a capture — it is an empty file. The state it asks about is read out of the \
              guest's memory, which only an emulator can do",
         ),
+        boot: BootPath::Direct,
     },
     Payload {
         name: "boot-idle-flash",
@@ -1368,6 +1412,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         fresh_chip: true,
         pin_capture: PinCapture::Off,
         emulator_only: None,
+        boot: BootPath::Direct,
     },
     Payload {
         name: "upload-walk",
@@ -1413,6 +1458,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         fresh_chip: true,
         pin_capture: PinCapture::Off,
         emulator_only: None,
+        boot: BootPath::Direct,
     },
     Payload {
         name: "upload-walk-usb",
@@ -1452,6 +1498,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         fresh_chip: true,
         pin_capture: PinCapture::Off,
         emulator_only: None,
+        boot: BootPath::Direct,
     },
     Payload {
         name: "meteor-walk-usb",
@@ -1509,6 +1556,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         fresh_chip: true,
         pin_capture: PinCapture::Off,
         emulator_only: None,
+        boot: BootPath::Direct,
     },
     Payload {
         name: "rmt-chase",
@@ -1563,6 +1611,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // it.
         pin_capture: PinCapture::EveryFrame,
         emulator_only: None,
+        boot: BootPath::Direct,
     },
     Payload {
         name: "shader-oracle-walk",
@@ -1610,6 +1659,66 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // printed, so the count is the clock's; the frames are not.
         pin_capture: PinCapture::WhileRunning,
         emulator_only: None,
+        boot: BootPath::Direct,
+    },
+    Payload {
+        name: "rom-up-boot",
+        display_name: "Reset vector to the idle loop, through the real ROM",
+        fw_check_slug: "rom-up-boot",
+        // The same bytes `boot-idle-flash` runs — the shipped image — reached
+        // the other way: the hart starts at the reset vector, the mask ROM
+        // detects the chip and reads the ESP-IDF second-stage bootloader out
+        // of flash, and the bootloader reads the partition table, hashes the
+        // image and loads the app. M7 made that work and gated it with an
+        // integration test; this makes it a RECORDED claim, which is the
+        // difference between "we ran it once" and "the runner replays it".
+        //
+        // The transcript is longer than `boot-idle-flash`'s by exactly the
+        // boot chain, and that prefix is the point: the ROM banner, the
+        // partition table, the segment loads. Everything after
+        // `[INIT] Initializing board...` should be the same lines, and a
+        // replay against `boot-idle-flash` is how that stays true.
+        firmware_features: &["server", "radio"],
+        fw_checks_feature: None,
+        emits_header: false,
+        host_script: None,
+        sentinel: Sentinel::Done("[stack] heartbeat: high-water"),
+        record_kinds: &[],
+        mask_set: "boot-idle",
+        fields: &[],
+        series: &[&HELLO, &FS_MOUNT, &HEARTBEAT, &STACK_HEARTBEAT],
+        capture: Capture::Monitor,
+        link: Link::UsbSerialJtag,
+        emulator_features: None,
+        host_plan: Some(HostPlan {
+            host: "attached",
+            script: "",
+        }),
+        probes: &[],
+        run_secs: None,
+        fresh_chip: true,
+        pin_capture: PinCapture::Off,
+        // Silicon CAN record this — it is the only thing silicon does — but
+        // the payload exists to prove the emulator's boot chain, and a
+        // silicon capture of it is `boot-idle-flash`'s, which is committed.
+        // Recording it twice under two names would be two names for one
+        // sitting.
+        emulator_only: Some(
+            "on silicon every boot is a ROM-up boot, so this payload's silicon side IS \
+             `boot-idle-flash` — record that one. This name exists so the EMULATOR's two boot \
+             paths are two recorded claims instead of one recorded claim and one integration \
+             test",
+        ),
+        // `poweron` and `app`: the reset cause and strap the ROM prints
+        // verbatim as `rst:0x1 (POWERON)` and `boot:0x1e
+        // (SPI_FAST_FLASH_BOOT)`. Silicon's committed capture shows
+        // `rst:0x15 (USB_UART_HPSYS)` because a desk board is reset by the
+        // host's DTR/RTS dance rather than by having its power restored —
+        // which is the same distinction the 8 B question turns on.
+        boot: BootPath::RomUp {
+            reset_cause: "poweron",
+            strap: "app",
+        },
     },
 ];
 

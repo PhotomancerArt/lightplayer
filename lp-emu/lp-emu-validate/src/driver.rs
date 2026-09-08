@@ -36,7 +36,7 @@ use std::process::Command;
 use anyhow::{Context, Result, bail};
 
 use crate::configuration::{Availability, Configuration, ConfigurationKind};
-use crate::payload::{Capture, Link, Payload, Sentinel};
+use crate::payload::{BootPath, Capture, Link, Payload, Sentinel};
 
 /// Build constants, kept equal to the `justfile`'s variables of the same name.
 pub const RV32_TARGET: &str = "riscv32imac-unknown-none-elf";
@@ -55,6 +55,13 @@ pub const C6_PARTITIONS: &str = "lp-fw/fw-esp32c6/partitions.csv";
 /// the runner's plans. Found at G3 sitting 1, 2026-09-07.
 pub const FW_ESP32C6_DIR: &str = "lp-fw/fw-esp32c6";
 pub const DESK_STEP_SCRIPT: &str = "scripts/emu/desk-espflash-step.sh";
+
+/// Builds the whole 4 MiB flash part a `BootPath::RomUp` payload boots from:
+/// the second-stage bootloader at `0x0`, the partition table at `0x8000`,
+/// the app in `factory`. It is `espflash save-image --merge` with this
+/// repository's partition table and a pinned espflash, because the
+/// bootloader inside it comes out of espflash's bundled resources.
+pub const MERGED_IMAGE_SCRIPT: &str = "scripts/emu/build-merged-image.sh";
 /// The flash half of a [`Capture::FlashThenOpenAfter`] run: the same port
 /// discipline as `DESK_STEP_SCRIPT`, and no monitor.
 pub const DESK_FLASH_NO_MONITOR_SCRIPT: &str = "scripts/emu/desk-flash-no-monitor.sh";
@@ -855,11 +862,51 @@ impl ConfigurationDriver for LpEmuDriver {
             LP_EMU_C6_PACKAGE.into(),
             "--release".into(),
             "--".into(),
-            "--elf".into(),
-            elf,
-            "--time-grade".into(),
-            grade.into(),
         ];
+        // How the image is reached. `Direct` hands the machine the ELF;
+        // `RomUp` hands it a whole merged flash part and lets the mask ROM
+        // and the ESP-IDF bootloader do the loading, which needs a step
+        // before this one to build that part (espflash is where the
+        // second-stage bootloader comes from — there is nowhere else in the
+        // repository to get that binary).
+        match req.payload.boot {
+            BootPath::Direct => {
+                emu.push("--elf".into());
+                emu.push(elf.clone());
+            }
+            BootPath::RomUp {
+                reset_cause,
+                strap,
+            } => {
+                let merged = image.with_file_name("merged.bin");
+                steps.push(
+                    PlanStep::new(
+                        "build the merged flash image (the bytes a flasher writes)",
+                        vec![
+                            MERGED_IMAGE_SCRIPT.into(),
+                            elf.clone(),
+                            merged.display().to_string(),
+                        ],
+                    )
+                    .with_note(
+                        "espflash 3.3.0 exactly: it bundles the ESP-IDF second-stage \
+                         bootloader, and a different espflash puts a different program in \
+                         the image the ROM is about to run",
+                    ),
+                );
+                emu.push("--merged".into());
+                emu.push(merged.display().to_string());
+                // Both are printed VERBATIM by the ROM's own banner
+                // (`rst:0x%x` / `boot:0x%x`), so they are inputs to the
+                // transcript, not decoration.
+                emu.push("--reset-cause".into());
+                emu.push(reset_cause.into());
+                emu.push("--strap".into());
+                emu.push(strap.into());
+            }
+        }
+        emu.push("--time-grade".into());
+        emu.push(grade.into());
         if usb {
             // The capture is the USB byte stream: the same bytes a reader on
             // the silicon port sees, and nothing else. What the guest handed
