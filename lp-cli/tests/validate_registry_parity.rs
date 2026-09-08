@@ -60,8 +60,8 @@ fn every_payload_has_a_matching_fw_check() {
     }
 }
 
-/// A `Ready` payload never finishes, so it must not claim a done marker; a
-/// `Done` payload must.
+/// A `Ready` payload never finishes and a `State` payload never prints, so
+/// neither may claim a done marker; a `Done` payload must.
 #[test]
 fn sentinels_and_done_markers_are_consistent() {
     for payload in ALL_PAYLOADS {
@@ -77,8 +77,68 @@ fn sentinels_and_done_markers_are_consistent() {
                     payload.name
                 );
             }
+            Sentinel::State(_) => {
+                assert!(
+                    check.done_marker.is_none(),
+                    "payload `{}` prints nothing at all — its subject is machine state — so \
+                     the firmware side has no marker to declare",
+                    payload.name
+                );
+            }
+        }
+        // Whatever the shape, the two registries agree on what `--exit-on`
+        // would be given: the done marker, or nothing.
+        assert_eq!(
+            payload.sentinel.exit_on(),
+            check.done_marker,
+            "payload `{}`: the marker a run stops on must be the one fw-checks declares",
+            payload.name
+        );
+    }
+}
+
+/// The link, the host plan and the emulator-only reason are **host-side**
+/// properties and are deliberately not mirrored: the image is the same bytes
+/// whichever host is on the other end of the cable, and what differs is what
+/// that host does. This test says so out loud, so that "fw-checks does not
+/// know about `host_plan`" reads as a decision rather than as an omission the
+/// parity test forgot.
+#[test]
+fn the_host_side_properties_are_not_mirrored_and_that_is_the_point() {
+    for payload in ALL_PAYLOADS {
+        let check = fw_check_for(payload.fw_check_slug);
+        // Same firmware, on every configuration that can run it.
+        assert_eq!(
+            check.firmware_features, payload.firmware_features,
+            "payload `{}`",
+            payload.name
+        );
+        // The three USB scenarios are one image asked three different
+        // questions, and `fw-checks` cannot tell them apart — which is
+        // exactly right, because nothing in the firmware differs.
+        if payload.host_plan.is_some() {
+            assert!(
+                check.firmware_features.contains(&"server"),
+                "payload `{}` asks about the host link, so it is the shipped image",
+                payload.name
+            );
         }
     }
+    let scenarios: Vec<&str> = ALL_PAYLOADS
+        .iter()
+        .filter(|p| p.host_plan.is_some())
+        .map(|p| p.name)
+        .collect();
+    assert_eq!(
+        scenarios,
+        vec![
+            "boot-idle",
+            "usb-negative-control",
+            "usb-detach-reattach",
+            "usb-host-absent"
+        ],
+        "the emu-m6 set, and nothing else, drives the host"
+    );
 }
 
 /// The GPIO calibration payload's readiness line is the one `fw-checks` emits.
