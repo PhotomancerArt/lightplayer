@@ -127,6 +127,11 @@ pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     // The interrupt path.
     "INTERRUPT_CORE0",
     "PLIC_MX",
+    // M7: the mask ROM's `_init` writes the last word of BOTH PLIC
+    // apertures before it has a stack. The user-mode one is nothing else's
+    // business on this chip (`tee_enabled()` is a const false), so it is
+    // accept-and-remember with the PAC's names.
+    "PLIC_UX",
     "INTPRI",
     // The rest of what the no-radio image touches.
     "HP_SYS",
@@ -204,10 +209,52 @@ pub enum RomSource {
 #[derive(Clone, Debug)]
 pub enum AppSource {
     /// No app: a machine with the ROM in place and nothing else. What M7's
-    /// ROM-up boot will start from, and what the ROM tests use.
+    /// ROM-up boot starts from, and what the ROM tests use.
     None,
     Path(PathBuf),
     Bytes(Vec<u8>),
+}
+
+/// How the machine arrives at the application: the plan's two boot paths.
+///
+/// They are not two implementations of one thing — they are two *different*
+/// amounts of chip. [`BootMode::Direct`] is M3's: the app's segments are
+/// placed by the host, the flash-resident half is staged at offsets the
+/// loader computes, the ROM's chip-size word is written for it, and the hart
+/// starts at the app's `_start` in the state the bootloader would have left.
+/// [`BootMode::RomUp`] is M7's: **nothing** is placed. The chip holds a
+/// merged image a flasher wrote, the hart starts at the mask ROM's reset
+/// vector, and the ROM and the second-stage bootloader do every one of those
+/// things themselves, for real, out of flash.
+///
+/// `loader`'s module documentation lists what direct load does not
+/// reproduce; each line of it is a place the two paths can disagree, and
+/// `tests/rom_up_boot.rs` is where they are made to agree.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BootMode {
+    /// Place the app and start at its entry point (M3, M4).
+    #[default]
+    Direct,
+    /// Start at the mask ROM's reset vector and let the chip boot itself
+    /// out of flash (M7).
+    RomUp,
+}
+
+impl BootMode {
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "direct" => Some(BootMode::Direct),
+            "rom-up" => Some(BootMode::RomUp),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BootMode::Direct => "direct",
+            BootMode::RomUp => "rom-up",
+        }
+    }
 }
 
 /// Where a run's UART0 bytes go — and, for `Tcp`, where its RX bytes come
@@ -567,6 +614,8 @@ impl ByteSink for TeeSink {
 pub struct Esp32C6Builder {
     rom: RomSource,
     app: AppSource,
+    /// Direct load, or the chip booting itself out of flash.
+    boot_mode: BootMode,
     efuse: EfuseIdentity,
     time_grade: TimeGrade,
     strict: bool,
@@ -621,6 +670,7 @@ impl Esp32C6Builder {
         Self {
             rom: RomSource::Vendored,
             app: AppSource::None,
+            boot_mode: BootMode::default(),
             efuse: EfuseIdentity::default(),
             time_grade: TimeGrade::default(),
             strict: false,
@@ -666,6 +716,18 @@ impl Esp32C6Builder {
 
     pub fn app(mut self, app: AppSource) -> Self {
         self.app = app;
+        self
+    }
+
+    /// Direct load (the default) or the ROM-up boot.
+    ///
+    /// Under [`BootMode::RomUp`] an [`AppSource`] is still accepted and is
+    /// still parsed — it is just never *placed*. The ELF is the symbol table
+    /// `--probe`, `--break-at` and the boot report read, and the image the
+    /// cross-check compares the booted state against; the bytes the machine
+    /// runs come from the chip.
+    pub fn boot_mode(mut self, mode: BootMode) -> Self {
+        self.boot_mode = mode;
         self
     }
 
@@ -872,6 +934,7 @@ impl Esp32C6Builder {
         let Self {
             rom,
             app,
+            boot_mode,
             efuse,
             time_grade,
             strict,
@@ -1094,11 +1157,23 @@ impl Esp32C6Builder {
         // memory.
         let rom_segments = rom::load(&mut bus, &rom_image)?;
         let rom_data = rom::seed_data(&mut bus, &rom_image)?;
+        // …and the mask ROM's own copy of those bytes, so that `_init`'s
+        // unpack loop — which a ROM-up boot really runs — copies them rather
+        // than the zeros the ELF leaves at their source addresses.
+        let rom_data_image = rom::seed_data_image(&mut bus, &rom_image)?;
         let mut app_segments = Vec::new();
         let mut entry = rom_image.entry;
         let mut staging = loader::FlashStaging::default();
         let mut cache_fills = 0u64;
-        if let Some(app) = &app_image {
+        // The ROM-up boot places nothing. The hart starts at the ROM's reset
+        // vector, the chip holds a merged image, and every one of the four
+        // steps below happens for real: the ROM reads the bootloader out of
+        // flash over SPI1, the bootloader reads the partition table and the
+        // app, programs the MMU, and jumps. An `app` given here is a symbol
+        // table and a cross-check reference, never a load.
+        if let Some(app) = &app_image
+            && boot_mode == BootMode::Direct
+        {
             app_segments = loader::load_app(&mut bus, app)?;
             loader::clear_dram2(&mut bus)?;
             entry = app.entry;
@@ -1189,6 +1264,7 @@ impl Esp32C6Builder {
             harts: vec![hart],
             bus,
             time_grade,
+            boot_mode,
             hooks: HookTable::new(),
             rom: rom_image,
             app: app_image,
@@ -1198,6 +1274,7 @@ impl Esp32C6Builder {
             rng: seed,
             rom_segments,
             rom_data,
+            rom_data_image,
             app_segments,
             uart0_log,
             usb_sj_log,
@@ -1365,6 +1442,7 @@ pub struct Esp32C6Machine {
     pub harts: Vec<MachineHart<SocBus>>,
     pub bus: SocBus,
     time_grade: TimeGrade,
+    boot_mode: BootMode,
     hooks: HookTable,
     rom: ElfImage,
     app: Option<ElfImage>,
@@ -1374,6 +1452,7 @@ pub struct Esp32C6Machine {
     rng: u64,
     rom_segments: Vec<PlacedSegment>,
     rom_data: Vec<rom::SeededSection>,
+    rom_data_image: rom::DataImage,
     app_segments: Vec<PlacedAppSegment>,
     uart0_log: ByteLog,
     usb_sj_log: ByteLog,
@@ -1420,6 +1499,11 @@ pub struct Esp32C6Machine {
 
 impl Esp32C6Machine {
     // ---- what it is made of -------------------------------------------
+
+    /// Which of the plan's two boot paths this machine took.
+    pub fn boot_mode(&self) -> BootMode {
+        self.boot_mode
+    }
 
     pub fn time_grade(&self) -> TimeGrade {
         self.time_grade
@@ -1508,6 +1592,12 @@ impl Esp32C6Machine {
     /// ([`rom::seed_data`]).
     pub fn rom_data(&self) -> &[rom::SeededSection] {
         &self.rom_data
+    }
+
+    /// What `rom::seed_data_image` reconstructed of the mask ROM's own
+    /// data image.
+    pub fn rom_data_image(&self) -> rom::DataImage {
+        self.rom_data_image
     }
 
     pub fn app_segments(&self) -> &[PlacedAppSegment] {

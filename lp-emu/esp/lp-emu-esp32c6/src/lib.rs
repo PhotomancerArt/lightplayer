@@ -53,6 +53,7 @@
 pub mod cache;
 pub mod control;
 pub mod flash;
+pub mod image;
 pub mod intmatrix;
 pub mod loader;
 pub mod machine;
