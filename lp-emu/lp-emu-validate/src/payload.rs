@@ -823,6 +823,106 @@ pub static SHADER_COMPILE: SeriesSpec = SeriesSpec {
 /// grades it `modeled` — and this crate's own `lp-emu:*` has none yet either);
 /// `checksum` is a deterministic XOR of the kernel's outputs, not a clock, so
 /// it is compared like any other structural field.
+/// The render-loop payload's two records.
+///
+/// `project`, `lamps`, `outputs`, `frames` and `delta_ms` are `Structural`:
+/// they are what the run WAS, not what it measured, and a capture whose lamp
+/// count moved is a capture of a different project. Everything with a clock in
+/// it is `Timing` — including `fps_centi`, which reads like a throughput fact
+/// and is a time fact wearing a hat. The heap figures are `Memory`.
+///
+/// Nothing here is `Pin`. The frames this payload puts on the wire are the
+/// subject of the emulator's own `--dump-frames` oracle, which reads them off
+/// the pad rather than believing the guest; a pin claim in this transcript
+/// would be the firmware marking its own homework.
+static RENDER_LOOP_FIELDS: &[FieldSpec] = &[
+    FieldSpec {
+        record: "render-loop-load",
+        field: "project",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "render-loop-load",
+        field: "lamps",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "render-loop-load",
+        field: "outputs",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "render-loop-load",
+        field: "load_us",
+        class: FieldClass::Timing,
+    },
+    FieldSpec {
+        record: "render-loop-load",
+        field: "heap_free",
+        class: FieldClass::Memory,
+    },
+    FieldSpec {
+        record: "render-loop-load",
+        field: "heap_used",
+        class: FieldClass::Memory,
+    },
+    FieldSpec {
+        record: "render-loop-summary",
+        field: "frames",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "render-loop-summary",
+        field: "delta_ms",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "render-loop-summary",
+        field: "uptime_us",
+        class: FieldClass::Timing,
+    },
+    FieldSpec {
+        record: "render-loop-summary",
+        field: "render_us_total",
+        class: FieldClass::Timing,
+    },
+    FieldSpec {
+        record: "render-loop-summary",
+        field: "render_us_min",
+        class: FieldClass::Timing,
+    },
+    FieldSpec {
+        record: "render-loop-summary",
+        field: "render_us_max",
+        class: FieldClass::Timing,
+    },
+    FieldSpec {
+        record: "render-loop-summary",
+        field: "render_us_mean",
+        class: FieldClass::Timing,
+    },
+    FieldSpec {
+        record: "render-loop-summary",
+        field: "fps_centi",
+        class: FieldClass::Timing,
+    },
+    FieldSpec {
+        record: "render-loop-summary",
+        field: "heap_free",
+        class: FieldClass::Memory,
+    },
+    FieldSpec {
+        record: "render-loop-summary",
+        field: "heap_used",
+        class: FieldClass::Memory,
+    },
+    FieldSpec {
+        record: "render-loop-summary",
+        field: "largest_free_block",
+        class: FieldClass::Memory,
+    },
+];
+
 static JIT_BENCH_FIELDS: &[FieldSpec] = &[
     FieldSpec {
         record: "jit-bench",
@@ -1141,6 +1241,38 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         record_kinds: &["jit-bench"],
         mask_set: "jit-math-perf",
         fields: JIT_BENCH_FIELDS,
+        series: &[],
+        capture: Capture::Monitor,
+        link: Link::Uart0Spike,
+        emulator_features: None,
+        host_plan: None,
+        probes: &[],
+        run_secs: None,
+        fresh_chip: false,
+        pin_capture: PinCapture::Off,
+        emulator_only: None,
+        boot: BootPath::Direct,
+    },
+    Payload {
+        name: "render-loop",
+        display_name: "Render loop (a real project, N frames, RMT on)",
+        fw_check_slug: "render-loop",
+        // The shipped server image with its filesystem pre-seeded and its
+        // loop bounded — see the `fw-checks` entry for why the feature is not
+        // named `test_*`. `memory_fs` puts the project in RAM; the flash
+        // route is `upload-walk`'s question, not this one.
+        firmware_features: &["server", "radio", "memory_fs", "bench_render_loop"],
+        fw_checks_feature: Some("check-render-loop"),
+        emits_header: true,
+        sentinel: Sentinel::Done("[render-loop] === DONE ==="),
+        host_script: None,
+        record_kinds: &["render-loop-load", "render-loop-summary"],
+        mask_set: "render-loop",
+        fields: RENDER_LOOP_FIELDS,
+        // No series: the payload prints nothing per frame, on purpose. Every
+        // earlier benchmark on this ladder turned out to be measuring its own
+        // logging, so the per-frame line that would make a series is exactly
+        // the thing this payload refuses to emit.
         series: &[],
         capture: Capture::Monitor,
         link: Link::Uart0Spike,

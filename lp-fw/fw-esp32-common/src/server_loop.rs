@@ -54,15 +54,87 @@ const HEARTBEAT_MESSAGE_ID: u64 = 0;
 /// Runs at ~60 FPS to maintain consistent frame timing.
 /// Yields control back to Embassy runtime between iterations.
 pub async fn run_server_loop<T: ServerTransport>(
-    mut server: LpServer,
-    mut transport: T,
+    server: LpServer,
+    transport: T,
     time_provider: Esp32TimeProvider,
     // Chip-injected seams: heap stats for the heartbeat (including the
     // fragmentation numbers only the chip can probe) and the watchdog feed.
     // Both are chip facts this crate must not know.
     memory_stats: fn() -> Option<lpc_wire::server::MemoryStats>,
-    mut feed_watchdog: impl FnMut(u64),
+    feed_watchdog: impl FnMut(u64),
 ) -> ! {
+    run_server_loop_bounded(
+        server,
+        transport,
+        time_provider,
+        memory_stats,
+        feed_watchdog,
+        FrameBudget::UNBOUNDED,
+        |_| {},
+    )
+    .await;
+    // `FrameBudget::UNBOUNDED` is the only budget whose loop never breaks, and
+    // it is the one this caller passes.
+    unreachable!("the unbounded server loop returned")
+}
+
+/// How many frames the loop runs for, and on whose clock.
+///
+/// The product passes [`FrameBudget::UNBOUNDED`] and nothing below it does
+/// anything. A **benchmark** image passes a frame count and a fixed delta, and
+/// that combination is what turns the server loop into a measurable workload:
+/// a bounded run can print a summary and stop, and a fixed delta makes frame
+/// *content* a function of the frame index rather than of whatever the clock
+/// happened to say — which is what lets two runs of two different emulator
+/// binaries be compared frame for frame.
+///
+/// This is not a chip fact, so it does not violate this crate's seam rules
+/// (ADR 2026-07-29): it is a property of the run, injected by whoever starts
+/// the loop.
+#[derive(Debug, Clone, Copy)]
+pub struct FrameBudget {
+    /// Stop after this many frames. `None` runs for ever.
+    pub frames: Option<u32>,
+    /// Tick every project with this delta instead of the measured one.
+    /// `None` uses the wall clock, which is what the product does.
+    pub fixed_delta_ms: Option<u32>,
+    /// A free-running cycle counter, injected because reading one is a chip
+    /// fact (the C6's is behind CSR 0x7E2 and has no portable spelling — the
+    /// same seam `jit-math-perf` uses). `None` reports every frame as zero.
+    pub cycles: Option<fn() -> u32>,
+}
+
+impl FrameBudget {
+    /// What the product runs: no end, and the real clock.
+    pub const UNBOUNDED: Self = Self {
+        frames: None,
+        fixed_delta_ms: None,
+        cycles: None,
+    };
+}
+
+/// The server loop, with an optional end and an optional fixed delta.
+///
+/// `on_frame` is handed the cost of each frame's `tick_and_send` — the render
+/// — in whatever unit the caller's counter counts, and nothing else. It
+/// deliberately does **not** see the whole loop iteration: the iteration also
+/// carries the transport poll, the heartbeat and a 1 ms yield, and a "render
+/// time" that included the yield would be a measurement of `Timer::after`.
+///
+/// It is called once per frame inside the loop being measured, so it must not
+/// print, allocate or await. The render-loop payload folds it into a
+/// min/max/sum accumulator and prints once, after the last frame — every
+/// earlier benchmark on this ladder turned out to be measuring its own
+/// logging.
+pub async fn run_server_loop_bounded<T: ServerTransport>(
+    mut server: LpServer,
+    mut transport: T,
+    time_provider: Esp32TimeProvider,
+    memory_stats: fn() -> Option<lpc_wire::server::MemoryStats>,
+    mut feed_watchdog: impl FnMut(u64),
+    budget: FrameBudget,
+    mut on_frame: impl FnMut(u32),
+) {
     // Wire hello: the first id-0 frame this loop ever sends, so clients can
     // check the protocol version before anything else arrives (see
     // docs/adr/2026-07-14-wire-hello-versioning.md).
@@ -116,12 +188,22 @@ pub async fn run_server_loop<T: ServerTransport>(
         }
         let receive_done = time_provider.now_ms();
 
-        // Calculate delta time since last tick
+        // Calculate delta time since last tick. A benchmark budget replaces
+        // it with a fixed one so that frame N is the same frame N on every
+        // run, whatever the clock did.
         let delta_time = time_provider.elapsed_ms(last_tick);
-        let delta_ms = delta_time.min(u32::MAX as u64) as u32;
+        let delta_ms = match budget.fixed_delta_ms {
+            Some(fixed) => fixed,
+            None => delta_time.min(u32::MAX as u64) as u32,
+        };
 
         // Tick server (synchronous)
         let tick_start = time_provider.now_ms();
+        // The render's own cost, on the cycle counter rather than the
+        // millisecond clock: a 16 ms frame is 16 ticks of `now_ms` and
+        // 2.6 million cycles, and only one of those two can tell two frames
+        // apart. Read immediately around `tick_and_send` and nothing else.
+        let render_from = budget.cycles.map(|read| read());
         let (tick_ms, send_ms, total_ms, response_count) = match server
             .tick_and_send(delta_ms.max(1), incoming_messages, &mut transport)
             .await
@@ -157,6 +239,14 @@ pub async fn run_server_loop<T: ServerTransport>(
                 )
             }
         };
+
+        // The render is over; hand its cost to the caller before anything
+        // else in this iteration can add to it.
+        if let (Some(read), Some(from)) = (budget.cycles, render_from) {
+            on_frame(read().wrapping_sub(from));
+        } else {
+            on_frame(0);
+        }
 
         last_tick = frame_start;
         frame_count += 1;
@@ -247,5 +337,14 @@ pub async fn run_server_loop<T: ServerTransport>(
         // Yield to Embassy runtime (allows other tasks to run)
         // Use embassy_time::Timer to delay slightly
         embassy_time::Timer::after(embassy_time::Duration::from_millis(1)).await;
+
+        // A benchmark budget ends here — after the yield, so the last frame's
+        // log and heartbeat bytes have had the same chance to reach the I/O
+        // task as every other frame's.
+        if let Some(limit) = budget.frames
+            && frame_count >= limit
+        {
+            return;
+        }
     }
 }

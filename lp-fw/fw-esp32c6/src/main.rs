@@ -96,6 +96,10 @@ use fw_esp32_common::time;
 #[cfg(all(feature = "server", not(fw_harness),))]
 use fw_esp32_common::transport;
 
+// The benchmark images (`bench_render_loop`): the shipped boot with a seeded
+// filesystem and a bounded loop. Not under `tests/` — see `bench/mod.rs`.
+#[cfg(all(feature = "bench_render_loop", not(fw_harness)))]
+mod bench;
 #[cfg(all(not(feature = "memory_fs"), not(fw_harness),))]
 mod bootctl;
 #[cfg(all(not(feature = "memory_fs"), not(fw_harness),))]
@@ -125,9 +129,13 @@ use {
     lpfs::LpFsMemory,
     output::{Esp32C6RmtWs281xDriver, Esp32OutputProvider},
     serial::io_task,
-    server_loop::run_server_loop,
     time::Esp32TimeProvider,
 };
+
+// The unbounded loop is the product's entry point; the benchmark image calls
+// `run_server_loop_bounded` instead and would carry this as an unused import.
+#[cfg(all(not(feature = "bench_render_loop"), not(fw_harness)))]
+use server_loop::run_server_loop;
 
 #[cfg(fw_harness)]
 mod tests {
@@ -217,6 +225,11 @@ struct FirmwareApp {
     transport: transport::StreamingMessageRouterTransport,
     time_provider: Esp32TimeProvider,
     watchdog: recovery::watchdog::WatchdogFeeder,
+    /// What `auto_load_project` cost, in cycles — parse, resolve, map and
+    /// above all the shader compile. The one part of the run that does not
+    /// repeat, so the benchmark reports it apart from the frames.
+    #[cfg(feature = "bench_render_loop")]
+    load_cycles: u32,
 }
 
 #[cfg(not(fw_harness))]
@@ -266,6 +279,11 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
 
     // Initialize log crate to write to outgoing serial (host will see these)
     crate::logger::init(serial::io_task::log_write_to_outgoing);
+
+    // The transcript header, before any record and as early as the logger
+    // allows — the same sink-agnostic entry point every other C6 payload uses.
+    #[cfg(feature = "bench_render_loop")]
+    bench::render_loop::write_header();
 
     log::info!("[fw-esp32c6] Shader backend: native JIT (lpvm-native rt_jit)");
 
@@ -328,6 +346,13 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     };
     #[cfg(feature = "memory_fs")]
     esp_println::println!("[INIT] In-memory filesystem created");
+
+    // The render-loop benchmark's whole firmware difference, part one: the
+    // filesystem is not empty. Everything after this line — the manifest, the
+    // server, `auto_load_project`, the RMT open, the render — is the shipped
+    // boot finding a project where a flashed board would have one.
+    #[cfg(feature = "bench_render_loop")]
+    bench::render_loop::seed(base_fs.as_ref());
 
     let hardware_manifest = load_hardware_manifest(
         base_fs.as_ref(),
@@ -462,6 +487,8 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // precedence rule (clamp wins over skip — a dim, visible board beats a
     // dark one). An explicit user instruction outranks the ladder: the user
     // may be recovering exactly the loop the ladder saw.
+    #[cfg(feature = "bench_render_loop")]
+    let load_from = board::esp32c6::cycle_counter::read();
     match boot_control.boot_action() {
         lp_bootctl::BootAction::LoadClamped { level } => {
             log::error!(
@@ -485,6 +512,8 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
             boot::auto_load_project(&mut server);
         }
     }
+    #[cfg(feature = "bench_render_loop")]
+    let load_cycles = board::esp32c6::cycle_counter::read().wrapping_sub(load_from);
 
     // Create time provider
     esp_println::println!("[INIT] Creating time provider...");
@@ -500,6 +529,8 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         transport,
         time_provider,
         watchdog,
+        #[cfg(feature = "bench_render_loop")]
+        load_cycles,
     }
 }
 
@@ -604,15 +635,63 @@ async fn main(spawner: embassy_executor::Spawner) {
         );
 
         // Run server loop (never returns)
-        let mut watchdog = app.watchdog;
-        run_server_loop(
-            app.server,
-            app.transport,
-            app.time_provider,
-            heartbeat_memory_stats,
-            move |now_ms| watchdog.feed(now_ms),
-        )
-        .await;
+        #[cfg(not(feature = "bench_render_loop"))]
+        {
+            let mut watchdog = app.watchdog;
+            run_server_loop(
+                app.server,
+                app.transport,
+                app.time_provider,
+                heartbeat_memory_stats,
+                move |now_ms| watchdog.feed(now_ms),
+            )
+            .await;
+        }
+
+        // The render-loop benchmark's whole firmware difference, part two:
+        // the same loop, with an end. `run_server_loop` is a wrapper around
+        // this call with `FrameBudget::UNBOUNDED` — the frames below are the
+        // product's frames, not a re-implementation of them.
+        #[cfg(feature = "bench_render_loop")]
+        {
+            use fw_checks::checks::render_loop::{FrameStats, cycles_to_us};
+
+            let heap_after_load = esp32_memory_stats().unwrap_or((0, 0));
+            let load_us = cycles_to_us(app.load_cycles as u64, board::esp32c6::constants::CPU_HZ);
+            let mut stats = FrameStats::new();
+            // The guest's own clock, bracketing the loop: `Esp32TimeProvider`
+            // measures from its own construction and is about to be moved
+            // into the loop, so the bracket is taken on `Instant` directly.
+            let started = embassy_time::Instant::now();
+
+            // The same watchdog the product arms and the same feed policy:
+            // the bounded loop yields once a frame like the unbounded one, so
+            // the I/O task stays provably alive and the RWDT never bites. An
+            // image that disarmed it would differ from the product in a third
+            // way, for no measurement.
+            let mut watchdog = app.watchdog;
+            server_loop::run_server_loop_bounded(
+                app.server,
+                app.transport,
+                app.time_provider,
+                heartbeat_memory_stats,
+                move |now_ms| watchdog.feed(now_ms),
+                bench::render_loop::budget(),
+                |cycles| stats.record(cycles),
+            )
+            .await;
+
+            let uptime_us = started.elapsed().as_micros();
+            bench::render_loop::report(&stats, load_us, uptime_us, heap_after_load);
+
+            // Idle, yielding, so the I/O task drains the records and the
+            // marker to the host link. `--exit-on` fires on those bytes; a
+            // loop that stopped yielding here would print the sentinel into a
+            // queue nobody pumps.
+            loop {
+                embassy_time::Timer::after(embassy_time::Duration::from_millis(100)).await;
+            }
+        }
     }
 }
 

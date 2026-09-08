@@ -22,6 +22,11 @@ check-oom = []
 # harness half (board init, `Rmt`, `LedChannel`, `embassy_time`) stays in
 # `fw-esp32c6`.
 check-rmt = []
+# The `render-loop` payload: the frame-timing accumulator and the record
+# shapes for the shipped server firmware rendering a real project
+# (`checks::render_loop`). No chip dependency — the cycle counter, the project
+# payload and the seeding stay in `fw-esp32c6`.
+check-render-loop = []
 check-dither = []
 check-fluid-demo = []
 check-msafluid = []
