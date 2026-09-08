@@ -19,7 +19,12 @@ non-determinisms — `esp_app_desc!()`'s wall-clock timestamp
 host-triple sysroot (`--remap-path-prefix`), and a cold-tree race where
 `fw-esp32c6/build.rs` runs before esp-hal's out dir exists and links the stock
 `rodata.x` — and two builds in two directories on one machine now produce
-identical sha256s.
+identical sha256s. (The third of those was a rebuild-once workaround inside
+the reference-image script. PR #601 fixed the **product** build underneath it,
+by giving the vendored esp-hal a `links` key so the two build scripts have a
+real ordering edge: build 1 of a cold tree is now the right image, which
+matters far beyond this entry — `firmware-size` and every fresh checkout had
+been measuring an image nobody had ever flashed.)
 
 **Between** hosts they still differ by ~4.7 KB. Everything a build can be told
 is pinned; the residual is the **rustc binary's own host build** — the same
