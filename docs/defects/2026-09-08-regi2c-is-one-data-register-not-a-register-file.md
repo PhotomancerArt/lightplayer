@@ -80,10 +80,11 @@ but only for the register actually asked about. The two read overrides
 carries the disassembly that justifies it: `wait_rfpll_cal_end` calls
 `rom_i2c_readReg_Mask(0x62, 1, 7, 1, 1)` and gives up after a hundred tries.
 
-**The evidence.** `tests/rom_up_boot.rs::the_app_says_the_same_thing_on_both_boot_paths`
-compares the app's whole console, line for line, between the ROM-up boot and
-a direct load of the same ELF — 27 lines from `[INIT] Initializing board` to
-`[RECOVERY] boot complete`. It passes. With `ANALOG_SEED` emptied, it fails
+**The evidence.** `tests/rom_up_boot.rs::rom_up_and_direct_load_agree_on_what_the_app_sees`
+gained a fifth claim: the app's whole console, line for line, between the
+ROM-up boot and a direct load of the same ELF, run on to `[INIT] fw-esp32
+initialized` — the first marker past the radio bring-up, which is where
+`wait_rfpll_cal_end` runs. It passes. With `ANALOG_SEED` emptied, it fails
 with **exactly** the three `pll_cal` lines inserted after `[INIT] Flash
 filesystem mounted` and nothing else moved, which is the differential the
 fix was asked for. Every other boot gate, the m3–m6 replays and every
