@@ -392,7 +392,7 @@ fn g4_4_the_shipped_image_crosses_no_modeled_usb_register() {
     // in five and a half seconds is part of what this run proves.
     assert_eq!(
         m.bus.blocks_in_strict_grade_scope(),
-        vec!["USB_DEVICE", "GPIO"]
+        vec!["UART0", "UART1", "USB_DEVICE", "GPIO"]
     );
     // And the run really did do the whole boot, so the pass is not a pass by
     // never getting there.
