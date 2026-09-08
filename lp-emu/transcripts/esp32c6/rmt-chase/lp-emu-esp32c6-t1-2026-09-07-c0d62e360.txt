@@ -1,4 +1,4 @@
-[fw-checks-header] {"schema":1,"payload":"rmt-chase","chip":"esp32c6","firmware_commit":"9b649c0c77a4","firmware_features":"default,esp32c6,esp_radio,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_rmt,ws281x_telemetry","firmware_dirty":false}
+[fw-checks-header] {"schema":1,"payload":"rmt-chase","chip":"esp32c6","firmware_commit":"c0d62e36011e","firmware_features":"default,esp32c6,esp_radio,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_rmt,ws281x_telemetry","firmware_dirty":true}
 [INFO] fw_esp32c6::output::rmt::led_channel: LedChannel::new: RMT slot 0, 256 LEDs (blocks=4 window_words=192 half_words=96)
 [INFO] fw_esp32c6::tests::test_rmt: [rmt-chase] 256 LEDs on gpio18, 3 chases (768 frames)
 [fw-check-json] {"kind":"rmt-frame","n":0,"leds":256,"lit":1,"crc":"0xf88210a7"}

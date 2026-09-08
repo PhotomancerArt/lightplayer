@@ -9,7 +9,7 @@
 //!
 //! ```bash
 //! cargo run -p lp-cli -- validate record emu-m5 --config lp-emu:esp32c6:t1 \
-//!   --date 2026-09-07 --commit 9b649c0c77a4 --dirty --timeout-secs 20
+//!   --date 2026-09-07 --commit c0d62e360 --dirty --timeout-secs 20
 //! cargo run -p lp-cli -- validate record emu-m5 --config lp-emu:esp32c6:t2 …
 //! ```
 //!
@@ -24,8 +24,8 @@ use lp_emu_validate::payload::SeriesSpec;
 use lp_emu_validate::transcript::Transcript;
 use lp_emu_validate::{FieldClass, Payload, ReplayOptions, find_payload, replay};
 
-const T1: &str = "lp-emu-esp32c6-t1-2026-09-07-9b649c0c7.txt";
-const T2: &str = "lp-emu-esp32c6-t2-2026-09-07-9b649c0c7.txt";
+const T1: &str = "lp-emu-esp32c6-t1-2026-09-07-c0d62e360.txt";
+const T2: &str = "lp-emu-esp32c6-t2-2026-09-07-c0d62e360.txt";
 const LEDS: usize = 256;
 const FRAMES: usize = LEDS * 3;
 
