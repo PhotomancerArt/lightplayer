@@ -258,6 +258,15 @@ button 20 press at 1000 bounce 5 edges over 200 hold 10ms
 encoder 21 22 8 cw from 4000 at 4000hz
 ```
 
+**File order is not drive order here.** A byte script's file order is wire
+order because a serial line has one; pads do not. Two pads move
+independently, a `button` expands to a rest level at cycle 0 and a release
+milliseconds later, and an `encoder` beside it covers the same stretch of
+time — so the absolute steps between two waits are driven in **time** order,
+and a file that reads naturally still writes a pin log whose timestamps go
+forwards. An `after` or `then` is a fence: everything after it is still
+after it.
+
 **The leading number is microseconds here**, not the milliseconds a byte
 script uses: a contact bounce is tens of microseconds and an integer grammar
 should be able to say so. `after`/`then`'s `+<ms>` delays are unchanged, and

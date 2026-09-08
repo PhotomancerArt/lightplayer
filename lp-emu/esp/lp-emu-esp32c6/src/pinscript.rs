@@ -34,6 +34,16 @@
 //! encoder <a> <b> <steps> cw|ccw from <us> at <hz>
 //! ```
 //!
+//! **File order is not drive order here.** A byte script's file order is
+//! wire order and has to be — a serial line has an order. Pads are not a
+//! serial line: two pads move independently, a `button` line expands to a
+//! rest level at cycle 0 and a release milliseconds later, and an `encoder`
+//! beside it covers the same stretch of time. So the absolute steps between
+//! two waits are driven in **time** order, and a file that reads naturally
+//! still writes a pin log whose timestamps go forwards. An `after` or `then`
+//! is a **fence**: everything after it is still after it, however early its
+//! own time says it is.
+//!
 //! **The units differ from `--usb-script` on purpose, and only in the
 //! absolute column.** A host byte lands on a millisecond scale; a contact
 //! bounce is tens of microseconds, and a script that had to spell one as
@@ -215,8 +225,13 @@ impl PinScript {
         self.steps.is_empty()
     }
 
-    /// Append another script's steps after this one's — file order is wire
-    /// order, and two files on one run are no different.
+    /// Append another script's steps after this one's.
+    ///
+    /// Each file's own steps are already in time order
+    /// ([`sort_segments`](Self::sort_segments)); the second file's queue
+    /// behind the first's rather than being merged into it, because two
+    /// `--pin-script` files are two separate schedules and merging them
+    /// would make each one's meaning depend on the other.
     pub fn extend(&mut self, other: Self) {
         self.steps.extend(other.steps);
     }
@@ -332,14 +347,49 @@ impl PinScript {
             self.steps.push_back(PinStep::At { at, events });
         }
     }
+
+    /// Put the absolute steps of each segment in **time** order.
+    ///
+    /// File order is drive order for the byte scripts, and it has to be:
+    /// a serial line has an order and reordering it would model a different
+    /// wire. Pads are not a serial line. Two pads move independently, a
+    /// `button` line expands to a rest level at cycle 0 and a release
+    /// milliseconds later, and an `encoder` line beside it covers the same
+    /// stretch of time — so a file that reads naturally would otherwise
+    /// write a pin log whose timestamps go backwards, and a decoder reading
+    /// that log would see edges out of order.
+    ///
+    /// So each **segment** — the run of absolute steps between two waits —
+    /// is stable-sorted by cycle. A wait is a fence: it has no absolute time
+    /// to compare against, and everything after it is still after it.
+    fn sort_segments(&mut self) {
+        let mut out: VecDeque<PinStep> = VecDeque::with_capacity(self.steps.len());
+        let mut segment: Vec<PinStep> = Vec::new();
+        for step in self.steps.drain(..) {
+            match step {
+                PinStep::At { .. } => segment.push(step),
+                fence => {
+                    segment.sort_by_key(|s| match s {
+                        PinStep::At { at, .. } => *at,
+                        _ => unreachable!("a segment holds absolute steps only"),
+                    });
+                    out.extend(segment.drain(..));
+                    out.push_back(fence);
+                }
+            }
+        }
+        segment.sort_by_key(|s| match s {
+            PinStep::At { at, .. } => *at,
+            _ => unreachable!("a segment holds absolute steps only"),
+        });
+        out.extend(segment);
+        self.steps = out;
+    }
 }
 
 /// Parse a `--pin-script` file. See the module docs for the grammar.
 pub fn parse_pin_script(text: &str) -> Result<PinScript, String> {
     let mut script = PinScript::new();
-    // Generators produce absolute steps out of file order (a `button` line's
-    // rest level is at cycle 0), so absolute steps are collected and sorted
-    // by time; `after`/`then` keep their place in the queue between them.
     for (n, raw) in text.lines().enumerate() {
         let line = strip_comment(raw.trim());
         if line.is_empty() {
@@ -388,6 +438,7 @@ pub fn parse_pin_script(text: &str) -> Result<PinScript, String> {
         let cycle = parse_stamp(stamp).map_err(&at)?;
         script.push_at(cycle, parse_pin_clause(rest.trim()).map_err(&at)?);
     }
+    script.sort_segments();
     Ok(script)
 }
 
@@ -880,6 +931,52 @@ mod tests {
         assert_eq!(events_at(&mut script, 10), [(20, true)]);
         log.append(b"xxa#byy");
         assert_eq!(events_at(&mut script, 20), [(21, true)]);
+    }
+
+    /// A file that reads naturally — a `button` beside an `encoder`, a plain
+    /// line under both — drives its pads in **time** order, not file order.
+    /// Bytes on a serial line keep file order; pads are not a serial line.
+    #[test]
+    fn absolute_steps_are_driven_in_time_order_whatever_order_the_file_lists_them() {
+        let got = expand(
+            "encoder 21 22 4 cw from 4000 at 4000hz\n\
+             5000 pin 23 1\n\
+             button 20 press at 1000 hold 2ms\n",
+        );
+        let times: Vec<u64> = got.iter().map(|(us, _, _)| *us).collect();
+        assert!(times.windows(2).all(|w| w[0] <= w[1]), "{got:?}");
+        assert_eq!(
+            got,
+            [
+                (0, 20, true),      // the button's rest level, from the last line
+                (1_000, 20, false), // the press
+                (3_000, 20, true),  // released
+                (4_000, 21, true),  // the encoder, a^
+                (4_250, 22, true),
+                (4_500, 21, false),
+                (4_750, 22, false),
+                (5_000, 23, true), // and the plain line where its time says
+            ]
+        );
+    }
+
+    /// A wait is a fence: the steps after it are still after it, however
+    /// early their own times say they are.
+    #[test]
+    fn a_wait_is_a_fence_that_the_time_ordering_does_not_cross() {
+        let log = ByteLog::new();
+        let mut script = parse_pin_script(
+            "9000 pin 20 1\n\
+             after \"go\" pin 21 1\n\
+             1000 pin 22 1\n",
+        )
+        .unwrap()
+        .watching(log.clone());
+        assert_eq!(events_at(&mut script, 9_000), [(20, true)]);
+        // gpio22's own time is long past, and it still waits its turn.
+        assert!(events_at(&mut script, 9_000).is_empty());
+        log.append(b"go");
+        assert_eq!(events_at(&mut script, 9_000), [(21, true), (22, true)]);
     }
 
     #[test]
