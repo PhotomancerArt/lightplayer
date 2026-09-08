@@ -292,22 +292,128 @@ pub struct UsbScript {
     pub commands: Vec<(Cycles, ControlCommand)>,
 }
 
-/// `--usb-script`: `--uart0-script`'s grammar with the control words added.
+/// One line of the script grammar, parsed but not yet placed on a timeline.
 ///
-/// One entry per line, `<ms> <what>`, where `<what>` is either **bytes** — a
-/// double-quoted string with `\n \r \t \\ \" \0 \xNN` escapes, or
-/// whitespace-separated hex bytes — or one of the control words. `#` starts
-/// a comment; blank lines are skipped. File order is wire order.
-///
-/// A leading `<ms>` is absolute emulated time from cycle zero, exactly as
-/// `--uart0-script` reads it. A `wait <ms>` line adds to an offset applied
-/// to every **later** line, which is how a relative script is written
-/// without recomputing every timestamp after an edit.
+/// The three byte forms are [`ScriptedSource`]'s own three steps; the fourth
+/// is the control channel's, and only [`parse_usb_script`] accepts it.
+#[derive(Debug, PartialEq, Eq)]
+enum ScriptLine {
+    /// `<ms> <bytes>` — absolute emulated time from cycle zero.
+    At { ms: u64, bytes: Vec<u8> },
+    /// `after "<line>" [+<ms>] <bytes>` — once the device has said that.
+    After {
+        needle: Vec<u8>,
+        delay_ms: u64,
+        bytes: Vec<u8>,
+    },
+    /// `then +<ms> <bytes>` — a host pacing itself after its own last chunk.
+    Then { delay_ms: u64, bytes: Vec<u8> },
+    /// `<ms> <verb …>` — the cable, not the wire.
+    Command { ms: u64, command: ControlCommand },
+}
+
+/// Parse one non-blank, non-comment line of the script grammar.
 ///
 /// Bytes and control words are told apart by the first token: a quoted
 /// string is bytes, a token in [`ControlCommand::VERBS`] is a command, and
 /// anything else is hex. No verb is a pair of hex digits, so the rule never
 /// has to guess.
+fn parse_script_line(line: &str) -> Result<ScriptLine, String> {
+    if let Some(rest) = line.strip_prefix("after ") {
+        let (needle, rest) = take_quoted(rest.trim())?;
+        let (delay_ms, rest) = parse_delay(rest.trim())?;
+        return Ok(ScriptLine::After {
+            needle,
+            delay_ms,
+            bytes: parse_script_bytes(strip_comment(rest.trim()))?,
+        });
+    }
+    if let Some(rest) = line.strip_prefix("then ") {
+        let (delay_ms, rest) = parse_delay(rest.trim())?;
+        return Ok(ScriptLine::Then {
+            delay_ms,
+            bytes: parse_script_bytes(strip_comment(rest.trim()))?,
+        });
+    }
+    let (ms, rest) = line.split_once(char::is_whitespace).ok_or_else(|| {
+        "expected `<ms> <bytes or command>`, `after \"<line>\" <bytes>` or `then +<ms> <bytes>`"
+            .to_string()
+    })?;
+    let ms: u64 = ms
+        .trim_end_matches("ms")
+        .parse()
+        .map_err(|e| format!("`{ms}` is not a millisecond count: {e}"))?;
+    // A comment may follow a command or a quoted string on the same line.
+    let rest = strip_comment(rest.trim());
+    let first = rest.split_whitespace().next().unwrap_or("");
+    if !rest.starts_with('"') && ControlCommand::VERBS.contains(&first) {
+        return Ok(ScriptLine::Command {
+            ms,
+            command: ControlCommand::parse(rest)?,
+        });
+    }
+    Ok(ScriptLine::At {
+        ms,
+        bytes: parse_script_bytes(rest)?,
+    })
+}
+
+/// The byte half of the grammar on its own: `--uart0-script`.
+///
+/// A link with no control channel has no cable to talk about, so a control
+/// word here is an error naming the flag that does take one rather than a
+/// line silently ignored.
+pub fn parse_byte_script(text: &str) -> Result<ScriptedSource, String> {
+    let mut source = ScriptedSource::new();
+    for (n, raw) in text.lines().enumerate() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let at = |e: String| format!("line {}: {e}", n + 1);
+        match parse_script_line(line).map_err(&at)? {
+            ScriptLine::At { ms, bytes } => source.push(ms * MS, bytes),
+            ScriptLine::After {
+                needle,
+                delay_ms,
+                bytes,
+            } => source.push_after(needle, delay_ms * MS, bytes),
+            ScriptLine::Then { delay_ms, bytes } => source.push_then(delay_ms * MS, bytes),
+            ScriptLine::Command { command, .. } => {
+                return Err(at(format!(
+                    "`{}` is a control command and this link has no control channel \
+                     (--usb-script takes those)",
+                    command.verb()
+                )));
+            }
+        }
+    }
+    Ok(source)
+}
+
+/// `--usb-script`: `--uart0-script`'s grammar with the control words added.
+///
+/// One entry per line. A line is either **bytes** — a double-quoted string
+/// with `\n \r \t \\ \" \0 \xNN` escapes, or whitespace-separated hex bytes —
+/// or one of the control words. `#` starts a comment; blank lines are
+/// skipped. File order is wire order.
+///
+/// A leading `<ms>` is absolute emulated time from cycle zero. A `wait <ms>`
+/// line adds to an offset applied to every **later** line, which is how a
+/// relative script is written without recomputing every timestamp after an
+/// edit.
+///
+/// `after "<line>" [+<ms>] <bytes>` and `then +<ms> <bytes>` are the walk
+/// forms, and they are what makes the upload walk runnable over this link at
+/// all: a client sends its next request when the answer to the last one
+/// arrives, not at a wall-clock offset. The needle is matched against the
+/// device's **USB** output, so the same file replays on either link — the
+/// conversation is the payload's, the link is the configuration's (M6 P5).
+/// The wait resolves in guest cycles, so two runs deliver the same bytes at
+/// the same cycles.
+///
+/// A `wait` offset applies to the absolute lines only; a wait-for step has
+/// no absolute time to shift.
 pub fn parse_usb_script(text: &str) -> Result<UsbScript, String> {
     let mut script = UsbScript::default();
     let mut offset_ms = 0u64;
@@ -316,43 +422,85 @@ pub fn parse_usb_script(text: &str) -> Result<UsbScript, String> {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let (ms, rest) = line
-            .split_once(char::is_whitespace)
-            .ok_or_else(|| format!("line {}: expected `<ms> <bytes or command>`", n + 1))?;
-        let ms: u64 = ms
-            .trim_end_matches("ms")
-            .parse()
-            .map_err(|e| format!("line {}: `{ms}` is not a millisecond count: {e}", n + 1))?;
-        // A comment may follow a command or a quoted string on the same line.
-        let rest = strip_comment(rest.trim());
-        let at = (ms + offset_ms) * 1_000 * memmap::CYCLES_PER_US;
-
-        if let Some(quoted) = rest.strip_prefix('"') {
-            let body = quoted
-                .strip_suffix('"')
-                .ok_or_else(|| format!("line {}: unterminated string", n + 1))?;
-            let bytes = unescape(body).map_err(|e| format!("line {}: {e}", n + 1))?;
-            script.bytes.push(at, bytes);
-            continue;
-        }
-
-        let first = rest.split_whitespace().next().unwrap_or("");
-        if !ControlCommand::VERBS.contains(&first) {
-            let words: Vec<&str> = rest.split_whitespace().collect();
-            if words.is_empty() {
-                return Err(format!("line {}: expected bytes or a command", n + 1));
+        let at = |e: String| format!("line {}: {e}", n + 1);
+        match parse_script_line(line).map_err(&at)? {
+            ScriptLine::At { ms, bytes } => script.bytes.push((ms + offset_ms) * MS, bytes),
+            ScriptLine::After {
+                needle,
+                delay_ms,
+                bytes,
+            } => script.bytes.push_after(needle, delay_ms * MS, bytes),
+            ScriptLine::Then { delay_ms, bytes } => script.bytes.push_then(delay_ms * MS, bytes),
+            ScriptLine::Command {
+                command: ControlCommand::Wait(by),
+                ..
+            } => offset_ms += by,
+            ScriptLine::Command { ms, command } => {
+                script.commands.push(((ms + offset_ms) * MS, command));
             }
-            let bytes = parse_hex(&words).map_err(|e| format!("line {}: {e}", n + 1))?;
-            script.bytes.push(at, bytes);
-            continue;
-        }
-
-        match ControlCommand::parse(rest).map_err(|e| format!("line {}: {e}", n + 1))? {
-            ControlCommand::Wait(by) => offset_ms += by,
-            command => script.commands.push((at, command)),
         }
     }
     Ok(script)
+}
+
+/// One emulated millisecond, in cycles.
+const MS: Cycles = 1_000 * memmap::CYCLES_PER_US;
+
+/// An optional leading `+<ms>` delay, and the rest.
+fn parse_delay(text: &str) -> Result<(u64, &str), String> {
+    let Some(after_plus) = text.strip_prefix('+') else {
+        return Ok((0, text));
+    };
+    let (num, tail) = after_plus
+        .split_once(char::is_whitespace)
+        .ok_or_else(|| "`+<ms>` needs bytes after it".to_string())?;
+    let ms: u64 = num
+        .trim_end_matches("ms")
+        .parse()
+        .map_err(|e| format!("`{num}` is not a millisecond count: {e}"))?;
+    Ok((ms, tail.trim()))
+}
+
+/// A double-quoted, escaped string at the start of `text`, and the rest.
+fn take_quoted(text: &str) -> Result<(Vec<u8>, &str), String> {
+    let body = text
+        .strip_prefix('"')
+        .ok_or_else(|| "expected a double-quoted string".to_string())?;
+    // The closing quote is the first unescaped one.
+    let mut end = None;
+    let mut escaped = false;
+    for (i, c) in body.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match c {
+            '\\' => escaped = true,
+            '"' => {
+                end = Some(i);
+                break;
+            }
+            _ => {}
+        }
+    }
+    let end = end.ok_or_else(|| "unterminated string".to_string())?;
+    Ok((unescape(&body[..end])?, &body[end + 1..]))
+}
+
+/// A quoted string, or whitespace-separated hex bytes.
+fn parse_script_bytes(rest: &str) -> Result<Vec<u8>, String> {
+    if rest.starts_with('"') {
+        let (bytes, tail) = take_quoted(rest)?;
+        if !tail.trim().is_empty() {
+            return Err(format!("trailing `{}` after the string", tail.trim()));
+        }
+        return Ok(bytes);
+    }
+    let words: Vec<&str> = rest.split_whitespace().collect();
+    if words.is_empty() {
+        return Err("expected bytes or a command".to_string());
+    }
+    parse_hex(&words)
 }
 
 /// Drop a trailing `#` comment, unless it is inside the quoted string.
@@ -618,6 +766,56 @@ mod tests {
         assert_eq!(script.bytes.next_byte(10 * MS), Some(b'a'));
         assert_eq!(script.bytes.next_byte(10 * MS), Some(b'#'));
         assert_eq!(script.bytes.next_byte(10 * MS), Some(b'b'));
+    }
+
+    /// The walk forms are the whole point of P5: M4's `examples-basic.script`
+    /// is a file of `after` and `then` lines, and until this parser took them
+    /// the shipped walk could only be replayed over the spike's UART0 link.
+    #[test]
+    fn the_walk_forms_parse_on_the_usb_link_too() {
+        let mut script = parse_usb_script(
+            "0 attach\n\
+             after \"[RECOVERY] boot complete (first frame served)\" \"M!{\\\"id\\\":1}\\n\"\n\
+             then +2ms \"more\"\n\
+             after \"\\\"id\\\":1,\" +5ms 4d 21 0a\n",
+        )
+        .unwrap();
+        assert_eq!(script.commands, vec![(0, ControlCommand::Attach)]);
+        // 11 + 4 + 3 bytes, in three steps.
+        assert_eq!(script.bytes.remaining(), 18);
+        assert_eq!(script.bytes.steps_left(), 3);
+        // Nothing is ready: every step waits on something the device has not
+        // said, and a source with no log to watch never resolves one.
+        assert_eq!(script.bytes.next_byte(1_000 * MS), None);
+    }
+
+    /// A `wait` shifts the absolute lines. A wait-*for* line has no absolute
+    /// time to shift, which is a distinction worth pinning: an offset that
+    /// silently moved an `after` would be moving a wait that is already
+    /// relative to the device.
+    #[test]
+    fn a_wait_offsets_the_absolute_lines_and_leaves_the_waits_alone() {
+        let script =
+            parse_usb_script("0 wait 500\n10 open\nafter \"x\" \"y\"\n600 detach\n").unwrap();
+        assert_eq!(
+            script.commands,
+            vec![
+                (510 * MS, ControlCommand::Open),
+                (1_100 * MS, ControlCommand::Detach),
+            ]
+        );
+        assert_eq!(script.bytes.steps_left(), 1);
+    }
+
+    /// UART0 has no cable to talk about, so a control word there is an error
+    /// naming the flag that does take one — never a line quietly dropped.
+    #[test]
+    fn the_byte_only_grammar_refuses_a_control_word() {
+        let source = parse_byte_script("1500 \"hi\"\nthen +2ms \"there\"\n").unwrap();
+        assert_eq!(source.remaining(), 7);
+        let err = parse_byte_script("0 attach\n").unwrap_err();
+        assert!(err.starts_with("line 1:"), "{err}");
+        assert!(err.contains("--usb-script"), "{err}");
     }
 
     #[test]

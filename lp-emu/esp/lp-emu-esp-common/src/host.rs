@@ -420,6 +420,15 @@ impl ScriptedSource {
         }
     }
 
+    /// Append another script's steps after this one's.
+    ///
+    /// File order is wire order, and two script *files* on one link are no
+    /// different: the second one's steps queue behind the first's. The
+    /// watched log is this source's own — a script does not bring one.
+    pub fn extend(&mut self, other: Self) {
+        self.steps.extend(other.steps);
+    }
+
     /// Bytes still undelivered.
     pub fn remaining(&self) -> usize {
         self.steps
