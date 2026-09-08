@@ -313,9 +313,17 @@ if (( verify )); then
     sha2="$(shasum -a 256 "$built2" | cut -d' ' -f1)"
     echo "build-reference-image: verify sha256 $sha2"
     if [[ "$sha" != "$sha2" ]]; then
+        # The failing tree is LEFT BEHIND on purpose: the next question is
+        # always "how do they differ", and that needs both ELFs.
         echo "build-reference-image: NOT REPRODUCIBLE — $elf is $sha but a second build at $wt2 is $sha2" >&2
-        echo "build-reference-image: sizes $(wc -c < "$elf") and $(wc -c < "$built2") bytes; diff their sections and their strings" >&2
+        echo "build-reference-image: sizes $(wc -c < "$elf") and $(wc -c < "$built2") bytes; both trees kept — compare readelf -S, strings, and the app descriptor stamp" >&2
         exit 6
     fi
     echo "build-reference-image: reproducible — two builds, two directories, one sha256"
+    # Nothing needs the second tree once it has agreed, and it is a whole
+    # target dir on a CI runner's disk. Removing it also means the next
+    # `--verify` builds cold again, which is the case that catches the
+    # linker-script race.
+    git -C "$repo" worktree remove --force "$wt2" 2>/dev/null || rm -rf "$wt2"
+    git -C "$repo" worktree prune
 fi
