@@ -586,6 +586,7 @@ pub struct Esp32C6Builder {
     /// Scripted host input on the USB link: what the host sends to the OUT
     /// endpoint, at declared cycles.
     usb_sj_source: Option<Box<dyn ByteSource>>,
+    usb_script_source: Option<lp_emu_esp_common::ScriptedSource>,
     usb_host: UsbHost,
     usb_sj_drain: UsbSjDrain,
     /// `--control tcp:<host:port>`: listen for the line protocol.
@@ -632,6 +633,7 @@ impl Esp32C6Builder {
             usb_sj: UsbSjSink::default(),
             usb_sj_tried: UsbSjSink::default(),
             usb_sj_source: None,
+            usb_script_source: None,
             usb_host: UsbHost::Absent,
             usb_sj_drain: UsbSjDrain::default(),
             control: None,
@@ -729,6 +731,19 @@ impl Esp32C6Builder {
     /// attached and draining.
     pub fn usb_sj_source(mut self, source: Box<dyn ByteSource>) -> Self {
         self.usb_sj_source = Some(source);
+        self
+    }
+
+    /// The same, as a [`lp_emu_esp_common::ScriptedSource`] the builder still
+    /// has to hand the USB link's own log to.
+    ///
+    /// Preferred over [`usb_sj_source`](Self::usb_sj_source) for a script,
+    /// because an `after "<line>"` step needs to watch what the device said
+    /// — and on this link that is the USB byte stream, not UART0. A script
+    /// handed over as a bare `ByteSource` sees nothing and every wait is
+    /// unsatisfiable, which is a silent walk rather than an error.
+    pub fn usb_script_source(mut self, script: lp_emu_esp_common::ScriptedSource) -> Self {
+        self.usb_script_source = Some(script);
         self
     }
 
@@ -869,6 +884,7 @@ impl Esp32C6Builder {
             usb_sj,
             usb_sj_tried,
             usb_sj_source,
+            usb_script_source,
             usb_host,
             usb_sj_drain,
             control,
@@ -979,6 +995,15 @@ impl Esp32C6Builder {
         };
         let usb_sj_log = ByteLog::new();
         let mut usb_sj_tcp: Option<lp_emu_esp_common::TcpHost> = None;
+        // A USB script watches the same log the USB sink tees into, so an
+        // `after "<line>"` step sees exactly what a host on this link saw —
+        // which is what lets one walk file replay on either link.
+        let usb_sj_source = match usb_script_source {
+            Some(script) => {
+                Some(Box::new(script.watching(usb_sj_log.clone())) as Box<dyn ByteSource>)
+            }
+            None => usb_sj_source,
+        };
         let (usb_inner, usb_source): (Box<dyn ByteSink>, Box<dyn ByteSource>) = match &usb_sj {
             UsbSjSink::Tcp(addr) => {
                 let host = lp_emu_esp_common::TcpHost::listen(addr)

@@ -148,6 +148,40 @@ pub const ALL_CHECKS: &[FwCheckConfig] = &[
         emits_header: false,
     },
     FwCheckConfig {
+        check: FwCheck::UploadWalkUsb,
+        display_name: "Project upload walk (examples/basic), over the USB link",
+        // The same image and the same conversation as `upload-walk`, on the
+        // link the product ships instead of the spike's UART0 workaround
+        // (M6 P5). Two payloads rather than one with a flag, because
+        // `upload-walk`'s committed transcript is of the `spike_uart0_link`
+        // image and a transcript is never re-baselined to suit a later idea
+        // — the pair is the comparison. Silicon's own §11.3 walk went over
+        // USB-Serial-JTAG, so this is the like-for-like one.
+        firmware_features: &["server", "radio"],
+        done_marker: Some("[shader-node] compilation succeeded"),
+        trace_slug: "upload-walk-usb",
+        supported_targets: ESP32_ONLY,
+        emits_records: false,
+        emits_header: false,
+    },
+    FwCheckConfig {
+        check: FwCheck::MeteorWalkUsb,
+        display_name: "Project upload walk (examples/meteor), over the USB link",
+        // The spike report §11.2 ledger: the desk's only heap comparison on
+        // a device with a project loaded and running, rather than idle.
+        //
+        // `done_marker` is `None` because this payload does not stop when it
+        // arrives — §11.2's "steady" figures are read off a heartbeat well
+        // after the load, so the run has to keep going. The host registry
+        // spells that `Sentinel::Ready`.
+        firmware_features: &["server", "radio"],
+        done_marker: None,
+        trace_slug: "meteor-walk-usb",
+        supported_targets: ESP32_ONLY,
+        emits_records: false,
+        emits_header: false,
+    },
+    FwCheckConfig {
         check: FwCheck::UsbNegativeControl,
         display_name: "Shipped image with the port closed from boot",
         // The shipped image itself, flash-backed — `boot-idle` minus

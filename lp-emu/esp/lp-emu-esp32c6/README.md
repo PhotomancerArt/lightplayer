@@ -782,7 +782,9 @@ feature set — recorded in `note`.
 Every class is graded `modeled`, with byte-equality written into the reason as
 evidence rather than as a promotion; `validate.toml` is where those reasons
 live and `tests/m3_replays.rs` is where strict mode's refusal of them is
-pinned. `tests/m4_replays.rs` reads the two M4 transcripts the same way.
+pinned. `tests/m4_replays.rs` reads the two M4 transcripts the same way, and
+`tests/m6_replays.rs` the M6 ones — including P5's pair of walks over the
+shipped link and the flash-backed DD30 arbitration against the desk board.
 
 ## Tests
 
@@ -791,12 +793,15 @@ boot tests are `#[ignore]`d, because a workspace test run must not start a
 cross-target firmware build; `just test-emu-c6` sets the environment and runs
 them. `test_support` resolves the ELF from `LP_EMU_C6_ELF_<SLUG>`, then the
 conventional target path, and only builds when `LP_EMU_BUILD_FW=1`. The
-images: `NO_RADIO` (`esp32c6,server,memory_fs`), `SHIPPED_NO_FLASH`
-(`esp32c6,server,radio,memory_fs`) and `TEST_RMT`
+images: `SHIPPED` (the default feature set — the bytes a board is flashed
+with, and since M6 P5 what every USB test runs), `NO_RADIO`
+(`esp32c6,server,memory_fs`), `SHIPPED_NO_FLASH`
+(`esp32c6,server,radio,memory_fs` — kept because the M6 scenario transcripts
+name it, not because anything still stands in with it) and `TEST_RMT`
 (`esp32c6,server,test_rmt` — the bare `esp32c6,test_rmt` does not link on
 today's main, `panic_path.rs` needs `lpc_shared`). The
 reference-image tests (`harness_parity`, `boot_idle`, `flash_persistence`,
-`upload_walk`) resolve theirs from
+`upload_walk`, `upload_walk_usb`) resolve theirs from
 `LP_EMU_C6_REF_<SLUG>`, then `target/emu-ref/`, and with `LP_EMU_BUILD_FW=1`
 run `scripts/emu/build-reference-image.sh` — which needs the repository's
 history for the reference commit (a shallow CI checkout cannot do it), so it

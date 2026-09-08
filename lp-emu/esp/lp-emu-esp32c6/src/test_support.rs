@@ -105,10 +105,15 @@ impl FwImage {
     };
 
     /// The shipped feature set minus flash: `esp32c6,server,radio,memory_fs`
-    /// (the same set `--features memory_fs` on the defaults builds). The P6
-    /// host-absent gate image (director note 2): the flash-backed shipped
-    /// image spins on `SPI1.cmd` until M4, so the wfi/tick assertions run
-    /// on this one.
+    /// (the same set `--features memory_fs` on the defaults builds).
+    ///
+    /// It was the USB tests' gate image from M3 P6 to M6 P4, for a reason
+    /// that has since expired: the flash-backed shipped image spun on
+    /// `SPI1.cmd` until M4 gave it a flash controller. Since M6 P5 every one
+    /// of those tests runs [`FwImage::SHIPPED`] — the bytes a board is
+    /// flashed with — and this constant is what the M6 scenario transcripts
+    /// were recorded against, which is why it stays: a transcript names its
+    /// image, and that image has to keep existing.
     pub const SHIPPED_NO_FLASH: FwImage = FwImage {
         features: &["esp32c6", "server", "radio", "memory_fs"],
         default_features: false,
@@ -433,6 +438,20 @@ impl ReferenceImage {
         slug: "boot-idle-memfs-usb",
         features: "esp32c6,server,radio,memory_fs",
         commit: SILICON_BOOT_IDLE_COMMIT,
+        spike: false,
+    };
+    /// The reference commit's **shipped** image: flash-backed, no `memory_fs`
+    /// and no spike cherry-pick, so it is byte for byte what a silicon flash
+    /// of `d6cfaa205` puts on a board (the spike's own `merged-default.bin`).
+    ///
+    /// M6 P5's walk image. `BOOT_IDLE` is the same feature set with the UART0
+    /// workaround on top, and the pair is what makes the two links
+    /// comparable on one commit — the slug is the feature list because it is
+    /// not one of the three the script gives a short name to.
+    pub const SHIPPED_USB: ReferenceImage = ReferenceImage {
+        slug: "esp32c6+server+radio",
+        features: "esp32c6,server,radio",
+        commit: REFERENCE_COMMIT,
         spike: false,
     };
     /// The same image at [`SCENARIO_COMMIT`], for the three M6 scenarios

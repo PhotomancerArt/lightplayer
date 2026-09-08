@@ -116,6 +116,14 @@ def main() -> int:
         default=2,
         help="milliseconds of emulated time between chunks",
     )
+    ap.add_argument(
+        "--note",
+        action="append",
+        default=[],
+        help="a provenance line for the header (repeatable). The capture path "
+        "alone is a scratch directory nobody else has; what a reader needs is "
+        "the firmware, the project and the link it went over.",
+    )
     args = ap.parse_args()
 
     blob = open(args.transcript, "rb").read()
@@ -131,8 +139,9 @@ def main() -> int:
         "# whole walk is a function of guest time and no write outruns the",
         "# 128-byte RX FIFO. Do not hand-edit: re-run the capture and",
         "# regenerate.",
-        "",
     ]
+    lines.extend(f"# {n}" for n in args.note)
+    lines.append("")
     needle = args.first_needle
     count = 0
     for chunk in chunks:

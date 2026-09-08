@@ -87,8 +87,14 @@ OPTIONS:
                             deterministic: --uart0-script's grammar plus the
                             control words above, one entry per line
                             (`0 attach`, `1500 \"M!{...}\\n\"`, `6000 detach`,
-                            `0 wait 500`). Byte lines feed the OUT endpoint;
-                            file order is wire order
+                            `0 wait 500`, and the walk forms
+                            `after \"boot complete\" \"M!{...}\\n\"` /
+                            `then +2ms \"…\"`, whose needle is matched against
+                            what a host on THIS link received). Byte lines
+                            feed the OUT endpoint; file order is wire order.
+                            Repeatable: the files concatenate in the order
+                            given, so a scenario's cable schedule and a
+                            walk's wire conversation stay separate files
     --usb-sj-tried stderr|file:<path>
                             the observation stream: bytes the guest handed to
                             the IN endpoint that no host took (pushed with no
@@ -169,7 +175,7 @@ struct Args {
     usb_sj_tried: UsbSjSink,
     usb_host: UsbHost,
     usb_sj_drain: UsbSjDrain,
-    usb_script: Option<PathBuf>,
+    usb_script: Vec<PathBuf>,
     control: Option<String>,
     efuse: EfuseIdentity,
     seed: u64,
@@ -217,18 +223,30 @@ fn run() -> Result<ExitCode, String> {
     if let Some(addr) = args.control.clone() {
         builder = builder.control(addr);
     }
-    if let Some(path) = &args.usb_script {
-        let text = std::fs::read_to_string(path)
-            .map_err(|e| format!("reading {}: {e}", path.display()))?;
-        let script = parse_usb_script(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+    // Repeatable, and the files concatenate in the order given: a scenario's
+    // cable schedule and a walk's wire conversation are two different
+    // scripts of two different lengths (the first is three lines written
+    // inline by the runner, the second a 12 KB generated file), and a link
+    // that carries both should not force them into one.
+    if !args.usb_script.is_empty() {
+        let mut bytes = ScriptedSource::new();
+        let mut commands = Vec::new();
+        for path in &args.usb_script {
+            let text = std::fs::read_to_string(path)
+                .map_err(|e| format!("reading {}: {e}", path.display()))?;
+            let script = parse_usb_script(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+            bytes.extend(script.bytes);
+            commands.extend(script.commands);
+        }
+        commands.sort_by_key(|(at, _)| *at);
         eprintln!(
             "usb script: {} byte(s) of host input in {} chunk(s) and {} control command(s)",
-            script.bytes.remaining(),
-            script.bytes.chunks(),
-            script.commands.len()
+            bytes.remaining(),
+            bytes.chunks(),
+            commands.len()
         );
-        builder = builder.usb_script(script.commands);
-        builder = builder.usb_sj_source(Box::new(script.bytes));
+        builder = builder.usb_script(commands);
+        builder = builder.usb_script_source(bytes);
     }
 
     if let Some(rom) = args.rom.clone() {
@@ -341,7 +359,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                 args.usb_sj_drain = UsbSjDrain::parse(&text)
                     .ok_or_else(|| format!("--usb-sj-drain `{text}`: expected auto or manual"))?;
             }
-            "--usb-script" => args.usb_script = Some(value("--usb-script")?.into()),
+            "--usb-script" => args.usb_script.push(value("--usb-script")?.into()),
             "--control" => {
                 let text = value("--control")?;
                 args.control = Some(parse_control(&text)?);
@@ -518,12 +536,6 @@ fn parse_control(text: &str) -> Result<String, String> {
     }
 }
 
-/// `--uart0-script`: one chunk per line, `<ms> <bytes>`, where `<bytes>` is
-/// either a double-quoted string with `\n \r \t \\ \" \xNN` escapes or
-/// whitespace-separated hex bytes. `#` starts a comment; blank lines are
-/// skipped. The millisecond is emulated time from cycle zero; chunks keep
-/// file order on the wire whatever their times say (a serial line has an
-/// order).
 /// The `--uart0-script` grammar.
 ///
 /// Two kinds of line, each ending in the bytes to send — a double-quoted
@@ -551,126 +563,12 @@ fn parse_control(text: &str) -> Result<String, String> {
 ///
 /// The needle is matched against the device's UART0 output *after* the
 /// previous step, so the same line can be waited for twice.
+///
+/// The grammar itself lives in [`lp_emu_esp32c6::control`], because
+/// `--usb-script` is the same grammar with the control words added and one
+/// walk file has to replay on either link (M6 P5).
 fn parse_uart0_script(text: &str) -> Result<ScriptedSource, String> {
-    let mut source = ScriptedSource::new();
-    for (n, raw) in text.lines().enumerate() {
-        let line = raw.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let at = |e: String| format!("line {}: {e}", n + 1);
-        if let Some(rest) = line.strip_prefix("after ") {
-            let (needle, rest) = take_quoted(rest.trim()).map_err(&at)?;
-            let (delay_ms, rest) = parse_delay(rest.trim()).map_err(&at)?;
-            let bytes = parse_script_bytes(rest).map_err(&at)?;
-            source.push_after(needle, delay_ms * 1_000 * memmap::CYCLES_PER_US, bytes);
-            continue;
-        }
-        if let Some(rest) = line.strip_prefix("then ") {
-            let (delay_ms, rest) = parse_delay(rest.trim()).map_err(&at)?;
-            let bytes = parse_script_bytes(rest).map_err(&at)?;
-            source.push_then(delay_ms * 1_000 * memmap::CYCLES_PER_US, bytes);
-            continue;
-        }
-        let (ms, rest) = line.split_once(char::is_whitespace).ok_or_else(|| {
-            at("expected `<ms> <bytes>` or `after \"<line>\" <bytes>`".to_string())
-        })?;
-        let ms: u64 = ms
-            .trim_end_matches("ms")
-            .parse()
-            .map_err(|e| at(format!("`{ms}` is not a millisecond count: {e}")))?;
-        let bytes = parse_script_bytes(rest.trim()).map_err(&at)?;
-        source.push(ms * 1_000 * memmap::CYCLES_PER_US, bytes);
-    }
-    Ok(source)
-}
-
-/// An optional leading `+<ms>` delay, and the rest.
-fn parse_delay(text: &str) -> Result<(u64, &str), String> {
-    let Some(after_plus) = text.strip_prefix('+') else {
-        return Ok((0, text));
-    };
-    let (num, tail) = after_plus
-        .split_once(char::is_whitespace)
-        .ok_or_else(|| "`+<ms>` needs bytes after it".to_string())?;
-    let ms: u64 = num
-        .trim_end_matches("ms")
-        .parse()
-        .map_err(|e| format!("`{num}` is not a millisecond count: {e}"))?;
-    Ok((ms, tail.trim()))
-}
-
-/// A double-quoted, escaped string at the start of `text`, and the rest.
-fn take_quoted(text: &str) -> Result<(Vec<u8>, &str), String> {
-    let body = text
-        .strip_prefix('"')
-        .ok_or_else(|| "expected a double-quoted string".to_string())?;
-    // The closing quote is the first unescaped one.
-    let mut end = None;
-    let mut escaped = false;
-    for (i, c) in body.char_indices() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        match c {
-            '\\' => escaped = true,
-            '"' => {
-                end = Some(i);
-                break;
-            }
-            _ => {}
-        }
-    }
-    let end = end.ok_or_else(|| "unterminated string".to_string())?;
-    Ok((unescape(&body[..end])?, &body[end + 1..]))
-}
-
-/// A quoted string, or whitespace-separated hex bytes.
-fn parse_script_bytes(rest: &str) -> Result<Vec<u8>, String> {
-    if rest.starts_with('"') {
-        let (bytes, tail) = take_quoted(rest)?;
-        if !tail.trim().is_empty() {
-            return Err(format!("trailing `{}` after the string", tail.trim()));
-        }
-        return Ok(bytes);
-    }
-    rest.split_whitespace()
-        .map(|h| {
-            u8::from_str_radix(h.trim_start_matches("0x"), 16)
-                .map_err(|e| format!("`{h}` is not a hex byte: {e}"))
-        })
-        .collect()
-}
-
-fn unescape(body: &str) -> Result<Vec<u8>, String> {
-    let mut out = Vec::with_capacity(body.len());
-    let mut chars = body.chars();
-    while let Some(c) = chars.next() {
-        if c != '\\' {
-            let mut buf = [0u8; 4];
-            out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
-            continue;
-        }
-        match chars.next() {
-            Some('n') => out.push(b'\n'),
-            Some('r') => out.push(b'\r'),
-            Some('t') => out.push(b'\t'),
-            Some('0') => out.push(0),
-            Some('\\') => out.push(b'\\'),
-            Some('"') => out.push(b'"'),
-            Some('x') => {
-                let hex: String = chars.by_ref().take(2).collect();
-                out.push(
-                    u8::from_str_radix(&hex, 16)
-                        .map_err(|e| format!("`\\x{hex}` is not a hex byte: {e}"))?,
-                );
-            }
-            Some(other) => return Err(format!("unknown escape `\\{other}`")),
-            None => return Err("trailing backslash".to_string()),
-        }
-    }
-    Ok(out)
+    lp_emu_esp32c6::control::parse_byte_script(text)
 }
 
 /// `TIMED_OUT@120` → (120 ms, "TIMED_OUT").
@@ -1054,12 +952,19 @@ mod tests {
             "manual".into(),
             "--usb-script".into(),
             "s.txt".into(),
+            // Repeatable: the cable's schedule and the wire's conversation
+            // are two files.
+            "--usb-script".into(),
+            "walk.script".into(),
         ])
         .unwrap();
         assert!(matches!(a.usb_sj, UsbSjSink::Tcp(addr) if addr == "127.0.0.1:5556"));
         assert_eq!(a.control.as_deref(), Some("127.0.0.1:5557"));
         assert_eq!(a.usb_sj_drain, UsbSjDrain::Manual);
-        assert_eq!(a.usb_script, Some("s.txt".into()));
+        assert_eq!(
+            a.usb_script,
+            vec![PathBuf::from("s.txt"), PathBuf::from("walk.script")]
+        );
 
         // The default is the coupling every host program expects.
         assert_eq!(parse(vec![]).unwrap().usb_sj_drain, UsbSjDrain::Auto);
@@ -1095,7 +1000,14 @@ mod tests {
         assert!(parse_uart0_script("10 \"unterminated").is_err());
         assert!(parse_uart0_script("10 zz").is_err());
         assert!(parse_uart0_script("10 \"\\q\"").is_err());
-        assert_eq!(unescape("a\\nb\\x00c\\\\").unwrap(), b"a\nb\0c\\");
+        assert_eq!(
+            lp_emu_esp32c6::control::unescape("a\\nb\\x00c\\\\").unwrap(),
+            b"a\nb\0c\\"
+        );
+        // A control word is the other flag's business, and the error says so
+        // rather than dropping the line.
+        let err = parse_uart0_script("10 attach").unwrap_err();
+        assert!(err.contains("--usb-script"), "{err}");
     }
 
     #[test]
