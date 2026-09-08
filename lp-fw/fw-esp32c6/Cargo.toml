@@ -81,6 +81,33 @@ ws281x_telemetry = []
 #   cargo build --profile release-esp32 --features esp32c6,server,radio,frame-dump
 frame-dump = []
 
+# The `render-loop` benchmark image — OFF by default, never shipped.
+#
+# The shipped server image with two additions and no substitutions: the
+# in-memory filesystem arrives pre-seeded with a real LightPlayer project, and
+# the server loop stops after a fixed number of frames and prints a summary.
+# Everything between those two is the product's own boot, project load, shader
+# compile, render and RMT output. See `src/bench/render_loop.rs`.
+#
+# ⚠️ NOT named `test_*`, and that is load-bearing: `build.rs` turns any
+# `CARGO_FEATURE_TEST_*` into `cfg(fw_harness)`, which replaces `main` and the
+# whole server stack. An image built that way would measure a
+# re-implementation of the render loop instead of the render loop.
+# `frame-dump` and `spike_uart0_link` are the same shape.
+#
+# Use with `memory_fs` (the seed goes into RAM). `touch src/main.rs` after
+# flipping.
+#
+#   cargo build --profile release-esp32 \
+#     --features esp32c6,server,radio,spike_uart0_link,memory_fs,bench_render_loop
+bench_render_loop = ["dep:fw-checks", "fw-checks/check-render-loop"]
+# The pressure-test payload: `catalog/projects/rocaille` instead of
+# `projects/test/basic`. Same 241 lamps on the same D10 pad and the same
+# hand-authored disc; heavier per-lamp arithmetic (an iterated sine-fold with
+# a `tanh`) and a `Texture` node. Meaningless without the machinery, so it
+# turns it on.
+bench_project_rocaille = ["bench_render_loop"]
+
 # P4 stress-matrix load generators (plan 2026-08-01-1459-rmt-priority-hli) —
 # OFF by default, never shipped. Each spawns a continuous radio-load task
 # beside the running server, replacing the ESP-NOW radio driver registration

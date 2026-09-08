@@ -2188,6 +2188,7 @@ test-emu-c6:
     cargo test -p lp-emu-validate --test m5_replays
     cargo test -p lp-emu-validate --test m6_replays
     cargo test -p lp-emu-validate --test m7_replays
+    cargo test -p lp-emu-validate --test cycle_probe_two_clocks
     cargo test -p lp-cli --test validate_registry_parity
     LP_EMU_BUILD_FW=1 cargo test -p lp-cli --test emu_usb_hello -- --include-ignored
 

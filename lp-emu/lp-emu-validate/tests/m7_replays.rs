@@ -315,15 +315,14 @@ const EMU_CHASE: &str = "lp-emu-esp32c6-t1-2026-09-07-c0d62e360.txt";
 /// equal — which is the thing the walk record's §9 listed as not run and
 /// this is it run.
 ///
-/// **The replay still reports two problems, and they are a filed defect
-/// rather than a result**
-/// (`docs/defects/2026-09-08-a-pin-capture-is-a-property-of-the-configuration-not-the-payload.md`):
-/// the payload declares a per-frame pin capture, `replay()` asks both sides
-/// for one, and silicon cannot give one because reading a real pad needs an
-/// instrument nobody has put on this bench — which the trust table and the
-/// walk record both already say. This test asserts the half that is real and
-/// names the other half, rather than asserting `is_ok()` on a comparison the
-/// system has written down as impossible.
+/// **The pin class is not compared, and the report says so.** The payload
+/// declares a per-frame pin capture and the emulator produces one; silicon
+/// cannot, because reading a real pad needs an instrument nobody has put on
+/// this bench, which the trust table and the walk record's §9 both already
+/// say. `records_pins` on `[[configuration]]` is where that is stated, and a
+/// replay across a side that records none reports the class as *not
+/// compared, and why* rather than passing over it in silence
+/// (`docs/defects/2026-09-08-a-pin-capture-is-a-property-of-the-configuration-not-the-payload.md`).
 #[test]
 fn the_silicon_chase_agrees_frame_for_frame() {
     let silicon = load("rmt-chase", SILICON_CHASE);
@@ -344,12 +343,6 @@ fn the_silicon_chase_agrees_frame_for_frame() {
         "{:?}",
         diffs(&report, FieldClass::Structural)
     );
-    assert_eq!(
-        report.differences_in(FieldClass::Pin).count(),
-        0,
-        "{:?}",
-        diffs(&report, FieldClass::Pin)
-    );
     // 768 frames, and the count is asserted so a truncated capture cannot
     // pass by having nothing to disagree about.
     assert_eq!(
@@ -361,20 +354,48 @@ fn the_silicon_chase_agrees_frame_for_frame() {
         768
     );
 
-    // And the two problems that are the filed defect, named exactly. If this
-    // list ever changes, the defect moved or something else broke.
-    let failures: Vec<String> = report.failures().iter().map(|f| f.to_string()).collect();
-    assert_eq!(failures.len(), 2, "{failures:?}");
+    // The pin class: not compared, said out loud, naming the side that
+    // records none. Before `records_pins` this replay failed here with two
+    // problems and 3,073 equal comparisons underneath them.
+    assert!(report.is_ok(), "{:?}", report.failures());
+    let why = report
+        .pin_not_compared
+        .as_deref()
+        .expect("the report says the pin class was not compared");
+    assert!(why.contains("silicon:esp32c6"), "{why}");
     assert!(
-        failures
-            .iter()
-            .any(|f| f.contains("claims a pin capture and has none")),
-        "{failures:?}"
+        report.render().contains("not compared"),
+        "and it is a row in the table, not a footnote:\n{}",
+        report.render()
     );
+}
+
+/// The other half of the same rule: between two configurations that BOTH
+/// record pins, nothing changed — the pin class is compared as before, and
+/// the report has no "not compared" note.
+#[test]
+fn two_machines_that_both_record_pins_still_compare_them() {
+    let t1 = load("rmt-chase", EMU_CHASE);
+    let t2 = load("rmt-chase", "lp-emu-esp32c6-t2-2026-09-07-c0d62e360.txt");
+    let report = replay(&t2, &t1, ReplayOptions::default()).expect("the replay runs");
     assert!(
-        failures
-            .iter()
-            .any(|f| f.contains("0 decoded frames on the left")),
-        "{failures:?}"
+        report.pin_not_compared.is_none(),
+        "{:?}",
+        report.pin_not_compared
     );
+    assert!(report.compared(FieldClass::Pin) > 0, "{}", report.render());
+    assert_eq!(report.differences_in(FieldClass::Pin).count(), 0);
+}
+
+/// `records_pins` is **stated**, and this is what says so: silicon's entry
+/// carries no claim, the two emulator grades do. A future configuration that
+/// is a board with a logic analyser on it says `true` here and needs no code
+/// change — which is why the rule is not "the name starts with `lp-emu:`".
+#[test]
+fn only_the_configurations_that_can_decode_a_pad_claim_to() {
+    let cfg = lp_emu_validate::config::ValidateConfig::embedded();
+    assert!(!cfg.configuration("silicon:esp32c6").unwrap().records_pins);
+    assert!(!cfg.configuration("esp-emu:0.42.0").unwrap().records_pins);
+    assert!(cfg.configuration("lp-emu:esp32c6:t1").unwrap().records_pins);
+    assert!(cfg.configuration("lp-emu:esp32c6:t2").unwrap().records_pins);
 }

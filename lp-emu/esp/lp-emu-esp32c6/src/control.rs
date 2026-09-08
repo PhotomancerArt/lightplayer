@@ -82,6 +82,14 @@ pub enum ControlCommand {
     UsbWrite(Vec<u8>),
     /// Scripted form only: shift every later line by this many milliseconds.
     Wait(u64),
+    /// Hold a level on a pad from outside the chip — a bench driver, the
+    /// **auditable** twin of a `--pin-script` line (plan RD6). Applied at a
+    /// slice boundary and stamped with the guest cycle, like every verb
+    /// here; a run that used it is not a transcript.
+    Pin { pad: u8, level: bool },
+    /// Report every pad the machine has anything to say about. Answered by
+    /// [`ControlReply::Pins`].
+    Pins,
 }
 
 impl ControlCommand {
@@ -108,6 +116,8 @@ impl ControlCommand {
             ControlCommand::State => "state",
             ControlCommand::UsbWrite(_) => "usb-write",
             ControlCommand::Wait(_) => "wait",
+            ControlCommand::Pin { .. } => "pin",
+            ControlCommand::Pins => "pins",
         }
     }
 
@@ -127,6 +137,8 @@ impl ControlCommand {
         "state",
         "usb-write",
         "wait",
+        "pin",
+        "pins",
     ];
 
     /// Parse one line. The caller has already dropped comments and blanks.
@@ -149,6 +161,7 @@ impl ControlCommand {
 
         match verb {
             "attach" => no_args(ControlCommand::Attach),
+            "pins" => no_args(ControlCommand::Pins),
             "detach" => no_args(ControlCommand::Detach),
             "open" => no_args(ControlCommand::Open),
             "close" => no_args(ControlCommand::Close),
@@ -197,6 +210,22 @@ impl ControlCommand {
                 }
                 Ok(ControlCommand::UsbWrite(parse_hex(&rest)?))
             }
+            "pin" => {
+                let [pad, value] = rest[..] else {
+                    return Err("`pin` takes a pad number and a level, 0 or 1".to_string());
+                };
+                let n: u8 = pad
+                    .trim_start_matches("gpio")
+                    .parse()
+                    .map_err(|e| format!("`pin {pad}`: not a pad number: {e}"))?;
+                // The same policy a `--pin-script` line is held to: the
+                // socket is auditable, not permissive.
+                crate::pinscript::check_pad(n, crate::pinscript::PadUse::Driven)?;
+                Ok(ControlCommand::Pin {
+                    pad: n,
+                    level: parse_level("pin", value)?,
+                })
+            }
             "wait" => {
                 let [value] = rest[..] else {
                     return Err("`wait` takes one argument, a millisecond count".to_string());
@@ -233,6 +262,49 @@ fn parse_hex(words: &[&str]) -> Result<Vec<u8>, String> {
         .collect()
 }
 
+/// One pad, as the `pins` command reports it.
+///
+/// Both sides of the fabric in one row: what the chip has routed to the pad,
+/// whether its input buffer is on, what a bench driver is holding on it, and
+/// the level the two of them resolved to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PadReport {
+    pub pad: u8,
+    /// What the pad's level follows, as the chip's routing view names it
+    /// (`sig71`, `gpio-out`), or `None` when nothing has routed it.
+    pub route: Option<String>,
+    /// The pad's input enable (the chip's IO_MUX `fun_ie`).
+    pub input_enable: bool,
+    /// The level an outside driver is holding, if one is.
+    pub driven: Option<bool>,
+    /// The resolved level — what a scope on the pin header would read.
+    pub level: bool,
+    /// Every pad tied to this one by `--wire`, ascending, this one left out.
+    pub wired_to: Vec<u8>,
+}
+
+impl std::fmt::Display for PadReport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "gpio{}[route={} ie={} drv={} lvl={}",
+            self.pad,
+            self.route.as_deref().unwrap_or("-"),
+            u8::from(self.input_enable),
+            match self.driven {
+                Some(level) => (u8::from(level) + b'0') as char,
+                None => '-',
+            },
+            u8::from(self.level),
+        )?;
+        if !self.wired_to.is_empty() {
+            let wired: Vec<String> = self.wired_to.iter().map(|p| format!("gpio{p}")).collect();
+            write!(f, " wire={}", wired.join(","))?;
+        }
+        f.write_str("]")
+    }
+}
+
 /// The host's side, as the `state` command reports it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HostReport {
@@ -254,6 +326,9 @@ pub enum ControlReply {
     Ok { verb: &'static str, cycle: Cycles },
     /// `ok state cyc=… us=… host=… draining=… sof=… in_pending=… out_queued=…`
     State { cycle: Cycles, host: HostReport },
+    /// `ok pins cyc=… us=… pads=<n> gpio18[…] gpio20[…]` — one line, one
+    /// bracket per pad, so it can be selected and pasted whole.
+    Pins { cycle: Cycles, pads: Vec<PadReport> },
     /// `err <reason>` — nothing was applied, and the reason says why.
     Err(String),
 }
@@ -277,6 +352,18 @@ impl std::fmt::Display for ControlReply {
                 host.in_pending,
                 host.out_queued,
             ),
+            ControlReply::Pins { cycle, pads } => {
+                write!(
+                    f,
+                    "ok pins cyc={cycle} us={} pads={}",
+                    cycle / memmap::CYCLES_PER_US,
+                    pads.len()
+                )?;
+                for pad in pads {
+                    write!(f, " {pad}")?;
+                }
+                Ok(())
+            }
             ControlReply::Err(reason) => write!(f, "err {reason}"),
         }
     }
@@ -599,6 +686,21 @@ mod tests {
                 ControlCommand::UsbWrite(vec![0x4d, 0x21, 0x0a]),
             ),
             ("wait 250", ControlCommand::Wait(250)),
+            (
+                "pin 20 1",
+                ControlCommand::Pin {
+                    pad: 20,
+                    level: true,
+                },
+            ),
+            (
+                "pin gpio21 0",
+                ControlCommand::Pin {
+                    pad: 21,
+                    level: false,
+                },
+            ),
+            ("pins", ControlCommand::Pins),
         ];
         for (line, want) in cases {
             assert_eq!(&ControlCommand::parse(line).unwrap(), want, "`{line}`");
@@ -632,6 +734,15 @@ mod tests {
             "usb-write zz",
             "wait",
             "wait soon",
+            "pin",
+            "pin 20",
+            "pin 20 2",
+            "pin twenty 1",
+            "pins now",
+            // The pad policy is the script's, on the socket too.
+            "pin 9 1",
+            "pin 18 0",
+            "pin 31 1",
         ];
         for line in bad {
             let err = ControlCommand::parse(line).unwrap_err();
@@ -687,6 +798,86 @@ mod tests {
         assert_eq!(
             ControlReply::Err("open: no host attached".to_string()).to_string(),
             "err open: no host attached"
+        );
+    }
+
+    /// **G1-5.** `pin` and `pins` round-trip: they parse, they render, and
+    /// the reply names the cycle the machine applied them at.
+    #[test]
+    fn the_pin_verbs_render_both_sides_of_every_pad_on_one_line() {
+        assert_eq!(
+            ControlReply::Ok {
+                verb: "pin",
+                cycle: 320,
+            }
+            .to_string(),
+            "ok pin cyc=320 us=2"
+        );
+        assert_eq!(
+            ControlReply::Pins {
+                cycle: 160_000,
+                pads: vec![
+                    PadReport {
+                        pad: 18,
+                        route: Some("sig71".to_string()),
+                        input_enable: false,
+                        driven: None,
+                        level: true,
+                        wired_to: vec![19],
+                    },
+                    PadReport {
+                        pad: 19,
+                        route: None,
+                        input_enable: true,
+                        driven: None,
+                        level: true,
+                        wired_to: vec![18],
+                    },
+                    PadReport {
+                        pad: 20,
+                        route: Some("gpio-out".to_string()),
+                        input_enable: true,
+                        driven: Some(false),
+                        level: false,
+                        wired_to: vec![],
+                    },
+                ],
+            }
+            .to_string(),
+            "ok pins cyc=160000 us=1000 pads=3 \
+             gpio18[route=sig71 ie=0 drv=- lvl=1 wire=gpio19] \
+             gpio19[route=- ie=1 drv=- lvl=1 wire=gpio18] \
+             gpio20[route=gpio-out ie=1 drv=0 lvl=0]"
+        );
+        assert_eq!(
+            ControlReply::Pins {
+                cycle: 0,
+                pads: vec![],
+            }
+            .to_string(),
+            "ok pins cyc=0 us=0 pads=0"
+        );
+    }
+
+    /// A pin verb is the socket's, not the script's: it carries no time of
+    /// its own, so a script file that used one is a script that cannot be
+    /// replayed. `--pin-script` is the deterministic path and its grammar is
+    /// `crate::pinscript`'s.
+    #[test]
+    fn a_pin_verb_in_a_usb_script_is_a_command_like_any_other() {
+        let script = parse_usb_script("0 attach\n100 pin 20 1\n").unwrap();
+        assert_eq!(
+            script.commands,
+            vec![
+                (0, ControlCommand::Attach),
+                (
+                    100 * MS,
+                    ControlCommand::Pin {
+                        pad: 20,
+                        level: true
+                    }
+                ),
+            ]
         );
     }
 

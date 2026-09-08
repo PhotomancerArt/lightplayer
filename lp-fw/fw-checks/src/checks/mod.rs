@@ -9,6 +9,8 @@ pub mod cycle_probe;
 pub mod gpio_calibrate;
 #[cfg(feature = "check-jit-math-perf")]
 pub mod jit_math_perf;
+#[cfg(any(feature = "check-render-loop", test))]
+pub mod render_loop;
 #[cfg(any(feature = "check-rmt", test))]
 pub mod rmt_chase;
 #[cfg(feature = "check-shader-compile")]
