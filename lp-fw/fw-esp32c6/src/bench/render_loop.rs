@@ -66,14 +66,20 @@ use crate::board::esp32c6::cycle_counter;
 
 /// How many frames the loop runs before printing its summary and stopping.
 ///
-/// Sized from measurements rather than taste. Boot to the first served frame
-/// is under half a second; `projects/test/basic`'s shader compile is 551 ms
-/// (the `shader-compile-stress` transcript, which compiles this exact file);
-/// and the project renders at about 61 fps on this emulator. 256 frames is
-/// therefore ≈4.2 s of rendering on top of ≈1 s of boot and compile — inside
-/// the ladder's existing 5.5 s identity window, with the compile at about a
-/// tenth of the run rather than dominating it.
-pub const FRAMES: u32 = 256;
+/// **Per project, and chosen to equalise emulated time rather than frames.**
+/// What the ladder spends on an image is host seconds, and host seconds track
+/// emulated time; what the image reports is a per-frame mean, which does not
+/// care how many frames it averaged. So both rows are sized to ≈4 s of
+/// rendering and neither costs the bench more than the other:
+///
+/// | project | steady frame | frames | ≈ emulated |
+/// |---|---|---|---|
+/// | `basic` | 15.2 ms | 256 | 4.3 s |
+/// | `rocaille` | 61.8 ms | 64 | 4.0 s |
+///
+/// Both amortise the compile to well under 1 % of the run, which is the only
+/// thing the count actually has to buy.
+pub use payload::FRAMES;
 
 /// The delta every frame is ticked with, replacing the measured one.
 ///
@@ -93,6 +99,8 @@ const PROJECT_DIR: &str = "/projects";
 mod payload {
     pub const NAME: &str = "basic";
     pub const SOURCE: &str = "projects/test/basic";
+    /// 256 × 15.2 ms ≈ 4.3 s emulated.
+    pub const FRAMES: u32 = 256;
     macro_rules! file {
         ($name:literal) => {
             (
@@ -122,6 +130,9 @@ mod payload {
 mod payload {
     pub const NAME: &str = "rocaille";
     pub const SOURCE: &str = "catalog/projects/rocaille";
+    /// 64 × 61.8 ms ≈ 4.0 s emulated — a quarter of `basic`'s frame count for
+    /// the same wall cost, because each frame is four times the shader.
+    pub const FRAMES: u32 = 64;
     macro_rules! file {
         ($name:literal) => {
             (

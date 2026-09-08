@@ -126,11 +126,20 @@ impl FrameStats {
     /// The first frame, separately — because it is not like the others.
     ///
     /// The engine compiles a shader **lazily**, on the first frame that
-    /// samples it, not during `load_project`. So frame 1 carries the whole
-    /// compile (52 ms for `projects/test/basic`, against a ~15 ms steady
-    /// frame) and is reliably the run's `max`. Reporting it on its own is what
-    /// keeps `max` meaning "the worst steady frame" to a reader who knows to
-    /// look, instead of meaning "the compile" every single time.
+    /// samples it, not during `load_project`. So frame 1 both absorbs the
+    /// whole compile and renders the black fallback instead of the shader,
+    /// and whether that makes it the run's `max` or its `min` depends
+    /// entirely on which of the two is larger. Both cases are real and
+    /// measured:
+    ///
+    /// | project | compile | steady frame | frame 1 is |
+    /// |---|---|---|---|
+    /// | `basic` | 52 ms | 15 ms | the `max` (67 ms) |
+    /// | `rocaille` | 18 ms | 62 ms | the `min` (18 ms) |
+    ///
+    /// Which is exactly why it is reported on its own rather than described:
+    /// no single sentence about frame 1 is true of both projects, but the
+    /// number is true of whichever one ran.
     pub const fn first_cycles(&self) -> u32 {
         self.first_cycles
     }
