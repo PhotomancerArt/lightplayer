@@ -232,3 +232,54 @@ decisions are unchanged.
   hello frame's identity compares equal to silicon's instead of differing over
   who was told what.
 
+
+## Amendment, 2026-09-07 (M5 P3, PR #595): the pin capture
+
+A transcript can now carry a **third file**, and this is the first widening
+of the contract G2 settled. It is **additive**, which is what made it a
+director-level change rather than a re-opening: every sidecar written before
+it loads unchanged and serialises without the new field, and a payload that
+makes no claim about a wire never gains a companion.
+
+```text
+lp-emu/transcripts/<chip>/<payload>/<configuration>-<date>-<short>.txt
+lp-emu/transcripts/<chip>/<payload>/<configuration>-<date>-<short>.txt.meta.json
+lp-emu/transcripts/<chip>/<payload>/<configuration>-<date>-<short>.txt.pins.jsonl   ← new
+```
+
+Raised as escalation E3 and answered by Yona on 2026-09-07 with the question
+that settles it: *"why wouldn't we want that?"*
+
+**Why a third file rather than more lines in the first.** The `.txt` is
+defined as the bytes a reader on the port saw — that is the whole reason it
+is kept verbatim, ANSI and progress bars and all. A decoded WS281x frame is
+not one of those bytes. It is what a **pad** carried, read off the waveform
+by a decoder that never spoke to the firmware, and putting it inside the
+console capture would make the capture a thing nobody actually observed.
+
+**Why it matters more than a convenience.** Until this, every claim in every
+transcript was something the device said about itself. `rmt-chase` prints
+`{"kind":"rmt-frame","crc":…}` — the driver's checksum of the frame it handed
+the hardware — and the companion holds `{"kind":"ws281x-frame","wire":…}`,
+the bytes that went down the wire. `replay` makes two different checks with
+them: **within** one transcript, the guest's checksum against its own pad,
+whose disagreement is a broken recording and is reported as a structural
+problem naming the frame; and **between** two transcripts, the pad's frames
+as `Pin`-class comparisons, which fail a replay. That is the first time a
+transcript can be wrong about a wire and be caught.
+
+The mechanics: the sidecar's optional `pins` is a **file name**, resolved
+against the transcript's own directory, so a tree can be moved wholesale and
+a companion can never point outside it. A payload's registry entry declares
+`pin_capture`, the runner passes `--dump-frames file:…` to a configuration
+that can observe a pad, and `record` copies the file beside the `.txt` —
+refusing to record at all if the payload claims a pad and the run decoded no
+frame on one. A configuration with no pin observation, which is silicon
+without an instrument on the header, records the console half and says
+nothing about the wire; that is exactly what its trust grade already said.
+
+**The grade did not move.** `lp-emu:esp32c6:t1|t2` stay `modeled` for `pin`,
+with the committed captures written into the `because` as evidence. 768
+frames whose checksums agree on both time grades is the strongest evidence
+this class has had, and both readings are still ours: what earns `measured`
+is an instrument on a real pin.

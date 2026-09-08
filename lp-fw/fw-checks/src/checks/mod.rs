@@ -7,6 +7,8 @@
 pub mod gpio_calibrate;
 #[cfg(feature = "check-jit-math-perf")]
 pub mod jit_math_perf;
+#[cfg(any(feature = "check-rmt", test))]
+pub mod rmt_chase;
 #[cfg(feature = "check-shader-compile")]
 pub mod shader_compile;
 #[cfg(any(feature = "check-uart-bridge", test))]

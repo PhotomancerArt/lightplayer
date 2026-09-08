@@ -342,8 +342,17 @@ Beyond the MMIO lines, three kinds of note appear in the same stream:
   `PIN gpio16 <- GPIO_OUT (out_sel=128 …)` — one note per routing *change*
   from the GPIO view (M5 P2); esp-hal rewriting the same routing on a
   rebind is not a note
-  adds the register and RAM writes around them, which is how a refill's
-  timing against the read pointer is read off.
+- `RMT REFILL ch=0 at=57456328 entry=1 fill=1` — one note per completed
+  refill (M5 P3): the words the transmitter consumed between the threshold
+  and the ISR's `ch_tx_lim` write (`entry`), and between that write and the
+  last word of the refill (`fill`), in the units `lp-ws281x` measures the
+  same race in. `--trace RMT` adds the register and RAM writes around them,
+  which is how a refill's timing against the read pointer is read off. The
+  totals are in the exit summary as `rmt refill ch0: … entry max … hist …;
+  fill max … hist …`, nine buckets in the same shape the `[WS281X]` line
+  prints. **Reported, never gated** (D13/PD9): the emulated ISR path is
+  RAM-resident and the machine has no flash-miss cost, so `entry` is a floor
+  rather than a prediction of silicon's 20–29 words.
 
 A 3 s no-radio run with `--trace SYSTIMER,PLIC_MX,INTPRI,INTERRUPT_CORE0,LP_WDT,TIMG0`
 is about 780 k lines, half of them the RTC-calibration poll at boot. Without

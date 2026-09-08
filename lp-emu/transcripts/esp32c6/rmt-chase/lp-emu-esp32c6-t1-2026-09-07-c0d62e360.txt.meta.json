@@ -1,18 +1,28 @@
 {
   "schema": 1,
-  "payload": "upload-walk",
+  "payload": "rmt-chase",
   "chip": "esp32c6",
   "configuration": "lp-emu:esp32c6:t1",
   "date": "2026-09-07",
-  "firmware_commit": "d6cfaa2051ae",
+  "firmware_commit": "c0d62e360",
   "firmware_features": [
+    "default",
     "esp32c6",
-    "server",
+    "esp_radio",
+    "lp_gfx_lpvm",
+    "lpa_server",
+    "lpc_hardware",
+    "lpc_model",
+    "lpc_shared",
+    "lpc_wire",
+    "lpfs",
     "radio",
-    "spike_uart0_link"
+    "server",
+    "test_rmt",
+    "ws281x_telemetry"
   ],
   "firmware_dirty": true,
-  "firmware_sha256": "31c39a3d0873641958e4be71af686660b9a6ab7a674df6950f7ded89e7eed733",
+  "firmware_sha256": "d536e1bd3ce5c084a5c9a4db58c843a916f2ddee3bd04edc62ac518b07d09f06",
   "silicon_rev": "v0.2",
   "board": "seeed/xiao-esp32-c6",
   "mac": "a0:f2:62:87:b4:8c",
@@ -20,9 +30,9 @@
     "lp-emu-esp32c6": "40.0.0 (c0d62e360+dirty)",
     "rom": "esp32c6_rev0_rom.elf sha256 788e1d38724aeb8fd974fa10c4a7b089c02627d35342ce84b9e0b12b239f3551"
   },
-  "source": "cargo run -q -p lp-emu-esp32c6 --release -- --elf target/emu-ref/d6cfaa205-boot-idle/fw-esp32c6 --time-grade t1 --uart0 file:target/validate/upload-walk.cap --timeout 20s --wall-timeout 400 --strict-bus --exit-on '\"id\":12,\"seq\":2,' --uart0-script lp-emu/esp/lp-emu-esp32c6/walks/examples-basic.script --efuse-mac a0:f2:62:87:b4:8c --efuse-rev 0.2",
-  "capture": "lp-cli validate record upload-walk --config lp-emu:esp32c6:t1",
-  "note": "running the pinned image target/emu-ref/d6cfaa205-boot-idle/fw-esp32c6 rather than building one: the committed transcripts are at firmware d6cfaa2051ae with `spike_uart0_link` applied as a dirty tree, which is not what this checkout builds. `scripts/emu/build-reference-image.sh esp32c6,server,radio,spike_uart0_link` reproduces that tree in a detached worktree and builds it there.",
+  "source": "(cd lp-fw/fw-esp32c6 && cargo build --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,test_rmt,ws281x_telemetry) && cargo run -q -p lp-emu-esp32c6 --release -- --elf target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6 --time-grade t1 --usb-sj file:target/validate/rmt-chase.cap --usb-sj-tried file:target/validate/rmt-chase.tried --usb-host attached --dump-frames file:target/validate/rmt-chase.pins.jsonl --timeout 20s --wall-timeout 400 --strict-bus --exit-on '[rmt-chase] === DONE ===' --efuse-mac a0:f2:62:87:b4:8c --efuse-rev 0.2",
+  "capture": "lp-cli validate record emu-m5 --config lp-emu:esp32c6:t1",
+  "pins": "lp-emu-esp32c6-t1-2026-09-07-c0d62e360.txt.pins.jsonl",
   "trust": [
     {
       "class": "memory",

@@ -62,12 +62,28 @@ the answer to the one before it — and two runs are byte-identical.
 Two pacing facts are baked into the generated file, and both are the *host's*
 behaviour, not the device's:
 
-- **64 bytes per write, 2 ms apart.** UART0's RX FIFO is 128 bytes; at
-  921,600 baud that is 1.39 ms of wire, and the firmware's reader takes 64
-  bytes per turn of its server loop. A host that streams a 739-byte request
-  without pausing overruns the FIFO, the part drops the byte, and the device
-  logs `dropping unparseable N B M! line`. The desk walk this is modelled on
-  went through a bridge board, which paces itself.
+- **64 bytes per write, 2 ms apart** — or **20 ms**, once a walk goes past
+  the load. UART0's RX FIFO is 128 bytes; at 921,600 baud that is 1.39 ms of
+  wire, and the firmware's reader takes 64 bytes per turn of its server loop.
+  A host that streams a 739-byte request without pausing overruns the FIFO,
+  the part drops the byte, and the device logs `dropping unparseable N B M!
+  line`. The desk walk this is modelled on went through a bridge board, which
+  paces itself. **How fast a turn of the server loop is depends on what the
+  device is doing:** before a project is loaded it turns as fast as it can,
+  and afterwards it turns once per rendered frame — 16.4 ms at
+  `examples/basic`'s 61 fps. `examples-basic.script` is generated at
+  `--chunk-gap 20` for exactly that reason, because it is the walk that goes
+  on to `projectRead` (M5 P3).
+
+- **A request whose predecessor's answer arrives before its work is done
+  waits for the work instead** (`--wait-for <id>=<line>`). `loadProject` is
+  acknowledged and *then* the device loads the project and compiles the
+  shader, head-down for about 51 ms; a host that starts sending on the
+  acknowledgement fills the 128-byte FIFO while nobody is reading and loses
+  the rest of its request. `examples-basic.script` therefore has request 12
+  wait for `[shader-node] compilation succeeded`, which is the last line the
+  load produces. That is not tuning: it is what a client with flow control
+  gets for free and what a raw UART has to be told.
 - **Each request waits for the previous answer**, matched on `"id":<n>,` —
   every wire frame carries its request's id, and the answer is the only
   place that id appears in the device's own output.

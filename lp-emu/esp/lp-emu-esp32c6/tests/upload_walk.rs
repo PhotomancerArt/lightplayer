@@ -18,12 +18,13 @@
 //! 5. Two runs are byte-identical.
 //! 6. The project survives a power cycle: a second machine on the same flash
 //!    file mounts without formatting and auto-loads `/projects/Basic`.
-//!
-//! What it does **not** pin, and why: the `projectRead` answer (request 12).
-//! `Ws281xOutput::write` waits for the RMT interrupt, an accept block raises
-//! none, so the driver spins to its 50 ms deadline, `LpServer::tick` returns
-//! a project tick error, and request 12 is never answered. That is M5's
-//! channel model, not this milestone's — see `periph::accept::rmt`.
+//! 7. **The `projectRead` answer, request 12** — which M4 could not have and
+//!    said so. `Ws281xOutput::write` waits for the RMT interrupt; an accept
+//!    block raised none; the driver spun to its 50 ms deadline and
+//!    `LpServer::tick` returned a project tick error before answering. M5's
+//!    channel model closes that, and M5 P3 paced the script for a device
+//!    that is *rendering* rather than idle, so the answer's three frames are
+//!    here (DD40; the reasons are in `walks/examples-basic.script`'s header).
 //!
 //! `#[ignore]`d for the usual reason (`test_support`).
 
@@ -41,9 +42,11 @@ use lp_emu_esp32c6::test_support::{ReferenceImage, reference_image, skip_notice,
 /// finishes in about 1.06 s of guest time.
 const WALK_US: u64 = 20_000_000;
 
-/// The sentinel: the shader compile, which is the last thing the load
-/// produces. The load-gate line is a few lines earlier.
-const COMPILE_SENTINEL: &str = "[shader-node] compilation succeeded";
+/// The sentinel: the last frame of the `projectRead` answer, which is where
+/// the conversation ends. It was the shader compile line until M5's channel
+/// model let the walk go past it (DD40); the load-gate line and the compile
+/// line are a few lines earlier and are still asserted.
+const WALK_SENTINEL: &str = "\"id\":12,\"seq\":2,";
 
 /// §5.3, verbatim.
 const LOAD_AFTER: &str = "[mem] load_project after: 220532 B free / 105004 B used (215k / 102k)";
@@ -170,7 +173,7 @@ fn run_walk(elf: &Path, backing: FlashBacking) -> Walk {
         .time_grade(TimeGrade::T1)
         .build()
         .expect("the reference image builds a machine");
-    let outcome = m.run_until(&StopCondition::after_micros(WALK_US).exit_on(COMPILE_SENTINEL));
+    let outcome = m.run_until(&StopCondition::after_micros(WALK_US).exit_on(WALK_SENTINEL));
     m.flush_flash().expect("the flash image writes back");
     let text = String::from_utf8_lossy(&m.uart0().bytes()).into_owned();
     Walk { m, outcome, text }
@@ -213,20 +216,29 @@ fn the_upload_walk_lands_the_project_with_the_spike_reports_own_figures() {
         walk.text
     );
 
-    // Every request answered, in order, once each. Requests 1..=11; 12 is
-    // `projectRead`, which waits for M5 (see the module docs).
+    // Every request answered, in order, once each — all thirteen now,
+    // `projectRead` included (M5 P3; at M4 this loop stopped at eleven and
+    // asserted request 12 was absent).
     let mut from = 0;
-    for id in &REQUEST_IDS[..12] {
+    for id in REQUEST_IDS {
         let needle = format!("M!{{\"id\":{id},");
         let at = walk.text[from..]
             .find(&needle)
             .unwrap_or_else(|| panic!("no answer to request {id} after byte {from}"));
         from += at + needle.len();
     }
+    // The answer arrives in three frames: the shapes stream's opening, `seq 1`
+    // with the shape catalogue, and `seq 2` with the node tree.
     assert_eq!(
         walk.text.matches("M!{\"id\":12,").count(),
-        0,
-        "request 12 was answered — has M5's RMT model landed? Update this test."
+        3,
+        "the three frames of the projectRead answer:\n{}",
+        walk.text
+    );
+    assert!(
+        !walk.text.contains("RMT channel 0 frame did not complete"),
+        "a frame timed out — the RMT model regressed:\n{}",
+        walk.text
     );
     assert!(
         walk.text.contains("\"loadProject\":{\"handle\":1}"),

@@ -65,7 +65,17 @@ ws281x_telemetry = []
 # returns). Use with `ws281x_telemetry`; `touch src/main.rs` after flipping.
 stress_s2 = ["radio"]  # WiFi scan loop (repeated active scans, station mode)
 stress_s3 = ["radio"]  # ESP-NOW broadcast chatter, max payload, back to back
-test_rmt = []  # Test RMT driver with simple patterns (no pipeline)
+# The `rmt-chase` payload's harness: a 256-LED white chase on GPIO18 through
+# the shipping `lp-ws281x` refill path, three passes, one `rmt-frame` record
+# per frame. The pattern, the checksum and the record live in fw-checks as
+# `checks::rmt_chase`; this feature is the alias, so `just fwtest-rmt-esp32c6`
+# keeps working.
+#
+# `lpc-shared` is in the list because `recovery/panic_path.rs` uses it
+# unconditionally and nothing else in a bare harness build brings it: before
+# this, `--features esp32c6,test_rmt` did not link and every gate had to add
+# `server` to work around it (M5 P1, DD37).
+test_rmt = ["dep:fw-checks", "fw-checks/check-rmt", "lpc-shared"]
 test_dither = []  # Test DisplayPipeline (use with default features; server brings lpc-shared)
 test_gpio = []  # Test GPIO pin toggle
 # Host-driven GPIO square-wave calibration. The line protocol and the duty

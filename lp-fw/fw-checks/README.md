@@ -76,6 +76,7 @@ desk session gets wasted.
 | `gpio-calibrate` | `test_gpio_calibrate` | `CAL READY target=` (it serves; it never finishes) | `checks::gpio_calibrate` (the `CAL` line protocol, the duty ramp) |
 | `uart-bridge` | `test_uart_bridge` | `UART-BRIDGE READY ` (it serves until unplugged) | `checks::uart_bridge` (the bounded queue, the pump step, the ready line) |
 | `jit-math-perf` | `test_jit_math_perf` | `[jit-math-perf] === DONE ===` | `checks::jit_math_perf` (the corpus, the Q32 kernels, the benchmark runner — the cycle counter itself is injected as a `fn() -> u32`, since reading it is a chip fact rather than portable arithmetic) |
+| `rmt-chase` | `test_rmt`, `ws281x_telemetry` | `[rmt-chase] === DONE ===` | `checks::rmt_chase` (the chase pattern, the FNV-1a checksum, the per-frame record) |
 | `boot-idle` | *(none — the shipped image)* | `[stack] heartbeat: high-water` | *(none)* |
 | `usb-negative-control` | *(none — the shipped image)* | `"hostDrainingAgainMs"` (the recovery stamp itself) | *(none)* |
 | `usb-detach-reattach` | *(none — the shipped image)* | `"uptime_ms":10000` (a whole heartbeat after the re-open) | *(none)* |
@@ -143,6 +144,31 @@ The registry that carries that difference is the **host's**
 (`lp-emu-validate`'s `Payload::capture`), not this one. `FwCheckConfig`
 describes what the firmware is and prints; when the operator opens the port is
 a fact about the operator.
+
+### `rmt-chase` is the first payload whose claim is checked off a pin
+
+Every other payload here is believed because the device said so. This one
+prints what the driver *thinks* it sent — one `rmt-frame` record per frame,
+with an FNV-1a checksum over the RGB bytes — and the emulator reads the same
+frame back off **the pad**, decoding the WS281x waveform the RMT actually put
+on GPIO18. The gate is that the two checksums agree, frame by frame — and the
+decoded frames are committed beside the transcript as its pin capture, so the
+comparison outlives the run.
+
+Of the `[WS281X]` telemetry's counters, `trips`, `skips` and `errors` are
+graded `Pin`: a truncated frame is a claim about a real strip, and the wire is
+now observable. `frames`, `complete`, `refills` and `wanted` are graded
+`Timing` despite reading like pin claims, because the line is printed once
+every ten seconds of the guest's uptime and how many frames fit in ten seconds
+is exactly what a time grade decides.
+
+Its pattern is a white dot (`[10, 10, 10]`) on black, which is invariant under
+any permutation of the three colour channels — deliberately, because
+`LedChannel` swaps RGB to GRB and `lp-ws281x` then permutes again, so the
+bytes on the wire are the caller's RGB unswapped. That double swap is a
+finding filed against the harness path (DD34 d), not something this phase
+fixed, and the payload is built so that settling it later cannot invalidate a
+committed transcript.
 
 ### `uart-bridge` is an instrument, not a measurement
 

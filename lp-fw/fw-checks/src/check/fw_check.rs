@@ -37,7 +37,7 @@ impl FwCheck {
             Self::UsbDetachReattach => "usb-detach-reattach",
             Self::UsbHostAbsent => "usb-host-absent",
             Self::Json => "json",
-            Self::Rmt => "rmt",
+            Self::Rmt => "rmt-chase",
             Self::Dither => "dither",
             Self::FluidDemo => "fluid-demo",
             Self::MsaFluid => "msafluid",

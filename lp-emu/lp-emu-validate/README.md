@@ -166,6 +166,36 @@ two must agree; `Transcript::load` refuses them if they do not.
 fixture to refresh. That is the FP replay rule, and it is the only reason a
 committed capture means anything.
 
+### The pin capture (M5 P3)
+
+A third file, for the payloads whose claim is about a **wire** rather than
+about what the device said:
+
+```text
+lp-emu/transcripts/<chip>/<payload>/<configuration>-<date>-<short-commit>.txt.pins.jsonl
+```
+
+One decoded frame per line, as `lp-emu-esp32c6 --dump-frames` writes them, and
+the sidecar's optional `pins` field is its **file name** — resolved against the
+transcript's own directory, so a tree can be moved wholesale and a companion
+can never point outside it.
+
+It exists because a console capture cannot hold it. Everything else in a
+transcript is something the firmware chose to say; this is what a pad carried,
+decoded from the waveform by something that never spoke to the firmware. So
+`rmt-chase`'s `[fw-check-json] {"kind":"rmt-frame","crc":…}` — the driver's
+claim about the frame it handed the hardware — can be checked against
+`{"kind":"ws281x-frame","wire":…}`, the bytes that actually went down the wire.
+`Transcript::pin_records()` reads it and `replay` compares the frames as
+**Pin**-class claims, which fail a replay; a transcript whose own guest and own
+pad disagree is a structural problem naming the frame.
+
+**Additive, by construction** (E3, approved 2026-09-07). Every sidecar written
+before it loads unchanged, and only a payload whose registry entry sets
+`pin_capture` is recorded with a companion at all — a configuration that cannot
+observe a pad records the console half and says nothing about the wire, which
+is what its trust grade already said.
+
 ## Replay
 
 `replay(left, right, options)` compares the two field by field, each comparison

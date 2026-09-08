@@ -68,6 +68,26 @@
 //! (GPIO18 through `func_out_sel_cfg`) is P2's signal fabric; until then the
 //! per-channel **pulse log** and **fetched-word log** are the observation,
 //! read by the machine's `rmt_pulses` / `rmt_words` / `rmt_frames_ended`.
+//!
+//! # The refill measurement (M5 P3)
+//!
+//! The block also watches the race it is half of, and reports it: for every
+//! `tx_thr_event` it counts the words the transmitter consumes before the
+//! guest's next `ch_tx_lim` write (the **entry** delay) and then before the
+//! last RAM write of that refill (the **fill**), in the same units
+//! `lp-ws281x` measures them in from `read_pos` — words. Every measurement is
+//! a `RMT REFILL ch=0 at=<cyc> entry=<w> fill=<w>` trace note, and the totals
+//! are a nine-bucket histogram per channel ([`RefillStats`]), printed in the
+//! CLI's exit summary beside the guest's own `hist=`/`entry_hist=`.
+//!
+//! It is **reported and never gated** (D13/PD9), and the reason is in the
+//! numbers rather than in the policy: the emulator's ISR path is
+//! RAM-resident by construction and the machine has no flash-miss cost, so
+//! the entry half is a floor rather than a prediction of silicon's 20–29
+//! words. What it is good for is the shape — a fill that grows, or a bucket
+//! that starts landing at "≥ half", is the model or the driver getting
+//! slower at the deadline, and neither of those was visible from anywhere
+//! before.
 
 use lp_emu_core::sched::{Cycles, EventId};
 use lp_emu_esp_common::regfile::{lane_of, merge_lane};
@@ -169,6 +189,101 @@ pub const WORD_LOG_CAP: usize = 2_000_000;
 /// the RMT never learns the answer — it cannot see the GPIO block.
 pub const fn signal_of(ch: usize) -> SignalId {
     SignalId(RMT_SIG_0 + ch as u16)
+}
+
+/// Buckets in a refill histogram: eighths of a half-window, plus one for
+/// "≥ half".
+///
+/// The same nine buckets, and the same edges, as `lp_ws281x::LAG_BUCKETS`
+/// (`state.rs::lag_bucket(advanced, half) = advanced * 8 / half`, saturating
+/// at 8). Deliberately identical so that the emulator's histogram and the
+/// guest's `hist=`/`entry_hist=` in the `[WS281X]` line can be printed side
+/// by side and read as the same shape — two measurements of one race, one
+/// from inside the ISR and one from the transmitter it is racing.
+pub const LAG_BUCKETS: usize = 9;
+
+/// Which eighth of `half` `words` falls in; `LAG_BUCKETS - 1` for `≥ half`.
+pub fn lag_bucket(words: u64, half: u32) -> usize {
+    if half == 0 {
+        return LAG_BUCKETS - 1;
+    }
+    ((words * 8) / u64::from(half)).min(LAG_BUCKETS as u64 - 1) as usize
+}
+
+/// What one channel's refills cost, in words — the emulator's own reading of
+/// the race the `ws281x_telemetry` line reports from the other side.
+///
+/// **Reported, never gated** (D13/PD9). The two figures are the two halves of
+/// discovery §4's `entry delay` and `refill lag`, measured here in the units
+/// the driver measures them in — words the transmitter consumed:
+///
+/// * `entry` — from the `tx_thr_event` to the guest's next `ch_tx_lim` write
+///   for that channel. On silicon that is the interrupt latency plus esp-hal's
+///   dispatch, which is where the flash misses live (silicon's `entry_max` is
+///   20–29 words); here the ISR path is RAM-resident by construction and the
+///   machine has no flash-miss cost at all, so `t1`'s figure is a floor, not
+///   a prediction.
+/// * `fill` — from that write to the last RAM write inside the channel's
+///   window before the next threshold or the end of the frame. This is the
+///   `fill_half` loop itself, and it is the half the two configurations can
+///   sensibly be compared on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RefillStats {
+    /// Threshold events whose refill was measured end to end.
+    pub refills: u64,
+    pub entry_max: u64,
+    pub entry_hist: [u64; LAG_BUCKETS],
+    pub fill_max: u64,
+    pub fill_hist: [u64; LAG_BUCKETS],
+    /// Threshold events where the guest never wrote `tx_lim` before the next
+    /// threshold or the end of the frame. Not an error — the last threshold
+    /// of a frame is answered by `finish`, not by `refill` — but a number
+    /// that should stay small, and a large one means the ISR is missing
+    /// events.
+    pub unanswered: u64,
+    /// The half-window the buckets were computed against, as latched at the
+    /// first measured refill. Zero until then.
+    pub half_words: u32,
+}
+
+impl RefillStats {
+    fn record(&mut self, entry: u64, fill: u64, half: u32) {
+        self.refills += 1;
+        self.half_words = half;
+        self.entry_max = self.entry_max.max(entry);
+        self.fill_max = self.fill_max.max(fill);
+        self.entry_hist[lag_bucket(entry, half)] += 1;
+        self.fill_hist[lag_bucket(fill, half)] += 1;
+    }
+
+    /// `a:b:c:…:i`, the shape the `[WS281X]` line prints its histograms in.
+    pub fn hist_string(hist: &[u64; LAG_BUCKETS]) -> String {
+        hist.iter()
+            .map(u64::to_string)
+            .collect::<Vec<_>>()
+            .join(":")
+    }
+}
+
+/// A refill measurement in flight on one channel.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum RefillProbe {
+    #[default]
+    Idle,
+    /// A threshold fired at `at` with the engine `words` into the frame;
+    /// waiting for the ISR's `ch_tx_lim` write.
+    AwaitingLimit { at: Cycles, words: u64 },
+    /// The ISR answered; measuring how far the transmitter gets before the
+    /// last word of the refill lands.
+    Filling {
+        at: Cycles,
+        entry: u64,
+        words: u64,
+        /// `words_consumed` as of the last RAM write in this channel's
+        /// window; starts equal to `words`, so a refill that writes nothing
+        /// measures zero.
+        last_write: u64,
+    },
 }
 
 /// One level held for `ticks` channel ticks from cycle `at`.
@@ -282,6 +397,13 @@ struct TxEngine {
     mem_empty: bool,
     /// Words fetched in the current frame, for the `end` note.
     frame_words: u32,
+    /// Words fetched since the machine started, on this channel. The unit
+    /// both halves of the refill measurement count in, and monotonic across
+    /// frames so a probe that spans a frame boundary still subtracts
+    /// correctly.
+    words_consumed: u64,
+    refill: RefillProbe,
+    refill_stats: RefillStats,
     frames_ended: usize,
     pulses: Vec<Pulse>,
     words: Vec<(Cycles, u32)>,
@@ -306,6 +428,9 @@ impl TxEngine {
             ending: Ending::No,
             mem_empty: false,
             frame_words: 0,
+            words_consumed: 0,
+            refill: RefillProbe::Idle,
+            refill_stats: RefillStats::default(),
             frames_ended: 0,
             pulses: Vec::new(),
             words: Vec::new(),
@@ -469,6 +594,81 @@ impl Rmt {
         cx.sched.cancel(event_id(self.index, EV_WORD + ch as u16));
     }
 
+    // ---- the refill measurement (reported, never gated) ---------------------
+
+    /// Close whatever refill measurement channel `ch` has in flight, then
+    /// optionally open a new one at `now`.
+    ///
+    /// Called at every threshold (close the previous, open this one) and at
+    /// the end of a frame (close, open nothing). A measurement that never saw
+    /// a `ch_tx_lim` write is counted as unanswered rather than recorded with
+    /// an invented entry delay.
+    fn close_refill(&mut self, ch: usize, cx: &mut BusCx<'_>) {
+        let half = self.ch[ch].window_words() / 2;
+        match core::mem::take(&mut self.ch[ch].refill) {
+            RefillProbe::Idle => {}
+            RefillProbe::AwaitingLimit { .. } => {
+                self.ch[ch].refill_stats.unanswered += 1;
+            }
+            RefillProbe::Filling {
+                at,
+                entry,
+                words,
+                last_write,
+            } => {
+                let fill = last_write.saturating_sub(words);
+                self.ch[ch].refill_stats.record(entry, fill, half);
+                note(cx, || {
+                    format!("cyc={at} RMT REFILL ch={ch} at={at} entry={entry} fill={fill}")
+                });
+            }
+        }
+    }
+
+    /// A threshold fired: the previous measurement (if any) ends here and a
+    /// new one begins.
+    fn open_refill(&mut self, ch: usize, at: Cycles, cx: &mut BusCx<'_>) {
+        self.close_refill(ch, cx);
+        self.ch[ch].refill = RefillProbe::AwaitingLimit {
+            at,
+            words: self.ch[ch].words_consumed,
+        };
+    }
+
+    /// The ISR wrote `ch_tx_lim`: the entry delay is settled, the fill begins.
+    fn refill_answered(&mut self, ch: usize) {
+        let words = self.ch[ch].words_consumed;
+        if let RefillProbe::AwaitingLimit { at, words: from } = self.ch[ch].refill {
+            self.ch[ch].refill = RefillProbe::Filling {
+                at,
+                entry: words.saturating_sub(from),
+                words,
+                last_write: words,
+            };
+        }
+    }
+
+    /// A word landed in a channel's window while its refill was being
+    /// measured.
+    fn refill_wrote(&mut self, word_index: u32) {
+        for ch in 0..TX_CHANNELS {
+            let start = BLOCK_WORDS * ch as u32;
+            let end = start + self.ch[ch].window_words();
+            if word_index < start || word_index >= end {
+                continue;
+            }
+            let words = self.ch[ch].words_consumed;
+            if let RefillProbe::Filling { last_write, .. } = &mut self.ch[ch].refill {
+                *last_write = words;
+            }
+        }
+    }
+
+    /// What channel `ch`'s refills have cost, in words.
+    pub fn refill_stats(&self, ch: usize) -> RefillStats {
+        self.ch[ch].refill_stats
+    }
+
     /// `conf_update`: latch the configuration and act on the strobes
     /// written since the last one (§10.3).
     fn conf_update(&mut self, ch: usize, cx: &mut BusCx<'_>) {
@@ -546,6 +746,7 @@ impl Rmt {
     /// (modeled — esp-hal's `stop` expects none).
     fn stop(&mut self, ch: usize, cx: &mut BusCx<'_>) {
         self.cancel_word(ch, cx);
+        self.close_refill(ch, cx);
         let e = &mut self.ch[ch];
         e.running = false;
         e.stalled = false;
@@ -560,6 +761,9 @@ impl Rmt {
     /// The frame ends here: `tx_end`, output to the idle level.
     fn end_frame(&mut self, ch: usize, at: Cycles, cx: &mut BusCx<'_>) {
         self.cancel_word(ch, cx);
+        // A refill still in flight ends with the frame: the driver's `finish`
+        // answers the last threshold, not `refill`.
+        self.close_refill(ch, cx);
         let e = &mut self.ch[ch];
         e.running = false;
         e.stalled = false;
@@ -631,6 +835,11 @@ impl Rmt {
     fn log_word(&mut self, ch: usize, now: Cycles, word: u32, cx: &mut BusCx<'_>) {
         let e = &mut self.ch[ch];
         e.frame_words += 1;
+        // The refill measurement's unit: a word the transmitter has taken out
+        // of the RAM and will not read again. Counted here rather than in
+        // `fetch` because a stalled engine has not consumed the word it is
+        // holding — `fetch` returns before this on the no-clock path.
+        e.words_consumed += 1;
         if !self.keep_logs {
             return;
         }
@@ -737,6 +946,10 @@ impl Rmt {
             // Position semantics: `tx_lim == window_words` is the wrap.
             self.raise(ch, INT_TX_THR_SHIFT);
             note(cx, || format!("cyc={now} RMT ch{ch} thr pos={pos}"));
+            // The previous refill ends here and this one begins. `now` is the
+            // word's own start cycle, which is when the pointer reached the
+            // threshold — not the dispatch cycle.
+            self.open_refill(ch, now, cx);
         }
         if pos >= window_words {
             if self.ch[ch].wrap() {
@@ -813,6 +1026,10 @@ impl Rmt {
                 // Live: the engine reads this on its next fetch, refilled
                 // or not.
                 *slot = value;
+                // …and it is the last word of a refill until another one
+                // lands, which is how the fill half of the measurement is
+                // read off the guest's own writes.
+                self.refill_wrote(i as u32);
             }
             return;
         }
@@ -847,6 +1064,11 @@ impl Rmt {
             if off == CH_TX_LIM[ch] {
                 // Immediate: the ISR rewrites it mid-frame.
                 self.regs.poke(off, value);
+                // And this write is the ISR arriving: the entry delay ends
+                // here. `refill` flips `tx_lim` first, before it plants the
+                // guard or writes a single word, so this is the earliest
+                // moment the handler is observably present.
+                self.refill_answered(ch);
                 return;
             }
         }
@@ -1043,6 +1265,34 @@ impl Peripheral for Rmt {
                 out.extend_from_slice(&at.to_le_bytes());
                 out.extend_from_slice(&w.to_le_bytes());
             }
+            // The refill measurement rides the snapshot like everything else
+            // the block observes: a restored run has to produce the same
+            // `RMT REFILL` notes as the run it was taken from, or the
+            // snapshot-identity gates would be comparing two different
+            // observers.
+            out.extend_from_slice(&e.words_consumed.to_le_bytes());
+            let (tag, at, entry, words, last_write) = match e.refill {
+                RefillProbe::Idle => (0u64, 0, 0, 0, 0),
+                RefillProbe::AwaitingLimit { at, words } => (1, at, 0, words, 0),
+                RefillProbe::Filling {
+                    at,
+                    entry,
+                    words,
+                    last_write,
+                } => (2, at, entry, words, last_write),
+            };
+            for v in [tag, at, entry, words, last_write] {
+                out.extend_from_slice(&v.to_le_bytes());
+            }
+            let s = &e.refill_stats;
+            out.extend_from_slice(&s.refills.to_le_bytes());
+            out.extend_from_slice(&s.entry_max.to_le_bytes());
+            out.extend_from_slice(&s.fill_max.to_le_bytes());
+            out.extend_from_slice(&s.unanswered.to_le_bytes());
+            out.extend_from_slice(&s.half_words.to_le_bytes());
+            for v in s.entry_hist.iter().chain(s.fill_hist.iter()) {
+                out.extend_from_slice(&v.to_le_bytes());
+            }
         }
         out.extend_from_slice(&self.regs.save_state());
         out
@@ -1110,6 +1360,61 @@ impl Peripheral for Rmt {
                 };
                 words.push((at, w));
             }
+            let (
+                Some(words_consumed),
+                Some(tag),
+                Some(probe_at),
+                Some(probe_entry),
+                Some(probe_words),
+                Some(probe_last_write),
+            ) = (r.u64(), r.u64(), r.u64(), r.u64(), r.u64(), r.u64())
+            else {
+                log::warn!("RMT: load_state blob too short, ignored");
+                return;
+            };
+            let mut stats = RefillStats::default();
+            let (
+                Some(refills),
+                Some(entry_max),
+                Some(fill_max),
+                Some(unanswered),
+                Some(half_words),
+            ) = (r.u64(), r.u64(), r.u64(), r.u64(), r.u32())
+            else {
+                log::warn!("RMT: load_state blob too short, ignored");
+                return;
+            };
+            stats.refills = refills;
+            stats.entry_max = entry_max;
+            stats.fill_max = fill_max;
+            stats.unanswered = unanswered;
+            stats.half_words = half_words;
+            for slot in stats
+                .entry_hist
+                .iter_mut()
+                .chain(stats.fill_hist.iter_mut())
+            {
+                let Some(v) = r.u64() else {
+                    log::warn!("RMT: load_state blob too short, ignored");
+                    return;
+                };
+                *slot = v;
+            }
+            e.words_consumed = words_consumed;
+            e.refill = match tag {
+                1 => RefillProbe::AwaitingLimit {
+                    at: probe_at,
+                    words: probe_words,
+                },
+                2 => RefillProbe::Filling {
+                    at: probe_at,
+                    entry: probe_entry,
+                    words: probe_words,
+                    last_write: probe_last_write,
+                },
+                _ => RefillProbe::Idle,
+            };
+            e.refill_stats = stats;
             e.latched = latched;
             e.pending = pending;
             e.running = eflags & 1 != 0;
@@ -1393,6 +1698,80 @@ mod tests {
             start + 95 * WORD_CYCLES,
             "word 95 is at 95 periods"
         );
+    }
+
+    /// The refill measurement, in the units the driver measures the same
+    /// race in: words the transmitter consumed between the threshold and the
+    /// ISR's `ch_tx_lim` write, and between that write and the last word of
+    /// the refill.
+    ///
+    /// Reported, never gated (D13/PD9) — so what this pins is that the two
+    /// quantities are what they claim to be, not that they are any
+    /// particular size.
+    #[test]
+    fn a_refill_is_measured_in_words_from_the_threshold_to_the_last_word_written() {
+        let (mut sb, mut r, _) = rig();
+        configure(&mut sb, &mut r, 1);
+        fill(&mut sb, &mut r, 0, 48, ZERO);
+        sb.write(&mut r, CH_TX_LIM[0], 24);
+        let start = 1_000u64;
+        sb.now = start;
+        start_tx(&mut sb, &mut r);
+        assert_eq!(r.refill_stats(0).refills, 0, "nothing measured yet");
+
+        // The threshold: word 23 fetched, 24 words consumed.
+        sb.run_to(&mut r, start + 23 * WORD_CYCLES);
+        assert!(sb.irq.level(source::RMT));
+
+        // The ISR arrives two words late and flips `tx_lim` first, exactly as
+        // `lp_ws281x::refill` does.
+        sb.run_to(&mut r, start + 25 * WORD_CYCLES);
+        sb.write(&mut r, CH_TX_LIM[0], 48);
+        sb.write(&mut r, INT_CLR, THR0);
+
+        // …and its last word lands three words later.
+        sb.run_to(&mut r, start + 28 * WORD_CYCLES);
+        sb.write(&mut r, ram_off(3), ZERO);
+        // A write outside this channel's window is not part of its refill.
+        sb.run_to(&mut r, start + 40 * WORD_CYCLES);
+        sb.write(&mut r, ram_off(100), ZERO);
+
+        // Still open: the measurement closes at the next threshold.
+        assert_eq!(r.refill_stats(0).refills, 0);
+        sb.run_to(&mut r, start + 47 * WORD_CYCLES);
+        let s = r.refill_stats(0);
+        assert_eq!(s.refills, 1);
+        assert_eq!(s.entry_max, 2, "two words between the threshold and tx_lim");
+        assert_eq!(s.fill_max, 3, "three more before the last word landed");
+        assert_eq!(s.half_words, 24, "a 48-word window's half");
+        assert_eq!(s.unanswered, 0);
+        // Buckets are eighths of the half, so three words wide here:
+        // `lag_bucket(2, 24) = 0` and `lag_bucket(3, 24) = 1`.
+        assert_eq!(s.entry_hist[0], 1);
+        assert_eq!(s.fill_hist[1], 1);
+
+        // A threshold the guest never answers is counted, not invented.
+        sb.write(&mut r, INT_CLR, THR0);
+        fill(&mut sb, &mut r, 0, 48, 0);
+        sb.run_to(&mut r, start + 60 * WORD_CYCLES);
+        assert_eq!(r.frames_ended(0), 1, "the STOP ended the frame");
+        let s = r.refill_stats(0);
+        assert_eq!(s.refills, 1, "no second refill was measured");
+        assert_eq!(
+            s.unanswered, 1,
+            "the last threshold of a frame is `finish`'s, not `refill`'s"
+        );
+    }
+
+    #[test]
+    fn the_lag_buckets_are_eighths_of_a_half_with_the_last_one_open() {
+        assert_eq!(lag_bucket(0, 96), 0);
+        assert_eq!(lag_bucket(11, 96), 0);
+        assert_eq!(lag_bucket(12, 96), 1);
+        assert_eq!(lag_bucket(95, 96), 7);
+        assert_eq!(lag_bucket(96, 96), 8, "≥ half");
+        assert_eq!(lag_bucket(4_000, 96), 8, "and it saturates");
+        assert_eq!(lag_bucket(3, 0), 8, "an unconfigured window has no eighths");
     }
 
     /// (b) A STOP at word 0 after the wrap ends the frame with `tx_end`

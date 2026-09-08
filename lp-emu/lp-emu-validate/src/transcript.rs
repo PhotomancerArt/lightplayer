@@ -149,6 +149,47 @@ impl Transcript {
         Ok(out)
     }
 
+    /// The pin capture's path, if this transcript has one and was loaded
+    /// from disk.
+    ///
+    /// The sidecar carries a file **name**; it is resolved against the
+    /// transcript's own directory, so a tree can be moved wholesale and a
+    /// companion can never be pointed outside it.
+    pub fn pins_path(&self) -> Option<PathBuf> {
+        let name = self.header.pins.as_ref()?;
+        Some(self.path.as_ref()?.with_file_name(name))
+    }
+
+    /// The decoded frames beside this transcript: one JSON object per line,
+    /// as `lp-emu-esp32c6 --dump-frames` writes them.
+    ///
+    /// The half of a recording that is not something the device said. Empty
+    /// for a transcript with no companion — which is every transcript before
+    /// M5 P3, and every silicon transcript until an instrument is on the
+    /// desk. An error only when the sidecar **names** a companion that
+    /// cannot be read: a transcript that promises a pad and does not deliver
+    /// one is broken, not merely quiet.
+    pub fn pin_records(&self) -> Result<Vec<Record>> {
+        let Some(path) = self.pins_path() else {
+            if self.header.pins.is_some() {
+                bail!(
+                    "the sidecar names a pin capture `{}` but this transcript was not loaded \
+                     from a path, so there is no directory to resolve it against",
+                    self.header.pins.as_deref().unwrap_or_default()
+                );
+            }
+            return Ok(Vec::new());
+        };
+        let text = std::fs::read_to_string(&path).with_context(|| {
+            format!(
+                "reading the pin capture {} named by {}'s sidecar",
+                path.display(),
+                self.header.payload
+            )
+        })?;
+        parse_pin_records(&text, &path.display().to_string())
+    }
+
     /// The records of one kind.
     pub fn records_of(&self, kind: &str) -> Result<Vec<Record>> {
         Ok(self
@@ -195,6 +236,38 @@ impl Transcript {
     }
 }
 
+/// One decoded frame per line, each a JSON object with a `kind`.
+///
+/// Kept separate from [`Transcript::pin_records`] so it can be tested, and
+/// used by a caller that has the bytes rather than a file.
+pub fn parse_pin_records(text: &str, source: &str) -> Result<Vec<Record>> {
+    let mut out = Vec::new();
+    for (i, line) in text.lines().enumerate() {
+        let line = line.trim();
+        // `--dump-frames` writes one note when its own line cap is reached;
+        // a comment is not a frame.
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let value: Value = serde_json::from_str(line)
+            .with_context(|| format!("parsing {source} line {}: {line}", i + 1))?;
+        let Value::Object(map) = value else {
+            bail!("{source} line {} is not a JSON object: {line}", i + 1);
+        };
+        let kind = map
+            .get("kind")
+            .and_then(Value::as_str)
+            .with_context(|| format!("{source} line {} has no `kind`", i + 1))?
+            .to_string();
+        out.push(Record {
+            kind,
+            fields: map.into_iter().collect(),
+            line: i + 1,
+        });
+    }
+    Ok(out)
+}
+
 /// `foo.txt` -> `foo.txt.meta.json`.
 pub fn sidecar_path(path: &Path) -> PathBuf {
     let mut s = path.as_os_str().to_os_string();
@@ -230,6 +303,7 @@ mod tests {
             source: None,
             capture: None,
             note: None,
+            pins: None,
             trust: Default::default(),
         }
     }
@@ -317,6 +391,39 @@ mod tests {
         let body = format!("{}\n", inband.to_line());
         let t = Transcript::from_parts(header("shader-compile-stress"), &body).unwrap();
         assert!(t.inband_header().unwrap().is_some());
+    }
+
+    #[test]
+    fn pin_records_parse_the_dump_frames_lines() {
+        let text = "\
+{\"kind\":\"ws281x-frame\",\"pad\":18,\"n\":0,\"wire\":\"0a0a0a\",\"complete\":true}
+# pin log cap reached
+{\"kind\":\"ws281x-frame\",\"pad\":18,\"n\":1,\"wire\":\"000000\",\"complete\":false}
+";
+        let records = parse_pin_records(text, "<test>").expect("parses");
+        assert_eq!(records.len(), 2, "the comment is not a frame");
+        assert_eq!(records[0].kind, "ws281x-frame");
+        assert_eq!(records[0].get("n").unwrap().as_u64(), Some(0));
+        assert_eq!(records[1].get("complete").unwrap().as_bool(), Some(false));
+        assert_eq!(records[1].line, 3, "the line number is the file's");
+
+        let err = parse_pin_records("{\"pad\":18}\n", "<test>").unwrap_err();
+        assert!(format!("{err:#}").contains("`kind`"), "{err:#}");
+    }
+
+    /// A transcript with no companion has no pin records and that is not an
+    /// error; one whose sidecar *names* a companion it cannot resolve is.
+    #[test]
+    fn a_transcript_without_a_pin_capture_simply_has_none() {
+        let t = Transcript::from_parts(header("shader-compile-stress"), "x\n").unwrap();
+        assert!(t.pin_records().unwrap().is_empty());
+        assert!(t.pins_path().is_none());
+
+        let mut h = header("shader-compile-stress");
+        h.pins = Some("nowhere.pins.jsonl".into());
+        let t = Transcript::from_parts(h, "x\n").unwrap();
+        let err = t.pin_records().unwrap_err().to_string();
+        assert!(err.contains("nowhere.pins.jsonl"), "{err}");
     }
 
     #[test]

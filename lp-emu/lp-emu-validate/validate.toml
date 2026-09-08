@@ -52,6 +52,11 @@ description = "The M4 gate set: the flash-backed shipped image booting to the id
 payloads = ["boot-idle-flash", "upload-walk"]
 
 [[set]]
+name = "emu-m5"
+description = "M5's gate set: the RMT chase. A 256-LED white dot walks the strip three times on GPIO18 through the shipping `lp-ws281x` refill path, printing one `rmt-frame` record per frame with an FNV-1a checksum of the bytes it handed the driver, and — because three chases cross the telemetry module's ten-second period — one `[WS281X]` line saying what the driver believes about its own refill race. It is the first payload whose claims are checked against a **pin**: the machine decodes the same frames off the pad and the two checksums must agree, frame for frame. The image is the harness's own, over the link it ships with, so a silicon capture of it would be the same bytes."
+payloads = ["rmt-chase"]
+
+[[set]]
 name = "usb-negative-control"
 description = "M6's negative control, rig-free: flash the shipped image, leave the port CLOSED for several seconds, then open a non-resetting reader and read the first heartbeat. The device is enumerated and undrained throughout, which is the one link state it cannot report on at the time — the `link` object's `hostNotDrainingMs` / `hostDrainingAgainMs` / `notDrainingCount` are its own record of it, on its own clock. Runs on silicon today; M6 P4 adds the emulator twin."
 payloads = ["usb-negative-control"]
@@ -204,7 +209,7 @@ because = "M6 built the host's side — absent, attached with the port closed, a
 [[configuration.trust]]
 class = "pin"
 grade = "modeled"
-because = "a pin IS observed (M5 P2): GPIO is a routing view over the bus's signal fabric, the RMT drives RMT_SIG_0/1 into it, and a WS281x decoder reads a routed pad's edges at the datasheet's +/-150 ns into frames (--dump-frames, --pin-log). Those frames are byte-equal to the word-level decode of the same transmission, which is two readings of one model and not a measurement: nothing on silicon has confirmed a pad here and no capture is committed. The grade moves when one is (M5 P4 puts the first lit frame against the host oracle)"
+because = "a pin IS observed (M5 P2): GPIO is a routing view over the bus's signal fabric, the RMT drives RMT_SIG_0/1 into it, and a WS281x decoder reads a routed pad's edges at the datasheet's +/-150 ns into frames (--dump-frames, --pin-log). Since M5 P3 a pin capture is COMMITTED beside the transcript (`rmt-chase`, 768 decoded frames of a 256-LED chase on gpio18) and the guest's own per-frame FNV-1a checksum agrees with the bytes the pad carried on every one of them, on both time grades. That is the strongest evidence this class has ever had and it is still not a measurement: both readings are ours. What would move the grade is a capture from an instrument on a real pin, and none exists. M5 P4 puts the first lit frame against the host oracle, which is the nearest independent check available without one"
 
 [[configuration.trust]]
 class = "wire"
@@ -242,7 +247,7 @@ because = "the same host model as t1, and the same four transcripts stand behind
 [[configuration.trust]]
 class = "pin"
 grade = "modeled"
-because = "the same pin observation as t1 (M5 P2), and the same reason for the grade: the fabric and the decoder are in the machine, not on a scope"
+because = "the same pin observation as t1 (M5 P2) and its own committed pin capture (M5 P3): `rmt-chase` recorded on this grade decodes the same 768 frames off gpio18, byte for byte the ones t1 decoded, which is what a time grade must never move. `modeled` for t1's reason: the fabric and the decoder are in the machine, not on a scope"
 
 [[configuration.trust]]
 class = "wire"

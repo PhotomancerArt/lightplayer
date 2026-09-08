@@ -1641,6 +1641,14 @@ impl Esp32C6Machine {
         self.rmt().map(|r| r.frames_ended(ch)).unwrap_or(0)
     }
 
+    /// What channel `ch`'s refills cost, in words consumed — the emulator's
+    /// own reading of the race the guest's `[WS281X]` line reports from the
+    /// other side. Reported, never gated (D13/PD9); see
+    /// [`periph::rmt::RefillStats`].
+    pub fn rmt_refill_stats(&self, ch: usize) -> periph::rmt::RefillStats {
+        self.rmt().map(|r| r.refill_stats(ch)).unwrap_or_default()
+    }
+
     // ---- the pads ------------------------------------------------------
 
     /// Every pad the guest has routed, ascending, with what it is routed to.

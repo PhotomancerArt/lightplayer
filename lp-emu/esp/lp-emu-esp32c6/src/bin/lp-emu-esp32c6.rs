@@ -23,6 +23,7 @@ use lp_emu_esp32c6::machine::{
     StopCondition, StripConfig, TimeGrade, Uart0Sink, UsbHost, UsbSjDrain, UsbSjSink,
 };
 use lp_emu_esp32c6::memmap;
+use lp_emu_esp32c6::periph::rmt::RefillStats;
 
 const USAGE: &str = "\
 lp-emu-esp32c6 — the ESP32-C6 machine
@@ -671,6 +672,43 @@ fn print_load_report(machine: &Esp32C6Machine) {
     }
 }
 
+/// The RMT's own reading of the refill race, per channel, at exit.
+///
+/// Two histograms in the shape the `[WS281X]` telemetry line prints its own —
+/// nine buckets, eighths of a half-window, the last one "≥ half" — so the two
+/// can be read side by side. **Reported, never gated** (D13/PD9): the entry
+/// half is a floor, because the emulated ISR path is RAM-resident and the
+/// machine has no flash-miss cost, and silicon's own entry delay is mostly
+/// those misses.
+///
+/// Silent for a run whose guest never started a channel, which is every run
+/// that does not load a project or drive a strip.
+fn report_refill_lag(machine: &Esp32C6Machine) {
+    for ch in 0..lp_emu_esp32c6::periph::rmt::TX_CHANNELS {
+        let s = machine.rmt_refill_stats(ch);
+        if s.refills == 0 && s.unanswered == 0 {
+            continue;
+        }
+        eprintln!(
+            "rmt refill ch{ch}: {} measured, half={} words; entry max {} hist {}; \
+             fill max {} hist {}{}",
+            s.refills,
+            s.half_words,
+            s.entry_max,
+            RefillStats::hist_string(&s.entry_hist),
+            s.fill_max,
+            RefillStats::hist_string(&s.fill_hist),
+            match s.unanswered {
+                0 => String::new(),
+                n => format!(
+                    "; {n} threshold(s) the guest never answered before the frame ended \
+                     (the last one of a frame is `finish`'s, not `refill`'s)"
+                ),
+            }
+        );
+    }
+}
+
 fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
     let cycles = machine.cycles();
     eprintln!(
@@ -756,6 +794,7 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
     for line in machine.pin_summaries() {
         eprintln!("{line}");
     }
+    report_refill_lag(machine);
     let tried = machine.usb_sj_tried();
     if !tried.is_empty() {
         eprintln!(
