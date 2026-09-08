@@ -132,6 +132,13 @@ test_fluid_demo = []  # RGB MSAFluid demo on the basic ring fixture (gpio4, 241 
 # the alias that keeps `just fwtest-jit-math-perf-esp32c6` working (Q12
 # retirement ledger, notes.md).
 test_jit_math_perf = ["dep:fw-checks", "fw-checks/check-jit-math-perf"]
+# The `cycle-probe` payload's harness: kernels that isolate one term of a
+# cycle model each, every one bracketed by BOTH the PMU cycle counter and
+# SYSTIMER microseconds. The bracket, the repetition, the record and the
+# kernels that need no chip fact live in fw-checks as `checks::cycle_probe`;
+# what stays here is the IRAM/flash pair, the assembly loops whose
+# instruction count has to be exact, and the two MMIO polls.
+test_cycle_probe = ["dep:fw-checks", "fw-checks/check-cycle-probe", "lpc-shared"]
 test_shader_compile_incremental = ["dep:fw-checks", "dep:lp-shader", "dep:lpvm-native", "dep:lpir", "dep:lps-shared", "lps-builtins"]  # Incremental native shader compile harness on ESP32-C6
 # f32 soft-float semantics harness (roadmap M9). The ONLY configuration in this
 # crate that turns `float-f32` on: the C6 has no FPU, ships Fixed-mode shaders,

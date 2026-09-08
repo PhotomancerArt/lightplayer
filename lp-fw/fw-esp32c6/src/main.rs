@@ -131,6 +131,8 @@ use {
 
 #[cfg(fw_harness)]
 mod tests {
+    #[cfg(feature = "test_cycle_probe")]
+    pub mod cycle_probe;
     #[cfg(feature = "test_f32_softfloat")]
     pub mod f32_softfloat;
     #[cfg(feature = "test_fluid_demo")]
@@ -569,6 +571,12 @@ async fn main(spawner: embassy_executor::Spawner) {
     {
         use tests::jit_math_perf::run_jit_math_perf;
         run_jit_math_perf(spawner).await;
+    }
+
+    #[cfg(feature = "test_cycle_probe")]
+    {
+        use tests::cycle_probe::run_cycle_probe;
+        run_cycle_probe(spawner).await;
     }
 
     #[cfg(feature = "test_shader_compile_incremental")]
