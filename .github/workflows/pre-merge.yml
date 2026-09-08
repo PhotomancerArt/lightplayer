@@ -854,7 +854,19 @@ jobs:
     # runner (2026-09-08, main at #567), which is three cold reference-image
     # builds and the suite. L4's `--verify` step adds a fourth build, so the
     # ceiling moves with it rather than the job living at 90 % of its budget.
-    timeout-minutes: 20
+    #
+    # Raised 20 -> 35 (2026-09-08): #599's `--verify` build and the
+    # heap-budget-check-chips step (a second, cross-target firmware build
+    # plus four emulator profile captures) pushed the job past 20 minutes on
+    # every run since — main's own post-merge run for #599 hit 20m21s, #597's
+    # runs hit 20m17s/20m15s, all cut mid heap-budget-check-chips with no
+    # step ever failing. Observed elapsed-to-that-step alone ranged
+    # 15m26s-18m23s across cache states, and the step itself was still
+    # running (not done) after 4m47s in the longest sample, so 20 min never
+    # had margin. 35 covers a fully cold run (cold reference-image builds +
+    # cold cross-target chip build + the profile captures) with headroom;
+    # see the PR for the timing table this is based on.
+    timeout-minutes: 35
     needs: detect-changes
     if: needs.detect-changes.outputs.emu_c6 == 'true'
     env:
@@ -902,12 +914,22 @@ jobs:
       # inside a detached worktree under lp2025/target/emu-ref/, which is
       # still under this workspace root, so sccache (content-addressed) still
       # covers them even though target/ itself is not cached.
+      #
+      # cache-on-failure (2026-09-08): this job's own post-cache save step
+      # was silently skipped on every run this job overran on, because
+      # rust-cache's default post-if is `success()` — a step failure or a
+      # timeout cancellation both make that false, so a cancelled run (see
+      # timeout-minutes above) never published this job's cache, and main
+      # ran cold on every subsequent run. cache-on-failure widens the
+      # post-if to `success() || cache-on-failure`, so a future overrun
+      # still saves what got built before the cutoff.
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: lp2025 -> target
           cache-targets: false
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
 
       - name: Install just
         uses: extractions/setup-just@v3
