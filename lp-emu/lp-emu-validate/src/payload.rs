@@ -2030,9 +2030,57 @@ mod tests {
             "`{last}` does not end with the sentinel `{}`",
             p.sentinel.marker()
         );
-        for other in ALL_PAYLOADS.iter().filter(|o| o.name != p.name) {
-            assert!(other.emulator_only.is_none(), "{}", other.name);
+    }
+
+    /// Refusing silicon is a claim about the payload, so every payload that
+    /// refuses must say something specific about ITSELF.
+    ///
+    /// This used to assert that `usb-host-absent` was the only one, which was
+    /// true and was not the rule — it was a census. There are two now, and
+    /// they refuse for different reasons: an absent host records nothing
+    /// because recording is what a host does, and a ROM-up boot cannot have a
+    /// silicon capture of its own because on silicon EVERY boot is a ROM-up
+    /// boot, so its silicon side is another payload's committed transcript.
+    /// Both are good reasons and neither is the other's. What the gate should
+    /// hold is that the reason is a sentence a reader can act on, not a flag —
+    /// and that no two payloads share one, which is what a copy-pasted
+    /// refusal would look like.
+    #[test]
+    fn every_emulator_only_payload_gives_its_own_reason() {
+        let refusing: Vec<&Payload> = ALL_PAYLOADS
+            .iter()
+            .filter(|p| p.emulator_only.is_some())
+            .collect();
+        assert!(
+            !refusing.is_empty(),
+            "at least `usb-host-absent` refuses silicon"
+        );
+        for p in &refusing {
+            let why = p.emulator_only.unwrap();
+            // A sentence, not a shrug. The runner prints this INSTEAD of
+            // producing an empty file and calling it evidence, so it is the
+            // whole of what the operator is told.
+            assert!(
+                why.len() > 60,
+                "payload `{}`'s refusal is too short to be a reason: {why}",
+                p.name
+            );
+            assert!(
+                !why.ends_with('.'),
+                "payload `{}`'s reason is a clause the runner completes, not a \
+                 sentence of its own: {why}",
+                p.name
+            );
         }
+        let mut reasons: Vec<&str> = refusing.iter().map(|p| p.emulator_only.unwrap()).collect();
+        reasons.sort_unstable();
+        let before = reasons.len();
+        reasons.dedup();
+        assert_eq!(
+            before,
+            reasons.len(),
+            "two payloads refuse silicon with the same words — one of them was copied"
+        );
     }
 
     /// The probe series against a line the machine actually printed
