@@ -1522,6 +1522,44 @@ mod tests {
         assert_eq!(bus.read_word(0x6000_001c).unwrap(), 0);
     }
 
+    /// `mmio_index`'s last-hit cache must never disagree with the sorted
+    /// binary search it shortcuts: every mapped block's first and last byte,
+    /// the first unmapped byte past it, and the gap before the next block —
+    /// with the cache pre-warmed on the *other* block each time, so a stale
+    /// neighbour would show up as a wrong answer instead of a lucky hit.
+    #[test]
+    fn mmio_last_hit_cache_agrees_with_the_slow_path_at_every_boundary() {
+        let mut bus = SocBus::new();
+        bus.add_peripheral(0x6000_0000, 0x100, Box::new(Probe::new("A")));
+        bus.add_peripheral(0x6000_1000, 0x100, Box::new(Probe::new("B")));
+
+        let probes: &[u32] = &[
+            0x6000_0000, // A's first byte
+            0x6000_00ff, // A's last byte
+            0x6000_0100, // first unmapped byte after A
+            0x6000_0fff, // last unmapped byte before B
+            0x6000_1000, // B's first byte
+            0x6000_10ff, // B's last byte
+            0x6000_1100, // first unmapped byte after B
+        ];
+
+        for &addr in probes {
+            // Warm the cache on the block the probe is *not* in, so a hit
+            // here can only come from the real decode, never a leftover.
+            let _ = bus.mmio_index(0x6000_0000);
+            let _ = bus.mmio_index(0x6000_1000);
+            let cached = bus.mmio_index(addr);
+
+            bus.last_mmio = None;
+            let slow = bus.mmio_index_slow(addr);
+
+            assert_eq!(
+                cached, slow,
+                "0x{addr:08x}: cache said {cached:?}, the slow path said {slow:?}"
+            );
+        }
+    }
+
     #[test]
     fn byte_and_halfword_lanes_reach_the_peripheral_intact() {
         // esp-println writes a word to USB_DEVICE; the ROM writes UART's
