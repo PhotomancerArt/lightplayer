@@ -1,5 +1,5 @@
-//! Finding the firmware ELF a boot test needs — without ever building it by
-//! accident.
+//! Finding the image a boot test needs — without ever building one by
+//! accident, and without two of them racing for the same file.
 //!
 //! `cargo test --workspace` must not start a firmware build. `fw-esp32c6` is
 //! a cross-target crate built with a nightly `-Zbuild-std` profile; a test
@@ -7,32 +7,67 @@
 //! run into a ten-minute one on every machine and every CI job that has
 //! nothing to do with the emulator (the director log's CI cost rule).
 //!
-//! So the resolution order, for an [`FwImage`], is:
+//! # One mechanism, three questions
 //!
-//! 1. `LP_EMU_C6_ELF_<SLUG>` — a path to an already-built ELF. `<SLUG>` is
-//!    the feature set upper-cased with `-` and `,` turned into `_`; the
-//!    shipped set is `ESP32C6_SERVER_RADIO`, the no-radio one
-//!    `ESP32C6_SERVER`. `LP_EMU_C6_ELF` with no slug is accepted as a
-//!    fallback for the shipped set.
-//! 2. This crate's own copy, `target/lp-emu-c6/<SLUG>-<SOURCE>/fw-esp32c6`,
-//!    left by an earlier build through step 3. `<SOURCE>` is a hash of the
-//!    **source tree that produced it** ([`source_key`]), because a copy keyed
-//!    by feature set alone is a stale ELF waiting to pass a gate: M6 P3
-//!    rebased onto P1b, whose firmware gained three statics, and
+//! There are three kinds of artefact here — a plain feature-set ELF
+//! ([`fw_esp32c6_image`]), a pinned reference ELF ([`reference_image`]) and
+//! the merged flash image beside it ([`merged_image`]) — and they used to
+//! carry three copies of the same careful sequence. They now share one:
+//! [`resolve`]. It answers three questions and nothing else does.
+//!
+//! **Which file?** In order:
+//!
+//! 1. `LP_EMU_C6_ELF_<SLUG>` / `LP_EMU_C6_REF_<SLUG>` — a path to an
+//!    already-built artefact, for a caller that has one. `<SLUG>` is the
+//!    feature set upper-cased with `-` and `,` turned into `_`; the shipped
+//!    set is `ESP32C6_SERVER_RADIO`. A variable pointing at a file that is
+//!    not there is an error, never a fall-through: it was asked for.
+//! 2. The **keyed path** this crate owns. For a feature-set ELF that is
+//!    `target/lp-emu-c6/<SLUG>-<SOURCE>/fw-esp32c6`, where `<SOURCE>` is a
+//!    hash of the source tree that produced it ([`source_key`]) — a copy
+//!    keyed by feature set alone is a stale ELF waiting to pass a gate. M6
+//!    P3 rebased onto P1b, whose firmware gained three statics, and
 //!    `host_absent` then failed looking for a symbol the cached ELF
-//!    predated. A changed source tree is a different key, so the copy is
-//!    missed and step 3 rebuilds. Where the key cannot be computed (no git),
-//!    the copy is not used at all — the trap is worse than the rebuild.
-//! 3. `LP_EMU_BUILD_FW=1` — and only then — run the build, and copy the
-//!    result to the per-slug path of step 2.
-//! 4. Otherwise `None`, and the caller prints a skip notice.
+//!    predated. Where the key cannot be computed (no git), the copy is not
+//!    used at all: the trap is worse than the rebuild. For a *reference*
+//!    image the key is the pinned commit itself, which is stronger — the
+//!    tree it is built from is a detached worktree at that commit.
+//! 3. Building it, and only with `LP_EMU_BUILD_FW=1`.
 //!
 //! The conventional `target/<triple>/release-esp32/fw-esp32c6` is **never**
 //! trusted: every feature set builds to that one path, so whatever is there
 //! is whatever was built last — P5 found the shipped-image test running
-//! against a no-radio build that way. (`cargo build` is cheap when the
-//! artifact is up to date, so step 3 costs a fraction of a second when
-//! nothing changed.)
+//! against a no-radio build that way.
+//!
+//! **May I build it?** Only if `LP_EMU_BUILD_FW=1`. Without it, [`resolve`]
+//! returns `Err` and the caller prints a [`skip_notice`] — a machine with no
+//! esp toolchain must not fail the suite. **With** it, a failed build is a
+//! failed *test*, not a skip, and [`resolve`] panics rather than returning
+//! `Err`. That distinction is load-bearing: returning `Err` for it once made
+//! three boot tests report `ok` in 0.2 s while building nothing at all
+//! (`git worktree add` was exiting 128 on a registered-but-deleted
+//! worktree, every test skipped, and the run was green and hollow).
+//!
+//! **Am I the only one building it?** Two locks, at two scopes, because a
+//! test binary is a process and a test is a thread:
+//!
+//! - [`BUILD_LOCK`], in this process. Three tests in one binary each resolve
+//!   an image on their own thread; with `LP_EMU_BUILD_FW=1` and nothing on
+//!   disk, each would start a build into the same output path. M5 P1's CI
+//!   run loaded a memfs image built that way and read a stack high-water
+//!   128 B off the pinned figure.
+//! - A `mkdir` lock inside `scripts/emu/build-reference-image.sh`, across
+//!   processes. `cargo test` runs each test *binary* as its own process, so
+//!   a mutex cannot see the other builder at all: `boot_idle`,
+//!   `flash_persistence` and `upload_walk` are three processes wanting one
+//!   image, and PR #567's run failed with `Rom(Elf("ELF parse failed"))` — a
+//!   reader that opened the file while another process was still copying
+//!   into it. The script also publishes by `mv`, so the file is never
+//!   half-written.
+//!
+//! Both are kept. The mutex stops N threads of one binary queueing on a file
+//! lock for a build the first of them already did; the file lock is the only
+//! thing that can see another process at all.
 //!
 //! `just test-emu-c6` is what sets the environment; a boot test is
 //! `#[ignore]`d so a bare `cargo test` never reaches it either way.
@@ -41,28 +76,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
 
-/// One firmware build at a time per process.
-///
-/// From M5 P1 (PR #569, `claude/emu-m5-p1-rmt-tx`), whose reasoning stands as
-/// written: three tests in one binary each resolve an image on their own
-/// thread, and with `LP_EMU_BUILD_FW=1` and no image on disk each would start
-/// `build-reference-image.sh` — into the **same** detached worktree and the
-/// same output path. Two `git worktree add`s race (the loser exits 128 and
-/// its test SKIPs), and two `cherry-pick -n` + `cargo build` + `cp` sequences
-/// race into one ELF: M5 P1's CI run loaded a memfs image built that way and
-/// read a stack high-water 128 B off the pinned figure.
-///
-/// M4 hit the same race one level out and it needed a second fix. `cargo
-/// test` runs each test *binary* as its own **process**, so a mutex cannot
-/// see the other builder at all: `boot_idle`, `flash_persistence` and
-/// `upload_walk` are three processes wanting one image, and PR #567's
-/// `Emulator C6 (x64)` run failed with `Rom(Elf("ELF parse failed: Invalid
-/// ELF header size or alignment"))` — a reader that opened the file while
-/// another process was still `cp`ing into it. The cross-process half lives in
-/// `scripts/emu/build-reference-image.sh`: a `mkdir` lock around the shared
-/// worktree, and a `mv` publish so the ELF is never half-written. This mutex
-/// is still worth keeping — it stops N threads of one binary from queueing on
-/// that file lock for a build the first of them already did.
+/// One artefact build at a time **per process**; the module docs say why
+/// there is a second lock across processes as well.
 static BUILD_LOCK: Mutex<()> = Mutex::new(());
 
 /// The profile and target `fw-esp32c6` is built with (`justfile`:
@@ -261,6 +276,75 @@ fn compute_source_key(root: &Path) -> Option<String> {
     Some(format!("{hash:016x}"))
 }
 
+/// **The one image-resolution mechanism.** Env var, then the keyed path,
+/// then — only with `LP_EMU_BUILD_FW=1` — `build`, under [`BUILD_LOCK`].
+///
+/// `what` names the artefact for the messages (`the fw-esp32c6 ELF for
+/// `ESP32C6_SERVER``). `env_vars` are tried in order and a variable that
+/// points at a missing file is an error rather than a fall-through: it was
+/// asked for. `how` completes the sentence a caller with no
+/// `LP_EMU_BUILD_FW=1` reads, and should say which recipe builds it.
+///
+/// `build` runs with the lock held and must leave a file at `path`. It
+/// returns `Err` only for a *setup* failure it wants reported as one; a
+/// build that runs and fails should panic, because `LP_EMU_BUILD_FW=1`
+/// asked for it and a failed build is a failed test. `resolve` panics too if
+/// `build` returns `Ok` without leaving the file, which is the case that
+/// used to pass silently.
+fn resolve(
+    what: &str,
+    env_vars: &[String],
+    path: &Path,
+    how: &str,
+    build: impl FnOnce() -> Result<(), String>,
+) -> Result<PathBuf, String> {
+    for var in env_vars {
+        if let Ok(from_env) = std::env::var(var) {
+            let from_env = PathBuf::from(from_env);
+            if from_env.is_file() {
+                return Ok(from_env);
+            }
+            return Err(format!(
+                "{var} points at {}, which is not a file",
+                from_env.display()
+            ));
+        }
+    }
+    if path.is_file() {
+        return Ok(path.to_path_buf());
+    }
+
+    // Serialise with every other build in this process, then look again: the
+    // thread that held the lock may have built this very artefact.
+    let _build = BUILD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    if path.is_file() {
+        return Ok(path.to_path_buf());
+    }
+
+    if std::env::var("LP_EMU_BUILD_FW").as_deref() != Ok("1") {
+        return Err(format!(
+            "no {what} at {}. Set LP_EMU_BUILD_FW=1 to build it ({how}), or point one of \
+             {} at an already-built one. Not built automatically: a workspace test run must \
+             not start a cross-target firmware build.",
+            path.display(),
+            if env_vars.is_empty() {
+                "no environment variable".to_string()
+            } else {
+                env_vars.join(", ")
+            }
+        ));
+    }
+
+    // Past this point a failure is NOT a skip — see the module docs.
+    build()?;
+    assert!(
+        path.is_file(),
+        "building {what} reported success but {} is missing",
+        path.display()
+    );
+    Ok(path.to_path_buf())
+}
+
 /// The `fw-esp32c6` ELF for the shipped feature set, or `None` with a
 /// reason. See [`fw_esp32c6_image`].
 pub fn fw_esp32c6_elf(features: &[&str]) -> Result<PathBuf, String> {
@@ -292,45 +376,49 @@ pub fn fw_esp32c6_image(image: &FwImage) -> Result<PathBuf, String> {
     if *image == FwImage::SHIPPED {
         vars.push("LP_EMU_C6_ELF".to_string());
     }
-    for var in vars {
-        if let Ok(path) = std::env::var(&var) {
-            let path = PathBuf::from(path);
-            if path.is_file() {
-                return Ok(path);
-            }
-            return Err(format!(
-                "{var} points at {}, which is not a file",
-                path.display()
-            ));
-        }
-    }
-
     let root = workspace_root().ok_or("could not find the workspace root")?;
-    let cached = cached_path(&root, image);
-    if let Some(cached) = &cached
-        && cached.is_file()
-    {
-        return Ok(cached.clone());
-    }
     let conventional = conventional_path(&root);
 
-    // Serialise with every other image build in this process, then look
-    // again: the thread that held the lock may have built this very image.
-    let _build = BUILD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(cached) = &cached
-        && cached.is_file()
-    {
-        return Ok(cached.clone());
-    }
+    // No source key means no keyed path, and then no cached copy at all —
+    // the module docs' rule. `resolve` still runs, so the env vars and the
+    // build gate behave the same; it just has nowhere to remember the
+    // result, and `build` hands back the conventional path instead.
+    let Some(cached) = cached_path(&root, image) else {
+        return resolve(
+            &format!("the fw-esp32c6 ELF for `{slug}`"),
+            &vars,
+            &conventional,
+            "`just test-emu-c6`",
+            || cargo_build_fw(&root, image),
+        );
+    };
 
-    if std::env::var("LP_EMU_BUILD_FW").as_deref() != Ok("1") {
-        return Err(format!(
-            "no fw-esp32c6 ELF for `{slug}`. Set LP_EMU_C6_ELF_{slug} to one, or LP_EMU_BUILD_FW=1 \
-             to build it (`just test-emu-c6`). Not built automatically: a workspace test run \
-             must not start a cross-target firmware build."
-        ));
-    }
+    resolve(
+        &format!("the fw-esp32c6 ELF for `{slug}`"),
+        &vars,
+        &cached,
+        "`just test-emu-c6`",
+        || {
+            cargo_build_fw(&root, image)?;
+            // Keep a copy only where it can be keyed to this source tree.
+            // Publish atomically, for the same reason the script does:
+            // another test *process* may be about to read this path.
+            if let Some(dir) = cached.parent() {
+                std::fs::create_dir_all(dir)
+                    .map_err(|e| format!("creating {}: {e}", dir.display()))?;
+            }
+            let staging = cached.with_extension("partial");
+            std::fs::copy(&conventional, &staging)
+                .map_err(|e| format!("copying the ELF to {}: {e}", staging.display()))?;
+            std::fs::rename(&staging, &cached)
+                .map_err(|e| format!("publishing the ELF at {}: {e}", cached.display()))
+        },
+    )
+}
 
+/// `cargo build` for one feature set, into the conventional path. Panics on
+/// a failed build: `LP_EMU_BUILD_FW=1` asked for this image.
+fn cargo_build_fw(root: &Path, image: &FwImage) -> Result<(), String> {
     let mut cmd = Command::new("cargo");
     cmd.current_dir(root.join("lp-fw/fw-esp32c6")).args([
         "build",
@@ -343,9 +431,6 @@ pub fn fw_esp32c6_image(image: &FwImage) -> Result<PathBuf, String> {
         cmd.arg("--no-default-features");
     }
     cmd.arg("--features").arg(image.features.join(","));
-    // Past this point a failure is not a skip — see `reference_image` for
-    // why (`LP_EMU_BUILD_FW=1` is a request, and a broken build is not a
-    // machine without a toolchain).
     let status = cmd
         .status()
         .unwrap_or_else(|e| panic!("running cargo build for fw-esp32c6: {e}"));
@@ -354,28 +439,13 @@ pub fn fw_esp32c6_image(image: &FwImage) -> Result<PathBuf, String> {
         "fw-esp32c6 build failed: {status} — LP_EMU_BUILD_FW=1 asked for this image, so a \
          failed build is a failed test, not a skip"
     );
+    let conventional = conventional_path(root);
     assert!(
         conventional.is_file(),
         "fw-esp32c6 built but {} is missing",
         conventional.display()
     );
-    // Keep a copy only when it can be keyed to this source tree. Without a
-    // key there is nothing to invalidate it, and an ELF nobody can date is
-    // exactly what let a gate pass against firmware it was not built from.
-    let Some(cached) = cached else {
-        return Ok(conventional);
-    };
-    if let Some(dir) = cached.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
-    }
-    // Publish atomically, for the same reason the script does: another test
-    // *process* may be about to read this path.
-    let staging = cached.with_extension("partial");
-    std::fs::copy(&conventional, &staging)
-        .map_err(|e| format!("copying the ELF to {}: {e}", staging.display()))?;
-    std::fs::rename(&staging, &cached)
-        .map_err(|e| format!("publishing the ELF at {}: {e}", cached.display()))?;
-    Ok(cached)
+    Ok(())
 }
 
 /// Print the reason a boot test is skipping, in one recognisable shape.
@@ -511,71 +581,38 @@ impl ReferenceImage {
     }
 }
 
-/// A reference image's ELF, or the reason there is none — the same order as
-/// [`fw_esp32c6_image`]: the env var, then the script's output path, then
-/// (only with `LP_EMU_BUILD_FW=1`) the script itself, which adds a detached
-/// worktree at the reference commit under `target/emu-ref/` and builds
-/// there. Never runs the script from a bare `cargo test`.
+/// A reference image's ELF, or the reason there is none — [`resolve`] with
+/// the pinned commit as the key, and `scripts/emu/build-reference-image.sh`
+/// as the build. The script adds a detached worktree at the reference commit
+/// under `target/emu-ref/` and builds there; it holds the cross-process lock
+/// the module docs describe, and publishes by `mv`.
 pub fn reference_image(image: &ReferenceImage) -> Result<PathBuf, String> {
-    let var = image.env_var();
-    if let Ok(path) = std::env::var(&var) {
-        let path = PathBuf::from(path);
-        if path.is_file() {
-            return Ok(path);
-        }
-        return Err(format!(
-            "{var} points at {}, which is not a file",
-            path.display()
-        ));
-    }
     let root = workspace_root().ok_or("could not find the workspace root")?;
     let path = image.conventional_path(&root);
-    if path.is_file() {
-        return Ok(path);
-    }
-    // The script shares one detached worktree between every reference
-    // image: never run it twice at once (see `BUILD_LOCK`). Across
-    // processes the script's own lock does it.
-    let _build = BUILD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    if path.is_file() {
-        return Ok(path);
-    }
-    if std::env::var("LP_EMU_BUILD_FW").as_deref() != Ok("1") {
-        return Err(format!(
-            "no reference image `{}` at {}. Set {var} to one, or LP_EMU_BUILD_FW=1 to build it \
-             with scripts/emu/build-reference-image.sh (`just test-emu-c6`).",
-            image.slug,
-            path.display()
-        ));
-    }
-    // Past this point a failure is **not** a skip.
-    //
-    // Every `Err` above means "there is no image here and you did not ask me
-    // to make one", which a caller rightly turns into a `skip_notice` — a
-    // machine without the esp toolchain must not fail the suite. But
-    // `LP_EMU_BUILD_FW=1` *is* asking, and a build that then breaks is a
-    // broken build. Returning `Err` for it made three boot tests report
-    // `ok` in 0.2 s while building nothing at all: `git worktree add` was
-    // exiting 128 on a registered-but-deleted worktree, every test skipped,
-    // and the run was green and hollow. A panic cannot be swallowed.
-    let status = Command::new(root.join("scripts/emu/build-reference-image.sh"))
-        .arg(image.features)
-        .arg(image.commit)
-        .arg(if image.spike { "e8d64eeff" } else { "none" })
-        .current_dir(&root)
-        .status()
-        .unwrap_or_else(|e| panic!("running build-reference-image.sh: {e}"));
-    assert!(
-        status.success(),
-        "build-reference-image.sh {} {} failed: {status} — LP_EMU_BUILD_FW=1 asked for this \
-         image, so a failed build is a failed test, not a skip",
-        image.features,
-        image.commit
-    );
-    if !path.is_file() {
-        panic!("the script ran but {} is missing", path.display());
-    }
-    Ok(path)
+    let slug = image.slug;
+    resolve(
+        &format!("the reference image `{slug}` at {}", image.commit),
+        &[image.env_var()],
+        &path,
+        "`just test-emu-c6`, which runs scripts/emu/build-reference-image.sh",
+        || {
+            let status = Command::new(root.join("scripts/emu/build-reference-image.sh"))
+                .arg(image.features)
+                .arg(image.commit)
+                .arg(if image.spike { "e8d64eeff" } else { "none" })
+                .current_dir(&root)
+                .status()
+                .unwrap_or_else(|e| panic!("running build-reference-image.sh: {e}"));
+            assert!(
+                status.success(),
+                "build-reference-image.sh {} {} failed: {status} — LP_EMU_BUILD_FW=1 asked for \
+                 this image, so a failed build is a failed test, not a skip",
+                image.features,
+                image.commit
+            );
+            Ok(())
+        },
+    )
 }
 
 #[cfg(test)]
@@ -624,6 +661,59 @@ mod tests {
             i.conventional_path(&root)
                 .ends_with("target/emu-ref/735af98ae-boot-idle-memfs-usb/fw-esp32c6")
         );
+    }
+
+    /// The two `Err` shapes `resolve` owes a caller, on a build that must
+    /// never start: a variable pointing nowhere is an error rather than a
+    /// fall-through, and a missing artefact names both the variables and
+    /// the recipe.
+    #[test]
+    fn resolve_refuses_a_bad_env_var_and_says_how_to_build_what_is_missing() {
+        let dir = std::env::temp_dir().join(format!("lp-emu-resolve-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        let missing = dir.join("not-there");
+        let present = dir.join("there");
+        std::fs::write(&present, b"x").expect("write");
+
+        // SAFETY: a scratch variable this test owns, set and removed here.
+        // The suite is single-threaded for these (`--test-threads` does not
+        // separate them), so the window is this function.
+        let var = format!("LP_EMU_C6_TEST_{}", std::process::id());
+        let never = || -> Result<(), String> { panic!("resolve must not build here") };
+
+        unsafe { std::env::set_var(&var, &missing) };
+        let err = resolve("the thing", &[var.clone()], &present, "just x", never)
+            .expect_err("a variable pointing at nothing is an error");
+        assert!(err.contains("which is not a file"), "{err}");
+
+        unsafe { std::env::set_var(&var, &present) };
+        assert_eq!(
+            resolve("the thing", &[var.clone()], &missing, "just x", never),
+            Ok(present.clone()),
+            "the variable wins, and its file is the answer"
+        );
+
+        unsafe { std::env::remove_var(&var) };
+        // Present on disk: no build, no variable, no lock contention.
+        assert_eq!(
+            resolve("the thing", &[var.clone()], &present, "just x", never),
+            Ok(present.clone())
+        );
+
+        // Absent, and nobody said `LP_EMU_BUILD_FW=1`.
+        let had = std::env::var("LP_EMU_BUILD_FW").ok();
+        unsafe { std::env::remove_var("LP_EMU_BUILD_FW") };
+        let err = resolve("the thing", &[var.clone()], &missing, "just x", never)
+            .expect_err("it must not build without being asked");
+        assert!(err.contains("no the thing at"), "{err}");
+        assert!(err.contains(&var), "the message names the variable: {err}");
+        assert!(err.contains("just x"), "and the recipe: {err}");
+        if let Some(v) = had {
+            unsafe { std::env::set_var("LP_EMU_BUILD_FW", v) };
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -733,50 +823,47 @@ mod tests {
 pub fn merged_image(image: &ReferenceImage) -> Result<PathBuf, String> {
     let elf = reference_image(image)?;
     let merged = elf.with_file_name("merged.bin");
-    if merged.is_file() {
-        return Ok(merged);
-    }
-    let _build = BUILD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    if merged.is_file() {
-        return Ok(merged);
-    }
     let root = workspace_root().ok_or("could not find the workspace root")?;
     let script = root.join("scripts/emu/build-merged-image.sh");
-    let status = Command::new(&script)
-        .arg(&elf)
-        .arg(&merged)
-        .status()
-        .map_err(|e| format!("running {}: {e}", script.display()))?;
-    // Past the ELF, a failure is not a skip: the ELF exists, so the Rust
-    // toolchain is here and only espflash can be missing or wrong — which
-    // is a thing to fix, not to pass around.
-    //
-    // 127 is called out by name because that is what a missing binary looks
-    // like, and because the first CI run of these tests showed exactly it
-    // with nothing else: the script's `set -euo pipefail` killed it at the
-    // command substitution that probed for espflash, before its own
-    // missing-tool message could print. The script names the tool now; this
-    // says where to look if a future one does not.
-    assert!(
-        status.success(),
-        "{} on {} failed: {status}{}",
-        script.display(),
-        elf.display(),
-        if status.code() == Some(127) {
-            "\n  127 is `command not found`. The script's own stderr, just above, \
-             names the tool it wanted; if it printed nothing, the script died \
-             before its check. CI installs espflash in the `emu-c6` job of \
-             .github/workflows/pre-merge.yml."
-        } else {
-            ""
-        }
-    );
-    assert!(
-        merged.is_file(),
-        "the script reported success but {} is missing",
-        merged.display()
-    );
-    Ok(merged)
+    resolve(
+        "the merged flash image",
+        &[],
+        &merged,
+        "`just test-emu-c6`",
+        || {
+            let status = Command::new(&script)
+                .arg(&elf)
+                .arg(&merged)
+                .status()
+                .map_err(|e| format!("running {}: {e}", script.display()))?;
+            // Past the ELF, a failure is not a skip: the ELF exists, so the
+            // Rust toolchain is here and only espflash can be missing or
+            // wrong — which is a thing to fix, not to pass around.
+            //
+            // 127 is called out by name because that is what a missing
+            // binary looks like, and because the first CI run of these tests
+            // showed exactly it with nothing else: the script's
+            // `set -euo pipefail` killed it at the command substitution that
+            // probed for espflash, before its own missing-tool message could
+            // print. The script names the tool now; this says where to look
+            // if a future one does not.
+            assert!(
+                status.success(),
+                "{} on {} failed: {status}{}",
+                script.display(),
+                elf.display(),
+                if status.code() == Some(127) {
+                    "\n  127 is `command not found`. The script's own stderr, just above, \
+                     names the tool it wanted; if it printed nothing, the script died \
+                     before its check. CI installs espflash in the `emu-c6` job of \
+                     .github/workflows/pre-merge.yml."
+                } else {
+                    ""
+                }
+            );
+            Ok(())
+        },
+    )
 }
 
 /// A committed transcript's text, by payload and configuration prefix.
