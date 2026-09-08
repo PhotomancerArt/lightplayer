@@ -827,8 +827,14 @@ jobs:
   # Same toolchain family as `firmware-size` (RISC-V, not Xtensa —
   # fw-esp32c6 is a RISC-V core, unlike the S3/v3 Xtensa firmware): the
   # pinned nightly with rust-src (build-std) plus the riscv32imac target.
-  # No espflash: this job builds and boots an emulator, never touches
-  # hardware.
+  #
+  # espflash IS needed here, which it was not until M7, and not for a port:
+  # `save-image --merge` is what builds the merged flash image the ROM-up
+  # boot reads, and the second-stage bootloader in that image comes out of
+  # espflash's own bundled resources. It is installed **prebuilt**
+  # (`cargo binstall`), unlike the three hardware-adjacent jobs that
+  # `cargo install` it from source — this is the job already closest to its
+  # ceiling, and a source build of espflash is minutes it does not have.
   #
   # Path-gated on `emu_c6` (narrower than `firmware`) rather than the full
   # device-image dependency closure — see that filter's comment in
@@ -899,6 +905,19 @@ jobs:
 
       - name: Install just
         uses: extractions/setup-just@v3
+
+      # Prebuilt, not `cargo install`: the same call the two deploy workflows
+      # make, pinned to the same 3.3.0. The version is load-bearing rather
+      # than incidental — espflash bundles the ESP-IDF second-stage
+      # bootloader, `build-merged-image.sh` refuses any other version, and
+      # the boot-log gate diffs that bootloader's output against a silicon
+      # capture of the same binary. A different espflash is a different
+      # program in the image.
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@v1.21.1
+
+      - name: Install espflash (prebuilt — the merged image's bootloader)
+        run: cargo binstall --no-confirm --locked espflash@3.3.0
 
       # The reference image is reproducible (L4): the same sha256 on this
       # runner and on a Mac, for the same pinned firmware commit. This step is

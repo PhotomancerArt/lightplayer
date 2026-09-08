@@ -747,14 +747,29 @@ pub fn merged_image(image: &ReferenceImage) -> Result<PathBuf, String> {
         .arg(&merged)
         .status()
         .map_err(|e| format!("running {}: {e}", script.display()))?;
-    // Past the ELF, a failure is not a skip: the ELF exists, so the
+    // Past the ELF, a failure is not a skip: the ELF exists, so the Rust
     // toolchain is here and only espflash can be missing or wrong — which
     // is a thing to fix, not to pass around.
+    //
+    // 127 is called out by name because that is what a missing binary looks
+    // like, and because the first CI run of these tests showed exactly it
+    // with nothing else: the script's `set -euo pipefail` killed it at the
+    // command substitution that probed for espflash, before its own
+    // missing-tool message could print. The script names the tool now; this
+    // says where to look if a future one does not.
     assert!(
         status.success(),
-        "{} on {} failed: {status}",
+        "{} on {} failed: {status}{}",
         script.display(),
-        elf.display()
+        elf.display(),
+        if status.code() == Some(127) {
+            "\n  127 is `command not found`. The script's own stderr, just above, \
+             names the tool it wanted; if it printed nothing, the script died \
+             before its check. CI installs espflash in the `emu-c6` job of \
+             .github/workflows/pre-merge.yml."
+        } else {
+            ""
+        }
     );
     assert!(
         merged.is_file(),

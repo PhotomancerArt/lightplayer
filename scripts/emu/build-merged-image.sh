@@ -43,12 +43,32 @@ partitions="$repo/lp-fw/fw-esp32c6/partitions.csv"
 # A newer one is not automatically wrong — it is a different bootloader, and
 # the gate that diffs a boot log has to be told so on purpose.
 want_espflash="${LP_EMU_ESPFLASH_VERSION:-3.3.0}"
-have_espflash="$(espflash --version 2>/dev/null | awk '{print $2}')"
+
+# `command -v` **before** running it, and the version read guarded against
+# `set -e`. Both halves are the fix for a real CI failure: the first version
+# of this check ran `espflash --version | awk …` inside a command
+# substitution, and with `set -euo pipefail` a missing binary makes that
+# pipeline exit 127 and takes the whole script with it — so the named error
+# below, which exists precisely to say what is missing, was unreachable in
+# the one case it was written for. `Emulator C6 (x64)` reported a bare
+# `exit status: 127` and nothing else.
+if ! command -v espflash >/dev/null 2>&1; then
+    echo "build-merged-image: MISSING TOOL — \`espflash\` is not on PATH." >&2
+    echo "  A merged image is the bootloader, the partition table and the app at" >&2
+    echo "  their flash offsets, and the second-stage bootloader comes out of" >&2
+    echo "  espflash's own bundled resources — there is nowhere else in this" >&2
+    echo "  repository to get it." >&2
+    echo "  Install it:  cargo binstall --no-confirm --locked espflash@$want_espflash" >&2
+    echo "           or:  cargo install espflash --version $want_espflash --locked" >&2
+    exit 127
+fi
+
+have_espflash="$(espflash --version 2>/dev/null | awk '{print $2}')" || have_espflash=""
 if [[ "$have_espflash" != "$want_espflash" ]]; then
-    echo "build-merged-image: espflash is $have_espflash, the transcripts' bootloader ships with $want_espflash." >&2
+    echo "build-merged-image: WRONG TOOL VERSION — espflash is ${have_espflash:-unreadable}, the transcripts' bootloader ships with $want_espflash." >&2
     echo "  A different espflash bundles a different second-stage bootloader, so the boot log" >&2
     echo "  would differ for a reason that has nothing to do with the emulator." >&2
-    echo "  Install it (\`cargo install espflash --version $want_espflash\`) or set" >&2
+    echo "  Install it (\`cargo binstall --no-confirm --locked espflash@$want_espflash\`) or set" >&2
     echo "  LP_EMU_ESPFLASH_VERSION to say the change is intended." >&2
     exit 1
 fi
