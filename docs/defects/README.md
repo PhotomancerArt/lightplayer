@@ -312,8 +312,22 @@ for `split-source-of-truth`/`config-masked-defect` above. Four in a month,
 now with a fix (`docs/adr/2026-09-02-fault-is-never-black.md`): watch whether
 a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 
+Saying it out loud once more: **`stand-in-divergence` has taken four
+entries since 2026-09-02**, all of them a host-side stand-in for a
+device — the ignored emu fuel probe, both classic-heap gate entries, and
+now the emulator's board manifest. The shape they share is that each
+stand-in is faithful in the dimension its tests measure (fuel
+accounting, heap capacity, pin and channel counts) and diverges in one
+nobody modelled. The 2026-09-07 entry adds an axis worth naming: its
+divergence is in an *identity* attribute rather than a capacity one, and
+the two present differently — a capacity divergence degrades visibly,
+an identity divergence resolves to nothing and reads as silence. Where a
+fake stands in for one member of a catalog of real things, booting a real
+member beats synthesising an average of them.
+
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| stand-in-divergence | 2026-09-07 | [virtual-board-lacks-project-labels](2026-09-07-virtual-board-lacks-project-labels.md) | **open** (not fixed by design — the board the emulator presents is the studio emulated-boards vision's question) | lp-fw/fw-emu boots `virtual_quad_rmt_gpio_board`, whose GPIO labels are `D7`–`D10`/`GPIOn`; zook-dome and 11 other bundled projects address `IO18`/`A01`/`D11`-class labels, so every open fails with `unknown Ws281x hardware endpoint` and the run measures a dark engine at exit 0 |
 | toolchain-miscompile | 2026-09-07 | [metal-drops-atomic-guarded-by-loop-exit-sum](2026-09-07-metal-drops-atomic-guarded-by-loop-exit-sum.md) | fixed | lp-gfx-wgpu loop_bound_pass → Metal: a conditional `atomicAdd` guarded by the loop's pre-store exit sum never executes; storing first and reading back fixes every shape |
 | contract-gap | 2026-09-06 | [gpu-tier-executes-unbounded-shaders](2026-09-06-gpu-tier-executes-unbounded-shaders.md) | fixed | lp-gfx-wgpu GPU tiers + catalog: `fault-demo`'s `while (true)` has no fuel meter on a GPU — the driver watchdog resets the device, corrupts sibling surfaces, and can take the OS down |
 | nondeterministic-capture | 2026-09-06 | [heap-budget-capture-truncated-by-cycle-cap](2026-09-06-heap-budget-capture-truncated-by-cycle-cap.md) | fixed | scripts/heap-budget-check.sh: the startup capture hit `--max-cycles` mid-compile and recorded the cut as a figure |
