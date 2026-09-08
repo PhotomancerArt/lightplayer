@@ -170,6 +170,10 @@ fn transcript(capture: &str, grade: &str) -> Transcript {
             .map(str::to_string)
             .collect(),
         firmware_dirty: None,
+        // The in-process gate runs the ELF it just built; the image digest is
+        // the runner's provenance for a *recorded* transcript, and there is
+        // nothing here for it to be the provenance of (L4).
+        firmware_sha256: None,
         silicon_rev: None,
         board: None,
         mac: None,
