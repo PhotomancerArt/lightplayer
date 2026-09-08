@@ -294,7 +294,7 @@ pre-M2 baseline this rung was designed against.
 `wasm32-wasip1` and runs in any browser under a small JavaScript WASI
 preview1 shim (D6: no `wasm32-unknown-unknown` entry point, zero source
 changes — the module is the CLI). `just bench-emu-web` builds it, stages it
-beside the two reference images plus a page and a dedicated-Worker runner,
+beside the four reference images plus a page and a dedicated-Worker runner,
 and serves it on the LAN (port via `scripts/dev-port.sh`, never pinned) so a
 phone can open it, run the sequence in the Worker, and upload its result
 JSON back to the Mac:

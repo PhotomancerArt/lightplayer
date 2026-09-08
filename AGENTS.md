@@ -718,11 +718,31 @@ just test-emu-c6                                # its gates (builds firmware)
 just heap-budget-check-chips                    # the firmware's own heap ledger, ratcheted
 just emu-c6 <elf> --strict-bus --timeout 6s     # the workshop binary, thirty flags
 just bench-emu-c6                               # its speed probe (an oracle, never a gate)
+scripts/emu/oracle-sweep.sh <bin-a> <bin-b>     # the identity oracle: uart + cycles + decoded FRAMES
 just bench-emu-c6-pgo                           # PGO recipe on top of the probe (opt-in, never a default build)
 just bench-emu-web                              # the same probe in a browser (wasip1 + JS WASI shim, LAN-served)
 just bench-emu-xt                               # the Xtensa core's probe (same rules)
 cargo run -p lp-cli -- validate run emu-m3 --config lp-emu:esp32c6:t1 --dry-run
 ```
+
+#### Which reference image you quote decides what you have measured
+
+`bench-emu-c6` runs four pinned images and they are **not** interchangeable.
+Same window, one loaded Mac, 2026-09-08, real time at t1:
+
+| image | rt | what it actually does |
+|---|---|---|
+| `boot-idle-memfs` | 6.0× | `wfi` with an EMPTY filesystem — no project, no shader |
+| `harness` | 0.6× (3.2× under M4's poll skip) | a shader COMPILE, and console-bound |
+| `render-basic` | 0.47× | the product's render loop: a real project, JIT'd shader per frame, RMT out |
+| `render-rocaille` | 0.53× | the same loop with four times the shader per frame |
+
+**Quote the render rows.** The ladder's headline numbers were taken on the
+other two for four milestones, and the render loop turns out to be about
+**twelve times slower** than the `boot-idle` image those numbers came from.
+The M4 poll skip is worth 5.6× on the harness and nothing — very slightly
+negative — on the render loop, which is the difference between accelerating
+the emulator and accelerating its logging.
 
 #### The walk, and what still needs a board
 

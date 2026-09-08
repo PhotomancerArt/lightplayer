@@ -5,10 +5,26 @@
 #   scripts/emu/bench-c6.sh --json out.json    # same, plus machine-readable
 #   scripts/emu/bench-c6.sh --bin <path> --no-promote --no-build
 #
-# Runs the two pinned reference images (`scripts/emu/build-reference-image.sh`,
+# Runs the four pinned reference images (`scripts/emu/build-reference-image.sh`,
 # building them if they are missing, same env-var convention as
-# `just test-emu-c6`: `LP_EMU_C6_REF_HARNESS`, `LP_EMU_C6_REF_BOOT_IDLE_MEMFS`)
-# at both time grades, twice each, and reports the best run of each pair:
+# `just test-emu-c6`: `LP_EMU_C6_REF_HARNESS`, `LP_EMU_C6_REF_BOOT_IDLE_MEMFS`,
+# `LP_EMU_C6_REF_RENDER_BASIC`, `LP_EMU_C6_REF_RENDER_ROCAILLE`) at both time
+# grades, twice each, and reports the best run of each pair:
+#
+# ⚠️ THE FOUR IMAGES ARE NOT INTERCHANGEABLE, and quoting one of them as "the
+# emulator's speed" is how this ladder spent four milestones measuring the
+# wrong thing. Measured 2026-09-08 on one loaded Mac, same window:
+#
+#   boot-idle-memfs   6.0x real time   — `wfi` with no project. Idle.
+#   harness           0.6x / 3.2x      — shader COMPILE, and console-bound:
+#                                        the M4 poll skip moves it 5.6x.
+#   render-basic      0.47x            — the product's render loop. The skip
+#                                        is worth nothing here, and slightly
+#                                        NEGATIVE at t1.
+#   render-rocaille   0.53x            — the same loop, 4x the shader.
+#
+# The render-loop rows are the ones the product cares about (M5 P0). They are
+# ~12x slower than boot-idle and they are the number to quote.
 #
 #   user s        USER CPU seconds — the only number that survives a busy
 #                 machine. Compare THESE across binaries.
