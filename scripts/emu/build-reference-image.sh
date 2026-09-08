@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 # Build the reference fw-esp32c6 image the committed C6 transcripts came from.
 #
-#   scripts/emu/build-reference-image.sh <features> [<commit>=d6cfaa205] [<spike>=e8d64eeff]
+#   scripts/emu/build-reference-image.sh [--verify] <features> [<commit>=d6cfaa205] [<spike>=e8d64eeff]
 #   → target/emu-ref/<commit>-<slug>/fw-esp32c6   (ELF; sha256 printed and written beside it)
+#
+# The image is REPRODUCIBLE: the same bytes on every host and every run (see
+# the determinism section below for the three causes that were not). With
+# `--verify` the recipe proves it — it builds the image a second time, in a
+# second cold worktree at a different path, and fails if the sha256s differ.
 #
 # The silicon transcript under lp-emu/transcripts/esp32c6/shader-compile-stress/
 # and the spike report's §5.1 numbers are at firmware commit d6cfaa2051ae with
@@ -30,7 +35,13 @@
 # how the spike built them (§5.4: "defaults on").
 set -euo pipefail
 
-features="${1:?usage: build-reference-image.sh <features> [<commit>] [<spike>]}"
+verify=0
+if [[ "${1:-}" == "--verify" ]]; then
+    verify=1
+    shift
+fi
+
+features="${1:?usage: build-reference-image.sh [--verify] <features> [<commit>] [<spike>]}"
 commit="${2:-d6cfaa205}"
 spike="${3:-e8d64eeff}"
 
@@ -70,7 +81,7 @@ lock="$repo/target/emu-ref/.build.lock"
 mkdir -p "$(dirname "$lock")"
 waited=0
 until mkdir "$lock" 2>/dev/null; do
-    if [[ -f "$elf" ]]; then
+    if [[ -f "$elf" ]] && (( ! verify )); then
         echo "build-reference-image: another process published $elf while we waited"
         exit 0
     fi
@@ -83,8 +94,9 @@ until mkdir "$lock" 2>/dev/null; do
 done
 trap 'rmdir "$lock" 2>/dev/null || true' EXIT
 # Re-check under the lock: the process we queued behind may have built
-# exactly this image.
-if [[ -f "$elf" ]]; then
+# exactly this image. `--verify` is a question about the recipe rather than a
+# request for a file, so it is never answered by a file that is already there.
+if [[ -f "$elf" ]] && (( ! verify )); then
     echo "build-reference-image: $elf was built while we waited for the lock"
     exit 0
 fi
@@ -93,33 +105,6 @@ full_commit="$(git -C "$repo" rev-parse "$commit")"
 spike_parent="$(git -C "$repo" rev-parse "$spike^")"
 if [[ "$spike_parent" != "$full_commit" ]]; then
     echo "build-reference-image: $spike's parent is $spike_parent, not $commit — the cherry-pick would not be the spike's tree" >&2
-    exit 1
-fi
-
-if [[ ! -d "$wt" ]]; then
-    mkdir -p "$(dirname "$wt")"
-    # `target/emu-ref` is a build directory and gets deleted — by
-    # `cargo clean`, by a disk sweep, by anyone reproducing a race from a
-    # clean cache. The worktree stays *registered* when its directory goes,
-    # and `git worktree add` then refuses with exit 128 ("a missing but
-    # already registered worktree"). That is not a build failure worth
-    # reporting; it is bookkeeping, and pruning is what clears it.
-    git -C "$repo" worktree prune
-    git -C "$repo" worktree add --detach "$wt" "$full_commit"
-    # The six firmware files of spike_uart0_link, staged and uncommitted.
-    git -C "$wt" cherry-pick -n "$spike"
-    # build.rs reads `git status --porcelain` for the hello's `dirty` flag;
-    # the cherry-pick leaves the tree dirty exactly as the original was.
-fi
-
-head_now="$(git -C "$wt" rev-parse HEAD)"
-if [[ "$head_now" != "$full_commit" ]]; then
-    echo "build-reference-image: worktree $wt is at $head_now, expected $full_commit — remove it and re-run" >&2
-    exit 1
-fi
-if ! git -C "$wt" diff --quiet --cached -- lp-fw/fw-esp32c6/src/serial/spike_uart0.rs 2>/dev/null \
-   && [[ ! -f "$wt/lp-fw/fw-esp32c6/src/serial/spike_uart0.rs" ]]; then
-    echo "build-reference-image: the spike feature is not applied in $wt" >&2
     exit 1
 fi
 
@@ -163,12 +148,73 @@ fi
 # joins with them. This tree is a pinned build scratch, never the shipped
 # source, and the shipped image keeps its real build stamp and its real
 # paths: nothing here changes what a `just build-fw-esp32c6` produces.
+#
+#   3. A LINKER SCRIPT RACE, the one `fw-esp32c6/build.rs` warns about in
+#      capitals. That script patches esp-hal's generated `rodata.x` to merge
+#      `.rodata_desc` and `.rodata` into one output section (the ESP32
+#      bootloader maps at most two ROM segments), and cargo gives it no
+#      ordering edge against esp-hal's own script — esp-hal has no `links`
+#      key. In a FRESH target dir ours runs first, finds no
+#      `esp-hal-*/out` to patch, and the link takes esp-hal's pristine
+#      script: an image with `.rodata_merge` and `.rodata.wifi` as their own
+#      sections. Every later build in that tree re-patches and links the
+#      merged layout. So the first build of a cold tree is a different image
+#      from the second — and CI's tree is always cold. Measured here: a
+#      fresh worktree's first build and its second differ by 108 B and by
+#      the whole `.rodata` layout, and the second matches this host's other
+#      worktree byte for byte.
+#
+# Cargo's `-C metadata` is NOT one of the causes — measured: the same package
+# built at two different absolute paths gets the same metadata hash, so no
+# mangled symbol moves with the directory.
+#
+# The remap flags go in a `.cargo/config.toml` written at the worktree root
+# rather than in `RUSTFLAGS`, because the env var REPLACES
+# `lp-fw/fw-esp32c6/.cargo/config.toml`'s target rustflags — `-Tlinkall.x`,
+# `panic=abort`, the flash-budget `-Z` flags — while a second config file
+# joins with them. This tree is a pinned build scratch, never the shipped
+# source, and the shipped image keeps its real build stamp and its real
+# paths: nothing here changes what a `just build-fw-esp32c6` produces.
 export SOURCE_DATE_EPOCH=0
 export CARGO_INCREMENTAL=0
 cargo_home="${CARGO_HOME:-$HOME/.cargo}"
 sysroot="$(rustc --print sysroot)"
-mkdir -p "$wt/.cargo"
-cat > "$wt/.cargo/config.toml" <<CONFIG
+
+# The pinned tree at `$1`: created if missing, checked if it is already there,
+# and given the remap config for its own path.
+prepare_worktree() {
+    local wt="$1"
+    if [[ ! -d "$wt" ]]; then
+        mkdir -p "$(dirname "$wt")"
+        # `target/emu-ref` is a build directory and gets deleted — by
+        # `cargo clean`, by a disk sweep, by anyone reproducing a race from a
+        # clean cache. The worktree stays *registered* when its directory
+        # goes, and `git worktree add` then refuses with exit 128 ("a missing
+        # but already registered worktree"). That is not a build failure worth
+        # reporting; it is bookkeeping, and pruning is what clears it.
+        git -C "$repo" worktree prune
+        git -C "$repo" worktree add --detach "$wt" "$full_commit"
+        # The six firmware files of spike_uart0_link, staged and uncommitted.
+        git -C "$wt" cherry-pick -n "$spike"
+        # build.rs reads `git status --porcelain` for the hello's `dirty`
+        # flag; the cherry-pick leaves the tree dirty exactly as the
+        # original was.
+    fi
+
+    local head_now
+    head_now="$(git -C "$wt" rev-parse HEAD)"
+    if [[ "$head_now" != "$full_commit" ]]; then
+        echo "build-reference-image: worktree $wt is at $head_now, expected $full_commit — remove it and re-run" >&2
+        exit 1
+    fi
+    if ! git -C "$wt" diff --quiet --cached -- lp-fw/fw-esp32c6/src/serial/spike_uart0.rs 2>/dev/null \
+       && [[ ! -f "$wt/lp-fw/fw-esp32c6/src/serial/spike_uart0.rs" ]]; then
+        echo "build-reference-image: the spike feature is not applied in $wt" >&2
+        exit 1
+    fi
+
+    mkdir -p "$wt/.cargo"
+    cat > "$wt/.cargo/config.toml" <<CONFIG
 # Written by scripts/emu/build-reference-image.sh — see the determinism
 # comment there. Joins with lp-fw/fw-esp32c6/.cargo/config.toml's rustflags
 # (cargo concatenates arrays across config files); replacing them would drop
@@ -180,39 +226,55 @@ rustflags = [
   "--remap-path-prefix=$sysroot=/rustc",
 ]
 CONFIG
-
-echo "build-reference-image: $features at $commit (+$spike) → $out_dir"
-# The feature comment in Cargo.toml says `touch src/main.rs` after flipping
-# the spike feature; cargo's fingerprint covers features, but a touch is
-# cheap insurance against a stale build.rs provenance.
-touch "$wt/lp-fw/fw-esp32c6/src/main.rs"
-build() {
-    (
-        cd "$wt/lp-fw/fw-esp32c6"
-        cargo build --target "$target" --profile "$profile" --features "$features"
-    )
 }
-built="$wt/target/$target/$profile/fw-esp32c6"
-build
 
-# The app descriptor's stamp is only re-read when that crate's build script
-# re-runs, and cargo re-runs a build script for its own reasons — not because
-# an environment variable it never declared changed. A worktree whose target
-# dir predates this recipe would keep a real timestamp and quietly stay
-# unreproducible, so check the artefact rather than trusting the environment,
-# and heal it once if it is stale.
-if ! LC_ALL=C grep -aq '1970-01-01' "$built"; then
-    echo "build-reference-image: the app descriptor is not stamped at the epoch — rebuilding it"
-    (
-        cd "$wt/lp-fw/fw-esp32c6"
-        cargo clean -p esp-bootloader-esp-idf --target "$target" --profile "$profile"
-    )
-    build
-    LC_ALL=C grep -aq '1970-01-01' "$built" || {
-        echo "build-reference-image: SOURCE_DATE_EPOCH did not reach the app descriptor" >&2
-        exit 5
-    }
-fi
+# Why an image is not the canonical one, one reason per line; silent when it
+# is. Both checks read the artefact rather than trusting the environment,
+# because both causes are cargo deciding not to re-run a build script.
+image_drift() {
+    local elf="$1"
+    LC_ALL=C grep -aq '1970-01-01' "$elf" \
+        || echo "the app descriptor is not stamped at SOURCE_DATE_EPOCH"
+    ! LC_ALL=C grep -aq '\.rodata_merge' "$elf" \
+        || echo "esp-hal's pristine rodata.x won the link (build.rs's patch missed the first build)"
+}
+
+# Build the image in `$1` and leave it at `$1/target/<triple>/<profile>/`.
+# Builds a second time if the first artefact drifted: the `.rodata_merge`
+# case is cured by any later build (build.rs re-runs because it watches a
+# path that does not exist yet and then finds esp-hal's out dir), and the
+# stamp case by cleaning the one package that carries it.
+build_image() {
+    local wt="$1"
+    local built="$wt/target/$target/$profile/fw-esp32c6"
+    # The feature comment in Cargo.toml says `touch src/main.rs` after
+    # flipping the spike feature; cargo's fingerprint covers features, but a
+    # touch is cheap insurance against a stale build.rs provenance.
+    touch "$wt/lp-fw/fw-esp32c6/src/main.rs"
+    ( cd "$wt/lp-fw/fw-esp32c6" && cargo build --target "$target" --profile "$profile" --features "$features" )
+
+    local drift
+    drift="$(image_drift "$built")"
+    if [[ -n "$drift" ]]; then
+        echo "build-reference-image: rebuilding — $drift" | tr '\n' ';'
+        echo
+        if [[ "$drift" == *"app descriptor"* ]]; then
+            ( cd "$wt/lp-fw/fw-esp32c6" && cargo clean -p esp-bootloader-esp-idf --target "$target" --profile "$profile" )
+        fi
+        touch "$wt/lp-fw/fw-esp32c6/src/main.rs"
+        ( cd "$wt/lp-fw/fw-esp32c6" && cargo build --target "$target" --profile "$profile" --features "$features" )
+        drift="$(image_drift "$built")"
+        if [[ -n "$drift" ]]; then
+            echo "build-reference-image: the image is still not reproducible after a second build: $drift" >&2
+            exit 5
+        fi
+    fi
+}
+
+prepare_worktree "$wt"
+echo "build-reference-image: $features at $commit (+$spike) → $out_dir"
+build_image "$wt"
+built="$wt/target/$target/$profile/fw-esp32c6"
 
 # Publish atomically. A reader outside the lock — a test binary that found
 # the file present and went straight to it — must see either no file or a
@@ -226,4 +288,34 @@ cp "$built" "$out_dir/.fw-esp32c6.partial"
 )
 echo "features=$features commit=$full_commit spike=$spike" > "$out_dir/PROVENANCE"
 mv "$out_dir/.fw-esp32c6.partial" "$elf"
+sha="$(shasum -a 256 "$elf" | cut -d' ' -f1)"
 echo "build-reference-image: done → $elf"
+echo "build-reference-image: sha256 $sha"
+
+# ---------------------------------------------------------------------------
+# `--verify`: build it again somewhere else and insist on the same bytes.
+#
+# A second detached worktree, deliberately at a LONGER path than the first,
+# because every path cause found so far showed up as a length difference in
+# `.debug_str` — two trees whose names are the same length would hide a
+# remap that silently stopped matching. Its target dir is cold, so this also
+# re-runs the first-build linker race above: a `--verify` pass is the whole
+# claim, "this recipe gives the same image on a cold tree at another path".
+#
+# The cost is a second full firmware build (~2.5 min on an M2 Max, cold), so
+# CI runs it on one image, not all three.
+if (( verify )); then
+    wt2="$repo/target/emu-ref/wt-$commit-verify-$slug"
+    echo "build-reference-image: --verify — a second build at $wt2"
+    prepare_worktree "$wt2"
+    build_image "$wt2"
+    built2="$wt2/target/$target/$profile/fw-esp32c6"
+    sha2="$(shasum -a 256 "$built2" | cut -d' ' -f1)"
+    echo "build-reference-image: verify sha256 $sha2"
+    if [[ "$sha" != "$sha2" ]]; then
+        echo "build-reference-image: NOT REPRODUCIBLE — $elf is $sha but a second build at $wt2 is $sha2" >&2
+        echo "build-reference-image: sizes $(wc -c < "$elf") and $(wc -c < "$built2") bytes; diff their sections and their strings" >&2
+        exit 6
+    fi
+    echo "build-reference-image: reproducible — two builds, two directories, one sha256"
+fi
