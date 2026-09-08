@@ -143,7 +143,22 @@ impl ValidateConfig {
         }
     }
 
+    /// The payloads a set names — or the one payload, when `set` is a
+    /// payload's own name and no set has that name.
+    ///
+    /// The fallback is not a convenience. M6 records `emu-m6`'s four
+    /// transcripts against **two** images (sitting 1's commit for the
+    /// DD30 arbitration, main's for the three scenarios whose vehicle P1b
+    /// added afterwards), and `record` takes one `--commit` per invocation
+    /// because the commit is provenance, not a guess. Without this a set of
+    /// four would have to be split into sets of one in `validate.toml`,
+    /// which would make the policy file a workaround for the CLI.
     pub fn payloads_in(&self, set: &str) -> Result<Vec<&'static Payload>> {
+        if self.sets.iter().all(|s| s.name != set)
+            && let Ok(one) = find_payload(set)
+        {
+            return Ok(vec![one]);
+        }
         self.set(set)?
             .payloads
             .iter()

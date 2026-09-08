@@ -268,7 +268,7 @@ milestone owns.
 | `IO_MUX` | `0x6009_0000` | accept | all 31 pads at reset `0x0800` |
 | `PMU`, `LP_AON`, `LP_APM`, `LP_APM0`, `HP_APM`, `MODEM_SYSCON`, `MODEM_LPCON`, `APB_SARADC`, `HP_SYS`, `TEE`, `LP_TEE`, `LP_IO`, `LP_TIMER`, `EXTMEM` | — | accept | written by `esp_hal::init`, read back as written; `LP_AON.store1` carries the calibration value |
 | `UART0`, `UART1` | `0x6000_0000/1000` | modelled | 128-byte FIFOs; the shifter drains **at the configured baud in emulated time** (PCR clock line × `clkdiv`; reset `clkdiv = 347 + 3/16` = 115,200 from XTAL, *modeled* "as the ROM boot leaves it"); `rxfifo_full`/`txfifo_empty` as levels (`>`/`<` the `conf1` thresholds, per the TRM), `rxfifo_tout` in bit-times, `tx_done`, `rxfifo_ovf`, `reg_update` pulse; `at_cmd_char_det` never fires (stated, not modelled); sources 43/44. See "UART0 and the outside" |
-| `USB_DEVICE` | `0x6000_F000` | modelled (M6 P2) | the host's side in three states (`--usb-host absent\|attached\|attached-idle`, the transitions for P3's control channel): **absent** — `sof` never, `free` = 0 for ever after the first `wr_done`, nothing arrives; **attached, port closed** — `int_raw.sof` every 1 ms (*documented*), `fram_num` counts, a committed IN packet is held until the port opens; **attached, draining** — the packet reaches the `usb-sj` stream 100 µs after `wr_done` (*modeled*), `free` returns, `serial_in_empty` and `in_token_rec_in_ep1` rise; host bytes land as ≤ 64 B OUT packets, one resident at a time (*modeled*), `avail` + `serial_out_recv_pkt` + `out_ep1_st.wr_addr/rec_data_cnt`. The DTR/RTS dance → `chip_rst` bit 0 + `MachineRequest::Reset { strap }`. Per-register grades: `fram_num`, `conf0` *documented*, the rest *modeled* (the file header's table; `--strict-grade`). The PCR reset of the block is **not** modelled (stated). Source 48 |
+| `USB_DEVICE` | `0x6000_F000` | measured on its data path (M6) | the host's side in three states (`--usb-host absent\|attached\|attached-idle`, the transitions for P3's control channel): **absent** — `sof` never, `free` = 0 for ever after the first `wr_done`, nothing arrives; **attached, port closed** — `int_raw.sof` every 1 ms (*documented*), `fram_num` counts, a committed IN packet is held until the port opens; **attached, draining** — the packet reaches the `usb-sj` stream 100 µs after `wr_done` (*modeled*), `free` returns, `serial_in_empty` and `in_token_rec_in_ep1` rise; host bytes land as ≤ 64 B OUT packets, one resident at a time (*modeled*), `avail` + `serial_out_recv_pkt` + `out_ep1_st.wr_addr/rec_data_cnt`. The DTR/RTS dance → `chip_rst` bit 0 + `MachineRequest::Reset { strap }`. Per-register grades (the file header's table; `--strict-grade`): `ep1`, `ep1_conf` and the four `int_*` registers *measured* — four committed transcripts cover them, and the bits they cover are named there — `fram_num` and `conf0` *documented*, the twenty listed below *modeled*. The PCR reset of the block is **not** modelled (stated). Source 48 |
 | `SPI1` | `0x6000_3000` | modelled | **the legacy flash controller**, against a `flash::FlashImage`: `flash_rdid` (esp-storage's own size probe), the `usr` engine (command/address/dummy/data phases from `user`/`user1`/`user2`/`addr`/`w0..w15`), the dedicated `flash_read`/`pp`/`se`/`be`/`ce`/`wren`/`wrdi`/`rdsr`/`wrsr` bits, and a real status register (WIP always clear, WEL set by `wren` and consumed by a program or erase). Every trigger self-clears and `mst_st` reads idle, which is what `Wait_SPI_Idle` waits for. **Every PAC reset value is carried**, `user = 0x8000_0000` above all: the mask ROM's read path never sets `usr_command` because reset already did |
 | `SPI0` | `0x6000_2000` | modelled | the cache controller's block: `mmu_item_content`/`mmu_item_index`/`mmu_power_ctrl` drive `cache::CacheMmu`; the rest accept, with the PAC's reset values |
 | `RMT` | `0x6000_6000` | modelled (M5 P1) | the PAC register file, the **192-word RAM** at `+0x400` (word/half/byte lanes, read live by the engine), and two TX engines on the scheduler: a word's two pulses at PCR's function clock (`rmt_sclk_conf` × `div_cnt`; one tick = 2 cycles, a WS2812 bit 200, the latch 48,000 — exact integer arithmetic over absolute ticks, anchored on the previous due cycle), **`tx_lim` as a position** (`== window_words` is the wrap), `mem_tx_wrap_en`, the all-zero STOP → `tx_end`, wrap off → `tx_err` + `mem_empty`, `int_st = raw & ena`, `int_clr` w1c, source 49. *Modeled* (discovery §10.1–5, each named where made): `mem_raddr_ex` = the next word to fetch; the strobes act at `conf_update` (a `tx_start` with no `conf_update` in the slice is acted on at the slice boundary, noted); the half-level end marker; `tx_stop` raises no `tx_end`; `ref_cnt_rst` accepted; no clock stalls the engine (1 ms poll resumes it), FOSC refused. RX channels 2/3 accept-and-remember (`rx_en` is noted once); the APB FIFO is not modelled. The waveform's pad is P2's fabric; until then `rmt_pulses`/`rmt_words`/`rmt_frames_ended` on the machine are the observation. See "The RMT chase" |
@@ -410,17 +410,50 @@ with no host, dropped into a committed FIFO, dropped by a bus reset).
 `--probe esp_println::serial_jtag_printer::TIMED_OUT@3000` reads the
 printer's latch in any state.
 
-The block carries the first **per-register grade table** (`fram_num` and
-`conf0` *documented*; everything else *modeled* until P4 promotes what the
-transcripts cover). `--strict-grade documented` refuses the first access to
-a register below that grade — on this machine that is the first MMIO access
-of the boot, since every accept table is *modeled* — and reports it as a
-strict-bus stop with the grade in the message. The level is a claim about
-what the run trusts, not a switch that makes the machine more accurate.
+#### The per-register grades, and what `--strict-grade` means
+
+The block carries the chip's first **per-register grade table**, and M6 P4
+promoted the half of it the transcripts cover:
+
+| grade | registers |
+|---|---|
+| `measured` | `ep1`, `ep1_conf`, `int_raw`, `int_st`, `int_ena`, `int_clr` |
+| `documented` | `fram_num` (the USB full-speed frame is 1 ms), `conf0` (the PAC's bit map; the shipped image never writes it on the C6) |
+| `modeled` | `test`, `jfifo_st`, `in_ep0_st`, `in_ep1_st`, `in_ep2_st`, `in_ep3_st`, `out_ep0_st`, `out_ep1_st`, `out_ep2_st`, `misc_conf`, `mem_conf`, `chip_rst`, `set_line_code_w0`, `set_line_code_w1`, `get_line_code_w0`, `get_line_code_w1`, `config_update`, `ser_afifo_config`, `bus_reset_st`, `date` |
+
+The four transcripts under `lp-emu/transcripts/esp32c6/` are what moved the
+first row: SOF present while attached and gone when the cable is out, `free`
+returning only once a host has drained the packet, `serial_in_empty`
+completing esp-hal's write future, `serial_out_recv_pkt` on the host's own
+bytes. Three of those registers are measured **bit by bit** — bits 1–3 of
+the `int_*` group and bits 0–2 of `ep1_conf` — and the file header says which
+bits and which are not; grading them with the register they live in is
+coarser than the evidence, and that is written down rather than smoothed
+over.
+
+The third row has one reason for all twenty: **neither esp-hal 1.1.1 nor
+esp-println 0.17 touches them on the C6**. Their reset values are the PAC's
+and reads answer them; nothing behind them is modelled. So the shipped image
+runs 5.5 s attached under `--strict-grade documented` and crosses none of
+them (`tests/usb_attached.rs`, G4-4), and a change that starts reading one
+stops the run with the register's name.
+
+**The level applies to the blocks that publish a table**, and today that is
+this one. A block with no table is passed over, because "nobody graded this
+block" is not the same statement as "this block is modelled" — conflating
+them made `documented` stop at the first MMIO access of any boot, on an
+accept table nobody had said anything about, and the flag then measured how
+much of the chip had been graded rather than what the run was allowed to
+trust. The run report names the blocks it checked (`strict-grade documented:
+checked 1 (USB_DEVICE)`), so an ungraded block reads as an unanswered
+question and never as a pass. Grading the accept tables is the
+honest-peripheral policy's next milestone, not a gap this flag hides.
 
 Not modelled, stated: the PCR reset of the block on esp-hal's first enable
-(whether it re-enumerates on silicon is the sitting-1 transcript's to say),
-the JTAG channel, line coding, the bus-error and zero-payload bits.
+(sitting 1's attached-host transcript shows both the `[INIT]` lines and the
+hello arriving on one port open, which says it does **not** re-enumerate on
+silicon — so the seam stays unbuilt, with the evidence recorded), the JTAG
+channel, line coding, the bus-error and zero-payload bits.
 
 #### Driving the host from outside (M6 P3)
 
@@ -510,21 +543,32 @@ evidence beside it, run again. The boot asked five times —
 
 — and then said hello. The list is `wifi_stub::OVERRIDES`; a unit test walks
 it and refuses an entry without a reason. Interrupt sources 0–3 are never
-raised: nothing here receives, and the `WIFI RX config` line is where the
-virtual-air work (M6) will start.
+raised: nothing here receives, and the `WIFI RX config` line is where
+virtual-air work would start.
 
 ## Reference images and the gates
 
-The committed silicon transcript and the spike report's figures are at
-firmware `d6cfaa205` with the `spike_uart0_link` feature applied as a dirty
-tree. `scripts/emu/build-reference-image.sh <features>` reproduces that
-tree in a detached worktree under `target/emu-ref/` and builds it there:
+The M2/M3 silicon transcript and the spike report's figures are at firmware
+`d6cfaa205` with the `spike_uart0_link` feature applied as a dirty tree.
+`scripts/emu/build-reference-image.sh <features> [<commit>] [<spike>|none]`
+reproduces a tree in a detached worktree under `target/emu-ref/` and builds
+it there:
 
 ```bash
 scripts/emu/build-reference-image.sh test_shader_compile_incremental,esp32c6,spike_uart0_link   # harness
 scripts/emu/build-reference-image.sh esp32c6,server,radio,spike_uart0_link,memory_fs            # boot-idle-memfs
 scripts/emu/build-reference-image.sh esp32c6,server,radio,spike_uart0_link                      # boot-idle (flash-backed)
+# M6: the shipped image over its OWN link, at the commit the desk board ran
+scripts/emu/build-reference-image.sh esp32c6,server,radio,memory_fs 735af98ae none
 ```
+
+`none` (or `--no-spike`) in the third slot builds the commit's own tree with
+no cherry-pick at all, and it is what M6 needs: the shipped image speaks its
+real USB-Serial-JTAG link, so the UART0 workaround would not merely be
+unnecessary, it would be a different image — and the DD30 arbitration is only
+an arbitration if both sides are the same bytes. A no-spike build leaves the
+worktree clean, so `build.rs` stamps `dirty: false` the way a silicon flash
+of that commit does.
 
 The ELF's sha256 is written beside it. It is **per worktree** — the build
 path is in the binary — so two checkouts' images differ in bytes while the

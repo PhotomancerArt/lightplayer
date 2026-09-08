@@ -164,10 +164,47 @@ pub const ALL_CHECKS: &[FwCheckConfig] = &[
         // (`lp-emu-validate`'s `Payload::capture`), because it is a fact
         // about the operator, not about the firmware.
         firmware_features: &["server", "radio"],
-        // The first stack heartbeat AFTER the reader attaches. The ones
-        // before it went into a closed port and are gone.
-        done_marker: Some("[stack] heartbeat: high-water"),
+        // The recovery stamp, in the first heartbeat delivered after the
+        // reader attaches. NOT a stack heartbeat: `stack_probe` reports only
+        // when the high-water mark has grown since the last report, so the
+        // one report this payload could have seen went into a closed port
+        // and there may never be another (M6 P4, measured on the emulator
+        // twin: one `[stack]` line in a twenty-second run, at five seconds,
+        // into the dark).
+        done_marker: Some("\"hostDrainingAgainMs\""),
         trace_slug: "usb-negative-control",
+        supported_targets: ESP32_ONLY,
+        emits_records: false,
+        emits_header: false,
+    },
+    FwCheckConfig {
+        check: FwCheck::UsbDetachReattach,
+        display_name: "The cable out mid-session and back in",
+        // The shipped image minus flash, like every M6 emulator scenario
+        // until M4 lands the flash controller. What is under test is the
+        // link; the filesystem has nothing to say about it.
+        firmware_features: &["server", "radio", "memory_fs"],
+        // A whole heartbeat arriving after the port is re-opened. The stack
+        // heartbeat at 5 s crosses before the unplug and the next is at 15 s,
+        // long after the scenario is over; "a frame crossed the recovered
+        // session" is the claim, and this is the line that carries it.
+        done_marker: Some("\"uptime_ms\":10000"),
+        trace_slug: "usb-detach-reattach",
+        supported_targets: ESP32_ONLY,
+        emits_records: false,
+        emits_header: false,
+    },
+    FwCheckConfig {
+        check: FwCheck::UsbHostAbsent,
+        display_name: "The shipped image with no cable at all",
+        firmware_features: &["server", "radio", "memory_fs"],
+        // None, and not because the payload never finishes: with no host the
+        // device says nothing at all, which is the finding. What the run has
+        // to report is read out of its memory rather than off a wire, so the
+        // host registry carries `Sentinel::State` and this side has no marker
+        // to declare.
+        done_marker: None,
+        trace_slug: "usb-host-absent",
         supported_targets: ESP32_ONLY,
         emits_records: false,
         emits_header: false,

@@ -364,13 +364,44 @@ pub fn skip_notice(test: &str, reason: &str) {
 /// figures came from (`scripts/emu/build-reference-image.sh`).
 pub const REFERENCE_COMMIT: &str = "d6cfaa205";
 
-/// One of the reference images the script builds: `<commit>` plus the
-/// `spike_uart0_link` feature applied as a dirty tree, with these features.
+/// The firmware commit sitting 1 flashed for the attached-host silicon
+/// `boot-idle` capture (`lp-emu/transcripts/esp32c6/boot-idle/`), on a clean
+/// tree. M6 P4's DD30 arbitration builds the same commit with the same
+/// features and no cherry-pick, so that both sides of the comparison are the
+/// same bytes.
+pub const SILICON_BOOT_IDLE_COMMIT: &str = "735af98ae";
+
+/// The commit M6's three link-monitor scenarios are recorded at: main with
+/// M6 P3 merged.
+///
+/// It is not [`SILICON_BOOT_IDLE_COMMIT`], and the reason is a date. Sitting
+/// 1 flashed the board that morning; M6 P1b landed the connection monitor's
+/// `HOST_NOT_DRAINING_MS` / `HOST_DRAINING_AGAIN_MS` / `NOT_DRAINING_COUNT`
+/// stamps and the heartbeat's `link` fields that afternoon. So the image the
+/// board ran has no vehicle for the transitions those three payloads exist
+/// to measure — a run against it probes symbols that are not in it — and the
+/// image that has the vehicle is not the one silicon captured. Each image
+/// answers the question it can be asked, and each transcript's filename
+/// carries the commit that produced it.
+pub const SCENARIO_COMMIT: &str = "372392b9c";
+
+/// One of the reference images the script builds: a commit, with these
+/// features, optionally plus the `spike_uart0_link` feature applied as a
+/// dirty tree.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ReferenceImage {
     /// The script's slug (`target/emu-ref/<commit>-<slug>/fw-esp32c6`).
     pub slug: &'static str,
     pub features: &'static str,
+    /// The commit the detached worktree is built at.
+    pub commit: &'static str,
+    /// Is the `spike_uart0_link` cherry-pick applied on top?
+    ///
+    /// `false` is what M6 needs: the shipped image speaks its own
+    /// USB-Serial-JTAG link, so the UART0 workaround would not merely be
+    /// unnecessary, it would be a different image — and an arbitration
+    /// between two images is not an arbitration.
+    pub spike: bool,
 }
 
 impl ReferenceImage {
@@ -378,16 +409,42 @@ impl ReferenceImage {
     pub const HARNESS: ReferenceImage = ReferenceImage {
         slug: "harness",
         features: "test_shader_compile_incremental,esp32c6,spike_uart0_link",
+        commit: REFERENCE_COMMIT,
+        spike: true,
     };
     /// The spike image (§5.1): flash-backed, spins on `SPI1.cmd` until M4.
     pub const BOOT_IDLE: ReferenceImage = ReferenceImage {
         slug: "boot-idle",
         features: "esp32c6,server,radio,spike_uart0_link",
+        commit: REFERENCE_COMMIT,
+        spike: true,
     };
     /// The §5.4 diagnostic variant: G6-2's gate image in M3.
     pub const BOOT_IDLE_MEMFS: ReferenceImage = ReferenceImage {
         slug: "boot-idle-memfs",
         features: "esp32c6,server,radio,spike_uart0_link,memory_fs",
+        commit: REFERENCE_COMMIT,
+        spike: true,
+    };
+    /// The same features **without** the spike cherry-pick, at the commit
+    /// sitting 1 flashed: M6 P4's DD26/DD30 arbitration image. The shipped
+    /// image over its own link, byte for byte what the board ran.
+    pub const BOOT_IDLE_MEMFS_USB: ReferenceImage = ReferenceImage {
+        slug: "boot-idle-memfs-usb",
+        features: "esp32c6,server,radio,memory_fs",
+        commit: SILICON_BOOT_IDLE_COMMIT,
+        spike: false,
+    };
+    /// The same image at [`SCENARIO_COMMIT`], for the three M6 scenarios
+    /// whose vehicle is the connection monitor's own stamps. Sitting 1's
+    /// commit predates them, so the DD30 image cannot answer those payloads
+    /// and this one cannot answer DD30 — two images, each for the question it
+    /// can be asked.
+    pub const SCENARIO_MEMFS_USB: ReferenceImage = ReferenceImage {
+        slug: "boot-idle-memfs-usb",
+        features: "esp32c6,server,radio,memory_fs",
+        commit: SCENARIO_COMMIT,
+        spike: false,
     };
 
     /// `LP_EMU_C6_REF_HARNESS`, `LP_EMU_C6_REF_BOOT_IDLE_MEMFS`, …
@@ -401,7 +458,7 @@ impl ReferenceImage {
     pub fn conventional_path(&self, root: &Path) -> PathBuf {
         root.join("target")
             .join("emu-ref")
-            .join(format!("{REFERENCE_COMMIT}-{}", self.slug))
+            .join(format!("{}-{}", self.commit, self.slug))
             .join("fw-esp32c6")
     }
 }
@@ -455,14 +512,17 @@ pub fn reference_image(image: &ReferenceImage) -> Result<PathBuf, String> {
     // and the run was green and hollow. A panic cannot be swallowed.
     let status = Command::new(root.join("scripts/emu/build-reference-image.sh"))
         .arg(image.features)
+        .arg(image.commit)
+        .arg(if image.spike { "e8d64eeff" } else { "none" })
         .current_dir(&root)
         .status()
         .unwrap_or_else(|e| panic!("running build-reference-image.sh: {e}"));
     assert!(
         status.success(),
-        "build-reference-image.sh {} failed: {status} — LP_EMU_BUILD_FW=1 asked for this \
+        "build-reference-image.sh {} {} failed: {status} — LP_EMU_BUILD_FW=1 asked for this \
          image, so a failed build is a failed test, not a skip",
-        image.features
+        image.features,
+        image.commit
     );
     if !path.is_file() {
         panic!("the script ran but {} is missing", path.display());
@@ -490,6 +550,31 @@ mod tests {
         assert_eq!(
             ReferenceImage::BOOT_IDLE_MEMFS.env_var(),
             "LP_EMU_C6_REF_BOOT_IDLE_MEMFS"
+        );
+        assert_eq!(
+            ReferenceImage::BOOT_IDLE_MEMFS_USB.env_var(),
+            "LP_EMU_C6_REF_BOOT_IDLE_MEMFS_USB"
+        );
+    }
+
+    /// The arbitration image is only an arbitration if it is the silicon
+    /// capture's own recipe: the same commit, the same features, no spike.
+    #[test]
+    fn the_dd30_reference_image_is_the_silicon_captures_recipe() {
+        let i = ReferenceImage::BOOT_IDLE_MEMFS_USB;
+        assert_eq!(i.commit, SILICON_BOOT_IDLE_COMMIT);
+        assert!(
+            !i.spike,
+            "the spike feature would make it a different image"
+        );
+        assert!(!i.features.contains("spike"), "{}", i.features);
+        // The features the sidecar of `silicon-esp32c6-2026-09-07-735af98ae`
+        // records, in the order the runner spells them.
+        assert_eq!(i.features, "esp32c6,server,radio,memory_fs");
+        let root = workspace_root().expect("found");
+        assert!(
+            i.conventional_path(&root)
+                .ends_with("target/emu-ref/735af98ae-boot-idle-memfs-usb/fw-esp32c6")
         );
     }
 

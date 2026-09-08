@@ -2061,6 +2061,7 @@ test-emu-c6:
     LP_EMU_BUILD_FW=1 cargo test -p lp-emu-esp32c6 -- --include-ignored --nocapture
     cargo test -p lp-emu-validate --test m3_replays
     cargo test -p lp-emu-validate --test m4_replays
+    cargo test -p lp-emu-validate --test m6_replays
     cargo test -p lp-cli --test validate_registry_parity
     LP_EMU_BUILD_FW=1 cargo test -p lp-cli --test emu_usb_hello -- --include-ignored
 

@@ -19,11 +19,13 @@
 //! reason (`test_support`); `just test-emu-c6` runs them.
 
 use lp_emu_core::sched::Cycles;
+use lp_emu_esp_common::RegGrade;
 use lp_emu_esp_common::trace::SharedBuffer;
 use lp_emu_esp32c6::machine::{
     AppSource, Esp32C6Builder, Esp32C6Machine, Outcome, StopCondition, TimeGrade, UsbHost,
 };
 use lp_emu_esp32c6::memmap;
+use lp_emu_esp32c6::periph::usb_sj::UsbSerialJtag;
 use lp_emu_esp32c6::test_support::{FwImage, fw_esp32c6_image, skip_notice};
 use sha2::{Digest, Sha256};
 
@@ -340,5 +342,62 @@ fn g2_4_two_attached_runs_are_the_same_run() {
         sha256(&b.m.usb_sj().bytes()),
         a.m.cycles(),
         b.m.cycles()
+    );
+}
+
+/// **G4-4 (M6 P4): the shipped image, attached and draining, under
+/// `--strict-grade documented`.**
+///
+/// The claim is narrow and it is stated narrowly. Every USB_DEVICE register
+/// the shipped image touches in five and a half seconds is one the M6
+/// transcripts measured or a document describes; not one of the twenty this
+/// block still grades `modeled` is crossed. If a later change reaches for
+/// one — a driver that starts reading `jfifo_st`, a line-coding path — this
+/// run stops with the register's name, which is what the level is for.
+///
+/// It is **not** a claim about the chip. `--strict-grade` applies to the
+/// blocks that publish a grade table, and today that is one; the run report
+/// says so and so does `blocks_in_strict_grade_scope`. Every accept table on
+/// the boot path is ungraded, which is an unanswered question rather than a
+/// pass, and grading them is the honest-peripheral policy's next milestone.
+#[test]
+#[ignore = "needs the fw-esp32c6 ELF; run through `just test-emu-c6`"]
+fn g4_4_the_shipped_image_crosses_no_modeled_usb_register() {
+    let elf = match fw_esp32c6_image(&FwImage::SHIPPED_NO_FLASH) {
+        Ok(path) => path,
+        Err(reason) => {
+            skip_notice("usb_attached", &reason);
+            return;
+        }
+    };
+    let mut m = Esp32C6Builder::new()
+        .app(AppSource::Path(elf))
+        .strict(true)
+        .strict_grade(Some(RegGrade::Documented))
+        .time_grade(TimeGrade::T1)
+        .usb_host(UsbHost::Attached { draining: true })
+        .build()
+        .expect("the shipped-minus-flash image builds a machine");
+    let outcome = m.run_until(&StopCondition::after_micros(GATE_US));
+    assert!(
+        matches!(outcome, Outcome::Deadline { .. }),
+        "a modeled USB register was crossed: {outcome:?}"
+    );
+    assert!(m.bus.first_strict_violation().is_none());
+
+    // The scope, named — a pass here is a pass about one block.
+    assert_eq!(m.bus.blocks_in_strict_grade_scope(), vec!["USB_DEVICE"]);
+    // And the run really did do the whole boot, so the pass is not a pass by
+    // never getting there.
+    assert!(
+        m.usb_sj().text().contains("[stack] heartbeat: high-water"),
+        "the run reached the idle loop"
+    );
+
+    // The list the README publishes, printed for the record.
+    println!(
+        "G4-4: {} modeled USB_DEVICE registers, none crossed in {GATE_US} us: {}",
+        UsbSerialJtag::modeled_registers().len(),
+        UsbSerialJtag::modeled_registers().join(", ")
     );
 }

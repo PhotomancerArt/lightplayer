@@ -665,6 +665,13 @@ four nouns:
   difference is reported with its ratio, and `--strict` refuses a claim the
   configuration is not measured for.
 
+On `lp-emu:*` the **shipped image runs on the link it ships with** — the
+emulated USB-Serial-JTAG, with a host that can be attached, detached, opened
+and closed (`--usb-host`, `--usb-script`, `--control`). The old
+`spike_uart0_link` workaround, which moved the host link to UART0, is now a
+per-payload property and applies only to `esp-emu:*` and to the payloads
+whose committed transcripts are of that image.
+
 ```bash
 cargo run -q -p lp-cli -- validate list
 cargo run -q -p lp-cli -- validate replay <transcript> --against esp-emu:0.42.0
