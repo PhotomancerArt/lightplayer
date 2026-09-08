@@ -93,12 +93,12 @@ impl ProjectReadStream {
         // batch of read events.
         match protocol.response_disposition(&message, self.request_id, PendingAsk::Other) {
             ResponseDisposition::Matched => self.accept_matched(message),
-            ResponseDisposition::ServerOriginated { .. }
-            | ResponseDisposition::Unsolicited => Ok(ClientEvent::from_unsolicited_message(message)
-                .map_or(
+            ResponseDisposition::ServerOriginated { .. } | ResponseDisposition::Unsolicited => {
+                Ok(ClientEvent::from_unsolicited_message(message).map_or(
                     ProjectReadStreamStep::Continue,
                     ProjectReadStreamStep::Event,
-                )),
+                ))
+            }
             ResponseDisposition::StaleAbandoned { response_id }
             | ResponseDisposition::PriorOwner { response_id } => Ok(ProjectReadStreamStep::Event(
                 ClientEvent::StaleResponseDropped { response_id },
