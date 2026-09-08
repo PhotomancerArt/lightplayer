@@ -232,6 +232,53 @@ fn poll(addr: *const u32, iters: u32) -> u32 {
     iters
 }
 
+/// Pairs of instructions in the code walk. `.rept` in the assembler, so the
+/// count is the assembler's and not the optimiser's: 12,288 × 2 × 4 bytes =
+/// exactly **96 KiB** of straight-line `.text`.
+const CODE_WALK_PAIRS: u32 = 12_288;
+
+/// `code_walk` — 96 KiB of straight-line flash-resident code, walked once.
+///
+/// Sized to exceed a **32 KiB** L1 cache by 3×. That 32 KiB is a
+/// *hypothesis*, not a citation: the C6's cache geometry — size, line length,
+/// ways — is not in this repository, and esp-hal 1.1.1 and esp-metadata 0.4.0
+/// carry no cache constant for the part (`notes.md` F7). **Establishing it is
+/// P3's job (OQ3)**, from the TRM's Cache chapter and the ROM's `Cache_*`
+/// writes into EXTMEM. So this kernel is deliberately over-sized rather than
+/// tuned: if the cache turns out larger than 32 KiB the walk still exceeds it
+/// and the measurement stands, but the kernel cannot *locate* the cache's
+/// edge and does not claim to.
+///
+/// **It is assembly because its size is the measurement.** Written as 96 KiB
+/// of straight-line Rust it was not 96 KiB of machine code: with a constant
+/// seed LLVM folded the entire chain at compile time despite
+/// `#[inline(never)]`, and with an opaque seed it re-rolled the repeating
+/// pattern into a loop — 6 KiB legs came out 98 bytes. `.rept` cannot be
+/// folded, re-rolled or outlined, and `.option norvc` pins the encoding at
+/// four bytes so the byte count is arithmetic rather than an estimate.
+///
+/// The walk is a dependency chain, so nothing in it can issue out of order
+/// around a stalled fetch.
+#[inline(never)]
+fn code_walk(seed: u32) -> u32 {
+    let mut a = seed;
+    unsafe {
+        core::arch::asm!(
+            ".option push",
+            ".option norvc",
+            ".rept 12288",
+            "add {a}, {a}, {b}",
+            "xor {a}, {a}, {b}",
+            ".endr",
+            ".option pop",
+            a = inout(reg) a,
+            b = in(reg) 0x9E37_79B1u32,
+            options(nostack, nomem),
+        );
+    }
+    a
+}
+
 #[inline(never)]
 fn poll_uart0_status(iters: u32) -> u32 {
     poll(UART0_STATUS, iters)
@@ -276,6 +323,30 @@ static MULDIV: Group = Group {
             iters: DIV_ITERS,
             insns_per_iter: Some(5),
             body: div_chain,
+        },
+    ],
+};
+
+/// The cold and warm walks share a repetition: they only mean anything back
+/// to back, and their difference is what a fetch miss costs.
+///
+/// **Repetition 0 is the only genuinely cold pass.** Every later `cold`
+/// reading walks code the previous repetition's `warm` pass has just touched,
+/// so the spread between repetition 0 and the rest is itself part of the
+/// measurement — which is one more reason nothing here is averaged.
+static CODE_WALK: Group = Group {
+    kernels: &[
+        Kernel {
+            name: "code_walk/cold",
+            iters: CODE_WALK_PAIRS,
+            insns_per_iter: Some(2),
+            body: code_walk,
+        },
+        Kernel {
+            name: "code_walk/warm",
+            iters: CODE_WALK_PAIRS,
+            insns_per_iter: Some(2),
+            body: code_walk,
         },
     ],
 };
@@ -337,8 +408,12 @@ pub async fn run_cycle_probe(_: embassy_executor::Spawner) -> ! {
     };
     let placement = core::slice::from_ref(&PLACEMENT);
     let muldiv = core::slice::from_ref(&MULDIV);
+    let code_walk = core::slice::from_ref(&CODE_WALK);
     let mmio = core::slice::from_ref(&MMIO);
-    run_all(&clocks, &[placement, muldiv, mmio, PORTABLE_GROUPS]);
+    run_all(
+        &clocks,
+        &[placement, muldiv, code_walk, mmio, PORTABLE_GROUPS],
+    );
 
     loop {
         embassy_time::Timer::after(embassy_time::Duration::from_secs(60)).await;

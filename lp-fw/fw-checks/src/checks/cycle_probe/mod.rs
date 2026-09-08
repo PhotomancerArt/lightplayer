@@ -47,9 +47,19 @@
 //! - **An MMIO address** is a chip fact, so the poll loops come from the
 //!   harness too.
 //!
-//! What lives here is the bracket, the repetition, the record, and the three
-//! kernels that are ordinary Rust with no address in them: the flash-resident
-//! code walk, the `.rodata` stride walk and the slice-shaped case.
+//! What lives here is the bracket, the repetition, the record, and the two
+//! kernels that are ordinary Rust with no address in them: the `.rodata`
+//! stride walk and the slice-shaped case.
+//!
+//! `code_walk` was written here first and had to move, and the reason is
+//! worth keeping. Ninety-six kilobytes of straight-line Rust is not
+//! straight-line machine code: with a constant seed LLVM evaluated the whole
+//! chain at compile time despite `#[inline(never)]`, and once the seed was
+//! opaque it re-rolled the repeating step pattern back into a loop —
+//! sixteen 6 KiB legs became sixteen 98-byte ones. `nm` on the built ELF
+//! is what caught both; the cycle counts would only have looked encouraging.
+//! Code whose *size* is the measurement has to be written in assembly, and
+//! assembly means an ISA, so it lives with the harness now.
 //!
 //! ## Reading the record
 //!
@@ -64,12 +74,10 @@
 //! kernels whose bodies are compiled Rust, whose sizes are measured off the
 //! ELF and recorded in the calibration report instead.
 
-mod code_walk;
 mod rodata;
 mod runner;
 mod slice_shape;
 
-pub use code_walk::{CODE_WALK_STEPS, walk_once};
 pub use rodata::{ACCESSES, RODATA_BYTES, STRIDES};
 pub use runner::{Clocks, Group, Kernel, REPS, run_all};
 pub use slice_shape::{SLICE_ITERS, slice_shape};
@@ -78,29 +86,7 @@ pub use slice_shape::{SLICE_ITERS, slice_shape};
 pub const DONE_MARKER: &str = "[cycle-probe] === DONE ===";
 
 /// The kernels that need no chip fact, one group each.
-///
-/// `code_walk` is **one group of two kernels** on purpose: `cold` and `warm`
-/// only mean anything back to back, so they share a repetition. Repetition 0
-/// is the only genuinely cold pass — every later `cold` reading walks code the
-/// previous repetition's `warm` pass has just touched — and the spread between
-/// repetition 0 and the rest is itself part of the measurement.
 pub static PORTABLE_GROUPS: &[Group] = &[
-    Group {
-        kernels: &[
-            Kernel {
-                name: "code_walk/cold",
-                iters: CODE_WALK_STEPS,
-                insns_per_iter: None,
-                body: walk_once,
-            },
-            Kernel {
-                name: "code_walk/warm",
-                iters: CODE_WALK_STEPS,
-                insns_per_iter: None,
-                body: walk_once,
-            },
-        ],
-    },
     Group {
         kernels: &[Kernel {
             name: "rodata_stride/16",
@@ -178,7 +164,7 @@ mod tests {
                 n += 1;
             }
         }
-        assert_eq!(n, 9, "the portable kernel count moved; update the report");
+        assert_eq!(n, 7, "the portable kernel count moved; update the report");
     }
 
     /// One stride kernel per declared stride, named after it. The names are
