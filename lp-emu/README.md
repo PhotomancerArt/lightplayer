@@ -241,6 +241,27 @@ shipped rungs, on a desk at load ~190, read 25.5 M -> 75.8 M (2.97x) with the
 either side — which is the bar every rung of this work is held to (PD5, ADR
 2026-09-06: a run is a pure function of the instruction stream).
 
+**The browser/phone rig.** The same binary, unmodified, builds for
+`wasm32-wasip1` and runs in any browser under a small JavaScript WASI
+preview1 shim (D6: no `wasm32-unknown-unknown` entry point, zero source
+changes — the module is the CLI). `just bench-emu-web` builds it, stages it
+beside the two reference images plus a page and a dedicated-Worker runner,
+and serves it on the LAN (port via `scripts/dev-port.sh`, never pinned) so a
+phone can open it, run the sequence in the Worker, and upload its result
+JSON back to the Mac:
+
+```bash
+just bench-emu-web              # build, stage, serve — open the printed URL
+just bench-emu-web --collect    # print every uploaded result-*.json as a table
+```
+
+The page shows a live table (wall seconds, instr/s, real-time ratio per run)
+and a running best-of-t2 headline per image; `--collect` reads every
+`result-*.json` in the stage directory and prints device, engine guess,
+image, grade, wall seconds, instr/s and the real-time ratio. Baseline numbers
+and the method are in
+`docs/reports/2026-09-07-emu-web-bench-baseline.md`.
+
 **The Xtensa core** (`lp-xt-emu`) has its own probe and its own ladder:
 
 ```bash
@@ -258,7 +279,7 @@ almost entirely one memory resolution per access instead of four or five.
 generic-codegen trap that per-package `opt-level` overrides hide.
 
 Evidence, and the rungs not yet climbed (MMIO fast path, poll-loop skip, block
-cache, the wasm/phone rig): the planning workspace's
+cache): the planning workspace's
 `2026-09-06-1001-esp-emulator/2026-09-07-speed-ladder-research.md` and its
 `speed-research/` directory, executed by the `2026-09-07-0827-emu-speed-ladder`
 plan.
