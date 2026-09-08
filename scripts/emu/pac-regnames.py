@@ -618,6 +618,26 @@ def render_sources(entries: list[tuple[int, str]], svd2rust: str) -> str:
 # rendering
 
 
+def slice_literal(name: str, items: list[str]) -> list[str]:
+    """`name: &[…],` the way rustfmt would leave it.
+
+    `cargo fmt --all` covers the generated files, so a shape rustfmt would
+    rewrite makes `fmt-check` and `lint-emu-regnames` disagree about the
+    same file for ever. rustfmt keeps an array literal on one line while it
+    fits in `array_width` (60 by default) and the line fits in `max_width`
+    (100); otherwise one element per line. This is that rule, and the two
+    lints agreeing is what proves it.
+    """
+    inner = ", ".join(items)
+    one = f"    {name}: &[{inner}],"
+    if len(inner) + 2 <= 60 and len(one) <= 100:
+        return [one]
+    out = [f"    {name}: &["]
+    out += [f"        {it}," for it in items]
+    out.append("    ],")
+    return out
+
+
 def render(
     target: Target,
     entries: list[tuple[int, str]],
@@ -639,15 +659,15 @@ def render(
         f"({len(entries)} registers, {len(resets)} with a non-zero reset).",
         f"pub static {target.static}: RegNames = RegNames {{",
         f'    block: "{target.block}",',
-        "    entries: &[",
     ]
     width = max((len(f"{off:#05x}") for off, _ in entries), default=5)
-    for off, name in entries:
-        lines.append(f'        ({off:#0{width}x}, "{name}"),')
-    lines += ["    ],", "    resets: &["]
-    for off, value in resets:
-        lines.append(f"        ({off:#0{width}x}, {value:#010x}),")
-    lines += ["    ],", "};", ""]
+    lines += slice_literal(
+        "entries", [f'({off:#0{width}x}, "{name}")' for off, name in entries]
+    )
+    lines += slice_literal(
+        "resets", [f"({off:#0{width}x}, {value:#010x})" for off, value in resets]
+    )
+    lines += ["};", ""]
     return "\n".join(lines)
 
 
