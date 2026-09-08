@@ -135,9 +135,13 @@ fn the_host_side_properties_are_not_mirrored_and_that_is_the_point() {
             "boot-idle",
             "usb-negative-control",
             "usb-detach-reattach",
-            "usb-host-absent"
+            "usb-host-absent",
+            // M4's flash-backed twin of `boot-idle`, which is the shipped
+            // image over the shipped link too — and P5's route to closing
+            // DD30 on flash-backed bytes.
+            "boot-idle-flash",
         ],
-        "the emu-m6 set, and nothing else, drives the host"
+        "the emu-m6 set plus M4's flash-backed boot, and nothing else, drives the host"
     );
 }
 

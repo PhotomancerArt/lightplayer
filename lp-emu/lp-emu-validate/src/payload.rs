@@ -1058,6 +1058,9 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         firmware_features: &["server", "radio", "memory_fs"],
         fw_checks_feature: None,
         emits_header: false,
+        // `host_script` is the UART0 walk's wire conversation (M4); what
+        // this payload drives is the cable, in `host_plan`.
+        host_script: None,
         // Not a stack heartbeat: the one at 5 s crosses before the unplug and
         // the next is at 15 s, five seconds after the scenario has anything
         // left to say. A whole heartbeat arriving *after* the re-open is the
@@ -1095,6 +1098,9 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         firmware_features: &["server", "radio", "memory_fs"],
         fw_checks_feature: None,
         emits_header: false,
+        // `host_script` is the UART0 walk's wire conversation (M4); what
+        // this payload drives is the cable, in `host_plan`.
+        host_script: None,
         // Nothing is printed, because nothing can be: see [`Sentinel::State`].
         sentinel: Sentinel::State("link_counters::NOT_DRAINING_COUNT"),
         record_kinds: &[],
@@ -1155,6 +1161,17 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         series: &[&HELLO, &FS_MOUNT, &HEARTBEAT, &STACK_HEARTBEAT],
         // Watched from the first byte, like every other boot payload.
         capture: Capture::Monitor,
+        // The product's own link, on both sides (M6): the flash-backed twin
+        // of `boot-idle`, and P5's closure of DD30 on flash-backed bytes.
+        link: Link::UsbSerialJtag,
+        emulator_features: None,
+        host_plan: Some(HostPlan {
+            host: "attached",
+            script: "",
+        }),
+        probes: &[],
+        run_secs: None,
+        emulator_only: None,
     },
     Payload {
         name: "upload-walk",
@@ -1176,6 +1193,17 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // The walk needs the port open from boot: its first request waits
         // for `[RECOVERY] boot complete`, which a late reader would miss.
         capture: Capture::Monitor,
+        // M4 recorded the walk over UART0, because that is the link an
+        // emulator had when it was written; its committed transcript is of
+        // that image. M6 P5 runs the same conversation over the USB link —
+        // which is what silicon's own §11.3 capture was — and that is the
+        // like-for-like comparison. Until then, the transcript decides.
+        link: Link::Uart0Spike,
+        emulator_features: None,
+        host_plan: None,
+        probes: &[],
+        run_secs: None,
+        emulator_only: None,
     },
 ];
 
