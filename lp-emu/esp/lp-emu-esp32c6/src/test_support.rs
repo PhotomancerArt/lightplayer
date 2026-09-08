@@ -371,6 +371,20 @@ pub const REFERENCE_COMMIT: &str = "d6cfaa205";
 /// same bytes.
 pub const SILICON_BOOT_IDLE_COMMIT: &str = "735af98ae";
 
+/// The commit M6's three link-monitor scenarios are recorded at: main with
+/// M6 P3 merged.
+///
+/// It is not [`SILICON_BOOT_IDLE_COMMIT`], and the reason is a date. Sitting
+/// 1 flashed the board that morning; M6 P1b landed the connection monitor's
+/// `HOST_NOT_DRAINING_MS` / `HOST_DRAINING_AGAIN_MS` / `NOT_DRAINING_COUNT`
+/// stamps and the heartbeat's `link` fields that afternoon. So the image the
+/// board ran has no vehicle for the transitions those three payloads exist
+/// to measure — a run against it probes symbols that are not in it — and the
+/// image that has the vehicle is not the one silicon captured. Each image
+/// answers the question it can be asked, and each transcript's filename
+/// carries the commit that produced it.
+pub const SCENARIO_COMMIT: &str = "372392b9c";
+
 /// One of the reference images the script builds: a commit, with these
 /// features, optionally plus the `spike_uart0_link` feature applied as a
 /// dirty tree.
@@ -419,6 +433,17 @@ impl ReferenceImage {
         slug: "boot-idle-memfs-usb",
         features: "esp32c6,server,radio,memory_fs",
         commit: SILICON_BOOT_IDLE_COMMIT,
+        spike: false,
+    };
+    /// The same image at [`SCENARIO_COMMIT`], for the three M6 scenarios
+    /// whose vehicle is the connection monitor's own stamps. Sitting 1's
+    /// commit predates them, so the DD30 image cannot answer those payloads
+    /// and this one cannot answer DD30 — two images, each for the question it
+    /// can be asked.
+    pub const SCENARIO_MEMFS_USB: ReferenceImage = ReferenceImage {
+        slug: "boot-idle-memfs-usb",
+        features: "esp32c6,server,radio,memory_fs",
+        commit: SCENARIO_COMMIT,
         spike: false,
     };
 

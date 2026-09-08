@@ -401,10 +401,31 @@ pub static HELLO: SeriesSpec = SeriesSpec {
 
 /// The idle heartbeat's heap sample and the counters beside it.
 ///
-/// Keyed on the literal message name, so a run that printed several
-/// heartbeats compares its **last** one (`Transcript::series` is last-writes,
-/// as it is for the calibration payload). The `boot-idle` payload's sentinel
-/// stops the run at the first stack heartbeat, so in practice there is one.
+/// **Keyed on the heartbeat's own five-second tick**, so the five-second
+/// sample is compared with the five-second sample.
+///
+/// It used to be keyed on the literal message name, which made
+/// `Transcript::series`'s last-writes rule pick each run's *last* heartbeat
+/// — fine while every capture stopped in the same place, and wrong the first
+/// time one did not. M6 P4 hit it: sitting 1's desk capture of `boot-idle`
+/// ran on to fifteen seconds while ours stops at the payload's sentinel at
+/// five, so the DD30 arbitration was comparing our 5 s heap sample with
+/// silicon's 15 s one and calling the 112 B between them a disagreement. On
+/// this payload the difference between two heartbeats of one boot is over a
+/// hundred bytes — silicon's own three read 266,392 / 266,496 / 266,388 — so
+/// which sample is compared is not a detail.
+///
+/// The key is the **seconds**, not `uptime_ms`, and the three trailing digits
+/// are matched and dropped. A millisecond is a timing figure and two
+/// configurations do not share one: `t1` reports `"uptime_ms":5000` and `t2`
+/// reports `5001` for the same heartbeat of the same boot, which as a key
+/// would make the two grades incomparable — the opposite of what a key is
+/// for.
+///
+/// A run with more heartbeats than the other now says so, as a structural
+/// problem naming the samples that appear on one side only. That is the
+/// honest report: two captures of different lengths are comparable where
+/// they overlap and nowhere else.
 ///
 /// `largestFreeBlock` is `Timing`, not `Memory`, and that is a decision worth
 /// stating: it is a fragmentation *snapshot*, whose value depends on which
@@ -416,13 +437,13 @@ pub static HEARTBEAT: SeriesSpec = SeriesSpec {
     pattern: concat!(
         r#""msg":\{"(?<msg>heartbeat)":\{"fps":\{"avg":(?<fps_avg>[0-9.]+)[^}]*\},"#,
         r#""frame_count":(?<frame_count>\d+),"loaded_projects":\[(?<loaded_projects>[^\]]*)\],"#,
-        r#""uptime_ms":(?<uptime_ms>\d+),"memory":\{"freeBytes":(?<free_bytes>\d+),"#,
+        r#""uptime_ms":(?<uptime_s>\d+)\d{3},"memory":\{"freeBytes":(?<free_bytes>\d+),"#,
         r#""usedBytes":(?<used_bytes>\d+),"totalBytes":(?<total_bytes>\d+),"#,
         r#""largestFreeBlock":(?<largest_free_block>\d+)\},"#,
         r#""recovery":\{"level":"(?<recovery_level>[^"]+)","resetReason":"(?<reset_reason>[^"]+)","#,
         r#""bootCount":(?<boot_count>\d+)"#,
     ),
-    key: "msg",
+    key: "uptime_s",
     fields: &[
         ("free_bytes", FieldClass::Memory),
         ("used_bytes", FieldClass::Memory),
@@ -430,7 +451,6 @@ pub static HEARTBEAT: SeriesSpec = SeriesSpec {
         ("largest_free_block", FieldClass::Timing),
         ("fps_avg", FieldClass::Timing),
         ("frame_count", FieldClass::Timing),
-        ("uptime_ms", FieldClass::Timing),
         ("loaded_projects", FieldClass::Structural),
         ("recovery_level", FieldClass::Structural),
         ("reset_reason", FieldClass::Structural),
@@ -972,22 +992,36 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         firmware_features: &["server", "radio"],
         fw_checks_feature: None,
         emits_header: false,
-        // The stack heartbeat that FOLLOWS the first heartbeat after the
-        // open, so the run captures one whole heartbeat — the `link` object
-        // is the entire point and a sentinel on the heartbeat itself would
-        // cut the capture off inside it.
-        sentinel: Sentinel::Done("[stack] heartbeat: high-water"),
         // Nothing is sent to it: the measurement is what the device says
         // while nobody is listening.
         host_script: None,
+        // The recovery stamp itself — the payload's own claim, and the only
+        // marker both sides can reach.
+        //
+        // P1b's stack heartbeat cannot be one, and finding out why is the
+        // M6 P4 finding that corrected this entry. `stack_probe` reports
+        // "when the high-water mark has GROWN since the last report", so the
+        // first report is at 5 s and there may never be another. On a link
+        // nobody was reading, that one report went into a closed port and is
+        // gone for ever: our own emulator twin runs 20 s and prints exactly
+        // one `[stack]` line, at 5 s, into the dark. A sentinel that depends
+        // on a firmware stack growing later is a sentinel that depends on
+        // luck.
+        //
+        // `hostDrainingAgainMs` appears only once the monitor has resumed,
+        // in the first heartbeat delivered after the port opens, and a
+        // `--until`/`--exit-on` match runs on to that line's newline — so the
+        // whole heartbeat is captured, `link` object and all.
+        sentinel: Sentinel::Done("\"hostDrainingAgainMs\""),
         record_kinds: &[],
         mask_set: "boot-idle",
         fields: &[],
         // No `HELLO`. The hello goes out at server start, seconds before the
         // reader attaches, into a port nobody has open — it is dropped, and
         // expecting it here would make every run of this payload fail for the
-        // reason the payload exists to demonstrate.
-        series: &[&HEARTBEAT, &STACK_HEARTBEAT, &LINK_MONITOR],
+        // reason the payload exists to demonstrate. No `STACK_HEARTBEAT`
+        // either, for the reason above: this payload cannot see one.
+        series: &[&HEARTBEAT, &LINK_MONITOR],
         // Boot ≈ 1 s, the hello plus two 250 ms write timeouts ≈ +0.6 s, and
         // one 5 s heartbeat interval of margin so the wait cannot land inside
         // the transition it is trying to observe.
@@ -1008,10 +1042,10 @@ pub static ALL_PAYLOADS: &[Payload] = &[
             script: "8000  open\n",
         }),
         probes: &[],
-        // Latch at ~0.6 s, open at 8 s, the recovery on the first probe of
-        // io_task's 2 s grid after it, the 10 s heartbeat carrying the pair,
-        // and the stack heartbeat at 15 s that stops the run.
-        run_secs: Some(20),
+        // Latch at ~0.9 s, open at 8 s, the recovery on the first probe of
+        // io_task's 2 s grid after it, and the 10 s heartbeat carrying the
+        // pair, which stops the run.
+        run_secs: Some(12),
         emulator_only: None,
     },
     Payload {
@@ -1295,7 +1329,10 @@ mod tests {
             .regex()
             .captures(beat)
             .expect("the heartbeat parses");
-        assert_eq!(&caps["msg"], "heartbeat");
+        assert_eq!(
+            &caps["uptime_s"], "5",
+            "the key is the tick, not the millisecond"
+        );
         assert_eq!(&caps["free_bytes"], "266688");
         assert_eq!(&caps["total_bytes"], "325536");
         assert_eq!(&caps["largest_free_block"], "200633");
@@ -1378,10 +1415,15 @@ mod tests {
         let p = find_payload("usb-negative-control").unwrap();
         assert_eq!(p.capture, Capture::FlashThenOpenAfter(8));
         let names: Vec<_> = p.series.iter().map(|s| s.name).collect();
-        assert_eq!(names, vec!["heartbeat", "stack-heartbeat", "link-monitor"]);
+        assert_eq!(names, vec!["heartbeat", "link-monitor"]);
         assert!(
             !names.contains(&"hello"),
             "the hello is dropped by the state this payload measures"
+        );
+        assert!(
+            !names.contains(&"stack-heartbeat"),
+            "the stack probe reports only when the high-water grows, so the one report \
+             this payload could have seen went into a closed port"
         );
         // The shipped image, flash-backed: the product's own link.
         assert_eq!(p.firmware_features, &["server", "radio"]);

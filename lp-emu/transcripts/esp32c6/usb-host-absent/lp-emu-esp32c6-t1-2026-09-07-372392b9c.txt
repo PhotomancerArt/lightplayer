@@ -1,0 +1,4 @@
+probe cyc=800000000 us=5000000 esp_println::serial_jtag_printer::TIMED_OUT @ 0x40854b48 = 0x00000001
+probe cyc=800000000 us=5000000 fw_esp32_common::serial::link_counters::HOST_NOT_DRAINING_MS @ 0x4081219c = 0x0000037d
+probe cyc=800000000 us=5000000 fw_esp32_common::serial::link_counters::HOST_DRAINING_AGAIN_MS @ 0x408121a0 = 0xffffffff
+probe cyc=800000000 us=5000000 fw_esp32_common::serial::link_counters::NOT_DRAINING_COUNT @ 0x40858cd8 = 0x00000001

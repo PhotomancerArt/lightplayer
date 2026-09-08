@@ -1125,7 +1125,7 @@ mod tests {
             "{rendered}"
         );
         assert!(
-            rendered.contains("--until '[stack] heartbeat: high-water'"),
+            rendered.contains("--until '\"hostDrainingAgainMs\"'"),
             "{rendered}"
         );
         assert!(rendered.contains("--seconds 120"), "{rendered}");
@@ -1293,7 +1293,7 @@ mod tests {
         let rendered = LpEmuDriver.plan(&req).unwrap().render();
         assert!(rendered.contains("--usb-host attached-idle"), "{rendered}");
         assert!(rendered.contains("printf '%s' '8000  open"), "{rendered}");
-        assert!(rendered.contains("--timeout 20s"), "{rendered}");
+        assert!(rendered.contains("--timeout 12s"), "{rendered}");
 
         // On silicon it is the product's own flash-backed image, watched
         // after a wait.
