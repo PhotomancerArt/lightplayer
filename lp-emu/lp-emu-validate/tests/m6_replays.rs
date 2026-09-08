@@ -537,3 +537,389 @@ fn the_m6_transcripts_are_filed_where_their_headers_say() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// P5 — the shipped image over the USB link with flash behind it.
+//
+// ```bash
+// # the walks, at M4's own commit, built with NO cherry-pick this time
+// scripts/emu/build-reference-image.sh esp32c6,server,radio d6cfaa205 none
+// cargo run -q -p lp-cli -- validate record upload-walk-usb \
+//   --config lp-emu:esp32c6:t1 --date 2026-09-07 --commit d6cfaa2051ae \
+//   --image upload-walk-usb=target/emu-ref/d6cfaa205-esp32c6+server+radio/fw-esp32c6
+// cargo run -q -p lp-cli -- validate record meteor-walk-usb …
+//
+// # DD30 on flash-backed bytes, both sides at sitting 1's commit
+// scripts/emu/build-reference-image.sh esp32c6,server,radio 735af98ae none
+// cargo run -q -p lp-cli -- validate record boot-idle-flash \
+//   --config silicon:esp32c6 --port /dev/cu.usbmodem1433201 \
+//   --date 2026-09-07 --commit 735af98ae9d9 --timeout-secs 30 \
+//   --image boot-idle-flash=target/emu-ref/735af98ae-esp32c6+server+radio/fw-esp32c6
+// ```
+// ---------------------------------------------------------------------------
+
+/// M4's commit, and both walks' — the same one the spike report's §5.3 and
+/// §11.2 figures are at.
+const WALK: &str = "lp-emu-esp32c6-t1-2026-09-07-d6cfaa205.txt";
+/// The flash-backed DD30 pair, at sitting 1's commit.
+const FLASH_OURS: &str = "lp-emu-esp32c6-t1-2026-09-07-735af98ae.txt";
+const FLASH_SILICON: &str = "silicon-esp32c6-2026-09-07-735af98ae.txt";
+
+fn gate(t: &Transcript, payload: &str, name: &str, field: &str) -> String {
+    series(t, payload, "load-gate")
+        .into_iter()
+        .find(|s| s.key == name)
+        .unwrap_or_else(|| panic!("{payload}: no `{name}` gate"))
+        .values[field]
+        .clone()
+}
+
+fn free_at(t: &Transcript, payload: &str, secs: &str) -> i64 {
+    series(t, payload, "heartbeat")
+        .iter()
+        .find(|s| s.key == secs)
+        .unwrap_or_else(|| panic!("{payload}: no heartbeat at {secs} s"))
+        .values["free_bytes"]
+        .parse()
+        .unwrap()
+}
+
+/// **G5-1.** The `lp-cli upload examples/basic` walk over the link the
+/// product ships, beside M4's run of the *same script* over the spike's
+/// UART0 link.
+///
+/// The two images differ by one cargo feature and nothing else, and the two
+/// runs differ by which socket carried the conversation. What this asserts is
+/// that the difference stops there: every filesystem write, every heap gate
+/// and every compiler output is identical across the pair.
+///
+/// That matters because of what silicon did. The desk's §11.3 walk went over
+/// **USB-Serial-JTAG**, through `usb-tcp-bridge.py` on the board's own port,
+/// so M4's UART0 run was a proxy for it and this one is the like-for-like.
+/// The three `[mem]` gates §5.3 prints — esp-emu's own figures on the same
+/// image bytes — come out byte-equal on both links, which is the useful
+/// negative result: the link driver is not in the heap ledger.
+#[test]
+fn g5_1_the_walk_is_the_same_walk_on_either_link() {
+    let usb = load("upload-walk-usb", WALK);
+    let uart0 = load("upload-walk", WALK);
+
+    // One feature apart, and the sidecars say which way round.
+    assert_eq!(usb.header.firmware_features, ["esp32c6", "server", "radio"]);
+    assert_eq!(
+        uart0.header.firmware_features,
+        ["esp32c6", "server", "radio", "spike_uart0_link"]
+    );
+    let source = usb.header.source.as_deref().unwrap();
+    assert!(
+        source.contains("--usb-sj file:") && source.contains("--usb-host attached"),
+        "the capture is the USB byte stream, with a host on the other end: {source}"
+    );
+    assert!(
+        source.contains("--usb-script lp-emu/esp/lp-emu-esp32c6/walks/examples-basic.script"),
+        "and the conversation is M4's own script, unchanged: {source}"
+    );
+
+    // Spike report §5.3, on both links.
+    for (name, free, used) in [
+        ("stop_all_projects before", "264716", "60820"),
+        ("load_project before", "258348", "67188"),
+        ("load_project after", "220532", "105004"),
+    ] {
+        assert_eq!(gate(&usb, "upload-walk-usb", name, "free_bytes"), free);
+        assert_eq!(gate(&usb, "upload-walk-usb", name, "used_bytes"), used);
+        assert_eq!(
+            gate(&uart0, "upload-walk", name, "free_bytes"),
+            gate(&usb, "upload-walk-usb", name, "free_bytes"),
+            "`{name}` must not depend on which socket the host was on"
+        );
+    }
+
+    // Eight files, nine writes (the shader arrives in two chunks), none
+    // refused — the same set M4's UART0 run wrote.
+    let writes = series(&usb, "upload-walk-usb", "fs-write");
+    assert_eq!(writes.len(), 9);
+    assert!(writes.iter().all(|w| w.values["error"] == "null"));
+    let paths = |t: &Transcript, p: &str| -> Vec<String> {
+        let mut v: Vec<String> = series(t, p, "fs-write").into_iter().map(|w| w.key).collect();
+        v.sort();
+        v.dedup();
+        v
+    };
+    assert_eq!(
+        paths(&usb, "upload-walk-usb"),
+        paths(&uart0, "upload-walk"),
+        "the same eight files, in the same eight places"
+    );
+
+    // The compiler's outputs are a function of the source, and they say so.
+    let compile = |t: &Transcript, p: &str, f: &str| -> String {
+        series(t, p, "shader-compile")[0].values[f].clone()
+    };
+    for field in [
+        "lpir_inst_count",
+        "lpir_func_count",
+        "lpir_import_count",
+        "final_inst_count",
+        "final_code_size",
+        "float_mode",
+    ] {
+        assert_eq!(
+            compile(&usb, "upload-walk-usb", field),
+            compile(&uart0, "upload-walk", field),
+            "{field}"
+        );
+    }
+    assert_eq!(compile(&usb, "upload-walk-usb", "final_code_size"), "8192");
+
+    // The walk started on a blank part, as the desk walk did after its
+    // erase — and this payload says so in the registry, which is what puts
+    // an `espflash erase-flash` in front of a silicon run of it.
+    assert_eq!(series(&usb, "upload-walk-usb", "fs-mount").len(), 2);
+    assert!(find_payload("upload-walk-usb").unwrap().fresh_chip);
+}
+
+/// **G5-2.** The meteor ledger over the USB link, against spike report
+/// §11.2 — which is the desk's only heap comparison on a *loaded* device.
+///
+/// §11.2 has three columns and they do not agree with each other, so each
+/// figure below names the one it is compared to:
+///
+/// | figure | §11.2 esp-emu | §11.2 silicon | ours |
+/// |---|---:|---:|---:|
+/// | `[mem] load_project after` | 216,056 | 215,992 bridged / **216,056** direct | **216,056** |
+/// | steady heartbeat `freeBytes` | 152,320 | **152,316** | both, five seconds apart |
+/// | `[stack] high-water` | 35,768 | **35,768** | **35,768** |
+/// | of a stack of | 71,328 (spike image) | **71,544** | **71,544** |
+///
+/// Two of those are worth saying out loud.
+///
+/// The stack **size** is 71,544 here and 71,328 in esp-emu's column, and the
+/// difference is the 216 B of `.bss` the `spike_uart0_link` `Uart` driver
+/// adds: esp-emu ran `merged-spike.bin` because it had to, and this run does
+/// not, so it is silicon's own `merged-default.bin` figure that ours matches.
+///
+/// And §11.2's "steady `freeBytes` −4 B" is not a difference between
+/// machines. **This single run reports both values** — 152,316 at ten,
+/// fifteen and twenty-five seconds and 152,320 at twenty — so the 4 B is a
+/// live allocation coming and going between samples, the same shape DD26's
+/// 104 B turned out to have. A cross-configuration delta of one sample of it
+/// was comparing the die roll.
+#[test]
+fn g5_2_the_meteor_ledger_over_usb_matches_11_2() {
+    let t = load("meteor-walk-usb", WALK);
+    assert_eq!(t.header.firmware_features, ["esp32c6", "server", "radio"]);
+
+    // The load gate. Byte-equal to esp-emu's column and to silicon's DIRECT
+    // upload; silicon's bridged walk read 215,992, which §11.2 attributes to
+    // the host's connect moment against the 5 s heartbeat. A script has no
+    // wall clock, so there is no offset to inherit — and the live client run
+    // this script was captured from DID land on 215,992, which is that same
+    // drift observed rather than argued.
+    assert_eq!(
+        gate(&t, "meteor-walk-usb", "load_project after", "free_bytes"),
+        "216056"
+    );
+    assert_eq!(
+        gate(&t, "meteor-walk-usb", "load_project before", "free_bytes"),
+        "261100"
+    );
+    assert_eq!(
+        gate(&t, "meteor-walk-usb", "stop_all_projects before", "free_bytes"),
+        "264716"
+    );
+
+    // The steady heartbeat, with the project loaded and running. Both of
+    // §11.2's values appear in this one run.
+    assert_eq!(
+        free_at(&t, "meteor-walk-usb", "25"),
+        152_316,
+        "silicon's steady figure, byte-equal"
+    );
+    assert_eq!(
+        free_at(&t, "meteor-walk-usb", "20"),
+        152_320,
+        "and esp-emu's, five seconds earlier"
+    );
+    let beats = series(&t, "meteor-walk-usb", "heartbeat");
+    for secs in ["10", "15", "20", "25"] {
+        let project = &beats.iter().find(|s| s.key == secs).unwrap().values["loaded_projects"];
+        assert!(
+            project.contains("/projects/Meteor"),
+            "a `steady` figure is a figure with the project running: {project}"
+        );
+    }
+
+    // The stack, on both numbers.
+    assert_eq!(first_stack_report(&t), (35_768, 71_544));
+}
+
+/// **G5-3, DD30 on the bytes the milestone is actually about.** The shipped
+/// image, from **flash**, over the USB link, with a host attached — on our
+/// machine and on the desk board, from one commit built one way.
+///
+/// | figure | ours (`t1`) | silicon | |
+/// |---|---:|---:|---|
+/// | `[stack] high-water` | 11,908 B | 11,908 B | **equal** |
+/// | of a stack of | 71,512 B | 71,512 B | equal |
+/// | `totalBytes` | 325,536 | 325,536 | equal |
+/// | `freeBytes` @ 5 s | 265,104 | 265,096 | **+8** |
+/// | `usedBytes` @ 5 s | 60,432 | 60,440 | −8 |
+///
+/// **Eight bytes again**, and that is the finding. P4 measured the same eight
+/// on the `memory_fs` image and named the board's boot history as the leading
+/// candidate: it was on its third boot after a user reset against our first.
+/// This capture was taken after an `espflash erase-flash`, and the board came
+/// up on `bootCount 10` — the boot ledger is not in the part an erase clears
+/// — so silicon has now been sampled at boot 3 and at boot 10, on two
+/// different filesystem backings, at two commits, and the gap has not moved
+/// by a byte. **The boot-history candidate is refuted.**
+///
+/// What the pair does say is stronger than either half: the cost of the
+/// filesystem backing is identical on the two machines. memfs minus flash is
+/// 266,400 − 265,104 = **1,296 B** on ours and 266,392 − 265,096 = **1,296 B**
+/// on silicon. So the eight bytes are not the flash driver, not the
+/// filesystem, not the commit and not the boot count: they are one live
+/// 8-byte block silicon has in every configuration measured and we have in
+/// none. Naming it needs a heap walk on both sides, which no `--probe` can
+/// do on a board, or a silicon capture at a true power-on (`bootCount 1`
+/// needs a power cycle, not a reset). Both are P5's carried items.
+///
+/// **Nothing was tuned.** This test fails the day the gap moves either way.
+#[test]
+fn g5_3_dd30_on_flash_backed_bytes_is_still_eight() {
+    let ours = load("boot-idle-flash", FLASH_OURS);
+    let silicon = load("boot-idle-flash", FLASH_SILICON);
+    for t in [&ours, &silicon] {
+        assert_eq!(t.header.firmware_commit, "735af98ae9d9");
+        assert_eq!(t.header.firmware_features, ["esp32c6", "server", "radio"]);
+    }
+    // The one thing a flash-backed pair has to prove about itself: both sides
+    // started on a part with no filesystem on it.
+    for (name, t) in [("ours", &ours), ("silicon", &silicon)] {
+        assert_eq!(
+            series(t, "boot-idle-flash", "fs-mount").len(),
+            2,
+            "{name}: the mount-failed / formatted pair"
+        );
+    }
+    assert!(
+        silicon
+            .header
+            .source
+            .as_deref()
+            .unwrap()
+            .contains("erase-flash"),
+        "and on the board that is an erase, not a hope"
+    );
+
+    let report = replay(&ours, &silicon, ReplayOptions::default()).expect("the replay runs");
+    println!("{}", report.render());
+
+    assert_eq!(first_stack_report(&ours), first_stack_report(&silicon));
+    assert_eq!(first_stack_report(&ours), (11_908, 71_512));
+
+    let beat = |t: &Transcript, field: &str| -> i64 {
+        series(t, "boot-idle-flash", "heartbeat")
+            .iter()
+            .find(|s| s.key == "5")
+            .expect("the five-second heartbeat")
+            .values[field]
+            .parse()
+            .unwrap()
+    };
+    assert_eq!(beat(&ours, "total_bytes"), beat(&silicon, "total_bytes"));
+    assert_eq!(
+        beat(&ours, "free_bytes") - beat(&silicon, "free_bytes"),
+        8,
+        "the residual is eight bytes on flash-backed bytes too"
+    );
+    assert_eq!(
+        beat(&ours, "used_bytes") - beat(&silicon, "used_bytes"),
+        -8,
+        "complementary: one live block, not a leak on either side"
+    );
+
+    // The filesystem backing costs the same on both machines, which is what
+    // turns "8 B on memfs" and "8 B on flash" into one constant rather than
+    // two coincidences. P4's memfs pair is the other half of this sum.
+    let memfs_ours = free_at(&load("boot-idle", OURS_SILICON_COMMIT), "boot-idle", "5");
+    let memfs_silicon = free_at(&load("boot-idle", SILICON), "boot-idle", "5");
+    assert_eq!(memfs_ours - beat(&ours, "free_bytes"), 1_296);
+    assert_eq!(memfs_silicon - beat(&silicon, "free_bytes"), 1_296);
+
+    // And the board's own history, stated rather than smoothed over: an
+    // erase does not reset the boot ledger, so this is boot ten against our
+    // first — and the eight bytes did not care.
+    let recovery = |t: &Transcript, field: &str| -> String {
+        series(t, "boot-idle-flash", "heartbeat")
+            .iter()
+            .find(|s| s.key == "5")
+            .unwrap()
+            .values[field]
+            .clone()
+    };
+    assert_eq!(recovery(&ours, "boot_count"), "1");
+    assert_eq!(recovery(&silicon, "boot_count"), "10");
+    assert_eq!(recovery(&ours, "reset_reason"), "power-on");
+    assert_eq!(recovery(&silicon, "reset_reason"), "user-reset");
+}
+
+/// The negative control for all three above: a changed digit has to reach
+/// the series, or none of it means anything. The file on disk is never
+/// touched.
+#[test]
+fn p5_a_changed_digit_reaches_the_series() {
+    let real = load("meteor-walk-usb", WALK);
+    assert_eq!(
+        gate(&real, "meteor-walk-usb", "load_project after", "free_bytes"),
+        "216056"
+    );
+    let corrupted = load_with_body("meteor-walk-usb", WALK, |body| {
+        body.replace("216056 B free", "216057 B free")
+    });
+    assert_eq!(
+        gate(
+            &corrupted,
+            "meteor-walk-usb",
+            "load_project after",
+            "free_bytes"
+        ),
+        "216057",
+        "a changed digit must reach the series, or the gate is decorative"
+    );
+}
+
+/// The three transcripts P5 recorded, and what their sidecars have to say
+/// before any figure in them is worth reading.
+#[test]
+fn p5_transcripts_are_the_shipped_image_on_its_own_link() {
+    let root = transcripts();
+    for (payload, name, commit) in [
+        ("upload-walk-usb", WALK, "d6cfaa2051ae"),
+        ("meteor-walk-usb", WALK, "d6cfaa2051ae"),
+        ("boot-idle-flash", FLASH_OURS, "735af98ae9d9"),
+    ] {
+        let path = root.join(payload).join(name);
+        let t = Transcript::load(&path).unwrap();
+        assert_eq!(t.header.payload, payload);
+        assert_eq!(t.header.firmware_commit, commit);
+        assert_eq!(
+            t.header.firmware_features,
+            vec!["esp32c6", "server", "radio"],
+            "{payload}: the SHIPPED image — flash-backed, no memfs, no spike link"
+        );
+        let source = t.header.source.as_deref().unwrap();
+        assert!(source.contains("--strict-bus"), "{source}");
+        assert!(!source.contains("spike_uart0_link"), "{source}");
+        assert!(
+            source.contains("--usb-sj file:"),
+            "the capture is what a host on the shipped link received: {source}"
+        );
+        assert_eq!(
+            t.header.trust.grade(FieldClass::UsbSerialJtag),
+            lp_emu_validate::grade::Grade::Modeled,
+            "{payload}: still `modeled`, with the evidence in the reason (DD33 Q4)"
+        );
+    }
+}

@@ -140,8 +140,16 @@ fn the_host_side_properties_are_not_mirrored_and_that_is_the_point() {
             // image over the shipped link too — and P5's route to closing
             // DD30 on flash-backed bytes.
             "boot-idle-flash",
+            // P5's two walks. A walk carries BOTH host fields and they mean
+            // different things: `host_plan` is the cable (attached, draining,
+            // from power-on) and `host_script` is the conversation an
+            // application had over it. Every other scenario here has a plan
+            // and no script, which is what made the distinction easy to miss.
+            "upload-walk-usb",
+            "meteor-walk-usb",
         ],
-        "the emu-m6 set plus M4's flash-backed boot, and nothing else, drives the host"
+        "the emu-m6 set, M4's flash-backed boot and P5's two walks — and nothing else — drive \
+         the host"
     );
 }
 
