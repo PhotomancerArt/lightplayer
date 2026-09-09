@@ -21,8 +21,8 @@
 //! Each event prints a human line **and** a structured record:
 //!
 //! ```text
-//! [espnow-broadcast] tx device=0x8cb48762 event=1 kind=1 payload_len=0
-//! [fw-check-json] {"kind":"espnow-tx","n":0,"device":2360641378,"event":1,"msg_kind":1,"payload_len":0}
+//! [espnow-broadcast] tx device=0x8cb48762 event=0 kind=1 payload_len=0
+//! [fw-check-json] {"kind":"espnow-tx","n":0,"device":2360641378,"event":0,"msg_kind":1,"payload_len":0}
 //! [espnow-broadcast] rx device=0x7ca88562 event=17 kind=1 payload_len=8
 //! [fw-check-json] {"kind":"espnow-rx","n":0,"peer":2091418978,"gap":0,"msg_kind":1,"len_ok":true}
 //! ```
@@ -37,7 +37,7 @@
 //! It cannot compare, and pretending otherwise would make every capture red
 //! for a reason that says nothing about a model.
 //!
-//! A receiver's own `tx` counter starts at 1 at its own power-on, so `event`
+//! A receiver's own `tx` counter starts at 0 at its own power-on, so `event`
 //! on the **tx** record compares exactly. The peer's counter does not: on the
 //! desk, two boards are captured one after the other through one port, so the
 //! board that is *not* being recorded has been powered — and counting — since
@@ -72,7 +72,7 @@
 //! — so the ladder here is deliberately four different sizes:
 //!
 //! ```text
-//! event 1 2 3 4 5 6 …
+//! event 0 1 2  3  4 5 …
 //! bytes 0 8 24 64 0 8 …
 //! ```
 //!
@@ -137,13 +137,16 @@ pub const DEADLINE_TICKS: u32 = 200;
 /// The payload lengths the ladder walks, by event number.
 pub const PAYLOAD_LENS: [usize; 4] = [0, 8, 24, 64];
 
-/// The payload length event `event` carries. `event` is 1-based, as the
-/// driver's own counter is.
+/// The payload length event `event` carries.
+///
+/// `event` is the **driver's own** `RadioEventId`, which is 0-based and is the
+/// number that goes on the wire — so a receiver can evaluate this from the
+/// frame alone. (`test_espnow` printed a 1-based counter of its own on the tx
+/// line and the driver's 0-based id on the rx line, which is why its two
+/// numbers for one frame never matched; this payload prints one number, the
+/// wire's.)
 pub const fn payload_len_for(event: u32) -> usize {
-    if event == 0 {
-        return 0;
-    }
-    PAYLOAD_LENS[((event - 1) % PAYLOAD_LENS.len() as u32) as usize]
+    PAYLOAD_LENS[(event % PAYLOAD_LENS.len() as u32) as usize]
 }
 
 /// The bytes event `event` carries, written into `out`.
@@ -335,6 +338,22 @@ pub fn write_done<W: fmt::Write>(w: &mut W) -> fmt::Result {
     writeln!(w, "{DONE_MARKER}")
 }
 
+/// Write one tx record through any [`fmt::Write`] sink, prefix and newline
+/// included.
+///
+/// Sink-agnostic for [`crate::write_header`]'s reason: this crate cannot prove
+/// a `log` sink is installed, and the C6 harness prints its header, its lines
+/// and its records through `esp_println::Printer` so that all three share one
+/// path and cannot interleave.
+pub fn write_tx_record<W: fmt::Write>(w: &mut W, record: &TxRecord) -> fmt::Result {
+    writeln!(w, "{}{record}", crate::FW_CHECK_JSON_PREFIX)
+}
+
+/// Write one rx record through any [`fmt::Write`] sink.
+pub fn write_rx_record<W: fmt::Write>(w: &mut W, record: &RxRecord) -> fmt::Result {
+    writeln!(w, "{}{record}", crate::FW_CHECK_JSON_PREFIX)
+}
+
 /// Emit one tx record through `log`.
 pub fn emit_tx_record(record: &TxRecord) {
     crate::emit_record_json(format_args!("{record}"));
@@ -354,19 +373,19 @@ mod tests {
 
     #[test]
     fn the_ladder_walks_four_sizes_in_the_first_four_events() {
-        let lens: std::vec::Vec<usize> = (1..=6).map(payload_len_for).collect();
+        let lens: std::vec::Vec<usize> = (0..6).map(payload_len_for).collect();
         assert_eq!(lens, std::vec![0, 8, 24, 64, 0, 8]);
         // U2's experiment needs two *different* lengths from one boot, and it
-        // has them by event 2.
-        assert_ne!(payload_len_for(1), payload_len_for(2));
+        // has them by the second frame.
+        assert_ne!(payload_len_for(0), payload_len_for(1));
     }
 
     #[test]
     fn the_payload_bytes_are_a_function_of_the_event() {
         let mut a = [0u8; 64];
         let mut b = [0u8; 64];
-        let la = fill_payload(2, &mut a);
-        let lb = fill_payload(6, &mut b);
+        let la = fill_payload(1, &mut a);
+        let lb = fill_payload(5, &mut b);
         assert_eq!(la, 8);
         assert_eq!(lb, 8);
         assert_ne!(a[..la], b[..lb], "two events of one length sent one blob");
@@ -423,10 +442,10 @@ mod tests {
     #[test]
     fn len_ok_checks_the_byte_count_against_the_peers_own_event_number() {
         // Phase-independent: the peer's event says 8 bytes and 8 arrived.
-        assert!(rx_record(0, 9, 2, 1, 8, 0).len_ok);
-        assert!(rx_record(0, 9, 46, 1, 8, 1).len_ok);
+        assert!(rx_record(0, 9, 1, 1, 8, 0).len_ok);
+        assert!(rx_record(0, 9, 45, 1, 8, 1).len_ok);
         // A short frame is visible however far along the peer's counter is.
-        assert!(!rx_record(0, 9, 2, 1, 7, 0).len_ok);
+        assert!(!rx_record(0, 9, 1, 1, 7, 0).len_ok);
     }
 
     #[test]
@@ -434,7 +453,7 @@ mod tests {
         let tx = TxRecord {
             n: 0,
             device: 0x8cb4_8762,
-            event: 1,
+            event: 0,
             msg_kind: 1,
             payload_len: 0,
         };
@@ -442,23 +461,23 @@ mod tests {
         crate::checks::espnow_broadcast::write_tx_line(&mut out, &tx).unwrap();
         assert_eq!(
             out,
-            "[espnow-broadcast] tx device=0x8cb48762 event=1 kind=1 payload_len=0\n"
+            "[espnow-broadcast] tx device=0x8cb48762 event=0 kind=1 payload_len=0\n"
         );
         assert_eq!(
             std::format!("{tx}"),
-            r#"{"kind":"espnow-tx","n":0,"device":2360641378,"event":1,"msg_kind":1,"payload_len":0}"#
+            r#"{"kind":"espnow-tx","n":0,"device":2360641378,"event":0,"msg_kind":1,"payload_len":0}"#
         );
 
-        let rx = rx_record(0, 0x7ca8_8562, 17, 1, 0, 0);
+        let rx = rx_record(0, 0x7ca8_8562, 16, 1, 0, 0);
         assert_eq!(
             std::format!("{rx}"),
             r#"{"kind":"espnow-rx","n":0,"peer":2091418978,"gap":0,"msg_kind":1,"len_ok":true}"#
         );
         let mut line = String::new();
-        write_rx_line(&mut line, 0x7ca8_8562, 17, 1, 0).unwrap();
+        write_rx_line(&mut line, 0x7ca8_8562, 16, 1, 0).unwrap();
         assert_eq!(
             line,
-            "[espnow-broadcast] rx device=0x7ca88562 event=17 kind=1 payload_len=0\n"
+            "[espnow-broadcast] rx device=0x7ca88562 event=16 kind=1 payload_len=0\n"
         );
     }
 
