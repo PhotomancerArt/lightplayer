@@ -24,6 +24,7 @@
 //! that *did* write `pgm_data` would see on silicon before a burn.
 
 use lp_emu_esp_common::RegFile;
+use lp_emu_esp_common::periph::RegGrade;
 
 use crate::loader::EfuseIdentity;
 use crate::regs;
@@ -60,8 +61,35 @@ pub fn identity(w0: u32, w1: u32, w3: u32) -> EfuseIdentity {
 }
 
 /// The block, seeded.
+///
+/// # Grades
+///
+/// The PAC grades give every register the block's honest default; the three
+/// identity words are promoted to `Documented` by hand, because the PAC
+/// calls them read-only (a burned fuse is not writable) and
+/// [`RegFile::with_pac_grades`] therefore leaves them `Modeled` on the
+/// read-only rule alone — which says nothing about whether the *bits* are
+/// right.
+///
+/// | register | grade | source |
+/// |---|---|---|
+/// | `rd_mac_spi_sys_0` +0x44 | `documented` | esp-hal 1.1.1 `efuse/esp32c6/fields.rs` `MAC` = bits 0..48 of block 1, big-endian (`efuse/mod.rs:206`); the bytes are this run's own `--efuse-mac` |
+/// | `rd_mac_spi_sys_1` +0x48 | `documented` | same field's high half, plus `MAC_EXT` = bits 48..64, zero |
+/// | `rd_mac_spi_sys_3` +0x50 | `documented` | `WAFER_VERSION_MINOR` bits 114..118, `_MAJOR` bits 118..120 (`fields.rs`) |
+///
+/// Nothing here is `measured`: that grade needs a committed silicon
+/// transcript naming the register, and the identity words are configuration
+/// rather than something silicon told us. What M3 P2 *did* establish is that
+/// two independent readers — esp-hal's `read_field_le` and espflash 3.3.0's
+/// own chip detection, over the mask ROM's download console — extract the
+/// same MAC out of these three words.
 pub fn efuse(id: EfuseIdentity) -> RegFile {
-    let mut rf = RegFile::new("EFUSE", 0x200).with_names(regs::EFUSE);
+    let mut rf = RegFile::new("EFUSE", 0x200)
+        .with_names(regs::EFUSE)
+        .with_pac_grades()
+        .with_grade(RD_MAC_SPI_SYS_0, RegGrade::Documented)
+        .with_grade(RD_MAC_SPI_SYS_1, RegGrade::Documented)
+        .with_grade(RD_MAC_SPI_SYS_3, RegGrade::Documented);
     for (off, word) in words(&id) {
         rf.poke(off, word);
     }

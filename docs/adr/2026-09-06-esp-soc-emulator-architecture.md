@@ -306,13 +306,23 @@ The list the direct loader carries has a counterpart, and it is short:
 1. **`Saved PC:`** — `ASSIST_DEBUG.core_0_lastpc_before_exception` is zero on
    a machine that has never run. Silicon's boot after an espflash reset had
    the PC it interrupted in it.
-2. **The download console does not answer commands.** The strap reaches the
+2. ~~**The download console does not answer commands.** The strap reaches the
    ROM's real download path and it prints `waiting for download`, but a
    scripted esptool SYNC gets no reply: the ROM begins with baud-rate
    auto-detection over `UART0`'s pulse-width counters (`rxd_cnt`,
-   `low_pulse_cnt`, `high_pulse_cnt`), which the UART model does not drive.
-   That is one measurable thing with a name, and plan two's shim is where it
-   belongs.
+   `low_pulse_cnt`, `high_pulse_cnt`), which the UART model does not drive.~~
+   **Closed 2026-09-08/09** — and the stated cause was wrong, which is worth
+   more than the closure. The USB console never reads the pulse-width
+   counters at all, and the USB model answered unchanged: the SYNC was never
+   *delivered*, because `scripts/rom-download-sync.usb` stamped `20000` in a
+   slot the grammar reads as **milliseconds** and the script meant
+   microseconds, so the frame arrived twenty seconds after the run had ended
+   (M3 P1, #620). A script unit bug had been written down as a missing
+   peripheral model for two days. The auto-baud model is real, but it belongs
+   to the **UART0** console, which the ROM does drive that way: `--uart0-baud`
+   states the rate the counters measure, the first SYNC is consumed by
+   detection as it is on silicon, and the second is the one answered. See the
+   amendment below.
 3. ~~**Three `pll_cal exceeds 2ms` lines**, from the ROM's
    `wait_rfpll_cal_end` polling an analog register the `I2C_ANA_MST` accept
    block cannot answer per-register.~~ **Closed 2026-09-08**: the block is
@@ -320,7 +330,8 @@ The list the direct loader carries has a counterpart, and it is short:
    ROM both address, so a `regi2c` read answers the register it asked for
    (`periph/i2c_ana_mst.rs`,
    `docs/defects/2026-09-08-regi2c-is-one-data-register-not-a-register-file.md`).
-   The list is two items now.
+   With item 2 closed a day later, **the list is one item now** — `Saved PC:`,
+   which is a memory of a previous run that a fresh chip cannot have.
 (A fourth item lasted one day. The mask ROM's console drops a character
 rather than waiting when the IN endpoint is not free, so the modelled
 `IN_DRAIN_LATENCY_US` was losing runs of the densest output over USB while
@@ -351,6 +362,114 @@ should *default* to, and M8 answered it by what each is for:
 `Payload::boot` (`BootPath::{Direct, RomUp}`) is how a recorded payload says
 which one it means — `rom-up-boot` is the first and, for now, only `RomUp`
 one.
+
+#### Amendment (M3, 2026-09-08/09): the download console answers, and a real flasher writes a real image
+
+Deviation 2 above is closed, and the sentence it was written in was wrong in
+a way worth keeping on the record: **"the ROM begins with baud-rate
+auto-detection over UART0's pulse-width counters, which the UART model does
+not drive" was not why the console was silent.** The USB console does not
+read those counters at all, and the USB model needed no change. The SYNC was
+never delivered: `scripts/rom-download-sync.usb` stamped `20000` in a slot
+whose grammar reads **milliseconds**, and the script meant microseconds, so
+the frame was scheduled twenty seconds into a run that ended long before. A
+unit bug in a test script had been recorded as a missing peripheral model.
+
+What is now true, and what each half of it rests on.
+
+**The console answers, on both consoles.** `SYNC` and `READ_REG` are answered
+by the real mask ROM — no hook, the hook table is still empty — over
+USB-Serial-JTAG and over UART0, and `READ_REG` returns the eFuse MAC *the run
+was given* (`--efuse-mac`), so the gate cannot pass on a constant.
+`tests/rom_download_console.rs` is the gate; `scripts/rom-download-sync.usb`
+is a script somebody runs, not the thing being trusted.
+
+**The UART0 auto-baud model is real, and is what it says it is.** The ROM
+does drive `rxd_cnt` / `low_pulse_cnt` / `high_pulse_cnt` on the UART0
+console, and `Uart::with_host_baud` (the `--uart0-baud` flag, mirrored on
+`lp-cli emu run`) models them **from a stated host baud** rather than from a
+measured edge: the rate is configuration, the consumption is not. The first
+SYNC is eaten by detection exactly as it is on silicon, and the second is the
+one answered. Applied before the power-on snapshot, so a reboot keeps it.
+
+**A real flasher writes a real image, over a socket.** The machine comes up
+`--boot-mode rom-up` with a **writable** chip — `--merged` stays read-only by
+design, because it is the image a gate named, and here the image is the
+flasher's *input*, not the chip's contents — a pty appears in front of the
+machine's byte socket (`scripts/emu/pty-tcp-bridge.py`), the flasher writes,
+the host performs its reset dance on the `--control` channel, and the chip
+boots what was just written. `scripts/emu/flash-over-socket.sh` is the whole
+story with one exit code per failure. A full run writes 4 MiB, verifies the
+hash, resets, and the app says hello.
+
+That the hello came from the *newly written* image is shown rather than
+assumed, by running the recipe twice with two images that differ only in the
+commit they were built at, each seeding the chip for the other's run:
+
+```text
+--seed d6cfaa205 …, flash 735af98ae …  →  "commit":"735af98ae9d9"
+--seed 735af98ae …, flash d6cfaa205 …  →  "commit":"d6cfaa2051ae"
+```
+
+The chip was holding a complete, bootable image in both runs, and the hello
+followed what the flasher wrote both times.
+
+**Stub versus `--no-stub`, which is the finding plan two asked for.** Both
+paths were driven, and they end differently.
+
+- `--no-stub` **works**, end to end: sync, chip detection, eFuse read, attach,
+  erase, program, and the ROM's own `SPI_FLASH_MD5` over what it programmed.
+  The bytes in the persistent backing are byte-identical to the image.
+- The **stub** uploads and runs — it is real RV32 code, and the modelled hart
+  executes it for 19.5 M cycles — and then reads `0x6000_4038`, which is
+  `I2C0.scl_high_period`, to pick the argument for the ROM's
+  `spi_flash_attach`. This machine's C6 boot set does not map I2C0, so the
+  strict bus refuses and the run ends. Run permissively, where an unclaimed
+  address reads 0 and is *counted*, the same stub goes on to erase and program
+  correctly, with `unmapped_reads() == 1` and `unmapped_writes() == 0` for the
+  whole run. **The stub is one unmapped block away from working, and that
+  block is touched once.** I2C0 was not added to the boot set: nobody has
+  measured what that register reads on a part, and mapping it would be the
+  machine asserting the PAC's reset value as behaviour. Filed at
+  `docs/defects/2026-09-09-the-esptool-stub-reads-i2c0-a-block-the-c6-boot-set-does-not-map.md`.
+
+**One grade moved, and it was the derived metadata that was wrong.** Naming
+`SPI1` in a run's strict-grade scope refused the mask ROM's own flash-timing
+setup, because `with_pac_grades()` reads the generated access table and the
+PAC calls `ctrl2` write-only. It is not: `spi_common_set_flash_cs_timing`
+(`0x4002_497e`) read-modify-writes it twice and both `andi`s preserve bits it
+did not write. The behaviour had always been right — `RegFile` does not
+enforce the access table — but the *grade* was wrong in the direction that
+hides a working path behind a refusal
+(`docs/defects/2026-09-09-the-pac-calls-spi-ctrl2-write-only-and-the-mask-rom-reads-it.md`).
+
+#### What this amendment does **not** claim
+
+- **Nothing here is `measured`.** SPI1's rows are `documented`, sourced from
+  the PAC and from the vendored ROM's disassembly; the eFuse identity words
+  are `documented` from esp-hal's field table. A `measured` grade needs a
+  committed silicon transcript naming the register, and this milestone
+  produced none.
+- **`EFUSE` is deliberately ungraded for strict purposes.** The mask ROM reads
+  `rd_repeat_data0` on its way to the console and the model answers zero from
+  a reading, not from a part; `modeled` is honest, so the block stays out of a
+  `documented` scope rather than being promoted to make a gate green.
+- **The browser half is untouched.** esptool-js, a Web Serial shim, and the
+  in-browser stub are plan two's M5. What this milestone hands that work is
+  the native half and the stub finding above, not a browser path.
+- **The stub's own path is only partly graded.** What it touched through SPI1
+  and the two consoles is graded; I2C0 is unmapped, and anything the stub
+  would have reached *after* `spi_flash_attach` on a machine that mapped it is
+  unexplored, because the permissive run is a probe and not a claim.
+- **`esptool` is not a gate.** It is installed locally and
+  `flash-over-socket.sh` defaults to it as a second client (OQ8); CI gates the
+  espflash **library** path, which needs no new tool in any job.
+
+This milestone satisfies plan two's **M4 row (RD8)** — the native download
+console, both exchanges, both consoles, strict-clean, as tests rather than as
+a script somebody runs — and plan two's **M5 keeps the browser stub path**,
+now with the measured answer above about what that stub does and does not
+need.
 
 ### Honest peripherals: strict bus, `modeled` grades, and no invented answers
 
