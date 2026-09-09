@@ -209,17 +209,17 @@ impl BlockStats {
 /// P1 measured **37,517 distinct block starts** on `render-basic` and 34,906
 /// on `render-rocaille`; 2^12 would thrash and 2^16 leaves the table a little
 /// over half occupied. 512 KiB of table at 8 bytes an entry.
-pub const DEFAULT_TABLE_BITS: u32 = 16;
+pub const DEFAULT_TABLE_BITS: u32 = 18;
 
 /// Default slot-arena cap.
 ///
 /// P1's working set is ~37.5 k blocks at a mean of 4.69 slots — about 176 k
 /// slots. 2^19 leaves room for the re-decodes a direct-mapped table's
 /// collisions cause without ever reaching the capacity flush.
-pub const DEFAULT_ARENA_SLOTS: usize = 1 << 19;
+pub const DEFAULT_ARENA_SLOTS: usize = 1 << 21;
 
 /// Default cap on distinct live blocks, for the same reason.
-pub const DEFAULT_BLOCK_CAP: usize = 1 << 17;
+pub const DEFAULT_BLOCK_CAP: usize = 1 << 19;
 
 /// A direct-mapped cache of pre-decoded blocks over one flat slot arena.
 ///
@@ -228,7 +228,9 @@ pub const DEFAULT_BLOCK_CAP: usize = 1 << 17;
 /// get wrong. `rv32emu`'s `code_cache_flush` makes the same choice.
 pub struct BlockCache<S: Slot> {
     table: Box<[Entry]>,
-    index_mask: u32,
+    /// `32 - table_bits`: the shift that turns [`BlockCache::index_of`]'s
+    /// multiply into a table index.
+    index_shift: u32,
     blocks: Vec<Block>,
     block_cap: usize,
     arena: Vec<S>,
@@ -255,7 +257,7 @@ impl<S: Slot> BlockCache<S> {
         let entries = 1usize << table_bits;
         Self {
             table: vec![EMPTY_ENTRY; entries].into_boxed_slice(),
-            index_mask: (entries as u32) - 1,
+            index_shift: 32 - table_bits,
             blocks: Vec::new(),
             block_cap,
             arena: Vec::new(),
@@ -284,10 +286,20 @@ impl<S: Slot> BlockCache<S> {
         self.table.len()
     }
 
+    /// The table index for a block start.
+    ///
+    /// A multiply-shift (Fibonacci) mix, not the low bits. RVC makes every
+    /// `pc` 2-aligned so bit 0 carries no information, but the *next* sixteen
+    /// do not identify a block either: the ESP32-C6 runs code out of a 16 MiB
+    /// flash-cache window, hp-sram at `0x4080_0000` and mask ROM at
+    /// `0x4000_0000`, so a plain `(pc >> 1) & mask` aliases every block start
+    /// that shares its low 17 address bits — which on the render loop meant
+    /// **864,230 collisions and 955,532 decodes against a working set of
+    /// 37,517**, measured before this line changed. One `imul` and a shift
+    /// spread the whole address, and the tag still decides.
     #[inline]
     fn index_of(&self, pc: u32) -> usize {
-        // RVC makes every `pc` 2-aligned, so bit 0 carries no information.
-        ((pc >> 1) & self.index_mask) as usize
+        ((pc >> 1).wrapping_mul(0x9E37_79B1) >> self.index_shift) as usize
     }
 
     /// The block starting at `pc`, if one is cached.
@@ -302,15 +314,18 @@ impl<S: Slot> BlockCache<S> {
         Some(self.blocks[entry.block as usize])
     }
 
-    /// One slot of a block, by absolute arena index.
+    /// A block's slots, in order.
     ///
-    /// Bounds-checked on purpose: the milestone forbids `unsafe` for
-    /// dispatch, and a mis-derived index must be a panic rather than a wild
-    /// read.
+    /// The arena is borrowed for the length of the block rather than indexed
+    /// per instruction: one bounds check instead of one per slot, and the
+    /// inner loop walks a slice. Bounds-checked, not `unsafe` — the milestone
+    /// forbids `unsafe` for dispatch, and a mis-derived range must be a panic
+    /// rather than a wild read.
     #[inline]
     #[must_use]
-    pub fn slot(&self, index: u32) -> S {
-        self.arena[index as usize]
+    pub fn slots_of(&self, block: &Block) -> &[S] {
+        let start = block.start as usize;
+        &self.arena[start..start + block.len as usize]
     }
 
     /// Count a slot as executed, for [`BlockStats::mean_block_len`].
@@ -533,8 +548,8 @@ mod tests {
 
         let found = cache.lookup(0x4080_0000).expect("cached");
         assert_eq!(found, block);
-        for i in 0..3 {
-            assert_eq!(cache.slot(found.start + i).tag, 0x4080_0000 + i);
+        for (i, slot) in cache.slots_of(&found).iter().enumerate() {
+            assert_eq!(slot.tag, 0x4080_0000 + i as u32);
         }
         assert_eq!(cache.stats().decodes, 1);
         assert_eq!(cache.stats().hits, 1);
@@ -666,7 +681,7 @@ mod tests {
         assert!(cache.lookup(0x1000).is_none());
         assert!(cache.lookup(0x1100).is_none());
         assert_eq!(cache.lookup(0x1200), Some(block));
-        assert_eq!(cache.slot(block.start).tag, 0x1200);
+        assert_eq!(cache.slots_of(&block)[0].tag, 0x1200);
     }
 
     #[test]

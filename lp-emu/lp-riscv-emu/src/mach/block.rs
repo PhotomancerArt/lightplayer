@@ -240,13 +240,20 @@ fn classify_compressed<B: Bus>(word: u32) -> Class<B> {
         (0b01, 0b101) => Class::Terminator(slot(InstClass::JalTail)),
         (0b01, 0b110) | (0b01, 0b111) => Class::Terminator(slot(InstClass::BranchTaken)),
 
-        // Q2: c.slli (000), c.lwsp (010), c.swsp (110). funct3 100 is
-        // c.jr/c.jalr/c.mv/c.add — `rs2 == 0` tells the jumps from the moves,
-        // and the whole group is treated as a terminator rather than
-        // re-deriving that split here. `JalrCall` (3) bounds all four.
+        // Q2: c.slli (000), c.lwsp (010), c.swsp (110).
         (0b10, 0b000) => Class::Body(slot(InstClass::Alu)),
         (0b10, 0b010) => Class::Body(slot(InstClass::Load)),
         (0b10, 0b110) => Class::Body(slot(InstClass::Store)),
+        // funct3 100 is four instructions sharing one encoding, split by
+        // `rs2` (RVC v2.0 §16.5): `rs2 != 0` is `c.mv`/`c.add`, which move a
+        // register and go straight on; `rs2 == 0` is `c.jr`/`c.jalr` (and
+        // `c.ebreak`, already refused above), which do not.
+        //
+        // Splitting them matters: `c.mv` and `c.add` are two of the most
+        // common instructions the compiler emits, and sweeping the whole
+        // group in with the jumps dropped the render loop's mean realised
+        // block length from 4.5 to 3.75 — measured, not guessed.
+        (0b10, 0b100) if (word >> 2) & 0x1f != 0 => Class::Body(slot(InstClass::Alu)),
         (0b10, 0b100) => Class::Terminator(slot(InstClass::JalrCall)),
 
         _ => Class::Refused,
@@ -267,6 +274,31 @@ pub(super) const MAX_BLOCK_SLOTS: usize = 64;
 mod tests {
     use super::*;
     use lp_emu_core::Memory;
+
+    /// What the slot's handler returns by value, in bytes.
+    ///
+    /// Not a claim about behaviour — the number M5's G3 report is built on,
+    /// pinned here so P4 can watch it fall. Inside `decode_execute` the
+    /// optimizer never materialises any of this: `LoggingDisabled` folds the
+    /// `log` field to `None` and the whole struct lives in registers. Across
+    /// the slot's **real call boundary** it becomes a 200-byte value returned
+    /// through memory on every cached instruction, and that — not the block
+    /// structure — is what Step A's speedup is spent on.
+    #[test]
+    fn the_slot_pays_for_a_200_byte_return_value() {
+        assert_eq!(
+            core::mem::size_of::<RvSlot<Memory>>(),
+            16,
+            "the slot itself"
+        );
+        assert_eq!(core::mem::size_of::<ExecutionResult>(), 56);
+        assert_eq!(
+            core::mem::size_of::<Result<ExecutionResult, EmulatorError>>(),
+            200,
+            "`EmulatorError`'s largest variant sets this, and every cached \
+             instruction returns it: P4's first job"
+        );
+    }
 
     fn class_of(word: u32) -> &'static str {
         match classify::<Memory>(word) {
@@ -313,9 +345,7 @@ mod tests {
         assert_eq!(class_of(0x0000_c101), "terminator", "c.beqz");
         assert_eq!(class_of(0x0000_e101), "terminator", "c.bnez");
         assert_eq!(class_of(0x0000_8082), "terminator", "c.jr ra (ret)");
-        // `c.mv`/`c.add` share quadrant 2 funct3 100 with the two jumps and
-        // are deliberately swept in with them.
-        assert_eq!(class_of(0x0000_8506), "terminator", "c.mv a0, ra");
+        assert_eq!(class_of(0x0000_9082), "terminator", "c.jalr ra");
     }
 
     #[test]
@@ -329,6 +359,9 @@ mod tests {
         assert_eq!(class_of(0x0000_4108), "body", "c.lw");
         assert_eq!(class_of(0x0000_c108), "body", "c.sw");
         assert_eq!(class_of(0x0000_0505), "body", "c.addi a0,1");
+        // The other half of quadrant 2 funct3 100, split by `rs2 != 0`.
+        assert_eq!(class_of(0x0000_8506), "body", "c.mv a0, ra");
+        assert_eq!(class_of(0x0000_9506), "body", "c.add a0, ra");
     }
 
     #[test]

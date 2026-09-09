@@ -179,6 +179,11 @@ struct MmioRange {
 }
 
 /// The SoC bus.
+/// Granularity of the `--strict-bus` code-page checker: the chip's own MMU
+/// page, and the granularity P1 measured the executed-page set at (428 pages
+/// on a whole render run).
+const CODE_PAGE_LEN: u32 = 4096;
+
 pub struct SocBus {
     /// Sorted by base, non-overlapping.
     regions: Vec<RamRegion>,
@@ -244,6 +249,30 @@ pub struct SocBus {
     unmapped_reads: u64,
     unmapped_writes: u64,
     first_strict_violation: Option<StrictViolation>,
+
+    /// Windows of guest **code** this bus has written from the host side
+    /// since the machine last drained them ([`SocBus::take_code_writes`]).
+    ///
+    /// A flash-cache MMU refill and a ROM-hook `ebreak` patch both write
+    /// instructions the guest will execute, and neither is followed by a
+    /// guest `fence.i` — we are not the guest. Every such write goes through
+    /// [`SocBus::load_image`], which is the funnel, so recording it here is
+    /// the whole of the emulator side of the block cache's invalidation.
+    code_writes: Vec<(u32, u32)>,
+
+    /// `--strict-bus` only: the 4 KiB pages the guest has fetched
+    /// instructions from.
+    ///
+    /// P1 measured 428 of these on a whole render run, so a set is small and
+    /// nothing is gained by a bitmap over the address space.
+    code_pages: BTreeSet<u32>,
+    /// `--strict-bus` only: code pages the **guest** has stored into since
+    /// the last `fence.i`.
+    unpublished_code_pages: BTreeSet<u32>,
+    /// `--strict-bus` only: how many times a page in
+    /// [`unpublished_code_pages`](Self::unpublished_code_pages) was then
+    /// executed. See [`SocBus::missing_fence_reports`].
+    missing_fence_reports: u64,
 
     /// Source levels → "the CPU interrupt this hart should take". Installed
     /// by the chip crate; [`NoCpuInterrupts`] until then.
@@ -332,6 +361,10 @@ impl SocBus {
             unmapped_reads: 0,
             unmapped_writes: 0,
             first_strict_violation: None,
+            code_writes: Vec::new(),
+            code_pages: BTreeSet::new(),
+            unpublished_code_pages: BTreeSet::new(),
+            missing_fence_reports: 0,
             matrix: Box::new(NoCpuInterrupts),
             request: None,
             memory_cost: None,
@@ -664,7 +697,76 @@ impl SocBus {
         }
         let off = (address - self.regions[i].base) as usize;
         self.regions[i].data[off..off + bytes.len()].copy_from_slice(bytes);
+        if self.regions[i].exec {
+            // The block cache's emulator-side funnel. Every host-side write
+            // of guest code comes through here — a flash-cache MMU refill
+            // (`cache::fill`), a ROM-hook `ebreak` patch (`rom::install_at`
+            // and `uninstall_all`), an ELF segment at build time, a snapshot
+            // restore's region reload — and none of them is followed by a
+            // guest `fence.i`, because none of them is the guest. The machine
+            // drains this at the slice boundary and invalidates.
+            self.code_writes
+                .push((address, address + bytes.len() as u32));
+        }
         Ok(())
+    }
+
+    /// Windows of guest code written from the host side since the last call.
+    ///
+    /// The machine drains this once per slice, beside `refill_cache`, and
+    /// hands each window to the hart's block cache. Empty on almost every
+    /// slice — P1 counted 98 cache refills across a whole render run.
+    pub fn take_code_writes(&mut self) -> Vec<(u32, u32)> {
+        core::mem::take(&mut self.code_writes)
+    }
+
+    /// True when nothing is waiting to be invalidated — the one-`bool` check
+    /// the slice boundary makes before doing anything.
+    #[inline]
+    pub fn code_writes_pending(&self) -> bool {
+        !self.code_writes.is_empty()
+    }
+
+    // ---- the `--strict-bus` missing-fence checker ----------------------
+
+    /// How many times `--strict-bus` has caught a code page being executed
+    /// after the guest wrote it with no `fence.i` in between.
+    ///
+    /// Zero on the product's own firmware is the claim the fence contract
+    /// makes; a `--boot rom-up` run is expected to report a handful, because
+    /// the mask ROM and the ESP-IDF second-stage bootloader copy code into
+    /// RAM and jump into it and we own neither (M5 MD13). That is what makes
+    /// this a working checker rather than an untested one.
+    #[inline]
+    pub fn missing_fence_reports(&self) -> u64 {
+        self.missing_fence_reports
+    }
+
+    /// 4 KiB pages the guest has fetched instructions from, under
+    /// `--strict-bus`. P1 measured 428 on a whole render run.
+    #[inline]
+    pub fn code_pages_seen(&self) -> usize {
+        self.code_pages.len()
+    }
+
+    /// A guest instruction at `pc` is about to run. Under `--strict-bus`,
+    /// remember its page and report it if the guest wrote that page and never
+    /// published the write.
+    #[inline(never)]
+    fn check_code_page(&mut self, pc: u32, publishing: bool) {
+        let page = pc & !(CODE_PAGE_LEN - 1);
+        if publishing {
+            self.code_pages.insert(page);
+        }
+        if self.unpublished_code_pages.remove(&page) {
+            self.missing_fence_reports += 1;
+            log::error!(
+                "strict-bus: code page {page:#010x} was written by the guest and then executed \
+                 at {pc:#010x} with no `fence.i` between. That is a firmware bug: instructions \
+                 published without a fence are not guaranteed to be visible to the fetch path on \
+                 real silicon, and the emulator's block cache will serve the old ones"
+            );
+        }
     }
 
     /// Dispatch every event due at or before `now` to the peripheral that
@@ -1156,6 +1258,16 @@ impl SocBus {
             if !self.regions[i].writable {
                 return Err(fault);
             }
+            if self.strict {
+                // `--strict-bus` only: the guest stored into a page it has
+                // executed from. It owes a `fence.i` before it executes there
+                // again, and the checker in `fetch_instruction` /
+                // `note_cached_execute` is what notices if it does not.
+                let page = address & !(CODE_PAGE_LEN - 1);
+                if self.code_pages.contains(&page) {
+                    self.unpublished_code_pages.insert(page);
+                }
+            }
             let off = (address - self.regions[i].base) as usize;
             let data = &mut self.regions[i].data;
             let stored = match width {
@@ -1422,6 +1534,9 @@ impl Bus for SocBus {
             return Err(fault());
         }
         self.last_fetch_region = i;
+        if self.strict {
+            self.check_code_page(address, true);
+        }
         if let Some(cost) = self.memory_cost.as_mut() {
             self.memory_cycles += cost.fetch(address);
         }
@@ -1546,6 +1661,50 @@ impl Bus for SocBus {
 
     fn pending_cpu_interrupt(&self) -> Option<u8> {
         self.matrix.cpu_interrupt(self.hart, &self.irq)
+    }
+
+    /// May the hart's block cache decode ahead of the guest?
+    ///
+    /// Two things on this bus make a fetch more than a read, and either one
+    /// makes reading an instruction the guest has not reached yet a change to
+    /// what the run counts or does:
+    ///
+    /// - a **memory-cost model** (`t3`) charges cycles for the fetch itself,
+    ///   so a decode-ahead fetch and the later execution would charge it
+    ///   twice or not at all;
+    /// - an **execute watchpoint** turns a fetch into a trap, and a
+    ///   decode-ahead would take it one or more instructions early.
+    ///
+    /// Both can appear and disappear mid-run — the grade is fixed at build
+    /// time, but a guest CSR write arms a trigger whenever it likes — so the
+    /// hart re-reads this after every instruction the cache did not run.
+    fn fetch_is_pure(&self) -> bool {
+        self.memory_cost.is_none()
+            && self.armed_for[kind_index(MemoryAccessKind::InstructionFetch)] == 0
+    }
+
+    /// Instructions in `[pc, pc + bytes)` are about to run from a cached
+    /// block, so this bus will see no fetch for them.
+    ///
+    /// Under `--strict-bus` the missing-fence checker lives on the fetch
+    /// path, and a cached block has no fetch path — this is where it is told
+    /// instead. Off by default and inlined away.
+    fn note_cached_execute(&mut self, pc: u32, bytes: u32) {
+        if !self.strict {
+            return;
+        }
+        // A block never crosses many pages; walk the ones it touches.
+        let mut at = pc & !(CODE_PAGE_LEN - 1);
+        let end = pc.saturating_add(bytes);
+        while at < end {
+            self.check_code_page(at.max(pc), false);
+            at = at.saturating_add(CODE_PAGE_LEN);
+        }
+    }
+
+    /// The guest retired a `fence.i`: everything it has written is published.
+    fn note_fence_i(&mut self) {
+        self.unpublished_code_pages.clear();
     }
 }
 

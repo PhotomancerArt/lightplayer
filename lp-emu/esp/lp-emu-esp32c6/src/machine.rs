@@ -818,6 +818,9 @@ pub struct Esp32C6Builder {
     /// Perform a reset request instead of reporting it. See
     /// [`Esp32C6Builder::reboot_on_reset`].
     reboot_on_reset: bool,
+    /// Let the hart pre-decode blocks. See
+    /// [`Esp32C6Builder::block_cache`].
+    block_cache: bool,
     efuse: EfuseIdentity,
     time_grade: TimeGrade,
     strict: bool,
@@ -882,6 +885,7 @@ impl Esp32C6Builder {
             reset_cause: ResetCause::default(),
             strap: Strap::App,
             reboot_on_reset: false,
+            block_cache: true,
             efuse: EfuseIdentity::default(),
             time_grade: TimeGrade::default(),
             strict: false,
@@ -982,6 +986,27 @@ impl Esp32C6Builder {
     /// every byte from before the reset — a reboot is not a new process.
     pub fn reboot_on_reset(mut self, reboot: bool) -> Self {
         self.reboot_on_reset = reboot;
+        self
+    }
+
+    /// Let the hart pre-decode runs of instructions and dispatch them without
+    /// re-deciding what each one is. **On by default**; `--no-block-cache`
+    /// turns it off.
+    ///
+    /// Off is the bring-up tool, the bisection tool and the identity oracle:
+    /// the same binary with the cache off must produce the same `stopped
+    /// after` line, the same UART bytes, the same decoded frames off the pad
+    /// and the same trace. It is also the *only* way anything about a run
+    /// should change, because the cache is not architectural state.
+    ///
+    /// It is forced off under [`BootMode::RomUp`] (M5 MD13): there the mask
+    /// ROM and the real ESP-IDF second-stage bootloader run as guest code and
+    /// copy segments into RAM without a `fence.i`, and we own neither, so
+    /// there is nothing to hold them to the contract. RomUp is a
+    /// boot-modelling path measured in hundreds of milliseconds, not a speed
+    /// path, so refusing to cache there costs nothing worth having.
+    pub fn block_cache(mut self, on: bool) -> Self {
+        self.block_cache = on;
         self
     }
 
@@ -1221,6 +1246,7 @@ impl Esp32C6Builder {
             reset_cause,
             strap,
             reboot_on_reset,
+            block_cache,
             efuse,
             time_grade,
             strict,
@@ -1533,6 +1559,12 @@ impl Esp32C6Builder {
         let mut hart = MachineHart::new(0);
         loader::reset_hart(&mut hart, &mut bus, entry);
         hart.set_cycle_model(time_grade.cycle_model());
+        // M5 MD13: a ROM-up boot runs the mask ROM and the real ESP-IDF
+        // second-stage bootloader as GUEST code, and both copy segments into
+        // hp-sram and jump into them with ordinary stores. Neither will ever
+        // emit the `fence.i` the cache's invalidation rests on, and we own
+        // neither, so the cache is off there.
+        hart.set_block_cache(block_cache && boot_mode != BootMode::RomUp);
         // The address's cost, if this grade charges one. Installed after the
         // loader has placed the app and filled the window: the cache starts
         // cold, as it is at reset, and the host's placement of segments
@@ -1967,6 +1999,25 @@ impl Esp32C6Machine {
             return;
         }
         self.cache_fills += crate::cache::fill(&mut self.bus, &self.flash, &self.cache) as u64;
+    }
+
+    /// What the hart's pre-decoded block cache did, or `None` when it was
+    /// never built (`--no-block-cache`, or a `--boot rom-up` run).
+    pub fn block_stats(&self) -> Option<lp_emu_core::BlockStats> {
+        self.harts[0].block_stats()
+    }
+
+    /// Whether the hart is allowed to pre-decode blocks at all.
+    pub fn block_cache(&self) -> bool {
+        self.harts[0].block_cache()
+    }
+
+    /// `fence.i` instructions the guest retired. One per JIT publish is what
+    /// the firmware's own fence should produce
+    /// (`lpvm_native::rt_jit::buffer::JitBuffer::from_code`); a run that
+    /// compiled a shader and saw none means that fence is not reaching here.
+    pub fn fence_i_count(&self) -> u64 {
+        self.harts[0].fence_i_count()
     }
 
     pub fn efuse(&self) -> EfuseIdentity {
@@ -3055,6 +3106,19 @@ impl Esp32C6Machine {
             // slice's entry poll is not answering a stale flag.
             let _ = self.bus.take_sideband();
             self.refill_cache();
+            // The block cache's emulator-side funnel, drained where the
+            // window refill it usually follows already is. Everything that
+            // writes guest code from the HOST side comes through
+            // `SocBus::load_image` — a flash-cache MMU page fill, a ROM-hook
+            // `ebreak` patch, an ELF segment — and none of it is followed by
+            // a guest `fence.i`, because none of it is the guest. Almost
+            // every slice this is one `is_empty` test: P1 counted 98 cache
+            // refills across a whole render run.
+            if self.bus.code_writes_pending() {
+                for (lo, hi) in self.bus.take_code_writes() {
+                    self.harts[0].invalidate_block_range(lo, hi);
+                }
+            }
 
             if let Some(violation) = self.bus.first_strict_violation() {
                 return Outcome::StrictBus { violation };
@@ -3575,8 +3639,14 @@ impl Esp32C6Machine {
     /// hart's trigger CSRs, because they live on the bus and the bus does not
     /// know they came from a hart.
     pub fn restore(&mut self, s: &Snapshot) {
+        // The block cache is not architectural state and is absent from a
+        // snapshot: `Clone for MachineHart` hands back an empty one, which is
+        // the whole of "restore invalidates all". The bus's pending code
+        // writes go with it — they described the machine that was, and the
+        // regions are about to be replaced wholesale.
         self.harts.clone_from(&s.harts);
         self.bus.restore_regions(&s.regions);
+        let _ = self.bus.take_code_writes();
         self.bus.restore_peripherals(&s.periph);
         self.bus.restore_scalars(&s.scalars);
         self.bus.sched.restore(&s.sched);

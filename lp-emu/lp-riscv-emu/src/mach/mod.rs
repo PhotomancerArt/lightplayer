@@ -67,7 +67,7 @@ use core::marker::PhantomData;
 
 use alloc::{boxed::Box, vec::Vec};
 
-use lp_emu_core::block::{Block, BlockCache, BlockStats};
+use lp_emu_core::block::{BlockCache, BlockStats};
 use lp_emu_core::{Bus, CycleModel, InstClass, MemoryAccessKind, MemoryError};
 
 use crate::emu::{EmulatorError, FpRegs, LoggingDisabled, decode_execute};
@@ -758,7 +758,16 @@ impl<B: Bus> MachineHart<B> {
             // per-instruction compare; one that does not fit runs with the
             // compare the single-stepping loop uses.
             let whole = self.cycle_count.saturating_add(u64::from(block.max_cycles)) <= end;
-            if let Some(over) = self.run_block(cache, bus, &block, whole, end) {
+            // The slot arena is borrowed for the length of the block so the
+            // inner loop reads a slice rather than re-deriving `&self.arena`
+            // and bounds-checking on every instruction; the counter the
+            // borrow would conflict with is updated out here.
+            let (out, ran) = {
+                let slots = cache.slots_of(&block);
+                self.run_block(slots, bus, block.pc, whole, end)
+            };
+            cache.note_slots_run(ran);
+            if let Some(over) = out {
                 return over;
             }
         }
@@ -776,20 +785,18 @@ impl<B: Bus> MachineHart<B> {
     /// up the next one.
     fn run_block(
         &mut self,
-        cache: &mut BlockCache<RvSlot<B>>,
+        slots: &[RvSlot<B>],
         bus: &mut B,
-        block: &Block,
+        block_pc: u32,
         whole: bool,
         end: u64,
-    ) -> Option<SliceEnd> {
-        let mut pc = block.pc;
+    ) -> (Option<SliceEnd>, u32) {
+        let mut pc = block_pc;
         let mut ran = 0u32;
-        for i in 0..block.len {
+        for slot in slots {
             if !whole && self.cycle_count >= end {
-                cache.note_slots_run(ran);
-                return Some(SliceEnd::BudgetExhausted);
+                return (Some(SliceEnd::BudgetExhausted), ran);
             }
-            let slot = cache.slot(block.start + i);
             // F10: per slot, not per block. A trap in the middle of a block
             // would otherwise report the block's first `pc` to the bus's
             // trace and to its unmapped-site dedup, which is keyed on
@@ -800,13 +807,12 @@ impl<B: Bus> MachineHart<B> {
                 Ok(result) => result,
                 Err(e) => {
                     self.charge(InstClass::System);
-                    cache.note_slots_run(ran);
                     let out = match self.deliver_executor_error(e, pc, slot.word) {
                         Ok(()) => None,
                         Err(fault) => Some(SliceEnd::Fault(fault)),
                     };
                     self.charge_memory(bus);
-                    return out;
+                    return (out, ran);
                 }
             };
 
@@ -830,8 +836,7 @@ impl<B: Bus> MachineHart<B> {
                 }
                 if bus.take_yield() {
                     self.charge_memory(bus);
-                    cache.note_slots_run(ran);
-                    return Some(SliceEnd::BusYield);
+                    return (Some(SliceEnd::BusYield), ran);
                 }
             }
             self.charge_memory(bus);
@@ -845,13 +850,11 @@ impl<B: Bus> MachineHart<B> {
             // at a taken terminator.
             let straight_on = pc.wrapping_add(u32::from(slot.width));
             if self.pc != straight_on {
-                cache.note_slots_run(ran);
-                return None;
+                return (None, ran);
             }
             pc = straight_on;
         }
-        cache.note_slots_run(ran);
-        None
+        (None, ran)
     }
 
     /// One instruction: the hart's own `SYSTEM` handling, the FP rejection,
