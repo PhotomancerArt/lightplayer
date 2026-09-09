@@ -32,13 +32,13 @@
 //!
 //! # The block plan
 //!
-//! The product's `LedChannel` publishes the one-channel plan, which gives its
+//! The product's `LedChannel` publishes the ONE-channel plan, which gives its
 //! transmitter all **four** RAM blocks — block 2 included, which is the
-//! receiver's window. This harness publishes `for_channels(1, 2)` instead:
-//! two blocks for the transmitter (96 words, a 48-word half) and block 2 left
-//! for RX channel 2. It configures the channel itself for the same reason —
-//! `LedChannel::new` takes the whole `Rmt` and there would be no `channel2`
-//! left to configure.
+//! receiver's window. This harness publishes the **shipped two-channel plan**
+//! instead (`plan_for_declared(2)`: one block each), which is the shape a
+//! board with two declared strips runs and which leaves block 2 free. It
+//! configures the channel itself rather than through `LedChannel::new`, which
+//! takes the whole `Rmt` and would leave no `channel2` to configure.
 //!
 //! # The pads
 //!
@@ -63,13 +63,16 @@ use fw_checks::checks::rmt_rx::{
     FRAMES, IDLE_THRES, LEDS, RxRecord, decode_frame, frame_codes, write_decode_error, write_done,
     write_rx_record, write_setup,
 };
+use esp_hal::time::Instant;
 use log::info;
-use lp_ws281x::{BlockPlan, ChannelTiming};
+use lp_ws281x::ChannelTiming;
 
 use crate::board::esp32c6::init::{init_board, start_runtime};
 use crate::logger;
-use crate::output::rmt::c6_rmt::{self, PLAN_SLOTS, TX_PLAN};
-use crate::output::rmt::shared_driver::{DRIVER, RMT_CLOCK, install_isr};
+use crate::output::rmt::c6_rmt::{self, TX_PLAN, plan_for_declared};
+use crate::output::rmt::shared_driver::{
+    DRIVER, FRAME_TIMEOUT, RMT_CLOCK, install_isr, report_telemetry_if_due,
+};
 // Through the module rather than the re-export, as `cycle_probe` and
 // `gpio_input` do: `serial::Esp32UsbSerialIo` is gated to a named list of
 // harnesses and adding this one to that list would be an edit to a product
@@ -109,10 +112,11 @@ pub async fn run_rmt_rx(_: embassy_executor::Spawner) -> ! {
         },
     );
 
-    // Two blocks for the transmitter, block 2 left for the receiver. Published
-    // before anything configures a channel, exactly as `LedChannel::new`
-    // publishes its own plan.
-    let plan = BlockPlan::<PLAN_SLOTS>::for_channels(1, 2).expect("two blocks for one channel");
+    // The shipped two-channel plan — one block each — published before
+    // anything configures a channel, exactly as `LedChannel::new` publishes
+    // its own. It leaves block 2 for the receiver, which the one-channel plan
+    // would have taken.
+    let plan = plan_for_declared(2).expect("the shipped two-channel plan");
     if let Err(error) = TX_PLAN.init(plan) {
         log::error!("[rmt-rx] block plan already published: {error:?}");
     }
@@ -201,14 +205,32 @@ pub async fn run_rmt_rx(_: embassy_executor::Spawner) -> ! {
         // 1,536 words through the receiver's 48-word window, so a half of it
         // has to be read every 24 words or the writer laps the reader.
         let mut rx_done = false;
+        // The same hang detector `LedChannel::start_transmission` installs: a
+        // frame that outlives its deadline is aborted and reported rather than
+        // wedging the loop.
+        let started = Instant::now();
+        let mut timed_out = false;
         let send = DRIVER.send_blocking(TX_SLOT, &wire, || {
             if !rx_done {
                 rx_done = rx_txn.poll();
             }
+            if !timed_out && started.elapsed() > FRAME_TIMEOUT {
+                timed_out = true;
+                DRIVER.abort(TX_SLOT);
+            }
         });
         if let Err(error) = send {
             info!("[rmt-rx] frame {n}: frame failed to start: {error:?}");
+        } else if timed_out {
+            info!(
+                "[rmt-rx] frame {n}: did not complete within {} ms",
+                FRAME_TIMEOUT.as_millis()
+            );
         }
+        // A no-op unless `ws281x_telemetry` is on, and the product's own call
+        // site: a harness that turns it on gets the same `[WS281X]` counters
+        // the app path prints.
+        report_telemetry_if_due();
         // The reception outlasts the transmission by the idle threshold, so
         // the loop above never sees its end.
         while !rx_done {

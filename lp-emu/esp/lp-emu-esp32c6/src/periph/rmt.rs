@@ -3283,13 +3283,21 @@ mod tests {
             r.rx_running(RXI),
             "200 bits at 100 ticks each, none of them 100 ticks of silence"
         );
-        assert_eq!(r.rx_words_written(RXI), 199, "one word per bit, less the open one");
+        assert_eq!(
+            r.rx_words_written(RXI),
+            199,
+            "one word per bit, less the open one"
+        );
 
         // …and it ends when the line finally does go quiet.
         let last = 2_000 + 199 * 100 * TICK_CYCLES + 32 * TICK_CYCLES;
         sb.run_to(&mut r, last + 101 * TICK_CYCLES);
         assert!(!r.rx_running(RXI));
-        assert_eq!(r.rx_words_written(RXI), 201, "199, the closing word, the marker");
+        assert_eq!(
+            r.rx_words_written(RXI),
+            201,
+            "199, the closing word, the marker"
+        );
     }
 
     /// (e) With `mem_rx_wrap_en` clear the window fills instead: `mem_full`,
