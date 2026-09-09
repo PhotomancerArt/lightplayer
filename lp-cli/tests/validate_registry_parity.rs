@@ -166,6 +166,11 @@ fn the_host_side_properties_are_not_mirrored_and_that_is_the_point() {
             // and no script, which is what made the distinction easy to miss.
             "upload-walk-usb",
             "meteor-walk-usb",
+            // M2 P3's loopback, listed here rather than beside `rmt-chase`
+            // because `ALL_PAYLOADS` is what fixes this order: same case as
+            // the chase's, a harness image whose records go out over the
+            // USB-Serial-JTAG it logs on.
+            "rmt-rx",
             // M5's chase: not a scenario at all — nothing here asks a
             // question about the link — but its records and its `[WS281X]`
             // line go out over the USB-Serial-JTAG the harness image logs on,
@@ -373,6 +378,11 @@ fn every_payloads_header_line_is_pinned() {
             "render-loop",
             "esp32c6,server,radio,memory_fs,bench_render_loop",
             "[fw-checks-header] {\"schema\":1,\"payload\":\"render-loop\",\"chip\":\"esp32c6\",\"firmware_commit\":\"d6cfaa2051ae\",\"firmware_features\":\"esp32c6,server,radio,memory_fs,bench_render_loop\",\"firmware_dirty\":false}\n",
+        ),
+        (
+            "rmt-rx",
+            "esp32c6,test_rmt_rx",
+            "[fw-checks-header] {\"schema\":1,\"payload\":\"rmt-rx\",\"chip\":\"esp32c6\",\"firmware_commit\":\"d6cfaa2051ae\",\"firmware_features\":\"esp32c6,test_rmt_rx\",\"firmware_dirty\":false}\n",
         ),
         (
             "rmt-chase",
