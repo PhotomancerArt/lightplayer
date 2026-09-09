@@ -302,11 +302,11 @@ ADR's ROM-up amendment.
 ### A real flasher, over the socket
 
 ```console
-$ scripts/emu/flash-over-socket.sh target/emu-ref/…/merged.bin
+$ scripts/emu/flash-over-socket.sh target/emu-ref/735af98ae-…/merged.bin
 flash-over-socket: the chip starts BLANK
 flash-over-socket: the flasher's port is /dev/ttys001
 flash-over-socket: esptool --no-stub write 0x0 …/merged.bin
-Wrote 4194304 bytes at 0x00000000 in 18.6 seconds (1803.2 kbit/s).
+Wrote 4194304 bytes at 0x00000000 in 35.8 seconds (937.9 kbit/s).
 Hash of data verified.
 flash-over-socket: the host's reset dance
 flash-over-socket: the chip matches …/merged.bin over every byte the image populates
