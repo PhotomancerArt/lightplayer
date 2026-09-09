@@ -28,6 +28,34 @@ pub const OUT_SEL_GPIO: u16 = 128;
 /// `OutputSignal::RMT_SIG_0`. Channel `ch`'s signal is `RMT_SIG_0 + ch`.
 pub const RMT_SIG_0: u16 = 71;
 
+/// `func_in_sel_cfg[s]` signal numbers this crate can name, `(number, name)`,
+/// sorted by number — the **input** half of the matrix (M2 P3).
+///
+/// Transcribed from the same table as its output twin
+/// (`esp-metadata-generated-0.4.0/src/_generated_esp32c6.rs:5210-5211`,
+/// `InputSignal::RMT_SIG_0 = 71`, `RMT_SIG_1 = 72`). The numbers coincide
+/// with the output signals' on this chip, but the two are separate
+/// enumerations in separate registers and nothing here relies on their
+/// agreeing.
+pub static INPUT_SIGNALS: &[(u16, &str)] = &[(71, "RMT_SIG_0_IN"), (72, "RMT_SIG_1_IN")];
+
+/// `InputSignal::RMT_SIG_0` — the signal **RX channel 2** reads.
+///
+/// The C6's RMT has two transmitters (channels 0/1) and two receivers
+/// (channels 2/3) but only two RMT signals in each direction: the metadata's
+/// `for_each_rmt_channel!` maps `rx(2, 0), (3, 1)`, so RX channel `ch` reads
+/// `RMT_RX_SIG_0 + (ch - 2)`.
+pub const RMT_RX_SIG_0: u16 = 71;
+
+/// The name for a `func_in_sel_cfg` signal number, or `None` when the table
+/// does not carry it.
+pub fn input_signal_name(sel: u16) -> Option<&'static str> {
+    INPUT_SIGNALS
+        .binary_search_by_key(&sel, |(n, _)| *n)
+        .map(|i| INPUT_SIGNALS[i].1)
+        .ok()
+}
+
 /// The name for an `out_sel` value, or `None` when the table does not carry
 /// it.
 pub fn output_signal_name(sel: u16) -> Option<&'static str> {

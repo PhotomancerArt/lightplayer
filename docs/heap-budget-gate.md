@@ -242,8 +242,9 @@ true power-on capture. `docs/debt/emulator-heap-ledger-differs-from-silicon-by-e
 The chip half needs a cross-target firmware build, and the rule that keeps one
 out of every workspace test run applies here too. `just heap-budget-check`
 therefore prints a named SKIP for it when there is no image, and the projects
-half still gates; CI's path-gated `emu-c6` job — which builds firmware anyway —
-runs `just heap-budget-check-chips`, where a skip is a failure. The direct load
+half still gates; CI's path-gated `Heap budget (esp32c6 chip)` job (id
+`heap-budget-chips`, gated like the emulator job) runs
+`just heap-budget-check-chips`, where a skip is a failure. The direct load
 is used rather than the ROM-up boot: M7 measured the two paths' idle heap
 byte-identical, so the bootloader adds seconds of wall clock and nothing to the
 answer. The place that boots the whole chain is the walk,
@@ -501,9 +502,12 @@ core paths changed — four emulator runs (two projects × two modes), after the
 tests so `lp-cli` and `fw-emu` reuse warm dependencies. Referenced from
 `docs/adr/2026-08-01-esp32v3-flash-budget.md`.
 
-The **chip** half runs elsewhere: the path-gated `emu-c6` job, as
-`just heap-budget-check-chips`, because it needs a cross-target firmware
-build — which that job has already done by the time it runs, so the step
-costs one emulator boot and nothing else. In `Validate (x64)` the same code
+The **chip** half runs elsewhere: the path-gated `Heap budget (esp32c6 chip)`
+job, as `just heap-budget-check-chips`, because it needs a cross-target
+firmware build (the script builds it under `LP_EMU_BUILD_FW=1`) plus a release
+`lp-cli`. It was a step of the emulator job until 2026-09-08, when that job
+outgrew its budget and the ratchet moved to a job of its own — one that also
+runs lp-cli's two emulator-backed tests, which share its `-p lp-cli` build
+(`just test-emu-c6-cli`). In `Validate (x64)` the same code
 prints a named SKIP rather than starting a firmware build, and the projects
 half still gates. See "The second source" above.

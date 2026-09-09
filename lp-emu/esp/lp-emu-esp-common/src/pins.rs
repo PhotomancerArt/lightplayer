@@ -45,22 +45,32 @@
 //! 2. If any pad in the group has an **outside driver**, the group carries
 //!    that level. Where two outside drivers disagree, the **lowest-numbered
 //!    pad's** driver wins, so a run is replayable from its flags.
-//! 3. Otherwise, if any pad in the group is **routed**, the group carries
-//!    that pad's output level (again lowest-numbered first).
+//! 3. Otherwise, if any pad in the group is **driving** — routed *and* with
+//!    its GPIO output-enable bit set — the group carries that pad's output
+//!    level (again lowest-numbered first).
 //! 4. Otherwise the group is not observed at all and reads low.
 //!
 //! **An outside driver always wins**, and the group's own output never gates
-//! it. When the losing side was an *enabled* output — the pad is routed and
-//! either the peripheral owns its OE (`oen_sel = 0`) or the GPIO `enable` bit
-//! is set — and the two levels disagree, that is a **conflict**: it is logged
-//! with both levels and the cycle, counted in [`Fabric::conflicts`], and then
-//! ignored. Never gated: an emulator that refused to run because a bench
-//! shorted an output tells you less than one that says so and carries on.
+//! it. When the losing side was a *driving* pad and the two levels disagree,
+//! that is a **conflict**: it is logged with both levels and the cycle,
+//! counted in [`Fabric::conflicts`], and then ignored. Never gated: an
+//! emulator that refused to run because a bench shorted an output tells you
+//! less than one that says so and carries on.
 //!
-//! The output side's `enable`/`oen_sel` bits are *read* here for that one
-//! purpose — deciding whether a disagreement is worth a line — and for
-//! nothing else. A pad whose OE is low still records its own edges, exactly
-//! as before.
+//! What makes a pad a driver is [`Fabric::set_gpio_enable`] — the chip's
+//! `GPIO.enable` bit — and **not** the mere existence of a routing
+//! ([`Fabric::output_enabled`] says why, plan DD38). A routed pad whose
+//! enable is clear is an *input* pad: it carries whatever the group carries
+//! and contributes nothing of its own.
+//!
+//! # The input routing
+//!
+//! The output side answers "which pad does this signal reach"; the input side
+//! answers "which pad does this peripheral read". [`Fabric::route_in`] is the
+//! chip's `func_in_sel_cfg` view and [`Fabric::input_level`] is what an input
+//! peripheral — the RMT's receiver, M2 P3 — samples. Both directions are
+//! here for the one reason the module opens with: a peripheral cannot see
+//! the GPIO block, so the routing has to be state on the bus.
 //!
 //! ## Edges are one stream
 //!
@@ -182,6 +192,11 @@ pub struct Fabric {
     /// Per pad, the pad's input enable (the chip's IO_MUX `fun_ie`).
     /// Recorded; never gated on here.
     input_enable: Vec<bool>,
+    /// Per peripheral **input** signal, the pad it reads and whether the
+    /// reading is inverted — sparse, sorted by signal, the mirror of
+    /// `routes`. A chip has a few hundred input signals and a run routes one
+    /// or two, so a `Vec` searched linearly is the whole structure.
+    in_routes: Vec<(SignalId, (PadId, bool))>,
     /// Union-find over tied pads: `tie[i]` is `i`'s parent, or `i` itself.
     /// Only meaningful while [`Fabric::tied`] is set.
     tie: Vec<u8>,
@@ -224,6 +239,7 @@ impl Fabric {
             signals: Vec::new(),
             driven: alloc::vec![None; MAX_PADS],
             input_enable: alloc::vec![false; MAX_PADS],
+            in_routes: Vec::new(),
             tie: (0..MAX_PADS as u8).collect(),
             tied: false,
             drivers: 0,
@@ -287,11 +303,20 @@ impl Fabric {
         self.settle(i, at);
     }
 
-    /// Set the GPIO output-enable bit for `pad`. Recorded only; see
-    /// [`Route::oen_from_gpio`].
-    pub fn set_gpio_enable(&mut self, pad: PadId, enabled: bool) {
+    /// Set the GPIO output-**enable** bit for `pad` at cycle `at`.
+    ///
+    /// Since M2 P3 this decides whether the pad drives the wire at all
+    /// ([`output_enabled`](Self::output_enabled)), so the pad settles here:
+    /// enabling an output that is already routed high **is** a rising edge,
+    /// the same way [`route`](Self::route) is, and disabling it drops the pad
+    /// back to whatever else the group carries (low, if that is nothing).
+    pub fn set_gpio_enable(&mut self, pad: PadId, enabled: bool, at: Cycles) {
         let Some(i) = Self::index(pad) else { return };
+        if self.gpio_enable[i] == enabled {
+            return;
+        }
         self.gpio_enable[i] = enabled;
+        self.settle_group(i, at);
     }
 
     /// A peripheral's output signal changed level at cycle `at`.
@@ -409,6 +434,59 @@ impl Fabric {
             .unwrap_or(false)
     }
 
+    // ---- the input routing (M2 P3) ---------------------------------------
+
+    /// Point peripheral **input** signal `signal` at `pad`, optionally
+    /// inverted — the mirror of [`route`](Self::route), and the seam an
+    /// input peripheral reads its wire through.
+    ///
+    /// The same shape as the output side and for the same reason (module
+    /// docs): a peripheral cannot see the GPIO block, so "which pad does the
+    /// RMT's receiver sample" is one fact two blocks share and it lives here.
+    /// The chip's GPIO block decides that a write to `func_in_sel_cfg[s]`
+    /// means this; the fabric only remembers it.
+    ///
+    /// Nothing settles: an input route changes what a *reader* sees, not what
+    /// any pad carries, so it records no edge and does not bump the routing
+    /// epoch (which is the pad-side decoders' cue).
+    pub fn route_in(&mut self, signal: SignalId, pad: PadId, invert: bool) {
+        if Self::index(pad).is_none() {
+            return;
+        }
+        match self.in_routes.binary_search_by_key(&signal, |(s, _)| *s) {
+            Ok(i) => self.in_routes[i].1 = (pad, invert),
+            Err(i) => self.in_routes.insert(i, (signal, (pad, invert))),
+        }
+    }
+
+    /// Drop `signal`'s input routing: it reads no pad at all.
+    pub fn unroute_in(&mut self, signal: SignalId) {
+        if let Ok(i) = self.in_routes.binary_search_by_key(&signal, |(s, _)| *s) {
+            self.in_routes.remove(i);
+        }
+    }
+
+    /// The pad `signal` reads, and whether the reading is inverted.
+    pub fn input_route_of(&self, signal: SignalId) -> Option<(PadId, bool)> {
+        self.in_routes
+            .binary_search_by_key(&signal, |(s, _)| *s)
+            .ok()
+            .map(|i| self.in_routes[i].1)
+    }
+
+    /// The level peripheral input signal `signal` reads right now, or `None`
+    /// when nothing is routed to it.
+    ///
+    /// The pad's **resolved** level ([`pad_level`](Self::pad_level)) — an
+    /// outside driver, a wired neighbour's output, the pad's own output —
+    /// inverted if the route says so. A peripheral that reads `None` is not
+    /// connected to anything, which is a different answer from "reads low"
+    /// and worth a note in the block that asked.
+    pub fn input_level(&self, signal: SignalId) -> Option<bool> {
+        self.input_route_of(signal)
+            .map(|(pad, invert)| self.pad_level(pad) != invert)
+    }
+
     /// Tie `a` and `b`: whatever one carries, the other carries.
     ///
     /// A jumper between two pin-header pins, and the only way one emulated
@@ -509,15 +587,41 @@ impl Fabric {
         })
     }
 
-    /// Whether pad `i`'s output is *enabled*, as the recorded bits say: the
-    /// peripheral owns the OE (`oen_sel = 0`), or the GPIO `enable` bit is
-    /// set. Read for one purpose only — deciding whether a disagreement with
-    /// an outside driver is worth a line. Never gated on.
+    /// Whether pad `i`'s output is *enabled*: it is routed **and** the GPIO
+    /// output-enable bit for it is set.
+    ///
+    /// # Why `enable` decides, whatever `oen_sel` says (M2 P3, plan DD38)
+    ///
+    /// M2 P1 read `oen_sel = 0` — "the peripheral owns the output enable" —
+    /// as "assume enabled", because the peripheral's own OE line is not
+    /// modelled. That made **every** input pad a driver: esp-hal's
+    /// `Input::new` writes `func_out_sel_cfg` (pointing the pad back at
+    /// `GPIO_OUT`, `oen_sel = 0`) on its way to configuring an input, so a
+    /// pad nothing was driving out of counted as an enabled output and every
+    /// outside driver on it logged a conflict — eight lines per `gpio-input`
+    /// run, all of them false.
+    ///
+    /// The bit that is actually maintained is `GPIO.enable`: esp-hal sets it
+    /// (`set_output_enable(true)`) in the same breath as every output route —
+    /// the RMT's `with_pin` writes `enable_w1ts` before `func_out_sel_cfg`,
+    /// `Output::new` sets it, `Flex::set_as_output` sets it — and clears it
+    /// (`set_output_enable(false)`) when it configures an input. So the
+    /// honest rule for a model with no peripheral OE lines is: **a pad drives
+    /// the wire when its `enable` bit says it does.**
+    ///
+    /// The limitation that leaves is worth stating rather than hiding: a
+    /// peripheral that drove a pad *without* the driver having set
+    /// `GPIO.enable` would read as not driving here. No driver this project
+    /// replays does that, and a run under a strict grade would show the pad
+    /// resting low rather than silently inventing a level.
     fn output_enabled(&self, i: usize) -> bool {
-        match self.routes[i] {
-            Some(route) => !route.oen_from_gpio || self.gpio_enable[i],
-            None => false,
-        }
+        self.routes[i].is_some() && self.gpio_enable[i]
+    }
+
+    /// The level pad `i` puts on the wire: [`output_of`](Self::output_of),
+    /// but only when the pad's output is enabled.
+    fn driving_level(&self, i: usize) -> Option<bool> {
+        self.output_enabled(i).then(|| self.output_of(i)).flatten()
     }
 
     /// Recompute pad `i`'s level and record an edge if it moved.
@@ -577,7 +681,7 @@ impl Fabric {
                     driver = Some((j, level));
                 }
                 if output.is_none()
-                    && let Some(level) = self.output_of(j)
+                    && let Some(level) = self.driving_level(j)
                 {
                     output = Some((j, level));
                 }
@@ -586,12 +690,12 @@ impl Fabric {
         } else {
             (
                 self.driven[i].map(|level| (i, level)),
-                self.output_of(i).map(|level| (i, level)),
+                self.driving_level(i).map(|level| (i, level)),
             )
         };
         match (driver, output) {
             (Some((_, d)), Some((oj, o))) => {
-                if d != o && self.output_enabled(oj) {
+                if d != o {
                     self.log_conflict(i, oj, d, o, at);
                 }
                 d
@@ -676,6 +780,10 @@ mod tests {
     #[test]
     fn routing_a_pad_to_a_high_signal_records_a_rising_edge_at_the_route_cycle() {
         let mut f = Fabric::new();
+        // The output enable first, the way esp-hal's `with_pin` writes it
+        // (`enable_w1ts`, then `func_out_sel_cfg`): the pad drives from the
+        // routing, not before it.
+        f.set_gpio_enable(PAD, true, 0);
         f.drive(SIG, true, 10);
         f.route(PAD, RouteSource::Signal(SIG, false), false, 40);
         assert_eq!(
@@ -710,6 +818,8 @@ mod tests {
     #[test]
     fn only_the_pads_routed_to_the_driven_signal_move() {
         let mut f = Fabric::new();
+        f.set_gpio_enable(PAD, true, 0);
+        f.set_gpio_enable(PadId(20), true, 0);
         f.route(PAD, RouteSource::Signal(SIG, false), false, 0);
         f.route(
             PadId(20),
@@ -727,6 +837,7 @@ mod tests {
     #[test]
     fn a_level_that_does_not_change_is_not_an_edge() {
         let mut f = Fabric::new();
+        f.set_gpio_enable(PAD, true, 0);
         f.route(PAD, RouteSource::Signal(SIG, false), false, 0);
         f.drive(SIG, true, 10);
         f.drive(SIG, true, 20);
@@ -736,6 +847,7 @@ mod tests {
     #[test]
     fn inv_sel_inverts() {
         let mut f = Fabric::new();
+        f.set_gpio_enable(PAD, true, 0);
         f.route(PAD, RouteSource::Signal(SIG, true), false, 5);
         // The signal rests low, so an inverted route is high from the route.
         assert_eq!(
@@ -760,6 +872,7 @@ mod tests {
     #[test]
     fn rerouting_to_gpio_out_follows_the_out_bit() {
         let mut f = Fabric::new();
+        f.set_gpio_enable(PAD, true, 0);
         f.set_gpio_out(PAD, true, 1);
         // Nothing is routed yet: the out bit alone is not an edge.
         assert!(f.take_edges().is_empty());
@@ -795,6 +908,7 @@ mod tests {
     #[test]
     fn unrouting_drops_the_pad_low() {
         let mut f = Fabric::new();
+        f.set_gpio_enable(PAD, true, 0);
         f.route(PAD, RouteSource::Signal(SIG, false), false, 0);
         f.drive(SIG, true, 10);
         assert_eq!(f.take_edges().len(), 1);
@@ -811,15 +925,71 @@ mod tests {
         assert_eq!(f.routes().count(), 0);
     }
 
+    /// Plan DD38: a routed pad drives the wire only once `GPIO.enable` says
+    /// it does, and enabling it late is itself the edge.
     #[test]
-    fn the_enable_bitmap_is_recorded_and_never_gates() {
+    fn a_routed_pad_drives_only_when_its_output_is_enabled() {
         let mut f = Fabric::new();
         f.route(PAD, RouteSource::Signal(SIG, false), false, 0);
         assert!(!f.gpio_enable(PAD));
         f.drive(SIG, true, 10);
-        assert_eq!(f.take_edges().len(), 1, "OE low does not suppress the edge");
-        f.set_gpio_enable(PAD, true);
+        assert!(
+            !f.pad_level(PAD),
+            "the signal is high but the pad's output is disabled"
+        );
+        assert!(
+            f.take_edges().is_empty(),
+            "a disabled output puts out nothing"
+        );
+
+        // The enable arrives after the routing — the order `Output::new`
+        // and `Flex::set_as_output` write them in — and the pad picks the
+        // signal up at that cycle.
+        f.set_gpio_enable(PAD, true, 20);
         assert!(f.gpio_enable(PAD));
+        assert!(f.pad_level(PAD));
+        assert_eq!(
+            f.take_edges(),
+            [Edge {
+                at: 20,
+                pad: PAD,
+                level: true
+            }]
+        );
+
+        // Disabling it drops the pad: nothing else in the group carries it.
+        f.set_gpio_enable(PAD, false, 30);
+        assert!(!f.pad_level(PAD));
+        assert_eq!(
+            f.take_edges(),
+            [Edge {
+                at: 30,
+                pad: PAD,
+                level: false
+            }]
+        );
+    }
+
+    /// The false-conflict M2 P2 found (plan DD38): `Input::new` writes
+    /// `func_out_sel_cfg` on its way to configuring an input, and that write
+    /// used to make the pad an "enabled output" because `oen_sel` was 0.
+    /// Every scripted level on it then logged a conflict with itself.
+    #[test]
+    fn an_input_pad_configured_the_way_esp_hal_does_logs_no_conflict() {
+        let mut f = Fabric::new();
+        // `Input::new`: output enable off, then the pad pointed back at
+        // `GPIO_OUT` with `oen_sel = 0` (the peripheral's OE), then the input
+        // buffer on. Nothing here says "drive".
+        f.set_gpio_enable(PAD, false, 0);
+        f.route(PAD, RouteSource::GpioOut, false, 0);
+        f.set_pad_input_enable(PAD, true);
+
+        // A button, an encoder, the far end of a jumper: 40 edges, no lines.
+        for k in 0..40u64 {
+            f.drive_pad(PAD, k % 2 == 0, 100 + k * 10);
+        }
+        assert_eq!(f.conflicts(), 0, "an input pad conflicts with nothing");
+        assert_eq!(f.take_edges().len(), 40);
     }
 
     #[test]
@@ -903,7 +1073,7 @@ mod tests {
         let mut f = Fabric::new();
         // gpio18 routed to its own `out` bit, output enabled, driving high.
         f.route(PAD, RouteSource::GpioOut, true, 0);
-        f.set_gpio_enable(PAD, true);
+        f.set_gpio_enable(PAD, true, 0);
         f.set_gpio_out(PAD, true, 10);
         assert!(f.pad_level(PAD));
         assert_eq!(f.conflicts(), 0);
@@ -931,6 +1101,52 @@ mod tests {
         f.set_gpio_out(PAD, true, 40);
         assert!(!f.pad_level(PAD));
         assert_eq!(f.conflicts(), 2);
+    }
+
+    // ---- the input routing (M2 P3) ---------------------------------------
+
+    #[test]
+    fn an_input_signal_reads_the_pad_it_is_routed_to() {
+        let mut f = Fabric::new();
+        assert_eq!(f.input_level(SIG), None, "nothing routed: not connected");
+
+        f.route_in(SIG, PadId(19), false);
+        assert_eq!(f.input_route_of(SIG), Some((PadId(19), false)));
+        assert_eq!(f.input_level(SIG), Some(false), "an idle pad reads low");
+        assert!(
+            f.take_edges().is_empty(),
+            "an input route changes no pad's level"
+        );
+
+        f.drive_pad(PadId(19), true, 10);
+        assert_eq!(f.input_level(SIG), Some(true));
+
+        // Inverted, and re-routing the same signal replaces the old route
+        // rather than stacking a second one.
+        f.route_in(SIG, PadId(19), true);
+        assert_eq!(f.input_level(SIG), Some(false));
+        assert_eq!(f.input_route_of(SIG), Some((PadId(19), true)));
+
+        f.unroute_in(SIG);
+        assert_eq!(f.input_level(SIG), None);
+    }
+
+    /// The loopback the `rmt-rx` payload runs on: one pad's *output* is the
+    /// other pad's input, through a wire and an input route.
+    #[test]
+    fn an_input_signal_reads_a_wired_neighbours_output() {
+        let mut f = Fabric::new();
+        f.route(PadId(18), RouteSource::Signal(SIG, false), false, 0);
+        f.set_gpio_enable(PadId(18), true, 0);
+        f.wire(PadId(18), PadId(19), 0).unwrap();
+        f.route_in(SignalId(99), PadId(19), false);
+
+        f.drive(SIG, true, 10);
+        assert!(f.pad_level(PadId(19)), "the wire carries it");
+        assert_eq!(f.input_level(SignalId(99)), Some(true));
+        f.drive(SIG, false, 20);
+        assert_eq!(f.input_level(SignalId(99)), Some(false));
+        assert_eq!(f.conflicts(), 0, "gpio19 drives nothing of its own");
     }
 
     #[test]
@@ -978,6 +1194,7 @@ mod tests {
         // RMT's TX pad needs to reach an RX pad.
         f.release_pad(PadId(18), 150);
         let _ = f.take_edges();
+        f.set_gpio_enable(PadId(18), true, 200);
         f.route(PadId(18), RouteSource::Signal(SIG, false), false, 200);
         f.drive(SIG, true, 300);
         assert!(f.pad_level(PadId(19)), "gpio18's signal reaches gpio19");

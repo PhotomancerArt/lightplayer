@@ -461,6 +461,95 @@ By the rule above, byte-equality is evidence weighed in the `because`, and
 `measured` waits for a silicon pin transcript — a logic analyser on the
 desk, or the C6 `frame-dump` port (M8's) read beside the decoder.
 
+#### Amendment (M2, 2026-09-08): the fabric's other side, and the RMT receiver
+
+The fabric above has one direction: a peripheral drives a signal, a pad
+follows it, a decoder reads the edges. M2 gives it the other, and the shape is
+the same one — one state on the bus, register views writing into it — because
+the rule that forced it has not changed.
+
+**Something outside the chip can now hold a level on a pad** (M2 P1).
+`drive_pad`/`release_pad` are a bench driver: a button to ground, an encoder's
+quadrature pair, the far end of a jumper. `wire(a, b)` ties two pads so that
+whatever one carries the other carries. `set_pad_input_enable` records the
+chip's IO_MUX `fun_ie` — recorded, never gated on in the fabric, and read back
+by the GPIO block to decide whether to serve a pad's bit in `GPIO.in_`, which
+is where a chip fact belongs. `pad_level` is the **resolved** level of a pad:
+what a scope on the pin header would read. The rule is four lines and every
+input payload depends on it: collect the pad and everything wired to it; an
+outside driver on any of them wins; otherwise a *driving* pad in the group
+wins; otherwise the group is unobserved and reads low. Where an outside driver
+and a driving pad disagree, that is a **conflict** — logged with both levels
+and the cycle, counted, and then ignored. Never gated: an emulator that
+refused to run because a bench shorted an output tells you less than one that
+says so and carries on (RD5).
+
+**What makes a pad a driver is `GPIO.enable`, and that is a correction** (M2
+P3, DD38). M2 P1 read `oen_sel = 0` — "the peripheral owns the output enable"
+— as "assume enabled", because peripheral OE lines are not modelled. That made
+every *input* pad a driver: esp-hal's `Input::new` writes `func_out_sel_cfg` on
+its way to configuring an input, so a pad nothing was driving out of counted as
+an enabled output and every scripted level on it logged a conflict with itself
+— eight lines per `gpio-input` run, all of them false. The bit drivers actually
+maintain is `GPIO.enable`: esp-hal sets it in the same breath as every output
+route and clears it when it configures an input. So `enable` decides, for the
+conflict line and for the resolution rule alike, and enabling an already-routed
+output is itself an edge. The limitation that leaves is stated rather than
+hidden: a peripheral that drove a pad without its driver having set
+`GPIO.enable` would read here as not driving. No driver this project replays
+does that, and the failure mode is a pad resting low rather than a level the
+model invented.
+
+**Signals can now read pads as well as drive them.** `route_in`/`input_level`
+mirror `route`/`pad_level`, and the GPIO block's `func_in_sel_cfg[s]` view
+writes them: `in_sel` names the pad a peripheral input signal reads,
+`in_inv_sel` inverts it, `sig_in_sel = 1` is the matrix route esp-hal's
+`connect_input_to_peripheral` writes. `sig_in_sel = 0` (a pad's direct IO_MUX
+function) and the constant selectors `0x38`/`0x3C` are accepted, left unrouted
+and named once — a peripheral that read one finds nothing connected rather
+than a level this model invented.
+
+**RMT channels 2 and 3 are receivers** (M2 P3, RD7), and that is what turns
+M5's esp-emu task into a differential rather than a one-sided capture. Each
+samples the pad its input signal reads, measures every run in channel ticks and
+writes them into the channel's RAM window two runs to a word, with `idle_thres`
+ending the reception, `rx_filter` swallowing a pulse narrower than its
+threshold, `rx_lim` raising `rx_thr_event` and `mem_rx_wrap_en` wrapping the
+write pointer; `rx_end` and `rx_thr_event` go out on source 49 with the status
+and clear semantics the transmitters already had. It is fed the fabric's
+**edges** rather than sampled tick by tick — 100 events per WS2812 bit would be
+614,400 a frame — which is the same model, because a sampler's only output is
+where the level changed, at one stated cost: the two interrupts are raised at
+the slice boundary after the edge, never the words, which carry the edges' own
+cycles.
+
+Three things it does not model, each named where it is made: the carrier
+(modulation out, demodulation in), the APB FIFO, and RAM ownership — there is
+one RAM and no arbiter, so `mem_owner` is recorded rather than enforced and
+`mem_owner_err` never rises. Two behaviours are **modeled choices** rather than
+bit maps, and the second is the one to argue with: the reception begins at the
+first edge (a receiver that started its idle timer on an already-idle line
+could never be armed for a frame that had not arrived), and `rx_lim` **counts**
+rather than naming a position. Its transmitting twin `tx_lim` is a position,
+pinned against silicon over 5,520 frames; nothing pins `rx_lim`, and the
+counter reading is what esp-hal's own reader needs — it reads half a window per
+event and never rewrites the register. That is a model chosen to make a driver
+work, which is the weakest kind, and it is exactly what the silicon capture
+below would settle.
+
+**The `pin` grade does not move.** The gate this engine passes is that the
+receiver's per-frame checksum equals the transmitter's, frame for frame, on a
+`--wire 18:19` loopback — 32 of 32 on both time grades, with the machine's own
+WS281x decoder agreeing off the same pad as a third reading. That is three
+readings of one frame and they agree, and it is still not a measurement,
+because all three are ours: our transmitter puts the waveform on our fabric and
+our receiver and our decoder read it back. The `because` above is unchanged and
+must not be weakened. What would move it is the same thing it always was — an
+instrument, or silicon: a jumper between gpio18 and gpio19 on the desk board
+and an `rmt-rx` capture beside these, which RD7 calls this engine's *promotion*
+rather than its gate, and which `d1-desk-batch.md` carries as an optional
+hands-only item.
+
 ### Provenance on everything derived
 
 Per `2026-07-29-license-provenance-discipline.md`. The register-name tables in

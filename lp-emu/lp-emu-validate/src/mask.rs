@@ -501,6 +501,20 @@ pub static RENDER_LOOP: MaskSet = MaskSet {
     ],
 };
 
+/// The `rmt-rx` set: ANSI and the boot banner's stamps, and nothing else.
+///
+/// The shortest set in the file, for `rmt-chase`'s reason taken one step
+/// further: this payload's whole output is two checksums per frame that have
+/// to be equal, and the setup line's pad numbers, LED count and idle
+/// threshold are the recipe both sides ran. There is nothing here a mask
+/// could remove that would not be removing the gate.
+pub static RMT_RX: MaskSet = MaskSet {
+    name: "rmt-rx",
+    description: "ANSI and boot timestamps; every checksum, word count and pad \
+                  number is left comparable",
+    rules: &[&ANSI, &BOOT_TIMESTAMP],
+};
+
 pub static ALL_SETS: &[&MaskSet] = &[
     &NORMALIZE,
     &COMPILE_HARNESS,
@@ -509,6 +523,7 @@ pub static ALL_SETS: &[&MaskSet] = &[
     &JIT_MATH_PERF,
     &BOOT_IDLE,
     &RMT_CHASE,
+    &RMT_RX,
     &CYCLE_PROBE,
     &GPIO_INPUT,
     &RENDER_LOOP,
