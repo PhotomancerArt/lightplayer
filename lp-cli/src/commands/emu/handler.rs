@@ -24,6 +24,7 @@ fn run(args: RunArgs) -> Result<()> {
     let grade = match args.time_grade {
         Grade::T1 => TimeGrade::T1,
         Grade::T2 => TimeGrade::T2,
+        Grade::T3 => TimeGrade::T3,
     };
 
     let mut builder = Esp32C6Builder::new()

@@ -47,6 +47,9 @@ pub enum Grade {
     T1,
     /// Per-class instruction costs.
     T2,
+    /// The kernel-measured class costs, plus the flash cache's fills and the
+    /// APB's wait states.
+    T3,
 }
 
 #[derive(Debug, Args)]

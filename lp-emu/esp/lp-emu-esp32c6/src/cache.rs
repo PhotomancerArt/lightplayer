@@ -385,9 +385,481 @@ pub fn fill(bus: &mut SocBus, flash: &FlashHandle, cache: &CacheHandle) -> usize
     filled
 }
 
+// ---------------------------------------------------------------------------
+// What an address costs: the cache's fills and the APB's wait states (`t3`)
+// ---------------------------------------------------------------------------
+//
+// Everything below is the C6 half of `lp_emu_core::MemoryCost`. It hangs off
+// this module because this module is where the flash window's address path
+// already lives ([`CacheMmu::translate`], and the module doc above): the
+// window is the only part of the address space whose cost is not one cycle,
+// and the cache that serves it is the reason.
+//
+// It does **not** call `translate`, and that is deliberate. The fill model
+// above copies whole 64 KiB pages into RAM, so by the time the hart fetches,
+// the translation has already happened; what is left to charge is the
+// *cache*, which on this part is indexed by the virtual address. The two
+// agree by construction here: a set index spans
+// `SETS * LINE_BYTES` = 8 KiB, which is inside a 64 KiB page, so the index
+// bits come from the page offset and are the same virtually or physically.
+// (The tags are not, but no two virtual pages in these images map to one
+// physical page, so there is no alias to get wrong.)
+
+/// Bytes in a cache line, and so the size of a fill.
+///
+/// `measured` **and** `documented`, agreeing: the mask ROM's
+/// `Cache_Get_ICache_Line_Size` (`0x4002_75aa`) is two instructions —
+///
+/// ```text
+/// 400275aa <Cache_Get_ICache_Line_Size>:
+///   400275aa: 02000513   li   a0,32
+///   400275ae: 8082       ret
+/// ```
+///
+/// — and P2's `rodata_stride` kernel found the knee between 16 and 32 bytes
+/// with the instruction side (`code_walk`) agreeing independently
+/// (`docs/reports/2026-09-08-esp32c6-t3-calibration.md` §2.4).
+pub const LINE_BYTES: u32 = 32;
+
+/// Ways. `documented` — the mask ROM, not the TRM (see [`CACHE_BYTES`]).
+///
+/// `Cache_Get_Mode` (`0x4002_75b0`) fills a three-field descriptor and
+/// `Cache_Travel_Tag_Memory` (`0x4002_7d96`) reads it back as
+/// `{ u32 size; u16 line; u8 ways; }`:
+///
+/// ```text
+/// 400275c6: 4791         li   a5,4
+/// 400275c8: 00a41223     sh   a0,4(s0)      ; line size
+/// 400275cc: 00f40323     sb   a5,6(s0)      ; ways = 4
+/// ```
+///
+/// and the traversal divides by exactly those two:
+///
+/// ```text
+/// 40027db4: lbu a5,6(s1)      ; ways
+/// 40027db8: lw  a1,0(s1)      ; total size
+/// 40027dc0: divu a1,a1,a5     ; bytes per way
+/// 40027ddc: remu a1,s0,a1     ; address within a way
+/// 40027de0: divu a1,a1,a4     ; / line size = set index
+/// 40027dea: bltu a5,a0,…      ; for way in 0..ways
+/// ```
+pub const WAYS: usize = 4;
+
+/// Total bytes of cache. `documented` — `Cache_Get_Mode`'s first store:
+///
+/// ```text
+/// 400275b4: 67a1     lui  a5,0x8     ; 0x8000 = 32,768
+/// 400275b6: c11c     sw   a5,0(a0)
+/// ```
+///
+/// **The TRM's Cache chapter was not consulted** — it is not in this
+/// repository and this phase ran offline — so OQ3's "cite both, and the ROM
+/// wins if they disagree" is met on the ROM side only. That is a reported
+/// deviation, not a silent one; the ROM is the source that wins by OQ3's own
+/// rule, and the one geometry number the ROM does *not* have to be trusted
+/// for — the line — is independently measured.
+///
+/// One cache, not two: the ROM has a single descriptor, a single
+/// `Cache_Get_Mode`, and `EXTMEM`'s size/blocksize registers come as one
+/// `l1_icache_*` pair and one `l1_cache_*` pair over the same array
+/// (`regs/extmem.rs`). Instruction fetch and data reads through the flash
+/// window therefore share these tags.
+pub const CACHE_BYTES: u32 = 32 * 1024;
+
+/// Sets: 32 KiB / 32 B / 4 ways.
+pub const SETS: usize = (CACHE_BYTES / LINE_BYTES) as usize / WAYS;
+
+/// What one line's fill costs the CPU, in CPU cycles.
+///
+/// `measured`, from `code_walk` — 98,304 bytes of straight-line 4-byte
+/// assembly, a working set three times the cache, all-miss on every pass:
+///
+/// ```text
+/// (1,064,273 silicon cycles − 24,576 instructions × 1 cycle) / 3,072 lines
+///   = 338.44 cycles per 32-byte line
+/// ```
+///
+/// Cross-checked by the data side, which shares no code and no address
+/// space with it: `rodata_stride/16` puts two accesses in one line and costs
+/// 168.71 memory cycles each (2 × 168.71 = 337.4 per fill, 0.3 % away), and
+/// `rodata_stride/32`–`/4096` put one access in each line at 349.3–350.0
+/// (3.3 % the other way). 338 reproduces all three inside ±3.4 %.
+///
+/// **The documented flash configuration cannot produce this number, and that
+/// is a finding rather than a rounding.** The image header says `SPI Speed:
+/// 40MHz, SPI Mode: DIO` (the bootloader's own banner, quoted in the
+/// `cycle-probe` silicon transcript at lines 26 and 38–39), and DIO at
+/// 40 MHz reads 32 bytes in
+///
+/// ```text
+///   8 clocks command (1 bit/clock)
+/// + 16 clocks address+mode (32 bits at 2 bits/clock)
+/// + 128 clocks data (256 bits at 2 bits/clock)
+/// = 152 SPI clocks × (160 MHz CPU / 40 MHz SPI) = 608 CPU cycles
+/// ```
+///
+/// which is 1.8× what silicon charges. A 32-byte line cannot arrive in 338
+/// CPU cycles at two bits per 40 MHz clock — 128 clocks of data alone is 512
+/// CPU cycles — so the part is not reading the way the header describes:
+/// four bits per clock at 40 MHz would be ≈336, and two bits per clock at
+/// 80 MHz ≈304 plus controller overhead. Which one it is needs a kernel that
+/// reads SPI0's clock and mode registers at run time, which `cycle-probe`
+/// does not have. **The constant is the measurement, not the arithmetic**;
+/// the arithmetic is written out because the brief asked for it and because
+/// it is the thing that turned out to be wrong.
+pub const LINE_FILL_CYCLES: u32 = 338;
+
+/// What an APB access costs beyond the load or store itself.
+///
+/// `measured`, from `mmio_poll`: a three-instruction poll loop costs 12.0011
+/// cycles an iteration on silicon at **both** UART0 `status` (`0x6000_001C`)
+/// and SYSTIMER `unit0_value.lo` (`0x6000_A044`) — indistinguishable, so
+/// this is the bus's cost and not a peripheral's. Less the three
+/// instructions at `iram_loop`'s measured 1.000 cycles each: **9** cycles of
+/// wait state, which is the "10-cycle APB read" of §2.2 with the load
+/// instruction's own cycle taken out (this hook charges what is *beyond* the
+/// instruction's class).
+///
+/// **Stores were not measured.** `cycle-probe` polls; it never writes in a
+/// loop. They are charged the same here, because a write that did not wait
+/// for the bus would have to be posted, and a posted write on a bus this
+/// slow would show up as a *negative* residual somewhere — but that is
+/// reasoning, not a reading, and a `mmio_store` kernel is named in the
+/// report as the capture that would settle it.
+pub const APB_ACCESS_CYCLES: u32 = 9;
+
+/// Invalid tag. Line indices are `addr >> 5` over a 32-bit space, so
+/// `u32::MAX` is only reachable at `0xffff_ffe0`, which is not memory on
+/// this part.
+const NO_LINE: u32 = u32::MAX;
+
+/// The initial MRU order of a set: way 0 most recent … way 3 least.
+/// Two bits per way, most-recently-used in the low pair.
+const FRESH_ORDER: u8 = 0b11_10_01_00;
+
+/// The C6's answer to "what does this address cost?" — the `t3` model.
+///
+/// Three terms, and no fourth:
+///
+/// - a **fill** ([`LINE_FILL_CYCLES`]) whenever an access misses the flash
+///   window's cache;
+/// - **nothing** for a hit, which is measured rather than assumed:
+///   `flash_loop` and `iram_loop` are the same 42 bytes of machine code at
+///   two addresses and cost the same to 0.0002 cycles per instruction once
+///   resident (§2.1), so flash residency itself is free;
+/// - the **APB**'s wait states ([`APB_ACCESS_CYCLES`]) on a load or store in
+///   the high peripheral window.
+///
+/// **There is no per-slice term and no scale factor.** P2's `slice_shape`
+/// kernel did not isolate a per-slice cost — it measured the console path,
+/// where silicon is 10,727 cycles *faster* than the emulator, the opposite
+/// sign to the +4,075 the harness's tick 15 shows — so there is no measured
+/// number to charge and none is invented (the phase brief's "refuse to add a
+/// free parameter without a kernel that isolates it").
+pub struct CacheCost {
+    /// `SETS * WAYS` line indices (`addr >> 5`), [`NO_LINE`] when empty.
+    /// Allocated once; nothing here allocates on the hot path.
+    tags: Vec<u32>,
+    /// One packed MRU order per set. Exact LRU: four ways fit in a byte.
+    order: Vec<u8>,
+    /// Statistics, for the calibration record. Not part of the model.
+    fills: u64,
+    hits: u64,
+    apb: u64,
+}
+
+impl Default for CacheCost {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CacheCost {
+    pub fn new() -> Self {
+        Self {
+            tags: vec![NO_LINE; SETS * WAYS],
+            order: vec![FRESH_ORDER; SETS],
+            fills: 0,
+            hits: 0,
+            apb: 0,
+        }
+    }
+
+    /// Empty the cache — what a reset, or a full invalidate, leaves.
+    pub fn reset(&mut self) {
+        self.tags.fill(NO_LINE);
+        self.order.fill(FRESH_ORDER);
+    }
+
+    pub fn fills(&self) -> u64 {
+        self.fills
+    }
+    pub fn hits(&self) -> u64 {
+        self.hits
+    }
+    pub fn apb_accesses(&self) -> u64 {
+        self.apb
+    }
+
+    /// Is this address served through the flash cache?
+    ///
+    /// The whole 16 MiB the MMU covers at page mode 0 — esp-hal's linker
+    /// script splits it into an 8 MiB `ROM` window and an 8 MiB `RODATA`
+    /// window by convention, but the cache does not know that and neither
+    /// does this.
+    #[inline]
+    fn cached(addr: u32) -> bool {
+        addr.wrapping_sub(memmap::FLASH_CACHE_BASE) < WINDOW_LEN
+    }
+
+    /// Is this address on the high peripheral bus the kernels measured?
+    ///
+    /// `0x6000_0000..0x6010_0000`. The low MMIO window (`0x2000_0000`, the
+    /// interrupt controllers) is **not** charged: it is core-local rather
+    /// than APB, no kernel measured it, and inventing either 0 or 9 for it
+    /// would be the same unmeasured guess. Zero is the one that adds no
+    /// term. Named in the report as a capture that is owed.
+    #[inline]
+    fn peripheral(addr: u32) -> bool {
+        addr.wrapping_sub(memmap::MMIO_HIGH_BASE) < memmap::MMIO_HIGH_LEN
+    }
+
+    /// One line: hit, or fill and evict the least recently used way.
+    #[inline]
+    fn touch_line(&mut self, line: u32) -> u32 {
+        let set = (line as usize) & (SETS - 1);
+        let base = set * WAYS;
+        let mut order = self.order[set];
+
+        for slot in 0..WAYS {
+            if self.tags[base + slot] == line {
+                self.hits += 1;
+                self.order[set] = promote(order, slot as u8);
+                return 0;
+            }
+        }
+
+        // Miss: the way at the far end of the MRU list is the victim.
+        let victim = ((order >> ((WAYS as u8 - 1) * 2)) & 3) as usize;
+        self.tags[base + victim] = line;
+        order = promote(order, victim as u8);
+        self.order[set] = order;
+        self.fills += 1;
+        LINE_FILL_CYCLES
+    }
+
+    /// The lines an access of `width` bytes at `addr` touches. A misaligned
+    /// access across a line boundary is two fills, which is what the part
+    /// does — the C6 core performs misaligned data accesses in hardware.
+    #[inline]
+    fn span(&mut self, addr: u32, width: u8) -> u32 {
+        let first = addr >> LINE_BYTES.trailing_zeros();
+        let last = addr.wrapping_add(u32::from(width) - 1) >> LINE_BYTES.trailing_zeros();
+        let mut cycles = self.touch_line(first);
+        if last != first {
+            cycles += self.touch_line(last);
+        }
+        cycles
+    }
+}
+
+/// Move `way` to the front of a set's packed MRU list.
+#[inline]
+fn promote(order: u8, way: u8) -> u8 {
+    let mut out = way;
+    let mut shift = 2;
+    for slot in 0..WAYS as u8 {
+        let w = (order >> (slot * 2)) & 3;
+        if w != way {
+            out |= w << shift;
+            shift += 2;
+        }
+    }
+    out
+}
+
+impl lp_emu_core::MemoryCost for CacheCost {
+    /// An instruction fetch.
+    ///
+    /// Charged on the line holding `addr` only. A 4-byte instruction at a
+    /// 2-byte offset can straddle a line, and this misses that second line —
+    /// but the very next fetch is in it, so the fill is charged one
+    /// instruction later rather than not at all, and a straight-line walk of
+    /// 4-byte instructions (which is what `code_walk` calibrated on) never
+    /// straddles at all. The alternative would need the instruction's width
+    /// at fetch time, which the bus does not have.
+    #[inline]
+    fn fetch(&mut self, addr: u32) -> u32 {
+        if !Self::cached(addr) {
+            return 0;
+        }
+        self.touch_line(addr >> LINE_BYTES.trailing_zeros())
+    }
+
+    #[inline]
+    fn load(&mut self, addr: u32, width: u8) -> u32 {
+        if Self::cached(addr) {
+            return self.span(addr, width);
+        }
+        if Self::peripheral(addr) {
+            self.apb += 1;
+            return APB_ACCESS_CYCLES;
+        }
+        0
+    }
+
+    #[inline]
+    fn store(&mut self, addr: u32, width: u8) -> u32 {
+        // A store into the flash window is not a thing the guest does — the
+        // window is read-only on the part — but the model answers for it
+        // anyway rather than pretending the address is free.
+        if Self::cached(addr) {
+            return self.span(addr, width);
+        }
+        if Self::peripheral(addr) {
+            self.apb += 1;
+            return APB_ACCESS_CYCLES;
+        }
+        0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lp_emu_core::MemoryCost as _;
+
+    #[test]
+    fn the_geometry_is_the_one_the_mask_rom_describes() {
+        // Cache_Get_Mode: size 0x8000, ways 4; Cache_Get_ICache_Line_Size: 32.
+        assert_eq!(CACHE_BYTES, 32_768);
+        assert_eq!(WAYS, 4);
+        assert_eq!(LINE_BYTES, 32);
+        assert_eq!(SETS, 256, "32 KiB / 32 B / 4 ways");
+        // A set index spans 8 KiB, inside a 64 KiB page: virtual and
+        // physical indexing agree, which is why this model needs no
+        // translation.
+        assert!(SETS as u32 * LINE_BYTES <= BLOCK_LEN);
+    }
+
+    #[test]
+    fn only_the_flash_window_and_the_apb_cost_anything() {
+        let mut c = CacheCost::new();
+        // HP SRAM: free, at any width.
+        assert_eq!(c.load(memmap::HP_SRAM_BASE, 4), 0);
+        assert_eq!(c.store(memmap::HP_SRAM_BASE + 0x40, 1), 0);
+        assert_eq!(c.fetch(memmap::HP_SRAM_BASE + 0x80), 0);
+        // The mask ROM's own text: free (it is not behind the cache).
+        assert_eq!(c.fetch(memmap::ROM_MASK_BASE), 0);
+        // UART0 status, the register the harness polls: the APB's wait.
+        assert_eq!(c.load(0x6000_001C, 4), APB_ACCESS_CYCLES);
+        assert_eq!(c.store(0x6000_0000, 4), APB_ACCESS_CYCLES);
+        // The interrupt controller window is deliberately uncharged.
+        assert_eq!(c.load(0x2000_1000, 4), 0);
+        assert_eq!(c.fills(), 0);
+        assert_eq!(c.apb_accesses(), 2);
+    }
+
+    #[test]
+    fn a_line_is_filled_once_and_then_free() {
+        let mut c = CacheCost::new();
+        let base = memmap::FLASH_CACHE_BASE + 0x1000;
+        assert_eq!(c.fetch(base), LINE_FILL_CYCLES, "cold");
+        for off in (0..LINE_BYTES).step_by(4) {
+            assert_eq!(c.fetch(base + off), 0, "the rest of the line is resident");
+        }
+        assert_eq!(c.fetch(base + LINE_BYTES), LINE_FILL_CYCLES, "the next line");
+        assert_eq!(c.fills(), 2);
+        assert_eq!(c.hits(), 8);
+    }
+
+    #[test]
+    fn a_working_set_bigger_than_the_cache_never_hits_and_one_smaller_never_misses() {
+        // This is `code_walk`'s premise and its result: 96 KiB of
+        // straight-line code is all-miss on the second pass as well as the
+        // first, and the same walk inside the cache is all-hit.
+        let base = memmap::FLASH_CACHE_BASE + 0x2_0000;
+        for (bytes, expect_second_pass_fills) in [(3 * CACHE_BYTES, 3 * CACHE_BYTES / LINE_BYTES),
+                                                  (CACHE_BYTES / 2, 0)]
+        {
+            let mut c = CacheCost::new();
+            for _pass in 0..2 {
+                for off in (0..bytes).step_by(4) {
+                    c.fetch(base + off);
+                }
+            }
+            let first_pass = bytes / LINE_BYTES;
+            assert_eq!(
+                c.fills(),
+                u64::from(first_pass + expect_second_pass_fills),
+                "{bytes} bytes over two passes"
+            );
+        }
+    }
+
+    #[test]
+    fn four_ways_of_conflict_fit_and_the_fifth_evicts_the_oldest() {
+        let mut c = CacheCost::new();
+        // Five lines that land in the same set: one way-span apart.
+        let way_span = SETS as u32 * LINE_BYTES;
+        let a = memmap::FLASH_CACHE_BASE;
+        for i in 0..4 {
+            assert_eq!(c.fetch(a + i * way_span), LINE_FILL_CYCLES);
+        }
+        // All four are resident.
+        for i in 0..4 {
+            assert_eq!(c.fetch(a + i * way_span), 0);
+        }
+        // A fifth evicts line 0, which was touched least recently.
+        assert_eq!(c.fetch(a + 4 * way_span), LINE_FILL_CYCLES);
+        assert_eq!(c.fetch(a), LINE_FILL_CYCLES, "line 0 was the victim");
+        assert_eq!(c.fetch(a + 3 * way_span), 0, "line 3 was not");
+    }
+
+    #[test]
+    fn a_load_across_a_line_boundary_is_two_fills() {
+        let mut c = CacheCost::new();
+        let edge = memmap::FLASH_CACHE_BASE + LINE_BYTES - 2;
+        assert_eq!(c.load(edge, 4), 2 * LINE_FILL_CYCLES);
+        assert_eq!(c.fills(), 2);
+        // And an aligned one in the same pair is free afterwards.
+        assert_eq!(c.load(memmap::FLASH_CACHE_BASE, 4), 0);
+    }
+
+    #[test]
+    fn the_same_access_stream_costs_the_same_twice() {
+        // Determinism at the smallest scale the model has: no host clock, no
+        // hash seed, no allocator address reaches the answer.
+        let run = || {
+            let mut c = CacheCost::new();
+            let mut total = 0u64;
+            for i in 0..20_000u32 {
+                let a = memmap::FLASH_CACHE_BASE + (i.wrapping_mul(2_654_435_761) & 0x000f_ffff);
+                total += u64::from(c.fetch(a));
+                total += u64::from(c.load(a ^ 0x40, 4));
+                total += u64::from(c.store(0x6000_0000 + (i & 0xff) * 4, 4));
+            }
+            (total, c.fills(), c.hits(), c.apb_accesses())
+        };
+        assert_eq!(run(), run());
+    }
+
+    #[test]
+    fn the_promote_order_is_an_exact_lru() {
+        // way 3 to the front leaves 0,1,2 behind it in their old order.
+        assert_eq!(promote(FRESH_ORDER, 3), 0b10_01_00_11);
+        // Promoting the front way changes nothing.
+        assert_eq!(promote(FRESH_ORDER, 0), FRESH_ORDER);
+        // Every way still appears exactly once, from every starting order.
+        for way in 0..WAYS as u8 {
+            let o = promote(FRESH_ORDER, way);
+            let mut seen = [false; WAYS];
+            for slot in 0..WAYS as u8 {
+                seen[((o >> (slot * 2)) & 3) as usize] = true;
+            }
+            assert!(seen.iter().all(|s| *s), "order {o:#010b} lost a way");
+        }
+    }
 
     #[test]
     fn a_reset_table_maps_nothing_the_way_cache_mmu_init_leaves_it() {

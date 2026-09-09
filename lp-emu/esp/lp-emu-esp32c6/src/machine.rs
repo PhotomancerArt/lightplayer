@@ -22,13 +22,23 @@
 //!
 //! # Time
 //!
-//! The CPU runs at 160 MHz, so `micros = cycles / 160`. Two grades, both of
-//! which are just the hart's cycle model:
+//! The CPU runs at 160 MHz, so `micros = cycles / 160`. Three grades. The
+//! first two are just the hart's cycle model; the third adds what an
+//! access's *address* costs:
 //!
 //! - `t1` (`lp-emu:esp32c6:t1`) — [`CycleModel::InstructionCount`], what the
 //!   vendor emulator does.
-//! - `t2` (`lp-emu:esp32c6:t2`) — [`CycleModel::Esp32C6`], the measured
-//!   per-class model.
+//! - `t2` (`lp-emu:esp32c6:t2`) — [`CycleModel::Esp32C6`], a per-class model
+//!   taken from a blog post.
+//! - `t3` (`lp-emu:esp32c6:t3`) — [`CycleModel::Esp32C6Kernels`], the same
+//!   table with the four classes the `cycle-probe` payload measured on
+//!   silicon corrected, **plus** [`crate::cache::CacheCost`] installed on
+//!   the bus: the flash cache's fills and the APB's wait states. It is the
+//!   first grade in which two instructions with the same opcode can cost
+//!   different amounts because they are at different addresses.
+//!
+//! `t1` and `t2` install no memory-cost model at all, so their cycle counts
+//! are exactly what they were before `t3` existed.
 //!
 //! Neither is a claim about milliseconds on silicon; see vision "Time is a
 //! graded ladder, never a promise".
@@ -184,6 +194,9 @@ pub enum TimeGrade {
     T1,
     /// `lp-emu:esp32c6:t2` — the per-instruction-class model.
     T2,
+    /// `lp-emu:esp32c6:t3` — the kernel-measured class table, and the cache
+    /// and bus costs of the address ([`crate::cache::CacheCost`]).
+    T3,
 }
 
 impl TimeGrade {
@@ -191,6 +204,19 @@ impl TimeGrade {
         match self {
             TimeGrade::T1 => CycleModel::InstructionCount,
             TimeGrade::T2 => CycleModel::Esp32C6,
+            TimeGrade::T3 => CycleModel::Esp32C6Kernels,
+        }
+    }
+
+    /// What an access's address costs at this grade, or `None` for free.
+    ///
+    /// `t1` and `t2` are `None` **by construction**, which is the reason
+    /// their counts cannot move: the bus's hook is not installed, so its
+    /// drain is a constant zero.
+    pub fn memory_cost(self) -> Option<Box<dyn lp_emu_core::MemoryCost + Send>> {
+        match self {
+            TimeGrade::T1 | TimeGrade::T2 => None,
+            TimeGrade::T3 => Some(Box::new(crate::cache::CacheCost::new())),
         }
     }
 
@@ -199,6 +225,7 @@ impl TimeGrade {
         match self {
             TimeGrade::T1 => "lp-emu:esp32c6:t1",
             TimeGrade::T2 => "lp-emu:esp32c6:t2",
+            TimeGrade::T3 => "lp-emu:esp32c6:t3",
         }
     }
 
@@ -206,7 +233,10 @@ impl TimeGrade {
         match text {
             "t1" => Ok(TimeGrade::T1),
             "t2" => Ok(TimeGrade::T2),
-            other => Err(format!("unknown time grade `{other}` (expected t1 or t2)")),
+            "t3" => Ok(TimeGrade::T3),
+            other => Err(format!(
+                "unknown time grade `{other}` (expected t1, t2 or t3)"
+            )),
         }
     }
 }
@@ -1330,6 +1360,11 @@ impl Esp32C6Builder {
         let mut hart = MachineHart::new(0);
         loader::reset_hart(&mut hart, &mut bus, entry);
         hart.set_cycle_model(time_grade.cycle_model());
+        // The address's cost, if this grade charges one. Installed after the
+        // loader has placed the app and filled the window: the cache starts
+        // cold, as it is at reset, and the host's placement of segments
+        // costs the guest nothing.
+        bus.set_memory_cost(time_grade.memory_cost());
 
         // `--wire a:b`, before the guest runs: a jumper is on the header
         // when the board powers up, not put there later.
