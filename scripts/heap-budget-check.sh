@@ -61,6 +61,14 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# The lp-cli invocation for the projects half (dev profile). `LP_CLI` overrides
+# it with a command prefix: CI sets it to the `target/debug/lp-cli` the
+# workspace `cargo test` already built, because a `-p lp-cli` dev build
+# unifies features differently and rebuilt every dependency (4m49s on
+# 2026-09-08). Word-split on purpose — it is a command, not a path.
+# shellcheck disable=SC2206
+LP_CLI_CMD=(${LP_CLI:-cargo run -q -p lp-cli --})
+
 RECORD="scripts/heap-budget-record.json"
 MODES=(startup steady-render)
 # Emulator cycle cap per profile session. The startup capture must reach the
@@ -92,7 +100,7 @@ run_profile() {
     # free-list figures. See docs/heap-budget-gate.md "Cost". Meteor's startup
     # capture never fit the default at all (`MAX_CYCLES` above); a session
     # that still hits the cap is refused by `budget_for`.
-    cargo run -q -p lp-cli -- profile "$project" --collect alloc --mode "$mode" \
+    "${LP_CLI_CMD[@]}" profile "$project" --collect alloc --mode "$mode" \
         --max-cycles "$MAX_CYCLES" 2>/dev/null | tail -1
 }
 

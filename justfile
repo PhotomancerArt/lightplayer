@@ -634,8 +634,14 @@ schema-gen:
     cargo run -p lp-cli -- schema gen
 
 # Verify schemas/ matches the generator byte-for-byte (drift gate, CI-style).
+#
+# `LP_CLI` overrides the lp-cli invocation (a command prefix). CI points it
+# at the binary the workspace `cargo test` already built, so the gate costs
+# no second tree build: a `-p lp-cli` dev build unifies features differently
+# from the workspace test build and rebuilt every dependency — 4m49s per
+# Validate run on 2026-09-08. Locally the default builds lp-cli as before.
 schema-check:
-    cargo run -p lp-cli -- schema gen --check
+    ${LP_CLI:-cargo run -q -p lp-cli --} schema gen --check
 
 # Snapshot the outgoing format into schemas/history/v<N>/ BEFORE bumping
 # PROJECT_FORMAT_VERSION (N = the current constant). Copies the schemas, the

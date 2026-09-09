@@ -1264,9 +1264,19 @@ jobs:
 
       # test-rust-core always runs; the studio-web host test only when studio
       # paths changed (it forces a differently-feature-unified rebuild of the
-      # Dioxus tree); filetests only when shader paths changed. schema-check
-      # runs last so its lp-cli dev build reuses the warm deps the test
-      # builds just produced. Pushes to main force every gate true.
+      # Dioxus tree); filetests only when shader paths changed. Pushes to
+      # main force every gate true.
+      #
+      # schema-check and the heap ratchet (next step) run against the
+      # `target/debug/lp-cli` the workspace `cargo test` just built, via the
+      # `LP_CLI` override both honor. They used to `cargo run -p lp-cli`,
+      # and a `-p lp-cli` dev build unifies features differently from the
+      # workspace test build, so it rebuilt every dependency: a third full
+      # tree build, 4m49s on main run 34308562027 (2026-09-08), for a
+      # binary cargo had already produced for lp-cli's integration tests.
+      # The assertion is deliberate — if a future change stops `cargo test`
+      # from building the bin, this must fail loudly rather than fall back
+      # to the slow path unnoticed.
       - name: Validate
         env:
           SHADER: ${{ needs.detect-changes.outputs.shader }}
@@ -1277,12 +1287,16 @@ jobs:
           [ "$STUDIO" = "true" ] && recipes="$recipes test-studio-host"
           [ "$SHADER" = "true" ] && recipes="$recipes test-filetests"
           just ci-prereqs
-          just $recipes schema-check
+          just $recipes
+          test -x target/debug/lp-cli || { echo "::error::cargo test did not leave target/debug/lp-cli — the LP_CLI fast path needs it"; exit 1; }
+          echo "LP_CLI=$PWD/target/debug/lp-cli" >> "$GITHUB_ENV"
+          LP_CLI="$PWD/target/debug/lp-cli" just schema-check
 
       # Heap-budget ratchet: emulator window deltas vs the checked-in
       # measured record. Deterministic, 0% margin; re-baseline explicitly
       # with `just heap-budget-baseline`. See docs/heap-budget-gate.md.
-      # Runs after the tests so lp-cli and fw-emu reuse warm deps.
+      # Runs after the tests: fw-emu reuses warm deps and lp-cli is the
+      # test-built binary (LP_CLI, exported by the step above).
       - name: Heap budget ratchet
         run: cd lp2025 && just heap-budget-check
 
