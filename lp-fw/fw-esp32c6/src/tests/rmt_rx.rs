@@ -58,12 +58,12 @@ use esp_hal::gpio::{AnyPin, Level};
 use esp_hal::rmt::{
     PulseCode, Rmt, RxChannelConfig, RxChannelCreator, TxChannelConfig, TxChannelCreator,
 };
+use esp_hal::time::Instant;
 use fw_checks::checks::rmt_chase::{FrameRecord, chase_frame, frame_bytes, write_frame_record};
 use fw_checks::checks::rmt_rx::{
     FRAMES, IDLE_THRES, LEDS, RxRecord, decode_frame, frame_codes, write_decode_error, write_done,
     write_rx_record, write_setup,
 };
-use esp_hal::time::Instant;
 use log::info;
 use lp_ws281x::ChannelTiming;
 
