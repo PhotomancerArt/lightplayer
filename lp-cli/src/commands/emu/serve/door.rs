@@ -17,6 +17,11 @@
 //! door has exactly three routes and one of them is an upgrade: pulling in a
 //! server stack to answer `GET /boards` would be more moving parts than the
 //! whole shim.
+//!
+//! Every plain HTTP reply carries `Access-Control-Allow-Origin: *`, so a
+//! Studio page served from another origin can `fetch()` `/boards`: the door
+//! is loopback-only dev tooling (`--listen 127.0.0.1:…` by default) with
+//! nothing behind it that an origin check would protect.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -154,12 +159,25 @@ fn header<'a>(head: &'a str, name: &str) -> Option<&'a str> {
         .map(|(_, v)| v.trim())
 }
 
+/// The head for every plain HTTP reply this door writes, `/boards`'s JSON
+/// included as much as its 404s and 409s.
+///
+/// `Access-Control-Allow-Origin: *` is a plain `GET` with no custom
+/// headers — a CORS "simple request" — so this alone is enough to let a
+/// cross-origin page read the reply; it needs no `OPTIONS` preflight
+/// handling alongside it. `*` is correct because the door only ever listens
+/// on loopback by default: there is no origin here that a narrower value
+/// would be protecting.
+fn http_head(status: &str, kind: &str, body_len: usize) -> String {
+    format!(
+        "HTTP/1.1 {status}\r\nContent-Type: {kind}\r\nContent-Length: {body_len}\r\n\
+         Access-Control-Allow-Origin: *\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n"
+    )
+}
+
 async fn respond(stream: &mut TcpStream, status: &str, kind: &str, body: &str) -> Result<()> {
-    let response = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: {kind}\r\nContent-Length: {}\r\n\
-         Cache-Control: no-store\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    );
+    let mut response = http_head(status, kind, body.len());
+    response.push_str(body);
     stream.write_all(response.as_bytes()).await?;
     stream.flush().await?;
     Ok(())
@@ -456,5 +474,23 @@ mod tests {
         assert_eq!(header(head, "upgrade"), Some("WebSocket"));
         assert_eq!(header(head, "sec-websocket-key"), Some("abc"));
         assert_eq!(header(head, "host"), None);
+    }
+
+    #[test]
+    fn boards_json_carries_the_cors_header_so_a_studio_page_can_read_it() {
+        let head = http_head("200 OK", "application/json", 2);
+        assert!(
+            head.contains("Access-Control-Allow-Origin: *\r\n"),
+            "GET /boards reply is missing Access-Control-Allow-Origin: {head}"
+        );
+    }
+
+    #[test]
+    fn a_404_carries_the_cors_header_too() {
+        let head = http_head("404 Not Found", "text/plain", 0);
+        assert!(
+            head.contains("Access-Control-Allow-Origin: *\r\n"),
+            "404 reply is missing Access-Control-Allow-Origin: {head}"
+        );
     }
 }

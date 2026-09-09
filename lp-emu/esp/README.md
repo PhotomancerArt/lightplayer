@@ -200,7 +200,7 @@ plan two's Studio walks need — so there is a third door, and it lives in
 **`lp-cli`**, outside this fence:
 
 ```text
-GET  /boards                 → the registry, as JSON
+GET  /boards                 → the registry, as JSON (Access-Control-Allow-Origin: *, so a Studio page on another origin can fetch it)
 WS   /board/<id>/bytes       → binary frames both ways; the payload IS the bytes
 WS   /board/<id>/control     → the line protocol above, verbatim
 ```
