@@ -29,6 +29,8 @@ std = [
     "log/std",
     "libc",
 ]
+# spike: per-block execution census for the region-JIT spike. Throwaway.
+blockprof = ["std", "lp-emu-core/blockprof"]
 
 [dev-dependencies]
 # Self-dependency: lp-riscv-emu's own tests need the `std` feature. This used to

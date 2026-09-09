@@ -33,6 +33,8 @@ rustc-demangle = "0.1"
 # (`scripts/check-emu-fence.sh`); no `mock` — the emulator is the cycle-time
 # model of the same peripheral.
 lp-ws281x = { path = "../../../lp-fw/lp-ws281x", default-features = false }
+# spike: the region-JIT-to-wasm spike (wasmtime). Throwaway.
+lp-emu-jit-spike = { path = "../../lp-emu-jit-spike", optional = true }
 
 [dev-dependencies]
 test-log = { workspace = true }
@@ -45,3 +47,8 @@ sha2 = "0.10"
 # silicon transcript with M2's runner. Inside the `lp-emu/` fence (MIT), and
 # it mirrors `fw-checks` rather than importing it, so the fence lint passes.
 lp-emu-validate = { path = "../../lp-emu-validate" }
+
+[features]
+# spike: per-block execution census for the region-JIT spike. Throwaway.
+blockprof = ["lp-riscv-emu/blockprof"]
+jit-spike = ["dep:lp-emu-jit-spike"]

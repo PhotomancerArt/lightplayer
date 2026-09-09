@@ -5684,12 +5684,25 @@ dependencies = [
  "log",
  "lp-emu-core",
  "lp-emu-esp-common",
+ "lp-emu-jit-spike",
  "lp-emu-validate",
  "lp-riscv-emu",
  "lp-ws281x",
  "rustc-demangle",
  "sha2",
  "test-log",
+]
+
+[[package]]
+name = "lp-emu-jit-spike"
+version = "40.0.0"
+dependencies = [
+ "log",
+ "lp-emu-core",
+ "lp-emu-esp-common",
+ "lp-riscv-emu",
+ "wasm-encoder 0.245.1",
+ "wasmtime",
 ]
 
 [[package]]

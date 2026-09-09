@@ -170,6 +170,36 @@ pub trait Bus {
     /// publish. The default is empty.
     #[inline(always)]
     fn note_fence_i(&mut self) {}
+
+    /// spike (region JIT): is a store side-band or a yield pending? A peek —
+    /// nothing is consumed. A JIT'd region must not be entered while one is
+    /// pending, and must leave right after the access that raised one, so the
+    /// interpreter observes it at exactly the store it always has.
+    fn sideband_or_yield_pending(&self) -> bool {
+        false
+    }
+
+    /// spike (region JIT): is any load watchpoint armed? A JIT'd region
+    /// performs RAM loads without the bus seeing them, so it refuses to run
+    /// while one is.
+    fn load_watchpoints_armed(&self) -> bool {
+        false
+    }
+
+    /// spike (region JIT): the store watchpoints, in the shape a region can
+    /// honour: none, exactly one `[lo, hi)` range (esp-hal's stack guard is
+    /// armed for the whole run), or more than one (the region refuses to run).
+    fn store_watch(&self) -> StoreWatch {
+        StoreWatch::None
+    }
+}
+
+/// spike (region JIT): see [`Bus::store_watch`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StoreWatch {
+    None,
+    One { lo: u64, hi: u64 },
+    Many,
 }
 
 /// A hardware watchpoint slot's configuration.

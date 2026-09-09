@@ -64,7 +64,56 @@ pub struct RamRegion {
     /// Guest stores are allowed. `false` models ROM and a read-only flash
     /// cache window.
     pub writable: bool,
-    pub data: Vec<u8>,
+    pub data: RegionBytes,
+}
+
+/// spike (region JIT): a region's bytes, owned by the bus or aliased into a
+/// wasm linear memory a JIT'd region reads and writes directly.
+///
+/// `Raw` is a pointer into a `wasmtime::Memory` whose size is fixed (min ==
+/// max) so its base never moves; the JIT that installed it owns the store and
+/// outlives every access. Throwaway - the product shape would give the bus a
+/// memory it owns and hand *that* to the JIT.
+#[derive(Clone)]
+pub enum RegionBytes {
+    Owned(Vec<u8>),
+    Raw(*mut u8, usize),
+}
+
+// The raw pointer is a host-side alias of memory the emulator already
+// considers its own; the bus is `Send` today and this keeps it so.
+unsafe impl Send for RegionBytes {}
+
+impl core::fmt::Debug for RegionBytes {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            RegionBytes::Owned(v) => write!(f, "Owned({} bytes)", v.len()),
+            RegionBytes::Raw(_, n) => write!(f, "Raw({n} bytes)"),
+        }
+    }
+}
+
+impl core::ops::Deref for RegionBytes {
+    type Target = [u8];
+    #[inline(always)]
+    fn deref(&self) -> &[u8] {
+        match self {
+            RegionBytes::Owned(v) => v,
+            // SAFETY: see the type docs - the memory is fixed-size and outlives the bus.
+            RegionBytes::Raw(p, n) => unsafe { core::slice::from_raw_parts(*p, *n) },
+        }
+    }
+}
+
+impl core::ops::DerefMut for RegionBytes {
+    #[inline(always)]
+    fn deref_mut(&mut self) -> &mut [u8] {
+        match self {
+            RegionBytes::Owned(v) => v,
+            // SAFETY: as above.
+            RegionBytes::Raw(p, n) => unsafe { core::slice::from_raw_parts_mut(*p, *n) },
+        }
+    }
 }
 
 impl RamRegion {
@@ -75,7 +124,7 @@ impl RamRegion {
             base,
             exec: false,
             writable: true,
-            data: alloc::vec![0; len as usize],
+            data: RegionBytes::Owned(alloc::vec![0; len as usize]),
         }
     }
 
@@ -86,7 +135,7 @@ impl RamRegion {
             base,
             exec: false,
             writable: true,
-            data,
+            data: RegionBytes::Owned(data),
         }
     }
 
@@ -909,7 +958,7 @@ impl SocBus {
 
     /// Every RAM region's bytes, in the bus's own (base-sorted) order.
     pub fn save_regions(&self) -> Vec<Vec<u8>> {
-        self.regions.iter().map(|r| r.data.clone()).collect()
+        self.regions.iter().map(|r| r.data.to_vec()).collect()
     }
 
     /// Put region bytes back. A length mismatch is a snapshot taken from a
@@ -1002,6 +1051,28 @@ impl SocBus {
     }
 
     /// `true` if `address` falls in a declared MMIO window.
+    /// spike (region JIT): move every region's bytes to `base + (region.base
+    /// - guest_base)` and alias the regions there from now on. `base` must
+    /// stay valid and fixed for the life of this bus.
+    pub fn rebase_regions_into(&mut self, base: *mut u8, guest_base: u32) {
+        for region in &mut self.regions {
+            let len = region.data.len();
+            let off = region.base.wrapping_sub(guest_base) as usize;
+            // SAFETY: the caller guarantees `base` covers every region's span.
+            let dst = unsafe { base.add(off) };
+            unsafe { core::ptr::copy_nonoverlapping(region.data.as_ptr(), dst, len) };
+            region.data = RegionBytes::Raw(dst, len);
+        }
+    }
+
+    /// spike (region JIT): `(base, len, writable)` per region, base-sorted.
+    pub fn region_spans(&self) -> Vec<(u32, u32, bool)> {
+        self.regions
+            .iter()
+            .map(|r| (r.base, r.len(), r.writable))
+            .collect()
+    }
+
     pub fn in_mmio_window(&self, address: u32) -> bool {
         self.mmio_windows
             .iter()
@@ -1739,6 +1810,24 @@ impl Bus for SocBus {
     /// The guest retired a `fence.i`: everything it has written is published.
     fn note_fence_i(&mut self) {
         self.unpublished_code_words.clear();
+    }
+
+    fn sideband_or_yield_pending(&self) -> bool {
+        self.sideband || self.yield_now
+    }
+
+    fn load_watchpoints_armed(&self) -> bool {
+        self.armed_for[kind_index(MemoryAccessKind::Read)] != 0
+    }
+
+    fn store_watch(&self) -> lp_emu_core::StoreWatch {
+        if self.armed_for[kind_index(MemoryAccessKind::Write)] == 0 {
+            return lp_emu_core::StoreWatch::None;
+        }
+        match self.single_store_watch {
+            Some((lo, hi, _)) => lp_emu_core::StoreWatch::One { lo, hi },
+            None => lp_emu_core::StoreWatch::Many,
+        }
     }
 }
 

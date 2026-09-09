@@ -40,6 +40,8 @@ std = [
     "linked_list_allocator",
     "rlsf",
 ]
+# spike: per-block execution census for the region-JIT spike. Throwaway.
+blockprof = ["std"]
 
 [dev-dependencies]
 tempfile = "3"

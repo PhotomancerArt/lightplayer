@@ -1,0 +1,25 @@
+[package]
+name = "lp-emu-jit-spike"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+# MIT as a unit with the rest of `lp-emu/`. THROWAWAY: the region-JIT-to-wasm
+# spike (planning: 2026-09-07-0827-emu-speed-ladder/spikes/jit-region-spike.md).
+# Nothing here is meant to land.
+license = "MIT"
+description = "spike: translate hot guest regions to wasm and run them under wasmtime"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+lp-emu-core = { path = "../lp-emu-core", features = ["std"] }
+lp-emu-esp-common = { path = "../esp/lp-emu-esp-common" }
+lp-riscv-emu = { path = "../lp-riscv-emu", features = ["std"] }
+# The spike's E-spend, named: wasmtime (Apache-2.0 WITH LLVM-exception) as the
+# native host for the generated modules, and wasm-encoder (same licence) to
+# emit them. Both already in the workspace lockfile via lps-filetests.
+wasmtime = { version = "42", default-features = false, features = ["cranelift", "runtime"] }
+wasm-encoder = "0.245"
+log = { workspace = true }

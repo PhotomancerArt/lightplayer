@@ -61,6 +61,67 @@ pub mod csr;
 pub mod trap;
 pub mod trigger;
 
+/// spike: the seam a region JIT plugs into. Throwaway.
+pub mod region_jit {
+    extern crate alloc;
+    use alloc::boxed::Box;
+    use alloc::string::String;
+    use alloc::vec::Vec;
+    use lp_emu_core::Bus;
+
+    /// The hart's state handed to a region at entry. The region reads and
+    /// writes `regs` in place; everything else comes back in [`RunOutcome`].
+    pub struct RegionCx<'a> {
+        pub regs: &'a mut [i32; 32],
+        pub pc: u32,
+        pub cycle_count: u64,
+        pub instruction_count: u64,
+        /// The slice deadline, absolute. Not one instruction may start at or
+        /// past it.
+        pub end: u64,
+    }
+
+    pub enum RunOutcome {
+        /// The region ran and left at `pc` with the counters as given.
+        /// `after_store` says the last retired instruction was an MMIO store
+        /// whose side-band/yield the hart must now observe, exactly as
+        /// `run_block` does after a store.
+        Ran {
+            pc: u32,
+            cycle_count: u64,
+            instruction_count: u64,
+            after_store: bool,
+        },
+        /// Nothing ran; the interpreter continues at `pc` as if there were no
+        /// JIT.
+        Refused,
+    }
+
+    pub trait RegionJit<B: Bus> {
+        fn run(&mut self, cx: RegionCx<'_>, bus: &mut B) -> RunOutcome;
+        /// Guest code may have changed (a `fence.i`, a host-side code write).
+        fn invalidate(&mut self);
+        fn report(&self) -> String;
+    }
+
+    /// `log2` of the hart's entry table: direct-mapped by `(pc >> 1)`.
+    pub const ENTRY_TABLE_BITS: u32 = 16;
+
+    pub type BoxedJit<B> = Box<dyn RegionJit<B>>;
+
+    /// Build the hart's entry table from the region entry pcs.
+    pub fn entry_table(entries: &[u32]) -> Vec<u32> {
+        let mut t = alloc::vec![0u32; 1 << ENTRY_TABLE_BITS];
+        for &pc in entries {
+            let slot = (pc >> 1) as usize & ((1 << ENTRY_TABLE_BITS) - 1);
+            if t[slot] == 0 {
+                t[slot] = pc;
+            }
+        }
+        t
+    }
+}
+
 extern crate alloc;
 
 use core::marker::PhantomData;
@@ -219,6 +280,10 @@ pub struct MachineHart<B: Bus> {
     /// A flush asked for while the cache was lifted out of the hart — see
     /// [`MachineHart::drain_block_flush`].
     block_flush_pending: bool,
+    /// spike: the region JIT, if one is installed, and its entry table
+    /// (direct-mapped by `pc >> 1`, `0` = no entry). Not architectural state.
+    jit: Option<region_jit::BoxedJit<B>>,
+    jit_entries: Vec<u32>,
     _bus: PhantomData<fn(&mut B)>,
 }
 
@@ -246,6 +311,8 @@ impl<B: Bus> Clone for MachineHart<B> {
             block_cache: self.block_cache,
             fence_i_count: self.fence_i_count,
             block_flush_pending: false,
+            jit: None,
+            jit_entries: Vec::new(),
             _bus: PhantomData,
         }
     }
@@ -290,8 +357,22 @@ impl<B: Bus> MachineHart<B> {
             block_cache: true,
             fence_i_count: 0,
             block_flush_pending: false,
+            jit: None,
+            jit_entries: Vec::new(),
             _bus: PhantomData,
         }
+    }
+
+    /// spike: install a region JIT with its entry pcs.
+    pub fn set_region_jit(&mut self, jit: region_jit::BoxedJit<B>, entries: &[u32]) {
+        self.jit_entries = region_jit::entry_table(entries);
+        self.jit = Some(jit);
+    }
+
+    /// spike: the installed JIT's own report line, if any.
+    #[must_use]
+    pub fn region_jit_report(&self) -> Option<alloc::string::String> {
+        self.jit.as_ref().map(|j| j.report())
     }
 
     // --- plain accessors ---------------------------------------------------
@@ -398,6 +479,20 @@ impl<B: Bus> MachineHart<B> {
         self.fence_i_count
     }
 
+    /// spike: the per-block execution census, if a cache ran.
+    #[cfg(feature = "blockprof")]
+    #[must_use]
+    pub fn block_prof(&self) -> Option<Vec<(u32, lp_emu_core::block::BlockProf)>> {
+        self.cache.as_ref().map(|c| c.prof())
+    }
+
+    /// spike: the dynamic block-to-pc edges, if a cache ran.
+    #[cfg(feature = "blockprof")]
+    #[must_use]
+    pub fn block_edges(&self) -> Option<Vec<((u32, u32), u64)>> {
+        self.cache.as_ref().map(|c| c.edges())
+    }
+
     /// Forget every cached block.
     ///
     /// For a machine that has written guest code from the host side with no
@@ -405,6 +500,9 @@ impl<B: Bus> MachineHart<B> {
     /// restore, a reboot.
     #[inline]
     pub fn invalidate_blocks(&mut self) {
+        if let Some(jit) = self.jit.as_mut() {
+            jit.invalidate();
+        }
         match self.cache.as_mut() {
             Some(cache) => cache.invalidate_all(),
             // The cache is lifted out of `self` for the whole of a slice
@@ -424,6 +522,9 @@ impl<B: Bus> MachineHart<B> {
     /// the safe direction.
     #[inline]
     pub fn invalidate_block_range(&mut self, lo: u32, hi: u32) {
+        if let Some(jit) = self.jit.as_mut() {
+            jit.invalidate();
+        }
         match self.cache.as_mut() {
             Some(cache) => cache.invalidate_range(lo, hi),
             None => self.block_flush_pending = true,
@@ -714,6 +815,42 @@ impl<B: Bus> MachineHart<B> {
                 return SliceEnd::BudgetExhausted;
             }
             let pc = self.pc;
+            // spike: a region entry. One table read and one compare on the
+            // block-dispatch path; the interpreter resumes wherever the
+            // region says it left, with the counters the region returns.
+            if let Some(jit) = self.jit.as_mut() {
+                let slot = (pc >> 1) as usize & ((1 << region_jit::ENTRY_TABLE_BITS) - 1);
+                if self.jit_entries[slot] == pc {
+                    let cx = region_jit::RegionCx {
+                        regs: &mut self.regs,
+                        pc,
+                        cycle_count: self.cycle_count,
+                        instruction_count: self.instruction_count,
+                        end,
+                    };
+                    if let region_jit::RunOutcome::Ran {
+                        pc: new_pc,
+                        cycle_count,
+                        instruction_count,
+                        after_store,
+                    } = jit.run(cx, bus)
+                    {
+                        self.pc = new_pc;
+                        self.cycle_count = cycle_count;
+                        self.instruction_count = instruction_count;
+                        if after_store {
+                            // (c) exactly what `run_block` does after a store.
+                            if bus.take_sideband() {
+                                self.resample_external(bus);
+                            }
+                            if bus.take_yield() {
+                                return SliceEnd::BusYield;
+                            }
+                        }
+                        continue;
+                    }
+                }
+            }
             let block = match cache.lookup(pc) {
                 Some(block) => block,
                 None => {
@@ -767,6 +904,17 @@ impl<B: Bus> MachineHart<B> {
                 self.run_block(slots, bus, block.pc, whole, end)
             };
             cache.note_slots_run(ran);
+            #[cfg(feature = "blockprof")]
+            {
+                let last_word = cache.slots_of(&block).last().map_or(0, |s| s.word);
+                let words: Vec<(u8, u32)> = cache
+                    .slots_of(&block)
+                    .iter()
+                    .map(|s| (s.width, if s.width == 2 { s.word & 0xffff } else { s.word }))
+                    .collect();
+                cache.note_block_run(block.pc, block.len, block.bytes, last_word, ran, words.into_iter());
+                cache.note_edge(block.pc, self.pc);
+            }
             if let Some(over) = out {
                 return over;
             }

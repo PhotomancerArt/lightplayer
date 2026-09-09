@@ -239,6 +239,29 @@ pub struct BlockCache<S: Slot> {
     /// nothing on the hot path.
     scratch: Vec<S>,
     stats: BlockStats,
+    /// spike: per-block execution census, keyed by block start.
+    #[cfg(feature = "blockprof")]
+    prof: std::collections::HashMap<u32, BlockProf>,
+    /// spike: dynamic edges `(block start, next pc)` with counts.
+    #[cfg(feature = "blockprof")]
+    edges: std::collections::HashMap<(u32, u32), u64>,
+}
+
+/// spike: what one block start did over a run.
+#[cfg(feature = "blockprof")]
+#[derive(Clone, Debug, Default)]
+pub struct BlockProf {
+    pub len: u32,
+    pub bytes: u32,
+    /// The terminator's instruction word (or the last slot's, for a block
+    /// that ended at the slot cap or a refused instruction).
+    pub last_word: u32,
+    /// Times the block was entered.
+    pub execs: u64,
+    /// Slots executed across those entries (partial runs included).
+    pub slots: u64,
+    /// `(width, word)` per slot, the compressed ones masked to 16 bits.
+    pub words: Vec<(u8, u32)>,
 }
 
 impl<S: Slot> BlockCache<S> {
@@ -264,7 +287,51 @@ impl<S: Slot> BlockCache<S> {
             arena_cap,
             scratch: Vec::new(),
             stats: BlockStats::default(),
+            #[cfg(feature = "blockprof")]
+            prof: std::collections::HashMap::new(),
+            #[cfg(feature = "blockprof")]
+            edges: std::collections::HashMap::new(),
         }
+    }
+
+    /// spike: count one dynamic edge from a block start to the pc it left to.
+    #[cfg(feature = "blockprof")]
+    pub fn note_edge(&mut self, from: u32, to: u32) {
+        *self.edges.entry((from, to)).or_default() += 1;
+    }
+
+    /// spike: the dynamic edges, unordered.
+    #[cfg(feature = "blockprof")]
+    pub fn edges(&self) -> Vec<((u32, u32), u64)> {
+        self.edges.iter().map(|(k, v)| (*k, *v)).collect()
+    }
+
+    /// spike: count one execution of the block starting at `pc`.
+    #[cfg(feature = "blockprof")]
+    pub fn note_block_run(
+        &mut self,
+        pc: u32,
+        len: u32,
+        bytes: u32,
+        last_word: u32,
+        ran: u32,
+        words: impl Iterator<Item = (u8, u32)>,
+    ) {
+        let e = self.prof.entry(pc).or_default();
+        if e.execs == 0 || e.len != len {
+            e.words = words.collect();
+        }
+        e.len = len;
+        e.bytes = bytes;
+        e.last_word = last_word;
+        e.execs += 1;
+        e.slots += u64::from(ran);
+    }
+
+    /// spike: the census, unordered.
+    #[cfg(feature = "blockprof")]
+    pub fn prof(&self) -> Vec<(u32, BlockProf)> {
+        self.prof.iter().map(|(k, v)| (*k, v.clone())).collect()
     }
 
     /// The sizes M5 P2 measured against.

@@ -265,6 +265,8 @@ struct Args {
     /// `--no-block-cache`. The cache is ON by default, so the flag is held
     /// as its negation: `Args` derives `Default`.
     no_block_cache: bool,
+    /// spike: region files for the wasm region JIT (`--jit-region`).
+    jit_regions: Vec<String>,
     strict_grade: Option<RegGrade>,
     strict_grade_blocks: Option<Vec<&'static str>>,
     probes: Vec<(u64, String)>,
@@ -421,6 +423,26 @@ fn run() -> Result<ExitCode, String> {
     }
 
     let mut machine = builder.build().map_err(|e| e.to_string())?;
+
+    // spike: the wasm region JIT.
+    if !args.jit_regions.is_empty() {
+        if args.strict || args.no_block_cache {
+            return Err("--jit-region needs the block cache and excludes --strict-bus".into());
+        }
+        #[cfg(feature = "jit-spike")]
+        {
+            let mut specs = Vec::new();
+            for path in &args.jit_regions {
+                let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+                specs.extend(lp_emu_jit_spike::parse_region_file(&text).map_err(|e| format!("{path}: {e}"))?);
+            }
+            let model = machine.time_grade().cycle_model();
+            let Esp32C6Machine { harts, bus, .. } = &mut machine;
+            lp_emu_jit_spike::install(&mut harts[0], bus, specs, model);
+        }
+        #[cfg(not(feature = "jit-spike"))]
+        return Err("--jit-region needs a build with `--features jit-spike`".into());
+    }
 
     if args.hooks {
         print_hooks(&machine);
@@ -591,6 +613,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             }
             "--strict-bus" => args.strict = true,
             "--no-block-cache" => args.no_block_cache = true,
+            "--jit-region" => args.jit_regions.push(value("--jit-region")?),
             "--probe" => args.probes.push(parse_probe(&value("--probe")?)?),
             "--break-at" => args.break_at.push(value("--break-at")?),
             "--hooks" => args.hooks = true,
@@ -949,6 +972,36 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
     // oracle sweep compares the `stopped after` line, the UART bytes and the
     // decoded frames, and this is none of those — but it IS how a run says
     // whether the firmware's `fence.i` reached the machine.
+    if let Some(line) = machine.harts[0].region_jit_report() {
+        eprintln!("{line}");
+    }
+    // spike: `LP_EMU_BLOCKPROF=<path>` dumps the per-block execution census.
+    #[cfg(feature = "blockprof")]
+    if let Ok(path) = std::env::var("LP_EMU_BLOCKPROF") {
+        use std::io::Write;
+        let mut rows = machine.harts[0].block_prof().unwrap_or_default();
+        rows.sort_by(|a, b| b.1.slots.cmp(&a.1.slots));
+        let mut f = std::fs::File::create(&path).expect("blockprof file");
+        writeln!(f, "# pc len bytes last_word execs slots words...").unwrap();
+        for (pc, p) in rows {
+            write!(
+                f,
+                "{pc:#010x} {} {} {:#010x} {} {}",
+                p.len, p.bytes, p.last_word, p.execs, p.slots
+            )
+            .unwrap();
+            for (w, word) in &p.words {
+                write!(f, " {w}:{word:08x}").unwrap();
+            }
+            writeln!(f).unwrap();
+        }
+        let mut edges = machine.harts[0].block_edges().unwrap_or_default();
+        edges.sort_by(|a, b| b.1.cmp(&a.1));
+        for ((from, to), n) in edges {
+            writeln!(f, "edge {from:#010x} {to:#010x} {n}").unwrap();
+        }
+        eprintln!("blockprof: written to {path}");
+    }
     match machine.block_stats() {
         Some(stats) => eprintln!(
             "blocks: {} cached, {} hits ({:.2}% of {} entries), mean length {:.2}; \

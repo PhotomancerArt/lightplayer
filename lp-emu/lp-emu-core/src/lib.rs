@@ -37,7 +37,7 @@ pub mod trap_code;
 
 // Re-exports for convenience
 pub use block::{Block, BlockCache, BlockStats, Slot};
-pub use bus::{Bus, Watchpoint};
+pub use bus::{Bus, StoreWatch, Watchpoint};
 pub use cycle_model::{CycleModel, InstClass, MemoryCost, NoMemoryCost};
 pub use log_level::LogLevel;
 pub use memory::{DEFAULT_RAM_START, DEFAULT_SHARED_START, Memory, MemoryAccessKind, MemoryError};
