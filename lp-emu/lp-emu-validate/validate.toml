@@ -96,6 +96,11 @@ name = "cycle-probe"
 description = "The cycle-model calibration kernels: an IRAM/flash pair, a code walk larger than any plausible cache, a .rodata stride curve, two MMIO poll loops, a mul and a div chain, and a slice-shaped case — each bracketed by BOTH the PMU cycle counter and SYSTIMER microseconds, five repetitions each, nothing averaged. It calibrates a time grade; it never gates one."
 payloads = ["cycle-probe"]
 
+[[set]]
+name = "c6r-m2"
+description = "M2's gate set: the `gpio-input` payload. A button read through the product's OWN `Esp32GpioButtonDriver` and debouncer — five contact bounces settling to one state change, a clean press and release, and a 20 ms glitch that must produce nothing at all — and a quadrature encoder decoded inside a both-edge GPIO interrupt handler, two detents clockwise and two back. The two sides are driven differently on purpose and both transcripts say so: silicon drives its own pads and reads them back through `GPIO.in_` (the read path), while an emulated configuration runs the same image with the pads driven from outside by `pins/gpio-input.pins` (the outside-driver path). What replays equal is every non-timing field: the state changes in order, the positions and directions in order."
+payloads = ["gpio-input"]
+
 # ---------------------------------------------------------------------------
 # Configurations
 # ---------------------------------------------------------------------------

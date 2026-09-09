@@ -1,0 +1,60 @@
+{
+  "schema": 1,
+  "payload": "gpio-input",
+  "chip": "esp32c6",
+  "configuration": "silicon:esp32c6",
+  "date": "2026-09-08",
+  "firmware_commit": "95b28394fb9d",
+  "firmware_features": [
+    "default",
+    "esp32c6",
+    "esp_radio",
+    "lp_gfx_lpvm",
+    "lpa_server",
+    "lpc_hardware",
+    "lpc_model",
+    "lpc_shared",
+    "lpc_wire",
+    "lpfs",
+    "radio",
+    "server",
+    "test_gpio_input"
+  ],
+  "firmware_dirty": false,
+  "firmware_sha256": "5adeecf5810adda039ce5f56a638d8743c091b7f23417ba2268888fd70db5d23",
+  "source": "(cd lp-fw/fw-esp32c6 && cargo build --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,test_gpio_input) && PORT_DEV=/dev/cu.usbmodem1433201 scripts/emu/desk-espflash-step.sh target/validate/gpio-input.cap '[gpio-input] === DONE ===' 120 -- flash --chip esp32c6 --port /dev/cu.usbmodem1433201 --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size 4mb --after hard-reset --monitor target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6",
+  "capture": "lp-cli validate record c6r-m2 --config silicon:esp32c6",
+  "note": "the pads are driven by the FIRMWARE ITSELF and read back through `GPIO.in_` — a self-loop, because there is no wire and no hands on this bench. What this transcript measures is therefore the READ path: the input buffer, `in_`, the edge detector, the interrupt matrix and the product's own debouncer. Its emulated twin measures the OUTSIDE-DRIVER path — the same image, with `lp-emu/lp-emu-validate/pins/gpio-input.pins` putting the levels on the pads from outside. The two are deliberately not conflated: the setup line's `drive=` word says which side drove, and it is the only thing this payload's mask set masks.",
+  "trust": [
+    {
+      "class": "memory",
+      "grade": "measured",
+      "because": "the board is the ground truth; nothing models it"
+    },
+    {
+      "class": "timing",
+      "grade": "measured",
+      "because": "a real clock on real flash with real wait states"
+    },
+    {
+      "class": "pin",
+      "grade": "measured",
+      "because": "a scope or a logic analyser on the header pin is the definition of what the pin did"
+    },
+    {
+      "class": "usb-serial-jtag",
+      "grade": "measured",
+      "because": "a real host really attaches, or really does not"
+    },
+    {
+      "class": "boot-log",
+      "grade": "measured",
+      "because": "the real ROM and the real IDF bootloader printed it"
+    },
+    {
+      "class": "wire",
+      "grade": "measured",
+      "because": "real bytes over a real port"
+    }
+  ]
+}

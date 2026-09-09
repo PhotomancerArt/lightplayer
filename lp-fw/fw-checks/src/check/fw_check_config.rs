@@ -98,6 +98,20 @@ pub const ALL_CHECKS: &[FwCheckConfig] = &[
         emits_header: true,
     },
     FwCheckConfig {
+        check: FwCheck::GpioInput,
+        display_name: "A button and a quadrature encoder, read back off the pads",
+        firmware_features: &["test_gpio_input"],
+        // The literal, not `checks::gpio_input::DONE_MARKER`, for the reason
+        // `cycle-probe` states above: this table is a `const` that exists
+        // whether or not `check-gpio-input` compiles the module.
+        // `the_gpio_input_marker_is_the_modules` below pins the two equal.
+        done_marker: Some("[gpio-input] === DONE ==="),
+        trace_slug: "gpio-input",
+        supported_targets: ESP32_ONLY,
+        emits_records: true,
+        emits_header: true,
+    },
+    FwCheckConfig {
         check: FwCheck::BootIdle,
         display_name: "Shipped image to the idle loop",
         // The shipped-image walk as a payload (vision Q1): no check module,
@@ -427,6 +441,15 @@ mod tests {
         assert_eq!(
             check.done_marker,
             Some(crate::checks::cycle_probe::DONE_MARKER)
+        );
+    }
+
+    #[test]
+    fn the_gpio_input_marker_is_the_modules() {
+        let check = find_check("gpio-input").expect("registered");
+        assert_eq!(
+            check.done_marker,
+            Some(crate::checks::gpio_input::DONE_MARKER)
         );
     }
 
