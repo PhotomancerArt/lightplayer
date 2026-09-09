@@ -442,15 +442,13 @@ pub fn write_pin_script(w: &mut impl core::fmt::Write) -> core::fmt::Result {
         w,
         "# makes this run report `drive=external`. Nothing is connected to that pad on"
     )?;
-    writeln!(w, "# the desk board, so silicon reads it low and self-loops.")?;
+    writeln!(
+        w,
+        "# the desk board, so silicon reads it low and self-loops."
+    )?;
     writeln!(w, "0us pin {DRIVE_SELECT_GPIO} 1")?;
     for pad in [Pad::Button, Pad::EncoderA, Pad::EncoderB] {
-        writeln!(
-            w,
-            "0us pin {} {}",
-            pad.gpio(),
-            u8::from(pad.rest_level())
-        )?;
+        writeln!(w, "0us pin {} {}", pad.gpio(), u8::from(pad.rest_level()))?;
     }
     let mut previous = 0u32;
     for (n, edge) in SCRIPT.iter().enumerate() {

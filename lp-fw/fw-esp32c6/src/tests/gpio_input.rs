@@ -76,10 +76,10 @@ use fw_checks::checks::gpio_input::{
     ENCODER_A_GPIO, ENCODER_B_GPIO, POLL_MS, Pad, Quadrature, RUN_END_US, SCRIPT, emit_button,
     emit_encoder,
 };
+use log::info;
 use lpc_hardware::{
     ButtonConfig, ButtonDriver, ButtonEventKind, HwRegistry, default_esp32c6_hardware_manifest,
 };
-use log::info;
 
 use crate::board::esp32c6::init::{init_board, start_runtime};
 use crate::hardware::button::Esp32GpioButtonDriver;
@@ -276,10 +276,7 @@ pub async fn run_gpio_input(_: embassy_executor::Spawner) -> ! {
     // driving them, resting at the Gray sequence's (0, 0).
     let mut enc_a = Flex::new(unsafe { AnyPin::steal(ENCODER_A_GPIO) });
     let mut enc_b = Flex::new(unsafe { AnyPin::steal(ENCODER_B_GPIO) });
-    for (pin, pad) in [
-        (&mut enc_a, Pad::EncoderA),
-        (&mut enc_b, Pad::EncoderB),
-    ] {
+    for (pin, pad) in [(&mut enc_a, Pad::EncoderA), (&mut enc_b, Pad::EncoderB)] {
         if self_loop {
             pin.set_level(if pad.rest_level() {
                 Level::High
