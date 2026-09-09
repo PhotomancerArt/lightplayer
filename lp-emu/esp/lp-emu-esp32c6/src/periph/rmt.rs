@@ -1,7 +1,9 @@
 //! `RMT` at `0x6000_6000` — the remote-control transceiver as the WS281x
 //! path drives it: the PAC register file, the 192-word RAM at `+0x400`, and
 //! two TX engines on the scheduler that consume words at the configured
-//! clock and raise `tx_end` / `tx_thr_event` / `tx_err` on source 49.
+//! clock and raise `tx_end` / `tx_thr_event` / `tx_err` on source 49 — and,
+//! since M2 P3, two RX engines that sample a routed input signal back into
+//! the same RAM and raise `rx_end` / `rx_thr_event` on the same source.
 //!
 //! Register facts are the esp32c6 PAC 0.23.2 `rmt` block (offsets in
 //! `regs::RMT`; bit positions cited per register below) and the two drivers
@@ -60,14 +62,46 @@
 //!   rather than guessed at.
 //! - `tx_stop` raises no `tx_end` (esp-hal's `stop` expects none).
 //!
+//! # The receivers (M2 P3)
+//!
+//! Channels 2 and 3 are engines too: [`RxEngine`] samples the level of the
+//! pad routed to the channel's **input** signal (`GPIO.func_in_sel_cfg[71]`
+//! for channel 2, through the fabric's `route_in`), measures each run in
+//! channel ticks and writes them into the channel's RAM window two to a word.
+//! `idle_thres` ends the reception, `rx_filter` swallows a pulse narrower
+//! than its threshold, `rx_lim` raises `rx_thr_event` and `mem_rx_wrap_en`
+//! wraps the write pointer; `rx_end` and `rx_thr_event` go out on source 49
+//! with the same status and clear semantics the TX side has.
+//!
+//! Each is fed the fabric's **edges** rather than sampled tick by tick — see
+//! [`RxEngine`] for why that is the same model and what it costs (a slice of
+//! latency on the two interrupts, never on the words). Where the modelled
+//! behaviour is a choice rather than a bit map, the choice is named at the
+//! place it is made: `RxEngine::armed` (the reception starts at the first
+//! edge), [`Rmt::rx_write_word`] (`rx_lim` counts, it is not a position) and
+//! [`Rmt::rx_end`] (the trailing idle run is stored and the last word is an
+//! end marker).
+//!
+//! # Register grades
+//!
+//! | grade | registers |
+//! |---|---|
+//! | `measured` | none. The `rmt-chase` transcripts agree with silicon frame for frame, but a waveform is not a register's bit map — `validate.toml`'s `pin` entry has the argument. |
+//! | `documented` | `ch0_tx_conf0`, `ch1_tx_conf0`, `ch0_tx_status`, `ch1_tx_status`, `ch0_tx_lim`, `ch1_tx_lim`, `ch2_rx_conf0`, `ch3_rx_conf0`, `ch2_rx_conf1`, `ch3_rx_conf1`, `ch0_rx_status`, `ch1_rx_status` (channels 2 and 3 — the PAC's own numbering), `ch0_rx_lim`, `ch1_rx_lim`, `int_raw`, `int_st`, `int_ena`, `int_clr`, `sys_conf`. The PAC's bit map is the source and every field above is that bit map read out loud. |
+//! | `modeled` | `ch0data`…`ch3data` (the APB FIFO, not modelled), `ch0carrier_duty`, `ch1carrier_duty`, `ch0_rx_carrier_rm`, `ch1_rx_carrier_rm` (carrier modulation and demodulation, not modelled), `tx_sim`, `ref_cnt_rst`, `date`. Accept-and-remember, at the PAC's reset value. |
+//!
 //! # What is not here
 //!
-//! RX channels 2/3 are accept-and-remember; a write that sets `rx_en` says so
-//! once. The APB FIFO (`ch*data`, `sys_conf.apb_fifo_mask = 0`) is not
-//! modelled — both drivers use direct RAM access. Where the waveform goes
-//! (GPIO18 through `func_out_sel_cfg`) is P2's signal fabric; until then the
-//! per-channel **pulse log** and **fetched-word log** are the observation,
-//! read by the machine's `rmt_pulses` / `rmt_words` / `rmt_frames_ended`.
+//! The APB FIFO (`ch*data`, `sys_conf.apb_fifo_mask = 0`) is not modelled —
+//! both drivers use direct RAM access. Neither is the carrier: modulation on
+//! the way out, demodulation on the way in, and `ch*_rx_carrier_rm` is
+//! accepted with one note. The RAM has one port and no arbiter, so
+//! `ch_rx_conf1.mem_owner` is recorded rather than enforced and
+//! `ch_rx_status.mem_owner_err` never rises. Where the waveform goes (GPIO18
+//! through `func_out_sel_cfg`) is the signal fabric's; the per-channel
+//! **pulse log** and **fetched-word log** are the TX side's other
+//! observation, read by the machine's `rmt_pulses` / `rmt_words` /
+//! `rmt_frames_ended`.
 //!
 //! # The refill measurement (M5 P3)
 //!
@@ -90,26 +124,40 @@
 //! before.
 
 use lp_emu_core::sched::{Cycles, EventId};
+use lp_emu_esp_common::pins::Edge;
 use lp_emu_esp_common::regfile::{lane_of, merge_lane};
-use lp_emu_esp_common::{BusCx, Peripheral, RegFile, SignalId, Width, event_id, event_local};
+use lp_emu_esp_common::{
+    BusCx, Peripheral, RegFile, RegGrade, RegGrades, SignalId, Width, event_id, event_local,
+};
 
 use super::pcr::RmtClockLine;
 use super::systimer::Reader;
 use crate::memmap;
-use crate::regs::output_signals::RMT_SIG_0;
+use crate::regs::output_signals::{RMT_RX_SIG_0, RMT_SIG_0};
 use crate::regs::{self, source};
 
 // Register offsets (`regs::RMT`).
+//
+// The PAC numbers the two halves of the block differently and the names below
+// are its names, not a typo: the *configuration* registers carry the absolute
+// channel number (`ch2_rx_conf0`, `ch3_rx_conf1`) while the status, limit and
+// carrier registers carry the receiver's index among the receivers
+// (`ch0_rx_status` is channel 2's). esp-hal indexes every one of them by the
+// receiver index (`DynChannelAccess<Rx>::ch_idx`, 0 for channel 2), which is
+// what these arrays are indexed by too.
 const CH_DATA_END: u32 = 0x010;
-const CH_TX_CONF0: [u32; 2] = [0x010, 0x014];
-const CH2_RX_CONF1: u32 = 0x01c;
-const CH3_RX_CONF1: u32 = 0x024;
-const CH_TX_STATUS: [u32; 2] = [0x028, 0x02c];
+const CH_TX_CONF0: [u32; TX_CHANNELS] = [0x010, 0x014];
+const CH_RX_CONF0: [u32; RX_CHANNELS] = [0x018, 0x020];
+const CH_RX_CONF1: [u32; RX_CHANNELS] = [0x01c, 0x024];
+const CH_TX_STATUS: [u32; TX_CHANNELS] = [0x028, 0x02c];
+const CH_RX_STATUS: [u32; RX_CHANNELS] = [0x030, 0x034];
 const INT_RAW: u32 = 0x038;
 const INT_ST: u32 = 0x03c;
 const INT_ENA: u32 = 0x040;
 const INT_CLR: u32 = 0x044;
-const CH_TX_LIM: [u32; 2] = [0x058, 0x05c];
+const CH_RX_CARRIER_RM: [u32; RX_CHANNELS] = [0x050, 0x054];
+const CH_TX_LIM: [u32; TX_CHANNELS] = [0x058, 0x05c];
+const CH_RX_LIM: [u32; RX_CHANNELS] = [0x060, 0x064];
 const SYS_CONF: u32 = 0x068;
 const REF_CNT_RST: u32 = 0x070;
 
@@ -122,8 +170,14 @@ pub const RAM_WORDS: usize = 192;
 pub const BLOCK_WORDS: u32 = 48;
 /// The whole window the bus maps: registers, the gap, the RAM.
 pub const LEN: u32 = 0x700;
-/// TX channels. Channels 2 and 3 receive only.
+/// TX channels: 0 and 1.
 pub const TX_CHANNELS: usize = 2;
+/// RX channels: 2 and 3. Indexed here by their **receiver index** — 0 is
+/// channel 2 — because that is how the PAC's status registers and esp-hal's
+/// `DynChannelAccess<Rx>` index them.
+pub const RX_CHANNELS: usize = 2;
+/// The absolute channel number of receiver index 0.
+pub const RX_CH_BASE: usize = 2;
 
 // `ch_tx_conf0` bits (`rmt/ch_tx_conf0.rs`).
 const CONF_TX_START: u32 = 1 << 0;
@@ -142,7 +196,49 @@ const CH_TX_CONF0_RESET: u32 = 0x0071_0200;
 const TX_LIM_MASK: u32 = 0x1ff;
 const SYS_CONF_APB_FIFO_MASK: u32 = 1 << 0;
 
-// `int_*` bits: TX and RX interleave in pairs (`rmt/int_raw.rs`).
+// `ch_rx_conf0` bits (`rmt/ch_rx_conf0.rs`).
+const RX_CONF0_DIV_CNT_SHIFT: u32 = 0;
+const RX_CONF0_IDLE_THRES_SHIFT: u32 = 8;
+const RX_CONF0_IDLE_THRES_MASK: u32 = 0x7fff;
+const RX_CONF0_MEM_SIZE_SHIFT: u32 = 23;
+const RX_CONF0_CARRIER_EN: u32 = 1 << 28;
+/// PAC reset: `div_cnt 2`, `idle_thres 0x7fff`, `mem_size 1`, carrier bits set.
+const CH_RX_CONF0_RESET: u32 = 0x30ff_ff02;
+
+// `ch_rx_conf1` bits (`rmt/ch_rx_conf1.rs`).
+const RX_CONF1_RX_EN: u32 = 1 << 0;
+const RX_CONF1_MEM_WR_RST: u32 = 1 << 1;
+const RX_CONF1_APB_MEM_RST: u32 = 1 << 2;
+const RX_CONF1_MEM_OWNER: u32 = 1 << 3;
+const RX_CONF1_FILTER_EN: u32 = 1 << 4;
+const RX_CONF1_FILTER_THRES_SHIFT: u32 = 5;
+const RX_CONF1_FILTER_THRES_MASK: u32 = 0xff;
+const RX_CONF1_MEM_RX_WRAP_EN: u32 = 1 << 13;
+/// Bit 15, the PAC's *"synchronization bit"* — `conf_update`, which esp-hal's
+/// `DynChannelAccess::update` writes for an RX channel exactly where it
+/// writes `ch_tx_conf0.conf_update` for a TX one.
+const RX_CONF1_CONF_UPDATE: u32 = 1 << 15;
+/// The strobes: read back 0 whatever was written, as the TX side's do.
+const RX_CONF1_PULSES: u32 = RX_CONF1_MEM_WR_RST | RX_CONF1_APB_MEM_RST | RX_CONF1_CONF_UPDATE;
+/// PAC reset: `mem_owner 1`, `rx_filter_thres 15`, everything else clear.
+const CH_RX_CONF1_RESET: u32 = 0x0000_01e8;
+
+/// `ch_rx_lim.rx_lim`, bits 0:8.
+const RX_LIM_MASK: u32 = 0x1ff;
+
+// `ch_rx_status` fields (`rmt/ch_rx_status.rs`).
+const RX_STATUS_APB_RADDR_SHIFT: u32 = 12;
+const RX_STATUS_STATE_SHIFT: u32 = 22;
+const RX_STATUS_MEM_FULL: u32 = 1 << 26;
+
+/// The largest duration one half of a word can hold: 15 bits.
+const DURATION_MAX: u32 = 0x7fff;
+
+// `int_*` bits: TX and RX interleave in pairs (`rmt/int_raw.rs`) — bit 0/1
+// are `ch0/ch1_tx_end`, bit 2/3 `ch2/ch3_rx_end`, bits 4..7 the four `err`
+// bits, bits 8/9 `ch0/ch1_tx_thr_event` and 10/11 `ch2/ch3_rx_thr_event`. So
+// the three shifts below are the same for both directions and the *channel
+// number* selects the bit: `raise(2, INT_END_SHIFT)` is `ch2_rx_end`.
 const INT_TX_END_SHIFT: u32 = 0;
 const INT_TX_ERR_SHIFT: u32 = 4;
 const INT_TX_THR_SHIFT: u32 = 8;
@@ -168,6 +264,9 @@ const PCR_RMT_CLK_EN: u32 = 1 << 0;
 const EV_WORD: u16 = 0;
 const EV_LATE_START: u16 = 2;
 const EV_CLOCK_POLL: u16 = 4;
+/// `EV_RX_IDLE + rxi`: the receiver's idle threshold expired with no edge, so
+/// the reception ends here.
+const EV_RX_IDLE: u16 = 5;
 
 /// How often a stalled engine re-checks the clock: 1 ms of guest time.
 /// Nothing in the firmware ever gates the clock, so this is a diagnostic
@@ -185,6 +284,20 @@ pub const WORD_LOG_CAP: usize = 2_000_000;
 /// the RMT never learns the answer — it cannot see the GPIO block.
 pub const fn signal_of(ch: usize) -> SignalId {
     SignalId(RMT_SIG_0 + ch as u16)
+}
+
+/// The GPIO-matrix **input** signal receiver `rxi` reads — `RMT_RX_SIG_0 +
+/// rxi`, so RX channel 2 reads `InputSignal::RMT_SIG_0`.
+///
+/// The C6 has four channels and two signals in each direction: the metadata's
+/// `for_each_rmt_channel!` maps `rx(2, 0), (3, 1)`
+/// (`esp-metadata-generated-0.4.0/src/_generated_esp32c6.rs:657`), and
+/// esp-hal's `Channel<Rx>::with_pin` connects that signal to the pad. Which
+/// pad it is is the fabric's business (`Fabric::route_in`, written by the
+/// GPIO block's `func_in_sel_cfg` view), and the RMT never learns the pad's
+/// number — only its level.
+pub const fn rx_signal_of(rxi: usize) -> SignalId {
+    SignalId(RMT_RX_SIG_0 + rxi as u16)
 }
 
 /// Buckets in a refill histogram: eighths of a half-window, plus one for
@@ -353,6 +466,21 @@ impl Clock {
         let d = u128::from(self.src_hz) * den;
         (n / d) as Cycles
     }
+
+    /// The inverse, for the receiver: how many channel ticks `cycles` CPU
+    /// cycles are, exactly, floored.
+    ///
+    /// Applied to the **absolute** cycle offset from the receive's anchor and
+    /// never per pulse, for [`TxEngine`]'s reason — a per-pulse conversion
+    /// would accumulate a rounding error across a 6,144-word frame. At the
+    /// shipped settings (80 MHz PLL, `div_cnt = 1`, a 160 MHz CPU) one tick is
+    /// exactly two cycles and nothing rounds at all.
+    fn ticks_for(&self, cycles: Cycles, div_cnt: u32) -> u64 {
+        let (num, den) = self.divider();
+        let n = u128::from(cycles) * u128::from(self.src_hz) * den;
+        let d = u128::from(memmap::CPU_HZ) * u128::from(div_cnt) * num;
+        (n / d) as u64
+    }
 }
 
 /// Why the current word is the frame's last.
@@ -462,19 +590,194 @@ impl TxEngine {
     }
 }
 
+/// One RX channel's engine — a **sampler**, not a decoder (M2 P3).
+///
+/// What it models is the receiver the TRM describes: the level of the pad
+/// routed to the channel's input signal, measured in channel ticks, written
+/// into the channel's RAM window as (level, duration) pairs two to a word,
+/// with `idle_thres` ending the reception, `rx_filter` swallowing narrow
+/// pulses, `rx_lim` raising `rx_thr_event` and `mem_rx_wrap_en` wrapping the
+/// write pointer. Both events go out on source 49 with exactly the status and
+/// clear semantics the TX side already has.
+///
+/// # It is driven by edges, not by a clock
+///
+/// A tick-by-tick sampler would be 100 events per WS2812 bit and 614,400 per
+/// frame, so the engine is fed the fabric's **edges** instead — the same
+/// stream the pin log and the strip decoders read, handed over by the machine
+/// at every slice boundary — and converts each edge's cycle into a tick with
+/// [`Clock::ticks_for`]. The result is identical to sampling because a
+/// sampler's only output is where the level changed; what is *not* modelled
+/// is a change narrower than a tick, which the fabric has no way to express
+/// either (its edges are stamped in cycles and levels alternate).
+///
+/// The consequence to state plainly: a receiver sees an edge at the slice
+/// boundary after it happened, so `rx_end` and `rx_thr_event` are raised up
+/// to one slice late — the words themselves carry the edges' own cycles, so
+/// nothing in the RAM moves. It is deterministic (slice boundaries are guest
+/// cycles) and it is the same latency the GPIO block's input side has.
+#[derive(Debug)]
+struct RxEngine {
+    /// `ch_rx_conf0` / `ch_rx_conf1` as latched at the last `conf_update`.
+    conf0: u32,
+    conf1: u32,
+    /// Strobe bits written since the last `conf_update`.
+    pending: u32,
+    /// Receiving: `rx_en` was latched and the engine has not ended.
+    running: bool,
+    /// Running, but still waiting for the first edge.
+    ///
+    /// **Modeled.** The reception begins at the first level change and the
+    /// leading idle is neither stored nor counted towards `idle_thres`; a
+    /// receiver that started its idle timer on an already-idle line would end
+    /// before the frame it was armed for ever arrived, and no driver could
+    /// use it. esp-hal's blocking `receive`/`wait` is written against exactly
+    /// that behaviour — it arms and then spins until `rx_end`.
+    armed: bool,
+    /// Absolute word index into the 192-word RAM: the **next word to write**,
+    /// which is what `ch_rx_status.mem_waddr_ex` reads back (esp-hal's
+    /// `hw_offset`, `rmt/reader.rs`: "the next code the hardware would
+    /// write").
+    waddr: u32,
+    /// Tick 0 of this reception happened at cycle `anchor_cycle`.
+    anchor_cycle: Cycles,
+    anchor_clock: Option<Clock>,
+    /// The run being measured: its level, and the tick it started at.
+    run_level: bool,
+    run_start: u64,
+    /// An edge the filter has accepted no verdict on yet: `(tick, the level
+    /// after it)`. Only ever occupied while `rx_filter_en` is set with a
+    /// non-zero threshold.
+    pending_edge: Option<(u64, bool)>,
+    /// The first half of the word being assembled, when one is open.
+    half: Option<(bool, u32)>,
+    /// Words written since the last `rx_thr_event` — the `rx_lim` counter.
+    since_thr: u32,
+    /// Words written in this reception, for the note and for a test.
+    frame_words: u64,
+    /// Words written since the machine started, on this channel.
+    words_written: u64,
+    /// `ch_rx_status.mem_full` (bit 26), sticky until the next start.
+    mem_full: bool,
+    /// The cycle the pending `EV_RX_IDLE` is due at.
+    idle_due: Cycles,
+    /// One note per reception that had no pad routed to it.
+    warned_unrouted: bool,
+}
+
+impl RxEngine {
+    fn new(rxi: usize) -> Self {
+        Self {
+            conf0: CH_RX_CONF0_RESET,
+            conf1: CH_RX_CONF1_RESET,
+            pending: 0,
+            running: false,
+            armed: false,
+            waddr: BLOCK_WORDS * Self::channel(rxi) as u32,
+            anchor_cycle: 0,
+            anchor_clock: None,
+            run_level: false,
+            run_start: 0,
+            pending_edge: None,
+            half: None,
+            since_thr: 0,
+            frame_words: 0,
+            words_written: 0,
+            mem_full: false,
+            idle_due: 0,
+            warned_unrouted: false,
+        }
+    }
+
+    /// The absolute channel number: receiver index 0 is channel 2.
+    const fn channel(rxi: usize) -> usize {
+        RX_CH_BASE + rxi
+    }
+
+    fn div_cnt(&self) -> u32 {
+        match (self.conf0 >> RX_CONF0_DIV_CNT_SHIFT) & 0xff {
+            0 => 256,
+            n => n,
+        }
+    }
+
+    /// `idle_thres`, in channel ticks: *"when no edge is detected on the input
+    /// signal and continuous clock cycles is longer than this register value,
+    /// received process is finished"* (PAC, `ch_rx_conf0.IDLE_THRES`).
+    fn idle_thres(&self) -> u32 {
+        (self.conf0 >> RX_CONF0_IDLE_THRES_SHIFT) & RX_CONF0_IDLE_THRES_MASK
+    }
+
+    fn window_words(&self) -> u32 {
+        BLOCK_WORDS * ((self.conf0 >> RX_CONF0_MEM_SIZE_SHIFT) & 0x7)
+    }
+
+    fn wrap(&self) -> bool {
+        self.conf1 & RX_CONF1_MEM_RX_WRAP_EN != 0
+    }
+
+    /// The filter width in channel ticks, or `None` when the filter is off.
+    ///
+    /// The register is *"in APB clock periods"* (PAC,
+    /// `ch_rx_conf1.RX_FILTER_THRES`) — the filter sits on the pad's side of
+    /// the divider, so it does **not** scale with `div_cnt`. The conversion
+    /// to ticks is therefore `thres × f_channel / f_apb`, and on this chip
+    /// `f_apb` is [`APB_HZ`].
+    fn filter_ticks(&self, clock: &Clock) -> Option<u64> {
+        if self.conf1 & RX_CONF1_FILTER_EN == 0 {
+            return None;
+        }
+        let thres =
+            u64::from((self.conf1 >> RX_CONF1_FILTER_THRES_SHIFT) & RX_CONF1_FILTER_THRES_MASK);
+        if thres == 0 {
+            return None;
+        }
+        // Channel ticks the filter's APB periods are worth, rounded up so a
+        // pulse that is exactly the threshold wide still passes.
+        let (num, den) = clock.divider();
+        let channel_hz = (u128::from(clock.src_hz) * den / num) as u64;
+        let ticks = (u128::from(thres) * u128::from(channel_hz))
+            .div_ceil(u128::from(APB_HZ) * u128::from(self.div_cnt()));
+        Some((ticks as u64).max(1))
+    }
+
+    /// The cycle at which absolute tick `ticks` falls, from the anchor.
+    fn cycle_at(&self, clock: &Clock, ticks: u64) -> Cycles {
+        self.anchor_cycle
+            .saturating_add(clock.cycles_for(ticks, self.div_cnt()))
+    }
+
+    /// The absolute tick that cycle `at` falls on, from the anchor.
+    fn tick_at(&self, clock: &Clock, at: Cycles) -> u64 {
+        clock.ticks_for(at.saturating_sub(self.anchor_cycle), self.div_cnt())
+    }
+}
+
+/// The APB clock the RX filter's threshold is counted in.
+///
+/// **Documented.** The ESP32-C6 has no configurable APB divider: the TRM's
+/// clock tree fixes `APB_CLK` at 80 MHz from the PLL, and esp-hal carries the
+/// same number (`esp-metadata-generated-0.4.0`, the C6's `apb_clock`). It
+/// matters only when `rx_filter_en` is set, which the `rmt-rx` payload leaves
+/// off — the filter is exercised by this file's own tests instead.
+pub const APB_HZ: u64 = 80_000_000;
+
 /// The RMT block.
 #[derive(Debug)]
 pub struct Rmt {
     index: usize,
     regs: RegFile,
+    grades: RegGrades,
     ram: Box<[u32; RAM_WORDS]>,
     clock: RmtClockLine,
     ch: [TxEngine; TX_CHANNELS],
-    /// Sticky `int_raw` bits (TX only: 0..1, 4..5, 8..9).
+    rx: [RxEngine; RX_CHANNELS],
+    /// Sticky `int_raw` bits: TX at 0..1 / 4..5 / 8..9, RX at 2..3 / 6..7 /
+    /// 10..11.
     sticky: u32,
     poll_armed: bool,
-    warned_rx: bool,
     warned_fifo: bool,
+    warned_rx_carrier: [bool; RX_CHANNELS],
     warned_gap: bool,
     warned_ref_cnt: [bool; 4],
     warned_late_start: [bool; TX_CHANNELS],
@@ -501,18 +804,52 @@ impl Rmt {
         Self {
             index: 0,
             regs,
+            grades: Self::grades(),
             ram: Box::new([0; RAM_WORDS]),
             clock,
             ch: [TxEngine::new(0), TxEngine::new(1)],
+            rx: [RxEngine::new(0), RxEngine::new(1)],
             sticky: 0,
             poll_armed: false,
-            warned_rx: false,
             warned_fifo: false,
+            warned_rx_carrier: [false; RX_CHANNELS],
             warned_gap: false,
             warned_ref_cnt: [false; 4],
             warned_late_start: [false; TX_CHANNELS],
             keep_logs: false,
         }
+    }
+
+    /// The block's register grades (M2 P3 — the debt sweep graded the accept
+    /// blocks and left the modelled ones to their owners).
+    ///
+    /// Everything unlisted is `Modeled`, which for this block means
+    /// accept-and-remember at the PAC's reset value. Nothing here is
+    /// `Measured`: the `rmt-chase` transcripts agree with silicon frame for
+    /// frame, but what they measure is the *waveform*, not a register's bit
+    /// map, and `validate.toml`'s `pin` entry gives the argument for why that
+    /// is not the same claim.
+    pub fn grades() -> RegGrades {
+        let mut g = RegGrades::new()
+            .with_grade(INT_RAW, RegGrade::Documented)
+            .with_grade(INT_ST, RegGrade::Documented)
+            .with_grade(INT_ENA, RegGrade::Documented)
+            .with_grade(INT_CLR, RegGrade::Documented)
+            .with_grade(SYS_CONF, RegGrade::Documented);
+        for ch in 0..TX_CHANNELS {
+            g = g
+                .with_grade(CH_TX_CONF0[ch], RegGrade::Documented)
+                .with_grade(CH_TX_STATUS[ch], RegGrade::Documented)
+                .with_grade(CH_TX_LIM[ch], RegGrade::Documented);
+        }
+        for rxi in 0..RX_CHANNELS {
+            g = g
+                .with_grade(CH_RX_CONF0[rxi], RegGrade::Documented)
+                .with_grade(CH_RX_CONF1[rxi], RegGrade::Documented)
+                .with_grade(CH_RX_STATUS[rxi], RegGrade::Documented)
+                .with_grade(CH_RX_LIM[rxi], RegGrade::Documented);
+        }
+        g
     }
 
     /// Keep the per-channel pulse and word logs. See [`Rmt::keep_logs`].
@@ -978,6 +1315,379 @@ impl Rmt {
         }
     }
 
+    // ---- the receiver (M2 P3) -----------------------------------------------
+
+    /// `rx_lim` for receiver `rxi`, in words.
+    fn rx_lim(&self, rxi: usize) -> u32 {
+        self.regs.stored(CH_RX_LIM[rxi]) & RX_LIM_MASK
+    }
+
+    /// The first word of receiver `rxi`'s RAM window.
+    fn rx_window_start(rxi: usize) -> u32 {
+        BLOCK_WORDS * RxEngine::channel(rxi) as u32
+    }
+
+    /// `conf_update` on an RX channel: latch both configuration words and act
+    /// on the strobes written since the last one, exactly as the TX side's
+    /// does (discovery §10.3, and esp-hal's `update()` writes the two bits in
+    /// the same place for both directions).
+    fn rx_conf_update(&mut self, rxi: usize, cx: &mut BusCx<'_>) {
+        let conf0 = self.regs.stored(CH_RX_CONF0[rxi]);
+        let conf1 = self.regs.stored(CH_RX_CONF1[rxi]);
+        let pending = core::mem::take(&mut self.rx[rxi].pending);
+        self.rx[rxi].conf0 = conf0;
+        self.rx[rxi].conf1 = conf1;
+        if pending & RX_CONF1_MEM_WR_RST != 0 {
+            self.rx[rxi].waddr = Self::rx_window_start(rxi);
+        }
+        // `apb_mem_rst` resets the APB *read* pointer, which the reader in
+        // esp-hal tracks in software: accepted.
+        let enabled = conf1 & RX_CONF1_RX_EN != 0;
+        if enabled && !self.rx[rxi].running {
+            let now = cx.now;
+            self.rx_start(rxi, now, cx);
+        } else if !enabled && self.rx[rxi].running {
+            self.rx_stop(rxi, cx);
+        }
+    }
+
+    /// Arm receiver `rxi`: it now watches its pad and waits for the first
+    /// edge.
+    fn rx_start(&mut self, rxi: usize, now: Cycles, cx: &mut BusCx<'_>) {
+        let ch = RxEngine::channel(rxi);
+        if self.rx[rxi].window_words() == 0 {
+            note(cx, || {
+                format!("cyc={now} RMT ch{ch} rx start refused: mem_size 0 (no window)")
+            });
+            return;
+        }
+        let clock = self.clock().ok();
+        let signal = rx_signal_of(rxi);
+        let route = cx.pins.input_route_of(signal);
+        let level = cx.pins.input_level(signal).unwrap_or(false);
+        {
+            let e = &mut self.rx[rxi];
+            e.running = true;
+            e.armed = true;
+            e.anchor_cycle = now;
+            e.anchor_clock = clock;
+            e.run_level = level;
+            e.run_start = 0;
+            e.pending_edge = None;
+            e.half = None;
+            e.since_thr = 0;
+            e.frame_words = 0;
+            e.mem_full = false;
+        }
+        self.cancel_rx_idle(rxi, cx);
+        let e = &self.rx[rxi];
+        let (idle, div_cnt, lim) = (e.idle_thres(), e.div_cnt(), self.rx_lim(rxi));
+        let (ws, ww) = (Self::rx_window_start(rxi), e.window_words());
+        let filter = clock.as_ref().and_then(|c| e.filter_ticks(c));
+        let wrap = u8::from(e.wrap());
+        let waddr = e.waddr;
+        let where_from = match route {
+            Some((pad, invert)) => format!("{pad}{}", if invert { " (inverted)" } else { "" }),
+            None => "nothing".into(),
+        };
+        note(cx, || {
+            format!(
+                "cyc={now} RMT ch{ch} rx start from {where_from} div_cnt={div_cnt} \
+                 idle_thres={idle} filter={} window={ws}..{} waddr={waddr} wrap={wrap} \
+                 rx_lim={lim} level={}",
+                filter.map_or("off".to_string(), |t| format!("{t} ticks")),
+                ws + ww,
+                u8::from(level),
+            )
+        });
+        if self.rx[rxi].conf1 & RX_CONF1_MEM_OWNER == 0 {
+            // `mem_owner` 0 is "the APB bus is using the RAM" (PAC). esp-hal
+            // sets it in the same write as `rx_en`; a reception started
+            // without it is accepted and named rather than refused, and
+            // `mem_owner_err` is not raised — the model has one RAM and no
+            // arbiter (see the block header's "what is not here").
+            note(cx, || {
+                format!(
+                    "cyc={now} RMT ch{ch} rx_en with mem_owner = 0 (APB owns the RAM): accepted, not modelled"
+                )
+            });
+        }
+        if route.is_none() && !self.rx[rxi].warned_unrouted {
+            self.rx[rxi].warned_unrouted = true;
+            note(cx, || {
+                format!(
+                    "cyc={now} RMT ch{ch} rx_en with no pad routed to its input signal \
+                     (GPIO func_in_sel_cfg): the receiver will never see an edge"
+                )
+            });
+        }
+    }
+
+    /// `rx_en` cleared while running: the receiver stops where it is, with no
+    /// `rx_end` and nothing flushed (esp-hal's `stop_rx`, which it calls
+    /// *after* the reception has already ended, expects neither).
+    fn rx_stop(&mut self, rxi: usize, cx: &mut BusCx<'_>) {
+        self.cancel_rx_idle(rxi, cx);
+        self.rx[rxi].running = false;
+        self.rx[rxi].armed = false;
+        self.rx[rxi].pending_edge = None;
+    }
+
+    fn cancel_rx_idle(&mut self, rxi: usize, cx: &mut BusCx<'_>) {
+        cx.sched
+            .cancel(event_id(self.index, EV_RX_IDLE + rxi as u16));
+    }
+
+    /// The idle timer runs from the start of the current level's run: the
+    /// reception ends one tick past `idle_thres` of no edge.
+    fn arm_rx_idle(&mut self, rxi: usize, cx: &mut BusCx<'_>) {
+        let Ok(clock) = self.clock() else { return };
+        let e = &self.rx[rxi];
+        if !e.running || e.armed {
+            return;
+        }
+        let due = e.cycle_at(&clock, e.run_start + u64::from(e.idle_thres()) + 1);
+        // An edge is handed over at the slice boundary after it happened, so
+        // a deadline can already be in the past by the time it is armed. It
+        // fires at the next dispatch, which is a guest cycle like any other.
+        let due = due.max(cx.now);
+        self.rx[rxi].idle_due = due;
+        cx.sched
+            .schedule_at(due, event_id(self.index, EV_RX_IDLE + rxi as u16));
+    }
+
+    /// The machine's slice drain hands every pad edge to the block; a running
+    /// receiver takes the ones on the pad its input signal reads.
+    ///
+    /// The mirror of [`super::gpio::Gpio::observe_edges`], and it reads the
+    /// same stream — so a receiver, the pin log and a strip decoder can never
+    /// disagree about what was on the wire.
+    pub fn observe_edges(&mut self, edges: &[Edge], cx: &mut BusCx<'_>) {
+        for rxi in 0..RX_CHANNELS {
+            if !self.rx[rxi].running {
+                continue;
+            }
+            let Some((pad, invert)) = cx.pins.input_route_of(rx_signal_of(rxi)) else {
+                continue;
+            };
+            for edge in edges {
+                if edge.pad != pad || !self.rx[rxi].running {
+                    continue;
+                }
+                self.rx_edge(rxi, edge.at, edge.level != invert, cx);
+            }
+        }
+        self.update_lines(cx);
+    }
+
+    /// One edge on receiver `rxi`'s pad, at cycle `at`, leaving the pad at
+    /// `level`.
+    fn rx_edge(&mut self, rxi: usize, at: Cycles, level: bool, cx: &mut BusCx<'_>) {
+        let Ok(clock) = self.clock() else {
+            // No function clock: the receiver counts nothing. Stated rather
+            // than silently mis-measured; nothing in the firmware gates the
+            // RMT clock while a channel is live.
+            return;
+        };
+        let tick = self.rx[rxi].tick_at(&clock, at);
+        if self.rx[rxi].armed {
+            // The reception begins here (see `RxEngine::armed`): this is the
+            // first run, and the idle that preceded it is not a pulse.
+            let e = &mut self.rx[rxi];
+            e.armed = false;
+            e.run_level = level;
+            e.run_start = tick;
+            self.arm_rx_idle(rxi, cx);
+            return;
+        }
+        match self.rx[rxi].filter_ticks(&clock) {
+            None => self.rx_accept_edge(rxi, tick, level, &clock, cx),
+            Some(width) => {
+                if let Some((pending_tick, pending_level)) = self.rx[rxi].pending_edge {
+                    if tick.saturating_sub(pending_tick) < width {
+                        // The level did not hold for the filter's width, so
+                        // the pulse never reached the edge detector at all:
+                        // this edge and the one that opened it both vanish
+                        // and the run underneath carries on.
+                        self.rx[rxi].pending_edge = None;
+                        let ch = RxEngine::channel(rxi);
+                        note(cx, || {
+                            format!(
+                                "cyc={at} RMT ch{ch} rx filtered a {}-tick pulse (< {width})",
+                                tick.saturating_sub(pending_tick)
+                            )
+                        });
+                        return;
+                    }
+                    self.rx_accept_edge(rxi, pending_tick, pending_level, &clock, cx);
+                }
+                self.rx[rxi].pending_edge = Some((tick, level));
+            }
+        }
+    }
+
+    /// An edge the filter has passed: the run it ends becomes a pulse.
+    fn rx_accept_edge(
+        &mut self,
+        rxi: usize,
+        tick: u64,
+        level: bool,
+        clock: &Clock,
+        cx: &mut BusCx<'_>,
+    ) {
+        let duration = tick.saturating_sub(self.rx[rxi].run_start);
+        let run_level = self.rx[rxi].run_level;
+        self.rx_push_pulse(rxi, run_level, duration, cx);
+        let e = &mut self.rx[rxi];
+        e.run_level = level;
+        e.run_start = tick;
+        let _ = clock;
+        self.arm_rx_idle(rxi, cx);
+    }
+
+    /// A measured run becomes half a word; a full word goes into the RAM.
+    ///
+    /// # The encoding, from the PAC's bit map
+    ///
+    /// One 32-bit word is two (level, duration) pairs, and it is the same
+    /// word the transmitter reads — `lp_ws281x::pulse_code` writes it and
+    /// [`Rmt::fetch`] takes it apart:
+    ///
+    /// | bits | field |
+    /// |---|---|
+    /// | 0:14 | duration of the **first** pulse, in channel ticks |
+    /// | 15 | level of the first pulse |
+    /// | 16:30 | duration of the **second** pulse |
+    /// | 31 | level of the second pulse |
+    ///
+    /// A duration of zero is the end marker both directions agree on
+    /// (esp-hal's `PulseCode::is_end_marker`: *"length1() == 0 || length2()
+    /// == 0"*), so a measured run is written as at least 1 and at most
+    /// [`DURATION_MAX`] — a run cannot exceed `idle_thres` anyway, because
+    /// the reception ends when it does.
+    fn rx_push_pulse(&mut self, rxi: usize, level: bool, duration: u64, cx: &mut BusCx<'_>) {
+        let duration = (duration.max(1) as u32).min(DURATION_MAX);
+        match self.rx[rxi].half.take() {
+            None => self.rx[rxi].half = Some((level, duration)),
+            Some((l0, d0)) => {
+                let word = d0 | (u32::from(l0) << 15) | (duration << 16) | (u32::from(level) << 31);
+                self.rx_write_word(rxi, word, cx);
+            }
+        }
+    }
+
+    /// Write one word into the channel's window and apply the threshold and
+    /// wrap rules.
+    fn rx_write_word(&mut self, rxi: usize, word: u32, cx: &mut BusCx<'_>) {
+        let start = Self::rx_window_start(rxi);
+        let window = self.rx[rxi].window_words();
+        let ch = RxEngine::channel(rxi);
+        let waddr = self.rx[rxi].waddr;
+        if let Some(slot) = self.ram.get_mut(waddr as usize) {
+            *slot = word;
+        }
+        {
+            let e = &mut self.rx[rxi];
+            e.waddr += 1;
+            e.frame_words += 1;
+            e.words_written += 1;
+            e.since_thr += 1;
+        }
+        // `rx_lim` is a **count**, not a position: the PAC's own words for
+        // this interrupt are *"triggered when receiver receive more data than
+        // configured value"*, and esp-hal never rewrites `ch_rx_lim` between
+        // events the way it rewrites `ch_tx_lim` — it reads half a window on
+        // each one and alternates its own offset. Modeled, and the driver's
+        // use of it (`rx_lim` = half the window) cannot tell a repeating
+        // counter from a position; a `rx_lim` that did not divide the window
+        // could, and nothing writes one.
+        let lim = self.rx_lim(rxi);
+        if lim != 0 && self.rx[rxi].since_thr >= lim {
+            self.rx[rxi].since_thr = 0;
+            self.raise(ch, INT_TX_THR_SHIFT);
+            let at = self.rx[rxi].waddr;
+            note(cx, || format!("RMT ch{ch} rx thr waddr={at}"));
+        }
+        if self.rx[rxi].waddr >= start + window {
+            if self.rx[rxi].wrap() {
+                self.rx[rxi].waddr = start;
+            } else {
+                // The window is full with no wrap: `mem_full`, `rx_err`, and
+                // the reception stops where it is.
+                self.rx[rxi].mem_full = true;
+                self.raise(ch, INT_TX_ERR_SHIFT);
+                note(cx, || {
+                    format!("RMT ch{ch} rx err mem_full (window end, wrap off)")
+                });
+                self.rx_stop(rxi, cx);
+            }
+        }
+        self.update_lines(cx);
+    }
+
+    /// The idle threshold expired: flush what is in hand and raise `rx_end`.
+    ///
+    /// **Modeled, and the shape is esp-hal's.** The trailing idle run is
+    /// stored as a pulse — it is the run the receiver was timing when it gave
+    /// up — and then the word is closed so that the **last word written is an
+    /// end marker**, which is what `RmtReader::read` asserts about a finished
+    /// reception (`rmt/reader.rs`, the `debug_assert!` on
+    /// `ram[hw_offset - 1].is_end_marker()`). Where the idle pulse leaves a
+    /// half open, that half is the zero; where it closes a word, one all-zero
+    /// word follows it.
+    fn rx_end(&mut self, rxi: usize, at: Cycles, cx: &mut BusCx<'_>) {
+        let ch = RxEngine::channel(rxi);
+        let idle = u64::from(self.rx[rxi].idle_thres()) + 1;
+        let level = self.rx[rxi].run_level;
+        // A pending edge the filter never got a verdict on is one the line
+        // then held: it passed by definition, so it is accepted here.
+        if let Some((tick, edge_level)) = self.rx[rxi].pending_edge.take()
+            && let Ok(clock) = self.clock()
+        {
+            self.rx_accept_edge(rxi, tick, edge_level, &clock, cx);
+            self.cancel_rx_idle(rxi, cx);
+            self.rx_push_pulse(rxi, edge_level, idle, cx);
+        } else {
+            self.rx_push_pulse(rxi, level, idle, cx);
+        }
+        if self.rx[rxi].half.is_some() {
+            // Close the open word: the second half is the zero marker.
+            let (l0, d0) = self.rx[rxi].half.take().expect("checked");
+            self.rx_write_word(rxi, d0 | (u32::from(l0) << 15), cx);
+        } else {
+            self.rx_write_word(rxi, 0, cx);
+        }
+        let words = self.rx[rxi].frame_words;
+        self.rx[rxi].running = false;
+        self.rx[rxi].armed = false;
+        self.cancel_rx_idle(rxi, cx);
+        self.raise(ch, INT_TX_END_SHIFT);
+        note(cx, || {
+            format!(
+                "cyc={at} RMT ch{ch} rx end words={words} idle_thres={}",
+                idle - 1
+            )
+        });
+        self.update_lines(cx);
+    }
+
+    // ---- observation, the receiving half ------------------------------------
+
+    /// Whether receiver `rxi` (0 is channel 2) is armed or receiving.
+    pub fn rx_running(&self, rxi: usize) -> bool {
+        self.rx[rxi].running
+    }
+
+    /// Words receiver `rxi` has written since the machine started.
+    pub fn rx_words_written(&self, rxi: usize) -> u64 {
+        self.rx[rxi].words_written
+    }
+
+    /// The next word receiver `rxi` will write — `ch_rx_status.mem_waddr_ex`.
+    pub fn rx_waddr(&self, rxi: usize) -> u32 {
+        self.rx[rxi].waddr
+    }
+
     // ---- registers ------------------------------------------------------------
 
     fn read_word(&self, off: u32) -> u32 {
@@ -997,6 +1707,27 @@ impl Rmt {
                 }
                 if e.mem_empty {
                     v |= STATUS_MEM_EMPTY;
+                }
+                return v;
+            }
+        }
+        for rxi in 0..RX_CHANNELS {
+            if off == CH_RX_STATUS[rxi] {
+                let e = &self.rx[rxi];
+                // `mem_waddr_ex` (bits 0:8) is absolute, the way the TX
+                // side's `mem_raddr_ex` is: esp-hal's `hw_offset` subtracts
+                // the channel's own window start from it.
+                let mut v = e.waddr & RX_LIM_MASK;
+                // `apb_mem_raddr_ex` (bits 12:20) is the *APB* side's read
+                // pointer, which the driver tracks in software and never
+                // reads back (esp-hal's `RmtReader` keeps its own `offset`).
+                // Modeled as the window start.
+                v |= (Self::rx_window_start(rxi) & RX_LIM_MASK) << RX_STATUS_APB_RADDR_SHIFT;
+                if e.running {
+                    v |= 1 << RX_STATUS_STATE_SHIFT;
+                }
+                if e.mem_full {
+                    v |= RX_STATUS_MEM_FULL;
                 }
                 return v;
             }
@@ -1062,6 +1793,46 @@ impl Rmt {
                 return;
             }
         }
+        for rxi in 0..RX_CHANNELS {
+            if off == CH_RX_CONF0[rxi] {
+                // No strobes here: `div_cnt`, `idle_thres`, `mem_size` and
+                // the carrier bits all take effect at the next
+                // `conf_update`, which is where esp-hal writes them from.
+                self.regs.poke(off, value);
+                return;
+            }
+            if off == CH_RX_CONF1[rxi] {
+                let strobes = value & (RX_CONF1_MEM_WR_RST | RX_CONF1_APB_MEM_RST);
+                self.rx[rxi].pending |= strobes;
+                self.regs.poke(off, value & !RX_CONF1_PULSES);
+                if value & RX_CONF1_CONF_UPDATE != 0 {
+                    self.rx_conf_update(rxi, cx);
+                }
+                return;
+            }
+            if off == CH_RX_LIM[rxi] {
+                // Immediate, like `ch_tx_lim`: nothing in the PAC gates it on
+                // `conf_update` and esp-hal writes it before the update that
+                // starts the reception.
+                self.regs.poke(off, value);
+                return;
+            }
+            if off == CH_RX_CARRIER_RM[rxi] {
+                self.regs.poke(off, value);
+                if self.rx[rxi].conf0 & RX_CONF0_CARRIER_EN != 0 && !self.warned_rx_carrier[rxi] {
+                    self.warned_rx_carrier[rxi] = true;
+                    let ch = RxEngine::channel(rxi);
+                    let now = cx.now;
+                    note(cx, || {
+                        format!(
+                            "cyc={now} RMT ch{ch} rx carrier demodulation is not modelled: the \
+                             receiver samples the pad's level as the fabric resolves it"
+                        )
+                    });
+                }
+                return;
+            }
+        }
         match off {
             INT_ENA => {
                 self.regs.poke(INT_ENA, value & INT_MASK);
@@ -1085,19 +1856,6 @@ impl Rmt {
                             )
                         });
                     }
-                }
-            }
-            CH2_RX_CONF1 | CH3_RX_CONF1 => {
-                self.regs.poke(off, value);
-                if value & 1 != 0 && !self.warned_rx {
-                    self.warned_rx = true;
-                    let ch = if off == CH2_RX_CONF1 { 2 } else { 3 };
-                    let now = cx.now;
-                    note(cx, || {
-                        format!(
-                            "cyc={now} RMT ch{ch} rx_en set: RX channels are not modelled (M5 models TX only)"
-                        )
-                    });
                 }
             }
             SYS_CONF => {
@@ -1169,6 +1927,13 @@ impl Peripheral for Rmt {
                     self.conf_update(ch, cx);
                 }
             }
+            l if (EV_RX_IDLE..EV_RX_IDLE + RX_CHANNELS as u16).contains(&l) => {
+                let rxi = usize::from(l - EV_RX_IDLE);
+                if self.rx[rxi].running && !self.rx[rxi].armed {
+                    let due = self.rx[rxi].idle_due;
+                    self.rx_end(rxi, due, cx);
+                }
+            }
             EV_CLOCK_POLL => {
                 self.poll_armed = false;
                 let stalled: Vec<usize> = (0..TX_CHANNELS)
@@ -1198,12 +1963,16 @@ impl Peripheral for Rmt {
         regs::RMT.name(off)
     }
 
+    fn reg_grade(&self, off: u32) -> Option<RegGrade> {
+        Some(self.grades.grade(off))
+    }
+
     fn save_state(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(REGS_LEN as usize + RAM_WORDS * 4 + 256);
         out.extend_from_slice(&(self.index as u64).to_le_bytes());
         out.extend_from_slice(&self.sticky.to_le_bytes());
         let flags = u32::from(self.poll_armed)
-            | (u32::from(self.warned_rx) << 1)
+            | (u32::from(self.warned_rx_carrier[0]) << 1)
             | (u32::from(self.warned_fifo) << 2)
             | (u32::from(self.warned_gap) << 3)
             | (u32::from(self.warned_ref_cnt[0]) << 4)
@@ -1212,7 +1981,8 @@ impl Peripheral for Rmt {
             | (u32::from(self.warned_ref_cnt[3]) << 7)
             | (u32::from(self.warned_late_start[0]) << 8)
             | (u32::from(self.warned_late_start[1]) << 9)
-            | (u32::from(self.keep_logs) << 10);
+            | (u32::from(self.keep_logs) << 10)
+            | (u32::from(self.warned_rx_carrier[1]) << 11);
         out.extend_from_slice(&flags.to_le_bytes());
         for w in self.ram.iter() {
             out.extend_from_slice(&w.to_le_bytes());
@@ -1283,6 +2053,41 @@ impl Peripheral for Rmt {
             for v in s.entry_hist.iter().chain(s.fill_hist.iter()) {
                 out.extend_from_slice(&v.to_le_bytes());
             }
+        }
+        // The receivers ride the snapshot for the same reason the refill
+        // measurement does: a restored run has to write the same words at the
+        // same cycles as the run it was taken from.
+        for e in &self.rx {
+            out.extend_from_slice(&e.conf0.to_le_bytes());
+            out.extend_from_slice(&e.conf1.to_le_bytes());
+            out.extend_from_slice(&e.pending.to_le_bytes());
+            let eflags = u32::from(e.running)
+                | (u32::from(e.armed) << 1)
+                | (u32::from(e.run_level) << 2)
+                | (u32::from(e.mem_full) << 3)
+                | (u32::from(e.warned_unrouted) << 4)
+                | (u32::from(e.half.is_some()) << 5)
+                | (u32::from(e.half.is_some_and(|(l, _)| l)) << 6)
+                | (u32::from(e.pending_edge.is_some()) << 7)
+                | (u32::from(e.pending_edge.is_some_and(|(_, l)| l)) << 8);
+            out.extend_from_slice(&eflags.to_le_bytes());
+            out.extend_from_slice(&e.waddr.to_le_bytes());
+            out.extend_from_slice(&e.anchor_cycle.to_le_bytes());
+            let (src, num, a, b) = e
+                .anchor_clock
+                .map(|c| (c.src_hz, c.div_num, c.div_a, c.div_b))
+                .unwrap_or((0, 0, 0, 0));
+            out.extend_from_slice(&src.to_le_bytes());
+            out.extend_from_slice(&num.to_le_bytes());
+            out.extend_from_slice(&a.to_le_bytes());
+            out.extend_from_slice(&b.to_le_bytes());
+            out.extend_from_slice(&e.run_start.to_le_bytes());
+            out.extend_from_slice(&e.pending_edge.map_or(0, |(t, _)| t).to_le_bytes());
+            out.extend_from_slice(&e.half.map_or(0, |(_, d)| d).to_le_bytes());
+            out.extend_from_slice(&e.since_thr.to_le_bytes());
+            out.extend_from_slice(&e.frame_words.to_le_bytes());
+            out.extend_from_slice(&e.words_written.to_le_bytes());
+            out.extend_from_slice(&e.idle_due.to_le_bytes());
         }
         out.extend_from_slice(&self.regs.save_state());
         out
@@ -1438,7 +2243,7 @@ impl Peripheral for Rmt {
         self.index = index as usize;
         self.sticky = sticky;
         self.poll_armed = flags & 1 != 0;
-        self.warned_rx = flags & 2 != 0;
+        self.warned_rx_carrier = [flags & 2 != 0, flags & (1 << 11) != 0];
         self.warned_fifo = flags & 4 != 0;
         self.warned_gap = flags & 8 != 0;
         for bit in 0..4 {
@@ -1451,6 +2256,72 @@ impl Peripheral for Rmt {
         self.ch = [
             it.next().expect("two engines"),
             it.next().expect("two engines"),
+        ];
+        let mut receivers = Vec::with_capacity(RX_CHANNELS);
+        for rxi in 0..RX_CHANNELS {
+            let mut e = RxEngine::new(rxi);
+            let (Some(conf0), Some(conf1), Some(pending), Some(eflags), Some(waddr)) =
+                (r.u32(), r.u32(), r.u32(), r.u32(), r.u32())
+            else {
+                log::warn!("RMT: load_state blob too short, ignored");
+                return;
+            };
+            let (Some(anchor_cycle), Some(src), Some(num), Some(a), Some(b)) =
+                (r.u64(), r.u64(), r.u32(), r.u32(), r.u32())
+            else {
+                log::warn!("RMT: load_state blob too short, ignored");
+                return;
+            };
+            let (
+                Some(run_start),
+                Some(pending_tick),
+                Some(half_dur),
+                Some(since_thr),
+                Some(frame_words),
+                Some(words_written),
+                Some(idle_due),
+            ) = (
+                r.u64(),
+                r.u64(),
+                r.u32(),
+                r.u32(),
+                r.u64(),
+                r.u64(),
+                r.u64(),
+            )
+            else {
+                log::warn!("RMT: load_state blob too short, ignored");
+                return;
+            };
+            e.conf0 = conf0;
+            e.conf1 = conf1;
+            e.pending = pending;
+            e.running = eflags & 1 != 0;
+            e.armed = eflags & 2 != 0;
+            e.run_level = eflags & 4 != 0;
+            e.mem_full = eflags & 8 != 0;
+            e.warned_unrouted = eflags & 16 != 0;
+            e.half = (eflags & 32 != 0).then_some((eflags & 64 != 0, half_dur));
+            e.pending_edge = (eflags & 128 != 0).then_some((pending_tick, eflags & 256 != 0));
+            e.waddr = waddr;
+            e.anchor_cycle = anchor_cycle;
+            e.anchor_clock = (src != 0).then_some(Clock {
+                src_hz: src,
+                div_num: num,
+                div_a: a,
+                div_b: b,
+            });
+            e.run_start = run_start;
+            e.since_thr = since_thr;
+            e.frame_words = frame_words;
+            e.words_written = words_written;
+            e.idle_due = idle_due;
+            receivers.push(e);
+        }
+        let mut it = receivers.into_iter();
+        self.rx = [
+            it.next().expect("two receivers"),
+            it.next().expect("two receivers"),
         ];
         self.regs.load_state(r.0);
     }
@@ -1592,19 +2463,27 @@ mod tests {
         assert_eq!(sb.read(&mut r, ram_off(5)), 0x1122_aa44);
         assert_eq!(r.read(ram_off(5) + 2, Width::Half, &mut sb.cx()), 0x1122);
         assert_eq!(r.ram()[5], 0x1122_aa44);
-        // (g) rx_en.
-        let mut sb2 = Sandbox::new();
-        let buf = lp_emu_esp_common::trace::SharedBuffer::new();
-        sb2.trace = lp_emu_esp_common::Trace::to_sink(Box::new(buf.clone()));
-        sb2.write(&mut r, CH2_RX_CONF1, 1);
-        sb2.write(&mut r, CH3_RX_CONF1, 1);
-        let rx: Vec<String> = buf
-            .lines()
-            .into_iter()
-            .filter(|l| l.contains("rx_en"))
-            .collect();
-        assert_eq!(rx.len(), 1, "{rx:?}");
-        assert!(rx[0].contains("RMT ch2 rx_en set: RX channels are not modelled"));
+        // (g) the RX registers read the PAC's reset values, and the strobes
+        // in `ch_rx_conf1` read back 0 the way the TX side's do.
+        assert_eq!(sb.read(&mut r, CH_RX_CONF0[0]), CH_RX_CONF0_RESET);
+        assert_eq!(sb.read(&mut r, CH_RX_CONF1[1]), CH_RX_CONF1_RESET);
+        assert_eq!(sb.read(&mut r, CH_RX_LIM[0]), 0x80);
+        assert_eq!(
+            sb.read(&mut r, CH_RX_STATUS[0]) & RX_LIM_MASK,
+            96,
+            "channel 2's window starts at block 2"
+        );
+        sb.write(
+            &mut r,
+            CH_RX_CONF1[0],
+            CH_RX_CONF1_RESET | RX_CONF1_MEM_WR_RST | RX_CONF1_APB_MEM_RST,
+        );
+        assert_eq!(
+            sb.read(&mut r, CH_RX_CONF1[0]) & RX_CONF1_PULSES,
+            0,
+            "mem_wr_rst, apb_mem_rst and conf_update read 0"
+        );
+        assert_eq!(r.reg_name(0x030), Some("ch0_rx_status"));
     }
 
     /// (a) The driver's exact sequence on a 48-word window, forever.
@@ -2108,5 +2987,348 @@ mod tests {
         assert_eq!(sb.read(&mut r, INT_RAW) & 0b11, 0b10);
         assert!(r.pulses(0).is_empty());
         assert_eq!(r.words(1).len(), 49);
+    }
+
+    // ---- the receiver (M2 P3) -------------------------------------------
+
+    /// The pad the loopback's receiver reads, and the RX channel that reads
+    /// it: gpio19 into `InputSignal::RMT_SIG_0`, which is channel 2.
+    const RX_PAD: lp_emu_esp_common::PadId = lp_emu_esp_common::PadId(19);
+    const RXI: usize = 0;
+    /// One tick is two CPU cycles at the shipped settings (80 MHz PLL,
+    /// `div_cnt = 1`, a 160 MHz CPU), which is what makes every duration in
+    /// these tests exact.
+    const TICK_CYCLES: u64 = 2;
+
+    /// Route gpio19 into the receiver's input signal and give the channel
+    /// esp-hal's `configure_rx` settings: `div_cnt 1`, `mem_size 1`, the
+    /// idle threshold and the filter as asked for.
+    fn configure_rx(sb: &mut Sandbox, r: &mut Rmt, idle_thres: u32, filter: Option<u32>) {
+        sb.pins.route_in(rx_signal_of(RXI), RX_PAD, false);
+        sb.pins.set_pad_input_enable(RX_PAD, true);
+        let conf0 = (1 << RX_CONF0_DIV_CNT_SHIFT)
+            | (idle_thres << RX_CONF0_IDLE_THRES_SHIFT)
+            | (1 << RX_CONF0_MEM_SIZE_SHIFT);
+        sb.write(r, CH_RX_CONF0[RXI], conf0);
+        let mut conf1 = RX_CONF1_MEM_OWNER | RX_CONF1_MEM_RX_WRAP_EN;
+        if let Some(thres) = filter {
+            conf1 |= RX_CONF1_FILTER_EN | (thres << RX_CONF1_FILTER_THRES_SHIFT);
+        }
+        sb.write(r, CH_RX_CONF1[RXI], conf1);
+        sb.write(r, INT_ENA, 0xffff);
+    }
+
+    /// `Channel<Rx>::receive` → `start_receive`: the threshold, the wrap, an
+    /// update, then `rx_en` with the two resets, then another update.
+    fn start_rx(sb: &mut Sandbox, r: &mut Rmt, rx_lim: u32) {
+        sb.write(r, INT_CLR, 0xffff);
+        sb.write(r, CH_RX_LIM[RXI], rx_lim);
+        let c = sb.read(r, CH_RX_CONF1[RXI]);
+        sb.write(r, CH_RX_CONF1[RXI], c | RX_CONF1_CONF_UPDATE);
+        let c = sb.read(r, CH_RX_CONF1[RXI]);
+        sb.write(
+            r,
+            CH_RX_CONF1[RXI],
+            c | RX_CONF1_MEM_OWNER | RX_CONF1_MEM_WR_RST | RX_CONF1_APB_MEM_RST | RX_CONF1_RX_EN,
+        );
+        let c = sb.read(r, CH_RX_CONF1[RXI]);
+        sb.write(r, CH_RX_CONF1[RXI], c | RX_CONF1_CONF_UPDATE);
+    }
+
+    /// Put an edge on the pad at cycle `at` and hand the block the edge the
+    /// fabric recorded, the way the machine's slice drain does.
+    fn pad(sb: &mut Sandbox, r: &mut Rmt, at: Cycles, level: bool) {
+        sb.now = at;
+        sb.pins.drive_pad(RX_PAD, level, at);
+        let edges = sb.pins.take_edges();
+        r.observe_edges(&edges, &mut sb.cx());
+    }
+
+    /// One WS2812 bit as the transmitter puts it on the wire: high for `high`
+    /// ticks, then low for the rest of the 100-tick slot.
+    fn bit(sb: &mut Sandbox, r: &mut Rmt, slot: u64, high: u64, start: Cycles) {
+        let t0 = start + slot * 100 * TICK_CYCLES;
+        pad(sb, r, t0, true);
+        pad(sb, r, t0 + high * TICK_CYCLES, false);
+    }
+
+    fn rx_word(sb: &mut Sandbox, r: &mut Rmt, word_index: u32) -> u32 {
+        sb.read(r, ram_off(word_index))
+    }
+
+    /// (a) The whole of the loopback in miniature: the receiver's words are
+    /// the transmitter's words, half for half.
+    #[test]
+    fn the_received_words_are_the_transmitted_words() {
+        let (mut sb, mut r, _) = rig();
+        configure_rx(&mut sb, &mut r, 4_000, None);
+        sb.now = 1_000;
+        start_rx(&mut sb, &mut r, 24);
+        assert!(r.rx_running(RXI));
+        assert_eq!(
+            sb.read(&mut r, CH_RX_STATUS[RXI]) >> RX_STATUS_STATE_SHIFT & 7,
+            1,
+            "state = receiving"
+        );
+
+        // Four WS2812 bits — 0, 1, 1, 0 — on the 100-tick grid the chase
+        // transmits on, starting well after `rx_en` so the leading idle is
+        // demonstrably not a pulse.
+        let start = 2_000;
+        for (slot, high) in [(0u64, 32u64), (1, 64), (2, 64), (3, 32)] {
+            bit(&mut sb, &mut r, slot, high, start);
+        }
+        // The words land as their second halves close, so three are in the
+        // RAM and the fourth is still open.
+        assert_eq!(rx_word(&mut sb, &mut r, 96), ZERO, "bit 0 is a WS2812 zero");
+        assert_eq!(rx_word(&mut sb, &mut r, 97), ONE);
+        assert_eq!(rx_word(&mut sb, &mut r, 98), ONE);
+        assert_eq!(r.rx_waddr(RXI), 99, "three words written, one half open");
+
+        // The line then rests: the idle threshold ends the reception, the
+        // last measured run is stored, and the last word is an end marker.
+        let last_edge = start + 3 * 100 * TICK_CYCLES + 32 * TICK_CYCLES;
+        sb.run_to(&mut r, last_edge + 4_001 * TICK_CYCLES);
+        assert!(!r.rx_running(RXI), "idle_thres ended it");
+        let closing = rx_word(&mut sb, &mut r, 99);
+        assert_eq!(closing & 0x7fff, 32, "the fourth bit's high half");
+        assert_eq!(closing & (1 << 15), 1 << 15, "…and it was high");
+        assert_eq!(
+            (closing >> 16) & 0x7fff,
+            4_001,
+            "the trailing idle run, idle_thres + 1"
+        );
+        assert_eq!(closing & (1 << 31), 0, "…and it was low");
+        assert_eq!(rx_word(&mut sb, &mut r, 100), 0, "the end marker");
+        // `rx_end` is ch2's bit — bit 2 of `int_raw`, not bit 0.
+        assert_eq!(
+            sb.read(&mut r, INT_RAW) & 0b1111,
+            1 << (INT_TX_END_SHIFT + 2),
+            "ch2_rx_end, and no tx bit"
+        );
+        assert!(sb.irq.level(source::RMT), "source 49 is up");
+        sb.write(&mut r, INT_CLR, 1 << (INT_TX_END_SHIFT + 2));
+        assert!(!sb.irq.level(source::RMT), "w1c drops it");
+    }
+
+    /// (b) G3-3, the threshold half: a level held past `idle_thres` ends the
+    /// reception and one held less does not.
+    #[test]
+    fn the_idle_threshold_ends_the_reception_and_a_shorter_gap_does_not() {
+        let (mut sb, mut r, _) = rig();
+        configure_rx(&mut sb, &mut r, 500, None);
+        sb.now = 1_000;
+        start_rx(&mut sb, &mut r, 24);
+
+        pad(&mut sb, &mut r, 2_000, true);
+        pad(&mut sb, &mut r, 2_000 + 100 * TICK_CYCLES, false);
+        // A gap of 400 ticks: shorter than the threshold, so nothing ends.
+        sb.run_to(&mut r, 2_000 + 500 * TICK_CYCLES);
+        assert!(r.rx_running(RXI), "400 ticks of idle is not 500");
+        pad(&mut sb, &mut r, 2_000 + 500 * TICK_CYCLES, true);
+        pad(&mut sb, &mut r, 2_000 + 600 * TICK_CYCLES, false);
+        assert!(r.rx_running(RXI));
+        assert_eq!(sb.read(&mut r, INT_RAW) & 0b1111, 0, "no rx_end yet");
+
+        // And now a gap that is longer.
+        sb.run_to(&mut r, 2_000 + 600 * TICK_CYCLES + 501 * TICK_CYCLES);
+        assert!(!r.rx_running(RXI));
+        assert_eq!(
+            sb.read(&mut r, INT_RAW) & 0b1111,
+            1 << (INT_TX_END_SHIFT + 2)
+        );
+        // Two bits' worth of runs went in: high, low, high, then the idle.
+        assert_eq!(rx_word(&mut sb, &mut r, 96), word(true, 100, false, 400));
+        let closing = rx_word(&mut sb, &mut r, 97);
+        assert_eq!(closing & 0x7fff, 100);
+        assert_eq!((closing >> 16) & 0x7fff, 501);
+    }
+
+    /// (c) G3-3, the filter half: a pulse narrower than `rx_filter_thres`
+    /// never reaches the edge detector, and one wider than it does.
+    ///
+    /// This is the test a sampler that ignores `rx_filter` fails, and the
+    /// numbers are chosen so that it cannot pass by accident: the glitch and
+    /// the kept pulse differ only in width.
+    #[test]
+    fn a_pulse_narrower_than_the_filter_is_swallowed_and_a_wider_one_is_kept() {
+        // The filter's threshold is in APB periods and the APB and the
+        // channel run at the same 80 MHz here, so 40 periods is 40 ticks.
+        let (mut sb, mut r, _) = rig();
+        configure_rx(&mut sb, &mut r, 4_000, Some(40));
+        sb.now = 1_000;
+        start_rx(&mut sb, &mut r, 24);
+
+        // A clean 100-tick high, then a 20-tick glitch, then a 100-tick high.
+        pad(&mut sb, &mut r, 2_000, true);
+        pad(&mut sb, &mut r, 2_000 + 100 * TICK_CYCLES, false);
+        let glitch = 2_000 + 300 * TICK_CYCLES;
+        pad(&mut sb, &mut r, glitch, true);
+        pad(&mut sb, &mut r, glitch + 20 * TICK_CYCLES, false);
+        pad(&mut sb, &mut r, 2_000 + 600 * TICK_CYCLES, true);
+        pad(&mut sb, &mut r, 2_000 + 700 * TICK_CYCLES, false);
+        sb.run_to(&mut r, 2_000 + 700 * TICK_CYCLES + 4_001 * TICK_CYCLES);
+        assert!(!r.rx_running(RXI));
+
+        // Two pulses in, two runs out plus the idle: the glitch left no trace
+        // and the low run it interrupted is one 500-tick run, not three.
+        assert_eq!(
+            rx_word(&mut sb, &mut r, 96),
+            word(true, 100, false, 500),
+            "the glitch and the low around it are one run"
+        );
+        let closing = rx_word(&mut sb, &mut r, 97);
+        assert_eq!(closing & 0x7fff, 100, "the second clean high");
+        assert_eq!((closing >> 16) & 0x7fff, 4_001, "then the idle");
+        assert_eq!(r.rx_words_written(RXI), 3, "two words and the end marker");
+
+        // The same run with the filter off keeps the glitch, which is what
+        // makes the assertion above about the filter rather than about the
+        // arithmetic.
+        let (mut sb, mut r, _) = rig();
+        configure_rx(&mut sb, &mut r, 4_000, None);
+        sb.now = 1_000;
+        start_rx(&mut sb, &mut r, 24);
+        pad(&mut sb, &mut r, 2_000, true);
+        pad(&mut sb, &mut r, 2_000 + 100 * TICK_CYCLES, false);
+        pad(&mut sb, &mut r, glitch, true);
+        pad(&mut sb, &mut r, glitch + 20 * TICK_CYCLES, false);
+        assert_eq!(
+            rx_word(&mut sb, &mut r, 96),
+            word(true, 100, false, 200),
+            "unfiltered, the low run ends at the glitch"
+        );
+    }
+
+    /// (d) G3-4: `rx_lim` words raise `rx_thr_event`, the writer wraps, and
+    /// both events clear the way the TX side's do.
+    #[test]
+    fn the_threshold_fires_every_rx_lim_words_and_the_writer_wraps() {
+        let (mut sb, mut r, _) = rig();
+        configure_rx(&mut sb, &mut r, 20_000, None);
+        sb.now = 1_000;
+        // esp-hal's `start_receive` arms the threshold at half the window.
+        start_rx(&mut sb, &mut r, 24);
+
+        let start = 2_000;
+        // A word closes when its *second* half does, and a bit's low run only
+        // ends at the next bit's rising edge — so 24 bits on the wire is 23
+        // words in the RAM, and the 24th lands when bit 24 starts.
+        for slot in 0..24u64 {
+            bit(&mut sb, &mut r, slot, 32, start);
+        }
+        assert_eq!(r.rx_words_written(RXI), 23);
+        assert_eq!(sb.read(&mut r, INT_ST) & 0b1111_0000_0000, 0, "not yet");
+        bit(&mut sb, &mut r, 24, 32, start);
+        assert_eq!(
+            sb.read(&mut r, INT_RAW) & 0xfff,
+            1 << (INT_TX_THR_SHIFT + 2),
+            "ch2_rx_thr_event, bit 10"
+        );
+        assert!(sb.irq.level(source::RMT));
+        assert_eq!(r.rx_waddr(RXI), 96 + 24, "half the window");
+        sb.write(&mut r, INT_CLR, 0xffff);
+        assert!(!sb.irq.level(source::RMT));
+
+        // The second half, then the wrap: 48 words in, the pointer is back at
+        // the window's first word and the threshold has fired twice.
+        for slot in 25..48u64 {
+            bit(&mut sb, &mut r, slot, 32, start);
+        }
+        // Bit 48 is a WS2812 one, so the word that overwrites word 0 after
+        // the wrap can be told apart from the zeros around it.
+        bit(&mut sb, &mut r, 48, 64, start);
+        assert_eq!(
+            sb.read(&mut r, INT_RAW) & 0xfff,
+            1 << (INT_TX_THR_SHIFT + 2),
+            "and again at 48"
+        );
+        assert_eq!(r.rx_waddr(RXI), 96, "wrapped to the window's start");
+        assert_eq!(r.rx_words_written(RXI), 48);
+        // The wrap overwrites: word 96 now holds bit 48's code, not bit 0's.
+        bit(&mut sb, &mut r, 49, 32, start);
+        assert_eq!(rx_word(&mut sb, &mut r, 96), ONE, "bit 48 landed on bit 0");
+    }
+
+    /// (e) With `mem_rx_wrap_en` clear the window fills instead: `mem_full`,
+    /// `rx_err` on ch2's bit, and the receiver stops where it is.
+    #[test]
+    fn a_full_window_without_wrap_is_mem_full_and_an_error() {
+        let (mut sb, mut r, _) = rig();
+        configure_rx(&mut sb, &mut r, 20_000, None);
+        // Clear the wrap bit the helper set.
+        let c = sb.read(&mut r, CH_RX_CONF1[RXI]);
+        sb.write(&mut r, CH_RX_CONF1[RXI], c & !RX_CONF1_MEM_RX_WRAP_EN);
+        sb.now = 1_000;
+        start_rx(&mut sb, &mut r, 0);
+
+        for slot in 0..49u64 {
+            bit(&mut sb, &mut r, slot, 32, 2_000);
+        }
+        assert!(!r.rx_running(RXI), "the window filled");
+        assert_eq!(
+            sb.read(&mut r, INT_RAW) & 0xff,
+            1 << (INT_TX_ERR_SHIFT + 2),
+            "ch2_rx_err, bit 6"
+        );
+        assert!(
+            sb.read(&mut r, CH_RX_STATUS[RXI]) & RX_STATUS_MEM_FULL != 0,
+            "mem_full"
+        );
+    }
+
+    /// (f) A receiver with no pad routed to its input signal says so and
+    /// never invents a level — the failure mode a loopback run would hit if
+    /// `func_in_sel_cfg` were still accept-and-remember.
+    #[test]
+    fn a_receiver_with_no_input_route_records_nothing_and_says_so() {
+        let (mut sb, mut r, _) = rig();
+        let buf = lp_emu_esp_common::trace::SharedBuffer::new();
+        sb.trace = lp_emu_esp_common::Trace::to_sink(Box::new(buf.clone()));
+        // Everything except the route.
+        let conf0 = (1 << RX_CONF0_DIV_CNT_SHIFT)
+            | (4_000 << RX_CONF0_IDLE_THRES_SHIFT)
+            | (1 << RX_CONF0_MEM_SIZE_SHIFT);
+        sb.write(&mut r, CH_RX_CONF0[RXI], conf0);
+        sb.write(&mut r, CH_RX_CONF1[RXI], RX_CONF1_MEM_OWNER);
+        sb.now = 1_000;
+        start_rx(&mut sb, &mut r, 24);
+        pad(&mut sb, &mut r, 2_000, true);
+        pad(&mut sb, &mut r, 2_400, false);
+        assert_eq!(r.rx_words_written(RXI), 0);
+        let lines: Vec<String> = buf
+            .lines()
+            .into_iter()
+            .filter(|l| l.contains("no pad routed"))
+            .collect();
+        assert_eq!(lines.len(), 1, "{lines:?}");
+    }
+
+    /// (g) The receiver's state survives a snapshot: the same words, at the
+    /// same cycles, on both sides of a save/load.
+    #[test]
+    fn a_reception_in_flight_rides_the_snapshot() {
+        let (mut sb, mut r, clock) = rig();
+        configure_rx(&mut sb, &mut r, 4_000, None);
+        sb.now = 1_000;
+        start_rx(&mut sb, &mut r, 24);
+        for (slot, high) in [(0u64, 32u64), (1, 64)] {
+            bit(&mut sb, &mut r, slot, high, 2_000);
+        }
+        let blob = r.save_state();
+
+        let mut restored = Rmt::new(clock);
+        restored.attached(7);
+        restored.load_state(&blob);
+        assert!(restored.rx_running(RXI));
+        assert_eq!(restored.rx_waddr(RXI), r.rx_waddr(RXI));
+        assert_eq!(restored.rx_words_written(RXI), r.rx_words_written(RXI));
+        // …and it goes on measuring from where it was: bit 1's word closes on
+        // bit 2's rising edge, on both sides.
+        bit(&mut sb, &mut restored, 2, 64, 2_000);
+        bit(&mut sb, &mut r, 2, 64, 2_000);
+        assert_eq!(restored.ram()[97], r.ram()[97]);
+        assert_eq!(restored.ram()[97], ONE);
+        assert_eq!(restored.ram()[96], ZERO);
     }
 }

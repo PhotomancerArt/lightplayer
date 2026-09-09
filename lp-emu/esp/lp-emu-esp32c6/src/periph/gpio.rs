@@ -797,6 +797,9 @@ mod tests {
     fn the_guard_drop_puts_the_pad_back_on_gpio_out() {
         let mut sb = Sandbox::new();
         let mut g = Gpio::new(crate::loader::STRAP_APP);
+        // The output enable first, the way esp-hal writes it: since M2 P3 a
+        // pad drives the wire only when `enable` says it does.
+        sb.write(&mut g, ENABLE_W1TS, 1 << GPIO18);
         sb.write(&mut g, FUNC18, RMT_SIG_0);
         sb.now = 10;
         sb.write(&mut g, FUNC18, u32::from(OUT_SEL_GPIO));
@@ -822,6 +825,7 @@ mod tests {
     fn inv_sel_and_oen_sel_are_carried_into_the_route() {
         let mut sb = Sandbox::new();
         let mut g = Gpio::new(crate::loader::STRAP_APP);
+        sb.write(&mut g, ENABLE_W1TS, 1 << GPIO18);
         sb.write(&mut g, FUNC18, RMT_SIG_0 | INV_SEL | OEN_SEL);
         let route = sb.pins.route_of(PadId(18)).expect("routed");
         assert_eq!(
@@ -869,6 +873,7 @@ mod tests {
         let mut g = Gpio::new(crate::loader::STRAP_APP);
         // Its `out` bit is tracked, so a later route starts at the right
         // level — but nothing is observed until something routes it.
+        sb.write(&mut g, ENABLE_W1TS, 1 << 5);
         sb.write(&mut g, OUT_W1TS, 1 << 5);
         assert!(sb.pins.route_of(PadId(5)).is_none());
         assert!(sb.pins.take_edges().is_empty());
@@ -1414,10 +1419,14 @@ mod tests {
             PCPU_INT,
             PIN20,
             FUNC20,
+            // The input half of the matrix, since M2 P3.
+            FUNC_IN_SEL_CFG,
+            FUNC_IN_SEL_CFG + 4 * 71,
+            FUNC_IN_SEL_CFG_END - 4,
         ] {
             assert_eq!(g.reg_grade(off), Some(RegGrade::Documented), "{off:#05x}");
         }
-        for off in [0x000, 0x010, 0x040, 0x050, 0x060, 0x154] {
+        for off in [0x000, 0x010, 0x040, 0x050, 0x060, 0x354] {
             assert_eq!(g.reg_grade(off), Some(RegGrade::Modeled), "{off:#05x}");
         }
         let modeled = Gpio::modeled_registers();

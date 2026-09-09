@@ -1461,6 +1461,9 @@ impl Esp32C6Builder {
             .watching(uart0_log.clone())
             .watching(usb_sj_log.clone());
         let gpio_index = bus.peripheral_index("GPIO");
+        // The other block that reads the edge stream: the RMT's receivers
+        // sample the pad their input signal is routed to (M2 P3).
+        let rmt_index = bus.peripheral_index("RMT");
         // The radio TX log's source block; `None` on a machine without one.
         let wifi_mac_index = bus.peripheral_index("WIFI_MAC");
         // Arm the recording only when something is listening: it ends a
@@ -1534,6 +1537,7 @@ impl Esp32C6Builder {
             script: usb_script.into(),
             pin_script,
             gpio_index,
+            rmt_index,
             wifi_mac_index,
             tx_log: tx_log_sink,
             tx_log_lines: 0,
@@ -1747,6 +1751,9 @@ pub struct Esp32C6Machine {
     pin_script: PinScript,
     /// `GPIO`'s peripheral index: the block the drained edges are handed to.
     gpio_index: Option<usize>,
+    /// `RMT`'s peripheral index: the other block the drained edges are handed
+    /// to, for its RX channels (M2 P3).
+    rmt_index: Option<usize>,
     /// `WIFI_MAC`'s peripheral index: where the radio TX log's handoffs come
     /// from. `None` on a machine with no radio window.
     wifi_mac_index: Option<usize>,
@@ -2233,6 +2240,15 @@ impl Esp32C6Machine {
         if let Some(index) = self.gpio_index {
             self.bus
                 .with_peripheral::<Gpio, _>(index, |g, cx| g.observe_edges(&edges, cx));
+        }
+        // …and so does the RMT: a receiver samples the pad its input signal
+        // is routed to, out of the same stream, so a word in the RX RAM and a
+        // line in the pin log can never disagree about the wire.
+        if let Some(index) = self.rmt_index {
+            self.bus
+                .with_peripheral::<crate::periph::rmt::Rmt, _>(index, |r, cx| {
+                    r.observe_edges(&edges, cx)
+                });
         }
         for edge in edges {
             let pad = edge.pad.0;
