@@ -43,6 +43,9 @@ abl-all = ["abl-issuing", "abl-charge", "abl-count", "abl-sideband", "abl-memcos
 # Block-shape statistics: terminator reason, realised length, and whether a
 # block could have been extended. Counters, not timings.
 blockstats = []
+# THROWAWAY (M5 P1b): experimental slot payloads (see mach/block.rs).
+slot-packed = []
+slot-dense = []
 
 [dev-dependencies]
 # Self-dependency: lp-riscv-emu's own tests need the `std` feature. This used to

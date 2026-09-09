@@ -454,6 +454,9 @@ fn run() -> Result<ExitCode, String> {
     // The run is over: a frame still open on a pad is reported as
     // incomplete rather than silently dropped.
     machine.flush_frames();
+    // THROWAWAY (M5 P1b) — never merge.
+    #[cfg(feature = "blockstats")]
+    eprint!("{}", lp_riscv_emu::mach::blockstats::report());
     report(&mut machine, &outcome);
     Ok(ExitCode::from(outcome.exit_code() as u8))
 }

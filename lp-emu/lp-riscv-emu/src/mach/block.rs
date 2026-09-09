@@ -54,8 +54,7 @@ use crate::emu::executor::{
 
 /// The executor a slot calls. Every category executor in the crate has this
 /// shape once `LoggingDisabled` and the bus type are fixed.
-pub(super) type Handler<B> =
-    fn(u32, u32, &mut [i32; 32], &mut B) -> Result<ExecutionResult, EmulatorError>;
+pub(super) type Handler<B> = fn(u32, u32, &mut [i32; 32], &mut B) -> HRet;
 
 /// One pre-decoded RV32 instruction.
 pub(super) struct RvSlot<B: Bus> {
@@ -68,6 +67,9 @@ pub(super) struct RvSlot<B: Bus> {
     /// An upper bound on the class this slot can charge; see
     /// [`lp_emu_core::block::Slot::cost_bound`].
     pub bound: InstClass,
+    /// THROWAWAY (M5 P1b): the dense category tag `slot-dense` dispatches on.
+    #[cfg(feature = "slot-dense")]
+    pub op: Op,
 }
 
 // Written out rather than derived: a derive would demand `B: Clone` / `B:
@@ -145,6 +147,8 @@ pub(super) fn classify<B: Bus>(word: u32) -> Class<B> {
         handler,
         width: 4,
         bound,
+        #[cfg(feature = "slot-dense")]
+        op: op_of(word).expect("classify's own arms agree with op_of"),
     };
     match opcode {
         OP_REG => {
@@ -157,44 +161,44 @@ pub(super) fn classify<B: Bus>(word: u32) -> Class<B> {
                 InstClass::Alu
             };
             Class::Body(slot(
-                arithmetic::decode_execute_rtype::<LoggingDisabled, B>,
+                h_rtype::<B>,
                 bound,
             ))
         }
         OP_IMM => Class::Body(slot(
-            immediate::decode_execute_itype::<LoggingDisabled, B>,
+            h_itype::<B>,
             InstClass::Alu,
         )),
         OP_LOAD => Class::Body(slot(
-            load_store::decode_execute_load::<LoggingDisabled, B>,
+            h_load::<B>,
             InstClass::Load,
         )),
         OP_STORE => Class::Body(slot(
-            load_store::decode_execute_store::<LoggingDisabled, B>,
+            h_store::<B>,
             InstClass::Store,
         )),
         OP_LUI => Class::Body(slot(
-            jump::decode_execute_lui::<LoggingDisabled, B>,
+            h_lui::<B>,
             InstClass::Lui,
         )),
         OP_AUIPC => Class::Body(slot(
-            jump::decode_execute_auipc::<LoggingDisabled, B>,
+            h_auipc::<B>,
             InstClass::Auipc,
         )),
 
         // The control transfers: in the block, and last.
         OP_BRANCH => Class::Terminator(slot(
-            branch::decode_execute_branch::<LoggingDisabled, B>,
+            h_branch::<B>,
             // `BranchTaken` (2) is the larger of the two the executor can
             // return; the charge still uses whichever it actually returns.
             InstClass::BranchTaken,
         )),
         OP_JAL => Class::Terminator(slot(
-            jump::decode_execute_jal::<LoggingDisabled, B>,
+            h_jal::<B>,
             InstClass::JalCall,
         )),
         OP_JALR => Class::Terminator(slot(
-            jump::decode_execute_jalr::<LoggingDisabled, B>,
+            h_jalr::<B>,
             InstClass::JalrCall,
         )),
 
@@ -220,9 +224,11 @@ fn classify_compressed<B: Bus>(word: u32) -> Class<B> {
     let funct3 = (word >> 13) & 0b111;
     let slot = |bound: InstClass| RvSlot {
         word,
-        handler: compressed::decode_execute_compressed::<LoggingDisabled, B> as Handler<B>,
+        handler: h_compressed::<B> as Handler<B>,
         width: 2,
         bound,
+        #[cfg(feature = "slot-dense")]
+        op: Op::Compressed,
     };
     match (quadrant, funct3) {
         // Q0: c.addi4spn (000), c.lw (010), c.sw (110). 001/011/101/111 are
@@ -384,3 +390,213 @@ mod tests {
         assert_eq!(s.width, 4);
     }
 }
+
+// ============================================================================
+// THROWAWAY (M5 P1b) — never merge.
+//
+// Two experimental slot payloads, each its own cargo feature, so the four
+// combinations can be timed against one another natively and in wasm from a
+// single tree.  Neither is a correct emulator on the error path: the packed
+// return has no room for an `EmulatorError`, so a diagnostic build panics
+// where the real one would deliver a trap.  They exist to be TIMED.
+//
+//   --features slot-packed   the handler returns a packed `u64` instead of a
+//                            200-byte `Result<ExecutionResult, EmulatorError>`.
+//                            §7 of PR #637 measured this at 1.008x NATIVELY;
+//                            P1b asks what it is worth in wasm, where the
+//                            struct is written to and read back from linear
+//                            memory across a real call boundary.
+//   --features slot-dense    the slot carries a dense category tag and
+//                            `run_block` dispatches on it with a `match`
+//                            (a wasm `br_table`) instead of an indirect call
+//                            through the function table (`call_indirect`).
+// ============================================================================
+
+/// The packed form of a successful [`ExecutionResult`], for `slot-packed`.
+///
+/// ```text
+///  bit 63      error sentinel
+///  bit 32      `new_pc` is `Some`
+///  bits 0..32  `new_pc`'s value
+///  bits 33..41 `class` as its discriminant
+///  bits 41..49 `inst_size`
+/// ```
+#[cfg(feature = "slot-packed")]
+pub(super) const PACKED_ERR: u64 = 1 << 63;
+
+#[cfg(feature = "slot-packed")]
+#[inline(always)]
+pub(super) fn pack(r: Result<ExecutionResult, EmulatorError>) -> u64 {
+    match r {
+        Ok(r) => {
+            let pc = match r.new_pc {
+                Some(p) => (1u64 << 32) | u64::from(p),
+                None => 0,
+            };
+            pc | (u64::from(class_code(r.class)) << 33) | (u64::from(r.inst_size) << 41)
+        }
+        Err(_) => PACKED_ERR,
+    }
+}
+
+#[cfg(feature = "slot-packed")]
+#[inline(always)]
+pub(super) fn class_code(c: InstClass) -> u8 {
+    match c {
+        InstClass::Alu => 0,
+        InstClass::Mul => 1,
+        InstClass::DivRem => 2,
+        InstClass::Load => 3,
+        InstClass::Store => 4,
+        InstClass::BranchTaken => 5,
+        InstClass::BranchNotTaken => 6,
+        InstClass::JalCall => 7,
+        InstClass::JalTail => 8,
+        InstClass::JalrCall => 9,
+        InstClass::JalrReturn => 10,
+        InstClass::JalrIndirect => 11,
+        InstClass::Lui => 12,
+        InstClass::Auipc => 13,
+        InstClass::System => 14,
+        InstClass::Fence => 15,
+        InstClass::Atomic => 16,
+        InstClass::FloatArith => 17,
+        InstClass::FloatMulAdd => 18,
+        InstClass::FloatConvert => 19,
+        InstClass::FloatCompare => 20,
+        InstClass::FloatEstimate => 21,
+    }
+}
+
+#[cfg(feature = "slot-packed")]
+#[inline(always)]
+pub(super) fn class_of_code(c: u8) -> InstClass {
+    match c {
+        0 => InstClass::Alu,
+        1 => InstClass::Mul,
+        2 => InstClass::DivRem,
+        3 => InstClass::Load,
+        4 => InstClass::Store,
+        5 => InstClass::BranchTaken,
+        6 => InstClass::BranchNotTaken,
+        7 => InstClass::JalCall,
+        8 => InstClass::JalTail,
+        9 => InstClass::JalrCall,
+        10 => InstClass::JalrReturn,
+        11 => InstClass::JalrIndirect,
+        12 => InstClass::Lui,
+        13 => InstClass::Auipc,
+        14 => InstClass::System,
+        15 => InstClass::Fence,
+        16 => InstClass::Atomic,
+        17 => InstClass::FloatArith,
+        18 => InstClass::FloatMulAdd,
+        19 => InstClass::FloatConvert,
+        20 => InstClass::FloatCompare,
+        21 => InstClass::FloatEstimate,
+        _ => unreachable!("P1b: class code out of range"),
+    }
+}
+
+/// The dense category tag, for `slot-dense`.
+#[cfg(feature = "slot-dense")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Op {
+    RType,
+    IType,
+    Load,
+    Store,
+    Lui,
+    Auipc,
+    Branch,
+    Jal,
+    Jalr,
+    Compressed,
+}
+
+/// `slot-dense`: the whole dispatch, as one `match` over the slot's tag.
+#[cfg(feature = "slot-dense")]
+#[inline(always)]
+pub(super) fn dispatch_dense<B: Bus>(
+    op: Op,
+    word: u32,
+    pc: u32,
+    regs: &mut [i32; 32],
+    bus: &mut B,
+) -> Result<ExecutionResult, EmulatorError> {
+    match op {
+        Op::RType => arithmetic::decode_execute_rtype::<LoggingDisabled, B>(word, pc, regs, bus),
+        Op::IType => immediate::decode_execute_itype::<LoggingDisabled, B>(word, pc, regs, bus),
+        Op::Load => load_store::decode_execute_load::<LoggingDisabled, B>(word, pc, regs, bus),
+        Op::Store => load_store::decode_execute_store::<LoggingDisabled, B>(word, pc, regs, bus),
+        Op::Lui => jump::decode_execute_lui::<LoggingDisabled, B>(word, pc, regs, bus),
+        Op::Auipc => jump::decode_execute_auipc::<LoggingDisabled, B>(word, pc, regs, bus),
+        Op::Branch => branch::decode_execute_branch::<LoggingDisabled, B>(word, pc, regs, bus),
+        Op::Jal => jump::decode_execute_jal::<LoggingDisabled, B>(word, pc, regs, bus),
+        Op::Jalr => jump::decode_execute_jalr::<LoggingDisabled, B>(word, pc, regs, bus),
+        Op::Compressed => {
+            compressed::decode_execute_compressed::<LoggingDisabled, B>(word, pc, regs, bus)
+        }
+    }
+}
+
+/// `slot-dense`: which category a word belongs to, or `None` if it is not
+/// cacheable. Mirrors [`classify`]'s own arms exactly.
+#[cfg(feature = "slot-dense")]
+pub(super) fn op_of(word: u32) -> Option<Op> {
+    if (word & 0b11) != 0b11 {
+        return match classify::<lp_emu_core::Memory>(word) {
+            Class::Refused => None,
+            _ => Some(Op::Compressed),
+        };
+    }
+    Some(match (word & 0x7f) as u8 {
+        OP_REG => Op::RType,
+        OP_IMM => Op::IType,
+        OP_LOAD => Op::Load,
+        OP_STORE => Op::Store,
+        OP_LUI => Op::Lui,
+        OP_AUIPC => Op::Auipc,
+        OP_BRANCH => Op::Branch,
+        OP_JAL => Op::Jal,
+        OP_JALR => Op::Jalr,
+        _ => return None,
+    })
+}
+
+/// What a slot's handler returns: the merged shape, or `slot-packed`'s `u64`.
+#[cfg(not(feature = "slot-packed"))]
+pub(super) type HRet = Result<ExecutionResult, EmulatorError>;
+#[cfg(feature = "slot-packed")]
+pub(super) type HRet = u64;
+
+#[cfg(not(feature = "slot-packed"))]
+#[inline(always)]
+fn finish(r: Result<ExecutionResult, EmulatorError>) -> HRet {
+    r
+}
+#[cfg(feature = "slot-packed")]
+#[inline(always)]
+fn finish(r: Result<ExecutionResult, EmulatorError>) -> HRet {
+    pack(r)
+}
+
+macro_rules! hnd {
+    ($name:ident, $m:ident, $f:ident) => {
+        #[inline(always)]
+        pub(super) fn $name<B: Bus>(w: u32, pc: u32, regs: &mut [i32; 32], bus: &mut B) -> HRet {
+            finish($m::$f::<LoggingDisabled, B>(w, pc, regs, bus))
+        }
+    };
+}
+
+hnd!(h_rtype, arithmetic, decode_execute_rtype);
+hnd!(h_itype, immediate, decode_execute_itype);
+hnd!(h_load, load_store, decode_execute_load);
+hnd!(h_store, load_store, decode_execute_store);
+hnd!(h_lui, jump, decode_execute_lui);
+hnd!(h_auipc, jump, decode_execute_auipc);
+hnd!(h_branch, branch, decode_execute_branch);
+hnd!(h_jal, jump, decode_execute_jal);
+hnd!(h_jalr, jump, decode_execute_jalr);
+hnd!(h_compressed, compressed, decode_execute_compressed);

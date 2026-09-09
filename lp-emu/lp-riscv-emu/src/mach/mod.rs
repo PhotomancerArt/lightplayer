@@ -72,6 +72,10 @@ use lp_emu_core::{Bus, CycleModel, InstClass, MemoryAccessKind, MemoryError};
 
 use crate::emu::{EmulatorError, FpRegs, LoggingDisabled, decode_execute};
 use block::{Class, MAX_BLOCK_SLOTS, RvSlot};
+
+/// THROWAWAY (M5 P1b) — never merge.
+#[cfg(feature = "blockstats")]
+pub mod blockstats;
 use csr::CsrFile;
 use trap::Exception;
 use trigger::TriggerUnit;
@@ -803,8 +807,44 @@ impl<B: Bus> MachineHart<B> {
             // `(pc, address)`.
             bus.set_issuing(pc, self.cycle_count);
 
-            let result = match (slot.handler)(slot.word, pc, &mut self.regs, bus) {
-                Ok(result) => result,
+            // THROWAWAY (M5 P1b): one seam, four builds. `slot-dense`
+            // replaces the indirect call with a `match` on the slot's
+            // category tag (a wasm `br_table` instead of `call_indirect`);
+            // `slot-packed` replaces the 200-byte
+            // `Result<ExecutionResult, EmulatorError>` with a packed `u64`.
+            #[cfg(feature = "slot-dense")]
+            let raw = block::dispatch_dense(slot.op, slot.word, pc, &mut self.regs, bus);
+            #[cfg(all(feature = "slot-dense", feature = "slot-packed"))]
+            let raw = block::pack(raw);
+            #[cfg(not(feature = "slot-dense"))]
+            let raw = (slot.handler)(slot.word, pc, &mut self.regs, bus);
+
+            #[cfg(feature = "slot-packed")]
+            let (r_class, r_new_pc, r_size) = {
+                assert!(
+                    raw & block::PACKED_ERR == 0,
+                    "P1b's packed diagnostic build cannot deliver an executor \
+                     error from inside a block; this image needs the real one"
+                );
+                (
+                    block::class_of_code(((raw >> 33) & 0xff) as u8),
+                    if raw & (1 << 32) != 0 {
+                        Some(raw as u32)
+                    } else {
+                        None
+                    },
+                    ((raw >> 41) & 0xff) as u8,
+                )
+            };
+            #[cfg(not(feature = "slot-packed"))]
+            let (r_class, r_new_pc, r_size) = match raw {
+                Ok(result) => {
+                    debug_assert!(
+                        !result.should_halt && !result.syscall,
+                        "the hart handles ecall/ebreak itself; a block never holds one"
+                    );
+                    (result.class, result.new_pc, result.inst_size)
+                }
                 Err(e) => {
                     self.charge(InstClass::System);
                     let out = match self.deliver_executor_error(e, pc, slot.word) {
@@ -816,21 +856,14 @@ impl<B: Bus> MachineHart<B> {
                 }
             };
 
-            debug_assert!(
-                !result.should_halt && !result.syscall,
-                "the hart handles ecall/ebreak itself; a block never holds one"
-            );
-
             self.instruction_count += 1;
-            self.charge(result.class);
-            self.pc = result
-                .new_pc
-                .unwrap_or(pc.wrapping_add(u32::from(result.inst_size)));
+            self.charge(r_class);
+            self.pc = r_new_pc.unwrap_or(pc.wrapping_add(u32::from(r_size)));
             ran += 1;
 
             // (c) an MMIO store may have changed interrupt state, and it may
             // have changed something only the machine can act on.
-            if matches!(result.class, InstClass::Store | InstClass::Atomic) {
+            if matches!(r_class, InstClass::Store | InstClass::Atomic) {
                 if bus.take_sideband() {
                     self.resample_external(bus);
                 }
@@ -850,9 +883,18 @@ impl<B: Bus> MachineHart<B> {
             // at a taken terminator.
             let straight_on = pc.wrapping_add(u32::from(slot.width));
             if self.pc != straight_on {
+                // THROWAWAY (M5 P1b).
+                #[cfg(feature = "blockstats")]
+                blockstats::note(slot.word, false, ran as usize == slots.len(), ran);
                 return (None, ran);
             }
             pc = straight_on;
+        }
+        // THROWAWAY (M5 P1b): ran off the end still on the straight line —
+        // a not-taken conditional branch, or a block the decoder truncated.
+        #[cfg(feature = "blockstats")]
+        if let Some(last) = slots.last() {
+            blockstats::note(last.word, true, true, ran);
         }
         (None, ran)
     }
