@@ -3223,18 +3223,37 @@ mod tests {
     }
 
     #[test]
-    fn the_time_grades_are_the_two_cycle_models_and_their_configuration_names() {
+    fn the_time_grades_are_the_three_cycle_models_and_their_configuration_names() {
         assert_eq!(TimeGrade::T1.cycle_model(), CycleModel::InstructionCount);
         assert_eq!(TimeGrade::T2.cycle_model(), CycleModel::Esp32C6);
+        assert_eq!(TimeGrade::T3.cycle_model(), CycleModel::Esp32C6Kernels);
         assert_eq!(TimeGrade::T1.configuration(), "lp-emu:esp32c6:t1");
         assert_eq!(TimeGrade::T2.configuration(), "lp-emu:esp32c6:t2");
-        assert!(TimeGrade::parse("t3").is_err());
+        assert_eq!(TimeGrade::T3.configuration(), "lp-emu:esp32c6:t3");
+        assert_eq!(TimeGrade::parse("t3"), Ok(TimeGrade::T3));
+        assert!(TimeGrade::parse("t4").is_err());
 
         let m = Esp32C6Builder::new()
             .time_grade(TimeGrade::T2)
             .build()
             .unwrap();
         assert_eq!(m.harts[0].cycle_model(), CycleModel::Esp32C6);
+    }
+
+    /// The memory-cost hook is installed by the grade and by nothing else.
+    /// `t1` and `t2` are `None` **by construction**, which is the whole of
+    /// why their cycle counts cannot move (M1 P3 G3-3).
+    #[test]
+    fn only_t3_installs_a_memory_cost_model() {
+        for (grade, expected) in [
+            (TimeGrade::T1, false),
+            (TimeGrade::T2, false),
+            (TimeGrade::T3, true),
+        ] {
+            assert!(grade.memory_cost().is_some() == expected, "{grade:?}");
+            let m = Esp32C6Builder::new().time_grade(grade).build().unwrap();
+            assert_eq!(m.bus.has_memory_cost(), expected, "{grade:?} on the bus");
+        }
     }
 
     #[test]

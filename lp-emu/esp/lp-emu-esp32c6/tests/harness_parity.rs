@@ -302,17 +302,35 @@ fn two_t3_harness_runs_are_byte_identical() {
     assert_eq!(a.text, b.text, "two t3 runs of the harness diverged");
 }
 
-/// The three grades run the **same instructions**; only the clock differs.
+/// The grades do **not** run the same instructions, and that is a finding
+/// rather than a defect.
 ///
-/// This is the assertion that a memory-cost model could most easily break by
-/// accident — a hook that charged a cycle by performing an access, or that
-/// answered differently on the second pass, would show up here as an
-/// instruction count that moved. It also states the ordering the grades are
-/// supposed to have: `t1` < `t2` < `t3` in cycles, over one instruction
-/// stream.
+/// A guest that polls a peripheral until a scheduled event lands executes
+/// however many iterations the clock leaves room for, so a grade that charges
+/// more cycles per instruction retires *fewer* instructions for the same
+/// guest microsecond. On the compile harness over its USB-Serial-JTAG link
+/// that is 21,580,739 instructions at `t1`, 18,000,200 at `t2` and 14,868,711
+/// at `t3` — the ROM and esp-hal's console drain spins, shortening.
+///
+/// What must hold instead, and does:
+///
+/// - **the slices do not get cheaper in total.** On the *USB-Serial-JTAG*
+///   recordings the calibration record's §3 is stronger — not one of the 92
+///   slices costs fewer cycles at `t3` than at `t1`. This test runs the
+///   **spike UART0** reference image, where every logging slice is pinned by
+///   the 115,200-baud drain rather than by the clock (F3, `notes.md`), so
+///   individual slices there move a fraction of a percent either way and only
+///   the sum is a statement. That difference between the two links is the
+///   point F3 makes, restated by a cycle model.
+/// - **memory is untouched** (`t3_memory_equals_t1`).
+/// - the totals order `t1` < `t2` < `t3`.
+///
+/// Silicon has the same property — a real board's spin is bounded by a real
+/// clock — which is why `slice_cycles`, and not an instruction count, is what
+/// the two machines are compared on.
 #[test]
 #[ignore = "needs the harness reference image; run through `just test-emu-c6`"]
-fn the_grades_share_one_instruction_stream_and_differ_only_in_cycles() {
+fn a_slower_clock_retires_fewer_instructions_and_no_slice_gets_cheaper() {
     let (Some(t1), Some(t2), Some(t3)) = (
         run_harness_at(TimeGrade::T1),
         run_harness_at(TimeGrade::T2),
@@ -320,24 +338,42 @@ fn the_grades_share_one_instruction_stream_and_differ_only_in_cycles() {
     ) else {
         return;
     };
-    assert_eq!(t1.m.instructions(), t2.m.instructions());
-    assert_eq!(
-        t1.m.instructions(),
-        t3.m.instructions(),
-        "t3 executed a different number of instructions than t1"
-    );
-    assert!(
-        t1.m.cycles() < t2.m.cycles() && t2.m.cycles() < t3.m.cycles(),
-        "t1 {} t2 {} t3 {}",
-        t1.m.cycles(),
-        t2.m.cycles(),
-        t3.m.cycles()
-    );
     println!(
-        "cycles: t1={} t2={} t3={} (instructions {})",
+        "cycles: t1={} t2={} t3={}; instructions: t1={} t2={} t3={}",
         t1.m.cycles(),
         t2.m.cycles(),
         t3.m.cycles(),
-        t1.m.instructions()
+        t1.m.instructions(),
+        t2.m.instructions(),
+        t3.m.instructions()
     );
+    assert!(
+        t1.m.cycles() < t2.m.cycles() && t2.m.cycles() < t3.m.cycles(),
+        "the grades did not order"
+    );
+    assert!(
+        t3.m.instructions() <= t1.m.instructions(),
+        "a more expensive clock retired MORE instructions"
+    );
+
+    // No slice gets cheaper. `slice_cycles=<n>` on the harness's own lines.
+    let slices = |text: &str| -> Vec<u64> {
+        text.lines()
+            .filter_map(|l| l.split("slice_cycles=").nth(1))
+            .filter_map(|rest| {
+                rest.split(|c: char| !c.is_ascii_digit())
+                    .next()
+                    .and_then(|d| d.parse::<u64>().ok())
+            })
+            .collect()
+    };
+    let (a, b) = (slices(&t1.text), slices(&t3.text));
+    assert_eq!(a.len(), b.len(), "different tick counts");
+    assert!(!a.is_empty(), "no slice_cycles lines");
+    let (sum1, sum3): (u64, u64) = (a.iter().sum(), b.iter().sum());
+    assert!(
+        sum3 >= sum1,
+        "the slices cost less in total at t3: {sum3} against t1's {sum1}"
+    );
+    println!("slice_cycles summed: t1={sum1} t3={sum3} over {} ticks", a.len());
 }
