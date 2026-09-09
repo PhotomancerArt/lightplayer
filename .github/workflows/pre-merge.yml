@@ -333,11 +333,23 @@ jobs:
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
 
-      # rust-cache keys on the job id, so this job's cache (check-mode
-      # artifacts) stays separate from the validate jobs'. save-if main-only:
-      # GitHub scopes cache RESTORE so a PR can only see its own ref's caches
-      # plus main's, and evicts LRU past the 10GB repo cap; saving only on
-      # main keeps one shared warm baseline every PR can restore.
+      # One rust-cache entry per toolchain family (`shared-key`), not per
+      # job. With cache-targets false the entry IS the cargo registry, and
+      # keying on the job id (the default) had produced twelve ~500 MB copies
+      # of the same registry — 5.8 GB of the repo's 10 GB Actions-cache
+      # budget, measured 2026-09-08 at 11.7 GB used — which is what kept
+      # evicting the stories job's 1 GB entry (missed on 2 of 3 main runs
+      # that day, 620 s of `cargo install` each time) and everyone's sccache
+      # objects. The x64 nightly jobs share `x64-nightly`, the Xtensa
+      # firmware pair `xtensa-fw`, validate-xtensa `xtensa-host`, the ARM
+      # job `arm64-nightly`. rust-cache still adds an env hash (installed
+      # toolchains + CARGO_*/RUST* env), so a family's members keep those
+      # identical or the key silently splits. On main every member attempts
+      # the save; the first wins and the rest log "already exists". save-if
+      # main-only: GitHub scopes cache RESTORE so a PR can only see its own
+      # ref's caches plus main's, and evicts LRU past the 10GB repo cap;
+      # saving only on main keeps one shared warm baseline every PR can
+      # restore.
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
         with:
@@ -347,8 +359,12 @@ jobs:
           # warm run), and the 2-3GB-per-job target payloads pushed the repo
           # past its 10GB Actions-cache budget, which LRU-evicts into
           # thrash. Build scripts re-run each time — small next to the
-          # eviction cost. Registry + ~/.cargo/bin stay cached.
+          # eviction cost. The registry stays cached; ~/.cargo/bin does not
+          # (cache-bin false): every tool comes prebuilt via cargo-binstall
+          # in seconds, so a shared entry never depends on which job saved it.
           cache-targets: false
+          cache-bin: false
+          shared-key: x64-nightly
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install just
@@ -390,6 +406,12 @@ jobs:
     if: needs.detect-changes.outputs.firmware == 'true'
     env:
       CARGO_INCREMENTAL: "0"
+      # sccache (2026-09-08): the two Xtensa firmware jobs had been the only
+      # compiling jobs without it, at 5-8.5 min each (the image build alone
+      # 89-172 s). The same toolchain + build-std under sccache is what
+      # validate-xtensa and deploy-cloud already run.
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
     steps:
       - name: Install system deps (libudev for espflash)
         run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
@@ -419,20 +441,31 @@ jobs:
           buildtargets: esp32s3
           default: true
 
+      - name: Run sccache
+        uses: mozilla/sccache-action@v0.0.10
+
+      # Shared `xtensa-fw` entry with firmware-esp32v3; see the lint job's
+      # cache step for the shared-key rationale.
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: lp2025 -> target
           cache-targets: false
+          cache-bin: false
+          shared-key: xtensa-fw
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install just
         uses: extractions/setup-just@v3
 
-      # Pinned to match the firmware-size job. ~/.cargo/bin is restored by
-      # rust-cache above, so this is a no-op on a warm cache.
-      - name: Install espflash
-        run: cargo install espflash --version 3.3.0 --locked
+      # Prebuilt, pinned to match the firmware-size job. A source build of
+      # espflash cost 160 s whenever the bin cache had been evicted
+      # (2026-09-08); binstall is seconds every time.
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@v1.21.1
+
+      - name: Install espflash (prebuilt)
+        run: cargo binstall --no-confirm --locked espflash@3.3.0
 
       # Builds the crate and checks the image against its 3 MB app partition.
       - name: Check esp32s3 image size
@@ -449,6 +482,14 @@ jobs:
       # crate has no clippy coverage anywhere.
       - name: Clippy esp32s3 firmware
         run: cd lp2025 && just clippy-fw-esp32s3
+
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: |
+          if command -v sccache >/dev/null; then
+            { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   # fw-esp32v3 (classic ESP32, "v3"/WROOM-32E) — the second crate on the
   # Xtensa fork, cloned from firmware-xtensa above. Same anti-rot rationale:
@@ -470,6 +511,12 @@ jobs:
     if: needs.detect-changes.outputs.firmware == 'true'
     env:
       CARGO_INCREMENTAL: "0"
+      # sccache (2026-09-08): the two Xtensa firmware jobs had been the only
+      # compiling jobs without it, at 5-8.5 min each (the image build alone
+      # 89-172 s). The same toolchain + build-std under sccache is what
+      # validate-xtensa and deploy-cloud already run.
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
     steps:
       - name: Install system deps (libudev for espflash)
         run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
@@ -495,24 +542,32 @@ jobs:
           buildtargets: esp32
           default: true
 
+      - name: Run sccache
+        uses: mozilla/sccache-action@v0.0.10
+
       # `lp2025 -> target`, mirroring firmware-xtensa: this crate is a
       # repo-root workspace member (M3-P1 folded it in) and writes into the
-      # shared root target/, so the cache key must be the repo root.
+      # shared root target/, so the cache key must be the repo root. Shared
+      # `xtensa-fw` entry with firmware-xtensa; see the lint job's cache step.
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: lp2025 -> target
           cache-targets: false
+          cache-bin: false
+          shared-key: xtensa-fw
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install just
         uses: extractions/setup-just@v3
 
-      # Pinned to match the firmware-size and firmware-xtensa jobs.
-      # ~/.cargo/bin is restored by rust-cache above, so this is a no-op on a
-      # warm cache.
-      - name: Install espflash
-        run: cargo install espflash --version 3.3.0 --locked
+      # Prebuilt, pinned to match the firmware-size and firmware-xtensa jobs
+      # (see firmware-xtensa for the cost of the source build it replaces).
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@v1.21.1
+
+      - name: Install espflash (prebuilt)
+        run: cargo binstall --no-confirm --locked espflash@3.3.0
 
       # Builds the crate and checks the image against its 3 MB app partition.
       - name: Check esp32v3 image size
@@ -528,6 +583,14 @@ jobs:
       # a different toolchain.
       - name: Clippy esp32v3 firmware
         run: cd lp2025 && just clippy-fw-esp32v3
+
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: |
+          if command -v sccache >/dev/null; then
+            { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   # The Xtensa HOST path: `lpvm-native`'s `rt_emu` compiling shaders for Xtensa
   # and executing them on `lp-xt-emu`, linked against a cross-compiled builtins
@@ -609,11 +672,16 @@ jobs:
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
 
+      # `xtensa-host` entry of its own: this job installs nightly AND the esp
+      # fork, so its env hash never matches the firmware pair's anyway; see
+      # the lint job's cache step for the shared-key rationale.
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: lp2025 -> target
           cache-targets: false
+          cache-bin: false
+          shared-key: xtensa-host
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install just
@@ -755,6 +823,11 @@ jobs:
     if: needs.detect-changes.outputs.firmware == 'true'
     env:
       CARGO_INCREMENTAL: "0"
+      # The firmware profile ignores these two; they are here so this job's
+      # rust-cache env hash matches the rest of the `x64-nightly` family
+      # (see the lint job's cache step).
+      CARGO_PROFILE_DEV_DEBUG: "false"
+      CARGO_PROFILE_TEST_DEBUG: "false"
       SCCACHE_GHA_ENABLED: "true"
       RUSTC_WRAPPER: sccache
     steps:
@@ -781,21 +854,27 @@ jobs:
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
 
+      # Shared `x64-nightly` entry; see the lint job's cache step.
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: lp2025 -> target
           cache-targets: false
+          cache-bin: false
+          shared-key: x64-nightly
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install just
         uses: extractions/setup-just@v3
 
-      # Pinned to match main-push.yml's deploy job, which packages the image this
-      # job measures. ~/.cargo/bin is restored by rust-cache above, so this is
-      # a no-op on a warm cache.
-      - name: Install espflash
-        run: cargo install espflash --version 3.3.0 --locked
+      # Prebuilt, pinned to match the deploy workflows, which package the
+      # image this job measures (see firmware-xtensa for the cost of the
+      # source build it replaces).
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@v1.21.1
+
+      - name: Install espflash (prebuilt)
+        run: cargo binstall --no-confirm --locked espflash@3.3.0
 
       - name: Check esp32c6 image size
         run: cd lp2025 && just fw-esp32c6-size-check
@@ -909,8 +988,8 @@ jobs:
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
 
-      # rust-cache keys on the job id; save-if main-only (see the lint job's
-      # cache step for the rationale). The reference-image builds happen
+      # Shared `x64-nightly` rust-cache entry; save-if main-only (see the lint
+      # job's cache step for both). The reference-image builds happen
       # inside a detached worktree under lp2025/target/emu-ref/, which is
       # still under this workspace root, so sccache (content-addressed) still
       # covers them even though target/ itself is not cached.
@@ -928,6 +1007,8 @@ jobs:
         with:
           workspaces: lp2025 -> target
           cache-targets: false
+          cache-bin: false
+          shared-key: x64-nightly
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
 
@@ -1039,8 +1120,8 @@ jobs:
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
 
-      # rust-cache keys on the job id; save-if main-only (see the lint job's
-      # cache step for the rationale).
+      # Shared `x64-nightly` entry; save-if main-only (see the lint job's
+      # cache step for both).
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
         with:
@@ -1050,8 +1131,12 @@ jobs:
           # warm run), and the 2-3GB-per-job target payloads pushed the repo
           # past its 10GB Actions-cache budget, which LRU-evicts into
           # thrash. Build scripts re-run each time — small next to the
-          # eviction cost. Registry + ~/.cargo/bin stay cached.
+          # eviction cost. The registry stays cached; ~/.cargo/bin does not
+          # (cache-bin false): every tool comes prebuilt via cargo-binstall
+          # in seconds, so a shared entry never depends on which job saved it.
           cache-targets: false
+          cache-bin: false
+          shared-key: x64-nightly
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install just
@@ -1132,9 +1217,9 @@ jobs:
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
 
-      # rust-cache keys on the job id, so this job's cache (wgpu tree) stays
-      # separate from validate-x64's and neither evicts the other. save-if
-      # main-only: see the lint job's cache step for the rationale.
+      # `arm64-nightly` entry of its own (a different host arch is a
+      # different registry payload). save-if main-only: see the lint job's
+      # cache step for the rationale.
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
         with:
@@ -1144,8 +1229,12 @@ jobs:
           # warm run), and the 2-3GB-per-job target payloads pushed the repo
           # past its 10GB Actions-cache budget, which LRU-evicts into
           # thrash. Build scripts re-run each time — small next to the
-          # eviction cost. Registry + ~/.cargo/bin stay cached.
+          # eviction cost. The registry stays cached; ~/.cargo/bin does not
+          # (cache-bin false): every tool comes prebuilt via cargo-binstall
+          # in seconds, so a shared entry never depends on which job saved it.
           cache-targets: false
+          cache-bin: false
+          shared-key: arm64-nightly
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install just
@@ -1207,10 +1296,8 @@ jobs:
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
 
-      # rust-cache keys on the job id, so this job's cache (wasm32 tree) stays
-      # separate from the other validate jobs'. It also caches ~/.cargo/bin,
-      # which amortizes the wasm-bindgen-cli install below. save-if main-only:
-      # see the lint job's cache step for the rationale.
+      # Shared `x64-nightly` entry; save-if main-only (see the lint job's
+      # cache step for both).
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
         with:
@@ -1220,17 +1307,25 @@ jobs:
           # warm run), and the 2-3GB-per-job target payloads pushed the repo
           # past its 10GB Actions-cache budget, which LRU-evicts into
           # thrash. Build scripts re-run each time — small next to the
-          # eviction cost. Registry + ~/.cargo/bin stay cached.
+          # eviction cost. The registry stays cached; ~/.cargo/bin does not
+          # (cache-bin false): every tool comes prebuilt via cargo-binstall
+          # in seconds, so a shared entry never depends on which job saved it.
           cache-targets: false
+          cache-bin: false
+          shared-key: x64-nightly
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install just
         uses: extractions/setup-just@v3
 
-      # Pinned to match the workspace wasm-bindgen dep; the just recipes
-      # refuse to run with a missing runner and print this exact version.
-      - name: Install wasm-bindgen-cli
-        run: command -v wasm-bindgen-test-runner >/dev/null || cargo install wasm-bindgen-cli --version 0.2.114
+      # Prebuilt, pinned to match the workspace wasm-bindgen dep; the just
+      # recipes refuse to run with a missing runner and print this exact
+      # version.
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@v1.21.1
+
+      - name: Install wasm-bindgen-cli (prebuilt)
+        run: command -v wasm-bindgen-test-runner >/dev/null || cargo binstall --no-confirm --locked wasm-bindgen-cli@0.2.114
 
       # The smoke check drives Chrome over a raw CDP WebSocket; pin node so
       # the global WebSocket client is guaranteed (same rationale as the
@@ -1372,15 +1467,24 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v3
 
+      # Prebuilt (cargo-binstall), not `cargo install`: on a cache miss the
+      # source builds cost 627 s and 619 s on two of 2026-09-08's three main
+      # runs — dioxus-cli alone is ~8 min — and the miss was routine because
+      # this job's 1 GB entry was the first thing the over-budget cache
+      # evicted. binstall verifies the pinned version and falls back to a
+      # `--locked` source build only if a release asset ever disappears.
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@v1.21.1
+
       - name: Install pinned tools (wasm-bindgen, dioxus-cli, oxipng)
         shell: bash
         run: |
           wasm-bindgen --version 2>/dev/null | grep -qF "$WASM_BINDGEN_VERSION" \
-            || cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
+            || cargo binstall --no-confirm --locked --force "wasm-bindgen-cli@$WASM_BINDGEN_VERSION"
           dx --version 2>/dev/null | grep -qF "$DIOXUS_CLI_VERSION" \
-            || cargo install dioxus-cli --version "$DIOXUS_CLI_VERSION" --locked --force
+            || cargo binstall --no-confirm --locked --force "dioxus-cli@$DIOXUS_CLI_VERSION"
           oxipng --version 2>/dev/null | grep -qF "$OXIPNG_VERSION" \
-            || cargo install oxipng --version "$OXIPNG_VERSION" --locked --force
+            || cargo binstall --no-confirm --locked --force "oxipng@$OXIPNG_VERSION"
 
       # Ubuntu 23.10+ AppArmor blocks unprivileged user namespaces, which the
       # pinned Chrome-for-Testing binary needs for its sandbox (the runner's
