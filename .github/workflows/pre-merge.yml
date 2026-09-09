@@ -168,9 +168,10 @@ jobs:
       # shader results, and the suite is cheap enough after the profile.dev
       # overrides in Cargo.toml that the insurance is free.
       #
-      # browser is the closure of the two real-browser wasm suites:
-      # lpa-fs-opfs (real OPFS + Web Locks) and fw-browser (runtime protocol
-      # over wasm).
+      # browser is the closure of the three real-browser wasm suites:
+      # lpa-fs-opfs (real OPFS + Web Locks), fw-browser (runtime protocol over
+      # wasm) and lpa-link's Web Serial conformance suite (the shipped JS
+      # device layer over the `navigator.serial` polyfill).
       - name: Filter changed paths (positive gates)
         id: some
         if: github.event_name == 'pull_request'
@@ -218,6 +219,16 @@ jobs:
               - '.github/workflows/pre-merge.yml'
             browser:
               - 'lp-app/lpa-fs-opfs/**'
+              # The Web Serial JS layer and the `navigator.serial` polyfill
+              # under it (emulator plan two, M2). Until 2026-09-09 this filter
+              # listed neither, so a conformance suite for that layer would
+              # have run on nothing on the very PRs that changed it — which is
+              # the failure mode `docs/debt/web-serial-js-untestable.md` exists
+              # about. `lpa-link` was already in the `core` filter; it is here
+              # for `lpa-link-browser-test`, and `lpa-studio-web` for the two
+              # polyfill files and the device controller it serves.
+              - 'lp-app/lpa-link/**'
+              - 'lp-app/lpa-studio-web/**'
               - 'lp-fw/**'
               - 'lp-base/**'
               - 'lp-core/**'
@@ -1508,7 +1519,7 @@ jobs:
         run: cd lp2025 && just fw-browser-smoke-check
 
       - name: Browser wasm tests
-        run: cd lp2025 && just lpa-fs-opfs-test fw-browser-test
+        run: cd lp2025 && just lpa-fs-opfs-test fw-browser-test lpa-link-browser-test
 
       - name: sccache stats
         if: always()
