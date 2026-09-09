@@ -214,6 +214,48 @@ pub static JIT_OVERHEAD_CYCLES: MaskRule = MaskRule::new(
     "$1=N cycles",
 );
 
+/// The `cycle-probe` human line's two clocks:
+/// `[cycle-probe] kernel <name> rep=N iters=N cycles=N us=N insns=N acc=N`.
+///
+/// `cycles` and `us` are masked and **nothing else is**. `iters`, `insns` and
+/// `acc` are the kernel's identity — how much work, how many instructions,
+/// and what it computed — and a configuration that disagrees on any of those
+/// is running a different kernel, not a slower one. The structured
+/// `cycle-probe` records carry the two clock figures and are compared instead.
+pub static CYCLE_PROBE_CLOCKS: MaskRule = MaskRule::new(
+    "cycle-probe-clocks",
+    "the two clock figures in the cycle-probe kernel line; the structured \
+     cycle-probe records carry the same numbers and are compared instead",
+    FieldClass::Timing,
+    r"(cycles|us)=[0-9]+",
+    "$1=N",
+);
+
+/// The `gpio-input` setup line's `drive=` word.
+///
+/// **The one place in this file where the mask hides a real, deliberate
+/// difference rather than a clock.** This payload's two sides are driven
+/// differently on purpose and cannot be otherwise: on silicon the firmware
+/// drives its own pads and reads them back (`drive=self-loop`), and on an
+/// emulated configuration a `--pin-script` drives them from outside
+/// (`drive=external`). Everything below that line is the same image doing the
+/// same thing; the word itself is the asymmetry, and it is stated — in this
+/// rule's own `because`, in each transcript's sidecar `note`, and in the
+/// payload's registry entry — rather than being made to disappear quietly.
+///
+/// Nothing else on the line is touched. `button=`, `encoder=`, `select=`,
+/// `poll_ms=` and `samples=` are the run's configuration and must compare
+/// equal, or the two sides were not running the same script.
+pub static GPIO_INPUT_DRIVE: MaskRule = MaskRule::new(
+    "gpio-input-drive",
+    "which side drove the pads: silicon self-loops, an emulated configuration \
+     is driven from outside by --pin-script. The asymmetry is the payload's \
+     premise and is stated in both sidecars",
+    FieldClass::Pin,
+    r"drive=(self-loop|external)",
+    "drive=D",
+);
+
 /// The hello frame's build provenance: `"commit":"d6cfaa2051ae","dirty":true`.
 ///
 /// Not a claim about the chip — a claim about the tree the image was built
@@ -366,6 +408,40 @@ pub static RMT_CHASE: MaskSet = MaskSet {
     rules: &[&ANSI, &BOOT_TIMESTAMP, &WS281X_TIMESTAMP],
 };
 
+/// The `cycle-probe` set: ANSI, the boot banner's stamps, and the two clock
+/// figures on the kernel line.
+///
+/// `PROSE_TIMING` is absent for the same reason it is absent from
+/// `rmt-chase`: this payload's own lines carry `iters=` and `acc=`, and a
+/// general-purpose rewriter loose in a calibration transcript is how a
+/// measurement quietly stops being one.
+pub static CYCLE_PROBE: MaskSet = MaskSet {
+    name: "cycle-probe",
+    description: "ANSI, boot timestamps and the kernel line's cycles/us; the \
+                  iteration counts, instruction counts and accumulators are \
+                  left comparable",
+    rules: &[&ANSI, &BOOT_TIMESTAMP, &CYCLE_PROBE_CLOCKS],
+};
+
+/// The `gpio-input` set: ANSI, the boot banner's stamps, and the `drive=`
+/// word — and nothing else.
+///
+/// Short for `rmt-chase`'s reason and one more. Every other number this
+/// payload prints is a claim it exists to make: `detents=` and `edges=` are
+/// the interrupt path's own count of itself, and `samples=`, `poll_ms=` and
+/// the pad numbers are the script both sides ran. `PROSE_TIMING` is absent
+/// because it rewrites `tick=` and `frame=`, neither of which appears here,
+/// and a general-purpose rewriter loose in a transcript whose subject is a
+/// sequence of levels is how a claim quietly stops being one. The `t_us`
+/// figures live in the structured records and are graded `Timing` there,
+/// which is where a replay reports them with their ratios.
+pub static GPIO_INPUT: MaskSet = MaskSet {
+    name: "gpio-input",
+    description: "ANSI, boot timestamps and the setup line's drive= word; every \
+                  pad number, sample count and detent count is left comparable",
+    rules: &[&ANSI, &BOOT_TIMESTAMP, &GPIO_INPUT_DRIVE],
+};
+
 /// The render-loop summary line's per-frame microseconds.
 ///
 /// `PROSE_TIMING` does not reach them — it knows `elapsed=`, `frame=` and
@@ -433,6 +509,8 @@ pub static ALL_SETS: &[&MaskSet] = &[
     &JIT_MATH_PERF,
     &BOOT_IDLE,
     &RMT_CHASE,
+    &CYCLE_PROBE,
+    &GPIO_INPUT,
     &RENDER_LOOP,
 ];
 

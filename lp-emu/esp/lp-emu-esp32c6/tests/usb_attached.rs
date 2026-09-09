@@ -355,12 +355,20 @@ fn g2_4_two_attached_runs_are_the_same_run() {
 /// one — a driver that starts reading `jfifo_st`, a line-coding path — this
 /// run stops with the register's name, which is what the level is for.
 ///
-/// It is **not** a claim about the chip. `--strict-grade` applies to the
-/// blocks that publish a grade table, and since M2 P1 that is two —
-/// `USB_DEVICE` and `GPIO`; the run report says so and so does
-/// `blocks_in_strict_grade_scope`. Every accept table on the boot path is
-/// still ungraded, which is an unanswered question rather than a pass, and
-/// grading them is the honest-peripheral policy's next milestone.
+/// It is **not** a claim about the chip, and it says which block it is
+/// about: `--strict-grade-blocks USB_DEVICE`. Until 2026-09-08 the narrowing
+/// was accidental — this was the only block that published a grade table, so
+/// the level had nowhere else to apply. Then M2 P1 gave `GPIO` one, M3 P1
+/// gave `UART0`/`UART1` theirs, and this branch gives every accept block one,
+/// so a run that wants this claim has to name it and
+/// `blocks_in_strict_grade_scope` reports the one block back. That is also
+/// what stops this snapshot needing a hand-edit every time a block is graded.
+///
+/// What the wider run says is `the_boot_reads_registers_we_only_modelled`
+/// below: the same level with no block named, which stops at the first
+/// modelled register of the boot and prints it. That is the survey the
+/// honest-peripheral policy wanted, and it is a different question from
+/// this one.
 #[test]
 #[ignore = "needs the fw-esp32c6 ELF; run through `just test-emu-c6`"]
 fn g4_4_the_shipped_image_crosses_no_modeled_usb_register() {
@@ -375,6 +383,7 @@ fn g4_4_the_shipped_image_crosses_no_modeled_usb_register() {
         .app(AppSource::Path(elf))
         .strict(true)
         .strict_grade(Some(RegGrade::Documented))
+        .strict_grade_blocks(Some(vec!["USB_DEVICE"]))
         .time_grade(TimeGrade::T1)
         .usb_host(UsbHost::Attached { draining: true })
         .build()
@@ -386,14 +395,14 @@ fn g4_4_the_shipped_image_crosses_no_modeled_usb_register() {
     );
     assert!(m.bus.first_strict_violation().is_none());
 
-    // The scope, named — a pass here is a pass about the blocks that publish
-    // a grade table, and M2 P1 made that two: `GPIO` grades its registers
-    // too now, so the shipped image crossing none of ITS modeled registers
-    // in five and a half seconds is part of what this run proves.
-    assert_eq!(
-        m.bus.blocks_in_strict_grade_scope(),
-        vec!["USB_DEVICE", "GPIO"]
-    );
+    // The scope, named — and it is ONE block because this run named it, not
+    // because only one publishes a table. Four did before this branch
+    // (`UART0`, `UART1`, `USB_DEVICE`, `GPIO`, from M3 P1 and M2 P1) and
+    // twenty-six do after it. That is the churn `--strict-grade-blocks`
+    // ends: this snapshot used to be a list every milestone that graded a
+    // block had to remember to widen, and a widened list quietly changed
+    // what G4-4 was claiming each time. It claims one block, so it says one.
+    assert_eq!(m.bus.blocks_in_strict_grade_scope(), vec!["USB_DEVICE"]);
     // And the run really did do the whole boot, so the pass is not a pass by
     // never getting there.
     assert!(
@@ -412,5 +421,71 @@ fn g4_4_the_shipped_image_crosses_no_modeled_usb_register() {
         "G4-4: {} modeled GPIO registers, none crossed either: {}",
         gpio.len(),
         gpio.join(", ")
+    );
+}
+
+/// The survey the accept-block grading made possible: run the shipped image
+/// under `--strict-grade documented` over **every** block that publishes a
+/// table, and name the first register it reads that we only modelled.
+///
+/// This is not a gate on a number and it is not expected to pass. A boot on
+/// this machine reads registers whose behaviour is our reading of the PAC
+/// and the drivers — that is what an emulator is — and the useful thing is
+/// to say *which*, in a way a change can move. Before the accept blocks were
+/// graded, `--strict-grade documented` passed over every one of them and the
+/// flag measured how much of the chip had been graded rather than what a run
+/// was allowed to trust.
+///
+/// The first one is `I2C_ANA_MST.i2c1_ctrl`: the analog transaction port,
+/// which forces `busy` low and answers `regi2c` reads out of a store nobody
+/// has measured. A register a block pretends about is a register it
+/// modelled, and the grading rule says so without being told.
+#[test]
+#[ignore = "needs the fw-esp32c6 ELF; run through `just test-emu-c6`"]
+fn the_boot_reads_registers_we_only_modelled_and_this_is_which() {
+    let elf = match fw_esp32c6_image(&FwImage::SHIPPED) {
+        Ok(path) => path,
+        Err(reason) => {
+            skip_notice("usb_attached", &reason);
+            return;
+        }
+    };
+    let mut m = Esp32C6Builder::new()
+        .app(AppSource::Path(elf))
+        .strict_grade(Some(RegGrade::Documented))
+        .time_grade(TimeGrade::T1)
+        .usb_host(UsbHost::Attached { draining: true })
+        .build()
+        .expect("the shipped image builds a machine");
+    // Not `.strict(true)`: an unmapped access is a different complaint, and
+    // this run is only asking the grade question.
+    let scope = m.bus.blocks_in_strict_grade_scope();
+    assert!(
+        scope.len() > 20,
+        "the accept blocks should be in scope now, not just USB_DEVICE: {scope:?}"
+    );
+    assert!(scope.contains(&"USB_DEVICE"), "{scope:?}");
+    assert!(scope.contains(&"PCR"), "{scope:?}");
+    assert!(scope.contains(&"I2C_ANA_MST"), "{scope:?}");
+
+    let outcome = m.run_until(&StopCondition::after_micros(GATE_US));
+    let violation = m.bus.first_strict_violation().unwrap_or_else(|| {
+        panic!("nothing below `documented` was read in {GATE_US} us: {outcome:?}")
+    });
+    assert_eq!(violation.grade, Some(RegGrade::Modeled));
+    println!(
+        "strict-grade documented over {} blocks: first modeled register read at \
+         {:#010x} (pc {:#010x}, cycle {})",
+        scope.len(),
+        violation.address,
+        violation.pc,
+        violation.cycle
+    );
+    // Pinned, because a change that moves it is a change to what this boot
+    // depends on being modelled — the point of the survey.
+    assert_eq!(
+        violation.address,
+        lp_emu_esp32c6::memmap::periph::I2C_ANA_MST + 0x004,
+        "the first modeled register the boot reads is the analog transaction port"
     );
 }

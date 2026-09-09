@@ -137,6 +137,20 @@ fn the_host_side_properties_are_not_mirrored_and_that_is_the_point() {
     assert_eq!(
         scenarios,
         vec![
+            // M1 P2's calibration kernels: the same case as `rmt-chase` — not
+            // a scenario, a harness image whose records go out over the
+            // USB-Serial-JTAG it logs on, against a `--usb-host` that defaults
+            // to `absent`. M1 P1 measured what happens without this: a USB
+            // payload with no host plan records **0 bytes** on the emulator,
+            // because the firmware serves into the void from power-on.
+            "cycle-probe",
+            // M2 P2's `gpio-input`: the same case again, and one more
+            // reason. Its emulated side is driven by a `--pin-script` whose
+            // steps wait on the firmware's own `=== ARMED ===` line, and a
+            // pin script's `after` resolves against what a HOST received —
+            // so with no host attached there is no console, no anchor, and
+            // every scripted edge would still be pending when the run ended.
+            "gpio-input",
             "boot-idle",
             "usb-negative-control",
             "usb-detach-reattach",
@@ -346,6 +360,16 @@ fn every_payloads_header_line_is_pinned() {
             "[fw-checks-header] {\"schema\":1,\"payload\":\"jit-math-perf\",\"chip\":\"esp32c6\",\"firmware_commit\":\"d6cfaa2051ae\",\"firmware_features\":\"esp32c6,test_jit_math_perf\",\"firmware_dirty\":false}\n",
         ),
         (
+            "cycle-probe",
+            "esp32c6,test_cycle_probe",
+            "[fw-checks-header] {\"schema\":1,\"payload\":\"cycle-probe\",\"chip\":\"esp32c6\",\"firmware_commit\":\"d6cfaa2051ae\",\"firmware_features\":\"esp32c6,test_cycle_probe\",\"firmware_dirty\":false}\n",
+        ),
+        (
+            "gpio-input",
+            "esp32c6,test_gpio_input",
+            "[fw-checks-header] {\"schema\":1,\"payload\":\"gpio-input\",\"chip\":\"esp32c6\",\"firmware_commit\":\"d6cfaa2051ae\",\"firmware_features\":\"esp32c6,test_gpio_input\",\"firmware_dirty\":false}\n",
+        ),
+        (
             "render-loop",
             "esp32c6,server,radio,memory_fs,bench_render_loop",
             "[fw-checks-header] {\"schema\":1,\"payload\":\"render-loop\",\"chip\":\"esp32c6\",\"firmware_commit\":\"d6cfaa2051ae\",\"firmware_features\":\"esp32c6,server,radio,memory_fs,bench_render_loop\",\"firmware_dirty\":false}\n",
@@ -530,4 +554,58 @@ fn every_trust_entry_says_why() {
             }
         }
     }
+}
+
+/// A payload's `pin_script` names a file, and a file that is not there is a
+/// run that drives no pads at all — which on `gpio-input` would produce a
+/// transcript with no records and a sentinel that never arrives.
+#[test]
+fn every_pin_script_a_payload_names_is_on_disk() {
+    for payload in ALL_PAYLOADS {
+        let Some(script) = payload.pin_script else {
+            continue;
+        };
+        let path = repo_root().join(script);
+        assert!(
+            path.is_file(),
+            "payload `{}` names pin script `{script}`, which is not at {}",
+            payload.name,
+            path.display()
+        );
+    }
+}
+
+/// The committed `--pin-script` and the firmware's own edge table are one
+/// thing said twice, so this is the check that keeps them one thing.
+///
+/// `gpio-input` is the payload whose two sides are driven differently on
+/// purpose: the firmware walks `SCRIPT` on silicon and the emulated side is
+/// driven from outside by the file below. If those two ever disagreed the
+/// replay would fail with a difference that looked like a model bug and was
+/// really a stale file, so the file is GENERATED from the table and held
+/// equal to it here — the same duty `every_payload_has_a_matching_fw_check`
+/// does for the two registries.
+#[test]
+fn the_gpio_input_pin_script_is_the_firmwares_own_edge_table() {
+    let mut rendered = String::new();
+    fw_checks::checks::gpio_input::write_pin_script(&mut rendered)
+        .expect("a String never fails to write");
+    let payload = lp_emu_validate::find_payload("gpio-input").unwrap();
+    let path = repo_root().join(payload.pin_script.expect("gpio-input names one"));
+    let committed = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(
+        committed,
+        rendered,
+        "{} has drifted from `fw_checks::checks::gpio_input::SCRIPT`. \
+         Regenerate it rather than editing either side.",
+        path.display()
+    );
+}
+
+/// `lp-cli/` is one directory below the repository root.
+fn repo_root() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("lp-cli sits under the repo root")
+        .to_path_buf()
 }

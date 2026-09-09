@@ -13,8 +13,22 @@ check-shader-compile = []
 # Q32 fixed-point kernels + corpus (mul/div/sin), no chip dependency beyond
 # the injected cycle-counter function pointer (see `checks::jit_math_perf`).
 check-jit-math-perf = ["dep:lps-builtins"]
+# The `cycle-probe` payload: the two-clock bracket, the repetition, the
+# record, and the three kernels that are ordinary Rust — the code walk, the
+# `.rodata` stride walk and the slice-shaped case (`checks::cycle_probe`). The
+# chip-bound kernels (IRAM/flash placement, the assembly loops whose
+# instruction count has to be exact, the MMIO addresses) stay in `fw-esp32c6`,
+# the same way this crate keeps the cycle counter out.
+check-cycle-probe = []
 check-json = []
 check-gpio-calibrate = []
+# The `gpio-input` payload: the scripted edge table both sides are driven by,
+# the quadrature decoder the GPIO interrupt handler runs, the record shapes,
+# and the renderer that turns the table into the emulated side's
+# `--pin-script` file (`checks::gpio_input`). No chip dependency at all — the
+# pads, the product button driver, the interrupt handler and the self-loop's
+# register writes are chip facts and stay in `fw-esp32c6`.
+check-gpio-input = []
 check-uart-bridge = []
 check-oom = []
 # The `rmt-chase` payload: the chase pattern, the FNV-1a checksum and the

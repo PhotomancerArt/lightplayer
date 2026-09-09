@@ -28,6 +28,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use lp_emu_core::bus::{Bus, Watchpoint};
+use lp_emu_core::cycle_model::MemoryCost;
 use lp_emu_core::memory::{MemoryAccessKind, MemoryError};
 use lp_emu_core::sched::{Cycles, EventId, Scheduler};
 
@@ -213,6 +214,9 @@ pub struct SocBus {
     /// `Some(level)`: an access to a register graded below `level` is
     /// refused like an unmapped one. See [`SocBus::set_strict_grade`].
     strict_grade: Option<RegGrade>,
+    /// The blocks the level applies to, or `None` for every graded block.
+    /// See [`SocBus::set_strict_grade_blocks`].
+    strict_grade_blocks: Option<Vec<&'static str>>,
     sideband: bool,
     /// See [`BusCx::yield_to_machine`].
     yield_now: bool,
@@ -246,6 +250,24 @@ pub struct SocBus {
     matrix: Box<dyn CpuIntMatrix>,
     /// A peripheral's request to the machine. See [`MachineRequest`].
     request: Option<MachineRequest>,
+
+    /// What an access's *address* costs, installed by the chip crate, or
+    /// `None` for a machine whose time grade charges nothing for one.
+    ///
+    /// A trait object rather than a generic parameter or an enum, and the
+    /// reason is that [`SocBus`] is one type the whole machine names: making
+    /// it `SocBus<M>` would make the machine, its builder, every peripheral
+    /// view and every test generic over a parameter that only the cycle
+    /// counter reads, and would monomorphize the entire run loop twice. An
+    /// enum cannot be it either — the variants would have to be the chips'
+    /// models, and this crate is below the chips. The cost is one virtual
+    /// call per access at a grade that has a model, and one null test at a
+    /// grade that does not; [`SocBus::set_matrix`] pays the same price for
+    /// the same reason.
+    memory_cost: Option<Box<dyn MemoryCost + Send>>,
+    /// Cycles [`memory_cost`](Self::memory_cost) has charged since the
+    /// privileged stepper last drained it.
+    memory_cycles: u32,
 
     now: Cycles,
     pc: u32,
@@ -299,6 +321,7 @@ impl SocBus {
             mmio_windows: Vec::new(),
             strict: false,
             strict_grade: None,
+            strict_grade_blocks: None,
             sideband: false,
             yield_now: false,
             allow_unaligned: false,
@@ -311,6 +334,8 @@ impl SocBus {
             first_strict_violation: None,
             matrix: Box::new(NoCpuInterrupts),
             request: None,
+            memory_cost: None,
+            memory_cycles: 0,
             now: 0,
             pc: 0,
             hart: 0,
@@ -426,6 +451,11 @@ impl SocBus {
     /// is what keeps that honest: the run report names the blocks that were
     /// actually checked, so an ungraded one reads as an unanswered question
     /// and never as a pass.
+    ///
+    /// Since 2026-09-08 the accept blocks publish tables too, so "the blocks
+    /// that published one" is most of the chip — and a run that wants the
+    /// narrow claim says which blocks it means with
+    /// [`set_strict_grade_blocks`](Self::set_strict_grade_blocks).
     pub fn set_strict_grade(&mut self, level: Option<RegGrade>) {
         self.strict_grade = level;
     }
@@ -434,14 +464,42 @@ impl SocBus {
         self.strict_grade
     }
 
+    /// Narrow the level to a named set of blocks.
+    ///
+    /// `None` — the default — means every block that publishes a table,
+    /// which is the survey: *what does this boot read that we only
+    /// modelled?* A named set is the gate: *this driver, on this block,
+    /// crosses nothing below the level*, which is the claim G4-4 makes about
+    /// `USB_DEVICE` and which stopped being expressible the day the accept
+    /// blocks were graded.
+    ///
+    /// A name that matches no mapped block is kept rather than rejected, and
+    /// shows up as its absence from
+    /// [`blocks_in_strict_grade_scope`](Self::blocks_in_strict_grade_scope)
+    /// — the caller can then say so, which is better than this layer
+    /// guessing whether a block is missing on purpose.
+    pub fn set_strict_grade_blocks(&mut self, blocks: Option<Vec<&'static str>>) {
+        self.strict_grade_blocks = blocks;
+    }
+
     /// The names of the blocks a `--strict-grade` run actually checks: those
-    /// that publish a per-register grade table.
+    /// that publish a per-register grade table, intersected with
+    /// [`set_strict_grade_blocks`](Self::set_strict_grade_blocks) when one
+    /// was named.
     pub fn blocks_in_strict_grade_scope(&self) -> Vec<&'static str> {
         self.mmio
             .iter()
             .filter(|w| w.periph.reg_grade(0).is_some())
             .map(|w| w.periph.name())
+            .filter(|name| self.block_in_strict_grade_scope(name))
             .collect()
+    }
+
+    fn block_in_strict_grade_scope(&self, name: &str) -> bool {
+        match &self.strict_grade_blocks {
+            None => true,
+            Some(names) => names.iter().any(|n| *n == name),
+        }
     }
 
     /// Mirror the hart's misaligned-access policy onto the bus.
@@ -462,6 +520,21 @@ impl SocBus {
     /// Install the chip's interrupt matrix. See [`CpuIntMatrix`].
     pub fn set_matrix(&mut self, matrix: Box<dyn CpuIntMatrix>) {
         self.matrix = matrix;
+    }
+
+    /// Install what a memory access's address costs, or `None` for free.
+    ///
+    /// The chip crate owns the model; this crate holds it and calls it. See
+    /// [`SocBus::memory_cost`] for why it is a trait object.
+    pub fn set_memory_cost(&mut self, cost: Option<Box<dyn MemoryCost + Send>>) {
+        self.memory_cost = cost;
+        self.memory_cycles = 0;
+    }
+
+    /// Whether a memory-cost model is installed. For tests and for the
+    /// machine's own reporting; the hot path never asks.
+    pub fn has_memory_cost(&self) -> bool {
+        self.memory_cost.is_some()
     }
 
     pub fn matrix(&self) -> &dyn CpuIntMatrix {
@@ -979,6 +1052,9 @@ impl SocBus {
     fn read(&mut self, address: u32, width: Width) -> Result<u32, MemoryError> {
         let len = width.bytes();
         self.check_watchpoints(address, len, MemoryAccessKind::Read)?;
+        if let Some(cost) = self.memory_cost.as_mut() {
+            self.memory_cycles += cost.load(address, len as u8);
+        }
 
         if let Some(i) = self.region_index(address) {
             // `region_index` guarantees `address` is inside the region, so
@@ -1067,6 +1143,9 @@ impl SocBus {
     fn write(&mut self, address: u32, width: Width, value: u32) -> Result<(), MemoryError> {
         let len = width.bytes();
         self.check_store_watchpoint(address, len)?;
+        if let Some(cost) = self.memory_cost.as_mut() {
+            self.memory_cycles += cost.store(address, len as u8);
+        }
 
         if let Some(i) = self.region_index(address) {
             let fault = MemoryError::InvalidAccess {
@@ -1168,7 +1247,11 @@ impl SocBus {
             return Ok(());
         };
         // A block that publishes no grade table is out of scope, not
-        // `Modeled`: see `Peripheral::reg_grade`.
+        // `Modeled`: see `Peripheral::reg_grade`. So is one the run did not
+        // name, when it named any.
+        if !self.block_in_strict_grade_scope(self.mmio[index].periph.name()) {
+            return Ok(());
+        }
         let Some(grade) = self.mmio[index].periph.reg_grade(off) else {
             return Ok(());
         };
@@ -1339,6 +1422,9 @@ impl Bus for SocBus {
             return Err(fault());
         }
         self.last_fetch_region = i;
+        if let Some(cost) = self.memory_cost.as_mut() {
+            self.memory_cycles += cost.fetch(address);
+        }
         let region = &self.regions[i];
         let off = (address - region.base) as usize;
         let d = &region.data;
@@ -1451,6 +1537,11 @@ impl Bus for SocBus {
 
     fn take_yield(&mut self) -> bool {
         core::mem::replace(&mut self.yield_now, false)
+    }
+
+    #[inline]
+    fn take_memory_cost(&mut self) -> u32 {
+        core::mem::take(&mut self.memory_cycles)
     }
 
     fn pending_cpu_interrupt(&self) -> Option<u8> {

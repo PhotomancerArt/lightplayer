@@ -66,7 +66,12 @@ fn on_alloc_error(layout: Layout) -> ! {
 mod board;
 #[cfg(not(fw_harness))]
 use fw_esp32_common::boot;
-#[cfg(any(not(fw_harness), feature = "test_button", feature = "test_espnow"))]
+#[cfg(any(
+    not(fw_harness),
+    feature = "test_button",
+    feature = "test_espnow",
+    feature = "test_gpio_input",
+))]
 mod hardware;
 pub use fw_esp32_common::logger;
 // jit_fns (JIT host-log symbol) now lives in fw-esp32-common; linked via the
@@ -139,10 +144,14 @@ use server_loop::run_server_loop;
 
 #[cfg(fw_harness)]
 mod tests {
+    #[cfg(feature = "test_cycle_probe")]
+    pub mod cycle_probe;
     #[cfg(feature = "test_f32_softfloat")]
     pub mod f32_softfloat;
     #[cfg(feature = "test_fluid_demo")]
     pub mod fluid_demo;
+    #[cfg(feature = "test_gpio_input")]
+    pub mod gpio_input;
     #[cfg(feature = "test_shader_compile_incremental")]
     pub mod incremental_shader_compile;
     #[cfg(feature = "test_jit_math_perf")]
@@ -600,6 +609,18 @@ async fn main(spawner: embassy_executor::Spawner) {
     {
         use tests::jit_math_perf::run_jit_math_perf;
         run_jit_math_perf(spawner).await;
+    }
+
+    #[cfg(feature = "test_cycle_probe")]
+    {
+        use tests::cycle_probe::run_cycle_probe;
+        run_cycle_probe(spawner).await;
+    }
+
+    #[cfg(feature = "test_gpio_input")]
+    {
+        use tests::gpio_input::run_gpio_input;
+        run_gpio_input(spawner).await;
     }
 
     #[cfg(feature = "test_shader_compile_incremental")]

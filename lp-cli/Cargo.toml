@@ -61,6 +61,9 @@ fw-checks = { path = "../lp-fw/fw-checks", features = [
     "std",
     "check-shader-compile",
     "check-gpio-calibrate",
+    # `check-gpio-input` so that the parity test can hold the committed
+    # `--pin-script` equal to the firmware's own edge table.
+    "check-gpio-input",
     "check-uart-bridge",
     "check-rmt",
 ] }

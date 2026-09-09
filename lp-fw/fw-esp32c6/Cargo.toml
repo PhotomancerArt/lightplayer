@@ -159,6 +159,25 @@ test_fluid_demo = []  # RGB MSAFluid demo on the basic ring fixture (gpio4, 241 
 # the alias that keeps `just fwtest-jit-math-perf-esp32c6` working (Q12
 # retirement ledger, notes.md).
 test_jit_math_perf = ["dep:fw-checks", "fw-checks/check-jit-math-perf"]
+# The `cycle-probe` payload's harness: kernels that isolate one term of a
+# cycle model each, every one bracketed by BOTH the PMU cycle counter and
+# SYSTIMER microseconds. The bracket, the repetition, the record and the
+# kernels that need no chip fact live in fw-checks as `checks::cycle_probe`;
+# what stays here is the IRAM/flash pair, the assembly loops whose
+# instruction count has to be exact, and the two MMIO polls.
+test_cycle_probe = ["dep:fw-checks", "fw-checks/check-cycle-probe", "lpc-shared"]
+# The `gpio-input` payload's harness: a button read through the PRODUCT's own
+# `Esp32GpioButtonDriver` and a quadrature encoder decoded in a both-edge GPIO
+# interrupt handler. The edge table both sides are driven by, the decoder and
+# the record shapes live in fw-checks as `checks::gpio_input`; what stays here
+# is the pads, the interrupt registration and the self-loop's output enable.
+#
+# `lpc-hardware` and `lpc-model` are in the list because the product button
+# driver is: it opens `button:local:D9` off the board manifest's own
+# `HwRegistry`, which is the whole reason this payload is worth recording.
+# `lpc-shared` is there for `recovery/panic_path.rs`, the same as `test_rmt`
+# and `test_cycle_probe` (M5 P1, DD37).
+test_gpio_input = ["dep:fw-checks", "fw-checks/check-gpio-input", "lpc-hardware", "lpc-model", "lpc-shared"]
 test_shader_compile_incremental = ["dep:fw-checks", "dep:lp-shader", "dep:lpvm-native", "dep:lpir", "dep:lps-shared", "lps-builtins"]  # Incremental native shader compile harness on ESP32-C6
 # f32 soft-float semantics harness (roadmap M9). The ONLY configuration in this
 # crate that turns `float-f32` on: the C6 has no FPU, ships Fixed-mode shaders,

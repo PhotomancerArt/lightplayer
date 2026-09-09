@@ -47,6 +47,9 @@ pub enum Grade {
     T1,
     /// Per-class instruction costs.
     T2,
+    /// The kernel-measured class costs, plus the flash cache's fills and the
+    /// APB's wait states.
+    T3,
 }
 
 #[derive(Debug, Args)]
@@ -130,6 +133,13 @@ pub struct RunArgs {
     /// Write the raw pad transitions here.
     #[arg(long = "pin-log")]
     pub pin_log: Option<PathBuf>,
+
+    /// Write the radio TX log here: one line per frame the WiFi blob hands
+    /// the MAC, as bytes. An observation, not an air — nothing is delivered
+    /// and no interrupt is raised. The line's fields are in
+    /// `lp-emu/esp/lp-emu-esp32c6/README.md`, "The radio TX log".
+    #[arg(long = "tx-log")]
+    pub tx_log: Option<PathBuf>,
 
     /// Scripted host input on the PADS, deterministic: `<us> pin <n> <0|1>`,
     /// the `after`/`then` walk forms, and the `button` / `encoder`

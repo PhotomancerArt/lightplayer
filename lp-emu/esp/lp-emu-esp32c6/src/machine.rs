@@ -22,13 +22,23 @@
 //!
 //! # Time
 //!
-//! The CPU runs at 160 MHz, so `micros = cycles / 160`. Two grades, both of
-//! which are just the hart's cycle model:
+//! The CPU runs at 160 MHz, so `micros = cycles / 160`. Three grades. The
+//! first two are just the hart's cycle model; the third adds what an
+//! access's *address* costs:
 //!
 //! - `t1` (`lp-emu:esp32c6:t1`) — [`CycleModel::InstructionCount`], what the
 //!   vendor emulator does.
-//! - `t2` (`lp-emu:esp32c6:t2`) — [`CycleModel::Esp32C6`], the measured
-//!   per-class model.
+//! - `t2` (`lp-emu:esp32c6:t2`) — [`CycleModel::Esp32C6`], a per-class model
+//!   taken from a blog post.
+//! - `t3` (`lp-emu:esp32c6:t3`) — [`CycleModel::Esp32C6Kernels`], the same
+//!   table with the four classes the `cycle-probe` payload measured on
+//!   silicon corrected, **plus** [`crate::cache::CacheCost`] installed on
+//!   the bus: the flash cache's fills and the APB's wait states. It is the
+//!   first grade in which two instructions with the same opcode can cost
+//!   different amounts because they are at different addresses.
+//!
+//! `t1` and `t2` install no memory-cost model at all, so their cycle counts
+//! are exactly what they were before `t3` existed.
 //!
 //! Neither is a claim about milliseconds on silicon; see vision "Time is a
 //! graded ladder, never a promise".
@@ -89,7 +99,7 @@ use crate::snapshot::Snapshot;
 /// `LP_CLKRST + 0x10`, the register the mask ROM reads before anything else.
 const LP_CLKRST_RESET_CAUSE: u32 = 0x010;
 
-const MAX_SLICE_CYCLES: u64 = 8_192;
+pub const MAX_SLICE_CYCLES: u64 = 8_192;
 
 /// The slice cap while strict mode is on.
 ///
@@ -184,6 +194,9 @@ pub enum TimeGrade {
     T1,
     /// `lp-emu:esp32c6:t2` — the per-instruction-class model.
     T2,
+    /// `lp-emu:esp32c6:t3` — the kernel-measured class table, and the cache
+    /// and bus costs of the address ([`crate::cache::CacheCost`]).
+    T3,
 }
 
 impl TimeGrade {
@@ -191,6 +204,19 @@ impl TimeGrade {
         match self {
             TimeGrade::T1 => CycleModel::InstructionCount,
             TimeGrade::T2 => CycleModel::Esp32C6,
+            TimeGrade::T3 => CycleModel::Esp32C6Kernels,
+        }
+    }
+
+    /// What an access's address costs at this grade, or `None` for free.
+    ///
+    /// `t1` and `t2` are `None` **by construction**, which is the reason
+    /// their counts cannot move: the bus's hook is not installed, so its
+    /// drain is a constant zero.
+    pub fn memory_cost(self) -> Option<Box<dyn lp_emu_core::MemoryCost + Send>> {
+        match self {
+            TimeGrade::T1 | TimeGrade::T2 => None,
+            TimeGrade::T3 => Some(Box::new(crate::cache::CacheCost::new())),
         }
     }
 
@@ -199,6 +225,7 @@ impl TimeGrade {
         match self {
             TimeGrade::T1 => "lp-emu:esp32c6:t1",
             TimeGrade::T2 => "lp-emu:esp32c6:t2",
+            TimeGrade::T3 => "lp-emu:esp32c6:t3",
         }
     }
 
@@ -206,7 +233,10 @@ impl TimeGrade {
         match text {
             "t1" => Ok(TimeGrade::T1),
             "t2" => Ok(TimeGrade::T2),
-            other => Err(format!("unknown time grade `{other}` (expected t1 or t2)")),
+            "t3" => Ok(TimeGrade::T3),
+            other => Err(format!(
+                "unknown time grade `{other}` (expected t1, t2 or t3)"
+            )),
         }
     }
 }
@@ -376,6 +406,32 @@ pub enum PinLogSink {
 /// Lines the pin log writes before it stops, with a closing note.
 pub const PIN_LOG_LINE_CAP: u64 = 2_000_000;
 
+/// Where the radio TX log goes (`--tx-log`): one line per frame the WiFi
+/// blob handed the MAC.
+///
+/// The pin log's shape, for the radio: an observation of what left the
+/// guest, not a model of anything. **Nothing is delivered** — no machine
+/// receives these bytes, no interrupt is raised, and a run with the log on
+/// is the same run with it off. See [`Esp32C6Machine::drain_tx_log`] for
+/// what each field is and how much of it is a reading rather than a fact.
+#[derive(Clone, Debug, Default)]
+pub enum TxLogSink {
+    #[default]
+    Off,
+    Stderr,
+    File(PathBuf),
+}
+
+/// Lines the radio TX log writes before it stops, with a closing note. A
+/// frame a second on the observed image, so this is a runaway guard rather
+/// than a real ceiling.
+pub const TX_LOG_LINE_CAP: u64 = 100_000;
+
+/// Bytes of a TX buffer the log will print for one frame. The observed frame
+/// is 64 (an eight-byte header and a 56-byte 802.11 frame); the cap keeps a
+/// descriptor whose length word has gone strange from writing a screenful.
+pub const TX_LOG_BYTE_CAP: u32 = 2_048;
+
 /// Frames kept in memory per pad, with a note when the cap is reached. The
 /// `--dump-frames` stream itself is not capped.
 pub const FRAMES_PER_PAD_CAP: usize = 8_192;
@@ -465,6 +521,127 @@ struct PinObserver {
 /// control channel. See [`crate::periph::usb_sj`] for what each state does
 /// at the registers.
 pub use crate::periph::usb_sj::HostState as UsbHost;
+
+/// One frame this machine's radio handed the MAC, ready for an
+/// [`Air`](lp_emu_esp_common::air::Air).
+///
+/// The `at` is the guest cycle of the arming write — the same cycle the
+/// `--tx-log` line reports — and `bytes` are the 802.11 frame exactly as it
+/// stood in guest RAM, with neither the descriptor's eight-byte header nor
+/// the FCS the buffer does not carry.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RadioFrame {
+    pub at: Cycles,
+    pub bytes: Vec<u8>,
+}
+
+/// How far the walk of the guest's RX descriptor chain may go before the
+/// machine gives up.
+///
+/// The ring the blob posts has ten elements and ends in a NULL `next` (M4 P0
+/// §2), so the walk normally stops on its own. This bound exists so that a
+/// `next` chain the guest has corrupted — or one that loops — cannot spin
+/// the emulator inside a slice boundary.
+const RX_RING_WALK_CAP: u32 = 64;
+
+/// `dw0[31]`, `owner`: the hardware's, and the one bit of the descriptor
+/// word whose reading M4 P0 called consistent across both descriptors.
+const RX_DESC_OWNER_MASK: u32 = 1 << 31;
+/// `dw0[30]`, `eof`. Set on the TX side's single-descriptor chain.
+const RX_DESC_EOF_MASK: u32 = 1 << 30;
+/// `dw0[11:0]`: the buffer's size — 1,700 against a 1,708-byte stride.
+const RX_DESC_SIZE_MASK: u32 = 0xfff;
+/// `dw0[23:12]`, the twelve bits M4 P0 could not name. See [`AirDelivery`].
+const RX_DESC_LEN_MASK: u32 = 0xfff << 12;
+const RX_DESC_LEN_SHIFT: u32 = 12;
+
+/// What became of one frame the air offered this machine.
+///
+/// # `[23:12]`, and why this type carries the argument
+///
+/// M4 P0 refuted `[23:12] = length` on both descriptors: 272 on a TX
+/// descriptor whose buffer is 96 bytes, and 2,704 on a freshly posted RX one
+/// whose buffer is 1,700. The swap (`length` low, `size` high) is refuted
+/// too, because it would put 2,704-byte buffers 1,708 bytes apart.
+///
+/// A delivery still has to write *something* there, so this machine writes
+/// the **byte count it wrote** (header, frame and the four FCS bytes), and
+/// the experiment that settled the choice was run rather than argued
+/// (`tests/air_delivery.rs`,
+/// `the_descriptor_words_undetermined_bits_change_nothing`):
+///
+/// - **The frame arrives whatever is in `[23:12]`** — the byte count, the
+///   2,704 the ring already held, or all ones. But the instruction counts
+///   differ between them, so the guest **reads** the field and merely
+///   tolerates every value. Undetermined, then; not ignored. The byte count
+///   is written because that is what a reader would expect to find there,
+///   and no claim is made about what the silicon puts in it.
+/// - **`[28:24]` is load-bearing**, which M4 P0 could not have known:
+///   clearing the 1 the blob posted stops the guest receiving. Its meaning
+///   is still P0's U3; leaving it exactly as posted is now a rule with a
+///   test behind it.
+/// - **`owner` is our convention, not the guest's requirement**: leaving it
+///   set delivers the frame just the same. It is cleared anyway, because
+///   that is what `lldesc` hardware does and a ring that never gave a
+///   descriptor back would look full after ten frames when it is not.
+/// - **`eof` is demanded.** With it clear the guest does not take the frame.
+///
+/// The README carries the same four lines.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AirDelivery {
+    /// Written into `desc`'s buffer, and the interrupt raised.
+    Delivered {
+        desc: u32,
+        buf: u32,
+        dw0_before: u32,
+        dw0_after: u32,
+        /// Header, frame and the four FCS bytes.
+        len: u32,
+    },
+    /// This machine has no `WIFI_MAC` block — a machine built without one.
+    NoBlock,
+    /// The blob has not programmed an RX ring yet (nothing at
+    /// `WIFI_MAC+0x4084`), or the chain does not read. Before radio init
+    /// this is the ordinary answer.
+    NoRing,
+    /// **Every descriptor in the chain is the guest's**, or none that is
+    /// still the hardware's has a big enough buffer. The ring ends rather
+    /// than wrapping, so this is what "the eleventh frame" looks like. The
+    /// frame is dropped, counted, and the first one is logged.
+    RingFull,
+    /// The walk hit [`RX_RING_WALK_CAP`] without finding an end — a chain
+    /// that loops or was corrupted.
+    RingWalkCap,
+}
+
+impl AirDelivery {
+    /// The phrase the trace line and the one-shot warning use.
+    pub fn why(&self) -> &'static str {
+        match self {
+            AirDelivery::Delivered { .. } => "delivered",
+            AirDelivery::NoBlock => "dropped: no WIFI_MAC block",
+            AirDelivery::NoRing => "dropped: no RX ring programmed yet",
+            AirDelivery::RingFull => "dropped: the RX ring is full",
+            AirDelivery::RingWalkCap => "dropped: the RX chain did not end",
+        }
+    }
+}
+
+/// What [`Esp32C6Machine::read_tx_frame`] made of one armed handoff.
+struct ReadTxFrame {
+    /// The `--tx-log` line, always.
+    line: String,
+    /// The frame's bytes, when the descriptor's reading held.
+    frame: Option<Vec<u8>>,
+}
+
+impl ReadTxFrame {
+    /// A handoff whose bytes this machine could not read as a frame. The
+    /// line still says so; the air gets nothing rather than a guess.
+    fn unreadable(line: String) -> Self {
+        Self { line, frame: None }
+    }
+}
 
 /// Why a run stopped.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -645,6 +822,7 @@ pub struct Esp32C6Builder {
     time_grade: TimeGrade,
     strict: bool,
     strict_grade: Option<RegGrade>,
+    strict_grade_blocks: Option<Vec<&'static str>>,
     trace: Option<Box<dyn std::io::Write + Send>>,
     trace_blocks: Vec<String>,
     uart0: Uart0Sink,
@@ -682,6 +860,7 @@ pub struct Esp32C6Builder {
     peripherals: Vec<(u32, u32, BoxedPeripheral)>,
     dump_frames: FrameSink,
     pin_log: PinLogSink,
+    tx_log: TxLogSink,
     strip: StripConfig,
     /// Keep the RMT's pulse and word logs (`Rmt::keep_logs`).
     rmt_logs: bool,
@@ -707,6 +886,7 @@ impl Esp32C6Builder {
             time_grade: TimeGrade::default(),
             strict: false,
             strict_grade: None,
+            strict_grade_blocks: None,
             trace: None,
             trace_blocks: Vec::new(),
             uart0: Uart0Sink::default(),
@@ -729,6 +909,7 @@ impl Esp32C6Builder {
             peripherals: Vec::new(),
             dump_frames: FrameSink::default(),
             pin_log: PinLogSink::default(),
+            tx_log: TxLogSink::default(),
             strip: StripConfig::default(),
             rmt_logs: false,
         }
@@ -933,6 +1114,14 @@ impl Esp32C6Builder {
         self
     }
 
+    /// Narrow `--strict-grade` to a named set of blocks; `None` (the
+    /// default) is every block that publishes a table. See
+    /// [`SocBus::set_strict_grade_blocks`].
+    pub fn strict_grade_blocks(mut self, blocks: Option<Vec<&'static str>>) -> Self {
+        self.strict_grade_blocks = blocks;
+        self
+    }
+
     /// Where decoded WS281x frames go. They are always also kept in memory
     /// for [`Esp32C6Machine::frames`].
     pub fn dump_frames(mut self, sink: FrameSink) -> Self {
@@ -941,6 +1130,12 @@ impl Esp32C6Builder {
     }
 
     /// Where the raw per-edge pin log goes. Off by default.
+    /// `--tx-log`: one line per frame the WiFi blob hands the MAC.
+    pub fn tx_log(mut self, sink: TxLogSink) -> Self {
+        self.tx_log = sink;
+        self
+    }
+
     pub fn pin_log(mut self, sink: PinLogSink) -> Self {
         self.pin_log = sink;
         self
@@ -1030,6 +1225,7 @@ impl Esp32C6Builder {
             time_grade,
             strict,
             strict_grade,
+            strict_grade_blocks,
             trace,
             trace_blocks,
             uart0,
@@ -1052,6 +1248,7 @@ impl Esp32C6Builder {
             peripherals,
             dump_frames,
             pin_log,
+            tx_log,
             strip,
             rmt_logs,
         } = self;
@@ -1318,9 +1515,15 @@ impl Esp32C6Builder {
             PinLogSink::Off => None,
             PinLogSink::File(path) => Some(open_write(path)?),
         };
+        let tx_log_sink: Option<Box<dyn std::io::Write + Send>> = match &tx_log {
+            TxLogSink::Off => None,
+            TxLogSink::Stderr => Some(Box::new(std::io::stderr())),
+            TxLogSink::File(path) => Some(open_write(path)?),
+        };
 
         bus.set_strict(strict);
         bus.set_strict_grade(strict_grade);
+        bus.set_strict_grade_blocks(strict_grade_blocks);
 
         // Guest time is zero and the schedule is empty: the peripherals that
         // need a first event (a UART polling its host source) take it now.
@@ -1330,6 +1533,11 @@ impl Esp32C6Builder {
         let mut hart = MachineHart::new(0);
         loader::reset_hart(&mut hart, &mut bus, entry);
         hart.set_cycle_model(time_grade.cycle_model());
+        // The address's cost, if this grade charges one. Installed after the
+        // loader has placed the app and filled the window: the cache starts
+        // cold, as it is at reset, and the host's placement of segments
+        // costs the guest nothing.
+        bus.set_memory_cost(time_grade.memory_cost());
 
         // `--wire a:b`, before the guest runs: a jumper is on the header
         // when the board powers up, not put there later.
@@ -1345,6 +1553,16 @@ impl Esp32C6Builder {
             .watching(uart0_log.clone())
             .watching(usb_sj_log.clone());
         let gpio_index = bus.peripheral_index("GPIO");
+        // The radio TX log's source block; `None` on a machine without one.
+        let wifi_mac_index = bus.peripheral_index("WIFI_MAC");
+        // Arm the recording only when something is listening: it ends a
+        // slice early, and a machine with no `--tx-log` must run exactly the
+        // run it ran before this block could record anything.
+        if !matches!(tx_log, TxLogSink::Off)
+            && let Some(i) = wifi_mac_index
+        {
+            bus.with_peripheral::<crate::periph::wifi_stub::WifiStub, _>(i, |w, _| w.arm_tx_log());
+        }
         if gpio_index.is_none() && !pin_script.is_empty() {
             return Err(BuildError::Io(
                 "--pin-script needs a GPIO block, and this machine has none".to_string(),
@@ -1408,6 +1626,16 @@ impl Esp32C6Builder {
             script: usb_script.into(),
             pin_script,
             gpio_index,
+            wifi_mac_index,
+            tx_log: tx_log_sink,
+            tx_log_lines: 0,
+            tx_log_capped: false,
+            air_participant: None,
+            air_tx: Vec::new(),
+            air_offered: 0,
+            air_delivered: 0,
+            air_undelivered: 0,
+            air_undelivered_noted: false,
             next_pin_poll: 0,
             next_host_poll: 0,
             control_lines: 0,
@@ -1614,6 +1842,34 @@ pub struct Esp32C6Machine {
     pin_script: PinScript,
     /// `GPIO`'s peripheral index: the block the drained edges are handed to.
     gpio_index: Option<usize>,
+    /// `WIFI_MAC`'s peripheral index: where the radio TX log's handoffs come
+    /// from. `None` on a machine with no radio window.
+    wifi_mac_index: Option<usize>,
+    /// The radio TX log's writer, its line count and whether the cap has
+    /// been announced.
+    tx_log: Option<Box<dyn std::io::Write + Send>>,
+    tx_log_lines: u64,
+    tx_log_capped: bool,
+    /// This machine's seat on an [`Air`](lp_emu_esp_common::air::Air), or
+    /// `None` for a machine that is not in one.
+    ///
+    /// The whole off switch: nothing on the air path runs, and `WIFI_MAC`
+    /// records nothing, until [`Esp32C6Machine::arm_air`] is called. See
+    /// [`crate::lockstep`].
+    air_participant: Option<lp_emu_esp_common::air::ParticipantId>,
+    /// Frames armed since the runner last drained them.
+    air_tx: Vec<RadioFrame>,
+    /// Frames the air has offered this machine. **P1 counts them and does
+    /// not deliver them**: writing one into the receiver's RX ring, filling
+    /// an `rx_ctrl` header and raising the RX interrupt is M4 P2's, and this
+    /// counter is what makes the pair runner testable before P2 exists.
+    air_offered: u64,
+    /// Frames actually written into the guest's RX ring, and frames the air
+    /// offered that could not be. `air_undelivered_noted` keeps the warning
+    /// to one line per run; the counts go in the run's summary.
+    air_delivered: u64,
+    air_undelivered: u64,
+    air_undelivered_noted: bool,
     /// The guest-cycle grid a pin script's unresolved `after` is looked at
     /// on. Guest time, so two runs resolve at the same cycle.
     next_pin_poll: Cycles,
@@ -2096,6 +2352,373 @@ impl Esp32C6Machine {
         }
     }
 
+    /// The radio TX log: the frames the WiFi blob handed the MAC, as bytes.
+    ///
+    /// Drained at a slice boundary, because the bytes live in guest RAM and
+    /// a peripheral cannot read it. `WIFI_MAC` records the arming PLCP0
+    /// write ([`wifi_stub::TxHandoff`]) and yields; this reads the
+    /// descriptor and the buffer and writes one line.
+    ///
+    /// # What a line says, and how much of it is a reading
+    ///
+    /// ```text
+    /// 1036433.581 tx desc=0x4081de88 dw0=0xc0110060 buf=0x4081defc next=0x00000000 \
+    ///     size=96 len=60 hdr=3c00000000000000 frame=d0000000ffffffffffff…
+    /// ```
+    ///
+    /// - `desc` is `0x4080_0000 | (plcp0 & 0xf_ffff)`
+    ///   ([`wifi_stub::TX_DESC_PTR_MASK`]) — arithmetic, corroborated by
+    ///   `lmacTxFrame`'s own argument on the observed run.
+    /// - `dw0`/`buf`/`next` are the three words **as read**, no
+    ///   interpretation. That the twelve bytes are a `{word, buffer, link}`
+    ///   descriptor is established by the RX ring, whose ten elements chain
+    ///   through `next` at twelve-byte spacing.
+    /// - `size` is `dw0 & 0xfff`. *Modeled*: on the RX ring that field is
+    ///   1,700 against a 1,708-byte buffer stride, which is what a capacity
+    ///   would look like. The other twelve bits of `dw0` are **not** decoded
+    ///   here, because no reading of them survives both descriptors.
+    /// - `len` is the buffer's first word — 60 on the observed frame, which
+    ///   is the 56 bytes of 802.11 frame plus a four-byte FCS the buffer
+    ///   does not carry, and the same value `mac_tx_set_plcp1` wrote to
+    ///   `WIFI_MAC+0x5488`. `hdr` is the eight bytes it sits in and `frame`
+    ///   is what follows, `len - 4` of them.
+    ///
+    /// A descriptor whose `len` does not fit its buffer is not forced into
+    /// that shape: the line becomes `raw=` with the first bytes verbatim, so
+    /// a frame this reading does not cover is visible rather than silently
+    /// mis-printed.
+    fn drain_tx_log(&mut self) {
+        if self.tx_log.is_none() && self.air_participant.is_none() {
+            return;
+        }
+        let Some(index) = self.wifi_mac_index else {
+            return;
+        };
+        let handoffs = self
+            .bus
+            .with_peripheral::<crate::periph::wifi_stub::WifiStub, _>(index, |w, _| {
+                w.take_tx_handoffs()
+            })
+            .unwrap_or_default();
+        for handoff in handoffs {
+            // Read the descriptor and the buffer **once**: the same bytes
+            // feed the `--tx-log` line and the air, so a pair run and a
+            // logged run can never disagree about what was sent.
+            let read = self.read_tx_frame(&handoff);
+            if self.air_participant.is_some()
+                && let Some(bytes) = read.frame
+            {
+                self.air_tx.push(RadioFrame {
+                    at: handoff.at,
+                    bytes,
+                });
+            }
+            if self.tx_log.is_none() {
+                continue;
+            }
+            let line = read.line;
+            let Some(w) = self.tx_log.as_mut() else {
+                return;
+            };
+            if self.tx_log_lines >= TX_LOG_LINE_CAP {
+                if !self.tx_log_capped {
+                    self.tx_log_capped = true;
+                    let _ = writeln!(
+                        w,
+                        "# tx log cap ({TX_LOG_LINE_CAP} lines) reached; later frames are not logged"
+                    );
+                }
+                return;
+            }
+            self.tx_log_lines += 1;
+            let _ = writeln!(w, "{line}");
+        }
+    }
+
+    /// One armed frame, read out of guest RAM: the log's line, and the
+    /// frame's own bytes when the descriptor's reading holds.
+    ///
+    /// See [`drain_tx_log`](Self::drain_tx_log) for what each field of the
+    /// line means and how much of it is a reading. `frame` is `None` for
+    /// exactly the cases the line reports as `unreadable=` or `raw=`: an air
+    /// carries a frame this machine could read *as a frame*, or it carries
+    /// nothing, and it never invents a length.
+    fn read_tx_frame(&mut self, handoff: &crate::periph::wifi_stub::TxHandoff) -> ReadTxFrame {
+        let us = handoff.at as f64 / memmap::CYCLES_PER_US as f64;
+        let desc = handoff.descriptor();
+        let head = format!(
+            "{us:.3} tx desc={desc:#010x} plcp0={:#010x} pc={:#010x}",
+            handoff.plcp0, handoff.pc
+        );
+        let (Some(dw0), Some(buf), Some(next)) = (
+            self.peek_word(desc),
+            self.peek_word(desc.wrapping_add(4)),
+            self.peek_word(desc.wrapping_add(8)),
+        ) else {
+            return ReadTxFrame::unreadable(format!("{head} unreadable=descriptor"));
+        };
+        let size = dw0 & 0xfff;
+        let head = format!("{head} dw0={dw0:#010x} buf={buf:#010x} next={next:#010x} size={size}");
+        let Some(len) = self.peek_word(buf) else {
+            return ReadTxFrame::unreadable(format!("{head} unreadable=buffer"));
+        };
+        // The frame sits at buf + 8 and runs `len - 4` bytes: the length
+        // word counts the FCS the MAC appends and the buffer does not hold.
+        // Anything that does not fit is printed raw rather than shaped.
+        let fits = (4..=size.min(TX_LOG_BYTE_CAP)).contains(&len) && len + 4 <= size;
+        if !fits {
+            let raw = self.peek_bytes(buf, size.min(64));
+            return ReadTxFrame::unreadable(format!("{head} len={len} raw={}", hex(&raw)));
+        }
+        let hdr = self.peek_bytes(buf, 8);
+        let frame = self.peek_bytes(buf + 8, len - 4);
+        ReadTxFrame {
+            line: format!("{head} len={len} hdr={} frame={}", hex(&hdr), hex(&frame)),
+            frame: Some(frame),
+        }
+    }
+
+    // ---- the air seam (M4 P1) -------------------------------------------
+    //
+    // Three calls, all driven from *outside* the machine by
+    // [`crate::lockstep`] or by the `--air` socket: take this machine's seat,
+    // drain what its radio armed, and offer it what someone else's did. The
+    // machine never sees the air and the air never sees the machine, which is
+    // the same seam `pins` draws for pads.
+
+    /// Give this machine seat `id` on an air, and start `WIFI_MAC` recording
+    /// the frames its blob arms.
+    ///
+    /// Idempotent, and the only thing that turns the air path on. A machine
+    /// this is never called on is byte-for-byte the machine that came before
+    /// this seam existed: [`drain_tx_log`](Self::drain_tx_log) returns at its
+    /// first line and `WIFI_MAC` never asks for a slice boundary.
+    pub fn arm_air(&mut self, id: lp_emu_esp_common::air::ParticipantId) {
+        self.air_participant = Some(id);
+        if let Some(index) = self.wifi_mac_index {
+            self.bus
+                .with_peripheral::<crate::periph::wifi_stub::WifiStub, _>(index, |w, _| {
+                    w.arm_air()
+                });
+        }
+    }
+
+    /// This machine's seat, or `None` when it is not in an air.
+    pub fn air_participant(&self) -> Option<lp_emu_esp_common::air::ParticipantId> {
+        self.air_participant
+    }
+
+    /// The frames this machine's radio armed since the last call, in the
+    /// order it armed them. Empty unless [`arm_air`](Self::arm_air) was.
+    pub fn take_air_frames(&mut self) -> Vec<RadioFrame> {
+        std::mem::take(&mut self.air_tx)
+    }
+
+    /// Offer this machine a frame from the air — and **deliver** it (M4 P2):
+    /// take a descriptor off the guest's own RX ring, write an `rx_ctrl`
+    /// header and the frame into its buffer, hand the descriptor back and
+    /// raise the radio interrupt.
+    ///
+    /// This runs at a **slice boundary**, where the machine holds guest
+    /// memory and the interrupt lines and no peripheral holds a borrow — the
+    /// mirror of [`drain_tx_log`](Self::drain_tx_log), which reads guest RAM
+    /// at the same place for the same reason.
+    ///
+    /// # What is the guest's and what is ours
+    ///
+    /// The **ring** is entirely the guest's: its base is the address the
+    /// blob wrote to `WIFI_MAC+0x4084`, its descriptors are the twelve-byte
+    /// records the blob chained, and the buffers are its own heap. Nothing
+    /// here allocates anything or assumes an address.
+    ///
+    /// The **interrupt source** and its **clear** are the guest's too — M4
+    /// P1 observed both. The **raise** is ours: no silicon has been watched
+    /// doing it, and an air that raises an interrupt is originating an event
+    /// rather than reproducing one. The README says so by name.
+    ///
+    /// Everything else — that the header sits at `buf[0]`, what goes in the
+    /// descriptor's undetermined bits, which event bits to raise — is
+    /// **chosen**, and [`crate::periph::wifi_stub`]'s docs say which of them
+    /// the guest was observed checking.
+    pub fn offer_air_frame(&mut self, frame: &lp_emu_esp_common::air::AirFrame) {
+        self.air_offered += 1;
+        let outcome = self.deliver_air_frame(&frame.bytes);
+        match &outcome {
+            AirDelivery::Delivered { .. } => self.air_delivered += 1,
+            _ => {
+                self.air_undelivered += 1;
+                // Once, and never silently: a run whose ring filled up says
+                // so in its summary, and the first one says why.
+                if !self.air_undelivered_noted {
+                    self.air_undelivered_noted = true;
+                    log::warn!(
+                        "air: {} could not be delivered into the RX ring ({}); \
+                         later ones are counted, not logged",
+                        frame.bytes.len(),
+                        outcome.why()
+                    );
+                }
+            }
+        }
+        if self.bus.trace.is_enabled() {
+            let line = format!(
+                "cyc={} AIR {} {} bytes from {} (sent at cyc={})",
+                self.cycles(),
+                outcome.why(),
+                frame.bytes.len(),
+                frame.from,
+                frame.at
+            );
+            self.bus.trace.note(&line);
+        }
+    }
+
+    /// The delivery itself. See [`offer_air_frame`](Self::offer_air_frame).
+    ///
+    /// # The walk
+    ///
+    /// From the base the blob programmed, follow `next` while the hardware
+    /// still owns the descriptor (`dw0[31]`) and its buffer is big enough
+    /// for the header and the frame (`dw0[11:0]`, the size field M4 P0
+    /// corroborated against the ring's 1,708-byte buffer stride). The chain
+    /// **ends** — the tenth descriptor's `next` is NULL, it does not wrap —
+    /// so a walk that runs out of owned descriptors is the ring being full,
+    /// and that is counted rather than papered over.
+    ///
+    /// [`RX_RING_WALK_CAP`] bounds the walk: a `next` chain the guest
+    /// corrupted must not spin the emulator.
+    ///
+    /// # The descriptor's undetermined bits
+    ///
+    /// `owner` (`[31]`) is **cleared** — the `lldesc` convention is that the
+    /// hardware gives a descriptor back that way, and it is the only bit in
+    /// the word whose reading M4 P0 called consistent across both
+    /// descriptors. `eof` (`[30]`) is **set**: one frame, one descriptor,
+    /// and the TX side's single-descriptor chain had it set. `[23:12]` is
+    /// written with the byte count — see [`AirDelivery`] and the README for
+    /// what the guest did and did not check about that. `[11:0]` (the
+    /// buffer's size) and `[28:24]` are **left exactly as the blob posted
+    /// them**: the air has nothing to say about a buffer's capacity, and
+    /// `[28:24]`'s meaning is M4 P0's U3, still open.
+    fn deliver_air_frame(&mut self, bytes: &[u8]) -> AirDelivery {
+        let Some(index) = self.wifi_mac_index else {
+            return AirDelivery::NoBlock;
+        };
+        let Some(base) = self
+            .bus
+            .with_peripheral::<crate::periph::wifi_stub::WifiStub, _>(index, |w, _| w.rx_dma_base())
+            .flatten()
+        else {
+            return AirDelivery::NoRing;
+        };
+        let micros = (self.cycles() / memmap::CYCLES_PER_US) as u32;
+        let payload = crate::periph::wifi_stub::rx_ctrl::frame_with_header(bytes, micros);
+        let need = payload.len() as u32;
+
+        let mut desc = base;
+        for _ in 0..RX_RING_WALK_CAP {
+            let (Some(dw0), Some(buf), Some(next)) = (
+                self.peek_word(desc),
+                self.peek_word(desc.wrapping_add(4)),
+                self.peek_word(desc.wrapping_add(8)),
+            ) else {
+                return AirDelivery::NoRing;
+            };
+            let owned_by_hardware = dw0 & RX_DESC_OWNER_MASK != 0;
+            let size = dw0 & RX_DESC_SIZE_MASK;
+            if owned_by_hardware && size >= need {
+                if !self.poke_bytes(buf, &payload) {
+                    return AirDelivery::NoRing;
+                }
+                let dw0_after = (dw0 & !RX_DESC_OWNER_MASK & !RX_DESC_LEN_MASK)
+                    | RX_DESC_EOF_MASK
+                    | ((need << RX_DESC_LEN_SHIFT) & RX_DESC_LEN_MASK);
+                self.poke_word(desc, dw0_after);
+                self.bus
+                    .with_peripheral::<crate::periph::wifi_stub::WifiStub, _>(index, |w, _| {
+                        w.raise_rx_interrupt(desc, next)
+                    });
+                // The level: a peripheral can only reach `IrqLines` inside
+                // an access, and this is a slice boundary. The block put the
+                // bits in its event word; the machine holds the line up
+                // until the guest's write-one-to-clear empties that word.
+                self.bus.irq.set_level(crate::regs::source::WIFI_MAC, true);
+                return AirDelivery::Delivered {
+                    desc,
+                    buf,
+                    dw0_before: dw0,
+                    dw0_after,
+                    len: need,
+                };
+            }
+            if next == 0 {
+                return AirDelivery::RingFull;
+            }
+            desc = next;
+        }
+        AirDelivery::RingWalkCap
+    }
+
+    /// Write `bytes` into guest memory through the bus's own decode, word by
+    /// word, read-modify-writing the two ends so a delivery never disturbs a
+    /// byte outside its own range. `false` if any word refused.
+    fn poke_bytes(&mut self, address: u32, bytes: &[u8]) -> bool {
+        let mut at = address;
+        let mut rest = bytes;
+        while !rest.is_empty() {
+            let word_at = at & !3;
+            let lane = (at - word_at) as usize;
+            let take = rest.len().min(4 - lane);
+            let mut word = if lane == 0 && take == 4 {
+                0
+            } else {
+                match self.peek_word(word_at) {
+                    Some(w) => w,
+                    None => return false,
+                }
+            }
+            .to_le_bytes();
+            word[lane..lane + take].copy_from_slice(&rest[..take]);
+            if !self.poke_word(word_at, u32::from_le_bytes(word)) {
+                return false;
+            }
+            at += take as u32;
+            rest = &rest[take..];
+        }
+        true
+    }
+
+    /// How many frames the air has offered this machine. See
+    /// [`offer_air_frame`](Self::offer_air_frame).
+    pub fn air_frames_offered(&self) -> u64 {
+        self.air_offered
+    }
+
+    /// How many of those reached the guest's RX ring, and how many did not.
+    /// A pair's summary prints both, because "offered" and "delivered" are
+    /// different claims and the difference is the ring's end (RD10).
+    pub fn air_frames_delivered(&self) -> u64 {
+        self.air_delivered
+    }
+
+    pub fn air_frames_undelivered(&self) -> u64 {
+        self.air_undelivered
+    }
+
+    /// `count` bytes of guest memory, word by word through the bus's decode.
+    /// Short if a word does not answer.
+    fn peek_bytes(&mut self, address: u32, count: u32) -> Vec<u8> {
+        let mut out = Vec::with_capacity(count as usize);
+        for i in 0..count.div_ceil(4) {
+            match self.peek_word(address.wrapping_add(i * 4)) {
+                Some(word) => out.extend_from_slice(&word.to_le_bytes()),
+                None => break,
+            }
+        }
+        out.truncate(count as usize);
+        out
+    }
+
     fn write_pin_log(&mut self, edge: &lp_emu_esp_common::pins::Edge) {
         let Some(w) = self.pins.pin_log.as_mut() else {
             return;
@@ -2417,6 +3040,9 @@ impl Esp32C6Machine {
             self.bus.run_due_events(at);
             // The pads: whatever the slice put on the wire, in cycle order.
             self.drain_pins();
+            // The radio: any frame the blob armed during the slice, read out
+            // of guest RAM now that a peripheral's borrow has ended.
+            self.drain_tx_log();
             // The host's side, at a slice boundary and never inside one: a
             // scripted command due by now, then — on the poll cadence — the
             // byte socket's client edge and the control channel's lines.
@@ -2996,18 +3622,37 @@ mod tests {
     }
 
     #[test]
-    fn the_time_grades_are_the_two_cycle_models_and_their_configuration_names() {
+    fn the_time_grades_are_the_three_cycle_models_and_their_configuration_names() {
         assert_eq!(TimeGrade::T1.cycle_model(), CycleModel::InstructionCount);
         assert_eq!(TimeGrade::T2.cycle_model(), CycleModel::Esp32C6);
+        assert_eq!(TimeGrade::T3.cycle_model(), CycleModel::Esp32C6Kernels);
         assert_eq!(TimeGrade::T1.configuration(), "lp-emu:esp32c6:t1");
         assert_eq!(TimeGrade::T2.configuration(), "lp-emu:esp32c6:t2");
-        assert!(TimeGrade::parse("t3").is_err());
+        assert_eq!(TimeGrade::T3.configuration(), "lp-emu:esp32c6:t3");
+        assert_eq!(TimeGrade::parse("t3"), Ok(TimeGrade::T3));
+        assert!(TimeGrade::parse("t4").is_err());
 
         let m = Esp32C6Builder::new()
             .time_grade(TimeGrade::T2)
             .build()
             .unwrap();
         assert_eq!(m.harts[0].cycle_model(), CycleModel::Esp32C6);
+    }
+
+    /// The memory-cost hook is installed by the grade and by nothing else.
+    /// `t1` and `t2` are `None` **by construction**, which is the whole of
+    /// why their cycle counts cannot move (M1 P3 G3-3).
+    #[test]
+    fn only_t3_installs_a_memory_cost_model() {
+        for (grade, expected) in [
+            (TimeGrade::T1, false),
+            (TimeGrade::T2, false),
+            (TimeGrade::T3, true),
+        ] {
+            assert!(grade.memory_cost().is_some() == expected, "{grade:?}");
+            let m = Esp32C6Builder::new().time_grade(grade).build().unwrap();
+            assert_eq!(m.bus.has_memory_cost(), expected, "{grade:?} on the bus");
+        }
     }
 
     #[test]

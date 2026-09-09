@@ -76,6 +76,8 @@ desk session gets wasted.
 | `gpio-calibrate` | `test_gpio_calibrate` | `CAL READY target=` (it serves; it never finishes) | `checks::gpio_calibrate` (the `CAL` line protocol, the duty ramp) |
 | `uart-bridge` | `test_uart_bridge` | `UART-BRIDGE READY ` (it serves until unplugged) | `checks::uart_bridge` (the bounded queue, the pump step, the ready line) |
 | `jit-math-perf` | `test_jit_math_perf` | `[jit-math-perf] === DONE ===` | `checks::jit_math_perf` (the corpus, the Q32 kernels, the benchmark runner — the cycle counter itself is injected as a `fn() -> u32`, since reading it is a chip fact rather than portable arithmetic) |
+| `cycle-probe` | `test_cycle_probe` | `[cycle-probe] === DONE ===` | `checks::cycle_probe` (the two-clock bracket, the repetition, the record, and the kernels that need no chip fact) |
+| `gpio-input` | `test_gpio_input` | `[gpio-input] === DONE ===` | `checks::gpio_input` (the scripted edge table both sides are driven by, the quadrature decoder the interrupt handler runs, the record shapes, and the renderer that turns the table into the emulated side's `--pin-script`) |
 | `rmt-chase` | `test_rmt`, `ws281x_telemetry` | `[rmt-chase] === DONE ===` | `checks::rmt_chase` (the chase pattern, the FNV-1a checksum, the per-frame record) |
 | `render-loop` | `bench_render_loop` (with `server,radio,memory_fs`) | `[render-loop] === DONE ===` | `checks::render_loop` (the frame accumulator, the record shapes) |
 | `boot-idle` | *(none — the shipped image)* | `[stack] heartbeat: high-water` | *(none)* |
@@ -132,6 +134,40 @@ idiomatic one; `catalog/projects/rocaille` (`bench_project_rocaille`, the same
 frame. The frame counts differ so that both cost the bench the same ~4 s of
 emulated time; what the payload reports is a per-frame mean, which does not
 care how many frames it averaged.
+
+### `gpio-input` is the first payload that makes the chip listen
+
+Every other payload here makes the chip *say* something. This one reads two
+pads, and it is the first that does: before it, nothing in this crate read an
+input at all.
+
+Two things about it are worth the paragraph, because both are the kind of
+decision a later reader would otherwise reverse by accident.
+
+**Its two sides are driven differently, on purpose.** There is no wire and no
+hands on the bench this payload was captured on, so a silicon capture is the
+firmware driving its own pad and reading it back — a self-loop, which works
+because `GPIO.in_` reads a pad's own driven level once the input buffer is on.
+An emulated capture is the *same image* with the levels arriving from outside,
+by `--pin-script`. So the silicon transcript measures the **read path** and
+the emulated one measures the **outside-driver path**. Both are real and
+conflating them would not be, so the `drive=` word on the setup line says
+which, both sidecars say which, and the payload's mask set masks that word and
+nothing else. The switch is **runtime** — a drive-select pad with a pull-down,
+which nothing is wired to on a board — so the image bytes are identical on
+both sides and a difference between the transcripts can never be a difference
+between two builds.
+
+**The button goes through the product's own driver, which is why the harness
+is a `src/tests/` entry point.** `Esp32GpioButtonDriver` lives in
+`fw-esp32c6/src/hardware/button.rs` and needs `esp_hal::gpio`,
+`lpc_hardware::HwRegistry` and the board manifest; a module here that could
+call it would have dragged all three into a crate whose first rule is to stay
+cheap. So the split is `cycle_probe`'s: this module holds the edge table, the
+decoder, the records and the renderer, and the chip-bound half — the pads, the
+interrupt handler, the product driver and the self-loop's output enable — is
+in `fw-esp32c6`. A pass on the button reader is therefore a pass for the code
+the product ships, not for a re-implementation of it.
 
 ### `boot-idle` is the shipped image, not a module
 
@@ -195,6 +231,31 @@ The registry that carries that difference is the **host's**
 (`lp-emu-validate`'s `Payload::capture`), not this one. `FwCheckConfig`
 describes what the firmware is and prints; when the operator opens the port is
 a fact about the operator.
+
+### `cycle-probe` measures a model's terms, not a workload
+
+Every other timing payload here measures something the product does.
+`cycle-probe` measures the **terms** a cycle model is built from: a kernel
+exists to move exactly one cost and nothing else, so a difference between
+silicon and an emulated configuration can be attributed rather than admired.
+
+Two properties are contract rather than implementation.
+
+- **Two clocks on every bracket, always.** The cycle counter and a microsecond
+  clock that is not derived from it, the microsecond reads outside the cycle
+  reads on both sides. If the two disagree about how long a kernel took, that
+  disagreement is a finding and is meant to be visible — a payload that
+  reported one clock could not tell "the model is wrong" from "the counter
+  stopped". Plan one lost a sitting to exactly that ambiguity (`notes.md` F3).
+- **Nothing is reduced.** Every repetition reaches the record; there is no
+  mean, and `bracket_overhead` is reported rather than subtracted. Variance on
+  silicon is data, and a payload that hides it hands the model a precision it
+  has not got.
+
+`insns` is on a record only where the count is *exact* — an assembly loop of
+known length times its iteration count. The kernels whose bodies are compiled
+Rust carry no `insns` field at all, because an estimate in a calibration
+record is worse than a gap in one.
 
 ### `rmt-chase` is the first payload whose claim is checked off a pin
 

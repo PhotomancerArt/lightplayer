@@ -21,7 +21,7 @@ use lp_emu_esp32c6::flash::FlashBacking;
 use lp_emu_esp32c6::loader::EfuseIdentity;
 use lp_emu_esp32c6::machine::{
     AppSource, Esp32C6Builder, Esp32C6Machine, FrameSink, Outcome, PinLogSink, RomSource,
-    StopCondition, StripConfig, TimeGrade, Uart0Sink, UsbHost, UsbSjDrain, UsbSjSink,
+    StopCondition, StripConfig, TimeGrade, TxLogSink, Uart0Sink, UsbHost, UsbSjDrain, UsbSjSink,
 };
 use lp_emu_esp32c6::memmap;
 use lp_emu_esp32c6::periph::rmt::RefillStats;
@@ -48,7 +48,8 @@ OPTIONS:
                             real mask ROM and the real bootloader do the
                             loading. Read-only; implies the chip's size
     --rom <path>            a mask ROM ELF (default: the vendored C6 rev0 image)
-    --time-grade t1|t2      t1 = instruction count, t2 = the per-class model [t1]
+    --time-grade t1|t2|t3   t1 = instruction count, t2 = the per-class model,
+                            t3 = the measured class costs plus cache and bus [t1]
     --timeout <5s|1500ms|900us>
                             EMULATED time to run for [100ms]
     --wall-timeout <s>      host-clock safety net; exits 4
@@ -127,6 +128,15 @@ OPTIONS:
     --strip-timing ws2812|ws2811
                             the wire timing a pad is decoded against
                             (400/800 ns vs 300/900 ns highs) [ws2812]
+    --tx-log stderr|file:<path>
+                            the radio TX log: one line per frame the WiFi
+                            blob hands the MAC, as bytes, read out of guest
+                            RAM at the descriptor the blob programmed —
+                            `<us> tx desc=.. dw0=.. buf=.. next=.. size=..
+                            len=.. hdr=.. frame=..`. An OBSERVATION, not an
+                            air: nothing is delivered anywhere, no interrupt
+                            is raised, and a run with it on is the same run
+                            with it off
     --pin-log file:<path>   every edge on every routed pad: `<us> gpio18 0|1`.
                             12,288 lines per 256-LED frame — never a default,
                             capped at 2,000,000 lines
@@ -169,13 +179,21 @@ OPTIONS:
     --trace [BLOCK,BLOCK]   log every MMIO access; an optional block filter
     --trace-file <path>     write the trace here instead of stderr
     --strict-bus            an access nothing claims is fatal; exits 3
+    --strict-grade-blocks <NAME,NAME>
+                            narrow --strict-grade to these blocks by name.
+                            The default is every block that publishes a
+                            table, which asks what a run reads that we only
+                            modelled; a named set asks the narrower question,
+                            whether one driver crosses anything below the
+                            level.
     --strict-grade modeled|documented|measured
                             an access to a register graded BELOW this level is
                             fatal (exits 3): `documented` stops on a register
                             whose behaviour is only our reading of the PAC,
                             `measured` on anything no transcript has proved.
                             It applies to the blocks that PUBLISH a grade
-                            table — USB_DEVICE today — and passes over the
+                            table — every accept block plus USB_DEVICE — and
+                            passes over the
                             rest, because `nobody graded this block` is not
                             the same statement as `this block is modelled`.
                             The report names the blocks it checked. Tables
@@ -239,12 +257,14 @@ struct Args {
     trace_file: Option<PathBuf>,
     strict: bool,
     strict_grade: Option<RegGrade>,
+    strict_grade_blocks: Option<Vec<&'static str>>,
     probes: Vec<(u64, String)>,
     break_at: Vec<String>,
     hooks: bool,
     map: bool,
     dump_frames: FrameSink,
     pin_log: PinLogSink,
+    tx_log: TxLogSink,
     strip: StripConfig,
 }
 
@@ -260,6 +280,7 @@ fn run() -> Result<ExitCode, String> {
         .time_grade(args.time_grade)
         .strict(args.strict)
         .strict_grade(args.strict_grade)
+        .strict_grade_blocks(args.strict_grade_blocks.clone())
         .efuse(args.efuse)
         .reset_cause(args.reset_cause)
         .strap(args.strap.unwrap_or(lp_emu_esp_common::Strap::App))
@@ -273,6 +294,7 @@ fn run() -> Result<ExitCode, String> {
         .usb_sj_drain(args.usb_sj_drain)
         .dump_frames(args.dump_frames.clone())
         .pin_log(args.pin_log.clone())
+        .tx_log(args.tx_log.clone())
         .strip(args.strip.order, args.strip.timing);
 
     if let Some(len) = args.flash_len {
@@ -491,6 +513,17 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                     format!("--strict-grade `{text}`: expected modeled, documented or measured")
                 })?);
             }
+            "--strict-grade-blocks" => {
+                let text = value("--strict-grade-blocks")?;
+                // Leaked because a block name is `&'static str` everywhere
+                // else in the bus, and a run parses this once.
+                args.strict_grade_blocks = Some(
+                    text.split(',')
+                        .map(|n| &*Box::leak(n.trim().to_string().into_boxed_str()))
+                        .filter(|n: &&str| !n.is_empty())
+                        .collect(),
+                );
+            }
             "--reset-cause" => {
                 let text = value("--reset-cause")?;
                 args.reset_cause =
@@ -534,6 +567,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             }
             "--dump-frames" => args.dump_frames = parse_dump_frames(&value("--dump-frames")?)?,
             "--pin-log" => args.pin_log = parse_pin_log(&value("--pin-log")?)?,
+            "--tx-log" => args.tx_log = parse_tx_log(&value("--tx-log")?)?,
             "--strip-order" => {
                 let text = value("--strip-order")?;
                 args.strip.order = StripConfig::parse_order(&text).ok_or_else(|| {
@@ -626,6 +660,18 @@ fn parse_dump_frames(text: &str) -> Result<FrameSink, String> {
                 "`{other}` is not a frame destination (stdout, memory, file:<path>)"
             )),
         },
+    }
+}
+
+/// `stderr` or `file:<path>` — the radio TX log's destination.
+fn parse_tx_log(text: &str) -> Result<TxLogSink, String> {
+    match text.split_once(':') {
+        Some(("file", path)) => Ok(TxLogSink::File(path.into())),
+        None if text == "stderr" => Ok(TxLogSink::Stderr),
+        _ => Err(format!(
+            "`{text}` is not a tx-log destination (stderr, file:<path>); the log is one line \
+             per frame the WiFi blob hands the MAC"
+        )),
     }
 }
 
@@ -866,8 +912,8 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
         // about the blocks it checked and about no others.
         let scope = machine.bus.blocks_in_strict_grade_scope();
         eprintln!(
-            "strict-grade {level}: checked {} ({}); every other block publishes no grade table \
-             and was passed over",
+            "strict-grade {level}: checked {} ({}); every other block was passed over — it \
+             publishes no grade table, or --strict-grade-blocks did not name it",
             scope.len(),
             if scope.is_empty() {
                 "none".to_string()

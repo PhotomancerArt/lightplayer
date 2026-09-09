@@ -40,11 +40,18 @@ same scripted host input are byte-identical — pinned by a test on the shipped
 image, not asserted. `--wall-timeout` is the single exception and it is a
 safety net: it can end a run, never change one.
 
-Time comes in two grades, both of which are just the hart's cycle model:
-`t1` (`lp-emu:esp32c6:t1`) counts instructions, `t2` uses the measured
-per-class model. The CPU is 160 MHz, so `micros = cycles / 160`. Neither
-grade is a claim about milliseconds on silicon — see the vision's "time is a
-graded ladder, never a promise".
+Time comes in three grades. The first two are just the hart's cycle model:
+`t1` (`lp-emu:esp32c6:t1`) counts instructions, `t2` uses a per-class model.
+`t3` adds what an access's **address** costs — a 32 KiB 4-way cache of
+32-byte lines over the flash window at 338 cycles a fill, and 9 cycles of APB
+wait state on a peripheral load or store (`cache.rs`, and
+`docs/reports/2026-09-08-esp32c6-t3-calibration.md` for the kernel behind
+every number) — and corrects the four class costs the `cycle-probe` payload
+measured on silicon. It is the first grade in which two instructions with the
+same opcode cost different amounts because they are at different addresses.
+The CPU is 160 MHz, so `micros = cycles / 160`. No grade is a claim about
+milliseconds on silicon — see the vision's "time is a graded ladder, never a
+promise".
 
 ## The memory map
 
@@ -281,8 +288,30 @@ zero is invalid, `Cache_MSPI_MMU_Set` (`0x4002_7c90`) says an entry is
 `page | encrypt<<10 | VALID<<9` and gives the index arithmetic,
 `MMU_Get_Page_Mode` (`0x4002_75ea`) says the page mode is
 `mmu_power_ctrl[4:3]`. `CacheMmu::translate` is the whole address path in one
-function, on purpose: a later `t2` rung hangs its cache-miss wait states off
-exactly that lookup.
+function, on purpose — and the rung that was promised off it has landed as
+`t3`.
+
+### What an address costs (`t3`)
+
+`cache::CacheCost` is the C6's implementation of `lp_emu_core::MemoryCost` —
+the hook the hart charges beside an instruction's own class cost, drained
+once per instruction through `Bus::take_memory_cost`. It is installed by the
+time grade and by nothing else: `t1` and `t2` install none, so their cycle
+counts are what they were before it existed.
+
+| term | cycles | grade | source |
+|---|---|---|---|
+| flash-window line fill | 338 per 32 B | `measured` | `cycle-probe`'s `code_walk`, cross-checked by `rodata_stride` |
+| flash-window hit | 0 | `measured` | `flash_loop` vs `iram_loop`: 0.0000 ± 0.0002 cycles/instruction once resident |
+| cache geometry | 32 KiB, 4-way, 32 B lines | `documented` | the mask ROM's `Cache_Get_Mode` (`0x4002_75b0`) and `Cache_Get_ICache_Line_Size` (`0x4002_75aa`); the line is `measured` too |
+| APB load or store (`0x6000_0000`+) | +9 | `measured` | `mmio_poll` at UART0 and at SYSTIMER, indistinguishable |
+| RAM, mask ROM, LP SRAM | 0 | `measured` | `iram_loop` at 1.000 cycles/instruction |
+| interrupt controllers (`0x2000_0000`+) | 0 | **not measured** | core-local rather than APB; no kernel reached it |
+| per-slice / interrupt entry | **none** | — | `slice_shape` measured the console path instead, and in the opposite direction; no term is invented without a kernel |
+
+There is no scale factor anywhere, global or per-class. The residual has two
+signs — the emulator was 43× cheap on cold flash code and is ~1.5× expensive
+on the console path — and a scale factor would average opposite errors.
 
 The window is served as a **cache fill** — `cache::fill` copies a valid
 page's flash bytes into the RAM region behind `0x4200_0000` when the table
@@ -517,16 +546,54 @@ runs 5.5 s attached under `--strict-grade documented` and crosses none of
 them (`tests/usb_attached.rs`, G4-4), and a change that starts reading one
 stops the run with the register's name.
 
-**The level applies to the blocks that publish a table**, and today that is
-this one. A block with no table is passed over, because "nobody graded this
-block" is not the same statement as "this block is modelled" — conflating
-them made `documented` stop at the first MMIO access of any boot, on an
-accept table nobody had said anything about, and the flag then measured how
-much of the chip had been graded rather than what the run was allowed to
-trust. The run report names the blocks it checked (`strict-grade documented:
-checked 1 (USB_DEVICE)`), so an ungraded block reads as an unanswered
-question and never as a pass. Grading the accept tables is the
-honest-peripheral policy's next milestone, not a gap this flag hides.
+**The level applies to the blocks that publish a table.** A block with no
+table is passed over, because "nobody graded this block" is not the same
+statement as "this block is modelled" — conflating them made `documented`
+stop at the first MMIO access of any boot, on an accept table nobody had said
+anything about, and the flag then measured how much of the chip had been
+graded rather than what the run was allowed to trust. The run report names
+the blocks it checked, so an ungraded block reads as an unanswered question
+and never as a pass.
+
+#### The accept tables, graded (2026-09-08)
+
+Until 2026-09-08 this block was the only one with a table, and that was the
+gap the paragraph above called the honest-peripheral policy's next milestone.
+It is closed: **every accept block grades itself from the PAC**, by a rule
+short enough to state in full (`RegFile::with_pac_grades`):
+
+- **`documented`** where the PAC says the register is read-write and the
+  block pretends nothing about it. Accept-and-remember *is* the documented
+  behaviour of a read-write register: the document says it holds what you
+  write, and a `RegFile` holds what you write.
+- **`modeled`** otherwise — a read-only register (the value comes from
+  hardware nobody here models, so whatever we answer is a stand-in), a
+  write-only one (the document does not say what a read returns), or **any
+  register the block has an exception for**: a read override, a mirror, a
+  write-one-to-clear or -pulse mask, a read-only mask. A register we pretend
+  about is a register we modelled.
+
+The access comes from the same generated table as the names and the resets —
+which of `impl Readable` / `impl Writable` svd2rust wrote for the register —
+so it is derived data with the same provenance, not a judgement typed in by
+hand. Nothing grades itself `measured`: that needs a transcript naming the
+register, and it is a promotion somebody makes by hand with a reason.
+
+Twenty-four blocks are in scope now rather than one, and the first thing the
+wider run says is worth reading: the shipped image's boot reaches a register
+we only modelled after **246,696 cycles**, and it is `I2C_ANA_MST.i2c1_ctrl`
+— the analog transaction port, which forces `busy` low and answers `regi2c`
+reads out of a store nobody has measured. `tests/usb_attached.rs
+::the_boot_reads_registers_we_only_modelled_and_this_is_which` pins it, and a
+change that moves it is a change to what this boot depends on being modelled.
+
+That is a survey, not a gate, and the two are now told apart by name.
+`--strict-grade-blocks NAME[,NAME]` narrows the level to the blocks a run
+means: G4-4 passes `USB_DEVICE` and keeps its old claim exactly (five and a
+half seconds attached, none of this block's twenty modelled registers
+crossed), while a run that names nothing asks the whole-chip question. Before
+the accept blocks were graded the narrowing was accidental — there was
+nowhere else for the level to apply.
 
 Not modelled, stated: the PCR reset of the block on esp-hal's first enable
 (sitting 1's attached-host transcript shows both the `[INIT]` lines and the
@@ -748,11 +815,317 @@ evidence beside it, run again. The boot asked five times —
 | `ram_set_chan_freq_sw_start` | `WIFI_MAC+0x0cc` | `andi 256; beqz` — bit 8, lock | bit 8 = 1 |
 | `rom_iq_est_enable` (ROM) | `WIFI_MAC+0x4a0` | `slli a3,a5,15; bgez` — bit 16, done | bit 16 = 1 |
 | `hal_init` | `WIFI_MAC+0x4ddc` | `andi 1; beqz` — bit 0, ready | bit 0 = 1 |
+| `hal_mac_rx_is_dscr_reload` | `WIFI_MAC+0x4080` | `andi 1; bnez` — bit 0, the descriptor-reload strobe | bit 0 = 0 |
 
 — and then said hello. The list is `wifi_stub::OVERRIDES`; a unit test walks
-it and refuses an entry without a reason. Interrupt sources 0–3 are never
-raised: nothing here receives, and the `WIFI RX config` line is where
-virtual-air work would start.
+it and refuses an entry without a reason. The sixth is not the boot's: it is
+the **first thing a delivered frame asked for**, and nothing had ever asked
+before M4 P2 because nothing had ever received.
+
+Interrupt sources 1 (`WIFI_MAC_NMI`) and 3 (`WIFI_BB`) are still never
+raised. **Source 0 is**, on a delivery into the RX ring — see the air
+section. Source 2 (`WIFI_PWR`) is claimed by the blob but nothing here raises
+it.
+
+#### The radio TX log
+
+`--tx-log stderr|file:<path>` writes one line per frame the blob hands the
+MAC — the TX side of that same window, as bytes:
+
+```text
+1036418.400 tx desc=0x4081de88 plcp0=0xc061de88 pc=0x40806040 dw0=0xc0110060 \
+  buf=0x4081defc next=0x00000000 size=96 len=60 hdr=3c00000000000000 \
+  frame=d0000000ffffffffffffa0f26287b48cffffffffffff00007f18fe34…
+```
+
+| field | what it is |
+|---|---|
+| `desc` | `0x4080_0000 \| (plcp0 & 0xf_ffff)` — the descriptor the blob programmed |
+| `plcp0`, `pc` | the arming write to `WIFI_MAC+0x4d6c` and who did it (`hal_mac_txq_enable+0xe`) |
+| `dw0`, `buf`, `next` | the descriptor's three words **as read**, no interpretation |
+| `size` | `dw0 & 0xfff`; *modeled* — the RX ring's 1,700 against a 1,708-byte buffer stride is what a capacity looks like |
+| `len` | the buffer's first word: 60 here, the 56 on-air bytes plus an FCS the buffer does not carry |
+| `hdr`, `frame` | the eight bytes `len` sits in, and the `len - 4` after them |
+
+The frame above is a 56-byte 802.11 vendor-specific action frame: broadcast
+to broadcast, from the eFuse MAC, category `0x7f`, Espressif OUI `18:fe:34`,
+ESP-NOW element type 4.
+
+**This is an observation, not an air.** Nothing is delivered anywhere, no
+machine receives these bytes, and no interrupt is raised — the guest is told
+nothing it would not have been told without the flag.
+
+**A machine without `--tx-log` is byte-for-byte the machine that came
+before it**: the block only starts recording when a sink is set. The
+recording itself ends the slice early, so that the machine can read the
+buffer out of guest RAM before the guest reuses it, and ending a slice moves
+where a pending interrupt is taken — so a run *with* the log is not promised
+to be instruction-identical to one without. That is why the arming is
+conditional rather than always-on. (On the `test_espnow` image it happens to
+be identical anyway: 79,871,852 instructions at 1,500 ms with the log off,
+with it on, and before the flag existed.)
+
+The blob's TX completion path
+(`lmacTxDone`, `ppProcTxDone`, `trc_onPPTxDone`, `esp_wifi_tx_done_cb`) is
+**still never entered** on this machine — so the `test_espnow` image arms
+exactly one frame and then stops making progress. The `WIFI_MAC` interrupt
+*is* raised now, on a delivery into the RX ring (see the air section), and it
+makes no difference to this: M4 P1 tried every bit of both event words
+against the completion path and none of them reaches it. That is the honest
+state of the TX side, and `docs/debt/emu-c6-radio-tx-never-completes.md`
+carries the question.
+
+A descriptor whose `len` does not fit its buffer prints `raw=` with the
+bytes verbatim rather than being forced into the shape above.
+
+#### The air, and the lockstep pair (M4 P1)
+
+Two machines can be put on a **medium** and run together, so that a frame one
+of them arms is carried to the other. The medium is
+`lp_emu_esp_common::air` — chip-neutral, and it holds no register offset, no
+interrupt source and no frame format — and the runner is
+[`lockstep`](src/lockstep.rs).
+
+```rust
+let mut pair = Lockstep::new(vec![a, b])?;          // 672 µs, 8,192-cycle quantum
+let report = pair.run_until(horizon, &StopCondition::default());
+```
+
+Two machines are advanced alternately over a fixed **guest-cycle quantum**,
+in **one thread and two run loops**, exchanging at quantum boundaries. One
+thread is not an implementation detail: it is what makes a pair run
+**byte-identical on every replay**, and a thread pair would end that.
+
+| number | value | why |
+|---|---|---|
+| latency | 672 µs = 107,520 cycles, `modeled` | the air time of the observed 60-byte frame at 802.11b's 1 Mbit/s long-preamble basic rate (192 µs preamble and PLCP header, then 60 bytes at 8 µs a byte). One **stated constant, not a function of the frame** — deriving it per frame would be a PHY model, and no PHY is modelled. Never zero. Settable. |
+| quantum | 8,192 cycles = 51.2 µs | the machine's own `MAX_SLICE_CYCLES`, so a pair pays no slice boundaries a single run was not already paying. It bounds how stale a delivery can be — at most one quantum, 7.6 % of the latency — and it is **never larger than the latency**, which the constructor refuses, because a larger one would let a frame be delivered sooner than the air says it travels. |
+
+**What the air models: byte delivery on a perfect medium.** Every frame
+reaches every other participant, in send order, exactly once, after the
+stated latency. A frame is never delivered back to its sender.
+
+**What it does not model, by name:** the PHY, the channel, collisions,
+retries, RSSI, channel occupancy, timing windows, encryption (ESP-NOW's CCMP
+when a peer key is set), and range — there is one medium and everyone on it
+hears everyone else. The C6's 28 % frame truncation under a WiFi scan
+(`docs/debt/c6-scan-truncation-accepted.md`) is a *timing* property of the
+blob and the MAC during masked windows, not of frame delivery, and cannot
+reproduce here.
+
+**A machine that is not in an air is byte-for-byte the machine that came
+before the air existed.** Nothing on the air path runs and `WIFI_MAC` records
+nothing until `arm_air` is called, exactly as `--tx-log` works. Measured on
+the `test_espnow` image: **79,871,852 instructions at 1,500 ms** with no air,
+which is M4 P0's figure for the same image with the TX log off, with it on,
+and before either flag existed.
+
+#### Delivery: the frame reaches the receiving guest's application (M4 P2)
+
+A frame the air offers a machine is **written into that machine's own RX
+descriptor ring**, behind an `rx_ctrl` header, and the radio interrupt is
+raised. On the `test_espnow` image the receiving guest's application prints
+it:
+
+```text
+[test_espnow] rx device= event= kind= payload_len=0
+```
+
+That is the first time anything has ever received on this machine. (The
+`device=`/`event=`/`kind=` fields print empty because the firmware's `Debug`
+impls for those newtypes print nothing — the same as the `device_id=` in its
+own ready line.)
+
+**How a delivery works.** At the slice boundary — the mirror of
+`drain_tx_log`, and for the same reason: a peripheral cannot touch guest
+memory, the machine can — the machine reads the ring base the blob programmed
+into `WIFI_MAC+0x4084`, walks the chain through each descriptor's `next`
+until it finds one the hardware still owns whose buffer is big enough, writes
+the header and the frame into that buffer, hands the descriptor back, points
+`WIFI_MAC+0x408c` and `+0x4088` at it, and raises interrupt source 0 with bit
+14 in the MAC's event word. Everything it touches is the guest's own: no
+address is assumed and nothing is allocated.
+
+**What the guest decided, and what we did.** Every row below was settled by
+changing the value and watching the receiving guest, not by reasoning about a
+layout (`tests/air_delivery.rs`):
+
+| thing | what it is set to | who decided |
+|---|---|---|
+| the interrupt source | 0 (`WIFI_MAC`) | **the guest** — its own `set_isr` routes it (M4 P1) |
+| the event bit | 14 | **the guest** — with a frame in the ring, bit 14 is the only one of 32 that reaches the RX path at all, and `hal_init`'s own enable mask (`+0x4c40 = 0x19a879e0`) has it set |
+| the clear | write-one-to-clear at `+0x4c4c`, and the line drops when the event word empties | **the guest** — it writes back what it read and loops until both event words read zero (M4 P1) |
+| `+0x408c` (last filled descriptor) | the descriptor just written | **the guest** — `hal_mac_rx_get_last_dscr` reads it, and answering 0 sends the blob into its reload path instead of at the ring |
+| `+0x4088` (the RX cursor) | the descriptor after it | **the guest** — `hal_mac_rx_read_rxdscrnext` reads it, and answering 0 makes the blob dereference the 0: the run's own `R4 UNMAPPED+0x1143c` is the evidence. This is M4 P0's **U6**, answered |
+| `+0x4080` bit 0 | self-clearing | **the guest** — `hal_mac_rx_set_dscr_reload` sets it and `hal_mac_rx_is_dscr_reload` spins until it reads 0 |
+| `rxmatch0` in the header | 1 | **the guest** — of all 256 values of that header byte, the 128 with bit 4 set reach `ppRxPkt` and the 128 without it do not |
+| descriptor `eof` (`[30]`) | set | **the guest** — with it clear the frame is not taken |
+| descriptor `[28:24]` | **left exactly as the blob posted it** | **the guest** — clearing the 1 it posts stops reception. What the field *means* is still M4 P0's U3 |
+| descriptor `owner` (`[31]`) | cleared | **us.** The guest does not check it; it is cleared because that is what `lldesc` hardware does, and a ring whose descriptors were never handed back would look full |
+| descriptor `[23:12]` | the byte count written | **nobody.** Every value tried — the byte count, the 2,704 the ring already held, all ones — delivers the frame. The guest *reads* it (the instruction counts differ) but tolerates anything. **Undetermined**, as M4 P0 left it |
+| the air's latency | 672 µs | **us**, a stated constant (above) |
+| the raise itself | ours | **us.** No silicon has been watched raising this interrupt. An air that raises one is *originating* an event, not reproducing one |
+
+**The `rx_ctrl` header, and how much of it is invented.** The layout is
+derived from the public bit layout of `wifi_pkt_rx_ctrl_t` in the
+**Apache-2.0 `esp-wifi-sys-esp32c6` crate, version 0.2.0** — cited, never
+copied: the crate is not vendored, none of its source is in this repository,
+and nothing was disassembled out of a blob binary. That the header sits at
+`buf[0]` and is 92 bytes long is a **choice**; M4 P0 §4 established that the
+ring was posted and never filled, so nobody here has ever seen the header the
+silicon writes.
+
+Setting each of the header's 92 bytes to `0xff` in turn and watching the
+guest says which of them it reads:
+
+| byte | field | read by the guest? |
+|---|---|---|
+| 1 | `rate` | **yes** |
+| 3 bit 4 | `rxmatch0` | **yes**, and it is the gate |
+| 33–34 | `rx_channel_estimate_len`, its valid bit | **yes** |
+| 39 | `cur_bb_format`, `cur_single_mpdu` | **yes** |
+| 84–85 | `sig_len` | **yes** |
+| 88 | `rx_state` | **yes** |
+| 0 | `rssi` | no — **a constant we invented**, −40 dBm |
+| 20 | `noise_floor` | no — a constant, −96 dBm |
+| 21 | `channel`, `second` | no — fixed at 11 and 0 |
+| 12–15 | `timestamp` | no — the receiving machine's own µs clock |
+| 11 bit 7 | `is_group` | no — derived from the frame's `addr1` |
+| all the rest | `he_siga1`, `he_siga2`, `rxend_state`, `dump_len`, … | no — zero |
+
+`rate` is a **fixed value**, not a derivation: an 802.11 frame does not carry
+the rate it was sent at, the PLCP registers that would say are M4 P0's U5,
+and no PHY is modelled — so it is 0, the 1 Mbit/s basic rate the air's
+latency constant was chosen from. `sig_len` and `is_group` *are* derived from
+the frame. Four zero bytes stand where the FCS would be; the air carries no
+FCS and none is computed.
+
+**The ring ends; it does not wrap.** The blob posts ten descriptors and the
+tenth's `next` is NULL. A guest that has stopped draining fills all ten, and
+this guest does **not** re-post them — after ten deliveries every descriptor
+is still the guest's. So the eleventh frame and every one after it is
+**dropped, counted and logged once**: `air_frames_delivered` and
+`air_frames_undelivered` on the machine say how many of each, and the first
+drop writes one line.
+
+##### What the air does not model, by name
+
+The list the ADR and the honesty section rest on. None of this is a hedge;
+each item is something a reader would otherwise assume:
+
+- **No PHY, no channel, no collisions, no retries, no range.** One medium,
+  everybody on it hears everybody, every frame arrives exactly once.
+- **No RSSI.** `rssi` is a constant, −40 dBm, and every frame carries it.
+  `noise_floor` likewise, at −96.
+- **No channel model.** The header's `channel` is a fixed 11 — the channel
+  the `test_espnow` image asks for — and the air delivers a frame whatever
+  channel anybody is on.
+- **No rate model.** `rate` is fixed at 0; the latency is a stated constant
+  and not a function of a frame's length.
+- **No encryption.** ESP-NOW's CCMP, when a peer key is set, is not modelled.
+- **No timing windows**, and in particular the C6's 28 % frame truncation
+  under a WiFi scan (`docs/debt/c6-scan-truncation-accepted.md`) — a *timing*
+  property of the blob and the MAC during masked windows, not of frame
+  delivery. It cannot reproduce here.
+- **No FCS.** Four zero bytes stand where one would be.
+- **No TX completion.** The blob's TX-done path is still never entered and
+  nothing here originates one. This is the reason a pair only ever exchanges
+  one frame in one direction — see below.
+
+##### The pair, and the one frame
+
+The `test_espnow` guest arms **one** frame and never returns from its own
+`send` (`docs/debt/emu-c6-radio-tx-never-completes.md`). So:
+
+- Two identical images started in the **same** cycle both arm at 1,036.4 ms
+  and are both wedged 672 µs later when the other's frame arrives. Both
+  deliver; neither prints. `tests/air_delivery.rs` pins that.
+- `Lockstep::stagger` gives each machine a stated power-on offset in the
+  pair's clock, the way two real boards have one. With the second machine
+  250 ms behind, the first machine's frame lands while the second is still in
+  its tick loop, and the second prints its `rx` line.
+- **The other direction cannot work**, whatever the offset: whichever machine
+  sends first wedges first, so the later sender's frame always arrives at a
+  machine that has stopped draining. One frame, one direction, until a TX
+  completes.
+
+A staggered pair is still byte-identical on replay — an offset is a constant
+in guest cycles.
+
+##### The socket form is still not built
+
+`--air listen:<addr>` / `--air connect:<addr>` is described below and **has no
+implementation**: the wire codec (`air::wire`) exists and is tested, the flag
+does not. It is auditable-only by construction and no gate may use it, so it
+waits for plan two's `lp-cli emu serve`. A pair is built through
+`lockstep::Lockstep`.
+
+##### What is observed and what is not, on the TX completion
+
+The blob's TX completion path (`lmacTxDone`, `ppProcTxDone`,
+`trc_onPPTxDone`) is **still never entered on this machine**, and this
+emulator **does not originate a completion**. M4 P1 established, by
+observation of *our own* registers, how the blob is wired for one:
+
+- esp-radio's `os_adapter_chip_specific::set_isr` routes interrupt sources
+  **0 (`WIFI_MAC`) and 2 (`WIFI_PWR`)** to CPU interrupt 16, which esp-hal
+  had already enabled at priority 1 — so a raised source 0 **is** taken.
+- On a raised source 0 the blob's ISR runs and reads `WIFI_MAC+0x4c48`
+  (`hal_mac_interrupt_get_event`), `WIFI_MAC+0x4c34`
+  (`hal_mac_interrupt_get_bsscolor`) and `WIFI_PWR+0x37b0`
+  (`hal_pwr_interrupt_get_event`), and clears what it read by writing it
+  back to `WIFI_MAC+0x4c4c` and `WIFI_PWR+0x37b4` — a write-one-to-clear
+  pair. It loops until both event words read zero.
+- **Every one of the 32 bits of each event word was tried, one at a time,
+  and none reaches the completion path.** The ISR consumes the event,
+  clears it and returns, with an identical instruction count for all 64
+  candidates.
+
+So: the source, the handler's reads and the clear are **observed**; which
+bits mean "your frame went out" is **not known**, and nothing here invents
+one. See `docs/debt/emu-c6-radio-tx-never-completes.md`.
+
+One line of P1's reading needs correcting, and it matters for anyone who
+reads this looking for a method. "The event word's value does not reach a
+dispatch at all" was measured **with an empty RX ring**, and it is only true
+there. M4 P2 ran the same sweep with a frame already in a descriptor and the
+candidates separate immediately — eight distinct instruction counts across 35
+of them, and bit 14 reaching the RX path where nothing else does. A negative
+measured with nothing to find is not a negative about the mechanism; it is a
+negative about the experiment.
+
+The TX question itself is **untouched** by M4 P2 and stays open. What the
+pair run adds to it is one datum: a machine that has *received* a frame, all
+the way up to its application, still wedges in its own `send` afterwards —
+machine 1 in `the_pair_hears_itself` prints its `rx` line and then never
+prints a `tx` one. So a working RX path is not what the TX completion was
+waiting for.
+
+##### `--air <addr>` — the socket form
+
+The wire framing is in `lp_emu_esp_common::air::wire` and is **its own**, not
+`M!` (`lpc_wire::json::to_serial_line` is the only `M!` framer and the
+emulator never uses it — `just lint-emu-fence`):
+
+```text
+  offset  size  field
+  0       4     magic, the ASCII bytes "LPA1"
+  4       4     length, little-endian u32: how many bytes follow
+  8       8     at, little-endian u64: the sender's guest cycle
+  16      2     from, little-endian u16: the sender's participant id
+  18      n     the frame, verbatim
+```
+
+When the flag lands it is spelled `--air listen:<host:port>` or
+`--air connect:<host:port>` (a bare `<host:port>` means connect), on this
+crate's binary and mirrored on `lp-cli emu run` the way `--pin-log` and
+`--tx-log` are; when plan two's `lp-cli emu serve` arrives it takes the same
+flag and the same wire form.
+
+**Auditable only, never a gate.** A socket pair is not byte-identical — two
+processes interleave however the operating system schedules them — so no
+validation configuration, no transcript and no CI job runs this way; the
+deterministic form is the lockstep runner, in one process and one thread.
 
 ## Reference images and the gates
 
@@ -824,7 +1197,7 @@ is a function of every access the machine makes.
 ## The CLI
 
 ```text
-lp-emu-esp32c6 --elf <app.elf> [--rom <path>] [--time-grade t1|t2]
+lp-emu-esp32c6 --elf <app.elf> [--rom <path>] [--time-grade t1|t2|t3]
     [--timeout 5s|1500ms|900us] [--wall-timeout <s>] [--exit-on <substr>]
     [--uart0 stdout|memory|file:<path>|tcp:<host:port>] [--uart0-script <file>]
     [--flash <file>] [--flash-copy <file>] [--flash-size 4M]
@@ -833,9 +1206,11 @@ lp-emu-esp32c6 --elf <app.elf> [--rom <path>] [--time-grade t1|t2]
     [--usb-sj-tried stderr|memory|file:<path>]
     [--control tcp:<host:port>] [--usb-script <file>]
     [--pin-script <file>]... [--wire <a>:<b>]...
+    [--tx-log stderr|file:<path>]
     [--efuse-mac a0:f2:62:87:b4:8c] [--efuse-rev 0.2] [--seed <u64>]
     [--trace [BLOCK,BLOCK…]] [--trace-file <path>] [--strict-bus]
     [--strict-grade modeled|documented|measured]
+    [--strict-grade-blocks NAME[,NAME…]]
     [--probe <symbol>@<ms>] [--break-at <symbol>] [--hooks] [--map]
 ```
 
@@ -852,7 +1227,8 @@ that ran too long says so, a capture cut in half looks like data.
 `--pin-script` and `--wire` are the host's side of the **pads**: a scripted
 button, a quadrature encoder, a pad-to-pad jumper. Both are mirrored on
 `lp-cli emu run`, the way `--pin-log` is; the grammar and the pad policy are
-under "The pin, driven from outside".
+under "The pin, driven from outside". `--tx-log` is the radio's side, and
+is mirrored the same way — "The radio TX log", above.
 
 `--control`, `--usb-script` and `--usb-sj tcp:` are the host's side of the
 USB link. The protocol — the command table, the replies, the coupling rule,
@@ -898,7 +1274,7 @@ enough, on the shipped image, to walk the whole documented boot sequence.
 
 `just emu-c6` above is the debugging door. The door that makes a *claim* is
 the validation runner, where this machine is the configuration
-`lp-emu:esp32c6:t1` (and `:t2` for the other grade):
+`lp-emu:esp32c6:t1` (and `:t2` / `:t3` for the other grades):
 
 ```bash
 cargo run -p lp-cli -- validate run emu-m3 --config lp-emu:esp32c6:t1 --dry-run

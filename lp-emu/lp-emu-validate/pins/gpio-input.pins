@@ -1,0 +1,40 @@
+# gpio-input — the emulated side of the pads.
+#
+# GENERATED from `fw_checks::checks::gpio_input::SCRIPT`. Do not edit by hand:
+# `lp-cli`'s validate_registry_parity test holds this file equal to what
+# `write_pin_script` renders, so that the firmware's own timeline and this
+# one cannot drift apart quietly.
+#
+# gpio2 high says an outside driver is present, which is what
+# makes this run report `drive=external`. Nothing is connected to that pad on
+# the desk board, so silicon reads it low and self-loops.
+0us pin 2 1
+0us pin 20 1
+0us pin 0 0
+0us pin 1 0
+after "[gpio-input] === ARMED ===" +110000us pin 20 0
+then +1000us pin 20 1
+then +1000us pin 20 0
+then +1000us pin 20 1
+then +1000us pin 20 0
+then +196000us pin 20 1
+then +100000us pin 20 0
+then +200000us pin 20 1
+then +100000us pin 20 0
+then +20000us pin 20 1
+then +170000us pin 0 1
+then +5000us pin 1 1
+then +5000us pin 0 0
+then +5000us pin 1 0
+then +5000us pin 0 1
+then +5000us pin 1 1
+then +5000us pin 0 0
+then +5000us pin 1 0
+then +65000us pin 1 1
+then +5000us pin 0 1
+then +5000us pin 1 0
+then +5000us pin 0 0
+then +5000us pin 1 1
+then +5000us pin 0 1
+then +5000us pin 1 0
+then +5000us pin 0 0

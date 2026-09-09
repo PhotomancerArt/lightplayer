@@ -1,0 +1,169 @@
+[fw-checks-header] {"schema":1,"payload":"cycle-probe","chip":"esp32c6","firmware_commit":"17ac011f7f97","firmware_features":"default,esp32c6,esp_radio,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_cycle_probe","firmware_dirty":false}
+[INFO] fw_esp32c6::tests::cycle_probe: [cycle-probe] esp32c6 @ 160000000 Hz, us clock = SYSTIMER unit0 @ 16 MHz
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] === cycle probe starting, 5 reps per kernel ===
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel bracket_overhead         rep=0 iters=0 cycles=718 us=10 acc=0
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"bracket_overhead","rep":0,"iters":0,"cycles":718,"us":10,"acc":0}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel bracket_overhead         rep=1 iters=0 cycles=42 us=1 acc=0
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"bracket_overhead","rep":1,"iters":0,"cycles":42,"us":1,"acc":0}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel bracket_overhead         rep=2 iters=0 cycles=42 us=1 acc=0
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"bracket_overhead","rep":2,"iters":0,"cycles":42,"us":1,"acc":0}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel bracket_overhead         rep=3 iters=0 cycles=42 us=1 acc=0
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"bracket_overhead","rep":3,"iters":0,"cycles":42,"us":1,"acc":0}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel bracket_overhead         rep=4 iters=0 cycles=42 us=1 acc=0
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"bracket_overhead","rep":4,"iters":0,"cycles":42,"us":1,"acc":0}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel iram_loop                rep=0 iters=250000 cycles=1500379 us=9379 insns=1500000 acc=3803897208
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"iram_loop","rep":0,"iters":250000,"cycles":1500379,"us":9379,"insns":1500000,"acc":3803897208}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel flash_loop               rep=0 iters=250000 cycles=1500379 us=9379 insns=1500000 acc=3803897208
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"flash_loop","rep":0,"iters":250000,"cycles":1500379,"us":9379,"insns":1500000,"acc":3803897208}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel iram_loop                rep=1 iters=250000 cycles=1500041 us=9376 insns=1500000 acc=3803897208
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"iram_loop","rep":1,"iters":250000,"cycles":1500041,"us":9376,"insns":1500000,"acc":3803897208}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel flash_loop               rep=1 iters=250000 cycles=1500041 us=9377 insns=1500000 acc=3803897208
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"flash_loop","rep":1,"iters":250000,"cycles":1500041,"us":9377,"insns":1500000,"acc":3803897208}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel iram_loop                rep=2 iters=250000 cycles=1500041 us=9377 insns=1500000 acc=3803897208
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"iram_loop","rep":2,"iters":250000,"cycles":1500041,"us":9377,"insns":1500000,"acc":3803897208}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel flash_loop               rep=2 iters=250000 cycles=1500041 us=9377 insns=1500000 acc=3803897208
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"flash_loop","rep":2,"iters":250000,"cycles":1500041,"us":9377,"insns":1500000,"acc":3803897208}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel iram_loop                rep=3 iters=250000 cycles=1500041 us=9377 insns=1500000 acc=3803897208
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"iram_loop","rep":3,"iters":250000,"cycles":1500041,"us":9377,"insns":1500000,"acc":3803897208}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel flash_loop               rep=3 iters=250000 cycles=1500041 us=9377 insns=1500000 acc=3803897208
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"flash_loop","rep":3,"iters":250000,"cycles":1500041,"us":9377,"insns":1500000,"acc":3803897208}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel iram_loop                rep=4 iters=250000 cycles=1500041 us=9377 insns=1500000 acc=3803897208
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"iram_loop","rep":4,"iters":250000,"cycles":1500041,"us":9377,"insns":1500000,"acc":3803897208}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel flash_loop               rep=4 iters=250000 cycles=1500041 us=9376 insns=1500000 acc=3803897208
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"flash_loop","rep":4,"iters":250000,"cycles":1500041,"us":9376,"insns":1500000,"acc":3803897208}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel muldiv/mul               rep=0 iters=250000 cycles=1251741 us=7824 insns=1250000 acc=3464855074
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"muldiv/mul","rep":0,"iters":250000,"cycles":1251741,"us":7824,"insns":1250000,"acc":3464855074}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel muldiv/div               rep=0 iters=40000 cycles=560389 us=3504 insns=200000 acc=3327904597
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"muldiv/div","rep":0,"iters":40000,"cycles":560389,"us":3504,"insns":200000,"acc":3327904597}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel muldiv/mul               rep=1 iters=250000 cycles=1250051 us=7813 insns=1250000 acc=3464855074
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"muldiv/mul","rep":1,"iters":250000,"cycles":1250051,"us":7813,"insns":1250000,"acc":3464855074}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel muldiv/div               rep=1 iters=40000 cycles=560051 us=3501 insns=200000 acc=3327904597
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"muldiv/div","rep":1,"iters":40000,"cycles":560051,"us":3501,"insns":200000,"acc":3327904597}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel muldiv/mul               rep=2 iters=250000 cycles=1250051 us=7814 insns=1250000 acc=3464855074
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"muldiv/mul","rep":2,"iters":250000,"cycles":1250051,"us":7814,"insns":1250000,"acc":3464855074}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel muldiv/div               rep=2 iters=40000 cycles=560051 us=3501 insns=200000 acc=3327904597
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"muldiv/div","rep":2,"iters":40000,"cycles":560051,"us":3501,"insns":200000,"acc":3327904597}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel muldiv/mul               rep=3 iters=250000 cycles=1250051 us=7813 insns=1250000 acc=3464855074
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"muldiv/mul","rep":3,"iters":250000,"cycles":1250051,"us":7813,"insns":1250000,"acc":3464855074}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel muldiv/div               rep=3 iters=40000 cycles=560051 us=3501 insns=200000 acc=3327904597
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"muldiv/div","rep":3,"iters":40000,"cycles":560051,"us":3501,"insns":200000,"acc":3327904597}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel muldiv/mul               rep=4 iters=250000 cycles=1250051 us=7814 insns=1250000 acc=3464855074
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"muldiv/mul","rep":4,"iters":250000,"cycles":1250051,"us":7814,"insns":1250000,"acc":3464855074}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel muldiv/div               rep=4 iters=40000 cycles=560051 us=3501 insns=200000 acc=3327904597
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"muldiv/div","rep":4,"iters":40000,"cycles":560051,"us":3501,"insns":200000,"acc":3327904597}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel code_walk/cold           rep=0 iters=12288 cycles=1063965 us=6662 insns=24576 acc=671100928
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"code_walk/cold","rep":0,"iters":12288,"cycles":1063965,"us":6662,"insns":24576,"acc":671100928}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel code_walk/warm           rep=0 iters=12288 cycles=1063965 us=6661 insns=24576 acc=671100928
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"code_walk/warm","rep":0,"iters":12288,"cycles":1063965,"us":6661,"insns":24576,"acc":671100928}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel code_walk/cold           rep=1 iters=12288 cycles=1063965 us=6662 insns=24576 acc=671100928
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"code_walk/cold","rep":1,"iters":12288,"cycles":1063965,"us":6662,"insns":24576,"acc":671100928}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel code_walk/warm           rep=1 iters=12288 cycles=1063965 us=6661 insns=24576 acc=671100928
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"code_walk/warm","rep":1,"iters":12288,"cycles":1063965,"us":6661,"insns":24576,"acc":671100928}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel code_walk/cold           rep=2 iters=12288 cycles=1063965 us=6661 insns=24576 acc=671100928
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"code_walk/cold","rep":2,"iters":12288,"cycles":1063965,"us":6661,"insns":24576,"acc":671100928}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel code_walk/warm           rep=2 iters=12288 cycles=1063965 us=6661 insns=24576 acc=671100928
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"code_walk/warm","rep":2,"iters":12288,"cycles":1063965,"us":6661,"insns":24576,"acc":671100928}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel code_walk/cold           rep=3 iters=12288 cycles=1063965 us=6661 insns=24576 acc=671100928
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"code_walk/cold","rep":3,"iters":12288,"cycles":1063965,"us":6661,"insns":24576,"acc":671100928}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel code_walk/warm           rep=3 iters=12288 cycles=1063965 us=6661 insns=24576 acc=671100928
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"code_walk/warm","rep":3,"iters":12288,"cycles":1063965,"us":6661,"insns":24576,"acc":671100928}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel code_walk/cold           rep=4 iters=12288 cycles=1063965 us=6661 insns=24576 acc=671100928
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"code_walk/cold","rep":4,"iters":12288,"cycles":1063965,"us":6661,"insns":24576,"acc":671100928}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel code_walk/warm           rep=4 iters=12288 cycles=1063965 us=6661 insns=24576 acc=671100928
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"code_walk/warm","rep":4,"iters":12288,"cycles":1063965,"us":6661,"insns":24576,"acc":671100928}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel mmio_poll/uart0-status   rep=0 iters=40000 cycles=480717 us=3005 insns=120000 acc=40000
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"mmio_poll/uart0-status","rep":0,"iters":40000,"cycles":480717,"us":3005,"insns":120000,"acc":40000}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel mmio_poll/systimer       rep=0 iters=40000 cycles=480717 us=3005 insns=120000 acc=40000
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"mmio_poll/systimer","rep":0,"iters":40000,"cycles":480717,"us":3005,"insns":120000,"acc":40000}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel mmio_poll/uart0-status   rep=1 iters=40000 cycles=480041 us=3001 insns=120000 acc=40000
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"mmio_poll/uart0-status","rep":1,"iters":40000,"cycles":480041,"us":3001,"insns":120000,"acc":40000}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel mmio_poll/systimer       rep=1 iters=40000 cycles=480041 us=3001 insns=120000 acc=40000
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"mmio_poll/systimer","rep":1,"iters":40000,"cycles":480041,"us":3001,"insns":120000,"acc":40000}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel mmio_poll/uart0-status   rep=2 iters=40000 cycles=480041 us=3001 insns=120000 acc=40000
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"mmio_poll/uart0-status","rep":2,"iters":40000,"cycles":480041,"us":3001,"insns":120000,"acc":40000}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel mmio_poll/systimer       rep=2 iters=40000 cycles=480041 us=3001 insns=120000 acc=40000
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"mmio_poll/systimer","rep":2,"iters":40000,"cycles":480041,"us":3001,"insns":120000,"acc":40000}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel mmio_poll/uart0-status   rep=3 iters=40000 cycles=480041 us=3001 insns=120000 acc=40000
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"mmio_poll/uart0-status","rep":3,"iters":40000,"cycles":480041,"us":3001,"insns":120000,"acc":40000}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel mmio_poll/systimer       rep=3 iters=40000 cycles=480041 us=3001 insns=120000 acc=40000
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"mmio_poll/systimer","rep":3,"iters":40000,"cycles":480041,"us":3001,"insns":120000,"acc":40000}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel mmio_poll/uart0-status   rep=4 iters=40000 cycles=480041 us=3001 insns=120000 acc=40000
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"mmio_poll/uart0-status","rep":4,"iters":40000,"cycles":480041,"us":3001,"insns":120000,"acc":40000}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel mmio_poll/systimer       rep=4 iters=40000 cycles=480041 us=3001 insns=120000 acc=40000
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"mmio_poll/systimer","rep":4,"iters":40000,"cycles":480041,"us":3001,"insns":120000,"acc":40000}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel rodata_stride/16         rep=0 iters=65536 cycles=12259001 us=76630 acc=4032561152
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"rodata_stride/16","rep":0,"iters":65536,"cycles":12259001,"us":76630,"acc":4032561152}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel rodata_stride/16         rep=1 iters=65536 cycles=12258325 us=76626 acc=4032561152
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"rodata_stride/16","rep":1,"iters":65536,"cycles":12258325,"us":76626,"acc":4032561152}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel rodata_stride/16         rep=2 iters=65536 cycles=12258325 us=76626 acc=4032561152
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"rodata_stride/16","rep":2,"iters":65536,"cycles":12258325,"us":76626,"acc":4032561152}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel rodata_stride/16         rep=3 iters=65536 cycles=12258325 us=76626 acc=4032561152
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"rodata_stride/16","rep":3,"iters":65536,"cycles":12258325,"us":76626,"acc":4032561152}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel rodata_stride/16         rep=4 iters=65536 cycles=12258325 us=76625 acc=4032561152
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"rodata_stride/16","rep":4,"iters":65536,"cycles":12258325,"us":76625,"acc":4032561152}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel rodata_stride/32         rep=0 iters=65536 cycles=23332557 us=145840 acc=1402208256
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"rodata_stride/32","rep":0,"iters":65536,"cycles":23332557,"us":145840,"acc":1402208256}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel rodata_stride/32         rep=1 iters=65536 cycles=23332557 us=145840 acc=1402208256
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"rodata_stride/32","rep":1,"iters":65536,"cycles":23332557,"us":145840,"acc":1402208256}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel rodata_stride/32         rep=2 iters=65536 cycles=23332557 us=145840 acc=1402208256
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"rodata_stride/32","rep":2,"iters":65536,"cycles":23332557,"us":145840,"acc":1402208256}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel rodata_stride/32         rep=3 iters=65536 cycles=23332557 us=145840 acc=1402208256
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"rodata_stride/32","rep":3,"iters":65536,"cycles":23332557,"us":145840,"acc":1402208256}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel rodata_stride/32         rep=4 iters=65536 cycles=23332557 us=145840 acc=1402208256
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"rodata_stride/32","rep":4,"iters":65536,"cycles":23332557,"us":145840,"acc":1402208256}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel rodata_stride/64         rep=0 iters=65536 cycles=23333233 us=145840 acc=1262223360
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"rodata_stride/64","rep":0,"iters":65536,"cycles":23333233,"us":145840,"acc":1262223360}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel rodata_stride/64         rep=1 iters=65536 cycles=23332557 us=145836 acc=1262223360
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"rodata_stride/64","rep":1,"iters":65536,"cycles":23332557,"us":145836,"acc":1262223360}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel rodata_stride/64         rep=2 iters=65536 cycles=23332557 us=145836 acc=1262223360
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"rodata_stride/64","rep":2,"iters":65536,"cycles":23332557,"us":145836,"acc":1262223360}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel rodata_stride/64         rep=3 iters=65536 cycles=23332557 us=145836 acc=1262223360
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"rodata_stride/64","rep":3,"iters":65536,"cycles":23332557,"us":145836,"acc":1262223360}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel rodata_stride/64         rep=4 iters=65536 cycles=23332557 us=145836 acc=1262223360
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"rodata_stride/64","rep":4,"iters":65536,"cycles":23332557,"us":145836,"acc":1262223360}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel rodata_stride/256        rep=0 iters=65536 cycles=23332219 us=145830 acc=3009150976
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"rodata_stride/256","rep":0,"iters":65536,"cycles":23332219,"us":145830,"acc":3009150976}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel rodata_stride/256        rep=1 iters=65536 cycles=23330867 us=145821 acc=3009150976
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"rodata_stride/256","rep":1,"iters":65536,"cycles":23330867,"us":145821,"acc":3009150976}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel rodata_stride/256        rep=2 iters=65536 cycles=23330867 us=145821 acc=3009150976
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"rodata_stride/256","rep":2,"iters":65536,"cycles":23330867,"us":145821,"acc":3009150976}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel rodata_stride/256        rep=3 iters=65536 cycles=23330867 us=145821 acc=3009150976
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"rodata_stride/256","rep":3,"iters":65536,"cycles":23330867,"us":145821,"acc":3009150976}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel rodata_stride/256        rep=4 iters=65536 cycles=23330867 us=145821 acc=3009150976
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"rodata_stride/256","rep":4,"iters":65536,"cycles":23330867,"us":145821,"acc":3009150976}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel rodata_stride/1024       rep=0 iters=65536 cycles=23331881 us=145825 acc=2673606656
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"rodata_stride/1024","rep":0,"iters":65536,"cycles":23331881,"us":145825,"acc":2673606656}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel rodata_stride/1024       rep=1 iters=65536 cycles=23330867 us=145819 acc=2673606656
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"rodata_stride/1024","rep":1,"iters":65536,"cycles":23330867,"us":145819,"acc":2673606656}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel rodata_stride/1024       rep=2 iters=65536 cycles=23330867 us=145819 acc=2673606656
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"rodata_stride/1024","rep":2,"iters":65536,"cycles":23330867,"us":145819,"acc":2673606656}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel rodata_stride/1024       rep=3 iters=65536 cycles=23330867 us=145819 acc=2673606656
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"rodata_stride/1024","rep":3,"iters":65536,"cycles":23330867,"us":145819,"acc":2673606656}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel rodata_stride/1024       rep=4 iters=65536 cycles=23330867 us=145819 acc=2673606656
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"rodata_stride/1024","rep":4,"iters":65536,"cycles":23330867,"us":145819,"acc":2673606656}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel rodata_stride/4096       rep=0 iters=65536 cycles=23331543 us=145823 acc=391905280
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"rodata_stride/4096","rep":0,"iters":65536,"cycles":23331543,"us":145823,"acc":391905280}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel rodata_stride/4096       rep=1 iters=65536 cycles=23330867 us=145819 acc=391905280
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"rodata_stride/4096","rep":1,"iters":65536,"cycles":23330867,"us":145819,"acc":391905280}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel rodata_stride/4096       rep=2 iters=65536 cycles=23330867 us=145818 acc=391905280
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"rodata_stride/4096","rep":2,"iters":65536,"cycles":23330867,"us":145818,"acc":391905280}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel rodata_stride/4096       rep=3 iters=65536 cycles=23330867 us=145819 acc=391905280
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"rodata_stride/4096","rep":3,"iters":65536,"cycles":23330867,"us":145819,"acc":391905280}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel rodata_stride/4096       rep=4 iters=65536 cycles=23330867 us=145819 acc=391905280
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"rodata_stride/4096","rep":4,"iters":65536,"cycles":23330867,"us":145819,"acc":391905280}
+[INFO] fw_checks::checks::cycle_probe::slice_shape: [cycle-probe] slice-shape body done acc=bf2156f3 iters=256
+[INFO] fw_checks::checks::cycle_probe::slice_shape: [cycle-probe] slice-shape body done acc=bf2156f3 iters=256
+[INFO] fw_checks::checks::cycle_probe::slice_shape: [cycle-probe] slice-shape body done acc=bf2156f3 iters=256
+[INFO] fw_checks::checks::cycle_probe::slice_shape: [cycle-probe] slice-shape body done acc=bf2156f3 iters=256
+[INFO] fw_checks::checks::cycle_probe::slice_shape: [cycle-probe] slice-shape body done acc=bf2156f3 iters=256
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel slice_shape              rep=0 iters=256 cycles=33925 us=213 acc=3206633203
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"slice_shape","rep":0,"iters":256,"cycles":33925,"us":213,"acc":3206633203}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel slice_shape              rep=1 iters=256 cycles=34638 us=218 acc=3206633203
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"slice_shape","rep":1,"iters":256,"cycles":34638,"us":218,"acc":3206633203}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel slice_shape              rep=2 iters=256 cycles=34638 us=218 acc=3206633203
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"slice_shape","rep":2,"iters":256,"cycles":34638,"us":218,"acc":3206633203}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel slice_shape              rep=3 iters=256 cycles=34638 us=217 acc=3206633203
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"slice_shape","rep":3,"iters":256,"cycles":34638,"us":217,"acc":3206633203}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] kernel slice_shape              rep=4 iters=256 cycles=34638 us=217 acc=3206633203
+[INFO] fw_checks: [fw-check-json] {"kind":"cycle-probe","kernel":"slice_shape","rep":4,"iters":256,"cycles":34638,"us":217,"acc":3206633203}
+[INFO] fw_checks::checks::cycle_probe::runner: [cycle-probe] === DONE ===

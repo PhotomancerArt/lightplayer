@@ -3,8 +3,12 @@
 // here, a plain `cargo test -p fw-checks` would compile the module out and
 // silently run none of its tests — the feature is only on in this workspace
 // because `lp-cli` happens to enable it.
+#[cfg(any(feature = "check-cycle-probe", test))]
+pub mod cycle_probe;
 #[cfg(any(feature = "check-gpio-calibrate", test))]
 pub mod gpio_calibrate;
+#[cfg(any(feature = "check-gpio-input", test))]
+pub mod gpio_input;
 #[cfg(feature = "check-jit-math-perf")]
 pub mod jit_math_perf;
 #[cfg(any(feature = "check-render-loop", test))]

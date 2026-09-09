@@ -8,7 +8,7 @@
 
 use lp_emu_esp_common::regnames::RegNames;
 
-/// Register names for the `lp_clkrst` block (13 registers, 8 with a non-zero reset).
+/// Register names for the `lp_clkrst` block (13 registers, 8 with a non-zero reset, 0 not plain read-write).
 pub static LP_CLKRST: RegNames = RegNames {
     block: "lp_clkrst",
     entries: &[
@@ -36,4 +36,5 @@ pub static LP_CLKRST: RegNames = RegNames {
         (0x020, 0xf0000000),
         (0x02c, 0x66c00000),
     ],
+    access: &[],
 };
