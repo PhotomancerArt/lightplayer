@@ -70,6 +70,25 @@ const DESK_MAC: [u8; 6] = [0xa0, 0xf2, 0x62, 0x87, 0xb4, 0x8c];
 /// would run. 64 KiB crosses sixteen 4 KiB sectors and 256 pages.
 const REGION: u32 = 0x1_0000;
 
+/// Where espflash 3.3.0 loads its C6 stub: `text_start` in
+/// `resources/stubs/stub_flasher_32c6.toml`, which is HP SRAM.
+const STUB_TEXT_START: u32 = 0x4080_0000;
+
+/// The `c.lw` at `stub_flasher_32c6` + 0xa1a — the instruction that reads a
+/// block this machine does not map. See
+/// `the_flasher_stub_runs_and_stops_at_a_block_the_c6_boot_set_does_not_map`.
+const STUB_ATTACH_PC: u32 = STUB_TEXT_START + 0xa1a;
+
+/// `I2C0.scl_high_period`. I2C0 is at `0x6000_4000`
+/// (`esp32c6-0.23.2/src/lib.rs:431`) and this machine's boot set does not
+/// map it.
+const I2C0_SCL_HIGH_PERIOD: u32 = 0x6000_4038;
+
+/// How many times the stub reads that one register in a whole
+/// upload-erase-program run. Pinned so that a second unmapped block would
+/// move it rather than hide in it.
+const STUB_UNMAPPED_READS: u64 = 1;
+
 /// The strict-grade scope these tests claim, BY NAME. Not "every block with
 /// a table": since the accept blocks grade themselves there are twenty-six
 /// of those, and the mask ROM writes `PLIC_UX+0x3fc` in `_init` on its way
@@ -118,7 +137,21 @@ fn free_port() -> u16 {
 /// flasher's INPUT, not the chip's contents. The chip is a `--flash` file,
 /// the backing that keeps a run's writes.
 fn download_console(chip: &std::path::Path, addr: &str) -> Esp32C6Machine {
-    Esp32C6Builder::new()
+    console_machine(chip, addr, true)
+}
+
+/// The same machine with the bus's refusal turned off, so an access to an
+/// address nothing claims reads 0 and is counted instead of ending the run.
+///
+/// Used by exactly one test, and only to answer a question the strict run
+/// cannot: *is the block below the first gap, or the only one?* An unmapped
+/// MMIO read returning 0 is not a claim about silicon — see that test.
+fn permissive_console(chip: &std::path::Path, addr: &str) -> Esp32C6Machine {
+    console_machine(chip, addr, false)
+}
+
+fn console_machine(chip: &std::path::Path, addr: &str, strict: bool) -> Esp32C6Machine {
+    let mut b = Esp32C6Builder::new()
         .boot_mode(BootMode::RomUp)
         .reset_cause(ResetCause::UsbUartHpSys)
         .strap(Strap::Download)
@@ -128,11 +161,13 @@ fn download_console(chip: &std::path::Path, addr: &str) -> Esp32C6Machine {
         .usb_host(UsbHost::Attached { draining: true })
         .usb_sj(UsbSjSink::Tcp(addr.to_string()))
         .usb_sj_drain(UsbSjDrain::Auto)
-        .strict(true)
-        .strict_grade(Some(RegGrade::Documented))
-        .strict_grade_blocks(Some(SCOPE.to_vec()))
-        .build()
-        .expect("the download-console machine builds")
+        .strict(strict);
+    if strict {
+        b = b
+            .strict_grade(Some(RegGrade::Documented))
+            .strict_grade_blocks(Some(SCOPE.to_vec()));
+    }
+    b.build().expect("the download-console machine builds")
 }
 
 /// Pump one pty end to the machine's socket and back, until `done`.
@@ -422,17 +457,43 @@ fn what_espflash_writes_is_byte_identical_to_the_image() {
     let _ = std::fs::remove_dir_all(chip.parent().unwrap());
 }
 
-/// G2-2's stub half. The stub is real RV32 code the flasher uploads into RAM
-/// and jumps to (`MEM_BEGIN`/`MEM_DATA`/`MEM_END`), and it drives SPI1
-/// through the ROM's own routines — paths the application never takes.
+/// G2-2's stub half, and the pin for plan two's OQ1: **the stub uploads and
+/// runs, and then reads a register in a block this machine does not map.**
 ///
-/// The claim here is narrow on purpose: the stub UPLOADS AND RUNS, and the
-/// bytes it writes are the image's. What it touched on the way is graded in
-/// `src/periph/spi1.rs`'s table, and what it read that the C6 does not have
-/// is `docs/defects/2026-09-09-the-esptool-stub-reads-a-chip-struct-the-c6-does-not-have.md`.
+/// espflash uploads Espressif's flasher stub into HP SRAM
+/// (`MEM_BEGIN`/`MEM_DATA`/`MEM_END`) and jumps to it, and the stub is real
+/// RV32 code that runs on the modelled hart — which it demonstrably does,
+/// because the run gets nineteen million cycles past the jump before it
+/// stops, at a `pc` inside the uploaded image. Where it stops is this,
+/// disassembled out of espflash 3.3.0's own
+/// `resources/stubs/stub_flasher_32c6.toml` (`text_start` = `0x4080_0000`):
+///
+/// ```text
+/// 40800a16:  lui   a0,0x60004
+/// 40800a1a:  c.lw  a0,56(a0)      # 0x6000_4038      <-- refused here
+/// 40800a1c:  c.andi a0,28         #   bits [4:2]
+/// 40800a1e:  c.addi a0,-8         #   == 2 ?
+/// 40800a20:  sltiu a0,a0,1
+/// 40800a24:  c.li  a1,0
+/// 40800a26:  auipc ra,0xff7ff
+/// 40800a2a:  jalr  ra,1974(ra)    # 0x4000_01dc __call_spi_flash_attach
+/// ```
+///
+/// `0x6000_4000` is **I2C0** (`esp32c6-0.23.2/src/lib.rs:431`), and `+0x38`
+/// is `scl_high_period`, "Configures the high level width of SCL". The stub
+/// reads three bits of an I2C clock-timing register to decide the argument
+/// it passes to the mask ROM's `spi_flash_attach`. Whatever those bits mean
+/// to the stub's author, this machine's C6 boot set does not map I2C0 at
+/// all — no application on this chip has ever driven it — so `--strict-bus`
+/// refuses the read and ends the run. That is the emulator being honest, not
+/// the stub being wrong.
+///
+/// **The gate is the stopping point itself**, asserted by address and by the
+/// instruction's `pc`, so that a later change which quietly maps I2C0 or
+/// quietly stops refusing has to come back here and say so.
 #[test]
 #[ignore = "needs the merged reference image; run through `just test-emu-c6`"]
-fn the_flasher_stub_uploads_runs_and_writes_the_same_bytes() {
+fn the_flasher_stub_runs_and_stops_at_a_block_the_c6_boot_set_does_not_map() {
     let image = match merged_image(&ReferenceImage::SHIPPED_USB_SILICON) {
         Ok(path) => path,
         Err(reason) => return skip_notice("flash_over_socket", &reason),
@@ -440,10 +501,81 @@ fn the_flasher_stub_uploads_runs_and_writes_the_same_bytes() {
     let bytes = std::fs::read(&image).expect("the merged image");
     let region = bytes[..REGION as usize].to_vec();
 
-    let chip = scratch("stub");
+    let chip = scratch("stub-strict");
     let _ = std::fs::remove_file(&chip);
     let addr = format!("127.0.0.1:{}", free_port());
     let mut m = download_console(&chip, &addr);
+
+    let (_report, early) = with_flasher(&mut m, &addr, 600_000_000, true, move |flasher| {
+        let mut r = Report::default();
+        let Ok(mut flasher) = flasher.map_err(|e| r.error = Some(e)) else {
+            return r;
+        };
+        r.chip = flasher.chip().to_string();
+        if let Err(e) = flasher.write_bin_to_flash(0x0, &region, None) {
+            r.error = Some(format!("write_bin_to_flash: {e}"));
+        }
+        r
+    });
+
+    let v = m
+        .bus
+        .first_strict_violation()
+        .expect("the stub's read of an unmapped block");
+    assert_eq!(v.address, I2C0_SCL_HIGH_PERIOD, "I2C0.scl_high_period");
+    assert_eq!(v.pc, STUB_ATTACH_PC, "the `c.lw` in the uploaded stub");
+    assert!(
+        matches!(early, Some(Outcome::StrictBus { .. })),
+        "the run ended on the bus's refusal: {early:?}"
+    );
+
+    // It really was the stub executing, not the ROM: the pc is inside the
+    // region espflash uploaded, nothing was hooked, and a ROM-up run's
+    // loader placed nothing.
+    assert!(
+        (STUB_TEXT_START..STUB_TEXT_START + 0x8000).contains(&v.pc),
+        "pc {:#010x} is not in the uploaded stub",
+        v.pc
+    );
+    assert!(m.app_segments().is_empty(), "the loader placed something");
+    assert!(m.hooks().is_empty(), "the ROM hook table is not empty");
+    assert_eq!(m.hook_calls(), 0, "nothing was intercepted");
+
+    let _ = std::fs::remove_dir_all(chip.parent().unwrap());
+}
+
+/// The follow-up question the strict run cannot answer, and the one plan
+/// two's M5 actually needs: **is I2C0 the only gap, or the first of many?**
+///
+/// With the bus's refusal off, an access to an address nothing claims reads
+/// 0 and is counted. For this particular register that happens to be the
+/// same answer the part gives — `I2C0.scl_high_period` resets to 0 and
+/// nothing on the download path writes it, so the stub's `(v>>2)&7 == 2`
+/// test is false either way — but the machine is not *claiming* that, which
+/// is why this runs permissively instead of I2C0 being added to the boot set
+/// with an invented reset value. (`periph/accept.rs` is fenced for this
+/// milestone in any case; a reset value that belongs there is a defect
+/// entry, not an edit.)
+///
+/// What the run then shows is the answer: the stub goes on to erase and
+/// program through the ROM's SPI1 routines, and the bytes it leaves on the
+/// chip are the image's. So the stub path is **one unmapped block away from
+/// working**, and the count below says exactly how many accesses that block
+/// costs.
+#[test]
+#[ignore = "needs the merged reference image; run through `just test-emu-c6`"]
+fn the_stub_writes_the_image_once_the_unmapped_block_reads_zero() {
+    let image = match merged_image(&ReferenceImage::SHIPPED_USB_SILICON) {
+        Ok(path) => path,
+        Err(reason) => return skip_notice("flash_over_socket", &reason),
+    };
+    let bytes = std::fs::read(&image).expect("the merged image");
+    let region = bytes[..REGION as usize].to_vec();
+
+    let chip = scratch("stub-permissive");
+    let _ = std::fs::remove_file(&chip);
+    let addr = format!("127.0.0.1:{}", free_port());
+    let mut m = permissive_console(&chip, &addr);
 
     let payload = region.clone();
     let (report, early) = with_flasher(&mut m, &addr, 600_000_000, true, move |flasher| {
@@ -471,6 +603,10 @@ fn the_flasher_stub_uploads_runs_and_writes_the_same_bytes() {
         &region[..],
         "the stub wrote something other than the image's bytes"
     );
+    assert!(
+        written[REGION as usize..].iter().all(|b| *b == 0xff),
+        "the stub disturbed flash past the region it was given"
+    );
 
     // The stub really did run RV32 code of its own: espflash placed it in HP
     // SRAM and the machine executed from there. Nothing was hooked and
@@ -479,6 +615,20 @@ fn the_flasher_stub_uploads_runs_and_writes_the_same_bytes() {
     assert!(m.app_segments().is_empty(), "the loader placed something");
     assert!(m.hooks().is_empty(), "the ROM hook table is not empty");
     assert_eq!(m.hook_calls(), 0);
+
+    // The whole cost of the gap, in accesses. If this ever grows, the stub
+    // reached a SECOND thing the machine does not have, and the sentence
+    // "one unmapped block away" has stopped being true.
+    assert_eq!(
+        m.bus.unmapped_writes(),
+        0,
+        "the stub wrote to an address nothing claims"
+    );
+    assert_eq!(
+        m.bus.unmapped_reads(),
+        STUB_UNMAPPED_READS,
+        "the stub read an address nothing claims a different number of times"
+    );
 
     let _ = std::fs::remove_dir_all(chip.parent().unwrap());
 }

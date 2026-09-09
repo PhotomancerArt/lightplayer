@@ -389,9 +389,11 @@ fn run() -> Result<ExitCode, String> {
     // two disagreeing is an error rather than a silent last-writer-wins.
     let rom_up = match (args.boot_mode, args.merged.is_some()) {
         (Some(BootMode::Direct), true) => {
-            return Err("--boot-mode direct with --merged: a merged image IS the chip's bytes, \
+            return Err(
+                "--boot-mode direct with --merged: a merged image IS the chip's bytes, \
                         and a direct load never reads them — pass --elf instead"
-                .to_string());
+                    .to_string(),
+            );
         }
         (mode, merged) => merged || mode == Some(BootMode::RomUp),
     };
@@ -507,9 +509,10 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--merged" => args.merged = Some(value("--merged")?.into()),
             "--boot-mode" => {
                 let text = value("--boot-mode")?;
-                args.boot_mode = Some(BootMode::parse(&text).ok_or_else(|| {
-                    format!("--boot-mode `{text}`: expected direct or rom-up")
-                })?);
+                args.boot_mode =
+                    Some(BootMode::parse(&text).ok_or_else(|| {
+                        format!("--boot-mode `{text}`: expected direct or rom-up")
+                    })?);
             }
             "--rom" => args.rom = Some(value("--rom")?.into()),
             "--time-grade" => args.time_grade = TimeGrade::parse(&value("--time-grade")?)?,
@@ -531,8 +534,9 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                     .parse()
                     .map_err(|e| format!("--uart0-baud `{text}`: {e}"))?;
                 if baud == 0 {
-                    return Err("--uart0-baud 0: a host that sends nothing has no bit time"
-                        .to_string());
+                    return Err(
+                        "--uart0-baud 0: a host that sends nothing has no bit time".to_string()
+                    );
                 }
                 args.uart0_baud = Some(baud);
             }
