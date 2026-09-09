@@ -1,0 +1,103 @@
+rom: 4 segments placed, 3785 symbols
+  0x40000000 filesz 0x42196  memsz 0x42196  x -> rom-mask
+  0x40048400 filesz 0x5fa8   memsz 0x5fa8   - -> rom-mask, drom-mask
+  0x4086ad08 filesz 0x0      memsz 0x14da4  - -> hp-sram
+  0x42000000 filesz 0xf07c   memsz 0xf07c   - -> flash-cache
+rom data: 28 sections seeded, 2460 bytes (the ROM startup's .data copy, from the ELF)
+app: 7 segments placed, entry 0x42050072 (_start)
+  0x40800000 filesz 0xfd04   memsz 0xfd04   x -> hp-sram
+  0x4080fd08 filesz 0x3dd8   memsz 0x4d1f0  - -> hp-sram
+  0x42000040 filesz 0x47784  memsz 0x4ffe0  - -> flash-cache
+  0x42050020 filesz 0x1ecde8 memsz 0x1ecde8 x -> flash-cache
+  0x50000000 filesz 0x0      memsz 0x3d0    - -> lp-sram
+  0x4085cef8 filesz 0x0      memsz 0x11718  - -> hp-sram
+  0x4086e610 filesz 0x0      memsz 0x10000  - -> hp-sram
+blockstats: 84574377 block executions, 616315122 slots run, mean realised length 7.287
+   17.05% of entries   13.57% of slots  mean  5.80  branch not taken (fall-through)
+   21.76% of entries   22.67% of slots  mean  7.59  branch taken
+    2.81% of entries    1.06% of slots  mean  2.76  jal, rd=x0 (a plain direct jump)
+    0.00% of entries    0.00% of slots  mean  9.28  jal, rd!=x0 (a direct call)
+   15.98% of entries   15.15% of slots  mean  6.91  jalr (indirect call / return)
+    7.01% of entries    3.73% of slots  mean  3.88  c.j / c.jal (direct)
+   14.98% of entries    8.06% of slots  mean  3.92  c.beqz / c.bnez not taken
+    4.22% of entries    2.75% of slots  mean  4.75  c.beqz / c.bnez taken
+   15.11% of entries   32.55% of slots  mean 15.70  c.jr / c.jalr (indirect / return)
+    1.08% of entries    0.44% of slots  mean  2.99  no terminator: slot cap, a refused instruction, or a mid-block exit
+  length histogram (slots run : block executions)
+      1 : 10249007
+      2 : 10425305
+      3 : 10351885
+      4 : 9768993
+      5 : 15323988
+      6 : 3368761
+      7 : 2211882
+      8 : 5767493
+      9 : 1014822
+     10 : 903134
+     11 : 484188
+     12 : 784133
+     13 : 3409361
+     14 : 233480
+     15 : 3861979
+     16 : 2560292
+     17 : 49028
+     18 : 237479
+     19 : 54335
+     20 : 34514
+     21 : 17642
+     22 : 44086
+     23 : 1091
+     24 : 195737
+     25 : 16931
+     26 : 1254
+     27 : 16791
+     28 : 778
+     29 : 664
+     30 : 418
+     31 : 558
+     32 : 499
+     33 : 19182
+     34 : 534
+     35 : 1428
+     36 : 394
+     37 : 435
+     38 : 448
+     39 : 389
+     40 : 473
+     41 : 15882
+     42 : 349
+     43 : 728
+     44 : 350
+     45 : 605
+     46 : 364
+     47 : 396
+     48 : 578
+     49 : 136133
+     50 : 1449246
+     51 : 212
+     52 : 260
+     53 : 1539984
+     54 : 5
+     55 : 6
+     56 : 1
+     57 : 4
+     58 : 4
+     59 : 5
+     60 : 78
+     61 : 4
+     62 : 2
+     63 : 3
+     64 : 15387
+
+stopped after 923325047 cycles (5770781 us emulated, 619037104 instructions, grade lp-emu:esp32c6:t2)
+unmapped: 0 reads, 0 writes, 0 distinct sites; 3520 idle skips (wfi)
+uart0: 4522 bytes left the wire
+blocks: 45751 cached, 84851714 hits (99.95% of 84897465 entries), mean length 7.28; 2 flush(es) (0 for capacity), 96 range invalidation(s) dropping 15 entr(ies), 11585 collision(s); 1 fence.i
+flash: 0 commands (0 reads, 0 page programs, 0 sector erases, 0 block erases, 0 write-enables; 0 status polls); 36 page(s) filled into the cache window
+usb-sj: host absent at power-on; 0 bytes reached the host
+pin gpio16: 0 frames, 0 complete, 0 errors, 0 leds
+pin gpio18: 64 frames, 64 complete, 0 errors, 241 leds
+rmt refill ch0: 15424 measured, half=24 words; entry max 20 hist 15386:13:6:3:5:8:3:0:0; fill max 4 hist 64:15360:0:0:0:0:0:0:0
+usb-sj tried: the guest handed 28 bytes to the IN endpoint that no host took:
+  | [INIT] Initializing board...
+--exit-on matched
