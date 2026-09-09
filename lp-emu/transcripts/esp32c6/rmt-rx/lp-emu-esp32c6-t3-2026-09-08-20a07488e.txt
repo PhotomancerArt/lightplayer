@@ -1,6 +1,6 @@
-[fw-checks-header] {"schema":1,"payload":"rmt-rx","chip":"esp32c6","firmware_commit":"f276f5e851ae","firmware_features":"default,esp32c6,esp_radio,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_rmt_rx","firmware_dirty":false}
+[fw-checks-header] {"schema":1,"payload":"rmt-rx","chip":"esp32c6","firmware_commit":"20a07488ed1e","firmware_features":"default,esp32c6,esp_radio,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_rmt_rx","firmware_dirty":true}
 [rmt-rx] tx=gpio18 rx=gpio19 leds=64 frames=32 idle_thres=32767 filter=off
-[INFO] fw_esp32c6::tests::rmt_rx: [rmt-rx] 64 LEDs, 32 frames, gpio18 -> gpio19, tx blocks 2
+[INFO] fw_esp32c6::tests::rmt_rx: [rmt-rx] 64 LEDs, 32 frames, gpio18 -> gpio19, tx blocks 1
 [fw-check-json] {"kind":"rmt-frame","n":0,"leds":64,"lit":1,"crc":"0x543099a7"}
 [fw-check-json] {"kind":"rmt-rx","n":0,"words":1537,"crc":"0x543099a7"}
 [fw-check-json] {"kind":"rmt-frame","n":1,"leds":64,"lit":1,"crc":"0x54024a3f"}
