@@ -230,6 +230,149 @@ impl Air for PerfectAir {
     }
 }
 
+/// The socket form of the medium: the same frames, over a stream, between
+/// machines in different processes.
+///
+/// # Auditable only, never a gate
+///
+/// A socket pair is **not** byte-identical: two processes interleave however
+/// the operating system schedules them, and a frame lands wherever the
+/// receiver happens to be. Nothing that has to replay may run this way. The
+/// deterministic form is [`super::PerfectAir`] under
+/// `lp-emu-esp32c6`'s lockstep runner, in one process and one thread, and it
+/// is the only form a validation configuration, a transcript or a CI job ever
+/// uses. This is for watching two machines talk.
+///
+/// # The framing, and why it is not `M!`
+///
+/// `lpc_wire::json::to_serial_line` is the repo's only `M!` framer, and the
+/// emulator never uses it — the MIT fence (`just lint-emu-fence`) is what
+/// keeps that true. So this has its own, and it is as small as a framing can
+/// be: a magic, a length, the sender's guest cycle, the sender's seat, and
+/// the frame.
+///
+/// ```text
+///   offset  size  field
+///   0       4     magic, the ASCII bytes "LPA1"
+///   4       4     length, little-endian u32: how many bytes follow
+///   8       8     at, little-endian u64: the sender's guest cycle
+///   16      2     from, little-endian u16: the sender's ParticipantId
+///   18      n     the frame, verbatim
+/// ```
+///
+/// `length` counts `at`, `from` and the frame — everything after itself — so
+/// a reader that has the first eight bytes knows exactly how much more to
+/// wait for. Little-endian throughout, because every machine this runs
+/// between is.
+pub mod wire {
+    use super::{AirFrame, ParticipantId};
+    use alloc::vec::Vec;
+    use lp_emu_core::sched::Cycles;
+
+    /// The four bytes every frame starts with.
+    pub const MAGIC: [u8; 4] = *b"LPA1";
+    /// Magic and length: what a reader needs before it knows the rest.
+    pub const HEADER_LEN: usize = 8;
+    /// `at` and `from`, the fixed part of a frame's payload.
+    pub const PAYLOAD_PREFIX_LEN: usize = 10;
+    /// The largest frame this codec will encode or accept. An 802.11 frame
+    /// is under two kilobytes and the RX ring's buffers are 1,700 bytes; the
+    /// cap is here so a bad length on a socket cannot ask for a huge
+    /// allocation, not because anything needs to be this big.
+    pub const MAX_FRAME_LEN: usize = 4_096;
+
+    /// Why a byte string was not a frame.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum WireError {
+        /// Not enough bytes yet. Read more and try again — this is the
+        /// ordinary answer on a stream, not a failure.
+        Incomplete,
+        /// The first four bytes were not [`MAGIC`]: the stream is not this
+        /// protocol, or it has lost sync. A reader should close rather than
+        /// hunt for the next magic.
+        BadMagic,
+        /// A length past [`MAX_FRAME_LEN`], or shorter than the fixed
+        /// prefix.
+        BadLength { length: u32 },
+    }
+
+    impl core::fmt::Display for WireError {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            match self {
+                WireError::Incomplete => f.write_str("air wire: incomplete frame"),
+                WireError::BadMagic => f.write_str("air wire: bad magic; the stream is not LPA1"),
+                WireError::BadLength { length } => {
+                    write!(f, "air wire: refusing a frame of length {length}")
+                }
+            }
+        }
+    }
+
+    /// One frame on the wire. See the module docs for the layout.
+    pub fn encode(from: ParticipantId, at: Cycles, bytes: &[u8]) -> Vec<u8> {
+        let length = (PAYLOAD_PREFIX_LEN + bytes.len()) as u32;
+        let mut out = Vec::with_capacity(HEADER_LEN + length as usize);
+        out.extend_from_slice(&MAGIC);
+        out.extend_from_slice(&length.to_le_bytes());
+        out.extend_from_slice(&at.to_le_bytes());
+        out.extend_from_slice(&(from.index() as u16).to_le_bytes());
+        out.extend_from_slice(bytes);
+        out
+    }
+
+    /// The first frame in `buf`, and how many bytes it took.
+    ///
+    /// `due` on the returned frame is `at`: the wire carries what the sender
+    /// handed over, and the receiving side's own air decides when it is due.
+    pub fn decode(buf: &[u8]) -> Result<(AirFrame, usize), WireError> {
+        if buf.len() < HEADER_LEN {
+            return Err(WireError::Incomplete);
+        }
+        if buf[..4] != MAGIC {
+            return Err(WireError::BadMagic);
+        }
+        let length = u32::from_le_bytes(buf[4..8].try_into().expect("checked"));
+        let payload = length as usize;
+        if payload < PAYLOAD_PREFIX_LEN || payload > PAYLOAD_PREFIX_LEN + MAX_FRAME_LEN {
+            return Err(WireError::BadLength { length });
+        }
+        if buf.len() < HEADER_LEN + payload {
+            return Err(WireError::Incomplete);
+        }
+        let at = Cycles::from_le_bytes(buf[8..16].try_into().expect("checked"));
+        let from = u16::from_le_bytes(buf[16..18].try_into().expect("checked"));
+        let bytes = buf[HEADER_LEN + PAYLOAD_PREFIX_LEN..HEADER_LEN + payload].to_vec();
+        Ok((
+            AirFrame {
+                from: ParticipantId(usize::from(from)),
+                at,
+                due: at,
+                bytes,
+            },
+            HEADER_LEN + payload,
+        ))
+    }
+
+    /// Every complete frame at the front of `buf`, removing them from it and
+    /// leaving any partial tail in place. The shape a stream reader wants.
+    pub fn drain(buf: &mut Vec<u8>) -> Result<Vec<AirFrame>, WireError> {
+        let mut out = Vec::new();
+        let mut taken = 0;
+        loop {
+            match decode(&buf[taken..]) {
+                Ok((frame, used)) => {
+                    out.push(frame);
+                    taken += used;
+                }
+                Err(WireError::Incomplete) => break,
+                Err(other) => return Err(other),
+            }
+        }
+        buf.drain(..taken);
+        Ok(out)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -348,6 +491,106 @@ mod tests {
         assert_eq!(air.sent(), 0);
         assert!(air.take_due(B, 1_000).is_empty());
         assert!(air.take_due(ParticipantId(7), 1_000).is_empty());
+    }
+
+    /// G1-5's first half: the codec round-trips, and says which of the three
+    /// things went wrong when one does.
+    #[test]
+    fn the_wire_codec_round_trips_and_names_its_refusals() {
+        use super::wire;
+        let frame = [0xd0u8, 0x00, 0xff, 0xff, 0x18, 0xfe, 0x34];
+        let bytes = wire::encode(B, 165_826_944, &frame);
+        assert_eq!(&bytes[..4], b"LPA1");
+        assert_eq!(bytes.len(), wire::HEADER_LEN + 10 + frame.len());
+        let (got, used) = wire::decode(&bytes).unwrap();
+        assert_eq!(used, bytes.len());
+        assert_eq!(got.from, B);
+        assert_eq!(got.at, 165_826_944);
+        assert_eq!(got.bytes, frame);
+
+        // A short read is Incomplete at every prefix, never a false frame.
+        for n in 0..bytes.len() {
+            assert_eq!(
+                wire::decode(&bytes[..n]),
+                Err(wire::WireError::Incomplete),
+                "prefix of {n} bytes"
+            );
+        }
+        // A stream that is not ours is refused rather than resynchronised.
+        let mut wrong = bytes.clone();
+        wrong[1] = b'X';
+        assert_eq!(wire::decode(&wrong), Err(wire::WireError::BadMagic));
+        // And a length nothing could hold.
+        let mut huge = bytes.clone();
+        huge[4..8].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert_eq!(
+            wire::decode(&huge),
+            Err(wire::WireError::BadLength { length: u32::MAX })
+        );
+
+        // `drain` takes whole frames and leaves a partial tail alone.
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&wire::encode(A, 1, b"one"));
+        stream.extend_from_slice(&wire::encode(B, 2, b"two"));
+        let tail = wire::encode(C, 3, b"three");
+        stream.extend_from_slice(&tail[..tail.len() - 2]);
+        let got = wire::drain(&mut stream).unwrap();
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].bytes, b"one");
+        assert_eq!(got[1].bytes, b"two");
+        assert_eq!(stream.len(), tail.len() - 2, "the partial frame is kept");
+        stream.extend_from_slice(&tail[tail.len() - 2..]);
+        let got = wire::drain(&mut stream).unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].bytes, b"three");
+        assert!(stream.is_empty());
+    }
+
+    /// G1-5's second half: two sockets in one process, one frame across
+    /// localhost, decoded by the same codec that encoded it.
+    ///
+    /// Not `#[ignore]`d: it binds `127.0.0.1:0` (the kernel picks the port,
+    /// so two of these can never collide) and both ends are in this process,
+    /// so there is nothing here to be flaky about. If it ever does flake on
+    /// this box, mark it `#[ignore]` **with the reason in a comment here**
+    /// rather than deleting it.
+    #[test]
+    fn one_frame_crosses_a_localhost_socket() {
+        use super::wire;
+        use std::io::{Read, Write};
+        use std::net::{TcpListener, TcpStream};
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let sent = wire::encode(A, 165_826_944, b"\xd0\x00\xff\xff\x18\xfe\x34");
+
+        let writer = std::thread::spawn({
+            let sent = sent.clone();
+            move || {
+                let mut s = TcpStream::connect(addr).expect("connect");
+                s.write_all(&sent).expect("write");
+                s.flush().expect("flush");
+            }
+        });
+
+        let (mut server, _) = listener.accept().expect("accept");
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 64];
+        while buf.len() < sent.len() {
+            let n = server.read(&mut chunk).expect("read");
+            if n == 0 {
+                break;
+            }
+            buf.extend_from_slice(&chunk[..n]);
+        }
+        writer.join().expect("writer");
+
+        let got = wire::drain(&mut buf).expect("decode");
+        assert_eq!(got.len(), 1, "one frame in, one frame out");
+        assert_eq!(got[0].from, A);
+        assert_eq!(got[0].at, 165_826_944);
+        assert_eq!(got[0].bytes, b"\xd0\x00\xff\xff\x18\xfe\x34");
+        assert!(buf.is_empty());
     }
 
     #[test]
