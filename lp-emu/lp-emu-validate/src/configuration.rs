@@ -454,10 +454,45 @@ mod tests {
         let t = TrustTable::new(vec![TrustEntry {
             class: FieldClass::Memory,
             grade: Grade::Measured,
+            band: None,
             because: "desk-validated".into(),
         }]);
         assert_eq!(t.grade(FieldClass::Memory), Grade::Measured);
         assert_eq!(t.grade(FieldClass::Timing), Grade::Modeled);
         assert_eq!(t.grade(FieldClass::UsbSerialJtag), Grade::Modeled);
+        // And silence is not a band either: an entry that states none is
+        // compared exactly, which is what every entry did before the field.
+        assert!(t.band(FieldClass::Memory).is_none());
+        assert!(t.band(FieldClass::Timing).is_none());
+    }
+
+    /// A trust entry with no band round-trips to the bytes it always had.
+    /// This is what keeps every committed sidecar loading, and it is why the
+    /// field is `skip_serializing_if`.
+    #[test]
+    fn a_band_less_entry_serialises_as_it_always_did() {
+        let json = r#"[{"class":"memory","grade":"measured","because":"desk-validated"}]"#;
+        let t: TrustTable = serde_json::from_str(json).unwrap();
+        assert!(t.band(FieldClass::Memory).is_none());
+        assert_eq!(serde_json::to_string(&t).unwrap(), json);
+    }
+
+    /// And an entry that states one carries it through a round trip.
+    #[test]
+    fn a_band_survives_a_round_trip() {
+        let json = concat!(
+            r#"[{"class":"timing","grade":"documented","band":{"per_sample":[0.8,1.25],"#,
+            r#""per_sample_coverage":0.9,"aggregate":0.2,"on":["p"]},"because":"why"}]"#
+        );
+        let t: TrustTable = serde_json::from_str(json).unwrap();
+        let band = t.band(FieldClass::Timing).unwrap();
+        assert_eq!(band.per_sample, [0.8, 1.25]);
+        assert!(band.covers("p") && !band.covers("q"));
+        assert!(band.contains(0.8) && band.contains(1.25) && !band.contains(1.26));
+        assert_eq!(
+            band.describe(),
+            "[0.80, 1.25] on >= 90 % of samples, aggregate within 20 %"
+        );
+        assert_eq!(serde_json::to_string(&t).unwrap(), json);
     }
 }

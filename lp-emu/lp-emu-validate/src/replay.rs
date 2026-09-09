@@ -132,7 +132,11 @@ impl AppliedBand {
     }
 
     fn direction(&self) -> &'static str {
-        if self.invert { "right/left" } else { "left/right" }
+        if self.invert {
+            "right/left"
+        } else {
+            "left/right"
+        }
     }
 }
 
@@ -768,13 +772,29 @@ pub fn replay(
     // is the reference: silicon / t3, the direction the calibration record's
     // tables use. A band that named no payloads was refused at parse time; a
     // band that does not name THIS payload does not travel to it.
-    fn band_of<'a>(t: &'a Transcript, payload: &str) -> Option<&'a Band> {
-        t.header
-            .trust
-            .band(FieldClass::Timing)
-            .filter(|b| b.covers(payload))
+    // A grade is frozen in the sidecar because it is a claim about the run
+    // that produced it. A band is not: it is the contract this tree states
+    // *today* for that configuration, and the whole point of the mechanism is
+    // that the number is a policy somebody chooses. So it is read from
+    // `validate.toml` — the same live source `records_pins` above is read
+    // from, and for the same reason — with the sidecar's own entry as the
+    // fallback for a configuration the live table no longer knows. That also
+    // means changing a band never asks anyone to re-record a transcript,
+    // which matters: "never edit a transcript" and "a band is Yona's to
+    // choose" would otherwise be in direct conflict.
+    fn band_of<'a>(t: &'a Transcript, cfg: &'a crate::config::ValidateConfig) -> Option<&'a Band> {
+        cfg.configuration(&t.header.configuration)
+            .ok()
+            .and_then(|c| c.trust.band(FieldClass::Timing))
+            .or_else(|| t.header.trust.band(FieldClass::Timing))
     }
-    let (left_band, right_band) = (band_of(left, payload.name), band_of(right, payload.name));
+    fn covers<'a>(b: Option<&'a Band>, payload: &str) -> Option<&'a Band> {
+        b.filter(|b| b.covers(payload))
+    }
+    let (left_band, right_band) = (
+        covers(band_of(left, &cfg), payload.name),
+        covers(band_of(right, &cfg), payload.name),
+    );
     let timing_band = match (left_band, right_band) {
         (None, None) => None,
         // Both sides state one: there is no reference side to divide by, so
