@@ -8,14 +8,21 @@ comments svd2rust writes above each register accessor — so they are derived
 data, not transcription, and each generated file carries the provenance
 header `docs/adr/2026-07-29-license-provenance-discipline.md` requires.
 
-Each table also carries the block's **non-zero reset values**, read from the
-`impl crate::Resettable for <REG>_SPEC { const RESET_VALUE: u32 = … }` that
-svd2rust writes beside every register (an empty impl means zero). A
-`RegFile` seeds itself from them, so an accept block reads what the part
-reads before anyone writes it rather than what a boot was observed to need
-— the sweep
-`docs/defects/2026-09-07-accept-blocks-carry-only-the-reset-values-a-boot-needed.md`
-asked for. Same source, same provenance, same `--check` lint.
+Each table also carries two more things svd2rust states per register, from
+the same source and under the same provenance and `--check` lint:
+
+- the **non-zero reset values**, from
+  `impl crate::Resettable for <REG>_SPEC { const RESET_VALUE: u32 = … }`
+  (an empty impl means zero). A `RegFile` seeds itself from them, so an
+  accept block reads what the part reads before anyone writes it rather than
+  what a boot was observed to need — the sweep
+  `docs/defects/2026-09-07-accept-blocks-carry-only-the-reset-values-a-boot-needed.md`
+  asked for.
+- the **access**, from which of `impl crate::Readable` / `impl
+  crate::Writable` the register has. Only the registers that are not plain
+  read-write are listed. This is what lets an accept block grade itself:
+  accept-and-remember IS the documented behaviour of a read-write register,
+  and is a stand-in for hardware on a read-only one.
 
 Two modes:
 
@@ -405,6 +412,11 @@ RESETTABLE = re.compile(
     r"impl crate::Resettable for (\w+)_SPEC \{(?:\s*const RESET_VALUE: u32 = "
     r"([0-9a-fA-Fx_]+);)?\s*\}"
 )
+# `impl crate::Readable for STATUS_SPEC {}` / `impl crate::Writable for
+# CONF0_SPEC {` — a register has one, the other, or both. A `status` register
+# has only Readable; an `int_clr` only Writable.
+READABLE = re.compile(r"impl crate::Readable for (\w+)_SPEC\b")
+WRITABLE = re.compile(r"impl crate::Writable for (\w+)_SPEC\b")
 
 
 @dataclass(frozen=True)
@@ -499,7 +511,31 @@ def reset_value(pac: PacSource, relpath: str, type_name: str) -> int:
     return 0
 
 
-def collect(pac: PacSource, block: str) -> tuple[list[tuple[int, str]], list[tuple[int, int]]]:
+def access_of(pac: PacSource, relpath: str, type_name: str) -> str:
+    """`"rw"`, `"r"`, `"w"` or `"none"` for one register.
+
+    svd2rust writes `impl crate::Readable` and/or `impl crate::Writable`
+    beside every register, and which of the two it writes is the SVD's
+    `access` attribute. A module we cannot read is `"rw"`: the neutral
+    answer, and the one that claims nothing extra.
+    """
+    text = pac.read(relpath)
+    if text is None:
+        return "rw"
+    r = any(m.group(1) == type_name for m in READABLE.finditer(text))
+    w = any(m.group(1) == type_name for m in WRITABLE.finditer(text))
+    if r and w:
+        return "rw"
+    if r:
+        return "r"
+    if w:
+        return "w"
+    return "none"
+
+
+def collect(
+    pac: PacSource, block: str
+) -> tuple[list[tuple[int, str]], list[tuple[int, int]], list[tuple[int, str]]]:
     """Every `(offset, name)` in a register block, clusters flattened, and
     the non-zero `(offset, reset)` pairs beside them.
 
@@ -518,6 +554,7 @@ def collect(pac: PacSource, block: str) -> tuple[list[tuple[int, str]], list[tup
     lengths = array_lengths(top)
     entries: dict[int, str] = {}
     resets: dict[int, int] = {}
+    access: dict[int, str] = {}
 
     def cluster_members(type_name: str) -> list[Accessor]:
         text = pac.read(f"src/{block}/{type_name.lower()}.rs")
@@ -535,20 +572,24 @@ def collect(pac: PacSource, block: str) -> tuple[list[tuple[int, str]], list[tup
                 if off in entries:
                     continue
                 entries[off] = f"{name}.{m.name}"
-                rv = reset_value(
-                    pac,
-                    f"src/{block}/{type_name.lower()}/{m.type_name.lower()}.rs",
-                    m.type_name,
-                )
+                rel = f"src/{block}/{type_name.lower()}/{m.type_name.lower()}.rs"
+                rv = reset_value(pac, rel, m.type_name)
                 if rv:
                     resets[off] = rv
+                acc = access_of(pac, rel, m.type_name)
+                if acc != "rw":
+                    access[off] = acc
         else:
             if base in entries:
                 return
             entries[base] = name
-            rv = reset_value(pac, f"src/{block}/{type_name.lower()}.rs", type_name)
+            rel = f"src/{block}/{type_name.lower()}.rs"
+            rv = reset_value(pac, rel, type_name)
             if rv:
                 resets[base] = rv
+            acc = access_of(pac, rel, type_name)
+            if acc != "rw":
+                access[base] = acc
 
     for a in (x for x in accessors if not x.array):
         place(a.offset, a.name, a.type_name)
@@ -561,7 +602,7 @@ def collect(pac: PacSource, block: str) -> tuple[list[tuple[int, str]], list[tup
         for i in range(count):
             place(a.offset + i * stride, f"{a.name}{i}", a.type_name)
 
-    return sorted(entries.items()), sorted(resets.items())
+    return sorted(entries.items()), sorted(resets.items()), sorted(access.items())
 
 
 # --------------------------------------------------------------------------
@@ -638,10 +679,14 @@ def slice_literal(name: str, items: list[str]) -> list[str]:
     return out
 
 
+ACCESS_VARIANT = {"r": "ReadOnly", "w": "WriteOnly", "none": "NoAccess"}
+
+
 def render(
     target: Target,
     entries: list[tuple[int, str]],
     resets: list[tuple[int, int]],
+    access: list[tuple[int, str]],
     svd2rust: str,
 ) -> str:
     lines = [
@@ -653,10 +698,13 @@ def render(
         "// Generated by scripts/emu/pac-regnames.py — do not hand-edit.",
         "// Regenerate and check with `just lint-emu-regnames`.",
         "",
-        "use lp_emu_esp_common::regnames::RegNames;",
+        "use lp_emu_esp_common::regnames::{Access, RegNames};"
+        if access
+        else "use lp_emu_esp_common::regnames::RegNames;",
         "",
         f"/// Register names for the `{target.block}` block "
-        f"({len(entries)} registers, {len(resets)} with a non-zero reset).",
+        f"({len(entries)} registers, {len(resets)} with a non-zero reset, "
+        f"{len(access)} not plain read-write).",
         f"pub static {target.static}: RegNames = RegNames {{",
         f'    block: "{target.block}",',
     ]
@@ -666,6 +714,10 @@ def render(
     )
     lines += slice_literal(
         "resets", [f"({off:#0{width}x}, {value:#010x})" for off, value in resets]
+    )
+    lines += slice_literal(
+        "access",
+        [f"({off:#0{width}x}, Access::{ACCESS_VARIANT[a]})" for off, a in access],
     )
     lines += ["};", ""]
     return "\n".join(lines)
@@ -700,7 +752,7 @@ def main() -> int:
     svd2rust = pac.svd2rust_line()
     stale: list[str] = []
     for target in TARGETS:
-        entries, resets = collect(pac, target.block)
+        entries, resets, access = collect(pac, target.block)
         if not entries:
             print(
                 f"pac-regnames: no registers parsed for `{target.block}` — the PAC's "
@@ -708,7 +760,7 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 1
-        text = render(target, entries, resets, svd2rust)
+        text = render(target, entries, resets, access, svd2rust)
         path = os.path.join(REPO, target.out)
         current = None
         if os.path.exists(path):
@@ -721,7 +773,7 @@ def main() -> int:
         if current == text:
             print(
                 f"  unchanged  {target.out} ({len(entries)} registers, "
-                f"{len(resets)} resets)"
+                f"{len(resets)} resets, {len(access)} non-rw)"
             )
             continue
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -729,7 +781,7 @@ def main() -> int:
             f.write(text)
         print(
             f"  wrote      {target.out} ({len(entries)} registers, "
-            f"{len(resets)} resets)"
+            f"{len(resets)} resets, {len(access)} non-rw)"
         )
 
     # The interrupt-source table, same discipline.

@@ -8,7 +8,7 @@
 
 use lp_emu_esp_common::regnames::RegNames;
 
-/// Register names for the `i2c_ana_mst` block (12 registers, 2 with a non-zero reset).
+/// Register names for the `i2c_ana_mst` block (12 registers, 2 with a non-zero reset, 0 not plain read-write).
 pub static I2C_ANA_MST: RegNames = RegNames {
     block: "i2c_ana_mst",
     entries: &[
@@ -26,4 +26,5 @@ pub static I2C_ANA_MST: RegNames = RegNames {
         (0x034, "date"),
     ],
     resets: &[(0x024, 0x00000042), (0x028, 0x00000042)],
+    access: &[],
 };

@@ -517,16 +517,54 @@ runs 5.5 s attached under `--strict-grade documented` and crosses none of
 them (`tests/usb_attached.rs`, G4-4), and a change that starts reading one
 stops the run with the register's name.
 
-**The level applies to the blocks that publish a table**, and today that is
-this one. A block with no table is passed over, because "nobody graded this
-block" is not the same statement as "this block is modelled" — conflating
-them made `documented` stop at the first MMIO access of any boot, on an
-accept table nobody had said anything about, and the flag then measured how
-much of the chip had been graded rather than what the run was allowed to
-trust. The run report names the blocks it checked (`strict-grade documented:
-checked 1 (USB_DEVICE)`), so an ungraded block reads as an unanswered
-question and never as a pass. Grading the accept tables is the
-honest-peripheral policy's next milestone, not a gap this flag hides.
+**The level applies to the blocks that publish a table.** A block with no
+table is passed over, because "nobody graded this block" is not the same
+statement as "this block is modelled" — conflating them made `documented`
+stop at the first MMIO access of any boot, on an accept table nobody had said
+anything about, and the flag then measured how much of the chip had been
+graded rather than what the run was allowed to trust. The run report names
+the blocks it checked, so an ungraded block reads as an unanswered question
+and never as a pass.
+
+#### The accept tables, graded (2026-09-08)
+
+Until 2026-09-08 this block was the only one with a table, and that was the
+gap the paragraph above called the honest-peripheral policy's next milestone.
+It is closed: **every accept block grades itself from the PAC**, by a rule
+short enough to state in full (`RegFile::with_pac_grades`):
+
+- **`documented`** where the PAC says the register is read-write and the
+  block pretends nothing about it. Accept-and-remember *is* the documented
+  behaviour of a read-write register: the document says it holds what you
+  write, and a `RegFile` holds what you write.
+- **`modeled`** otherwise — a read-only register (the value comes from
+  hardware nobody here models, so whatever we answer is a stand-in), a
+  write-only one (the document does not say what a read returns), or **any
+  register the block has an exception for**: a read override, a mirror, a
+  write-one-to-clear or -pulse mask, a read-only mask. A register we pretend
+  about is a register we modelled.
+
+The access comes from the same generated table as the names and the resets —
+which of `impl Readable` / `impl Writable` svd2rust wrote for the register —
+so it is derived data with the same provenance, not a judgement typed in by
+hand. Nothing grades itself `measured`: that needs a transcript naming the
+register, and it is a promotion somebody makes by hand with a reason.
+
+Twenty-four blocks are in scope now rather than one, and the first thing the
+wider run says is worth reading: the shipped image's boot reaches a register
+we only modelled after **246,696 cycles**, and it is `I2C_ANA_MST.i2c1_ctrl`
+— the analog transaction port, which forces `busy` low and answers `regi2c`
+reads out of a store nobody has measured. `tests/usb_attached.rs
+::the_boot_reads_registers_we_only_modelled_and_this_is_which` pins it, and a
+change that moves it is a change to what this boot depends on being modelled.
+
+That is a survey, not a gate, and the two are now told apart by name.
+`--strict-grade-blocks NAME[,NAME]` narrows the level to the blocks a run
+means: G4-4 passes `USB_DEVICE` and keeps its old claim exactly (five and a
+half seconds attached, none of this block's twenty modelled registers
+crossed), while a run that names nothing asks the whole-chip question. Before
+the accept blocks were graded the narrowing was accidental — there was
+nowhere else for the level to apply.
 
 Not modelled, stated: the PCR reset of the block on esp-hal's first enable
 (sitting 1's attached-host transcript shows both the `[INIT]` lines and the
@@ -885,6 +923,7 @@ lp-emu-esp32c6 --elf <app.elf> [--rom <path>] [--time-grade t1|t2]
     [--efuse-mac a0:f2:62:87:b4:8c] [--efuse-rev 0.2] [--seed <u64>]
     [--trace [BLOCK,BLOCK…]] [--trace-file <path>] [--strict-bus]
     [--strict-grade modeled|documented|measured]
+    [--strict-grade-blocks NAME[,NAME…]]
     [--probe <symbol>@<ms>] [--break-at <symbol>] [--hooks] [--map]
 ```
 

@@ -8,7 +8,7 @@
 
 use lp_emu_esp_common::regnames::RegNames;
 
-/// Register names for the `lp_tee` block (4 registers, 2 with a non-zero reset).
+/// Register names for the `lp_tee` block (4 registers, 2 with a non-zero reset, 0 not plain read-write).
 pub static LP_TEE: RegNames = RegNames {
     block: "lp_tee",
     entries: &[
@@ -18,4 +18,5 @@ pub static LP_TEE: RegNames = RegNames {
         (0x0fc, "date"),
     ],
     resets: &[(0x000, 0x00000003), (0x004, 0x00000001)],
+    access: &[],
 };

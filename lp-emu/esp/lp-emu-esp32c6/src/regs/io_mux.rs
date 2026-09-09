@@ -8,7 +8,7 @@
 
 use lp_emu_esp_common::regnames::RegNames;
 
-/// Register names for the `io_mux` block (34 registers, 32 with a non-zero reset).
+/// Register names for the `io_mux` block (34 registers, 32 with a non-zero reset, 0 not plain read-write).
 pub static IO_MUX: RegNames = RegNames {
     block: "io_mux",
     entries: &[
@@ -81,4 +81,5 @@ pub static IO_MUX: RegNames = RegNames {
         (0x078, 0x00000800),
         (0x07c, 0x00000800),
     ],
+    access: &[],
 };
