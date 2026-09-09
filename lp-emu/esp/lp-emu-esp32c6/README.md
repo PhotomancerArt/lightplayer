@@ -754,6 +754,54 @@ it and refuses an entry without a reason. Interrupt sources 0–3 are never
 raised: nothing here receives, and the `WIFI RX config` line is where
 virtual-air work would start.
 
+#### The radio TX log
+
+`--tx-log stderr|file:<path>` writes one line per frame the blob hands the
+MAC — the TX side of that same window, as bytes:
+
+```text
+1036418.400 tx desc=0x4081de88 plcp0=0xc061de88 pc=0x40806040 dw0=0xc0110060 \
+  buf=0x4081defc next=0x00000000 size=96 len=60 hdr=3c00000000000000 \
+  frame=d0000000ffffffffffffa0f26287b48cffffffffffff00007f18fe34…
+```
+
+| field | what it is |
+|---|---|
+| `desc` | `0x4080_0000 \| (plcp0 & 0xf_ffff)` — the descriptor the blob programmed |
+| `plcp0`, `pc` | the arming write to `WIFI_MAC+0x4d6c` and who did it (`hal_mac_txq_enable+0xe`) |
+| `dw0`, `buf`, `next` | the descriptor's three words **as read**, no interpretation |
+| `size` | `dw0 & 0xfff`; *modeled* — the RX ring's 1,700 against a 1,708-byte buffer stride is what a capacity looks like |
+| `len` | the buffer's first word: 60 here, the 56 on-air bytes plus an FCS the buffer does not carry |
+| `hdr`, `frame` | the eight bytes `len` sits in, and the `len - 4` after them |
+
+The frame above is a 56-byte 802.11 vendor-specific action frame: broadcast
+to broadcast, from the eFuse MAC, category `0x7f`, Espressif OUI `18:fe:34`,
+ESP-NOW element type 4.
+
+**This is an observation, not an air.** Nothing is delivered anywhere, no
+machine receives these bytes, and no interrupt is raised — the guest is told
+nothing it would not have been told without the flag.
+
+**A machine without `--tx-log` is byte-for-byte the machine that came
+before it**: the block only starts recording when a sink is set. The
+recording itself ends the slice early, so that the machine can read the
+buffer out of guest RAM before the guest reuses it, and ending a slice moves
+where a pending interrupt is taken — so a run *with* the log is not promised
+to be instruction-identical to one without. That is why the arming is
+conditional rather than always-on. (On the `test_espnow` image it happens to
+be identical anyway: 79,871,852 instructions at 1,500 ms with the log off,
+with it on, and before the flag existed.)
+
+The blob's TX completion path
+(`lmacTxDone`, `ppProcTxDone`, `trc_onPPTxDone`, `esp_wifi_tx_done_cb`) is
+**never entered** on this machine, because nothing raises the `WIFI_MAC`
+interrupt — so the `test_espnow` image arms exactly one frame and then stops
+making progress. That is the honest state of the radio window, and closing
+it is the virtual-air work, not this flag.
+
+A descriptor whose `len` does not fit its buffer prints `raw=` with the
+bytes verbatim rather than being forced into the shape above.
+
 ## Reference images and the gates
 
 The M2/M3 silicon transcript and the spike report's figures are at firmware
@@ -833,6 +881,7 @@ lp-emu-esp32c6 --elf <app.elf> [--rom <path>] [--time-grade t1|t2]
     [--usb-sj-tried stderr|memory|file:<path>]
     [--control tcp:<host:port>] [--usb-script <file>]
     [--pin-script <file>]... [--wire <a>:<b>]...
+    [--tx-log stderr|file:<path>]
     [--efuse-mac a0:f2:62:87:b4:8c] [--efuse-rev 0.2] [--seed <u64>]
     [--trace [BLOCK,BLOCK…]] [--trace-file <path>] [--strict-bus]
     [--strict-grade modeled|documented|measured]
@@ -852,7 +901,8 @@ that ran too long says so, a capture cut in half looks like data.
 `--pin-script` and `--wire` are the host's side of the **pads**: a scripted
 button, a quadrature encoder, a pad-to-pad jumper. Both are mirrored on
 `lp-cli emu run`, the way `--pin-log` is; the grammar and the pad policy are
-under "The pin, driven from outside".
+under "The pin, driven from outside". `--tx-log` is the radio's side, and
+is mirrored the same way — "The radio TX log", above.
 
 `--control`, `--usb-script` and `--usb-sj tcp:` are the host's side of the
 USB link. The protocol — the command table, the replies, the coupling rule,

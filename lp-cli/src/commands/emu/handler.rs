@@ -4,7 +4,7 @@ use anyhow::{Context, Result, bail};
 use lp_emu_esp32c6::flash::FlashBacking;
 use lp_emu_esp32c6::machine::{
     AppSource, BootMode, Esp32C6Builder, Esp32C6Machine, FrameSink, Outcome, PinLogSink,
-    StopCondition, TimeGrade, Uart0Sink, UsbHost, UsbSjDrain, UsbSjSink,
+    StopCondition, TimeGrade, TxLogSink, Uart0Sink, UsbHost, UsbSjDrain, UsbSjSink,
 };
 use lp_emu_esp32c6::memmap;
 use lp_emu_esp32c6::pinscript::{PinScript, parse_pin_script, parse_wire};
@@ -107,6 +107,9 @@ fn run(args: RunArgs) -> Result<()> {
     }
     if let Some(path) = &args.pin_log {
         builder = builder.pin_log(PinLogSink::File(path.clone()));
+    }
+    if let Some(path) = &args.tx_log {
+        builder = builder.tx_log(TxLogSink::File(path.clone()));
     }
     // `--pin-log` is mirrored here, so its input twin is mirrored too: a run
     // driven from `lp-cli emu run` can script the pads and read the edges
