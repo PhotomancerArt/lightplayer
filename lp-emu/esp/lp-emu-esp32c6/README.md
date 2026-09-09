@@ -840,6 +840,102 @@ it is the virtual-air work, not this flag.
 A descriptor whose `len` does not fit its buffer prints `raw=` with the
 bytes verbatim rather than being forced into the shape above.
 
+#### The air, and the lockstep pair (M4 P1)
+
+Two machines can be put on a **medium** and run together, so that a frame one
+of them arms is carried to the other. The medium is
+`lp_emu_esp_common::air` — chip-neutral, and it holds no register offset, no
+interrupt source and no frame format — and the runner is
+[`lockstep`](src/lockstep.rs).
+
+```rust
+let mut pair = Lockstep::new(vec![a, b])?;          // 672 µs, 8,192-cycle quantum
+let report = pair.run_until(horizon, &StopCondition::default());
+```
+
+Two machines are advanced alternately over a fixed **guest-cycle quantum**,
+in **one thread and two run loops**, exchanging at quantum boundaries. One
+thread is not an implementation detail: it is what makes a pair run
+**byte-identical on every replay**, and a thread pair would end that.
+
+| number | value | why |
+|---|---|---|
+| latency | 672 µs = 107,520 cycles, `modeled` | the air time of the observed 60-byte frame at 802.11b's 1 Mbit/s long-preamble basic rate (192 µs preamble and PLCP header, then 60 bytes at 8 µs a byte). One **stated constant, not a function of the frame** — deriving it per frame would be a PHY model, and no PHY is modelled. Never zero. Settable. |
+| quantum | 8,192 cycles = 51.2 µs | the machine's own `MAX_SLICE_CYCLES`, so a pair pays no slice boundaries a single run was not already paying. It bounds how stale a delivery can be — at most one quantum, 7.6 % of the latency — and it is **never larger than the latency**, which the constructor refuses, because a larger one would let a frame be delivered sooner than the air says it travels. |
+
+**What the air models: byte delivery on a perfect medium.** Every frame
+reaches every other participant, in send order, exactly once, after the
+stated latency. A frame is never delivered back to its sender.
+
+**What it does not model, by name:** the PHY, the channel, collisions,
+retries, RSSI, channel occupancy, timing windows, encryption (ESP-NOW's CCMP
+when a peer key is set), and range — there is one medium and everyone on it
+hears everyone else. The C6's 28 % frame truncation under a WiFi scan
+(`docs/debt/c6-scan-truncation-accepted.md`) is a *timing* property of the
+blob and the MAC during masked windows, not of frame delivery, and cannot
+reproduce here.
+
+**What P1 does not do: it does not deliver.** A frame the air offers a machine
+is **counted and logged, and nothing more** — `frames offered` in a pair's
+report is the honest statement of what happened: the air carried them and
+nobody read them. Writing one into the receiver's RX ring, filling an
+`rx_ctrl` header in front of it and raising the RX interrupt is M4 P2's.
+
+**A machine that is not in an air is byte-for-byte the machine that came
+before the air existed.** Nothing on the air path runs and `WIFI_MAC` records
+nothing until `arm_air` is called, exactly as `--tx-log` works.
+
+##### What is observed and what is not, on the TX completion
+
+The blob's TX completion path (`lmacTxDone`, `ppProcTxDone`,
+`trc_onPPTxDone`) is **still never entered on this machine**, and this
+emulator **does not originate a completion**. M4 P1 established, by
+observation of *our own* registers, how the blob is wired for one:
+
+- esp-radio's `os_adapter_chip_specific::set_isr` routes interrupt sources
+  **0 (`WIFI_MAC`) and 2 (`WIFI_PWR`)** to CPU interrupt 16, which esp-hal
+  had already enabled at priority 1 — so a raised source 0 **is** taken.
+- On a raised source 0 the blob's ISR runs and reads `WIFI_MAC+0x4c48`
+  (`hal_mac_interrupt_get_event`), `WIFI_MAC+0x4c34`
+  (`hal_mac_interrupt_get_bsscolor`) and `WIFI_PWR+0x37b0`
+  (`hal_pwr_interrupt_get_event`), and clears what it read by writing it
+  back to `WIFI_MAC+0x4c4c` and `WIFI_PWR+0x37b4` — a write-one-to-clear
+  pair. It loops until both event words read zero.
+- **Every one of the 32 bits of each event word was tried, one at a time,
+  and none reaches the completion path.** The ISR consumes the event,
+  clears it and returns, with an identical instruction count for all 64
+  candidates.
+
+So: the source, the handler's reads and the clear are **observed**; which
+bits mean "your frame went out" is **not known**, and nothing here invents
+one. See `docs/debt/emu-c6-radio-tx-never-completes.md`.
+
+##### `--air <addr>` — the socket form
+
+The wire framing is in `lp_emu_esp_common::air::wire` and is **its own**, not
+`M!` (`lpc_wire::json::to_serial_line` is the only `M!` framer and the
+emulator never uses it — `just lint-emu-fence`):
+
+```text
+  offset  size  field
+  0       4     magic, the ASCII bytes "LPA1"
+  4       4     length, little-endian u32: how many bytes follow
+  8       8     at, little-endian u64: the sender's guest cycle
+  16      2     from, little-endian u16: the sender's participant id
+  18      n     the frame, verbatim
+```
+
+When the flag lands it is spelled `--air listen:<host:port>` or
+`--air connect:<host:port>` (a bare `<host:port>` means connect), on this
+crate's binary and mirrored on `lp-cli emu run` the way `--pin-log` and
+`--tx-log` are; when plan two's `lp-cli emu serve` arrives it takes the same
+flag and the same wire form.
+
+**Auditable only, never a gate.** A socket pair is not byte-identical — two
+processes interleave however the operating system schedules them — so no
+validation configuration, no transcript and no CI job runs this way; the
+deterministic form is the lockstep runner, in one process and one thread.
+
 ## Reference images and the gates
 
 The M2/M3 silicon transcript and the spike report's figures are at firmware

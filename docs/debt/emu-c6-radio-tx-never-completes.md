@@ -4,7 +4,8 @@ since: 2026-09-08
 logged: 2026-09-08
 area: lp-emu-esp32c6 radio window (`periph/wifi_stub.rs`)
 related:
-  - lp-emu/esp/lp-emu-esp32c6/README.md ("The radio window", "The radio TX log")
+  - lp-emu/esp/lp-emu-esp32c6/README.md ("The radio window", "The radio TX log", "The air, and the lockstep pair")
+  - lp-emu/esp/lp-emu-esp32c6/src/periph/wifi_stub.rs (RADIO_INT_SOURCES, MAC_INT_EVENT_OFFSET)
   - docs/adr/2026-09-06-esp-soc-emulator-architecture.md
 ---
 # A WiFi TX is armed on the emulated C6 and never completes
@@ -29,13 +30,65 @@ never returns, and the guest makes no further progress.
   **no MMIO of any kind**. It is spinning on RAM with the timer interrupt not
   being taken.
 
-**Why it is carried** — closing it means *originating* an interrupt the
-hardware would have originated, on a completion path nobody has observed:
-which of interrupt sources 0–3 the MAC raises on TX done, which register the
-ISR reads, which bits it expects, and which register clears them are all
-undocumented and none of them can be learned from this emulator, because the
-emulator is what is missing the interrupt. That is M4's virtual-air work
-(P1/P2), and the roadmap deliberately did not plan it before the discovery.
+**Narrowed 2026-09-08, M4 P1.** Three of the four unknowns above are now
+answered by observation of *our own* registers on the same image. The fourth
+— which bits mean "your frame went out" — is not, and the debt stays open on
+it alone.
+
+- **Which source.** esp-radio's `os_adapter_chip_specific::set_isr` routes
+  sources **0 (`WIFI_MAC`) and 2 (`WIFI_PWR`)** to CPU interrupt 16 at
+  5.6 ms, `cyc=5619236 pc=0x4202c9d8 W4 INTERRUPT_CORE0+0x000
+  core_0_intr_map0 = 0x00000010`. CPU interrupt 16 was already enabled at
+  priority 1 by esp-hal's `_setup_interrupts` (`mxint16_pri = 1`,
+  `mxint_enable = 0x00010000`) and carries the live esp-rtos tick, so a
+  raised source 0 **is** taken. Sources 1 (`WIFI_MAC_NMI`) and 3
+  (`WIFI_BB`) are left at the default of 31 and never claimed.
+- **Which register the ISR reads.** Raising source 0 after the go strobe
+  enters the blob's ISR, which reads `WIFI_MAC+0x4c48` through
+  `hal_mac_interrupt_get_event` (`cyc=165843231 pc=0x4080d232`), then
+  `WIFI_MAC+0x4c34` (`hal_mac_interrupt_get_bsscolor`) and
+  `WIFI_PWR+0x37b0` (`hal_pwr_interrupt_get_event`).
+- **Which register clears it.** `WIFI_MAC+0x4c4c`, written with exactly the
+  bits just read (`cyc=165843260 pc=0x4080d23c W4 WIFI_MAC+0x4c4c =
+  0x00001000`) — a write-one-to-clear. `WIFI_PWR+0x37b4` is its twin.
+  `mac_txrx_init` writes `+0x4c4c = 0xffffffff` at init, which is the
+  second reading that says it is a clear. A block that raises the line
+  without honouring the clear re-enters the ISR every 464 cycles forever.
+- **Which bits it expects: still unknown.** All 32 bits of
+  `WIFI_MAC+0x4c48` and all 32 of `WIFI_PWR+0x37b0` were tried **one at a
+  time**, and with all bits set at once, against the stated oracle
+  (`--break-at lmacTxDone --break-at ppProcTxDone --break-at
+  trc_onPPTxDone`, and the guest's own `tx simulated_button … event=N`
+  line). None reaches the completion path: the ISR consumes the event,
+  clears it, returns, and the guest goes back to the same spin — with an
+  **identical instruction count (15,871,852 at 1,100 ms) for all 64
+  candidates**, so the event word's value does not reach a dispatch at all.
+
+**Why it is still carried** — closing it means *originating* an event the
+blob's software accepts on a path nobody has observed, and P1 stopped rather
+than guessing past the evidence. The specific question a bounded
+interpretation pass or a silicon capture would answer is now one line:
+
+> The blob's ISR (entered through the handler `set_isr` registered at
+> `0x4202c9d8` for source 0, reached at `hal_mac_interrupt_get_event`,
+> `0x4080d22e`) reads `WIFI_MAC+0x4c48` and `WIFI_PWR+0x37b0`, clears both,
+> and returns without entering `lmacTxDone` (`0x40803704`) for any value of
+> either word. **What else must be true — which other register, or which
+> RAM state — before the ISR dispatches a TX completion?**
+
+Note the shape of that question: it is no longer "which bit", because no bit
+of either word is sufficient. Something outside those two words gates the
+dispatch. M4 P3's two-board silicon capture is the oracle that would settle
+it, and `d1-desk-batch.md` step 3 is where it is spent.
+
+**What M4 P1 shipped instead** — the `Air`, the lockstep pair runner and the
+socket framing, with the receiving end **counting and logging** rather than
+delivering. No completion is originated, no interrupt is raised, and a
+machine that is not in an air is byte-for-byte the machine that came before
+the air existed. The constants above are recorded in `periph/wifi_stub.rs`
+(`RADIO_INT_SOURCES`, `MAC_INT_EVENT_OFFSET`, `MAC_INT_CLEAR_OFFSET`,
+`PWR_INT_EVENT_OFFSET`, `PWR_INT_CLEAR_OFFSET`) with the trace lines that
+named each, and nothing in the block acts on them.
 
 **What is not blocked** — the frame itself. The bytes the blob hands the MAC
 are complete and readable before the wedge, and `--tx-log` ships them: on the
