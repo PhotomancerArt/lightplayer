@@ -55,11 +55,10 @@ fn serial_thread_loop(
 
     let mut read_buffer = Vec::new();
     let mut connection_lost = false;
-    let mut shutdown = false;
 
     loop {
         // Check for shutdown signal (non-blocking)
-        if shutdown || shutdown_rx.try_recv().is_ok() {
+        if shutdown_rx.try_recv().is_ok() {
             log::debug!("Serial thread: Shutdown signal received");
             break;
         }
@@ -71,19 +70,6 @@ fn serial_thread_loop(
 
         // Process incoming client messages (non-blocking)
         while let Ok(msg) = client_rx.try_recv() {
-            // Re-check shutdown per message, not just per loop pass: closing
-            // drops `client_tx` but leaves whatever is already queued
-            // readable, and a backlog (readiness re-asks a hello every
-            // second for the whole ready budget) would otherwise be written
-            // out one bounded-but-slow write at a time before the thread
-            // looked at the shutdown signal again — past the close's join
-            // budget, leaving the port held. A close means "stop", not
-            // "finish the queue".
-            if shutdown_rx.try_recv().is_ok() {
-                log::debug!("Serial thread: Shutdown signal received (draining writes)");
-                shutdown = true;
-                break;
-            }
             // Frame as one `M!{json}\n` line (the shared framer).
             let data = match lpc_wire::json::to_serial_line(&msg) {
                 Ok(line) => line.into_bytes(),
@@ -114,6 +100,20 @@ fn serial_thread_loop(
                          dropped message id={}",
                         msg.id
                     );
+                    // And stop draining. Everything queued behind this frame
+                    // is equally undeliverable, and each attempt costs the
+                    // port's full write timeout — readiness leaves ~30 of
+                    // them behind a silent board, which is minutes of writes
+                    // nobody will read, past any close's join budget. The
+                    // outer pass re-checks the shutdown signal immediately.
+                    //
+                    // Deliberately keyed on the STALL and not on shutdown: a
+                    // peer that is still accepting gets the queue it was
+                    // already being handed (the studio device bench depends
+                    // on a close mid-drain finishing what it started), and a
+                    // peer that is not gets abandoned at the first frame it
+                    // refused.
+                    break;
                 }
                 Err(e) => {
                     log::error!("Serial thread: Write error: {e}");
@@ -391,11 +391,16 @@ mod tests {
     /// A byte stream that answers reads the way a silent device does and
     /// records the two things `close` is supposed to guarantee: that the
     /// stream was DROPPED (on a real port, that is the fd closing), and how
-    /// many writes went out before it was.
+    /// many writes were attempted before it was.
+    ///
+    /// `stalls` makes writes behave like a port whose peer has stopped
+    /// reading: each attempt costs the port's write timeout and then reports
+    /// [`ByteStreamError::WriteStalled`].
     struct SilentStream {
         dropped: Arc<AtomicBool>,
         writes: Arc<AtomicUsize>,
         write_cost: Duration,
+        stalls: bool,
     }
 
     impl DeviceByteStream for SilentStream {
@@ -408,6 +413,9 @@ mod tests {
         fn write_all(&mut self, _bytes: &[u8]) -> Result<(), ByteStreamError> {
             thread::sleep(self.write_cost);
             self.writes.fetch_add(1, Ordering::SeqCst);
+            if self.stalls {
+                return Err(ByteStreamError::WriteStalled);
+            }
             Ok(())
         }
 
@@ -448,6 +456,7 @@ mod tests {
                 dropped: Arc::clone(&dropped),
                 writes: Arc::new(AtomicUsize::new(0)),
                 write_cost: Duration::ZERO,
+                stalls: false,
             }),
             "/dev/test-silent",
             HardwareSerialOptions::default(),
@@ -461,34 +470,38 @@ mod tests {
         );
     }
 
-    /// A queued write backlog must not outlive the close. The readiness
-    /// engine queues one hello per second for its whole budget, and a device
-    /// that never answers leaves them all unsent; draining that queue before
-    /// looking at the shutdown signal is what pushed the framing thread past
-    /// the close's join budget and left the port held.
+    /// A backlog aimed at a peer that has stopped reading must not outlive
+    /// the close. The readiness engine queues one hello per second for its
+    /// whole budget, and a board that never answers leaves them all unsent;
+    /// attempting each of them at the port's full write timeout is what
+    /// pushed the framing thread past the close's join budget and left the
+    /// port held.
+    ///
+    /// The break is keyed on the STALL, not on the shutdown signal: a peer
+    /// that is still accepting gets the queue it was already being handed.
     #[tokio::test]
-    async fn close_abandons_a_write_backlog_instead_of_draining_it() {
+    async fn a_stalled_peer_does_not_hold_the_close_hostage() {
         let dropped = Arc::new(AtomicBool::new(false));
         let writes = Arc::new(AtomicUsize::new(0));
         let mut transport = create_hardware_serial_transport_pair_with_options(
             Box::new(SilentStream {
                 dropped: Arc::clone(&dropped),
                 writes: Arc::clone(&writes),
-                write_cost: Duration::from_millis(50),
+                // One port write timeout per attempt: 60 × 100 ms = 6 s if
+                // every queued frame is attempted.
+                write_cost: Duration::from_millis(100),
+                stalls: true,
             }),
             "/dev/test-backlog",
             HardwareSerialOptions::default(),
         )
         .expect("transport");
 
-        // 60 × 50 ms = 3 s of writes if the queue is drained in full.
         for id in 0..60 {
             transport.send(hello(id)).await.expect("queue hello");
         }
 
-        // Let the framing thread get INSIDE its drain loop before closing:
-        // the outer per-pass check already covers a close that lands while
-        // it is reading, and the per-message check is what covers this.
+        // Let the framing thread get INSIDE its drain loop before closing.
         tokio::time::sleep(Duration::from_millis(300)).await;
 
         let start = Instant::now();
@@ -505,7 +518,7 @@ mod tests {
         );
         assert!(
             writes.load(Ordering::SeqCst) < 60,
-            "the backlog was drained in full instead of abandoned at shutdown"
+            "every queued frame was attempted against a peer that refused the first"
         );
     }
 }

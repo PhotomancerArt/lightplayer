@@ -73,12 +73,13 @@ could not enforce, and the enforcement it needed was denied by the peer:
 
    The framing thread is inside the close that would have released the port;
    the main thread is inside the open that is waiting for it.
-3. Even short of a wedge, the message drain
-   (`while let Ok(msg) = client_rx.try_recv()`) ran to the end of the queue
-   before the loop looked at the shutdown signal again. Readiness re-asks a
-   hello every second for the whole ready budget (30 s on the walk), so a
-   device that never answers leaves a deep backlog, and a close landing
-   mid-drain waited out every remaining write.
+3. The message drain (`while let Ok(msg) = client_rx.try_recv()`) ran to the
+   end of the queue before the loop looked at the shutdown signal again.
+   Readiness re-asks a hello every second for the whole ready budget (30 s on
+   the walk), so a board that never answers leaves a deep backlog, and each
+   of those frames costs the port's full write timeout against a peer that
+   refuses them — minutes of writes nobody will read, past any close's join
+   budget.
 
 The `Unresponsive` path is what exposed it, and not by coincidence: a board
 that reaches `Ready` drains its FIFO on every frame and queues nothing, so
@@ -110,9 +111,12 @@ operation runs from — instead of `Unresponsive`.
 - A write that times out is `ByteStreamError::WriteStalled`, a **dropped
   frame, not a dead stream**: the framing thread logs it and keeps the link,
   so the readiness deadline gets to classify the board as `Unresponsive`.
-- The framing thread re-checks the shutdown signal **per queued message**, not
-  per loop pass: a close means stop, not finish the queue. It drops the stream
-  explicitly at exit, where the release happens.
+- The framing thread stops draining its write queue at the **first stalled
+  frame**: everything behind it is equally undeliverable, and the outer pass
+  re-checks the shutdown signal immediately. Keyed on the stall and not on the
+  shutdown signal on purpose — see "What the first attempt at this broke"
+  below. It also drops the stream explicitly at exit, where the release
+  happens.
 - `AsyncSerialClientTransport::close` documents that returning `Ok` *is* the
   promise the resource is free, carries a backend label so its timeout error
   names the held port instead of "Backend thread", logs at `error!`, and waits
@@ -131,17 +135,35 @@ operation runs from — instead of `Unresponsive`.
 
 - `close_drops_the_byte_stream` — pins the invariant itself: `close()`
   returning `Ok` means the stream (the port fd, on hardware) is gone.
-- `close_abandons_a_write_backlog_instead_of_draining_it` — queues 60 writes
-  at 50 ms each behind a silent stream, closes mid-drain, and asserts the
-  close lands inside its join budget with the backlog abandoned. Verified to
-  fail before the fix (`close: Other("serial backend thread for
-  /dev/test-backlog did not stop within 2.0s; it still holds the
-  connection")`).
+- `a_stalled_peer_does_not_hold_the_close_hostage` — queues 60 frames behind
+  a stream that costs a full write timeout per attempt and then reports
+  `WriteStalled`, closes mid-drain, and asserts the close lands inside its
+  join budget with the backlog abandoned. Verified to fail without the break
+  (`close: Other("serial backend thread for /dev/test-backlog did not stop
+  within 2.0s; it still holds the connection")`).
 
 The drain-on-teardown half has **no automated coverage**: it needs a real OS
 serial port whose peer has stopped draining, and on macOS a pty cannot stand
 in for one (`serialport` sets baud via `IOSSIOSPEED`, which a pty driver
 refuses with `ENOTTY`). Its evidence is the bench sample above.
+
+## What the first attempt at this broke
+
+The obvious version of the drain fix — *re-check the shutdown signal before
+every queued message* — was wrong, and CI said so: it turned
+`an_effect_that_outlives_its_activity_gives_the_wire_back_and_the_pump_resumes`
+(`lpa-studio-core`) red, deterministically, and bisecting the change down to
+individual hunks named that one hunk alone. The studio device bench runs the
+fake device over this same framing thread, and its eviction-recovery leg
+depends on a close landing mid-drain **finishing what it started**: cutting
+the drain short let the rebuilt link's hello arrive inside the same window,
+and a board the test expects to read `NotResponding` read `Ready`.
+
+The correction is the distinction the first version missed. "Shutdown" is not
+what makes a queued frame undeliverable; a peer that refuses it is. Keying the
+break on the stall serves both: a peer still accepting gets the queue it was
+already being handed, and a peer that is not gets abandoned at the first frame
+it refused — which is the only case that could ever have blown the budget.
 
 ## Verification status
 
@@ -163,6 +185,10 @@ formality (`flush`, and then `close` itself) is exactly the one that blocks,
 so read the implementation rather than the name. When you remove one
 unbounded wait, check whether you moved it rather than removed it — the tty
 drains on teardown whichever syscall you reach it through, and the second
-exit was invisible until a stack sample named it. And an unresponsive peer is
+exit was invisible until a stack sample named it. And when you bound a loop,
+bound it on the condition that actually makes the work pointless (the peer
+refused) rather than on the event that prompted you to look (a close arrived):
+the first version of this fix cut a drain short for a peer that was happily
+reading, and a bench that depended on the difference caught it. And an unresponsive peer is
 a *state*, not an error: mapping "it isn't reading" onto "the stream is dead"
 turns a board management could have repaired into one it refuses to touch.
