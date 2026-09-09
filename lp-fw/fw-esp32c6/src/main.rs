@@ -158,6 +158,8 @@ mod tests {
     pub mod jit_math_perf;
     #[cfg(any(feature = "test_msafluid", feature = "test_fluid_demo"))]
     pub mod msafluid_solver;
+    #[cfg(feature = "test_rmt_rx")]
+    pub mod rmt_rx;
     #[cfg(feature = "test_button")]
     pub mod test_button;
     #[cfg(feature = "test_dither")]
@@ -621,6 +623,12 @@ async fn main(spawner: embassy_executor::Spawner) {
     {
         use tests::gpio_input::run_gpio_input;
         run_gpio_input(spawner).await;
+    }
+
+    #[cfg(feature = "test_rmt_rx")]
+    {
+        use tests::rmt_rx::run_rmt_rx;
+        run_rmt_rx(spawner).await;
     }
 
     #[cfg(feature = "test_shader_compile_incremental")]
