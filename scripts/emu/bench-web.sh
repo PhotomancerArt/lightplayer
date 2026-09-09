@@ -151,9 +151,35 @@ for spec in "${images[@]}"; do
         --arg exitOn "$exit_on" '{slug: $slug, elf: $elf, timeout: $timeout, exitOn: (if $exitOn == "" then null else $exitOn end)}')"
     manifest_images="$(jq -c --argjson e "$entry" '. + [$e]' <<<"$manifest_images")"
 done
-jq -n --argjson images "$manifest_images" '{images: $images, grades: ["t1", "t2"], repeats: 2}' >"$stage_dir/manifest.json"
 
-echo "bench-web: staged $stage_dir ($(du -sh "$stage_dir" | cut -f1))" >&2
+# The `build` object lets the page (and every uploaded result) say what was
+# measured: the emulator's git sha/branch/dirty flag and when it was built,
+# so a phone that refreshes can see it picked up a new build, and the
+# collected log can attribute numbers without guessing.
+sha256() {
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | awk '{print $1}'
+    else
+        sha256sum "$1" | awk '{print $1}'
+    fi
+}
+build_sha="$(git rev-parse HEAD)"
+build_short="${build_sha:0:7}"
+build_branch="$(git branch --show-current)"
+[[ -z "$build_branch" ]] && build_branch="detached"
+if [[ -n "$(git status --porcelain)" ]]; then build_dirty=true; else build_dirty=false; fi
+build_built_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+wasm_sha256="$(sha256 "$stage_dir/emu.wasm")"
+wasm_bytes="$(wc -c <"$stage_dir/emu.wasm" | tr -d ' ')"
+build_obj="$(jq -n --arg sha "$build_sha" --arg short "$build_short" --arg branch "$build_branch" \
+    --argjson dirty "$build_dirty" --arg builtAt "$build_built_at" --arg wasmSha "$wasm_sha256" \
+    --argjson wasmBytes "$wasm_bytes" \
+    '{sha: $sha, short: $short, branch: $branch, dirty: $dirty, built_at: $builtAt, wasm_sha256: $wasmSha, wasm_bytes: $wasmBytes}')"
+
+jq -n --argjson images "$manifest_images" --argjson build "$build_obj" \
+    '{images: $images, grades: ["t1", "t2"], repeats: 2, build: $build}' >"$stage_dir/manifest.json"
+
+echo "bench-web: staged $stage_dir ($(du -sh "$stage_dir" | cut -f1)) build $build_short$([[ $build_dirty == true ]] && echo ' (dirty)')" >&2
 
 # --- serve ---------------------------------------------------------------
 if [[ -z "$port" ]]; then

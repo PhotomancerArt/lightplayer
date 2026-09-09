@@ -311,6 +311,13 @@ image, grade, wall seconds, instr/s and the real-time ratio. Baseline numbers
 and the method are in
 `docs/reports/2026-09-07-emu-web-bench-baseline.md`.
 
+`manifest.json`'s top-level `build` object (sha, short, branch, dirty,
+built_at, wasm_sha256, wasm_bytes) says what was actually measured: the page
+shows it before and during every run, cache-busts `worker.js`/`emu.wasm` by
+the short sha so a phone refresh picks up a new build, and stamps it onto
+every uploaded `result-*.json` so the collected log can attribute numbers
+without guessing.
+
 **The Xtensa core** (`lp-xt-emu`) has its own probe and its own ladder:
 
 ```bash
