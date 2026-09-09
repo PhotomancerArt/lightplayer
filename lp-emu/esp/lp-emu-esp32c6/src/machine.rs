@@ -2242,8 +2242,7 @@ impl Esp32C6Machine {
             return format!("{head} unreadable=descriptor");
         };
         let size = dw0 & 0xfff;
-        let head =
-            format!("{head} dw0={dw0:#010x} buf={buf:#010x} next={next:#010x} size={size}");
+        let head = format!("{head} dw0={dw0:#010x} buf={buf:#010x} next={next:#010x} size={size}");
         let Some(len) = self.peek_word(buf) else {
             return format!("{head} unreadable=buffer");
         };
