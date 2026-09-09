@@ -100,10 +100,26 @@ fn serial_thread_loop(
             );
 
             // Write to the stream (bounded — see `DeviceByteStream::write_all`)
-            if let Err(e) = stream.write_all(&data) {
-                log::error!("Serial thread: Write error: {e}");
-                connection_lost = true;
-                break;
+            match stream.write_all(&data) {
+                Ok(()) => {}
+                // The device stopped draining its receive FIFO. Drop the
+                // frame and keep the link: this is what an unresponsive
+                // board looks like from the write side, and the readiness
+                // engine's own deadline is what gets to classify it. Tearing
+                // the link down here reported a repairable board as `Gone`,
+                // a state management never runs from (bench, 2026-09-08).
+                Err(ByteStreamError::WriteStalled) => {
+                    log::warn!(
+                        "Serial thread: {stream_label} is not accepting output; \
+                         dropped message id={}",
+                        msg.id
+                    );
+                }
+                Err(e) => {
+                    log::error!("Serial thread: Write error: {e}");
+                    connection_lost = true;
+                    break;
+                }
             }
         }
 
