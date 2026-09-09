@@ -703,7 +703,10 @@ fn armed_descriptor(m: &mut Esp32C6Machine) -> u32 {
 }
 
 fn raise_mac(m: &mut Esp32C6Machine, bits: u32) {
-    let i = m.bus.peripheral_index("WIFI_MAC").expect("the radio window");
+    let i = m
+        .bus
+        .peripheral_index("WIFI_MAC")
+        .expect("the radio window");
     m.bus
         .with_peripheral::<lp_emu_esp32c6::periph::wifi_stub::WifiStub, _>(i, |w, _| {
             w.raise_event(bits)
@@ -866,8 +869,7 @@ fn sweep_one(elf: &str, candidate: Candidate) -> Row {
         .iter()
         .skip(mark)
         .find(|l| {
-            (l.contains(" R4 ") || l.contains(" W4 "))
-                && !ISR_STAPLES.iter().any(|s| l.contains(s))
+            (l.contains(" R4 ") || l.contains(" W4 ")) && !ISR_STAPLES.iter().any(|s| l.contains(s))
         })
         .map(|l| {
             let sym = pc_of(l).and_then(|pc| m.symbolize(pc)).unwrap_or_default();
@@ -932,7 +934,10 @@ fn u1_sweep_every_event_bit_after_an_armed_tx() {
     let Some(elf) = espnow_elf() else { return };
     let mut rows = Vec::new();
     for (block, off) in SWEPT_REGISTERS {
-        for bits in (0..32u32).map(|n| 1u32 << n).chain([0xffff_ffff, 0x19a8_79e0]) {
+        for bits in (0..32u32)
+            .map(|n| 1u32 << n)
+            .chain([0xffff_ffff, 0x19a8_79e0])
+        {
             rows.push(sweep_one(
                 &elf,
                 Candidate {
@@ -962,7 +967,10 @@ fn u1_sweep_the_event_word_against_a_finished_tx_slot() {
     let Some(elf) = espnow_elf() else { return };
     let mut rows = Vec::new();
     for state in [TxState::OwnerClear, TxState::StrobeClear, TxState::Both] {
-        for bits in (0..32u32).map(|n| 1u32 << n).chain([0xffff_ffff, 0x19a8_79e0]) {
+        for bits in (0..32u32)
+            .map(|n| 1u32 << n)
+            .chain([0xffff_ffff, 0x19a8_79e0])
+        {
             rows.push(sweep_one(
                 &elf,
                 Candidate {

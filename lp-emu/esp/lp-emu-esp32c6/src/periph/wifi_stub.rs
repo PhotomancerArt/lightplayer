@@ -979,10 +979,8 @@ impl Peripheral for WifiStub {
             }
             if self.tx_completion_armed {
                 let at = cx.now + TX_DONE_DELAY_US * crate::memmap::CYCLES_PER_US;
-                cx.sched.schedule_at(
-                    at,
-                    lp_emu_esp_common::bus::event_id(self.index, EV_TX_DONE),
-                );
+                cx.sched
+                    .schedule_at(at, lp_emu_esp_common::bus::event_id(self.index, EV_TX_DONE));
             }
         }
     }
