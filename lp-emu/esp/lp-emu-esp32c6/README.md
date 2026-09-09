@@ -815,11 +815,17 @@ evidence beside it, run again. The boot asked five times —
 | `ram_set_chan_freq_sw_start` | `WIFI_MAC+0x0cc` | `andi 256; beqz` — bit 8, lock | bit 8 = 1 |
 | `rom_iq_est_enable` (ROM) | `WIFI_MAC+0x4a0` | `slli a3,a5,15; bgez` — bit 16, done | bit 16 = 1 |
 | `hal_init` | `WIFI_MAC+0x4ddc` | `andi 1; beqz` — bit 0, ready | bit 0 = 1 |
+| `hal_mac_rx_is_dscr_reload` | `WIFI_MAC+0x4080` | `andi 1; bnez` — bit 0, the descriptor-reload strobe | bit 0 = 0 |
 
 — and then said hello. The list is `wifi_stub::OVERRIDES`; a unit test walks
-it and refuses an entry without a reason. Interrupt sources 0–3 are never
-raised: nothing here receives, and the `WIFI RX config` line is where
-virtual-air work would start.
+it and refuses an entry without a reason. The sixth is not the boot's: it is
+the **first thing a delivered frame asked for**, and nothing had ever asked
+before M4 P2 because nothing had ever received.
+
+Interrupt sources 1 (`WIFI_MAC_NMI`) and 3 (`WIFI_BB`) are still never
+raised. **Source 0 is**, on a delivery into the RX ring — see the air
+section. Source 2 (`WIFI_PWR`) is claimed by the blob but nothing here raises
+it.
 
 #### The radio TX log
 
@@ -861,10 +867,13 @@ with it on, and before the flag existed.)
 
 The blob's TX completion path
 (`lmacTxDone`, `ppProcTxDone`, `trc_onPPTxDone`, `esp_wifi_tx_done_cb`) is
-**never entered** on this machine, because nothing raises the `WIFI_MAC`
-interrupt — so the `test_espnow` image arms exactly one frame and then stops
-making progress. That is the honest state of the radio window, and closing
-it is the virtual-air work, not this flag.
+**still never entered** on this machine — so the `test_espnow` image arms
+exactly one frame and then stops making progress. The `WIFI_MAC` interrupt
+*is* raised now, on a delivery into the RX ring (see the air section), and it
+makes no difference to this: M4 P1 tried every bit of both event words
+against the completion path and none of them reaches it. That is the honest
+state of the TX side, and `docs/debt/emu-c6-radio-tx-never-completes.md`
+carries the question.
 
 A descriptor whose `len` does not fit its buffer prints `raw=` with the
 bytes verbatim rather than being forced into the shape above.
@@ -904,15 +913,152 @@ hears everyone else. The C6's 28 % frame truncation under a WiFi scan
 blob and the MAC during masked windows, not of frame delivery, and cannot
 reproduce here.
 
-**What P1 does not do: it does not deliver.** A frame the air offers a machine
-is **counted and logged, and nothing more** — `frames offered` in a pair's
-report is the honest statement of what happened: the air carried them and
-nobody read them. Writing one into the receiver's RX ring, filling an
-`rx_ctrl` header in front of it and raising the RX interrupt is M4 P2's.
-
 **A machine that is not in an air is byte-for-byte the machine that came
 before the air existed.** Nothing on the air path runs and `WIFI_MAC` records
-nothing until `arm_air` is called, exactly as `--tx-log` works.
+nothing until `arm_air` is called, exactly as `--tx-log` works. Measured on
+the `test_espnow` image: **79,871,852 instructions at 1,500 ms** with no air,
+which is M4 P0's figure for the same image with the TX log off, with it on,
+and before either flag existed.
+
+#### Delivery: the frame reaches the receiving guest's application (M4 P2)
+
+A frame the air offers a machine is **written into that machine's own RX
+descriptor ring**, behind an `rx_ctrl` header, and the radio interrupt is
+raised. On the `test_espnow` image the receiving guest's application prints
+it:
+
+```text
+[test_espnow] rx device= event= kind= payload_len=0
+```
+
+That is the first time anything has ever received on this machine. (The
+`device=`/`event=`/`kind=` fields print empty because the firmware's `Debug`
+impls for those newtypes print nothing — the same as the `device_id=` in its
+own ready line.)
+
+**How a delivery works.** At the slice boundary — the mirror of
+`drain_tx_log`, and for the same reason: a peripheral cannot touch guest
+memory, the machine can — the machine reads the ring base the blob programmed
+into `WIFI_MAC+0x4084`, walks the chain through each descriptor's `next`
+until it finds one the hardware still owns whose buffer is big enough, writes
+the header and the frame into that buffer, hands the descriptor back, points
+`WIFI_MAC+0x408c` and `+0x4088` at it, and raises interrupt source 0 with bit
+14 in the MAC's event word. Everything it touches is the guest's own: no
+address is assumed and nothing is allocated.
+
+**What the guest decided, and what we did.** Every row below was settled by
+changing the value and watching the receiving guest, not by reasoning about a
+layout (`tests/air_delivery.rs`):
+
+| thing | what it is set to | who decided |
+|---|---|---|
+| the interrupt source | 0 (`WIFI_MAC`) | **the guest** — its own `set_isr` routes it (M4 P1) |
+| the event bit | 14 | **the guest** — with a frame in the ring, bit 14 is the only one of 32 that reaches the RX path at all, and `hal_init`'s own enable mask (`+0x4c40 = 0x19a879e0`) has it set |
+| the clear | write-one-to-clear at `+0x4c4c`, and the line drops when the event word empties | **the guest** — it writes back what it read and loops until both event words read zero (M4 P1) |
+| `+0x408c` (last filled descriptor) | the descriptor just written | **the guest** — `hal_mac_rx_get_last_dscr` reads it, and answering 0 sends the blob into its reload path instead of at the ring |
+| `+0x4088` (the RX cursor) | the descriptor after it | **the guest** — `hal_mac_rx_read_rxdscrnext` reads it, and answering 0 makes the blob dereference the 0: the run's own `R4 UNMAPPED+0x1143c` is the evidence. This is M4 P0's **U6**, answered |
+| `+0x4080` bit 0 | self-clearing | **the guest** — `hal_mac_rx_set_dscr_reload` sets it and `hal_mac_rx_is_dscr_reload` spins until it reads 0 |
+| `rxmatch0` in the header | 1 | **the guest** — of all 256 values of that header byte, the 128 with bit 4 set reach `ppRxPkt` and the 128 without it do not |
+| descriptor `eof` (`[30]`) | set | **the guest** — with it clear the frame is not taken |
+| descriptor `[28:24]` | **left exactly as the blob posted it** | **the guest** — clearing the 1 it posts stops reception. What the field *means* is still M4 P0's U3 |
+| descriptor `owner` (`[31]`) | cleared | **us.** The guest does not check it; it is cleared because that is what `lldesc` hardware does, and a ring whose descriptors were never handed back would look full |
+| descriptor `[23:12]` | the byte count written | **nobody.** Every value tried — the byte count, the 2,704 the ring already held, all ones — delivers the frame. The guest *reads* it (the instruction counts differ) but tolerates anything. **Undetermined**, as M4 P0 left it |
+| the air's latency | 672 µs | **us**, a stated constant (above) |
+| the raise itself | ours | **us.** No silicon has been watched raising this interrupt. An air that raises one is *originating* an event, not reproducing one |
+
+**The `rx_ctrl` header, and how much of it is invented.** The layout is
+derived from the public bit layout of `wifi_pkt_rx_ctrl_t` in the
+**Apache-2.0 `esp-wifi-sys-esp32c6` crate, version 0.2.0** — cited, never
+copied: the crate is not vendored, none of its source is in this repository,
+and nothing was disassembled out of a blob binary. That the header sits at
+`buf[0]` and is 92 bytes long is a **choice**; M4 P0 §4 established that the
+ring was posted and never filled, so nobody here has ever seen the header the
+silicon writes.
+
+Setting each of the header's 92 bytes to `0xff` in turn and watching the
+guest says which of them it reads:
+
+| byte | field | read by the guest? |
+|---|---|---|
+| 1 | `rate` | **yes** |
+| 3 bit 4 | `rxmatch0` | **yes**, and it is the gate |
+| 33–34 | `rx_channel_estimate_len`, its valid bit | **yes** |
+| 39 | `cur_bb_format`, `cur_single_mpdu` | **yes** |
+| 84–85 | `sig_len` | **yes** |
+| 88 | `rx_state` | **yes** |
+| 0 | `rssi` | no — **a constant we invented**, −40 dBm |
+| 20 | `noise_floor` | no — a constant, −96 dBm |
+| 21 | `channel`, `second` | no — fixed at 11 and 0 |
+| 12–15 | `timestamp` | no — the receiving machine's own µs clock |
+| 11 bit 7 | `is_group` | no — derived from the frame's `addr1` |
+| all the rest | `he_siga1`, `he_siga2`, `rxend_state`, `dump_len`, … | no — zero |
+
+`rate` is a **fixed value**, not a derivation: an 802.11 frame does not carry
+the rate it was sent at, the PLCP registers that would say are M4 P0's U5,
+and no PHY is modelled — so it is 0, the 1 Mbit/s basic rate the air's
+latency constant was chosen from. `sig_len` and `is_group` *are* derived from
+the frame. Four zero bytes stand where the FCS would be; the air carries no
+FCS and none is computed.
+
+**The ring ends; it does not wrap.** The blob posts ten descriptors and the
+tenth's `next` is NULL. A guest that has stopped draining fills all ten, and
+this guest does **not** re-post them — after ten deliveries every descriptor
+is still the guest's. So the eleventh frame and every one after it is
+**dropped, counted and logged once**: `air_frames_delivered` and
+`air_frames_undelivered` on the machine say how many of each, and the first
+drop writes one line.
+
+##### What the air does not model, by name
+
+The list the ADR and the honesty section rest on. None of this is a hedge;
+each item is something a reader would otherwise assume:
+
+- **No PHY, no channel, no collisions, no retries, no range.** One medium,
+  everybody on it hears everybody, every frame arrives exactly once.
+- **No RSSI.** `rssi` is a constant, −40 dBm, and every frame carries it.
+  `noise_floor` likewise, at −96.
+- **No channel model.** The header's `channel` is a fixed 11 — the channel
+  the `test_espnow` image asks for — and the air delivers a frame whatever
+  channel anybody is on.
+- **No rate model.** `rate` is fixed at 0; the latency is a stated constant
+  and not a function of a frame's length.
+- **No encryption.** ESP-NOW's CCMP, when a peer key is set, is not modelled.
+- **No timing windows**, and in particular the C6's 28 % frame truncation
+  under a WiFi scan (`docs/debt/c6-scan-truncation-accepted.md`) — a *timing*
+  property of the blob and the MAC during masked windows, not of frame
+  delivery. It cannot reproduce here.
+- **No FCS.** Four zero bytes stand where one would be.
+- **No TX completion.** The blob's TX-done path is still never entered and
+  nothing here originates one. This is the reason a pair only ever exchanges
+  one frame in one direction — see below.
+
+##### The pair, and the one frame
+
+The `test_espnow` guest arms **one** frame and never returns from its own
+`send` (`docs/debt/emu-c6-radio-tx-never-completes.md`). So:
+
+- Two identical images started in the **same** cycle both arm at 1,036.4 ms
+  and are both wedged 672 µs later when the other's frame arrives. Both
+  deliver; neither prints. `tests/air_delivery.rs` pins that.
+- `Lockstep::stagger` gives each machine a stated power-on offset in the
+  pair's clock, the way two real boards have one. With the second machine
+  250 ms behind, the first machine's frame lands while the second is still in
+  its tick loop, and the second prints its `rx` line.
+- **The other direction cannot work**, whatever the offset: whichever machine
+  sends first wedges first, so the later sender's frame always arrives at a
+  machine that has stopped draining. One frame, one direction, until a TX
+  completes.
+
+A staggered pair is still byte-identical on replay — an offset is a constant
+in guest cycles.
+
+##### The socket form is still not built
+
+`--air listen:<addr>` / `--air connect:<addr>` is described below and **has no
+implementation**: the wire codec (`air::wire`) exists and is tested, the flag
+does not. It is auditable-only by construction and no gate may use it, so it
+waits for plan two's `lp-cli emu serve`. A pair is built through
+`lockstep::Lockstep`.
 
 ##### What is observed and what is not, on the TX completion
 
@@ -938,6 +1084,22 @@ observation of *our own* registers, how the blob is wired for one:
 So: the source, the handler's reads and the clear are **observed**; which
 bits mean "your frame went out" is **not known**, and nothing here invents
 one. See `docs/debt/emu-c6-radio-tx-never-completes.md`.
+
+One line of P1's reading needs correcting, and it matters for anyone who
+reads this looking for a method. "The event word's value does not reach a
+dispatch at all" was measured **with an empty RX ring**, and it is only true
+there. M4 P2 ran the same sweep with a frame already in a descriptor and the
+candidates separate immediately — eight distinct instruction counts across 35
+of them, and bit 14 reaching the RX path where nothing else does. A negative
+measured with nothing to find is not a negative about the mechanism; it is a
+negative about the experiment.
+
+The TX question itself is **untouched** by M4 P2 and stays open. What the
+pair run adds to it is one datum: a machine that has *received* a frame, all
+the way up to its application, still wedges in its own `send` afterwards —
+machine 1 in `the_pair_hears_itself` prints its `rx` line and then never
+prints a `tx` one. So a working RX path is not what the TX completion was
+waiting for.
 
 ##### `--air <addr>` — the socket form
 
