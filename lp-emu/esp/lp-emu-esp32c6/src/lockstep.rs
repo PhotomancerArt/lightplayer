@@ -49,10 +49,8 @@
 //! `let wake = wake.max(self.cycles() + 1).min(stop_cycle)`), which is the
 //! one fact this runner rests on. Without it an idle machine would jump past
 //! the pair's horizon and the other machine's frames would arrive in its
-//! past. [`an_idle_machine_stops_at_the_horizon_not_past_it`] is the test
-//! that holds it.
-//!
-//! [`an_idle_machine_stops_at_the_horizon_not_past_it`]: tests::an_idle_machine_stops_at_the_horizon_not_past_it
+//! past. `tests::an_idle_machine_stops_at_the_horizon_not_past_it` is the
+//! test that holds it.
 //!
 //! # Choosing the two numbers
 //!
