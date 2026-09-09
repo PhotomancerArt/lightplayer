@@ -664,7 +664,14 @@ impl<B: Bus> MachineHart<B> {
     /// One instruction: fetch it, run it, charge what the bus billed.
     ///
     /// `None` means "keep going"; `Some` ends the slice.
-    #[inline(always)]
+    // THROWAWAY (M5 P1b), `wasm-split`: Step A gave this ONE
+    // `#[inline(always)]` body TWO call sites (the stepping loop and the
+    // cached loop's refused-address fallback), and in JSC the module's
+    // stepping loop then reads 1.18x slower than pre-Step-A's. This tests
+    // whether a wasm engine's per-function compilation is what is paying for
+    // that, by giving it one out-of-line copy instead.
+    #[cfg_attr(not(feature = "wasm-split"), inline(always))]
+    #[cfg_attr(feature = "wasm-split", inline(never))]
     fn step_once(&mut self, bus: &mut B) -> Option<SliceEnd> {
         let pc = self.pc;
         // The bus's trace and spin detector are only worth having if the
