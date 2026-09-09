@@ -26,6 +26,11 @@ use serialport::{SerialPort, SerialPortType, UsbPortInfo};
 
 use lp_bootctl::{BOOTCTL_PARTITION_OFFSET, BOOTCTL_PARTITION_SIZE, BootFlags, encode_record};
 
+use super::lp_analog_i2c::{
+    LP_ANA_I2C_BIT, LP_I2C_ANA_MST_BUSY, LP_I2C_ANA_MST_I2C0_CTRL, LPPERI_CLK_EN, LPPERI_RESET_EN,
+    describe, lp_analog_i2c_plan,
+};
+
 use crate::{
     LinkBootControlResult, LinkEraseDeviceResult, LinkError, LinkFirmwareFlashResult,
     LinkFirmwareManifest, LinkFlashRegion, LinkManagementEvent, LinkManagementEventSink,
@@ -83,7 +88,17 @@ pub(super) fn flash_firmware(
             manifest_path, manifest.target_chip
         ))
     })?;
-    let mut flasher = connect(port_name, Some(expected_chip), &mut recorder)?;
+    // `NoResetNoStub`: the flash-target `finish` must NOT reset the board —
+    // the LP-clock restore below has to run between the write and the reset,
+    // over the stub that is still up. The reset is ours, after it. (The
+    // ROM-only pass in `connect` normally leaves nothing for this one to do;
+    // it stays as the belt to that brace.)
+    let mut flasher = connect(
+        port_name,
+        Some(expected_chip),
+        ResetAfterOperation::NoResetNoStub,
+        &mut recorder,
+    )?;
     let chip_name = chip_name(&mut flasher);
     assert_chip_matches_manifest(flasher.chip(), &manifest)?;
 
@@ -106,11 +121,20 @@ pub(super) fn flash_firmware(
             .map_err(|error| LinkError::other(format!("flash write failed: {error}")))?;
     }
 
-    // No explicit reset: `write_bin_to_flash`'s flash-target `finish`
-    // already applies the connection's after-operation (HardReset), exactly
-    // like the espflash CLI's flash command. A second `reset_after` would
-    // talk to a stub that is already gone (found on hardware, M5 smoke).
+    // `write_bin_to_flash`'s flash-target `finish` applied the connection's
+    // after-operation — `NoResetNoStub`, so the stub is still up and the
+    // board has not been reset. (With `HardReset`, as this path once used, a
+    // second `reset_after` would talk to a stub that is already gone — found
+    // on hardware, M5 smoke.) Restore what the previous firmware may have
+    // left gated, THEN reset: the bootloader we just wrote cannot boot
+    // otherwise.
     recorder.log("Flash complete");
+    restore_lp_analog_i2c_clock(&mut flasher, &mut recorder);
+    recorder.log("Resetting flashed device");
+    flasher
+        .connection()
+        .reset()
+        .map_err(|error| LinkError::other(format!("post-flash reset failed: {error}")))?;
 
     Ok(LinkFirmwareFlashResult {
         manifest,
@@ -134,7 +158,12 @@ pub(super) fn erase_device_flash(
     let mut recorder = EventRecorder::new(events);
     recorder.log("Erasing device flash");
 
-    let mut flasher = connect(port_name, None, &mut recorder)?;
+    let mut flasher = connect(
+        port_name,
+        None,
+        ResetAfterOperation::HardReset,
+        &mut recorder,
+    )?;
     let chip_name = chip_name(&mut flasher);
 
     recorder.progress(LinkManagementProgress::new("Erasing flash"));
@@ -172,7 +201,12 @@ pub(super) fn write_boot_control(
         flags.bits()
     ));
 
-    let mut flasher = connect(port_name, None, &mut recorder)?;
+    let mut flasher = connect(
+        port_name,
+        None,
+        ResetAfterOperation::HardReset,
+        &mut recorder,
+    )?;
     let chip_name = chip_name(&mut flasher);
 
     recorder.progress(LinkManagementProgress::new("Erasing boot-control sector"));
@@ -215,7 +249,12 @@ pub(super) fn read_raw_filesystem(
     events: &LinkManagementEventSink,
 ) -> Result<LinkRawFilesystemReadResult, LinkError> {
     let mut recorder = EventRecorder::new(events);
-    let mut flasher = connect(port_name, None, &mut recorder)?;
+    let mut flasher = connect(
+        port_name,
+        None,
+        ResetAfterOperation::HardReset,
+        &mut recorder,
+    )?;
     let chip_name = chip_name(&mut flasher);
     let region = chip_name
         .as_deref()
@@ -359,7 +398,12 @@ pub(super) fn probe_target(
 ) -> Result<Option<String>, LinkError> {
     let mut recorder = EventRecorder::new(events);
     recorder.log(format!("Probing {port_name} for a bootloader"));
-    let mut flasher = connect(port_name, None, &mut recorder)?;
+    let mut flasher = connect(
+        port_name,
+        None,
+        ResetAfterOperation::HardReset,
+        &mut recorder,
+    )?;
     let chip_name = chip_name(&mut flasher);
     reset_into_app(&mut flasher, &mut recorder);
     recorder.log(match &chip_name {
@@ -389,8 +433,10 @@ pub(super) fn reset_runtime(
 
 /// Open the port and establish an espflash connection (reset into bootloader,
 /// sync, chip-detect, upload stub). `before = DefaultReset` performs the
-/// USB-JTAG download-mode entry; `after = HardReset` is applied by
-/// [`reset_into_app`] once the operation finishes.
+/// USB-JTAG download-mode entry; `after` is what the operation's `finish`
+/// (or [`reset_into_app`]) applies once it is done — `HardReset` everywhere
+/// but the flash path, which resets by hand after
+/// [`restore_lp_analog_i2c_clock`].
 /// Open `port_name` and run the espflash handshake.
 ///
 /// `expect_chip` is `Some` only on the flash path, where an image is about to
@@ -402,13 +448,12 @@ pub(super) fn reset_runtime(
 fn connect(
     port_name: &str,
     expect_chip: Option<Chip>,
+    after: ResetAfterOperation,
     recorder: &mut EventRecorder,
 ) -> Result<Flasher, LinkError> {
     recorder.log(format!("Connecting to {port_name}"));
-    let serial = serialport::new(port_name, CONNECT_BAUD)
-        .flow_control(serialport::FlowControl::None)
-        .open_native()
-        .map_err(|error| LinkError::other(format!("failed to open {port_name}: {error}")))?;
+    prepare_lp_domain(port_name, recorder);
+    let serial = open_port(port_name)?;
     Flasher::connect(
         serial,
         port_info_for(port_name),
@@ -417,10 +462,92 @@ fn connect(
         /* verify    */ false,
         /* skip      */ false,
         expect_chip,
-        ResetAfterOperation::HardReset,
+        after,
         ResetBeforeOperation::DefaultReset,
     )
     .map_err(|error| LinkError::other(format!("espflash connect failed: {error}")))
+}
+
+/// Open the port, tolerating the brief window after a link release where the
+/// OS has not yet freed the USB serial FD.
+///
+/// `DeviceSession::manage` releases the wire (closing the byte-stream
+/// framing thread) and then immediately runs an operation whose first act is
+/// to reopen the port here; on macOS the just-closed `/dev/cu.*` reports
+/// "Resource busy" for a short beat after the previous holder dropped it
+/// (worsened by our own ROM pre-pass, which opens once more right before the
+/// stub connect). A bounded retry turns that transient into a non-event;
+/// anything else (a real second holder, a vanished port) surfaces after the
+/// budget, unchanged.
+fn open_port(port_name: &str) -> Result<serialport::TTYPort, LinkError> {
+    const OPEN_ATTEMPTS: u32 = 20;
+    const OPEN_RETRY: Duration = Duration::from_millis(100);
+    let mut last: Option<serialport::Error> = None;
+    for attempt in 0..OPEN_ATTEMPTS {
+        match serialport::new(port_name, CONNECT_BAUD)
+            .flow_control(serialport::FlowControl::None)
+            .open_native()
+        {
+            Ok(port) => return Ok(port),
+            Err(error)
+                if error.kind() == serialport::ErrorKind::Io(std::io::ErrorKind::ResourceBusy) =>
+            {
+                last = Some(error);
+                if attempt + 1 < OPEN_ATTEMPTS {
+                    std::thread::sleep(OPEN_RETRY);
+                }
+            }
+            Err(error) => {
+                return Err(LinkError::other(format!(
+                    "failed to open {port_name}: {error}"
+                )));
+            }
+        }
+    }
+    Err(LinkError::other(format!(
+        "failed to open {port_name} after {OPEN_ATTEMPTS} attempts: {}",
+        last.map(|error| error.to_string()).unwrap_or_default()
+    )))
+}
+
+/// A ROM-only pass over the board BEFORE the stub is loaded: on a C6 whose
+/// previous firmware gated the LP analog I2C clock, espflash's RAM stub
+/// never answers its first command (bench, 2026-09-06: `Timeout while
+/// running command` 3.7 s in, on every stub operation; the ROM alone
+/// connects and answers `board-info` fine, and after the fix below the stub
+/// comes up again). So the same restore the flash path runs before its
+/// closing reset also has to run here, over the ROM, or a factory-fresh
+/// board cannot be flashed at all. One extra ROM handshake per operation;
+/// silent on a clean board.
+///
+/// Best-effort: any failure is logged and the real connect below produces
+/// the error that matters (chip mismatch, no bootloader, port gone).
+fn prepare_lp_domain(port_name: &str, recorder: &mut EventRecorder) {
+    let serial = match open_port(port_name) {
+        Ok(serial) => serial,
+        Err(error) => {
+            recorder.log(format!("warning: LP-domain pre-check skipped: {error}"));
+            return;
+        }
+    };
+    let flasher = Flasher::connect(
+        serial,
+        port_info_for(port_name),
+        Some(CONNECT_BAUD),
+        /* use_stub  */ false,
+        /* verify    */ false,
+        /* skip      */ false,
+        None,
+        ResetAfterOperation::NoResetNoStub,
+        ResetBeforeOperation::DefaultReset,
+    );
+    match flasher {
+        Ok(mut flasher) => restore_lp_analog_i2c_clock(&mut flasher, recorder),
+        Err(error) => recorder.log(format!("warning: LP-domain pre-check skipped: {error}")),
+    }
+    // Dropping the ROM session closes the port; the stub connect that
+    // follows resets into the downloader again (HP-only — the restore
+    // survives it).
 }
 
 /// Refuse to write `manifest` onto `detected`.
@@ -454,6 +581,54 @@ fn reset_into_app(flasher: &mut Flasher, recorder: &mut EventRecorder) {
     // `is_stub = true` matches the `use_stub = true` passed to `connect`.
     if let Err(error) = flasher.connection().reset_after(true) {
         recorder.log(format!("warning: post-operation reset failed: {error}"));
+    }
+}
+
+/// Undo the LP-domain state a fresh board's factory firmware leaves behind,
+/// so the bootloader we just wrote can boot on the reset that follows. C6
+/// only; a no-op (and silent) on a board whose clock is on and whose master
+/// is idle. See [`super::lp_analog_i2c`] for the mechanism and the bench proof.
+///
+/// Best-effort on purpose: a register read that fails is logged, and the
+/// flash still ends in a reset — the board may then need a replug, which is
+/// exactly where it stood before this existed.
+fn restore_lp_analog_i2c_clock(flasher: &mut Flasher, recorder: &mut EventRecorder) {
+    if flasher.chip() != Chip::Esp32c6 {
+        return;
+    }
+    let connection = flasher.connection();
+    let read = |connection: &mut espflash::connection::Connection, addr: u32| {
+        connection
+            .read_reg(addr)
+            .map_err(|error| LinkError::other(format!("read 0x{addr:08x}: {error}")))
+    };
+    let result: Result<Option<String>, LinkError> = (|| {
+        let clk_before = read(connection, LPPERI_CLK_EN)?;
+        let ctrl = read(connection, LP_I2C_ANA_MST_I2C0_CTRL)?;
+        let Some(fix) = lp_analog_i2c_plan(clk_before, ctrl) else {
+            return Ok(None);
+        };
+        let write = |connection: &mut espflash::connection::Connection, addr: u32, value: u32| {
+            connection
+                .write_reg(addr, value, None)
+                .map_err(|error| LinkError::other(format!("write 0x{addr:08x}: {error}")))
+        };
+        write(connection, LPPERI_CLK_EN, clk_before | LP_ANA_I2C_BIT)?;
+        // The clock alone does not clear a latched busy: pulse the master's
+        // reset line (bench, 2026-09-06).
+        let reset_before = read(connection, LPPERI_RESET_EN)?;
+        write(connection, LPPERI_RESET_EN, reset_before | LP_ANA_I2C_BIT)?;
+        write(connection, LPPERI_RESET_EN, reset_before & !LP_ANA_I2C_BIT)?;
+        let clk_after = read(connection, LPPERI_CLK_EN)?;
+        let busy_after = read(connection, LP_I2C_ANA_MST_I2C0_CTRL)? & LP_I2C_ANA_MST_BUSY != 0;
+        Ok(Some(describe(fix, clk_before, clk_after, busy_after)))
+    })();
+    match result {
+        Ok(Some(line)) => recorder.log(line),
+        Ok(None) => {}
+        Err(error) => recorder.log(format!(
+            "warning: LP analog I2C clock check failed: {error}"
+        )),
     }
 }
 

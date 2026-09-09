@@ -29,6 +29,7 @@ check-gpio-calibrate = []
 # pads, the product button driver, the interrupt handler and the self-loop's
 # register writes are chip facts and stay in `fw-esp32c6`.
 check-gpio-input = []
+check-rmt-rx = []
 check-uart-bridge = []
 # The `espnow-broadcast` payload: the broadcast schedule, the payload-length
 # ladder, the record shapes and the phase-independent reduction of a peer's

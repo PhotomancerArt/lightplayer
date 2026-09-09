@@ -1083,6 +1083,23 @@ impl ConfigurationDriver for LpEmuDriver {
         // the firmware's own self-loop, which is what makes a pin payload
         // recordable on a board with no wire and no hands, and each
         // transcript's sidecar `note` says which side drove.
+        // The third kind of input: a jumper. It goes to the emulated
+        // configurations alone, because on a board the jumper is a jumper and
+        // the sidecar's `note` is where a silicon transcript says whether it
+        // was there.
+        for wire in req.payload.wire {
+            emu.push("--wire".into());
+            emu.push((*wire).into());
+            notes.push(format!(
+                "the pads are TIED: `--wire {wire}` ties the two pads together in the signal \
+                 fabric, so whatever one carries the other carries. That is this payload's \
+                 loopback, and it is the emulated stand-in for a jumper between the two header \
+                 pins. What the run measures is therefore this machine's own receiver reading \
+                 this machine's own transmitter — a claim about the machine, not about silicon. \
+                 A silicon twin of this payload needs the physical jumper, and its sidecar says \
+                 so."
+            ));
+        }
         if let Some(script) = req.payload.pin_script {
             emu.push("--pin-script".into());
             emu.push(script.into());

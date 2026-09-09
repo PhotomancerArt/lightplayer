@@ -80,6 +80,7 @@ desk session gets wasted.
 | `gpio-input` | `test_gpio_input` | `[gpio-input] === DONE ===` | `checks::gpio_input` (the scripted edge table both sides are driven by, the quadrature decoder the interrupt handler runs, the record shapes, and the renderer that turns the table into the emulated side's `--pin-script`) |
 | `espnow-broadcast` | `test_espnow_broadcast` | `[espnow-broadcast] === DONE ===` (after six sends and six received frames; the payload keeps broadcasting afterwards, because a two-board capture needs the peer still on the air) | `checks::espnow_broadcast` (the schedule, the payload-length ladder, the record shapes, and the peer-counter reduction that makes two captures comparable) |
 | `rmt-chase` | `test_rmt`, `ws281x_telemetry` | `[rmt-chase] === DONE ===` | `checks::rmt_chase` (the chase pattern, the FNV-1a checksum, the per-frame record) |
+| `rmt-rx` | `test_rmt_rx` | `[rmt-rx] === DONE ===` | `checks::rmt_rx` (the WS2812 encode and decode, host-tested against each other, and the `rmt-rx` record — a frame put on gpio18 and read back off gpio19, checksummed with `rmt_chase`'s own FNV-1a so the two numbers are directly comparable) |
 | `render-loop` | `bench_render_loop` (with `server,radio,memory_fs`) | `[render-loop] === DONE ===` | `checks::render_loop` (the frame accumulator, the record shapes) |
 | `boot-idle` | *(none — the shipped image)* | `[stack] heartbeat: high-water` | *(none)* |
 | `usb-negative-control` | *(none — the shipped image)* | `"hostDrainingAgainMs"` (the recovery stamp itself) | *(none)* |

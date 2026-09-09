@@ -17,6 +17,8 @@ pub mod jit_math_perf;
 pub mod render_loop;
 #[cfg(any(feature = "check-rmt", test))]
 pub mod rmt_chase;
+#[cfg(any(feature = "check-rmt-rx", test))]
+pub mod rmt_rx;
 #[cfg(feature = "check-shader-compile")]
 pub mod shader_compile;
 #[cfg(any(feature = "check-uart-bridge", test))]

@@ -27,6 +27,7 @@ justfile recipes.
 | `flashSizeMb` | Physical flash the image header declares. Must match `partitionsCsv` — the bootloader validates the table against the header, not the chip. |
 | `partitionsCsv` | Repo-relative partition table, the same file espflash flashes with. |
 | `chip.family` / `chip.name` | espflash chip identity (`--chip`). |
+| `bootloader` | Optional. Repo-relative second-stage bootloader to merge instead of the one the installed espflash bundles (`--bootloader`). Provenance and the rule for changing it: `lp-fw/bootloaders/README.md`. |
 
 ## Authoring rules
 
@@ -36,6 +37,13 @@ justfile recipes.
   entry. Do not rename a shipped id.
 - Changing `flashSizeMb` without changing `partitionsCsv` (or vice versa) is a
   boot-loop; they are one decision.
+- The packager refuses an image whose **bootloader segments** are not the
+  ones `lpa_devices::bootloader::bootloader_code_ranges` names for the chip.
+  Studio recognizes a board hung in its bootloader by the ROM's `Saved PC`
+  against that table, so a bootloader change (an espflash upgrade, a
+  `--bootloader` override) must update the table — and the copy in
+  `scripts/c6-lp-ana-i2c.py` — from the new bootloader's image header. See
+  `docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.md`.
 - Xtensa builds need Espressif's fork on PATH. `lp-cli` runs cargo in the
   crate directory so the crate's `rust-toolchain.toml` selects the channel,
   but the GNU binutils must already be on PATH — `just

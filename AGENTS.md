@@ -809,7 +809,11 @@ CI (see `.github/workflows/pre-merge.yml`) is path-gated per job: one
 `just check-lint` in parallel with `Validate (x64)`, which runs
 `just ci-prereqs`, the gated test recipes (`test-rust-core`, plus
 `test-studio-host` when studio paths changed, plus `test-filetests` when
-shader paths changed), then `schema-check`. Docs-only PRs skip every job.
+shader paths changed), then `schema-check` and the heap-budget ratchet —
+both against the `target/debug/lp-cli` that `cargo test` already built
+(the `LP_CLI` override; a `-p lp-cli` dev build unifies features
+differently and used to rebuild every dependency). Locally `just check`
+still builds lp-cli in dev. Docs-only PRs skip every job.
 Pushes to main force all gates true, so filter misses surface on the next
 merge. To avoid the round-trip of "push → wait → CI fails on lint → fix →
 repeat", run the local equivalent before every push:
