@@ -16,6 +16,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use super::args::PackageArgs;
+use super::bootloader_guard::check_bootloader_segments;
 use super::build::build_firmware;
 use super::build_def::{BuildDef, find_repo_root, load_build_def};
 use super::distribution_manifest::{
@@ -72,6 +73,10 @@ fn package_build(repo_root: &Path, def: &BuildDef, out_dir: &Path) -> Result<Pat
     // picked up a stale or foreign artifact.
     let image_bytes =
         std::fs::read(&image_path).with_context(|| format!("reading {}", image_path.display()))?;
+    // The bootloader at the head of the image must load where Studio's
+    // hung-bootloader detection expects it (`lpa_devices::bootloader`).
+    check_bootloader_segments(&def.chip.name, &image_bytes)
+        .with_context(|| format!("checking the bootloader in {}", image_path.display()))?;
     let (_, image_core) = extract_core(&image_bytes, &image_path)?;
     if image_core != core {
         bail!(
@@ -175,7 +180,7 @@ fn check_core_matches_def(def: &BuildDef, core: &ManifestCore, elf: &Path) -> Re
 }
 
 /// `espflash save-image --merge --skip-padding` with the def's chip, flash
-/// size and partition table. `--flash-size` is load-bearing: espflash writes
+/// size, partition table and (when the def names one) vendored bootloader. `--flash-size` is load-bearing: espflash writes
 /// it into the image header and the bootloader validates the partition table
 /// against that header, not the physical chip.
 fn save_merged_image(
@@ -188,13 +193,18 @@ fn save_merged_image(
     if !partitions.exists() {
         bail!("partition table {} does not exist", partitions.display());
     }
-    let status = Command::new("espflash")
+    let mut command = Command::new("espflash");
+    command
         .current_dir(repo_root)
         .arg("save-image")
         .args(["--chip", &def.chip.name])
         .arg("--partition-table")
         .arg(&partitions)
-        .args(["--flash-size", &def.flash_size_arg()])
+        .args(["--flash-size", &def.flash_size_arg()]);
+    if let Some(bootloader) = def.bootloader_path(repo_root)? {
+        command.arg("--bootloader").arg(bootloader);
+    }
+    let status = command
         .arg("--merge")
         .arg("--skip-padding")
         .arg(elf)
