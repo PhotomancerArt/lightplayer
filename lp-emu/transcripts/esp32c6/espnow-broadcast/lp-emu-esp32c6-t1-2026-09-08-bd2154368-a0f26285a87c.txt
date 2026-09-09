@@ -1,4 +1,4 @@
-[fw-checks-header] {"schema":1,"payload":"espnow-broadcast","chip":"esp32c6","firmware_commit":"04dae2fa201f","firmware_features":"default,esp32c6,esp_radio,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_espnow_broadcast","firmware_dirty":false}
+[fw-checks-header] {"schema":1,"payload":"espnow-broadcast","chip":"esp32c6","firmware_commit":"bd2154368792","firmware_features":"default,esp32c6,esp_radio,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_espnow_broadcast","firmware_dirty":false}
 [INFO] fw_esp32c6::hardware::espnow_radio_driver: [fw-esp32c6] ESP-NOW radio version=2 channel=11
 [espnow-broadcast] radio ready device=0x7ca88562 espnow_channel=11 logical_channel=1 tick_ms=50 ticks_per_send=2 tx_events=6 rx_events=6
 [espnow-broadcast] tx device=0x7ca88562 event=0 kind=1 payload_len=0

@@ -48,7 +48,7 @@ use lp_emu_esp_common::air::ParticipantId;
 use lp_emu_esp32c6::loader::EfuseIdentity;
 use lp_emu_esp32c6::lockstep::{DEFAULT_LATENCY_US, Lockstep};
 use lp_emu_esp32c6::machine::{
-    AppSource, Esp32C6Builder, Esp32C6Machine, StopCondition, TxLogSink, UsbHost,
+    AppSource, Esp32C6Builder, Esp32C6Machine, StopCondition, TimeGrade, TxLogSink, UsbHost,
 };
 use lp_emu_esp32c6::memmap;
 
@@ -113,9 +113,25 @@ fn ms(n: u64) -> u64 {
     n * 1_000 * memmap::CYCLES_PER_US
 }
 
+/// The time grade the pair runs at, overridable with
+/// `LP_EMU_C6_ESPNOW_BROADCAST_GRADE=t1|t2|t3`.
+///
+/// A pair is two machines on one clock, so both run at one grade — a pair of
+/// mixed grades would be two different claims sharing an air. The committed
+/// captures are `t1` and `t2`, and the replay between them is what says a time
+/// grade moves no non-timing field of this payload.
+fn grade() -> TimeGrade {
+    match std::env::var("LP_EMU_C6_ESPNOW_BROADCAST_GRADE").as_deref() {
+        Ok("t2") => TimeGrade::T2,
+        Ok("t3") => TimeGrade::T3,
+        _ => TimeGrade::T1,
+    }
+}
+
 fn machine(elf: &str, mac: &str, tx_log: TxLogSink) -> Esp32C6Machine {
     Esp32C6Builder::new()
         .app(AppSource::Path(elf.into()))
+        .time_grade(grade())
         .tx_log(tx_log)
         .usb_host(UsbHost::Attached { draining: true })
         .efuse(EfuseIdentity {
