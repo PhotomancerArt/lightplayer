@@ -1,0 +1,13 @@
+[fw-checks-header] {"schema":1,"payload":"gpio-input","chip":"esp32c6","firmware_commit":"95b28394fb9d","firmware_features":"default,esp32c6,esp_radio,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_gpio_input","firmware_dirty":false}
+[INFO] fw_esp32c6::tests::gpio_input: [gpio-input] drive=external button=gpio20 encoder=gpio0/gpio1 select=gpio2 poll_ms=20 samples=45
+[INFO] fw_esp32c6::tests::gpio_input: [gpio-input] === ARMED ===
+[INFO] fw_checks: [fw-check-json] {"kind":"gpio-input","reader":"button","state":"down","t_us":160024,"samples":9}
+[INFO] fw_checks: [fw-check-json] {"kind":"gpio-input","reader":"button","state":"up","t_us":360024,"samples":19}
+[INFO] fw_checks: [fw-check-json] {"kind":"gpio-input","reader":"button","state":"down","t_us":460024,"samples":24}
+[INFO] fw_checks: [fw-check-json] {"kind":"gpio-input","reader":"button","state":"up","t_us":660024,"samples":34}
+[INFO] fw_checks: [fw-check-json] {"kind":"gpio-input","reader":"encoder","position":1,"dir":"cw","t_us":914999}
+[INFO] fw_checks: [fw-check-json] {"kind":"gpio-input","reader":"encoder","position":2,"dir":"cw","t_us":934999}
+[INFO] fw_checks: [fw-check-json] {"kind":"gpio-input","reader":"encoder","position":1,"dir":"ccw","t_us":1014999}
+[INFO] fw_checks: [fw-check-json] {"kind":"gpio-input","reader":"encoder","position":0,"dir":"ccw","t_us":1034999}
+[INFO] fw_esp32c6::tests::gpio_input: [gpio-input] detents=4 edges=16
+[INFO] fw_esp32c6::tests::gpio_input: [gpio-input] === DONE ===
