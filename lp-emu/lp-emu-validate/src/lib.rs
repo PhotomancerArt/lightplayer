@@ -12,7 +12,7 @@ pub mod run;
 pub mod transcript;
 
 pub use config::ValidateConfig;
-pub use configuration::{Availability, Configuration, ConfigurationKind, TrustTable};
+pub use configuration::{Availability, Band, Configuration, ConfigurationKind, TrustTable};
 pub use grade::{FieldClass, Grade};
 pub use header::{HEADER_PREFIX, HEADER_SCHEMA, InbandHeader, TranscriptHeader};
 pub use mask::{MaskRule, MaskSet, mask_set};

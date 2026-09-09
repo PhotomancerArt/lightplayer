@@ -187,8 +187,137 @@ pub struct TrustTable {
 pub struct TrustEntry {
     pub class: FieldClass,
     pub grade: Grade,
+    /// How wrong this class is allowed to be, when "wrong" is the only thing
+    /// it can be.
+    ///
+    /// Additive and optional (M1 P4). An entry without one behaves exactly as
+    /// it did before the field existed — which is what keeps every sidecar
+    /// already committed loading unchanged, and why this is
+    /// `skip_serializing_if`: a band-less entry serialises to the same bytes
+    /// it always did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub band: Option<Band>,
     /// Why. A trust entry without a reason is a guess with a table around it.
     pub because: String,
+}
+
+/// A stated tolerance for a class that is never exact.
+///
+/// The problem it solves: `--strict-timing` compares timing fields for
+/// **equality**, and a cycle model is never equal. Under that contract the
+/// `timing` class can only ever be `modeled`, however good the model gets, so
+/// the grade stops carrying information. A band says how wrong the model is
+/// allowed to be, on which payloads, and a replay enforces *that* instead.
+///
+/// **Direction.** A ratio is read as **reference over model** — the side that
+/// does *not* carry the band, divided by the side that does. That is the
+/// direction the calibration record's tables state (silicon / `t3`), and
+/// fixing it here is what keeps a band from passing when a replay's two
+/// arguments are given one way round and failing the other. Only a
+/// non-reciprocal-symmetric band would notice, but a contract that depends on
+/// argument order is not a contract. When *both* sides carry a band the
+/// ratio is `left / right` and the left side's band is the one enforced;
+/// that case has no reference and is documented rather than guessed at.
+///
+/// **`on` is mandatory.** A band that does not name the payloads that measured
+/// it is a claim about payloads nobody ran. A payload outside the list is
+/// compared exactly, as before — the band does not travel.
+///
+/// Only `timing` has a tested meaning here. The type allows a band on any
+/// class because refusing one would be a second rule to keep in sync, but no
+/// other class has ever carried one and none is interpreted: see the
+/// hardware-validation ADR's 2026-09-08 amendment.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(try_from = "BandRepr")]
+pub struct Band {
+    /// `[low, high]`: the closed interval the per-sample ratio must fall in.
+    pub per_sample: [f64; 2],
+    /// The fraction of a field's samples that must be inside `per_sample`,
+    /// in `(0, 1]`. Coverage is counted per field over all of that field's
+    /// samples in the replay, because a transcript has no column saying which
+    /// slice was which kind of work — that split is the calibration record's
+    /// analysis, not data the contract can read.
+    pub per_sample_coverage: f64,
+    /// `|sum(reference) / sum(model) - 1|` must not exceed this. The
+    /// per-sample test can pass on a distribution that is biased in one
+    /// direction; this one cannot.
+    pub aggregate: f64,
+    /// The payloads this band was measured on. Never empty.
+    pub on: Vec<String>,
+}
+
+/// The wire shape, so the invariants are checked wherever a band is
+/// deserialised — `validate.toml` and a committed sidecar both.
+#[derive(Deserialize)]
+struct BandRepr {
+    per_sample: [f64; 2],
+    per_sample_coverage: f64,
+    aggregate: f64,
+    #[serde(default)]
+    on: Vec<String>,
+}
+
+impl TryFrom<BandRepr> for Band {
+    type Error = String;
+
+    fn try_from(r: BandRepr) -> Result<Self, Self::Error> {
+        let [lo, hi] = r.per_sample;
+        if !(lo.is_finite() && hi.is_finite()) || lo <= 0.0 || hi < lo {
+            return Err(format!(
+                "band per_sample must be [low, high] with 0 < low <= high, got [{lo}, {hi}]"
+            ));
+        }
+        if !r.per_sample_coverage.is_finite()
+            || r.per_sample_coverage <= 0.0
+            || r.per_sample_coverage > 1.0
+        {
+            return Err(format!(
+                "band per_sample_coverage must be a fraction in (0, 1], got {}",
+                r.per_sample_coverage
+            ));
+        }
+        if !r.aggregate.is_finite() || r.aggregate < 0.0 {
+            return Err(format!(
+                "band aggregate must be a non-negative fraction, got {}",
+                r.aggregate
+            ));
+        }
+        if r.on.is_empty() {
+            return Err(
+                "a band must name the payloads it was measured on (`on = [...]`): a band \
+                 without one is a claim about payloads nobody ran"
+                    .into(),
+            );
+        }
+        Ok(Self {
+            per_sample: r.per_sample,
+            per_sample_coverage: r.per_sample_coverage,
+            aggregate: r.aggregate,
+            on: r.on,
+        })
+    }
+}
+
+impl Band {
+    /// Does this band speak for `payload`?
+    pub fn covers(&self, payload: &str) -> bool {
+        self.on.iter().any(|p| p == payload)
+    }
+
+    pub fn contains(&self, ratio: f64) -> bool {
+        ratio >= self.per_sample[0] && ratio <= self.per_sample[1]
+    }
+
+    /// `[0.80, 1.25] on >= 90 % of samples, aggregate within 10 %`.
+    pub fn describe(&self) -> String {
+        format!(
+            "[{:.2}, {:.2}] on >= {:.0} % of samples, aggregate within {:.0} %",
+            self.per_sample[0],
+            self.per_sample[1],
+            self.per_sample_coverage * 100.0,
+            self.aggregate * 100.0
+        )
+    }
 }
 
 impl TrustTable {
@@ -213,6 +342,18 @@ impl TrustTable {
             .iter()
             .find(|e| e.class == class)
             .map(|e| e.because.as_str())
+    }
+
+    /// The band this configuration states for a class, if it states one.
+    ///
+    /// `None` is the answer for every configuration that predates the field,
+    /// and it means "compared exactly", which is what those configurations
+    /// have always meant.
+    pub fn band(&self, class: FieldClass) -> Option<&Band> {
+        self.entries
+            .iter()
+            .find(|e| e.class == class)
+            .and_then(|e| e.band.as_ref())
     }
 }
 
@@ -313,10 +454,45 @@ mod tests {
         let t = TrustTable::new(vec![TrustEntry {
             class: FieldClass::Memory,
             grade: Grade::Measured,
+            band: None,
             because: "desk-validated".into(),
         }]);
         assert_eq!(t.grade(FieldClass::Memory), Grade::Measured);
         assert_eq!(t.grade(FieldClass::Timing), Grade::Modeled);
         assert_eq!(t.grade(FieldClass::UsbSerialJtag), Grade::Modeled);
+        // And silence is not a band either: an entry that states none is
+        // compared exactly, which is what every entry did before the field.
+        assert!(t.band(FieldClass::Memory).is_none());
+        assert!(t.band(FieldClass::Timing).is_none());
+    }
+
+    /// A trust entry with no band round-trips to the bytes it always had.
+    /// This is what keeps every committed sidecar loading, and it is why the
+    /// field is `skip_serializing_if`.
+    #[test]
+    fn a_band_less_entry_serialises_as_it_always_did() {
+        let json = r#"[{"class":"memory","grade":"measured","because":"desk-validated"}]"#;
+        let t: TrustTable = serde_json::from_str(json).unwrap();
+        assert!(t.band(FieldClass::Memory).is_none());
+        assert_eq!(serde_json::to_string(&t).unwrap(), json);
+    }
+
+    /// And an entry that states one carries it through a round trip.
+    #[test]
+    fn a_band_survives_a_round_trip() {
+        let json = concat!(
+            r#"[{"class":"timing","grade":"documented","band":{"per_sample":[0.8,1.25],"#,
+            r#""per_sample_coverage":0.9,"aggregate":0.2,"on":["p"]},"because":"why"}]"#
+        );
+        let t: TrustTable = serde_json::from_str(json).unwrap();
+        let band = t.band(FieldClass::Timing).unwrap();
+        assert_eq!(band.per_sample, [0.8, 1.25]);
+        assert!(band.covers("p") && !band.covers("q"));
+        assert!(band.contains(0.8) && band.contains(1.25) && !band.contains(1.26));
+        assert_eq!(
+            band.describe(),
+            "[0.80, 1.25] on >= 90 % of samples, aggregate within 20 %"
+        );
+        assert_eq!(serde_json::to_string(&t).unwrap(), json);
     }
 }

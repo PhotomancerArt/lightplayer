@@ -693,3 +693,84 @@ the second chip is the test of the design, and a flat crate fails it.
   was not complete — the ROM's own data image was missing from it, because
   nothing on the direct path executes `_init` — and the boot-log diff is
   above.)
+
+#### Amendment (M1 P4, 2026-09-08, PR #630): grade 3, and the rule that an address costs
+
+This amends "Time is a discrete-event schedule over a cycle model, and the
+wall clock never enters" above. It was drafted by M1 P3 (PR #627), which
+built the thing; it lands here with the contract that judges it.
+
+The ladder gains a third rung. `t1` counts instructions and `t2` charges a
+per-class table; both answer "what does this instruction cost?" and neither
+can answer "what does this *address* cost?", which on a part whose code lives
+behind a 32 KiB cache in front of a serial flash is where most of the
+difference from silicon was. Measured: a fetch out of cold flash costs 43.3
+cycles an instruction on silicon and 1 on the emulator, and one instruction in
+twelve of the compile harness is an MMIO read that silicon charges 10 cycles
+and the emulator charged 1.
+
+`t3` adds one neutral hook and one chip implementation:
+
+- **`lp_emu_core::MemoryCost`** — `fetch(addr)`, `load(addr, width)`,
+  `store(addr, width)`, each returning cycles *beyond* the instruction's own
+  class. The hart never sees an address: the bus accumulates and the
+  privileged stepper drains once per instruction through
+  `Bus::take_memory_cost`, whose default is a constant zero. The neutral
+  crates gain no cache concept and no chip number.
+- **`lp_emu_esp32c6::cache::CacheCost`** — the C6's answer, beside the address
+  path `CacheMmu::translate` already owned.
+
+Three rules the rung carries, and they bind every rung after it:
+
+1. **A grade installs its own memory-cost model, or none.** `t1` and `t2`
+   install none, which is why adding `t3` moved no cycle count already on the
+   record. A grade is a *configuration*, and a transcript names it.
+2. **No constant without a kernel, and no scale factor at all.** Every number
+   in a cost model carries `measured` / `documented` / `modeled` and the
+   capture or the disassembly that fixes it. A term the calibration payload
+   did not isolate is not added — it is named in the calibration record as a
+   capture that is owed. A scale factor is refused outright: the residual it
+   would fit has two signs.
+3. **Calibrate on kernels, validate on a workload, and never the reverse.**
+   The calibration set is a payload of single-purpose kernels; the validation
+   set is a workload the model has never been fitted to. A model that
+   reproduces its calibration set and misses its validation set is reported as
+   over-fitted rather than repaired with a term.
+
+**Neutrality, and the one thing to see named.** `CycleModel` in `lp-emu-core`
+already carried a C6 per-class table (`CycleModel::Esp32C6`), and `t3` adds a
+second C6 variant beside it, `Esp32C6Kernels`, rather than correcting the
+first — because a committed transcript names its grade, and correcting
+`Esp32C6` in place would move every `t2` cycle count on the record. The rule
+that holds is therefore the precise one: **no C6 number is charged by the
+hart.** The cache and bus model, which is what this rung is about, is entirely
+in the chip's own `cache.rs`.
+
+A time grade must still not move a heap byte, and `t3` does not (372/372).
+What it *does* move, and no grade before it did, is the **instruction count**:
+a guest polling until a scheduled event lands retires fewer instructions under
+a more expensive clock (21.6M / 18.0M / 14.9M across the three grades on the
+compile harness). It is not accuracy bought by shortening spins — not one of
+the 92 validation slices costs fewer cycles at `t3` than at `t1` — and silicon
+has the same property, which is why `slice_cycles` and not an instruction
+count is the comparison. Emulated cycles remain the only comparable quantity,
+and never a host gate (PD9/D13).
+
+**`timing` does not become `measured` here.** The draft in #627 said "the
+model exists; the contract that says how wrong it is allowed to be does not",
+and that contract now exists — a **band** on a trust entry, in the
+hardware-validation ADR's 2026-09-08 amendment. `lp-emu:esp32c6:t3` states one
+and is graded `documented` under it: 85 of 92 like-for-like slices inside
+[0.80, 1.25] with an aggregate of 1.154, a one-signed compute residual, and
+one independent workload. What promotes it is a second payload, not a
+better paragraph. The derivation is
+`docs/reports/2026-09-08-esp32c6-t3-calibration.md` §4.
+
+The ladder now reads:
+
+- `t1` — one cycle per instruction. No cache, no flash wait states.
+- `t2` — a measured per-class table. Still no address.
+- `t3` — `t2`'s classes, corrected on kernels, plus what an address costs: the
+  flash cache's fills and the APB's wait states. The first grade in which two
+  instructions with the same opcode cost different amounts, and the first with
+  a band it is allowed to be wrong inside.
