@@ -172,6 +172,15 @@ pub struct RunArgs {
     /// board's, which is what every transcript was captured against.
     #[arg(long = "efuse-mac")]
     pub efuse_mac: Option<String>,
+
+    /// The rate a host on UART0 sends at, default 115200. UART0 carries no
+    /// clock, so the pulse-width counters the mask ROM's baud auto-detection
+    /// reads can only report a rate the run STATES — this states it. It
+    /// changes the divisor the ROM computes and writes to `UART0.clkdiv` and
+    /// nothing else: a scripted byte still lands when the script says it
+    /// does. Applied before the power-on snapshot, so a reboot keeps it.
+    #[arg(long = "uart0-baud")]
+    pub uart0_baud: Option<u64>,
 }
 
 /// The USB host's state at a served board's power-on. The same three the

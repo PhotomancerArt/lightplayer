@@ -283,3 +283,99 @@ with the committed captures written into the `because` as evidence. 768
 frames whose checksums agree on both time grades is the strongest evidence
 this class has had, and both readings are still ours: what earns `measured`
 is an instrument on a real pin.
+
+
+## Amendment, 2026-09-08 (M1 P4, PR #630): a band on a trust entry
+
+A trust entry may now state a **band**: how wrong a class is allowed to be,
+when "wrong" is the only thing it can be. Like the pin capture above this is
+**additive** — every `validate.toml` entry and every committed sidecar loads
+unchanged, a band-less entry serialises to the bytes it always did, and a
+class with no band is compared exactly, as before.
+
+```toml
+[[configuration.trust]]
+class = "timing"
+grade = "documented"
+band = { per_sample = [0.80, 1.25], per_sample_coverage = 0.90, aggregate = 0.20, on = ["shader-compile-stress", "cycle-probe"] }
+because = "…"
+```
+
+**Why it had to exist.** "Trust is per field class, stated, with a reason"
+above is what lets one transcript be authoritative about heap and worthless
+about microseconds. But `--strict-timing` compared timing fields for
+*equality*, and a cycle model is never equal. So `timing` could only ever be
+`modeled` — however good the model got, the grade could not move, and a grade
+that cannot move stops carrying information. The band is the smallest change
+that lets the ladder have a middle rung for a class that is never exact.
+
+**How a replay reads one.** For a timing comparison where either side's entry
+carries a band naming the payload in hand:
+
+- **per-sample**: the ratio must fall inside `per_sample` for at least
+  `per_sample_coverage` of that field's samples in the replay;
+- **aggregate**: `|sum(reference) / sum(model) − 1|` must not exceed
+  `aggregate`. The per-sample test alone cannot see a distribution that is
+  biased one way; this one can.
+
+Both must hold. The ratio is read **reference over model** — the side without
+the band divided by the side with it — so a band means the same thing
+whichever way round the two transcripts were given to `replay`. A contract
+that depends on argument order is not a contract.
+
+Three rules the field carries:
+
+1. **`on` is mandatory, and it is the boundary.** A band that does not name
+   the payloads that measured it is a claim about payloads nobody ran, and it
+   is refused where it is written rather than where it is read. A payload the
+   list does not name gets no band at all: it is compared exactly, which is
+   `modeled` behaviour, because that is what the configuration is there.
+2. **The grade is frozen in the sidecar; the band is not.** A grade is a claim
+   about the run that produced a transcript, so it travels with it. A band is
+   the contract this tree states *today*, so a replay reads it from
+   `validate.toml` for the configuration named, falling back to the sidecar
+   for a configuration the live table no longer knows. Otherwise "never edit a
+   transcript" and "the band is a policy somebody chooses" would be in direct
+   conflict: changing a number would mean re-recording every recording.
+3. **Only `timing` has a tested meaning.** The type permits a band on any
+   class because refusing one would be a second rule to keep in sync, but no
+   other class has ever carried one, none is interpreted, and adding one is a
+   change to this ADR rather than a line in a table.
+
+**The promotion rule, amended.** The M6 amendment's rule was: *a grade moves
+only with a transcript; byte-equality is evidence in the `because`, never a
+promotion.* All of it survives, and it gains a clause:
+
+> A grade moves only with a transcript. A **`measured` timing grade moves
+> only with a transcript *and* a band**, and only for the payloads the band
+> names. Byte-equality is still evidence in the `because` and never a
+> promotion; being inside a band is now evidence too, and it is still not a
+> promotion — the band says how wrong the model may be, the transcript says
+> how wrong it was, and a person decides whether that is `measured`.
+
+**What this does not change.** `--strict` is untouched: it still reads the
+*grade*, and refuses any class either side grades below `measured`, band or
+no band. A band and a grade are separate claims, and `lp-emu:esp32c6:t3`
+today states a band at `documented` — which `--strict` still refuses and
+`--strict-timing` still enforces, exactly as intended. The hard classes are
+untouched: a `memory`, `pin`, `wire`, `usb-serial-jtag` or `structural`
+difference fails a replay regardless of any band, and a band on one of those
+classes is unread rather than lenient. The report's ratios are printed
+whether or not `--strict-timing` is on, band or no band, because reading a
+number and gating on it are different acts.
+
+And **PD9/D13 is unchanged: no host gate runs on emulated microseconds.** A
+band makes `--strict-timing` usable as a regression gate between two
+committed transcripts of one payload. It does not make an emulated
+microsecond a product number, and it does not put a time figure beside the
+heap budget's bytes. Whether a band may ever become an *advisory* line in the
+heap-budget report is the open question this amendment deliberately does not
+answer.
+
+**Provenance.** The first band on the record is
+`lp-emu:esp32c6:t3`'s, derived in
+`docs/reports/2026-09-08-esp32c6-t3-calibration.md` §4 from 92 like-for-like
+slices no parameter was fitted to. Its numbers are Yona's (gate G1); the
+mechanism is this ADR's. The contract is held by
+`lp-emu/lp-emu-validate/tests/band_contract.rs`, which needs no firmware and
+runs everywhere.

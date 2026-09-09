@@ -143,6 +143,12 @@ fn run(args: RunArgs) -> Result<()> {
             LinkKind::Uart0 => builder.uart0(Uart0Sink::Tcp(addr.clone())),
         };
     }
+    // The rate the auto-baud counters report, when a run drives the ROM's
+    // UART0 console. Mirrored from the bin because the console gate is only
+    // reachable from a run that can state it.
+    if let Some(baud) = args.uart0_baud {
+        builder = builder.uart0_baud(baud);
+    }
     if let Some(path) = &args.dump_frames {
         builder = builder.dump_frames(FrameSink::File(path.clone()));
     }

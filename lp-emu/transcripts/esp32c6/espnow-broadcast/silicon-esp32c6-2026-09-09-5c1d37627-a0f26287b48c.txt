@@ -1,0 +1,87 @@
+^D[2026-09-09T16:29:22Z INFO ] 🚀 A new version of espflash is available: v4.5.0
+[2026-09-09T16:29:22Z INFO ] Serial port: '/dev/cu.usbmodem213201'
+[2026-09-09T16:29:22Z INFO ] Connecting...
+[2026-09-09T16:29:23Z INFO ] Using flash stub
+Chip type:         esp32c6 (revision v0.2)
+Crystal frequency: 40 MHz
+Flash size:        4MB
+Features:          WiFi 6, BT 5
+MAC address:       a0:f2:62:87:b4:8c
+Partition table:   lp-fw/fw-esp32c6/partitions.csv
+App/part. size:    614,320/3,145,728 bytes, 19.53%
+[2026-09-09T16:29:23Z INFO ] Segment at address '0x0' has not changed, skipping write
+[2026-09-09T16:29:23Z INFO ] Segment at address '0x8000' has not changed, skipping write
+[00:00:00] [>                                       ]       1/367     0x10000   [2K[00:00:00] [>                                       ]       2/367     0x10000   [2K[00:00:00] [>                                       ]       3/367     0x10000   [2K[00:00:00] [>                                       ]       4/367     0x10000   [2K[00:00:00] [>                                       ]       5/367     0x10000   [2K[00:00:00] [>                                       ]       6/367     0x10000   [2K[00:00:00] [>                                       ]       7/367     0x10000   [2K[00:00:00] [>                                       ]       8/367     0x10000   [2K[00:00:00] [>                                       ]       9/367     0x10000   [2K[00:00:00] [=>                                      ]      10/367     0x10000   [2K[00:00:00] [=>                                      ]      11/367     0x10000   [2K[00:00:00] [=>                                      ]      12/367     0x10000   [2K[00:00:00] [=>                                      ]      13/367     0x10000   [2K[00:00:00] [=>                                      ]      14/367     0x10000   [2K[00:00:00] [=>                                      ]      15/367     0x10000   [2K[00:00:00] [=>                                      ]      16/367     0x10000   [2K[00:00:00] [=>                                      ]      17/367     0x10000   [2K[00:00:00] [=>                                      ]      18/367     0x10000   [2K[00:00:00] [==>                                     ]      19/367     0x10000   [2K[00:00:00] [==>                                     ]      20/367     0x10000   [2K[00:00:00] [==>                                     ]      21/367     0x10000   [2K[00:00:00] [==>                                     ]      22/367     0x10000   [2K[00:00:00] [==>                                     ]      23/367     0x10000   [2K[00:00:00] [==>                                     ]      24/367     0x10000   [2K[00:00:00] [===>                                    ]      34/367     0x10000   [2K[00:00:00] [====>                                   ]      44/367     0x10000   [2K[00:00:00] [====>                                   ]      45/367     0x10000   [2K[00:00:00] [=====>                                  ]      46/367     0x10000   [2K[00:00:00] [=====>                                  ]      50/367     0x10000   [2K[00:00:00] [=======>                                ]      65/367     0x10000   [2K[00:00:00] [=======>                                ]      71/367     0x10000   [2K[00:00:00] [=========>                              ]      87/367     0x10000   [2K[00:00:00] [=========>                              ]      88/367     0x10000   [2K[00:00:00] [=========>                              ]      89/367     0x10000   [2K[00:00:00] [==========>                             ]      98/367     0x10000   [2K[00:00:00] [===========>                            ]     103/367     0x10000   [2K[00:00:00] [=============>                          ]     120/367     0x10000   [2K[00:00:00] [=============>                          ]     121/367     0x10000   [2K[00:00:00] [=============>                          ]     122/367     0x10000   [2K[00:00:01] [=============>                          ]     126/367     0x10000   [2K[00:00:01] [===============>                        ]     140/367     0x10000   [2K[00:00:01] [================>                       ]     147/367     0x10000   [2K[00:00:01] [=================>                      ]     160/367     0x10000   [2K[00:00:01] [=================>                      ]     161/367     0x10000   [2K[00:00:01] [=================>                      ]     162/367     0x10000   [2K[00:00:01] [==================>                     ]     170/367     0x10000   [2K[00:00:01] [===================>                    ]     182/367     0x10000   [2K[00:00:01] [====================>                   ]     192/367     0x10000   [2K[00:00:01] [======================>                 ]     204/367     0x10000   [2K[00:00:01] [======================>                 ]     205/367     0x10000   [2K[00:00:01] [======================>                 ]     206/367     0x10000   [2K[00:00:01] [=======================>                ]     218/367     0x10000   [2K[00:00:01] [========================>               ]     224/367     0x10000   [2K[00:00:01] [==========================>             ]     239/367     0x10000   [2K[00:00:01] [==========================>             ]     246/367     0x10000   [2K[00:00:01] [==========================>             ]     247/367     0x10000   [2K[00:00:01] [===========================>            ]     248/367     0x10000   [2K[00:00:01] [============================>           ]     263/367     0x10000   [2K[00:00:01] [=============================>          ]     268/367     0x10000   [2K[00:00:02] [===============================>        ]     285/367     0x10000   [2K[00:00:02] [===============================>        ]     289/367     0x10000   [2K[00:00:02] [===============================>        ]     290/367     0x10000   [2K[00:00:02] [===============================>        ]     291/367     0x10000   [2K[00:00:02] [=================================>      ]     309/367     0x10000   [2K[00:00:02] [=================================>      ]     311/367     0x10000   [2K[00:00:02] [====================================>   ]     331/367     0x10000   [2K[00:00:02] [====================================>   ]     333/367     0x10000   [2K[00:00:02] [====================================>   ]     334/367     0x10000   [2K[00:00:02] [====================================>   ]     336/367     0x10000   [2K[00:00:02] [======================================> ]     355/367     0x10000   [2K[00:00:02] [=======================================>]     358/367     0x10000   [2K[00:00:02] [========================================]     367/367     0x10000   [2026-09-09T16:29:27Z INFO ] Flashing has completed!
+Commands:
+    CTRL+R    Reset chip
+    CTRL+C    Exit
+
+ESP-ROM:esp32c6-20220919
+Build:Sep 19 2022
+rst:0x15 (USB_UART_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)
+Saved PC:0x40800542
+[38;5;11m0x40800542 - swint_handler_trampoline
+    at ??:??
+[39mSPIWP:0xee
+mode:DIO, clock div:2
+load:0x4086c410,len:0xd48
+load:0x4086e610,len:0x2d68
+[38;5;11m0x4086e610 - fw_esp32c6::board::esp32c6::init::init_board::HEAP
+    at ??:??
+[39mload:0x40875720,len:0x1800
+[38;5;11m0x40875720 - fw_esp32c6::board::esp32c6::init::init_board::HEAP
+    at ??:??
+[39mentry 0x4086c410
+[0;32mI (23) boot: ESP-IDF v5.1-beta1-378-gea5e0ff298-dirt 2nd stage bootloader[0m
+[0;32mI (23) boot: compile time Jun  7 2023 08:02:08[0m
+[0;32mI (24) boot: chip revision: v0.2[0m
+[0;32mI (28) boot.esp32c6: SPI Speed      : 40MHz[0m
+[0;32mI (33) boot.esp32c6: SPI Mode       : DIO[0m
+[0;32mI (37) boot.esp32c6: SPI Flash Size : 4MB[0m
+[0;32mI (42) boot: Enabling RNG early entropy source...[0m
+[0;32mI (48) boot: Partition Table:[0m
+[0;32mI (51) boot: ## Label            Usage          Type ST Offset   Length[0m
+[0;32mI (58) boot:  0 nvs              WiFi data        01 02 00009000 00005000[0m
+[0;32mI (66) boot:  1 bootctl          Unknown data     01 06 0000e000 00001000[0m
+[0;32mI (73) boot:  2 phy_init         RF data          01 01 0000f000 00001000[0m
+[0;32mI (81) boot:  3 factory          factory app      00 00 00010000 00300000[0m
+[0;32mI (88) boot:  4 lpfs             Unknown data     01 82 00310000 000f0000[0m
+[0;32mI (96) boot: End of partition table[0m
+[0;32mI (100) esp_image: segment 0: paddr=00010020 vaddr=40800000 size=00018h (    24) load[0m
+[0;32mI (109) esp_image: segment 1: paddr=00010040 vaddr=42000040 size=19284h (103044) map[0m
+[0;32mI (138) esp_image: segment 2: paddr=000292cc vaddr=40800018 size=06d4ch ( 27980) load[0m
+[0;32mI (145) esp_image: segment 3: paddr=00030020 vaddr=42020020 size=6ba68h (440936) map[0m
+[0;32mI (235) esp_image: segment 4: paddr=0009ba90 vaddr=40806d64 size=088c0h ( 35008) load[0m
+[0;32mI (245) esp_image: segment 5: paddr=000a4358 vaddr=4080f628 size=01a4ch (  6732) load[0m
+[0;32mI (247) esp_image: segment 6: paddr=000a5dac vaddr=40811078 size=001e0h (   480) load[0m
+[0;32mI (254) boot: Loaded app from partition at offset 0x10000[0m
+[0;32mI (256) boot: Disabling RNG early entropy source...[0m
+[fw-checks-header] {"schema":1,"payload":"espnow-broadcast","chip":"esp32c6","firmware_commit":"5c1d37627b22","firmware_features":"default,esp32c6,esp_radio,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_espnow_broadcast","firmware_dirty":false}
+[INFO] fw_esp32c6::hardware::espnow_radio_driver: [fw-esp32c6] ESP-NOW radio version=2 channel=11
+[espnow-broadcast] radio ready device=0x8cb48762 espnow_channel=11 logical_channel=1 tick_ms=50 ticks_per_send=2 tx_events=6 rx_events=6
+[espnow-broadcast] tx device=0x8cb48762 event=0 kind=1 payload_len=0
+[fw-check-json] {"kind":"espnow-tx","n":0,"device":2360641378,"event":0,"msg_kind":1,"payload_len":0}
+[espnow-broadcast] rx device=0x7ca88562 event=315 kind=1 payload_len=64
+[fw-check-json] {"kind":"espnow-rx","n":0,"peer":2091418978,"gap":0,"msg_kind":1,"len_ok":true}
+[espnow-broadcast] tx device=0x8cb48762 event=1 kind=1 payload_len=8
+[fw-check-json] {"kind":"espnow-tx","n":1,"device":2360641378,"event":1,"msg_kind":1,"payload_len":8}
+[espnow-broadcast] rx device=0x7ca88562 event=316 kind=1 payload_len=0
+[fw-check-json] {"kind":"espnow-rx","n":1,"peer":2091418978,"gap":1,"msg_kind":1,"len_ok":true}
+[espnow-broadcast] tx device=0x8cb48762 event=2 kind=1 payload_len=24
+[fw-check-json] {"kind":"espnow-tx","n":2,"device":2360641378,"event":2,"msg_kind":1,"payload_len":24}
+[espnow-broadcast] rx device=0x7ca88562 event=317 kind=1 payload_len=8
+[fw-check-json] {"kind":"espnow-rx","n":2,"peer":2091418978,"gap":1,"msg_kind":1,"len_ok":true}
+[espnow-broadcast] tx device=0x8cb48762 event=3 kind=1 payload_len=64
+[fw-check-json] {"kind":"espnow-tx","n":3,"device":2360641378,"event":3,"msg_kind":1,"payload_len":64}
+[espnow-broadcast] rx device=0x7ca88562 event=318 kind=1 payload_len=24
+[fw-check-json] {"kind":"espnow-rx","n":3,"peer":2091418978,"gap":1,"msg_kind":1,"len_ok":true}
+[espnow-broadcast] tx device=0x8cb48762 event=4 kind=1 payload_len=0
+[fw-check-json] {"kind":"espnow-tx","n":4,"device":2360641378,"event":4,"msg_kind":1,"payload_len":0}
+[espnow-broadcast] rx device=0x7ca88562 event=319 kind=1 payload_len=64
+[fw-check-json] {"kind":"espnow-rx","n":4,"peer":2091418978,"gap":1,"msg_kind":1,"len_ok":true}
+[espnow-broadcast] tx device=0x8cb48762 event=5 kind=1 payload_len=8
+[fw-check-json] {"kind":"espnow-tx","n":5,"device":2360641378,"event":5,"msg_kind":1,"payload_len":8}
+[espnow-broadcast] rx device=0x7ca88562 event=320 kind=1 payload_len=0
+[fw-check-json] {"kind":"espnow-rx","n":5,"peer":2091418978,"gap":1,"msg_kind":1,"len_ok":true}
+[espnow-broadcast] tx=6 rx=6 peers=1 peer_overflow=false dropped=0
+[espnow-broadcast] === DONE ===

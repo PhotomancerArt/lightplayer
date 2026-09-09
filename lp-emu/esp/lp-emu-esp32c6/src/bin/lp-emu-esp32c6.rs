@@ -20,7 +20,7 @@ use lp_emu_esp32c6::control::parse_usb_script;
 use lp_emu_esp32c6::flash::FlashBacking;
 use lp_emu_esp32c6::loader::EfuseIdentity;
 use lp_emu_esp32c6::machine::{
-    AppSource, Esp32C6Builder, Esp32C6Machine, FrameSink, Outcome, PinLogSink, RomSource,
+    AppSource, BootMode, Esp32C6Builder, Esp32C6Machine, FrameSink, Outcome, PinLogSink, RomSource,
     StopCondition, StripConfig, TimeGrade, TxLogSink, Uart0Sink, UsbHost, UsbSjDrain, UsbSjSink,
 };
 use lp_emu_esp32c6::memmap;
@@ -33,6 +33,7 @@ lp-emu-esp32c6 — the ESP32-C6 machine
 USAGE:
     lp-emu-esp32c6 --elf <app.elf> [options]
     lp-emu-esp32c6 --merged <chip.bin> [--elf <app.elf>] [options]
+    lp-emu-esp32c6 --boot-mode rom-up --flash <chip.bin> [options]
     lp-emu-esp32c6 --hooks
 
 OPTIONS:
@@ -47,6 +48,16 @@ OPTIONS:
                             writes (scripts/emu/build-merged-image.sh). The
                             real mask ROM and the real bootloader do the
                             loading. Read-only; implies the chip's size
+    --boot-mode direct|rom-up
+                            direct = place --elf's segments in memory and
+                            start at its entry; rom-up = start at the RESET
+                            VECTOR and let the real mask ROM read whatever
+                            the chip holds. --merged implies rom-up (and is
+                            read-only); this flag is how a run boots rom-up
+                            from a WRITABLE chip — the flashing scenario,
+                            where the bytes arrive over the download console
+                            and --flash is what keeps them. With rom-up an
+                            --elf is optional and is never loaded [direct]
     --rom <path>            a mask ROM ELF (default: the vendored C6 rev0 image)
     --time-grade t1|t2|t3   t1 = instruction count, t2 = the per-class model,
                             t3 = the measured class costs plus cache and bus [t1]
@@ -60,6 +71,16 @@ OPTIONS:
                             where UART0's bytes go; tcp: LISTENS, one client at a
                             time, and the client's bytes are UART0's RX (not
                             deterministic: wall clock decides their cycle)
+    --uart0-baud <n>        the rate the HOST on UART0 sends at [115200].
+                            UART0 carries no clock, so a model that answers
+                            the ROM's baud auto-detection has to be told the
+                            host's rate: the pulse-width counters report
+                            `sclk / n` clocks a bit and `rxd_cnt` counts the
+                            edges actually sent. Changing it changes the
+                            divisor the ROM computes and writes to
+                            UART0.clkdiv. It says nothing about how fast
+                            bytes arrive — a scripted byte lands when the
+                            script says it does
     --uart0-script <file>   scripted host input for UART0, deterministic:
                             one chunk per line, either at an EMULATED time
                             (`1500 \"M!{...}\\n\"`, `2000 4d 21 0a`) or waiting
@@ -198,8 +219,10 @@ OPTIONS:
                             whose behaviour is only our reading of the PAC,
                             `measured` on anything no transcript has proved.
                             It applies to the blocks that PUBLISH a grade
-                            table — every accept block plus USB_DEVICE — and
-                            passes over the
+                            table — every accept block, plus the modelled
+                            ones that grade themselves: USB_DEVICE, UART0,
+                            UART1, GPIO, RMT, PCR, SPI1, EFUSE, I2C_ANA_MST —
+                            and passes over the
                             rest, because `nobody graded this block` is not
                             the same statement as `this block is modelled`.
                             The report names the blocks it checked. Tables
@@ -234,6 +257,9 @@ fn main() -> ExitCode {
 struct Args {
     elf: Option<PathBuf>,
     merged: Option<PathBuf>,
+    /// `--boot-mode`. `None` is "whatever the image implies": `--merged` is
+    /// rom-up, an `--elf` on its own is direct.
+    boot_mode: Option<BootMode>,
     rom: Option<PathBuf>,
     time_grade: TimeGrade,
     timeout: Option<u64>,
@@ -241,6 +267,7 @@ struct Args {
     exit_on: Option<String>,
     uart0: Uart0Sink,
     uart0_script: Option<PathBuf>,
+    uart0_baud: Option<u64>,
     usb_sj: UsbSjSink,
     flash: FlashBacking,
     flash_len: Option<u32>,
@@ -367,10 +394,30 @@ fn run() -> Result<ExitCode, String> {
     if let Some(rom) = args.rom.clone() {
         builder = builder.rom(RomSource::Path(rom));
     }
+    if let Some(baud) = args.uart0_baud {
+        builder = builder.uart0_baud(baud);
+    }
+    // `--boot-mode` is stated before `--merged` is folded in, so that the
+    // two disagreeing is an error rather than a silent last-writer-wins.
+    let rom_up = match (args.boot_mode, args.merged.is_some()) {
+        (Some(BootMode::Direct), true) => {
+            return Err(
+                "--boot-mode direct with --merged: a merged image IS the chip's bytes, \
+                        and a direct load never reads them — pass --elf instead"
+                    .to_string(),
+            );
+        }
+        (mode, merged) => merged || mode == Some(BootMode::RomUp),
+    };
+    if rom_up {
+        builder = builder.boot_mode(BootMode::RomUp);
+    }
     if let Some(elf) = args.elf.clone() {
         builder = builder.app(AppSource::Path(elf));
-    } else if !args.hooks && args.merged.is_none() {
-        return Err("--elf or --merged is required (or --hooks / --map)".to_string());
+    } else if !args.hooks && !rom_up {
+        return Err(
+            "--elf, --merged or --boot-mode rom-up is required (or --hooks / --map)".to_string(),
+        );
     }
     if let Some(image) = args.merged.clone() {
         if !matches!(args.flash, FlashBacking::Blank) {
@@ -399,7 +446,6 @@ fn run() -> Result<ExitCode, String> {
         // wrote back into it would quietly stop being the image the gate
         // named. `--flash` is how a run keeps its writes.
         builder = builder
-            .boot_mode(lp_emu_esp32c6::machine::BootMode::RomUp)
             .flash(FlashBacking::Copy(image))
             .flash_len(args.flash_len.unwrap_or(len));
     }
@@ -473,6 +519,13 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             }
             "--elf" => args.elf = Some(value("--elf")?.into()),
             "--merged" => args.merged = Some(value("--merged")?.into()),
+            "--boot-mode" => {
+                let text = value("--boot-mode")?;
+                args.boot_mode =
+                    Some(BootMode::parse(&text).ok_or_else(|| {
+                        format!("--boot-mode `{text}`: expected direct or rom-up")
+                    })?);
+            }
             "--rom" => args.rom = Some(value("--rom")?.into()),
             "--time-grade" => args.time_grade = TimeGrade::parse(&value("--time-grade")?)?,
             "--timeout" => args.timeout = Some(parse_duration_us(&value("--timeout")?)?),
@@ -487,6 +540,18 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--exit-on" => args.exit_on = Some(value("--exit-on")?),
             "--uart0" => args.uart0 = parse_uart0(&value("--uart0")?)?,
             "--uart0-script" => args.uart0_script = Some(value("--uart0-script")?.into()),
+            "--uart0-baud" => {
+                let text = value("--uart0-baud")?;
+                let baud: u64 = text
+                    .parse()
+                    .map_err(|e| format!("--uart0-baud `{text}`: {e}"))?;
+                if baud == 0 {
+                    return Err(
+                        "--uart0-baud 0: a host that sends nothing has no bit time".to_string()
+                    );
+                }
+                args.uart0_baud = Some(baud);
+            }
             "--usb-sj" => args.usb_sj = parse_usb_sj(&value("--usb-sj")?)?,
             "--flash" => args.flash = FlashBacking::File(value("--flash")?.into()),
             "--flash-copy" => args.flash = FlashBacking::Copy(value("--flash-copy")?.into()),

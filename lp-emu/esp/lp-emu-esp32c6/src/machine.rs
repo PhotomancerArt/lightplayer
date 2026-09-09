@@ -836,6 +836,8 @@ pub struct Esp32C6Builder {
     /// UART0 log to — the only way an `after "<line>"` step can see what the
     /// device said.
     uart0_script: Option<lp_emu_esp_common::ScriptedSource>,
+    /// The rate a host on UART0 sends at ([`Esp32C6Builder::uart0_baud`]).
+    uart0_baud: Option<u64>,
     usb_sj: UsbSjSink,
     usb_sj_tried: UsbSjSink,
     /// Scripted host input on the USB link: what the host sends to the OUT
@@ -896,6 +898,7 @@ impl Esp32C6Builder {
             uart0: Uart0Sink::default(),
             uart0_source: None,
             uart0_script: None,
+            uart0_baud: None,
             usb_sj: UsbSjSink::default(),
             usb_sj_tried: UsbSjSink::default(),
             usb_sj_source: None,
@@ -1051,6 +1054,17 @@ impl Esp32C6Builder {
     /// step has nothing to watch and never fires.
     pub fn uart0_script(mut self, script: lp_emu_esp_common::ScriptedSource) -> Self {
         self.uart0_script = Some(script);
+        self
+    }
+
+    /// The rate the host on UART0 sends at (`--uart0-baud`, default
+    /// [`crate::periph::uart::DEFAULT_HOST_BAUD`]). UART0 carries no clock,
+    /// so the auto-baud counters the mask ROM reads can only report a rate
+    /// the run states; this states it. It changes what the ROM computes and
+    /// writes to `UART0.clkdiv` and nothing else — a scripted byte still
+    /// lands when the script says it does.
+    pub fn uart0_baud(mut self, baud: u64) -> Self {
+        self.uart0_baud = Some(baud);
         self
     }
 
@@ -1257,6 +1271,7 @@ impl Esp32C6Builder {
             uart0,
             uart0_source,
             uart0_script,
+            uart0_baud,
             usb_sj,
             usb_sj_tried,
             usb_sj_source,
@@ -1697,6 +1712,17 @@ impl Esp32C6Builder {
         // instruction runs. Only when a run asked to perform resets: it is
         // a whole copy of guest memory (~17 MiB), and a run that will never
         // reboot should not pay for it.
+        // Before the power-on snapshot, so a reboot restores the stated
+        // rate rather than the default: `--uart0-baud` describes the host on
+        // the other end of the wire, and that host does not change when the
+        // chip resets.
+        if let Some(baud) = uart0_baud
+            && let Some(i) = machine.bus.peripheral_index("UART0")
+        {
+            machine
+                .bus
+                .with_peripheral::<crate::periph::uart::Uart, _>(i, |u, _| u.set_host_baud(baud));
+        }
         if reboot_on_reset {
             machine.power_on = Some(machine.snapshot());
         }

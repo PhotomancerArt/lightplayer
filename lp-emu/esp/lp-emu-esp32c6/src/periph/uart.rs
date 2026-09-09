@@ -386,6 +386,15 @@ impl Uart {
         self
     }
 
+    /// [`with_host_baud`](Self::with_host_baud) after the block is in the
+    /// bus, for the machine builder — which does not construct the UART, it
+    /// receives it from [`crate::periph::boot_set`]. Called before the
+    /// power-on snapshot is taken, so a reboot restores the stated rate
+    /// along with everything else.
+    pub fn set_host_baud(&mut self, baud: u64) {
+        self.host_baud = baud;
+    }
+
     pub fn host_baud(&self) -> u64 {
         self.host_baud
     }
