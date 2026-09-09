@@ -34,8 +34,10 @@ lp-cli validate            payloads, transcripts, replay, trust grading
   `BusCx`, `RegFile` (accept-and-remember with a table of exceptions), the
   bus trace with its spin detector, host byte streams, the interrupt-matrix
   seam, the machine-request slot, the **signal fabric** (pads, signals and
-  edges — where an output actually goes) with the WS281x decoder that reads
-  it, and the PT_LOAD view of an ELF. It holds **no chip numbers** — see its
+  edges — where an output actually goes, and since M2 which pad an input
+  signal reads and what an outside driver or a pad-to-pad wire holds on a
+  pad) with the WS281x decoder that reads it, and the PT_LOAD view of an
+  ELF. It holds **no chip numbers** — see its
   README.
 
 - **`lp-emu-esp32c6/`** — the C6 machine: the memory map (every base cited to

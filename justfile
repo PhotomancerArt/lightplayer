@@ -1845,7 +1845,7 @@ clippy-fw-esp32c6-harnesses: install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
     cd lp-fw/fw-esp32c6
-    for feature in test_rmt test_dither test_gpio test_gpio_calibrate test_button \
+    for feature in test_rmt test_rmt_rx test_dither test_gpio test_gpio_calibrate test_button \
                    test_usb test_json test_msafluid test_fluid_demo \
                    test_jit_math_perf test_shader_compile_incremental \
                    test_cycle_probe test_gpio_input; do

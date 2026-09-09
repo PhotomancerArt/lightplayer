@@ -19,6 +19,7 @@ pub use fw_esp32_common::output::provider::Esp32OutputProvider;
 #[cfg(all(not(fw_harness), feature = "lpc-hardware"))]
 pub use rmt::Esp32C6RmtWs281xDriver;
 
-/// The harnesses' single-strip API — see `rmt::led_channel`.
-#[cfg(fw_harness)]
+/// The harnesses' single-strip API — see `rmt::led_channel`, which says why
+/// `test_rmt_rx` is not one of its callers.
+#[cfg(all(fw_harness, not(feature = "test_rmt_rx")))]
 pub use rmt::LedChannel;

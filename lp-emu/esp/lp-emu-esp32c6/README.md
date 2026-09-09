@@ -366,7 +366,7 @@ milestone owns.
 | `USB_DEVICE` | `0x6000_F000` | measured on its data path (M6) | the host's side in three states (`--usb-host absent\|attached\|attached-idle`, the transitions for P3's control channel): **absent** — `sof` never, `free` = 0 for ever after the first `wr_done`, nothing arrives; **attached, port closed** — `int_raw.sof` every 1 ms (*documented*), `fram_num` counts, a committed IN packet is held until the port opens; **attached, draining** — the packet reaches the `usb-sj` stream 100 µs after `wr_done` (*modeled*), `free` returns, `serial_in_empty` and `in_token_rec_in_ep1` rise; host bytes land as ≤ 64 B OUT packets, one resident at a time (*modeled*), `avail` + `serial_out_recv_pkt` + `out_ep1_st.wr_addr/rec_data_cnt`. The DTR/RTS dance → `chip_rst` bit 0 + `MachineRequest::Reset { strap }`. Per-register grades (the file header's table; `--strict-grade`): `ep1`, `ep1_conf` and the four `int_*` registers *measured* — four committed transcripts cover them, and the bits they cover are named there — `fram_num` and `conf0` *documented*, the twenty listed below *modeled*. The PCR reset of the block is **not** modelled (stated). Source 48 |
 | `SPI1` | `0x6000_3000` | modelled | **the legacy flash controller**, against a `flash::FlashImage`: `flash_rdid` (esp-storage's own size probe), the `usr` engine (command/address/dummy/data phases from `user`/`user1`/`user2`/`addr`/`w0..w15`), the dedicated `flash_read`/`pp`/`se`/`be`/`ce`/`wren`/`wrdi`/`rdsr`/`wrsr` bits, and a real status register (WIP always clear, WEL set by `wren` and consumed by a program or erase). Every trigger self-clears and `mst_st` reads idle, which is what `Wait_SPI_Idle` waits for. **Every PAC reset value is carried**, `user = 0x8000_0000` above all: the mask ROM's read path never sets `usr_command` because reset already did |
 | `SPI0` | `0x6000_2000` | modelled | the cache controller's block: `mmu_item_content`/`mmu_item_index`/`mmu_power_ctrl` drive `cache::CacheMmu`; the rest accept, with the PAC's reset values |
-| `RMT` | `0x6000_6000` | modelled (M5 P1) | the PAC register file, the **192-word RAM** at `+0x400` (word/half/byte lanes, read live by the engine), and two TX engines on the scheduler: a word's two pulses at PCR's function clock (`rmt_sclk_conf` × `div_cnt`; one tick = 2 cycles, a WS2812 bit 200, the latch 48,000 — exact integer arithmetic over absolute ticks, anchored on the previous due cycle), **`tx_lim` as a position** (`== window_words` is the wrap), `mem_tx_wrap_en`, the all-zero STOP → `tx_end`, wrap off → `tx_err` + `mem_empty`, `int_st = raw & ena`, `int_clr` w1c, source 49. *Modeled* (discovery §10.1–5, each named where made): `mem_raddr_ex` = the next word to fetch; the strobes act at `conf_update` (a `tx_start` with no `conf_update` in the slice is acted on at the slice boundary, noted); the half-level end marker; `tx_stop` raises no `tx_end`; `ref_cnt_rst` accepted; no clock stalls the engine (1 ms poll resumes it), FOSC refused. RX channels 2/3 accept-and-remember (`rx_en` is noted once); the APB FIFO is not modelled. Since P2 the waveform is **driven onto the bus's signal fabric** as `RMT_SIG_0 + ch` at every pulse start, with the idle level at end/stop; `rmt_pulses`/`rmt_words` are the word-level oracle a gate reads and are off unless `Esp32C6Builder::rmt_logs(true)` asks for them. See "The RMT chase" and "The pin" |
+| `RMT` | `0x6000_6000` | modelled (M5 P1) | the PAC register file, the **192-word RAM** at `+0x400` (word/half/byte lanes, read live by the engine), and two TX engines on the scheduler: a word's two pulses at PCR's function clock (`rmt_sclk_conf` × `div_cnt`; one tick = 2 cycles, a WS2812 bit 200, the latch 48,000 — exact integer arithmetic over absolute ticks, anchored on the previous due cycle), **`tx_lim` as a position** (`== window_words` is the wrap), `mem_tx_wrap_en`, the all-zero STOP → `tx_end`, wrap off → `tx_err` + `mem_empty`, `int_st = raw & ena`, `int_clr` w1c, source 49. *Modeled* (discovery §10.1–5, each named where made): `mem_raddr_ex` = the next word to fetch; the strobes act at `conf_update` (a `tx_start` with no `conf_update` in the slice is acted on at the slice boundary, noted); the half-level end marker; `tx_stop` raises no `tx_end`; `ref_cnt_rst` accepted; no clock stalls the engine (1 ms poll resumes it), FOSC refused. **RX channels 2/3 are engines too** (M2 P3): each samples the pad its input signal reads (`GPIO.func_in_sel_cfg[71 + rxi]` through the fabric's `route_in`), measures every run in channel ticks and writes them into the channel's window two runs to a word, with `idle_thres` ending the reception, `rx_filter` swallowing a narrower pulse, `rx_lim` raising `rx_thr_event` and `mem_rx_wrap_en` wrapping the write pointer; `rx_end` and `rx_thr_event` are the same three int shifts selected by the channel number (bits 2/3, 6/7, 10/11). Fed the fabric's **edges** rather than sampled tick by tick, so the two interrupts are raised at the slice boundary after the edge and the words carry the edges' own cycles. *Modeled*, each named where made: the reception starts at the first edge; `rx_lim` **counts** rather than naming a position (unlike `tx_lim` — nothing pins it, and the counter reading is what esp-hal's reader needs); the trailing idle run is stored and the last word written is an end marker. Not modelled: the carrier either way, the APB FIFO, and RAM ownership (`mem_owner` recorded, `mem_owner_err` never raised). Since P2 the waveform is **driven onto the bus's signal fabric** as `RMT_SIG_0 + ch` at every pulse start, with the idle level at end/stop; `rmt_pulses`/`rmt_words` are the word-level oracle a gate reads and are off unless `Esp32C6Builder::rmt_logs(true)` asks for them. Register grades (M2 P3): `documented` for the two `ch*_tx_conf0`, the two `ch*_tx_status`, the two `ch*_tx_lim`, the four RX configuration registers, the two `ch*_rx_status`, the two `ch*_rx_lim`, `int_raw`/`st`/`ena`/`clr` and `sys_conf`; `modeled` for `ch*data`, the carrier registers, `tx_sim`, `ref_cnt_rst` and `date`. See "The RMT chase", "The pin" and "The RMT loopback" |
 | `WIFI_MAC` | `0x600A_0000..9800` | accept (*modeled*) | the radio window as **one** block with coarse names (`mac` / `ieee802154` / `bb` — ours, nothing documents it), a `TOUCH` note per distinct offset, and the override list `wifi_stub::OVERRIDES` (five entries, one per `SPIN` the boot showed, each with the poll's disassembly beside it); `+0x4084` is the RX DMA base the `WIFI RX config` line reports |
 | `WIFI_PWR` | `0x600A_9900..F000` | accept | the undocumented gap after MODEM_SYSCON (the ROM's `tsf_hal_*` touch it first); `+0x3700` is a live **microsecond counter** (*modeled* `cycles / 160`) — the blob's `wait_i2c_sdm_stable` latches it and gives up after 9,999 ticks, and a remembered 0 never lets it |
 | `I2C_MST_MEM` | `0x600A_FC00..600B_0000` | accept | the analog I2C master's burst **command memory**, `I2C_ANA_MST + 0x400`, which the PAC's block (ending at `date`, `+0x34`) does not cover; libphy's `phy_i2c_master_cmd_mem_init` fills it and nothing reads it back |
@@ -433,6 +433,10 @@ Beyond the MMIO lines, three kinds of note appear in the same stream:
   tx_lim=96`, `RMT ch0 thr pos=96`, `RMT ch0 end words=6146 idle=0`,
   `RMT ch0 err mem_empty (window end, wrap off)`, `RMT ch0 stop idle=0`,
   `RMT ch0 stalled: …` / `resumed` — the TX engines (M5 P1); `--trace RMT`
+- `RMT ch2 rx start from gpio19 div_cnt=1 idle_thres=32767 filter=off
+  window=96..144 waddr=96 wrap=1 rx_lim=24 level=0`, `RMT ch2 rx thr
+  waddr=120`, `RMT ch2 rx end words=1537 idle_thres=32767`, `RMT ch2 rx
+  filtered a 20-tick pulse (< 40)` — the RX engines (M2 P3); `--trace RMT`
 - `PIN gpio18 <- RMT_SIG_0 (out_sel=71 inv=0 oen_sel=0 oe=1)` /
   `PIN gpio16 <- GPIO_OUT (out_sel=128 …)` — one note per routing *change*
   from the GPIO view (M5 P2); esp-hal rewriting the same routing on a
@@ -727,17 +731,27 @@ button, turn an encoder, or loop one pad's output into another's input.
 | `--pin-script <file>` | scripted pad levels at declared guest times — the deterministic path. Repeatable |
 | `--wire <a>:<b>` | tie two pads before the guest starts: whatever `a` carries, `b` carries. Repeatable, and transitive |
 
+The other direction is a **view, not a flag**: `GPIO.func_in_sel_cfg[s]` names the pad peripheral input signal `s` reads (`in_sel`, `in_inv_sel`, `sig_in_sel = 1` for the matrix route), and the fabric's `route_in`/`input_level` hold it. `sig_in_sel = 0` and the constant selectors `0x38`/`0x3C` are accepted, left unrouted, and named once. RMT RX channel 2 is its first reader.
+
 Both are mirrored on `lp-cli emu run`, the way `--pin-log` is.
 
 **The resolution rule** (`lp-emu-esp-common`'s `pins`): collect the pad and
 everything wired to it; if anything in the group has an outside driver the
 group carries that level (lowest pad number wins a disagreement); otherwise
-it carries the group's routed output; otherwise it is unobserved and reads
-low. **An outside driver always wins.** When the side it beat was an
-*enabled* output and the levels disagree, that is a **conflict**: logged
-with both levels and the cycle, counted, and then ignored. Never gated — an
-emulator that refused to run because a bench shorted an output would tell
-you less than one that says so and carries on.
+it carries the group's **driving** pad's output — routed *and* with its
+`GPIO.enable` bit set; otherwise it is unobserved and reads low. **An
+outside driver always wins.** When the side it beat was a driving pad and
+the levels disagree, that is a **conflict**: logged with both levels and
+the cycle, counted, and then ignored. Never gated — an emulator that
+refused to run because a bench shorted an output would tell you less than
+one that says so and carries on.
+
+`GPIO.enable` is what makes a pad a driver, and not the mere existence of a
+routing (M2 P3, plan DD38). `Input::new` writes `func_out_sel_cfg` on its
+way to configuring an input, so reading a routing as "driving" made every
+input pad conflict with itself — eight false lines per `gpio-input` run.
+The bit drivers actually maintain is `enable`, and enabling an
+already-routed output is itself an edge.
 
 An edge an outside driver causes goes into the **same** stream as one the
 RMT caused, so `--pin-log` and the strip decoders see it with no change.
@@ -755,6 +769,32 @@ lp-emu-esp32c6 --elf fw --pin-script button.pins --pin-log file:pins.log
 # the strip pad looped into gpio19
 lp-emu-esp32c6 --elf fw --wire 18:19
 ```
+
+### The RMT loopback
+
+`rmt-rx` (M2 P3) is the payload that closes the circle: a frame goes out of
+gpio18 through the product's own `lp_ws281x` driver, comes back in on gpio19
+through RMT RX channel 2, is decoded back into bytes by the guest and
+checksummed with the FNV-1a the chase uses. `--wire 18:19` is the jumper.
+
+```bash
+lp-cli validate record c6r-m2-rx --config lp-emu:esp32c6:t1 --date <d> --commit <c>
+```
+
+A transcript therefore carries **three** readings of every frame: `rmt-frame`
+is what the guest built, `rmt-rx` is what its receiver read off the pad, and
+the committed `.pins.jsonl` beside it is what this crate's own WS281x decoder
+read off the same pad. The gate is that the first two are equal, frame for
+frame — 32 of 32 on `t1` and on `t3`, at 1,537 words a frame (1,536 bit words
+and one end marker). It is still not a measurement: all three readings are
+ours. A silicon twin needs a physical jumper between the two header pins,
+which `d1-desk-batch.md` carries as an optional hands-only item.
+
+One thing the payload found and the harness's header states: esp-hal's own
+blocking RMT **transmitter** sets `ch_tx_lim` once and never rewrites it, so
+under this chip's position semantics it is woken once per lap and refills half
+of what the transmitter consumed. The payload sends through `lp_ws281x`
+instead, which rewrites `tx_lim` between the half and the wrap.
 
 The M5 P2 gate (`tests/rmt_chase.rs`): on the chase image the trace carries
 one routing note and it is gpio18's, and every frame the decoder reads off

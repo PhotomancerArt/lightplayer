@@ -29,6 +29,7 @@ check-gpio-calibrate = []
 # pads, the product button driver, the interrupt handler and the self-loop's
 # register writes are chip facts and stay in `fw-esp32c6`.
 check-gpio-input = []
+check-rmt-rx = []
 check-uart-bridge = []
 check-oom = []
 # The `rmt-chase` payload: the chase pattern, the FNV-1a checksum and the

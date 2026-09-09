@@ -50,11 +50,17 @@ pub mod frame_dump;
 pub use esp32c6_rmt_ws281x_driver::Esp32C6RmtWs281xDriver;
 
 /// The harnesses' single-strip API. `main.rs` compiles this module only for the
-/// app and the five harnesses that light a strip, so `fw_harness` here means
-/// exactly those five: in the shipping image it would be a second way to send
+/// app and the harnesses that light a strip, so `fw_harness` here means
+/// exactly those: in the shipping image it would be a second way to send
 /// a frame, which is the thing this migration removed.
-#[cfg(fw_harness)]
+///
+/// `test_rmt_rx` is the exception among the harnesses that pull the output
+/// tree in: it needs `c6_rmt` and `shared_driver` — the block plan, the ISR
+/// and `DRIVER` — but sends through `DRIVER.send_blocking` directly so that
+/// it can drain its receiver in the spin closure, and a `LedChannel` it never
+/// constructs is dead code in that build.
+#[cfg(all(fw_harness, not(feature = "test_rmt_rx")))]
 pub mod led_channel;
 
-#[cfg(fw_harness)]
+#[cfg(all(fw_harness, not(feature = "test_rmt_rx")))]
 pub use led_channel::LedChannel;

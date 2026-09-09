@@ -267,6 +267,15 @@ pub struct Payload {
     /// never sees this, and the transcript's sidecar `note` is where the
     /// difference is stated.
     pub pin_script: Option<&'static str>,
+    /// Pads this payload's EMULATED side ties together, as `--wire a:b`
+    /// arguments, or empty for a payload with no loopback.
+    ///
+    /// The third kind of input, after a host script and a pin script, and a
+    /// payload field for their reason: a jumper is part of the scenario. It
+    /// has no silicon arm either — on a board the wire is a wire and somebody
+    /// has to put it there — so a silicon transcript of a wired payload is
+    /// recorded with the jumper in place and its sidecar `note` says so.
+    pub wire: &'static [&'static str],
     /// Structured record kinds it emits behind `[fw-check-json] `.
     pub record_kinds: &'static [&'static str],
     /// The mask set that makes two of its transcripts comparable.
@@ -1196,6 +1205,63 @@ pub static WS281X_TELEMETRY: SeriesSpec = SeriesSpec {
     compiled: OnceLock::new(),
 };
 
+/// The `rmt-rx` payload's per-frame records: what the guest built, and what
+/// its receiver read back off the wire.
+///
+/// Both `rmt-frame` and `rmt-rx` are here because this payload emits both and
+/// a replay compares every field of both. The two `crc` fields are graded
+/// differently on purpose, and the difference is the payload:
+///
+/// * `rmt-frame.crc` is **Structural** — arithmetic over bytes the guest
+///   built, which two configurations running one image must reproduce
+///   identically because nothing about a machine can change it. That is the
+///   grade `rmt-chase` gives it and the reasoning is unchanged.
+/// * `rmt-rx.crc` is **Pin** — a claim about what the pad carried. It is the
+///   checksum of bytes a receiver measured off a wire, and a machine whose
+///   fabric, whose routing or whose sampler is wrong changes it. `words` is
+///   Pin for the same reason: it is how many words came off the pad.
+///
+/// The gate the payload exists for — that the two checksums are equal, frame
+/// for frame — is not a field comparison at all, because both numbers are in
+/// one transcript. It is read straight out of the records.
+static RMT_RX_FIELDS: &[FieldSpec] = &[
+    FieldSpec {
+        record: "rmt-frame",
+        field: "n",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "rmt-frame",
+        field: "leds",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "rmt-frame",
+        field: "lit",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "rmt-frame",
+        field: "crc",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "rmt-rx",
+        field: "n",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "rmt-rx",
+        field: "words",
+        class: FieldClass::Pin,
+    },
+    FieldSpec {
+        record: "rmt-rx",
+        field: "crc",
+        class: FieldClass::Pin,
+    },
+];
+
 /// The `rmt-chase` payload's per-frame record: what the guest handed the
 /// driver, and the checksum the pin is compared against.
 static RMT_FRAME_FIELDS: &[FieldSpec] = &[
@@ -1239,6 +1305,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         sentinel: Sentinel::Done("[inc-shader-compile] === DONE ==="),
         host_script: None,
         pin_script: None,
+        wire: &[],
         record_kinds: &["case-summary", "total-summary"],
         mask_set: "compile-harness",
         fields: &[
@@ -1340,6 +1407,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         sentinel: Sentinel::Ready("CAL READY target="),
         host_script: None,
         pin_script: None,
+        wire: &[],
         record_kinds: &[],
         mask_set: "normalize",
         fields: &[],
@@ -1365,6 +1433,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         sentinel: Sentinel::Ready("UART-BRIDGE READY "),
         host_script: None,
         pin_script: None,
+        wire: &[],
         record_kinds: &[],
         mask_set: "normalize",
         fields: &[],
@@ -1390,6 +1459,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         sentinel: Sentinel::Done("[jit-math-perf] === DONE ==="),
         host_script: None,
         pin_script: None,
+        wire: &[],
         record_kinds: &["jit-bench"],
         mask_set: "jit-math-perf",
         fields: JIT_BENCH_FIELDS,
@@ -1415,6 +1485,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         sentinel: Sentinel::Done("[cycle-probe] === DONE ==="),
         host_script: None,
         pin_script: None,
+        wire: &[],
         record_kinds: &["cycle-probe"],
         mask_set: "cycle-probe",
         fields: CYCLE_PROBE_FIELDS,
@@ -1465,6 +1536,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // (silicon) and the outside-driver path (emulated), and both sidecars
         // say so.
         pin_script: Some("lp-emu/lp-emu-validate/pins/gpio-input.pins"),
+        wire: &[],
         record_kinds: &["gpio-input"],
         mask_set: "gpio-input",
         fields: GPIO_INPUT_FIELDS,
@@ -1510,6 +1582,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         sentinel: Sentinel::Done("[render-loop] === DONE ==="),
         host_script: None,
         pin_script: None,
+        wire: &[],
         record_kinds: &["render-loop-load", "render-loop-summary"],
         mask_set: "render-loop",
         fields: RENDER_LOOP_FIELDS,
@@ -1557,6 +1630,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         sentinel: Sentinel::Done("[stack] heartbeat: high-water"),
         host_script: None,
         pin_script: None,
+        wire: &[],
         record_kinds: &[],
         mask_set: "boot-idle",
         fields: &[],
@@ -1617,6 +1691,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // whole heartbeat is captured, `link` object and all.
         sentinel: Sentinel::Done("\"hostDrainingAgainMs\""),
         pin_script: None,
+        wire: &[],
         record_kinds: &[],
         mask_set: "boot-idle",
         fields: &[],
@@ -1675,6 +1750,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // recovered, and the proof is a frame that crossed it.
         sentinel: Sentinel::Done("\"uptime_ms\":10000"),
         pin_script: None,
+        wire: &[],
         record_kinds: &[],
         mask_set: "boot-idle",
         fields: &[],
@@ -1715,6 +1791,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // Nothing is printed, because nothing can be: see [`Sentinel::State`].
         sentinel: Sentinel::State("link_counters::NOT_DRAINING_COUNT"),
         pin_script: None,
+        wire: &[],
         record_kinds: &[],
         mask_set: "normalize",
         fields: &[],
@@ -1771,6 +1848,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         host_script: None,
         sentinel: Sentinel::Done("[stack] heartbeat: high-water"),
         pin_script: None,
+        wire: &[],
         record_kinds: &[],
         mask_set: "boot-idle",
         fields: &[],
@@ -1817,6 +1895,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // stops there rather than at a line the walk merely passes through.
         sentinel: Sentinel::Done("\"id\":12,\"seq\":2,"),
         pin_script: None,
+        wire: &[],
         record_kinds: &[],
         mask_set: "boot-idle",
         fields: &[],
@@ -1862,6 +1941,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         host_script: Some("lp-emu/esp/lp-emu-esp32c6/walks/examples-basic.script"),
         sentinel: Sentinel::Done("[shader-node] compilation succeeded"),
         pin_script: None,
+        wire: &[],
         record_kinds: &[],
         mask_set: "boot-idle",
         fields: &[],
@@ -1911,6 +1991,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // before the load.
         sentinel: Sentinel::Ready("\"path\":\"/projects/Meteor\""),
         pin_script: None,
+        wire: &[],
         record_kinds: &[],
         mask_set: "boot-idle",
         fields: &[],
@@ -1943,6 +2024,52 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         boot: BootPath::Direct,
     },
     Payload {
+        name: "rmt-rx",
+        display_name: "An RMT frame put on gpio18 and read back off gpio19",
+        fw_check_slug: "rmt-rx",
+        firmware_features: &["test_rmt_rx"],
+        fw_checks_feature: Some("check-rmt-rx"),
+        emits_header: true,
+        sentinel: Sentinel::Done("[rmt-rx] === DONE ==="),
+        host_script: None,
+        pin_script: None,
+        // The whole of the emulated side's setup: one jumper, in the signal
+        // fabric. gpio18 is the transmitter's pad — the exception the
+        // `--wire` flag carries for exactly this payload — and gpio19 is the
+        // receiver's. On silicon the same two pins need an actual jumper,
+        // which is the desk batch's optional item; the emulated run's gate
+        // does not wait for it, because its claim is about its own machine.
+        wire: &["18:19"],
+        record_kinds: &["rmt-frame", "rmt-rx"],
+        mask_set: "rmt-rx",
+        fields: RMT_RX_FIELDS,
+        series: &[],
+        capture: Capture::Monitor,
+        // The product's own link, for `cycle-probe`'s reason: the claim is
+        // that the SAME image runs on both sides.
+        link: Link::UsbSerialJtag,
+        emulator_features: None,
+        // A host with the port open from the first byte: without it an
+        // emulated USB payload records nothing at all (M1 P1's finding).
+        host_plan: Some(HostPlan {
+            host: "attached",
+            script: "",
+        }),
+        probes: &[],
+        // 32 frames of 64 LEDs is 49,152 bits each way plus the receiver's
+        // 409 us idle wait per frame: about a second of guest time, and the
+        // done marker ends it well before the deadline.
+        run_secs: Some(20),
+        fresh_chip: false,
+        // The pad's own reading, decoded by something that never spoke to the
+        // firmware, beside the two the firmware reports. Three readings of
+        // one frame is the whole point of the payload: the guest's bytes, the
+        // receiver's bytes, and the decoder's.
+        pin_capture: PinCapture::EveryFrame,
+        emulator_only: None,
+        boot: BootPath::Direct,
+    },
+    Payload {
         name: "rmt-chase",
         display_name: "RMT chase (256 LEDs, three passes)",
         fw_check_slug: "rmt-chase",
@@ -1952,6 +2079,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         sentinel: Sentinel::Done("[rmt-chase] === DONE ==="),
         host_script: None,
         pin_script: None,
+        wire: &[],
         record_kinds: &["rmt-frame"],
         mask_set: "rmt-chase",
         fields: RMT_FRAME_FIELDS,
@@ -2027,6 +2155,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // (`tests/shader_oracle_pin.rs`) runs on for seconds.
         sentinel: Sentinel::Done("\"id\":11,\"seq\":2,"),
         pin_script: None,
+        wire: &[],
         record_kinds: &[],
         mask_set: "boot-idle",
         fields: &[],
@@ -2070,6 +2199,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         host_script: None,
         sentinel: Sentinel::Done("[stack] heartbeat: high-water"),
         pin_script: None,
+        wire: &[],
         record_kinds: &[],
         mask_set: "boot-idle",
         fields: &[],

@@ -112,6 +112,20 @@ pub const ALL_CHECKS: &[FwCheckConfig] = &[
         emits_header: true,
     },
     FwCheckConfig {
+        check: FwCheck::RmtRx,
+        display_name: "An RMT frame put on gpio18 and read back off gpio19",
+        firmware_features: &["test_rmt_rx"],
+        // The literal, not `checks::rmt_rx::DONE_MARKER`, for the reason
+        // `cycle-probe` states above: this table is a `const` that exists
+        // whether or not `check-rmt-rx` compiles the module.
+        // `the_rmt_rx_marker_is_the_modules` below pins the two equal.
+        done_marker: Some("[rmt-rx] === DONE ==="),
+        trace_slug: "rmt-rx",
+        supported_targets: ESP32_ONLY,
+        emits_records: true,
+        emits_header: true,
+    },
+    FwCheckConfig {
         check: FwCheck::BootIdle,
         display_name: "Shipped image to the idle loop",
         // The shipped-image walk as a payload (vision Q1): no check module,
@@ -441,6 +455,16 @@ mod tests {
         assert_eq!(
             check.done_marker,
             Some(crate::checks::cycle_probe::DONE_MARKER)
+        );
+    }
+
+    #[test]
+    fn the_rmt_rx_marker_is_the_modules() {
+        let check = find_check("rmt-rx").expect("registered");
+        assert_eq!(
+            check.done_marker,
+            Some(crate::checks::rmt_rx::DONE_MARKER),
+            "the registry's marker and the module's have to be the same line"
         );
     }
 
