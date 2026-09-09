@@ -123,6 +123,53 @@ pub trait Bus {
     fn take_memory_cost(&mut self) -> u32 {
         0
     }
+
+    // ---- what a pre-decoded block cache needs from a bus ------------------
+
+    /// May a fetch be performed **ahead of time** and its result reused,
+    /// with nothing observable changing?
+    ///
+    /// A [`crate::block::BlockCache`] decodes a run of instructions in one
+    /// go and then executes them without fetching again. That is only exact
+    /// when a fetch has no consequence beyond returning the word:
+    ///
+    /// - it must **charge nothing** ([`Bus::take_memory_cost`] must stay at
+    ///   zero for fetches), because a decode-ahead fetch and the later
+    ///   execution would otherwise charge the cycle twice, or not at all;
+    /// - it must **trap nothing** — no execute-kind watchpoint may be armed,
+    ///   or a block build would take a trap the guest has not reached yet.
+    ///
+    /// The default is **`false`**: a bus opts in, rather than being opted in
+    /// by a trait default it never read. Getting this wrong is a silent
+    /// mis-accounting, so the fail-safe direction is "no cache".
+    ///
+    /// It is read once per slice and again at every block boundary, so a bus
+    /// may change its answer whenever it likes.
+    #[inline(always)]
+    fn fetch_is_pure(&self) -> bool {
+        false
+    }
+
+    /// `--strict-bus` diagnostics: instructions in `[pc, pc + bytes)` are
+    /// about to run from a **cached** block, so the bus will see no fetch for
+    /// them.
+    ///
+    /// A bus that checks "was this code page written since the last
+    /// `fence.i`?" does it on the fetch path, and a cached block has no fetch
+    /// path — this is where it gets told instead. The default is empty and
+    /// inlines away, which is what keeps the checker free on the default run.
+    #[inline(always)]
+    fn note_cached_execute(&mut self, _pc: u32, _bytes: u32) {}
+
+    /// The guest retired a `fence.i`: every code page written up to here has
+    /// been published, and a bus tracking "written but not fenced" clears its
+    /// marks.
+    ///
+    /// The other end of the contract is the firmware's own `fence.i`, emitted
+    /// by `lpvm_native::rt_jit::buffer::JitBuffer::from_code` after a JIT
+    /// publish. The default is empty.
+    #[inline(always)]
+    fn note_fence_i(&mut self) {}
 }
 
 /// A hardware watchpoint slot's configuration.
