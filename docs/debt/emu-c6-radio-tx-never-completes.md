@@ -90,6 +90,26 @@ the air existed. The constants above are recorded in `periph/wifi_stub.rs`
 `PWR_INT_EVENT_OFFSET`, `PWR_INT_CLEAR_OFFSET`) with the trace lines that
 named each, and nothing in the block acts on them.
 
+**Still open after M4 P2, and one claim above needs narrowing.** P2 built the
+RX half — a frame the air carries is written into the receiving guest's own
+descriptor ring, source 0 is raised with bit 14 in the MAC's event word, and
+the receiving application prints `[test_espnow] rx …`. Three things follow
+for this debt:
+
+- **The TX completion is untouched and still open.** Nothing here originates
+  one, and the RX raise makes no difference to it.
+- **A working RX path is not what the TX was waiting for.** In the pair run
+  the receiving machine prints its `rx` line, goes on to arm its own frame,
+  and wedges exactly as before — it never prints a `tx` line either.
+- **P1's "the event word's value never reaches a dispatch" was measured with
+  an empty RX ring, and only holds there.** With a frame in a descriptor the
+  32 candidates separate into eight distinct instruction counts and bit 14
+  reaches the blob's RX path where no other bit does. That does not reopen
+  the TX question — it *sharpens* the method: a bit sweep against a machine
+  that has nothing to find measures the experiment, not the mechanism. If a
+  future pass sweeps for the TX bit, it should do so with whatever state a
+  real TX completion would find, not with the machine as it sits.
+
 **What is not blocked** — the frame itself. The bytes the blob hands the MAC
 are complete and readable before the wedge, and `--tx-log` ships them: on the
 image above, a 56-byte 802.11 vendor-specific action frame, broadcast to
@@ -100,6 +120,12 @@ broadcast, from the eFuse MAC, Espressif OUI `18:fe:34`, ESP-NOW element type
 returning. `test_espnow` is one, and it is the only one in the tree; the
 shipped image does not send at boot, which is why every existing C6 gate and
 transcript is unaffected and none of them regressed when this was found.
+
+It is also what bounds a **pair**: each machine arms one frame and stops, so
+a two-board run exchanges exactly one frame in one direction, and only if the
+machines are staggered (`lockstep::Lockstep::stagger`) so that the receiver
+is not already wedged when the frame lands. Closing this debt is what would
+turn that into a conversation.
 
 **The evidence, in full**, including the register-by-register ledger of the
 arming sequence and the descriptor read out of guest RAM:
