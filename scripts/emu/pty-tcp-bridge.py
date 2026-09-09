@@ -57,6 +57,12 @@ def main() -> int:
     ap.add_argument("--log-dev", help="only what the chip sent")
     ap.add_argument("--connect-timeout", type=float, default=30.0)
     ap.add_argument(
+        "--write-timeout",
+        type=float,
+        default=2.0,
+        help="seconds to keep trying to hand a chunk to the pty before dropping it",
+    )
+    ap.add_argument(
         "--idle-exit",
         type=float,
         default=0.0,
@@ -117,6 +123,7 @@ def main() -> int:
     signal.signal(signal.SIGTERM, on_signal)
 
     last = time.monotonic()
+    dropped = 0
     to_dev = b""
     try:
         while not stop:
@@ -155,14 +162,35 @@ def main() -> int:
                     for name in ("both", "dev"):
                         if logs[name]:
                             logs[name].write(data)
+                    # Bounded, and this bound is load-bearing. The pty stays
+                    # alive after the flasher exits (the bridge holds the
+                    # slave open on purpose), so nothing is READING it any
+                    # more and its buffer fills after a few kilobytes. An
+                    # unbounded retry loop wedges there and never sees the
+                    # signal that would stop it — which is exactly how the
+                    # first cut of this script hung a recipe run after the
+                    # chip rebooted and started talking. A serial port whose
+                    # application has closed drops what it cannot deliver;
+                    # so does this, and it says how much.
                     pending = data
-                    while pending:
+                    deadline = time.monotonic() + args.write_timeout
+                    while pending and not stop:
                         try:
                             n = os.write(master, pending)
                         except BlockingIOError:
-                            select.select([], [master], [], 1.0)
-                            continue
+                            n = 0
                         pending = pending[n:]
+                        if not pending:
+                            break
+                        if time.monotonic() > deadline:
+                            dropped += len(pending)
+                            print(
+                                f"DROPPED {len(pending)} (nothing is reading the pty; "
+                                f"{dropped} total)",
+                                flush=True,
+                            )
+                            break
+                        select.select([], [master], [], 0.2)
             if to_dev and dev in w:
                 try:
                     n = dev.send(to_dev)
