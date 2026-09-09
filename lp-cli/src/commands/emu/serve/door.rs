@@ -175,7 +175,13 @@ async fn handle(mut stream: TcpStream, registry: Arc<Registry>) -> Result<()> {
     let key = header(&head, "sec-websocket-key").map(str::to_string);
 
     if method != "GET" {
-        return respond(&mut stream, "405 Method Not Allowed", "text/plain", "GET only\n").await;
+        return respond(
+            &mut stream,
+            "405 Method Not Allowed",
+            "text/plain",
+            "GET only\n",
+        )
+        .await;
     }
 
     match (route(&path), upgrading) {

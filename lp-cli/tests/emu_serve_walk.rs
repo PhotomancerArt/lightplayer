@@ -61,10 +61,7 @@ fn the_walk_over_the_ws_door_lands_the_same_project_with_the_same_figures() {
         "a fresh state dir is a blank board"
     );
 
-    let host = format!(
-        "serial:ws://127.0.0.1:{}/board/c6-a/bytes",
-        serve.port()
-    );
+    let host = format!("serial:ws://127.0.0.1:{}/board/c6-a/bytes", serve.port());
     let upload = Command::new(env!("CARGO_BIN_EXE_lp-cli"))
         .arg("upload")
         .arg(&project)

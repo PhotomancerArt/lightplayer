@@ -323,7 +323,10 @@ fn untaken_path(console: &std::path::Path) -> PathBuf {
     let mut path = console.to_path_buf();
     let name = path
         .file_name()
-        .map(|n| n.to_string_lossy().replace(".console.", ".console-untaken."))
+        .map(|n| {
+            n.to_string_lossy()
+                .replace(".console.", ".console-untaken.")
+        })
         .unwrap_or_else(|| "console-untaken.log".to_string());
     path.set_file_name(name);
     path

@@ -225,8 +225,9 @@ mod tests {
 
     #[test]
     fn wss_is_refused_by_name_rather_than_downgraded() {
-        let e = WsByteStream::connect("wss://example.invalid/board/c6-a/bytes")
-            .expect_err("wss:// has no TLS on this seam");
+        let Err(e) = WsByteStream::connect("wss://example.invalid/board/c6-a/bytes") else {
+            panic!("wss:// has no TLS on this seam and must be refused");
+        };
         assert!(format!("{e}").contains("wss://"), "{e}");
     }
 

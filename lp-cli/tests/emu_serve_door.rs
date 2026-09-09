@@ -84,8 +84,14 @@ fn the_control_channel_answers_one_line_per_line_in_order() {
         "state: {state}"
     );
     assert!(state.contains("draining=false"), "port closed: {state}");
-    assert!(state.contains("in_pending="), "the full state grammar: {state}");
-    assert!(state.contains("out_queued="), "the full state grammar: {state}");
+    assert!(
+        state.contains("in_pending="),
+        "the full state grammar: {state}"
+    );
+    assert!(
+        state.contains("out_queued="),
+        "the full state grammar: {state}"
+    );
 
     // A cable that is already in cannot be plugged in again, and the machine
     // says which precondition failed rather than quietly doing nothing.
@@ -158,8 +164,14 @@ fn a_byte_client_opens_the_port_and_never_moves_the_cable() {
     {
         let _bytes = serve.bytes("c6-a");
         let reopened = serve.wait_for_state(&mut control, "draining=true");
-        assert!(reopened.contains("draining=true"), "second open: {reopened}");
-        assert!(reopened.contains("host=attached"), "second open: {reopened}");
+        assert!(
+            reopened.contains("draining=true"),
+            "second open: {reopened}"
+        );
+        assert!(
+            reopened.contains("host=attached"),
+            "second open: {reopened}"
+        );
     }
 }
 
@@ -223,8 +235,14 @@ fn a_board_says_hello_over_the_byte_endpoint_with_its_own_identity() {
     let serve = Serve::start(&elf, &["c6-a", "c6-b"], &[]);
     let listed = serve.get("/boards");
     let json: serde_json::Value = serde_json::from_str(&listed).expect("JSON");
-    let mac_a = json["boards"][0]["mac"].as_str().expect("a mac").to_string();
-    let mac_b = json["boards"][1]["mac"].as_str().expect("a mac").to_string();
+    let mac_a = json["boards"][0]["mac"]
+        .as_str()
+        .expect("a mac")
+        .to_string();
+    let mac_b = json["boards"][1]["mac"]
+        .as_str()
+        .expect("a mac")
+        .to_string();
 
     let hello_a = serve.hello("c6-a");
     let hello_b = serve.hello("c6-b");
@@ -238,7 +256,10 @@ fn a_board_says_hello_over_the_byte_endpoint_with_its_own_identity() {
     );
     assert_ne!(mac_a, mac_b, "two boards, two identities");
     // The line is a whole `M!` line and nothing has been wrapped around it.
-    assert!(hello_a.starts_with("M!{"), "no envelope was added: {hello_a}");
+    assert!(
+        hello_a.starts_with("M!{"),
+        "no envelope was added: {hello_a}"
+    );
 }
 
 /// **Gate 6** — `reset` reboots; it does not end the run (PD11).

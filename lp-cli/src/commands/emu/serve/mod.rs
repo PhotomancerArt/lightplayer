@@ -199,7 +199,11 @@ fn parse_board(
         format!("--board `{text}`: expected <id>=<image>, for example c6-a=target/…/fw-esp32c6")
     })?;
     let id = id.trim();
-    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+    if id.is_empty()
+        || !id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
         bail!(
             "--board `{text}`: `{id}` is not a board id — letters, digits, `-` and `_`, because \
              the id is a path segment"
@@ -309,7 +313,11 @@ mod tests {
 
     #[test]
     fn two_boards_may_not_share_an_id() {
-        let clash = parse_boards(&["c6-a=one".to_string(), "c6-a=two".to_string()], None, None);
+        let clash = parse_boards(
+            &["c6-a=one".to_string(), "c6-a=two".to_string()],
+            None,
+            None,
+        );
         assert!(clash.is_err(), "the id is the endpoint path");
     }
 }

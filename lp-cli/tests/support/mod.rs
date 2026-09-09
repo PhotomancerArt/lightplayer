@@ -138,7 +138,10 @@ impl Serve {
             .and_then(|line| line.split_whitespace().nth(1))
             .and_then(|code| code.parse().ok())
             .unwrap_or(0);
-        let body = text.split_once("\r\n\r\n").map_or("", |(_, b)| b).to_string();
+        let body = text
+            .split_once("\r\n\r\n")
+            .map_or("", |(_, b)| b)
+            .to_string();
         (status, body)
     }
 
@@ -175,7 +178,9 @@ impl Serve {
 
     fn open_ws(&self, path: &str) -> Result<WebSocket<TcpStream>, String> {
         let stream = TcpStream::connect(("127.0.0.1", self.port)).map_err(|e| e.to_string())?;
-        stream.set_read_timeout(Some(NET)).map_err(|e| e.to_string())?;
+        stream
+            .set_read_timeout(Some(NET))
+            .map_err(|e| e.to_string())?;
         stream.set_nodelay(true).map_err(|e| e.to_string())?;
         let (socket, _response) = tungstenite::client::client(
             tungstenite::client::IntoClientRequest::into_client_request(self.url(path))
@@ -306,7 +311,9 @@ impl Control {
                     return String::from_utf8_lossy(&bytes).trim_end().to_string();
                 }
                 Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_)) => continue,
-                Ok(Message::Close(_)) => panic!("the control channel closed instead of answering `{line}`"),
+                Ok(Message::Close(_)) => {
+                    panic!("the control channel closed instead of answering `{line}`")
+                }
                 Err(e) => panic!("reading the reply to `{line}`: {e}"),
             }
         }
@@ -316,10 +323,7 @@ impl Control {
 
 /// Read frames off a byte client until `done` says the text so far is
 /// enough, then hand back everything read.
-pub fn read_until(
-    socket: &mut WebSocket<TcpStream>,
-    done: impl Fn(&str) -> bool,
-) -> String {
+pub fn read_until(socket: &mut WebSocket<TcpStream>, done: impl Fn(&str) -> bool) -> String {
     let deadline = Instant::now() + NET;
     let mut text = String::new();
     while Instant::now() < deadline {

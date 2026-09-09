@@ -28,8 +28,7 @@ pub struct AirTap {
 impl AirTap {
     /// Bind `addr` and start accepting watchers.
     pub fn bind(addr: &str) -> Result<Arc<AirTap>> {
-        let listener =
-            TcpListener::bind(addr).with_context(|| format!("--air: binding {addr}"))?;
+        let listener = TcpListener::bind(addr).with_context(|| format!("--air: binding {addr}"))?;
         let local = listener
             .local_addr()
             .with_context(|| format!("--air: reading back {addr}"))?;
@@ -89,6 +88,11 @@ impl AirTap {
         }
         let encoded = wire::encode(ParticipantId(seat), at, bytes);
         let mut clients = self.clients.lock().expect("air clients poisoned");
-        clients.retain_mut(|client| client.write_all(&encoded).and_then(|()| client.flush()).is_ok());
+        clients.retain_mut(|client| {
+            client
+                .write_all(&encoded)
+                .and_then(|()| client.flush())
+                .is_ok()
+        });
     }
 }

@@ -2216,6 +2216,22 @@ test-emu-c6-cli:
     cargo test -p lp-cli --test validate_registry_parity
     LP_EMU_BUILD_FW=1 cargo test -p lp-cli --test emu_usb_hello -- --include-ignored
 
+# `lp-cli emu serve`'s WebSocket door: the registry, the two endpoints, the
+# coupling rule, `reset`, and the upload walk over `serial:ws://…` landing
+# `upload-walk-usb`'s figures (emulator plan two, M1).
+#
+# Not part of `test-emu-c6` and not a CI job (plan two PD9 / E-cost): it wants
+# the REFERENCE image — a riscv32 build of firmware commit d6cfaa205 through
+# `scripts/emu/build-reference-image.sh` — and a `git archive` of the project
+# the walk was captured against. Both skip honestly when they cannot be had,
+# so a run with neither says so rather than passing quietly.
+#
+# Serial on purpose: each test holds N emulated boards and a port, and a
+# loaded box is where a socket test goes flaky.
+test-emu-serve:
+    LP_EMU_BUILD_FW=1 cargo test -p lp-cli --test emu_serve_door -- --include-ignored --test-threads=1
+    LP_EMU_BUILD_FW=1 cargo test -p lp-cli --test emu_serve_walk -- --include-ignored --test-threads=1
+
 # The hardware walk, with the emulator where the board goes.
 #
 # `scripts/m4-hardware-walk.sh --chip esp32c6` asks one question of a board:

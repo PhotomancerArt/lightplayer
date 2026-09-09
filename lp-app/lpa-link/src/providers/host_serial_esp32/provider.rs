@@ -397,16 +397,20 @@ impl LinkProvider for HostSerialEsp32Provider {
         // mapping); the transport machinery below the byte-stream seam is
         // port-agnostic and shared with the fake device.
         let stream: Box<dyn lpa_client::DeviceByteStream> = match socket {
-            Some(SocketEndpoint::Tcp(addr)) => Box::new(TcpByteStream::connect(addr).map_err(
-                |error| LinkError::ConnectionFailed {
-                    message: error.to_string(),
-                },
-            )?),
-            Some(SocketEndpoint::WebSocket(url)) => Box::new(WsByteStream::connect(url).map_err(
-                |error| LinkError::ConnectionFailed {
-                    message: error.to_string(),
-                },
-            )?),
+            Some(SocketEndpoint::Tcp(addr)) => {
+                Box::new(TcpByteStream::connect(addr).map_err(|error| {
+                    LinkError::ConnectionFailed {
+                        message: error.to_string(),
+                    }
+                })?)
+            }
+            Some(SocketEndpoint::WebSocket(url)) => {
+                Box::new(WsByteStream::connect(url).map_err(|error| {
+                    LinkError::ConnectionFailed {
+                        message: error.to_string(),
+                    }
+                })?)
+            }
             None => Box::new(
                 SerialPortByteStream::open(&endpoint.port_name, baud_rate).map_err(|error| {
                     LinkError::ConnectionFailed {
