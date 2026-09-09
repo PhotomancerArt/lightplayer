@@ -1071,6 +1071,123 @@ each item is something a reader would otherwise assume:
   the guest's own behaviour, but the raise, the completing slot bit and the
   672 us delay are ours. See "The TX completion" below.
 
+##### The honesty section: what this air is, in one place (M4 P3)
+
+Everything above is the mechanism. This is the **claim**, written out so that
+a reader who stops here is not left to assemble it, and so that the sentence
+on the tin can be argued with. Its formal home is
+`docs/adr/2026-09-08-virtual-air-claim-policy.md`.
+
+**What it does.** It takes the bytes the WiFi blob hands the MAC — read
+verbatim out of guest RAM at the descriptor the blob itself programmed, not
+reconstructed — and, after a **stated latency of 672 µs**, writes them into
+every other machine's own RX descriptor ring, behind a `wifi_pkt_rx_ctrl_t`
+header built from the public Apache-2.0 layout, and raises the RX interrupt.
+Then it originates the sender's TX completion so the sender's `send` returns.
+That is the whole of it: **byte delivery on a perfect medium**.
+
+**What it originates rather than reproduces.** Two events, and they are the
+policy's whole subject:
+
+- **The TX completion.** No silicon has ever been watched completing a
+  transmission on this chip. M4 P0 established that (`§3`: `lmacTxDone`,
+  `ppProcTxDone`, `trc_onPPTxDone` and `esp_wifi_tx_done_cb` never entered),
+  and M4 U1 got one to happen by finding, bit by bit, **what the blob's own
+  ISR responds to** — not by reading a datasheet and not by reading the blob.
+- **The RX interrupt.** Same shape: raised by us, on a path nobody has
+  observed, into a handler whose reads and clears the guest showed us.
+
+Every bit of both was chosen **inside a constraint the guest imposed**, which
+is a weaker claim than "measured" and a much stronger one than "invented".
+The two tables above say which is which, row by row; the short form is: the
+interrupt source, the event bits (7 for TX, 14 for RX), the queue-state
+register and its `w1c`, the two RX cursors, the reload strobe, `rxmatch0`,
+`eof` and descriptor `[28:24]` are all **the guest's own behaviour**, and the
+raise itself, the completing slot bit (`+0x4cb8` bit 0), the 672 µs, the
+cleared `owner`, the byte count we write into `[23:12]`, and 84 of the
+`rx_ctrl` header's 92 bytes are **ours**.
+
+**What it does not model** is the list above, by name: no PHY, no channel
+occupancy, no collisions, no retries, no range; RSSI a constant; no rate
+model; no ESP-NOW CCMP when a peer key is set; no timing windows, and in
+particular not the C6's 28 % frame truncation under a WiFi scan
+(`docs/debt/c6-scan-truncation-accepted.md`), which is a timing property of
+the blob and the MAC and cannot reproduce here.
+
+**And one thing it does not do that a reader would assume it does: deliver
+every frame to the application.** M4 P3's two-machine payload found that a
+receiving guest surfaces **every other** frame written into its ring — the
+air offers them all, the ring takes them all
+(`frames_sent == frames_offered == air_frames_delivered`,
+`air_frames_undelivered == 0`), and the application sees the peer's events
+0, 2, 4, 6, 8, 10. It is not a phase artefact of the pair's stagger: 25 ms
+and 250 ms alternate identically. Nothing found it earlier because nothing
+had sent and received repeatedly — M4 P2 delivered one frame and M4 U1
+completed one transmission. It is open, pinned by a test, and written up in
+`docs/debt/emu-c6-air-delivers-every-other-frame.md`.
+
+**Grades.** Every one of these claims is `modeled`, and stays `modeled`. A
+grade moves only with a transcript (`docs/adr/2026-09-06-esp-soc-emulator-architecture.md`),
+and the transcript that could move this one is a **two-board silicon
+capture**, which `d1-desk-batch.md` step 3 is still owed: M4 P3's sitting
+found one board absent from the bus and the other's port wedged, so the
+emulated pair's four committed transcripts
+(`lp-emu/transcripts/esp32c6/espnow-broadcast/`, `t1` and `t2`, one per
+machine) currently have no silicon twin.
+
+**No pin claim, and the reason is the payload.** ESP-NOW events are **console
+fields, not pin fields**: `espnow-broadcast` declares no pin capture, so no
+pad is decoded on either side, no `--dump-frames` is passed, and a replay of
+it says nothing about pins at all. That is a different situation from
+`rmt-chase`, where the payload *does* claim a pad and a silicon replay prints
+`pin capture: … records none` because a board has no logic analyser on it
+(#624).
+
+**The socket form does not exist.** `--air <addr>` is a described flag with a
+tested wire codec and **no implementation** (see below); nothing is gated on
+it, and plan two's `lp-cli emu serve` is where it lands. The deterministic
+form — the only one any gate uses — is `lockstep::Lockstep`, two machines in
+one thread.
+
+##### What the two-board payload settled about the TX descriptor (M4 P3)
+
+M4 P0 left four unknowns blocked on one thing: a machine that sends more than
+one frame. `espnow-broadcast` sends six, of four different lengths, and its
+`--tx-log` reads the descriptor the blob programmed for each. Four frames,
+four lengths, four descriptor words:
+
+| payload bytes | frame len | `dw0` | `[11:0]` | `[23:14]` | `[13:12]` | `[28:24]` | `hdr` first two bytes |
+|---|---|---|---|---|---|---|---|
+| 0 | 60 | `0xc0110060` | 96 | 68 | 0 | 0 | `3c 00` = 60 |
+| 8 | 68 | `0xc0130068` | 104 | 76 | 0 | 0 | `44 00` = 68 |
+| 24 | 84 | `0xc0170078` | 120 | 92 | 0 | 0 | `54 00` = 84 |
+| 64 | 124 | `0xc02100a0` | 160 | 132 | 0 | 0 | `7c 00` = 124 |
+
+- **U2 (`[23:12]`) — closed on the TX side.** It *is* a length, and P0 was
+  looking two bits too low: `[23:14]` is exactly **frame length + 8** on all
+  four frames, and `[13:12]` is 0 on all four. Eight is the header at `buf`.
+- **U4 (the eight bytes at `buf`) — closed.** They are a hardware TX header,
+  and its **first field is the frame length, little-endian**: `3c 00`, `44
+  00`, `54 00`, `7c 00` against 60, 68, 84 and 124 bytes. The remaining six
+  bytes are zero on every frame.
+- **The RX side is *not* settled by this**, and the table above says why it
+  would be easy to think otherwise. P0 read 2,704 in the RX descriptor's
+  `[23:12]`; `2704 >> 2` is 676, which is not the ring's 1,700-byte buffer
+  plus anything, so the TX reading does not carry over. Our delivery still
+  writes a byte count there and the guest still tolerates any value —
+  **undetermined on the RX side**, exactly as the table above leaves it.
+- **U7 (the four variable bytes in the action frame)** — six frames from one
+  boot give `e2b3830d`, `42f345a8`, `e5d6d890`, `484066d5`, `d2e3d687`,
+  `b4742a00`. All different, in no order. That refutes "session id" (which
+  would repeat) and "timestamp" (which would climb); it is consistent with a
+  nonce, and that is as far as six samples go.
+- Also visible, and not an unknown anybody asked about: the 802.11
+  sequence-control field steps by one per frame (`0000`, `1000`, `2000`, …).
+
+**`[28:24]` (U3) stays open**, unchanged from where M4 P2 left it: 0 on TX, 1
+on RX, load-bearing on the RX side (clearing it stops reception) and with no
+known meaning.
+
 ##### The pair, and the one frame
 
 *Amended by M4 U1: the guest's `send` now returns, so a pair exchanges a
