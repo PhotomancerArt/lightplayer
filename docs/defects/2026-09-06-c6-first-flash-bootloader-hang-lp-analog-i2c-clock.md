@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-09-06      # how: report (Yona, first LightPlayer install on a fresh Seeed XIAO ESP32C6, prod Studio)
-fixed: this change
+fixed: 3c75c7f72  # flasher fix; ladder adabba204, guard/scripts 0f5b7fc55
 area: lpa-link flashers (browser esptool-js + host espflash) · lpa-devices post-flash reconnect ladder · the merged image's second-stage bootloader
 class: assumed-context
 related:
@@ -90,6 +90,14 @@ the diagnosis to this entry's fix.
 The bench proof, both directions, on XIAO `A0:F2:62:85:A8:7C` (2026-09-06):
 clearing the bit over the ROM reproduces the hang on demand; the sequence
 above followed by Studio's ordinary reset boots LightPlayer.
+
+**Confirmed on hardware through Studio (2026-09-08).** The board was induced
+into the exact production failure (`LPPERI_CLK_EN 0x5f000000`, hung at
+`Saved PC:0x4086ed7a`), then flashed from Studio: the card went green on the
+flasher's own reset with **no replug** — the ritual this entry exists to
+delete. A second flash onto the now-clean board logged no restore line at
+all, and its `Saved PC:0x4080082e` (an app address, outside the bootloader
+ranges) was correctly not read as a hang.
 
 **Regression coverage** — `lpa-link`
 `lp_analog_i2c::tests` (the register plan and the log line); `lpa-devices`
