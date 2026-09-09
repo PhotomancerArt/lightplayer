@@ -13,6 +13,13 @@ check-shader-compile = []
 # Q32 fixed-point kernels + corpus (mul/div/sin), no chip dependency beyond
 # the injected cycle-counter function pointer (see `checks::jit_math_perf`).
 check-jit-math-perf = ["dep:lps-builtins"]
+# The `cycle-probe` payload: the two-clock bracket, the repetition, the
+# record, and the three kernels that are ordinary Rust — the code walk, the
+# `.rodata` stride walk and the slice-shaped case (`checks::cycle_probe`). The
+# chip-bound kernels (IRAM/flash placement, the assembly loops whose
+# instruction count has to be exact, the MMIO addresses) stay in `fw-esp32c6`,
+# the same way this crate keeps the cycle counter out.
+check-cycle-probe = []
 check-json = []
 check-gpio-calibrate = []
 check-uart-bridge = []

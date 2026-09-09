@@ -6,6 +6,7 @@
 
 pub mod constants;
 #[cfg(any(
+    feature = "test_cycle_probe",
     feature = "test_msafluid",
     feature = "test_jit_math_perf",
     feature = "test_shader_compile_incremental",

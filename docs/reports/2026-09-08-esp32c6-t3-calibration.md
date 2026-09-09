@@ -302,6 +302,294 @@ the same defect is present in this payload's application-level
 a finding for P3 to read before it starts modelling, not a model — no
 cycle-model work was done in this phase, per scope.
 
+## §2 The kernels
+
+§1 measures a workload. This section measures the **terms** a cycle model
+would be built from: sixteen kernels, each one moving one cost, five
+repetitions each, every repetition on the record. Nothing below is averaged
+and nothing is subtracted silently — where a figure has the bracket taken off
+it, the bracket is quoted beside it.
+
+### Provenance
+
+Three transcripts of the `cycle-probe` payload (`validate.toml` set
+`cycle-probe`), all of **one image's bytes** over the link the product ships
+with (USB-Serial-JTAG, `Link::UsbSerialJtag`, `host_plan` attached):
+
+- **silicon** —
+  `lp-emu/transcripts/esp32c6/cycle-probe/silicon-esp32c6-2026-09-08-b89893962.txt`
+  (+ `.meta.json`), recorded 2026-09-08 on desk board `A0:F2:62:87:B4:8C`
+  (`/dev/cu.usbmodem1433201`, chip rev v0.2), firmware `b89893962c76`,
+  `firmware_dirty: false`, boot `rst:0x15 (USB_UART_HPSYS)`.
+- **t1** (`TimeGrade::T1`, instruction count) —
+  `lp-emu-esp32c6-t1-2026-09-08-b89893962.txt`, same commit, same ELF.
+- **t2** (`TimeGrade::T2`, the per-class table) —
+  `lp-emu-esp32c6-t2-2026-09-08-b89893962.txt`, same commit, same ELF.
+
+**All three ran the same instructions**, and that is asserted rather than
+assumed: every kernel's `acc` — the accumulator read back out of a
+`black_box` — is identical across all three transcripts, all 80 records
+(`lp-emu/lp-emu-validate/tests/cycle_probe_two_clocks.rs`,
+`every_kernel_computed_the_same_thing_on_every_machine`). The cycle columns
+below are therefore three readings of one kernel, not three kernels.
+
+Emulator-side figures are **on top of debt-sweep #612 and #619** and are not
+comparable with any pre-#612 emulator figure, for the reasons the Provenance
+section above gives. Silicon is unaffected.
+
+### The two clocks agree, and that is the first result
+
+Every kernel is bracketed by `mpccr` **and** by SYSTIMER microseconds
+(`embassy_time::Instant`, Unit0 at XTAL/2.5 = 16 MHz), the microsecond reads
+outside the cycle reads on both sides. On silicon, for every kernel whose
+span is a millisecond or more, `cycles / 160e6` and `us / 1e6` agree to
+within **0.229 %** (`code_walk/warm` rep 1) — worst case, over all 70 such
+readings. "A millisecond or more" is 160,000 cycles at 160 MHz, which is
+`LONG_ENOUGH_CYCLES` in the test; 70 of the 80 records clear it and the
+remaining 10 are the two short kernels below.
+
+The two kernels below a millisecond are explained rather than exempted.
+`bracket_overhead` and `slice_shape` run 0.3–150 µs, and the bracket itself
+costs about 1–2 µs of `us` that it does not cost of `cycles` (the two
+`Instant::now()` calls sit outside the two `mpccr` reads, and `as_micros`
+truncates). Their `us` exceeds their cycle span by 0.7–1.7 µs, which is that
+number and no more. **Nothing here supports a "the counter pauses" reading**
+— the counter and an independent 16 MHz timer describe the same span
+everywhere the span is large enough to describe.
+
+The one reading with a bigger gap is the very first bracket of the run:
+`bracket_overhead` rep 0, 884 cycles against the 42 of every repetition after
+it, and 11 µs of SYSTIMER against 5.5 µs of `mpccr`. That is the measurement
+code itself being fetched from flash for the first time — inside the cycle
+bracket and, for the `Instant::now()` pair, outside it. `code_walk` below
+says what such a fetch costs, and 21× on a 42-cycle body is entirely within
+it. The test asserts that this reading is still conspicuously cold before it
+grants it a looser bound.
+
+### The kernels
+
+Silicon cycles are `min..max` over the five repetitions; `t1` and `t2` are
+the median (both are deterministic, so the median is the value).
+
+| kernel | insns | silicon cycles | t1 | t2 | si/t1 | si/t2 | si cyc/insn |
+|---|---:|---|---:|---:|---:|---:|---:|
+| `bracket_overhead` | — | 42..884 | 29 | 49 | 1.45 | 0.86 | — |
+| `iram_loop` | 1,500,000 | 1,500,043..1,500,195 | 1,500,030 | 1,750,047 | 1.00 | 0.86 | 1.000 |
+| `flash_loop` | 1,500,000 | 1,500,043..1,500,493 | 1,500,030 | 1,750,047 | 1.00 | 0.86 | 1.000 |
+| `muldiv/mul` | 1,250,000 | 1,250,053..1,251,588 | 1,250,036 | 1,500,057 | 1.00 | 0.83 | 1.000 |
+| `muldiv/div` | 200,000 | 560,053..560,368 | 200,036 | 1,480,057 | 2.80 | 0.38 | 2.800 |
+| `code_walk/cold` | 24,576 | 1,064,273..1,064,307 | 24,604 | 24,622 | 43.26 | 43.22 | 43.31 |
+| `code_walk/warm` | 24,576 | 1,064,273 | 24,604 | 24,622 | 43.26 | 43.22 | 43.31 |
+| `mmio_poll/uart0-status` | 120,000 | 480,043..480,679 | 120,030 | 200,047 | 4.00 | 2.40 | 4.000 |
+| `mmio_poll/systimer` | 120,000 | 480,045..480,689 | 120,030 | 200,047 | 4.00 | 2.40 | 4.000 |
+| `rodata_stride/16` | — | 11,974,265..11,974,939 | 917,540 | 1,376,313 | 13.05 | 8.70 | — |
+| `rodata_stride/32` | — | 23,811,905..23,812,228 | 917,540 | 1,376,313 | 25.95 | 17.30 | — |
+| `rodata_stride/64` | — | 23,940,795..23,941,473 | 917,540 | 1,376,313 | 26.09 | 17.39 | — |
+| `rodata_stride/256` | — | 23,855,155..23,856,511 | 917,540 | 1,376,313 | 26.00 | 17.33 | — |
+| `rodata_stride/1024` | — | 23,855,155..23,856,155 | 917,540 | 1,376,313 | 26.00 | 17.33 | — |
+| `rodata_stride/4096` | — | 23,855,155..23,855,463 | 917,540 | 1,376,313 | 26.00 | 17.33 | — |
+| `slice_shape` | — | 20,247..23,882 | 32,694 | 33,070 | 0.67 | 0.66 | — |
+
+`insns` is present only where the loop is hand-written assembly of known
+length. It is audited rather than declared: `t1` charges one cycle per
+instruction, so `t1`'s cycles are the instruction count plus the bracket's
+handful, and the test asserts exactly that on all 40 assembly readings.
+
+The variance on silicon is small and it is almost all in **repetition 0** —
+every kernel's first pass is its slowest, by between 0.005 % (`iram_loop`)
+and 0.13 % (`mmio_poll`). The exceptions are `code_walk`, which has no cold
+pass to lose (below), and `slice_shape`, whose spread is 18 % and is the
+console's.
+
+### The four derived quantities
+
+**1. Flash-fetch extra cost per instruction — measured at zero, and that is
+the finding.**
+
+(`flash_loop` − `iram_loop`) / 1,500,000 instructions:
+
+| rep | difference (cycles) | per instruction |
+|---:|---:|---:|
+| 0 | +298 | +0.000199 |
+| 1 | 0 | 0.000000 |
+| 2 | 0 | 0.000000 |
+| 3 | 0 | 0.000000 |
+| 4 | 0 | 0.000000 |
+
+The two loops are **the same 42 bytes of machine code** — `nm` on the ELF:
+`iram_loop` at `0x40800644` (HP-SRAM) and `flash_loop` at `0x42050cb4`
+(flash-cache window), both `0x2a` bytes — differing only by
+`#[esp_hal::ram]`.
+
+So: **once resident, flash-resident code costs nothing over IRAM-resident
+code**, to a resolution of 2×10⁻⁴ cycles per instruction. The 298 cycles in
+repetition 0 are the one-time fill of the 42 bytes. A model that charges a
+per-instruction premium for flash residency would be wrong; the whole of
+flash's cost is in the **miss**, which is `code_walk`'s number.
+
+**2. APB read cost — 10.0 cycles, the same for both blocks.**
+
+Each poll iteration is three instructions (`addi`, `lw`, `bnez`), one of them
+the peripheral load; 40,000 iterations.
+
+| block | cycles/iteration | less the two ALU instructions | read cost |
+|---|---:|---:|---|
+| UART0 `status` (`0x6000_001C`) | 12.0011..12.0170 | −2.0 | **10.00..10.02 cycles** |
+| SYSTIMER `unit0_value.lo` (`0x6000_A044`) | 12.0011..12.0172 | −2.0 | **10.00..10.02 cycles** |
+
+The two blocks are indistinguishable — 480,043 against 480,045 cycles at
+their tightest. "The APB costs ten cycles" is supported; "UART0 costs
+something UART0-specific" is not.
+
+The subtraction of 2.0 is `iram_loop`'s measured 1.000 cycles per
+instruction, quoted rather than assumed, and it is the only subtraction in
+this section.
+
+This is the term `notes.md` F9 says matters most: one instruction in twelve
+in the compile harness is an MMIO access and 86 % of those are reads of this
+one UART0 register. `t1` charges 1 cycle for that read and `t2` charges 1.67
+(200,047 / 120,000); silicon charges **10**.
+
+**3. Per-slice fixed cost — this kernel did not isolate it.**
+
+| | rep 0 | 1 | 2 | 3 | 4 |
+|---|---:|---:|---:|---:|---:|
+| silicon | 23,882 | 21,967 | 22,655 | 20,247 | 21,451 |
+| `t1` | 32,246 | 32,694 | 32,694 | 32,694 | 32,694 |
+| `t2` | 32,454 | 33,070 | 33,070 | 33,070 | 33,070 |
+
+silicon − `t1` at the median is **−10,727 cycles**: silicon is *faster*, by
+half again. Beside it, the harness's tick 15 — the figure this kernel was
+built to reproduce — is silicon 5,153 against `t1` 1,078, a **+4,075** excess
+in the other direction (`notes.md` F4).
+
+**So `slice_shape` did not isolate the per-slice term, and here is why.** The
+kernel is a small compute body (256 xorshift-multiply iterations, ≈1,300
+instructions) and then one log line, and the log line is 90 % of the bracket
+on both machines. What it therefore measures is the **console path**, not the
+slice boundary — and the console path is itself a modelled cost that runs the
+other way: the emulator's USB-Serial-JTAG path costs about 31,400 guest
+cycles for one line where silicon costs about 20,600. The compute half is far
+too small a fraction to see the 4,075 through.
+
+That is a result P3 needs, in two parts. The per-slice term is **not
+determined by this capture**, and a kernel that would determine it has to
+either put the log line outside the bracket (measuring the slice boundary
+alone) or make the compute body large enough that the console is noise —
+which is a different kernel, not a longer run of this one. And separately:
+the emulator's own console path is **over**-charged relative to silicon by
+roughly 1.5×, on a payload where that is the whole of the difference, which
+is a second thing to model and points the same way §1's log-bearing ticks do.
+
+**4. The `.rodata` stride curve — a knee between 16 and 32 bytes.**
+
+65,536 accesses per kernel at every stride, so the strides differ in locality
+and nothing else. "Memory cycles" takes off `t1`'s 14.00 cycles per access,
+which is the loop's own instruction count at `t1`'s one cycle each.
+
+| stride | silicon cycles/access | memory cycles/access | `t1` | `t2` |
+|---:|---:|---:|---:|---:|
+| 16 B | 182.71..182.72 | 168.71 | 14.00 | 21.00 |
+| 32 B | 363.34..363.35 | 349.34 | 14.00 | 21.00 |
+| 64 B | 365.31..365.32 | 351.31 | 14.00 | 21.00 |
+| 256 B | 364.00..364.02 | 350.00 | 14.00 | 21.00 |
+| 1024 B | 364.00..364.02 | 350.00 | 14.00 | 21.00 |
+| 4096 B | 364.00..364.01 | 350.00 | 14.00 | 21.00 |
+
+The curve has exactly one feature: **stride 16 costs half of everything
+else**, and 32 B through 4096 B are flat to within 0.4 %. The array is 256
+KiB (`RODATA_BYTES`), eight times the sizing hypothesis, so no stride here is
+resident.
+
+Read literally, that says two accesses 16 bytes apart share one fill and two
+accesses 32 bytes apart do not: **a 32-byte fill granule**, costing ~350
+cycles. The instruction side agrees independently — `code_walk` sustains
+43.31 cycles per 4-byte instruction, which over eight instructions is 346.4
+cycles per 32 bytes, within 1 % of the data side's 349.3. Two kernels that
+share no code and no address space arriving at the same fill cost is the
+strongest thing in this section.
+
+**It is a measurement and not a citation, and P3 must treat it as one.** The
+C6's cache geometry is not in this repository (`notes.md` F7; esp-hal 1.1.1
+and esp-metadata 0.4.0 carry no cache constant for the part), and
+establishing it against the TRM's Cache chapter and the ROM's `Cache_*`
+writes into EXTMEM is OQ3's job. Nothing in the payload hardcodes a geometry:
+the kernel sizes are stated as hypotheses in their own doc comments.
+
+**What this curve does not determine:** the flash MMU's 64 KiB page stride.
+A 256 KiB array holds four such pages, and 65,536 accesses over four lines
+would measure a warm cache after the first pass rather than a page walk. The
+strides here run out at 4096 B. Measuring the page term needs a bigger array
+than this payload carries.
+
+### Two more terms the kernels settled on the way
+
+**`t2` overcharges divide by 3.3×.** `muldiv/mul` and `muldiv/div` are the
+same five instructions apart from the one under test.
+
+| | silicon cycles/iter | `t1` | `t2` |
+|---|---:|---:|---:|
+| `muldiv/mul` | 5.0002..5.0064 | 5.0001 | 6.0002 |
+| `muldiv/div` | 14.0013..14.0092 | 5.0009 | 37.0014 |
+
+Taking off the four non-multiplying instructions at `iram_loop`'s measured
+1.000 cycles each: **`mul` ≈ 1.0 cycles** (indistinguishable from any other
+ALU instruction) and **`divu` ≈ 10.0 cycles**. `lp-emu-core`'s C6 table
+charges `DivRem` **32** (`cycle_model.rs:73-75`), which shows up as `t2`'s
+37.0 cycles per iteration against silicon's 14.0. It also charges the ALU
+floor at 7 cycles per 6-instruction iteration where silicon charges 6, which
+is `iram_loop`'s si/t2 of 0.86.
+
+**A fetch miss costs 43.3 cycles per instruction, sustained, and there is no
+warm pass.** `code_walk` is 98,304 bytes of straight-line `.rept` assembly
+(the symbol measures 98,328 with its prologue), three times the 32 KiB
+sizing hypothesis.
+
+| | silicon | `t1` | `t2` |
+|---|---:|---:|---:|
+| cold pass | 1,064,273..1,064,307 | 24,604 | 24,622 |
+| warm pass | 1,064,273 | 24,604 | 24,622 |
+| silicon cycles per instruction | 43.31 | 1.001 | 1.002 |
+
+**Cold and warm are identical to the cycle**, on every repetition. The
+kernel's premise — walk it twice, and the second walk shows what a hit costs
+— fails, and it fails informatively: a 96 KiB working set never survives to
+the second pass, so both walks are all-miss. What the kernel *did* isolate is
+the sustained miss rate, 43.31 cycles per fetched instruction against
+`iram_loop`'s 1.000 in the same image. **What it did not isolate is the hit
+cost**, and measuring that needs a walk *smaller* than the cache — which
+cannot be sized until OQ3 says what the cache is.
+
+Both emulated grades charge ≈1 cycle per instruction here, so the emulator is
+**43× cheap** on flash-resident straight-line code. Against §1's overall 2.12×
+(`t1`) that is the shape of the residual: the compile harness does not run
+96 KiB of cold straight-line code, but it runs some, and this is the size of
+the term that is missing.
+
+### What §2 does and does not give P3
+
+Determined, with spreads:
+
+- flash residency costs **0.0000 ± 0.0002** cycles per instruction once
+  resident (`iram_loop` / `flash_loop`);
+- an APB read costs **10.00–10.02** cycles, the same at UART0 and SYSTIMER;
+- a fill is **~350 cycles** and its granule is **32 bytes**, agreed on
+  independently by the data side (349.3) and the instruction side (346.4);
+- a sustained instruction-fetch miss costs **43.31** cycles per instruction;
+- `divu` costs **~10.0** cycles, against the `t2` table's 32.
+
+Not determined by this capture:
+
+- **the per-slice fixed cost.** `slice_shape` measured the console path
+  instead, and in the opposite direction (§2.3).
+- **the cache hit cost, and the cache's size.** `code_walk` is all-miss in
+  both passes (§2 above); sizing a walk that fits needs OQ3 first.
+- **the flash MMU page term.** No stride here reaches 64 KiB, and the array
+  is too small to carry one (§2.4).
+- **operand dependence of `mul` and `divu`.** Both chains vary their operands
+  but both are dependency chains, so these are *latencies*; a throughput
+  figure would need independent chains.
+
 ## Checks
 
 The two commands that produced the memory-agreement counts quoted above
@@ -322,4 +610,40 @@ $ cargo run -q -p lp-cli -- validate replay lp-emu/transcripts/esp32c6/shader-co
   timing                 188         0       188
   structural             190       190         0
   REPLAY OK
+```
+
+### §2's checks
+
+The three `cycle-probe` transcripts replayed against each other. All 360
+structural comparisons agree on both grades — same kernels, same iteration
+counts, same instruction counts, same accumulators — and every difference is
+in `timing`, which is what the payload exists to report:
+
+```text
+$ cargo run -q -p lp-cli -- validate replay lp-emu/transcripts/esp32c6/cycle-probe/lp-emu-esp32c6-t1-2026-09-08-b89893962.txt --against lp-emu/transcripts/esp32c6/cycle-probe/silicon-esp32c6-2026-09-08-b89893962.txt
+  class             compared     equal    differ
+  timing                 160         3       157
+  structural             360       360         0
+  REPLAY OK
+
+$ cargo run -q -p lp-cli -- validate replay lp-emu/transcripts/esp32c6/cycle-probe/lp-emu-esp32c6-t2-2026-09-08-b89893962.txt --against lp-emu/transcripts/esp32c6/cycle-probe/silicon-esp32c6-2026-09-08-b89893962.txt
+  class             compared     equal    differ
+  timing                 160         1       159
+  structural             360       360         0
+  REPLAY OK
+```
+
+The two clocks' agreement, the cold first bracket, the cross-machine `acc`
+equality and the audit of the declared instruction counts are all asserted
+over the committed transcripts by
+`cargo test -p lp-emu-validate --test cycle_probe_two_clocks` (six tests).
+
+The kernels' placements and sizes are read off the built ELF, not claimed:
+
+```text
+$ rust-nm -S --size-sort target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6
+40800644 0000002a t …tests::cycle_probe::iram_loop        # HP-SRAM, 42 bytes
+42050cb4 0000002a t …tests::cycle_probe::flash_loop       # flash cache window, 42 bytes
+42050d28 00018018 t …tests::cycle_probe::code_walk        # 98,328 bytes
+420026fc 00040000 r …cycle_probe::rodata::TABLE           # 262,144 bytes, .rodata
 ```
