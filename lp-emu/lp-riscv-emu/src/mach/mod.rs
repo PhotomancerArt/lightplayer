@@ -481,13 +481,24 @@ impl<B: Bus> MachineHart<B> {
             bus.set_issuing(pc, self.cycle_count);
             let inst_word = match bus.fetch_instruction(pc) {
                 Ok(word) => word,
-                Err(e) => match self.deliver_fetch_error(e, pc) {
-                    Ok(()) => continue,
-                    Err(fault) => return SliceEnd::Fault(fault),
-                },
+                Err(e) => {
+                    // A fetch that faulted still went to memory, so whatever
+                    // the bus charged for it is charged here rather than
+                    // carried into the next instruction's total.
+                    self.charge_memory(bus);
+                    match self.deliver_fetch_error(e, pc) {
+                        Ok(()) => continue,
+                        Err(fault) => return SliceEnd::Fault(fault),
+                    }
+                }
             };
 
-            match self.step(bus, pc, inst_word) {
+            let outcome = self.step(bus, pc, inst_word);
+            // Drained after the instruction, so the fetch and any load or
+            // store it made are charged together, once, in the same place
+            // `charge` bills the instruction's class.
+            self.charge_memory(bus);
+            match outcome {
                 StepOutcome::Continue => {}
                 StepOutcome::End(end) => return end,
             }
@@ -786,6 +797,20 @@ impl<B: Bus> MachineHart<B> {
     #[inline]
     fn charge(&mut self, class: InstClass) {
         self.cycle_count += u64::from(self.cycle_model.cycles_for(class));
+    }
+
+    /// Charge whatever the bus's memory system billed for this instruction's
+    /// accesses ([`Bus::take_memory_cost`]).
+    ///
+    /// The hart deliberately learns nothing from it: no address, no width,
+    /// no reason. A bus with no memory-cost model returns a constant zero
+    /// and this compiles to nothing.
+    #[inline]
+    fn charge_memory(&mut self, bus: &mut B) {
+        let extra = bus.take_memory_cost();
+        if extra != 0 {
+            self.cycle_count += u64::from(extra);
+        }
     }
 
     fn deliver_illegal(&mut self, pc: u32, inst_word: u32, reason: &str) {

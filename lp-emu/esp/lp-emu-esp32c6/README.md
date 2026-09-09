@@ -40,11 +40,18 @@ same scripted host input are byte-identical — pinned by a test on the shipped
 image, not asserted. `--wall-timeout` is the single exception and it is a
 safety net: it can end a run, never change one.
 
-Time comes in two grades, both of which are just the hart's cycle model:
-`t1` (`lp-emu:esp32c6:t1`) counts instructions, `t2` uses the measured
-per-class model. The CPU is 160 MHz, so `micros = cycles / 160`. Neither
-grade is a claim about milliseconds on silicon — see the vision's "time is a
-graded ladder, never a promise".
+Time comes in three grades. The first two are just the hart's cycle model:
+`t1` (`lp-emu:esp32c6:t1`) counts instructions, `t2` uses a per-class model.
+`t3` adds what an access's **address** costs — a 32 KiB 4-way cache of
+32-byte lines over the flash window at 338 cycles a fill, and 9 cycles of APB
+wait state on a peripheral load or store (`cache.rs`, and
+`docs/reports/2026-09-08-esp32c6-t3-calibration.md` for the kernel behind
+every number) — and corrects the four class costs the `cycle-probe` payload
+measured on silicon. It is the first grade in which two instructions with the
+same opcode cost different amounts because they are at different addresses.
+The CPU is 160 MHz, so `micros = cycles / 160`. No grade is a claim about
+milliseconds on silicon — see the vision's "time is a graded ladder, never a
+promise".
 
 ## The memory map
 
@@ -281,8 +288,30 @@ zero is invalid, `Cache_MSPI_MMU_Set` (`0x4002_7c90`) says an entry is
 `page | encrypt<<10 | VALID<<9` and gives the index arithmetic,
 `MMU_Get_Page_Mode` (`0x4002_75ea`) says the page mode is
 `mmu_power_ctrl[4:3]`. `CacheMmu::translate` is the whole address path in one
-function, on purpose: a later `t2` rung hangs its cache-miss wait states off
-exactly that lookup.
+function, on purpose — and the rung that was promised off it has landed as
+`t3`.
+
+### What an address costs (`t3`)
+
+`cache::CacheCost` is the C6's implementation of `lp_emu_core::MemoryCost` —
+the hook the hart charges beside an instruction's own class cost, drained
+once per instruction through `Bus::take_memory_cost`. It is installed by the
+time grade and by nothing else: `t1` and `t2` install none, so their cycle
+counts are what they were before it existed.
+
+| term | cycles | grade | source |
+|---|---|---|---|
+| flash-window line fill | 338 per 32 B | `measured` | `cycle-probe`'s `code_walk`, cross-checked by `rodata_stride` |
+| flash-window hit | 0 | `measured` | `flash_loop` vs `iram_loop`: 0.0000 ± 0.0002 cycles/instruction once resident |
+| cache geometry | 32 KiB, 4-way, 32 B lines | `documented` | the mask ROM's `Cache_Get_Mode` (`0x4002_75b0`) and `Cache_Get_ICache_Line_Size` (`0x4002_75aa`); the line is `measured` too |
+| APB load or store (`0x6000_0000`+) | +9 | `measured` | `mmio_poll` at UART0 and at SYSTIMER, indistinguishable |
+| RAM, mask ROM, LP SRAM | 0 | `measured` | `iram_loop` at 1.000 cycles/instruction |
+| interrupt controllers (`0x2000_0000`+) | 0 | **not measured** | core-local rather than APB; no kernel reached it |
+| per-slice / interrupt entry | **none** | — | `slice_shape` measured the console path instead, and in the opposite direction; no term is invented without a kernel |
+
+There is no scale factor anywhere, global or per-class. The residual has two
+signs — the emulator was 43× cheap on cold flash code and is ~1.5× expensive
+on the console path — and a scale factor would average opposite errors.
 
 The window is served as a **cache fill** — `cache::fill` copies a valid
 page's flash bytes into the RAM region behind `0x4200_0000` when the table
@@ -1006,7 +1035,7 @@ is a function of every access the machine makes.
 ## The CLI
 
 ```text
-lp-emu-esp32c6 --elf <app.elf> [--rom <path>] [--time-grade t1|t2]
+lp-emu-esp32c6 --elf <app.elf> [--rom <path>] [--time-grade t1|t2|t3]
     [--timeout 5s|1500ms|900us] [--wall-timeout <s>] [--exit-on <substr>]
     [--uart0 stdout|memory|file:<path>|tcp:<host:port>] [--uart0-script <file>]
     [--flash <file>] [--flash-copy <file>] [--flash-size 4M]
@@ -1083,7 +1112,7 @@ enough, on the shipped image, to walk the whole documented boot sequence.
 
 `just emu-c6` above is the debugging door. The door that makes a *claim* is
 the validation runner, where this machine is the configuration
-`lp-emu:esp32c6:t1` (and `:t2` for the other grade):
+`lp-emu:esp32c6:t1` (and `:t2` / `:t3` for the other grades):
 
 ```bash
 cargo run -p lp-cli -- validate run emu-m3 --config lp-emu:esp32c6:t1 --dry-run

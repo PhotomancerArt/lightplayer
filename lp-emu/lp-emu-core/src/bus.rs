@@ -103,6 +103,26 @@ pub trait Bus {
     fn pending_cpu_interrupt(&self) -> Option<u8> {
         None
     }
+
+    /// Extra cycles this bus's memory system charged for the accesses made
+    /// since the last call, and clear the total.
+    ///
+    /// The bus, not the hart, is where an access's *address* is known: the
+    /// hart hands out a `pc` and the executors compute a load's address
+    /// inside the instruction, so the only component that sees every address
+    /// with its width is the one that serves it. A bus that models a cache
+    /// or a peripheral bus (see [`crate::cycle_model::MemoryCost`])
+    /// accumulates here and the privileged stepper drains it once per
+    /// instruction, adding it to the cycle counter beside the instruction's
+    /// own class cost.
+    ///
+    /// The default is a constant the optimizer removes, which is what keeps
+    /// a grade with no memory-cost model exactly as fast, and exactly as
+    /// counted, as it was before this existed.
+    #[inline(always)]
+    fn take_memory_cost(&mut self) -> u32 {
+        0
+    }
 }
 
 /// A hardware watchpoint slot's configuration.

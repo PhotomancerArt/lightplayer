@@ -590,6 +590,490 @@ Not determined by this capture:
   but both are dependency chains, so these are *latencies*; a throughput
   figure would need independent chains.
 
+## §3 The model
+
+§1 measured a workload and §2 measured the terms. This section is the model
+built from §2's terms, and what it does to §1's workload — which it was never
+fitted to, and the section says how you can tell.
+
+### Provenance
+
+Everything below is `lp-emu:esp32c6:t3` at commit `17ac011f7`, on two
+committed transcripts recorded this phase:
+
+- `lp-emu/transcripts/esp32c6/cycle-probe/lp-emu-esp32c6-t3-2026-09-08-17ac011f7.txt`
+  — the calibration set, against §2's silicon capture
+  (`silicon-esp32c6-2026-09-08-b89893962.txt`).
+- `lp-emu/transcripts/esp32c6/shader-compile-stress/lp-emu-esp32c6-t3-2026-09-08-17ac011f7.txt`
+  — the validation set, `--link real`, against §1's silicon capture
+  (`silicon-esp32c6-2026-09-07-735af98ae.txt`).
+
+The `t2` null-hypothesis column below was **re-recorded at this same commit
+and this same image** rather than carried over from §1, so the two emulator
+columns differ in the cycle model and in nothing else. Those `t1`/`t2`
+re-recordings are not committed (the phase owns new `t3` transcripts only) —
+reproduce them with
+
+```bash
+cargo run -q -p lp-cli -- validate record compile-parity \
+    --config lp-emu:esp32c6:t2 --link real --commit 17ac011f7 --date 2026-09-08
+```
+
+— and they reproduce §1's figures exactly — compute aggregate 2.323× / 1.667×,
+min 1.506 / 1.087, max 4.968 / 3.569 — which is the check that the two runs
+are comparable.
+
+### What the model is
+
+Three terms and no fourth, in `lp-emu/esp/lp-emu-esp32c6/src/cache.rs`, hung
+off the neutral `lp_emu_core::MemoryCost` hook that the hart drains once per
+instruction. Every constant carries its grade and its kernel:
+
+| term | value | grade | what fixes it |
+|---|---:|---|---|
+| flash-window line fill | **338** cycles per 32 B | `measured` | `code_walk`: (1,064,273 − 24,576) / 3,072 lines = 338.44 |
+| flash-window hit | **0** | `measured` | `flash_loop` − `iram_loop` = 0.0000 ± 0.0002 cycles/instruction |
+| cache geometry | **32 KiB, 4-way, 32 B lines** (256 sets, exact LRU) | `documented` | the mask ROM (below); the line is `measured` as well |
+| APB load/store at `0x6000_0000`+ | **+9** cycles | `measured` | `mmio_poll`: 12.0011 cycles/iteration − 3 instructions at 1.000 |
+| interrupt controllers at `0x2000_0000`+ | **0** | *not measured* | no kernel reached it; see "What is still owed" |
+| `DivRem` class | **10** (was 32) | `measured` | `muldiv/div` − `muldiv/mul` = 14.0 − 4 × 1.000 |
+| `Load`, `BranchTaken` classes | **1** (were 2) | `measured` | `mmio_poll` and `iram_loop` (6 instructions = 6.0002 cycles) |
+| every other class | `t2`'s figures, unchanged | *not measured* | no kernel touches them; carried rather than invented |
+| per-slice / interrupt term | **none** | — | `slice_shape` measured the console path instead (§2.3) |
+
+There is **no scale factor**, global or per-class, and none was tried. §2's
+residual has two signs — 43× cheap on cold flash code, ~1.5× expensive on the
+console — and a scale factor would average opposite errors into a number that
+described neither.
+
+### The geometry, and what OQ3 got
+
+OQ3 asked for the cache geometry cited to the TRM's Cache chapter **and** to
+the ROM, with the ROM winning any disagreement. **Only the ROM side was
+done**, and that is a deviation stated rather than hidden: the ESP32-C6 TRM is
+not in this repository and this phase ran offline. What the ROM says is
+unambiguous, and it is machine code rather than prose:
+
+```text
+400275aa <Cache_Get_ICache_Line_Size>:
+  400275aa: 02000513   li   a0,32                 ; 32-byte line
+  400275ae: 8082       ret
+
+400275b0 <Cache_Get_Mode>:                        ; fills { u32 size; u16 line; u8 ways; }
+  400275b4: 67a1       lui  a5,0x8                ; 0x8000 = 32,768 bytes
+  400275b6: c11c       sw   a5,0(a0)
+  400275c6: 4791       li   a5,4                  ; 4 ways
+  400275c8: 00a41223   sh   a0,4(s0)
+  400275cc: 00f40323   sb   a5,6(s0)
+
+40027d96 <Cache_Travel_Tag_Memory>:               ; reads that descriptor back
+  40027db4: lbu  a5,6(s1)     ; ways
+  40027db8: lw   a1,0(s1)     ; size
+  40027dc0: divu a1,a1,a5     ; bytes per way
+  40027ddc: remu a1,s0,a1     ; address within a way
+  40027de0: divu a1,a1,a4     ; / line size = set index
+  40027dea: bltu a5,a0,…      ; for way in 0..ways
+```
+
+`Cache_Travel_Tag_Memory` is the strong part: it does not merely *hold* the
+three numbers, it indexes the real tag memory with them. So 32 KiB, 4-way,
+32-byte lines, 256 sets — and the line size is the one number of the three
+that §2 measured independently (the stride knee between 16 and 32 bytes), and
+the two agree.
+
+One cache and not two: the ROM has a single descriptor and a single
+`Cache_Get_Mode`, so instruction fetch and `.rodata` reads through the flash
+window share these tags, and the model shares them too.
+
+The model indexes on the **virtual** address. That is exact rather than
+approximate here: a set index spans 256 × 32 B = 8 KiB, which is inside a
+64 KiB MMU page, so the index bits are page-offset bits and are the same
+either way; and no two virtual pages in these images map to one physical
+page, so there is no alias for the tag to get wrong.
+
+### The kernels: G3-1
+
+Silicon is `min..max` over five repetitions; the emulated grades are the
+median. `t2` is the null hypothesis in every table below.
+
+| kernel | silicon | `t2` | `t3` | si/`t2` | **si/`t3`** |
+|---|---|---:|---:|---:|---:|
+| `bracket_overhead` | 42..884 | 49 | 42..718 | 0.857 | **1.000** |
+| `iram_loop` | 1,500,043..1,500,195 | 1,750,047 | 1,500,041..1,500,379 | 0.857 | **1.000** |
+| `flash_loop` | 1,500,043..1,500,493 | 1,750,047 | 1,500,041..1,500,379 | 0.857 | **1.000** |
+| `muldiv/mul` | 1,250,053..1,251,588 | 1,500,057 | 1,250,051..1,251,741 | 0.833 | **1.000** |
+| `muldiv/div` | 560,053..560,368 | 1,480,057 | 560,051..560,389 | 0.378 | **1.000** |
+| `code_walk/cold` | 1,064,273..1,064,307 | 24,622 | 1,063,965 | 43.22 | **1.000** |
+| `code_walk/warm` | 1,064,273 | 24,622 | 1,063,965 | 43.22 | **1.000** |
+| `mmio_poll/uart0-status` | 480,043..480,679 | 200,047 | 480,041..480,717 | 2.400 | **1.000** |
+| `mmio_poll/systimer` | 480,045..480,689 | 200,047 | 480,041..480,717 | 2.400 | **1.000** |
+| `rodata_stride/16` | 11,974,265..11,974,939 | 1,376,313 | 12,258,325..12,259,001 | 8.700 | **0.977** |
+| `rodata_stride/32` | 23,811,905..23,812,228 | 1,376,313 | 23,332,557 | 17.30 | **1.021** |
+| `rodata_stride/64` | 23,940,795..23,941,473 | 1,376,313 | 23,332,557..23,333,233 | 17.39 | **1.026** |
+| `rodata_stride/256` | 23,855,155..23,856,511 | 1,376,313 | 23,330,867..23,332,219 | 17.33 | **1.023** |
+| `rodata_stride/1024` | 23,855,155..23,856,155 | 1,376,313 | 23,330,867..23,331,881 | 17.33 | **1.023** |
+| `rodata_stride/4096` | 23,855,155..23,855,463 | 1,376,313 | 23,330,867..23,331,543 | 17.33 | **1.023** |
+| `slice_shape` | 20,247..23,882 | 32,454..33,070 | 33,925..34,638 | 0.664 | **0.634** |
+
+**Fifteen of sixteen kernels are inside ±10 %; nine of them are exact to four
+figures.** The sixteenth is named rather than excused:
+
+**`slice_shape` is 0.634 and gets slightly worse than `t2`'s 0.664.** §2.3
+already said why, and `t3` cannot fix it: the kernel measures the *console
+path*, where the emulator's USB-Serial-JTAG model makes the guest execute
+about 1.5× the work silicon does for one log line. That is a peripheral model
+being wrong about how many instructions a line costs, not a cycle model being
+wrong about what an instruction costs — and a cycle model that charges more
+per instruction can only make an over-long instruction stream cost *more*.
+The 0.03 it loses against `t2` is exactly the APB wait state, now correctly
+charged, on a stream that should not be that long. Fixing it means fixing the
+USB-Serial-JTAG drain model, which is not this phase's and not a cycle
+model's.
+
+`rodata_stride/16` at 0.977 and the ≥32 B strides at 1.02 are the one
+internal disagreement in §2's own data, carried honestly: the stride-16 point
+implies a fill of 337.4 cycles and the ≥32 B points imply 349.3–350.0, while
+`code_walk` implies 338.4. **338 was taken from `code_walk`**, which is the
+kernel with the longest lever (24,576 instructions of one thing) and which
+agrees with the stride-16 point to 0.3 %. Taking 350 instead would put
+`code_walk` at 0.970 and `rodata_stride/16` at 0.968 — still inside ±10 %,
+and a worse fit to two of the three. Nothing here was averaged toward the
+92 ticks; see the sensitivity table below for what the 92 ticks *would* have
+asked for.
+
+### The fill's arithmetic, and what refuted it
+
+The phase brief asked for the miss cost to be derived: 40 MHz flash in DIO
+mode, two bits per clock, converted to CPU cycles. Written out, on the
+configuration the image itself declares (`SPI Speed : 40MHz`, `SPI Mode :
+DIO` — the second-stage bootloader's own banner, in the `cycle-probe` silicon
+transcript at lines 38–39):
+
+```text
+   8 clocks  command, 1 bit/clock
++ 16 clocks  24-bit address + 8-bit mode byte, 2 bits/clock
++128 clocks  32 bytes of data, 2 bits/clock
+=152 SPI clocks × (160 MHz CPU / 40 MHz SPI) = 608 CPU cycles
+```
+
+**Silicon charges 338, and the arithmetic says 608.** This is not a rounding
+disagreement — it is not physically reachable: 32 bytes at two bits per
+40 MHz clock is 128 SPI clocks, which is 512 CPU cycles of data phase alone,
+more than the whole measured fill. Two configurations *would* produce
+something near the measurement: four bits per clock at 40 MHz gives
+8 + 6 + 2 + 4 + 64 = 84 SPI clocks ≈ **336** CPU cycles, and two bits per
+clock at 80 MHz gives ≈304 plus controller overhead. Which of those the part
+is actually doing after the bootloader has configured it needs a kernel that
+reads SPI0's clock and mode registers at run time, and `cycle-probe` has no
+such kernel.
+
+So the constant is the **measurement**, graded `measured`, and the arithmetic
+is recorded because it is the part that turned out to be wrong. A model that
+had trusted the derivation over the reading would have been 1.8× too
+expensive on every fill.
+
+### The 92 ticks: G3-2, and the null hypothesis beside it
+
+Never fitted to. Not one parameter in the table above was chosen, adjusted or
+checked against these 92 slices; every one of them is pinned by a
+`cycle-probe` kernel or by the mask ROM, and the sensitivity table below
+shows what happens to the kernels when each is moved.
+
+| class | | si/`t1` | si/`t2` (null) | **si/`t3`** |
+|---|---|---:|---:|---:|
+| compute (1–18) | min | 1.506 | 1.087 | **1.016** |
+| | max | 4.968 | 3.569 | **1.356** |
+| | **spread (max/min)** | **3.30×** | **3.28×** | **1.33×** |
+| | median | 2.561 | 1.838 | **1.195** |
+| | aggregate | 2.323 | 1.667 | **1.181** |
+| | within [0.80, 1.25] | 0/18 | 1/18 | **11/18** |
+| log-bearing (19–92) | min | 1.101 | 1.054 | **0.910** |
+| | max | 4.002 | 3.185 | **1.222** |
+| | spread | 3.63× | 3.02× | **1.34×** |
+| | median | 1.803 | 1.499 | **1.080** |
+| | aggregate | 2.035 | 1.515 | **1.142** |
+| | within [0.80, 1.25] | 14/74 | 24/74 | **74/74** |
+| all 92 | min | 1.101 | 1.054 | **0.910** |
+| | max | 4.968 | 3.569 | **1.356** |
+| | spread | 4.51× | 3.39× | **1.49×** |
+| | median | 2.005 | 1.529 | **1.122** |
+| | aggregate | 2.118 | 1.560 | **1.154** |
+| | within [0.80, 1.25] | 14/92 | 25/92 | **85/92** |
+
+**G3-2 asked for the compute spread to fall from 3.3× to under 1.6×. It is
+1.33×.** The aggregate moved from 1.667× to 1.181×, and the class that was
+*worse* than the log-bearing one at every previous grade is now the one whose
+ratios cluster tightest around a single number.
+
+**The null hypothesis, run rather than argued.** A `t3` with all memory costs
+set to zero — the corrected class table alone, cache and APB charging nothing
+— was built and recorded (a local patch, not committed):
+
+| | compute spread | compute aggregate | all-92 aggregate | in band |
+|---|---:|---:|---:|---:|
+| `t3`, memory costs zero | 3.35× | 2.041 | 1.858 | 0/18 compute |
+| `t3` | **1.33×** | **1.181** | **1.154** | **11/18 compute** |
+
+So essentially none of the improvement is the class table and essentially all
+of it is the address: correcting `DivRem` from 32 to 10 and `Load`/
+`BranchTaken` from 2 to 1 moves the compute aggregate from 2.323 (`t1`) to
+2.041 and leaves the spread where it was. The kernels needed those
+corrections and the workload barely notices them. That is worth saying
+plainly, because it is the opposite of what a per-class model promises.
+
+### All 92 ticks at `t3`, with `t2` beside it
+
+The same 92 slices §1 tabulates, the `t2` column re-recorded at this
+commit so the two emulator columns differ only in the cycle model.
+
+| tick | class | silicon | `t2` | `t3` | silicon/`t2` | silicon/`t3` |
+|---:|---|---:|---:|---:|---:|---:|
+| 1 | compute | 177179 | 119752 | 174385 | 1.480 | 1.016 |
+| 2 | compute | 244832 | 183989 | 225317 | 1.331 | 1.087 |
+| 3 | compute | 970106 | 892718 | 871606 | 1.087 | 1.113 |
+| 4 | compute | 251438 | 96098 | 221451 | 2.616 | 1.135 |
+| 5 | compute | 235710 | 66040 | 206175 | 3.569 | 1.143 |
+| 6 | compute | 193562 | 108502 | 154893 | 1.784 | 1.250 |
+| 7 | compute | 157975 | 63781 | 116525 | 2.477 | 1.356 |
+| 8 | compute | 219036 | 126553 | 181767 | 1.731 | 1.205 |
+| 9 | compute | 204160 | 124022 | 172153 | 1.646 | 1.186 |
+| 10 | compute | 177245 | 92768 | 141791 | 1.911 | 1.250 |
+| 11 | compute | 297142 | 103146 | 221309 | 2.881 | 1.343 |
+| 12 | compute | 268678 | 107344 | 213172 | 2.503 | 1.260 |
+| 13 | compute | 481844 | 192643 | 378485 | 2.501 | 1.273 |
+| 14 | compute | 719303 | 380349 | 561390 | 1.891 | 1.281 |
+| 15 | compute | 5153 | 1524 | 3860 | 3.381 | 1.335 |
+| 16 | compute | 87183 | 59424 | 83923 | 1.467 | 1.039 |
+| 17 | compute | 1601383 | 1045267 | 1375916 | 1.532 | 1.164 |
+| 18 | compute | 403198 | 251443 | 363664 | 1.604 | 1.109 |
+| 19 | log-bearing | 232493 | 220590 | 209787 | 1.054 | 1.108 |
+| 20 | log-bearing | 44532 | 35385 | 48708 | 1.258 | 0.914 |
+| 21 | log-bearing | 100071 | 46506 | 96323 | 2.152 | 1.039 |
+| 22 | log-bearing | 50467 | 33001 | 52472 | 1.529 | 0.962 |
+| 23 | log-bearing | 390943 | 232388 | 338626 | 1.682 | 1.154 |
+| 24 | log-bearing | 213179 | 101623 | 193128 | 2.098 | 1.104 |
+| 25 | log-bearing | 40942 | 33419 | 40034 | 1.225 | 1.023 |
+| 26 | log-bearing | 56908 | 49980 | 57112 | 1.139 | 0.996 |
+| 27 | log-bearing | 139794 | 84173 | 123414 | 1.661 | 1.133 |
+| 28 | log-bearing | 58004 | 46963 | 58748 | 1.235 | 0.987 |
+| 29 | log-bearing | 828622 | 651272 | 683383 | 1.272 | 1.213 |
+| 30 | log-bearing | 319514 | 230328 | 279826 | 1.387 | 1.142 |
+| 31 | log-bearing | 37682 | 33423 | 39811 | 1.127 | 0.947 |
+| 32 | log-bearing | 39018 | 33250 | 42885 | 1.173 | 0.910 |
+| 33 | log-bearing | 121912 | 49511 | 106503 | 2.462 | 1.145 |
+| 34 | log-bearing | 50278 | 33083 | 48677 | 1.520 | 1.033 |
+| 35 | log-bearing | 389944 | 226372 | 332306 | 1.723 | 1.173 |
+| 36 | log-bearing | 200264 | 101051 | 171129 | 1.982 | 1.170 |
+| 37 | log-bearing | 38526 | 33417 | 39692 | 1.153 | 0.971 |
+| 38 | log-bearing | 49460 | 43704 | 50470 | 1.132 | 0.980 |
+| 39 | log-bearing | 138974 | 66290 | 114207 | 2.096 | 1.217 |
+| 40 | log-bearing | 53329 | 37524 | 51202 | 1.421 | 1.042 |
+| 41 | log-bearing | 565984 | 399601 | 473304 | 1.416 | 1.196 |
+| 42 | log-bearing | 261148 | 161213 | 225007 | 1.620 | 1.161 |
+| 43 | log-bearing | 40042 | 33347 | 39640 | 1.201 | 1.010 |
+| 44 | log-bearing | 48548 | 43652 | 50434 | 1.112 | 0.963 |
+| 45 | log-bearing | 132464 | 66113 | 116403 | 2.004 | 1.138 |
+| 46 | log-bearing | 53040 | 37596 | 51253 | 1.411 | 1.035 |
+| 47 | log-bearing | 569506 | 399709 | 474070 | 1.425 | 1.201 |
+| 48 | log-bearing | 259428 | 161561 | 225306 | 1.606 | 1.151 |
+| 49 | log-bearing | 40204 | 33340 | 39690 | 1.206 | 1.013 |
+| 50 | log-bearing | 42636 | 37459 | 46313 | 1.138 | 0.921 |
+| 51 | log-bearing | 142734 | 75532 | 126765 | 1.890 | 1.126 |
+| 52 | log-bearing | 50489 | 33030 | 47760 | 1.529 | 1.057 |
+| 53 | log-bearing | 441488 | 263535 | 364182 | 1.675 | 1.212 |
+| 54 | log-bearing | 224708 | 121810 | 190159 | 1.845 | 1.182 |
+| 55 | log-bearing | 36260 | 33399 | 39234 | 1.086 | 0.924 |
+| 56 | log-bearing | 40390 | 34173 | 43259 | 1.182 | 0.934 |
+| 57 | log-bearing | 173956 | 54615 | 148843 | 3.185 | 1.169 |
+| 58 | log-bearing | 49993 | 33009 | 48375 | 1.515 | 1.033 |
+| 59 | log-bearing | 393894 | 220326 | 333510 | 1.788 | 1.181 |
+| 60 | log-bearing | 192936 | 93024 | 162618 | 2.074 | 1.186 |
+| 61 | log-bearing | 40465 | 33437 | 38576 | 1.210 | 1.049 |
+| 62 | log-bearing | 46688 | 37163 | 47761 | 1.256 | 0.978 |
+| 63 | log-bearing | 169445 | 60605 | 149766 | 2.796 | 1.131 |
+| 64 | log-bearing | 51453 | 34023 | 50730 | 1.512 | 1.014 |
+| 65 | log-bearing | 449724 | 279405 | 376534 | 1.610 | 1.194 |
+| 66 | log-bearing | 221461 | 114472 | 187023 | 1.935 | 1.184 |
+| 67 | log-bearing | 37821 | 33429 | 40208 | 1.131 | 0.941 |
+| 68 | log-bearing | 52870 | 44308 | 54658 | 1.193 | 0.967 |
+| 69 | log-bearing | 196590 | 78148 | 171431 | 2.516 | 1.147 |
+| 70 | log-bearing | 56215 | 37530 | 54585 | 1.498 | 1.030 |
+| 71 | log-bearing | 568022 | 390169 | 474296 | 1.456 | 1.198 |
+| 72 | log-bearing | 267909 | 152666 | 229314 | 1.755 | 1.168 |
+| 73 | log-bearing | 39985 | 33443 | 40497 | 1.196 | 0.987 |
+| 74 | log-bearing | 76531 | 71522 | 76187 | 1.070 | 1.005 |
+| 75 | log-bearing | 230064 | 130146 | 204976 | 1.768 | 1.122 |
+| 76 | log-bearing | 78101 | 57147 | 70274 | 1.367 | 1.111 |
+| 77 | log-bearing | 1233585 | 1033176 | 1009260 | 1.194 | 1.222 |
+| 78 | log-bearing | 458237 | 359008 | 408016 | 1.276 | 1.123 |
+| 79 | log-bearing | 39539 | 33479 | 39962 | 1.181 | 0.989 |
+| 80 | log-bearing | 54460 | 41037 | 57306 | 1.327 | 0.950 |
+| 81 | log-bearing | 157570 | 68649 | 133181 | 2.295 | 1.183 |
+| 82 | log-bearing | 64309 | 39545 | 61633 | 1.626 | 1.043 |
+| 83 | log-bearing | 677024 | 451564 | 591535 | 1.499 | 1.145 |
+| 84 | log-bearing | 271479 | 148970 | 239515 | 1.822 | 1.133 |
+| 85 | log-bearing | 36466 | 33457 | 39735 | 1.090 | 0.918 |
+| 86 | log-bearing | 55943 | 36461 | 53690 | 1.534 | 1.042 |
+| 87 | log-bearing | 143478 | 56826 | 124820 | 2.525 | 1.149 |
+| 88 | log-bearing | 59883 | 35513 | 57923 | 1.686 | 1.034 |
+| 89 | log-bearing | 549268 | 321756 | 474756 | 1.707 | 1.157 |
+| 90 | log-bearing | 251559 | 127411 | 224202 | 1.974 | 1.122 |
+| 91 | log-bearing | 38041 | 33495 | 39828 | 1.136 | 0.955 |
+| 92 | log-bearing | 488373 | 417858 | 467607 | 1.169 | 1.044 |
+
+### Where the residual lives
+
+**Compute (1–18): one sign, and the model is still cheap.** Every compute
+ratio is ≥ 1.016 — silicon is never faster than `t3` on a compute slice. The
+six outside the band are ticks **7 (1.356), 11 (1.343), 15 (1.335), 14
+(1.281), 13 (1.273), 12 (1.260)**, with 6 and 10 at exactly 1.250. What they
+have in common is *when* they happen: they are the middle of the compile
+phase, ticks 6–15, while the first five and the last three sit at
+1.016–1.164. Tick 15 is also the smallest slice in the payload (5,153 cycles
+on silicon) and the one `notes.md` F4 nominated for a per-slice term — at
+`t1` it was 4.780 and the excess was 4,075 cycles; at `t3` it is 1.335 and
+the excess is 1,293 cycles, or **about four line fills**. A per-slice
+constant was not added to close that, because no kernel measured one (§2.3),
+and four fills is the size of a thing a cache model could yet explain by
+itself.
+
+The shape says the model still *under*-counts misses in the middle of a
+compile, and three candidates are named for a future kernel rather than
+guessed at here: the model never invalidates (the ROM invalidates at boot,
+when the model is cold anyway, and nothing after that does); it models an
+exact LRU where the part's replacement policy is not stated anywhere this
+phase could read; and it charges a fetch on the line holding the instruction's
+first byte only, so a 4-byte instruction straddling a line is one fill late.
+
+**Log-bearing (19–92): both signs, and the sign says which model is wrong.**
+The 74 log-bearing ticks run 0.910–1.222 and all 74 are in band. The ones
+*below* 1 are a coherent set — 20, 31, 32, 50, 55, 56, 67, 80, 85, 91 — and
+they are the payload's cheapest ticks, ~36k–55k cycles on silicon, the ones
+whose entire cost is one log line. There the emulator is now slightly
+*expensive*, which is §2.3's console finding arriving in the workload:
+`slice_shape` says the emulator's USB path costs about 1.5× silicon's, and
+these are the ticks made of nothing else. The ticks *above* 1 are the ones
+with real compilation in them, where the compute residual dominates.
+
+That the two classes' residuals have opposite signs, on the same run, is the
+clearest possible statement that this is two different model gaps and not one
+number that needs scaling.
+
+### Refuting the parameters: what each one is worth
+
+For every parameter, the kernel that isolates it, and what moving it ±50 %
+does to the *other* measurements. Each row is a build and two recordings.
+
+| change | `code_walk` | `rodata/32` | `mmio_poll` | `muldiv/div` | compute spread | all-92 aggregate |
+|---|---:|---:|---:|---:|---:|---:|
+| **shipped** (fill 338, APB 9, div 10, 32 KiB, 4-way) | 1.000 | 1.021 | 1.000 | 1.000 | **1.33×** | **1.154** |
+| fill 169 (−50 %) | 1.955 | 1.943 | 1.000 | 1.000 | 1.70× | 1.421 |
+| fill 507 (+50 %) | 0.672 | 0.692 | 1.000 | 1.000 | 1.28× | 0.970 |
+| APB 4 (−50 %) | 1.000 | 1.021 | 1.714 | 1.000 | 1.33× | 1.158 |
+| APB 14 (+50 %) | 1.000 | 1.021 | 0.706 | 1.000 | 1.33× | 1.150 |
+| `DivRem` 5 (−50 %) | 1.000 | 1.021 | 1.000 | 1.556 | 1.33× | 1.154 |
+| `DivRem` 15 (+50 %) | 1.000 | 1.021 | 1.000 | 0.737 | 1.33× | 1.154 |
+| cache 16 KiB | 1.000 | 1.021 | 1.000 | 1.000 | 1.76× | 0.855 |
+| cache 64 KiB | 1.000 | 1.021 | 1.000 | 1.000 | 3.39× | 1.485 |
+| cache 32 KiB, **2-way** | 1.000 | 1.021 | 1.000 | 1.000 | 1.48× | 1.052 |
+
+Three things follow, and the third is the one that matters.
+
+1. **Every fitted parameter is isolated by its kernel.** Moving the fill
+   ±50 % moves `code_walk` and the stride curve by a factor of two and moves
+   nothing else. Moving the APB cost ±50 % moves `mmio_poll` by 1.7× / 0.71×
+   and leaves the compute ticks *bit-identical* (they touch no MMIO). Moving
+   `DivRem` moves `muldiv/div` and moves the 92 ticks by 0.000. None of them
+   is a knob.
+
+2. **The 92 ticks would have chosen differently, and were not allowed to.**
+   `fill 507` — half again the measured value — gives a *better*-looking
+   validation set than the shipped model: aggregate 0.970 instead of 1.154,
+   compute spread 1.28× instead of 1.33×, 18/18 compute slices in band
+   instead of 11/18. It is also flatly refused by both calibration kernels,
+   at 0.672 and 0.692. A model fitted to §1 would have taken it. This one
+   did not, and this row is the evidence.
+
+3. **The cache size is the one parameter no kernel isolates, and the ROM
+   pinned it.** 16 KiB, 32 KiB and 64 KiB are *identical* on every kernel —
+   `code_walk` is 96 KiB and `rodata_stride` is 256 KiB, so both are all-miss
+   at any of the three — and they are worlds apart on the workload (aggregate
+   0.855 / 1.154 / 1.485; compute spread 1.76× / 1.33× / 3.39×). With respect
+   to §2 alone the cache size is a free parameter, and G3-2 turns on it. It
+   was not chosen by looking at these numbers: it is 32 KiB because
+   `Cache_Get_Mode` writes `lui a5,0x8` and `Cache_Travel_Tag_Memory` divides
+   the tag walk by it. The best-fitting size is not 32 KiB either — it is
+   somewhere between 16 and 32 — so the documented value is neither the
+   flattering choice nor the fitted one. **If the ROM reading is wrong, G3-2
+   is wrong with it**, which is why the disassembly is quoted above at length
+   rather than cited.
+
+   Associativity behaves the same way: 2-way is invisible to every kernel and
+   moves the workload (1.48× spread, 1.052 aggregate). The ROM says 4.
+
+### What `t3` does not change: G3-3, G3-4, G3-5
+
+- **`t1` and `t2` are untouched, and by construction rather than by luck.**
+  The memory-cost hook is installed by the time grade
+  (`TimeGrade::memory_cost`) and `t1`/`t2` install none, so the bus's drain is
+  a constant zero. Measured as well as argued: the emulator was rebuilt with
+  the hook's five call sites deleted — the exact pre-change hot path — and the
+  `t1` and `t2` captures of the compile harness are byte-identical to the
+  ones the shipped build produces (`a190ad1c…` and `292a3ede…`, sha-256).
+  The committed `t1`/`t2` replays against silicon reproduce §"Checks"
+  unchanged: memory 372/372/0, timing 188/0/188, structural 190/190/0,
+  `REPLAY OK`, sum ratio 0.47× and 0.64×.
+- **Determinism.** Two `t3` runs of the compile harness produce identical
+  captures (`e2ded865…` twice) and identical `slice_cycles` totals
+  (19,758,051); two of `cycle-probe` likewise (`f52fbdd8…`). The model reads
+  no host clock, no hash seed and no allocator address, and
+  `the_same_access_stream_costs_the_same_twice` asserts it at the unit level.
+- **Memory is unmoved.** `t3_memory_equals_t1` replays a `t3` capture of the
+  harness against the committed `t1` transcript: 372 memory values compared,
+  372 equal, 0 different. A time grade must not move a heap byte, and the
+  grade that moves the most does not move one.
+
+**One thing `t3` does change that a time grade was not expected to: the
+instruction count.** On the compile harness over its USB link the three
+grades retire 21,580,739 / 18,000,200 / 14,868,711 instructions. A guest that
+polls a peripheral until a scheduled event lands executes however many
+iterations the clock leaves room for, so a more expensive cycle model retires
+*fewer* instructions for the same guest microsecond. This is not the model
+buying accuracy by shortening spins: **not one of the 92 slices costs fewer
+cycles at `t3` than at `t1`** (per-tick minimum ratio `t3`/`t1` = 1.171 on
+the log-bearing class, 1.353 on the compute class), so no slice is made
+cheaper by the effect. Silicon has the same property — a real board's spin is
+bounded by a real clock — which is why `slice_cycles`, and not an instruction
+count, is what the two machines are compared on. It is written down because
+it is the kind of thing that looks like nondeterminism when it is met without
+warning.
+
+### What is still owed
+
+Named as work for a future kernel rather than modelled:
+
+- **A per-slice / interrupt-entry term.** `slice_shape` measured the console
+  instead (§2.3). Tick 15's remaining 1,293-cycle excess is four fills' worth,
+  and a kernel that put the log line *outside* the bracket would say whether
+  it is a slice boundary or a cold cache.
+- **The cache hit cost, and a walk that fits.** `code_walk` is all-miss in
+  both passes. Now that the ROM has been read, a walk sized under 32 KiB
+  would isolate the hit, which this model asserts is free on the strength of
+  `flash_loop` alone.
+- **`mmio_store`.** Stores are charged the APB's 9 cycles because reads are;
+  no kernel writes in a loop.
+- **The interrupt-controller window** (`0x2000_0000`). Charged zero. It is
+  core-local rather than APB on this part, but zero is as unmeasured as nine
+  would be; a poll loop on `INTERRUPT_CORE0` would settle it. Its size is
+  bounded: charging it 9 like the APB moves the all-92 aggregate by less than
+  the APB sensitivity row above.
+- **The flash's actual clock and width at run time.** The arithmetic above
+  says the declared DIO/40 MHz cannot produce the measured fill; one kernel
+  reading SPI0's clock and mode registers would close it, and would turn a
+  `measured` constant into a `measured` constant with a derivation behind it.
+- **The TRM cross-check on the geometry** (OQ3's other half).
+
+
 ## Checks
 
 The two commands that produced the memory-agreement counts quoted above
@@ -647,3 +1131,38 @@ $ rust-nm -S --size-sort target/riscv32imac-unknown-none-elf/release-esp32/fw-es
 42050d28 00018018 t …tests::cycle_probe::code_walk        # 98,328 bytes
 420026fc 00040000 r …cycle_probe::rodata::TABLE           # 262,144 bytes, .rodata
 ```
+
+### §3's checks
+
+The `t3` transcripts replayed against their silicon captures. Memory and
+structure are untouched by a time grade; timing is reported with its ratio,
+never compared (PD9):
+
+```text
+$ cargo run -q -p lp-cli -- validate replay lp-emu/transcripts/esp32c6/shader-compile-stress/lp-emu-esp32c6-t3-2026-09-08-17ac011f7.txt --against lp-emu/transcripts/esp32c6/shader-compile-stress/silicon-esp32c6-2026-09-07-735af98ae.txt
+  class             compared     equal    differ
+  memory                 372       372         0
+  timing                 188         0       188
+  structural             190       190         0
+    compile-tick.slice_cycles [timing]    92 samples,     0 equal, sum ratio 0.87x
+  REPLAY OK
+
+$ cargo run -q -p lp-cli -- validate replay lp-emu/transcripts/esp32c6/cycle-probe/lp-emu-esp32c6-t3-2026-09-08-17ac011f7.txt --against lp-emu/transcripts/esp32c6/cycle-probe/silicon-esp32c6-2026-09-08-b89893962.txt
+  class             compared     equal    differ
+  timing                 160        19       141
+  structural             360       360         0
+  REPLAY OK
+```
+
+The compile harness's `sum ratio 0.87x` is §1's 0.47× (`t1`) and 0.64× (`t2`)
+read the other way up, and the cycle-probe's **19** exactly-equal timing
+values are 3 at `t1` and 1 at `t2` — a cycle model landing on silicon's
+number to the cycle, nineteen times, on kernels it was calibrated on.
+
+The grade's own tests, all `#[ignore]`d behind the reference image and run by
+`just test-emu-c6` (`lp-emu/esp/lp-emu-esp32c6/tests/harness_parity.rs`):
+`t3_memory_equals_t1`, `two_t3_harness_runs_are_byte_identical`, and
+`a_slower_clock_retires_fewer_instructions_and_no_slice_gets_cheaper`. The
+model's own unit tests are in `cache.rs`: the ROM's geometry, the fill/hit
+split, the LRU's exactness, a straddling access, and determinism over a
+40,000-access pseudo-random stream.
