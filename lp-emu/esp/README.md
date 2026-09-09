@@ -381,7 +381,7 @@ a reset as their evidence.
 
 `lp-cli emu serve` is the one place it is on and not configurable off. A
 server cannot lose a board to esptool-js's DTR/RTS dance, whose whole purpose
-is to reset the chip — see "The WebSocket door" below.
+is to reset the chip — see "The WebSocket door" above.
 
 Without the flag, the machine reports the request instead of performing it:
 
