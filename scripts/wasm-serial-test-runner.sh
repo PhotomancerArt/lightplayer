@@ -45,10 +45,18 @@ for required in \
     fi
 done
 
+# Copied, not symlinked: the runner's static server resolves an asset under
+# its serving directory and refuses one that leaves it, so a symlink out to
+# the source tree 404s (measured 2026-09-09 — every test failed with
+# "Failed to fetch dynamically imported module"). The copy is remade on every
+# run from the files themselves, so it cannot go stale, and
+# `scripts/check-browser-serial-js-frozen.sh` pins the three that must not
+# move at all.
 root="$repo_root/target/wasm-serial-test-root"
-mkdir -p "$root"
-ln -sfn "$public" "$root/lpa-link"
-ln -sfn "$provider" "$root/provider"
+rm -rf "$root"
+mkdir -p "$root/lpa-link" "$root/provider"
+cp "$public"/*.js "$root/lpa-link/"
+cp "$provider"/*.js "$root/provider/"
 
 cd "$root"
 exec wasm-bindgen-test-runner "$wasm_abs" "$@"

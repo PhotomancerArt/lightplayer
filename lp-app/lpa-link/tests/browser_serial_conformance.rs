@@ -201,7 +201,9 @@ async fn shim_off() {
 /// The board ids the installed bus actually holds — the scripted names in CI,
 /// whatever `emu serve` was given in the live half.
 async fn board_ids() -> Vec<String> {
-    let value = JsFuture::from(js_bus_board_ids()).await.expect("bus boards");
+    let value = JsFuture::from(js_bus_board_ids())
+        .await
+        .expect("bus boards");
     value
         .as_string()
         .unwrap_or_default()
@@ -291,7 +293,9 @@ async fn navigator_serial_is_shadowed_by_an_own_property_and_is_removable() {
     shim_off().await;
 
     let standalone = js_can_shadow_navigator_serial();
-    log(&format!("DD9 standalone defineProperty probe: {standalone}"));
+    log(&format!(
+        "DD9 standalone defineProperty probe: {standalone}"
+    ));
     assert!(
         standalone.contains("\"shadowed\":true"),
         "Object.defineProperty(navigator, \"serial\", …) did not shadow the \
@@ -510,7 +514,9 @@ async fn a_closed_port_keeps_its_session_and_a_forgotten_one_does_not() {
     );
     log("close-vs-release: getPort(id) still resolves after closePort(id)");
 
-    let revoked = JsFuture::from(js_forget_port(id)).await.expect("forgetPort");
+    let revoked = JsFuture::from(js_forget_port(id))
+        .await
+        .expect("forgetPort");
     assert_eq!(revoked.as_bool(), Some(true), "forgetPort() did not revoke");
 
     let after_forget = JsFuture::from(js_get_port(id)).await;
@@ -519,7 +525,9 @@ async fn a_closed_port_keeps_its_session_and_a_forgotten_one_does_not() {
         message.contains(&format!("Unknown browser serial session: {id}")),
         "forgetPort() left the session reachable: {message}"
     );
-    log(&format!("close-vs-release: after forgetPort(id) → `{message}`"));
+    log(&format!(
+        "close-vs-release: after forgetPort(id) → `{message}`"
+    ));
 
     assert!(
         granted_sessions().await.is_empty(),
@@ -601,7 +609,10 @@ async fn the_flash_bridge_acquires_the_live_generation() {
 
     let before = JsFuture::from(js_get_port(id)).await.expect("getPort");
     let dead = live_port(&board).await;
-    assert!(Object::is(&before, &dead), "getPort did not resolve the live port");
+    assert!(
+        Object::is(&before, &dead),
+        "getPort did not resolve the live port"
+    );
 
     JsFuture::from(js_reset_over_control_channel(&board))
         .await
@@ -712,7 +723,9 @@ async fn the_signal_lines_pass_through_undecoded() {
 
     open_port(id, true).await.expect("openPort with a reset");
     let log_text = js_control_log(&board);
-    log(&format!("control channel after a normal reset:\n{log_text}"));
+    log(&format!(
+        "control channel after a normal reset:\n{log_text}"
+    ));
     assert_eq!(
         log_text.lines().collect::<Vec<_>>(),
         vec!["dtr 0", "rts 1", "rts 0"],
@@ -756,7 +769,9 @@ async fn request_port_resolves_to_the_first_board() {
     // Twice over the same port is ONE session — `requestPort` used to mint a
     // second controller over an already-registered port (the multi-board L1
     // defect), and `sessionForPort` is the shared rule that stopped it.
-    let again = JsFuture::from(js_request_port()).await.expect("requestPort()");
+    let again = JsFuture::from(js_request_port())
+        .await
+        .expect("requestPort()");
     assert_eq!(
         number(&again, "id").expect("session id") as u32,
         id,
@@ -845,7 +860,9 @@ async fn bytes_travel_both_ways_through_the_controller() {
     );
     log(&format!("bytes both ways: board received {received:?}"));
 
-    JsFuture::from(js_release_port(id)).await.expect("releasePort");
+    JsFuture::from(js_release_port(id))
+        .await
+        .expect("releasePort");
     shim_off().await;
 }
 
