@@ -89,7 +89,7 @@ the chip's matrix, one layer up. `IrqLines` is chip-wide and per-source,
 `BusCx.hart` says who is asking — which is the whole of plan PD6's
 multi-hart shape until a second hart exists.
 
-### `pins` — the signal fabric (M5 P2, input side M2 P1)
+### `pins` — the signal fabric (M5 P2, input side M2 P1, input routing M2 P3)
 
 Where a peripheral's output actually goes. A peripheral never sees another
 peripheral, so the RMT block cannot read `GPIO.func_out_sel_cfg[18]` to
@@ -108,7 +108,13 @@ and signals (plan DD34 e):
   GPIO view;
 - something **outside** the chip holds a level on a pad with
   `drive_pad(pad, level, at)` / `release_pad(pad, at)`, and `wire(a, b, at)`
-  ties two pads so that whatever one carries the other carries.
+  ties two pads so that whatever one carries the other carries;
+- and the other direction, the mirror of the first: a chip's GPIO block
+  points a peripheral **input** signal at a pad with
+  `route_in(signal, pad, invert)`, and an input peripheral reads
+  `input_level(signal)` — `None` when nothing is routed to it, which is a
+  different answer from "reads low" and worth a note in the block that
+  asked. The C6's RMT receiver is its first caller.
 
 **No chip numbers here either.** The fabric does not know that a C6 calls
 signal 71 `RMT_SIG_0` or that 128 means "follow the GPIO output register";
@@ -120,9 +126,14 @@ the pin header.
 `pad_level(pad)` is the **resolved** level of the pad — what a scope on the
 pin header would read — and the rule is one paragraph, stated in full in the
 module doc: collect the pad and everything wired to it; an outside driver
-wins over the group's own output, lowest pad number breaking a tie; a routed
-output wins over nothing; a group with neither is unobserved and reads low.
-When the side the driver beat was an *enabled* output and the levels
+wins over the group's own output, lowest pad number breaking a tie; a
+**driving** pad — routed *and* with its GPIO output-enable bit set — wins
+over nothing; a group with neither is unobserved and reads low. What makes
+a pad a driver is `set_gpio_enable` and not the routing alone (M2 P3, plan
+DD38): a routed pad whose enable is clear is an input pad, it carries what
+the group carries and contributes nothing, and enabling an already-routed
+output is itself an edge.
+When the side the driver beat was a driving pad and the levels
 disagree, the **conflict** is logged with both levels and the cycle and
 counted in `conflicts()` — and then ignored. **Never gated**: an emulator
 that refused to run because a bench shorted an output would tell you less
