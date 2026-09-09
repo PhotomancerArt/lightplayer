@@ -65,7 +65,10 @@ jobs:
           fetch-depth: 0
 
       - name: Install system deps
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome*.list /etc/apt/sources.list.d/*chrome*.list
+          sudo apt-get update
+          sudo apt-get install -y libudev-dev pkg-config
 
       # Before the build, for the same reason as the production deploy in
       # deploy-cloud.yml: `print-app-version.sh` reads `git status --porcelain`,
