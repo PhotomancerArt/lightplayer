@@ -224,6 +224,15 @@ genuinely fits none of these, and define it here in one line.
   that ends it, but the resource is actually owned by the waiting program
   itself, so nothing outside the wait can ever produce the wake-up and
   the hold is indistinguishable from "any second now".
+- **`unmapped-block-on-a-new-path`** — a strict bus refuses an access to a
+  peripheral block nobody has mapped, and the block is real (a new client
+  reaches it) rather than a bug in the client — the honest gap is in the
+  model's boot set, not in the code that hit it.
+- **`wrong-derived-metadata`** — a generated table asserts a property (an
+  access mode, a grade) that a downstream consumer trusts without
+  re-deriving, and the generator's source of truth disagrees with the
+  hardware the table describes, so the wrongness hides behind "it's
+  generated" until something that actually depends on the property runs.
 
 ## Index
 
@@ -334,6 +343,8 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| unmapped-block-on-a-new-path | 2026-09-09 | [the-esptool-stub-reads-i2c0-a-block-the-c6-boot-set-does-not-map](2026-09-09-the-esptool-stub-reads-i2c0-a-block-the-c6-boot-set-does-not-map.md) | **open** (director call: map I2C0 with a `modeled` grade, or keep the refusal) | lp-emu-esp32c6 periph boot set — espflash's stub reads `I2C0.scl_high_period` once, at stub+0xa1a, before `spi_flash_attach`; `--no-stub` is unaffected |
+| wrong-derived-metadata | 2026-09-09 | [the-pac-calls-spi-ctrl2-write-only-and-the-mask-rom-reads-it](2026-09-09-the-pac-calls-spi-ctrl2-write-only-and-the-mask-rom-reads-it.md) | fixed for SPI1 (`ctrl2` hand-graded `documented`); **open**: SPI0's identical register is ungraded, and nothing sweeps the rest of the generated access tables against the ROM's actual reads | lp-emu-esp32c6 src/regs/ (generated PAC access tables) + periph/spi1.rs |
 | open-path-wait-without-wakeup | 2026-09-08 | [a-held-lens-waited-for-a-sim-nobody-was-going-to-start](2026-09-08-a-held-lens-waited-for-a-sim-nobody-was-going-to-start.md) | fixed | lpa-studio-core studio_controller (try_pending_device_lens, resolve_open_device, seed_device_sim_records) — prod outage, no project could open |
 | write-ordering | 2026-09-07 | [merge-delete-erased-the-merged-row](2026-09-07-merge-delete-erased-the-merged-row.md) | fixed | lpa-devices roster (reconcile_identities) + lpa-studio-core studio_controller (settle_device_records) |
 | assumed-context | 2026-09-06 | [c6-first-flash-bootloader-hang-lp-analog-i2c-clock](2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.md) | fixed | lpa-link flashers + lpa-devices reconnect ladder: a fresh C6's factory firmware gates the LP analog I2C clock; our bootloader hangs after every HP-only reset until a replug (the fix; see c6-analog-master-wedges-the-bootloader for the bench diagnosis) |
