@@ -381,14 +381,21 @@ fn every_event_bit_against_the_rx_oracle() {
         let buf = SharedBuffer::new();
         let mut m = traced_machine(&elf, "a0:f2:62:87:b4:8c", &buf);
         m.arm_air(ParticipantId(0));
-        let i = m.bus.peripheral_index("WIFI_MAC").expect("the radio window");
+        let i = m
+            .bus
+            .peripheral_index("WIFI_MAC")
+            .expect("the radio window");
         m.bus
             .with_peripheral::<lp_emu_esp32c6::periph::wifi_stub::WifiStub, _>(i, |w, _| {
                 w.set_rx_event_bits(bits)
             });
         m.run_until(&until(ms(500)));
         let mark = buf.lines().len();
-        offer(&mut m, ms(500) - 1, hex_to_bytes(FRAME_FROM_THE_OTHER_BOARD));
+        offer(
+            &mut m,
+            ms(500) - 1,
+            hex_to_bytes(FRAME_FROM_THE_OTHER_BOARD),
+        );
         m.run_until(&until(ms(700)));
         let lines = buf.lines();
         let after: Vec<&String> = lines.iter().skip(mark).collect();
@@ -419,7 +426,11 @@ fn every_event_bit_against_the_rx_oracle() {
         "bit 14 is the only single bit that reaches the RX path"
     );
     let distinct: std::collections::BTreeSet<u64> = rows.iter().map(|r| r.1).collect();
-    println!("distinct instruction counts across {} candidates: {}", rows.len(), distinct.len());
+    println!(
+        "distinct instruction counts across {} candidates: {}",
+        rows.len(),
+        distinct.len()
+    );
     assert!(
         distinct.len() > 1,
         "M4 P1 saw one; with a frame in the ring there are several"
@@ -452,7 +463,11 @@ fn which_header_bytes_the_guest_notices() {
     let Some(elf) = espnow_elf() else { return };
     let run = |poke: Option<(u32, u8)>| -> u64 {
         let mut m = a_listening_machine(&elf);
-        offer(&mut m, ms(500) - 1, hex_to_bytes(FRAME_FROM_THE_OTHER_BOARD));
+        offer(
+            &mut m,
+            ms(500) - 1,
+            hex_to_bytes(FRAME_FROM_THE_OTHER_BOARD),
+        );
         if let Some((byte, value)) = poke {
             let base = m.peek_word(WIFI_MAC + 0x4084).expect("the ring base");
             let buf = m.peek_word(base + 4).expect("the buffer");
@@ -494,7 +509,11 @@ fn only_rxmatch0_gets_the_frame_into_pprxpkt() {
     for value in 0..=255u32 {
         let mut m = a_listening_machine(&elf);
         let _ = m.break_at("ppRxPkt");
-        offer(&mut m, ms(500) - 1, hex_to_bytes(FRAME_FROM_THE_OTHER_BOARD));
+        offer(
+            &mut m,
+            ms(500) - 1,
+            hex_to_bytes(FRAME_FROM_THE_OTHER_BOARD),
+        );
         let base = m.peek_word(WIFI_MAC + 0x4084).expect("the ring base");
         let buf = m.peek_word(base + 4).expect("the buffer");
         let mut b = m.peek_word(buf).expect("a word").to_le_bytes();
@@ -504,7 +523,10 @@ fn only_rxmatch0_gets_the_frame_into_pprxpkt() {
             hits.push(value);
         }
     }
-    println!("values of header byte 3 that reach ppRxPkt: {} of 256", hits.len());
+    println!(
+        "values of header byte 3 that reach ppRxPkt: {} of 256",
+        hits.len()
+    );
     assert_eq!(hits.len(), 128);
     assert!(
         hits.iter().all(|v| v & 0x10 != 0),
@@ -533,7 +555,11 @@ fn how_far_up_the_rx_chain_a_delivery_gets() {
     ] {
         let mut m = a_listening_machine(&elf);
         let resolved = m.break_at(sym).ok();
-        offer(&mut m, ms(500) - 1, hex_to_bytes(FRAME_FROM_THE_OTHER_BOARD));
+        offer(
+            &mut m,
+            ms(500) - 1,
+            hex_to_bytes(FRAME_FROM_THE_OTHER_BOARD),
+        );
         let outcome = m.run_until(&until(ms(800)));
         let hit = matches!(outcome, Outcome::Breakpoint { .. });
         println!(
@@ -582,7 +608,11 @@ fn the_descriptor_words_undetermined_bits_change_nothing() {
     let Some(elf) = espnow_elf() else { return };
     let run = |dw0: Option<u32>| -> (u64, bool) {
         let mut m = a_listening_machine(&elf);
-        offer(&mut m, ms(500) - 1, hex_to_bytes(FRAME_FROM_THE_OTHER_BOARD));
+        offer(
+            &mut m,
+            ms(500) - 1,
+            hex_to_bytes(FRAME_FROM_THE_OTHER_BOARD),
+        );
         let base = m.peek_word(WIFI_MAC + 0x4084).expect("the ring base");
         if let Some(dw0) = dw0 {
             m.poke_word(base, dw0);

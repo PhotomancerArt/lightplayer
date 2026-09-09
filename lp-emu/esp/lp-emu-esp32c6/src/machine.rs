@@ -2642,9 +2642,7 @@ impl Esp32C6Machine {
                 // an access, and this is a slice boundary. The block put the
                 // bits in its event word; the machine holds the line up
                 // until the guest's write-one-to-clear empties that word.
-                self.bus
-                    .irq
-                    .set_level(crate::regs::source::WIFI_MAC, true);
+                self.bus.irq.set_level(crate::regs::source::WIFI_MAC, true);
                 return AirDelivery::Delivered {
                     desc,
                     buf,

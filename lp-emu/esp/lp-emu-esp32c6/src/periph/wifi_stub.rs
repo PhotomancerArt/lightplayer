@@ -142,7 +142,12 @@ pub const OVERRIDES: &[(u32, u32, u32, &str)] = &[
     // `hal_mac_set_rxbuf_reload_use_hw_beacon_enable` had already set, and
     // they are remembered as written. Value chosen so the poll exits — bit 0
     // always reads 0, so a reload the blob asks for is instantly done.
-    (0x4080, 1 << 0, 0, "hal_mac_rx_is_dscr_reload strobe self-clears"),
+    (
+        0x4080,
+        1 << 0,
+        0,
+        "hal_mac_rx_is_dscr_reload strobe self-clears",
+    ),
 ];
 
 /// The `WIFI_PWR` block's override list; same rule, same shape.
@@ -1010,9 +1015,17 @@ mod tests {
         let out = rx_ctrl::frame_with_header(&frame, 1_036_418);
         assert_eq!(out.len(), rx_ctrl::LEN + 56 + 4, "header, frame, FCS");
         assert_eq!(&out[rx_ctrl::LEN..rx_ctrl::LEN + 56], &frame[..]);
-        assert_eq!(&out[rx_ctrl::LEN + 56..], &[0, 0, 0, 0], "no FCS is computed");
+        assert_eq!(
+            &out[rx_ctrl::LEN + 56..],
+            &[0, 0, 0, 0],
+            "no FCS is computed"
+        );
 
-        assert_eq!(out[0] as i8, rx_ctrl::RSSI_DBM, "a constant, not a measurement");
+        assert_eq!(
+            out[0] as i8,
+            rx_ctrl::RSSI_DBM,
+            "a constant, not a measurement"
+        );
         assert_eq!(out[20] as i8, rx_ctrl::NOISE_FLOOR_DBM);
         assert_eq!(out[1], rx_ctrl::RATE, "fixed, and named as fixed");
         assert_eq!(out[21] & 0x0f, rx_ctrl::CHANNEL);
