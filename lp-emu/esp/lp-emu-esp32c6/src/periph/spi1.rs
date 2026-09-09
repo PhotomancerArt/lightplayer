@@ -71,6 +71,7 @@
 //! honest answer for a bring-up: the run continues and the log says what it
 //! did not do.
 
+use lp_emu_esp_common::periph::RegGrade;
 use lp_emu_esp_common::regfile::{lane_of, merge_lane};
 use lp_emu_esp_common::{BusCx, Peripheral, RegFile, Width};
 
@@ -81,6 +82,11 @@ use crate::regs;
 pub const CMD: u32 = 0x000;
 pub const ADDR: u32 = 0x004;
 pub const CTRL: u32 = 0x008;
+/// Chip-select setup and hold timing. The PAC calls this register
+/// **write-only** and the mask ROM reads it back twice — see
+/// [`Spi1::reg_grade`] and
+/// `docs/defects/2026-09-09-the-pac-calls-spi-ctrl2-write-only-and-the-mask-rom-reads-it.md`.
+pub const CTRL2: u32 = 0x010;
 pub const USER: u32 = 0x018;
 pub const USER1: u32 = 0x01c;
 pub const USER2: u32 = 0x020;
@@ -201,7 +207,12 @@ impl core::fmt::Debug for Spi1 {
 /// read of a blank chip both fail the superblock check the same way.
 impl Spi1 {
     pub fn new(flash: FlashHandle) -> Self {
-        let regs = RegFile::new("SPI1", 0x400).with_names(regs::SPI1);
+        let regs = RegFile::new("SPI1", 0x400)
+            .with_names(regs::SPI1)
+            .with_pac_grades()
+            .with_grade(CMD, RegGrade::Documented)
+            .with_grade(CTRL2, RegGrade::Documented)
+            .with_grade(RD_STATUS, RegGrade::Documented);
         Self {
             regs,
             flash,
@@ -537,6 +548,36 @@ impl Peripheral for Spi1 {
 
     fn reg_name(&self, off: u32) -> Option<&'static str> {
         regs::SPI1.name(off)
+    }
+
+    /// The block's grades, from the PAC, with two hand-written rows.
+    ///
+    /// [`RegFile::with_pac_grades`] cannot see the two registers this block
+    /// intercepts in its own [`Peripheral::read`] and
+    /// [`Peripheral::write`] — `pretends_about` walks the `RegFile`'s
+    /// declared exceptions, and `cmd` is a hand-written match arm above it.
+    /// So both are stated here, with the source:
+    ///
+    /// | register | grade | source |
+    /// |---|---|---|
+    /// | `cmd` +0x000 | `documented` | PAC `spi1::cmd`: every trigger bit is documented as cleared once the operation is done, and `mst_st`/`slv_st` are status that read idle when nothing is running. This block completes inside the write, so `cmd` reads exactly 0 — which is the state the ROM's own `Wait_SPI_Idle` (`0x4002_42e8`) spins for. The *duration* is a timing claim this block does not make (`t2`'s rung), not a register-behaviour one. |
+    /// | `ctrl2` +0x010 | `documented` | The PAC calls it **write-only**, so the rule above graded it `modeled` and a `--strict-grade documented` run refused the mask ROM's own flash-timing setup. It is not write-only: `spi_common_set_flash_cs_timing` (`0x4002_497e`) read-modify-writes it **twice** — `lw a4,16(a5)` / `andi a4,a4,-993` / `ori a4,a4,64` / `sw`, then `lw` / `andi a4,a4,-32` / `ori a4,a4,1` / `sw` — so the ROM both reads it and depends on the bits it reads back. A register the mask ROM reads is readable. See `docs/defects/2026-09-09-the-pac-calls-spi-ctrl2-write-only-and-the-mask-rom-reads-it.md`. |
+    /// | `rd_status` +0x02c | `documented` | The flash part's status register, not the SoC's: WIP (bit 0) and WEL (bit 1) are the SPI NOR command set's, and the ROM's `_SPI_write_enable` (`0x4002_4630`) loops until it reads WEL set — a model that left it clear would hang the first write. Bits above WEL are whatever `flash_wrsr` last wrote, because `_esp_rom_spiflash_unlock` writes block-protect bits and reads them back. |
+    ///
+    /// Everything else is the PAC's own rule: a named read/write register
+    /// this block does not pretend about is `documented`, anything else
+    /// `modeled`. Nothing in SPI1 is `measured` — that needs a committed
+    /// silicon transcript naming the register, and the desk captures this
+    /// repository holds are UART and RMT ones.
+    ///
+    /// The path M3 P2 drove through this block is the mask ROM's
+    /// `esp_rom_spiflash_*` family, reached from the download console's
+    /// `FLASH_BEGIN`/`FLASH_DATA`/`SPI_FLASH_MD5` commands: `cmd`, `addr`,
+    /// `user`, `user1`, `user2`, `mosi_dlen`, `miso_dlen`, `rd_status` and
+    /// `w0..w15` — the same registers the application's own flash reads take,
+    /// which is why the flasher's path found no ungraded register here.
+    fn reg_grade(&self, off: u32) -> Option<RegGrade> {
+        self.regs.reg_grade(off)
     }
 
     fn save_state(&self) -> Vec<u8> {

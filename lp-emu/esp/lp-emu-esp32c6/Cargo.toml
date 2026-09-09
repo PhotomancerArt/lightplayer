@@ -45,3 +45,22 @@ sha2 = "0.10"
 # silicon transcript with M2's runner. Inside the `lp-emu/` fence (MIT), and
 # it mirrors `fw-checks` rather than importing it, so the fence lint passes.
 lp-emu-validate = { path = "../../lp-emu-validate" }
+# `tests/flash_over_socket.rs`: the flasher the gate is about, driven the way
+# this repository's own product code drives it
+# (`lp-cli/src/commands/fwcheck/flash.rs`,
+# `lp-app/lpa-link/.../host_esp32_flash.rs`) — as a LIBRARY, with the `cli`
+# feature and its dependency tree left out.
+#
+# Not a new dependency and not a new tool: the same crate at the same version
+# is already resolved for `lp-cli` and `lpa-link`, and CI already installs its
+# binary for `build-merged-image.sh`. It is here rather than the CLI because
+# espflash's CLI resolves `--port` through the operating system's serial-port
+# ENUMERATION and refuses a name that is not in it, and a pty is not an
+# enumerated device on macOS or Linux — see `tests/flash_over_socket.rs`.
+#
+# Registry crates, so the MIT fence (`scripts/check-emu-fence.sh`, which walks
+# WORKSPACE-local edges) is untouched; both are MIT/Apache-2.0.
+espflash = { version = "3.3", default-features = false, features = [
+    "serialport",
+] }
+serialport = "4.8"
