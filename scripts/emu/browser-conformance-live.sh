@@ -25,7 +25,7 @@ if [ -z "$image" ]; then
     image="${LP_EMU_C6_ELF:-}"
 fi
 if [ -z "$image" ]; then
-    image="$repo/target/riscv32imac-unknown-none-elf/release/fw-esp32c6"
+    image="$repo/target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6"
 fi
 
 if [ ! -f "$image" ]; then
@@ -56,6 +56,7 @@ cargo build -p lp-cli --quiet
 
 "$repo/target/debug/lp-cli" emu serve \
     --board "c6-a=$image" \
+    --board "c6-b=$image" \
     --listen 127.0.0.1:0 \
     --state-dir "$state" \
     --console-dir "$state" >"$log" 2>&1 &

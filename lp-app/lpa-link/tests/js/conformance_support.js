@@ -316,10 +316,14 @@ function nativeBackingOverScript() {
 
 /// Install the polyfill over a REAL `lp-cli emu serve` at `baseUrl` — the
 /// live half of the suite, run by a `just` recipe and never in CI.
-export async function installLive(baseUrl) {
+export async function installLive(baseUrl, boardIds) {
   door = null;
   const { install } = await polyfill();
-  await install(baseUrl);
+  // The boards are named rather than listed: `GET /boards` is cross-origin
+  // from this page and the door sends no `Access-Control-Allow-Origin`, so
+  // the registry is unreadable from a browser today (see `virtual_serial.js`
+  // `list()`). Naming them exercises everything else.
+  await install(baseUrl, { boards: boardIds });
 }
 
 export async function uninstallShim() {

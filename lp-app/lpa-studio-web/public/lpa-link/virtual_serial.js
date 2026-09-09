@@ -121,17 +121,36 @@ class VirtualSerial extends EventTarget {
   }
 
   async load(only) {
-    const boards = await this.backing.listBoards();
+    const boards = only?.length ? only.map((id) => ({ id })) : await this.list();
     for (const board of boards) {
       const id = board?.id ?? board;
-      if (only && !only.includes(id)) {
-        continue;
-      }
       const emulator = await this.backing.connect(id, board);
       const port = this.mint(id, emulator, board);
       this.boardIds.push(id);
       this.granted.add(port);
       emulator.on("reenumerate", () => this.reenumerate(id));
+    }
+  }
+
+  // `GET /boards` is a CROSS-ORIGIN fetch whenever the page and the server
+  // are not the same origin — and they never are, because `emu serve` binds
+  // its own port. Measured 2026-09-09 against the merged M1 door: the reply
+  // carries no `Access-Control-Allow-Origin`, so the browser refuses to let
+  // the page read it and this rejects with a bare `TypeError: Failed to
+  // fetch`. The WebSockets are unaffected (a WebSocket handshake is not
+  // subject to CORS), so naming the boards is enough to work without the
+  // registry — which is why `install(url, { boards: [...] })` skips this
+  // path entirely.
+  async list() {
+    try {
+      return await this.backing.listBoards();
+    } catch (error) {
+      throw new Error(
+        `${this.backing.describe()}: could not read the board registry ` +
+          `(${error?.message ?? error}). A cross-origin GET /boards needs an ` +
+          `Access-Control-Allow-Origin header the door does not send yet; ` +
+          `name the boards with install(url, { boards: ["c6-a"] }) instead.`,
+      );
     }
   }
 

@@ -94,7 +94,7 @@ extern "C" {
     fn js_install_scripted(board_ids: &Array) -> Promise;
 
     #[wasm_bindgen(js_name = installLive)]
-    fn js_install_live(base_url: &str) -> Promise;
+    fn js_install_live(base_url: &str, board_ids: &Array) -> Promise;
 
     #[wasm_bindgen(js_name = uninstallShim)]
     fn js_uninstall_shim() -> Promise;
@@ -177,7 +177,11 @@ async fn shim_over(boards: &[&str]) {
     let _ = JsFuture::from(js_uninstall_shim()).await;
     match option_env!("LP_EMU_SERVE_URL") {
         Some(url) if !url.is_empty() => {
-            JsFuture::from(js_install_live(url))
+            let ids = Array::new();
+            for board in boards {
+                ids.push(&JsValue::from_str(board));
+            }
+            JsFuture::from(js_install_live(url, &ids))
                 .await
                 .expect("install the shim over a live `lp-cli emu serve`");
         }
@@ -255,6 +259,14 @@ async fn live_port(board_id: &str) -> JsValue {
 
 async fn open_port(id: u32, reset: bool) -> Result<JsValue, JsValue> {
     JsFuture::from(js_open_port(id, 115_200, reset, "normal")).await
+}
+
+/// Whether this build points at a live `lp-cli emu serve` rather than the
+/// scripted door. Set by `scripts/emu/browser-conformance-live.sh`; a few
+/// claims can only be made against the scripted door (they need to reach
+/// inside it) and say so in the log rather than pretending to have run.
+fn live_backing() -> bool {
+    option_env!("LP_EMU_SERVE_URL").is_some_and(|url| !url.is_empty())
 }
 
 async fn boolean(promise: Promise) -> bool {
@@ -450,7 +462,8 @@ async fn session_ids_are_stable_across_a_re_enumeration() {
 /// pattern-matching a DTR/RTS dance, which is the emulator's job to decode.
 #[wasm_bindgen_test]
 async fn a_reboot_behind_our_back_re_enumerates_at_the_next_control_reply() {
-    if option_env!("LP_EMU_SERVE_URL").is_some_and(|url| !url.is_empty()) {
+    if live_backing() {
+        log("SKIPPED against the live door (this claim is pinned by the scripted half)");
         // The live door decides its own cycle counter; the scripted half is
         // where this mechanism is pinned deterministically.
         return;
@@ -546,7 +559,8 @@ async fn a_closed_port_keeps_its_session_and_a_forgotten_one_does_not() {
 /// does not wedge — a subsequent `openProtocol` succeeds and reads again.
 #[wasm_bindgen_test]
 async fn the_read_pump_reports_a_lost_device_and_the_port_reopens() {
-    if option_env!("LP_EMU_SERVE_URL").is_some_and(|url| !url.is_empty()) {
+    if live_backing() {
+        log("SKIPPED against the live door (this claim is pinned by the scripted half)");
         // Killing a live board's byte channel from the browser would need the
         // server to cooperate; the scripted half pins the pump's error path.
         return;
@@ -712,7 +726,8 @@ async fn openness_is_readable_or_writable() {
 /// `download-mode`, no dance the shim recognised and shortcut.
 #[wasm_bindgen_test]
 async fn the_signal_lines_pass_through_undecoded() {
-    if option_env!("LP_EMU_SERVE_URL").is_some_and(|url| !url.is_empty()) {
+    if live_backing() {
+        log("SKIPPED against the live door (this claim is pinned by the scripted half)");
         // The live door keeps no log the browser can read; the scripted half
         // is where the exact lines are pinned.
         return;
@@ -834,7 +849,8 @@ async fn hotplug_edges_arrive_from_a_re_enumeration() {
 /// lines.
 #[wasm_bindgen_test]
 async fn bytes_travel_both_ways_through_the_controller() {
-    if option_env!("LP_EMU_SERVE_URL").is_some_and(|url| !url.is_empty()) {
+    if live_backing() {
+        log("SKIPPED against the live door (this claim is pinned by the scripted half)");
         return;
     }
     shim_over(&["c6-a"]).await;
