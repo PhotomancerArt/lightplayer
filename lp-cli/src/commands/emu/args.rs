@@ -12,6 +12,8 @@ pub struct EmuCli {
 pub enum EmuCommand {
     /// Boot an ESP32-C6 firmware image and serve it on a socket.
     Run(RunArgs),
+    /// Hold N emulated boards and serve each as two WebSocket endpoints.
+    Serve(ServeArgs),
 }
 
 /// Which chip. One today; the enum is here because `--chip` reads better than
@@ -165,4 +167,71 @@ pub struct RunArgs {
     /// reading zero and carrying on.
     #[arg(long = "strict-bus")]
     pub strict_bus: bool,
+
+    /// The board's eFuse MAC, `a0:f2:62:87:b4:8c`. Defaults to the desk
+    /// board's, which is what every transcript was captured against.
+    #[arg(long = "efuse-mac")]
+    pub efuse_mac: Option<String>,
+}
+
+/// `lp-cli emu serve` — a registry of named boards behind a WebSocket door.
+///
+/// `run` is one image, one socket and a deadline; `serve` outlives any one
+/// board and is what a browser (and `lp-cli upload … serial:ws://…`) talks
+/// to. See `commands/emu/serve/mod.rs` for the shape of the door.
+#[derive(Debug, Args)]
+pub struct ServeArgs {
+    #[arg(long, value_enum, default_value_t = EmuChip::Esp32C6)]
+    pub chip: EmuChip,
+
+    /// A board: `<id>=<image>[,mac=<aa:bb:cc:dd:ee:ff>][,kind=elf|merged]`.
+    /// Repeatable, and the whole point — `s9-two-boards` is about two
+    /// identities, so every board gets its own MAC (the desk board's with
+    /// the last octet stepped, unless `mac=` says otherwise) and its own
+    /// flash file under `--state-dir`.
+    ///
+    /// `kind=merged` is a whole merged flash image booted from the reset
+    /// vector through the real mask ROM; the default `kind=elf` is a
+    /// firmware ELF loaded at its entry point.
+    #[arg(long = "board", value_name = "ID=IMAGE[,OPTS]")]
+    pub board: Vec<String>,
+
+    /// Where the door listens. `127.0.0.1:0` takes an ephemeral port and
+    /// prints it, which is what a test and a second server want.
+    #[arg(long, default_value = "127.0.0.1:5599")]
+    pub listen: String,
+
+    /// A directory holding one persistent flash file per board,
+    /// `<id>.flash.bin` (PD8). Written back on a cadence, whenever a byte
+    /// client closes the port, and on shutdown — so blank → flash → loaded
+    /// is a sequence rather than three unrelated runs. Without it every
+    /// board boots blank and forgets.
+    #[arg(long = "state-dir")]
+    pub state_dir: Option<PathBuf>,
+
+    #[arg(long = "time-grade", value_enum, default_value_t = Grade::T1)]
+    pub time_grade: Grade,
+
+    /// Start every board with no cable in the socket, so an `attach` on the
+    /// control channel is the plug-in edge. Off by default: a board a picker
+    /// lists is a board that is plugged in, with its port closed until a
+    /// byte client opens it.
+    #[arg(long = "host-absent")]
+    pub host_absent: bool,
+
+    /// Refuse any access to an address no peripheral claims.
+    #[arg(long = "strict-bus")]
+    pub strict_bus: bool,
+
+    /// Serve the boards' radio frames on this TCP address, in the `LPA1`
+    /// wire codec.
+    ///
+    /// AUDITABLE ONLY. One way: frames the boards' radios hand over are
+    /// written to whoever is watching, and nothing is ever delivered into a
+    /// board from it. A run that used this is NOT a transcript — the
+    /// deterministic form of an air is `lp-emu-esp32c6`'s in-process
+    /// lockstep runner, and that is the only form any transcript,
+    /// validation configuration or CI job ever uses.
+    #[arg(long = "air")]
+    pub air: Option<String>,
 }
