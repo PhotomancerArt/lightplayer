@@ -1316,11 +1316,16 @@ it says nothing about pins at all. That is a different situation from
 `pin capture: … records none` because a board has no logic analyser on it
 (#624).
 
-**The socket form does not exist.** `--air <addr>` is a described flag with a
-tested wire codec and **no implementation** (see below); nothing is gated on
-it, and plan two's `lp-cli emu serve` is where it lands. The deterministic
-form — the only one any gate uses — is `lockstep::Lockstep`, two machines in
-one thread.
+**The socket form exists now, on `lp-cli emu serve`, and it is a tap, not a
+delivery path.** Plan two's M1 (PR #639) landed `--air <addr>`: a TCP listener
+(`lp-cli/src/commands/emu/serve/air.rs`) that encodes every frame a served
+board's radio hands the MAC in the wire codec below and writes it to whoever
+is watching. **Auditable only** — nothing is ever delivered *into* a board
+from this socket, so two boards served with `--air` do not hear each other;
+nothing about a run that used it is a transcript, and no gate, validation
+configuration or CI job uses it. This crate's own binary
+(`lp-emu-esp32c6.rs`) never grew the flag. The deterministic form — the only
+one any gate uses — is `lockstep::Lockstep`, two machines in one thread.
 
 ##### What the two-board payload settled about the TX descriptor (M4 P3)
 
@@ -1438,11 +1443,15 @@ emulator never uses it — `just lint-emu-fence`):
   18      n     the frame, verbatim
 ```
 
-When the flag lands it is spelled `--air listen:<host:port>` or
-`--air connect:<host:port>` (a bare `<host:port>` means connect), on this
-crate's binary and mirrored on `lp-cli emu run` the way `--pin-log` and
-`--tx-log` are; when plan two's `lp-cli emu serve` arrives it takes the same
-flag and the same wire form.
+**Landed, and spelled differently than predicted.** This section originally
+said the flag would take `listen:<host:port>` / `connect:<host:port>` forms on
+this crate's own binary. What plan two's M1 (PR #639) actually shipped is
+simpler and narrower: `lp-cli emu serve --air <addr>` binds `addr` as a TCP
+listener and only **taps** — it writes every served board's outgoing frames
+to whoever connects and watches, in the wire form above, and delivers nothing
+back into any board. This crate's own binary and `lp-cli emu run` never grew
+the flag; there is no `connect:` form and no way for a socket peer to inject a
+frame.
 
 **Auditable only, never a gate.** A socket pair is not byte-identical — two
 processes interleave however the operating system schedules them — so no
