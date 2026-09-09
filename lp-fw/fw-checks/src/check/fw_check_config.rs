@@ -112,6 +112,21 @@ pub const ALL_CHECKS: &[FwCheckConfig] = &[
         emits_header: true,
     },
     FwCheckConfig {
+        check: FwCheck::EspnowBroadcast,
+        display_name: "Two boards on the air, each saying what it sent and what it heard",
+        firmware_features: &["test_espnow_broadcast"],
+        // The literal, not `checks::espnow_broadcast::DONE_MARKER`, for the
+        // reason `cycle-probe` states above: this table is a `const` that
+        // exists whether or not `check-espnow-broadcast` compiles the module.
+        // `the_espnow_broadcast_marker_is_the_modules` below pins the two
+        // equal.
+        done_marker: Some("[espnow-broadcast] === DONE ==="),
+        trace_slug: "espnow-broadcast",
+        supported_targets: ESP32_ONLY,
+        emits_records: true,
+        emits_header: true,
+    },
+    FwCheckConfig {
         check: FwCheck::BootIdle,
         display_name: "Shipped image to the idle loop",
         // The shipped-image walk as a payload (vision Q1): no check module,
@@ -459,6 +474,15 @@ mod tests {
         assert_eq!(
             check.done_marker,
             Some(crate::checks::render_loop::DONE_MARKER)
+        );
+    }
+
+    #[test]
+    fn the_espnow_broadcast_marker_is_the_modules() {
+        let check = find_check("espnow-broadcast").expect("registered");
+        assert_eq!(
+            check.done_marker,
+            Some(crate::checks::espnow_broadcast::DONE_MARKER)
         );
     }
 }
