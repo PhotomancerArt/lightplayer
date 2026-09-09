@@ -210,6 +210,10 @@ pub struct Lockstep {
     quantum: Cycles,
     /// The pair's clock: every machine has been run to here.
     now: Cycles,
+    /// How far into the pair's clock each machine's own power-on sits. See
+    /// [`Lockstep::stagger`]. All zero unless a caller says otherwise, and a
+    /// zero offset is exactly the runner P1 shipped.
+    offsets: Vec<Cycles>,
     /// `Some(outcome)` once a machine has stopped participating.
     ended: Vec<Option<Outcome>>,
     sent: Vec<u64>,
@@ -271,9 +275,54 @@ impl Lockstep {
             air,
             quantum,
             now: 0,
+            offsets: vec![0; n],
             ended: vec![None; n],
             sent: vec![0; n],
         })
+    }
+
+    /// Move each machine's power-on `offsets[i]` guest cycles into the pair's
+    /// clock: machine 0 boots at the pair's cycle 0, machine 1 at
+    /// `offsets[1]`, and so on. Extra entries are ignored, missing ones are
+    /// zero, and all-zero is the runner exactly as M4 P1 shipped it.
+    ///
+    /// # Why a pair needs this, and it is not a convenience
+    ///
+    /// Two identical images on two machines started in the same cycle do
+    /// **the same thing in the same cycle**. On the `test_espnow` image that
+    /// is fatal to a pair run, because of the open question in
+    /// `docs/debt/emu-c6-radio-tx-never-completes.md`: each guest arms one
+    /// frame at 1,036.4 ms and then **never returns from its own `send`**,
+    /// so when the air offers the other machine that frame 672 µs later,
+    /// the receiver is already spinning inside its own send and its
+    /// application never drains the queue again. Both machines deliver, and
+    /// neither prints. Measured, not argued — `tests/air_delivery.rs`
+    /// has the run.
+    ///
+    /// A stagger is what two real boards have: nobody powers two of them up
+    /// on the same cycle. With one machine a fraction of a second behind,
+    /// the frame the first arms lands while the second is still in its tick
+    /// loop, and the second prints its `rx` line.
+    ///
+    /// **It does not rescue the other direction**, and nothing here can:
+    /// whichever machine sends first wedges first, so the later sender's
+    /// frame always arrives at a machine that has already stopped draining.
+    /// One frame, one direction, until a TX completes.
+    ///
+    /// Determinism is untouched. An offset is a constant in guest cycles,
+    /// applied to a machine's own clock and to the cycle at which its frames
+    /// enter the air, so a staggered pair replays byte-identically like any
+    /// other.
+    pub fn stagger(mut self, offsets: Vec<Cycles>) -> Self {
+        for (i, off) in offsets.into_iter().enumerate().take(self.offsets.len()) {
+            self.offsets[i] = off;
+        }
+        self
+    }
+
+    /// Machine `i`'s power-on offset in the pair's clock.
+    pub fn offset(&self, id: ParticipantId) -> Cycles {
+        self.offsets.get(id.index()).copied().unwrap_or(0)
     }
 
     /// The air's stated latency, in guest cycles.
@@ -322,8 +371,15 @@ impl Lockstep {
                 if self.ended[i].is_some() {
                     continue;
                 }
+                // A machine's own clock starts at the pair's cycle
+                // `offsets[i]` (see `stagger`), so the horizon it is run to
+                // is the pair's horizon minus its offset. With every offset
+                // zero — the default — this is `next`, exactly as before.
+                let Some(own_horizon) = next.checked_sub(self.offsets[i]) else {
+                    continue;
+                };
                 let stop = StopCondition {
-                    stop_cycle: Some(next),
+                    stop_cycle: Some(own_horizon),
                     exit_on: base.exit_on.clone(),
                     wall_timeout: None,
                     probes: base.probes.clone(),
@@ -342,7 +398,10 @@ impl Lockstep {
             for i in 0..self.machines.len() {
                 for frame in self.machines[i].take_air_frames() {
                     self.sent[i] += 1;
-                    self.air.send(ParticipantId(i), frame.at, &frame.bytes);
+                    // The air runs on the pair's clock, the machine on its
+                    // own; the offset is what converts one to the other.
+                    let at = frame.at.saturating_add(self.offsets[i]);
+                    self.air.send(ParticipantId(i), at, &frame.bytes);
                 }
             }
 

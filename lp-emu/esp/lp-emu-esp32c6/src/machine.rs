@@ -565,14 +565,28 @@ const RX_DESC_LEN_SHIFT: u32 = 12;
 /// too, because it would put 2,704-byte buffers 1,708 bytes apart.
 ///
 /// A delivery still has to write *something* there, so this machine writes
-/// the **byte count it wrote** (header, frame and the four FCS bytes) and
-/// the experiment that settled the choice was run rather than argued:
-/// **the receiving guest's behaviour is identical whether that field carries
-/// the byte count, the 2,704 the ring already held, or 0xfff** — same
-/// console lines, same instruction count. So the field is **undetermined**,
-/// the byte count is what a reader would expect to find and is therefore
-/// what is written, and no claim is made about what the silicon puts there.
-/// The README says the same in the same words.
+/// the **byte count it wrote** (header, frame and the four FCS bytes), and
+/// the experiment that settled the choice was run rather than argued
+/// (`tests/air_delivery.rs`,
+/// `the_descriptor_words_undetermined_bits_change_nothing`):
+///
+/// - **The frame arrives whatever is in `[23:12]`** — the byte count, the
+///   2,704 the ring already held, or all ones. But the instruction counts
+///   differ between them, so the guest **reads** the field and merely
+///   tolerates every value. Undetermined, then; not ignored. The byte count
+///   is written because that is what a reader would expect to find there,
+///   and no claim is made about what the silicon puts in it.
+/// - **`[28:24]` is load-bearing**, which M4 P0 could not have known:
+///   clearing the 1 the blob posted stops the guest receiving. Its meaning
+///   is still P0's U3; leaving it exactly as posted is now a rule with a
+///   test behind it.
+/// - **`owner` is our convention, not the guest's requirement**: leaving it
+///   set delivers the frame just the same. It is cleared anyway, because
+///   that is what `lldesc` hardware does and a ring that never gave a
+///   descriptor back would look full after ten frames when it is not.
+/// - **`eof` is demanded.** With it clear the guest does not take the frame.
+///
+/// The README carries the same four lines.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AirDelivery {
     /// Written into `desc`'s buffer, and the interrupt raised.
