@@ -113,7 +113,10 @@ jobs:
           fetch-tags: true
 
       - name: Install system deps
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google*
+          sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
+          sudo apt-get install -y libudev-dev pkg-config
 
       # BEFORE the build, and this ordering is the whole point:
       # `print-app-version.sh` reads `git status --porcelain`, and the build

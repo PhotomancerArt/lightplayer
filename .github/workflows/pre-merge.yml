@@ -367,7 +367,10 @@ jobs:
       RUSTC_WRAPPER: sccache
     steps:
       - name: Install system deps (libudev for serialport)
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google*
+          sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
+          sudo apt-get install -y libudev-dev
 
       - name: Checkout lp2025
         uses: actions/checkout@v4
@@ -474,7 +477,10 @@ jobs:
       RUSTC_WRAPPER: sccache
     steps:
       - name: Install system deps (libudev for espflash)
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google*
+          sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
+          sudo apt-get install -y libudev-dev pkg-config
 
       - name: Checkout lp2025
         uses: actions/checkout@v4
@@ -579,7 +585,10 @@ jobs:
       RUSTC_WRAPPER: sccache
     steps:
       - name: Install system deps (libudev for espflash)
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google*
+          sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
+          sudo apt-get install -y libudev-dev pkg-config
 
       - name: Checkout lp2025
         uses: actions/checkout@v4
@@ -892,7 +901,10 @@ jobs:
       RUSTC_WRAPPER: sccache
     steps:
       - name: Install system deps (libudev for espflash)
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google*
+          sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
+          sudo apt-get install -y libudev-dev pkg-config
 
       - name: Checkout lp2025
         uses: actions/checkout@v4
@@ -1026,7 +1038,10 @@ jobs:
       RUSTC_WRAPPER: sccache
     steps:
       - name: Install system deps (libudev for serialport)
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google*
+          sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
+          sudo apt-get install -y libudev-dev
 
       - name: Checkout lp2025
         uses: actions/checkout@v4
@@ -1161,7 +1176,10 @@ jobs:
       RUSTC_WRAPPER: sccache
     steps:
       - name: Install system deps (libudev for serialport)
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google*
+          sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
+          sudo apt-get install -y libudev-dev
 
       - name: Checkout lp2025
         uses: actions/checkout@v4
@@ -1255,7 +1273,10 @@ jobs:
       RUSTC_WRAPPER: sccache
     steps:
       - name: Install system deps (libudev for serialport)
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google*
+          sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
+          sudo apt-get install -y libudev-dev
 
       - name: Checkout lp2025
         uses: actions/checkout@v4
@@ -1369,7 +1390,10 @@ jobs:
       RUSTC_WRAPPER: sccache
     steps:
       - name: Install system deps (libudev for serialport)
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google*
+          sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
+          sudo apt-get install -y libudev-dev
 
       - name: Checkout lp2025
         uses: actions/checkout@v4
@@ -1448,7 +1472,10 @@ jobs:
       RUSTC_WRAPPER: sccache
     steps:
       - name: Install system deps (libudev for serialport)
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google*
+          sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
+          sudo apt-get install -y libudev-dev
 
       - name: Checkout lp2025
         uses: actions/checkout@v4
@@ -1582,7 +1609,10 @@ jobs:
       DIOXUS_CLI_VERSION: "0.7.9"
     steps:
       - name: Install system deps (libudev for serialport build scripts)
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google*
+          sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
+          sudo apt-get install -y libudev-dev pkg-config
 
       - name: Checkout lp2025
         uses: actions/checkout@v4
