@@ -1055,6 +1055,17 @@ impl ConfigurationDriver for LpEmuDriver {
             );
             emu.push(script.into());
         }
+        // The pads' half of the same idea, and the same split: a script is
+        // the deterministic path and the `pin`/`pins` control verbs are the
+        // auditable one, so a transcript only ever carries the file. It goes
+        // to the emulated configurations alone — silicon's levels come from
+        // the firmware's own self-loop, which is what makes a pin payload
+        // recordable on a board with no wire and no hands, and each
+        // transcript's sidecar `note` says which side drove.
+        if let Some(script) = req.payload.pin_script {
+            emu.push("--pin-script".into());
+            emu.push(script.into());
+        }
         if let Some(mac) = &req.identity.mac {
             emu.push("--efuse-mac".into());
             emu.push(mac.clone());
