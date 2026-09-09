@@ -66,8 +66,8 @@ jobs:
 
       - name: Install system deps
         run: |
-          sudo rm -f /etc/apt/sources.list.d/google-chrome*.list /etc/apt/sources.list.d/*chrome*.list
-          sudo apt-get update
+          sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google*
+          sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
           sudo apt-get install -y libudev-dev pkg-config
 
       # Before the build, for the same reason as the production deploy in

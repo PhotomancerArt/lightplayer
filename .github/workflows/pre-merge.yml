@@ -368,8 +368,8 @@ jobs:
     steps:
       - name: Install system deps (libudev for serialport)
         run: |
-          sudo rm -f /etc/apt/sources.list.d/google-chrome*.list /etc/apt/sources.list.d/*chrome*.list
-          sudo apt-get update
+          sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google*
+          sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
           sudo apt-get install -y libudev-dev
 
       - name: Checkout lp2025
@@ -478,8 +478,8 @@ jobs:
     steps:
       - name: Install system deps (libudev for espflash)
         run: |
-          sudo rm -f /etc/apt/sources.list.d/google-chrome*.list /etc/apt/sources.list.d/*chrome*.list
-          sudo apt-get update
+          sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google*
+          sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
           sudo apt-get install -y libudev-dev pkg-config
 
       - name: Checkout lp2025
@@ -586,8 +586,8 @@ jobs:
     steps:
       - name: Install system deps (libudev for espflash)
         run: |
-          sudo rm -f /etc/apt/sources.list.d/google-chrome*.list /etc/apt/sources.list.d/*chrome*.list
-          sudo apt-get update
+          sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google*
+          sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
           sudo apt-get install -y libudev-dev pkg-config
 
       - name: Checkout lp2025
@@ -902,8 +902,8 @@ jobs:
     steps:
       - name: Install system deps (libudev for espflash)
         run: |
-          sudo rm -f /etc/apt/sources.list.d/google-chrome*.list /etc/apt/sources.list.d/*chrome*.list
-          sudo apt-get update
+          sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google*
+          sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
           sudo apt-get install -y libudev-dev pkg-config
 
       - name: Checkout lp2025
@@ -1039,8 +1039,8 @@ jobs:
     steps:
       - name: Install system deps (libudev for serialport)
         run: |
-          sudo rm -f /etc/apt/sources.list.d/google-chrome*.list /etc/apt/sources.list.d/*chrome*.list
-          sudo apt-get update
+          sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google*
+          sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
           sudo apt-get install -y libudev-dev
 
       - name: Checkout lp2025
@@ -1177,8 +1177,8 @@ jobs:
     steps:
       - name: Install system deps (libudev for serialport)
         run: |
-          sudo rm -f /etc/apt/sources.list.d/google-chrome*.list /etc/apt/sources.list.d/*chrome*.list
-          sudo apt-get update
+          sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google*
+          sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
           sudo apt-get install -y libudev-dev
 
       - name: Checkout lp2025
@@ -1274,8 +1274,8 @@ jobs:
     steps:
       - name: Install system deps (libudev for serialport)
         run: |
-          sudo rm -f /etc/apt/sources.list.d/google-chrome*.list /etc/apt/sources.list.d/*chrome*.list
-          sudo apt-get update
+          sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google*
+          sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
           sudo apt-get install -y libudev-dev
 
       - name: Checkout lp2025
@@ -1391,8 +1391,8 @@ jobs:
     steps:
       - name: Install system deps (libudev for serialport)
         run: |
-          sudo rm -f /etc/apt/sources.list.d/google-chrome*.list /etc/apt/sources.list.d/*chrome*.list
-          sudo apt-get update
+          sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google*
+          sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
           sudo apt-get install -y libudev-dev
 
       - name: Checkout lp2025
@@ -1473,8 +1473,8 @@ jobs:
     steps:
       - name: Install system deps (libudev for serialport)
         run: |
-          sudo rm -f /etc/apt/sources.list.d/google-chrome*.list /etc/apt/sources.list.d/*chrome*.list
-          sudo apt-get update
+          sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google*
+          sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
           sudo apt-get install -y libudev-dev
 
       - name: Checkout lp2025
@@ -1610,8 +1610,8 @@ jobs:
     steps:
       - name: Install system deps (libudev for serialport build scripts)
         run: |
-          sudo rm -f /etc/apt/sources.list.d/google-chrome*.list /etc/apt/sources.list.d/*chrome*.list
-          sudo apt-get update
+          sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google*
+          sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
           sudo apt-get install -y libudev-dev pkg-config
 
       - name: Checkout lp2025
