@@ -143,6 +143,77 @@ pub const I2C_MST_MEM_COARSE_NAMES: &[(u32, u32, &str)] = &[(0x0000, 0x0400, "cm
 /// nothing measured which clock the chip feeds it.
 pub const PWR_MICROS_COUNTER: u32 = 0x3700;
 
+/// The **TX slot's register group**, `WIFI_MAC + 0x4d68`.
+///
+/// Not a guess: `--break-at mac_tx_set_plcp0` on the `test_espnow` image
+/// stops with `a4=0x600a4d68`, so the blob is handed this address as the
+/// slot's base and writes PLCP0 at base + 4. The whole group the first
+/// `send_channel` touches is `+0x4d60`, `+0x4d64`, `+0x4d68`, `+0x4d6c`;
+/// M4 P0's `m4/discovery-air.md` has the ledger, the writer of each and the
+/// confidence on each reading.
+pub const TX_SLOT_BASE_OFFSET: u32 = 0x4d68;
+
+/// `WIFI_MAC + 0x4d6c` — the TX slot's **PLCP0** word, the one register in
+/// the window that carries a DRAM pointer on the TX path.
+///
+/// Written twice per frame on the observed path, and the two writes are the
+/// handoff:
+///
+/// ```text
+/// cyc=165826331 pc=0x408051b4 W4 WIFI_MAC+0x4d6c = 0x0061de88  mac_tx_set_plcp0+0x6a
+/// cyc=165826944 pc=0x40806040 W4 WIFI_MAC+0x4d6c = 0xc061de88  hal_mac_txq_enable+0xe
+/// ```
+///
+/// `mac_tx_set_plcp0` programs the pointer; `hal_mac_txq_enable` re-writes
+/// the same word with bits 31 and 30 set, and nothing in the window is
+/// touched afterwards. So the second write is where the frame is final —
+/// [`TX_GO_MASK`].
+pub const TX_PLCP0_OFFSET: u32 = 0x4d6c;
+
+/// The bits `hal_mac_txq_enable` adds to [`TX_PLCP0_OFFSET`] and nothing
+/// clears. *Modeled as a start strobe*: they are set on the last write of
+/// the sequence and the frame's bytes are complete under them. What they
+/// mean to the silicon is not known — see the discovery document's
+/// "what stays unknown".
+pub const TX_GO_MASK: u32 = 0b11 << 30;
+
+/// How much of a PLCP0 word is the descriptor's address.
+///
+/// The evidence is arithmetic, not documentation: PLCP0 read `0x0061de88`,
+/// and `--break-at lmacTxFrame` on the same run stopped with
+/// `a0=0x4081de4c`. `0x4080_0000 | (0x0061de88 & 0xf_ffff)` is `0x4081de88`
+/// = `a0 + 0x3c`, and the twelve bytes there are `{0xc0110060, 0x4081defc,
+/// 0x00000000}` — a word, a DRAM pointer and a null link. The remaining
+/// bits (`0x006` in `0x0061de88`) are **not** part of the address and this
+/// machine does not claim to know what they are.
+pub const TX_DESC_PTR_MASK: u32 = 0x000f_ffff;
+
+/// The DRAM base the masked pointer is completed with (HP-SRAM's data view).
+pub const TX_DESC_PTR_BASE: u32 = 0x4080_0000;
+
+/// One frame the blob handed the MAC: the PLCP0 write that armed it.
+///
+/// Deliberately *only* what the register said. Everything else the radio TX
+/// log prints — the descriptor, the buffer, the length — the machine reads
+/// out of guest RAM afterwards, because a peripheral cannot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TxHandoff {
+    /// Guest cycle of the arming write.
+    pub at: u64,
+    /// The PC that performed it (`hal_mac_txq_enable+0xe` on the observed
+    /// path).
+    pub pc: u32,
+    /// The whole PLCP0 word, strobe bits included.
+    pub plcp0: u32,
+}
+
+impl TxHandoff {
+    /// The descriptor address this word points at. See [`TX_DESC_PTR_MASK`].
+    pub fn descriptor(&self) -> u32 {
+        TX_DESC_PTR_BASE | (self.plcp0 & TX_DESC_PTR_MASK)
+    }
+}
+
 /// The register the blob programs with its RX DMA descriptor base, reported
 /// as the `WIFI RX config` trace line. Found in P6's G6-5 run: the only
 /// write of a DRAM address into the window is
@@ -160,6 +231,18 @@ pub struct WifiStub {
     names: &'static [(u32, u32, &'static str)],
     regs: RegFile,
     touched: BTreeSet<u32>,
+    /// Frames armed since the machine last drained them. Only `WIFI_MAC`
+    /// ever fills it; the machine reads the bytes and empties it at the
+    /// slice boundary that follows.
+    tx_handoffs: Vec<TxHandoff>,
+    /// Whether anything is listening ([`Self::arm_tx_log`]).
+    ///
+    /// The recording ends the slice so the machine can read guest RAM before
+    /// the buffer is reused, and ending a slice early is a real difference —
+    /// it moves where a pending interrupt is taken. So a machine with no
+    /// `--tx-log` does not arm it, and its runs are byte-for-byte the runs it
+    /// had before this block could record anything.
+    tx_log_armed: bool,
 }
 
 impl WifiStub {
@@ -174,6 +257,8 @@ impl WifiStub {
             names: COARSE_NAMES,
             regs,
             touched: BTreeSet::new(),
+            tx_handoffs: Vec::new(),
+            tx_log_armed: false,
         }
     }
 
@@ -190,6 +275,8 @@ impl WifiStub {
             names: PWR_COARSE_NAMES,
             regs,
             touched: BTreeSet::new(),
+            tx_handoffs: Vec::new(),
+            tx_log_armed: false,
         }
     }
 
@@ -205,12 +292,26 @@ impl WifiStub {
             names: I2C_MST_MEM_COARSE_NAMES,
             regs: RegFile::new("I2C_MST_MEM", crate::memmap::periph::I2C_MST_MEM_LEN),
             touched: BTreeSet::new(),
+            tx_handoffs: Vec::new(),
+            tx_log_armed: false,
         }
     }
 
     /// Distinct offsets the guest has touched so far.
     pub fn touched(&self) -> &BTreeSet<u32> {
         &self.touched
+    }
+
+    /// Start recording TX handoffs. The machine calls this when a
+    /// `--tx-log` sink is set, and only then — see `tx_log_armed`.
+    pub fn arm_tx_log(&mut self) {
+        self.tx_log_armed = true;
+    }
+
+    /// Take the frames armed since the last call, for the machine's radio TX
+    /// log. Empty on every block but `WIFI_MAC`.
+    pub fn take_tx_handoffs(&mut self) -> Vec<TxHandoff> {
+        std::mem::take(&mut self.tx_handoffs)
     }
 
     fn note_touch(&mut self, off: u32, access: &str, cx: &mut BusCx<'_>) {
@@ -262,6 +363,28 @@ impl Peripheral for WifiStub {
             );
             cx.trace.note(&line);
         }
+        // The TX handoff. Recorded, never answered: the block still does not
+        // raise an interrupt and the guest is not told anything it would not
+        // have been told without the log.
+        if self.tx_log_armed
+            && self.name == "WIFI_MAC"
+            && word == TX_PLCP0_OFFSET
+            && merged & TX_GO_MASK == TX_GO_MASK
+        {
+            self.tx_handoffs.push(TxHandoff {
+                at: cx.now,
+                pc: cx.pc,
+                plcp0: merged,
+            });
+            // The machine reads guest RAM for the log, and a peripheral
+            // cannot; end the slice so it does that before the guest can
+            // reuse the buffer.
+            cx.yield_to_machine();
+        }
+    }
+
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
     }
 
     fn reg_name(&self, off: u32) -> Option<&'static str> {
@@ -364,6 +487,61 @@ mod tests {
         other.load_state(&blob);
         assert_eq!(other.touched(), w.touched());
         assert_eq!(other.regs.stored(0x1234), 0xdead_beef);
+    }
+
+    /// The radio TX log's trigger: `mac_tx_set_plcp0` programming the
+    /// pointer is **not** a frame, and `hal_mac_txq_enable` re-writing the
+    /// same word with the strobe **is**. The values are the ones the
+    /// `test_espnow` image produced (M4 P0's ledger).
+    #[test]
+    fn only_the_strobed_plcp0_write_is_a_tx_handoff() {
+        let mut sb = Sandbox::new();
+        let mut w = WifiStub::new();
+
+        // Nothing is listening yet: the strobe records nothing at all, which
+        // is what keeps every run without `--tx-log` the run it always was.
+        sb.write(&mut w, TX_PLCP0_OFFSET, 0xc061_de88);
+        assert!(
+            w.take_tx_handoffs().is_empty(),
+            "an unarmed block records nothing"
+        );
+        w.arm_tx_log();
+
+        // `mac_tx_set_plcp0+0x6a`: the pointer, no strobe. Not a frame yet.
+        sb.now = 165_826_331;
+        sb.write(&mut w, TX_PLCP0_OFFSET, 0x0061_de88);
+        assert!(
+            w.take_tx_handoffs().is_empty(),
+            "the pointer alone is not a handoff"
+        );
+
+        // `hal_mac_txq_enable+0xe`: the same word, bits 31 and 30 set.
+        sb.now = 165_826_944;
+        sb.write(&mut w, TX_PLCP0_OFFSET, 0xc061_de88);
+        let armed = w.take_tx_handoffs();
+        assert_eq!(armed.len(), 1, "{armed:?}");
+        assert_eq!(armed[0].plcp0, 0xc061_de88);
+        assert_eq!(armed[0].at, 165_826_944);
+        assert_eq!(
+            armed[0].descriptor(),
+            0x4081_de88,
+            "the low 20 bits, completed with the DRAM base"
+        );
+        assert!(w.take_tx_handoffs().is_empty(), "drained once, not twice");
+
+        // Every other offset in the slot group is silent, however it is
+        // written — only PLCP0 carries a pointer.
+        for off in [TX_SLOT_BASE_OFFSET, 0x4d60, 0x4d64, 0x5488, 0x54bc] {
+            sb.write(&mut w, off, 0xffff_ffff);
+        }
+        assert!(w.take_tx_handoffs().is_empty(), "only +0x4d6c arms");
+
+        // And the block only arms on `WIFI_MAC`: the same offset in the PWR
+        // window is an ordinary register.
+        let mut p = WifiStub::pwr();
+        p.arm_tx_log();
+        sb.write(&mut p, TX_PLCP0_OFFSET, 0xc061_de88);
+        assert!(p.take_tx_handoffs().is_empty(), "WIFI_PWR has no TX slot");
     }
 
     #[test]

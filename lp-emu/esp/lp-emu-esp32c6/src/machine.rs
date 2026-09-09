@@ -406,6 +406,32 @@ pub enum PinLogSink {
 /// Lines the pin log writes before it stops, with a closing note.
 pub const PIN_LOG_LINE_CAP: u64 = 2_000_000;
 
+/// Where the radio TX log goes (`--tx-log`): one line per frame the WiFi
+/// blob handed the MAC.
+///
+/// The pin log's shape, for the radio: an observation of what left the
+/// guest, not a model of anything. **Nothing is delivered** — no machine
+/// receives these bytes, no interrupt is raised, and a run with the log on
+/// is the same run with it off. See [`Esp32C6Machine::drain_tx_log`] for
+/// what each field is and how much of it is a reading rather than a fact.
+#[derive(Clone, Debug, Default)]
+pub enum TxLogSink {
+    #[default]
+    Off,
+    Stderr,
+    File(PathBuf),
+}
+
+/// Lines the radio TX log writes before it stops, with a closing note. A
+/// frame a second on the observed image, so this is a runaway guard rather
+/// than a real ceiling.
+pub const TX_LOG_LINE_CAP: u64 = 100_000;
+
+/// Bytes of a TX buffer the log will print for one frame. The observed frame
+/// is 64 (an eight-byte header and a 56-byte 802.11 frame); the cap keeps a
+/// descriptor whose length word has gone strange from writing a screenful.
+pub const TX_LOG_BYTE_CAP: u32 = 2_048;
+
 /// Frames kept in memory per pad, with a note when the cap is reached. The
 /// `--dump-frames` stream itself is not capped.
 pub const FRAMES_PER_PAD_CAP: usize = 8_192;
@@ -712,6 +738,7 @@ pub struct Esp32C6Builder {
     peripherals: Vec<(u32, u32, BoxedPeripheral)>,
     dump_frames: FrameSink,
     pin_log: PinLogSink,
+    tx_log: TxLogSink,
     strip: StripConfig,
     /// Keep the RMT's pulse and word logs (`Rmt::keep_logs`).
     rmt_logs: bool,
@@ -759,6 +786,7 @@ impl Esp32C6Builder {
             peripherals: Vec::new(),
             dump_frames: FrameSink::default(),
             pin_log: PinLogSink::default(),
+            tx_log: TxLogSink::default(),
             strip: StripConfig::default(),
             rmt_logs: false,
         }
@@ -971,6 +999,12 @@ impl Esp32C6Builder {
     }
 
     /// Where the raw per-edge pin log goes. Off by default.
+    /// `--tx-log`: one line per frame the WiFi blob hands the MAC.
+    pub fn tx_log(mut self, sink: TxLogSink) -> Self {
+        self.tx_log = sink;
+        self
+    }
+
     pub fn pin_log(mut self, sink: PinLogSink) -> Self {
         self.pin_log = sink;
         self
@@ -1082,6 +1116,7 @@ impl Esp32C6Builder {
             peripherals,
             dump_frames,
             pin_log,
+            tx_log,
             strip,
             rmt_logs,
         } = self;
@@ -1348,6 +1383,11 @@ impl Esp32C6Builder {
             PinLogSink::Off => None,
             PinLogSink::File(path) => Some(open_write(path)?),
         };
+        let tx_log_sink: Option<Box<dyn std::io::Write + Send>> = match &tx_log {
+            TxLogSink::Off => None,
+            TxLogSink::Stderr => Some(Box::new(std::io::stderr())),
+            TxLogSink::File(path) => Some(open_write(path)?),
+        };
 
         bus.set_strict(strict);
         bus.set_strict_grade(strict_grade);
@@ -1380,6 +1420,16 @@ impl Esp32C6Builder {
             .watching(uart0_log.clone())
             .watching(usb_sj_log.clone());
         let gpio_index = bus.peripheral_index("GPIO");
+        // The radio TX log's source block; `None` on a machine without one.
+        let wifi_mac_index = bus.peripheral_index("WIFI_MAC");
+        // Arm the recording only when something is listening: it ends a
+        // slice early, and a machine with no `--tx-log` must run exactly the
+        // run it ran before this block could record anything.
+        if !matches!(tx_log, TxLogSink::Off)
+            && let Some(i) = wifi_mac_index
+        {
+            bus.with_peripheral::<crate::periph::wifi_stub::WifiStub, _>(i, |w, _| w.arm_tx_log());
+        }
         if gpio_index.is_none() && !pin_script.is_empty() {
             return Err(BuildError::Io(
                 "--pin-script needs a GPIO block, and this machine has none".to_string(),
@@ -1443,6 +1493,10 @@ impl Esp32C6Builder {
             script: usb_script.into(),
             pin_script,
             gpio_index,
+            wifi_mac_index,
+            tx_log: tx_log_sink,
+            tx_log_lines: 0,
+            tx_log_capped: false,
             next_pin_poll: 0,
             next_host_poll: 0,
             control_lines: 0,
@@ -1649,6 +1703,14 @@ pub struct Esp32C6Machine {
     pin_script: PinScript,
     /// `GPIO`'s peripheral index: the block the drained edges are handed to.
     gpio_index: Option<usize>,
+    /// `WIFI_MAC`'s peripheral index: where the radio TX log's handoffs come
+    /// from. `None` on a machine with no radio window.
+    wifi_mac_index: Option<usize>,
+    /// The radio TX log's writer, its line count and whether the cap has
+    /// been announced.
+    tx_log: Option<Box<dyn std::io::Write + Send>>,
+    tx_log_lines: u64,
+    tx_log_capped: bool,
     /// The guest-cycle grid a pin script's unresolved `after` is looked at
     /// on. Guest time, so two runs resolve at the same cycle.
     next_pin_poll: Cycles,
@@ -2131,6 +2193,121 @@ impl Esp32C6Machine {
         }
     }
 
+    /// The radio TX log: the frames the WiFi blob handed the MAC, as bytes.
+    ///
+    /// Drained at a slice boundary, because the bytes live in guest RAM and
+    /// a peripheral cannot read it. `WIFI_MAC` records the arming PLCP0
+    /// write ([`wifi_stub::TxHandoff`]) and yields; this reads the
+    /// descriptor and the buffer and writes one line.
+    ///
+    /// # What a line says, and how much of it is a reading
+    ///
+    /// ```text
+    /// 1036433.581 tx desc=0x4081de88 dw0=0xc0110060 buf=0x4081defc next=0x00000000 \
+    ///     size=96 len=60 hdr=3c00000000000000 frame=d0000000ffffffffffff…
+    /// ```
+    ///
+    /// - `desc` is `0x4080_0000 | (plcp0 & 0xf_ffff)`
+    ///   ([`wifi_stub::TX_DESC_PTR_MASK`]) — arithmetic, corroborated by
+    ///   `lmacTxFrame`'s own argument on the observed run.
+    /// - `dw0`/`buf`/`next` are the three words **as read**, no
+    ///   interpretation. That the twelve bytes are a `{word, buffer, link}`
+    ///   descriptor is established by the RX ring, whose ten elements chain
+    ///   through `next` at twelve-byte spacing.
+    /// - `size` is `dw0 & 0xfff`. *Modeled*: on the RX ring that field is
+    ///   1,700 against a 1,708-byte buffer stride, which is what a capacity
+    ///   would look like. The other twelve bits of `dw0` are **not** decoded
+    ///   here, because no reading of them survives both descriptors.
+    /// - `len` is the buffer's first word — 60 on the observed frame, which
+    ///   is the 56 bytes of 802.11 frame plus a four-byte FCS the buffer
+    ///   does not carry, and the same value `mac_tx_set_plcp1` wrote to
+    ///   `WIFI_MAC+0x5488`. `hdr` is the eight bytes it sits in and `frame`
+    ///   is what follows, `len - 4` of them.
+    ///
+    /// A descriptor whose `len` does not fit its buffer is not forced into
+    /// that shape: the line becomes `raw=` with the first bytes verbatim, so
+    /// a frame this reading does not cover is visible rather than silently
+    /// mis-printed.
+    fn drain_tx_log(&mut self) {
+        if self.tx_log.is_none() {
+            return;
+        }
+        let Some(index) = self.wifi_mac_index else {
+            return;
+        };
+        let handoffs = self
+            .bus
+            .with_peripheral::<crate::periph::wifi_stub::WifiStub, _>(index, |w, _| {
+                w.take_tx_handoffs()
+            })
+            .unwrap_or_default();
+        for handoff in handoffs {
+            let line = self.tx_log_line(&handoff);
+            let Some(w) = self.tx_log.as_mut() else {
+                return;
+            };
+            if self.tx_log_lines >= TX_LOG_LINE_CAP {
+                if !self.tx_log_capped {
+                    self.tx_log_capped = true;
+                    let _ = writeln!(
+                        w,
+                        "# tx log cap ({TX_LOG_LINE_CAP} lines) reached; later frames are not logged"
+                    );
+                }
+                return;
+            }
+            self.tx_log_lines += 1;
+            let _ = writeln!(w, "{line}");
+        }
+    }
+
+    /// One radio TX log line. See [`drain_tx_log`](Self::drain_tx_log).
+    fn tx_log_line(&mut self, handoff: &crate::periph::wifi_stub::TxHandoff) -> String {
+        let us = handoff.at as f64 / memmap::CYCLES_PER_US as f64;
+        let desc = handoff.descriptor();
+        let head = format!(
+            "{us:.3} tx desc={desc:#010x} plcp0={:#010x} pc={:#010x}",
+            handoff.plcp0, handoff.pc
+        );
+        let (Some(dw0), Some(buf), Some(next)) = (
+            self.peek_word(desc),
+            self.peek_word(desc.wrapping_add(4)),
+            self.peek_word(desc.wrapping_add(8)),
+        ) else {
+            return format!("{head} unreadable=descriptor");
+        };
+        let size = dw0 & 0xfff;
+        let head = format!("{head} dw0={dw0:#010x} buf={buf:#010x} next={next:#010x} size={size}");
+        let Some(len) = self.peek_word(buf) else {
+            return format!("{head} unreadable=buffer");
+        };
+        // The frame sits at buf + 8 and runs `len - 4` bytes: the length
+        // word counts the FCS the MAC appends and the buffer does not hold.
+        // Anything that does not fit is printed raw rather than shaped.
+        let fits = (4..=size.min(TX_LOG_BYTE_CAP)).contains(&len) && len + 4 <= size;
+        if !fits {
+            let raw = self.peek_bytes(buf, size.min(64));
+            return format!("{head} len={len} raw={}", hex(&raw));
+        }
+        let hdr = self.peek_bytes(buf, 8);
+        let frame = self.peek_bytes(buf + 8, len - 4);
+        format!("{head} len={len} hdr={} frame={}", hex(&hdr), hex(&frame))
+    }
+
+    /// `count` bytes of guest memory, word by word through the bus's decode.
+    /// Short if a word does not answer.
+    fn peek_bytes(&mut self, address: u32, count: u32) -> Vec<u8> {
+        let mut out = Vec::with_capacity(count as usize);
+        for i in 0..count.div_ceil(4) {
+            match self.peek_word(address.wrapping_add(i * 4)) {
+                Some(word) => out.extend_from_slice(&word.to_le_bytes()),
+                None => break,
+            }
+        }
+        out.truncate(count as usize);
+        out
+    }
+
     fn write_pin_log(&mut self, edge: &lp_emu_esp_common::pins::Edge) {
         let Some(w) = self.pins.pin_log.as_mut() else {
             return;
@@ -2452,6 +2629,9 @@ impl Esp32C6Machine {
             self.bus.run_due_events(at);
             // The pads: whatever the slice put on the wire, in cycle order.
             self.drain_pins();
+            // The radio: any frame the blob armed during the slice, read out
+            // of guest RAM now that a peripheral's borrow has ended.
+            self.drain_tx_log();
             // The host's side, at a slice boundary and never inside one: a
             // scripted command due by now, then — on the poll cadence — the
             // byte socket's client edge and the control channel's lines.

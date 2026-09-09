@@ -21,7 +21,7 @@ use lp_emu_esp32c6::flash::FlashBacking;
 use lp_emu_esp32c6::loader::EfuseIdentity;
 use lp_emu_esp32c6::machine::{
     AppSource, Esp32C6Builder, Esp32C6Machine, FrameSink, Outcome, PinLogSink, RomSource,
-    StopCondition, StripConfig, TimeGrade, Uart0Sink, UsbHost, UsbSjDrain, UsbSjSink,
+    StopCondition, StripConfig, TimeGrade, TxLogSink, Uart0Sink, UsbHost, UsbSjDrain, UsbSjSink,
 };
 use lp_emu_esp32c6::memmap;
 use lp_emu_esp32c6::periph::rmt::RefillStats;
@@ -128,6 +128,15 @@ OPTIONS:
     --strip-timing ws2812|ws2811
                             the wire timing a pad is decoded against
                             (400/800 ns vs 300/900 ns highs) [ws2812]
+    --tx-log stderr|file:<path>
+                            the radio TX log: one line per frame the WiFi
+                            blob hands the MAC, as bytes, read out of guest
+                            RAM at the descriptor the blob programmed —
+                            `<us> tx desc=.. dw0=.. buf=.. next=.. size=..
+                            len=.. hdr=.. frame=..`. An OBSERVATION, not an
+                            air: nothing is delivered anywhere, no interrupt
+                            is raised, and a run with it on is the same run
+                            with it off
     --pin-log file:<path>   every edge on every routed pad: `<us> gpio18 0|1`.
                             12,288 lines per 256-LED frame — never a default,
                             capped at 2,000,000 lines
@@ -246,6 +255,7 @@ struct Args {
     map: bool,
     dump_frames: FrameSink,
     pin_log: PinLogSink,
+    tx_log: TxLogSink,
     strip: StripConfig,
 }
 
@@ -274,6 +284,7 @@ fn run() -> Result<ExitCode, String> {
         .usb_sj_drain(args.usb_sj_drain)
         .dump_frames(args.dump_frames.clone())
         .pin_log(args.pin_log.clone())
+        .tx_log(args.tx_log.clone())
         .strip(args.strip.order, args.strip.timing);
 
     if let Some(len) = args.flash_len {
@@ -535,6 +546,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             }
             "--dump-frames" => args.dump_frames = parse_dump_frames(&value("--dump-frames")?)?,
             "--pin-log" => args.pin_log = parse_pin_log(&value("--pin-log")?)?,
+            "--tx-log" => args.tx_log = parse_tx_log(&value("--tx-log")?)?,
             "--strip-order" => {
                 let text = value("--strip-order")?;
                 args.strip.order = StripConfig::parse_order(&text).ok_or_else(|| {
@@ -627,6 +639,18 @@ fn parse_dump_frames(text: &str) -> Result<FrameSink, String> {
                 "`{other}` is not a frame destination (stdout, memory, file:<path>)"
             )),
         },
+    }
+}
+
+/// `stderr` or `file:<path>` — the radio TX log's destination.
+fn parse_tx_log(text: &str) -> Result<TxLogSink, String> {
+    match text.split_once(':') {
+        Some(("file", path)) => Ok(TxLogSink::File(path.into())),
+        None if text == "stderr" => Ok(TxLogSink::Stderr),
+        _ => Err(format!(
+            "`{text}` is not a tx-log destination (stderr, file:<path>); the log is one line \
+             per frame the WiFi blob hands the MAC"
+        )),
     }
 }
 
