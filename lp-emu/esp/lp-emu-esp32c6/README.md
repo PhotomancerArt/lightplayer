@@ -865,15 +865,13 @@ conditional rather than always-on. (On the `test_espnow` image it happens to
 be identical anyway: 79,871,852 instructions at 1,500 ms with the log off,
 with it on, and before the flag existed.)
 
-The blob's TX completion path
-(`lmacTxDone`, `ppProcTxDone`, `trc_onPPTxDone`, `esp_wifi_tx_done_cb`) is
-**still never entered** on this machine — so the `test_espnow` image arms
-exactly one frame and then stops making progress. The `WIFI_MAC` interrupt
-*is* raised now, on a delivery into the RX ring (see the air section), and it
-makes no difference to this: M4 P1 tried every bit of both event words
-against the completion path and none of them reaches it. That is the honest
-state of the TX side, and `docs/debt/emu-c6-radio-tx-never-completes.md`
-carries the question.
+The blob's TX completion path (`lmacTxDone`) **is** entered, since M4 U1:
+a machine on an air schedules a completion 672 us after a strobed PLCP0
+write, and the `test_espnow` image's own `send` returns and it sends again a
+second later. See the air section's "The TX completion" below for which
+registers say what, and `docs/debt/emu-c6-radio-tx-never-completes.md` (now
+retired) for how it was found. A machine that is **not** on an air still
+completes nothing, which is why every figure above is unchanged.
 
 A descriptor whose `len` does not fit its buffer prints `raw=` with the
 bytes verbatim rather than being forced into the shape above.
@@ -1028,14 +1026,18 @@ each item is something a reader would otherwise assume:
   property of the blob and the MAC during masked windows, not of frame
   delivery. It cannot reproduce here.
 - **No FCS.** Four zero bytes stand where one would be.
-- **No TX completion.** The blob's TX-done path is still never entered and
-  nothing here originates one. This is the reason a pair only ever exchanges
-  one frame in one direction — see below.
+- **A TX completion that is ours.** Since M4 U1 a machine on an air *does*
+  originate one — the event bit, the queue-state register and the clear are
+  the guest's own behaviour, but the raise, the completing slot bit and the
+  672 us delay are ours. See "The TX completion" below.
 
 ##### The pair, and the one frame
 
-The `test_espnow` guest arms **one** frame and never returns from its own
-`send` (`docs/debt/emu-c6-radio-tx-never-completes.md`). So:
+*Amended by M4 U1: the guest's `send` now returns, so a pair exchanges a
+frame a second in both directions and both guests print `rx` and `tx` lines.
+What follows described the wedge and is kept for the shape of it.* Before
+U1, the `test_espnow` guest armed **one** frame and never returned from its
+own `send`. So:
 
 - Two identical images started in the **same** cycle both arm at 1,036.4 ms
   and are both wedged 672 µs later when the other's frame arrives. Both
@@ -1060,46 +1062,36 @@ does not. It is auditable-only by construction and no gate may use it, so it
 waits for plan two's `lp-cli emu serve`. A pair is built through
 `lockstep::Lockstep`.
 
-##### What is observed and what is not, on the TX completion
+##### The TX completion (M4 U1)
 
-The blob's TX completion path (`lmacTxDone`, `ppProcTxDone`,
-`trc_onPPTxDone`) is **still never entered on this machine**, and this
-emulator **does not originate a completion**. M4 P1 established, by
-observation of *our own* registers, how the blob is wired for one:
+A machine on an air completes its transmissions. The chain, and what stands
+behind each link:
 
-- esp-radio's `os_adapter_chip_specific::set_isr` routes interrupt sources
-  **0 (`WIFI_MAC`) and 2 (`WIFI_PWR`)** to CPU interrupt 16, which esp-hal
-  had already enabled at priority 1 — so a raised source 0 **is** taken.
-- On a raised source 0 the blob's ISR runs and reads `WIFI_MAC+0x4c48`
-  (`hal_mac_interrupt_get_event`), `WIFI_MAC+0x4c34`
-  (`hal_mac_interrupt_get_bsscolor`) and `WIFI_PWR+0x37b0`
-  (`hal_pwr_interrupt_get_event`), and clears what it read by writing it
-  back to `WIFI_MAC+0x4c4c` and `WIFI_PWR+0x37b4` — a write-one-to-clear
-  pair. It loops until both event words read zero.
-- **Every one of the 32 bits of each event word was tried, one at a time,
-  and none reaches the completion path.** The ISR consumes the event,
-  clears it and returns, with an identical instruction count for all 64
-  candidates.
+| what | who decided it |
+|---|---|
+| Source **0** carries it, and a raised source 0 is taken | the guest: `set_isr` routes sources 0 and 2 to CPU interrupt 16 at 5.6 ms, which esp-hal had already enabled at priority 1 |
+| `WIFI_MAC+0x4c48` **bit 7** is the event | the guest: bit 7 is one of three bits in 132 candidates that take the ISR into `hal_mac_get_txq_state` (`0x40806382`), and the only one whose route reads the register below |
+| `WIFI_MAC+0x4cb8` answers **bit 0** | the guest asks (`R4 +0x4cb8 = 0x00000001  hal_mac_get_txq_state+0x74`) and refuses 0 by returning from the ISR; **which bit** is a slot is ours — `0x10` does not complete either, so the choice is inside a constraint |
+| `WIFI_MAC+0x4cb4` clears the queue state, write-one-to-clear | the guest: `hal_mac_clr_txq_state` reads it and writes back the bit it serviced |
+| `WIFI_MAC+0x4c4c` clears the event word | the guest, since M4 P1 |
+| **672 us** after the go strobe | **ours**, restated from `lockstep::DEFAULT_LATENCY_US`'s air time. Not measured, and not zero: a guest must not see its own frame complete in the store that armed it |
+| the completion happens **only** on a strobed write to `WIFI_MAC+0x4d6c` | ours, and it is the whole gate: no frame, no completion |
 
-So: the source, the handler's reads and the clear are **observed**; which
-bits mean "your frame went out" is **not known**, and nothing here invents
-one. See `docs/debt/emu-c6-radio-tx-never-completes.md`.
+The oracle is the guest's own line — `[test_espnow] tx simulated_button
+device= event=1`, then `event=2` — and `--break-at lmacTxDone`. Every
+register above is graded `modeled`: no silicon has been watched doing any of
+it, and a two-board capture is what would change that.
 
-One line of P1's reading needs correcting, and it matters for anyone who
-reads this looking for a method. "The event word's value does not reach a
-dispatch at all" was measured **with an empty RX ring**, and it is only true
-there. M4 P2 ran the same sweep with a frame already in a descriptor and the
-candidates separate immediately — eight distinct instruction counts across 35
-of them, and bit 14 reaching the RX path where nothing else does. A negative
-measured with nothing to find is not a negative about the mechanism; it is a
-negative about the experiment.
-
-The TX question itself is **untouched** by M4 P2 and stays open. What the
-pair run adds to it is one datum: a machine that has *received* a frame, all
-the way up to its application, still wedges in its own `send` afterwards —
-machine 1 in `the_pair_hears_itself` prints its `rx` line and then never
-prints a `tx` one. So a working RX path is not what the TX completion was
-waiting for.
+One thing worth carrying forward as method. M4 P1 and P2 swept these bits
+against the run's **instruction count** and got one value for every
+candidate, which read as "the event word never reaches a dispatch". It is an
+artefact: the wedged guest retires one instruction per cycle in its own spin,
+so a deadline-bounded run retires the same number whatever the ISR did.
+Counting the **radio-window accesses** each raise produced separates the same
+132 candidates into eight paths. The wedge, too, was not where it looked: the
+frame-pointer chain says `Esp32EspNowRadioDevice::send_channel+0x1fe`, our own
+firmware spinning in `.wait()` — `esp_now` had accepted the frame and only
+the completion was missing.
 
 ##### `--air <addr>` — the socket form
 
