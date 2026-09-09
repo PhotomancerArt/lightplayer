@@ -148,6 +148,8 @@ use server_loop::run_server_loop;
 mod tests {
     #[cfg(feature = "test_cycle_probe")]
     pub mod cycle_probe;
+    #[cfg(feature = "test_espnow_broadcast")]
+    pub mod espnow_broadcast;
     #[cfg(feature = "test_f32_softfloat")]
     pub mod f32_softfloat;
     #[cfg(feature = "test_fluid_demo")]
@@ -166,8 +168,6 @@ mod tests {
     pub mod test_button;
     #[cfg(feature = "test_dither")]
     pub mod test_dither;
-    #[cfg(feature = "test_espnow_broadcast")]
-    pub mod espnow_broadcast;
     #[cfg(feature = "test_espnow")]
     pub mod test_espnow;
     #[cfg(feature = "test_gpio")]

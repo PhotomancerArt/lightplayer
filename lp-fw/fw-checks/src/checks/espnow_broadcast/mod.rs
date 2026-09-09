@@ -270,7 +270,14 @@ impl Peers {
 }
 
 /// The rx record for a frame, given the peer table's answer.
-pub fn rx_record(n: u32, peer: u32, event: u32, msg_kind: u8, payload_len: usize, gap: u32) -> RxRecord {
+pub fn rx_record(
+    n: u32,
+    peer: u32,
+    event: u32,
+    msg_kind: u8,
+    payload_len: usize,
+    gap: u32,
+) -> RxRecord {
     RxRecord {
         n,
         peer,

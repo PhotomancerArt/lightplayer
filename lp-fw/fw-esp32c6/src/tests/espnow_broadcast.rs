@@ -210,8 +210,13 @@ pub async fn run_espnow_broadcast(_: embassy_executor::Spawner) -> ! {
                     if done || rx_recorded >= RX_EVENTS {
                         continue;
                     }
-                    let _ =
-                        write_rx_line(&mut esp_println::Printer, peer, event, msg_kind, payload_len);
+                    let _ = write_rx_line(
+                        &mut esp_println::Printer,
+                        peer,
+                        event,
+                        msg_kind,
+                        payload_len,
+                    );
                     let record = rx_record(rx_recorded, peer, event, msg_kind, payload_len, gap);
                     let _ = write_rx_record(&mut esp_println::Printer, &record);
                     rx_recorded += 1;
