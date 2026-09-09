@@ -19,6 +19,25 @@ Commands that connect to a firmware host (`lp-cli upload <project> <host>`,
 | `serial:/dev/cu.usbmodem2101?baud=115200` | a specific port and baud rate |
 | `ws://host:port/`, `wss://host:port/` | a WebSocket host |
 | `serial:tcp://host:port` | a device link over TCP instead of a real serial port |
+| `serial:ws://host:port/path` | a device link over a WebSocket — `lp-cli emu serve`'s byte endpoint |
+
+**`ws://…` and `serial:ws://…` are not the same thing.** A bare
+`ws://host:port/` is the **lpc-wire protocol** against an `lpa-server`; the
+`serial:` prefix makes it **raw device bytes**, the sibling of
+`serial:tcp://`. The raw-byte spelling is what `lp-cli emu serve` hands out:
+
+```sh
+lp-cli emu serve --board c6-a=target/emu-ref/esp32c6+server+radio/fw-esp32c6 \
+    --listen 127.0.0.1:5599 --state-dir target/emu-serve
+lp-cli upload projects/test/basic serial:ws://127.0.0.1:5599/board/c6-a/bytes
+```
+
+Like `tcp://` it has no modem lines and so no reset-on-open; the board's
+DTR/RTS, `attach`/`detach` and `reset` live on the **control** endpoint
+(`/board/<id>/control`), which is a second WebSocket on purpose — in-band
+control would be a dialect every byte client would have to speak. See
+`lp-app/lpa-client/src/stream/ws_stream.rs` and
+`lp-cli/src/commands/emu/serve/`.
 
 `serial:tcp://host:port` is for hosts that expose their UART as a TCP
 socket rather than a real serial device — Espressif's `esp-emu`
