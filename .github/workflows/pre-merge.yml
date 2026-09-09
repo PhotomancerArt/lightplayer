@@ -56,7 +56,9 @@ env:
 #                   ├─ validate-x64    (build prereqs + gated test recipes + schema-check)
 #                   ├─ validate-gfx    (ARM; wgpu tree)
 #                   ├─ validate-browser(real-browser wasm suites)
-#                   └─ validate-stories(story baseline capture)
+#                   ├─ validate-stories(story baseline capture)
+#                   ├─ emu-c6          (the C6 SoC emulator's own suite)
+#                   └─ heap-budget-chips (chip heap ratchet + lp-cli emu tests)
 #
 # Every job is path-gated, including lint/validate via the `core` filter, so a
 # docs-only PR runs nothing but detect-changes — with one carve-out:
@@ -909,14 +911,18 @@ jobs:
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           fi
 
-  # The ESP32-C6 emulator's own boot-test + replay suite (`just test-emu-c6`,
-  # L3 of the 2026-09-06 esp-emulator plan, DD27). This builds TWO reference
+  # The ESP32-C6 emulator's own boot-test + replay suite (`just
+  # test-emu-c6-boot`, the emulator half of `just test-emu-c6`; L3 of the
+  # 2026-09-06 esp-emulator plan, DD27). This builds TWO reference
   # `fw-esp32c6` images at a pinned historical commit
   # (`scripts/emu/build-reference-image.sh`: `git worktree add --detach` at
   # d6cfaa205, `git cherry-pick -n` of e8d64eeff on top) and boots them against
   # the `#[ignore]`d boot tests in `lp-emu-esp32c6` under `LP_EMU_BUILD_FW=1`,
-  # then runs the `lp-emu-validate` M3 replays and lp-cli's registry-parity
-  # test. Before this job, that whole suite was inert in CI — the boot tests
+  # then runs the `lp-emu-validate` replays. lp-cli's two emulator-backed
+  # tests and the chip heap ratchet ran here too until 2026-09-08; they moved
+  # to `heap-budget-chips` below (see that job for the timings), which is
+  # what brought this job back under its budget. Before this job, that whole
+  # suite was inert in CI — the boot tests
   # are `#[ignore]`d specifically so a bare `cargo test --workspace` (which
   # `validate-x64` runs) never starts a firmware build, so nothing exercised
   # them.
@@ -934,9 +940,9 @@ jobs:
   # `save-image --merge` is what builds the merged flash image the ROM-up
   # boot reads, and the second-stage bootloader in that image comes out of
   # espflash's own bundled resources. It is installed **prebuilt**
-  # (`cargo binstall`), unlike the three hardware-adjacent jobs that
-  # `cargo install` it from source — this is the job already closest to its
-  # ceiling, and a source build of espflash is minutes it does not have.
+  # (`cargo binstall`), as every espflash-using job now is — this was the
+  # first to switch, being the job closest to its ceiling, and a source
+  # build of espflash is minutes it did not have.
   #
   # Path-gated on `emu_c6` (narrower than `firmware`) rather than the full
   # device-image dependency closure — see that filter's comment in
@@ -962,6 +968,12 @@ jobs:
     # had margin. 35 covers a fully cold run (cold reference-image builds +
     # cold cross-target chip build + the profile captures) with headroom;
     # see the PR for the timing table this is based on.
+    #
+    # Split (2026-09-08): the ratchet (478 s) and the lp-cli tests (367 s of
+    # tree build + 7 s of test) moved to `heap-budget-chips`, so this job is
+    # expected back near 12 min — the `--verify` builds (91 s) and the
+    # emulator's own suite. 35 stays, deliberately: it is headroom now, not a
+    # ceiling, and a job that starts timing out wants its p95 re-measured.
     timeout-minutes: 35
     needs: detect-changes
     if: needs.detect-changes.outputs.emu_c6 == 'true'
@@ -1058,17 +1070,108 @@ jobs:
         run: cd lp2025 && ./scripts/emu/build-reference-image.sh --verify esp32c6,server,radio,spike_uart0_link,memory_fs
 
       - name: Emulator C6 boot tests + replays
-        run: cd lp2025 && just test-emu-c6
+        run: cd lp2025 && just test-emu-c6-boot
 
-      # The heap-budget record's chip half: the shipped image booted whole,
-      # read from the allocator figures its own first heartbeat reports
-      # (docs/heap-budget-gate.md, "The second source"). It lives HERE and not
-      # in the required `Validate (x64)` job because it needs a cross-target
-      # firmware build — which this job has already done by now, so the step
-      # costs one emulator run and nothing else. `heap-budget-check` in the
-      # required job prints a named SKIP for the same reason; a skip here
-      # would be a failure, and the recipe sets LP_EMU_BUILD_FW=1 so it cannot
-      # happen quietly.
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: |
+          if command -v sccache >/dev/null; then
+            { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # The heap-budget record's chip half (`just heap-budget-check-chips`,
+  # docs/heap-budget-gate.md "The second source") and lp-cli's two
+  # emulator-backed tests (`just test-emu-c6-cli`). Both were steps of
+  # `emu-c6` until 2026-09-08. That job had been cut at its 20-minute budget
+  # on every run since #599 (PR #613 raised it to 35 as a stopgap), and its
+  # step timings on main run 34308562027 said why: 478 s for the ratchet and
+  # 367 s inside the suite for `cargo test -p lp-cli` — a second full
+  # test-tree build, because `-p lp-cli` unifies features differently from
+  # `-p lp-emu-esp32c6`. The ratchet needs that same lp-cli build (release,
+  # `heap-budget-check.sh` line ~206) plus a cross-target firmware build the
+  # script does itself under `LP_EMU_BUILD_FW=1`, so the two ride together
+  # here and the emulator job keeps only the emulator's own suite.
+  #
+  # Cheaper setup than emu-c6 on purpose: a depth-1 checkout (nothing here
+  # builds a reference image, so no historical commits are needed) and no
+  # espflash (nothing here builds a merged flash image — the tests boot a
+  # plain ELF). Same toolchain family as emu-c6 and firmware-size: the
+  # pinned nightly with rust-src (build-std) plus the riscv32imac target.
+  #
+  # `heap-budget-check` in the required `Validate (x64)` job prints a named
+  # SKIP for the chip half; here `LP_EMU_BUILD_FW=1` is set by the recipe, so
+  # a skip is a failure and cannot happen quietly. Path-gated on `emu_c6`
+  # like the emulator job.
+  heap-budget-chips:
+    name: Heap budget (esp32c6 chip)
+    runs-on: ubuntu-24.04
+    # Expected ~15 min: ~1 min setup, ~6 min lp-cli test tree (sccache floor),
+    # ~8 min ratchet (release lp-cli + firmware + the profile captures). 30 is
+    # a fully cold run with headroom; re-measure before tightening.
+    timeout-minutes: 30
+    needs: detect-changes
+    if: needs.detect-changes.outputs.emu_c6 == 'true'
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "false"
+      CARGO_PROFILE_TEST_DEBUG: "false"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+    steps:
+      - name: Install system deps (libudev for serialport)
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+
+      - name: Checkout lp2025
+        uses: actions/checkout@v4
+        with:
+          path: lp2025
+
+      - name: Checkout lp-regalloc2
+        uses: actions/checkout@v4
+        with:
+          repository: PhotomancerArt/lp-regalloc2
+          path: lp-regalloc2
+
+      # Toolchain is pinned in lp2025/rust-toolchain.toml; keep this in sync.
+      # rust-src is required: fw-esp32c6 builds core/alloc from source
+      # (build-std) for its release-esp32 profile, same as firmware-size.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-27
+          components: rust-src
+
+      - name: Install RISC-V target
+        run: rustup target add ${{ env.RISC_V_TARGET }}
+
+      - name: Run sccache
+        uses: mozilla/sccache-action@v0.0.10
+
+      # Shared `x64-nightly` rust-cache entry; save-if main-only (see the lint
+      # job's cache step for both). cache-on-failure for the same reason as
+      # emu-c6: an overrun must still publish what it built.
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lp2025 -> target
+          cache-targets: false
+          cache-bin: false
+          shared-key: x64-nightly
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      - name: Emulator-backed lp-cli tests
+        run: cd lp2025 && just test-emu-c6-cli
+
+      # The shipped image booted whole, read from the allocator figures its
+      # own first heartbeat reports. It lives in this job and not in the
+      # required `Validate (x64)` job because it needs a cross-target firmware
+      # build; `heap-budget-check` in the required job prints a named SKIP for
+      # the same reason, and a skip here would be a failure.
       - name: Heap budget ratchet — the C6's own ledger
         run: cd lp2025 && just heap-budget-check-chips
 
