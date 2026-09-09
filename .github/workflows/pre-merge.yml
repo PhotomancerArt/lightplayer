@@ -20,10 +20,27 @@ on:
   push:
     branches: ["main"]
 
-# Cancel stale in-flight runs when new commits land on the same ref, except on
-# main where every push should be validated.
+# Cancel stale in-flight runs when new commits land on the same PR ref. On
+# main every push is validated, and each main push is its OWN group: with
+# cancel off, a ref-keyed group does not cancel — it QUEUES, and every main
+# run waited for the previous one to finish. Measured 2026-09-08: the main
+# runs created 03:15 and 03:48 sat 21.2 and 14.8 min before their first job
+# started, behind a ~30 min run each. At ~9 merges a day that queue was most
+# of merge-to-green.
+#
+# Two main runs in flight share state; each case is fine by construction:
+#   - rust-cache and the stories `actions/cache/save`: same key from both,
+#     the second save logs "already exists" and the job continues.
+#   - sccache: content-addressed, concurrent writes are fine.
+#   - the stories snapshot push: each run pushes its own `sha-<sha>` ref (the
+#     baseline authority — story-baseline-lookup.mjs reads only
+#     refs/heads/sha-*) and force-updates `latest`, a convenience pointer
+#     that can briefly land on the older of two out-of-order finishes.
+#   - the stories baseline lookup walks main's first-parent chain for a
+#     captured ancestor; a parallel run's parent may not be captured yet, so
+#     it walks one further — the same thing a PR against a moving main does.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}${{ github.ref == 'refs/heads/main' && format('-{0}', github.sha) || '' }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
