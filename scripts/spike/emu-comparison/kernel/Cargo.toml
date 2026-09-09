@@ -1,0 +1,23 @@
+# SPIKE — throwaway. A bare-metal RV32IMAC compute kernel used as the common
+# yardstick across emulators (ours, QEMU TCG, libriscv, rv32emu). Standalone:
+# the empty [workspace] keeps it out of the repo workspace so nothing it does
+# can reach a firmware graph or the opt-level overrides.
+[package]
+name = "rv-yardstick"
+version = "0.0.0"
+edition = "2021"
+
+[workspace]
+
+[features]
+# exactly one of these
+plat-c6 = []       # ESP32-C6 map, UART0 at 0x6000_0000  (lp-emu-esp32c6 --elf)
+plat-virt = []     # QEMU riscv32 `virt`: NS16550A 0x1000_0000, sifive_test 0x0010_0000
+plat-syscall = []  # ecall write(1)/exit — libriscv, rv32emu
+
+[profile.release]
+opt-level = 3
+lto = true
+panic = "abort"
+codegen-units = 1
+debug = false
