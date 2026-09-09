@@ -1440,8 +1440,17 @@ impl Rmt {
 
     /// The idle timer runs from the start of the current level's run: the
     /// reception ends one tick past `idle_thres` of no edge.
+    ///
+    /// The **cancel is load-bearing**: `Scheduler::schedule_at` appends
+    /// rather than replaces, so an engine that re-armed without cancelling
+    /// would leave one stale deadline per edge behind and end its reception
+    /// `idle_thres` after the *first* edge of the frame. That is not a
+    /// hypothetical — it is what the first loopback run did, and the words it
+    /// produced (329 of 1,536, which is 409 us at 1.25 us a bit) named the
+    /// bug exactly.
     fn arm_rx_idle(&mut self, rxi: usize, cx: &mut BusCx<'_>) {
         let Ok(clock) = self.clock() else { return };
+        self.cancel_rx_idle(rxi, cx);
         let e = &self.rx[rxi];
         if !e.running || e.armed {
             return;

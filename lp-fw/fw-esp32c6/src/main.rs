@@ -82,6 +82,7 @@ pub use fw_esp32_common::logger;
 #[cfg(any(
     not(fw_harness),
     feature = "test_rmt",
+    feature = "test_rmt_rx",
     feature = "test_dither",
     feature = "test_usb",
     feature = "test_json",

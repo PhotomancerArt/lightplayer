@@ -1,82 +1,87 @@
 //! The `rmt-rx` payload's C6 harness: a frame out of gpio18 and back in on
 //! gpio19.
 //!
-//! Everything portable — the WS2812 encode, the decode, the checksum, the
-//! `rmt-rx` record, the done marker — lives in
-//! [`fw_checks::checks::rmt_rx`] and is unit-tested on the host. What is here
-//! is the half that needs a chip: `init_board`, esp-hal's `Rmt`, one TX
-//! channel with a pin and one RX channel with a pin, and the poll loop that
-//! services both at once.
+//! Everything portable — the WS2812 decode, the checksum, the `rmt-rx`
+//! record, the done marker — lives in [`fw_checks::checks::rmt_rx`] and is
+//! unit-tested on the host. What is here is the half that needs a chip:
+//! `init_board`, the product's own RMT transmitter, esp-hal's RMT receiver,
+//! and the loop that drains one while the other sends.
 //!
-//! # Both halves are polled in one loop, and they have to be
+//! # The transmitter is the product's, and it has to be
 //!
-//! Each channel gets one 48-word RAM block, so a 1,536-word frame goes
-//! through each window 32 times. esp-hal's blocking `wait()` spins on one
-//! transaction only, and a `wait()` on the transmitter would leave the
-//! receiver's half-window unread for the length of the frame — 64 thresholds
-//! missed and a receiver lapping its reader. So the two transactions are
-//! **polled together**: `TxTransaction::poll` refills the transmitter's half
-//! and `RxTransaction::poll` drains the receiver's, and the loop runs until
-//! both say they are done.
+//! This harness does not use esp-hal's `Channel<Tx>::transmit`, and the
+//! reason is a real difference between two drivers rather than a preference.
+//! `ch_tx_lim` on this chip is a **position** in the channel's window, not a
+//! repeating count: the threshold fires when the read pointer reaches word
+//! `tx_lim`, which is what the emulator models (RMT discovery §4, pinned
+//! against silicon over 5,520 frames) and what `lp_ws281x` is written for —
+//! it rewrites `tx_lim` between the half and the wrap on every event.
+//! esp-hal's blocking transmitter sets `tx_lim` once, to half the window, and
+//! never rewrites it, so under position semantics it is woken once per lap
+//! and refills half of what the transmitter consumed. A first version of this
+//! harness used it and put **twice** the frame's bits on the pad; that is a
+//! finding about esp-hal on this chip, filed with the phase, and the way past
+//! it is to send the way the product sends.
 //!
-//! # Why this harness does not use `LedChannel`
+//! So the frame goes out through `lp_ws281x`'s `DRIVER.send_blocking` on RMT
+//! slot 0 — the same call `LedChannel::start_transmission` makes, with the
+//! same block plan, ISR and timing — and the **spin closure that call already
+//! takes** is where this payload drains the receiver. That is the whole trick
+//! of the harness: the transmitter's own wait loop is the receiver's poll
+//! loop.
 //!
-//! The product's harness channel publishes the one-channel block plan, which
-//! gives its transmitter **all four** RAM blocks — including block 2, the
-//! receiver's window. A loopback needs the shipped two-channel shape, so this
-//! payload configures esp-hal's channels itself with one block each. What it
-//! keeps from `rmt-chase` is everything the comparison rests on: the same
-//! pattern, the same FNV-1a, and the same `rmt-frame` line.
+//! # The block plan
+//!
+//! The product's `LedChannel` publishes the one-channel plan, which gives its
+//! transmitter all **four** RAM blocks — block 2 included, which is the
+//! receiver's window. This harness publishes `for_channels(1, 2)` instead:
+//! two blocks for the transmitter (96 words, a 48-word half) and block 2 left
+//! for RX channel 2. It configures the channel itself for the same reason —
+//! `LedChannel::new` takes the whole `Rmt` and there would be no `channel2`
+//! left to configure.
 //!
 //! # The pads
 //!
 //! GPIO18 is D10 on the XIAO C6 and the pad the shipped manifest's first
 //! WS281x channel uses, so the frame goes out where the product's frames go.
-//! GPIO19 is D-none on the silkscreen's LED side and is free: it is neither
-//! USB (12/13), nor UART0 (16/17), nor the BOOT strap (9). On an emulated
-//! configuration the two are tied by `--wire 18:19`; on silicon they need a
-//! jumper, which is the desk batch's optional item and the only part of this
-//! payload that needs hands.
+//! GPIO19 is free: it is neither USB (12/13), nor UART0 (16/17), nor the BOOT
+//! strap (9). On an emulated configuration the two are tied by
+//! `--wire 18:19`; on silicon they need a jumper, which is the desk batch's
+//! optional item and the only part of this payload that needs hands.
 
 extern crate alloc;
 
 use alloc::rc::Rc;
 use alloc::vec;
 use core::cell::RefCell;
-use esp_hal::gpio::AnyPin;
+use esp_hal::gpio::{AnyPin, Level};
 use esp_hal::rmt::{
     PulseCode, Rmt, RxChannelConfig, RxChannelCreator, TxChannelConfig, TxChannelCreator,
 };
-use esp_hal::time::Rate;
 use fw_checks::checks::rmt_chase::{FrameRecord, chase_frame, frame_bytes, write_frame_record};
 use fw_checks::checks::rmt_rx::{
-    FRAMES, IDLE_THRES, LEDS, RxRecord, decode_frame, encode_frame, frame_codes,
-    write_decode_error, write_done, write_rx_record, write_setup,
+    FRAMES, IDLE_THRES, LEDS, RxRecord, decode_frame, frame_codes, write_decode_error, write_done,
+    write_rx_record, write_setup,
 };
 use log::info;
+use lp_ws281x::{BlockPlan, ChannelTiming};
 
 use crate::board::esp32c6::init::{init_board, start_runtime};
 use crate::logger;
+use crate::output::rmt::c6_rmt::{self, PLAN_SLOTS, TX_PLAN};
+use crate::output::rmt::shared_driver::{DRIVER, RMT_CLOCK, install_isr};
 // Through the module rather than the re-export, as `cycle_probe` and
 // `gpio_input` do: `serial::Esp32UsbSerialIo` is gated to a named list of
 // harnesses and adding this one to that list would be an edit to a product
 // file this phase has no business in.
 use crate::serial::usb_serial::Esp32UsbSerialIo;
 
-/// The channel clock, transcribed from
-/// `output::rmt::shared_driver::RMT_CLOCK` rather than imported.
-///
-/// Importing it would pull the product's whole output tree — `LedChannel`
-/// included — into a build that transmits its own codes and never uses it.
-/// The number is pinned on the portable side too:
-/// `fw_checks::checks::rmt_rx::CLOCK_HZ` is the same 80 MHz, and every
-/// duration in this payload is a tick of it.
-const RMT_CLOCK: Rate = Rate::from_mhz(80);
-
 /// The pad the frame goes out on — the product's strip pin.
 const TX_GPIO: u8 = 18;
 /// The pad it comes back in on.
 const RX_GPIO: u8 = 19;
+/// The RMT slot the transmitter uses, as every harness does.
+const TX_SLOT: u8 = 0;
 
 /// Run the `rmt-rx` payload.
 pub async fn run_rmt_rx(_: embassy_executor::Spawner) -> ! {
@@ -104,31 +109,47 @@ pub async fn run_rmt_rx(_: embassy_executor::Spawner) -> ! {
         },
     );
 
-    let rmt = Rmt::new(rmt_peripheral, RMT_CLOCK).expect("RMT initialises");
+    // Two blocks for the transmitter, block 2 left for the receiver. Published
+    // before anything configures a channel, exactly as `LedChannel::new`
+    // publishes its own plan.
+    let plan = BlockPlan::<PLAN_SLOTS>::for_channels(1, 2).expect("two blocks for one channel");
+    if let Err(error) = TX_PLAN.init(plan) {
+        log::error!("[rmt-rx] block plan already published: {error:?}");
+    }
 
-    // One block each: the transmitter takes block 0 and the receiver block 2,
-    // which is what leaves the loopback any RAM to run in at all.
+    let mut rmt = Rmt::new(rmt_peripheral, RMT_CLOCK).expect("RMT initialises");
+    install_isr(&mut rmt);
+
+    // The transmitter: the same registers `LedChannel::new` writes, because
+    // the frame path below is the same driver.
     let tx_config = TxChannelConfig::default()
         .with_clk_divider(1)
         .with_idle_output(true)
-        .with_idle_output_level(esp_hal::gpio::Level::Low)
+        .with_idle_output_level(Level::Low)
         .with_carrier_modulation(false)
-        .with_memsize(1);
-    let rx_config = RxChannelConfig::default()
-        .with_clk_divider(1)
-        .with_carrier_modulation(false)
-        // Off, and deliberately: the emulated wire has no glitches on it and
-        // the filter is exercised by the emulator's own unit tests. A filter
-        // here would be an unmeasured variable between the two sides.
-        .with_filter_threshold(0)
-        .with_idle_threshold(IDLE_THRES)
-        .with_memsize(1);
-
-    let mut tx = rmt
+        .with_memsize(TX_PLAN.blocks(TX_SLOT));
+    let _tx_channel = rmt
         .channel0
         .configure_tx(&tx_config)
         .expect("channel 0 configures")
         .with_pin(unsafe { AnyPin::steal(TX_GPIO) });
+    c6_rmt::enable_tx_interrupts(TX_SLOT);
+    // All-STOP until the first frame prefills the window, so a spurious start
+    // transmits nothing.
+    c6_rmt::clear_ram(TX_SLOT);
+    if let Err(error) = DRIVER.configure_default_clock(TX_SLOT, &ChannelTiming::WS2812) {
+        log::error!("[rmt-rx] timing configuration failed: {error:?}");
+    }
+
+    // The receiver: one block, the filter off, and an idle threshold longer
+    // than the WS2812 latch so that the reception ends after the frame rather
+    // than inside the gap it leaves.
+    let rx_config = RxChannelConfig::default()
+        .with_clk_divider(1)
+        .with_carrier_modulation(false)
+        .with_filter_threshold(0)
+        .with_idle_threshold(IDLE_THRES)
+        .with_memsize(1);
     let mut rx = rmt
         .channel2
         .configure_rx(&rx_config)
@@ -136,25 +157,33 @@ pub async fn run_rmt_rx(_: embassy_executor::Spawner) -> ! {
         .with_pin(unsafe { AnyPin::steal(RX_GPIO) });
 
     let _ = write_setup(&mut esp_println::Printer, TX_GPIO, RX_GPIO);
-    info!("[rmt-rx] {LEDS} LEDs, {FRAMES} frames, gpio{TX_GPIO} -> gpio{RX_GPIO}");
+    info!(
+        "[rmt-rx] {LEDS} LEDs, {FRAMES} frames, gpio{TX_GPIO} -> gpio{RX_GPIO}, tx blocks {}",
+        TX_PLAN.blocks(TX_SLOT)
+    );
 
     let mut data = vec![0u8; frame_bytes(LEDS)];
-    let mut codes = vec![0u32; frame_codes(LEDS)];
-    // The same words as `codes`, in the driver's newtype. `fw-checks` speaks
-    // plain `u32` because it is a host-tested crate that must not depend on
-    // esp-hal, and `PulseCode` is that `u32` with a name on it.
-    let mut tx_codes = vec![PulseCode::from(0u32); frame_codes(LEDS)];
+    // Wire order. `lp_ws281x` permutes by `ColorOrder::Grb` at encode time and
+    // the product's `LedChannel` swaps RGB into GRB before handing the frame
+    // over, so the two cancel and the bytes on the wire are the caller's RGB.
+    // The same swap is here so that the decode below compares against `data`
+    // whatever pattern a later reader puts in it — the chase's grey dot is
+    // invariant under any permutation, but relying on that would make the
+    // comparison quietly pattern-dependent.
+    let mut wire = vec![0u8; frame_bytes(LEDS)];
     // Room for every bit's word plus whatever the receiver writes to close
     // the reception: the trailing idle run's half and an end marker.
-    let mut received = vec![PulseCode::from(0u32); frame_codes(LEDS) + 4];
-    let mut received_words = vec![0u32; frame_codes(LEDS) + 4];
+    let mut received = vec![PulseCode::from(0u32); frame_codes(LEDS) + 8];
+    let mut received_words = vec![0u32; frame_codes(LEDS) + 8];
     let mut decoded = vec![0u8; frame_bytes(LEDS)];
 
     for n in 0..FRAMES {
         let lit = chase_frame(n, LEDS, &mut data);
-        let written = encode_frame(&data, &mut codes).expect("codes fit");
-        for (dst, src) in tx_codes.iter_mut().zip(codes.iter()) {
-            *dst = PulseCode::from(*src);
+        for led in 0..LEDS {
+            let at = led * 3;
+            wire[at] = data[at + 1];
+            wire[at + 1] = data[at];
+            wire[at + 2] = data[at + 2];
         }
 
         // Armed *before* the frame goes out, so no edge of it can arrive with
@@ -167,33 +196,24 @@ pub async fn run_rmt_rx(_: embassy_executor::Spawner) -> ! {
                 continue;
             }
         };
-        let mut tx_txn = match tx.transmit(&tx_codes[..written]) {
-            Ok(txn) => txn,
-            Err((error, channel)) => {
-                tx = channel;
-                info!("[rmt-rx] frame {n}: transmit refused: {error:?}");
-                let (_, channel) = rx_txn.wait().unwrap_or_else(|(_, c)| (0, c));
-                rx = channel;
-                continue;
-            }
-        };
 
-        let (mut tx_done, mut rx_done) = (false, false);
-        while !(tx_done && rx_done) {
-            if !tx_done {
-                tx_done = tx_txn.poll();
-            }
+        // The transmitter's wait loop is the receiver's poll loop: a frame is
+        // 1,536 words through the receiver's 48-word window, so a half of it
+        // has to be read every 24 words or the writer laps the reader.
+        let mut rx_done = false;
+        let send = DRIVER.send_blocking(TX_SLOT, &wire, || {
             if !rx_done {
                 rx_done = rx_txn.poll();
             }
+        });
+        if let Err(error) = send {
+            info!("[rmt-rx] frame {n}: frame failed to start: {error:?}");
         }
-        tx = match tx_txn.wait() {
-            Ok(channel) => channel,
-            Err((error, channel)) => {
-                info!("[rmt-rx] frame {n}: transmit ended with {error:?}");
-                channel
-            }
-        };
+        // The reception outlasts the transmission by the idle threshold, so
+        // the loop above never sees its end.
+        while !rx_done {
+            rx_done = rx_txn.poll();
+        }
         let (words, channel) = match rx_txn.wait() {
             Ok(pair) => pair,
             Err((error, channel)) => {
