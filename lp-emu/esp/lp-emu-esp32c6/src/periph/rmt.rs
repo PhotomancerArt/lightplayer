@@ -3259,6 +3259,39 @@ mod tests {
         assert_eq!(rx_word(&mut sb, &mut r, 96), ONE, "bit 48 landed on bit 0");
     }
 
+    /// (d2) A reception longer than `idle_thres` does not end in the middle
+    /// of itself.
+    ///
+    /// The regression the first loopback run found: the idle deadline is
+    /// re-armed on every edge, and `Scheduler::schedule_at` appends rather
+    /// than replaces, so an engine that did not cancel the previous one ended
+    /// `idle_thres` after the FIRST edge of a frame. Here the frame is 200
+    /// bits — 250 us — against a 100-tick threshold, so a stale deadline
+    /// would fire 51 words in and this test would see 51 words instead of
+    /// 200.
+    #[test]
+    fn a_reception_longer_than_the_idle_threshold_does_not_end_in_the_middle_of_itself() {
+        let (mut sb, mut r, _) = rig();
+        configure_rx(&mut sb, &mut r, 100, None);
+        sb.now = 1_000;
+        start_rx(&mut sb, &mut r, 0);
+
+        for slot in 0..200u64 {
+            bit(&mut sb, &mut r, slot, 32, 2_000);
+        }
+        assert!(
+            r.rx_running(RXI),
+            "200 bits at 100 ticks each, none of them 100 ticks of silence"
+        );
+        assert_eq!(r.rx_words_written(RXI), 199, "one word per bit, less the open one");
+
+        // …and it ends when the line finally does go quiet.
+        let last = 2_000 + 199 * 100 * TICK_CYCLES + 32 * TICK_CYCLES;
+        sb.run_to(&mut r, last + 101 * TICK_CYCLES);
+        assert!(!r.rx_running(RXI));
+        assert_eq!(r.rx_words_written(RXI), 201, "199, the closing word, the marker");
+    }
+
     /// (e) With `mem_rx_wrap_en` clear the window fills instead: `mem_full`,
     /// `rx_err` on ch2's bit, and the receiver stops where it is.
     #[test]
