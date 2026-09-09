@@ -266,12 +266,20 @@ pub struct SocBus {
     /// P1 measured 428 of these on a whole render run, so a set is small and
     /// nothing is gained by a bitmap over the address space.
     code_pages: BTreeSet<u32>,
-    /// `--strict-bus` only: code pages the **guest** has stored into since
-    /// the last `fence.i`.
-    unpublished_code_pages: BTreeSet<u32>,
-    /// `--strict-bus` only: how many times a page in
-    /// [`unpublished_code_pages`](Self::unpublished_code_pages) was then
-    /// executed. See [`SocBus::missing_fence_reports`].
+    /// `--strict-bus` only: word addresses on a code page whose **bytes the
+    /// guest changed** and has not published with a `fence.i`.
+    ///
+    /// Word-granular rather than page-granular, and only when the store
+    /// actually changed something. Both refinements remove a false positive
+    /// the page model has: firmware routinely writes code that lives on the
+    /// same 4 KiB page as the writer, and P1 measured that **36 %** of the
+    /// render loop's stores onto executed pages write bytes that were already
+    /// there.
+    unpublished_code_words: BTreeSet<u32>,
+    /// `--strict-bus` only: how many times a word in
+    /// [`unpublished_code_words`](Self::unpublished_code_words) was then
+    /// fetched or run out of a cached block. See
+    /// [`SocBus::missing_fence_reports`].
     missing_fence_reports: u64,
 
     /// Source levels → "the CPU interrupt this hart should take". Installed
@@ -363,7 +371,7 @@ impl SocBus {
             first_strict_violation: None,
             code_writes: Vec::new(),
             code_pages: BTreeSet::new(),
-            unpublished_code_pages: BTreeSet::new(),
+            unpublished_code_words: BTreeSet::new(),
             missing_fence_reports: 0,
             matrix: Box::new(NoCpuInterrupts),
             request: None,
@@ -749,23 +757,54 @@ impl SocBus {
         self.code_pages.len()
     }
 
-    /// A guest instruction at `pc` is about to run. Under `--strict-bus`,
-    /// remember its page and report it if the guest wrote that page and never
-    /// published the write.
+    /// A guest store landed in region `i` at byte offset `off`. Under
+    /// `--strict-bus`, mark the words it **changed** when they are on a page
+    /// the guest has executed from.
     #[inline(never)]
-    fn check_code_page(&mut self, pc: u32, publishing: bool) {
-        let page = pc & !(CODE_PAGE_LEN - 1);
-        if publishing {
-            self.code_pages.insert(page);
+    fn note_guest_code_write(&mut self, i: usize, off: usize, address: u32, len: u32, value: u32) {
+        let page = address & !(CODE_PAGE_LEN - 1);
+        if !self.code_pages.contains(&page) {
+            return;
         }
-        if self.unpublished_code_pages.remove(&page) {
-            self.missing_fence_reports += 1;
-            log::error!(
-                "strict-bus: code page {page:#010x} was written by the guest and then executed \
-                 at {pc:#010x} with no `fence.i` between. That is a firmware bug: instructions \
-                 published without a fence are not guaranteed to be visible to the fetch path on \
-                 real silicon, and the emulator's block cache will serve the old ones"
-            );
+        let old = &self.regions[i].data[off..off + len as usize];
+        if old == &value.to_le_bytes()[..len as usize] {
+            // A store that writes what was already there publishes nothing
+            // and owes no fence. P1 measured 36 % of the render loop's stores
+            // onto executed pages doing exactly this.
+            return;
+        }
+        // Every word the store touches, so a byte or halfword store still
+        // names the instruction it lands in.
+        let mut at = address & !3;
+        while at < address + len {
+            self.unpublished_code_words.insert(at);
+            at += 4;
+        }
+    }
+
+    /// A guest instruction at `pc` is about to run. Under `--strict-bus`,
+    /// remember its page, and report it when the guest changed the bytes it
+    /// is made of and never published the change.
+    #[inline(never)]
+    fn check_code_word(&mut self, pc: u32, fetching: bool) {
+        if fetching {
+            self.code_pages.insert(pc & !(CODE_PAGE_LEN - 1));
+        }
+        if self.unpublished_code_words.is_empty() {
+            return;
+        }
+        // An instruction is 2 or 4 bytes and may straddle a word boundary.
+        for word in [pc & !3, (pc + 2) & !3] {
+            if self.unpublished_code_words.remove(&word) {
+                self.missing_fence_reports += 1;
+                log::error!(
+                    "strict-bus: the instruction at {pc:#010x} was written by the guest and then \
+                     executed with no `fence.i` between. That is a firmware bug: instructions \
+                     published without a fence are not guaranteed to be visible to the fetch \
+                     path on real silicon, and the emulator\u{27}s block cache will serve the \
+                     old ones"
+                );
+            }
         }
     }
 
@@ -1258,17 +1297,10 @@ impl SocBus {
             if !self.regions[i].writable {
                 return Err(fault);
             }
-            if self.strict {
-                // `--strict-bus` only: the guest stored into a page it has
-                // executed from. It owes a `fence.i` before it executes there
-                // again, and the checker in `fetch_instruction` /
-                // `note_cached_execute` is what notices if it does not.
-                let page = address & !(CODE_PAGE_LEN - 1);
-                if self.code_pages.contains(&page) {
-                    self.unpublished_code_pages.insert(page);
-                }
-            }
             let off = (address - self.regions[i].base) as usize;
+            if self.strict {
+                self.note_guest_code_write(i, off, address, len, value);
+            }
             let data = &mut self.regions[i].data;
             let stored = match width {
                 Width::Word => data
@@ -1535,7 +1567,7 @@ impl Bus for SocBus {
         }
         self.last_fetch_region = i;
         if self.strict {
-            self.check_code_page(address, true);
+            self.check_code_word(address, true);
         }
         if let Some(cost) = self.memory_cost.as_mut() {
             self.memory_cycles += cost.fetch(address);
@@ -1693,18 +1725,20 @@ impl Bus for SocBus {
         if !self.strict {
             return;
         }
-        // A block never crosses many pages; walk the ones it touches.
-        let mut at = pc & !(CODE_PAGE_LEN - 1);
+        if self.unpublished_code_words.is_empty() {
+            return;
+        }
+        let mut at = pc & !3;
         let end = pc.saturating_add(bytes);
         while at < end {
-            self.check_code_page(at.max(pc), false);
-            at = at.saturating_add(CODE_PAGE_LEN);
+            self.check_code_word(at, false);
+            at = at.saturating_add(4);
         }
     }
 
     /// The guest retired a `fence.i`: everything it has written is published.
     fn note_fence_i(&mut self) {
-        self.unpublished_code_pages.clear();
+        self.unpublished_code_words.clear();
     }
 }
 
