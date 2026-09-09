@@ -222,3 +222,122 @@ fn two_harness_runs_are_byte_identical() {
     assert_eq!(a.m.instructions(), b.m.instructions());
     assert_eq!(a.text, b.text, "two runs of the harness diverged");
 }
+
+/// M1 P3 G3-5, and the same statement `t2_memory_equals_t1` makes about the
+/// grade below it: **a time grade must not move a heap byte**, and `t3` moves
+/// more than any grade before it — it is the first one where two instructions
+/// with the same opcode cost different amounts because of where they are.
+///
+/// It must still move nothing the allocator can see. The payload is
+/// single-task, so there is no interleaving for a clock to change, and the
+/// cache model is charged *after* the access rather than instead of it: it
+/// answers with a number of cycles and never with a byte.
+#[test]
+#[ignore = "needs the harness reference image; run through `just test-emu-c6`"]
+fn t3_memory_equals_t1() {
+    let Some(Run { m, outcome, text }) = run_harness_at(TimeGrade::T3) else {
+        return;
+    };
+    assert!(
+        matches!(outcome, Outcome::ExitMatched { .. }),
+        "{outcome:?}"
+    );
+    assert_eq!(m.bus.unmapped_reads() + m.bus.unmapped_writes(), 0);
+
+    let root = workspace_root().expect("workspace root");
+    let sidecar = SIDECAR.replace("lp-emu:esp32c6:t1", "lp-emu:esp32c6:t3");
+    let ours = Transcript::from_parts(
+        TranscriptHeader::from_json(&sidecar).expect("the sidecar parses"),
+        &text,
+    )
+    .expect("our t3 capture is a transcript");
+    let recorded = Transcript::load(root.join(COMMITTED_T1)).expect("the committed t1 transcript");
+    let report = replay(
+        &ours,
+        &recorded,
+        ReplayOptions {
+            strict: false,
+            strict_timing: false,
+        },
+    )
+    .expect("the replay runs");
+    println!("{}", report.render());
+
+    assert!(report.is_ok(), "{:?}", report.failures());
+    assert_eq!(report.compared(FieldClass::Memory), 372);
+    assert_eq!(
+        report.differences_in(FieldClass::Memory).count(),
+        0,
+        "a time grade moved a heap byte: {:?}",
+        report
+            .differences_in(FieldClass::Memory)
+            .map(|d| format!("{}.{}: {} vs {}", d.scope, d.field, d.left, d.right))
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        report.differences_in(FieldClass::Timing).count() > 0,
+        "t3 produced t1's timings"
+    );
+}
+
+/// M1 P3 G3-4. A cache model is *state*, so `t3` is the first grade whose
+/// answer to an access depends on the accesses before it — which is exactly
+/// the shape of thing that stops being deterministic when someone reaches for
+/// a host clock or an allocator address. Two runs, same process, same bytes,
+/// same cycle total.
+///
+/// Exact cycle *counts* are deliberately not asserted against a constant
+/// here: the reference image is built locally and a different host's build is
+/// a different binary (DD45), so a pinned number would be a host gate. Two
+/// runs on one host is the comparison that means something.
+#[test]
+#[ignore = "needs the harness reference image; run through `just test-emu-c6`"]
+fn two_t3_harness_runs_are_byte_identical() {
+    let (Some(a), Some(b)) = (run_harness_at(TimeGrade::T3), run_harness_at(TimeGrade::T3)) else {
+        return;
+    };
+    assert_eq!(a.outcome, b.outcome);
+    assert_eq!(a.m.cycles(), b.m.cycles());
+    assert_eq!(a.m.instructions(), b.m.instructions());
+    assert_eq!(a.text, b.text, "two t3 runs of the harness diverged");
+}
+
+/// The three grades run the **same instructions**; only the clock differs.
+///
+/// This is the assertion that a memory-cost model could most easily break by
+/// accident — a hook that charged a cycle by performing an access, or that
+/// answered differently on the second pass, would show up here as an
+/// instruction count that moved. It also states the ordering the grades are
+/// supposed to have: `t1` < `t2` < `t3` in cycles, over one instruction
+/// stream.
+#[test]
+#[ignore = "needs the harness reference image; run through `just test-emu-c6`"]
+fn the_grades_share_one_instruction_stream_and_differ_only_in_cycles() {
+    let (Some(t1), Some(t2), Some(t3)) = (
+        run_harness_at(TimeGrade::T1),
+        run_harness_at(TimeGrade::T2),
+        run_harness_at(TimeGrade::T3),
+    ) else {
+        return;
+    };
+    assert_eq!(t1.m.instructions(), t2.m.instructions());
+    assert_eq!(
+        t1.m.instructions(),
+        t3.m.instructions(),
+        "t3 executed a different number of instructions than t1"
+    );
+    assert!(
+        t1.m.cycles() < t2.m.cycles() && t2.m.cycles() < t3.m.cycles(),
+        "t1 {} t2 {} t3 {}",
+        t1.m.cycles(),
+        t2.m.cycles(),
+        t3.m.cycles()
+    );
+    println!(
+        "cycles: t1={} t2={} t3={} (instructions {})",
+        t1.m.cycles(),
+        t2.m.cycles(),
+        t3.m.cycles(),
+        t1.m.instructions()
+    );
+}
