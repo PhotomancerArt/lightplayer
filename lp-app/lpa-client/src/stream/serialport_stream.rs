@@ -101,12 +101,30 @@ impl DeviceByteStream for SerialPortByteStream {
         }
     }
 
+    /// Hand `bytes` to the kernel's output queue. Deliberately does NOT
+    /// `flush()`.
+    ///
+    /// `serialport`'s `flush` is `tcdrain(fd)`: "block until every queued
+    /// byte has been transmitted", with no timeout (the port timeout there
+    /// only bounds `EINTR` retries). A device that stops draining its
+    /// receive FIFO — a C6 hung in its bootloader is the case that found
+    /// this — backs the queue up and turns that into a permanent block. The
+    /// framing thread that owns this stream then never reaches its shutdown
+    /// check, `ClientTransport::close` gives up at its join budget, and the
+    /// OS port stays open for the life of the process
+    /// (`docs/defects/2026-09-08-serial-close-leaks-the-port-on-a-wedged-device.md`).
+    ///
+    /// Nothing is lost by skipping it: `write` has already handed the bytes
+    /// to the driver, which transmits them on its own schedule, and no
+    /// caller here needs "already on the wire" semantics — the only
+    /// operation that would care (the reset dance, which cuts transmission
+    /// short) runs before the first write. `write` itself stays bounded: it
+    /// waits for writability under the port's 100 ms timeout and surfaces a
+    /// `TimedOut` error, which the framing thread treats as a lost
+    /// connection and exits on.
     fn write_all(&mut self, bytes: &[u8]) -> Result<(), ByteStreamError> {
         self.port
             .write_all(bytes)
-            .map_err(|error| ByteStreamError::io(error.to_string()))?;
-        self.port
-            .flush()
             .map_err(|error| ByteStreamError::io(error.to_string()))
     }
 

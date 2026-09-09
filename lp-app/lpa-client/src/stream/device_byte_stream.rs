@@ -23,8 +23,15 @@ pub trait DeviceByteStream: Send {
     /// good returns [`ByteStreamError::Closed`].
     fn read_available(&mut self, buf: &mut [u8]) -> Result<usize, ByteStreamError>;
 
-    /// Write all of `bytes` to the device, flushing so the data is actually
-    /// sent (serial ports buffer aggressively).
+    /// Write all of `bytes` to the device.
+    ///
+    /// Must return in bounded time — the framing thread that owns the stream
+    /// can only honor a shutdown between calls, so an implementation that
+    /// blocks forever pins the thread and whatever OS resource it holds
+    /// (`docs/defects/2026-09-08-serial-close-leaks-the-port-on-a-wedged-device.md`).
+    /// Handing the bytes to the OS is the contract; WAITING for them to
+    /// reach the wire is not, and on a serial port that wait (`tcdrain`) is
+    /// exactly the unbounded call to avoid.
     fn write_all(&mut self, bytes: &[u8]) -> Result<(), ByteStreamError>;
 
     /// Drive the DTR/RTS control lines.

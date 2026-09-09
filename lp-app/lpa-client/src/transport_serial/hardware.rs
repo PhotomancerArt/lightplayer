@@ -55,10 +55,11 @@ fn serial_thread_loop(
 
     let mut read_buffer = Vec::new();
     let mut connection_lost = false;
+    let mut shutdown = false;
 
     loop {
         // Check for shutdown signal (non-blocking)
-        if shutdown_rx.try_recv().is_ok() {
+        if shutdown || shutdown_rx.try_recv().is_ok() {
             log::debug!("Serial thread: Shutdown signal received");
             break;
         }
@@ -70,6 +71,19 @@ fn serial_thread_loop(
 
         // Process incoming client messages (non-blocking)
         while let Ok(msg) = client_rx.try_recv() {
+            // Re-check shutdown per message, not just per loop pass: closing
+            // drops `client_tx` but leaves whatever is already queued
+            // readable, and a backlog (readiness re-asks a hello every
+            // second for the whole ready budget) would otherwise be written
+            // out one bounded-but-slow write at a time before the thread
+            // looked at the shutdown signal again — past the close's join
+            // budget, leaving the port held. A close means "stop", not
+            // "finish the queue".
+            if shutdown_rx.try_recv().is_ok() {
+                log::debug!("Serial thread: Shutdown signal received (draining writes)");
+                shutdown = true;
+                break;
+            }
             // Frame as one `M!{json}\n` line (the shared framer).
             let data = match lpc_wire::json::to_serial_line(&msg) {
                 Ok(line) => line.into_bytes(),
@@ -85,7 +99,7 @@ fn serial_thread_loop(
                 data.len()
             );
 
-            // Write to the stream (implementations flush internally)
+            // Write to the stream (bounded — see `DeviceByteStream::write_all`)
             if let Err(e) = stream.write_all(&data) {
                 log::error!("Serial thread: Write error: {e}");
                 connection_lost = true;
@@ -166,7 +180,15 @@ fn serial_thread_loop(
         drop(server_tx);
     }
 
-    log::debug!("Serial thread: Exiting");
+    // Explicit, and load-bearing: this thread is the ONLY owner of the byte
+    // stream, so the OS serial port is released here and nowhere else.
+    // `ClientTransport::close` joins this thread precisely to observe that,
+    // and the next management operation reopens the same port immediately
+    // after — see
+    // `docs/defects/2026-09-08-serial-close-leaks-the-port-on-a-wedged-device.md`.
+    drop(stream);
+
+    log::debug!("Serial thread: Exiting ({stream_label} released)");
 }
 
 /// How the DTR/RTS lines reach the chip's reset, which decides the dance.
@@ -301,7 +323,8 @@ pub fn create_hardware_serial_transport_pair(
 /// The caller owns port opening (the `host-serial-esp32` provider opens
 /// native ports; `lpa-link`'s fake device supplies a scripted stream). The
 /// returned transport speaks the `M!` JSON line protocol over the stream from
-/// a dedicated I/O thread. `stream_label` only names the stream in logs.
+/// a dedicated I/O thread. `stream_label` names the stream in logs and in
+/// the close-timeout error (where it is the held port's name).
 pub fn create_hardware_serial_transport_pair_with_options(
     stream: Box<dyn DeviceByteStream>,
     stream_label: &str,
@@ -316,6 +339,7 @@ pub fn create_hardware_serial_transport_pair_with_options(
 
     // Spawn serial thread
     let stream_label = stream_label.to_string();
+    let label_for_error = stream_label.clone();
     let thread_handle = thread::Builder::new()
         .name("lp-hardware-serial".to_string())
         .spawn(move || {
@@ -335,5 +359,137 @@ pub fn create_hardware_serial_transport_pair_with_options(
         server_rx,
         shutdown_tx,
         thread_handle,
+        label_for_error,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::time::Instant;
+
+    use super::*;
+    use crate::transport::ClientTransport;
+    use crate::transport_serial::client::CLOSE_JOIN_BUDGET;
+
+    /// A byte stream that answers reads the way a silent device does and
+    /// records the two things `close` is supposed to guarantee: that the
+    /// stream was DROPPED (on a real port, that is the fd closing), and how
+    /// many writes went out before it was.
+    struct SilentStream {
+        dropped: Arc<AtomicBool>,
+        writes: Arc<AtomicUsize>,
+        write_cost: Duration,
+    }
+
+    impl DeviceByteStream for SilentStream {
+        fn read_available(&mut self, _buf: &mut [u8]) -> Result<usize, ByteStreamError> {
+            // The port's read timeout, as the real stream reports it.
+            thread::sleep(Duration::from_millis(100));
+            Ok(0)
+        }
+
+        fn write_all(&mut self, _bytes: &[u8]) -> Result<(), ByteStreamError> {
+            thread::sleep(self.write_cost);
+            self.writes.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        fn set_signals(
+            &mut self,
+            _dtr: Option<bool>,
+            _rts: Option<bool>,
+        ) -> Result<(), ByteStreamError> {
+            Ok(())
+        }
+
+        fn reopen(&mut self, _baud_rate: u32) -> Result<(), ByteStreamError> {
+            Ok(())
+        }
+    }
+
+    impl Drop for SilentStream {
+        fn drop(&mut self) {
+            self.dropped.store(true, Ordering::SeqCst);
+        }
+    }
+
+    fn hello(id: u64) -> ClientMessage {
+        ClientMessage {
+            id,
+            msg: lpc_wire::ClientRequest::Hello,
+        }
+    }
+
+    /// `close()` returning `Ok` means the byte stream is gone — which on the
+    /// host serial provider is the promise that the OS port is free for the
+    /// management operation that opens it next.
+    #[tokio::test]
+    async fn close_drops_the_byte_stream() {
+        let dropped = Arc::new(AtomicBool::new(false));
+        let mut transport = create_hardware_serial_transport_pair_with_options(
+            Box::new(SilentStream {
+                dropped: Arc::clone(&dropped),
+                writes: Arc::new(AtomicUsize::new(0)),
+                write_cost: Duration::ZERO,
+            }),
+            "/dev/test-silent",
+            HardwareSerialOptions::default(),
+        )
+        .expect("transport");
+
+        transport.close().await.expect("close");
+        assert!(
+            dropped.load(Ordering::SeqCst),
+            "close returned Ok while the framing thread still owned the stream"
+        );
+    }
+
+    /// A queued write backlog must not outlive the close. The readiness
+    /// engine queues one hello per second for its whole budget, and a device
+    /// that never answers leaves them all unsent; draining that queue before
+    /// looking at the shutdown signal is what pushed the framing thread past
+    /// the close's join budget and left the port held.
+    #[tokio::test]
+    async fn close_abandons_a_write_backlog_instead_of_draining_it() {
+        let dropped = Arc::new(AtomicBool::new(false));
+        let writes = Arc::new(AtomicUsize::new(0));
+        let mut transport = create_hardware_serial_transport_pair_with_options(
+            Box::new(SilentStream {
+                dropped: Arc::clone(&dropped),
+                writes: Arc::clone(&writes),
+                write_cost: Duration::from_millis(50),
+            }),
+            "/dev/test-backlog",
+            HardwareSerialOptions::default(),
+        )
+        .expect("transport");
+
+        // 60 × 50 ms = 3 s of writes if the queue is drained in full.
+        for id in 0..60 {
+            transport.send(hello(id)).await.expect("queue hello");
+        }
+
+        // Let the framing thread get INSIDE its drain loop before closing:
+        // the outer per-pass check already covers a close that lands while
+        // it is reading, and the per-message check is what covers this.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        let start = Instant::now();
+        transport.close().await.expect("close");
+        let elapsed = start.elapsed();
+
+        assert!(
+            dropped.load(Ordering::SeqCst),
+            "close returned Ok while the framing thread still owned the stream"
+        );
+        assert!(
+            elapsed < CLOSE_JOIN_BUDGET,
+            "close took {elapsed:?}, past the {CLOSE_JOIN_BUDGET:?} join budget"
+        );
+        assert!(
+            writes.load(Ordering::SeqCst) < 60,
+            "the backlog was drained in full instead of abandoned at shutdown"
+        );
+    }
 }

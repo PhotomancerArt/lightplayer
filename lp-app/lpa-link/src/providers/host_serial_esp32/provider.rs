@@ -524,11 +524,37 @@ impl LinkProvider for HostSerialEsp32Provider {
             session.session.status = LinkSessionStatus::Closed;
             session.server_connection.take()
         };
+        // The transport close is what actually frees the OS serial port —
+        // it joins the framing thread that owns the port fd — and the next
+        // management operation reopens that port by name straight after. A
+        // failure here therefore means the port is STILL HELD, so it is
+        // recorded on the session before it propagates: swallowed by a
+        // best-effort caller, it used to resurface a whole operation later
+        // as an unexplained "Device or resource busy"
+        // (`docs/defects/2026-09-08-serial-close-leaks-the-port-on-a-wedged-device.md`).
         if let Some(server_connection) = server_connection {
             let mut transport = server_connection.lock().await;
-            lpa_client::ClientTransport::close(&mut **transport)
-                .await
-                .map_err(|error| LinkError::other(error.to_string()))?;
+            let closed = lpa_client::ClientTransport::close(&mut **transport).await;
+            drop(transport);
+            if let Err(error) = closed {
+                let message = format!("host serial ESP32 port not released on close: {error}");
+                let mut state = self.state();
+                if let Some(session) = state.sessions.get_mut(session_id) {
+                    session.logs.push(LinkLogEntry::new(
+                        session.session.endpoint_id.clone(),
+                        Some(session.session.id.clone()),
+                        LinkLogLevel::Error,
+                        message.clone(),
+                    ));
+                    session.diagnostics.push(LinkDiagnostic::new(
+                        session.session.endpoint_id.clone(),
+                        Some(session.session.id.clone()),
+                        LinkDiagnosticSeverity::Error,
+                        message.clone(),
+                    ));
+                }
+                return Err(LinkError::other(message));
+            }
         }
         let mut state = self.state();
         let session = state
