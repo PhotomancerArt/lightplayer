@@ -1,0 +1,64 @@
+{
+  "schema": 1,
+  "payload": "espnow-broadcast",
+  "chip": "esp32c6",
+  "configuration": "silicon:esp32c6",
+  "date": "2026-09-09",
+  "firmware_commit": "5c1d37627b22",
+  "firmware_features": [
+    "default",
+    "esp32c6",
+    "esp_radio",
+    "lp_gfx_lpvm",
+    "lpa_server",
+    "lpc_hardware",
+    "lpc_model",
+    "lpc_shared",
+    "lpc_wire",
+    "lpfs",
+    "radio",
+    "server",
+    "test_espnow_broadcast"
+  ],
+  "firmware_dirty": false,
+  "firmware_sha256": "bddf0018abd379afb55a21113b198b34bdbf25877488f890d2068e431e9f6280",
+  "silicon_rev": "v0.2",
+  "board": "seeed/xiao-esp32-c6",
+  "mac": "a0:f2:62:87:b4:8c",
+  "source": "(cd lp-fw/fw-esp32c6 && cargo build --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,test_espnow_broadcast) && PORT_DEV=/dev/cu.usbmodem213201 scripts/emu/desk-espflash-step.sh target/validate/espnow-broadcast.cap '[espnow-broadcast] === DONE ===' 120 -- flash --chip esp32c6 --port /dev/cu.usbmodem213201 --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size 4mb --after hard-reset --monitor target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6",
+  "capture": "lp-cli validate record c6r-m4 --config silicon:esp32c6",
+  "machine": "a0f26287b48c",
+  "note": "ONE OF A PAIR. The silicon half of M4 P3's two-board capture, recorded on the desk in one sitting on 2026-09-09. This is THE DESK BOARD, MAC a0:f2:62:87:b4:8c, which the payload reports as device=0x8cb48762; its peer on the air is THE SECOND BOARD, MAC a0:f2:62:85:a8:7c (device=0x7ca88562), whose capture is the sibling silicon transcript in this directory at the same commit and date. Both boards ran the same ELF, sha256 bddf0018abd379afb55a21113b198b34bdbf25877488f890d2068e431e9f6280, built once before either capture. Both are XIAO ESP32-C6, chip revision v0.2.\n\nHOW TWO BOARDS WERE CAPTURED THROUGH ONE FOREGROUND LANE, and why the numbers look the way they do: the peer was flashed first with scripts/emu/desk-flash-no-monitor.sh and its port released, so it was already powered and broadcasting when this capture began. That is why the peer's RAW event numbers here are 315-320 rather than 0-5 \u2014 a peer's counter starts at its own power-on, which is exactly why the mask set masks it. Only THIS board's own tx event numbers start at 0, because espflash reset it into the capture. Ports were never held concurrently: flash the peer, release, record this board, release, then record the peer.\n\nNO PIN CAPTURE, and the reason is the payload rather than the configuration: ESP-NOW events are CONSOLE fields, not pin fields. This payload declares no pin capture on either side, so a replay says nothing about pins at all \u2014 and silicon records no pad in any case (#624).\n\nTHE FINDING IN THESE BYTES: `gap` is 1 on every espnow-rx record after the first (the first is 0 by construction \u2014 there is no previous frame to compare against). This board heard EVERY frame its peer sent: nothing was dropped between two consecutive frames, and the peer's payload_len walks the full four-rung ladder (0, 8, 24, 64) rather than half of it. The emulated pair's `gap` is 2 \u2014 the peer's events arrive as 0, 2, 4, 6, 8, 10 \u2014 which is docs/debt/emu-c6-air-delivers-every-other-frame.md. Replaying this transcript against its emulated twin at BOTH grades gives 55 of 60 structural fields equal with all five differences being `gap` (1 vs 2) and nothing else. That settles the debt file's open question: the every-other-frame behaviour is the EMULATOR's, not the payload's. Nothing here was tuned toward or away from it, and no emulator code was touched by the sitting that recorded this \u2014 a fix is queued as its own PR.",
+  "trust": [
+    {
+      "class": "memory",
+      "grade": "measured",
+      "because": "the board is the ground truth; nothing models it"
+    },
+    {
+      "class": "timing",
+      "grade": "measured",
+      "because": "a real clock on real flash with real wait states"
+    },
+    {
+      "class": "pin",
+      "grade": "measured",
+      "because": "a scope or a logic analyser on the header pin is the definition of what the pin did"
+    },
+    {
+      "class": "usb-serial-jtag",
+      "grade": "measured",
+      "because": "a real host really attaches, or really does not"
+    },
+    {
+      "class": "boot-log",
+      "grade": "measured",
+      "because": "the real ROM and the real IDF bootloader printed it"
+    },
+    {
+      "class": "wire",
+      "grade": "measured",
+      "because": "real bytes over a real port"
+    }
+  ]
+}
