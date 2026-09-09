@@ -263,6 +263,124 @@ between the two paths, DD40's flash offsets and chip-size word, the download
 strap, a reboot into it, and a first heartbeat that is byte-identical
 whichever way the app arrived.
 
+## The download console, and flashing over a socket
+
+`--strap download` reaches the mask ROM's real download path, and since M3 it
+**answers**. No hook: the ROM hook table is still empty, and the replies come
+out of the vendored mask ROM running on the modelled hart.
+
+`--boot-mode direct|rom-up` says which entry a run takes, without going
+through `--merged`. That matters for exactly one scenario and it is this one:
+`--merged` is **read-only** on purpose — it is the image a gate named, and a
+run that wrote back into it would quietly stop being that image — but a
+flashing run's whole point is that the bytes are *not there yet*. So the chip
+is `--flash <file>`, the backing that keeps a run's writes, and
+`--boot-mode rom-up` asks for a ROM-up boot from it. With `rom-up` an `--elf`
+is optional; `--boot-mode direct` with `--merged` is refused, because a merged
+image *is* the chip's bytes and a direct load never reads them.
+
+### Both consoles answer
+
+`SYNC` and `READ_REG` are answered over USB-Serial-JTAG and over UART0, and
+`READ_REG` returns the eFuse MAC the run was given (`--efuse-mac`) — so the
+gate cannot pass on a constant. `tests/rom_download_console.rs` is the gate.
+
+On UART0 the ROM begins with baud-rate auto-detection over the pulse-width
+counters (`rxd_cnt`, `lowpulse`, `highpulse`), and `--uart0-baud <rate>`
+states the rate those counters measure. It is a **model from a stated host
+baud**, not a measurement of edges: the rate is configuration, the
+consumption is not — the first SYNC is eaten by detection exactly as it is on
+silicon, and the second is the one answered. Applied before the power-on
+snapshot, so a reboot keeps it. (`lp-cli emu run` mirrors the flag.)
+
+The USB console never reads those counters. It answered unchanged from the
+start, and the two days it spent recorded as "the download console does not
+answer commands" were a unit bug in `scripts/rom-download-sync.usb`, which
+stamped `20000` in a slot the grammar reads as **milliseconds** — see the
+ADR's ROM-up amendment.
+
+### A real flasher, over the socket
+
+```console
+$ scripts/emu/flash-over-socket.sh target/emu-ref/…/merged.bin
+flash-over-socket: the chip starts BLANK
+flash-over-socket: the flasher's port is /dev/ttys001
+flash-over-socket: esptool --no-stub write 0x0 …/merged.bin
+Wrote 4194304 bytes at 0x00000000 in 18.6 seconds (1803.2 kbit/s).
+Hash of data verified.
+flash-over-socket: the host's reset dance
+flash-over-socket: the chip matches …/merged.bin over every byte the image populates
+flash-over-socket: the chip booted what was written and said hello
+"commit":"735af98ae9d9"
+```
+
+The machine comes up ROM-up with the download strap and a writable chip,
+`scripts/emu/pty-tcp-bridge.py` puts a **pty** in front of the machine's byte
+socket (flashers speak to a serial *port*; the machine serves bytes on a
+socket, and nothing else in the tree turns one into the other —
+`uart-tcp-proxy.py` is TCP→TCP and the spike's `usb-tcp-bridge.py` puts a
+board's tty *on* a socket), the flasher writes in the foreground, the host's
+reset dance goes on the `--control` channel where `USB_DEVICE` models it, and
+the chip boots what was just written. Then the bytes are compared. One exit
+code per failure — `10` a held port, `11` no listener, `12` no pty, `13` the
+flasher, `14` the bytes, `15` no hello, `16` the machine, `20` a client that
+cannot open a pty, `127` a missing tool.
+
+`--seed <image>` starts the chip holding some other image, which is how the
+recipe shows the hello came from what was *flashed* rather than from what was
+there: run it both ways with two images that differ only in their build
+commit, and the hello's `commit` field follows the flasher both times.
+
+A pty carries no DTR or RTS, so every client runs `--before no-reset --after
+no-reset` and the dance is performed on the control channel instead. Nothing
+about the chip's side of it is faked: it is the modelled dance on the modelled
+register.
+
+### Which flasher, and why the CLI is not one of them
+
+| client | what it is | works? |
+|---|---|---|
+| `espflash` **library** | `espflash::flasher::Flasher`, driven by `tests/flash_over_socket.rs` — the CI gate | **yes**, `--no-stub` |
+| `esptool` CLI | `--client esptool`, the recipe's default; local only (OQ8) | **yes**, `--no-stub` |
+| `espflash` CLI | `--client espflash` | **no**, and not for a reason on this side |
+
+`espflash --port <path>` does not open `<path>`. It looks the name up in the
+operating system's serial-port **enumeration** (`available_ports()` — IOKit
+on macOS, libudev / `/sys/class/tty` on Linux) and refuses a name that is not
+in the list (espflash 3.3.0, `src/cli/serial.rs`, `find_serial_port` →
+`espflash::serial_not_found`). A pty is not an enumerated device on either
+platform, so no bridge can make it work: the refusal happens before a byte is
+sent. The recipe says so and exits 20.
+
+The espflash **protocol** is still gated, by espflash's own code, the way this
+repository's product code already flashes a board
+(`lp-cli/src/commands/fwcheck/flash.rs`,
+`lp-app/lpa-link/…/host_esp32_flash.rs` both open the port themselves and hand
+it to `Flasher::connect`, skipping the same lookup for the same reason). Only
+the CLI's port picker is skipped.
+
+### The stub, and where it stops
+
+espflash and esptool default to uploading Espressif's flasher **stub** into
+RAM and jumping to it. It uploads and runs here — real RV32 code, executed by
+the modelled hart for 19.5 M cycles — and then reads `0x6000_4038`, which is
+`I2C0.scl_high_period`, to pick the argument for the ROM's
+`spi_flash_attach`. This machine's boot set does not map I2C0, so the strict
+bus refuses and the run ends.
+
+Run permissively, where an unclaimed address reads 0 and is *counted*, the
+same stub goes on to erase and program through the ROM's SPI1 routines and
+leaves the image's bytes on the chip, with `unmapped_reads() == 1` and
+`unmapped_writes() == 0` for the whole run. **The stub is one unmapped block
+away from working, and that block is touched once.** Both numbers are
+asserted, so a second gap would move them rather than hide in them.
+
+I2C0 is not mapped, because nobody has measured what that register reads on a
+part and mapping it would be the machine asserting the PAC's reset value as
+behaviour. Filed at
+`docs/defects/2026-09-09-the-esptool-stub-reads-i2c0-a-block-the-c6-boot-set-does-not-map.md`.
+`--no-stub` is the path that works, and is what the recipe and the gate use.
+
 ## Flash, and the cache window
 
 The chip is a `flash::FlashImage`: read, program (an `&=`, because a NOR cell

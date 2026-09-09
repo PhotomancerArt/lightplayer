@@ -219,8 +219,10 @@ OPTIONS:
                             whose behaviour is only our reading of the PAC,
                             `measured` on anything no transcript has proved.
                             It applies to the blocks that PUBLISH a grade
-                            table — every accept block plus USB_DEVICE — and
-                            passes over the
+                            table — every accept block, plus the modelled
+                            ones that grade themselves: USB_DEVICE, UART0,
+                            UART1, GPIO, RMT, PCR, SPI1, EFUSE, I2C_ANA_MST —
+                            and passes over the
                             rest, because `nobody graded this block` is not
                             the same statement as `this block is modelled`.
                             The report names the blocks it checked. Tables
