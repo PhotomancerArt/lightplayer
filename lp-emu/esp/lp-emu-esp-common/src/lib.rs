@@ -38,6 +38,7 @@
 //! clock never enters the machine (plan PD5), so two runs of the same image
 //! with the same scripted host input are byte-identical.
 
+pub mod air;
 pub mod bus;
 pub mod elf;
 pub mod host;
@@ -48,6 +49,7 @@ pub mod regnames;
 pub mod strip;
 pub mod trace;
 
+pub use air::{Air, AirFrame, ParticipantId, PerfectAir};
 pub use bus::{
     BusScalars, RamRegion, SocBus, StrictViolation, event_id, event_local, event_peripheral,
 };

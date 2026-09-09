@@ -26,7 +26,12 @@
 //! vision's first artefact of the virtual-air work.
 //!
 //! Interrupt sources 0–3 (`WIFI_MAC`, `WIFI_MAC_NMI`, `WIFI_PWR`, `WIFI_BB`)
-//! are never raised: nothing here receives.
+//! are never raised: nothing here receives. M4 P1 established **which** of
+//! them the blob claims and **which registers its ISR reads and clears** —
+//! see [`RADIO_INT_SOURCES`], [`MAC_INT_EVENT_OFFSET`] and
+//! [`PWR_INT_EVENT_OFFSET`] — but raising one has never produced a TX
+//! completion, so this block still raises nothing. The evidence is in those
+//! constants' docs and in `docs/debt/emu-c6-radio-tx-never-completes.md`.
 
 use std::collections::BTreeSet;
 
@@ -214,6 +219,70 @@ impl TxHandoff {
     }
 }
 
+/// The interrupt **source** the blob's radio path claims, and the event and
+/// clear registers its ISR reads and writes.
+///
+/// All four are **observed**, on the `test_espnow` image, and none of them is
+/// acted on by this block today: M4 P1 recorded them and P2 owns whatever
+/// uses them. They are written down here rather than in a planning file
+/// because the next person to open this module is the one who needs them.
+///
+/// **Who claims the source.** esp-radio's
+/// `os_adapter_chip_specific::set_isr` routes sources 0 (`WIFI_MAC`) and 2
+/// (`WIFI_PWR`) to CPU interrupt 16, 5.6 ms into the boot:
+///
+/// ```text
+/// cyc=5619236 pc=0x4202c9d8 W4 INTERRUPT_CORE0+0x000 core_0_intr_map0 = 0x00000010
+/// cyc=5619237 pc=0x4202c9da W4 INTERRUPT_CORE0+0x008 core_0_intr_map2 = 0x00000010
+/// ```
+///
+/// CPU interrupt 16 was already enabled and prioritised by esp-hal's
+/// `_setup_interrupts` at boot (`W4 PLIC_MX+0x050 mxint16_pri = 0x00000001`,
+/// `W4 PLIC_MX+0x000 mxint_enable = 0x00010000`), and the esp-rtos tick
+/// (source 51) rides the same CPU interrupt — so the line is live and a
+/// raised source 0 *is* taken. Sources 1 (`WIFI_MAC_NMI`) and 3 (`WIFI_BB`)
+/// are left at the `_setup_interrupts` default of 31 and are never claimed.
+pub const RADIO_INT_SOURCES: [u16; 2] =
+    [crate::regs::source::WIFI_MAC, crate::regs::source::WIFI_PWR];
+
+/// `WIFI_MAC + 0x4c48` — the MAC's interrupt **event** word, and
+/// `+0x4c4c` its **write-one-to-clear** twin.
+///
+/// Observed by raising source 0 after a TX go strobe: the blob's ISR enters,
+/// reads the event word through `hal_mac_interrupt_get_event` (the symbol
+/// table names `0x4080d22e`, and the read is at `+0x4`), and writes the
+/// value it just read back into `+0x4c4c`:
+///
+/// ```text
+/// cyc=165843231 pc=0x4080d232 R4 WIFI_MAC+0x4c48 bb = 0x00001000
+/// cyc=165843260 pc=0x4080d23c W4 WIFI_MAC+0x4c4c bb = 0x00001000
+/// ```
+///
+/// `mac_txrx_init` writes `+0x4c4c = 0xffffffff` at 34.9 ms, which is what a
+/// clear register is written with at init, and is the second reading that
+/// says `+0x4c4c` is the clear rather than a second status word.
+///
+/// The ISR is a **loop**: it re-reads `+0x4c48` after clearing and exits when
+/// it reads zero. A block that raises the line without honouring the clear
+/// re-enters the ISR forever (measured: every 464 cycles).
+pub const MAC_INT_EVENT_OFFSET: u32 = 0x4c48;
+pub const MAC_INT_CLEAR_OFFSET: u32 = 0x4c4c;
+
+/// `WIFI_PWR + 0x37b0` / `+0x37b4` — the same pair on the PWR block, read
+/// and written by the *same* ISR entry through `hal_pwr_interrupt_get_event`
+/// (`0x4080d2d6`), with `+0x37ac` read beside it:
+///
+/// ```text
+/// cyc=165843243 pc=0x4080d2d6 R4 WIFI_PWR+0x37b0 pwr = 0x00000000
+/// cyc=165843250 pc=0x40008e88 R4 WIFI_PWR+0x37ac pwr = 0x00000000
+/// cyc=165843274 pc=0x4080d2e0 W4 WIFI_PWR+0x37b4 pwr = 0x00000000
+/// ```
+///
+/// So one ISR entry drains two event words, and the loop's exit condition
+/// covers both.
+pub const PWR_INT_EVENT_OFFSET: u32 = 0x37b0;
+pub const PWR_INT_CLEAR_OFFSET: u32 = 0x37b4;
+
 /// The register the blob programs with its RX DMA descriptor base, reported
 /// as the `WIFI RX config` trace line. Found in P6's G6-5 run: the only
 /// write of a DRAM address into the window is
@@ -235,14 +304,15 @@ pub struct WifiStub {
     /// ever fills it; the machine reads the bytes and empties it at the
     /// slice boundary that follows.
     tx_handoffs: Vec<TxHandoff>,
-    /// Whether anything is listening ([`Self::arm_tx_log`]).
+    /// Whether anything is listening ([`Self::arm_tx_log`] or
+    /// [`Self::arm_air`]).
     ///
     /// The recording ends the slice so the machine can read guest RAM before
     /// the buffer is reused, and ending a slice early is a real difference —
     /// it moves where a pending interrupt is taken. So a machine with no
-    /// `--tx-log` does not arm it, and its runs are byte-for-byte the runs it
-    /// had before this block could record anything.
-    tx_log_armed: bool,
+    /// `--tx-log` and no air does not arm it, and its runs are byte-for-byte
+    /// the runs it had before this block could record anything.
+    tx_capture_armed: bool,
 }
 
 impl WifiStub {
@@ -258,7 +328,7 @@ impl WifiStub {
             regs,
             touched: BTreeSet::new(),
             tx_handoffs: Vec::new(),
-            tx_log_armed: false,
+            tx_capture_armed: false,
         }
     }
 
@@ -276,7 +346,7 @@ impl WifiStub {
             regs,
             touched: BTreeSet::new(),
             tx_handoffs: Vec::new(),
-            tx_log_armed: false,
+            tx_capture_armed: false,
         }
     }
 
@@ -293,7 +363,7 @@ impl WifiStub {
             regs: RegFile::new("I2C_MST_MEM", crate::memmap::periph::I2C_MST_MEM_LEN),
             touched: BTreeSet::new(),
             tx_handoffs: Vec::new(),
-            tx_log_armed: false,
+            tx_capture_armed: false,
         }
     }
 
@@ -303,9 +373,17 @@ impl WifiStub {
     }
 
     /// Start recording TX handoffs. The machine calls this when a
-    /// `--tx-log` sink is set, and only then — see `tx_log_armed`.
+    /// `--tx-log` sink is set, and only then — see `tx_capture_armed`.
     pub fn arm_tx_log(&mut self) {
-        self.tx_log_armed = true;
+        self.tx_capture_armed = true;
+    }
+
+    /// The same recording, armed because this machine is in an
+    /// [`lp_emu_esp_common::air::Air`] rather than because a log is being
+    /// written. One flag, two reasons, and the same off switch: a machine
+    /// with neither is the machine that came before either existed.
+    pub fn arm_air(&mut self) {
+        self.tx_capture_armed = true;
     }
 
     /// Take the frames armed since the last call, for the machine's radio TX
@@ -366,7 +444,7 @@ impl Peripheral for WifiStub {
         // The TX handoff. Recorded, never answered: the block still does not
         // raise an interrupt and the guest is not told anything it would not
         // have been told without the log.
-        if self.tx_log_armed
+        if self.tx_capture_armed
             && self.name == "WIFI_MAC"
             && word == TX_PLCP0_OFFSET
             && merged & TX_GO_MASK == TX_GO_MASK
