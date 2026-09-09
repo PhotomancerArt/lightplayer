@@ -117,3 +117,13 @@ and "the application saw it" are **three different claims**, and an air that
 reports only the first two will read as working long after it has stopped
 being. `docs/debt/emu-c6-air-delivers-every-other-frame.md` is that finding;
 the payload's `gap` field is how it reaches a replay.
+
+**Amended 2026-09-09.** That defect is **fixed and the debt entry retired**,
+and the consequence above stands unchanged — it is the reason the third claim
+now has its own gate rather than a note about a past bug. The cause is worth
+one line here because it is a modelling rule and not a detail of this block:
+the delivery re-derived its write position from the ring **base** on every
+frame, and a driver's base is not a DMA engine's cursor. The blob recycles a
+consumed descriptor to the tail of its chain and moves the base one interrupt
+later; anything that re-derives instead of stepping loses precisely the frames
+that arrive inside that window.

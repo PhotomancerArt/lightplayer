@@ -81,8 +81,11 @@ const STAGGER_MS: u64 = 250;
 /// The knob exists because the first pair run of this payload found the
 /// receiving guest reporting **every other** frame, and "is that a phase
 /// artefact of two machines a fixed distance apart, or is it structural?" is a
-/// question one environment variable answers in a second. It is not a knob a
-/// committed transcript ever uses: the recorded pair is [`STAGGER_MS`].
+/// question one environment variable answers in a second. It was structural
+/// (`docs/debt/emu-c6-air-delivers-every-other-frame.md`, retired 2026-09-09),
+/// and the knob is kept because the *next* question of that shape deserves the
+/// same one-second answer. It is not a knob a committed transcript ever uses:
+/// the recorded pair is [`STAGGER_MS`].
 fn stagger_ms() -> u64 {
     std::env::var("LP_EMU_C6_ESPNOW_BROADCAST_STAGGER_MS")
         .ok()
@@ -280,49 +283,70 @@ fn the_pair_hears_the_other_boards_events() {
     }
 }
 
-/// **The finding this phase did not go looking for, pinned.**
+/// **The guest sees every frame the air writes into its ring.**
 ///
-/// A guest on this emulator's air reports **every other** frame written into
-/// its RX ring. The air is not losing them and the ring is not refusing them —
-/// `frames_offered`, `air_frames_delivered` and the sender's `frames_sent` all
-/// agree, and `air_frames_undelivered` is 0 — but the receiving application
-/// sees the peer's events 0, 2, 4, 6, 8, 10 and never an odd one.
+/// M4 P3 wrote this test the other way round. It pinned a defect it was fenced
+/// from fixing: the receiving application reported the peer's events 0, 2, 4,
+/// 6, 8, 10 and never an odd one, so this asserted `"gap":2` five times and
+/// `"gap":1` never, and its docstring said it "fails the day it is fixed,
+/// which is the point of pinning it".
 ///
-/// It is **not** a phase artefact of two machines a fixed distance apart:
-/// `LP_EMU_C6_ESPNOW_BROADCAST_STAGGER_MS` was swept and 25 ms (where the
-/// peer's frames land nowhere near this machine's own sends) gives exactly the
-/// same alternation as 250 ms. It is not the guest's own transmit interfering
-/// either, for the same reason.
+/// **It was fixed**, and this is the same run with the opposite expectation —
+/// inverted rather than deleted, so that a diff shows the day the air stopped
+/// dropping half of what it delivered. The cause was not in the air, the ring
+/// or the payload, all three of which P3 had already cleared: the delivery
+/// re-derived its write position from the ring **base** on every frame, and
+/// the blob recycles a consumed descriptor to the **tail** of its chain while
+/// advancing that base one ISR later. Every second frame landed in the window
+/// and was written into a descriptor the guest had already read. The fix gives
+/// the modelled DMA the cursor real DMA has — see
+/// `Esp32C6Machine::deliver_air_frame` and `WifiStub::rx_write_cursor` — and
+/// the instrumentation that named it is
+/// `tests/air_delivery.rs::what_the_guests_isr_reads_after_each_delivery`.
 ///
-/// Nothing before this payload could have found it. M4 P2 delivered **one**
-/// frame into a ring and M4 U1 completed **one** transmission; this is the
-/// first time anything on this machine has sent and received repeatedly, which
-/// is the whole point of a two-board payload.
-///
-/// The mechanism is `lp-emu-esp32c6/src/periph/wifi_stub.rs`'s — M4 P2's,
-/// merged, and fenced for this phase — so this phase **reports and pins** it
-/// rather than reaching into it (M4 P3 scope 5: "never tune a number toward
-/// silicon"). `docs/debt/emu-c6-air-delivers-every-other-frame.md` carries the
-/// question. This test fails the day it is fixed, which is the point of
-/// pinning it.
+/// `gap` is the receiving guest's own arithmetic — the distance between this
+/// frame's peer event number and the previous one's — so **1 means nothing was
+/// missed**, and 1 is what two real XIAO C6s record on every one of their
+/// records (`docs/reports/2026-09-09-espnow-broadcast-two-board-silicon-replay.md`).
+/// Nothing here was tuned toward that figure: the delivery was made correct
+/// and the figure followed.
 #[test]
 #[ignore = "needs an espnow-broadcast ELF in LP_EMU_C6_ESPNOW_BROADCAST_ELF"]
-fn the_air_surfaces_only_every_other_delivered_frame() {
+fn the_air_surfaces_every_delivered_frame() {
     let Some(elf) = elf() else { return };
     let (console_a, console_b) = run_the_pair(&elf, TxLogSink::Off);
     for (label, console) in [("A", &console_a), ("B", &console_b)] {
         assert_eq!(
-            console.matches(r#""gap":2"#).count(),
+            console.matches(r#""gap":1"#).count(),
             5,
-            "machine {label} no longer alternates — if the air was fixed, this test is the \
-             record of what it used to do and the payload's transcripts want re-recording:\n\
-             {console}"
+            "machine {label} did not hear a contiguous run of its peer's frames:\n{console}"
         );
         assert_eq!(
-            console.matches(r#""gap":1"#).count(),
+            console.matches(r#""gap":2"#).count(),
             0,
-            "machine {label} saw a contiguous pair, which the alternation says is \
-             impossible:\n{console}"
+            "machine {label} missed a frame the air delivered into its ring — the \
+             every-other-frame defect, or another with the same shape:\n{console}"
+        );
+        // The peer's own numbering, straight through: six frames, each one
+        // after the last.
+        let events: Vec<u32> = heard(console).into_iter().map(|(_, e)| e).collect();
+        assert_eq!(events.len(), 6, "machine {label}: {events:?}");
+        assert!(
+            events.windows(2).all(|w| w[1] == w[0] + 1),
+            "machine {label} heard a broken run: {events:?}"
+        );
+        // And the four-rung payload ladder at full resolution, which is what
+        // hearing every frame looks like on this payload — the alternation saw
+        // 0, 24, 0, 24, 0, 24 and silicon sees all four rungs.
+        let rungs: std::collections::BTreeSet<&str> = console
+            .lines()
+            .filter(|l| l.contains("[espnow-broadcast] rx "))
+            .filter_map(|l| l.split("payload_len=").nth(1))
+            .collect();
+        assert_eq!(
+            rungs.len(),
+            4,
+            "machine {label} saw the ladder at half resolution: {rungs:?}"
         );
     }
 }

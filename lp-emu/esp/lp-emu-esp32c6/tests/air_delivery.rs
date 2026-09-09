@@ -1313,3 +1313,263 @@ fn u1_what_the_isr_reads_after_an_armed_tx() {
         println!("console: {:?}", m.usb_sj().text());
     }
 }
+
+// ---------------------------------------------------------------------------
+// The every-other-frame delivery
+// ---------------------------------------------------------------------------
+
+/// The `espnow-broadcast` image — the first payload on this machine that both
+/// sends and receives repeatedly, and so the only one that can show a *stream*
+/// of receptions. Driven by **`LP_EMU_C6_ESPNOW_BROADCAST_ELF`**.
+fn broadcast_elf() -> Option<String> {
+    match std::env::var("LP_EMU_C6_ESPNOW_BROADCAST_ELF") {
+        Ok(path) if std::path::Path::new(&path).is_file() => Some(path),
+        Ok(path) => panic!("LP_EMU_C6_ESPNOW_BROADCAST_ELF={path} is not a file"),
+        Err(_) => {
+            eprintln!(
+                "air_delivery: skipped — set LP_EMU_C6_ESPNOW_BROADCAST_ELF to a \
+                 `test_espnow_broadcast,esp32c6` ELF"
+            );
+            None
+        }
+    }
+}
+
+/// Every descriptor in the guest's RX ring, walked from the base it programmed:
+/// `(address, dw0)` in the chain's own order.
+fn ring(m: &mut Esp32C6Machine) -> Vec<(u32, u32)> {
+    let Some(base) = m.peek_word(WIFI_MAC + 0x4084) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let mut desc = base;
+    while out.len() < 16 {
+        let Some(dw0) = m.peek_word(desc) else { break };
+        out.push((desc, dw0));
+        match m.peek_word(desc + 8) {
+            Some(0) | None => break,
+            Some(next) => desc = next,
+        }
+    }
+    out
+}
+
+/// One character per descriptor: `H` where the hardware still owns it
+/// (`dw0[31]`), `.` where it has been handed back.
+fn owners(ring: &[(u32, u32)]) -> String {
+    ring.iter()
+        .map(|(_, dw0)| if dw0 & (1 << 31) != 0 { 'H' } else { '.' })
+        .collect()
+}
+
+/// The index of the descriptor a delivery would take — the first one the
+/// hardware still owns.
+fn first_owned(ring: &[(u32, u32)]) -> Option<usize> {
+    ring.iter().position(|(_, dw0)| dw0 & (1 << 31) != 0)
+}
+
+/// A sender and a receiver of the `espnow-broadcast` image, both up.
+///
+/// This is the lockstep pair taken apart, so that the receiving machine can be
+/// stopped and read *between* deliveries — the one thing [`Lockstep`] does not
+/// offer and the whole question needs.
+fn broadcast_sender_and_receiver(
+    elf: &str,
+    trace: Option<&SharedBuffer>,
+) -> (Esp32C6Machine, Esp32C6Machine) {
+    let mut sender = machine(elf, "a0:f2:62:87:b4:8c");
+    sender.arm_air(ParticipantId(1));
+    let mut receiver = build(elf, "a0:f2:62:85:a8:7c", trace, TxLogSink::Off);
+    receiver.arm_air(ParticipantId(0));
+    sender.run_until(&until(ms(1_000)));
+    receiver.run_until(&until(ms(1_000)));
+    (sender, receiver)
+}
+
+/// **The instrumentation that named the cause of
+/// `docs/debt/emu-c6-air-delivers-every-other-frame.md`.**
+///
+/// Eight frames from a real `espnow-broadcast` sender, handed to a real
+/// `espnow-broadcast` receiver **one at a time, with the receiver run in
+/// between**, and after every one: the ring's owner bits, the descriptor the
+/// walk chose, the cursors the delivery wrote, what the guest read back from
+/// `+0x4084` / `+0x4088` / `+0x408c`, and whether the application printed an
+/// `rx` line.
+#[test]
+#[ignore = "needs an espnow-broadcast ELF in LP_EMU_C6_ESPNOW_BROADCAST_ELF"]
+fn what_the_guests_isr_reads_after_each_delivery() {
+    let Some(elf) = broadcast_elf() else { return };
+    let buf = SharedBuffer::new();
+    let (mut sender, mut receiver) = broadcast_sender_and_receiver(&elf, Some(&buf));
+    println!("ring at rest: {}", owners(&ring(&mut receiver)));
+
+    let mut at = ms(1_000);
+    let mut carried: Vec<Vec<u8>> = Vec::new();
+    while carried.len() < 8 && at < ms(2_000) {
+        at += ms(50);
+        sender.run_until(&until(at));
+        carried.extend(sender.take_air_frames().into_iter().map(|f| f.bytes));
+    }
+    println!("the sender armed {} frames", carried.len());
+
+    println!(
+        "\n {:>2} {:<10} {:>10} {:<10}  {:<10} {:<10} {:>4}  {}",
+        "#", "base", "ring", "wrote into", "+0x408c", "+0x4088", "rx?", "what the guest read back"
+    );
+    let mut rx_lines = 0usize;
+    let mut wrote_into: Vec<u32> = Vec::new();
+    let mut null_cursor = 0usize;
+    let mut reload_strobes = 0usize;
+    for frame in carried.iter() {
+        let n = wrote_into.len();
+        let base = receiver
+            .peek_word(WIFI_MAC + 0x4084)
+            .expect("the ring base");
+        let before = ring(&mut receiver);
+        let took = first_owned(&before);
+        let mark = buf.lines().len();
+        offer(&mut receiver, at, frame.clone());
+        let last = receiver.peek_word(WIFI_MAC + 0x408c);
+        let next = receiver.peek_word(WIFI_MAC + 0x4088);
+        at += ms(50);
+        receiver.run_until(&until(at));
+        let lines = buf.lines();
+        let reads: Vec<String> = lines
+            .iter()
+            .skip(mark)
+            .filter(|l| l.contains("+0x4084") || l.contains("+0x4088") || l.contains("+0x408c"))
+            .map(|l| {
+                let off = l
+                    .split("+0x")
+                    .nth(1)
+                    .unwrap_or("")
+                    .split(' ')
+                    .next()
+                    .unwrap_or("");
+                let value = l
+                    .split("= ")
+                    .nth(1)
+                    .unwrap_or("")
+                    .split(' ')
+                    .next()
+                    .unwrap_or("");
+                let kind = if l.contains(" R4 ") { 'R' } else { 'W' };
+                format!("{kind}{off}={value}")
+            })
+            .collect();
+        reload_strobes += lines
+            .iter()
+            .skip(mark)
+            .filter(|l| l.contains("+0x4080"))
+            .count();
+        let now = receiver
+            .usb_sj()
+            .text()
+            .matches("[espnow-broadcast] rx ")
+            .count();
+        let printed = now > rx_lines;
+        rx_lines = now;
+        if next == Some(0) {
+            null_cursor += 1;
+        }
+        wrote_into.push(last.unwrap_or(0));
+        let _ = took;
+        println!(
+            " {:>2} {:#010x} {:>10} {:#010x}  {:<10} {:<10} {:>4}  {}",
+            n,
+            base,
+            owners(&before),
+            last.unwrap_or(0),
+            last.map(|v| format!("{v:#010x}")).unwrap_or_default(),
+            next.map(|v| format!("{v:#010x}")).unwrap_or_default(),
+            if printed { "yes" } else { "NO" },
+            reads.join(" ")
+        );
+    }
+    println!("\nfinal ring: {}", owners(&ring(&mut receiver)));
+
+    // The three facts the fix rests on.
+    let repeats = wrote_into.windows(2).filter(|w| w[0] == w[1]).count();
+    println!(
+        "descriptors written into : {:?}",
+        wrote_into
+            .iter()
+            .map(|d| format!("{d:#x}"))
+            .collect::<Vec<_>>()
+    );
+    println!(
+        "consecutive repeats      : {repeats} of {}",
+        wrote_into.len() - 1
+    );
+    println!("deliveries publishing +0x4088 = 0 : {null_cursor}");
+    println!("accesses to the reload strobe +0x4080 : {reload_strobes}");
+    println!("rx lines the application printed : {rx_lines}");
+    println!("console:\n{}", receiver.usb_sj().text());
+
+    // **The regression, at the mechanism rather than at the payload's
+    // arithmetic.** Before the fix this read `4 of 8` repeats and `4` null
+    // cursors; the payload's `gap` is downstream of both.
+    assert_eq!(
+        repeats, 0,
+        "two deliveries in a row went into the same descriptor — the base was \
+         walked again before the guest advanced it: {wrote_into:#x?}"
+    );
+    assert_eq!(
+        null_cursor, 0,
+        "a delivery published +0x4088 = 0, the null RX cursor M4 P2 recorded \
+         the blob refusing to follow"
+    );
+}
+
+/// **The regression this file owes the fix**, stated without the payload in
+/// the way: eight frames offered to a running guest, one at a time, and the
+/// air puts each of them in a **different** descriptor.
+///
+/// The defect wrote every second frame into the descriptor it had just used —
+/// the one the guest had already read and recycled to the tail of its chain,
+/// while `+0x4084` still named it. That is a fact about the delivery walk, and
+/// it is checkable without asking the application what it thought it heard,
+/// which is what [`what_the_guests_isr_reads_after_each_delivery`] prints and
+/// what this asserts.
+#[test]
+#[ignore = "needs an espnow-broadcast ELF in LP_EMU_C6_ESPNOW_BROADCAST_ELF"]
+fn every_delivery_takes_a_descriptor_the_guest_has_not_already_read() {
+    let Some(elf) = broadcast_elf() else { return };
+    let (mut sender, mut receiver) = broadcast_sender_and_receiver(&elf, None);
+    let mut at = ms(1_000);
+    let mut carried: Vec<Vec<u8>> = Vec::new();
+    while carried.len() < 8 && at < ms(2_000) {
+        at += ms(50);
+        sender.run_until(&until(at));
+        carried.extend(sender.take_air_frames().into_iter().map(|f| f.bytes));
+    }
+    assert!(carried.len() >= 8, "the sender armed {}", carried.len());
+
+    let mut wrote_into = Vec::new();
+    for frame in carried.iter().take(8) {
+        let before = receiver.air_frames_delivered();
+        offer(&mut receiver, at, frame.clone());
+        assert_eq!(
+            receiver.air_frames_delivered(),
+            before + 1,
+            "the ring refused a frame: {:?}",
+            owners(&ring(&mut receiver))
+        );
+        wrote_into.push(
+            receiver
+                .peek_word(WIFI_MAC + 0x408c)
+                .expect("the last-filled register"),
+        );
+        at += ms(50);
+        receiver.run_until(&until(at));
+    }
+    println!("descriptors written into: {wrote_into:#x?}");
+    let distinct: std::collections::BTreeSet<u32> = wrote_into.iter().copied().collect();
+    assert_eq!(
+        distinct.len(),
+        wrote_into.len(),
+        "eight deliveries, {} descriptors — the every-other-frame defect wrote \
+         each one twice",
+        distinct.len()
+    );
+}

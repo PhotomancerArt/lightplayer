@@ -679,6 +679,26 @@ pub struct WifiStub {
     /// default and turned on by [`Self::arm_tx_completion`] — see that
     /// method for why this is a switch and not simply how the block behaves.
     tx_completion_armed: bool,
+    /// **The descriptor the modelled RX DMA will fill next** — this block's
+    /// own cursor into the guest's ring, and the thing
+    /// [`RX_DSCR_NEXT_OFFSET`] answers with.
+    ///
+    /// `None` before anything has been received, and after a fill that
+    /// reached the chain's NULL: both mean "start again from the base the
+    /// guest programmed".
+    ///
+    /// It is **state** rather than something re-derived per frame, and that
+    /// distinction is the whole of
+    /// `docs/debt/emu-c6-air-delivers-every-other-frame.md`. The guest
+    /// recycles a consumed descriptor by moving it to the **tail** of its
+    /// chain and advancing [`RX_DMA_BASE_OFFSET`] one ISR **later**, so for
+    /// the length of that window the base still names a descriptor the guest
+    /// has already read and handed back. A delivery that re-derives its
+    /// position from the base falls into that window on every second frame,
+    /// writes into the ring's tail, and publishes the tail's NULL `next` as
+    /// the RX cursor — which the guest then declines to follow. Real DMA does
+    /// not re-derive: it holds a pointer and steps it.
+    rx_write_cursor: Option<u32>,
 }
 
 impl WifiStub {
@@ -698,6 +718,7 @@ impl WifiStub {
             rx_int_event_bits: RX_INT_EVENT_BITS,
             index: 0,
             tx_completion_armed: false,
+            rx_write_cursor: None,
         }
     }
 
@@ -719,6 +740,7 @@ impl WifiStub {
             rx_int_event_bits: RX_INT_EVENT_BITS,
             index: 0,
             tx_completion_armed: false,
+            rx_write_cursor: None,
         }
     }
 
@@ -739,6 +761,7 @@ impl WifiStub {
             rx_int_event_bits: RX_INT_EVENT_BITS,
             index: 0,
             tx_completion_armed: false,
+            rx_write_cursor: None,
         }
     }
 
@@ -814,6 +837,26 @@ impl WifiStub {
         }
     }
 
+    /// Where the modelled RX DMA will write the next frame — see
+    /// `rx_write_cursor`. `None` means "wherever [`Self::rx_dma_base`]
+    /// points", which is what a DMA that has just been programmed does.
+    pub fn rx_write_cursor(&self) -> Option<u32> {
+        if self.name != "WIFI_MAC" {
+            return None;
+        }
+        self.rx_write_cursor
+    }
+
+    /// Step the cursor. The delivery path calls this with the `next` link of
+    /// the descriptor it just filled — `None` at the chain's NULL, which
+    /// sends the following delivery back to the base.
+    pub fn set_rx_write_cursor(&mut self, next: Option<u32>) {
+        if self.name != "WIFI_MAC" {
+            return;
+        }
+        self.rx_write_cursor = next;
+    }
+
     /// Put [`RX_INT_EVENT_BITS`] (or whatever [`Self::set_rx_event_bits`]
     /// last set) into the MAC's event word.
     ///
@@ -823,6 +866,12 @@ impl WifiStub {
     /// ISR will read and the machine sets the level; the two belong
     /// together and [`Esp32C6Machine::offer_air_frame`] is the only caller.
     ///
+    /// It also **steps this block's own write cursor** to `next`, because
+    /// [`RX_DSCR_NEXT_OFFSET`] and `rx_write_cursor` are one fact — where the
+    /// DMA goes next — and a fact derived twice is a fact nothing checks.
+    /// `next == 0` is the chain's NULL and parks the cursor, which sends the
+    /// following delivery back to [`RX_DMA_BASE_OFFSET`].
+    ///
     /// [`Esp32C6Machine::offer_air_frame`]: crate::machine::Esp32C6Machine::offer_air_frame
     pub fn raise_rx_interrupt(&mut self, descriptor: u32, next: u32) {
         if self.name != "WIFI_MAC" {
@@ -830,6 +879,7 @@ impl WifiStub {
         }
         self.regs.poke(RX_LAST_DSCR_OFFSET, descriptor);
         self.regs.poke(RX_DSCR_NEXT_OFFSET, next);
+        self.rx_write_cursor = (next != 0).then_some(next);
         let pending = self.regs.stored(MAC_INT_EVENT_OFFSET) | self.rx_int_event_bits;
         self.regs.poke(MAC_INT_EVENT_OFFSET, pending);
     }

@@ -1108,13 +1108,23 @@ own ready line.)
 
 **How a delivery works.** At the slice boundary — the mirror of
 `drain_tx_log`, and for the same reason: a peripheral cannot touch guest
-memory, the machine can — the machine reads the ring base the blob programmed
-into `WIFI_MAC+0x4084`, walks the chain through each descriptor's `next`
-until it finds one the hardware still owns whose buffer is big enough, writes
-the header and the frame into that buffer, hands the descriptor back, points
-`WIFI_MAC+0x408c` and `+0x4088` at it, and raises interrupt source 0 with bit
-14 in the MAC's event word. Everything it touches is the guest's own: no
-address is assumed and nothing is allocated.
+memory, the machine can — the machine starts at **the modelled DMA's own write
+cursor** (`WifiStub::rx_write_cursor`, the ring base the blob programmed into
+`WIFI_MAC+0x4084` until the first frame steps it), walks the chain through
+each descriptor's `next` until it finds one the hardware still owns whose
+buffer is big enough, writes the header and the frame into that buffer, hands
+the descriptor back, points `WIFI_MAC+0x408c` at that descriptor and `+0x4088`
+at the one after it — which is the same step that moves the cursor — and
+raises interrupt source 0 with bit 14 in the MAC's event word. Everything it
+touches is the guest's own: no address is assumed and nothing is allocated.
+
+**The cursor is state, and that is load-bearing.** A walk restarted from
+`+0x4084` on every frame delivers every second one into a descriptor the guest
+has already read, because the guest recycles a consumed descriptor to the tail
+of its chain and moves `+0x4084` one ISR later. See "the honesty section"
+below; the short version is that the base is the *driver's* head and the
+cursor is the *hardware's*, and modelling one with the other loses half the
+traffic.
 
 **What the guest decided, and what we did.** Every row below was settled by
 changing the value and watching the receiving guest, not by reasoning about a
@@ -1246,26 +1256,57 @@ particular not the C6's 28 % frame truncation under a WiFi scan
 (`docs/debt/c6-scan-truncation-accepted.md`), which is a timing property of
 the blob and the MAC and cannot reproduce here.
 
-**And one thing it does not do that a reader would assume it does: deliver
-every frame to the application.** M4 P3's two-machine payload found that a
-receiving guest surfaces **every other** frame written into its ring — the
-air offers them all, the ring takes them all
-(`frames_sent == frames_offered == air_frames_delivered`,
-`air_frames_undelivered == 0`), and the application sees the peer's events
-0, 2, 4, 6, 8, 10. It is not a phase artefact of the pair's stagger: 25 ms
-and 250 ms alternate identically. Nothing found it earlier because nothing
-had sent and received repeatedly — M4 P2 delivered one frame and M4 U1
-completed one transmission. It is open, pinned by a test, and written up in
-`docs/debt/emu-c6-air-delivers-every-other-frame.md`.
+**Every frame the air delivers reaches the application — and for a while it
+did not.** M4 P3's two-machine payload found a receiving guest surfacing
+**every other** frame written into its ring: the air offered them all, the
+ring took them all (`frames_sent == frames_offered == air_frames_delivered`,
+`air_frames_undelivered == 0`), and the application saw the peer's events
+0, 2, 4, 6, 8, 10. It was not a phase artefact of the pair's stagger — 25 ms
+and 250 ms alternated identically — and nothing found it earlier because
+nothing had sent and received repeatedly (M4 P2 delivered one frame; M4 U1
+completed one transmission).
+
+The cause was the delivery's **write position**, and it is worth stating
+because it is a rule about modelling DMA rather than a detail about this
+block. The delivery re-derived that position from `RX_DMA_BASE_OFFSET`
+(`+0x4084`) on every frame and took the first descriptor the hardware still
+owned. But the blob recycles a descriptor it has consumed by moving it to the
+**tail** of its chain — `owner` back to 1, `next` to NULL, the old tail
+linked to it — and advances `+0x4084` one ISR **later**. For the width of that
+window the base still names a descriptor the guest has already read, so every
+second delivery wrote into the ring's tail and published that tail's NULL as
+`RX_DSCR_NEXT_OFFSET` — the null cursor this block's own docs already record
+the blob refusing to follow. Real DMA does not re-derive its position; it
+holds a pointer and steps it, so `WifiStub` now holds one
+(`rx_write_cursor`), stepped by the same call that writes `+0x4088` so the two
+cannot disagree, with a fall back to the base for a cursor gone stale.
+`tests/air_delivery.rs::what_the_guests_isr_reads_after_each_delivery` is the
+instrumentation that named it and
+`::every_delivery_takes_a_descriptor_the_guest_has_not_already_read` the
+regression;
+`tests/espnow_broadcast_pair.rs::the_air_surfaces_every_delivered_frame` is
+M4 P3's pin, inverted.
 
 **Grades.** Every one of these claims is `modeled`, and stays `modeled`. A
 grade moves only with a transcript (`docs/adr/2026-09-06-esp-soc-emulator-architecture.md`),
 and the transcript that could move this one is a **two-board silicon
-capture**, which `d1-desk-batch.md` step 3 is still owed: M4 P3's sitting
-found one board absent from the bus and the other's port wedged, so the
-emulated pair's four committed transcripts
+capture**. That capture now exists —
+`docs/reports/2026-09-09-espnow-broadcast-two-board-silicon-replay.md`, two
+XIAO C6s, `gap` 1 on every record and the four-rung payload ladder walked in
+full — and it is what says the alternation above was the emulator's and not
+the payload's. It is evidence weighed in a `because`, not a promotion.
+
+Replayed against those two silicon transcripts, the emulated pair now compares
+**60 of 60** structural fields on both machines, where the committed pre-fix
+capture compares 55 — the five differences being exactly `espnow-rx[1..5].gap`,
+2 against silicon's 1.
+
+⚠️ **The emulated pair's four committed transcripts
 (`lp-emu/transcripts/esp32c6/espnow-broadcast/`, `t1` and `t2`, one per
-machine) currently have no silicon twin.
+machine) predate the fix** and still carry `"gap":2`, so a replay of *them*
+still fails those five fields. They want re-recording, which is a transcript
+change and belongs with whoever holds that directory; the 60-of-60 above was
+measured on a scratch re-run of the same pair.
 
 **No pin claim, and the reason is the payload.** ESP-NOW events are **console
 fields, not pin fields**: `espnow-broadcast` declares no pin capture, so no
