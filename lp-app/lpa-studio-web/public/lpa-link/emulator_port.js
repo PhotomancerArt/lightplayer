@@ -25,10 +25,17 @@
 // here pattern-matches a dance, and nothing here sends a verb Studio did not
 // ask for.
 
+// `WebSocket.OPEN` / `WebSocket.CLOSED`, spelled out: the readyState codes
+// are the protocol's, not one implementation's, and a scripted door reports
+// the same numbers without having to subclass `WebSocket`.
+const SOCKET_OPEN = 1;
+const SOCKET_CLOSED = 3;
+
 /// `GET /boards` — the registry, in the order the server was given them.
-export async function listBoards(baseUrl) {
+export async function listBoards(baseUrl, { fetchImpl = null } = {}) {
   const url = new URL("boards", baseWithSlash(baseUrl));
-  const response = await fetch(url, { cache: "no-store" });
+  const get = fetchImpl ?? globalThis.fetch.bind(globalThis);
+  const response = await get(url, { cache: "no-store" });
   if (!response.ok) {
     throw new Error(`emu serve: GET ${url} answered ${response.status}`);
   }
@@ -37,13 +44,19 @@ export async function listBoards(baseUrl) {
 }
 
 // A backing is `{ describe(), listBoards(), connect(boardId) }`. The polyfill
-// takes one of these; this is the native one, and a scripted double (the CI
-// half of the conformance suite) or a wasm worker is the same three methods.
-export function nativeBacking(baseUrl) {
+// takes one of these; this is the native one, and a wasm worker would be the
+// same three methods.
+//
+// `transport` names the two globals this backing reaches for — `fetch` and
+// `WebSocket`. The CI half of the conformance suite passes a scripted door
+// there instead of standing a server up, so everything in this file and in
+// the polyfill above it is the code CI actually runs; only the socket is
+// scripted. Production passes nothing.
+export function nativeBacking(baseUrl, transport = {}) {
   return {
     describe: () => `emu serve ${baseUrl}`,
-    listBoards: () => listBoards(baseUrl),
-    connect: (boardId, board) => EmulatorPort.connect(baseUrl, boardId, board),
+    listBoards: () => listBoards(baseUrl, transport),
+    connect: (boardId, board) => EmulatorPort.connect(baseUrl, boardId, board, transport),
   };
 }
 
@@ -53,20 +66,25 @@ export class EmulatorPort {
   // with `open()`/`close()`. That split is the door's coupling rule, not a
   // convention of ours: a byte client's connect IS the machine's `open` and
   // its disconnect IS the machine's `close`, so `open()` below sends no verb.
-  static async connect(baseUrl, boardId, board = null) {
-    const port = new EmulatorPort(baseUrl, boardId, board);
+  static async connect(baseUrl, boardId, board = null, transport = {}) {
+    const port = new EmulatorPort(baseUrl, boardId, board, transport);
     await port._openControl();
     return port;
   }
 
-  constructor(baseUrl, boardId, board) {
+  constructor(baseUrl, boardId, board, transport = {}) {
     this.baseUrl = baseUrl;
     this.boardId = boardId;
     this.board = board;
+    this._Socket = transport.WebSocketImpl ?? globalThis.WebSocket;
     this._control = null;
     this._bytes = null;
     this._pending = [];
     this._byteListeners = new Set();
+    // Bytes that arrived before anyone was reading. A real port buffers them
+    // between `open()` and `getReader()` and so does this one — dropping them
+    // would lose the board's greeting on every single open.
+    this._pendingBytes = [];
     this._eventListeners = new Map();
     // The last guest cycle any control reply named. A reply whose cycle is
     // BELOW it is a reboot: the machine went back to its power-on state, so
@@ -81,12 +99,15 @@ export class EmulatorPort {
 
   onBytes(callback) {
     this._byteListeners.add(callback);
+    for (const bytes of this._pendingBytes.splice(0, this._pendingBytes.length)) {
+      callback(bytes);
+    }
     return () => this._byteListeners.delete(callback);
   }
 
   write(bytes) {
     const socket = this._bytes;
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
+    if (!socket || socket.readyState !== SOCKET_OPEN) {
       throw new Error(`emulated board ${this.boardId}: byte channel is not open`);
     }
     socket.send(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes));
@@ -106,6 +127,7 @@ export class EmulatorPort {
   // so this opens a socket and sends no verb. Sending `open` here as well
   // would answer `err` — the port is already open, by our own connect.
   async open() {
+    this._pendingBytes.length = 0;
     if (this._bytes) {
       throw portBusy(`emulated board ${this.boardId} is already open in this page`);
     }
@@ -201,7 +223,7 @@ export class EmulatorPort {
       return Promise.reject(new Error(`emulated board ${this.boardId}: port disposed`));
     }
     const socket = this._control;
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
+    if (!socket || socket.readyState !== SOCKET_OPEN) {
       return Promise.reject(
         new Error(`emulated board ${this.boardId}: control channel is not open`),
       );
@@ -262,7 +284,7 @@ export class EmulatorPort {
   // --- internals -----------------------------------------------------------
 
   _openControl() {
-    const socket = new WebSocket(this._url("control"));
+    const socket = new this._Socket(this._url("control"));
     return new Promise((resolve, reject) => {
       socket.addEventListener("open", () => {
         this._control = socket;
@@ -314,7 +336,7 @@ export class EmulatorPort {
   }
 
   _openBytes() {
-    const socket = new WebSocket(this._url("bytes"));
+    const socket = new this._Socket(this._url("bytes"));
     socket.binaryType = "arraybuffer";
     return new Promise((resolve, reject) => {
       let opened = false;
@@ -329,6 +351,10 @@ export class EmulatorPort {
           data instanceof ArrayBuffer
             ? new Uint8Array(data)
             : new TextEncoder().encode(String(data));
+        if (this._byteListeners.size === 0) {
+          this._pendingBytes.push(bytes);
+          return;
+        }
         for (const listener of this._byteListeners) {
           listener(bytes);
         }
@@ -434,7 +460,7 @@ function parsePins(line) {
 }
 
 function closeSocket(socket) {
-  if (socket.readyState === WebSocket.CLOSED) {
+  if (socket.readyState === SOCKET_CLOSED) {
     return Promise.resolve();
   }
   return new Promise((resolve) => {

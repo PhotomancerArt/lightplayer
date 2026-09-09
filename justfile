@@ -234,6 +234,48 @@ lpa-fs-opfs-test: install-wasm32-target
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner \
         cargo test -p lpa-fs-opfs --target wasm32-unknown-unknown
 
+# The Web Serial JS layer in a real Chrome — the harness
+# `docs/debt/web-serial-js-untestable.md` has been asking for since
+# 2026-07-10 (emulator plan two, M2).
+#
+# It drives the SHIPPED `browser_serial.js` (and, through its own dynamic
+# import, `browser_esp32_device_controller.js`) over the `navigator.serial`
+# polyfill, which sits on `EmulatorPort`, which sits on a SCRIPTED door
+# standing in for `lp-cli emu serve`. Hermetic: no server, no sockets, no
+# firmware, no timers, and nothing in it asserts a duration.
+#
+# `scripts/wasm-serial-test-runner.sh` is the runner: it serves Studio's own
+# static root so `/lpa-link/*.js` resolves the way it does in a real Studio.
+# CI runs this in the path-gated `validate-browser` job.
+lpa-link-browser-test: install-wasm32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v wasm-bindgen-test-runner >/dev/null 2>&1; then
+        echo "wasm-bindgen-test-runner not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
+        exit 1
+    fi
+    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="$PWD/scripts/wasm-serial-test-runner.sh" \
+        cargo test -p lpa-link --target wasm32-unknown-unknown \
+            --features browser-serial-esp32 --test browser_serial_conformance
+
+# The SAME assertions against a live `lp-cli emu serve` holding a real
+# emulated C6 — the other half of M2's conformance suite.
+#
+# Deliberately NOT a CI job (plan two PD9, E-cost pre-ruled): Chrome +
+# chromedriver + the emulator + a firmware build is far over the ~5-minute
+# line. An agent runs this by hand; CI runs the scripted half above.
+#
+# The script starts the server, reads the ephemeral port it prints, runs the
+# suite against it, and stops the server BY PID — never `pkill -f`.
+lpa-link-browser-test-live IMAGE="": install-wasm32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v wasm-bindgen-test-runner >/dev/null 2>&1; then
+        echo "wasm-bindgen-test-runner not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
+        exit 1
+    fi
+    exec scripts/emu/browser-conformance-live.sh "{{IMAGE}}"
+
 # Serve the smoke page for a human to watch (render product, output ring, boot
 # checklist). This recipe never exits on its own: it cannot fail, it can only
 # serve a page that says "error". Use `fw-browser-smoke-check` for a verdict.
