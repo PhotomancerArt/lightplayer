@@ -2,6 +2,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use lp_emu_esp32c6::flash::FlashBacking;
+use lp_emu_esp32c6::loader::EfuseIdentity;
 use lp_emu_esp32c6::machine::{
     AppSource, BootMode, Esp32C6Builder, Esp32C6Machine, FrameSink, Outcome, PinLogSink,
     StopCondition, TimeGrade, TxLogSink, Uart0Sink, UsbHost, UsbSjDrain, UsbSjSink,
@@ -14,53 +15,46 @@ use super::args::{EmuChip, EmuCli, EmuCommand, Grade, LinkKind, RunArgs};
 pub fn handle_emu(cli: EmuCli) -> Result<()> {
     match cli.command {
         EmuCommand::Run(args) => run(args),
+        EmuCommand::Serve(args) => super::serve::serve(args),
     }
 }
 
-fn run(args: RunArgs) -> Result<()> {
-    let EmuChip::Esp32C6 = args.chip;
+impl Grade {
+    /// The machine's own name for this grade. Shared so that `serve` and
+    /// `run` cannot drift into two spellings of one thing.
+    pub(super) fn time_grade(self) -> TimeGrade {
+        match self {
+            Grade::T1 => TimeGrade::T1,
+            Grade::T2 => TimeGrade::T2,
+            Grade::T3 => TimeGrade::T3,
+        }
+    }
+}
 
-    let micros = parse_duration_us(&args.timeout)?;
-    let grade = match args.time_grade {
-        Grade::T1 => TimeGrade::T1,
-        Grade::T2 => TimeGrade::T2,
-        Grade::T3 => TimeGrade::T3,
-    };
-
-    let mut builder = Esp32C6Builder::new()
-        .time_grade(grade)
-        .strict(args.strict_bus)
-        .usb_host(if args.host_absent {
-            UsbHost::Absent
-        } else {
-            UsbHost::Attached { draining: true }
-        })
-        // `--monitor` takes the socket out of the port's open/close story:
-        // the host is declared attached and draining from power-on and stays
-        // that way, so a client that uploads and leaves does not take the
-        // console with it.
-        .usb_sj_drain(if args.monitor {
-            UsbSjDrain::Manual
-        } else {
-            UsbSjDrain::Auto
-        });
-
-    // The image, and with it the boot path. `--merged` is the whole chip:
-    // the hart starts at the reset vector and the real ROM finds the
-    // bootloader, so a `--flash` beside it would be a second chip and is
-    // refused rather than silently ignored.
-    match (&args.elf, &args.merged) {
+/// The image, and with it the boot path — the half of `run` that `serve`
+/// needs per board.
+///
+/// `--merged` is the whole chip: the hart starts at the reset vector and the
+/// real ROM finds the bootloader, so a flash file beside it would be a second
+/// chip and is refused rather than silently ignored.
+pub(super) fn apply_image(
+    mut builder: Esp32C6Builder,
+    elf: Option<&Path>,
+    merged: Option<&Path>,
+    flash: Option<&Path>,
+) -> Result<Esp32C6Builder> {
+    match (elf, merged) {
         (Some(elf), None) => {
             check_file(elf, "--elf")?;
-            builder = builder.app(AppSource::Path(elf.clone()));
-            builder = match &args.flash {
-                Some(path) => builder.flash(FlashBacking::File(path.clone())),
+            builder = builder.app(AppSource::Path(elf.to_path_buf()));
+            builder = match flash {
+                Some(path) => builder.flash(FlashBacking::File(path.to_path_buf())),
                 None => builder.flash(FlashBacking::Blank),
             };
         }
         (None, Some(merged)) => {
             check_file(merged, "--merged")?;
-            if args.flash.is_some() {
+            if flash.is_some() {
                 bail!(
                     "--merged is the whole chip's bytes; --flash would be a second one. \
                      Drop one: --merged for a boot from the reset vector through the real \
@@ -83,7 +77,7 @@ fn run(args: RunArgs) -> Result<()> {
                 })?;
             builder = builder
                 .boot_mode(BootMode::RomUp)
-                .flash(FlashBacking::Copy(merged.clone()))
+                .flash(FlashBacking::Copy(merged.to_path_buf()))
                 .flash_len(len);
         }
         (Some(_), Some(_)) => unreachable!("clap's `image` group allows only one"),
@@ -91,6 +85,52 @@ fn run(args: RunArgs) -> Result<()> {
             "nothing to run: pass --elf <fw-esp32c6> for a direct load, or --merged \
              <chip.bin> to boot from the reset vector through the real ROM"
         ),
+    }
+    Ok(builder)
+}
+
+fn run(args: RunArgs) -> Result<()> {
+    let EmuChip::Esp32C6 = args.chip;
+
+    let micros = parse_duration_us(&args.timeout)?;
+    let grade = args.time_grade.time_grade();
+
+    let mut builder = Esp32C6Builder::new()
+        .time_grade(grade)
+        .strict(args.strict_bus)
+        .usb_host(if args.host_absent {
+            UsbHost::Absent
+        } else {
+            UsbHost::Attached { draining: true }
+        })
+        // `--monitor` takes the socket out of the port's open/close story:
+        // the host is declared attached and draining from power-on and stays
+        // that way, so a client that uploads and leaves does not take the
+        // console with it.
+        .usb_sj_drain(if args.monitor {
+            UsbSjDrain::Manual
+        } else {
+            UsbSjDrain::Auto
+        });
+
+    builder = apply_image(
+        builder,
+        args.elf.as_deref(),
+        args.merged.as_deref(),
+        args.flash.as_deref(),
+    )?;
+
+    // The eFuse identity. `run` serves one board, so the default — the desk
+    // board's MAC — is the right one; `serve` gives every board its own,
+    // because a registry of N boards that all answer with one MAC is one
+    // board N times.
+    if let Some(text) = &args.efuse_mac {
+        let mac = EfuseIdentity::parse_mac(text)
+            .map_err(|e| anyhow::anyhow!("--efuse-mac `{text}`: {e}"))?;
+        builder = builder.efuse(EfuseIdentity {
+            mac,
+            ..EfuseIdentity::default()
+        });
     }
 
     // The link. Both kinds listen; the difference is which of the chip's two
@@ -227,7 +267,7 @@ fn console_bytes(machine: &Esp32C6Machine, kind: LinkKind) -> Vec<u8> {
     }
 }
 
-fn describe(outcome: &Outcome) -> String {
+pub(super) fn describe(outcome: &Outcome) -> String {
     match outcome {
         Outcome::Deadline { .. } => "reached its deadline".to_string(),
         Outcome::ExitMatched { .. } => "stopped on --exit-on".to_string(),
@@ -243,7 +283,7 @@ fn describe(outcome: &Outcome) -> String {
     }
 }
 
-fn check_file(path: &Path, flag: &str) -> Result<()> {
+pub(super) fn check_file(path: &Path, flag: &str) -> Result<()> {
     if !path.is_file() {
         bail!("{flag} {} is not a file", path.display());
     }
@@ -253,7 +293,7 @@ fn check_file(path: &Path, flag: &str) -> Result<()> {
 /// `5s`, `1500ms`, `900us` → microseconds. The unit is required: a bare
 /// number would read as seconds to one caller and microseconds to the next,
 /// and this clock is emulated, which is confusing enough already.
-fn parse_duration_us(text: &str) -> Result<u64> {
+pub(super) fn parse_duration_us(text: &str) -> Result<u64> {
     let (digits, scale) = if let Some(d) = text.strip_suffix("ms") {
         (d, 1_000u64)
     } else if let Some(d) = text.strip_suffix("us") {

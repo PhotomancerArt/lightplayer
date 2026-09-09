@@ -78,6 +78,10 @@ lp-emu-validate = { path = "../lp-emu/lp-emu-validate" }
 # reach a product crate — so a product crate reaching in is fine
 # (`just lint-emu-fence`).
 lp-emu-esp32c6 = { path = "../lp-emu/esp/lp-emu-esp32c6" }
+# `lp-cli emu serve --air`: the `LPA1` air wire codec and `ParticipantId`,
+# which `lp-emu-esp32c6` uses but does not re-export. Same direction as the
+# line above — a product crate reaching INTO the fence, which is fine.
+lp-emu-esp-common = { path = "../lp-emu/esp/lp-emu-esp-common" }
 lpir = { path = "../lp-shader/lpir" }
 lps-frontend = { path = "../lp-shader/lps-frontend" }
 lps-shared = { path = "../lp-shader/lps-shared" }

@@ -26,7 +26,10 @@
   grade means now that the shipped image's frame is held against the host
   oracle. **Completed by M7** (PR #596): ROM-up boot, the cross-check, and
   the two new seams the boot needed (`Bus::take_yield`,
-  `RegFile::with_read_mirror`).
+  `RegFile::with_read_mirror`). **Amended by plan two's M1** (2026-09-09): the
+  WebSocket door and the board registry — a third door that is `lp-cli`'s
+  rather than the machine's, and the one place `--reboot-on-reset` defaults
+  the other way.
 
 ## Context
 
@@ -563,6 +566,72 @@ LICENSE and `SHA256SUMS`, never edited, re-derivable by
 `just lint-emu-fence` and may not import a product crate — which is why the
 validation system's payload registry *mirrors* `fw-checks` instead of
 importing it.
+
+### Amendment (2026-09-09, plan two M1): the WebSocket door and the board registry
+
+The two doors above are the *machine's*: one byte socket and one control
+socket per link, TCP, one machine per process, bound before the run and torn
+down with it. A browser cannot open a TCP socket, and Studio's device walks
+are the whole point of the emulator's second plan. So there is now a **third
+door, and it is not the machine's** — it is `lp-cli emu serve`, in `lp-cli`,
+outside the MIT fence, and it is a *pump*.
+
+```text
+GET  /boards                 → the registry, as JSON
+WS   /board/<id>/bytes       → binary frames both ways; the payload IS the bytes
+WS   /board/<id>/control     → control.rs's line protocol, verbatim
+```
+
+**How it holds a board, and why that is the design.** Each board runs on its
+own OS thread with `usb_sj(UsbSjSink::Tcp("127.0.0.1:0"))` and
+`control("127.0.0.1:0")` — ephemeral loopback ports, read back through
+`Esp32C6Machine::usb_sj_tcp()` and `control_tcp()`. The WebSocket endpoints
+move bytes and lines between a socket and those ports and do nothing else.
+
+The alternative was a public seam on the machine (`apply_control` made public,
+or a `control_line(&str) -> String`), which is fewer moving parts at runtime.
+It was rejected because the loopback bridge **changes nothing under
+`lp-emu/`**, and that is worth a hop per byte three times over:
+
+- the licence fence never enters the conversation, so the door can depend on
+  `tokio-tungstenite` without it becoming an E-license question;
+- the coupling rule (a byte client's connect **is** an application opening the
+  port), the rule that `attach`/`detach` are never implied by a socket, the
+  one-reply-per-command rule and the slice-boundary semantics all survive
+  **literally** rather than by re-implementation — the TCP client the pump
+  opens *is* the byte client `service_host` watches;
+- `machine.rs` is the most contended file in two roadmaps, and a door that
+  needs none of it can ship beside anything else.
+
+**The registry is plural from the first commit.** N named boards, each with
+its own id (the endpoint path), its own eFuse MAC — the desk board's with the
+last octet stepped, or a spelled `mac=` — and its own persistent flash file
+under `--state-dir`. A registry of N boards that all answer with one identity
+is one board N times, and the scenarios this exists for (`s9-two-boards`, and
+the duplication defects a twin is best placed to catch) are multi-board
+scenarios. `GET /boards` is what an in-page picker lists.
+
+**One default flips here, and only here: `--reboot-on-reset` is ON.** M7 left
+it off deliberately, because three merged M6 scenarios read the exit code of a
+run that ended on `MachineRequest::Reset` as their evidence. A *server* cannot
+have that: esptool-js opens with a DTR/RTS dance whose whole purpose is to
+reset the chip, and a board that disappears when it is reset is not a board.
+So `serve` passes it and does not offer a way to turn it off; `run` keeps M7's
+default and the three scenarios keep their meaning.
+
+**What is auditable and what is a gate.** Nothing this door produces is a
+transcript. A socket is not deterministic — a command lands at whichever slice
+boundary the host's poll fell on — so the reply's `cyc=`/`us=` is for a human
+reading a log, and the door's own tests assert outcomes only. `--air <addr>`
+is the same shape and says so in its help text: a one-way tap in the `LPA1`
+wire codec, so a watcher can see what the boards' radios hand over. The
+deterministic form of an air remains the in-process lockstep runner, and that
+is the only form a transcript, a validation configuration or a CI job ever
+uses.
+
+The host side of the door is `serial:ws://<addr>/board/<id>/bytes`, the
+sibling of `serial:tcp://<addr>` — raw bytes, not the lpc-wire protocol a bare
+`ws://` specifier means.
 
 ## Alternatives considered
 
