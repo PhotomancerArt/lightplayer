@@ -50,14 +50,19 @@ env:
   RUSTUP_PERMIT_COPY_RENAME: 1
 
 # CI shape (2026-07-28 restructure — measured baseline: Validate was 39-52 min
-# and dominated every run):
+# and dominated every run; 2026-09-08 restructure — baseline in the
+# paragraphs below):
 #
-#   detect-changes ─┬─ lint            (fmt + clippy + repo lints)
-#                   ├─ validate-x64    (build prereqs + gated test recipes + schema-check)
-#                   ├─ validate-gfx    (ARM; wgpu tree)
-#                   ├─ validate-browser(real-browser wasm suites)
-#                   ├─ validate-stories(story baseline capture)
-#                   ├─ emu-c6          (the C6 SoC emulator's own suite)
+#   detect-changes ─┬─ lint              (fmt + clippy + repo lints)
+#                   ├─ validate-x64      (build prereqs + gated test recipes + schema-check + heap ratchet)
+#                   ├─ validate-gfx      (ARM; wgpu tree)
+#                   ├─ validate-browser  (real-browser wasm suites)
+#                   ├─ validate-stories  (story baseline capture)
+#                   ├─ validate-xtensa   (Xtensa host engine + filetest corpus)
+#                   ├─ firmware-xtensa   (esp32s3 image size, manifest, clippy)
+#                   ├─ firmware-esp32v3  (esp32 image size, manifest, clippy)
+#                   ├─ firmware-size     (esp32c6 image size, manifest)
+#                   ├─ emu-c6            (the C6 SoC emulator's own suite)
 #                   └─ heap-budget-chips (chip heap ratchet + lp-cli emu tests)
 #
 # Every job is path-gated, including lint/validate via the `core` filter, so a
@@ -80,10 +85,30 @@ env:
 # crates (deps still hit). CARGO_INCREMENTAL=0 because sccache cannot cache
 # incremental compiles (and CI never benefited: the incremental state was
 # never restored). debug=0 because CI only needs symbol names in backtraces,
-# not line tables, and it roughly halves compile output — which keeps the
-# per-job caches comfortably under the repo's 10 GB Actions-cache budget.
+# not line tables, and it roughly halves compile output.
 # validate-stories is deliberately exempt from all of this: its pinned
 # capture environment must not churn (see that job).
+#
+# sccache has a FLOOR, measured 2026-09-08 (main run 34308562027): at
+# 95-99.7 % hit rates a full test-profile build of this tree still costs
+# 4-7 minutes — object fetches, linking, build scripts and proc macros, none
+# of which it covers. The rule that follows: a job that builds the tree
+# twice pays the floor twice, and "twice" hides in feature unification —
+# `cargo test` (workspace) and `cargo run -p lp-cli` or `cargo test -p
+# lp-cli` resolve features over different package sets and share no dep
+# artifact. That is why validate-x64 reuses the test-built lp-cli for
+# schema-check and the heap ratchet instead of a third build, and why the
+# lp-cli emulator tests moved out of emu-c6 into heap-budget-chips. Only a
+# restored target/ gets under the floor, and that needs the budget below.
+#
+# The Actions-cache budget (10 GB per repo, LRU) is the constraint every
+# cache decision here answers to. On 2026-09-08 the repo held 11.7 GB in
+# 5,597 entries: 5.8 GB of it was twelve per-job rust-cache copies of the
+# same cargo registry (now one entry per toolchain family, see the lint
+# job's cache step), 4.3 GB sccache objects, 1.07 GB the stories job's
+# entry, which that pressure evicted on two of three main runs that day.
+# Re-check the listing (`gh api repos/<r>/actions/caches`) before adding any
+# entry over ~100 MB; what it displaces matters more than what it saves.
 #
 # Job timeouts (added 2026-08-05): every job carries `timeout-minutes`. Before
 # this, NO workflow in the repo set one, so a wedge ran to GitHub's 6-hour
@@ -97,7 +122,12 @@ env:
 # to turn a slow-but-healthy run into a flake. Re-measure before tightening —
 # and note a genuinely cold cache is the long tail here, not the typical run.
 # A job that starts timing out legitimately wants its p95 re-measured, not a
-# reflexive bump.
+# reflexive bump — the 2026-09-08 emu-c6 overrun was a job that had grown
+# two whole builds, and the answer was a split (heap-budget-chips), with the
+# raised budget kept as headroom rather than as the fix.
+#
+# Concurrency: PR refs cancel in-progress runs; each main push is its own
+# group so main runs in parallel (the `concurrency:` block above says why).
 jobs:
   detect-changes:
     name: Detect changed paths
