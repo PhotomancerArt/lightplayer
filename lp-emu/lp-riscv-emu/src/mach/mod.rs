@@ -912,11 +912,16 @@ impl<B: Bus> MachineHart<B> {
             // choice (F1: `BranchTaken` 2 against `BranchNotTaken` 1).
             #[cfg(feature = "bk-hoist")]
             {
-                cyc += u64::from(if i == last {
-                    self.cycle_model.cycles_for(r_class)
-                } else {
-                    slot.cost
-                });
+                cyc += u64::from(
+                    if i == last || slot.bound == InstClass::BranchTaken {
+                        // A branch's cost is taken-or-not, a run-time
+                        // choice (F1) — and under `superblock` a branch is
+                        // no longer necessarily the last slot.
+                        self.cycle_model.cycles_for(r_class)
+                    } else {
+                        slot.cost
+                    },
+                );
             }
             self.pc = r_new_pc.unwrap_or(pc.wrapping_add(u32::from(r_size)));
             ran += 1;

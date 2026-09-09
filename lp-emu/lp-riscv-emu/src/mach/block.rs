@@ -195,6 +195,18 @@ pub(super) fn classify<B: Bus>(word: u32) -> Class<B> {
         )),
 
         // The control transfers: in the block, and last.
+        //
+        // THROWAWAY (M5 P1b), `superblock`: a conditional branch stays INSIDE
+        // the block and the decoder keeps going down its fall-through. The
+        // block executor already handles the taken case exactly — its
+        // straight-on check leaves the block the moment the hart is not at
+        // `pc + width` — so this is a three-line change to the classifier and
+        // nothing else. P1b's census says 38.7 % of `render-basic`'s block
+        // ends are a NOT-TAKEN conditional branch, which is the largest
+        // single block-length lever on the workload.
+        #[cfg(feature = "superblock")]
+        OP_BRANCH => Class::Body(slot(h_branch::<B>, InstClass::BranchTaken)),
+        #[cfg(not(feature = "superblock"))]
         OP_BRANCH => Class::Terminator(slot(
             h_branch::<B>,
             // `BranchTaken` (2) is the larger of the two the executor can
@@ -254,6 +266,9 @@ fn classify_compressed<B: Bus>(word: u32) -> Class<B> {
         (0b01, 0b011) => Class::Body(slot(InstClass::Lui)),
         (0b01, 0b001) => Class::Terminator(slot(InstClass::JalCall)),
         (0b01, 0b101) => Class::Terminator(slot(InstClass::JalTail)),
+        #[cfg(feature = "superblock")]
+        (0b01, 0b110) | (0b01, 0b111) => Class::Body(slot(InstClass::BranchTaken)),
+        #[cfg(not(feature = "superblock"))]
         (0b01, 0b110) | (0b01, 0b111) => Class::Terminator(slot(InstClass::BranchTaken)),
 
         // Q2: c.slli (000), c.lwsp (010), c.swsp (110).

@@ -47,6 +47,7 @@ blockstats = []
 slot-packed = []
 slot-dense = []
 bk-hoist = []
+superblock = []
 
 [dev-dependencies]
 # Self-dependency: lp-riscv-emu's own tests need the `std` feature. This used to
