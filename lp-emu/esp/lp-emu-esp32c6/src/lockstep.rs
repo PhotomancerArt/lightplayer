@@ -58,13 +58,21 @@
 //! relation between them is the design, and it is checked at construction:
 //! **the quantum is never larger than the latency.**
 //!
-//! # What P1 does not do
+//! # The receiving end delivers (M4 P2)
 //!
-//! The receiving end **counts and logs**; it does not deliver. A frame the
-//! air offers a machine is reported as "offered, not delivered". Writing one
-//! into the receiver's RX ring, filling an `rx_ctrl` header in front of it
-//! and raising the RX interrupt is M4 P2's, and it grows from
-//! [`Esp32C6Machine::offer_air_frame`].
+//! A frame the air offers a machine is written into that machine's own RX
+//! descriptor ring behind an `rx_ctrl` header and the radio interrupt is
+//! raised — [`Esp32C6Machine::offer_air_frame`] and the C6 README's air
+//! section. A machine with no ring programmed, or one whose ring is full,
+//! counts the frame as undelivered rather than dropping it silently, so
+//! `frames_sent` and `frames_offered` here and `air_frames_delivered` on the
+//! machine are three different claims and a report shows all three.
+//!
+//! # One frame, one direction — and why a pair is staggered
+//!
+//! See [`Lockstep::stagger`]. Two identical guests started in the same cycle
+//! wedge in the same cycle, and the wedge is
+//! `docs/debt/emu-c6-radio-tx-never-completes.md`, not this runner.
 
 use lp_emu_core::sched::Cycles;
 use lp_emu_esp_common::air::{Air, ParticipantId, PerfectAir};
@@ -165,7 +173,10 @@ pub struct MachineReport {
     pub outcome: Outcome,
     /// Frames its radio handed the air.
     pub frames_sent: u64,
-    /// Frames the air offered it. **Not delivered** — see the module docs.
+    /// Frames the air offered it. Not the same as *delivered*: a machine
+    /// with no RX ring programmed yet, or one whose ring is full, is offered
+    /// frames it cannot take. `Esp32C6Machine::air_frames_delivered` and
+    /// `air_frames_undelivered` split this number.
     pub frames_offered: u64,
 }
 
@@ -210,6 +221,10 @@ pub struct Lockstep {
     quantum: Cycles,
     /// The pair's clock: every machine has been run to here.
     now: Cycles,
+    /// How far into the pair's clock each machine's own power-on sits. See
+    /// [`Lockstep::stagger`]. All zero unless a caller says otherwise, and a
+    /// zero offset is exactly the runner P1 shipped.
+    offsets: Vec<Cycles>,
     /// `Some(outcome)` once a machine has stopped participating.
     ended: Vec<Option<Outcome>>,
     sent: Vec<u64>,
@@ -271,9 +286,54 @@ impl Lockstep {
             air,
             quantum,
             now: 0,
+            offsets: vec![0; n],
             ended: vec![None; n],
             sent: vec![0; n],
         })
+    }
+
+    /// Move each machine's power-on `offsets[i]` guest cycles into the pair's
+    /// clock: machine 0 boots at the pair's cycle 0, machine 1 at
+    /// `offsets[1]`, and so on. Extra entries are ignored, missing ones are
+    /// zero, and all-zero is the runner exactly as M4 P1 shipped it.
+    ///
+    /// # Why a pair needs this, and it is not a convenience
+    ///
+    /// Two identical images on two machines started in the same cycle do
+    /// **the same thing in the same cycle**. On the `test_espnow` image that
+    /// is fatal to a pair run, because of the open question in
+    /// `docs/debt/emu-c6-radio-tx-never-completes.md`: each guest arms one
+    /// frame at 1,036.4 ms and then **never returns from its own `send`**,
+    /// so when the air offers the other machine that frame 672 µs later,
+    /// the receiver is already spinning inside its own send and its
+    /// application never drains the queue again. Both machines deliver, and
+    /// neither prints. Measured, not argued — `tests/air_delivery.rs`
+    /// has the run.
+    ///
+    /// A stagger is what two real boards have: nobody powers two of them up
+    /// on the same cycle. With one machine a fraction of a second behind,
+    /// the frame the first arms lands while the second is still in its tick
+    /// loop, and the second prints its `rx` line.
+    ///
+    /// **It does not rescue the other direction**, and nothing here can:
+    /// whichever machine sends first wedges first, so the later sender's
+    /// frame always arrives at a machine that has already stopped draining.
+    /// One frame, one direction, until a TX completes.
+    ///
+    /// Determinism is untouched. An offset is a constant in guest cycles,
+    /// applied to a machine's own clock and to the cycle at which its frames
+    /// enter the air, so a staggered pair replays byte-identically like any
+    /// other.
+    pub fn stagger(mut self, offsets: Vec<Cycles>) -> Self {
+        for (i, off) in offsets.into_iter().enumerate().take(self.offsets.len()) {
+            self.offsets[i] = off;
+        }
+        self
+    }
+
+    /// Machine `i`'s power-on offset in the pair's clock.
+    pub fn offset(&self, id: ParticipantId) -> Cycles {
+        self.offsets.get(id.index()).copied().unwrap_or(0)
     }
 
     /// The air's stated latency, in guest cycles.
@@ -322,8 +382,15 @@ impl Lockstep {
                 if self.ended[i].is_some() {
                     continue;
                 }
+                // A machine's own clock starts at the pair's cycle
+                // `offsets[i]` (see `stagger`), so the horizon it is run to
+                // is the pair's horizon minus its offset. With every offset
+                // zero — the default — this is `next`, exactly as before.
+                let Some(own_horizon) = next.checked_sub(self.offsets[i]) else {
+                    continue;
+                };
                 let stop = StopCondition {
-                    stop_cycle: Some(next),
+                    stop_cycle: Some(own_horizon),
                     exit_on: base.exit_on.clone(),
                     wall_timeout: None,
                     probes: base.probes.clone(),
@@ -342,7 +409,10 @@ impl Lockstep {
             for i in 0..self.machines.len() {
                 for frame in self.machines[i].take_air_frames() {
                     self.sent[i] += 1;
-                    self.air.send(ParticipantId(i), frame.at, &frame.bytes);
+                    // The air runs on the pair's clock, the machine on its
+                    // own; the offset is what converts one to the other.
+                    let at = frame.at.saturating_add(self.offsets[i]);
+                    self.air.send(ParticipantId(i), at, &frame.bytes);
                 }
             }
 
@@ -554,6 +624,45 @@ mod tests {
         let report = pair.run_until(past * 2, &StopCondition::default());
         assert_eq!(report.machines[1].frames_offered, 1);
         assert!(report.all_reached_the_horizon());
+    }
+
+    /// A staggered machine runs its own clock behind the pair's, exactly by
+    /// its offset, and the two runs of the same stagger are the same run.
+    #[test]
+    fn a_staggered_machine_runs_its_offset_behind_the_pair() {
+        let offset = 7 * DEFAULT_QUANTUM_CYCLES;
+        let run = || {
+            let mut pair = Lockstep::new(vec![idle_machine(), idle_machine()])
+                .unwrap()
+                .stagger(vec![0, offset]);
+            let report = pair.run_until(64 * pair.quantum(), &StopCondition::default());
+            (report, pair.offset(ParticipantId(1)))
+        };
+        let (report, seen) = run();
+        assert_eq!(seen, offset);
+        assert_eq!(report.cycles, 64 * DEFAULT_QUANTUM_CYCLES);
+        assert_eq!(report.machines[0].cycles, 64 * DEFAULT_QUANTUM_CYCLES);
+        assert_eq!(
+            report.machines[1].cycles,
+            64 * DEFAULT_QUANTUM_CYCLES - offset,
+            "machine 1's own clock is its offset behind the pair's"
+        );
+        assert!(report.all_reached_the_horizon());
+        assert_eq!(run().0, report, "and a stagger replays identically");
+
+        // A horizon inside the offset leaves the second machine at zero
+        // rather than running it backwards.
+        let mut pair = Lockstep::new(vec![idle_machine(), idle_machine()])
+            .unwrap()
+            .stagger(vec![0, offset]);
+        let early = pair.run_until(3 * DEFAULT_QUANTUM_CYCLES, &StopCondition::default());
+        assert_eq!(early.machines[1].cycles, 0);
+        assert_eq!(early.machines[0].cycles, 3 * DEFAULT_QUANTUM_CYCLES);
+
+        // And the default is no stagger at all: the runner P1 shipped.
+        let plain = Lockstep::new(vec![idle_machine(), idle_machine()]).unwrap();
+        assert_eq!(plain.offset(ParticipantId(0)), 0);
+        assert_eq!(plain.offset(ParticipantId(1)), 0);
     }
 
     /// The off switch, at the seam rather than at the CLI: a machine that was

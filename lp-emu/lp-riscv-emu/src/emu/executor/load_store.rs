@@ -12,7 +12,7 @@ use lp_riscv_inst::{
 
 /// Decode and execute load instructions (I-type, opcode 0x03).
 #[inline(always)]
-pub(super) fn decode_execute_load<M: LoggingMode, B: Bus>(
+pub(crate) fn decode_execute_load<M: LoggingMode, B: Bus>(
     inst_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
@@ -43,7 +43,7 @@ pub(super) fn decode_execute_load<M: LoggingMode, B: Bus>(
 
 /// Decode and execute store instructions (S-type, opcode 0x23).
 #[inline(always)]
-pub(super) fn decode_execute_store<M: LoggingMode, B: Bus>(
+pub(crate) fn decode_execute_store<M: LoggingMode, B: Bus>(
     inst_word: u32,
     pc: u32,
     regs: &mut [i32; 32],

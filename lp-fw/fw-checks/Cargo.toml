@@ -22,7 +22,22 @@ check-jit-math-perf = ["dep:lps-builtins"]
 check-cycle-probe = []
 check-json = []
 check-gpio-calibrate = []
+# The `gpio-input` payload: the scripted edge table both sides are driven by,
+# the quadrature decoder the GPIO interrupt handler runs, the record shapes,
+# and the renderer that turns the table into the emulated side's
+# `--pin-script` file (`checks::gpio_input`). No chip dependency at all — the
+# pads, the product button driver, the interrupt handler and the self-loop's
+# register writes are chip facts and stay in `fw-esp32c6`.
+check-gpio-input = []
+check-rmt-rx = []
 check-uart-bridge = []
+# The `espnow-broadcast` payload: the broadcast schedule, the payload-length
+# ladder, the record shapes and the phase-independent reduction of a peer's
+# event counter that makes two captures comparable
+# (`checks::espnow_broadcast`). No chip dependency at all — board init, the
+# ESP-NOW driver, the hardware registry and the executor stay in `fw-esp32c6`,
+# and the driver itself is read and never written (E-product).
+check-espnow-broadcast = []
 check-oom = []
 # The `rmt-chase` payload: the chase pattern, the FNV-1a checksum and the
 # per-frame record (`checks::rmt_chase`). No chip dependency at all — the

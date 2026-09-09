@@ -255,6 +255,27 @@ pub struct Payload {
     /// emulated configurations' stand-in for it, and a driver that cannot
     /// use one says so in its plan.
     pub host_script: Option<&'static str>,
+    /// A `--pin-script` this payload's EMULATED side is driven by,
+    /// repo-root-relative, or `None` for a payload that makes no claim about
+    /// a pad's input.
+    ///
+    /// The sibling of [`Payload::host_script`], on the other kind of input,
+    /// and it is a payload field for the same reason: what the pads do is
+    /// part of the scenario, not part of the machine. It has no silicon arm
+    /// at all — on a board the levels come from the firmware's own self-loop,
+    /// or from a finger — so a configuration that cannot drive a pad simply
+    /// never sees this, and the transcript's sidecar `note` is where the
+    /// difference is stated.
+    pub pin_script: Option<&'static str>,
+    /// Pads this payload's EMULATED side ties together, as `--wire a:b`
+    /// arguments, or empty for a payload with no loopback.
+    ///
+    /// The third kind of input, after a host script and a pin script, and a
+    /// payload field for their reason: a jumper is part of the scenario. It
+    /// has no silicon arm either — on a board the wire is a wire and somebody
+    /// has to put it there — so a silicon transcript of a wired payload is
+    /// recorded with the jumper in place and its sidecar `note` says so.
+    pub wire: &'static [&'static str],
     /// Structured record kinds it emits behind `[fw-check-json] `.
     pub record_kinds: &'static [&'static str],
     /// The mask set that makes two of its transcripts comparable.
@@ -1032,6 +1053,170 @@ static CYCLE_PROBE_FIELDS: &[FieldSpec] = &[
     },
 ];
 
+/// One frame across the air: what this device broadcast, and what it heard.
+///
+/// ```text
+/// [fw-check-json] {"kind":"espnow-tx","n":0,"device":2360641378,"event":0,"msg_kind":1,"payload_len":0}
+/// [fw-check-json] {"kind":"espnow-rx","n":0,"peer":2091418978,"gap":0,"msg_kind":1,"len_ok":true}
+/// ```
+///
+/// **Everything here is `Structural`, and the fields that are not here are the
+/// decision this entry exists to record.**
+///
+/// The tx side is the easy half: a device's own event counter starts at 0 at
+/// its own power-on, so `device`, `event` and the ladder's `payload_len`
+/// compare exactly between a board and the machine that carries its MAC.
+///
+/// The rx side deliberately does **not** carry the peer's raw event number or
+/// its raw byte count, and no class would have made them comparable. Two
+/// boards are captured one after the other through one port
+/// (`d1-desk-batch.md` step 3): recording a board resets it, and the other has
+/// been counting since the previous flash, so a desk capture sees its peer at
+/// event 45 where the emulated pair sees it at event 2. Same air, same frames,
+/// same order, different origin — and because the ladder is a function of the
+/// event number, `payload_len` is phase-shifted for exactly the same reason.
+/// Grading either `Timing` to make a replay pass would be a lie about what a
+/// clock is; comparing them would fail every capture for a difference that
+/// says nothing about a model.
+///
+/// So the record carries the origin-free content instead, and it is a stronger
+/// claim than the raw numbers would have been:
+///
+/// * `gap` — this event's number minus the previous one from the same peer,
+///   `0` for the first. **All 1s means nothing was dropped between these
+///   frames**, whatever the sequence started from. It is where a real air's
+///   losses would show up against a perfect one's, which is precisely the
+///   comparison this payload exists to make.
+/// * `len_ok` — whether the frame carried the number of bytes the peer's own
+///   event number prescribes. An end-to-end byte-count check that needs no
+///   phase alignment.
+///
+/// The raw numbers are still in the transcript, verbatim, on the human `rx`
+/// line; the payload's mask set (`espnow-broadcast`) hides them from the
+/// **human view** and names this reason.
+static ESPNOW_BROADCAST_FIELDS: &[FieldSpec] = &[
+    FieldSpec {
+        record: "espnow-tx",
+        field: "n",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "espnow-tx",
+        field: "device",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "espnow-tx",
+        field: "event",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "espnow-tx",
+        field: "msg_kind",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "espnow-tx",
+        field: "payload_len",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "espnow-rx",
+        field: "n",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "espnow-rx",
+        field: "peer",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "espnow-rx",
+        field: "gap",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "espnow-rx",
+        field: "msg_kind",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "espnow-rx",
+        field: "len_ok",
+        class: FieldClass::Structural,
+    },
+];
+
+/// One reading off a pad: a button state change the product's debouncer
+/// accepted, or a detent the GPIO interrupt handler decoded.
+///
+/// ```text
+/// [fw-check-json] {"kind":"gpio-input","reader":"button","state":"down",
+///   "t_us":160042,"samples":9}
+/// [fw-check-json] {"kind":"gpio-input","reader":"encoder","position":1,
+///   "dir":"cw","t_us":915231}
+/// ```
+///
+/// **`state`, `dir` and `position` are `Pin`, and that is the decision this
+/// payload exists to record.** They are not statistics about the firmware and
+/// they are not identities either: each one is a claim about *what the pad
+/// carried*, read back through the input buffer, `GPIO.in_`, the edge
+/// detector and — for the encoder — the interrupt matrix. A configuration
+/// that reports `up` where another reports `down`, or `ccw` where another
+/// reports `cw`, is not a slower configuration; it is one whose pad did
+/// something else. `Pin` fails a replay (`replay.rs::HARD_CLASSES`), which is
+/// exactly right for a claim of that kind.
+///
+/// **`reader` and `samples` are `Structural`.** `reader` is the record's own
+/// identity, and `samples` is an INDEX rather than a level: the number of
+/// `ButtonInput::poll` calls made when the debouncer accepted the change,
+/// counted on a grid the firmware paces itself. It is comparable because the
+/// payload hands the debouncer the sample index times the period rather than
+/// a clock reading — see `fw_checks::checks::gpio_input` for why that
+/// matters — so two machines that saw the same levels at the same samples
+/// report the same number. It is on the record because it is what makes the
+/// debounce claim checkable: a debouncer that had stopped debouncing would
+/// report six state changes on this script, and one that had started
+/// swallowing them would report two.
+///
+/// `t_us` is `Timing` for the ordinary reason (PD9/D13): it is guest
+/// microseconds since the payload armed, reported with its ratio and never
+/// gated. It is on the record all the same, because "the interrupt arrived"
+/// and "the interrupt arrived when the edge did" are different claims and a
+/// reader should be able to see the second one.
+static GPIO_INPUT_FIELDS: &[FieldSpec] = &[
+    FieldSpec {
+        record: "gpio-input",
+        field: "reader",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "gpio-input",
+        field: "samples",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "gpio-input",
+        field: "state",
+        class: FieldClass::Pin,
+    },
+    FieldSpec {
+        record: "gpio-input",
+        field: "dir",
+        class: FieldClass::Pin,
+    },
+    FieldSpec {
+        record: "gpio-input",
+        field: "position",
+        class: FieldClass::Pin,
+    },
+    FieldSpec {
+        record: "gpio-input",
+        field: "t_us",
+        class: FieldClass::Timing,
+    },
+];
+
 /// The WS281x driver's own account of the refill race, one line per
 /// configured channel every ten seconds (`ws281x_telemetry`).
 ///
@@ -1114,6 +1299,63 @@ pub static WS281X_TELEMETRY: SeriesSpec = SeriesSpec {
     compiled: OnceLock::new(),
 };
 
+/// The `rmt-rx` payload's per-frame records: what the guest built, and what
+/// its receiver read back off the wire.
+///
+/// Both `rmt-frame` and `rmt-rx` are here because this payload emits both and
+/// a replay compares every field of both. The two `crc` fields are graded
+/// differently on purpose, and the difference is the payload:
+///
+/// * `rmt-frame.crc` is **Structural** — arithmetic over bytes the guest
+///   built, which two configurations running one image must reproduce
+///   identically because nothing about a machine can change it. That is the
+///   grade `rmt-chase` gives it and the reasoning is unchanged.
+/// * `rmt-rx.crc` is **Pin** — a claim about what the pad carried. It is the
+///   checksum of bytes a receiver measured off a wire, and a machine whose
+///   fabric, whose routing or whose sampler is wrong changes it. `words` is
+///   Pin for the same reason: it is how many words came off the pad.
+///
+/// The gate the payload exists for — that the two checksums are equal, frame
+/// for frame — is not a field comparison at all, because both numbers are in
+/// one transcript. It is read straight out of the records.
+static RMT_RX_FIELDS: &[FieldSpec] = &[
+    FieldSpec {
+        record: "rmt-frame",
+        field: "n",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "rmt-frame",
+        field: "leds",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "rmt-frame",
+        field: "lit",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "rmt-frame",
+        field: "crc",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "rmt-rx",
+        field: "n",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "rmt-rx",
+        field: "words",
+        class: FieldClass::Pin,
+    },
+    FieldSpec {
+        record: "rmt-rx",
+        field: "crc",
+        class: FieldClass::Pin,
+    },
+];
+
 /// The `rmt-chase` payload's per-frame record: what the guest handed the
 /// driver, and the checksum the pin is compared against.
 static RMT_FRAME_FIELDS: &[FieldSpec] = &[
@@ -1156,6 +1398,8 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         emits_header: true,
         sentinel: Sentinel::Done("[inc-shader-compile] === DONE ==="),
         host_script: None,
+        pin_script: None,
+        wire: &[],
         record_kinds: &["case-summary", "total-summary"],
         mask_set: "compile-harness",
         fields: &[
@@ -1256,6 +1500,8 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         emits_header: true,
         sentinel: Sentinel::Ready("CAL READY target="),
         host_script: None,
+        pin_script: None,
+        wire: &[],
         record_kinds: &[],
         mask_set: "normalize",
         fields: &[],
@@ -1280,6 +1526,8 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         emits_header: true,
         sentinel: Sentinel::Ready("UART-BRIDGE READY "),
         host_script: None,
+        pin_script: None,
+        wire: &[],
         record_kinds: &[],
         mask_set: "normalize",
         fields: &[],
@@ -1304,6 +1552,8 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         emits_header: true,
         sentinel: Sentinel::Done("[jit-math-perf] === DONE ==="),
         host_script: None,
+        pin_script: None,
+        wire: &[],
         record_kinds: &["jit-bench"],
         mask_set: "jit-math-perf",
         fields: JIT_BENCH_FIELDS,
@@ -1328,6 +1578,8 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         emits_header: true,
         sentinel: Sentinel::Done("[cycle-probe] === DONE ==="),
         host_script: None,
+        pin_script: None,
+        wire: &[],
         record_kinds: &["cycle-probe"],
         mask_set: "cycle-probe",
         fields: CYCLE_PROBE_FIELDS,
@@ -1357,6 +1609,106 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         boot: BootPath::Direct,
     },
     Payload {
+        name: "gpio-input",
+        display_name: "A button and a quadrature encoder, read back off the pads",
+        fw_check_slug: "gpio-input",
+        firmware_features: &["test_gpio_input"],
+        fw_checks_feature: Some("check-gpio-input"),
+        emits_header: true,
+        sentinel: Sentinel::Done("[gpio-input] === DONE ==="),
+        host_script: None,
+        // The other kind of host input, and the whole of the emulated side's
+        // half of this payload: the levels, at times the file states, anchored
+        // on the firmware's own `=== ARMED ===` line so that the boot in front
+        // of it — which is not the same length on two time grades, let alone
+        // on silicon — cannot move an edge relative to the sample grid.
+        //
+        // Silicon does not use it and there is nothing to be sorry about
+        // there: on a board the firmware drives its own pads and reads them
+        // back, which is what makes a capture possible with no wire and no
+        // hands. The two transcripts therefore measure the read path
+        // (silicon) and the outside-driver path (emulated), and both sidecars
+        // say so.
+        pin_script: Some("lp-emu/lp-emu-validate/pins/gpio-input.pins"),
+        wire: &[],
+        record_kinds: &["gpio-input"],
+        mask_set: "gpio-input",
+        fields: GPIO_INPUT_FIELDS,
+        series: &[],
+        capture: Capture::Monitor,
+        // The product's own link, for `cycle-probe`'s reason: the claim is
+        // that the SAME image runs on both sides, so the link has to be the
+        // same too.
+        link: Link::UsbSerialJtag,
+        emulator_features: None,
+        // A cable in and an application reading, from the first byte — and
+        // here it does double duty. Without it an emulated USB payload
+        // records nothing at all (M1 P1's finding), and with no console
+        // record there would be no `=== ARMED ===` line for the pin script's
+        // `after` to resolve against, so every edge would still be waiting
+        // when the run ended.
+        host_plan: Some(HostPlan {
+            host: "attached",
+            script: "",
+        }),
+        probes: &[],
+        run_secs: None,
+        fresh_chip: false,
+        // No decoded pad beside the transcript. The claims this payload makes
+        // about the pads arrive in the console, as the fields above; a
+        // `--dump-frames` capture decodes a WS281x waveform, which is a
+        // different question about a different pin.
+        pin_capture: PinCapture::Off,
+        emulator_only: None,
+        boot: BootPath::Direct,
+    },
+    Payload {
+        name: "espnow-broadcast",
+        display_name: "Two boards on the air, each saying what it sent and what it heard",
+        fw_check_slug: "espnow-broadcast",
+        firmware_features: &["test_espnow_broadcast"],
+        fw_checks_feature: Some("check-espnow-broadcast"),
+        emits_header: true,
+        sentinel: Sentinel::Done("[espnow-broadcast] === DONE ==="),
+        host_script: None,
+        // No pad is driven, none is read and none is tied to another: this
+        // payload's subject is a RADIO, and every claim it makes arrives on
+        // the console as a record.
+        pin_script: None,
+        wire: &[],
+        record_kinds: &["espnow-tx", "espnow-rx"],
+        mask_set: "espnow-broadcast",
+        fields: ESPNOW_BROADCAST_FIELDS,
+        series: &[],
+        capture: Capture::Monitor,
+        // The product's own link, for `cycle-probe`'s reason: the claim is
+        // that the SAME image runs on both sides, so the link has to be the
+        // same too.
+        link: Link::UsbSerialJtag,
+        emulator_features: None,
+        // A cable in and an application reading, from the first byte. Without
+        // it an emulated USB payload records nothing at all (M1 P1's finding,
+        // "usb-sj: host absent at power-on").
+        host_plan: Some(HostPlan {
+            host: "attached",
+            script: "",
+        }),
+        probes: &[],
+        run_secs: None,
+        fresh_chip: false,
+        // No pin capture, and the sentence is here rather than left to a
+        // reader: ESP-NOW events are CONSOLE fields, not pin fields. There is
+        // no pad in this payload to decode, so the `pin_capture` machinery is
+        // off on both sides, no `--dump-frames` is passed, and a replay says
+        // nothing about pins at all — which is different from the `rmt-chase`
+        // shape, where the payload does declare a pad and a silicon replay
+        // prints `pin capture: … records none` because a board has no logic
+        // analyser on it (#624).
+        pin_capture: PinCapture::Off,
+        emulator_only: None,
+        boot: BootPath::Direct,
+    },
+    Payload {
         name: "render-loop",
         display_name: "Render loop (a real project, N frames, RMT on)",
         fw_check_slug: "render-loop",
@@ -1369,6 +1721,8 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         emits_header: true,
         sentinel: Sentinel::Done("[render-loop] === DONE ==="),
         host_script: None,
+        pin_script: None,
+        wire: &[],
         record_kinds: &["render-loop-load", "render-loop-summary"],
         mask_set: "render-loop",
         fields: RENDER_LOOP_FIELDS,
@@ -1415,6 +1769,8 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // be cut off mid-line.
         sentinel: Sentinel::Done("[stack] heartbeat: high-water"),
         host_script: None,
+        pin_script: None,
+        wire: &[],
         record_kinds: &[],
         mask_set: "boot-idle",
         fields: &[],
@@ -1474,6 +1830,8 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // `--until`/`--exit-on` match runs on to that line's newline — so the
         // whole heartbeat is captured, `link` object and all.
         sentinel: Sentinel::Done("\"hostDrainingAgainMs\""),
+        pin_script: None,
+        wire: &[],
         record_kinds: &[],
         mask_set: "boot-idle",
         fields: &[],
@@ -1531,6 +1889,8 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // stronger claim and the natural end of the timeline — the session
         // recovered, and the proof is a frame that crossed it.
         sentinel: Sentinel::Done("\"uptime_ms\":10000"),
+        pin_script: None,
+        wire: &[],
         record_kinds: &[],
         mask_set: "boot-idle",
         fields: &[],
@@ -1570,6 +1930,8 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         host_script: None,
         // Nothing is printed, because nothing can be: see [`Sentinel::State`].
         sentinel: Sentinel::State("link_counters::NOT_DRAINING_COUNT"),
+        pin_script: None,
+        wire: &[],
         record_kinds: &[],
         mask_set: "normalize",
         fields: &[],
@@ -1625,6 +1987,8 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         emits_header: false,
         host_script: None,
         sentinel: Sentinel::Done("[stack] heartbeat: high-water"),
+        pin_script: None,
+        wire: &[],
         record_kinds: &[],
         mask_set: "boot-idle",
         fields: &[],
@@ -1670,6 +2034,8 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // sentinel goes where the conversation now ends — and `--exit-on`
         // stops there rather than at a line the walk merely passes through.
         sentinel: Sentinel::Done("\"id\":12,\"seq\":2,"),
+        pin_script: None,
+        wire: &[],
         record_kinds: &[],
         mask_set: "boot-idle",
         fields: &[],
@@ -1714,6 +2080,8 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         emits_header: false,
         host_script: Some("lp-emu/esp/lp-emu-esp32c6/walks/examples-basic.script"),
         sentinel: Sentinel::Done("[shader-node] compilation succeeded"),
+        pin_script: None,
+        wire: &[],
         record_kinds: &[],
         mask_set: "boot-idle",
         fields: &[],
@@ -1762,6 +2130,8 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // reports on growth, and its first report is the idle one long
         // before the load.
         sentinel: Sentinel::Ready("\"path\":\"/projects/Meteor\""),
+        pin_script: None,
+        wire: &[],
         record_kinds: &[],
         mask_set: "boot-idle",
         fields: &[],
@@ -1794,6 +2164,52 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         boot: BootPath::Direct,
     },
     Payload {
+        name: "rmt-rx",
+        display_name: "An RMT frame put on gpio18 and read back off gpio19",
+        fw_check_slug: "rmt-rx",
+        firmware_features: &["test_rmt_rx"],
+        fw_checks_feature: Some("check-rmt-rx"),
+        emits_header: true,
+        sentinel: Sentinel::Done("[rmt-rx] === DONE ==="),
+        host_script: None,
+        pin_script: None,
+        // The whole of the emulated side's setup: one jumper, in the signal
+        // fabric. gpio18 is the transmitter's pad — the exception the
+        // `--wire` flag carries for exactly this payload — and gpio19 is the
+        // receiver's. On silicon the same two pins need an actual jumper,
+        // which is the desk batch's optional item; the emulated run's gate
+        // does not wait for it, because its claim is about its own machine.
+        wire: &["18:19"],
+        record_kinds: &["rmt-frame", "rmt-rx"],
+        mask_set: "rmt-rx",
+        fields: RMT_RX_FIELDS,
+        series: &[],
+        capture: Capture::Monitor,
+        // The product's own link, for `cycle-probe`'s reason: the claim is
+        // that the SAME image runs on both sides.
+        link: Link::UsbSerialJtag,
+        emulator_features: None,
+        // A host with the port open from the first byte: without it an
+        // emulated USB payload records nothing at all (M1 P1's finding).
+        host_plan: Some(HostPlan {
+            host: "attached",
+            script: "",
+        }),
+        probes: &[],
+        // 32 frames of 64 LEDs is 49,152 bits each way plus the receiver's
+        // 409 us idle wait per frame: about a second of guest time, and the
+        // done marker ends it well before the deadline.
+        run_secs: Some(20),
+        fresh_chip: false,
+        // The pad's own reading, decoded by something that never spoke to the
+        // firmware, beside the two the firmware reports. Three readings of
+        // one frame is the whole point of the payload: the guest's bytes, the
+        // receiver's bytes, and the decoder's.
+        pin_capture: PinCapture::EveryFrame,
+        emulator_only: None,
+        boot: BootPath::Direct,
+    },
+    Payload {
         name: "rmt-chase",
         display_name: "RMT chase (256 LEDs, three passes)",
         fw_check_slug: "rmt-chase",
@@ -1802,6 +2218,8 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         emits_header: true,
         sentinel: Sentinel::Done("[rmt-chase] === DONE ==="),
         host_script: None,
+        pin_script: None,
+        wire: &[],
         record_kinds: &["rmt-frame"],
         mask_set: "rmt-chase",
         fields: RMT_FRAME_FIELDS,
@@ -1876,6 +2294,8 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // the claim, small enough to commit. The in-process gate
         // (`tests/shader_oracle_pin.rs`) runs on for seconds.
         sentinel: Sentinel::Done("\"id\":11,\"seq\":2,"),
+        pin_script: None,
+        wire: &[],
         record_kinds: &[],
         mask_set: "boot-idle",
         fields: &[],
@@ -1918,6 +2338,8 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         emits_header: false,
         host_script: None,
         sentinel: Sentinel::Done("[stack] heartbeat: high-water"),
+        pin_script: None,
+        wire: &[],
         record_kinds: &[],
         mask_set: "boot-idle",
         fields: &[],

@@ -428,6 +428,26 @@ impl ConfigurationDriver for SiliconDriver {
         )?;
         let capture = req.capture_path();
         let mut notes: Vec<String> = Vec::new();
+        // A payload with a pin script is a payload whose two sides are driven
+        // differently, and every sidecar it produces has to say so. There is
+        // no wire and no hands on this bench, so a silicon capture of a pad
+        // is the firmware driving its own pad and reading it back, and an
+        // emulated one is the same image with the levels arriving from
+        // outside. Both are real; conflating them would not be, and a note
+        // written here reaches BOTH sidecars rather than whichever one
+        // somebody remembered to annotate.
+        if let Some(script) = req.payload.pin_script {
+            notes.push(format!(
+                "the pads are driven by the FIRMWARE ITSELF and read back through \
+                 `GPIO.in_` — a self-loop, because there is no wire and no hands on this \
+                 bench. What this transcript measures is therefore the READ path: the input \
+                 buffer, `in_`, the edge detector, the interrupt matrix and the product's own \
+                 debouncer. Its emulated twin measures the OUTSIDE-DRIVER path — the same \
+                 image, with `{script}` putting the levels on the pads from outside. The two \
+                 are deliberately not conflated: the setup line's `drive=` word says which \
+                 side drove, and it is the only thing this payload's mask set masks."
+            ));
+        }
         // One build step, whichever way the board is then watched: the
         // negative control flashes the same image as everyone else, and it is
         // built from the firmware's own directory for the reason
@@ -1055,6 +1075,45 @@ impl ConfigurationDriver for LpEmuDriver {
                 .into(),
             );
             emu.push(script.into());
+        }
+        // The pads' half of the same idea, and the same split: a script is
+        // the deterministic path and the `pin`/`pins` control verbs are the
+        // auditable one, so a transcript only ever carries the file. It goes
+        // to the emulated configurations alone — silicon's levels come from
+        // the firmware's own self-loop, which is what makes a pin payload
+        // recordable on a board with no wire and no hands, and each
+        // transcript's sidecar `note` says which side drove.
+        // The third kind of input: a jumper. It goes to the emulated
+        // configurations alone, because on a board the jumper is a jumper and
+        // the sidecar's `note` is where a silicon transcript says whether it
+        // was there.
+        for wire in req.payload.wire {
+            emu.push("--wire".into());
+            emu.push((*wire).into());
+            notes.push(format!(
+                "the pads are TIED: `--wire {wire}` ties the two pads together in the signal \
+                 fabric, so whatever one carries the other carries. That is this payload's \
+                 loopback, and it is the emulated stand-in for a jumper between the two header \
+                 pins. What the run measures is therefore this machine's own receiver reading \
+                 this machine's own transmitter — a claim about the machine, not about silicon. \
+                 A silicon twin of this payload needs the physical jumper, and its sidecar says \
+                 so."
+            ));
+        }
+        if let Some(script) = req.payload.pin_script {
+            emu.push("--pin-script".into());
+            emu.push(script.into());
+            notes.push(format!(
+                "the pads are driven from OUTSIDE, by `{script}`: a `--pin-script`'s levels \
+                 arrive at the guest times the file states, anchored on a line the firmware \
+                 itself printed, so two runs of it against one image drive the same pads at \
+                 the same cycles. What this transcript measures is therefore the \
+                 OUTSIDE-DRIVER path. Its silicon twin measures the READ path — on a board \
+                 the firmware drives its own pads and reads them back, because there is no \
+                 wire and no hands on that bench. The two are deliberately not conflated: the \
+                 setup line's `drive=` word says which side drove, and it is the only thing \
+                 this payload's mask set masks."
+            ));
         }
         if let Some(mac) = &req.identity.mac {
             emu.push("--efuse-mac".into());

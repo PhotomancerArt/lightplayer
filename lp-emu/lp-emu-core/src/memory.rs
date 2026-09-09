@@ -712,6 +712,14 @@ impl crate::bus::Bus for Memory {
     // `set_watchpoint` and `take_sideband` keep the trait's default no-op:
     // flat user-mode `Memory` has no privileged state to trap from and no
     // MMIO to raise a sideband about.
+
+    /// A flat `Memory` fetch reads bytes and does nothing else — no cost
+    /// model, no watchpoints, no MMIO on the fetch path — so a decode-ahead
+    /// fetch is free of consequence and a block cache over it is exact.
+    #[inline(always)]
+    fn fetch_is_pure(&self) -> bool {
+        true
+    }
 }
 
 #[cfg(all(test, feature = "std"))]

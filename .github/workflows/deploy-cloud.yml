@@ -42,6 +42,13 @@ env:
   # sccache + Espressif toolchain + build-std is proven by pre-merge's
   # firmware-size job.
   CARGO_INCREMENTAL: "0"
+  # Match pre-merge.yml exactly: these two are part of the rustc arguments
+  # sccache hashes, and the deployed artifact (the wasm bundle + release
+  # firmware images) does not carry host debuginfo anyway. Without them the
+  # deploy's lp-cli build was `dev [unoptimized + debuginfo]`, sharing
+  # nothing with CI and half again as much output to link (2026-09-08).
+  CARGO_PROFILE_DEV_DEBUG: "false"
+  CARGO_PROFILE_TEST_DEBUG: "false"
   SCCACHE_GHA_ENABLED: "true"
   RUSTC_WRAPPER: sccache
 
@@ -82,13 +89,21 @@ jobs:
     if: needs.gate.outputs.ready == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    # Every `run` step works inside lp2025/, the same path pre-merge.yml
+    # checks out into. That is not cosmetic: sccache hashes the compile's
+    # working directory ("the cwd of the compile" in its Rust hasher), so a
+    # root checkout could never share an object with CI — measured 10 %
+    # sccache hits and a 13m41s lp-cli build on 2026-09-08, with the three
+    # firmware images CI had just built rebuilt from scratch. The checkout
+    # comes first because the directory must exist before any `run` step.
+    defaults:
+      run:
+        working-directory: lp2025
     steps:
-      - name: Install system deps
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
-
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          path: lp2025
           # Deploy exactly the commit CI validated (empty on manual
           # dispatch, which then checks out the default branch head).
           ref: ${{ github.event.workflow_run.head_sha }}
@@ -96,6 +111,9 @@ jobs:
           # `main-push.yml` pushed for this very commit.
           fetch-depth: 0
           fetch-tags: true
+
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
 
       # BEFORE the build, and this ordering is the whole point:
       # `print-app-version.sh` reads `git status --porcelain`, and the build
@@ -147,16 +165,22 @@ jobs:
 
       # target/ is deliberately NOT cached (cache-targets: false): the old
       # multi-GB `cloud-cargo` actions/cache entry was LRU-evicted between
-      # deploys every single time (the repo's 10 GB Actions-cache budget
-      # lives in thousands of small sccache entries), so it never restored —
-      # it only burned 48 s of save time and cache budget per run. sccache
-      # re-materializes crate compiles content-addressed instead, same shape
-      # as pre-merge.yml. `shared-key` is shared with deploy-pages-channel.yml
-      # on purpose: the two build the same artifact from the same tree.
+      # deploys every single time (the repo's 10 GB Actions-cache budget was
+      # over-subscribed — 11.7 GB on 2026-09-08, most of it twelve per-job
+      # copies of the cargo registry that pre-merge.yml has since collapsed),
+      # so it never restored — it only burned 48 s of save time and cache
+      # budget per run. sccache re-materializes crate compiles
+      # content-addressed instead, same shape as pre-merge.yml, and with the
+      # working directory and profile env aligned (above) its objects are
+      # the same ones CI writes. `shared-key` is shared with
+      # deploy-pages-channel.yml on purpose: the two build the same artifact
+      # from the same tree. cache-bin false: the tools come prebuilt below.
       - name: Cache cargo registry
         uses: Swatinem/rust-cache@v2
         with:
+          workspaces: lp2025 -> target
           cache-targets: false
+          cache-bin: false
           shared-key: deploy
 
       - name: Run sccache

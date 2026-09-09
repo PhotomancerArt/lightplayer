@@ -634,8 +634,14 @@ schema-gen:
     cargo run -p lp-cli -- schema gen
 
 # Verify schemas/ matches the generator byte-for-byte (drift gate, CI-style).
+#
+# `LP_CLI` overrides the lp-cli invocation (a command prefix). CI points it
+# at the binary the workspace `cargo test` already built, so the gate costs
+# no second tree build: a `-p lp-cli` dev build unifies features differently
+# from the workspace test build and rebuilt every dependency — 4m49s per
+# Validate run on 2026-09-08. Locally the default builds lp-cli as before.
 schema-check:
-    cargo run -p lp-cli -- schema gen --check
+    ${LP_CLI:-cargo run -q -p lp-cli --} schema gen --check
 
 # Snapshot the outgoing format into schemas/history/v<N>/ BEFORE bumping
 # PROJECT_FORMAT_VERSION (N = the current constant). Copies the schemas, the
@@ -1839,10 +1845,10 @@ clippy-fw-esp32c6-harnesses: install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
     cd lp-fw/fw-esp32c6
-    for feature in test_rmt test_dither test_gpio test_gpio_calibrate test_button \
+    for feature in test_rmt test_rmt_rx test_dither test_gpio test_gpio_calibrate test_button \
                    test_usb test_json test_msafluid test_fluid_demo \
                    test_jit_math_perf test_shader_compile_incremental \
-                   test_cycle_probe; do
+                   test_cycle_probe test_gpio_input; do
         echo "==> fw-esp32c6 harness: $feature"
         cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
             --features "$feature,esp32c6" -- --no-deps -D warnings
@@ -2193,7 +2199,24 @@ lint-emu-fence:
 # `emu_usb_hello` is in `lp-cli` rather than the emulator because it sends a
 # real `M!` frame, and the single framer for those (`lpc_wire::json::to_serial_line`)
 # is a product crate the fence keeps out of `lp-emu/` — see the test's header.
-test-emu-c6:
+#
+# Two halves, because CI runs them in two jobs. The `-p lp-cli` half is a
+# second full test-tree build (features unify differently from
+# `-p lp-emu-esp32c6`; 6m07s on a CI runner, 2026-09-08), so CI runs it in
+# `Heap budget (esp32c6 chip)` beside the chip ratchet, which needs the same
+# build, and `Emulator C6 (x64)` keeps the emulator's own suite. Locally,
+# `just test-emu-c6` is still the whole thing.
+test-emu-c6: test-emu-c6-boot test-emu-c6-cli
+
+# The emulator's own suite: boot tests against built fw-esp32c6 ELFs, then the
+# lp-emu-validate replays. CI's `Emulator C6 (x64)` job runs this half.
+#
+# `test-emu-serve` rides along at the end (DD13, plan two): the M1 gates want
+# the reference image, and this is the one recipe whose CI job has already
+# built it — anywhere else in CI they would only skip. Last, not a
+# dependency, because a socket suite is the slow half and the emulator's own
+# answers should not wait behind it.
+test-emu-c6-boot:
     LP_EMU_BUILD_FW=1 cargo test -p lp-emu-esp32c6 -- --include-ignored --nocapture
     cargo test -p lp-emu-validate --test m3_replays
     cargo test -p lp-emu-validate --test m4_replays
@@ -2202,8 +2225,36 @@ test-emu-c6:
     cargo test -p lp-emu-validate --test m7_replays
     cargo test -p lp-emu-validate --test cycle_probe_two_clocks
     cargo test -p lp-emu-validate --test band_contract
+    just test-emu-serve
+
+# lp-cli's two emulator-backed tests. Both resolve the ELF through
+# `lp_emu_esp32c6::test_support` under `LP_EMU_BUILD_FW=1` — a plain
+# `cargo build`, not a reference image, so no espflash and no git history.
+# CI's `Heap budget (esp32c6 chip)` job runs this half.
+test-emu-c6-cli:
     cargo test -p lp-cli --test validate_registry_parity
     LP_EMU_BUILD_FW=1 cargo test -p lp-cli --test emu_usb_hello -- --include-ignored
+
+# `lp-cli emu serve`'s WebSocket door: the registry, the two endpoints, the
+# coupling rule, `reset`, and the upload walk over `serial:ws://…` landing
+# `upload-walk-usb`'s figures (emulator plan two, M1).
+#
+# It wants the REFERENCE image — a riscv32 build of firmware commit d6cfaa205
+# through `scripts/emu/build-reference-image.sh` — and a `git archive` of the
+# project the walk was captured against. Both skip honestly when they cannot
+# be had, so a run with neither says so rather than passing quietly.
+#
+# Run from `test-emu-c6-boot` (DD13), which is the one CI job that has both:
+# `Emulator C6 (x64)` builds the reference image a step earlier and checks out
+# with `fetch-depth: 0`, so the `git archive` resolves. No new job — PD9 /
+# E-cost still stands, this is a step on a path-gated one that already pays
+# for the image.
+#
+# Serial on purpose: each test holds N emulated boards and a port, and a
+# loaded box is where a socket test goes flaky.
+test-emu-serve:
+    LP_EMU_BUILD_FW=1 cargo test -p lp-cli --test emu_serve_door -- --include-ignored --test-threads=1
+    LP_EMU_BUILD_FW=1 cargo test -p lp-cli --test emu_serve_walk -- --include-ignored --test-threads=1
 
 # The hardware walk, with the emulator where the board goes.
 #

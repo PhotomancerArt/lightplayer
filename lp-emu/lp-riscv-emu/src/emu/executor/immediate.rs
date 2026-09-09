@@ -9,7 +9,7 @@ use lp_riscv_inst::{Gpr, format::TypeI};
 
 /// Decode and execute I-type immediate instructions.
 #[inline(always)]
-pub(super) fn decode_execute_itype<M: LoggingMode, B: Bus>(
+pub(crate) fn decode_execute_itype<M: LoggingMode, B: Bus>(
     inst_word: u32,
     pc: u32,
     regs: &mut [i32; 32],

@@ -535,6 +535,98 @@ pub struct RadioFrame {
     pub bytes: Vec<u8>,
 }
 
+/// How far the walk of the guest's RX descriptor chain may go before the
+/// machine gives up.
+///
+/// The ring the blob posts has ten elements and ends in a NULL `next` (M4 P0
+/// §2), so the walk normally stops on its own. This bound exists so that a
+/// `next` chain the guest has corrupted — or one that loops — cannot spin
+/// the emulator inside a slice boundary.
+const RX_RING_WALK_CAP: u32 = 64;
+
+/// `dw0[31]`, `owner`: the hardware's, and the one bit of the descriptor
+/// word whose reading M4 P0 called consistent across both descriptors.
+const RX_DESC_OWNER_MASK: u32 = 1 << 31;
+/// `dw0[30]`, `eof`. Set on the TX side's single-descriptor chain.
+const RX_DESC_EOF_MASK: u32 = 1 << 30;
+/// `dw0[11:0]`: the buffer's size — 1,700 against a 1,708-byte stride.
+const RX_DESC_SIZE_MASK: u32 = 0xfff;
+/// `dw0[23:12]`, the twelve bits M4 P0 could not name. See [`AirDelivery`].
+const RX_DESC_LEN_MASK: u32 = 0xfff << 12;
+const RX_DESC_LEN_SHIFT: u32 = 12;
+
+/// What became of one frame the air offered this machine.
+///
+/// # `[23:12]`, and why this type carries the argument
+///
+/// M4 P0 refuted `[23:12] = length` on both descriptors: 272 on a TX
+/// descriptor whose buffer is 96 bytes, and 2,704 on a freshly posted RX one
+/// whose buffer is 1,700. The swap (`length` low, `size` high) is refuted
+/// too, because it would put 2,704-byte buffers 1,708 bytes apart.
+///
+/// A delivery still has to write *something* there, so this machine writes
+/// the **byte count it wrote** (header, frame and the four FCS bytes), and
+/// the experiment that settled the choice was run rather than argued
+/// (`tests/air_delivery.rs`,
+/// `the_descriptor_words_undetermined_bits_change_nothing`):
+///
+/// - **The frame arrives whatever is in `[23:12]`** — the byte count, the
+///   2,704 the ring already held, or all ones. But the instruction counts
+///   differ between them, so the guest **reads** the field and merely
+///   tolerates every value. Undetermined, then; not ignored. The byte count
+///   is written because that is what a reader would expect to find there,
+///   and no claim is made about what the silicon puts in it.
+/// - **`[28:24]` is load-bearing**, which M4 P0 could not have known:
+///   clearing the 1 the blob posted stops the guest receiving. Its meaning
+///   is still P0's U3; leaving it exactly as posted is now a rule with a
+///   test behind it.
+/// - **`owner` is our convention, not the guest's requirement**: leaving it
+///   set delivers the frame just the same. It is cleared anyway, because
+///   that is what `lldesc` hardware does and a ring that never gave a
+///   descriptor back would look full after ten frames when it is not.
+/// - **`eof` is demanded.** With it clear the guest does not take the frame.
+///
+/// The README carries the same four lines.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AirDelivery {
+    /// Written into `desc`'s buffer, and the interrupt raised.
+    Delivered {
+        desc: u32,
+        buf: u32,
+        dw0_before: u32,
+        dw0_after: u32,
+        /// Header, frame and the four FCS bytes.
+        len: u32,
+    },
+    /// This machine has no `WIFI_MAC` block — a machine built without one.
+    NoBlock,
+    /// The blob has not programmed an RX ring yet (nothing at
+    /// `WIFI_MAC+0x4084`), or the chain does not read. Before radio init
+    /// this is the ordinary answer.
+    NoRing,
+    /// **Every descriptor in the chain is the guest's**, or none that is
+    /// still the hardware's has a big enough buffer. The ring ends rather
+    /// than wrapping, so this is what "the eleventh frame" looks like. The
+    /// frame is dropped, counted, and the first one is logged.
+    RingFull,
+    /// The walk hit [`RX_RING_WALK_CAP`] without finding an end — a chain
+    /// that loops or was corrupted.
+    RingWalkCap,
+}
+
+impl AirDelivery {
+    /// The phrase the trace line and the one-shot warning use.
+    pub fn why(&self) -> &'static str {
+        match self {
+            AirDelivery::Delivered { .. } => "delivered",
+            AirDelivery::NoBlock => "dropped: no WIFI_MAC block",
+            AirDelivery::NoRing => "dropped: no RX ring programmed yet",
+            AirDelivery::RingFull => "dropped: the RX ring is full",
+            AirDelivery::RingWalkCap => "dropped: the RX chain did not end",
+        }
+    }
+}
+
 /// What [`Esp32C6Machine::read_tx_frame`] made of one armed handoff.
 struct ReadTxFrame {
     /// The `--tx-log` line, always.
@@ -726,6 +818,9 @@ pub struct Esp32C6Builder {
     /// Perform a reset request instead of reporting it. See
     /// [`Esp32C6Builder::reboot_on_reset`].
     reboot_on_reset: bool,
+    /// Let the hart pre-decode blocks. See
+    /// [`Esp32C6Builder::block_cache`].
+    block_cache: bool,
     efuse: EfuseIdentity,
     time_grade: TimeGrade,
     strict: bool,
@@ -790,6 +885,7 @@ impl Esp32C6Builder {
             reset_cause: ResetCause::default(),
             strap: Strap::App,
             reboot_on_reset: false,
+            block_cache: true,
             efuse: EfuseIdentity::default(),
             time_grade: TimeGrade::default(),
             strict: false,
@@ -890,6 +986,27 @@ impl Esp32C6Builder {
     /// every byte from before the reset — a reboot is not a new process.
     pub fn reboot_on_reset(mut self, reboot: bool) -> Self {
         self.reboot_on_reset = reboot;
+        self
+    }
+
+    /// Let the hart pre-decode runs of instructions and dispatch them without
+    /// re-deciding what each one is. **On by default**; `--no-block-cache`
+    /// turns it off.
+    ///
+    /// Off is the bring-up tool, the bisection tool and the identity oracle:
+    /// the same binary with the cache off must produce the same `stopped
+    /// after` line, the same UART bytes, the same decoded frames off the pad
+    /// and the same trace. It is also the *only* way anything about a run
+    /// should change, because the cache is not architectural state.
+    ///
+    /// It is forced off under [`BootMode::RomUp`] (M5 MD13): there the mask
+    /// ROM and the real ESP-IDF second-stage bootloader run as guest code and
+    /// copy segments into RAM without a `fence.i`, and we own neither, so
+    /// there is nothing to hold them to the contract. RomUp is a
+    /// boot-modelling path measured in hundreds of milliseconds, not a speed
+    /// path, so refusing to cache there costs nothing worth having.
+    pub fn block_cache(mut self, on: bool) -> Self {
+        self.block_cache = on;
         self
     }
 
@@ -1129,6 +1246,7 @@ impl Esp32C6Builder {
             reset_cause,
             strap,
             reboot_on_reset,
+            block_cache,
             efuse,
             time_grade,
             strict,
@@ -1441,6 +1559,12 @@ impl Esp32C6Builder {
         let mut hart = MachineHart::new(0);
         loader::reset_hart(&mut hart, &mut bus, entry);
         hart.set_cycle_model(time_grade.cycle_model());
+        // M5 MD13: a ROM-up boot runs the mask ROM and the real ESP-IDF
+        // second-stage bootloader as GUEST code, and both copy segments into
+        // hp-sram and jump into them with ordinary stores. Neither will ever
+        // emit the `fence.i` the cache's invalidation rests on, and we own
+        // neither, so the cache is off there.
+        hart.set_block_cache(block_cache && boot_mode != BootMode::RomUp);
         // The address's cost, if this grade charges one. Installed after the
         // loader has placed the app and filled the window: the cache starts
         // cold, as it is at reset, and the host's placement of segments
@@ -1461,6 +1585,9 @@ impl Esp32C6Builder {
             .watching(uart0_log.clone())
             .watching(usb_sj_log.clone());
         let gpio_index = bus.peripheral_index("GPIO");
+        // The other block that reads the edge stream: the RMT's receivers
+        // sample the pad their input signal is routed to (M2 P3).
+        let rmt_index = bus.peripheral_index("RMT");
         // The radio TX log's source block; `None` on a machine without one.
         let wifi_mac_index = bus.peripheral_index("WIFI_MAC");
         // Arm the recording only when something is listening: it ends a
@@ -1534,6 +1661,7 @@ impl Esp32C6Builder {
             script: usb_script.into(),
             pin_script,
             gpio_index,
+            rmt_index,
             wifi_mac_index,
             tx_log: tx_log_sink,
             tx_log_lines: 0,
@@ -1541,6 +1669,9 @@ impl Esp32C6Builder {
             air_participant: None,
             air_tx: Vec::new(),
             air_offered: 0,
+            air_delivered: 0,
+            air_undelivered: 0,
+            air_undelivered_noted: false,
             next_pin_poll: 0,
             next_host_poll: 0,
             control_lines: 0,
@@ -1747,6 +1878,9 @@ pub struct Esp32C6Machine {
     pin_script: PinScript,
     /// `GPIO`'s peripheral index: the block the drained edges are handed to.
     gpio_index: Option<usize>,
+    /// `RMT`'s peripheral index: the other block the drained edges are handed
+    /// to, for its RX channels (M2 P3).
+    rmt_index: Option<usize>,
     /// `WIFI_MAC`'s peripheral index: where the radio TX log's handoffs come
     /// from. `None` on a machine with no radio window.
     wifi_mac_index: Option<usize>,
@@ -1769,6 +1903,12 @@ pub struct Esp32C6Machine {
     /// an `rx_ctrl` header and raising the RX interrupt is M4 P2's, and this
     /// counter is what makes the pair runner testable before P2 exists.
     air_offered: u64,
+    /// Frames actually written into the guest's RX ring, and frames the air
+    /// offered that could not be. `air_undelivered_noted` keeps the warning
+    /// to one line per run; the counts go in the run's summary.
+    air_delivered: u64,
+    air_undelivered: u64,
+    air_undelivered_noted: bool,
     /// The guest-cycle grid a pin script's unresolved `after` is looked at
     /// on. Guest time, so two runs resolve at the same cycle.
     next_pin_poll: Cycles,
@@ -1866,6 +2006,25 @@ impl Esp32C6Machine {
             return;
         }
         self.cache_fills += crate::cache::fill(&mut self.bus, &self.flash, &self.cache) as u64;
+    }
+
+    /// What the hart's pre-decoded block cache did, or `None` when it was
+    /// never built (`--no-block-cache`, or a `--boot rom-up` run).
+    pub fn block_stats(&self) -> Option<lp_emu_core::BlockStats> {
+        self.harts[0].block_stats()
+    }
+
+    /// Whether the hart is allowed to pre-decode blocks at all.
+    pub fn block_cache(&self) -> bool {
+        self.harts[0].block_cache()
+    }
+
+    /// `fence.i` instructions the guest retired. One per JIT publish is what
+    /// the firmware's own fence should produce
+    /// (`lpvm_native::rt_jit::buffer::JitBuffer::from_code`); a run that
+    /// compiled a shader and saw none means that fence is not reaching here.
+    pub fn fence_i_count(&self) -> u64 {
+        self.harts[0].fence_i_count()
     }
 
     pub fn efuse(&self) -> EfuseIdentity {
@@ -2234,6 +2393,15 @@ impl Esp32C6Machine {
             self.bus
                 .with_peripheral::<Gpio, _>(index, |g, cx| g.observe_edges(&edges, cx));
         }
+        // …and so does the RMT: a receiver samples the pad its input signal
+        // is routed to, out of the same stream, so a word in the RX RAM and a
+        // line in the pin log can never disagree about the wire.
+        if let Some(index) = self.rmt_index {
+            self.bus
+                .with_peripheral::<crate::periph::rmt::Rmt, _>(index, |r, cx| {
+                    r.observe_edges(&edges, cx)
+                });
+        }
         for edge in edges {
             let pad = edge.pad.0;
             *self.pins.state.edges.entry(pad).or_default() += 1;
@@ -2413,19 +2581,57 @@ impl Esp32C6Machine {
         std::mem::take(&mut self.air_tx)
     }
 
-    /// Offer this machine a frame from the air.
+    /// Offer this machine a frame from the air — and **deliver** it (M4 P2):
+    /// take a descriptor off the guest's own RX ring, write an `rx_ctrl`
+    /// header and the frame into its buffer, hand the descriptor back and
+    /// raise the radio interrupt.
     ///
-    /// **P1 counts it and stops there.** Delivery — a descriptor taken off
-    /// the RX ring, an `rx_ctrl` header written in front of the frame, the
-    /// RX interrupt raised — is M4 P2's, and it grows from exactly here.
-    /// Until it does, `frames offered` in a pair's report is the honest
-    /// statement of what the air did: it carried them, and nobody read them.
+    /// This runs at a **slice boundary**, where the machine holds guest
+    /// memory and the interrupt lines and no peripheral holds a borrow — the
+    /// mirror of [`drain_tx_log`](Self::drain_tx_log), which reads guest RAM
+    /// at the same place for the same reason.
+    ///
+    /// # What is the guest's and what is ours
+    ///
+    /// The **ring** is entirely the guest's: its base is the address the
+    /// blob wrote to `WIFI_MAC+0x4084`, its descriptors are the twelve-byte
+    /// records the blob chained, and the buffers are its own heap. Nothing
+    /// here allocates anything or assumes an address.
+    ///
+    /// The **interrupt source** and its **clear** are the guest's too — M4
+    /// P1 observed both. The **raise** is ours: no silicon has been watched
+    /// doing it, and an air that raises an interrupt is originating an event
+    /// rather than reproducing one. The README says so by name.
+    ///
+    /// Everything else — that the header sits at `buf[0]`, what goes in the
+    /// descriptor's undetermined bits, which event bits to raise — is
+    /// **chosen**, and [`crate::periph::wifi_stub`]'s docs say which of them
+    /// the guest was observed checking.
     pub fn offer_air_frame(&mut self, frame: &lp_emu_esp_common::air::AirFrame) {
         self.air_offered += 1;
+        let outcome = self.deliver_air_frame(&frame.bytes);
+        match &outcome {
+            AirDelivery::Delivered { .. } => self.air_delivered += 1,
+            _ => {
+                self.air_undelivered += 1;
+                // Once, and never silently: a run whose ring filled up says
+                // so in its summary, and the first one says why.
+                if !self.air_undelivered_noted {
+                    self.air_undelivered_noted = true;
+                    log::warn!(
+                        "air: {} could not be delivered into the RX ring ({}); \
+                         later ones are counted, not logged",
+                        frame.bytes.len(),
+                        outcome.why()
+                    );
+                }
+            }
+        }
         if self.bus.trace.is_enabled() {
             let line = format!(
-                "cyc={} AIR offered {} bytes from {} (sent at cyc={}, not delivered — M4 P2)",
+                "cyc={} AIR {} {} bytes from {} (sent at cyc={})",
                 self.cycles(),
+                outcome.why(),
                 frame.bytes.len(),
                 frame.from,
                 frame.at
@@ -2434,10 +2640,136 @@ impl Esp32C6Machine {
         }
     }
 
+    /// The delivery itself. See [`offer_air_frame`](Self::offer_air_frame).
+    ///
+    /// # The walk
+    ///
+    /// From the base the blob programmed, follow `next` while the hardware
+    /// still owns the descriptor (`dw0[31]`) and its buffer is big enough
+    /// for the header and the frame (`dw0[11:0]`, the size field M4 P0
+    /// corroborated against the ring's 1,708-byte buffer stride). The chain
+    /// **ends** — the tenth descriptor's `next` is NULL, it does not wrap —
+    /// so a walk that runs out of owned descriptors is the ring being full,
+    /// and that is counted rather than papered over.
+    ///
+    /// [`RX_RING_WALK_CAP`] bounds the walk: a `next` chain the guest
+    /// corrupted must not spin the emulator.
+    ///
+    /// # The descriptor's undetermined bits
+    ///
+    /// `owner` (`[31]`) is **cleared** — the `lldesc` convention is that the
+    /// hardware gives a descriptor back that way, and it is the only bit in
+    /// the word whose reading M4 P0 called consistent across both
+    /// descriptors. `eof` (`[30]`) is **set**: one frame, one descriptor,
+    /// and the TX side's single-descriptor chain had it set. `[23:12]` is
+    /// written with the byte count — see [`AirDelivery`] and the README for
+    /// what the guest did and did not check about that. `[11:0]` (the
+    /// buffer's size) and `[28:24]` are **left exactly as the blob posted
+    /// them**: the air has nothing to say about a buffer's capacity, and
+    /// `[28:24]`'s meaning is M4 P0's U3, still open.
+    fn deliver_air_frame(&mut self, bytes: &[u8]) -> AirDelivery {
+        let Some(index) = self.wifi_mac_index else {
+            return AirDelivery::NoBlock;
+        };
+        let Some(base) = self
+            .bus
+            .with_peripheral::<crate::periph::wifi_stub::WifiStub, _>(index, |w, _| w.rx_dma_base())
+            .flatten()
+        else {
+            return AirDelivery::NoRing;
+        };
+        let micros = (self.cycles() / memmap::CYCLES_PER_US) as u32;
+        let payload = crate::periph::wifi_stub::rx_ctrl::frame_with_header(bytes, micros);
+        let need = payload.len() as u32;
+
+        let mut desc = base;
+        for _ in 0..RX_RING_WALK_CAP {
+            let (Some(dw0), Some(buf), Some(next)) = (
+                self.peek_word(desc),
+                self.peek_word(desc.wrapping_add(4)),
+                self.peek_word(desc.wrapping_add(8)),
+            ) else {
+                return AirDelivery::NoRing;
+            };
+            let owned_by_hardware = dw0 & RX_DESC_OWNER_MASK != 0;
+            let size = dw0 & RX_DESC_SIZE_MASK;
+            if owned_by_hardware && size >= need {
+                if !self.poke_bytes(buf, &payload) {
+                    return AirDelivery::NoRing;
+                }
+                let dw0_after = (dw0 & !RX_DESC_OWNER_MASK & !RX_DESC_LEN_MASK)
+                    | RX_DESC_EOF_MASK
+                    | ((need << RX_DESC_LEN_SHIFT) & RX_DESC_LEN_MASK);
+                self.poke_word(desc, dw0_after);
+                self.bus
+                    .with_peripheral::<crate::periph::wifi_stub::WifiStub, _>(index, |w, _| {
+                        w.raise_rx_interrupt(desc, next)
+                    });
+                // The level: a peripheral can only reach `IrqLines` inside
+                // an access, and this is a slice boundary. The block put the
+                // bits in its event word; the machine holds the line up
+                // until the guest's write-one-to-clear empties that word.
+                self.bus.irq.set_level(crate::regs::source::WIFI_MAC, true);
+                return AirDelivery::Delivered {
+                    desc,
+                    buf,
+                    dw0_before: dw0,
+                    dw0_after,
+                    len: need,
+                };
+            }
+            if next == 0 {
+                return AirDelivery::RingFull;
+            }
+            desc = next;
+        }
+        AirDelivery::RingWalkCap
+    }
+
+    /// Write `bytes` into guest memory through the bus's own decode, word by
+    /// word, read-modify-writing the two ends so a delivery never disturbs a
+    /// byte outside its own range. `false` if any word refused.
+    fn poke_bytes(&mut self, address: u32, bytes: &[u8]) -> bool {
+        let mut at = address;
+        let mut rest = bytes;
+        while !rest.is_empty() {
+            let word_at = at & !3;
+            let lane = (at - word_at) as usize;
+            let take = rest.len().min(4 - lane);
+            let mut word = if lane == 0 && take == 4 {
+                0
+            } else {
+                match self.peek_word(word_at) {
+                    Some(w) => w,
+                    None => return false,
+                }
+            }
+            .to_le_bytes();
+            word[lane..lane + take].copy_from_slice(&rest[..take]);
+            if !self.poke_word(word_at, u32::from_le_bytes(word)) {
+                return false;
+            }
+            at += take as u32;
+            rest = &rest[take..];
+        }
+        true
+    }
+
     /// How many frames the air has offered this machine. See
     /// [`offer_air_frame`](Self::offer_air_frame).
     pub fn air_frames_offered(&self) -> u64 {
         self.air_offered
+    }
+
+    /// How many of those reached the guest's RX ring, and how many did not.
+    /// A pair's summary prints both, because "offered" and "delivered" are
+    /// different claims and the difference is the ring's end (RD10).
+    pub fn air_frames_delivered(&self) -> u64 {
+        self.air_delivered
+    }
+
+    pub fn air_frames_undelivered(&self) -> u64 {
+        self.air_undelivered
     }
 
     /// `count` bytes of guest memory, word by word through the bus's decode.
@@ -2790,6 +3122,19 @@ impl Esp32C6Machine {
             // slice's entry poll is not answering a stale flag.
             let _ = self.bus.take_sideband();
             self.refill_cache();
+            // The block cache's emulator-side funnel, drained where the
+            // window refill it usually follows already is. Everything that
+            // writes guest code from the HOST side comes through
+            // `SocBus::load_image` — a flash-cache MMU page fill, a ROM-hook
+            // `ebreak` patch, an ELF segment — and none of it is followed by
+            // a guest `fence.i`, because none of it is the guest. Almost
+            // every slice this is one `is_empty` test: P1 counted 98 cache
+            // refills across a whole render run.
+            if self.bus.code_writes_pending() {
+                for (lo, hi) in self.bus.take_code_writes() {
+                    self.harts[0].invalidate_block_range(lo, hi);
+                }
+            }
 
             if let Some(violation) = self.bus.first_strict_violation() {
                 return Outcome::StrictBus { violation };
@@ -3310,8 +3655,14 @@ impl Esp32C6Machine {
     /// hart's trigger CSRs, because they live on the bus and the bus does not
     /// know they came from a hart.
     pub fn restore(&mut self, s: &Snapshot) {
+        // The block cache is not architectural state and is absent from a
+        // snapshot: `Clone for MachineHart` hands back an empty one, which is
+        // the whole of "restore invalidates all". The bus's pending code
+        // writes go with it — they described the machine that was, and the
+        // regions are about to be replaced wholesale.
         self.harts.clone_from(&s.harts);
         self.bus.restore_regions(&s.regions);
+        let _ = self.bus.take_code_writes();
         self.bus.restore_peripherals(&s.periph);
         self.bus.restore_scalars(&s.scalars);
         self.bus.sched.restore(&s.sched);

@@ -98,6 +98,49 @@ pub const ALL_CHECKS: &[FwCheckConfig] = &[
         emits_header: true,
     },
     FwCheckConfig {
+        check: FwCheck::GpioInput,
+        display_name: "A button and a quadrature encoder, read back off the pads",
+        firmware_features: &["test_gpio_input"],
+        // The literal, not `checks::gpio_input::DONE_MARKER`, for the reason
+        // `cycle-probe` states above: this table is a `const` that exists
+        // whether or not `check-gpio-input` compiles the module.
+        // `the_gpio_input_marker_is_the_modules` below pins the two equal.
+        done_marker: Some("[gpio-input] === DONE ==="),
+        trace_slug: "gpio-input",
+        supported_targets: ESP32_ONLY,
+        emits_records: true,
+        emits_header: true,
+    },
+    FwCheckConfig {
+        check: FwCheck::RmtRx,
+        display_name: "An RMT frame put on gpio18 and read back off gpio19",
+        firmware_features: &["test_rmt_rx"],
+        // The literal, not `checks::rmt_rx::DONE_MARKER`, for the reason
+        // `cycle-probe` states above: this table is a `const` that exists
+        // whether or not `check-rmt-rx` compiles the module.
+        // `the_rmt_rx_marker_is_the_modules` below pins the two equal.
+        done_marker: Some("[rmt-rx] === DONE ==="),
+        trace_slug: "rmt-rx",
+        supported_targets: ESP32_ONLY,
+        emits_records: true,
+        emits_header: true,
+    },
+    FwCheckConfig {
+        check: FwCheck::EspnowBroadcast,
+        display_name: "Two boards on the air, each saying what it sent and what it heard",
+        firmware_features: &["test_espnow_broadcast"],
+        // The literal, not `checks::espnow_broadcast::DONE_MARKER`, for the
+        // reason `cycle-probe` states above: this table is a `const` that
+        // exists whether or not `check-espnow-broadcast` compiles the module.
+        // `the_espnow_broadcast_marker_is_the_modules` below pins the two
+        // equal.
+        done_marker: Some("[espnow-broadcast] === DONE ==="),
+        trace_slug: "espnow-broadcast",
+        supported_targets: ESP32_ONLY,
+        emits_records: true,
+        emits_header: true,
+    },
+    FwCheckConfig {
         check: FwCheck::BootIdle,
         display_name: "Shipped image to the idle loop",
         // The shipped-image walk as a payload (vision Q1): no check module,
@@ -431,11 +474,39 @@ mod tests {
     }
 
     #[test]
+    fn the_rmt_rx_marker_is_the_modules() {
+        let check = find_check("rmt-rx").expect("registered");
+        assert_eq!(
+            check.done_marker,
+            Some(crate::checks::rmt_rx::DONE_MARKER),
+            "the registry's marker and the module's have to be the same line"
+        );
+    }
+
+    #[test]
+    fn the_gpio_input_marker_is_the_modules() {
+        let check = find_check("gpio-input").expect("registered");
+        assert_eq!(
+            check.done_marker,
+            Some(crate::checks::gpio_input::DONE_MARKER)
+        );
+    }
+
+    #[test]
     fn the_render_loop_marker_is_the_modules() {
         let check = find_check("render-loop").expect("registered");
         assert_eq!(
             check.done_marker,
             Some(crate::checks::render_loop::DONE_MARKER)
+        );
+    }
+
+    #[test]
+    fn the_espnow_broadcast_marker_is_the_modules() {
+        let check = find_check("espnow-broadcast").expect("registered");
+        assert_eq!(
+            check.done_marker,
+            Some(crate::checks::espnow_broadcast::DONE_MARKER)
         );
     }
 }

@@ -41,6 +41,7 @@
 //! - `README.md` and `docs/adr/2026-08-25-event-fold-device-model.md`.
 
 pub mod activity;
+pub mod bootloader;
 pub mod device;
 pub mod event;
 pub mod evidence;

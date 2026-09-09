@@ -666,3 +666,37 @@ hours), and neither is an exit path on its own.
   flip could not be reproduced end-to-end through the real harness locally; the
   mechanism was proven with a direct CDP probe instead. Worth knowing before
   the next local reproduction attempt on a popover story.
+
+- 2026-09-08 — **five agent-harness lessons from the "always a device" plan's
+  director run**, filed here (not as one-off notes) because they hit the
+  same story-pipeline/CI-harness surface as the rest of this entry:
+  1. `just watch-pr` misreads a **cancelled** run's job as `fail` — a
+     superseded push cancels the in-flight run, and the recipe's exit path
+     does not distinguish "cancelled because superseded" from "actually
+     failed", so a director watching a stale run head sees a false red.
+  2. `gh run watch --exit-status` has the same blind spot: it exits **0**
+     on a cancelled run (matching neither success nor failure), so a script
+     branching on its exit code alone treats "cancelled" as "passed".
+     Both (1) and (2) mean the only reliable signal is `mergeStateStatus`
+     plus reading the run's own conclusion field, never a recipe's bare
+     exit code, on any run that might have been superseded mid-flight.
+  3. `just studio-web-dev-build` racing this worktree's own `studio-dev`
+     sidecar server is a real wedge, not a false alarm: both write to the
+     same wasm output directory, so running the dev build while the dev
+     server's own watch-rebuild is mid-write produces spurious compile
+     errors that vanish on a clean re-run. Stop or wait out the sidecar
+     before running the dev build by hand.
+  4. Editing `lp-app/lpa-link/src/providers/browser_worker/
+     fw_browser_worker.js` and re-running `just check`/`cargo test` can
+     silently build against the STALE embedded copy: the file reaches the
+     binary through `include_str!`, and cargo does not always see a JS
+     asset edit as a reason to rebuild the crate that embeds it. `cargo
+     clean -p lpa-link` before the next build is the reliable fix, cheaper
+     than chasing a phantom "my change had no effect."
+  5. **Never `pkill -f "dx serve"` or any other pattern-based kill of a dev
+     server.** Two separate agents on this plan (the P3 walk and the
+     original P4 agent) killed OTHER worktrees' live servers this way,
+     once taking out the director's own G1 review server mid-gate. Kill by
+     **pid**, found from the process you started or from `lsof -nP
+     -iTCP:<port>` on the port you own — a pattern match has no worktree
+     boundary.

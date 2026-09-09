@@ -25,16 +25,27 @@
 //! programs for its RX path is reported as the `WIFI RX config` line — the
 //! vision's first artefact of the virtual-air work.
 //!
+//! # Interrupts
+//!
 //! Interrupt sources 0–3 (`WIFI_MAC`, `WIFI_MAC_NMI`, `WIFI_PWR`, `WIFI_BB`)
-//! are never raised: nothing here receives. M4 P1 established **which** of
-//! them the blob claims and **which registers its ISR reads and clears** —
-//! see [`RADIO_INT_SOURCES`], [`MAC_INT_EVENT_OFFSET`] and
-//! [`PWR_INT_EVENT_OFFSET`] — but raising one has never produced a TX
-//! completion, so this block still raises nothing. The evidence is in those
-//! constants' docs and in `docs/debt/emu-c6-radio-tx-never-completes.md`.
+//! were never raised until M4 P2. M4 P1 established **which** of them the
+//! blob claims and **which registers its ISR reads and clears** — see
+//! [`RADIO_INT_SOURCES`], [`MAC_INT_EVENT_OFFSET`] and
+//! [`PWR_INT_EVENT_OFFSET`] — but raising one never produced a TX
+//! completion, so **no TX completion is originated here** and
+//! `docs/debt/emu-c6-radio-tx-never-completes.md` still carries that
+//! question.
+//!
+//! P2 raises **source 0 on a delivery into the RX ring**
+//! ([`WifiStub::raise_rx_interrupt`]), and honours the guest's
+//! write-one-to-clear at [`MAC_INT_CLEAR_OFFSET`] so the line drops when the
+//! ISR has drained it. What that raise is worth is in the README's
+//! "what the guest actually checked" table: the raise is **ours**, the source
+//! and the clear are the guest's own.
 
 use std::collections::BTreeSet;
 
+use lp_emu_esp_common::RegGrade;
 use lp_emu_esp_common::regfile::{lane_of, merge_lane};
 use lp_emu_esp_common::{BusCx, Peripheral, RegFile, Width};
 
@@ -120,6 +131,23 @@ pub const OVERRIDES: &[(u32, u32, u32, &str)] = &[
     // `mac_txrx_init`. Blob spins here; esp-emu evidently satisfies it;
     // value chosen so the poll exits.
     (0x4ddc, 1 << 0, 1 << 0, "hal_init ready flag"),
+    // `SPIN WIFI_MAC+0x4080 bb = 0x88000001 x10000` from
+    // `hal_mac_rx_is_dscr_reload+0x4` (`0x42079682`) — reached the first
+    // time this machine ever delivered a frame into the RX ring (M4 P2, and
+    // never before, because nothing here had ever received). The RX path
+    // sets bit 0 through `hal_mac_rx_set_dscr_reload+0xe` and then loops
+    // `lw` on the same word until it reads back **0**: the shape of a
+    // self-clearing strobe. Bits 31 and 27 of this register are the RX
+    // enables `ic_enable_rx` and
+    // `hal_mac_set_rxbuf_reload_use_hw_beacon_enable` had already set, and
+    // they are remembered as written. Value chosen so the poll exits — bit 0
+    // always reads 0, so a reload the blob asks for is instantly done.
+    (
+        0x4080,
+        1 << 0,
+        0,
+        "hal_mac_rx_is_dscr_reload strobe self-clears",
+    ),
 ];
 
 /// The `WIFI_PWR` block's override list; same rule, same shape.
@@ -293,6 +321,334 @@ pub const PWR_INT_CLEAR_OFFSET: u32 = 0x37b4;
 /// offset from `0x4080_0000`, on the flash-backed image's layout.)
 pub const RX_DMA_BASE_OFFSET: Option<u32> = Some(0x4084);
 
+/// The event bit [`WifiStub::raise_rx_interrupt`] puts in
+/// [`MAC_INT_EVENT_OFFSET`] before it raises source 0: **bit 14**.
+///
+/// # Observed, not chosen — and it disagrees with M4 P1
+///
+/// P1 tried all 32 bits of this word, one at a time, plus all-ones, and
+/// reported an identical instruction count for every candidate: "the event
+/// word's value does not reach a dispatch at all". **That holds only while
+/// the RX ring is empty.** P1 had nothing to receive, so the blob's RX path
+/// looked at a ring with no filled descriptor and left by the same route
+/// whatever it had been told.
+///
+/// M4 P2 ran the same sweep with a frame already written into a descriptor,
+/// against the *RX* oracle, and the candidates separate at once — eight
+/// distinct instruction counts across 35 of them. **Bit 14 is the only one
+/// that reaches the RX path**: the guest goes on to read the ring's base
+/// (`+0x4084`), [`RX_LAST_DSCR_OFFSET`] and its neighbours through
+/// `wdev_record_rx_linked_list` and `hal_mac_rx_get_last_dscr`, and to work
+/// the descriptor-reload strobe at `+0x4080`. No other bit produces a single
+/// access to any of those registers.
+///
+/// Corroboration, from the guest's own boot: `hal_init` writes an interrupt
+/// enable mask of `0x19a879e0` to `WIFI_MAC+0x4c40` (`cyc=5618718`), and bit
+/// 14 is one of the fourteen bits set in it.
+///
+/// So this constant rests on **evidence**, which is more than P1 could
+/// manage — and the register is still `modeled`, because what the silicon
+/// puts in that word has never been watched.
+pub const RX_INT_EVENT_BITS: u32 = 1 << 14;
+
+/// The event bit [`WifiStub`] puts in [`MAC_INT_EVENT_OFFSET`] for a **TX
+/// completion**: **bit 7**.
+///
+/// # Observed, not chosen — and it is what M4 P1 and P2 could not find
+///
+/// M4 U1 swept all 32 bits of `+0x4c48`, all 32 of `+0x4c34`
+/// (`hal_mac_interrupt_get_bsscolor`), all 32 of `WIFI_PWR+0x37b0` and all 32
+/// of `+0x37ac`, on a machine that had **armed a frame**, and counted the
+/// radio-window accesses each raise produced rather than the run's
+/// instructions. (The instruction count is worthless on this path and is why
+/// P1's negative read stronger than it was: the wedged guest retires one
+/// instruction per cycle, so a run bounded by a deadline retires the same
+/// number whatever the ISR did.)
+///
+/// Three bits of `+0x4c48` — **7, 8 and 19** — and no bit of any other word
+/// take the ISR into `hal_mac_get_txq_state` (`0x40806382`). Bit 7's route
+/// reads [`TXQ_STATE_OFFSET`]:
+///
+/// ```text
+/// cyc=176010445 pc=0x408063f6 R4 WIFI_MAC+0x4cb8 bb = 0x00000001  hal_mac_get_txq_state+0x74
+/// cyc=176010453 pc=0x4000bcee R4 WIFI_MAC+0x54e0 bb = 0x00000000  hal_mac_get_txq_complete+0x42
+/// cyc=176010642 pc=0x4000bc9c R4 WIFI_MAC+0x4cb4 bb = 0x00000000  hal_mac_clr_txq_state+0x36
+/// cyc=176010645 pc=0x4000bca6 W4 WIFI_MAC+0x4cb4 bb = 0x00000001  hal_mac_clr_txq_state+0x40
+/// ```
+///
+/// With that register answering 0 the ISR returns and nothing happens; with
+/// bit 0 set it enters `lmacTxDone` (`0x40803704`) and the guest's own
+/// application prints `[test_espnow] tx simulated_button … event=1`. That
+/// line is the oracle, and it had never appeared on this emulator before.
+pub const TX_DONE_INT_EVENT_BITS: u32 = 1 << 7;
+
+/// `WIFI_MAC + 0x4cb8` — the **TX queue state** word `hal_mac_get_txq_state`
+/// reads once the event word's bit 7 has sent it there, and `+0x4cb4` its
+/// clear.
+///
+/// That `+0x4cb4` is the clear is the guest's own statement, in the same
+/// shape as `+0x4c4c`: `hal_mac_clr_txq_state` reads `+0x4cb4`, ORs in the
+/// bit it just serviced and writes it back. This block honours it exactly as
+/// it honours [`MAC_INT_CLEAR_OFFSET`].
+///
+/// *Modeled.* **Bit 0 is a choice inside an observation**: the ISR needs a
+/// non-zero answer here and the guest completes with bit 0, but which bit
+/// corresponds to which of the chip's TX slots is not known — the blob
+/// programmed exactly one slot on this path and nothing distinguishes them.
+/// `both = 0x10` was tried and does **not** complete, so it is not "any bit
+/// will do".
+pub const TXQ_STATE_OFFSET: u32 = 0x4cb8;
+pub const TXQ_STATE_CLEAR_OFFSET: u32 = 0x4cb4;
+
+/// The bit [`TXQ_STATE_OFFSET`] answers with. See that constant.
+pub const TXQ_STATE_DONE_BITS: u32 = 1 << 0;
+
+/// How long after the go strobe the completion is raised: **672 µs**, the
+/// air time [`crate::lockstep::DEFAULT_LATENCY_US`] was chosen from, for the
+/// same reason and with the same standing.
+///
+/// It is a **stated constant, not a measurement**: no silicon has been
+/// watched timing a TX completion. It is not zero because a frame that
+/// completed in the store that armed it would let a guest see its own
+/// completion before the frame could have left, and every timing the guest
+/// derives from it would be a lie in the other direction.
+pub const TX_DONE_DELAY_US: u64 = 672;
+
+/// The scheduler event this block uses for the completion.
+const EV_TX_DONE: u16 = 0;
+
+/// `WIFI_MAC + 0x408c` — the descriptor the hardware last filled, read by
+/// `hal_mac_rx_get_last_dscr+0x4` (`0x42079664`) and again by
+/// `wdev_record_rx_linked_list+0x44` on every RX interrupt.
+///
+/// Observed the first time a frame was delivered into the ring: with bit 14
+/// raised, the guest reads `+0x4084` (the base it programmed itself), then
+/// this register, then `+0x4088`, `+0x4094` and `+0x4090` beside it.
+/// Answering 0 — "the hardware has filled nothing" — sends it into the
+/// descriptor-reload path and it never looks at the ring; answering the
+/// address of the descriptor just filled is what carries the frame up to
+/// the app.
+///
+/// *Modeled.* That this register names the **last filled descriptor** is an
+/// inference from its reader's symbol name plus what the guest does with
+/// each answer; nothing on silicon has been watched writing it.
+pub const RX_LAST_DSCR_OFFSET: u32 = 0x408c;
+
+/// `WIFI_MAC + 0x4088` — the descriptor the hardware will fill **next**,
+/// read by `hal_mac_rx_read_rxdscrnext+0x4` (`0x4080ab18`) and again by
+/// `wdev_record_rx_linked_list+0x4c`.
+///
+/// **This is M4 P0's U6**, answered: "whether `RX_DMA_BASE_OFFSET` is the
+/// only pointer register on the RX side, or whether a second register
+/// carries a read/write cursor into the ring". It is not the only one, and
+/// this is the cursor. P0 could not see it because nothing had ever
+/// received; it is read only on the RX path.
+///
+/// Answering 0 is not merely useless, it is **visibly wrong**: the blob
+/// takes the value as a pointer and dereferences it, and the emulator's own
+/// strict-bus counter catches the result —
+/// `R4 UNMAPPED+0x1143c [unmapped]` from `0x40809fbc`. A cursor that names
+/// the descriptor after the one just filled is what stops that.
+///
+/// *Modeled*, for the same reason as [`RX_LAST_DSCR_OFFSET`]: the reading
+/// is its reader's name plus the guest's behaviour on each answer.
+pub const RX_DSCR_NEXT_OFFSET: u32 = 0x4088;
+
+/// The registers the air writes or answers, each with its grade and the
+/// evidence for it: `(offset, grade, what decided it)`.
+///
+/// Every one is **`modeled`**. `Measured` would mean a committed silicon
+/// transcript agrees with the model, and none of these has one — the whole
+/// window's meanings are inferences from a writer's symbol name and an
+/// observed value. The table is here so that a reader can see *which*
+/// registers the air is now part of, and on what evidence, the same way
+/// [`OVERRIDES`] shows which polls the boot demanded.
+///
+/// [`Peripheral::reg_grade`] grades the **whole window** `modeled` rather
+/// than only these four; see its docs for the blast radius that publishing a
+/// table has.
+pub const AIR_GRADES: &[(u32, RegGrade, &str)] = &[
+    (
+        0x4084,
+        RegGrade::Modeled,
+        "RX_DMA_BASE_OFFSET. The blob writes its RX ring's base here \
+         (`W4 WIFI_MAC+0x4084 = 0x4081557c` from the MAC init, and \
+         `0x40811434` on the test_espnow image); a delivery reads it back \
+         and walks the chain. Modeled: the ring's shape is read out of \
+         guest RAM (M4 P0 §2), the register's meaning is inferred from its \
+         writer's name",
+    ),
+    (
+        0x4c48,
+        RegGrade::Modeled,
+        "MAC_INT_EVENT_OFFSET. The ISR reads it \
+         (`hal_mac_interrupt_get_event`) on every raise of source 0; a \
+         delivery ORs RX_INT_EVENT_BITS into it before raising. Modeled, \
+         and the *value* is undetermined: no bit pattern changes what the \
+         guest does (M4 P1 A.2, and P2's RX sweep)",
+    ),
+    (
+        0x4c4c,
+        RegGrade::Modeled,
+        "MAC_INT_CLEAR_OFFSET. Write-one-to-clear: the ISR writes back the \
+         bits it read, and `mac_txrx_init` writes 0xffffffff at init. This \
+         block clears those bits from +0x4c48 and drops the source when the \
+         word reaches zero. Modeled: the w1c behaviour is read off the \
+         guest's own writes, not a document",
+    ),
+    (
+        TX_PLCP0_OFFSET,
+        RegGrade::Modeled,
+        "The TX slot's PLCP0. Answered as an ordinary remembered register; \
+         the strobed write is what hands a frame to the air (M4 P0 §1-§2) \
+         and, since M4 U1, what schedules the completion. Modeled: the \
+         pointer reading is arithmetic against a break-at, and the strobe \
+         bits' meaning is not known",
+    ),
+    (
+        TXQ_STATE_OFFSET,
+        RegGrade::Modeled,
+        "TXQ_STATE_OFFSET. `hal_mac_get_txq_state+0x74` reads it after event \
+         bit 7 (`cyc=176010445 pc=0x408063f6 R4 WIFI_MAC+0x4cb8 = \
+         0x00000001`); answering 0 returns from the ISR, answering bit 0 \
+         enters lmacTxDone and the guest's send returns. Modeled, and which \
+         bit is which TX slot is undetermined — 0x10 does not complete",
+    ),
+    (
+        TXQ_STATE_CLEAR_OFFSET,
+        RegGrade::Modeled,
+        "TXQ_STATE_CLEAR_OFFSET. Write-one-to-clear, on the guest's own \
+         evidence: `hal_mac_clr_txq_state+0x36` reads it and `+0x40` writes \
+         back the bit it serviced (`W4 WIFI_MAC+0x4cb4 = 0x00000001`). This \
+         block clears those bits from +0x4cb8. Modeled: read off the guest's \
+         writes, not a document",
+    ),
+];
+
+/// One received frame's `rx_ctrl` header, in **our own words**.
+///
+/// # Provenance
+///
+/// Per `docs/adr/2026-07-29-license-provenance-discipline.md`. The field
+/// names, widths and bit offsets below are **derived from the public bit
+/// layout of `wifi_pkt_rx_ctrl_t`** (an alias of `esp_wifi_rxctrl_t`) in the
+/// **`esp-wifi-sys-esp32c6` crate, version 0.2.0, Apache-2.0**, whose
+/// bindings are generated from esp-idf's `esp_wifi_types.h`. Nothing is
+/// **copied**: the crate is not vendored, no source from it is in this
+/// repository, and the code below is written from the layout, not from the
+/// bindings' text. Nothing here was disassembled out of a blob binary.
+///
+/// # What is *chosen* here, and it is a lot
+///
+/// M4 P0 §4 is explicit that the RX ring on this machine was **posted but
+/// never filled**, so nothing has ever seen the header the silicon writes.
+/// Two things are therefore assumptions this module is making, not facts it
+/// inherited:
+///
+/// 1. **That the header sits at `buf[0]`,** with the 802.11 frame
+///    immediately after it. That is the shape the promiscuous-mode buffer
+///    has (`rx_ctrl` then payload) and it is the obvious reading; it is not
+///    an observation.
+/// 2. **That it is [`RX_CTRL_LEN`] bytes long**, which is what the layout
+///    above sums to.
+///
+/// Every field is either **derived from the frame** (`sig_len`, `is_group`),
+/// **taken from the receiving machine's own clock** (`timestamp`), or a
+/// **stated constant** ([`RX_RSSI_DBM`], [`RX_NOISE_FLOOR_DBM`],
+/// [`RX_CTRL_RATE`], [`RX_CTRL_CHANNEL`]) — never a value pretending to be a
+/// measurement. The air models no PHY, so there is no RSSI to compute and no
+/// rate to recover.
+pub mod rx_ctrl {
+    /// The header's length in bytes: the layout's own size.
+    ///
+    /// The struct is `#[repr(C, packed)]`, so this is the sum of its parts
+    /// with no padding: a four-byte bit field, `he_siga1`, a one-byte bit
+    /// field, `he_siga2`, and an 81-byte bit field.
+    pub const LEN: usize = 4 + 4 + 1 + 2 + 81;
+
+    /// `rssi`, byte 0, signed 8-bit. **A constant, not a measurement.** The
+    /// air models no PHY and no range (RD10), so there is nothing to derive
+    /// one from; −40 dBm is "a peer on the same bench", and every frame this
+    /// machine delivers reports it.
+    pub const RSSI_DBM: i8 = -40;
+
+    /// `noise_floor`, byte 20, signed 8-bit. A constant, for the same
+    /// reason as [`RSSI_DBM`].
+    pub const NOISE_FLOOR_DBM: i8 = -96;
+
+    /// `rate`, byte 1 bits 0..5. **Fixed at 0** — 802.11b 1 Mbit/s with a
+    /// long preamble, the basic rate the air's latency constant was chosen
+    /// from (`lockstep::DEFAULT_LATENCY_US`).
+    ///
+    /// RD10 says `rate` "comes from the frame"; it cannot. An 802.11 frame
+    /// does not carry the rate it was sent at — the PLCP header does, and
+    /// the PLCP registers the blob wrote are M4 P0's U5, undetermined. So
+    /// this is a **stated fixed value** consistent with the latency, and it
+    /// is named as one here and in the README rather than dressed up as a
+    /// derivation.
+    pub const RATE: u8 = 0;
+
+    /// `channel`, byte 21 bits 0..4. **Fixed.** The air has no channel: one
+    /// medium, everybody on it hears everybody (RD10). 11 is the channel the
+    /// `test_espnow` image asks its driver for
+    /// (`espnow_radio_driver::DEFAULT_ESPNOW_CHANNEL`), so a frame that
+    /// claimed anything else would be claiming a channel model this
+    /// emulator does not have.
+    pub const CHANNEL: u8 = 11;
+
+    /// A frame, headed. `bytes` is the 802.11 frame as it travelled;
+    /// `micros` is the receiving machine's own microsecond clock.
+    ///
+    /// The returned buffer is the header followed by the frame followed by
+    /// **four zero bytes where the FCS would be**. The air carries no FCS
+    /// (the sender's buffer did not hold one either — M4 P0 §2) and none is
+    /// computed here; the four bytes exist so that a reader who trusts
+    /// `sig_len` reads zeros rather than whatever the heap left behind.
+    pub fn frame_with_header(bytes: &[u8], micros: u32) -> Vec<u8> {
+        let mut out = vec![0u8; LEN];
+        // `rssi`: byte 0, signed.
+        out[0] = RSSI_DBM as u8;
+        // `rate`: byte 1, bits 0..5.
+        out[1] = RATE & 0x1f;
+        // `rxmatch0`: bit 28, which is bit 4 of byte 3. **The one field in
+        // this header the guest demands.** Sweeping every value of every
+        // byte against `--break-at ppRxPkt` (M4 P2) says exactly this: the
+        // frame reaches `ppRxPkt` for all 128 values of byte 3 that have bit
+        // 4 set and for none of the 128 that do not, and no other byte of
+        // the header changes whether it gets there. `rxmatch0` reads as
+        // "receive filter 0 matched", and this air delivers every frame to
+        // every participant, so filter 0 matched.
+        out[3] |= 1 << 4;
+        // `is_group`: bit 7 of byte 11. **Derived from the frame**: 802.11
+        // calls addr1 a group address when the low bit of its first byte is
+        // set, and ESP-NOW's broadcast frames are exactly that. addr1
+        // starts at frame byte 4, after the frame control and duration.
+        let is_group = bytes.get(4).is_some_and(|b| b & 1 == 1);
+        if is_group {
+            out[11] |= 1 << 7;
+        }
+        // `timestamp`: bytes 12..16, byte-aligned in the layout. **The
+        // receiving machine's own microsecond counter** — the same one the
+        // TX path takes its timestamps from (`WIFI_PWR+0x3700`, M4 P0 §1),
+        // so a guest that compares them is comparing one clock.
+        out[12..16].copy_from_slice(&micros.to_le_bytes());
+        // `noise_floor`: byte 20, signed.
+        out[20] = NOISE_FLOOR_DBM as u8;
+        // `channel` in bits 0..4 of byte 21, `second` (the secondary
+        // channel, fixed at 0 = none) in bits 4..8.
+        out[21] = CHANNEL & 0x0f;
+        // `sig_len`: 14 bits at byte 84. **Derived from the frame**: the
+        // length including the four-byte FCS, which is the same convention
+        // the TX side's length word used (60 for a 56-byte frame, M4 P0 §2).
+        let sig_len = (bytes.len() as u32 + 4) & 0x3fff;
+        out[84] = sig_len as u8;
+        out[85] = (sig_len >> 8) as u8;
+        out.extend_from_slice(bytes);
+        out.extend_from_slice(&[0, 0, 0, 0]);
+        out
+    }
+}
+
 /// The radio window (and, as a second instance, the `WIFI_PWR` gap).
 #[derive(Debug)]
 pub struct WifiStub {
@@ -313,6 +669,16 @@ pub struct WifiStub {
     /// `--tx-log` and no air does not arm it, and its runs are byte-for-byte
     /// the runs it had before this block could record anything.
     tx_capture_armed: bool,
+    /// What [`Self::raise_rx_interrupt`] puts in the event word. Defaults to
+    /// [`RX_INT_EVENT_BITS`]; settable so the sweep that failed to
+    /// distinguish one value from another can be re-run without a rebuild.
+    rx_int_event_bits: u32,
+    /// The bus index, for [`lp_emu_esp_common::bus::event_id`].
+    index: usize,
+    /// Whether a strobed PLCP0 write schedules a TX completion. Off by
+    /// default and turned on by [`Self::arm_tx_completion`] — see that
+    /// method for why this is a switch and not simply how the block behaves.
+    tx_completion_armed: bool,
 }
 
 impl WifiStub {
@@ -329,6 +695,9 @@ impl WifiStub {
             touched: BTreeSet::new(),
             tx_handoffs: Vec::new(),
             tx_capture_armed: false,
+            rx_int_event_bits: RX_INT_EVENT_BITS,
+            index: 0,
+            tx_completion_armed: false,
         }
     }
 
@@ -347,6 +716,9 @@ impl WifiStub {
             touched: BTreeSet::new(),
             tx_handoffs: Vec::new(),
             tx_capture_armed: false,
+            rx_int_event_bits: RX_INT_EVENT_BITS,
+            index: 0,
+            tx_completion_armed: false,
         }
     }
 
@@ -364,6 +736,9 @@ impl WifiStub {
             touched: BTreeSet::new(),
             tx_handoffs: Vec::new(),
             tx_capture_armed: false,
+            rx_int_event_bits: RX_INT_EVENT_BITS,
+            index: 0,
+            tx_completion_armed: false,
         }
     }
 
@@ -382,14 +757,126 @@ impl WifiStub {
     /// [`lp_emu_esp_common::air::Air`] rather than because a log is being
     /// written. One flag, two reasons, and the same off switch: a machine
     /// with neither is the machine that came before either existed.
+    ///
+    /// A machine on an air also **completes its transmissions**
+    /// ([`Self::arm_tx_completion`]): an air whose senders each stop after
+    /// one frame is not an air.
     pub fn arm_air(&mut self) {
         self.tx_capture_armed = true;
+        self.tx_completion_armed = true;
+    }
+
+    /// Make a strobed PLCP0 write schedule a TX completion
+    /// [`TX_DONE_DELAY_US`] later — the thing
+    /// `docs/debt/emu-c6-radio-tx-never-completes.md` was open on.
+    ///
+    /// # Why this is a switch
+    ///
+    /// A completion is the one thing this block does that the guest cannot
+    /// tell from hardware and that **changes what the guest computes**: an
+    /// image whose `send` returns takes a different path forever after. Every
+    /// C6 gate and transcript in the tree was recorded on a machine whose
+    /// sends never returned, and the only image in the tree that sends is
+    /// `test_espnow`. So it is armed where a caller has asked for radio
+    /// behaviour — an air — and a machine that has not asked is byte-for-byte
+    /// the machine that came before, which is the same discipline
+    /// [`Self::arm_tx_log`] keeps and the same one that lets the existing
+    /// gates stand without being re-run.
+    ///
+    /// It is gated on a **real arming write** and on nothing else: only the
+    /// strobed write to [`TX_PLCP0_OFFSET`] schedules one, so a completion
+    /// cannot exist without a frame having been handed to the MAC.
+    pub fn arm_tx_completion(&mut self) {
+        self.tx_completion_armed = true;
     }
 
     /// Take the frames armed since the last call, for the machine's radio TX
     /// log. Empty on every block but `WIFI_MAC`.
     pub fn take_tx_handoffs(&mut self) -> Vec<TxHandoff> {
         std::mem::take(&mut self.tx_handoffs)
+    }
+
+    /// The RX descriptor ring's base, as the **guest's own blob** programmed
+    /// it into [`RX_DMA_BASE_OFFSET`], or `None` before it has.
+    ///
+    /// Read out of the register file rather than off the bus on purpose: a
+    /// bus read from the machine would leave a `TOUCH` note and enter the
+    /// touched set, and a delivery must not change what a run's trace says
+    /// the *guest* reached.
+    pub fn rx_dma_base(&self) -> Option<u32> {
+        let off = RX_DMA_BASE_OFFSET?;
+        if self.name != "WIFI_MAC" {
+            return None;
+        }
+        match self.regs.stored(off) {
+            0 => None,
+            base => Some(base),
+        }
+    }
+
+    /// Put [`RX_INT_EVENT_BITS`] (or whatever [`Self::set_rx_event_bits`]
+    /// last set) into the MAC's event word.
+    ///
+    /// The **caller raises the line** — a peripheral only reaches
+    /// `IrqLines` inside an access, and a delivery happens at a slice
+    /// boundary, where the machine holds them. So this sets the word the
+    /// ISR will read and the machine sets the level; the two belong
+    /// together and [`Esp32C6Machine::offer_air_frame`] is the only caller.
+    ///
+    /// [`Esp32C6Machine::offer_air_frame`]: crate::machine::Esp32C6Machine::offer_air_frame
+    pub fn raise_rx_interrupt(&mut self, descriptor: u32, next: u32) {
+        if self.name != "WIFI_MAC" {
+            return;
+        }
+        self.regs.poke(RX_LAST_DSCR_OFFSET, descriptor);
+        self.regs.poke(RX_DSCR_NEXT_OFFSET, next);
+        let pending = self.regs.stored(MAC_INT_EVENT_OFFSET) | self.rx_int_event_bits;
+        self.regs.poke(MAC_INT_EVENT_OFFSET, pending);
+    }
+
+    /// Whether anything is left in the MAC's event word — the level the
+    /// machine should be holding on source 0.
+    pub fn radio_interrupt_pending(&self) -> bool {
+        self.name == "WIFI_MAC" && self.regs.stored(MAC_INT_EVENT_OFFSET) != 0
+    }
+
+    /// The value [`Self::raise_rx_interrupt`] writes. See
+    /// [`RX_INT_EVENT_BITS`] for why this is settable: the sweep that could
+    /// not distinguish one value from another is worth re-running, and a
+    /// rebuild per candidate is not.
+    pub fn set_rx_event_bits(&mut self, bits: u32) {
+        self.rx_int_event_bits = bits;
+    }
+
+    /// Put `bits` in this block's own interrupt **event** word — the MAC's
+    /// [`MAC_INT_EVENT_OFFSET`] or the PWR block's [`PWR_INT_EVENT_OFFSET`]
+    /// — without touching the RX cursors.
+    ///
+    /// **The experiment seam for `docs/debt/emu-c6-radio-tx-never-completes.md`,
+    /// and nothing in this emulator calls it.** A delivery into the RX ring
+    /// goes through [`Self::raise_rx_interrupt`], which is gated on a frame
+    /// actually landing in a descriptor; this one is gated on nothing, so it
+    /// exists for `tests/air_delivery.rs`'s sweeps and for no other reason.
+    /// The caller raises the source line itself, for the same reason
+    /// [`Self::raise_rx_interrupt`]'s does.
+    pub fn raise_event(&mut self, bits: u32) {
+        let off = match self.name {
+            "WIFI_MAC" => MAC_INT_EVENT_OFFSET,
+            "WIFI_PWR" => PWR_INT_EVENT_OFFSET,
+            _ => return,
+        };
+        let pending = self.regs.stored(off) | bits;
+        self.regs.poke(off, pending);
+    }
+
+    /// Whether either block's event word still holds something — the level
+    /// the machine should be holding on that block's source.
+    pub fn event_pending(&self) -> bool {
+        match self.name {
+            "WIFI_MAC" => self.regs.stored(MAC_INT_EVENT_OFFSET) != 0,
+            "WIFI_PWR" => self.regs.stored(PWR_INT_EVENT_OFFSET) != 0,
+            _ => false,
+        }
     }
 
     fn note_touch(&mut self, off: u32, access: &str, cx: &mut BusCx<'_>) {
@@ -434,6 +921,32 @@ impl Peripheral for WifiStub {
         let word = off & !3;
         let merged = merge_lane(self.regs.stored(word), off, width, value);
         self.regs.poke(word, merged);
+        // The ISR's write-one-to-clear. M4 P1 observed the guest writing back
+        // exactly the bits it had just read from `+0x4c48`, and observed that
+        // it **loops** — re-reading the event word after each clear and
+        // exiting when it reads zero. So a raise this block does not retract
+        // re-enters the ISR every 464 cycles forever. This is where it is
+        // retracted, and the level drops with the last bit.
+        if self.name == "WIFI_MAC" && word == MAC_INT_CLEAR_OFFSET {
+            let left = self.regs.stored(MAC_INT_EVENT_OFFSET) & !merged;
+            self.regs.poke(MAC_INT_EVENT_OFFSET, left);
+            if left == 0 {
+                cx.irq.set_level(crate::regs::source::WIFI_MAC, false);
+            }
+        }
+        // The PWR block's twin, on the same evidence: the *same* ISR entry
+        // reads `WIFI_PWR+0x37b0` and writes back what it read to `+0x37b4`
+        // (M4 P1, `cyc=165843274 pc=0x4080d2e0`). Nothing in this emulator
+        // raises source 2 today, so this changes no existing run; it is here
+        // so that a sweep of the PWR event word (M4 U1) is retracted the same
+        // way the MAC's is instead of re-entering the ISR forever.
+        if self.name == "WIFI_PWR" && word == PWR_INT_CLEAR_OFFSET {
+            let left = self.regs.stored(PWR_INT_EVENT_OFFSET) & !merged;
+            self.regs.poke(PWR_INT_EVENT_OFFSET, left);
+            if left == 0 {
+                cx.irq.set_level(crate::regs::source::WIFI_PWR, false);
+            }
+        }
         if self.name == "WIFI_MAC" && Some(word) == RX_DMA_BASE_OFFSET && cx.trace.is_enabled() {
             let line = format!(
                 "cyc={} pc=0x{:08x} WIFI RX config: dma_base=0x{merged:08x}",
@@ -441,28 +954,101 @@ impl Peripheral for WifiStub {
             );
             cx.trace.note(&line);
         }
-        // The TX handoff. Recorded, never answered: the block still does not
-        // raise an interrupt and the guest is not told anything it would not
-        // have been told without the log.
-        if self.tx_capture_armed
-            && self.name == "WIFI_MAC"
-            && word == TX_PLCP0_OFFSET
-            && merged & TX_GO_MASK == TX_GO_MASK
-        {
-            self.tx_handoffs.push(TxHandoff {
-                at: cx.now,
-                pc: cx.pc,
-                plcp0: merged,
-            });
-            // The machine reads guest RAM for the log, and a peripheral
-            // cannot; end the slice so it does that before the guest can
-            // reuse the buffer.
-            cx.yield_to_machine();
+        // The TX queue state's own write-one-to-clear, in the same shape as
+        // `+0x4c4c` and on the same kind of evidence: `hal_mac_clr_txq_state`
+        // reads `+0x4cb4`, ORs in the bit it has just serviced and writes it
+        // back (`cyc=176010645 pc=0x4000bca6 W4 WIFI_MAC+0x4cb4 = 0x00000001`).
+        if self.name == "WIFI_MAC" && word == TXQ_STATE_CLEAR_OFFSET {
+            let left = self.regs.stored(TXQ_STATE_OFFSET) & !merged;
+            self.regs.poke(TXQ_STATE_OFFSET, left);
+        }
+        // The TX handoff, and — when a caller has asked for radio behaviour —
+        // the completion the frame's departure earns. **Only the strobed
+        // write arms either**, so neither can exist without a frame.
+        if self.name == "WIFI_MAC" && word == TX_PLCP0_OFFSET && merged & TX_GO_MASK == TX_GO_MASK {
+            if self.tx_capture_armed {
+                self.tx_handoffs.push(TxHandoff {
+                    at: cx.now,
+                    pc: cx.pc,
+                    plcp0: merged,
+                });
+                // The machine reads guest RAM for the log, and a peripheral
+                // cannot; end the slice so it does that before the guest can
+                // reuse the buffer.
+                cx.yield_to_machine();
+            }
+            if self.tx_completion_armed {
+                let at = cx.now + TX_DONE_DELAY_US * crate::memmap::CYCLES_PER_US;
+                cx.sched
+                    .schedule_at(at, lp_emu_esp_common::bus::event_id(self.index, EV_TX_DONE));
+            }
+        }
+    }
+
+    fn attached(&mut self, index: usize) {
+        self.index = index;
+    }
+
+    /// The TX completion coming due, [`TX_DONE_DELAY_US`] after the go
+    /// strobe: the queue-state word says a slot finished, the event word
+    /// says the MAC has something, and the source goes up. Both are
+    /// retracted by the guest's own clears — `+0x4cb4` above and `+0x4c4c`
+    /// in [`Peripheral::write`].
+    fn on_event(&mut self, _id: lp_emu_core::EventId, cx: &mut BusCx<'_>) {
+        if self.name != "WIFI_MAC" {
+            return;
+        }
+        let state = self.regs.stored(TXQ_STATE_OFFSET) | TXQ_STATE_DONE_BITS;
+        self.regs.poke(TXQ_STATE_OFFSET, state);
+        let pending = self.regs.stored(MAC_INT_EVENT_OFFSET) | TX_DONE_INT_EVENT_BITS;
+        self.regs.poke(MAC_INT_EVENT_OFFSET, pending);
+        cx.irq.set_level(crate::regs::source::WIFI_MAC, true);
+        if cx.trace.is_enabled() {
+            let line = format!(
+                "cyc={} WIFI TX complete: +0x{TXQ_STATE_OFFSET:04x} |= {TXQ_STATE_DONE_BITS:#x}, \
+                 +0x{MAC_INT_EVENT_OFFSET:04x} |= {TX_DONE_INT_EVENT_BITS:#x}, source 0 raised",
+                cx.now
+            );
+            cx.trace.note(&line);
         }
     }
 
     fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
         Some(self)
+    }
+
+    /// `WIFI_MAC` publishes a table; `WIFI_PWR` and `I2C_MST_MEM` do not.
+    ///
+    /// # Why one block and not all three
+    ///
+    /// Publishing a table is a statement that *somebody graded this block*,
+    /// and `--strict-grade` then stops at it instead of passing over it. M4
+    /// P2 gave `WIFI_MAC` registers the air writes and answers, so it is
+    /// graded; nobody has graded `WIFI_PWR` or the PHY's command memory, and
+    /// `nobody graded this` is not the same statement as `this is modelled`
+    /// (see [`Peripheral::reg_grade`]'s own docs).
+    ///
+    /// # Why every entry is `modeled`, including the ones with a trace line
+    ///
+    /// `Measured` means a committed silicon transcript agrees with the
+    /// model. Nothing here has one, and the register meanings themselves are
+    /// inferences from a writer's name and an observed value — the module
+    /// docs say so. The four offsets the air touches carry their evidence in
+    /// [`AIR_GRADES`]; the rest of the window is `modeled` as well, which is
+    /// the honest answer for a block whose layout is a closed blob's.
+    ///
+    /// **The blast radius, stated:** before this, `WIFI_MAC` published no
+    /// table and `--strict-grade` passed over it. It no longer does, so a
+    /// `--strict-grade documented` run over the default scope now stops on
+    /// the first `WIFI_MAC` read — which is what the flag is for. The two
+    /// tests that name a scope (`tests/usb_attached.rs` g4_4,
+    /// `tests/rom_download_console.rs`) are unaffected because they name
+    /// one, and `the_boot_reads_registers_we_only_modelled_and_this_is_which`
+    /// still stops where it stopped: its first violation is
+    /// `I2C_ANA_MST+0x004` at cycle 246,696, and the blob does not reach
+    /// this window until radio init at ~30 ms.
+    fn reg_grade(&self, _off: u32) -> Option<RegGrade> {
+        (self.name == "WIFI_MAC").then_some(RegGrade::Modeled)
     }
 
     fn reg_name(&self, off: u32) -> Option<&'static str> {
@@ -620,6 +1206,165 @@ mod tests {
         p.arm_tx_log();
         sb.write(&mut p, TX_PLCP0_OFFSET, 0xc061_de88);
         assert!(p.take_tx_handoffs().is_empty(), "WIFI_PWR has no TX slot");
+    }
+
+    /// The header's shape: the one field the guest demands, the two the air
+    /// derives from the frame, and the constants that are named as
+    /// constants. See `tests/air_delivery.rs` for which of them the guest
+    /// was measured reading.
+    #[test]
+    fn the_rx_ctrl_header_carries_what_it_says_it_carries() {
+        // A broadcast frame: addr1 starts at byte 4 and its first octet has
+        // the group bit set.
+        let mut frame = vec![0xd0, 0x00, 0x00, 0x00];
+        frame.extend_from_slice(&[0xff; 6]);
+        frame.extend_from_slice(&[0u8; 46]);
+        assert_eq!(frame.len(), 56);
+
+        let out = rx_ctrl::frame_with_header(&frame, 1_036_418);
+        assert_eq!(out.len(), rx_ctrl::LEN + 56 + 4, "header, frame, FCS");
+        assert_eq!(&out[rx_ctrl::LEN..rx_ctrl::LEN + 56], &frame[..]);
+        assert_eq!(
+            &out[rx_ctrl::LEN + 56..],
+            &[0, 0, 0, 0],
+            "no FCS is computed"
+        );
+
+        assert_eq!(
+            out[0] as i8,
+            rx_ctrl::RSSI_DBM,
+            "a constant, not a measurement"
+        );
+        assert_eq!(out[20] as i8, rx_ctrl::NOISE_FLOOR_DBM);
+        assert_eq!(out[1], rx_ctrl::RATE, "fixed, and named as fixed");
+        assert_eq!(out[21] & 0x0f, rx_ctrl::CHANNEL);
+        assert_eq!(out[3] & (1 << 4), 1 << 4, "rxmatch0 — the guest demands it");
+        assert_eq!(out[11] & (1 << 7), 1 << 7, "is_group, from addr1");
+        assert_eq!(
+            u32::from_le_bytes(out[12..16].try_into().unwrap()),
+            1_036_418,
+            "timestamp, the receiver's own microseconds"
+        );
+        assert_eq!(
+            u16::from_le_bytes(out[84..86].try_into().unwrap()) & 0x3fff,
+            60,
+            "sig_len counts the FCS: 56 + 4, the TX side's convention"
+        );
+
+        // A unicast frame is not a group frame.
+        let mut unicast = frame.clone();
+        unicast[4] = 0xa0;
+        assert_eq!(rx_ctrl::frame_with_header(&unicast, 0)[11] & (1 << 7), 0);
+    }
+
+    /// The raise puts the cursors and the event bits where the guest reads
+    /// them, and the guest's own write-one-to-clear takes the line down.
+    #[test]
+    fn a_raise_is_retracted_by_the_guests_own_clear() {
+        let mut sb = Sandbox::new();
+        let mut w = WifiStub::new();
+        assert_eq!(w.rx_dma_base(), None, "before the blob programs one");
+        sb.write(&mut w, RX_DMA_BASE_OFFSET.unwrap(), 0x4081_1434);
+        assert_eq!(w.rx_dma_base(), Some(0x4081_1434));
+
+        assert!(!w.radio_interrupt_pending());
+        w.raise_rx_interrupt(0x4081_1434, 0x4081_1440);
+        assert!(w.radio_interrupt_pending());
+        assert_eq!(sb.read(&mut w, RX_LAST_DSCR_OFFSET), 0x4081_1434);
+        assert_eq!(sb.read(&mut w, RX_DSCR_NEXT_OFFSET), 0x4081_1440);
+        assert_eq!(sb.read(&mut w, MAC_INT_EVENT_OFFSET), RX_INT_EVENT_BITS);
+
+        // The machine holds the line while the block holds the event.
+        sb.irq.set_level(crate::regs::source::WIFI_MAC, true);
+        // A clear of some other bit leaves it up…
+        sb.write(&mut w, MAC_INT_CLEAR_OFFSET, 1);
+        assert!(w.radio_interrupt_pending());
+        assert!(sb.irq.level(crate::regs::source::WIFI_MAC));
+        // …and the bit the ISR actually read takes it down.
+        sb.write(&mut w, MAC_INT_CLEAR_OFFSET, RX_INT_EVENT_BITS);
+        assert!(!w.radio_interrupt_pending());
+        assert!(!sb.irq.level(crate::regs::source::WIFI_MAC));
+
+        // Two raises before a clear are one line, drained by one write —
+        // which is what `mac_txrx_init`'s `+0x4c4c = 0xffffffff` does.
+        w.raise_rx_interrupt(1, 2);
+        w.raise_rx_interrupt(3, 4);
+        sb.write(&mut w, MAC_INT_CLEAR_OFFSET, 0xffff_ffff);
+        assert!(!w.radio_interrupt_pending());
+
+        // And none of it happens on the other two blocks.
+        let mut p = WifiStub::pwr();
+        p.raise_rx_interrupt(1, 2);
+        assert!(!p.radio_interrupt_pending());
+        assert_eq!(p.rx_dma_base(), None);
+    }
+
+    /// Every graded offset the air touches is `modeled` and carries a
+    /// reason, and the block publishes a table where it did not before.
+    #[test]
+    fn the_air_grades_are_all_modeled_and_say_why() {
+        for &(off, grade, why) in AIR_GRADES {
+            assert!(off < WINDOW_LEN, "+0x{off:04x} is outside the window");
+            assert_eq!(grade, RegGrade::Modeled, "+0x{off:04x}");
+            assert!(why.len() > 40, "+0x{off:04x} needs its evidence");
+        }
+        let w = WifiStub::new();
+        assert_eq!(w.reg_grade(0), Some(RegGrade::Modeled));
+        assert_eq!(w.reg_grade(MAC_INT_EVENT_OFFSET), Some(RegGrade::Modeled));
+        // The other two instances publish nothing: nobody graded them, and
+        // that is not the same statement as "these are modelled".
+        assert_eq!(WifiStub::pwr().reg_grade(0), None);
+        assert_eq!(WifiStub::i2c_mst_mem().reg_grade(0), None);
+    }
+
+    /// The completion: only a strobed PLCP0 write schedules one, an unarmed
+    /// block schedules none, and the guest's own clears retract both words.
+    #[test]
+    fn a_tx_completion_is_scheduled_only_by_a_real_arming_write() {
+        let mut sb = Sandbox::new();
+        let mut w = WifiStub::new();
+
+        // Unarmed: the strobe records nothing and schedules nothing, which is
+        // what keeps every machine that did not ask for radio behaviour the
+        // machine it always was.
+        sb.write(&mut w, TX_PLCP0_OFFSET, 0xc061_de88);
+        assert_eq!(sb.sched.live(), 0, "an unarmed block schedules nothing");
+
+        w.arm_tx_completion();
+        // The pointer without the strobe is not an arming write.
+        sb.write(&mut w, TX_PLCP0_OFFSET, 0x0061_de88);
+        assert_eq!(sb.sched.live(), 0, "the pointer alone arms nothing");
+
+        // The strobe schedules the completion, and not before its time.
+        sb.now = 165_826_944;
+        sb.write(&mut w, TX_PLCP0_OFFSET, 0xc061_de88);
+        assert_eq!(
+            sb.sched.next_deadline(),
+            Some(sb.now + TX_DONE_DELAY_US * crate::memmap::CYCLES_PER_US)
+        );
+
+        // When it comes due: the queue state, the event word, the line.
+        let due = sb.now + TX_DONE_DELAY_US * crate::memmap::CYCLES_PER_US;
+        sb.run_to(&mut w, due);
+        assert_eq!(sb.read(&mut w, TXQ_STATE_OFFSET), TXQ_STATE_DONE_BITS);
+        assert_eq!(
+            sb.read(&mut w, MAC_INT_EVENT_OFFSET),
+            TX_DONE_INT_EVENT_BITS
+        );
+        assert!(sb.irq.level(crate::regs::source::WIFI_MAC));
+
+        // And the guest's own two clears take both back down.
+        sb.write(&mut w, TXQ_STATE_CLEAR_OFFSET, TXQ_STATE_DONE_BITS);
+        assert_eq!(sb.read(&mut w, TXQ_STATE_OFFSET), 0);
+        sb.write(&mut w, MAC_INT_CLEAR_OFFSET, TX_DONE_INT_EVENT_BITS);
+        assert!(!w.radio_interrupt_pending());
+        assert!(!sb.irq.level(crate::regs::source::WIFI_MAC));
+
+        // Never on the other two blocks.
+        let mut p = WifiStub::pwr();
+        p.arm_tx_completion();
+        sb.write(&mut p, TX_PLCP0_OFFSET, 0xc061_de88);
+        assert!(!p.event_pending());
     }
 
     #[test]

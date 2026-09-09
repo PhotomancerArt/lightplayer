@@ -231,6 +231,31 @@ pub static CYCLE_PROBE_CLOCKS: MaskRule = MaskRule::new(
     "$1=N",
 );
 
+/// The `gpio-input` setup line's `drive=` word.
+///
+/// **The one place in this file where the mask hides a real, deliberate
+/// difference rather than a clock.** This payload's two sides are driven
+/// differently on purpose and cannot be otherwise: on silicon the firmware
+/// drives its own pads and reads them back (`drive=self-loop`), and on an
+/// emulated configuration a `--pin-script` drives them from outside
+/// (`drive=external`). Everything below that line is the same image doing the
+/// same thing; the word itself is the asymmetry, and it is stated — in this
+/// rule's own `because`, in each transcript's sidecar `note`, and in the
+/// payload's registry entry — rather than being made to disappear quietly.
+///
+/// Nothing else on the line is touched. `button=`, `encoder=`, `select=`,
+/// `poll_ms=` and `samples=` are the run's configuration and must compare
+/// equal, or the two sides were not running the same script.
+pub static GPIO_INPUT_DRIVE: MaskRule = MaskRule::new(
+    "gpio-input-drive",
+    "which side drove the pads: silicon self-loops, an emulated configuration \
+     is driven from outside by --pin-script. The asymmetry is the payload's \
+     premise and is stated in both sidecars",
+    FieldClass::Pin,
+    r"drive=(self-loop|external)",
+    "drive=D",
+);
+
 /// The hello frame's build provenance: `"commit":"d6cfaa2051ae","dirty":true`.
 ///
 /// Not a claim about the chip — a claim about the tree the image was built
@@ -398,6 +423,25 @@ pub static CYCLE_PROBE: MaskSet = MaskSet {
     rules: &[&ANSI, &BOOT_TIMESTAMP, &CYCLE_PROBE_CLOCKS],
 };
 
+/// The `gpio-input` set: ANSI, the boot banner's stamps, and the `drive=`
+/// word — and nothing else.
+///
+/// Short for `rmt-chase`'s reason and one more. Every other number this
+/// payload prints is a claim it exists to make: `detents=` and `edges=` are
+/// the interrupt path's own count of itself, and `samples=`, `poll_ms=` and
+/// the pad numbers are the script both sides ran. `PROSE_TIMING` is absent
+/// because it rewrites `tick=` and `frame=`, neither of which appears here,
+/// and a general-purpose rewriter loose in a transcript whose subject is a
+/// sequence of levels is how a claim quietly stops being one. The `t_us`
+/// figures live in the structured records and are graded `Timing` there,
+/// which is where a replay reports them with their ratios.
+pub static GPIO_INPUT: MaskSet = MaskSet {
+    name: "gpio-input",
+    description: "ANSI, boot timestamps and the setup line's drive= word; every \
+                  pad number, sample count and detent count is left comparable",
+    rules: &[&ANSI, &BOOT_TIMESTAMP, &GPIO_INPUT_DRIVE],
+};
+
 /// The render-loop summary line's per-frame microseconds.
 ///
 /// `PROSE_TIMING` does not reach them — it knows `elapsed=`, `frame=` and
@@ -457,6 +501,72 @@ pub static RENDER_LOOP: MaskSet = MaskSet {
     ],
 };
 
+/// The **peer's own** counter and byte count, on an `espnow-broadcast` rx
+/// line: `event=45 kind=1 payload_len=8`.
+///
+/// The one masked thing in this payload, and it is a statement rather than a
+/// convenience. A device's own `tx` line is left entirely alone — its counter
+/// starts at 0 at its own power-on and compares exactly. The peer's does not,
+/// and cannot be made to:
+///
+/// * On the desk, two boards are captured **one after the other through one
+///   port** (`d1-desk-batch.md` step 3). Recording a board resets it; the other
+///   board has been powered, and counting, since the previous flash. Board A's
+///   capture sees board B at event 45.
+/// * In the emulated pair both machines are minted for the run, so machine A
+///   sees machine B at event 2.
+///
+/// Same air, same frames, same order, different origin — and the length ladder
+/// is a function of the event number, so `payload_len` is phase-shifted for
+/// exactly the same reason. Neither difference says anything about a model.
+///
+/// **Nothing is lost.** The `espnow-rx` RECORD beside this line carries what
+/// does not depend on the origin and a replay compares it as `Structural`:
+/// `gap` (this event's number minus the previous one from that peer — all 1s
+/// means nothing was dropped) and `len_ok` (the byte count is the one the
+/// peer's own event number prescribes). The raw numbers stay in the transcript
+/// on this line, verbatim and never edited; this rule hides them from the
+/// **human view** so that a reader diffing two captures is not shown a
+/// difference that is only where each board's power-on was.
+pub static ESPNOW_PEER_COUNTER: MaskRule = MaskRule::new(
+    "espnow-peer-counter",
+    "the peer's event counter and the byte count that follows from it start at \
+     the peer's own power-on, and two boards are captured one after the other \
+     through one port. The rx RECORD carries the origin-free content — `gap` \
+     and `len_ok` — and a replay compares that",
+    FieldClass::Structural,
+    r"(\[espnow-broadcast\] rx device=0x[0-9a-f]{8} )event=\d+( kind=\d+ )payload_len=\d+",
+    "${1}event=E${2}payload_len=L",
+);
+
+/// `espnow-broadcast`: ANSI, boot timestamps and the peer's own counter.
+///
+/// Every device id, every own-`tx` event number, every kind and every one of
+/// the payload's records is left comparable — the ladder's own byte counts on
+/// the tx side included, because a device's own frames are numbered from its
+/// own boot on both sides.
+pub static ESPNOW_BROADCAST: MaskSet = MaskSet {
+    name: "espnow-broadcast",
+    description: "ANSI, boot timestamps and the PEER's event counter and byte \
+                  count on an rx line; every device id, every own-tx event \
+                  number and every record is left comparable",
+    rules: &[&ANSI, &BOOT_TIMESTAMP, &ESPNOW_PEER_COUNTER],
+};
+
+/// The `rmt-rx` set: ANSI and the boot banner's stamps, and nothing else.
+///
+/// The shortest set in the file, for `rmt-chase`'s reason taken one step
+/// further: this payload's whole output is two checksums per frame that have
+/// to be equal, and the setup line's pad numbers, LED count and idle
+/// threshold are the recipe both sides ran. There is nothing here a mask
+/// could remove that would not be removing the gate.
+pub static RMT_RX: MaskSet = MaskSet {
+    name: "rmt-rx",
+    description: "ANSI and boot timestamps; every checksum, word count and pad \
+                  number is left comparable",
+    rules: &[&ANSI, &BOOT_TIMESTAMP],
+};
+
 pub static ALL_SETS: &[&MaskSet] = &[
     &NORMALIZE,
     &COMPILE_HARNESS,
@@ -465,7 +575,10 @@ pub static ALL_SETS: &[&MaskSet] = &[
     &JIT_MATH_PERF,
     &BOOT_IDLE,
     &RMT_CHASE,
+    &RMT_RX,
     &CYCLE_PROBE,
+    &GPIO_INPUT,
+    &ESPNOW_BROADCAST,
     &RENDER_LOOP,
 ];
 

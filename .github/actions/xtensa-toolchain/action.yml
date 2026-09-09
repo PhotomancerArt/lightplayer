@@ -36,11 +36,13 @@ description: >
 #
 #   - The tree is 499 MB packed. Saving it cost 42 s, which is most of the
 #     ~56 s install it was meant to avoid.
-#   - This repository sits at 10.59 GB against a 10 GB Actions-cache budget,
-#     spread over 5,529 entries that are overwhelmingly small sccache objects
-#     — and sccache IS the compile reuse here (see the cache notes in
-#     pre-merge.yml and deploy-cloud.yml). A 499 MB entry does not coexist
-#     with that; it evicts ~499 MB of sccache to buy back ~35 s.
+#   - This repository sat at 10.59 GB against a 10 GB Actions-cache budget,
+#     spread over 5,529 entries. (Amended 2026-09-08: the bulk of that was
+#     not sccache objects but twelve per-job rust-cache copies of the cargo
+#     registry, ~5.8 GB, since collapsed to one entry per toolchain family —
+#     see pre-merge.yml's lint job. The conclusion stands either way: sccache
+#     IS the compile reuse here, and a 499 MB entry evicts ~499 MB of it to
+#     buy back ~35 s.)
 #   - It doesn't even survive: the entry saved at 07:06:35 UTC was gone
 #     inside 25 minutes, LRU-evicted by the ordinary sccache write rate.
 #     Exactly the fate deploy-cloud.yml already records for its multi-GB

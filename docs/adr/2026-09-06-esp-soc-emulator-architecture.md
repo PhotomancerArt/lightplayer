@@ -26,7 +26,10 @@
   grade means now that the shipped image's frame is held against the host
   oracle. **Completed by M7** (PR #596): ROM-up boot, the cross-check, and
   the two new seams the boot needed (`Bus::take_yield`,
-  `RegFile::with_read_mirror`).
+  `RegFile::with_read_mirror`). **Amended by plan two's M1** (2026-09-09): the
+  WebSocket door and the board registry — a third door that is `lp-cli`'s
+  rather than the machine's, and the one place `--reboot-on-reset` defaults
+  the other way.
 
 ## Context
 
@@ -351,6 +354,12 @@ one.
 
 ### Honest peripherals: strict bus, `modeled` grades, and no invented answers
 
+> **Pointer, not an amendment.** This section governs **registers that
+> answer**. A peripheral that *originates* an event the hardware would have
+> originated — a virtual radio raising a completion or an RX interrupt — is a
+> different kind of claim and has its own policy in
+> `docs/adr/2026-09-08-virtual-air-claim-policy.md`. Nothing below changes.
+
 A peripheral is either **modelled** (a real type with behaviour and scheduled
 events) or **accepted** (a register file that remembers writes, with a short
 table of pinned bits, each citing the esp-hal line that reads or spins on it).
@@ -461,6 +470,95 @@ By the rule above, byte-equality is evidence weighed in the `because`, and
 `measured` waits for a silicon pin transcript — a logic analyser on the
 desk, or the C6 `frame-dump` port (M8's) read beside the decoder.
 
+#### Amendment (M2, 2026-09-08): the fabric's other side, and the RMT receiver
+
+The fabric above has one direction: a peripheral drives a signal, a pad
+follows it, a decoder reads the edges. M2 gives it the other, and the shape is
+the same one — one state on the bus, register views writing into it — because
+the rule that forced it has not changed.
+
+**Something outside the chip can now hold a level on a pad** (M2 P1).
+`drive_pad`/`release_pad` are a bench driver: a button to ground, an encoder's
+quadrature pair, the far end of a jumper. `wire(a, b)` ties two pads so that
+whatever one carries the other carries. `set_pad_input_enable` records the
+chip's IO_MUX `fun_ie` — recorded, never gated on in the fabric, and read back
+by the GPIO block to decide whether to serve a pad's bit in `GPIO.in_`, which
+is where a chip fact belongs. `pad_level` is the **resolved** level of a pad:
+what a scope on the pin header would read. The rule is four lines and every
+input payload depends on it: collect the pad and everything wired to it; an
+outside driver on any of them wins; otherwise a *driving* pad in the group
+wins; otherwise the group is unobserved and reads low. Where an outside driver
+and a driving pad disagree, that is a **conflict** — logged with both levels
+and the cycle, counted, and then ignored. Never gated: an emulator that
+refused to run because a bench shorted an output tells you less than one that
+says so and carries on (RD5).
+
+**What makes a pad a driver is `GPIO.enable`, and that is a correction** (M2
+P3, DD38). M2 P1 read `oen_sel = 0` — "the peripheral owns the output enable"
+— as "assume enabled", because peripheral OE lines are not modelled. That made
+every *input* pad a driver: esp-hal's `Input::new` writes `func_out_sel_cfg` on
+its way to configuring an input, so a pad nothing was driving out of counted as
+an enabled output and every scripted level on it logged a conflict with itself
+— eight lines per `gpio-input` run, all of them false. The bit drivers actually
+maintain is `GPIO.enable`: esp-hal sets it in the same breath as every output
+route and clears it when it configures an input. So `enable` decides, for the
+conflict line and for the resolution rule alike, and enabling an already-routed
+output is itself an edge. The limitation that leaves is stated rather than
+hidden: a peripheral that drove a pad without its driver having set
+`GPIO.enable` would read here as not driving. No driver this project replays
+does that, and the failure mode is a pad resting low rather than a level the
+model invented.
+
+**Signals can now read pads as well as drive them.** `route_in`/`input_level`
+mirror `route`/`pad_level`, and the GPIO block's `func_in_sel_cfg[s]` view
+writes them: `in_sel` names the pad a peripheral input signal reads,
+`in_inv_sel` inverts it, `sig_in_sel = 1` is the matrix route esp-hal's
+`connect_input_to_peripheral` writes. `sig_in_sel = 0` (a pad's direct IO_MUX
+function) and the constant selectors `0x38`/`0x3C` are accepted, left unrouted
+and named once — a peripheral that read one finds nothing connected rather
+than a level this model invented.
+
+**RMT channels 2 and 3 are receivers** (M2 P3, RD7), and that is what turns
+M5's esp-emu task into a differential rather than a one-sided capture. Each
+samples the pad its input signal reads, measures every run in channel ticks and
+writes them into the channel's RAM window two runs to a word, with `idle_thres`
+ending the reception, `rx_filter` swallowing a pulse narrower than its
+threshold, `rx_lim` raising `rx_thr_event` and `mem_rx_wrap_en` wrapping the
+write pointer; `rx_end` and `rx_thr_event` go out on source 49 with the status
+and clear semantics the transmitters already had. It is fed the fabric's
+**edges** rather than sampled tick by tick — 100 events per WS2812 bit would be
+614,400 a frame — which is the same model, because a sampler's only output is
+where the level changed, at one stated cost: the two interrupts are raised at
+the slice boundary after the edge, never the words, which carry the edges' own
+cycles.
+
+Three things it does not model, each named where it is made: the carrier
+(modulation out, demodulation in), the APB FIFO, and RAM ownership — there is
+one RAM and no arbiter, so `mem_owner` is recorded rather than enforced and
+`mem_owner_err` never rises. Two behaviours are **modeled choices** rather than
+bit maps, and the second is the one to argue with: the reception begins at the
+first edge (a receiver that started its idle timer on an already-idle line
+could never be armed for a frame that had not arrived), and `rx_lim` **counts**
+rather than naming a position. Its transmitting twin `tx_lim` is a position,
+pinned against silicon over 5,520 frames; nothing pins `rx_lim`, and the
+counter reading is what esp-hal's own reader needs — it reads half a window per
+event and never rewrites the register. That is a model chosen to make a driver
+work, which is the weakest kind, and it is exactly what the silicon capture
+below would settle.
+
+**The `pin` grade does not move.** The gate this engine passes is that the
+receiver's per-frame checksum equals the transmitter's, frame for frame, on a
+`--wire 18:19` loopback — 32 of 32 on both time grades, with the machine's own
+WS281x decoder agreeing off the same pad as a third reading. That is three
+readings of one frame and they agree, and it is still not a measurement,
+because all three are ours: our transmitter puts the waveform on our fabric and
+our receiver and our decoder read it back. The `because` above is unchanged and
+must not be weakened. What would move it is the same thing it always was — an
+instrument, or silicon: a jumper between gpio18 and gpio19 on the desk board
+and an `rmt-rx` capture beside these, which RD7 calls this engine's *promotion*
+rather than its gate, and which `d1-desk-batch.md` carries as an optional
+hands-only item.
+
 ### Provenance on everything derived
 
 Per `2026-07-29-license-provenance-discipline.md`. The register-name tables in
@@ -474,6 +572,72 @@ LICENSE and `SHA256SUMS`, never edited, re-derivable by
 `just lint-emu-fence` and may not import a product crate — which is why the
 validation system's payload registry *mirrors* `fw-checks` instead of
 importing it.
+
+### Amendment (2026-09-09, plan two M1): the WebSocket door and the board registry
+
+The two doors above are the *machine's*: one byte socket and one control
+socket per link, TCP, one machine per process, bound before the run and torn
+down with it. A browser cannot open a TCP socket, and Studio's device walks
+are the whole point of the emulator's second plan. So there is now a **third
+door, and it is not the machine's** — it is `lp-cli emu serve`, in `lp-cli`,
+outside the MIT fence, and it is a *pump*.
+
+```text
+GET  /boards                 → the registry, as JSON
+WS   /board/<id>/bytes       → binary frames both ways; the payload IS the bytes
+WS   /board/<id>/control     → control.rs's line protocol, verbatim
+```
+
+**How it holds a board, and why that is the design.** Each board runs on its
+own OS thread with `usb_sj(UsbSjSink::Tcp("127.0.0.1:0"))` and
+`control("127.0.0.1:0")` — ephemeral loopback ports, read back through
+`Esp32C6Machine::usb_sj_tcp()` and `control_tcp()`. The WebSocket endpoints
+move bytes and lines between a socket and those ports and do nothing else.
+
+The alternative was a public seam on the machine (`apply_control` made public,
+or a `control_line(&str) -> String`), which is fewer moving parts at runtime.
+It was rejected because the loopback bridge **changes nothing under
+`lp-emu/`**, and that is worth a hop per byte three times over:
+
+- the licence fence never enters the conversation, so the door can depend on
+  `tokio-tungstenite` without it becoming an E-license question;
+- the coupling rule (a byte client's connect **is** an application opening the
+  port), the rule that `attach`/`detach` are never implied by a socket, the
+  one-reply-per-command rule and the slice-boundary semantics all survive
+  **literally** rather than by re-implementation — the TCP client the pump
+  opens *is* the byte client `service_host` watches;
+- `machine.rs` is the most contended file in two roadmaps, and a door that
+  needs none of it can ship beside anything else.
+
+**The registry is plural from the first commit.** N named boards, each with
+its own id (the endpoint path), its own eFuse MAC — the desk board's with the
+last octet stepped, or a spelled `mac=` — and its own persistent flash file
+under `--state-dir`. A registry of N boards that all answer with one identity
+is one board N times, and the scenarios this exists for (`s9-two-boards`, and
+the duplication defects a twin is best placed to catch) are multi-board
+scenarios. `GET /boards` is what an in-page picker lists.
+
+**One default flips here, and only here: `--reboot-on-reset` is ON.** M7 left
+it off deliberately, because three merged M6 scenarios read the exit code of a
+run that ended on `MachineRequest::Reset` as their evidence. A *server* cannot
+have that: esptool-js opens with a DTR/RTS dance whose whole purpose is to
+reset the chip, and a board that disappears when it is reset is not a board.
+So `serve` passes it and does not offer a way to turn it off; `run` keeps M7's
+default and the three scenarios keep their meaning.
+
+**What is auditable and what is a gate.** Nothing this door produces is a
+transcript. A socket is not deterministic — a command lands at whichever slice
+boundary the host's poll fell on — so the reply's `cyc=`/`us=` is for a human
+reading a log, and the door's own tests assert outcomes only. `--air <addr>`
+is the same shape and says so in its help text: a one-way tap in the `LPA1`
+wire codec, so a watcher can see what the boards' radios hand over. The
+deterministic form of an air remains the in-process lockstep runner, and that
+is the only form a transcript, a validation configuration or a CI job ever
+uses.
+
+The host side of the door is `serial:ws://<addr>/board/<id>/bytes`, the
+sibling of `serial:tcp://<addr>` — raw bytes, not the lpc-wire protocol a bare
+`ws://` specifier means.
 
 ## Alternatives considered
 

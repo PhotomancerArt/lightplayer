@@ -13,6 +13,11 @@ lpc-shared = { path = "../../lp-core/lpc-shared", optional = true }
 tokio = { version = "1", features = ["full"], optional = true }
 anyhow = { version = "1", optional = true }
 tokio-tungstenite = { version = "0.21", optional = true }
+# The SYNC half, for `stream/ws_stream.rs`: the host-side byte stream over
+# `lp-cli emu serve`'s WebSocket byte door, the sibling of `tcp_stream.rs`.
+# Optional and off in the browser build (`default-features = false`), which
+# has no business compiling a native WebSocket client.
+tungstenite = { version = "0.21", optional = true }
 futures-util = { version = "0.3", optional = true }
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
@@ -32,6 +37,7 @@ default = ["host"]
 host = ["dep:anyhow", "dep:futures-util", "dep:lpc-shared", "dep:tokio"]
 serial = [
     "host",
+    "ws-stream",
     "lp-riscv-elf",
     "lp-riscv-emu",
     "lp-riscv-emu/std",
@@ -43,6 +49,9 @@ serial = [
 ]
 emu = ["host", "lp-riscv-elf", "lp-riscv-emu", "lp-riscv-emu/std", "lp-emu-core", "lp-emu-core/std", "hashbrown"]
 ws = ["host", "tokio-tungstenite"]
+# `WsByteStream`: the raw-byte `serial:ws://…` sibling of `serial:tcp://…`.
+# Distinct from `ws`, which is the lpc-wire protocol against an `lpa-server`.
+ws-stream = ["dep:tungstenite"]
 
 [dev-dependencies]
 lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf", features = ["std"] }
