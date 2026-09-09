@@ -1841,7 +1841,8 @@ clippy-fw-esp32c6-harnesses: install-rv32-target
     cd lp-fw/fw-esp32c6
     for feature in test_rmt test_dither test_gpio test_gpio_calibrate test_button \
                    test_usb test_json test_msafluid test_fluid_demo \
-                   test_jit_math_perf test_shader_compile_incremental; do
+                   test_jit_math_perf test_shader_compile_incremental \
+                   test_cycle_probe; do
         echo "==> fw-esp32c6 harness: $feature"
         cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
             --features "$feature,esp32c6" -- --no-deps -D warnings
