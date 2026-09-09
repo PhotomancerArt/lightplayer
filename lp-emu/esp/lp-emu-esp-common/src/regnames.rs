@@ -15,6 +15,27 @@
 //! that uses them, because a register layout is chip-family data and this
 //! crate holds no chip numbers. The type and the lookup live here.
 
+/// How the part lets the guest touch a register, from the SVD's `access`
+/// attribute as svd2rust writes it: a register has `impl Readable`, `impl
+/// Writable`, both, or (for a few reserved words) neither.
+///
+/// It is what lets an accept block grade itself. Accept-and-remember **is**
+/// the documented behaviour of a [`ReadWrite`](Access::ReadWrite) register —
+/// the document says it holds what you write, and that is what a `RegFile`
+/// does. On a [`ReadOnly`](Access::ReadOnly) one the value comes from
+/// hardware nobody here models, so whatever we answer is a stand-in; on a
+/// [`WriteOnly`](Access::WriteOnly) one the document does not say what a
+/// read returns at all.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Access {
+    /// The default, and the one this table does not list.
+    ReadWrite,
+    ReadOnly,
+    WriteOnly,
+    /// Neither — a reserved word svd2rust names but does not expose.
+    NoAccess,
+}
+
 /// A block's register names, sorted by offset.
 ///
 /// Names are the block-local ones (`fifo`, `rtccalicfg`, `unit0load.hi`),
@@ -41,6 +62,10 @@ pub struct RegNames {
     /// "the resets the PAC states" — see
     /// `docs/defects/2026-09-07-accept-blocks-carry-only-the-reset-values-a-boot-needed.md`.
     pub resets: &'static [(u32, u32)],
+    /// `(offset, access)` for every register that is **not** plain
+    /// read-write, sorted by offset. Read-write is the common case and the
+    /// default, so listing it would bury the exceptions.
+    pub access: &'static [(u32, Access)],
 }
 
 /// A table for a block with no names yet. Peripherals default to it so that
@@ -49,6 +74,7 @@ pub const EMPTY: RegNames = RegNames {
     block: "",
     entries: &[],
     resets: &[],
+    access: &[],
 };
 
 impl RegNames {
@@ -72,6 +98,19 @@ impl RegNames {
             .binary_search_by_key(&word, |(o, _)| *o)
             .ok()
             .map(|i| self.resets[i].1)
+    }
+
+    /// How the part lets the guest touch the register containing `off`, or
+    /// `None` where the block names no register there.
+    pub fn access(&self, off: u32) -> Option<Access> {
+        let word = off & !3;
+        self.name(word)?;
+        Some(
+            self.access
+                .binary_search_by_key(&word, |(o, _)| *o)
+                .map(|i| self.access[i].1)
+                .unwrap_or(Access::ReadWrite),
+        )
     }
 
     /// The PAC register-block type this table describes (`uart0`).
@@ -113,12 +152,29 @@ impl RegNames {
                 w[1].0
             );
         }
-        // A reset at an offset the block does not name is a parse that went
+        for w in self.access.windows(2) {
+            assert!(
+                w[0].0 < w[1].0,
+                "RegNames access table for `{}` is not strictly sorted by offset: \
+                 0x{:03x} then 0x{:03x}",
+                self.block,
+                w[0].0,
+                w[1].0
+            );
+        }
+        // An entry at an offset the block does not name is a parse that went
         // wrong, not a fact about silicon.
         for (off, _) in self.resets {
             assert!(
                 self.name(*off).is_some(),
                 "RegNames reset table for `{}` has 0x{off:03x}, which names no register",
+                self.block
+            );
+        }
+        for (off, _) in self.access {
+            assert!(
+                self.name(*off).is_some(),
+                "RegNames access table for `{}` has 0x{off:03x}, which names no register",
                 self.block
             );
         }
@@ -133,6 +189,7 @@ mod tests {
         block: "uart0",
         entries: &[(0x000, "fifo"), (0x004, "int_raw"), (0x01c, "status")],
         resets: &[(0x01c, 0x0000_0060)],
+        access: &[(0x01c, Access::ReadOnly)],
     };
 
     #[test]
@@ -175,6 +232,17 @@ mod tests {
     }
 
     #[test]
+    fn access_defaults_to_read_write_and_only_the_exceptions_are_listed() {
+        assert_eq!(SAMPLE.access(0x01c), Some(Access::ReadOnly));
+        assert_eq!(SAMPLE.access(0x01e), Some(Access::ReadOnly), "byte lane");
+        assert_eq!(SAMPLE.access(0x000), Some(Access::ReadWrite));
+        assert_eq!(SAMPLE.access(0x004), Some(Access::ReadWrite));
+        // An offset that names no register has no access either.
+        assert_eq!(SAMPLE.access(0x008), None);
+        assert_eq!(EMPTY.access(0), None);
+    }
+
+    #[test]
     fn assert_sorted_accepts_a_sorted_table() {
         SAMPLE.assert_sorted();
     }
@@ -186,6 +254,7 @@ mod tests {
             block: "bad",
             entries: &[(0x000, "a")],
             resets: &[(0x008, 1)],
+            access: &[],
         }
         .assert_sorted();
     }
@@ -197,6 +266,7 @@ mod tests {
             block: "bad",
             entries: &[(0x004, "b"), (0x000, "a")],
             resets: &[],
+            access: &[],
         }
         .assert_sorted();
     }

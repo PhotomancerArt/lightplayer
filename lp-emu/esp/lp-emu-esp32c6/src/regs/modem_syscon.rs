@@ -8,7 +8,7 @@
 
 use lp_emu_esp_common::regnames::RegNames;
 
-/// Register names for the `modem_syscon` block (10 registers, 2 with a non-zero reset).
+/// Register names for the `modem_syscon` block (10 registers, 2 with a non-zero reset, 0 not plain read-write).
 pub static MODEM_SYSCON: RegNames = RegNames {
     block: "modem_syscon",
     entries: &[
@@ -24,4 +24,5 @@ pub static MODEM_SYSCON: RegNames = RegNames {
         (0x024, "date"),
     ],
     resets: &[(0x004, 0x00200000), (0x020, 0x00000020)],
+    access: &[],
 };

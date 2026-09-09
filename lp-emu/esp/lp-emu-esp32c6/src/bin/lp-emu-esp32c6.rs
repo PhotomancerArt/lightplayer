@@ -178,13 +178,21 @@ OPTIONS:
     --trace [BLOCK,BLOCK]   log every MMIO access; an optional block filter
     --trace-file <path>     write the trace here instead of stderr
     --strict-bus            an access nothing claims is fatal; exits 3
+    --strict-grade-blocks <NAME,NAME>
+                            narrow --strict-grade to these blocks by name.
+                            The default is every block that publishes a
+                            table, which asks what a run reads that we only
+                            modelled; a named set asks the narrower question,
+                            whether one driver crosses anything below the
+                            level.
     --strict-grade modeled|documented|measured
                             an access to a register graded BELOW this level is
                             fatal (exits 3): `documented` stops on a register
                             whose behaviour is only our reading of the PAC,
                             `measured` on anything no transcript has proved.
                             It applies to the blocks that PUBLISH a grade
-                            table — USB_DEVICE today — and passes over the
+                            table — every accept block plus USB_DEVICE — and
+                            passes over the
                             rest, because `nobody graded this block` is not
                             the same statement as `this block is modelled`.
                             The report names the blocks it checked. Tables
@@ -248,6 +256,7 @@ struct Args {
     trace_file: Option<PathBuf>,
     strict: bool,
     strict_grade: Option<RegGrade>,
+    strict_grade_blocks: Option<Vec<&'static str>>,
     probes: Vec<(u64, String)>,
     break_at: Vec<String>,
     hooks: bool,
@@ -270,6 +279,7 @@ fn run() -> Result<ExitCode, String> {
         .time_grade(args.time_grade)
         .strict(args.strict)
         .strict_grade(args.strict_grade)
+        .strict_grade_blocks(args.strict_grade_blocks.clone())
         .efuse(args.efuse)
         .reset_cause(args.reset_cause)
         .strap(args.strap.unwrap_or(lp_emu_esp_common::Strap::App))
@@ -501,6 +511,17 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                 args.strict_grade = Some(RegGrade::parse(&text).ok_or_else(|| {
                     format!("--strict-grade `{text}`: expected modeled, documented or measured")
                 })?);
+            }
+            "--strict-grade-blocks" => {
+                let text = value("--strict-grade-blocks")?;
+                // Leaked because a block name is `&'static str` everywhere
+                // else in the bus, and a run parses this once.
+                args.strict_grade_blocks = Some(
+                    text.split(',')
+                        .map(|n| &*Box::leak(n.trim().to_string().into_boxed_str()))
+                        .filter(|n: &&str| !n.is_empty())
+                        .collect(),
+                );
             }
             "--reset-cause" => {
                 let text = value("--reset-cause")?;
@@ -890,8 +911,8 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
         // about the blocks it checked and about no others.
         let scope = machine.bus.blocks_in_strict_grade_scope();
         eprintln!(
-            "strict-grade {level}: checked {} ({}); every other block publishes no grade table \
-             and was passed over",
+            "strict-grade {level}: checked {} ({}); every other block was passed over — it \
+             publishes no grade table, or --strict-grade-blocks did not name it",
             scope.len(),
             if scope.is_empty() {
                 "none".to_string()

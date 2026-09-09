@@ -59,6 +59,7 @@
 
 use std::collections::BTreeMap;
 
+use lp_emu_esp_common::periph::RegGrade;
 use lp_emu_esp_common::{BusCx, Peripheral, RegFile, Width};
 
 use crate::regs;
@@ -121,7 +122,8 @@ impl I2cAnaMst {
                 .with_names(regs::I2C_ANA_MST)
                 .with_read_override(I2C0_CTRL, BUSY, 0)
                 .with_read_override(I2C1_CTRL, BUSY, 0)
-                .with_read_override(ANA_CONF0, CAL_DONE, CAL_DONE),
+                .with_read_override(ANA_CONF0, CAL_DONE, CAL_DONE)
+                .with_pac_grades(),
             analog,
         }
     }
@@ -173,6 +175,14 @@ impl Peripheral for I2cAnaMst {
 
     fn reg_name(&self, off: u32) -> Option<&'static str> {
         regs::I2C_ANA_MST.name(off)
+    }
+
+    /// The window's own grades, from the PAC. `i2c_ctrl(n)` grades
+    /// `modeled` because this block forces `busy` low in it — which is also
+    /// the honest reading of a transaction port whose answers come from a
+    /// store nobody has measured.
+    fn reg_grade(&self, off: u32) -> Option<RegGrade> {
+        self.regs.reg_grade(off)
     }
 
     fn save_state(&self) -> Vec<u8> {

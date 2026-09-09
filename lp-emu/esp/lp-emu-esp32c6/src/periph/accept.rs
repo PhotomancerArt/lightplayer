@@ -25,28 +25,38 @@ use crate::regs;
 // ---- APM: `pre_init` writes 0 to each `func_ctrl` (soc/esp32c6/mod.rs:31-49)
 
 pub fn lp_apm() -> RegFile {
-    RegFile::new("LP_APM", 0x100).with_names(regs::LP_APM)
+    RegFile::new("LP_APM", 0x100)
+        .with_names(regs::LP_APM)
+        .with_pac_grades()
 }
 
 pub fn lp_apm0() -> RegFile {
-    RegFile::new("LP_APM0", 0x800).with_names(regs::LP_APM0)
+    RegFile::new("LP_APM0", 0x800)
+        .with_names(regs::LP_APM0)
+        .with_pac_grades()
 }
 
 pub fn hp_apm() -> RegFile {
-    RegFile::new("HP_APM", 0x800).with_names(regs::HP_APM)
+    RegFile::new("HP_APM", 0x800)
+        .with_names(regs::HP_APM)
+        .with_pac_grades()
 }
 
 // ---- LP_AON: `store0..7` plain RW; `store1` carries the calibration value
 // the firmware writes and reads back (clock/mod.rs:518-520, :539-548).
 
 pub fn lp_aon() -> RegFile {
-    RegFile::new("LP_AON", 0x400).with_names(regs::LP_AON)
+    RegFile::new("LP_AON", 0x400)
+        .with_names(regs::LP_AON)
+        .with_pac_grades()
 }
 
 // ---- PMU: written by `rtc::init`, never read back (discovery §4).
 
 pub fn pmu() -> RegFile {
-    RegFile::new("PMU", 0x400).with_names(regs::PMU)
+    RegFile::new("PMU", 0x400)
+        .with_names(regs::PMU)
+        .with_pac_grades()
 }
 
 /// `LP_CLKRST`. `reset_cause` at `+0x10` is the very first MMIO access of
@@ -69,6 +79,7 @@ pub fn lp_clkrst(cause: crate::loader::ResetCause) -> RegFile {
     RegFile::new("LP_CLKRST", 0x400)
         .with_names(regs::LP_CLKRST)
         .with_reset(0x010, cause.rom_code())
+        .with_pac_grades()
 }
 
 /// `SLC`, the SDIO slave DMA controller. Nothing in any image this machine
@@ -87,7 +98,9 @@ pub fn lp_clkrst(cause: crate::loader::ResetCause) -> RegFile {
 /// short arm. That the boot then reaches the flash bootloader and prints
 /// silicon's log line for line is the evidence for the value.
 pub fn slc() -> RegFile {
-    RegFile::new("SLC", 0x1000).with_names(regs::SLC)
+    RegFile::new("SLC", 0x1000)
+        .with_names(regs::SLC)
+        .with_pac_grades()
 }
 
 /// `HINF`, the SDIO slave host interface. Two read-modify-writes from
@@ -103,11 +116,15 @@ pub fn slc() -> RegFile {
 /// of it, so accept-and-remember is the whole model; the brownout it
 /// configures cannot happen on a machine with no analog supply.
 pub fn lp_ana() -> RegFile {
-    RegFile::new("LP_ANA", 0x400).with_names(regs::LP_ANA)
+    RegFile::new("LP_ANA", 0x400)
+        .with_names(regs::LP_ANA)
+        .with_pac_grades()
 }
 
 pub fn hinf() -> RegFile {
-    RegFile::new("HINF", 0x1000).with_names(regs::HINF)
+    RegFile::new("HINF", 0x1000)
+        .with_names(regs::HINF)
+        .with_pac_grades()
 }
 
 /// `PLIC_UX`, the user-mode half of the interrupt controller. The C6's
@@ -118,17 +135,23 @@ pub fn hinf() -> RegFile {
 /// the PAC's names; every register in it is *modeled*, and no image has ever
 /// read one back.
 pub fn plic_ux() -> RegFile {
-    RegFile::new("PLIC_UX", 0x400).with_names(regs::PLIC_UX)
+    RegFile::new("PLIC_UX", 0x400)
+        .with_names(regs::PLIC_UX)
+        .with_pac_grades()
 }
 
 // ---- MODEM_*: written by `modem_clock_*`, never read back.
 
 pub fn modem_syscon() -> RegFile {
-    RegFile::new("MODEM_SYSCON", 0x100).with_names(regs::MODEM_SYSCON)
+    RegFile::new("MODEM_SYSCON", 0x100)
+        .with_names(regs::MODEM_SYSCON)
+        .with_pac_grades()
 }
 
 pub fn modem_lpcon() -> RegFile {
-    RegFile::new("MODEM_LPCON", 0x100).with_names(regs::MODEM_LPCON)
+    RegFile::new("MODEM_LPCON", 0x100)
+        .with_names(regs::MODEM_LPCON)
+        .with_pac_grades()
 }
 
 // `I2C_ANA_MST` was an accept block here from P5 until 2026-09-08, and it
@@ -151,6 +174,7 @@ pub fn lp_i2c_ana_mst() -> RegFile {
     RegFile::new("LP_I2C_ANA_MST", 0x400)
         .with_names(regs::LP_I2C_ANA_MST)
         .with_read_override(0x000, 1 << 25, 0)
+        .with_pac_grades()
 }
 
 /// `PCR` — the clock and reset controller. The `disable_peripherals` sweep
@@ -172,6 +196,7 @@ pub fn pcr() -> RegFile {
         .with_names(regs::PCR)
         .with_read_override(0x110, 0x7f << 24, 40 << 24)
         .with_read_override(0x114, 1 << 3, 0)
+        .with_pac_grades()
 }
 
 /// `LP_TIMER` at `0x600B_0C00`: the block *after* EFUSE. The vendor
@@ -180,11 +205,15 @@ pub fn pcr() -> RegFile {
 /// 0x44` (`update`, `main_buf0_low/high`, and two more), accepted here
 /// under their own names rather than as "undocumented eFuse offsets".
 pub fn lp_timer() -> RegFile {
-    RegFile::new("LP_TIMER", 0x400).with_names(regs::LP_TIMER)
+    RegFile::new("LP_TIMER", 0x400)
+        .with_names(regs::LP_TIMER)
+        .with_pac_grades()
 }
 
 pub fn apb_saradc() -> RegFile {
-    RegFile::new("APB_SARADC", 0x400).with_names(regs::APB_SARADC)
+    RegFile::new("APB_SARADC", 0x400)
+        .with_names(regs::APB_SARADC)
+        .with_pac_grades()
 }
 
 /// `ASSIST_DEBUG`. `cpu(0).debug_mode` at `+0x74`: bit 1
@@ -197,22 +226,31 @@ pub fn assist_debug() -> RegFile {
     RegFile::new("ASSIST_DEBUG", 0x400)
         .with_names(regs::ASSIST_DEBUG)
         .with_read_override(0x074, 0b11, 0)
+        .with_pac_grades()
 }
 
 pub fn hp_sys() -> RegFile {
-    RegFile::new("HP_SYS", 0x400).with_names(regs::HP_SYS)
+    RegFile::new("HP_SYS", 0x400)
+        .with_names(regs::HP_SYS)
+        .with_pac_grades()
 }
 
 pub fn tee() -> RegFile {
-    RegFile::new("TEE", 0x1000).with_names(regs::TEE)
+    RegFile::new("TEE", 0x1000)
+        .with_names(regs::TEE)
+        .with_pac_grades()
 }
 
 pub fn lp_tee() -> RegFile {
-    RegFile::new("LP_TEE", 0x100).with_names(regs::LP_TEE)
+    RegFile::new("LP_TEE", 0x100)
+        .with_names(regs::LP_TEE)
+        .with_pac_grades()
 }
 
 pub fn lp_io() -> RegFile {
-    RegFile::new("LP_IO", 0x400).with_names(regs::LP_IO)
+    RegFile::new("LP_IO", 0x400)
+        .with_names(regs::LP_IO)
+        .with_pac_grades()
 }
 
 /// `EXTMEM` — the cache controller.
@@ -282,7 +320,9 @@ pub fn extmem() -> RegFile {
 /// to `0x0800` and `pin_ctrl` to `0x1def` — from the generated table, which
 /// expands the array the same way the name table does.
 pub fn io_mux() -> RegFile {
-    RegFile::new("IO_MUX", 0x100).with_names(regs::IO_MUX)
+    RegFile::new("IO_MUX", 0x100)
+        .with_names(regs::IO_MUX)
+        .with_pac_grades()
 }
 
 // `GPIO` was an accept block here from P5 (`in_` and `pcpu_int` reading 0,

@@ -8,7 +8,7 @@
 
 use lp_emu_esp_common::regnames::RegNames;
 
-/// Register names for the `lp_aon` block (23 registers, 3 with a non-zero reset).
+/// Register names for the `lp_aon` block (23 registers, 3 with a non-zero reset, 0 not plain read-write).
 pub static LP_AON: RegNames = RegNames {
     block: "lp_aon",
     entries: &[
@@ -41,4 +41,5 @@ pub static LP_AON: RegNames = RegNames {
         (0x048, 0xb0200000),
         (0x04c, 0x02800000),
     ],
+    access: &[],
 };
