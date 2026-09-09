@@ -9,7 +9,7 @@
 //! |---|---|---|
 //! | `0x37c` | `mmu_item_content` | reads and writes the entry `mmu_item_index` selects |
 //! | `0x380` | `mmu_item_index` | selects it; no auto-increment |
-//! | `0x384` | `mmu_power_ctrl` | bits 4:3 are the page mode, and drive [`CacheMmu::set_page_mode`] |
+//! | `0x384` | `mmu_power_ctrl` | bits 4:3 are the page mode, and drive [`crate::cache::CacheMmu::set_page_mode`] |
 //!
 //! Everything else — the timing calibration, the PMS protection ranges, the
 //! XTS flash-encryption block, `cache_fctrl`/`cache_sctrl` and the SRAM

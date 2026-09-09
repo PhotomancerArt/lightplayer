@@ -228,7 +228,7 @@ impl PinScript {
     /// Append another script's steps after this one's.
     ///
     /// Each file's own steps are already in time order
-    /// ([`sort_segments`](Self::sort_segments)); the second file's queue
+    /// (`sort_segments`, private); the second file's queue
     /// behind the first's rather than being merged into it, because two
     /// `--pin-script` files are two separate schedules and merging them
     /// would make each one's meaning depend on the other.

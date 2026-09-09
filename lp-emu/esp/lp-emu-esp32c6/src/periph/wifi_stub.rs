@@ -549,13 +549,13 @@ pub const AIR_GRADES: &[(u32, RegGrade, &str)] = &[
 ///    immediately after it. That is the shape the promiscuous-mode buffer
 ///    has (`rx_ctrl` then payload) and it is the obvious reading; it is not
 ///    an observation.
-/// 2. **That it is [`RX_CTRL_LEN`] bytes long**, which is what the layout
+/// 2. **That it is [`rx_ctrl::LEN`] bytes long**, which is what the layout
 ///    above sums to.
 ///
 /// Every field is either **derived from the frame** (`sig_len`, `is_group`),
 /// **taken from the receiving machine's own clock** (`timestamp`), or a
-/// **stated constant** ([`RX_RSSI_DBM`], [`RX_NOISE_FLOOR_DBM`],
-/// [`RX_CTRL_RATE`], [`RX_CTRL_CHANNEL`]) — never a value pretending to be a
+/// **stated constant** ([`rx_ctrl::RSSI_DBM`], [`rx_ctrl::NOISE_FLOOR_DBM`],
+/// [`rx_ctrl::RATE`], [`rx_ctrl::CHANNEL`]) — never a value pretending to be a
 /// measurement. The air models no PHY, so there is no RSSI to compute and no
 /// rate to recover.
 pub mod rx_ctrl {

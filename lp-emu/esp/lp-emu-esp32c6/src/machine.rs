@@ -412,8 +412,9 @@ pub const PIN_LOG_LINE_CAP: u64 = 2_000_000;
 /// The pin log's shape, for the radio: an observation of what left the
 /// guest, not a model of anything. **Nothing is delivered** — no machine
 /// receives these bytes, no interrupt is raised, and a run with the log on
-/// is the same run with it off. See [`Esp32C6Machine::drain_tx_log`] for
-/// what each field is and how much of it is a reading rather than a fact.
+/// is the same run with it off. See `Esp32C6Machine::drain_tx_log` (private)
+/// for what each field is and how much of it is a reading rather than a
+/// fact.
 #[derive(Clone, Debug, Default)]
 pub enum TxLogSink {
     #[default]
@@ -609,8 +610,8 @@ pub enum AirDelivery {
     /// than wrapping, so this is what "the eleventh frame" looks like. The
     /// frame is dropped, counted, and the first one is logged.
     RingFull,
-    /// The walk hit [`RX_RING_WALK_CAP`] without finding an end — a chain
-    /// that loops or was corrupted.
+    /// The walk hit `RX_RING_WALK_CAP` (private) without finding an end — a
+    /// chain that loops or was corrupted.
     RingWalkCap,
 }
 
@@ -2584,8 +2585,8 @@ impl Esp32C6Machine {
     ///
     /// Idempotent, and the only thing that turns the air path on. A machine
     /// this is never called on is byte-for-byte the machine that came before
-    /// this seam existed: [`drain_tx_log`](Self::drain_tx_log) returns at its
-    /// first line and `WIFI_MAC` never asks for a slice boundary.
+    /// this seam existed: `drain_tx_log` (private) returns at its first line
+    /// and `WIFI_MAC` never asks for a slice boundary.
     pub fn arm_air(&mut self, id: lp_emu_esp_common::air::ParticipantId) {
         self.air_participant = Some(id);
         if let Some(index) = self.wifi_mac_index {
@@ -2614,8 +2615,8 @@ impl Esp32C6Machine {
     ///
     /// This runs at a **slice boundary**, where the machine holds guest
     /// memory and the interrupt lines and no peripheral holds a borrow — the
-    /// mirror of [`drain_tx_log`](Self::drain_tx_log), which reads guest RAM
-    /// at the same place for the same reason.
+    /// mirror of `drain_tx_log` (private), which reads guest RAM at the same
+    /// place for the same reason.
     ///
     /// # What is the guest's and what is ours
     ///

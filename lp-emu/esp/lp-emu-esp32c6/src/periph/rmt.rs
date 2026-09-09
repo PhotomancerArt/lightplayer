@@ -64,7 +64,7 @@
 //!
 //! # The receivers (M2 P3)
 //!
-//! Channels 2 and 3 are engines too: [`RxEngine`] samples the level of the
+//! Channels 2 and 3 are engines too: `RxEngine` (private) samples the level of the
 //! pad routed to the channel's **input** signal (`GPIO.func_in_sel_cfg[71]`
 //! for channel 2, through the fabric's `route_in`), measures each run in
 //! channel ticks and writes them into the channel's RAM window two to a word.
@@ -74,13 +74,13 @@
 //! with the same status and clear semantics the TX side has.
 //!
 //! Each is fed the fabric's **edges** rather than sampled tick by tick — see
-//! [`RxEngine`] for why that is the same model and what it costs (a slice of
-//! latency on the two interrupts, never on the words). Where the modelled
-//! behaviour is a choice rather than a bit map, the choice is named at the
-//! place it is made: `RxEngine::armed` (the reception starts at the first
-//! edge), [`Rmt::rx_write_word`] (`rx_lim` counts, it is not a position) and
-//! [`Rmt::rx_end`] (the trailing idle run is stored and the last word is an
-//! end marker).
+//! `RxEngine` (private) for why that is the same model and what it costs (a
+//! slice of latency on the two interrupts, never on the words). Where the
+//! modelled behaviour is a choice rather than a bit map, the choice is named
+//! at the place it is made: `RxEngine::armed` (the reception starts at the
+//! first edge), `Rmt::rx_write_word` (private; `rx_lim` counts, it is not a
+//! position) and `Rmt::rx_end` (private; the trailing idle run is stored and
+//! the last word is an end marker).
 //!
 //! # Register grades
 //!
