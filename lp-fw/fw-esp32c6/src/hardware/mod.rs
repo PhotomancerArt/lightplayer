@@ -5,7 +5,15 @@
 //! over-broad gate here surfaces as dead-code errors under `-D warnings`
 //! rather than as a silent extra dependency.
 
-#[cfg(any(not(fw_harness), feature = "test_button"))]
+// `test_gpio_input` is here for the same reason `test_button` is: the
+// `gpio-input` payload's whole claim is that a button read on the emulator is
+// read through the PRODUCT's driver, so its harness calls this module. The
+// driver itself is untouched (E-product).
+#[cfg(any(
+    not(fw_harness),
+    feature = "test_button",
+    feature = "test_gpio_input"
+))]
 pub mod button;
 // The radio *driver* is compiled out of P4 stress builds: there the radio
 // stack belongs to the load generators in `stress.rs` instead.
