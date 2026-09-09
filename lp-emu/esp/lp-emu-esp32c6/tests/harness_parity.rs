@@ -375,5 +375,8 @@ fn a_slower_clock_retires_fewer_instructions_and_no_slice_gets_cheaper() {
         sum3 >= sum1,
         "the slices cost less in total at t3: {sum3} against t1's {sum1}"
     );
-    println!("slice_cycles summed: t1={sum1} t3={sum3} over {} ticks", a.len());
+    println!(
+        "slice_cycles summed: t1={sum1} t3={sum3} over {} ticks",
+        a.len()
+    );
 }

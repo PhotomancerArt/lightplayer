@@ -768,7 +768,11 @@ mod tests {
         for off in (0..LINE_BYTES).step_by(4) {
             assert_eq!(c.fetch(base + off), 0, "the rest of the line is resident");
         }
-        assert_eq!(c.fetch(base + LINE_BYTES), LINE_FILL_CYCLES, "the next line");
+        assert_eq!(
+            c.fetch(base + LINE_BYTES),
+            LINE_FILL_CYCLES,
+            "the next line"
+        );
         assert_eq!(c.fills(), 2);
         assert_eq!(c.hits(), 8);
     }
@@ -779,9 +783,10 @@ mod tests {
         // straight-line code is all-miss on the second pass as well as the
         // first, and the same walk inside the cache is all-hit.
         let base = memmap::FLASH_CACHE_BASE + 0x2_0000;
-        for (bytes, expect_second_pass_fills) in [(3 * CACHE_BYTES, 3 * CACHE_BYTES / LINE_BYTES),
-                                                  (CACHE_BYTES / 2, 0)]
-        {
+        for (bytes, expect_second_pass_fills) in [
+            (3 * CACHE_BYTES, 3 * CACHE_BYTES / LINE_BYTES),
+            (CACHE_BYTES / 2, 0),
+        ] {
             let mut c = CacheCost::new();
             for _pass in 0..2 {
                 for off in (0..bytes).step_by(4) {
