@@ -779,8 +779,20 @@ to broadcast, from the eFuse MAC, category `0x7f`, Espressif OUI `18:fe:34`,
 ESP-NOW element type 4.
 
 **This is an observation, not an air.** Nothing is delivered anywhere, no
-machine receives these bytes, no interrupt is raised, and a run with the log
-on is the same run with it off. The blob's TX completion path
+machine receives these bytes, and no interrupt is raised — the guest is told
+nothing it would not have been told without the flag.
+
+**A machine without `--tx-log` is byte-for-byte the machine that came
+before it**: the block only starts recording when a sink is set. The
+recording itself ends the slice early, so that the machine can read the
+buffer out of guest RAM before the guest reuses it, and ending a slice moves
+where a pending interrupt is taken — so a run *with* the log is not promised
+to be instruction-identical to one without. That is why the arming is
+conditional rather than always-on. (On the `test_espnow` image it happens to
+be identical anyway: 79,871,852 instructions at 1,500 ms with the log off,
+with it on, and before the flag existed.)
+
+The blob's TX completion path
 (`lmacTxDone`, `ppProcTxDone`, `trc_onPPTxDone`, `esp_wifi_tx_done_cb`) is
 **never entered** on this machine, because nothing raises the `WIFI_MAC`
 interrupt — so the `test_espnow` image arms exactly one frame and then stops

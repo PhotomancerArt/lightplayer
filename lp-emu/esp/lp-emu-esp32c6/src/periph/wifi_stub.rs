@@ -235,6 +235,14 @@ pub struct WifiStub {
     /// ever fills it; the machine reads the bytes and empties it at the
     /// slice boundary that follows.
     tx_handoffs: Vec<TxHandoff>,
+    /// Whether anything is listening ([`Self::arm_tx_log`]).
+    ///
+    /// The recording ends the slice so the machine can read guest RAM before
+    /// the buffer is reused, and ending a slice early is a real difference —
+    /// it moves where a pending interrupt is taken. So a machine with no
+    /// `--tx-log` does not arm it, and its runs are byte-for-byte the runs it
+    /// had before this block could record anything.
+    tx_log_armed: bool,
 }
 
 impl WifiStub {
@@ -250,6 +258,7 @@ impl WifiStub {
             regs,
             touched: BTreeSet::new(),
             tx_handoffs: Vec::new(),
+            tx_log_armed: false,
         }
     }
 
@@ -267,6 +276,7 @@ impl WifiStub {
             regs,
             touched: BTreeSet::new(),
             tx_handoffs: Vec::new(),
+            tx_log_armed: false,
         }
     }
 
@@ -283,12 +293,19 @@ impl WifiStub {
             regs: RegFile::new("I2C_MST_MEM", crate::memmap::periph::I2C_MST_MEM_LEN),
             touched: BTreeSet::new(),
             tx_handoffs: Vec::new(),
+            tx_log_armed: false,
         }
     }
 
     /// Distinct offsets the guest has touched so far.
     pub fn touched(&self) -> &BTreeSet<u32> {
         &self.touched
+    }
+
+    /// Start recording TX handoffs. The machine calls this when a
+    /// `--tx-log` sink is set, and only then — see `tx_log_armed`.
+    pub fn arm_tx_log(&mut self) {
+        self.tx_log_armed = true;
     }
 
     /// Take the frames armed since the last call, for the machine's radio TX
@@ -349,7 +366,11 @@ impl Peripheral for WifiStub {
         // The TX handoff. Recorded, never answered: the block still does not
         // raise an interrupt and the guest is not told anything it would not
         // have been told without the log.
-        if self.name == "WIFI_MAC" && word == TX_PLCP0_OFFSET && merged & TX_GO_MASK == TX_GO_MASK {
+        if self.tx_log_armed
+            && self.name == "WIFI_MAC"
+            && word == TX_PLCP0_OFFSET
+            && merged & TX_GO_MASK == TX_GO_MASK
+        {
             self.tx_handoffs.push(TxHandoff {
                 at: cx.now,
                 pc: cx.pc,
@@ -477,6 +498,15 @@ mod tests {
         let mut sb = Sandbox::new();
         let mut w = WifiStub::new();
 
+        // Nothing is listening yet: the strobe records nothing at all, which
+        // is what keeps every run without `--tx-log` the run it always was.
+        sb.write(&mut w, TX_PLCP0_OFFSET, 0xc061_de88);
+        assert!(
+            w.take_tx_handoffs().is_empty(),
+            "an unarmed block records nothing"
+        );
+        w.arm_tx_log();
+
         // `mac_tx_set_plcp0+0x6a`: the pointer, no strobe. Not a frame yet.
         sb.now = 165_826_331;
         sb.write(&mut w, TX_PLCP0_OFFSET, 0x0061_de88);
@@ -509,6 +539,7 @@ mod tests {
         // And the block only arms on `WIFI_MAC`: the same offset in the PWR
         // window is an ordinary register.
         let mut p = WifiStub::pwr();
+        p.arm_tx_log();
         sb.write(&mut p, TX_PLCP0_OFFSET, 0xc061_de88);
         assert!(p.take_tx_handoffs().is_empty(), "WIFI_PWR has no TX slot");
     }

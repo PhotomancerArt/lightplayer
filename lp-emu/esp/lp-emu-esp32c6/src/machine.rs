@@ -1387,6 +1387,14 @@ impl Esp32C6Builder {
         let gpio_index = bus.peripheral_index("GPIO");
         // The radio TX log's source block; `None` on a machine without one.
         let wifi_mac_index = bus.peripheral_index("WIFI_MAC");
+        // Arm the recording only when something is listening: it ends a
+        // slice early, and a machine with no `--tx-log` must run exactly the
+        // run it ran before this block could record anything.
+        if !matches!(tx_log, TxLogSink::Off)
+            && let Some(i) = wifi_mac_index
+        {
+            bus.with_peripheral::<crate::periph::wifi_stub::WifiStub, _>(i, |w, _| w.arm_tx_log());
+        }
         if gpio_index.is_none() && !pin_script.is_empty() {
             return Err(BuildError::Io(
                 "--pin-script needs a GPIO block, and this machine has none".to_string(),
