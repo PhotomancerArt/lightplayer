@@ -2179,6 +2179,17 @@ lint-emu-fence:
 # log's CI cost rule says a gated job or a nightly, never the default path.
 # `m3_replays`..`m7_replays` need no firmware and do run everywhere.
 #
+# So does `band_contract` (M1 P4), and that is the whole shape of RD4/OQ7: a
+# grade-3 gate replays two committed transcripts and builds NOTHING, which is
+# what makes it free enough for the default path. The risk that trades for is
+# the other one — a transcript quietly swapped for one recorded from a PR's
+# own image — so the test asserts each transcript's recorded `firmware_sha256`
+# against the pinned image at that transcript's commit
+# (`the_grade_3_replays_run_against_the_pinned_images`). A re-recording has to
+# arrive as a new stem with its own sha and its own line in that test; it can
+# never arrive as a rebuild. It is listed here as well as running everywhere
+# because this is the job a reader looks in for the C6 emulator's gates.
+#
 # `emu_usb_hello` is in `lp-cli` rather than the emulator because it sends a
 # real `M!` frame, and the single framer for those (`lpc_wire::json::to_serial_line`)
 # is a product crate the fence keeps out of `lp-emu/` — see the test's header.
@@ -2190,6 +2201,7 @@ test-emu-c6:
     cargo test -p lp-emu-validate --test m6_replays
     cargo test -p lp-emu-validate --test m7_replays
     cargo test -p lp-emu-validate --test cycle_probe_two_clocks
+    cargo test -p lp-emu-validate --test band_contract
     cargo test -p lp-cli --test validate_registry_parity
     LP_EMU_BUILD_FW=1 cargo test -p lp-cli --test emu_usb_hello -- --include-ignored
 
