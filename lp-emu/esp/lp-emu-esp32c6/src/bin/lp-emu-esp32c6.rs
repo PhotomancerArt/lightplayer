@@ -221,6 +221,9 @@ EXIT CODES:
 
 fn main() -> ExitCode {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+    // THROWAWAY (M5 P1b) — never merge.
+    #[cfg(all(feature = "selfprof", target_os = "macos"))]
+    lp_emu_esp32c6::selfprof::install();
     match run() {
         Ok(code) => code,
         Err(message) => {

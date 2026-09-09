@@ -45,3 +45,18 @@ sha2 = "0.10"
 # silicon transcript with M2's runner. Inside the `lp-emu/` fence (MIT), and
 # it mirrors `fw-checks` rather than importing it, so the fence lint passes.
 lp-emu-validate = { path = "../../lp-emu-validate" }
+
+# THROWAWAY (M5 P1b) — never merge.
+[features]
+default = []
+selfprof = []
+# Ablation builds: each removes exactly one per-slot bookkeeping action from
+# the block executor's inner loop. NOT correct emulators — they are timings.
+abl-issuing = ["lp-riscv-emu/abl-issuing"]
+abl-charge = ["lp-riscv-emu/abl-charge"]
+abl-count = ["lp-riscv-emu/abl-count"]
+abl-sideband = ["lp-riscv-emu/abl-sideband"]
+abl-memcost = ["lp-riscv-emu/abl-memcost"]
+abl-pc = ["lp-riscv-emu/abl-pc"]
+abl-all = ["lp-riscv-emu/abl-all"]
+blockstats = ["lp-riscv-emu/blockstats"]

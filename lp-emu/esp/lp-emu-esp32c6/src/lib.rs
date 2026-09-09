@@ -50,6 +50,9 @@
 //! unmapped on purpose (the radio window, RMT, the flash controller), so a
 //! strict run stops on the first block a later milestone owns.
 
+/// THROWAWAY (M5 P1b) — never merge.
+#[cfg(all(feature = "selfprof", target_os = "macos"))]
+pub mod selfprof;
 pub mod cache;
 pub mod control;
 pub mod flash;

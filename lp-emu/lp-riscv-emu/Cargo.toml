@@ -30,6 +30,20 @@ std = [
     "libc",
 ]
 
+# THROWAWAY (M5 P1b) — never merge. Ablations of the block executor's
+# per-slot bookkeeping. Each one produces an INCORRECT emulator; they exist
+# to be timed, not to be right.
+abl-issuing = []
+abl-charge = []
+abl-count = []
+abl-sideband = []
+abl-memcost = []
+abl-pc = []
+abl-all = ["abl-issuing", "abl-charge", "abl-count", "abl-sideband", "abl-memcost", "abl-pc"]
+# Block-shape statistics: terminator reason, realised length, and whether a
+# block could have been extended. Counters, not timings.
+blockstats = []
+
 [dev-dependencies]
 # Self-dependency: lp-riscv-emu's own tests need the `std` feature. This used to
 # arrive implicitly via lp-riscv-elf's (now dev-only) dependency on this crate.
