@@ -119,7 +119,9 @@ protocol of its own.
 | USB-Serial-JTAG | `--usb-sj tcp:<host:port>` (listens, one client; the client's bytes are the OUT endpoint's) | `--control tcp:<host:port>` |
 
 Both are also available as **files**: `--uart0-script` and `--usb-script`.
-Those are the deterministic path and the one gates use.
+Those are the deterministic path and the one gates use. And both USB sockets
+are available over **WebSocket**, for N boards at once, through `lp-cli emu
+serve` — see "The WebSocket door" below.
 
 ### The commands
 
@@ -187,6 +189,51 @@ client the host is attached-idle or absent, so no packet is ever delivered
 and no backlog accumulates; the backlog exists only for a client that
 disconnects and reconnects while `draining` is held on by
 `--usb-sj-drain manual`.
+
+### The WebSocket door: `lp-cli emu serve`
+
+The two sockets above are TCP, one machine per process, bound before the run
+and gone with it. A browser cannot open a TCP socket, and a browser is what
+plan two's Studio walks need — so there is a third door, and it lives in
+**`lp-cli`**, outside this fence:
+
+```text
+GET  /boards                 → the registry, as JSON
+WS   /board/<id>/bytes       → binary frames both ways; the payload IS the bytes
+WS   /board/<id>/control     → the line protocol above, verbatim
+```
+
+```sh
+lp-cli emu serve --board c6-a=target/emu-ref/…/fw-esp32c6 \
+                 --board c6-b=target/emu-ref/…/fw-esp32c6 \
+                 --listen 127.0.0.1:5599 --state-dir target/emu-serve
+lp-cli upload projects/test/basic serial:ws://127.0.0.1:5599/board/c6-a/bytes
+```
+
+It is a **pump, not a translation**. Each board runs on its own thread with
+`--usb-sj tcp:127.0.0.1:0` and `--control tcp:127.0.0.1:0` — ephemeral
+loopback ports, read back through `Esp32C6Machine::usb_sj_tcp()` and
+`control_tcp()` — and the WebSocket endpoints move bytes and lines between a
+socket and those ports. Nothing under `lp-emu/` changed for it, which is the
+point: the TCP client the pump opens **is** the byte client the coupling rule
+watches, so connect ⇒ `open`, disconnect ⇒ `close`, `attach`/`detach` never
+implied and one reply per command are all this machine's own behaviour rather
+than a re-implementation of it. One byte client and one control client per
+board at a time, as `TcpHost` has; a second is refused with `409`.
+
+What `serve` adds beyond `run`: a registry of N named boards, one **eFuse
+MAC** each (the desk board's with the last octet stepped, or `mac=` on the
+`--board`), one persistent **flash file** each under `--state-dir` written
+back on a cadence and on shutdown, a **console transcript** each under
+`--console-dir`, `--reboot-on-reset` **on** (see above), and `--air <addr>` —
+a one-way `LPA1` tap that is **auditable only** and never a transcript.
+
+`--usb-host` decides what a byte client finds. `attached` (the default, and
+`emu run`'s) is the cable in with the port open from power-on, so the boot
+console is on the wire and the first client is replayed it. `attached-idle` is
+the cable in with the port **closed**, which is what makes the coupling rule
+visible on `state` — at the cost of the boot log, because the firmware does
+not write while nothing is draining, exactly as a board does not.
 
 ### The scripted form
 
@@ -321,11 +368,22 @@ The dances are **decoded**, not pattern-matched: the model watches the RTS
 falling edge and whether DTR was ever high, exactly as `set_signals` does, so
 any host tool whose sequence has that shape works without being listed here.
 
-### `reset` and `download-mode` until M7
+### `reset` and `download-mode`
 
-Both end the run. The chip would reboot, and the emulator does not yet have a
-boot chain to reboot into (M7 owns it), so the machine reports the request
-instead of performing it:
+Both end the run **unless `--reboot-on-reset`**. M7 shipped the boot chain and
+the flag: with it the machine performs the reset — `Esp32C6Machine::reboot`
+puts the chip back to its power-on state with the strap and the reset cause
+re-seeded, keeps both consoles' bytes so a log with two boots in it is a
+better record than one that lost everything before the reset, and the run
+carries on with `reboots()` incremented. The flag is **off by default** on
+purpose: three merged M6 scenarios read the exit code of a run that ended on
+a reset as their evidence.
+
+`lp-cli emu serve` is the one place it is on and not configurable off. A
+server cannot lose a board to esptool-js's DTR/RTS dance, whose whole purpose
+is to reset the chip — see "The WebSocket door" below.
+
+Without the flag, the machine reports the request instead of performing it:
 
 ```text
 RESET requested by USB_DEVICE chip_rst (serial) at cycle 96000000 (600000 us),

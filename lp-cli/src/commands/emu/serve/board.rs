@@ -59,6 +59,9 @@ pub struct BoardSpec {
     /// The persistent flash file, `None` for a merged board (which carries
     /// the whole chip already) and for a serve with no `--state-dir`.
     pub flash: Option<PathBuf>,
+    /// Where to rewrite this board's console transcript, `None` with no
+    /// `--console-dir`.
+    pub console: Option<PathBuf>,
 }
 
 /// Everything the door needs about a board, plus the handle that stops it.
@@ -91,10 +94,8 @@ pub struct Board {
 pub struct BoardOptions {
     pub grade: TimeGrade,
     pub strict_bus: bool,
-    /// Start with no cable in the socket, so an `attach` on the control
-    /// channel is the plug-in edge. Off by default: a board a picker lists
-    /// is a board that is plugged in.
-    pub host_absent: bool,
+    /// The USB host's state at power-on.
+    pub usb_host: UsbHost,
     pub air: Option<Arc<AirTap>>,
     pub air_seat: usize,
 }
@@ -253,17 +254,87 @@ fn run_board(
             }
         }
         if flush_now.swap(false, Ordering::SeqCst) || last_flush.elapsed() >= FLUSH_EVERY {
-            flush(&mut machine, &spec.id);
+            flush(&mut machine, &spec);
             last_flush = Instant::now();
         }
     }
-    flush(&mut machine, &spec.id);
+    flush(&mut machine, &spec);
     machine.flush_frames();
 }
 
-fn flush(machine: &mut lp_emu_esp32c6::machine::Esp32C6Machine, id: &str) {
-    if let Err(e) = machine.flush_flash() {
-        eprintln!("emu serve: board `{id}`: writing the flash back failed: {e}");
+/// Where the machine writes its flash part before it is moved into place.
+///
+/// `FlashImage::flush` is a `std::fs::write`: it truncates and then writes
+/// four megabytes. A server killed mid-flush would leave a half-image, and a
+/// half-image loses the project more thoroughly than no write at all —
+/// the next boot mounts it, calls it corrupt and **reformats**. So the
+/// machine writes here and the result is `rename`d into place, which is
+/// atomic: the durable file is a whole image or the previous whole image,
+/// never a prefix of one.
+///
+/// This is a hazard reasoned about rather than one observed: no run has been
+/// caught mid-write. It costs one rename per flush and it removes the whole
+/// class, which is worth it for the file a walk's project lives in.
+fn working_path(flash: &std::path::Path) -> PathBuf {
+    let mut path = flash.to_path_buf();
+    let name = path
+        .file_name()
+        .map(|n| format!("{}.part", n.to_string_lossy()))
+        .unwrap_or_else(|| "flash.bin.part".to_string());
+    path.set_file_name(name);
+    path
+}
+
+/// Write back everything a killed server must not lose: the flash part, and
+/// the console transcript.
+fn flush(machine: &mut lp_emu_esp32c6::machine::Esp32C6Machine, spec: &BoardSpec) {
+    match machine.flush_flash() {
+        Ok(true) => {
+            if let Some(durable) = &spec.flash
+                && let Err(e) = std::fs::rename(working_path(durable), durable)
+            {
+                eprintln!(
+                    "emu serve: board `{}`: moving the flash into place failed: {e}",
+                    spec.id
+                );
+            }
+        }
+        Ok(false) => {}
+        Err(e) => eprintln!(
+            "emu serve: board `{}`: writing the flash back failed: {e}",
+            spec.id
+        ),
+    }
+    if let Some(path) = &spec.console {
+        write_console(path, machine.usb_sj().bytes(), &spec.id);
+        // What the guest handed the IN endpoint that no host took — the
+        // boot log a byte client that connects later never sees, because
+        // the firmware pauses its writes when nothing is draining. A board
+        // does that too; the difference is that here it can still be read.
+        let untaken = machine.usb_sj_tried().bytes();
+        if !untaken.is_empty() {
+            write_console(&untaken_path(path), untaken, &spec.id);
+        }
+    }
+}
+
+/// `<id>.console.log` → `<id>.console-untaken.log`.
+fn untaken_path(console: &std::path::Path) -> PathBuf {
+    let mut path = console.to_path_buf();
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().replace(".console.", ".console-untaken."))
+        .unwrap_or_else(|| "console-untaken.log".to_string());
+    path.set_file_name(name);
+    path
+}
+
+fn write_console(path: &std::path::Path, bytes: Vec<u8>, id: &str) {
+    if let Err(e) = std::fs::write(path, bytes) {
+        eprintln!(
+            "emu serve: board `{id}`: writing the console to {} failed: {e}",
+            path.display()
+        );
     }
 }
 
@@ -274,15 +345,14 @@ fn build(
     let mut builder = Esp32C6Builder::new()
         .time_grade(options.grade)
         .strict(options.strict_bus)
-        .usb_host(if options.host_absent {
-            UsbHost::Absent
-        } else {
-            // Cable in, port closed. The coupling rule then means what it
-            // says: the byte client's connect IS the application opening the
-            // port, and its disconnect is it closing one. `attach` and
-            // `detach` stay the cable's, never a socket's.
-            UsbHost::Attached { draining: false }
-        })
+        // `attached` by default, as `emu run` is: the board's boot console
+        // is then on the wire and the first byte client is replayed it.
+        // `attached-idle` is what makes the coupling rule literal — the
+        // client's connect IS the `open` — at the cost of the boot log,
+        // which the firmware does not write while nothing is draining.
+        // Either way `attach` and `detach` stay the cable's, never a
+        // socket's.
+        .usb_host(options.usb_host)
         .usb_sj_drain(UsbSjDrain::Auto)
         // PD11, and the one place the default flips: without it a
         // `MachineRequest::Reset` ends the run, and a board that disappears
@@ -303,7 +373,23 @@ fn build(
     } else {
         (Some(spec.image.as_path()), None)
     };
-    builder = apply_image(builder, elf, merged, spec.flash.as_deref())
+    // The machine reads and writes the working file; `flush` renames it onto
+    // the durable one. Seed it from whatever the last server left, so this
+    // board boots what it wrote.
+    let working = match &spec.flash {
+        Some(durable) => {
+            let working = working_path(durable);
+            let _ = std::fs::remove_file(&working);
+            if durable.is_file() {
+                std::fs::copy(durable, &working).with_context(|| {
+                    format!("board `{}`: seeding {}", spec.id, working.display())
+                })?;
+            }
+            Some(working)
+        }
+        None => None,
+    };
+    builder = apply_image(builder, elf, merged, working.as_deref())
         .with_context(|| format!("board `{}`", spec.id))?;
 
     builder

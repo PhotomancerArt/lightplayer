@@ -174,6 +174,21 @@ pub struct RunArgs {
     pub efuse_mac: Option<String>,
 }
 
+/// The USB host's state at a served board's power-on. The same three the
+/// `lp-emu-esp32c6` binary's `--usb-host` takes, spelled the same way, so
+/// nobody has to learn a second vocabulary for one chip.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
+pub enum ServeHost {
+    /// Cable in, port open and draining from power-on — `emu run`'s default.
+    #[default]
+    Attached,
+    /// Cable in, port CLOSED. The byte client's connect is what opens it.
+    #[value(name = "attached-idle")]
+    AttachedIdle,
+    /// No cable. An `attach` on the control channel is the plug-in edge.
+    Absent,
+}
+
 /// `lp-cli emu serve` — a registry of named boards behind a WebSocket door.
 ///
 /// `run` is one image, one socket and a deadline; `serve` outlives any one
@@ -209,15 +224,35 @@ pub struct ServeArgs {
     #[arg(long = "state-dir")]
     pub state_dir: Option<PathBuf>,
 
+    /// A directory to write each board's console transcript into,
+    /// `<id>.console.log` — `run`'s `--console`, once per board.
+    ///
+    /// Everything the board said on its link since power-on, whether or not
+    /// anyone was listening at the time, rewritten on the same cadence the
+    /// flash is written back. A serve with no byte client still has a
+    /// console; this is where to read it.
+    #[arg(long = "console-dir")]
+    pub console_dir: Option<PathBuf>,
+
     #[arg(long = "time-grade", value_enum, default_value_t = Grade::T1)]
     pub time_grade: Grade,
 
-    /// Start every board with no cable in the socket, so an `attach` on the
-    /// control channel is the plug-in edge. Off by default: a board a picker
-    /// lists is a board that is plugged in, with its port closed until a
-    /// byte client opens it.
-    #[arg(long = "host-absent")]
-    pub host_absent: bool,
+    /// The USB host's state at power-on, spelled as `lp-emu-esp32c6
+    /// --usb-host` spells it.
+    ///
+    /// `attached` is the default and matches `emu run`: the cable is in and
+    /// the port is open from power-on, so the board's boot console is on the
+    /// wire and the first byte client is replayed it — which is what
+    /// "connect and watch it boot" means and what every walk over this door
+    /// wants.
+    ///
+    /// `attached-idle` is the cable in with the port CLOSED, which is what
+    /// makes the coupling rule literal: the byte client's connect is the
+    /// `open` and its disconnect is the `close`, provable through `state`.
+    /// The cost is the board's boot log, which the firmware does not write
+    /// while nothing is draining — a real board does that too.
+    #[arg(long = "usb-host", value_enum, default_value_t = ServeHost::Attached)]
+    pub usb_host: ServeHost,
 
     /// Refuse any access to an address no peripheral claims.
     #[arg(long = "strict-bus")]

@@ -45,7 +45,9 @@ use std::sync::Arc;
 use anyhow::{Context, Result, bail};
 use lp_emu_esp32c6::loader::EfuseIdentity;
 
-use super::args::{EmuChip, ServeArgs};
+use lp_emu_esp32c6::machine::UsbHost;
+
+use super::args::{EmuChip, ServeArgs, ServeHost};
 use board::{Board, BoardOptions, BoardSpec, default_mac, format_mac};
 use door::Registry;
 
@@ -63,7 +65,16 @@ pub fn serve(args: ServeArgs) -> Result<()> {
             .with_context(|| format!("--state-dir: creating {}", dir.display()))?;
     }
 
-    let specs = parse_boards(&args.board, args.state_dir.as_deref())?;
+    if let Some(dir) = &args.console_dir {
+        std::fs::create_dir_all(dir)
+            .with_context(|| format!("--console-dir: creating {}", dir.display()))?;
+    }
+
+    let specs = parse_boards(
+        &args.board,
+        args.state_dir.as_deref(),
+        args.console_dir.as_deref(),
+    )?;
 
     let air = match &args.air {
         Some(addr) => {
@@ -83,7 +94,11 @@ pub fn serve(args: ServeArgs) -> Result<()> {
         let options = BoardOptions {
             grade: args.time_grade.time_grade(),
             strict_bus: args.strict_bus,
-            host_absent: args.host_absent,
+            usb_host: match args.usb_host {
+                ServeHost::Attached => UsbHost::Attached { draining: true },
+                ServeHost::AttachedIdle => UsbHost::Attached { draining: false },
+                ServeHost::Absent => UsbHost::Absent,
+            },
             air: air.clone(),
             air_seat: seat,
         };
@@ -146,10 +161,14 @@ pub fn serve(args: ServeArgs) -> Result<()> {
 }
 
 /// `--board <id>=<image>[,mac=<aa:bb:…>][,kind=elf|merged]`.
-fn parse_boards(specs: &[String], state_dir: Option<&Path>) -> Result<Vec<BoardSpec>> {
+fn parse_boards(
+    specs: &[String],
+    state_dir: Option<&Path>,
+    console_dir: Option<&Path>,
+) -> Result<Vec<BoardSpec>> {
     let mut out: Vec<BoardSpec> = Vec::with_capacity(specs.len());
     for (index, text) in specs.iter().enumerate() {
-        let spec = parse_board(text, index, state_dir)?;
+        let spec = parse_board(text, index, state_dir, console_dir)?;
         if out.iter().any(|b| b.id == spec.id) {
             bail!(
                 "--board `{}`: two boards cannot share the id `{}` — the id is the endpoint path",
@@ -170,7 +189,12 @@ fn parse_boards(specs: &[String], state_dir: Option<&Path>) -> Result<Vec<BoardS
     Ok(out)
 }
 
-fn parse_board(text: &str, index: usize, state_dir: Option<&Path>) -> Result<BoardSpec> {
+fn parse_board(
+    text: &str,
+    index: usize,
+    state_dir: Option<&Path>,
+    console_dir: Option<&Path>,
+) -> Result<BoardSpec> {
     let (id, rest) = text.split_once('=').with_context(|| {
         format!("--board `{text}`: expected <id>=<image>, for example c6-a=target/…/fw-esp32c6")
     })?;
@@ -229,6 +253,7 @@ fn parse_board(text: &str, index: usize, state_dir: Option<&Path>) -> Result<Boa
         merged,
         mac,
         flash,
+        console: console_dir.map(|dir| dir.join(format!("{id}.console.log"))),
     })
 }
 
@@ -242,6 +267,7 @@ mod tests {
         let specs = parse_boards(
             &["c6-a=fw-esp32c6".to_string(), "c6-b=fw-esp32c6".to_string()],
             Some(&dir),
+            None,
         )
         .expect("two boards");
         assert_eq!(specs[0].id, "c6-a");
@@ -252,13 +278,14 @@ mod tests {
 
     #[test]
     fn a_spelled_mac_wins_and_a_repeat_is_refused() {
-        let one = parse_board("c6-a=fw,mac=aa:bb:cc:dd:ee:ff", 0, None).expect("parses");
+        let one = parse_board("c6-a=fw,mac=aa:bb:cc:dd:ee:ff", 0, None, None).expect("parses");
         assert_eq!(format_mac(&one.mac), "aa:bb:cc:dd:ee:ff");
         let clash = parse_boards(
             &[
                 "c6-a=fw,mac=aa:bb:cc:dd:ee:ff".to_string(),
                 "c6-b=fw,mac=aa:bb:cc:dd:ee:ff".to_string(),
             ],
+            None,
             None,
         );
         assert!(clash.is_err(), "one identity twice is one board twice");
@@ -267,22 +294,22 @@ mod tests {
     #[test]
     fn a_merged_board_keeps_its_own_flash() {
         let dir = PathBuf::from("/tmp/state");
-        let spec = parse_board("c6-a=chip.bin,kind=merged", 0, Some(&dir)).expect("parses");
+        let spec = parse_board("c6-a=chip.bin,kind=merged", 0, Some(&dir), None).expect("parses");
         assert!(spec.merged);
         assert_eq!(spec.flash, None, "--merged is the whole chip already");
     }
 
     #[test]
     fn an_id_is_a_path_segment() {
-        assert!(parse_board("c6/a=fw", 0, None).is_err());
-        assert!(parse_board("=fw", 0, None).is_err());
-        assert!(parse_board("c6-a", 0, None).is_err());
-        assert!(parse_board("c6-a=fw,nonsense=1", 0, None).is_err());
+        assert!(parse_board("c6/a=fw", 0, None, None).is_err());
+        assert!(parse_board("=fw", 0, None, None).is_err());
+        assert!(parse_board("c6-a", 0, None, None).is_err());
+        assert!(parse_board("c6-a=fw,nonsense=1", 0, None, None).is_err());
     }
 
     #[test]
     fn two_boards_may_not_share_an_id() {
-        let clash = parse_boards(&["c6-a=one".to_string(), "c6-a=two".to_string()], None);
+        let clash = parse_boards(&["c6-a=one".to_string(), "c6-a=two".to_string()], None, None);
         assert!(clash.is_err(), "the id is the endpoint path");
     }
 }

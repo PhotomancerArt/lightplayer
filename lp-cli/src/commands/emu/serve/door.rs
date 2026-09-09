@@ -197,7 +197,13 @@ async fn handle(mut stream: TcpStream, registry: Arc<Registry>) -> Result<()> {
             )
             .await
         }
+        // A board that does not exist is a 404 whatever was asked of it:
+        // "upgrade required" on a name nobody has would send a client
+        // hunting for a handshake bug it does not have.
         (Route::Bytes(id) | Route::Control(id), false) => {
+            if registry.find(id).is_none() {
+                return not_a_board(&mut stream, id).await;
+            }
             respond(
                 &mut stream,
                 "426 Upgrade Required",
