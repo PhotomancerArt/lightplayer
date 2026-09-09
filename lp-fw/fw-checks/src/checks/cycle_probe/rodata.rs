@@ -100,7 +100,10 @@ mod tests {
 
     #[test]
     fn the_word_count_is_a_power_of_two() {
-        assert!(WORDS.is_power_of_two(), "the index mask needs a power of two");
+        assert!(
+            WORDS.is_power_of_two(),
+            "the index mask needs a power of two"
+        );
     }
 
     #[test]
