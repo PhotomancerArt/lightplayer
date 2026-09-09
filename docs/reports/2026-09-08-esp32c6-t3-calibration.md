@@ -611,8 +611,15 @@ committed transcripts recorded this phase:
 The `t2` null-hypothesis column below was **re-recorded at this same commit
 and this same image** rather than carried over from §1, so the two emulator
 columns differ in the cycle model and in nothing else. Those `t1`/`t2`
-re-recordings are not committed (the phase owns new `t3` transcripts only);
-they reproduce §1's figures exactly — compute aggregate 2.323× / 1.667×,
+re-recordings are not committed (the phase owns new `t3` transcripts only) —
+reproduce them with
+
+```bash
+cargo run -q -p lp-cli -- validate record compile-parity \
+    --config lp-emu:esp32c6:t2 --link real --commit 17ac011f7 --date 2026-09-08
+```
+
+— and they reproduce §1's figures exactly — compute aggregate 2.323× / 1.667×,
 min 1.506 / 1.087, max 4.968 / 3.569 — which is the check that the two runs
 are comparable.
 
