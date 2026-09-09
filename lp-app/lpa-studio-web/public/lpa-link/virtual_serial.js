@@ -49,19 +49,38 @@ let installed = null;
 let previous = null;
 let hadOwnProperty = false;
 
-/// Replace `navigator.serial` with a bus over `baseUrl`'s emulated boards.
+/// Build the bus over `baseUrl`'s emulated boards WITHOUT touching
+/// `navigator.serial`.
+///
+/// `install()` below is this plus the `defineProperty`, and it is what the
+/// conformance suite uses. M3's dev-mode seam (`index.html`) wants the halves
+/// apart: it defines `navigator.serial` SYNCHRONOUSLY, as a façade, in an
+/// inline script — because a dynamic `import()` cannot promise to resolve
+/// before the wasm bundle boots — and hands the façade this bus when it
+/// arrives. A second `defineProperty` from in here would take the façade's
+/// event listeners off the page with it.
 ///
 /// `boards` — an array of board ids to admit, when the page wants a subset.
 /// `backing` — an `{ describe, listBoards, connect }` triple; the default is
 /// `emu serve` over `baseUrl`, and the conformance suite passes a scripted
 /// double instead so CI needs no server, no sockets and no firmware.
-export async function install(baseUrl, { boards = null, backing = null } = {}) {
+/// `picker` — `(candidates) => Promise<boardId | null>`, the in-page chooser
+/// (M3). With one, `requestPort()` asks it and the page starts with NO grants,
+/// which is what a fresh Chrome profile looks like. Without one, every board
+/// is granted at load and `requestPort()` resolves to the first match.
+export async function createBus(baseUrl, { boards = null, backing = null, picker = null } = {}) {
+  const source = backing ?? nativeBacking(baseUrl);
+  const bus = new VirtualSerial(source, picker);
+  await bus.load(boards);
+  return bus;
+}
+
+/// Replace `navigator.serial` with a bus over `baseUrl`'s emulated boards.
+export async function install(baseUrl, options = {}) {
   if (installed) {
     await uninstall();
   }
-  const source = backing ?? nativeBacking(baseUrl);
-  const bus = new VirtualSerial(source);
-  await bus.load(boards);
+  const bus = await createBus(baseUrl, options);
 
   const navigator = globalThis.navigator;
   // DD9: `navigator.serial` is a getter on `Navigator.prototype` in Chromium,
@@ -106,9 +125,11 @@ export function bus() {
 }
 
 class VirtualSerial extends EventTarget {
-  constructor(backing) {
+  constructor(backing, picker = null) {
     super();
     this.backing = backing;
+    // The in-page chooser, or null. See `createBus`.
+    this.picker = picker;
     // Every port ever minted for a board, live or dead, newest last. The
     // dead ones stay reachable so `getInfo()` still answers on them.
     this.generations = [];
@@ -127,20 +148,30 @@ class VirtualSerial extends EventTarget {
       const emulator = await this.backing.connect(id, board);
       const port = this.mint(id, emulator, board);
       this.boardIds.push(id);
-      this.granted.add(port);
+      // A page with a chooser starts with no grants: Chrome hands a fresh
+      // profile an empty `getPorts()` until the chooser resolves one, and a
+      // shim that pre-granted every board would auto-connect Studio to all of
+      // them and leave the picker unreachable. A page WITHOUT a chooser has no
+      // way to grant at all, so there every board is granted at load — which
+      // is the shape M2's suite pins.
+      if (!this.picker) {
+        this.granted.add(port);
+      }
       emulator.on("reenumerate", () => this.reenumerate(id));
     }
   }
 
   // `GET /boards` is a CROSS-ORIGIN fetch whenever the page and the server
   // are not the same origin — and they never are, because `emu serve` binds
-  // its own port. Measured 2026-09-09 against the merged M1 door: the reply
-  // carries no `Access-Control-Allow-Origin`, so the browser refuses to let
-  // the page read it and this rejects with a bare `TypeError: Failed to
-  // fetch`. The WebSockets are unaffected (a WebSocket handshake is not
-  // subject to CORS), so naming the boards is enough to work without the
-  // registry — which is why `install(url, { boards: [...] })` skips this
-  // path entirely.
+  // its own port. M2 measured that against the door as merged and it failed:
+  // the reply carried no `Access-Control-Allow-Origin`, so the browser refused
+  // to let the page read it and this rejected with a bare `TypeError: Failed
+  // to fetch`. M1.1 (PR #646, merged 2026-09-09) puts the header on every
+  // plain HTTP reply, so the registry path is the live one now and M3's dev
+  // seam uses it — the board ids, the MACs and the flash state on the picker
+  // all come from here. `install(url, { boards: [...] })` remains for a page
+  // that wants a named subset; the WebSockets never needed either, a handshake
+  // not being subject to CORS.
   async list() {
     try {
       return await this.backing.listBoards();
@@ -148,8 +179,9 @@ class VirtualSerial extends EventTarget {
       throw new Error(
         `${this.backing.describe()}: could not read the board registry ` +
           `(${error?.message ?? error}). A cross-origin GET /boards needs an ` +
-          `Access-Control-Allow-Origin header the door does not send yet; ` +
-          `name the boards with install(url, { boards: ["c6-a"] }) instead.`,
+          `Access-Control-Allow-Origin header — check the server is an ` +
+          `\`lp-cli emu serve\` new enough to send it (PR #646) — or name the ` +
+          `boards with install(url, { boards: ["c6-a"] }) instead.`,
       );
     }
   }
@@ -208,11 +240,18 @@ class VirtualSerial extends EventTarget {
     return ports;
   }
 
-  /// There is no chooser under the shim. M2 resolves to the first admitted
-  /// board and the suite says so; M3 replaces `resolveRequestedPort` with the
-  /// in-page picker without touching the port double.
+  /// There is no BROWSER chooser under the shim, so the page draws one: with
+  /// a `picker` the request resolves through it, and without one it resolves
+  /// to the first admitted board (M2's shape, which the suite pins).
+  ///
+  /// Either way this is the same call `browser_esp32_device_controller.js:41`
+  /// makes, with the same filters, and it answers with the same two outcomes:
+  /// a port, or `NotFoundError` for "the user closed it with nothing".
   async requestPort(options = {}) {
-    const port = this.resolveRequestedPort(options?.filters ?? null);
+    const filters = options?.filters ?? null;
+    const port = this.picker
+      ? await this.pickPort(filters)
+      : this.resolveRequestedPort(filters);
     if (!port) {
       // What Chrome throws when the chooser closes with nothing — upstream
       // maps `NotFoundError` to "cancelled"
@@ -233,6 +272,84 @@ class VirtualSerial extends EventTarget {
       }
     }
     return null;
+  }
+
+  /// Offer the filtered boards to the page's picker and take its answer.
+  /// A picker that answers null — the user closed it — is a cancelled
+  /// chooser, and the caller above turns that into `NotFoundError`.
+  async pickPort(filters) {
+    const candidates = [];
+    for (const boardId of this.boardIds) {
+      const port = this.livePortFor(boardId);
+      if (port && matchesFilters(port.getInfo(), filters)) {
+        candidates.push(port);
+      }
+    }
+    if (candidates.length === 0) {
+      return null;
+    }
+    const chosen = await this.picker(candidates.map((port) => this.describe(port)));
+    if (chosen === null || chosen === undefined) {
+      return null;
+    }
+    return candidates.find((port) => port.boardId === chosen) ?? null;
+  }
+
+  /// What the page's chrome is allowed to know about a board: the registry
+  /// record `GET /boards` gave, plus this page's own grant/open state. Studio
+  /// never sees any of it — it holds a `SerialPort`, and that is the point.
+  describe(port) {
+    const info = port.getInfo();
+    return {
+      boardId: port.boardId,
+      mac: port.board?.mac ?? null,
+      chip: port.board?.chip ?? null,
+      flash: port.board?.flash ?? null,
+      link: port.board?.link ?? null,
+      usbVendorId: info.usbVendorId,
+      usbProductId: info.usbProductId,
+      granted: this.granted.has(port),
+      open: port.opened,
+    };
+  }
+
+  /// Every live board, described. The dev banner lists these.
+  describeBoards() {
+    return this.boardIds
+      .map((boardId) => this.livePortFor(boardId))
+      .filter((port) => port !== null)
+      .map((port) => this.describe(port));
+  }
+
+  // --- the cable, as a page-level control ---------------------------------
+  //
+  // `attach` and `detach` are control verbs — a cable going in and coming out
+  // — and they are never implied by a socket (`lp-emu/esp/README.md`). Chrome
+  // answers a replug with `connect`/`disconnect` on `navigator.serial`, so the
+  // bus answers these with exactly one of each: `installSerialEvents` wires
+  // them to `StudioCommand::DeviceHotplug`, and both edges are re-derivation
+  // triggers carrying no port (`web_app.rs:1908-1913`).
+
+  async detach(boardId) {
+    const port = this.requireLivePort(boardId);
+    await port.emulator.detach();
+    this.dispatchEvent(new CustomEvent("disconnect", { detail: { port } }));
+    return port;
+  }
+
+  async attach(boardId) {
+    const port = this.requireLivePort(boardId);
+    await port.emulator.attach();
+    this.dispatchEvent(new CustomEvent("connect", { detail: { port } }));
+    return port;
+  }
+
+  requireLivePort(boardId) {
+    const port = this.livePortFor(boardId);
+    if (!port) {
+      throw new Error(`no live port for emulated board \`${boardId}\``);
+    }
+    return port;
   }
 
   async dispose() {
