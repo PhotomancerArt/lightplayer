@@ -468,6 +468,51 @@ mod tests {
         assert_eq!(other.regs.stored(0x1234), 0xdead_beef);
     }
 
+    /// The radio TX log's trigger: `mac_tx_set_plcp0` programming the
+    /// pointer is **not** a frame, and `hal_mac_txq_enable` re-writing the
+    /// same word with the strobe **is**. The values are the ones the
+    /// `test_espnow` image produced (M4 P0's ledger).
+    #[test]
+    fn only_the_strobed_plcp0_write_is_a_tx_handoff() {
+        let mut sb = Sandbox::new();
+        let mut w = WifiStub::new();
+
+        // `mac_tx_set_plcp0+0x6a`: the pointer, no strobe. Not a frame yet.
+        sb.now = 165_826_331;
+        sb.write(&mut w, TX_PLCP0_OFFSET, 0x0061_de88);
+        assert!(
+            w.take_tx_handoffs().is_empty(),
+            "the pointer alone is not a handoff"
+        );
+
+        // `hal_mac_txq_enable+0xe`: the same word, bits 31 and 30 set.
+        sb.now = 165_826_944;
+        sb.write(&mut w, TX_PLCP0_OFFSET, 0xc061_de88);
+        let armed = w.take_tx_handoffs();
+        assert_eq!(armed.len(), 1, "{armed:?}");
+        assert_eq!(armed[0].plcp0, 0xc061_de88);
+        assert_eq!(armed[0].at, 165_826_944);
+        assert_eq!(
+            armed[0].descriptor(),
+            0x4081_de88,
+            "the low 20 bits, completed with the DRAM base"
+        );
+        assert!(w.take_tx_handoffs().is_empty(), "drained once, not twice");
+
+        // Every other offset in the slot group is silent, however it is
+        // written — only PLCP0 carries a pointer.
+        for off in [TX_SLOT_BASE_OFFSET, 0x4d60, 0x4d64, 0x5488, 0x54bc] {
+            sb.write(&mut w, off, 0xffff_ffff);
+        }
+        assert!(w.take_tx_handoffs().is_empty(), "only +0x4d6c arms");
+
+        // And the block only arms on `WIFI_MAC`: the same offset in the PWR
+        // window is an ordinary register.
+        let mut p = WifiStub::pwr();
+        sb.write(&mut p, TX_PLCP0_OFFSET, 0xc061_de88);
+        assert!(p.take_tx_handoffs().is_empty(), "WIFI_PWR has no TX slot");
+    }
+
     #[test]
     fn the_override_list_is_applied_and_every_entry_has_a_reason() {
         for &(off, mask, _, why) in OVERRIDES {
