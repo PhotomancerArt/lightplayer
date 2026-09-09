@@ -111,6 +111,17 @@ pub struct RecordArgs {
     /// `validate run --link`.
     #[arg(long, value_parser = ["real", "spike"])]
     pub link: Option<String>,
+    /// Which machine of a MULTI-MACHINE payload this capture is of — the
+    /// board's MAC without colons, by convention (`a0f26287b48c`).
+    ///
+    /// It becomes part of the committed filename and the sidecar's `machine`
+    /// field. Only `espnow-broadcast` needs it: its subject is two boards on
+    /// one air, and one sitting produces two captures of one payload on one
+    /// configuration at one commit on one date, which the filing scheme had no
+    /// room for. Leave it unset for every other payload and the transcript is
+    /// filed exactly where it always was.
+    #[arg(long)]
+    pub machine: Option<String>,
     #[arg(long, default_value_t = 120)]
     pub timeout_secs: u64,
     /// Print the exact commands and the destination paths, and stop.
