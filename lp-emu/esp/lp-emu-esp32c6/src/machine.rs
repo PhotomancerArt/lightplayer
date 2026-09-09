@@ -2644,13 +2644,33 @@ impl Esp32C6Machine {
     ///
     /// # The walk
     ///
-    /// From the base the blob programmed, follow `next` while the hardware
-    /// still owns the descriptor (`dw0[31]`) and its buffer is big enough
-    /// for the header and the frame (`dw0[11:0]`, the size field M4 P0
-    /// corroborated against the ring's 1,708-byte buffer stride). The chain
-    /// **ends** — the tenth descriptor's `next` is NULL, it does not wrap —
-    /// so a walk that runs out of owned descriptors is the ring being full,
-    /// and that is counted rather than papered over.
+    /// From **the block's own write cursor** — `WifiStub::rx_write_cursor`,
+    /// the descriptor the modelled DMA will fill next, which starts at the
+    /// base the blob programmed and is stepped by every fill — follow `next`
+    /// while the hardware still owns the descriptor (`dw0[31]`) and its
+    /// buffer is big enough for the header and the frame (`dw0[11:0]`, the
+    /// size field M4 P0 corroborated against the ring's 1,708-byte buffer
+    /// stride). The chain **ends** — the tenth descriptor's `next` is NULL,
+    /// it does not wrap — so a walk that runs out of owned descriptors is the
+    /// ring being full, and that is counted rather than papered over.
+    ///
+    /// **Why a cursor and not the base** — this is
+    /// `docs/debt/emu-c6-air-delivers-every-other-frame.md`, and it cost the
+    /// guest every second frame. The blob recycles a descriptor it has
+    /// consumed by moving it to the **tail** of its chain (`owner` back to 1,
+    /// `next` to NULL, the old tail linked to it) and advancing
+    /// `RX_DMA_BASE_OFFSET` one ISR **later**. For the width of that window
+    /// the base still names a descriptor the guest has already read. A walk
+    /// that starts at the base lands in it on every second frame: it writes
+    /// into the ring's tail, publishes that tail's NULL as
+    /// `RX_DSCR_NEXT_OFFSET`, and the guest — which M4 P2 had already
+    /// recorded refusing a cursor of 0 — never surfaces the frame. Real DMA
+    /// holds a pointer and steps it, so this does.
+    ///
+    /// A cursor that has gone stale is not trusted: if the walk from it
+    /// reaches the chain's end without finding a descriptor to fill, the walk
+    /// is retried once **from the base**, so a guest that re-posts its ring
+    /// somewhere else is followed rather than stranded.
     ///
     /// [`RX_RING_WALK_CAP`] bounds the walk: a `next` chain the guest
     /// corrupted must not spin the emulator.
@@ -2682,48 +2702,86 @@ impl Esp32C6Machine {
         let payload = crate::periph::wifi_stub::rx_ctrl::frame_with_header(bytes, micros);
         let need = payload.len() as u32;
 
-        let mut desc = base;
-        for _ in 0..RX_RING_WALK_CAP {
-            let (Some(dw0), Some(buf), Some(next)) = (
-                self.peek_word(desc),
-                self.peek_word(desc.wrapping_add(4)),
-                self.peek_word(desc.wrapping_add(8)),
-            ) else {
-                return AirDelivery::NoRing;
-            };
-            let owned_by_hardware = dw0 & RX_DESC_OWNER_MASK != 0;
-            let size = dw0 & RX_DESC_SIZE_MASK;
-            if owned_by_hardware && size >= need {
-                if !self.poke_bytes(buf, &payload) {
-                    return AirDelivery::NoRing;
+        let cursor = self
+            .bus
+            .with_peripheral::<crate::periph::wifi_stub::WifiStub, _>(index, |w, _| {
+                w.rx_write_cursor()
+            })
+            .flatten();
+        // The cursor first, the base second: a cursor that has gone stale
+        // (the guest re-posted its ring somewhere else) must not strand the
+        // air, and a base that has not caught up with the guest's own
+        // recycling must not be walked from while the cursor is good.
+        let starts = match cursor {
+            Some(c) if c != base => vec![c, base],
+            _ => vec![base],
+        };
+        let mut outcome = AirDelivery::RingFull;
+        for start in starts {
+            let mut desc = start;
+            let mut steps = 0;
+            outcome = loop {
+                if steps == RX_RING_WALK_CAP {
+                    break AirDelivery::RingWalkCap;
                 }
-                let dw0_after = (dw0 & !RX_DESC_OWNER_MASK & !RX_DESC_LEN_MASK)
-                    | RX_DESC_EOF_MASK
-                    | ((need << RX_DESC_LEN_SHIFT) & RX_DESC_LEN_MASK);
-                self.poke_word(desc, dw0_after);
-                self.bus
-                    .with_peripheral::<crate::periph::wifi_stub::WifiStub, _>(index, |w, _| {
-                        w.raise_rx_interrupt(desc, next)
-                    });
-                // The level: a peripheral can only reach `IrqLines` inside
-                // an access, and this is a slice boundary. The block put the
-                // bits in its event word; the machine holds the line up
-                // until the guest's write-one-to-clear empties that word.
-                self.bus.irq.set_level(crate::regs::source::WIFI_MAC, true);
-                return AirDelivery::Delivered {
-                    desc,
-                    buf,
-                    dw0_before: dw0,
-                    dw0_after,
-                    len: need,
+                steps += 1;
+                let (Some(dw0), Some(buf), Some(next)) = (
+                    self.peek_word(desc),
+                    self.peek_word(desc.wrapping_add(4)),
+                    self.peek_word(desc.wrapping_add(8)),
+                ) else {
+                    break AirDelivery::NoRing;
                 };
+                let owned_by_hardware = dw0 & RX_DESC_OWNER_MASK != 0;
+                let size = dw0 & RX_DESC_SIZE_MASK;
+                if owned_by_hardware && size >= need {
+                    if !self.poke_bytes(buf, &payload) {
+                        break AirDelivery::NoRing;
+                    }
+                    let dw0_after = (dw0 & !RX_DESC_OWNER_MASK & !RX_DESC_LEN_MASK)
+                        | RX_DESC_EOF_MASK
+                        | ((need << RX_DESC_LEN_SHIFT) & RX_DESC_LEN_MASK);
+                    self.poke_word(desc, dw0_after);
+                    // One call sets the two RX cursor registers *and* steps
+                    // this block's own write cursor to `next` — one fact,
+                    // one writer.
+                    self.bus
+                        .with_peripheral::<crate::periph::wifi_stub::WifiStub, _>(index, |w, _| {
+                            w.raise_rx_interrupt(desc, next)
+                        });
+                    // The level: a peripheral can only reach `IrqLines`
+                    // inside an access, and this is a slice boundary. The
+                    // block put the bits in its event word; the machine holds
+                    // the line up until the guest's write-one-to-clear
+                    // empties that word.
+                    self.bus.irq.set_level(crate::regs::source::WIFI_MAC, true);
+                    break AirDelivery::Delivered {
+                        desc,
+                        buf,
+                        dw0_before: dw0,
+                        dw0_after,
+                        len: need,
+                    };
+                }
+                if next == 0 {
+                    break AirDelivery::RingFull;
+                }
+                desc = next;
+            };
+            if !matches!(outcome, AirDelivery::RingFull) {
+                break;
             }
-            if next == 0 {
-                return AirDelivery::RingFull;
-            }
-            desc = next;
         }
-        AirDelivery::RingWalkCap
+        if matches!(outcome, AirDelivery::RingFull) {
+            // Nothing took it from either start, so the cursor names a
+            // descriptor that is no use: park it and let the next delivery
+            // begin at the base the guest has by then programmed.
+            self.bus
+                .with_peripheral::<crate::periph::wifi_stub::WifiStub, _>(index, |w, _| {
+                    w.set_rx_write_cursor(None)
+                });
+        }
+        outcome
     }
 
     /// Write `bytes` into guest memory through the bus's own decode, word by

@@ -1505,4 +1505,71 @@ fn what_the_guests_isr_reads_after_each_delivery() {
     println!("accesses to the reload strobe +0x4080 : {reload_strobes}");
     println!("rx lines the application printed : {rx_lines}");
     println!("console:\n{}", receiver.usb_sj().text());
+
+    // **The regression, at the mechanism rather than at the payload's
+    // arithmetic.** Before the fix this read `4 of 8` repeats and `4` null
+    // cursors; the payload's `gap` is downstream of both.
+    assert_eq!(
+        repeats, 0,
+        "two deliveries in a row went into the same descriptor — the base was \
+         walked again before the guest advanced it: {wrote_into:#x?}"
+    );
+    assert_eq!(
+        null_cursor, 0,
+        "a delivery published +0x4088 = 0, the null RX cursor M4 P2 recorded \
+         the blob refusing to follow"
+    );
+}
+
+/// **The regression this file owes the fix**, stated without the payload in
+/// the way: eight frames offered to a running guest, one at a time, and the
+/// air puts each of them in a **different** descriptor.
+///
+/// The defect wrote every second frame into the descriptor it had just used —
+/// the one the guest had already read and recycled to the tail of its chain,
+/// while `+0x4084` still named it. That is a fact about the delivery walk, and
+/// it is checkable without asking the application what it thought it heard,
+/// which is what [`what_the_guests_isr_reads_after_each_delivery`] prints and
+/// what this asserts.
+#[test]
+#[ignore = "needs an espnow-broadcast ELF in LP_EMU_C6_ESPNOW_BROADCAST_ELF"]
+fn every_delivery_takes_a_descriptor_the_guest_has_not_already_read() {
+    let Some(elf) = broadcast_elf() else { return };
+    let (mut sender, mut receiver) = broadcast_sender_and_receiver(&elf, None);
+    let mut at = ms(1_000);
+    let mut carried: Vec<Vec<u8>> = Vec::new();
+    while carried.len() < 8 && at < ms(2_000) {
+        at += ms(50);
+        sender.run_until(&until(at));
+        carried.extend(sender.take_air_frames().into_iter().map(|f| f.bytes));
+    }
+    assert!(carried.len() >= 8, "the sender armed {}", carried.len());
+
+    let mut wrote_into = Vec::new();
+    for frame in carried.iter().take(8) {
+        let before = receiver.air_frames_delivered();
+        offer(&mut receiver, at, frame.clone());
+        assert_eq!(
+            receiver.air_frames_delivered(),
+            before + 1,
+            "the ring refused a frame: {:?}",
+            owners(&ring(&mut receiver))
+        );
+        wrote_into.push(
+            receiver
+                .peek_word(WIFI_MAC + 0x408c)
+                .expect("the last-filled register"),
+        );
+        at += ms(50);
+        receiver.run_until(&until(at));
+    }
+    println!("descriptors written into: {wrote_into:#x?}");
+    let distinct: std::collections::BTreeSet<u32> = wrote_into.iter().copied().collect();
+    assert_eq!(
+        distinct.len(),
+        wrote_into.len(),
+        "eight deliveries, {} descriptors — the every-other-frame defect wrote \
+         each one twice",
+        distinct.len()
+    );
 }
