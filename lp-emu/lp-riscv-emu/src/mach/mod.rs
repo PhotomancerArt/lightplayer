@@ -722,7 +722,11 @@ impl<B: Bus> MachineHart<B> {
                 Some(block) => block,
                 None => {
                     let model = self.cycle_model;
-                    match cache.build(pc, model, |out| decode_block(bus, pc, out)) {
+                    #[cfg(feature = "bk-hoist")]
+                    let built = cache.build(pc, model, |out| decode_block(bus, pc, model, out));
+                    #[cfg(not(feature = "bk-hoist"))]
+                    let built = cache.build(pc, model, |out| decode_block(bus, pc, out));
+                    match built {
                         Some(block) => block,
                         None => {
                             // Nothing cacheable starts here — a `SYSTEM`, a
@@ -797,7 +801,34 @@ impl<B: Bus> MachineHart<B> {
     ) -> (Option<SliceEnd>, u32) {
         let mut pc = block_pc;
         let mut ran = 0u32;
-        for slot in slots {
+        // THROWAWAY (M5 P1b), `bk-hoist`: the running cycle lives in a local
+        // for the length of the block instead of in the hart's field, the
+        // instruction counter advances once at the exit, `charge_memory` is
+        // drained once (it is provably zero on the cached path — the cache
+        // only runs over a bus whose `fetch_is_pure`, which requires no
+        // memory-cost model), and `set_issuing` fires only where the bus can
+        // read it: a load, a store, an atomic, or the terminator.
+        #[cfg(feature = "bk-hoist")]
+        let mut cyc = self.cycle_count;
+        #[cfg(feature = "bk-hoist")]
+        let last = slots.len() - 1;
+        #[cfg(feature = "bk-hoist")]
+        macro_rules! leave {
+            ($out:expr) => {{
+                self.cycle_count = cyc;
+                self.instruction_count += u64::from(ran);
+                self.charge_memory(bus);
+                return ($out, ran);
+            }};
+        }
+        for (i, slot) in slots.iter().enumerate() {
+            #[cfg(not(feature = "bk-hoist"))]
+            let _ = i;
+            #[cfg(feature = "bk-hoist")]
+            if !whole && cyc >= end {
+                leave!(Some(SliceEnd::BudgetExhausted))
+            }
+            #[cfg(not(feature = "bk-hoist"))]
             if !whole && self.cycle_count >= end {
                 return (Some(SliceEnd::BudgetExhausted), ran);
             }
@@ -805,6 +836,16 @@ impl<B: Bus> MachineHart<B> {
             // would otherwise report the block's first `pc` to the bus's
             // trace and to its unmapped-site dedup, which is keyed on
             // `(pc, address)`.
+            #[cfg(feature = "bk-hoist")]
+            if i == last
+                || matches!(
+                    slot.bound,
+                    InstClass::Load | InstClass::Store | InstClass::Atomic
+                )
+            {
+                bus.set_issuing(pc, cyc);
+            }
+            #[cfg(not(feature = "bk-hoist"))]
             bus.set_issuing(pc, self.cycle_count);
 
             // THROWAWAY (M5 P1b): one seam, four builds. `slot-dense`
@@ -846,6 +887,11 @@ impl<B: Bus> MachineHart<B> {
                     (result.class, result.new_pc, result.inst_size)
                 }
                 Err(e) => {
+                    #[cfg(feature = "bk-hoist")]
+                    {
+                        self.cycle_count = cyc;
+                        self.instruction_count += u64::from(ran);
+                    }
                     self.charge(InstClass::System);
                     let out = match self.deliver_executor_error(e, pc, slot.word) {
                         Ok(()) => None,
@@ -856,8 +902,22 @@ impl<B: Bus> MachineHart<B> {
                 }
             };
 
-            self.instruction_count += 1;
-            self.charge(r_class);
+            #[cfg(not(feature = "bk-hoist"))]
+            {
+                self.instruction_count += 1;
+                self.charge(r_class);
+            }
+            // THROWAWAY (M5 P1b): a body slot's cost was resolved from its
+            // word at decode time; only the terminator's is a run-time
+            // choice (F1: `BranchTaken` 2 against `BranchNotTaken` 1).
+            #[cfg(feature = "bk-hoist")]
+            {
+                cyc += u64::from(if i == last {
+                    self.cycle_model.cycles_for(r_class)
+                } else {
+                    slot.cost
+                });
+            }
             self.pc = r_new_pc.unwrap_or(pc.wrapping_add(u32::from(r_size)));
             ran += 1;
 
@@ -865,13 +925,23 @@ impl<B: Bus> MachineHart<B> {
             // have changed something only the machine can act on.
             if matches!(r_class, InstClass::Store | InstClass::Atomic) {
                 if bus.take_sideband() {
+                    #[cfg(feature = "bk-hoist")]
+                    {
+                        self.cycle_count = cyc;
+                    }
                     self.resample_external(bus);
                 }
                 if bus.take_yield() {
-                    self.charge_memory(bus);
-                    return (Some(SliceEnd::BusYield), ran);
+                    #[cfg(feature = "bk-hoist")]
+                    leave!(Some(SliceEnd::BusYield));
+                    #[cfg(not(feature = "bk-hoist"))]
+                    {
+                        self.charge_memory(bus);
+                        return (Some(SliceEnd::BusYield), ran);
+                    }
                 }
             }
+            #[cfg(not(feature = "bk-hoist"))]
             self.charge_memory(bus);
 
             // Defence in depth, and the reason a classification mistake can
@@ -886,6 +956,9 @@ impl<B: Bus> MachineHart<B> {
                 // THROWAWAY (M5 P1b).
                 #[cfg(feature = "blockstats")]
                 blockstats::note(slot.word, false, ran as usize == slots.len(), ran);
+                #[cfg(feature = "bk-hoist")]
+                leave!(None);
+                #[cfg(not(feature = "bk-hoist"))]
                 return (None, ran);
             }
             pc = straight_on;
@@ -896,6 +969,9 @@ impl<B: Bus> MachineHart<B> {
         if let Some(last) = slots.last() {
             blockstats::note(last.word, true, true, ran);
         }
+        #[cfg(feature = "bk-hoist")]
+        leave!(None);
+        #[cfg(not(feature = "bk-hoist"))]
         (None, ran)
     }
 
@@ -1320,7 +1396,12 @@ impl<B: Bus> MachineHart<B> {
 /// stopped at one: [`BlockCache::invalidate_range`] compares byte spans, so a
 /// block that reaches into a window an emulator-side writer touched is
 /// dropped whether it started in that window or not.
-fn decode_block<B: Bus>(bus: &mut B, pc: u32, out: &mut Vec<RvSlot<B>>) {
+fn decode_block<B: Bus>(
+    bus: &mut B,
+    pc: u32,
+    #[cfg(feature = "bk-hoist")] model: lp_emu_core::CycleModel,
+    out: &mut Vec<RvSlot<B>>,
+) {
     let mut at = pc;
     for _ in 0..MAX_BLOCK_SLOTS {
         let Ok(word) = bus.fetch_instruction(at) else {
@@ -1329,6 +1410,13 @@ fn decode_block<B: Bus>(bus: &mut B, pc: u32, out: &mut Vec<RvSlot<B>>) {
         match block::classify::<B>(word) {
             Class::Body(slot) => {
                 let width = u32::from(slot.width);
+                // THROWAWAY (M5 P1b).
+                #[cfg(feature = "bk-hoist")]
+                let slot = {
+                    let mut slot = slot;
+                    slot.cost = model.cycles_for(block::exact_class(word));
+                    slot
+                };
                 out.push(slot);
                 match at.checked_add(width) {
                     Some(next) => at = next,

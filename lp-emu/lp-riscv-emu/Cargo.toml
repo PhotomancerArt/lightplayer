@@ -46,6 +46,7 @@ blockstats = []
 # THROWAWAY (M5 P1b): experimental slot payloads (see mach/block.rs).
 slot-packed = []
 slot-dense = []
+bk-hoist = []
 
 [dev-dependencies]
 # Self-dependency: lp-riscv-emu's own tests need the `std` feature. This used to

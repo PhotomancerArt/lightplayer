@@ -70,6 +70,12 @@ pub(super) struct RvSlot<B: Bus> {
     /// THROWAWAY (M5 P1b): the dense category tag `slot-dense` dispatches on.
     #[cfg(feature = "slot-dense")]
     pub op: Op,
+    /// THROWAWAY (M5 P1b): this slot's EXACT cycle cost under the block's
+    /// cycle model, resolved at decode time. Only meaningful for a body
+    /// slot — a terminator's cost is a run-time choice (F1) and is still
+    /// taken from the class the executor returns.
+    #[cfg(feature = "bk-hoist")]
+    pub cost: u8,
 }
 
 // Written out rather than derived: a derive would demand `B: Clone` / `B:
@@ -149,6 +155,8 @@ pub(super) fn classify<B: Bus>(word: u32) -> Class<B> {
         bound,
         #[cfg(feature = "slot-dense")]
         op: op_of(word).expect("classify's own arms agree with op_of"),
+        #[cfg(feature = "bk-hoist")]
+        cost: 0,
     };
     match opcode {
         OP_REG => {
@@ -229,6 +237,8 @@ fn classify_compressed<B: Bus>(word: u32) -> Class<B> {
         bound,
         #[cfg(feature = "slot-dense")]
         op: Op::Compressed,
+        #[cfg(feature = "bk-hoist")]
+        cost: 0,
     };
     match (quadrant, funct3) {
         // Q0: c.addi4spn (000), c.lw (010), c.sw (110). 001/011/101/111 are
@@ -600,3 +610,40 @@ hnd!(h_branch, branch, decode_execute_branch);
 hnd!(h_jal, jump, decode_execute_jal);
 hnd!(h_jalr, jump, decode_execute_jalr);
 hnd!(h_compressed, compressed, decode_execute_compressed);
+
+/// THROWAWAY (M5 P1b), for `bk-hoist`: the **exact** class a body slot's
+/// executor will return, resolved from the word at decode time.
+///
+/// This is the "second source of truth" the phase file warns about, and it is
+/// exactly why this is a diagnostic and not a patch: if one arm here
+/// disagrees with the executor it charges a different number of cycles and
+/// the byte-identity oracle says so immediately. Terminators are *not*
+/// covered — a branch's cost is a run-time choice (F1) and stays with the
+/// class the executor returns.
+#[cfg(feature = "bk-hoist")]
+pub(super) fn exact_class(word: u32) -> InstClass {
+    if (word & 0b11) != 0b11 {
+        let q = word & 0b11;
+        let f3 = (word >> 13) & 0b111;
+        return match (q, f3) {
+            (0b00, 0b010) | (0b10, 0b010) => InstClass::Load,
+            (0b00, 0b110) | (0b10, 0b110) => InstClass::Store,
+            (0b01, 0b011) => InstClass::Lui,
+            _ => InstClass::Alu,
+        };
+    }
+    match (word & 0x7f) as u8 {
+        OP_LOAD => InstClass::Load,
+        OP_STORE => InstClass::Store,
+        OP_LUI => InstClass::Lui,
+        OP_AUIPC => InstClass::Auipc,
+        OP_REG if (word >> 25) & 0x7f == FUNCT7_M => {
+            if (word >> 12) & 0b111 < 4 {
+                InstClass::Mul
+            } else {
+                InstClass::DivRem
+            }
+        }
+        _ => InstClass::Alu,
+    }
+}
