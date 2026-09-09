@@ -343,6 +343,17 @@ Running `cargo build -p fw-esp32c6 ...` from the workspace root can fail at fina
 link with `memory region not defined: ROTEXT`, because it bypasses the
 crate-local firmware build context.
 
+**The bare form — `cargo check -p fw-esp32c6` with no `--target` — checks the
+wrong thing, not nothing.** With no target it resolves to the host, and on
+this repo's host toolchains that is *worse* than a no-op: `esp32c6-0.23.2`'s
+`#[link_section = ".rwtext"]` is not a valid section specifier for a Mach-O
+host (`error: invalid Mach-O section specifier`) and `esp-sync`'s
+`riscv::interrupt::enable()` does not resolve outside the `riscv32` target
+(`cannot find module or crate riscv`), so the check fails loudly for reasons
+that have nothing to do with the firmware. Always pass `--target
+riscv32imac-unknown-none-elf --profile release-esp32 --features
+esp32c6,server` (the line above), never the bare `-p fw-esp32c6`.
+
 For targeted host validation of specific crates:
 
 ```bash
@@ -706,8 +717,15 @@ byte-equal to ROM-up at app entry and which is what the per-tick gates use. It
 speaks the link the product ships on (emulated USB-Serial-JTAG, with a host
 that can be attached, detached, opened and closed), serves a project over it,
 renders, and drives a WS281x waveform onto a pad that a decoder reads back at
-the datasheet's ±150 ns. It is the configuration `lp-emu:esp32c6:t1` (and
-`:t2`) in the validation system above.
+the datasheet's ±150 ns. A pad can also be driven **from outside**
+(`--pin-script`, the `pin`/`pins` control verbs, `--wire a:b`), so `GPIO.in_`
+is a real two-way view and a `gpio-input` payload reads a button and a
+quadrature encoder through the product's own driver; RMT channels 2/3 are
+receive engines, not accept-and-remember. It is the configuration
+`lp-emu:esp32c6:t1` (`:t2`, and since M1 P4 `:t3` — a structural cache/bus
+model, graded `documented` within a stated band: `--strict-timing` enforces
+the band regardless of grade, `--strict` still refuses `t3` because
+`documented` is not `measured`) in the validation system above.
 
 ```bash
 lp-cli emu run --merged <chip.bin> --link 127.0.0.1:5591 --monitor   # a C6 you can talk to
@@ -756,25 +774,37 @@ this) and the waveform decoded off the emulated pad. The walk record is
 `docs/reports/2026-09-08-esp32c6-emulator-walk.md`, and it is where to look
 before quoting any of this.
 
-**It does not replace a board.** The emulator has no Chromium USB stack, no
-radio traffic, no analog anything, no RX pins, and its clock is a model. The
-walk record lists what it does not cover; a change to any of that is still a
-desk sitting. What the walk replaces is the *routine* C6 walk — the one that
-used to be run to check that a render still renders.
+**It does not replace a board.** The emulator has no Chromium USB stack and no
+analog anything (`regi2c` answers from one shared data byte). Its clock is
+still a model, not a measurement of wall time. Two emulated C6s can now hold
+an ESP-NOW conversation (M4) and a pad can be driven from outside and read
+back on GPIO or through an RMT receiver (M2) — but the air is byte delivery
+on a perfect medium with no PHY, no channel and no collisions, and a pin's
+three readings (the fabric's driven level, the RMT waveform, our own decoder)
+are all ours, so `pin` stays `modeled` even where the words agree with a
+second oracle. The walk record lists what it does not cover; a change to any
+of that is still a desk sitting. What the walk replaces is the *routine* C6
+walk — the one that used to be run to check that a render still renders.
 
 Three rules before you use a number from it:
 
 - **Never gate on emulated microseconds** (plan PD9, vision D13). Time is a
-  graded ladder and no rung is a promise: `t1` counts one cycle per
-  instruction, `t2` uses a per-class model, and neither is graded by a
-  transcript. Memory figures transfer; clocks do not. A replay *reports* a
-  timing difference with its ratio and *fails* on a memory one, which is the
-  same rule in code.
+  graded ladder and no rung is a promise, a graded one included: `t1` counts
+  one cycle per instruction, `t2` uses a per-class model, and `t3` (M1, a
+  structural cache/bus model) is graded `documented` **within a stated
+  band** on the two payloads that measured it — the first rung any
+  `--strict-timing` replay enforces, and still not a number a host budget may
+  read (PD9 stays absolute; whether a band may ever become an *advisory* line
+  in the heap-budget report was left an explicit open question at G1, not a
+  yes). Memory figures transfer; clocks do not. A replay *reports* a timing
+  difference with its ratio and *fails* on a memory one, which is the same
+  rule in code.
 - **A claim needs a transcript.** Every class of `lp-emu:esp32c6:*` is graded
-  `modeled` in `validate.toml`, each with a reason; byte-equality with silicon
-  on one payload is evidence written into that reason, not a promotion. Record
-  through `lp-cli validate record`, never by hand, and never edit what it
-  wrote.
+  `modeled` in `validate.toml` — except `t3`'s `timing`, `documented` inside
+  its band — each with a reason; byte-equality with silicon on one payload is
+  evidence written into that reason, not a promotion, and being inside a band
+  is evidence in the same sense, not a promotion either. Record through
+  `lp-cli validate record`, never by hand, and never edit what it wrote.
 - **The fence still applies.** These crates are MIT and may not import a
   product crate. The payload registry mirrors `fw-checks`; `lp-cli` owns the
   parity test.
