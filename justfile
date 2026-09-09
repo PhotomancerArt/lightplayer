@@ -634,8 +634,14 @@ schema-gen:
     cargo run -p lp-cli -- schema gen
 
 # Verify schemas/ matches the generator byte-for-byte (drift gate, CI-style).
+#
+# `LP_CLI` overrides the lp-cli invocation (a command prefix). CI points it
+# at the binary the workspace `cargo test` already built, so the gate costs
+# no second tree build: a `-p lp-cli` dev build unifies features differently
+# from the workspace test build and rebuilt every dependency — 4m49s per
+# Validate run on 2026-09-08. Locally the default builds lp-cli as before.
 schema-check:
-    cargo run -p lp-cli -- schema gen --check
+    ${LP_CLI:-cargo run -q -p lp-cli --} schema gen --check
 
 # Snapshot the outgoing format into schemas/history/v<N>/ BEFORE bumping
 # PROJECT_FORMAT_VERSION (N = the current constant). Copies the schemas, the
@@ -2182,7 +2188,18 @@ lint-emu-fence:
 # `emu_usb_hello` is in `lp-cli` rather than the emulator because it sends a
 # real `M!` frame, and the single framer for those (`lpc_wire::json::to_serial_line`)
 # is a product crate the fence keeps out of `lp-emu/` — see the test's header.
-test-emu-c6:
+#
+# Two halves, because CI runs them in two jobs. The `-p lp-cli` half is a
+# second full test-tree build (features unify differently from
+# `-p lp-emu-esp32c6`; 6m07s on a CI runner, 2026-09-08), so CI runs it in
+# `Heap budget (esp32c6 chip)` beside the chip ratchet, which needs the same
+# build, and `Emulator C6 (x64)` keeps the emulator's own suite. Locally,
+# `just test-emu-c6` is still the whole thing.
+test-emu-c6: test-emu-c6-boot test-emu-c6-cli
+
+# The emulator's own suite: boot tests against built fw-esp32c6 ELFs, then the
+# lp-emu-validate replays. CI's `Emulator C6 (x64)` job runs this half.
+test-emu-c6-boot:
     LP_EMU_BUILD_FW=1 cargo test -p lp-emu-esp32c6 -- --include-ignored --nocapture
     cargo test -p lp-emu-validate --test m3_replays
     cargo test -p lp-emu-validate --test m4_replays
@@ -2190,6 +2207,12 @@ test-emu-c6:
     cargo test -p lp-emu-validate --test m6_replays
     cargo test -p lp-emu-validate --test m7_replays
     cargo test -p lp-emu-validate --test cycle_probe_two_clocks
+
+# lp-cli's two emulator-backed tests. Both resolve the ELF through
+# `lp_emu_esp32c6::test_support` under `LP_EMU_BUILD_FW=1` — a plain
+# `cargo build`, not a reference image, so no espflash and no git history.
+# CI's `Heap budget (esp32c6 chip)` job runs this half.
+test-emu-c6-cli:
     cargo test -p lp-cli --test validate_registry_parity
     LP_EMU_BUILD_FW=1 cargo test -p lp-cli --test emu_usb_hello -- --include-ignored
 
