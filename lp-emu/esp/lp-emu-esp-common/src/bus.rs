@@ -214,6 +214,9 @@ pub struct SocBus {
     /// `Some(level)`: an access to a register graded below `level` is
     /// refused like an unmapped one. See [`SocBus::set_strict_grade`].
     strict_grade: Option<RegGrade>,
+    /// The blocks the level applies to, or `None` for every graded block.
+    /// See [`SocBus::set_strict_grade_blocks`].
+    strict_grade_blocks: Option<Vec<&'static str>>,
     sideband: bool,
     /// See [`BusCx::yield_to_machine`].
     yield_now: bool,
@@ -318,6 +321,7 @@ impl SocBus {
             mmio_windows: Vec::new(),
             strict: false,
             strict_grade: None,
+            strict_grade_blocks: None,
             sideband: false,
             yield_now: false,
             allow_unaligned: false,
@@ -447,6 +451,11 @@ impl SocBus {
     /// is what keeps that honest: the run report names the blocks that were
     /// actually checked, so an ungraded one reads as an unanswered question
     /// and never as a pass.
+    ///
+    /// Since 2026-09-08 the accept blocks publish tables too, so "the blocks
+    /// that published one" is most of the chip — and a run that wants the
+    /// narrow claim says which blocks it means with
+    /// [`set_strict_grade_blocks`](Self::set_strict_grade_blocks).
     pub fn set_strict_grade(&mut self, level: Option<RegGrade>) {
         self.strict_grade = level;
     }
@@ -455,14 +464,42 @@ impl SocBus {
         self.strict_grade
     }
 
+    /// Narrow the level to a named set of blocks.
+    ///
+    /// `None` — the default — means every block that publishes a table,
+    /// which is the survey: *what does this boot read that we only
+    /// modelled?* A named set is the gate: *this driver, on this block,
+    /// crosses nothing below the level*, which is the claim G4-4 makes about
+    /// `USB_DEVICE` and which stopped being expressible the day the accept
+    /// blocks were graded.
+    ///
+    /// A name that matches no mapped block is kept rather than rejected, and
+    /// shows up as its absence from
+    /// [`blocks_in_strict_grade_scope`](Self::blocks_in_strict_grade_scope)
+    /// — the caller can then say so, which is better than this layer
+    /// guessing whether a block is missing on purpose.
+    pub fn set_strict_grade_blocks(&mut self, blocks: Option<Vec<&'static str>>) {
+        self.strict_grade_blocks = blocks;
+    }
+
     /// The names of the blocks a `--strict-grade` run actually checks: those
-    /// that publish a per-register grade table.
+    /// that publish a per-register grade table, intersected with
+    /// [`set_strict_grade_blocks`](Self::set_strict_grade_blocks) when one
+    /// was named.
     pub fn blocks_in_strict_grade_scope(&self) -> Vec<&'static str> {
         self.mmio
             .iter()
             .filter(|w| w.periph.reg_grade(0).is_some())
             .map(|w| w.periph.name())
+            .filter(|name| self.block_in_strict_grade_scope(name))
             .collect()
+    }
+
+    fn block_in_strict_grade_scope(&self, name: &str) -> bool {
+        match &self.strict_grade_blocks {
+            None => true,
+            Some(names) => names.iter().any(|n| *n == name),
+        }
     }
 
     /// Mirror the hart's misaligned-access policy onto the bus.
@@ -1210,7 +1247,11 @@ impl SocBus {
             return Ok(());
         };
         // A block that publishes no grade table is out of scope, not
-        // `Modeled`: see `Peripheral::reg_grade`.
+        // `Modeled`: see `Peripheral::reg_grade`. So is one the run did not
+        // name, when it named any.
+        if !self.block_in_strict_grade_scope(self.mmio[index].periph.name()) {
+            return Ok(());
+        }
         let Some(grade) = self.mmio[index].periph.reg_grade(off) else {
             return Ok(());
         };

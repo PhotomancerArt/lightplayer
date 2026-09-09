@@ -142,6 +142,12 @@ impl Peripheral for Pcr {
         }
     }
 
+    /// PCR is the P5 accept block with the clock lines on top, so its
+    /// grades are that block's: the PAC's, through `with_pac_grades`.
+    fn reg_grade(&self, off: u32) -> Option<lp_emu_esp_common::periph::RegGrade> {
+        self.regs.reg_grade(off)
+    }
+
     fn reg_name(&self, off: u32) -> Option<&'static str> {
         self.regs.reg_name(off)
     }
