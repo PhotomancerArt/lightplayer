@@ -543,7 +543,11 @@ mod tests {
     #[test]
     fn an_empty_decode_installs_nothing_and_the_address_stays_uncached() {
         let mut cache = BlockCache::<Toy>::new(8, 64, 16);
-        assert!(cache.build(0x4080_0000, CycleModel::Esp32C6, |_| {}).is_none());
+        assert!(
+            cache
+                .build(0x4080_0000, CycleModel::Esp32C6, |_| {})
+                .is_none()
+        );
         assert!(cache.lookup(0x4080_0000).is_none());
         assert!(cache.is_empty());
     }

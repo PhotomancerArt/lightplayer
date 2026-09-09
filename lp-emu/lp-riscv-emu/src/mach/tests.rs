@@ -58,6 +58,9 @@ struct TestBus {
     /// When set, an access to [`MMIO`] latches this into `pending` — a
     /// peripheral raising its line from inside the store.
     raise_on_mmio: Option<u8>,
+    /// `fence.i` instructions the hart has reported through
+    /// [`Bus::note_fence_i`].
+    fences_seen: u32,
 }
 
 impl TestBus {
@@ -69,6 +72,7 @@ impl TestBus {
             sideband_reads: 0,
             pending: None,
             raise_on_mmio: None,
+            fences_seen: 0,
         }
     }
 
@@ -222,6 +226,21 @@ impl Bus for TestBus {
     fn pending_cpu_interrupt(&self) -> Option<u8> {
         self.pending
     }
+
+    /// This bus charges nothing for a fetch, so a decode-ahead is free of
+    /// consequence — **unless** an execute-kind watchpoint is armed, when a
+    /// fetch can trap and reading one instruction early would take that trap
+    /// early. Same shape as `SocBus`'s answer.
+    fn fetch_is_pure(&self) -> bool {
+        !self
+            .watchpoints
+            .iter()
+            .any(|wp| wp.is_some_and(|wp| wp.on_execute))
+    }
+
+    fn note_fence_i(&mut self) {
+        self.fences_seen += 1;
+    }
 }
 
 // --- the rig ----------------------------------------------------------------
@@ -271,6 +290,78 @@ impl Rig {
     fn set_reg(&mut self, n: u8, value: u32) {
         self.hart.regs_mut()[n as usize] = value as i32;
     }
+}
+
+// --- the block cache's differential rig -------------------------------------
+
+/// Everything a slice can have changed, as one comparable value.
+///
+/// The block cache's whole claim is that nothing observable depends on a hit
+/// or a miss, so the tests below state that claim directly: run the same
+/// program with the cache on and with `--no-block-cache`, and require every
+/// field of this to match. It is the in-crate twin of the sweep the phase
+/// runs over the pinned firmware images.
+#[derive(Debug, PartialEq, Eq)]
+struct SliceState {
+    end: SliceEnd,
+    pc: u32,
+    regs: [i32; 32],
+    cycles: u64,
+    instructions: u64,
+    csr: alloc::string::String,
+    ram: Vec<u8>,
+    sideband_reads: u32,
+    fences_seen: u32,
+}
+
+impl Rig {
+    /// The same rig with the block cache off — `--no-block-cache`.
+    fn uncached() -> Self {
+        let mut rig = Self::new();
+        rig.hart.set_block_cache(false);
+        rig
+    }
+
+    fn state(&self, end: SliceEnd) -> SliceState {
+        SliceState {
+            end,
+            pc: self.hart.pc(),
+            regs: *self.hart.regs(),
+            cycles: self.hart.cycle_count(),
+            instructions: self.hart.instruction_count(),
+            csr: alloc::format!("{:?}", self.hart.csr()),
+            ram: self.bus.ram.clone(),
+            sideband_reads: self.bus.sideband_reads,
+            fences_seen: self.bus.fences_seen,
+        }
+    }
+}
+
+/// Build the same rig twice, run the same slice through both, and require
+/// the cached and single-stepping paths to have done exactly the same thing.
+///
+/// `setup` is handed a fresh rig; it loads the program and seeds whatever
+/// state the case needs.
+fn same_either_way(budget: u64, setup: impl Fn(&mut Rig)) -> SliceState {
+    let mut cached = Rig::new();
+    setup(&mut cached);
+    assert!(
+        cached.hart.block_cache(),
+        "the cache is on by default; this rig should be exercising it"
+    );
+    let cached_end = cached.run(budget);
+    let cached_state = cached.state(cached_end);
+
+    let mut stepped = Rig::uncached();
+    setup(&mut stepped);
+    let stepped_end = stepped.run(budget);
+    let stepped_state = stepped.state(stepped_end);
+
+    assert_eq!(
+        cached_state, stepped_state,
+        "the block cache changed something observable"
+    );
+    cached_state
 }
 
 // --- 1 ----------------------------------------------------------------------
@@ -845,4 +936,445 @@ fn scratch_csrs_read_back_what_was_written() {
     assert_eq!(rig.run(500), SliceEnd::Ebreak { pc: RAM_BASE + 16 });
     assert_eq!(rig.reg(6), 0x1234_5678);
     assert_eq!(rig.reg(7), 0x1234_5678);
+}
+
+// --- the block cache --------------------------------------------------------
+//
+// M5 P2 (Step A). Every test here states the same claim twice: the cached
+// path and the single-stepping path do exactly the same thing. `--no-block-
+// cache` is the free identity oracle, and these are it — in the crate, on
+// programs the pinned firmware images cannot construct.
+
+/// `fence.i` — the encoding the hart's [`super::FENCE_I`] compares against.
+const FENCE_I_WORD: u32 = 0x0000_100f;
+/// `fence iorw, iorw` — funct3 0, so NOT a `fence.i`.
+const FENCE_WORD: u32 = 0x0ff0_000f;
+
+/// A straight run of body instructions is one block and nothing else.
+#[test]
+fn a_straight_run_of_body_instructions_is_one_block() {
+    let program = [
+        encode::addi(Gpr::new(5), Gpr::new(0), 1),
+        encode::addi(Gpr::new(5), Gpr::new(5), 1),
+        encode::addi(Gpr::new(5), Gpr::new(5), 1),
+        encode::addi(Gpr::new(5), Gpr::new(5), 1),
+        encode::ebreak(),
+    ];
+    let state = same_either_way(500, |rig| rig.load(RAM_BASE, &program));
+    assert_eq!(state.end, SliceEnd::Ebreak { pc: RAM_BASE + 16 });
+    assert_eq!(state.regs[5], 4);
+    assert_eq!(state.instructions, 4);
+
+    let mut rig = Rig::new();
+    rig.load(RAM_BASE, &program);
+    rig.run(500);
+    let stats = rig.hart.block_stats().expect("the cache was built");
+    assert_eq!(stats.decodes, 1, "four `addi`, then the refused `ebreak`");
+    assert_eq!(stats.slots_run, 4);
+    assert!((stats.mean_block_len() - 4.0).abs() < 1e-9);
+}
+
+/// The same branch taken and not taken must charge what single-stepping
+/// charges — the reason the terminator's charge comes from the class the
+/// executor returns rather than from the decoder's bound.
+#[test]
+fn a_taken_and_a_not_taken_branch_charge_what_single_stepping_charges() {
+    for (name, seed, taken) in [("taken", 0u32, true), ("not taken", 1, false)] {
+        let state = same_either_way(500, |rig| {
+            rig.set_reg(6, seed);
+            rig.load(
+                RAM_BASE,
+                &[
+                    encode::addi(Gpr::new(5), Gpr::new(0), 7),
+                    // beq x6, x0, +8 — over the `addi` that follows.
+                    encode::beq(Gpr::new(6), Gpr::new(0), 8),
+                    encode::addi(Gpr::new(5), Gpr::new(5), 100),
+                    encode::ebreak(),
+                ],
+            );
+        });
+        if taken {
+            assert_eq!(state.regs[5], 7, "{name}: the skipped `addi` must not run");
+            assert_eq!(state.end, SliceEnd::Ebreak { pc: RAM_BASE + 12 });
+        } else {
+            assert_eq!(state.regs[5], 107, "{name}");
+        }
+    }
+}
+
+/// A `SYSTEM` instruction in the middle of a straight run ends the block
+/// before itself and is never cached — the hart keeps handling it.
+#[test]
+fn a_system_instruction_mid_stream_is_never_cached() {
+    let state = same_either_way(500, |rig| {
+        rig.set_reg(5, 0x1234);
+        rig.load(
+            RAM_BASE,
+            &[
+                encode::addi(Gpr::new(6), Gpr::new(0), 1),
+                encode::csrrw(Gpr::new(0), Gpr::new(5), MSCRATCH),
+                encode::csrrs(Gpr::new(7), Gpr::new(0), MSCRATCH),
+                encode::addi(Gpr::new(6), Gpr::new(6), 1),
+                encode::ebreak(),
+            ],
+        );
+    });
+    assert_eq!(state.regs[7], 0x1234);
+    assert_eq!(state.regs[6], 2);
+}
+
+/// An RV32F opcode is refused by the decoder and rejected by the hart, with
+/// the same trap either way.
+#[test]
+fn an_fp_opcode_is_never_cached_and_still_traps() {
+    let state = same_either_way(500, |rig| {
+        rig.trap_to_ebreak();
+        rig.load(
+            RAM_BASE,
+            &[encode::addi(Gpr::new(5), Gpr::new(0), 1), FADD_S],
+        );
+    });
+    assert_eq!(state.end, SliceEnd::Ebreak { pc: VEC });
+    assert_eq!(state.regs[5], 1);
+
+    let state = same_either_way(500, |rig| {
+        rig.trap_to_ebreak();
+        rig.load(RAM_BASE, &[encode::addi(Gpr::new(5), Gpr::new(0), 1), FLW]);
+    });
+    assert_eq!(state.end, SliceEnd::Ebreak { pc: VEC });
+}
+
+/// A block decode that walks off the end of RAM stops there, and the fault is
+/// delivered by the single-stepping path at the right `pc`.
+#[test]
+fn a_fetch_fault_mid_decode_falls_back_to_the_stepping_path() {
+    let last = RAM_BASE + RAM_LEN as u32 - 8;
+    let state = same_either_way(500, |rig| {
+        rig.trap_to_ebreak();
+        rig.hart.set_pc(last);
+        rig.load(
+            last,
+            &[
+                encode::addi(Gpr::new(5), Gpr::new(0), 3),
+                encode::addi(Gpr::new(5), Gpr::new(5), 4),
+            ],
+        );
+    });
+    assert_eq!(state.regs[5], 7);
+    assert_eq!(state.end, SliceEnd::Ebreak { pc: VEC });
+}
+
+/// A deadline that lands inside a block stops at exactly the instruction the
+/// single-stepping loop stops at, with exactly the same cycle count.
+#[test]
+fn a_deadline_inside_a_block_stops_where_single_stepping_stops() {
+    // `addi` is one cycle under the C6 model, so budgets 1..=8 walk the
+    // deadline through the middle of an eight-instruction block.
+    for budget in 1..=8u64 {
+        let state = same_either_way(budget, |rig| {
+            let mut program = Vec::new();
+            for _ in 0..8 {
+                program.push(encode::addi(Gpr::new(5), Gpr::new(5), 1));
+            }
+            program.push(encode::ebreak());
+            rig.load(RAM_BASE, &program);
+        });
+        assert_eq!(state.end, SliceEnd::BudgetExhausted, "budget {budget}");
+        assert_eq!(state.regs[5], budget as i32, "budget {budget}");
+        assert_eq!(state.pc, RAM_BASE + 4 * budget as u32, "budget {budget}");
+        assert_eq!(state.cycles, budget, "budget {budget}");
+    }
+}
+
+/// A `div` costs 32 cycles under the C6 model, so a block holding one falls
+/// onto the exact-tail path for most of a small budget. Both paths must still
+/// stop at the same instruction with the same count.
+#[test]
+fn an_expensive_instruction_in_a_block_still_stops_at_the_right_place() {
+    for budget in 1..=40u64 {
+        let state = same_either_way(budget, |rig| {
+            rig.set_reg(6, 100);
+            rig.set_reg(7, 7);
+            rig.load(
+                RAM_BASE,
+                &[
+                    encode::addi(Gpr::new(5), Gpr::new(5), 1),
+                    encode::div(Gpr::new(8), Gpr::new(6), Gpr::new(7)),
+                    encode::addi(Gpr::new(5), Gpr::new(5), 1),
+                    encode::ebreak(),
+                ],
+            );
+        });
+        // Both paths agree, which is the claim; the exact stopping point is
+        // the previous test's subject.
+        let _ = state;
+    }
+}
+
+/// A store that raises the bus's side-band inside a block is answered inside
+/// the block, at the point `step` answers it.
+#[test]
+fn a_store_side_band_inside_a_block_is_answered_in_place() {
+    let state = same_either_way(500, |rig| {
+        rig.bus.raise_on_mmio = Some(7);
+        assert!(rig.hart.set_csr_raw(MIE, 1 << 7));
+        rig.trap_to_ebreak();
+        rig.set_reg(10, MMIO);
+        rig.load(
+            RAM_BASE,
+            &[
+                encode::addi(Gpr::new(5), Gpr::new(0), 1),
+                encode::sw(Gpr::new(10), Gpr::new(5), 0),
+                encode::addi(Gpr::new(5), Gpr::new(5), 1),
+                encode::ebreak(),
+            ],
+        );
+    });
+    // The interrupt is delivered at the store, so the `addi` after it does
+    // not run before the handler does.
+    assert_eq!(state.regs[5], 1);
+    assert_eq!(state.end, SliceEnd::Ebreak { pc: VEC });
+}
+
+/// Write an instruction over an already-executed block, emit `fence.i`, jump
+/// back in: the NEW instruction runs.
+///
+/// This is the contract's guest half. Its firmware half is the `fence.i`
+/// `lpvm-native`'s `JitBuffer::from_code` emits after a JIT publish.
+#[test]
+fn code_rewritten_and_fenced_runs_the_new_instruction() {
+    let target = RAM_BASE + 0x100;
+    let state = same_either_way(500, |rig| {
+        // The subroutine at `target`: `addi x5, x5, 1; ret`.
+        rig.load(
+            target,
+            &[
+                encode::addi(Gpr::new(5), Gpr::new(5), 1),
+                encode::jalr(Gpr::new(0), Gpr::new(1), 0),
+            ],
+        );
+        rig.set_reg(10, target);
+        rig.set_reg(11, encode::addi(Gpr::new(5), Gpr::new(5), 16));
+        rig.load(
+            RAM_BASE,
+            &[
+                // call target        -> x5 = 1, and the block is now cached
+                encode::jal(Gpr::new(1), 0x100),
+                // sw x11, 0(x10)     -> overwrite the block's first word
+                encode::sw(Gpr::new(10), Gpr::new(11), 0),
+                // fence.i            -> publish it
+                FENCE_I_WORD,
+                // call target again  -> must see +16, not +1
+                encode::jal(Gpr::new(1), 0x100 - 12),
+                encode::ebreak(),
+            ],
+        );
+    });
+    assert_eq!(
+        state.regs[5], 17,
+        "the second call must run the rewritten instruction (1 + 16)"
+    );
+    assert_eq!(state.fences_seen, 1, "the bus must have been told");
+}
+
+/// A store to a cached page that does not change the bytes disturbs nothing.
+#[test]
+fn a_store_that_changes_no_bytes_disturbs_nothing() {
+    let target = RAM_BASE + 0x100;
+    let same = encode::addi(Gpr::new(5), Gpr::new(5), 1);
+    let state = same_either_way(500, |rig| {
+        rig.load(target, &[same, encode::jalr(Gpr::new(0), Gpr::new(1), 0)]);
+        rig.set_reg(10, target);
+        rig.set_reg(11, same);
+        rig.load(
+            RAM_BASE,
+            &[
+                encode::jal(Gpr::new(1), 0x100),
+                encode::sw(Gpr::new(10), Gpr::new(11), 0),
+                encode::jal(Gpr::new(1), 0x100 - 8),
+                encode::ebreak(),
+            ],
+        );
+    });
+    assert_eq!(state.regs[5], 2);
+}
+
+/// `fence.i` is counted, reaches the bus, and flushes.
+#[test]
+fn a_fence_i_is_counted_and_flushes_the_cache() {
+    let mut rig = Rig::new();
+    rig.load(
+        RAM_BASE,
+        &[
+            encode::addi(Gpr::new(5), Gpr::new(0), 1),
+            FENCE_I_WORD,
+            encode::addi(Gpr::new(5), Gpr::new(5), 1),
+            FENCE_I_WORD,
+            encode::ebreak(),
+        ],
+    );
+    rig.run(500);
+    assert_eq!(rig.hart.fence_i_count(), 2);
+    assert_eq!(rig.bus.fences_seen, 2);
+    let stats = rig.hart.block_stats().expect("built");
+    assert_eq!(stats.flushes, 2);
+    assert_eq!(stats.hits, 0, "every block was flushed before re-use");
+}
+
+/// A plain `fence` is not a `fence.i` and must not flush anything.
+#[test]
+fn a_plain_fence_does_not_flush() {
+    let mut rig = Rig::new();
+    rig.load(
+        RAM_BASE,
+        &[
+            encode::addi(Gpr::new(5), Gpr::new(0), 1),
+            FENCE_WORD,
+            encode::addi(Gpr::new(5), Gpr::new(5), 1),
+            encode::ebreak(),
+        ],
+    );
+    rig.run(500);
+    assert_eq!(rig.hart.fence_i_count(), 0);
+    assert_eq!(rig.bus.fences_seen, 0);
+    assert_eq!(rig.hart.block_stats().expect("built").flushes, 0);
+}
+
+/// An execute watchpoint armed mid-slice takes the cache out of the loop for
+/// the rest of it: a decode-ahead fetch would otherwise take the watchpoint's
+/// trap one instruction early.
+#[test]
+fn an_execute_watchpoint_armed_mid_slice_traps_at_the_right_instruction() {
+    let guarded = RAM_BASE + 0x40;
+    let state = same_either_way(500, |rig| {
+        rig.trap_to_ebreak();
+        // esp-hal's `set_watchpoint` shape with the EXECUTE bit in place of
+        // the store bit: tcontrol = mte, tdata1 = execute | m | NAPOT match.
+        rig.set_reg(5, 0x8);
+        rig.set_reg(6, 0xC4);
+        rig.set_reg(7, (guarded & !3) | 1);
+        rig.load(
+            RAM_BASE,
+            &[
+                encode::csrrw(Gpr::new(0), Gpr::new(0), TSELECT),
+                encode::csrrw(Gpr::new(0), Gpr::new(5), TCONTROL),
+                encode::csrrw(Gpr::new(0), Gpr::new(6), TDATA1),
+                encode::csrrw(Gpr::new(0), Gpr::new(7), TDATA2),
+                encode::addi(Gpr::new(8), Gpr::new(0), 1),
+                encode::jal(Gpr::new(0), 0x40 - 20),
+                encode::ebreak(),
+            ],
+        );
+        rig.load(guarded, &[encode::addi(Gpr::new(9), Gpr::new(0), 1)]);
+    });
+    assert_eq!(state.regs[8], 1, "the instruction before the jump ran");
+    assert_eq!(
+        state.regs[9], 0,
+        "the guarded instruction must trap instead of running"
+    );
+    assert_eq!(state.end, SliceEnd::Ebreak { pc: VEC });
+}
+
+/// `--no-block-cache` really does keep the cache from ever being built.
+#[test]
+fn no_block_cache_never_builds_one() {
+    let mut rig = Rig::uncached();
+    rig.load(
+        RAM_BASE,
+        &[
+            encode::addi(Gpr::new(5), Gpr::new(0), 1),
+            encode::addi(Gpr::new(5), Gpr::new(5), 1),
+            encode::ebreak(),
+        ],
+    );
+    rig.run(500);
+    assert_eq!(rig.reg(5), 2);
+    assert!(rig.hart.block_stats().is_none());
+}
+
+/// A cloned hart — the snapshot path — starts with an empty cache. The cache
+/// is not architectural state, and the clone's bus may hold different bytes
+/// at the same addresses.
+#[test]
+fn a_cloned_hart_starts_with_an_empty_cache() {
+    let mut rig = Rig::new();
+    rig.load(
+        RAM_BASE,
+        &[encode::addi(Gpr::new(5), Gpr::new(0), 1), encode::ebreak()],
+    );
+    rig.run(500);
+    assert!(rig.hart.block_stats().is_some());
+    let clone = rig.hart.clone();
+    assert!(clone.block_stats().is_none(), "a clone caches nothing yet");
+    assert!(clone.block_cache(), "but it is still allowed to");
+}
+
+/// Changing the cycle model invalidates: a block's `max_cycles` is computed
+/// against the model it was built under.
+#[test]
+fn changing_the_cycle_model_invalidates_the_cache() {
+    let mut rig = Rig::new();
+    rig.load(
+        RAM_BASE,
+        &[encode::addi(Gpr::new(5), Gpr::new(0), 1), encode::ebreak()],
+    );
+    rig.run(500);
+    let before = rig.hart.block_stats().expect("built");
+    rig.hart.set_cycle_model(CycleModel::InstructionCount);
+    let after = rig.hart.block_stats().expect("still allocated, but empty");
+    assert_eq!(after.flushes, before.flushes + 1);
+}
+
+/// An explicit range invalidation drops only the blocks that overlap it.
+#[test]
+fn invalidating_a_range_drops_only_what_overlaps_it() {
+    let mut rig = Rig::new();
+    rig.load(
+        RAM_BASE,
+        &[
+            encode::addi(Gpr::new(5), Gpr::new(0), 1),
+            encode::jal(Gpr::new(0), 8),
+            encode::ebreak(),
+            encode::addi(Gpr::new(6), Gpr::new(0), 1),
+            encode::ebreak(),
+        ],
+    );
+    rig.run(500);
+    let before = rig.hart.block_stats().expect("built");
+    assert_eq!(before.decodes, 2, "the jump splits the run in two");
+    rig.hart.invalidate_block_range(RAM_BASE, RAM_BASE + 4);
+    let after = rig.hart.block_stats().expect("built");
+    assert_eq!(after.range_entries_dropped, 1);
+    assert_eq!(after.range_invalidations, 1);
+}
+
+/// A compressed instruction stream caches and runs identically.
+#[test]
+fn compressed_instructions_run_the_same_either_way() {
+    let state = same_either_way(500, |rig| {
+        // Four `c.addi a0, 1` (0x0505), then `ebreak`.
+        rig.load(RAM_BASE, &[0x0505_0505, 0x0505_0505, encode::ebreak()]);
+    });
+    assert_eq!(state.regs[10], 4, "four `c.addi a0, 1`");
+    assert_eq!(state.instructions, 4);
+}
+
+/// A `c.jr` (RVC quadrant 2, funct3 100) is a terminator, and the block it
+/// ends runs the same either way.
+#[test]
+fn a_compressed_return_ends_its_block() {
+    let target = RAM_BASE + 0x100;
+    let state = same_either_way(500, |rig| {
+        // `c.addi a0, 1` then `c.jr ra` (0x8082).
+        rig.load(target, &[0x8082_0505]);
+        rig.load(
+            RAM_BASE,
+            &[
+                encode::jal(Gpr::new(1), 0x100),
+                encode::jal(Gpr::new(1), 0x100 - 4),
+                encode::ebreak(),
+            ],
+        );
+    });
+    assert_eq!(state.regs[10], 2);
 }

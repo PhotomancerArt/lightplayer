@@ -56,15 +56,22 @@
 //! cost: there is no measurement behind a number for those, and an invented
 //! one would be indistinguishable from a measured one six months from now.
 
+mod block;
 pub mod csr;
 pub mod trap;
 pub mod trigger;
 
+extern crate alloc;
+
 use core::marker::PhantomData;
 
+use alloc::{boxed::Box, vec::Vec};
+
+use lp_emu_core::block::{Block, BlockCache, BlockStats};
 use lp_emu_core::{Bus, CycleModel, InstClass, MemoryAccessKind, MemoryError};
 
 use crate::emu::{EmulatorError, FpRegs, LoggingDisabled, decode_execute};
+use block::{Class, MAX_BLOCK_SLOTS, RvSlot};
 use csr::CsrFile;
 use trap::Exception;
 use trigger::TriggerUnit;
@@ -79,6 +86,16 @@ const OPCODE_SYSTEM: u8 = 0x73;
 /// Opcode `STORE` — used only to tell a misaligned *store* from a
 /// misaligned *load*, which [`MemoryError::Unaligned`] does not carry.
 const OPCODE_STORE: u8 = 0x23;
+
+/// `fence.i` — `MISC-MEM` with `funct3 = 1`, `imm = 0x001`, `rs1 = rd = 0`
+/// (spec, Zifencei). The whole encoding is fixed, so one compare identifies
+/// it.
+///
+/// This is the block cache's invalidation signal, and the emulator's half of
+/// a contract whose other half is in the firmware: `lpvm-native`'s
+/// `JitBuffer::from_code` emits a `fence.i` after every JIT publish, which is
+/// what real silicon requires anyway. See [`MachineHart::on_fence_i`].
+const FENCE_I: u32 = 0x0000_100f;
 
 /// `funct12` of `ecall` / `ebreak` / `mret` / `wfi` (spec §3.3).
 const FUNCT12_ECALL: u32 = 0x000;
@@ -184,6 +201,24 @@ pub struct MachineHart<B: Bus> {
     /// the call, and the three F CSRs are illegal here. Held rather than
     /// constructed per instruction so the slice loop stays a loop.
     fp_unused: FpRegs,
+    /// The pre-decoded block cache, built on first use.
+    ///
+    /// **Not architectural state.** Nothing observable may depend on a hit or
+    /// a miss; it is absent from a snapshot, a clone starts empty, and
+    /// `--no-block-cache` must produce byte-identical everything. See
+    /// [`lp_emu_core::block`].
+    cache: Option<Box<BlockCache<RvSlot<B>>>>,
+    /// Configuration, not state: whether this hart may use a block cache at
+    /// all ([`MachineHart::set_block_cache`]).
+    block_cache: bool,
+    /// How many `fence.i` instructions the guest has retired. A run of the
+    /// product's firmware should show one per shader compile; a zero on a run
+    /// that compiled a shader means the firmware's fence is not reaching the
+    /// machine.
+    fence_i_count: u64,
+    /// A flush asked for while the cache was lifted out of the hart — see
+    /// [`MachineHart::drain_block_flush`].
+    block_flush_pending: bool,
     _bus: PhantomData<fn(&mut B)>,
 }
 
@@ -202,6 +237,15 @@ impl<B: Bus> Clone for MachineHart<B> {
             external: self.external,
             allow_unaligned: self.allow_unaligned,
             fp_unused: self.fp_unused.clone(),
+            // The block cache is NOT copied. It is not architectural state,
+            // so a cloned hart — the snapshot path — starts with an empty one
+            // and re-decodes what it needs. Copying it would be a correctness
+            // hazard rather than an optimisation: the clone's bus may hold
+            // different bytes at the same addresses.
+            cache: None,
+            block_cache: self.block_cache,
+            fence_i_count: self.fence_i_count,
+            block_flush_pending: false,
             _bus: PhantomData,
         }
     }
@@ -242,6 +286,10 @@ impl<B: Bus> MachineHart<B> {
             external: None,
             allow_unaligned: false,
             fp_unused: FpRegs::new(),
+            cache: None,
+            block_cache: true,
+            fence_i_count: 0,
+            block_flush_pending: false,
             _bus: PhantomData,
         }
     }
@@ -294,9 +342,117 @@ impl<B: Bus> MachineHart<B> {
         self.cycle_model
     }
 
+    /// Change the per-instruction cost model.
+    ///
+    /// Invalidates the block cache: a cached block carries the most cycles it
+    /// can charge *under the model it was built against*
+    /// ([`lp_emu_core::block::Block::max_cycles`]), and that bound is what
+    /// lets a block run whole with no per-instruction deadline compare. A
+    /// stale bound would let a block run past a deadline it should have
+    /// stopped inside.
     #[inline]
     pub fn set_cycle_model(&mut self, model: CycleModel) {
         self.cycle_model = model;
+        self.invalidate_blocks();
+    }
+
+    // --- the block cache ---------------------------------------------------
+
+    /// Turn the pre-decoded block cache on or off. Default: on.
+    ///
+    /// Off is `--no-block-cache`: the bring-up tool, the bisection tool, and
+    /// the identity oracle this milestone leans on hardest — the same binary
+    /// with the cache off must print identical everything.
+    ///
+    /// It is also how [`lp_emu_core::block`]'s one architectural exclusion is
+    /// expressed: an ESP32-C6 booting `--boot rom-up` runs the real mask ROM
+    /// and the real ESP-IDF second-stage bootloader as *guest* code, and
+    /// those copy segments into RAM and jump into them without ever emitting
+    /// a `fence.i`. We own neither, so the machine turns the cache off there
+    /// (M5 MD13).
+    #[inline]
+    pub fn set_block_cache(&mut self, on: bool) {
+        self.block_cache = on;
+        if !on {
+            self.cache = None;
+        }
+    }
+
+    #[inline]
+    #[must_use]
+    pub const fn block_cache(&self) -> bool {
+        self.block_cache
+    }
+
+    /// What the cache did, or `None` when it was never built.
+    #[inline]
+    #[must_use]
+    pub fn block_stats(&self) -> Option<BlockStats> {
+        self.cache.as_ref().map(|c| c.stats())
+    }
+
+    /// `fence.i` instructions the guest has retired.
+    #[inline]
+    #[must_use]
+    pub const fn fence_i_count(&self) -> u64 {
+        self.fence_i_count
+    }
+
+    /// Forget every cached block.
+    ///
+    /// For a machine that has written guest code from the host side with no
+    /// guest `fence.i` behind it and cannot name the window: a snapshot
+    /// restore, a reboot.
+    #[inline]
+    pub fn invalidate_blocks(&mut self) {
+        match self.cache.as_mut() {
+            Some(cache) => cache.invalidate_all(),
+            // The cache is lifted out of `self` for the whole of a slice
+            // (see [`MachineHart::run_slice_cached`]), so a flush asked for
+            // from inside one is recorded and applied where the cache is.
+            None => self.block_flush_pending = true,
+        }
+    }
+
+    /// Forget every cached block whose instructions overlap `[lo, hi)`.
+    ///
+    /// The emulator-side code-writer funnels: a flash-cache MMU refill and a
+    /// ROM-hook `ebreak` patch both write guest code that no guest `fence.i`
+    /// follows, and both know exactly which window they wrote. Called at a
+    /// slice boundary, where the cache is back in the hart; asked for from
+    /// inside a slice it degrades to a whole flush, which is conservative in
+    /// the safe direction.
+    #[inline]
+    pub fn invalidate_block_range(&mut self, lo: u32, hi: u32) {
+        match self.cache.as_mut() {
+            Some(cache) => cache.invalidate_range(lo, hi),
+            None => self.block_flush_pending = true,
+        }
+    }
+
+    /// The `fence.i` hook: the guest has published instructions, so every
+    /// pre-decoded block is suspect.
+    ///
+    /// A whole-cache flush rather than a range (M5 MD12). It fires once per
+    /// shader compile — a handful of times in a render run — so range
+    /// precision would buy nothing measurable and would cost correctness
+    /// surface. The bus is told too, so a `--strict-bus` run can clear its
+    /// "written but not yet published" marks.
+    #[inline]
+    fn on_fence_i(&mut self, bus: &mut B) {
+        self.fence_i_count += 1;
+        self.invalidate_blocks();
+        bus.note_fence_i();
+    }
+
+    /// Apply a flush that was asked for while the cache was lifted out of the
+    /// hart. `fence.i` is the reason this exists.
+    #[inline]
+    fn drain_block_flush(&mut self, cache: &mut BlockCache<RvSlot<B>>) {
+        if self.block_flush_pending {
+            self.block_flush_pending = false;
+            cache.invalidate_all();
+        }
     }
 
     /// See [`MachineHart::allow_unaligned`].
@@ -470,39 +626,232 @@ impl<B: Bus> MachineHart<B> {
         // instead of a subtract and a compare. `saturating_add` keeps a
         // `u64::MAX` budget meaning "never", as the subtraction form did.
         let end = self.cycle_count.saturating_add(budget);
+
+        // A block cache decodes ahead and then executes without fetching
+        // again, so it may only run over a bus whose fetches have no
+        // consequence beyond returning the word — see
+        // [`Bus::fetch_is_pure`]. Read once per slice, and re-read whenever
+        // an instruction that could have changed the answer runs.
+        if self.block_cache && bus.fetch_is_pure() {
+            self.run_slice_cached(bus, end)
+        } else {
+            self.run_slice_stepping(bus, end)
+        }
+    }
+
+    /// The slice loop as it has always been: fetch, step, charge, repeat.
+    ///
+    /// Still the whole of `--no-block-cache`, of every bus that does not
+    /// claim [`Bus::fetch_is_pure`], and of any address the block decoder
+    /// refuses. The cached loop reuses [`MachineHart::step_once`] for exactly
+    /// those addresses, so there is one copy of the per-instruction path and
+    /// not two that can drift.
+    fn run_slice_stepping(&mut self, bus: &mut B, end: u64) -> SliceEnd {
         loop {
             if self.cycle_count >= end {
                 return SliceEnd::BudgetExhausted;
             }
+            if let Some(over) = self.step_once(bus) {
+                return over;
+            }
+        }
+    }
 
+    /// One instruction: fetch it, run it, charge what the bus billed.
+    ///
+    /// `None` means "keep going"; `Some` ends the slice.
+    #[inline(always)]
+    fn step_once(&mut self, bus: &mut B) -> Option<SliceEnd> {
+        let pc = self.pc;
+        // The bus's trace and spin detector are only worth having if the
+        // pc and the cycle on each line are this instruction's.
+        bus.set_issuing(pc, self.cycle_count);
+        let inst_word = match bus.fetch_instruction(pc) {
+            Ok(word) => word,
+            Err(e) => {
+                // A fetch that faulted still went to memory, so whatever
+                // the bus charged for it is charged here rather than
+                // carried into the next instruction's total.
+                self.charge_memory(bus);
+                return match self.deliver_fetch_error(e, pc) {
+                    Ok(()) => None,
+                    Err(fault) => Some(SliceEnd::Fault(fault)),
+                };
+            }
+        };
+
+        let outcome = self.step(bus, pc, inst_word);
+        // Drained after the instruction, so the fetch and any load or
+        // store it made are charged together, once, in the same place
+        // `charge` bills the instruction's class.
+        self.charge_memory(bus);
+        match outcome {
+            StepOutcome::Continue => None,
+            StepOutcome::End(end) => Some(end),
+        }
+    }
+
+    /// The same slice, run out of pre-decoded blocks.
+    ///
+    /// The cache is lifted out of `self` for the whole slice so the arena and
+    /// the hart's registers are two disjoint borrows rather than one; that is
+    /// two pointer moves per slice, against ~419 instructions per slice on
+    /// `render-basic`.
+    fn run_slice_cached(&mut self, bus: &mut B, end: u64) -> SliceEnd {
+        let mut cache = self
+            .cache
+            .take()
+            .unwrap_or_else(|| Box::new(BlockCache::with_defaults()));
+        self.drain_block_flush(&mut cache);
+        let out = self.run_blocks(&mut cache, bus, end);
+        self.cache = Some(cache);
+        out
+    }
+
+    fn run_blocks(&mut self, cache: &mut BlockCache<RvSlot<B>>, bus: &mut B, end: u64) -> SliceEnd {
+        loop {
+            if self.cycle_count >= end {
+                return SliceEnd::BudgetExhausted;
+            }
             let pc = self.pc;
-            // The bus's trace and spin detector are only worth having if the
-            // pc and the cycle on each line are this instruction's.
-            bus.set_issuing(pc, self.cycle_count);
-            let inst_word = match bus.fetch_instruction(pc) {
-                Ok(word) => word,
-                Err(e) => {
-                    // A fetch that faulted still went to memory, so whatever
-                    // the bus charged for it is charged here rather than
-                    // carried into the next instruction's total.
-                    self.charge_memory(bus);
-                    match self.deliver_fetch_error(e, pc) {
-                        Ok(()) => continue,
-                        Err(fault) => return SliceEnd::Fault(fault),
+            let block = match cache.lookup(pc) {
+                Some(block) => block,
+                None => {
+                    let model = self.cycle_model;
+                    match cache.build(pc, model, |out| decode_block(bus, pc, out)) {
+                        Some(block) => block,
+                        None => {
+                            // Nothing cacheable starts here — a `SYSTEM`, a
+                            // fence, an atomic, an FP opcode, an encoding the
+                            // executors reject, or a fetch that faults. Run
+                            // exactly one instruction the way the
+                            // single-stepping loop always has.
+                            if let Some(over) = self.step_once(bus) {
+                                self.drain_block_flush(cache);
+                                return over;
+                            }
+                            // That instruction may have been a `fence.i`, and
+                            // the cache it wanted flushed is out here rather
+                            // than in the hart.
+                            self.drain_block_flush(cache);
+                            // It may also have been the CSR write
+                            // that arms an execute watchpoint, which is the
+                            // one thing that can make decoding ahead unsafe
+                            // in the middle of a slice.
+                            if !bus.fetch_is_pure() {
+                                cache.invalidate_all();
+                                return self.run_slice_stepping(bus, end);
+                            }
+                            continue;
+                        }
                     }
                 }
             };
+            // `--strict-bus` only: these instructions are about to run
+            // without the bus seeing a fetch for them, so the missing-fence
+            // checker is told directly. Empty and inlined away otherwise.
+            bus.note_cached_execute(block.pc, block.bytes);
 
-            let outcome = self.step(bus, pc, inst_word);
-            // Drained after the instruction, so the fetch and any load or
-            // store it made are charged together, once, in the same place
-            // `charge` bills the instruction's class.
-            self.charge_memory(bus);
-            match outcome {
-                StepOutcome::Continue => {}
-                StepOutcome::End(end) => return end,
+            // The budget rule (M5 MD3). `max_cycles` is what the block can
+            // charge at most, so a block that fits leaves every interior
+            // instruction boundary strictly below `end` and needs no
+            // per-instruction compare; one that does not fit runs with the
+            // compare the single-stepping loop uses.
+            let whole = self.cycle_count.saturating_add(u64::from(block.max_cycles)) <= end;
+            if let Some(over) = self.run_block(cache, bus, &block, whole, end) {
+                return over;
             }
         }
+    }
+
+    /// Run one block's slots.
+    ///
+    /// Every per-instruction hook [`MachineHart::step`] runs today runs here,
+    /// at the same point and in the same order: `set_issuing`, execution,
+    /// `instruction_count`, `charge`, the `pc` update, then — for a store or
+    /// an atomic — the bus side-band and the yield. The only thing that
+    /// changed is how the handler was found.
+    ///
+    /// `None` means the block ended normally and the outer loop should look
+    /// up the next one.
+    fn run_block(
+        &mut self,
+        cache: &mut BlockCache<RvSlot<B>>,
+        bus: &mut B,
+        block: &Block,
+        whole: bool,
+        end: u64,
+    ) -> Option<SliceEnd> {
+        let mut pc = block.pc;
+        let mut ran = 0u32;
+        for i in 0..block.len {
+            if !whole && self.cycle_count >= end {
+                cache.note_slots_run(ran);
+                return Some(SliceEnd::BudgetExhausted);
+            }
+            let slot = cache.slot(block.start + i);
+            // F10: per slot, not per block. A trap in the middle of a block
+            // would otherwise report the block's first `pc` to the bus's
+            // trace and to its unmapped-site dedup, which is keyed on
+            // `(pc, address)`.
+            bus.set_issuing(pc, self.cycle_count);
+
+            let result = match (slot.handler)(slot.word, pc, &mut self.regs, bus) {
+                Ok(result) => result,
+                Err(e) => {
+                    self.charge(InstClass::System);
+                    cache.note_slots_run(ran);
+                    let out = match self.deliver_executor_error(e, pc, slot.word) {
+                        Ok(()) => None,
+                        Err(fault) => Some(SliceEnd::Fault(fault)),
+                    };
+                    self.charge_memory(bus);
+                    return out;
+                }
+            };
+
+            debug_assert!(
+                !result.should_halt && !result.syscall,
+                "the hart handles ecall/ebreak itself; a block never holds one"
+            );
+
+            self.instruction_count += 1;
+            self.charge(result.class);
+            self.pc = result
+                .new_pc
+                .unwrap_or(pc.wrapping_add(u32::from(result.inst_size)));
+            ran += 1;
+
+            // (c) an MMIO store may have changed interrupt state, and it may
+            // have changed something only the machine can act on.
+            if matches!(result.class, InstClass::Store | InstClass::Atomic) {
+                if bus.take_sideband() {
+                    self.resample_external(bus);
+                }
+                if bus.take_yield() {
+                    self.charge_memory(bus);
+                    cache.note_slots_run(ran);
+                    return Some(SliceEnd::BusYield);
+                }
+            }
+            self.charge_memory(bus);
+
+            // Defence in depth, and the reason a classification mistake can
+            // only make a block shorter. Anything that moved the hart off the
+            // decoder's straight line — a taken branch, a jump, a trap, an
+            // interrupt delivered by the side-band above, an instruction
+            // whose width the executor disagrees about — leaves the block and
+            // is looked up again by pc. In a correct build this fires exactly
+            // at a taken terminator.
+            let straight_on = pc.wrapping_add(u32::from(slot.width));
+            if self.pc != straight_on {
+                cache.note_slots_run(ran);
+                return None;
+            }
+            pc = straight_on;
+        }
+        cache.note_slots_run(ran);
+        None
     }
 
     /// One instruction: the hart's own `SYSTEM` handling, the FP rejection,
@@ -555,15 +904,22 @@ impl<B: Bus> MachineHart<B> {
             .new_pc
             .unwrap_or(pc.wrapping_add(u32::from(result.inst_size)));
 
-        // (c) an MMIO store may have changed interrupt state, and it may
-        // have changed something only the machine can act on.
-        if matches!(result.class, InstClass::Store | InstClass::Atomic) {
-            if bus.take_sideband() {
-                self.resample_external(bus);
+        match result.class {
+            // (c) an MMIO store may have changed interrupt state, and it may
+            // have changed something only the machine can act on.
+            InstClass::Store | InstClass::Atomic => {
+                if bus.take_sideband() {
+                    self.resample_external(bus);
+                }
+                if bus.take_yield() {
+                    return StepOutcome::End(SliceEnd::BusYield);
+                }
             }
-            if bus.take_yield() {
-                return StepOutcome::End(SliceEnd::BusYield);
-            }
+            // The guest has published instructions. A fence is never inside a
+            // block (M5 MD2), so this hook is always reached on the
+            // single-stepping path and always at a block boundary.
+            InstClass::Fence if inst_word == FENCE_I => self.on_fence_i(bus),
+            _ => {}
         }
 
         StepOutcome::Continue
@@ -899,6 +1255,48 @@ impl<B: Bus> MachineHart<B> {
             }
         }
         Ok(())
+    }
+}
+
+/// Build one block's slots by walking forward from `pc`.
+///
+/// Appends nothing when the very first instruction cannot be cached, which is
+/// how "this address is not cacheable" is said; the caller then single-steps
+/// it, exactly as it always did.
+///
+/// The walk fetches through the bus, which is why the whole cached path is
+/// gated on [`Bus::fetch_is_pure`]: these fetches happen before the guest
+/// reaches the instructions and must charge nothing and trap nothing. A fetch
+/// that *fails* simply ends the block — the address is left uncached and the
+/// single-stepping path takes the fault, at the right moment, with the right
+/// `pc`.
+///
+/// A block may cross a page or a region boundary. It does not need to be
+/// stopped at one: [`BlockCache::invalidate_range`] compares byte spans, so a
+/// block that reaches into a window an emulator-side writer touched is
+/// dropped whether it started in that window or not.
+fn decode_block<B: Bus>(bus: &mut B, pc: u32, out: &mut Vec<RvSlot<B>>) {
+    let mut at = pc;
+    for _ in 0..MAX_BLOCK_SLOTS {
+        let Ok(word) = bus.fetch_instruction(at) else {
+            return;
+        };
+        match block::classify::<B>(word) {
+            Class::Body(slot) => {
+                let width = u32::from(slot.width);
+                out.push(slot);
+                match at.checked_add(width) {
+                    Some(next) => at = next,
+                    // A block that would wrap the address space ends here.
+                    None => return,
+                }
+            }
+            Class::Terminator(slot) => {
+                out.push(slot);
+                return;
+            }
+            Class::Refused => return,
+        }
     }
 }
 

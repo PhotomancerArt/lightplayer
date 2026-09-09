@@ -15,7 +15,7 @@ use lp_riscv_inst::Gpr;
 
 /// Decode and execute compressed instructions (16-bit, bits [1:0] != 0b11).
 #[inline(always)]
-pub(super) fn decode_execute_compressed<M: LoggingMode, B: Bus>(
+pub(crate) fn decode_execute_compressed<M: LoggingMode, B: Bus>(
     inst_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
