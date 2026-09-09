@@ -213,6 +213,17 @@ genuinely fits none of these, and define it here in one line.
   landing on a different test each time. The fix is a shape check — ask
   whether the frame *could* answer this request before asking whether
   its number matches.
+- **`write-ordering`** — a single batch of writes to one store contains
+  both a delete and a persist that resolve to the same key, and applying
+  the batch in a fixed within-batch order (every persist, then every
+  delete) lets the delete win over a persist for the identity the same
+  batch just wrote — discarding a record the batch itself believed was
+  current.
+- **`open-path-wait-without-wakeup`** — a wait for a resource assumes its
+  owner (the world, another process) will eventually supply the event
+  that ends it, but the resource is actually owned by the waiting program
+  itself, so nothing outside the wait can ever produce the wake-up and
+  the hold is indistinguishable from "any second now".
 
 ## Index
 
@@ -323,6 +334,8 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| open-path-wait-without-wakeup | 2026-09-08 | [a-held-lens-waited-for-a-sim-nobody-was-going-to-start](2026-09-08-a-held-lens-waited-for-a-sim-nobody-was-going-to-start.md) | fixed | lpa-studio-core studio_controller (try_pending_device_lens, resolve_open_device, seed_device_sim_records) — prod outage, no project could open |
+| write-ordering | 2026-09-07 | [merge-delete-erased-the-merged-row](2026-09-07-merge-delete-erased-the-merged-row.md) | fixed | lpa-devices roster (reconcile_identities) + lpa-studio-core studio_controller (settle_device_records) |
 | toolchain-miscompile | 2026-09-07 | [metal-drops-atomic-guarded-by-loop-exit-sum](2026-09-07-metal-drops-atomic-guarded-by-loop-exit-sum.md) | fixed | lp-gfx-wgpu loop_bound_pass → Metal: a conditional `atomicAdd` guarded by the loop's pre-store exit sum never executes; storing first and reading back fixes every shape |
 | contract-gap | 2026-09-06 | [gpu-tier-executes-unbounded-shaders](2026-09-06-gpu-tier-executes-unbounded-shaders.md) | fixed | lp-gfx-wgpu GPU tiers + catalog: `fault-demo`'s `while (true)` has no fuel meter on a GPU — the driver watchdog resets the device, corrupts sibling surfaces, and can take the OS down |
 | nondeterministic-capture | 2026-09-06 | [heap-budget-capture-truncated-by-cycle-cap](2026-09-06-heap-budget-capture-truncated-by-cycle-cap.md) | fixed | scripts/heap-budget-check.sh: the startup capture hit `--max-cycles` mid-compile and recorded the cut as a figure |
