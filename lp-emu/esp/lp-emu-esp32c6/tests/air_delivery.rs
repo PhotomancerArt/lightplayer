@@ -650,3 +650,290 @@ fn the_descriptor_words_undetermined_bits_change_nothing() {
         "if these ever agree, the guest has stopped reading [23:12]"
     );
 }
+
+// ---------------------------------------------------------------------------
+// M4 U1 — the TX-completion pass.
+//
+// The experiment `docs/debt/emu-c6-radio-tx-never-completes.md` asks for, run
+// against **the state a real completion would find** rather than against the
+// machine as it sits: M4 P2's lesson (Appendix B.5) is that a sweep with
+// nothing to find measures the experiment. `test_espnow`'s own
+// `[test_espnow] tx simulated_button … event=N` line and `--break-at
+// lmacTxDone` are the two oracles.
+// ---------------------------------------------------------------------------
+
+/// The TX slot's PLCP0, for reading back the descriptor the blob armed.
+const TX_PLCP0: u32 = 0x4d6c;
+
+/// A machine run past its own arming write (~1,036 ms) with the air armed —
+/// one frame handed to the MAC, the blob waiting for a completion.
+fn a_machine_that_armed_a_frame(elf: &str, buf: Option<&SharedBuffer>) -> Esp32C6Machine {
+    let mut m = build(elf, "a0:f2:62:87:b4:8c", buf, TxLogSink::Off);
+    m.arm_air(ParticipantId(0));
+    m.run_until(&until(ms(1_100)));
+    assert!(
+        m.usb_sj().text().contains("[test_espnow] radio ready"),
+        "the radio never came up"
+    );
+    m
+}
+
+/// The descriptor PLCP0 points at, and a check that the go strobe is there —
+/// i.e. that this machine really did arm a frame.
+fn armed_descriptor(m: &mut Esp32C6Machine) -> u32 {
+    let plcp0 = m.peek_word(WIFI_MAC + TX_PLCP0).expect("the PLCP0 word");
+    assert_eq!(
+        plcp0 & 0xc000_0000,
+        0xc000_0000,
+        "no go strobe in PLCP0 ({plcp0:#010x}): this machine armed nothing"
+    );
+    0x4080_0000 | (plcp0 & 0x000f_ffff)
+}
+
+fn raise_mac(m: &mut Esp32C6Machine, bits: u32) {
+    let i = m.bus.peripheral_index("WIFI_MAC").expect("the radio window");
+    m.bus
+        .with_peripheral::<lp_emu_esp32c6::periph::wifi_stub::WifiStub, _>(i, |w, _| {
+            w.raise_event(bits)
+        });
+    m.bus
+        .irq
+        .set_level(lp_emu_esp32c6::regs::source::WIFI_MAC, true);
+}
+
+fn raise_pwr(m: &mut Esp32C6Machine, bits: u32) {
+    let i = m.bus.peripheral_index("WIFI_PWR").expect("the PWR window");
+    m.bus
+        .with_peripheral::<lp_emu_esp32c6::periph::wifi_stub::WifiStub, _>(i, |w, _| {
+            w.raise_event(bits)
+        });
+    m.bus
+        .irq
+        .set_level(lp_emu_esp32c6::regs::source::WIFI_PWR, true);
+}
+
+/// A trace line's `pc=0x…`, symbolized against the image.
+fn pc_of(line: &str) -> Option<u32> {
+    let rest = line.split("pc=0x").nth(1)?;
+    u32::from_str_radix(rest.get(..8)?, 16).ok()
+}
+
+/// **Where the wedge is.** M4 P0 §3 measured that the guest stops making
+/// progress after the arming write — no `wfi`, no MMIO, 160 M instructions a
+/// second — and called it "a spin on RAM" without saying where. The frame
+/// pointer chain says where.
+#[test]
+#[ignore = "needs a test_espnow ELF in LP_EMU_C6_ESPNOW_ELF"]
+fn u1_where_the_guest_is_wedged() {
+    let Some(elf) = espnow_elf() else { return };
+    let mut m = build(&elf, "a0:f2:62:87:b4:8c", None, TxLogSink::Off);
+    m.arm_air(ParticipantId(0));
+    for at in [900u64, 1_030, 1_040, 1_100, 1_500, 2_000] {
+        m.run_until(&until(ms(at)));
+        println!("\n=== at {at} ms, {} instructions ===", m.instructions());
+        for (i, (addr, sym)) in m.backtrace().into_iter().enumerate() {
+            println!("  #{i:<2} {addr:#010x}  {sym}");
+        }
+        let regs = m.registers();
+        let named = ["zero", "ra", "sp", "gp", "tp", "t0", "t1", "t2", "s0", "s1"];
+        for (i, v) in regs.iter().enumerate().take(18) {
+            let name = named.get(i).copied().unwrap_or("");
+            let sym = m.symbolize(*v).unwrap_or_default();
+            println!("  x{i:<2} {name:<5} {v:#010x} {sym}");
+        }
+    }
+}
+
+/// One sweep candidate: a register to put `bits` in before the raise.
+#[derive(Clone, Copy, Debug)]
+struct Candidate {
+    block: &'static str,
+    off: u32,
+    bits: u32,
+}
+
+/// The registers this pass sweeps, and why each is a candidate:
+///
+/// - `WIFI_MAC+0x4c48` — the event word M4 P1 swept with an empty RX ring.
+/// - `WIFI_MAC+0x4c34` — **never swept.** The ISR reads it immediately after
+///   the event word (`hal_mac_interrupt_get_bsscolor+0x4`) and clears through
+///   `+0x4c38`: the shape of a second event register, and P1 read its zero as
+///   scenery rather than as a candidate.
+/// - `WIFI_PWR+0x37b0` — the PWR block's event word.
+/// - `WIFI_PWR+0x37ac` — read beside it by `pwr_hal_get_intr_raw_signal+0x4`
+///   and never cleared: a raw-signal twin.
+const SWEPT_REGISTERS: [(&str, u32); 4] = [
+    ("WIFI_MAC", 0x4c48),
+    ("WIFI_MAC", 0x4c34),
+    ("WIFI_PWR", 0x37b0),
+    ("WIFI_PWR", 0x37ac),
+];
+
+/// What one candidate did.
+#[derive(Debug)]
+struct Row {
+    candidate: Candidate,
+    instructions: u64,
+    tx_done: bool,
+    tx_line: bool,
+    /// The first access to either radio block, after the raise, that is not
+    /// one of the four reads and two writes the ISR always makes — the "next
+    /// register read" the brief asks each row to name.
+    novel: Option<String>,
+}
+
+/// The six accesses every ISR entry makes, whatever it is told. Anything else
+/// is a path this candidate opened.
+const ISR_STAPLES: [&str; 6] = ["+0x4c48", "+0x4c34", "+0x37b0", "+0x37ac", "+0x4c4c", "+0x4c38"];
+
+/// Run one candidate to the oracles. `clear_owner` clears `owner` on the TX
+/// descriptor first — the `lldesc` convention for "the hardware is done".
+fn sweep_one(elf: &str, candidate: Candidate, clear_owner: bool) -> Row {
+    let buf = SharedBuffer::new();
+    let mut m = a_machine_that_armed_a_frame(elf, Some(&buf));
+    if clear_owner {
+        let desc = armed_descriptor(&mut m);
+        let dw0 = m.peek_word(desc).expect("the descriptor word");
+        m.poke_word(desc, dw0 & !(1 << 31));
+    }
+    let _ = m.break_at("lmacTxDone");
+    let mark = buf.lines().len();
+    let (block, off) = (candidate.block, candidate.off);
+    let i = m.bus.peripheral_index(block).expect("the block");
+    m.bus
+        .with_peripheral::<lp_emu_esp32c6::periph::wifi_stub::WifiStub, _>(i, |w, _| {
+            w.raise_event(0)
+        });
+    let base = if block == "WIFI_MAC" {
+        WIFI_MAC
+    } else {
+        0x600a_9900
+    };
+    m.poke_word(base + off, candidate.bits);
+    m.bus
+        .irq
+        .set_level(lp_emu_esp32c6::regs::source::WIFI_MAC, true);
+    let outcome = m.run_until(&until(ms(1_400)));
+    let lines = buf.lines();
+    let novel = lines
+        .iter()
+        .skip(mark)
+        .find(|l| {
+            (l.contains(" R4 ") || l.contains(" W4 "))
+                && !ISR_STAPLES.iter().any(|s| l.contains(s))
+        })
+        .map(|l| {
+            let sym = pc_of(l).and_then(|pc| m.symbolize(pc)).unwrap_or_default();
+            let short = l.split(" R4 ").last().unwrap_or(l);
+            let short = short.split(" W4 ").last().unwrap_or(short);
+            format!("{short}  pc={:#010x} {sym}", pc_of(l).unwrap_or(0))
+        });
+    Row {
+        candidate,
+        instructions: m.instructions(),
+        tx_done: matches!(outcome, Outcome::Breakpoint { .. }),
+        tx_line: m
+            .usb_sj()
+            .text()
+            .contains("[test_espnow] tx simulated_button"),
+        novel,
+    }
+}
+
+fn print_rows(rows: &[Row]) {
+    println!(
+        "{:<10} {:<8} {:>12}  {:<8} {:<8}  next-novel-access",
+        "block", "off", "bits", "lmacTxDone", "tx-line"
+    );
+    for r in rows {
+        println!(
+            "{:<10} +{:#06x} {:#012x}  {:<8} {:<8}  {}",
+            r.candidate.block,
+            r.candidate.off,
+            r.candidate.bits,
+            r.tx_done,
+            r.tx_line,
+            r.novel.as_deref().unwrap_or("-")
+        );
+    }
+    let distinct: std::collections::BTreeSet<u64> = rows.iter().map(|r| r.instructions).collect();
+    println!(
+        "{} candidates, {} distinct instruction counts: {:?}",
+        rows.len(),
+        distinct.len(),
+        distinct
+    );
+}
+
+/// **Method 2, the sweep.** One bit at a time in each of the four registers
+/// the ISR touches, then the enable mask `hal_init` programmed
+/// (`WIFI_MAC+0x4c40 = 0x19a879e0`) and its own bits, against both oracles.
+#[test]
+#[ignore = "needs a test_espnow ELF in LP_EMU_C6_ESPNOW_ELF"]
+fn u1_sweep_every_event_bit_after_an_armed_tx() {
+    let Some(elf) = espnow_elf() else { return };
+    let mut rows = Vec::new();
+    for (block, off) in SWEPT_REGISTERS {
+        for n in 0..32u32 {
+            rows.push(sweep_one(
+                &elf,
+                Candidate {
+                    block,
+                    off,
+                    bits: 1 << n,
+                },
+                false,
+            ));
+        }
+        rows.push(sweep_one(
+            &elf,
+            Candidate {
+                block,
+                off,
+                bits: 0xffff_ffff,
+            },
+            false,
+        ));
+    }
+    print_rows(&rows);
+    let hits: Vec<&Row> = rows.iter().filter(|r| r.tx_done || r.tx_line).collect();
+    println!("candidates that reached an oracle: {hits:?}");
+}
+
+/// **Method 1.** What the blob's ISR reads when source 0 is raised on a
+/// machine that has *armed a frame*, with the TX descriptor as the blob left
+/// it and with `owner` cleared — the `lldesc` convention for "the hardware is
+/// done with this one".
+#[test]
+#[ignore = "needs a test_espnow ELF in LP_EMU_C6_ESPNOW_ELF"]
+fn u1_what_the_isr_reads_after_an_armed_tx() {
+    let Some(elf) = espnow_elf() else { return };
+    for (label, clear_owner) in [("as armed", false), ("owner cleared", true)] {
+        let buf = SharedBuffer::new();
+        let mut m = a_machine_that_armed_a_frame(&elf, Some(&buf));
+        let desc = armed_descriptor(&mut m);
+        let dw0 = m.peek_word(desc).expect("the descriptor word");
+        println!("\n=== {label}: descriptor {desc:#010x} dw0={dw0:#010x} ===");
+        if clear_owner {
+            m.poke_word(desc, dw0 & !(1 << 31));
+        }
+        let before = m.instructions();
+        let mark = buf.lines().len();
+        let _ = m.break_at("lmacTxDone");
+        raise_mac(&mut m, 0xffff_ffff);
+        let outcome = m.run_until(&until(ms(1_120)));
+        let lines = buf.lines();
+        for line in lines.iter().skip(mark).take(60) {
+            let sym = pc_of(line)
+                .and_then(|pc| m.symbolize(pc))
+                .unwrap_or_default();
+            println!("{line}   {sym}");
+        }
+        println!(
+            "{label}: {} lines, {} instructions, outcome={outcome:?}",
+            lines.len() - mark,
+            m.instructions() - before
+        );
+        println!("console: {:?}", m.usb_sj().text());
+    }
+}

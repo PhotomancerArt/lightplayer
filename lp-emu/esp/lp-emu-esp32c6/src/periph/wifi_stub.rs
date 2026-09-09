@@ -722,6 +722,37 @@ impl WifiStub {
         self.rx_int_event_bits = bits;
     }
 
+    /// Put `bits` in this block's own interrupt **event** word — the MAC's
+    /// [`MAC_INT_EVENT_OFFSET`] or the PWR block's [`PWR_INT_EVENT_OFFSET`]
+    /// — without touching the RX cursors.
+    ///
+    /// **The experiment seam for `docs/debt/emu-c6-radio-tx-never-completes.md`,
+    /// and nothing in this emulator calls it.** A delivery into the RX ring
+    /// goes through [`Self::raise_rx_interrupt`], which is gated on a frame
+    /// actually landing in a descriptor; this one is gated on nothing, so it
+    /// exists for `tests/air_delivery.rs`'s sweeps and for no other reason.
+    /// The caller raises the source line itself, for the same reason
+    /// [`Self::raise_rx_interrupt`]'s does.
+    pub fn raise_event(&mut self, bits: u32) {
+        let off = match self.name {
+            "WIFI_MAC" => MAC_INT_EVENT_OFFSET,
+            "WIFI_PWR" => PWR_INT_EVENT_OFFSET,
+            _ => return,
+        };
+        let pending = self.regs.stored(off) | bits;
+        self.regs.poke(off, pending);
+    }
+
+    /// Whether either block's event word still holds something — the level
+    /// the machine should be holding on that block's source.
+    pub fn event_pending(&self) -> bool {
+        match self.name {
+            "WIFI_MAC" => self.regs.stored(MAC_INT_EVENT_OFFSET) != 0,
+            "WIFI_PWR" => self.regs.stored(PWR_INT_EVENT_OFFSET) != 0,
+            _ => false,
+        }
+    }
+
     fn note_touch(&mut self, off: u32, access: &str, cx: &mut BusCx<'_>) {
         let word = off & !3;
         if self.touched.insert(word) && cx.trace.is_enabled() {
@@ -775,6 +806,19 @@ impl Peripheral for WifiStub {
             self.regs.poke(MAC_INT_EVENT_OFFSET, left);
             if left == 0 {
                 cx.irq.set_level(crate::regs::source::WIFI_MAC, false);
+            }
+        }
+        // The PWR block's twin, on the same evidence: the *same* ISR entry
+        // reads `WIFI_PWR+0x37b0` and writes back what it read to `+0x37b4`
+        // (M4 P1, `cyc=165843274 pc=0x4080d2e0`). Nothing in this emulator
+        // raises source 2 today, so this changes no existing run; it is here
+        // so that a sweep of the PWR event word (M4 U1) is retracted the same
+        // way the MAC's is instead of re-entering the ISR forever.
+        if self.name == "WIFI_PWR" && word == PWR_INT_CLEAR_OFFSET {
+            let left = self.regs.stored(PWR_INT_EVENT_OFFSET) & !merged;
+            self.regs.poke(PWR_INT_EVENT_OFFSET, left);
+            if left == 0 {
+                cx.irq.set_level(crate::regs::source::WIFI_PWR, false);
             }
         }
         if self.name == "WIFI_MAC" && Some(word) == RX_DMA_BASE_OFFSET && cx.trace.is_enabled() {
