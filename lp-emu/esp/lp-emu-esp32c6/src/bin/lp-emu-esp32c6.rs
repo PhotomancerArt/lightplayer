@@ -199,7 +199,13 @@ OPTIONS:
     --seed <u64>            the machine PRNG's seed [0]
     --trace [BLOCK,BLOCK]   log every MMIO access; an optional block filter
     --trace-file <path>     write the trace here instead of stderr
-    --strict-bus            an access nothing claims is fatal; exits 3
+    --strict-bus            an access nothing claims is fatal; exits 3.
+                            Also arms the missing-fence checker: a code page
+                            the guest wrote and then executed with no
+                            `fence.i` between is named as a firmware bug
+    --no-block-cache        do not pre-decode blocks of instructions. Slower,
+                            and the identity oracle: every byte of every
+                            transcript must be the same either way
     --strict-grade-blocks <NAME,NAME>
                             narrow --strict-grade to these blocks by name.
                             The default is every block that publishes a
@@ -281,6 +287,9 @@ struct Args {
     trace_blocks: Vec<String>,
     trace_file: Option<PathBuf>,
     strict: bool,
+    /// `--no-block-cache`. The cache is ON by default, so the flag is held
+    /// as its negation: `Args` derives `Default`.
+    no_block_cache: bool,
     strict_grade: Option<RegGrade>,
     strict_grade_blocks: Option<Vec<&'static str>>,
     probes: Vec<(u64, String)>,
@@ -304,6 +313,7 @@ fn run() -> Result<ExitCode, String> {
     let mut builder = Esp32C6Builder::new()
         .time_grade(args.time_grade)
         .strict(args.strict)
+        .block_cache(!args.no_block_cache)
         .strict_grade(args.strict_grade)
         .strict_grade_blocks(args.strict_grade_blocks.clone())
         .efuse(args.efuse)
@@ -643,6 +653,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                     .ok_or_else(|| format!("--strip-timing `{text}`: expected ws2812 or ws2811"))?;
             }
             "--strict-bus" => args.strict = true,
+            "--no-block-cache" => args.no_block_cache = true,
             "--probe" => args.probes.push(parse_probe(&value("--probe")?)?),
             "--break-at" => args.break_at.push(value("--break-at")?),
             "--hooks" => args.hooks = true,
@@ -997,6 +1008,51 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
             None => String::new(),
         }
     );
+    // The block cache, when it ran. Never part of a compared transcript: the
+    // oracle sweep compares the `stopped after` line, the UART bytes and the
+    // decoded frames, and this is none of those — but it IS how a run says
+    // whether the firmware's `fence.i` reached the machine.
+    match machine.block_stats() {
+        Some(stats) => eprintln!(
+            "blocks: {} cached, {} hits ({:.2}% of {} entries), mean length {:.2}; \
+             {} flush(es) ({} for capacity), {} range invalidation(s) dropping {} entr(ies), \
+             {} collision(s); {} fence.i",
+            stats.decodes,
+            stats.hits,
+            stats.hit_rate() * 100.0,
+            stats.decodes + stats.hits,
+            stats.mean_block_len(),
+            stats.flushes,
+            stats.capacity_flushes,
+            stats.range_invalidations,
+            stats.range_entries_dropped,
+            stats.collisions,
+            machine.fence_i_count(),
+        ),
+        None => eprintln!(
+            "blocks: no cache ({}); {} fence.i",
+            if machine.block_cache() {
+                "never needed one"
+            } else {
+                "--no-block-cache, or a rom-up boot"
+            },
+            machine.fence_i_count(),
+        ),
+    }
+    if machine.bus.strict() {
+        let reports = machine.bus.missing_fence_reports();
+        eprintln!(
+            "strict-bus: {} code page(s) executed from; {} of them executed after a guest write \
+             with no `fence.i` between{}",
+            machine.bus.code_pages_seen(),
+            reports,
+            if reports == 0 {
+                " — the fence contract holds"
+            } else {
+                " — see the errors above"
+            }
+        );
+    }
     let census = machine.flash_census();
     if census.commands() > 0 || census.status_reads > 0 || machine.cache_fills() > 0 {
         eprintln!(

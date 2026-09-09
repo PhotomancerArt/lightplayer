@@ -58,11 +58,50 @@ pub struct JitBuffer {
 }
 
 impl JitBuffer {
+    /// Take ownership of freshly linked code and **publish it**.
+    ///
+    /// # The fence, and why it is not dead weight
+    ///
+    /// On RV32 this issues one `fence.i` before returning. `fence.i` is
+    /// RISC-V's architected "I have written instructions; make them visible
+    /// to the fetch path" (Zifencei), and it belongs here rather than at the
+    /// call site so that the constructor for executable heap code fences *by
+    /// construction* and no future caller can forget.
+    ///
+    /// It is safe to fence here because nothing writes to a `JitBuffer` after
+    /// this returns: `link_jit_taking` has already linked and patched every
+    /// relocation into `code`, `JitBuffer` exposes no mutable view of it, and
+    /// on RV32 the execute address IS the write address
+    /// ([`crate::exec_addr`]), so there is no second copy to publish.
+    ///
+    /// **Do not delete it because the C6 does not need it.** It is true that
+    /// the ESP32-C6 has no instruction cache over SRAM and that a shader runs
+    /// correctly today without this. Two things depend on it anyway:
+    ///
+    /// - the emulator (`lp-emu/esp/lp-emu-esp32c6`) keeps a **pre-decoded
+    ///   block cache** and invalidates it on exactly this instruction. Without
+    ///   the fence it serves the previous shader's instructions from a stale
+    ///   block, and the failure shows up as wrong pixels three weeks later
+    ///   rather than as an error. `MachineHart::on_fence_i` is the other end
+    ///   of the contract, and `--strict-bus` names a missing one as a firmware
+    ///   bug at the moment it is introduced;
+    /// - any future RV32 part with an I-cache requires it, and a JIT that
+    ///   publishes code without one is wrong on that part by construction.
+    ///
+    /// It costs one instruction per shader compile. The Xtensa `Placed` path
+    /// has its own publish barrier in `codemem_esp32`'s device sink.
     #[cfg(not(all(feature = "xt-placed-code", target_arch = "xtensa")))]
     pub(crate) fn from_code(code: Vec<u8>) -> Self {
-        Self {
+        let buffer = Self {
             inner: Inner::Heap { code },
+        };
+        #[cfg(target_arch = "riscv32")]
+        // SAFETY: `fence.i` has no operands and no memory effects beyond the
+        // instruction-stream synchronisation it exists for.
+        unsafe {
+            core::arch::asm!("fence.i", options(nostack, preserves_flags));
         }
+        buffer
     }
 
     /// A buffer for code already installed at execute address `exec_base`
