@@ -53,6 +53,20 @@ The CPU is 160 MHz, so `micros = cycles / 160`. No grade is a claim about
 milliseconds on silicon — see the vision's "time is a graded ladder, never a
 promise".
 
+`t3` is the first grade with a **band**: a cycle model is never exact, so a
+`--strict-timing` comparing for equality could never let `timing` be anything
+but `modeled` however good the model got, and `lp-emu:esp32c6:t3`'s trust
+entry therefore states the interval it is allowed to be wrong inside —
+per-slice silicon/`t3` in [0.80, 1.25] on at least 90 % of a field's samples
+with the aggregate within 20 %, on `shader-compile-stress` and `cycle-probe`
+and on no other payload, replayed by `--strict-timing`. Measured: 85 of 92
+slices inside, aggregate 1.154. The grade is `documented` rather than
+`measured` — the compute residual is one-signed and `cycle-probe` is the
+calibration payload, so one independent workload stands behind it. The band's
+derivation is `docs/reports/2026-09-08-esp32c6-t3-calibration.md` §4; the
+mechanism is the hardware-validation ADR's 2026-09-08 amendment. A band is
+not a licence to gate anything on emulated microseconds (PD9/D13).
+
 ## The memory map
 
 `memmap.rs` holds every base and length, each cited to

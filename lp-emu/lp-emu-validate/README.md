@@ -104,6 +104,7 @@ silicon:esp32c6                 real silicon, that chip
 esp-emu:0.42.0                  Espressif's binary emulator, that version
 lp-emu:esp32c6:t1               our machine, time grade 1 (instruction count)
 lp-emu:esp32c6:t2               our machine, time grade 2 (per-class model)
+lp-emu:esp32c6:t3               our machine, time grade 3 (+ what an address costs)
 ```
 
 **Identity is the chip, not the board** (Yona, G2 2026-09-06). This is chip
@@ -129,6 +130,27 @@ reader can weigh it — evidence, not a promotion. `measured` means the class wa
 measured on silicon, or on a configuration whose agreement with silicon *for
 that class* is itself in a committed transcript; one payload's heap ledger is
 not a licence for the pin class.
+
+### A band: how wrong a class is allowed to be
+
+A trust entry may also state a **band**, and one class needs it. A cycle model
+is never exact, so a `--strict-timing` that compares for equality can never
+let `timing` be anything but `modeled`, however good the model gets — a grade
+that cannot move stops carrying information. A band is what a never-exact
+class is graded against instead: an interval the per-sample ratio must fall
+in, the fraction of a field's samples that must fall in it, an aggregate
+tolerance the per-sample test cannot see, and — mandatory — the payloads that
+measured it, because a band naming no payloads is a claim about payloads
+nobody ran. The ratio is read reference-over-model, so a band means the same
+thing whichever transcript is given to `replay` first, and a payload the `on`
+list omits is compared exactly, as before. The field is additive: an entry
+with no band behaves exactly as every entry did before it existed. See the
+hardware-validation ADR's 2026-09-08 amendment, and
+`docs/reports/2026-09-08-esp32c6-t3-calibration.md` §4 for the first one.
+
+A grade and a band are separate claims: `--strict` reads the grade,
+`--strict-timing` reads the band, and `lp-emu:esp32c6:t3` today states a band
+at `documented` — which `--strict` refuses and `--strict-timing` enforces.
 
 An emulated configuration also carries the identity it has no eFuse to read
 (`mac`, `silicon_rev`, `board`), which the runner passes to the machine. The
@@ -232,7 +254,15 @@ carrying its class:
 * a difference in **timing** or **boot-log** is reported *with its ratio*, not
   failed — time is where a configuration is allowed to be wrong, and hiding it
   would be the mistake;
-* `--strict` refuses any class either side grades below `measured`.
+* `--strict` refuses any class either side grades below `measured`;
+* `--strict-timing` fails a timing difference. Where a side states a **band**
+  for this payload it fails only *outside* the band — per-sample coverage and
+  the aggregate, both — and names the band, the observed coverage and the
+  observed aggregate so a reader can see how far outside it landed. Where
+  neither side states one, it is the exact comparison it always was. Either
+  way the ratios are still printed: reading a number and gating on it are
+  different acts, and PD9/D13 stands — no host gate runs on emulated
+  microseconds.
 
 Masking (`src/mask.rs`, the `scripts/spike/esp-emu/mask-transcript.sh` rules as
 code) names the differences that mean nothing — heap digits in prose, uptime,
