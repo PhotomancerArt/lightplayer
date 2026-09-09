@@ -994,6 +994,107 @@ mod tests {
         assert!(p.take_tx_handoffs().is_empty(), "WIFI_PWR has no TX slot");
     }
 
+    /// The header's shape: the one field the guest demands, the two the air
+    /// derives from the frame, and the constants that are named as
+    /// constants. See `tests/air_delivery.rs` for which of them the guest
+    /// was measured reading.
+    #[test]
+    fn the_rx_ctrl_header_carries_what_it_says_it_carries() {
+        // A broadcast frame: addr1 starts at byte 4 and its first octet has
+        // the group bit set.
+        let mut frame = vec![0xd0, 0x00, 0x00, 0x00];
+        frame.extend_from_slice(&[0xff; 6]);
+        frame.extend_from_slice(&[0u8; 46]);
+        assert_eq!(frame.len(), 56);
+
+        let out = rx_ctrl::frame_with_header(&frame, 1_036_418);
+        assert_eq!(out.len(), rx_ctrl::LEN + 56 + 4, "header, frame, FCS");
+        assert_eq!(&out[rx_ctrl::LEN..rx_ctrl::LEN + 56], &frame[..]);
+        assert_eq!(&out[rx_ctrl::LEN + 56..], &[0, 0, 0, 0], "no FCS is computed");
+
+        assert_eq!(out[0] as i8, rx_ctrl::RSSI_DBM, "a constant, not a measurement");
+        assert_eq!(out[20] as i8, rx_ctrl::NOISE_FLOOR_DBM);
+        assert_eq!(out[1], rx_ctrl::RATE, "fixed, and named as fixed");
+        assert_eq!(out[21] & 0x0f, rx_ctrl::CHANNEL);
+        assert_eq!(out[3] & (1 << 4), 1 << 4, "rxmatch0 — the guest demands it");
+        assert_eq!(out[11] & (1 << 7), 1 << 7, "is_group, from addr1");
+        assert_eq!(
+            u32::from_le_bytes(out[12..16].try_into().unwrap()),
+            1_036_418,
+            "timestamp, the receiver's own microseconds"
+        );
+        assert_eq!(
+            u16::from_le_bytes(out[84..86].try_into().unwrap()) & 0x3fff,
+            60,
+            "sig_len counts the FCS: 56 + 4, the TX side's convention"
+        );
+
+        // A unicast frame is not a group frame.
+        let mut unicast = frame.clone();
+        unicast[4] = 0xa0;
+        assert_eq!(rx_ctrl::frame_with_header(&unicast, 0)[11] & (1 << 7), 0);
+    }
+
+    /// The raise puts the cursors and the event bits where the guest reads
+    /// them, and the guest's own write-one-to-clear takes the line down.
+    #[test]
+    fn a_raise_is_retracted_by_the_guests_own_clear() {
+        let mut sb = Sandbox::new();
+        let mut w = WifiStub::new();
+        assert_eq!(w.rx_dma_base(), None, "before the blob programs one");
+        sb.write(&mut w, RX_DMA_BASE_OFFSET.unwrap(), 0x4081_1434);
+        assert_eq!(w.rx_dma_base(), Some(0x4081_1434));
+
+        assert!(!w.radio_interrupt_pending());
+        w.raise_rx_interrupt(0x4081_1434, 0x4081_1440);
+        assert!(w.radio_interrupt_pending());
+        assert_eq!(sb.read(&mut w, RX_LAST_DSCR_OFFSET), 0x4081_1434);
+        assert_eq!(sb.read(&mut w, RX_DSCR_NEXT_OFFSET), 0x4081_1440);
+        assert_eq!(sb.read(&mut w, MAC_INT_EVENT_OFFSET), RX_INT_EVENT_BITS);
+
+        // The machine holds the line while the block holds the event.
+        sb.irq.set_level(crate::regs::source::WIFI_MAC, true);
+        // A clear of some other bit leaves it up…
+        sb.write(&mut w, MAC_INT_CLEAR_OFFSET, 1);
+        assert!(w.radio_interrupt_pending());
+        assert!(sb.irq.level(crate::regs::source::WIFI_MAC));
+        // …and the bit the ISR actually read takes it down.
+        sb.write(&mut w, MAC_INT_CLEAR_OFFSET, RX_INT_EVENT_BITS);
+        assert!(!w.radio_interrupt_pending());
+        assert!(!sb.irq.level(crate::regs::source::WIFI_MAC));
+
+        // Two raises before a clear are one line, drained by one write —
+        // which is what `mac_txrx_init`'s `+0x4c4c = 0xffffffff` does.
+        w.raise_rx_interrupt(1, 2);
+        w.raise_rx_interrupt(3, 4);
+        sb.write(&mut w, MAC_INT_CLEAR_OFFSET, 0xffff_ffff);
+        assert!(!w.radio_interrupt_pending());
+
+        // And none of it happens on the other two blocks.
+        let mut p = WifiStub::pwr();
+        p.raise_rx_interrupt(1, 2);
+        assert!(!p.radio_interrupt_pending());
+        assert_eq!(p.rx_dma_base(), None);
+    }
+
+    /// Every graded offset the air touches is `modeled` and carries a
+    /// reason, and the block publishes a table where it did not before.
+    #[test]
+    fn the_air_grades_are_all_modeled_and_say_why() {
+        for &(off, grade, why) in AIR_GRADES {
+            assert!(off < WINDOW_LEN, "+0x{off:04x} is outside the window");
+            assert_eq!(grade, RegGrade::Modeled, "+0x{off:04x}");
+            assert!(why.len() > 40, "+0x{off:04x} needs its evidence");
+        }
+        let w = WifiStub::new();
+        assert_eq!(w.reg_grade(0), Some(RegGrade::Modeled));
+        assert_eq!(w.reg_grade(MAC_INT_EVENT_OFFSET), Some(RegGrade::Modeled));
+        // The other two instances publish nothing: nobody graded them, and
+        // that is not the same statement as "these are modelled".
+        assert_eq!(WifiStub::pwr().reg_grade(0), None);
+        assert_eq!(WifiStub::i2c_mst_mem().reg_grade(0), None);
+    }
+
     #[test]
     fn the_override_list_is_applied_and_every_entry_has_a_reason() {
         for &(off, mask, _, why) in OVERRIDES {

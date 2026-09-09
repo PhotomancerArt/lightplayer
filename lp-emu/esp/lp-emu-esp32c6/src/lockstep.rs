@@ -58,13 +58,21 @@
 //! relation between them is the design, and it is checked at construction:
 //! **the quantum is never larger than the latency.**
 //!
-//! # What P1 does not do
+//! # The receiving end delivers (M4 P2)
 //!
-//! The receiving end **counts and logs**; it does not deliver. A frame the
-//! air offers a machine is reported as "offered, not delivered". Writing one
-//! into the receiver's RX ring, filling an `rx_ctrl` header in front of it
-//! and raising the RX interrupt is M4 P2's, and it grows from
-//! [`Esp32C6Machine::offer_air_frame`].
+//! A frame the air offers a machine is written into that machine's own RX
+//! descriptor ring behind an `rx_ctrl` header and the radio interrupt is
+//! raised — [`Esp32C6Machine::offer_air_frame`] and the C6 README's air
+//! section. A machine with no ring programmed, or one whose ring is full,
+//! counts the frame as undelivered rather than dropping it silently, so
+//! `frames_sent` and `frames_offered` here and `air_frames_delivered` on the
+//! machine are three different claims and a report shows all three.
+//!
+//! # One frame, one direction — and why a pair is staggered
+//!
+//! See [`Lockstep::stagger`]. Two identical guests started in the same cycle
+//! wedge in the same cycle, and the wedge is
+//! `docs/debt/emu-c6-radio-tx-never-completes.md`, not this runner.
 
 use lp_emu_core::sched::Cycles;
 use lp_emu_esp_common::air::{Air, ParticipantId, PerfectAir};
@@ -165,7 +173,10 @@ pub struct MachineReport {
     pub outcome: Outcome,
     /// Frames its radio handed the air.
     pub frames_sent: u64,
-    /// Frames the air offered it. **Not delivered** — see the module docs.
+    /// Frames the air offered it. Not the same as *delivered*: a machine
+    /// with no RX ring programmed yet, or one whose ring is full, is offered
+    /// frames it cannot take. `Esp32C6Machine::air_frames_delivered` and
+    /// `air_frames_undelivered` split this number.
     pub frames_offered: u64,
 }
 
@@ -613,6 +624,45 @@ mod tests {
         let report = pair.run_until(past * 2, &StopCondition::default());
         assert_eq!(report.machines[1].frames_offered, 1);
         assert!(report.all_reached_the_horizon());
+    }
+
+    /// A staggered machine runs its own clock behind the pair's, exactly by
+    /// its offset, and the two runs of the same stagger are the same run.
+    #[test]
+    fn a_staggered_machine_runs_its_offset_behind_the_pair() {
+        let offset = 7 * DEFAULT_QUANTUM_CYCLES;
+        let run = || {
+            let mut pair = Lockstep::new(vec![idle_machine(), idle_machine()])
+                .unwrap()
+                .stagger(vec![0, offset]);
+            let report = pair.run_until(64 * pair.quantum(), &StopCondition::default());
+            (report, pair.offset(ParticipantId(1)))
+        };
+        let (report, seen) = run();
+        assert_eq!(seen, offset);
+        assert_eq!(report.cycles, 64 * DEFAULT_QUANTUM_CYCLES);
+        assert_eq!(report.machines[0].cycles, 64 * DEFAULT_QUANTUM_CYCLES);
+        assert_eq!(
+            report.machines[1].cycles,
+            64 * DEFAULT_QUANTUM_CYCLES - offset,
+            "machine 1's own clock is its offset behind the pair's"
+        );
+        assert!(report.all_reached_the_horizon());
+        assert_eq!(run().0, report, "and a stagger replays identically");
+
+        // A horizon inside the offset leaves the second machine at zero
+        // rather than running it backwards.
+        let mut pair = Lockstep::new(vec![idle_machine(), idle_machine()])
+            .unwrap()
+            .stagger(vec![0, offset]);
+        let early = pair.run_until(3 * DEFAULT_QUANTUM_CYCLES, &StopCondition::default());
+        assert_eq!(early.machines[1].cycles, 0);
+        assert_eq!(early.machines[0].cycles, 3 * DEFAULT_QUANTUM_CYCLES);
+
+        // And the default is no stagger at all: the runner P1 shipped.
+        let plain = Lockstep::new(vec![idle_machine(), idle_machine()]).unwrap();
+        assert_eq!(plain.offset(ParticipantId(0)), 0);
+        assert_eq!(plain.offset(ParticipantId(1)), 0);
     }
 
     /// The off switch, at the seam rather than at the CLI: a machine that was
