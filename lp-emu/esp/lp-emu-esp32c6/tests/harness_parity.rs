@@ -222,3 +222,161 @@ fn two_harness_runs_are_byte_identical() {
     assert_eq!(a.m.instructions(), b.m.instructions());
     assert_eq!(a.text, b.text, "two runs of the harness diverged");
 }
+
+/// M1 P3 G3-5, and the same statement `t2_memory_equals_t1` makes about the
+/// grade below it: **a time grade must not move a heap byte**, and `t3` moves
+/// more than any grade before it — it is the first one where two instructions
+/// with the same opcode cost different amounts because of where they are.
+///
+/// It must still move nothing the allocator can see. The payload is
+/// single-task, so there is no interleaving for a clock to change, and the
+/// cache model is charged *after* the access rather than instead of it: it
+/// answers with a number of cycles and never with a byte.
+#[test]
+#[ignore = "needs the harness reference image; run through `just test-emu-c6`"]
+fn t3_memory_equals_t1() {
+    let Some(Run { m, outcome, text }) = run_harness_at(TimeGrade::T3) else {
+        return;
+    };
+    assert!(
+        matches!(outcome, Outcome::ExitMatched { .. }),
+        "{outcome:?}"
+    );
+    assert_eq!(m.bus.unmapped_reads() + m.bus.unmapped_writes(), 0);
+
+    let root = workspace_root().expect("workspace root");
+    let sidecar = SIDECAR.replace("lp-emu:esp32c6:t1", "lp-emu:esp32c6:t3");
+    let ours = Transcript::from_parts(
+        TranscriptHeader::from_json(&sidecar).expect("the sidecar parses"),
+        &text,
+    )
+    .expect("our t3 capture is a transcript");
+    let recorded = Transcript::load(root.join(COMMITTED_T1)).expect("the committed t1 transcript");
+    let report = replay(
+        &ours,
+        &recorded,
+        ReplayOptions {
+            strict: false,
+            strict_timing: false,
+        },
+    )
+    .expect("the replay runs");
+    println!("{}", report.render());
+
+    assert!(report.is_ok(), "{:?}", report.failures());
+    assert_eq!(report.compared(FieldClass::Memory), 372);
+    assert_eq!(
+        report.differences_in(FieldClass::Memory).count(),
+        0,
+        "a time grade moved a heap byte: {:?}",
+        report
+            .differences_in(FieldClass::Memory)
+            .map(|d| format!("{}.{}: {} vs {}", d.scope, d.field, d.left, d.right))
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        report.differences_in(FieldClass::Timing).count() > 0,
+        "t3 produced t1's timings"
+    );
+}
+
+/// M1 P3 G3-4. A cache model is *state*, so `t3` is the first grade whose
+/// answer to an access depends on the accesses before it — which is exactly
+/// the shape of thing that stops being deterministic when someone reaches for
+/// a host clock or an allocator address. Two runs, same process, same bytes,
+/// same cycle total.
+///
+/// Exact cycle *counts* are deliberately not asserted against a constant
+/// here: the reference image is built locally and a different host's build is
+/// a different binary (DD45), so a pinned number would be a host gate. Two
+/// runs on one host is the comparison that means something.
+#[test]
+#[ignore = "needs the harness reference image; run through `just test-emu-c6`"]
+fn two_t3_harness_runs_are_byte_identical() {
+    let (Some(a), Some(b)) = (run_harness_at(TimeGrade::T3), run_harness_at(TimeGrade::T3)) else {
+        return;
+    };
+    assert_eq!(a.outcome, b.outcome);
+    assert_eq!(a.m.cycles(), b.m.cycles());
+    assert_eq!(a.m.instructions(), b.m.instructions());
+    assert_eq!(a.text, b.text, "two t3 runs of the harness diverged");
+}
+
+/// The grades do **not** run the same instructions, and that is a finding
+/// rather than a defect.
+///
+/// A guest that polls a peripheral until a scheduled event lands executes
+/// however many iterations the clock leaves room for, so a grade that charges
+/// more cycles per instruction retires *fewer* instructions for the same
+/// guest microsecond. On the compile harness over its USB-Serial-JTAG link
+/// that is 21,580,739 instructions at `t1`, 18,000,200 at `t2` and 14,868,711
+/// at `t3` — the ROM and esp-hal's console drain spins, shortening.
+///
+/// What must hold instead, and does:
+///
+/// - **the slices do not get cheaper in total.** On the *USB-Serial-JTAG*
+///   recordings the calibration record's §3 is stronger — not one of the 92
+///   slices costs fewer cycles at `t3` than at `t1`. This test runs the
+///   **spike UART0** reference image, where every logging slice is pinned by
+///   the 115,200-baud drain rather than by the clock (F3, `notes.md`), so
+///   individual slices there move a fraction of a percent either way and only
+///   the sum is a statement. That difference between the two links is the
+///   point F3 makes, restated by a cycle model.
+/// - **memory is untouched** (`t3_memory_equals_t1`).
+/// - the totals order `t1` < `t2` < `t3`.
+///
+/// Silicon has the same property — a real board's spin is bounded by a real
+/// clock — which is why `slice_cycles`, and not an instruction count, is what
+/// the two machines are compared on.
+#[test]
+#[ignore = "needs the harness reference image; run through `just test-emu-c6`"]
+fn a_slower_clock_retires_fewer_instructions_and_no_slice_gets_cheaper() {
+    let (Some(t1), Some(t2), Some(t3)) = (
+        run_harness_at(TimeGrade::T1),
+        run_harness_at(TimeGrade::T2),
+        run_harness_at(TimeGrade::T3),
+    ) else {
+        return;
+    };
+    println!(
+        "cycles: t1={} t2={} t3={}; instructions: t1={} t2={} t3={}",
+        t1.m.cycles(),
+        t2.m.cycles(),
+        t3.m.cycles(),
+        t1.m.instructions(),
+        t2.m.instructions(),
+        t3.m.instructions()
+    );
+    assert!(
+        t1.m.cycles() < t2.m.cycles() && t2.m.cycles() < t3.m.cycles(),
+        "the grades did not order"
+    );
+    assert!(
+        t3.m.instructions() <= t1.m.instructions(),
+        "a more expensive clock retired MORE instructions"
+    );
+
+    // No slice gets cheaper. `slice_cycles=<n>` on the harness's own lines.
+    let slices = |text: &str| -> Vec<u64> {
+        text.lines()
+            .filter_map(|l| l.split("slice_cycles=").nth(1))
+            .filter_map(|rest| {
+                rest.split(|c: char| !c.is_ascii_digit())
+                    .next()
+                    .and_then(|d| d.parse::<u64>().ok())
+            })
+            .collect()
+    };
+    let (a, b) = (slices(&t1.text), slices(&t3.text));
+    assert_eq!(a.len(), b.len(), "different tick counts");
+    assert!(!a.is_empty(), "no slice_cycles lines");
+    let (sum1, sum3): (u64, u64) = (a.iter().sum(), b.iter().sum());
+    assert!(
+        sum3 >= sum1,
+        "the slices cost less in total at t3: {sum3} against t1's {sum1}"
+    );
+    println!(
+        "slice_cycles summed: t1={sum1} t3={sum3} over {} ticks",
+        a.len()
+    );
+}

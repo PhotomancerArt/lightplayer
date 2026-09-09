@@ -1,0 +1,68 @@
+{
+  "schema": 1,
+  "payload": "shader-compile-stress",
+  "chip": "esp32c6",
+  "configuration": "lp-emu:esp32c6:t3",
+  "date": "2026-09-08",
+  "firmware_commit": "17ac011f7",
+  "firmware_features": [
+    "default",
+    "esp32c6",
+    "esp_radio",
+    "lp_gfx_lpvm",
+    "lpa_server",
+    "lpc_hardware",
+    "lpc_model",
+    "lpc_shared",
+    "lpc_wire",
+    "lpfs",
+    "lps_builtins",
+    "radio",
+    "server",
+    "test_shader_compile_incremental"
+  ],
+  "firmware_dirty": false,
+  "firmware_sha256": "23d82aa5fbeabe230634c48a3eea804d3472f88456024eebd644eaf6dcb7fda1",
+  "silicon_rev": "v0.2",
+  "board": "seeed/xiao-esp32-c6",
+  "mac": "a0:f2:62:87:b4:8c",
+  "tools": {
+    "lp-emu-esp32c6": "40.0.0 (17ac011f7+dirty)",
+    "rom": "esp32c6_rev0_rom.elf sha256 788e1d38724aeb8fd974fa10c4a7b089c02627d35342ce84b9e0b12b239f3551"
+  },
+  "source": "(cd lp-fw/fw-esp32c6 && cargo build --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,test_shader_compile_incremental) && cargo run -q -p lp-emu-esp32c6 --release -- --elf target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6 --time-grade t3 --usb-sj file:target/validate/shader-compile-stress.cap --usb-sj-tried file:target/validate/shader-compile-stress.tried --usb-host attached --timeout 120s --wall-timeout 2400 --strict-bus --exit-on '[inc-shader-compile] === DONE ===' --efuse-mac a0:f2:62:87:b4:8c --efuse-rev 0.2",
+  "capture": "lp-cli validate record compile-parity --config lp-emu:esp32c6:t3",
+  "note": "--link override: this run's link is `usb-serial-jtag`, not payload `shader-compile-stress`'s own `uart0-spike` (`validate.toml`/`payload.rs` are unchanged — this is a per-run choice, recorded here and in `firmware_features` so a reader of the transcript alone can tell it from a run of the payload's default link).",
+  "trust": [
+    {
+      "class": "memory",
+      "grade": "modeled",
+      "because": "the same allocator and the same RAM model as t1 and t2; the harness's 372 memory values are identical under all three grades (`t3_memory_equals_t1`, `tests/harness_parity.rs`) — a time grade must not move a heap byte, and a memory-cost model answers in cycles, never in bytes"
+    },
+    {
+      "class": "timing",
+      "grade": "modeled",
+      "because": "the model exists but the contract does not. t3 is structural rather than per-class — a 32 KiB 4-way cache of 32-byte lines at 338 cycles a fill (the mask ROM's Cache_Get_Mode for the geometry, cycle-probe's code_walk for the cost) and 9 cycles of APB wait state (cycle-probe's mmio_poll) — and it is calibrated on the cycle-probe kernels and validated against 92 like-for-like silicon ticks in docs/reports/2026-09-08-esp32c6-t3-calibration.md. What it does not yet have is a stated band it is allowed to be wrong inside, and a cycle model is never exact; `modeled` until that contract exists (M1 P4)"
+    },
+    {
+      "class": "boot-log",
+      "grade": "modeled",
+      "because": "direct load prints no ROM or bootloader banner; the time grade changes nothing about that. M7 owns it"
+    },
+    {
+      "class": "usb-serial-jtag",
+      "grade": "modeled",
+      "because": "the same host model as t1 and t2. t3 charges the guest's own accesses to the USB block the APB's wait states, which makes the console path *more* expensive, not more accurate: §2.3 of the calibration record measures the emulator's console path at about 1.5x silicon's already, and that is a peripheral model rather than a cycle model"
+    },
+    {
+      "class": "pin",
+      "grade": "modeled",
+      "because": "the same pin observation as t1 and t2, from the same fabric and the same decoder. What a time grade moves here is the frame count in a fixed wall of emulated time, which is reported as timing"
+    },
+    {
+      "class": "wire",
+      "grade": "modeled",
+      "because": "the same UART0 model as t1 and t2: the bytes are the guest's, a live socket's arrival times are the host's"
+    }
+  ]
+}

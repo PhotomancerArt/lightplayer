@@ -821,11 +821,12 @@ impl ConfigurationDriver for LpEmuDriver {
 
     fn plan(&self, req: &RunRequest) -> Result<RunPlan> {
         let grade = req.configuration.qualifier.as_deref().unwrap_or("t1");
-        if !matches!(grade, "t1" | "t2") {
+        if !matches!(grade, "t1" | "t2" | "t3") {
             bail!(
-                "`{}`: `{grade}` is not a time grade. The machine has two — `t1` counts \
-                 instructions, `t2` uses the measured per-class model — and neither is a \
-                 claim about milliseconds on silicon (the vision's graded ladder).",
+                "`{}`: `{grade}` is not a time grade. The machine has three — `t1` counts \
+                 instructions, `t2` uses a per-class model, `t3` adds what an access's \
+                 address costs — and none of them is a claim about milliseconds on silicon \
+                 (the vision's graded ladder).",
                 req.configuration.name()
             );
         }
