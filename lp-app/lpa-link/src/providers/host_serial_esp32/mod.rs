@@ -1,4 +1,5 @@
 mod host_esp32_flash;
+mod lp_analog_i2c;
 mod provider;
 
 pub use provider::{

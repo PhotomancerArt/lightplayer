@@ -20,10 +20,27 @@ on:
   push:
     branches: ["main"]
 
-# Cancel stale in-flight runs when new commits land on the same ref, except on
-# main where every push should be validated.
+# Cancel stale in-flight runs when new commits land on the same PR ref. On
+# main every push is validated, and each main push is its OWN group: with
+# cancel off, a ref-keyed group does not cancel — it QUEUES, and every main
+# run waited for the previous one to finish. Measured 2026-09-08: the main
+# runs created 03:15 and 03:48 sat 21.2 and 14.8 min before their first job
+# started, behind a ~30 min run each. At ~9 merges a day that queue was most
+# of merge-to-green.
+#
+# Two main runs in flight share state; each case is fine by construction:
+#   - rust-cache and the stories `actions/cache/save`: same key from both,
+#     the second save logs "already exists" and the job continues.
+#   - sccache: content-addressed, concurrent writes are fine.
+#   - the stories snapshot push: each run pushes its own `sha-<sha>` ref (the
+#     baseline authority — story-baseline-lookup.mjs reads only
+#     refs/heads/sha-*) and force-updates `latest`, a convenience pointer
+#     that can briefly land on the older of two out-of-order finishes.
+#   - the stories baseline lookup walks main's first-parent chain for a
+#     captured ancestor; a parallel run's parent may not be captured yet, so
+#     it walks one further — the same thing a PR against a moving main does.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}${{ github.ref == 'refs/heads/main' && format('-{0}', github.sha) || '' }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
@@ -33,13 +50,20 @@ env:
   RUSTUP_PERMIT_COPY_RENAME: 1
 
 # CI shape (2026-07-28 restructure — measured baseline: Validate was 39-52 min
-# and dominated every run):
+# and dominated every run; 2026-09-08 restructure — baseline in the
+# paragraphs below):
 #
-#   detect-changes ─┬─ lint            (fmt + clippy + repo lints)
-#                   ├─ validate-x64    (build prereqs + gated test recipes + schema-check)
-#                   ├─ validate-gfx    (ARM; wgpu tree)
-#                   ├─ validate-browser(real-browser wasm suites)
-#                   └─ validate-stories(story baseline capture)
+#   detect-changes ─┬─ lint              (fmt + clippy + repo lints)
+#                   ├─ validate-x64      (build prereqs + gated test recipes + schema-check + heap ratchet)
+#                   ├─ validate-gfx      (ARM; wgpu tree)
+#                   ├─ validate-browser  (real-browser wasm suites)
+#                   ├─ validate-stories  (story baseline capture)
+#                   ├─ validate-xtensa   (Xtensa host engine + filetest corpus)
+#                   ├─ firmware-xtensa   (esp32s3 image size, manifest, clippy)
+#                   ├─ firmware-esp32v3  (esp32 image size, manifest, clippy)
+#                   ├─ firmware-size     (esp32c6 image size, manifest)
+#                   ├─ emu-c6            (the C6 SoC emulator's own suite)
+#                   └─ heap-budget-chips (chip heap ratchet + lp-cli emu tests)
 #
 # Every job is path-gated, including lint/validate via the `core` filter, so a
 # docs-only PR runs nothing but detect-changes — with one carve-out:
@@ -61,10 +85,30 @@ env:
 # crates (deps still hit). CARGO_INCREMENTAL=0 because sccache cannot cache
 # incremental compiles (and CI never benefited: the incremental state was
 # never restored). debug=0 because CI only needs symbol names in backtraces,
-# not line tables, and it roughly halves compile output — which keeps the
-# per-job caches comfortably under the repo's 10 GB Actions-cache budget.
+# not line tables, and it roughly halves compile output.
 # validate-stories is deliberately exempt from all of this: its pinned
 # capture environment must not churn (see that job).
+#
+# sccache has a FLOOR, measured 2026-09-08 (main run 34308562027): at
+# 95-99.7 % hit rates a full test-profile build of this tree still costs
+# 4-7 minutes — object fetches, linking, build scripts and proc macros, none
+# of which it covers. The rule that follows: a job that builds the tree
+# twice pays the floor twice, and "twice" hides in feature unification —
+# `cargo test` (workspace) and `cargo run -p lp-cli` or `cargo test -p
+# lp-cli` resolve features over different package sets and share no dep
+# artifact. That is why validate-x64 reuses the test-built lp-cli for
+# schema-check and the heap ratchet instead of a third build, and why the
+# lp-cli emulator tests moved out of emu-c6 into heap-budget-chips. Only a
+# restored target/ gets under the floor, and that needs the budget below.
+#
+# The Actions-cache budget (10 GB per repo, LRU) is the constraint every
+# cache decision here answers to. On 2026-09-08 the repo held 11.7 GB in
+# 5,597 entries: 5.8 GB of it was twelve per-job rust-cache copies of the
+# same cargo registry (now one entry per toolchain family, see the lint
+# job's cache step), 4.3 GB sccache objects, 1.07 GB the stories job's
+# entry, which that pressure evicted on two of three main runs that day.
+# Re-check the listing (`gh api repos/<r>/actions/caches`) before adding any
+# entry over ~100 MB; what it displaces matters more than what it saves.
 #
 # Job timeouts (added 2026-08-05): every job carries `timeout-minutes`. Before
 # this, NO workflow in the repo set one, so a wedge ran to GitHub's 6-hour
@@ -78,7 +122,12 @@ env:
 # to turn a slow-but-healthy run into a flake. Re-measure before tightening —
 # and note a genuinely cold cache is the long tail here, not the typical run.
 # A job that starts timing out legitimately wants its p95 re-measured, not a
-# reflexive bump.
+# reflexive bump — the 2026-09-08 emu-c6 overrun was a job that had grown
+# two whole builds, and the answer was a split (heap-budget-chips), with the
+# raised budget kept as headroom rather than as the fix.
+#
+# Concurrency: PR refs cancel in-progress runs; each main push is its own
+# group so main runs in parallel (the `concurrency:` block above says why).
 jobs:
   detect-changes:
     name: Detect changed paths
@@ -333,11 +382,23 @@ jobs:
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
 
-      # rust-cache keys on the job id, so this job's cache (check-mode
-      # artifacts) stays separate from the validate jobs'. save-if main-only:
-      # GitHub scopes cache RESTORE so a PR can only see its own ref's caches
-      # plus main's, and evicts LRU past the 10GB repo cap; saving only on
-      # main keeps one shared warm baseline every PR can restore.
+      # One rust-cache entry per toolchain family (`shared-key`), not per
+      # job. With cache-targets false the entry IS the cargo registry, and
+      # keying on the job id (the default) had produced twelve ~500 MB copies
+      # of the same registry — 5.8 GB of the repo's 10 GB Actions-cache
+      # budget, measured 2026-09-08 at 11.7 GB used — which is what kept
+      # evicting the stories job's 1 GB entry (missed on 2 of 3 main runs
+      # that day, 620 s of `cargo install` each time) and everyone's sccache
+      # objects. The x64 nightly jobs share `x64-nightly`, the Xtensa
+      # firmware pair `xtensa-fw`, validate-xtensa `xtensa-host`, the ARM
+      # job `arm64-nightly`. rust-cache still adds an env hash (installed
+      # toolchains + CARGO_*/RUST* env), so a family's members keep those
+      # identical or the key silently splits. On main every member attempts
+      # the save; the first wins and the rest log "already exists". save-if
+      # main-only: GitHub scopes cache RESTORE so a PR can only see its own
+      # ref's caches plus main's, and evicts LRU past the 10GB repo cap;
+      # saving only on main keeps one shared warm baseline every PR can
+      # restore.
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
         with:
@@ -347,8 +408,12 @@ jobs:
           # warm run), and the 2-3GB-per-job target payloads pushed the repo
           # past its 10GB Actions-cache budget, which LRU-evicts into
           # thrash. Build scripts re-run each time — small next to the
-          # eviction cost. Registry + ~/.cargo/bin stay cached.
+          # eviction cost. The registry stays cached; ~/.cargo/bin does not
+          # (cache-bin false): every tool comes prebuilt via cargo-binstall
+          # in seconds, so a shared entry never depends on which job saved it.
           cache-targets: false
+          cache-bin: false
+          shared-key: x64-nightly
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install just
@@ -390,6 +455,12 @@ jobs:
     if: needs.detect-changes.outputs.firmware == 'true'
     env:
       CARGO_INCREMENTAL: "0"
+      # sccache (2026-09-08): the two Xtensa firmware jobs had been the only
+      # compiling jobs without it, at 5-8.5 min each (the image build alone
+      # 89-172 s). The same toolchain + build-std under sccache is what
+      # validate-xtensa and deploy-cloud already run.
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
     steps:
       - name: Install system deps (libudev for espflash)
         run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
@@ -419,20 +490,31 @@ jobs:
           buildtargets: esp32s3
           default: true
 
+      - name: Run sccache
+        uses: mozilla/sccache-action@v0.0.10
+
+      # Shared `xtensa-fw` entry with firmware-esp32v3; see the lint job's
+      # cache step for the shared-key rationale.
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: lp2025 -> target
           cache-targets: false
+          cache-bin: false
+          shared-key: xtensa-fw
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install just
         uses: extractions/setup-just@v3
 
-      # Pinned to match the firmware-size job. ~/.cargo/bin is restored by
-      # rust-cache above, so this is a no-op on a warm cache.
-      - name: Install espflash
-        run: cargo install espflash --version 3.3.0 --locked
+      # Prebuilt, pinned to match the firmware-size job. A source build of
+      # espflash cost 160 s whenever the bin cache had been evicted
+      # (2026-09-08); binstall is seconds every time.
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@v1.21.1
+
+      - name: Install espflash (prebuilt)
+        run: cargo binstall --no-confirm --locked espflash@3.3.0
 
       # Builds the crate and checks the image against its 3 MB app partition.
       - name: Check esp32s3 image size
@@ -449,6 +531,14 @@ jobs:
       # crate has no clippy coverage anywhere.
       - name: Clippy esp32s3 firmware
         run: cd lp2025 && just clippy-fw-esp32s3
+
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: |
+          if command -v sccache >/dev/null; then
+            { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   # fw-esp32v3 (classic ESP32, "v3"/WROOM-32E) — the second crate on the
   # Xtensa fork, cloned from firmware-xtensa above. Same anti-rot rationale:
@@ -470,6 +560,12 @@ jobs:
     if: needs.detect-changes.outputs.firmware == 'true'
     env:
       CARGO_INCREMENTAL: "0"
+      # sccache (2026-09-08): the two Xtensa firmware jobs had been the only
+      # compiling jobs without it, at 5-8.5 min each (the image build alone
+      # 89-172 s). The same toolchain + build-std under sccache is what
+      # validate-xtensa and deploy-cloud already run.
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
     steps:
       - name: Install system deps (libudev for espflash)
         run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
@@ -495,24 +591,32 @@ jobs:
           buildtargets: esp32
           default: true
 
+      - name: Run sccache
+        uses: mozilla/sccache-action@v0.0.10
+
       # `lp2025 -> target`, mirroring firmware-xtensa: this crate is a
       # repo-root workspace member (M3-P1 folded it in) and writes into the
-      # shared root target/, so the cache key must be the repo root.
+      # shared root target/, so the cache key must be the repo root. Shared
+      # `xtensa-fw` entry with firmware-xtensa; see the lint job's cache step.
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: lp2025 -> target
           cache-targets: false
+          cache-bin: false
+          shared-key: xtensa-fw
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install just
         uses: extractions/setup-just@v3
 
-      # Pinned to match the firmware-size and firmware-xtensa jobs.
-      # ~/.cargo/bin is restored by rust-cache above, so this is a no-op on a
-      # warm cache.
-      - name: Install espflash
-        run: cargo install espflash --version 3.3.0 --locked
+      # Prebuilt, pinned to match the firmware-size and firmware-xtensa jobs
+      # (see firmware-xtensa for the cost of the source build it replaces).
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@v1.21.1
+
+      - name: Install espflash (prebuilt)
+        run: cargo binstall --no-confirm --locked espflash@3.3.0
 
       # Builds the crate and checks the image against its 3 MB app partition.
       - name: Check esp32v3 image size
@@ -528,6 +632,14 @@ jobs:
       # a different toolchain.
       - name: Clippy esp32v3 firmware
         run: cd lp2025 && just clippy-fw-esp32v3
+
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: |
+          if command -v sccache >/dev/null; then
+            { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   # The Xtensa HOST path: `lpvm-native`'s `rt_emu` compiling shaders for Xtensa
   # and executing them on `lp-xt-emu`, linked against a cross-compiled builtins
@@ -609,11 +721,16 @@ jobs:
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
 
+      # `xtensa-host` entry of its own: this job installs nightly AND the esp
+      # fork, so its env hash never matches the firmware pair's anyway; see
+      # the lint job's cache step for the shared-key rationale.
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: lp2025 -> target
           cache-targets: false
+          cache-bin: false
+          shared-key: xtensa-host
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install just
@@ -755,6 +872,11 @@ jobs:
     if: needs.detect-changes.outputs.firmware == 'true'
     env:
       CARGO_INCREMENTAL: "0"
+      # The firmware profile ignores these two; they are here so this job's
+      # rust-cache env hash matches the rest of the `x64-nightly` family
+      # (see the lint job's cache step).
+      CARGO_PROFILE_DEV_DEBUG: "false"
+      CARGO_PROFILE_TEST_DEBUG: "false"
       SCCACHE_GHA_ENABLED: "true"
       RUSTC_WRAPPER: sccache
     steps:
@@ -781,21 +903,27 @@ jobs:
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
 
+      # Shared `x64-nightly` entry; see the lint job's cache step.
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: lp2025 -> target
           cache-targets: false
+          cache-bin: false
+          shared-key: x64-nightly
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install just
         uses: extractions/setup-just@v3
 
-      # Pinned to match main-push.yml's deploy job, which packages the image this
-      # job measures. ~/.cargo/bin is restored by rust-cache above, so this is
-      # a no-op on a warm cache.
-      - name: Install espflash
-        run: cargo install espflash --version 3.3.0 --locked
+      # Prebuilt, pinned to match the deploy workflows, which package the
+      # image this job measures (see firmware-xtensa for the cost of the
+      # source build it replaces).
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@v1.21.1
+
+      - name: Install espflash (prebuilt)
+        run: cargo binstall --no-confirm --locked espflash@3.3.0
 
       - name: Check esp32c6 image size
         run: cd lp2025 && just fw-esp32c6-size-check
@@ -813,14 +941,18 @@ jobs:
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           fi
 
-  # The ESP32-C6 emulator's own boot-test + replay suite (`just test-emu-c6`,
-  # L3 of the 2026-09-06 esp-emulator plan, DD27). This builds TWO reference
+  # The ESP32-C6 emulator's own boot-test + replay suite (`just
+  # test-emu-c6-boot`, the emulator half of `just test-emu-c6`; L3 of the
+  # 2026-09-06 esp-emulator plan, DD27). This builds TWO reference
   # `fw-esp32c6` images at a pinned historical commit
   # (`scripts/emu/build-reference-image.sh`: `git worktree add --detach` at
   # d6cfaa205, `git cherry-pick -n` of e8d64eeff on top) and boots them against
   # the `#[ignore]`d boot tests in `lp-emu-esp32c6` under `LP_EMU_BUILD_FW=1`,
-  # then runs the `lp-emu-validate` M3 replays and lp-cli's registry-parity
-  # test. Before this job, that whole suite was inert in CI — the boot tests
+  # then runs the `lp-emu-validate` replays. lp-cli's two emulator-backed
+  # tests and the chip heap ratchet ran here too until 2026-09-08; they moved
+  # to `heap-budget-chips` below (see that job for the timings), which is
+  # what brought this job back under its budget. Before this job, that whole
+  # suite was inert in CI — the boot tests
   # are `#[ignore]`d specifically so a bare `cargo test --workspace` (which
   # `validate-x64` runs) never starts a firmware build, so nothing exercised
   # them.
@@ -838,9 +970,9 @@ jobs:
   # `save-image --merge` is what builds the merged flash image the ROM-up
   # boot reads, and the second-stage bootloader in that image comes out of
   # espflash's own bundled resources. It is installed **prebuilt**
-  # (`cargo binstall`), unlike the three hardware-adjacent jobs that
-  # `cargo install` it from source — this is the job already closest to its
-  # ceiling, and a source build of espflash is minutes it does not have.
+  # (`cargo binstall`), as every espflash-using job now is — this was the
+  # first to switch, being the job closest to its ceiling, and a source
+  # build of espflash is minutes it did not have.
   #
   # Path-gated on `emu_c6` (narrower than `firmware`) rather than the full
   # device-image dependency closure — see that filter's comment in
@@ -866,6 +998,12 @@ jobs:
     # had margin. 35 covers a fully cold run (cold reference-image builds +
     # cold cross-target chip build + the profile captures) with headroom;
     # see the PR for the timing table this is based on.
+    #
+    # Split (2026-09-08): the ratchet (478 s) and the lp-cli tests (367 s of
+    # tree build + 7 s of test) moved to `heap-budget-chips`, so this job is
+    # expected back near 12 min — the `--verify` builds (91 s) and the
+    # emulator's own suite. 35 stays, deliberately: it is headroom now, not a
+    # ceiling, and a job that starts timing out wants its p95 re-measured.
     timeout-minutes: 35
     needs: detect-changes
     if: needs.detect-changes.outputs.emu_c6 == 'true'
@@ -909,8 +1047,8 @@ jobs:
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
 
-      # rust-cache keys on the job id; save-if main-only (see the lint job's
-      # cache step for the rationale). The reference-image builds happen
+      # Shared `x64-nightly` rust-cache entry; save-if main-only (see the lint
+      # job's cache step for both). The reference-image builds happen
       # inside a detached worktree under lp2025/target/emu-ref/, which is
       # still under this workspace root, so sccache (content-addressed) still
       # covers them even though target/ itself is not cached.
@@ -928,6 +1066,8 @@ jobs:
         with:
           workspaces: lp2025 -> target
           cache-targets: false
+          cache-bin: false
+          shared-key: x64-nightly
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
 
@@ -960,17 +1100,108 @@ jobs:
         run: cd lp2025 && ./scripts/emu/build-reference-image.sh --verify esp32c6,server,radio,spike_uart0_link,memory_fs
 
       - name: Emulator C6 boot tests + replays
-        run: cd lp2025 && just test-emu-c6
+        run: cd lp2025 && just test-emu-c6-boot
 
-      # The heap-budget record's chip half: the shipped image booted whole,
-      # read from the allocator figures its own first heartbeat reports
-      # (docs/heap-budget-gate.md, "The second source"). It lives HERE and not
-      # in the required `Validate (x64)` job because it needs a cross-target
-      # firmware build — which this job has already done by now, so the step
-      # costs one emulator run and nothing else. `heap-budget-check` in the
-      # required job prints a named SKIP for the same reason; a skip here
-      # would be a failure, and the recipe sets LP_EMU_BUILD_FW=1 so it cannot
-      # happen quietly.
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: |
+          if command -v sccache >/dev/null; then
+            { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # The heap-budget record's chip half (`just heap-budget-check-chips`,
+  # docs/heap-budget-gate.md "The second source") and lp-cli's two
+  # emulator-backed tests (`just test-emu-c6-cli`). Both were steps of
+  # `emu-c6` until 2026-09-08. That job had been cut at its 20-minute budget
+  # on every run since #599 (PR #613 raised it to 35 as a stopgap), and its
+  # step timings on main run 34308562027 said why: 478 s for the ratchet and
+  # 367 s inside the suite for `cargo test -p lp-cli` — a second full
+  # test-tree build, because `-p lp-cli` unifies features differently from
+  # `-p lp-emu-esp32c6`. The ratchet needs that same lp-cli build (release,
+  # `heap-budget-check.sh` line ~206) plus a cross-target firmware build the
+  # script does itself under `LP_EMU_BUILD_FW=1`, so the two ride together
+  # here and the emulator job keeps only the emulator's own suite.
+  #
+  # Cheaper setup than emu-c6 on purpose: a depth-1 checkout (nothing here
+  # builds a reference image, so no historical commits are needed) and no
+  # espflash (nothing here builds a merged flash image — the tests boot a
+  # plain ELF). Same toolchain family as emu-c6 and firmware-size: the
+  # pinned nightly with rust-src (build-std) plus the riscv32imac target.
+  #
+  # `heap-budget-check` in the required `Validate (x64)` job prints a named
+  # SKIP for the chip half; here `LP_EMU_BUILD_FW=1` is set by the recipe, so
+  # a skip is a failure and cannot happen quietly. Path-gated on `emu_c6`
+  # like the emulator job.
+  heap-budget-chips:
+    name: Heap budget (esp32c6 chip)
+    runs-on: ubuntu-24.04
+    # Expected ~15 min: ~1 min setup, ~6 min lp-cli test tree (sccache floor),
+    # ~8 min ratchet (release lp-cli + firmware + the profile captures). 30 is
+    # a fully cold run with headroom; re-measure before tightening.
+    timeout-minutes: 30
+    needs: detect-changes
+    if: needs.detect-changes.outputs.emu_c6 == 'true'
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "false"
+      CARGO_PROFILE_TEST_DEBUG: "false"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+    steps:
+      - name: Install system deps (libudev for serialport)
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+
+      - name: Checkout lp2025
+        uses: actions/checkout@v4
+        with:
+          path: lp2025
+
+      - name: Checkout lp-regalloc2
+        uses: actions/checkout@v4
+        with:
+          repository: PhotomancerArt/lp-regalloc2
+          path: lp-regalloc2
+
+      # Toolchain is pinned in lp2025/rust-toolchain.toml; keep this in sync.
+      # rust-src is required: fw-esp32c6 builds core/alloc from source
+      # (build-std) for its release-esp32 profile, same as firmware-size.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-27
+          components: rust-src
+
+      - name: Install RISC-V target
+        run: rustup target add ${{ env.RISC_V_TARGET }}
+
+      - name: Run sccache
+        uses: mozilla/sccache-action@v0.0.10
+
+      # Shared `x64-nightly` rust-cache entry; save-if main-only (see the lint
+      # job's cache step for both). cache-on-failure for the same reason as
+      # emu-c6: an overrun must still publish what it built.
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lp2025 -> target
+          cache-targets: false
+          cache-bin: false
+          shared-key: x64-nightly
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      - name: Emulator-backed lp-cli tests
+        run: cd lp2025 && just test-emu-c6-cli
+
+      # The shipped image booted whole, read from the allocator figures its
+      # own first heartbeat reports. It lives in this job and not in the
+      # required `Validate (x64)` job because it needs a cross-target firmware
+      # build; `heap-budget-check` in the required job prints a named SKIP for
+      # the same reason, and a skip here would be a failure.
       - name: Heap budget ratchet — the C6's own ledger
         run: cd lp2025 && just heap-budget-check-chips
 
@@ -1039,8 +1270,8 @@ jobs:
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
 
-      # rust-cache keys on the job id; save-if main-only (see the lint job's
-      # cache step for the rationale).
+      # Shared `x64-nightly` entry; save-if main-only (see the lint job's
+      # cache step for both).
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
         with:
@@ -1050,8 +1281,12 @@ jobs:
           # warm run), and the 2-3GB-per-job target payloads pushed the repo
           # past its 10GB Actions-cache budget, which LRU-evicts into
           # thrash. Build scripts re-run each time — small next to the
-          # eviction cost. Registry + ~/.cargo/bin stay cached.
+          # eviction cost. The registry stays cached; ~/.cargo/bin does not
+          # (cache-bin false): every tool comes prebuilt via cargo-binstall
+          # in seconds, so a shared entry never depends on which job saved it.
           cache-targets: false
+          cache-bin: false
+          shared-key: x64-nightly
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install just
@@ -1059,9 +1294,19 @@ jobs:
 
       # test-rust-core always runs; the studio-web host test only when studio
       # paths changed (it forces a differently-feature-unified rebuild of the
-      # Dioxus tree); filetests only when shader paths changed. schema-check
-      # runs last so its lp-cli dev build reuses the warm deps the test
-      # builds just produced. Pushes to main force every gate true.
+      # Dioxus tree); filetests only when shader paths changed. Pushes to
+      # main force every gate true.
+      #
+      # schema-check and the heap ratchet (next step) run against the
+      # `target/debug/lp-cli` the workspace `cargo test` just built, via the
+      # `LP_CLI` override both honor. They used to `cargo run -p lp-cli`,
+      # and a `-p lp-cli` dev build unifies features differently from the
+      # workspace test build, so it rebuilt every dependency: a third full
+      # tree build, 4m49s on main run 34308562027 (2026-09-08), for a
+      # binary cargo had already produced for lp-cli's integration tests.
+      # The assertion is deliberate — if a future change stops `cargo test`
+      # from building the bin, this must fail loudly rather than fall back
+      # to the slow path unnoticed.
       - name: Validate
         env:
           SHADER: ${{ needs.detect-changes.outputs.shader }}
@@ -1072,12 +1317,16 @@ jobs:
           [ "$STUDIO" = "true" ] && recipes="$recipes test-studio-host"
           [ "$SHADER" = "true" ] && recipes="$recipes test-filetests"
           just ci-prereqs
-          just $recipes schema-check
+          just $recipes
+          test -x target/debug/lp-cli || { echo "::error::cargo test did not leave target/debug/lp-cli — the LP_CLI fast path needs it"; exit 1; }
+          echo "LP_CLI=$PWD/target/debug/lp-cli" >> "$GITHUB_ENV"
+          LP_CLI="$PWD/target/debug/lp-cli" just schema-check
 
       # Heap-budget ratchet: emulator window deltas vs the checked-in
       # measured record. Deterministic, 0% margin; re-baseline explicitly
       # with `just heap-budget-baseline`. See docs/heap-budget-gate.md.
-      # Runs after the tests so lp-cli and fw-emu reuse warm deps.
+      # Runs after the tests: fw-emu reuses warm deps and lp-cli is the
+      # test-built binary (LP_CLI, exported by the step above).
       - name: Heap budget ratchet
         run: cd lp2025 && just heap-budget-check
 
@@ -1132,9 +1381,9 @@ jobs:
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
 
-      # rust-cache keys on the job id, so this job's cache (wgpu tree) stays
-      # separate from validate-x64's and neither evicts the other. save-if
-      # main-only: see the lint job's cache step for the rationale.
+      # `arm64-nightly` entry of its own (a different host arch is a
+      # different registry payload). save-if main-only: see the lint job's
+      # cache step for the rationale.
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
         with:
@@ -1144,8 +1393,12 @@ jobs:
           # warm run), and the 2-3GB-per-job target payloads pushed the repo
           # past its 10GB Actions-cache budget, which LRU-evicts into
           # thrash. Build scripts re-run each time — small next to the
-          # eviction cost. Registry + ~/.cargo/bin stay cached.
+          # eviction cost. The registry stays cached; ~/.cargo/bin does not
+          # (cache-bin false): every tool comes prebuilt via cargo-binstall
+          # in seconds, so a shared entry never depends on which job saved it.
           cache-targets: false
+          cache-bin: false
+          shared-key: arm64-nightly
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install just
@@ -1207,10 +1460,8 @@ jobs:
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
 
-      # rust-cache keys on the job id, so this job's cache (wasm32 tree) stays
-      # separate from the other validate jobs'. It also caches ~/.cargo/bin,
-      # which amortizes the wasm-bindgen-cli install below. save-if main-only:
-      # see the lint job's cache step for the rationale.
+      # Shared `x64-nightly` entry; save-if main-only (see the lint job's
+      # cache step for both).
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
         with:
@@ -1220,17 +1471,25 @@ jobs:
           # warm run), and the 2-3GB-per-job target payloads pushed the repo
           # past its 10GB Actions-cache budget, which LRU-evicts into
           # thrash. Build scripts re-run each time — small next to the
-          # eviction cost. Registry + ~/.cargo/bin stay cached.
+          # eviction cost. The registry stays cached; ~/.cargo/bin does not
+          # (cache-bin false): every tool comes prebuilt via cargo-binstall
+          # in seconds, so a shared entry never depends on which job saved it.
           cache-targets: false
+          cache-bin: false
+          shared-key: x64-nightly
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install just
         uses: extractions/setup-just@v3
 
-      # Pinned to match the workspace wasm-bindgen dep; the just recipes
-      # refuse to run with a missing runner and print this exact version.
-      - name: Install wasm-bindgen-cli
-        run: command -v wasm-bindgen-test-runner >/dev/null || cargo install wasm-bindgen-cli --version 0.2.114
+      # Prebuilt, pinned to match the workspace wasm-bindgen dep; the just
+      # recipes refuse to run with a missing runner and print this exact
+      # version.
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@v1.21.1
+
+      - name: Install wasm-bindgen-cli (prebuilt)
+        run: command -v wasm-bindgen-test-runner >/dev/null || cargo binstall --no-confirm --locked wasm-bindgen-cli@0.2.114
 
       # The smoke check drives Chrome over a raw CDP WebSocket; pin node so
       # the global WebSocket client is guaranteed (same rationale as the
@@ -1372,15 +1631,24 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v3
 
+      # Prebuilt (cargo-binstall), not `cargo install`: on a cache miss the
+      # source builds cost 627 s and 619 s on two of 2026-09-08's three main
+      # runs — dioxus-cli alone is ~8 min — and the miss was routine because
+      # this job's 1 GB entry was the first thing the over-budget cache
+      # evicted. binstall verifies the pinned version and falls back to a
+      # `--locked` source build only if a release asset ever disappears.
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@v1.21.1
+
       - name: Install pinned tools (wasm-bindgen, dioxus-cli, oxipng)
         shell: bash
         run: |
           wasm-bindgen --version 2>/dev/null | grep -qF "$WASM_BINDGEN_VERSION" \
-            || cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
+            || cargo binstall --no-confirm --locked --force "wasm-bindgen-cli@$WASM_BINDGEN_VERSION"
           dx --version 2>/dev/null | grep -qF "$DIOXUS_CLI_VERSION" \
-            || cargo install dioxus-cli --version "$DIOXUS_CLI_VERSION" --locked --force
+            || cargo binstall --no-confirm --locked --force "dioxus-cli@$DIOXUS_CLI_VERSION"
           oxipng --version 2>/dev/null | grep -qF "$OXIPNG_VERSION" \
-            || cargo install oxipng --version "$OXIPNG_VERSION" --locked --force
+            || cargo binstall --no-confirm --locked --force "oxipng@$OXIPNG_VERSION"
 
       # Ubuntu 23.10+ AppArmor blocks unprivileged user namespaces, which the
       # pinned Chrome-for-Testing binary needs for its sandbox (the runner's

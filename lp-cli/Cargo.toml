@@ -33,6 +33,9 @@ lp-gfx-lpvm = { path = "../lp-gfx/lp-gfx-lpvm" }
 lpa-link = { path = "../lp-app/lpa-link", features = ["host-process", "host-serial-esp32"] }
 lpc-hardware = { path = "../lp-core/lpc-hardware", features = ["schema-gen"] }
 lpa-boards = { path = "../lp-app/lpa-boards", features = ["schema-gen"] }
+# `firmware package`: the bootloader-range guard checks the merged image
+# against the device model's hung-bootloader table.
+lpa-devices = { path = "../lp-app/lpa-devices" }
 schemars = { workspace = true }
 lpc-shared = { path = "../lp-core/lpc-shared" }
 lpfs = { path = "../lp-base/lpfs", features = ["std"] }
