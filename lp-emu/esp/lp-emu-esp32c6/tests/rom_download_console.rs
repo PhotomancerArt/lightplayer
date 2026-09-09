@@ -119,6 +119,13 @@ fn download_console(mac: [u8; 6]) -> Esp32C6Builder {
         .usb_host(UsbHost::Attached { draining: true })
         .strict(true)
         .strict_grade(Some(RegGrade::Documented))
+        // The claim is about the blocks M3 P1 graded — this run's console
+        // path — not about the chip. Named, because since the accept blocks
+        // grade themselves "every block that publishes a table" is
+        // twenty-six of them, and the mask ROM writes `PLIC_UX+0x3fc` in
+        // `_init` on its way to the console: a register PLIC_UX honestly
+        // grades `modeled`, in a block this test is making no claim about.
+        .strict_grade_blocks(Some(vec!["UART0", "UART1", "USB_DEVICE", "GPIO"]))
 }
 
 fn run(mut m: Esp32C6Machine, micros: u64) -> Esp32C6Machine {
@@ -139,11 +146,14 @@ fn run(mut m: Esp32C6Machine, micros: u64) -> Esp32C6Machine {
     );
     assert!(m.hooks().is_empty(), "the ROM hook table is not empty");
     assert_eq!(m.hook_calls(), 0);
-    // The scope the strict grade actually checked, by name.
+    // The scope the strict grade actually checked, by name — and it is this
+    // list because the run NAMED it, not because these are the only blocks
+    // with a table. That distinction is what keeps this assertion from
+    // needing a hand-edit every time another block is graded.
     assert_eq!(
         m.bus.blocks_in_strict_grade_scope(),
         vec!["UART0", "UART1", "USB_DEVICE", "GPIO"],
-        "the blocks that publish a grade table"
+        "the blocks this run asked the level about"
     );
     m
 }
