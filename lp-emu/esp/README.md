@@ -70,7 +70,7 @@ cargo run -p lp-cli -- validate run emu-m3 --config lp-emu:esp32c6:t1 --dry-run
 cargo run -p lp-cli -- validate run emu-m4 --config lp-emu:esp32c6:t1 --dry-run
 ```
 
-Door 3 is the one that makes a claim. `lp-emu:esp32c6:t1` and `:t2` are
+Door 3 is the one that makes a claim. `lp-emu:esp32c6:t1`, `:t2` and `:t3` are
 configurations in `lp-emu/lp-emu-validate/validate.toml`, the runner's driver
 turns a payload into exactly the command line door 1 takes, and
 `validate record` writes the capture under `lp-emu/transcripts/` with a
@@ -87,7 +87,7 @@ reason in `validate.toml`. That is not modesty and it is not a placeholder:
 | class | why it is `modeled` |
 |---|---|
 | memory | byte-equal to silicon on the compile harness — 372/372 values — which is *evidence in the reason*, not a promotion. `measured` would want a transcript per class |
-| timing | `t1` counts instructions, `t2` uses the per-class model, and no transcript grades either yet (the vision's graded ladder) |
+| timing | `t1` counts instructions, `t2` uses a per-class model, `t3` adds the flash cache's fills and the APB's wait states on top of class costs the `cycle-probe` kernels measured — and no transcript grades any of them yet (the vision's graded ladder). `t3` is calibrated on those kernels and validated against 92 like-for-like silicon ticks in `docs/reports/2026-09-08-esp32c6-t3-calibration.md`; what it still lacks is a stated band it is allowed to be wrong inside, which is what would let `timing` move off `modeled` |
 | boot-log | `modeled` on a direct load, which prints no banner at all; **`measured`** on a `--merged` ROM-up boot, whose log is diffed line for line against the committed silicon capture |
 | usb-serial-jtag | the host's three states and the transitions between them, with four committed transcripts behind them (M6) — `boot-idle` over the shipped link against silicon's capture of the *same image bytes*, the port held closed from boot, an unplug mid-session, and no cable at all. M6 P5 adds the working half: the shipped image from flash takes a real `lp-cli upload` over this link, and every filesystem write, heap gate and compiler output is identical to the same script run over UART0. The block's own data path is graded `measured` register by register in `periph/usb_sj.rs`; the **class** stays `modeled` by the rule below. The silicon transcript that would let anybody argue otherwise has landed (`usb-negative-control/silicon-…-b18360ea6.txt`); whether it promotes the class is the director's to rule |
 | pin | the waveform is a modelled peripheral's, decoded by our own decoder (M5 P2), and two pin captures are committed beside their transcripts: on `rmt-chase` the guest's per-frame checksums agree with the pad on all 768 frames (M5 P3), and on `shader-oracle-walk` the **shipped** image's first lit frame off gpio18 is byte-equal to the host oracle's `[ORACLE] rgb=` / `[ORACLE-RV32] rgb=` line, with every later frame the same (M5 P4). The oracle never touched the machine, which makes it the nearest independent check there is; it is still not a measurement, because both readings of the *pad* are ours. A silicon pin transcript — a logic analyser, or M8's C6 `frame-dump` port read beside the decoder — is the `measured` step |
