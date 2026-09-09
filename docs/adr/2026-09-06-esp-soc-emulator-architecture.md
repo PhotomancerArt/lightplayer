@@ -354,6 +354,12 @@ one.
 
 ### Honest peripherals: strict bus, `modeled` grades, and no invented answers
 
+> **Pointer, not an amendment.** This section governs **registers that
+> answer**. A peripheral that *originates* an event the hardware would have
+> originated — a virtual radio raising a completion or an RX interrupt — is a
+> different kind of claim and has its own policy in
+> `docs/adr/2026-09-08-virtual-air-claim-policy.md`. Nothing below changes.
+
 A peripheral is either **modelled** (a real type with behaviour and scheduled
 events) or **accepted** (a register file that remembers writes, with a short
 table of pinned bits, each citing the esp-hal line that reads or spins on it).

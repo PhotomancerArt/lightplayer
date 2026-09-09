@@ -352,6 +352,12 @@ pub struct RecordProvenance<'a> {
     /// reference images are a commit plus a staged cherry-pick, so `true` is
     /// the honest answer for them and the hello frame says so too.
     pub firmware_dirty: Option<bool>,
+    /// Which machine of a multi-machine payload this sitting is capturing —
+    /// the board's MAC without colons, by convention. It becomes part of the
+    /// committed filename and the sidecar's `machine` field. `None` for every
+    /// payload whose subject is one machine, which is every payload but
+    /// `espnow-broadcast`. See [`crate::header::TranscriptHeader::machine`].
+    pub machine: Option<&'a str>,
 }
 
 /// `validate record <set> --config <name>` — run, then write each capture into
@@ -548,6 +554,11 @@ pub fn record_set(
             // not a path: it is resolved against the transcript's own
             // directory (E3, the additive widening).
             pins: None,
+            // Which board (or which emulated machine) this capture came from,
+            // for a payload whose subject is two of them. It is part of the
+            // committed filename, so a two-board sitting files two transcripts
+            // instead of writing one twice.
+            machine: provenance.machine.map(str::to_string),
             trust: entry.trust.clone(),
         };
         let mut header = header;
@@ -753,6 +764,7 @@ mod tests {
             capture: None,
             note: Some("a plan note.".into()),
             pins: None,
+            machine: None,
             trust: Default::default(),
         };
         header.pins = Some(header.pins_file_name().unwrap());
@@ -825,6 +837,7 @@ mod tests {
                 date: "2026-09-06",
                 firmware_commit: "d6cfaa2051ae",
                 firmware_dirty: Some(true),
+                machine: None,
             },
             true,
         )
@@ -862,6 +875,7 @@ mod tests {
                 date: "2026-09-06",
                 firmware_commit: "d6cfaa2051ae",
                 firmware_dirty: None,
+                machine: None,
             },
             true,
         )

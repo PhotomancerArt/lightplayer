@@ -186,6 +186,14 @@ test_shader_compile_incremental = ["dep:fw-checks", "dep:lp-shader", "dep:lpvm-n
 # else is what keeps `just fw-esp32c6-size-check` measuring an unchanged image.
 test_f32_softfloat = ["dep:lpvm-native", "dep:lpvm", "dep:lps-glsl", "dep:lpir", "dep:lps-shared", "lps-builtins", "lpc-shared", "lpvm-native/float-f32", "lps-builtins/float-f32"]
 test_espnow = ["radio"]  # ESP-NOW broadcast/receive smoke test with simulated 1Hz button events
+# The `espnow-broadcast` payload's harness (M4 P3): the two-board air, recorded.
+# `test_espnow`'s facts behind a payload a transcript can replay — the schedule,
+# the payload-length ladder, the record shapes and the peer-counter reduction
+# live in fw-checks as `checks::espnow_broadcast`; what stays here is board
+# init, the PRODUCT's ESP-NOW driver (read, never written — E-product), the
+# hardware registry and the executor. `test_espnow` itself is untouched and
+# undeleted (RD13/DD31).
+test_espnow_broadcast = ["dep:fw-checks", "fw-checks/check-espnow-broadcast", "radio"]
 
 # FIXTURE builds — test scaffolding, never shipped. Make this CURRENT
 # build misreport its hello so a current Studio classifies it Incompatible,

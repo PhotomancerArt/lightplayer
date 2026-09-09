@@ -124,6 +124,31 @@ pub struct TranscriptHeader {
     /// recorded with a companion at all.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pins: Option<String>,
+    /// **Which machine of a multi-machine payload this capture came from.**
+    ///
+    /// Additive and optional, like [`Self::pins`], and for a payload the
+    /// filing scheme had no room for. A transcript is filed at
+    /// `<chip>/<payload>/<configuration>-<date>-<commit>.txt`, and until M4 P3
+    /// every payload's subject was **one** machine, so that stem was unique by
+    /// construction. `espnow-broadcast`'s subject is **two** — two boards on
+    /// one air, or two emulated machines in one lockstep run — and one sitting
+    /// of it produces two captures of one payload on one configuration at one
+    /// commit on one date. Without a discriminator the second would overwrite
+    /// the first.
+    ///
+    /// So a capture may say which machine it is, and the stem carries it. The
+    /// convention this payload uses is the **MAC without colons**
+    /// (`a0f26287b48c`), because a MAC is the only thing that tells two boards
+    /// of one model apart (`d1-desk-batch.md`) and it is what the sidecar's
+    /// `note` and the payload's records name too. A capture with no `machine`
+    /// is filed exactly where it always was, which is why every transcript
+    /// recorded before this field existed is untouched.
+    ///
+    /// It is **not** a configuration. Identity is the chip (Yona, G2
+    /// 2026-09-06); this is one more fact about one capture, beside `board`,
+    /// `mac` and `silicon_rev`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
     /// What this configuration is trusted for, per field class.
     #[serde(default)]
     pub trust: TrustTable,
@@ -138,7 +163,11 @@ impl TranscriptHeader {
     pub fn file_stem(&self) -> Result<String> {
         let config = self.configuration()?;
         let short = short_commit(&self.firmware_commit);
-        Ok(format!("{}-{}-{}", config.slug(), self.date, short))
+        let stem = format!("{}-{}-{}", config.slug(), self.date, short);
+        match &self.machine {
+            Some(machine) => Ok(format!("{stem}-{machine}")),
+            None => Ok(stem),
+        }
     }
 
     /// The committed path, relative to the transcripts root:
@@ -196,6 +225,18 @@ impl TranscriptHeader {
             bail!(
                 "transcript header `date` must be YYYY-MM-DD, got `{}`",
                 self.date
+            );
+        }
+        // It goes into a filename, so it may hold only what a filename should.
+        if let Some(machine) = &self.machine
+            && (machine.is_empty()
+                || !machine
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-'))
+        {
+            bail!(
+                "transcript header `machine` becomes part of the committed filename, so it must \
+                 be ASCII letters, digits and dashes; got `{machine}`"
             );
         }
         Ok(())
@@ -337,6 +378,7 @@ mod tests {
             capture: None,
             note: None,
             pins: None,
+            machine: None,
             trust: TrustTable::default(),
         }
     }

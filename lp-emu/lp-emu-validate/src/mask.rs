@@ -501,6 +501,58 @@ pub static RENDER_LOOP: MaskSet = MaskSet {
     ],
 };
 
+/// The **peer's own** counter and byte count, on an `espnow-broadcast` rx
+/// line: `event=45 kind=1 payload_len=8`.
+///
+/// The one masked thing in this payload, and it is a statement rather than a
+/// convenience. A device's own `tx` line is left entirely alone — its counter
+/// starts at 0 at its own power-on and compares exactly. The peer's does not,
+/// and cannot be made to:
+///
+/// * On the desk, two boards are captured **one after the other through one
+///   port** (`d1-desk-batch.md` step 3). Recording a board resets it; the other
+///   board has been powered, and counting, since the previous flash. Board A's
+///   capture sees board B at event 45.
+/// * In the emulated pair both machines are minted for the run, so machine A
+///   sees machine B at event 2.
+///
+/// Same air, same frames, same order, different origin — and the length ladder
+/// is a function of the event number, so `payload_len` is phase-shifted for
+/// exactly the same reason. Neither difference says anything about a model.
+///
+/// **Nothing is lost.** The `espnow-rx` RECORD beside this line carries what
+/// does not depend on the origin and a replay compares it as `Structural`:
+/// `gap` (this event's number minus the previous one from that peer — all 1s
+/// means nothing was dropped) and `len_ok` (the byte count is the one the
+/// peer's own event number prescribes). The raw numbers stay in the transcript
+/// on this line, verbatim and never edited; this rule hides them from the
+/// **human view** so that a reader diffing two captures is not shown a
+/// difference that is only where each board's power-on was.
+pub static ESPNOW_PEER_COUNTER: MaskRule = MaskRule::new(
+    "espnow-peer-counter",
+    "the peer's event counter and the byte count that follows from it start at \
+     the peer's own power-on, and two boards are captured one after the other \
+     through one port. The rx RECORD carries the origin-free content — `gap` \
+     and `len_ok` — and a replay compares that",
+    FieldClass::Structural,
+    r"(\[espnow-broadcast\] rx device=0x[0-9a-f]{8} )event=\d+( kind=\d+ )payload_len=\d+",
+    "${1}event=E${2}payload_len=L",
+);
+
+/// `espnow-broadcast`: ANSI, boot timestamps and the peer's own counter.
+///
+/// Every device id, every own-`tx` event number, every kind and every one of
+/// the payload's records is left comparable — the ladder's own byte counts on
+/// the tx side included, because a device's own frames are numbered from its
+/// own boot on both sides.
+pub static ESPNOW_BROADCAST: MaskSet = MaskSet {
+    name: "espnow-broadcast",
+    description: "ANSI, boot timestamps and the PEER's event counter and byte \
+                  count on an rx line; every device id, every own-tx event \
+                  number and every record is left comparable",
+    rules: &[&ANSI, &BOOT_TIMESTAMP, &ESPNOW_PEER_COUNTER],
+};
+
 /// The `rmt-rx` set: ANSI and the boot banner's stamps, and nothing else.
 ///
 /// The shortest set in the file, for `rmt-chase`'s reason taken one step
@@ -526,6 +578,7 @@ pub static ALL_SETS: &[&MaskSet] = &[
     &RMT_RX,
     &CYCLE_PROBE,
     &GPIO_INPUT,
+    &ESPNOW_BROADCAST,
     &RENDER_LOOP,
 ];
 

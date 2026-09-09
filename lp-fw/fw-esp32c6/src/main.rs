@@ -70,6 +70,7 @@ use fw_esp32_common::boot;
     not(fw_harness),
     feature = "test_button",
     feature = "test_espnow",
+    feature = "test_espnow_broadcast",
     feature = "test_gpio_input",
 ))]
 mod hardware;
@@ -147,6 +148,8 @@ use server_loop::run_server_loop;
 mod tests {
     #[cfg(feature = "test_cycle_probe")]
     pub mod cycle_probe;
+    #[cfg(feature = "test_espnow_broadcast")]
+    pub mod espnow_broadcast;
     #[cfg(feature = "test_f32_softfloat")]
     pub mod f32_softfloat;
     #[cfg(feature = "test_fluid_demo")]
@@ -642,6 +645,12 @@ async fn main(spawner: embassy_executor::Spawner) {
     {
         use tests::test_espnow::run_espnow_test;
         run_espnow_test(spawner).await;
+    }
+
+    #[cfg(feature = "test_espnow_broadcast")]
+    {
+        use tests::espnow_broadcast::run_espnow_broadcast;
+        run_espnow_broadcast(spawner).await;
     }
 
     #[cfg(feature = "test_f32_softfloat")]

@@ -304,6 +304,7 @@ mod tests {
             capture: None,
             note: None,
             pins: None,
+            machine: None,
             trust: Default::default(),
         }
     }

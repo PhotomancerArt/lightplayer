@@ -1053,6 +1053,100 @@ static CYCLE_PROBE_FIELDS: &[FieldSpec] = &[
     },
 ];
 
+/// One frame across the air: what this device broadcast, and what it heard.
+///
+/// ```text
+/// [fw-check-json] {"kind":"espnow-tx","n":0,"device":2360641378,"event":0,"msg_kind":1,"payload_len":0}
+/// [fw-check-json] {"kind":"espnow-rx","n":0,"peer":2091418978,"gap":0,"msg_kind":1,"len_ok":true}
+/// ```
+///
+/// **Everything here is `Structural`, and the fields that are not here are the
+/// decision this entry exists to record.**
+///
+/// The tx side is the easy half: a device's own event counter starts at 0 at
+/// its own power-on, so `device`, `event` and the ladder's `payload_len`
+/// compare exactly between a board and the machine that carries its MAC.
+///
+/// The rx side deliberately does **not** carry the peer's raw event number or
+/// its raw byte count, and no class would have made them comparable. Two
+/// boards are captured one after the other through one port
+/// (`d1-desk-batch.md` step 3): recording a board resets it, and the other has
+/// been counting since the previous flash, so a desk capture sees its peer at
+/// event 45 where the emulated pair sees it at event 2. Same air, same frames,
+/// same order, different origin — and because the ladder is a function of the
+/// event number, `payload_len` is phase-shifted for exactly the same reason.
+/// Grading either `Timing` to make a replay pass would be a lie about what a
+/// clock is; comparing them would fail every capture for a difference that
+/// says nothing about a model.
+///
+/// So the record carries the origin-free content instead, and it is a stronger
+/// claim than the raw numbers would have been:
+///
+/// * `gap` — this event's number minus the previous one from the same peer,
+///   `0` for the first. **All 1s means nothing was dropped between these
+///   frames**, whatever the sequence started from. It is where a real air's
+///   losses would show up against a perfect one's, which is precisely the
+///   comparison this payload exists to make.
+/// * `len_ok` — whether the frame carried the number of bytes the peer's own
+///   event number prescribes. An end-to-end byte-count check that needs no
+///   phase alignment.
+///
+/// The raw numbers are still in the transcript, verbatim, on the human `rx`
+/// line; the payload's mask set (`espnow-broadcast`) hides them from the
+/// **human view** and names this reason.
+static ESPNOW_BROADCAST_FIELDS: &[FieldSpec] = &[
+    FieldSpec {
+        record: "espnow-tx",
+        field: "n",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "espnow-tx",
+        field: "device",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "espnow-tx",
+        field: "event",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "espnow-tx",
+        field: "msg_kind",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "espnow-tx",
+        field: "payload_len",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "espnow-rx",
+        field: "n",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "espnow-rx",
+        field: "peer",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "espnow-rx",
+        field: "gap",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "espnow-rx",
+        field: "msg_kind",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "espnow-rx",
+        field: "len_ok",
+        class: FieldClass::Structural,
+    },
+];
+
 /// One reading off a pad: a button state change the product's debouncer
 /// accepted, or a detent the GPIO interrupt handler decoded.
 ///
@@ -1564,6 +1658,52 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // about the pads arrive in the console, as the fields above; a
         // `--dump-frames` capture decodes a WS281x waveform, which is a
         // different question about a different pin.
+        pin_capture: PinCapture::Off,
+        emulator_only: None,
+        boot: BootPath::Direct,
+    },
+    Payload {
+        name: "espnow-broadcast",
+        display_name: "Two boards on the air, each saying what it sent and what it heard",
+        fw_check_slug: "espnow-broadcast",
+        firmware_features: &["test_espnow_broadcast"],
+        fw_checks_feature: Some("check-espnow-broadcast"),
+        emits_header: true,
+        sentinel: Sentinel::Done("[espnow-broadcast] === DONE ==="),
+        host_script: None,
+        // No pad is driven, none is read and none is tied to another: this
+        // payload's subject is a RADIO, and every claim it makes arrives on
+        // the console as a record.
+        pin_script: None,
+        wire: &[],
+        record_kinds: &["espnow-tx", "espnow-rx"],
+        mask_set: "espnow-broadcast",
+        fields: ESPNOW_BROADCAST_FIELDS,
+        series: &[],
+        capture: Capture::Monitor,
+        // The product's own link, for `cycle-probe`'s reason: the claim is
+        // that the SAME image runs on both sides, so the link has to be the
+        // same too.
+        link: Link::UsbSerialJtag,
+        emulator_features: None,
+        // A cable in and an application reading, from the first byte. Without
+        // it an emulated USB payload records nothing at all (M1 P1's finding,
+        // "usb-sj: host absent at power-on").
+        host_plan: Some(HostPlan {
+            host: "attached",
+            script: "",
+        }),
+        probes: &[],
+        run_secs: None,
+        fresh_chip: false,
+        // No pin capture, and the sentence is here rather than left to a
+        // reader: ESP-NOW events are CONSOLE fields, not pin fields. There is
+        // no pad in this payload to decode, so the `pin_capture` machinery is
+        // off on both sides, no `--dump-frames` is passed, and a replay says
+        // nothing about pins at all — which is different from the `rmt-chase`
+        // shape, where the payload does declare a pad and a silicon replay
+        // prints `pin capture: … records none` because a board has no logic
+        // analyser on it (#624).
         pin_capture: PinCapture::Off,
         emulator_only: None,
         boot: BootPath::Direct,

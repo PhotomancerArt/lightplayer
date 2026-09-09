@@ -151,6 +151,12 @@ fn the_host_side_properties_are_not_mirrored_and_that_is_the_point() {
             // so with no host attached there is no console, no anchor, and
             // every scripted edge would still be pending when the run ended.
             "gpio-input",
+            // M4 P3's `espnow-broadcast`: `cycle-probe`'s case once more — a
+            // harness image whose records go out over the USB-Serial-JTAG it
+            // logs on, with `--usb-host` defaulting to `absent`. It asks
+            // nothing about the link; it simply needs somebody draining the
+            // port, on each of the TWO machines the lockstep pair runs.
+            "espnow-broadcast",
             "boot-idle",
             "usb-negative-control",
             "usb-detach-reattach",
@@ -373,6 +379,11 @@ fn every_payloads_header_line_is_pinned() {
             "gpio-input",
             "esp32c6,test_gpio_input",
             "[fw-checks-header] {\"schema\":1,\"payload\":\"gpio-input\",\"chip\":\"esp32c6\",\"firmware_commit\":\"d6cfaa2051ae\",\"firmware_features\":\"esp32c6,test_gpio_input\",\"firmware_dirty\":false}\n",
+        ),
+        (
+            "espnow-broadcast",
+            "esp32c6,test_espnow_broadcast",
+            "[fw-checks-header] {\"schema\":1,\"payload\":\"espnow-broadcast\",\"chip\":\"esp32c6\",\"firmware_commit\":\"d6cfaa2051ae\",\"firmware_features\":\"esp32c6,test_espnow_broadcast\",\"firmware_dirty\":false}\n",
         ),
         (
             "render-loop",
