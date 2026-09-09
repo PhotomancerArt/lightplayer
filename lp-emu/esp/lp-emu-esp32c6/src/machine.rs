@@ -89,7 +89,7 @@ use crate::snapshot::Snapshot;
 /// `LP_CLKRST + 0x10`, the register the mask ROM reads before anything else.
 const LP_CLKRST_RESET_CAUSE: u32 = 0x010;
 
-const MAX_SLICE_CYCLES: u64 = 8_192;
+pub const MAX_SLICE_CYCLES: u64 = 8_192;
 
 /// The slice cap while strict mode is on.
 ///
@@ -491,6 +491,35 @@ struct PinObserver {
 /// control channel. See [`crate::periph::usb_sj`] for what each state does
 /// at the registers.
 pub use crate::periph::usb_sj::HostState as UsbHost;
+
+/// One frame this machine's radio handed the MAC, ready for an
+/// [`Air`](lp_emu_esp_common::air::Air).
+///
+/// The `at` is the guest cycle of the arming write — the same cycle the
+/// `--tx-log` line reports — and `bytes` are the 802.11 frame exactly as it
+/// stood in guest RAM, with neither the descriptor's eight-byte header nor
+/// the FCS the buffer does not carry.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RadioFrame {
+    pub at: Cycles,
+    pub bytes: Vec<u8>,
+}
+
+/// What [`Esp32C6Machine::read_tx_frame`] made of one armed handoff.
+struct ReadTxFrame {
+    /// The `--tx-log` line, always.
+    line: String,
+    /// The frame's bytes, when the descriptor's reading held.
+    frame: Option<Vec<u8>>,
+}
+
+impl ReadTxFrame {
+    /// A handoff whose bytes this machine could not read as a frame. The
+    /// line still says so; the air gets nothing rather than a guess.
+    fn unreadable(line: String) -> Self {
+        Self { line, frame: None }
+    }
+}
 
 /// Why a run stopped.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1474,6 +1503,9 @@ impl Esp32C6Builder {
             tx_log: tx_log_sink,
             tx_log_lines: 0,
             tx_log_capped: false,
+            air_participant: None,
+            air_tx: Vec::new(),
+            air_offered: 0,
             next_pin_poll: 0,
             next_host_poll: 0,
             control_lines: 0,
@@ -1688,6 +1720,20 @@ pub struct Esp32C6Machine {
     tx_log: Option<Box<dyn std::io::Write + Send>>,
     tx_log_lines: u64,
     tx_log_capped: bool,
+    /// This machine's seat on an [`Air`](lp_emu_esp_common::air::Air), or
+    /// `None` for a machine that is not in one.
+    ///
+    /// The whole off switch: nothing on the air path runs, and `WIFI_MAC`
+    /// records nothing, until [`Esp32C6Machine::arm_air`] is called. See
+    /// [`crate::lockstep`].
+    air_participant: Option<lp_emu_esp_common::air::ParticipantId>,
+    /// Frames armed since the runner last drained them.
+    air_tx: Vec<RadioFrame>,
+    /// Frames the air has offered this machine. **P1 counts them and does
+    /// not deliver them**: writing one into the receiver's RX ring, filling
+    /// an `rx_ctrl` header and raising the RX interrupt is M4 P2's, and this
+    /// counter is what makes the pair runner testable before P2 exists.
+    air_offered: u64,
     /// The guest-cycle grid a pin script's unresolved `after` is looked at
     /// on. Guest time, so two runs resolve at the same cycle.
     next_pin_poll: Cycles,
@@ -2206,7 +2252,7 @@ impl Esp32C6Machine {
     /// a frame this reading does not cover is visible rather than silently
     /// mis-printed.
     fn drain_tx_log(&mut self) {
-        if self.tx_log.is_none() {
+        if self.tx_log.is_none() && self.air_participant.is_none() {
             return;
         }
         let Some(index) = self.wifi_mac_index else {
@@ -2219,7 +2265,22 @@ impl Esp32C6Machine {
             })
             .unwrap_or_default();
         for handoff in handoffs {
-            let line = self.tx_log_line(&handoff);
+            // Read the descriptor and the buffer **once**: the same bytes
+            // feed the `--tx-log` line and the air, so a pair run and a
+            // logged run can never disagree about what was sent.
+            let read = self.read_tx_frame(&handoff);
+            if self.air_participant.is_some()
+                && let Some(bytes) = read.frame
+            {
+                self.air_tx.push(RadioFrame {
+                    at: handoff.at,
+                    bytes,
+                });
+            }
+            if self.tx_log.is_none() {
+                continue;
+            }
+            let line = read.line;
             let Some(w) = self.tx_log.as_mut() else {
                 return;
             };
@@ -2238,8 +2299,15 @@ impl Esp32C6Machine {
         }
     }
 
-    /// One radio TX log line. See [`drain_tx_log`](Self::drain_tx_log).
-    fn tx_log_line(&mut self, handoff: &crate::periph::wifi_stub::TxHandoff) -> String {
+    /// One armed frame, read out of guest RAM: the log's line, and the
+    /// frame's own bytes when the descriptor's reading holds.
+    ///
+    /// See [`drain_tx_log`](Self::drain_tx_log) for what each field of the
+    /// line means and how much of it is a reading. `frame` is `None` for
+    /// exactly the cases the line reports as `unreadable=` or `raw=`: an air
+    /// carries a frame this machine could read *as a frame*, or it carries
+    /// nothing, and it never invents a length.
+    fn read_tx_frame(&mut self, handoff: &crate::periph::wifi_stub::TxHandoff) -> ReadTxFrame {
         let us = handoff.at as f64 / memmap::CYCLES_PER_US as f64;
         let desc = handoff.descriptor();
         let head = format!(
@@ -2251,12 +2319,12 @@ impl Esp32C6Machine {
             self.peek_word(desc.wrapping_add(4)),
             self.peek_word(desc.wrapping_add(8)),
         ) else {
-            return format!("{head} unreadable=descriptor");
+            return ReadTxFrame::unreadable(format!("{head} unreadable=descriptor"));
         };
         let size = dw0 & 0xfff;
         let head = format!("{head} dw0={dw0:#010x} buf={buf:#010x} next={next:#010x} size={size}");
         let Some(len) = self.peek_word(buf) else {
-            return format!("{head} unreadable=buffer");
+            return ReadTxFrame::unreadable(format!("{head} unreadable=buffer"));
         };
         // The frame sits at buf + 8 and runs `len - 4` bytes: the length
         // word counts the FCS the MAC appends and the buffer does not hold.
@@ -2264,11 +2332,77 @@ impl Esp32C6Machine {
         let fits = (4..=size.min(TX_LOG_BYTE_CAP)).contains(&len) && len + 4 <= size;
         if !fits {
             let raw = self.peek_bytes(buf, size.min(64));
-            return format!("{head} len={len} raw={}", hex(&raw));
+            return ReadTxFrame::unreadable(format!("{head} len={len} raw={}", hex(&raw)));
         }
         let hdr = self.peek_bytes(buf, 8);
         let frame = self.peek_bytes(buf + 8, len - 4);
-        format!("{head} len={len} hdr={} frame={}", hex(&hdr), hex(&frame))
+        ReadTxFrame {
+            line: format!("{head} len={len} hdr={} frame={}", hex(&hdr), hex(&frame)),
+            frame: Some(frame),
+        }
+    }
+
+    // ---- the air seam (M4 P1) -------------------------------------------
+    //
+    // Three calls, all driven from *outside* the machine by
+    // [`crate::lockstep`] or by the `--air` socket: take this machine's seat,
+    // drain what its radio armed, and offer it what someone else's did. The
+    // machine never sees the air and the air never sees the machine, which is
+    // the same seam `pins` draws for pads.
+
+    /// Give this machine seat `id` on an air, and start `WIFI_MAC` recording
+    /// the frames its blob arms.
+    ///
+    /// Idempotent, and the only thing that turns the air path on. A machine
+    /// this is never called on is byte-for-byte the machine that came before
+    /// this seam existed: [`drain_tx_log`](Self::drain_tx_log) returns at its
+    /// first line and `WIFI_MAC` never asks for a slice boundary.
+    pub fn arm_air(&mut self, id: lp_emu_esp_common::air::ParticipantId) {
+        self.air_participant = Some(id);
+        if let Some(index) = self.wifi_mac_index {
+            self.bus
+                .with_peripheral::<crate::periph::wifi_stub::WifiStub, _>(index, |w, _| {
+                    w.arm_air()
+                });
+        }
+    }
+
+    /// This machine's seat, or `None` when it is not in an air.
+    pub fn air_participant(&self) -> Option<lp_emu_esp_common::air::ParticipantId> {
+        self.air_participant
+    }
+
+    /// The frames this machine's radio armed since the last call, in the
+    /// order it armed them. Empty unless [`arm_air`](Self::arm_air) was.
+    pub fn take_air_frames(&mut self) -> Vec<RadioFrame> {
+        std::mem::take(&mut self.air_tx)
+    }
+
+    /// Offer this machine a frame from the air.
+    ///
+    /// **P1 counts it and stops there.** Delivery — a descriptor taken off
+    /// the RX ring, an `rx_ctrl` header written in front of the frame, the
+    /// RX interrupt raised — is M4 P2's, and it grows from exactly here.
+    /// Until it does, `frames offered` in a pair's report is the honest
+    /// statement of what the air did: it carried them, and nobody read them.
+    pub fn offer_air_frame(&mut self, frame: &lp_emu_esp_common::air::AirFrame) {
+        self.air_offered += 1;
+        if self.bus.trace.is_enabled() {
+            let line = format!(
+                "cyc={} AIR offered {} bytes from {} (sent at cyc={}, not delivered — M4 P2)",
+                self.cycles(),
+                frame.bytes.len(),
+                frame.from,
+                frame.at
+            );
+            self.bus.trace.note(&line);
+        }
+    }
+
+    /// How many frames the air has offered this machine. See
+    /// [`offer_air_frame`](Self::offer_air_frame).
+    pub fn air_frames_offered(&self) -> u64 {
+        self.air_offered
     }
 
     /// `count` bytes of guest memory, word by word through the bus's decode.

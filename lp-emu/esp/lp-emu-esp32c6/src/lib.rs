@@ -56,6 +56,7 @@ pub mod flash;
 pub mod image;
 pub mod intmatrix;
 pub mod loader;
+pub mod lockstep;
 pub mod machine;
 pub mod memmap;
 pub mod periph;
