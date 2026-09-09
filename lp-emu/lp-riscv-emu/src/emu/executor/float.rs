@@ -106,6 +106,7 @@ const MAX_FINITE: u32 = 0x7f7f_ffff;
 ///
 /// Dispatched from [`super::decode_execute`] for the five F-extension opcodes.
 /// `lp-riscv-inst` has no F support, so the instruction word is decoded here.
+#[inline(always)]
 pub(super) fn decode_execute_float<M: LoggingMode, B: Bus>(
     inst_word: u32,
     pc: u32,

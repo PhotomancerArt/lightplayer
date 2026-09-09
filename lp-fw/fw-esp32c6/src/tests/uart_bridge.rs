@@ -11,11 +11,13 @@
 //! This harness never calls `logger::init`. With no `log` sink registered every
 //! `log::` call in this crate and in esp-hal is a no-op, which is the only way
 //! to guarantee that an `esp_hal` `debug!` cannot land in the middle of
-//! somebody's boot capture. It is also why the two boot lines go out through
-//! `esp_println` (whose USB-Serial-JTAG printer times out and drops rather than
-//! spinning on an unread endpoint) instead of through `fw_checks::emit_header`,
-//! which logs. The line they produce is byte-identical to the contracted one —
-//! `PayloadHeader`'s `Display` is the same renderer `emit_header` uses.
+//! somebody's boot capture. It is also why the header line goes out through
+//! `fw_checks::write_header(&mut esp_println::Printer, ..)` (whose
+//! USB-Serial-JTAG printer times out and drops rather than spinning on an
+//! unread endpoint) instead of through `fw_checks::emit_header`, which logs
+//! and would be a silent no-op with no sink installed. Every other C6 payload
+//! harness now goes through the same `write_header` entry point, for the same
+//! reason: none of them can prove a logger is installed either.
 //!
 //! ## The two directions are not symmetric
 //!
@@ -133,19 +135,17 @@ pub async fn run_uart_bridge(_: embassy_executor::Spawner) -> ! {
 
     let (prev_to_uart, prev_to_usb) = take_drops();
 
-    // The contracted header line, rendered by the same `Display` impl
-    // `fw_checks::emit_header` uses — but printed rather than logged, because
-    // this payload installs no logger (see the module docs).
-    esp_println::println!(
-        "{}{}",
-        fw_checks::FW_CHECKS_HEADER_PREFIX,
-        fw_checks::PayloadHeader {
+    // The contracted header line — printed rather than logged, because this
+    // payload installs no logger (see the module docs).
+    let _ = fw_checks::write_header(
+        &mut esp_println::Printer,
+        &fw_checks::PayloadHeader {
             payload: "uart-bridge",
             chip: TARGET,
             firmware_commit: env!("LP_BUILD_COMMIT"),
             firmware_features: env!("LP_BUILD_FEATURES"),
             firmware_dirty: fw_checks::str_is_true(env!("LP_BUILD_DIRTY")),
-        }
+        },
     );
     esp_println::println!(
         "{}",

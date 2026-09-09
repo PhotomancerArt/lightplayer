@@ -31,7 +31,6 @@ pub mod export_lint;
 pub mod loaded_project_choice;
 pub mod node;
 pub mod node_card_ui_state;
-pub(crate) mod output_frame_cache;
 pub(crate) mod patch_bay_derivation;
 pub mod patch_preview;
 pub mod patch_pulse;
@@ -74,11 +73,11 @@ pub use editor_meta_op::{
 pub use export_lint::{ExportGraphContext, ExportGraphNode, check_export_graph};
 pub use loaded_project_choice::LoadedProjectChoice;
 pub use node::{
-    ModuleExportOp, NodeClearDebugOp, NodeController, NodeControllerState, NodeCopyOp,
-    NodeCreateOp, NodeImportOp, NodePasteOp, NodeRemoveOp, NodeRevertOp, PanelAutoSaveOp,
-    PanelClearOp, PanelWriteOp, PlaylistActivateOp, ProjectNodeAddress, ProjectNodeTarget,
-    ProjectProductSubscriptionIntent, UiAddNodeMenu, UiAddNodeMenuEntry, UiAttachTarget,
-    UiImportablePattern, UiNodeRemovePreflight,
+    IMPORT_BUILTIN_SECTION, IMPORT_LIBRARY_SECTION, ImportSource, ModuleExportOp, NodeClearDebugOp,
+    NodeController, NodeControllerState, NodeCopyOp, NodeCreateOp, NodeImportOp, NodePasteOp,
+    NodeRemoveOp, NodeRevertOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp, PlaylistActivateOp,
+    ProjectNodeAddress, ProjectNodeTarget, ProjectProductSubscriptionIntent, UiAddNodeMenu,
+    UiAddNodeMenuEntry, UiAttachTarget, UiImportablePattern, UiNodeRemovePreflight,
 };
 pub use node_card_ui_state::{
     ModuleHeroProduct, NodeCardDrawer, NodeCardUiState, NodeUiOp, UiPreviewSpaces,

@@ -46,32 +46,32 @@ mod tests {
 
     const EXAMPLES: &[(&str, &str)] = &[
         (
-            "examples/fast/shader.glsl",
-            include_str!("../../../examples/fast/shader.glsl"),
+            "projects/test/fast/shader.glsl",
+            include_str!("../../../projects/test/fast/shader.glsl"),
         ),
         (
-            "examples/basic2/shader.glsl",
-            include_str!("../../../examples/basic2/shader.glsl"),
+            "projects/test/basic2/shader.glsl",
+            include_str!("../../../projects/test/basic2/shader.glsl"),
         ),
         (
-            "examples/basic/shader.glsl",
-            include_str!("../../../examples/basic/shader.glsl"),
+            "projects/test/basic/shader.glsl",
+            include_str!("../../../projects/test/basic/shader.glsl"),
         ),
         (
             "testdata/noise-fx.glsl",
             include_str!("../testdata/noise-fx.glsl"),
         ),
         (
-            "examples/perf/baseline/shader.glsl",
-            include_str!("../../../examples/perf/baseline/shader.glsl"),
+            "projects/test/perf/baseline/shader.glsl",
+            include_str!("../../../projects/test/perf/baseline/shader.glsl"),
         ),
         (
-            "examples/perf/fastmath/shader.glsl",
-            include_str!("../../../examples/perf/fastmath/shader.glsl"),
+            "projects/test/perf/fastmath/shader.glsl",
+            include_str!("../../../projects/test/perf/fastmath/shader.glsl"),
         ),
         (
-            "examples/rocaille/shader.glsl",
-            include_str!("../../../examples/rocaille/shader.glsl"),
+            "catalog/projects/rocaille/shader.glsl",
+            include_str!("../../../catalog/projects/rocaille/shader.glsl"),
         ),
     ];
 
@@ -576,7 +576,7 @@ FluidEmitter emitters[4];
 
 {}
 "#,
-            include_str!("../../../examples/fluid/compute.glsl")
+            include_str!("../../../projects/test/fluid/compute.glsl")
         );
         let output = compile(&source, &CompileOptions::default()).expect("compile fluid compute");
         lpir::validate_module(&output.ir).expect("valid LPIR");

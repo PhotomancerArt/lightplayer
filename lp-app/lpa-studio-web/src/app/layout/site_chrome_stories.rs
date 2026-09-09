@@ -12,9 +12,8 @@ use dioxus::prelude::*;
 use lpa_studio_core::{
     ControllerId, DirtySummary, ProjectController, ProjectNodeAddress, ProjectOp,
     ProjectSlotAddress, ProjectSlotRoot, ProjectSyncPhase, SlotEditOp, SlotPath, UiAction,
-    UiChromeSessionControl, UiChromeSessionKind, UiChromeSessionStatus, UiHistoryKind,
-    UiPaneAction, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiProjectHistory,
-    UiProjectHistoryEntry, UiStatus,
+    UiChromeSessionControl, UiChromeSessionStatus, UiHistoryKind, UiPaneAction, UiPendingEdit,
+    UiPendingEditKind, UiPendingEditPhase, UiProjectHistory, UiProjectHistoryEntry, UiStatus,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -168,6 +167,18 @@ pub(crate) fn control_relationship_faces() -> Element {
                     {control_row_as(1000, sim_control(Some("ESP32-C6")), Some(control_content(3, 0, UiStatus::good("Ready"))), relationship, None)}
                 }
             }
+        }
+    }
+}
+
+#[story(
+    label = "Device popover open — hardware lens, rename",
+    description = "The shared panel on its DEVICE tab for a hardware lens: the device's live title (the roster's, not an attach-time snapshot, so a rename shows in the segment at once), its run word and the lens client's rate — and, because a board has a name of its own to change where the sim does not, the same Rename section the device card's header menu holds, prefilled with the current title. Submitting dispatches SetName and closes the panel."
+)]
+pub(crate) fn control_device_popover_open_hardware() -> Element {
+    rsx! {
+        div { class: "tw:min-h-[320px] tw:p-4",
+            {control_row(700, hardware_control(), Some(control_content(0, 0, UiStatus::good("Ready"))), Some(ControlSegment::Device))}
         }
     }
 }
@@ -469,13 +480,14 @@ fn control_row_as(
     }
 }
 
-/// THE sim session, naming the board it simulates (ruling 8.1) — or bare
-/// "Sim" when the project names no board (ruling Q6).
+/// THE tab's sim session: a DEVICE like any other now (PD9), named by its
+/// record and wearing the board it acts as behind that name.
 fn sim_control(board: Option<&str>) -> UiChromeSessionControl {
     UiChromeSessionControl {
-        kind: UiChromeSessionKind::Sim,
-        key: "runtime-sim".to_string(),
-        name: "Sim".to_string(),
+        face: lpa_studio_core::DeviceFace::Sim,
+        key: "device:dev000000daqf6dvvsm".to_string(),
+        device: Some(lpa_studio_core::DeviceId(2)),
+        name: "Desktop sim".to_string(),
         board: board.map(str::to_string),
         status: UiChromeSessionStatus::Run,
         stat_line: board.map(|_| "60 fps · 217 lamps".to_string()),
@@ -487,8 +499,9 @@ fn sim_control(board: Option<&str>) -> UiChromeSessionControl {
 /// stat line is what the lens client heard.
 fn hardware_control() -> UiChromeSessionControl {
     UiChromeSessionControl {
-        kind: UiChromeSessionKind::Device,
+        face: lpa_studio_core::DeviceFace::Wire,
         key: "device:dev000000daqf6dvvqz".to_string(),
+        device: Some(lpa_studio_core::DeviceId(1)),
         name: "XIAO ESP32-C6 · Sep 1".to_string(),
         board: None,
         status: UiChromeSessionStatus::Run,

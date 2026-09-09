@@ -6,7 +6,6 @@
 
 pub(crate) mod brand_hero;
 pub(crate) mod card_footer;
-pub(crate) mod card_sheet;
 pub(crate) mod card_thumb;
 pub(crate) mod device_pick_popover;
 pub(crate) mod device_roster_card;
@@ -21,7 +20,7 @@ pub(crate) mod home_gallery_stories;
 pub mod home_landing;
 #[cfg(feature = "stories")]
 pub(crate) mod home_landing_stories;
-/// The `examples/logo-sign` mapping generator plus its drift gate. Test-only:
+/// The `catalog/logo-sign` mapping generator plus its drift gate. Test-only:
 /// the running app reads the committed document, never this.
 #[cfg(test)]
 mod logo_sign_gen;
@@ -32,12 +31,12 @@ pub(crate) mod package_card;
 #[cfg(feature = "stories")]
 pub(crate) mod package_card_stories;
 pub mod package_export;
+pub(crate) mod play_feed_text;
 pub mod project_opening_frame;
 #[cfg(feature = "stories")]
 pub(crate) mod project_opening_frame_stories;
 pub mod projects_page;
-pub(crate) mod sim_card;
-pub(crate) mod sim_play_tab;
+pub(crate) mod target_pick_popover;
 /// Poster capture is the wasm thumb path; host builds of this crate render
 /// no live preview at all and only run the cache's unit tests.
 #[cfg_attr(

@@ -1,0 +1,139 @@
+diff --git a/lp-fw/fw-esp32v3/Cargo.toml b/lp-fw/fw-esp32v3/Cargo.toml
+index df835c05a..8d2701702 100644
+--- a/lp-fw/fw-esp32v3/Cargo.toml
++++ b/lp-fw/fw-esp32v3/Cargo.toml
+@@ -95,6 +95,16 @@ server = [
+ #   cargo build --profile release-esp32v3 --features ws281x_telemetry
+ ws281x_telemetry = []
+ 
++# Scheduler-interrupt cost on the PRO core: a `[RTOS-TICK]` line every 10 s
++# with the cycles spent in esp-rtos's tick and yield handlers (see
++# `src/rtos_tick_probe.rs` and `third_party/esp-rtos/README-LP.md`). Off by
++# default for the same reasons as `ws281x_telemetry`; the counters live in the
++# vendored esp-rtos behind its `lp-tick-probe` feature.
++#
++# Build (touch src/main.rs first if flipping features):
++#   cargo build --profile release-esp32v3 --features rtos_tick_probe
++rtos_tick_probe = ["esp-rtos?/lp-tick-probe"]
++
+ # Hardware f32 shaders on this chip's LX6 FPU.
+ #
+ # ON BY DEFAULT, like fw-esp32s3's feature of the same name. The C6 names no
+diff --git a/lp-fw/fw-esp32v3/src/main.rs b/lp-fw/fw-esp32v3/src/main.rs
+index 323cd93e6..78ef279da 100644
+--- a/lp-fw/fw-esp32v3/src/main.rs
++++ b/lp-fw/fw-esp32v3/src/main.rs
+@@ -122,6 +122,8 @@ mod output;
+ #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
+ mod recovery;
+ #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
++mod rtos_tick_probe;
++#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
+ mod serial;
+ #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
+ mod stack_probe;
+diff --git a/lp-fw/fw-esp32v3/src/output/rmt/esp32v3_rmt_ws281x_driver.rs b/lp-fw/fw-esp32v3/src/output/rmt/esp32v3_rmt_ws281x_driver.rs
+index 6d6d8f800..f08b4d663 100644
+--- a/lp-fw/fw-esp32v3/src/output/rmt/esp32v3_rmt_ws281x_driver.rs
++++ b/lp-fw/fw-esp32v3/src/output/rmt/esp32v3_rmt_ws281x_driver.rs
+@@ -681,6 +681,7 @@ impl Esp32V3RmtWs281xOutput {
+ 
+         // After the frame, never during it (see the fallback path).
+         report_telemetry_if_due();
++        crate::rtos_tick_probe::report_if_due();
+ 
+         match outcome {
+             // A frame that completed inside the grace window made it to the
+@@ -864,6 +865,7 @@ impl Ws281xOutput for Esp32V3RmtWs281xOutput {
+         // After the frame, never during it, and a no-op unless the
+         // `ws281x_telemetry` feature is on.
+         report_telemetry_if_due();
++        crate::rtos_tick_probe::report_if_due();
+ 
+         if timed_out {
+             return Err(OutputError::Other {
+diff --git a/lp-fw/fw-esp32v3/src/rtos_tick_probe.rs b/lp-fw/fw-esp32v3/src/rtos_tick_probe.rs
+new file mode 100644
+index 000000000..7eadedfd4
+--- /dev/null
++++ b/lp-fw/fw-esp32v3/src/rtos_tick_probe.rs
+@@ -0,0 +1,79 @@
++//! Scheduler-interrupt cost on the PRO core, printed over the serial log.
++//!
++//! The classic's `#[ram]` esp-rtos handlers call flash-resident code on their
++//! executed paths (`docs/debt/classic-iram-handlers-reach-flash.md`), and the
++//! PRO core's render loop thrashes the one 32 KB flash cache that core has.
++//! This probe prices that: the vendored esp-rtos (`third_party/esp-rtos`,
++//! feature `lp-tick-probe`) reads `CCOUNT` at the entry and exit of
++//! `timer_tick_handler` and `cross_core_yield_handler` and folds the deltas
++//! into counters; this module drains them from thread context every
++//! [`PERIOD`] and prints one `[RTOS-TICK]` line:
++//!
++//! ```text
++//! [RTOS-TICK] t_ms=… dt_ms=… ticks=… tick_cycles=… tick_max=… yields=… yield_cycles=… yield_max=…
++//! ```
++//!
++//! Cycles are at the CPU clock (`CpuClock::max()` = 240 MHz here), so
++//! `tick_cycles / 240` is microseconds and `tick_cycles / (240_000 * dt_ms)`
++//! is the PRO-core fraction spent in the tick handler over the period. The
++//! host side does that arithmetic; integer formatting only on the device, so
++//! no float machinery is linked.
++//!
++//! Called from the frame-write path next to `report_telemetry_if_due` — a
++//! thread context on the PRO core, after a frame and never during one — so a
++//! render-heavy project (`projects/test/zook-dome-1500`) is exactly the load
++//! the numbers describe. Compiled out entirely without the
++//! `rtos_tick_probe` feature: the call site becomes an empty
++//! `#[inline(always)]` fn.
++
++#[cfg(not(feature = "rtos_tick_probe"))]
++#[inline(always)]
++pub fn report_if_due() {}
++
++#[cfg(feature = "rtos_tick_probe")]
++pub use probe::report_if_due;
++
++#[cfg(feature = "rtos_tick_probe")]
++mod probe {
++    use core::sync::atomic::{AtomicU32, Ordering};
++
++    use esp_hal::time::{Duration, Instant};
++
++    /// Report cadence. Long enough that the print cannot perturb the
++    /// measurement, short enough that a one-minute capture holds several
++    /// samples.
++    pub const PERIOD: Duration = Duration::from_secs(10);
++
++    /// Millisecond timestamp of the last report (32-bit: the LX6 has no
++    /// 64-bit atomics; wrapping arithmetic covers the rollover).
++    static LAST_REPORT_MS: AtomicU32 = AtomicU32::new(0);
++
++    /// Print one `[RTOS-TICK]` line if [`PERIOD`] has elapsed.
++    pub fn report_if_due() {
++        let now_ms = Instant::now().duration_since_epoch().as_millis() as u32;
++        let last = LAST_REPORT_MS.load(Ordering::Relaxed);
++        if now_ms.wrapping_sub(last) < PERIOD.as_millis() as u32 {
++            return;
++        }
++        if LAST_REPORT_MS
++            .compare_exchange(last, now_ms, Ordering::Relaxed, Ordering::Relaxed)
++            .is_err()
++        {
++            return;
++        }
++        let (ticks, tick_cycles, tick_max) = esp_rtos::lp_probe::TICK.take();
++        let (yields, yield_cycles, yield_max) = esp_rtos::lp_probe::YIELD.take();
++        esp_println::println!(
++            "[RTOS-TICK] t_ms={} dt_ms={} ticks={} tick_cycles={} tick_max={} \
++             yields={} yield_cycles={} yield_max={}",
++            now_ms,
++            now_ms.wrapping_sub(last),
++            ticks,
++            tick_cycles,
++            tick_max,
++            yields,
++            yield_cycles,
++            yield_max,
++        );
++    }
++}

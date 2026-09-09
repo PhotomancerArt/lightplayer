@@ -115,6 +115,16 @@ pub enum Action {
         /// app; the model treats it as data.
         #[serde(default)]
         park_first: bool,
+        /// The name the user typed at setup, when they typed one. Optional
+        /// by ruling (no naming step): `None` leaves the app's derived
+        /// "<board> · <Mon D>" in place. `Some` is a user-stream write of
+        /// [`Intent::name`](crate::Intent::name), folded before the flash
+        /// spawns — the same fact a later [`Self::SetName`] would set, riding
+        /// the gesture it was typed into rather than a second dispatch (a
+        /// pending link has no intent to rename until this very gesture
+        /// adopts it).
+        #[serde(default)]
+        name: Option<String>,
     },
     /// Reset the board's hardware (DTR/RTS pulse — `ResetKind::Normal`) and
     /// identify what boots. The direct-control verb for a board wedged in a
@@ -394,6 +404,7 @@ mod tests {
                 board_id: "seeed-xiao-esp32c6".to_string(),
                 build_id: "esp32c6-4mb".to_string(),
                 park_first: false,
+                name: None,
             },
             Action::SetName {
                 device,

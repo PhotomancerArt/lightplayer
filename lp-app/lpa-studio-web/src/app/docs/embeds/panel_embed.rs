@@ -180,7 +180,7 @@ pub(crate) fn DocsPanelSurface(
                 },
                 None => rsx! {
                     EmbedLoading {
-                        message: "Starting the simulator — the knobs appear here.".to_string(),
+                        message: "Starting Desktop (sim) — the knobs appear here.".to_string(),
                         min_height: 120,
                     }
                 },
@@ -280,7 +280,7 @@ mod tests {
         assert!(!fans_out(&UiAction::from_op(
             ControllerId::new(lpa_studio_core::HOME_NODE_ID),
             HomeOp::OpenExample {
-                id: "examples/plasma".to_string(),
+                id: "catalog/plasma".to_string(),
             },
         )));
     }

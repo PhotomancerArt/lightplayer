@@ -28,7 +28,7 @@
 //!   that published, which is how the small dome's second box (2,975
 //!   lamps) never appeared on a preview card.
 //!
-//! The device card feed (`crate::app::runtime_pool::card_feed`) keeps the
+//! The device card feed (`crate::app::frame_feed::card_feed`) keeps the
 //! same guarantees for a session at the far end of a serial link, where the
 //! read is a host-driven pull with its own pacing and offline story. This one
 //! rides a frame the preview host already schedules, so it owns neither.
@@ -36,7 +36,7 @@
 use lpc_wire::{ControlDisplayLayoutRead, OutputFrameEntry};
 
 use crate::UiControlProductPreview;
-use crate::app::project::output_frame_cache::OutputFrameCache;
+use crate::app::frame_feed::OutputFrameCache;
 
 /// Output-frame state for one [`super::PreviewSlotHandle`].
 #[derive(Debug, Default)]

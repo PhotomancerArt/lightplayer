@@ -38,6 +38,40 @@ pub struct ConfigurationEntry {
     pub name: String,
     pub description: String,
     pub chip: String,
+    /// The chip identity this configuration reports, when it has to be told.
+    ///
+    /// Silicon reads its own eFuse and leaves these empty — a transcript from
+    /// a board records what that board said. An emulator has no eFuse to read,
+    /// so ours is given the desk board's MAC and revision here, and the runner
+    /// passes them on the machine's command line. That is what makes the
+    /// identity fields of a hello frame compare equal across a silicon
+    /// transcript and an emulated one instead of differing for a reason that
+    /// says nothing about the model.
+    ///
+    /// Still **not** identity in the PD4 sense: the configuration is the chip
+    /// (`lp-emu:esp32c6:t1`), and which board these numbers came from is said
+    /// in `board`, here and in every transcript's sidecar.
+    #[serde(default)]
+    pub mac: Option<String>,
+    #[serde(default)]
+    pub silicon_rev: Option<String>,
+    #[serde(default)]
+    pub board: Option<String>,
+    /// Can this configuration produce a decoded pin capture?
+    ///
+    /// **Stated, never inferred**, for the same reason trust is: silence is
+    /// not a capability. An `lp-emu:*` machine decodes the pad off its own
+    /// signal fabric and says `records_pins = true`; silicon says nothing and
+    /// therefore records none, because reading a real pad needs an instrument
+    /// nobody has put on this bench.
+    ///
+    /// Deliberately not derived from the `lp-emu:` name prefix. That would be
+    /// right by accident and wrong the first time a configuration is a board
+    /// with a logic analyser on it — which is exactly the capture the `pin`
+    /// class is waiting for
+    /// (`docs/defects/2026-09-08-a-pin-capture-is-a-property-of-the-configuration-not-the-payload.md`).
+    #[serde(default)]
+    pub records_pins: bool,
     #[serde(default)]
     pub trust: TrustTable,
 }
@@ -45,6 +79,15 @@ pub struct ConfigurationEntry {
 impl ConfigurationEntry {
     pub fn parsed(&self) -> Result<Configuration> {
         Configuration::parse(&self.name)
+    }
+
+    /// The identity to hand a driver.
+    pub fn identity(&self) -> crate::driver::Identity {
+        crate::driver::Identity {
+            mac: self.mac.clone(),
+            silicon_rev: self.silicon_rev.clone(),
+            board: self.board.clone(),
+        }
     }
 }
 
@@ -115,7 +158,22 @@ impl ValidateConfig {
         }
     }
 
+    /// The payloads a set names — or the one payload, when `set` is a
+    /// payload's own name and no set has that name.
+    ///
+    /// The fallback is not a convenience. M6 records `emu-m6`'s four
+    /// transcripts against **two** images (sitting 1's commit for the
+    /// DD30 arbitration, main's for the three scenarios whose vehicle P1b
+    /// added afterwards), and `record` takes one `--commit` per invocation
+    /// because the commit is provenance, not a guess. Without this a set of
+    /// four would have to be split into sets of one in `validate.toml`,
+    /// which would make the policy file a workaround for the CLI.
     pub fn payloads_in(&self, set: &str) -> Result<Vec<&'static Payload>> {
+        if self.sets.iter().all(|s| s.name != set)
+            && let Ok(one) = find_payload(set)
+        {
+            return Ok(vec![one]);
+        }
         self.set(set)?
             .payloads
             .iter()

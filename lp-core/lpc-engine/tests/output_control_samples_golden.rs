@@ -43,7 +43,9 @@ const DELTA_MS: u32 = 16;
 
 /// One example project's expected published-output digests.
 struct Expectation {
-    /// Project directory under `examples/`.
+    /// Project directory name, resolved by [`project_dir`] across the
+    /// checked-in roots (the root path — and so every output node path
+    /// below — is derived from this name alone).
     project: &'static str,
     /// Per-output `(node path, per-tick (byte length, digest, head bytes))`.
     outputs: &'static [(&'static str, &'static [(usize, u64, [u8; 6])])],
@@ -411,12 +413,24 @@ fn workspace_dir() -> PathBuf {
         .to_path_buf()
 }
 
+/// Where a golden's project lives: the first checked-in root holding a
+/// directory of that name (catalog buckets first, then the test rigs).
+fn project_dir(project: &str) -> PathBuf {
+    const ROOTS: &[&str] = &["catalog/patterns", "catalog/projects", "projects/test"];
+    let workspace = workspace_dir();
+    ROOTS
+        .iter()
+        .map(|root| workspace.join(root).join(project))
+        .find(|dir| dir.join("project.json").is_file())
+        .unwrap_or_else(|| panic!("{project}: not found under any of {ROOTS:?}"))
+}
+
 fn load(project: &str) -> LoadedProjectRuntime {
-    let fs = LpFsStd::new(workspace_dir().join("examples").join(project));
+    let fs = LpFsStd::new(project_dir(project));
     let root = format!("/{}.show", project.replace(['/', '-'], "_"));
     let services = EngineServices::new(TreePath::parse(&root).expect("root path"));
     let mut rt = ProjectLoader::load_from_root(&fs, services)
-        .unwrap_or_else(|e| panic!("load examples/{project}: {e:?}"));
+        .unwrap_or_else(|e| panic!("load {project}: {e:?}"));
     rt.engine_mut()
         .set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
             lp_shader::ShaderFrontend::LpsGlsl,
@@ -430,7 +444,7 @@ fn render_project(project: &str) -> OutputDigests {
     let mut per_output: OutputDigests = Vec::new();
     for tick in 0..TICKS {
         rt.tick(DELTA_MS)
-            .unwrap_or_else(|e| panic!("examples/{project} tick {tick}: {e:?}"));
+            .unwrap_or_else(|e| panic!("{project} tick {tick}: {e:?}"));
         for (path, digest) in published_outputs(&rt) {
             match per_output.iter_mut().find(|(known, _)| known == &path) {
                 Some((_, ticks)) => ticks.push(digest),

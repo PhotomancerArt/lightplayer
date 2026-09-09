@@ -1,4 +1,4 @@
-//! Generator for `examples/logo-sign/sign.map2d.json` — the brand artwork as
+//! Generator for `catalog/logo-sign/sign.map2d.json` — the brand artwork as
 //! a real, someday-buildable LED piece.
 //!
 //! The Logo Sign is the landing hero made physical: a shaped PCB matrix in the
@@ -10,7 +10,7 @@
 //! The document is **generated, not drawn**: the triangle outline comes from
 //! [`fillet_tri_corners`] — the same construction the mark, the favicon and
 //! the hero clip path are built from — and the letters come from the committed
-//! [`letters.svg`](../../../../../examples/logo-sign/letters.svg) through the
+//! [`letters.svg`](../../../../../catalog/projects/logo-sign/letters.svg) through the
 //! corpus SVG importer. Drawing it by hand would have forked the brand
 //! geometry the moment either side moved.
 //!
@@ -36,7 +36,7 @@ use crate::base::logo_mark::fillet_tri_corners;
 /// The committed letter skeletons. Authored in the corpus SVG subset (one
 /// top-level group per letter, one straight-line polyline, one
 /// `path:N,count:N` label); see the file's own header for the em frame.
-const LETTERS_SVG: &str = include_str!("../../../../../examples/logo-sign/letters.svg");
+const LETTERS_SVG: &str = include_str!("../../../../../catalog/projects/logo-sign/letters.svg");
 
 /// The letters, in wiring order, with the segment indices of each letter's
 /// jumper wire — the pen-lifts a single stroke cannot reach.
@@ -101,7 +101,7 @@ fn logo_sign_map2d() -> Map2dDoc {
 }
 
 /// The committed document's bytes: pretty JSON with a trailing newline, the
-/// same shape every generated map2d in `examples/` is written in.
+/// same shape every generated map2d in `catalog/` is written in.
 fn logo_sign_map2d_json() -> String {
     logo_sign_map2d().to_json_pretty() + "\n"
 }
@@ -179,7 +179,7 @@ fn fillet_arc(enter: (f32, f32), leave: (f32, f32), rho: f32, toward: (f32, f32)
 /// placed on the hero's wordmark metrics.
 fn letter_objects() -> Vec<Map2dObject> {
     let imported = lpc_mapping::import::svg_to_doc(LETTERS_SVG, SAMPLE_DIAMETER)
-        .expect("examples/logo-sign/letters.svg parses as a corpus mapping SVG");
+        .expect("catalog/logo-sign/letters.svg parses as a corpus mapping SVG");
     let [_, _, svg_width, _] = imported
         .canvas
         .expect("letters.svg declares a viewBox, which the importer keeps as the canvas");
@@ -237,7 +237,8 @@ fn round_point(point: [f32; 2]) -> [f32; 2] {
 use std::path::PathBuf;
 
 fn map2d_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/logo-sign/sign.map2d.json")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../catalog/projects/logo-sign/sign.map2d.json")
 }
 
 /// Drift gate: the committed mapping document must match the generated one,
@@ -246,11 +247,11 @@ fn map2d_path() -> PathBuf {
 #[test]
 fn logo_sign_map2d_in_sync() {
     let on_disk =
-        std::fs::read_to_string(map2d_path()).expect("read examples/logo-sign/sign.map2d.json");
+        std::fs::read_to_string(map2d_path()).expect("read catalog/logo-sign/sign.map2d.json");
     assert_eq!(
         on_disk,
         logo_sign_map2d_json(),
-        "examples/logo-sign/sign.map2d.json is stale. Regenerate:\n  \
+        "catalog/logo-sign/sign.map2d.json is stale. Regenerate:\n  \
          cargo test -p lpa-studio-web logo_sign_map2d_regen -- --ignored"
     );
 }
@@ -258,10 +259,10 @@ fn logo_sign_map2d_in_sync() {
 /// Regenerator (opt-in): rewrites the committed document from the brand
 /// geometry and the letter SVG. Run after changing either.
 #[test]
-#[ignore = "writes examples/logo-sign/sign.map2d.json; run explicitly after geometry changes"]
+#[ignore = "writes catalog/logo-sign/sign.map2d.json; run explicitly after geometry changes"]
 fn logo_sign_map2d_regen() {
     std::fs::write(map2d_path(), logo_sign_map2d_json())
-        .expect("write examples/logo-sign/sign.map2d.json");
+        .expect("write catalog/logo-sign/sign.map2d.json");
 }
 
 /// The counts the artwork IS: a 132-lamp shaped matrix and 109 lamps of

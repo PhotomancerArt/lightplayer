@@ -11,7 +11,7 @@ use dioxus::prelude::*;
 use lpa_boards::geometry::{BoardLayout, DiagramOptions};
 use lpa_boards::{
     BoardCallout, BoardDiagram, BoardDisplayFile, BoardsCatalogPage, DiagramMargin, DiagramMode,
-    HostOs, PinSwatch, WiredConnection, all_boards, board_by_id,
+    HostOs, PinSwatch, WiredConnection, board_by_id, purchasable_boards,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -95,7 +95,7 @@ fn BoardFigure(children: Element) -> Element {
 pub(crate) fn catalog_thumbnails() -> Element {
     rsx! {
         div { style: "display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-end;",
-            for entry in all_boards() {
+            for entry in purchasable_boards() {
                 div { style: "display: flex; flex-direction: column; align-items: center; gap: 6px; background: var(--studio-color-terminal); border: 1px solid var(--studio-color-border); border-radius: 10px; padding: 12px;",
                     BoardDiagram {
                         board: entry.clone(),
@@ -119,7 +119,7 @@ pub(crate) fn picker_thumbnails() -> Element {
     rsx! {
         div { style: "display: flex; flex-direction: column; gap: 18px; align-items: flex-start;",
             div { style: "display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-start;",
-                for entry in all_boards() {
+                for entry in purchasable_boards() {
                     div { style: "display: flex; flex-direction: column; gap: 4px; width: 150px; border: 1px solid var(--studio-color-border-subtle); border-radius: 6px; padding: 8px;",
                         span { style: "display: grid; place-items: center; height: 56px; overflow: hidden; border-radius: 3px; background: var(--studio-color-terminal);",
                             BoardDiagram {
@@ -140,7 +140,7 @@ pub(crate) fn picker_thumbnails() -> Element {
                 }
             }
             div { style: "display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-start;",
-                for entry in all_boards() {
+                for entry in purchasable_boards() {
                     span { style: "display: grid; place-items: center; width: 132px; height: 56px; overflow: hidden; border-radius: 3px; background: var(--studio-color-terminal);",
                         BoardDiagram {
                             board: entry.clone(),
@@ -152,7 +152,7 @@ pub(crate) fn picker_thumbnails() -> Element {
                 }
             }
             div { style: "display: flex; gap: 10px; align-items: center;",
-                for entry in all_boards() {
+                for entry in purchasable_boards() {
                     span { style: "display: grid; place-items: center; width: 22px; height: 16px; overflow: hidden; border-radius: 3px; border: 1px solid var(--studio-color-border-strong); background: var(--studio-color-surface-raised-strong);",
                         BoardDiagram {
                             board: entry.clone(),

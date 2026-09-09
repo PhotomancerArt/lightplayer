@@ -185,12 +185,34 @@ genuinely fits none of these, and define it here in one line.
   than by construction, so unrelated growth elsewhere crosses it silently
   and the failure is quantised at one specific deadline, every time. The
   fix is placement or budget, verified by measurement, not by attributes.
+- **`toolchain-miscompile`** — a compiler between the validated IR and
+  the hardware drops or rewrites a construct that is legal at every layer
+  above it; nothing host-side can see it, only a device run of the exact
+  construct. The fix is a shape the compiler handles and a device test
+  that holds the shape.
+- **`contract-gap`** — content is authored against a guarantee one tier
+  enforces (a fuel meter, a bound, a trap) and a second implementation of
+  the same interface never enforces it, so the same input is safe on one
+  tier and lethal on another. Unlike `backend-contract-divergence` the two
+  do not disagree on a detail — one of them simply has nothing where the
+  other has a guard, and nothing in the interface says which. The fix
+  shape is to make the guarantee part of the interface: enforce it on
+  every tier, or refuse the input on the tier that cannot.
 - **`arena-retained-transient`** — a value that is transient by intent
   (an intermediate of a recursive build, a type copied "for convenience"
   onto every node) is pushed into an arena whose lifetime is the whole
   pass, so the working set scales with references × payload size instead
   of with the result. Presents as an allocation failure far larger than
   the input could justify.
+- **`shared-namespace-collision`** — two independent producers mint
+  identifiers from the same namespace onto one shared channel, and a
+  consumer correlates on the identifier alone, so one producer's frame
+  satisfies the other's pending request. Disjoint bases (start your ids
+  high) are the usual mitigation and are the trap: they make the
+  collision rare rather than impossible, so the defect presents as flake
+  landing on a different test each time. The fix is a shape check — ask
+  whether the frame *could* answer this request before asking whether
+  its number matches.
 
 ## Index
 
@@ -301,8 +323,9 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
-| assumed-context | 2026-09-06 | [c6-first-flash-bootloader-hang-lp-analog-i2c-clock](2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.md) | fixed | lpa-link flashers + lpa-devices reconnect ladder: a fresh C6's factory firmware gates the LP analog I2C clock; our bootloader hangs after every HP-only reset until a replug |
-| assumed-context | 2026-09-06 | [xiao-c6-7e44-hangs-in-the-second-stage-bootloader](2026-09-06-xiao-c6-7e44-hangs-in-the-second-stage-bootloader.md) | fixed (same cause; espflash-stub half open) | UART-bridge bench fixture, board A0:F2:62:86:7E:44 — the same hang, first blamed on the wiring |
+| assumed-context | 2026-09-06 | [c6-first-flash-bootloader-hang-lp-analog-i2c-clock](2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.md) | fixed | lpa-link flashers + lpa-devices reconnect ladder: a fresh C6's factory firmware gates the LP analog I2C clock; our bootloader hangs after every HP-only reset until a replug (the fix; see c6-analog-master-wedges-the-bootloader for the bench diagnosis) |
+| toolchain-miscompile | 2026-09-07 | [metal-drops-atomic-guarded-by-loop-exit-sum](2026-09-07-metal-drops-atomic-guarded-by-loop-exit-sum.md) | fixed | lp-gfx-wgpu loop_bound_pass → Metal: a conditional `atomicAdd` guarded by the loop's pre-store exit sum never executes; storing first and reading back fixes every shape |
+| contract-gap | 2026-09-06 | [gpu-tier-executes-unbounded-shaders](2026-09-06-gpu-tier-executes-unbounded-shaders.md) | fixed | lp-gfx-wgpu GPU tiers + catalog: `fault-demo`'s `while (true)` has no fuel meter on a GPU — the driver watchdog resets the device, corrupts sibling surfaces, and can take the OS down |
 | nondeterministic-capture | 2026-09-06 | [heap-budget-capture-truncated-by-cycle-cap](2026-09-06-heap-budget-capture-truncated-by-cycle-cap.md) | fixed | scripts/heap-budget-check.sh: the startup capture hit `--max-cycles` mid-compile and recorded the cut as a figure |
 | stand-in-divergence | 2026-09-04 | [read-gate-refuses-on-largest-block-proxy](2026-09-04-read-gate-refuses-on-largest-block-proxy.md) | **open** | lpa-server ProjectRead headroom gate vs the classic's two-region heap |
 | stand-in-divergence | 2026-09-04 | [unload-leaves-classic-unloadable-until-power-cycle](2026-09-04-unload-leaves-classic-unloadable-until-power-cycle.md) | **open** (not reproducing on the four-region heap 2026-09-06: reload accepted at 72,954 B, margin ~7 KB) | after stopAllProjects the classic's largest block is 39.7 KB and the 64 KiB load gate refuses every load |
@@ -324,6 +347,7 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 | config-masked-defect | 2026-08-29 | [lamp-views-latch-one-output](2026-08-29-lamp-views-latch-one-output.md) | fixed | lpa-studio-core lamp compositors (card feed, preview feed, module hero) |
 | state-conflation | 2026-08-28 | [wire-load-skips-link-engine-state](2026-08-28-wire-load-skips-link-engine-state.md) | fixed | lpa-server (wire load handler) + lpc-engine (display-layout budget) |
 | assumed-context | 2026-08-24 | [power-gate-black-scan-counts-alpha](2026-08-24-power-gate-black-scan-counts-alpha.md) | **open** | fw-esp32-common output/power_gate (is_all_black) |
+| unenforced-test-precondition | 2026-09-08 | [usb-gates-pin-a-heartbeat-millisecond](2026-09-08-usb-gates-pin-a-heartbeat-millisecond.md) | **open** (the image half closed by [cold-target-dir-links-esp-hals-stock-rodata](2026-09-08-cold-target-dir-links-esp-hals-stock-rodata.md); the precondition stands) | lp-emu-esp32c6 `tests/usb_control.rs` G3-1/G3-1b: an exact `"uptime_ms":5000` pins a millisecond the firmware's loop only samples by luck |
 | unenforced-test-precondition | 2026-08-05 | [cross-core-panic-races-the-isr-thread](2026-08-05-cross-core-panic-races-the-isr-thread.md) | fixed | lp-fw/lp-ws281x tests (cross_core) |
 | reclaim-ordered-behind-its-own-rebuild | 2026-08-04 | [compile-window-drops-rebuilt-before-compile](2026-08-04-compile-window-drops-rebuilt-before-compile.md) | fixed | lpc-engine nodes (fixture + output pressure handlers) |
 | assumed-context | 2026-08-02 | [provisioning-flashes-one-image-unchecked](2026-08-02-provisioning-flashes-one-image-unchecked.md) | fixed | lpa-link serial ESP32 providers + lpa-boards + justfile |
@@ -404,6 +428,7 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 | untested-path | 2026-09-02 | [studio-flasher-cannot-recover-a-boot-looping-c6](2026-09-02-studio-flasher-cannot-recover-a-boot-looping-c6.md) | **open** | lpa-studio-web device card flash flow (esptool-js ladder) |
 | lifecycle-ownership | 2026-09-02 | [same-gpio-rebind-disconnects-the-pad](2026-09-02-same-gpio-rebind-disconnects-the-pad.md) | fixed | fw-esp32c6 + fw-esp32s3 output/rmt `bind_channel` (esp-hal `with_pin` guard order) |
 | untested-path | 2026-09-06 | [emu-transport-drops-unprefixed-client-lines](2026-09-06-emu-transport-drops-unprefixed-client-lines.md) | fixed | lpa-client transport_serial/emulator (async `M!` framing) + lp-cli `emu` host spec |
+| shared-namespace-collision | 2026-09-08 | [a-stray-hello-answered-a-request-that-never-asked](2026-09-08-a-stray-hello-answered-a-request-that-never-asked.md) | fixed | lpa-client protocol_session/client/tokio_client/project_read_stream (correlation) |
 
 ## Predecessor: `docs/bugs/`
 

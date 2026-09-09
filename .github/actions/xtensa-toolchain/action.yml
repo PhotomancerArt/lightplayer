@@ -1,0 +1,147 @@
+name: Xtensa Rust toolchain (authenticated, retried)
+description: >
+  Install the Espressif Xtensa Rust fork the way esp-rs/xtensa-toolchain does,
+  but with an authenticated GitHub API and a bounded retry.
+
+# WHY THIS EXISTS
+#
+# `esp-rs/xtensa-toolchain@v1.6` is forty lines of bash that shell out to
+# espup, and espup's first act is an UNAUTHENTICATED query to
+# `api.github.com/repos/esp-rs/rust-build/releases`. Unauthenticated
+# api.github.com is 60 requests/hour *per source IP*, and hosted runners share
+# a NAT pool with every other repository on the platform. When that pool is
+# hot, the query returns 403 and the job dies in ~20 seconds:
+#
+#   [debug]: Querying GitHub API: '.../esp-rs/rust-build/releases?...'
+#   Error: espup::toolchain::http_error
+#     x HTTP GET Error: GitHub API returned status code: 403 Forbidden
+#
+# Observed on two unrelated PRs a day apart, both green on rerun:
+#   PR #557 https://github.com/PhotomancerArt/lightplayer/actions/runs/34098208425/job/101666493090
+#   PR #596 https://github.com/PhotomancerArt/lightplayer/actions/runs/34190629728/job/101947822790
+#
+# Two layers:
+#
+#   1. GITHUB_TOKEN. espup reads it (src/toolchain/mod.rs: `if let
+#      Some(token) = env::var_os("GITHUB_TOKEN")` -> Bearer header) and the
+#      limit becomes 1000/hour scoped to THIS repository rather than 60/hour
+#      shared with the platform. The debug log says `Auth header added` when
+#      it lands. This removes the observed failure.
+#   2. A bounded retry, three attempts with 15s/30s backoff. Layer 1 does
+#      nothing for a genuine api.github.com blip, a 5xx from
+#      objects.githubusercontent.com, or a truncated tarball.
+#
+# NOT A THIRD LAYER: caching the installed toolchain. That was implemented,
+# measured on PR #600, and removed. It works — and it is a net loss here:
+#
+#   - The tree is 499 MB packed. Saving it cost 42 s, which is most of the
+#     ~56 s install it was meant to avoid.
+#   - This repository sits at 10.59 GB against a 10 GB Actions-cache budget,
+#     spread over 5,529 entries that are overwhelmingly small sccache objects
+#     — and sccache IS the compile reuse here (see the cache notes in
+#     pre-merge.yml and deploy-cloud.yml). A 499 MB entry does not coexist
+#     with that; it evicts ~499 MB of sccache to buy back ~35 s.
+#   - It doesn't even survive: the entry saved at 07:06:35 UTC was gone
+#     inside 25 minutes, LRU-evicted by the ordinary sccache write rate.
+#     Exactly the fate deploy-cloud.yml already records for its multi-GB
+#     `cloud-cargo` entry.
+#
+#   If the budget ever changes, the two things to re-check first are the
+#   entry's survival time and what it displaces — not just the step's clock.
+#
+# Upstream is inlined rather than wrapped because a composite action cannot
+# put `continue-on-error` on a step, so a `uses:` step cannot be retried from
+# inside one. The inlined bash is a faithful copy of v1.6's Linux/macOS path
+# (the callers are all ubuntu-24.04); the only intentional differences are the
+# token and the loop.
+
+inputs:
+  version:
+    description: Xtensa Rust fork version, pinned (never "latest" — see the callers).
+    required: true
+  buildtargets:
+    description: Comma-separated chip list, e.g. "esp32s3" or "esp32s3,esp32".
+    required: true
+  default:
+    description: Make `esp` the default rustup toolchain.
+    default: "false"
+  override:
+    description: Clear any rustup directory override, as upstream does.
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    # Upstream's first step. Every current caller is on an image that ships
+    # rustup, but a caller that is not would otherwise fail two steps later
+    # with a confusing message.
+    - name: Ensure rustup is installed
+      shell: bash
+      run: |
+        if ! command -v rustup >/dev/null 2>&1; then
+          curl --proto '=https' --tlsv1.2 --retry 5 --retry-all-errors -sSf https://sh.rustup.rs \
+            | sh -s -- --profile minimal -y
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.cargo/bin:$PATH"
+        fi
+        echo "HOST_TARGET=$(rustup show | grep 'Default host' | sed -e 's/.* //')" >> "$GITHUB_ENV"
+        echo "ESPUP_EXPORT_FILE=$HOME/exports" >> "$GITHUB_ENV"
+
+    - name: Install the Xtensa toolchain (espup)
+      shell: bash
+      env:
+        # The fix for the observed 403. Read by espup for every
+        # api.github.com call; scoped to this repository and read-only for the
+        # public release metadata it fetches.
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        set -uo pipefail
+        version_flag=(--toolchain-version "${{ inputs.version }}")
+
+        install_once() {
+          rm -f "espup-${HOST_TARGET}.zip"
+          curl --proto '=https' --tlsv1.2 --retry 5 --retry-all-errors \
+            --location --silent --show-error --fail \
+            -o "espup-${HOST_TARGET}.zip" \
+            "https://github.com/esp-rs/espup/releases/latest/download/espup-${HOST_TARGET}.zip" || return 1
+          unzip -o "espup-${HOST_TARGET}.zip" -d "$HOME/.cargo/bin" || return 1
+          chmod +x "$HOME/.cargo/bin/espup"*
+          "$HOME/.cargo/bin/espup" install -l debug --targets "${{ inputs.buildtargets }}" "${version_flag[@]}"
+        }
+
+        for attempt in 1 2 3; do
+          echo "::group::espup install (attempt $attempt/3)"
+          if install_once; then
+            echo "::endgroup::"
+            exit 0
+          fi
+          echo "::endgroup::"
+          if [[ $attempt -lt 3 ]]; then
+            backoff=$((attempt * 15))
+            echo "::warning::Xtensa toolchain install failed (attempt $attempt/3); retrying in ${backoff}s."
+            sleep $backoff
+          fi
+        done
+        echo "::error::Xtensa toolchain install failed after 3 attempts."
+        exit 1
+
+    # Upstream's export block. espup writes PATH and LIBCLANG_PATH into
+    # $ESPUP_EXPORT_FILE; publishing them is what puts xtensa-*-elf-gcc on the
+    # PATH for the link steps that follow.
+    - name: Export the toolchain environment
+      shell: bash
+      run: |
+        set -uo pipefail
+        # shellcheck disable=SC1091
+        source "$HOME/exports"
+        echo "$PATH" >> "$GITHUB_PATH"
+        [[ -n "${LIBCLANG_PATH:-}" ]] && echo "LIBCLANG_PATH=${LIBCLANG_PATH}" >> "$GITHUB_ENV"
+        [[ -n "${CLANG_PATH:-}" ]] && echo "CLANG_PATH=${CLANG_PATH}" >> "$GITHUB_ENV"
+        exit 0
+
+    - name: Set default and override
+      shell: bash
+      run: |
+        [[ "${{ inputs.default }}" = "true" ]] && rustup default esp || true
+        [[ "${{ inputs.override }}" = "true" ]] && rustup override unset || true
+        exit 0

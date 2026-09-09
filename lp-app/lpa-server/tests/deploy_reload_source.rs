@@ -202,7 +202,7 @@ fn fresh_load_render(shader: &str) -> Vec<u8> {
 /// shader → fixture → output chain whose frames are identical, so the LED
 /// bytes identify the compiled source and nothing else.
 fn project_files(shader: &str) -> Vec<ProjectDeployFile> {
-    let dir = repo_root().join("examples").join("shader-oracle");
+    let dir = repo_root().join("projects/test/shader-oracle");
     let mut files = Vec::new();
     for entry in std::fs::read_dir(&dir).expect("read shader-oracle") {
         let path = entry.expect("dir entry").path();
@@ -245,7 +245,7 @@ fn memory_server() -> (LpServer, Rc<RefCell<MemoryOutputProvider>>) {
 
 /// The u16 engine samples reduced to the bytes a ws281x driver sees. The
 /// oracle project's output options make `DisplayPipeline` collapse to this
-/// stateless rounding step (see `examples/shader-oracle/README.md`).
+/// stateless rounding step (see `projects/test/shader-oracle/README.md`).
 fn rendered_bytes(provider: &MemoryOutputProvider) -> Vec<u8> {
     let mut bytes = Vec::new();
     for handle in provider.get_all_handles() {

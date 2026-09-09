@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 use lpa_studio_core::{UiAction, UiLensCard, UiNodeFace, UiPaneView, UiStudioView, UiViewContent};
 
 use crate::app::module::{PlayModeSurface, panel_gesture_actions};
+use crate::app::project::MismatchPage;
 use crate::app::workbench::{WorkbenchFrame, WorkbenchHrefs, view_for_route};
 use crate::app::{DevicesPage, ProjectOpeningFrame, ProjectsPage};
 use crate::core::PaneView;
@@ -34,6 +35,11 @@ pub fn StudioShell(
     /// intent picks the frame — no gallery flash on a project reload).
     #[props(default = false)]
     opening_frame: bool,
+    /// The open stopped because the address named a device running a
+    /// different project (D50): the mismatch page renders in place of the
+    /// opening frame. `web_app` decides; the shell only picks the body.
+    #[props(default)]
+    mismatch: Option<lpa_studio_core::UiOpenMismatch>,
     /// Play mode (`docs/design/panel.md` P12): the root module's panel and
     /// nothing else — no pane column, no workspace, no device card. Set by
     /// the `/play` route suffix; a session whose root wears no module face
@@ -48,8 +54,8 @@ pub fn StudioShell(
     #[props(default)]
     project_view: ProjectView,
     /// The workbench view tabs' hrefs, one slot per view-table row; a
-    /// `None` slot hides its tab (a device lens has no mapping address
-    /// yet). Stories default to inert fragments.
+    /// `None` slot hides its tab. Every lens route (project, example,
+    /// device) fills every slot. Stories default to inert fragments.
     #[props(default)]
     workbench_hrefs: Option<WorkbenchHrefs>,
     on_action: EventHandler<UiAction>,
@@ -75,12 +81,29 @@ pub fn StudioShell(
         lens_card,
         // the header session·project control's session, for the chrome
         session: _,
+        // the web shell picks the mismatch body from the `mismatch` prop —
+        // rendering it needs the gallery below, which this destructure is
+        // about to take apart
+        open_mismatch: _,
         // the chrome renders the settings surface (web_app owns both)
         settings: _,
         // consumed by the web shell's unload gate; the project pane
         // computes its own dirty affordances from the editor view
         dirty: _,
     } = view;
+
+    // The mismatch page outranks the opening frame: the open it was
+    // narrating has STOPPED, and a skeleton over a settled question is the
+    // eternal-skeleton bug the frame's honest states exist to prevent.
+    if let Some(mismatch) = mismatch
+        && panes.is_empty()
+    {
+        return rsx! {
+            div { class: "tw:grid tw:gap-7",
+                MismatchPage { mismatch, home: home.map(|home| *home), on_action }
+            }
+        };
+    }
 
     if opening_frame && panes.is_empty() {
         // The frame polls the open pipeline itself (its module explains
@@ -206,28 +229,21 @@ fn play_mode_face(
     }
 }
 
-/// The docked lens card, by session kind (round-2 M5): the sim's grown
-/// card, or the roster's device card — the SAME `DeviceView` the gallery
-/// renders, with no picker lists (a board the editor is open on is running
-/// something; the empty face's picker belongs to the gallery).
+/// The docked lens card: the roster's device card — the SAME `DeviceView`
+/// the gallery renders, for every runtime (PD9), with no picker lists (a
+/// device the editor is open on is running something; the empty face's
+/// picker belongs to the gallery).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn LensCardPane(card: UiLensCard, on_action: EventHandler<UiAction>) -> Element {
-    match card {
-        UiLensCard::Sim(card) => rsx! {
-            crate::app::home::sim_card::SimCard {
-                pane: true,
-                card,
-                on_action,
-            }
-        },
-        UiLensCard::Device(card) => rsx! {
-            crate::app::home::device_roster_card::DeviceRosterCard {
-                card,
-                projects: Vec::new(),
-                examples: Vec::new(),
-                on_action,
-            }
-        },
+    let UiLensCard::Device { card, runtime } = card;
+    rsx! {
+        crate::app::home::device_roster_card::DeviceRosterCard {
+            card,
+            runtime,
+            projects: Vec::new(),
+            examples: Vec::new(),
+            on_action,
+        }
     }
 }

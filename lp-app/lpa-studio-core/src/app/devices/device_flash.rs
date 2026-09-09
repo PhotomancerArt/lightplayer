@@ -233,6 +233,8 @@ impl FirmwareVerb {
                 board_id: choice.board_id.clone(),
                 build_id: choice.build_id.clone(),
                 park_first: choice.park_first,
+                // An update never renames: the board already has a name.
+                name: None,
             })
             .with_label(self.label())
             .with_summary(self.summary()),
@@ -502,6 +504,7 @@ mod tests {
             remembered_firmware: None,
             degraded: None,
             loaded_project: LoadedProject::Empty,
+            engine_fps: None,
             can_receive_project: true,
             can_remove_project: false,
             activity: None,
@@ -547,6 +550,7 @@ mod tests {
             firmware_face: face,
             remembered_firmware: None,
             degraded: None,
+            engine_fps: None,
             loaded_project: LoadedProject::Running {
                 label: "studio".to_string(),
             },

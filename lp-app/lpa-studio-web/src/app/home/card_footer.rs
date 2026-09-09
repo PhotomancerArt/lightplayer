@@ -36,7 +36,6 @@ pub(crate) enum GlyphTone {
     /// rebuild — its only wearer); the rebuilt device model re-adds it.
     #[allow(dead_code, reason = "the rebuilt device model re-wears green")]
     Good,
-    Live,
     Attention,
 }
 
@@ -161,7 +160,6 @@ pub(crate) fn CardGlassFooter(
 fn glyph_tone_class(tone: GlyphTone) -> &'static str {
     match tone {
         GlyphTone::Good => "tw:text-status-good-foreground",
-        GlyphTone::Live => "tw:text-status-working-foreground",
         GlyphTone::Attention => "tw:text-status-attention-foreground",
     }
 }

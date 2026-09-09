@@ -8,6 +8,7 @@ use lp_emu_core::Bus;
 use lp_riscv_inst::{Gpr, format::TypeB};
 
 /// Decode and execute branch instructions (B-type, opcode 0x63).
+#[inline(always)]
 pub(super) fn decode_execute_branch<M: LoggingMode, B: Bus>(
     inst_word: u32,
     pc: u32,

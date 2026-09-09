@@ -2,17 +2,17 @@
 status: carried
 since: 2026-07-29
 logged: 2026-07-29
-area: examples/**/*.glsl, CI (just check / build-ci), lps-filetests
+area: catalog/**/*.glsl, projects/test/**/*.glsl, CI (just check / build-ci), lps-filetests
 related:
   - docs/defects/2026-07-29-uniform-struct-array-runtime-index.md
 ---
 # Shipped example shaders are not compile-gated on non-host targets
 
-**Shape** — nothing in CI compiles the GLSL under `examples/` for the
+**Shape** — nothing in CI compiles the GLSL under `catalog/` and `projects/test/` for the
 device- and browser-canonical shader targets. `examples_valid.rs` loads
 every example as a project (which exercises the HOST backend only), and the
 filetest suite covers `lp-shader/lps-filetests/filetests/**`, never
-`examples/`. An example can therefore ship a construct that compiles on the
+`catalog/`. An example can therefore ship a construct that compiles on the
 host and fails on `rv32n` / `rv32c` / `wasm` / `interp` — the targets that
 actually run on device and in the browser sim.
 
@@ -32,7 +32,7 @@ glitch rather than broken shipped content.
 **Workarounds**
 - When authoring example GLSL, copy the shape of an existing example that
   is already known-good on device rather than inventing one; the uniform
-  struct-array idiom in `examples/events/shader.glsl` is the reference.
+  struct-array idiom in `projects/test/events/shader.glsl` is the reference.
 - After adding or editing an example shader, open it in the browser sim
   once and read the node's status — that is currently the only end-to-end
   check.
@@ -45,7 +45,7 @@ glitch rather than broken shipped content.
   automated gate stayed green.
 
 **Exit criteria** — extend the filetest runner (or add a small harness) to
-compile every `examples/**/*.glsl` for `ALL_TARGETS`, run-free
+compile every `catalog/**/*.glsl` and `projects/test/**/*.glsl` for `ALL_TARGETS`, run-free
 (compile-only), and fail on any target that rejects a shipped example.
 Compile-only keeps it cheap and needs no uniform values or expected
 outputs. Note the filetest harness currently treats `compile-fail` as an

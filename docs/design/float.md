@@ -109,7 +109,7 @@ theoretically ABI-recoverable, since output conversion is intrinsic to an
 integer LED pipeline. The remainder is FPU dependent-chain latency inside the
 shader itself: band-chase's interior alone runs 3→7 ms on the classic (≈2.3×)
 and 2.5→4 ms on the S3 (≈1.6×) — extreme-interior costs are hypothetical
-beyond this, since the heavier `examples/basic/shader.glsl` (psrdnoise) cannot
+beyond this, since the heavier `projects/test/basic/shader.glsl` (psrdnoise) cannot
 even GLSL-compile at 1500 LEDs on the classic (OOM).
 
 **The S3 is not fps-neutral at dome scale.** An earlier neutral S3 datapoint

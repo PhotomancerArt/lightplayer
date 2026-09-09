@@ -23,11 +23,25 @@ authored GLSL (byte-identical to what the device compiles)
   → naga glsl-in
   → bounded-tanh IR pass          (tanh(x) → tanh(clamp(x, -20, 20));
                                    Metal fast-math tanh NaNs for |x| ≳ 89)
+  → loop-bound IR pass            (a loop with no exit is refused; every
+                                   other loop charges the LPVM fuel budget
+                                   per back-edge and counts a spent budget
+                                   on the shader's fault flag — see below)
   → naga validate → wgsl-out
   → wgpu render pipeline          (fullscreen triangle; one uniform buffer
                                    per shader instance, offsets from naga's
                                    own layout reflection)
 ```
+
+Diagnostics — naga glsl-in, naga validation, and the unbounded-loop
+refusal (`loop_bound_pass`) — render with a `┌─ glsl:LINE:COL` marker in
+**authored** coordinates: `assembly::AssembledGlsl` records the byte range
+the authored text occupies in the unit, and `wgsl_compile` shifts every
+span out of it before rendering (the CPU-tier naga frontend does the same
+over its own prefix). A span outside the authored text — prelude, hoisted
+declaration copy, texture helper, wrapper `main` — renders location-less.
+The Studio parser (`lpa-studio-core` `ui_shader_error.rs`) reads the marker
+verbatim.
 
 No pipeline cache: compiles cost ≈26 ms worst-case warm; cards are
 independent backends (device sharing belongs to the browser-integration
@@ -42,6 +56,34 @@ never silently substitutes float arithmetic for an explicit Q32 request.
 Conformance is judged against the f32 LPIR interpreter oracle plus
 hold-or-beat divergence bounds vs the authoritative `wasm.q32` path (see
 `tests/`).
+
+## Loop bounds and the fault flag
+
+The GPU has no fuel meter, and content in this repo is authored against
+one (`docs/adr/2026-09-06-gpu-tier-loop-bounds.md`,
+`docs/adr/2026-09-07-gpu-tier-spent-budget-faults.md`). `loop_bound_pass`
+closes the gap in the naga IR:
+
+1. A loop with no `break`/`return`/`discard` on any path is a
+   `GfxError::Compile` naming the assembled-source line (constant `if`
+   conditions fold first — glsl-in lowers `while (true)` to
+   `if (!true) break;`).
+2. Every other loop charges a `var<private>` budget in its `continuing`
+   block and `break if`s past `DEFAULT_INVOCATION_FUEL`. The invocation
+   that crosses the budget does `atomicAdd(&lp_gfx_loop_fault, 1u)` once
+   on a `@group(0)` storage flag the pass binds on the next free slot.
+3. `fault_flag` clears the flag before every dispatch, copies it out
+   after, and reports a non-zero count as `GfxError::FuelExhausted` with
+   `ShaderFuelTrapEntry::Invocations { spent }` — the LPVM's trap type, so
+   the shader node routes it to a `Fault` and the outputs paint the fault
+   pattern. Native reads it same-frame (a bounded wait on the dispatch's
+   own submission; `render` is synchronous natively); the browser reads
+   the previous frame's flag before it draws (one frame of latency, a
+   capture in flight every frame so a runaway faults continuously).
+
+`tests/loop_fault.rs` spends the budget deliberately on a 4×4 frame and a
+few sample points. Nothing in `cargo test -p lp-gfx-wgpu` dispatches an
+unbounded loop — the pass is in the only compile path.
 
 ## Texture backing and readback policy
 

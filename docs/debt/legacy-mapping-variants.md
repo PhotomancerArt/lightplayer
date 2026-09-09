@@ -27,7 +27,7 @@ again (99.70%).
 
 **What remains carried** — `PathPoints { PointList }` stays as BOTH the
 resolved runtime carrier (Map2d docs funnel into it) and an authorable
-form (`examples/fiber-headband` hand-authors it; the doc schema's path
+form (`catalog/projects/fiber-headband` hand-authors it; the doc schema's path
 objects interpolate along polylines and cannot express arbitrary
 explicit point lists). Retiring the *authored* form needs either a doc
 schema "points" object or acceptance that hand-placed lamps are

@@ -1,0 +1,22 @@
+[INIT] fw-esp32 initialized, starting server loop... proto=20 commit=1e1b79464f03 di
+[INFO] fw_esp32_common::server_loop: [perf] frame=88 fps=17 elapsed=5016ms recv=0ms tick=54ms send=0ms total=54ms responses=0
+[RTOS-TICK] t_ms=10005 dt_ms=10005 ticks=173 tick_cycles=241602 tick_max=1498 yields=351 yield_cycles=884945 yield_max=10276
+[INFO] fw_esp32_common::server_loop: [perf] frame=178 fps=17 elapsed=5003ms recv=0ms tick=54ms send=0ms total=54ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frame=268 fps=17 elapsed=5004ms recv=0ms tick=54ms send=0ms total=54ms responses=0
+[RTOS-TICK] t_ms=20011 dt_ms=10006 ticks=180 tick_cycles=249581 tick_max=1500 yields=364 yield_cycles=907487 yield_max=9762
+[INFO] fw_esp32_common::server_loop: [perf] frame=358 fps=17 elapsed=5002ms recv=0ms tick=54ms send=0ms total=54ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frame=448 fps=17 elapsed=5005ms recv=0ms tick=54ms send=0ms total=54ms responses=0
+[RTOS-TICK] t_ms=30018 dt_ms=10007 ticks=180 tick_cycles=249560 tick_max=1496 yields=364 yield_cycles=907402 yield_max=9749
+[INFO] fw_esp32_common::server_loop: [perf] frame=538 fps=17 elapsed=5002ms recv=0ms tick=54ms send=0ms total=54ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frame=628 fps=17 elapsed=5003ms recv=0ms tick=54ms send=0ms total=54ms responses=0
+[RTOS-TICK] t_ms=40024 dt_ms=10006 ticks=180 tick_cycles=250520 tick_max=1500 yields=364 yield_cycles=905560 yield_max=9753
+[INFO] fw_esp32_common::server_loop: [perf] frame=718 fps=17 elapsed=5003ms recv=0ms tick=54ms send=0ms total=54ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frame=808 fps=17 elapsed=5002ms recv=0ms tick=54ms send=0ms total=54ms responses=0
+[RTOS-TICK] t_ms=50028 dt_ms=10004 ticks=180 tick_cycles=249294 tick_max=1505 yields=364 yield_cycles=908041 yield_max=9765
+[INFO] fw_esp32_common::server_loop: [perf] frame=898 fps=17 elapsed=5002ms recv=0ms tick=54ms send=0ms total=54ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frame=988 fps=17 elapsed=5002ms recv=0ms tick=54ms send=0ms total=54ms responses=0
+[RTOS-TICK] t_ms=60032 dt_ms=10004 ticks=180 tick_cycles=249185 tick_max=1506 yields=364 yield_cycles=907298 yield_max=9716
+[INFO] fw_esp32_common::server_loop: [perf] frame=1078 fps=17 elapsed=5002ms recv=0ms tick=54ms send=0ms total=54ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frame=1168 fps=17 elapsed=5005ms recv=1ms tick=53ms send=0ms total=54ms responses=0
+[RTOS-TICK] t_ms=70038 dt_ms=10006 ticks=180 tick_cycles=248878 tick_max=1503 yields=364 yield_cycles=908200 yield_max=9738
+[INFO] fw_esp32_common::server_loop: [perf] frame=1258 fps=17 elapsed=5002ms recv=0ms tick=54ms send=0ms total=54ms responses=0

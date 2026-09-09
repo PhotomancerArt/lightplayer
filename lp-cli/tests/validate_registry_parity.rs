@@ -10,7 +10,7 @@
 //! `lp-cli` depends on both, so it is the natural home. If this test ever
 //! fails, fix the registry that is wrong — do not relax the assertion.
 
-use fw_checks::{FwCheckConfig, PayloadHeader, all_checks, find_check};
+use fw_checks::{FwCheckConfig, PayloadHeader, all_checks, find_check, write_header};
 use lp_emu_validate::header::InbandHeader;
 use lp_emu_validate::payload::{ALL_PAYLOADS, Sentinel};
 use lp_emu_validate::{FieldClass, HEADER_PREFIX, RECORD_PREFIX, ValidateConfig};
@@ -34,10 +34,14 @@ fn every_payload_has_a_matching_fw_check() {
         let check = fw_check_for(payload.fw_check_slug);
 
         assert_eq!(
-            check.firmware_features,
-            [payload.firmware_feature],
-            "payload `{}`: firmware feature disagrees",
+            check.firmware_features, payload.firmware_features,
+            "payload `{}`: firmware features disagree",
             payload.name
+        );
+        assert_eq!(
+            check.emits_header, payload.emits_header,
+            "payload `{}`: fw-checks says emits_header={}, the registry says {}",
+            payload.name, check.emits_header, payload.emits_header
         );
         assert_eq!(
             check.done_marker,
@@ -56,8 +60,8 @@ fn every_payload_has_a_matching_fw_check() {
     }
 }
 
-/// A `Ready` payload never finishes, so it must not claim a done marker; a
-/// `Done` payload must.
+/// A `Ready` payload never finishes and a `State` payload never prints, so
+/// neither may claim a done marker; a `Done` payload must.
 #[test]
 fn sentinels_and_done_markers_are_consistent() {
     for payload in ALL_PAYLOADS {
@@ -73,8 +77,114 @@ fn sentinels_and_done_markers_are_consistent() {
                     payload.name
                 );
             }
+            Sentinel::State(_) => {
+                assert!(
+                    check.done_marker.is_none(),
+                    "payload `{}` prints nothing at all — its subject is machine state — so \
+                     the firmware side has no marker to declare",
+                    payload.name
+                );
+            }
+        }
+        // Whatever the shape, the two registries agree on what `--exit-on`
+        // would be given: the done marker, or nothing.
+        assert_eq!(
+            payload.sentinel.exit_on(),
+            check.done_marker,
+            "payload `{}`: the marker a run stops on must be the one fw-checks declares",
+            payload.name
+        );
+    }
+}
+
+/// The link, the host plan and the emulator-only reason are **host-side**
+/// properties and are deliberately not mirrored: the image is the same bytes
+/// whichever host is on the other end of the cable, and what differs is what
+/// that host does. This test says so out loud, so that "fw-checks does not
+/// know about `host_plan`" reads as a decision rather than as an omission the
+/// parity test forgot.
+#[test]
+fn the_host_side_properties_are_not_mirrored_and_that_is_the_point() {
+    for payload in ALL_PAYLOADS {
+        let check = fw_check_for(payload.fw_check_slug);
+        // Same firmware, on every configuration that can run it.
+        assert_eq!(
+            check.firmware_features, payload.firmware_features,
+            "payload `{}`",
+            payload.name
+        );
+        // A host plan means the run is served over the product's own link, so
+        // there must be a link driver in the image to serve it: `server` for
+        // the shipped-image scenarios, a `fw-checks` module of its own for a
+        // payload that brings its own logger and printer. `rmt-chase` is the
+        // second kind and the first of it — before M5 P3 every payload with a
+        // host plan was the shipped image, which is why this clause used to
+        // read `contains("server")` alone.
+        if payload.host_plan.is_some() {
+            assert!(
+                check.firmware_features.contains(&"server") || payload.fw_checks_feature.is_some(),
+                "payload `{}` is served over the USB link, so it is either the shipped image \
+                 or a harness with a module of its own",
+                payload.name
+            );
         }
     }
+    let scenarios: Vec<&str> = ALL_PAYLOADS
+        .iter()
+        .filter(|p| p.host_plan.is_some())
+        .map(|p| p.name)
+        .collect();
+    assert_eq!(
+        scenarios,
+        vec![
+            // M1 P2's calibration kernels: the same case as `rmt-chase` — not
+            // a scenario, a harness image whose records go out over the
+            // USB-Serial-JTAG it logs on, against a `--usb-host` that defaults
+            // to `absent`. M1 P1 measured what happens without this: a USB
+            // payload with no host plan records **0 bytes** on the emulator,
+            // because the firmware serves into the void from power-on.
+            "cycle-probe",
+            // M2 P2's `gpio-input`: the same case again, and one more
+            // reason. Its emulated side is driven by a `--pin-script` whose
+            // steps wait on the firmware's own `=== ARMED ===` line, and a
+            // pin script's `after` resolves against what a HOST received —
+            // so with no host attached there is no console, no anchor, and
+            // every scripted edge would still be pending when the run ended.
+            "gpio-input",
+            "boot-idle",
+            "usb-negative-control",
+            "usb-detach-reattach",
+            "usb-host-absent",
+            // M4's flash-backed twin of `boot-idle`, which is the shipped
+            // image over the shipped link too — and P5's route to closing
+            // DD30 on flash-backed bytes.
+            "boot-idle-flash",
+            // P5's two walks. A walk carries BOTH host fields and they mean
+            // different things: `host_plan` is the cable (attached, draining,
+            // from power-on) and `host_script` is the conversation an
+            // application had over it. Every other scenario here has a plan
+            // and no script, which is what made the distinction easy to miss.
+            "upload-walk-usb",
+            "meteor-walk-usb",
+            // M5's chase: not a scenario at all — nothing here asks a
+            // question about the link — but its records and its `[WS281X]`
+            // line go out over the USB-Serial-JTAG the harness image logs on,
+            // and `--usb-host` defaults to `absent`. Somebody has to be
+            // draining the port or the transcript is empty.
+            "rmt-chase",
+            // M5 P4's walk of the host oracle's project on the shipped image
+            // over the shipped link, with the pad observed: the same shape as
+            // P5's two walks, plus a pin capture.
+            "shader-oracle-walk",
+            // M8's recorded ROM-up boot: `boot-idle-flash`'s image and link,
+            // reached from the reset vector. It needs a host for the same
+            // reason `boot-idle-flash` does — the boot log comes out over the
+            // product's own link, and nobody draining it is an empty file.
+            "rom-up-boot",
+        ],
+        "the emu-m6 set, M4's flash-backed boot, P5's two walks, M5's chase, M5's oracle \
+         walk and M8's ROM-up boot drive the host; nothing else"
+    );
 }
 
 /// The GPIO calibration payload's readiness line is the one `fw-checks` emits.
@@ -165,6 +275,187 @@ fn the_uart_bridges_ready_line_is_the_line_the_firmware_prints() {
         assert_eq!(caps["prev_drop_to_uart"], *prev_to_uart.to_string());
         assert_eq!(caps["prev_drop_to_usb"], *prev_to_usb.to_string());
     }
+}
+
+/// The `rmt-frame` record the firmware renders is the record the host
+/// classifies — every field named, none extra.
+///
+/// A field the registry does not classify is a `structural_problem` in a
+/// replay (`replay.rs`: "add a FieldSpec for it"), so a record that grew a
+/// field would fail every replay of the payload rather than being silently
+/// ignored. This catches it here, without a machine or a board.
+#[test]
+fn the_rmt_chase_record_is_the_line_the_firmware_prints() {
+    use fw_checks::checks::rmt_chase::{
+        DONE_MARKER, FrameRecord, LEDS, chase_frame, frame_bytes, write_frame_record,
+    };
+
+    let payload = ALL_PAYLOADS
+        .iter()
+        .find(|p| p.name == "rmt-chase")
+        .expect("rmt-chase is registered");
+    assert_eq!(payload.sentinel, Sentinel::Done(DONE_MARKER));
+    assert_eq!(payload.record_kinds, &["rmt-frame"]);
+
+    let mut frame = vec![0u8; frame_bytes(LEDS)];
+    let lit = chase_frame(7, LEDS, &mut frame);
+    let mut line = String::new();
+    write_frame_record(&mut line, &FrameRecord::of(7, LEDS, lit, &frame)).unwrap();
+    assert!(line.starts_with(RECORD_PREFIX), "{line}");
+
+    let json = line
+        .trim_end()
+        .strip_prefix(RECORD_PREFIX)
+        .expect("the prefix");
+    let value: serde_json::Value = serde_json::from_str(json).expect("the record is JSON");
+    let object = value.as_object().expect("a JSON object");
+    assert_eq!(object["kind"], "rmt-frame");
+    for field in object.keys() {
+        if field == "kind" {
+            continue;
+        }
+        assert_eq!(
+            payload.class_of("rmt-frame", field),
+            Some(FieldClass::Structural),
+            "record field `{field}` is unclassified; a replay would refuse it"
+        );
+    }
+    // …and nothing the registry classifies is missing from the line.
+    for spec in payload.fields {
+        assert!(
+            object.contains_key(spec.field),
+            "the registry classifies `{}`, which the firmware does not print",
+            spec.field
+        );
+    }
+}
+
+/// The header line every C6 harness now prints through
+/// `fw_checks::write_header(&mut esp_println::Printer, ..)` (G3 sitting-1
+/// blocker: `test_gpio_calibrate` installed no logger, so the log-based
+/// `emit_header` never reached a silicon capture there). Pinned per payload
+/// so a change to `PayloadHeader`'s `Display` or to `write_header`'s framing
+/// (the trailing `\n`) shows up here first, rather than at a desk.
+#[test]
+fn every_payloads_header_line_is_pinned() {
+    let cases: &[(&str, &str, &str)] = &[
+        (
+            "shader-compile-stress",
+            "esp32c6,test_shader_compile_incremental",
+            "[fw-checks-header] {\"schema\":1,\"payload\":\"shader-compile-stress\",\"chip\":\"esp32c6\",\"firmware_commit\":\"d6cfaa2051ae\",\"firmware_features\":\"esp32c6,test_shader_compile_incremental\",\"firmware_dirty\":false}\n",
+        ),
+        (
+            "gpio-calibrate",
+            "esp32c6,test_gpio_calibrate",
+            "[fw-checks-header] {\"schema\":1,\"payload\":\"gpio-calibrate\",\"chip\":\"esp32c6\",\"firmware_commit\":\"d6cfaa2051ae\",\"firmware_features\":\"esp32c6,test_gpio_calibrate\",\"firmware_dirty\":false}\n",
+        ),
+        (
+            "uart-bridge",
+            "esp32c6,test_uart_bridge",
+            "[fw-checks-header] {\"schema\":1,\"payload\":\"uart-bridge\",\"chip\":\"esp32c6\",\"firmware_commit\":\"d6cfaa2051ae\",\"firmware_features\":\"esp32c6,test_uart_bridge\",\"firmware_dirty\":false}\n",
+        ),
+        (
+            "jit-math-perf",
+            "esp32c6,test_jit_math_perf",
+            "[fw-checks-header] {\"schema\":1,\"payload\":\"jit-math-perf\",\"chip\":\"esp32c6\",\"firmware_commit\":\"d6cfaa2051ae\",\"firmware_features\":\"esp32c6,test_jit_math_perf\",\"firmware_dirty\":false}\n",
+        ),
+        (
+            "cycle-probe",
+            "esp32c6,test_cycle_probe",
+            "[fw-checks-header] {\"schema\":1,\"payload\":\"cycle-probe\",\"chip\":\"esp32c6\",\"firmware_commit\":\"d6cfaa2051ae\",\"firmware_features\":\"esp32c6,test_cycle_probe\",\"firmware_dirty\":false}\n",
+        ),
+        (
+            "gpio-input",
+            "esp32c6,test_gpio_input",
+            "[fw-checks-header] {\"schema\":1,\"payload\":\"gpio-input\",\"chip\":\"esp32c6\",\"firmware_commit\":\"d6cfaa2051ae\",\"firmware_features\":\"esp32c6,test_gpio_input\",\"firmware_dirty\":false}\n",
+        ),
+        (
+            "render-loop",
+            "esp32c6,server,radio,memory_fs,bench_render_loop",
+            "[fw-checks-header] {\"schema\":1,\"payload\":\"render-loop\",\"chip\":\"esp32c6\",\"firmware_commit\":\"d6cfaa2051ae\",\"firmware_features\":\"esp32c6,server,radio,memory_fs,bench_render_loop\",\"firmware_dirty\":false}\n",
+        ),
+        (
+            "rmt-chase",
+            "esp32c6,test_rmt,ws281x_telemetry",
+            "[fw-checks-header] {\"schema\":1,\"payload\":\"rmt-chase\",\"chip\":\"esp32c6\",\"firmware_commit\":\"d6cfaa2051ae\",\"firmware_features\":\"esp32c6,test_rmt,ws281x_telemetry\",\"firmware_dirty\":false}\n",
+        ),
+    ];
+    for (payload, firmware_features, expected) in cases {
+        assert!(
+            find_check(payload).expect("registered").emits_header,
+            "`{payload}` has a pinned header line but does not claim to print one"
+        );
+        let header = PayloadHeader {
+            payload,
+            chip: "esp32c6",
+            firmware_commit: "d6cfaa2051ae",
+            firmware_features,
+            firmware_dirty: false,
+        };
+        let mut out = String::new();
+        write_header(&mut out, &header).expect("writing to a String never fails");
+        assert_eq!(&out, expected, "payload `{payload}`");
+    }
+
+    // A payload with no row above is a payload this test forgot — unless it
+    // says it prints no header at all. `boot-idle` is the one of those: it has
+    // no `fw-checks` module, because the payload IS the shipped image, so its
+    // provenance is the transcript's sidecar and nothing else.
+    for payload in ALL_PAYLOADS {
+        assert_eq!(
+            cases.iter().any(|(name, ..)| *name == payload.name),
+            payload.emits_header,
+            "payload `{}` (emits_header={}) has no pinned header line in this test",
+            payload.name,
+            payload.emits_header,
+        );
+    }
+}
+
+/// A payload that prints no in-band header has no `fw-checks` module either,
+/// and the other way round. The two are the same fact — a module is what
+/// prints the line — and stating it here keeps a future payload from claiming
+/// half of it.
+#[test]
+fn a_payload_without_a_module_prints_no_header() {
+    for payload in ALL_PAYLOADS {
+        assert_eq!(
+            payload.fw_checks_feature.is_some(),
+            payload.emits_header,
+            "payload `{}`: fw_checks_feature={:?} but emits_header={}",
+            payload.name,
+            payload.fw_checks_feature,
+            payload.emits_header
+        );
+    }
+}
+
+/// The shipped-image payload, whose whole point is that it is not a `test_*`
+/// module: several features, no done marker of its own making, no records and
+/// no header. It is the one entry where the two registries could drift into
+/// something meaningless without anybody noticing, because there is no
+/// firmware code on the other side to fail to compile.
+#[test]
+fn the_boot_idle_payload_is_the_shipped_image_on_both_sides() {
+    let payload = ALL_PAYLOADS
+        .iter()
+        .find(|p| p.name == "boot-idle")
+        .expect("boot-idle is registered");
+    let check = fw_check_for(payload.fw_check_slug);
+
+    assert_eq!(payload.firmware_features, ["server", "radio", "memory_fs"]);
+    assert_eq!(check.firmware_features, payload.firmware_features);
+    assert_eq!(payload.fw_checks_feature, None);
+    assert!(!payload.emits_header && !check.emits_header);
+    assert!(!check.emits_records && payload.record_kinds.is_empty());
+    assert_eq!(
+        payload.sentinel,
+        Sentinel::Done("[stack] heartbeat: high-water")
+    );
+    assert_eq!(check.done_marker, Some("[stack] heartbeat: high-water"));
+    // The three series it parses out of a boot.
+    let names: Vec<&str> = payload.series.iter().map(|s| s.name).collect();
+    assert_eq!(names, ["hello", "heartbeat", "stack-heartbeat"]);
 }
 
 /// The two prefixes must not collide, and the header schema must match.
@@ -263,4 +554,58 @@ fn every_trust_entry_says_why() {
             }
         }
     }
+}
+
+/// A payload's `pin_script` names a file, and a file that is not there is a
+/// run that drives no pads at all — which on `gpio-input` would produce a
+/// transcript with no records and a sentinel that never arrives.
+#[test]
+fn every_pin_script_a_payload_names_is_on_disk() {
+    for payload in ALL_PAYLOADS {
+        let Some(script) = payload.pin_script else {
+            continue;
+        };
+        let path = repo_root().join(script);
+        assert!(
+            path.is_file(),
+            "payload `{}` names pin script `{script}`, which is not at {}",
+            payload.name,
+            path.display()
+        );
+    }
+}
+
+/// The committed `--pin-script` and the firmware's own edge table are one
+/// thing said twice, so this is the check that keeps them one thing.
+///
+/// `gpio-input` is the payload whose two sides are driven differently on
+/// purpose: the firmware walks `SCRIPT` on silicon and the emulated side is
+/// driven from outside by the file below. If those two ever disagreed the
+/// replay would fail with a difference that looked like a model bug and was
+/// really a stale file, so the file is GENERATED from the table and held
+/// equal to it here — the same duty `every_payload_has_a_matching_fw_check`
+/// does for the two registries.
+#[test]
+fn the_gpio_input_pin_script_is_the_firmwares_own_edge_table() {
+    let mut rendered = String::new();
+    fw_checks::checks::gpio_input::write_pin_script(&mut rendered)
+        .expect("a String never fails to write");
+    let payload = lp_emu_validate::find_payload("gpio-input").unwrap();
+    let path = repo_root().join(payload.pin_script.expect("gpio-input names one"));
+    let committed = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(
+        committed,
+        rendered,
+        "{} has drifted from `fw_checks::checks::gpio_input::SCRIPT`. \
+         Regenerate it rather than editing either side.",
+        path.display()
+    );
+}
+
+/// `lp-cli/` is one directory below the repository root.
+fn repo_root() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("lp-cli sits under the repo root")
+        .to_path_buf()
 }

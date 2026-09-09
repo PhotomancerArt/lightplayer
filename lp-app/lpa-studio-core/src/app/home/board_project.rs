@@ -35,7 +35,7 @@
 use lpa_boards::board_by_id;
 use lpc_model::{HwEndpointSpec, ProjectManifest};
 
-use super::embedded_example::METEOR_FILES;
+use super::embedded_example::embedded_example;
 
 /// Pixels on the generated fixture's strip. Modest on purpose: enough to
 /// look like a strip rather than a token, few enough that a user who
@@ -100,7 +100,15 @@ impl From<GenerateProjectError> for crate::UiError {
 /// Build the first project for `board_id`: clock → playlist(meteor) →
 /// fixture → output, on the board's first default LED wire, with the
 /// container manifest's `target` set to the board.
-pub fn generate_board_project(board_id: &str) -> Result<GeneratedProject, GenerateProjectError> {
+///
+/// `name` is the user's name for the project when they typed one at the
+/// card (the setup surface offers it beside the board's own name); blank or
+/// `None` names the project after the board, as every provision did before
+/// the field existed.
+pub fn generate_board_project(
+    board_id: &str,
+    name: Option<&str>,
+) -> Result<GeneratedProject, GenerateProjectError> {
     let board = board_by_id(board_id).ok_or_else(|| GenerateProjectError::UnknownBoard {
         board_id: board_id.to_string(),
     })?;
@@ -116,7 +124,11 @@ pub fn generate_board_project(board_id: &str) -> Result<GeneratedProject, Genera
         }
     })?;
 
-    let name = board.display_name.clone();
+    let name = name
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| board.display_name.clone());
     let manifest = ProjectManifest {
         name: Some(name.clone()),
         target: Some(board_id.to_string()),
@@ -140,13 +152,13 @@ pub fn generate_board_project(board_id: &str) -> Result<GeneratedProject, Genera
             "output.json".to_string(),
             output_json(endpoint.as_str()).into_bytes(),
         ),
-        ("effect/module.json".to_string(), EFFECT_MODULE.into()),
     ];
-    // The effect's node artifacts and shaders ride verbatim from the
-    // embedded example — the gallery's meteor and the generated one are
-    // the same bytes by construction.
-    for name in ["sim.json", "sim.glsl", "render.json", "render.glsl"] {
-        files.push((format!("effect/{name}"), meteor_file(name).to_vec()));
+    // The effect rides verbatim from the catalog's meteor: its exported
+    // `effect/` folder — module, node artifacts, shaders, provenance — is
+    // vendored whole, so the gallery's meteor and the generated one are
+    // the same bytes by construction (modules.md §6 copy-to-own).
+    for (path, bytes) in meteor_export_files() {
+        files.push((path.to_string(), bytes.to_vec()));
     }
 
     Ok(GeneratedProject {
@@ -157,13 +169,21 @@ pub fn generate_board_project(board_id: &str) -> Result<GeneratedProject, Genera
     })
 }
 
-/// One file of the embedded meteor example, by package-relative name.
-fn meteor_file(name: &str) -> &'static [u8] {
-    METEOR_FILES
+/// The catalog id of the pattern the generated project vendors.
+const METEOR_ID: &str = "catalog/meteor";
+
+/// The folder the pattern exports (`project.json` `exports`), vendored as
+/// `effect/` in the generated project too.
+const METEOR_EXPORT: &str = "effect/";
+
+/// Every file of meteor's exported `effect/` folder, package-relative.
+fn meteor_export_files() -> impl Iterator<Item = (&'static str, &'static [u8])> {
+    embedded_example(METEOR_ID)
+        .unwrap_or_else(|| panic!("{METEOR_ID} is in the catalog"))
+        .files
         .iter()
-        .find(|(path, _)| *path == name)
-        .map(|(_, bytes)| *bytes)
-        .unwrap_or_else(|| panic!("the embedded meteor example ships {name}"))
+        .copied()
+        .filter(|(path, _)| path.starts_with(METEOR_EXPORT))
 }
 
 /// Root module: the four fixed nodes of a first project.
@@ -209,27 +229,6 @@ const PLAYLIST: &[u8] = br#"{
         "ref": "./effect/module.json"
       }
     }
-  }
-}
-"#;
-
-/// The vendored meteor module: the compute/render pair and nothing else
-/// (the example's own clock/fixture/output are the host project's job).
-/// Provenance is copied per modules.md R14 — vendoring keeps attribution.
-const EFFECT_MODULE: &[u8] = br#"{
-  "kind": "Module",
-  "nodes": {
-    "sim": {
-      "ref": "./sim.json"
-    },
-    "render": {
-      "ref": "./render.json"
-    }
-  },
-  "provenance": {
-    "author": "Photomancer",
-    "version": "1",
-    "license": "CC0-1.0"
   }
 }
 "#;
@@ -338,16 +337,41 @@ mod tests {
     #[test]
     fn an_unknown_board_is_refused_not_guessed() {
         assert_eq!(
-            generate_board_project("acme/not-a-board"),
+            generate_board_project("acme/not-a-board", None),
             Err(GenerateProjectError::UnknownBoard {
                 board_id: "acme/not-a-board".to_string()
             })
         );
     }
 
+    /// The optional name: typed, it is the project's (trimmed); blank or
+    /// absent, the board's display name is — the way every provision named
+    /// itself before the field existed.
+    #[test]
+    fn a_typed_name_names_the_project_and_blank_falls_back_to_the_board() {
+        let named =
+            generate_board_project("seeed/xiao-esp32-c6", Some("  Porch sign ")).expect("xiao");
+        assert_eq!(named.name, "Porch sign");
+        let manifest = String::from_utf8(named.files[0].1.clone()).expect("utf8 manifest");
+        assert!(
+            manifest.contains("\"name\": \"Porch sign\""),
+            "the manifest carries the typed name: {manifest}"
+        );
+
+        let blank = generate_board_project("seeed/xiao-esp32-c6", Some("   ")).expect("xiao");
+        let unnamed = generate_board_project("seeed/xiao-esp32-c6", None).expect("xiao");
+        assert_eq!(blank.name, unnamed.name);
+        assert_eq!(
+            unnamed.name,
+            lpa_boards::board_by_id("seeed/xiao-esp32-c6")
+                .expect("catalogued")
+                .display_name
+        );
+    }
+
     #[test]
     fn the_generated_project_wires_the_boards_first_default_wire() {
-        let project = generate_board_project("domraem/dom-z-102").expect("desk board");
+        let project = generate_board_project("domraem/dom-z-102", None).expect("desk board");
         // The DOM-Z-102's four fused DATA terminals, first one taken.
         assert_eq!(project.endpoint, "ws281x:local:IO18");
         assert_eq!(project.board_id, "domraem/dom-z-102");
@@ -361,7 +385,7 @@ mod tests {
 
     #[test]
     fn the_manifest_carries_the_board_as_its_target() {
-        let project = generate_board_project("seeed/xiao-esp32-c6").expect("xiao");
+        let project = generate_board_project("seeed/xiao-esp32-c6", None).expect("xiao");
         let manifest =
             ProjectManifest::read_json(&file_text(&project, "project.json")).expect("manifest");
         assert_eq!(manifest.target.as_deref(), Some("seeed/xiao-esp32-c6"));
@@ -371,20 +395,30 @@ mod tests {
 
     #[test]
     fn the_effect_files_are_the_embedded_examples_bytes() {
-        let project = generate_board_project("seeed/xiao-esp32-c6").expect("xiao");
-        for name in ["sim.glsl", "render.glsl", "sim.json", "render.json"] {
-            let generated = file_bytes(&project, &format!("effect/{name}"));
+        let project = generate_board_project("seeed/xiao-esp32-c6", None).expect("xiao");
+        let mut vendored = 0;
+        for (path, bytes) in meteor_export_files() {
             assert_eq!(
-                generated,
-                meteor_file(name),
-                "effect/{name} must be the embedded meteor's own bytes"
+                file_bytes(&project, path),
+                bytes,
+                "{path} must be the embedded meteor's own bytes"
             );
+            vendored += 1;
         }
+        assert!(
+            vendored >= 5,
+            "meteor exports a module plus its sim/render pair"
+        );
+        // The vendored module carries the pattern's own provenance — the
+        // export lint's warning-free shape (modules.md R14).
+        let module = file_text(&project, "effect/module.json");
+        assert!(module.contains("\"provenance\""), "{module}");
+        assert!(module.contains("\"license\""), "{module}");
     }
 
     #[test]
     fn the_container_manifest_deploys_first() {
-        let project = generate_board_project("quinled/dig-uno").expect("dig-uno");
+        let project = generate_board_project("quinled/dig-uno", None).expect("dig-uno");
         assert_eq!(
             project.files.first().map(|(path, _)| path.as_str()),
             Some("project.json")
@@ -397,7 +431,7 @@ mod tests {
 
     #[test]
     fn the_strip_is_the_default_pixel_count() {
-        let project = generate_board_project("quinled/dig-uno").expect("dig-uno");
+        let project = generate_board_project("quinled/dig-uno", None).expect("dig-uno");
         let doc = lpc_mapping::Map2dDoc::from_json(&file_text(&project, "fixture.map2d.json"))
             .expect("the generated mapping parses");
         let resolved = lpc_mapping::resolve(&doc).expect("and resolves");

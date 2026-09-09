@@ -67,15 +67,18 @@ does not blur into a larger API rename.
 
 - `StudioController` is the top-level controller. It owns the
   `RuntimePool`, `DeviceController`, and `ProjectController`.
-- `RuntimePool` (`app/runtime_pool/`, runtime-pool ADR) holds the runtime
-  sessions Studio is attached to — each `RuntimeSession` bundles its
-  runtime payload (browser-worker sim or hardware `DeviceSession`), its
-  OWN `StudioServerClient` + server protocol state, and the per-device
-  reconcile bundle — plus the editor **lens** (the ≤1 session the editor
-  is bound to). Capacity is a policy (MVP: 1 sim + 1 device); "connected"
-  means "a session exists in the pool". Network ops resolve through two
-  named seams: lens-bound editor ops (`lens_session_mut`) and
-  session-targeted device/deploy/reconcile ops (`device_session_mut`).
+- `RuntimePool` (`app/runtime_pool/`, runtime-pool ADR + the always-a-device
+  ADR) holds the session Studio is attached to. There is **one payload**:
+  a `DeviceLensAttachment` — the editor is a lens on a roster device, and
+  a sim is a roster device like any other. A `RuntimeSession` bundles that
+  attachment, its OWN `StudioServerClient` + server protocol state, its
+  console tail and its pacing, plus the editor **lens** (the ≤1 session
+  the editor is bound to). Capacity is a policy and it is ONE
+  (`SESSION_CAPACITY` — one device per tab, D37); "connected" means "a
+  session exists in the pool". The one thing left that a session forks on
+  is `LinkTransport { Sim, Serial }`, read off the link's endpoint: a fact
+  about the WIRE (an in-process worker channel has no bandwidth bound, a
+  serial port does), never about the kind of device.
 - `DeviceController` owns the connect flow — the `LinkProviderRegistry`
   catalog and the picker view state (`ConnectFlowState`) — and is the
   session FACTORY: connect flows build and return a `RuntimePayload` that
@@ -125,7 +128,7 @@ does not blur into a larger API rename.
 - `StudioSnapshot` and the node snapshots remain cloneable domain read models,
   but web rendering should prefer `StudioView`.
 
-The first slice supports the browser-worker simulator and browser Web Serial
+The first slice supports the browser-worker sim and browser Web Serial
 ESP32 entrypoints. It launches `fw-browser` through `lpa-link`, talks to the
 real `lp-server` protocol through `lpa-client`, attaches to a running project
 when one is already loaded, can load the demo project, and reads project
@@ -200,8 +203,10 @@ it enqueues commands and renders change-gated snapshots. The pieces:
   visibility signal, and a card nobody is watching generates no traffic.
 - **Request scoping** stays core-owned and is runtime-tiered: the probe set
   (`node_subscribes_products`) subscribes every non-collapsed node's products
-  on the simulator and only the focused node (plus the primary visual) on a
-  device, and probe resolution tiers the same way (32×32 sim / 16×16 device).
+  over an in-process wire and only the focused node (plus the primary
+  visual) over serial, and probe resolution tiers the same way (32×32 /
+  16×16) — the fork is `LinkTransport`, because both are bandwidth
+  arguments.
   The set is picked up by the next pull; `Focus` completes synchronously with
   no bolt-on network refresh.
 
@@ -339,9 +344,12 @@ Project attach behavior is core-owned:
 - multiple loaded projects: show the selection in the Device open-project step
   and expose one action per loaded project.
 
-For the browser-worker simulator, the zero-loaded-project case auto-loads the
-demo project. Real hardware remains conservative and requires explicit project
-loading when nothing is running.
+Opening a project from the gallery is a push of the library head regardless
+of what is running (D19), and it lands through `attach_lens` — so a lens
+that arrives late, on a sim that was still booting when the click ran,
+pushes exactly as one that arrived at once. A `/device/<uid>` open with no
+pending package stays conservative and connects to whatever the device
+already runs.
 
 ## Feedback And Recovery
 
@@ -389,6 +397,75 @@ The console model lives in `core/log/` (ADR
   toolbar sends it as `ConsoleCommand::SetDeviceLogLevel`, converted to the
   device action at actor intake. Not persisted device-side; tracked
   optimistically per connection.
+
+## Devices: One Layer, Two Transports
+
+A **sim** is a device. Not "a runtime that looks like one" — a row in the
+same registry, a record in the same `lpa-devices` fold, the same card, the
+same verbs, and the same runtime pool session. `lpa-devices` has no arm
+for it and never will: what a sim adds is a `Link` implementor and an
+effect backend, never a flow.
+
+The one mark on the card is the **runtime band**
+(`devices/runtime_band.rs`): 24px, bound-family,
+`▶ Sim · <target> · in this tab · <granted tier>`, joined at the app view
+in `DeviceRosterView::runtime_bands` like the card's feed. Real boards
+have none, so a real card's height is unchanged.
+
+Four pieces in `app/devices/` make that true:
+
+- **`sim_record.rs` — identity and the sidecar.** Studio mints a
+  locally-administered MAC from caller-supplied random bytes (sans-IO) and
+  derives the uid through `HardwareId::device_uid`, the one G1-approved
+  derivation. The registry row therefore records `hardware_id: "efuse:<mac>"`
+  like any board and every identity join is untouched. The sole "this is a
+  sim" fact is `/device-sims/<uid>.json`, beside `/device-frames/<uid>.json`:
+  absence means not a sim, an unreadable or foreign-version file reads as
+  absent, and `Forget` deletes it. Nothing about a sim rides the wire.
+- **`sim_transport.rs` — the sims this tab powered on.** A
+  `DeviceTransport` answering a differently-shaped question — sims are
+  **made**, not discovered — behind the same trait. What a running sim IS
+  arrives through `SimLinkSource`: a `fw-browser` worker in the browser
+  (`browser_sim_source.rs`, wasm-only), a scripted fake in the host e2e
+  bench. Effects say what actually happened: a flash writes nothing and
+  reports no probed MAC or chip name, an erase says the storage was memory,
+  a manifest write is worn by the next runtime, and push/remove run the real
+  `lpa-client` conversation.
+- **`composite_transport.rs` — one transport, two halves.** `DeviceEffects`
+  holds exactly one `DeviceTransport`, on purpose (a per-kind fork inside it
+  is how a second device flow grows), so a build that reaches both installs a
+  composite that routes by the link's endpoint — already the effects layer's
+  routing key, and already what the registry `transport` column is derived
+  from. A build with no serial half still serves sims; only the chooser
+  degrades, and it says why.
+
+Power on and off are `Action::Connect` and `Action::Disconnect`. The effects
+layer starts the runtime before the fold so the sweep finds a link; the hello
+carries the uid and the fold adopts the link into the record that was already
+there. Powering off raises the detach explicitly, because `Disconnect` alone
+keeps a card attached — right for a board still on the desk, wrong for a
+runtime that no longer exists. Only the two verbs' WORDS fork ("Power on" /
+"Power off", via `DevicesOp`'s `face`); every other verb reads the same.
+
+**Creating one** is `SimCreateOp` (`devices/sim_create_op.rs`), the Devices
+page add slot's second verb — its own op rather than a `DevicesOp` variant
+because creating a device is not something the fold does: the record is
+written in the library (row + sidecar, one settle), the roster meets it as
+an ordinary device at the settle that follows, and only then is there a
+`DeviceId` for the ordinary `Connect` to aim at. What the menu offers is
+decided in `devices/target_offer.rs` (Desktop first, then the catalog
+boards) and tagged from `devices/runtime_backing.rs`, the one-row
+capability table that says what this build runs a target AS — `sim`
+everywhere until an emulator lands behind a device.
+
+A project's own hardware is the container manifest's `target`
+(`library/project_target.rs`), and the project settings' **Hardware** row is
+the first thing that writes it: `HomeOp::SetPackageTarget` patches the open
+project's manifest through its own handle and mirrors it to the runtime,
+exactly as the rename does. Desktop writes no key — an absent `target` has
+always meant Desktop, and one spelling on disk is enough. Projects created
+in this library declare Desktop at creation (D32); imports and forks keep
+whatever they arrived with.
 
 ## Device Management UX
 

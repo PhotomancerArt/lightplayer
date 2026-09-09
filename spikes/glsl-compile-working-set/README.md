@@ -11,13 +11,13 @@ already unreachable because "a 4 KB shader needs ~65 KB of compile working set"
 — which PR #284 put in doubt by shrinking `ChunkedVec`'s chunk allocations.
 
 A counting `#[global_allocator]` measures peak live bytes across a real
-`lps_glsl::compile`, for `examples/basic/shader.glsl` and a synthetic size sweep.
+`lps_glsl::compile`, for `projects/test/basic/shader.glsl` and a synthetic size sweep.
 
 ## Results (2026-08-02)
 
 | GLSL | peak heap | largest single allocation |
 |---|---|---|
-| 4,092 B (`examples/basic`) | 156,972 B | **24,576 B** |
+| 4,092 B (`projects/test/basic`) | 156,972 B | **24,576 B** |
 | 17,714 B (synthetic) | 1,680,167 B | **196,608 B** |
 | 35,634 B (synthetic) | 3,353,511 B | 393,216 B |
 
@@ -35,7 +35,7 @@ code region, remains the binding constraint at that size.
 Measuring `lps_glsl::lex` on its own returns the same 24,576 B, so the token
 vector owns it — a plain doubling `Vec<Token>` with no chunking. `Token` is
 **12 bytes on both** `riscv32imac` and the 64-bit host, so this figure transfers
-to the device unchanged: `examples/basic` asks the classic's allocator for a
+to the device unchanged: `projects/test/basic` asks the classic's allocator for a
 single 24,576 B block, 22 % of its 112,640 B arena and **8× the 3,072 B request
 that OOM'd** in `docs/defects/2026-08-02-classic-oom-retry-succeeds.md`.
 

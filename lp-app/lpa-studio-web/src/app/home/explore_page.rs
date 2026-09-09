@@ -1,12 +1,12 @@
-//! The Explore page (`#/explore`, vision D10): the example grid under
-//! its new name — exactly the old gallery's Examples section, with
-//! today's open-example behavior. No kinds, no provenance, no remix UI
-//! (the content system is future M4 / wled-compat material, D6/D7).
+//! The Explore page (`#/explore`, vision D10): the catalog, grouped by
+//! kind (catalog content tree D17) — real pieces first, then patterns,
+//! the same sections the home landing shows, with today's open-example
+//! behavior. No provenance, no remix UI, no filter chrome (T4 material).
 
 use dioxus::prelude::*;
 
 use crate::base::HelpLink;
-use lpa_studio_core::{UiAction, UiHomeView};
+use lpa_studio_core::{UiAction, UiHomeView, example_groups};
 
 use crate::app::home::example_card::{ExampleCard, embedded_example_cards};
 use crate::app::home::gallery_preview::HoveredCard;
@@ -52,29 +52,32 @@ pub fn ExplorePage(
                     on_action: Some(on_action),
                 }
             }
-            section { class: "tw:grid tw:gap-3",
-                header { class: "tw:flex tw:items-center tw:gap-3",
-                    h2 { class: section_title_class(), "Examples" }
-                    // kind filter chips: Modules stays hidden while no module
-                    // examples exist (M6 grows this)
-                    span { class: "tw:rounded-full tw:border tw:border-border tw:px-2.5 tw:py-0.5 tw:text-xs tw:font-semibold tw:text-muted-foreground",
-                        "Projects"
+            for group in example_groups(&examples) {
+                section { key: "{group.key}", class: "tw:grid tw:gap-3",
+                    header { class: "tw:flex tw:items-center tw:gap-3",
+                        h2 { class: section_title_class(), "{group.label}" }
+                        // Where a WLED person goes looking for "the effects
+                        // list" — the patterns section is the exact spot
+                        // the shader question arises.
+                        if group.key == "patterns" {
+                            HelpLink {
+                                href: crate::app::docs::docs_links::what_is_a_shader::HREF,
+                                title: "What's a shader?",
+                            }
+                        }
                     }
-                    // Where a WLED person goes looking for "the effects
-                    // list" — the exact spot the shader question arises.
-                    HelpLink {
-                        href: crate::app::docs::docs_links::what_is_a_shader::HREF,
-                        title: "What's a shader?",
+                    p { class: "tw:m-0 tw:text-xs tw:leading-snug tw:text-muted-foreground",
+                        "{group.lede}"
                     }
-                }
-                div { class: card_grid_class(),
-                    for card in examples {
-                        ExampleCard {
-                            key: "{card.id}",
-                            opening: opening.as_deref() == Some(card.id.as_str()),
-                            busy,
-                            card,
-                            on_action,
+                    div { class: card_grid_class(),
+                        for card in group.cards {
+                            ExampleCard {
+                                key: "{card.id}",
+                                opening: opening.as_deref() == Some(card.id.as_str()),
+                                busy,
+                                card,
+                                on_action,
+                            }
                         }
                     }
                 }

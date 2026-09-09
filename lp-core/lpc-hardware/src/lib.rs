@@ -65,6 +65,7 @@ pub use hw_error::HwError;
 pub use hw_system::HardwareSystem;
 pub use lpc_model::HwEndpointSpec;
 pub use manifest::default_manifests::{
+    DESKTOP_BOARD_MANIFEST_JSON, default_desktop_hardware_manifest,
     default_esp32c6_hardware_manifest, default_esp32s3_hardware_manifest,
     default_esp32v3_hardware_manifest, permissive_emu_hardware_manifest,
 };

@@ -1,12 +1,13 @@
 //! Verbs that act on the attached RUNTIME rather than on a project.
 //!
-//! Two survived the device-system teardown (M2 of the device-model
-//! rebuild), where they lived as `DeviceOp` variants alongside a dozen
-//! hardware verbs: stopping the simulator (the sim card's danger zone) and
-//! setting the runtime's log level (the console's runtime-level selector).
-//! Both are runtime-scoped and neither is device-specific, so they get
-//! their own small op rather than riding a project op or waiting for the
-//! rebuilt device model.
+//! Three of them, all lens-scoped: open the editor on a device, close it,
+//! and set the runtime's log level (the console's runtime-level selector).
+//! None is device-specific, so they get their own small op rather than
+//! riding a project op.
+//!
+//! `StopSimulator` retired with the sim card (PD9): a sim is a device, and
+//! stopping one is `Power off` on its card — a `DevicesOp` at the fold, not
+//! a runtime verb.
 
 use core::any::Any;
 
@@ -17,10 +18,6 @@ use crate::{
 /// One runtime-scoped gesture.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RuntimeOp {
-    /// Destroy the simulator session (worker + wire client). The card's
-    /// danger-zone verb; unsaved changes on it are gone (D22 — the sim
-    /// persists nothing).
-    StopSimulator,
     /// Ask the attached runtime's server to apply a log level. There is no
     /// read-back on the wire, so the console's selector shows the last
     /// requested level optimistically.
@@ -44,14 +41,6 @@ impl RuntimeOp {
 impl ControllerOp for RuntimeOp {
     fn default_action_meta(&self) -> ActionMeta {
         match self {
-            Self::StopSimulator => ActionMeta::new(
-                "Stop simulator",
-                "Shut the simulator down. Anything running on it stops, and \
-                 unsaved changes on it are lost.",
-                ActionPriority::Tertiary,
-            )
-            .with_icon("remove")
-            .destructive(),
             Self::SetLogLevel { .. } => ActionMeta::new(
                 "Set log level",
                 "Ask the runtime's server to log at this level.",
@@ -73,9 +62,6 @@ impl ControllerOp for RuntimeOp {
 
     fn action_class(&self) -> ActionClass {
         match self {
-            // Stopping the sim tears the session down; it owns the
-            // connection for the duration, so it carries no deadline.
-            Self::StopSimulator => ActionClass::Recovery,
             // One small wire write.
             Self::SetLogLevel { .. } => ActionClass::Foreground {
                 deadline: PROJECT_ACTION_DEADLINE,
@@ -86,7 +72,7 @@ impl ControllerOp for RuntimeOp {
                 deadline: PROJECT_ACTION_DEADLINE,
             },
             // Tears the session down; it owns the connection for the
-            // duration, so it carries no deadline (like stopping the sim).
+            // duration, so it carries no deadline.
             Self::CloseDeviceLens => ActionClass::Recovery,
         }
     }
@@ -111,15 +97,6 @@ impl ControllerOp for RuntimeOp {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn stopping_the_sim_owns_the_connection_and_reads_destructive() {
-        assert_eq!(
-            RuntimeOp::StopSimulator.action_class(),
-            ActionClass::Recovery
-        );
-        assert!(RuntimeOp::StopSimulator.default_action_meta().destructive);
-    }
 
     #[test]
     fn opening_a_device_lens_is_bounded_and_closing_it_owns_the_connection() {

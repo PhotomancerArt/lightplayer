@@ -12,7 +12,7 @@ pub const SHADER_COMPILE_CASES: &[ShaderCompileCase] = &[ShaderCompileCase {
     name: "examples-basic",
     glsl: include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../examples/basic/shader.glsl"
+        "/../../projects/test/basic/shader.glsl"
     )),
     with_input_color: false,
 }];

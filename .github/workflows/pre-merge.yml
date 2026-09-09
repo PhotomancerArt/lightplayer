@@ -96,6 +96,7 @@ jobs:
       browser: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.browser }}
       studio: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.studio }}
       firmware: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.firmware }}
+      emu_c6: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.emu_c6 }}
     steps:
       # Default quantifier ("some"): a filter is true when ANY changed file
       # matches one of its globs. Each list is the *dependency closure* of what
@@ -142,6 +143,10 @@ jobs:
               - 'rust-toolchain.toml'
               - 'justfile'
               - '.github/workflows/pre-merge.yml'
+              # The Xtensa install is a local composite action now; a change
+              # to it must rebuild the jobs that use it (validate-xtensa here,
+              # the two firmware-* jobs via the `firmware` filter below).
+              - '.github/actions/**'
             gfx:
               - 'lp-gfx/**'
               - 'lp-shader/**'
@@ -231,6 +236,30 @@ jobs:
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'rust-toolchain.toml'
+              - 'justfile'
+              - '.github/workflows/pre-merge.yml'
+              - '.github/actions/**'
+            # emu_c6 gates the ESP32-C6 emulator's OWN boot-test + replay suite
+            # (`just test-emu-c6`, DD27 of the 2026-09-06 esp-emulator plan):
+            # the machine and its tests live in lp-emu/, and the two reference
+            # firmware images it builds and boots
+            # (`scripts/emu/build-reference-image.sh`, at a pinned historical
+            # commit) come from lp-fw/fw-esp32c6. Deliberately narrower than
+            # `firmware` above, which is the full link closure of the SHIPPED
+            # device image: this job's ~69s (measured, warm cargo cache) is
+            # dominated by building two extra reference images at that pinned
+            # commit, cost a shared-crate bump gains nothing from re-paying
+            # here when `firmware-size` already rebuilds the shipped image for
+            # exactly that case. Caching prebuilt ELFs instead of building them
+            # was considered and rejected (DD27).
+            emu_c6:
+              - 'lp-emu/**'
+              - 'lp-fw/fw-esp32c6/**'
+              # The recipe that builds every image this job boots. It was
+              # missing until L4, so a change to the reference build — the
+              # thing that decides WHICH BYTES the gates run against — ran no
+              # gate at all unless it happened to touch something else.
+              - 'scripts/emu/**'
               - 'justfile'
               - '.github/workflows/pre-merge.yml'
 
@@ -379,13 +408,16 @@ jobs:
       # pins so a fork release cannot turn a green PR red on its own. Needs
       # >= 1.90 for the workspace MSRV — on 1.88 lpc-model genuinely fails to
       # compile (70x E0716 from the Slotted derive). Bump deliberately.
+      #
+      # Wrapped by a local action rather than calling esp-rs/xtensa-toolchain
+      # directly: espup's release query was 403'ing on the shared runner-IP
+      # rate limit. See .github/actions/xtensa-toolchain/action.yml.
       - name: Install Xtensa Rust toolchain
-        uses: esp-rs/xtensa-toolchain@v1.6
+        uses: ./lp2025/.github/actions/xtensa-toolchain
         with:
           version: 1.95.0.0
           buildtargets: esp32s3
           default: true
-          ldproxy: false
 
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
@@ -457,12 +489,11 @@ jobs:
       # release cannot turn a green PR red on its own. Keep this version in
       # sync with firmware-xtensa's.
       - name: Install Xtensa Rust toolchain
-        uses: esp-rs/xtensa-toolchain@v1.6
+        uses: ./lp2025/.github/actions/xtensa-toolchain
         with:
           version: 1.95.0.0
           buildtargets: esp32
           default: true
-          ldproxy: false
 
       # `lp2025 -> target`, mirroring firmware-xtensa: this crate is a
       # repo-root workspace member (M3-P1 folded it in) and writes into the
@@ -564,12 +595,11 @@ jobs:
       # leaves the host nightly as the default toolchain — the image build
       # selects the esp channel itself through lp-xt/fixtures/rust-toolchain.toml.
       - name: Install Xtensa Rust toolchain
-        uses: esp-rs/xtensa-toolchain@v1.6
+        uses: ./lp2025/.github/actions/xtensa-toolchain
         with:
           version: 1.95.0.0
           buildtargets: esp32s3
           default: false
-          ldproxy: false
 
       # Compile cache, mirroring every other compile-heavy job here (see
       # validate-x64 for the design: cache-targets is off repo-wide, sccache IS
@@ -774,6 +804,175 @@ jobs:
       # embedded manifest core and diff against the checked-in expectation.
       - name: Check esp32c6 embedded manifest
         run: cd lp2025 && just fw-manifest-check-esp32c6
+
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: |
+          if command -v sccache >/dev/null; then
+            { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # The ESP32-C6 emulator's own boot-test + replay suite (`just test-emu-c6`,
+  # L3 of the 2026-09-06 esp-emulator plan, DD27). This builds TWO reference
+  # `fw-esp32c6` images at a pinned historical commit
+  # (`scripts/emu/build-reference-image.sh`: `git worktree add --detach` at
+  # d6cfaa205, `git cherry-pick -n` of e8d64eeff on top) and boots them against
+  # the `#[ignore]`d boot tests in `lp-emu-esp32c6` under `LP_EMU_BUILD_FW=1`,
+  # then runs the `lp-emu-validate` M3 replays and lp-cli's registry-parity
+  # test. Before this job, that whole suite was inert in CI — the boot tests
+  # are `#[ignore]`d specifically so a bare `cargo test --workspace` (which
+  # `validate-x64` runs) never starts a firmware build, so nothing exercised
+  # them.
+  #
+  # fetch-depth: 0, unlike every other job here: the two commits above are
+  # ordinary history, not refs, and the script's `git worktree add` /
+  # `git cherry-pick` both need them present locally — a shallow checkout
+  # would fail with "unknown revision".
+  #
+  # Same toolchain family as `firmware-size` (RISC-V, not Xtensa —
+  # fw-esp32c6 is a RISC-V core, unlike the S3/v3 Xtensa firmware): the
+  # pinned nightly with rust-src (build-std) plus the riscv32imac target.
+  #
+  # espflash IS needed here, which it was not until M7, and not for a port:
+  # `save-image --merge` is what builds the merged flash image the ROM-up
+  # boot reads, and the second-stage bootloader in that image comes out of
+  # espflash's own bundled resources. It is installed **prebuilt**
+  # (`cargo binstall`), unlike the three hardware-adjacent jobs that
+  # `cargo install` it from source — this is the job already closest to its
+  # ceiling, and a source build of espflash is minutes it does not have.
+  #
+  # Path-gated on `emu_c6` (narrower than `firmware`) rather than the full
+  # device-image dependency closure — see that filter's comment in
+  # detect-changes for why. Not added to any required-check list here; see
+  # the PR description for that call.
+  emu-c6:
+    name: Emulator C6 (x64)
+    runs-on: ubuntu-24.04
+    # Measured 69s wall-clock on an M2 Max, warm cargo cache (2026-09-06, see
+    # the PR that added this job for the CI-measured number); 9m34s on this
+    # runner (2026-09-08, main at #567), which is three cold reference-image
+    # builds and the suite. L4's `--verify` step adds a fourth build, so the
+    # ceiling moves with it rather than the job living at 90 % of its budget.
+    #
+    # Raised 20 -> 35 (2026-09-08): #599's `--verify` build and the
+    # heap-budget-check-chips step (a second, cross-target firmware build
+    # plus four emulator profile captures) pushed the job past 20 minutes on
+    # every run since — main's own post-merge run for #599 hit 20m21s, #597's
+    # runs hit 20m17s/20m15s, all cut mid heap-budget-check-chips with no
+    # step ever failing. Observed elapsed-to-that-step alone ranged
+    # 15m26s-18m23s across cache states, and the step itself was still
+    # running (not done) after 4m47s in the longest sample, so 20 min never
+    # had margin. 35 covers a fully cold run (cold reference-image builds +
+    # cold cross-target chip build + the profile captures) with headroom;
+    # see the PR for the timing table this is based on.
+    timeout-minutes: 35
+    needs: detect-changes
+    if: needs.detect-changes.outputs.emu_c6 == 'true'
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "false"
+      CARGO_PROFILE_TEST_DEBUG: "false"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+    steps:
+      - name: Install system deps (libudev for serialport)
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+
+      - name: Checkout lp2025
+        uses: actions/checkout@v4
+        with:
+          path: lp2025
+          # build-reference-image.sh does `git worktree add --detach` at a
+          # pinned historical commit and a `git cherry-pick -n` on top of it —
+          # both need history a shallow (depth-1) checkout does not have.
+          fetch-depth: 0
+
+      - name: Checkout lp-regalloc2
+        uses: actions/checkout@v4
+        with:
+          repository: PhotomancerArt/lp-regalloc2
+          path: lp-regalloc2
+
+      # Toolchain is pinned in lp2025/rust-toolchain.toml; keep this in sync.
+      # rust-src is required: fw-esp32c6 builds core/alloc from source
+      # (build-std) for its release-esp32 profile, same as firmware-size.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-27
+          components: rust-src
+
+      - name: Install RISC-V target
+        run: rustup target add ${{ env.RISC_V_TARGET }}
+
+      - name: Run sccache
+        uses: mozilla/sccache-action@v0.0.10
+
+      # rust-cache keys on the job id; save-if main-only (see the lint job's
+      # cache step for the rationale). The reference-image builds happen
+      # inside a detached worktree under lp2025/target/emu-ref/, which is
+      # still under this workspace root, so sccache (content-addressed) still
+      # covers them even though target/ itself is not cached.
+      #
+      # cache-on-failure (2026-09-08): this job's own post-cache save step
+      # was silently skipped on every run this job overran on, because
+      # rust-cache's default post-if is `success()` — a step failure or a
+      # timeout cancellation both make that false, so a cancelled run (see
+      # timeout-minutes above) never published this job's cache, and main
+      # ran cold on every subsequent run. cache-on-failure widens the
+      # post-if to `success() || cache-on-failure`, so a future overrun
+      # still saves what got built before the cutoff.
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lp2025 -> target
+          cache-targets: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      # Prebuilt, not `cargo install`: the same call the two deploy workflows
+      # make, pinned to the same 3.3.0. The version is load-bearing rather
+      # than incidental — espflash bundles the ESP-IDF second-stage
+      # bootloader, `build-merged-image.sh` refuses any other version, and
+      # the boot-log gate diffs that bootloader's output against a silicon
+      # capture of the same binary. A different espflash is a different
+      # program in the image.
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@v1.21.1
+
+      - name: Install espflash (prebuilt — the merged image's bootloader)
+        run: cargo binstall --no-confirm --locked espflash@3.3.0
+
+      # The reference image is reproducible (L4): the same sha256 on this
+      # runner and on a Mac, for the same pinned firmware commit. This step is
+      # what keeps that true — it builds the memfs image twice, in two cold
+      # worktrees at different paths, and fails if the bytes differ.
+      #
+      # One image, not all three: the claim is about the recipe, and the other
+      # two go through the same code path. It runs BEFORE the suite so its
+      # first build is the one the tests then use (the script publishes to the
+      # path they resolve), which is why it does not simply double the job.
+      - name: Reference image reproducibility (--verify)
+        run: cd lp2025 && ./scripts/emu/build-reference-image.sh --verify esp32c6,server,radio,spike_uart0_link,memory_fs
+
+      - name: Emulator C6 boot tests + replays
+        run: cd lp2025 && just test-emu-c6
+
+      # The heap-budget record's chip half: the shipped image booted whole,
+      # read from the allocator figures its own first heartbeat reports
+      # (docs/heap-budget-gate.md, "The second source"). It lives HERE and not
+      # in the required `Validate (x64)` job because it needs a cross-target
+      # firmware build — which this job has already done by now, so the step
+      # costs one emulator run and nothing else. `heap-budget-check` in the
+      # required job prints a named SKIP for the same reason; a skip here
+      # would be a failure, and the recipe sets LP_EMU_BUILD_FW=1 so it cannot
+      # happen quietly.
+      - name: Heap budget ratchet — the C6's own ledger
+        run: cd lp2025 && just heap-budget-check-chips
 
       - name: sccache stats
         if: always()

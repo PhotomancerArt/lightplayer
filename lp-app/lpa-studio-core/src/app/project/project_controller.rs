@@ -64,11 +64,14 @@ pub struct ProjectController {
     /// or a link that is not Ready): the add-node picker then offers every
     /// kind. Gating only ever narrows when a device affirmatively reports.
     lens_device_features: Option<Vec<lpc_model::LpFeature>>,
-    /// What kind of runtime the lens is on — the probe policy's key
-    /// (visual probe resolution, product-subscription node scope). Pushed
-    /// by the studio controller's `sync_lens_probe_policy` at every action
-    /// and tick that might move the lens; `None` while detached.
-    lens_runtime_kind: Option<crate::RuntimeKind>,
+    /// How the lens device is reached — the probe policy's key (visual
+    /// probe resolution, product-subscription node scope). Every runtime is
+    /// a device now (PD9), so what these forks were ever really about is
+    /// the WIRE: an in-process worker channel has no bandwidth bound, a
+    /// serial port does. Pushed by the studio controller's
+    /// `sync_lens_probe_policy` at every action and tick that might move
+    /// the lens; `None` while detached.
+    lens_transport: Option<crate::LinkTransport>,
     /// Every pattern export the local library offers, for the add-node
     /// picker's import source (module authoring unit, P5). Pushed down from
     /// the studio controller at each library settle — a view build must
@@ -422,7 +425,7 @@ struct ActiveLibraryProject {
 /// layer needs to address the session honestly (a bare `/p/<slug>`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum TransientOrigin {
-    /// An embedded example, by id (`examples/fyeah-sign`).
+    /// An embedded example, by id (`catalog/fyeah-sign`).
     Example { id: String },
     /// Someone else's View-access shared project (P5): the session runs
     /// the cloud document's own uid over fetched content; a fork mints a
@@ -438,7 +441,7 @@ impl ProjectController {
             state: ProjectState::NotLoaded,
             running_project_status: RunningProjectStatus::Unknown,
             lens_device_features: None,
-            lens_runtime_kind: None,
+            lens_transport: None,
             import_patterns: Vec::new(),
             active_editor_target: None,
             runtime_storage_id: crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID
@@ -489,16 +492,6 @@ impl ProjectController {
     #[cfg(test)]
     pub(crate) fn runtime_storage_id_for_test(&self) -> &str {
         &self.runtime_storage_id
-    }
-
-    /// A file from the ACTIVE package's store (transient e2e assertions:
-    /// the memory copy is unreachable from outside the controller).
-    #[cfg(test)]
-    pub(crate) fn active_package_file_for_test(&self, path: &str) -> Option<Vec<u8>> {
-        use lpc_model::AsLpPath;
-        let active = self.library.as_ref()?.active.as_ref()?;
-        let view = active.handle.package_fs.borrow();
-        view.read_file(path.as_path()).ok()
     }
 
     /// Attach the injected library host (browser shell, once the store
@@ -2602,7 +2595,7 @@ impl ProjectController {
         self.mark_opening_project();
         let files = crate::app::preview_host::example_deploy_files(example_id)
             .map_err(UiError::MissingSession)?;
-        // `examples/plasma` → `docs-plasma`: a filesystem-safe storage id.
+        // `catalog/plasma` → `docs-plasma`: a filesystem-safe storage id.
         let short = example_id.rsplit('/').next().unwrap_or(example_id);
         let storage_id = format!("docs-{short}");
         let loaded = server
@@ -4434,7 +4427,7 @@ impl ProjectController {
             // device lens, the bytes you would be editing are not the ones
             // in front of you, so the row disables and says so (planning
             // Q4).
-            device_session: self.lens_runtime_kind == Some(crate::RuntimeKind::Device),
+            device_session: self.lens_transport == Some(crate::LinkTransport::Serial),
         })
     }
 
@@ -4658,6 +4651,148 @@ impl ProjectController {
             notices: UiNotices::new().with_notice(notice),
             logs,
         })
+    }
+
+    /// Rename the OPEN library project: patch the container manifest's
+    /// `name` through the project's own exclusive-locked `package_fs` — the
+    /// seam [`Self::set_module_export`] uses, because a
+    /// [`crate::app::library::CatalogOp::Rename`] would refuse
+    /// `OpenInThisTab` for the very project being edited — then mirror the
+    /// bytes into the runtime copy so the save path's library/runtime hash
+    /// tripwire stays quiet. Returns the trimmed name that was written.
+    ///
+    /// The library's dated directory slug is NOT moved here: the open
+    /// handle is chrooted to it. The studio controller re-slugs the package
+    /// with the ordinary catalog rename once this project closes.
+    pub async fn rename_active_project(
+        &mut self,
+        server: &mut StudioServerClient,
+        name: &str,
+    ) -> Result<String, UiError> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(UiError::UnsupportedAction(
+                "a project name cannot be empty".to_string(),
+            ));
+        }
+        let root = self.project_fs_root.clone().ok_or_else(|| {
+            UiError::Project(
+                "the connected project's filesystem root is unknown; cannot rename".to_string(),
+            )
+        })?;
+        let now = {
+            let context = self.library.as_ref().ok_or_else(no_library_error)?;
+            (context.now_secs)()
+        };
+
+        // --- library write (the manifest's home) --------------------------
+        let (bytes, uid) = {
+            let context = self.library.as_ref().ok_or_else(no_library_error)?;
+            let active = context.active.as_ref().ok_or_else(|| {
+                UiError::UnsupportedAction(
+                    "this project is not in your library, so it has no name to change".to_string(),
+                )
+            })?;
+            if active.transient.is_some() {
+                // A view session's copy is someone else's document (or an
+                // example's): naming it means owning it first.
+                return Err(UiError::UnsupportedAction(
+                    "save a copy of this project first, then name it".to_string(),
+                ));
+            }
+            let fs = active.handle.package_fs.borrow();
+            crate::app::library::package_manifest::set_name(&*fs, name)
+                .map_err(library_ui_error)?;
+            let bytes = fs
+                .read_file(lpc_model::AsLpPath::as_path(
+                    &crate::app::library::package_manifest::MANIFEST_PATH,
+                ))
+                .map_err(|e| library_ui_error(crate::app::library::LibraryError::from(e)))?;
+            (bytes, active.handle.uid.to_string())
+        };
+
+        // --- runtime mirror (keeps the two copies hash-identical) ---------
+        server.fs_write(&root.join("project.json"), &bytes).await?;
+
+        {
+            let context = self.library.as_mut().ok_or_else(no_library_error)?;
+            if let Some(active) = context.active.as_mut() {
+                // The bytes on disk moved without a runtime commit, so the
+                // history head is stale until this snapshot lands.
+                active.handle.record_save(now).map_err(library_ui_error)?;
+            }
+            // A save happened, as far as the library and the cloud are
+            // concerned: the manifest is what carries the name they show.
+            context.host.notify_saved(&uid);
+        }
+        Ok(name.to_string())
+    }
+
+    /// Write the OPEN project's hardware target (D41, PD17) — the Hardware
+    /// settings row.
+    ///
+    /// The same two-copy dance the rename does, and for the same reason:
+    /// the manifest's home is the library, and the runtime holds a copy
+    /// whose bytes must stay hash-identical or the next save reads as a
+    /// change nobody made. `None` clears the key (Desktop).
+    ///
+    /// Not a format bump: `target` has been in `project.json` since
+    /// 2026-08-05, the strict writer rewrites the canonical form, and every
+    /// other byte is unchanged.
+    pub async fn set_active_project_target(
+        &mut self,
+        server: &mut StudioServerClient,
+        target: Option<&str>,
+    ) -> Result<(), UiError> {
+        let root = self.project_fs_root.clone().ok_or_else(|| {
+            UiError::Project(
+                "the connected project's filesystem root is unknown; cannot set its hardware"
+                    .to_string(),
+            )
+        })?;
+        let now = {
+            let context = self.library.as_ref().ok_or_else(no_library_error)?;
+            (context.now_secs)()
+        };
+
+        // --- library write (the manifest's home) --------------------------
+        let (bytes, uid) = {
+            let context = self.library.as_ref().ok_or_else(no_library_error)?;
+            let active = context.active.as_ref().ok_or_else(|| {
+                UiError::UnsupportedAction(
+                    "this project is not in your library, so its hardware cannot be changed"
+                        .to_string(),
+                )
+            })?;
+            if active.transient.is_some() {
+                // Someone else's document (or an example's): declaring what
+                // hardware it runs on means owning it first.
+                return Err(UiError::UnsupportedAction(
+                    "save a copy of this project first, then choose its hardware".to_string(),
+                ));
+            }
+            let fs = active.handle.package_fs.borrow();
+            crate::app::library::package_manifest::set_target(&*fs, target)
+                .map_err(library_ui_error)?;
+            let bytes = fs
+                .read_file(lpc_model::AsLpPath::as_path(
+                    &crate::app::library::package_manifest::MANIFEST_PATH,
+                ))
+                .map_err(|e| library_ui_error(crate::app::library::LibraryError::from(e)))?;
+            (bytes, active.handle.uid.to_string())
+        };
+
+        // --- runtime mirror (keeps the two copies hash-identical) ---------
+        server.fs_write(&root.join("project.json"), &bytes).await?;
+
+        {
+            let context = self.library.as_mut().ok_or_else(no_library_error)?;
+            if let Some(active) = context.active.as_mut() {
+                active.handle.record_save(now).map_err(library_ui_error)?;
+            }
+            context.host.notify_saved(&uid);
+        }
+        Ok(())
     }
 
     /// Every panel control a card subtree already derived whose
@@ -4972,9 +5107,9 @@ impl ProjectController {
             // node only: every subscribed product is frames pulled over
             // serial, and a board asked for every expanded node's frames
             // stops answering heartbeats (round-2 M5 re-arms this).
-            ProjectProductSubscriptionIntent::Default => match self.lens_runtime_kind {
-                Some(crate::RuntimeKind::Sim) => !node.state().collapsed,
-                Some(crate::RuntimeKind::Device) | None => self.is_focused_node(node),
+            ProjectProductSubscriptionIntent::Default => match self.lens_transport {
+                Some(crate::LinkTransport::Sim) => !node.state().collapsed,
+                Some(crate::LinkTransport::Serial) | None => self.is_focused_node(node),
             },
             ProjectProductSubscriptionIntent::Subscribed => true,
             ProjectProductSubscriptionIntent::Unsubscribed => false,
@@ -5194,10 +5329,10 @@ impl ProjectController {
         self.lens_device_features = features;
     }
 
-    /// Record what kind of runtime the lens is on, so probe policy (visual
-    /// probe resolution, product-subscription node scope) tracks the lens.
-    pub fn set_lens_runtime_kind(&mut self, kind: Option<crate::RuntimeKind>) {
-        self.lens_runtime_kind = kind;
+    /// Record how the lens device is reached, so probe policy (visual probe
+    /// resolution, product-subscription node scope) tracks the lens.
+    pub fn set_lens_transport(&mut self, transport: Option<crate::LinkTransport>) {
+        self.lens_transport = transport;
     }
 
     /// Record what the library can be imported FROM (module authoring
@@ -5212,9 +5347,9 @@ impl ProjectController {
     /// tier over serial, the default everywhere else (a sim lens has always
     /// used the default; a detached mirror is not probing at all).
     fn visual_preview_frame(&self) -> crate::UiProductPreviewFrame {
-        match self.lens_runtime_kind {
-            Some(crate::RuntimeKind::Device) => crate::UiProductPreviewFrame::VISUAL_DEVICE,
-            Some(crate::RuntimeKind::Sim) | None => crate::UiProductPreviewFrame::VISUAL_DEFAULT,
+        match self.lens_transport {
+            Some(crate::LinkTransport::Serial) => crate::UiProductPreviewFrame::VISUAL_DEVICE,
+            Some(crate::LinkTransport::Sim) | None => crate::UiProductPreviewFrame::VISUAL_DEFAULT,
         }
     }
 
@@ -5336,6 +5471,7 @@ impl ProjectController {
             name: fields.name,
             created: fields.created,
             kind,
+            target: fields.target,
         })
     }
 
@@ -6252,25 +6388,29 @@ impl ProjectController {
             .await
     }
 
-    /// Vendor one library pattern export into this project
-    /// ([`crate::NodeImportOp`], module authoring unit, P5).
+    /// Vendor one pattern export — a library package's, or a built-in
+    /// catalog pattern's — into this project ([`crate::NodeImportOp`],
+    /// module authoring unit P5; catalog content tree P6).
     ///
-    /// Copy-to-own: the source package is read through a fresh read-only
+    /// Copy-to-own: a library source is read through a fresh read-only
     /// catalog snapshot (no lock, no write — the source project may well be
-    /// open in another tab), its `<export>/**` files are re-rooted under
-    /// `modules/<key>/`, and the whole folder goes out as ONE `CreateNode`
-    /// — the def plus every other file as assets. The folder's internal
-    /// refs are relative, so re-rooting preserves them untouched; nothing
-    /// here rewrites a path inside the copy.
+    /// open in another tab); a built-in source is the registry entry's
+    /// compiled-in bytes. Either way its `<export>/**` files are re-rooted
+    /// under `modules/<key>/`, and the whole folder goes out as ONE
+    /// `CreateNode` — the def plus every other file as assets. The folder's
+    /// internal refs are relative, so re-rooting preserves them untouched;
+    /// nothing here rewrites a path inside the copy.
     ///
-    /// `key` is the export's own name, deduped against the project's taken
-    /// names (`fire`, then `fire_2`) exactly as the create and paste paths
-    /// do — so importing the same pattern twice lands two independent
-    /// copies rather than a rejection.
+    /// `key` is the export's own name for a library import (`fire`) and the
+    /// catalog slug for a built-in one (`comet` — every catalog pattern
+    /// exports `effect`, so the export name alone would collide), deduped
+    /// against the project's taken names (`fire`, then `fire_2`) exactly as
+    /// the create and paste paths do — so importing the same pattern twice
+    /// lands two independent copies rather than a rejection.
     pub async fn import_pattern(
         &mut self,
         server: &mut StudioServerClient,
-        package_uid: &str,
+        source: &crate::ImportSource,
         export: &str,
     ) -> Result<ProjectEditRun, UiError> {
         use crate::app::project::node::import_pattern::{
@@ -6283,21 +6423,33 @@ impl ProjectController {
                 "an import names an export folder".to_string(),
             ));
         }
-        let host = {
-            let context = self.library.as_ref().ok_or_else(no_library_error)?;
-            std::rc::Rc::clone(&context.host)
-        };
-        // Read-only snapshot: the SOURCE is somebody else's project, and a
-        // read must never take its lock (the `package_export` precedent).
-        let snapshot = host.catalog_snapshot().await?;
-        let source_files = {
-            let store = crate::app::library::LibraryStore::read_only(snapshot);
-            let uid = store.resolve_key(package_uid).map_err(library_ui_error)?;
-            store
-                .open(uid)
-                .map_err(library_ui_error)?
-                .read_all_files()
-                .map_err(library_ui_error)?
+        let (source_files, key_stem): (Vec<(String, Vec<u8>)>, String) = match source {
+            crate::ImportSource::Library { package_uid } => {
+                let host = {
+                    let context = self.library.as_ref().ok_or_else(no_library_error)?;
+                    std::rc::Rc::clone(&context.host)
+                };
+                // Read-only snapshot: the SOURCE is somebody else's project,
+                // and a read must never take its lock (the `package_export`
+                // precedent).
+                let snapshot = host.catalog_snapshot().await?;
+                let store = crate::app::library::LibraryStore::read_only(snapshot);
+                let uid = store.resolve_key(package_uid).map_err(library_ui_error)?;
+                let files = store
+                    .open(uid)
+                    .map_err(library_ui_error)?
+                    .read_all_files()
+                    .map_err(library_ui_error)?;
+                (files, export.to_string())
+            }
+            crate::ImportSource::BuiltIn { example_id } => {
+                let example = crate::app::home::embedded_example(example_id).ok_or_else(|| {
+                    UiError::UnsupportedAction(format!(
+                        "{example_id} is not a built-in catalog entry"
+                    ))
+                })?;
+                (example.files(), example.slug().to_string())
+            }
         };
 
         let vendored = collect_export_folder(&source_files, export)?;
@@ -6310,7 +6462,7 @@ impl ProjectController {
             &self.slot_shapes,
         )?;
 
-        let key = self.unique_node_name_from(export);
+        let key = self.unique_node_name_from(&key_stem);
         let (site, parent, expected_name) =
             match self.resolve_attach_site(&UiAttachTarget::ProjectRoot, &key)? {
                 Some(resolved) => resolved,
@@ -9890,7 +10042,7 @@ mod tests {
     #[test]
     fn the_project_title_prefers_the_manifests_name_over_the_tree_root_label() {
         assert_eq!(
-            project_display_title(Some("Fyeah Sign"), Some("Studio"), "examples/fyeah-sign"),
+            project_display_title(Some("Fyeah Sign"), Some("Studio"), "catalog/fyeah-sign"),
             "Fyeah Sign"
         );
         // No package behind the project (device projects, fixture servers):
@@ -10626,7 +10778,7 @@ mod tests {
         let mut project = ProjectController::new();
         // This is a SIM-lens test: the device policy (focused-only) is the
         // conservative default for an unknown lens (round-2 M5).
-        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Sim));
+        project.set_lens_transport(Some(crate::LinkTransport::Sim));
 
         project.apply_project_view(&view).unwrap();
 
@@ -11690,7 +11842,7 @@ mod tests {
         let mut project = ProjectController::new();
         // This is a SIM-lens test: the device policy (focused-only) is the
         // conservative default for an unknown lens (round-2 M5).
-        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Sim));
+        project.set_lens_transport(Some(crate::LinkTransport::Sim));
         project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
         project.apply_project_view(&view).unwrap();
         clear_node_focus(&mut project.root_nodes);
@@ -11818,7 +11970,7 @@ mod tests {
         let mut project = ProjectController::new();
         // This is a SIM-lens test: the device policy (focused-only) is the
         // conservative default for an unknown lens (round-2 M5).
-        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Sim));
+        project.set_lens_transport(Some(crate::LinkTransport::Sim));
         project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
         project.apply_project_view(&view).unwrap();
         clear_node_focus(&mut project.root_nodes);
@@ -13242,13 +13394,13 @@ mod tests {
         clear_node_focus(&mut project.root_nodes);
 
         // Device lens (and unknown): an unfocused node contributes nothing.
-        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Device));
+        project.set_lens_transport(Some(crate::LinkTransport::Serial));
         assert_eq!(project.subscribed_products(), Vec::new());
-        project.set_lens_runtime_kind(None);
+        project.set_lens_transport(None);
         assert_eq!(project.subscribed_products(), Vec::new());
 
         // Sim lens: the unfocused (expanded) node's products stream too.
-        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Sim));
+        project.set_lens_transport(Some(crate::LinkTransport::Sim));
         assert_eq!(
             project.subscribed_products(),
             vec![
@@ -13275,12 +13427,12 @@ mod tests {
             project.visual_preview_frame(),
             crate::UiProductPreviewFrame::VISUAL_DEFAULT
         );
-        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Device));
+        project.set_lens_transport(Some(crate::LinkTransport::Serial));
         assert_eq!(
             project.visual_preview_frame(),
             crate::UiProductPreviewFrame::VISUAL_DEVICE
         );
-        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Sim));
+        project.set_lens_transport(Some(crate::LinkTransport::Sim));
         assert_eq!(
             project.visual_preview_frame(),
             crate::UiProductPreviewFrame::VISUAL_DEFAULT

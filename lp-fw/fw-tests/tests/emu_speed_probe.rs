@@ -29,7 +29,7 @@
 //! `lp-app/lpa-client/src/transport_serial/emulator.rs`. Both were tried
 //! here and found broken against a real project in this repo state:
 //!
-//! - Plain `release` `fw-emu` (`lp-cli upload examples/meteor emu`, tried
+//! - Plain `release` `fw-emu` (`lp-cli upload catalog/patterns/meteor emu`, tried
 //!   directly): the process pins one CPU core at ~99% with no forward
 //!   progress once the first uploaded project file reaches the firmware.
 //!   This matches the `release-emu` Cargo.toml comment's warning
@@ -149,11 +149,11 @@ async fn speed_probe_windows() {
         idle_instr as f64 / idle_wall.as_secs_f64(),
     );
 
-    // --- Window 3: rendering examples/meteor, >=5s wall -----------------
+    // --- Window 3: rendering catalog/patterns/meteor, >=5s wall -----------------
     let project_files = read_project_files("meteor");
     assert!(
         !project_files.is_empty(),
-        "examples/meteor should have files"
+        "catalog/patterns/meteor should have files"
     );
     let deploy_wall_start = Instant::now();
     for (path, bytes) in &project_files {
@@ -216,14 +216,14 @@ async fn speed_probe_windows() {
     );
 }
 
-/// Read every file under `examples/<project_dir>` from disk, relative paths
+/// Read every file under `catalog/patterns/<project_dir>` from disk, relative paths
 /// (forward-slash separated) paired with their bytes.
 fn read_project_files(project_dir: &str) -> Vec<(String, Vec<u8>)> {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../examples")
+        .join("../../catalog/patterns")
         .join(project_dir)
         .canonicalize()
-        .unwrap_or_else(|e| panic!("examples/{project_dir} should exist: {e}"));
+        .unwrap_or_else(|e| panic!("{project_dir} should exist: {e}"));
 
     let mut files = Vec::new();
     let mut stack = vec![root.clone()];

@@ -4,8 +4,8 @@
 // arrays of scalars/vectors, dynamically indexable) and from
 // `array/of-struct/` (function-local struct arrays): a uniform struct
 // array's element address must be resolvable at lower time, so members are
-// read through CONSTANT indices — the idiom `examples/events/shader.glsl`
-// and `examples/effects/meteor` both carry.
+// read through CONSTANT indices — the idiom `projects/test/events/shader.glsl`
+// and `catalog/patterns/meteor` both carry.
 //
 // Regression origin (2026-07-29): the meteor effect shipped a helper that
 // indexed this array with a runtime parameter. It compiled on every

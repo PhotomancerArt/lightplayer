@@ -4,6 +4,7 @@ mod clipboard;
 pub mod cloud;
 pub mod core;
 mod device_events_io;
+mod device_hint;
 pub mod exploration;
 #[cfg(target_arch = "wasm32")]
 mod library_host_opfs;

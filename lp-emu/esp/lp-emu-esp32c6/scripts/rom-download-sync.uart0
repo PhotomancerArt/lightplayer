@@ -1,0 +1,26 @@
+# The same exchange on UART0 — `--uart0-script`'s grammar, the same
+# bytes as rom-download-sync.usb, plus ONE MORE SYNC, because the
+# mask ROM spends the first one measuring the host's baud.
+#
+# On UART0 the ROM's detector (`UartConnCheck(0)`, 0x40023388) reads
+# nothing from the port until `uart_serial_baudrate_detect` has
+# counted more than 0x7f edges on RXD; the SYNC that carries the
+# 128th edge is still on the wire when detection returns, the
+# divisor is written with both FIFOs reset (`uart_div_modify`), and
+# the console byte only then starts parsing frames. So the first SYNC
+# is consumed by detection and never answered; the second is answered
+# eight times. esptool sends up to seven SYNCs per attempt for
+# exactly this reason. Times are EMULATED MILLISECONDS; the host's
+# baud is `--uart0-baud` (default 115,200), which is what the
+# auto-baud counters in periph/uart.rs measure.
+#
+# Replayed as a gate by tests/rom_download_console.rs.
+
+# The banner is done by 1.2 ms. At 115,200 a 46-byte SYNC takes 4 ms
+# on the wire.
+20 c0 00 08 24 00 00 00 00 00 07 07 12 20 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 c0
+120 c0 00 08 24 00 00 00 00 00 07 07 12 20 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55 c0
+
+# READ_REG on EFUSE_RD_MAC_SPI_SYS_0 (0x600b0844): the low four bytes
+# of `--efuse-mac`.
+220 c0 00 0a 04 00 00 00 00 00 44 08 0b 60 c0

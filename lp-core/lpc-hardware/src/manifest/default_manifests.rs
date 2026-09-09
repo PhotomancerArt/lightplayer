@@ -8,6 +8,13 @@ use crate::{
 const XIAO_ESP32_C6_JSON: &str = include_str!("../../boards/seeed/xiao-esp32-c6.json");
 const XIAO_ESP32_S3_PLUS_JSON: &str = include_str!("../../boards/seeed/xiao-esp32-s3-plus.json");
 const DOM_Z_102_JSON: &str = include_str!("../../boards/domraem/dom-z-102.json");
+/// The checked-in DESKTOP board manifest, verbatim.
+///
+/// Public because embedders with no board catalog need the text itself:
+/// `fw-browser` re-exports it to its standalone smoke page, which boots a
+/// runtime by handing the manifest back in. A `const`, so an image that
+/// never mentions it (every ESP firmware) carries none of these bytes.
+pub const DESKTOP_BOARD_MANIFEST_JSON: &str = include_str!("../../boards/lightplayer/desktop.json");
 
 pub fn default_esp32c6_hardware_manifest() -> HwManifest {
     HardwareManifestFile::read_json(XIAO_ESP32_C6_JSON)
@@ -57,6 +64,22 @@ pub fn default_esp32v3_hardware_manifest() -> HwManifest {
     HardwareManifestFile::read_json(DOM_Z_102_JSON)
         .and_then(|manifest| manifest.to_manifest())
         .expect("checked-in domraem/dom-z-102 hardware manifest must parse")
+}
+
+/// Compiled-in board profile for the DESKTOP target: `fw-browser` in a tab,
+/// `fw-host` on a machine.
+///
+/// A computer has no pins, so this profile is not a calibrated pin map but a
+/// virtual, deliberately **unlimited** table: every wire label the checked-in
+/// catalog authors (`IO*`, `D0`–`D13`, `A01`–`A13`, `B01`–`B13`) resolves,
+/// nothing is reserved, and thirty-two WS281x timing resources let the
+/// largest project's wires all run at once. That is what makes the Desktop
+/// sim honest without being permissive: outputs still resolve against a
+/// manifest, and that manifest simply has room for everything.
+pub fn default_desktop_hardware_manifest() -> HwManifest {
+    HardwareManifestFile::read_json(DESKTOP_BOARD_MANIFEST_JSON)
+        .and_then(|manifest| manifest.to_manifest())
+        .expect("checked-in lightplayer/desktop board manifest must parse")
 }
 
 /// Emulator manifest: XIAO ESP32-C6 pin map, board D-labels for endpoint specs,
@@ -252,6 +275,81 @@ mod tests {
                 "gpio{pin} is not verified on this board and must stay absent"
             );
         }
+    }
+
+    /// The Desktop profile is UNLIMITED by construction, and that is a
+    /// property of the table rather than of a permissive validator: nothing
+    /// is reserved, and a registry builds from it with no chip lookup
+    /// anywhere (the target names no silicon).
+    #[test]
+    fn default_desktop_manifest_reserves_nothing_and_builds_a_registry() {
+        let manifest = default_desktop_hardware_manifest();
+
+        assert_eq!(manifest.board_id(), "lightplayer/desktop");
+        assert_eq!(manifest.target(), Some(HardwareTarget::Desktop));
+        for resource in manifest.resources() {
+            assert!(
+                resource.reserved_reason().is_none(),
+                "{} is reserved — the Desktop table has no scarcity",
+                resource.address()
+            );
+        }
+        let registry = HwRegistry::new(manifest);
+        assert!(registry.manifest().resource(&HwAddress::radio(0)).is_some());
+    }
+
+    /// Every wire label the checked-in catalog authors resolves on the
+    /// Desktop board, and the widest project (`catalog/projects/small-dome`,
+    /// 13 `A` wires plus 13 `B` wires) opens ALL of them at once — the point
+    /// of declaring thirty-two timing resources.
+    #[test]
+    fn default_desktop_manifest_opens_every_catalog_wire_label_at_once() {
+        use alloc::rc::Rc;
+        use alloc::vec::Vec;
+
+        let registry = Rc::new(HwRegistry::new(default_desktop_hardware_manifest()));
+        let system = HardwareSystem::with_virtual_drivers(registry);
+
+        let mut open = Vec::new();
+        for bank in ['A', 'B'] {
+            for wire in 1..=13 {
+                let spec = alloc::format!("ws281x:local:{bank}{wire:02}");
+                open.push(
+                    system
+                        .open_ws281x_by_spec(
+                            &HwEndpointSpec::parse(spec.clone()).expect("endpoint spec"),
+                            crate::Ws281xConfig::new(3),
+                        )
+                        .unwrap_or_else(|error| panic!("{spec}: {error}")),
+                );
+            }
+        }
+        assert_eq!(open.len(), 26);
+        drop(open);
+
+        // The other label families the catalog uses: D-pins, raw IO names
+        // (which a real C6 profile only carries as aliases, so they do NOT
+        // resolve there), a button, and the radio.
+        for spec in ["ws281x:local:D10", "ws281x:local:D11", "ws281x:local:IO18"] {
+            system
+                .open_ws281x_by_spec(
+                    &HwEndpointSpec::from_static(spec),
+                    crate::Ws281xConfig::new(3),
+                )
+                .unwrap_or_else(|error| panic!("{spec}: {error}"));
+        }
+        system
+            .open_button_by_spec(
+                &HwEndpointSpec::from_static("button:local:D9"),
+                crate::ButtonConfig::new(30),
+            )
+            .expect("button D9");
+        system
+            .open_radio_by_spec(
+                &HwEndpointSpec::from_static("radio:local:0"),
+                crate::RadioConfig::default(),
+            )
+            .expect("radio espnow");
     }
 
     #[test]

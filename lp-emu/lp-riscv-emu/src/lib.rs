@@ -23,6 +23,12 @@ pub use lp_riscv_inst::{Gpr, Inst, decode_instruction, format_instruction};
 // Emulator modules
 pub mod emu;
 
+/// The privileged (machine-mode) hart: M-mode CSRs, traps, `mret`/`wfi`,
+/// hardware triggers and interrupt delivery. `emu` is the user-mode
+/// emulator; this is what a SoC machine drives. Public API of the crate —
+/// `lp-emu/esp/`'s machines are its consumers.
+pub mod mach;
+
 #[cfg(feature = "std")]
 pub mod test_util;
 

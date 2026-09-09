@@ -12,7 +12,7 @@ Prereqs: `python3 spikes/serial-lab/server.py` running, lab page open with
 the port granted, port open at 921600 (the script opens it if closed).
 
     python3 spikes/serial-lab/scripts/push-dir.py \
-        --src /path/to/examples/small-dome --dest /projects/small-dome \
+        --src /path/to/catalog/projects/small-dome --dest /projects/small-dome \
         [--no-stop] [--load] [--server http://localhost:29188]
 
 Text files ship RAW (never pre-base64 text: the smart codec would store

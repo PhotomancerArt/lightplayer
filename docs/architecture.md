@@ -215,8 +215,25 @@ behind a dependency lint (`just lint-emu-fence`). See
   per-board memory maps (S3 / classic), and an FPU proven bit-equal to real S3 silicon; plus
   its `no_std` guest runtime (a device-target crate, built via `lp-xt/fixtures`).
 
-SoC-level emulation is namespaced by vendor under `lp-emu/esp/` (empty until M3 of the
-2026-09-06 esp-emulator plan).
+- **`lp-emu-validate`** - The hardware-validation system's host half: payloads,
+  configurations, transcripts and their provenance headers, masking, per-class trust
+  grading and replay, plus the runner behind `lp-cli validate`. It mirrors
+  `lp-fw/fw-checks`'s payload registry rather than importing it (the fence);
+  `lp-cli` owns the parity test. Committed captures live in `lp-emu/transcripts/`
+  and are never edited.
+
+SoC-level emulation is namespaced by vendor under `lp-emu/esp/`:
+
+- **`lp-emu-esp-common`** - The Espressif SoC substrate: the bus and its MMIO decode,
+  the `Peripheral` trait, accept-and-remember register files, the trace with its spin
+  detector, host byte streams, and the interrupt-matrix seam. No chip numbers.
+
+- **`lp-emu-esp32c6`** - The ESP32-C6 machine, and the only place in the family holding
+  chip numbers: memory map, vendored mask ROM (`lp-emu/esp/roms/`, Apache-2.0), direct
+  load, the boot peripheral set, a discrete-event run loop over a `CycleModel`, and a CLI
+  whose every timeout is emulated time. It runs the shipped firmware image to its idle
+  loop; its claims are the configurations `lp-emu:esp32c6:t1` / `:t2` in the validation
+  system, graded `modeled` in every class with a reason. `just emu-c6`, `just test-emu-c6`.
 
 ## RISC-V Tooling (`lp-riscv/`)
 

@@ -9,14 +9,16 @@
 //! covers the library pages and the live sim card.
 
 use dioxus::prelude::*;
+use lpa_studio_core::{DeviceCardFeedView, FeedLiveness};
 use lpa_studio_web_story_macros::story;
+use lpc_model::ProjectKind;
 
 use lpa_studio_core::app::library::PackageHealth;
 use lpa_studio_core::{
     ColorOrder, ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d,
-    ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, Revision, SimCardState,
+    ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, Revision,
     UiControlProductPreview, UiControlSampleFormat, UiExampleCard, UiHomeView, UiIssue,
-    UiPackageCard, UiSimCard, UiSimProjectChip,
+    UiPackageCard, UiRuntimeBand,
 };
 
 use lpa_studio_core::UiAction;
@@ -33,17 +35,32 @@ use crate::app::home::device_pick_popover::{
 use crate::app::home::device_roster_card::{DeviceRosterCard, PendingLinkCard};
 use crate::app::home::device_terminal::DeviceTerminal;
 use crate::app::home::gallery_preview::ThumbPreviewBadge;
+use crate::app::home::target_pick_popover::TargetPickPopover;
 use crate::app::home::{DevicesPage, ExplorePage, ProjectsPage};
 
 /// A fixed "now" so relative times in baselines never drift.
 const STORY_NOW: f64 = 1_800_000_000.0;
 
+/// One of each kind, so the grouped surfaces show both sections.
 fn examples() -> Vec<UiExampleCard> {
-    vec![UiExampleCard {
-        id: "examples/basic".to_string(),
-        name: "Basic".to_string(),
-        kind: "Module".to_string(),
-    }]
+    vec![
+        UiExampleCard {
+            id: "catalog/fyeah-sign".to_string(),
+            name: "Fyeah Sign".to_string(),
+            kind: ProjectKind::General,
+            description: "A porch sign on the full bus: clock, button and radio share one trigger."
+                .to_string(),
+        },
+        UiExampleCard {
+            id: "catalog/plasma".to_string(),
+            name: "Plasma".to_string(),
+            kind: ProjectKind::Pattern {
+                exports: vec!["effect".to_string()],
+            },
+            description: "The smallest non-empty panel: one plasma shader with three bound knobs."
+                .to_string(),
+        },
+    ]
 }
 
 fn packages() -> Vec<UiPackageCard> {
@@ -58,7 +75,6 @@ fn packages() -> Vec<UiPackageCard> {
             provenance: None,
             on_device: Some("Luna's porch sign".to_string()),
             open_elsewhere: false,
-            running_in_sim: false,
             target: None,
             health: PackageHealth::Ready,
         },
@@ -72,7 +88,6 @@ fn packages() -> Vec<UiPackageCard> {
             provenance: Some("Remixed from Basic".to_string()),
             on_device: None,
             open_elsewhere: false,
-            running_in_sim: false,
             target: None,
             health: PackageHealth::Ready,
         },
@@ -86,7 +101,6 @@ fn packages() -> Vec<UiPackageCard> {
             provenance: Some("Forked from 2026-07-02-0930-porch-sign".to_string()),
             on_device: None,
             open_elsewhere: false,
-            running_in_sim: false,
             target: None,
             health: PackageHealth::Ready,
         },
@@ -100,7 +114,6 @@ fn first_run() -> Element {
     // no devices ever granted: the Connected section collapses to a slim
     // affordance; the library holds nothing yet
     let home = UiHomeView {
-        sim: None,
         projects: Vec::new(),
         examples: examples(),
         devices: Default::default(),
@@ -144,7 +157,6 @@ fn project_format_states() -> Element {
         provenance: None,
         on_device: None,
         open_elsewhere: false,
-        running_in_sim: false,
         target: None,
         health: PackageHealth::Blocked {
             headline: "project.json could not be read".to_string(),
@@ -155,7 +167,6 @@ fn project_format_states() -> Element {
         },
     });
     let home = UiHomeView {
-        sim: None,
         projects,
         examples: examples(),
         devices: Default::default(),
@@ -173,7 +184,6 @@ fn project_format_states() -> Element {
 #[story]
 fn populated() -> Element {
     let home = UiHomeView {
-        sim: Some(sim_card_fixture(true)),
         projects: packages(),
         examples: examples(),
         devices: Default::default(),
@@ -195,7 +205,6 @@ fn project_open_in_another_tab() -> Element {
     let mut projects = packages();
     projects[0].open_elsewhere = true;
     let home = UiHomeView {
-        sim: None,
         projects,
         examples: examples(),
         devices: Default::default(),
@@ -213,7 +222,6 @@ fn project_open_in_another_tab() -> Element {
 #[story]
 fn opening_a_project() -> Element {
     let mut home = UiHomeView {
-        sim: None,
         projects: packages(),
         examples: examples(),
         devices: Default::default(),
@@ -263,7 +271,7 @@ fn live_thumb_states() -> Element {
             }
             article { class: "tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
                 CardThumb {
-                    seed: "examples/basic".to_string(),
+                    seed: "catalog/plasma".to_string(),
                     label: "failed".to_string(),
                     static_badge: Some(ThumbPreviewBadge::Error {
                         reason: "deploy: shader compile failed".to_string(),
@@ -405,28 +413,6 @@ fn thumb_lamp_frame() -> UiControlProductPreview {
     }
 }
 
-/// The live sim card (D36) as the pool evidence produces it: Running with
-/// the loaded project's chip, or "nothing loaded".
-fn sim_card_fixture(with_project: bool) -> UiSimCard {
-    UiSimCard {
-        state: if with_project {
-            SimCardState::Running
-        } else {
-            SimCardState::Empty
-        },
-        project: with_project.then(|| UiSimProjectChip {
-            uid: "prj3fKq8Zr21bTxYw0AhVmDpe".to_string(),
-            name: "2026-07-02-0930-porch-sign".to_string(),
-        }),
-        board_id: None,
-        console_tail: Vec::new(),
-        frame_preview: None,
-        frame_age_secs: None,
-        frame_fps: None,
-        ui: Default::default(),
-    }
-}
-
 fn gallery(home: UiHomeView) -> Element {
     rsx! {
         section { class: "tw:p-4",
@@ -436,43 +422,10 @@ fn gallery(home: UiHomeView) -> Element {
 }
 
 #[story(
-    description = "D36: only the sim session lives — the roster leads with the sim card (Running + project chip) and the loaded project's card wears 'Running in simulator'."
-)]
-fn sim_running_only() -> Element {
-    let mut projects = packages();
-    projects[0].running_in_sim = true;
-    gallery(UiHomeView {
-        sim: Some(sim_card_fixture(true)),
-        projects,
-        examples: examples(),
-        devices: Default::default(),
-        library_available: true,
-        opening: None,
-        issue: None,
-    })
-}
-
-#[story(
-    description = "The sim session with nothing loaded: the card reads 'Connected — nothing loaded' and no project card claims a runtime."
-)]
-fn sim_with_nothing_loaded() -> Element {
-    gallery(UiHomeView {
-        sim: Some(sim_card_fixture(false)),
-        projects: packages(),
-        examples: examples(),
-        devices: Default::default(),
-        library_available: true,
-        opening: None,
-        issue: None,
-    })
-}
-
-#[story(
     description = "No transport (a browser without Web Serial, or a build without the provider): the Devices page says so rather than showing an empty roster, which would read as \"you have no devices\"."
 )]
 fn devices_page_without_a_transport() -> Element {
     gallery(UiHomeView {
-        sim: None,
         projects: packages(),
         examples: examples(),
         devices: DeviceRosterView::default(),
@@ -500,7 +453,6 @@ fn devices_page_remembered_open() -> Element {
 /// connected boards and one remembered board, with the line open or shut.
 fn devices_page_story(remembered_open: bool) -> Element {
     let home = UiHomeView {
-        sim: None,
         projects: packages(),
         examples: examples(),
         devices: roster_page_fixture(),
@@ -511,6 +463,98 @@ fn devices_page_story(remembered_open: bool) -> Element {
     rsx! {
         section { class: "tw:p-4",
             DevicesPage { home, remembered_open, on_action: |_| {} }
+        }
+    }
+}
+
+#[story(
+    description = "The add slot's target menu, open (D44, PD16, spike 2 + 2b). The slot keeps \"It's connected\" as its spectrum CTA — a board on the desk is the common case — and grows a quiet second verb, \"start a board here ▾\", because the slot where the next card appears should offer BOTH ways a card can appear. The menu is two groups: Desktop alone at the top (it is the default target and the one every new project gets), then every catalog board this build can actually start, in catalog order, each row a silhouette · name · tag. The tag is a lowercase WORD — the same word the runtime band and the `?on=` grammar use — rather than a chip or a sentence, and it says what this build would run the row AS: `sim` everywhere today, because nothing is emulated yet. For the same reason the emu-versus-sim hint line is absent: it explains a choice nobody has, and inert text is noise. Picking a row mints a sim record of that target, powers it on, and the card lands in the grid next to the slot that made it. The panel floats in the top layer, so the slot is exactly as tall open as shut and the roster never reflows."
+)]
+fn devices_target_pick_open() -> Element {
+    rsx! {
+        section { class: "tw:grid tw:min-h-[520px] tw:w-[360px] tw:place-items-center tw:p-4",
+            TargetPickPopover { initially_open: true, on_action: |_| {} }
+        }
+    }
+}
+
+#[story(
+    description = "A powered-off sim, where Q5 put it: on the remembered line, in the same dashed tile an unplugged board gets. Powering a sim off keeps its record and takes everything else — so the tile says what it has (a name, the board it acts as) and nothing it does not, and its preview slot carries the honest sentence rather than a stale picture. The one thing that differs from a board's tile is the verb in the Reconnect slot: a runtime this tab makes has no port grant to ask the browser back for, so the escape reads POWER ON, in the same outline voice, dispatching the same `Connect` the model already has (PD8/Q15 — a sim adds a link and an effect backend, never a fifth flow). Forget keeps its inline confirm, whose words are the sim's own: \"Forget this sim? Its record and name go; nothing else exists.\" (D46)."
+)]
+fn devices_card_sim_powered_off() -> Element {
+    let home = UiHomeView {
+        projects: packages(),
+        examples: examples(),
+        devices: powered_off_sim_fixture(),
+        library_available: true,
+        opening: None,
+        issue: None,
+    };
+    rsx! {
+        section { class: "tw:p-4",
+            DevicesPage { home, remembered_open: true, on_action: |_| {} }
+        }
+    }
+}
+
+/// A roster holding exactly one device: a sim that has been powered off.
+///
+/// The band map is what makes it a sim to [`split_roster`] — the model
+/// deliberately does not know — and that is what turns the tile's
+/// Reconnect slot into Power on.
+fn powered_off_sim_fixture() -> DeviceRosterView {
+    let mut card = sim_card_view(21, "XIAO ESP32-C6 (sim)", "seeed/xiao-esp32-c6");
+    card.status = DeviceStatus::Offline;
+    card.state_label = "Powered off".to_string();
+    card.escapes = vec![DeviceEscape::Reconnect, DeviceEscape::Forget];
+    card.freshness_label = Some("last heard 4 min ago".to_string());
+    let id = card.id;
+    DeviceRosterView {
+        transport_available: true,
+        feeds: Default::default(),
+        runtime_bands: [(id, UiRuntimeBand::sim("seeed/xiao-esp32-c6", Some("cpu")))]
+            .into_iter()
+            .collect(),
+        open_addresses: Default::default(),
+        roster: RosterView {
+            pending: Vec::new(),
+            devices: vec![card],
+        },
+    }
+}
+
+#[story(
+    description = "The remembered line open, with the board's LAST PICTURE (the honest-device-preview follow-up, 2026-09-07): the same page as `devices_page_remembered_open`, but the remembered board's feed carries the frame Studio persisted to its per-uid sidecar the last time the board was fed. The tile's 120px slot draws that frame exactly as a card's Offline look does — the lamp field dimmed and desaturated, the neutral pill \"last frame · 3 h ago\" with the age measured from when the board actually published it (the STORED capture stamp, not the reload) — instead of the \"Not connected — …\" sentence. Nothing else on the tile moves: same dashed border, same height, same board · last-heard meta line, same Reconnect / Forget verbs. Compare against `devices_page_remembered_open`, whose remembered board has no sidecar and keeps its sentence."
+)]
+fn devices_page_remembered_last_frame() -> Element {
+    let mut devices = roster_page_fixture();
+    let remembered = devices
+        .roster
+        .devices
+        .iter()
+        .find(|device| device.status == DeviceStatus::Offline)
+        .map(|device| device.id)
+        .expect("the page fixture has a remembered board");
+    devices.feeds.insert(
+        remembered,
+        DeviceCardFeedView {
+            frame: Some(thumb_lamp_frame()),
+            frame_age_secs: Some(3.0 * 3_600.0),
+            engine_fps: None,
+            liveness: FeedLiveness::Offline,
+        },
+    );
+    let home = UiHomeView {
+        projects: packages(),
+        examples: examples(),
+        devices,
+        library_available: true,
+        opening: None,
+        issue: None,
+    };
+    rsx! {
+        section { class: "tw:p-4",
+            DevicesPage { home, remembered_open: true, on_action: |_| {} }
         }
     }
 }
@@ -534,6 +578,57 @@ fn devices_card_states() -> Element {
                             // The real gallery lists, so the empty face
                             // shows the pick trigger it actually wears
                             // rather than the "nothing to offer" note.
+                            projects: packages(),
+                            examples: examples(),
+                            on_action: |_| {},
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The preview slot with the live feed (plan 2026-09-06 device-card-live-feed): the same Running card five times at 400px, each with the board's own published frame (a canned 72-lamp sign) joined at the app view. LIVE — calm green pill \"live · 43 fps\" (the board's engine rate off its heartbeat); STALE — the frame stays, amber \"last frame · 12 s ago\" past the 5 s threshold; OFFLINE — the last in-session frame dimmed and desaturated, neutral \"last frame · 12 s ago\" (last known, not current); LENS — the editor holds the wire, the feed is paused, the last frame dimmed with \"editor has the wire\"; NO LAYOUT — frames arrive but the board's lamp layout exceeded the wire's read budget, so the slot says so instead of painting nothing. The lamp field is aspect-fit and letterboxed INSIDE the fixed 120px slot — the slot never follows the layout's aspect — so all five cards measure exactly the height of `devices_card_states`' cards: the picture arriving moves nothing. Compare against `devices_card_states` for the never-fed sentence."
+)]
+fn devices_card_live_feed() -> Element {
+    let running = card_state_fixtures().remove(0);
+    let (_, card, open_uid) = running;
+    let frame = thumb_lamp_frame();
+    let feed = |liveness: FeedLiveness, with_layout: bool| DeviceCardFeedView {
+        frame: Some(match with_layout {
+            true => frame.clone(),
+            false => UiControlProductPreview {
+                display_layout: None,
+                ..frame.clone()
+            },
+        }),
+        frame_age_secs: Some(12.0),
+        engine_fps: Some(43),
+        liveness,
+    };
+    let looks = [
+        ("Live", feed(FeedLiveness::Live, true)),
+        ("Stale", feed(FeedLiveness::Stale, true)),
+        ("Offline", feed(FeedLiveness::Offline, true)),
+        ("Lens", feed(FeedLiveness::Lens, true)),
+        ("No layout", feed(FeedLiveness::Live, false)),
+    ];
+    rsx! {
+        section { class: "tw:p-4",
+            // Two per row like `devices_card_states`, so the sheet holds
+            // every card whole at the capture width.
+            div { class: "tw:grid tw:grid-cols-[repeat(2,400px)] tw:items-start tw:gap-3",
+                for (label , feed) in looks {
+                    div { key: "{label}", class: "tw:grid tw:gap-2",
+                        p { class: "tw:m-0 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:tracking-wide tw:text-subtle-foreground",
+                            "{label}"
+                        }
+                        DeviceRosterCard {
+                            card: card.clone(),
+                            open_uid: open_uid.clone(),
+                            feed: Some(feed),
                             projects: packages(),
                             examples: examples(),
                             on_action: |_| {},
@@ -711,6 +806,8 @@ fn degraded_card_fixture() -> DeviceView {
 fn roster_fixture() -> DeviceRosterView {
     DeviceRosterView {
         transport_available: true,
+        feeds: Default::default(),
+        runtime_bands: Default::default(),
         // The running card has earned a registry row, so it has an editor
         // address and the running face wears Open (round-2 M5).
         open_addresses: [(1, "dev000000daqf6dvvqz".to_string())]
@@ -765,6 +862,7 @@ fn roster_fixture() -> DeviceRosterView {
                     degraded: None,
                     // The RUNNING face (M3): what the board itself reports,
                     // named by the storage dir it runs from.
+                    engine_fps: None,
                     loaded_project: DeviceLoadedProject::Running {
                         label: "2026-07-09-1421-porch-sign".to_string(),
                     },
@@ -824,6 +922,7 @@ fn roster_fixture() -> DeviceRosterView {
                     remembered_firmware: None,
                     degraded: None,
                     loaded_project: DeviceLoadedProject::Unknown,
+                    engine_fps: None,
                     // Busy: one activity per device, so no second verb.
                     can_receive_project: false,
                     can_remove_project: false,
@@ -866,6 +965,7 @@ fn roster_fixture() -> DeviceRosterView {
                     remembered_firmware: None,
                     degraded: None,
                     loaded_project: DeviceLoadedProject::Unknown,
+                    engine_fps: None,
                     can_receive_project: false,
                     can_remove_project: false,
                     activity: None,
@@ -913,6 +1013,7 @@ fn roster_fixture() -> DeviceRosterView {
                     remembered_firmware: None,
                     degraded: None,
                     loaded_project: DeviceLoadedProject::Empty,
+                    engine_fps: None,
                     can_receive_project: true,
                     // Nothing on it to remove — the empty face's picker is
                     // the verb here.
@@ -971,6 +1072,7 @@ fn roster_fixture() -> DeviceRosterView {
                     remembered_firmware: Some("fw-esp32c6 abc1234".to_string()),
                     degraded: None,
                     loaded_project: DeviceLoadedProject::Unknown,
+                    engine_fps: None,
                     can_receive_project: false,
                     can_remove_project: false,
                     activity: None,
@@ -1022,6 +1124,8 @@ fn roster_page_fixture() -> DeviceRosterView {
     let running = devices.remove(0);
     DeviceRosterView {
         transport_available: true,
+        feeds: Default::default(),
+        runtime_bands: Default::default(),
         open_addresses: full.open_addresses,
         roster: RosterView {
             // The blank board's link, the one a fresh plug actually looks
@@ -1095,6 +1199,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
             },
         },
         degraded: Some("Recovery red: /studio.show/s disabled after repeated crashes".to_string()),
+        engine_fps: None,
         loaded_project: DeviceLoadedProject::Running {
             label: "studio".to_string(),
         },
@@ -1191,6 +1296,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         remembered_firmware: None,
         degraded: None,
         loaded_project: DeviceLoadedProject::Unknown,
+        engine_fps: None,
         can_receive_project: false,
         can_remove_project: false,
         activity: None,
@@ -1289,6 +1395,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         remembered_firmware: Some("fw-esp32v3 7c80a27".to_string()),
         degraded: None,
         loaded_project: DeviceLoadedProject::Unknown,
+        engine_fps: None,
         can_receive_project: false,
         can_remove_project: false,
         activity: None,
@@ -1322,6 +1429,91 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         ("Silent", silent, None),
         ("Attached — not listening", attached_closed, None),
     ]
+}
+
+/// A sim-backed device card: the SAME `DeviceView` a board gets, plus the
+/// record's own title and board, so the only difference the sheet shows is
+/// the band.
+fn sim_card_view(id: u64, title: &str, board_id: &str) -> DeviceView {
+    let running = roster_fixture().roster.devices.remove(0);
+    DeviceView {
+        id: DeviceId(id),
+        title: title.to_string(),
+        board_id: Some(board_id.to_string()),
+        identity_label: Some("02:1a:2b:3c:4d:5e".to_string()),
+        ..running
+    }
+}
+
+#[story(
+    description = "The sim as a device (PD9/PD11): three faces of the SAME `DeviceRosterCard` a board gets, wearing the one thing that marks a runtime that is not silicon — the 24px runtime band under the identity rows, in the bound family, reading \"▶ Sim · <target> · in this tab · <granted tier>\". READY (Desktop, GPU) — the card a library open lands on; READY (a board sim, CPU) — the same card acting as a XIAO ESP32-C6, which is what makes \"it acts as its target\" legible; UNDER THE LENS — the editor holds the wire, so the preview slot says so and the feed is paused, exactly as it does for a board. No title prefix, no tinted edge, no second glyph: everything else on these cards is the device grammar verbatim (D38)."
+)]
+fn devices_card_sim_faces() -> Element {
+    let desktop = sim_card_view(11, "Desktop sim", "lightplayer/desktop");
+    let board = sim_card_view(12, "C6 sim", "seeed/xiao-esp32-c6");
+    let lens = DeviceView {
+        loaded_project: DeviceLoadedProject::Running {
+            label: "porch-sign".to_string(),
+        },
+        ..desktop.clone()
+    };
+    let lens_feed = DeviceCardFeedView {
+        frame: Some(thumb_lamp_frame()),
+        liveness: FeedLiveness::Lens,
+        frame_age_secs: Some(2.0),
+        engine_fps: None,
+    };
+    let faces: Vec<(
+        &str,
+        DeviceView,
+        Option<UiRuntimeBand>,
+        Option<DeviceCardFeedView>,
+    )> = vec![
+        (
+            "Ready · Desktop · GPU",
+            desktop.clone(),
+            Some(UiRuntimeBand::sim("lightplayer/desktop", Some("gpu"))),
+            None,
+        ),
+        (
+            "Ready · a board sim · CPU",
+            board,
+            Some(UiRuntimeBand::sim("seeed/xiao-esp32-c6", Some("cpu"))),
+            None,
+        ),
+        (
+            "Under the lens",
+            lens,
+            Some(UiRuntimeBand::sim("lightplayer/desktop", Some("gpu"))),
+            Some(lens_feed),
+        ),
+    ];
+    rsx! {
+        section { class: "tw:p-4 tw:grid tw:gap-4",
+            div { class: "tw:grid tw:grid-cols-[repeat(2,400px)] tw:items-start tw:gap-3",
+                for (label , card , runtime , feed) in faces {
+                    div { key: "{label}", class: "tw:grid tw:gap-2",
+                        p { class: "tw:m-0 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:tracking-wide tw:text-subtle-foreground",
+                            "{label}"
+                        }
+                        DeviceRosterCard {
+                            card,
+                            runtime,
+                            feed,
+                            open_uid: Some("dev000000daqf6dvvqz".to_string()),
+                            projects: packages(),
+                            examples: examples(),
+                            on_action: |_| {},
+                        }
+                    }
+                }
+            }
+            // Powered off: an offline sim is not a card at all — its
+            // record sits on the Devices page's remembered line with
+            // Power on in the Reconnect slot (Q5), which
+            // `devices_page_remembered_open` already captures.
+        }
+    }
 }
 
 fn card_state_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
@@ -1419,7 +1611,6 @@ fn armed_card_fixture() -> DeviceView {
 #[story]
 fn store_unavailable_with_issue() -> Element {
     let home = UiHomeView {
-        sim: None,
         projects: Vec::new(),
         examples: examples(),
         devices: Default::default(),
@@ -1645,30 +1836,78 @@ fn pick_popover_library() -> Vec<UiPackageCard> {
             provenance: None,
             on_device: None,
             open_elsewhere: false,
-            running_in_sim: false,
             target: None,
             health: PackageHealth::Ready,
         })
         .collect()
 }
 
-/// Six bundled examples, so the Examples tab is a grid rather than a row.
+/// Six bundled examples, three of each kind, so the Examples tab shows
+/// both of its sections as grids rather than rows.
 fn pick_popover_examples() -> Vec<UiExampleCard> {
     [
-        "Basic",
-        "Meteor",
-        "Plasma",
-        "Rainbow",
-        "Logo sign",
-        "Candle",
+        ("Logo sign", false),
+        ("Meteor", true),
+        ("Porch sign", false),
+        ("Plasma", true),
+        ("Zook dome", false),
+        ("Candle", true),
     ]
     .into_iter()
-    .map(|name| UiExampleCard {
-        id: format!("examples/{}", name.to_lowercase().replace(' ', "-")),
+    .map(|(name, pattern)| UiExampleCard {
+        id: format!("catalog/{}", name.to_lowercase().replace(' ', "-")),
         name: name.to_string(),
-        kind: "Module".to_string(),
+        kind: if pattern {
+            ProjectKind::Pattern {
+                exports: vec!["effect".to_string()],
+            }
+        } else {
+            ProjectKind::General
+        },
+        description: format!("{name}, in one sentence."),
     })
     .collect()
+}
+
+#[story(
+    description = "The gallery pick popover open on its NEW tab, the one source that has no name yet. Under the starter card sits the optional Project name field, prefilled with the board's own title — a piece and the board that runs it usually share a name, so leaving it is the common case and the hint says so. Typing a different name swaps the hint for one offer, ticked by default: name the board the same. Nothing here is a step — the CTA in the verb row still dispatches one Push, now carrying the project's name (and, when ticked, the board's rename) as parameters. The board's rename is only ever offered on a NEW project; an example or a library project pushed to the board never renames it."
+)]
+fn device_pick_popover_new_tab() -> Element {
+    rsx! {
+        section { class: "tw:min-h-[520px] tw:w-[420px] tw:p-4",
+            div { class: "tw:flex tw:h-[30px] tw:min-w-0 tw:items-center tw:gap-1.5 tw:overflow-hidden tw:whitespace-nowrap",
+                ProjectPickPopover {
+                    card: pick_popover_card(),
+                    projects: pick_popover_library(),
+                    examples: pick_popover_examples(),
+                    initially_open: true,
+                    initial_pick: Some("new:seeed/xiao-esp32-c6".to_string()),
+                    on_action: |_| {},
+                }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The device card's header ⋯ menu, open: the project card's menu grammar on the device card, holding the one verb that acts on the ENTRY rather than the board — Rename, as an inline form prefilled with the card's current title (here the derived \"<board> · <Mon D>\" a flash minted). Submitting dispatches the model's own SetName and closes the menu; the name is Studio's (persisted to the registry) and is never written to the board. Every board verb keeps its zone; this is a menu, not a fourth verb row. The pending card carries no menu — a link that has not identified itself has no intent to write a name into, and names itself through the board pick's name field instead."
+)]
+fn devices_card_menu_open() -> Element {
+    let card = roster_fixture().roster.devices.remove(0);
+    rsx! {
+        section { class: "tw:min-h-[560px] tw:p-4",
+            div { class: "tw:w-[400px]",
+                DeviceRosterCard {
+                    card,
+                    open_uid: Some("dev000000daqf6dvvqz".to_string()),
+                    projects: packages(),
+                    examples: examples(),
+                    menu_initially_open: true,
+                    on_action: |_| {},
+                }
+            }
+        }
+    }
 }
 
 #[story(
@@ -1691,7 +1930,7 @@ fn device_pick_popover_open() -> Element {
 }
 
 #[story(
-    description = "The board pick popover, open and filtered (P6, AC4; renderings P10). The chip the boot banner named narrows the served catalog, and the panel SAYS so — which chip, which source answered it, how many boards fit — with \"show all\" as the escape; the flash preflight's chip guard, not the filter, is what makes a wrong pick fail safely, which is what the foot line is for. Each tile now LEADS with the board as lpa-boards draws it — the same sidecar and the same renderer the boards page uses, turned a quarter turn and fitted to a 56px band, so a devkit lies along the band instead of standing in it as a sliver and tiles of a three-to-one height range still line their names up — over the name, its manufacturer and flash, and its family, marked green only where it matches the detected chip. The trigger's swatch carries the picked board's own silhouette. Two C6 boards fit, so nothing is preselected and the Flash verb waits: the pin map is written to the device, so the card never guesses."
+    description = "The board pick popover, open and filtered (P6, AC4; renderings P10). The chip the boot banner named narrows the served catalog, and the panel SAYS so — which chip, which source answered it, how many boards fit — with \"show all\" as the escape; the flash preflight's chip guard, not the filter, is what makes a wrong pick fail safely, which is what the foot line is for. Each tile now LEADS with the board as lpa-boards draws it — the same sidecar and the same renderer the boards page uses, turned a quarter turn and fitted to a 56px band, so a devkit lies along the band instead of standing in it as a sliver and tiles of a three-to-one height range still line their names up — over the name, its manufacturer and flash, and its family, marked green only where it matches the detected chip. The trigger's swatch carries the picked board's own silhouette. Two C6 boards fit, so nothing is preselected and the Flash verb waits: the pin map is written to the device, so the card never guesses. Above the foot line sits the optional Board name field: blank keeps the derived \"<board> · <Mon D>\" the app mints at flash (shown as the placeholder once a board is picked), and a typed name rides the Flash gesture itself — the only road a still-pending link's name can take, since it has no intent to rename until this gesture adopts it. The Update verb's pick carries no field: that board already has its name."
 )]
 fn device_board_pick_open() -> Element {
     board_pick_story(BoardPickMode::Row, ("esp32c6", ChipSource::BootBanner))

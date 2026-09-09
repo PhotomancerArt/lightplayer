@@ -26,7 +26,7 @@ just web-demo-build
 ```
 
 This builds `web-demo` for wasm32 (release), runs `wasm-bindgen` into `www/pkg/`, and refreshes
-`www/rainbow-default.glsl` from `examples/basic/shader.glsl`.
+`www/rainbow-default.glsl` from `projects/test/basic/shader.glsl`.
 
 ## Run
 

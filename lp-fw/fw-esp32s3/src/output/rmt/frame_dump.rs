@@ -37,12 +37,16 @@
 //! `lp-app/lpa-server/tests/shader_oracle_frame.rs` mirrors them on the host so
 //! the two transcripts line up without either side being sliced by hand.
 //!
-//! ⚠️ There is a **third** copy: `lp-fw/fw-esp32v3/src/output/rmt/frame_dump.rs`
-//! is a byte-for-byte port of this module, so the classic ESP32's M7 gate can
-//! reuse the same walk script and the same host comparator with no per-chip
-//! branch. Two firmwares under separate toolchains with no shared chip-side
-//! library, so the duplication is deliberate — but a format string changed here
-//! and not there silently breaks the classic's gate.
+//! ⚠️ There are **two more** copies of the code below:
+//! `lp-fw/fw-esp32v3/src/output/rmt/frame_dump.rs` (the classic ESP32, for its
+//! M7 gate) and `lp-fw/fw-esp32c6/src/output/rmt/frame_dump.rs` (the C6, for
+//! the emulator plan's walk twin) are byte-for-byte ports of this module, so
+//! all three chips reuse the same walk script and the same host comparator
+//! with no per-chip branch. Three firmwares under separate toolchains with no
+//! shared chip-side library, so the duplication is deliberate — but a format
+//! string changed here and not there silently breaks the other two chips'
+//! gates. `lp-fw/fw-tests/tests/frame_dump_parity.rs` holds the three copies
+//! against each other so that failure is a red `cargo test`, not a red walk.
 
 use lpc_hardware::HwEndpointId;
 
@@ -50,7 +54,7 @@ use lpc_hardware::HwEndpointId;
 const REPORT_EVERY_FRAMES: u32 = 60;
 
 /// Cap on the one-shot full dump, in LEDs. 64 LEDs is 192 bytes ≈ 400 hex
-/// characters — one long line, not a flood. `examples/shader-oracle` is sized
+/// characters — one long line, not a flood. `projects/test/shader-oracle` is sized
 /// to exactly this so its dump is the *whole* frame.
 pub const MAX_DUMP_LEDS: usize = 64;
 

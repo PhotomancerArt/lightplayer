@@ -30,9 +30,22 @@ the round-2 plan):
 - **Finishing setup does NOT auto-open the editor.**
 - **Naming is derived** ("<board display_name> · <Mon D>", collision
   suffix ` 2`, ` 3`) — round 2 made this the ONLY naming path (no naming
-  step anywhere; rename later).
+  step anywhere; rename later). The "rename later" half landed 2026-09-06:
+  the device card's header ⋯ menu and the header session control's device
+  panel carry Rename (`SetName`), the board pick carries an OPTIONAL name
+  field whose typed value rides the Flash gesture, and the New-project
+  push offers to name the board after the project. Still no step: blank
+  everywhere keeps the derived name.
 - **`/hardware.json` written at provision** (D4) — now the flash
   activity's post-hello stamp.
+- **The add slot is the creation surface.** The wizard's `ItsConnected`
+  entry survives as the slot's own CTA. 2026-09-07 (always-a-device, P5)
+  gave the slot a second, quiet verb — "start a board here ▾", a menu of
+  Desktop and the boards — and relabelled the CTA **"It's connected"** so
+  the two read as the two ways a card can appear: a board already at the
+  end of a wire, or a runtime Studio starts in this tab. There is no other
+  creation path and no wizard behind either verb; picking a target mints a
+  device record and powers it on.
 
 The §2 transition table below is the record of what the first
 implementation decided.

@@ -1,6 +1,6 @@
 // test run
 //
-// Integration-style checks mirroring examples/basic/src/rainbow.shader/main.glsl.
+// Integration-style checks mirroring projects/test/basic/src/rainbow.shader/main.glsl.
 // Expectations are blessed from wasm.q32; other targets must match within tolerance.
 
 const bool CYCLE_PALETTE = true;

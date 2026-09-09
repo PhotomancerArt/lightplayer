@@ -13,7 +13,7 @@
 //!   render straight into the buffer instead of into a whole-product scratch
 //!   that is then copied out run by run — 6 B per lamp of every patched
 //!   product, every frame, and the 35,700 B ask that halted the emulator on
-//!   `examples/small-dome`. The runtime buffer is the rendered product's one
+//!   `catalog/projects/small-dome`. The runtime buffer is the rendered product's one
 //!   home; nothing is materialized beside it
 //!   (`docs/adr/2026-09-06-control-render-targets-scatter.md`).
 //!

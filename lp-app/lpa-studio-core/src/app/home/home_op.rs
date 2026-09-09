@@ -80,9 +80,28 @@ impl ProjectTemplate {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum HomeOp {
     /// Open a library package — by slug (URLs) or `prj…` uid (cards) —
-    /// pushing its head to the simulator (D13/D19).
+    /// pushing its head to the sim (D13/D19).
     OpenPackage {
         key: String,
+    },
+    /// Open a library package **on the device the address named** —
+    /// `?on=mac:<base mac>` (D43), or the mismatch page's "push here".
+    ///
+    /// The sibling of [`Self::OpenPackage`] and not a parameter on it,
+    /// because they are different gestures: one asks Studio to resolve a
+    /// device and is free to reuse the tab's sim, the other names one
+    /// device and will not settle for another. A hint naming a device this
+    /// library does not know drops back to [`Self::OpenPackage`] at the
+    /// edge that read the URL, with a notice — the model is never handed a
+    /// device it cannot find and asked to improvise.
+    OpenPackageOnDevice {
+        key: String,
+        /// The named device's base MAC, canonical (lowercase colon hex).
+        base_mac: String,
+        /// The person has seen the mismatch page and chose to push over
+        /// what is running (D50). `false` — every arrival from a URL —
+        /// stops at that page instead.
+        over_running_project: bool,
     },
     /// Open an example as a TRANSIENT view session (examples vision D2):
     /// nothing installed, nothing seeded; the explicit save forks it.
@@ -107,10 +126,13 @@ pub enum HomeOp {
     /// Deviates from D17 (the examples place is unbuilt and node authoring
     /// makes an empty project genuinely useful; see
     /// `docs/adr/2026-07-27-node-authoring-operations.md`). No name
-    /// prompt: the template's default label is slugged/dated/deduped by
-    /// the library, and rename lives on the card kebab.
+    /// PROMPT — `name` is the menu's optional field: `None` (or blank)
+    /// falls back to the template's default label, slugged/dated/deduped
+    /// by the library, and rename lives on the card kebab and in the
+    /// project's own settings.
     CreateProject {
         template: ProjectTemplate,
+        name: Option<String>,
     },
     /// Create a project BUILT AROUND a library pattern's export, and open
     /// it (module authoring unit, P5): the pattern-project rig with the
@@ -133,6 +155,20 @@ pub enum HomeOp {
         uid: String,
         name: String,
     },
+    /// Declare what hardware a project runs on (D41, PD17) — the project
+    /// settings' **Hardware** row.
+    ///
+    /// The first library write of the container manifest's `target`. It
+    /// names a KIND of board, never an instance (D32): putting a project on
+    /// the board on your desk is that board's own card verb.
+    ///
+    /// `target` is a catalog board id, or `None` for Desktop — the same
+    /// thing an absent field has always meant, so choosing Desktop writes
+    /// no key rather than a redundant one.
+    SetPackageTarget {
+        uid: String,
+        target: Option<String>,
+    },
     DuplicatePackage {
         uid: String,
     },
@@ -149,15 +185,10 @@ pub enum HomeOp {
     ImportJson {
         text: String,
     },
-    /// Mutate a card's UI VIEW-STATE (select tab / open or close a sheet).
-    /// A pure, synchronous view-state change — no wire, no library — kept
-    /// core-owned so it survives the card ⇄ pane growth and is
-    /// e2e-drivable (2026-07-25 re-home).
-    CardUi(crate::app::home::card_ui_state::CardUiOp),
 }
 
 impl HomeOp {
-    /// Whether this op ends in a project being opened on the simulator.
+    /// Whether this op ends in a project being opened on a device.
     ///
     /// The supersede rule (D4) is keyed off this: enqueuing one of these
     /// makes it THE current open, and whatever open is already parked in
@@ -168,6 +199,7 @@ impl HomeOp {
         matches!(
             self,
             Self::OpenPackage { .. }
+                | Self::OpenPackageOnDevice { .. }
                 | Self::OpenExample { .. }
                 | Self::OpenSharedTransient { .. }
                 | Self::CreateProject { .. }
@@ -185,7 +217,10 @@ impl HomeOp {
     pub fn is_pure_open(&self) -> bool {
         matches!(
             self,
-            Self::OpenPackage { .. } | Self::OpenExample { .. } | Self::OpenSharedTransient { .. }
+            Self::OpenPackage { .. }
+                | Self::OpenPackageOnDevice { .. }
+                | Self::OpenExample { .. }
+                | Self::OpenSharedTransient { .. }
         )
     }
 }
@@ -195,7 +230,13 @@ impl ControllerOp for HomeOp {
         match self {
             Self::OpenPackage { .. } => ActionMeta::new(
                 "Open",
-                "Open this project in the simulator.",
+                "Open this project on a sim.",
+                ActionPriority::Primary,
+            )
+            .with_icon("play"),
+            Self::OpenPackageOnDevice { .. } => ActionMeta::new(
+                "Open",
+                "Open this project on that device.",
                 ActionPriority::Primary,
             )
             .with_icon("play"),
@@ -216,13 +257,14 @@ impl ControllerOp for HomeOp {
             // and the menu's own rows carry the per-template labels.
             Self::CreateProject {
                 template: ProjectTemplate::Blank,
+                ..
             } => ActionMeta::new(
                 "New",
                 "Create a blank project and open it.",
                 ActionPriority::Secondary,
             )
             .with_icon("add"),
-            Self::CreateProject { template } => ActionMeta::new(
+            Self::CreateProject { template, .. } => ActionMeta::new(
                 template.label(),
                 match template {
                     ProjectTemplate::Pattern1d => {
@@ -252,6 +294,12 @@ impl ControllerOp for HomeOp {
                 ActionMeta::new("Rename", "Rename this project.", ActionPriority::Secondary)
                     .with_icon("edit")
             }
+            Self::SetPackageTarget { .. } => ActionMeta::new(
+                "Set hardware",
+                "Choose the hardware this project runs on.",
+                ActionPriority::Secondary,
+            )
+            .with_icon("edit"),
             Self::DuplicatePackage { .. } => ActionMeta::new(
                 "Duplicate",
                 "Fork an independent copy of this project.",
@@ -277,11 +325,6 @@ impl ControllerOp for HomeOp {
                 ActionPriority::Secondary,
             )
             .with_icon("upload"),
-            Self::CardUi(_) => ActionMeta::new(
-                "Card view",
-                "Change what this card is showing.",
-                ActionPriority::Tertiary,
-            ),
         }
     }
 
@@ -291,6 +334,7 @@ impl ControllerOp for HomeOp {
             // demo-load quiet-gap budget fits. Create-and-open ends in the
             // same open, so it shares the budget.
             Self::OpenPackage { .. }
+            | Self::OpenPackageOnDevice { .. }
             | Self::OpenExample { .. }
             | Self::OpenSharedTransient { .. }
             | Self::CreateProject { .. }
@@ -301,16 +345,11 @@ impl ControllerOp for HomeOp {
             // live write-back is one small wire write); the standard budget
             // bounds it.
             Self::RenamePackage { .. }
+            | Self::SetPackageTarget { .. }
             | Self::DuplicatePackage { .. }
             | Self::DeletePackage { .. }
             | Self::ImportZip { .. }
             | Self::ImportJson { .. } => ActionClass::Foreground {
-                deadline: PROJECT_ACTION_DEADLINE,
-            },
-            // A pure view-state flip — synchronous, no wire; run it
-            // inline like any local gesture (the standard budget never
-            // engages because the handler never awaits).
-            Self::CardUi(_) => ActionClass::Foreground {
                 deadline: PROJECT_ACTION_DEADLINE,
             },
         }
@@ -344,16 +383,19 @@ mod tests {
                 key: "prj1".to_string(),
             },
             HomeOp::OpenExample {
-                id: "examples/basic".to_string(),
+                id: "catalog/plasma".to_string(),
             },
             HomeOp::CreateProject {
                 template: ProjectTemplate::Blank,
+                name: None,
             },
             HomeOp::CreateProject {
                 template: ProjectTemplate::Pattern1d,
+                name: None,
             },
             HomeOp::CreateProject {
                 template: ProjectTemplate::Pattern2d,
+                name: None,
             },
         ] {
             assert_eq!(
@@ -373,6 +415,7 @@ mod tests {
         assert_eq!(
             HomeOp::CreateProject {
                 template: ProjectTemplate::Blank,
+                name: None,
             }
             .default_action_meta()
             .label,
@@ -380,9 +423,12 @@ mod tests {
         );
         for template in [ProjectTemplate::Pattern1d, ProjectTemplate::Pattern2d] {
             assert_eq!(
-                HomeOp::CreateProject { template }
-                    .default_action_meta()
-                    .label,
+                HomeOp::CreateProject {
+                    template,
+                    name: None
+                }
+                .default_action_meta()
+                .label,
                 template.label(),
             );
         }

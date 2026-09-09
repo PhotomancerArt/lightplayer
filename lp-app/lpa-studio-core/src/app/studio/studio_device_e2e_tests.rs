@@ -40,12 +40,15 @@ use lpa_link::providers::fake_device::{
     FakeBootState, FakeDeviceIdentity, FakeDeviceScript, FakeEsp32Device, FakeLightPlayerState,
 };
 
+use lpfs::AsLpPath;
+
 use crate::app::library::{LibraryStore, MemoryLibraryHost};
 use crate::app::places::DeviceRegistry;
 use crate::{
     DeviceAction, DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceInput,
     DeviceTaskFuture, DeviceTransport, DeviceTransportFuture, DevicesOp, GrantedLink, LensLineTap,
-    LensTapEvent, ProjectController, ProjectOp, StudioController, UiAction,
+    LensTapEvent, ProjectController, ProjectOp, SimBacking, SimDeviceTransport, SimLinkSource,
+    SimRuntimeControl, SimSession, StudioController, UiAction,
 };
 
 /// Wall-clock ceiling on a `run_until`. Generous: the fake boots a real host
@@ -257,7 +260,8 @@ impl DeviceTransport for ScriptedTransport {
                         // actual ask → stop → delete conversation runs over
                         // the fake's own `M!` wire into a real `LpServer`.
                         RemovePlan::Real => {
-                            let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(&device));
+                            let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(&device))
+                                .on_borrowed_wire();
                             let mut report = |label: String, percent: Option<u8>| {
                                 progress(label, percent);
                             };
@@ -308,7 +312,8 @@ impl DeviceTransport for ScriptedTransport {
                             // `M!` byte wire, into a real `LpServer` over
                             // `LpFsMemory`. Nothing about the stop/write/
                             // load order or the hash check is faked.
-                            let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(&device));
+                            let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(&device))
+                                .on_borrowed_wire();
                             let mut report = |label: String, percent: Option<u8>| {
                                 progress(label, percent);
                             };
@@ -330,6 +335,69 @@ impl DeviceTransport for ScriptedTransport {
                 })
             }
         }
+    }
+}
+
+/// A [`SimLinkSource`] over the SAME scripted fake the serial rows drive.
+///
+/// The test double for the browser worker, and the reason the whole model
+/// half of "a sim is a device" is `just test`-covered: what these rows prove
+/// is the record, the power verbs, the fold, the registry and the sidecar —
+/// none of which care whether the bytes came from a worker or a thread. The
+/// worker half (`lpa_link::device_link::browser_worker`) is wasm-only and is
+/// covered by the fw-browser smoke and the browser walk instead.
+struct ScriptedSimSource {
+    device: FakeEsp32Device,
+    /// How many times an effect restarted the runtime.
+    restarts: Rc<Cell<usize>>,
+    /// `/hardware.json` payloads the manifest-write effect handed the sim.
+    manifests: Rc<RefCell<Vec<String>>>,
+}
+
+struct ScriptedSimControl {
+    device: FakeEsp32Device,
+    restarts: Rc<Cell<usize>>,
+    manifests: Rc<RefCell<Vec<String>>>,
+}
+
+impl SimRuntimeControl for ScriptedSimControl {
+    fn restart(&self) -> DeviceTransportFuture<Result<(), String>> {
+        self.restarts.set(self.restarts.get() + 1);
+        Box::pin(core::future::ready(Ok(())))
+    }
+
+    fn set_hardware_manifest(&self, manifest_json: String) {
+        self.manifests.borrow_mut().push(manifest_json);
+    }
+
+    fn client_io(&self, tap: Option<LensLineTap>) -> Result<Box<dyn lpa_client::ClientIo>, String> {
+        // The real conversation over the fake's real `M!` wire, teed: the
+        // push and the removal on a sim are not scripted at all.
+        let io = FakeDeviceIo::new(&self.device);
+        Ok(Box::new(match tap {
+            Some(tap) => io.with_tap(tap),
+            None => io,
+        }))
+    }
+}
+
+impl SimLinkSource for ScriptedSimSource {
+    fn open(&self, session: &SimSession) -> Result<SimBacking, String> {
+        // The sim's OWN link info — `sim:<uid>`, no USB ids — over the fake's
+        // real byte wire, so the endpoint routing, the registry column and
+        // the framing are all the shipped ones.
+        let info = crate::sim_link_info(&session.uid, &session.display_name);
+        Ok(SimBacking {
+            link: GrantedLink {
+                link: Box::new(fake_device_link(info.clone(), &self.device)),
+                info,
+            },
+            control: Rc::new(ScriptedSimControl {
+                device: self.device.clone(),
+                restarts: Rc::clone(&self.restarts),
+                manifests: Rc::clone(&self.manifests),
+            }),
+        })
     }
 }
 
@@ -558,6 +626,10 @@ struct DeviceBench {
     manifest_writes: Rc<RefCell<Vec<String>>>,
     push_plan: Rc<Cell<PushPlan>>,
     remove_plan: Rc<Cell<RemovePlan>>,
+    /// The sim half of the transport, when this bench has one. Held so a
+    /// row can assert what is RUNNING as opposed to what is remembered.
+    sims: Option<Rc<SimDeviceTransport>>,
+    sim_restarts: Rc<Cell<usize>>,
     started: std::time::Instant,
 }
 
@@ -576,6 +648,40 @@ impl DeviceBench {
         Self::build(device, endpoint, false, true)
     }
 
+    /// A bench holding ONE created sim of `target`, powered OFF.
+    ///
+    /// The whole creation path runs: the identity is minted from
+    /// [`SIM_RANDOM`], the row and the sidecar are written in one catalog
+    /// op, and the library settle rehydrates them — so the record the rows
+    /// below act on is the one a picker would have made. The serial half is
+    /// installed too (with no grants), because a build with both halves is
+    /// what ships and the composite has to route.
+    ///
+    /// `device` must wear the identity [`sim_identity`] mints, or the hello
+    /// would describe a different board and the fold would (correctly)
+    /// refuse to adopt it into this record.
+    fn with_sim(device: &FakeEsp32Device, target: &str) -> (Self, TaskPool, String) {
+        let (mut bench, tasks) = Self::build(device, "unused-serial-port", false, false);
+        let restarts = Rc::new(Cell::new(0));
+        let sims = Rc::new(SimDeviceTransport::new(Rc::new(ScriptedSimSource {
+            device: device.clone(),
+            restarts: Rc::clone(&restarts),
+            manifests: Rc::new(RefCell::new(Vec::new())),
+        })));
+        bench.sims = Some(Rc::clone(&sims));
+        bench.sim_restarts = restarts;
+        bench.controller.set_device_sim_transport(sims);
+
+        let uid = drive(
+            bench
+                .controller
+                .create_sim_record(target, None, &SIM_RANDOM),
+        )
+        .expect("a sim is created");
+        bench.settle_library();
+        (bench, tasks, uid)
+    }
+
     fn build(
         device: &FakeEsp32Device,
         endpoint: &str,
@@ -583,13 +689,35 @@ impl DeviceBench {
         chooser_grants: bool,
     ) -> (Self, TaskPool) {
         let clock = Rc::new(Cell::new(1_000.0));
+        let store = memory_store(Rc::clone(&clock));
+        Self::build_on(device, endpoint, granted, chooser_grants, clock, store)
+    }
+
+    /// A reload: a FRESH controller (empty roster, empty feeds) over the
+    /// store an earlier bench wrote to, with the clock carried forward —
+    /// the registry rows and the last-frame sidecars are what survive a
+    /// page reload, and nothing else does. No port grant: the board is
+    /// remembered, not seen.
+    fn reloaded(previous: &Self, device: &FakeEsp32Device, endpoint: &str) -> (Self, TaskPool) {
+        let clock = Rc::new(Cell::new(previous.clock.get()));
+        let store = memory_store_sharing(&previous.store);
+        Self::build_on(device, endpoint, false, false, clock, store)
+    }
+
+    fn build_on(
+        device: &FakeEsp32Device,
+        endpoint: &str,
+        granted: bool,
+        chooser_grants: bool,
+        clock: Rc<Cell<f64>>,
+        store: LibraryStore,
+    ) -> (Self, TaskPool) {
         let tasks: TaskPool = Rc::new(RefCell::new(Vec::new()));
         let inbox: Rc<RefCell<VecDeque<DeviceInput>>> = Rc::new(RefCell::new(VecDeque::new()));
         let granted = Rc::new(Cell::new(granted));
         let chooser_grants = Rc::new(Cell::new(chooser_grants));
         let revoked = Rc::new(RefCell::new(Vec::new()));
 
-        let store = memory_store(Rc::clone(&clock));
         let host = MemoryLibraryHost::new(memory_store_sharing(&store), {
             let clock = Rc::clone(&clock);
             Rc::new(move || clock.get())
@@ -661,6 +789,8 @@ impl DeviceBench {
             manifest_writes,
             push_plan,
             remove_plan,
+            sims: None,
+            sim_restarts: Rc::new(Cell::new(0)),
             started: std::time::Instant::now(),
         };
         (bench, tasks)
@@ -714,6 +844,31 @@ impl DeviceBench {
         drive(self.controller.dispatch(action)).expect("a push gesture never fails loudly");
     }
 
+    /// Open a library project ON a named device — the `?on=mac:` arrival
+    /// (D43), through the ordinary action path. `over` is the mismatch
+    /// page's "push here"; every arrival from a URL passes `false`.
+    fn open_on_device(
+        &mut self,
+        key: &str,
+        base_mac: &str,
+        over: bool,
+    ) -> Result<(), crate::UiError> {
+        let action = UiAction::from_op(
+            crate::HOME_NODE_ID,
+            crate::HomeOp::OpenPackageOnDevice {
+                key: key.to_string(),
+                base_mac: base_mac.to_string(),
+                over_running_project: over,
+            },
+        );
+        drive(self.controller.dispatch(action)).map(|_| ())
+    }
+
+    /// The open that stopped at the mismatch page (D50), if one did.
+    fn mismatch(&self) -> Option<crate::UiOpenMismatch> {
+        self.controller.view().open_mismatch.map(|boxed| *boxed)
+    }
+
     /// The running face's Open (round-2 M5), through the ordinary action
     /// path: the editor becomes a lens on the device registered as `uid`.
     fn open_lens(&mut self, uid: &str) -> Result<(), crate::UiError> {
@@ -737,9 +892,25 @@ impl DeviceBench {
     fn lens_device_uid(&self) -> Option<String> {
         self.controller
             .runtime_pool_for_test()
-            .device_session()
-            .and_then(crate::RuntimeSession::device_attachment)
+            .attached_session()
+            .map(crate::RuntimeSession::attachment)
             .map(|attachment| attachment.uid.clone())
+    }
+
+    /// Re-hydrate the library snapshot the way the actor does, so a row
+    /// this bench just wrote reaches the roster (and its sidecar reaches
+    /// the sim cache).
+    fn settle_library(&mut self) {
+        drive(self.controller.settle_library());
+    }
+
+    /// The sim sidecar bytes on disk, or `None` when there is none.
+    fn sim_sidecar(&self, uid: &str) -> Option<Vec<u8>> {
+        self.store
+            .fs_handle()
+            .borrow()
+            .read_file(crate::app::devices::sim_record::sim_record_path(uid).as_path())
+            .ok()
     }
 
     fn registry(&self) -> Vec<crate::app::places::RegisteredDevice> {
@@ -793,15 +964,15 @@ fn opening_the_lens_borrows_the_wire_and_the_card_keeps_folding() {
         .expect("the running board opens in the editor");
     assert_eq!(bench.lens_device_uid().as_deref(), Some(uid.as_str()));
     let pool = bench.controller.runtime_pool_for_test();
-    let session = pool.device_session().expect("a device session");
+    let session = pool.attached_session().expect("a device session");
     assert_eq!(
         pool.lens(),
         Some(session.id()),
         "the editor is the lens on it"
     );
     assert!(session.is_connected(), "the wire client is up");
-    assert_eq!(session.kind(), crate::RuntimeKind::Device);
-    let link = session.device_attachment().expect("attachment").link;
+    assert_eq!(session.transport(), crate::LinkTransport::Serial);
+    let link = session.attachment().link;
     assert!(
         bench
             .controller
@@ -905,7 +1076,7 @@ fn opening_the_lens_reads_the_board_build_for_the_picker_gate() {
 
     bench.open_lens(&uid).expect("opens");
     let pool = bench.controller.runtime_pool_for_test();
-    let session = pool.device_session().expect("a device session");
+    let session = pool.attached_session().expect("a device session");
     let reported = session
         .device_features()
         .expect("the attach read the board's build off the wire");
@@ -1012,8 +1183,8 @@ fn a_card_verb_on_the_lens_device_closes_the_editor_and_then_runs() {
     let link = bench
         .controller
         .runtime_pool_for_test()
-        .device_session()
-        .and_then(crate::RuntimeSession::device_attachment)
+        .attached_session()
+        .map(crate::RuntimeSession::attachment)
         .expect("attachment")
         .link;
 
@@ -1260,6 +1431,573 @@ fn opening_a_lens_on_an_unknown_board_is_held_not_refused() {
     assert!(bench.controller.runtime_pool_for_test().lens().is_none());
 }
 
+/// An app conversation on the SHARED link (the card feed's seam): a real
+/// `lpa-client` request goes out as a raw line with an app-range id, the
+/// pump routes the reply to the conversation's inbox instead of the fold,
+/// and meanwhile the board's heartbeats keep folding — no borrow, no gap in
+/// freshness, and the journal never hears a passthrough.
+#[test]
+fn a_shared_link_conversation_answers_while_the_card_keeps_folding() {
+    let device = empty_light_player("dev000000daqf6dvvsh");
+    let (mut bench, tasks) = identified(&device, "usb-conv-1");
+    let link = bench.controller.devices_for_test().roster().devices()[0]
+        .link()
+        .expect("an identified board is on a link");
+    assert!(
+        !bench
+            .controller
+            .devices_for_test()
+            .effects()
+            .wire_borrowed(link),
+        "nothing holds the wire"
+    );
+    let heard_before = bench.controller.devices_for_test().roster().devices()[0]
+        .evidence
+        .freshness
+        .last_heard;
+
+    let io = bench
+        .controller
+        .devices_for_test()
+        .effects()
+        .conversation_io(link)
+        .expect("a live link lends a conversation io");
+    let answer: Rc<RefCell<Option<Result<u32, String>>>> = Rc::new(RefCell::new(None));
+    tasks.borrow_mut().push(Box::pin({
+        let answer = Rc::clone(&answer);
+        async move {
+            let mut client = io.into_client();
+            let result = client
+                .hello()
+                .await
+                .map(|outcome| outcome.value.proto)
+                .map_err(|error| error.to_string());
+            *answer.borrow_mut() = Some(result);
+        }
+    }));
+    bench.run_until(&tasks, "the conversation to be answered", |_| {
+        answer.borrow().is_some()
+    });
+
+    let proto = answer
+        .borrow()
+        .clone()
+        .expect("answered")
+        .expect("the board answers the app-range hello");
+    assert_eq!(proto, lpc_wire::WIRE_PROTO_VERSION);
+    // The board heartbeats every 20 ms of its own clock; a conversation
+    // that took the pump away would have frozen freshness meanwhile.
+    bench.run_until(&tasks, "a heartbeat after the conversation", |bench| {
+        bench.controller.devices_for_test().roster().devices()[0]
+            .evidence
+            .freshness
+            .last_heard
+            > heard_before
+    });
+    let journal: Vec<String> = bench
+        .controller
+        .devices_for_test()
+        .roster()
+        .journal()
+        .entries()
+        .map(|entry| format!("{entry:?}"))
+        .collect();
+    assert!(
+        !journal.iter().any(|line| line.contains("Passthrough")),
+        "the fold never hears a conversation frame: {journal:#?}"
+    );
+    assert!(
+        bench.view().devices[0].activity.is_none()
+            && bench.view().devices[0].state_label == "Ready",
+        "the card is untouched by the conversation: {:?}",
+        bench.view().devices[0]
+    );
+}
+
+// ---------------------------------------------------------------------
+// The device card's live frame feed (plan 2026-09-06-1407)
+// ---------------------------------------------------------------------
+
+/// One pass of the actor's card-feed lane for the roster boards: poll the
+/// due device pulls to completion while the link pumps keep turning and
+/// the fake clock advances, then fold whatever the pumps queued meanwhile.
+///
+/// Mirrors the actor exactly: a pull holds the controller across its
+/// awaits, so device inputs queue until it completes (which is why pulls
+/// are bounded and cancellable). `step_ms` is the clock's stride per poll —
+/// coarse strides walk a 12 s deadline in a few hundred polls.
+fn feed_tick(bench: &mut DeviceBench, tasks: &TaskPool, step_ms: f64) -> bool {
+    let clock = Rc::clone(&bench.clock);
+    let make_timer = {
+        let clock = Rc::clone(&clock);
+        move |delay: Duration| Sleep {
+            clock: Rc::clone(&clock),
+            due: clock.get() + delay.as_secs_f64(),
+        }
+    };
+    let waker = noop_waker();
+    let mut cx = Context::from_waker(&waker);
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    let preempted = {
+        let mut pull = core::pin::pin!(
+            bench
+                .controller
+                .run_due_device_feeds(make_timer, &lpa_client::NeverCancel)
+        );
+        loop {
+            if let Poll::Ready(preempted) = pull.as_mut().poll(&mut cx) {
+                break preempted;
+            }
+            clock.set(clock.get() + step_ms / 1_000.0);
+            pump(tasks);
+            assert!(
+                std::time::Instant::now() < deadline,
+                "a device feed pull did not complete"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    };
+    bench.step(tasks);
+    preempted
+}
+
+/// A board running the bundled example, with its card wanting a picture.
+fn running_board_wanting_a_picture(uid: &str, endpoint: &str) -> (DeviceBench, TaskPool) {
+    let device = empty_light_player(uid);
+    let (mut bench, tasks) = identified(&device, endpoint);
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let card = bench.view().devices[0].clone();
+    bench.push_gesture(card.id, bundled_example());
+    bench.run_until(&tasks, "the push to finish", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+    assert!(
+        bench.view().devices[0]
+            .last_outcome
+            .as_ref()
+            .is_some_and(|o| o.ok),
+        "{:?}",
+        bench.view().devices[0]
+    );
+    bench.run_until(&tasks, "the running face", |bench| {
+        matches!(
+            bench.view().devices[0].loaded_project,
+            lpa_devices::view::LoadedProject::Running { .. }
+        )
+    });
+    bench.controller.set_device_feed_wanted(card.id, true);
+    (bench, tasks)
+}
+
+fn feed_frame_revision(bench: &DeviceBench, device: crate::DeviceId) -> Option<i64> {
+    bench
+        .controller
+        .device_feeds()
+        .get(device)
+        .and_then(|feed| feed.frame())
+        .map(|frame| frame.revision)
+}
+
+/// AC1: a running board feeds its card. The picture arrives with the
+/// board's own display layout within two pulls, and the next pulls see the
+/// engine's revision moving — the frames are the board's, not a re-render.
+/// AC5 rides along: the fold never hears a passthrough.
+#[test]
+fn a_running_board_feeds_its_card_over_the_shared_link() {
+    let (mut bench, tasks) = running_board_wanting_a_picture("dev000000daqf6dvvt1", "usb-feed-1");
+    let device = bench.view().devices[0].id;
+
+    let mut pulls = 0;
+    while feed_frame_revision(&bench, device).is_none() {
+        feed_tick(&mut bench, &tasks, 5.0);
+        pulls += 1;
+        assert!(pulls <= 2, "no frame after two pulls");
+        // Let the completion gap elapse.
+        for _ in 0..40 {
+            bench.step(&tasks);
+        }
+    }
+    let feed = bench.controller.device_feeds().get(device).expect("a feed");
+    let first = feed.frame().expect("a frame").clone();
+    assert!(
+        first.display_layout.is_some(),
+        "the board's own display layout came with the picture"
+    );
+    assert!(first.extent.rows >= 1 && !first.bytes.is_empty());
+
+    // The engine keeps publishing: a later pull sees a newer revision.
+    let mut advanced = false;
+    for _ in 0..30 {
+        for _ in 0..40 {
+            bench.step(&tasks);
+        }
+        feed_tick(&mut bench, &tasks, 5.0);
+        if feed_frame_revision(&bench, device).is_some_and(|rev| rev > first.revision) {
+            advanced = true;
+            break;
+        }
+    }
+    assert!(advanced, "the revision never moved past {}", first.revision);
+
+    // The app view joins the picture beside the card: live, with the
+    // board's own picture and no dimming.
+    let feeds = bench.controller.device_roster_view().feeds;
+    let feed_view = feeds.get(&device).expect("the fed card has a feed view");
+    assert_eq!(
+        feed_view.liveness,
+        crate::FeedLiveness::Live,
+        "{feed_view:?}"
+    );
+    assert!(feed_view.frame.is_some());
+
+    // The card is untouched, and the journal never saw a conversation frame.
+    let card = &bench.view().devices[0];
+    assert!(card.activity.is_none(), "{card:?}");
+    assert!(
+        matches!(
+            card.loaded_project,
+            lpa_devices::view::LoadedProject::Running { .. }
+        ),
+        "{card:?}"
+    );
+    let journal: Vec<String> = bench
+        .controller
+        .devices_for_test()
+        .roster()
+        .journal()
+        .entries()
+        .map(|entry| format!("{entry:?}"))
+        .collect();
+    assert!(
+        !journal.iter().any(|line| line.contains("Passthrough")),
+        "{journal:#?}"
+    );
+}
+
+/// The persisted last frame (honest-device-preview follow-up): a fed
+/// board's newest picture is written to its per-uid sidecar at most every
+/// ten seconds, and a RELOAD — a fresh controller over the same store, no
+/// port — rehydrates the remembered board's tile with that picture, dimmed
+/// as Offline, aged from the STORED capture stamp rather than from now.
+#[test]
+fn a_fed_boards_last_frame_survives_a_reload() {
+    let uid = "dev000000daqf6dvvt9";
+    let (mut bench, tasks) = running_board_wanting_a_picture(uid, "usb-feed-9");
+    let device = bench.view().devices[0].id;
+    let sidecar = crate::app::devices::device_frame_snapshot::snapshot_path(uid);
+    let sidecar_bytes = |bench: &DeviceBench| {
+        bench
+            .store
+            .fs_handle()
+            .borrow()
+            .read_file(sidecar.as_path())
+            .ok()
+    };
+
+    // The first frame is written as soon as it lands (nothing was written
+    // before, so the window does not apply).
+    let mut pulls = 0;
+    while feed_frame_revision(&bench, device).is_none() {
+        feed_tick(&mut bench, &tasks, 5.0);
+        pulls += 1;
+        assert!(pulls <= 2, "no frame after two pulls");
+        for _ in 0..40 {
+            bench.step(&tasks);
+        }
+    }
+    let first = sidecar_bytes(&bench).expect("the first frame is written at once");
+    let (stored, stored_at) =
+        crate::app::devices::device_frame_snapshot::decode(&first).expect("decodes");
+    let feed = bench.controller.device_feeds().get(device).expect("a feed");
+    let live = feed.frame().expect("the feed's frame");
+    // The packed layout form quantizes lamp centers, so the picture is
+    // compared by what a slot would draw from it, not bit for bit.
+    assert_eq!(stored.revision, live.revision);
+    assert_eq!(stored.bytes, live.bytes);
+    assert_eq!(stored.extent, live.extent);
+    assert!(stored.display_layout.is_some() && live.display_layout.is_some());
+    let live_at = feed
+        .frame_age_secs(bench.clock.get())
+        .map(|age| bench.clock.get() - age)
+        .expect("aged");
+    assert!(
+        (stored_at - live_at).abs() < 1e-6,
+        "the sidecar carries the frame's own capture stamp: {stored_at} vs {live_at}"
+    );
+
+    // Newer frames inside the ten-second window do not rewrite the file;
+    // once the window elapses, the newest one does.
+    for _ in 0..40 {
+        bench.step(&tasks);
+    }
+    feed_tick(&mut bench, &tasks, 5.0);
+    assert!(
+        feed_frame_revision(&bench, device).is_some_and(|rev| rev > stored.revision),
+        "the engine kept publishing"
+    );
+    assert_eq!(
+        sidecar_bytes(&bench).as_deref(),
+        Some(first.as_slice()),
+        "inside the window the sidecar stands"
+    );
+    bench
+        .clock
+        .set(bench.clock.get() + crate::DEVICE_FRAME_SNAPSHOT_INTERVAL_SECS);
+    feed_tick(&mut bench, &tasks, 5.0);
+    let second = sidecar_bytes(&bench).expect("still there");
+    let (newer, newer_at) =
+        crate::app::devices::device_frame_snapshot::decode(&second).expect("decodes");
+    assert!(newer.revision > stored.revision, "{newer:?} vs {stored:?}");
+    assert!(newer_at > stored_at);
+
+    // Reload: a fresh controller over the same store, the board unplugged
+    // an hour later. The registry row rehydrates the remembered board; the
+    // sidecar rehydrates its picture.
+    let (mut reloaded, _tasks) =
+        DeviceBench::reloaded(&bench, &empty_light_player(uid), "usb-feed-9");
+    reloaded.clock.set(reloaded.clock.get() + 3_600.0);
+    drive(reloaded.controller.settle_library());
+    let roster = reloaded.controller.device_roster_view();
+    let card = roster.roster.devices.first().expect("the remembered board");
+    assert_eq!(
+        card.status,
+        lpa_devices::device::DeviceStatus::Offline,
+        "{card:?}"
+    );
+    let feed_view = roster
+        .feeds
+        .get(&card.id)
+        .expect("the remembered board carries its last picture");
+    assert_eq!(feed_view.liveness, crate::FeedLiveness::Offline);
+    assert_eq!(feed_view.frame.as_ref(), Some(&newer));
+    let age = feed_view
+        .frame_age_secs
+        .expect("aged from the stored stamp");
+    assert!(
+        (age - (reloaded.clock.get() - newer_at)).abs() < 1e-6,
+        "age {age} should be measured from the stored stamp {newer_at}"
+    );
+    // The split the page draws puts it on the remembered line, picture
+    // attached.
+    let split = crate::split_roster(&roster);
+    assert!(split.connected.is_empty());
+    assert_eq!(split.remembered.len(), 1);
+
+    // What came from the store is never written back, and a second settle
+    // reads nothing new (idempotent).
+    reloaded.clock.set(reloaded.clock.get() + 60.0);
+    drive(reloaded.controller.settle_library());
+    assert!(
+        reloaded
+            .controller
+            .device_feeds()
+            .snapshots_due(reloaded.clock.get())
+            .is_empty()
+    );
+    assert_eq!(sidecar_bytes(&reloaded).as_deref(), Some(second.as_slice()));
+}
+
+/// AC3: while the editor lens holds the wire the feed does not pull — not
+/// one request — and it resumes the moment the wire comes back.
+#[test]
+fn the_feed_never_pulls_while_the_lens_holds_the_wire() {
+    let (mut bench, tasks) = running_board_wanting_a_picture("dev000000daqf6dvvt2", "usb-feed-2");
+    let device = bench.view().devices[0].id;
+    feed_tick(&mut bench, &tasks, 5.0);
+    for _ in 0..40 {
+        bench.step(&tasks);
+    }
+    feed_tick(&mut bench, &tasks, 5.0);
+    let stamp_before = bench
+        .controller
+        .device_feeds()
+        .get(device)
+        .and_then(|feed| feed.last_pull_completed_at())
+        .expect("the feed has pulled");
+    let uid = bench.registry()[0].uid.clone();
+
+    bench
+        .open_lens(&uid)
+        .expect("the running board opens in the editor");
+    let link = bench.controller.devices_for_test().roster().devices()[0]
+        .link()
+        .expect("on a link");
+    assert!(
+        bench
+            .controller
+            .devices_for_test()
+            .effects()
+            .wire_borrowed(link)
+    );
+    for _ in 0..10 {
+        for _ in 0..40 {
+            bench.step(&tasks);
+        }
+        feed_tick(&mut bench, &tasks, 5.0);
+    }
+    let stamp_under_lens = bench
+        .controller
+        .device_feeds()
+        .get(device)
+        .and_then(|feed| feed.last_pull_completed_at());
+    assert_eq!(
+        stamp_under_lens,
+        Some(stamp_before),
+        "not one pull ran while the lens held the wire"
+    );
+
+    bench.detach_lens();
+    bench.run_until(&tasks, "the wire to come back", |bench| {
+        !bench
+            .controller
+            .devices_for_test()
+            .effects()
+            .wire_borrowed(link)
+    });
+    for _ in 0..40 {
+        bench.step(&tasks);
+    }
+    feed_tick(&mut bench, &tasks, 5.0);
+    let stamp_after = bench
+        .controller
+        .device_feeds()
+        .get(device)
+        .and_then(|feed| feed.last_pull_completed_at());
+    assert!(
+        stamp_after > Some(stamp_before),
+        "the feed resumed once the lens let go"
+    );
+}
+
+/// AC4: a board that stops answering parks the feed after three failed
+/// pulls, and a fresh hello (a reconnect) re-arms it.
+#[test]
+fn three_failed_pulls_park_the_feed_until_the_board_says_hello_again() {
+    let device = empty_light_player("dev000000daqf6dvvt3");
+    let (mut bench, tasks) =
+        {
+            let (mut bench, tasks) = identified(&device, "usb-feed-3");
+            bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+                bench.view().devices.first().is_some_and(|card| {
+                    card.loaded_project == lpa_devices::view::LoadedProject::Empty
+                })
+            });
+            let card = bench.view().devices[0].clone();
+            bench.push_gesture(card.id, bundled_example());
+            bench.run_until(&tasks, "the push to finish", |bench| {
+                bench
+                    .view()
+                    .devices
+                    .first()
+                    .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+            });
+            bench.run_until(&tasks, "the running face", |bench| {
+                matches!(
+                    bench.view().devices[0].loaded_project,
+                    lpa_devices::view::LoadedProject::Running { .. }
+                )
+            });
+            bench.controller.set_device_feed_wanted(card.id, true);
+            (bench, tasks)
+        };
+    let device_id = bench.view().devices[0].id;
+    feed_tick(&mut bench, &tasks, 5.0);
+    assert!(feed_frame_revision(&bench, device_id).is_some(), "fed once");
+
+    // The board goes deaf to requests (heartbeats keep coming, so the card
+    // itself stays honest and Ready).
+    device.set_drop_responses(true);
+    let mut ticks = 0;
+    while !bench
+        .controller
+        .device_feeds()
+        .get(device_id)
+        .is_some_and(crate::DeviceFrameFeed::is_parked)
+    {
+        for _ in 0..40 {
+            bench.step(&tasks);
+        }
+        // Coarse clock strides: each failed pull waits out its deadline.
+        feed_tick(&mut bench, &tasks, 100.0);
+        ticks += 1;
+        assert!(
+            ticks <= crate::DEVICE_FEED_PARK_AFTER_FAILURES as usize + 2,
+            "never parked"
+        );
+    }
+    assert_eq!(ticks, crate::DEVICE_FEED_PARK_AFTER_FAILURES as usize);
+    assert!(
+        feed_frame_revision(&bench, device_id).is_some(),
+        "the last frame stays while parked"
+    );
+    // Parked means parked: more ticks, no pulls.
+    let parked_stamp = bench
+        .controller
+        .device_feeds()
+        .get(device_id)
+        .and_then(|feed| feed.last_pull_completed_at());
+    for _ in 0..3 {
+        for _ in 0..40 {
+            bench.step(&tasks);
+        }
+        feed_tick(&mut bench, &tasks, 100.0);
+    }
+    assert_eq!(
+        bench
+            .controller
+            .device_feeds()
+            .get(device_id)
+            .and_then(|feed| feed.last_pull_completed_at()),
+        parked_stamp
+    );
+
+    // The board answers again and the user reconnects: a new window, a new
+    // hello, and the feed re-arms on it.
+    device.set_drop_responses(false);
+    bench.gesture(DeviceAction::Disconnect { device: device_id });
+    bench.run_until(&tasks, "the port to close", |bench| {
+        !bench.controller.devices_for_test().roster().devices()[0]
+            .evidence
+            .presence
+            .is_open()
+    });
+    bench.gesture(DeviceAction::Connect { device: device_id });
+    bench.run_until(&tasks, "the board to be Ready again", |bench| {
+        bench.view().devices.first().is_some_and(|card| {
+            card.activity.is_none()
+                && card.state_label == "Ready"
+                && matches!(
+                    card.loaded_project,
+                    lpa_devices::view::LoadedProject::Running { .. }
+                )
+        })
+    });
+    for _ in 0..40 {
+        bench.step(&tasks);
+    }
+    feed_tick(&mut bench, &tasks, 5.0);
+    let feed = bench
+        .controller
+        .device_feeds()
+        .get(device_id)
+        .expect("the feed survives");
+    assert!(!feed.is_parked(), "a fresh hello re-armed the feed");
+    assert!(
+        feed.last_pull_completed_at() > parked_stamp,
+        "and it pulled again"
+    );
+}
+
 fn memory_store(clock: Rc<Cell<f64>>) -> LibraryStore {
     let counter = Rc::new(Cell::new(0u8));
     LibraryStore::new(
@@ -1476,11 +2214,30 @@ fn forgetting_an_identified_device_deletes_its_row_and_gives_the_grant_back() {
     assert_eq!(bench.registry().len(), 1);
     let device_id = bench.view().devices[0].id;
 
+    // A last-frame sidecar under the same uid, as a fed session leaves.
+    crate::app::devices::device_frame_snapshot::write_snapshot(
+        &*bench.store.fs_handle().borrow(),
+        "dev_forget",
+        b"{}",
+    )
+    .unwrap();
+
     bench.gesture(DeviceAction::Forget { device: device_id });
     bench.step(&tasks);
 
     assert!(bench.view().devices.is_empty(), "the card is gone");
     assert!(bench.registry().is_empty(), "so is the remembered row");
+    assert!(
+        !bench
+            .store
+            .fs_handle()
+            .borrow()
+            .file_exists(
+                crate::app::devices::device_frame_snapshot::snapshot_path("dev_forget").as_path()
+            )
+            .unwrap(),
+        "and so is any last-frame sidecar"
+    );
     assert_eq!(
         bench.revoked.borrow().len(),
         1,
@@ -1596,6 +2353,7 @@ fn a_flash_from_the_blank_pending_card_runs_to_ready_named_and_registered() {
         board_id: choice.board_id.clone(),
         build_id: choice.build_id.clone(),
         park_first: false,
+        name: None,
     });
 
     // The gesture adopts: the pending card becomes a device card, busy
@@ -1653,6 +2411,50 @@ fn a_flash_from_the_blank_pending_card_runs_to_ready_named_and_registered() {
     );
 }
 
+/// The same walk with a name typed into the board pick (the setup surface's
+/// optional field): the Flash carries it, the model records it as the user's
+/// name before the flash spawns, and the derived "<board> · <Mon D>" is
+/// never minted — the card and the registry row wear the typed name.
+#[test]
+fn a_flash_with_a_typed_name_wears_it_instead_of_the_derived_one() {
+    let device = blank_board();
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-flash-named");
+
+    bench.run_until(&tasks, "the blank verdict to settle", |bench| {
+        bench
+            .view()
+            .pending
+            .first()
+            .is_some_and(|pending| pending.needs_firmware())
+    });
+    let target = bench.view().pending[0].device;
+    let choice = c6_board_choice();
+
+    bench.gesture(DeviceAction::Flash {
+        device: target,
+        board_id: choice.board_id.clone(),
+        build_id: choice.build_id.clone(),
+        park_first: false,
+        name: Some("Porch lantern".to_string()),
+    });
+    bench.run_until(&tasks, "the flashed board to land Ready", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Ready" && card.activity.is_none())
+    });
+
+    let card = &bench.view().devices[0];
+    assert_eq!(
+        card.title, "Porch lantern",
+        "the typed name is the title (the surface trims before dispatching)"
+    );
+    let rows = bench.registry();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].name, "Porch lantern");
+}
+
 /// A mid-write failure lands on an honest problem face: outcome line with
 /// the tool's message, the needs-firmware face re-offered (retry in place),
 /// and every escape still present.
@@ -1676,6 +2478,7 @@ fn a_mid_write_failure_lands_on_an_honest_face_with_retry_in_place() {
         board_id: choice.board_id,
         build_id: choice.build_id,
         park_first: false,
+        name: None,
     });
     bench.run_until(&tasks, "the failure to settle", |bench| {
         bench
@@ -1726,6 +2529,7 @@ fn post_flash_silence_climbs_the_ladder_then_fails_with_honest_guidance() {
         board_id: choice.board_id,
         build_id: choice.build_id,
         park_first: true,
+        name: None,
     });
     bench.run_until(&tasks, "the ladder to exhaust", |bench| {
         bench
@@ -1778,6 +2582,7 @@ fn forgetting_mid_flash_evicts_the_hung_effect_and_cleans_up() {
         board_id: choice.board_id,
         build_id: choice.build_id,
         park_first: false,
+        name: None,
     });
     bench.run_until(&tasks, "the flash to be visibly running", |bench| {
         bench
@@ -1811,6 +2616,30 @@ fn empty_light_player(uid: &str) -> FakeEsp32Device {
             // The loaded-project fact rides heartbeats; the fake's host
             // server never heartbeats on its own, so a script that wants a
             // truthful empty/running face has to opt in.
+            .with_heartbeat_interval(Duration::from_millis(20)),
+    )))
+}
+
+/// The six bytes every bench sim mints its identity from. Fixed on purpose:
+/// the fake has to wear the identity the mint produces, or the hello would
+/// describe a different board.
+const SIM_RANDOM: [u8; 6] = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66];
+
+/// The uid and base MAC [`SIM_RANDOM`] mints, as strings.
+fn sim_identity() -> (String, String) {
+    let (mac, uid) = crate::mint_sim_identity(&SIM_RANDOM);
+    (uid.0, mac.0)
+}
+
+/// A fake standing in for a sim's runtime: a LightPlayer wearing the
+/// identity Studio minted for it, exactly as `fw-browser` will once it boots
+/// with the identity option (P1).
+fn sim_light_player() -> FakeEsp32Device {
+    let (uid, base_mac) = sim_identity();
+    FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_identity(FakeDeviceIdentity::new(&uid, "Sim"))
+            .with_base_mac(&base_mac)
             .with_heartbeat_interval(Duration::from_millis(20)),
     )))
 }
@@ -1909,6 +2738,221 @@ fn the_empty_face_pushes_an_example_and_the_card_ends_up_running() {
         "the banked version is the verified content hash"
     );
 }
+// ---------------------------------------------------------------------
+// P4: `?on=mac:` and the mismatch page (D50)
+// ---------------------------------------------------------------------
+
+/// **Never a silent push**, and what gets past it.
+///
+/// One board, two projects, one story: the board is running project A; an
+/// address names it and asks for project B. The open STOPS — both projects
+/// named, nothing sent. Then the same op carries the person's answer, and
+/// the same open runs: B lands on the board.
+///
+/// The two halves are deliberately the same op with one flag changed. That
+/// is the claim the page rests on: it does not add a second push path, it
+/// withholds the ordinary one until somebody says yes.
+#[test]
+fn a_board_running_another_project_stops_the_open_until_push_here_answers_it() {
+    let device = empty_light_player("dev000000daqf6dvvqz");
+    let (mut bench, tasks) = identified(&device, "usb-mismatch");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+
+    // Project A, pushed the ordinary way: the board runs it and the
+    // registry row records what it was given.
+    let card = bench.view().devices[0].clone();
+    bench.push_gesture(card.id, bundled_example());
+    bench.run_until(&tasks, "the push to be banked", |bench| {
+        bench
+            .registry()
+            .first()
+            .is_some_and(|row| row.association.is_some())
+    });
+    // The board's OWN report is half the mismatch rule — the association
+    // says WHICH project, the heartbeat says one is running at all.
+    bench.run_until(&tasks, "the board to report it running", |bench| {
+        bench.view().devices.first().is_some_and(|card| {
+            matches!(
+                &card.loaded_project,
+                lpa_devices::view::LoadedProject::Running { .. }
+            )
+        })
+    });
+    let running = bench.registry()[0]
+        .association
+        .as_ref()
+        .expect("a banked push")
+        .project
+        .to_string();
+    // Project B, in the library, is what the address asks to open.
+    let other = bench
+        .store
+        .create("other-project", 0.0)
+        .expect("the library takes a second project")
+        .uid
+        .to_string();
+    // The gallery inputs are what the mismatch names both projects from.
+    drive(bench.controller.settle_library());
+
+    // --- the stop -----------------------------------------------------
+    let _ = bench.open_on_device(&other, BENCH_BOARD_MAC, false);
+
+    let mismatch = bench.mismatch().unwrap_or_else(|| {
+        panic!(
+            "the open stopped at the page; registry now: {:?}",
+            bench.registry()
+        )
+    });
+    assert_eq!(mismatch.project_uid, other, "{mismatch:?}");
+    assert_eq!(
+        mismatch.running.as_ref().map(|running| running.uid.clone()),
+        Some(running.clone()),
+        "the page names what is actually on the board: {mismatch:?}"
+    );
+    assert_eq!(mismatch.device_base_mac, BENCH_BOARD_MAC);
+    assert!(
+        mismatch.can_act(),
+        "both projects are in the library, so both verbs stand: {mismatch:?}"
+    );
+    assert_eq!(
+        bench.controller.view().open_project_uid,
+        None,
+        "nothing was opened, so nothing was pushed"
+    );
+    assert_eq!(
+        bench.registry()[0]
+            .association
+            .as_ref()
+            .expect("the first push is still banked")
+            .project
+            .to_string(),
+        running,
+        "the board still has what it had"
+    );
+
+    // --- the answer ---------------------------------------------------
+    bench
+        .open_on_device(&other, BENCH_BOARD_MAC, true)
+        .expect("the answered open runs");
+    assert!(
+        bench.mismatch().is_none(),
+        "an answered page does not ask again"
+    );
+    // The lens is HELD until the board answers the editor's own hello, so
+    // the open finishes on a later tick — the hold every device open rides.
+    bench.run_until(&tasks, "the lens to land on the board", |bench| {
+        bench.controller.view().open_project_uid.is_some()
+    });
+    let view = bench.controller.view();
+    assert_eq!(
+        view.open_project_uid.as_deref(),
+        Some(other.as_str()),
+        "the board is running what was pushed here, not {running}"
+    );
+    assert!(
+        matches!(
+            view.lens,
+            Some(crate::UiLensRuntime::Device {
+                transport: crate::LinkTransport::Serial,
+                ..
+            })
+        ),
+        "the lens landed on the named BOARD: {:?}",
+        view.lens
+    );
+}
+
+/// A MAC nothing answers to is not a failure and not a guess: the hint is
+/// dropped and the open takes its ordinary course (PD14). Nothing stops,
+/// because there is nothing to decide.
+#[test]
+fn an_unknown_mac_raises_no_page() {
+    let device = empty_light_player("dev000000daqf6dvvr8");
+    let (mut bench, tasks) = identified(&device, "usb-mismatch-absent");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let project = bench
+        .store
+        .create("a-project", 0.0)
+        .expect("the library takes a project")
+        .uid
+        .to_string();
+    drive(bench.controller.settle_library());
+
+    let _ = bench.open_on_device(&project, "02:ff:ff:ff:ff:fe", false);
+
+    assert!(
+        bench.mismatch().is_none(),
+        "an absent device raises no page"
+    );
+}
+
+/// The base MAC [`empty_light_player`] reports.
+const BENCH_BOARD_MAC: &str = "60:55:f9:0a:0b:0c";
+
+/// The New tab's naming: a starter pushed with a project name lands in the
+/// library under that name (not the board's), and the "name the board the
+/// same" offer, ticked, renames the board in the same gesture — folded as
+/// the user's own `SetName` before the push, so the card wears it whether or
+/// not the wire accepts the project.
+#[test]
+fn a_named_starter_push_names_the_library_package_and_the_board() {
+    let device = empty_light_player("dev000000daqf6dvvr9");
+    let (mut bench, tasks) = identified(&device, "usb-push-named");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let device_id = bench.view().devices[0].id;
+    assert_ne!(bench.view().devices[0].title, "Porch sign");
+
+    let action = crate::DevicePushOp {
+        device: device_id,
+        source: crate::PushSource::NewForBoard {
+            board_id: "seeed/xiao-esp32-c6".to_string(),
+            name: Some("Porch sign".to_string()),
+        },
+        device_name: Some("Porch sign".to_string()),
+    }
+    .into_action();
+    drive(bench.controller.dispatch(action)).expect("a push gesture never fails loudly");
+    bench.run_until(&tasks, "the push to settle", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+
+    let card = &bench.view().devices[0];
+    assert_eq!(
+        card.title, "Porch sign",
+        "the board took the project's name"
+    );
+    let library = bench.library();
+    assert_eq!(library.len(), 1, "{library:?}");
+    assert_eq!(
+        library[0].name, "Porch sign",
+        "the starter is named, not the board"
+    );
+    let rows = bench.registry();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].name, "Porch sign");
+}
 
 /// A push the board refuses lands on the problem face: the outcome line says
 /// what happened, the picker is still there (retry in place), and every
@@ -1973,6 +3017,7 @@ fn a_project_that_cannot_be_prepared_fails_on_the_card_not_in_a_log() {
         device_id,
         crate::PushSource::NewForBoard {
             board_id: "no-such-board".to_string(),
+            name: None,
         },
     );
     bench.run_until(&tasks, "the refusal to settle", |bench| {
@@ -2253,6 +3298,111 @@ fn a_refused_removal_leaves_the_running_face_and_says_why() {
     assert!(!card.escapes.is_empty(), "always a way out");
 }
 
+/// A removal whose conversation never ends. The cancel is HELD rather than
+/// honoured mid-delete (the board's project dir is already part-gone;
+/// stopping there would leave it loading half a project), so the push grace
+/// is what bounds the hold and eviction is the backstop — the same physics
+/// the push has, from the other direction.
+///
+/// What the card must come back saying: not a success, always escapable, and
+/// — the part only this scenario reaches — NOT empty. The removal was never
+/// confirmed by the board, and the empty face is drawn from the board's own
+/// report or not at all.
+#[test]
+fn cancelling_mid_removal_is_held_then_bounded_by_eviction() {
+    let device = empty_light_player("dev000000daqf6dvvr6");
+    let (mut bench, tasks) = identified(&device, "usb-remove-3");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let device_id = bench.view().devices[0].id;
+    bench.push_gesture(device_id, bundled_example());
+    bench.run_until(&tasks, "the board to be running it", |bench| {
+        bench.view().devices.first().is_some_and(|card| {
+            card.activity.is_none()
+                && matches!(
+                    card.loaded_project,
+                    lpa_devices::view::LoadedProject::Running { .. }
+                )
+        })
+    });
+
+    // The delete takes the wire and never gives it back.
+    bench.remove_plan.set(RemovePlan::Hang);
+    bench.gesture(DeviceAction::RemoveProject { device: device_id });
+    bench.run_until(&tasks, "the removal to be visibly running", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_some())
+    });
+
+    bench.gesture(DeviceAction::CancelActivity { device: device_id });
+    let asked_at = bench.controller.device_now_for_test().0;
+    assert!(
+        bench.view().devices[0]
+            .activity
+            .as_ref()
+            .is_some_and(|activity| activity.cancel_requested),
+        "the card says it is cancelling rather than stopping mid-delete"
+    );
+
+    // The cancel does not end the activity by itself: the hung effect still
+    // owns the wire, so the hold outlives the request. 40 turns is 200 ms of
+    // the 500 ms grace — the card is still mid-removal here, and what ends
+    // it below is the grace expiring, not the asking.
+    for _ in 0..40 {
+        bench.step(&tasks);
+    }
+    assert!(
+        bench.view().devices[0].activity.is_some(),
+        "still mid-removal 200 ms in: the asking alone does not end it: {:?}",
+        bench.view().devices[0]
+    );
+
+    bench.run_until(&tasks, "the cancel grace to bound the hold", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none())
+    });
+
+    // It is the push GRACE that bounded the hold — the removal shares the
+    // push's physics — and not the far-off supervision deadline that would
+    // leave the card mid-removal for another twenty seconds. Pinning the
+    // window is what tells those two apart.
+    let held_ms = bench.controller.device_now_for_test().0 - asked_at;
+    assert!(
+        held_ms < 2_000,
+        "the hold ended on the 500 ms push grace, not the 20 s deadline; held {held_ms} ms"
+    );
+
+    let card = bench.view().devices[0].clone();
+    assert!(
+        card.last_outcome
+            .as_ref()
+            .is_some_and(|outcome| !outcome.ok),
+        "an interrupted removal is not a success: {card:?}"
+    );
+    assert!(!card.escapes.is_empty(), "always a way out");
+    assert_ne!(
+        card.loaded_project,
+        lpa_devices::view::LoadedProject::Empty,
+        "no board ever reported empty, so the card must not claim it: {card:?}"
+    );
+    assert_eq!(
+        bench.library().len(),
+        1,
+        "the library copy is untouched by a removal that never landed"
+    );
+}
+
 /// C2 (G1 bench, 2026-08-31): an effect that outlives its activity must give
 /// the wire back. The bench proves the consequence rather than the flag —
 /// after the eviction, the board is HEARD FROM again, which can only happen
@@ -2461,5 +3611,991 @@ fn an_unrelated_disconnect_leaves_a_still_granted_port_alone() {
         bench.view().devices[0].state_label,
         "Attached — not listening",
         "a port the browser still grants us has not departed"
+    );
+}
+
+// ---------------------------------------------------------------------
+// P2: the sim as a roster device (the model half)
+// ---------------------------------------------------------------------
+
+/// The target every bench sim runs. A board id, so the row's `board_id`
+/// carries something the catalog can name.
+const SIM_TARGET: &str = "seeed/xiao-esp32-c6";
+
+/// Drive a created sim to its settled card: Power on, then wait out the
+/// identify the way `identified` does for a board.
+fn powered_on_sim() -> (DeviceBench, TaskPool, String, FakeEsp32Device) {
+    let device = sim_light_player();
+    let (mut bench, tasks, uid) = DeviceBench::with_sim(&device, SIM_TARGET);
+    let target = bench.view().devices[0].id;
+
+    bench.gesture(DeviceAction::Connect { device: target });
+    bench.run_until(&tasks, "the sim to identify", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+    });
+    (bench, tasks, uid, device)
+}
+
+/// AC7, the picker's half (D44): picking a board in the add slot's dropdown
+/// mints a sim of THAT target, names it after the board, and powers it on —
+/// one gesture, ending in a card in the grid rather than a record on the
+/// remembered line. The device is an ordinary registry row; the picker
+/// invented no runtime beside the roster.
+#[test]
+fn the_picker_mints_a_sim_of_the_picked_target_and_powers_it_on() {
+    let device = sim_light_player();
+    let (mut bench, tasks) = DeviceBench::build(&device, "unused-serial-port", false, false);
+    let sims = Rc::new(SimDeviceTransport::new(Rc::new(ScriptedSimSource {
+        device: device.clone(),
+        restarts: Rc::new(Cell::new(0)),
+        manifests: Rc::new(RefCell::new(Vec::new())),
+    })));
+    bench.sims = Some(Rc::clone(&sims));
+    bench.controller.set_device_sim_transport(sims);
+    bench.controller.set_random(|| {
+        let mut bytes = [0u8; 16];
+        bytes[..6].copy_from_slice(&SIM_RANDOM);
+        bytes
+    });
+
+    assert!(bench.registry().is_empty(), "nothing before the pick");
+
+    drive(
+        bench
+            .controller
+            .dispatch(crate::SimCreateOp::action_for(SIM_TARGET)),
+    )
+    .expect("the pick starts a device");
+
+    let rows = bench.registry();
+    assert_eq!(rows.len(), 1, "the pick created ONE device: {rows:?}");
+    assert_eq!(rows[0].transport, "sim");
+    assert_eq!(rows[0].board_id.as_deref(), Some(SIM_TARGET));
+    assert_eq!(
+        rows[0].name, "XIAO ESP32-C6 (sim)",
+        "named after the board it acts as, renameable from the card"
+    );
+    assert!(
+        bench.sim_sidecar(&rows[0].uid).is_some(),
+        "the record is complete: row AND sidecar"
+    );
+
+    // Powered on, not merely remembered: the sim's own runtime is running
+    // and the card settles on Ready like a board that just said hello.
+    assert!(
+        bench
+            .sims
+            .as_ref()
+            .expect("the sim transport")
+            .is_powered(&rows[0].uid),
+        "the picked target is started, not filed away"
+    );
+    bench.run_until(&tasks, "the picked sim to identify", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+    });
+    let home = bench.controller.view().home.expect("the home view");
+    let split = crate::split_roster(&home.devices);
+    assert_eq!(split.connected.len(), 1, "{split:?}");
+    assert!(
+        split.remembered.is_empty(),
+        "a picked device belongs in the grid: {split:?}"
+    );
+}
+
+/// A target with no checked-in runtime manifest is refused with its reason
+/// rather than started as something else (Q10). The picker never offers
+/// one, so this is the guard behind the offer, not a path a user walks.
+#[test]
+fn a_target_with_no_hardware_manifest_is_refused_rather_than_swapped() {
+    let device = sim_light_player();
+    let (mut bench, _tasks) = DeviceBench::build(&device, "unused-serial-port", false, false);
+
+    let error = drive(
+        bench
+            .controller
+            .dispatch(crate::SimCreateOp::action_for("quinled/dig-uno")),
+    )
+    .expect_err("a target nothing can wear is refused");
+
+    assert!(
+        format!("{error}").contains("quinled/dig-uno"),
+        "the refusal names the target: {error}"
+    );
+    assert!(bench.registry().is_empty(), "and nothing was written");
+}
+
+/// AC3, the creation half: a minted sim is an ORDINARY remembered device.
+/// It loads detached from the registry like any board, keyed on the uid
+/// derived from its minted MAC, and the only thing marking it is the
+/// transport column plus a sidecar beside the row.
+#[test]
+fn a_created_sim_loads_as_a_detached_device_that_says_sim_in_one_column() {
+    let device = sim_light_player();
+    let (bench, _tasks, uid) = DeviceBench::with_sim(&device, SIM_TARGET);
+    let (minted_uid, minted_mac) = sim_identity();
+
+    assert_eq!(uid, minted_uid, "the uid is derived, never invented");
+
+    let rows = bench.registry();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].uid, uid);
+    assert_eq!(rows[0].transport, "sim");
+    assert_eq!(rows[0].board_id.as_deref(), Some(SIM_TARGET));
+    assert_eq!(
+        rows[0].hardware_id.as_deref(),
+        Some(format!("efuse:{minted_mac}").as_str()),
+        "the efuse form, so every identity join stays exactly as it is"
+    );
+
+    let sidecar = bench.sim_sidecar(&uid).expect("the sidecar was written");
+    let sidecar = crate::app::devices::sim_record::decode(&sidecar).expect("it decodes");
+    assert_eq!(sidecar.target, SIM_TARGET);
+    assert_eq!(sidecar.base_mac, minted_mac);
+
+    // The roster rehydrated it like any remembered board: one card, no
+    // port, and the target it will run already on it.
+    let view = bench.view();
+    assert_eq!(view.devices.len(), 1, "{view:?}");
+    assert!(view.pending.is_empty());
+    assert_eq!(view.devices[0].board_id.as_deref(), Some(SIM_TARGET));
+    assert!(
+        !bench
+            .sims
+            .as_ref()
+            .expect("a sim transport")
+            .is_powered(&uid),
+        "creating a sim does not start one"
+    );
+}
+
+/// AC3, the power half (PD8, Q15): `Connect` starts the runtime, the sweep
+/// attaches its link, and the hello's uid makes the fold adopt it into the
+/// record that was already there — ONE card, not a second one beside it.
+#[test]
+fn powering_a_sim_on_attaches_it_and_the_hello_adopts_the_record() {
+    let (bench, _tasks, uid, _device) = powered_on_sim();
+
+    let view = bench.view();
+    assert_eq!(view.devices.len(), 1, "adopted, not duplicated: {view:?}");
+    assert!(view.pending.is_empty(), "{view:?}");
+    let card = &view.devices[0];
+    assert_eq!(card.state_label, "Ready");
+    assert_eq!(
+        card.board_id.as_deref(),
+        Some(SIM_TARGET),
+        "the card wears the target it was created for"
+    );
+
+    let record = bench.controller.devices_for_test().roster().devices()[0].clone();
+    assert_eq!(
+        record.identity.uid.as_ref().map(|uid| uid.0.as_str()),
+        Some(uid.as_str()),
+        "the hello's uid is the derived one"
+    );
+    assert_eq!(
+        record.identity.endpoint.as_ref().map(|key| key.0.as_str()),
+        Some(format!("sim:{uid}").as_str())
+    );
+
+    let rows = bench.registry();
+    assert_eq!(rows.len(), 1, "still one row: {rows:?}");
+    assert_eq!(rows[0].uid, uid);
+    assert_eq!(rows[0].transport, "sim", "and it still says sim");
+    assert!(
+        bench
+            .sims
+            .as_ref()
+            .expect("a sim transport")
+            .is_powered(&uid)
+    );
+}
+
+/// Power off keeps the device. The runtime stops and the card leaves the
+/// grid — a stopped sim is not "attached but closed", because there is
+/// nothing left to be attached to — but the row and the sidecar survive, so
+/// it can be powered on again (Q5: the remembered line).
+#[test]
+fn powering_a_sim_off_keeps_the_record_and_its_sidecar() {
+    let (mut bench, tasks, uid, _device) = powered_on_sim();
+    let target = bench.view().devices[0].id;
+
+    bench.gesture(DeviceAction::Disconnect { device: target });
+    for _ in 0..40 {
+        bench.step(&tasks);
+    }
+
+    assert!(
+        !bench
+            .sims
+            .as_ref()
+            .expect("a sim transport")
+            .is_powered(&uid),
+        "the runtime stopped"
+    );
+    let rows = bench.registry();
+    assert_eq!(rows.len(), 1, "the device is remembered: {rows:?}");
+    assert_eq!(rows[0].uid, uid);
+    assert_eq!(
+        rows[0].transport, "sim",
+        "a powered-off sim must not be relabelled a serial board"
+    );
+    assert!(
+        bench.sim_sidecar(&uid).is_some(),
+        "and it is still a sim when it comes back"
+    );
+}
+
+/// Forget takes BOTH: the registry row and the sidecar. A sim whose sidecar
+/// outlived its row would come back as a device the moment its uid was
+/// re-derived.
+#[test]
+fn forgetting_a_sim_takes_its_record_and_its_sidecar() {
+    let (mut bench, tasks, uid, _device) = powered_on_sim();
+    let target = bench.view().devices[0].id;
+    assert!(bench.sim_sidecar(&uid).is_some());
+
+    bench.gesture(DeviceAction::Forget { device: target });
+    for _ in 0..40 {
+        bench.step(&tasks);
+    }
+
+    assert!(bench.view().devices.is_empty(), "the card is gone");
+    assert!(bench.registry().is_empty(), "and so is the row");
+    assert_eq!(bench.sim_sidecar(&uid), None, "and so is the sidecar");
+    assert!(
+        !bench
+            .sims
+            .as_ref()
+            .expect("a sim transport")
+            .is_powered(&uid),
+        "and the runtime stopped"
+    );
+}
+
+/// A flash on a sim runs the whole ladder and ends honestly: nothing was
+/// written, the effect says so in the terminal in its own words, and NO
+/// fact the effect did not learn reaches the record. A scripted flash that
+/// reported a probed MAC — the way the serial bench's does — would break
+/// the fold's "facts are stated when reported" rule from underneath, and
+/// would bind this device to an identity nothing ever read.
+#[test]
+fn flashing_a_sim_ends_with_the_scripted_summary_and_no_fake_facts() {
+    let (mut bench, tasks, _uid, _device) = powered_on_sim();
+    let target = bench.view().devices[0].id;
+    let (_, minted_mac) = sim_identity();
+    let choice = c6_board_choice();
+
+    bench.gesture(DeviceAction::Flash {
+        device: target,
+        board_id: choice.board_id.clone(),
+        build_id: choice.build_id.clone(),
+        park_first: false,
+        name: None,
+    });
+    bench.run_until(&tasks, "the sim flash to end", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+
+    let card = bench.view().devices[0].clone();
+    assert!(
+        card.last_outcome.as_ref().is_some_and(|outcome| outcome.ok),
+        "{card:?}"
+    );
+    assert!(
+        card.terminal
+            .iter()
+            .any(|line| line.text == "a sim runs the build it was started with"),
+        "the effect's own words reach the card: {card:?}"
+    );
+    // Twice, and honestly so: the flash ladder's two writing rungs are the
+    // firmware write and the board-manifest write, and on a sim each of
+    // them IS a restart — there is nothing else for either to do.
+    assert_eq!(
+        bench.sim_restarts.get(),
+        2,
+        "the runtime restarted, so the card sees a fresh boot"
+    );
+
+    // The evidence half: the ladder learned nothing a sim cannot report.
+    // The serial bench's scripted flash answers with SCRIPTED_PREFLIGHT_MAC
+    // here; a sim's answers with nothing, so the record still carries the
+    // MAC Studio minted for it.
+    let record = bench.controller.devices_for_test().roster().devices()[0].clone();
+    assert_eq!(
+        record.identity.mac.as_ref().map(|mac| mac.0.as_str()),
+        Some(minted_mac.as_str()),
+        "no preflight read an efuse, so no second identity was learned"
+    );
+    assert!(
+        !card
+            .terminal
+            .iter()
+            .any(|line| line.text.contains(SCRIPTED_PREFLIGHT_MAC)),
+        "{card:?}"
+    );
+}
+
+/// The card's live picture works on a sim: the same shared-link app
+/// conversation, the same `Passthrough` classification, the same feed. The
+/// point is that nothing in the feed lane knows what a sim is.
+#[test]
+fn a_running_sim_feeds_its_card_over_the_shared_link() {
+    let (mut bench, tasks, _uid, _device) = powered_on_sim();
+    bench.run_until(&tasks, "the sim to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let device = bench.view().devices[0].id;
+
+    bench.push_gesture(device, bundled_example());
+    bench.run_until(&tasks, "the push to finish", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+    assert!(
+        bench.view().devices[0]
+            .last_outcome
+            .as_ref()
+            .is_some_and(|outcome| outcome.ok),
+        "the REAL push conversation ran over the sim's channel: {:?}",
+        bench.view().devices[0]
+    );
+    bench.run_until(&tasks, "the running face", |bench| {
+        matches!(
+            bench.view().devices[0].loaded_project,
+            lpa_devices::view::LoadedProject::Running { .. }
+        )
+    });
+    bench.controller.set_device_feed_wanted(device, true);
+
+    let mut pulls = 0;
+    while feed_frame_revision(&bench, device).is_none() {
+        feed_tick(&mut bench, &tasks, 5.0);
+        pulls += 1;
+        assert!(pulls <= 2, "no frame after two pulls");
+        for _ in 0..40 {
+            bench.step(&tasks);
+        }
+    }
+    let frame = bench
+        .controller
+        .device_feeds()
+        .get(device)
+        .and_then(|feed| feed.frame())
+        .expect("a frame")
+        .clone();
+    assert!(
+        frame.display_layout.is_some(),
+        "the sim's own display layout came with the picture"
+    );
+    assert!(frame.extent.rows >= 1 && !frame.bytes.is_empty());
+
+    // And the fold never heard the conversation: frames are not evidence,
+    // whatever the transport underneath.
+    let journal: Vec<String> = bench
+        .controller
+        .devices_for_test()
+        .roster()
+        .journal()
+        .entries()
+        .map(|entry| format!("{entry:?}"))
+        .collect();
+    assert!(
+        !journal.iter().any(|line| line.contains("Passthrough")),
+        "{journal:#?}"
+    );
+}
+
+// ---------------------------------------------------------------------
+// P3: opening a project starts a device (D33, D37, PD9)
+// ---------------------------------------------------------------------
+
+/// Install a library package targeting `target` and return its uid.
+///
+/// A real bundled example's files with the target stamped into its
+/// manifest: the open PUSHES this package into the runtime, and a runtime
+/// refuses a project that is only a manifest.
+fn library_package(bench: &DeviceBench, name: &str, target: &str) -> String {
+    let example = crate::app::home::embedded_example(
+        crate::first_bundled_example_id().expect("this build bundles examples"),
+    )
+    .expect("the bundled example");
+    let files: Vec<(String, Vec<u8>)> = example
+        .files()
+        .into_iter()
+        .map(|(path, bytes)| match path.as_str() {
+            "project.json" => {
+                let mut manifest: serde_json::Value =
+                    serde_json::from_slice(&bytes).expect("the example's manifest parses");
+                manifest["target"] = serde_json::Value::String(target.to_string());
+                (path, serde_json::to_vec(&manifest).expect("re-encode"))
+            }
+            _ => (path, bytes),
+        })
+        .collect();
+    bench
+        .store
+        .install_package(
+            name,
+            &files,
+            crate::app::library::PackageProvenance::Created,
+            1.0,
+        )
+        .expect("install")
+        .uid
+        .to_string()
+}
+
+/// Dispatch the gallery's own open and let the tick land whatever it held.
+fn open_package(bench: &mut DeviceBench, tasks: &TaskPool, uid: &str) {
+    bench.controller.request_library_refresh();
+    drive(bench.controller.settle_library());
+    open_package_cold(bench, tasks, uid);
+}
+
+/// The same open, on a controller that has NEVER settled its library — a
+/// cold page whose first gesture is the open. What the resolution knows
+/// about remembered sims at that moment is exactly nothing, which is the
+/// state the duplicate-mint row below is about.
+fn open_package_cold(bench: &mut DeviceBench, tasks: &TaskPool, uid: &str) {
+    drive(bench.controller.dispatch(UiAction::from_op(
+        crate::ControllerId::new(crate::HOME_NODE_ID),
+        crate::HomeOp::OpenPackage {
+            key: uid.to_string(),
+        },
+    )))
+    .expect("the gallery's open never fails loudly");
+    // The lens is HELD until the device says hello (the fold that produces
+    // it runs on the actor's queue, which is what the bench's step IS), so
+    // the tick's own attach has to run here the way the actor runs it.
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    while bench
+        .controller
+        .runtime_pool_for_test()
+        .lens_session()
+        .is_none()
+    {
+        bench.step(tasks);
+        drive(bench.controller.try_pending_device_lens());
+        assert!(
+            bench.controller.pending_device_lens_for_test().is_some()
+                || bench
+                    .controller
+                    .runtime_pool_for_test()
+                    .lens_session()
+                    .is_some(),
+            "the held lens was dropped without landing: {:?}",
+            bench
+                .controller
+                .view()
+                .console
+                .entries
+                .iter()
+                .rev()
+                .take(10)
+                .map(|entry| entry.message.clone())
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for the open to land its lens; roster now: {:?}",
+            bench.view()
+        );
+        // Paced like `run_until`, and for the same reason: a step is 5 fake
+        // ms, and the sim this open just powered on boots a real host
+        // runtime on a real thread. Spinning steps as fast as the CPU allows
+        // would spend the fold's 5 s identify budget (~1000 steps) in a few
+        // real milliseconds and give that thread no chance to say hello —
+        // the open would then read a booting sim as one that never started
+        // and drop the hold, which is precisely what a loaded CI box saw.
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+/// D33 + PD9: opening a library project with no sim MAKES one of the
+/// project's target, powers it on and lands the lens on it. The device is
+/// an ordinary registry row — the open did not invent a runtime beside
+/// the roster, it created a device.
+#[test]
+fn opening_a_project_with_no_sim_creates_one_and_lands_the_lens_on_it() {
+    let device = sim_light_player();
+    let (mut bench, tasks) = DeviceBench::build(&device, "unused-serial-port", false, false);
+    let sims = Rc::new(SimDeviceTransport::new(Rc::new(ScriptedSimSource {
+        device: device.clone(),
+        restarts: Rc::new(Cell::new(0)),
+        manifests: Rc::new(RefCell::new(Vec::new())),
+    })));
+    bench.sims = Some(Rc::clone(&sims));
+    bench.controller.set_device_sim_transport(sims);
+    bench.controller.set_random(|| {
+        let mut bytes = [0u8; 16];
+        bytes[..6].copy_from_slice(&SIM_RANDOM);
+        bytes
+    });
+
+    let uid = library_package(&bench, "Porch sign", SIM_TARGET);
+    assert!(bench.registry().is_empty(), "nothing before the open");
+
+    open_package(&mut bench, &tasks, &uid);
+
+    let rows = bench.registry();
+    assert_eq!(rows.len(), 1, "the open created ONE device: {rows:?}");
+    assert_eq!(rows[0].transport, "sim");
+    assert_eq!(
+        rows[0].board_id.as_deref(),
+        Some(SIM_TARGET),
+        "born wearing the project's target"
+    );
+    let session = bench
+        .controller
+        .runtime_pool_for_test()
+        .lens_session()
+        .expect("the lens landed");
+    assert_eq!(session.transport(), crate::LinkTransport::Sim);
+    assert_eq!(session.attachment().uid, rows[0].uid);
+}
+
+/// The six bytes a SECOND mint would use. Different from [`SIM_RANDOM`] on
+/// purpose: a duplicate mint from the same bytes derives the same uid and
+/// overwrites the one row, which would hide the very thing the reload row
+/// below is looking for.
+const SIM_RANDOM_SECOND: [u8; 6] = [0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc];
+
+/// Install a sim transport and fixed randomness on a bench that has none.
+fn install_sims(bench: &mut DeviceBench, device: &FakeEsp32Device, random: [u8; 6]) {
+    let sims = Rc::new(SimDeviceTransport::new(Rc::new(ScriptedSimSource {
+        device: device.clone(),
+        restarts: Rc::new(Cell::new(0)),
+        manifests: Rc::new(RefCell::new(Vec::new())),
+    })));
+    bench.sims = Some(Rc::clone(&sims));
+    bench.controller.set_device_sim_transport(sims);
+    bench.controller.set_random(move || {
+        let mut bytes = [0u8; 16];
+        bytes[..6].copy_from_slice(&random);
+        bytes
+    });
+}
+
+/// A bench holding one library package of [`SIM_TARGET`], with sims
+/// installed and nothing opened yet. Returns the package key.
+fn sim_open_bench() -> (DeviceBench, TaskPool, FakeEsp32Device, String) {
+    let device = sim_light_player();
+    let (mut bench, tasks) = DeviceBench::build(&device, "unused-serial-port", false, false);
+    install_sims(&mut bench, &device, SIM_RANDOM);
+    let key = library_package(&bench, "Porch sign", SIM_TARGET);
+    (bench, tasks, device, key)
+}
+
+/// A RELOAD opens on the sim the library remembers instead of minting a
+/// second one (2026-09-08 outage, half one).
+///
+/// The resolution reads the remembered sims out of a map the first library
+/// settle fills. A cold page's first gesture can BE the open, and reading
+/// "no sim of this target" off a map that is merely empty-so-far minted a
+/// fresh record every time the page was reloaded — a devices page filling
+/// up with scratch boards, each one a worker the tab would start.
+#[test]
+fn a_cold_reload_opens_on_the_remembered_sim_instead_of_minting_a_second() {
+    let (mut bench, tasks, device, key) = sim_open_bench();
+    open_package(&mut bench, &tasks, &key);
+    let first = bench.registry();
+    assert_eq!(first.len(), 1, "the first open made one sim: {first:?}");
+
+    // The page comes back: same store, fresh controller, every worker gone
+    // — and a mint here would use different bytes, so a second record
+    // would be visibly a second row rather than the same one rewritten.
+    let (mut reloaded, tasks) = DeviceBench::reloaded(&bench, &device, "unused-serial-port");
+    install_sims(&mut reloaded, &device, SIM_RANDOM_SECOND);
+    open_package_cold(&mut reloaded, &tasks, &key);
+
+    let rows = reloaded.registry();
+    assert_eq!(
+        rows.len(),
+        1,
+        "the reload reused the remembered sim: {rows:?}"
+    );
+    assert_eq!(rows[0].uid, first[0].uid);
+    let session = reloaded
+        .controller
+        .runtime_pool_for_test()
+        .lens_session()
+        .expect("the reload landed its lens");
+    assert_eq!(session.attachment().uid, first[0].uid);
+}
+
+/// Power the sim off from its card, then open the project again: it starts
+/// back up and the editor lands (2026-09-08 outage, half two).
+///
+/// A sim only ever runs because this tab started it, so a hold on a sim
+/// that is OFF is a hold on something that will never happen. The open's
+/// own power-on covers the ordinary path; the tick's wake-up is what makes
+/// it true whatever skipped it.
+#[test]
+fn powering_the_sim_off_and_reopening_the_project_starts_it_again() {
+    let (mut bench, tasks, _device, key) = sim_open_bench();
+    open_package(&mut bench, &tasks, &key);
+    let uid = bench.registry()[0].uid.clone();
+    let card = bench.view().devices[0].id;
+
+    bench.gesture(DeviceAction::Disconnect { device: card });
+    assert!(
+        !bench
+            .sims
+            .as_ref()
+            .expect("a sim transport")
+            .is_powered(&uid),
+        "Power off stopped the runtime"
+    );
+    bench.step(&tasks);
+
+    open_package(&mut bench, &tasks, &key);
+
+    assert!(
+        bench
+            .sims
+            .as_ref()
+            .expect("a sim transport")
+            .is_powered(&uid),
+        "the reopen started it again"
+    );
+    let session = bench
+        .controller
+        .runtime_pool_for_test()
+        .lens_session()
+        .expect("the reopen landed its lens");
+    assert_eq!(session.attachment().uid, uid);
+    assert_eq!(
+        bench.registry().len(),
+        1,
+        "and reused the record rather than minting one"
+    );
+}
+
+/// The wake-up itself: a held `/device/<uid>` intent on a sim that is OFF
+/// powers it on rather than waiting for a runtime nobody will start.
+///
+/// This is the address path — a reload landing on a lens route — where
+/// nothing upstream issues a power-on at all. Before the fix the console
+/// said "waiting for the device before opening it: missing session: this
+/// board is not connected" and then nothing, forever.
+#[test]
+fn a_held_lens_on_a_sim_that_is_off_powers_it_on_and_lands() {
+    let device = sim_light_player();
+    let (mut bench, tasks, uid) = DeviceBench::with_sim(&device, SIM_TARGET);
+
+    drive(bench.controller.dispatch(UiAction::from_op(
+        crate::RuntimeOp::NODE_ID,
+        crate::RuntimeOp::OpenDeviceLens { uid: uid.clone() },
+    )))
+    .expect("the address is an intent to hold, never a refusal");
+    assert_eq!(
+        bench.controller.pending_device_lens_for_test().as_deref(),
+        Some(uid.as_str()),
+        "the lens is held on a sim that is not running"
+    );
+    assert!(
+        !bench
+            .sims
+            .as_ref()
+            .expect("a sim transport")
+            .is_powered(&uid),
+        "nothing has started it yet"
+    );
+
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    while bench
+        .controller
+        .runtime_pool_for_test()
+        .lens_session()
+        .is_none()
+    {
+        bench.step(&tasks);
+        drive(bench.controller.try_pending_device_lens());
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the held lens never woke its sim; roster now: {:?}",
+            bench.view()
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(
+        bench
+            .sims
+            .as_ref()
+            .expect("a sim transport")
+            .is_powered(&uid),
+        "the hold powered it on"
+    );
+}
+
+/// A sim whose runtime dies before it ever says hello — the browser worker
+/// that could not fetch its engine (G1, 2026-09-07) — must not hold the
+/// open forever. The fold hears Error + Closed, spends its identify
+/// retries and stops; the tick then ends the open with a verdict naming
+/// the device, powers the sim off so it can be started again, and leaves
+/// the record where it was. Nothing hangs, and nothing is forgotten.
+#[test]
+fn a_sim_that_never_says_hello_fails_the_open_instead_of_holding_it() {
+    let device = sim_light_player();
+    // The wire is dead from the first byte: every open lands, then closes
+    // on its first read — what the link does for a worker that posted
+    // `fatal` on the way up.
+    device.set_failure_plan(
+        lpa_link::providers::fake_device::FakeFailurePlan::none().with_disconnect_after_bytes(0),
+    );
+    let (mut bench, tasks) = DeviceBench::build(&device, "unused-serial-port", false, false);
+    let sims = Rc::new(SimDeviceTransport::new(Rc::new(ScriptedSimSource {
+        device: device.clone(),
+        restarts: Rc::new(Cell::new(0)),
+        manifests: Rc::new(RefCell::new(Vec::new())),
+    })));
+    bench.sims = Some(Rc::clone(&sims));
+    bench.controller.set_device_sim_transport(sims);
+    bench.controller.set_random(|| {
+        let mut bytes = [0u8; 16];
+        bytes[..6].copy_from_slice(&SIM_RANDOM);
+        bytes
+    });
+    let key = library_package(&bench, "Porch sign", SIM_TARGET);
+    bench.controller.request_library_refresh();
+    drive(bench.controller.settle_library());
+
+    let outcome = drive(bench.controller.dispatch(UiAction::from_op(
+        crate::ControllerId::new(crate::HOME_NODE_ID),
+        crate::HomeOp::OpenPackage { key: key.clone() },
+    )));
+    assert!(
+        outcome.is_ok(),
+        "the open is held, never refused: {outcome:?}"
+    );
+    let sim_uid = bench
+        .controller
+        .pending_device_lens_for_test()
+        .expect("the lens is held while the sim boots");
+    assert!(
+        bench
+            .sims
+            .as_ref()
+            .expect("a sim transport")
+            .is_powered(&sim_uid),
+        "the open powered the sim on"
+    );
+
+    // The fold asks, the wire closes, the fold re-asks up to its cap and
+    // stops; the tick then notices and ends the open.
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    while bench.controller.pending_device_lens_for_test().is_some() {
+        bench.step(&tasks);
+        drive(bench.controller.try_pending_device_lens());
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the hold on a sim that never said hello was never released; roster now: {:?}",
+            bench.view()
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+
+    assert!(
+        bench
+            .controller
+            .runtime_pool_for_test()
+            .lens_session()
+            .is_none(),
+        "nothing landed"
+    );
+    let crate::app::open_progress::OpenStage::Failed(failure) =
+        crate::app::open_progress::open_stage()
+    else {
+        panic!(
+            "the opening frame got no verdict: {:?}",
+            crate::app::open_progress::open_stage()
+        );
+    };
+    assert!(
+        failure.message.ends_with("did not start"),
+        "the verdict names the device: {:?}",
+        failure.message
+    );
+    assert_eq!(
+        failure.retry,
+        UiAction::from_op(
+            crate::ControllerId::new(crate::HOME_NODE_ID),
+            crate::HomeOp::OpenPackage { key },
+        ),
+        "Retry is the same open"
+    );
+    assert!(
+        !bench
+            .sims
+            .as_ref()
+            .expect("a sim transport")
+            .is_powered(&sim_uid),
+        "the sim was powered off, so Power on and Retry can start it again"
+    );
+    let rows = bench.registry();
+    assert_eq!(rows.len(), 1, "the record survives: {rows:?}");
+    assert_eq!(rows[0].uid, sim_uid);
+    assert_eq!(rows[0].transport, "sim");
+    // Settle the detach the power-off raised, then read the roster: the
+    // record is back on the remembered line, and no pending card is left
+    // behind for the dead link.
+    bench.step(&tasks);
+    let view = bench.view();
+    assert!(
+        view.pending.is_empty(),
+        "no orphaned pending card: {view:?}"
+    );
+    assert_eq!(view.devices.len(), 1, "{view:?}");
+    assert!(
+        !view.devices[0].state_label.starts_with("Ready"),
+        "the record is not claiming a runtime it does not have: {:?}",
+        view.devices[0].state_label
+    );
+    let last = bench
+        .controller
+        .view()
+        .console
+        .entries
+        .iter()
+        .rev()
+        .find(|entry| entry.message.contains("did not start"))
+        .map(|entry| entry.message.clone());
+    assert!(last.is_some(), "the console says why");
+}
+
+/// D37: the tab runs ONE device. Opening a project for another target
+/// powers the running sim off — silently, and keeping its record, which is
+/// what puts it on the remembered line with Power on (Q5).
+///
+/// The SECOND sim's landing is `opening_a_project_with_no_sim_…`'s claim:
+/// this bench has one fake identity, so two sims cannot both say hello on
+/// it. What this row pins is the eviction.
+#[test]
+fn opening_a_project_for_another_target_powers_the_first_sim_off_and_keeps_it() {
+    let (mut bench, tasks, first_uid, _device) = powered_on_sim();
+    assert!(
+        bench
+            .sims
+            .as_ref()
+            .expect("a sim transport")
+            .is_powered(&first_uid),
+        "the first sim is running before the open"
+    );
+
+    let other = library_package(&bench, "Desk lamp", "lightplayer/desktop");
+    bench.controller.request_library_refresh();
+    drive(bench.controller.settle_library());
+    let _ = drive(bench.controller.dispatch(UiAction::from_op(
+        crate::ControllerId::new(crate::HOME_NODE_ID),
+        crate::HomeOp::OpenPackage { key: other },
+    )));
+    for _ in 0..20 {
+        bench.step(&tasks);
+    }
+
+    assert!(
+        !bench
+            .sims
+            .as_ref()
+            .expect("a sim transport")
+            .is_powered(&first_uid),
+        "the first sim powered off — one device per tab"
+    );
+    assert!(
+        bench.registry().iter().any(|row| row.uid == first_uid),
+        "and its record stayed: power off is not Forget"
+    );
+    assert!(
+        bench
+            .registry()
+            .iter()
+            .any(|row| row.board_id.as_deref() == Some("lightplayer/desktop")),
+        "the open minted a device of the project\'s own target"
+    );
+}
+
+/// D33: an open must never touch silicon. With the editor held on a BOARD,
+/// opening a library project gives that board its wire back and reaches
+/// for a sim instead — and nothing at all is written to the board.
+#[test]
+fn opening_a_project_under_a_board_lens_never_touches_the_board() {
+    // A DIFFERENT identity from the sim's: the board and the sim must not
+    // fold into one record, which is the whole point of the assertion.
+    let board = empty_light_player("dev000000daqf6dvvqz");
+    let (mut bench, tasks) = identified(&board, "usb-1");
+    let sims = Rc::new(SimDeviceTransport::new(Rc::new(ScriptedSimSource {
+        device: sim_light_player(),
+        restarts: Rc::new(Cell::new(0)),
+        manifests: Rc::new(RefCell::new(Vec::new())),
+    })));
+    bench.sims = Some(Rc::clone(&sims));
+    bench.controller.set_device_sim_transport(sims);
+    bench.controller.set_random(|| {
+        let mut bytes = [0u8; 16];
+        bytes[..6].copy_from_slice(&SIM_RANDOM);
+        bytes
+    });
+
+    let board_uid = bench.registry()[0].uid.clone();
+    bench
+        .open_lens(&board_uid)
+        .expect("the board opens in the editor");
+    assert_eq!(bench.lens_device_uid().as_deref(), Some(board_uid.as_str()));
+    let writes_before = bench.manifest_writes.borrow().len();
+    let revoked_before = bench.revoked.borrow().len();
+
+    let uid = library_package(&bench, "Porch sign", SIM_TARGET);
+    bench.controller.request_library_refresh();
+    drive(bench.controller.settle_library());
+    let _ = drive(bench.controller.dispatch(UiAction::from_op(
+        crate::ControllerId::new(crate::HOME_NODE_ID),
+        crate::HomeOp::OpenPackage { key: uid },
+    )));
+    for _ in 0..20 {
+        bench.step(&tasks);
+    }
+
+    assert_ne!(
+        bench.lens_device_uid().as_deref(),
+        Some(board_uid.as_str()),
+        "the editor left the board rather than pushing at it"
+    );
+    assert_eq!(
+        bench.manifest_writes.borrow().len(),
+        writes_before,
+        "nothing was written to the board"
+    );
+    assert_eq!(
+        bench.revoked.borrow().len(),
+        revoked_before,
+        "and its port grant was left alone"
+    );
+    assert!(
+        bench
+            .view()
+            .devices
+            .iter()
+            .any(|card| card.board_id.as_deref() == Some(SIM_TARGET)),
+        "the open reached for a sim of the project\'s target: {:?}",
+        bench.view()
     );
 }

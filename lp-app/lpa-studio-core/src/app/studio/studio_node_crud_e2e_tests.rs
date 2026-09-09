@@ -593,7 +593,7 @@ fn create_records_a_saved_library_event_and_copies_match() {
     let runtime_texture = server
         .borrow()
         .base_fs()
-        .read_file("/projects/studio/texture.json".as_path())
+        .read_file(format!("{PROJECT_DIR}/texture.json").as_path())
         .expect("runtime holds texture.json");
     assert_eq!(
         library_texture, runtime_texture,

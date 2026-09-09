@@ -827,7 +827,11 @@ mod tests {
         // A late frame for the timed-out id 1 is stale for the next request.
         let late_frame = frame(1, 0, true, []);
         assert!(matches!(
-            protocol.response_disposition(&late_frame, 2),
+            protocol.response_disposition(
+                &late_frame,
+                2,
+                crate::protocol_session::PendingAsk::Other
+            ),
             crate::protocol_session::ResponseDisposition::StaleAbandoned { response_id: 1 }
         ));
     }

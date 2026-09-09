@@ -26,6 +26,7 @@
 //!
 //! Original code; no derivation from QEMU/binutils (see the repo license ADR).
 
+use std::cell::Cell;
 use std::sync::{Arc, Mutex};
 
 use crate::error::{Trap, TrapKind};
@@ -176,6 +177,63 @@ impl Region {
         self.dbus_index(rule.ibus_to_dbus(addr))
     }
 
+    /// Byte index within `data` for `addr` under `access`, in the same view
+    /// order [`Memory::resolve`] scans: the I-bus view first (the only one a
+    /// fetch may use), then the D-bus view for a data access.
+    #[inline]
+    fn index(&self, addr: u32, access: Access) -> Option<usize> {
+        if let Some(idx) = self.ibus_index(addr) {
+            return Some(idx);
+        }
+        if access == Access::Data {
+            return self.dbus_index(addr);
+        }
+        None
+    }
+
+    /// Are the `n` bytes from `addr` — which resolved to byte `idx` — laid out
+    /// contiguously from `idx` in the backing store?
+    ///
+    /// The question exists because [`AliasRule::WordMirrored`]'s I-bus image
+    /// runs *downward* word by word: consecutive I-bus addresses are
+    /// consecutive backing bytes within a word and jump back seven bytes at
+    /// each word boundary. Every other view — an unaliased region, and both
+    /// views of an `Offset` or `Identity` alias — is linear, so a span that
+    /// fits the region can be read or written in one slice.
+    ///
+    /// A word-mirrored region answers `false` even for a D-bus access, whose
+    /// indices *are* linear. [`Memory::resolve`] does not report which of the
+    /// two views matched, and reconstructing it from the index is only sound
+    /// while the mirror has no fixed point — a property of today's classic
+    /// constants, not of the rule. Those regions keep the byte-at-a-time path
+    /// and take the win from the region hint alone; the classic JIT's code
+    /// region is `Identity` and is unaffected.
+    ///
+    /// The `checked_add` rules out an address span that wraps `u32`, which a
+    /// region whose own D-bus range wraps could otherwise let through with a
+    /// linear-looking index.
+    /// Does this region's [`AccessRule`] accept an `n`-byte data access at
+    /// `addr`? A word-only region takes aligned 4-byte accesses and nothing
+    /// else; every other region takes any width at any alignment.
+    #[inline]
+    fn width_ok(&self, addr: u32, n: u32) -> bool {
+        match self.access {
+            AccessRule::Any => true,
+            AccessRule::WordOnly => n == 4 && addr % 4 == 0,
+        }
+    }
+
+    #[inline]
+    fn linear_span(&self, addr: u32, idx: usize, n: u32) -> bool {
+        if idx + n as usize > self.data.len() || addr.checked_add(n - 1).is_none() {
+            return false;
+        }
+        match self.alias {
+            None | Some(AliasRule::Offset(_)) | Some(AliasRule::Identity) => true,
+            Some(AliasRule::WordMirrored { .. }) => false,
+        }
+    }
+
     /// Inclusive `[lo, hi]` bounds of this region's I-bus image, or `None` when
     /// it has no alias. Conservative: computed from the endpoints and rounded
     /// out to word boundaries, because a word-mirrored alias runs *downward*
@@ -238,9 +296,25 @@ pub struct Memory {
     /// ([`add_shared`](Self::add_shared)). Deliberately not a [`Region`]: it is
     /// never fetchable, and its bytes live behind a lock.
     shared: Option<SharedRegion>,
-    /// Max number of bytes accessible from any address (for load/store bounds).
-    #[allow(dead_code, reason = "layout placeholder kept from the source repo")]
-    _reserved: (),
+    /// Index of the region that answered the last instruction fetch, and the
+    /// last data access, respectively — a pure memoization of
+    /// [`resolve`](Self::resolve)'s linear scan.
+    ///
+    /// Mirrors `SocBus::region_index`'s last-hit cache on the rv32 side. It is
+    /// sound because no address resolves to two regions: `push_region` and
+    /// `add_shared` assert every new region's D-bus range *and* I-bus image
+    /// against both views of every installed one, so first-match-wins and
+    /// only-match-wins are the same answer. Fetch and data get separate
+    /// entries because a fetch-heavy loop and its data working set usually sit
+    /// in different regions and would otherwise evict each other every
+    /// instruction.
+    ///
+    /// [`Cell`] rather than a `&mut self` parameter: resolution is a read of
+    /// the map, and threading mutability through every load would spread far
+    /// wider than this. A stale or out-of-range index is harmless — the entry
+    /// is checked before use and the scan re-seeds it.
+    fetch_hint: Cell<usize>,
+    data_hint: Cell<usize>,
 }
 
 /// How a resolved address may be used.
@@ -260,7 +334,8 @@ impl Memory {
         Memory {
             regions: Vec::new(),
             shared: None,
-            _reserved: (),
+            fetch_hint: Cell::new(0),
+            data_hint: Cell::new(0),
         }
     }
 
@@ -414,16 +489,40 @@ impl Memory {
     }
 
     /// Resolve `addr` for `access`, returning `(region_index, byte_index)`.
+    ///
+    /// Tries the last region that answered this kind of access before falling
+    /// back to the linear scan. Straight-line code and its stack both sit in
+    /// one region for long stretches, so the hint hits almost always; when it
+    /// misses, the scan re-seeds it. See the `fetch_hint` / `data_hint` fields
+    /// for why memoizing first-match-wins is exact.
+    #[inline]
     fn resolve(&self, addr: u32, access: Access) -> Option<(usize, usize)> {
-        // Fetch: only the executable (I-bus alias) view is valid.
-        for (ri, r) in self.regions.iter().enumerate() {
-            if let Some(idx) = r.ibus_index(addr) {
+        let hint = match access {
+            Access::Fetch => &self.fetch_hint,
+            Access::Data => &self.data_hint,
+        };
+        let ri = hint.get();
+        if let Some(r) = self.regions.get(ri) {
+            if let Some(idx) = r.index(addr, access) {
                 return Some((ri, idx));
             }
-            if access == Access::Data {
-                if let Some(idx) = r.dbus_index(addr) {
-                    return Some((ri, idx));
-                }
+        }
+        self.resolve_scan(addr, access, hint)
+    }
+
+    /// [`resolve`](Self::resolve)'s miss path: the linear scan over every
+    /// region, in the same view order, seeding the hint on a hit.
+    fn resolve_scan(
+        &self,
+        addr: u32,
+        access: Access,
+        hint: &Cell<usize>,
+    ) -> Option<(usize, usize)> {
+        // Fetch: only the executable (I-bus alias) view is valid.
+        for (ri, r) in self.regions.iter().enumerate() {
+            if let Some(idx) = r.index(addr, access) {
+                hint.set(ri);
+                return Some((ri, idx));
             }
         }
         None
@@ -517,16 +616,29 @@ impl Memory {
     /// permission. Returns fewer bytes only at the very end of a region.
     pub fn fetch(&self, pc: u32, out: &mut [u8; 3]) -> Result<usize, Trap> {
         // The first byte must be fetchable; that classifies the address.
-        if self.resolve(pc, Access::Fetch).is_none() {
+        let Some((ri, idx)) = self.resolve(pc, Access::Fetch) else {
             return Err(Trap {
                 kind: TrapKind::Exception,
                 cause: EXC_INSTR_FETCH_ERROR,
                 pc,
                 vaddr: pc,
             });
+        };
+        let region = &self.regions[ri];
+        // The overwhelmingly common case: all three bytes live contiguously in
+        // the region the first byte resolved to, so one slice copy replaces
+        // three more resolutions. The tail cases below are what
+        // `linear_span` refuses — a word-mirrored I-bus view, or an
+        // instruction sitting in the last bytes of a region — and they keep
+        // the original byte-at-a-time behaviour, including reading on into an
+        // adjacent region when one answers.
+        if region.linear_span(pc, idx, 3) {
+            out.copy_from_slice(&region.data[idx..idx + 3]);
+            return Ok(3);
         }
-        let mut got = 0;
-        for i in 0..3u32 {
+        out[0] = region.data[idx];
+        let mut got = 1;
+        for i in 1..3u32 {
             match self.resolve(pc.wrapping_add(i), Access::Fetch) {
                 Some((ri, idx)) => {
                     out[i as usize] = self.regions[ri].data[idx];
@@ -556,8 +668,24 @@ impl Memory {
                 return Ok(v);
             }
         }
-        self.check_width(addr, n)
-            .map_err(|_| self.load_fault(addr))?;
+        // One resolution for the whole access, not one per byte plus one for
+        // the width check. An unmapped `addr` used to pass `check_width` and
+        // fault in the byte loop; it faults here instead, with the same
+        // address in the same error.
+        let Some((ri, idx)) = self.resolve(addr, Access::Data) else {
+            return Err(self.load_fault(addr));
+        };
+        let region = &self.regions[ri];
+        if !region.width_ok(addr, n) {
+            return Err(self.load_fault(addr));
+        }
+        if region.linear_span(addr, idx, n) {
+            let mut v = 0u32;
+            for (i, b) in region.data[idx..idx + n as usize].iter().enumerate() {
+                v |= (*b as u32) << (8 * i);
+            }
+            return Ok(v);
+        }
         let mut v = 0u32;
         for i in 0..n {
             let a = addr.wrapping_add(i);
@@ -567,23 +695,6 @@ impl Memory {
             }
         }
         Ok(v)
-    }
-
-    /// Apply the resolved region's [`AccessRule`] to an `n`-byte data access
-    /// at `addr`: a word-only region refuses anything but an aligned 4-byte
-    /// access. An unmapped `addr` passes here and faults in the byte loop that
-    /// follows, so the error carries the same address either way.
-    fn check_width(&self, addr: u32, n: u32) -> Result<(), ()> {
-        match self.resolve(addr, Access::Data) {
-            Some((ri, _)) if self.regions[ri].access == AccessRule::WordOnly => {
-                if n == 4 && addr % 4 == 0 {
-                    Ok(())
-                } else {
-                    Err(())
-                }
-            }
-            _ => Ok(()),
-        }
     }
 
     fn write_bytes(&mut self, addr: u32, n: u32, val: u32) -> Result<(), Trap> {
@@ -599,8 +710,22 @@ impl Memory {
                 return Ok(());
             }
         }
-        self.check_width(addr, n)
-            .map_err(|_| self.store_fault(addr))?;
+        let Some((ri, idx)) = self.resolve(addr, Access::Data) else {
+            return Err(self.store_fault(addr));
+        };
+        {
+            let region = &self.regions[ri];
+            if !region.width_ok(addr, n) || !region.writable {
+                return Err(self.store_fault(addr));
+            }
+            if region.linear_span(addr, idx, n) {
+                let region = &mut self.regions[ri];
+                for (i, slot) in region.data[idx..idx + n as usize].iter_mut().enumerate() {
+                    *slot = (val >> (8 * i)) as u8;
+                }
+                return Ok(());
+            }
+        }
         for i in 0..n {
             let a = addr.wrapping_add(i);
             match self.resolve(a, Access::Data) {

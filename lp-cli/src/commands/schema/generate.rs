@@ -146,10 +146,11 @@ fn populated_registry() -> Result<SlotShapeRegistry> {
 ///
 /// The container is NOT a node envelope (docs/design/modules.md §1/§6): it
 /// carries the workspace identity — `format` pinned to the current
-/// [`PROJECT_FORMAT_VERSION`], optional `uid`/`name`, the advisory `target`,
-/// the optional provenance fields `author`/`version`/`license`/`created`,
-/// and the optional authored `kind`/`exports` pair (module authoring unit,
-/// P1) — and nothing else (`additionalProperties: false` mirrors the strict
+/// [`PROJECT_FORMAT_VERSION`], optional `uid`/`name`, the optional card
+/// blurb `description`, the advisory `target`, the optional provenance
+/// fields `author`/`version`/`license`/`created`, and the optional authored
+/// `kind`/`exports` pair (module authoring unit, P1) — and nothing else
+/// (`additionalProperties: false` mirrors the strict
 /// streaming reader in `lpc_model::ProjectManifest`, which rejects unknown
 /// fields). The property list must track `ProjectManifest`'s fields
 /// one-for-one: the reader accepts exactly these keys, so a field missing
@@ -172,6 +173,10 @@ fn project_schema() -> Result<Value> {
             },
             "name": {
                 "title": "Human-readable project name",
+                "type": "string",
+            },
+            "description": {
+                "title": "Card blurb: one sentence, what the project shows off",
                 "type": "string",
             },
             "author": {

@@ -1,0 +1,48 @@
+{
+  "schema": 1,
+  "payload": "usb-negative-control",
+  "chip": "esp32c6",
+  "configuration": "silicon:esp32c6",
+  "date": "2026-09-07",
+  "firmware_commit": "b18360ea6dad",
+  "firmware_features": [
+    "esp32c6",
+    "server",
+    "radio"
+  ],
+  "firmware_dirty": false,
+  "source": "(cd lp-fw/fw-esp32c6 && cargo build --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server,radio) && PORT_DEV=/dev/cu.usbmodem1433201 scripts/emu/desk-flash-no-monitor.sh -- flash --chip esp32c6 --port /dev/cu.usbmodem1433201 --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size 4mb --after hard-reset target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6 && sleep 8 && scripts/emu/tty-capture.py --dev /dev/cu.usbmodem1433201 --out target/validate/usb-negative-control.cap --seconds 30 --until '\"hostDrainingAgainMs\"'",
+  "capture": "lp-cli validate record usb-negative-control --config silicon:esp32c6",
+  "trust": [
+    {
+      "class": "memory",
+      "grade": "measured",
+      "because": "the board is the ground truth; nothing models it"
+    },
+    {
+      "class": "timing",
+      "grade": "measured",
+      "because": "a real clock on real flash with real wait states"
+    },
+    {
+      "class": "pin",
+      "grade": "measured",
+      "because": "a scope or a logic analyser on the header pin is the definition of what the pin did"
+    },
+    {
+      "class": "usb-serial-jtag",
+      "grade": "measured",
+      "because": "a real host really attaches, or really does not"
+    },
+    {
+      "class": "boot-log",
+      "grade": "measured",
+      "because": "the real ROM and the real IDF bootloader printed it"
+    },
+    {
+      "class": "wire",
+      "grade": "measured",
+      "because": "real bytes over a real port"
+    }
+  ]
+}

@@ -58,6 +58,56 @@ naga = ["lpa-server/naga"]
 #   cargo build --profile release-esp32 --features esp32c6,server,ws281x_telemetry
 ws281x_telemetry = []
 
+# Serial readout of every transmitted WS281x frame — OFF by default.
+#
+# `lp-fw/fw-esp32s3`'s feature of the same name, its module ported body for
+# body (the classic's `fw-esp32v3` is the same port, one chip earlier). The
+# emitted line shapes — `[OUT] open`, `[OUT] dump … rgb=`, `[OUT] frame= …
+# crc=` — are IDENTICAL on all three chips on purpose, because
+# `scripts/m4-hardware-walk.sh` and `lp-app/lpa-server/tests/
+# shader_oracle_frame.rs` parse them with no per-chip branch;
+# `lp-fw/fw-tests/tests/frame_dump_parity.rs` fails if a copy drifts.
+#
+# The C6 gained it last, for the emulator plan's walk twin: `lp-emu-esp32c6`
+# already decodes the WS281x waveform off the emulated pad, but both readings
+# of that pad are ours, and this line is the firmware's own independent record
+# of the bytes it handed the driver. The walk reads both on one run.
+#
+# It decorates the app path rather than replacing it, so a frame-dump build is
+# the real firmware plus a transcript, not a harness. Every hunk is `cfg`'d
+# out of a default build — no formatter, no checksum, not even the counter —
+# so `just fw-esp32c6-size-check` measures an unchanged image.
+#
+#   cargo build --profile release-esp32 --features esp32c6,server,radio,frame-dump
+frame-dump = []
+
+# The `render-loop` benchmark image — OFF by default, never shipped.
+#
+# The shipped server image with two additions and no substitutions: the
+# in-memory filesystem arrives pre-seeded with a real LightPlayer project, and
+# the server loop stops after a fixed number of frames and prints a summary.
+# Everything between those two is the product's own boot, project load, shader
+# compile, render and RMT output. See `src/bench/render_loop.rs`.
+#
+# ⚠️ NOT named `test_*`, and that is load-bearing: `build.rs` turns any
+# `CARGO_FEATURE_TEST_*` into `cfg(fw_harness)`, which replaces `main` and the
+# whole server stack. An image built that way would measure a
+# re-implementation of the render loop instead of the render loop.
+# `frame-dump` and `spike_uart0_link` are the same shape.
+#
+# Use with `memory_fs` (the seed goes into RAM). `touch src/main.rs` after
+# flipping.
+#
+#   cargo build --profile release-esp32 \
+#     --features esp32c6,server,radio,spike_uart0_link,memory_fs,bench_render_loop
+bench_render_loop = ["dep:fw-checks", "fw-checks/check-render-loop"]
+# The pressure-test payload: `catalog/projects/rocaille` instead of
+# `projects/test/basic`. Same 241 lamps on the same D10 pad and the same
+# hand-authored disc; heavier per-lamp arithmetic (an iterated sine-fold with
+# a `tanh`) and a `Texture` node. Meaningless without the machinery, so it
+# turns it on.
+bench_project_rocaille = ["bench_render_loop"]
+
 # P4 stress-matrix load generators (plan 2026-08-01-1459-rmt-priority-hli) —
 # OFF by default, never shipped. Each spawns a continuous radio-load task
 # beside the running server, replacing the ESP-NOW radio driver registration
@@ -65,7 +115,17 @@ ws281x_telemetry = []
 # returns). Use with `ws281x_telemetry`; `touch src/main.rs` after flipping.
 stress_s2 = ["radio"]  # WiFi scan loop (repeated active scans, station mode)
 stress_s3 = ["radio"]  # ESP-NOW broadcast chatter, max payload, back to back
-test_rmt = []  # Test RMT driver with simple patterns (no pipeline)
+# The `rmt-chase` payload's harness: a 256-LED white chase on GPIO18 through
+# the shipping `lp-ws281x` refill path, three passes, one `rmt-frame` record
+# per frame. The pattern, the checksum and the record live in fw-checks as
+# `checks::rmt_chase`; this feature is the alias, so `just fwtest-rmt-esp32c6`
+# keeps working.
+#
+# `lpc-shared` is in the list because `recovery/panic_path.rs` uses it
+# unconditionally and nothing else in a bare harness build brings it: before
+# this, `--features esp32c6,test_rmt` did not link and every gate had to add
+# `server` to work around it (M5 P1, DD37).
+test_rmt = ["dep:fw-checks", "fw-checks/check-rmt", "lpc-shared"]
 test_dither = []  # Test DisplayPipeline (use with default features; server brings lpc-shared)
 test_gpio = []  # Test GPIO pin toggle
 # Host-driven GPIO square-wave calibration. The line protocol and the duty
@@ -94,7 +154,30 @@ test_json = ["server"]  # Validates ser-write-json on device (sends Heartbeat vi
 memory_fs = []  # Use in-memory filesystem instead of persistent flash
 test_msafluid = []  # MSAFluid perf harness (solver + cycle timing; phase 02 wires runner)
 test_fluid_demo = []  # RGB MSAFluid demo on the basic ring fixture (gpio4, 241 leds, DisplayPipeline)
-test_jit_math_perf = ["lps-builtins"]  # JIT Q32 math perf harness (cycle timing; no pipeline)
+# JIT Q32 math perf harness (cycle timing; no pipeline). The corpus and
+# kernels live in fw-checks as the `jit-math-perf` payload; this feature is
+# the alias that keeps `just fwtest-jit-math-perf-esp32c6` working (Q12
+# retirement ledger, notes.md).
+test_jit_math_perf = ["dep:fw-checks", "fw-checks/check-jit-math-perf"]
+# The `cycle-probe` payload's harness: kernels that isolate one term of a
+# cycle model each, every one bracketed by BOTH the PMU cycle counter and
+# SYSTIMER microseconds. The bracket, the repetition, the record and the
+# kernels that need no chip fact live in fw-checks as `checks::cycle_probe`;
+# what stays here is the IRAM/flash pair, the assembly loops whose
+# instruction count has to be exact, and the two MMIO polls.
+test_cycle_probe = ["dep:fw-checks", "fw-checks/check-cycle-probe", "lpc-shared"]
+# The `gpio-input` payload's harness: a button read through the PRODUCT's own
+# `Esp32GpioButtonDriver` and a quadrature encoder decoded in a both-edge GPIO
+# interrupt handler. The edge table both sides are driven by, the decoder and
+# the record shapes live in fw-checks as `checks::gpio_input`; what stays here
+# is the pads, the interrupt registration and the self-loop's output enable.
+#
+# `lpc-hardware` and `lpc-model` are in the list because the product button
+# driver is: it opens `button:local:D9` off the board manifest's own
+# `HwRegistry`, which is the whole reason this payload is worth recording.
+# `lpc-shared` is there for `recovery/panic_path.rs`, the same as `test_rmt`
+# and `test_cycle_probe` (M5 P1, DD37).
+test_gpio_input = ["dep:fw-checks", "fw-checks/check-gpio-input", "lpc-hardware", "lpc-model", "lpc-shared"]
 test_shader_compile_incremental = ["dep:fw-checks", "dep:lp-shader", "dep:lpvm-native", "dep:lpir", "dep:lps-shared", "lps-builtins"]  # Incremental native shader compile harness on ESP32-C6
 # f32 soft-float semantics harness (roadmap M9). The ONLY configuration in this
 # crate that turns `float-f32` on: the C6 has no FPU, ships Fixed-mode shaders,

@@ -12,7 +12,7 @@ fixture, one output node.
   roadmap M6), so measurement splits the buffer 4 ways.
 - **Shader**: the penta-strands band-chase (1,276 B GLSL) — dome-realistic
   "pretty simple shader". For a heavy-shader bound, swap in
-  `examples/basic/shader.glsl` (4,092 B, psrdnoise).
+  `projects/test/basic/shader.glsl` (4,092 B, psrdnoise).
 
 ## Measured on silicon 2026-08-04 (fw f799ee61e = merged main)
 

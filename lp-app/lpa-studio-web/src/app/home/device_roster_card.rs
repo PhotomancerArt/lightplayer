@@ -15,13 +15,20 @@
 //!   header      title · status chip
 //!               board · chip  /  MAC · firmware  (two fixed mono rows)
 //!   ──────────── (full bleed)
-//!   Project     preview slot (120) · info (17) · bar (4) · verbs (30)
+//!   Project     preview slot (120) · info (17) + bar (4) · verbs (30)
 //!   ────────────
-//!   Firmware    info (17) · bar (4) · verbs (30)
+//!   Firmware    info (17) + bar (4) · verbs (30)
 //!               terminal — FLUSH, edge to edge, no hairline above it
 //!   ────────────
 //!   Device      info (17) · verbs (30)
 //! ```
+//!
+//! `info + bar` is one block ([`line_and_bar_class`]): the bar slot rides
+//! FLUSH under its info line with no row gap on either side of it, so an
+//! unlit slot costs the zone 4px rather than 20 (G1 2026-09-06 read the
+//! old `gap · bar · gap` as "lots of dead space" between the line and its
+//! verbs). The slot still occupies its 4px in every state — the card's
+//! height is the same lit or unlit, which is the rule below.
 //!
 //! The terminal shares the firmware's zone rather than owning one (G1's
 //! second ruling, 2026-09-03): it is the same subject said twice — what
@@ -71,9 +78,10 @@
 //!
 //! | row | height |
 //! |---|---|
+//! | runtime band | 24px, **sim/emu cards only** — a real board has none (D38), so a real card's height is unchanged |
 //! | info line | 17px, one line, ellipsised, `title` = the full text |
 //! | bar slot | 4px, unlit when its zone has no activity |
-//! | preview slot | 120px, the picture or an honest sentence (AC10) |
+//! | preview slot | 120px, the board's own picture (aspect-fit, letterboxed) or an honest sentence (AC10) |
 //! | verb row | 30px, whether it holds verbs or nothing |
 //!
 //! A board event — a heartbeat, a fault, a lost link, a new terminal line —
@@ -118,9 +126,10 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DeviceAction, DeviceActivityView, DeviceEscape, DeviceLoadedProject, DeviceStatus, DeviceView,
-    DevicesOp, FirmwareVerb, PendingLinkView, UiAction, UiExampleCard, UiPackageCard, UiStatus,
-    device_escape_action, device_firmware_line, device_identity_line, device_status_kind,
+    DeviceAction, DeviceActivityView, DeviceCardFeedView, DeviceEscape, DeviceFeedOp, DeviceId,
+    DeviceLoadedProject, DeviceStatus, DeviceView, DevicesOp, FeedLiveness, FirmwareVerb,
+    PendingLinkView, UiAction, UiExampleCard, UiPackageCard, UiRuntimeBand, UiStatus,
+    device_escape_action_for, device_firmware_line, device_identity_line, device_status_kind,
     firmware_face_preview_sentence, firmware_verb, pending_escape_action, pending_firmware_line,
     pending_identity_rows,
 };
@@ -129,7 +138,12 @@ use super::device_pick_popover::{
     BoardPickMode, BoardPickPopover, ChipSource, ProjectPickPopover, joined_chip,
 };
 use super::device_terminal::DeviceTerminal;
-use crate::core::{ActionButton, ActionButtonVariant, StatusChip};
+use super::play_feed_text::frame_age_label;
+use crate::app::node::lamp_view::LampView;
+use crate::base::{
+    DetailPopover, DetailSection, PopoverCloseHandle, PopoverPlacement, StudioIcon, StudioIconName,
+};
+use crate::core::{ActionButton, ActionButtonVariant, StatusChip, quiet_action_class};
 
 /// One device card.
 #[component]
@@ -155,9 +169,34 @@ pub(crate) fn DeviceRosterCard(
     /// verb.
     #[props(default)]
     open_uid: Option<String>,
+    /// The board's own picture and its treatment, joined at the app view.
+    /// `None` = nothing honest to draw: the slot keeps its sentence.
+    #[props(default)]
+    feed: Option<DeviceCardFeedView>,
+    /// The runtime band (PD11), for a device that is not silicon. `None`
+    /// for a real board, which wears no band at all (D38) — and which is
+    /// why a real card's height is unchanged by this phase.
+    #[props(default)]
+    runtime: Option<UiRuntimeBand>,
+    /// Open the header's ⋯ menu immediately (stories only).
+    #[props(default = false)]
+    menu_initially_open: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let device = card.id;
+    // The two verbs whose WORDS depend on what the device is (PD8/Q15): a
+    // sim is powered on and off, a board is connected and disconnected.
+    // The band is the fact — a device with one is not silicon.
+    let face = match runtime.is_some() {
+        true => lpa_studio_core::DeviceFace::Sim,
+        false => lpa_studio_core::DeviceFace::Wire,
+    };
+    // The mount lease: a card on screen wants its board's picture; a card
+    // leaving the page stops the pull (frames nobody sees are serial time
+    // the board would rather spend elsewhere). The feed keeps the last
+    // frame across the unmount.
+    use_effect(move || on_action.call(DeviceFeedOp::action_for(device, true)));
+    use_drop(move || on_action.call(DeviceFeedOp::action_for(device, false)));
     let status = UiStatus {
         label: card.state_label.clone(),
         kind: device_status_kind(card.status),
@@ -244,7 +283,15 @@ pub(crate) fn DeviceRosterCard(
                             title: "{card.title}",
                             "{card.title}"
                         }
-                        StatusChip { status }
+                        div { class: "tw:flex tw:flex-none tw:items-center tw:gap-1.5",
+                            StatusChip { status }
+                            DeviceCardMenu {
+                                device,
+                                title: card.title.clone(),
+                                initially_open: menu_initially_open,
+                                on_action,
+                            }
+                        }
                     }
                     // board · chip / MAC · firmware (AC3), split in core so
                     // a hello-only board still names its chip — two FIXED
@@ -262,30 +309,37 @@ pub(crate) fn DeviceRosterCard(
                             }
                         }
                     }
+                    // The runtime band (PD11/D49): the ONE mark that says
+                    // this device is not silicon. Under the identity rows,
+                    // bound-family tone, 24px, and absent entirely on a
+                    // real board — which is what keeps every real card's
+                    // height exactly what it was.
+                    if let Some(runtime) = runtime.clone() {
+                        RuntimeBand { runtime }
+                    }
                 }
             }
 
             // ── zone 2: PROJECT — what is on the board ──────────────────
             section { class: zone_class(false),
                 div { class: "ux-armed-dim tw:grid tw:min-w-0 tw:gap-2",
-                    // preview slot (120px, AC10). No feed yet — the honest
-                    // sentence instead of a fake picture. The
-                    // `ux-play-pill` liveness slot belongs top-right inside
-                    // this frame; the feed milestone drops it in without
-                    // moving anything, because the frame's height is fixed.
-                    div { class: preview_frame_class(),
-                        div { class: "ux-play-empty",
-                            p { class: "tw:m-0", "{preview_sentence(&card)}" }
+                    // preview slot (120px, AC10): the board's own published
+                    // frames when the feed has them, the honest sentence
+                    // otherwise — never a fake picture. The liveness pill
+                    // sits top-right INSIDE the frame, so the picture
+                    // arriving moves nothing: the frame's height is fixed.
+                    {preview_slot(&card, feed.as_ref())}
+                    div { class: line_and_bar_class(),
+                        // info line (17px, one line, full text on hover)
+                        p {
+                            class: if project_line_is_fault { fault_line_class() } else { info_line_class() },
+                            title: "{project_line}",
+                            "{project_line}"
                         }
+                        // bar slot (4px, flush under the line) — lit only
+                        // for PROJECT work.
+                        ZoneBar { activity: card.activity.clone(), lit: busy_zone == Some(ZoneKind::Project) }
                     }
-                    // info line (17px, one line, full text on hover)
-                    p {
-                        class: if project_line_is_fault { fault_line_class() } else { info_line_class() },
-                        title: "{project_line}",
-                        "{project_line}"
-                    }
-                    // bar slot (4px) — lit only for PROJECT work.
-                    ZoneBar { activity: card.activity.clone(), lit: busy_zone == Some(ZoneKind::Project) }
                 }
                 // verb row (30px) — outside `ux-armed-dim`: arming dims what
                 // the card says, never what it offers.
@@ -295,7 +349,7 @@ pub(crate) fn DeviceRosterCard(
                         if let Some(escape) = cancel {
                             ActionButton {
                                 key: "{\"cancel-project\"}",
-                                action: device_escape_action(escape, device),
+                                action: device_escape_action_for(escape, device, face),
                                 running: false,
                                 variant: ActionButtonVariant::Quiet,
                                 on_action,
@@ -311,7 +365,7 @@ pub(crate) fn DeviceRosterCard(
                                 class: row_cta_class(),
                                 href: "{href}",
                                 title: "Open this board in the editor",
-                                "Open"
+                                "Open in editor"
                             }
                         }
                         // Only on a board that has SAID it is degraded: a
@@ -350,7 +404,7 @@ pub(crate) fn DeviceRosterCard(
             // last block, flush to both edges, with no hairline between them.
             section { class: combined_zone_class(),
                 div { class: zone_rows_class(),
-                div { class: "ux-armed-dim tw:grid tw:min-w-0 tw:gap-2",
+                div { class: armed_line_and_bar_class(),
                     p { class: info_line_class(), title: "{firmware_line}", "{firmware_line}" }
                     ZoneBar { activity: card.activity.clone(), lit: busy_zone == Some(ZoneKind::Firmware) }
                 }
@@ -359,7 +413,7 @@ pub(crate) fn DeviceRosterCard(
                         if let Some(escape) = cancel {
                             ActionButton {
                                 key: "{\"cancel-firmware\"}",
-                                action: device_escape_action(escape, device),
+                                action: device_escape_action_for(escape, device, face),
                                 running: false,
                                 variant: ActionButtonVariant::Quiet,
                                 on_action,
@@ -457,7 +511,7 @@ pub(crate) fn DeviceRosterCard(
                         if let Some(escape) = cancel {
                             ActionButton {
                                 key: "{\"cancel-device\"}",
-                                action: device_escape_action(escape, device),
+                                action: device_escape_action_for(escape, device, face),
                                 running: false,
                                 variant: ActionButtonVariant::Quiet,
                                 on_action,
@@ -485,7 +539,7 @@ pub(crate) fn DeviceRosterCard(
                     {
                         ActionButton {
                             key: "{escape:?}",
-                            action: device_escape_action(escape, device),
+                            action: device_escape_action_for(escape, device, face),
                             running: false,
                             variant: ActionButtonVariant::Quiet,
                             on_action,
@@ -495,7 +549,7 @@ pub(crate) fn DeviceRosterCard(
                     if card.escapes.contains(&DeviceEscape::Forget) {
                         ActionButton {
                             key: "{\"forget\"}",
-                            action: device_escape_action(DeviceEscape::Forget, device),
+                            action: device_escape_action_for(DeviceEscape::Forget, device, face),
                             running: false,
                             variant: ActionButtonVariant::Quiet,
                             armed_preview,
@@ -507,6 +561,98 @@ pub(crate) fn DeviceRosterCard(
         }
     }
 }
+
+/// The header's ⋯ menu — the project card's grammar on the device card. The
+/// verbs that act on the ENTRY rather than on the board live here, and
+/// today that is one: Rename. Every board verb keeps its zone (P9), which
+/// is why this is a menu and not a fourth verb row.
+///
+/// Not on the pending card: a link that has not identified itself has no
+/// intent to write a name into — its name rides the Flash gesture instead
+/// (the board pick's name field).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn DeviceCardMenu(
+    device: DeviceId,
+    title: String,
+    #[props(default = false)] initially_open: bool,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    rsx! {
+        DetailPopover {
+            icon: StudioIconName::More,
+            label: "Device menu".to_string(),
+            title: "Rename this device.".to_string(),
+            placement: PopoverPlacement::BottomEnd,
+            initially_open,
+            trigger: rsx! {
+                StudioIcon { name: StudioIconName::More, size: 13 }
+            },
+            trigger_class: HEADER_MENU_TRIGGER_CLASS.to_string(),
+            trigger_open_class: format!(
+                "{HEADER_MENU_TRIGGER_CLASS} tw:bg-white/10 tw:text-strong-foreground"
+            ),
+            DeviceRenameSection { device, title, on_action }
+        }
+    }
+}
+
+/// The "Rename" section: one form, on the project card's Rename precedent
+/// (a form in the menu, never a dialog). Prefilled with what the card says
+/// now, so a board wearing the derived "<board> · <Mon D>" is a few
+/// keystrokes from a name of its own. Submitting dispatches `SetName` — the
+/// user-stream write the model persists to the registry (the name is
+/// Studio's, never written to the board) — and closes the menu: a rename is
+/// a completed gesture.
+///
+/// Shared with the header session control's device panel, which is the
+/// other place the name is shown.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub(crate) fn DeviceRenameSection(
+    device: DeviceId,
+    /// What the device is called right now — the field's starting value.
+    title: String,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let mut value = use_signal(|| title);
+    let close = try_consume_context::<PopoverCloseHandle>();
+
+    rsx! {
+        DetailSection { title: Some("Rename".to_string()),
+            form {
+                class: "tw:flex tw:gap-2",
+                onsubmit: move |event| {
+                    event.prevent_default();
+                    let name = value.read().trim().to_string();
+                    if name.is_empty() {
+                        return;
+                    }
+                    on_action.call(DevicesOp::action_for(DeviceAction::SetName { device, name }));
+                    if let Some(mut close) = close {
+                        close.close();
+                    }
+                },
+                input {
+                    class: RENAME_INPUT_CLASS,
+                    aria_label: "Device name",
+                    value: "{value}",
+                    oninput: move |event| value.set(event.value()),
+                }
+                button { class: quiet_action_class(), r#type: "submit", "Rename" }
+            }
+        }
+    }
+}
+
+/// The header menu's 20px quiet ⋯ trigger — the project card's
+/// (`CARD_MENU_TRIGGER_CLASS`), so the two cards' menus read as one
+/// control. Resets UA button chrome itself — Tailwind preflight is not
+/// loaded.
+const HEADER_MENU_TRIGGER_CLASS: &str = "tw:grid tw:h-5 tw:w-5 tw:flex-none tw:cursor-pointer tw:appearance-none tw:place-items-center tw:rounded tw:border-0 tw:bg-transparent tw:p-0 tw:text-muted-foreground tw:transition-colors tw:hover:bg-white/10 tw:hover:text-strong-foreground";
+
+/// The rename form's field — the project card's rename input, verbatim.
+const RENAME_INPUT_CLASS: &str = "tw:min-w-0 tw:flex-1 tw:rounded tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1 tw:text-sm tw:text-strong-foreground";
 
 /// One zone's 4px bar slot: present in every state, lit only when the
 /// activity running belongs to THIS zone.
@@ -591,7 +737,7 @@ pub(crate) fn PendingLinkCard(
             // that answers it, and whatever it has said so far.
             section { class: combined_zone_class(),
                 div { class: zone_rows_class(),
-                    div { class: "ux-armed-dim tw:grid tw:min-w-0 tw:gap-2",
+                    div { class: armed_line_and_bar_class(),
                         p { class: info_line_class(), title: "{firmware_line}", "{firmware_line}" }
                         // Identification carries no percentage, so the slot
                         // sits unlit — present so the pending card and the
@@ -910,6 +1056,25 @@ fn fault_line_class() -> &'static str {
     "tw:m-0 tw:h-[17px] tw:truncate tw:text-xs tw:font-semibold tw:leading-[17px] tw:text-status-attention-foreground"
 }
 
+/// An info line and its bar slot as ONE block: a gapless grid, so the 4px
+/// slot rides flush under the line and the zone's row gap (8px) runs from
+/// the slot to the verb row. With the slot inside the zone grid as a row of
+/// its own it collected a gap on each side — 20px between the line and its
+/// verbs, unlit, in every zone (G1 2026-09-06: "lots of dead space").
+///
+/// The block is the same height lit or unlit — the slot never leaves —
+/// which is what keeps a board event from moving the card (ADR
+/// 2026-09-03, "fixed height").
+fn line_and_bar_class() -> &'static str {
+    "tw:grid tw:min-w-0"
+}
+
+/// [`line_and_bar_class`] as a zone's whole dimmable block, for the zones
+/// whose only rows above the verbs ARE the line and its bar.
+fn armed_line_and_bar_class() -> &'static str {
+    "ux-armed-dim tw:grid tw:min-w-0"
+}
+
 /// A zone's bar slot: 4px, transparent (and therefore invisible) when this
 /// zone has no activity, a track when it does. It occupies its 4px either
 /// way, which is the point.
@@ -943,6 +1108,123 @@ fn progress_fill_style(percent: Option<u8>) -> String {
 /// border, radius) at the card's fixed 120px.
 fn preview_frame_class() -> &'static str {
     "ux-play-frame ux-play-frame-slot"
+}
+
+/// The preview slot's content, in precedence order:
+///
+/// 1. An activity — the picture is gone while the board is being flashed
+///    or written to, and the activity sentence says so (D2).
+/// 2. A frame WITH geometry: the lamp field, aspect-fit and letterboxed
+///    inside the slot (the slot never follows the layout's aspect — a
+///    fixed row is the height rule), plus the liveness pill. Offline and
+///    lens frames are dimmed: last known, not current.
+/// 3. A frame WITHOUT geometry: the board's layout exceeded the wire's
+///    read budget — said in words, since a wordless blank reads as a
+///    defect.
+/// 4. A feed that is pulling but has no frame yet: waiting.
+/// 5. Otherwise the card's own sentence ([`preview_sentence`]).
+fn preview_slot(card: &DeviceView, feed: Option<&DeviceCardFeedView>) -> Element {
+    let frame_class = feed_frame_class(card, feed);
+    let pill = feed_pill(card, feed);
+    let picture = card
+        .activity
+        .is_none()
+        .then(|| feed.and_then(|feed| feed.frame.clone()))
+        .flatten();
+    let sentence = preview_slot_sentence(card, feed);
+    rsx! {
+        div { class: "{frame_class}",
+            if let Some(frame) = picture
+                && frame.display_layout.is_some()
+            {
+                div { class: "ux-play-lamps",
+                    LampView { preview: frame }
+                }
+            }
+            if let Some(sentence) = sentence {
+                div { class: "ux-play-empty",
+                    p { class: "tw:m-0", "{sentence}" }
+                }
+            }
+            if let Some((family, text)) = pill {
+                span { class: "ux-play-pill {family}",
+                    span { class: "ux-play-dot" }
+                    "{text}"
+                }
+            }
+        }
+    }
+}
+
+/// The frame's classes: the fixed slot, dimmed when the picture is last
+/// known rather than current.
+fn feed_frame_class(card: &DeviceView, feed: Option<&DeviceCardFeedView>) -> String {
+    let mut class = preview_frame_class().to_string();
+    if card.activity.is_none()
+        && feed.is_some_and(|feed| {
+            feed.frame.is_some()
+                && matches!(feed.liveness, FeedLiveness::Offline | FeedLiveness::Lens)
+        })
+    {
+        class.push_str(" ux-play-frame-dim");
+    }
+    class
+}
+
+/// The liveness pill: its tint family and its text, or none. Says where the
+/// picture came from and how old it is (the honest-preview ADR) — and
+/// nothing while an activity owns the slot or no frame exists.
+fn feed_pill(
+    card: &DeviceView,
+    feed: Option<&DeviceCardFeedView>,
+) -> Option<(&'static str, String)> {
+    if card.activity.is_some() {
+        return None;
+    }
+    let feed = feed?;
+    feed.frame.as_ref()?;
+    let age = || frame_age_label(feed.frame_age_secs.unwrap_or_default());
+    Some(match feed.liveness {
+        FeedLiveness::Waiting => return None,
+        // fps is the BOARD's engine rate off its heartbeat; a board that
+        // has not reported one says "live" and nothing more rather than
+        // inventing a number.
+        FeedLiveness::Live => (
+            "ux-play-pill-live",
+            match feed.engine_fps {
+                Some(fps) => format!("live · {fps} fps"),
+                None => "live".to_string(),
+            },
+        ),
+        FeedLiveness::Stale => ("ux-play-pill-stale", format!("last frame · {}", age())),
+        FeedLiveness::Offline => ("ux-play-pill-offline", format!("last frame · {}", age())),
+        FeedLiveness::Lens => ("ux-play-pill-offline", "editor has the wire".to_string()),
+    })
+}
+
+/// The sentence in the slot, when the picture is not the whole story.
+fn preview_slot_sentence(card: &DeviceView, feed: Option<&DeviceCardFeedView>) -> Option<String> {
+    if card.activity.is_some() {
+        return Some(preview_sentence(card));
+    }
+    let Some(feed) = feed else {
+        return Some(preview_sentence(card));
+    };
+    match &feed.frame {
+        Some(frame) if frame.display_layout.is_some() => None,
+        // Frames without geometry: the board declined the display layout
+        // (over the link's read budget at this scale). Say so instead of
+        // painting nothing.
+        Some(_) => Some(
+            "Frames are flowing, but this project's lamp layout is too large to preview over \
+             this link."
+                .to_string(),
+        ),
+        None => Some(match feed.liveness {
+            FeedLiveness::Waiting => "Waiting for the first frame…".to_string(),
+            _ => preview_sentence(card),
+        }),
+    }
 }
 
 /// A zone's verb row: 30px, always, whether it holds verbs or (during
@@ -985,6 +1267,33 @@ fn mono_line_class() -> &'static str {
 /// short stays level with its neighbours rather than sitting 16px higher.
 fn identity_rows_class() -> &'static str {
     "tw:grid tw:h-8 tw:min-w-0 tw:content-start"
+}
+
+/// The runtime band: 24px, bound-family tone, one line, ellipsised with the
+/// full text on its `title`.
+///
+/// Bound-family because that is the studio's "this is standing in for
+/// something" colour (`studio-bound-violet-convention`), and it is the ONLY
+/// place on a card it appears — no title prefix, no tinted edge, no second
+/// glyph (D38). A person reading a wall of cards sees one extra row on the
+/// ones that are not boards, and everything else is identical, which is the
+/// whole claim of "always a device".
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn RuntimeBand(runtime: UiRuntimeBand) -> Element {
+    let line = runtime.line();
+    rsx! {
+        p {
+            class: runtime_band_class(),
+            title: "{line}",
+            "\u{25b6} {line}"
+        }
+    }
+}
+
+fn runtime_band_class() -> &'static str {
+    "tw:m-0 tw:flex tw:h-6 tw:min-w-0 tw:items-center tw:truncate tw:text-[0.68rem] \
+     tw:leading-6 tw:text-status-bound-foreground"
 }
 
 #[cfg(test)]
@@ -1056,6 +1365,13 @@ mod tests {
         assert!(verb_row_class().contains("tw:h-[30px]"));
         // The unlit bar slot is invisible but still occupies its row.
         assert!(progress_slot_class(false).contains("tw:bg-transparent"));
+        // The line and its bar are one gapless block: the slot rides flush
+        // under the line, and no row gap surrounds it (G1 2026-09-06).
+        for class in [line_and_bar_class(), armed_line_and_bar_class()] {
+            assert!(class.contains("tw:grid"), "{class}");
+            assert!(!class.contains("gap"), "{class}");
+        }
+        assert!(armed_line_and_bar_class().contains("ux-armed-dim"));
         // A two-word verb in a narrow card must not wrap and burst the row:
         // `white-space: nowrap` inherits from the row into every chip in it
         // ("Clear faults" broke to two lines before this).
@@ -1121,6 +1437,7 @@ mod tests {
             remembered_firmware: None,
             degraded: None,
             loaded_project: DeviceLoadedProject::Unknown,
+            engine_fps: None,
             can_receive_project: false,
             can_remove_project: false,
             activity: None,
@@ -1278,6 +1595,131 @@ mod tests {
             ..card_fixture()
         };
         assert_eq!(device_line_text(&bare, None), "");
+    }
+
+    fn feed_fixture(liveness: FeedLiveness, with_layout: bool) -> DeviceCardFeedView {
+        use std::rc::Rc;
+        let layout = with_layout.then(|| {
+            Rc::new(lpc_model::ControlDisplayLayout::Layout2d(
+                lpc_model::ControlLayout2d::new(lpc_model::Revision::new(7), 4, 1, Vec::new()),
+            ))
+        });
+        DeviceCardFeedView {
+            frame: (liveness != FeedLiveness::Waiting).then(|| {
+                lpa_studio_core::UiControlProductPreview {
+                    revision: 3,
+                    extent: lpc_model::ControlExtent::new(1, 12),
+                    sample_format: lpa_studio_core::UiControlSampleFormat::U16,
+                    sample_layout: lpc_model::ControlSampleLayout { spans: Vec::new() },
+                    display_layout: layout,
+                    bytes: Rc::from(vec![0u8; 24]),
+                }
+            }),
+            frame_age_secs: Some(12.0),
+            engine_fps: Some(43),
+            liveness,
+        }
+    }
+
+    /// The pill says where the picture came from and how old it is — and
+    /// says nothing over an activity or an empty slot.
+    #[test]
+    fn the_pill_names_the_pictures_provenance_and_age() {
+        let card = card_fixture();
+        let pill = |liveness| feed_pill(&card, Some(&feed_fixture(liveness, true)));
+        assert_eq!(
+            pill(FeedLiveness::Live),
+            Some(("ux-play-pill-live", "live · 43 fps".to_string()))
+        );
+        assert_eq!(
+            pill(FeedLiveness::Stale),
+            Some(("ux-play-pill-stale", "last frame · 12 s ago".to_string()))
+        );
+        assert_eq!(
+            pill(FeedLiveness::Offline),
+            Some(("ux-play-pill-offline", "last frame · 12 s ago".to_string()))
+        );
+        assert_eq!(
+            pill(FeedLiveness::Lens),
+            Some(("ux-play-pill-offline", "editor has the wire".to_string()))
+        );
+        assert_eq!(pill(FeedLiveness::Waiting), None);
+        assert_eq!(feed_pill(&card, None), None);
+
+        let mut no_fps = feed_fixture(FeedLiveness::Live, true);
+        no_fps.engine_fps = None;
+        assert_eq!(
+            feed_pill(&card, Some(&no_fps)),
+            Some(("ux-play-pill-live", "live".to_string()))
+        );
+
+        let mut busy = card_fixture();
+        busy.activity = Some(DeviceActivityView {
+            kind: lpa_studio_core::DeviceActivityKind::Flash,
+            label: "Flashing firmware…".to_string(),
+            percent: None,
+            cancellable: true,
+            cancel_requested: false,
+        });
+        assert_eq!(
+            feed_pill(&busy, Some(&feed_fixture(FeedLiveness::Live, true))),
+            None,
+            "an activity owns the slot"
+        );
+    }
+
+    /// The slot's sentence yields to a picture with geometry, names a
+    /// picture without one, waits honestly, and otherwise stays the card's
+    /// own — an activity always wins.
+    #[test]
+    fn the_slot_sentence_yields_to_the_picture() {
+        let card = card_fixture();
+        assert_eq!(
+            preview_slot_sentence(&card, Some(&feed_fixture(FeedLiveness::Live, true))),
+            None
+        );
+        assert!(
+            preview_slot_sentence(&card, Some(&feed_fixture(FeedLiveness::Live, false)))
+                .is_some_and(|s| s.contains("too large to preview")),
+        );
+        assert_eq!(
+            preview_slot_sentence(&card, Some(&feed_fixture(FeedLiveness::Waiting, true))),
+            Some("Waiting for the first frame…".to_string())
+        );
+        assert_eq!(
+            preview_slot_sentence(&card, None),
+            Some(preview_sentence(&card))
+        );
+
+        let mut busy = card_fixture();
+        busy.activity = Some(DeviceActivityView {
+            kind: lpa_studio_core::DeviceActivityKind::Flash,
+            label: "Flashing firmware…".to_string(),
+            percent: None,
+            cancellable: true,
+            cancel_requested: false,
+        });
+        assert_eq!(
+            preview_slot_sentence(&busy, Some(&feed_fixture(FeedLiveness::Live, true))),
+            Some(preview_sentence(&busy))
+        );
+        assert_eq!(
+            feed_frame_class(&busy, Some(&feed_fixture(FeedLiveness::Offline, true))),
+            preview_frame_class(),
+            "no dimming under an activity"
+        );
+        assert!(
+            feed_frame_class(&card, Some(&feed_fixture(FeedLiveness::Offline, true)))
+                .ends_with("ux-play-frame-dim")
+        );
+        assert!(
+            feed_frame_class(&card, Some(&feed_fixture(FeedLiveness::Lens, true)))
+                .ends_with("ux-play-frame-dim")
+        );
+        assert_eq!(
+            feed_frame_class(&card, Some(&feed_fixture(FeedLiveness::Stale, true))),
+            preview_frame_class()
+        );
     }
 
     /// AC10: every state's preview slot says something honest, and no state

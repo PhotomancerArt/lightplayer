@@ -193,6 +193,7 @@ fn a_marker_from_an_evicted_effect_never_ends_the_activity_that_replaced_it() {
         device: device.0,
         board: "seeed-xiao-esp32c6".to_string(),
         build: "esp32c6-4mb".to_string(),
+        name: None,
     };
     let commands = replay.step(Millis(6_000), flash.clone());
     let evicted_effect = commands
@@ -548,6 +549,45 @@ fn an_anonymous_entry_merges_into_the_record_matched_device() {
     );
 }
 
+/// The engine's frame rate rides the heartbeat into the card (the live
+/// feed's pill), is window-scoped like every observation, and never shows
+/// up on the terminal line — which stays collapsible across heartbeats.
+#[test]
+fn engine_fps_rides_the_heartbeat_and_drops_with_the_window() {
+    let fixture = Script::new()
+        .at(0, Step::attach(1, "usb-1"))
+        .at(10, Step::opened(1))
+        .at(100, Step::hello(1).uid("dev_fps"))
+        .at(200, Step::heartbeat(1))
+        .expect(Expect::new().devices(1).device_state("Ready"))
+        .at(2_200, Step::heartbeat(1).fps(43))
+        .expect(Expect::new().engine_fps(43))
+        // A heartbeat without the fact leaves the last report standing.
+        .at(4_200, Step::heartbeat(1))
+        .expect(Expect::new().engine_fps(43))
+        .into_fixture("engine fps");
+    let mut replay = Replay::new(RosterConfig::default());
+    replay.run(&fixture).expect("scenario");
+
+    let card = replay.view().devices[0].clone();
+    assert_eq!(card.engine_fps, Some(43));
+    let wire_lines: Vec<&str> = card
+        .terminal
+        .iter()
+        .filter(|line| line.kind == lpa_devices::TerminalKind::Wire)
+        .map(|line| line.text.as_str())
+        .collect();
+    assert!(
+        wire_lines.iter().all(|text| !text.contains("43")),
+        "fps must not reach the terminal line: {wire_lines:?}"
+    );
+
+    // A reopen is a new window: the rate is a live report, not a memory.
+    replay.step(Millis(5_000), Step::closed(1));
+    replay.step(Millis(5_100), Step::opened(1));
+    assert_eq!(replay.view().devices[0].engine_fps, None);
+}
+
 #[test]
 fn a_lossy_wire_never_flaps_the_timeline() {
     let config = RosterConfig::default();
@@ -816,6 +856,7 @@ fn flashing_a_blank_pending_link_adopts_joins_identity_and_lands_ready() {
             device: device.0,
             board: "seeed-xiao-esp32c6".to_string(),
             build: "esp32c6-4mb".to_string(),
+            name: None,
         },
     );
     assert!(replay.roster().pending().is_empty(), "flash adopts");
@@ -953,6 +994,7 @@ fn a_silent_board_after_a_flash_climbs_the_ladder_then_fails_honestly() {
             device: device.0,
             board: "dig-uno".to_string(),
             build: "esp32-4mb".to_string(),
+            name: None,
         },
     );
     replay.step(
@@ -1242,6 +1284,7 @@ fn a_pre_flash_hello_never_starts_the_stamp_before_the_port_comes_back() {
             device: device.0,
             board: "dig-uno".to_string(),
             build: "esp32-4mb".to_string(),
+            name: None,
         },
     );
     // The flasher closed the port under its borrow (the release half of the
@@ -1358,6 +1401,7 @@ fn a_stamp_that_hears_nothing_back_says_unconfirmed_not_that_the_default_stands(
             device: device.0,
             board: "dig-uno".to_string(),
             build: "esp32-4mb".to_string(),
+            name: None,
         },
     );
     replay.step(Millis(29_000), Step::closed(1));
@@ -1420,6 +1464,7 @@ fn a_stamp_the_board_refused_carries_the_conversations_words_not_a_pin_map_verdi
             device: device.0,
             board: "dig-uno".to_string(),
             build: "esp32-4mb".to_string(),
+            name: None,
         },
     );
     replay.step(Millis(29_000), Step::closed(1));
@@ -1481,6 +1526,7 @@ fn forget_mid_flash_evicts_and_cleans_up() {
             device: device.0,
             board: "dig-uno".to_string(),
             build: "esp32-4mb".to_string(),
+            name: None,
         },
     );
     assert!(replay.roster().device(device).expect("device").is_busy());
@@ -1739,6 +1785,7 @@ fn the_terminal_panel_keeps_boot_lines_and_effect_narration_across_a_reopen() {
             device: device.0,
             board: "dig-uno".to_string(),
             build: "esp32-4mb".to_string(),
+            name: None,
         },
     );
     for at in [500_u64, 520, 540] {

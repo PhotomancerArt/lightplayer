@@ -56,7 +56,7 @@ pub struct UiProductPreviewFrame {
 }
 
 impl UiProductPreviewFrame {
-    /// Default visual-product probe frame (simulator tier).
+    /// Default visual-product probe frame (sim tier).
     pub const VISUAL_DEFAULT: Self = Self::new(32, 32);
 
     /// Visual-product probe frame for real-device lenses: 4× fewer bytes

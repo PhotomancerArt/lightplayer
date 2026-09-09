@@ -5,6 +5,11 @@
 //! `main.rs`); which of the two shapes below exists is decided by `fw_harness`,
 //! because a harness has no registry and the app has no reason to carry a
 //! second way to send a frame.
+//!
+//! Under the `frame-dump` feature that driver's write path also prints each
+//! transmitted frame to serial ([`rmt::frame_dump`]). An LED cannot be diffed;
+//! the transcript can, which is how the C6's hardware walk — and its emulator
+//! twin — state their result as "192 of 192 bytes" instead of "it lit up".
 
 pub mod rmt;
 

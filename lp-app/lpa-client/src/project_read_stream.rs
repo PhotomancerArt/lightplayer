@@ -29,7 +29,7 @@
 use lpc_wire::{ProjectReadEvent, WireServerMessage, WireServerMsgBody};
 
 use crate::client_event::ClientEvent;
-use crate::protocol_session::{ProtocolSession, ResponseDisposition};
+use crate::protocol_session::{PendingAsk, ProtocolSession, ResponseDisposition};
 
 /// Failure while collecting a project-read stream.
 ///
@@ -88,13 +88,17 @@ impl ProjectReadStream {
         protocol: &ProtocolSession,
         message: WireServerMessage,
     ) -> Result<ProjectReadStreamStep, ProjectReadStreamError> {
-        match protocol.response_disposition(&message, self.request_id) {
+        // A read never asks for a hello, so a hello (or a heartbeat, or a
+        // log) under this stream's id is another id space's frame, not a
+        // batch of read events.
+        match protocol.response_disposition(&message, self.request_id, PendingAsk::Other) {
             ResponseDisposition::Matched => self.accept_matched(message),
-            ResponseDisposition::Unsolicited => Ok(ClientEvent::from_unsolicited_message(message)
-                .map_or(
+            ResponseDisposition::ServerOriginated { .. } | ResponseDisposition::Unsolicited => {
+                Ok(ClientEvent::from_unsolicited_message(message).map_or(
                     ProjectReadStreamStep::Continue,
                     ProjectReadStreamStep::Event,
-                )),
+                ))
+            }
             ResponseDisposition::StaleAbandoned { response_id }
             | ResponseDisposition::PriorOwner { response_id } => Ok(ProjectReadStreamStep::Event(
                 ClientEvent::StaleResponseDropped { response_id },

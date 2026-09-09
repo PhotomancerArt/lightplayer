@@ -522,10 +522,17 @@ impl Device {
                 board_id,
                 build_id,
                 park_first,
+                name,
                 ..
             } => {
                 // Flashing implies wanting the board connected afterwards.
                 self.intent.connection = ConnectionIntent::Connected;
+                // A name typed into the setup gesture is the user's, exactly
+                // as a `SetName` would record it; `None` changes nothing (the
+                // app derives one when the board has none).
+                if let Some(name) = name {
+                    self.intent.name = Some(name.clone());
+                }
                 self.spawn_flash(now, board_id, build_id, *park_first, ctx)
             }
             Action::Push { .. } => {

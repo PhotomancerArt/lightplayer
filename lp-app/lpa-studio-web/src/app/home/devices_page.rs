@@ -1,13 +1,9 @@
 //! The Devices page (`/devices`, vision D9): the runtime roster.
 //!
-//! Two sections, from two different places:
-//!
-//! - **Runtimes** — the live simulator's card, while a sim session exists
-//!   (D36). Unchanged by the device-model rebuild; the sim is not a device
-//!   (D22) and keeps its own path through round 1.
-//! - **Devices** — the `lpa-devices` roster's projection: one card per known
-//!   device, one entry per link still being identified, and one button to ask
-//!   the browser for another port.
+//! One section, one source: the `lpa-devices` roster's projection — one
+//! card per known device (real, emu, or sim; a sim is a device, same as
+//! any board), one entry per link still being identified, and one button
+//! to ask the browser for another port.
 //!
 //! The device half renders `RosterView` DIRECTLY. There is no `Ui*` mirror of
 //! it, on purpose: the projection is already a pure function of the fold, so
@@ -37,12 +33,14 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     DeviceAction, DeviceEscape, DeviceRosterView, DevicesOp, RememberedView, UiAction, UiHomeView,
-    device_escape_action, split_roster,
+    device_escape_action_for, split_roster,
 };
 
 use crate::app::home::device_roster_card::{DeviceRosterCard, PendingLinkCard};
-use crate::app::home::sim_card::SimCard;
+use crate::app::home::play_feed_text::frame_age_label;
+use crate::app::home::target_pick_popover::TargetPickPopover;
 use crate::app::home::{device_grid_class, section_title_class};
+use crate::app::node::lamp_view::LampView;
 use crate::core::{ActionButton, ActionButtonVariant};
 
 /// The runtime roster page (roadmap M4's gallery top, re-homed).
@@ -56,6 +54,11 @@ pub fn DevicesPage(
     /// closed and stays where the user leaves it.
     #[props(default)]
     remembered_open: bool,
+    /// Story-only: mount the add slot's target menu open, for the same
+    /// reason — a capture cannot click a trigger, and the dropdown is the
+    /// half of D44 worth reviewing.
+    #[props(default)]
+    target_pick_open: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let devices = home.devices.clone();
@@ -72,19 +75,6 @@ pub fn DevicesPage(
             if let Some(issue) = home.issue.clone() {
                 div { class: "tw:flex tw:items-center tw:gap-3 tw:rounded-md tw:border tw:border-status-error-border tw:bg-status-error-bg tw:px-4 tw:py-2.5 tw:text-sm tw:text-status-error-foreground",
                     span { "{issue.message}" }
-                }
-            }
-
-            // The live simulator, while a session is running (D36: its
-            // card exists exactly as long as the session does).
-            if let Some(card) = home.sim.clone() {
-                section { class: "tw:grid tw:gap-3",
-                    header { class: "tw:flex tw:items-baseline tw:justify-between tw:gap-3",
-                        h2 { class: section_title_class(), "Runtimes" }
-                    }
-                    div { class: device_grid_class(),
-                        SimCard { key: "{card.render_key()}", card, on_action }
-                    }
                 }
             }
 
@@ -115,6 +105,12 @@ pub fn DevicesPage(
                                 // device's editor address (its registry
                                 // uid); a board still identifying has none.
                                 open_uid: devices.open_addresses.get(&card.id.0).cloned(),
+                                // The board's own picture, joined at the
+                                // app view; absent = the slot's sentence.
+                                feed: devices.feeds.get(&card.id).cloned(),
+                                // The runtime band, for a device that is
+                                // not silicon; absent = a real board.
+                                runtime: devices.runtime_bands.get(&card.id).cloned(),
                                 card,
                                 // The empty face's picker reads the SAME two
                                 // lists the gallery does — there is no
@@ -127,7 +123,7 @@ pub fn DevicesPage(
                         // Adding lives IN the roster, at the insertion point
                         // (the house rule: add buttons sit where the new
                         // entry will appear, never in headers).
-                        AddDeviceCard { on_action }
+                        AddDeviceCard { pick_open: target_pick_open, on_action }
                     }
                 }
 
@@ -154,15 +150,29 @@ pub fn DevicesPage(
 /// the round-1 dodge for the too-bold gradient fill, and the spike gate
 /// (2026-08-31, "1F for the primary") made Primary the spectrum outline
 /// the slot wanted all along.
+///
+/// # Two verbs, one slot (D44, spike 2a)
+///
+/// The house rule taken literally: the slot where the next card appears
+/// offers both ways a card can appear. **"It's connected"** stays the
+/// spectrum CTA — a board on the desk is the common case — and **"start a
+/// board here ▾"** is the quiet second verb that opens the target menu. Its
+/// panel floats in the top layer, so the slot is the same height open or
+/// shut and the grid never reflows.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn AddDeviceCard(on_action: EventHandler<UiAction>) -> Element {
+fn AddDeviceCard(
+    /// Stories only: mount the target menu open (a capture cannot click).
+    #[props(default = false)]
+    pick_open: bool,
+    on_action: EventHandler<UiAction>,
+) -> Element {
     rsx! {
         div { class: "tw:flex tw:min-h-40 tw:flex-col tw:items-center tw:justify-center tw:gap-3 tw:rounded-md tw:border tw:border-dashed tw:border-border-strong tw:bg-transparent tw:px-5 tw:py-6",
             // The invitation is transport-OPEN: connecting is the goal, and
-            // the USB specifics live on the verb below ("It's plugged in"),
-            // so a network path can join later as a sibling verb rather
-            // than a rewrite.
+            // the USB specifics live in the verb's own summary, so a
+            // network path can join later as a sibling verb rather than a
+            // rewrite.
             p { class: "tw:m-0 tw:max-w-56 tw:text-center tw:text-xs tw:leading-relaxed tw:text-muted-foreground",
                 "Connect a LightPlayer board to control\u{a0}it."
             }
@@ -171,8 +181,17 @@ fn AddDeviceCard(on_action: EventHandler<UiAction>) -> Element {
                 running: false,
                 on_action,
             }
+            span { class: add_slot_or_class(), "or" }
+            TargetPickPopover { initially_open: pick_open, on_action }
         }
     }
+}
+
+/// The "or" between the slot's two verbs: the quietest possible separator,
+/// because the two offers are not equal — one is the common case and the
+/// other is the deliberate detour.
+fn add_slot_or_class() -> &'static str {
+    "tw:text-[10px] tw:tracking-wide tw:text-dim-foreground tw:uppercase"
 }
 
 /// No transport: this build (or this browser) cannot reach a USB port at all.
@@ -189,7 +208,7 @@ fn UnavailableNote() -> Element {
             }
             p { class: "tw:m-0 tw:max-w-prose tw:text-xs tw:leading-relaxed tw:text-subtle-foreground",
                 "Studio reaches boards over Web Serial, which Chrome, Edge and \
-                 other Chromium browsers support. The simulator works everywhere."
+                 other Chromium browsers support. A sim runs anywhere."
             }
         }
     }
@@ -253,14 +272,19 @@ fn RememberedLine(
 /// nothing here is live.
 ///
 /// The tile carries the same 120px preview slot the cards do so the row
-/// reads as the same family — with the "last seen" sentence in it, because
-/// there IS no picture: the feed is a later milestone, and a board that is
-/// not connected would have nothing to feed it anyway.
+/// reads as the same family. When the board's last picture is known — this
+/// session pulled one before the port went, or a sidecar remembered one
+/// across a reload — the slot draws it exactly as a card's Offline look
+/// does: dimmed, with the neutral "last frame · <age>" pill, the age
+/// measured from when the board actually published it. Otherwise the
+/// "last seen" sentence: never a stale picture passed off as current, and
+/// never an empty box.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn RememberedTile(entry: RememberedView, on_action: EventHandler<UiAction>) -> Element {
     let device = entry.id;
     let meta = remembered_meta_text(&entry);
+    let slot = remembered_slot(&entry);
 
     rsx! {
         div { class: remembered_tile_class(),
@@ -270,9 +294,22 @@ fn RememberedTile(entry: RememberedView, on_action: EventHandler<UiAction>) -> E
                     title: "{entry.title}",
                     "{entry.title}"
                 }
-                div { class: "ux-play-frame ux-play-frame-slot",
-                    div { class: "ux-play-empty",
-                        p { class: "tw:m-0", "{remembered_preview_sentence(&entry)}" }
+                div { class: "{slot.frame_class}",
+                    if let Some(picture) = slot.picture {
+                        div { class: "ux-play-lamps",
+                            LampView { preview: picture }
+                        }
+                    }
+                    if let Some(sentence) = slot.sentence {
+                        div { class: "ux-play-empty",
+                            p { class: "tw:m-0", "{sentence}" }
+                        }
+                    }
+                    if let Some(pill) = slot.pill {
+                        span { class: "ux-play-pill ux-play-pill-offline",
+                            span { class: "ux-play-dot" }
+                            "{pill}"
+                        }
                     }
                 }
                 p {
@@ -289,7 +326,7 @@ fn RememberedTile(entry: RememberedView, on_action: EventHandler<UiAction>) -> E
                 for escape in entry.escapes.iter().copied() {
                     ActionButton {
                         key: "{escape:?}",
-                        action: device_escape_action(escape, device),
+                        action: device_escape_action_for(escape, device, entry.face),
                         running: false,
                         variant: remembered_escape_variant(escape),
                         on_action,
@@ -316,6 +353,55 @@ fn remembered_meta_text(entry: &RememberedView) -> String {
         (Some(board), None) => board.to_string(),
         (None, Some(last)) => last.to_string(),
         (None, None) => "not heard this session".to_string(),
+    }
+}
+
+/// What a remembered tile's preview slot draws.
+#[derive(Debug, PartialEq)]
+struct RememberedSlot {
+    /// The slot's classes: the fixed frame, dimmed when a picture is in it.
+    frame_class: String,
+    /// The last picture, when it has geometry to draw.
+    picture: Option<lpa_studio_core::UiControlProductPreview>,
+    /// "last frame · <age>", beside a picture.
+    pill: Option<String>,
+    /// The honest sentence when there is no picture to draw.
+    sentence: Option<String>,
+}
+
+/// The slot's contents: the last picture with its age when the entry
+/// carries a frame WITH a layout; a frame without geometry (the board's
+/// layout exceeded the wire budget when it was captured) has nothing to
+/// draw and keeps the sentence, like the card does.
+fn remembered_slot(entry: &RememberedView) -> RememberedSlot {
+    let picture = entry
+        .feed
+        .as_ref()
+        .and_then(|feed| feed.frame.as_ref())
+        .filter(|frame| frame.display_layout.is_some())
+        .cloned();
+    match picture {
+        Some(picture) => RememberedSlot {
+            frame_class: "ux-play-frame ux-play-frame-slot ux-play-frame-dim".to_string(),
+            picture: Some(picture),
+            pill: Some(format!(
+                "last frame · {}",
+                frame_age_label(
+                    entry
+                        .feed
+                        .as_ref()
+                        .and_then(|feed| feed.frame_age_secs)
+                        .unwrap_or_default()
+                )
+            )),
+            sentence: None,
+        },
+        None => RememberedSlot {
+            frame_class: "ux-play-frame ux-play-frame-slot".to_string(),
+            picture: None,
+            pill: None,
+            sentence: Some(remembered_preview_sentence(entry)),
+        },
     }
 }
 
@@ -405,7 +491,29 @@ mod tests {
             roster,
             transport_available,
             open_addresses: Default::default(),
+            feeds: Default::default(),
+            runtime_bands: Default::default(),
         }
+    }
+
+    /// D44: the slot offers BOTH ways a card can appear, and each verb's
+    /// words come from the place that owns them — core's action vocabulary
+    /// for the board already connected, the target menu for the one Studio
+    /// is about to start.
+    #[test]
+    fn the_add_slot_offers_both_ways_a_card_can_appear() {
+        let connected = DevicesOp::action_for(DeviceAction::AddFromUsb);
+
+        assert_eq!(connected.meta().label, "It's connected");
+        assert_eq!(
+            crate::app::home::target_pick_popover::SLOT_VERB_LABEL,
+            "start a board here"
+        );
+        assert_ne!(
+            connected.meta().label,
+            crate::app::home::target_pick_popover::SLOT_VERB_LABEL,
+            "two offers, two verbs"
+        );
     }
 
     /// A host build (or a Firefox) has no transport, and the page says that
@@ -642,7 +750,73 @@ mod tests {
             board: Some("seeed-xiao-esp32c6".to_string()),
             last_seen_label: Some("last heard 4 min ago".to_string()),
             escapes: vec![DeviceEscape::Reconnect, DeviceEscape::Forget],
+            face: lpa_studio_core::DeviceFace::Wire,
+            feed: None,
         }
+    }
+
+    fn remembered_feed(with_layout: bool) -> lpa_studio_core::DeviceCardFeedView {
+        use std::rc::Rc;
+        let layout = with_layout.then(|| {
+            Rc::new(lpa_studio_core::ControlDisplayLayout::Layout2d(
+                lpa_studio_core::ControlLayout2d::new(
+                    lpa_studio_core::Revision::new(7),
+                    4,
+                    1,
+                    Vec::new(),
+                ),
+            ))
+        });
+        lpa_studio_core::DeviceCardFeedView {
+            frame: Some(lpa_studio_core::UiControlProductPreview {
+                revision: 3,
+                extent: lpa_studio_core::ControlExtent::new(1, 12),
+                sample_format: lpa_studio_core::UiControlSampleFormat::U16,
+                sample_layout: lpa_studio_core::ControlSampleLayout { spans: Vec::new() },
+                display_layout: layout,
+                bytes: Rc::from(vec![0u8; 24]),
+            }),
+            frame_age_secs: Some(3.0 * 3_600.0),
+            engine_fps: None,
+            liveness: lpa_studio_core::FeedLiveness::Offline,
+        }
+    }
+
+    /// The tile's slot: the last picture, dimmed and aged from its own
+    /// stamp, when the entry carries one with geometry — and the honest
+    /// sentence otherwise (no feed, or a frame the board never gave a
+    /// layout for).
+    #[test]
+    fn the_slot_draws_the_last_picture_or_says_why_there_is_none() {
+        let entry = remembered_fixture();
+        let plain = remembered_slot(&entry);
+        assert!(plain.picture.is_none());
+        assert_eq!(plain.pill, None);
+        assert_eq!(
+            plain.sentence.as_deref(),
+            Some("Not connected — last heard 4 min ago.")
+        );
+        assert!(!plain.frame_class.contains("ux-play-frame-dim"));
+
+        let with_picture = remembered_slot(&RememberedView {
+            feed: Some(remembered_feed(true)),
+            ..remembered_fixture()
+        });
+        assert!(with_picture.picture.is_some());
+        assert_eq!(with_picture.pill.as_deref(), Some("last frame · 3 h ago"));
+        assert_eq!(with_picture.sentence, None);
+        assert!(with_picture.frame_class.contains("ux-play-frame-dim"));
+
+        let no_layout = remembered_slot(&RememberedView {
+            feed: Some(remembered_feed(false)),
+            ..remembered_fixture()
+        });
+        assert!(
+            no_layout.picture.is_none(),
+            "bytes without geometry draw nothing"
+        );
+        assert_eq!(no_layout.pill, None);
+        assert_eq!(no_layout.sentence, plain.sentence);
     }
 
     fn bare_card() -> DeviceView {
@@ -660,6 +834,7 @@ mod tests {
             remembered_firmware: None,
             degraded: None,
             loaded_project: lpa_studio_core::DeviceLoadedProject::Unknown,
+            engine_fps: None,
             can_receive_project: false,
             can_remove_project: false,
             activity: None,

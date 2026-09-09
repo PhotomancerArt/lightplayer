@@ -25,9 +25,9 @@ fn profile_alloc_smoke() {
         .expect("lp-cli crate should live one level under the workspace root");
 
     let examples_basic = workspace_root
-        .join("examples/basic")
+        .join("projects/test/basic")
         .canonicalize()
-        .expect("resolve examples/basic");
+        .expect("resolve projects/test/basic");
 
     let note = format!("ci-smoke-{}", std::process::id());
     let manifest_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");

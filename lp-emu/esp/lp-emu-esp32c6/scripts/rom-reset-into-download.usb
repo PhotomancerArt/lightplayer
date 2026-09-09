@@ -1,0 +1,11 @@
+# The host's reset dance, after the application has booted.
+#
+# `download-mode` is M6's decoding of an esptool "reset into the download
+# console" sequence, applied at a slice boundary and stamped with the guest
+# cycle. Until M7 the machine could only report it: there was no boot chain
+# to reboot into. With `--merged --reboot-on-reset` the request is performed,
+# and the log has two boots in it — the second one the ROM's own console.
+# Well past `[INIT] fw-esp32 initialized`, so the reset lands on a running
+# application rather than on the bootloader.
+# Times are EMULATED MILLISECONDS.
+1200 download-mode

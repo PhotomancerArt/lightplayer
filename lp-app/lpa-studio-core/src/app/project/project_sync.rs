@@ -17,7 +17,7 @@ use lpc_wire::{
     WireProjectionShape, WireTextureFormat, WireVisualSpace,
 };
 
-use super::output_frame_cache::OutputFrameCache;
+use crate::app::frame_feed::OutputFrameCache;
 use crate::{
     ProjectRuntimeSummary, ProjectSyncPhase, ProjectSyncSummary, UiCellProjection,
     UiConsumerPolicy, UiControlProductPreview, UiControlSampleFormat, UiError, UiIssue,

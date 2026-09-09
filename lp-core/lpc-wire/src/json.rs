@@ -270,6 +270,33 @@ mod ser_write_json_tests {
         );
     }
 
+    /// The connection-monitor stamps are additive on an object that already
+    /// shipped: firmware built before M6 P1b sends the four loss counters and
+    /// nothing else, and that frame must still decode — with the stamps read
+    /// as "this device never told us", not as a parse failure.
+    #[test]
+    fn a_link_object_without_the_connection_stamps_still_decodes() {
+        let old = r#"{"id":0,"msg":{"heartbeat":{"fps":{"avg":60.0,"sdev":0.0,"min":60.0,"max":60.0},"frame_count":7,"loaded_projects":[],"uptime_ms":5000,"link":{"parseFailures":0,"rxErrors":0,"queueFullDrops":0,"stalePartialFlushes":0}}}}"#;
+        let msg: ServerMessage = from_str(old).expect("a pre-P1b link object decodes");
+        let ServerMsgBody::Heartbeat { link, .. } = msg.msg else {
+            panic!("expected heartbeat");
+        };
+        let link = link.expect("link present");
+        assert_eq!(link.parse_failures, 0);
+        assert_eq!(link.host_not_draining_ms, None, "never told us");
+        assert_eq!(link.host_draining_again_ms, None);
+        assert_eq!(link.not_draining_count, 0);
+
+        // And the other direction: a link that never latched sends no stamp
+        // keys at all, so the four-counter frame is exactly what a C6 with a
+        // host reading it from boot still puts on the wire.
+        let quiet = crate::server::LinkCounters::default();
+        assert_eq!(
+            to_string(&quiet).unwrap(),
+            r#"{"parseFailures":0,"rxErrors":0,"queueFullDrops":0,"stalePartialFlushes":0,"notDrainingCount":0}"#
+        );
+    }
+
     #[test]
     fn a_heartbeat_carrying_a_project_fault_decodes() {
         // The other half of the additive guard: a fault-reporting frame
@@ -444,6 +471,9 @@ mod ser_write_json_tests {
                     rx_errors: 1,
                     queue_full_drops: 0,
                     stale_partial_flushes: 2,
+                    host_not_draining_ms: Some(1_402),
+                    host_draining_again_ms: Some(8_137),
+                    not_draining_count: 1,
                 }),
                 identity: Some(crate::server::HeartbeatIdentity {
                     device_uid: Some("dev0000000000000001".to_string()),
@@ -461,11 +491,13 @@ mod ser_write_json_tests {
                 ServerMsgBody::Heartbeat {
                     frame_count: expected,
                     identity: expected_identity,
+                    link: expected_link,
                     ..
                 },
                 ServerMsgBody::Heartbeat {
                     frame_count,
                     identity,
+                    link,
                     ..
                 },
             ) => {
@@ -473,6 +505,15 @@ mod ser_write_json_tests {
                 // The firmware's serializer is the one that must carry
                 // identity: heartbeats leave a device through ser-write-json.
                 assert_eq!(expected_identity, identity);
+                // …and the connection-monitor stamps, which are `Option`s:
+                // ser-write-json has to emit `serialize_some` for them or the
+                // negative control has no vehicle at all.
+                assert_eq!(expected_link, link);
+                assert!(
+                    json.contains(r#""hostNotDrainingMs":1402"#),
+                    "the stamps must ride the wire in camelCase: {json}"
+                );
+                assert!(json.contains(r#""notDrainingCount":1"#), "{json}");
             }
             _ => panic!("variant mismatch"),
         }

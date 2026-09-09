@@ -87,7 +87,7 @@ measurement (older lp-cli?)"`.
 
 ⚠️ **Cost.** The walk allocates the whole free heap in 8 B units — up to
 ~40 K alloc+free pairs per marker at 320 K, roughly a dozen markers per
-startup profile. Measured 2026-09-04 on `examples/zook-dome --mode
+startup profile. Measured 2026-09-04 on `catalog/projects/zook-dome --mode
 startup`: 6.6 s wall without the walk (no alloc collector), 8.9 s with it —
 about +35%, all of it inside the already-`--collect alloc` path (a cpu-only
 profile is unaffected). Not sampled down: a fragmentation figure that skips
@@ -143,7 +143,7 @@ allocated at tick/output-open time, so a per-LED regression shows up as
 ```json
 {
   "projects": {
-    "examples/basic": {
+    "projects/test/basic": {
       "modes": {
         "startup":       { "windows": { "server-boot": {…}, "project-load": {…}, "shader-compile": {…}, "shader-link": {…}, "frame": {…} } },
         "steady-render": { "windows": { "frame": { "transient": …, "retained": …, "largest_alloc": …, "alloc_count": …, "alloc_bytes": … } } }
@@ -161,9 +161,9 @@ measurement fails (the instrument or the instrumented path broke).
 
 To add a project, add its key under `projects` (an empty object is enough)
 and run `just heap-budget-baseline`; the baseline reads the project list from
-the record. Recorded today: `examples/basic` (the smallest real project),
-`examples/meteor` (a compute-shader project with a struct-valued map slot —
-the per-frame churn case) and `examples/zook-dome` (1,500 lamps on four
+the record. Recorded today: `projects/test/basic` (the smallest real project),
+`catalog/patterns/meteor` (a compute-shader project with a struct-valued map slot —
+the per-frame churn case) and `catalog/projects/zook-dome` (1,500 lamps on four
 strips — the per-lamp case, and the classic ESP32's target envelope).
 
 ### Reading a figure per lamp
@@ -175,7 +175,7 @@ that lands in `project-load`). Which struct owns each of those bytes, and
 what the classic adds on top (its `DisplayPipeline` buffers), is measured
 per owner in `docs/reports/2026-09-02-per-lamp-memory-table.md`; the host
 probe `lp-core/lpc-engine/tests/per_lamp_memory_table.rs` pins the slopes.
-`examples/small-dome` (6,310 lamps) is not in the record: it halts the 320 K
+`catalog/projects/small-dome` (6,310 lamps) is not in the record: it halts the 320 K
 guest in its first frame. Since #527 (bounded sample windows — the two 8 B/lamp
 graphics buffers and the coordinate transient are gone) it gets past every
 per-lamp ask and halts in the frame's port opens on the emulator-only
@@ -184,6 +184,70 @@ see "Discounting emulator-only artifacts") with 25,625 B free but no hole
 that size. The emulator's own overheads — that Vec, the 36,864 B manifest,
 the ~30 KB in-RAM deploy — are what stand between this project and the
 record now; `docs/reports/2026-09-06-small-dome-first-frame-budget.md`.
+
+## The second source: a whole chip, not an engine
+
+Everything above measures a **project** on the RV32 engine emulator. That
+emulator has no firmware in it — it is `lp-cli profile` running the render
+engine on a host — so it can say what a project's windows cost and nothing at
+all about what the firmware around them costs.
+
+`scripts/heap-budget-record.json`'s `chips` section is the other half. It comes
+from the **SoC** emulator (`lp-emu/esp/lp-emu-esp32c6`, plan
+`2026-09-06-1001-esp-emulator`): the shipped `fw-esp32c6` image — the bytes a
+board is flashed with — booted whole, run to its first heartbeat, and read from
+the allocator figures the firmware itself reports over its own link.
+
+```bash
+just heap-budget-check-chips     # the ratchet
+just heap-budget-baseline-chips  # re-measure into the record
+```
+
+Five figures, each with its own direction, and one band:
+
+| figure | direction | why |
+|---|---|---|
+| `totalBytes` | **exact** | the heap region's size. A change is a linker-script or memory-map change, never a budget. |
+| `stackTotal` | **exact** | the main task's stack, same reasoning. |
+| `usedBytes` | ratchet on **growth** | what the firmware holds resident at idle. |
+| `freeBytes` | ratchet on **shrinking** | the same fact from the other side; both are recorded so a change that moves one and not the other is visibly wrong. |
+| `largestFreeBlock` | ratchet on **shrinking** | the contiguity proxy — the read gate on device refuses on this, not on free bytes (`docs/defects/2026-09-04-read-gate-refuses-on-largest-block-proxy.md`). |
+| `stackHighWater` | **band** | see below. |
+
+The stack high-water is a band and the memory figures are not, and that
+asymmetry is measured rather than cautious. A reference image built here and
+one built on a CI runner differ by ~4.7 KB — the rustc binary's own host build,
+not anything a build can be told — so the code lands at different addresses.
+Every memory-class figure survives that; the high-water does not, because it
+is the deepest point an interrupt ever landed on the main task and a tick that
+lands on a different instruction of a differently laid-out image has a
+different deepest point (11,432 B here, 11,560 B on a runner). See
+`docs/debt/reference-images-are-not-reproducible-across-hosts.md`. The band is
+the measured spread with room; it is never widened to make a run pass.
+
+### Silicon, printed beside it
+
+The record also carries `silicon_reference`: the same figures from a committed
+silicon transcript, with the commit that produced them. It is **never gated** —
+it is a different image at a different commit — but it is printed on every
+chip check, because the entire reason this source is trusted is that the two
+agree, and a gap nobody looks at is a gap nobody notices widening. Today they
+agree on every figure except a constant **8 bytes** (`freeBytes` +8,
+`usedBytes` −8), which is one live allocation silicon has and the emulator does
+not; three explanations have been tested and refuted, and naming it needs a
+true power-on capture. `docs/debt/emulator-heap-ledger-differs-from-silicon-by-eight-bytes.md`.
+
+### Why it does not run in the required job
+
+The chip half needs a cross-target firmware build, and the rule that keeps one
+out of every workspace test run applies here too. `just heap-budget-check`
+therefore prints a named SKIP for it when there is no image, and the projects
+half still gates; CI's path-gated `emu-c6` job — which builds firmware anyway —
+runs `just heap-budget-check-chips`, where a skip is a failure. The direct load
+is used rather than the ROM-up boot: M7 measured the two paths' idle heap
+byte-identical, so the bootloader adds seconds of wall clock and nothing to the
+answer. The place that boots the whole chain is the walk,
+`scripts/emu/m4-walk.sh`.
 
 ## Ratchet, not ceiling
 
@@ -256,7 +320,7 @@ A harness that overstates its fidelity is worse than none. This gate does
   re-materialises every unbound default each frame: its `frame` churn is
   higher and its `frame.retained` lower than these figures. What the gate does
   price is the payload table itself — turning the cache on moved
-  `examples/basic` `frame.retained` by the bytes the table costs, in the record
+  `projects/test/basic` `frame.retained` by the bytes the table costs, in the record
   diff — which is the byte number that debt entry asked for.
 - **The emulator's hardware manifest.** `fw-emu` runs the permissive
   256-resource board profile; the classic's manifest has 34. Every port
@@ -291,14 +355,14 @@ holes open — attributed to the call site that allocated them.
 
 ```bash
 # the classic's two regions (the default), 10 holes attributed per marker
-cargo run -p lp-cli -- profile examples/zook-dome --collect alloc --mode startup
+cargo run -p lp-cli -- profile catalog/projects/zook-dome --collect alloc --mode startup
 
 # the guest's own single region — the only layout the cross-check means anything on
-cargo run -p lp-cli -- profile examples/basic --collect alloc --mode startup \
+cargo run -p lp-cli -- profile projects/test/basic --collect alloc --mode startup \
     --frag-layout guest
 
 # an arbitrary region list, in registration order
-cargo run -p lp-cli -- profile examples/basic --collect alloc \
+cargo run -p lp-cli -- profile projects/test/basic --collect alloc \
     --frag-regions 112640,73728 --frag-top 20
 ```
 
@@ -317,9 +381,9 @@ allocator front-pads a hole whose start is not already aligned for the
 request, so a replay that guessed 4 B diverged from the guest's own layout
 the first time an 8- or 16-aligned request landed on a 4-mod-8 boundary —
 that guess cost hole count ±8 and largest free block ±320 B on
-`examples/basic`. With the real alignment the replay reproduces the guest's
+`projects/test/basic`. With the real alignment the replay reproduces the guest's
 free-list walk **exactly** — same hole count, same largest block, same free
-total — at every marker of `examples/basic` and `examples/zook-dome` in
+total — at every marker of `projects/test/basic` and `catalog/projects/zook-dome` in
 `startup` mode. Run with `--frag-layout guest` to check any trace: the
 cross-check table prints the comparison per marker, and its verdict column
 is the thing to look at after touching the replay. A trace recorded before
@@ -342,12 +406,12 @@ reports the same site — contains the substring, along with its frees and
 reallocs:
 
 ```bash
-cargo run -p lp-cli -- profile examples/zook-dome --collect alloc --mode startup \
+cargo run -p lp-cli -- profile catalog/projects/zook-dome --collect alloc --mode startup \
     --frag-discount-site VirtualWs281xDriver::endpoints \
     --frag-discount-site HwResource
 ```
 
-Discounting both takes `examples/zook-dome` on the classic layout from 2,452
+Discounting both takes `catalog/projects/zook-dome` on the classic layout from 2,452
 `would-OOM` allocations to none, and its final largest free block from
 7,328 B to 42,428 B. The report header names every active discount and the
 blocks, bytes and peak-live it removed, and says "discounts: none" when
@@ -367,7 +431,7 @@ anyone writes it.
 
 ```bash
 scripts/frag-table.sh            # the three reference projects, every lever
-scripts/frag-table.sh examples/basic   # or a project list of your own
+scripts/frag-table.sh projects/test/basic   # or a project list of your own
 ```
 
 The script runs `startup` mode with the two discounts above and every
@@ -375,7 +439,7 @@ counterfactual, and prints each run's `Heap Counterfactuals` section; the same
 data lands in `frag-cf.json` beside `frag.json`. To run one by hand:
 
 ```bash
-cargo run -p lp-cli -- profile examples/zook-dome --collect alloc --mode startup \
+cargo run -p lp-cli -- profile catalog/projects/zook-dome --collect alloc --mode startup \
     --workload studio-sync \
     --frag-discount-site VirtualWs281xDriver::endpoints \
     --frag-discount-site HwResource \
@@ -436,3 +500,10 @@ Runs in the `Validate (x64)` job of `.github/workflows/pre-merge.yml` when
 core paths changed — four emulator runs (two projects × two modes), after the
 tests so `lp-cli` and `fw-emu` reuse warm dependencies. Referenced from
 `docs/adr/2026-08-01-esp32v3-flash-budget.md`.
+
+The **chip** half runs elsewhere: the path-gated `emu-c6` job, as
+`just heap-budget-check-chips`, because it needs a cross-target firmware
+build — which that job has already done by the time it runs, so the step
+costs one emulator boot and nothing else. In `Validate (x64)` the same code
+prints a named SKIP rather than starting a firmware build, and the projects
+half still gates. See "The second source" above.

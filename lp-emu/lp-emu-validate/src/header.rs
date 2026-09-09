@@ -55,6 +55,23 @@ pub struct TranscriptHeader {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub firmware_dirty: Option<bool>,
+    /// The sha256 of the image that produced this transcript, lower-case hex.
+    ///
+    /// Additive and optional: the two transcripts this system was built on
+    /// predate it, and an added optional field needs no schema bump (see
+    /// [`HEADER_SCHEMA`]).
+    ///
+    /// The commit and the feature set say which SOURCE ran; this says which
+    /// BYTES did, and until L4 those were not the same question. M5 P1's
+    /// digest (PR #569) found three CI runs of one pinned firmware commit
+    /// producing three different ELFs — a wall-clock stamp in the ESP-IDF
+    /// application descriptor, absolute paths in `.debug_str`, and a
+    /// linker-script patch that lost a race on a cold build tree.
+    /// `scripts/emu/build-reference-image.sh` removes all three and its
+    /// `--verify` proves it, so a recorded sha is a fact another host can
+    /// reproduce rather than a serial number.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub firmware_sha256: Option<String>,
     /// Silicon revision as the chip reports it (`v0.2`), or as the
     /// configuration synthesises it (esp-emu's eFuse says `v0.3` on a `v0.2`
     /// board — that disagreement is a fact worth carrying).
@@ -86,6 +103,27 @@ pub struct TranscriptHeader {
     /// Anything else a reader needs before trusting a number here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// The **pin capture** that goes with this transcript: the file name of a
+    /// JSON-lines companion sitting beside the `.txt`, one decoded frame per
+    /// line, as `lp-emu-esp32c6 --dump-frames` writes them.
+    ///
+    /// The one thing a console capture cannot hold. Everything else in a
+    /// transcript is something the device said; this is what a **pad**
+    /// carried, decoded from the waveform by something that never spoke to
+    /// the firmware — so `[fw-check-json] {"kind":"rmt-frame","crc":…}` (the
+    /// driver's claim) and `{"kind":"ws281x-frame","wire":…}` (the wire) can
+    /// be compared frame by frame, as a `Pin`-class comparison that fails a
+    /// replay. Approved as an additive widening of the G2 contract (E3,
+    /// 2026-09-07: "why wouldn't we want that?").
+    ///
+    /// **Additive, and deliberately so.** It is a file *name*, resolved
+    /// against the transcript's own directory, so a tree can be moved
+    /// wholesale. A sidecar without it — every sidecar written before M5 P3 —
+    /// loads exactly as it did, and a payload that makes no pin claim never
+    /// gains one: only a payload whose registry entry sets `pin_capture` is
+    /// recorded with a companion at all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pins: Option<String>,
     /// What this configuration is trusted for, per field class.
     #[serde(default)]
     pub trust: TrustTable,
@@ -112,6 +150,14 @@ impl TranscriptHeader {
             self.payload,
             self.file_stem()?
         ))
+    }
+
+    /// The pin capture's file name for this transcript: `<stem>.txt.pins.jsonl`,
+    /// the same shape as the sidecar's `<stem>.txt.meta.json` so that the
+    /// three files sort together and no reader has to guess which transcript
+    /// a companion belongs to.
+    pub fn pins_file_name(&self) -> Result<String> {
+        Ok(format!("{}.txt.pins.jsonl", self.file_stem()?))
     }
 
     pub fn from_json(text: &str) -> Result<Self> {
@@ -282,6 +328,7 @@ mod tests {
                 "test_shader_compile_incremental".into(),
             ],
             firmware_dirty: Some(false),
+            firmware_sha256: None,
             silicon_rev: Some("v0.2".into()),
             board: Some("seeed/xiao-esp32-c6".into()),
             mac: Some("a0:f2:62:87:b4:8c".into()),
@@ -289,6 +336,7 @@ mod tests {
             source: None,
             capture: None,
             note: None,
+            pins: None,
             trust: TrustTable::default(),
         }
     }
@@ -313,6 +361,71 @@ mod tests {
         assert_eq!(back.payload, h.payload);
         assert_eq!(back.mac, h.mac);
         assert_eq!(back.firmware_features, h.firmware_features);
+    }
+
+    /// `firmware_sha256` is additive in both directions: a sidecar written
+    /// before it existed still loads, and one that carries it keeps it
+    /// through a round trip. That is the whole M2 contract for adding a
+    /// field — no schema bump, no committed transcript touched.
+    #[test]
+    fn the_image_sha_is_an_additive_field() {
+        let mut h = header();
+        h.firmware_sha256 = None;
+        let without = h.to_json().unwrap();
+        assert!(
+            !without.contains("firmware_sha256"),
+            "an absent sha is not written at all: {without}"
+        );
+
+        h.firmware_sha256 =
+            Some("61027da9eabbf137a2f3ed5846350293f2bc79fea91fd9ee5592fa9f4aa16ba8".to_string());
+        let with = h.to_json().unwrap();
+        assert_eq!(
+            TranscriptHeader::from_json(&with)
+                .unwrap()
+                .firmware_sha256
+                .as_deref(),
+            Some("61027da9eabbf137a2f3ed5846350293f2bc79fea91fd9ee5592fa9f4aa16ba8")
+        );
+        // And the pre-L4 sidecars, which have no such key.
+        assert_eq!(
+            TranscriptHeader::from_json(&without)
+                .unwrap()
+                .firmware_sha256,
+            None
+        );
+    }
+
+    /// The E3 widening is additive in the only sense that matters: a sidecar
+    /// written before it exists loads unchanged, and one written after it
+    /// does not gain a field when the payload makes no pin claim.
+    #[test]
+    fn the_pins_field_is_additive() {
+        let before = r#"{
+            "schema": 1,
+            "payload": "shader-compile-stress",
+            "chip": "esp32c6",
+            "configuration": "silicon:esp32c6",
+            "date": "2026-09-06",
+            "firmware_commit": "d6cfaa2051ae",
+            "firmware_features": ["esp32c6"]
+        }"#;
+        let h = TranscriptHeader::from_json(before).expect("an older sidecar still loads");
+        assert_eq!(h.pins, None);
+        assert!(
+            !h.to_json().unwrap().contains("pins"),
+            "a payload with no pin claim gains no field"
+        );
+
+        let mut h = header();
+        h.pins = Some(h.pins_file_name().unwrap());
+        assert_eq!(
+            h.pins.as_deref(),
+            Some("silicon-esp32c6-2026-09-06-d6cfaa205.txt.pins.jsonl"),
+            "the companion sorts beside the .txt and its .meta.json"
+        );
+        let back = TranscriptHeader::from_json(&h.to_json().unwrap()).unwrap();
+        assert_eq!(back.pins, h.pins);
     }
 
     #[test]

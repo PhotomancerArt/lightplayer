@@ -34,6 +34,27 @@ pub trait Bus {
     #[inline(always)]
     fn set_watchpoint(&mut self, _slot: usize, _wp: Option<Watchpoint>) {}
 
+    /// Tell the bus which instruction is about to issue accesses, and at
+    /// what cycle.
+    ///
+    /// A bus log is worth having because it says *who* and *when*: `cyc=41288
+    /// pc=0x42009a1c R4 TIMG0+0x068 rtccalicfg` answers "which status bit is
+    /// it spinning on" in one line. Both halves have to arrive per
+    /// instruction to be that line — a machine that set them once per
+    /// scheduler slice would stamp a million accesses with the same value,
+    /// and the unmapped-site dedup (keyed on `(pc, address)`) would collapse
+    /// unrelated sites onto one.
+    ///
+    /// `cycle` is the count *before* this instruction is charged, which is
+    /// the only reading that composes: two accesses one instruction apart
+    /// differ by exactly that instruction's cost.
+    ///
+    /// Called before each instruction the privileged stepper executes. The
+    /// default is empty and inlines away; only a bus that keeps a trace or a
+    /// spin detector implements it.
+    #[inline(always)]
+    fn set_issuing(&mut self, _pc: u32, _cycle: u64) {}
+
     /// Side-band after an MMIO-class access: `true` when the bus's
     /// interrupt state may have changed (an MMIO store). Consumed by the
     /// privileged stepper after Store/System-class instructions only; the
@@ -41,6 +62,66 @@ pub trait Bus {
     #[inline(always)]
     fn take_sideband(&mut self) -> bool {
         false
+    }
+
+    /// Did a peripheral ask the machine to take over before the next
+    /// instruction runs?
+    ///
+    /// The side-band above says "interrupt state may have changed", which
+    /// the hart can answer by itself. This says "something changed that only
+    /// the machine can act on", and the hart's answer is to end the slice.
+    ///
+    /// It exists for exactly one shape of thing, and the ESP32-C6's cache
+    /// MMU is the first of it: a store that changes what an address
+    /// *means*. The guest programs an MMU entry and reads through the
+    /// window a few instructions later, in the same slice; a machine that
+    /// refills the window at the next slice boundary serves it stale bytes.
+    /// The C6's second-stage bootloader does exactly that, and read its own
+    /// image header as zeros until this existed.
+    ///
+    /// Checked only after a store, and only when the store was to MMIO, so
+    /// a bus that never sets it costs one already-loaded bool per store.
+    fn take_yield(&mut self) -> bool {
+        false
+    }
+
+    /// The CPU interrupt this bus's interrupt matrix asserts *right now* for
+    /// the hart that is executing, or `None` for "nothing asserted".
+    ///
+    /// This is the other half of [`Bus::take_sideband`], and the two are a
+    /// pair: when the side-band says an MMIO store may have changed interrupt
+    /// state, the privileged stepper **replaces** its pending-interrupt input
+    /// with this value and polls, so a store that raises a peripheral line is
+    /// delivered before the next instruction retires — and a store that
+    /// *lowers* one stops being pending in the same breath.
+    ///
+    /// Therefore: **a bus that ever returns `true` from `take_sideband` must
+    /// implement this method.** A bus that never raises the side-band never
+    /// has it called, which is why the default is a constant the optimizer
+    /// removes rather than an `unimplemented!()`.
+    #[inline(always)]
+    fn pending_cpu_interrupt(&self) -> Option<u8> {
+        None
+    }
+
+    /// Extra cycles this bus's memory system charged for the accesses made
+    /// since the last call, and clear the total.
+    ///
+    /// The bus, not the hart, is where an access's *address* is known: the
+    /// hart hands out a `pc` and the executors compute a load's address
+    /// inside the instruction, so the only component that sees every address
+    /// with its width is the one that serves it. A bus that models a cache
+    /// or a peripheral bus (see [`crate::cycle_model::MemoryCost`])
+    /// accumulates here and the privileged stepper drains it once per
+    /// instruction, adding it to the cycle counter beside the instruction's
+    /// own class cost.
+    ///
+    /// The default is a constant the optimizer removes, which is what keeps
+    /// a grade with no memory-cost model exactly as fast, and exactly as
+    /// counted, as it was before this existed.
+    #[inline(always)]
+    fn take_memory_cost(&mut self) -> u32 {
+        0
     }
 }
 

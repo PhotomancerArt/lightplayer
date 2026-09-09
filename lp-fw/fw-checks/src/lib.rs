@@ -1,7 +1,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![doc = include_str!("../README.md")]
 
-#[cfg(feature = "check-shader-compile")]
+#[cfg(any(feature = "check-shader-compile", feature = "check-jit-math-perf"))]
 extern crate alloc;
 
 pub mod check;
@@ -11,7 +11,9 @@ pub mod header;
 pub use check::{
     FW_CHECK_JSON_PREFIX, FwCheck, FwCheckConfig, FwCheckTarget, all_checks, find_check,
 };
-pub use header::{FW_CHECKS_HEADER_PREFIX, HEADER_SCHEMA, PayloadHeader, emit_header, str_is_true};
+pub use header::{
+    FW_CHECKS_HEADER_PREFIX, HEADER_SCHEMA, PayloadHeader, emit_header, str_is_true, write_header,
+};
 
 pub fn emit_record_json(args: core::fmt::Arguments<'_>) {
     log_record(args);

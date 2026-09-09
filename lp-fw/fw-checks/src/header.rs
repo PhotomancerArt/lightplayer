@@ -67,8 +67,36 @@ impl fmt::Display for PayloadHeader<'_> {
 }
 
 /// Print the header line. Call it once, first, before any record.
+///
+/// Goes through `log`, so it is a no-op on any harness that installs no
+/// logger (`gpio-calibrate`, `uart-bridge`) — that is a real gap on real
+/// hardware, not a hypothetical one: a header printed this way from
+/// `test_gpio_calibrate` never reached a silicon capture, because that
+/// harness's whole point is to stay in `no_std` territory with no `log` sink
+/// registered. Kept for host builds and anywhere a logger is known to be
+/// installed; a C6 harness should call [`write_header`] instead.
 pub fn emit_header(header: &PayloadHeader<'_>) {
     log::info!("{FW_CHECKS_HEADER_PREFIX}{header}");
+}
+
+/// Print the header line through any [`fmt::Write`] sink — the
+/// sink-agnostic sibling of [`emit_header`], for a harness that cannot rely
+/// on a `log` sink being installed (which, from this crate's `no_std` side,
+/// is always: installing one is a firmware decision this crate cannot see).
+///
+/// Every C6 payload harness should call this with `esp_println::Printer`
+/// (`uart-bridge`'s reason for going straight to `esp_println` — its printer
+/// times out and drops rather than spinning on an unread endpoint — applies
+/// equally to every other payload, since none of them can prove a logger is
+/// installed either). It writes the same bytes `emit_header` logs, terminated
+/// with one `\n`.
+///
+/// ```ignore
+/// let mut printer = esp_println::Printer;
+/// let _ = fw_checks::write_header(&mut printer, &fw_checks::PayloadHeader { .. });
+/// ```
+pub fn write_header(w: &mut impl fmt::Write, header: &PayloadHeader<'_>) -> fmt::Result {
+    writeln!(w, "{FW_CHECKS_HEADER_PREFIX}{header}")
 }
 
 /// `env!("LP_BUILD_DIRTY")` is the string "true" or "false"; this is the
@@ -138,5 +166,23 @@ mod tests {
         assert!(str_is_true("true"));
         assert!(!str_is_true("false"));
         assert!(!str_is_true(""));
+    }
+
+    /// [`write_header`] must print the exact bytes [`emit_header`] would log,
+    /// plus one trailing `\n` — that byte-equality is the whole reason a
+    /// harness can switch printers without changing what a transcript's
+    /// in-band header line looks like.
+    #[test]
+    fn write_header_matches_the_display_impl_plus_a_newline() {
+        let h = PayloadHeader {
+            payload: "jit-math-perf",
+            chip: "esp32c6",
+            firmware_commit: "d6cfaa2051ae",
+            firmware_features: "esp32c6,test_jit_math_perf",
+            firmware_dirty: false,
+        };
+        let mut out = std::string::String::new();
+        write_header(&mut out, &h).expect("writing to a String never fails");
+        assert_eq!(out, format!("{FW_CHECKS_HEADER_PREFIX}{h}\n"));
     }
 }

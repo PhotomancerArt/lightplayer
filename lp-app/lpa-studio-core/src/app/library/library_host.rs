@@ -73,9 +73,11 @@ pub enum CatalogOp {
     /// Generate a first project for a catalog board (the setup flow's
     /// provision step, P03/P06) and install it. Creation-shaped: it touches
     /// no existing project, and NOT seed-once — every provision makes its
-    /// own package.
+    /// own package. `name` is the user's name for it when they typed one;
+    /// `None` names it after the board.
     GenerateForBoard {
         board_id: String,
+        name: Option<String>,
     },
     /// Migrate a package's own bytes to the current project format and
     /// save the result (P5's Upgrade verb; the same body P3 runs on open).
@@ -135,10 +137,34 @@ pub enum CatalogOp {
     /// and here; this and [`CatalogOp::ForgetRegisteredDevice`] are its two
     /// writers, and both are driven by the roster, never by a UI flow.
     UpsertRegisteredDevice(Box<crate::app::places::RegisteredDevice>),
-    /// Remove a device from the registry (`Command::DeleteRecord`).
-    /// Idempotent — forgetting an unknown row is a no-op.
+    /// Remove a device from the registry (`Command::DeleteRecord`) and its
+    /// per-device sidecars with it — the last frame, and the sim record
+    /// that said it was a sim. Idempotent — forgetting an unknown row is a
+    /// no-op.
     ForgetRegisteredDevice {
         uid: String,
+    },
+    /// Create a sim: its registry row and its `/device-sims/<uid>.json`
+    /// sidecar, in ONE settle.
+    ///
+    /// One op rather than two because a half-created sim is not a state
+    /// worth having: a row with no sidecar is a board that cannot be
+    /// started, and a sidecar with no row is a device nothing lists. The
+    /// bytes arrive already encoded, so the host stays codec-free like the
+    /// frame sidecar's write.
+    CreateSimDevice {
+        device: Box<crate::app::places::RegisteredDevice>,
+        sidecar_bytes: Vec<u8>,
+    },
+    /// Write a fed board's newest composed frame to its per-uid sidecar
+    /// (`app/devices/device_frame_snapshot.rs`), already encoded so the
+    /// host stays codec-free. Store-only, like the registry writes, and
+    /// driven by the controller's feed lane at most every ten seconds per
+    /// board — the caller deliberately does NOT schedule a gallery
+    /// re-hydration after it (nothing the gallery lists changed).
+    StoreDeviceFrame {
+        uid: String,
+        bytes: Vec<u8>,
     },
     /// Record a completed push (M3 of the round-2 rebuild, restoring the
     /// pre-teardown op): a history `Pushed` event on the project, plus the
@@ -406,8 +432,8 @@ pub fn apply_catalog_op(
             upgraded_from = outcome.upgraded_from;
             Some(outcome.summary)
         }
-        CatalogOp::GenerateForBoard { board_id } => {
-            Some(generate_for_board(store, &board_id, now)?)
+        CatalogOp::GenerateForBoard { board_id, name } => {
+            Some(generate_for_board(store, &board_id, name.as_deref(), now)?)
         }
         CatalogOp::UpsertRegisteredDevice(device) => {
             crate::app::places::DeviceRegistry::new(store.fs_handle())
@@ -419,6 +445,37 @@ pub fn apply_catalog_op(
             crate::app::places::DeviceRegistry::new(store.fs_handle())
                 .forget(&uid)
                 .map_err(LibraryHostError::from)?;
+            // The picture goes with the row: a forgotten board leaves no
+            // sidecar behind to be shown again on a later re-register. So
+            // does the sim record — a forgotten sim is gone, not a device
+            // that would come back the moment its uid was re-derived.
+            let fs = store.fs_handle();
+            let fs = fs.borrow();
+            crate::app::devices::device_frame_snapshot::delete_snapshot(&*fs, &uid)
+                .map_err(|error| LibraryHostError::Host(error.to_string()))?;
+            crate::app::devices::delete_sim_record(&*fs, &uid)
+                .map_err(|error| LibraryHostError::Host(error.to_string()))?;
+            None
+        }
+        CatalogOp::CreateSimDevice {
+            device,
+            sidecar_bytes,
+        } => {
+            let uid = device.uid.clone();
+            crate::app::places::DeviceRegistry::new(store.fs_handle())
+                .upsert(*device)
+                .map_err(LibraryHostError::from)?;
+            let fs = store.fs_handle();
+            let fs = fs.borrow();
+            crate::app::devices::sim_record::write_sim_record_bytes(&*fs, &uid, &sidecar_bytes)
+                .map_err(|error| LibraryHostError::Host(error.to_string()))?;
+            None
+        }
+        CatalogOp::StoreDeviceFrame { uid, bytes } => {
+            let fs = store.fs_handle();
+            let fs = fs.borrow();
+            crate::app::devices::device_frame_snapshot::write_snapshot(&*fs, &uid, &bytes)
+                .map_err(|error| LibraryHostError::Host(error.to_string()))?;
             None
         }
         CatalogOp::RecordPush {
@@ -484,9 +541,10 @@ fn import_refusal(error: &LibraryError, context: String) -> LibraryHostError {
 fn generate_for_board(
     store: &LibraryStore,
     board_id: &str,
+    name: Option<&str>,
     now: f64,
 ) -> Result<PackageSummary, LibraryHostError> {
-    let generated = crate::app::home::generate_board_project(board_id)
+    let generated = crate::app::home::generate_board_project(board_id, name)
         .map_err(|error| LibraryHostError::Host(error.to_string()))?;
     Ok(store.install_package(
         &generated.name,

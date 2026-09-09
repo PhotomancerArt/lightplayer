@@ -10,8 +10,8 @@
 //! figures from `lp-cli profile --collect alloc`.
 //!
 //! Three fixtures:
-//! - zook (`examples/zook-dome`, 1,500 lamps) and a generated 2× copy (3,000);
-//! - small-dome (`examples/small-dome`, 6,310 lamps: 5,950 dome + 360 doors),
+//! - zook (`catalog/projects/zook-dome`, 1,500 lamps) and a generated 2× copy (3,000);
+//! - small-dome (`catalog/projects/small-dome`, 6,310 lamps: 5,950 dome + 360 doors),
 //!   as authored only — its map is ten repeat objects plus patch documents
 //!   keyed by object path, so a scaled copy is not a faithful variant;
 //! - a dome-scale synthetic (190 panels × 119 = 22,610 lamps, the big dome's
@@ -131,14 +131,14 @@ fn synthetic_from_zook(
     per_strand: u32,
     patch: Option<&str>,
 ) -> Fixture {
-    let src = workspace_dir().join("examples/zook-dome");
+    let src = workspace_dir().join("catalog/projects/zook-dome");
     let dir = std::env::temp_dir().join(format!(
         "lp-per-lamp-{}-{label}-{strands}x{per_strand}",
         std::process::id()
     ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("temp project dir");
-    for entry in std::fs::read_dir(&src).expect("read examples/zook-dome") {
+    for entry in std::fs::read_dir(&src).expect("read catalog/projects/zook-dome") {
         let entry = entry.expect("dir entry");
         std::fs::copy(entry.path(), dir.join(entry.file_name())).expect("copy project file");
     }
@@ -203,7 +203,7 @@ fn fixtures() -> Vec<Fixture> {
     vec![
         Fixture {
             label: "zook",
-            dir: workspace_dir().join("examples/zook-dome"),
+            dir: workspace_dir().join("catalog/projects/zook-dome"),
             lamps: 1500,
         },
         synthetic_from_zook("zook-2x", 10, 300, None),
@@ -212,7 +212,7 @@ fn fixtures() -> Vec<Fixture> {
         synthetic_from_zook("zook-patched", 5, 300, Some(ZOOK_PATCH)),
         Fixture {
             label: "small-dome",
-            dir: workspace_dir().join("examples/small-dome"),
+            dir: workspace_dir().join("catalog/projects/small-dome"),
             lamps: 6310,
         },
         synthetic_from_zook("dome-scale", 190, 119, None),

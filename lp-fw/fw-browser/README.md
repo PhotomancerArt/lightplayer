@@ -1,8 +1,10 @@
 # fw-browser
 
-`fw-browser` is the browser/Web Worker LightPlayer runtime target.
+`fw-browser` is **the desktop firmware running in the browser** — the same
+LightPlayer runtime a computer runs, hosted in a Web Worker instead of on a
+machine or a chip.
 
-It exists for Studio simulation and browser-local project testing. It is not the
+It exists to power Studio's sim and browser-local project testing. It is not the
 embedded product path and it is not a replacement for ESP32 runtime shader
 compilation. The browser runtime still uses the real shader frontend and
 `lpvm-wasm` browser backend to compile and execute shaders in the browser, but
@@ -19,6 +21,38 @@ direct public shader calls.
   logs/status for Studio.
 - Future Studio UI code should consume this through a browser-local link/session
   boundary rather than reaching directly into shader runtime details.
+
+## Boot Options — What A Runtime Is Created As
+
+`create_runtime(label, options_json)` takes the whole of a runtime's boot
+parameters as one JSON object (`envelope.rs`'s `BrowserRuntimeOptions`):
+
+```json
+{
+  "tier": "cpu",
+  "hardware_manifest_json": "{ …a lpc_hardware board manifest… }",
+  "identity": { "base_mac": "02:00:00:ab:cd:ef" }
+}
+```
+
+- **`hardware_manifest_json`** is the board this runtime WEARS, as text. One
+  manifest builds ONE registry, and outputs, buttons and the radio all
+  resolve against it: an endpoint the board does not declare is refused
+  here exactly as the firmware would refuse it. A manifest that will not
+  parse fails the call — a runtime never falls back to some other board,
+  because the hello is about to name this one.
+- The manifest travels as TEXT on purpose: `lpa-link` forwards it opaquely
+  and never learns to parse a board.
+- Studio takes the text from `lpa_boards::runtime_manifest_json` for
+  whatever board the project targets. Embedders with no board catalog (this
+  crate's own smoke page) call `desktop_hardware_manifest_json()` for the
+  one board a computer can always be, `lightplayer/desktop`.
+- **`identity`** is the synthetic identity Studio minted for this sim
+  device. A browser runtime has no efuse, so this is the only way it can
+  have a MAC; without it the hello reports none.
+
+The hello then reports `board_id` = the worn manifest's id and the supplied
+`base_mac`, which is what lets a sim be read like any other device.
 
 ## Worker Boundary
 
@@ -62,7 +96,7 @@ The runtime never owns a clock; it advances its `ManualTimeProvider` by exactly
 the delta each `tick` envelope carries. Who supplies that delta is a *worker*
 concern, selected at boot:
 
-- **Self-ticking** (Studio simulator default): the worker JS runs its own timer
+- **Self-ticking** (Studio's sim default): the worker JS runs its own timer
   (~30 fps) and ticks the runtime with the *real* elapsed time measured via
   `performance.now()`. Previews animate at roughly real time even when no
   protocol request is in flight. The Studio client transport is a pure consumer

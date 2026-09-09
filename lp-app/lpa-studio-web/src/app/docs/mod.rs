@@ -31,7 +31,7 @@ pub use docs_page::DocsPage;
 pub struct DocsSimSpec {
     /// The article-facing handle, e.g. `main` in ` ```embed panel sim=main `.
     pub name: &'static str,
-    /// The embedded example this sim runs, e.g. `examples/plasma-duo`.
+    /// The embedded example this sim runs, e.g. `catalog/plasma-duo`.
     pub example_id: &'static str,
 }
 
@@ -61,7 +61,7 @@ pub const PAGES: &[DocPage] = &[
         markdown: include_str!("../../../../../docs/user-guide/README.md"),
         sims: &[DocsSimSpec {
             name: "main",
-            example_id: "examples/plasma-duo",
+            example_id: "catalog/plasma-duo",
         }],
     },
     DocPage {
@@ -70,7 +70,7 @@ pub const PAGES: &[DocPage] = &[
         markdown: include_str!("../../../../../docs/user-guide/what-is-a-shader.md"),
         sims: &[DocsSimSpec {
             name: "main",
-            example_id: "examples/plasma-duo",
+            example_id: "catalog/plasma-duo",
         }],
     },
     DocPage {
@@ -83,11 +83,11 @@ pub const PAGES: &[DocPage] = &[
         sims: &[
             DocsSimSpec {
                 name: "twod",
-                example_id: "examples/peach-2d",
+                example_id: "catalog/peach-2d",
             },
             DocsSimSpec {
                 name: "oned",
-                example_id: "examples/peach-1d",
+                example_id: "catalog/peach-1d",
             },
         ],
     },
@@ -97,7 +97,7 @@ pub const PAGES: &[DocPage] = &[
         markdown: include_str!("../../../../../docs/user-guide/patching-the-dome.md"),
         sims: &[DocsSimSpec {
             name: "main",
-            example_id: "examples/small-dome",
+            example_id: "catalog/small-dome",
         }],
     },
     DocPage {

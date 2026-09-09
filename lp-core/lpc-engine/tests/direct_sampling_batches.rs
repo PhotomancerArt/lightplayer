@@ -41,14 +41,14 @@ const DELTA_MS: u32 = 16;
 /// on a 2D fixture), the fluid sampler (`fluid`), and two fixtures on one
 /// graph (`plasma-duo`).
 const EXAMPLES: &[&str] = &[
-    "basic",
-    "zook-dome",
-    "small-dome",
-    "peach-1d",
-    "peach-2d",
-    "fire2012",
-    "fluid",
-    "plasma-duo",
+    "projects/test/basic",
+    "catalog/projects/zook-dome",
+    "catalog/projects/small-dome",
+    "catalog/projects/peach-1d",
+    "catalog/projects/peach-2d",
+    "catalog/patterns/fire2012",
+    "projects/test/fluid",
+    "catalog/patterns/plasma-duo",
 ];
 
 // ---- a backend with a chosen batch capacity ---------------------------------
@@ -204,18 +204,18 @@ impl LpGraphics for CappedGraphics {
 
 // ---- the crossfade project --------------------------------------------------
 
-/// `examples/button-playlist` with its ring's per-ring counts scaled by
+/// `projects/test/button-playlist` with its ring's per-ring counts scaled by
 /// `scale`: `1 + 240 × scale` lamps (the one-lamp centre grid plus the
 /// disc). Returns the temp dir and the lamp count.
 fn scaled_button_playlist(scale: u32) -> (PathBuf, u32) {
-    let src = workspace_dir().join("examples/button-playlist");
+    let src = workspace_dir().join("projects/test/button-playlist");
     let dir = std::env::temp_dir().join(format!(
         "lp-playlist-crossfade-{}-x{scale}",
         std::process::id()
     ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("temp project dir");
-    for entry in std::fs::read_dir(&src).expect("read examples/button-playlist") {
+    for entry in std::fs::read_dir(&src).expect("read projects/test/button-playlist") {
         let entry = entry.expect("dir entry");
         std::fs::copy(entry.path(), dir.join(entry.file_name())).expect("copy project file");
     }
@@ -247,7 +247,7 @@ fn scaled_button_playlist(scale: u32) -> (PathBuf, u32) {
     // The authored example never binds the playlist's output onto the
     // visual bus (its fixture renders black — see the all-zero digests in
     // `output_control_samples_golden.rs`). The probe needs the crossfade to
-    // reach the fixture, so bind it the way `examples/basic/shader.json`
+    // reach the fixture, so bind it the way `projects/test/basic/shader.json`
     // does. Written by hand, not through `serde_json::Map`: the node-def
     // loader reads `kind` as a leading header and the map sorts keys.
     let playlist = std::fs::read_to_string(src.join("playlist.json")).expect("playlist.json");
@@ -326,14 +326,17 @@ fn published_outputs(engine: &Engine) -> Vec<(String, Vec<u8>)> {
 type Frames = Vec<Vec<(String, Vec<u8>)>>;
 
 fn render_example(project: &str, capacity: u32) -> Frames {
-    let dir = workspace_dir().join("examples").join(project);
-    let root = format!("/{}.show", project.replace(['/', '-'], "_"));
+    let dir = workspace_dir().join(project);
+    let root = format!(
+        "/{}.show",
+        project.rsplit('/').next().unwrap().replace('-', "_")
+    );
     let (mut engine, registry) = load(&dir, &root, capacity);
     (0..TICKS)
         .map(|tick| {
             engine
                 .tick(&registry, DELTA_MS)
-                .unwrap_or_else(|e| panic!("examples/{project} tick {tick}: {e:?}"));
+                .unwrap_or_else(|e| panic!("{project} tick {tick}: {e:?}"));
             published_outputs(&engine)
         })
         .collect()
@@ -404,18 +407,10 @@ fn every_batch_capacity_publishes_the_same_bytes() {
             .iter()
             .flatten()
             .any(|(_, bytes)| bytes.iter().any(|b| *b != 0));
-        assert!(
-            lit,
-            "examples/{project}: the unbatched reference is all black"
-        );
+        assert!(lit, "{project}: the unbatched reference is all black");
         for &capacity in CAPACITIES {
             let candidate = render_example(project, capacity);
-            assert_frames_identical(
-                &format!("examples/{project}"),
-                &reference,
-                &candidate,
-                capacity,
-            );
+            assert_frames_identical(&format!("{project}"), &reference, &candidate, capacity);
         }
     }
 }

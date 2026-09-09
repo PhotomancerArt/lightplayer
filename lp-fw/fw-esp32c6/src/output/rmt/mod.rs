@@ -16,6 +16,11 @@
 //! `led_channel` sits beside them for the hardware harnesses, which drive a
 //! strip without a registry; it is compiled only for those builds.
 //!
+//! A fifth module, [`frame_dump`], exists only under the `frame-dump` feature:
+//! it is the serial transcript of what the channels transmitted, and it hangs
+//! off the app driver's write path. Nothing else depends on it. It is what
+//! `scripts/m4-hardware-walk.sh --chip esp32c6` and its emulator twin read.
+//!
 //! # What this replaced
 //!
 //! Until roadmap M5/P2 this chip ran a WS281x driver of its own — its own ISR,
@@ -37,6 +42,9 @@ pub mod shared_driver;
 /// dependency and always compile.
 #[cfg(all(not(fw_harness), feature = "lpc-hardware"))]
 pub mod esp32c6_rmt_ws281x_driver;
+
+#[cfg(all(not(fw_harness), feature = "lpc-hardware", feature = "frame-dump"))]
+pub mod frame_dump;
 
 #[cfg(all(not(fw_harness), feature = "lpc-hardware"))]
 pub use esp32c6_rmt_ws281x_driver::Esp32C6RmtWs281xDriver;

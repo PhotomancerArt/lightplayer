@@ -81,8 +81,8 @@ impl SimCanvasView {
     /// What the loading state says it is waiting for.
     fn waiting_for(self) -> &'static str {
         match self {
-            Self::Map => "Starting the simulator — the lamp layout appears here.",
-            Self::Product => "Starting the simulator — the rendered frame appears here.",
+            Self::Map => "Starting Desktop (sim) — the lamp layout appears here.",
+            Self::Product => "Starting Desktop (sim) — the rendered frame appears here.",
         }
     }
 }

@@ -59,6 +59,11 @@ them JSON objects with a `kind`.
    this crate rather than importing it (the `lp-emu/` MIT fence), and
    `lp-cli/tests/validate_registry_parity.rs` is what keeps the two honest.
 
+A payload that has **no module** — a shipped-image walk, where the product
+image itself is the subject — skips 1 to 4 and does only 5, plus an
+`ALL_CHECKS` entry naming the image's own features with `emits_header: false`.
+See `boot-idle` below.
+
 **Do not move a wire format in the same change as a refactor.** `lp-cli`
 parses these lines, and a protocol change hidden inside a migration is how a
 desk session gets wasted.
@@ -70,6 +75,212 @@ desk session gets wasted.
 | `shader-compile-stress` | `test_shader_compile_incremental` | `[inc-shader-compile] === DONE ===` | `checks::shader_compile` (record types, host reporter) |
 | `gpio-calibrate` | `test_gpio_calibrate` | `CAL READY target=` (it serves; it never finishes) | `checks::gpio_calibrate` (the `CAL` line protocol, the duty ramp) |
 | `uart-bridge` | `test_uart_bridge` | `UART-BRIDGE READY ` (it serves until unplugged) | `checks::uart_bridge` (the bounded queue, the pump step, the ready line) |
+| `jit-math-perf` | `test_jit_math_perf` | `[jit-math-perf] === DONE ===` | `checks::jit_math_perf` (the corpus, the Q32 kernels, the benchmark runner — the cycle counter itself is injected as a `fn() -> u32`, since reading it is a chip fact rather than portable arithmetic) |
+| `cycle-probe` | `test_cycle_probe` | `[cycle-probe] === DONE ===` | `checks::cycle_probe` (the two-clock bracket, the repetition, the record, and the kernels that need no chip fact) |
+| `gpio-input` | `test_gpio_input` | `[gpio-input] === DONE ===` | `checks::gpio_input` (the scripted edge table both sides are driven by, the quadrature decoder the interrupt handler runs, the record shapes, and the renderer that turns the table into the emulated side's `--pin-script`) |
+| `rmt-chase` | `test_rmt`, `ws281x_telemetry` | `[rmt-chase] === DONE ===` | `checks::rmt_chase` (the chase pattern, the FNV-1a checksum, the per-frame record) |
+| `render-loop` | `bench_render_loop` (with `server,radio,memory_fs`) | `[render-loop] === DONE ===` | `checks::render_loop` (the frame accumulator, the record shapes) |
+| `boot-idle` | *(none — the shipped image)* | `[stack] heartbeat: high-water` | *(none)* |
+| `usb-negative-control` | *(none — the shipped image)* | `"hostDrainingAgainMs"` (the recovery stamp itself) | *(none)* |
+| `usb-detach-reattach` | *(none — the shipped image)* | `"uptime_ms":10000` (a whole heartbeat after the re-open) | *(none)* |
+| `usb-host-absent` | *(none — the shipped image)* | *(none — it prints nothing; see below)* | *(none)* |
+
+### `render-loop` is the shipped image with a project in it
+
+The odd one out among the harnesses, and the only payload here whose feature
+is deliberately **not** called `test_*`.
+
+Every other payload in this crate either replaces the product entry point (the
+`test_*` harnesses, via `fw-esp32c6/build.rs`'s `CARGO_FEATURE_TEST_*` →
+`cfg(fw_harness)` rule) or *is* the product image untouched (the shipped-image
+walks below). `render-loop` is a third thing: the product image with two
+additions and no substitutions. Its in-memory filesystem arrives seeded with a
+real LightPlayer project, and its server loop stops after a fixed number of
+frames and prints a summary. Between those two, everything — `boot_firmware`,
+`auto_load_project`, the shader compile, the render, the RMT open and every
+frame — is the shipped code path.
+
+That shape is forced by what the payload is for. Neither `shader-compile-stress`
+nor `boot-idle` executes a shader: one compiles and stops, the other is `wfi`
+with an empty filesystem. `jit-math-perf` executes JIT'd kernels with no
+pipeline around them and `rmt-chase` drives the output with no shader at all.
+So the emulator speed ladder spent four milestones quoting numbers from images
+that do not do what the product does, and the first thing this payload
+measured was that the render loop runs about **twelve times slower** than the
+`boot-idle` image the ladder had been quoting. A payload that replaced `main`
+could not have found that, because it would have been measuring its own
+re-implementation of the loop.
+
+Two properties are contract:
+
+- **It prints nothing per frame.** Min, max, first and a running sum live in
+  registers and one summary record is emitted after the last frame. This is
+  not an optimisation; it is the correction. `jit-math-perf`'s 2.4× speedup
+  under the M4 poll skip was, measured by address, 100 % of the time spent
+  waiting for UART TX to drain its own logging.
+- **The tick delta is fixed, not measured.** Frame content is therefore a
+  function of the frame index alone, which is what lets two emulator binaries'
+  decoded output be compared frame for frame. The display pipeline's temporal
+  interpolation still reads the guest's real clock, so a frame dump is
+  comparable **within** a time grade and never across one.
+
+Two projects ship behind it, chosen because both address `ws281x:local:D10` —
+the only endpoints that resolve on the emulated board are `D0`–`D3` and
+`D6`–`D10`, built from the `seeed/xiao-esp32-c6` manifest's `display_label`
+alone, which is why the classic-board projects' `IO*` spellings open on
+nothing. `projects/test/basic` (default, 241 lamps, 256 frames, 66 fps) is the
+idiomatic one; `catalog/projects/rocaille` (`bench_project_rocaille`, the same
+241 lamps, 64 frames, 16 fps) is the pressure test — four times the shader per
+frame. The frame counts differ so that both cost the bench the same ~4 s of
+emulated time; what the payload reports is a per-frame mean, which does not
+care how many frames it averaged.
+
+### `gpio-input` is the first payload that makes the chip listen
+
+Every other payload here makes the chip *say* something. This one reads two
+pads, and it is the first that does: before it, nothing in this crate read an
+input at all.
+
+Two things about it are worth the paragraph, because both are the kind of
+decision a later reader would otherwise reverse by accident.
+
+**Its two sides are driven differently, on purpose.** There is no wire and no
+hands on the bench this payload was captured on, so a silicon capture is the
+firmware driving its own pad and reading it back — a self-loop, which works
+because `GPIO.in_` reads a pad's own driven level once the input buffer is on.
+An emulated capture is the *same image* with the levels arriving from outside,
+by `--pin-script`. So the silicon transcript measures the **read path** and
+the emulated one measures the **outside-driver path**. Both are real and
+conflating them would not be, so the `drive=` word on the setup line says
+which, both sidecars say which, and the payload's mask set masks that word and
+nothing else. The switch is **runtime** — a drive-select pad with a pull-down,
+which nothing is wired to on a board — so the image bytes are identical on
+both sides and a difference between the transcripts can never be a difference
+between two builds.
+
+**The button goes through the product's own driver, which is why the harness
+is a `src/tests/` entry point.** `Esp32GpioButtonDriver` lives in
+`fw-esp32c6/src/hardware/button.rs` and needs `esp_hal::gpio`,
+`lpc_hardware::HwRegistry` and the board manifest; a module here that could
+call it would have dragged all three into a crate whose first rule is to stay
+cheap. So the split is `cycle_probe`'s: this module holds the edge table, the
+decoder, the records and the renderer, and the chip-bound half — the pads, the
+interrupt handler, the product driver and the self-loop's output enable — is
+in `fw-esp32c6`. A pass on the button reader is therefore a pass for the code
+the product ships, not for a re-implementation of it.
+
+### `boot-idle` is the shipped image, not a module
+
+The other odd one out, and the reason two fields on `FwCheckConfig` exist.
+`boot-idle` is the product image built `server,radio,memory_fs` on top of the
+defaults, run to its first idle stack heartbeat — a **shipped-image walk**
+(vision Q1), which is a scenario kind rather than a check. There is no
+`check-boot-idle` feature and no `src/checks/boot_idle/`, because there is no
+arithmetic over bytes to share: what it prints is what the firmware prints on
+any boot.
+
+So `firmware_features` is a list here rather than one `test_*` switch, and
+`emits_header` is `false` — nothing in the image calls `write_header`, so the
+transcript's `.meta.json` sidecar is the whole provenance. Steps 1–4 of the
+recipe above do not apply to a payload like this; step 5 does, and it is the
+only step it needs.
+
+(`esp-emu:*` adds `spike_uart0_link` on top, which moves the host link to
+UART0, because that emulator's USB model asserts SOF for ever and the
+firmware would serve into the void believing a host was there. Our own C6
+machine models the host, so since M6 it runs the shipped image on the shipped
+link — the link is a property of the payload, in the host-side registry.)
+
+### The three USB scenarios are the same image asked about its link
+
+`usb-detach-reattach` and `usb-host-absent` join `usb-negative-control` as
+shipped-image scenarios with no module: what differs between them is not the
+firmware, it is what the **host** does. So the difference lives in the
+host-side registry (`Payload::host_plan`, `Payload::capture`), and this side
+carries only the sentinel each one can actually reach.
+
+Two of those sentinels are worth the sentence. `usb-negative-control` cannot
+use a stack heartbeat: `stack_probe` reports only when the high-water mark
+has grown, so the one report it could have seen went into a closed port and
+there may never be another — measured on the emulator twin, one `[stack]`
+line in a twenty-second run, at five seconds, into the dark. And
+`usb-host-absent` has no marker at all, because with no cable the device says
+nothing: its transcript is the emulator reading statics out of the guest, and
+only an emulator can record it.
+
+### `usb-negative-control` is the same image, watched differently
+
+Two payloads share a sentinel and nearly a feature list, and the difference
+between them is not in this crate at all.
+
+`usb-negative-control` is the shipped image built `server,radio` — flash-backed,
+the product's own bytes — and what makes it a distinct payload is **when the
+host side opens the port**. `boot-idle` is flashed with `espflash --monitor`
+and watched from its first byte. This one is flashed with no monitor at all,
+left alone for several seconds, and only then read by a non-resetting reader.
+
+That is the only way to observe the state the firmware cannot report on while
+it is in it: a host attached (SOF arriving) with nobody draining the port.
+Every protocol write times out, the connection monitor latches, and the log
+line saying so is dropped by the latch that emitted it — the outgoing queue is
+gated on `is_connected()`. What survives is a pair of timestamps on the
+device's own clock, in the next heartbeat's `link` object
+(`hostNotDrainingMs`, `hostDrainingAgainMs`, `notDrainingCount`; M6 P1b).
+
+The registry that carries that difference is the **host's**
+(`lp-emu-validate`'s `Payload::capture`), not this one. `FwCheckConfig`
+describes what the firmware is and prints; when the operator opens the port is
+a fact about the operator.
+
+### `cycle-probe` measures a model's terms, not a workload
+
+Every other timing payload here measures something the product does.
+`cycle-probe` measures the **terms** a cycle model is built from: a kernel
+exists to move exactly one cost and nothing else, so a difference between
+silicon and an emulated configuration can be attributed rather than admired.
+
+Two properties are contract rather than implementation.
+
+- **Two clocks on every bracket, always.** The cycle counter and a microsecond
+  clock that is not derived from it, the microsecond reads outside the cycle
+  reads on both sides. If the two disagree about how long a kernel took, that
+  disagreement is a finding and is meant to be visible — a payload that
+  reported one clock could not tell "the model is wrong" from "the counter
+  stopped". Plan one lost a sitting to exactly that ambiguity (`notes.md` F3).
+- **Nothing is reduced.** Every repetition reaches the record; there is no
+  mean, and `bracket_overhead` is reported rather than subtracted. Variance on
+  silicon is data, and a payload that hides it hands the model a precision it
+  has not got.
+
+`insns` is on a record only where the count is *exact* — an assembly loop of
+known length times its iteration count. The kernels whose bodies are compiled
+Rust carry no `insns` field at all, because an estimate in a calibration
+record is worse than a gap in one.
+
+### `rmt-chase` is the first payload whose claim is checked off a pin
+
+Every other payload here is believed because the device said so. This one
+prints what the driver *thinks* it sent — one `rmt-frame` record per frame,
+with an FNV-1a checksum over the RGB bytes — and the emulator reads the same
+frame back off **the pad**, decoding the WS281x waveform the RMT actually put
+on GPIO18. The gate is that the two checksums agree, frame by frame — and the
+decoded frames are committed beside the transcript as its pin capture, so the
+comparison outlives the run.
+
+Of the `[WS281X]` telemetry's counters, `trips`, `skips` and `errors` are
+graded `Pin`: a truncated frame is a claim about a real strip, and the wire is
+now observable. `frames`, `complete`, `refills` and `wanted` are graded
+`Timing` despite reading like pin claims, because the line is printed once
+every ten seconds of the guest's uptime and how many frames fit in ten seconds
+is exactly what a time grade decides.
+
+Its pattern is a white dot (`[10, 10, 10]`) on black, which is invariant under
+any permutation of the three colour channels — deliberately, because
+`LedChannel` swaps RGB to GRB and `lp-ws281x` then permutes again, so the
+bytes on the wire are the caller's RGB unswapped. That double swap is a
+finding filed against the harness path (DD34 d), not something this phase
+fixed, and the payload is built so that settling it later cannot invalidate a
+committed transcript.
 
 ### `uart-bridge` is an instrument, not a measurement
 

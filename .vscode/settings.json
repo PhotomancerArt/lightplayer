@@ -11,7 +11,7 @@
     {
       "fileMatch": [
         "/projects/**/project.json",
-        "/examples/**/project.json",
+        "/catalog/**/project.json",
         "/lp-fw/fw-browser/www/smoke-project/project.json"
       ],
       "url": "./schemas/project.schema.json"
@@ -20,8 +20,8 @@
       "fileMatch": [
         "/projects/**/*.json",
         "!/projects/**/project.json",
-        "/examples/**/*.json",
-        "!/examples/**/project.json",
+        "/catalog/**/*.json",
+        "!/catalog/**/project.json",
         "/lp-fw/fw-browser/www/smoke-project/*.json",
         "!/lp-fw/fw-browser/www/smoke-project/project.json"
       ],

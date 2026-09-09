@@ -1,6 +1,6 @@
 // test run
 
-// Focused slice from examples/basic/shader.glsl. This keeps the native frontend honest about
+// Focused slice from projects/test/basic/shader.glsl. This keeps the native frontend honest about
 // the palette vector math and LPFN signatures needed before the full basic shader is useful.
 
 vec3 paletteWarm(float t) {

@@ -1,6 +1,6 @@
 //! Host oracle for the on-device shader render.
 //!
-//! Renders `examples/shader-oracle` through the host LPVM engine and prints the
+//! Renders `projects/test/shader-oracle` through the host LPVM engine and prints the
 //! exact bytes a device's ws281x driver must receive. A `fw-esp32s3` **or**
 //! `fw-esp32v3` built with its `frame-dump` feature prints the same bytes off
 //! its RMT write path (`output::rmt::frame_dump`, ported between the two
@@ -101,7 +101,7 @@ fn shader_oracle_frame_matches_across_frames() {
 /// returning the ws281x bytes. A fresh server per engine keeps the engines from
 /// sharing any cached artifact.
 fn render_project(graphics: Arc<dyn LpGraphics>) -> Vec<u8> {
-    let project_dir = repo_root().join("examples").join(PROJECT_NAME);
+    let project_dir = repo_root().join("projects/test").join(PROJECT_NAME);
     assert!(
         project_dir.is_dir(),
         "missing project directory {}",

@@ -11,7 +11,7 @@
 //! `tests/corpus/v4/_expected/<project>/` is what this crate produces from
 //! them. Those trees are OUR contract, reviewed once by a human and frozen
 //! thereafter. They deliberately do **not** match today's hand-polished
-//! `examples/` and `projects/test/`: the hand migration converted several
+//! `catalog/` and `projects/test/`: the hand migration converted several
 //! uniforms to phasors using periods mined out of GLSL, which is authoring
 //! judgment an upgrader must not invent.
 //!

@@ -483,7 +483,7 @@ undocumented WiFi window (the PAC's next base is the only thing that named
 them), so the blob's real footprint is ≈1,088 sites; the SPI flash path is
 the busiest peripheral of the whole walk (14,169 decoded `USR` commands —
 13,528 reads, 634 page programs, 29 sector erases, 664 write-enables — the
-project upload and littlefs); esp-emu's IO_MUX model stops at GPIO15, so
+project upload and littlefs)[^spi-total]; esp-emu's IO_MUX model stops at GPIO15, so
 the pad writes for GPIO16–30 (UART0's pads and the WS281x pin GPIO18) are
 all "unhandled" and yet nothing misbehaves; and GDMA is never touched by
 any register — its only trace is its PCR clock gate.
@@ -858,3 +858,19 @@ Advanced:   --timeout <DUR>  --exit-on <STR>  --save-state  --efuse <FILE>  --sk
             --strap-mode <HEX>  --rmt-loopback <TX:RX[,..]>  --log-color <auto|always|never>
 Subcommands: update
 ```
+
+---
+
+[^spi-total]: **Amended 2026-09-08 (M8's docs sweep, plan
+    `2026-09-06-1001-esp-emulator`, DD40 d).** The stated total and its own
+    breakdown disagree: 13,528 + 634 + 29 + 664 = **14,855**, not 14,169, a
+    difference of 686. Which figure is right is not recoverable from this
+    report — the scan that produced them is not committed and the spike's
+    scratch captures are gone — so both are left as written and the
+    discrepancy is named here rather than one of them being quietly
+    corrected to match the other. Neither number is load-bearing: the
+    finding is "the SPI flash path is the busiest peripheral of the walk by
+    an order of magnitude", and that survives either. If an exact count is
+    ever wanted, re-derive it — `lp-emu-esp32c6`'s own `FlashCensus`
+    (`machine.flash_census()`) counts the same commands on the same walk,
+    from a machine whose source is in the repository.

@@ -1,0 +1,57 @@
+^D[2026-09-07T15:46:12Z INFO ] 🚀 A new version of espflash is available: v4.5.0
+[2026-09-07T15:46:12Z INFO ] Serial port: '/dev/cu.usbmodem1433201'
+[2026-09-07T15:46:12Z INFO ] Connecting...
+[2026-09-07T15:46:12Z INFO ] Using flash stub
+Chip type:         esp32c6 (revision v0.2)
+Crystal frequency: 40 MHz
+Flash size:        4MB
+Features:          WiFi 6, BT 5
+MAC address:       a0:f2:62:87:b4:8c
+Partition table:   lp-fw/fw-esp32c6/partitions.csv
+App/part. size:    99,904/3,145,728 bytes, 3.18%
+[2026-09-07T15:46:12Z INFO ] Segment at address '0x0' has not changed, skipping write
+[2026-09-07T15:46:12Z INFO ] Segment at address '0x8000' has not changed, skipping write
+[00:00:00] [=>                                      ]       1/28      0x10000   [2K[00:00:00] [==>                                     ]       2/28      0x10000   [2K[00:00:00] [====>                                   ]       3/28      0x10000   [2K[00:00:00] [=====>                                  ]       4/28      0x10000   [2K[00:00:00] [=======>                                ]       5/28      0x10000   [2K[00:00:00] [========>                               ]       6/28      0x10000   [2K[00:00:00] [==========>                             ]       7/28      0x10000   [2K[00:00:00] [===========>                            ]       8/28      0x10000   [2K[00:00:00] [============>                           ]       9/28      0x10000   [2K[00:00:00] [==============>                         ]      10/28      0x10000   [2K[00:00:00] [===============>                        ]      11/28      0x10000   [2K[00:00:00] [=================>                      ]      12/28      0x10000   [2K[00:00:00] [==================>                     ]      13/28      0x10000   [2K[00:00:00] [====================>                   ]      14/28      0x10000   [2K[00:00:00] [=====================>                  ]      15/28      0x10000   [2K[00:00:00] [======================>                 ]      16/28      0x10000   [2K[00:00:00] [========================>               ]      17/28      0x10000   [2K[00:00:00] [=========================>              ]      18/28      0x10000   [2K[00:00:00] [===========================>            ]      19/28      0x10000   [2K[00:00:00] [============================>           ]      20/28      0x10000   [2K[00:00:00] [==============================>         ]      21/28      0x10000   [2K[00:00:00] [===============================>        ]      22/28      0x10000   [2K[00:00:00] [================================>       ]      23/28      0x10000   [2K[00:00:00] [==================================>     ]      24/28      0x10000   [2K[00:00:00] [===================================>    ]      25/28      0x10000   [2K[00:00:00] [========================================]      28/28      0x10000   [2K[00:00:00] [========================================]      28/28      0x10000   [2026-09-07T15:46:13Z INFO ] Flashing has completed!
+Commands:
+    CTRL+R    Reset chip
+    CTRL+C    Exit
+
+ESP-ROM:esp32c6-20220919
+Build:Sep 19 2022
+rst:0x15 (USB_UART_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)
+Saved PC:0x4080053c
+[38;5;11m0x4080053c - swint_handler_trampoline
+    at ??:??
+[39mSPIWP:0xee
+mode:DIO, clock div:2
+load:0x4086c410,len:0xd48
+load:0x4086e610,len:0x2d68
+[38;5;11m0x4086e610 - fw_esp32c6::board::esp32c6::init::init_board::HEAP
+    at ??:??
+[39mload:0x40875720,len:0x1800
+[38;5;11m0x40875720 - fw_esp32c6::board::esp32c6::init::init_board::HEAP
+    at ??:??
+[39mentry 0x4086c410
+[0;32mI (23) boot: ESP-IDF v5.1-beta1-378-gea5e0ff298-dirt 2nd stage bootloader[0m
+[0;32mI (23) boot: compile time Jun  7 2023 08:02:08[0m
+[0;32mI (24) boot: chip revision: v0.2[0m
+[0;32mI (28) boot.esp32c6: SPI Speed      : 40MHz[0m
+[0;32mI (33) boot.esp32c6: SPI Mode       : DIO[0m
+[0;32mI (37) boot.esp32c6: SPI Flash Size : 4MB[0m
+[0;32mI (42) boot: Enabling RNG early entropy source...[0m
+[0;32mI (48) boot: Partition Table:[0m
+[0;32mI (51) boot: ## Label            Usage          Type ST Offset   Length[0m
+[0;32mI (58) boot:  0 nvs              WiFi data        01 02 00009000 00005000[0m
+[0;32mI (66) boot:  1 bootctl          Unknown data     01 06 0000e000 00001000[0m
+[0;32mI (73) boot:  2 phy_init         RF data          01 01 0000f000 00001000[0m
+[0;32mI (81) boot:  3 factory          factory app      00 00 00010000 00300000[0m
+[0;32mI (88) boot:  4 lpfs             Unknown data     01 82 00310000 000f0000[0m
+[0;32mI (96) boot: End of partition table[0m
+[0;32mI (100) esp_image: segment 0: paddr=00010020 vaddr=42000020 size=019ech (  6636) map[0m
+[0;32mI (110) esp_image: segment 1: paddr=00011a14 vaddr=40800000 size=01760h (  5984) load[0m
+[0;32mI (118) esp_image: segment 2: paddr=0001317c vaddr=00000000 size=0ce9ch ( 52892) [0m
+[0;32mI (136) esp_image: segment 3: paddr=00020020 vaddr=42010020 size=085f0h ( 34288) map[0m
+[0;32mI (144) boot: Loaded app from partition at offset 0x10000[0m
+[0;32mI (145) boot: Disabling RNG early entropy source...[0m
+[fw-checks-header] {"schema":1,"payload":"gpio-calibrate","chip":"esp32c6","firmware_commit":"735af98ae9d9","firmware_features":"default,esp32c6,esp_radio,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_gpio_calibrate","firmware_dirty":true}
+CAL READY target=esp32c6

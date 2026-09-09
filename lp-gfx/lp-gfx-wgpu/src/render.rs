@@ -7,12 +7,18 @@ use lp_gfx::{GfxError, LpShader, SampleOutHandle, SamplePointsHandle, TextureHan
 use lp_shader::{ShaderEntrySpace, TextureBindingSpecs};
 use lps_shared::{LpsValueF32, TextureShapeHint, TextureStorageFormat};
 
+use crate::fault_flag::FaultFlag;
 use crate::gpu_graphics::GpuShared;
 use crate::sample_pass::SamplePass;
 use crate::texture_backing::{gpu_format, gpu_texture_mut};
 use crate::uniform_layout::{TextureGlobal, UniformTable, reflect_textures, reflect_uniforms};
 use crate::uniform_writer::encode_uniforms;
 use crate::wgsl_compile::compile_wgsl;
+
+/// Bound on the filetest probe's waits (longer than the product bound: the
+/// corpus runs many probes in parallel on one device).
+#[cfg(not(target_arch = "wasm32"))]
+const PROBE_WAIT: core::time::Duration = core::time::Duration::from_secs(20);
 
 /// Hand-written fullscreen-triangle vertex stage (the fragment stage comes
 /// from the authored GLSL via naga wgsl-out).
@@ -35,6 +41,11 @@ fn vs_main(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
 /// buffer, rewritten every frame from the engine's `LpsValueF32` tree.
 /// Texture uniforms (`LpsValueF32::Texture2D` fields) resolve through the
 /// backend's texture registry into bind-group entries per render call.
+/// A shader with loops also binds its loop fault flag
+/// ([`crate::fault_flag`]), cleared before and read after every dispatch:
+/// a non-zero count is the GPU tier's fuel trap, returned as
+/// [`GfxError::FuelExhausted`] from `render`, `probe_f32` and the sample
+/// pass.
 pub struct GpuShader {
     shared: Arc<GpuShared>,
     /// Authored GLSL, kept for the lazily-built sample pipeline (the sample
@@ -75,6 +86,8 @@ struct ShaderBindings {
     /// bindings); with textures the group is rebuilt per render from the
     /// uniform tree's texture values.
     static_bind_group: Option<wgpu::BindGroup>,
+    /// The loop fault flag, `Some` when the module has loops.
+    fault: Option<FaultFlag>,
 }
 
 /// The instance uniform buffer and its per-global slices.
@@ -108,7 +121,11 @@ impl GpuShader {
             source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(FULLSCREEN_TRIANGLE_WGSL)),
         });
 
-        let bindings = if table.globals.is_empty() && texture_globals.is_empty() {
+        let fault = compiled
+            .fault_binding
+            .map(|binding| FaultFlag::new(device, binding));
+        let bindings = if table.globals.is_empty() && texture_globals.is_empty() && fault.is_none()
+        {
             None
         } else {
             let mut entries: Vec<wgpu::BindGroupLayoutEntry> = table
@@ -140,6 +157,9 @@ impl GpuShader {
                     },
                     count: None,
                 });
+            }
+            if let Some(fault) = &fault {
+                entries.push(fault.layout_entry());
             }
             let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("lp-gfx-wgpu shader bindings"),
@@ -174,6 +194,7 @@ impl GpuShader {
                     &table,
                     uniforms.as_ref(),
                     &[],
+                    fault.as_ref(),
                 ))
             } else {
                 None
@@ -183,6 +204,7 @@ impl GpuShader {
                 layout,
                 uniforms,
                 static_bind_group,
+                fault,
             })
         };
 
@@ -265,6 +287,15 @@ impl GpuShader {
                     interface(&self.table)
                 )));
             }
+            // Same authored loops, same next-free slot: the sample unit
+            // must bind the flag where the shared layout has it.
+            let render_fault_binding = self.fault_flag().map(FaultFlag::binding);
+            if compiled.fault_binding != render_fault_binding {
+                return Err(GfxError::Compile(format!(
+                    "sample unit loop fault binding {:?} does not match the render unit's {:?}",
+                    compiled.fault_binding, render_fault_binding
+                )));
+            }
             self.sample_pass = Some(SamplePass::new(
                 &self.shared,
                 &compiled.wgsl,
@@ -331,6 +362,7 @@ impl GpuShader {
                     &self.table,
                     bindings.uniforms.as_ref(),
                     &texture_views,
+                    bindings.fault.as_ref(),
                 ));
             }
         }
@@ -339,6 +371,9 @@ impl GpuShader {
             .shared
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        if let Some(fault) = self.fault_flag_mut() {
+            fault.begin(&mut encoder)?;
+        }
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("lp-gfx-wgpu probe render"),
@@ -366,20 +401,37 @@ impl GpuShader {
             }
             pass.draw(0..3, 0..1);
         }
-        self.shared.queue.submit([encoder.finish()]);
+        if let Some(fault) = self.fault_flag_mut() {
+            fault.capture(&mut encoder);
+        }
+        let submission = self.shared.queue.submit([encoder.finish()]);
 
-        // Bounded wait: corpus shaders may not terminate (CPU targets rely
-        // on fuel exhaustion; the GPU has none). A hung submission surfaces
-        // as PollError::Timeout instead of hanging the harness forever.
-        read_back_f32(
+        // Bounded wait: every loop is budgeted, so a submission that
+        // outlives the bound is a wedged device, surfaced as
+        // PollError::Timeout instead of hanging the harness forever.
+        let texels = read_back_f32(
             &self.shared.device,
             &self.shared.queue,
             &backing,
             width,
             1,
             TextureStorageFormat::Rgba16Unorm,
-            Some(core::time::Duration::from_secs(20)),
-        )
+            Some(PROBE_WAIT),
+        )?;
+        // The flag's submission has completed by now; this wait is a formality.
+        let device = &self.shared.device;
+        if let Some(fault) = self.bindings.as_mut().and_then(|b| b.fault.as_mut()) {
+            fault.collect(device, submission, Some(PROBE_WAIT))?;
+        }
+        Ok(texels)
+    }
+
+    fn fault_flag(&self) -> Option<&FaultFlag> {
+        self.bindings.as_ref().and_then(|b| b.fault.as_ref())
+    }
+
+    fn fault_flag_mut(&mut self) -> Option<&mut FaultFlag> {
+        self.bindings.as_mut().and_then(|b| b.fault.as_mut())
     }
 
     /// Resolve the shader's texture bindings from the uniform tree: each
@@ -478,6 +530,7 @@ impl LpShader for GpuShader {
                     &self.table,
                     bindings.uniforms.as_ref(),
                     &texture_views,
+                    bindings.fault.as_ref(),
                 ));
             }
         }
@@ -486,6 +539,9 @@ impl LpShader for GpuShader {
             .shared
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        if let Some(fault) = self.fault_flag_mut() {
+            fault.begin(&mut encoder)?;
+        }
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("lp-gfx-wgpu shader render"),
@@ -513,7 +569,16 @@ impl LpShader for GpuShader {
             }
             pass.draw(0..3, 0..1);
         }
-        self.shared.queue.submit([encoder.finish()]);
+        if let Some(fault) = self.fault_flag_mut() {
+            fault.capture(&mut encoder);
+        }
+        let submission = self.shared.queue.submit([encoder.finish()]);
+        // The GPU tier's fuel trap: native waits on this submission
+        // (bounded), the browser reports the previous frame's count.
+        let device = &self.shared.device;
+        if let Some(fault) = self.bindings.as_mut().and_then(|b| b.fault.as_mut()) {
+            fault.collect(device, submission, product_wait())?;
+        }
         Ok(())
     }
 
@@ -547,6 +612,7 @@ impl LpShader for GpuShader {
                     &self.table,
                     bindings.uniforms.as_ref(),
                     &texture_views,
+                    bindings.fault.as_ref(),
                 ));
             }
         }
@@ -591,26 +657,41 @@ impl LpShader for GpuShader {
             bound_sample_bind_group,
             ..
         } = self;
-        let bind_group = bound_sample_bind_group.as_ref().or_else(|| {
-            bindings
-                .as_ref()
-                .and_then(|bindings| bindings.static_bind_group.as_ref())
-        });
+        let (static_bind_group, fault) = match bindings.as_mut() {
+            Some(bindings) => (bindings.static_bind_group.as_ref(), bindings.fault.as_mut()),
+            None => (None, None),
+        };
+        let bind_group = bound_sample_bind_group.as_ref().or(static_bind_group);
         sample_pass
             .as_mut()
             .expect("sample pass was ensured by bind_uniforms")
-            .run(shared, point_coords, bind_group, out_channels)
+            .run(shared, point_coords, bind_group, fault, out_channels)
+    }
+}
+
+/// The product dispatch wait: native waits on the dispatch's own submission
+/// for its fault count (bounded like every product read-back); the browser
+/// never waits, so the bound is moot there.
+fn product_wait() -> Option<core::time::Duration> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        Some(crate::read_back::PRODUCT_READ_BACK_WAIT)
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        None
     }
 }
 
 /// Assemble the `@group(0)` bind group from the uniform buffer slices plus
-/// resolved texture views.
+/// resolved texture views and the loop fault flag.
 fn build_bind_group(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
     table: &UniformTable,
     uniforms: Option<&ShaderUniforms>,
     texture_views: &[(u32, wgpu::TextureView)],
+    fault: Option<&FaultFlag>,
 ) -> wgpu::BindGroup {
     let mut entries: Vec<wgpu::BindGroupEntry> = Vec::new();
     if let Some(shader_uniforms) = uniforms {
@@ -633,6 +714,7 @@ fn build_bind_group(
                 resource: wgpu::BindingResource::TextureView(view),
             }),
     );
+    entries.extend(fault.map(FaultFlag::bind_group_entry));
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("lp-gfx-wgpu shader bindings"),
         layout,

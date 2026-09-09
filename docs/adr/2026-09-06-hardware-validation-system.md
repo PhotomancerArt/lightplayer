@@ -147,7 +147,7 @@ nothing. **Masking means reported-but-not-compared, never deleted.**
 `list`, `replay`, `run`, `record`. Drivers **plan first and execute second**,
 so `--dry-run` prints the exact commands — which is what makes a desk protocol
 reviewable before a board is plugged in. The silicon driver shells out to
-`scripts/spike/esp-emu/desk-espflash-step.sh` rather than re-deriving the port
+`scripts/emu/desk-espflash-step.sh` rather than re-deriving the port
 discipline: foreground espflash under `script(1)` with a `SIG_DFL` exec shim,
 sentinel poll, SIGINT to that pid only, `lsof`/`pgrep` post-check. Every clause
 there is a sitting that broke.
@@ -207,3 +207,79 @@ so the same file can be read under different rules forever.
   to the host, UART0 to the board under test). Both are small, neither is
   useful without the other, and both are recorded in `g3-desk-batch.md` and
   assigned to M6's first phase.
+
+## Amendment, 2026-09-06 (M3 P7, PR #555)
+
+Two claims above are the state at M2 and no longer describe the tree; the
+decisions are unchanged.
+
+- `lp-emu:*` is **no longer "unavailable until M3"**. `lp-emu:esp32c6:t1` and
+  `:t2` are runnable configurations with a driver behind them, and the trait
+  really was the only seam: nothing else in `lp-emu-validate` changed shape to
+  accept the machine. Both are graded `modeled` in every field class, with the
+  compile harness's byte-equality recorded as *evidence in the reason* rather
+  than as a promotion to `measured`.
+- A payload's `firmware_feature` is now a **list**, and a payload declares
+  whether it prints the in-band header. Both fell out of the same case: the
+  `boot-idle` payload is the shipped image itself (vision Q1's shipped-image
+  walk), which has no `fw-checks` module to print a header and is named by a
+  feature set rather than one `test_*` switch. The parity test carries the new
+  fields, and gained one more: a payload with no module must claim no header.
+- The identity a configuration reports (`mac`, `silicon_rev`, `board`) can now
+  be stated in `validate.toml`, because an emulator has no eFuse to read. That
+  does not touch "identity is the chip": the configuration name is still the
+  chip, and those fields are what the runner passes to the machine so that a
+  hello frame's identity compares equal to silicon's instead of differing over
+  who was told what.
+
+
+## Amendment, 2026-09-07 (M5 P3, PR #595): the pin capture
+
+A transcript can now carry a **third file**, and this is the first widening
+of the contract G2 settled. It is **additive**, which is what made it a
+director-level change rather than a re-opening: every sidecar written before
+it loads unchanged and serialises without the new field, and a payload that
+makes no claim about a wire never gains a companion.
+
+```text
+lp-emu/transcripts/<chip>/<payload>/<configuration>-<date>-<short>.txt
+lp-emu/transcripts/<chip>/<payload>/<configuration>-<date>-<short>.txt.meta.json
+lp-emu/transcripts/<chip>/<payload>/<configuration>-<date>-<short>.txt.pins.jsonl   ← new
+```
+
+Raised as escalation E3 and answered by Yona on 2026-09-07 with the question
+that settles it: *"why wouldn't we want that?"*
+
+**Why a third file rather than more lines in the first.** The `.txt` is
+defined as the bytes a reader on the port saw — that is the whole reason it
+is kept verbatim, ANSI and progress bars and all. A decoded WS281x frame is
+not one of those bytes. It is what a **pad** carried, read off the waveform
+by a decoder that never spoke to the firmware, and putting it inside the
+console capture would make the capture a thing nobody actually observed.
+
+**Why it matters more than a convenience.** Until this, every claim in every
+transcript was something the device said about itself. `rmt-chase` prints
+`{"kind":"rmt-frame","crc":…}` — the driver's checksum of the frame it handed
+the hardware — and the companion holds `{"kind":"ws281x-frame","wire":…}`,
+the bytes that went down the wire. `replay` makes two different checks with
+them: **within** one transcript, the guest's checksum against its own pad,
+whose disagreement is a broken recording and is reported as a structural
+problem naming the frame; and **between** two transcripts, the pad's frames
+as `Pin`-class comparisons, which fail a replay. That is the first time a
+transcript can be wrong about a wire and be caught.
+
+The mechanics: the sidecar's optional `pins` is a **file name**, resolved
+against the transcript's own directory, so a tree can be moved wholesale and
+a companion can never point outside it. A payload's registry entry declares
+`pin_capture`, the runner passes `--dump-frames file:…` to a configuration
+that can observe a pad, and `record` copies the file beside the `.txt` —
+refusing to record at all if the payload claims a pad and the run decoded no
+frame on one. A configuration with no pin observation, which is silicon
+without an instrument on the header, records the console half and says
+nothing about the wire; that is exactly what its trust grade already said.
+
+**The grade did not move.** `lp-emu:esp32c6:t1|t2` stay `modeled` for `pin`,
+with the committed captures written into the `because` as evidence. 768
+frames whose checksums agree on both time grades is the strongest evidence
+this class has had, and both readings are still ours: what earns `measured`
+is an instrument on a real pin.

@@ -9,6 +9,7 @@ use lp_riscv_inst::{
 };
 
 /// Decode and execute JAL instruction (J-type, opcode 0x6f).
+#[inline(always)]
 pub(super) fn decode_execute_jal<M: LoggingMode, B: Bus>(
     inst_word: u32,
     pc: u32,
@@ -22,6 +23,7 @@ pub(super) fn decode_execute_jal<M: LoggingMode, B: Bus>(
 }
 
 /// Decode and execute JALR instruction (I-type, opcode 0x67).
+#[inline(always)]
 pub(super) fn decode_execute_jalr<M: LoggingMode, B: Bus>(
     inst_word: u32,
     pc: u32,
@@ -36,6 +38,7 @@ pub(super) fn decode_execute_jalr<M: LoggingMode, B: Bus>(
 }
 
 /// Decode and execute LUI instruction (U-type, opcode 0x37).
+#[inline(always)]
 pub(super) fn decode_execute_lui<M: LoggingMode, B: Bus>(
     inst_word: u32,
     pc: u32,
@@ -49,6 +52,7 @@ pub(super) fn decode_execute_lui<M: LoggingMode, B: Bus>(
 }
 
 /// Decode and execute AUIPC instruction (U-type, opcode 0x17).
+#[inline(always)]
 pub(super) fn decode_execute_auipc<M: LoggingMode, B: Bus>(
     inst_word: u32,
     pc: u32,

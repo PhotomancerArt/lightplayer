@@ -48,7 +48,7 @@ the model, regenerate, and commit the schema diff together with the code.
 Two more guards keep the schemas honest:
 
 - **Conformance:** `lp-cli/tests/schema_conformance.rs` validates every
-  authored artifact (`projects/`, `examples/`, the fw-browser smoke
+  authored artifact (`projects/`, `catalog/`, the fw-browser smoke
   project, board manifests) against the checked-in schemas in normal CI.
 - **Firmware isolation:** `just lint-schemars-fw` asserts `schemars` never
   appears in an RV32 firmware graph — schema generation is host-only
@@ -66,7 +66,7 @@ mismatched version before parsing. To make a breaking format change:
    `lp-app/lpa-upgrade/src/steps/v<N>_to_v<N+1>.rs` as a stub. Refuses to
    overwrite an existing snapshot and does not edit the constant.
 2. Bump `PROJECT_FORMAT_VERSION` by hand and make the format change.
-3. Update the authored `project.json` files (`projects/`, `examples/`,
+3. Update the authored `project.json` files (`projects/`, `catalog/`,
    `lp-fw/fw-browser/www/smoke-project`).
 4. Write the scaffolded step's `apply()` and register it in
    `lp-app/lpa-upgrade/src/steps/mod.rs::STEPS`; copy the new snapshot's

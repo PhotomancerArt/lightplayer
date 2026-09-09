@@ -81,7 +81,7 @@ fn workspace_dir() -> PathBuf {
         .to_path_buf()
 }
 
-/// Load examples/zook-dome and run the first ticks, bracketing each phase
+/// Load catalog/projects/zook-dome and run the first ticks, bracketing each phase
 /// under the tracking allocator. Prints the phase table (`--nocapture`).
 #[test]
 fn zook_dome_load_and_tick_memory_phases() {
@@ -102,10 +102,11 @@ fn zook_dome_load_and_tick_memory_phases() {
 
     let mut loaded = None;
     run("load project", &mut || {
-        let fs = LpFsStd::new(workspace_dir().join("examples/zook-dome"));
+        let fs = LpFsStd::new(workspace_dir().join("catalog/projects/zook-dome"));
         let services = EngineServices::new(TreePath::parse("/zook_dome.show").expect("root path"));
-        loaded =
-            Some(ProjectLoader::load_from_root(&fs, services).expect("load examples/zook-dome"));
+        loaded = Some(
+            ProjectLoader::load_from_root(&fs, services).expect("load catalog/projects/zook-dome"),
+        );
     });
     let mut rt = loaded.expect("loaded");
 

@@ -48,7 +48,7 @@ const TRI_CORNER_RATIO: f32 = 0.16;
 /// tangent points are G1-continuous with the straight edges.
 ///
 /// Separate from [`fillet_tri_path`] because the triangle is used as
-/// *geometry* as well as as a `d` string — the `examples/logo-sign` map2d
+/// *geometry* as well as as a `d` string — the `catalog/logo-sign` map2d
 /// generator flattens it into a lamp-carrying outline — and the two must be
 /// the same triangle, not two constructions of one.
 pub(crate) fn fillet_tri_corners(cx: f32, cy: f32, r: f32, rho: f32) -> [[(f32, f32); 2]; 3] {

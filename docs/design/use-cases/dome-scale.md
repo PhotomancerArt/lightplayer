@@ -9,7 +9,7 @@ across **190 panels**, driven by **10 PixLite Long Range** controllers.
 When "the Dome" appears in a plan or a conversation, that is the piece
 meant.
 
-Zook's dome — the `examples/zook-dome` project — is **NOT** "the Dome".
+Zook's dome — the `catalog/projects/zook-dome` project — is **NOT** "the Dome".
 It is a small dome, useful as a test piece and a mapping example, and
 confusing the two has already cost time. Say "Zook's dome" when that is
 what is meant.

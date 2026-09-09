@@ -24,15 +24,21 @@ const EXPECTED_COMPATIBILITY: &[(&str, &[&str])] = &[
     ("espressif/esp32-c6-devkitc-1", &["esp32c6-4mb"]),
     ("espressif/esp32-devkitc-v4", &["esp32v3-4mb"]),
     ("espressif/esp32-s3-devkitc-1", &["esp32s3-8mb"]),
+    // The Desktop board is not silicon: no firmware image is flashed to a
+    // computer, so an empty list is the correct and permanent answer.
+    ("lightplayer/desktop", &[]),
     ("quinled/dig-uno", &["esp32v3-4mb"]),
     ("quinled/dig2go", &["esp32v3-4mb"]),
     ("seeed/xiao-esp32-c6", &["esp32c6-4mb"]),
     ("seeed/xiao-esp32-s3-plus", &["esp32s3-8mb"]),
 ];
 
-/// Why a board runs nothing. Empty since `fw-esp32v3`'s build def landed:
-/// every checked-in board now computes at least one compatible build.
-const EXPECTED_NO_BUILD: &[(&str, NoBuildReason)] = &[];
+/// Why a board runs nothing. Every SILICON board computes a compatible
+/// build since `fw-esp32v3`'s build def landed; the one entry here is the
+/// Desktop board, whose `family` names no chip because there is none — the
+/// desktop firmware is built, never flashed.
+const EXPECTED_NO_BUILD: &[(&str, NoBuildReason)] =
+    &[("lightplayer/desktop", NoBuildReason::NoBuildForChip)];
 
 fn builds_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../lp-fw/builds")

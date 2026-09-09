@@ -1,9 +1,141 @@
 {
-  "comment": "Measured heap-budget record — a ratchet, not a target. These are what the projects cost TODAY on the RV32 emulator, not what any product may use. Per project and profile mode; steady-render records only the frame window. Regenerate with `just heap-budget-baseline`; see docs/heap-budget-gate.md.",
-  "recorded": "2026-09-06",
-  "commit": "dd25c4af5",
+  "comment": "Measured heap-budget record \u2014 a ratchet, not a target. These are what the projects cost TODAY on the RV32 emulator, not what any product may use. Per project and profile mode; steady-render records only the frame window. Regenerate with `just heap-budget-baseline`; see docs/heap-budget-gate.md.",
+  "recorded": "2026-09-07",
+  "commit": "357222797",
   "projects": {
-    "examples/basic": {
+    "catalog/patterns/meteor": {
+      "modes": {
+        "startup": {
+          "windows": {
+            "server-boot": {
+              "transient": 47680,
+              "retained": 47680,
+              "largest_alloc": 36864,
+              "alloc_count": 928,
+              "alloc_bytes": 86539,
+              "largest_free_at_close": 253976,
+              "holes_at_close": 3
+            },
+            "project-load": {
+              "transient": 50074,
+              "retained": 46304,
+              "largest_alloc": 3584,
+              "alloc_count": 4917,
+              "alloc_bytes": 291857,
+              "largest_free_at_close": 211224,
+              "holes_at_close": 44
+            },
+            "frame": {
+              "transient": 96581,
+              "retained": 43752,
+              "largest_alloc": 20480,
+              "alloc_count": 6482,
+              "alloc_bytes": 357560,
+              "largest_free_at_close": 171960,
+              "holes_at_close": 12
+            },
+            "shader-compile": {
+              "transient": 32274,
+              "retained": 7010,
+              "largest_alloc": 8148,
+              "alloc_count": 3686,
+              "alloc_bytes": 188589,
+              "largest_free_at_close": 131832,
+              "holes_at_close": 38
+            },
+            "shader-link": {
+              "transient": 3282,
+              "retained": 0,
+              "largest_alloc": 3192,
+              "alloc_count": 7,
+              "alloc_bytes": 3337,
+              "largest_free_at_close": 131832,
+              "holes_at_close": 38
+            }
+          }
+        },
+        "steady-render": {
+          "windows": {
+            "frame": {
+              "transient": 19336,
+              "retained": 12232,
+              "largest_alloc": 560,
+              "alloc_count": 655,
+              "alloc_bytes": 30691,
+              "largest_free_at_close": 131832,
+              "holes_at_close": 50
+            }
+          }
+        }
+      }
+    },
+    "catalog/projects/zook-dome": {
+      "modes": {
+        "startup": {
+          "windows": {
+            "server-boot": {
+              "transient": 47680,
+              "retained": 47680,
+              "largest_alloc": 36864,
+              "alloc_count": 928,
+              "alloc_bytes": 86539,
+              "largest_free_at_close": 253976,
+              "holes_at_close": 3
+            },
+            "project-load": {
+              "transient": 46320,
+              "retained": 41695,
+              "largest_alloc": 12000,
+              "alloc_count": 3579,
+              "alloc_bytes": 225911,
+              "largest_free_at_close": 224064,
+              "holes_at_close": 25
+            },
+            "frame": {
+              "transient": 86856,
+              "retained": 33068,
+              "largest_alloc": 20480,
+              "alloc_count": 9888,
+              "alloc_bytes": 488151,
+              "largest_free_at_close": 193528,
+              "holes_at_close": 18
+            },
+            "shader-compile": {
+              "transient": 22858,
+              "retained": 4990,
+              "largest_alloc": 7424,
+              "alloc_count": 615,
+              "alloc_bytes": 84359,
+              "largest_free_at_close": 174648,
+              "holes_at_close": 22
+            },
+            "shader-link": {
+              "transient": 2865,
+              "retained": 0,
+              "largest_alloc": 2780,
+              "alloc_count": 6,
+              "alloc_bytes": 2911,
+              "largest_free_at_close": 174648,
+              "holes_at_close": 29
+            }
+          }
+        },
+        "steady-render": {
+          "windows": {
+            "frame": {
+              "transient": 1200,
+              "retained": 896,
+              "largest_alloc": 384,
+              "alloc_count": 175,
+              "alloc_bytes": 5826,
+              "largest_free_at_close": 174648,
+              "holes_at_close": 29
+            }
+          }
+        }
+      }
+    },
+    "projects/test/basic": {
       "modes": {
         "startup": {
           "windows": {
@@ -22,7 +154,7 @@
               "largest_alloc": 4365,
               "alloc_count": 3680,
               "alloc_bytes": 227442,
-              "largest_free_at_close": 215304,
+              "largest_free_at_close": 215240,
               "holes_at_close": 25
             },
             "frame": {
@@ -68,137 +200,41 @@
           }
         }
       }
-    },
-    "examples/meteor": {
-      "modes": {
-        "startup": {
-          "windows": {
-            "server-boot": {
-              "transient": 47680,
-              "retained": 47680,
-              "largest_alloc": 36864,
-              "alloc_count": 928,
-              "alloc_bytes": 86539,
-              "largest_free_at_close": 253976,
-              "holes_at_close": 3
-            },
-            "project-load": {
-              "transient": 46827,
-              "retained": 43515,
-              "largest_alloc": 3584,
-              "alloc_count": 4579,
-              "alloc_bytes": 280316,
-              "largest_free_at_close": 214912,
-              "holes_at_close": 35
-            },
-            "frame": {
-              "transient": 96225,
-              "retained": 43396,
-              "largest_alloc": 20480,
-              "alloc_count": 6463,
-              "alloc_bytes": 356892,
-              "largest_free_at_close": 175688,
-              "holes_at_close": 7
-            },
-            "shader-compile": {
-              "transient": 32274,
-              "retained": 7010,
-              "largest_alloc": 8148,
-              "alloc_count": 3686,
-              "alloc_bytes": 188589,
-              "largest_free_at_close": 147408,
-              "holes_at_close": 33
-            },
-            "shader-link": {
-              "transient": 3282,
-              "retained": 0,
-              "largest_alloc": 3192,
-              "alloc_count": 7,
-              "alloc_bytes": 3337,
-              "largest_free_at_close": 147408,
-              "holes_at_close": 37
-            }
-          }
+    }
+  },
+  "chips": {
+    "esp32c6": {
+      "measured": {
+        "freeBytes": 265104,
+        "usedBytes": 60432,
+        "totalBytes": 325536,
+        "largestFreeBlock": 198876,
+        "stackHighWater": 11908,
+        "stackTotal": 71152,
+        "stackHighWaterBand": [
+          11400,
+          12500
+        ]
+      },
+      "recorded": "2026-09-08",
+      "commit": "194344c33",
+      "comment": "What the FIRMWARE costs, not what a project costs: the shipped image (esp32c6,server,radio \u2014 the bytes a board is flashed with) booted whole on lp-emu:esp32c6:t1 and read from the allocator figures its own first heartbeat reports. `measured` is this tree, and is the ratchet; `silicon_reference` is a committed silicon capture and is NEVER gated \u2014 it is printed every run so the gap between the two cannot widen unseen. Regenerate `measured` with `just heap-budget-baseline-chips`; see docs/heap-budget-gate.md, \"The second source\".",
+      "image": "esp32c6,server,radio",
+      "configuration": "lp-emu:esp32c6:t1",
+      "sample": "the first heartbeat (the 5 s tick)",
+      "silicon_reference": {
+        "commit": "735af98ae",
+        "transcript": "lp-emu/transcripts/esp32c6/boot-idle-flash/silicon-esp32c6-2026-09-07-735af98ae.txt",
+        "figures": {
+          "freeBytes": 265096,
+          "usedBytes": 60440,
+          "totalBytes": 325536,
+          "largestFreeBlock": 198886,
+          "stackHighWater": 11908,
+          "stackTotal": 71512
         },
-        "steady-render": {
-          "windows": {
-            "frame": {
-              "transient": 19168,
-              "retained": 12144,
-              "largest_alloc": 560,
-              "alloc_count": 636,
-              "alloc_bytes": 30047,
-              "largest_free_at_close": 146288,
-              "holes_at_close": 50
-            }
-          }
-        }
-      }
-    },
-    "examples/zook-dome": {
-      "modes": {
-        "startup": {
-          "windows": {
-            "server-boot": {
-              "transient": 47680,
-              "retained": 47680,
-              "largest_alloc": 36864,
-              "alloc_count": 928,
-              "alloc_bytes": 86539,
-              "largest_free_at_close": 253976,
-              "holes_at_close": 3
-            },
-            "project-load": {
-              "transient": 46320,
-              "retained": 41695,
-              "largest_alloc": 12000,
-              "alloc_count": 3569,
-              "alloc_bytes": 225146,
-              "largest_free_at_close": 224256,
-              "holes_at_close": 25
-            },
-            "frame": {
-              "transient": 86856,
-              "retained": 33068,
-              "largest_alloc": 20480,
-              "alloc_count": 9888,
-              "alloc_bytes": 488151,
-              "largest_free_at_close": 193656,
-              "holes_at_close": 18
-            },
-            "shader-compile": {
-              "transient": 22858,
-              "retained": 4990,
-              "largest_alloc": 7424,
-              "alloc_count": 615,
-              "alloc_bytes": 84359,
-              "largest_free_at_close": 174776,
-              "holes_at_close": 22
-            },
-            "shader-link": {
-              "transient": 2865,
-              "retained": 0,
-              "largest_alloc": 2780,
-              "alloc_count": 6,
-              "alloc_bytes": 2911,
-              "largest_free_at_close": 174776,
-              "holes_at_close": 29
-            }
-          }
-        },
-        "steady-render": {
-          "windows": {
-            "frame": {
-              "transient": 1200,
-              "retained": 896,
-              "largest_alloc": 384,
-              "alloc_count": 175,
-              "alloc_bytes": 5826,
-              "largest_free_at_close": 174776,
-              "holes_at_close": 29
-            }
-          }
-        }
+        "gap_note": "freeBytes +8 / usedBytes -8 on our side, constant across boot 3 and boot 10, two commits, both links and both boot paths: one live 8-byte block silicon has and we do not. Sampling, boot history and the loader are all refuted; naming it needs a true power-on capture. docs/debt/emulator-heap-ledger-differs-from-silicon-by-eight-bytes.md",
+        "not_a_gate": "A different image at a different commit \u2014 totalBytes and stackTotal move with the tree, and comparing them across commits would be comparing two linker scripts. Read the four allocator figures and the 8 B; gate on `measured`."
       }
     }
   }

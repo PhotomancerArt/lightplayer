@@ -23,7 +23,9 @@ held() { lsof -n 2>/dev/null | grep -E '/dev/(cu|tty)\.usbmodem'; }
 if held; then echo "PRECHECK: a usbmodem port is held"; exit 9; fi
 if pgrep -fl "^espflash"; then echo "PRECHECK: espflash running"; exit 9; fi
 if [[ -n "$img" ]]; then
-    PORT_DEV="$PORT_DEV" "$HERE/desk-espflash-step.sh" "$OUT/$label.flash.cap" 'NEVER' 240 \
+    # Promoted out of this directory in M8's sweep — it is a product
+    # dependency now (`lp_emu_validate::driver::DESK_STEP_SCRIPT`).
+    PORT_DEV="$PORT_DEV" "$HERE/../../emu/desk-espflash-step.sh" "$OUT/$label.flash.cap" 'NEVER' 240 \
         -- write-bin --chip esp32c6 --port "$PORT_DEV" --after hard-reset 0x0 "$img" | grep -E 'exited|SENTINEL|WARN|port'
     grep -q 'successfully written' "$OUT/$label.flash.cap" || { echo "FLASH DID NOT COMPLETE"; exit 8; }
     sleep 2

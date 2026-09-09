@@ -63,7 +63,7 @@ burns a hardware session and blocks whatever gate the board was needed for.
 - **2026-09-02** — the emulator heap-budget gate (`docs/heap-budget-gate.md`)
   now prices a per-frame cache in bytes without a serial cable: `fw-emu`
   turned `resolver-payload-cache` on to match the C6, and the record diff
-  showed `examples/basic` `frame.retained` +15,361 B (30,007 → 45,368 B).
+  showed `projects/test/basic` `frame.retained` +15,361 B (30,007 → 45,368 B).
   Same gate gained `alloc_count` / `alloc_bytes` per frame (a steady-render
   pass), so the *churn* side of a per-frame optimisation is priced too. Partial
   exit: the number is produced by CI and moves when a cache is added; it is

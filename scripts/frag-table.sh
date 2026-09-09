@@ -26,7 +26,7 @@ cd "$(dirname "$0")/.."
 
 PROJECTS=("$@")
 if [ ${#PROJECTS[@]} -eq 0 ]; then
-    PROJECTS=(examples/basic examples/meteor examples/zook-dome)
+    PROJECTS=(projects/test/basic catalog/patterns/meteor catalog/projects/zook-dome)
 fi
 
 DISCOUNTS=(

@@ -20,6 +20,7 @@ use std::fmt::Write as _;
 use anyhow::{Result, bail};
 
 use crate::grade::{FieldClass, Grade};
+use crate::payload::PinCapture;
 use crate::transcript::Transcript;
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -79,6 +80,17 @@ pub struct ReplayReport {
     pub structural_problems: Vec<String>,
     /// Strict-mode refusals.
     pub grade_problems: Vec<String>,
+    /// Why the decoded **pad** was not compared, when the payload declares a
+    /// pin capture and a configuration on one side or the other cannot produce
+    /// one. `None` means the question did not arise: either the payload makes
+    /// no pin claim, or both sides record pins and the pad was compared like
+    /// anything else. Never a silent skip — the report says it.
+    ///
+    /// Not the same as the `pin` field CLASS, which may be compared on the
+    /// same run: `ws281x-telemetry`'s trips, skips and errors are pin-class
+    /// claims the guest makes about its own driver and they arrive in the
+    /// console. This is about the pad itself.
+    pub pin_not_compared: Option<String>,
     pub options: ReplayOptions,
 }
 
@@ -164,6 +176,17 @@ impl ReplayReport {
                 compared - differ,
                 differ
             );
+        }
+        if let Some(why) = &self.pin_not_compared {
+            // A row, not a footnote: a reader scanning the table has to see
+            // this in the table. Labelled `pin capture` rather than `pin`
+            // because the CLASS may well have been compared on the line above
+            // — `ws281x-telemetry`'s trips, skips and errors are pin-class
+            // claims the guest makes about its own driver, and they travel in
+            // the console. What is missing is the decoded PAD, which is a
+            // different reading of the same pin and the only one an
+            // instrument could confirm.
+            let _ = writeln!(s, "  {:<16} {:>9}   — {why}", "pin capture", "not compared");
         }
 
         let timing: Vec<_> = self
@@ -389,6 +412,102 @@ pub fn replay(
         }
     }
 
+    // --- the pin capture ---------------------------------------------------
+    //
+    // The half of a recording that is not something the device said. Two
+    // claims are checked, and they are different claims:
+    //
+    //  1. **Within** each transcript, the guest's own checksum against the
+    //     bytes the pad carried, frame by frame. A disagreement there means
+    //     the driver and the wire disagree on one machine, which is not a
+    //     difference between configurations at all — it is a structural
+    //     problem in that recording, and it is named as one.
+    //  2. **Between** the two, the pad's own bytes per frame, as a `Pin`
+    //     comparison. That is the claim the class exists for and the one
+    //     that fails a replay.
+    //
+    // Whether a side can produce a pin log at all is a property of its
+    // CONFIGURATION, not of the payload: an `lp-emu:*` machine decodes the pad
+    // off its own signal fabric and silicon cannot, because reading a real pad
+    // needs an instrument nobody has put on this bench. Asking silicon for one
+    // made the first silicon capture of `rmt-chase` fail with 3,073 equal
+    // structural comparisons underneath the red
+    // (`docs/defects/2026-09-08-a-pin-capture-is-a-property-of-the-configuration-not-the-payload.md`).
+    //
+    // Stated in `validate.toml`, never inferred from the configuration's name.
+    let cfg = crate::config::ValidateConfig::embedded();
+    let records_pins = |t: &Transcript| -> Result<bool> {
+        Ok(cfg.configuration(&t.header.configuration)?.records_pins)
+    };
+    let (left_pins, right_pins) = (records_pins(left)?, records_pins(right)?);
+    // Said in the report rather than silently skipped: a replay that cannot
+    // compare pins must not read as one that compared them and agreed.
+    let pin_note = match (payload.pin_capture.is_on(), left_pins, right_pins) {
+        (false, _, _) => None,
+        (true, true, true) => None,
+        (true, false, false) => Some(format!(
+            "neither {} nor {} records pins",
+            left.header.configuration, right.header.configuration
+        )),
+        (true, false, true) => Some(format!("{} records none", left.header.configuration)),
+        (true, true, false) => Some(format!("{} records none", right.header.configuration)),
+    };
+
+    if payload.pin_capture.is_on() && left_pins && right_pins {
+        for (t, side) in [(left, "left"), (right, "right")] {
+            for problem in pin_self_disagreements(t, side)? {
+                structural_problems.push(problem);
+            }
+        }
+        let (lp, rp) = (left.pin_records()?, right.pin_records()?);
+        match payload.pin_capture {
+            PinCapture::EveryFrame if lp.len() != rp.len() => {
+                structural_problems.push(format!(
+                    "pin capture: {} decoded frames on the left, {} on the right",
+                    lp.len(),
+                    rp.len()
+                ));
+            }
+            // A shipped-image walk's pad runs on at the engine's pace until
+            // the run ends on a console line, so the count is the clock's:
+            // reported with its ratio, like every other timing figure, while
+            // the frames the two share are compared below as `Pin`.
+            PinCapture::WhileRunning => comparisons.push(compare(
+                "pin",
+                "frames",
+                FieldClass::Timing,
+                lp.len().to_string(),
+                rp.len().to_string(),
+                false,
+            )),
+            PinCapture::EveryFrame | PinCapture::Off => {}
+        }
+        for (n, (l, r)) in lp.iter().zip(rp.iter()).enumerate() {
+            let scope = format!("pin[{n}]");
+            for field in ["pad", "signal", "n", "leds", "bits", "complete"] {
+                comparisons.push(compare(
+                    &scope,
+                    field,
+                    FieldClass::Pin,
+                    l.get(field).map(render_json).unwrap_or_default(),
+                    r.get(field).map(render_json).unwrap_or_default(),
+                    true,
+                ));
+            }
+            // The bytes themselves, as a checksum: a per-frame hex string of
+            // 768 bytes in a failure message helps nobody, and the checksum
+            // is the same function the guest's record uses.
+            comparisons.push(compare(
+                &scope,
+                "wire_crc",
+                FieldClass::Pin,
+                pin_wire_crc(l),
+                pin_wire_crc(r),
+                true,
+            ));
+        }
+    }
+
     // --- strict mode -------------------------------------------------------
     let mut grade_problems = Vec::new();
     if options.strict {
@@ -425,6 +544,7 @@ pub fn replay(
         series_summaries,
         structural_problems,
         grade_problems,
+        pin_not_compared: pin_note,
         options,
     })
 }
@@ -478,6 +598,82 @@ fn accumulate(slot: &mut Option<f64>, value: &str) {
         (Some(_), Err(_)) => *slot = None,
         (None, _) => {}
     }
+}
+
+/// FNV-1a, 32-bit, over a pin record's `wire` hex.
+///
+/// The sixth transcription of these two constants in the repository, and the
+/// point of it is that this side must not be able to agree with the guest by
+/// sharing its code: the firmware computes the same function over the bytes
+/// it *handed the driver*, this computes it over the bytes the pad *carried*,
+/// and the two agreeing is the claim.
+///
+/// `wire`, not `rgb`, and that is a decision the harness forces. `rgb` is the
+/// wire bytes unpermuted by the configured colour order; but the harness's
+/// `LedChannel` already swaps RGB into GRB before `lp-ws281x` permutes again,
+/// so the bytes on the wire *are* the frame the payload checksummed and
+/// `rgb` is that frame swapped once more. Comparing against `rgb` would
+/// therefore fail on any frame that is not grey (DD34 d, the double colour
+/// swap — filed, not fixed).
+fn pin_wire_crc(record: &crate::transcript::Record) -> String {
+    let Some(hex) = record.get("wire").and_then(serde_json::Value::as_str) else {
+        return String::new();
+    };
+    let mut hash = 0x811c_9dc5u32;
+    for pair in hex.as_bytes().chunks_exact(2) {
+        let Ok(byte) = u8::from_str_radix(std::str::from_utf8(pair).unwrap_or("zz"), 16) else {
+            return format!("<not hex: {hex}>");
+        };
+        hash ^= u32::from(byte);
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    format!("0x{hash:08x}")
+}
+
+/// Does this transcript's guest agree with its own pin capture, frame by
+/// frame? A disagreement is a problem with **this** recording, not a
+/// difference between two of them.
+fn pin_self_disagreements(t: &Transcript, side: &str) -> Result<Vec<String>> {
+    let pins = t.pin_records()?;
+    if pins.is_empty() {
+        return Ok(vec![format!(
+            "{side} transcript's payload `{}` claims a pin capture and has none",
+            t.payload.name
+        )]);
+    }
+    // A payload with no per-frame claim of its own — a walk on the shipped
+    // image, which prints no record per frame — has nothing here to disagree
+    // with: its pad stands alone, and what it is compared against is the
+    // other transcript (and, for `shader-oracle-walk`, the host oracle in
+    // `tests/m5_replays.rs`).
+    if !t.payload.record_kinds.contains(&"rmt-frame") {
+        return Ok(Vec::new());
+    }
+    let claims = t.records()?;
+    let claims: Vec<_> = claims.iter().filter(|r| r.kind == "rmt-frame").collect();
+    let mut out = Vec::new();
+    if claims.len() != pins.len() {
+        out.push(format!(
+            "{side}: the guest recorded {} frames and the pad carried {}",
+            claims.len(),
+            pins.len()
+        ));
+    }
+    for (claim, pin) in claims.iter().zip(pins.iter()) {
+        let claimed = claim.get("crc").map(render_json).unwrap_or_default();
+        let observed = pin_wire_crc(pin);
+        if claimed != observed {
+            out.push(format!(
+                "{side}: frame {} — the guest claims {claimed}, the pad carried {observed}",
+                claim.get("n").map(render_json).unwrap_or_default()
+            ));
+            if out.len() > 8 {
+                out.push(format!("{side}: … and more"));
+                break;
+            }
+        }
+    }
+    Ok(out)
 }
 
 fn render_json(v: &serde_json::Value) -> String {

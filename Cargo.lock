@@ -3135,8 +3135,6 @@ dependencies = [
 [[package]]
 name = "esp-hal"
 version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bfcf2a0842903717f4663f6a08512c32b0f6b2d7fb7db3c8a6895d2e6d49f72"
 dependencies = [
  "bitfield",
  "bitflags 2.11.0",
@@ -3918,6 +3916,7 @@ name = "fw-checks"
 version = "40.0.0"
 dependencies = [
  "log",
+ "lps-builtins",
  "serde",
  "serde_json",
 ]
@@ -5526,6 +5525,7 @@ dependencies = [
  "log",
  "lp-collection 1.0.0",
  "lp-emu-core",
+ "lp-emu-esp32c6",
  "lp-emu-validate",
  "lp-gfx-lpvm",
  "lp-perf",
@@ -5665,6 +5665,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-emu-esp-common"
+version = "40.0.0"
+dependencies = [
+ "log",
+ "lp-emu-core",
+ "lp-ws281x",
+ "object 0.37.3",
+ "test-log",
+]
+
+[[package]]
+name = "lp-emu-esp32c6"
+version = "40.0.0"
+dependencies = [
+ "env_logger 0.11.9",
+ "log",
+ "lp-emu-core",
+ "lp-emu-esp-common",
+ "lp-emu-validate",
+ "lp-riscv-emu",
+ "lp-ws281x",
+ "rustc-demangle",
+ "sha2",
+ "test-log",
+]
+
+[[package]]
 name = "lp-emu-validate"
 version = "40.0.0"
 dependencies = [
@@ -5672,6 +5699,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "sha2",
  "toml 0.8.23",
 ]
 
@@ -6062,6 +6090,7 @@ name = "lpa-studio-core"
 version = "40.0.0"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "futures-util",
  "js-sys",
  "jsonschema",

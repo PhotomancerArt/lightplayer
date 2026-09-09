@@ -2,20 +2,28 @@
 //! pool, the project mirror and the library.
 //!
 //! ⚠️ The DEVICE half of this controller — the connect flow, the device
-//! op dispatch, the card-op store, the setup wizard, the deploy/push
-//! verbs, the connect-as-pull reconcile and the registry write-backs —
-//! was deleted in M2 of the device-model rebuild. The rebuilt model owns
-//! all of it; what remains here is the sim session, the project mirror,
-//! the library and the gallery.
+//! op dispatch, the setup wizard, the deploy/push verbs, the
+//! connect-as-pull reconcile and the registry write-backs — was deleted in
+//! M2 of the device-model rebuild. The rebuilt model owns all of it; what
+//! remains here is the editor lens, the project mirror, the library and
+//! the gallery.
 //!
-//! # The single-session web policy
+//! # One device per tab
 //!
 //! Pool capacity is a POLICY, not a shape (ADR
 //! `2026-08-03-studio-runs-n-device-sessions`). The WEB app runs exactly
 //! ONE session per browser tab, so that decision lives here — at
-//! [`StudioController::install_session`] and the sim-reuse open — and
-//! never in the pool (a desktop shell with real session wayfinding is
-//! meant to inherit the N-session shape unchanged).
+//! [`StudioController::open_device_lens`] and the open path's device
+//! resolution (D37) — and never in the pool (a desktop shell with real
+//! session wayfinding is meant to inherit the N-session shape unchanged).
+//!
+//! # Opening a project starts a device
+//!
+//! There is no runtime that is not a device (PD9). Opening a library card
+//! resolves a SIM of the project's target — the one that last ran it, an
+//! idle one, or a freshly minted record — powers it on, waits for its
+//! hello and lands the lens on it, exactly the way a `/device/<uid>` open
+//! lands on silicon. Opening never touches a board by itself (D33).
 
 use core::future::Future;
 use core::time::Duration;
@@ -38,10 +46,10 @@ use crate::{
     NodeClearDebugOp, NodeCopyOp, NodeCreateOp, NodeImportOp, NodePasteOp, NodeRemoveOp,
     NodeRevertOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp, PatchPulseOp, PlaylistActivateOp,
     ProjectConnectResult, ProjectController, ProjectEditRun, ProjectOp, ProjectRefreshOutcome,
-    ProjectState, ProjectSyncRun, RuntimePool, ServerFailureKind, ServerSnapshot, ServerState,
-    SimAttachment, SlotEditOp, StudioSnapshot, UiAction, UiActions, UiActivityView, UiError,
-    UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiNotice, UiResult, UiStatus, UiStudioView,
-    UiViewContent, UxActivityTarget, UxUpdate, UxUpdateSink,
+    ProjectState, ProjectSyncRun, RuntimePool, ServerSnapshot, ServerState, SlotEditOp,
+    StudioSnapshot, UiAction, UiActions, UiActivityView, UiError, UiLogDraft, UiLogEntry,
+    UiLogLevel, UiLogOrigin, UiNotice, UiResult, UiStatus, UiStudioView, UiViewContent,
+    UxActivityTarget, UxUpdate, UxUpdateSink,
 };
 
 /// Minimum gap between view publishes that carry *only* streamed log lines
@@ -51,11 +59,14 @@ use crate::{
 /// stream can force a full-view rebuild.
 const LOG_ONLY_PUBLISH_MIN_GAP_SECS: f64 = 0.25;
 
-/// Flap guard for the sim crash auto-reboot: one reboot per window. A
-/// crash landing within this many seconds of the previous auto-reboot
-/// means the loaded project crashes the worker itself — rebooting again
-/// would loop, so the session stays Failed for manual restart.
-const SIM_CRASH_REBOOT_GUARD_SECS: f64 = 30.0;
+/// The address a docs page's anonymous sim answers to inside its own
+/// leased controller.
+///
+/// NOT a registry uid: nothing persists this device (PD10 — its runtime
+/// carries no identity, so `registry_key()` is `None`), and no other
+/// controller ever sees it. It exists so the lens has something to open
+/// by, the way every other device is opened by its address.
+const DOCS_SIM_KEY: &str = "docs-sim";
 
 /// The device model's knobs for THIS build.
 ///
@@ -86,40 +97,42 @@ pub(crate) fn device_roster_config_for_test() -> crate::DeviceRosterConfig {
     device_roster_config()
 }
 
-/// Whether a fresh sim crash at `now` may auto-reboot, given when the
-/// previous auto-reboot ran (`None` = never; epoch seconds).
-fn sim_crash_reboot_allowed(last_reboot_at: Option<f64>, now: f64, guard_secs: f64) -> bool {
-    match last_reboot_at {
-        None => true,
-        Some(last) => now - last >= guard_secs,
-    }
-}
-
-/// Close an attachment the pool no longer holds: the provider minted a
-/// live worker session for it, so dropping it without closing would leak
-/// the worker.
-async fn close_runtime_payload(payload: SimAttachment) {
-    use lpa_link::LinkProvider;
-    let _ = payload.connector.close(&payload.session.id).await;
-}
-
 pub struct StudioController {
-    /// The door to the simulator runtime: the link provider registry plus
-    /// the injected timer factory its connect ladder sleeps on.
-    sim_link: crate::SimLink,
     /// The rebuilt device layer (M3): the `lpa-devices` roster plus the
     /// effects layer that performs its commands. The ONLY device path —
     /// there is no device lens in the runtime pool and no device arm on any
     /// other op, by design (the anti-fifth-machine rule).
     devices: crate::DeviceRoster,
-    /// A `/device/<uid>` open that arrived before the board was ready (a
-    /// reload: the route asks for the lens while the granted port is still
-    /// identifying). Held until the board says hello, then attached from
-    /// the refresh tick; cleared by any close or another lens attach.
+    /// The device cards' live frame feeds (one per wanted device), pulled
+    /// as app conversations on each board's shared link. Frame state only —
+    /// every device fact they need is read off `devices` at tick time.
+    device_feeds: crate::DeviceFrameFeeds,
+    /// A lens open that arrived before the device was ready — a reload
+    /// whose route asks for the lens while the granted port is still
+    /// identifying, or a sim that was just powered on and has not said
+    /// hello yet. Held until the device says hello, then attached from the
+    /// refresh tick; cleared by any close or another lens attach.
+    ///
+    /// The hold, not a wait: the fold that produces the hello runs on the
+    /// actor's own queue, so an open that awaited the hello inside its
+    /// dispatch would wait for a fold that cannot run until it returns.
     pending_device_lens: Option<String>,
     /// A granted-port sweep is due (boot, or a `navigator.serial` connect).
     /// Drained by the actor's device step so a hotplug storm costs one sweep.
     device_sweep_pending: bool,
+    /// The transport that reaches SILICON, when this build has one (browser
+    /// Web Serial; a scripted fake in the benches). Held so installing the
+    /// sim half can rebuild the composite without the caller re-supplying
+    /// it — the effects layer takes one transport, on purpose.
+    serial_transport: Option<Rc<dyn crate::DeviceTransport>>,
+    /// The transport that reaches SIMS, when this build has one. Concrete
+    /// rather than `dyn` because powering a sim on and off is not part of
+    /// the `DeviceTransport` vocabulary and must not become part of it.
+    sim_transport: Option<Rc<crate::SimDeviceTransport>>,
+    /// The `/device-sims/<uid>.json` sidecars, read off the library
+    /// snapshot at settle. The sole "this device is a sim" fact, cached so
+    /// powering one on does not read the store from inside a fold.
+    device_sims: std::collections::BTreeMap<String, crate::SimRecord>,
     /// The runtime sessions the studio is attached to, plus the editor
     /// lens. Every network op resolves its wire client through the pool's
     /// lens-bound seam.
@@ -184,24 +197,24 @@ pub struct StudioController {
     /// Cached gallery inputs, hydrated from a host catalog snapshot by
     /// [`Self::refresh_library`] — `view()` never reads a live store.
     home_inputs: Option<HomeInputs>,
+    /// The library half of a rename made while the project was OPEN: the
+    /// `(uid, name)` whose directory slug still has to move. The manifest
+    /// name was patched at once through the open handle; the catalog rename
+    /// (a directory move under a lock the open project holds) waits for the
+    /// close, and runs at the next library settle after it.
+    pending_reslug: Option<(String, String)>,
     /// A library re-hydration is due (attach, home op, save, close, or a
     /// cross-tab `LibraryChanged` ping). Drained at the end of every
     /// dispatch and by the actor after each batch.
     library_refresh_pending: bool,
     /// A home-card open in flight: keeps the gallery on screen (card busy)
-    /// while the simulator opens, and tells the connect flow which package
+    /// while the sim opens, and tells the connect flow which package
     /// to push instead of probing running projects.
     pending_open: Option<PendingOpen>,
-    /// Per-card UI view-state (selected tab, open sheet), keyed by the
-    /// card's `identity_key()`. Core-owned so it survives the card ⇄ pane
-    /// growth, and is e2e-drivable (2026-07-25 re-home). Pruned lazily:
-    /// absent keys default; a stale key just never re-reads.
-    card_ui: std::collections::HashMap<String, crate::CardUiState>,
-    /// When the last sim crash auto-reboot ran (`None` = never). Epoch
-    /// seconds on the injected clock; the flap guard: a second crash
-    /// within [`SIM_CRASH_REBOOT_GUARD_SECS`] stays Failed for manual
-    /// restart instead of reboot-looping a crashing project.
-    sim_crash_reboot_at: Option<f64>,
+    /// The open that stopped at the mismatch page (D50). Cleared the
+    /// moment any open starts — a new gesture supersedes the question the
+    /// page was asking, exactly as it supersedes an open in flight.
+    open_mismatch: Option<Box<crate::UiOpenMismatch>>,
     /// Injected randomness for uid minting. The web shell installs crypto
     /// randomness at startup; the default is a clock-derived fallback good
     /// enough for tests.
@@ -231,13 +244,49 @@ pub struct StudioController {
     agent: crate::AgentController,
 }
 
+/// Which device an open lands on — the model half of the URL's `?on=`
+/// hint (D43).
+///
+/// The two arms are the two halves of the grammar, and they differ in
+/// exactly one way that matters: whether the open may settle for a
+/// different device than the one asked for.
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum OpenOn {
+    /// A kind, or nothing at all: Studio resolves a sim of the project's
+    /// target and is free to reuse its own (D33) — the sim that last ran
+    /// this project, an idle one, else a fresh record.
+    Resolve,
+    /// An INSTANCE, named by base MAC. Silicon or a sim; this device or
+    /// none. It is the naming that makes the mismatch page's stop
+    /// worthwhile (D50).
+    Device {
+        base_mac: String,
+        /// The mismatch page's "push here": the person chose to replace
+        /// what is running, with both projects named in front of them.
+        over_running_project: bool,
+    },
+}
+
+/// Why a named device did not take this open.
+enum NamedDeviceRefusal {
+    /// Nothing this library knows answers to that MAC.
+    Unknown,
+    /// It is running a different project (D50) — the page, not a push.
+    Mismatch(crate::UiOpenMismatch),
+}
+
 /// What a home card asked to open.
 #[derive(Clone, Debug)]
 enum PendingOpen {
-    /// A library package, by key (`prj…` uid or slug).
-    Package(String),
+    /// A library package, by key (`prj…` uid or slug), on the device the
+    /// address named (or on the resolver's choice — see [`OpenOn`]).
+    Package { key: String, on: OpenOn },
     /// An embedded example, by id (opened as a transient view session).
     Example(String),
+    /// A compiled-in docs example, deployed directly onto the docs sim
+    /// (never through the library). Rides the same pending-open slot so a
+    /// lens that lands late still deploys.
+    DocsExample(String),
     /// A fetched View-access shared project (P5): the bytes ride the
     /// pending open so a cold link can boot the sim first.
     SharedTransient {
@@ -252,8 +301,9 @@ impl PendingOpen {
     /// The card key the gallery marks busy.
     fn card_key(&self) -> &str {
         match self {
-            PendingOpen::Package(key) => key,
+            PendingOpen::Package { key, .. } => key,
             PendingOpen::Example(id) => id,
+            PendingOpen::DocsExample(id) => id,
             PendingOpen::SharedTransient { uid, .. } => uid,
         }
     }
@@ -263,8 +313,20 @@ impl PendingOpen {
     /// Retry can never drift from what was actually attempted.
     fn retry_action(&self) -> UiAction {
         let op = match self {
-            PendingOpen::Package(key) => HomeOp::OpenPackage { key: key.clone() },
-            PendingOpen::Example(id) => HomeOp::OpenExample { id: id.clone() },
+            PendingOpen::Package { key, on } => match on {
+                OpenOn::Resolve => HomeOp::OpenPackage { key: key.clone() },
+                OpenOn::Device {
+                    base_mac,
+                    over_running_project,
+                } => HomeOp::OpenPackageOnDevice {
+                    key: key.clone(),
+                    base_mac: base_mac.clone(),
+                    over_running_project: *over_running_project,
+                },
+            },
+            PendingOpen::Example(id) | PendingOpen::DocsExample(id) => {
+                HomeOp::OpenExample { id: id.clone() }
+            }
             PendingOpen::SharedTransient {
                 uid,
                 name,
@@ -293,10 +355,13 @@ impl StudioController {
         let now_secs_for_stamp = Rc::clone(&now_secs);
         let device_events = Rc::new(std::cell::RefCell::new(DeviceEventLog::new()));
         Self {
-            sim_link: crate::SimLink::new(),
             devices: crate::DeviceRoster::new(device_roster_config()),
+            device_feeds: crate::DeviceFrameFeeds::new(),
             pending_device_lens: None,
             device_sweep_pending: false,
+            serial_transport: None,
+            sim_transport: None,
+            device_sims: std::collections::BTreeMap::new(),
             pool: RuntimePool::new(),
             project: ProjectController::new(),
             sync_timer: None,
@@ -314,10 +379,10 @@ impl StudioController {
             last_log_only_publish: f64::NEG_INFINITY,
             library_host: None,
             home_inputs: None,
+            pending_reslug: None,
             library_refresh_pending: false,
             pending_open: None,
-            card_ui: std::collections::HashMap::new(),
-            sim_crash_reboot_at: None,
+            open_mismatch: None,
             random: Rc::new(clock_fallback_random),
             local_stamp: {
                 let clock = Rc::clone(&now_secs_for_stamp);
@@ -427,8 +492,252 @@ impl StudioController {
     /// see ports should show what it already has permission for, without the
     /// user asking twice.
     pub fn set_device_transport(&mut self, transport: Rc<dyn crate::DeviceTransport>) {
+        self.serial_transport = Some(transport);
+        self.install_device_transport();
+    }
+
+    /// Install the transport that serves SIMS. Install before the actor
+    /// takes ownership, beside (or instead of) the serial one.
+    ///
+    /// A build with both installs a `CompositeDeviceTransport` routing by
+    /// the link's endpoint: the effects layer holds exactly one transport,
+    /// and a per-kind fork inside it is how a second device flow grows.
+    pub fn set_device_sim_transport(&mut self, transport: Rc<crate::SimDeviceTransport>) {
+        self.sim_transport = Some(transport);
+        self.install_device_transport();
+    }
+
+    /// (Re)install whichever transport this build's halves add up to, and
+    /// arm the first sweep: a page that CAN see devices should show what it
+    /// already has, without the user asking twice.
+    fn install_device_transport(&mut self) {
+        let transport: Option<Rc<dyn crate::DeviceTransport>> = match &self.sim_transport {
+            Some(sim) => Some(Rc::new(crate::CompositeDeviceTransport::new(
+                self.serial_transport.clone(),
+                Rc::clone(sim) as Rc<dyn crate::DeviceTransport>,
+            ))),
+            None => self.serial_transport.clone(),
+        };
+        let Some(transport) = transport else {
+            return;
+        };
         self.devices.effects_mut().set_transport(transport);
         self.device_sweep_pending = true;
+    }
+
+    /// Mint a sim of `target` and remember it: one registry row
+    /// (`transport: "sim"`, keyed on the derived uid) and one
+    /// `/device-sims/<uid>.json` sidecar, written in a single library
+    /// settle so a half-created sim cannot exist.
+    ///
+    /// `random` is the caller's six bytes (the web shell's
+    /// `crypto.getRandomValues`, a test's fixed bytes): minting decides
+    /// identity, and where entropy comes from is the platform's business,
+    /// not the model's. Returns the uid the sim is remembered under.
+    ///
+    /// The sim is NOT powered on. It loads as a detached record like any
+    /// remembered board, and `Action::Connect` is what starts it.
+    pub async fn create_sim_record(
+        &mut self,
+        target: &str,
+        name: Option<&str>,
+        random: &[u8; 6],
+    ) -> Result<String, UiError> {
+        let minted = crate::new_sim_record(target, name, random, (self.now_secs)());
+        let sidecar_bytes = serde_json::to_vec(&minted.sidecar).unwrap_or_default();
+        self.run_catalog_op(CatalogOp::CreateSimDevice {
+            device: Box::new(minted.row.clone()),
+            sidecar_bytes,
+        })
+        .await?;
+        self.device_sims
+            .insert(minted.uid.clone(), minted.sidecar.clone());
+        Ok(minted.uid)
+    }
+
+    /// The sims remembered in this library, by uid.
+    pub fn device_sims(&self) -> &std::collections::BTreeMap<String, crate::SimRecord> {
+        &self.device_sims
+    }
+
+    /// Read every remembered sim's sidecar off the library snapshot.
+    ///
+    /// Only rows the registry already labels `sim` are looked at, so a
+    /// library full of boards reads nothing. Absence is the answer for
+    /// everything else — a board without a sidecar is not a sim, which is
+    /// every board in every existing library.
+    fn seed_device_sim_records(&mut self, fs: &Rc<std::cell::RefCell<dyn lpfs::LpFs>>) {
+        let Some(inputs) = self.home_inputs.as_ref() else {
+            return;
+        };
+        let uids: Vec<String> = inputs
+            .registered
+            .iter()
+            .filter(|row| row.transport == crate::SIM_TRANSPORT)
+            .map(|row| row.uid.clone())
+            .collect();
+        let fs = fs.borrow();
+        // A sidecar this snapshot cannot read does NOT unmake the sim: the
+        // row says it is one, and the record this tab already holds is the
+        // better answer than nothing. Dropping it here was an eternal
+        // "Opening…" — `sim_session_for` reads this map, so a sim without
+        // an entry cannot be powered on, and a held lens on it waits for a
+        // runtime nobody will ever start (2026-09-08 outage). The one thing
+        // that removes an entry is the row going away, which is Forget.
+        let held = std::mem::take(&mut self.device_sims);
+        self.device_sims = uids
+            .into_iter()
+            .filter_map(|uid| {
+                crate::read_sim_record(&*fs, &uid)
+                    .or_else(|| held.get(&uid).cloned())
+                    .map(|record| (uid, record))
+            })
+            .collect();
+    }
+
+    /// The session a sim device would run as, or `None` when this device is
+    /// not a sim (no sidecar, no `sim` registry row) or has no uid to be
+    /// keyed on.
+    fn sim_session_for(&self, device: crate::DeviceId) -> Option<crate::SimSession> {
+        let entry = self
+            .devices
+            .roster()
+            .devices()
+            .iter()
+            .find(|entry| entry.id == device)?;
+        let uid = entry
+            .identity
+            .uid
+            .as_ref()
+            .map(|uid| uid.0.clone())
+            .or_else(|| self.device_registry_key(device))?;
+        let (target, base_mac) = self.sim_backing_facts(&uid)?;
+        Some(crate::SimSession {
+            uid,
+            target,
+            display_name: entry.title(),
+            base_mac,
+            // PD12: a device asks for the GPU tier; the worker answers with
+            // what it granted, and the band says which.
+            tier: crate::SimTier::Gpu,
+        })
+    }
+
+    /// What a sim's runtime has to be started with — the board it wears and
+    /// the minted MAC it reports — read from its sidecar, or rebuilt from
+    /// its registry row when the sidecar is unreadable.
+    ///
+    /// The row is not a second source of truth, it is the SAME two facts
+    /// written a second time: `new_sim_record` puts the target in
+    /// `board_id` and the minted MAC in `hardware_id`. Reading them back
+    /// costs nothing and is the difference between a sim that can be
+    /// powered on and one that can only be waited for.
+    fn sim_backing_facts(&self, uid: &str) -> Option<(String, String)> {
+        if let Some(sidecar) = self.device_sims.get(uid) {
+            return Some((sidecar.target.clone(), sidecar.base_mac.clone()));
+        }
+        let row = self
+            .home_inputs
+            .as_ref()?
+            .registered
+            .iter()
+            .find(|row| row.uid == uid && row.transport == crate::SIM_TRANSPORT)?;
+        // `efuse:<the minted base MAC>` — the same text the sidecar holds,
+        // validated rather than trusted so a hand-edited row cannot boot a
+        // runtime claiming an identity that is not a MAC.
+        let base_mac = row.hardware_id.as_deref()?.strip_prefix("efuse:")?;
+        crate::app::places::HardwareId::from_base_mac(base_mac)?;
+        Some((row.board_id.clone()?, base_mac.to_ascii_lowercase()))
+    }
+
+    /// Whether the device remembered as `uid` is a SIM — a runtime this tab
+    /// starts — rather than silicon on a desk.
+    ///
+    /// Either witness is enough. The sidecar is the record; the registry
+    /// row's `transport` is what survives a sidecar this tab could not read
+    /// back, and reading only the sidecar meant an open skipped the
+    /// power-on and then waited for it forever.
+    fn is_sim_device(&self, uid: &str) -> bool {
+        self.device_sims.contains_key(uid)
+            || self.home_inputs.as_ref().is_some_and(|inputs| {
+                inputs
+                    .registered
+                    .iter()
+                    .any(|row| row.uid == uid && row.transport == crate::SIM_TRANSPORT)
+            })
+    }
+
+    /// Power a sim on, if this gesture is a `Connect` at one.
+    ///
+    /// The EFFECTS layer starts the runtime, never the model: `Connect` on a
+    /// sim is `Connect` (PD8, Q15), and the sweep this arms is what attaches
+    /// the link the model then opens. The hello carries the uid, so the fold
+    /// adopts the link into this very record through its own identity join —
+    /// no new arm, no new event.
+    fn power_on_sim_for(&mut self, action: &crate::DeviceAction) {
+        let crate::DeviceAction::Connect { device } = action else {
+            return;
+        };
+        let (Some(sim), Some(session)) =
+            (self.sim_transport.clone(), self.sim_session_for(*device))
+        else {
+            return;
+        };
+        if sim.is_powered(&session.uid) {
+            return;
+        }
+        match sim.power_on(session) {
+            Ok(()) => self.device_sweep_pending = true,
+            Err(error) => log::warn!("the sim did not start: {error}"),
+        }
+    }
+
+    /// Power a sim off, if this gesture was a `Disconnect` (or a `Forget`)
+    /// at one.
+    ///
+    /// Runs AFTER the fold, which has already evicted and closed the link.
+    /// The detach has to be raised explicitly: `Disconnect` alone closes a
+    /// port and keeps the card attached, which is right for a board still
+    /// sitting on the desk and wrong for a runtime that no longer exists. A
+    /// powered-off sim leaves the roster the way an unplugged board does,
+    /// and its record stays on the remembered line (Q5).
+    fn power_off_sim_for(&mut self, action: &crate::DeviceAction) {
+        let uid = self.sim_uid_to_power_off(action);
+        self.power_off_sim(uid);
+    }
+
+    /// The uid a gesture will power off, read BEFORE the fold.
+    ///
+    /// Before, because a `Forget` DELETES the device: read afterwards, the
+    /// roster no longer holds the entry the uid comes from, and the sim
+    /// would be forgotten while its worker kept running (`just test`, P3).
+    /// `Disconnect` would survive either order; one rule for both is
+    /// cheaper than remembering which.
+    fn sim_uid_to_power_off(&self, action: &crate::DeviceAction) -> Option<String> {
+        match action {
+            crate::DeviceAction::Disconnect { device } | crate::DeviceAction::Forget { device } => {
+                self.sim_session_for(*device).map(|session| session.uid)
+            }
+            _ => None,
+        }
+    }
+
+    fn power_off_sim(&mut self, uid: Option<String>) {
+        let (Some(sim), Some(uid)) = (self.sim_transport.clone(), uid) else {
+            return;
+        };
+        let link = self
+            .devices
+            .effects()
+            .link_for_endpoint(&crate::sim_endpoint(&uid));
+        if !sim.power_off(&uid) {
+            return;
+        }
+        if let Some(link) = link {
+            self.fold_device_input(crate::DeviceInput::Event(
+                lpa_devices::Event::LinkDetached { link },
+            ));
+        }
     }
 
     /// Install the platform task spawner for device IO (`spawn_local` on
@@ -470,6 +779,8 @@ impl StudioController {
             );
         }
         self.drop_device_lens_if_wireless();
+        // A forgotten device takes its feed (and last frame) with it.
+        self.device_feeds.retain_devices(self.devices.roster());
         self.mark_dirty();
     }
 
@@ -520,6 +831,16 @@ impl StudioController {
             log::debug!("device records not persisted: no library host");
             return;
         }
+        // The uids this batch WRITES. A merge (`reconcile_identities`) emits
+        // `DeleteRecord` for the discarded handle and `PersistRecord` for the
+        // surviving one in the SAME batch, and both resolve to the same
+        // registry key — because being the same device is what a merge
+        // discovered. Deleting on that would take away the row this very
+        // batch just wrote, and, worse, the device's sidecars with it: a
+        // remembered board whose port came back would silently lose its last
+        // picture, and a sim would lose the file that says it is one.
+        // (`docs/defects/2026-09-07-merge-delete-erased-the-merged-row.md`.)
+        let mut written: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         for record in writes.persist {
             let Some(row) = crate::app::devices::registry_row_from_record(&record) else {
                 // An anonymous board has no honest registry key; adopting one
@@ -530,6 +851,7 @@ impl StudioController {
             // the device is gone from the fold, and the row key is its
             // identity, not its handle.
             self.devices.remember_key(record.device, row.uid.clone());
+            written.insert(row.uid.clone());
             if let Err(error) = self
                 .run_catalog_op(CatalogOp::UpsertRegisteredDevice(Box::new(row)))
                 .await
@@ -545,6 +867,10 @@ impl StudioController {
             else {
                 continue;
             };
+            if written.contains(&uid) {
+                log::debug!("device {device:?} merged into the row it shares; {uid} stays");
+                continue;
+            }
             if let Err(error) = self
                 .run_catalog_op(CatalogOp::ForgetRegisteredDevice { uid })
                 .await
@@ -674,7 +1000,42 @@ impl StudioController {
 
     /// The devices surface's projection.
     pub fn device_roster_view(&self) -> crate::DeviceRosterView {
-        self.devices.view(self.device_now())
+        let mut view = self.devices.view(self.device_now());
+        view.feeds = crate::device_card_feed_views(
+            self.devices.roster(),
+            &view.roster.devices,
+            &self.device_feeds,
+            self.devices.effects(),
+            (self.now_secs)(),
+        );
+        view.runtime_bands = self.runtime_bands(&view);
+        view
+    }
+
+    /// The runtime band for every SIM in the roster (PD11), joined here
+    /// because the model does not know a sim from silicon: the sidecar
+    /// says which devices are sims and what they wear, and the transport
+    /// says what tier their worker was granted.
+    fn runtime_bands(
+        &self,
+        view: &crate::DeviceRosterView,
+    ) -> std::collections::BTreeMap<crate::DeviceId, crate::UiRuntimeBand> {
+        if self.device_sims.is_empty() {
+            return std::collections::BTreeMap::new();
+        }
+        view.roster
+            .devices
+            .iter()
+            .filter_map(|card| {
+                let uid = view.open_addresses.get(&card.id.0)?;
+                let sidecar = self.device_sims.get(uid)?;
+                let tier = self
+                    .sim_transport
+                    .as_ref()
+                    .and_then(|transport| transport.granted_tier(uid));
+                Some((card.id, crate::UiRuntimeBand::sim(&sidecar.target, tier)))
+            })
+            .collect()
     }
 
     /// Install the platform's user-settings persistence sink (localStorage
@@ -824,12 +1185,6 @@ impl StudioController {
 
     /// The controller's shared stamping clock, for the actor's progressive
     /// log updates (which stamp `UxUpdate::Log` drafts outside `push_log`).
-    /// Install the platform timer factory the simulator connect ladder
-    /// sleeps on (the web shell's `gloo` sleep).
-    pub fn set_sim_timers(&mut self, timers: lpa_link::DeviceTimers) {
-        self.sim_link.set_timers(timers);
-    }
-
     pub(crate) fn clock(&self) -> LogClock {
         Rc::clone(&self.now_secs)
     }
@@ -961,7 +1316,7 @@ impl StudioController {
         // A card feeding its ▶ tab pulls far faster than its heartbeat, so
         // its gap has to reach the UI timer — otherwise the feed would run
         // at heartbeat pace and the tab would show a 2 s slideshow.
-        if let Some(feed) = self.card_feed_due_in(now) {
+        if let Some(feed) = self.device_feed_due_in(now) {
             delay = Some(delay.map_or(feed, |current| current.min(feed)));
         }
         delay.unwrap_or_else(|| RefreshCadence::default().interval())
@@ -997,11 +1352,11 @@ impl StudioController {
     /// might move the lens; cheap, idempotent.
     fn sync_lens_probe_policy(&mut self) {
         let lens = self.pool.lens_session();
-        let kind = lens.map(crate::RuntimeSession::kind);
+        let transport = lens.map(crate::RuntimeSession::transport);
         let features = lens
             .and_then(crate::RuntimeSession::device_features)
             .map(<[lpc_model::LpFeature]>::to_vec);
-        self.project.set_lens_runtime_kind(kind);
+        self.project.set_lens_transport(transport);
         self.project.set_lens_device_features(features);
     }
 
@@ -1037,13 +1392,16 @@ impl StudioController {
             return;
         };
         session.record_refresh_failure();
-        let dead = session.kind() == crate::RuntimeKind::Device
-            && session.consecutive_refresh_failures() >= LENS_DEAD_WIRE_FAILURES;
+        // The backstop is every kind's now (PD9): a worker that died under
+        // the lens answers nothing, exactly like a wire with nobody on it,
+        // and this is what closes the editor honestly instead of leaving a
+        // mirror over a runtime that is gone.
+        let dead = session.consecutive_refresh_failures() >= LENS_DEAD_WIRE_FAILURES;
         if dead {
             self.push_log(UiLogDraft::new(
                 UiLogLevel::Warn,
                 UiLogOrigin::Studio,
-                "the board stopped answering the editor; the editor is closed".to_string(),
+                "the device stopped answering the editor; the editor is closed".to_string(),
             ));
             self.close_device_lens();
         }
@@ -1099,113 +1457,32 @@ impl StudioController {
     }
 
     // ---------------------------------------------------------------
-    // Runtime card frame feed (honest-device preview P2)
+    // The card frame feed (honest-device preview P2)
     // ---------------------------------------------------------------
+    //
+    // ONE lane, the roster's. The runtime pool used to run a second one
+    // for the sim card's ▶ tab; the sim is a device now (PD9), so it is
+    // fed through `device_feeds` like every other card — including the
+    // `FeedLiveness::Lens` treatment when the editor holds its wire.
 
-    /// The tab a card is EFFECTIVELY showing: the persisted choice, else
-    /// the default a fresh card opens on.
-    ///
-    /// The ONE place that answers the question, so the renderer's tab body
-    /// and the frame feed's gate can never disagree about which tab is up —
-    /// a feed running behind a hidden tab would be a wire op nobody asked
-    /// for, and a ▶ tab with no feed would be an empty promise. P3's
-    /// default-when-connected rule belongs here, not in a second table.
-    fn effective_card_tab(&self, card_key: &str) -> crate::CardTab {
-        match self.card_ui.get(card_key) {
-            // An explicit choice is sticky, always. Nothing about the link
-            // coming back should move a tab the user put there.
-            Some(state) => state.tab,
-            None => self.default_card_tab(card_key),
-        }
+    /// Time until the earliest due card feed pull. `None` when no card is
+    /// feeding — the common case, where the UI timer keeps its calm
+    /// heartbeat pace.
+    fn device_feed_due_in(&self, now: f64) -> Option<Duration> {
+        self.device_feeds.due_in(
+            now,
+            crate::DEVICE_CARD_FEED_INTERVAL,
+            self.devices.roster(),
+            self.devices.effects(),
+        )
     }
 
-    /// What a card with no saved choice opens on: ▶ when there is a live
-    /// picture to open on, the front door otherwise (P3's
-    /// default-when-connected rule).
+    /// Pull one published frame per feeding DEVICE card whose completion
+    /// gap elapsed — the roster boards' half of the card feed lane, under
+    /// the same passive class and preempt watch as the sim's.
     ///
-    /// "A live picture" is a session that is ANSWERING and running a project
-    /// — the same pair the renderer reads off the built card
-    /// (`card.project.is_some()` on a Ready link) to decide the ▶ tab
-    /// exists. Deriving it from the pool here rather than from the card
-    /// keeps the rule where the feed can consult it: `card_feed_active`
-    /// asks this question before any card is built.
-    ///
-    /// Landing it HERE and not in a second table at the renderer is the
-    /// point — a default that disagreed with the feed's gate would either
-    /// pull frames for a hidden tab or open a ▶ tab nothing feeds.
-    fn default_card_tab(&self, card_key: &str) -> crate::CardTab {
-        // The sim's ▶ is its own published output — a loaded project is all
-        // it needs.
-        let has_picture = card_key == crate::SIM_CARD_KEY
-            && self
-                .pool
-                .sim_session()
-                .is_some_and(|session| session.sim_loaded_project().is_some());
-        if has_picture {
-            crate::CardTab::Play
-        } else {
-            crate::CardTab::Details
-        }
-    }
-
-    /// The card-identity key a session's card wears.
-    fn card_key_for_session(_session: &crate::RuntimeSession) -> String {
-        crate::SIM_CARD_KEY.to_string()
-    }
-
-    /// Whether a session's frame feed should be pulling (Q3): a session
-    /// that is answering and running a project, whose card is showing the
-    /// ▶ tab. Nothing else earns a frame read.
-    ///
-    /// For the sim that means a loaded project (G1 ruling 3 — the sim ▶
-    /// rides this same feed, so the card shows the sim engine's OWN
-    /// published frames, exactly like hardware; the in-proc wire makes the
-    /// bandwidth caveats moot but the completion-gap cadence still paces
-    /// it).
-    ///
-    /// Tab selection is the visibility signal, deliberately. A card on
-    /// another tab, a gallery scrolled away, or a backgrounded browser tab
-    /// all stop producing reads either here or through the throttled UI
-    /// timer, and the completion-gap absorbs whatever the throttle does to
-    /// the cadence. There is no separate "surface visible" flag in core to
-    /// consult, and inventing one to gate a picture would be the wrong
-    /// order of work.
-    fn card_feed_active(&self, session: &crate::RuntimeSession) -> bool {
-        if session.sim_loaded_project().is_none() {
-            return false;
-        }
-        let key = Self::card_key_for_session(session);
-        self.effective_card_tab(&key) == crate::CardTab::Play
-    }
-
-    /// Time until the earliest due card-feed pull, for the actor's
-    /// min-over-sessions delay. `None` when no session is feeding — the
-    /// common case, where the UI timer keeps its calm heartbeat pace.
-    fn card_feed_due_in(&self, now: f64) -> Option<Duration> {
-        self.pool
-            .sessions()
-            .filter(|session| self.card_feed_active(session))
-            .map(|session| {
-                session
-                    .card_feed()
-                    .due_in(now, session.card_feed_interval())
-            })
-            .min()
-    }
-
-    /// Pull one published frame per feeding session whose completion gap
-    /// elapsed (the ▶ tab's cadence).
-    ///
-    /// This is a distinct pull class from the lens refresh: it runs on
-    /// NON-lens sessions, which otherwise issue no wire op between
-    /// heartbeats, and it declares [`crate::DEVICE_CARD_FEED_CLASS`] — it
-    /// preempts nothing and is cancelled at the next frame boundary when a
-    /// user gesture arrives.
-    ///
-    /// Returns whether a due feed was skipped or cut short by cancellation,
-    /// so the actor can count this run toward its starvation floor (a live
-    /// control's write stream must not freeze a card's ▶ tab either).
-    pub async fn run_due_card_feeds<MakeTimer, Timer, Cancel>(
+    /// Returns whether a due pull was skipped or cut short by cancellation.
+    pub async fn run_due_device_feeds<MakeTimer, Timer, Cancel>(
         &mut self,
         make_timer: MakeTimer,
         cancel: &Cancel,
@@ -1215,164 +1492,137 @@ impl StudioController {
         Timer: Future<Output = ()>,
         Cancel: CancelSignal + ?Sized,
     {
-        let now = (self.now_secs)();
-        let due: Vec<crate::RuntimeId> = self
-            .pool
-            .sessions()
-            .filter(|session| {
-                self.card_feed_active(session)
-                    && session.card_feed().due(now, session.card_feed_interval())
-            })
-            .map(crate::RuntimeSession::id)
-            .collect();
-        // Only a feed that was actually DUE can be starved: with no card
-        // feeding, a cancel flag flipped by the tick's watcher says nothing
-        // about this lane, and must not count toward the actor's floor.
-        let mut preempted = false;
-        for id in due {
-            if cancel.is_cancelled() {
-                preempted = true;
-                break;
-            }
-            self.run_card_feed(id, make_timer.clone(), cancel).await;
-            // A read cut short mid-frame leaves the flag set.
-            preempted = cancel.is_cancelled();
+        let now_secs = Rc::clone(&self.now_secs);
+        let (preempted, new_frame) = self
+            .device_feeds
+            .run_due(
+                &*now_secs,
+                crate::DEVICE_CARD_FEED_INTERVAL,
+                crate::DEVICE_CARD_FEED_CLASS
+                    .deadline()
+                    .unwrap_or(crate::PASSIVE_REFRESH_DEADLINE),
+                self.devices.roster(),
+                self.devices.effects(),
+                make_timer,
+                cancel,
+            )
+            .await;
+        if new_frame {
+            self.mark_dirty();
         }
+        self.persist_due_device_frames().await;
         preempted
     }
 
-    /// One session's feed pull: acquire the project handle, read the
-    /// published frame, fold it into the session's feed state, and fill in
-    /// a refused display layout locally.
-    async fn run_card_feed<MakeTimer, Timer, Cancel>(
-        &mut self,
-        id: crate::RuntimeId,
-        make_timer: MakeTimer,
-        cancel: &Cancel,
-    ) where
-        MakeTimer: FnMut(Duration) -> Timer,
-        Timer: Future<Output = ()>,
-        Cancel: CancelSignal + ?Sized,
-    {
-        // Record which card this feed feeds BEFORE the wire work: if this
-        // pull is the one that discovers the board is gone, the roster
-        // still needs to know where the last frame belongs.
-        if let Some(session) = self.pool.session_mut(id) {
-            let key = Self::card_key_for_session(session);
-            session.card_feed_mut().set_card_key(key);
+    /// Write every feed's newest frame to its board's sidecar when one is
+    /// due ([`crate::DeviceFrameFeed::snapshot_due`]: a frame newer than the
+    /// written one, at most every ten seconds per board), so a remembered
+    /// board keeps its last picture across reloads.
+    ///
+    /// Runs in the feed lane, after the pulls, and never in a fold (I7).
+    /// The write goes straight to the host — NOT through `run_catalog_op`,
+    /// whose gallery re-hydration would rebuild the home view every ten
+    /// seconds for nothing the gallery lists. A failed write is logged and
+    /// still stamped as written: a store that refuses today would refuse
+    /// again every tick, and the board's picture is a convenience, not the
+    /// source of truth.
+    async fn persist_due_device_frames(&mut self) {
+        let now = (self.now_secs)();
+        let due = self.device_feeds.snapshots_due(now);
+        if due.is_empty() {
+            return;
         }
-        let Some(handle_id) = self.acquire_card_feed_handle(id).await else {
-            // Nothing loaded (or the handle is unknowable right now): stamp
-            // the attempt so the ask paces itself instead of spinning.
-            let now = (self.now_secs)();
-            if let Some(session) = self.pool.session_mut(id) {
-                session.card_feed_mut().mark_pull_complete(now);
-            }
+        let Ok(host) = self.library_host() else {
             return;
         };
-        let deadline = ProgressDeadline::new(
-            crate::DEVICE_CARD_FEED_CLASS
-                .deadline()
-                .unwrap_or(crate::PASSIVE_REFRESH_DEADLINE),
-            make_timer,
-        );
-        let (outcome, request_logs) = {
-            let Some(session) = self.pool.session_mut(id) else {
-                return;
+        for (device, frame, captured_at) in due {
+            let Some(uid) = self.device_registry_key(device).or_else(|| {
+                self.devices
+                    .roster()
+                    .device(device)
+                    .and_then(|device| device.identity.uid.as_ref())
+                    .map(|uid| uid.0.clone())
+            }) else {
+                // An anonymous board has no honest key; its picture lives
+                // for the session only, like its record.
+                continue;
             };
-            let request = lpc_wire::ProjectReadRequest {
-                since: None,
-                queries: Vec::new(),
-                // The whole request: one probe, no mirror queries. This is
-                // a picture, not a ProjectSync.
-                probes: vec![lpc_wire::ProjectProbeRequest::OutputFrame(
-                    lpc_wire::OutputFrameProbeRequest {
-                        display_layout: session.card_feed().display_layout_read(),
-                    },
-                )],
-            };
-            let Ok(server) = session.client_mut() else {
-                return;
-            };
-            match server
-                .project_read_gated(handle_id, request, deadline, cancel)
+            let bytes = crate::app::devices::device_frame_snapshot::encode(&frame, captured_at);
+            if let Err(error) = host
+                .catalog(CatalogOp::StoreDeviceFrame { uid, bytes })
                 .await
             {
-                Ok(crate::StudioProjectReadOutcome::Completed(read)) => {
-                    (Some(read.events), read.logs)
-                }
-                // Preempted: keep the old completion stamp so the redo is
-                // prompt, exactly like the lens pull.
-                Ok(crate::StudioProjectReadOutcome::Cancelled) => return,
-                Ok(crate::StudioProjectReadOutcome::TimedOut) => (None, Vec::new()),
-                Err(error) => (
-                    None,
-                    vec![UiLogDraft::new(
-                        UiLogLevel::Debug,
-                        UiLogOrigin::Studio,
-                        format!("runtime card frame read failed: {error}"),
-                    )],
-                ),
+                log::warn!("device last frame not persisted: {error}");
             }
+            self.device_feeds
+                .mark_snapshot_written(device, captured_at, now);
+        }
+    }
+
+    /// Seed the feeds of remembered boards from their persisted last frames
+    /// (`device_frame_snapshot`), read off the library snapshot `fs` at
+    /// settle. Only a board whose feed has NO picture reads its sidecar, so
+    /// after the first settle nothing is read again, and a frame this
+    /// session pulled is never displaced by an older one on disk.
+    fn seed_device_frame_snapshots(&mut self, fs: &Rc<std::cell::RefCell<dyn lpfs::LpFs>>) {
+        let Some(inputs) = self.home_inputs.as_ref() else {
+            return;
         };
-        self.record_session_logs(id, request_logs);
-        let now = (self.now_secs)();
-        let mut new_frame = false;
-        if let Some(session) = self.pool.session_mut(id) {
-            session.card_feed_mut().mark_pull_complete(now);
-            match outcome {
-                Some(events) => {
-                    let outputs = output_frame_entries(&events);
-                    // Every entry folds in: the card composes ALL published
-                    // outputs into one picture (the small dome's two boxes).
-                    let applied = session.card_feed_mut().apply(&outputs, now);
-                    new_frame = applied.new_frame;
-                }
-                // A read that timed out or errored says nothing about the
-                // handle staying valid — a device-side reload retires it —
-                // so drop the connection-scoped half and re-acquire next
-                // tick. The last frame stays on screen, aging honestly.
-                None => session.card_feed_mut().invalidate_connection(),
+        let mut seeded = false;
+        let rows: Vec<(String, Option<u64>)> = inputs
+            .registered
+            .iter()
+            .map(|row| (row.uid.clone(), row.device_id))
+            .collect();
+        for (uid, device_id) in rows {
+            let device = self
+                .devices
+                .roster()
+                .devices()
+                .iter()
+                .find(|device| {
+                    device_id == Some(device.id.0)
+                        || device
+                            .identity
+                            .uid
+                            .as_ref()
+                            .is_some_and(|known| known.0 == uid)
+                })
+                .map(|device| device.id);
+            let Some(device) = device else {
+                continue;
+            };
+            if self.device_feeds.has_frame(device) {
+                continue;
+            }
+            let snapshot = {
+                let fs = fs.borrow();
+                crate::app::devices::device_frame_snapshot::read_snapshot(&*fs, &uid)
+            };
+            if let Some((frame, captured_at)) = snapshot {
+                seeded |= self.device_feeds.seed_snapshot(device, frame, captured_at);
             }
         }
-        if new_frame {
+        if seeded {
             self.mark_dirty();
         }
     }
 
-    /// The runtime's loaded-project handle for the feed, acquired once per
-    /// connection.
-    ///
-    /// The heartbeat already carries one for every loaded project, so the
-    /// common path costs nothing; a session that has not seen a heartbeat
-    /// yet spends one `ListLoadedProjects` and remembers the answer.
-    async fn acquire_card_feed_handle(&mut self, id: crate::RuntimeId) -> Option<u32> {
-        let session = self.pool.session(id)?;
-        if let Some(handle) = session.card_feed().handle_id() {
-            return Some(handle);
-        }
-        if let Some(handle) = session.heartbeat_project_handle() {
-            self.pool
-                .session_mut(id)?
-                .card_feed_mut()
-                .set_handle_id(handle);
-            return Some(handle);
-        }
-        let catalog = self
-            .pool
-            .session_mut(id)?
-            .client_mut()
-            .ok()?
-            .list_loaded_projects()
-            .await
-            .ok()?;
-        self.record_session_logs(id, catalog.logs);
-        let handle = catalog.projects.first()?.handle_id;
-        self.pool
-            .session_mut(id)?
-            .card_feed_mut()
-            .set_handle_id(handle);
-        Some(handle)
+    /// The card's mount lease for its live frame feed: a mounted
+    /// `DeviceRosterCard` wants its device fed; an unmounted one does not.
+    pub fn set_device_feed_wanted(&mut self, device: crate::DeviceId, wanted: bool) {
+        self.device_feeds.set_wanted(device, wanted);
+        self.mark_dirty();
+    }
+
+    /// The page's visibility, for the feeds: a hidden tab feeds nothing.
+    pub fn set_device_feeds_page_visible(&mut self, visible: bool) {
+        self.device_feeds.set_page_visible(visible);
+    }
+
+    /// The device feeds, for the view join and the tests.
+    pub fn device_feeds(&self) -> &crate::DeviceFrameFeeds {
+        &self.device_feeds
     }
 
     pub fn actions(&self) -> UiActions {
@@ -1385,6 +1635,7 @@ impl StudioController {
                 .with_home(Some(home))
                 .with_lens(self.lens_runtime())
                 .with_session(self.session_control())
+                .with_open_mismatch(self.open_mismatch.as_deref().cloned())
                 .with_settings(self.settings.ui_view());
         }
         // gallery-always (D24): home covers every no-project state, so the
@@ -1438,70 +1689,33 @@ impl StudioController {
             .with_dirty(dirty)
     }
 
+    /// The LENS session's docked card (D43): the device the editor is open
+    /// on, projected by the roster exactly as the gallery projects it —
+    /// never a second card, and for a sim the same card the Devices grid
+    /// draws, band and all (PD11).
+    fn lens_card(&self) -> Option<crate::UiLensCard> {
+        let attachment = self.pool.attached_session()?.attachment();
+        let view = self.device_roster_view();
+        let runtime = view.runtime_bands.get(&attachment.device).cloned();
+        view.roster
+            .devices
+            .into_iter()
+            .find(|card| card.id == attachment.device)
+            .map(|card| crate::UiLensCard::Device { card, runtime })
+    }
+
     /// The header session·project control's ONE session (single-session
-    /// policy, module doc), built from the live cards the gallery roster
-    /// itself derives — status included, so the control can never wear a
-    /// state the gallery would deny.
+    /// policy, module doc): the device's own name and board, its status
+    /// from the roster's evidence (the same fold the card renders — the
+    /// control can never disagree with the card), and the engine rate the
+    /// lens client heard.
     ///
     /// Deliberately NOT coupled to the lens: a session the editor has
     /// detached from is still the session this tab runs, and the control is
     /// what says so.
     fn session_control(&self) -> Option<crate::UiChromeSessionControl> {
-        if let Some(control) = self.device_session_control() {
-            return Some(control);
-        }
-        let card = home_view_builder::sim_card(&self.home_pool_evidence().sim?);
-        // Best-effort, and honestly absent when nothing is known: the
-        // engine's rate once it publishes frames. The lamp extent the spike
-        // sketched ("… · 217 lamps") has no honest source for the SIM yet,
-        // so it waits for one instead of being invented here.
-        let mut facts: Vec<String> = Vec::new();
-        if let Some(fps) = card.frame_fps {
-            facts.push(format!("{} fps", fps.round() as i64));
-        }
-        Some(crate::UiChromeSessionControl {
-            kind: crate::UiChromeSessionKind::Sim,
-            key: card.identity_key().to_string(),
-            // The control renders the sim's board as a suffix, so the
-            // name stays the kind.
-            name: "Sim".to_string(),
-            // D4: the sim's board is the one it inherited from the
-            // project it runs.
-            board: card.board_id.as_deref().map(crate::board_display_name),
-            status: home_view_builder::chip_status(card.state),
-            stat_line: (!facts.is_empty()).then(|| facts.join(" · ")),
-        })
-    }
-
-    /// The LENS session's docked card (D43): the device the editor is open
-    /// on, projected by the roster exactly as the gallery projects it; else
-    /// the sim's live card.
-    fn lens_card(&self) -> Option<crate::UiLensCard> {
-        if let Some(attachment) = self
-            .pool
-            .device_session()
-            .and_then(crate::RuntimeSession::device_attachment)
-        {
-            return self
-                .device_roster_view()
-                .roster
-                .devices
-                .into_iter()
-                .find(|card| card.id == attachment.device)
-                .map(crate::UiLensCard::Device);
-        }
-        self.home_pool_evidence().sim.as_ref().map(|sim| {
-            crate::UiLensCard::Sim(self.overlay_card_ui(home_view_builder::sim_card(sim)))
-        })
-    }
-
-    /// The header control for a DEVICE lens session (round-2 M5): the
-    /// device's own name and board, its status from the roster's evidence
-    /// (the same fold the card renders — the control can never disagree
-    /// with the card), and the engine rate the lens client heard.
-    fn device_session_control(&self) -> Option<crate::UiChromeSessionControl> {
-        let session = self.pool.device_session()?;
-        let attachment = session.device_attachment()?;
+        let session = self.pool.attached_session()?;
+        let attachment = session.attachment();
         let device = self.devices.roster().device(attachment.device);
         let running = device.is_some_and(|device| {
             device
@@ -1519,9 +1733,18 @@ impl StudioController {
             facts.push(format!("{} fps", fps.round() as i64));
         }
         Some(crate::UiChromeSessionControl {
-            kind: crate::UiChromeSessionKind::Device,
+            face: match attachment.transport {
+                crate::LinkTransport::Sim => crate::DeviceFace::Sim,
+                crate::LinkTransport::Serial => crate::DeviceFace::Wire,
+            },
             key: format!("device:{}", attachment.uid),
-            name: attachment.name.clone(),
+            device: Some(attachment.device),
+            // The roster's LIVE title, so a rename made from this very
+            // panel shows up in the segment at once; the attach-time
+            // snapshot only covers a device the roster has since dropped.
+            name: device
+                .map(lpa_devices::Device::title)
+                .unwrap_or_else(|| attachment.name.clone()),
             board: attachment
                 .board_id
                 .as_deref()
@@ -1531,16 +1754,14 @@ impl StudioController {
         })
     }
 
-    /// The board the LENS runtime claims to be: for the SIM, the board it
-    /// inherited from the project it runs (vision D4). The registry-backed
-    /// device arm returns with the rebuilt device model.
+    /// The board the LENS device reports it is — the roster's `board_id`,
+    /// which for a sim is the manifest it wears and for silicon is the
+    /// board its firmware was built for. One source, both kinds (PD9).
     ///
-    /// `None` is ORDINARY, not exceptional: no lens, or a sim running an
-    /// untargeted project.
+    /// `None` is ORDINARY, not exceptional: no lens, or a device that has
+    /// reported no board.
     fn lens_board_id(&self) -> Option<&str> {
-        // the sim is not a device (D22): it has no registry row, and its
-        // board is the session's own advisory identity
-        self.pool.lens_session()?.sim_board_id()
+        self.pool.lens_session()?.attachment().board_id.as_deref()
     }
 
     /// The settings-derived slice the agent view decoration needs:
@@ -1573,22 +1794,34 @@ impl StudioController {
     /// focused document — the web shell's D37 route reconciliation binds
     /// to this).
     fn lens_runtime(&self) -> Option<crate::UiLensRuntime> {
-        self.pool
-            .lens_session()
-            .map(|session| match session.device_attachment() {
-                // A device lens is addressed by the device's registered uid.
-                Some(device) => crate::UiLensRuntime::Device {
-                    uid: device.uid.clone(),
-                },
-                // the session's loaded-project record (not the library
-                // binding) is the key: it survives detach, so re-attach
-                // flows address the same document
-                None => crate::UiLensRuntime::Sim {
-                    project_uid: session
-                        .sim_loaded_project()
-                        .map(|project| project.uid.clone()),
-                },
-            })
+        let attachment = self.pool.lens_session()?.attachment();
+        Some(crate::UiLensRuntime::Device {
+            base_mac: self.base_mac_of(&attachment.uid),
+            uid: attachment.uid.clone(),
+            transport: attachment.transport,
+            // The library binding the mirror holds: what the editor is
+            // looking at through this lens, which is the whole of the
+            // project route's identity. `None` for a transient open (an
+            // example, a shared link) and for the storeless demo path.
+            project_uid: self.project.active_library_uid(),
+        })
+    }
+
+    /// A device's base MAC in canonical form, off the roster's identity
+    /// chain — the instance half of the `?on=` grammar (D43).
+    ///
+    /// `None` for a device whose identity has not landed, and for the docs
+    /// page's identity-less sim (PD10), which is never addressed at all.
+    fn base_mac_of(&self, uid: &str) -> Option<String> {
+        Some(
+            self.devices
+                .device_for_key(uid)?
+                .identity
+                .mac
+                .as_ref()?
+                .0
+                .clone(),
+        )
     }
 
     /// The home gallery: shown whenever NO project is open — always
@@ -1603,47 +1836,12 @@ impl StudioController {
             self.home_inputs.as_ref(),
             opening.map(|pending| pending.card_key().to_string()),
             None,
-            &self.home_pool_evidence(),
         );
-        // Overlay the card's persisted UI view-state (the builder leaves
-        // `ui` default; the identity key keys the overlay).
-        view.sim = view.sim.map(|card| self.overlay_card_ui(card));
         // The device half is the model's own projection, verbatim: there is
         // no `Ui*` mirror of it, so the page cannot drift from the fold.
+        // The sim is in it, like every device (PD9).
         view.devices = self.device_roster_view();
         Some(view)
-    }
-
-    /// The runtime pool's roster evidence: the SIM session's, while it
-    /// lives (D36: the sim card exists exactly as long as the session
-    /// does).
-    ///
-    /// ⚠️ The per-DEVICE-session evidence bundles, the app-singular connect
-    /// narration and the setup flow's stand-down windows went with M2 of
-    /// the device-model rebuild; the rebuilt model projects device cards
-    /// from its own DTOs.
-    fn home_pool_evidence(&self) -> crate::app::home::HomePoolEvidence {
-        let now = (self.now_secs)();
-        let sim = self
-            .pool
-            .sim_session()
-            .map(|session| crate::app::home::HomeSimEvidence {
-                project: session
-                    .sim_loaded_project()
-                    .map(|project| crate::UiSimProjectChip {
-                        uid: project.uid.clone(),
-                        name: project.name.clone(),
-                    }),
-                // The sim ▶ rides the SAME feed a device card will (G1
-                // ruling 3) — these are the sim engine's own published
-                // frames, never a browser re-simulation.
-                frame: session.card_feed().frame().cloned(),
-                frame_age_secs: session.card_feed().frame_age_secs(now),
-                fps: session.engine_fps(),
-                board_id: session.sim_board_id().map(str::to_string),
-                console_tail: session.console_tail().iter().cloned().collect(),
-            });
-        crate::app::home::HomePoolEvidence { sim }
     }
 
     /// The console slice of the view: ring entries passing the display
@@ -1797,8 +1995,38 @@ impl StudioController {
     /// settle. Called at the end of every dispatch and by the actor after
     /// each command batch, so host futures always get driven even when a
     /// close happened on a synchronous path.
+    /// The deferred half of a rename made while its project was open: once
+    /// the project is no longer the active library package (its close has
+    /// been released just above), move the library directory to the new
+    /// name with the ordinary catalog rename — the same op the gallery's
+    /// kebab runs, so the slug, the manifest and the cloud's `Renamed`
+    /// trigger all land the way a closed-project rename lands them.
+    ///
+    /// A rename that never gets its close (the tab is shut first) keeps the
+    /// manifest name it already wrote; only the dated directory slug stays
+    /// behind, which the next gallery rename fixes.
+    async fn run_pending_reslug(&mut self) {
+        let Some((uid, name)) = self.pending_reslug.clone() else {
+            return;
+        };
+        if self.project.active_library_uid().as_deref() == Some(uid.as_str()) {
+            return;
+        }
+        self.pending_reslug = None;
+        if let Err(error) = self
+            .run_catalog_op(CatalogOp::Rename {
+                uid: uid.clone(),
+                new_slug: name,
+            })
+            .await
+        {
+            log::warn!("library slug of {uid} did not follow its rename: {error}");
+        }
+    }
+
     pub async fn settle_library(&mut self) {
         self.project.release_closed_library_projects().await;
+        self.run_pending_reslug().await;
         if !self.library_refresh_pending {
             return;
         }
@@ -1807,15 +2035,18 @@ impl StudioController {
             return;
         };
         let open_elsewhere = host.open_elsewhere_uids().await;
+        let mut snapshot_fs = None;
         match host.catalog_snapshot().await {
             Ok(fs) => {
-                let inputs = home_view_builder::hydrate_home_inputs(fs, &open_elsewhere);
+                let inputs =
+                    home_view_builder::hydrate_home_inputs(Rc::clone(&fs), &open_elsewhere);
                 // The add-node picker's import source is derived from the
                 // same walk (P5) — one snapshot read feeds both the
                 // gallery and the picker.
                 self.project
                     .set_import_patterns(home_view_builder::importable_patterns(&inputs));
                 self.home_inputs = Some(inputs);
+                snapshot_fs = Some(fs);
             }
             Err(error) => {
                 log::warn!("library snapshot failed: {error}");
@@ -1829,8 +2060,13 @@ impl StudioController {
         }
         // The registry rows come off the same snapshot walk; the roster
         // rehydrates from them the first time they land, so a remembered
-        // board has a card before any port is open.
+        // board has a card before any port is open — and its last picture,
+        // off the same snapshot, so the tile shows what it last did.
         self.load_device_records_if_due();
+        if let Some(fs) = snapshot_fs.as_ref() {
+            self.seed_device_sim_records(fs);
+            self.seed_device_frame_snapshots(fs);
+        }
         self.mark_dirty();
     }
 
@@ -1947,6 +2183,15 @@ impl StudioController {
             let op = action.into_op::<crate::DevicePushOp>()?;
             return self.execute_device_push_op(op).await;
         }
+        if node_id.as_str() == crate::SimCreateOp::NODE_ID {
+            let op = action.into_op::<crate::SimCreateOp>()?;
+            return self.execute_sim_create_op(op).await;
+        }
+        if node_id.as_str() == crate::DeviceFeedOp::NODE_ID {
+            let op = action.into_op::<crate::DeviceFeedOp>()?;
+            self.set_device_feed_wanted(op.device, op.wanted);
+            return Ok(UiNotices::new());
+        }
         if node_id == project_node_id {
             // Slot edits and node-level reverts target the project node too
             // (the op carries the full slot/node address), so route by op
@@ -2049,142 +2294,6 @@ impl StudioController {
         )))
     }
 
-    /// Sim crash detection + guarded auto-reboot, riding the tick cadence
-    /// like [`Self::run_due_connect_retry`] (poisoned-instance defect: a
-    /// panic escaping the worker's panic=abort wasm instance condemns it;
-    /// the link layer reports it as a sticky per-session fatal message).
-    ///
-    /// Detection is edge-triggered — a sim session not yet marked
-    /// [`ServerFailureKind::SimCrashed`] whose connector reports a fatal —
-    /// so the recovery decision runs once per crash. When the flap guard
-    /// allows, the dead session is torn down (the Worker terminates) and
-    /// the recorded [`SimLoadedProject`](crate::SimLoadedProject) is
-    /// reopened through the normal open flow; otherwise the session stays
-    /// Failed and the card offers manual restart (the open flow tears a
-    /// crashed session down itself, see `open_from_home_inner`).
-    pub async fn run_due_sim_crash_recovery(&mut self) {
-        let Some(sim_id) = self.detect_sim_crash() else {
-            return;
-        };
-        let now = (self.now_secs)();
-        if !sim_crash_reboot_allowed(self.sim_crash_reboot_at, now, SIM_CRASH_REBOOT_GUARD_SECS) {
-            self.push_log(UiLogDraft::new(
-                UiLogLevel::Error,
-                UiLogOrigin::Studio,
-                "Simulator keeps crashing; not restarting automatically. \
-                 Reopen the project to try again.",
-            ));
-            self.mark_dirty();
-            return;
-        }
-        self.sim_crash_reboot_at = Some(now);
-        let loaded = self
-            .pool
-            .session(sim_id)
-            .and_then(|session| session.sim_loaded_project().cloned());
-        self.teardown_crashed_sim(sim_id).await;
-        // The crashed session's project still holds its host-side tab lock
-        // (quiesce parks it for the settle points, which run at batch end —
-        // too late for this same-batch reopen). Release it now so the
-        // reopen can lock the project again.
-        self.project.release_closed_library_projects().await;
-        self.push_log(UiLogDraft::new(
-            UiLogLevel::Warn,
-            UiLogOrigin::Studio,
-            "Simulator crashed and was restarted; unsaved changes may be lost.",
-        ));
-        if let Some(project) = loaded {
-            // Reboot with the last-known project: the library head — the
-            // crashed instance held the applied-but-unsaved overlay, which
-            // died with it either way.
-            if let Err(error) = self
-                .open_from_home(PendingOpen::Package(project.uid), UxUpdateSink::noop())
-                .await
-            {
-                self.push_log(UiLogDraft::new(
-                    UiLogLevel::Error,
-                    UiLogOrigin::Studio,
-                    format!("simulator restart failed: {error}"),
-                ));
-            }
-        }
-        self.mark_dirty();
-    }
-
-    /// Edge-detect a crashed sim worker: the sim session's connector
-    /// reports a sticky instance-fatal message and the session is not yet
-    /// marked crashed. Marks it Failed with
-    /// [`ServerFailureKind::SimCrashed`], surfaces the primary panic on
-    /// the console, and returns the session id.
-    fn detect_sim_crash(&mut self) -> Option<crate::RuntimeId> {
-        let session = self.pool.sim_session()?;
-        if matches!(
-            session.server_state(),
-            ServerState::Failed {
-                kind: ServerFailureKind::SimCrashed,
-                ..
-            }
-        ) {
-            return None;
-        }
-        let sim = session.sim_payload()?;
-        let message = sim.connector.session_fatal(&sim.session.id)?;
-        let sim_id = session.id();
-        self.push_log(UiLogDraft::new(
-            UiLogLevel::Error,
-            UiLogOrigin::Studio,
-            format!("Simulator crashed: {message}"),
-        ));
-        if let Some(session) = self.pool.session_mut(sim_id) {
-            session.fail_with_kind(message, ServerFailureKind::SimCrashed);
-        }
-        self.mark_dirty();
-        Some(sim_id)
-    }
-
-    /// Tear down a crashed sim session: quiesce the editor lens when it
-    /// sits on it, take the session out of the pool, and close its payload
-    /// (terminating the dead Worker). Close errors are logged, not fatal —
-    /// the worker is already dead.
-    async fn teardown_crashed_sim(&mut self, sim_id: crate::RuntimeId) {
-        if self.pool.lens() == Some(sim_id) {
-            self.quiesce_lens();
-        }
-        if let Some(crate::RuntimePayload::Sim(sim)) = self
-            .pool
-            .remove_sim()
-            .map(crate::RuntimeSession::into_payload)
-        {
-            close_runtime_payload(sim).await;
-        }
-    }
-
-    /// Install a connected attachment into the pool under the capacity
-    /// policy (module doc: one session per tab).
-    ///
-    /// When the install replaces the session the lens is on (a re-connect
-    /// under an open editor), the mirror resets — the replacement inherits
-    /// the lens with a clean slate.
-    async fn install_session(&mut self, payload: SimAttachment) -> crate::RuntimeId {
-        let install_endpoint = payload.session.endpoint_id.as_str().to_string();
-        // Read BEFORE the install: the question is whether THIS install
-        // replaces the session the editor is a lens on.
-        let lens_replaced = self.pool.lens_session().is_some();
-        let id = self.pool.install(crate::RuntimePayload::Sim(payload));
-        self.record_device_event(
-            Some(&id.to_string()),
-            Some(install_endpoint.as_str()),
-            DeviceEventKind::Pool {
-                action: "install".to_string(),
-                detail: "sim".to_string(),
-            },
-        );
-        if lens_replaced {
-            self.project.reset();
-        }
-        id
-    }
-
     /// Every file of one library package, read through a fresh read-only
     /// snapshot. No lock: the source of a vendoring is somebody else's
     /// project, possibly open in another tab, and reading it must never
@@ -2210,7 +2319,31 @@ impl StudioController {
         match op {
             HomeOp::OpenPackage { key } => {
                 return self
-                    .open_from_home(PendingOpen::Package(key), updates)
+                    .open_from_home(
+                        PendingOpen::Package {
+                            key,
+                            on: OpenOn::Resolve,
+                        },
+                        updates,
+                    )
+                    .await;
+            }
+            HomeOp::OpenPackageOnDevice {
+                key,
+                base_mac,
+                over_running_project,
+            } => {
+                return self
+                    .open_from_home(
+                        PendingOpen::Package {
+                            key,
+                            on: OpenOn::Device {
+                                base_mac,
+                                over_running_project,
+                            },
+                        },
+                        updates,
+                    )
                     .await;
             }
             HomeOp::OpenExample { id } => {
@@ -2234,25 +2367,34 @@ impl StudioController {
                     )
                     .await;
             }
-            HomeOp::CreateProject { template } => {
+            HomeOp::CreateProject { template, name } => {
                 // Create-and-open (the D17 deviation, 2026-07-27): the
                 // package lands in the library — slugged/dated/deduped by
-                // the store from the template's label; rename lives on the
-                // card kebab — then opens like any card, so the user lands
-                // in the editor with something to do next. `Blank` sends no
-                // files at all, so the historical path is untouched.
+                // the store from the name the menu's optional field carried,
+                // else the template's label; rename lives on the card kebab
+                // and in the project's settings — then opens like any card,
+                // so the user lands in the editor with something to do next.
+                // `Blank` sends no files at all, so the historical path is
+                // untouched.
                 let files = crate::app::home::template_project_files(template)?;
+                let name = name
+                    .map(|name| name.trim().to_string())
+                    .filter(|name| !name.is_empty())
+                    .unwrap_or_else(|| template.default_project_name().to_string());
                 let outcome = self
-                    .run_catalog_op(CatalogOp::Create {
-                        name: template.default_project_name().to_string(),
-                        files,
-                    })
+                    .run_catalog_op(CatalogOp::Create { name, files })
                     .await?;
                 let created = outcome.summary.ok_or_else(|| {
                     UiError::MissingSession("create produced no package".to_string())
                 })?;
                 return self
-                    .open_from_home(PendingOpen::Package(created.uid.to_string()), updates)
+                    .open_from_home(
+                        PendingOpen::Package {
+                            key: created.uid.to_string(),
+                            on: OpenOn::Resolve,
+                        },
+                        updates,
+                    )
                     .await;
             }
             HomeOp::CreateFromPattern { uid, export, name } => {
@@ -2279,7 +2421,13 @@ impl StudioController {
                     UiError::MissingSession("create produced no package".to_string())
                 })?;
                 return self
-                    .open_from_home(PendingOpen::Package(created.uid.to_string()), updates)
+                    .open_from_home(
+                        PendingOpen::Package {
+                            key: created.uid.to_string(),
+                            on: OpenOn::Resolve,
+                        },
+                        updates,
+                    )
                     .await;
             }
             HomeOp::RenamePackage { uid, name } => {
@@ -2288,6 +2436,22 @@ impl StudioController {
                     return Err(UiError::UnsupportedAction(
                         "a project name cannot be empty".to_string(),
                     ));
+                }
+                // The project OPEN in this tab — the one whose settings row
+                // or gallery card was just edited while it runs — cannot go
+                // through the catalog: the host refuses structural ops on
+                // it (`OpenInThisTab`, the project-before-catalog rule).
+                // Its name is patched through its own handle instead, and
+                // the library directory follows when the project closes
+                // (`run_pending_reslug`).
+                if self.project.active_library_uid().as_deref() == Some(uid.as_str()) {
+                    let renamed = {
+                        let server = self.pool.lens_session_mut()?.client_mut()?;
+                        self.project.rename_active_project(server, name).await?
+                    };
+                    self.pending_reslug = Some((uid, renamed.clone()));
+                    return Ok(UiNotices::new()
+                        .with_notice(UiNotice::info(format!("Renamed to {renamed}"))));
                 }
                 let outcome = self
                     .run_catalog_op(CatalogOp::Rename {
@@ -2300,6 +2464,39 @@ impl StudioController {
                     .map(|summary| summary.slug)
                     .unwrap_or_else(|| name.to_string());
                 Ok(UiNotices::new().with_notice(UiNotice::info(format!("Renamed to {renamed}"))))
+            }
+            HomeOp::SetPackageTarget { uid, target } => {
+                // The Hardware row lives in the OPEN project's settings, so
+                // this is the open project's manifest — patched through its
+                // own handle like the name is, because the host refuses
+                // structural catalog ops on a project this tab holds.
+                if self.project.active_library_uid().as_deref() != Some(uid.as_str()) {
+                    return Err(UiError::UnsupportedAction(
+                        "open this project to choose the hardware it runs on".to_string(),
+                    ));
+                }
+                // Desktop is a CHOICE and is written as one (Yona's
+                // ruling, 2026-09-08): `set_target` puts
+                // `lightplayer/desktop` in the manifest, the same value
+                // creation writes. An absent key still reads as Desktop,
+                // so nothing on disk needs rewriting — but a project that
+                // was asked and answered no longer looks like one that was
+                // never asked.
+                let target = crate::app::library::ProjectTarget::from_manifest(target.as_deref());
+                let written = match &target {
+                    crate::app::library::ProjectTarget::Desktop => None,
+                    crate::app::library::ProjectTarget::Board(board_id) => Some(board_id.clone()),
+                };
+                {
+                    let server = self.pool.lens_session_mut()?.client_mut()?;
+                    self.project
+                        .set_active_project_target(server, written.as_deref())
+                        .await?;
+                }
+                Ok(UiNotices::new().with_notice(UiNotice::info(format!(
+                    "Hardware set to {}",
+                    crate::board_display_name(target.board_id())
+                ))))
             }
             HomeOp::DuplicatePackage { uid } => {
                 let outcome = self.run_catalog_op(CatalogOp::Duplicate { uid }).await?;
@@ -2330,48 +2527,7 @@ impl StudioController {
                         .with_notice(UiNotice::info(import_message("Pasted", &outcome))),
                 )
             }
-            HomeOp::CardUi(op) => {
-                self.apply_card_ui_op(op);
-                Ok(UiNotices::new())
-            }
         }
-    }
-
-    /// Apply a card UI view-state mutation (2026-07-25 re-home): flip the
-    /// entry keyed by the card's identity and mark the view dirty. Pure
-    /// and synchronous — no wire, no library.
-    fn apply_card_ui_op(&mut self, op: crate::CardUiOp) {
-        use crate::CardUiOp;
-        match op {
-            CardUiOp::SelectTab { card, tab } => {
-                self.card_ui.entry(card).or_default().tab = tab;
-            }
-            CardUiOp::OpenSheet { card, sheet } => {
-                self.card_ui.entry(card).or_default().sheet = Some(sheet);
-            }
-            CardUiOp::CloseSheet { card } => {
-                self.card_ui.entry(card).or_default().sheet = None;
-            }
-        }
-        self.mark_dirty();
-    }
-
-    /// Overlay the card's persisted UI view-state (tab + sheet) onto a
-    /// freshly-built card. The builder leaves `ui` default; identity keys
-    /// the lookup.
-    fn overlay_card_ui(&self, mut card: crate::UiSimCard) -> crate::UiSimCard {
-        // The tab the card comes up on is the ONE answer
-        // (`effective_card_tab`): the saved choice, else the default rule.
-        // Reading it here rather than leaning on `CardUiState::default()`
-        // is what makes a fresh running card open on ▶ — and what keeps
-        // the rendered tab and the frame feed's gate the same fact.
-        let key = card.identity_key().to_string();
-        if let Some(saved) = self.card_ui.get(&key) {
-            card.ui = saved.clone();
-        } else {
-            card.ui.tab = self.default_card_tab(&key);
-        }
-        card
     }
 
     /// Run one catalog transaction through the host and schedule a gallery
@@ -2419,36 +2575,27 @@ impl StudioController {
         })
     }
 
-    /// Open a home card: push the package's head to the simulator,
-    /// creating or reusing THE sim session (D13: a library card opens in
-    /// the sim; the sim is invisible infrastructure). A connected hardware
-    /// device simply stays attached and reconciled while the project opens
-    /// (P2 coexistence — the old "disconnect the device to open this
-    /// project" refusal is gone).
-    async fn open_from_home(&mut self, pending: PendingOpen, updates: UxUpdateSink) -> UiResult {
-        // Opening a LIBRARY CARD still means the simulator, and now says
-        // so: the destination is named at the call site rather than being
-        // the one thing `open_from_home_inner` could do (device-first
-        // creation ADR — the setup wizard reaches the sim through
-        // `open_on_simulator` too, explicitly, and never through here).
-        self.open_on_simulator(pending, updates).await
-    }
-
-    /// Open a package or example ON THE SIMULATOR: start or reuse THE sim
-    /// session, put the lens on it, and load. The explicit sim path.
+    /// Open a home card ON A DEVICE (D33, PD9): resolve the SIM of the
+    /// project's target — the one that last ran it, an idle one, or a
+    /// freshly minted record — power it on, land the lens on it, and push
+    /// the package's head. Never silicon: putting a project on a real board
+    /// is that board's own card verb.
     ///
     /// This is also where the open's public narration begins and ends
     /// ([`crate::app::open_progress`]): the stage the opening frame reads,
     /// the supersede generation the parked flow checks, and the terminal
     /// failure that replaces the eternal skeleton with an error and a
     /// Retry.
-    async fn open_on_simulator(&mut self, pending: PendingOpen, updates: UxUpdateSink) -> UiResult {
+    async fn open_from_home(&mut self, pending: PendingOpen, updates: UxUpdateSink) -> UiResult {
         // The click owns the engine while it runs: background preview work
         // (pool boots, new lease deploys, hover-to-play) stops STARTING
         // until this guard drops, on every exit path — success, failure, or
         // the whole future being dropped. See `app::open_priority`.
         let _open_priority = crate::app::open_priority::begin_user_open();
         crate::app::open_progress::note_open_started();
+        // A new open supersedes the mismatch page's question: whatever the
+        // person is doing now, it is not answering that page.
+        self.open_mismatch = None;
         let retry = pending.retry_action();
         // The missing-library refusal rides the SAME reporting as every
         // other failure below (it used to `?` straight out, which left the
@@ -2468,7 +2615,14 @@ impl StudioController {
                 // G1 Q1 residual).
                 updates.emit(UxUpdate::View(self.view()));
                 let result = self.open_from_home_inner(updates.clone()).await;
-                self.pending_open = None;
+                // A pending LENS means the sim was powered on and has not
+                // said hello yet: the open is not over, it is held. The
+                // tick's `try_pending_device_lens` finishes it and clears
+                // the pending open then — dropping it here would push the
+                // package at nothing.
+                if self.pending_device_lens.is_none() {
+                    self.pending_open = None;
+                }
                 result
             }
             Err(error) => Err(error),
@@ -2481,6 +2635,9 @@ impl StudioController {
             return Ok(UiNotices::new());
         }
         match result {
+            // A held lens is not a settled open: the sim is booting and the
+            // opening frame keeps narrating until the tick lands the lens.
+            Ok(notices) if self.pending_device_lens.is_some() => Ok(notices),
             Ok(notices) => {
                 crate::app::open_progress::note_open_settled();
                 Ok(notices)
@@ -2492,93 +2649,469 @@ impl StudioController {
         }
     }
 
+    /// The open, once the library is known to be there: resolve the device,
+    /// make sure it is on, and land the lens on it. The push is
+    /// [`Self::open_pending_package`], reached from [`Self::attach_lens`]
+    /// so that a lens landing late (a sim still booting) pushes too.
     async fn open_from_home_inner(&mut self, updates: UxUpdateSink) -> UiResult {
-        // A crashed sim (SimCrashed: its worker's wasm instance is
-        // poisoned) cannot be reconnected — the worker never answers
-        // again. Tear it down here so the open falls through to a fresh
-        // install below; this is also the MANUAL restart path when the
-        // auto-reboot flap guard left the session Failed.
-        if self.pool.sim_session().is_some_and(|sim| {
-            matches!(
-                sim.server_state(),
-                ServerState::Failed {
-                    kind: ServerFailureKind::SimCrashed,
-                    ..
-                }
-            )
-        }) {
-            let sim_id = self.pool.sim_session().map(crate::RuntimeSession::id);
-            if let Some(sim_id) = sim_id {
-                self.teardown_crashed_sim(sim_id).await;
-                // Free the dead session's project tab lock now — the settle
-                // points run after this open, which needs the lock itself.
-                self.project.release_closed_library_projects().await;
-            }
+        // WHAT HARDWARE this project is for, decided before anything is
+        // reused: a sim is created wearing a board and cannot be re-dressed
+        // into another, so the resolution below picks a sim of THIS target
+        // or mints one. An untargeted project reads as Desktop.
+        let (target, target_notice) = self.pending_open_target().await.resolve_for_sim();
+        if let Some(notice) = target_notice {
+            self.push_log(UiLogDraft::new(
+                UiLogLevel::Warn,
+                UiLogOrigin::Studio,
+                notice,
+            ));
         }
-        // Boundary 1 of 3 (post-teardown): the first real await this open
-        // can be outlived at. Nothing project-specific has happened yet —
-        // no lock, no worker, no deploy — so a stale open just leaves, and
-        // the teardown it did was work the newer open wanted anyway.
+        // Boundary 1 of 3: the first real await this open can be outlived
+        // at. Nothing project-specific has happened yet — no lock, no
+        // runtime, no deploy — so a stale open just leaves.
         if crate::app::open_progress::open_superseded() {
             return Ok(UiNotices::new());
         }
-        // The open targets THE sim session: reuse it when it exists — the
-        // lens moves onto it (the editor mirror opens on the sim) — and
-        // replace-and-load directly when its server protocol is live, or
-        // reconnect its server first when not. A fresh install claims the
-        // lens by the pool's lens-less rule (the quiesce above cleared it).
-        if let Some(sim) = self.pool.sim_session() {
-            let sim_id = sim.id();
-            let server_live = matches!(sim.server_state(), ServerState::Connected { .. });
-            // D37/M5 (`/p/<slug>-<uid>` — and the project-card click that
-            // now rides it): when the sim ALREADY runs the requested project,
-            // re-attach the lens instead of pushing the head again — the
-            // running session with its server-side overlay IS the document
-            // (SDI); a fresh push would discard applied-but-unsaved edits.
-            // A different (or no) loaded project keeps the D19 head push.
-            let pending_key = match &self.pending_open {
-                Some(PendingOpen::Package(key)) => Some(key.as_str()),
-                _ => None,
-            };
-            let already_running = pending_key.is_some_and(|key| {
-                sim.sim_loaded_project()
-                    .is_some_and(|project| project.uid == key || project.name == key)
-            });
-            if already_running && server_live {
-                // A re-attach IS a landed open-in-sim: the user clicked
-                // "Open in sim" and the sim now runs that project, board
-                // and all. It just landed EARLIER, so nothing loads here
-                // and `note_sim_loaded_project` never runs.
-                return self.attach_lens(sim_id, updates.clone()).await;
+        // A NAMED device (`?on=mac:…`) settles the question outright, and
+        // is the one arm with a stop in it: the mismatch page (D50).
+        let named = match self.pending_open_on() {
+            OpenOn::Device {
+                base_mac,
+                over_running_project,
+            } => match self.open_on_named_device(&base_mac, over_running_project) {
+                Ok(uid) => Some(uid),
+                // The open stopped at the mismatch page. Not a failure —
+                // the person has a page with two verbs on it — so the
+                // opening frame's error state stays out of this.
+                Err(NamedDeviceRefusal::Mismatch(mismatch)) => {
+                    self.open_mismatch = Some(Box::new(mismatch));
+                    self.pending_open = None;
+                    self.mark_dirty();
+                    updates.emit(UxUpdate::View(self.view()));
+                    return Ok(UiNotices::new());
+                }
+                // The device went away between the address being read and
+                // this open running. PD14's rule for an unknown hint: drop
+                // it and take the default, saying so once.
+                Err(NamedDeviceRefusal::Unknown) => {
+                    self.push_log(UiLogDraft::new(
+                        UiLogLevel::Warn,
+                        UiLogOrigin::Studio,
+                        format!("no device answers to {base_mac}; opening on a sim instead"),
+                    ));
+                    None
+                }
+            },
+            OpenOn::Resolve => None,
+        };
+        let uid = match named {
+            Some(uid) => uid,
+            None => {
+                // The tab's own sim already wears this target: reuse it
+                // outright. The first arm of the resolution (the device
+                // that last ran this project) and the second (an idle sim
+                // of the target) both land here, and there is nothing to
+                // power on or hand a wire to — the lens is already holding
+                // it.
+                if let Some(id) = self.lens_on_a_sim_wearing(&target) {
+                    return self.attach_lens(id, updates).await;
+                }
+                self.resolve_open_device(&target).await?
             }
-            self.pool.set_lens(sim_id);
-            if server_live {
-                return self.open_pending_package(updates).await;
-            }
-            return self.connect_server_from_link(sim_id, updates).await;
+        };
+        // The open's own narration names the DEVICE it is starting, not
+        // "the simulator": there is one device per open and it has a board.
+        emit_activity(
+            &updates,
+            UxActivityTarget::pane(ProjectController::NODE_ID),
+            "Starting the device",
+            "Starting",
+            &format!(
+                "Starting {} (sim)",
+                crate::board_display_name(target.board_id())
+            ),
+        );
+        // ONE DEVICE PER TAB (D37). The lens goes first — a lens on another
+        // device holds its wire, and `open_device_lens` would close it for
+        // us anyway; doing it here keeps the power-off below unambiguous.
+        if self
+            .pool
+            .lens_session()
+            .is_some_and(|session| session.attachment().uid != uid)
+        {
+            self.close_device_lens();
+            // The departing session's project tab lock has to be free
+            // before this open takes it; the settle points run too late.
+            self.project.release_closed_library_projects().await;
         }
-        // No sim yet: start the simulator runtime. A failed start leaves
-        // the pool untouched (nothing was installed).
-        match self.sim_link.open().await {
-            Ok((payload, logs)) => {
-                self.record_logs(logs);
-                let id = self.install_session(payload).await;
-                self.attach_runtime(id, updates).await
-            }
-            Err(error) => Err(error),
+        self.power_off_other_sims(&uid);
+        // Power on is `Connect` at the fold (PD8/Q15) — the same gesture
+        // the card's own Power on raises, so nothing here is a second flow.
+        // A sim already on is a no-op at the transport, and the fold
+        // re-opens a port it had closed.
+        //
+        // **Sims only.** A board is not powered on by Studio: it is on a
+        // desk, reached over a port the browser already granted, and
+        // `Connect`ing it would close and reopen a wire that was working —
+        // which drops the card back through Connecting and leaves the lens
+        // held behind a board that was Ready a moment ago. Attach-or-
+        // connect for silicon is `open_device_lens`'s own job, and it has
+        // been doing it since the device route existed.
+        let is_sim = self.is_sim_device(&uid);
+        if is_sim && let Some(device) = self.devices.device_for_key(&uid).map(|device| device.id) {
+            self.execute_devices_op(crate::DevicesOp::on_sim(crate::DeviceAction::Connect {
+                device,
+            }))
+            .await?;
+        }
+        // Boundary 2 of 3: the runtime is starting. A superseded open
+        // leaves it STANDING — it is the expensive part, every open wants
+        // one, and the click that replaced this one walks straight into it.
+        if crate::app::open_progress::open_superseded() {
+            return Ok(UiNotices::new());
+        }
+        // The lens: attaches now if the device already said hello, or is
+        // held as `pending_device_lens` and attached from the tick the
+        // moment it does. Either way the push rides `attach_lens`.
+        self.open_device_lens(&uid, updates).await
+    }
+
+    /// Bank an open that NAMED a device, the way a card push is banked:
+    /// the registry row records the project it was last given.
+    ///
+    /// This open really did push — the lens deploy sends the package over
+    /// the board's own wire — and the association is what the mismatch
+    /// page reads to answer "what is on this device?" (D50). Without this,
+    /// answering the page once would leave the row still naming the
+    /// project that was replaced, and the next reload would raise the same
+    /// page offering to switch to something that is no longer running:
+    /// the page would lie, which is worse than the page not existing.
+    ///
+    /// Scoped to the named arm on purpose. A device the address named is
+    /// the only one whose association gets *read* back as a promise; the
+    /// resolver's own sims are Studio's scratch devices and no surface
+    /// asks them this question. Banking every open would be a broader
+    /// change to what a push means, and that belongs with the pull the
+    /// backup story still needs (Q7), not here.
+    ///
+    /// Best-effort, exactly like [`Self::bank_completed_push`]: the
+    /// project is open and running either way, and a bookkeeping failure
+    /// is a log line, never a failed open. `record_push` refuses a version
+    /// the project's history never recorded (an unsaved working copy), and
+    /// that refusal is correct — an event may not name a snapshot the
+    /// library cannot produce.
+    async fn bank_open_on_named_device(&mut self) {
+        let OpenOn::Device { .. } = self.pending_open_on() else {
+            return;
+        };
+        let Some(uid) = self.pending_open_key() else {
+            return;
+        };
+        let Some(project_uid) = self.library_uid_for_key(&uid) else {
+            return;
+        };
+        let Some(attachment) = self
+            .pool
+            .lens_session()
+            .map(|session| session.attachment().uid.clone())
+        else {
+            return;
+        };
+        let Some(row) = self
+            .devices
+            .device_for_key(&attachment)
+            .and_then(|device| device.record.as_ref())
+            .and_then(crate::app::devices::registry_row_from_record)
+        else {
+            return;
+        };
+        let version = match self.library_head_hash(&project_uid).await {
+            Some(version) => version,
+            None => return,
+        };
+        if let Err(error) = self
+            .run_catalog_op(CatalogOp::RecordPush {
+                project_uid,
+                device: Box::new(row),
+                version,
+            })
+            .await
+        {
+            log::warn!("open on a named device not banked: {error}");
         }
     }
 
-    /// Attach the server protocol to an installed session whose link is
-    /// live but whose wire client is not (a sim session reconnecting after
-    /// its server protocol detached), then continue the pending open.
-    async fn connect_server_from_link(
+    /// One library project's head content hash, or `None` when the
+    /// library, the key or the package is unavailable.
+    async fn library_head_hash(&mut self, key: &str) -> Option<lpc_history::ContentHash> {
+        let host = self.library_host().ok()?;
+        let fs = host.catalog_snapshot().await.ok()?;
+        let store = crate::app::library::LibraryStore::read_only(fs);
+        let uid = store.resolve_key(key).ok()?;
+        store.open(uid).ok()?.content_hash().ok()
+    }
+
+    /// Which device the pending open was told to land on.
+    fn pending_open_on(&self) -> OpenOn {
+        match &self.pending_open {
+            Some(PendingOpen::Package { on, .. }) => on.clone(),
+            _ => OpenOn::Resolve,
+        }
+    }
+
+    /// The device a `?on=mac:` address named, if this open may have it.
+    ///
+    /// The refusal is the point of the whole arm: a device already running
+    /// a *different* library project is never pushed over silently (D50).
+    /// What comes back instead is the page's material — both projects by
+    /// name, and the device — so the person decides with the consequence
+    /// in front of them.
+    fn open_on_named_device(
+        &self,
+        base_mac: &str,
+        over_running_project: bool,
+    ) -> Result<String, NamedDeviceRefusal> {
+        let registry = self
+            .home_inputs
+            .as_ref()
+            .map(|inputs| inputs.registered.as_slice())
+            .unwrap_or_default();
+        let found = crate::app::devices::device_by_base_mac(
+            self.devices.roster().devices(),
+            registry,
+            &self.device_sims,
+            base_mac,
+        )
+        .ok_or(NamedDeviceRefusal::Unknown)?;
+        let Some(key) = self.pending_open_key() else {
+            return Ok(found.key);
+        };
+        let project_uid = self.library_uid_for_key(&key).unwrap_or(key);
+        if over_running_project || !found.would_push_over(&project_uid) {
+            return Ok(found.key);
+        }
+        let running = found
+            .last_given_project
+            .as_deref()
+            .and_then(|uid| self.library_project_named(uid));
+        Err(NamedDeviceRefusal::Mismatch(crate::UiOpenMismatch {
+            project_name: self
+                .library_project_named(&project_uid)
+                .map(|project| project.name)
+                .unwrap_or_else(|| project_uid.clone()),
+            project_uid,
+            device_key: found.key,
+            device_name: found.name,
+            device_base_mac: base_mac.to_string(),
+            running,
+        }))
+    }
+
+    /// The pending open's library key, when it has one.
+    fn pending_open_key(&self) -> Option<String> {
+        match &self.pending_open {
+            Some(PendingOpen::Package { key, .. }) => Some(key.clone()),
+            _ => None,
+        }
+    }
+
+    /// One library project as the mismatch page names it — `None` when
+    /// this library does not have that uid, which is the whole of the
+    /// "nothing to switch to" test.
+    fn library_project_named(&self, uid: &str) -> Option<crate::UiRunningProject> {
+        self.home_inputs
+            .as_ref()?
+            .projects
+            .iter()
+            .find(|card| card.uid == uid)
+            .map(|card| crate::UiRunningProject {
+                uid: card.uid.clone(),
+                name: card.slug.clone(),
+            })
+    }
+
+    /// A library key (a `prj…` uid, or the slug a URL carried) as the uid
+    /// the registry's associations are written against.
+    fn library_uid_for_key(&self, key: &str) -> Option<String> {
+        let projects = &self.home_inputs.as_ref()?.projects;
+        projects
+            .iter()
+            .find(|card| card.uid == key || card.slug == key)
+            .map(|card| card.uid.clone())
+    }
+
+    /// The session the lens already holds, when it is a SIM wearing
+    /// `target` — the open can reuse it as-is.
+    ///
+    /// A sim is created wearing a board and cannot be re-dressed into
+    /// another, so the board has to match; a lens on silicon never
+    /// matches, because opening a project must not touch a board (D33).
+    fn lens_on_a_sim_wearing(
+        &self,
+        target: &crate::app::library::ProjectTarget,
+    ) -> Option<crate::RuntimeId> {
+        let session = self.pool.lens_session()?;
+        let attachment = session.attachment();
+        (attachment.transport == crate::LinkTransport::Sim
+            && attachment.board_id.as_deref() == Some(target.board_id()))
+        .then(|| session.id())
+    }
+
+    /// The device this open lands on (PD9, PD14's default arm): the sim
+    /// that last ran this project, else an idle sim of the same target,
+    /// else a freshly minted record.
+    ///
+    /// Silicon is never resolved here (D33): putting a project on a board
+    /// is that board's own card verb.
+    async fn resolve_open_device(
         &mut self,
-        id: crate::RuntimeId,
-        updates: UxUpdateSink,
-    ) -> UiResult {
-        self.pool.set_lens(id);
-        self.attach_runtime(id, updates).await
+        target: &crate::app::library::ProjectTarget,
+    ) -> Result<String, UiError> {
+        let target_id = target.board_id().to_string();
+        // The remembered sims, READ FIRST. A cold page has an empty map
+        // until the first library settle fills it, and this resolution
+        // reads "no sim of this target" off an empty map and mints one —
+        // so every cold open left a second, third, fourth record behind
+        // for the same tab. One settle here and the answer is the
+        // library's; a settle that is not due costs nothing.
+        if self.device_sims.is_empty() {
+            self.request_library_refresh();
+            self.settle_library().await;
+        }
+        let of_target: Vec<String> = self
+            .device_sims
+            .iter()
+            .filter(|(_, record)| record.target == target_id)
+            .map(|(uid, _)| uid.clone())
+            .collect();
+        // The one that LAST RAN this project, when the tab can tell: the
+        // lens is the only place that pairing is known before P4's `?on=`
+        // grammar, and it is the common case (reopening what you just had).
+        let pending_key = match &self.pending_open {
+            Some(PendingOpen::Package { key, .. }) => Some(key.clone()),
+            _ => None,
+        };
+        if let Some(key) = pending_key
+            && self.project.active_library_uid().as_deref() == Some(key.as_str())
+            && let Some(session) = self.pool.lens_session()
+            && session.transport() == crate::LinkTransport::Sim
+            && of_target.contains(&session.attachment().uid)
+        {
+            return Ok(session.attachment().uid.clone());
+        }
+        // Else an idle one of the same target: any remembered sim wearing
+        // it. A powered-off record is as good as a running one — powering
+        // it on is the next step either way.
+        if let Some(uid) = of_target.first() {
+            return Ok(uid.clone());
+        }
+        // Else make one. Until P5's picker, a board-target project mints
+        // its sim silently on open — which is D33.
+        let random = self.random_bytes6();
+        let uid = self.create_sim_record(&target_id, None, &random).await?;
+        // The record is in the LIBRARY; the roster learns it at the next
+        // settle, and the power-on below needs a device to aim at. Settle
+        // here rather than waiting for the dispatch's own settle point,
+        // which runs after this open has already finished.
+        self.settle_library().await;
+        Ok(uid)
+    }
+
+    /// Power off every sim that is NOT the one this open lands on (D37,
+    /// silently). The record stays: a powered-off sim sits on the
+    /// remembered line with Power on (Q5).
+    fn power_off_other_sims(&mut self, keep_uid: &str) {
+        self.power_off_sims_except(Some(keep_uid));
+    }
+
+    /// Power every sim this tab runs off — the tab (or a docs host) going
+    /// away. A running sim is a worker, and a worker nobody terminates
+    /// outlives the page that started it.
+    pub fn power_off_sims(&mut self) {
+        self.power_off_sims_except(None);
+    }
+
+    fn power_off_sims_except(&mut self, keep_uid: Option<&str>) {
+        let Some(transport) = self.sim_transport.clone() else {
+            return;
+        };
+        let others: Vec<String> = transport
+            .powered_uids()
+            .into_iter()
+            .filter(|uid| Some(uid.as_str()) != keep_uid)
+            .collect();
+        for uid in others {
+            // A sim with no roster device is one that never said hello:
+            // the transport still holds its worker, and powering it off is
+            // the whole of the teardown.
+            let Some(device) = self.lens_facts_at_address(&uid).map(|facts| facts.device) else {
+                transport.power_off(&uid);
+                continue;
+            };
+            let action = crate::DeviceAction::Disconnect { device };
+            self.fold_device_input(crate::DeviceInput::Action(action.clone()));
+            self.power_off_sim_for(&action);
+        }
+    }
+
+    /// Six bytes of the injected randomness, for a minted sim's MAC.
+    fn random_bytes6(&self) -> [u8; 6] {
+        let bytes = (self.random)();
+        let mut six = [0u8; 6];
+        six.copy_from_slice(&bytes[..6]);
+        six
+    }
+
+    /// What hardware the PENDING open's project declares, read before the
+    /// project is opened (that is the point: it decides which sim the open
+    /// lands on).
+    ///
+    /// Read leniently and never fatally — a manifest this cannot read is
+    /// the open's problem to report a moment later, with a better error
+    /// than "unknown target" — so every failure path here reads as the
+    /// default, Desktop.
+    async fn pending_open_target(&mut self) -> crate::app::library::ProjectTarget {
+        use crate::app::library::ProjectTarget;
+
+        match self.pending_open.clone() {
+            Some(PendingOpen::Package { key, .. }) => self
+                .read_library_project_manifest(&key)
+                .await
+                .as_deref()
+                .map_or(ProjectTarget::Desktop, ProjectTarget::from_manifest_bytes),
+            Some(PendingOpen::Example(id)) => {
+                crate::app::home::embedded_example::embedded_example(&id)
+                    .and_then(|example| example.file("project.json"))
+                    .map_or(ProjectTarget::Desktop, ProjectTarget::from_manifest_bytes)
+            }
+            Some(PendingOpen::SharedTransient { package_files, .. }) => package_files
+                .iter()
+                .find(|(path, _)| path == "project.json")
+                .map_or(ProjectTarget::Desktop, |(_, bytes)| {
+                    ProjectTarget::from_manifest_bytes(bytes)
+                }),
+            // A docs page is a computer, and a docs example targets no
+            // board.
+            Some(PendingOpen::DocsExample(_)) | None => ProjectTarget::Desktop,
+        }
+    }
+
+    /// One library package's `project.json` bytes, or `None` when the
+    /// library, the key or the file is unavailable.
+    async fn read_library_project_manifest(&mut self, key: &str) -> Option<Vec<u8>> {
+        let host = self.library_host().ok()?;
+        let fs = host.catalog_snapshot().await.ok()?;
+        let store = crate::app::library::LibraryStore::read_only(fs);
+        let uid = store.resolve_key(key).ok()?;
+        let handle = store.open(uid).ok()?;
+        let manifest = handle
+            .package_fs
+            .borrow()
+            .read_file(lpc_model::AsLpPath::as_path(
+                &crate::app::library::package_manifest::MANIFEST_PATH,
+            ))
+            .ok()?;
+        Some(manifest)
     }
 
     /// Push the pending package to the connected runtime and load it.
@@ -2598,18 +3131,26 @@ impl StudioController {
             .pending_open
             .clone()
             .ok_or_else(|| UiError::MissingSession("no pending package to open".to_string()))?;
+        // A docs example is a direct deploy, not a library open: it has its
+        // own narration and never touches the catalog.
+        if let PendingOpen::DocsExample(id) = &pending {
+            let id = id.clone();
+            return self.deploy_docs_example(&id, updates).await;
+        }
         crate::app::open_progress::note_preparing_project();
         emit_activity(
             &updates,
             UxActivityTarget::pane(ProjectController::NODE_ID),
             "Opening project",
             "Opening",
-            "Pushing the project to the simulator",
+            "Sending the project to the device",
         );
         let result = {
             let server = self.pool.lens_session_mut()?.client_mut()?;
             match &pending {
-                PendingOpen::Package(key) => self.project.open_library_package(server, key).await,
+                PendingOpen::Package { key, .. } => {
+                    self.project.open_library_package(server, &key).await
+                }
                 // Examples open as TRANSIENT view sessions (vision D2):
                 // no seed, no library entry, no persisted uid. The
                 // explicit-save gesture is what installs a copy.
@@ -2631,12 +3172,13 @@ impl StudioController {
                         "shared open: invalid uid {uid:?}: {e}"
                     ))),
                 },
+                // Handled above, before the library seam is reached.
+                PendingOpen::DocsExample(_) => unreachable!("docs deploys never reach the library"),
             }
         };
         match result {
             Ok(logs) => {
                 self.record_logs(logs);
-                self.note_sim_loaded_project();
                 // The open path's own notices come FIRST — a format upgrade
                 // is the thing the user most needs to read, and it must not
                 // be a console-only line (P3).
@@ -2645,6 +3187,7 @@ impl StudioController {
                     notices = notices.with_notice(notice);
                 }
                 let sync = self.sync_project_after_attach(updates).await?;
+                self.bank_open_on_named_device().await;
                 Ok(notices.with_notice(project_sync_notice(
                     sync.synced,
                     "Project opened",
@@ -2680,9 +3223,69 @@ impl StudioController {
         if let Some(name_first) = self.derive_flash_name_action(op.action()) {
             self.fold_device_input(crate::DeviceInput::Action(name_first));
         }
-        self.fold_device_input(crate::DeviceInput::Action(op.0));
+        // A sim's runtime is started HERE, before the fold, so the sweep the
+        // model's own `Connect` triggers finds a link to attach.
+        self.power_on_sim_for(op.action());
+        // …and the uid a power-off will need is read before it too: a
+        // `Forget` takes the device with it, and the roster is where that
+        // uid comes from.
+        let power_off = self.sim_uid_to_power_off(op.action());
+        self.fold_device_input(crate::DeviceInput::Action(op.action.clone()));
+        self.power_off_sim(power_off);
         self.settle_device_records().await;
         Ok(UiNotices::new())
+    }
+
+    /// The picker's gesture (D44): mint a sim of the target and power it on.
+    ///
+    /// Two steps that must not come apart. The record is LIBRARY work — a
+    /// registry row and a sidecar in one settle — and the roster meets it
+    /// as an ordinary device at the settle that follows; only then is there
+    /// a `DeviceId` for the `Connect` to aim at. A minted sim nobody
+    /// powered on would land on the remembered line, which is the wrong
+    /// answer to "start a board here".
+    ///
+    /// The power-on is the SAME `execute_devices_op` the card's own Power
+    /// on runs, and the target is normalized through [`ProjectTarget`] so a
+    /// picked "lightplayer/desktop" and an absent target are one target.
+    ///
+    /// [`ProjectTarget`]: crate::app::library::ProjectTarget
+    async fn execute_sim_create_op(&mut self, op: crate::SimCreateOp) -> UiResult {
+        let target = crate::app::library::ProjectTarget::from_manifest(Some(&op.target));
+        let target_id = target.board_id().to_string();
+        if target.runtime_manifest_json().is_none() {
+            // The picker only offers startable targets, so this is a
+            // programming error or a hand-made action — refused with the
+            // reason rather than silently started as Desktop.
+            return Err(UiError::UnsupportedAction(format!(
+                "no hardware profile is checked in for {target_id}, so it cannot be started here"
+            )));
+        }
+        let name = op
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| crate::sim_device_name(&target_id));
+
+        let random = self.random_bytes6();
+        let uid = self
+            .create_sim_record(&target_id, Some(&name), &random)
+            .await?;
+        // The roster learns the row at the next library settle, and the
+        // power-on below needs a device to aim at.
+        self.settle_library().await;
+        let Some(device) = self.devices.device_for_key(&uid).map(|device| device.id) else {
+            return Err(UiError::MissingSession(
+                "the new device did not reach the roster".to_string(),
+            ));
+        };
+        self.execute_devices_op(crate::DevicesOp::on_sim(crate::DeviceAction::Connect {
+            device,
+        }))
+        .await?;
+        Ok(UiNotices::new().with_notice(UiNotice::info(format!("{name} is on"))))
     }
 
     /// One wire, one owner: a card gesture that needs the board's wire
@@ -2701,9 +3304,8 @@ impl StudioController {
         };
         let lens_device = self
             .pool
-            .device_session()
-            .and_then(crate::RuntimeSession::device_attachment)
-            .map(|attachment| attachment.device);
+            .attached_session()
+            .map(|session| session.attachment().device);
         if touches_wire && lens_device == Some(target) {
             self.push_log(UiLogDraft::new(
                 UiLogLevel::Info,
@@ -2730,6 +3332,15 @@ impl StudioController {
     /// instead of one of them being a toast the card never hears about.
     async fn execute_device_push_op(&mut self, op: crate::DevicePushOp) -> UiResult {
         self.yield_lens_wire_for(&crate::DeviceAction::Push { device: op.device });
+        // The picker's "name the board to match" offer: a user-stream
+        // rename, folded before the push exactly as the card's own Rename
+        // would be.
+        if let Some(name) = op.device_name.clone() {
+            self.fold_device_input(crate::DeviceInput::Action(crate::DeviceAction::SetName {
+                device: op.device,
+                name,
+            }));
+        }
         let staged = self.prepare_push(&op.source).await;
         if let Err(reason) = &staged {
             log::warn!("nothing to push to {:?}: {reason}", op.device);
@@ -2768,9 +3379,10 @@ impl StudioController {
                 })
                 .await?
             }
-            crate::PushSource::NewForBoard { board_id } => {
+            crate::PushSource::NewForBoard { board_id, name } => {
                 self.install_for_push(CatalogOp::GenerateForBoard {
                     board_id: board_id.clone(),
+                    name: name.clone(),
                 })
                 .await?
             }
@@ -2899,17 +3511,25 @@ impl StudioController {
 
     /// The auto-name that precedes a Flash on a still-unnamed board, if one
     /// is due. `None` for every other gesture, for a named board (a re-flash
-    /// must not rename), and for a target the roster does not hold.
+    /// must not rename), for a Flash that carries the name the user typed
+    /// at setup (the model records that one itself), and for a target the
+    /// roster does not hold.
     fn derive_flash_name_action(
         &self,
         action: &crate::DeviceAction,
     ) -> Option<crate::DeviceAction> {
         let crate::DeviceAction::Flash {
-            device, board_id, ..
+            device,
+            board_id,
+            name,
+            ..
         } = action
         else {
             return None;
         };
+        if name.is_some() {
+            return None;
+        }
         let named = self
             .devices
             .roster()
@@ -2945,7 +3565,6 @@ impl StudioController {
         updates: UxUpdateSink,
     ) -> UiResult {
         match op {
-            crate::RuntimeOp::StopSimulator => self.stop_simulator().await,
             crate::RuntimeOp::SetLogLevel { level } => self.set_runtime_log_level(level).await,
             crate::RuntimeOp::OpenDeviceLens { uid } => self.open_device_lens(&uid, updates).await,
             crate::RuntimeOp::CloseDeviceLens => {
@@ -2973,16 +3592,14 @@ impl StudioController {
     /// with an activity, or a wire the transport cannot lend.
     async fn open_device_lens(&mut self, uid: &str, updates: UxUpdateSink) -> UiResult {
         // Already there: re-attaching the same lens is a no-op with a
-        // fresh mirror, like clicking the sim card's grow twice.
-        if let Some(session) = self.pool.device_session() {
-            if session
-                .device_attachment()
-                .is_some_and(|attachment| attachment.uid == uid)
-            {
+        // fresh mirror.
+        if let Some(session) = self.pool.attached_session() {
+            if session.attachment().uid == uid {
                 let id = session.id();
                 return self.attach_lens(id, updates).await;
             }
-            // A lens on ANOTHER device: give its wire back first.
+            // A lens on ANOTHER device: give its wire back first (D37 —
+            // one device per tab, whatever backs either of them).
             self.close_device_lens();
         }
         let attachment = match self.device_lens_attachment(uid) {
@@ -2999,24 +3616,19 @@ impl StudioController {
                 self.push_log(UiLogDraft::new(
                     UiLogLevel::Info,
                     UiLogOrigin::Studio,
-                    format!("waiting for the board before opening it: {error}"),
+                    format!("waiting for the device before opening it: {error}"),
                 ));
-                return Ok(UiNotices::new().with_notice(UiNotice::info("Waiting for the board")));
+                return Ok(UiNotices::new().with_notice(UiNotice::info("Waiting for the device")));
             }
         };
         self.pending_device_lens = None;
         emit_activity(
             &updates,
             UxActivityTarget::pane(ProjectController::NODE_ID),
-            "Opening board",
+            "Opening device",
             "Opening",
             &format!("Opening {}", attachment.name),
         );
-        if self.pool.sim_session().is_some() {
-            // The tab runs one session; the sim's worker is closed properly
-            // rather than dropped by the pool's replacement.
-            self.stop_simulator().await?;
-        }
         let deadline = self.device_request_deadline()?;
         let link = attachment.link;
         let io = self
@@ -3024,7 +3636,11 @@ impl StudioController {
             .effects_mut()
             .attach_lens_wire(link)
             .map_err(UiError::MissingSession)?;
-        let client = crate::StudioServerClient::from_lens_io(io, deadline, "usb-serial");
+        let protocol = match attachment.transport {
+            crate::LinkTransport::Sim => "browser-worker",
+            crate::LinkTransport::Serial => "usb-serial",
+        };
+        let client = crate::StudioServerClient::from_lens_io(io, deadline, protocol);
         let id = self.pool.install(crate::RuntimePayload::Device(attachment));
         self.record_device_event(
             Some(&id.to_string()),
@@ -3068,16 +3684,15 @@ impl StudioController {
     /// The lens's handle on the device registered as `uid`, or the honest
     /// reason it cannot be opened right now.
     fn device_lens_attachment(&self, uid: &str) -> Result<crate::DeviceLensAttachment, UiError> {
-        let device = self
-            .devices
-            .device_for_key(uid)
+        let facts = self
+            .lens_facts_at_address(uid)
             .ok_or_else(|| UiError::MissingSession(format!("no device is registered as {uid}")))?;
-        let link = device
-            .link()
+        let link = facts
+            .link
             .ok_or_else(|| UiError::MissingSession("this board is not connected".to_string()))?;
         // Attached is not open: a port the model closed (Disconnect, a
         // cancelled identify) has stale hello evidence and no wire to lend.
-        if !device.evidence.presence.is_open() {
+        if !facts.open {
             return Err(UiError::MissingSession(
                 "this board's port is closed — connect it first".to_string(),
             ));
@@ -3086,27 +3701,107 @@ impl StudioController {
         // hope-it-works terms Yona ruled (2026-09-04) — the fold has
         // journaled the version difference, and a request the old firmware
         // cannot answer fails the way any request fails.
-        let hello = device.evidence.classification.hello().ok_or_else(|| {
+        let board_id = facts.hello.ok_or_else(|| {
             UiError::MissingSession(
                 "this board has not identified itself as a LightPlayer yet".to_string(),
             )
         })?;
-        if device.is_busy() {
+        if facts.busy {
             return Err(UiError::MissingSession(
                 "this board is busy with an activity; wait for it to finish".to_string(),
             ));
         }
         Ok(crate::DeviceLensAttachment {
-            device: device.id,
+            device: facts.device,
             link,
             uid: uid.to_string(),
-            name: device.title(),
-            board_id: hello.board_id.clone(),
+            name: facts.name,
+            board_id,
+            // Read off the device's own endpoint rung: `sim:<uid>` is the
+            // sim transport's scheme, and nothing else answers to it.
+            transport: facts
+                .endpoint
+                .as_deref()
+                .map(crate::LinkTransport::from_endpoint)
+                .unwrap_or(crate::LinkTransport::Serial),
             // The hello the fold mirrors carries no build features; the
             // attach reads them off the lens's own wire (`read_device_build`)
             // before the editor lands. Until then the picker offers
             // everything (the same as the sim).
             features: None,
+        })
+    }
+
+    /// The device an address names: its registry uid, or — for a sim whose
+    /// row has not settled yet, and for the docs page's anonymous one,
+    /// which never will — its `sim:<uid>` endpoint.
+    ///
+    /// One resolution, so a sim powered on a moment ago is openable before
+    /// the library write lands and the docs sim is openable without ever
+    /// being written at all (PD10).
+    fn device_at_address(&self, uid: &str) -> Option<&lpa_devices::Device> {
+        if let Some(device) = self.devices.device_for_key(uid) {
+            return Some(device);
+        }
+        let endpoint = crate::sim_endpoint(uid);
+        self.devices
+            .roster()
+            .devices()
+            .iter()
+            .find(|device| device.identity.endpoint.as_ref() == Some(&endpoint))
+    }
+
+    /// What the lens needs to know about the thing at an address, whether
+    /// the fold holds it as a device or as a still-PENDING link.
+    ///
+    /// The docs page's sim is the pending case, permanently: it is minted
+    /// with no MAC (PD10 — identity-less, never a registry row), so its
+    /// hello names no identity, the fold never promotes its link to a
+    /// device, and the only handle it ever has is the `sim:<key>` endpoint
+    /// its link wears. `device_at_address` promised to resolve it and
+    /// searched only the devices, which is why the docs embeds stayed at
+    /// "Starting the simulator" with a booted, identified runtime behind
+    /// them (G1, 2026-09-07). The pending entry carries the same evidence
+    /// a device does, so the lens reads the same facts off it.
+    fn lens_facts_at_address(&self, uid: &str) -> Option<LensFacts> {
+        if let Some(device) = self.device_at_address(uid) {
+            return Some(LensFacts {
+                device: device.id,
+                link: device.link(),
+                open: device.evidence.presence.is_open(),
+                hello: device
+                    .evidence
+                    .classification
+                    .hello()
+                    .map(|hello| hello.board_id.clone()),
+                busy: device.is_busy(),
+                name: device.title(),
+                endpoint: device
+                    .identity
+                    .endpoint
+                    .as_ref()
+                    .map(|endpoint| endpoint.0.clone()),
+            });
+        }
+        let endpoint = crate::sim_endpoint(uid);
+        let pending = self
+            .devices
+            .roster()
+            .pending()
+            .iter()
+            .find(|pending| pending.info.endpoint == endpoint)?;
+        let evidence = pending.evidence();
+        Some(LensFacts {
+            device: pending.device_id(),
+            link: evidence.link(),
+            open: evidence.presence.is_open(),
+            hello: evidence
+                .classification
+                .hello()
+                .map(|hello| hello.board_id.clone()),
+            busy: pending.is_identifying(),
+            name: pending.info.label.clone(),
+            endpoint: Some(endpoint.0.clone()),
         })
     }
 
@@ -3127,23 +3822,21 @@ impl StudioController {
     /// there is none. The device keeps its card and its evidence.
     pub(crate) fn close_device_lens(&mut self) {
         self.pending_device_lens = None;
-        let Some(session) = self.pool.device_session() else {
+        let Some(session) = self.pool.attached_session() else {
             return;
         };
         let id = session.id();
-        let link = session
-            .device_attachment()
-            .map(|attachment| attachment.link);
+        let link = session.attachment().link;
         if self.pool.lens() == Some(id) {
             self.quiesce_lens();
         }
-        if let Some(mut session) = self.pool.remove_device() {
+        if let Some(mut session) = self.pool.remove_attached_session() {
             let pending = session.take_pending_logs();
             self.record_session_logs(id, pending);
         }
-        if let Some(link) = link {
-            self.devices.effects_mut().release_lens_wire(link);
-        }
+        // Back to the roster's pump — and for a sim that is the whole of
+        // the detach: the runtime keeps running, exactly like silicon.
+        self.devices.effects_mut().release_lens_wire(link);
         self.record_device_event(
             Some(&id.to_string()),
             None,
@@ -3164,18 +3857,17 @@ impl StudioController {
     fn drop_device_lens_if_wireless(&mut self) {
         let Some(attachment) = self
             .pool
-            .device_session()
-            .and_then(crate::RuntimeSession::device_attachment)
-            .cloned()
+            .attached_session()
+            .map(|session| session.attachment().clone())
         else {
             return;
         };
         let link = attachment.link;
+        // By address, not by device id: the docs sim's lens is on a pending
+        // link, which `roster().device()` never finds.
         let port_open = self
-            .devices
-            .roster()
-            .device(attachment.device)
-            .is_some_and(|device| device.evidence.presence.is_open());
+            .lens_facts_at_address(&attachment.uid)
+            .is_some_and(|facts| facts.open);
         if self.devices.link_is_routable(link) && port_open {
             return;
         }
@@ -3194,16 +3886,216 @@ impl StudioController {
         let Some(uid) = self.pending_device_lens.clone() else {
             return;
         };
-        if self.device_lens_attachment(&uid).is_err() {
-            // Still loading, identifying, or busy: keep holding.
+        // THE WAKE-UP. A hold waits for a device to become ready; a sim
+        // only ever becomes ready because this tab started it. Nothing else
+        // will, so if the sim under a held lens is off — the open's own
+        // power-on was skipped, the page reloaded and the workers died with
+        // it, or somebody used Power off — this is where it goes back on.
+        // Without it the hold is eternal: the runtime never boots, so it
+        // never says hello, so the attach below never fires, and the card
+        // reads "Opening…" for as long as anyone watches (2026-09-08
+        // outage). Silicon is untouched: a board is on a desk, and waiting
+        // for it is the correct behaviour.
+        match self.wake_held_sim(&uid) {
+            SimWake::NotOurs | SimWake::AlreadyRunning => {}
+            SimWake::Started => return,
+            SimWake::Refused(reason) => {
+                let name = self
+                    .devices
+                    .device_for_key(&uid)
+                    .map(|device| device.title())
+                    .unwrap_or_else(|| "The sim".to_string());
+                self.release_hold_on_a_sim_that_did_not_start(
+                    &uid,
+                    &name,
+                    "its runtime could not be started",
+                    &reason,
+                );
+                return;
+            }
+        }
+        if let Some((name, detail)) = self.sim_that_did_not_start(&uid) {
+            self.release_hold_on_a_sim_that_did_not_start(
+                &uid,
+                &name,
+                "its runtime gave up before it said hello",
+                &detail,
+            );
             return;
         }
-        if let Err(error) = self.open_device_lens(&uid, UxUpdateSink::noop()).await {
-            self.push_log(UiLogDraft::new(
-                UiLogLevel::Warn,
-                UiLogOrigin::Studio,
-                format!("could not open the board in the editor: {error}"),
-            ));
+        if self.device_lens_attachment(&uid).is_err() {
+            // Still loading, identifying, or booting: keep holding.
+            return;
+        }
+        let landed = self.open_device_lens(&uid, UxUpdateSink::noop()).await;
+        // The open that was waiting on this lens is over either way: the
+        // push rode `attach_lens`, or it failed and the opening frame
+        // needs its verdict rather than an eternal skeleton.
+        let held_open = self.pending_open.take();
+        match landed {
+            Ok(_) => crate::app::open_progress::note_open_settled(),
+            Err(error) => {
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Warn,
+                    UiLogOrigin::Studio,
+                    format!("could not open the device in the editor: {error}"),
+                ));
+                if let Some(pending) = held_open {
+                    crate::app::open_progress::note_open_failed(
+                        error.message(),
+                        pending.retry_action(),
+                    );
+                }
+            }
+        }
+    }
+
+    /// Start the sim a held lens is waiting on, if it is a sim and it is
+    /// off.
+    ///
+    /// The power-on is the transport's, not the fold's, on purpose: the
+    /// fold's `Connect` needs a roster `DeviceId`, and the states this has
+    /// to recover from include "the row is there but the roster has not
+    /// adopted it yet". Arming the sweep is the whole of the handover —
+    /// the link reaches the model exactly as it does from the card's own
+    /// Power on.
+    fn wake_held_sim(&mut self, uid: &str) -> SimWake {
+        let Some(sim) = self.sim_transport.clone() else {
+            return SimWake::NotOurs;
+        };
+        if !self.is_sim_device(uid) {
+            return SimWake::NotOurs;
+        }
+        if sim.is_powered(uid) {
+            return SimWake::AlreadyRunning;
+        }
+        let Some((target, base_mac)) = self.sim_backing_facts(uid) else {
+            return SimWake::Refused(
+                "its record does not say what board it is or what identity it reports".to_string(),
+            );
+        };
+        let display_name = self
+            .devices
+            .device_for_key(uid)
+            .map(|device| device.title())
+            .unwrap_or_else(|| crate::sim_device_name(&target));
+        let session = crate::SimSession {
+            uid: uid.to_string(),
+            target,
+            display_name,
+            base_mac,
+            tier: crate::SimTier::Gpu,
+        };
+        match sim.power_on(session) {
+            Ok(()) => {
+                self.device_sweep_pending = true;
+                self.mark_dirty();
+                SimWake::Started
+            }
+            Err(error) => SimWake::Refused(error),
+        }
+    }
+
+    /// The name of the sim at `uid` when its runtime has been given up on
+    /// before it ever said hello — a held lens on it would hold forever.
+    ///
+    /// A sim is powered on by this tab and cannot come back on its own the
+    /// way a board can be replugged, so "the fold stopped asking" is final
+    /// for it. That state is read off the fold's own evidence, not off a
+    /// timer of this controller's: the sim's link is attached to the
+    /// roster (the sweep handed it over), nothing is running on it (the
+    /// identify — and the auto-retries the fold spends on a link that
+    /// closes under it — are over), and the port is either closed again or
+    /// open with nothing said in its window. A booting sim is busy; an
+    /// adopted one is open with a hello; a sim the sweep has not reached
+    /// yet is on no link at all; one whose runtime is still starting says
+    /// so through its control — each of those keeps the hold.
+    ///
+    /// The browser case (G1, 2026-09-07): a worker that could not fetch its
+    /// engine posts `fatal`, the link raises `Error` + `Closed`, the fold
+    /// re-asks twice more and stops, and the project card said "Opening…"
+    /// for as long as anyone watched.
+    fn sim_that_did_not_start(&self, uid: &str) -> Option<(String, String)> {
+        let sim = self.sim_transport.as_ref()?;
+        if !sim.is_powered(uid) || sim.is_starting(uid) {
+            // Off, or still coming up. The second matters: the fold's
+            // identify deadline (5 s) is shorter than a cold worker boot,
+            // and each eviction closes and re-opens the link — which
+            // KILLS the worker and boots a fresh one — so at the retry
+            // cap the last boot is still in flight while the link reads
+            // "attached, idle, not open" below. Only the runtime knows it
+            // is starting, so it is asked first.
+            return None;
+        }
+        let endpoint = crate::sim_endpoint(uid);
+        let roster = self.devices.roster();
+        let (busy, presence, hello) = if let Some(pending) = roster
+            .pending()
+            .iter()
+            .find(|pending| pending.info.endpoint == endpoint)
+        {
+            let evidence = pending.evidence();
+            (
+                pending.is_identifying(),
+                evidence.presence,
+                evidence.classification.hello().is_some(),
+            )
+        } else if let Some(device) = roster.devices().iter().find(|device| {
+            device.link().is_some() && device.identity.endpoint.as_ref() == Some(&endpoint)
+        }) {
+            (
+                device.is_busy(),
+                device.evidence.presence,
+                device.evidence.classification.hello().is_some(),
+            )
+        } else {
+            // Not handed to the fold yet: the sweep is still pending.
+            return None;
+        };
+        if busy || !presence.is_attached() {
+            return None;
+        }
+        if presence.is_open() && hello {
+            // Adopted and listening: the ordinary attach lands this tick.
+            return None;
+        }
+        let name = self
+            .devices
+            .device_for_key(uid)
+            .map(|device| device.title())
+            .unwrap_or_else(|| "The sim".to_string());
+        // The evidence the verdict rests on, for the console line: a
+        // release that turns out premature has to be arguable from the log.
+        let detail = format!(
+            "port {}, hello {}",
+            if presence.is_open() { "open" } else { "closed" },
+            if hello { "heard" } else { "not heard" },
+        );
+        Some((name, detail))
+    }
+
+    /// End a held open on a sim that did not start: power the sim off (so
+    /// the record goes back to the remembered line, where Power on and the
+    /// open's own Retry can start it again — a "powered" entry with no
+    /// runtime behind it could never be powered on again), and hand the
+    /// opening frame its verdict, naming the device.
+    fn release_hold_on_a_sim_that_did_not_start(
+        &mut self,
+        uid: &str,
+        name: &str,
+        why: &str,
+        detail: &str,
+    ) {
+        self.pending_device_lens = None;
+        let message = format!("{name} did not start");
+        self.push_log(UiLogDraft::new(
+            UiLogLevel::Warn,
+            UiLogOrigin::Studio,
+            format!("{message}: {why} ({detail}); powered off"),
+        ));
+        self.power_off_sim(Some(uid.to_string()));
+        if let Some(pending) = self.pending_open.take() {
+            crate::app::open_progress::note_open_failed(message, pending.retry_action());
         }
     }
 
@@ -3296,16 +4188,6 @@ impl StudioController {
             ProjectOp::ReloadActiveProject => self.reload_active_project(updates).await,
             ProjectOp::DisconnectProject => self.disconnect_project().await,
             ProjectOp::DetachLens => self.detach_lens(),
-            ProjectOp::OpenSimProject => {
-                let id = self
-                    .pool
-                    .sim_session()
-                    .map(crate::RuntimeSession::id)
-                    .ok_or_else(|| {
-                        UiError::MissingSession("the simulator is not running".to_string())
-                    })?;
-                self.attach_lens(id, updates).await
-            }
             ProjectOp::SaveOverlay => {
                 let run = {
                     let server = self.pool.lens_session_mut()?.client_mut()?;
@@ -3315,7 +4197,6 @@ impl StudioController {
                 // shared-view fork changes the active project's identity —
                 // re-note so the lens (and therefore the URL) follows the
                 // fork. Idempotent for every ordinary save.
-                self.note_sim_loaded_project();
                 self.record_project_edit_run(run)
             }
             ProjectOp::RevertAllEdits => {
@@ -3777,14 +4658,15 @@ impl StudioController {
         self.record_project_edit_run(run)
     }
 
-    /// Vendor a library pattern export into the open project (module
-    /// authoring unit, P5). The source bytes come from the library, the
-    /// write goes over the wire as an ordinary `CreateNode`.
+    /// Vendor a pattern export into the open project (module authoring
+    /// unit, P5; built-ins, catalog content tree P6). The source bytes come
+    /// from the library or the compiled-in catalog, the write goes over the
+    /// wire as an ordinary `CreateNode`.
     async fn execute_node_import_op(&mut self, op: NodeImportOp) -> UiResult {
         let run = {
             let server = self.pool.lens_session_mut()?.client_mut()?;
             self.project
-                .import_pattern(server, &op.package_uid, &op.export)
+                .import_pattern(server, &op.source, &op.export)
                 .await
         };
         // The vendored files landed in the library through the create's
@@ -3810,109 +4692,6 @@ impl StudioController {
         let run = run?;
         self.record_logs(run.logs);
         Ok(run.notices)
-    }
-
-    /// Attach the server protocol to the session `id`'s runtime (the sim
-    /// worker's io) and run the post-attach sequence: readiness probe, then
-    /// either the pending open's push or the auto-connect to whatever the
-    /// runtime already runs.
-    ///
-    /// Session-targeted throughout (P2): every state write lands on the
-    /// session being attached, never "the lens".
-    async fn attach_runtime(&mut self, id: crate::RuntimeId, updates: UxUpdateSink) -> UiResult {
-        let attach_result = match self.pool.session_mut(id) {
-            Some(session) => session.attach_server(updates.clone()),
-            None => Err(UiError::MissingSession(
-                "link connection is not open".to_string(),
-            )),
-        };
-        match attach_result {
-            Ok(()) => {
-                let mut outcome =
-                    UiNotices::new().with_notice(UiNotice::info("Server protocol connected"));
-                updates.emit(UxUpdate::View(self.view()));
-                // a home-card open skips the running-project probe: opening
-                // is a push of the library head regardless of what runs
-                // (D19)
-                if self.pending_open.is_some() {
-                    let open_outcome = self.open_pending_package(updates).await?;
-                    outcome.notices.extend(open_outcome.notices);
-                    return Ok(outcome);
-                }
-                emit_activity(
-                    &updates,
-                    UxActivityTarget::pane(ProjectController::NODE_ID),
-                    "Checking running projects",
-                    "Checking",
-                    "Checking server response",
-                );
-                // The sim WITH the lens auto-connects the editor to
-                // whatever runs; a sim attaching while the lens is
-                // elsewhere (P3: attach never steals the editor) probes
-                // readiness only. The probe still issues the first wire
-                // request either way.
-                let lens_bound = self.pool.lens() == Some(id);
-                let probe = if lens_bound {
-                    self.connect_running_project_if_available(updates.clone())
-                        .await
-                } else {
-                    self.probe_server_readiness(id).await
-                };
-                let auto_connect = match probe {
-                    Ok(auto_connect) => auto_connect,
-                    Err(error) => {
-                        // This session's own streams, onto this session's
-                        // console tail (D42) — the ring would swallow them.
-                        // A failed attach is exactly when they are worth
-                        // reading.
-                        let pending_logs = self
-                            .pool
-                            .session_mut(id)
-                            .map(|session| session.take_pending_logs())
-                            .unwrap_or_default();
-                        self.record_session_logs(id, pending_logs);
-                        // Quiesce the editor only when it is a lens on the
-                        // failing session.
-                        if self.pool.lens() == Some(id) {
-                            self.project.reset();
-                        }
-                        self.push_log(UiLogDraft::new(
-                            UiLogLevel::Error,
-                            UiLogOrigin::Studio,
-                            format!("server readiness probe failed: {error}"),
-                        ));
-                        if let Some(session) = self.pool.session_mut(id) {
-                            session.fail(error.to_string());
-                        }
-                        return Err(error);
-                    }
-                };
-                match auto_connect {
-                    AutoProjectConnect::Connected { synced } => {
-                        outcome = outcome.with_notice(project_sync_notice(
-                            synced,
-                            "Connected running project",
-                            "Connected running project; project sync needs attention",
-                        ));
-                    }
-                    AutoProjectConnect::SelectionRequired => {
-                        outcome = outcome.with_notice(UiNotice::info("Choose running project"));
-                    }
-                    AutoProjectConnect::NotFound if lens_bound => {
-                        let demo_outcome = self.load_demo_project(updates).await?;
-                        outcome.notices.extend(demo_outcome.notices);
-                    }
-                    AutoProjectConnect::NotFound => {}
-                }
-                Ok(outcome)
-            }
-            Err(error) => {
-                if let Some(session) = self.pool.session_mut(id) {
-                    session.fail(error.to_string());
-                }
-                Err(error)
-            }
-        }
     }
 
     async fn connect_running_project(&mut self, updates: UxUpdateSink) -> UiResult {
@@ -3953,67 +4732,6 @@ impl StudioController {
                 ));
                 self.project.fail(error.to_string());
                 Err(error)
-            }
-        }
-    }
-
-    /// Observation-only readiness probe: issue the wire's first request on
-    /// session `id` so readiness settles (and NoFirmware/Incompatible
-    /// surface through the same error path as the auto-connect probe)
-    /// WITHOUT connecting the editor to anything the runtime runs —
-    /// hardware attach is observation (roster model; editor entry is the
-    /// explicit D29 click), and a sim attaching without the lens must not
-    /// steal the mirror (P3).
-    async fn probe_server_readiness(
-        &mut self,
-        id: crate::RuntimeId,
-    ) -> Result<AutoProjectConnect, UiError> {
-        let catalog = {
-            let server = self
-                .pool
-                .session_mut(id)
-                .ok_or_else(|| {
-                    UiError::MissingSession("runtime session is not attached".to_string())
-                })?
-                .client_mut()?;
-            server.list_loaded_projects().await?
-        };
-        self.record_logs(catalog.logs);
-        Ok(AutoProjectConnect::NotFound)
-    }
-
-    async fn connect_running_project_if_available(
-        &mut self,
-        updates: UxUpdateSink,
-    ) -> Result<AutoProjectConnect, UiError> {
-        emit_activity(
-            &updates,
-            UxActivityTarget::pane(ProjectController::NODE_ID),
-            "Checking running projects",
-            "Checking",
-            "Checking loaded projects",
-        );
-        let result = {
-            let server = self.pool.lens_session_mut()?.client_mut()?;
-            self.project
-                .connect_running_project_if_available(server)
-                .await
-        };
-        match result? {
-            ProjectConnectResult::Connected { logs } => {
-                self.record_logs(logs);
-                let sync = self.sync_project_after_attach(updates).await?;
-                Ok(AutoProjectConnect::Connected {
-                    synced: sync.synced,
-                })
-            }
-            ProjectConnectResult::SelectionRequired { logs } => {
-                self.record_logs(logs);
-                Ok(AutoProjectConnect::SelectionRequired)
-            }
-            ProjectConnectResult::NotFound { logs } => {
-                self.record_logs(logs);
-                Ok(AutoProjectConnect::NotFound)
             }
         }
     }
@@ -4067,7 +4785,6 @@ impl StudioController {
         match result {
             Ok(logs) => {
                 self.record_logs(logs);
-                self.note_sim_loaded_project();
                 let sync = self.sync_project_after_attach(updates).await?;
                 Ok(UiNotices::new().with_notice(project_sync_notice(
                     sync.synced,
@@ -4088,71 +4805,76 @@ impl StudioController {
     }
 
     /// The docs-sim bootstrap ([`ProjectOp::OpenDocsExample`], interactive
-    /// docs D1/D2): ensure THIS controller's browser-worker sim is
-    /// connected, put the lens on it, and deploy a compiled-in example
-    /// directly — never through the library. A docs page's leased
-    /// controller dispatches this as its first action; re-dispatching on
-    /// the live sim is the docs "reset" (pristine re-deploy of the same
-    /// files). Never dispatched by any app surface.
+    /// docs D1/D2): power an **identity-less** sim device on, put the lens
+    /// on it, and deploy a compiled-in example directly — never through the
+    /// library. A docs page's leased controller dispatches this as its
+    /// first action; re-dispatching on the live sim is the docs "reset"
+    /// (pristine re-deploy of the same files). Never dispatched by any app
+    /// surface.
+    ///
+    /// Identity-less is the whole of PD10/Q4: the boot options carry no
+    /// MAC, so the hello reports none, `registry_key()` is `None` and
+    /// [`Self::settle_device_records`] never writes a row. A docs page
+    /// reading the docs must not leave a device behind in the reader's
+    /// library.
     async fn open_docs_example(&mut self, example_id: &str, updates: UxUpdateSink) -> UiResult {
-        match self.pool.sim_session() {
-            // Live sim: the reset path. Lens back on it, re-deploy below.
-            Some(sim) if matches!(sim.server_state(), ServerState::Connected { .. }) => {
-                let id = sim.id();
-                self.pool.set_lens(id);
-            }
-            // A sim in any half-state is unexpected here: the docs host
-            // boots fresh controllers and resets only live ones. Refuse
-            // loudly instead of guessing at recovery (removing the session
-            // without closing its provider would leak the worker).
-            Some(_) => {
-                return Err(UiError::MissingSession(
-                    "the docs simulator is not connected; shut this host down and boot a fresh one"
-                        .to_string(),
-                ));
-            }
-            None => {
-                emit_activity(
-                    &updates,
-                    UxActivityTarget::pane(ProjectController::NODE_ID),
-                    "Starting simulator",
-                    "Starting",
-                    "Starting the docs simulator",
-                );
-                match self.sim_link.open().await {
-                    Ok((payload, logs)) => {
-                        self.record_logs(logs);
-                        let id = self.install_session(payload).await;
-                        // The fresh install claims a lens-less pool's lens;
-                        // set it explicitly anyway so the invariant is local.
-                        self.pool.set_lens(id);
-                        let attach = self
-                            .pool
-                            .session_mut(id)
-                            .ok_or_else(|| {
-                                UiError::MissingSession(
-                                    "the docs simulator session vanished after install".to_string(),
-                                )
-                            })?
-                            .attach_server(updates.clone());
-                        if let Err(error) = attach {
-                            self.pool.remove_sim();
-                            return Err(error);
-                        }
-                    }
-                    Err(error) => {
-                        self.pool.remove_sim();
-                        return Err(error);
-                    }
-                }
-            }
+        // Live already: the reset path, re-deploying below onto the lens.
+        if self
+            .pool
+            .lens_session()
+            .is_some_and(crate::RuntimeSession::is_connected)
+        {
+            return self.deploy_docs_example(example_id, updates).await;
         }
+        emit_activity(
+            &updates,
+            UxActivityTarget::pane(ProjectController::NODE_ID),
+            "Starting the device",
+            "Starting",
+            "Starting the docs sim",
+        );
+        // A docs sim runs the desktop firmware as itself: the page is a
+        // computer, and a docs example targets no board.
+        let transport = self.sim_transport.clone().ok_or_else(|| {
+            UiError::UnsupportedFeature("this build has no sim runtime".to_string())
+        })?;
+        transport
+            .power_on(crate::SimSession {
+                uid: DOCS_SIM_KEY.to_string(),
+                target: crate::app::library::ProjectTarget::Desktop
+                    .board_id()
+                    .to_string(),
+                display_name: "Docs".to_string(),
+                // No MAC: the runtime answers with no identity, which is
+                // what keeps this device out of the registry.
+                base_mac: String::new(),
+                // The docs embed draws the runtime's BYTES (the rendered
+                // frame is a byte preview, like the preview pool's host),
+                // and a GPU-tier product has none to read back — the embed
+                // showed the probe's refusal where the lamps go (G1,
+                // 2026-09-07). PD12's GPU request is for devices with a
+                // present path; this one has only the embed.
+                tier: crate::SimTier::Cpu,
+            })
+            .map_err(UiError::Link)?;
+        self.device_sweep_pending = true;
+        self.run_due_device_sweep();
+        // The docs host holds this example until the anonymous device says
+        // hello; the tick's `try_pending_device_lens` lands the lens and
+        // this same deploy runs from `attach_lens`.
+        self.pending_open = Some(PendingOpen::DocsExample(example_id.to_string()));
+        self.open_device_lens(DOCS_SIM_KEY, updates).await
+    }
+
+    /// Deploy a compiled-in example directly onto the lens (the docs
+    /// "reset", and the landing half of [`Self::open_docs_example`]).
+    async fn deploy_docs_example(&mut self, example_id: &str, updates: UxUpdateSink) -> UiResult {
         emit_activity(
             &updates,
             UxActivityTarget::pane(ProjectController::NODE_ID),
             "Opening example",
             "Opening",
-            "Pushing the example to the docs simulator",
+            "Sending the example to the docs sim",
         );
         let result = {
             let server = self.pool.lens_session_mut()?.client_mut()?;
@@ -4185,33 +4907,6 @@ impl StudioController {
         Ok(UiNotices::new().with_notice(UiNotice::info("Project disconnected")))
     }
 
-    /// Record what a just-landed load-as-push put on the lens SIM session
-    /// — the live sim card's identity evidence (D36) and the project
-    /// card's "Running in simulator" pairing key. No-op when the lens is
-    /// not on a sim or the open carried no library identity (the storeless
-    /// demo path); the record outlives the lens (detach keeps the sim
-    /// running) and dies with the session.
-    ///
-    /// The sim's BOARD identity rides along (vision D4: the sim inherits
-    /// its board from the project it runs) — the project's advisory
-    /// manifest `target`, which is where that fact persists. It follows the
-    /// project exactly: an untargeted project leaves the sim with no board,
-    /// which is today's behavior everywhere until the wizard generates
-    /// targeted projects.
-    fn note_sim_loaded_project(&mut self) {
-        let project = self
-            .project
-            .active_library_uid()
-            .zip(self.project.active_library_slug());
-        let target = self.project.active_target();
-        if let Some((uid, name)) = project
-            && let Ok(session) = self.pool.lens_session_mut()
-        {
-            session.set_sim_loaded_project(Some(crate::SimLoadedProject { uid, name }));
-            session.set_sim_board_id(target);
-        }
-    }
-
     /// Detach the editor lens (runtime-pool P3): the mirror drops, every
     /// session STAYS in the pool — worker running, wire client attached,
     /// device reconcile state intact. The gallery-return route policy
@@ -4225,18 +4920,11 @@ impl StudioController {
     /// executes. By the time we run, no edit ack is in flight; acked
     /// overlay state is server-side and survives for re-attach.
     fn detach_lens(&mut self) -> UiResult {
-        // A device lens has no life without the editor: detaching is
-        // closing (the wire goes back to the roster). The sim keeps running
-        // detached, as ever.
-        if self
-            .pool
-            .lens_session()
-            .is_some_and(|session| session.kind() == crate::RuntimeKind::Device)
-        {
-            self.close_device_lens();
-            return Ok(UiNotices::new());
-        }
-        self.quiesce_lens();
+        // Detaching is closing: the wire goes back to the roster and the
+        // DEVICE keeps running — a sim exactly like silicon (PD9). The old
+        // "quiesce and keep the sim session running detached" is gone with
+        // the sim's own session: there is nothing left to hold open.
+        self.close_device_lens();
         Ok(UiNotices::new())
     }
 
@@ -4265,10 +4953,13 @@ impl StudioController {
     }
 
     /// Attach the editor lens to session `id` and rebuild the mirror
-    /// against that session's client via the existing connect sequence
-    /// (`connect_running_project` → `sync_loaded_project`), for BOTH kinds
-    /// (P3). A mirror open on another session quiesces first; that session
-    /// stays in the pool.
+    /// against that session's client: a PENDING OPEN pushes the library
+    /// head (D19 — opening is a push regardless of what runs), and
+    /// everything else connects to whatever the device already runs.
+    ///
+    /// One path for every device (PD9). The push lives HERE rather than at
+    /// the open's call site so that a lens landing late — a sim that was
+    /// still booting when the click ran — still pushes.
     pub(crate) async fn attach_lens(
         &mut self,
         id: crate::RuntimeId,
@@ -4288,59 +4979,22 @@ impl StudioController {
             self.quiesce_lens();
             self.pool.set_lens(id);
         }
-        // Library sync must target the dir this runtime ACTUALLY serves.
-        // The sim has no discovered dir, so it keeps the demo slot; a device
-        // lens asks the board (round-2 M5).
-        let storage_id = match self.pool.session(id).map(crate::RuntimeSession::kind) {
-            Some(crate::RuntimeKind::Device) => self.discover_device_storage_id(id).await?,
-            Some(crate::RuntimeKind::Sim) | None => {
-                crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID.to_string()
-            }
-        };
+        // Library sync must target the dir this runtime ACTUALLY serves —
+        // asked over the wire for every kind now, because a sim answers the
+        // same question a board does (the demo-slot assumption was the
+        // sim's last special case).
+        let storage_id = self.discover_device_storage_id(id).await?;
         self.project.set_runtime_storage_id(storage_id);
         // The connect sequence builds the first view of this lens; the
         // picker's gate (and probe policy) must already know the runtime
         // it is on — the per-dispatch sync ran before this op moved the lens.
         self.sync_lens_probe_policy();
+        // A home-card open skips the running-project probe: opening IS a
+        // push of the library head, regardless of what runs (D19).
+        if self.pending_open.is_some() {
+            return self.open_pending_package(updates).await;
+        }
         self.connect_running_project(updates).await
-    }
-
-    /// Stop-sim (runtime-pool P3, Q5): destroy THE simulator session —
-    /// quiesce the editor when the lens is on it, remove it from the pool,
-    /// close the provider session (`worker.terminate()` on the web). Every
-    /// other session stays. A failed provider close still removes the
-    /// session (the pool is the truth about attachment); the failure lands
-    /// in the ring as a warning.
-    async fn stop_simulator(&mut self) -> UiResult {
-        let sim_id = self
-            .pool
-            .sim_session()
-            .map(crate::RuntimeSession::id)
-            .ok_or_else(|| UiError::MissingSession("the simulator is not running".to_string()))?;
-        if self.pool.lens() == Some(sim_id) {
-            self.quiesce_lens();
-        }
-        let Some(mut session) = self.pool.remove_sim() else {
-            return Err(UiError::MissingSession(
-                "the simulator is not running".to_string(),
-            ));
-        };
-        let pending = session.take_pending_logs();
-        self.record_logs(pending);
-        {
-            use lpa_link::LinkProvider;
-            let crate::RuntimePayload::Sim(sim) = session.into_payload() else {
-                unreachable!("remove_sim only ever yields a sim session");
-            };
-            if let Err(error) = sim.connector.close(&sim.session.id).await {
-                self.push_log(UiLogDraft::new(
-                    UiLogLevel::Warn,
-                    UiLogOrigin::Studio,
-                    format!("simulator session close reported: {error}"),
-                ));
-            }
-        }
-        Ok(UiNotices::new().with_notice(UiNotice::info("Simulator stopped")))
     }
 
     async fn refresh_project(&mut self, updates: UxUpdateSink) -> UiResult {
@@ -4385,7 +5039,6 @@ impl StudioController {
         match result {
             Ok(logs) => {
                 self.record_logs(logs);
-                self.note_sim_loaded_project();
                 updates.emit(UxUpdate::View(self.view()));
                 Ok(UiNotices::new())
             }
@@ -4459,20 +5112,22 @@ impl StudioController {
 /// `pub(crate)` helpers assemble a connected controller for them.
 #[cfg(test)]
 impl StudioController {
-    /// Install a stubbed SIMULATOR attachment — the "connected but not
-    /// hardware" fixture.
+    /// Install a stubbed lens session on a SIM-backed device — the
+    /// "connected but not hardware" fixture, which is now a device like
+    /// any other.
     pub(crate) fn set_stub_sim_for_test(&mut self) {
         self.install_stub_sim_for_test();
     }
 
-    /// Install a stubbed SIM session and return its id.
+    /// Install a stubbed sim-backed lens session and return its id.
     pub(crate) fn install_stub_sim_for_test(&mut self) -> crate::RuntimeId {
-        self.pool.install(crate::RuntimePayload::Sim(
-            crate::SimAttachment::stub_for_test(),
+        self.pool.install(crate::RuntimePayload::Device(
+            crate::DeviceLensAttachment::sim_stub_for_test("devsim"),
         ))
     }
 
-    /// Install a stubbed SIM session with an injected wire client.
+    /// Install a stubbed sim-backed lens session with an injected wire
+    /// client.
     pub(crate) fn install_stub_sim_with_client_for_test(
         &mut self,
         client: crate::StudioServerClient,
@@ -4480,7 +5135,7 @@ impl StudioController {
         let id = self.install_stub_sim_for_test();
         self.pool
             .session_mut(id)
-            .expect("just-installed sim session")
+            .expect("just-installed session")
             .set_client_for_test(client);
         id
     }
@@ -4491,20 +5146,16 @@ impl StudioController {
         &self.project
     }
 
+    pub(crate) fn pending_device_lens_for_test(&self) -> Option<String> {
+        self.pending_device_lens.clone()
+    }
+
     pub(crate) fn devices_for_test(&self) -> &crate::DeviceRoster {
         &self.devices
     }
 
     pub(crate) fn runtime_pool_for_test(&self) -> &RuntimePool {
         &self.pool
-    }
-
-    /// Test-only: the LENS session's card, as the editor shell renders it.
-    pub(crate) fn lens_sim_card_for_test(&self) -> Option<crate::UiSimCard> {
-        self.home_pool_evidence()
-            .sim
-            .as_ref()
-            .map(|sim| self.overlay_card_ui(crate::app::home::home_view_builder::sim_card(sim)))
     }
 
     /// Set the lens session's server protocol state directly (the retired
@@ -4564,13 +5215,6 @@ impl ControllerContext for StudioController {
     ) -> core::pin::Pin<Box<dyn Future<Output = UiResult> + '_>> {
         Box::pin(StudioController::dispatch(self, action))
     }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum AutoProjectConnect {
-    Connected { synced: bool },
-    SelectionRequired,
-    NotFound,
 }
 
 /// Human-readable mapping kind for the system prompt's fixture line.
@@ -4644,56 +5288,6 @@ fn project_sync_notice(synced: bool, success: &str, needs_attention: &str) -> Ui
 }
 
 /// Constructor-default randomness: clock-derived bytes. Unique enough
-/// The published-frame entries carried by a card-feed read's event stream.
-///
-/// The feed asks for exactly one probe, so this walks the stream for probe
-/// index 0 and reassembles it: a small result arrives whole, and a
-/// dome-scale frame arrives as a header plus bounded chunks the transport
-/// already validated for coverage. Anything else in the stream (the
-/// begin/end revision markers) is not this read's business.
-///
-/// A malformed stream yields no entries rather than an error: the feed's
-/// answer to "no frame this time" is to keep the last one, and there is no
-/// user-facing failure to raise for a picture that did not arrive.
-fn output_frame_entries(events: &[lpc_wire::ProjectReadEvent]) -> Vec<lpc_wire::OutputFrameEntry> {
-    use lpc_wire::{
-        OutputFrameProbeResult, ProjectProbeResult, ProjectProbeResultHeader, ProjectReadEvent,
-        ProjectReadProbeEvent,
-    };
-
-    let mut pending: Option<(ProjectProbeResultHeader, Vec<u8>)> = None;
-    for event in events {
-        let ProjectReadEvent::Probe { event, .. } = event else {
-            continue;
-        };
-        match event {
-            ProjectReadProbeEvent::Result(ProjectProbeResult::OutputFrame(
-                OutputFrameProbeResult::Frame { outputs },
-            )) => return outputs.clone(),
-            ProjectReadProbeEvent::ResultBegin { header, .. } => {
-                pending = Some((header.clone(), Vec::new()));
-            }
-            ProjectReadProbeEvent::ResultBytes { bytes, .. } => {
-                if let Some((_, buffer)) = pending.as_mut() {
-                    buffer.extend_from_slice(bytes);
-                }
-            }
-            ProjectReadProbeEvent::ResultEnd => {
-                let Some((header, bytes)) = pending.take() else {
-                    continue;
-                };
-                if let ProjectProbeResult::OutputFrame(OutputFrameProbeResult::Frame { outputs }) =
-                    header.into_result(bytes)
-                {
-                    return outputs;
-                }
-            }
-            _ => {}
-        }
-    }
-    Vec::new()
-}
-
 /// for tests; the web shell replaces it with crypto randomness via
 /// [`StudioController::set_random`].
 fn clock_fallback_random() -> [u8; 16] {
@@ -4782,6 +5376,40 @@ fn project_tree_item_actions(
 /// The per-operation shape of one device management flow (reset / flash /
 /// wipe): the link request plus the notice/log wording that differs between
 /// them. Everything else — quiesce, capture, manage, reopen, reattach,
+/// The lens's view of the thing at an address: the facts
+/// `StudioController::device_lens_attachment` decides on, read the same way
+/// off a roster device or off a pending link (`lens_facts_at_address`).
+struct LensFacts {
+    device: lpa_devices::DeviceId,
+    link: Option<lpa_devices::LinkId>,
+    /// The port is open right now (attached is not open).
+    open: bool,
+    /// `Some(board_id)` when a hello was heard in the current window.
+    hello: Option<Option<String>>,
+    /// An activity is running on it.
+    busy: bool,
+    name: String,
+    /// The endpoint rung, for the transport fork (`sim:` vs a port).
+    endpoint: Option<String>,
+}
+
+/// What [`StudioController::wake_held_sim`] did about the device a held
+/// lens is waiting on.
+#[derive(Debug, PartialEq, Eq)]
+enum SimWake {
+    /// Not a sim (or this build runs none): waiting is the right answer.
+    NotOurs,
+    /// A sim, already running: whatever the hold is waiting for, it is not
+    /// a power-on.
+    AlreadyRunning,
+    /// A sim that was off and is now booting. The hold stands; the boot is
+    /// what it was waiting for.
+    Started,
+    /// A sim that cannot be started at all, with the reason. The hold has
+    /// to END — nothing is coming.
+    Refused(String),
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
@@ -4848,17 +5476,6 @@ mod tests {
         studio.record_logs(vec![draft("three")]);
         studio.push_log(draft("outcome"));
         assert!(studio.view_if_changed().is_some());
-    }
-
-    #[test]
-    fn sim_crash_reboot_guard_allows_first_and_expired_never_within_window() {
-        // Never rebooted: always allowed.
-        assert!(sim_crash_reboot_allowed(None, 100.0, 30.0));
-        // Inside the window (including the same instant): suppressed.
-        assert!(!sim_crash_reboot_allowed(Some(100.0), 100.0, 30.0));
-        assert!(!sim_crash_reboot_allowed(Some(100.0), 129.9, 30.0));
-        // Window elapsed: allowed again.
-        assert!(sim_crash_reboot_allowed(Some(100.0), 130.0, 30.0));
     }
 
     #[test]
@@ -5183,7 +5800,7 @@ mod tests {
     }
 
     #[test]
-    fn detached_sim_sessions_join_the_slow_heartbeat_lane() {
+    fn a_detached_lens_session_joins_the_slow_heartbeat_lane() {
         use crate::app::studio::refresh_cadence::{
             DEVICE_HEARTBEAT_INTERVAL, SIMULATOR_REFRESH_INTERVAL,
         };
@@ -5198,53 +5815,37 @@ mod tests {
         studio.note_passive_refresh_completed();
         assert_eq!(studio.next_refresh_interval(), SIMULATOR_REFRESH_INTERVAL);
 
-        // Detached (P3): the sim leaves the lens lane and joins the slow
-        // heartbeat lane, so its buffered wire logs keep draining while no
-        // project pull touches its client. A never-heartbeated session is
-        // immediately due; a fresh heartbeat re-arms the full interval.
+        // Detaching CLOSES the lens now (PD9: a device keeps running, the
+        // session does not) — an empty pool falls back to the calm default.
         studio.detach_lens().expect("detach succeeds");
-        assert_eq!(studio.next_refresh_interval(), Duration::ZERO);
-        studio.run_due_heartbeats();
-        assert_eq!(studio.next_refresh_interval(), DEVICE_HEARTBEAT_INTERVAL);
+        assert!(
+            !studio.runtime_pool_for_test().has_session(),
+            "detaching a lens closes it; the device keeps running"
+        );
+        assert_eq!(
+            studio.next_refresh_interval(),
+            RefreshCadence::default().interval()
+        );
+        // The slow heartbeat lane is still what a non-lens session rides.
+        let _ = DEVICE_HEARTBEAT_INTERVAL;
     }
 
     #[test]
-    fn a_sim_lens_with_a_board_feeds_lens_board_id_and_its_card() {
-        // Gallery-rework P04 / vision D4. The sim is still not a device
-        // (D22) — no registry row backs it — but a board identity makes
-        // the output face's pin diagram light up for it exactly as it does
-        // for hardware, and the card says what it is pretending to be.
+    fn the_lens_board_id_is_the_devices_own() {
+        // The board the output face's pin diagram lights up for is the
+        // device's, read off the attachment — one source for a sim and for
+        // silicon (PD9), instead of the sim's old advisory claim.
         let mut studio = StudioController::new(|| 100.0);
         studio.set_stub_sim_for_test();
 
         assert_eq!(
             studio.lens_board_id(),
-            None,
-            "default: no board, today's behavior"
+            Some("lightplayer/desktop"),
+            "a Desktop sim reports the manifest it wears"
         );
         assert_eq!(
-            studio
-                .lens_sim_card_for_test()
-                .expect("a lens card for the sim session")
-                .board_id,
-            None
-        );
-
-        studio
-            .pool
-            .lens_session_mut()
-            .expect("the sim holds the lens")
-            .set_sim_board_id(Some("seeed/xiao-esp32-c6".to_string()));
-
-        assert_eq!(studio.lens_board_id(), Some("seeed/xiao-esp32-c6"));
-        assert_eq!(
-            studio
-                .lens_sim_card_for_test()
-                .expect("a lens card for the sim session")
-                .board_id
-                .as_deref(),
-            Some("seeed/xiao-esp32-c6"),
-            "the card carries it too — that is the \"as <board>\" line"
+            studio.pool.lens_session().expect("a lens").transport(),
+            crate::LinkTransport::Sim
         );
     }
 
@@ -5258,6 +5859,66 @@ mod tests {
         assert!(view.panes.is_empty(), "home replaces the pane layout");
         assert!(!home.library_available, "no store attached on host");
         assert!(!home.examples.is_empty(), "examples always show");
+    }
+
+    /// The New menu's optional name: a typed name is what the library dates
+    /// and slugs; blank falls back to the template's label. The follow-on
+    /// open errs on host (no sim runtime), exactly as the create test below
+    /// documents — the package sticks either way.
+    #[test]
+    fn home_create_project_takes_the_menus_optional_name() {
+        use crate::app::library::{LibraryStore, MemoryLibraryHost};
+        use crate::{HOME_NODE_ID, HomeOp};
+        use lpfs::LpFsMemory;
+
+        let mut studio = StudioController::new(|| 42.0);
+        let counter = Rc::new(RefCell::new(0u8));
+        let store = LibraryStore::new(
+            Rc::new(RefCell::new(LpFsMemory::new())),
+            Rc::new(move || {
+                *counter.borrow_mut() += 1;
+                [*counter.borrow(); 16]
+            }),
+            Rc::new(|| "2026-09-06-1010".to_string()),
+        );
+        studio.attach_library(Rc::new(MemoryLibraryHost::new(
+            store.clone(),
+            Rc::new(|| 42.0),
+        )));
+        let home_action = |op: HomeOp| UiAction::from_op(ControllerId::new(HOME_NODE_ID), op);
+
+        block_on_ready(studio.dispatch(home_action(HomeOp::CreateProject {
+            template: crate::ProjectTemplate::Blank,
+            name: Some("  Porch sign ".to_string()),
+        })))
+        // No sim transport on a host build: the open mints the record,
+        // asks the fold to power it on, and HOLDS the lens — the package
+        // sticks either way, which is what this pins.
+        .expect("the open holds its lens rather than failing");
+        block_on_ready(studio.dispatch(home_action(HomeOp::CreateProject {
+            template: crate::ProjectTemplate::Blank,
+            name: Some("   ".to_string()),
+        })))
+        // No sim transport on a host build: the open mints the record,
+        // asks the fold to power it on, and HOLDS the lens — the package
+        // sticks either way, which is what this pins.
+        .expect("the open holds its lens rather than failing");
+
+        let mut slugs: Vec<String> = store
+            .list()
+            .expect("library lists")
+            .into_iter()
+            .map(|summary| summary.slug)
+            .collect();
+        slugs.sort();
+        assert_eq!(
+            slugs,
+            vec![
+                "2026-09-06-1010-porch-sign".to_string(),
+                "2026-09-06-1010-project".to_string(),
+            ],
+            "typed name slugged and dated; blank fell back to the template's label"
+        );
     }
 
     #[test]
@@ -5374,13 +6035,15 @@ mod tests {
 
         // Two creates in a row. Creation lands FIRST; the follow-on open
         // then refuses on host (this build has no browser-worker sim), so
-        // the dispatch errs — the successful create-and-open round-trip is
-        // the edit-e2e test's. The packages stick either way.
+        // the open holds its lens (no sim runtime on a host build) — the
+        // successful create-and-open round-trip is the edit-e2e test's.
+        // The packages stick either way.
         for _ in 0..2 {
             block_on_ready(studio.dispatch(home_action(HomeOp::CreateProject {
                 template: crate::ProjectTemplate::Blank,
+                name: None,
             })))
-            .expect_err("host test builds have no sim runtime to open into");
+            .expect("the open holds its lens rather than failing");
         }
         studio.request_library_refresh();
         block_on_ready(studio.settle_library());
@@ -5505,7 +6168,10 @@ mod tests {
             !view.panes.iter().any(|pane| pane.node_id.as_str() == "bus"),
             "no bus pane"
         );
-        assert!(view.lens_card.is_some());
+        // The lens card is the ROSTER's projection of the lens device
+        // (PD9) — asserted end to end in `studio_device_e2e_tests`, where
+        // a real device backs the lens; a stub session has no roster row
+        // to project.
 
         // The retired wizard's project steps stayed gone through the
         // deletion.
@@ -5746,26 +6412,8 @@ mod tests {
     // docs/defects/2026-07-28-retired-device-pane-still-reachable.md.
     // -----------------------------------------------------------------
 
-    /// Panes render ⇒ the editor is open ⇒ a lens card exists. Held
-    /// across every state the lens can reach while the pane layout is up.
-    #[test]
-    fn panes_never_render_without_a_lens_card() {
-        fn assert_invariant(studio: &StudioController, what: &str) {
-            let view = studio.view();
-            if view.panes.is_empty() {
-                return;
-            }
-            assert!(
-                view.lens_card.is_some(),
-                "{what}: panes render with no lens card — the editor's right column has no \
-                 runtime surface"
-            );
-        }
-
-        let studio = connected_studio();
-        assert_invariant(&studio, "sim lens");
-    }
-
+    /// A controller with a stubbed sim-backed lens session, a connected
+    /// server protocol and a ready project.
     fn connected_studio() -> StudioController {
         let mut studio = stub_sim_studio();
         studio.set_server_state_for_test(ServerState::Connected {

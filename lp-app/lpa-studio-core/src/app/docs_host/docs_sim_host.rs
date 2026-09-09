@@ -9,21 +9,22 @@ use std::rc::Rc;
 use crate::app::project::project_controller::ProjectController;
 use crate::app::studio::studio_view_channel::{CommandSender, StudioViewReceiver};
 use crate::{
-    ControllerId, ProjectOp, RuntimeOp, StudioActor, StudioActorOptions, StudioCommand,
-    StudioController, StudioHandle, UiAction,
+    ControllerId, ProjectOp, StudioActor, StudioActorOptions, StudioCommand, StudioController,
+    StudioHandle, UiAction,
 };
 
 /// A leased studio instance for one docs sim: a real controller + actor
-/// whose first queued command connects a browser-worker sim and deploys a
-/// compiled-in example directly (never through the library).
+/// whose first queued command powers an identity-less sim device on and
+/// deploys a compiled-in example directly (never through the library, and
+/// never leaving a device record behind — PD10).
 ///
 /// # Lifecycle contract (leak-critical)
 ///
 /// Nothing in the actor/controller/pool/session chain terminates the
-/// worker on drop — only [`RuntimeOp::StopSimulator`] reaches
-/// `worker.terminate()`. [`DocsSimHost::shutdown`] enqueues exactly that
-/// followed by [`StudioCommand::Shutdown`]; the actor's batch plan runs
-/// actions before honoring shutdown, so one enqueue is a complete,
+/// worker on drop. [`DocsSimHost::shutdown`] enqueues
+/// [`StudioCommand::Shutdown`], and the actor powers this host's sims off
+/// before it stops (`StudioController::power_off_sims` — dropping a sim's
+/// backing is what terminates its worker), so one enqueue is a complete,
 /// ordered teardown that the actor task finishes **on its own** — the
 /// page's tasks may die immediately after calling it. `Drop` also calls
 /// `shutdown()` as a backstop, but the page should call it explicitly on
@@ -41,8 +42,8 @@ impl DocsSimHost {
     /// Boot a docs sim host.
     ///
     /// `controller` is caller-built so platform seams stay in the shell
-    /// (clock via [`StudioController::new`], sim timers via
-    /// [`StudioController::set_sim_timers`]); the caller must **not**
+    /// (clock via [`StudioController::new`], the sim transport via
+    /// [`StudioController::set_device_sim_transport`]); the caller must **not**
     /// install the global log sink for it. `spawn` runs the actor future
     /// and must outlive the component that booted it (on the web:
     /// `wasm_bindgen_futures::spawn_local`, *not* a scope-tied spawn —
@@ -132,18 +133,14 @@ impl DocsSimHost {
         ));
     }
 
-    /// Tear down: stop the sim (closes the provider session —
-    /// `worker.terminate()` on the web — and removes it from this host's
-    /// pool), then shut the actor loop down. Idempotent; fire-and-forget
-    /// (the spawned actor task completes the teardown by itself).
+    /// Tear down: shut the actor loop down, which powers this host's sim
+    /// off on its way out (`worker.terminate()` on the web). Idempotent;
+    /// fire-and-forget (the spawned actor task completes the teardown by
+    /// itself).
     pub fn shutdown(&self) {
         if self.shutdown_sent.replace(true) {
             return;
         }
-        self.tx.send(StudioCommand::Action(UiAction::from_op(
-            ControllerId::new(RuntimeOp::NODE_ID),
-            RuntimeOp::StopSimulator,
-        )));
         self.tx.send(StudioCommand::Shutdown);
     }
 }

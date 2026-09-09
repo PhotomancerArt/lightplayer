@@ -278,9 +278,10 @@ impl IdentifyActivity {
             // Boot lines (pre-verdict), errors and reset outcomes are
             // diagnosis: the fold has already recorded them and the
             // deadline decides.
-            LinkEvent::Line(_) | LinkEvent::Error(_) | LinkEvent::ResetOutcome { .. } => {
-                ActivityStep::nothing()
-            }
+            LinkEvent::Line(_)
+            | LinkEvent::Error(_)
+            | LinkEvent::ResetOutcome { .. }
+            | LinkEvent::Passthrough { .. } => ActivityStep::nothing(),
         }
     }
 }

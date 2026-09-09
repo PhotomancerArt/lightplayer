@@ -1,0 +1,10 @@
+# The ROM images are binaries, byte-for-byte as Espressif published them.
+# The repository sets `core.autocrlf = input`; without this, a checkout on a
+# machine that disagreed could rewrite bytes inside a 490 KB ELF and the
+# checksum test would fail with no explanation of what touched it.
+*.elf binary
+
+# SHA256SUMS is the file that says the ELF is intact; it must not be
+# line-ending-normalised either, or `--check` would compare against a
+# different file than the one that was written.
+SHA256SUMS -text

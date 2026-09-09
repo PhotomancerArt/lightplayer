@@ -137,6 +137,12 @@ pub struct ProjectManifest {
     pub uid: Option<String>,
     /// Human-readable project name — the Studio project pane's title.
     pub name: Option<String>,
+    /// Card blurb: one sentence describing what the project shows off
+    /// (catalog content vision D7). Provenance-tier
+    /// metadata beside `author`/`license`/`target`: purely descriptive,
+    /// never read by the engine. `None` is the common case — most projects
+    /// author no blurb.
+    pub description: Option<String>,
     /// Provenance (§8, settled Q7): author attribution.
     pub author: Option<String>,
     /// Provenance: authored version string; no semver semantics yet.
@@ -264,6 +270,9 @@ impl ProjectManifest {
                     }
                     "uid" => manifest.uid = Some(read_string(&mut source, "uid")?),
                     "name" => manifest.name = Some(read_string(&mut source, "name")?),
+                    "description" => {
+                        manifest.description = Some(read_string(&mut source, "description")?);
+                    }
                     "author" => manifest.author = Some(read_string(&mut source, "author")?),
                     "version" => manifest.version = Some(read_string(&mut source, "version")?),
                     "license" => manifest.license = Some(read_string(&mut source, "license")?),
@@ -297,10 +306,10 @@ impl ProjectManifest {
     }
 
     /// Write the manifest as canonical authored JSON: pretty-printed, fixed
-    /// field order (`format`, `uid`, `name`, `author`, `version`,
-    /// `license`, `created`, `kind`, `exports`, `target`), absent fields
-    /// omitted, trailing newline. Deterministic so unchanged models produce
-    /// byte-identical files.
+    /// field order (`format`, `uid`, `name`, `description`, `author`,
+    /// `version`, `license`, `created`, `kind`, `exports`, `target`), absent
+    /// fields omitted, trailing newline. Deterministic so unchanged models
+    /// produce byte-identical files.
     pub fn write_json(&self) -> String {
         let mut out = String::from("{");
         let mut first = true;
@@ -326,6 +335,9 @@ impl ProjectManifest {
         }
         if let Some(name) = &self.name {
             field("name", name, true, &mut out);
+        }
+        if let Some(description) = &self.description {
+            field("description", description, true, &mut out);
         }
         if let Some(author) = &self.author {
             field("author", author, true, &mut out);
@@ -545,6 +557,7 @@ mod tests {
             format: Some(PROJECT_FORMAT_VERSION),
             uid: Some(String::from("prj0000000000000042")),
             name: Some(String::from("Porch sign")),
+            description: Some(String::from("A porch sign that spells hello")),
             author: Some(String::from("Yona")),
             version: Some(String::from("0.1")),
             license: Some(String::from("CC0-1.0")),
@@ -556,11 +569,50 @@ mod tests {
         let text = manifest.write_json();
         assert_eq!(
             text,
-            "{\n  \"format\": 10,\n  \"uid\": \"prj0000000000000042\",\n  \"name\": \"Porch sign\",\n  \"author\": \"Yona\",\n  \"version\": \"0.1\",\n  \"license\": \"CC0-1.0\",\n  \"created\": \"2026-08-01\",\n  \"target\": \"espressif/esp32-c6-devkitc-1\"\n}\n"
+            "{\n  \"format\": 10,\n  \"uid\": \"prj0000000000000042\",\n  \"name\": \"Porch sign\",\n  \"description\": \"A porch sign that spells hello\",\n  \"author\": \"Yona\",\n  \"version\": \"0.1\",\n  \"license\": \"CC0-1.0\",\n  \"created\": \"2026-08-01\",\n  \"target\": \"espressif/esp32-c6-devkitc-1\"\n}\n"
         );
         let read = ProjectManifest::read_json(&text).expect("read back");
         assert_eq!(read, manifest);
         assert_eq!(read.write_json(), text);
+    }
+
+    /// P1: `description` present round-trips, and its absence (the common
+    /// case — most projects author no card blurb) serializes to nothing,
+    /// exactly like the other optional provenance fields. Also pins the
+    /// documented key order: `description` sits right after `name`, before
+    /// every provenance field.
+    #[test]
+    fn manifest_description_present_round_trips() {
+        let manifest = ProjectManifest {
+            format: Some(PROJECT_FORMAT_VERSION),
+            name: Some(String::from("Porch sign")),
+            description: Some(String::from("A porch sign that spells hello")),
+            author: Some(String::from("Yona")),
+            ..ProjectManifest::default()
+        };
+        let text = manifest.write_json();
+        assert_eq!(
+            text,
+            "{\n  \"format\": 10,\n  \"name\": \"Porch sign\",\n  \"description\": \"A porch sign that spells hello\",\n  \"author\": \"Yona\"\n}\n"
+        );
+        let read = ProjectManifest::read_json(&text).expect("read back");
+        assert_eq!(read, manifest);
+        assert_eq!(read.write_json(), text);
+    }
+
+    #[test]
+    fn manifest_description_absent_round_trips() {
+        let manifest = ProjectManifest {
+            format: Some(PROJECT_FORMAT_VERSION),
+            ..ProjectManifest::default()
+        };
+        let text = manifest.write_json();
+        assert!(
+            !text.contains("description"),
+            "a blurb-less project must not author a description key: {text}"
+        );
+        let read = ProjectManifest::read_json(&text).expect("read back");
+        assert_eq!(read.description, None);
     }
 
     /// P02: `target` present round-trips, and its absence (the common case

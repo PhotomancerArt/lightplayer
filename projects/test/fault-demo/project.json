@@ -1,0 +1,9 @@
+{
+  "format": 10,
+  "name": "Fault demo",
+  "description": "A shader that compiles but faults every frame on purpose: the demo of a fault never being black, a red breathe and a Degraded device card.",
+  "kind": "pattern",
+  "exports": [
+    "effect"
+  ]
+}

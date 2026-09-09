@@ -1,6 +1,6 @@
 //! End-to-end edit flow against an in-process LightPlayer server.
 //!
-//! Harness-level, no UI: a real `LpServer` (simulator session) runs behind a
+//! Harness-level, no UI: a real `LpServer` (sim session) runs behind a
 //! `ClientIo` adapter that pumps every client message through
 //! `LpServer::tick_and_send`. The studio actor drives the same command path
 //! the web shell uses: connect → `SetValue` on a clock control (transient)
@@ -266,14 +266,19 @@ fn detach_with_an_edit_in_flight_quiesces_and_loses_nothing() {
         "the queued edit reached the wire (acked) BEFORE the mirror dropped"
     );
 
-    // Nothing lost: re-attach on the surviving session rebuilds the
-    // mirror over the server-side overlay.
+    // Nothing lost: the DEVICE keeps running (PD9 — detaching gives its
+    // wire back, it does not stop it), so a fresh attach on a session over
+    // the same runtime rebuilds the mirror over the server-side overlay.
     let sim_id = actor
         .controller_mut_for_test()
-        .runtime_pool_for_test()
-        .sim_session()
-        .expect("the sim session survives the detach")
-        .id();
+        .install_stub_sim_with_client_for_test(StudioServerClient::from_io_for_test(
+            "in-process",
+            Box::new(InProcessServerIo {
+                server: Rc::clone(&server),
+                inbox: Rc::new(RefCell::new(VecDeque::new())),
+                sent: Rc::clone(&sent),
+            }),
+        ));
     drive(
         actor
             .controller_mut_for_test()
@@ -354,7 +359,7 @@ fn home_open_package_pushes_the_library_head_end_to_end() {
         let bytes = server
             .borrow()
             .base_fs()
-            .read_file("/projects/studio/project.json".as_path())
+            .read_file(format!("{PROJECT_DIR}/project.json").as_path())
             .expect("pushed manifest exists in the runtime");
         String::from_utf8(bytes).expect("utf8 manifest")
     };
@@ -518,6 +523,129 @@ fn a_failed_open_gives_the_project_back_to_the_library() {
     );
 }
 
+/// Renaming the project that is OPEN in this tab (2026-09-06: the project
+/// settings' name row, and the gallery kebab on the card that is running in
+/// the sim). The catalog refuses structural ops on it, so the rename goes
+/// through the open handle: the manifest name changes at once — in the
+/// editor view and in the library copy — while the dated directory slug
+/// stays until the project closes; opening another project closes it, and
+/// the settle that follows moves the directory to the new name with the
+/// ordinary catalog rename.
+#[test]
+fn renaming_the_open_project_patches_its_name_now_and_its_slug_at_close() {
+    use crate::app::library::{LibraryStore, MemoryLibraryHost, package_manifest};
+    use crate::{HOME_NODE_ID, HomeOp};
+
+    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let mut controller = StudioController::connected_with_client_for_test(client);
+    let counter = Rc::new(RefCell::new(0u8));
+    let store = LibraryStore::new(
+        Rc::new(RefCell::new(LpFsMemory::new())),
+        Rc::new(move || {
+            *counter.borrow_mut() += 1;
+            [*counter.borrow(); 16]
+        }),
+        Rc::new(|| "2026-09-06-1010".to_string()),
+    );
+    controller.attach_library(Rc::new(MemoryLibraryHost::new(
+        store.clone(),
+        Rc::new(|| 2.0),
+    )));
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+    let home_action = |op: HomeOp| UiAction::from_op(ControllerId::new(HOME_NODE_ID), op);
+
+    handle
+        .tx
+        .send(StudioCommand::Action(home_action(HomeOp::CreateProject {
+            template: crate::ProjectTemplate::Blank,
+            name: None,
+        })));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("create-and-open emits a snapshot");
+    let (uid, slug) = project_editor(&snapshot)
+        .library_identity
+        .clone()
+        .expect("the created package backs the open project");
+    assert_eq!(slug, "2026-09-06-1010-project");
+
+    // The rename the settings row (or the kebab on the running card) sends.
+    handle
+        .tx
+        .send(StudioCommand::Action(home_action(HomeOp::RenamePackage {
+            uid: uid.clone(),
+            name: "Porch sign".to_string(),
+        })));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("the rename emits a snapshot");
+    let editor = project_editor(&snapshot);
+    assert_eq!(
+        editor.project_name, "Porch sign",
+        "the editor wears the name at once"
+    );
+    assert_eq!(
+        editor
+            .manifest
+            .as_ref()
+            .and_then(|manifest| manifest.name.as_deref()),
+        Some("Porch sign")
+    );
+    // The library copy carries it too — under the SAME directory: the open
+    // handle is chrooted to it, so nothing moved yet.
+    let summaries = store.list().expect("library lists");
+    assert_eq!(summaries.len(), 1);
+    assert_eq!(summaries[0].slug, "2026-09-06-1010-project");
+    assert_eq!(summaries[0].name, "Porch sign");
+    {
+        let handle = store.open(summaries[0].uid).expect("the package opens");
+        let fields =
+            package_manifest::read_manifest(&*handle.package_fs.borrow()).expect("manifest reads");
+        assert_eq!(fields.name.as_deref(), Some("Porch sign"));
+    }
+    // …and the runtime copy matches it, so the next save's hash tripwire
+    // stays quiet.
+    let pushed_manifest = {
+        let bytes = server
+            .borrow()
+            .base_fs()
+            .read_file(format!("{PROJECT_DIR}/project.json").as_path())
+            .expect("pushed manifest exists in the runtime");
+        String::from_utf8(bytes).expect("utf8 manifest")
+    };
+    assert!(
+        pushed_manifest.contains("Porch sign"),
+        "the runtime's manifest was mirrored: {pushed_manifest}"
+    );
+
+    // Opening another project closes this one; the settle after that close
+    // is when the directory follows the name.
+    handle
+        .tx
+        .send(StudioCommand::Action(home_action(HomeOp::CreateProject {
+            template: crate::ProjectTemplate::Blank,
+            name: Some("Second".to_string()),
+        })));
+    drive(actor.run_one_batch_for_test());
+    let _snapshot = view.try_recv().expect("the second create emits a snapshot");
+    let mut slugs: Vec<(String, String)> = store
+        .list()
+        .expect("library lists")
+        .into_iter()
+        .map(|summary| (summary.uid.to_string(), summary.slug))
+        .collect();
+    slugs.sort();
+    assert!(
+        slugs.contains(&(uid.clone(), "porch-sign".to_string())),
+        "the renamed project's directory followed its name once it closed: {slugs:?}"
+    );
+}
+
 /// The D17-deviation gesture (2026-07-27): `HomeOp::CreateProject` mints a
 /// pure-blank one-file package and OPENS it — the UI-level regression test
 /// for the `LibraryStore::create` `format` fix (without `"format": 1` the
@@ -555,6 +683,7 @@ fn home_create_project_creates_and_opens_a_blank_package_end_to_end() {
         ControllerId::new(HOME_NODE_ID),
         HomeOp::CreateProject {
             template: crate::ProjectTemplate::Blank,
+            name: None,
         },
     )));
     drive(actor.run_one_batch_for_test());
@@ -611,7 +740,7 @@ fn home_create_project_creates_and_opens_a_blank_package_end_to_end() {
         let bytes = server
             .borrow()
             .base_fs()
-            .read_file("/projects/studio/project.json".as_path())
+            .read_file(format!("{PROJECT_DIR}/project.json").as_path())
             .expect("pushed manifest exists in the runtime");
         String::from_utf8(bytes).expect("utf8 manifest")
     };
@@ -677,6 +806,7 @@ fn home_create_project_from_the_1d_template_opens_a_designated_pattern_project()
         ControllerId::new(HOME_NODE_ID),
         HomeOp::CreateProject {
             template: ProjectTemplate::Pattern1d,
+            name: None,
         },
     )));
     drive(actor.run_one_batch_for_test());
@@ -754,7 +884,7 @@ fn home_create_project_from_the_1d_template_opens_a_designated_pattern_project()
         let bytes = server
             .borrow()
             .base_fs()
-            .read_file("/projects/studio/project.json".as_path())
+            .read_file(format!("{PROJECT_DIR}/project.json").as_path())
             .expect("pushed manifest exists in the runtime");
         String::from_utf8(bytes).expect("utf8 manifest")
     };
@@ -898,12 +1028,13 @@ fn save_after_home_open_pulls_the_edit_into_the_library() {
     drive(actor.run_one_batch_for_test());
     let _ = view.try_recv().expect("save emits a snapshot");
 
-    // the runtime committed the edit… (home opens deploy to /projects/studio)
+    // the runtime committed the edit… (an open deploys into the dir the
+    // device says it runs from — PD9: a sim answers that like a board)
     let runtime_fixture: String = String::from_utf8(
         server
             .borrow()
             .base_fs()
-            .read_file("/projects/studio/fixture.json".as_path())
+            .read_file(format!("{PROJECT_DIR}/fixture.json").as_path())
             .expect("runtime fixture.json"),
     )
     .expect("utf8")
@@ -2313,7 +2444,7 @@ pub(crate) fn asset_e2e_server() -> LpServer {
 const PROJECT_DIR: &str = "/projects/edit-e2e";
 
 /// A real server with a loaded clock + fixture project (no shader, so the
-/// simulator session runs entirely host-side).
+/// sim session runs entirely host-side).
 /// A "device" fixture: a real in-process server with NOTHING loaded.
 /// Connect-time pulls discover the device's LOADED project, so device
 /// tests must not run the edit-e2e project — an idle device falls back to

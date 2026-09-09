@@ -24,7 +24,7 @@ use crate::core::{ActionButton, ActionButtonVariant, menu_item_action_class, qui
 
 /// One package card: thumbnail, name, meta, and the card menu. Clicking the
 /// card opens the copy the card *is* — the library head, pushed to the
-/// simulator (D13).
+/// sim (D13).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn PackageCard(
@@ -183,10 +183,10 @@ fn face_context_line(blocked: Option<&(String, String)>, opening: bool) -> Optio
 /// The title row's status glyphs — the D28 runtime-presence facts
 /// compressed to icons (words ride the tooltip and the ⋯ popup):
 /// lightning = on the connected device (green only when current, the
-/// D24 rule), the sim glyph = running in simulator, amber "!" = the
+/// D24 rule), the sim glyph = running on a sim, amber "!" = the
 /// card is blocked. Both runtimes live = both glyphs ("Live in 2
 /// places" stays a popup/tooltip phrasing).
-fn face_status_glyphs(card: &UiPackageCard, blocked: bool) -> Vec<CardStatusGlyph> {
+fn face_status_glyphs(_card: &UiPackageCard, blocked: bool) -> Vec<CardStatusGlyph> {
     if blocked {
         return vec![CardStatusGlyph {
             icon: StudioIconName::StepAttention,
@@ -194,20 +194,12 @@ fn face_status_glyphs(card: &UiPackageCard, blocked: bool) -> Vec<CardStatusGlyp
             words: "This project can't be opened by this Studio.".to_string(),
         }];
     }
-    let mut glyphs = Vec::new();
-    if card.running_in_sim {
-        glyphs.push(CardStatusGlyph {
-            icon: StudioIconName::Simulator,
-            tone: GlyphTone::Live,
-            words: "Running in simulator".to_string(),
-        });
-    }
-    glyphs
+    Vec::new()
 }
 
 /// The card menu — the redesigned card's DEPTH surface ("the second
 /// click"): a status section carrying in words everything the slim face
-/// compressed to glyphs, then the actions — open in sim, put on an
+/// compressed to glyphs, then the actions — open, put on an
 /// empty device, push, rename, duplicate, export, delete. The rows are
 /// `UiAction`s rendered in the shared menu-item context (export is a
 /// web-side handler wearing the same classes) — one action vocabulary,
@@ -224,7 +216,7 @@ pub(crate) fn PackageCardMenu(
     #[props(default)]
     edited_line: Option<String>,
     /// The card's open link (D37: opening is navigation) for the
-    /// "Open in sim" row. `None` renders no row (blocked cards).
+    /// "Open" row. `None` renders no row (blocked cards).
     #[props(default)]
     open_href: Option<String>,
     /// This card's open is in flight — the open row holds navigation.
@@ -324,12 +316,11 @@ pub(crate) fn PackageCardMenu(
                     if let Some(edited) = edited_line {
                         p { class: "tw:m-0 tw:text-xs tw:text-muted-foreground", "Edited {edited}" }
                     }
-                    // Advisory board target (vision D3): a quiet fact, not
-                    // a warning.
-                    if let Some(target) = card.target.as_deref() {
-                        p { class: "tw:m-0 tw:text-xs tw:text-muted-foreground",
-                            "for {target_display_name(target)}"
-                        }
+                    // The board this project is for (D41): a quiet fact,
+                    // not a warning — and absent for Desktop, which is
+                    // what most projects are.
+                    if let Some(board) = target_badge(card.target.as_deref()) {
+                        p { class: "tw:m-0 tw:text-xs tw:text-muted-foreground", "for {board}" }
                     }
                     if let Some(provenance) = card.provenance.clone() {
                         p { class: "tw:m-0 tw:text-xs tw:text-dim-foreground", "{provenance}" }
@@ -395,7 +386,7 @@ pub(crate) fn PackageCardMenu(
                         a {
                             class: "{menu_item_action_class()} tw:no-underline",
                             href: "{href}",
-                            title: "Open this project in the simulator.",
+                            title: "Open this project.",
                             onclick: move |event: MouseEvent| {
                                 if opening {
                                     event.prevent_default();
@@ -404,7 +395,7 @@ pub(crate) fn PackageCardMenu(
                             span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
                                 StudioIcon { name: StudioIconName::Play, size: 14 }
                             }
-                            span { "Open in sim" }
+                            span { "Open" }
                         }
                     }
                     if !blocked {
@@ -551,6 +542,22 @@ fn target_display_name(target: &str) -> &str {
         .unwrap_or(target)
 }
 
+/// The "for \<board\>" badge, when the target is worth saying out loud.
+///
+/// **Desktop gets none.** Since 2026-09-07 every project declares a target
+/// and most of them declare Desktop (D32/PD17), so a badge for it would be
+/// a line on nearly every card carrying no information — "for Desktop" is
+/// what a project with no hardware opinion looks like. The badge exists to
+/// mark the projects that ARE about a board, and marking them means not
+/// marking the rest.
+fn target_badge(target: Option<&str>) -> Option<&str> {
+    let target = target?;
+    match lpa_studio_core::ProjectTarget::from_manifest(Some(target)) {
+        lpa_studio_core::ProjectTarget::Desktop => None,
+        lpa_studio_core::ProjectTarget::Board(_) => Some(target_display_name(target)),
+    }
+}
+
 pub(crate) fn home_action(op: HomeOp) -> UiAction {
     UiAction::from_op(ControllerId::new(HOME_NODE_ID), op)
 }
@@ -605,22 +612,17 @@ struct LivePresenceLine {
     title: Option<String>,
 }
 
-const LIVE_LINE_GOOD: &str = "tw:m-0 tw:truncate tw:text-xs tw:text-status-good-foreground";
-
-/// The card's runtime-presence line (D28): "Running in simulator" while
-/// the sim runs this project's head — load-as-push always runs the head,
-/// so the sim is current (green).
+/// The card's runtime-presence line (D28).
 ///
-/// ⚠️ The DEVICE lines (the D24 connected line and the "Live in 2 places"
-/// aggregate) went with M2 of the device-model rebuild, along with the
-/// `connected_device` connection the card carried. The rebuilt device
-/// model re-adds them.
-fn live_presence_line(card: &UiPackageCard) -> Option<LivePresenceLine> {
-    card.running_in_sim.then(|| LivePresenceLine {
-        text: "Running in simulator".to_string(),
-        class: LIVE_LINE_GOOD,
-        title: None,
-    })
+/// ⚠️ Nothing produces one right now. The sim arm read
+/// `UiPackageCard::running_in_sim`, whose source — the runtime pool's own
+/// record of what the sim ran — retired with the sim session (PD9): a sim
+/// is a device, and the device pairing is the registry `association` a
+/// card Push banks, which a lens open does not write. The DEVICE lines
+/// (the D24 connected line and the "Live in 2 places" aggregate) went with
+/// M2 of the device-model rebuild. Both come back together.
+fn live_presence_line(_card: &UiPackageCard) -> Option<LivePresenceLine> {
+    None
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -656,13 +658,34 @@ mod target_display_name_tests {
             "acme/future-board-9000"
         );
     }
+
+    /// D32/PD17: every project declares a target now, and Desktop is what
+    /// most of them declare — so the badge marks the ones that are about a
+    /// BOARD and stays quiet for the rest. Both spellings of Desktop (the
+    /// written id and the absent field) read the same.
+    #[test]
+    fn the_badge_marks_boards_and_says_nothing_about_desktop() {
+        use super::target_badge;
+
+        assert_eq!(
+            target_badge(Some("seeed/xiao-esp32-c6")),
+            Some("XIAO ESP32-C6")
+        );
+        assert_eq!(target_badge(Some("lightplayer/desktop")), None);
+        assert_eq!(target_badge(None), None);
+        assert_eq!(
+            target_badge(Some("acme/future-board-9000")),
+            Some("acme/future-board-9000"),
+            "a board this catalog does not carry is still a board"
+        );
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn card(running_in_sim: bool) -> UiPackageCard {
+    fn card(_running_in_sim: bool) -> UiPackageCard {
         UiPackageCard {
             uid: "prj1".to_string(),
             kind: "Module".to_string(),
@@ -673,7 +696,6 @@ mod tests {
             provenance: None,
             on_device: None,
             open_elsewhere: false,
-            running_in_sim,
             target: None,
             health: PackageHealth::Ready,
         }
@@ -725,13 +747,13 @@ mod tests {
         }
     }
 
+    /// The runtime-presence line has no producer while the device pairing
+    /// is the registry association a card Push banks (see
+    /// `live_presence_line`): a card claims nothing rather than claiming
+    /// something nobody reported.
     #[test]
-    fn the_sim_line_appears_exactly_while_the_sim_runs_this_project() {
-        let sim = live_presence_line(&card(true)).expect("the sim line");
-        assert_eq!(sim.text, "Running in simulator");
-        assert_eq!(sim.class, LIVE_LINE_GOOD, "the sim always runs the head");
-        assert_eq!(sim.title, None);
-
+    fn no_presence_line_is_claimed_without_a_banked_pairing() {
+        assert_eq!(live_presence_line(&card(true)), None);
         assert_eq!(live_presence_line(&card(false)), None);
     }
 }

@@ -375,6 +375,76 @@ raise it well above the fuel tank so fuel traps fire first and the budget stays
 a backstop for fuel-off compiles; `DEFAULT_STEP_BUDGET` is sized for the fixture
 corpus, not for real shaders.
 
+## Speed
+
+```bash
+just bench-emu-xt                                   # the table, promoted to prev/
+just bench-emu-xt --json target/emu-bench-xt/new.json
+scripts/emu/bench-xt.sh --bin <saved-binary> --no-build --no-promote   # the A/B half
+```
+
+This core has no SoC around it — no peripherals, no emulated clock — so it
+runs at `CycleModel::InstructionCount`, where a cycle *is* an instruction and
+there is no real-time ratio to report. The probe prints instructions/second,
+user seconds, wall seconds and the load average, and `cmp`s two things against
+the previous run: the guest's collected output and a capped text trace. Those
+two are the identity oracle — the speed work must not change one byte of
+either (PD5, ADR 2026-09-06).
+
+The workload is `bench_loop`, a `lp-xt/fixtures` program written for this
+probe (the recipe builds the corpus with the esp toolchain if it is missing).
+It reads the `arg` the emulator hands `main` as a round count, so **one run at
+`--arg 50000` retires 111.6 M instructions** from a single emulator: the probe
+passes `--repeat 1`, and nothing but the run loop is in the rate. A round is a
+64-word working set read and written through a non-inlined call per element,
+plus one 24-deep recursion past the 64-AR window ring — the memory, call and
+window-spill traffic in one program.
+
+**There are no repeats any more.** The conformance fixtures are short (the
+longest, `ackermann`, retires 292 k instructions), so the probe used to
+re-create the emulator and reload the ELF 400–800 times to reach 100 M. That
+setup measured ~40 µs against ~16 ms of execution — a rounding error in the
+rate rather than a bug, but measurement overhead the probe had no reason to
+carry. The `ackermann` and `fib_rec` rows went with it: at `--repeat 1` they
+retire 292 k and 138 k instructions, ~14 ms and ~3 ms of user time, which
+`/usr/bin/time`'s 10 ms resolution cannot report. They stay in the corpus, run
+against their host-side oracles by `cargo test -p lp-xt-elf`.
+
+Like the C6 probe it is an **oracle, not a gate**: nothing in CI runs it, and
+no number it prints gates anything.
+
+**The measured ladder** (M6, 2026-09-07; best of three runs, two interleaved
+same-window rounds on an M2 Max at load 10–28; the spread between rounds is
+±8%, which is the resolution this desk offers). These numbers predate
+`bench_loop` and were taken with the repeat-based probe on the two fixtures it
+used to run — they are kept because they are what the ladder was measured on,
+not because the probe still prints those rows:
+
+| rung | ackermann instr/s | fib_rec instr/s |
+|---|---:|---:|
+| stock (`opt-level = 3` from M1) | 21.4 M | 54.5 M |
+| + one memory resolution per access, region hint | 31.4 M | 62.4 M |
+| + compile-time tracer | 30.6 M | 61.9 M |
+| + cost class from the executor arm, log level hoisted | 31.2 M | 61.3 M |
+| **total** | **1.46×** | **1.12×** |
+
+Read that honestly: the memory path is the whole win. `ackermann` is deep
+recursion with heavy window spill/reload traffic, so it was paying five region
+scans per stored word; `fib_rec`'s wide, shallow call tree pays fewer, and
+gains less. The tracer and cost-class rungs are inside the noise here — they
+remove real per-instruction work (a virtual call per register write, a second
+full match over the 51-variant `Inst`), but an indirect call to an empty
+function and a well-predicted match are close to free on this core. They are
+kept for the work they remove and for the seam the block cache (M5) wants.
+
+**One trap worth knowing.** A per-package `opt-level` override only reaches
+code codegen'd in *that* package, and a generic function is codegen'd wherever
+it is instantiated. Making the emulator's public entry points generic over the
+tracer put the whole run loop in `lp-xt-elf`, at the workspace's
+`opt-level = "z"`, and cost 25%. The generic parameters therefore stay behind
+non-generic entry points (`Emulator::run_loop`), and the root `Cargo.toml`
+says so next to the override.
+
 ## Validation
 
 `tests/conformance.rs` runs every corpus case on the emulator under **every**

@@ -38,12 +38,37 @@
 use lpa_devices::identity::{DeviceId, DeviceUid, IdentityChain, MacAddress};
 use lpa_devices::record::DeviceRecord;
 use lpa_devices::time::Millis;
+use lpa_link::LinkProviderKind;
 
 use crate::app::places::{HardwareId, RegisteredDevice};
 
-/// Transport label recorded for rows this model writes. One transport this
-/// round; the registry column is display-only.
-const USB_TRANSPORT: &str = "USB";
+/// Transport label for a device reached over a serial wire.
+///
+/// Not a constant the row is stamped with any more: it is what
+/// [`LinkProviderKind::transport_label`] answers for the serial kinds, and
+/// [`transport_label_for_endpoint`] is what picks between them.
+pub const USB_TRANSPORT: &str = "USB";
+
+/// Transport label for a device reached over a `fw-browser` worker — a sim.
+pub const SIM_TRANSPORT: &str = "sim";
+
+/// The transport label for a device reached at `endpoint`.
+///
+/// The label comes from the link's own provider class rather than from a
+/// constant this module chose: a `sim:` endpoint is served by
+/// `BrowserWorkerLink` over the browser-worker provider, everything else in
+/// this build by one of the serial kinds. Keeping the answer in
+/// `lpa-link`'s table is what stops the registry column and the link from
+/// disagreeing when a third device class arrives.
+pub fn transport_label_for_endpoint(endpoint: &str) -> &'static str {
+    let kind = match endpoint.starts_with(super::sim_record::SIM_ENDPOINT_PREFIX) {
+        true => LinkProviderKind::BrowserWorker,
+        false => LinkProviderKind::BrowserSerialEsp32,
+    };
+    // Every kind names itself today; a future class that does not yet is a
+    // row that says nothing rather than a row that lies.
+    kind.transport_label().unwrap_or_default()
+}
 
 /// The registry key for a record: its uid, else its MAC. `None` when the
 /// device is anonymous (see the module doc).
@@ -57,12 +82,27 @@ pub fn registry_key(identity: &IdentityChain) -> Option<String> {
 /// One model record as a registry row.
 ///
 /// `None` for an anonymous record: there is no honest key for it.
+///
+/// **The transport comes from the link, or from nothing.** A record that is
+/// currently reached somewhere carries its endpoint, and that endpoint names
+/// the transport ([`transport_label_for_endpoint`]). A record that is not —
+/// a remembered board loaded from the registry, whose endpoint is
+/// deliberately never persisted — writes an EMPTY transport, which
+/// `upsert_model_fields` leaves alone: "the next sighting fills it", which
+/// is the rule the column has documented since it was added. Stamping
+/// `"USB"` unconditionally, as this used to, would relabel every powered-off
+/// sim as a serial board the first time its record was persisted.
 pub fn registry_row_from_record(record: &DeviceRecord) -> Option<RegisteredDevice> {
     let uid = registry_key(&record.identity)?;
     Some(RegisteredDevice {
         uid,
         name: record.name.clone().unwrap_or_default(),
-        transport: USB_TRANSPORT.to_string(),
+        transport: record
+            .identity
+            .endpoint
+            .as_ref()
+            .map(|endpoint| transport_label_for_endpoint(&endpoint.0).to_string())
+            .unwrap_or_default(),
         last_seen_at: record
             .last_seen
             .map(|last| last.0 as f64 / 1_000.0)
@@ -222,6 +262,29 @@ mod tests {
         assert_eq!(
             back.identity.endpoint, None,
             "the endpoint is a per-page fingerprint, never persisted"
+        );
+    }
+
+    /// The column says how the device is reached, and the link is what
+    /// knows: a `sim:` endpoint is a sim, a port is USB, and a remembered
+    /// board that is not reached at all says nothing rather than guessing.
+    #[test]
+    fn the_transport_column_follows_the_link_and_never_guesses() {
+        let mut serial = record();
+        serial.identity.endpoint = Some(lpa_devices::identity::EndpointKey("usb-1".to_string()));
+        assert_eq!(registry_row_from_record(&serial).unwrap().transport, "USB");
+
+        let mut sim = record();
+        sim.identity.endpoint = Some(super::super::sim_record::sim_endpoint("dev1"));
+        assert_eq!(registry_row_from_record(&sim).unwrap().transport, "sim");
+
+        let mut remembered = record();
+        remembered.identity.endpoint = None;
+        assert_eq!(
+            registry_row_from_record(&remembered).unwrap().transport,
+            "",
+            "an empty column is what `upsert_model_fields` leaves alone — \
+             a powered-off sim must not be relabelled a serial board"
         );
     }
 

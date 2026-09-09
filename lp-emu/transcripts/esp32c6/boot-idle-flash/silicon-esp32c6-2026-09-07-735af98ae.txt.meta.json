@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "payload": "boot-idle-flash",
+  "chip": "esp32c6",
+  "configuration": "silicon:esp32c6",
+  "date": "2026-09-07",
+  "firmware_commit": "735af98ae9d9",
+  "firmware_features": [
+    "esp32c6",
+    "server",
+    "radio"
+  ],
+  "firmware_dirty": false,
+  "source": "PORT_DEV=/dev/cu.usbmodem1433201 scripts/emu/desk-flash-no-monitor.sh -- erase-flash --chip esp32c6 --port /dev/cu.usbmodem1433201 && PORT_DEV=/dev/cu.usbmodem1433201 scripts/spike/esp-emu/desk-espflash-step.sh target/validate/boot-idle-flash.cap '[stack] heartbeat: high-water' 30 -- flash --chip esp32c6 --port /dev/cu.usbmodem1433201 --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size 4mb --after hard-reset --monitor target/emu-ref/735af98ae-esp32c6+server+radio/fw-esp32c6",
+  "capture": "lp-cli validate record boot-idle-flash --config silicon:esp32c6",
+  "note": "flashing the pinned reference image target/emu-ref/735af98ae-esp32c6+server+radio/fw-esp32c6 rather than building one: this payload's claim is a comparison against an emulated run of the SAME bytes (DD30), and the tree this runner stands in is not that commit. `scripts/emu/build-reference-image.sh esp32c6,server,radio <commit> none` builds it in a detached worktree; the directory name is the provenance, and the runner checks its feature half.",
+  "trust": [
+    {
+      "class": "memory",
+      "grade": "measured",
+      "because": "the board is the ground truth; nothing models it"
+    },
+    {
+      "class": "timing",
+      "grade": "measured",
+      "because": "a real clock on real flash with real wait states"
+    },
+    {
+      "class": "pin",
+      "grade": "measured",
+      "because": "a scope or a logic analyser on the header pin is the definition of what the pin did"
+    },
+    {
+      "class": "usb-serial-jtag",
+      "grade": "measured",
+      "because": "a real host really attaches, or really does not"
+    },
+    {
+      "class": "boot-log",
+      "grade": "measured",
+      "because": "the real ROM and the real IDF bootloader printed it"
+    },
+    {
+      "class": "wire",
+      "grade": "measured",
+      "because": "real bytes over a real port"
+    }
+  ]
+}

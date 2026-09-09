@@ -36,6 +36,71 @@ name = "pins"
 description = "Payloads that make a claim about a pin."
 payloads = ["gpio-calibrate"]
 
+[[set]]
+name = "shipped-image"
+description = "The shipped image at rest: boot to the first idle heartbeat, and the hello frame that precedes it. A scenario rather than a check — nothing here is behind a `test_*` feature — and the only set that says what the product does when nobody is asking it for anything. It is a set of one because `emu-m3` pairs it with the compile harness, and a desk sitting that wants only the idle walk cannot ask for that pair twice."
+payloads = ["boot-idle"]
+
+[[set]]
+name = "emu-m3"
+description = "The M3 gate set for our own C6 machine: the compile harness (heap parity against silicon, the first point on the time ladder) and the shipped image's boot to the idle heartbeat. Both run against the reference images `scripts/emu/build-reference-image.sh` builds, so `--image` is part of the recipe."
+payloads = ["shader-compile-stress", "boot-idle"]
+
+[[set]]
+name = "emu-m4"
+description = "The M4 gate set: the flash-backed shipped image booting to the idle heartbeat (the `[FS]` mount pair and spike report §5.1's heap and stack figures, which M3 could not reach because it stopped on SPI1.cmd), and the project-upload walk (§5.3's load gate and compile outputs, replayed from the committed host script so the transcript is a function of guest time). Both run against the reference image `scripts/emu/build-reference-image.sh` builds, so `--image` is part of the recipe."
+payloads = ["boot-idle-flash", "upload-walk"]
+
+[[set]]
+name = "emu-m5"
+description = "M5's gate set: the RMT chase. A 256-LED white dot walks the strip three times on GPIO18 through the shipping `lp-ws281x` refill path, printing one `rmt-frame` record per frame with an FNV-1a checksum of the bytes it handed the driver, and — because three chases cross the telemetry module's ten-second period — one `[WS281X]` line saying what the driver believes about its own refill race. It is the first payload whose claims are checked against a **pin**: the machine decodes the same frames off the pad and the two checksums must agree, frame for frame. The image is the harness's own, over the link it ships with, so a silicon capture of it would be the same bytes. Then the pin claim on the SHIPPED image (M5 P4): `lp-cli upload projects/test/shader-oracle` replayed over the USB link, with the frames the pad carried recorded beside the console, so the first lit frame off gpio18 can be held against the host oracle's `[ORACLE] rgb=` line — the walk's own PASS criterion, with the decoder standing in for the frame-dump line the C6 does not have."
+payloads = ["rmt-chase", "shader-oracle-walk"]
+
+[[set]]
+name = "usb-negative-control"
+description = "M6's negative control, rig-free: flash the shipped image, leave the port CLOSED for several seconds, then open a non-resetting reader and read the first heartbeat. The device is enumerated and undrained throughout, which is the one link state it cannot report on at the time — the `link` object's `hostNotDrainingMs` / `hostDrainingAgainMs` / `notDrainingCount` are its own record of it, on its own clock. Runs on silicon today; M6 P4 adds the emulator twin."
+payloads = ["usb-negative-control"]
+
+[[set]]
+name = "emu-m6"
+description = "M6's four USB-Serial-JTAG scenarios on our own machine, all four over the link the product actually ships: the shipped image with a host attached and reading (the DD26/DD30 arbitration against sitting 1's silicon capture of the same bytes), the port held closed from boot and opened after eight seconds (the emulator twin of the silicon negative control), the cable out mid-session and back in (`s7-unplug-mid-op`'s device side, which has had no trace since M2), and no cable at all — which silicon cannot record, because recording is what a host does."
+payloads = [
+    "boot-idle",
+    "usb-negative-control",
+    "usb-detach-reattach",
+    "usb-host-absent",
+]
+
+[[set]]
+name = "rmt-chase"
+description = "The RMT chase on its own, and the reason it is a set of one: `emu-m5` pairs it with `shader-oracle-walk`, whose recipe ERASES THE FLASH CHIP before it flashes (the erase is what gives that payload the blank filesystem and `bootCount 1` it needs). A silicon capture of the chase wants none of that — the chase is a harness image that never reaches `bootctl` — and a sitting that asks for one should not have to wipe a board's filesystem to get it. The payload is the same on either machine, so this set is how the emulator's committed captures and the desk's are of one recipe."
+payloads = ["rmt-chase"]
+
+[[set]]
+name = "emu-m6-walk"
+description = "M6 P5: the shipped flash-backed image doing a day's work over the link it ships with. `lp-cli upload examples/basic` (the same script M4 replayed over the spike's UART0 link, so the pair is a controlled comparison of the two link drivers on one image) and `lp-cli upload examples/meteor`, which runs on past the load to the steady heartbeat the spike report §11.2 measured on the desk. Both run against `scripts/emu/build-reference-image.sh esp32c6,server,radio d6cfaa205 none` — the commit §5.3 and §11.2 are at, built with NO cherry-pick, so the bytes are silicon's own merged-default.bin."
+payloads = ["upload-walk-usb", "meteor-walk-usb"]
+
+[[set]]
+name = "emu-m7"
+description = "M7's boot chain as a RECORDED claim rather than an integration test (M8's sweep, the item M7 filed): the shipped image reached from the reset vector through the real mask ROM and the ESP-IDF second-stage bootloader, `--reset-cause poweron --strap app`. Its transcript is `boot-idle-flash`'s with the boot chain in front of it, so replaying the two against each other is what keeps 'everything after `[INIT] Initializing board...` is the same lines' true. Emulator only: on silicon every boot is a ROM-up boot, so the silicon side of this claim IS the committed `boot-idle-flash` capture."
+payloads = ["rom-up-boot"]
+
+[[set]]
+name = "jit-math-perf"
+description = "The Q32 math kernel cycle-cost payload (Q12 ledger, cheapest test_* migration): mul/div/sin kernels and LUT access cost against the PMU cycle counter. Timing only — never a gate under esp-emu, which has no cycle model."
+payloads = ["jit-math-perf"]
+
+[[set]]
+name = "cycle-probe"
+description = "The cycle-model calibration kernels: an IRAM/flash pair, a code walk larger than any plausible cache, a .rodata stride curve, two MMIO poll loops, a mul and a div chain, and a slice-shaped case — each bracketed by BOTH the PMU cycle counter and SYSTIMER microseconds, five repetitions each, nothing averaged. It calibrates a time grade; it never gates one."
+payloads = ["cycle-probe"]
+
+[[set]]
+name = "c6r-m2"
+description = "M2's gate set: the `gpio-input` payload. A button read through the product's OWN `Esp32GpioButtonDriver` and debouncer — five contact bounces settling to one state change, a clean press and release, and a 20 ms glitch that must produce nothing at all — and a quadrature encoder decoded inside a both-edge GPIO interrupt handler, two detents clockwise and two back. The two sides are driven differently on purpose and both transcripts say so: silicon drives its own pads and reads them back through `GPIO.in_` (the read path), while an emulated configuration runs the same image with the pads driven from outside by `pins/gpio-input.pins` (the outside-driver path). What replays equal is every non-timing field: the state changes in order, the positions and directions in order."
+payloads = ["gpio-input"]
+
 # ---------------------------------------------------------------------------
 # Configurations
 # ---------------------------------------------------------------------------
@@ -114,10 +179,146 @@ class = "wire"
 grade = "measured"
 because = "the masked UART0 walk transcript is content-identical to silicon's (spike report §11.3)"
 
+# ---------------------------------------------------------------------------
+# Our own machine, one entry per time grade.
+#
+# Every class is `modeled`, and that is not modesty. Byte-equality with silicon
+# on one payload is *evidence*, and it is written into the `because` where a
+# reader can weigh it; it is not a promotion. `measured` means the class was
+# measured on silicon, or on a configuration whose agreement with silicon for
+# that class is itself in a committed transcript — which for us will mean a
+# transcript per class, not one payload's heap ledger standing in for all of
+# them. The vision's graded ladder is the same idea for time.
+#
+# `mac` / `silicon_rev` / `board` are the desk board's, because an emulator has
+# no eFuse to read: the runner passes them as `--efuse-mac` / `--efuse-rev`, so
+# a hello frame's identity fields compare equal to silicon's transcripts rather
+# than differing for a reason that says nothing about the model. The
+# configuration is still the CHIP (PD4); the board is metadata, here and in
+# every sidecar.
+# ---------------------------------------------------------------------------
+
 [[configuration]]
 name = "lp-emu:esp32c6:t1"
-description = "Our own C6 machine at time grade 1. Unavailable until M3 — listed so the seam has a name."
+description = "Our own C6 machine (lp-emu/esp/lp-emu-esp32c6) at time grade 1: one cycle per instruction. The gate configuration from M3 onward. Since M6 P5 the image under test is the SHIPPED one — default features, mounted from a modelled flash chip, served over the modelled USB-Serial-JTAG link with a host attached — and `spike_uart0_link` survives only for the payloads whose committed transcripts are of that older image."
 chip = "esp32c6"
-# No trust entries: nothing has been measured, so everything is `modeled`.
-# M3 earns the memory entry the same way esp-emu did — with a committed
-# transcript that this crate replays.
+mac = "a0:f2:62:87:b4:8c"
+silicon_rev = "v0.2"
+board = "seeed/xiao-esp32-c6"
+# The pad is decoded off this machine's own signal fabric (M5 P2), so a
+# capture from it carries a per-frame pin log. Silicon says nothing here and
+# therefore records none: reading a real pad needs an instrument nobody has
+# put on this bench, which is the same thing the `pin` trust entry says.
+records_pins = true
+
+[[configuration.trust]]
+class = "memory"
+grade = "modeled"
+because = "the allocator is the guest's own and the RAM model is byte-exact, and on the compile harness this configuration is byte-equal to silicon — 372/372 values, peak 48,132 / resident 18,932 / after-drop 3,976 B and all 184 per-tick figures (M3 P6). On the shipped image against the desk board, same commit and same bytes, the residual is EIGHT BYTES of `freeBytes` (complementary in `usedBytes`) and nothing else: `totalBytes` equal, the stack's first high-water mark equal to the byte on both the memfs pair (11,784 B, M6 P4) and the flash-backed pair (11,908 B, M6 P5). M3's 104 B was a sample of a live ~108 B allocation that comes and goes between heartbeats — silicon's own three read 266,392 / 266,496 / 266,388 — and §11.2's meteor `-4 B` is the same shape: one M6 P5 run reports both 152,316 and 152,320 five seconds apart. The eight bytes are not that: they repeat to the byte at 5 s and 10 s, across memfs and flash, across two commits, and across silicon boots 3 and 10, and the two machines agree to the byte on what the filesystem backing costs (1,296 B either side). One live 8-byte block silicon has and we do not, unnamed. Never tuned toward it"
+
+[[configuration.trust]]
+class = "timing"
+grade = "modeled"
+because = "t1 counts one cycle per instruction — no cache, no flash wait states — and neither grade is graded by a transcript yet (the vision's 'time is a graded ladder, never a promise'). What is modelled honestly is the UART drain, at baud in emulated time, which is why the harness's log-bearing ticks land at 1.01x silicon while its compute ticks are 0.42x"
+
+[[configuration.trust]]
+class = "boot-log"
+grade = "modeled"
+because = "there is no boot log: a direct load places the app's segments and jumps to its entry, so no ROM banner and no IDF bootloader lines are printed at all. M7 boots from reset and is where this class becomes a claim"
+
+[[configuration.trust]]
+class = "usb-serial-jtag"
+grade = "modeled"
+because = "M6 built the host's side — absent, attached with the port closed, attached and draining — and four committed transcripts under `lp-emu/transcripts/esp32c6/` are what it has to show for it: `boot-idle` over the shipped link against sitting 1's silicon capture of the SAME image bytes (stack high-water 11,784 B equal, heap 8 B apart); `usb-negative-control`, the port held closed from boot and opened at eight seconds, latching at 893 ms and recovering at 8,145; `usb-detach-reattach`, the cable out at six seconds and back at nine, recovering with exactly one hello and the firmware noticing nothing; and `usb-host-absent`, where the stamp pair reads 893 / never — the discriminator absent-vs-unread. The block's own registers are graded one by one (`--strict-grade`, the table in `periph/usb_sj.rs`) and the data path is `measured` there. M6 P5 adds the working half: the shipped image FROM FLASH over this link takes a real `lp-cli upload` (`upload-walk-usb`, `meteor-walk-usb`) with every filesystem write, every heap gate and every compiler output identical to M4's run of the same script over the spike's UART0 link — so the host model carries a day's work and not just a boot, and the link driver is demonstrably not in the heap ledger. This class stays `modeled` all the same, by the rule the ADR states and DD33 Q4 confirmed: byte-equality and agreement are EVIDENCE, weighed here where a reader can see them, not a promotion. The silicon transcript that would let anybody argue otherwise has now landed (`usb-negative-control/silicon-esp32c6-2026-09-07-b18360ea6.txt`, G3 step 4); whether it promotes this class is the director's to rule, not a phase's to assume"
+
+[[configuration.trust]]
+class = "pin"
+grade = "modeled"
+because = "the waveform is a modelled peripheral's, decoded by our own decoder: GPIO is a routing view over the bus's signal fabric, the RMT drives RMT_SIG_0/1 into it, and a WS281x decoder reads a routed pad's edges at the datasheet's +/-150 ns into frames (--dump-frames, --pin-log; M5 P2). Two pin captures are COMMITTED beside their transcripts. On `rmt-chase` (M5 P3) the guest's own per-frame FNV-1a checksum agrees with the bytes the pad carried on all 768 frames. On `shader-oracle-walk` (M5 P4) the SHIPPED image's first lit frame off gpio18 — the frame after the compile-window black one — is byte-equal to the host oracle's `[ORACLE] rgb=` and `[ORACLE-RV32] rgb=` (crc 0x55772254, 64 LEDs, `unpermute(wire, GRB)`), and every later frame in the run is the same bytes; `examples/basic` puts whole, latched 241-LED frames on the same pad at a steady period. That is the nearest independent check there is without an instrument: the oracle never touched the machine. It is still not a measurement, because both readings of the PAD are ours — the fabric and the decoder are in the machine, not on a scope. No silicon pin transcript exists yet; a logic-analyser capture, or the C6 `frame-dump` port M8 owns read beside the decoder, would be the `measured` step"
+
+[[configuration.trust]]
+class = "wire"
+grade = "modeled"
+because = "the bytes are the guest's own, drained through a UART0 model at the configured baud, so their content and order are the firmware's. What is not the firmware's is when a host's bytes arrive on a live socket — that is host time, not guest time, and `--uart0-script` is the deterministic path for anything a transcript should carry"
+
+[[configuration]]
+name = "lp-emu:esp32c6:t2"
+description = "The same machine at time grade 2: the measured per-class cycle model. Memory is identical to t1 by construction; the interleaving is not, and the stack high-water mark moves with it."
+chip = "esp32c6"
+mac = "a0:f2:62:87:b4:8c"
+silicon_rev = "v0.2"
+board = "seeed/xiao-esp32-c6"
+# The pad is decoded off this machine's own signal fabric (M5 P2), so a
+# capture from it carries a per-frame pin log. Silicon says nothing here and
+# therefore records none: reading a real pad needs an instrument nobody has
+# put on this bench, which is the same thing the `pin` trust entry says.
+records_pins = true
+
+[[configuration.trust]]
+class = "memory"
+grade = "modeled"
+because = "the same allocator and the same RAM model as t1, and the harness's 372 memory values are identical under both grades — a time grade must not move a heap byte. The one figure that does move is the idle stack high-water mark (11,432 B under t1, 11,752 B under t2), which is interleaving, not memory: the deepest interrupted call chain is not the same chain"
+
+[[configuration.trust]]
+class = "timing"
+grade = "modeled"
+because = "t2 uses the per-class cycle model rather than one cycle per instruction, and no transcript grades it either. It is a rung up the ladder, not a promise about milliseconds on silicon"
+
+[[configuration.trust]]
+class = "boot-log"
+grade = "modeled"
+because = "direct load prints no ROM or bootloader banner; the time grade changes nothing about that. M7 owns it"
+
+[[configuration.trust]]
+class = "usb-serial-jtag"
+grade = "modeled"
+because = "the same host model as t1, and the same four transcripts stand behind it — `boot-idle` is recorded on this grade too and its heap figures are t1's to the byte, which is what a time grade must never move. `modeled` for t1's reason: the evidence is here to be weighed, and the silicon half of the negative control is owed"
+
+[[configuration.trust]]
+class = "pin"
+grade = "modeled"
+because = "the same pin observation as t1, on the same two committed captures: the rmt-chase checksums agree on all 768 frames and the shipped image's first lit frame off gpio18 is the host oracle's (`shader-oracle-walk`, crc 0x55772254), with only the frame COUNT by the sentinel moving between the grades (39 against t1's 59 in three seconds — the clock's, reported as timing). The same reason for the grade: the fabric and the decoder are in the machine, not on a scope, and no silicon pin transcript exists"
+
+[[configuration.trust]]
+class = "wire"
+grade = "modeled"
+because = "the same UART0 model as t1: the bytes are the guest's, a live socket's arrival times are the host's"
+
+[[configuration]]
+name = "lp-emu:esp32c6:t3"
+description = "The same machine at time grade 3: the class costs the cycle-probe kernels measured on silicon, plus what an access's address costs — the flash cache's 32-byte fills and the APB's wait states. The first grade in which two instructions with the same opcode cost different amounts. Memory is identical to t1 and t2 by construction; the interleaving is not."
+chip = "esp32c6"
+mac = "a0:f2:62:87:b4:8c"
+silicon_rev = "v0.2"
+board = "seeed/xiao-esp32-c6"
+records_pins = true
+
+[[configuration.trust]]
+class = "memory"
+grade = "modeled"
+because = "the same allocator and the same RAM model as t1 and t2; the harness's 372 memory values are identical under all three grades (`t3_memory_equals_t1`, `tests/harness_parity.rs`) — a time grade must not move a heap byte, and a memory-cost model answers in cycles, never in bytes"
+
+[[configuration.trust]]
+class = "timing"
+grade = "modeled"
+because = "the model exists but the contract does not. t3 is structural rather than per-class — a 32 KiB 4-way cache of 32-byte lines at 338 cycles a fill (the mask ROM's Cache_Get_Mode for the geometry, cycle-probe's code_walk for the cost) and 9 cycles of APB wait state (cycle-probe's mmio_poll) — and it is calibrated on the cycle-probe kernels and validated against 92 like-for-like silicon ticks in docs/reports/2026-09-08-esp32c6-t3-calibration.md. What it does not yet have is a stated band it is allowed to be wrong inside, and a cycle model is never exact; `modeled` until that contract exists (M1 P4)"
+
+[[configuration.trust]]
+class = "boot-log"
+grade = "modeled"
+because = "direct load prints no ROM or bootloader banner; the time grade changes nothing about that. M7 owns it"
+
+[[configuration.trust]]
+class = "usb-serial-jtag"
+grade = "modeled"
+because = "the same host model as t1 and t2. t3 charges the guest's own accesses to the USB block the APB's wait states, which makes the console path *more* expensive, not more accurate: §2.3 of the calibration record measures the emulator's console path at about 1.5x silicon's already, and that is a peripheral model rather than a cycle model"
+
+[[configuration.trust]]
+class = "pin"
+grade = "modeled"
+because = "the same pin observation as t1 and t2, from the same fabric and the same decoder. What a time grade moves here is the frame count in a fixed wall of emulated time, which is reported as timing"
+
+[[configuration.trust]]
+class = "wire"
+grade = "modeled"
+because = "the same UART0 model as t1 and t2: the bytes are the guest's, a live socket's arrival times are the host's"

@@ -220,7 +220,7 @@ mod tests {
             name: name.to_string(),
             args: vec![
                 ("sim".to_string(), "main".to_string()),
-                ("example".to_string(), "examples/plasma".to_string()),
+                ("example".to_string(), "catalog/plasma".to_string()),
                 ("src".to_string(), "plasma-shader".to_string()),
             ],
             body: String::new(),
@@ -293,7 +293,7 @@ mod tests {
                 vec![("sim", "main"), ("view", "map"), ("fixture", "grid")],
             ),
             ("editor", vec![("sim", "main")]),
-            ("open-in-studio", vec![("example", "examples/plasma-duo")]),
+            ("open-in-studio", vec![("example", "catalog/plasma-duo")]),
             ("code-figure", vec![("src", "plasma-shader")]),
         ];
         for (name, args) in fences {

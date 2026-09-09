@@ -5,7 +5,7 @@ fixed: this change
 area: lpa-link flashers (browser esptool-js + host espflash) · lpa-devices post-flash reconnect ladder · the merged image's second-stage bootloader
 class: assumed-context
 related:
-  - 2026-09-06-xiao-c6-7e44-hangs-in-the-second-stage-bootloader.md
+  - 2026-09-06-c6-analog-master-wedges-the-bootloader.md
   - ~/.photomancer/planning/lp2025/2026-09-06-1649-c6-first-flash-bootloader-hang/
   - lp-app/lpa-link/src/providers/host_serial_esp32/lp_analog_i2c.rs
   - scripts/c6-bootloader-hang-walk.sh
@@ -61,9 +61,11 @@ was written for CH340 bridges.
 
 LightPlayer's own HAL (esp-hal 1.1.1, esp-radio 0.18) never touches
 `LPPERI`, so a board that already ran LightPlayer never hits this — it is a
-first-flash-on-a-fresh-board defect. The same `Saved PC` was filed the same
-morning against a second XIAO on the UART-bridge bench (the related entry)
-and blamed on the fixture wiring.
+first-flash-on-a-fresh-board defect. The emulator bench independently
+root-caused the identical hang (same `Saved PC`, same busy-spin) on its own
+XIAOs — see
+[c6-analog-master-wedges-the-bootloader](2026-09-06-c6-analog-master-wedges-the-bootloader.md),
+the diagnosis to this entry's fix.
 
 **Fix** — three places:
 

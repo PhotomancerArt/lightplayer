@@ -5,6 +5,9 @@
 - **Deciders:** Photomancer
 - **Supersedes:** None
 - **Superseded by:** None
+- **Amended by:** [2026-09-07-always-a-device-target-real-emu-sim.md](2026-09-07-always-a-device-target-real-emu-sim.md)
+  (the tab's ONE session is a device lens, whatever backs it — "one sim OR
+  one device" becomes "one device per tab")
 
 ## Context
 
@@ -36,6 +39,10 @@ oldest-first eviction path stays exercised rather than becoming dead code,
 and a wall against runaway session minting (a hotplug storm must hit a
 bound, not grow the pool forever). Raise the number when a desk outgrows
 it; never the shape. Sim capacity stays 1.
+
+> **Amended 2026-09-07** — a sim is a device now, not a separate kind
+> with its own capacity number. See
+> `2026-09-07-always-a-device-target-real-emu-sim.md`.
 
 **One session per endpoint.** `RuntimePool::install` replaces an existing
 same-kind session holding the SAME endpoint id (refused while an op is in
@@ -127,6 +134,11 @@ those N sessions its own UI will show at once, exactly the "capacity is a
 policy, never a shape" posture this ADR opened with. A desktop-app shell
 is free to lift the policy and show more than one session again without
 any change here.
+
+> **Amended 2026-09-07** — "one sim OR one device" is now "one device
+> per tab": the sim is a device, so the web shell's capacity-one policy
+> no longer forks on kind. See
+> `2026-09-07-always-a-device-target-real-emu-sim.md`.
 
 ## Consequences
 

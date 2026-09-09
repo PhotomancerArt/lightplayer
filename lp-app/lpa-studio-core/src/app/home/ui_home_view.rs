@@ -4,17 +4,12 @@ use crate::UiIssue;
 
 use super::ui_example_card::UiExampleCard;
 use super::ui_package_card::UiPackageCard;
-use super::ui_sim_card::UiSimCard;
 
 /// Everything the home screen renders. Present on
 /// [`UiStudioView`](crate::UiStudioView) when the shell should show the
 /// gallery instead of the pane layout.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiHomeView {
-    /// The live simulator's card, while a sim session lives. Device cards
-    /// were the rest of this section until the device system was torn down
-    /// (M2 of the device-model rebuild); the rebuilt model re-adds them.
-    pub sim: Option<UiSimCard>,
     /// *Your projects* section, name-sorted like the library lists them.
     pub projects: Vec<UiPackageCard>,
     /// *Examples* section (embedded packages until M6).
@@ -40,8 +35,7 @@ impl UiHomeView {
     /// Render as plain text lines for fallback renderers and tests.
     pub fn render_text_lines(&self) -> Vec<String> {
         let mut lines = vec![format!(
-            "Home: {} runtimes, {} projects, {} examples",
-            usize::from(self.sim.is_some()),
+            "Home: {} projects, {} examples",
             self.projects.len(),
             self.examples.len(),
         )];

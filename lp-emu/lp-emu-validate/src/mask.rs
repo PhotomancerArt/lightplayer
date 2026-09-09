@@ -139,6 +139,22 @@ pub static PROSE_TIMING: MaskRule = MaskRule::new(
     "$1=N$2",
 );
 
+/// The `[WS281X]` telemetry line's own timestamp.
+///
+/// The one field in that line that is a clock rather than a count: the module
+/// reports when ten seconds of *its* uptime have passed, so `t_ms` is a
+/// property of when the run started printing, not of the refill race. Every
+/// other field on the line — the frame counters, the refill counts, the two
+/// histograms — is left comparable, because they are what the line exists to
+/// say.
+pub static WS281X_TIMESTAMP: MaskRule = MaskRule::new(
+    "ws281x-timestamp",
+    "the telemetry line's own uptime stamp; the counters beside it are the claim",
+    FieldClass::Timing,
+    r"(\[WS281X\] )t_ms=[0-9]+",
+    "${1}t_ms=N",
+);
+
 /// The stack high-water report.
 pub static STACK_HIGH_WATER: MaskRule = MaskRule::new(
     "stack-high-water",
@@ -171,6 +187,108 @@ pub static ROM_PRINTF_COLUMNS: MaskRule = MaskRule::new(
     FieldClass::BootLog,
     r"[ \t]+",
     " ",
+);
+
+/// The `jit-math-perf` bench line's cycle figures:
+/// `[jit-math-perf] bench <label> median=N per_call=N avg=N min=N max=N
+/// calls=N checksum=N`. `calls` (corpus size) and `checksum` (a deterministic
+/// XOR of the kernel's outputs) are left alone — only the five numbers with a
+/// clock in them are masked, because the structured `jit-bench` records carry
+/// the same figures and are compared instead.
+pub static JIT_BENCH_CYCLES: MaskRule = MaskRule::new(
+    "jit-bench-cycles",
+    "cycle counts in the jit-math-perf bench line; the structured jit-bench \
+     records carry the same numbers and are compared instead",
+    FieldClass::Timing,
+    r"(median|per_call|avg|min|max)=[0-9]+",
+    "$1=N",
+);
+
+/// `[jit-math-perf] overhead summary: empty=N cycles, counter-pair=N cycles`.
+pub static JIT_OVERHEAD_CYCLES: MaskRule = MaskRule::new(
+    "jit-overhead-cycles",
+    "the overhead baseline's raw cycle counts; the jit-bench records for \
+     overhead/empty and overhead/read-counter-pair carry the same numbers",
+    FieldClass::Timing,
+    r"(empty|counter-pair)=[0-9]+ cycles",
+    "$1=N cycles",
+);
+
+/// The `cycle-probe` human line's two clocks:
+/// `[cycle-probe] kernel <name> rep=N iters=N cycles=N us=N insns=N acc=N`.
+///
+/// `cycles` and `us` are masked and **nothing else is**. `iters`, `insns` and
+/// `acc` are the kernel's identity — how much work, how many instructions,
+/// and what it computed — and a configuration that disagrees on any of those
+/// is running a different kernel, not a slower one. The structured
+/// `cycle-probe` records carry the two clock figures and are compared instead.
+pub static CYCLE_PROBE_CLOCKS: MaskRule = MaskRule::new(
+    "cycle-probe-clocks",
+    "the two clock figures in the cycle-probe kernel line; the structured \
+     cycle-probe records carry the same numbers and are compared instead",
+    FieldClass::Timing,
+    r"(cycles|us)=[0-9]+",
+    "$1=N",
+);
+
+/// The `gpio-input` setup line's `drive=` word.
+///
+/// **The one place in this file where the mask hides a real, deliberate
+/// difference rather than a clock.** This payload's two sides are driven
+/// differently on purpose and cannot be otherwise: on silicon the firmware
+/// drives its own pads and reads them back (`drive=self-loop`), and on an
+/// emulated configuration a `--pin-script` drives them from outside
+/// (`drive=external`). Everything below that line is the same image doing the
+/// same thing; the word itself is the asymmetry, and it is stated — in this
+/// rule's own `because`, in each transcript's sidecar `note`, and in the
+/// payload's registry entry — rather than being made to disappear quietly.
+///
+/// Nothing else on the line is touched. `button=`, `encoder=`, `select=`,
+/// `poll_ms=` and `samples=` are the run's configuration and must compare
+/// equal, or the two sides were not running the same script.
+pub static GPIO_INPUT_DRIVE: MaskRule = MaskRule::new(
+    "gpio-input-drive",
+    "which side drove the pads: silicon self-loops, an emulated configuration \
+     is driven from outside by --pin-script. The asymmetry is the payload's \
+     premise and is stated in both sidecars",
+    FieldClass::Pin,
+    r"drive=(self-loop|external)",
+    "drive=D",
+);
+
+/// The hello frame's build provenance: `"commit":"d6cfaa2051ae","dirty":true`.
+///
+/// Not a claim about the chip — a claim about the tree the image was built
+/// from, which the sidecar carries as `firmware_commit` / `firmware_dirty` and
+/// which `Transcript::load` already refuses to let disagree with an in-band
+/// header. Comparing it here as well would fail every replay of one image
+/// captured at two commits, for a difference the header states plainly.
+pub static HELLO_BUILD_PROVENANCE: MaskRule = MaskRule::new(
+    "hello-build-provenance",
+    "the hello's build commit and dirty flag; the sidecar's firmware_commit \
+     and firmware_dirty are the provenance, and they are checked against the \
+     in-band header rather than diffed as prose",
+    FieldClass::Structural,
+    r#""commit":"[0-9a-f]*","dirty":(true|false)"#,
+    r#""commit":"N","dirty":N"#,
+);
+
+/// The chip identity a wire frame carries: `baseMac`, `chipRevision`, `eui64`.
+///
+/// These come from the eFuse block, and the sidecar carries them as `mac` and
+/// `silicon_rev`. The runner seeds an emulated configuration's eFuse from the
+/// configuration's entry in `validate.toml` (`--efuse-mac` / `--efuse-rev`),
+/// so an emulated transcript and a silicon one of the same desk board agree by
+/// construction; masking here keeps the *human* view stable when they are not
+/// the same board, which is a fact about the desk and not about the model.
+pub static WIRE_IDENTITY: MaskRule = MaskRule::new(
+    "wire-identity",
+    "baseMac / chipRevision / eui64 in a wire frame: eFuse content, carried by \
+     the sidecar as mac and silicon_rev and seeded into an emulated \
+     configuration from validate.toml",
+    FieldClass::Wire,
+    r#""(baseMac|chipRevision|eui64)":"[^"]*""#,
+    r#""$1":"N""#,
 );
 
 /// A named, ordered set of rules.
@@ -242,7 +360,159 @@ pub static BOOT_LOG: MaskSet = MaskSet {
     rules: &[&ANSI, &BOOT_TIMESTAMP, &ROM_PRINTF_COLUMNS],
 };
 
-pub static ALL_SETS: &[&MaskSet] = &[&NORMALIZE, &COMPILE_HARNESS, &WALK, &BOOT_LOG];
+/// The `jit-math-perf` set: normalise, then mask the cycle counts. `label`,
+/// `calls` and `checksum` stay comparable — memory is not in play here, only
+/// timing, and cycle-cost payloads exist to report it, not hide it.
+pub static JIT_MATH_PERF: MaskSet = MaskSet {
+    name: "jit-math-perf",
+    description: "ANSI + the cycle counts in the bench and overhead lines; \
+                  labels, call counts and checksums are left comparable",
+    rules: &[&ANSI, &JIT_BENCH_CYCLES, &JIT_OVERHEAD_CYCLES],
+};
+
+/// The shipped-image boot set: normalise, drop build provenance and chip
+/// identity, mask everything with a clock in it — and leave **memory alone**.
+///
+/// `HEAP_LEDGER_*`, `HEARTBEAT_MEMORY` and `STACK_HIGH_WATER` are deliberately
+/// absent: the heap ledger at the idle heartbeat and the stack high-water mark
+/// are the two numbers this payload exists to compare, and the `heartbeat` and
+/// `stack-heartbeat` series carry them as `Memory`.
+pub static BOOT_IDLE: MaskSet = MaskSet {
+    name: "boot-idle",
+    description: "ANSI, build provenance, chip identity and every clock-derived \
+                  field; the heap and stack figures are left comparable",
+    rules: &[
+        &ANSI,
+        &HELLO_BUILD_PROVENANCE,
+        &WIRE_IDENTITY,
+        &HEARTBEAT_TIMING,
+        &SAMPLE_STATS,
+        &PROSE_TIMING,
+        &BOOT_TIMESTAMP,
+    ],
+};
+
+/// The `rmt-chase` set: ANSI, the boot banner's stamps, and the telemetry
+/// line's own uptime stamp — and **nothing else**.
+///
+/// Deliberately the shortest set in the file after `normalize`. Every number
+/// this payload prints is a claim it exists to make: the per-frame checksums
+/// are the frames, and the `[WS281X]` counters are what the driver believes
+/// about the refill race. `PROSE_TIMING` is absent on purpose: it rewrites
+/// `frame=N`, which is one character from this payload's `frames=768`, and a
+/// mask that erases the gate is worse than no mask at all.
+pub static RMT_CHASE: MaskSet = MaskSet {
+    name: "rmt-chase",
+    description: "ANSI, boot timestamps and the telemetry line's t_ms; every \
+                  counter and checksum is left comparable",
+    rules: &[&ANSI, &BOOT_TIMESTAMP, &WS281X_TIMESTAMP],
+};
+
+/// The `cycle-probe` set: ANSI, the boot banner's stamps, and the two clock
+/// figures on the kernel line.
+///
+/// `PROSE_TIMING` is absent for the same reason it is absent from
+/// `rmt-chase`: this payload's own lines carry `iters=` and `acc=`, and a
+/// general-purpose rewriter loose in a calibration transcript is how a
+/// measurement quietly stops being one.
+pub static CYCLE_PROBE: MaskSet = MaskSet {
+    name: "cycle-probe",
+    description: "ANSI, boot timestamps and the kernel line's cycles/us; the \
+                  iteration counts, instruction counts and accumulators are \
+                  left comparable",
+    rules: &[&ANSI, &BOOT_TIMESTAMP, &CYCLE_PROBE_CLOCKS],
+};
+
+/// The `gpio-input` set: ANSI, the boot banner's stamps, and the `drive=`
+/// word — and nothing else.
+///
+/// Short for `rmt-chase`'s reason and one more. Every other number this
+/// payload prints is a claim it exists to make: `detents=` and `edges=` are
+/// the interrupt path's own count of itself, and `samples=`, `poll_ms=` and
+/// the pad numbers are the script both sides ran. `PROSE_TIMING` is absent
+/// because it rewrites `tick=` and `frame=`, neither of which appears here,
+/// and a general-purpose rewriter loose in a transcript whose subject is a
+/// sequence of levels is how a claim quietly stops being one. The `t_us`
+/// figures live in the structured records and are graded `Timing` there,
+/// which is where a replay reports them with their ratios.
+pub static GPIO_INPUT: MaskSet = MaskSet {
+    name: "gpio-input",
+    description: "ANSI, boot timestamps and the setup line's drive= word; every \
+                  pad number, sample count and detent count is left comparable",
+    rules: &[&ANSI, &BOOT_TIMESTAMP, &GPIO_INPUT_DRIVE],
+};
+
+/// The render-loop summary line's per-frame microseconds.
+///
+/// `PROSE_TIMING` does not reach them — it knows `elapsed=`, `frame=` and
+/// `tick=`, and this line says `mean=`, `min=`, `max=` and `first=` in
+/// microseconds. The numbers are not lost by masking them here: the
+/// `render-loop-summary` RECORD beside this line carries every one of them as
+/// a `Timing`-graded field, which is where a replay compares them properly.
+pub static RENDER_LOOP_FRAME_US: MaskRule = MaskRule::new(
+    "render-loop-frame-us",
+    "the summary line's per-frame microseconds; the record beside it carries      the same numbers as graded fields",
+    FieldClass::Timing,
+    r"(mean|min|max|first)=[0-9]+us",
+    "$1=Nus",
+);
+
+/// The render-loop summary line's frames-per-second.
+///
+/// Its own rule rather than `PROSE_TIMING`'s `fps=[0-9]+`, which would match
+/// the integer part of `fps=65.99` and leave `fps=N.99` behind — a half-masked
+/// number that still differs between two runs and reads as if it had been
+/// handled. Whole field or nothing.
+pub static RENDER_LOOP_FPS: MaskRule = MaskRule::new(
+    "render-loop-fps",
+    "the summary line's fps, masked whole rather than to its decimals",
+    FieldClass::Timing,
+    r"fps=[0-9]+\.[0-9]+",
+    "fps=N",
+);
+
+/// The `render-loop` set: everything with a clock in it, and **memory left
+/// alone**.
+///
+/// Same shape as `BOOT_IDLE` and for the same reason. What this payload exists
+/// to say is how long a frame takes and how much heap a loaded project costs,
+/// and those arrive as graded fields on its two records rather than as prose —
+/// so the prose restatements are masked and `HEAP_LEDGER_*` is deliberately
+/// absent, leaving the `[mem]` bracket around `load_project` comparable.
+///
+/// `PROSE_TIMING` is included, unlike in `RMT_CHASE`: it rewrites `frame=N`,
+/// and this payload's line says `frames=` — one character further along, which
+/// the regex's `=` anchor does not reach. It does reach the shader compile
+/// line's `elapsed=52ms`, which is exactly a clock and exactly what should go.
+pub static RENDER_LOOP: MaskSet = MaskSet {
+    name: "render-loop",
+    description: "ANSI, build provenance, chip identity and every clock-derived \
+                  field; the heap figures are left comparable",
+    rules: &[
+        &ANSI,
+        &HELLO_BUILD_PROVENANCE,
+        &WIRE_IDENTITY,
+        &HEARTBEAT_TIMING,
+        &SAMPLE_STATS,
+        &PROSE_TIMING,
+        &BOOT_TIMESTAMP,
+        &RENDER_LOOP_FRAME_US,
+        &RENDER_LOOP_FPS,
+    ],
+};
+
+pub static ALL_SETS: &[&MaskSet] = &[
+    &NORMALIZE,
+    &COMPILE_HARNESS,
+    &WALK,
+    &BOOT_LOG,
+    &JIT_MATH_PERF,
+    &BOOT_IDLE,
+    &RMT_CHASE,
+    &CYCLE_PROBE,
+    &GPIO_INPUT,
+    &RENDER_LOOP,
+];
 
 pub fn mask_set(name: &str) -> Result<&'static MaskSet> {
     match ALL_SETS.iter().find(|s| s.name == name) {
@@ -341,6 +611,32 @@ mod tests {
     }
 
     #[test]
+    fn the_boot_idle_set_hides_provenance_and_identity_but_not_the_heap() {
+        let hello = r#"M!{"id":0,"msg":{"hello":{"proto":20,"build":{"features":[],"#.to_string()
+            + r#""package":"fw-esp32c6","commit":"d6cfaa2051ae","dirty":true,"#
+            + r#""profile":"release-esp32"},"hardware":{"boardId":"seeed/xiao-esp32-c6","#
+            + r#""baseMac":"a0:f2:62:87:b4:8c","chipRevision":"0.2","eui64":"a0:f2:62:87:b4:8c:00:00"}}}}"#;
+        let masked = BOOT_IDLE.apply(&hello);
+        assert!(masked.contains(r#""commit":"N","dirty":N"#), "{masked}");
+        assert!(masked.contains(r#""baseMac":"N""#), "{masked}");
+        assert!(masked.contains(r#""chipRevision":"N""#), "{masked}");
+        assert!(masked.contains(r#""eui64":"N""#), "{masked}");
+        // The board profile is not identity: it stays.
+        assert!(
+            masked.contains(r#""boardId":"seeed/xiao-esp32-c6""#),
+            "{masked}"
+        );
+
+        // The two numbers the payload exists for survive the mask.
+        let beat = r#"M!{"id":0,"msg":{"heartbeat":{"uptime_ms":5000,"memory":{"freeBytes":266688,"usedBytes":58848,"totalBytes":325536}}}}"#;
+        let masked = BOOT_IDLE.apply(beat);
+        assert!(masked.contains(r#""freeBytes":266688"#), "{masked}");
+        assert!(masked.contains(r#""uptime_ms":N"#), "{masked}");
+        let stack = "[stack] heartbeat: high-water 11432 B of 71960 B (60528 B headroom)";
+        assert_eq!(BOOT_IDLE.apply(stack), stack);
+    }
+
+    #[test]
     fn mask_set_lookup() {
         assert!(mask_set("compile-harness").is_ok());
         assert!(mask_set("no-such-set").is_err());
@@ -351,5 +647,26 @@ mod tests {
         let timing: Vec<_> = WALK.rules_for(FieldClass::Timing).map(|r| r.name).collect();
         assert!(timing.contains(&"prose-timing"));
         assert!(!timing.contains(&"heap-ledger-k"));
+    }
+
+    #[test]
+    fn jit_math_perf_masks_cycles_but_not_labels_calls_or_checksum() {
+        let line = "[jit-math-perf] bench mul/helper-saturating median=812 per_call=1 \
+                    avg=815 min=808 max=990 calls=441 checksum=123456";
+        let masked = JIT_MATH_PERF.apply(line);
+        assert_eq!(
+            masked,
+            "[jit-math-perf] bench mul/helper-saturating median=N per_call=N \
+             avg=N min=N max=N calls=441 checksum=123456"
+        );
+    }
+
+    #[test]
+    fn jit_math_perf_masks_the_overhead_summary_line() {
+        let line = "[jit-math-perf] overhead summary: empty=6 cycles, counter-pair=14 cycles";
+        assert_eq!(
+            JIT_MATH_PERF.apply(line),
+            "[jit-math-perf] overhead summary: empty=N cycles, counter-pair=N cycles"
+        );
     }
 }

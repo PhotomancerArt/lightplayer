@@ -12,6 +12,7 @@ use lp_emu_core::Bus;
 use lp_riscv_inst::{Gpr, format::TypeI};
 
 /// Decode and execute system instructions (I-type, opcode 0x73).
+#[inline(always)]
 pub(super) fn decode_execute_system<M: LoggingMode, B: Bus>(
     inst_word: u32,
     pc: u32,
@@ -195,6 +196,7 @@ fn execute_ebreak<M: LoggingMode>(
 }
 
 /// Decode and execute FENCE/FENCE.I instructions (opcode 0x0f).
+#[inline(always)]
 pub(super) fn decode_execute_fence<M: LoggingMode, B: Bus>(
     inst_word: u32,
     pc: u32,

@@ -28,7 +28,7 @@
 //! the emulator profile has no trigger path to reach a crossfade, so the
 //! backend call count is the honest instrument.
 //!
-//! Fixture: `examples/button-playlist` (idle → active on trigger 1, 0.12 s
+//! Fixture: `projects/test/button-playlist` (idle → active on trigger 1, 0.12 s
 //! fade out of idle, 0.8 s fade out of active), copied to a temp dir with
 //! its ring scaled ×K. The transition is driven through the runtime command
 //! channel (`PlaylistActivateEntry`), the same path a wire client uses.
@@ -279,18 +279,18 @@ fn workspace_dir() -> PathBuf {
         .to_path_buf()
 }
 
-/// `examples/button-playlist` with its ring's per-ring counts scaled by
+/// `projects/test/button-playlist` with its ring's per-ring counts scaled by
 /// `scale`: `1 + 240 × scale` lamps (the one-lamp centre grid plus the
 /// disc). Returns the temp dir and the lamp count.
 fn scaled_button_playlist(scale: u32) -> (PathBuf, u32) {
-    let src = workspace_dir().join("examples/button-playlist");
+    let src = workspace_dir().join("projects/test/button-playlist");
     let dir = std::env::temp_dir().join(format!(
         "lp-playlist-crossfade-{}-x{scale}",
         std::process::id()
     ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("temp project dir");
-    for entry in std::fs::read_dir(&src).expect("read examples/button-playlist") {
+    for entry in std::fs::read_dir(&src).expect("read projects/test/button-playlist") {
         let entry = entry.expect("dir entry");
         std::fs::copy(entry.path(), dir.join(entry.file_name())).expect("copy project file");
     }
@@ -322,7 +322,7 @@ fn scaled_button_playlist(scale: u32) -> (PathBuf, u32) {
     // The authored example never binds the playlist's output onto the
     // visual bus (its fixture renders black — see the all-zero digests in
     // `output_control_samples_golden.rs`). The probe needs the crossfade to
-    // reach the fixture, so bind it the way `examples/basic/shader.json`
+    // reach the fixture, so bind it the way `projects/test/basic/shader.json`
     // does. Written by hand, not through `serde_json::Map`: the node-def
     // loader reads `kind` as a leading header and the map sorts keys.
     let playlist = std::fs::read_to_string(src.join("playlist.json")).expect("playlist.json");

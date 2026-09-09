@@ -117,7 +117,7 @@ web-demo-build: install-wasm32-target
     wasm-bindgen target/wasm32-unknown-unknown/release/web_demo.wasm \
         --out-dir lp-app/web-demo/www/pkg --target web
     mkdir -p lp-app/web-demo/www
-    cp examples/basic/shader.glsl lp-app/web-demo/www/rainbow-default.glsl
+    cp projects/test/basic/shader.glsl lp-app/web-demo/www/rainbow-default.glsl
     echo "Artifacts: lp-app/web-demo/www/ (index.html, pkg/)"
 
 # Build and serve the web demo (installs miniserve via cargo if missing)
@@ -717,7 +717,7 @@ format-bump:
     echo "Next steps:"
     echo "  1. Bump PROJECT_FORMAT_VERSION in ${const_file}."
     echo "  2. Make the format change; update authored project.json files"
-    echo "     (projects/, examples/, lp-fw/fw-browser/www/smoke-project)."
+    echo "     (projects/, catalog/, lp-fw/fw-browser/www/smoke-project)."
     echo "  3. Write ${step_file}'s apply() (see lp-app/lpa-upgrade/README.md)"
     echo "     and register it in lp-app/lpa-upgrade/src/steps/mod.rs::STEPS."
     echo "  4. Copy ${dest}/fixtures/* into"
@@ -749,8 +749,18 @@ build-rv32: install-rv32-target build-rv32-builtins build-fw-esp32c6 build-rv32-
 build-rv32-release: build-rv32
 
 # riscv32: fw-esp32c6 (uses release-esp32 profile: nightly for -Zbuild-std)
-build-fw-esp32c6: install-rv32-target
-    cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6
+#
+# The optional argument is extra features, in the shape `build-fw-esp32s3`
+# takes them. `esp32c6` is always added — it is the chip gate, not an option.
+build-fw-esp32c6 features="": install-rv32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    features="esp32c6"
+    if [[ -n "{{ features }}" ]]; then
+      features="$features,{{ features }}"
+    fi
+    cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} \
+        --profile {{ fw_esp32c6_profile }} --features "$features"
 
 # Build the ESP32-S3 firmware. Xtensa has no upstream Rust target, so this uses
 # Espressif's fork via the crate's own `rust-toolchain.toml` (channel = "esp").
@@ -1027,6 +1037,31 @@ flash-fw-esp32s3 port="" features="": (build-fw-esp32s3 features)
       args+=(--port "{{ port }}")
     fi
     espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
+
+# Flash fw-esp32c6 to a connected ESP32-C6 and open the serial monitor.
+#
+# The S3 recipe above, one chip over, and it exists for the same caller:
+# `scripts/m4-hardware-walk.sh --chip esp32c6` needs one command that builds,
+# flashes and monitors, and owns the partition table and flash size so the
+# walk script duplicates neither. The optional second argument is passed to
+# `build-fw-esp32c6`; the one that matters is `frame-dump`, which makes the
+# board print every transmitted frame, because an LED cannot be diffed against
+# a host render:
+#
+#   just flash-fw-esp32c6 /dev/cu.usbmodemXXXX frame-dump
+#
+# ⚠️ Two C6s on one bus are indistinguishable by port name — both enumerate as
+# `303a:1001` and both come up as `/dev/cu.usbmodem14332xx`. Resolve by MAC
+# first (`scripts/emu/board-port.py A0:F2:62:87:B4:8C`) and pass the port
+# explicitly rather than letting espflash pick.
+flash-fw-esp32c6 port="" features="": (build-fw-esp32c6 features)
+    #!/usr/bin/env bash
+    set -euo pipefail
+    args=(--chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} --monitor --after hard-reset)
+    if [[ -n "{{ port }}" ]]; then
+      args+=(--port "{{ port }}")
+    fi
+    espflash flash "${args[@]}" {{ fw_esp32c6_elf }}
 
 # Run the Xtensa JIT corpus on a connected ESP32-S3 and print PASS/FAIL per case.
 #
@@ -1438,6 +1473,55 @@ fw-esp32c6-size-check margin="65536": install-rv32-target
     # lp-fw/fw-esp32c6/partitions.csv.
     just _fw-size-check esp32c6 esp32c6 {{ c6_flash_size }} {{ fw_esp32c6_elf }} 3145728 {{ margin }} \
         "See docs/adr/2026-07-28-esp32c6-flash-budget.md."
+    just fw-esp32c6-rodata-layout-check
+
+# The image just linked must carry `build.rs`'s MERGED rodata layout, not
+# esp-hal's stock one.
+#
+# esp-hal's `ld/sections/rodata.x` defines `.flash.appdesc`, `.rodata_merge`,
+# `.rodata` and `.rodata.wifi` as four output sections; `build.rs` replaces it
+# with one `.rodata`, because espflash turns the gaps between those sections
+# into extra ROM-mapped image segments and the ESP32 bootloader asserts
+# `rom_index < 2`. Until 2026-09-08 that patch could silently miss on a cold
+# target dir and the stock layout would link instead
+# (docs/defects/2026-09-08-cold-target-dir-links-esp-hals-stock-rodata.md).
+# `build.rs` now fails the build rather than skip, so this is the second line
+# of defence — it reads the artefact instead of trusting the recipe, which is
+# what the defect turned out to need.
+#
+# Two signatures of the stock script, either one enough: a `.rodata_merge` or
+# `.rodata.wifi` output section exists, or `.flash.appdesc` is placed BELOW
+# `.rodata` (stock puts it first in the region; under the patch it is an
+# orphan and lands after).
+fw-esp32c6-rodata-layout-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    table="$(python3 scripts/emu/elf-section-digest.py {{ fw_esp32c6_elf }})"
+    # Drop the `[ 8]` / `[10]` index column before splitting: it is one awk
+    # field when the index is two digits and two when it is one, which silently
+    # moves every column after it. Normalised, $1 is the name and $3 the addr.
+    rows="$(echo "$table" | sed -E 's/^ *\[ *[0-9]+\] *//')"
+    # BSD awk on macOS has no `strtonum`, so the hex address comes out as
+    # written and the shell converts it.
+    addr_of() { echo "$rows" | awk -v n="$1" '$1 == n { print $3; exit }'; }
+    stock="$(echo "$rows" | awk '$1 == ".rodata_merge" || $1 == ".rodata.wifi" { print $1 }' | tr '\n' ' ')"
+    rodata="$(addr_of .rodata)"
+    appdesc="$(addr_of .flash.appdesc)"
+    out_of_order=0
+    if [ -n "$rodata" ] && [ -n "$appdesc" ] && [ "$((appdesc))" -lt "$((rodata))" ]; then
+        out_of_order=1
+    fi
+    if [ -n "$stock" ] || [ "$out_of_order" -eq 1 ]; then
+        echo "fw-esp32c6-rodata-layout-check: this image has esp-hal's STOCK rodata layout." >&2
+        [ -n "$stock" ] && echo "  stock-only sections present: $stock" >&2
+        echo "  lp-fw/fw-esp32c6/build.rs's rodata.x patch did not reach this link." >&2
+        echo "  espflash will emit >2 ROM segments and the bootloader will assert" >&2
+        echo "  'unpack_load_app, bootloader_utility.c:762 (rom_index < 2)'." >&2
+        echo "  See docs/defects/2026-09-08-cold-target-dir-links-esp-hals-stock-rodata.md." >&2
+        echo "$rows" | grep -E "rodata|appdesc" >&2
+        exit 1
+    fi
+    echo "fw-esp32c6-rodata-layout-check: one merged .rodata section, appdesc after it — patch applied"
 
 # Drift checks: the manifest core embedded in a built firmware must match the
 # checked-in expected fixture (provenance fields stripped). The firmware
@@ -1546,8 +1630,34 @@ heap-budget-check margin_pct="0": install-rv32-target
     scripts/heap-budget-check.sh check {{ margin_pct }}
 
 # Regenerate the heap-budget measured record from the current tree.
+#
+# The `chips` section is carried through untouched — it comes from a different
+# emulator and needs a firmware build. `heap-budget-baseline-chips` is its
+# half.
 heap-budget-baseline: install-rv32-target
     scripts/heap-budget-check.sh baseline
+
+# The heap-budget record's OTHER source: the shipped ESP32-C6 firmware booted
+# whole on `lp-emu-esp32c6`, read from the allocator figures its own first
+# heartbeat reports.
+#
+# `heap-budget-check` measures what a PROJECT costs, on an emulator that has
+# no firmware in it. This measures what the FIRMWARE costs, on the bytes a
+# board is flashed with — and M3 through M7 established that figure byte-equal
+# to silicon on every memory-class value but a constant 8 B, which the record
+# carries beside it. It is what "the heap gates are read from the emulator"
+# means (plan 2026-09-06-1001-esp-emulator, acceptance 8).
+#
+# Separate from `heap-budget-check` because it needs a cross-target firmware
+# build: the required test job must not start one, so `heap-budget-check`
+# prints a named SKIP there and CI's path-gated `emu-c6` job — which builds
+# firmware anyway — runs this, where a skip would be a failure.
+heap-budget-check-chips margin_pct="0": install-rv32-target
+    LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips {{ margin_pct }}
+
+# Re-measure the chip figures into scripts/heap-budget-record.json.
+heap-budget-baseline-chips: install-rv32-target
+    LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips-baseline
 
 # Emit RV32 stack-size metadata for the ESP32 firmware.
 # The direct cargo build can fail at final link on local ESP linker-script setup,
@@ -1701,7 +1811,21 @@ clippy-rv32: install-rv32-target clippy-fw-esp32c6 clippy-fw-esp32c6-harnesses c
 
 # riscv32: fw-esp32c6 clippy
 clippy-fw-esp32c6: install-rv32-target
-    cd lp-fw/fw-esp32c6 && cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6 -- --no-deps -D warnings
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd lp-fw/fw-esp32c6
+    # The app path, default features.
+    cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
+        --features esp32c6 -- --no-deps -D warnings
+    # The app path again with the serial frame readout bolted on. It is `cfg`'d
+    # out of the default build entirely, so linting the defaults leaves it
+    # completely uncovered — the same hole the harness recipe below exists to
+    # close, and the same pass `clippy-fw-esp32s3` makes for the same module.
+    # The C6's walk (and its emulator twin) is only a byte comparison because
+    # this build exists.
+    echo "clippy: --features frame-dump"
+    cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
+        --features esp32c6,frame-dump -- --no-deps -D warnings
 
 # riscv32: every fw-esp32c6 hardware-harness feature (one build per harness).
 #
@@ -1717,7 +1841,8 @@ clippy-fw-esp32c6-harnesses: install-rv32-target
     cd lp-fw/fw-esp32c6
     for feature in test_rmt test_dither test_gpio test_gpio_calibrate test_button \
                    test_usb test_json test_msafluid test_fluid_demo \
-                   test_jit_math_perf test_shader_compile_incremental; do
+                   test_jit_math_perf test_shader_compile_incremental \
+                   test_cycle_probe test_gpio_input; do
         echo "==> fw-esp32c6 harness: $feature"
         cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
             --features "$feature,esp32c6" -- --no-deps -D warnings
@@ -1982,7 +2107,7 @@ test-glsl-filetests:
 # (which need chip builds this gate deliberately avoids). Note the narrow
 # residue: drift unique to the emu fixture itself is only caught locally.
 [parallel]
-check-lint: fmt-check clippy check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-torture-corpus lint-vec-corpus lint-tw-utilities
+check-lint: fmt-check clippy check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
@@ -2032,6 +2157,145 @@ lint-upgrade-fw:
 # fence lives in the script, one line of reason each.
 lint-emu-fence:
     ./scripts/check-emu-fence.sh
+
+# The ESP32-C6 machine's boot tests, which need firmware ELFs, plus the M3
+# replays of the committed transcripts.
+#
+# The boot tests are `#[ignore]`d so that `cargo test --workspace` never starts
+# a cross-target firmware build (a two-minute workspace run would become a
+# ten-minute one on every machine and every CI job that has nothing to do with
+# the emulator). This recipe is what sets the environment and runs them.
+#
+# `LP_EMU_BUILD_FW=1` lets a test build what it needs if it is not already
+# there: `cargo build` for a plain feature set, and
+# `scripts/emu/build-reference-image.sh` for the pinned reference images the
+# gates use (which needs this repository's history for the reference commit, so
+# it is a local affair). Point at prebuilt ones instead with
+# `LP_EMU_C6_ELF_<SLUG>` / `LP_EMU_C6_REF_<SLUG>`; both are cached under
+# `target/lp-emu-c6/` and `target/emu-ref/` once built, so a second run of this
+# recipe rebuilds nothing.
+#
+# NOT in `test-rust-core`: two firmware builds is minutes, and the director
+# log's CI cost rule says a gated job or a nightly, never the default path.
+# `m3_replays`..`m7_replays` need no firmware and do run everywhere.
+#
+# `emu_usb_hello` is in `lp-cli` rather than the emulator because it sends a
+# real `M!` frame, and the single framer for those (`lpc_wire::json::to_serial_line`)
+# is a product crate the fence keeps out of `lp-emu/` — see the test's header.
+test-emu-c6:
+    LP_EMU_BUILD_FW=1 cargo test -p lp-emu-esp32c6 -- --include-ignored --nocapture
+    cargo test -p lp-emu-validate --test m3_replays
+    cargo test -p lp-emu-validate --test m4_replays
+    cargo test -p lp-emu-validate --test m5_replays
+    cargo test -p lp-emu-validate --test m6_replays
+    cargo test -p lp-emu-validate --test m7_replays
+    cargo test -p lp-emu-validate --test cycle_probe_two_clocks
+    cargo test -p lp-cli --test validate_registry_parity
+    LP_EMU_BUILD_FW=1 cargo test -p lp-cli --test emu_usb_hello -- --include-ignored
+
+# The hardware walk, with the emulator where the board goes.
+#
+# `scripts/m4-hardware-walk.sh --chip esp32c6` asks one question of a board:
+# does the shader it compiled and executed on its own JIT render the bytes a
+# host render produces? This asks it of `lp-emu-esp32c6`, on the same image
+# bytes, over the same wire protocol, against the same oracle — and gets TWO
+# independent answers where a board gives one: the firmware's own `[OUT] dump`
+# line, and the WS281x waveform decoded back off the emulated pad by a decoder
+# that never spoke to the firmware.
+#
+# ROM-up from a merged 4 MiB image by default (the closer twin of flashing and
+# resetting a board); `LP_WALK_BOOT=direct` takes M7's faster direct load,
+# which reaches a byte-equal state at app entry.
+#
+# NOT in `test-emu-c6`: it builds a firmware image, a merged flash image and a
+# release lp-cli, and then runs the machine for eight emulated seconds — it
+# is a walk, and a walk is something you run, not something every PR pays for.
+# What it proves per-tick lives in `tests/shader_oracle_pin.rs`, which does
+# run there. See docs/reports/2026-09-08-esp32c6-emulator-walk.md.
+# `build-rv32-builtins` and not the whole `ci-prereqs`: the host oracle's
+# second engine is `lpvm-native`'s rv32 code generator, which renders black
+# without its builtins image — and a black host frame is not an oracle. The
+# Xtensa half of `ci-prereqs` has nothing to do with this chip.
+walk-esp32c6-emu *args: install-rv32-target build-rv32-builtins
+    scripts/emu/m4-walk.sh {{ args }}
+
+# Run one image on the C6 machine — the human front door.
+#
+#   just emu-c6 target/emu-ref/d6cfaa205-boot-idle-memfs/fw-esp32c6 --timeout 6s --strict-bus
+#
+# Every timeout is EMULATED time and needs its unit; `--help` lists the rest.
+# For a recorded, replayable run use the runner instead:
+# `lp-cli validate record emu-m3 --config lp-emu:esp32c6:t1 …`.
+emu-c6 elf *args:
+    cargo run -p lp-emu-esp32c6 --release -- --elf {{ elf }} {{ args }}
+
+# The C6 machine's speed probe: both pinned reference images, both time
+# grades, best of two runs, reported as user seconds, instructions/second and
+# a real-time ratio, with the load average and a `cmp` of the UART bytes
+# against the previous run.
+#
+#   just bench-emu-c6                                   # table, promote to prev/
+#   just bench-emu-c6 --json target/emu-bench/new.json
+#   scripts/emu/bench-c6.sh --bin <saved> --no-build --no-promote   # the A/B half
+#
+# It is an ORACLE, not a gate — no CI job runs it and no number it prints
+# gates anything (AGENTS.md "never gate on emulated microseconds"). A
+# before/after belongs in a PR body as a same-window A/B with the load
+# average quoted; see the script's header.
+bench-emu-c6 *args:
+    scripts/emu/bench-c6.sh {{ args }}
+
+# PGO recipe for the C6 machine binary (D4): instrumented build, one training
+# run of each reference image, merge, optimized rebuild, then the probe on
+# the result. Opt-in — never a default build or CI step, and the target is
+# met without it. Needs `rustup component add llvm-tools-preview` and
+# `cargo install cargo-binutils`; the script checks both first. See
+# `scripts/emu/pgo-c6.sh` and `lp-emu/README.md`'s Speed section.
+bench-emu-c6-pgo:
+    scripts/emu/pgo-c6.sh
+
+# The C6 machine's browser/phone speed probe: builds the wasip1 module,
+# stages it with the two pinned reference images plus a page and worker
+# under a JS WASI shim, and serves it on the LAN (port from
+# scripts/dev-port.sh, never pinned) so a phone can run it and upload its
+# result. D6: no source changes, no wasm32-unknown-unknown entry point.
+#
+#   just bench-emu-web              # build, stage, serve — open the printed URL
+#   just bench-emu-web --collect    # print every uploaded result-*.json as a table
+#
+# Also an ORACLE, not a gate — see the script's header.
+bench-emu-web *args:
+    scripts/emu/bench-web.sh {{ args }}
+
+# The Xtensa core's speed probe: the `bench_loop` fixture at a round count
+# that retires >=100 M instructions in ONE run, reported as user seconds,
+# instructions/second and the load average, with a `cmp` of the guest output
+# AND of a capped text trace against the previous run.
+#
+#   just bench-emu-xt                                   # table, promote to prev/
+#   just bench-emu-xt --json target/emu-bench-xt/new.json
+#   scripts/emu/bench-xt.sh --bin <saved> --no-build --no-promote   # the A/B half
+#
+# `lp-xt-emu` is an ISA core with no SoC around it, so there is no emulated
+# clock and no real-time ratio — a cycle is an instruction
+# (`CycleModel::InstructionCount`). The workload comes from `lp-xt/fixtures`,
+# which the recipe builds (esp toolchain) if it is missing; `bench_loop` takes
+# its round count from the guest entry argument, so the probe no longer
+# repeats a short program to reach a probe-sized run. See the script's header.
+#
+# It is an ORACLE, not a gate — no CI job runs it and no number it prints
+# gates anything.
+bench-emu-xt *args:
+    scripts/emu/bench-xt.sh {{ args }}
+
+# The generated `RegNames` tables (offset -> register name) are derived from
+# the esp32c6 PAC's svd2rust offset comments and carry a provenance header.
+# A hand edit is reverted by the next regeneration and takes its provenance
+# with it, so this checks them the way `lint-vec-corpus` checks the shader
+# corpus. It prints a notice and passes when the PAC sources are not in this
+# machine's cargo registry — see the script's header for why.
+lint-emu-regnames:
+    python3 scripts/emu/pac-regnames.py --check
 
 # Build RV32 builtins before check/build/test so host crates that embed the
 # builtins ELF do not compile a stale "builtins missing" artifact.
@@ -2302,21 +2566,22 @@ validate *args:
 # ============================================================================
 # Demo projects
 # ============================================================================
-# Run lp-cli dev server with an example project
-# Usage: just demo [example-name]
+# Run lp-cli dev server with a checked-in project (a workspace-relative path:
+# `catalog/patterns/<slug>`, `catalog/projects/<slug>` or `projects/test/<slug>`).
+# Usage: just demo [project-dir]
 
-# Example: just demo basic
-demo example="basic":
-    cd lp-cli && cargo run -- dev ../examples/{{ example }}
+# Example: just demo catalog/patterns/pulse
+demo project="projects/test/basic":
+    cargo run -p lp-cli -- dev {{ project }}
 
 # Requires: ESP32-C6 device connected via USB. Builds the default lps-glsl frontend path.
-# Usage: just demo-esp32c6-host [example-name]
-demo-esp32c6-host example="basic": install-rv32-target
+# Usage: just demo-esp32c6-host [project-dir]
+demo-esp32c6-host project="projects/test/basic": install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server
     PORT="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32c6)"; \
     echo "Using ESPFLASH_PORT=$PORT"; \
     ESPFLASH_PORT="$PORT" espflash flash --chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} {{ fw_esp32c6_elf }}; \
-    cargo run --package lp-cli -- dev examples/{{ example }} --push "serial:$PORT"
+    cargo run --package lp-cli -- dev {{ project }} --push "serial:$PORT"
 
 # Run an ESP32-C6 demo as an automated hardware check: capture boot serial,
 # push the project, and exit once the loaded project responds.
@@ -2328,13 +2593,13 @@ test-native-rainbow: build-rv32-builtins
     cargo run -p lps-filetests-app -- test --target rv32lpn.q32 --concise lps-glsl/rainbow.glsl
 
 # Requires: ESP32-C6 device connected via USB. Builds the explicit Naga reference frontend.
-# Usage: just demo-esp32c6-host-naga [example-name]
-demo-esp32c6-host-naga example="basic": install-rv32-target
+# Usage: just demo-esp32c6-host-naga [project-dir]
+demo-esp32c6-host-naga project="projects/test/basic": install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server,naga
     PORT="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32c6)"; \
     echo "Using ESPFLASH_PORT=$PORT"; \
     ESPFLASH_PORT="$PORT" espflash flash --chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} {{ fw_esp32c6_elf }}; \
-    cargo run --package lp-cli -- dev examples/{{ example }} --push "serial:$PORT"
+    cargo run --package lp-cli -- dev {{ project }} --push "serial:$PORT"
 
 # Same as demo-esp32c6-check, but builds the explicit Naga frontend.
 demo-esp32c6-check-naga example="basic": install-rv32-target
@@ -2418,7 +2683,7 @@ fwtest-json-esp32c6: install-rv32-target
 fwtest-msafluid-esp32c6: install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo run --features test_msafluid,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
 
-# Run firmware with test_fluid_demo: live RGB MSAFluid demo on examples/basic ring fixture (GPIO4)
+# Run firmware with test_fluid_demo: live RGB MSAFluid demo on projects/test/basic ring fixture (GPIO4)
 fwtest-fluid-demo-esp32c6: install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo run --features test_fluid_demo,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
 
@@ -2566,7 +2831,7 @@ decode-backtrace-esp32v3 *addrs:
 # ============================================================================
 # Profile a project in the emulator with the unified profile collector(s).
 # Replaces mem-profile and heap-summary.
-# Default project: examples/basic
+# Default project: projects/test/basic
 # Default collectors: alloc
 # Usage: just profile [path/to/project] [--collect alloc] [--frames N] [--note "description"]
 profile *args:

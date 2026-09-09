@@ -239,6 +239,13 @@ pack (T3 content work) — the same posture the format-version history
 already takes toward optional additive fields: old content keeps working
 un-upgraded until something gives it a reason to change.
 
+> Amended 2026-09-06: the eight single-effect examples restructured into
+> this shape as catalog content work — `catalog/patterns/<slug>/` with
+> `kind: pattern`, `exports: ["effect"]`, provenance on the export — and
+> the picker's import source now lists them beside the library's
+> (`2026-09-06-catalog-content-tree`). The pieces stay flat; no
+> big-bang migration happened, and none is scheduled.
+
 ## Consequences
 
 - `project.json` accepts `kind`/`exports`; `schemas/project.schema.json`

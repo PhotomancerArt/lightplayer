@@ -1,0 +1,139 @@
+diff --git a/third_party/esp-rtos/Cargo.toml b/third_party/esp-rtos/Cargo.toml
+index 53e7c54c4..54a98fcd7 100644
+--- a/third_party/esp-rtos/Cargo.toml
++++ b/third_party/esp-rtos/Cargo.toml
+@@ -90,6 +90,9 @@ features = [
+ ]
+ 
+ [features]
++# LP fork: cycle-count probe on the PRO-core tick and yield handlers (Xtensa
++# only). See README-LP.md.
++lp-tick-probe = []
+ alloc = [
+     "dep:allocator-api2",
+     "dep:esp-radio-rtos-driver",
+diff --git a/third_party/esp-rtos/src/lib.rs b/third_party/esp-rtos/src/lib.rs
+index 12874d2cf..f75d361df 100644
+--- a/third_party/esp-rtos/src/lib.rs
++++ b/third_party/esp-rtos/src/lib.rs
+@@ -457,6 +457,75 @@ pub fn start_second_core_with_stack_guard_offset<const STACK_SIZE: usize>(
+ 
+ const TICK_RATE: u32 = esp_config::esp_config_int!(u32, "ESP_RTOS_CONFIG_TICK_RATE_HZ");
+ 
++/// LP fork: a cycle-count probe on the two interrupt handlers the scheduler
++/// runs on the PRO core — the timer tick and the cross-core yield. Each
++/// handler reads `CCOUNT` on entry and exit and folds the delta into a
++/// counter; the firmware drains the counters from thread context and prints
++/// them. Off unless the `lp-tick-probe` feature is on, and Xtensa-only (the
++/// only chip the fork exists for). See README-LP.md.
++#[cfg(feature = "lp-tick-probe")]
++pub mod lp_probe {
++    use core::sync::atomic::{AtomicU32, Ordering};
++
++    #[cfg(not(xtensa))]
++    compile_error!("the lp-tick-probe feature reads the Xtensa CCOUNT register");
++
++    /// Invocation count, summed cycles and the longest single run since the
++    /// last [`Counter::take`]. 32-bit on purpose: the LX6 has no 64-bit
++    /// atomics, and a reader that drains every few seconds never wraps them.
++    pub struct Counter {
++        count: AtomicU32,
++        cycles: AtomicU32,
++        max: AtomicU32,
++    }
++
++    /// One drained sample: `(count, cycles, max)`.
++    pub type Sample = (u32, u32, u32);
++
++    impl Counter {
++        const fn new() -> Self {
++            Self {
++                count: AtomicU32::new(0),
++                cycles: AtomicU32::new(0),
++                max: AtomicU32::new(0),
++            }
++        }
++
++        #[inline(always)]
++        pub(crate) fn record(&self, cycles: u32) {
++            self.count.fetch_add(1, Ordering::Relaxed);
++            self.cycles.fetch_add(cycles, Ordering::Relaxed);
++            self.max.fetch_max(cycles, Ordering::Relaxed);
++        }
++
++        /// Read and zero the counters.
++        pub fn take(&self) -> Sample {
++            (
++                self.count.swap(0, Ordering::Relaxed),
++                self.cycles.swap(0, Ordering::Relaxed),
++                self.max.swap(0, Ordering::Relaxed),
++            )
++        }
++    }
++
++    /// `timer_tick_handler`, entry to exit.
++    pub static TICK: Counter = Counter::new();
++    /// `cross_core_yield_handler`, entry to exit (the context switch itself).
++    pub static YIELD: Counter = Counter::new();
++
++    /// `CCOUNT`, read inline: `xtensa_lx::timer::get_cycle_count` is only
++    /// `#[inline]`, which `opt-level = "z"` outlines into flash — the very
++    /// thing this probe measures.
++    #[inline(always)]
++    pub(crate) fn ccount() -> u32 {
++        let value: u32;
++        // SAFETY: reading the cycle-count special register has no side
++        // effects and needs no state.
++        unsafe { core::arch::asm!("rsr.ccount {0}", out(reg) value, options(nomem, nostack)) };
++        value
++    }
++}
++
+ pub(crate) fn now() -> u64 {
+     Instant::now().duration_since_epoch().as_micros()
+ }
+diff --git a/third_party/esp-rtos/src/task/xtensa.rs b/third_party/esp-rtos/src/task/xtensa.rs
+index d6732ae5d..c3c82d3b5 100644
+--- a/third_party/esp-rtos/src/task/xtensa.rs
++++ b/third_party/esp-rtos/src/task/xtensa.rs
+@@ -195,12 +195,18 @@ pub(crate) fn yield_task() {
+ #[cfg(multi_core)]
+ #[ram]
+ extern "C" fn cross_core_yield_handler(context: &mut CpuContext) {
++    #[cfg(feature = "lp-tick-probe")]
++    let lp_probe_entry = crate::lp_probe::ccount();
++
+     match Cpu::current() {
+         Cpu::ProCpu => unsafe { SoftwareInterrupt::<'static, 0>::steal() }.reset(),
+         Cpu::AppCpu => unsafe { SoftwareInterrupt::<'static, 1>::steal() }.reset(),
+     }
+ 
+     trigger_task_switch(context);
++
++    #[cfg(feature = "lp-tick-probe")]
++    crate::lp_probe::YIELD.record(crate::lp_probe::ccount().wrapping_sub(lp_probe_entry));
+ }
+ 
+ // Having this function separate ensures there is a single un-inlined copy of the task switch logic
+diff --git a/third_party/esp-rtos/src/timer/mod.rs b/third_party/esp-rtos/src/timer/mod.rs
+index 7eb2e312e..56cd6febe 100644
+--- a/third_party/esp-rtos/src/timer/mod.rs
++++ b/third_party/esp-rtos/src/timer/mod.rs
+@@ -220,6 +220,9 @@ impl TimeDriver {
+ 
+ #[esp_hal::ram]
+ extern "C" fn timer_tick_handler() {
++    #[cfg(feature = "lp-tick-probe")]
++    let lp_probe_entry = crate::lp_probe::ccount();
++
+     #[cfg(feature = "rtos-trace")]
+     rtos_trace::trace::marker_begin(TraceEvents::TimerTickHandler as u32);
+ 
+@@ -299,4 +302,7 @@ extern "C" fn timer_tick_handler() {
+ 
+     #[cfg(feature = "rtos-trace")]
+     rtos_trace::trace::marker_end(TraceEvents::TimerTickHandler as u32);
++
++    #[cfg(feature = "lp-tick-probe")]
++    crate::lp_probe::TICK.record(crate::lp_probe::ccount().wrapping_sub(lp_probe_entry));
+ }

@@ -62,6 +62,61 @@ const FRAG_OUT: &str = "lp_gfx_frag_color";
 /// Name of the generated sample-position varying (sample-point pass).
 const SAMPLE_POS_IN: &str = "lp_gfx_sample_pos";
 
+/// An assembled fragment-stage compilation unit, with the byte range the
+/// authored text occupies inside it.
+///
+/// Diagnostics naga produces on the unit carry spans in **assembled**
+/// coordinates; the Studio editor wants **authored** lines. The authored
+/// text is one contiguous slice of the unit (the remainder after
+/// [`hoist_declarations`]: texture calls rewritten in place, hoisted and
+/// stripped declarations blanked with newlines preserved), so line N of
+/// `authored` is authored line N and [`Self::to_authored`] is a shift.
+/// Columns match too, except on a line whose sampler declaration or
+/// `texture()` call was rewritten. The CPU tier's naga frontend does the
+/// same remap over its own prefix (`lps-frontend/src/parse.rs`); the wire
+/// carries one string in authored coordinates, and the Studio parser
+/// (`ui_shader_error.rs`) learns no offset.
+#[derive(Clone, Debug)]
+pub struct AssembledGlsl {
+    /// The full compilation unit fed to naga `glsl-in`.
+    pub glsl: String,
+    /// Byte range of the authored text inside `glsl`.
+    pub authored: core::ops::Range<usize>,
+}
+
+impl AssembledGlsl {
+    /// A unit that is authored text end to end (tests and fixtures).
+    pub fn unassembled(glsl: String) -> Self {
+        let authored = 0..glsl.len();
+        Self { glsl, authored }
+    }
+
+    /// The authored slice of the unit, in assembled form (see the type doc).
+    pub fn authored_text(&self) -> &str {
+        &self.glsl[self.authored.clone()]
+    }
+
+    /// Shift a span in assembled coordinates into authored coordinates.
+    ///
+    /// A span that starts outside the authored text — in the lpfn prelude,
+    /// a hoisted declaration's copy, a texture helper or the wrapper
+    /// `main` — has no authored location and comes back
+    /// [`naga::Span::UNDEFINED`], which every naga renderer treats as
+    /// "message only" (and [`naga::WithSpan::with_span`] drops). A span
+    /// that starts inside and runs past the end is clamped.
+    pub fn to_authored(&self, span: naga::Span) -> naga::Span {
+        let Some(range) = span.to_range() else {
+            return naga::Span::UNDEFINED;
+        };
+        if range.start < self.authored.start || range.start >= self.authored.end {
+            return naga::Span::UNDEFINED;
+        }
+        let start = range.start - self.authored.start;
+        let end = range.end.min(self.authored.end) - self.authored.start;
+        naga::Span::new(start as u32, end as u32)
+    }
+}
+
 /// Assemble the full fragment-stage GLSL for an authored pixel shader
 /// declaring `space`.
 ///
@@ -72,8 +127,8 @@ pub fn assemble_fragment_glsl(
     authored: &str,
     textures: &TextureBindingSpecs,
     space: ShaderEntrySpace,
-) -> Result<String, GfxError> {
-    let mut out = assembled_unit_prefix(authored, textures)?;
+) -> Result<AssembledGlsl, GfxError> {
+    let mut unit = assembled_unit_prefix(authored, textures)?;
     // A 1D target is one row, so the raster x coordinate is the whole
     // position; y is discarded rather than projected.
     let call = match space {
@@ -81,22 +136,23 @@ pub fn assemble_fragment_glsl(
         ShaderEntrySpace::OneD => "render_1d(floor(gl_FragCoord.x))",
     };
     let _ = write!(
-        out,
+        unit.glsl,
         "\nlayout(location = 0) out vec4 {FRAG_OUT};\n\
          void main() {{\n    {FRAG_OUT} = {call};\n}}\n"
     );
-    Ok(out)
+    Ok(unit)
 }
 
 /// Everything of the compilation unit before the generated `main`: version,
 /// lpfn prelude, hoisted struct/const declarations, texture-lowering
 /// helpers, generated prototypes, the (rewritten) authored text, and helper
 /// definitions. Shared verbatim by the render and sample wrappers so both
-/// units lower textures and order declarations identically.
+/// units lower textures and order declarations identically, and both carry
+/// the same authored range.
 fn assembled_unit_prefix(
     authored: &str,
     textures: &TextureBindingSpecs,
-) -> Result<String, GfxError> {
+) -> Result<AssembledGlsl, GfxError> {
     let lowered = lower_texture_calls(authored, textures)?;
     let (hoisted, remainder) = hoist_declarations(&lowered.rewritten);
 
@@ -106,14 +162,19 @@ fn assembled_unit_prefix(
     out.push_str(&lowered.shared_helpers);
     out.push_str(&lowered.helper_prototypes);
     out.push_str(&authored_prototypes(authored));
+    let authored_start = out.len();
     out.push_str(&remainder);
+    let authored_end = out.len();
     // Helper definitions come after the authored text so the sampler
     // uniform declarations they reference are already in scope for naga's
     // declaration-before-use resolution (call sites resolve through the
     // prototypes spliced above).
     out.push('\n');
     out.push_str(&lowered.helper_definitions);
-    Ok(out)
+    Ok(AssembledGlsl {
+        glsl: out,
+        authored: authored_start..authored_end,
+    })
 }
 
 /// Assemble the sample-point fragment-stage GLSL for an authored pixel
@@ -131,19 +192,19 @@ pub fn assemble_sample_fragment_glsl(
     authored: &str,
     textures: &TextureBindingSpecs,
     space: ShaderEntrySpace,
-) -> Result<String, GfxError> {
-    let mut out = assembled_unit_prefix(authored, textures)?;
+) -> Result<AssembledGlsl, GfxError> {
+    let mut unit = assembled_unit_prefix(authored, textures)?;
     let (varying_ty, entry) = match space {
         ShaderEntrySpace::TwoD => ("vec2", "render_2d"),
         ShaderEntrySpace::OneD => ("float", "render_1d"),
     };
     let _ = write!(
-        out,
+        unit.glsl,
         "\nlayout(location = 0) in {varying_ty} {SAMPLE_POS_IN};\n\
          layout(location = 0) out vec4 {FRAG_OUT};\n\
          void main() {{\n    {FRAG_OUT} = {entry}({SAMPLE_POS_IN});\n}}\n"
     );
-    Ok(out)
+    Ok(unit)
 }
 
 /// Build the canonical lpfn prelude for an authored source: the
@@ -631,7 +692,8 @@ float sum(float arr[N]) { return arr[0] + arr[1]; }
             &TextureBindingSpecs::new(),
             ShaderEntrySpace::TwoD,
         )
-        .expect("assembles");
+        .expect("assembles")
+        .glsl;
         let struct_at = unit.find("struct Point").expect("struct hoisted");
         let const_at = unit.find("const int N = 2;").expect("const hoisted");
         let proto_at = unit.find("Point make_point(float x);").expect("prototype");
@@ -653,7 +715,8 @@ float sum(float arr[N]) { return arr[0] + arr[1]; }
             &TextureBindingSpecs::new(),
             ShaderEntrySpace::TwoD,
         )
-        .expect("assembles");
+        .expect("assembles")
+        .glsl;
         // Only the generated prototype survives (naga rejects duplicates),
         // and it precedes render's per callee-first ordering.
         assert_eq!(unit.matches("float helper(float x);").count(), 1);
@@ -695,7 +758,8 @@ float sum(float arr[N]) { return arr[0] + arr[1]; }
             &TextureBindingSpecs::new(),
             ShaderEntrySpace::TwoD,
         )
-        .expect("assembles");
+        .expect("assembles")
+        .glsl;
         assert!(unit.starts_with("#version 450 core\n"));
         let saturate_at = unit.find("float lpfn_saturate(").expect("prelude");
         let proto_at = unit.find("vec4 render_2d(vec2 pos);").expect("prototype");
@@ -716,7 +780,8 @@ float sum(float arr[N]) { return arr[0] + arr[1]; }
             &TextureBindingSpecs::new(),
             ShaderEntrySpace::OneD,
         )
-        .expect("assembles");
+        .expect("assembles")
+        .glsl;
         assert!(unit.contains("render_1d(floor(gl_FragCoord.x))"), "{unit}");
         assert!(
             !unit.contains("gl_FragCoord.xy"),
@@ -737,7 +802,8 @@ float sum(float arr[N]) { return arr[0] + arr[1]; }
             &TextureBindingSpecs::new(),
             ShaderEntrySpace::OneD,
         )
-        .expect("assembles");
+        .expect("assembles")
+        .glsl;
         assert!(
             unit.contains("layout(location = 0) in float lp_gfx_sample_pos;"),
             "{unit}"
@@ -754,7 +820,8 @@ float sum(float arr[N]) { return arr[0] + arr[1]; }
             &TextureBindingSpecs::new(),
             ShaderEntrySpace::TwoD,
         )
-        .expect("assembles");
+        .expect("assembles")
+        .glsl;
         assert!(unit.starts_with("#version 450 core\n"));
         assert!(unit.contains("float lpfn_saturate("), "prelude spliced");
         assert!(unit.contains("layout(location = 0) in vec2 lp_gfx_sample_pos;"));
@@ -763,5 +830,92 @@ float sum(float arr[N]) { return arr[0] + arr[1]; }
             !unit.contains("gl_FragCoord"),
             "sample positions come from the varying, not the raster position"
         );
+    }
+
+    // ---- authored range -----------------------------------------------------
+
+    fn assemble(authored: &str, textures: &TextureBindingSpecs) -> AssembledGlsl {
+        assemble_fragment_glsl(authored, textures, ShaderEntrySpace::TwoD).expect("assembles")
+    }
+
+    /// The authored slice is the hoisted remainder: same line count as the
+    /// authored text, with the prelude, prototypes and wrapper outside it.
+    #[test]
+    fn authored_range_covers_the_authored_text_line_for_line() {
+        let authored = "layout(binding = 0) uniform vec2 outputSize;\n\
+                        struct P { float x; };\n\
+                        vec4 render_2d(vec2 pos) { return vec4(lpfn_saturate(pos.x)); }\n";
+        let unit = assemble(authored, &TextureBindingSpecs::new());
+        let slice = unit.authored_text();
+        assert_eq!(slice.lines().count(), authored.lines().count(), "{slice:?}");
+        assert!(slice.contains("vec4 render_2d(vec2 pos) {"), "{slice}");
+        assert!(!slice.contains("struct P"), "hoisted out, blanked: {slice}");
+        assert!(
+            !slice.contains("lpfn_saturate(float"),
+            "prelude precedes: {slice}"
+        );
+        assert!(!slice.contains("void main()"), "wrapper follows: {slice}");
+        // The prefix is non-trivial here (a prelude and a prototype), so a
+        // naive "line N is line N" would be wrong.
+        assert!(unit.glsl[..unit.authored.start].lines().count() > 3);
+    }
+
+    /// Texture lowering rewrites declarations and call sites in place, so
+    /// the authored slice keeps its line count under it too.
+    #[test]
+    fn authored_range_survives_texture_lowering_line_for_line() {
+        use lp_shader::texture_binding;
+        use lps_shared::{TextureFilter, TextureStorageFormat, TextureWrap};
+        let mut textures = TextureBindingSpecs::new();
+        textures.insert(
+            String::from("t"),
+            texture_binding::texture2d(
+                TextureStorageFormat::Rgba16Unorm,
+                TextureFilter::Linear,
+                TextureWrap::Repeat,
+                TextureWrap::MirrorRepeat,
+            ),
+        );
+        let authored = "uniform sampler2D t;\n\
+                        vec4 render_2d(vec2 pos) {\n\
+                            return texture(t, pos / 8.0);\n\
+                        }\n";
+        let unit = assemble(authored, &textures);
+        let slice = unit.authored_text();
+        assert_eq!(slice.lines().count(), authored.lines().count(), "{slice:?}");
+        assert!(
+            slice.lines().nth(2).is_some_and(|l| l.contains("return ")),
+            "the call site keeps its line: {slice}"
+        );
+    }
+
+    #[test]
+    fn to_authored_shifts_inside_spans_and_drops_outside_ones() {
+        let authored = "vec4 render_2d(vec2 pos) {\n    return vec4(lpfn_saturate(pos.x));\n}\n";
+        let unit = assemble(authored, &TextureBindingSpecs::new());
+        let at = unit
+            .glsl
+            .find("return vec4(lpfn_saturate")
+            .expect("authored call");
+        let shifted = unit.to_authored(naga::Span::new(at as u32, at as u32 + 6));
+        let location = shifted.location(unit.authored_text());
+        assert_eq!((location.line_number, location.line_position), (2, 5));
+        assert_eq!(&unit.authored_text()[shifted], "return");
+
+        let prelude_at = unit.glsl.find("float lpfn_saturate(").expect("prelude");
+        assert!(
+            !unit
+                .to_authored(naga::Span::new(prelude_at as u32, prelude_at as u32 + 5))
+                .is_defined(),
+            "a prelude span has no authored line"
+        );
+        let main_at = unit.glsl.find("void main()").expect("wrapper");
+        assert!(
+            !unit
+                .to_authored(naga::Span::new(main_at as u32, main_at as u32 + 4))
+                .is_defined(),
+            "a wrapper span has no authored line"
+        );
+        assert!(!unit.to_authored(naga::Span::UNDEFINED).is_defined());
     }
 }

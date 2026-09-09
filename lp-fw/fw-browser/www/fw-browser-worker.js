@@ -1,5 +1,6 @@
 import init, {
   create_runtime,
+  desktop_hardware_manifest_json,
   drain_output_json,
   fw_browser_init_exports,
   handle_envelope_json,
@@ -50,8 +51,14 @@ async function boot(label) {
     self.postMessage({ kind: 'status', status: 'booting' });
     const exports = await init();
     fw_browser_init_exports(exports);
-    // Smoke page runs the CPU tier (the authoritative sim tier).
-    runtimeId = JSON.parse(create_runtime(label, 'cpu')).runtime_id;
+    // Smoke page runs the CPU tier (the authoritative sim tier) on the
+    // DESKTOP board — the one board a computer can always be, asked of the
+    // firmware because this page has no board catalog of its own.
+    const options = JSON.stringify({
+      tier: 'cpu',
+      hardware_manifest_json: desktop_hardware_manifest_json(),
+    });
+    runtimeId = JSON.parse(create_runtime(label, options)).runtime_id;
     booted = true;
     postMany(drain_output_json(runtimeId));
   }

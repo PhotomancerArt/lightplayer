@@ -41,10 +41,6 @@ pub struct UiPackageCard {
     /// Structural actions refuse while set; the card gets the badge
     /// treatment (M4b P4).
     pub open_elsewhere: bool,
-    /// The live SIM session currently runs this project (the D28 grammar's
-    /// sim arm — one fact, two views: the sim card wears the project chip,
-    /// this card wears the "Running in simulator" indication).
-    pub running_in_sim: bool,
     /// The project's advisory `target` (gallery-rework vision D3): a board
     /// catalog id in the registry's `vendor/product` vocabulary, straight
     /// from `ProjectManifest.target`. `None` for an untargeted project. The

@@ -15,6 +15,13 @@
 //! The row strings come from [`ProjectTemplate`], not from here: adding a
 //! template is one arm in the core enum plus one in the file generator, and
 //! this menu grows the row for free.
+//!
+//! **One optional name field** sits above the rows (2026-09-06: Yona could
+//! not find how to name a project while setting up a piece). Blank keeps
+//! the ruling that a template needs no prompt — the library names the
+//! package after the template — and a typed name rides the row's
+//! `CreateProject` as the package's name. Not a step: a row is still one
+//! click.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{HomeOp, ProjectTemplate, UiAction};
@@ -49,6 +56,11 @@ pub fn NewProjectMenu(
 ) -> Element {
     let rest = quiet_action_class().to_string();
     let open = format!("{rest} tw:bg-card-muted tw:text-soft-foreground");
+    // The optional name, shared by every row: typed once, carried by
+    // whichever template is picked.
+    let mut name = use_signal(String::new);
+    let typed = name.read().trim().to_string();
+    let project_name = (!typed.is_empty()).then_some(typed);
 
     rsx! {
         DetailPopover {
@@ -67,9 +79,25 @@ pub fn NewProjectMenu(
             trigger_class: rest,
             trigger_open_class: open,
             DetailSection { title: Some("New project".to_string()),
-                div { class: "tw:grid tw:gap-0.5",
-                    for template in TEMPLATES {
-                        TemplateRow { key: "{template:?}", template, busy, on_action }
+                div { class: "tw:grid tw:gap-1.5",
+                    input {
+                        class: NAME_INPUT_CLASS,
+                        r#type: "text",
+                        aria_label: "Project name (optional)",
+                        placeholder: "Name (optional) \u{2014} else named after the template",
+                        value: "{name}",
+                        oninput: move |event| name.set(event.value()),
+                    }
+                    div { class: "tw:grid tw:gap-0.5",
+                        for template in TEMPLATES {
+                            TemplateRow {
+                                key: "{template:?}",
+                                template,
+                                name: project_name.clone(),
+                                busy,
+                                on_action,
+                            }
+                        }
                     }
                 }
             }
@@ -88,10 +116,13 @@ pub fn NewProjectMenu(
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn TemplateRow(
     template: ProjectTemplate,
+    /// The menu's optional name, already trimmed and `None` when blank.
+    #[props(default)]
+    name: Option<String>,
     #[props(default = false)] busy: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
-    let action = home_action(HomeOp::CreateProject { template });
+    let action = home_action(HomeOp::CreateProject { template, name });
     let summary = action.meta().summary.clone();
     let close = try_consume_context::<PopoverCloseHandle>();
 
@@ -119,6 +150,10 @@ fn TemplateRow(
         }
     }
 }
+
+/// The optional name field — the card rename input's dress, at the menu's
+/// width.
+const NAME_INPUT_CLASS: &str = "tw:min-w-0 tw:rounded tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1 tw:text-sm tw:text-strong-foreground";
 
 /// The menu-row treatment, top-aligned for a two-line row (the shared
 /// `menu_item_action_class` centers its single line).

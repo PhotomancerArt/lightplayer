@@ -12,7 +12,7 @@
 //!   corpus, so the feature stays off and order lives in this tree instead.
 //! - **Numeric spelling.** `Value` stores numbers as `f64`, and re-emitting
 //!   one goes through ryū: `0.00003` comes back as `3e-5`. That is a real
-//!   diff in `examples/fluid/fluid.json`, a file the v4→v5 step *does*
+//!   diff in `projects/test/fluid/fluid.json`, a file the v4→v5 step *does*
 //!   rewrite. Scalars are therefore kept as their original source text.
 //!
 //! Scalars (numbers, strings, booleans, `null`) are stored verbatim as the

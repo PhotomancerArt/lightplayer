@@ -1,0 +1,9 @@
+{
+  "format": 10,
+  "name": "Pulse",
+  "description": "The plainest possible shader: the whole fixture breathes one colour on a phasor. If a strip is dark under this, that is the wiring.",
+  "kind": "pattern",
+  "exports": [
+    "effect"
+  ]
+}

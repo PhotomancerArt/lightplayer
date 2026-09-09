@@ -75,7 +75,7 @@ against a stale arena is just wrong.
 
 ⚠️ **And per-LED is not the dominant term at realistic scale.** Comparing two
 projects with near-identical LED counts but different node counts —
-`examples/basic` (241 LEDs, 1 fixture + 1 output, ~58 KB of project cost) vs
+`projects/test/basic` (241 LEDs, 1 fixture + 1 output, ~58 KB of project cost) vs
 `quad60-v3` (240 LEDs, 4 + 4, ~100 KB) — puts roughly **14 KB on each
 fixture+output pair**, against ~21 KB of per-LED cost for the whole 240-LED
 project. On a four-channel show, node cost already exceeds LED cost by 2×.
@@ -142,11 +142,11 @@ Three separable steps, cheapest first:
   valuable RAM lead this chip has", and was believed to scale with `render_size`.
   It does not, on the direct-sampling path: it scales with mapped lamp count.
 - **2026-08-02** — the `render_size` multiplier measured separately, on the
-  `TextureArea` path (`examples/fast`, 16×16 canvas, **one** lamp): 1,024 B of
+  `TextureArea` path (`projects/test/fast`, 16×16 canvas, **one** lamp): 1,024 B of
   `PixelMappingEntry` (4 B/canvas pixel) + 2,048 B of RGBA16 render target
   (8 B/canvas pixel) = **3,072 B per fixture for a single LED**, i.e. 12 B per
   canvas pixel *independent of lamp count*. 34× what a direct-sampled LED costs.
-  Only `examples/fast` uses this path today, so it contributes nothing to the
+  Only `projects/test/fast` uses this path today, so it contributes nothing to the
   89.5 B/LED figure — but nothing in the authoring surface tells an author that
   widening `render_size` on a texture-area fixture is a RAM decision. Worth its
   own entry if that path ever ships.

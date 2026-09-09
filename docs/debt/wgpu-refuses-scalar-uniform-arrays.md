@@ -10,7 +10,7 @@ natural stride (`third_party/naga/src/front/glsl/parser/types.rs` →
 in `front/glsl/offset.rs` only runs for interface-block members, which
 top-level uniforms never are.
 
-vec3/vec4/mat and 16-aligned-struct arrays pass — `examples/meteor`'s
+vec3/vec4/mat and 16-aligned-struct arrays pass — `catalog/patterns/meteor`'s
 `uniform Meteor meteors[4]` works only because the struct is 16-aligned.
 
 **Why it matters now.** Buffer slots (ADR 2026-08-08-typed-shader-buffers)

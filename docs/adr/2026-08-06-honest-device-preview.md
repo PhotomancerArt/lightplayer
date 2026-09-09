@@ -5,7 +5,14 @@
 - **Deciders:** Photomancer
 - **Supersedes:** the D12 hero strip (gallery-rework P05) as the device
   card's preview surface
-- **Superseded by:** None
+- **Superseded by:** in part — the client-side display-layout synthesis
+  clause below was deleted in 45df0da9c; `2026-09-06-shared-link-
+  conversations-and-the-card-feed.md` records what stands (geometry comes
+  only from the wire; over-budget layouts are named, not drawn) and brings
+  this feed to the round-2 device card over the SHARED link
+- **Amended by:** [2026-09-07-always-a-device-target-real-emu-sim.md](2026-09-07-always-a-device-target-real-emu-sim.md)
+  (one card-feed lane, the roster's — the violet SIM pill becomes the
+  runtime band)
 
 ## Context
 
@@ -57,6 +64,15 @@ the frames the sim engine actually published — as real as a board's —
 wearing a violet SIM pill as identity dress over the shared
 live/stale/offline/waiting states. The browser re-simulation canvas
 left the play tab entirely (project thumbnails keep theirs).
+
+> **Amended 2026-09-07** — the violet SIM pill is retired in favor of
+> the runtime band: a 24px row under the identity rows, in the same
+> bound family, reading `▶ Sim · <target> · in this tab · <granted
+> tier>` (D38/D49). A sim is drawn by the ordinary `DeviceRosterCard`
+> now, not a separate `sim_card.rs`, and its feed is fed through
+> `device_feeds` like any card — including the Lens treatment (paused,
+> "the editor has the wire") while the editor holds its wire. See
+> `2026-09-07-always-a-device-target-real-emu-sim.md`.
 
 **Post-gamma colors ARE the honest view** (Q2): the published buffer
 holds what the board drives onto the wire. Gamma is lossy to invert,
@@ -126,8 +142,20 @@ re-squishes).
 
 ## Follow-ups
 
-- Persistent last-frame snapshots (offline cards across app runs) via
-  the M6 project-thumb `<img>` seam / LibraryStore metadata.
+- ~~Persistent last-frame snapshots (offline cards across app runs) via
+  the M6 project-thumb `<img>` seam / LibraryStore metadata~~ — **landed
+  2026-09-07** (PR #572): not the `<img>` seam (web-only, session cache, no native
+  test) but a per-uid sidecar in the library store,
+  `/device-frames/<uid>.json` (`app/devices/device_frame_snapshot.rs`):
+  the composed frame + display layout + capture stamp, written from the
+  feed lane at most every 10 s per board (`CatalogOp::StoreDeviceFrame`,
+  no gallery re-hydration), deleted with the registry row on Forget, and
+  seeded into the board's `DeviceFrameFeed` at library settle so the
+  remembered tile draws it dimmed with "last frame · <age>" aged from the
+  STORED stamp. Posture: a cache, not user data — additive, own
+  `version`, and an unreadable or foreign-version sidecar reads as absent
+  rather than migrating (AGENTS.md persisted-format rule, the additive
+  way).
 - 3D fixture models inherit the ▶ tab slot when they land.
 - GPU render tier (PR #299 parked) relates via the D1/D2 display-policy
   tension recorded above.

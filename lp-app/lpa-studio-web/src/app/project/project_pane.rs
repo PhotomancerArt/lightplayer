@@ -271,7 +271,7 @@ pub fn ProjectPane(
                 DebugActiveChip { count: debug_overrides, on_action }
             },
             detail: rsx! {
-                ProjectDetailPopover { content: detail_content, initially_open }
+                ProjectDetailPopover { content: detail_content, initially_open, on_action }
             },
             body: rsx! {
                 div { class: "tw:grid tw:min-w-0 tw:content-start tw:gap-3 tw:pt-3",
@@ -338,11 +338,12 @@ pub(crate) fn DebugActiveChip(count: usize, on_action: EventHandler<UiAction>) -
 /// The detail popup on the shared [`DetailPopover`] base — the project's
 /// standing panel: project identity with the status word (its only home —
 /// headers no longer carry a status chip), the root's "Project settings"
-/// identity rows (the editable `name` — and the read-only
-/// `format`/`uid`/`nodes` rows — live here rather than on the restored root
-/// card, as purpose-built controls rather than generic slot editors; see
-/// [`ProjectSettingsSection`]), and the project stats (moved here
-/// from the old sidebar MetricGrid card).
+/// identity rows (the `name` row — editable when a library package backs
+/// the project, its form dispatching the same `RenamePackage` the gallery
+/// kebab does — and the read-only `format`/`uid`/`nodes` rows live here
+/// rather than on the restored root card, as purpose-built controls rather
+/// than generic slot editors; see [`ProjectSettingsSection`]), and the
+/// project stats (moved here from the old sidebar MetricGrid card).
 ///
 /// Two things are NOT here. The pending-edit lists and facts belong to the
 /// header control's **changes** segment (relationship-control D8), whose
@@ -354,6 +355,7 @@ pub(crate) fn DebugActiveChip(count: usize, on_action: EventHandler<UiAction>) -
 fn ProjectDetailPopover(
     content: ProjectDetailContent,
     #[props(default = false)] initially_open: bool,
+    on_action: EventHandler<UiAction>,
 ) -> Element {
     let affordance = content.affordance;
     let style = affordance_trigger_style(affordance);
@@ -367,7 +369,7 @@ fn ProjectDetailPopover(
             placement: PopoverPlacement::BottomEnd,
             active: affordance.is_announced(),
             initially_open,
-            ProjectDetailSections { content }
+            ProjectDetailSections { content, on_action: Some(on_action) }
         }
     }
 }
@@ -379,12 +381,16 @@ fn ProjectDetailPopover(
 /// — the workbench's flat Nodes dock has no header of its own to hang a
 /// popup from, so that mount is the ONLY place its project state shows.
 ///
-/// Purely presentational now: the change lists (which carried the per-entry
-/// revert dispatch) moved to the changes popup, so these sections take no
-/// `on_action`.
+/// The change lists (which carried the per-entry revert dispatch) moved to
+/// the changes popup; the one control left here is the settings section's
+/// rename, which is why `on_action` is optional — a mount with nowhere to
+/// send it renders the name read-only.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn ProjectDetailSections(content: ProjectDetailContent) -> Element {
+pub fn ProjectDetailSections(
+    content: ProjectDetailContent,
+    #[props(default)] on_action: Option<EventHandler<UiAction>>,
+) -> Element {
     let ProjectDetailContent {
         project_name,
         status,
@@ -398,7 +404,10 @@ pub fn ProjectDetailSections(content: ProjectDetailContent) -> Element {
         // reached THROUGH that popover, so carrying the rows here too would
         // be the same door twice.
         dirty: _,
-        library_identity: _,
+        // The library package behind the project is what a rename
+        // addresses; a project without one (the demo path, a device-hosted
+        // project) keeps a read-only name row.
+        library_identity,
         // The changes half of the content — pending-edit lists, the
         // pending facts, and the Save/Revert pair — belongs to the header
         // control's CHANGES popup now (relationship-control D8); it rides
@@ -431,7 +440,12 @@ pub fn ProjectDetailSections(content: ProjectDetailContent) -> Element {
             // root's nodes count): purpose-built controls, NOT the
             // generic slot editor — see `project_settings_section`.
             DetailSection { title: "Project settings",
-                ProjectSettingsSection { manifest, root_slots }
+                ProjectSettingsSection {
+                    manifest,
+                    root_slots,
+                    rename_uid: library_identity.map(|(uid, _slug)| uid),
+                    on_action,
+                }
             }
         }
         if !stats.is_empty() {

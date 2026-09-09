@@ -19,6 +19,10 @@ pub struct UiProjectManifest {
     /// ([`crate::app::library::package_manifest::kind_label`]), never the
     /// raw JSON spelling.
     pub kind: String,
+    /// The hardware this project declares it runs on (D41): the catalog
+    /// board id, or `None` for Desktop — which is what an absent `target`
+    /// has always meant. The settings' Hardware row shows and edits it.
+    pub target: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -183,7 +183,7 @@ The core is IO-free state machines; async belongs to platform edges. See
   could not be read" — because the classifier had no version to key an
   upgrade on. The drill: `just format-bump` (snapshot + step scaffold),
   bump `PROJECT_FORMAT_VERSION`, write the `lpa-upgrade` step, bless the
-  corpus goldens, and migrate `examples/` + `projects/` in the same change.
+  corpus goldens, and migrate `catalog/` + `projects/` in the same change.
   The v5→v6 step (`lp-app/lpa-upgrade/src/steps/v5_to_v6.rs`) is the
   worked example — value-preserving transcode, keyed off shape, never off
   field names.
@@ -237,6 +237,7 @@ runtime.
 | `fw-emu`         | RISC-V emulator firmware (CI)          | yes (bare metal) |
 | `lp-riscv-emu`   | RV32 emulator (host) — in `lp-emu/`    | yes (+std feat)  |
 | `lp-xt-emu`      | Xtensa emulator (host) — in `lp-emu/`  | yes (+std feat)  |
+| `lp-emu-esp32c6` | ESP32-C6 SoC emulator (host) — `lp-emu/esp/` | no        |
 
 Every emulator crate lives under **`lp-emu/`** and is **MIT**, not AGPL —
 see the license rule above and `lp-emu/README.md`. The rv32/Xtensa
@@ -664,6 +665,13 @@ four nouns:
   difference is reported with its ratio, and `--strict` refuses a claim the
   configuration is not measured for.
 
+On `lp-emu:*` the **shipped image runs on the link it ships with** — the
+emulated USB-Serial-JTAG, with a host that can be attached, detached, opened
+and closed (`--usb-host`, `--usb-script`, `--control`). The old
+`spike_uart0_link` workaround, which moved the host link to UART0, is now a
+per-payload property and applies only to `esp-emu:*` and to the payloads
+whose committed transcripts are of that image.
+
 ```bash
 cargo run -q -p lp-cli -- validate list
 cargo run -q -p lp-cli -- validate replay <transcript> --against esp-emu:0.42.0
@@ -686,6 +694,94 @@ transcript, then agents work for weeks with no board. An agent does not open
 the port (see below); it writes the protocol file and Yona runs it.
 
 `lp-cli fwcheck` remains the older single-check front door and still works.
+
+### The ESP32-C6 emulator
+
+`lp-emu/esp/lp-emu-esp32c6` runs the shipped `fw-esp32c6` image on the host —
+the bytes a board is flashed with, not a variant. It boots either way a board
+can: **ROM-up** from a merged 4 MiB flash image, where the hart starts at the
+reset vector and the real mask ROM and ESP-IDF second-stage bootloader load
+the app, or a **direct load** straight to the entry point, which M7 measured
+byte-equal to ROM-up at app entry and which is what the per-tick gates use. It
+speaks the link the product ships on (emulated USB-Serial-JTAG, with a host
+that can be attached, detached, opened and closed), serves a project over it,
+renders, and drives a WS281x waveform onto a pad that a decoder reads back at
+the datasheet's ±150 ns. It is the configuration `lp-emu:esp32c6:t1` (and
+`:t2`) in the validation system above.
+
+```bash
+lp-cli emu run --merged <chip.bin> --link 127.0.0.1:5591 --monitor   # a C6 you can talk to
+lp-cli upload projects/test/basic serial:tcp://127.0.0.1:5591        # …in another terminal
+
+just walk-esp32c6-emu                           # THE WALK (see below) — minutes, not seconds
+just test-emu-c6                                # its gates (builds firmware)
+just heap-budget-check-chips                    # the firmware's own heap ledger, ratcheted
+just emu-c6 <elf> --strict-bus --timeout 6s     # the workshop binary, thirty flags
+just bench-emu-c6                               # its speed probe (an oracle, never a gate)
+scripts/emu/oracle-sweep.sh <bin-a> <bin-b>     # the identity oracle: uart + cycles + decoded FRAMES
+just bench-emu-c6-pgo                           # PGO recipe on top of the probe (opt-in, never a default build)
+just bench-emu-web                              # the same probe in a browser (wasip1 + JS WASI shim, LAN-served)
+just bench-emu-xt                               # the Xtensa core's probe (same rules)
+cargo run -p lp-cli -- validate run emu-m3 --config lp-emu:esp32c6:t1 --dry-run
+```
+
+#### Which reference image you quote decides what you have measured
+
+`bench-emu-c6` runs four pinned images and they are **not** interchangeable.
+Same window, one loaded Mac, 2026-09-08, real time at t1:
+
+| image | rt | what it actually does |
+|---|---|---|
+| `boot-idle-memfs` | 6.0× | `wfi` with an EMPTY filesystem — no project, no shader |
+| `harness` | 0.6× (3.2× under M4's poll skip) | a shader COMPILE, and console-bound |
+| `render-basic` | 0.47× | the product's render loop: a real project, JIT'd shader per frame, RMT out |
+| `render-rocaille` | 0.53× | the same loop with four times the shader per frame |
+
+**Quote the render rows.** The ladder's headline numbers were taken on the
+other two for four milestones, and the render loop turns out to be about
+**twelve times slower** than the `boot-idle` image those numbers came from.
+The M4 poll skip is worth 5.6× on the harness and nothing — very slightly
+negative — on the render loop, which is the difference between accelerating
+the emulator and accelerating its logging.
+
+#### The walk, and what still needs a board
+
+`just walk-esp32c6-emu` is the emulator twin of
+`scripts/m4-hardware-walk.sh --chip esp32c6`: same image bytes, same wire
+protocol, same host oracle, and the same question — does the shader the device
+compiled and executed on its own JIT render the bytes a host render produces?
+It answers **twice**, where a board answers once: the firmware's own
+`[OUT] dump` line (the `frame-dump` feature, ported to this chip for exactly
+this) and the waveform decoded off the emulated pad. The walk record is
+`docs/reports/2026-09-08-esp32c6-emulator-walk.md`, and it is where to look
+before quoting any of this.
+
+**It does not replace a board.** The emulator has no Chromium USB stack, no
+radio traffic, no analog anything, no RX pins, and its clock is a model. The
+walk record lists what it does not cover; a change to any of that is still a
+desk sitting. What the walk replaces is the *routine* C6 walk — the one that
+used to be run to check that a render still renders.
+
+Three rules before you use a number from it:
+
+- **Never gate on emulated microseconds** (plan PD9, vision D13). Time is a
+  graded ladder and no rung is a promise: `t1` counts one cycle per
+  instruction, `t2` uses a per-class model, and neither is graded by a
+  transcript. Memory figures transfer; clocks do not. A replay *reports* a
+  timing difference with its ratio and *fails* on a memory one, which is the
+  same rule in code.
+- **A claim needs a transcript.** Every class of `lp-emu:esp32c6:*` is graded
+  `modeled` in `validate.toml`, each with a reason; byte-equality with silicon
+  on one payload is evidence written into that reason, not a promotion. Record
+  through `lp-cli validate record`, never by hand, and never edit what it
+  wrote.
+- **The fence still applies.** These crates are MIT and may not import a
+  product crate. The payload registry mirrors `fw-checks`; `lp-cli` owns the
+  parity test.
+
+Run it under `--strict-bus` while bringing anything up: an access nothing
+claims is then a fault with a pc and a symbol, instead of a zero the guest
+believes.
 
 ## Validation Commands
 

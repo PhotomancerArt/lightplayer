@@ -623,12 +623,6 @@ label:has(> input:not(:disabled)) {
     color: var(--studio-status-neutral-text);
 }
 
-/* Violet = the sim's own family: a re-simulated picture must never wear the
-   green a device's frames earn. */
-.ux-play-pill-sim {
-    color: var(--studio-status-bound-text);
-}
-
 @keyframes ux-play-blink {
     50% {
         opacity: 0.35;

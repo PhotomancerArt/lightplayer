@@ -145,6 +145,11 @@
           "const": "esp32",
           "description": "Classic ESP32 (Xtensa LX6) — `fw-esp32v3`.",
           "type": "string"
+        },
+        {
+          "const": "desktop",
+          "description": "A computer running the desktop firmware — `fw-browser` in a tab,\n`fw-host` on a machine. It has no pins, so its board profile\n(`boards/lightplayer/desktop.json`) is a virtual, deliberately\nunlimited table rather than a calibrated pin map.",
+          "type": "string"
         }
       ]
     },

@@ -7,6 +7,13 @@
 //! link, and the only visible consequence of it failing is that the link
 //! lags (see the crate's P5 for the affordances that do speak).
 //!
+//! What it does leave behind is bookkeeping, not UI: every trip's
+//! conclusion goes to [`sync_status`](super::sync_status) for the
+//! `/account` page to read, and a trip that put something in the cloud
+//! files a [`publish_notice`] so a surface holding a now-stale
+//! `GetProject` answer knows to re-ask. Neither is a control, and neither
+//! says anything to the user on its own.
+//!
 //! # Where the triggers come from
 //!
 //! - **Every catalog transaction** that produced a package
@@ -16,8 +23,11 @@
 //!   several op variants funnel through `install_package`.
 //! - **Every save** (`library_host_opfs::notify_saved`), debounced.
 //! - **Sign-in**, which sweeps the whole library.
-//! - **A coarse timer**, which is the retry path for everything the service
-//!   was not reachable for.
+//! - **A coarse timer**, which re-derives from the library: the retry path
+//!   for everything the service was not reachable for, and the catch-all
+//!   for a project whose install-time request never made it into the queue
+//!   (installed before `whoami` answered) or was refused and forgotten.
+//!   `SyncQueue::sweep` keeps it cheap by skipping what already settled.
 //!
 //! # Locks
 //!
@@ -47,10 +57,11 @@ use lpa_cloud_client::LocalProject;
 use lpa_studio_core::app::library::{LibraryStore, PackageSummary};
 use lpc_history::PrefixedUid;
 
+use super::publish_notice;
 use super::sidecar_producer::read_identity;
 use super::sync_queue::{DueProject, SyncQueue, SyncTrigger, TripResult};
 use super::sync_status::{self, SyncOutcomeKind};
-use super::sync_trip::{TripReport, classify, run_trip};
+use super::sync_trip::{TripReport, classify, describe_error, run_trip};
 use crate::cloud::FetchCloudPort;
 use crate::local_store::opfs_library_host;
 
@@ -213,15 +224,49 @@ impl SyncEngine {
     }
 
     /// The coarse retry loop. Started once, runs for the life of the tab.
+    ///
+    /// Each tick is a sweep over the library, not over the queue: an entry
+    /// the queue forgot (a refusal, before it backed off instead) or never
+    /// had (an install that landed while `whoami` was pending, a sign-in
+    /// sweep that found no library host yet) is still a project in OPFS
+    /// with no cloud record, and the roster is the only place it shows.
+    /// The queue's own memory of what settled keeps this from re-pushing a
+    /// quiet library once a minute.
     async fn sweep_forever(self: Rc<Self>) {
         loop {
             TimeoutFuture::new(SWEEP_INTERVAL_MS).await;
             if !self.signed_in.get() {
                 continue;
             }
-            self.queue.borrow_mut().arm_all(now_ms());
-            self.pump().await;
+            self.tick().await;
         }
+    }
+
+    /// One tick of the coarse timer: offer the library to the queue's
+    /// sweep, then pump whatever came out due.
+    async fn tick(self: &Rc<Self>) {
+        // Read the library BEFORE touching the queue (see `sweep`).
+        let library = roster().await;
+        let now = now_ms();
+        // A sign-in sweep that gave up on the library host recorded that
+        // nothing was offered; the first tick that does offer supersedes it,
+        // so `/account` stops telling the user to reload.
+        if !library.is_empty() {
+            sync_status::record(|board| {
+                if board
+                    .engine
+                    .last_sweep
+                    .as_ref()
+                    .is_some_and(|sweep| sweep.host_missing)
+                {
+                    board.record_sweep(library.len(), false, now);
+                }
+            });
+        }
+        self.queue
+            .borrow_mut()
+            .sweep(library.keys().map(String::as_str), now);
+        self.pump().await;
     }
 
     /// One project's trip: snapshot, publish, bank — in that order, and
@@ -277,6 +322,16 @@ impl SyncEngine {
                 log::debug!("cloud sync: {} {report:?}", due.uid);
                 let (kind, detail) = describe(&report);
                 conclude(kind, detail);
+                // The one push out of the driver (`publish_notice`): a
+                // trip that PUT something in the cloud can change what
+                // `GetProject` answers about this project, and a surface
+                // that asked before the trip is now holding a stale
+                // answer. Published and pushed both count — a push lands
+                // on a project whose roster fetch may have run while
+                // there was still no cloud record to find.
+                if matches!(kind, SyncOutcomeKind::Published | SyncOutcomeKind::Pushed) {
+                    publish_notice::record(&due.uid);
+                }
                 TripResult::Settled
             }
             Err(error) => {
@@ -287,7 +342,7 @@ impl SyncEngine {
                     TripResult::Denied => SyncOutcomeKind::Denied,
                     TripResult::Settled | TripResult::Refused => SyncOutcomeKind::Refused,
                 };
-                conclude(kind, &error.to_string());
+                conclude(kind, &describe_error(&error));
                 verdict
             }
         }

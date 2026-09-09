@@ -43,6 +43,7 @@ pub use entry_space::{RenderEntry, ShaderEntrySpace};
 pub use error::{LpsError, ShaderFuelTrap, ShaderFuelTrapEntry};
 pub use lps_shared::{LpsTexture2DDescriptor, LpsTexture2DValue};
 pub use lpvm::AllocError;
+pub use lpvm::DEFAULT_INVOCATION_FUEL;
 pub use px_shader::LpsPxShader;
 pub use sample_buf::{LpsSamplePointBuf, LpsSampleRgba16Buf};
 pub use texture_buf::LpsTextureBuf;

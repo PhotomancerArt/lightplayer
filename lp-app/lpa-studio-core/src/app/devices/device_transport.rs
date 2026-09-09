@@ -9,6 +9,9 @@
 //! | build | implementation |
 //! |---|---|
 //! | wasm + `browser-serial-esp32` | `BrowserSerialTransport` (`browser_transport.rs`) over `BrowserSerialEsp32Provider` |
+//! | any build that can run sims | `SimDeviceTransport` (`sim_transport.rs`) over the sims this tab powered on |
+//! | both of the above | `CompositeDeviceTransport` (`composite_transport.rs`), routing by the link's endpoint — the effects layer holds ONE transport, on purpose |
+//! | a browser without Web Serial (Safari, Firefox), and the host | the composite with no serial half: the roster still fills with sims, and only the chooser degrades |
 //! | host tests | a fake over `lpa_link::device_link::fake` (see `device_roster`'s tests) |
 //! | anything else | none installed: the roster stays empty and says so |
 //!

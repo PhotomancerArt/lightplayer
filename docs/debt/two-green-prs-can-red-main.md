@@ -57,7 +57,7 @@ repair is not buried inside unrelated work, and say so on the PR.
   code size, and it documents its own contract as "the same pipeline the device
   runs … in Q32". `FloatMode::F32` would have compiled cleanly and silently
   measured different code sizes, destroying agreement with silicon. The repair
-  was verified by confirming the figures were unchanged (`examples/basic`
+  was verified by confirming the figures were unchanged (`projects/test/basic`
   6,516 B, `quad-strips-v3` 2,032 B — both still matching `[JIT] used=`
   readings taken off a classic ESP32 the same day).
 

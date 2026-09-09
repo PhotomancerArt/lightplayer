@@ -112,7 +112,7 @@ impl EnginePhase {
             Self::Booting => "Starting the engine…",
             Self::Instantiating => "Loading the engine…",
             Self::GpuInit => "Setting up graphics…",
-            Self::RuntimeCreate => "Starting the simulator…",
+            Self::RuntimeCreate => "Starting the sim…",
         }
     }
 }
@@ -519,7 +519,7 @@ mod tests {
         UiAction::from_op(
             ControllerId::new(HOME_NODE_ID),
             HomeOp::OpenExample {
-                id: "examples/fyeah-sign".to_string(),
+                id: "catalog/fyeah-sign".to_string(),
             },
         )
     }
@@ -569,7 +569,7 @@ mod tests {
             ("booting", "Starting the engine…"),
             ("instantiating", "Loading the engine…"),
             ("gpu-init", "Setting up graphics…"),
-            ("runtime-create", "Starting the simulator…"),
+            ("runtime-create", "Starting the sim…"),
             // an unknown future phase must never leak the raw token
             ("warming-caches", "Starting the engine…"),
         ] {
@@ -625,7 +625,7 @@ mod tests {
         let state = opening_state(&OpenProbe {
             in_flight: false,
             stage: OpenStage::Failed(OpenFailure {
-                message: "the simulator did not connect".to_string(),
+                message: "the device did not start".to_string(),
                 retry: retry_action(),
             }),
             ..OpenProbe::default()
@@ -633,7 +633,7 @@ mod tests {
         let OpeningState::Failed { message, retry } = state else {
             panic!("a finished failure must not fall back to the skeleton");
         };
-        assert_eq!(message, "the simulator did not connect");
+        assert_eq!(message, "the device did not start");
         assert_eq!(retry, retry_action());
     }
 

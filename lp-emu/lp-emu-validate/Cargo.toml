@@ -15,7 +15,16 @@ anyhow = { workspace = true, features = ["std"] }
 regex = { workspace = true }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std"] }
+# For the sidecar's `firmware_sha256`: which BYTES a transcript came from
+# (L4). No product crate, so the fence holds.
+sha2 = { workspace = true }
 toml = "0.8"
+
+[dev-dependencies]
+# `tests/m4_replays.rs` pins the walk's shape frame by digest: 16,139 bytes
+# that must stay the ones a real C6 sent, and quoting them in a test would be
+# sixteen kilobytes of assertion nobody could read.
+sha2 = "0.10"
 
 [lints]
 workspace = true

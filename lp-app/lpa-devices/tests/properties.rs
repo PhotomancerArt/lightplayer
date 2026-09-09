@@ -621,5 +621,6 @@ fn flash_step() -> Step {
         device: 1,
         board: "seeed-xiao-esp32c6".to_string(),
         build: "esp32c6-4mb".to_string(),
+        name: None,
     }
 }

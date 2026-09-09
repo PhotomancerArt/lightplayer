@@ -35,7 +35,14 @@ fn run_fixture(name: &str, arg: u32) -> Option<lp_xt_elf::GuestRun> {
 /// Assert a fixture runs to a clean exit 0 with exactly `expected` output.
 #[track_caller]
 fn assert_fixture(name: &str, expected: &str) {
-    let Some(run) = run_fixture(name, 0) else {
+    assert_fixture_with_arg(name, 0, expected);
+}
+
+/// As [`assert_fixture`], passing `arg` to the guest entry point (for the
+/// fixtures whose work is parameterized by it).
+#[track_caller]
+fn assert_fixture_with_arg(name: &str, arg: u32, expected: &str) {
+    let Some(run) = run_fixture(name, arg) else {
         return;
     };
     assert_eq!(
@@ -127,6 +134,58 @@ fn ackermann() {
     let _ = writeln!(e, "ack(3,3)={}", ack(3, 3));
     let _ = writeln!(e, "ack(3,5)={}", ack(3, 5));
     assert_fixture("ackermann", &e);
+}
+
+/// The speed probe's workload (`scripts/emu/bench-xt.sh`). Unlike the rest of
+/// the corpus its length is set by `arg` — one round when `arg == 0` — so the
+/// oracle is checked at both ends of that branch: the degenerate single round
+/// and a thousand rounds of the real loop.
+#[test]
+fn bench_loop() {
+    const N: usize = 64;
+
+    fn step(v: u32, acc: u32, i: u32) -> u32 {
+        let r = (v ^ acc).rotate_left(i & 31);
+        r.wrapping_add(v >> 3).wrapping_mul(2654435761) ^ (acc >> 11)
+    }
+
+    fn spill(n: u32, x: u32) -> u32 {
+        if n == 0 {
+            x
+        } else {
+            spill(n - 1, x.rotate_left(3).wrapping_add(n)) ^ (n << 2)
+        }
+    }
+
+    fn expected(arg: u32) -> String {
+        let rounds = if arg == 0 { 1 } else { arg };
+        let mut buf = [0u32; N];
+        let mut seed = 0x1234_5678u32;
+        for slot in buf.iter_mut() {
+            seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+            *slot = seed;
+        }
+        let mut acc = 0xC0FF_EE00u32;
+        for r in 0..rounds {
+            for i in 0..N {
+                let w = step(buf[i], acc, i as u32);
+                buf[i] = w;
+                acc = acc.wrapping_mul(1664525).wrapping_add(1013904223) ^ (w >> 7);
+            }
+            acc = acc.wrapping_add(spill(24, r ^ acc));
+        }
+        let checksum = buf.iter().enumerate().fold(0u32, |a, (i, &v)| {
+            a.wrapping_add(v.rotate_left(i as u32 & 31))
+        });
+        let mut e = String::new();
+        let _ = writeln!(e, "rounds={rounds}");
+        let _ = writeln!(e, "acc={acc}");
+        let _ = writeln!(e, "checksum={checksum}");
+        e
+    }
+
+    assert_fixture_with_arg("bench_loop", 0, &expected(0));
+    assert_fixture_with_arg("bench_loop", 1000, &expected(1000));
 }
 
 #[test]

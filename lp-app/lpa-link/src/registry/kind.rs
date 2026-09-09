@@ -70,15 +70,18 @@ impl LinkProviderKind {
 
     /// Transport label for UI surfaces that name how a DEVICE is reached.
     ///
-    /// `None` for runtime providers that are not devices at all (the browser
-    /// worker and host process simulators never show as devices — D22).
-    /// `Fake` is the test double for serial hardware, so it wears the serial
-    /// label and fixtures render like production. Future device classes
-    /// (websocket, network) name themselves here.
+    /// Every kind names itself: a runtime is reached over a channel like
+    /// anything else, and a device backed by the browser worker is a **sim**
+    /// — a device whose transport is a worker rather than a wire. `Fake` is
+    /// the test double for serial hardware, so it wears the serial label and
+    /// fixtures render like production. Future device classes (websocket,
+    /// network) name themselves here, which is why the answer stays
+    /// optional.
     pub fn transport_label(self) -> Option<&'static str> {
         match self {
             Self::HostSerialEsp32 | Self::BrowserSerialEsp32 | Self::Fake => Some("USB"),
-            Self::HostProcess | Self::BrowserWorker => None,
+            Self::BrowserWorker => Some("sim"),
+            Self::HostProcess => Some("host"),
         }
     }
 

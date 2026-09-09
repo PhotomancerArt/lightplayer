@@ -2702,48 +2702,61 @@ mod tests {
     }
 
     fn examples_fluid_fs() -> LpFsStd {
-        LpFsStd::new(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/fluid"))
+        LpFsStd::new(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../projects/test/fluid"),
+        )
     }
 
     fn examples_events_fs() -> LpFsStd {
-        LpFsStd::new(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/events"))
+        LpFsStd::new(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../projects/test/events"),
+        )
     }
 
     fn examples_button_playlist_fs() -> LpFsStd {
         LpFsStd::new(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/button-playlist"),
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../projects/test/button-playlist"),
         )
     }
 
     fn examples_button_sign_fs() -> LpFsStd {
         LpFsStd::new(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/button-sign"),
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../projects/test/button-sign"),
         )
     }
 
     fn examples_fyeah_sign_fs() -> LpFsStd {
         LpFsStd::new(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/fyeah-sign"),
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../catalog/projects/fyeah-sign"),
         )
     }
 
     fn examples_fyeah_button_fs() -> LpFsStd {
         LpFsStd::new(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/fyeah-button"),
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../projects/test/fyeah-button"),
         )
     }
 
     fn examples_basic_fs() -> LpFsStd {
-        LpFsStd::new(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/basic"))
+        LpFsStd::new(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../projects/test/basic"),
+        )
     }
 
     fn examples_plasma_fs() -> LpFsStd {
-        LpFsStd::new(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/plasma"))
+        LpFsStd::new(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../catalog/patterns/plasma"),
+        )
     }
 
     fn examples_plasma_duo_fs() -> LpFsStd {
         LpFsStd::new(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/plasma-duo"),
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../catalog/patterns/plasma-duo"),
         )
     }
 
@@ -2769,7 +2782,8 @@ mod tests {
     fn loaded_basic_runtime() -> LoadedProjectRuntime {
         let fs = examples_basic_fs();
         let services = EngineServices::new(TreePath::parse("/basic.show").expect("path"));
-        let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load examples/basic");
+        let mut rt =
+            ProjectLoader::load_from_root(&fs, services).expect("load projects/test/basic");
         rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
             lp_shader::ShaderFrontend::LpsGlsl,
         ))));
@@ -4087,7 +4101,7 @@ mod tests {
         );
     }
 
-    /// The defaulting rule, end to end: `examples/fluid` predates the `power`
+    /// The defaulting rule, end to end: `projects/test/fluid` predates the `power`
     /// slot and authors none, yet its fixture must still come up limited. The
     /// budget the node publishes is the one actually enforced, so asserting on
     /// it also pins that the UI cannot report a percentage against a budget

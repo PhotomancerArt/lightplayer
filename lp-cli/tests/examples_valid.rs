@@ -5,7 +5,7 @@ use lpfs::LpFsStd;
 use std::path::{Path, PathBuf};
 
 #[test]
-fn checked_in_projects_load_as_core_projects() -> Result<()> {
+fn checked_in_catalog_entries_load_as_core_projects() -> Result<()> {
     let workspace_dir = workspace_dir();
     let project_dirs = checked_in_project_dirs(&workspace_dir, GATE_ROOTS)?;
 
@@ -34,7 +34,7 @@ fn checked_in_projects_load_as_core_projects() -> Result<()> {
 }
 
 #[test]
-fn checked_in_projects_rewrite_byte_identically() -> Result<()> {
+fn checked_in_catalog_entries_rewrite_byte_identically() -> Result<()> {
     // Mitosis invariant: loading and re-writing an unchanged project
     // produces identical bytes for BOTH split files — the container
     // manifest through `ProjectManifest::write_json`, the root module
@@ -86,8 +86,8 @@ fn checked_in_projects_rewrite_byte_identically() -> Result<()> {
     Ok(())
 }
 
-/// Every checked-in project under `roots`, recursively (a root may nest
-/// its projects one directory deep). Every root must
+/// Every checked-in project under `roots`, recursively (the catalog nests
+/// entries one bucket deep: `catalog/<bucket>/<slug>`). Every root must
 /// contribute at least one project — a wrong path would otherwise make a
 /// gate vacuous.
 fn checked_in_project_dirs(workspace_dir: &Path, roots: &[&str]) -> Result<Vec<PathBuf>> {
@@ -104,13 +104,9 @@ fn checked_in_project_dirs(workspace_dir: &Path, roots: &[&str]) -> Result<Vec<P
     Ok(project_dirs)
 }
 
-/// Roots both gates walk: the checked-in examples (the content Studio
-/// embeds) and every hardware/measurement rig under `projects/test/`. Both
-/// trees must load, and both must already be in the canonical writers'
-/// byte order — a project that fails the byte gate is rewritten once
-/// through `ProjectManifest::write_json` / `NodeDef::write_json` (no
-/// semantic change) rather than exempted.
-const GATE_ROOTS: &[&str] = &["examples", "projects/test"];
+/// Roots both gates walk: the catalog (the content Studio embeds) and
+/// every test rig under `projects/test/` — canonical since PR #543.
+const GATE_ROOTS: &[&str] = &["catalog", "projects/test"];
 
 fn workspace_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))

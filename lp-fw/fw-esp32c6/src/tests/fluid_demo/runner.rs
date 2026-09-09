@@ -1,4 +1,4 @@
-//! RGB MSAFluid live demo on the `examples/basic` 241-lamp circular
+//! RGB MSAFluid live demo on the `projects/test/basic` 241-lamp circular
 //! ring fixture, GPIO18. Solver + emitters + sampler + readout +
 //! `lpc_shared::DisplayPipeline` + RMT, all in `no_std` Rust.
 //!
@@ -66,7 +66,7 @@ pub async fn run_fluid_demo(_: embassy_executor::Spawner) -> ! {
          intensity={INTENSITY} brightness={BRIGHTNESS} lamps={LAMP_COUNT}",
     );
 
-    // RMT + LedChannel on gpio18 (matches `examples/basic` strip output).
+    // RMT + LedChannel on gpio18 (matches `projects/test/basic` strip output).
     let rmt = Rmt::new(rmt_peripheral, crate::output::rmt::shared_driver::RMT_CLOCK)
         .expect("Failed to initialize RMT");
     let mut led_channel = LedChannel::new(rmt, gpio18, LAMP_COUNT)

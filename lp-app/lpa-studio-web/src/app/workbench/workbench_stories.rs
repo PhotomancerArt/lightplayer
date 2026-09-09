@@ -18,8 +18,8 @@ use crate::app::story_fixtures::{
 };
 use crate::router::ProjectView;
 use lpa_studio_core::{
-    ArtifactLocation, NodeId, ProjectSyncPhase, UiArrangeMeta, UiArrangeTransform, UiLensCard,
-    UiPatchSurface, UiPatchTarget, UiStudioView, UiViewContent,
+    ArtifactLocation, NodeId, ProjectSyncPhase, UiArrangeMeta, UiArrangeTransform, UiPatchSurface,
+    UiPatchTarget, UiStudioView, UiViewContent,
 };
 
 /// Stamp port/output labels onto every cell by id join — what
@@ -62,7 +62,7 @@ fn labelled(mut surface: UiPatchSurface) -> UiPatchSurface {
 
 /// One embedded small-dome file's text, by example-relative path.
 fn small_dome_text(path: &str) -> String {
-    let example = lpa_studio_core::app::home::embedded_example("examples/small-dome")
+    let example = lpa_studio_core::app::home::embedded_example("catalog/small-dome")
         .expect("small-dome embedded");
     let bytes = example
         .files
@@ -269,7 +269,7 @@ fn workbench_patching_mobile_pick() -> Element {
                             path: "/sector/4".to_string(),
                         }),
                     ),
-                lens_card: Some(UiLensCard::Sim(simulator_lens_card())),
+                lens_card: Some(simulator_lens_card()),
                 running: true,
                 hrefs: WorkbenchHrefs::inert_all(),
                 initial_summoned: Some(super::PanelId::Outputs),
@@ -296,7 +296,7 @@ fn workbench_mobile_outputs_summoned() -> Element {
                             path: "/sector/2".to_string(),
                         }),
                     ),
-                lens_card: Some(UiLensCard::Sim(simulator_lens_card())),
+                lens_card: Some(simulator_lens_card()),
                 running: true,
                 hrefs: WorkbenchHrefs::inert_all(),
                 initial_summoned: Some(super::PanelId::Outputs),
@@ -323,7 +323,7 @@ fn workbench_tablet_tree_summoned() -> Element {
                             path: "/sector/2".to_string(),
                         }),
                     ),
-                lens_card: Some(UiLensCard::Sim(simulator_lens_card())),
+                lens_card: Some(simulator_lens_card()),
                 running: true,
                 hrefs: WorkbenchHrefs::inert_all(),
                 initial_summoned: Some(super::PanelId::Tree),
@@ -388,7 +388,7 @@ fn workbench_memory_story(memory: PanelMemory) -> Element {
                 view: WorkbenchView::Nodes,
                 panes: vec![project_synced_pane_view()],
                 project_editor: project_editor_fixture(ProjectSyncPhase::Ready),
-                lens_card: Some(UiLensCard::Sim(simulator_lens_card())),
+                lens_card: Some(simulator_lens_card()),
                 running: true,
                 hrefs: WorkbenchHrefs::inert_all(),
                 initial_memory: Some(memory),
@@ -421,7 +421,7 @@ fn props_stack_surface() -> UiPatchSurface {
 /// The dome fixture's real document (the embedded example's bytes — the
 /// same resolver the device runs).
 fn dome_doc() -> Map2dDoc {
-    let example = lpa_studio_core::app::home::embedded_example("examples/small-dome")
+    let example = lpa_studio_core::app::home::embedded_example("catalog/small-dome")
         .expect("small-dome embedded");
     let bytes = example
         .files

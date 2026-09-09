@@ -4,7 +4,7 @@ use lp_collection::{VecMap, VecSet};
 
 use crate::{
     HardwareLease, HwAddress, HwCapability, HwClaim, HwEndpointStatus, HwError, HwLeaseId,
-    HwManifest,
+    HwManifest, HwResource,
 };
 
 /// Live ownership registry for a board manifest.
@@ -138,20 +138,34 @@ impl HwRegistry {
 
     pub fn endpoint_status_for(&self, address: &HwAddress) -> HwEndpointStatus {
         match self.manifest.resource(address) {
-            Some(resource) => {
-                if let Some(reason) = resource.reserved_reason() {
-                    HwEndpointStatus::Reserved {
-                        reason: reason.into(),
-                    }
-                } else if let Some(claimant) = self.claimant_for(address) {
-                    HwEndpointStatus::InUse { claimant }
-                } else {
-                    HwEndpointStatus::Available
-                }
-            }
+            Some(resource) => self.endpoint_status_of(resource),
             None => HwEndpointStatus::Unavailable {
                 reason: alloc::format!("unknown hardware resource: {address}"),
             },
+        }
+    }
+
+    /// Status of a manifest resource the caller already holds.
+    ///
+    /// What [`Self::endpoint_status_for`] answers once it has found the
+    /// resource — without the finding. A driver enumerating its endpoints walks
+    /// `manifest().resources()` and so has each resource in hand; asking by
+    /// address instead made every endpoint re-search the manifest, a linear
+    /// `String` compare per entry. On the emulator's virtual board, which
+    /// declares all 256 GPIOs, that was 256 × 261 compares per output open —
+    /// 9.3 M cycles of a zook-dome load, more than the shader compile.
+    ///
+    /// `resource` must come from this registry's manifest; the status of a
+    /// resource from any other manifest is meaningless here.
+    pub fn endpoint_status_of(&self, resource: &HwResource) -> HwEndpointStatus {
+        if let Some(reason) = resource.reserved_reason() {
+            HwEndpointStatus::Reserved {
+                reason: reason.into(),
+            }
+        } else if let Some(claimant) = self.claimant_for(resource.address()) {
+            HwEndpointStatus::InUse { claimant }
+        } else {
+            HwEndpointStatus::Available
         }
     }
 
@@ -385,6 +399,39 @@ mod tests {
         let after_release = registry.generation();
         assert!(registry.release(&held).is_err());
         assert_eq!(registry.generation(), after_release);
+    }
+
+    /// Enumerating drivers hold the resource and ask by it; the answer must be
+    /// the by-address answer for every state a resource can be in.
+    #[test]
+    fn status_of_a_held_resource_matches_status_by_address() {
+        let manifest = HwManifest::new(
+            "board",
+            "Board",
+            [
+                HwResource::new(HwAddress::gpio(18), [HwCapability::GpioOutput], "D6"),
+                HwResource::new(HwAddress::gpio(19), [HwCapability::GpioOutput], "D7"),
+                HwResource::new(HwAddress::gpio(12), [HwCapability::GpioOutput], "GPIO12")
+                    .reserved("crashes during GPIO scan"),
+            ],
+        );
+        let registry = HwRegistry::new(manifest);
+        let _held = registry
+            .claim_bundle(HwClaim::new("holder", vec![HwAddress::gpio(18)]))
+            .unwrap();
+
+        for resource in registry.manifest().resources() {
+            assert_eq!(
+                registry.endpoint_status_of(resource),
+                registry.endpoint_status_for(resource.address()),
+                "{}",
+                resource.address()
+            );
+        }
+        let by_address = |pin| registry.endpoint_status_for(&HwAddress::gpio(pin));
+        assert!(matches!(by_address(18), HwEndpointStatus::InUse { .. }));
+        assert!(matches!(by_address(19), HwEndpointStatus::Available));
+        assert!(matches!(by_address(12), HwEndpointStatus::Reserved { .. }));
     }
 
     #[test]
