@@ -1296,10 +1296,17 @@ XIAO C6s, `gap` 1 on every record and the four-rung payload ladder walked in
 full — and it is what says the alternation above was the emulator's and not
 the payload's. It is evidence weighed in a `because`, not a promotion.
 
+Replayed against those two silicon transcripts, the emulated pair now compares
+**60 of 60** structural fields on both machines, where the committed pre-fix
+capture compares 55 — the five differences being exactly `espnow-rx[1..5].gap`,
+2 against silicon's 1.
+
 ⚠️ **The emulated pair's four committed transcripts
 (`lp-emu/transcripts/esp32c6/espnow-broadcast/`, `t1` and `t2`, one per
-machine) predate the fix** and still carry `"gap":2`. They want re-recording,
-which is a transcript change and belongs with whoever holds that directory.
+machine) predate the fix** and still carry `"gap":2`, so a replay of *them*
+still fails those five fields. They want re-recording, which is a transcript
+change and belongs with whoever holds that directory; the 60-of-60 above was
+measured on a scratch re-run of the same pair.
 
 **No pin claim, and the reason is the payload.** ESP-NOW events are **console
 fields, not pin fields**: `espnow-broadcast` declares no pin capture, so no

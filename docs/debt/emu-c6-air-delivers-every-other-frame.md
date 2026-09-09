@@ -190,11 +190,26 @@ and `tests/air_delivery.rs::every_delivery_takes_a_descriptor_the_guest_has
 _not_already_read`, which pins the mechanism without going through the
 payload's arithmetic at all.
 
+**The replay, both machines.** The silicon pair landed on `main` while this
+was in flight (PR #644), so the comparison the report could only describe can
+now be run. Against `silicon-esp32c6-2026-09-09-5c1d37627-*`:
+
+| left (emulated `t1`) | compared | equal | differ |
+|---|---|---|---|
+| the committed pair, pre-fix | 60 | 55 | 5 (`espnow-rx[1..5].gap`, 2 vs 1) |
+| the same pair re-run post-fix | 60 | **60** | **0** |
+
+Both machines, both directions. The five fields the report named as the only
+divergence are the five the fix closes, and it moves nothing else — which is
+the shape a correct fix was required to have.
+
 **What the fix did not do, and someone still owes.** The emulated pair's four
 committed transcripts (`lp-emu/transcripts/esp32c6/espnow-broadcast/`, `t1`
 and `t2`, one per machine) predate it and still carry `"gap":2`; transcripts
-were fenced for this change, so they want re-recording separately. Nothing was
-tuned toward silicon: the delivery was made correct, and `gap` reaching 1 —
-the figure two real XIAO C6s record on every one of their records, per
+were fenced for this change, so they want re-recording separately, and the
+60-of-60 row above was measured on a scratch re-run rather than on a committed
+capture. Nothing was tuned toward silicon: the delivery was made correct, and
+`gap` reaching 1 — the figure two real XIAO C6s record on every one of their
+records, per
 `docs/reports/2026-09-09-espnow-broadcast-two-board-silicon-replay.md` —
 followed from it.
