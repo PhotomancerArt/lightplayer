@@ -1067,6 +1067,7 @@ fn a_native_usb_board_after_a_flash_never_gets_the_ch34x_rung() {
             board_id: "seeed-xiao-esp32c6".to_string(),
             build_id: "esp32c6-4mb".to_string(),
             park_first: true,
+            name: None,
         }),
     );
     replay.step(
@@ -1139,6 +1140,7 @@ fn a_hung_bootloader_saved_pc_ends_the_ladder_early_with_replug_guidance() {
             device: device.0,
             board: "dig-uno".to_string(),
             build: "esp32-4mb".to_string(),
+            name: None,
         },
     );
     replay.step(
@@ -1218,6 +1220,7 @@ fn a_saved_pc_outside_the_bootloader_is_not_a_hang() {
             device: device.0,
             board: "dig-uno".to_string(),
             build: "esp32-4mb".to_string(),
+            name: None,
         },
     );
     replay.step(
