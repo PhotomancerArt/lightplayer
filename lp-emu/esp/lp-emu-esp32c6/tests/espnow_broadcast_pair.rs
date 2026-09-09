@@ -81,8 +81,11 @@ const STAGGER_MS: u64 = 250;
 /// The knob exists because the first pair run of this payload found the
 /// receiving guest reporting **every other** frame, and "is that a phase
 /// artefact of two machines a fixed distance apart, or is it structural?" is a
-/// question one environment variable answers in a second. It is not a knob a
-/// committed transcript ever uses: the recorded pair is [`STAGGER_MS`].
+/// question one environment variable answers in a second. It was structural
+/// (`docs/debt/emu-c6-air-delivers-every-other-frame.md`, retired 2026-09-09),
+/// and the knob is kept because the *next* question of that shape deserves the
+/// same one-second answer. It is not a knob a committed transcript ever uses:
+/// the recorded pair is [`STAGGER_MS`].
 fn stagger_ms() -> u64 {
     std::env::var("LP_EMU_C6_ESPNOW_BROADCAST_STAGGER_MS")
         .ok()
