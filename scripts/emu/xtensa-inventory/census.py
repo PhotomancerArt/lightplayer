@@ -98,13 +98,22 @@ def lift_section(objcopy: Path, elf: Path, name: str, vma: int, workdir: Path) -
     raw = workdir / f"{name.strip('.').replace('.', '_')}.bin"
     out = workdir / f"{name.strip('.').replace('.', '_')}.elf"
     run([str(objcopy), "-O", "binary", f"--only-section={name}", str(elf), str(raw)])
+    # NOTE: this toolchain's objcopy (crosstool-NG esp-14.2.0_20240906,
+    # GNU objcopy 2.43.1) silently zeroes the section's *content* — while
+    # keeping the correct size — when section flags are attached directly
+    # to `--rename-section` (`.data=.text,alloc,load,readonly,code`).
+    # Verified by hand: the same rename with a separate `--set-section-flags`
+    # preserves content; adding flags to `--rename-section` zeroes it, with
+    # or without `--change-section-address` also present. So flags and
+    # rename are always issued as two separate options here.
     run(
         [
             str(objcopy),
             "-I", "binary",
             "-O", "elf32-xtensa-le",
             "-B", "xtensa",
-            "--rename-section", ".data=.text,alloc,load,readonly,code",
+            "--rename-section", ".data=.text",
+            "--set-section-flags", ".text=alloc,load,readonly,code",
             "--change-section-address", f".data={vma:#x}",
             str(raw),
             str(out),
@@ -121,7 +130,8 @@ def wrap_raw(objcopy: Path, blob: Path, vma: int, workdir: Path) -> Path:
             "-I", "binary",
             "-O", "elf32-xtensa-le",
             "-B", "xtensa",
-            "--rename-section", ".data=.text,alloc,load,readonly,code",
+            "--rename-section", ".data=.text",
+            "--set-section-flags", ".text=alloc,load,readonly,code",
             "--change-section-address", f".data={vma:#x}",
             str(blob),
             str(out),

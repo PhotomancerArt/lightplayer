@@ -46,8 +46,10 @@ DEFAULT_TOOLCHAIN = Path(
     )
 )
 
-# objdump -d instruction line:  "400d0020:\t2d f4 21 \tmovi.n\ta2, -1"
-_INSN_RE = re.compile(r"^\s*([0-9a-f]+):\t([0-9a-f]{2}(?: [0-9a-f]{2})*)\s*\t(\S+)")
+# objdump -d instruction line, tab-delimited: "400d0020:\t572c      \tmovi.n\ta7, 37"
+# The hex-bytes field has NO spaces between byte pairs on this objdump
+# (verified by hand: "1c4012" is one 3-byte instruction, not three fields) —
+# so width is (hex digit count)/2, matching objdiff.rs's own parse_line.
 # objdump -h section line: "  4 .literal      00000a10  3ffb7f90  3ffb7f90  00027f90  2**2"
 _SEC_RE = re.compile(
     r"^\s*\d+\s+(\S+)\s+([0-9a-f]+)\s+([0-9a-f]+)\s+([0-9a-f]+)\s+([0-9a-f]+)\s+2\*\*"
@@ -120,15 +122,33 @@ def symbol_ranges(nm: Path, elf: Path) -> list[tuple[int, int, str]]:
 
 
 def decoded_instructions(objdump: Path, elf: Path, section: str) -> list[tuple[int, int]]:
-    """[(addr, width_bytes), ...] for every decoded line in `section`, in address order."""
+    """[(addr, width_bytes), ...] for every decoded line in `section`, in address order.
+
+    Parses the same way `objdiff.rs::parse_line` does: split the address off
+    at the first `:`, then split the rest on tabs — the first non-empty
+    tab-field is the hex-bytes field (its hex-digit count / 2 is the width),
+    the remaining fields are the mnemonic/operands. This intentionally
+    includes `.byte` data-directive lines (mis-decoded regions, e.g. the
+    `.vectors` section) — they are real bytes a naive sweep would still walk
+    through, so they belong in the collision count, not excluded from it.
+    """
     text = run([str(objdump), "-d", "-j", section, str(elf)])
     out = []
     for line in text.splitlines():
-        m = _INSN_RE.match(line)
-        if not m:
+        if ":\t" not in line:
             continue
-        addr = int(m.group(1), 16)
-        width = len(m.group(2).split())
+        addr_part, rest = line.split(":", 1)
+        addr_part = addr_part.strip()
+        if not addr_part or any(c not in "0123456789abcdef" for c in addr_part):
+            continue
+        fields = [f for f in rest.split("\t") if f.strip()]
+        if not fields:
+            continue
+        hexdigits = "".join(c for c in fields[0] if c in "0123456789abcdef")
+        if not hexdigits:
+            continue
+        addr = int(addr_part, 16)
+        width = len(hexdigits) // 2
         out.append((addr, width))
     return out
 
