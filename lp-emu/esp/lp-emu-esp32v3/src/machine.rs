@@ -524,6 +524,7 @@ pub struct Esp32V3Builder {
     boot_frame: Option<BootFrame>,
     flash_size: u32,
     reset_cause: loader::ResetCause,
+    efuse: loader::EfuseIdentity,
     boot_set: bool,
     trace: Option<Box<dyn std::io::Write + Send>>,
     trace_blocks: Vec<String>,
@@ -542,6 +543,7 @@ impl Default for Esp32V3Builder {
             boot_frame: None,
             flash_size: loader::DEFAULT_FLASH_SIZE,
             reset_cause: loader::ResetCause::default(),
+            efuse: loader::EfuseIdentity::default(),
             boot_set: true,
             trace: None,
             trace_blocks: Vec::new(),
@@ -566,6 +568,7 @@ impl fmt::Debug for Esp32V3Builder {
             .field("boot_frame", &self.boot_frame)
             .field("flash_size", &self.flash_size)
             .field("reset_cause", &self.reset_cause)
+            .field("efuse", &self.efuse)
             .field("boot_set", &self.boot_set)
             .field("trace", &self.trace.is_some())
             .field("trace_blocks", &self.trace_blocks)
@@ -635,6 +638,15 @@ impl Esp32V3Builder {
         self
     }
 
+    /// The part this run claims to be: the MAC and the chip revision the
+    /// eFuse block answers with, and — through `APB_CTRL.date` bit 31 — the
+    /// top bit of that revision. Default: the desk board, `30:76:f5:ec:f6:34`
+    /// and v3.1 (`../bench.md`).
+    pub fn efuse(mut self, identity: loader::EfuseIdentity) -> Self {
+        self.efuse = identity;
+        self
+    }
+
     /// A machine with **no** peripherals — the memory map, the ROM and the
     /// harts alone. What P2 built; kept so a test can still read the first
     /// strict stop of each boot path against an empty MMIO window.
@@ -672,7 +684,7 @@ impl Esp32V3Builder {
         // is empty until `start_peripherals`.
         let mut peripheral_map = Vec::new();
         if self.boot_set {
-            let set = crate::periph::boot_set(self.reset_cause);
+            let set = crate::periph::boot_set(self.reset_cause, self.efuse);
             check_registration_order(&set)?;
             for (base, len, periph) in set {
                 peripheral_map.push((periph.name(), base, len));

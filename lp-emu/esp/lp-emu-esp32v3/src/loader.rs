@@ -214,6 +214,83 @@ impl BootFrame {
     }
 }
 
+/// The desk board's MAC — `30:76:f5:ec:f6:34`, the classic ESP32 on
+/// `../bench.md`'s bench (DOM-Z-102). The default so that a run with no
+/// `--efuse-*` flag produces the same identity as the board every transcript
+/// came from, exactly as the C6's `DESK_MAC` does.
+pub const DESK_MAC: [u8; 6] = [0x30, 0x76, 0xf5, 0xec, 0xf6, 0x34];
+
+/// What the classic's eFuse block reports about the part it is: the MAC and
+/// the chip revision. [`crate::periph::efuse`] turns it into the words
+/// esp-hal and the IDF bootloader read.
+///
+/// The desk board is **v3.1** — L0's bootloader banner prints `chip
+/// revision: v3.1` (`../bench.md`) — so that is the default.
+///
+/// ⚠️ **The major revision is not an eFuse field alone.** esp-hal's
+/// `major_chip_version` (`esp-hal-1.1.1/src/efuse/esp32/mod.rs`) combines
+/// three bits: `CHIP_VER_REV1` (eFuse block 0 bit 111), `CHIP_VER_REV2`
+/// (bit 180) and **bit 31 of `APB_CTRL.date`**, which is not an eFuse at
+/// all. See [`crate::periph::accept::apb_ctrl`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EfuseIdentity {
+    pub mac: [u8; 6],
+    /// Major chip revision — 3 on the desk board. Only 0..=3 are
+    /// expressible: esp-hal maps the three-bit combination to exactly those
+    /// four values.
+    pub chip_major: u8,
+    /// Minor chip revision — 1 on the desk board. Two bits
+    /// (`WAFER_VERSION_MINOR`, block 0 bits 184:185).
+    pub chip_minor: u8,
+}
+
+impl Default for EfuseIdentity {
+    fn default() -> Self {
+        Self {
+            mac: DESK_MAC,
+            chip_major: 3,
+            chip_minor: 1,
+        }
+    }
+}
+
+impl EfuseIdentity {
+    /// Parse `30:76:f5:ec:f6:34`.
+    pub fn parse_mac(text: &str) -> Result<[u8; 6], String> {
+        let parts: Vec<&str> = text.split(':').collect();
+        if parts.len() != 6 {
+            return Err(format!("`{text}` is not six colon-separated octets"));
+        }
+        let mut mac = [0u8; 6];
+        for (i, p) in parts.iter().enumerate() {
+            mac[i] = u8::from_str_radix(p, 16).map_err(|e| format!("`{p}`: {e}"))?;
+        }
+        Ok(mac)
+    }
+
+    /// Parse `3.1` into (major, minor).
+    pub fn parse_rev(text: &str) -> Result<(u8, u8), String> {
+        let (major, minor) = text
+            .split_once('.')
+            .ok_or_else(|| format!("`{text}` is not `<major>.<minor>`"))?;
+        let major: u8 = major.parse().map_err(|e| format!("`{major}`: {e}"))?;
+        let minor: u8 = minor.parse().map_err(|e| format!("`{minor}`: {e}"))?;
+        if major > 3 {
+            return Err(format!(
+                "chip revision major {major}: esp-hal's three-bit combination expresses 0..=3 \
+                 only (efuse/esp32/mod.rs `major_chip_version`)"
+            ));
+        }
+        if minor > 3 {
+            return Err(format!(
+                "chip revision minor {minor}: WAFER_VERSION_MINOR is two bits (block 0 bits \
+                 184:185)"
+            ));
+        }
+        Ok((major, minor))
+    }
+}
+
 /// Why the chip is starting, as `RTC_CNTL.reset_state.reset_cause_procpu`
 /// says and as the mask ROM's banner prints it.
 ///

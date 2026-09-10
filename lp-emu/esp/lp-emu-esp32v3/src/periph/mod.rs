@@ -26,16 +26,22 @@
 //! for convenience.
 
 pub mod accept;
+pub mod efuse;
 
 use lp_emu_esp_common::periph::BoxedPeripheral;
 
-use crate::loader::ResetCause;
+use crate::loader::{EfuseIdentity, ResetCause};
 use crate::memmap::periph as base;
 
 /// The whole boot set, in [`crate::machine::PERIPHERAL_REGISTRATION_ORDER`].
 ///
-/// `reset_cause` is what a direct load asserts (loader item 7).
-pub fn boot_set(reset_cause: ResetCause) -> Vec<(u32, u32, BoxedPeripheral)> {
+/// `reset_cause` is what a direct load asserts (loader item 7); `identity`
+/// is the part this run claims to be (MAC and chip revision), which reaches
+/// two blocks — the eFuse view and, for the revision's top bit, `APB_CTRL`.
+pub fn boot_set(
+    reset_cause: ResetCause,
+    identity: EfuseIdentity,
+) -> Vec<(u32, u32, BoxedPeripheral)> {
     vec![
         (
             base::DPORT,
@@ -50,7 +56,7 @@ pub fn boot_set(reset_cause: ResetCause) -> Vec<(u32, u32, BoxedPeripheral)> {
         (
             base::APB_CTRL,
             accept::APB_CTRL_LEN,
-            Box::new(accept::apb_ctrl()),
+            Box::new(accept::apb_ctrl(identity)),
         ),
         (
             base::TIMG0,
@@ -72,6 +78,10 @@ pub fn boot_set(reset_cause: ResetCause) -> Vec<(u32, u32, BoxedPeripheral)> {
         (base::IO_MUX, accept::IO_MUX_LEN, Box::new(accept::io_mux())),
         (base::SPI1, accept::SPI_LEN, Box::new(accept::spi("SPI1"))),
         (base::SPI0, accept::SPI_LEN, Box::new(accept::spi("SPI0"))),
-        (base::EFUSE, accept::EFUSE_LEN, Box::new(accept::efuse())),
+        (
+            base::EFUSE,
+            efuse::EFUSE_LEN,
+            Box::new(efuse::Efuse::new(identity)),
+        ),
     ]
 }

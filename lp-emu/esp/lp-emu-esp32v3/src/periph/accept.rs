@@ -112,6 +112,9 @@ pub fn rtc_cntl(cause: crate::loader::ResetCause) -> RegFile {
 /// (`date`).
 pub const APB_CTRL_LEN: u32 = 0x80;
 
+/// `APB_CTRL.date` (`+0x7c`) — and **bit 31 of it is a chip-revision bit**.
+pub const APB_CTRL_DATE: u32 = 0x07c;
+
 /// `APB_CTRL` — the phase file's first-named accept candidate, and the
 /// third strict stop of the direct load, 109,663 cycles in:
 /// `fw_esp32v3::boot_firmware+0x29a` (the inlined `esp_hal::init` →
@@ -123,10 +126,35 @@ pub const APB_CTRL_LEN: u32 = 0x80;
 /// in the shipped image reads a bit back that hardware would have changed,
 /// so accept-and-remember with the PAC's resets (`sysclk_conf` =
 /// `0x0000_2000`, `xtal_tick_conf` = `0x27`, …) is the whole model. P5's
-/// accept list.
-pub fn apb_ctrl() -> RegFile {
+/// accept list, and P5 keeps it an accept block.
+///
+/// # The one deviation: `date` bit 31 is a chip-revision bit
+///
+/// esp-hal's `major_chip_version` (`esp-hal-1.1.1/src/efuse/esp32/mod.rs`)
+/// is
+///
+/// ```text
+/// let eco_bit0 = read_field_le::<u32>(CHIP_VER_REV1);            // eFuse block 0 bit 111
+/// let eco_bit1 = read_field_le::<u32>(CHIP_VER_REV2);            // eFuse block 0 bit 180
+/// let eco_bit2 = (APB_CTRL::regs().date().read().bits() & 0x80000000) >> 31;
+/// match (eco_bit2 << 2) | (eco_bit1 << 1) | eco_bit0 { 1 => 1, 3 => 2, 7 => 3, _ => 0 }
+/// ```
+///
+/// so **the top bit of a revision this chip's eFuse block cannot express
+/// lives here**, and a v3 part reads it set. The PAC's reset for `date` is 0
+/// (the table carries none), because an SVD cannot know which stepping it is
+/// describing. The revision is an input to the run — the same kind of input
+/// [`rtc_cntl`]'s reset cause is — so this block takes it from the same
+/// [`crate::loader::EfuseIdentity`] the eFuse view is built from, and the
+/// deviation is listed.
+///
+/// Nothing else in the register changes: the low 31 bits stay the PAC's.
+pub fn apb_ctrl(id: crate::loader::EfuseIdentity) -> RegFile {
+    let (_, _, eco2) = crate::periph::efuse::eco_bits(id.chip_major);
+    let date = regs::APB_CTRL.reset(APB_CTRL_DATE).unwrap_or(0) | (u32::from(eco2) << 31);
     RegFile::new("APB_CTRL", APB_CTRL_LEN)
         .with_names(regs::APB_CTRL)
+        .with_reset(APB_CTRL_DATE, date)
         .with_pac_grades()
 }
 
@@ -385,36 +413,10 @@ pub fn spi(name: &'static str) -> RegFile {
         .with_pac_grades()
 }
 
-/// `EFUSE`'s aperture: the generated table runs to `+0x1fc` (`date`).
-pub const EFUSE_LEN: u32 = 0x200;
-
-/// `EFUSE` — **P5's block**, accept-and-remember here.
-///
-/// The first strict stop of the ROM-up path, **seven instructions after
-/// the reset vector**: `_ResetHandler_efuse_check_patch` (`0x4000_FDA0`,
-/// reported as `~_rtc_trigger_sw_system_reset+0x11` because both labels are
-/// zero-sized) reads `blk0_rdata0`, `blk0_rdata5` and `blk0_rdata6`
-/// (`+0x00`, `+0x14`, `+0x18`), parks them at `0x3FFE_1320`, and calls
-/// `_reload_efuses_and_check` three times to compare — the ROM's anti-glitch
-/// check on its own fuses.
-///
-/// Every register is the PAC's: the burned words all read **0** because an
-/// SVD cannot know what a part had burned into it, and this phase does not
-/// invent a MAC or a chip revision. The desk board's identity (MAC
-/// `30:76:f5:ec:f6:34`, silicon v3.1, L0) is P5's `EfuseIdentity` seed, the
-/// way the C6's `periph/efuse.rs` carries its board's — and the ROM-up path
-/// is where it will matter first, because the ROM's clock and boot-mode
-/// decisions read chip-revision bits out of `blk0_rdata3`/`blk0_rdata5`.
-pub fn efuse() -> RegFile {
-    RegFile::new("EFUSE", EFUSE_LEN)
-        .with_names(regs::EFUSE)
-        .with_pac_grades()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::loader::ResetCause;
+    use crate::loader::{EfuseIdentity, ResetCause};
     use lp_emu_esp_common::{Peripheral, Sandbox};
 
     /// The accept blocks, each with the generated table it is built from.
@@ -422,7 +424,7 @@ mod tests {
         vec![
             (dport(), regs::DPORT),
             (rtc_cntl(ResetCause::PowerOn), regs::RTC_CNTL),
-            (apb_ctrl(), regs::APB_CTRL),
+            (apb_ctrl(EfuseIdentity::default()), regs::APB_CTRL),
             (timg("TIMG0"), regs::TIMG0),
             (i2c_ana_mst(), I2C_ANA_MST_NAMES),
             (timg("TIMG1"), regs::TIMG0),
@@ -431,7 +433,6 @@ mod tests {
             (io_mux(), regs::IO_MUX),
             (spi("SPI1"), regs::SPI0),
             (spi("SPI0"), regs::SPI0),
-            (efuse(), regs::EFUSE),
         ]
     }
 
@@ -440,14 +441,26 @@ mod tests {
     /// or an undocumented hand exception — the whole point of the sweep.
     ///
     /// `(block, offset, what this machine reads instead, why)`.
-    const DEVIATIONS: &[(&str, u32, u32, &str)] = &[(
-        "RTC_CNTL",
-        0x034,
-        0x0000_3041,
-        "reset_state's two reset_cause fields are an input to the run, not a property of the \
-         part: the machine asserts POWERON_RESET (1) for both cores, the value the ROM's \
-         rtc_get_reset_reason masks out (extui 0,6 / 6,6) and the silicon banner printed",
-    )];
+    const DEVIATIONS: &[(&str, u32, u32, &str)] = &[
+        (
+            "APB_CTRL",
+            0x07c,
+            0x8000_0000,
+            "date bit 31 is esp-hal's eco_bit2 — the top bit of the chip's major revision \
+             (efuse/esp32/mod.rs major_chip_version), which no eFuse word on this part \
+             carries. The revision is an input to the run, like the reset cause; the desk \
+             board is v3.1 and the PAC's reset for date is 0",
+        ),
+        (
+            "RTC_CNTL",
+            0x034,
+            0x0000_3041,
+            "reset_state's two reset_cause fields are an input to the run, not a property of \
+             the part: the machine asserts POWERON_RESET (1) for both cores, the value the \
+             ROM's rtc_get_reset_reason masks out (extui 0,6 / 6,6) and the silicon banner \
+             printed",
+        ),
+    ];
 
     #[test]
     fn the_only_deviations_from_the_pacs_resets_are_the_listed_ones() {
@@ -574,16 +587,6 @@ mod tests {
             m.reg_grade(0x010),
             Some(lp_emu_esp_common::periph::RegGrade::Modeled)
         );
-    }
-
-    #[test]
-    fn efuse_reads_the_pacs_zeros_and_remembers_nothing_it_is_not_told() {
-        let mut sb = Sandbox::new();
-        let mut e = efuse();
-        assert_eq!(e.reg_name(0x000), Some("blk0_rdata0"));
-        assert_eq!(sb.read(&mut e, 0x000), 0, "no MAC is invented here");
-        assert_eq!(sb.read(&mut e, 0x014), 0);
-        assert_eq!(sb.read(&mut e, 0x018), 0);
     }
 
     #[test]
