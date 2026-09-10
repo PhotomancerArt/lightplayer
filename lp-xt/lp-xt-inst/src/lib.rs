@@ -142,6 +142,23 @@ pub enum StoreOp {
     S32i,
 }
 
+/// The synchronising word accesses (`RRI8`, `op0 = 2`), kept apart from the
+/// plain [`LoadOp`]/[`StoreOp`] families because their *semantics* differ, not
+/// their shape: all three are `op at, as, offset` with a 4-scaled unsigned
+/// 8-bit offset (0..=1020).
+///
+/// This crate holds no semantics for any of them — see the module doc — but a
+/// machine that does needs them told apart from `l32i`/`s32i` at decode time.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AtomicLsOp {
+    /// `l32ai at, as, off` — load 32 bits with acquire ordering; `r = 0xB`.
+    L32ai,
+    /// `s32ri at, as, off` — store 32 bits with release ordering; `r = 0xF`.
+    S32ri,
+    /// `s32c1i at, as, off` — store-conditional against `SCOMPARE1`; `r = 0xE`.
+    S32c1i,
+}
+
 /// Register-register conditional branches (`RRI8`, `op0 = 7`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BrRr {
@@ -280,6 +297,9 @@ pub enum Inst {
     L32iN(Reg, Reg, u32),
     /// `s32i.n rt, rs, offset` (16-bit; offset 0..=60, multiple of 4)
     S32iN(Reg, Reg, u32),
+    /// `op at, as, offset` — the synchronising word accesses (`l32ai`,
+    /// `s32ri`, `s32c1i`). Byte offset already unscaled, 0..=1020.
+    AtomicLs(AtomicLsOp, Reg, Reg, u32),
     /// `l32r rt, label`. Stores the raw 16-bit field; target is backward-only.
     L32r(Reg, u16),
     /// `op rs, rt, target`. Stores signed 8-bit PC-relative offset.

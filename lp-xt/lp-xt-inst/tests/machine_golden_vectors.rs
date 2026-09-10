@@ -65,7 +65,10 @@ fn agrees_with_objdump(bytes: &[u8], objdump: &str) {
             (Some(x), Some(y)) => x == y,
             _ => m == o,
         };
-        assert!(same, "operand {m} vs {o} for {bytes:02x?}: {mine} / {objdump}");
+        assert!(
+            same,
+            "operand {m} vs {o} for {bytes:02x?}: {mine} / {objdump}"
+        );
     }
 }
 
@@ -354,6 +357,50 @@ fn sr_ur_named_vectors() {
     assert_eq!(
         dec(&[0x30, 0x0c, 0x13]),
         Inst::Sr(SrOp::Wsr, SpecialReg::Scompare1, a(3))
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Family 1 — synchronising loads/stores and the store-conditional
+// ---------------------------------------------------------------------------
+
+/// Source lines, LX6 bytes == LX7 bytes for all of them:
+/// ```text
+///   l32ai a3, a4, 0        l32ai a3, a4, 4        l32ai a15, a0, 1020
+///   s32ri a3, a4, 0        s32ri a3, a4, 4        s32ri a15, a0, 1020
+///   s32c1i a2, a3, 4       s32c1i a0, a15, 0      s32c1i a15, a0, 1020
+/// ```
+#[rustfmt::skip]
+const ATOMIC_VECTORS: &[(&[u8], &str)] = &[
+    (&[0x32, 0xb4, 0x00], "l32ai a3, a4, 0"),
+    (&[0x32, 0xb4, 0x01], "l32ai a3, a4, 4"),
+    (&[0xf2, 0xb0, 0xff], "l32ai a15, a0, 0x3fc"),
+    (&[0x32, 0xf4, 0x00], "s32ri a3, a4, 0"),
+    (&[0x32, 0xf4, 0x01], "s32ri a3, a4, 4"),
+    (&[0xf2, 0xf0, 0xff], "s32ri a15, a0, 0x3fc"),
+    (&[0x22, 0xe3, 0x01], "s32c1i a2, a3, 4"),
+    (&[0x02, 0xef, 0x00], "s32c1i a0, a15, 0"),
+    (&[0xf2, 0xe0, 0xff], "s32c1i a15, a0, 0x3fc"),
+];
+
+#[test]
+fn atomic_loads_and_stores() {
+    for (bytes, text) in ATOMIC_VECTORS {
+        dec(bytes);
+        agrees_with_objdump(bytes, text);
+    }
+    // The phase file's named vector, checked structurally.
+    assert_eq!(
+        dec(&[0x22, 0xe3, 0x01]),
+        Inst::AtomicLs(AtomicLsOp::S32c1i, a(2), a(3), 4)
+    );
+    assert_eq!(
+        dec(&[0x32, 0xb4, 0x01]),
+        Inst::AtomicLs(AtomicLsOp::L32ai, a(3), a(4), 4)
+    );
+    assert_eq!(
+        dec(&[0xf2, 0xf0, 0xff]),
+        Inst::AtomicLs(AtomicLsOp::S32ri, a(15), a(0), 1020)
     );
 }
 

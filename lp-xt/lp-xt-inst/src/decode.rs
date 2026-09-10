@@ -502,6 +502,11 @@ fn decode_rri8_ls_movi(w: u32) -> Option<Inst> {
         0x1 => Some(Inst::Load(LoadOp::L16ui, dst, base, off8 * 2)),
         0x2 => Some(Inst::Load(LoadOp::L32i, dst, base, off8 * 4)),
         0x9 => Some(Inst::Load(LoadOp::L16si, dst, base, off8 * 2)),
+        // The synchronising word accesses share the plain load/store shape;
+        // the offset is 4-scaled like `l32i`/`s32i`.
+        0xb => Some(Inst::AtomicLs(AtomicLsOp::L32ai, dst, base, off8 * 4)),
+        0xe => Some(Inst::AtomicLs(AtomicLsOp::S32c1i, dst, base, off8 * 4)),
+        0xf => Some(Inst::AtomicLs(AtomicLsOp::S32ri, dst, base, off8 * 4)),
         0x4 => Some(Inst::Store(StoreOp::S8i, dst, base, off8)),
         0x5 => Some(Inst::Store(StoreOp::S16i, dst, base, off8 * 2)),
         0x6 => Some(Inst::Store(StoreOp::S32i, dst, base, off8 * 4)),

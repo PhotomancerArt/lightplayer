@@ -8,11 +8,13 @@
 
 use lp_emu_core::InstClass;
 use lp_emu_core::bus::Bus;
-use lp_xt_inst::{AluRrr, FpLsiOp, FpLsxOp, FpRrOp, FpRrrOp, Inst, NullaryNarrowOp, NullaryOp};
+use lp_xt_inst::{
+    AluRrr, AtomicLsOp, FpLsiOp, FpLsxOp, FpRrOp, FpRrrOp, Inst, NullaryNarrowOp, NullaryOp,
+};
 
 use crate::cpu::Cpu;
 use crate::emu::Flow;
-use crate::error::Trap;
+use crate::error::{Trap, TrapKind};
 use crate::fp_policy::FpPolicy;
 use crate::trace::{TraceEvent, Tracer};
 
@@ -42,6 +44,25 @@ pub(crate) struct Exec<'a, B: Bus> {
     pub(crate) cpu: &'a mut Cpu,
     pub(crate) mem: &'a mut B,
     pub(crate) fp_policy: &'a mut FpPolicy,
+}
+
+/// The trap a machine-mode-only instruction raises in the **user-mode** runner.
+///
+/// `lp-xt-inst` decodes the whole LX6/LX7 firmware ISA as of M1 P1; this runner
+/// implements the user-mode subset and nothing else. A word outside that subset
+/// used to fail at *decode* with `EXC_ILLEGAL_INSTRUCTION` (`emu.rs`'s `step`);
+/// now it decodes and fails here, with the same cause — so nothing about the
+/// observable behaviour of a user-mode payload changes, and the corpus goldens
+/// stay byte-identical. Machine-mode semantics for these are M1 P3's.
+///
+/// `pc` is left 0 for the run loop to fill in, matching the other executors.
+pub(crate) fn machine_mode_only() -> Trap {
+    Trap {
+        kind: TrapKind::Exception,
+        cause: crate::error::EXC_ILLEGAL_INSTRUCTION,
+        pc: 0,
+        vaddr: 0,
+    }
 }
 
 /// Map a retired instruction (plus its control-flow outcome) onto
@@ -82,6 +103,11 @@ pub(crate) fn inst_class(inst: &Inst, flow: &Flow) -> InstClass {
         | Inst::Entry(..) => InstClass::Alu,
         Inst::Load(..) | Inst::L32iN(..) | Inst::L32r(..) => InstClass::Load,
         Inst::Store(..) | Inst::S32iN(..) => InstClass::Store,
+        // Machine-mode-only families (M1 P1 decode, M1 P3 semantics). The
+        // user-mode runner traps on all of them; the bucket is still the
+        // honest cost shape so a measured model has somewhere to land.
+        Inst::AtomicLs(AtomicLsOp::L32ai, ..) => InstClass::Load,
+        Inst::AtomicLs(..) => InstClass::Store,
         Inst::BranchRr(..)
         | Inst::BranchRi(..)
         | Inst::BranchRiu(..)
@@ -361,6 +387,13 @@ impl<B: Bus> Exec<'_, B> {
                 (flow, branch_class(&flow))
             }
             Inst::Sr(..) | Inst::Ur(..) => (self.exec_float(inst, pc, tracer)?, InstClass::System),
+
+            // --- machine-mode-only families ---
+            //
+            // `lp-xt-inst` decodes these (M1 P1) so the privileged hart can;
+            // the user-mode runner has no state for them and says so loudly
+            // rather than doing nothing. See `machine_mode_only`.
+            Inst::AtomicLs(..) => return Err(machine_mode_only()),
         };
         debug_assert_eq!(
             class,

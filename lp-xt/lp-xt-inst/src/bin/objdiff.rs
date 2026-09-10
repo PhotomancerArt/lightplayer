@@ -236,7 +236,9 @@ fn typed_operands(inst: &Inst, pc: u32) -> Vec<Operand> {
         Addi(a, b, i) | Addmi(a, b, i) => vec![reg(a), reg(b), Operand::Imm(i as i64)],
         Movi(a, i) => vec![reg(a), Operand::Imm(i as i64)],
         MoviN(a, i) => vec![reg(a), Operand::Imm(i as i64)],
-        Load(_, a, b, off) | Store(_, a, b, off) => vec![reg(a), reg(b), Operand::Imm(off as i64)],
+        Load(_, a, b, off) | Store(_, a, b, off) | AtomicLs(_, a, b, off) => {
+            vec![reg(a), reg(b), Operand::Imm(off as i64)]
+        }
         L32iN(a, b, off) | S32iN(a, b, off) => vec![reg(a), reg(b), Operand::Imm(off as i64)],
         L32r(a, imm16) => vec![reg(a), Operand::Addr(l32r_target(pc, imm16))],
         BranchRr(_, a, b, off) => vec![reg(a), reg(b), br(off)],

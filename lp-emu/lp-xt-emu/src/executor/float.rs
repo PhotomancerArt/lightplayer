@@ -42,7 +42,7 @@
 use lp_emu_core::bus::Bus;
 use lp_xt_inst::{FpLsiOp, FpLsxOp, FpRrOp, Inst, SpecialReg, SrOp, UrOp, UserReg};
 
-use super::Exec;
+use super::{Exec, machine_mode_only};
 use crate::emu::Flow;
 use crate::error::{EXC_COPROCESSOR0_DISABLED, Trap, TrapKind};
 use crate::memory::XtAccess;
@@ -232,23 +232,6 @@ impl<B: Bus> Exec<'_, B> {
             SpecialReg::Cpenable => self.cpu.cpenable = v,
             _ => {}
         }
-    }
-}
-
-/// The trap a machine-mode-only instruction raises in the **user-mode** runner.
-///
-/// `lp-xt-inst` decodes the whole firmware ISA (M1 P1); this runner implements
-/// the user-mode subset. A word outside that subset used to fail at *decode*
-/// with `EXC_ILLEGAL_INSTRUCTION` (`emu.rs`'s `step`); now it decodes and fails
-/// here, with the same cause, so nothing about the observable behaviour of a
-/// user-mode payload changes. `pc` is left 0 for the run loop to fill in,
-/// matching the other executors.
-fn machine_mode_only() -> Trap {
-    Trap {
-        kind: TrapKind::Exception,
-        cause: crate::error::EXC_ILLEGAL_INSTRUCTION,
-        pc: 0,
-        vaddr: 0,
     }
 }
 

@@ -106,6 +106,14 @@ pub fn format_inst(inst: &Inst, pc: u32) -> String {
             };
             format!("{m}\t{rt:?}, {rs:?}, {off}")
         }
+        AtomicLs(op, at, ars, off) => {
+            let m = match op {
+                AtomicLsOp::L32ai => "l32ai",
+                AtomicLsOp::S32ri => "s32ri",
+                AtomicLsOp::S32c1i => "s32c1i",
+            };
+            format!("{m}\t{at:?}, {ars:?}, {off}")
+        }
         L32iN(rt, rs, off) => format!("l32i.n\t{rt:?}, {rs:?}, {off}"),
         S32iN(rt, rs, off) => format!("s32i.n\t{rt:?}, {rs:?}, {off}"),
         L32r(rt, imm16) => {

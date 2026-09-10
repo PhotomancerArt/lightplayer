@@ -420,6 +420,19 @@ fn special_and_user_registers() {
     }
 }
 
+#[test]
+fn atomic_loads_and_stores() {
+    for op in [AtomicLsOp::L32ai, AtomicLsOp::S32ri, AtomicLsOp::S32c1i] {
+        for &at in &REGS {
+            for &ars in &REGS {
+                for off in [0u32, 4, 512, 1016, 1020] {
+                    rt(Inst::AtomicLs(op, r(at), r(ars), off), 3);
+                }
+            }
+        }
+    }
+}
+
 /// The SR / UR tables are total in both directions: every variant's number maps
 /// back to that variant, `ALL` and `from_num` agree on the modelled set, and
 /// numbers outside it stay `None`.
@@ -434,7 +447,9 @@ fn sr_ur_tables_are_total_both_ways() {
             sreg.name()
         );
     }
-    let modelled: usize = (0u8..=255).filter(|&n| SpecialReg::from_num(n).is_some()).count();
+    let modelled: usize = (0u8..=255)
+        .filter(|&n| SpecialReg::from_num(n).is_some())
+        .count();
     assert_eq!(
         modelled,
         SpecialReg::ALL.len(),
@@ -442,9 +457,16 @@ fn sr_ur_tables_are_total_both_ways() {
     );
 
     for ureg in UserReg::ALL {
-        assert_eq!(UserReg::from_num(ureg.num()), Some(ureg), "UR {}", ureg.num());
+        assert_eq!(
+            UserReg::from_num(ureg.num()),
+            Some(ureg),
+            "UR {}",
+            ureg.num()
+        );
     }
-    let modelled_ur: usize = (0u8..=255).filter(|&n| UserReg::from_num(n).is_some()).count();
+    let modelled_ur: usize = (0u8..=255)
+        .filter(|&n| UserReg::from_num(n).is_some())
+        .count();
     assert_eq!(modelled_ur, UserReg::ALL.len());
 
     // A sample of numbers the LX6/LX7 assemblers have no name for.

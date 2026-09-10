@@ -304,6 +304,18 @@ pub fn encode(inst: &Inst) -> Vec<u8> {
                 3,
             );
         }
+        Inst::AtomicLs(op, at, ars, offset) => {
+            let r = match op {
+                AtomicLsOp::L32ai => 0xb,
+                AtomicLsOp::S32c1i => 0xe,
+                AtomicLsOp::S32ri => 0xf,
+            };
+            emit(
+                &mut out,
+                rri8(2, at.num() as u32, ars.num() as u32, r, (offset / 4) & 0xff),
+                3,
+            );
+        }
         Inst::L32iN(rt, rs, offset) => {
             let off = (offset / 4) & 0xf;
             emit(
