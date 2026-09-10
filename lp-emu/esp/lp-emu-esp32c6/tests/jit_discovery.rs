@@ -115,14 +115,14 @@ fn outcome(m: &Esp32C6Machine) -> Outcome {
 /// always taken.
 fn image_with_a_literal_pool() -> Vec<u32> {
     vec![
-        addi(7, 0, 1),           // +0   t2 = 1
-        addi(5, 5, 1),           // +4   t0 += 1
-        bne(7, 0, 16),           // +8   taken, to +24
-        NOT_AN_INSTRUCTION,      // +12  the pool: the branch's fall-through
-        NOT_AN_INSTRUCTION,      // +16
-        NOT_AN_INSTRUCTION,      // +20
-        addi(6, 6, 2),           // +24  t1 += 2
-        EBREAK,                  // +28
+        addi(7, 0, 1),      // +0   t2 = 1
+        addi(5, 5, 1),      // +4   t0 += 1
+        bne(7, 0, 16),      // +8   taken, to +24
+        NOT_AN_INSTRUCTION, // +12  the pool: the branch's fall-through
+        NOT_AN_INSTRUCTION, // +16
+        NOT_AN_INSTRUCTION, // +20
+        addi(6, 6, 2),      // +24  t1 += 2
+        EBREAK,             // +28
     ]
 }
 

@@ -2398,7 +2398,9 @@ impl Esp32C6Machine {
         // Biggest first, the app's symbols before the ROM's: with a budget
         // that binds, app text is what a render loop spends its time in.
         let sorted = |image: Option<&ElfImage>| {
-            let Some(image) = image else { return Vec::new() };
+            let Some(image) = image else {
+                return Vec::new();
+            };
             let mut named: Vec<(u32, u32)> = image
                 .symbols()
                 .iter()
@@ -2415,7 +2417,12 @@ impl Esp32C6Machine {
         // Last, and never dropped: code the guest wrote and published. It is
         // last only because the symbol lists are the bulk; under a budget
         // that binds these are cheap and there are a handful of them.
-        seeds.extend(self.jit_published_seeds.iter().copied().filter(|&at| in_text(at)));
+        seeds.extend(
+            self.jit_published_seeds
+                .iter()
+                .copied()
+                .filter(|&at| in_text(at)),
+        );
         seeds
     }
 
@@ -2457,6 +2464,22 @@ impl Esp32C6Machine {
             self.jit_published_seeds
                 .iter()
                 .map(|at| format!(" {at:#010x}"))
+                .collect::<String>(),
+        ));
+        // Where the run's instructions retire, by region. The one split that
+        // says how much of an image is statically discoverable at all:
+        // flash-cache text is in the ELF and cannot change, while hp-SRAM and
+        // IRAM hold code the guest may have written itself.
+        let mut retired_by_region: BTreeMap<&str, u64> = BTreeMap::new();
+        for (pc, _, retired) in prof.iter() {
+            *retired_by_region.entry(self.region_of(pc)).or_default() += retired;
+        }
+        let all = prof.retired().max(1);
+        lines.push(format!(
+            "blockprof: retired by region:{}",
+            retired_by_region
+                .iter()
+                .map(|(name, r)| format!(" {name} {r} ({:.2} %)", 100.0 * *r as f64 / all as f64))
                 .collect::<String>(),
         ));
         let found = self.discovered_pcs();
@@ -2533,13 +2556,7 @@ impl Esp32C6Machine {
             if found.contains(&pc) {
                 continue;
             }
-            let name = self
-                .bus
-                .regions()
-                .iter()
-                .find(|r| pc >= r.base && pc < r.end())
-                .map_or("unmapped", |r| r.name);
-            *by_region.entry(name).or_default() += retired;
+            *by_region.entry(self.region_of(pc)).or_default() += retired;
         }
         for (name, retired) in by_region {
             line.push_str(&format!(
@@ -2561,6 +2578,15 @@ impl Esp32C6Machine {
     #[cfg(not(feature = "jit"))]
     fn discovered_pcs(&self) -> BTreeSet<u32> {
         BTreeSet::new()
+    }
+
+    /// The region an address belongs to, by name.
+    fn region_of(&self, at: u32) -> &'static str {
+        self.bus
+            .regions()
+            .iter()
+            .find(|r| at >= r.base && at < r.end())
+            .map_or("unmapped", |r| r.name)
     }
 
     /// Which region an address belongs to, for a census line.

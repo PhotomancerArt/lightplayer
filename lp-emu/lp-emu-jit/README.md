@@ -16,14 +16,67 @@ eagerly rather than chasing hot regions. See
 | module | what it is |
 |---|---|
 | `decode` | RV32IMC word → a small `Inst` with the emulator's own `InstClass` cost class and the instruction's width |
-| `blocks` | the guest blocks a translation is *of*, and the deliberately simple walk P3 uses to find some |
+| `blocks` | the guest blocks a translation is *of* |
+| `discover` | how they are found: a symbol-seeded, width-following sweep over the whole image |
 | `translate` | the block set → one wasm function |
 | `host` | what an emitted module is run against, and the exit protocol below |
 | `host_wasmtime` | a native host, behind `host-wasmtime`, so identity can be proven on the desk |
 | `replay` | the identity harness's record and compare shapes, including the per-entry memory-granule diff |
 
-Whole-image discovery is P4's, splitting the module across functions is P5's,
-and the browser host is P6's.
+Splitting the module across functions is P5's, and the browser host is P6's.
+
+## Discovery: the five rules, and why each one is there
+
+Every one of these was paid for in measurement. A reader who skips this
+section will re-derive it over about a day.
+
+1. **Symbols are the seeds.** The entry point alone reaches **two
+   instructions**: `_start` runs into a CSR write the translator refuses and
+   the walk stops. So the seeds are the entry point, the hart's trap vector,
+   and every symbol in an executable region — of the app **and of the mask
+   ROM**, which is 2.7–9.2 % of the instructions a render image retires.
+   Biggest symbol first, because a bound is a budget and the order decides
+   what it is spent on; and a seed is explored to exhaustion before the next
+   is added, because queueing them all first spends the budget on seeds and
+   follows no edge at all (511 blocks of one instruction each, measured).
+
+2. **Follow decoded widths, never a stride.** **48.99 % of real block starts
+   sit at 2 mod 4.** A 4-byte scan desyncs on half the image; a 2-byte one
+   manufactures instructions out of the upper halves of 32-bit encodings. A
+   symbol is a known-good start and a decoded width is the only honest way to
+   the next one.
+
+3. **A call names its return address.** `jal`/`jalr` with `rd != 0` is a call,
+   and the instruction after it is where control comes back. This is the
+   single largest rule in the file: without it the whole remainder of every
+   calling function is invisible, and adding it moved discovery coverage on
+   `render-basic` from **63.9 % to 89.2 %**.
+
+4. **A refused encoding ends the block but not the walk.** RISC-V puts an
+   instruction's length in the low bits of its first halfword whatever the
+   rest of the encoding means, so the address after a `csrr`, an `ecall`, an
+   atomic or an `fence.i` is a real block start. The step is **bounded** —
+   four in a row and the walk stops — because on data the length bits are a
+   guess, and an unbounded guess walks the whole of RAM: zeroed memory does
+   not decode, so every two bytes of it becomes another start (259,843
+   starts, 420 ms, measured on a bare machine).
+
+5. **Everything else degrades (JD7).** A word the decoder refuses, a fetch
+   that cannot be served, a block that runs into another's start, a branch to
+   a pc not in the set: all of them end a block and hand the pc to the
+   interpreter. A walk over a whole image meets literal pools and jump tables
+   where a census never does, because a census supplies real observed block
+   starts and a symbol table does not. Data must cost coverage and can never
+   cost correctness.
+
+**What discovery cannot find**, and it is worth stating because it is most of
+what is left: code the guest **writes itself** and never publishes with a
+`fence.i`. No symbol names it and no static edge reaches it — the firmware's
+shader JIT calls its buffer through a function pointer — so the only signal
+is the publish. The machine records the spans of executable memory the guest
+writes and seeds the retranslation from them at each `fence.i`; a firmware
+that writes code and does not fence is invisible to this by construction, and
+is what `--strict-bus`'s missing-fence checker exists to catch.
 
 ## The exit protocol
 
@@ -93,10 +146,18 @@ Two escapes, one rule: never guess.
 
 ## Two structural facts a reader will otherwise rediscover
 
-- **wasm caps one function body at 7,654,321 bytes.** P3 emits one function per
-  block set, so a set has to fit; at ~400 B per translated instruction that is
-  around ten thousand blocks, against the ~37,600 a render image executes.
-  Two-level dispatch (JD8) is P5's.
+- **wasm caps one function body at 7,654,321 bytes.** This crate emits one
+  function per block set, so a set has to fit. Measured on `render-basic`:
+  17,104 blocks emit 8.06 MB and are refused, so the ceiling is ~16,000
+  blocks — against the **156,053** a whole-image walk finds and the ~37,600 a
+  render run executes. **Cranelift refuses far earlier**, somewhere under
+  8,586 blocks, and takes 116 s to compile 4,272. Two-level dispatch (JD8) is
+  P5's, and these are the numbers it is sized against.
+- **An invalidation retires the whole module, not the blocks whose bytes
+  changed.** The entry index says where the hart may *enter*; a block's edges
+  to other blocks are compiled into the module, so dropping one from the
+  index does not stop a surviving block branching into its body. A changed
+  byte therefore makes the module stale, and JD5's second event replaces it.
 - **`wasmtime::Memory::new` silently ignores a host memory creator.** It builds
   its instance with `OnDemandInstanceAllocator::default()`, which has none, so
   the module runs against a fresh zeroed allocation and nothing errors — the
