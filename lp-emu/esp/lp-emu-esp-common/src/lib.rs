@@ -18,8 +18,9 @@
 //!   SocBus                 RAM regions + MMIO decode + watchpoints
 //!    |        |            + the unmapped policy + sideband
 //!    |    Peripheral       read/write/on_event against a BusCx
-//!    |        |
-//!    |     RegFile         accept-and-remember, with a table of exceptions
+//!    |        |            (a chip's register VIEW of a block)
+//!    |        |--- RegFile accept-and-remember, with a table of exceptions
+//!    |        |--- engine  what the block DOES, with no register map
 //!    |
 //!   Trace                  every MMIO access, with the PC, plus SPIN
 //!   HostSinks              where a UART's bytes actually go
@@ -41,6 +42,7 @@
 pub mod air;
 pub mod bus;
 pub mod elf;
+pub mod engine;
 pub mod host;
 pub mod periph;
 pub mod pins;
