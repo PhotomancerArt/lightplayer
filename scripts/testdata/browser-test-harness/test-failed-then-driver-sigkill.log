@@ -1,0 +1,105 @@
+Executing bindgen...                                                                                Running headless tests in Firefox on `http://127.0.0.1:52406/`
+Try find `webdriver.json` for configure browser's capabilities:
+Not found
+Starting new webdriver session...                 Visiting http://127.0.0.1:52405...                Loading page elements...                          Waiting for test to finish...                                                                       running 12 tests
+test tests::unusable_boot_manifest_fails_runtime_creation ... ok
+test tests::runtime_serves_protocol_messages_after_tick ... ok
+test tests::runtime_loads_project_and_renders_output_after_ticks ... ok
+test tests::load_project_tolerates_library_artifacts ... ok
+test tests::infinite_loop_shader_reports_fuel_error_and_keeps_ticking ... ok
+test tests::hello_reports_the_worn_board_and_the_supplied_identity ... ok
+test tests::get_fuel_builtin_links_and_reads_nonzero_on_browser_path ... ok
+test tests::fuel_on_bounded_loop_shader_renders ... ok
+test tests::file_sync_round_trips_over_the_protocol ... ok
+test tests::explicit_ticks_advance_the_clock_deterministically ... ok
+test tests::desktop_boot_accepts_a_dome_wire_label ... FAIL
+test tests::board_manifest_boot_wears_the_board_and_survives_a_wire_it_lacks ... ok
+
+failures:
+
+---- tests::desktop_boot_accepts_a_dome_wire_label output ----
+    error output:
+        [fw-browser] panicked at lp-fw/fw-browser/src/tests.rs:847:5:
+        assertion `left == right` failed: TEMPORARY: capturing a real failing-suite log
+          left: 1
+         right: 2
+    
+    JS exception that was thrown:
+        RuntimeError: unreachable executed
+        fw_browser-705e3ca1dcdd0391.wasm.__rustc[65ef6f51ce03687d]::__rust_abort@http://127.0.0.1:52405/wasm-bindgen-test_bg.wasm:wasm-function[55032]:0xc114a1
+        fw_browser-705e3ca1dcdd0391.wasm.__rustc[65ef6f51ce03687d]::__rust_start_panic@http://127.0.0.1:52405/wasm-bindgen-test_bg.wasm:wasm-function[54898]:0xc1113c
+        fw_browser-705e3ca1dcdd0391.wasm.__rustc[65ef6f51ce03687d]::rust_panic@http://127.0.0.1:52405/wasm-bindgen-test_bg.wasm:wasm-function[53090]:0xc0bb6a
+        fw_browser-705e3ca1dcdd0391.wasm.std[2e91dbac936d47b3]::panicking::panic_with_hook@http://127.0.0.1:52405/wasm-bindgen-test_bg.wasm:wasm-function[11406]:0x891d22
+        fw_browser-705e3ca1dcdd0391.wasm.std[2e91dbac936d47b3]::panicking::panic_handler::{closure#0}@http://127.0.0.1:52405/wasm-bindgen-test_bg.wasm:wasm-function[20997]:0xa322d6
+        fw_browser-705e3ca1dcdd0391.wasm.std[2e91dbac936d47b3]::sys::backtrace::__rust_end_short_backtrace::<std[2e91dbac936d47b3]::panicking::panic_handler::{closure#0}, !>@http://127.0.0.1:52405/wasm-bindgen-test_bg.wasm:wasm-function[54691]:0xc10a7a
+        fw_browser-705e3ca1dcdd0391.wasm.__rustc[65ef6f51ce03687d]::rust_begin_unwind@http://127.0.0.1:52405/wasm-bindgen-test_bg.wasm:wasm-function[40879]:0xba22db
+        fw_browser-705e3ca1dcdd0391.wasm.core[8aafb732cdda8419]::panicking::panic_fmt@http://127.0.0.1:52405/wasm-bindgen-test_bg.wasm:wasm-function[33308]:0xb41938
+        fw_browser-705e3ca1dcdd0391.wasm.core[8aafb732cdda8419]::panicking::assert_failed_inner@http://127.0.0.1:52405/wasm-bindgen-test_bg.wasm:wasm-function[9965]:0x833b55
+        fw_browser-705e3ca1dcdd0391.wasm.core[8aafb732cdda8419]::panicking::assert_failed::<i32, i32>@http://127.0.0.1:52405/wasm-bindgen-test_bg.wasm:wasm-function[35365]:0xb5e88f
+        fw_browser-705e3ca1dcdd0391.wasm.fw_browser[e4e3f78838a143c3]::tests::desktop_boot_accepts_a_dome_wire_label@http://127.0.0.1:52405/wasm-bindgen-test_bg.wasm:wasm-function[4321]:0x5f8840
+        fw_browser-705e3ca1dcdd0391.wasm.<fw_browser[e4e3f78838a143c3]::tests::desktop_boot_accepts_a_dome_wire_label as core[8aafb732cdda8419]::ops::function::FnOnce<()>>::call_once@http://127.0.0.1:52405/wasm-bindgen-test_bg.wasm:wasm-function[50236]:0xbfb531
+        fw_browser-705e3ca1dcdd0391.wasm.<wasm_bindgen_test[5406c67aa9608f2a]::__rt::Context>::execute_sync::<(), fw_browser[e4e3f78838a143c3]::tests::desktop_boot_accepts_a_dome_wire_label>::{closure#0}@http://127.0.0.1:52405/wasm-bindgen-test_bg.wasm:wasm-function[19981]:0xa11815
+        fw_browser-705e3ca1dcdd0391.wasm.<wasm_bindgen_test[5406c67aa9608f2a]::__rt::TestFuture<<wasm_bindgen_test[5406c67aa9608f2a]::__rt::Context>::execute_sync<(), fw_browser[e4e3f78838a143c3]::tests::desktop_boot_accepts_a_dome_wire_label>::{closure#0}> as core[8aafb732cdda8419]::future::future::Future>::poll::{closure#1}::{closure#0}@http://127.0.0.1:52405/wasm-bindgen-test_bg.wasm:wasm-function[19780]:0xa0abe9
+        fw_browser-705e3ca1dcdd0391.wasm.wasm_bindgen[6d896f3628445996]::convert::closures::_::invoke::<(), true>@http://127.0.0.1:52405/wasm-bindgen-test_bg.wasm:wasm-function[50407]:0xbfc90b
+        wasm_bindgen_6d896f3628445996___convert__closures_____invoke_______true_@http://127.0.0.1:52405/wasm-bindgen-test:2176:10
+        cb0@http://127.0.0.1:52405/wasm-bindgen-test:571:32
+        window.__wbg_test_invoke@http://127.0.0.1:52405/:42:38
+        __wbg_get_imports/__wbg___wbg_test_invoke_1a559f32546cebec/<@http://127.0.0.1:52405/wasm-bindgen-test:576:34
+        handleError@http://127.0.0.1:52405/wasm-bindgen-test:2439:18
+        __wbg___wbg_test_invoke_1a559f32546cebec@http://127.0.0.1:52405/wasm-bindgen-test:564:71
+        fw_browser-705e3ca1dcdd0391.wasm.wasm_bindgen_test[5406c67aa9608f2a]::__rt::__wbg_test_invoke@http://127.0.0.1:52405/wasm-bindgen-test_bg.wasm:wasm-function[40073]:0xb990e9
+        fw_browser-705e3ca1dcdd0391.wasm.<wasm_bindgen_test[5406c67aa9608f2a]::__rt::TestFuture<<wasm_bindgen_test[5406c67aa9608f2a]::__rt::Context>::execute_sync<(), fw_browser[e4e3f78838a143c3]::tests::desktop_boot_accepts_a_dome_wire_label>::{closure#0}> as core[8aafb732cdda8419]::future::future::Future>::poll::{closure#1}@http://127.0.0.1:52405/wasm-bindgen-test_bg.wasm:wasm-function[22094]:0xa52d1f
+        fw_browser-705e3ca1dcdd0391.wasm.<wasm_bindgen_test[5406c67aa9608f2a]::__rt::scoped_tls::ScopedKey<core[8aafb732cdda8419]::cell::RefCell<wasm_bindgen_test[5406c67aa9608f2a]::__rt::Output>>>::set::<<wasm_bindgen_test[5406c67aa9608f2a]::__rt::TestFuture<<wasm_bindgen_test[5406c67aa9608f2a]::__rt::Context>::execute_sync<(), fw_browser[e4e3f78838a143c3]::tests::desktop_boot_accepts_a_dome_wire_label>::{closure#0}> as core[8aafb732cdda8419]::future::future::Future>::poll::{closure#1}, core[8aafb732cdda8419]::result::Result<(), wasm_bindgen[6d896f3628445996]::JsValue>>@http://127.0.0.1:52405/wasm-bindgen-test_bg.wasm:wasm-function[20700]:0xa28cde
+        fw_browser-705e3ca1dcdd0391.wasm.<wasm_bindgen_test[5406c67aa9608f2a]::__rt::TestFuture<<wasm_bindgen_test[5406c67aa9608f2a]::__rt::Context>::execute_sync<(), fw_browser[e4e3f78838a143c3]::tests::desktop_boot_accepts_a_dome_wire_label>::{closure#0}> as core[8aafb732cdda8419]::future::future::Future>::poll@http://127.0.0.1:52405/wasm-bindgen-test_bg.wasm:wasm-function[4556]:0x61c1f4
+        fw_browser-705e3ca1dcdd0391.wasm.<wasm_bindgen_test[5406c67aa9608f2a]::__rt::ExecuteTests as core[8aafb732cdda8419]::future::future::Future>::poll@http://127.0.0.1:52405/wasm-bindgen-test_bg.wasm:wasm-function[589]:0x15dcf2
+        fw_browser-705e3ca1dcdd0391.wasm.wasm_bindgen_futures[6b4a82fc1dba5d57]::future_to_promise::<<wasm_bindgen_test[5406c67aa9608f2a]::__rt::Context>::run::{closure#0}>::{closure#0}::{closure#0}@http://127.0.0.1:52405/wasm-bindgen-test_bg.wasm:wasm-function[5429]:0x6908ad
+        fw_browser-705e3ca1dcdd0391.wasm.<wasm_bindgen_futures[6b4a82fc1dba5d57]::queue::Queue>::new::{closure#0}@http://127.0.0.1:52405/wasm-bindgen-test_bg.wasm:wasm-function[4732]:0x6359c9
+        fw_browser-705e3ca1dcdd0391.wasm.wasm_bindgen[6d896f3628445996]::convert::closures::_::invoke::<wasm_bindgen[6d896f3628445996]::JsValue, core[8aafb732cdda8419]::result::Result<(), wasm_bindgen[6d896f3628445996]::JsError>, true>@http://127.0.0.1:52405/wasm-bindgen-test_bg.wasm:wasm-function[26470]:0xac413e
+        fw_browser-705e3ca1dcdd0391.wasm.wasm_bindgen[6d896f3628445996]::convert::closures::_::invoke::<wasm_bindgen[6d896f3628445996]::JsValue, core[8aafb732cdda8419]::result::Result<(), wasm_bindgen[6d896f3628445996]::JsError>, true> externref shim@http://127.0.0.1:52405/wasm-bindgen-test_bg.wasm:wasm-function[52083]:0xc07147
+        fw_browser-705e3ca1dcdd0391.wasm.wasm_bindgen[6d896f3628445996]::convert::closures::_::invoke::<wasm_bindgen[6d896f3628445996]::JsValue, core[8aafb732cdda8419]::result::Result<(), wasm_bindgen[6d896f3628445996]::JsError>, true> externref shim multivalue shim@http://127.0.0.1:52405/wasm-bindgen-test_bg.wasm:wasm-function[43107]:0xbb93ec
+        wasm_bindgen_6d896f3628445996___convert__closures_____invoke___wasm_bindgen_6d896f3628445996___JsValue__core_8aafb732cdda8419___result__Result_____wasm_bindgen_6d896f3628445996___JsError___true_@http://127.0.0.1:52405/wasm-bindgen-test:2201:22
+        real@http://127.0.0.1:52405/wasm-bindgen-test:2477:20
+
+failures:
+
+    tests::desktop_boot_accepts_a_dome_wire_label
+
+test result: FAILED. 11 passed; 1 failed; 0 ignored; 0 filtered out; finished in 0.13s
+console.log div contained:
+    Invoking test: tests::unusable_boot_manifest_fails_runtime_creation
+    Invoking test: tests::runtime_serves_protocol_messages_after_tick
+    Invoking test: tests::runtime_loads_project_and_renders_output_after_ticks
+    Invoking test: tests::load_project_tolerates_library_artifacts
+    Invoking test: tests::infinite_loop_shader_reports_fuel_error_and_keeps_ticking
+    Invoking test: tests::hello_reports_the_worn_board_and_the_supplied_identity
+    Invoking test: tests::get_fuel_builtin_links_and_reads_nonzero_on_browser_path
+    Invoking test: tests::fuel_on_bounded_loop_shader_renders
+    Invoking test: tests::file_sync_round_trips_over_the_protocol
+    Invoking test: tests::explicit_ticks_advance_the_clock_deterministically
+    Invoking test: tests::desktop_boot_accepts_a_dome_wire_label
+    Invoking test: tests::board_manifest_boot_wears_the_board_and_survives_a_wire_it_lacks
+
+console.log div contained:
+    [fw-browser] panicked at lp-fw/fw-browser/src/tests.rs:847:5:
+    assertion `left == right` failed: TEMPORARY: capturing a real failing-suite log
+      left: 1
+     right: 2
+
+                                                  driver status: signal: 9 (SIGKILL)
+driver stdout:
+    1789021219760	geckodriver	INFO	Listening on 127.0.0.1:52114
+    1789021219875	mozrunner::runner	INFO	Running command: MOZ_CRASHREPORTER="1" MOZ_CRASHREPORTER_NO_REPORT="1" MOZ_CRASHREPORTER_SHUTDOWN="1" "/Applications/Firefox. ... e" "-headless" "-foreground" "-no-remote" "-profile" "/var/folders/4k/sz_fzyrd7d7656btz16_q20r0000gp/T/rust_mozprofilel087OH"
+    1789021220307	Marionette	INFO	Marionette enabled
+    1789021220474	Marionette	INFO	Listening on port 52118
+    [GFX1-]: RenderCompositorSWGL failed mapping default framebuffer, no dt
+    console.error: "Experiment desktop-release-rollout-show-relay-to-all-browsers-next-sign-up-modal-cta has unknown featureId: email-autocomplete-relay"
+    console.error: "Experiment visual-card-updates has unknown featureId: newtabRefinedCardsLayout"
+    console.error: "Experiment enable-nimbus-unenrollment-synchronization has unknown featureId: nimbusStore"
+    console.error: "Experiment private-window-visual-refresh-design-change-only has unknown featureId: feltPrivacy"
+    1789021241831	Marionette	INFO	Stopped listening on port 52118
+
+driver stderr:
+    *** You are running in headless mode.
+    JavaScript error: resource://gre/modules/PrivateBrowsingUtils.sys.mjs, line 50: TypeError: can't access property "QueryInterface", aWindow.docShell is null
+
+                                                  Error: some tests failed

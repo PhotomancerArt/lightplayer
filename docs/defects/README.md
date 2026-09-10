@@ -334,6 +334,7 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| state-conflation | 2026-09-09 | [browser-crash-reported-as-test-failure](2026-09-09-browser-crash-reported-as-test-failure.md) | fixed | scripts/browser-test-harness.sh: `wasm-bindgen-test-runner` says `Error: some tests failed` whether a test failed or headless Firefox was SIGKILLed mid-run |
 | open-path-wait-without-wakeup | 2026-09-08 | [a-held-lens-waited-for-a-sim-nobody-was-going-to-start](2026-09-08-a-held-lens-waited-for-a-sim-nobody-was-going-to-start.md) | fixed | lpa-studio-core studio_controller (try_pending_device_lens, resolve_open_device, seed_device_sim_records) — prod outage, no project could open |
 | write-ordering | 2026-09-07 | [merge-delete-erased-the-merged-row](2026-09-07-merge-delete-erased-the-merged-row.md) | fixed | lpa-devices roster (reconcile_identities) + lpa-studio-core studio_controller (settle_device_records) |
 | assumed-context | 2026-09-06 | [c6-first-flash-bootloader-hang-lp-analog-i2c-clock](2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.md) | fixed | lpa-link flashers + lpa-devices reconnect ladder: a fresh C6's factory firmware gates the LP analog I2C clock; our bootloader hangs after every HP-only reset until a replug (the fix; see c6-analog-master-wedges-the-bootloader for the bench diagnosis) |

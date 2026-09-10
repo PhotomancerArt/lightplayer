@@ -1545,6 +1545,14 @@ jobs:
       - name: fw-browser smoke check
         run: cd lp2025 && just fw-browser-smoke-check
 
+      # All three run through `scripts/browser-test-harness.sh`, because
+      # `wasm-bindgen-test-runner` ends a dead browser and a red suite with the
+      # same `Error: some tests failed` (this job, PR #651: headless Firefox's
+      # compositor failed, geckodriver was SIGKILLed, no test ever finished,
+      # and a re-run of the same commit was green). A crash is reported as
+      # `ENVIRONMENT FAILURE, not a test failure` and retried once, loudly; a
+      # test failure is passed straight through. See
+      # `docs/defects/2026-09-09-browser-crash-reported-as-test-failure.md`.
       - name: Browser wasm tests
         run: cd lp2025 && just lpa-fs-opfs-test fw-browser-test lpa-link-browser-test
 

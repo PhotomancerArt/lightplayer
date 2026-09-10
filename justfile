@@ -218,7 +218,7 @@ fw-browser-test: install-wasm32-target
         echo "wasm-bindgen-test-runner not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
         exit 1
     fi
-    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner \
+    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="$PWD/scripts/browser-test-harness.sh" \
         cargo test -p fw-browser --target wasm32-unknown-unknown
 
 # Local project store tests: real browser + real OPFS. Needs a chromedriver
@@ -231,7 +231,7 @@ lpa-fs-opfs-test: install-wasm32-target
         echo "wasm-bindgen-test-runner not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
         exit 1
     fi
-    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner \
+    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="$PWD/scripts/browser-test-harness.sh" \
         cargo test -p lpa-fs-opfs --target wasm32-unknown-unknown
 
 # The Web Serial JS layer in a real Chrome — the harness
@@ -2232,7 +2232,7 @@ test-glsl-filetests:
 # (which need chip builds this gate deliberately avoids). Note the narrow
 # residue: drift unique to the emu fixture itself is only caught locally.
 [parallel]
-check-lint: fmt-check clippy check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-serial-js-frozen lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities
+check-lint: fmt-check clippy check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-browser-serial-js-frozen lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
@@ -2248,6 +2248,14 @@ lint-browser-serial-js-frozen:
 # See docs/adr/2026-07-04-json-only-artifacts.md and the script's allowlist.
 lint-serde-content:
     ./scripts/check-serde-content.sh
+
+# The browser suites' runner reports "Error: some tests failed" whether a test
+# failed or headless Firefox was SIGKILLed mid-run (PR #651). The harness in
+# front of it tells those apart; this runs its classifier against captured
+# logs of both, so a widened rule that would retry a real red suite fails here
+# instead of on a branch someone trusts.
+lint-browser-test-harness:
+    ./scripts/browser-test-harness.sh --self-test
 
 # The control-flow torture corpus is generated; without this gate, hand edits to
 # those files are silently reverted by the next `--write` (that is how the

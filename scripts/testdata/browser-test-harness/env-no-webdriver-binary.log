@@ -1,0 +1,22 @@
+Executing bindgen...                                                                                                                                  Error: failed to find a suitable WebDriver binary or remote running WebDriver to drive
+headless testing; to configure the location of the webdriver binary you can use
+environment variables like `GECKODRIVER=/path/to/geckodriver` or make sure that
+the binary is in `PATH`; to configure the address of remote webdriver you can
+use environment variables like `GECKODRIVER_REMOTE=http://remote.host/`
+
+This crate currently supports `geckodriver`, `chromedriver`, `safaridriver`, and
+`msedgedriver`, although more driver support may be added! You can download these at:
+
+    * geckodriver - https://github.com/mozilla/geckodriver/releases
+    * chromedriver - https://chromedriver.chromium.org/downloads
+    * msedgedriver - https://developer.microsoft.com/en-us/microsoft-edge/tools/webdriver/
+    * safaridriver - should be preinstalled on OSX
+
+If you would prefer to not use headless testing and would instead like to do
+interactive testing in a web browser then you can specify `NO_HEADLESS=1` as
+an environment variable. When rerun the tests will start a server that you can
+visit in a web browser, and headless testing should not be used.
+
+If you're still having difficulty resolving this error, please feel free to open
+an issue against wasm-bindgen/wasm-bindgen!
+    

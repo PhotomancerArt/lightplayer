@@ -76,4 +76,8 @@ if [ -n "${LP_WEBDRIVER_JSON:-}" ]; then
 fi
 
 cd "$root"
-exec wasm-bindgen-test-runner "$wasm_abs" "$@"
+# Through `browser-test-harness.sh`, never `wasm-bindgen-test-runner`
+# directly: the runner reports a dead browser and a red suite with the same
+# "Error: some tests failed", and this suite is the one that has actually been
+# bitten by it (PR #651, and again locally on 2026-09-09).
+exec "$repo_root/scripts/browser-test-harness.sh" "$wasm_abs" "$@"
