@@ -834,6 +834,9 @@ impl<B: Bus> MachineHart<B> {
                         instruction_count,
                         after_store,
                     } = jit.run(cx, bus)
+                        // No progress (the region's first block does not fit
+                        // the remaining budget): the interpreter runs it.
+                        && (new_pc != pc || instruction_count != self.instruction_count)
                     {
                         self.pc = new_pc;
                         self.cycle_count = cycle_count;

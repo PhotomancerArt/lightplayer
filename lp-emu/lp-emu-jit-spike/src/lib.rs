@@ -379,7 +379,10 @@ impl Jit {
         let mut instructions = 0;
         for (i, b) in code.blocks.iter().enumerate() {
             let off = b.pc.wrapping_sub(GUEST_BASE) as usize;
-            let bytes = data[off..off + b.bytes as usize].to_vec();
+            // At least one word, so a block that was unreadable when the region
+            // was translated (code the guest writes later) is noticed when it appears.
+            let n = (b.bytes as usize).max(4);
+            let bytes = data[off..off + n].to_vec();
             if self.is_writable(b.pc) {
                 ram_bytes.push((b.pc, bytes));
             } else {
