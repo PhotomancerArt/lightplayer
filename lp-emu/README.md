@@ -84,7 +84,11 @@ directories are allowed to assume MMIO at all.
   **machine-mode hart** (`mach::XtHart`) — PS and the SR file, exceptions and
   window exceptions vectoring through VECBASE, interrupt level selection,
   CCOMPARE timers, DBREAK/IBREAK — the twin of `lp-riscv-emu::mach`, which a
-  classic-ESP32 machine will drive.
+  classic-ESP32 machine will drive. It carries the twin of that hart's
+  **translated-core seam** too (`mach::translated`) and the block cache's
+  Xtensa slot type (`block::XtSlot`); both are shape only — there is no Xtensa
+  translator and no block cache wired in, and with no core installed the hart
+  produces a byte-identical everything.
 
 - **`lp-xt-emu-guest`** — the `no_std` Xtensa guest runtime. A DEVICE-target
   crate: excluded from the host workspace and built as a member of the
