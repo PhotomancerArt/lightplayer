@@ -1,0 +1,99 @@
+{"t":1789046312.827,"kind":"journal","scope":"capture","entry":"emulator-captured trace (plan two M6). configuration=lp-emu:esp32c6:t1 scenario=s7-unplug-mid-op boards=c6-a={fw} image=target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6 door=127.0.0.1:64203 command=just device-scenario run s7-unplug-mid-op --emu. NOT a silicon fixture: no board produced these bytes."}
+{"t":1789046318.835,"endpoint":"roster","kind":"journal","scope":"roster","entry":"Input(Action(AddFromUsb))"}
+{"t":1789046318.891,"endpoint":"roster","kind":"journal","scope":"roster","entry":"Input(Event(LinkAttached { link: LinkId(9), info: LinkInfo { label: \"ESP32 Serial (303a:1001)\", endpoint: EndpointKey(\"browser-serial-esp32-port-1\"), usb: Some(UsbIds { vendor: 12346, product: 4097 }), serial_number: None } }))"}
+{"t":1789046318.891,"endpoint":"roster","kind":"journal","scope":"roster","entry":"Note(PendingLinkOpened { link: LinkId(9) })"}
+{"t":1789046318.891,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Note(IdentityPromoted { binding: Endpoint, value: \"browser-serial-esp32-port-1\" })"}
+{"t":1789046318.891,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Note(ActivityStarted { kind: Identify })"}
+{"t":1789046318.944,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Opened { info: LinkInfo { label: \"ESP32 Serial (303a:1001)\", endpoint: EndpointKey(\"browser-serial-esp32-port-1\"), usb: Some(UsbIds { vendor: 12346, product: 4097 }), serial_number: None } } }))"}
+{"t":1789046318.944,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[INIT] Initializing board...\") }))"}
+{"t":1789046318.944,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[INIT] Board initialized, starting runtime... (main stack 71152 B)\") }))"}
+{"t":1789046318.945,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true\") }))"}
+{"t":1789046318.945,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[RECOVERY] RWDT armed: boot 30000 ms, runtime 8000 ms\") }))"}
+{"t":1789046318.945,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[INIT] Runtime started\") }))"}
+{"t":1789046318.945,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[INIT] fw-esp32 starting...\") }))"}
+{"t":1789046318.945,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[INIT] Spawning I/O task...\") }))"}
+{"t":1789046318.945,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[INIT] I/O task spawned\") }))"}
+{"t":1789046318.945,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[INIT] Creating StreamingMessageRouterTransport...\") }))"}
+{"t":1789046318.945,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[INIT] StreamingMessageRouterTransport created\") }))"}
+{"t":1789046318.945,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[INIT] Initializing RMT peripheral at 80MHz...\") }))"}
+{"t":1789046318.945,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[INIT] RMT peripheral initialized\") }))"}
+{"t":1789046318.945,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[INIT] Flash filesystem mounted\") }))"}
+{"t":1789046318.945,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[INIT] Creating output provider...\") }))"}
+{"t":1789046318.945,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[INIT] Output provider created\") }))"}
+{"t":1789046318.945,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[INIT] Creating LpServer instance...\") }))"}
+{"t":1789046318.945,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[INIT] LpServer created\") }))"}
+{"t":1789046318.945,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[INIT] Creating time provider...\") }))"}
+{"t":1789046318.945,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[INIT] Time provider created\") }))"}
+{"t":1789046318.945,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[INIT] fw-esp32 initialized, starting server loop... proto=20 commit=2be6b6235aad dirty=true\") }))"}
+{"t":1789046318.946,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"\") }))"}
+{"t":1789046318.947,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Frame(ServerFrame { request_id: 0, body: Hello(HelloFacts { proto: 20, identity: PeerIdentity { uid: None, mac: Some(MacAddress(\"a0:f2:62:87:b4:8c\")), name: None }, firmware: Some(\"fw-esp32c6 2be6b6235aad (dirty)\"), board_id: Some(\"seeed/xiao-esp32-c6\") }) }) }))"}
+{"t":1789046318.947,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Note(IdentityPromoted { binding: Mac, value: \"a0:f2:62:87:b4:8c\" })"}
+{"t":1789046318.947,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Note(ActivityEnded { kind: Identify, outcome: Succeeded { summary: \"seeed/xiao-esp32-c6 · fw-esp32c6 2be6b6235aad (dirty)\" } })"}
+{"t":1789046318.947,"endpoint":"roster","kind":"journal","scope":"roster","entry":"Note(DeviceCreated { device: DeviceId(1), from_record: false })"}
+{"t":1789046318.947,"endpoint":"roster","kind":"journal","scope":"roster","entry":"Note(LinkRouted { link: LinkId(9), to: DeviceId(1) })"}
+{"t":1789046318.948,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"\") }))"}
+{"t":1789046318.948,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[INFO] fw_esp32c6: [fw-esp32c6] Shader backend: native JIT (lpvm-native rt_jit)\") }))"}
+{"t":1789046318.948,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"\") }))"}
+{"t":1789046318.948,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[WARN] fw_esp32_common::lp_fs: [FS] Mount failed (filesystem corrupt), formatting partition...\") }))"}
+{"t":1789046318.948,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"\") }))"}
+{"t":1789046318.948,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[INFO] fw_esp32_common::lp_fs: [FS] Formatted and mounted fresh filesystem\") }))"}
+{"t":1789046318.948,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"\") }))"}
+{"t":1789046318.948,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[INFO] fw_esp32c6: [fw-esp32c6] Hardware manifest: seeed/xiao-esp32-c6 (XIAO ESP32-C6)\") }))"}
+{"t":1789046318.948,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"\") }))"}
+{"t":1789046318.948,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[INFO] fw_esp32c6::output::rmt::esp32c6_rmt_ws281x_driver: Esp32C6RmtWs281xDriver: 2 WS281x channels for 2 declared (ch0_blocks=1 ch0_window_words=48 ch0_half_words=24)\") }))"}
+{"t":1789046318.948,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"\") }))"}
+{"t":1789046318.948,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[INFO] fw_esp32c6: [fw-esp32c6] ESP-NOW radio ready: device_id= channel=11\") }))"}
+{"t":1789046318.948,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"\") }))"}
+{"t":1789046318.948,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[INFO] fw_esp32_common::boot: Boot: scanning /projects for projects\") }))"}
+{"t":1789046318.948,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"\") }))"}
+{"t":1789046318.948,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[WARN] fw_esp32_common::boot: Boot: failed to list /projects: Filesystem error: list_dir /projects: no such file or directory\") }))"}
+{"t":1789046318.949,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"\") }))"}
+{"t":1789046318.949,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[INFO] fw_esp32_common::server_loop: [RECOVERY] boot complete (first frame served)\") }))"}
+{"t":1789046318.951,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Action(SetName { device: DeviceId(1), name: \"XIAO ESP32-C6 · Sep 10\" }))"}
+{"t":1789046319.175,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"\") }))"}
+{"t":1789046319.175,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Frame(ServerFrame { request_id: 1, body: Hello(HelloFacts { proto: 20, identity: PeerIdentity { uid: None, mac: Some(MacAddress(\"a0:f2:62:87:b4:8c\")), name: None }, firmware: Some(\"fw-esp32c6 2be6b6235aad (dirty)\"), board_id: Some(\"seeed/xiao-esp32-c6\") }) }) }))"}
+{"t":1789046321.448,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"\") }))"}
+{"t":1789046321.476,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Frame(ServerFrame { request_id: 0, body: Heartbeat { identity: Some(PeerIdentity { uid: None, mac: Some(MacAddress(\"a0:f2:62:87:b4:8c\")), name: None }), loaded: Some([]), recovery: Some(RecoveryFacts { level: Green, safe_mode: false, paths: [], last_crash: None }), engine_fps: Some(968) } }) }))"}
+{"t":1789046321.476,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"\") }))"}
+{"t":1789046321.476,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[INFO] fw_esp32_common::server_loop: [perf] frame=4839 fps=967 elapsed=5000ms recv=0ms tick=0ms send=0ms total=0ms responses=0\") }))"}
+{"t":1789046321.476,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"\") }))"}
+{"t":1789046321.476,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[INFO] fw_esp32c6::stack_probe: [stack] heartbeat: high-water 18372 B of 71152 B (52780 B headroom)\") }))"}
+{"t":1789046322.009,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Action(Push { device: DeviceId(1) }))"}
+{"t":1789046322.009,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Note(ActivityStarted { kind: Push })"}
+{"t":1789046322.032,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Error(\"browser serial error: The emulated board was detached.\") }))"}
+{"t":1789046322.032,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Error(\"browser serial error: Serial port disconnected.\") }))"}
+{"t":1789046322.034,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(LinkDetached { link: LinkId(9) }))"}
+{"t":1789046322.034,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Note(ActivityEvicted { kind: Push, reason: LinkLost })"}
+{"t":1789046322.034,"endpoint":"roster","kind":"journal","scope":"roster","entry":"Input(Event(Link { link: LinkId(9), event: Closed { reason: \"browser serial error\" } }))"}
+{"t":1789046322.034,"endpoint":"roster","kind":"journal","scope":"roster","entry":"Input(Event(LinkBorrow { link: LinkId(9), held: true }))"}
+{"t":1789046322.034,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(ActivityMarker { device: DeviceId(1), effect: Some(EffectId(51)), marker: Progress { label: \"Asking the board what it is running\", percent: Some(5) } }))"}
+{"t":1789046322.034,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Note(StaleEffectMarker { effect: EffectId(51), ended: false })"}
+{"t":1789046322.081,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(LinkAttached { link: LinkId(10), info: LinkInfo { label: \"ESP32 Serial (303a:1001)\", endpoint: EndpointKey(\"browser-serial-esp32-port-1\"), usb: Some(UsbIds { vendor: 12346, product: 4097 }), serial_number: None } }))"}
+{"t":1789046322.081,"endpoint":"roster","kind":"journal","scope":"roster","entry":"Note(LinkRouted { link: LinkId(10), to: DeviceId(1) })"}
+{"t":1789046322.081,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Note(ActivityStarted { kind: Identify })"}
+{"t":1789046322.355,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(10), event: Error(\"open failed: NetworkError: Failed to open serial port: emulated board c6-a is already open in this page\") }))"}
+{"t":1789046323.083,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(TimerFired { timer: TimerId { scope: Device(DeviceId(1)), seq: 10 } }))"}
+{"t":1789046324.085,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(TimerFired { timer: TimerId { scope: Device(DeviceId(1)), seq: 11 } }))"}
+{"t":1789046325.087,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(TimerFired { timer: TimerId { scope: Device(DeviceId(1)), seq: 12 } }))"}
+{"t":1789046326.087,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(TimerFired { timer: TimerId { scope: Device(DeviceId(1)), seq: 13 } }))"}
+{"t":1789046327.083,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(TimerFired { timer: TimerId { scope: Device(DeviceId(1)), seq: 14 } }))"}
+{"t":1789046327.083,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Note(ActivityEnded { kind: Identify, outcome: Failed { message: \"no response from the device\" } })"}
+{"t":1789046327.083,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Note(ActivityStarted { kind: Identify })"}
+{"t":1789046327.353,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(10), event: Error(\"open failed: NetworkError: Failed to open serial port: emulated board c6-a is already open in this page\") }))"}
+{"t":1789046327.486,"endpoint":"roster","kind":"journal","scope":"roster","entry":"Input(Event(LinkBorrow { link: LinkId(9), held: false }))"}
+{"t":1789046327.487,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(ActivityMarker { device: DeviceId(1), effect: Some(EffectId(51)), marker: Ended { kind: Push, outcome: Failed { message: \"push failed: transport error: Transport error: device did not respond within 5.0s\" } } }))"}
+{"t":1789046327.487,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Note(StaleEffectMarker { effect: EffectId(51), ended: true })"}
+{"t":1789046328.085,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(TimerFired { timer: TimerId { scope: Device(DeviceId(1)), seq: 15 } }))"}
+{"t":1789046329.092,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(TimerFired { timer: TimerId { scope: Device(DeviceId(1)), seq: 16 } }))"}
+{"t":1789046330.093,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(TimerFired { timer: TimerId { scope: Device(DeviceId(1)), seq: 17 } }))"}
+{"t":1789046331.094,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(TimerFired { timer: TimerId { scope: Device(DeviceId(1)), seq: 18 } }))"}
+{"t":1789046332.084,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(TimerFired { timer: TimerId { scope: Device(DeviceId(1)), seq: 19 } }))"}
+{"t":1789046332.084,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Note(ActivityEnded { kind: Identify, outcome: Failed { message: \"no response from the device\" } })"}
+{"t":1789046332.084,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Note(ActivityStarted { kind: Identify })"}
+{"t":1789046332.353,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(10), event: Error(\"open failed: NetworkError: Failed to open serial port: emulated board c6-a is already open in this page\") }))"}
+{"t":1789046333.086,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(TimerFired { timer: TimerId { scope: Device(DeviceId(1)), seq: 20 } }))"}
+{"t":1789046334.087,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(TimerFired { timer: TimerId { scope: Device(DeviceId(1)), seq: 21 } }))"}
+{"t":1789046335.088,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(TimerFired { timer: TimerId { scope: Device(DeviceId(1)), seq: 22 } }))"}
+{"t":1789046336.089,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(TimerFired { timer: TimerId { scope: Device(DeviceId(1)), seq: 23 } }))"}
+{"t":1789046337.086,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(TimerFired { timer: TimerId { scope: Device(DeviceId(1)), seq: 24 } }))"}
+{"t":1789046337.086,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Note(ActivityEnded { kind: Identify, outcome: Failed { message: \"no response from the device\" } })"}

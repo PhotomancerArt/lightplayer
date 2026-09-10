@@ -29,11 +29,14 @@
 //   anomaly    counts only, per side. Non-zero on one side and not the other
 //              is a finding worth its own paragraph
 //              (docs/defects/2026-08-02-serial-line-interleaving.md).
-//   rx SET     the distinct set of NORMALISED boot lines, not the count. A
-//              line the emulator never emits, or emits differently, is
-//              exactly the difference the plan wants named.
+//   BOOT-LINE SET  the distinct set of NORMALISED boot lines, not the count.
+//              A line the emulator never emits, or emits differently, is
+//              exactly the difference the plan wants named. Read out of `rx`
+//              records where they exist and unwrapped from journal entries
+//              where they do not — see `bootLines`, and the note the output
+//              prints whenever it had to bridge the two.
 //
-// Normalisation for the rx set is deliberately blunt and stated in the
+// Normalisation for the boot-line set is deliberately blunt and stated in the
 // output: runs of digits collapse to `#`, hex literals to `0x#`, so
 // `[perf] frame=473355 fps=963` and the next second's copy are one line.
 // Everything the normaliser touches is reported as a count, never as a
@@ -79,6 +82,43 @@ function key(record) {
     default:
       return null;
   }
+}
+
+/// THE BOOT LINES, from either era of the trace format.
+///
+/// A 2026-08 fixture carries them as `rx` records. A capture taken today
+/// carries the same bytes one level down, inside the device model's journal:
+/// `Input(Event(Link { link: LinkId(9), event: Line("…") }))`. That is not a
+/// difference between silicon and the emulator — it is a difference between
+/// two Studios, and it is filed as
+/// docs/defects/2026-09-10-eight-of-ten-device-event-kinds-lost-their-producer.md.
+///
+/// Unwrapping it here is what keeps the comparison the plan actually wants
+/// possible at all: the SET of lines a board emits against the set an
+/// emulated chip emits. It is stated in the output, every time, so nobody
+/// reads a bridged diff as a like-for-like one.
+function bootLines(records) {
+  const lines = [];
+  let fromJournal = 0;
+  for (const record of records) {
+    if (record.kind === "rx" && typeof record.line === "string") {
+      lines.push(record.line);
+      continue;
+    }
+    if (record.kind !== "journal" || typeof record.entry !== "string") continue;
+    // `event: Line("…")` — the payload is Rust's Debug escaping of the line.
+    const match = record.entry.match(/event: Line\("((?:[^"\\]|\\.)*)"\)/);
+    if (!match) continue;
+    fromJournal += 1;
+    lines.push(
+      match[1]
+        .replaceAll('\\"', '"')
+        .replaceAll("\\n", "\n")
+        .replaceAll("\\t", "\t")
+        .replaceAll("\\\\", "\\"),
+    );
+  }
+  return { lines, fromJournal };
 }
 
 /// Volatile numbers out, so the SET of boot lines is a set of shapes.
@@ -227,19 +267,29 @@ function main() {
   console.log("");
 
   // --- the distinct set of boot lines ------------------------------------
-  const leftLines = new Set(left.records.filter((r) => r.kind === "rx").map((r) => normaliseLine(r.line ?? "")));
-  const rightLines = new Set(right.records.filter((r) => r.kind === "rx").map((r) => normaliseLine(r.line ?? "")));
+  const leftBoot = bootLines(left.records);
+  const rightBoot = bootLines(right.records);
+  const leftLines = new Set(leftBoot.lines.map(normaliseLine));
+  const rightLines = new Set(rightBoot.lines.map(normaliseLine));
   const onlyLeft = setDifference(leftLines, rightLines);
   const onlyRight = setDifference(rightLines, leftLines);
   const shared = [...leftLines].filter((line) => rightLines.has(line)).length;
-  console.log(`  distinct rx line SHAPES (digits → #):  ${labels[0]}=${leftLines.size}  ${labels[1]}=${rightLines.size}  shared=${shared}`);
+  if (leftBoot.fromJournal || rightBoot.fromJournal) {
+    console.log(
+      `  (boot lines UNWRAPPED FROM THE JOURNAL: ${labels[0]}=${leftBoot.fromJournal}, ${labels[1]}=${rightBoot.fromJournal}.\n` +
+        `   A 2026-08 fixture carries them as \`rx\` records; a capture taken today carries the same\n` +
+        `   bytes inside journal entries, because \`rx\` lost its producer — that is two Studios,\n` +
+        `   not two boards. docs/defects/2026-09-10-eight-of-ten-device-event-kinds-lost-their-producer.md)`,
+    );
+  }
+  console.log(`  distinct boot-line SHAPES (digits → #):  ${labels[0]}=${leftLines.size}  ${labels[1]}=${rightLines.size}  shared=${shared}`);
   console.log(`    only in ${labels[0]}: ${onlyLeft.length}`);
   for (const line of onlyLeft) console.log(`      - ${line}`);
   console.log(`    only in ${labels[1]}: ${onlyRight.length}`);
   for (const line of onlyRight) console.log(`      + ${line}`);
   console.log("");
-  if (onlyLeft.length) differences.push({ area: "rx line set", detail: `${onlyLeft.length} shape(s) only ${labels[0]}` });
-  if (onlyRight.length) differences.push({ area: "rx line set", detail: `${onlyRight.length} shape(s) only ${labels[1]}` });
+  if (onlyLeft.length) differences.push({ area: "boot-line set", detail: `${onlyLeft.length} shape(s) only ${labels[0]}` });
+  if (onlyRight.length) differences.push({ area: "boot-line set", detail: `${onlyRight.length} shape(s) only ${labels[1]}` });
 
   console.log(`  VERDICT: ${differences.length} difference(s) to name.`);
   for (const difference of differences) {

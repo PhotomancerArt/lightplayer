@@ -1,0 +1,75 @@
+{"t":1789045857.319,"kind":"journal","scope":"capture","entry":"emulator-captured trace (plan two M6). configuration=lp-emu:esp32c6:t1 scenario=s1-blank-flash boards=c6-a=blank,kind=rom-up image=target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6 door=127.0.0.1:63824 command=just device-scenario run s1-blank-flash --emu. NOT a silicon fixture: no board produced these bytes."}
+{"t":1789045865.227,"endpoint":"roster","kind":"journal","scope":"roster","entry":"Input(Action(AddFromUsb))"}
+{"t":1789045865.265,"endpoint":"roster","kind":"journal","scope":"roster","entry":"Input(Event(LinkAttached { link: LinkId(9), info: LinkInfo { label: \"ESP32 Serial (303a:1001)\", endpoint: EndpointKey(\"browser-serial-esp32-port-1\"), usb: Some(UsbIds { vendor: 12346, product: 4097 }), serial_number: None } }))"}
+{"t":1789045865.266,"endpoint":"roster","kind":"journal","scope":"roster","entry":"Note(PendingLinkOpened { link: LinkId(9) })"}
+{"t":1789045865.266,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Note(IdentityPromoted { binding: Endpoint, value: \"browser-serial-esp32-port-1\" })"}
+{"t":1789045865.266,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Note(ActivityStarted { kind: Identify })"}
+{"t":1789045865.326,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Opened { info: LinkInfo { label: \"ESP32 Serial (303a:1001)\", endpoint: EndpointKey(\"browser-serial-esp32-port-1\"), usb: Some(UsbIds { vendor: 12346, product: 4097 }), serial_number: None } } }))"}
+{"t":1789045865.328,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"ESP-ROM:esp32c6-20220919\") }))"}
+{"t":1789045865.328,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"Build:Sep 19 2022\") }))"}
+{"t":1789045865.328,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"rst:0x1 (POWERON),boot:0x1e (SPI_FAST_FLASH_BOOT)\") }))"}
+{"t":1789045865.328,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.328,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Note(ActivityEnded { kind: Identify, outcome: Succeeded { summary: \"blank or erased flash\" } })"}
+{"t":1789045865.329,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.329,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.329,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.329,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.329,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.329,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.329,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.329,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.329,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.329,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.329,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.329,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.329,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.329,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.329,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.329,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.329,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.329,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.329,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.329,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.33,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.33,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.33,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.33,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.33,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.33,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.33,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.33,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.33,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.33,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.33,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.33,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.33,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.33,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.33,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.33,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.33,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.33,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.331,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.331,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.331,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.331,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.331,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.331,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.331,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.331,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.331,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.331,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.331,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.331,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.331,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.331,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.331,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.332,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.332,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.332,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.332,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.332,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.332,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.332,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"invalid header: 0xffffffff\") }))"}
+{"t":1789045865.377,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Closed { reason: \"closed by request\" } }))"}
+{"t":1789045877.342,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(TimerFired { timer: TimerId { scope: Device(DeviceId(1)), seq: 6 } }))"}
+{"t":1789045877.342,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Note(WentQuiet { last_heard: Millis(1789045865332) })"}
