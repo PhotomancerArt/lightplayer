@@ -142,6 +142,23 @@ pub enum StoreOp {
     S32i,
 }
 
+/// The synchronising word accesses (`RRI8`, `op0 = 2`), kept apart from the
+/// plain [`LoadOp`]/[`StoreOp`] families because their *semantics* differ, not
+/// their shape: all three are `op at, as, offset` with a 4-scaled unsigned
+/// 8-bit offset (0..=1020).
+///
+/// This crate holds no semantics for any of them — see the module doc — but a
+/// machine that does needs them told apart from `l32i`/`s32i` at decode time.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AtomicLsOp {
+    /// `l32ai at, as, off` — load 32 bits with acquire ordering; `r = 0xB`.
+    L32ai,
+    /// `s32ri at, as, off` — store 32 bits with release ordering; `r = 0xF`.
+    S32ri,
+    /// `s32c1i at, as, off` — store-conditional against `SCOMPARE1`; `r = 0xE`.
+    S32c1i,
+}
+
 /// Register-register conditional branches (`RRI8`, `op0 = 7`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BrRr {
@@ -202,6 +219,199 @@ pub enum CallxOp {
     Callx12,
 }
 
+/// The zero-overhead loop opcodes (`BRI8`, `op0 = 6`, `n = 3`, `m = 1`).
+///
+/// All three take `op as, label`: `as` is the trip count and the label is the
+/// first instruction *after* the loop body, which the hardware latches into
+/// `LEND`. See [`crate::disasm::loop_end`] for the address formula.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LoopOp {
+    /// `loop as, label` — `r = 8`. Always executes the body `AR[s]` times.
+    Loop,
+    /// `loopnez as, label` — `r = 9`. Skips the body entirely if `AR[s] == 0`.
+    Loopnez,
+    /// `loopgtz as, label` — `r = 0xA`. Skips the body if `AR[s] <= 0` signed.
+    Loopgtz,
+}
+
+/// The zero-operand exception returns (`RRR`, `op0 = 0`, `op1 = 0`, `op2 = 0`,
+/// `r = 3`, `t = 0`, sub-selected by `s`).
+///
+/// Kept out of [`NullaryOp`] deliberately: those are instructions the user-mode
+/// runner executes, these are privileged control transfers the machine-mode
+/// hart owns.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RfOp {
+    /// `rfe` — return from a level-1 exception; `s = 0`. Clears `PS.EXCM`.
+    Rfe,
+    /// `rfde` — return from a double exception; `s = 2`.
+    Rfde,
+    /// `rfwo` — return from a window **overflow** handler; `s = 4`.
+    Rfwo,
+    /// `rfwu` — return from a window **underflow** handler; `s = 5`.
+    Rfwu,
+}
+
+/// The windowed spill/reload accesses (`RRR`, `op0 = 0`, `op1 = 9`).
+///
+/// `op at, as, offset`, offset a **negative** multiple of 4 in -64..=-4 held in
+/// the `r` field as `(offset / 4) + 16`. These are the instructions the
+/// `_WindowOverflow*` / `_WindowUnderflow*` vectors are made of.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum WindowLsOp {
+    /// `l32e at, as, off` — window-reload load; `op2 = 0`.
+    L32e,
+    /// `s32e at, as, off` — window-spill store; `op2 = 4`.
+    S32e,
+}
+
+/// A MAC16 operand register `m0`..`m3`.
+///
+/// A separate type from [`Reg`] for the same reason [`FReg`] is: the MR file is
+/// four registers wide and unrelated to the windowed AR file, and the two are
+/// not interchangeable in any MAC16 operand slot.
+///
+/// The architecture constrains which half of the file each slot can name — the
+/// **x** operand is `m0`/`m1`, the **y** operand is `m2`/`m3` — and the encoded
+/// fields are one bit wide accordingly, so `decode` never produces an out-of-
+/// range pairing and `encode` masks to the same bit.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MReg(u8);
+
+impl MReg {
+    /// Create a MAC16 register from a raw number, panicking if `>3`.
+    #[inline]
+    pub const fn new(n: u8) -> MReg {
+        assert!(n < 4, "Xtensa MAC16 register out of range");
+        MReg(n)
+    }
+
+    /// The raw register number `0..=3`.
+    #[inline]
+    pub const fn num(self) -> u8 {
+        self.0
+    }
+}
+
+impl core::fmt::Debug for MReg {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "m{}", self.0)
+    }
+}
+
+/// Which MAC16 multiply a word performs (`op1{3-2}`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MacOp {
+    /// `umul.aa.<half>` — unsigned multiply into the accumulator; `op1{3-2} = 0`.
+    /// Only the AA operand form exists.
+    Umul,
+    /// `mul.<xy>.<half>` — signed multiply, replacing the accumulator; `= 1`.
+    Mul,
+    /// `mula.<xy>.<half>` — multiply-accumulate; `= 2`.
+    Mula,
+    /// `muls.<xy>.<half>` — multiply-subtract; `= 3`.
+    Muls,
+}
+
+/// Which 16-bit half of each 32-bit multiplicand a MAC16 word uses
+/// (`op1{1-0}`): the first letter is the **x** operand, the second the **y**.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MacHalf {
+    /// `.ll` — low × low; `op1{1-0} = 0`.
+    Ll,
+    /// `.hl` — high × low; `= 1`.
+    Hl,
+    /// `.lh` — low × high; `= 2`.
+    Lh,
+    /// `.hh` — high × high; `= 3`.
+    Hh,
+}
+
+/// Where a MAC16 multiply's two operands come from (`op2`), with the registers.
+///
+/// The letters name the files: `A` = the address-register file, `D` = the MAC16
+/// `m0..m3` file, x first then y. The `x`-from-MR forms may only name `m0`/`m1`
+/// and the `y`-from-MR forms only `m2`/`m3` — a hardware constraint, not a
+/// modelling choice.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MacSrc {
+    /// `op.aa.<half> as, at` — both from the AR file; `op2 = 7`.
+    Aa(Reg, Reg),
+    /// `op.ad.<half> as, my` — x from AR, y from MR; `op2 = 3`.
+    Ad(Reg, MReg),
+    /// `op.da.<half> mx, at` — x from MR, y from AR; `op2 = 6`.
+    Da(MReg, Reg),
+    /// `op.dd.<half> mx, my` — both from MR; `op2 = 2`.
+    Dd(MReg, MReg),
+}
+
+/// The `y` operand of a MAC16 multiply-and-load, which decides whether the word
+/// is the `.da` or the `.dd` form.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MacY {
+    /// `.da…` — y from the AR file; `op2{2} = 1`.
+    Ar(Reg),
+    /// `.dd…` — y from the MR file (`m2`/`m3`); `op2{2} = 0`.
+    Mr(MReg),
+}
+
+/// Boolean-file logic ops (`RRR`, `op0 = 0`, `op1 = 2`). Shape: `op br, bs, bt`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BoolOp {
+    /// `andb br, bs, bt` — `op2 = 0`.
+    Andb,
+    /// `andbc br, bs, bt` — `bs AND NOT bt`; `op2 = 1`.
+    Andbc,
+    /// `orb br, bs, bt` — `op2 = 2`.
+    Orb,
+    /// `orbc br, bs, bt` — `bs OR NOT bt`; `op2 = 3`.
+    Orbc,
+    /// `xorb br, bs, bt` — `op2 = 4`.
+    Xorb,
+}
+
+/// Boolean-file reductions (`RRR`, `op0 = 0`, `op1 = 0`, `op2 = 0`, by `r`).
+///
+/// Shape: `op br, bs` where `bs` names the **first** register of a 4- or
+/// 8-register aligned group; objdump renders the whole range
+/// (`all4 b0, b4:b5:b6:b7`), which is the same field.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BoolAllOp {
+    /// `any4 br, bs` — `r = 8`.
+    Any4,
+    /// `all4 br, bs` — `r = 9`.
+    All4,
+    /// `any8 br, bs` — `r = 0xA`.
+    Any8,
+    /// `all8 br, bs` — `r = 0xB`.
+    All8,
+}
+
+/// Region-protection / TLB accesses taking `at, as` (`RRR`, `op0 = 0`,
+/// `op1 = 0`, `op2 = 5`, sub-selected by `r`).
+///
+/// **Decode and disassembly only.** This crate holds no semantics for any of
+/// them, and the "accept and remember" model a machine needs is P3's or later.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TlbOp {
+    /// `ritlb0 at, as` — `r = 3`.
+    Ritlb0,
+    /// `pitlb at, as` — `r = 5`.
+    Pitlb,
+    /// `witlb at, as` — `r = 6`.
+    Witlb,
+    /// `ritlb1 at, as` — `r = 7`.
+    Ritlb1,
+    /// `rdtlb0 at, as` — `r = 0xB`.
+    Rdtlb0,
+    /// `pdtlb at, as` — `r = 0xD`.
+    Pdtlb,
+    /// `wdtlb at, as` — `r = 0xE`.
+    Wdtlb,
+    /// `rdtlb1 at, as` — `r = 0xF`.
+    Rdtlb1,
+}
+
 /// Zero-operand barrier / sync / nop opcodes (`RRR`, `op0 = 0`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum NullaryOp {
@@ -258,6 +468,8 @@ pub enum Inst {
     Extui(Reg, Reg, u8, u8),
     /// `sext rd, rs, imm` (imm 7..=22)
     Sext(Reg, Reg, u8),
+    /// `clamps rd, rs, imm` (imm 7..=22) — saturate to a signed `imm+1`-bit range.
+    Clamps(Reg, Reg, u8),
     /// `mov.n rt, rs` (16-bit)
     MovN(Reg, Reg),
     /// `add.n rd, rs, rt` (16-bit)
@@ -280,6 +492,9 @@ pub enum Inst {
     L32iN(Reg, Reg, u32),
     /// `s32i.n rt, rs, offset` (16-bit; offset 0..=60, multiple of 4)
     S32iN(Reg, Reg, u32),
+    /// `op at, as, offset` — the synchronising word accesses (`l32ai`,
+    /// `s32ri`, `s32c1i`). Byte offset already unscaled, 0..=1020.
+    AtomicLs(AtomicLsOp, Reg, Reg, u32),
     /// `l32r rt, label`. Stores the raw 16-bit field; target is backward-only.
     L32r(Reg, u16),
     /// `op rs, rt, target`. Stores signed 8-bit PC-relative offset.
@@ -294,6 +509,10 @@ pub enum Inst {
     BranchBiI(bool /* set? bbsi:true, bbci:false */, Reg, u8, i32),
     /// `beqz.n`/`bnez.n rs, target` (16-bit). Stores unsigned 6-bit forward offset.
     BranchZN(bool /* nez? */, Reg, u32),
+    /// `op as, label` — a zero-overhead loop. Stores the **unsigned** 8-bit
+    /// encoded offset, not an address; [`crate::disasm::loop_end`] turns it
+    /// into the `LEND` value.
+    Loop(LoopOp, Reg, u8),
     /// `j target`. Stores signed 18-bit byte offset.
     J(i32),
     /// `jx rs`
@@ -304,6 +523,22 @@ pub enum Inst {
     Callx(CallxOp, Reg),
     /// `entry rs, imm` (imm 0..=32760, multiple of 8)
     Entry(Reg, u32),
+    /// `rfe`/`rfde`/`rfwo`/`rfwu` — privileged exception returns.
+    Rf(RfOp),
+    /// `rfi level` (level 0..=15) — return from a level-`n` interrupt.
+    Rfi(u8),
+    /// `rsil at, level` — read PS and set `PS.INTLEVEL` to `level` (0..=15).
+    Rsil(Reg, u8),
+    /// `waiti level` (0..=15) — wait for an interrupt above `level`.
+    Waiti(u8),
+    /// `rotw imm` (imm -8..=7) — rotate the register window by `imm` groups.
+    Rotw(i8),
+    /// `break imms, immt` (both 0..=15) — raise a debug exception.
+    Break(u8, u8),
+    /// `break.n imms` (0..=15, 16-bit) — the density form.
+    BreakN(u8),
+    /// `op at, as, offset` — windowed spill/reload; offset -64..=-4, step 4.
+    WindowLs(WindowLsOp, Reg, Reg, i32),
     /// zero-operand barrier/sync/return (24-bit)
     Nullary(NullaryOp),
     /// zero-operand narrow return/nop (16-bit)
@@ -340,6 +575,34 @@ pub enum Inst {
     MovBool(bool /* set? movt:movf */, Reg, Reg, BReg),
     /// `bt`/`bf bs, target`. Stores the signed 8-bit PC-relative offset.
     BranchBool(bool /* set? bt:bf */, BReg, i32),
+    /// `op br, bs, bt` — boolean-file logic.
+    BoolLogic(BoolOp, BReg, BReg, BReg),
+    /// `op br, bs` — boolean-file reduction over an aligned 4- or 8-group.
+    BoolAll(BoolAllOp, BReg, BReg),
+
+    // --- region protection (decode and disassembly only) ---
+    /// `op at, as` — a TLB read/probe/write.
+    Tlb(TlbOp, Reg, Reg),
+    /// `idtlb as` (`data = true`, `r = 0xC`) / `iitlb as` (`r = 4`) — invalidate.
+    TlbInv(bool /* data? idtlb:iitlb */, Reg),
+    /// `rer at, as` (`write = false`) / `wer at, as` — external-register access.
+    ExtReg(bool /* write? wer:rer */, Reg, Reg),
+
+    // --- MAC16 (`op0 = 4`; decode and disassembly only) ---
+    /// `op.<xy>.<half> …` — a MAC16 multiply.
+    Mac(MacOp, MacHalf, MacSrc),
+    /// `mula.<xy>.<half>.ldinc`/`.lddec mw, as, mx, y` — multiply-accumulate
+    /// with an autoincrementing MR load. `dec = true` selects `.lddec`.
+    MacLd(
+        bool, /* dec? lddec:ldinc */
+        MacHalf,
+        MReg,
+        Reg,
+        MReg,
+        MacY,
+    ),
+    /// `ldinc`/`lddec mw, as` — the bare MR load; `dec = true` for `lddec`.
+    MacLoad(bool /* dec? lddec:ldinc */, MReg, Reg),
 
     // --- special / user registers (see the [`sr`] module doc) ---
     /// `rsr.<sr>`/`wsr.<sr>`/`xsr.<sr> at`

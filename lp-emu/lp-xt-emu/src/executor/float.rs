@@ -42,7 +42,7 @@
 use lp_emu_core::bus::Bus;
 use lp_xt_inst::{FpLsiOp, FpLsxOp, FpRrOp, Inst, SpecialReg, SrOp, UrOp, UserReg};
 
-use super::Exec;
+use super::{Exec, machine_mode_only};
 use crate::emu::Flow;
 use crate::error::{EXC_COPROCESSOR0_DISABLED, Trap, TrapKind};
 use crate::memory::XtAccess;
@@ -126,10 +126,18 @@ impl<B: Bus> Exec<'_, B> {
             }
 
             // --- special registers: BR and CPENABLE (neither is gated) ---
+            //
+            // M1 P1 widened `lp-xt-inst`'s SR table to the whole firmware SR
+            // space so a machine-mode hart can decode it. The **user-mode**
+            // runner models exactly two of those registers and must not
+            // silently do nothing for the rest: every other SR raises the same
+            // illegal-instruction exception it raised when the decoder refused
+            // the word outright. Machine-mode behaviour is M1 P3's.
             Inst::Sr(op, sreg, at) => {
                 let old = match sreg {
                     SpecialReg::Br => u32::from(self.cpu.br),
                     SpecialReg::Cpenable => self.cpu.cpenable,
+                    _ => return Err(machine_mode_only()),
                 };
                 let new = self.rreg(at.num());
                 match op {
@@ -150,6 +158,7 @@ impl<B: Bus> Exec<'_, B> {
                         let v = match ureg {
                             UserReg::Fcr => self.cpu.fcr,
                             UserReg::Fsr => self.cpu.fsr,
+                            _ => return Err(machine_mode_only()),
                         };
                         self.wreg(at.num(), v, tracer);
                     }
@@ -160,6 +169,7 @@ impl<B: Bus> Exec<'_, B> {
                             // flags are sticky otherwise (measured, M6 P1).
                             UserReg::Fsr => self.cpu.fsr = v,
                             UserReg::Fcr => self.cpu.fcr = v,
+                            _ => return Err(machine_mode_only()),
                         }
                     }
                 }
@@ -205,6 +215,8 @@ impl<B: Bus> Exec<'_, B> {
     }
 
     fn write_special<T: Tracer + ?Sized>(&mut self, sreg: SpecialReg, v: u32, tracer: &mut T) {
+        // Only reached for the two registers the `Inst::Sr` arm above lets
+        // through; anything else has already trapped as machine-mode-only.
         match sreg {
             SpecialReg::Br => {
                 let new = v as u16;
@@ -218,6 +230,7 @@ impl<B: Bus> Exec<'_, B> {
                 }
             }
             SpecialReg::Cpenable => self.cpu.cpenable = v,
+            _ => {}
         }
     }
 }

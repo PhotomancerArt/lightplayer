@@ -402,18 +402,282 @@ fn boolean_moves_and_branches() {
 #[test]
 fn special_and_user_registers() {
     for op in [SrOp::Rsr, SrOp::Wsr, SrOp::Xsr] {
-        for sreg in [SpecialReg::Br, SpecialReg::Cpenable] {
+        for sreg in SpecialReg::ALL {
+            if !sreg.allows(op) {
+                continue;
+            }
             for &x in &REGS {
                 rt(Inst::Sr(op, sreg, r(x)), 3);
             }
         }
     }
     for op in [UrOp::Rur, UrOp::Wur] {
-        for ureg in [UserReg::Fcr, UserReg::Fsr] {
+        for ureg in UserReg::ALL {
             for &x in &REGS {
                 rt(Inst::Ur(op, ureg, r(x)), 3);
             }
         }
+    }
+}
+
+#[test]
+fn atomic_loads_and_stores() {
+    for op in [AtomicLsOp::L32ai, AtomicLsOp::S32ri, AtomicLsOp::S32c1i] {
+        for &at in &REGS {
+            for &ars in &REGS {
+                for off in [0u32, 4, 512, 1016, 1020] {
+                    rt(Inst::AtomicLs(op, r(at), r(ars), off), 3);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn zero_overhead_loops() {
+    for op in [LoopOp::Loop, LoopOp::Loopnez, LoopOp::Loopgtz] {
+        for &ars in &REGS {
+            for imm in [0u8, 1, 127, 128, 254, 255] {
+                rt(Inst::Loop(op, r(ars), imm), 3);
+            }
+        }
+    }
+}
+
+#[test]
+fn privileged_control_flow_and_windows() {
+    for op in [RfOp::Rfe, RfOp::Rfde, RfOp::Rfwo, RfOp::Rfwu] {
+        rt(Inst::Rf(op), 3);
+    }
+    for level in 0..=15u8 {
+        rt(Inst::Rfi(level), 3);
+        rt(Inst::Waiti(level), 3);
+        for &at in &REGS {
+            rt(Inst::Rsil(r(at), level), 3);
+        }
+    }
+    for imm in -8..=7i8 {
+        rt(Inst::Rotw(imm), 3);
+    }
+    for op in [WindowLsOp::L32e, WindowLsOp::S32e] {
+        for &at in &REGS {
+            for &ars in &REGS {
+                for off in (-64..=-4).step_by(4) {
+                    rt(Inst::WindowLs(op, r(at), r(ars), off), 3);
+                }
+            }
+        }
+    }
+    for imms in 0..=15u8 {
+        rt(Inst::BreakN(imms), 2);
+        for immt in 0..=15u8 {
+            rt(Inst::Break(imms, immt), 3);
+        }
+    }
+}
+
+#[test]
+fn integer_helper_booleans_and_region_protection() {
+    for &x in &REGS {
+        for &y in &REGS {
+            for imm in 7..=22u8 {
+                rt(Inst::Clamps(r(x), r(y), imm), 3);
+            }
+            rt(Inst::ExtReg(false, r(x), r(y)), 3);
+            rt(Inst::ExtReg(true, r(x), r(y)), 3);
+            for op in [
+                TlbOp::Ritlb0,
+                TlbOp::Pitlb,
+                TlbOp::Witlb,
+                TlbOp::Ritlb1,
+                TlbOp::Rdtlb0,
+                TlbOp::Pdtlb,
+                TlbOp::Wdtlb,
+                TlbOp::Rdtlb1,
+            ] {
+                rt(Inst::Tlb(op, r(x), r(y)), 3);
+            }
+        }
+        rt(Inst::TlbInv(true, r(x)), 3);
+        rt(Inst::TlbInv(false, r(x)), 3);
+    }
+    for op in [
+        BoolOp::Andb,
+        BoolOp::Andbc,
+        BoolOp::Orb,
+        BoolOp::Orbc,
+        BoolOp::Xorb,
+    ] {
+        for &x in &REGS {
+            for &y in &REGS {
+                rt(Inst::BoolLogic(op, b(x), b(y), b(15 - x)), 3);
+            }
+        }
+    }
+    // The reduction's source names an ALIGNED group: 4-forms take b0/b4/b8/b12
+    // and 8-forms take b0/b8. The assembler refuses anything else.
+    for op in [BoolAllOp::Any4, BoolAllOp::All4] {
+        for &x in &REGS {
+            for y in [0u8, 4, 8, 12] {
+                rt(Inst::BoolAll(op, b(x), b(y)), 3);
+            }
+        }
+    }
+    for op in [BoolAllOp::Any8, BoolAllOp::All8] {
+        for &x in &REGS {
+            for y in [0u8, 8] {
+                rt(Inst::BoolAll(op, b(x), b(y)), 3);
+            }
+        }
+    }
+}
+
+/// The boolean reductions read an aligned group base, and a word whose `s`
+/// field is not aligned is not one of them. objdump prints such a word as
+/// `all4 b0, b0:b1:b2:b3` (it aligns the base down); the assembler refuses to
+/// produce one, so this crate refuses to decode one.
+#[test]
+fn boolean_reductions_require_an_aligned_group() {
+    // op0=0, op1=0, op2=0, r = 8/9 (4-forms) or 0xA/0xB (8-forms); s = base.
+    for (r_field, bad_bases) in [
+        (0x8u32, [1u32, 2, 3, 5].as_slice()),
+        (0x9, [1, 2, 3, 5].as_slice()),
+        (0xa, [1, 2, 4, 7].as_slice()),
+        (0xb, [1, 2, 4, 7].as_slice()),
+    ] {
+        for &s in bad_bases {
+            let w = (r_field << 12) | (s << 8);
+            let bytes = [w as u8, (w >> 8) as u8, (w >> 16) as u8];
+            assert!(
+                matches!(
+                    decode(&bytes).unwrap_err(),
+                    DecodeError::Unsupported { len: 3, .. }
+                ),
+                "r={r_field:#x} base b{s} is unaligned and must not decode"
+            );
+        }
+    }
+}
+
+#[test]
+fn mac16() {
+    const HALVES: [MacHalf; 4] = [MacHalf::Ll, MacHalf::Hl, MacHalf::Lh, MacHalf::Hh];
+    // The x MR operand is m0/m1, the y MR operand m2/m3 — a hardware
+    // constraint, so the round-trip only covers the pairings that exist.
+    for half in HALVES {
+        for which in [MacOp::Mul, MacOp::Mula, MacOp::Muls] {
+            for &x in &REGS {
+                for &y in &REGS {
+                    rt(Inst::Mac(which, half, MacSrc::Aa(r(x), r(y))), 3);
+                }
+                for my in 2..=3u8 {
+                    rt(Inst::Mac(which, half, MacSrc::Ad(r(x), MReg::new(my))), 3);
+                }
+            }
+            for mx in 0..=1u8 {
+                for &y in &REGS {
+                    rt(Inst::Mac(which, half, MacSrc::Da(MReg::new(mx), r(y))), 3);
+                }
+                for my in 2..=3u8 {
+                    rt(
+                        Inst::Mac(which, half, MacSrc::Dd(MReg::new(mx), MReg::new(my))),
+                        3,
+                    );
+                }
+            }
+        }
+        // `umul` exists only in the AA form.
+        for &x in &REGS {
+            for &y in &REGS {
+                rt(Inst::Mac(MacOp::Umul, half, MacSrc::Aa(r(x), r(y))), 3);
+            }
+        }
+        for dec in [false, true] {
+            for mw in 0..=3u8 {
+                for mx in 0..=1u8 {
+                    for &ars in &REGS {
+                        for &at in &REGS {
+                            rt(
+                                Inst::MacLd(
+                                    dec,
+                                    half,
+                                    MReg::new(mw),
+                                    r(ars),
+                                    MReg::new(mx),
+                                    MacY::Ar(r(at)),
+                                ),
+                                3,
+                            );
+                        }
+                        for my in 2..=3u8 {
+                            rt(
+                                Inst::MacLd(
+                                    dec,
+                                    half,
+                                    MReg::new(mw),
+                                    r(0),
+                                    MReg::new(mx),
+                                    MacY::Mr(MReg::new(my)),
+                                ),
+                                3,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for dec in [false, true] {
+        for mw in 0..=3u8 {
+            for &ars in &REGS {
+                rt(Inst::MacLoad(dec, MReg::new(mw), r(ars)), 3);
+            }
+        }
+    }
+}
+
+/// The SR / UR tables are total in both directions: every variant's number maps
+/// back to that variant, `ALL` and `from_num` agree on the modelled set, and
+/// numbers outside it stay `None`.
+#[test]
+fn sr_ur_tables_are_total_both_ways() {
+    for sreg in SpecialReg::ALL {
+        assert_eq!(
+            SpecialReg::from_num(sreg.num()),
+            Some(sreg),
+            "SR {} ({}) does not round-trip through from_num",
+            sreg.num(),
+            sreg.name()
+        );
+    }
+    let modelled: usize = (0u8..=255)
+        .filter(|&n| SpecialReg::from_num(n).is_some())
+        .count();
+    assert_eq!(
+        modelled,
+        SpecialReg::ALL.len(),
+        "SpecialReg::ALL and from_num disagree on how many registers are modelled"
+    );
+
+    for ureg in UserReg::ALL {
+        assert_eq!(
+            UserReg::from_num(ureg.num()),
+            Some(ureg),
+            "UR {}",
+            ureg.num()
+        );
+    }
+    let modelled_ur: usize = (0u8..=255)
+        .filter(|&n| UserReg::from_num(n).is_some())
+        .count();
+    assert_eq!(modelled_ur, UserReg::ALL.len());
+
+    // A sample of numbers the LX6/LX7 assemblers have no name for.
+    for n in [6u8, 13, 100, 105, 200, 216, 229, 239, 243, 248, 255] {
+        assert_eq!(SpecialReg::from_num(n), None, "SR {n} must stay unmodelled");
+    }
+    for n in [0u8, 100, 229, 237, 255] {
+        assert_eq!(UserReg::from_num(n), None, "UR {n} must stay unmodelled");
     }
 }
 
@@ -433,9 +697,12 @@ fn length_rule() {
 /// correct length so a stream walk stays aligned.
 #[test]
 fn unsupported_reports_length() {
-    // `andb b0, b1, b2` (op0=0, op1=2, op2=0) — the boolean *logic* ops are
-    // deliberately outside the subset (M6 needs only the compare readback
-    // paths); 3 bytes. Assembler-derived bytes.
-    let e = decode(&[0x20, 0x01, 0x02]).unwrap_err();
+    // `s32nb a2, a3, 4` (op0=0, op1=9, op2=5) — the narrow-bus store, outside
+    // this crate's set and outside M1 P1's families; 3 bytes. Assembler-derived
+    // bytes (both LX6 and LX7 emit `20 13 59`).
+    let e = decode(&[0x20, 0x13, 0x59]).unwrap_err();
+    assert!(matches!(e, DecodeError::Unsupported { len: 3, .. }));
+    // `sddr32.p a2` — likewise; 3 bytes, `f0 72 00`.
+    let e = decode(&[0xf0, 0x72, 0x00]).unwrap_err();
     assert!(matches!(e, DecodeError::Unsupported { len: 3, .. }));
 }

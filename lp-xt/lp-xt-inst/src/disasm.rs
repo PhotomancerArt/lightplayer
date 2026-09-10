@@ -21,6 +21,24 @@ fn call_target(pc: u32, word_offset: i32) -> u32 {
         .wrapping_add(4)
 }
 
+/// Compute the `LEND` value a `loop`/`loopnez`/`loopgtz` at `pc` latches.
+///
+/// **The formula is `LEND = pc + 4 + imm8`**, with `imm8` unsigned (0..=255) —
+/// the same `pc + 4` base every Xtensa PC-relative branch uses, independent of
+/// the instruction's own 3-byte width. Verified against `xtensa-esp32-elf-as`
+/// and `xtensa-esp32s3-elf-as` at five offsets spanning the field, including
+/// the wraparound-looking ones (`imm8 = 0xfb` at pc 0x1b resolves to 0x11a, not
+/// backwards).
+///
+/// It lives here, once, because a decoder that silently drops the loop
+/// back-edge produces a wrong answer with no fault: everything that needs
+/// `LEND` — the machine hart, the block-discovery sweep, the disassembler —
+/// must get it from the same place rather than each redoing the arithmetic.
+#[inline]
+pub fn loop_end(pc: u32, imm8: u8) -> u32 {
+    pc.wrapping_add(4).wrapping_add(imm8 as u32)
+}
+
 /// Compute an `l32r` literal address from the raw 16-bit field (always backward).
 #[inline]
 pub fn l32r_target(pc: u32, imm16: u16) -> u32 {
@@ -106,6 +124,14 @@ pub fn format_inst(inst: &Inst, pc: u32) -> String {
             };
             format!("{m}\t{rt:?}, {rs:?}, {off}")
         }
+        AtomicLs(op, at, ars, off) => {
+            let m = match op {
+                AtomicLsOp::L32ai => "l32ai",
+                AtomicLsOp::S32ri => "s32ri",
+                AtomicLsOp::S32c1i => "s32c1i",
+            };
+            format!("{m}\t{at:?}, {ars:?}, {off}")
+        }
         L32iN(rt, rs, off) => format!("l32i.n\t{rt:?}, {rs:?}, {off}"),
         S32iN(rt, rs, off) => format!("s32i.n\t{rt:?}, {rs:?}, {off}"),
         L32r(rt, imm16) => {
@@ -162,6 +188,14 @@ pub fn format_inst(inst: &Inst, pc: u32) -> String {
             let m = if nez { "bnez.n" } else { "beqz.n" };
             format!("{m}\t{rs:?}, {:#x}", br_target(pc, imm6 as i32))
         }
+        Loop(op, ars, imm) => {
+            let m = match op {
+                LoopOp::Loop => "loop",
+                LoopOp::Loopnez => "loopnez",
+                LoopOp::Loopgtz => "loopgtz",
+            };
+            format!("{m}\t{ars:?}, {:#x}", loop_end(pc, imm))
+        }
         J(off) => format!("j\t{:#x}", br_target(pc, off)),
         Jx(rs) => format!("jx\t{rs:?}"),
         Call(op, off) => {
@@ -183,6 +217,92 @@ pub fn format_inst(inst: &Inst, pc: u32) -> String {
             format!("{m}\t{rs:?}")
         }
         Entry(rs, imm) => format!("entry\t{rs:?}, {imm}"),
+        Clamps(rd, rs, imm) => format!("clamps\t{rd:?}, {rs:?}, {imm}"),
+        BoolLogic(op, br, bs, bt) => {
+            let m = match op {
+                BoolOp::Andb => "andb",
+                BoolOp::Andbc => "andbc",
+                BoolOp::Orb => "orb",
+                BoolOp::Orbc => "orbc",
+                BoolOp::Xorb => "xorb",
+            };
+            format!("{m}\t{br:?}, {bs:?}, {bt:?}")
+        }
+        BoolAll(op, br, bs) => {
+            let m = match op {
+                BoolAllOp::Any4 => "any4",
+                BoolAllOp::All4 => "all4",
+                BoolAllOp::Any8 => "any8",
+                BoolAllOp::All8 => "all8",
+            };
+            format!("{m}\t{br:?}, {bs:?}")
+        }
+        Tlb(op, at, ars) => {
+            let m = match op {
+                TlbOp::Ritlb0 => "ritlb0",
+                TlbOp::Pitlb => "pitlb",
+                TlbOp::Witlb => "witlb",
+                TlbOp::Ritlb1 => "ritlb1",
+                TlbOp::Rdtlb0 => "rdtlb0",
+                TlbOp::Pdtlb => "pdtlb",
+                TlbOp::Wdtlb => "wdtlb",
+                TlbOp::Rdtlb1 => "rdtlb1",
+            };
+            format!("{m}\t{at:?}, {ars:?}")
+        }
+        TlbInv(data, ars) => {
+            let m = if data { "idtlb" } else { "iitlb" };
+            format!("{m}\t{ars:?}")
+        }
+        ExtReg(write, at, ars) => {
+            let m = if write { "wer" } else { "rer" };
+            format!("{m}\t{at:?}, {ars:?}")
+        }
+        Mac(which, half, src) => {
+            let w = mac_which_name(which);
+            let h = mac_half_name(half);
+            match src {
+                MacSrc::Aa(ars, at) => format!("{w}.aa.{h}\t{ars:?}, {at:?}"),
+                MacSrc::Ad(ars, my) => format!("{w}.ad.{h}\t{ars:?}, {my:?}"),
+                MacSrc::Da(mx, at) => format!("{w}.da.{h}\t{mx:?}, {at:?}"),
+                MacSrc::Dd(mx, my) => format!("{w}.dd.{h}\t{mx:?}, {my:?}"),
+            }
+        }
+        MacLd(dec, half, mw, ars, mx, y) => {
+            let ld = if dec { "lddec" } else { "ldinc" };
+            let h = mac_half_name(half);
+            match y {
+                MacY::Ar(at) => {
+                    format!("mula.da.{h}.{ld}\t{mw:?}, {ars:?}, {mx:?}, {at:?}")
+                }
+                MacY::Mr(my) => {
+                    format!("mula.dd.{h}.{ld}\t{mw:?}, {ars:?}, {mx:?}, {my:?}")
+                }
+            }
+        }
+        MacLoad(dec, mw, ars) => {
+            let m = if dec { "lddec" } else { "ldinc" };
+            format!("{m}\t{mw:?}, {ars:?}")
+        }
+        Rf(op) => match op {
+            RfOp::Rfe => "rfe".to_string(),
+            RfOp::Rfde => "rfde".to_string(),
+            RfOp::Rfwo => "rfwo".to_string(),
+            RfOp::Rfwu => "rfwu".to_string(),
+        },
+        Rfi(level) => format!("rfi\t{level}"),
+        Rsil(at, level) => format!("rsil\t{at:?}, {level}"),
+        Waiti(level) => format!("waiti\t{level}"),
+        Rotw(imm) => format!("rotw\t{imm}"),
+        WindowLs(op, at, ars, off) => {
+            let m = match op {
+                WindowLsOp::L32e => "l32e",
+                WindowLsOp::S32e => "s32e",
+            };
+            format!("{m}\t{at:?}, {ars:?}, {off}")
+        }
+        Break(imms, immt) => format!("break\t{imms}, {immt}"),
+        BreakN(imms) => format!("break.n\t{imms}"),
         Nullary(op) => {
             let m = match op {
                 NullaryOp::Memw => "memw",
@@ -290,8 +410,26 @@ pub fn format_inst(inst: &Inst, pc: u32) -> String {
         }
 
         // --- special / user registers ---
-        Sr(op, sreg, at) => format!("{}.{}\t{at:?}", op.name(), sreg.name()),
+        Sr(op, sreg, at) => format!("{}.{}\t{at:?}", op.name(), sreg.name_for(op)),
         Ur(op, ureg, at) => format!("{}.{}\t{at:?}", op.name(), ureg.name()),
+    }
+}
+
+fn mac_which_name(op: MacOp) -> &'static str {
+    match op {
+        MacOp::Umul => "umul",
+        MacOp::Mul => "mul",
+        MacOp::Mula => "mula",
+        MacOp::Muls => "muls",
+    }
+}
+
+fn mac_half_name(half: MacHalf) -> &'static str {
+    match half {
+        MacHalf::Ll => "ll",
+        MacHalf::Hl => "hl",
+        MacHalf::Lh => "lh",
+        MacHalf::Hh => "hh",
     }
 }
 

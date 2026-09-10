@@ -162,6 +162,7 @@ fn decode24(w: u32) -> Option<Inst> {
         0x1 => Some(Inst::L32r(reg_t(w), ((w >> 8) & 0xffff) as u16)),
         0x2 => decode_rri8_ls_movi(w),
         0x3 => decode_fp_lsi(w),
+        0x4 => decode_mac16(w),
         0x5 => {
             // CALL format: call0/4/8/12
             let n = (w >> 4) & 0x3;
@@ -196,6 +197,16 @@ fn decode_qrst(w: u32) -> Option<Inst> {
             Some(Inst::Extui(reg_r(w), reg_t(w), shiftimm, maskimm))
         }
         0x8 => decode_fp_lsx(w),
+        // The windowed spill/reload pair. `r` holds `(offset / 4) + 16`, so the
+        // offset is always a negative multiple of 4 in -64..=-4.
+        0x9 => {
+            let off = (r(w) as i32 - 16) * 4;
+            match op2(w) {
+                0x0 => Some(Inst::WindowLs(WindowLsOp::L32e, reg_t(w), reg_s(w), off)),
+                0x4 => Some(Inst::WindowLs(WindowLsOp::S32e, reg_t(w), reg_s(w), off)),
+                _ => None,
+            }
+        }
         0xa => decode_fp0(w),
         0xb => decode_fp1(w),
         _ => None,
@@ -307,6 +318,87 @@ fn decode_fp_lsi(w: u32) -> Option<Inst> {
     Some(Inst::FpLsi(op, freg_t(w), reg_s(w), imm8(w) as u32 * 4))
 }
 
+/// `op0 = 4`: the MAC16 major opcode, sub-decoded by `op2` then `op1`.
+///
+/// Field layout, all of it assembler-derived:
+///
+/// | `op2` | form |
+/// |---|---|
+/// | 0 / 1 | `mula.dd.<half>.ldinc` / `.lddec` |
+/// | 2 | `mul`/`mula`/`muls`` .dd.<half>` |
+/// | 3 | `… .ad.<half>` |
+/// | 4 / 5 | `mula.da.<half>.ldinc` / `.lddec` |
+/// | 6 | `… .da.<half>` |
+/// | 7 | `umul`/`mul`/`mula`/`muls`` .aa.<half>` |
+/// | 8 / 9 | `ldinc` / `lddec` |
+///
+/// `op1 = (which multiply << 2) | half`. The `x` MR operand rides in `r{3-2}`
+/// and can only be `m0`/`m1`; the `y` MR operand rides in `t{2}` and can only
+/// be `m2`/`m3`; `mw` (the load destination) rides in `r{1-0}`.
+///
+/// Every field the assembler emits as zero is **required** to be zero here. A
+/// MAC16 word with a reserved field set is not a MAC16 instruction, and
+/// decoding it as one is the mistake the `ssai` fix in this same phase was
+/// about.
+fn decode_mac16(w: u32) -> Option<Inst> {
+    let half = match op1(w) & 0x3 {
+        0 => MacHalf::Ll,
+        1 => MacHalf::Hl,
+        2 => MacHalf::Lh,
+        _ => MacHalf::Hh,
+    };
+    let which = match (op1(w) >> 2) & 0x3 {
+        0 => MacOp::Umul,
+        1 => MacOp::Mul,
+        2 => MacOp::Mula,
+        _ => MacOp::Muls,
+    };
+    // x from MR: r{3-2} selects m0/m1. y from MR: t{2} selects m2/m3.
+    let mx = MReg::new((r(w) >> 2) & 0x1);
+    let my = MReg::new(2 + ((t(w) >> 2) & 0x1));
+    let mw = MReg::new(r(w) & 0x3);
+    let r_hi_clear = r(w) & 0xc == 0;
+    let r_lo_clear = r(w) & 0x3 == 0;
+    // `t` carries only bit 2 when it names an MR operand.
+    let t_reserved_clear = t(w) & 0xb == 0;
+
+    match op2(w) {
+        // mula.dd.<half>.ldinc / .lddec — mula only.
+        0x0 | 0x1 if which == MacOp::Mula && t_reserved_clear => Some(Inst::MacLd(
+            op2(w) == 1,
+            half,
+            mw,
+            reg_s(w),
+            mx,
+            MacY::Mr(my),
+        )),
+        // mula.da.<half>.ldinc / .lddec — mula only.
+        0x4 | 0x5 if which == MacOp::Mula => Some(Inst::MacLd(
+            op2(w) == 5,
+            half,
+            mw,
+            reg_s(w),
+            mx,
+            MacY::Ar(reg_t(w)),
+        )),
+        0x2 if which != MacOp::Umul && r_lo_clear && s(w) == 0 && t_reserved_clear => {
+            Some(Inst::Mac(which, half, MacSrc::Dd(mx, my)))
+        }
+        0x3 if which != MacOp::Umul && r(w) == 0 && t_reserved_clear => {
+            Some(Inst::Mac(which, half, MacSrc::Ad(reg_s(w), my)))
+        }
+        0x6 if which != MacOp::Umul && r_lo_clear && s(w) == 0 => {
+            Some(Inst::Mac(which, half, MacSrc::Da(mx, reg_t(w))))
+        }
+        0x7 if r(w) == 0 => Some(Inst::Mac(which, half, MacSrc::Aa(reg_s(w), reg_t(w)))),
+        // The bare MR loads: op1 = 0 entirely, mw in r{1-0}.
+        0x8 | 0x9 if op1(w) == 0 && t(w) == 0 && r_hi_clear => {
+            Some(Inst::MacLoad(op2(w) == 9, mw, reg_s(w)))
+        }
+        _ => None,
+    }
+}
+
 /// `op0 = 0, op1 = 0`: RST0, sub-decoded by `op2`.
 fn decode_rst0(w: u32) -> Option<Inst> {
     let alu = |op| Some(Inst::Rrr(op, reg_r(w), reg_s(w), reg_t(w)));
@@ -316,6 +408,7 @@ fn decode_rst0(w: u32) -> Option<Inst> {
         0x2 => alu(AluRrr::Or),
         0x3 => alu(AluRrr::Xor),
         0x4 => decode_st1(w),
+        0x5 => decode_tlb(w),
         0x6 => match s(w) {
             0x0 => Some(Inst::Rt(AluRt::Neg, reg_r(w), reg_t(w))),
             0x1 => Some(Inst::Rt(AluRt::Abs, reg_r(w), reg_t(w))),
@@ -363,6 +456,37 @@ fn decode_st0(w: u32) -> Option<Inst> {
             }
         }
         0x1 => Some(Inst::Rs(AluRs::Movsp, reg_t(w), reg_s(w))),
+        // RFEI: the privileged returns. `t` picks the sub-group, `s` the
+        // variant (t = 0) or the interrupt level (t = 1).
+        0x3 => match t(w) {
+            0x0 => match s(w) {
+                0x0 => Some(Inst::Rf(RfOp::Rfe)),
+                0x2 => Some(Inst::Rf(RfOp::Rfde)),
+                0x4 => Some(Inst::Rf(RfOp::Rfwo)),
+                0x5 => Some(Inst::Rf(RfOp::Rfwu)),
+                _ => None,
+            },
+            0x1 => Some(Inst::Rfi(s(w))),
+            _ => None,
+        },
+        // BREAK imms, immt
+        0x4 => Some(Inst::Break(s(w), t(w))),
+        // RSIL at, level: t = at, s = level.
+        0x6 => Some(Inst::Rsil(reg_t(w), s(w))),
+        // WAITI level: s = level, t reserved 0.
+        0x7 if t(w) == 0 => Some(Inst::Waiti(s(w))),
+        // Boolean-file reductions over an **aligned** group: t = br, s = bs.
+        // The assembler refuses an unaligned base (`all4 b0, b1` and
+        // `all8 b0, b4` are both errors on LX6 and LX7), so the low bits of `s`
+        // are reserved and a word with them set is not one of these
+        // instructions. objdump disagrees — it silently aligns the base down
+        // and prints `all4 b0, b0:b1:b2:b3` for a word whose `s` is 2 — which
+        // is how the too-loose version of this arm showed up as ten objdiff
+        // mismatches on literal-pool words in the shipped image.
+        0x8 if s(w) & 0x3 == 0 => Some(Inst::BoolAll(BoolAllOp::Any4, breg_t(w), breg_s(w))),
+        0x9 if s(w) & 0x3 == 0 => Some(Inst::BoolAll(BoolAllOp::All4, breg_t(w), breg_s(w))),
+        0xa if s(w) & 0x7 == 0 => Some(Inst::BoolAll(BoolAllOp::Any8, breg_t(w), breg_s(w))),
+        0xb if s(w) & 0x7 == 0 => Some(Inst::BoolAll(BoolAllOp::All8, breg_t(w), breg_s(w))),
         // SYSCALL: r=5, s=0, t=0 (assembler golden bytes `00 50 00`).
         0x5 if s(w) == 0 && t(w) == 0 => Some(Inst::Nullary(NullaryOp::Syscall)),
         0x2 => {
@@ -386,6 +510,27 @@ fn decode_st0(w: u32) -> Option<Inst> {
     }
 }
 
+/// `op0 = 0, op1 = 0, op2 = 5`: the region-protection group, sub-decoded by `r`.
+///
+/// Decode and disassembly only — this crate holds no TLB model.
+fn decode_tlb(w: u32) -> Option<Inst> {
+    let two = |op| Some(Inst::Tlb(op, reg_t(w), reg_s(w)));
+    match r(w) {
+        0x3 => two(TlbOp::Ritlb0),
+        // The invalidates take only `as`; `t` is reserved and assembled as 0.
+        0x4 if t(w) == 0 => Some(Inst::TlbInv(false, reg_s(w))),
+        0x5 => two(TlbOp::Pitlb),
+        0x6 => two(TlbOp::Witlb),
+        0x7 => two(TlbOp::Ritlb1),
+        0xb => two(TlbOp::Rdtlb0),
+        0xc if t(w) == 0 => Some(Inst::TlbInv(true, reg_s(w))),
+        0xd => two(TlbOp::Pdtlb),
+        0xe => two(TlbOp::Wdtlb),
+        0xf => two(TlbOp::Rdtlb1),
+        _ => None,
+    }
+}
+
 /// `op0 = 0, op1 = 0, op2 = 4`: ST1, sub-decoded by `r`.
 fn decode_st1(w: u32) -> Option<Inst> {
     match r(w) {
@@ -393,11 +538,21 @@ fn decode_st1(w: u32) -> Option<Inst> {
         0x1 if t(w) == 0 => Some(Inst::ShiftSet(ShiftSetOp::Ssl, reg_s(w))),
         0x2 if t(w) == 0 => Some(Inst::ShiftSet(ShiftSetOp::Ssa8l, reg_s(w))),
         0x3 if t(w) == 0 => Some(Inst::ShiftSet(ShiftSetOp::Ssa8b, reg_s(w))),
-        0x4 => {
-            // SSAI: imm = s | (t{0} << 4)
+        // SSAI: imm = s | (t{0} << 4). `t{3-1}` is a reserved field and the
+        // assembler always emits it as zero; a word with those bits set is NOT
+        // an `ssai` and must not decode as one. Accepting them silently
+        // mis-decoded six literal-pool words in the shipped `fw-esp32v3` image
+        // as `ssai 0` (M0's inventory, 2026-09-10) — the exact
+        // silently-wrong-answer shape this crate exists to avoid.
+        0x4 if t(w) & 0xe == 0 => {
             let imm = s(w) | ((t(w) & 0x1) << 4);
             Some(Inst::Ssai(imm))
         }
+        // External-register access (ESP32/ESP32-S3 only): `op at, as`.
+        0x6 => Some(Inst::ExtReg(false, reg_t(w), reg_s(w))),
+        0x7 => Some(Inst::ExtReg(true, reg_t(w), reg_s(w))),
+        // ROTW simm4: the rotation rides in `t`, `s` is reserved 0.
+        0x8 if s(w) == 0 => Some(Inst::Rotw(sext(t(w) as u32, 4) as i8)),
         0xe => Some(Inst::Rt(AluRt::Nsa, reg_t(w), reg_s(w))),
         0xf => Some(Inst::Rt(AluRt::Nsau, reg_t(w), reg_s(w))),
         _ => None,
@@ -434,7 +589,14 @@ fn decode_rst1(w: u32) -> Option<Inst> {
 /// `op0 = 0, op1 = 2`: RST2, sub-decoded by `op2` (mul32, div32).
 fn decode_rst2(w: u32) -> Option<Inst> {
     let alu = |op| Some(Inst::Rrr(op, reg_r(w), reg_s(w), reg_t(w)));
+    let bool_logic = |op| Some(Inst::BoolLogic(op, breg_r(w), breg_s(w), breg_t(w)));
     match op2(w) {
+        // The boolean *logic* ops share RST2 with the 32-bit mul/div group.
+        0x0 => bool_logic(BoolOp::Andb),
+        0x1 => bool_logic(BoolOp::Andbc),
+        0x2 => bool_logic(BoolOp::Orb),
+        0x3 => bool_logic(BoolOp::Orbc),
+        0x4 => bool_logic(BoolOp::Xorb),
         0x8 => alu(AluRrr::Mull),
         0xa => alu(AluRrr::Muluh),
         0xb => alu(AluRrr::Mulsh),
@@ -453,6 +615,7 @@ fn decode_rst3(w: u32) -> Option<Inst> {
         0x0 => sr_access(w, SrOp::Rsr),
         0x1 => sr_access(w, SrOp::Wsr),
         0x2 => Some(Inst::Sext(reg_r(w), reg_s(w), t(w) + 7)),
+        0x3 => Some(Inst::Clamps(reg_r(w), reg_s(w), t(w) + 7)),
         0x4 => alu(AluRrr::Min),
         0x5 => alu(AluRrr::Max),
         0x6 => alu(AluRrr::Minu),
@@ -474,10 +637,17 @@ fn decode_rst3(w: u32) -> Option<Inst> {
 }
 
 /// Decode an `RSR`/`WSR`/`XSR` word: the special-register number is
-/// `(r << 4) | s` and `t` is the address register. `None` for any register
-/// outside [`SpecialReg`]'s narrow modeled set.
+/// `(r << 4) | s` and `t` is the address register.
+///
+/// `None` for any register outside [`SpecialReg`]'s modelled set **and** for a
+/// direction the assembler refuses (`xsr.interrupt`, `rsr.intclear`,
+/// `wsr.prid`) — see [`SpecialReg::allows`].
 fn sr_access(w: u32, op: SrOp) -> Option<Inst> {
-    SpecialReg::from_num((r(w) << 4) | s(w)).map(|sreg| Inst::Sr(op, sreg, reg_t(w)))
+    let sreg = SpecialReg::from_num((r(w) << 4) | s(w))?;
+    if !sreg.allows(op) {
+        return None;
+    }
+    Some(Inst::Sr(op, sreg, reg_t(w)))
 }
 
 /// `op0 = 2`: RRI8 loads/stores plus movi/addi/addmi (disambiguated by `r`).
@@ -490,6 +660,11 @@ fn decode_rri8_ls_movi(w: u32) -> Option<Inst> {
         0x1 => Some(Inst::Load(LoadOp::L16ui, dst, base, off8 * 2)),
         0x2 => Some(Inst::Load(LoadOp::L32i, dst, base, off8 * 4)),
         0x9 => Some(Inst::Load(LoadOp::L16si, dst, base, off8 * 2)),
+        // The synchronising word accesses share the plain load/store shape;
+        // the offset is 4-scaled like `l32i`/`s32i`.
+        0xb => Some(Inst::AtomicLs(AtomicLsOp::L32ai, dst, base, off8 * 4)),
+        0xe => Some(Inst::AtomicLs(AtomicLsOp::S32c1i, dst, base, off8 * 4)),
+        0xf => Some(Inst::AtomicLs(AtomicLsOp::S32ri, dst, base, off8 * 4)),
         0x4 => Some(Inst::Store(StoreOp::S8i, dst, base, off8)),
         0x5 => Some(Inst::Store(StoreOp::S16i, dst, base, off8 * 2)),
         0x6 => Some(Inst::Store(StoreOp::S32i, dst, base, off8 * 4)),
@@ -566,11 +741,15 @@ fn decode_op0_6(w: u32) -> Option<Inst> {
                     off,
                 ))
             }
-            // BI1: bf/bt boolean branches (r = 0/1); the loop family
-            // (r = 8/9/0xA) stays unsupported.
+            // BI1: bf/bt boolean branches (r = 0/1) and the zero-overhead loop
+            // family (r = 8/9/0xA). The loop offset is **unsigned** — the
+            // label is always forward, past the body.
             0x1 => match r(w) {
                 0x0 => Some(Inst::BranchBool(false, breg_s(w), imm8(w) as i8 as i32)),
                 0x1 => Some(Inst::BranchBool(true, breg_s(w), imm8(w) as i8 as i32)),
+                0x8 => Some(Inst::Loop(LoopOp::Loop, reg_s(w), imm8(w))),
+                0x9 => Some(Inst::Loop(LoopOp::Loopnez, reg_s(w), imm8(w))),
+                0xa => Some(Inst::Loop(LoopOp::Loopgtz, reg_s(w), imm8(w))),
                 _ => None,
             },
             _ => unreachable!(),
@@ -651,6 +830,8 @@ fn decode16(w: u32) -> Option<Inst> {
                     0x1 if s(w) == 0 => Some(Inst::NullaryN(NullaryNarrowOp::RetwN)),
                     0x3 if s(w) == 0 => Some(Inst::NullaryN(NullaryNarrowOp::NopN)),
                     0x6 if s(w) == 0 => Some(Inst::NullaryN(NullaryNarrowOp::IllN)),
+                    // BREAK.N imms: the immediate is the `s` field.
+                    0x2 => Some(Inst::BreakN(s(w))),
                     _ => None,
                 },
                 _ => None,

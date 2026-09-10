@@ -1,11 +1,30 @@
 //! Differential disassembler conformance rig (host-only).
 //!
-//! Disassembles the entire `.text` of an ELF with `lp-xt-inst` and diffs against
-//! `xtensa-esp32s3-elf-objdump -d`. Every instruction is either MATCHED (its
-//! mnemonic and operand values agree, resolving hex/decimal/target formatting
-//! differences), or placed on the printed UNSUPPORTED allowlist (counted by
-//! mnemonic, never silently skipped). Data directives (`.byte`, `.long`) are
-//! counted apart.
+//! Disassembles **every executable section** of an ELF with `lp-xt-inst` and
+//! diffs against `xtensa-esp*-elf-objdump -d`. Every instruction is either
+//! MATCHED (its mnemonic and operand values agree, resolving hex/decimal/target
+//! formatting differences), or placed on the printed UNSUPPORTED allowlist
+//! (counted by mnemonic, never silently skipped). Data directives (`.byte`,
+//! `.long`) are counted apart.
+//!
+//! # What "every executable section" means, and why
+//!
+//! M1 P1 widened this from `.text` alone. The ROM ELFs and the ESP-IDF
+//! second-stage bootloader put code in sections this rig used to skip, and the
+//! app image's `.vectors` — the exception handlers, which is precisely the code
+//! a machine-mode hart has to run — is one of them. Sections are selected by
+//! the `SHF_EXECINSTR` flag, so nothing is chosen by name.
+//!
+//! # A warning the number depends on
+//!
+//! objdump **mis-disassembles literal pools as instructions**. Xtensa literal
+//! pools sit inside `.text`, interleaved with code, and objdump has no way to
+//! tell them apart; it emits plausible-looking mnemonics for constants. Those
+//! land in the UNSUPPORTED allowlist and inflate it. They are *not* evidence
+//! that this crate is missing an instruction — see the crate README's residue
+//! section for how to tell the two apart. Data directives objdump *does*
+//! recognise are counted separately and must stay that way: reclassifying them
+//! would "improve" the number by deleting the evidence.
 //!
 //! Usage: `cargo run -p lp-xt-inst --features objdiff --bin objdiff -- <elf> [objdump]`
 
@@ -26,6 +45,8 @@ enum Operand {
     FReg(u8),
     /// A boolean register, rendered `b3`.
     BReg(u8),
+    /// A MAC16 operand register, rendered `m2`.
+    MReg(u8),
     Imm(i64),
     Addr(u32),
 }
@@ -43,19 +64,36 @@ fn main() {
         std::env::var("XT_OBJDUMP").unwrap_or_else(|_| DEFAULT_OBJDUMP.to_string())
     });
 
-    // --- load .text via the object crate ---
+    // --- load every executable section via the object crate ---
     let data = std::fs::read(&elf_path).expect("read elf");
     let file = object::File::parse(&*data).expect("parse elf");
-    let text = file
-        .section_by_name(".text")
-        .expect(".text section present");
-    let text_vma = text.address() as u32;
-    let text_bytes = text.data().expect(".text data").to_vec();
-    let text_end = text_vma + text_bytes.len() as u32;
+    let mut regions: Vec<(String, u32, Vec<u8>)> = Vec::new();
+    for section in file.sections() {
+        let exec = match section.flags() {
+            object::SectionFlags::Elf { sh_flags } => {
+                sh_flags & u64::from(object::elf::SHF_EXECINSTR) != 0
+            }
+            _ => false,
+        };
+        if !exec || section.size() == 0 {
+            continue;
+        }
+        let Ok(bytes) = section.data() else { continue };
+        if bytes.is_empty() {
+            continue;
+        }
+        let name = section.name().unwrap_or("<unnamed>").to_string();
+        regions.push((name, section.address() as u32, bytes.to_vec()));
+    }
+    if regions.is_empty() {
+        eprintln!("no SHF_EXECINSTR section with contents in {elf_path}");
+        std::process::exit(1);
+    }
+    regions.sort_by_key(|(_, vma, _)| *vma);
 
-    // --- run objdump -d -j .text ---
+    // --- run objdump -d over the whole file ---
     let out = Command::new(&objdump)
-        .args(["-d", "-j", ".text", &elf_path])
+        .args(["-d", &elf_path])
         .output()
         .expect("spawn objdump");
     if !out.status.success() {
@@ -75,10 +113,13 @@ fn main() {
         let Some((addr, hex, text_field)) = parse_line(line) else {
             continue;
         };
-        // Only consider instructions that live inside .text bounds we loaded.
-        if addr < text_vma || addr >= text_end {
+        // Only consider instructions that live inside an executable section.
+        let Some((_, vma, section_bytes)) = regions
+            .iter()
+            .find(|(_, vma, b)| addr >= *vma && addr < *vma + b.len() as u32)
+        else {
             continue;
-        }
+        };
         let od_mnem = text_field.split_whitespace().next().unwrap_or("");
         if od_mnem.starts_with('.') || od_mnem.is_empty() {
             // objdump data directive (.byte/.short/.long/.word) — count as data.
@@ -88,11 +129,11 @@ fn main() {
         n_insns += 1;
 
         let len = hex.len() / 2; // objdump byte count for this instruction
-        let off = (addr - text_vma) as usize;
-        if off + len > text_bytes.len() {
+        let off = (addr - *vma) as usize;
+        if off + len > section_bytes.len() {
             continue;
         }
-        let bytes = &text_bytes[off..off + len];
+        let bytes = &section_bytes[off..off + len];
 
         match decode(bytes) {
             Ok((inst, my_len)) => {
@@ -133,7 +174,10 @@ fn main() {
     let n_mismatched = n_supported_seen - n_matched;
 
     println!("=== lp-xt-inst objdiff over {elf_path} ===");
-    println!(".text: vma={text_vma:#x} size={} bytes", text_bytes.len());
+    println!("executable sections ({}):", regions.len());
+    for (name, vma, bytes) in &regions {
+        println!("  {name:<20} vma={vma:#010x} size={} bytes", bytes.len());
+    }
     println!();
     println!("instructions (objdump):   {n_insns}");
     println!("  supported (decoded):    {n_supported_seen}");
@@ -213,6 +257,7 @@ fn typed_operands(inst: &Inst, pc: u32) -> Vec<Operand> {
     let reg = |r: lp_xt_inst::Reg| Operand::Reg(r.num());
     let freg = |r: lp_xt_inst::FReg| Operand::FReg(r.num());
     let breg = |r: lp_xt_inst::BReg| Operand::BReg(r.num());
+    let mreg = |r: lp_xt_inst::MReg| Operand::MReg(r.num());
     let br = |off: i32| Operand::Addr(pc.wrapping_add(4).wrapping_add(off as u32));
     match *inst {
         Rrr(_, a, b, c) => vec![reg(a), reg(b), reg(c)],
@@ -229,14 +274,34 @@ fn typed_operands(inst: &Inst, pc: u32) -> Vec<Operand> {
             Operand::Imm(sh as i64),
             Operand::Imm(mk as i64),
         ],
-        Sext(a, b, i) => vec![reg(a), reg(b), Operand::Imm(i as i64)],
+        Sext(a, b, i) | Clamps(a, b, i) => vec![reg(a), reg(b), Operand::Imm(i as i64)],
+        BoolLogic(_, x, y, z) => vec![breg(x), breg(y), breg(z)],
+        BoolAll(_, x, y) => vec![breg(x), breg(y)],
+        Tlb(_, x, y) | ExtReg(_, x, y) => vec![reg(x), reg(y)],
+        TlbInv(_, x) => vec![reg(x)],
+        Mac(_, _, src) => match src {
+            lp_xt_inst::MacSrc::Aa(x, y) => vec![reg(x), reg(y)],
+            lp_xt_inst::MacSrc::Ad(x, y) => vec![reg(x), mreg(y)],
+            lp_xt_inst::MacSrc::Da(x, y) => vec![mreg(x), reg(y)],
+            lp_xt_inst::MacSrc::Dd(x, y) => vec![mreg(x), mreg(y)],
+        },
+        MacLd(_, _, mw, ars, mx, y) => {
+            let last = match y {
+                lp_xt_inst::MacY::Ar(at) => reg(at),
+                lp_xt_inst::MacY::Mr(my) => mreg(my),
+            };
+            vec![mreg(mw), reg(ars), mreg(mx), last]
+        }
+        MacLoad(_, mw, ars) => vec![mreg(mw), reg(ars)],
         MovN(a, b) => vec![reg(a), reg(b)],
         AddN(a, b, c) => vec![reg(a), reg(b), reg(c)],
         AddiN(a, b, i) => vec![reg(a), reg(b), Operand::Imm(i as i64)],
         Addi(a, b, i) | Addmi(a, b, i) => vec![reg(a), reg(b), Operand::Imm(i as i64)],
         Movi(a, i) => vec![reg(a), Operand::Imm(i as i64)],
         MoviN(a, i) => vec![reg(a), Operand::Imm(i as i64)],
-        Load(_, a, b, off) | Store(_, a, b, off) => vec![reg(a), reg(b), Operand::Imm(off as i64)],
+        Load(_, a, b, off) | Store(_, a, b, off) | AtomicLs(_, a, b, off) => {
+            vec![reg(a), reg(b), Operand::Imm(off as i64)]
+        }
         L32iN(a, b, off) | S32iN(a, b, off) => vec![reg(a), reg(b), Operand::Imm(off as i64)],
         L32r(a, imm16) => vec![reg(a), Operand::Addr(l32r_target(pc, imm16))],
         BranchRr(_, a, b, off) => vec![reg(a), reg(b), br(off)],
@@ -245,6 +310,7 @@ fn typed_operands(inst: &Inst, pc: u32) -> Vec<Operand> {
         BranchZ(_, a, off) => vec![reg(a), br(off)],
         BranchBiI(_, a, imm, off) => vec![reg(a), Operand::Imm(imm as i64), br(off)],
         BranchZN(_, a, imm6) => vec![reg(a), br(imm6 as i32)],
+        Loop(_, a, imm) => vec![reg(a), Operand::Addr(lp_xt_inst::disasm::loop_end(pc, imm))],
         J(off) => vec![br(off)],
         Jx(a) => vec![reg(a)],
         Call(_, off) => vec![Operand::Addr(
@@ -252,7 +318,14 @@ fn typed_operands(inst: &Inst, pc: u32) -> Vec<Operand> {
         )],
         Callx(_, a) => vec![reg(a)],
         Entry(a, imm) => vec![reg(a), Operand::Imm(imm as i64)],
-        Nullary(_) | NullaryN(_) => vec![],
+        Nullary(_) | NullaryN(_) | Rf(_) => vec![],
+        Rfi(level) => vec![Operand::Imm(level as i64)],
+        Rsil(at, level) => vec![reg(at), Operand::Imm(level as i64)],
+        Waiti(level) => vec![Operand::Imm(level as i64)],
+        Rotw(imm) => vec![Operand::Imm(imm as i64)],
+        WindowLs(_, at, ars, off) => vec![reg(at), reg(ars), Operand::Imm(off as i64)],
+        Break(imms, immt) => vec![Operand::Imm(imms as i64), Operand::Imm(immt as i64)],
+        BreakN(imms) => vec![Operand::Imm(imms as i64)],
 
         // --- floating point ---
         FpRrr(_, a, b, c) => vec![freg(a), freg(b), freg(c)],
@@ -306,8 +379,15 @@ fn parse_operands(text: &str, hints: &[Operand]) -> Option<Vec<Operand>> {
                 Operand::FReg(n.parse().ok()?)
             }
             Operand::BReg(_) => {
-                let n = tok.strip_prefix('b')?;
+                // objdump renders a boolean *group* as its whole range
+                // (`all4 b0, b4:b5:b6:b7`); the field holds only the base,
+                // which is what this crate decodes.
+                let n = tok.split(':').next().unwrap_or(tok).strip_prefix('b')?;
                 Operand::BReg(n.parse().ok()?)
+            }
+            Operand::MReg(_) => {
+                let n = tok.strip_prefix('m')?;
+                Operand::MReg(n.parse().ok()?)
             }
             Operand::Imm(_) => Operand::Imm(parse_int(tok)? & 0xffff_ffff),
             Operand::Addr(_) => {

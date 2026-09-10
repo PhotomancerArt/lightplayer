@@ -118,6 +118,31 @@ fn fp_to_int_op2(op: FpToIntOp) -> u32 {
     }
 }
 
+/// `op1{3-2}` for a MAC16 multiply.
+fn mac_which(op: MacOp) -> u32 {
+    match op {
+        MacOp::Umul => 0,
+        MacOp::Mul => 1,
+        MacOp::Mula => 2,
+        MacOp::Muls => 3,
+    }
+}
+
+/// `op1{1-0}` for a MAC16 half selector.
+fn mac_half(half: MacHalf) -> u32 {
+    match half {
+        MacHalf::Ll => 0,
+        MacHalf::Hl => 1,
+        MacHalf::Lh => 2,
+        MacHalf::Hh => 3,
+    }
+}
+
+/// The `t` field for a MAC16 `y`-from-MR operand: `m2` -> 0, `m3` -> 4.
+fn mac_y(my: MReg) -> u32 {
+    ((my.num() & 0x1) << 2) as u32
+}
+
 /// Encode `inst` to little-endian machine bytes.
 pub fn encode(inst: &Inst) -> Vec<u8> {
     let mut out = Vec::with_capacity(3);
@@ -304,6 +329,18 @@ pub fn encode(inst: &Inst) -> Vec<u8> {
                 3,
             );
         }
+        Inst::AtomicLs(op, at, ars, offset) => {
+            let r = match op {
+                AtomicLsOp::L32ai => 0xb,
+                AtomicLsOp::S32c1i => 0xe,
+                AtomicLsOp::S32ri => 0xf,
+            };
+            emit(
+                &mut out,
+                rri8(2, at.num() as u32, ars.num() as u32, r, (offset / 4) & 0xff),
+                3,
+            );
+        }
         Inst::L32iN(rt, rs, offset) => {
             let off = (offset / 4) & 0xf;
             emit(
@@ -405,6 +442,16 @@ pub fn encode(inst: &Inst) -> Vec<u8> {
             let t = (1 << 3) | ((nez as u32) << 2) | hi;
             emit(&mut out, narrow(0xc, t, rs.num() as u32, r), 2);
         }
+        Inst::Loop(op, ars, imm) => {
+            // op0 = 6, n = 3, m = 1 -> t nibble = (m << 2) | n = 7; r selects
+            // which loop; s = the trip-count register; imm8 = the raw offset.
+            let r = match op {
+                LoopOp::Loop => 8,
+                LoopOp::Loopnez => 9,
+                LoopOp::Loopgtz => 0xa,
+            };
+            emit(&mut out, rri8(6, 7, ars.num() as u32, r, imm as u32), 3);
+        }
         Inst::J(off) => {
             let w = 6 | (((off as u32) & 0x3ffff) << 6);
             emit(&mut out, w, 3);
@@ -440,6 +487,148 @@ pub fn encode(inst: &Inst) -> Vec<u8> {
             // op0=6, n=3, m=0; s=rs; imm12
             let w = (6 | (3 << 4)) | ((rs.num() as u32) << 8) | (imm12 << 12);
             emit(&mut out, w, 3);
+        }
+        Inst::Clamps(rd, rs, imm) => {
+            let t = (imm - 7) as u32;
+            emit(
+                &mut out,
+                pack(0, t, rs.num() as u32, rd.num() as u32, 3, 3),
+                3,
+            );
+        }
+        Inst::BoolLogic(op, br, bs, bt) => {
+            let op2 = match op {
+                BoolOp::Andb => 0,
+                BoolOp::Andbc => 1,
+                BoolOp::Orb => 2,
+                BoolOp::Orbc => 3,
+                BoolOp::Xorb => 4,
+            };
+            let w = pack(0, bt.num() as u32, bs.num() as u32, br.num() as u32, 2, op2);
+            emit(&mut out, w, 3);
+        }
+        Inst::BoolAll(op, br, bs) => {
+            let r = match op {
+                BoolAllOp::Any4 => 8,
+                BoolAllOp::All4 => 9,
+                BoolAllOp::Any8 => 0xa,
+                BoolAllOp::All8 => 0xb,
+            };
+            emit(
+                &mut out,
+                pack(0, br.num() as u32, bs.num() as u32, r, 0, 0),
+                3,
+            );
+        }
+        Inst::Tlb(op, at, ars) => {
+            let r = match op {
+                TlbOp::Ritlb0 => 0x3,
+                TlbOp::Pitlb => 0x5,
+                TlbOp::Witlb => 0x6,
+                TlbOp::Ritlb1 => 0x7,
+                TlbOp::Rdtlb0 => 0xb,
+                TlbOp::Pdtlb => 0xd,
+                TlbOp::Wdtlb => 0xe,
+                TlbOp::Rdtlb1 => 0xf,
+            };
+            emit(
+                &mut out,
+                pack(0, at.num() as u32, ars.num() as u32, r, 0, 5),
+                3,
+            );
+        }
+        Inst::TlbInv(data, ars) => {
+            let r = if data { 0xc } else { 0x4 };
+            emit(&mut out, pack(0, 0, ars.num() as u32, r, 0, 5), 3);
+        }
+        Inst::ExtReg(write, at, ars) => {
+            let r = if write { 7 } else { 6 };
+            emit(
+                &mut out,
+                pack(0, at.num() as u32, ars.num() as u32, r, 0, 4),
+                3,
+            );
+        }
+
+        // --- MAC16 (op0 = 4) ---
+        Inst::Mac(which, half, src) => {
+            let op1 = (mac_which(which) << 2) | mac_half(half);
+            let w = match src {
+                MacSrc::Aa(ars, at) => pack(4, at.num() as u32, ars.num() as u32, 0, op1, 7),
+                MacSrc::Ad(ars, my) => pack(4, mac_y(my), ars.num() as u32, 0, op1, 3),
+                MacSrc::Da(mx, at) => pack(
+                    4,
+                    at.num() as u32,
+                    0,
+                    ((mx.num() & 0x1) as u32) << 2,
+                    op1,
+                    6,
+                ),
+                MacSrc::Dd(mx, my) => pack(4, mac_y(my), 0, ((mx.num() & 0x1) as u32) << 2, op1, 2),
+            };
+            emit(&mut out, w, 3);
+        }
+        Inst::MacLd(dec, half, mw, ars, mx, y) => {
+            // Always the MULA multiply; op2 picks .dd (0/1) vs .da (4/5) and
+            // ldinc (even) vs lddec (odd).
+            let op1 = (mac_which(MacOp::Mula) << 2) | mac_half(half);
+            let r = (((mx.num() & 0x1) << 2) | (mw.num() & 0x3)) as u32;
+            let (t, op2) = match y {
+                MacY::Mr(my) => (mac_y(my), if dec { 1 } else { 0 }),
+                MacY::Ar(at) => (at.num() as u32, if dec { 5 } else { 4 }),
+            };
+            emit(&mut out, pack(4, t, ars.num() as u32, r, op1, op2), 3);
+        }
+        Inst::MacLoad(dec, mw, ars) => {
+            let op2 = if dec { 9 } else { 8 };
+            emit(
+                &mut out,
+                pack(4, 0, ars.num() as u32, (mw.num() & 0x3) as u32, 0, op2),
+                3,
+            );
+        }
+
+        // --- privileged control flow and windows ---
+        Inst::Rf(op) => {
+            // ST0 r = 3, t = 0; `s` selects the variant.
+            let s = match op {
+                RfOp::Rfe => 0,
+                RfOp::Rfde => 2,
+                RfOp::Rfwo => 4,
+                RfOp::Rfwu => 5,
+            };
+            emit(&mut out, pack(0, 0, s, 3, 0, 0), 3);
+        }
+        Inst::Rfi(level) => {
+            emit(&mut out, pack(0, 1, level as u32, 3, 0, 0), 3);
+        }
+        Inst::Rsil(at, level) => {
+            emit(&mut out, pack(0, at.num() as u32, level as u32, 6, 0, 0), 3);
+        }
+        Inst::Waiti(level) => {
+            emit(&mut out, pack(0, 0, level as u32, 7, 0, 0), 3);
+        }
+        Inst::Rotw(imm) => {
+            // ST1 (op2 = 4) r = 8; the rotation is a 4-bit signed `t`.
+            emit(&mut out, pack(0, (imm as u32) & 0xf, 0, 8, 0, 4), 3);
+        }
+        Inst::WindowLs(op, at, ars, offset) => {
+            let op2 = match op {
+                WindowLsOp::L32e => 0,
+                WindowLsOp::S32e => 4,
+            };
+            let r = ((offset / 4) + 16) as u32;
+            emit(
+                &mut out,
+                pack(0, at.num() as u32, ars.num() as u32, r, 9, op2),
+                3,
+            );
+        }
+        Inst::Break(imms, immt) => {
+            emit(&mut out, pack(0, immt as u32, imms as u32, 4, 0, 0), 3);
+        }
+        Inst::BreakN(imms) => {
+            emit(&mut out, narrow(0xd, 2, imms as u32, 0xf), 2);
         }
         Inst::Nullary(op) => {
             let w = match op {

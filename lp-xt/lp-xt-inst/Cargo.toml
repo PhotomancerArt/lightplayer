@@ -4,7 +4,7 @@ version.workspace = true
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Xtensa (ESP32-S3, LX7) instruction model, encoder, decoder and disassembler (integer subset)."
+description = "Xtensa (LX6/LX7) instruction model, encoder, decoder and disassembler for the firmware ISA."
 
 [lints]
 workspace = true
