@@ -1406,11 +1406,16 @@ impl FakeCore {
 impl super::translated::TranslatedCore<TestBus> for alloc::rc::Rc<core::cell::RefCell<FakeCore>> {
     fn run(
         &mut self,
-        cx: super::translated::EntryCx<'_>,
+        hart: &mut super::MachineHart<TestBus>,
         _bus: &mut TestBus,
+        _end: u64,
     ) -> super::translated::RunOutcome {
         let mut me = self.borrow_mut();
         me.entries += 1;
+        assert!(
+            !hart.has_translated_core(),
+            "the hart lifts the core out before calling it"
+        );
         match me.outcome {
             super::translated::RunOutcome::Refused => super::translated::RunOutcome::Refused,
             super::translated::RunOutcome::Ran {
@@ -1419,9 +1424,11 @@ impl super::translated::TranslatedCore<TestBus> for alloc::rc::Rc<core::cell::Re
                 instruction_count,
                 after_store,
             } => {
-                // A real core would have run guest code; this one reports the
-                // exit the test asked for and leaves `regs` alone.
-                let _ = &cx.regs;
+                // A real core would have run guest code, leaving the hart's
+                // own pc and counters agreeing with what it reports; this one
+                // reports the exit the test asked for and does the same.
+                hart.set_pc(pc);
+                hart.set_counters(cycle_count, instruction_count);
                 super::translated::RunOutcome::Ran {
                     pc,
                     cycle_count,
