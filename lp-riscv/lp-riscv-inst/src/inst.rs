@@ -208,8 +208,10 @@ pub enum Inst {
     Sh2add { rd: Gpr, rs1: Gpr, rs2: Gpr },
     /// SH3ADD: rd = (rs1 << 3) + rs2
     Sh3add { rd: Gpr, rs1: Gpr, rs2: Gpr },
-    /// SLLIUW: rd = (rs1[31:0] << imm[4:0]) zero-extended to 64 bits (RV32: just shift)
-    SlliUw { rd: Gpr, rs1: Gpr, imm: i32 },
+    //
+    // Zba's `slli.uw` is deliberately absent: it is RV64-only, and the word it
+    // would occupy on RV32 (OP-IMM, funct3=1, funct7=0x04) is reserved — no
+    // RV32 assembler emits it, so naming it would be an invention.
 
     // Immediate generation
     /// LUI: rd = imm << 12
@@ -419,7 +421,7 @@ impl Inst {
             // Zbb: Byte reverse
             Inst::Rev8 { rd, rs1 } => format!("rev8 {rd}, {rs1}"),
             Inst::Brev8 { rd, rs1 } => format!("brev8 {rd}, {rs1}"),
-            Inst::Orcb { rd, rs1 } => format!("orcb {rd}, {rs1}"),
+            Inst::Orcb { rd, rs1 } => format!("orc.b {rd}, {rs1}"),
 
             // Zbb: Min/Max
             Inst::Min { rd, rs1, rs2 } => format!("min {rd}, {rs1}, {rs2}"),
@@ -436,9 +438,6 @@ impl Inst {
             Inst::Sh1add { rd, rs1, rs2 } => format!("sh1add {rd}, {rs1}, {rs2}"),
             Inst::Sh2add { rd, rs1, rs2 } => format!("sh2add {rd}, {rs1}, {rs2}"),
             Inst::Sh3add { rd, rs1, rs2 } => format!("sh3add {rd}, {rs1}, {rs2}"),
-            Inst::SlliUw { rd, rs1, imm } => {
-                format!("slli.uw {}, {}, {}", rd, rs1, format_imm(*imm))
-            }
 
             // Immediate generation
             Inst::Lui { rd, imm } => format!("lui {}, 0x{:08x}", rd, *imm as u32),
@@ -590,7 +589,6 @@ impl Inst {
             Inst::Sh1add { rd, rs1, rs2 } => sh1add(*rd, *rs1, *rs2),
             Inst::Sh2add { rd, rs1, rs2 } => sh2add(*rd, *rs1, *rs2),
             Inst::Sh3add { rd, rs1, rs2 } => sh3add(*rd, *rs1, *rs2),
-            Inst::SlliUw { rd, rs1, imm } => slli_uw(*rd, *rs1, *imm),
             Inst::Lui { rd, imm } => lui(*rd, *imm),
             Inst::Auipc { rd, imm } => auipc(*rd, *imm),
             Inst::Ecall => ecall(),

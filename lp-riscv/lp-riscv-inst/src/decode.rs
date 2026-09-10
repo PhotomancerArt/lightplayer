@@ -124,52 +124,45 @@ pub fn decode_instruction(inst: u32) -> Result<Inst, alloc::string::String> {
                     imm: imm_i,
                 }),
                 0x1 => {
-                    // SLLI and other funct3=0x1 instructions
-                    // Extract funct6 from bits [31:26] and imm[5:0] from bits [25:20]
-                    let funct6 = ((inst >> 26) & 0x3f) as u8;
-                    let imm_5_0 = ((inst >> 20) & 0x3f) as u8;
+                    // SLLI and the Zbs immediate forms, which share funct3=0x1.
+                    //
+                    // RV32 spells all of these with a 7-bit funct7 and a 5-bit
+                    // shamt: imm[5] (bit 25) belongs to funct7 and must be 0.
+                    // The 6-bit funct6 view is the RV64 generalization, and
+                    // reading it on RV32 accepts reserved words as shifts. The
+                    // funct7 values below are the ones the assembler emits, and
+                    // they are the same values the register forms above use
+                    // (`bclr` 0x24, `bset` 0x14, `binv` 0x34).
+                    let shamt = ((inst >> 20) & 0x1f) as i32;
 
-                    match funct6 {
-                        0x00 => {
-                            // SLLI: funct6=0x00
-                            Ok(Inst::Slli {
-                                rd,
-                                rs1,
-                                imm: imm_i,
-                            })
-                        }
-                        0x12 => {
-                            // BSETI: funct6=0b001010 (0x12)
-                            Ok(Inst::Bseti {
-                                rd,
-                                rs1,
-                                imm: imm_5_0 as i32,
-                            })
-                        }
-                        0x1a => {
-                            // BINVI: funct6=0b011010 (0x1a)
-                            Ok(Inst::Binvi {
-                                rd,
-                                rs1,
-                                imm: imm_5_0 as i32,
-                            })
-                        }
-                        0x09 => {
-                            // BCLRI: funct6=0b010010 (0x09)
-                            Ok(Inst::Bclri {
-                                rd,
-                                rs1,
-                                imm: imm_5_0 as i32,
-                            })
-                        }
-                        0x02 => {
-                            // SLLIUW: funct6=0b000010 (0x02)
-                            Ok(Inst::SlliUw {
-                                rd,
-                                rs1,
-                                imm: imm_5_0 as i32,
-                            })
-                        }
+                    match funct7 {
+                        // SLLI. funct7 0x01 is the RV64 shamt >= 32 form; it has
+                        // always decoded here, and `imm_i` carries the amount.
+                        0x00 | 0x01 => Ok(Inst::Slli {
+                            rd,
+                            rs1,
+                            imm: imm_i,
+                        }),
+                        0x24 => Ok(Inst::Bclri {
+                            rd,
+                            rs1,
+                            imm: shamt,
+                        }),
+                        0x14 => Ok(Inst::Bseti {
+                            rd,
+                            rs1,
+                            imm: shamt,
+                        }),
+                        0x34 => Ok(Inst::Binvi {
+                            rd,
+                            rs1,
+                            imm: shamt,
+                        }),
+                        // Zba `slli.uw` is RV64-only; on RV32 this funct7 is a
+                        // reserved `slli` and naming it would be an invention.
+                        0x04 => Err(format!(
+                            "Invalid shift instruction: funct7=0x04 (reserved on RV32, SLLI.UW is RV64-only)"
+                        )),
                         _ => {
                             // Check for funct12 encodings (CLZ, CTZ, CPOP, SEXTB, SEXTH)
                             let funct12 = ((inst >> 20) & 0xfff) as u16;
@@ -180,7 +173,7 @@ pub fn decode_instruction(inst: u32) -> Result<Inst, alloc::string::String> {
                                 0x604 => Ok(Inst::Sextb { rd, rs1 }),
                                 0x605 => Ok(Inst::Sexth { rd, rs1 }),
                                 _ => Err(format!(
-                                    "Unknown I-type instruction: funct3=0x{funct3:x}, funct6=0x{funct6:x}, funct12=0x{funct12:x}"
+                                    "Unknown I-type instruction: funct3=0x{funct3:x}, funct7=0x{funct7:x}, funct12=0x{funct12:x}"
                                 )),
                             }
                         }
@@ -225,31 +218,33 @@ pub fn decode_instruction(inst: u32) -> Result<Inst, alloc::string::String> {
                             imm: (imm_5_0 & 0x1f) as i32,
                         })
                     } else {
-                        // Check for other funct6 encoded instructions
-                        match funct6 {
-                            0x18 => {
-                                // RORI: funct6=0b011000 (0x18)
-                                Ok(Inst::Rori {
-                                    rd,
-                                    rs1,
-                                    imm: imm_5_0 as i32,
-                                })
-                            }
-                            0x09 => {
-                                // BEXTI: funct6=0b010010 (0x09)
-                                Ok(Inst::Bexti {
-                                    rd,
-                                    rs1,
-                                    imm: imm_5_0 as i32,
-                                })
-                            }
+                        // The Zbb/Zbs forms that share funct3=0x5, matched on the
+                        // RV32 funct7 for the same reason as funct3=0x1 above:
+                        // imm[5] is part of funct7 here, not part of the shamt.
+                        let shamt = ((inst >> 20) & 0x1f) as i32;
+                        match funct7 {
+                            0x30 => Ok(Inst::Rori {
+                                rd,
+                                rs1,
+                                imm: shamt,
+                            }),
+                            0x24 => Ok(Inst::Bexti {
+                                rd,
+                                rs1,
+                                imm: shamt,
+                            }),
                             _ => {
                                 // Check for funct12 encodings (REV8, ORCB, BREV8)
                                 let funct12 = ((inst >> 20) & 0xfff) as u16;
                                 match funct12 {
-                                    0x6b8 => Ok(Inst::Rev8 { rd, rs1 }),
+                                    // RV32 `rev8` is funct12 0x698. 0x6b8 is the
+                                    // RV64 spelling and is reserved here.
+                                    0x698 => Ok(Inst::Rev8 { rd, rs1 }),
                                     0x287 => Ok(Inst::Orcb { rd, rs1 }),
                                     0x687 => Ok(Inst::Brev8 { rd, rs1 }),
+                                    0x6b8 => Err(format!(
+                                        "Invalid instruction: funct12=0x6b8 (reserved on RV32, this is the RV64 REV8 encoding; RV32 REV8 is 0x698)"
+                                    )),
                                     _ => Err(format!(
                                         "Unknown I-type instruction: funct3=0x{funct3:x}, funct7=0x{funct7:x}, funct6=0x{funct6:x}, funct12=0x{funct12:x}"
                                     )),
