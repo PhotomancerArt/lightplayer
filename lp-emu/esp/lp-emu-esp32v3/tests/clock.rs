@@ -426,3 +426,116 @@ fn what_a_lact_timestamp_costs() {
         elapsed.as_nanos() as f64 / f64::from(N) / 8.0,
     );
 }
+
+// ---------------------------------------------------------------------------
+// Through the machine: the seams P4 and the report care about
+// ---------------------------------------------------------------------------
+
+use lp_emu_esp32v3::loader::{DESK_MAC, EfuseIdentity};
+use lp_emu_esp32v3::machine::{BootMode, Esp32V3Builder, Machine, StopCondition};
+use lp_emu_esp32v3::periph::rtc_cntl::{OPTIONS0, STALLED};
+
+fn machine() -> Machine {
+    Esp32V3Builder::new()
+        .boot_mode(BootMode::RomUp)
+        .build()
+        .expect("builds")
+}
+
+#[test]
+fn reset_cause_reads_poweron_through_the_bus() {
+    let mut m = machine();
+    let word = m
+        .peek_word(memmap::periph::RTC_CNTL + 0x034)
+        .expect("reset_state is mapped");
+    assert_eq!(word & 0x3f, 1, "PRO: POWERON_RESET");
+    assert_eq!((word >> 6) & 0x3f, 1, "APP: POWERON_RESET");
+}
+
+/// **The seam P4 consumes.** `Machine::core_stalled` is an OR of the
+/// machine's own field and RTC_CNTL's two-register stall key; P4 adds
+/// `DPORT.appcpu_ctrl_c.appcpu_runstall` as the third input.
+#[test]
+fn the_stall_key_reaches_the_machine_from_rtc_cntl() {
+    let mut m = machine();
+    // Core 1 is held by the machine's own field for the whole of M3 (Q5),
+    // and RTC_CNTL is not what is holding it.
+    assert!(m.core_stalled(1));
+    assert!(!m.stall_key().stalled(1), "not RTC_CNTL's doing");
+    // Core 0 runs, and nothing in RTC_CNTL says otherwise.
+    assert!(!m.core_stalled(0));
+    assert!(!m.stall_key().stalled(0));
+
+    // Park the PRO core the way `internal_park_core` does: `c1` first, then
+    // `c0`. Only the pair counts.
+    let sw_cpu_stall = memmap::periph::RTC_CNTL + 0x0ac;
+    assert!(m.poke_word(sw_cpu_stall, 0x21 << 26));
+    assert!(!m.core_stalled(0), "one half is not the key");
+    assert!(m.poke_word(memmap::periph::RTC_CNTL + OPTIONS0, 0x02 << 2));
+    assert!(m.core_stalled(0), "both halves: the machine sees it");
+    assert_eq!(m.stall_key().key(0) & 0xff, STALLED);
+}
+
+/// The desk board's identity, and the flag that overrides it.
+#[test]
+fn efuse_mac_default() {
+    let mut m = machine();
+    assert_eq!(DESK_MAC, [0x30, 0x76, 0xf5, 0xec, 0xf6, 0x34]);
+    // esp-hal's `base_mac_address` reads MAC0 (block 0 word 1) and MAC1
+    // (word 2's low half) and reverses the bytes.
+    let w1 = m.peek_word(memmap::periph::EFUSE + 0x04).expect("mapped");
+    let w2 = m.peek_word(memmap::periph::EFUSE + 0x08).expect("mapped");
+    let mac0 = w1.to_le_bytes();
+    let mac1 = (w2 & 0xffff).to_le_bytes();
+    let mac = [mac1[1], mac1[0], mac0[3], mac0[2], mac0[1], mac0[0]];
+    assert_eq!(mac, DESK_MAC);
+
+    // v3.1: CHIP_VER_REV1 in word 3 bit 15, CHIP_VER_REV2 in word 5 bit 20,
+    // WAFER_VERSION_MINOR in word 5 bits 25:24 — and the third revision bit
+    // in APB_CTRL.date bit 31, which is not an eFuse at all.
+    let w3 = m.peek_word(memmap::periph::EFUSE + 0x0c).expect("mapped");
+    let w5 = m.peek_word(memmap::periph::EFUSE + 0x14).expect("mapped");
+    let date = m.peek_word(memmap::periph::APB_CTRL + 0x7c).expect("mapped");
+    let eco0 = (w3 >> 15) & 1;
+    let eco1 = (w5 >> 20) & 1;
+    let eco2 = date >> 31;
+    assert_eq!((eco2 << 2) | (eco1 << 1) | eco0, 7, "esp-hal maps 7 to v3");
+    assert_eq!((w5 >> 24) & 0b11, 1, "minor 1");
+
+    // …and `--efuse-mac` / `--efuse-rev` move both.
+    let mut other = Esp32V3Builder::new()
+        .boot_mode(BootMode::RomUp)
+        .efuse(EfuseIdentity {
+            mac: [0x11, 0x22, 0x33, 0x44, 0x55, 0x66],
+            chip_major: 1,
+            chip_minor: 2,
+        })
+        .build()
+        .expect("builds");
+    assert_eq!(
+        other.peek_word(memmap::periph::EFUSE + 0x04),
+        Some(0x3344_5566)
+    );
+    assert_eq!(
+        other
+            .peek_word(memmap::periph::APB_CTRL + 0x7c)
+            .map(|d| d >> 31),
+        Some(0),
+        "v1 does not set APB_CTRL's revision bit"
+    );
+}
+
+/// A ten-millisecond emulated ROM-up run is quiet: no watchdog in this
+/// machine fires, because none of them models expiry.
+#[test]
+fn rwdt_never_fires() {
+    let mut m = machine();
+    let _ = m.run_until(&StopCondition::after_micros(10_000));
+    // Whatever the run stopped on, it was not a reset: the RWDT schedules
+    // nothing and core 0 is still the core that was running.
+    assert!(m.cycles() > 0);
+    assert!(
+        !m.core_stalled(0),
+        "core 0 was never parked, so nothing reset it"
+    );
+}
