@@ -31,6 +31,9 @@ pub mod efuse;
 pub mod flash_mmu;
 pub mod i2c_ana_mst;
 pub mod rtc_cntl;
+pub mod sha;
+pub mod spi0;
+pub mod spi1;
 pub mod timg;
 
 /// `UART0` and `UART1` were accept blocks in P3; **P6 replaced them with the
@@ -57,6 +60,7 @@ use lp_emu_esp_common::StreamId;
 use lp_emu_esp_common::periph::BoxedPeripheral;
 
 use crate::cache::CacheHandle;
+use crate::flash::FlashHandle;
 use crate::loader::{EfuseIdentity, ResetCause};
 use crate::memmap::periph as base;
 use crate::memmap::{self};
@@ -116,6 +120,7 @@ pub fn boot_set(
     cache: CacheHandle,
     appcpu: dport::AppCoreHandle,
     uart0_stream: Option<StreamId>,
+    flash: FlashHandle,
 ) -> Vec<(u32, u32, BoxedPeripheral)> {
     vec![
         (
@@ -147,8 +152,12 @@ pub fn boot_set(
             Box::new(uart::Uart::uart0(uart0_stream)),
         ),
         (base::IO_MUX, accept::IO_MUX_LEN, Box::new(accept::io_mux())),
-        (base::SPI1, accept::SPI_LEN, Box::new(accept::spi("SPI1"))),
-        (base::SPI0, accept::SPI_LEN, Box::new(accept::spi("SPI0"))),
+        (
+            base::SPI1,
+            accept::SPI_LEN,
+            Box::new(spi1::Spi1::new(flash)),
+        ),
+        (base::SPI0, accept::SPI_LEN, Box::new(spi0::Spi0::new())),
         (
             base::EFUSE,
             efuse::EFUSE_LEN,
@@ -172,5 +181,11 @@ pub fn boot_set(
             flash_mmu::LEN,
             Box::new(flash_mmu::FlashMmuView::new(cache)),
         ),
+        // ROM-up, last: the ESP-IDF second-stage bootloader hashes the
+        // application image before it will run it. Nothing on the direct
+        // path reaches this block, and the mask ROM's own reset path does
+        // not either — the bootloader's `bootloader_sha256_*` is the first
+        // and only caller (`ets_sha_update`, `0x4005_C2A0`).
+        (base::SHA, sha::LEN, Box::new(sha::Sha::new())),
     ]
 }
