@@ -206,6 +206,14 @@ OPTIONS:
     --no-block-cache        do not pre-decode blocks of instructions. Slower,
                             and the identity oracle: every byte of every
                             transcript must be the same either way
+    --interpreter           never install a translated core; interpret every
+                            instruction. The translator's identity oracle,
+                            and the same promise --no-block-cache makes:
+                            every byte of every transcript must be the same
+                            either way
+    --jit-report            print what the translated core translated, how
+                            much of the run it covered, how often it left for
+                            the interpreter, and what boot cost to build it
     --strict-grade-blocks <NAME,NAME>
                             narrow --strict-grade to these blocks by name.
                             The default is every block that publishes a
@@ -292,6 +300,19 @@ struct Args {
     /// `--no-block-cache`. The cache is ON by default, so the flag is held
     /// as its negation: `Args` derives `Default`.
     no_block_cache: bool,
+    /// `--interpreter`: refuse to install a translated core. Held as its
+    /// negation for the same reason as `no_block_cache` — translation is the
+    /// default wherever it exists.
+    ///
+    /// This is the translator's free oracle (M7 JD15): the same binary, the
+    /// same image, the interpreter, and a transcript that must match byte for
+    /// byte. It is also the bring-up switch and the way back from P7's
+    /// default flip.
+    interpreter: bool,
+    /// `--jit-report`: print the translated core's own report line, plus the
+    /// boot cost of building it (emit ms, module bytes, engine compile ms,
+    /// instantiate ms — M7 JD20).
+    jit_report: bool,
     strict_grade: Option<RegGrade>,
     strict_grade_blocks: Option<Vec<&'static str>>,
     probes: Vec<(u64, String)>,
@@ -316,6 +337,8 @@ fn run() -> Result<ExitCode, String> {
         .time_grade(args.time_grade)
         .strict(args.strict)
         .block_cache(!args.no_block_cache)
+        .translate(!args.interpreter)
+        .jit_report(args.jit_report)
         .strict_grade(args.strict_grade)
         .strict_grade_blocks(args.strict_grade_blocks.clone())
         .efuse(args.efuse)
@@ -656,6 +679,8 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             }
             "--strict-bus" => args.strict = true,
             "--no-block-cache" => args.no_block_cache = true,
+            "--interpreter" => args.interpreter = true,
+            "--jit-report" => args.jit_report = true,
             "--probe" => args.probes.push(parse_probe(&value("--probe")?)?),
             "--break-at" => args.break_at.push(value("--break-at")?),
             "--hooks" => args.hooks = true,
@@ -1040,6 +1065,23 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
             },
             machine.fence_i_count(),
         ),
+    }
+    if machine.jit_report() {
+        // One line, on every `--jit-report` run, whether or not a core ran
+        // (M7 JD20 wants the boot cost and the escape-hatch rate reported,
+        // not buried). Nothing installs a core before M7 P3, so today this
+        // says so rather than printing nothing at all.
+        match machine.translated_core_report() {
+            Some(line) => eprintln!("jit: {line}"),
+            None => eprintln!(
+                "jit: no translated core ({})",
+                if machine.translate() {
+                    "none installed"
+                } else {
+                    "--interpreter"
+                }
+            ),
+        }
     }
     if machine.bus.strict() {
         let reports = machine.bus.missing_fence_reports();

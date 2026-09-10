@@ -2369,6 +2369,28 @@ test-emu-c6-cli:
     cargo test -p lp-cli --test validate_registry_parity
     LP_EMU_BUILD_FW=1 cargo test -p lp-cli --test emu_usb_hello -- --include-ignored
 
+# The translator's decoder agreement test, corpus half included (M7 JD3).
+#
+# `lp-emu-jit` decodes independently of `lp-riscv-emu`'s executors, and
+# `tests/decoder_agreement.rs` is what makes that safe: it holds both decoders
+# to the same `(width, InstClass)`. Its **sweep** half needs nothing and runs in
+# every `cargo test`; its **corpus** half decodes every 16- and 32-bit word of
+# the two pinned render images and so needs those images — a riscv32 firmware
+# build at commit 8ffc4b325, two of them, minutes each.
+#
+# So the corpus half is `#[ignore]`d, exactly like the C6 boot tests and for
+# exactly the reason in `lp_emu_esp32c6::test_support`'s module docs: a plain
+# `cargo test --workspace` must not start a cross-target firmware build. This
+# recipe is what runs it, and once it IS running it never skips — a missing
+# image is a failed test, not a quiet pass.
+#
+# NOT in `test-emu-c6`: two more reference-image builds is minutes on a CI
+# runner, and the director log's CI cost rule says a gated job or a nightly,
+# never the default path. M7 P9 decides whether the whole-image tier earns a
+# CI seat; until then this is the local recipe.
+test-emu-jit:
+    LP_EMU_BUILD_FW=1 cargo test -p lp-emu-jit -- --include-ignored --nocapture
+
 # `lp-cli emu serve`'s WebSocket door: the registry, the two endpoints, the
 # coupling rule, `reset`, and the upload walk over `serial:ws://…` landing
 # `upload-walk-usb`'s figures (emulator plan two, M1).

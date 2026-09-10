@@ -1378,3 +1378,215 @@ fn a_compressed_return_ends_its_block() {
     });
     assert_eq!(state.regs[10], 2);
 }
+
+// --- the translated-core seam (M7 P1) ---------------------------------------
+//
+// No translator exists yet. What is testable now is the seam's contract: the
+// entry point, the no-progress guard, the after-store polling, and the rule
+// that a core is not architectural state. A test double stands in for the
+// core so each of those is exercised on its own.
+
+/// A core that does whatever the test told it to, and counts.
+struct FakeCore {
+    outcome: super::translated::RunOutcome,
+    entries: u32,
+    invalidations: Vec<Option<(u32, u32)>>,
+}
+
+impl FakeCore {
+    fn refusing() -> Self {
+        Self {
+            outcome: super::translated::RunOutcome::Refused,
+            entries: 0,
+            invalidations: Vec::new(),
+        }
+    }
+}
+
+impl super::translated::TranslatedCore<TestBus> for alloc::rc::Rc<core::cell::RefCell<FakeCore>> {
+    fn run(
+        &mut self,
+        cx: super::translated::EntryCx<'_>,
+        _bus: &mut TestBus,
+    ) -> super::translated::RunOutcome {
+        let mut me = self.borrow_mut();
+        me.entries += 1;
+        match me.outcome {
+            super::translated::RunOutcome::Refused => super::translated::RunOutcome::Refused,
+            super::translated::RunOutcome::Ran {
+                pc,
+                cycle_count,
+                instruction_count,
+                after_store,
+            } => {
+                // A real core would have run guest code; this one reports the
+                // exit the test asked for and leaves `regs` alone.
+                let _ = &cx.regs;
+                super::translated::RunOutcome::Ran {
+                    pc,
+                    cycle_count,
+                    instruction_count,
+                    after_store,
+                }
+            }
+        }
+    }
+
+    fn invalidate(&mut self, range: Option<(u32, u32)>) {
+        self.borrow_mut().invalidations.push(range);
+    }
+
+    fn report(&self) -> alloc::string::String {
+        alloc::format!("{} entr(ies)", self.borrow().entries)
+    }
+}
+
+fn shared(core: FakeCore) -> alloc::rc::Rc<core::cell::RefCell<FakeCore>> {
+    alloc::rc::Rc::new(core::cell::RefCell::new(core))
+}
+
+/// The seam is only asked at the pcs the entry table names, and a core that
+/// refuses changes nothing at all.
+#[test]
+fn a_refusing_core_is_asked_once_and_changes_nothing() {
+    let program: &[u32] = &[
+        encode::addi(Gpr::new(10), Gpr::new(0), 7),
+        encode::addi(Gpr::new(11), Gpr::new(0), 9),
+        encode::ebreak(),
+    ];
+
+    let mut plain = Rig::new();
+    plain.load(RAM_BASE, program);
+    let plain_end = plain.run(500);
+    let plain_state = plain.state(plain_end);
+
+    let mut with_core = Rig::new();
+    with_core.load(RAM_BASE, program);
+    let core = shared(FakeCore::refusing());
+    with_core
+        .hart
+        .set_translated_core(alloc::boxed::Box::new(core.clone()), &[RAM_BASE]);
+    let core_end = with_core.run(500);
+    let core_state = with_core.state(core_end);
+
+    assert_eq!(
+        plain_state, core_state,
+        "a refusing core is not architectural state"
+    );
+    assert_eq!(core.borrow().entries, 1, "asked at the one entry pc only");
+}
+
+/// A core that reports `Ran` without moving the pc or retiring anything is
+/// what a real one does when its first block does not fit the remaining
+/// budget. The interpreter must take the block rather than ask again forever.
+#[test]
+fn the_no_progress_guard_hands_the_block_back_to_the_interpreter() {
+    let mut rig = Rig::new();
+    rig.load(
+        RAM_BASE,
+        &[encode::addi(Gpr::new(10), Gpr::new(0), 7), encode::ebreak()],
+    );
+    let core = shared(FakeCore {
+        outcome: super::translated::RunOutcome::Ran {
+            pc: RAM_BASE,
+            cycle_count: 0,
+            instruction_count: 0,
+            after_store: false,
+        },
+        entries: 0,
+        invalidations: Vec::new(),
+    });
+    rig.hart
+        .set_translated_core(alloc::boxed::Box::new(core.clone()), &[RAM_BASE]);
+    let end = rig.run(500);
+
+    assert!(
+        matches!(end, SliceEnd::Ebreak { .. }),
+        "the run finished rather than spun: {end:?}"
+    );
+    assert_eq!(rig.reg(10), 7, "the interpreter ran the block");
+    assert_eq!(
+        core.borrow().entries,
+        1,
+        "asked once at the entry pc; the interpreter left it behind"
+    );
+}
+
+/// `invalidate_blocks` and `invalidate_block_range` reach the core, and a
+/// guest `fence.i` reaches it through the first of them — that is the whole
+/// of how a core learns its translated code is stale.
+#[test]
+fn invalidation_and_fence_i_reach_the_core() {
+    let mut rig = Rig::new();
+    rig.load(RAM_BASE, &[FENCE_I_WORD, encode::ebreak()]);
+    let core = shared(FakeCore::refusing());
+    rig.hart
+        .set_translated_core(alloc::boxed::Box::new(core.clone()), &[]);
+
+    rig.hart.invalidate_block_range(RAM_BASE, RAM_BASE + 0x100);
+    rig.hart.invalidate_blocks();
+    rig.run(500);
+
+    let seen = core.borrow().invalidations.clone();
+    assert_eq!(
+        seen,
+        alloc::vec![Some((RAM_BASE, RAM_BASE + 0x100)), None, None],
+        "the range, the explicit flush, and the guest `fence.i`"
+    );
+    assert_eq!(rig.hart.fence_i_count(), 1);
+}
+
+/// Installing and clearing a core is what `--interpreter` reaches, and the
+/// report line is what `--jit-report` prints.
+#[test]
+fn a_core_can_be_installed_reported_and_cleared() {
+    let mut rig = Rig::new();
+    assert!(!rig.hart.has_translated_core());
+    assert_eq!(rig.hart.translated_core_report(), None);
+
+    rig.hart.set_translated_core(
+        alloc::boxed::Box::new(shared(FakeCore::refusing())),
+        &[RAM_BASE],
+    );
+    assert!(rig.hart.has_translated_core());
+    assert_eq!(
+        rig.hart.translated_core_report().as_deref(),
+        Some("0 entr(ies)")
+    );
+
+    rig.hart.clear_translated_core();
+    assert!(!rig.hart.has_translated_core());
+}
+
+/// A cloned hart — the snapshot path — starts without a core, exactly as it
+/// starts without a block cache and for a sharper reason.
+#[test]
+fn a_cloned_hart_has_no_translated_core() {
+    let mut rig = Rig::new();
+    rig.hart.set_translated_core(
+        alloc::boxed::Box::new(shared(FakeCore::refusing())),
+        &[RAM_BASE],
+    );
+    assert!(!rig.hart.clone().has_translated_core());
+}
+
+/// The entry table is direct-mapped by `pc >> 1`, because RVC puts 48.99 % of
+/// real block starts at 2 mod 4 — indexing by `pc >> 2` would fold half the
+/// image onto the other half.
+#[test]
+fn the_entry_table_indexes_by_halfword() {
+    use super::translated::{entry_slot, entry_table};
+    assert_ne!(
+        entry_slot(RAM_BASE),
+        entry_slot(RAM_BASE + 2),
+        "two-byte-apart entries must not collide"
+    );
+    let table = entry_table(&[RAM_BASE, RAM_BASE + 2]);
+    assert_eq!(table[entry_slot(RAM_BASE)], RAM_BASE);
+    assert_eq!(table[entry_slot(RAM_BASE + 2)], RAM_BASE + 2);
+    // First claim wins on a collision; the loser costs an interpreted block,
+    // never a wrong answer.
+    let far = RAM_BASE + (1 << (super::translated::ENTRY_TABLE_BITS + 1));
+    assert_eq!(entry_slot(far), entry_slot(RAM_BASE));
+    assert_eq!(entry_table(&[RAM_BASE, far])[entry_slot(far)], RAM_BASE);
+}

@@ -5695,6 +5695,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-emu-jit"
+version = "40.0.0"
+dependencies = [
+ "lp-emu-core",
+ "lp-riscv-emu",
+ "wasm-encoder 0.245.1",
+ "wasmtime",
+]
+
+[[package]]
 name = "lp-emu-validate"
 version = "40.0.0"
 dependencies = [

@@ -1,0 +1,53 @@
+[package]
+name = "lp-emu-jit"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+# MIT as a unit with the rest of `lp-emu/`, NOT the workspace's AGPL.
+# See lp-emu/LICENSE-MIT and `just lint-emu-fence`.
+license = "MIT"
+description = "Translates RV32IMC guest blocks to WebAssembly for the LightPlayer emulators"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+lp-emu-core = { path = "../lp-emu-core" }
+# The ONLY default dependency outside the fence, and deliberately so (M7 JD2).
+# `wasm-encoder` (Apache-2.0 WITH LLVM-exception) is a permissive byte emitter,
+# not a compiler: it writes the module bytes P3 emits, and it brings no
+# workspace-local AGPL edge with it. In particular this crate does NOT use
+# `lp-riscv-inst` for decoding even though the fence allowlist would permit it —
+# `decode` is this crate's own, and `tests/decoder_agreement.rs` is the price
+# paid for that (JD3).
+#
+# Declared here, unused until P3: the crate is defined now, and a dependency
+# that appears with the code that uses it is a dependency nobody reviewed.
+wasm-encoder = "0.245"
+
+[dependencies.wasmtime]
+version = "42"
+default-features = false
+features = ["cranelift", "runtime", "std"]
+optional = true
+
+[features]
+# A native wasmtime host for translated modules — development, CI and the
+# native `--jit` path (JD18). NEVER a default, and never enabled by
+# `lp-emu-esp32c6`: the product host is the browser's own engine, and wasmtime
+# needs 130-220 s of cranelift compilation on the images this ladder measures.
+#
+# Any wasmtime host built on this feature MUST set guard-page traps
+# (`signals_based_traps(true)`, 4 GiB `memory_reservation`, 2 GiB
+# `memory_guard_size`, `memory_may_move(false)`). Without them every number is
+# ~4.8x wrong and nothing reports an error — the spike measured exactly that,
+# twice, before it found the configuration.
+host-wasmtime = ["dep:wasmtime"]
+
+[dev-dependencies]
+# The agreement test's oracle (JD3): `lp_riscv_emu::emu::class_oracle` reports
+# the width and cost class this repository's own *executors* give a word, which
+# is the only ground truth a second decoder can be checked against. A dev
+# dependency, inside the fence, and never linked into the translator.
+lp-riscv-emu = { path = "../lp-riscv-emu", features = ["std"] }

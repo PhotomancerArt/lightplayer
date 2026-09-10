@@ -762,7 +762,7 @@ fn read_span(m: &Esp32C6Machine, address: u32, len: u32) -> Vec<u8> {
     for region in m.bus.regions() {
         if region.contains(address) && region.contains(address + len - 1) {
             let at = (address - region.base) as usize;
-            return region.data[at..at + len as usize].to_vec();
+            return m.bus.region_bytes(region)[at..at + len as usize].to_vec();
         }
     }
     panic!("{address:#010x}+{len} is not in one RAM region");

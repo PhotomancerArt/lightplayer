@@ -13,6 +13,7 @@ lp-emu/
   LICENSE-MIT                   the licence for everything below
   lp-emu-core/                  arch-neutral host substrate
   lp-emu-abi/                   host <-> guest protocol
+  lp-emu-jit/                   RV32IMC -> WebAssembly translation (host)
   lp-emu-validate/              the hardware-validation system (host)
   transcripts/                  committed, verbatim payload captures
   lp-riscv-emu/                 RV32IMAC+F executors

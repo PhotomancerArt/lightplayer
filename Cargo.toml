@@ -86,6 +86,7 @@ members = [
     "lp-shader/lps-filetests",
     "lp-emu/lp-emu-core",
     "lp-emu/lp-emu-abi",
+    "lp-emu/lp-emu-jit",
     "lp-emu/lp-emu-validate",
     "lp-emu/esp/lp-emu-esp-common",
     "lp-emu/esp/lp-emu-esp32c6",
@@ -182,6 +183,7 @@ default-members = [
     "lp-shader/lps-filetests",
     "lp-emu/lp-emu-core",
     "lp-emu/lp-emu-abi",
+    "lp-emu/lp-emu-jit",
     "lp-emu/lp-emu-validate",
     "lp-emu/esp/lp-emu-esp-common",
     "lp-emu/esp/lp-emu-esp32c6",
@@ -431,7 +433,7 @@ codegen-units = 4
 # planning speed-research; the same-window A/B in PR #566 reads 2.32x on the
 # compile harness). Nothing here is size-constrained — these are host binaries.
 #
-# None of these five crates is in a firmware graph, which is the whole reason
+# None of these six crates is in a firmware graph, which is the whole reason
 # the override names crates rather than flipping a profile: `lp-riscv-inst`,
 # `lp-xt-inst` and `lp-emu-abi` ARE in one (lpvm-native's isa-rv32 / isa-xt,
 # and fw-emu's guest graph), and `release-esp32` inherits `release`, so an
@@ -455,6 +457,13 @@ codegen-units = 4
 [profile.release.package.lp-emu-core]
 opt-level = 3
 [profile.release.package.lp-riscv-emu]
+opt-level = 3
+# The translator (M7) sits on the same path as the five below it: it decodes
+# and emits inside the same run the interpreter is being replaced in, and its
+# decode loop is called once per guest instruction of every image it covers.
+# Not size-constrained and not in any firmware graph — the same reasoning, and
+# the same `cargo tree` check, as the block above.
+[profile.release.package.lp-emu-jit]
 opt-level = 3
 [profile.release.package.lp-emu-esp-common]
 opt-level = 3
