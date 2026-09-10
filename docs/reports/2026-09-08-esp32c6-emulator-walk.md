@@ -235,17 +235,62 @@ for the walk, direct load for the gates.
 
 ## 6. What this does not cover
 
-A harness that overstates its fidelity is worse than none. The emulator does
-**not** model:
+A harness that overstates its fidelity is worse than none. This table was
+written for plan one (M8) and is **re-read here, 2026-09-09, by the
+rounding-out roadmap's M6 sweep** (G3): plan one closed with time at grade 2
+and input, the ROM download console and the radio all absent; that roadmap's
+M1–M5 added a graded, banded time model, a driven-from-outside pin fabric
+with a real RMT receiver, a mask-ROM download console a real flasher writes
+through, and byte-accurate ESP-NOW delivery between two emulated boards. Two
+rows below are gone outright; one is reworded rather than dropped, on
+purpose — see the ship report for the M6 sweep for the one-line reason on
+each change. The emulator does **not** model:
 
 | not covered | consequence |
 |---|---|
 | **The Chromium USB stack** | Studio talks to a board through Web Serial in a browser. The walk's link is a TCP socket carrying the same bytes; every fault that lives in the browser's serial implementation, in permission grants, or in a replug is invisible here. `docs/debt/studio-no-reconnect-after-replug.md` is that category. |
-| **Radio** | ESP-NOW is an accept-and-remember stub. The C6's known frame truncation under a WiFi scan (`docs/debt/c6-scan-truncation-accepted.md`) cannot reproduce here — there is no scan. |
+| **The radio itself** | ESP-NOW frames are delivered — a frame the blob hands the MAC reaches every other emulated board's RX ring, byte for byte, verified against a two-board silicon capture on every non-timing field (`docs/reports/2026-09-09-espnow-broadcast-two-board-silicon-replay.md`, 60/60 equal). What is not modelled is the medium a real radio would cross: no PHY, no channel, no collisions, no RSSI (a stated constant, never a measurement), no encryption. The C6's known frame truncation under a WiFi scan (`docs/debt/c6-scan-truncation-accepted.md`) still cannot reproduce here — there is no scan, no PHY and no interrupt-masking window to have one in. |
 | **Anything analog** | No PHY, no PLL settling, no brownout, no temperature. `regi2c` answers from one shared data byte (§7). |
-| **RX pins and input** | The RMT has TX channels only; GPIO is a routing view. A button, an encoder, an incoming DMX universe: none of it. |
-| **Wall-clock time** | §3. Time grades 1 and 2 are event schedulers, not clocks. Grades 3 and 4 are out of plan one's scope by design. |
 | **The board** | Power, wiring, connectors, the strip itself, and every fault that is really a loose wire. |
+
+Two rows from the original table are retired rather than reworded, and the
+reasoning is different for each:
+
+- **"RX pins and input" is gone.** A pad can now be driven from outside
+  (`--pin-script`, the `pin`/`pins` verbs, `--wire`), `GPIO.in_` is a real
+  two-way view, a `gpio-input` payload reads a button and a quadrature
+  encoder through the **product's own** driver with the GPIO interrupt path
+  exercised, and RMT channel 2 is a receive engine whose words agree with our
+  own transmitter to the crc, frame for frame. What is left is a grading
+  nuance, not a structural absence: `pin` stays `modeled` (all three readings
+  of a pad — the driven level, the RMT waveform, our decoder — are ours; a
+  `measured` grade needs an instrument nobody has pointed at gpio18 yet), and
+  `ch_rx_lim`'s counter-vs-position semantics are disputed against esp-emu
+  0.42.0 with no silicon arbiter (the GPIO18→19 jumper capture is owed). An
+  incoming DMX or E1.31 universe is still absent, but that is a **product
+  protocol layered on the primitives above**, not a claim about the pin
+  fabric — it is out-of-roadmap scope (`notes.md`'s future-work list), not a
+  fidelity gap in what exists.
+- **"Wall-clock time" is gone**, and this one is a judgement call, not a
+  mechanical read of M1's own closing note (which asked for the row to be
+  *reworded* to name `t3`'s band, not dropped). §3 already carries the whole
+  story — `t1` and `t2` are event schedulers, `t3` is a structural cache/bus
+  model graded `documented` inside a stated band on two named payloads,
+  `--strict-timing` enforces the band and PD9 still refuses any host gate on
+  an emulated microsecond — and repeating that nuance as a table row under a
+  heading that means "not modelled at all" overstates the gap in one
+  direction (time is no longer purely absent) while requiring so many
+  caveats to state honestly that it understates the gap in the other. A
+  reader who wants the real texture of what `t3` does and does not cover
+  should read §3 and `docs/reports/2026-09-08-esp32c6-t3-calibration.md`
+  directly rather than a compressed row here.
+
+**This table no longer reads "Chromium's USB stack, analog, the board" and
+nothing else — the radio survives, reworded.** See the M6 ship report for
+why that row was kept rather than dropped to match the hoped-for three; the
+short version is that "the radio is not modelled" remains literally true
+even though "ESP-NOW frames are delivered" is now also true, and the two
+sentences are not in tension.
 
 **What the walk replaces is the routine C6 walk** — the one run to check that
 a render still renders after a change to the engine, the compiler or the
@@ -337,15 +382,38 @@ should know. Full detail is in each `m*-_DONE.md` in the plan directory.
 
 ## 9. Not run
 
-- **The esp-emu loopback differential** (the plan's G4-3). esp-emu 0.42.0 is
-  not installed on this host and fetching the release asset is an action the
-  agent lane could not authorize on its own; the recipe is in the plan's
-  `notes.md`. It would be a *second* oracle for the frame, not the gate — the
-  gate is the host oracle, and it is met.
+**Updated 2026-09-09 by the rounding-out roadmap's M6 sweep.** One item below
+moved from "not run" to "run, and here is what it found"; the rest stand.
+
+- **The esp-emu loopback differential ran, 2026-09-08, and did not produce
+  the comparison it hoped for.** The rounding-out roadmap's M5 installed
+  esp-emu 0.42.0 in a scratchpad (never the repo, never CI) and ran the
+  `rmt_chase_loopback` image under `--rmt-loopback 0:2` (the plan's own
+  `18:19` was refuted: that flag takes RMT channel indices, not pins).
+  esp-emu hangs 24 words into the RX side — `ch_rx_lim` frozen at 24, both
+  `rx_thr_event` and `rx_end` raised together — which the report reads as
+  esp-emu modelling `ch_rx_lim` as a **position**, the opposite of the
+  **counter** our own reader needs; neither model has a silicon arbiter.
+  `docs/reports/2026-09-08-esp-emu-rmt-loopback-differential.md` is the
+  record; `validate.toml`'s `c6r-m2-rx` set description carries the one-line
+  summary. The GPIO18→19 jumper capture (below) is now the only thing that
+  can settle it.
 - **A silicon `rmt-chase` capture** and a **silicon pin transcript**. The
   second is the `measured` step for the pin class (§8, M5). Both are cheap
-  while the C6 is on the bench and neither gates anything.
-- **The `bootCount 1` power-on capture** (§7.1).
+  while the C6 is on the bench and neither gates anything. The rounding-out
+  roadmap's optional hands item A (`d1-desk-batch.md`) is the same ask,
+  narrower — the GPIO18→19 jumper, for a silicon `rmt-rx` capture — and is
+  still owed.
+- **A BOOT-button press, as a real external input** (`d1-desk-batch.md`
+  optional B). The `gpio-input` payload's silicon capture used a self-loop
+  pad instead (§B in the rounding-out roadmap's `notes.md`), which needed no
+  hands; a real button is still an ask, never a gate.
+- **The `bootCount 1` power-on capture** (§7.1). Every silicon transcript in
+  the tree, including the three the rounding-out roadmap's desk batch added
+  (`cycle-probe`, the `gpio-input` self-loop, the two-board
+  `espnow-broadcast` pair), was taken after a reset. A **power-on** — cable
+  or power removed, not a soft reset — is what would name the 8-byte heap
+  gap, and it needs a hand on a cable.
 
 ## 10. Reproducing this
 
