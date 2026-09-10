@@ -1,7 +1,5 @@
 ---
-status: fixed          # bench-confirmed through the erase step still PENDING
-                       # (see "Verification status") — the board dropped off
-                       # USB mid-walk and needs a physical replug
+status: fixed          # bench-confirmed 2026-09-09, whole walk green
 found: 2026-09-08      # how: hardware-walk (c6-bootloader-hang-walk.sh)
 fixed: this change
 area: lpa-client stream/serialport_stream + transport_serial (hardware framing thread, AsyncSerialClientTransport::close); lpa-link host_serial_esp32 provider + DeviceSession::release_link
@@ -167,12 +165,26 @@ it refused — which is the only case that could ever have blown the budget.
 
 ## Verification status
 
-Bench-confirmed so far, on the induced fixture: the classification is right
-(`Unresponsive { NoSerialOutput }`), and the leak is now *reported* at the
-layer that causes it. The final leg — the walk getting past the erase — is
-**not yet run against the `tcflush` fix**: the C6 dropped off the USB bus when
-the wedged process was killed and needs a physical replug before
-`scripts/c6-bootloader-hang-walk.sh A0:F2:62:85:A8:7C` can run again.
+Bench-confirmed on the induced fixture (2026-09-09, board `A0:F2:62:85:A8:7C`
+on `/dev/cu.usbmodem2101`), the whole walk green for the first time:
+
+```
+# HUNG BOOTLOADER: Saved PC:0x4086ed7a
+connected: Unresponsive { diagnosis: NoSerialOutput }
+== manage: EraseDeviceFlash ==   erase outcome state: BlankFlash
+== manage: FlashFirmware ==      flash outcome state: Ready
+== manage: ResetRuntime ==       reset outcome state: Ready
+MANAGE SMOKE: PASS
+PASS: induced hang, flashed through the host provider, clock restored,
+      board answered (port free)
+```
+
+The erase is the step that used to fail; its reopen of the just-released port
+now succeeds first try. Neither `device link release failed:` nor `Device or
+resource busy` appears anywhere in the log. The three runs together are the
+whole argument: the first failed at the reopen with the leak silent, the
+second reached `Unresponsive` and *named* the leak at the layer causing it,
+and this one clears every step.
 
 ## Lesson
 
