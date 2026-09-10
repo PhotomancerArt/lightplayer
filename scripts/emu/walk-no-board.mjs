@@ -40,10 +40,14 @@ const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../.
 /// The upload step's project. `peach-1d` and not the silicon capture's
 /// `fyeah-sign` for one measured reason, and it is a DEVIATION, not a
 /// preference: on an emulated board `fyeah-sign`'s graphics stage overruns
-/// the firmware's own 8 s RTC watchdog and the chip resets mid-push —
+/// the firmware's own 8 s RTC watchdog and the chip resets mid-push, then
+/// reboot-loops on the startup project the failed push set —
 /// docs/defects/2026-09-10-the-emulated-c6-builds-a-graphics-stage-40x-slower-than-silicon.md,
 /// which is Yona's F1 and which this walk reproduces on purpose in the
 /// scenario lane (`s3`, `s7`). A real board does the same step in 0.199 s.
+/// `WALK_PROJECT="Fyeah Sign" just walk-no-board` is the control: same walk,
+/// same board, `reboots=9` instead of `reboots=3`, and the board never says
+/// `Project loaded`.
 const WALK_PROJECT = process.env.WALK_PROJECT ?? "Peach (1D)";
 /// The model the picker offers for this board — the emulated C6 reports
 /// `seeed/xiao-esp32-c6` in its own hardware manifest, so this is the honest
@@ -247,13 +251,29 @@ async function main() {
       });
       await driver.click(BOARD_MODEL, { scope: `document.querySelector('[id^="ux-popover-panel"]')` });
       await driver.clickWhenReady("Flash firmware", { timeoutMs: STEP_DEADLINE_MS });
-      // The board's own words, not a byte count and not a clock: the card
-      // stops saying it needs firmware when what Studio wrote is what the
-      // board booted.
+      // The flow has to START and then FINISH, and both halves are needed.
+      // "the card stopped saying `needs firmware`" alone is satisfied the
+      // instant the card switches to `Flashing firmware…`, which screenshotted
+      // a progress bar and called it a flash.
       await driver.waitFor(
-        `!(document.querySelector('#main')?.innerText || '').includes('needs firmware')`,
-        { timeoutMs: FLASH_DEADLINE_MS, what: "the flash to finish and the board to boot what was written" },
+        `(document.querySelector('#main')?.innerText || '').includes('Flashing firmware')`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "the flash to start" },
       );
+      await driver.waitFor(
+        `(() => { const t = document.querySelector('#main')?.innerText || "";
+                  return !t.includes('Flashing firmware') && !t.includes('needs firmware'); })()`,
+        { timeoutMs: FLASH_DEADLINE_MS, what: "the flash to finish" },
+      );
+      // …and then the DOOR, which is the only party that can see the reset
+      // vector. `flash` answers "does an image magic sit there", recomputed
+      // per flush (DD34), so `loaded` means what Studio wrote is what the ROM
+      // will jump to.
+      const after = await boardRegistry(door.addr);
+      const board = after.find((b) => b.id === options.board);
+      console.log(`  door: ${board.id} flash=${board.flash} boot=${board.boot} reboots=${board.reboots}`);
+      if (board.flash !== "loaded") {
+        throw new Error(`the flash flow finished but the door still reports flash=${board.flash}`);
+      }
     });
 
     // 2 + 3. CONNECT and IDENTIFY. The flash flow leaves the port held; the
@@ -309,16 +329,13 @@ async function main() {
         { timeoutMs: STEP_DEADLINE_MS, what: "the board to say `Project loaded`" },
       );
 
-      // STUDIO'S VERDICT is reported beside it, and it is a different thing —
-      // on an emulated board it is always `Failed`, and the reason is
-      // measured and filed: Studio's device deadline is a fixed FIVE WALL
-      // SECONDS, and the emulator executes about 7.6 M instructions per wall
-      // second while modelling a 160 MHz CPU, so any project load that is
-      // CPU-busy work on silicon takes ~20x longer here in wall time. The
-      // load completes; the request that asked for it has already given up.
-      // `lp-cli upload`'s 10 s deadline clears the same load on the same
-      // board, which is the cleanest evidence that the boundary is the
-      // number and not the shim. See
+      // STUDIO'S VERDICT is reported beside it rather than asserted on,
+      // because they are different claims and the board's is the stronger
+      // one. With `Peach (1D)` both agree (`Succeeded`, three runs of three).
+      // With `Fyeah Sign` the board never gets to say `Project loaded` at
+      // all: its graphics stage overruns the firmware's own 8 s RTC watchdog
+      // on an emulated chip, the board resets, and the door's `reboots` count
+      // climbs — 9 against this run's 3. That is F1, and it is filed:
       // docs/defects/2026-09-10-the-emulated-c6-builds-a-graphics-stage-40x-slower-than-silicon.md
       const ended = await sink
         .awaitRecord(

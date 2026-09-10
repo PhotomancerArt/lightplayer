@@ -62,16 +62,32 @@ Same binary, same project, same modelled clock, ~40× the guest time. So the
 emulated chip is executing roughly forty times the instructions a real one
 needs to build this project's graphics stage.
 
-**It is not "the emulator is slow at shaders".** A small project goes through
-cleanly on the same board, with the shader compiler reporting single-digit
-milliseconds of guest time:
+**It is not "the emulator is slow at everything", and it is not the host's
+clock.** A small project goes through cleanly on the same board, on both
+paths, with the shader compiler reporting single-digit milliseconds of guest
+time:
 
 ```
 $ lp-cli upload catalog/projects/peach-1d serial:ws://…/board/c6-a/bytes
 [shader-node] compilation succeeded (elapsed=13ms, lpir_inst_count=128, final_code_size=2108 bytes, float=fixed)
 [shader-node] compilation succeeded (elapsed=10ms, lpir_inst_count=107, final_code_size=1924 bytes, float=fixed)
 Project uploaded and running.
+
+$ just walk-no-board            # Studio's own push, headless, 3 runs of 3
+  the board:  Project loaded
+  Studio:     Note(ActivityEnded { kind: Push, outcome: Succeeded { … } })
 ```
+
+The cleanest control is the same walk with only the project changed:
+
+| `just walk-no-board` with | the board says | door afterwards |
+|---|---|---|
+| `Peach (1D)` | `Project loaded` | `flash=loaded boot=rom-up reboots=3` |
+| `Fyeah Sign` | never says it | `flash=loaded boot=rom-up reboots=9` |
+
+Those six extra reboots are the loop: the failed push has already written the
+project and set it as the startup project, so each boot loads it and dies the
+same way.
 
 So the cost scales with something `fyeah-sign` has and `peach-1d` does not —
 the obvious candidate being its 8.8 KB `fyeah.map2d.json` and the per-lamp

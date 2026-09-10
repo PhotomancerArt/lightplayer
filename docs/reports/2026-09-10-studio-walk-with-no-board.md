@@ -71,26 +71,28 @@ board kind Studio's esptool-js flow can actually write.
   ✓ 508 device-event record(s): journal=508
 — upload: push Peach (1D) onto the board from the gallery
   the board:  Project loaded
-  Studio:     Note(ActivityEnded { kind: Push, outcome: Failed { message: "push failed: transport error: Transport error: device did not respond within 5.0s" } })
-  ✓ 107 device-event record(s): journal=107
+  Studio:     Note(ActivityEnded { kind: Push, outcome: Succeeded { summary: "project sent to studio — the board is running studio" } })
+  ✓ 174 device-event record(s): journal=174
 — detach: the cable comes out mid-session
-  ✓ 4 device-event record(s): journal=4
+  ✓ 0 device-event record(s): (none)
 — reattach: the cable goes back in
-  after the replug the card reads: "Identifying"
+  after the replug the card reads: "Ready"
   ✓ 0 device-event record(s): (none)
 
 === the walk, step by step
-  ✓ flash     81 record(s)   walk-1-flash.png
-  ✓ connect   2 record(s)   walk-2-connect.png
-  ✓ identify  508 record(s)   walk-3-identify.png
-  ✓ upload    107 record(s)   walk-4-upload.png
-  ✓ detach    4 record(s)   walk-5-detach.png
+  ✓ flash     805 record(s)   walk-1-flash.png
+  ✓ connect   0 record(s)   walk-2-connect.png
+  ✓ identify  0 record(s)   walk-3-identify.png
+  ✓ upload    174 record(s)   walk-4-upload.png
+  ✓ detach    0 record(s)   walk-5-detach.png
   ✓ reattach  0 record(s)   walk-6-reattach.png
 
   door's live registry: c6-a flash=loaded boot=rom-up reboots=3 state=running
 
 ✓ the walk finished: flash → connect → identify → upload → detach → re-attach, with no board.
 ```
+
+Three consecutive runs, identical in every line above.
 
 Screenshots, one per step, at `target/walk-no-board/shots/walk-{1..6}-*.png`
 (archived with the milestone's G2 packet). The full trace is
@@ -100,11 +102,19 @@ which records each step produced — is `target/walk-no-board/walk-steps.json`.
 **Three of those six steps are gated on the BOARD's words, not Studio's**, and
 that was a deliberate choice each time:
 
-- **flash** — the card stops saying `needs firmware`, and the door's live
-  registry reads `flash=loaded boot=rom-up reboots=3`. The door's `flash` word
-  answers "does an image magic sit at the reset vector" (DD34), recomputed per
-  flush, so `loaded` here means what Studio wrote is at the vector the ROM
-  jumps to. `reboots=3` is esptool's reset dance plus its `hard_reset`.
+- **flash** — the card says `Flashing firmware…` and then stops saying it, and
+  the door's live registry reads `flash=loaded boot=rom-up reboots=3`. The
+  door's `flash` word answers "does an image magic sit at the reset vector"
+  (DD34), recomputed per flush, so `loaded` here means what Studio wrote is at
+  the vector the ROM jumps to. `reboots=3` is esptool's reset dance plus its
+  `hard_reset`. **Both halves of that wait are load-bearing and the first
+  version of this step had neither**: "the card stopped saying `needs
+  firmware`" is satisfied the instant the card switches to `Flashing
+  firmware…`, so the step returned mid-flash, screenshotted a progress bar,
+  and every step after it raced a flash that was still running. That artefact
+  produced three spurious `device did not respond within 5.0s` push failures
+  before it was found; they are not in this record because they were not
+  real.
 - **identify** — `fw-esp32c6 2be6b6235aad (dirty)` on the card is the board's
   own hello. It is the build this Studio serves, so the board is running what
   Studio wrote and says so itself.
@@ -114,32 +124,55 @@ that was a deliberate choice each time:
   satisfied by the *chooser's own button* the moment the project is picked,
   and "Nothing loaded went away" is satisfied when the push *starts*.
 
-## 3. The upload step's honest verdict, and why it is not a green tick
+## 3. The upload step, and what the project's size decides
 
-Studio reported `Failed { … device did not respond within 5.0s }` on a push
-that landed. Every emulated push does. The cause is measured, and it is not
-the shim's:
+`Peach (1D)` pushes cleanly: the board says `Project loaded`, Studio says
+`Succeeded { summary: "project sent to studio — the board is running studio" }`,
+three runs out of three.
 
-- Studio's device deadline is a fixed **five wall seconds**.
-- The emulator executes about **7.6 M instructions per wall second** while
-  modelling a 160 MHz CPU — measured as `20000000 us emulated, 172070742
-  instructions` in `22.71 s` of wall time on an idle board, and
-  `1308312919 instructions` for `8279541 us emulated` on a busy one. So when
-  the guest is *busy*, the emulator is roughly **21× slower than real time**;
-  when it is idle, guest time jumps and it looks real-time.
-- A project load is CPU-busy work. On silicon it takes 0.204 s (measured off
-  the committed `s3` fixture's own stamps). Twenty-one times that is over
-  Studio's five seconds, so the request that asked for the load has given up
-  by the time the load finishes.
-- `lp-cli upload … serial:ws://…/board/c6-a/bytes`, whose deadline is **ten**
-  seconds, clears the same load on the same board and prints
-  `Project uploaded and running.` That is the cleanest evidence that the
-  boundary is the number, not the shim, not the door and not the browser.
+**`Fyeah Sign` does not, and cannot.** Same walk, same board, same code, only
+the project changed:
 
-**The upload legs agree** on what lands, which is invariant 9: both paths write
-the same `/projects/studio/…` files and the board loads the project either
-way. They disagree about whether to call it a success, and only because of the
-deadline.
+```
+$ WALK_PROJECT="Fyeah Sign" just walk-no-board
+— upload: push Fyeah Sign onto the board from the gallery
+  ✗ waiting for the board to say `Project loaded`: wait deadline
+  door's live registry: c6-a flash=loaded boot=rom-up reboots=9 state=running
+```
+
+`reboots=9` against the clean run's `reboots=3` is the whole story: the board
+reset six more times inside the step. That is **F1, Yona's push hang**, filed
+as
+`docs/defects/2026-09-10-the-emulated-c6-builds-a-graphics-stage-40x-slower-than-silicon.md`
+and summarised in §7. It is the project's graphics stage overrunning the
+firmware's own eight-second RTC watchdog, on an emulated chip that needs ~40×
+the guest time silicon needs for that step — and once the failed push has set
+the startup project, every subsequent boot loads it and dies the same way,
+which is the reboot loop those nine count.
+
+**The upload legs agree** on what lands, which is invariant 9. `lp-cli upload
+catalog/projects/peach-1d serial:ws://…/board/c6-a/bytes` writes the same
+`/projects/studio/…` files, compiles the same two shaders (`elapsed=13ms` and
+`elapsed=10ms` of guest time, `final_code_size=2108` and `1924` bytes) and
+prints `Project uploaded and running.` Both legs fail on `fyeah-sign`, and
+fail at the same line.
+
+### A number worth having, and a claim retracted
+
+The emulator executes about **7.6 M instructions per wall second** while
+modelling a 160 MHz CPU: `20000000 us emulated, 172070742 instructions` in
+`22.71 s` of wall time on an idle board, and `1308312919 instructions` for
+`8279541 us emulated` on a busy one. So when the guest is *busy* it runs
+roughly **21× slower than real time**; when it is idle, guest time jumps and
+it looks real-time.
+
+An earlier draft of this record used that number to claim Studio's fixed
+five-second device deadline made *every* emulated push report failure. **That
+was wrong and is retracted.** The failures it rested on came from this walk's
+own too-loose flash gate (§2), not from the deadline; with the gate fixed,
+`Peach (1D)` clears Studio's five seconds every time. The deadline is a real
+constraint on a board this slow and it will bite on a bigger project — but
+nothing here has measured where.
 
 ## 4. The six scenarios, with no board
 
@@ -296,7 +329,9 @@ The honest residue, and it has not moved:
 - **Anything analog or radio.** Unchanged by this plan.
 - **Wall-clock behaviour.** The emulator is ~21× slower than silicon while the
   CPU is busy, so any product timeout is being tested against the wrong
-  number. §3 is that boundary meeting a real one.
+  number — in both directions. A timeout that is too tight will bite here and
+  not on a board; a timeout that is too loose will never be exercised here at
+  all.
 - **A half-open byte client.** M5 measured zero 409s across seven walks and
   this milestone saw none either; the case where a client dies without closing
   is still unmeasured, not ruled out.
