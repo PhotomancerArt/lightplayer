@@ -311,7 +311,14 @@ fn print_outcome(machine: &mut Machine, outcome: &Outcome) {
                 .symbolize(violation.pc)
                 .unwrap_or_else(|| "?".into());
             let where_ = if violation.in_mmio_window {
-                "inside the declared MMIO window — an UNMODELLED BLOCK".to_string()
+                match memmap::ahb_to_dport(violation.address) {
+                    Some(twin) => format!(
+                        "inside the declared AHB peripheral window — an UNMODELLED BLOCK; \
+                         its DPORT twin is {twin:#010x} (memmap::MMIO_AHB_BASE)"
+                    ),
+                    None => "inside the declared DPORT peripheral window — an UNMODELLED BLOCK"
+                        .to_string(),
+                }
             } else if let Some((span, why)) = bus_setup::unmapped_window(violation.address) {
                 format!(
                     "inside `{}`, which this machine deliberately does not map: {why}",

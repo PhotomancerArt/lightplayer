@@ -346,6 +346,8 @@ ESP32_TARGETS = [
     _v3("gpio", "GPIO"),
     _v3("io_mux", "IO_MUX"),
     _v3("apb_ctrl", "APB_CTRL"),
+    # WDEV_RND_REG, on the AHB bus (P3 found the window; P7 models the block).
+    _v3("rng", "RNG"),
     _v3("frc_timer", "FRC_TIMER"),
     # M4's peripheral, generated here so M4 does not touch this script.
     _v3("rmt", "RMT"),
@@ -381,21 +383,14 @@ CHIPS = {
         pac="esp32",
         version="0.40.2",
         targets=ESP32_TARGETS,
-        skip=(
-            (
-                "rng",
-                # esp32-0.40.2/src/lib.rs:647 gives RNG the base 0x6003_5000,
-                # an address that DOES NOT EXIST on the classic: it is an
-                # S2/C3-family address that leaked into the SVD. The classic's
-                # random register is WDEV_RND_REG inside the WiFi window, and
-                # M3 P7 resolves it from the ROM ELF's own symbol or from
-                # esp-hal's classic `rng` — never from that PAC line. Emitting
-                # a table for it would give a wrong address a provenance
-                # header, which is worse than having no table at all.
-                "the PAC's base 0x6003_5000 is an SVD leak from another "
-                "family; see m3/notes.md §4 and memmap::periph",
-            ),
-        ),
+        # `rng` sat in `skip` from P1 to P3 as "an SVD leak from another
+        # family": esp32-0.40.2/src/lib.rs:647 gives it 0x6003_5000, which is
+        # not in the DPORT peripheral window. M3 P3's strict boot found the
+        # classic's SECOND peripheral window — the AHB bus at 0x6000_0000,
+        # mirroring the DPORT blocks from 0x3FF4_0000 — and 0x6003_5000 is
+        # WDEV's AHB address: `data` at +0x144 is 0x6003_5144, the classic's
+        # WDEV_RND_REG. The PAC was right; the exclusion is gone and the
+        # table is generated like every other (memmap::MMIO_AHB_BASE).
     ),
 }
 

@@ -25,15 +25,19 @@
 //! - [`TIMG0`] is TIMG0 (`0x3FF5_F000`) and TIMG1 (`0x3FF6_0000`);
 //! - [`UART0`] is UART0 (`0x3FF4_0000`), UART1 and UART2.
 //!
-//! # Two things the generator cannot produce, and does not pretend to
+//! # `RNG` is on the AHB bus, and P1 was wrong to exclude it
 //!
-//! **`RNG` is excluded.** `esp32-0.40.2/src/lib.rs:647` gives it base
-//! `0x6003_5000`, an address that does not exist on this part — an SVD leak
-//! from the S2/C3 family. Emitting a table for it would give a wrong address
-//! a provenance header, which is worse than having no table. The exclusion is
-//! in the generator's `SKIP` list with that reason, so it is documented
-//! rather than accidental. M3 P7 resolves the classic's `WDEV_RND_REG` from
-//! the ROM ELF's own symbol or from esp-hal's classic `rng`.
+//! `esp32-0.40.2/src/lib.rs:647` gives `RNG` the base `0x6003_5000`. P1 read
+//! that as an SVD leak from another family and put it in the generator's
+//! `SKIP` list; P3's fifth strict stop found the classic's **second
+//! peripheral window** — the AHB bus at `0x6000_0000`, a mirror of the DPORT
+//! blocks from `0x3FF4_0000` up (`crate::memmap::MMIO_AHB_BASE` has the
+//! evidence) — and `0x6003_5000` is the AHB address of the WiFi window's
+//! WDEV block: [`RNG`]'s `data` at `+0x144` is `0x6003_5144`, the classic's
+//! `WDEV_RND_REG`. The table is generated like every other, and the `SKIP`
+//! entry is gone.
+//!
+//! # One thing the generator cannot produce, and does not pretend to
 //!
 //! **The flash MMU page tables are not in [`DPORT`].** They are raw 256-entry
 //! `u32` arrays at `0x3FF1_0000` (PRO) and `0x3FF1_2000` (APP)
@@ -50,6 +54,7 @@ mod frc_timer;
 mod gpio;
 mod io_mux;
 mod rmt;
+mod rng;
 mod rtc_cntl;
 mod rtc_i2c;
 mod rtc_io;
@@ -66,6 +71,7 @@ pub use frc_timer::FRC_TIMER;
 pub use gpio::GPIO;
 pub use io_mux::IO_MUX;
 pub use rmt::RMT;
+pub use rng::RNG;
 pub use rtc_cntl::RTC_CNTL;
 pub use rtc_i2c::RTC_I2C;
 pub use rtc_io::RTC_IO;
@@ -77,8 +83,8 @@ pub use uart0::UART0;
 
 /// Every table, for the tests that sweep them.
 pub const ALL: &[&lp_emu_esp_common::RegNames] = &[
-    &APB_CTRL, &DPORT, &EFUSE, &FRC_TIMER, &GPIO, &IO_MUX, &RMT, &RTC_CNTL, &RTC_I2C, &RTC_IO,
-    &SENS, &SHA, &SPI0, &TIMG0, &UART0,
+    &APB_CTRL, &DPORT, &EFUSE, &FRC_TIMER, &GPIO, &IO_MUX, &RMT, &RNG, &RTC_CNTL, &RTC_I2C,
+    &RTC_IO, &SENS, &SHA, &SPI0, &TIMG0, &UART0,
 ];
 
 #[cfg(test)]
@@ -249,6 +255,7 @@ mod tests {
             "gpio",
             "io_mux",
             "rmt",
+            "rng",
             "rtc_cntl",
             "rtc_i2c",
             "rtc_io",
@@ -260,8 +267,15 @@ mod tests {
         ] {
             assert!(blocks.contains(&expected), "`{expected}` has no table");
         }
-        assert_eq!(blocks.len(), 15);
-        // `rng` is excluded on purpose — see the module docs.
-        assert!(!blocks.contains(&"rng"));
+        assert_eq!(blocks.len(), 16);
+    }
+
+    /// `RNG` is one register on the AHB bus: `data` at `+0x144`, which at
+    /// the PAC's base `0x6003_5000` is `0x6003_5144` — `WDEV_RND_REG`. P1
+    /// excluded the block as an SVD leak; P3 found the bus (module docs).
+    #[test]
+    fn rng_is_wdev_rnd_reg_on_the_ahb_bus() {
+        assert_eq!(RNG.name(0x144), Some("data"));
+        assert_eq!(crate::memmap::periph::RNG + 0x144, 0x6003_5144);
     }
 }

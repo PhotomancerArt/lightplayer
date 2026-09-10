@@ -251,14 +251,67 @@ pub const RTC_SLOW_LEN: u32 = 0x0000_2000;
 // MMIO
 // ---------------------------------------------------------------------------
 
-/// The peripheral window. Every base in [`periph`] falls inside
-/// `0x3FF0_0000..0x3FF8_0000` — the window is declared to `0x3FF8_0000`
-/// because that is where RTC fast memory's data view begins
-/// ([`RTC_FAST_DBUS`]).
+/// The peripheral window on the **DPORT bus**. Every base in [`periph`]
+/// except the two AHB-only ones falls inside `0x3FF0_0000..0x3FF8_0000` —
+/// the window is declared to `0x3FF8_0000` because that is where RTC fast
+/// memory's data view begins ([`RTC_FAST_DBUS`]).
 pub const MMIO_BASE: u32 = 0x3FF0_0000;
 
 /// `0x8_0000`, ending at [`RTC_FAST_DBUS`].
 pub const MMIO_LEN: u32 = 0x0008_0000;
+
+/// The peripheral window on the **AHB bus** — the classic's second
+/// peripheral window, found by P3's fifth strict stop on the direct load.
+///
+/// The mask ROM's `rom_chip_i2c_writeReg` (`0x4000_4168`) computes the
+/// analog I2C master's command word address as
+/// `(0x1800_3800 + host_id) << 2` = **`0x6000_E000 + 4·host_id`**, and
+/// `esp_hal::soc::esp32::clocks` reaches it through `rom_i2c_writeReg` to
+/// program the BBPLL (`REGI2C_BBPLL(0x66, 4)` → `0x6000_E010`, the address
+/// of the stop). The address is outside the DPORT window and inside nothing
+/// this file named until then.
+///
+/// **It is a mirror.** The ROM's `.text` loads forty-odd literals in
+/// `0x6000_0000..0x6002_2000`, and they line up with DPORT blocks the PAC
+/// names, offset by `0x3FF4_0000 − 0x6000_0000`: `0x6000_88xx` is `SENS`
+/// (`0x3FF4_8800`), `0x6001_C0xx`/`0x6001_D0xx` are `NRX`/`BB`
+/// (`0x3FF5_CC00`/`0x3FF5_D000`), `0x6000_60xx` is `FLASH_ENCRYPTION`
+/// (`0x3FF4_6000`). And the PAC's `RNG` at `0x6003_5000` — which P1 excluded
+/// as "an address that does not exist on this part" — is the AHB address of
+/// the WiFi window's `WDEV` block: its `data` register at `+0x144` is
+/// `0x6003_5144`, the classic's `WDEV_RND_REG`, which esp-hal's classic
+/// `rng` reads through that very PAC type. **P1's exclusion was wrong**, and
+/// P3 reverses it (`regs::RNG`, and the generator's `SKIP` entry removed).
+///
+/// So: `AHB = 0x6000_0000 + (DPORT − 0x3FF4_0000)` for the blocks from
+/// `UART0` up, `0x4_0000` long, ending where the DPORT window ends.
+///
+/// ⚠️ **What this machine does with the mirror.** `SocBus` registers a
+/// peripheral at one base; two registrations would be two blocks with two
+/// states, which is the SRAM1-alias mistake in MMIO form (DD24/DD36). So a
+/// block is registered at **one** of its two addresses — the DPORT one where
+/// the PAC names it, the AHB one where only the ROM does (the analog I2C
+/// master has no DPORT-side name in the PAC) — and an access through the
+/// *other* address is a strict stop naming this window. A guest that reaches
+/// a PAC-named block through AHB is the evidence that would justify a
+/// forwarding view (chip-side, one shared state) or a bus feature (M2's), and
+/// P3 reports the question rather than answering it.
+pub const MMIO_AHB_BASE: u32 = 0x6000_0000;
+
+/// `0x4_0000`: the mirror of `0x3FF4_0000..0x3FF8_0000`. See
+/// [`MMIO_AHB_BASE`].
+pub const MMIO_AHB_LEN: u32 = 0x0004_0000;
+
+/// The DPORT address a mirrored AHB address corresponds to, or `None` for an
+/// address outside the AHB window. Reporting only: nothing in this machine
+/// forwards through it.
+pub const fn ahb_to_dport(address: u32) -> Option<u32> {
+    if address >= MMIO_AHB_BASE && address < MMIO_AHB_BASE + MMIO_AHB_LEN {
+        Some(address - MMIO_AHB_BASE + 0x3FF4_0000)
+    } else {
+        None
+    }
+}
 
 /// The flash MMU page tables, **PRO** core: 256 `u32` entries of 64 KiB pages
 /// at `0x3FF1_0000`.
@@ -278,12 +331,10 @@ pub const FLASH_MMU_APP: u32 = 0x3FF1_2000;
 /// peripheral is `Periph<RegisterBlock, BASE>`; the line number is on each).
 /// The window each block gets is decided where it is registered — P2 onward.
 ///
-/// ⚠️ **`RNG` is not here.** The PAC's `:647` gives it `0x6003_5000`, an
-/// address that does not exist on the classic (an SVD leak from the S2/C3
-/// family). The classic's random register is `WDEV_RND_REG` inside the WiFi
-/// window; P7 resolves it from the ROM ELF's own symbol or from esp-hal's
-/// classic `rng` — never from that PAC line. `pac-regnames.py` carries the
-/// same exclusion in its `SKIP` table.
+/// Two bases are on the **AHB** bus ([`MMIO_AHB_BASE`]), not the DPORT one:
+/// [`periph::I2C_ANA_MST`], which the PAC does not name at all, and
+/// [`periph::RNG`], which P1 wrongly excluded as an SVD leak — see
+/// [`MMIO_AHB_BASE`] for the evidence that reversed it.
 pub mod periph {
     /// `:458`. The system/DPORT block: cache control, the per-core interrupt
     /// maps, the peripheral clock and reset gates.
@@ -335,8 +386,18 @@ pub mod periph {
     /// `:818`.
     pub const UART2: u32 = 0x3FF6_E000;
     /// `:836`. The WiFi MAC window. Not mapped: the shipped image runs no
-    /// radio, and the classic's `WDEV_RND_REG` lives in here (P7).
+    /// radio.
     pub const WIFI: u32 = 0x3FF7_3000;
+    /// **AHB bus.** The analog I2C master the mask ROM's `rom_i2c_writeReg`
+    /// / `rom_i2c_readReg` drive (`0x4000_41A4` / `0x4000_4148`, through
+    /// `rom_chip_i2c_writeReg` at `0x4000_4168`: address `(0x1800_3800 +
+    /// host_id) << 2`). One command/status word per `host_id`; the BBPLL is
+    /// host 4. The PAC has no block for it; the ROM is the citation.
+    pub const I2C_ANA_MST: u32 = 0x6000_E000;
+    /// `:647`, **AHB bus**: `0x6003_5000`, with `data` at `+0x144` =
+    /// `0x6003_5144`, the classic's `WDEV_RND_REG`. The DPORT-side twin is
+    /// the WiFi window ([`WIFI`] + `0x2000`); the PAC names the AHB one.
+    pub const RNG: u32 = 0x6003_5000;
 }
 
 /// CPU clock: 240 MHz. `CpuClock::max()` on this chip
@@ -433,11 +494,20 @@ pub const RAM_SPANS: &[Span] = &[
 
 /// The declared MMIO windows. An access inside one that no peripheral claims
 /// is still unmapped, but the log says "an unmodelled block".
-pub const MMIO_WINDOWS: &[Span] = &[Span {
-    name: "mmio",
-    base: MMIO_BASE,
-    len: MMIO_LEN,
-}];
+///
+/// Two since P3: the DPORT window and its AHB mirror ([`MMIO_AHB_BASE`]).
+pub const MMIO_WINDOWS: &[Span] = &[
+    Span {
+        name: "mmio-dport",
+        base: MMIO_BASE,
+        len: MMIO_LEN,
+    },
+    Span {
+        name: "mmio-ahb",
+        base: MMIO_AHB_BASE,
+        len: MMIO_AHB_LEN,
+    },
+];
 
 /// Windows this machine names and deliberately does **not** map. A strict
 /// stop inside one of these says which window it was, instead of "unmapped".

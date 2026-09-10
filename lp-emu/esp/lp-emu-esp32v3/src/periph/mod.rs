@@ -57,6 +57,11 @@ pub fn boot_set(reset_cause: ResetCause) -> Vec<(u32, u32, BoxedPeripheral)> {
             accept::TIMG_LEN,
             Box::new(accept::timg("TIMG0")),
         ),
+        (
+            base::I2C_ANA_MST,
+            accept::I2C_ANA_MST_LEN,
+            Box::new(accept::i2c_ana_mst()),
+        ),
         (base::EFUSE, accept::EFUSE_LEN, Box::new(accept::efuse())),
     ]
 }

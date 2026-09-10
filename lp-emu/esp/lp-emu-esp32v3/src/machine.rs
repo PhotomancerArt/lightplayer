@@ -110,6 +110,9 @@ pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     "APB_CTRL",
     // Direct load, stop 4: `measure_rtc_clock` reads `TIMG0.rtccalicfg`.
     "TIMG0",
+    // Direct load, stop 5: the ROM's `rom_chip_i2c_writeReg` programs the
+    // BBPLL through the analog I2C master — on the AHB bus.
+    "I2C_ANA_MST",
     // ROM-up, stop 1: `_ResetHandler_efuse_check_patch` reads its own
     // fuses seven instructions after the reset vector.
     "EFUSE",

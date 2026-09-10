@@ -176,6 +176,90 @@ pub fn timg(name: &'static str) -> RegFile {
         .with_pac_grades()
 }
 
+/// The analog I2C master's aperture: eight command/status words, one per
+/// `host_id` (`0x6000_E000 + 4·host_id`; the BBPLL is host 4, the highest
+/// esp-idf names for this chip is 7). Tight on purpose — a ninth host is a
+/// strict stop, not a silent zero — and the ROM's other literals in the
+/// block (`+0x50`, `+0x5c`, `+0x80`, the PHY's `ANA_CONFIG` words) are
+/// outside it until a boot reaches them.
+pub const I2C_ANA_MST_LEN: u32 = 0x20;
+
+/// The analog I2C master's register names. **Hand-written**, because the
+/// `esp32` PAC has no block at this address; the layout is the mask ROM's:
+///
+/// ```text
+/// 40004168 <rom_chip_i2c_writeReg>:          (block, host_id, reg, data)
+/// 4000416b:  l32r  a9, (0x01000000)          ; bit 24: write
+/// 40004177:  l32r  a9, (0x18003800)
+/// 40004183:  add.n a9, a3, a9                ; + host_id
+/// 4000418b:  slli  a9, a9, 2                 ; ×4 → 0x6000E000 + 4·host_id
+/// 40004180:  slli  a4, a4, 8                 ; reg  << 8
+/// 40004188:  slli  a8, a5, 16                ; data << 16
+/// 40004197:  s32i.n a2, a9, 0                ; write the command word
+/// 4000419c:  l32i.n a8, a9, 0
+/// 4000419e:  bany  a8, a10(0x02000000), -5   ; spin while bit 25 (busy)
+///
+/// 40004110 <rom_chip_i2c_readReg>:  same word, no bit 24; after the spin,
+/// 40004141:  extui a2, a2, 16, 8             ; data = bits 23:16
+/// ```
+///
+/// So one word per host: `[7:0]` slave address, `[15:8]` register, `[23:16]`
+/// data, `[24]` write, `[25]` busy.
+pub static I2C_ANA_MST_NAMES: lp_emu_esp_common::regnames::RegNames =
+    lp_emu_esp_common::regnames::RegNames {
+        block: "i2c_ana_mst",
+        entries: &[
+            (0x000, "host0"),
+            (0x004, "host1"),
+            (0x008, "host2"),
+            (0x00c, "host3"),
+            (0x010, "host4_bbpll"),
+            (0x014, "host5"),
+            (0x018, "host6"),
+            (0x01c, "host7"),
+        ],
+        resets: &[],
+        access: &[],
+    };
+
+/// `I2C_ANA_MST` — the analog I2C master on the **AHB bus**
+/// ([`crate::memmap::MMIO_AHB_BASE`]): accept-and-remember here, **P5's**
+/// `{block, register}` store later.
+///
+/// The fifth strict stop of the direct load, 143,014 cycles in:
+/// `rom_chip_i2c_writeReg+0x2f` (`0x4000_4197`) writes `0x6000_E010` —
+/// `esp_hal::soc::esp32::clocks` programming the BBPLL through
+/// `rom_i2c_writeReg` (`clocks.rs:222-264`, `I2C_BBPLL_*.write_reg`). It was
+/// "outside every region and every declared window" until the AHB window
+/// was declared; the memmap carries the evidence.
+///
+/// # No exception, and why that is honest for this image
+///
+/// The ROM's spin is on **bit 25** (busy), which the guest never writes —
+/// the command word it stores has bits 24 and below only — so a block that
+/// remembers what was written answers the spin with 0 on the first read.
+/// Nothing is pinned. The shipped image only **writes** through this master
+/// (every `regi2c` use in `clocks.rs` is a `write_reg`); a `readReg` would
+/// get back bits 23:16 of the last word written to that host, which is the
+/// C6's *one data register* defect in waiting
+/// (`docs/defects/2026-09-08-regi2c-is-one-data-register-not-a-register-file.md`)
+/// and P5's reason to give it the `{block, register}` store the C6's
+/// `i2c_ana_mst` has.
+///
+/// There are no PAC resets to seed: the PAC does not know this block. Every
+/// register here is *modeled*.
+pub fn i2c_ana_mst() -> RegFile {
+    let rf = RegFile::new("I2C_ANA_MST", I2C_ANA_MST_LEN)
+        .with_names(I2C_ANA_MST_NAMES)
+        .with_pac_grades();
+    // `with_pac_grades` calls a register with no access entry read-write and
+    // therefore *documented*; nothing documents these, so every word is
+    // demoted by hand to what it is.
+    (0..I2C_ANA_MST_LEN / 4).fold(rf, |rf, i| {
+        rf.with_grade(4 * i, lp_emu_esp_common::periph::RegGrade::Modeled)
+    })
+}
+
 /// `EFUSE`'s aperture: the generated table runs to `+0x1fc` (`date`).
 pub const EFUSE_LEN: u32 = 0x200;
 
@@ -215,6 +299,7 @@ mod tests {
             (rtc_cntl(ResetCause::PowerOn), regs::RTC_CNTL),
             (apb_ctrl(), regs::APB_CTRL),
             (timg("TIMG0"), regs::TIMG0),
+            (i2c_ana_mst(), I2C_ANA_MST_NAMES),
             (efuse(), regs::EFUSE),
         ]
     }
@@ -337,6 +422,27 @@ mod tests {
         assert_eq!(sb.read(&mut t, 0x06c), 0, "rtc_cali_value: nothing counted");
         assert_eq!(t.reg_name(0x064), Some("wdtwprotect"));
         assert_eq!(sb.read(&mut t, 0x064), 0x50d8_3aa1);
+    }
+
+    #[test]
+    fn the_analog_master_answers_the_roms_busy_spin_without_a_pin() {
+        let mut sb = Sandbox::new();
+        let mut m = i2c_ana_mst();
+        assert_eq!(m.reg_name(0x010), Some("host4_bbpll"));
+        // `rom_chip_i2c_writeReg(0x66, 4, 3, 0x1c)`: the word the ROM stores.
+        let word = (1 << 24) | (0x1c << 16) | (3 << 8) | 0x66;
+        sb.write(&mut m, 0x010, word);
+        assert_eq!(
+            sb.read(&mut m, 0x010) & (1 << 25),
+            0,
+            "busy is a bit the guest never sets, so remembering answers the spin"
+        );
+        assert_eq!(sb.read(&mut m, 0x010), word);
+        // Every register is modeled: the PAC does not know this block.
+        assert_eq!(
+            m.reg_grade(0x010),
+            Some(lp_emu_esp_common::periph::RegGrade::Modeled)
+        );
     }
 
     #[test]
