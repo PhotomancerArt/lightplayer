@@ -221,7 +221,9 @@ OPTIONS:
                             the proof that a partial translator can only be
                             slow and never wrong
     --jit-blocks <N>        with --jit: how many blocks the sweep from the
-                            entry point may find (default 4096)
+                            entry point may find. The default suits the
+                            emission policy, and a set the host refuses to
+                            compile is halved and retried
     --jit-report            print what the translated core translated, how
                             much of the run it covered, how often it left for
                             the interpreter, and what boot cost to build it
@@ -358,10 +360,6 @@ fn run() -> Result<ExitCode, String> {
         .jit_report(args.jit_report)
         .jit(args.jit)
         .jit_escape_all(args.jit_escape_all)
-        .jit_blocks(
-            args.jit_blocks
-                .unwrap_or(lp_emu_esp32c6::machine::DEFAULT_JIT_BLOCKS),
-        )
         .strict_grade(args.strict_grade)
         .strict_grade_blocks(args.strict_grade_blocks.clone())
         .efuse(args.efuse)
@@ -380,6 +378,9 @@ fn run() -> Result<ExitCode, String> {
         .tx_log(args.tx_log.clone())
         .strip(args.strip.order, args.strip.timing);
 
+    if let Some(blocks) = args.jit_blocks {
+        builder = builder.jit_blocks(blocks);
+    }
     if let Some(len) = args.flash_len {
         builder = builder.flash_len(len);
     }

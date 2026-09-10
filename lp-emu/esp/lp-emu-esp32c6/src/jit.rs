@@ -69,10 +69,33 @@ fn arena_word(arena: &[u8], base: u32, spans: &[(u32, u32, bool)], pc: u32) -> O
 
 /// Sweep a block set from `seeds`, translate it, and install it on `hart`.
 ///
+/// The smallest block budget worth retrying at. Below this the set is too
+/// small to be evidence of anything, and a failure is a real failure.
+const MIN_BLOCKS: usize = 64;
+
 /// # Errors
 ///
 /// Nothing reachable to translate, an arena with no room for the tables, or a
-/// module wasmtime will not compile.
+/// module the host will not build even at [`MIN_BLOCKS`].
+///
+/// # A host's ceiling is not the design's
+///
+/// `max_blocks` is what the caller *asked* for; what gets translated is the
+/// largest set at or under it that the host will actually build. Halving and
+/// retrying is not a workaround, it is the honest shape: **every engine refuses
+/// a large enough function, and they refuse at wildly different sizes.** The
+/// spike measured cranelift refusing somewhere between 1,161 and 5,161 blocks
+/// while JSC compiled 8,161 without complaint, so a fixed budget would either
+/// waste most of a browser's capacity or fail outright on the desk. It is also
+/// why the same budget can build under `--jit` and be refused under
+/// `--jit-escape-all`: an escaped instruction emits a register flush, a call
+/// and a reload where a real one emits a few opcodes, so the same block count
+/// is several times the wasm.
+///
+/// Each halving is logged with the reason, because a silent shrink would hide
+/// a real translator bug behind a smaller module. Translated code is not
+/// architectural state, so what was translated cannot change a transcript —
+/// only how much of the run was fast.
 pub fn install(
     hart: &mut MachineHart<SocBus>,
     bus: &mut SocBus,
@@ -81,25 +104,34 @@ pub fn install(
     model: CycleModel,
     policy: Emit,
 ) -> Result<BuildReport, String> {
-    let set = {
-        let spans = bus.region_spans();
-        let base = bus.guest_arena_base();
-        let arena = bus.guest_arena();
-        BlockSet::sweep(seeds, max_blocks, &mut |pc| {
-            arena_word(arena, base, &spans, pc)
-        })
-    };
-    if set.is_empty() {
-        return Err(format!(
-            "nothing translatable is reachable from {:#010x}",
-            seeds.first().copied().unwrap_or(0)
-        ));
+    let mut budget = max_blocks;
+    loop {
+        let set = {
+            let spans = bus.region_spans();
+            let base = bus.guest_arena_base();
+            let arena = bus.guest_arena();
+            BlockSet::sweep(seeds, budget, &mut |pc| arena_word(arena, base, &spans, pc))
+        };
+        if set.is_empty() {
+            return Err(format!(
+                "nothing translatable is reachable from {:#010x}",
+                seeds.first().copied().unwrap_or(0)
+            ));
+        }
+        match JitCore::build(bus, &set, model, policy) {
+            Ok(core) => {
+                let report = core.build_report();
+                let entries = set.entries().to_vec();
+                hart.set_translated_core(Box::new(core), &entries);
+                return Ok(report);
+            }
+            Err(e) if budget > MIN_BLOCKS => {
+                budget /= 2;
+                log::warn!("jit: {e}; retrying with {budget} blocks");
+            }
+            Err(e) => return Err(e),
+        }
     }
-    let entries = set.entries().to_vec();
-    let core = JitCore::build(bus, &set, model, policy)?;
-    let report = core.build_report();
-    hart.set_translated_core(Box::new(core), &entries);
-    Ok(report)
 }
 
 /// The two permission encodings are separate constants in separate crates

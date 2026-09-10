@@ -118,6 +118,22 @@ pub const MAX_SLICE_CYCLES: u64 = 8_192;
 /// way.
 pub const DEFAULT_JIT_BLOCKS: usize = 2048;
 
+/// The default bound when every instruction goes through the escape hatch
+/// (`--jit-escape-all`).
+///
+/// Smaller, and not by taste: an escaped instruction emits a register flush, a
+/// call and a reload where a real one emits a few opcodes, so the same block
+/// count is several times the wasm — 4 MB against 400 KB at 1,024 blocks on
+/// `render-basic`. Cranelift refuses a function long before a browser engine
+/// does (the spike measured it giving up between 1,161 and 5,161 blocks where
+/// JSC took 8,161), and this is the build whose job is to *run*, not to be
+/// fast: it is the proof that partial translation can only be slow and never
+/// wrong, and a proof that does not build proves nothing.
+///
+/// `jit::install` halves and retries anyway, so this is what keeps the common
+/// case from paying for a refused compile first.
+pub const DEFAULT_JIT_ESCAPE_BLOCKS: usize = 512;
+
 /// The slice cap while strict mode is on.
 ///
 /// A strict refusal reaches the guest as an ordinary access fault, so the
@@ -850,9 +866,9 @@ pub struct Esp32C6Builder {
     /// Send every instruction through the escape hatch. See
     /// [`Esp32C6Builder::jit_escape_all`].
     jit_escape_all: bool,
-    /// How many blocks the P3 sweep may find. See
-    /// [`Esp32C6Builder::jit_blocks`].
-    jit_blocks: usize,
+    /// How many blocks the P3 sweep may find, or `None` for the default that
+    /// suits the emission policy. See [`Esp32C6Builder::jit_blocks`].
+    jit_blocks: Option<usize>,
     efuse: EfuseIdentity,
     time_grade: TimeGrade,
     strict: bool,
@@ -924,7 +940,7 @@ impl Esp32C6Builder {
             jit_report: false,
             jit: false,
             jit_escape_all: false,
-            jit_blocks: DEFAULT_JIT_BLOCKS,
+            jit_blocks: None,
             efuse: EfuseIdentity::default(),
             time_grade: TimeGrade::default(),
             strict: false,
@@ -1108,7 +1124,7 @@ impl Esp32C6Builder {
     /// whole-image discovery is P4's. The bound is what keeps the sample a
     /// sample.
     pub fn jit_blocks(mut self, blocks: usize) -> Self {
-        self.jit_blocks = blocks;
+        self.jit_blocks = Some(blocks);
         self
     }
 
@@ -1841,7 +1857,12 @@ impl Esp32C6Builder {
         }
         machine.sync_translated_core();
         if jit && machine.translate {
-            machine.install_translated_core(entry, jit_escape_all, jit_blocks)?;
+            let blocks = jit_blocks.unwrap_or(if jit_escape_all {
+                DEFAULT_JIT_ESCAPE_BLOCKS
+            } else {
+                DEFAULT_JIT_BLOCKS
+            });
+            machine.install_translated_core(entry, jit_escape_all, blocks)?;
         }
         Ok(machine)
     }
