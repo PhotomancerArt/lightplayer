@@ -17,14 +17,15 @@ use lp_emu_core::CycleModel;
 use lp_emu_core::arena::GuestArena;
 use lp_emu_jit::blocks::BlockSet;
 use lp_emu_jit::discover::discover;
+use lp_emu_jit::dispatch::{emit_module, target_table_bytes, write_target_tables};
 use lp_emu_jit::host::{
-    self, EXCHANGE_CYCLE, EXCHANGE_INSTRET, EXCHANGE_LEN, EXCHANGE_REGS, HostOps, MMIO_OK,
-    MmioLoad, MmioStore, PERM_ENTRIES, PERM_NONE, PERM_READ_WRITE, PERM_SHIFT, STEP_CONTINUE,
-    StepOne,
+    self, EXCHANGE_CROSS, EXCHANGE_CYCLE, EXCHANGE_INDIRECT_MISS, EXCHANGE_INSTRET, EXCHANGE_LEN,
+    EXCHANGE_REGS, HostOps, MMIO_OK, MmioLoad, MmioStore, PERM_ENTRIES, PERM_NONE, PERM_READ_WRITE,
+    PERM_SHIFT, STEP_CONTINUE, StepOne,
 };
 use lp_emu_jit::host_wasmtime::WasmtimeCore;
 use lp_emu_jit::replay::GRANULE_BYTES;
-use lp_emu_jit::translate::{Emit, Layout, emit};
+use lp_emu_jit::translate::{Emit, Layout};
 
 // The test memory: exchange, then the permission table, then 64 KiB of guest
 // RAM at `GUEST_BASE`. Six wasm pages, so the whole thing is one allocation
@@ -36,12 +37,17 @@ const ARENA_AT: u32 = PERM_AT + PERM_ENTRIES;
 const ARENA_LEN: u32 = 0x1_0000;
 const GUEST_BASE: u32 = 0x4000_0000;
 const PAGES: u64 = 6;
-const MEM_LEN: usize = (PAGES as usize) * 65536;
+/// Where the indirect-target tables go in the rig that has them. Only the
+/// tests that exercise `jalr` pay for them: the page map alone is 1 MiB, and
+/// putting it in every case would quadruple every engine case for nothing.
+const IND_AT: u32 = ARENA_AT + ARENA_LEN;
+const IND_PAGES: u64 = 23;
 
 /// A host that serves the imports out of a plain `Vec` and remembers what it
 /// was asked.
 struct FakeHost {
     mem: *mut u8,
+    len: usize,
     /// `(pc, cycle, address, kind)` per `mmio_load`.
     loads: Vec<(u32, u64, u32, u32)>,
     /// `(pc, cycle, address, kind, value)` per `mmio_store`.
@@ -78,8 +84,8 @@ unsafe impl Send for FakeHost {}
 
 impl FakeHost {
     fn bytes(&mut self) -> &mut [u8] {
-        // SAFETY: `mem` is the test's own `MEM_LEN`-byte allocation.
-        unsafe { core::slice::from_raw_parts_mut(self.mem, MEM_LEN) }
+        // SAFETY: `mem` is the test's own `len`-byte allocation.
+        unsafe { core::slice::from_raw_parts_mut(self.mem, self.len) }
     }
 }
 
@@ -308,29 +314,50 @@ fn tiny_decode(w: u32) -> Tiny {
 
 // --- the rig ----------------------------------------------------------------
 
-fn layout() -> Layout {
-    Layout {
-        memory_pages: PAGES,
-        guest_base: GUEST_BASE,
-        arena_offset: ARENA_AT,
-        perm_offset: PERM_AT,
-        exchange_offset: EXCHANGE_AT,
-    }
-}
-
 struct Rig {
     /// A `GuestArena` rather than a `Vec`, so these tests run the emitted
     /// modules under the same guard-page configuration the native `--jit`
     /// path uses (M7 JD21) wherever the host can provide one.
     mem: GuestArena,
+    pages: u64,
+    /// Whether this rig builds the indirect-target tables, so an emitted
+    /// `jalr` resolves in-module instead of leaving.
+    indirect: bool,
+    /// The global block index the next run enters at.
+    entry: u32,
 }
 
 impl Rig {
+    fn mem_len(&self) -> usize {
+        (self.pages as usize) * 65536
+    }
+
+    fn layout(&self) -> Layout {
+        Layout {
+            memory_pages: self.pages,
+            guest_base: GUEST_BASE,
+            arena_offset: ARENA_AT,
+            perm_offset: PERM_AT,
+            exchange_offset: EXCHANGE_AT,
+            indirect: self.indirect.then_some(IND_AT),
+        }
+    }
+
     /// A memory with the permission table filled in: the 64 KiB of guest RAM
     /// is read-write, and everything else — including the MMIO address the
     /// tests use — is [`PERM_NONE`].
     fn new(program: &[(u32, u32)]) -> Self {
-        let mut mem = GuestArena::zeroed(MEM_LEN);
+        Self::sized(program, PAGES, false)
+    }
+
+    /// The same rig with room for the indirect-target tables, and building
+    /// them.
+    fn with_indirect(program: &[(u32, u32)]) -> Self {
+        Self::sized(program, IND_PAGES, true)
+    }
+
+    fn sized(program: &[(u32, u32)], pages: u64, indirect: bool) -> Self {
+        let mut mem = GuestArena::zeroed((pages as usize) * 65536);
         for page in 0..(ARENA_LEN >> PERM_SHIFT) {
             let entry = ((GUEST_BASE >> PERM_SHIFT) + page) as usize;
             mem[PERM_AT as usize + entry] = PERM_READ_WRITE;
@@ -340,7 +367,12 @@ impl Rig {
             let at = (ARENA_AT + (pc - GUEST_BASE)) as usize;
             mem[at..at + 4].copy_from_slice(&word.to_le_bytes());
         }
-        Self { mem }
+        Self {
+            mem,
+            pages,
+            indirect,
+            entry: 0,
+        }
     }
 
     fn word_at(&self, guest: u32) -> u32 {
@@ -363,16 +395,56 @@ impl Rig {
         regs: [i32; 32],
         end: u64,
     ) -> Outcome {
-        let emitted = emit(set, CycleModel::Esp32C6, layout(), policy);
+        self.run_split(case, set, policy, regs, end, usize::MAX)
+    }
+
+    /// The same, entering at block `entry` rather than at block zero.
+    fn run_at(
+        &mut self,
+        case: &str,
+        set: &BlockSet,
+        policy: Emit,
+        regs: [i32; 32],
+        end: u64,
+        entry: u32,
+    ) -> Outcome {
+        self.entry = entry;
+        let out = self.run_split(case, set, policy, regs, end, usize::MAX);
+        self.entry = 0;
+        out
+    }
+
+    /// The same, with at most `fn_blocks` guest blocks per sub-dispatcher.
+    fn run_split(
+        &mut self,
+        case: &str,
+        set: &BlockSet,
+        policy: Emit,
+        regs: [i32; 32],
+        end: u64,
+        fn_blocks: usize,
+    ) -> Outcome {
+        if self.indirect {
+            assert!(
+                u64::from(IND_AT) + target_table_bytes(set) <= self.mem_len() as u64,
+                "the rig's memory has no room for the indirect-target tables"
+            );
+            write_target_tables(&mut self.mem, IND_AT, set);
+        }
+        let entry = self.entry;
+        let layout = self.layout();
+        let emitted = emit_module(set, CycleModel::Esp32C6, layout, policy, fn_blocks);
         for (i, r) in regs.iter().enumerate() {
             let at = (EXCHANGE_AT as u64 + EXCHANGE_REGS) as usize + 4 * i;
             self.mem[at..at + 4].copy_from_slice(&r.to_le_bytes());
         }
+        let mem_len = self.mem_len();
         let initial = self.mem.to_vec();
         let guard = self.mem.guard();
         let base = self.mem.as_mut_ptr();
         let host = FakeHost {
             mem: base,
+            len: mem_len,
             loads: Vec::new(),
             stores: Vec::new(),
             escapes: Vec::new(),
@@ -380,10 +452,10 @@ impl Rig {
         };
         // SAFETY: `self.mem` outlives `core`, and nothing else holds a
         // reference into it while `enter` is running.
-        let mut core = unsafe { WasmtimeCore::new(&emitted.wasm, host, base, MEM_LEN, guard) }
+        let mut core = unsafe { WasmtimeCore::new(&emitted.wasm, host, base, mem_len, guard) }
             .expect("the emitted module compiles and instantiates");
         let exit = core
-            .enter(0, 0, 0, end, (0, 0))
+            .enter(entry, 0, 0, end, (0, 0))
             .expect("translated code does not trap");
 
         let read_i64 = |m: &[u8], at: u64| {
@@ -407,6 +479,8 @@ impl Rig {
             flags: exit.flags,
             cycle: read_i64(&self.mem, EXCHANGE_CYCLE),
             instret: read_i64(&self.mem, EXCHANGE_INSTRET),
+            cross: read_i64(&self.mem, EXCHANGE_CROSS),
+            indirect_miss: read_i64(&self.mem, EXCHANGE_INDIRECT_MISS),
             regs: out_regs,
             loads: core.ops_mut().loads.clone(),
             stores: core.ops_mut().stores.clone(),
@@ -540,6 +614,10 @@ struct Outcome {
     flags: i32,
     cycle: u64,
     instret: u64,
+    /// How many times control left one sub-dispatcher for another.
+    cross: u64,
+    /// How many indirect jumps the target table could not resolve.
+    indirect_miss: u64,
     regs: [i32; 32],
     loads: Vec<(u32, u64, u32, u32)>,
     stores: Vec<(u32, u64, u32, u32, u32)>,
@@ -741,6 +819,157 @@ fn a_backward_branch_stays_inside_the_module() {
         slow.escapes.len(),
         8,
         "every one of them went through the interpreter"
+    );
+}
+
+/// `jal ra, +12` / `addi a1, x0, 7` / `jal x0, +8` / `jalr x0, 0(ra)` — a
+/// call, a body, and the return that P3 always left the module at.
+fn call_and_return() -> Vec<(u32, u32)> {
+    vec![
+        (GUEST_BASE, 0x00c0_00ef),
+        (GUEST_BASE + 4, 0x0070_0593),
+        (GUEST_BASE + 8, 0x0080_006f),
+        (GUEST_BASE + 12, 0x0000_8067),
+    ]
+}
+
+#[test]
+fn a_return_resolves_through_the_target_table_instead_of_leaving() {
+    let program = call_and_return();
+
+    // Without the tables: P3's shape. The `jalr` is where the stay ends, and
+    // the two instructions after the return never run inside the module.
+    let mut plain = Rig::new(&program);
+    let set = set_of(&plain, GUEST_BASE);
+    assert_eq!(set.blocks.len(), 3, "call, body, return");
+    let out = plain.run_named("ret-no-table", &set, Emit::EVERYTHING, [0; 32], u64::MAX);
+    assert_eq!(out.pc, GUEST_BASE + 4, "the return leaves at its target");
+    assert_eq!(out.instret, 2);
+    assert_eq!(out.regs[11], 0, "the body never ran");
+
+    // With them: the return is a branch, and the stay runs to the edge that
+    // really does leave the block set.
+    let mut rig = Rig::with_indirect(&program);
+    let set = set_of(&rig, GUEST_BASE);
+    let fast = rig.run_named("ret-table", &set, Emit::EVERYTHING, [0; 32], u64::MAX);
+    assert_eq!(fast.pc, GUEST_BASE + 16, "the `jal` out of the set");
+    assert_eq!(fast.instret, 4, "the call, the return, and the body's two");
+    assert_eq!(fast.regs[1] as u32, GUEST_BASE + 4, "the link register");
+    assert_eq!(fast.regs[11], 7, "the body ran");
+    assert_eq!(fast.indirect_miss, 0);
+    assert_eq!(fast.cross, 0, "one sub-dispatcher holds all three blocks");
+    assert!(fast.escapes.is_empty(), "no instruction left for the host");
+    let cost = |c| u64::from(CycleModel::Esp32C6.cycles_for(c));
+    assert_eq!(
+        fast.cycle,
+        out.cycle + cost(lp_emu_core::InstClass::Alu) + cost(lp_emu_core::InstClass::JalTail),
+        "the body's `addi` and its `jal`, charged on top of what P3's shape reached"
+    );
+}
+
+#[test]
+fn an_indirect_jump_the_table_does_not_know_leaves_and_says_so() {
+    let program = call_and_return();
+    let mut rig = Rig::with_indirect(&program);
+    let set = set_of(&rig, GUEST_BASE);
+    // `ra` already holds an address no block starts at, and the `jal` at the
+    // top overwrites it — so enter at the return itself.
+    let mut regs = [0i32; 32];
+    regs[1] = (GUEST_BASE + 0x2000) as i32;
+    let idx = set
+        .blocks
+        .iter()
+        .position(|b| b.pc == GUEST_BASE + 12)
+        .expect("the return is a block");
+    let out = rig.run_at(
+        "ret-miss",
+        &set,
+        Emit::EVERYTHING,
+        regs,
+        u64::MAX,
+        idx as u32,
+    );
+    assert_eq!(out.pc, GUEST_BASE + 0x2000, "it left at the unknown target");
+    assert_eq!(out.instret, 1);
+    assert_eq!(out.indirect_miss, 1, "and the miss is counted");
+}
+
+#[test]
+fn the_split_module_answers_exactly_what_one_function_does() {
+    let program = call_and_return();
+    let mut whole = Rig::with_indirect(&program);
+    let set = set_of(&whole, GUEST_BASE);
+    let one = whole.run_split(
+        "split-1",
+        &set,
+        Emit::EVERYTHING,
+        [0; 32],
+        u64::MAX,
+        usize::MAX,
+    );
+
+    for fn_blocks in [2usize, 1] {
+        let mut rig = Rig::with_indirect(&program);
+        let split = rig.run_split(
+            "split-n",
+            &set,
+            Emit::EVERYTHING,
+            [0; 32],
+            u64::MAX,
+            fn_blocks,
+        );
+        assert_eq!(split.pc, one.pc, "at {fn_blocks} blocks per function");
+        assert_eq!(split.cycle, one.cycle, "at {fn_blocks} blocks per function");
+        assert_eq!(split.instret, one.instret, "at {fn_blocks}");
+        assert_eq!(split.regs, one.regs, "at {fn_blocks}");
+        assert_eq!(split.flags, one.flags, "at {fn_blocks}");
+        assert_eq!(split.loads, one.loads, "at {fn_blocks}");
+        assert_eq!(split.stores, one.stores, "at {fn_blocks}");
+        assert_eq!(split.escapes, one.escapes, "at {fn_blocks}");
+        assert_eq!(split.indirect_miss, 0);
+    }
+
+    // One block per function makes every edge in this program a cross: the
+    // call's forward `jal` and the `jalr` back.
+    let mut each = Rig::with_indirect(&program);
+    let split = each.run_split("split-each", &set, Emit::EVERYTHING, [0; 32], u64::MAX, 1);
+    assert_eq!(split.cross, 2, "the call and the return");
+}
+
+/// A backward branch is an intra-function edge when the two blocks share a
+/// sub-dispatcher and a cross-function one when they do not, and the answer
+/// is the same either way.
+#[test]
+fn a_backward_branch_crosses_functions_without_changing_the_answer() {
+    let program = vec![
+        (GUEST_BASE, 0x0030_0513),
+        (GUEST_BASE + 4, 0xfff5_0513),
+        (GUEST_BASE + 8, 0xfe05_1ee3),
+        (GUEST_BASE + 12, 0x0040_006f),
+    ];
+    let mut whole = Rig::new(&program);
+    let set = set_of(&whole, GUEST_BASE);
+    // The loop top, the loop body, and the block the branch falls out into.
+    assert_eq!(set.blocks.len(), 3);
+    let one = whole.run_split(
+        "loop-1",
+        &set,
+        Emit::EVERYTHING,
+        [0; 32],
+        u64::MAX,
+        usize::MAX,
+    );
+    let mut each = Rig::new(&program);
+    let two = each.run_split("loop-2", &set, Emit::EVERYTHING, [0; 32], u64::MAX, 1);
+    assert_eq!(one.regs, two.regs);
+    assert_eq!(one.instret, two.instret);
+    assert_eq!(one.cycle, two.cycle);
+    assert_eq!(one.pc, two.pc);
+    assert_eq!(one.cross, 0);
+    assert_eq!(
+        two.cross, 2,
+        "the fall into the loop and the fall out of it; the three iterations \
+         are back edges inside one function and cross nothing"
     );
 }
 

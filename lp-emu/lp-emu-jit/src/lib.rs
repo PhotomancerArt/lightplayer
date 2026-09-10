@@ -16,7 +16,10 @@
 //! - [`discover`] — how they are found: a symbol-seeded, width-following
 //!   sweep over the whole image that follows every static edge and degrades
 //!   to the interpreter at everything else (JD6, JD7).
-//! - [`translate`] — the block set to one wasm function: registers in locals,
+//! - [`dispatch`] — the block set to one wasm *module*: an outer selector
+//!   over as many sub-dispatchers as the function-size limit needs, plus the
+//!   flat tables that make an indirect jump an in-module branch (JD8).
+//! - [`translate`] — one sub-dispatcher's body: registers in locals,
 //!   the arena as the imported memory, RAM behind a permission byte, MMIO and
 //!   the escape hatch through imports.
 //! - [`host`] — the contract an emitted module is run against, written out
@@ -56,6 +59,7 @@ extern crate alloc;
 pub mod blocks;
 pub mod decode;
 pub mod discover;
+pub mod dispatch;
 pub mod host;
 #[cfg(feature = "host-wasmtime")]
 pub mod host_wasmtime;

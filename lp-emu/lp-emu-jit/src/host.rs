@@ -37,8 +37,10 @@
 //! | `+0`   | `regs[32]`, one `i32` each, `x0` first |
 //! | `+128` | `mcycle` |
 //! | `+136` | `minstret` |
-//! | `+144` | [`FLAG_AFTER_STORE`] / [`FLAG_SLICE_ENDED`] |
+//! | `+144` | [`FLAG_AFTER_STORE`] / [`FLAG_SLICE_ENDED`] / [`FLAG_PENDING`] |
 //! | `+148` | the status [`HostOps::step_one`] last reported |
+//! | `+152` | [`EXCHANGE_CROSS`] — cross-function transfers this stay |
+//! | `+160` | [`EXCHANGE_INDIRECT_MISS`] — unresolved indirect jumps |
 //!
 //! The **whole** register file is in the exchange area, not just the registers
 //! the block set touches: [`HostOps::step_one`] runs an arbitrary guest
@@ -65,6 +67,21 @@ pub const EXCHANGE_INSTRET: u64 = 136;
 pub const EXCHANGE_FLAGS: u64 = 144;
 /// The status [`HostOps::step_one`] last reported, as an `i32`.
 pub const EXCHANGE_STATUS: u64 = 148;
+/// How many times the outer selector re-dispatched into another
+/// sub-dispatcher function during this stay, as an `i64` (P5, JD8).
+///
+/// Counted in the selector rather than at the edge, because that is the one
+/// place every cross-function transfer passes through, and because it keeps
+/// the count off the intra-function paths entirely. The host adds it up and
+/// reports it as a rate; a high one is a sizing finding, which is exactly why
+/// it is a permanent counter and not a debug build's.
+pub const EXCHANGE_CROSS: u64 = 152;
+/// How many indirect jumps this stay could **not** resolve in-module, as an
+/// `i64`: the target lookup said "no block starts here" and the stay left.
+///
+/// Incremented only on the miss, so a resolved `jalr` — the common case once
+/// the whole image is installed — pays nothing for the counter.
+pub const EXCHANGE_INDIRECT_MISS: u64 = 160;
 /// How much of the imported memory the exchange area claims.
 pub const EXCHANGE_LEN: u32 = 256;
 
@@ -76,6 +93,17 @@ pub const FLAG_AFTER_STORE: i32 = 1;
 /// `wfi`, an `ebreak`, a bus yield or a fault. The host knows which; translated
 /// code only knows it has to leave.
 pub const FLAG_SLICE_ENDED: i32 = 2;
+/// An MMIO **load** left a yield on the bus, so the next store must leave even
+/// if it is an inline RAM store the bus never sees.
+///
+/// Not a flag the host reads — it is how one sub-dispatcher hands that
+/// obligation to the next across a cross-function edge (P5). Inside a
+/// function it lives in a local; a sub-dispatcher's epilogue writes it here
+/// and the next one's prologue picks it up, which is the same flush-and-reload
+/// every other piece of stay state does at an exit (JD17). The selector clears
+/// the whole field when the host enters, so a stale bit from the last exit
+/// cannot be read as this stay's.
+pub const FLAG_PENDING: i32 = 4;
 
 // ---- the permission table -------------------------------------------------
 
