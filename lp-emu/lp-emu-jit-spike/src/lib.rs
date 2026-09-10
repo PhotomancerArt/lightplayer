@@ -493,6 +493,30 @@ impl Jit {
                 bytes: at.wrapping_sub(pc),
             });
         }
+        // spike: `LP_EMU_JIT_PAD=<n>` appends n unreachable copies of the
+        // region's blocks at fake pcs, purely to grow the dispatcher's
+        // `br_table` and its block nesting. The real blocks keep their indices,
+        // so the run stays byte-identical — which is exactly what makes this a
+        // clean measurement of how the dispatcher scales towards whole-image
+        // size (tens of thousands of entry points) in each engine.
+        let pad: usize = std::env::var("LP_EMU_JIT_PAD")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        if pad > 0 && !blocks.is_empty() {
+            let real = blocks.len();
+            let mut fake_pc = 0x3000_0000u32;
+            for i in 0..pad {
+                let src = &blocks[i % real];
+                blocks.push(BlockCode {
+                    pc: fake_pc,
+                    insts: src.insts.iter().map(|&(_, d)| (fake_pc, d)).collect(),
+                    end: BlockEnd::Undecodable(fake_pc),
+                    bytes: src.bytes,
+                });
+                fake_pc = fake_pc.wrapping_add(0x40);
+            }
+        }
         let index = blocks.iter().enumerate().map(|(i, b)| (b.pc, i)).collect();
         RegionCode {
             blocks,
@@ -536,6 +560,10 @@ impl Jit {
         let mut entry_index = HashMap::new();
         let mut instructions = 0;
         for (i, b) in code.blocks.iter().enumerate() {
+            if b.pc < GUEST_BASE {
+                // A `LP_EMU_JIT_PAD` filler block: unreachable, no guest bytes.
+                continue;
+            }
             let off = b.pc.wrapping_sub(GUEST_BASE) as usize;
             // At least one word, so a block that was unreadable when the region
             // was translated (code the guest writes later) is noticed when it appears.

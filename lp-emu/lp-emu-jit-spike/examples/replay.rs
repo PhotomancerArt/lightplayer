@@ -29,7 +29,7 @@ fn i64le(b: &[u8], at: usize) -> i64 {
 fn main() {
     let dir = std::env::args().nth(1).unwrap_or_else(|| "target/emu-spike/rec-rk".into());
     let dir = std::path::PathBuf::from(dir);
-    let wasm = std::fs::read(dir.join("region.wasm")).expect("region.wasm");
+    let wasm = std::fs::read(std::env::args().nth(2).unwrap_or_else(|| dir.join("region.wasm").display().to_string())).expect("region.wasm");
     let snap = std::fs::read(dir.join("mem.bin")).expect("mem.bin");
     let trace = std::fs::read(dir.join("trace.bin")).expect("trace.bin");
     let mmio = std::fs::read(dir.join("mmio.bin")).expect("mmio.bin");
