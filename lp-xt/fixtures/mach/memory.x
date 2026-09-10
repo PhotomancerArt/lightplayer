@@ -11,7 +11,8 @@
  *   RODATA       (0x40390000)           0x3FCA0000..0x3FCA4000
  *   RWTEXT       0x40394000..0x40398000 0x3FCA4000..0x3FCA8000
  *   RWDATA       (0x40398000)           0x3FCA8000..0x3FCAC000
- *   stack        —                      0x3FCAC000..0x3FCB0000
+ *   stack        —                      0x3FCAC000..0x3FCAF000 (grows down)
+ *   phantom      —                      0x3FCAF000..0x3FCAF080
  *
  * Two constraints pin these numbers rather than taste:
  *
@@ -43,6 +44,41 @@ MEMORY
 }
 
 /* Where `Reset` puts SP. 16-byte aligned (the windowed ABI's stack alignment,
- * which `lpc_shared::backtrace::is_valid_xt_stack` enforces) and the top of the
- * modeled region, so it grows down into 16 KiB of its own. */
-_stack_start_cpu0 = 0x3FCB0000;
+ * which `lpc_shared::backtrace::is_valid_xt_stack` enforces), with 12 KiB of
+ * its own below it before `.bss`. */
+_stack_start_cpu0 = 0x3FCAF000;
+
+/* The frame that called `Reset` — the one the bootloader is standing in.
+ *
+ * `XtHart::new` leaves `WindowStart = 1`: **frame 0 is resident**. `PS_BOOT`
+ * carries `CALLINC = 2` (the bootloader reaches the app entry through a
+ * `callx8`), so `Reset`'s `entry a1, 0x10` creates frame 2 and leaves frame 0
+ * resident with whatever `a1` it had. On silicon that is the bootloader's own
+ * stack pointer. On a **direct load** it is zero, and the first thing that
+ * spills every live window — `save_context`'s `SPILL_REGISTERS`, which runs on
+ * every exception — takes `_WindowOverflow8` for frame 0 and executes
+ *
+ *     l32e a0, a1, -12     // a0 <- the caller's SP, out of THIS frame's save area
+ *
+ * against `a1 = 0`, i.e. `0xFFFFFFF4`. A load/store error raised inside a
+ * window handler (`PS.EXCM = 1`) is an immediate DOUBLE EXCEPTION, and the run
+ * never comes back. That is not hypothetical: it is what every fixture with an
+ * exception in it did before these two symbols existed — one entry to
+ * `VECBASE + 0x080`, then 1.6 million to `VECBASE + 0x3C0`.
+ *
+ * So the boot frame gets a stack, in two halves:
+ *
+ *  - the **host runner** seeds `a1 = _boot_frame_sp` before the first
+ *    instruction, exactly as it seeds `PS`. A machine that seeds the
+ *    bootloader's PS and not the bootloader's stack pointer has only half of
+ *    "as the bootloader left it" (a finding for M3, which owns the real
+ *    machine's seeding);
+ *  - `mach::__pre_init` seeds `[_boot_frame_sp - 16 .. _boot_frame_sp)` with
+ *    `{0, _boot_frame_caller_sp, 0, 0}` — a zero return address, which is the
+ *    backtrace chain's documented terminator, and one more stack pointer so
+ *    the `s32e a4..a7, a0, -32..-20` that follows the `l32e` lands somewhere
+ *    legal.
+ *
+ * Both live in the 4 KiB above the stack, which nothing else claims. */
+_boot_frame_sp = 0x3FCAF040;
+_boot_frame_caller_sp = 0x3FCAF080;

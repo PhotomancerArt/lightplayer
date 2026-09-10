@@ -23,3 +23,10 @@ description = "Bare-metal Xtensa fixtures for lp-xt-emu's privileged hart (xtens
 # dependency inside the fence, which is exactly why the fixtures live here and
 # the host tests read only ELF bytes.
 xtensa-lx-rt = "0.22"
+# Fixture (a) takes its backtrace with the **shipping** crash-report walker,
+# not a reimplementation of it: `force_window_spill` + the base save-area chain
+# walk are the claim about the hart's window exceptions that this milestone is
+# about, and a copy of them here would only test the copy. `default-features =
+# false` drops its `std`; the ESP32-S3 window set is the default and matches
+# `memory.x`'s layout.
+lpc-shared = { path = "../../../lp-core/lpc-shared", default-features = false }

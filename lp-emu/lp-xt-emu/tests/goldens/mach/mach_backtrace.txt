@@ -1,0 +1,32 @@
+fixture: mach_backtrace
+vectors entered: 0x080 x38, 0x000 x1, 0x0c0 x37
+chain depth: 25
+frames reported: 27
+distinct PCs: 27
+frame[00]: bt_f25
+frame[01]: bt_f24
+frame[02]: bt_f23
+frame[03]: bt_f22
+frame[04]: bt_f21
+frame[05]: bt_f20
+frame[06]: bt_f19
+frame[07]: bt_f18
+frame[08]: bt_f17
+frame[09]: bt_f16
+frame[10]: bt_f15
+frame[11]: bt_f14
+frame[12]: bt_f13
+frame[13]: bt_f12
+frame[14]: bt_f11
+frame[15]: bt_f10
+frame[16]: bt_f09
+frame[17]: bt_f08
+frame[18]: bt_f07
+frame[19]: bt_f06
+frame[20]: bt_f05
+frame[21]: bt_f04
+frame[22]: bt_f03
+frame[23]: bt_f02
+frame[24]: bt_f01
+frame[25]: main
+frame[26]: Reset

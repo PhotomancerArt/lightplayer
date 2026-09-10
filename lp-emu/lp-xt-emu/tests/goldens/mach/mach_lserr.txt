@@ -1,0 +1,7 @@
+fixture: mach_lserr
+vectors entered: 0x340 x1, 0x080 x2, 0x000 x1, 0x0c0 x1
+handler runs: 1
+exccause: 3
+excvaddr == faulting address: true
+faulting address: 0x60000000
+epc1 in: fault_load

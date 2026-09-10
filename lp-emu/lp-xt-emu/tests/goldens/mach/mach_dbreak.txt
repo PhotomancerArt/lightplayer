@@ -1,0 +1,9 @@
+fixture: mach_dbreak
+vectors entered: 0x280 x1, 0x080 x2, 0x000 x1, 0x0c0 x1
+handler runs: 1
+debugcause: 0x00000004
+dbreak slot: 0
+guarded word before store: 0xfeedface
+guarded word seen by handler: 0xfeedface
+store wanted to write: 0x0bad0bad
+guarded word at end: 0x0bad0bad

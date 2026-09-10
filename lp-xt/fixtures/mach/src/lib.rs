@@ -94,3 +94,151 @@ fn stamp(magic: u32) -> ! {
 fn panicked(_info: &core::panic::PanicInfo) -> ! {
     stamp(MAGIC_PANIC)
 }
+
+unsafe extern "C" {
+    /// `_stack_start_cpu0` from `memory.x`. An absolute linker symbol: its
+    /// *address* is the value.
+    static _stack_start_cpu0: u32;
+    /// `_boot_frame_sp` from `memory.x` — the stack pointer of the frame that
+    /// "called" `Reset`. The host runner seeds `a1` with it.
+    static _boot_frame_sp: u32;
+    /// `_boot_frame_caller_sp` from `memory.x`.
+    static _boot_frame_caller_sp: u32;
+}
+
+/// Seed the stack frame the second-stage bootloader would have left below
+/// `Reset`.
+///
+/// `xtensa-lx-rt` PROVIDEs `__pre_init = no_init_hook` and calls it from
+/// `Reset` as the first thing after the stack pointer is set; defining it here
+/// takes over.
+///
+/// **Why it has to exist** is `memory.x`'s `_boot_frame_sp` comment in full;
+/// the short version is that `XtHart::new` leaves frame 0 resident, `PS_BOOT`
+/// makes `Reset` frame 2, and the first `SPILL_REGISTERS` therefore takes
+/// `_WindowOverflow8` for frame 0 — whose `l32e a0, a1, -12` needs a stack
+/// under it, and whose `s32e a4, a0, -32` needs one under *that*. Without both,
+/// a load/store error inside a window handler becomes a double exception and
+/// the run never returns.
+///
+/// This runs before `.bss` is zeroed, which is fine: it writes stack, not
+/// statics.
+#[unsafe(no_mangle)]
+pub extern "C" fn __pre_init() {
+    let boot_sp = (&raw const _boot_frame_sp) as u32;
+    let boot_caller_sp = (&raw const _boot_frame_caller_sp) as u32;
+    let reset_sp = (&raw const _stack_start_cpu0) as u32;
+    // SAFETY: both save areas are in the reserved 4 KiB above the stack, inside
+    // the one modeled region, and nothing else in the image writes them.
+    unsafe {
+        // The boot frame's own base save area: what its caller's spill would
+        // have left. `a0 = 0` is the backtrace chain's terminator.
+        ((boot_sp - 16) as *mut u32).write_volatile(0);
+        ((boot_sp - 12) as *mut u32).write_volatile(boot_caller_sp);
+        ((boot_sp - 8) as *mut u32).write_volatile(0);
+        ((boot_sp - 4) as *mut u32).write_volatile(0);
+        // `Reset`'s base save area. The boot frame's own spill writes exactly
+        // these two values into it; seeding them here makes the chain walk read
+        // the same thing whether or not that spill has happened yet.
+        ((reset_sp - 16) as *mut u32).write_volatile(0);
+        ((reset_sp - 12) as *mut u32).write_volatile(boot_sp);
+        ((reset_sp - 8) as *mut u32).write_volatile(0);
+        ((reset_sp - 4) as *mut u32).write_volatile(0);
+    }
+}
+
+/// A global allocator that never allocates.
+///
+/// `lpc-shared` (fixture (a)'s backtrace walker) pulls `alloc` into the link
+/// through its own dependency tree, so the image needs a `#[global_allocator]`
+/// to build. It does not need one to *run*: nothing on a fixture's path
+/// allocates, and if something ever starts to, a null return becomes
+/// `handle_alloc_error` -> panic -> [`MAGIC_PANIC`] in slot 0, which the host
+/// test reports by name. A bump allocator here would instead let an accidental
+/// allocation succeed quietly and change what the fixture measures.
+struct NeverAlloc;
+
+// SAFETY: returning null is the documented "allocation failed" answer, and
+// `dealloc` is unreachable because nothing is ever handed out.
+unsafe impl core::alloc::GlobalAlloc for NeverAlloc {
+    unsafe fn alloc(&self, _layout: core::alloc::Layout) -> *mut u8 {
+        core::ptr::null_mut()
+    }
+
+    unsafe fn dealloc(&self, _ptr: *mut u8, _layout: core::alloc::Layout) {
+        unreachable!("a mach fixture allocated and then freed")
+    }
+}
+
+#[global_allocator]
+static ALLOCATOR: NeverAlloc = NeverAlloc;
+
+/// Special-register access the fixtures need, spelled once.
+///
+/// Every one of these is a single instruction with no memory effect; they are
+/// `#[inline(always)]` so a fixture's own function extents stay meaningful when
+/// a captured PC is attributed to a symbol.
+pub mod sr {
+    macro_rules! reader {
+        ($(#[$m:meta])* $name:ident, $insn:literal) => {
+            $(#[$m])*
+            #[inline(always)]
+            #[must_use]
+            pub fn $name() -> u32 {
+                let v: u32;
+                // SAFETY: a single `rsr`, no memory effect.
+                unsafe { core::arch::asm!($insn, v = out(reg) v, options(nomem, nostack)) };
+                v
+            }
+        };
+    }
+    macro_rules! writer {
+        ($(#[$m:meta])* $name:ident, $insn:literal) => {
+            $(#[$m])*
+            #[inline(always)]
+            pub fn $name(value: u32) {
+                // SAFETY: a single `wsr`. The caller owns the consequences —
+                // `intset` in particular raises an interrupt at the next
+                // instruction (the hart's poll point (b)).
+                unsafe { core::arch::asm!($insn, v = in(reg) value, options(nostack)) };
+            }
+        };
+    }
+
+    reader!(/// `PS`.
+        ps, "rsr.ps {v}");
+    reader!(/// `EPC3`, the PC a level-3 interrupt preempted.
+        epc3, "rsr.epc3 {v}");
+    reader!(/// `EPS3`, the PS a level-3 interrupt preempted.
+        eps3, "rsr.eps3 {v}");
+    reader!(/// `DEBUGCAUSE` (RM §4.7.6.2, Table 4-123).
+        debugcause, "rsr.debugcause {v}");
+    reader!(/// `INTERRUPT` (SR 226): the lines pending right now.
+        interrupt, "rsr.interrupt {v}");
+
+    writer!(/// `INTENABLE`. `Reset` leaves this at 0.
+        set_intenable, "wsr.intenable {v}");
+    writer!(/// `INTSET`: raise a software interrupt. Only software lines
+        /// respond (RM Table 5-170).
+        set_intset, "wsr.intset {v}");
+    writer!(/// `INTCLEAR`: drop an edge or software line.
+        set_intclear, "wsr.intclear {v}");
+    writer!(/// `DBREAKA0`, the watched address.
+        set_dbreaka0, "wsr.dbreaka0 {v}");
+    writer!(/// `DBREAKC0`: bit 31 = break on stores, bit 30 = on loads,
+        /// bits 5:0 = the address mask (`111111` = one byte).
+        set_dbreakc0, "wsr.dbreakc0 {v}");
+}
+
+/// The length in bytes of the instruction whose first byte is `b0`.
+///
+/// The Density Option's rule (ISA RM §5, the instruction-format tables): `op0`
+/// — the low nibble of the first byte — selects the format, and `op0 >= 8` is a
+/// 16-bit (`*.n`) instruction. A handler that wants to *skip* the instruction
+/// it faulted on needs this, and needs it from the encoding rather than from
+/// the mnemonic it wrote: the assembler narrows `l32i` to `l32i.n` on its own,
+/// so a hard-coded `+3` silently lands mid-instruction.
+#[must_use]
+pub const fn inst_len(b0: u8) -> u32 {
+    if b0 & 0x0F >= 0x08 { 2 } else { 3 }
+}
