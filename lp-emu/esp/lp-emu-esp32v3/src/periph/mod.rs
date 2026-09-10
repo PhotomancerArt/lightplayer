@@ -47,6 +47,11 @@ pub fn boot_set(reset_cause: ResetCause) -> Vec<(u32, u32, BoxedPeripheral)> {
             accept::RTC_CNTL_LEN,
             Box::new(accept::rtc_cntl(reset_cause)),
         ),
+        (
+            base::APB_CTRL,
+            accept::APB_CTRL_LEN,
+            Box::new(accept::apb_ctrl()),
+        ),
         (base::EFUSE, accept::EFUSE_LEN, Box::new(accept::efuse())),
     ]
 }

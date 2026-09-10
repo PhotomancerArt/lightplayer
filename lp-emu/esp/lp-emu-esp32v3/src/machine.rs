@@ -106,6 +106,8 @@ pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     // Direct load, stop 2: the ROM's `rtc_get_reset_reason` reads
     // `reset_state` for `esp_hal::rtc_cntl::reset_reason`.
     "RTC_CNTL",
+    // Direct load, stop 3: `Clocks::init` reads `APB_CTRL.sysclk_conf`.
+    "APB_CTRL",
     // ROM-up, stop 1: `_ResetHandler_efuse_check_patch` reads its own
     // fuses seven instructions after the reset vector.
     "EFUSE",

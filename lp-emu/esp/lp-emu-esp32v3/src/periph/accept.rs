@@ -108,6 +108,28 @@ pub fn rtc_cntl(cause: crate::loader::ResetCause) -> RegFile {
         .with_pac_grades()
 }
 
+/// `APB_CTRL`'s aperture, tight: the generated table runs to `+0x7c`
+/// (`date`).
+pub const APB_CTRL_LEN: u32 = 0x80;
+
+/// `APB_CTRL` — the phase file's first-named accept candidate, and the
+/// third strict stop of the direct load, 109,663 cycles in:
+/// `fw_esp32v3::boot_firmware+0x29a` (the inlined `esp_hal::init` →
+/// `Clocks::init`) reads `sysclk_conf` at `+0x00`, whose `pre_div_cnt`
+/// field is the APB pre-divider `esp-hal`'s clock tree reads and then
+/// re-writes (`soc/esp32/clocks.rs:435-437`, `modify(|_, w|
+/// w.pre_div_cnt().bits(…))`); the four `*_tick_conf` registers after it are
+/// written outright (`:479-529`). Nothing spins on this block and nothing
+/// in the shipped image reads a bit back that hardware would have changed,
+/// so accept-and-remember with the PAC's resets (`sysclk_conf` =
+/// `0x0000_2000`, `xtal_tick_conf` = `0x27`, …) is the whole model. P5's
+/// accept list.
+pub fn apb_ctrl() -> RegFile {
+    RegFile::new("APB_CTRL", APB_CTRL_LEN)
+        .with_names(regs::APB_CTRL)
+        .with_pac_grades()
+}
+
 /// `EFUSE`'s aperture: the generated table runs to `+0x1fc` (`date`).
 pub const EFUSE_LEN: u32 = 0x200;
 
@@ -145,6 +167,7 @@ mod tests {
         vec![
             (dport(), regs::DPORT),
             (rtc_cntl(ResetCause::PowerOn), regs::RTC_CNTL),
+            (apb_ctrl(), regs::APB_CTRL),
             (efuse(), regs::EFUSE),
         ]
     }
