@@ -649,11 +649,19 @@ fn strict_stops_somewhere_honest_from_the_reset_vector() {
 ///
 /// `crate::periph::efuse` makes the read command a completion, so the check
 /// passes, the three reloads compare equal, and the ROM walks on into
-/// `main` — where it stops on the **next** unmodelled block: `uartAttach`
+/// `main`. P5 left it stopped at the **next** unmodelled block: `uartAttach`
 /// (`0x4000_9013`) writing `UART1 +0x10`, which the P3 ledger's §4.3 named
-/// in advance and which P6 owns. This test holds that reading.
+/// in advance.
+///
+/// **P6 modelled both UARTs, and the ROM walked past `uartAttach` and
+/// `Uart_Init`.** Its next strict stop is a block the P3 ledger did *not*
+/// predict — §4.3 expected `GPIO.strap` or `spi_flash_attach` next — and
+/// that is the reading this test now holds: the ROM's `gpio_pad_unhold`
+/// reads **`RTC_IO +0x74` (`dig_pad_hold`)** at `0x4000_a67d`, cycle 7,430.
+/// `RTC_IO` is on P5's "not reached by P3 and still unmapped" list; it is
+/// reached now, and it is P7's or P8's to answer, not P6's.
 #[test]
-fn rom_up_passes_the_efuse_check_and_stands_at_uart1_until_p6() {
+fn rom_up_walks_past_uart_attach_and_stands_at_rtc_io() {
     let mut machine = Esp32V3Builder::new()
         .boot_mode(BootMode::RomUp)
         .strict(true)
@@ -661,19 +669,24 @@ fn rom_up_passes_the_efuse_check_and_stands_at_uart1_until_p6() {
         .expect("builds");
     let outcome = machine.run_until(&StopCondition::after_micros(20_000));
     let Outcome::StrictBus { violation } = outcome else {
-        panic!("the ROM-up path stops on UART1, not on {outcome:?}");
+        panic!("the ROM-up path stops on RTC_IO, not on {outcome:?}");
     };
-    let sym = machine.symbolize(violation.pc).unwrap_or_default();
-    assert!(
-        sym.starts_with("uartAttach"),
-        "the stop is in the ROM's uartAttach, got pc={:#010x} ({sym})",
-        violation.pc
+    assert_eq!(violation.pc, 0x4000_a67d);
+    assert_eq!(
+        violation.address,
+        memmap::periph::RTC_IO + 0x74,
+        "RTC_IO.dig_pad_hold, read by the ROM's own pad-unhold routine"
     );
-    assert_eq!(violation.pc, 0x4000_9013);
-    assert_eq!(violation.address, memmap::periph::UART1 + 0x10);
+    assert_eq!(violation.cycle, 7_430);
     assert!(
         violation.in_mmio_window,
         "an unmodelled block, not a wild pointer"
+    );
+    // And `uartAttach`'s two writes are behind it: both UARTs took them.
+    assert_eq!(
+        machine.peek_word(memmap::periph::UART1 + 0x10),
+        Some(0),
+        "UART1.int_clr is write-only and reads back zero"
     );
 
     // The eFuse check is behind it: the read command self-cleared and the
@@ -707,7 +720,7 @@ fn the_efuse_checks_accumulator_lands_on_the_roms_own_constant() {
         .expect("builds");
     // `_ResetHandler_efuse_check_patch` seeds a13 with 0xee101017 and
     // requires 0xee10101a after three calls (`4000fdef`, `4000fdfe`); the
-    // difference is three ones. Reaching `uartAttach` at all is the proof —
+    // difference is three ones. Reaching `main` at all is the proof —
     // a wrong first read sends the ROM to `_rtc_trigger_sw_system_reset`
     // (`0x4000_FDC7`), which writes RTC_CNTL +0x00 and then `ill.n`.
     let outcome = machine.run_until(&StopCondition::after_micros(20_000));

@@ -33,6 +33,27 @@ pub mod i2c_ana_mst;
 pub mod rtc_cntl;
 pub mod timg;
 
+/// `UART0` and `UART1` were accept blocks in P3; **P6 replaced them with the
+/// view** ([`super::uart`]).
+///
+/// The finding they were built to expose is worth keeping where the block
+/// used to be. The eighth strict stop of the direct load, 3,564,269 cycles
+/// in, was `esp_hal::soc::…::clocks::UartInstance::configure_function_clock
+/// +0x98` reading `conf0` (`+0x20`) — the first touch of
+/// `Uart::new(peripherals.UART0, Config::default().with_baudrate(921_600))`
+/// in `board/esp32v3/init.rs`. Everything the boot then printed went into a
+/// register that remembers only the last byte: `status.txfifo_cnt` read 0,
+/// so neither the mask ROM's `uart_tx_one_char` (which spins while
+/// `status & 0x0080_0000`) nor esp-hal's `write` ever waited, and 543 bytes
+/// of `[INIT]` chain reached the end of the boot without one of them leaving
+/// the chip. **A hello that comes out of an accept block is not a hello**,
+/// which is the whole reason P6 exists.
+///
+/// The aperture the view keeps ([`uart::UART_LEN`]): the generated table
+/// runs to `+0x7c` (`id`).
+pub mod uart;
+
+use lp_emu_esp_common::StreamId;
 use lp_emu_esp_common::periph::BoxedPeripheral;
 
 use crate::cache::CacheHandle;
@@ -85,13 +106,16 @@ pub const WDT_WKEY: u32 = 0x50D8_3AA1;
 /// `stall` is the handle RTC_CNTL publishes its half of the CPU stall key
 /// through, which the machine reads and to which P4's DPORT view adds its
 /// third input; `cache` and `appcpu` are the two states the machine shares
-/// with DPORT's view and with the flash MMU tables (P4).
+/// with DPORT's view and with the flash MMU tables (P4); `uart0_stream` is
+/// the host byte stream UART0's shifter writes to and polls (P6) — `None`
+/// for a machine with no console.
 pub fn boot_set(
     reset_cause: ResetCause,
     identity: EfuseIdentity,
     stall: rtc_cntl::StallKey,
     cache: CacheHandle,
     appcpu: dport::AppCoreHandle,
+    uart0_stream: Option<StreamId>,
 ) -> Vec<(u32, u32, BoxedPeripheral)> {
     vec![
         (
@@ -117,7 +141,11 @@ pub fn boot_set(
         ),
         (base::TIMG1, timg::TIMG_LEN, Box::new(timg::Timg::timg1())),
         (base::GPIO, accept::GPIO_LEN, Box::new(accept::gpio())),
-        (base::UART0, accept::UART0_LEN, Box::new(accept::uart0())),
+        (
+            base::UART0,
+            uart::UART_LEN,
+            Box::new(uart::Uart::uart0(uart0_stream)),
+        ),
         (base::IO_MUX, accept::IO_MUX_LEN, Box::new(accept::io_mux())),
         (base::SPI1, accept::SPI_LEN, Box::new(accept::spi("SPI1"))),
         (base::SPI0, accept::SPI_LEN, Box::new(accept::spi("SPI0"))),
@@ -125,6 +153,15 @@ pub fn boot_set(
             base::EFUSE,
             efuse::EFUSE_LEN,
             Box::new(efuse::Efuse::new(identity)),
+        ),
+        // ROM-up, in `main`: `uartAttach` (`0x4000_9013`) touches
+        // `UART1 +0x10` as well as UART0's, at cycle 30,992 — before
+        // `mmu_init` below. The application never opens it, so it has no
+        // host stream and its bytes go nowhere. P6.
+        (
+            base::UART1,
+            uart::UART_LEN,
+            Box::new(uart::Uart::uart1(None)),
         ),
         // ROM-up, after the eFuse gate: `mmu_init` (`0x4000_95A4`) clears
         // both flash MMU tables, and `cache_flash_mmu_set` fills them. The
