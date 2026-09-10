@@ -35,6 +35,11 @@ pub struct Snapshot {
     pub regions: Vec<Vec<u8>>,
     pub periph: Vec<(String, Vec<u8>)>,
     pub scalars: BusScalars,
+    /// The interrupt matrix's routing (`CpuIntMatrix::save_state`). It lives
+    /// on the bus rather than in a peripheral — DPORT is a *view* onto it —
+    /// so a snapshot that only carried `periph` would restore a machine whose
+    /// interrupt map was reset while the guest believed it was programmed.
+    pub matrix: Vec<u8>,
     pub sched: Vec<(Cycles, u64, EventId)>,
     pub rng: u64,
     pub hook_calls: u64,

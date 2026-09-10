@@ -1090,6 +1090,113 @@ fn the_direct_load_says_hello_into_an_accept_block_and_stands_at_the_flash_until
     );
 }
 
+/// The sha256 of the 543 bytes the direct load prints, **pinned**.
+///
+/// P3 measured the chain and printed it in
+/// `docs/reports/2026-09-10-esp32v3-strict-boot-inventory.md` §1.1; P4
+/// replaced DPORT's accept block with a view, which is the largest change a
+/// phase can make to a boot without touching the firmware, so the bytes get a
+/// golden rather than a spot check. The heap line inside it is byte-identical
+/// to L0's silicon capture (`../bench.md`).
+///
+/// ⚠️ It is a property of **this image**, not of the machine: the desk board
+/// runs a different commit (ruling R7), and a firmware change moves it. A
+/// failure here means "the boot printed something else", and the diff the
+/// test prints is what says whether that is a regression or a rebuild.
+const INIT_CHAIN_SHA256: &str =
+    "ea8bae305953ef613f68a97fb84919378f33b37eb5623dcb970e8dce2b7343e7";
+
+/// How many bytes that is.
+const INIT_CHAIN_LEN: usize = 543;
+
+/// **P4's acceptance for the boot threshold.** The direct load with the DPORT
+/// view in place reaches the same place P3 left it — the flash status spin —
+/// and prints the same 543 bytes on the way.
+#[test]
+#[ignore = "needs the shipped image; run through `just test-emu-esp32v3-boot`"]
+fn the_init_chain_is_the_golden_543_bytes() {
+    use sha2::{Digest, Sha256};
+
+    let Some((_, outcome, trace)) = direct_traced(300_000) else {
+        return;
+    };
+    assert!(
+        matches!(outcome, Outcome::Deadline { .. }),
+        "no strict stop, no fault and no cache-off stop: {outcome:?}"
+    );
+    let bytes = uart0_fifo_bytes(&trace);
+    let text = String::from_utf8_lossy(&bytes).into_owned();
+    assert_eq!(bytes.len(), INIT_CHAIN_LEN, "the chain is:\n{text}");
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&bytes)),
+        INIT_CHAIN_SHA256,
+        "the chain is:\n{text}"
+    );
+}
+
+/// **P4's acceptance for the software interrupts.** `swi2` drives the io
+/// task's `InterruptExecutor` at Priority2, so it has to actually fire — the
+/// phase file's words. It does: the guest writes `cpu_intr_from_cpu2`, the
+/// matrix routes source 26, the hart takes the interrupt, and the handler
+/// reads `core_0_intr_status0` with bit 26 set and then clears the source.
+///
+/// The whole path is here rather than in a unit test because the unit test
+/// can only prove the matrix reports it; only the boot proves the hart takes
+/// it.
+#[test]
+#[ignore = "needs the shipped image; run through `just test-emu-esp32v3-boot`"]
+fn swi2_fires_and_the_handler_sees_it_in_the_status_word() {
+    let elf = match fw_esp32v3_image() {
+        Ok(p) => p,
+        Err(reason) => {
+            skip_notice("direct load, DPORT traced", &reason);
+            return;
+        }
+    };
+    let sink = SharedSink::default();
+    let mut machine = Esp32V3Builder::new()
+        .boot_mode(BootMode::Direct)
+        .app(AppSource::Path(elf))
+        .strict(true)
+        .trace(Box::new(sink.clone()), vec!["DPORT".into()])
+        .build()
+        .expect("builds");
+    machine.run_until(&StopCondition::after_micros(20_000));
+    let trace = sink.text();
+
+    let raised = trace
+        .lines()
+        .find(|l| l.contains("W4 DPORT+0x0e4 cpu_intr_from_cpu2 = 0x00000001"))
+        .expect("the io task raises swi2");
+    let seen = trace
+        .lines()
+        .find(|l| l.contains("R4 DPORT+0x0ec core_0_intr_status0 = 0x04000000"))
+        .unwrap_or_else(|| {
+            panic!(
+                "the handler must see source 26 (FROM_CPU_INTR2) in the status word; the \
+                 raise was:\n{raised}\nthe DPORT trace:\n{trace}"
+            )
+        });
+    let cleared = trace
+        .lines()
+        .find(|l| l.contains("W4 DPORT+0x0e4 cpu_intr_from_cpu2 = 0x00000000"))
+        .expect("and clears it");
+    // In that order, and the raise is what the level came from.
+    let at = |line: &str| {
+        trace
+            .lines()
+            .position(|l| l == line)
+            .expect("a line of this trace")
+    };
+    assert!(at(raised) < at(seen) && at(seen) < at(cleared));
+
+    // swi0 (esp-rtos) takes the same path, one source lower.
+    assert!(
+        trace.contains("R4 DPORT+0x0ec core_0_intr_status0 = 0x01000000"),
+        "swi0 = FROM_CPU_INTR0 = source 24"
+    );
+}
+
 /// Determinism, pinned: two runs of the same image with the same flags end
 /// at the same cycle and the same pc and wrote the same UART0 bytes.
 #[test]

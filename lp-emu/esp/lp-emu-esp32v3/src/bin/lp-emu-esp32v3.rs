@@ -10,15 +10,16 @@
 //! what a bring-up session reads.
 //!
 //! **An unrecognised flag is an error.** The doors P6/P7/P8 add (`--uart0`,
-//! `--uart0-script`, `--control`, `--flash`, `--cache-off-fetch`) are
-//! deliberately *not* stubbed with no-ops, so the phase that adds one is
-//! visible in the diff instead of silently changing what an old command line
-//! meant.
+//! `--uart0-script`, `--control`, `--flash`) are deliberately *not* stubbed
+//! with no-ops, so the phase that adds one is visible in the diff instead of
+//! silently changing what an old command line meant. `--cache-off-fetch`
+//! arrived with P4 and D4.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
+use lp_emu_esp32v3::cache::CacheOffPolicy;
 use lp_emu_esp32v3::loader::EfuseIdentity;
 use lp_emu_esp32v3::machine::{
     AppSource, BootMode, Esp32V3Builder, Machine, Outcome, RomSource, StopCondition, TimeGrade,
@@ -52,6 +53,15 @@ OPTIONS:
                             reaches its first spin on a register only a
                             model can answer — see the phase report for
                             which phase owns which
+    --cache-off-fetch stop|permit
+                            D4. `stop` (the default, and what every gate run
+                            uses) ends the run the first time a core reaches
+                            through a flash window with its own read cache
+                            disabled, naming the access and the write that
+                            disabled the cache. It claims nothing else: not
+                            the stall duration, not that silicon would crash,
+                            not that the access is a bug. `permit` does not
+                            check at all, and continues [stop]
     --time-grade t1         t1 = cycles are instructions. The only grade this
                             machine defines; see --help output for why [t1]
     --timeout <5s|1500ms|900us>
@@ -74,7 +84,7 @@ OPTIONS:
 EXIT CODES:
     0 the deadline was reached   2 the hart faulted
     3 a strict-bus refusal       4 the wall-clock net fired
-    5 a --break-at was reached
+    5 a --break-at was reached  6 a cache-off fetch (D4)
 ";
 
 fn main() -> ExitCode {
@@ -96,6 +106,7 @@ struct Args {
     rom: Option<PathBuf>,
     boot_mode: Option<BootMode>,
     strict: bool,
+    cache_off: CacheOffPolicy,
     time_grade: TimeGrade,
     timeout: Option<Duration>,
     wall_timeout: Option<Duration>,
@@ -134,6 +145,7 @@ fn run() -> Result<ExitCode, String> {
         .boot_mode(boot_mode)
         .time_grade(args.time_grade)
         .strict(args.strict)
+        .cache_off_fetch(args.cache_off)
         .seed(args.seed)
         .efuse(args.efuse);
     if let Some(path) = args.rom {
@@ -318,6 +330,9 @@ fn print_outcome(machine: &mut Machine, outcome: &Outcome) {
         Outcome::WallTimeout { .. } => {
             println!("WALL TIMEOUT cycle={cycle} ({micros} us emulated)");
         }
+        Outcome::CacheOffFetch { pc, access, .. } => {
+            println!("{}", machine.cache_off_message(cycle, *pc, access));
+        }
         Outcome::Fault { pc, fault, .. } => {
             let sym = machine.symbolize(*pc).unwrap_or_else(|| "?".into());
             println!("FAULT pc={pc:#010x} ({sym}) cycle={cycle}: {fault:?}");
@@ -374,6 +389,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--map" => args.map = true,
             "--hooks" => args.hooks = true,
             "--strict-bus" => args.strict = true,
+            "--cache-off-fetch" => args.cache_off = CacheOffPolicy::parse(&value()?)?,
             "--elf" => args.elf = Some(PathBuf::from(value()?)),
             "--rom" => args.rom = Some(PathBuf::from(value()?)),
             "--boot-mode" => {

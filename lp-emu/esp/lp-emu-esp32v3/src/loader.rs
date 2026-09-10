@@ -106,11 +106,18 @@
 //!     ([`seed_rom_flash_chip`]) in place of the bootloader's
 //!     `esp_rom_spiflash_config_param`. Default 4 MiB, the desk board (L0).
 //! 11. **The cache MMU is left in the enabled state the bootloader hands
-//!     over** — in P3, by there being no cache model at all: the flash
-//!     windows read as RAM and no `pro_cache_enable` bit exists to be off.
-//!     D4's cache-off stop (P4) is defined against exactly the state this
-//!     item names, and P4 is where `pro_cache_enable = 1` with the app's
-//!     pages mapped becomes a real seed rather than an absence.
+//!     over** — [`seed_cache_enabled`], since P4. The PRO core's
+//!     `pro_cache_enable` is **1** at the application's entry because the IDF
+//!     bootloader calls `Cache_Read_Enable` immediately before the `callx8`
+//!     that enters the app (the P3 report's §2 item 4 pins the app's entry to
+//!     `0x400796b9`, "between the `Cache_Read_Enable` call and the next
+//!     function's `entry`"), and the ROM's own `ets_unpack_flash_code` calls
+//!     it too (`400070b3: call8 <Cache_Read_Enable>`). A direct load runs
+//!     neither, so without the seed D4's stop fires eight instructions in on
+//!     the app's own `__pre_init` — which is the emulator being right about
+//!     its own state and wrong about silicon's. The **page table** behind the
+//!     window is still not programmed (item 2): the flash windows are plain
+//!     RAM holding the ELF's bytes until P7 stages an image and maps it.
 //!
 //! # The stack pointer at the application's entry, pinned
 //!
@@ -484,6 +491,23 @@ pub struct FlashChipSeed {
 /// The ROM's data must already be seeded (the caller places the ROM first);
 /// `previous` reports what was there so a test can pin that it was the
 /// ROM's own default and not a zero from an unseeded section.
+/// Item 11: put the PRO core's read cache in the state the bootloader hands
+/// over — **enabled**.
+///
+/// The one bit, and its citation, is in the module docs. `app_cache_enable`
+/// is left as reset leaves it: the bootloader calls `Cache_Read_Enable(0)`,
+/// core 1 is not running, and asserting a bit for a core nothing has started
+/// would be a claim about a state nobody was in.
+///
+/// `at` and `pc` are 0: this is the emulator seeding, not a guest store, and
+/// the cycle/pc a later stop would quote belong to whatever really turns the
+/// bit off.
+pub fn seed_cache_enabled(cache: &crate::cache::CacheHandle) {
+    let mut c = cache.lock().expect("cache poisoned");
+    let ctrl = c.ctrl(0) | crate::cache::CACHE_ENABLE;
+    c.write_ctrl(0, ctrl, 0, 0);
+}
+
 pub fn seed_rom_flash_chip(
     bus: &mut SocBus,
     rom: &ElfImage,
