@@ -71,12 +71,18 @@
 //! honest answer for a bring-up: the run continues and the log says what it
 //! did not do.
 
+use lp_emu_esp_common::engine::spi_flash::{self, FlashEngine, FlashOp, FlashOutcome, op};
 use lp_emu_esp_common::periph::RegGrade;
 use lp_emu_esp_common::regfile::{lane_of, merge_lane};
 use lp_emu_esp_common::{BusCx, Peripheral, RegFile, Width};
 
-use crate::flash::{BLOCK_LEN, FlashHandle, PAGE_LEN, SECTOR_LEN};
+use crate::flash::{BLOCK_LEN, FlashHandle, SECTOR_LEN};
 use crate::regs;
+
+/// This block's name, in its own trace lines and in the ones the engine
+/// writes on its behalf — the engine models a NOR flash and does not know
+/// which controller is driving it.
+const NAME: &str = "SPI1";
 
 // Register offsets (`regs::SPI1`, generated from the PAC).
 pub const CMD: u32 = 0x000;
@@ -137,45 +143,18 @@ const USER_MISO: u32 = 1 << 28;
 const USER_ADDR: u32 = 1 << 30;
 const USER_COMMAND: u32 = 1 << 31;
 
-// Status-register bits, as the ROM reads them.
-/// Write-in-progress. Always 0 here: operations complete inside the write.
-pub const SR_WIP: u16 = 1 << 0;
-/// Write-enable latch. `_SPI_write_enable` loops until this is set.
-pub const SR_WEL: u16 = 1 << 1;
-
-/// SPI NOR command bytes the `usr` engine may carry. Only the ones the ROM
-/// actually sends are named; anything else is refused with a trace line.
-mod op {
-    pub const READ: u8 = 0x03;
-    pub const FAST_READ: u8 = 0x0b;
-    pub const DUAL_OUT: u8 = 0x3b;
-    pub const QUAD_OUT: u8 = 0x6b;
-    pub const DUAL_IO: u8 = 0xbb;
-    pub const QUAD_IO: u8 = 0xeb;
-    pub const PAGE_PROGRAM: u8 = 0x02;
-    pub const READ_STATUS: u8 = 0x05;
-    pub const READ_STATUS_HIGH: u8 = 0x35;
-    pub const WRITE_ENABLE: u8 = 0x06;
-    pub const WRITE_DISABLE: u8 = 0x04;
-    pub const RDID: u8 = 0x9f;
-    pub const SECTOR_ERASE: u8 = 0x20;
-    pub const BLOCK_ERASE_64K: u8 = 0xd8;
-
-    /// The read commands, all of which mean "give me `miso_dlen` bits from
-    /// `addr`". The mode/dummy differences are wire-level and move no
-    /// different bytes.
-    pub const READS: &[u8] = &[READ, FAST_READ, DUAL_OUT, QUAD_OUT, DUAL_IO, QUAD_IO];
-}
+// The flash part's status-register bits, as the ROM reads them: WIP (0) and
+// WEL (1) are the SPI NOR command set's own, so they live with the chip in
+// [`lp_emu_esp_common::engine::spi_flash`] and are named here for the paths
+// that already say `spi1::SR_WEL`.
+pub use lp_emu_esp_common::engine::spi_flash::{SR_WEL, SR_WIP};
 
 /// The legacy flash controller.
 pub struct Spi1 {
     regs: RegFile,
-    flash: FlashHandle,
-    /// The flash chip's status register. Bits above WEL are whatever
-    /// `flash_wrsr` last wrote — the part remembers block-protect bits and
-    /// `_esp_rom_spiflash_unlock` writes them, so a model that dropped them
-    /// would make the unlock unobservable.
-    status: u16,
+    /// The chip on the other side, and the WIP/WEL latch a mask ROM spins
+    /// on. Everything this block's `cmd` triggers ends up here.
+    engine: FlashEngine,
     /// Every `cmd` trigger this model does not know, once each, so a boot
     /// that reaches one says so without flooding the log.
     refused: Vec<u32>,
@@ -184,7 +163,7 @@ pub struct Spi1 {
 impl core::fmt::Debug for Spi1 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Spi1")
-            .field("status", &self.status)
+            .field("status", &self.engine.status())
             .finish_non_exhaustive()
     }
 }
@@ -215,21 +194,20 @@ impl Spi1 {
             .with_grade(RD_STATUS, RegGrade::Documented);
         Self {
             regs,
-            flash,
-            status: 0,
+            engine: FlashEngine::new(flash),
             refused: Vec::new(),
         }
     }
 
     pub fn status(&self) -> u16 {
-        self.status
+        self.engine.status()
     }
 
     /// The `w0..w15` buffer as bytes, little-endian per word — the layout
     /// the ROM's copy loops assume (`SPI_read_data` reads whole words out of
     /// `0x6000_3058 + 4n`).
-    fn buffer_bytes(&self) -> [u8; 64] {
-        let mut out = [0u8; 64];
+    fn buffer_bytes(&self) -> [u8; spi_flash::BUFFER_LEN] {
+        let mut out = [0u8; spi_flash::BUFFER_LEN];
         for i in 0..W_COUNT {
             let word = self.regs.stored(W0 + 4 * i);
             out[(i * 4) as usize..(i * 4 + 4) as usize].copy_from_slice(&word.to_le_bytes());
@@ -253,28 +231,35 @@ impl Spi1 {
     /// `SPI_read_data` and `SPI_page_program` both write the plain byte
     /// address into `addr` (`sw a1,4(a5)`), and `user1`'s
     /// `usr_addr_bitlen` says how many bits go on the wire — 24 for a plain
-    /// read, 28 for QIO's four mode bits. The bits above 24 are therefore
-    /// mode, not address, and this chip is at most 16 MiB, so the address is
-    /// the low 24 bits. Anything above them is reported once rather than
-    /// silently folded.
+    /// read, 28 for QIO's four mode bits. Which of those bits are address is
+    /// the part's business, so the masking and its diagnostic are the
+    /// engine's; the *offset* of `addr` is this block's.
     fn flash_addr(&mut self, cx: &mut BusCx<'_>) -> u32 {
-        let raw = self.regs.stored(ADDR);
-        if raw & 0xff00_0000 != 0 {
-            cx.trace.note(&format!(
-                "cyc={} pc={:#010x} SPI1 addr {raw:#010x} has bits above 24; \
-                 this chip is 16 MiB at most, using {:#010x}",
-                cx.now,
-                cx.pc,
-                raw & 0x00ff_ffff
-            ));
-        }
-        raw & 0x00ff_ffff
+        FlashEngine::flash_addr(self.regs.stored(ADDR), NAME, cx)
     }
 
     /// Bytes = `dlen + 1` bits, rounded up, capped at the 64-byte buffer.
     fn dlen_bytes(&self, off: u32) -> u32 {
         let bits = (self.regs.stored(off) & 0x3ff) + 1;
-        bits.div_ceil(8).min(64)
+        bits.div_ceil(8).min(spi_flash::BUFFER_LEN as u32)
+    }
+
+    /// Hand one decoded transaction to the engine, and put back what belongs
+    /// in this block's registers.
+    ///
+    /// The engine never touches `w0..w15`: it does not know where they are.
+    /// A program is handed the bytes this block has already gathered, and a
+    /// read comes back in the same 64-byte array for this block to scatter.
+    fn run(&mut self, op: FlashOp, cx: &mut BusCx<'_>) -> FlashOutcome {
+        let mut buffer = match op {
+            FlashOp::Program { .. } => self.buffer_bytes(),
+            _ => [0u8; spi_flash::BUFFER_LEN],
+        };
+        let outcome = self.engine.execute(op, &mut buffer, NAME, cx);
+        if outcome == FlashOutcome::Buffer {
+            self.set_buffer_bytes(&buffer);
+        }
+        outcome
     }
 
     /// Run whatever `cmd` was just triggered with, and clear the bits.
@@ -290,47 +275,61 @@ impl Spi1 {
         match dedicated {
             0 => {}
             CMD_FLASH_RDID => {
-                let id = self.flash.lock().unwrap().jedec_id();
-                self.regs.poke(W0, id);
+                if let FlashOutcome::Word(id) = self.run(FlashOp::ReadId, cx) {
+                    self.regs.poke(W0, id);
+                }
             }
             CMD_FLASH_RDSR => {
-                self.flash.lock().unwrap().status_reads += 1;
-                let kept = self.regs.stored(RD_STATUS) & 0xffff_0000;
-                self.regs.poke(RD_STATUS, kept | u32::from(self.status));
+                if let FlashOutcome::Status(status) = self.run(FlashOp::ReadStatus, cx) {
+                    let kept = self.regs.stored(RD_STATUS) & 0xffff_0000;
+                    self.regs.poke(RD_STATUS, kept | u32::from(status));
+                }
             }
             CMD_FLASH_WRSR => {
                 // The value is in `rd_status`'s low half — the ROM put it
                 // there (`esp_rom_spiflash_write_status`). WIP stays 0 and
                 // the write consumes WEL, as it does on the part.
-                self.status = (self.regs.stored(RD_STATUS) & 0xffff) as u16 & !SR_WIP;
-                self.status &= !SR_WEL;
+                let value = (self.regs.stored(RD_STATUS) & 0xffff) as u16;
+                self.run(FlashOp::WriteStatus(value), cx);
             }
             CMD_FLASH_WREN => {
-                self.flash.lock().unwrap().write_enables += 1;
-                self.status |= SR_WEL;
+                self.run(FlashOp::WriteEnable, cx);
             }
-            CMD_FLASH_WRDI => self.status &= !SR_WEL,
+            CMD_FLASH_WRDI => {
+                self.run(FlashOp::WriteDisable, cx);
+            }
             CMD_FLASH_SE => {
                 let addr = self.flash_addr(cx);
-                self.erase(addr, SECTOR_LEN, cx);
+                self.run(
+                    FlashOp::Erase {
+                        addr,
+                        len: SECTOR_LEN,
+                    },
+                    cx,
+                );
             }
             CMD_FLASH_BE => {
                 let addr = self.flash_addr(cx);
-                self.erase(addr, BLOCK_LEN, cx);
+                self.run(
+                    FlashOp::Erase {
+                        addr,
+                        len: BLOCK_LEN,
+                    },
+                    cx,
+                );
             }
             CMD_FLASH_CE => {
-                self.flash.lock().unwrap().erase_chip();
-                self.status &= !SR_WEL;
+                self.run(FlashOp::EraseChip, cx);
             }
             CMD_FLASH_PP => {
                 let addr = self.flash_addr(cx);
                 let len = self.dlen_bytes(MOSI_DLEN);
-                self.program(addr, len, cx);
+                self.run(FlashOp::Program { addr, len }, cx);
             }
             CMD_FLASH_READ => {
                 let addr = self.flash_addr(cx);
                 let len = self.dlen_bytes(MISO_DLEN);
-                self.read_into_buffer(addr, len, cx);
+                self.run(FlashOp::Read { addr, len }, cx);
             }
             other => self.refuse(other, cx),
         }
@@ -367,7 +366,7 @@ impl Spi1 {
             self.phase(user, USER_ADDR, "address", command, cx);
             let addr = self.flash_addr(cx);
             let len = self.dlen_bytes(MISO_DLEN);
-            self.read_into_buffer(addr, len, cx);
+            self.run(FlashOp::Read { addr, len }, cx);
             return;
         }
         match command {
@@ -378,41 +377,61 @@ impl Spi1 {
                 self.phase(user, USER_ADDR, "address", command, cx);
                 let addr = self.flash_addr(cx);
                 let len = self.dlen_bytes(MOSI_DLEN);
-                self.program(addr, len, cx);
+                self.run(FlashOp::Program { addr, len }, cx);
             }
             op::SECTOR_ERASE => {
                 let addr = self.flash_addr(cx);
-                self.erase(addr, SECTOR_LEN, cx);
+                self.run(
+                    FlashOp::Erase {
+                        addr,
+                        len: SECTOR_LEN,
+                    },
+                    cx,
+                );
             }
             op::BLOCK_ERASE_64K => {
                 let addr = self.flash_addr(cx);
-                self.erase(addr, BLOCK_LEN, cx);
+                self.run(
+                    FlashOp::Erase {
+                        addr,
+                        len: BLOCK_LEN,
+                    },
+                    cx,
+                );
             }
             op::WRITE_ENABLE => {
-                self.flash.lock().unwrap().write_enables += 1;
-                self.status |= SR_WEL;
+                self.run(FlashOp::WriteEnable, cx);
             }
-            op::WRITE_DISABLE => self.status &= !SR_WEL,
+            op::WRITE_DISABLE => {
+                self.run(FlashOp::WriteDisable, cx);
+            }
             op::READ_STATUS => {
-                self.flash.lock().unwrap().status_reads += 1;
-                // `esp_rom_spiflash_read_user_cmd` reads the answer out of
-                // `w0`'s low byte, not out of `rd_status`.
-                self.regs.poke(W0, u32::from(self.status & 0xff));
+                if let FlashOutcome::Status(status) = self.run(FlashOp::ReadStatus, cx) {
+                    // `esp_rom_spiflash_read_user_cmd` reads the answer out
+                    // of `w0`'s low byte, not out of `rd_status`.
+                    self.regs.poke(W0, u32::from(status & 0xff));
+                }
             }
             op::READ_STATUS_HIGH => {
-                self.flash.lock().unwrap().status_reads += 1;
-                self.regs.poke(W0, u32::from(self.status >> 8));
+                if let FlashOutcome::Status(status) = self.run(FlashOp::ReadStatus, cx) {
+                    self.regs.poke(W0, u32::from(status >> 8));
+                }
             }
             op::RDID => {
-                let id = self.flash.lock().unwrap().jedec_id();
-                self.regs.poke(W0, id);
+                if let FlashOutcome::Word(id) = self.run(FlashOp::ReadId, cx) {
+                    self.regs.poke(W0, id);
+                }
             }
             other => {
-                cx.trace.note(&format!(
-                    "cyc={} pc={:#010x} SPI1 usr command {other:#04x} is not modelled; \
-                     no bytes moved and the buffer is unchanged",
-                    cx.now, cx.pc
-                ));
+                // The engine does not guess at a command byte it does not
+                // know; the refusal is this block's, and carries its name.
+                if self.run(FlashOp::Unknown(other), cx) == FlashOutcome::Unknown {
+                    cx.trace.note(&format!(
+                        "cyc={} pc={:#010x} SPI1 usr command {other:#04x} is not modelled; \
+                         no bytes moved and the buffer is unchanged",
+                        cx.now, cx.pc
+                    ));
+                }
             }
         }
     }
@@ -433,77 +452,6 @@ impl Spi1 {
         false
     }
 
-    fn read_into_buffer(&mut self, addr: u32, len: u32, cx: &mut BusCx<'_>) {
-        let bytes = {
-            let mut flash = self.flash.lock().unwrap();
-            match flash.read(addr, len) {
-                Some(slice) => slice.to_vec(),
-                None => {
-                    let chip = flash.len();
-                    drop(flash);
-                    cx.trace.note(&format!(
-                        "cyc={} pc={:#010x} SPI1 read {len} bytes at {addr:#010x} leaves the \
-                         {chip:#x}-byte chip; the buffer reads 0xff",
-                        cx.now, cx.pc
-                    ));
-                    vec![0xff; len as usize]
-                }
-            }
-        };
-        self.set_buffer_bytes(&bytes);
-    }
-
-    fn program(&mut self, addr: u32, len: u32, cx: &mut BusCx<'_>) {
-        if self.status & SR_WEL == 0 {
-            cx.trace.note(&format!(
-                "cyc={} pc={:#010x} SPI1 page program at {addr:#010x} with WEL clear; \
-                 the part would ignore it, and so does this",
-                cx.now, cx.pc
-            ));
-            return;
-        }
-        let data = self.buffer_bytes();
-        let len = len.min(64) as usize;
-        // A page program may not cross a 256-byte page: the part wraps
-        // within the page instead, which is a bug the caller wants to see.
-        if (addr % PAGE_LEN) as usize + len > PAGE_LEN as usize {
-            cx.trace.note(&format!(
-                "cyc={} pc={:#010x} SPI1 page program of {len} bytes at {addr:#010x} crosses a \
-                 256-byte page boundary; the part would wrap, this model programs straight \
-                 through",
-                cx.now, cx.pc
-            ));
-        }
-        if !self.flash.lock().unwrap().program(addr, &data[..len]) {
-            cx.trace.note(&format!(
-                "cyc={} pc={:#010x} SPI1 page program of {len} bytes at {addr:#010x} leaves \
-                 the chip; nothing was written",
-                cx.now, cx.pc
-            ));
-        }
-        self.status &= !SR_WEL;
-    }
-
-    fn erase(&mut self, addr: u32, len: u32, cx: &mut BusCx<'_>) {
-        if self.status & SR_WEL == 0 {
-            cx.trace.note(&format!(
-                "cyc={} pc={:#010x} SPI1 erase at {addr:#010x} with WEL clear; ignored",
-                cx.now, cx.pc
-            ));
-            return;
-        }
-        // The part erases the granule the address falls in.
-        let aligned = addr & !(len - 1);
-        if !self.flash.lock().unwrap().erase(aligned, len) {
-            cx.trace.note(&format!(
-                "cyc={} pc={:#010x} SPI1 erase of {len} bytes at {aligned:#010x} leaves the \
-                 chip; nothing was erased",
-                cx.now, cx.pc
-            ));
-        }
-        self.status &= !SR_WEL;
-    }
-
     fn refuse(&mut self, bits: u32, cx: &mut BusCx<'_>) {
         if self.refused.contains(&bits) {
             return;
@@ -519,7 +467,7 @@ impl Spi1 {
 
 impl Peripheral for Spi1 {
     fn name(&self) -> &'static str {
-        "SPI1"
+        NAME
     }
 
     fn read(&mut self, off: u32, width: Width, cx: &mut BusCx<'_>) -> u32 {
@@ -580,20 +528,23 @@ impl Peripheral for Spi1 {
         self.regs.reg_grade(off)
     }
 
+    /// The engine's status latch, then this block's register file — the
+    /// order the snapshot format has always had, which is why the engine
+    /// writes its half into the same buffer rather than owning the stream.
     fn save_state(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(0x400 + 2);
-        out.extend_from_slice(&self.status.to_le_bytes());
+        self.engine.save_status(&mut out);
         out.extend_from_slice(&self.regs.save_state());
         out
     }
 
     fn load_state(&mut self, bytes: &[u8]) {
-        if bytes.len() < 2 {
+        let Some((status, n)) = FlashEngine::load_status(bytes) else {
             log::warn!("SPI1::load_state: {} bytes is too short", bytes.len());
             return;
-        }
-        self.status = u16::from_le_bytes([bytes[0], bytes[1]]);
-        self.regs.load_state(&bytes[2..]);
+        };
+        self.engine.restore(status);
+        self.regs.load_state(&bytes[n..]);
     }
 }
 

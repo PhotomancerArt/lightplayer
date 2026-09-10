@@ -914,7 +914,12 @@ mod tests {
         assert_eq!(id, FlashOutcome::Word(flash.lock().unwrap().jedec_id()));
         assert_eq!(flash.lock().unwrap().status_reads, 2);
         // WIP never survives a status write: operations complete inside it.
-        engine.execute(FlashOp::WriteStatus(0xfd), &mut buffer, "FLASH", &mut sb.cx());
+        engine.execute(
+            FlashOp::WriteStatus(0xfd),
+            &mut buffer,
+            "FLASH",
+            &mut sb.cx(),
+        );
         assert_eq!(engine.status() & SR_WIP, 0);
         assert_eq!(engine.status() & SR_WEL, 0);
         assert_eq!(engine.status(), 0xfc);
