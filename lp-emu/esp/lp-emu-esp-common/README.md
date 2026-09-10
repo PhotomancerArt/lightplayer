@@ -57,6 +57,7 @@ events fire.
 | engine | why it earned one |
 |---|---|
 | `engine::uart` | Two writers share a real UART — a mask ROM's direct FIFO store and an async driver filling it and awaiting a threshold — behind a shifter draining at the programmed baud in emulated cycles, a receive timeout, threshold levels, and a `HostSinks` byte stream with a scheduled source poll. Scheduled behaviour with host-stream coupling, and on the classic ESP32 the UART is the *only* host link |
+| `engine::spi_flash` | The flash side of a controller's command word — the `usr` transaction's operations, the WIP/WEL latch a mask ROM spins on, the SPI-NOR command set — and the NOR chip itself: program is `&=` so a double-write without an erase shows up, erase is the only way back to `0xff`, the JEDEC capacity byte comes from the same length the ROM's `chip_size` word does, and `--flash` / `--flash-copy` / blank are three distinct persistence policies. Every part in this emulator boots off SPI-NOR, and a second view would otherwise re-derive file-backed persistence exactly or its transcripts would mean nothing |
 | `engine::timg` | Counters at a rate with alarms, auto-reload, the load/update pair, and the watchdog's write-protect gate. The classic ESP32 has no SYSTIMER: TIMG0 is its rtos tick, its 1 ms io pacer **and** its `Instant::now()`. Three scheduled counters feeding `IrqLines`, and the engine takes the count as a parameter so the classic's third one needs no new type |
 
 Two things a reader might look for in `engine::timg` and not find. The
@@ -67,6 +68,16 @@ before it was a saving — the classic's own view may revisit that in M3. And
 the **MWDT's expiry** is not modelled at all, here or in the view: arming
 one leaves a trace note saying so, and no stage ever fires. A watchdog that
 started firing would be a behaviour change wearing a refactor's clothes.
+
+**What stayed chip-specific, and why.** The C6's `periph/spi0.rs` did *not*
+become a view: four of its registers are live and three of those drive the
+cache MMU (`Cache_MMU_Init`, `Cache_MSPI_MMU_Set`, `MMU_Get_Page_Mode`), which
+is a chip's own address translation and not flash behaviour. Its only overlap
+with SPI1 is the self-clearing trigger mask, fifteen lines that name bit
+positions — and bit positions are exactly what an engine may not hold. The
+cache MMU, the cache-fill path and the flash window stay in the chip crate for
+the same reason. So does every trigger-bit number: they happen to agree across
+two generations of this IP, and this crate does not encode coincidences.
 
 ### The USB-Serial-JTAG finding (M2, for M6)
 
