@@ -85,6 +85,11 @@ pub const PRID_APP: u32 = 0x0000_ABAB;
 /// The number of cores the classic has. Both are constructed; M3 runs one.
 pub const CORES: usize = 2;
 
+/// How far back [`Machine::symbolize`] will look for a name when no symbol's
+/// size covers the address. Four kilobytes: further than any routine in this
+/// ROM, and short enough that a pc in a genuine hole is reported as a hole.
+pub const NEAREST_SYMBOL_WINDOW: u32 = 0x1000;
+
 /// The classic's 32 CPU interrupt lines: each one's fixed level and type.
 ///
 /// Source: `third_party/esp-hal/src/interrupt/xtensa.rs:19-98`, whose
@@ -522,7 +527,7 @@ impl Esp32V3Builder {
         // The ROM first, always (PD7), and its non-alloc data with it.
         let rom_segments = rom::load(&mut bus, &rom_image)?;
         let rom_data = rom::seed_data(&mut bus, &rom_image)?;
-        let rom_data_image = rom::seed_data_image(&rom_image, &rom_data);
+        let rom_data_image = rom::seed_data_image(&rom_data);
 
         let app_image = match &self.app {
             AppSource::None => None,
@@ -639,7 +644,11 @@ impl Machine {
         let entry = app.entry;
         let mut placed = Vec::new();
         for seg in &segments {
-            if seg.memsz == 0 {
+            // The same two skips the ROM loader makes: an empty segment, and
+            // a segment whose file bytes are the ELF's own headers
+            // (`rom::is_header_map` — the classic ROM has one, and an
+            // application linked the same way would too).
+            if seg.memsz == 0 || rom::is_header_map(&seg.data) {
                 continue;
             }
             let regions = rom::place_spanning(&mut self.bus, seg.vaddr, &seg.data, seg.memsz)?;
@@ -796,8 +805,18 @@ impl Machine {
     /// What is at `address`: the app's symbol if the app claims it, else the
     /// ROM's. Both are asked because a fault inside `memcpy` is in the ROM
     /// and a fault inside `esp_hal::init` is in the app.
+    ///
+    /// `ElfImage::symbol_at` answers only when a symbol's `[address, address
+    /// + size)` covers the query, and it stops at the *last* symbol starting
+    /// at or before it. On the classic ROM that is not enough: its table is
+    /// full of zero-sized labels sitting inside real functions, so a pc in
+    /// the middle of `gpio_register_set` gets no name at all. So there is a
+    /// second pass — **the nearest preceding symbol within
+    /// [`NEAREST_SYMBOL_WINDOW`]** — bounded so a fault in a hole is reported
+    /// as a hole rather than attributed to a function a hundred kilobytes
+    /// back.
     pub fn symbolize(&self, address: u32) -> Option<String> {
-        let from = |image: &ElfImage| {
+        let exact = |image: &ElfImage| {
             image.symbol_at(address).map(|s| {
                 if s.address == address {
                     s.name.clone()
@@ -806,7 +825,20 @@ impl Machine {
                 }
             })
         };
-        self.app.as_ref().and_then(from).or_else(|| from(&self.rom))
+        if let Some(name) = self.app.as_ref().and_then(exact).or_else(|| exact(&self.rom)) {
+            return Some(name);
+        }
+        let nearest = |image: &ElfImage| {
+            let symbols = image.symbols();
+            let i = symbols.partition_point(|s| s.address <= address).checked_sub(1)?;
+            let s = &symbols[i];
+            let back = address - s.address;
+            (back <= NEAREST_SYMBOL_WINDOW).then(|| format!("{}+0x{back:x}", s.name))
+        };
+        self.app
+            .as_ref()
+            .and_then(nearest)
+            .or_else(|| nearest(&self.rom))
     }
 
     /// The exact ELF name first, then a **unique** symbol whose name ends

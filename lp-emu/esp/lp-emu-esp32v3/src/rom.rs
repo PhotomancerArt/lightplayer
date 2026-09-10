@@ -115,6 +115,9 @@ pub struct PlacedSegment {
     /// The region names the bytes landed in, in address order. More than one
     /// when a segment spans a region boundary.
     pub regions: Vec<&'static str>,
+    /// This segment's file bytes are the **ELF's own header and program
+    /// header table**, not guest content. See [`is_header_map`].
+    pub header_mapped: bool,
 }
 
 impl PlacedSegment {
@@ -327,7 +330,24 @@ pub fn load(bus: &mut SocBus, rom: &ElfImage) -> Result<Vec<PlacedSegment>, RomE
         if seg.memsz == 0 {
             continue;
         }
-        let regions = place_spanning(bus, seg.vaddr, &seg.data, seg.memsz)?;
+        let header_mapped = is_header_map(&seg.data);
+        let (at, data, memsz) = if header_mapped {
+            // The file half is the ELF's own headers; only the zero-fill
+            // tail is guest memory. See `is_header_map`.
+            let skip = seg.filesz();
+            (
+                seg.vaddr + skip,
+                &[][..],
+                seg.memsz.saturating_sub(skip),
+            )
+        } else {
+            (seg.vaddr, &seg.data[..], seg.memsz)
+        };
+        let regions = if memsz == 0 {
+            Vec::new()
+        } else {
+            place_spanning(bus, at, data, memsz)?
+        };
         placed.push(PlacedSegment {
             vaddr: seg.vaddr,
             paddr: seg.paddr,
@@ -335,9 +355,41 @@ pub fn load(bus: &mut SocBus, rom: &ElfImage) -> Result<Vec<PlacedSegment>, RomE
             memsz: seg.memsz,
             execute: seg.execute,
             regions,
+            header_mapped,
         });
     }
     Ok(placed)
+}
+
+/// Is this segment's file content the **ELF's own header and program header
+/// table** rather than guest memory?
+///
+/// ⚠️ **A fact of this ROM that `m3/notes.md` §2 did not predict, and it is
+/// load-bearing.** The vendored `esp32_rev300_rom.elf`'s first `PT_LOAD` is
+///
+/// ```text
+/// LOAD  Offset 0x000000  VirtAddr 0x3ffadafc  FileSiz 0x00514  MemSiz 0x00534  RW
+///       .bss_hal .bss_ets .bss_cache .bss_newlib
+/// ```
+///
+/// — `p_offset = 0`, so its file bytes are the 52-byte ELF header plus the
+/// 39 × 32-byte program headers, exactly `0x514`. Every section it covers is
+/// `NOBITS`. The linker pulled the segment's `vaddr` **down** by `0x514` from
+/// where the sections actually live (`0x3FFA_E010`) so that the headers would
+/// fit in front of them.
+///
+/// So placing this segment by vaddr the ordinary way would write the ELF's
+/// own header at `0x3FFA_DAFC` — 1,284 bytes below anything the classic's map
+/// claims, which is how it was found: `RomError::Unmapped { vaddr:
+/// 0x3ffadafc, memsz: 0x534 }` on the very first build. It is not a memory
+/// map bug. Those bytes are not in the mask ROM at all.
+///
+/// The signature is the ELF magic at the start of the file bytes, which is
+/// the definition of `p_offset = 0` and is what `lp-emu-esp-common`'s
+/// [`ElfImage`] view exposes (it keeps the bytes, not the offset).
+/// `tests/boot.rs` cross-checks that the length is exactly the header table's.
+pub fn is_header_map(data: &[u8]) -> bool {
+    data.starts_with(b"\x7fELF")
 }
 
 /// How many `PT_LOAD`s an image declares with nothing in them. Reported so
@@ -385,29 +437,26 @@ pub fn seed_data(bus: &mut SocBus, rom: &ElfImage) -> Result<Vec<SeededSection>,
 /// What [`seed_data`] placed, in the shape `boot.rs` and the run report
 /// assert on.
 ///
-/// Reporting only on the classic — see the module docs. `skipped_empty`
-/// counts the non-alloc sections the ELF declares with zero bytes
-/// (`.data_hal`, `.data_ets`, `.data_uart_*` and the rest of the family):
-/// they are real sections and they carry nothing, and saying so is what
-/// keeps "eight seeded" from reading as a truncated list.
+/// Reporting only on the classic — see the module docs.
+///
+/// There is no "skipped empty" count, and the reason is worth one line: the
+/// ROM ELF really does declare a family of zero-length non-alloc sections
+/// (`.data_hal`, `.data_ets`, `.data_uart_*`, `.data_all_*` and the rest),
+/// but `lp-emu-esp-common`'s ELF view drops them before this crate sees them
+/// (`elf.rs:174`). Counting them here would mean re-parsing the ELF for a
+/// number that is a fact about the file, not about the run.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct DataImage {
     pub sections: usize,
     pub bytes: u32,
-    pub skipped_empty: usize,
 }
 
 /// Report what [`seed_data`] did. Takes the seeded list rather than the bus
 /// so it cannot disagree with it.
-pub fn seed_data_image(rom: &ElfImage, seeded: &[SeededSection]) -> DataImage {
+pub fn seed_data_image(seeded: &[SeededSection]) -> DataImage {
     DataImage {
         sections: seeded.len(),
         bytes: seeded.iter().map(|s| s.len).sum(),
-        skipped_empty: rom
-            .init_sections
-            .iter()
-            .filter(|s| s.data.is_empty())
-            .count(),
     }
 }
 
