@@ -132,6 +132,20 @@ for spec in "${images[@]}"; do
     done
 done
 
+# A filter that names nothing is a typo, not an empty sweep. Without this the
+# script reached `"${rows[@]}"` with `rows` empty and died on bash 3.2's
+# `unbound variable`, which says nothing about the cause and reads like a bug
+# in the oracle rather than in the caller's spelling.
+if (( ${#rows[@]} == 0 )); then
+    echo "oracle-sweep: LP_EMU_ORACLE_IMAGES=\"$only\" matched none of the pinned images." >&2
+    echo "  Known slugs:" >&2
+    for spec in "${images[@]}"; do
+        IFS='|' read -r slug _ <<<"$spec"
+        echo "    $slug" >&2
+    done
+    exit 2
+fi
+
 echo
 printf '%-16s %-5s %8s %9s %8s %8s\n' image grade uart stopped frames "n"
 printf '%-16s %-5s %8s %9s %8s %8s\n' ---------------- ----- -------- --------- -------- --------
