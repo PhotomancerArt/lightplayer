@@ -14,15 +14,24 @@
 //! difference is written down where the number is, not left for a reader to
 //! infer.
 //!
-//! # What is here today (M3 P1)
+//! # What is here today (M3 P2)
 //!
 //! [`memmap`], every base cited to `third_party/esp-hal/ld/esp32/memory.x`,
 //! the hardware-measured facts in `lp-xt-emu`'s board profiles, the vendored
-//! ROM ELF's own program headers or the `esp32` PAC; and [`regs`], the
-//! generated register-name tables. The bus, the hart, the loader, the
-//! peripherals and the CLI are M3 P2 onward — the crate is split this way so
-//! the numbers and the vendored binary can be reviewed and merged on their
-//! own, before anything depends on them.
+//! ROM ELF's own program headers or the `esp32` PAC; [`regs`], the generated
+//! register-name tables; [`bus_setup`], which turns the map into a
+//! [`lp_emu_esp_common::SocBus`]; [`rom`], which places the mask ROM and
+//! seeds the data no program header carries; [`machine`], the two-hart
+//! skeleton with core 1 stalled and the run loop; and [`snapshot`].
+//!
+//! **No peripheral is modelled yet.** The MMIO window is declared and empty
+//! on purpose: under `--strict-bus` the first access to any block stops the
+//! run and names it, which is the reading P3 takes, in order, before any of
+//! them is built.
 
+pub mod bus_setup;
+pub mod machine;
 pub mod memmap;
 pub mod regs;
+pub mod rom;
+pub mod snapshot;

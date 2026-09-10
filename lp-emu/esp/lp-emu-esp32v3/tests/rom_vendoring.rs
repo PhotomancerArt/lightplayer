@@ -5,34 +5,24 @@
 //! digest is re-derived in-process from the same bytes the machine will load,
 //! and compared against the checksum file the fetch script wrote. The twin of
 //! `lp-emu-esp32c6/tests/rom_vendoring.rs`.
+//!
+//! Since P2 the bytes are `lp_emu_esp32v3::rom::VENDORED_V3_ROM` — the very
+//! static the loader reads — rather than a second `include_bytes!` of the
+//! same file. A test that hashed its own copy could pass while the machine
+//! loaded a different one.
 
 use sha2::{Digest, Sha256};
+
+use lp_emu_esp32v3::rom::VENDORED_V3_ROM;
 
 const SUMS: &str = include_str!("../../roms/SHA256SUMS");
 const ELF_NAME: &str = "esp32_rev300_rom.elf";
 
-/// The vendored file's length, spelled out so a **swapped file fails to
-/// compile** rather than failing a test: `include_bytes!` produces
-/// `[u8; N]` for the real N, and coercing it into `[u8; ROM_BYTES]` is only
-/// possible when the two agree.
+/// The vendored file's length. Spelled out here as a cross-check on the
+/// `[u8; N]` the crate itself embeds: `src/rom.rs` names the same number in
+/// the type of its `include_bytes!`, so a swapped file fails to **compile**
+/// there and this assertion is the second, human-readable half of that.
 const ROM_BYTES: usize = 857_500;
-
-/// `include_bytes!` promises nothing about alignment, and `object`'s ELF
-/// reader casts into the buffer it is handed — so the bytes are wrapped in a
-/// shim with a `[u64; 0]` field, which costs nothing and raises the
-/// alignment to 8. The same shim, for the same reason, as
-/// `lp-emu-esp32c6/src/rom.rs:46-74`. P2 moves this into `src/rom.rs`, where
-/// the loader can reach it; at P1 the vendoring test is its only reader.
-#[repr(C)]
-struct Aligned<T: ?Sized> {
-    _align: [u64; 0],
-    bytes: T,
-}
-
-static ROM: &Aligned<[u8; ROM_BYTES]> = &Aligned {
-    _align: [],
-    bytes: *include_bytes!("../../roms/esp32_rev300_rom.elf"),
-};
 
 fn recorded(name: &str) -> &'static str {
     SUMS.lines()
@@ -45,7 +35,7 @@ fn recorded(name: &str) -> &'static str {
 
 #[test]
 fn the_embedded_rom_matches_the_checksum_the_fetch_script_recorded() {
-    let digest = Sha256::digest(ROM.bytes);
+    let digest = Sha256::digest(VENDORED_V3_ROM);
     assert_eq!(
         format!("{digest:x}"),
         recorded(ELF_NAME),
@@ -67,7 +57,7 @@ fn the_file_on_disk_is_the_same_file_that_is_embedded() {
     let bytes = std::fs::read(path).expect("the vendored ROM is committed");
     assert_eq!(
         bytes.len(),
-        ROM.bytes.len(),
+        VENDORED_V3_ROM.len(),
         "the file on disk and the embedded copy differ in length"
     );
     assert_eq!(format!("{:x}", Sha256::digest(&bytes)), recorded(ELF_NAME));
@@ -84,7 +74,7 @@ fn the_sha256_is_the_one_the_m0_report_independently_verified() {
         recorded(ELF_NAME),
         "920b70635440517866aab2230964a570d2cf2b676658d93c52fbac108c1cca31"
     );
-    assert_eq!(ROM.bytes.len(), ROM_BYTES);
+    assert_eq!(VENDORED_V3_ROM.len(), ROM_BYTES);
 }
 
 #[test]
@@ -93,7 +83,7 @@ fn the_vendored_file_is_the_classics_rom_and_not_another_chips() {
     // view `EM_XTENSA`. These four fields are a VENDORING check: the release
     // tarball carries seventeen chips under similar names, and a sha256 alone
     // cannot say that the file it matches is the right one of them.
-    let b = &ROM.bytes;
+    let b = VENDORED_V3_ROM;
     assert_eq!(&b[..4], b"\x7fELF", "not an ELF");
     assert_eq!(b[4], 1, "ELFCLASS32");
     assert_eq!(b[5], 1, "ELFDATA2LSB — Xtensa here is little-endian");

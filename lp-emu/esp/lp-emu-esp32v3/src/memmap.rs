@@ -138,6 +138,33 @@ pub const SRAM1_DBUS_BASE: u32 = 0x3FFE_0000;
 /// 128 KiB, up to `0x4000_0000` where the mask ROM window begins.
 pub const SRAM1_DBUS_LEN: u32 = 0x0002_0000;
 
+/// The base of the mask ROM's **PRO**-core stack: `reserved_rom_stack_pro`
+/// (`memory.x:32`), which that file says is derived from the ROM's own
+/// `_stack_sentry`. The vendored `esp32_rev300_rom.elf` agrees: its
+/// `_stack_sentry` is `0x3FFE_1320`.
+pub const ROM_PRO_STACK_BASE: u32 = 0x3FFE_1320;
+
+/// 11,264 bytes (`memory.x:32`), the same length for both ROM stacks.
+pub const ROM_STACK_LEN: u32 = 11_264;
+
+/// The **top** of the ROM's PRO-core stack — the value the ROM's own startup
+/// loads into `a1`, and the one a direct load seeds as the outermost frame's
+/// stack pointer ([`crate::machine::BootFrame`]).
+///
+/// The ROM ELF calls it `__stack` and puts it at `0x3FFE_3F20`; `memory.x:32`
+/// reaches the same address as `reserved_rom_stack_pro`'s end, and
+/// `memory.x:28` starts `reserved_rom_data_app` there. Three sources, one
+/// number.
+pub const ROM_PRO_STACK_TOP: u32 = ROM_PRO_STACK_BASE + ROM_STACK_LEN;
+
+/// The base of the mask ROM's **APP**-core stack (`memory.x:33`;
+/// `_stack_sentry_app` in the ROM ELF).
+pub const ROM_APP_STACK_BASE: u32 = 0x3FFE_5230;
+
+/// The top of the ROM's APP-core stack: `__stack_app` in the ROM ELF,
+/// `0x3FFE_7E30`, which is also `dram2_seg`'s origin (`memory.x:35`).
+pub const ROM_APP_STACK_TOP: u32 = ROM_APP_STACK_BASE + ROM_STACK_LEN;
+
 /// The SRAM1 **instruction**-bus alias, `0x400A_0000..0x400C_0000`
 /// (`lp-xt-emu/src/board.rs:178-185`, the C2b measurement).
 ///
