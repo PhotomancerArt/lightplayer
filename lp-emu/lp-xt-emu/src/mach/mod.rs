@@ -398,6 +398,13 @@ impl<B: Bus> XtHart<B> {
         &self.ints
     }
 
+    /// The interrupt unit from outside the guest — state restore, and a
+    /// machine seeding `INTENABLE`. Nothing is polled as a side effect.
+    #[inline]
+    pub fn interrupts_mut(&mut self) -> &mut InterruptUnit {
+        &mut self.ints
+    }
+
     #[inline]
     #[must_use]
     pub const fn timers(&self) -> &Timers {
@@ -486,7 +493,10 @@ impl<B: Bus> XtHart<B> {
     pub fn advance_to_cycle(&mut self, cycle: u64) {
         if cycle > self.cycle_count {
             self.cycle_count = cycle;
-            self.tick_timers();
+            // Latched, not delivered: the skip is the machine's, and so is
+            // the poll that follows it (point (d)). Delivering here would
+            // move a trap out of the slice loop and into a clock write.
+            self.latch_timers();
         }
     }
 
@@ -832,20 +842,29 @@ impl<B: Bus> XtHart<B> {
         self.poll_interrupts();
     }
 
-    /// Poll point (e): raise the line of every timer whose compare was
-    /// reached, and poll if any was.
+    /// Raise the line of every timer whose compare the cycle counter has
+    /// reached. Returns whether any did.
     #[inline]
-    fn tick_timers(&mut self) {
+    fn latch_timers(&mut self) -> bool {
         let fired = self.timers.advance(self.cycle_count);
         if fired == 0 {
-            return;
+            return false;
         }
         for i in 0..NUM_TIMERS {
             if fired & (1 << i) != 0 {
                 self.ints.timer_fired(i);
             }
         }
-        self.poll_interrupts();
+        true
+    }
+
+    /// Poll point (e): a timer match inside the slice loop is delivered in
+    /// the same instruction.
+    #[inline]
+    fn tick_timers(&mut self) {
+        if self.latch_timers() {
+            self.poll_interrupts();
+        }
     }
 
     #[inline]

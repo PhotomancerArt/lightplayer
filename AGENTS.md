@@ -236,7 +236,7 @@ runtime.
 | `fw-esp32c6`       | ESP32 firmware                         | yes (bare metal) |
 | `fw-emu`         | RISC-V emulator firmware (CI)          | yes (bare metal) |
 | `lp-riscv-emu`   | RV32 emulator (host) — in `lp-emu/`    | yes (+std feat)  |
-| `lp-xt-emu`      | Xtensa emulator (host) — in `lp-emu/`  | yes (+std feat)  |
+| `lp-xt-emu`      | Xtensa emulator + machine-mode hart (host) — in `lp-emu/` | yes (+std feat)  |
 | `lp-emu-esp32c6` | ESP32-C6 SoC emulator (host) — `lp-emu/esp/` | no        |
 
 Every emulator crate lives under **`lp-emu/`** and is **MIT**, not AGPL —

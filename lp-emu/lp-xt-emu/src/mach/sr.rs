@@ -33,15 +33,22 @@ pub const PS_WRITE_MASK: u32 = 0x0007_0FFF;
 /// (RM Table 5-139): `INTLEVEL = 15`, `EXCM = 1`, everything else 0.
 pub const PS_RESET: u32 = 0x0000_001F;
 
-/// `PS = WOE | UM`: INTLEVEL 0, EXCM 0 — what the real ROM and second-stage
-/// bootloader leave the core in when they jump to the app, and therefore what
-/// a machine seeds for a **direct load** (the Xtensa twin of the C6's
-/// `mstatus = 0x1888`). The reason is concrete: `xtensa-lx-rt`'s `Reset:`
-/// (`src/lib.rs:126-160`) begins with `entry a1, 0x10` and uses
+/// `PS = WOE | UM | CALLINC(2)`: INTLEVEL 0, EXCM 0 — what the real ROM and
+/// second-stage bootloader leave the core in when they jump to the app, and
+/// therefore what a machine seeds for a **direct load** (the Xtensa twin of
+/// the C6's `mstatus = 0x1888`). The reason is concrete: `xtensa-lx-rt`'s
+/// `Reset:` (`src/lib.rs:126-160`) begins with `entry a1, 0x10` and uses
 /// `call4`/`callx4` at once, which needs `PS.WOE = 1` and `PS.EXCM = 0`. A
 /// hart left at [`PS_RESET`] raises an illegal instruction on the app's first
 /// instruction — the twin of "the firmware idles forever in `wfi`".
-pub const PS_BOOT: u32 = PS_WOE | PS_UM;
+///
+/// `CALLINC = 2` because the bootloader reaches the entry point through a C
+/// indirect call — a `callx8` under the windowed ABI — so the app's `entry`
+/// rotates by two groups on silicon. The M1 planning note pinned
+/// `0x0004_0020` (CALLINC 0), under which that `entry` rotates by nothing;
+/// harmless for the runtime, but not what the bootloader leaves. The
+/// machine (M3) owns the final word; this constant records the reasoning.
+pub const PS_BOOT: u32 = PS_WOE | PS_UM | (2 << PS_CALLINC_SHIFT);
 
 /// Number of exception levels with their own EPC/EPS/EXCSAVE bank, indexed
 /// 1..=7 (`EPC1` is the general-exception slot; `EPS1` does not exist).
