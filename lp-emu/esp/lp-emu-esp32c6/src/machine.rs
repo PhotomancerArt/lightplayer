@@ -2143,14 +2143,36 @@ impl Esp32C6Machine {
         // Same class, one layer up: the port's open/closed state IS in the
         // snapshot (USB_DEVICE's `HostState`) and the byte client's
         // connectedness is not, and the coupling only fires on an EDGE. So a
-        // board whose power-on state was "cable in, port closed" comes back
-        // closed while this still says a client is attached, and nothing
-        // re-opens it — host bytes then stage forever and the chip is deaf to
-        // the flasher that just reset it. Re-derive from the port the restore
-        // actually produced, so the next poll sees an edge exactly when there
-        // is one and re-opens; an already-open port needs nothing and must not
-        // be told to open again.
-        self.usb_client_connected = self.usb_sj_open();
+        // restore can leave the two disagreeing with nothing to reconcile
+        // them. Re-derive this from BOTH sides, so the next poll (which the
+        // deadline above has just made due) sees an edge exactly when one is
+        // needed and none when it is not.
+        //
+        // Both terms are load-bearing, and each is a bug that was actually
+        // observed:
+        //
+        // * The PORT term. A board whose power-on state was "cable in, port
+        //   closed" comes back closed. Without it this would still say a
+        //   client is attached, no edge would fire, and nothing would re-open
+        //   the port — host bytes stage forever and the chip is deaf to the
+        //   flasher that just reset it.
+        // * The CLIENT term. `--usb-host attached` — `emu serve`'s default —
+        //   powers on with the port OPEN and no byte client at all. Without
+        //   it a reboot would claim a client that does not exist, and the
+        //   very next poll would see `connected=false` against it and issue
+        //   the matching `close` — slamming shut the port the restore had
+        //   just opened, on a board nobody had touched. That is a `reset`
+        //   through the door going quiet afterwards, and it is a race with
+        //   the guest's own boot: sometimes the hello beats the close out.
+        //
+        // Together they read: "the port is open BECAUSE a client has it
+        // open", which is the only state the coupling is entitled to assume
+        // it already applied.
+        let client = self
+            .usb_sj_tcp
+            .as_ref()
+            .is_some_and(|tcp| tcp.client_connected());
+        self.usb_client_connected = client && self.usb_sj_open();
         self.reboots += 1;
         true
     }
@@ -4145,6 +4167,39 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    /// **A reset does not invent a byte client for a port nobody opened.**
+    ///
+    /// `--usb-host attached` — `emu serve`'s default — powers on with the
+    /// port already open and no byte client at all. [`Esp32C6Machine::reboot`]
+    /// re-derives the coupling's memory of the client from the port AND the
+    /// socket; from the port alone it would come back believing in a client
+    /// that was never there, and the very next host poll would see
+    /// `connected=false` against that belief and issue the matching `close` —
+    /// slamming shut the port the restore had just opened. That is a `reset`
+    /// through `emu serve`'s door racing its own board's boot for the hello,
+    /// which is what `reset_reboots_the_board_and_the_server_stays_up` in
+    /// `lp-cli/tests/emu_serve_door.rs` caught intermittently.
+    #[test]
+    fn a_reboot_does_not_invent_a_byte_client_for_an_open_port() {
+        let mut m = Esp32C6Builder::new()
+            .usb_host(UsbHost::Attached { draining: true })
+            .reboot_on_reset(true)
+            .build()
+            .unwrap();
+
+        assert!(m.usb_sj_open(), "the power-on port is open");
+        assert!(!m.usb_client_connected, "and no byte client opened it");
+
+        assert!(m.reboot(Strap::App), "the machine reboots");
+
+        assert!(m.usb_sj_open(), "the restore puts the open port back");
+        assert!(
+            !m.usb_client_connected,
+            "…and the coupling still remembers no client, so the next poll \
+             has no falling edge to close that port with"
+        );
     }
 
     #[test]
