@@ -21,6 +21,7 @@ use lp_emu_jit::host::{
     StepOne,
 };
 use lp_emu_jit::host_wasmtime::WasmtimeCore;
+use lp_emu_jit::replay::GRANULE_BYTES;
 use lp_emu_jit::translate::{Emit, Layout, emit};
 
 // The test memory: exchange, then the permission table, then 64 KiB of guest
@@ -45,6 +46,28 @@ struct FakeHost {
     stores: Vec<(u32, u64, u32, u32, u32)>,
     /// The pcs handed to `step_one`, in order.
     escapes: Vec<u32>,
+    /// Every import call's *result*, in call order, so another engine can be
+    /// handed the same answers without reimplementing the host. See
+    /// `engine_case`.
+    trace: Vec<Call>,
+}
+
+/// One import call's answer, as the JSON a JS host replays.
+#[derive(Clone, Debug)]
+enum Call {
+    Load(i64),
+    Store(i32),
+    /// `(pc, cycle, instret, status, regs, memory granules the interpreter
+    /// changed)`.
+    ///
+    /// The granules are why a replay can be believed. An escaped instruction
+    /// runs on the *interpreter*, and a store it makes lands in memory the
+    /// replaying engine has no way to reproduce — a replay that reloaded the
+    /// initial image and ran only the module would be executing it against
+    /// memory the real run never had. That is the spike's entry-21 divergence,
+    /// and it is what `crate::replay`'s memory-granule diff exists for. This
+    /// is the same diff at the same granularity.
+    Step(u32, u64, u64, u32, [i32; 32], Vec<(u32, Vec<u8>)>),
 }
 
 // SAFETY: the pointer is into a buffer the test owns and keeps alive for
@@ -61,12 +84,16 @@ impl FakeHost {
 impl HostOps for FakeHost {
     fn mmio_load(&mut self, pc: u32, cycle: u64, address: u32, kind: u32) -> MmioLoad {
         self.loads.push((pc, cycle, address, kind));
-        MmioLoad {
+        let out = MmioLoad {
             status: MMIO_OK,
             // A recognisable value, and a different one per address so a
             // mixed-up operand shows up as a wrong number rather than a zero.
             value: 0xAB00 | (address & 0xff),
-        }
+        };
+        self.trace.push(Call::Load(
+            (i64::from(out.status) << 32) | i64::from(out.value),
+        ));
+        out
     }
 
     fn mmio_store(
@@ -78,6 +105,7 @@ impl HostOps for FakeHost {
         value: u32,
     ) -> MmioStore {
         self.stores.push((pc, cycle, address, kind, value));
+        self.trace.push(Call::Store(MMIO_OK as i32));
         MMIO_OK
     }
 
@@ -91,6 +119,7 @@ impl HostOps for FakeHost {
             let b = self.bytes();
             u32::from_le_bytes([b[at], b[at + 1], b[at + 2], b[at + 3]])
         };
+        let before = self.bytes().to_vec();
         let d = tiny_decode(word);
         let mut next = pc.wrapping_add(u32::from(d.width));
         match d.kind {
@@ -136,12 +165,32 @@ impl HostOps for FakeHost {
                 }
             }
         }
-        StepOne {
+        let out = StepOne {
             pc: next,
             cycle: cycle + d.cycles,
             instret: instret + 1,
             status: STEP_CONTINUE,
+        };
+        let after = self.bytes().to_vec();
+        let mut granules = Vec::new();
+        for (i, (a, b)) in before
+            .chunks(GRANULE_BYTES)
+            .zip(after.chunks(GRANULE_BYTES))
+            .enumerate()
+        {
+            if a != b {
+                granules.push(((i * GRANULE_BYTES) as u32, b.to_vec()));
+            }
         }
+        self.trace.push(Call::Step(
+            out.pc,
+            out.cycle,
+            out.instret,
+            out.status,
+            *regs,
+            granules,
+        ));
+        out
     }
 
     fn exchange(&mut self) -> &mut [u8] {
@@ -301,18 +350,27 @@ impl Rig {
 
     /// Emit `set` under `policy`, enter at block 0 with `regs`, and report
     /// everything that came back.
-    fn run(&mut self, set: &BlockSet, policy: Emit, regs: [i32; 32], end: u64) -> Outcome {
+    fn run_named(
+        &mut self,
+        case: &str,
+        set: &BlockSet,
+        policy: Emit,
+        regs: [i32; 32],
+        end: u64,
+    ) -> Outcome {
         let emitted = emit(set, CycleModel::Esp32C6, layout(), policy);
         for (i, r) in regs.iter().enumerate() {
             let at = (EXCHANGE_AT as u64 + EXCHANGE_REGS) as usize + 4 * i;
             self.mem[at..at + 4].copy_from_slice(&r.to_le_bytes());
         }
+        let initial = self.mem.clone();
         let base = self.mem.as_mut_ptr();
         let host = FakeHost {
             mem: base,
             loads: Vec::new(),
             stores: Vec::new(),
             escapes: Vec::new(),
+            trace: Vec::new(),
         };
         // SAFETY: `self.mem` outlives `core`, and nothing else holds a
         // reference into it while `enter` is running.
@@ -338,7 +396,7 @@ impl Rig {
                 self.mem[at + 3],
             ]);
         }
-        Outcome {
+        let outcome = Outcome {
             pc: exit.pc,
             flags: exit.flags,
             cycle: read_i64(&self.mem, EXCHANGE_CYCLE),
@@ -349,8 +407,125 @@ impl Rig {
             escapes: core.ops_mut().escapes.clone(),
             escaped_insts: emitted.escaped_insts,
             native_insts: emitted.native_insts,
+        };
+        if let Ok(dir) = std::env::var("LP_EMU_JIT_ENGINE_CASE") {
+            write_case(
+                &dir,
+                case,
+                &emitted.wasm,
+                &initial,
+                &self.mem,
+                end,
+                &core.ops_mut().trace,
+                &outcome,
+            );
         }
+        outcome
     }
+}
+
+/// The 64-bit FNV-1a of a memory image, computed the same way here and in
+/// `scripts/emu/jit-engine-check.mjs`.
+fn fnv1a(bytes: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for &b in bytes {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x100_0000_01b3);
+    }
+    h
+}
+
+/// Write one engine case: the module bytes, the memory it starts from, the
+/// answers its imports gave, and everything it produced.
+///
+/// The point is that **the same module bytes** can then be run in V8 and in
+/// JavaScriptCore against the same inputs, with no host to reimplement — the
+/// imports are replayed from the recorded answers in call order. JD19: a
+/// single-engine wasm number, or a single-engine wasm *answer*, is not a wasm
+/// answer.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a case file is exactly these eight things, and a struct to carry \
+              them between two functions in one file would name them twice"
+)]
+fn write_case(
+    dir: &str,
+    case: &str,
+    wasm: &[u8],
+    initial: &[u8],
+    final_mem: &[u8],
+    end: u64,
+    trace: &[Call],
+    outcome: &Outcome,
+) {
+    use std::io::Write as _;
+    std::fs::create_dir_all(dir).expect("the case directory");
+    std::fs::write(format!("{dir}/{case}.wasm"), wasm).expect("the module");
+    let calls: Vec<String> = trace
+        .iter()
+        .map(|c| match c {
+            Call::Load(v) => format!(r#"{{"kind":"load","ret":"{v}"}}"#),
+            Call::Store(v) => format!(r#"{{"kind":"store","ret":{v}}}"#),
+            Call::Step(pc, cycle, instret, status, regs, granules) => {
+                let regs: Vec<String> = regs.iter().map(ToString::to_string).collect();
+                let mem: Vec<String> = granules
+                    .iter()
+                    .map(|(at, bytes)| format!(r#"{{"at":{at},"b":"{}"}}"#, base64(bytes)))
+                    .collect();
+                format!(
+                    r#"{{"kind":"step","pc":{pc},"cycle":"{cycle}","instret":"{instret}","status":{status},"regs":[{}],"mem":[{}]}}"#,
+                    regs.join(","),
+                    mem.join(",")
+                )
+            }
+        })
+        .collect();
+    let regs: Vec<String> = outcome.regs.iter().map(ToString::to_string).collect();
+    let mut f = std::fs::File::create(format!("{dir}/{case}.json")).expect("the case");
+    write!(
+        f,
+        r#"{{"case":"{case}","pages":{PAGES},"exchange":{EXCHANGE_AT},"entry":0,"end":"{end}",
+"cycle":"0","instret":"0","watchLo":"0","watchHi":"0",
+"memoryFnv":"{}","initial":"{}","calls":[{}],
+"expect":{{"pc":{},"flags":{},"cycle":"{}","instret":"{}","regs":[{}],"memoryFnv":"{}"}}}}"#,
+        fnv1a(initial),
+        base64(initial),
+        calls.join(","),
+        outcome.pc,
+        outcome.flags,
+        outcome.cycle,
+        outcome.instret,
+        regs.join(","),
+        fnv1a(final_mem),
+    )
+    .expect("writing the case");
+}
+
+/// Plain base64, so the case file needs no dependency on either side.
+fn base64(bytes: &[u8]) -> String {
+    const A: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b = [
+            chunk[0],
+            chunk.get(1).copied().unwrap_or(0),
+            chunk.get(2).copied().unwrap_or(0),
+        ];
+        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        out.push(A[(n >> 18) as usize & 63] as char);
+        out.push(A[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 {
+            A[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            A[n as usize & 63] as char
+        } else {
+            '='
+        });
+    }
+    out
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -391,7 +566,13 @@ fn set_of(rig: &Rig, seed: u32) -> BlockSet {
 fn a_straight_line_block_computes_and_charges_what_the_cost_model_says() {
     let mut rig = Rig::new(&straight_line());
     let set = set_of(&rig, GUEST_BASE);
-    let out = rig.run(&set, Emit::EVERYTHING, [0; 32], u64::MAX);
+    let out = rig.run_named(
+        "straight-emitted",
+        &set,
+        Emit::EVERYTHING,
+        [0; 32],
+        u64::MAX,
+    );
 
     assert_eq!(out.regs[10], 7);
     assert_eq!(out.regs[11], 10);
@@ -412,10 +593,16 @@ fn the_all_escape_build_agrees_with_the_emitted_one_on_everything() {
     let program = straight_line();
     let mut emitted = Rig::new(&program);
     let set = set_of(&emitted, GUEST_BASE);
-    let fast = emitted.run(&set, Emit::EVERYTHING, [0; 32], u64::MAX);
+    let fast = emitted.run_named(
+        "straight-emitted",
+        &set,
+        Emit::EVERYTHING,
+        [0; 32],
+        u64::MAX,
+    );
 
     let mut escaped = Rig::new(&program);
-    let slow = escaped.run(&set, Emit::NOTHING, [0; 32], u64::MAX);
+    let slow = escaped.run_named("straight-escaped", &set, Emit::NOTHING, [0; 32], u64::MAX);
 
     assert_eq!(slow.escaped_insts, 4, "every instruction went out");
     assert_eq!(slow.native_insts, 0);
@@ -449,7 +636,7 @@ fn a_ram_store_and_load_stay_inline_and_an_off_ram_one_goes_out() {
     ];
     let mut rig = Rig::new(&program);
     let set = set_of(&rig, GUEST_BASE);
-    let out = rig.run(&set, Emit::EVERYTHING, [0; 32], u64::MAX);
+    let out = rig.run_named("memory-emitted", &set, Emit::EVERYTHING, [0; 32], u64::MAX);
 
     assert_eq!(out.regs[13], 0x123, "the load saw the store");
     assert!(out.loads.is_empty(), "plain RAM never reaches the import");
@@ -458,7 +645,7 @@ fn a_ram_store_and_load_stay_inline_and_an_off_ram_one_goes_out() {
 
     // The same program with every instruction escaped has to agree.
     let mut escaped = Rig::new(&program);
-    let slow = escaped.run(&set, Emit::NOTHING, [0; 32], u64::MAX);
+    let slow = escaped.run_named("memory-escaped", &set, Emit::NOTHING, [0; 32], u64::MAX);
     assert_eq!(out.regs, slow.regs);
     assert_eq!(out.cycle, slow.cycle);
     assert_eq!(out.instret, slow.instret);
@@ -483,7 +670,7 @@ fn an_off_ram_access_carries_the_exact_pc_and_cycle_to_the_import() {
     ];
     let mut rig = Rig::new(&program);
     let set = set_of(&rig, GUEST_BASE);
-    let out = rig.run(&set, Emit::EVERYTHING, [0; 32], u64::MAX);
+    let out = rig.run_named("mmio-emitted", &set, Emit::EVERYTHING, [0; 32], u64::MAX);
 
     let model = CycleModel::Esp32C6;
     let lui = u64::from(model.cycles_for(lp_emu_core::InstClass::Lui));
@@ -509,7 +696,7 @@ fn a_block_that_does_not_fit_the_budget_is_handed_back_untouched() {
     // One cycle of budget: the block's maximum cost cannot fit, so it must
     // report the entry pc having retired and charged nothing. The hart's
     // no-progress guard then runs it interpreted.
-    let out = rig.run(&set, Emit::EVERYTHING, [0; 32], 1);
+    let out = rig.run_named("budget", &set, Emit::EVERYTHING, [0; 32], 1);
     assert_eq!(out.pc, GUEST_BASE);
     assert_eq!(out.cycle, 0);
     assert_eq!(out.instret, 0);
@@ -530,7 +717,7 @@ fn a_backward_branch_stays_inside_the_module() {
     ];
     let mut rig = Rig::new(&program);
     let set = set_of(&rig, GUEST_BASE);
-    let out = rig.run(&set, Emit::EVERYTHING, [0; 32], u64::MAX);
+    let out = rig.run_named("loop-emitted", &set, Emit::EVERYTHING, [0; 32], u64::MAX);
     assert_eq!(out.regs[10], 0);
     // 1 `addi` to load, then three times round the loop, then the `jal`.
     assert_eq!(out.instret, 1 + 3 * 2 + 1);
@@ -539,7 +726,7 @@ fn a_backward_branch_stays_inside_the_module() {
     // And the escape-hatch build agrees, which means the "compare the pc the
     // interpreter reported against this block's static targets" path works.
     let mut escaped = Rig::new(&program);
-    let slow = escaped.run(&set, Emit::NOTHING, [0; 32], u64::MAX);
+    let slow = escaped.run_named("loop-escaped", &set, Emit::NOTHING, [0; 32], u64::MAX);
     assert_eq!(out.regs, slow.regs);
     assert_eq!(out.instret, slow.instret);
     assert_eq!(out.pc, slow.pc);
