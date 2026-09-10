@@ -2383,6 +2383,24 @@ test-emu-c6-cli:
     cargo test -p lp-cli --test validate_registry_parity
     LP_EMU_BUILD_FW=1 cargo test -p lp-cli --test emu_usb_hello -- --include-ignored
 
+# The classic ESP32 (v3) machine's own suite (plan three, M3).
+#
+# Nothing here is `#[ignore]`d and nothing here builds firmware yet: at P1 the
+# crate is a memory map, the generated register tables and a vendored ROM, and
+# all three are checked from committed bytes alone. P2 onward adds the boot
+# tests, which will be `#[ignore]`d for the same reason the C6's are — a plain
+# `cargo test --workspace` must never start a cross-target firmware build.
+test-emu-esp32v3:
+    cargo test -p lp-emu-esp32v3
+
+# Run an image on the classic ESP32 (v3) machine.
+#
+# The door gets its name at P1 so it has one name for its whole life; the
+# binary behind it arrives with P2, and until then this recipe says as much by
+# failing to find a bin target rather than by not existing.
+emu-esp32v3 elf *args:
+    cargo run -p lp-emu-esp32v3 --release -- --elf {{ elf }} {{ args }}
+
 # The translator's decoder agreement test, corpus half included (M7 JD3).
 #
 # `lp-emu-jit` decodes independently of `lp-riscv-emu`'s executors, and

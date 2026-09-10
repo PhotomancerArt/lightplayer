@@ -1,0 +1,30 @@
+[package]
+name = "lp-emu-esp32v3"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+# MIT as a unit with the rest of `lp-emu/`, NOT the workspace's AGPL.
+# See lp-emu/LICENSE-MIT and `just lint-emu-fence`.
+license = "MIT"
+description = "The classic ESP32 (v3, LX6) machine: memory map, mask-ROM loader, direct load, scheduler loop, snapshot, CLI"
+
+[lints]
+workspace = true
+
+[dependencies]
+lp-emu-core = { path = "../../lp-emu-core", features = ["std"] }
+lp-emu-esp-common = { path = "../lp-emu-esp-common" }
+# The Xtensa hart. Declared here from the crate's first commit even though P1
+# constructs none: the dependency edge is what makes P2's `machine.rs` an
+# addition rather than a manifest change nobody reviewed. `lp-xt-emu` is
+# inside the MIT fence (`lp-emu/lp-xt-emu`), so this edge costs the fence
+# nothing.
+lp-xt-emu = { path = "../../lp-xt-emu" }
+log = { workspace = true }
+
+[dev-dependencies]
+# The vendored ROM's checksum test. Reading `SHA256SUMS` and re-deriving the
+# digest in-process is what makes a swapped ROM fail the build's tests rather
+# than a boot; shelling out to `shasum` would make the assertion depend on
+# which host ran it.
+sha2 = "0.10"
