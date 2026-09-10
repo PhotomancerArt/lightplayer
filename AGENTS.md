@@ -611,6 +611,43 @@ The worked example, with every difference between an emulated trace and its
 silicon fixture named, is
 `docs/reports/2026-09-10-studio-walk-with-no-board.md`.
 
+### Running the conformance suite in Chrome or Brave
+
+`just lpa-link-browser-test` runs the Web Serial JS conformance suite in
+whatever WebDriver the runner finds; on CI that is Firefox (there is no Web
+Serial there, so the polyfill is the whole `navigator.serial` and the criteria
+are proven). Yona's rule (E1, 2026-09-10): CI's browser does not matter, **but
+the suite must be runnable locally in Chrome and Brave.** The desk's stock
+pairing is usually broken — homebrew's chromedriver drifts a major version
+behind system Chrome (150 vs 152 on 2026-09-10) — so point the runner at a
+matched driver instead of installing one system-wide:
+
+```bash
+# 1. Fetch a chromedriver that matches your Chrome (check `Google Chrome --version`).
+#    @stable also works if your Chrome is current.
+npx @puppeteer/browsers install chromedriver@152.0.7977.83 --path /tmp/cd
+
+# 2. A capabilities file, headless. LP_WEBDRIVER_JSON copies it into the
+#    runner's cwd, the ONLY place wasm-bindgen-test-runner reads webdriver.json.
+cat > /tmp/webdriver.json <<'JSON'
+{ "goog:chromeOptions": { "args": ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage"] } }
+JSON
+
+# 3. Run. CHROMEDRIVER picks Chrome over the geckodriver on PATH.
+CHROMEDRIVER=/tmp/cd/chromedriver/*/chromedriver-*/chromedriver \
+  LP_WEBDRIVER_JSON=/tmp/webdriver.json \
+  just lpa-link-browser-test
+```
+
+"It worked" looks like: `Running headless tests in Chrome`, then
+`running 15 tests`, then `test result: ok. 15 passed; 0 failed`. **Brave**
+runs on the *same* chromedriver — it is Chromium — by adding its binary to the
+capabilities file:
+`"binary": "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"`.
+Both were run this way on 2026-09-10 (15/15 each). The `LP_WEBDRIVER_JSON`
+hook lives in `scripts/wasm-serial-test-runner.sh`, whose comment is the longer
+explanation; **CI sets none of this** and uses the runner's own defaults.
+
 ## Handing off for review
 
 When stopping at a review gate — visual/feel gate, hardware walk, plan

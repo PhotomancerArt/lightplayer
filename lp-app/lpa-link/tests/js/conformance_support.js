@@ -52,6 +52,15 @@ let modules = null;
 /// imports started and never finished. Sequential imports remove the
 /// concurrency the race needs; the whole set is under 80 KB, so the cost is
 /// nothing a test suite can measure.
+///
+/// The `tiny-http` behaviour is unfixed and lives upstream in
+/// `wasm-bindgen-test-runner`; it is size-sensitive and it will bite again as
+/// the served JS grows. So: **adding a sixth module here means keeping this
+/// loader serial** — do not restore the `Promise.all`, and do not parallelise
+/// "just the new one". (Emulator plan two, DD24; the residue is recorded in
+/// `docs/debt/web-serial-js-untestable.md`'s incident log, not a new debt
+/// entry — a third-party harness behaviour with a working mitigation is below
+/// the filing bar.)
 async function load() {
   modules ??= (async () => {
     const serial = await import("/provider/browser_serial.js");

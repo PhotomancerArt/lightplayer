@@ -68,6 +68,17 @@ requires a human with a board to verify; agents cannot close the loop.
   already carried registry/controller coverage and the read-pump reopen
   is now also pinned by
   `the_read_pump_reports_a_lost_device_and_the_port_reopens`.
+- 2026-09-09 — **a residual harness flake, recorded not filed** (M3, DD24).
+  `wasm-bindgen-test-runner` serves the suite's JS from a `tiny-http` server
+  that can wedge under concurrent dynamic `import()`s as the served JS grows;
+  the driver is SIGKILLed after its timeout and the failure reads as *"Failed
+  to detect test as having been run. It might have timed out."* It is
+  size-sensitive, not code-sensitive (main's own JS padded to M3's byte length
+  hung 1/8). The fix in place: `lp-app/lpa-link/tests/js/conformance_support.js`
+  `load()` imports its five modules serially, not through `Promise.all`; a
+  sixth module means keeping it serial (the comment at `load()` says so). No
+  new debt entry — a third-party harness behaviour with a working mitigation is
+  below `README.md`'s filing bar.
 - 2026-09-09 — **the flash bridge proved out through the shim** (M5 →
   PR #653). Studio's own **Flash firmware** verb, through the frozen
   `browser_esp32_flash.js`, through esptool-js 0.6.0, wrote the packaged

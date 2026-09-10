@@ -246,7 +246,14 @@ lpa-fs-opfs-test: install-wasm32-target
 #
 # `scripts/wasm-serial-test-runner.sh` is the runner: it serves Studio's own
 # static root so `/lpa-link/*.js` resolves the way it does in a real Studio.
-# CI runs this in the path-gated `validate-browser` job.
+# CI runs this in the path-gated `validate-browser` job (in Firefox — the
+# runner's default there).
+#
+# To run it locally in Chrome or Brave (the desk's stock chromedriver usually
+# drifts a version behind system Chrome), point the runner at a matched driver
+# with `CHROMEDRIVER=… LP_WEBDRIVER_JSON=…`. The recipe, verbatim, is in
+# AGENTS.md, "Running the conformance suite in Chrome or Brave"; the
+# `LP_WEBDRIVER_JSON` hook's own comment is in `scripts/wasm-serial-test-runner.sh`.
 lpa-link-browser-test: install-wasm32-target
     #!/usr/bin/env bash
     set -euo pipefail
