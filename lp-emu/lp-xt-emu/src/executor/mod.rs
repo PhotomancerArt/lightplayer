@@ -10,6 +10,7 @@ use lp_emu_core::InstClass;
 use lp_emu_core::bus::Bus;
 use lp_xt_inst::{
     AluRrr, AtomicLsOp, FpLsiOp, FpLsxOp, FpRrOp, FpRrrOp, Inst, NullaryNarrowOp, NullaryOp,
+    WindowLsOp,
 };
 
 use crate::cpu::Cpu;
@@ -107,7 +108,16 @@ pub(crate) fn inst_class(inst: &Inst, flow: &Flow) -> InstClass {
         // user-mode runner traps on all of them; the bucket is still the
         // honest cost shape so a measured model has somewhere to land.
         Inst::AtomicLs(AtomicLsOp::L32ai, ..) => InstClass::Load,
-        Inst::Loop(..) => InstClass::System,
+        Inst::Loop(..)
+        | Inst::Rf(..)
+        | Inst::Rfi(..)
+        | Inst::Rsil(..)
+        | Inst::Waiti(..)
+        | Inst::Rotw(..)
+        | Inst::Break(..)
+        | Inst::BreakN(..) => InstClass::System,
+        Inst::WindowLs(WindowLsOp::L32e, ..) => InstClass::Load,
+        Inst::WindowLs(..) => InstClass::Store,
         Inst::AtomicLs(..) => InstClass::Store,
         Inst::BranchRr(..)
         | Inst::BranchRi(..)
@@ -394,7 +404,16 @@ impl<B: Bus> Exec<'_, B> {
             // `lp-xt-inst` decodes these (M1 P1) so the privileged hart can;
             // the user-mode runner has no state for them and says so loudly
             // rather than doing nothing. See `machine_mode_only`.
-            Inst::AtomicLs(..) | Inst::Loop(..) => return Err(machine_mode_only()),
+            Inst::AtomicLs(..)
+            | Inst::Loop(..)
+            | Inst::Rf(..)
+            | Inst::Rfi(..)
+            | Inst::Rsil(..)
+            | Inst::Waiti(..)
+            | Inst::Rotw(..)
+            | Inst::WindowLs(..)
+            | Inst::Break(..)
+            | Inst::BreakN(..) => return Err(machine_mode_only()),
         };
         debug_assert_eq!(
             class,

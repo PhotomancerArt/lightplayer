@@ -217,6 +217,25 @@ pub fn format_inst(inst: &Inst, pc: u32) -> String {
             format!("{m}\t{rs:?}")
         }
         Entry(rs, imm) => format!("entry\t{rs:?}, {imm}"),
+        Rf(op) => match op {
+            RfOp::Rfe => "rfe".to_string(),
+            RfOp::Rfde => "rfde".to_string(),
+            RfOp::Rfwo => "rfwo".to_string(),
+            RfOp::Rfwu => "rfwu".to_string(),
+        },
+        Rfi(level) => format!("rfi\t{level}"),
+        Rsil(at, level) => format!("rsil\t{at:?}, {level}"),
+        Waiti(level) => format!("waiti\t{level}"),
+        Rotw(imm) => format!("rotw\t{imm}"),
+        WindowLs(op, at, ars, off) => {
+            let m = match op {
+                WindowLsOp::L32e => "l32e",
+                WindowLsOp::S32e => "s32e",
+            };
+            format!("{m}\t{at:?}, {ars:?}, {off}")
+        }
+        Break(imms, immt) => format!("break\t{imms}, {immt}"),
+        BreakN(imms) => format!("break.n\t{imms}"),
         Nullary(op) => {
             let m = match op {
                 NullaryOp::Memw => "memw",

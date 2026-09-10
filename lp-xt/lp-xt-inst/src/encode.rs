@@ -463,6 +463,48 @@ pub fn encode(inst: &Inst) -> Vec<u8> {
             let w = (6 | (3 << 4)) | ((rs.num() as u32) << 8) | (imm12 << 12);
             emit(&mut out, w, 3);
         }
+        // --- privileged control flow and windows ---
+        Inst::Rf(op) => {
+            // ST0 r = 3, t = 0; `s` selects the variant.
+            let s = match op {
+                RfOp::Rfe => 0,
+                RfOp::Rfde => 2,
+                RfOp::Rfwo => 4,
+                RfOp::Rfwu => 5,
+            };
+            emit(&mut out, pack(0, 0, s, 3, 0, 0), 3);
+        }
+        Inst::Rfi(level) => {
+            emit(&mut out, pack(0, 1, level as u32, 3, 0, 0), 3);
+        }
+        Inst::Rsil(at, level) => {
+            emit(&mut out, pack(0, at.num() as u32, level as u32, 6, 0, 0), 3);
+        }
+        Inst::Waiti(level) => {
+            emit(&mut out, pack(0, 0, level as u32, 7, 0, 0), 3);
+        }
+        Inst::Rotw(imm) => {
+            // ST1 (op2 = 4) r = 8; the rotation is a 4-bit signed `t`.
+            emit(&mut out, pack(0, (imm as u32) & 0xf, 0, 8, 0, 4), 3);
+        }
+        Inst::WindowLs(op, at, ars, offset) => {
+            let op2 = match op {
+                WindowLsOp::L32e => 0,
+                WindowLsOp::S32e => 4,
+            };
+            let r = ((offset / 4) + 16) as u32;
+            emit(
+                &mut out,
+                pack(0, at.num() as u32, ars.num() as u32, r, 9, op2),
+                3,
+            );
+        }
+        Inst::Break(imms, immt) => {
+            emit(&mut out, pack(0, immt as u32, imms as u32, 4, 0, 0), 3);
+        }
+        Inst::BreakN(imms) => {
+            emit(&mut out, narrow(0xd, 2, imms as u32, 0xf), 2);
+        }
         Inst::Nullary(op) => {
             let w = match op {
                 // ST0 SYNC group: op0=0,op1=0,op2=0,r=2,s=0,t=..

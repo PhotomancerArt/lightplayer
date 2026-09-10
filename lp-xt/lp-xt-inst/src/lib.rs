@@ -234,6 +234,37 @@ pub enum LoopOp {
     Loopgtz,
 }
 
+/// The zero-operand exception returns (`RRR`, `op0 = 0`, `op1 = 0`, `op2 = 0`,
+/// `r = 3`, `t = 0`, sub-selected by `s`).
+///
+/// Kept out of [`NullaryOp`] deliberately: those are instructions the user-mode
+/// runner executes, these are privileged control transfers the machine-mode
+/// hart owns.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RfOp {
+    /// `rfe` — return from a level-1 exception; `s = 0`. Clears `PS.EXCM`.
+    Rfe,
+    /// `rfde` — return from a double exception; `s = 2`.
+    Rfde,
+    /// `rfwo` — return from a window **overflow** handler; `s = 4`.
+    Rfwo,
+    /// `rfwu` — return from a window **underflow** handler; `s = 5`.
+    Rfwu,
+}
+
+/// The windowed spill/reload accesses (`RRR`, `op0 = 0`, `op1 = 9`).
+///
+/// `op at, as, offset`, offset a **negative** multiple of 4 in -64..=-4 held in
+/// the `r` field as `(offset / 4) + 16`. These are the instructions the
+/// `_WindowOverflow*` / `_WindowUnderflow*` vectors are made of.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum WindowLsOp {
+    /// `l32e at, as, off` — window-reload load; `op2 = 0`.
+    L32e,
+    /// `s32e at, as, off` — window-spill store; `op2 = 4`.
+    S32e,
+}
+
 /// Zero-operand barrier / sync / nop opcodes (`RRR`, `op0 = 0`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum NullaryOp {
@@ -343,6 +374,22 @@ pub enum Inst {
     Callx(CallxOp, Reg),
     /// `entry rs, imm` (imm 0..=32760, multiple of 8)
     Entry(Reg, u32),
+    /// `rfe`/`rfde`/`rfwo`/`rfwu` — privileged exception returns.
+    Rf(RfOp),
+    /// `rfi level` (level 0..=15) — return from a level-`n` interrupt.
+    Rfi(u8),
+    /// `rsil at, level` — read PS and set `PS.INTLEVEL` to `level` (0..=15).
+    Rsil(Reg, u8),
+    /// `waiti level` (0..=15) — wait for an interrupt above `level`.
+    Waiti(u8),
+    /// `rotw imm` (imm -8..=7) — rotate the register window by `imm` groups.
+    Rotw(i8),
+    /// `break imms, immt` (both 0..=15) — raise a debug exception.
+    Break(u8, u8),
+    /// `break.n imms` (0..=15, 16-bit) — the density form.
+    BreakN(u8),
+    /// `op at, as, offset` — windowed spill/reload; offset -64..=-4, step 4.
+    WindowLs(WindowLsOp, Reg, Reg, i32),
     /// zero-operand barrier/sync/return (24-bit)
     Nullary(NullaryOp),
     /// zero-operand narrow return/nop (16-bit)

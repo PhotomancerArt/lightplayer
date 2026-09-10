@@ -482,6 +482,83 @@ fn loop_end_matches_objdump() {
 }
 
 // ---------------------------------------------------------------------------
+// Families 4 and 5 — privileged control flow, windows, traps
+// ---------------------------------------------------------------------------
+//
+// Committed together because they share one opcode neighbourhood (`op0 = 0`,
+// `op1 = 0`, `op2 = 0`, sub-selected by `r`: 3 = the exception returns,
+// 4 = `break`, 5 = `syscall`, 6 = `rsil`, 7 = `waiti`) and came out of one
+// assembler probe.
+
+/// LX6 bytes == LX7 bytes for every vector.
+#[rustfmt::skip]
+const PRIV_VECTORS: &[(&[u8], &str)] = &[
+    (&[0x20, 0x63, 0x00], "rsil a2, 3"),
+    (&[0x00, 0x60, 0x00], "rsil a0, 0"),
+    (&[0xf0, 0x6f, 0x00], "rsil a15, 15"),
+    (&[0x00, 0x70, 0x00], "waiti 0"),
+    (&[0x00, 0x7f, 0x00], "waiti 15"),
+    (&[0x00, 0x30, 0x00], "rfe"),
+    (&[0x00, 0x32, 0x00], "rfde"),
+    (&[0x10, 0x33, 0x00], "rfi 3"),
+    (&[0x10, 0x30, 0x00], "rfi 0"),
+    (&[0x10, 0x3f, 0x00], "rfi 15"),
+    (&[0x00, 0x34, 0x00], "rfwo"),
+    (&[0x00, 0x35, 0x00], "rfwu"),
+    (&[0xf0, 0x80, 0x40], "rotw -1"),
+    (&[0x10, 0x80, 0x40], "rotw 1"),
+    (&[0x80, 0x80, 0x40], "rotw -8"),
+    (&[0x70, 0x80, 0x40], "rotw 7"),
+    (&[0x00, 0xc5, 0x09], "l32e a0, a5, -16"),
+    (&[0xf0, 0x00, 0x09], "l32e a15, a0, -64"),
+    (&[0x00, 0xc5, 0x49], "s32e a0, a5, -16"),
+    (&[0xf0, 0x00, 0x49], "s32e a15, a0, -64"),
+    (&[0x10, 0x41, 0x00], "break 1, 1"),
+    (&[0x00, 0x40, 0x00], "break 0, 0"),
+    (&[0xf0, 0x4f, 0x00], "break 15, 15"),
+    (&[0x20, 0x41, 0x00], "break 1, 2"),
+    (&[0x10, 0x42, 0x00], "break 2, 1"),
+    (&[0x40, 0x43, 0x00], "break 3, 4"),
+    (&[0x2d, 0xf1], "break.n 1"),
+    (&[0x2d, 0xff], "break.n 15"),
+    (&[0x00, 0x50, 0x00], "syscall"),
+    // Already decoded before this phase; the phase file asks for the vector.
+    (&[0x10, 0x13, 0x00], "movsp a1, a3"),
+    (&[0x10, 0x10, 0x00], "movsp a1, a0"),
+];
+
+#[test]
+fn privileged_control_flow_and_windows() {
+    for (bytes, text) in PRIV_VECTORS {
+        dec(bytes);
+        agrees_with_objdump(bytes, text);
+    }
+
+    // The exact operands the real `_WindowOverflow4` / `_WindowUnderflow4`
+    // handlers use (`xtensa-lx-rt-0.22.0/src/exception/asm.rs:786-791`).
+    assert_eq!(
+        dec(&[0x00, 0xc5, 0x09]),
+        Inst::WindowLs(WindowLsOp::L32e, a(0), a(5), -16)
+    );
+    assert_eq!(
+        dec(&[0x00, 0xc5, 0x49]),
+        Inst::WindowLs(WindowLsOp::S32e, a(0), a(5), -16)
+    );
+    assert_eq!(dec(&[0x00, 0x34, 0x00]), Inst::Rf(RfOp::Rfwo));
+    assert_eq!(dec(&[0x00, 0x35, 0x00]), Inst::Rf(RfOp::Rfwu));
+    assert_eq!(dec(&[0x00, 0x30, 0x00]), Inst::Rf(RfOp::Rfe));
+    assert_eq!(dec(&[0x10, 0x33, 0x00]), Inst::Rfi(3));
+    assert_eq!(dec(&[0xf0, 0x80, 0x40]), Inst::Rotw(-1));
+    assert_eq!(dec(&[0x20, 0x63, 0x00]), Inst::Rsil(a(2), 3));
+    assert_eq!(dec(&[0x00, 0x70, 0x00]), Inst::Waiti(0));
+    // `break imms, immt` — `s` is the FIRST operand, `t` the second. The
+    // asymmetric vectors are what pin the order.
+    assert_eq!(dec(&[0x20, 0x41, 0x00]), Inst::Break(1, 2));
+    assert_eq!(dec(&[0x10, 0x42, 0x00]), Inst::Break(2, 1));
+    assert_eq!(dec(&[0x2d, 0xf1]), Inst::BreakN(1));
+}
+
+// ---------------------------------------------------------------------------
 // The SSAI reserved-field fix
 // ---------------------------------------------------------------------------
 

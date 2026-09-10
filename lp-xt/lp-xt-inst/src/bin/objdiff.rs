@@ -255,7 +255,14 @@ fn typed_operands(inst: &Inst, pc: u32) -> Vec<Operand> {
         )],
         Callx(_, a) => vec![reg(a)],
         Entry(a, imm) => vec![reg(a), Operand::Imm(imm as i64)],
-        Nullary(_) | NullaryN(_) => vec![],
+        Nullary(_) | NullaryN(_) | Rf(_) => vec![],
+        Rfi(level) => vec![Operand::Imm(level as i64)],
+        Rsil(at, level) => vec![reg(at), Operand::Imm(level as i64)],
+        Waiti(level) => vec![Operand::Imm(level as i64)],
+        Rotw(imm) => vec![Operand::Imm(imm as i64)],
+        WindowLs(_, at, ars, off) => vec![reg(at), reg(ars), Operand::Imm(off as i64)],
+        Break(imms, immt) => vec![Operand::Imm(imms as i64), Operand::Imm(immt as i64)],
+        BreakN(imms) => vec![Operand::Imm(imms as i64)],
 
         // --- floating point ---
         FpRrr(_, a, b, c) => vec![freg(a), freg(b), freg(c)],

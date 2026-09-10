@@ -444,6 +444,38 @@ fn zero_overhead_loops() {
     }
 }
 
+#[test]
+fn privileged_control_flow_and_windows() {
+    for op in [RfOp::Rfe, RfOp::Rfde, RfOp::Rfwo, RfOp::Rfwu] {
+        rt(Inst::Rf(op), 3);
+    }
+    for level in 0..=15u8 {
+        rt(Inst::Rfi(level), 3);
+        rt(Inst::Waiti(level), 3);
+        for &at in &REGS {
+            rt(Inst::Rsil(r(at), level), 3);
+        }
+    }
+    for imm in -8..=7i8 {
+        rt(Inst::Rotw(imm), 3);
+    }
+    for op in [WindowLsOp::L32e, WindowLsOp::S32e] {
+        for &at in &REGS {
+            for &ars in &REGS {
+                for off in (-64..=-4).step_by(4) {
+                    rt(Inst::WindowLs(op, r(at), r(ars), off), 3);
+                }
+            }
+        }
+    }
+    for imms in 0..=15u8 {
+        rt(Inst::BreakN(imms), 2);
+        for immt in 0..=15u8 {
+            rt(Inst::Break(imms, immt), 3);
+        }
+    }
+}
+
 /// The SR / UR tables are total in both directions: every variant's number maps
 /// back to that variant, `ALL` and `from_num` agree on the modelled set, and
 /// numbers outside it stay `None`.

@@ -196,6 +196,16 @@ fn decode_qrst(w: u32) -> Option<Inst> {
             Some(Inst::Extui(reg_r(w), reg_t(w), shiftimm, maskimm))
         }
         0x8 => decode_fp_lsx(w),
+        // The windowed spill/reload pair. `r` holds `(offset / 4) + 16`, so the
+        // offset is always a negative multiple of 4 in -64..=-4.
+        0x9 => {
+            let off = (r(w) as i32 - 16) * 4;
+            match op2(w) {
+                0x0 => Some(Inst::WindowLs(WindowLsOp::L32e, reg_t(w), reg_s(w), off)),
+                0x4 => Some(Inst::WindowLs(WindowLsOp::S32e, reg_t(w), reg_s(w), off)),
+                _ => None,
+            }
+        }
         0xa => decode_fp0(w),
         0xb => decode_fp1(w),
         _ => None,
@@ -363,6 +373,25 @@ fn decode_st0(w: u32) -> Option<Inst> {
             }
         }
         0x1 => Some(Inst::Rs(AluRs::Movsp, reg_t(w), reg_s(w))),
+        // RFEI: the privileged returns. `t` picks the sub-group, `s` the
+        // variant (t = 0) or the interrupt level (t = 1).
+        0x3 => match t(w) {
+            0x0 => match s(w) {
+                0x0 => Some(Inst::Rf(RfOp::Rfe)),
+                0x2 => Some(Inst::Rf(RfOp::Rfde)),
+                0x4 => Some(Inst::Rf(RfOp::Rfwo)),
+                0x5 => Some(Inst::Rf(RfOp::Rfwu)),
+                _ => None,
+            },
+            0x1 => Some(Inst::Rfi(s(w))),
+            _ => None,
+        },
+        // BREAK imms, immt
+        0x4 => Some(Inst::Break(s(w), t(w))),
+        // RSIL at, level: t = at, s = level.
+        0x6 => Some(Inst::Rsil(reg_t(w), s(w))),
+        // WAITI level: s = level, t reserved 0.
+        0x7 if t(w) == 0 => Some(Inst::Waiti(s(w))),
         // SYSCALL: r=5, s=0, t=0 (assembler golden bytes `00 50 00`).
         0x5 if s(w) == 0 && t(w) == 0 => Some(Inst::Nullary(NullaryOp::Syscall)),
         0x2 => {
@@ -403,6 +432,8 @@ fn decode_st1(w: u32) -> Option<Inst> {
             let imm = s(w) | ((t(w) & 0x1) << 4);
             Some(Inst::Ssai(imm))
         }
+        // ROTW simm4: the rotation rides in `t`, `s` is reserved 0.
+        0x8 if s(w) == 0 => Some(Inst::Rotw(sext(t(w) as u32, 4) as i8)),
         0xe => Some(Inst::Rt(AluRt::Nsa, reg_t(w), reg_s(w))),
         0xf => Some(Inst::Rt(AluRt::Nsau, reg_t(w), reg_s(w))),
         _ => None,
@@ -672,6 +703,8 @@ fn decode16(w: u32) -> Option<Inst> {
                     0x1 if s(w) == 0 => Some(Inst::NullaryN(NullaryNarrowOp::RetwN)),
                     0x3 if s(w) == 0 => Some(Inst::NullaryN(NullaryNarrowOp::NopN)),
                     0x6 if s(w) == 0 => Some(Inst::NullaryN(NullaryNarrowOp::IllN)),
+                    // BREAK.N imms: the immediate is the `s` field.
+                    0x2 => Some(Inst::BreakN(s(w))),
                     _ => None,
                 },
                 _ => None,
