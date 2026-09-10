@@ -18,18 +18,30 @@ are committed verbatim, with their checksums and their licence.
 `SHA256SUMS` records the tarball and each vendored file. The tarball's own
 line is provenance, not a local check — the tarball is not committed. The ELF
 lines are checked two ways: `scripts/emu/fetch-rom-elfs.sh --check` (offline,
-no cargo) and a unit test in `lp-emu-esp32c6`, so a corrupted or swapped ROM
-fails the build's tests rather than a boot at cycle 400,000.
+no cargo) and a test in the machine crate that loads each one
+(`lp-emu-esp32c6/tests/rom_vendoring.rs`,
+`lp-emu-esp32v3/tests/rom_vendoring.rs`), so a corrupted or swapped ROM fails
+the build's tests rather than a boot at cycle 400,000.
 
 ## What is here
 
 | File | Chip | Bytes | Notes |
 |---|---|---|---|
 | `esp32c6_rev0_rom.elf` | ESP32-C6, revision 0 | 489,768 | 3,876 symbol-table entries; the only chip plan one needs |
+| `esp32_rev300_rom.elf` | Classic ESP32, revision 3 | 857,500 | `EM_XTENSA`, `ET_EXEC`, entry `0x4000_0400`; 39 `PT_LOAD`s, one per vector |
 
-The classic ESP32 (rev0 and rev300) and the S3 arrive with plan three; the
-release tarball carries seventeen chips and we vendor only what code loads.
-Adding one is one line in `WANTED` in the fetch script, then re-running it.
+The S3 arrives with plan three's M6; the release tarball carries seventeen
+chips and we vendor only what code loads. Adding one is one line in `WANTED`
+in the fetch script, then re-running it.
+
+**The classic is here at one revision.** `esp32_rev0_rom.elf` is in the same
+tarball and is deliberately not vendored (plan three, decision Q2): the desk
+board and every board this firmware ships on are v3 silicon, so a second
+826 KB image no configuration loads would be 826 KB nobody can check. The
+`rev300` file's sha256 was verified twice and independently — once by hand
+against the release's own checksum file when M0 read the ROM
+(`docs/reports/2026-09-10-xtensa-firmware-isa-inventory.md` §6), and again by
+this script re-deriving it from the tarball's extracted bytes.
 
 ## Why the ROM is here at all
 

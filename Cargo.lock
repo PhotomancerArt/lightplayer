@@ -5696,6 +5696,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-emu-esp32v3"
+version = "40.0.0"
+dependencies = [
+ "log",
+ "lp-emu-core",
+ "lp-emu-esp-common",
+ "lp-xt-emu",
+ "sha2",
+]
+
+[[package]]
 name = "lp-emu-jit"
 version = "40.0.0"
 dependencies = [

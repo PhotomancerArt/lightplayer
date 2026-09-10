@@ -2383,6 +2383,24 @@ test-emu-c6-cli:
     cargo test -p lp-cli --test validate_registry_parity
     LP_EMU_BUILD_FW=1 cargo test -p lp-cli --test emu_usb_hello -- --include-ignored
 
+# The classic ESP32 (v3) machine's own suite (plan three, M3).
+#
+# Nothing here is `#[ignore]`d and nothing here builds firmware yet: at P1 the
+# crate is a memory map, the generated register tables and a vendored ROM, and
+# all three are checked from committed bytes alone. P2 onward adds the boot
+# tests, which will be `#[ignore]`d for the same reason the C6's are — a plain
+# `cargo test --workspace` must never start a cross-target firmware build.
+test-emu-esp32v3:
+    cargo test -p lp-emu-esp32v3
+
+# Run an image on the classic ESP32 (v3) machine.
+#
+# The door gets its name at P1 so it has one name for its whole life; the
+# binary behind it arrives with P2, and until then this recipe says as much by
+# failing to find a bin target rather than by not existing.
+emu-esp32v3 elf *args:
+    cargo run -p lp-emu-esp32v3 --release -- --elf {{ elf }} {{ args }}
+
 # The translator's decoder agreement test, corpus half included (M7 JD3).
 #
 # `lp-emu-jit` decodes independently of `lp-riscv-emu`'s executors, and
@@ -2542,11 +2560,15 @@ bench-emu-xt *args:
     scripts/emu/bench-xt.sh {{ args }}
 
 # The generated `RegNames` tables (offset -> register name) are derived from
-# the esp32c6 PAC's svd2rust offset comments and carry a provenance header.
+# an Espressif PAC's svd2rust offset comments and carry a provenance header.
 # A hand edit is reverted by the next regeneration and takes its provenance
 # with it, so this checks them the way `lint-vec-corpus` checks the shader
 # corpus. It prints a notice and passes when the PAC sources are not in this
 # machine's cargo registry — see the script's header for why.
+#
+# `--check` covers EVERY chip in the script's `CHIPS` table (esp32c6 and
+# esp32 today), whatever `--pac` a regenerate run last named: a lint that only
+# saw the chip you happened to be working on would pass for the other one.
 lint-emu-regnames:
     python3 scripts/emu/pac-regnames.py --check
 

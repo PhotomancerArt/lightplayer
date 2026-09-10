@@ -40,13 +40,17 @@ LICENSE_URL="https://raw.githubusercontent.com/espressif/esp-rom-elfs/${RELEASE_
 
 DEST="lp-emu/esp/roms"
 
-# Which chips we vendor. One line per file, so adding the classic and the S3
-# with plan three is one line each and the checksum file regenerates.
+# Which chips we vendor. One line per file, so adding the S3 with plan three's
+# M6 is one line and the checksum file regenerates.
 #
-# Only the C6 is here today: plan one is the C6, and 2 MB of ROM images for
-# chips no code loads yet is 2 MB of repository nobody can check.
+# The release tarball carries seventeen chips and we vendor only what code
+# loads: a ROM image no configuration reads is repository nobody can check.
+# The classic is here at ONE revision (plan three Q2) — the desk board and
+# every board this firmware ships on are v3 silicon, so `esp32_rev0_rom.elf`
+# would be 790 KB nothing loads.
 WANTED=(
     "esp32c6_rev0_rom.elf"
+    "esp32_rev300_rom.elf" # plan three M3 (Q2): the classic v3 machine
 )
 
 sha256() {
