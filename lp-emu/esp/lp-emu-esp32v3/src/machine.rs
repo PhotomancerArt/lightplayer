@@ -690,12 +690,23 @@ impl Esp32V3Builder {
         // is not there.
         let stall_key = crate::periph::rtc_cntl::StallKey::new();
         let mut peripheral_map = Vec::new();
+        let mut alias_map = Vec::new();
         if self.boot_set {
             let set = crate::periph::boot_set(self.reset_cause, self.efuse, stall_key.clone());
             check_registration_order(&set)?;
             for (base, len, periph) in set {
-                peripheral_map.push((periph.name(), base, len));
-                bus.add_peripheral(base, len, periph);
+                let name = periph.name();
+                peripheral_map.push((name, base, len));
+                let index = bus.add_peripheral(base, len, periph);
+                // The classic's second peripheral window (P3 §3.2): every
+                // block from `0x3FF4_0000` up answers at its AHB address too,
+                // and it is the **same state** — one registration, a second
+                // decode (DD38). Registered here rather than in `boot_set`
+                // because an alias needs the index the bus just handed back.
+                if let Some(ahb) = memmap::dport_to_ahb(base) {
+                    bus.add_peripheral_alias(ahb, len, index);
+                    alias_map.push((name, ahb, len));
+                }
             }
         }
 
@@ -747,6 +758,7 @@ impl Esp32V3Builder {
             app_segments: Vec::new(),
             flash_seed: None,
             peripheral_map,
+            alias_map,
             hooks: HookTable::new(),
             boot_mode: self.boot_mode,
             time_grade: self.time_grade,
@@ -798,6 +810,7 @@ pub struct Machine {
     app_segments: Vec<PlacedAppSegment>,
     flash_seed: Option<FlashChipSeed>,
     peripheral_map: Vec<(&'static str, u32, u32)>,
+    alias_map: Vec<(&'static str, u32, u32)>,
     hooks: HookTable,
     boot_mode: BootMode,
     time_grade: TimeGrade,
@@ -957,6 +970,13 @@ impl Machine {
     /// The registered blocks, in registration order: `(name, base, len)`.
     pub fn peripheral_map(&self) -> &[(&'static str, u32, u32)] {
         &self.peripheral_map
+    }
+
+    /// The **second** address each block answers at, in the same order:
+    /// `(name, ahb base, len)`. The classic's AHB mirror (DD38); empty on a
+    /// machine built with [`Esp32V3Builder::bare`].
+    pub fn peripheral_alias_map(&self) -> &[(&'static str, u32, u32)] {
+        &self.alias_map
     }
 
     pub fn hook_calls(&self) -> u64 {

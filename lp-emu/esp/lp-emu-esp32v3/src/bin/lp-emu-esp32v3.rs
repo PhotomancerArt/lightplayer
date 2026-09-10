@@ -207,7 +207,17 @@ fn print_map() {
     match Esp32V3Builder::new().boot_mode(BootMode::RomUp).build() {
         Ok(machine) => {
             for (name, base, len) in machine.peripheral_map() {
-                println!("    {name:<18} {base:#010x}..{:#010x}  accept", base + len);
+                println!("    {name:<18} {base:#010x}..{:#010x}", base + len);
+            }
+            println!(
+                "  the AHB mirror: the same blocks, the same state, a second decode (DD38)"
+            );
+            for (name, base, len) in machine.peripheral_alias_map() {
+                println!(
+                    "    {name:<18} {base:#010x}..{:#010x}  alias of {:#010x}",
+                    base + len,
+                    memmap::ahb_to_dport(*base).unwrap_or(0)
+                );
             }
         }
         Err(e) => println!("    (could not build the boot set: {e})"),

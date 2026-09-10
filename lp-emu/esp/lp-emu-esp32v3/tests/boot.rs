@@ -310,6 +310,63 @@ fn the_bus_maps_the_map_and_declares_the_mmio_window() {
     assert_eq!(bare.bus().peripheral_count(), 0);
 }
 
+/// **DD38 acceptance.** Every block from `0x3FF4_0000` up answers at its AHB
+/// address as well, and it is the **same state**: a write through one door is
+/// read back through the other. The four blocks below that base — `DPORT`
+/// itself, `AES`, `RSA`, `SHA` — get no alias, which is why the ROM reaches
+/// them only through the DPORT bus (P3 §4.3).
+#[test]
+fn the_ahb_mirror_is_the_same_block_at_a_second_base() {
+    use lp_emu_core::Bus;
+
+    let mut machine = Esp32V3Builder::new()
+        .boot_mode(BootMode::RomUp)
+        .build()
+        .expect("builds");
+
+    let aliased: Vec<&str> = machine
+        .peripheral_alias_map()
+        .iter()
+        .map(|(n, _, _)| *n)
+        .collect();
+    assert!(
+        !aliased.contains(&"DPORT"),
+        "DPORT is at 0x3FF0_0000, below the mirror's low end — it has no AHB address"
+    );
+    for (name, ahb, _) in machine.peripheral_alias_map() {
+        let dport = memmap::ahb_to_dport(*ahb).expect("an alias is inside the AHB window");
+        let (_, base, _) = machine
+            .peripheral_map()
+            .iter()
+            .find(|(n, _, _)| n == name)
+            .expect("every alias names a registered block");
+        assert_eq!(dport, *base, "`{name}`'s alias mirrors its own base");
+    }
+    // The analog master's only cited address is the AHB one, so it gets no
+    // DPORT-side alias: a claim about 0x3FF4_E000 is a claim nothing backs.
+    assert!(!aliased.contains(&"I2C_ANA_MST"));
+
+    // One state, two decodes: `UART0.clkdiv` written through DPORT reads back
+    // through AHB, and again the other way round.
+    let dport = memmap::periph::UART0 + 0x14;
+    let ahb = memmap::dport_to_ahb(memmap::periph::UART0).expect("UART0 is mirrored") + 0x14;
+    assert_eq!(ahb, 0x6000_0014);
+    machine.bus_mut().write_word(dport, 0x0000_2b6a).unwrap();
+    assert_eq!(machine.bus_mut().read_word(ahb).unwrap(), 0x0000_2b6a);
+    machine.bus_mut().write_word(ahb, 0x0000_0057).unwrap();
+    assert_eq!(machine.bus_mut().read_word(dport).unwrap(), 0x0000_0057);
+
+    // The blocks nothing maps stay a strict stop through either door: an
+    // alias needs a registered block to point at (`SENS` is P5's).
+    let sens_ahb = memmap::dport_to_ahb(memmap::periph::SENS).expect("SENS is mirrored");
+    assert!(
+        machine
+            .peripheral_alias_map()
+            .iter()
+            .all(|(_, base, len)| sens_ahb < *base || sens_ahb >= base + len)
+    );
+}
+
 #[test]
 fn the_windows_this_machine_will_not_map_are_named() {
     let unmapped = bus_setup::deliberately_unmapped();
