@@ -14,6 +14,7 @@
 #![cfg(feature = "host-wasmtime")]
 
 use lp_emu_core::CycleModel;
+use lp_emu_core::arena::GuestArena;
 use lp_emu_jit::blocks::BlockSet;
 use lp_emu_jit::discover::discover;
 use lp_emu_jit::host::{
@@ -318,7 +319,10 @@ fn layout() -> Layout {
 }
 
 struct Rig {
-    mem: Vec<u8>,
+    /// A `GuestArena` rather than a `Vec`, so these tests run the emitted
+    /// modules under the same guard-page configuration the native `--jit`
+    /// path uses (M7 JD21) wherever the host can provide one.
+    mem: GuestArena,
 }
 
 impl Rig {
@@ -326,7 +330,7 @@ impl Rig {
     /// is read-write, and everything else — including the MMIO address the
     /// tests use — is [`PERM_NONE`].
     fn new(program: &[(u32, u32)]) -> Self {
-        let mut mem = vec![0u8; MEM_LEN];
+        let mut mem = GuestArena::zeroed(MEM_LEN);
         for page in 0..(ARENA_LEN >> PERM_SHIFT) {
             let entry = ((GUEST_BASE >> PERM_SHIFT) + page) as usize;
             mem[PERM_AT as usize + entry] = PERM_READ_WRITE;
@@ -364,7 +368,8 @@ impl Rig {
             let at = (EXCHANGE_AT as u64 + EXCHANGE_REGS) as usize + 4 * i;
             self.mem[at..at + 4].copy_from_slice(&r.to_le_bytes());
         }
-        let initial = self.mem.clone();
+        let initial = self.mem.to_vec();
+        let guard = self.mem.guard();
         let base = self.mem.as_mut_ptr();
         let host = FakeHost {
             mem: base,
@@ -375,7 +380,7 @@ impl Rig {
         };
         // SAFETY: `self.mem` outlives `core`, and nothing else holds a
         // reference into it while `enter` is running.
-        let mut core = unsafe { WasmtimeCore::new(&emitted.wasm, host, base, MEM_LEN) }
+        let mut core = unsafe { WasmtimeCore::new(&emitted.wasm, host, base, MEM_LEN, guard) }
             .expect("the emitted module compiles and instantiates");
         let exit = core
             .enter(0, 0, 0, end, (0, 0))
@@ -617,7 +622,7 @@ fn the_all_escape_build_agrees_with_the_emitted_one_on_everything() {
     assert_eq!(fast.instret, slow.instret);
     assert_eq!(fast.regs, slow.regs);
     assert_eq!(fast.flags, slow.flags);
-    assert_eq!(emitted.mem, escaped.mem, "and the memory, byte for byte");
+    assert_eq!(*emitted.mem, *escaped.mem, "and the memory, byte for byte");
 }
 
 #[test]
@@ -652,7 +657,7 @@ fn a_ram_store_and_load_stay_inline_and_an_off_ram_one_goes_out() {
     assert_eq!(out.cycle, slow.cycle);
     assert_eq!(out.instret, slow.instret);
     assert_eq!(out.pc, slow.pc);
-    assert_eq!(rig.mem, escaped.mem);
+    assert_eq!(*rig.mem, *escaped.mem);
 }
 
 #[test]
