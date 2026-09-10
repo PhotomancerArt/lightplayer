@@ -27,6 +27,7 @@ use alloc::collections::BTreeSet;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
+use lp_emu_core::arena::{ArenaGuard, GuestArena};
 use lp_emu_core::bus::{Bus, Watchpoint};
 use lp_emu_core::cycle_model::MemoryCost;
 use lp_emu_core::memory::{MemoryAccessKind, MemoryError};
@@ -245,14 +246,19 @@ pub struct SocBus {
     /// regions span 0x4000_0000..0x5000_4000, so the arena is ~256 MiB of
     /// *reservation* against ~17 MiB of real regions — and it buys a
     /// translated core that reaches guest memory with one constant fold and
-    /// no per-access region lookup. The allocation is zero-filled by the
-    /// allocator, so the pages in the gaps are never touched and never
-    /// resident.
+    /// no per-access region lookup. The allocation is zero-filled, so the
+    /// pages in the gaps are never touched and never resident.
+    ///
+    /// It is a [`GuestArena`] rather than a `Vec<u8>` because a native
+    /// wasmtime host hands these bytes to the engine as its linear memory,
+    /// and the engine elides its bounds checks on the strength of the guard
+    /// the host promises: on a host with virtual memory the arena maps its
+    /// own reservation, with a real unmapped guard after it (M7 JD21).
     ///
     /// It must not move once the machine is running: [`SocBus::add_region`]
     /// is the only thing that can reallocate it, and every region is added
     /// during construction.
-    arena: Vec<u8>,
+    arena: GuestArena,
     /// The guest address of `arena[0]`.
     arena_base: u32,
     /// Sorted by base, non-overlapping.
@@ -458,7 +464,7 @@ pub const fn event_local(id: EventId) -> u16 {
 impl SocBus {
     pub fn new() -> Self {
         Self {
-            arena: Vec::new(),
+            arena: GuestArena::empty(),
             arena_base: 0,
             regions: Vec::new(),
             last_regions: [0, 0],
@@ -556,7 +562,7 @@ impl SocBus {
         let want_hi = u64::from(base) + u64::from(len);
         if self.arena.is_empty() {
             self.arena_base = base;
-            self.arena = alloc::vec![0u8; len as usize];
+            self.arena = GuestArena::zeroed(len as usize);
             return;
         }
         let have_lo = u64::from(self.arena_base);
@@ -566,7 +572,7 @@ impl SocBus {
         if lo == have_lo && hi == have_hi {
             return;
         }
-        let mut grown = alloc::vec![0u8; (hi - lo) as usize];
+        let mut grown = GuestArena::zeroed((hi - lo) as usize);
         // Only the regions carry meaningful bytes; the gaps are zero in both
         // the old arena and the new one, so copying region by region is both
         // cheaper than copying the whole span and exactly equivalent.
@@ -947,6 +953,17 @@ impl SocBus {
     /// The guest address of `guest_arena()[0]`.
     pub fn guest_arena_base(&self) -> u32 {
         self.arena_base
+    }
+
+    /// The reservation and unmapped guard behind the arena, or `None` when
+    /// this arena is a plain heap allocation.
+    ///
+    /// A host that gives these bytes to a wasm engine as its linear memory
+    /// must read this rather than assume: guard-page bounds checks are only
+    /// sound when there really is a guard, and the arena is the only thing
+    /// that knows whether it got one (M7 JD21).
+    pub fn guest_arena_guard(&self) -> Option<ArenaGuard> {
+        self.arena.guard()
     }
 
     /// The largest `[base, base + len)` inside the arena that **no region
@@ -3676,6 +3693,28 @@ mod tests {
         bus.add_region(RamRegion::new("ram", 0x5000_0000, 0x100));
         assert_eq!(bus.guest_arena().as_ptr(), base, "the arena did not move");
         assert_eq!(bus.guest_arena_base(), 0x4000_0000);
+    }
+
+    /// The C6's own span, at the size the chip crate reserves it, really does
+    /// get a guarded mapping on a host that has virtual memory — which is what
+    /// the native `--jit` path's guard-page bounds checks rest on (M7 JD21).
+    #[cfg(all(unix, not(target_family = "wasm")))]
+    #[test]
+    fn the_chip_sized_span_is_guarded() {
+        let mut bus = SocBus::new();
+        assert_eq!(
+            bus.guest_arena_guard(),
+            None,
+            "an arena with no bytes has nothing to guard"
+        );
+        bus.reserve_guest_span(0x4000_0000, 0x1000_4000);
+        let guard = bus
+            .guest_arena_guard()
+            .expect("this host maps its arenas, so the C6's span is guarded");
+        assert!(
+            guard.reservation >= bus.guest_arena().len() as u64 && guard.guard > 0,
+            "the reservation must cover the arena and leave a guard behind it: {guard:?}"
+        );
     }
 
     #[test]

@@ -595,6 +595,10 @@ impl JitCore {
         };
 
         let arena_len = bus.guest_arena().len();
+        // Straight from the arena, never a constant: this is what decides
+        // whether the engine may elide its bounds checks, and only the
+        // allocation knows whether there is really a guard behind it.
+        let arena_guard = bus.guest_arena_guard();
         let exchange = bus.guest_arena_mut()[at.exchange_at as usize..].as_mut_ptr();
         let arena_ptr = bus.guest_arena_mut().as_mut_ptr();
         let ops = C6Ops {
@@ -610,9 +614,12 @@ impl JitCore {
         // covers only whole wasm pages of it. Nothing holds a Rust reference
         // into the arena while translated code runs: `JitCore::run` reaches the
         // bus through the raw pointer it just set, and does not touch it
-        // otherwise.
-        let core = unsafe { WasmtimeCore::new(&emitted.wasm, ops, arena_ptr, arena_len) }
-            .map_err(|e| format!("the translated module did not build: {e:?}"))?;
+        // otherwise. `arena_guard` is the arena's own report: when it is
+        // `Some`, the bytes past `arena_len` really are unmapped out to the
+        // end of the reservation and its guard.
+        let core =
+            unsafe { WasmtimeCore::new(&emitted.wasm, ops, arena_ptr, arena_len, arena_guard) }
+                .map_err(|e| format!("the translated module did not build: {e:?}"))?;
         let (compile_us, instantiate_us) = (core.compile_us(), core.instantiate_us());
 
         Ok(Self {

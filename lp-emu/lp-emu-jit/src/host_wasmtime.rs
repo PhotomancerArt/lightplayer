@@ -5,9 +5,27 @@
 //! and this exists so identity can be proven on the desk against the same
 //! module bytes.
 //!
-//! # The memory, and the configuration that is not here
+//! # The memory, and the guard it comes with
 //!
-//! JD18 says any wasmtime host **must** be configured with guard-page traps:
+//! JD4 gives the guest arena to the bus, and the emitted module has to import
+//! *that* memory rather than a copy — copying a 256 MiB arena in and out
+//! around every slice would cost more than translation saves. So the memory is
+//! supplied through [`wasmtime::MemoryCreator`], aliasing the bus's own
+//! allocation. And `MemoryCreator`'s safety contract is explicit that a
+//! host-supplied memory has to be followed by `guard_size_in_bytes` of
+//! **unmapped** address space, because cranelift elides bounds checks on the
+//! strength of it.
+//!
+//! P3 read that contract against a `Vec<u8>` arena and, rightly, refused the
+//! guard: a `Vec` is followed by whatever the allocator put there, so
+//! promising a guard would have turned a translator bug from a wasm trap into
+//! a silent write into the host heap. The price was JD18's ~4.8x — explicit
+//! bounds checks on every guest load and store.
+//!
+//! JD21 removes the conflict at the other end: the bus's arena
+//! ([`lp_emu_core::arena::GuestArena`]) now maps its own reservation with a
+//! real unmapped guard behind it, so the promise this host makes is one the
+//! allocation actually keeps, and JD18's configuration goes on:
 //!
 //! ```text
 //! // Guard-page bounds checks, the way a browser engine always does them.
@@ -20,35 +38,16 @@
 //! config.memory_may_move(false);
 //! ```
 //!
-//! **This host cannot use it, and the reason is structural rather than an
-//! oversight.** JD4 gives the guest arena to the bus, as a `Vec<u8>`, and the
-//! emitted module has to import *that* memory rather than a copy — copying a
-//! 256 MiB arena in and out around every slice would cost more than
-//! translation saves. So the memory is supplied through
-//! [`wasmtime::MemoryCreator`], aliasing the bus's own allocation. And
-//! `MemoryCreator`'s safety contract is explicit that a host-supplied memory
-//! has to be followed by `guard_size_in_bytes` of **unmapped** address space,
-//! because cranelift elides bounds checks on the strength of it. A `Vec` is
-//! followed by whatever the allocator put there.
+//! **Only when the arena says it is guarded.** [`WasmtimeCore::new`] takes the
+//! guard from the arena, not from a constant, and a host without virtual
+//! memory hands it `None` — for which this host goes back to explicit bounds
+//! checks and [`ArenaMemoryCreator`] refuses any non-zero guard the engine
+//! asks for. A build that promises a guard it does not have is the bug this
+//! whole arrangement exists to prevent, and it is not expressible here.
 //!
-//! Configuring the guard and then handing over a `Vec` would not fail: it
-//! would turn a translator bug from a wasm trap into a silent write into the
-//! host heap. So this host asks for **explicit bounds checks** — the slow,
-//! safe half of the pair — and the native `--jit` path pays the ~4.8x the
-//! spike measured.
-//!
-//! Two things follow, and both belong in the milestone ADR:
-//!
-//! - **the browser has no such conflict.** There the emulator *is* a wasm
-//!   module: the arena is a `Vec` inside its own linear memory, the module
-//!   imports that memory, and the arena's base is an offset. The engine's own
-//!   guard pages are already there and no aliasing is involved. The 4.8x is a
-//!   property of hosting wasm *next to* a native emulator, not of the design;
-//! - **a native host that wants the guard pages has to own the arena.** That
-//!   is a real option — the memory creator maps a guarded reservation and the
-//!   bus is handed a view of it — and it is P8's to weigh, with the numbers,
-//!   against caching compiled modules. P3 does not need it: identity does not
-//!   care how fast it is proven.
+//! The browser never had the conflict at all: there the emulator *is* a wasm
+//! module, the arena is bytes inside its own linear memory, the module imports
+//! that memory, and the engine's own guard pages are already under it.
 
 extern crate alloc;
 // The crate is `no_std`; this module is not, and only exists behind the
@@ -62,6 +61,7 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::sync::Arc;
 
+use lp_emu_core::arena::ArenaGuard;
 use wasmtime::{
     Caller, Config, Engine, Extern, Instance, LinearMemory, MemoryCreator, Module, Store, TypedFunc,
 };
@@ -79,9 +79,11 @@ use crate::translate::ENTRY_FUNC;
 /// once the machine is running" — and it is why the arena is allocated once,
 /// during construction, from the chip's declared memory map.
 ///
-/// The memory is **not** guarded. See this module's docs: the configuration
-/// that goes with it asks for explicit bounds checks, so nothing is relying on
-/// the bytes after the allocation being unmapped.
+/// When `guard` is `Some`, the bytes from `base + len` out to
+/// `base + reservation + guard` are genuinely unmapped, which is what lets the
+/// engine elide its bounds checks. When it is `None` there is no guard, and
+/// [`ArenaMemoryCreator::new_memory`] has already refused to hand this memory
+/// to an engine that wanted one.
 struct ArenaMemory {
     base: *mut u8,
     len: usize,
@@ -94,11 +96,18 @@ struct ArenaMemory {
 unsafe impl Send for ArenaMemory {}
 unsafe impl Sync for ArenaMemory {}
 
-// SAFETY: `byte_size` and `byte_capacity` report exactly the allocation the
-// caller promised, `as_ptr` returns its base, and `grow_to` refuses anything
-// larger — so wasm can never address a byte outside it. The trait's guard-page
-// clause is discharged by the configuration rather than by the allocation: see
-// the module docs.
+// SAFETY: four clauses, and each is discharged here:
+//
+// - `byte_size` and `byte_capacity` report exactly the allocation the caller
+//   promised — the arena's own length, no more;
+// - `as_ptr` returns its base, which the caller has promised is stable for the
+//   life of the store;
+// - `grow_to` refuses anything larger, so the reported size never rises and
+//   the base never has to move;
+// - the guard-page clause is discharged by the *allocation*, checked in
+//   `ArenaMemoryCreator::new_memory` against what the engine asks for. An
+//   arena with no guard is only ever paired with a configuration that asks for
+//   none.
 unsafe impl LinearMemory for ArenaMemory {
     fn byte_size(&self) -> usize {
         self.len
@@ -123,27 +132,59 @@ unsafe impl LinearMemory for ArenaMemory {
     }
 }
 
+/// Hands the engine the one arena it is allowed to have.
+///
+/// The guard check in [`Self::new_memory`] is the load-bearing part: the
+/// engine asks for a reservation and a guard derived from the `Config` this
+/// module sets, and the request is refused unless the arena's own mapping
+/// covers it. That is what makes a mismatch between the configuration and the
+/// allocation an instantiation error rather than a silent loss of memory
+/// safety.
 struct ArenaMemoryCreator {
     base: usize,
     len: usize,
+    /// The arena's own report of what lies behind it, straight from
+    /// `GuestArena::guard`.
+    guard: Option<ArenaGuard>,
 }
 
 // SAFETY: every memory this creator hands out is the same, correctly sized
 // view of one allocation the caller has promised is stable — see
-// [`ArenaMemory`].
+// [`ArenaMemory`] — and `new_memory` refuses outright rather than return one
+// whose guard the allocation does not actually provide.
 unsafe impl MemoryCreator for ArenaMemoryCreator {
     fn new_memory(
         &self,
         _ty: wasmtime::MemoryType,
         minimum: usize,
         _maximum: Option<usize>,
-        _reserved_size_in_bytes: Option<usize>,
-        _guard_size_in_bytes: usize,
+        reserved_size_in_bytes: Option<usize>,
+        guard_size_in_bytes: usize,
     ) -> Result<Box<dyn LinearMemory>, String> {
         if minimum > self.len {
             return Err(alloc::format!(
                 "the module wants {minimum} bytes of memory and the guest arena is {}",
                 self.len
+            ));
+        }
+        // What the engine will treat as addressable-or-trapping: everything
+        // from the base out to the end of the reservation, plus the guard it
+        // has already told cranelift it may run off into.
+        let wants = (reserved_size_in_bytes.unwrap_or(self.len).max(self.len) as u64)
+            .checked_add(guard_size_in_bytes as u64)
+            .ok_or_else(|| String::from("the engine's reservation plus guard overflows"))?;
+        // The arena's mapping is `reservation + guard` bytes long with only
+        // its first `len` readable, so everything past `len` traps. Anything
+        // the engine wants beyond that span is address space we do not own.
+        let have = match self.guard {
+            Some(g) => g.reservation.max(self.len as u64).saturating_add(g.guard),
+            None => self.len as u64,
+        };
+        if wants > have {
+            return Err(alloc::format!(
+                "the engine wants {wants} bytes of reservation and guard behind the guest arena \
+                 and it has {have}: a guard this host does not own would let an out-of-range \
+                 guest access write the emulator's own memory instead of trapping"
             ));
         }
         Ok(Box::new(ArenaMemory {
@@ -161,6 +202,37 @@ pub struct Exit {
     /// The exchange area's flag word: [`crate::host::FLAG_AFTER_STORE`],
     /// [`crate::host::FLAG_SLICE_ENDED`].
     pub flags: i32,
+}
+
+/// How an engine over `guard` should bounds-check the guest's accesses.
+///
+/// Separated from [`WasmtimeCore::new`] so the choice is one readable thing
+/// and so `tests::the_guard_actually_removes_the_bounds_checks` can compile
+/// the same module both ways and see the difference in the machine code.
+fn bounds_check_config(guard: Option<ArenaGuard>) -> Config {
+    let mut config = Config::new();
+    match guard {
+        // Guard-page bounds checks, the way a browser engine always does
+        // them. Without these wasmtime emits an explicit check on EVERY guest
+        // load and store, and the region runs 4.8x slower — a property of the
+        // native host, not of the emitted module. Measured: 308 -> 1481
+        // M instr/s.
+        Some(g) => {
+            config.signals_based_traps(true);
+            config.memory_reservation(g.reservation);
+            config.memory_guard_size(g.guard);
+            config.memory_may_move(false);
+        }
+        // No mapping behind this arena, so no guard may be promised: the
+        // engine has to check every access itself. See the module docs.
+        None => {
+            config.signals_based_traps(false);
+            config.memory_reservation(0);
+            config.memory_guard_size(0);
+            config.memory_may_move(false);
+        }
+    }
+    config
 }
 
 /// One compiled, instantiated translated module and the store it lives in.
@@ -185,6 +257,13 @@ impl<H: HostOps + 'static> WasmtimeCore<H> {
     /// Compile `wasm` and instantiate it against the arena at
     /// `(arena_base, arena_len)`.
     ///
+    /// `guard` is the arena's own report of what lies behind it —
+    /// `GuestArena::guard` — and decides which of the two bounds-check
+    /// strategies this store gets. Pass what the arena says, never a
+    /// constant: a guard named here that the allocation does not keep is
+    /// exactly the unsound case, and the only defence left after that is
+    /// [`ArenaMemoryCreator`]'s refusal.
+    ///
     /// # Safety
     ///
     /// `arena_base` must point at `arena_len` readable, writable bytes that
@@ -192,6 +271,12 @@ impl<H: HostOps + 'static> WasmtimeCore<H> {
     /// and nothing else may hold a Rust reference into them while translated
     /// code is running. The emulator's guest arena is exactly that by
     /// construction — see [`ArenaMemory`].
+    ///
+    /// When `guard` is `Some`, the bytes from `arena_base + arena_len` out to
+    /// `arena_base + reservation + guard` must additionally be **unmapped**,
+    /// so that an access there raises a signal the engine turns into a wasm
+    /// trap. `GuestArena` is the only thing in the tree that produces a
+    /// `Some`, and it produces it only for a mapping it made itself.
     ///
     /// # Errors
     ///
@@ -202,18 +287,13 @@ impl<H: HostOps + 'static> WasmtimeCore<H> {
         ops: H,
         arena_base: *mut u8,
         arena_len: usize,
+        guard: Option<ArenaGuard>,
     ) -> wasmtime::Result<Self> {
-        let mut config = Config::new();
-        // Explicit bounds checks: this store's memory is the bus's own `Vec`
-        // and has no guard region after it. See the module docs — this is the
-        // one place JD18's configuration is deliberately not used, and why.
-        config.signals_based_traps(false);
-        config.memory_reservation(0);
-        config.memory_guard_size(0);
-        config.memory_may_move(false);
+        let mut config = bounds_check_config(guard);
         config.with_host_memory(Arc::new(ArenaMemoryCreator {
             base: arena_base as usize,
             len: arena_len,
+            guard,
         }));
 
         let engine = Engine::new(&config)?;
@@ -381,8 +461,166 @@ fn memory_shim(pages: u32) -> alloc::vec::Vec<u8> {
     module.finish()
 }
 
-/// The bytes a `Vec`-backed arena has to be a whole number of wasm pages for.
+/// The bytes of an arena that are a whole number of wasm pages.
 #[must_use]
 pub fn whole_pages(arena_len: usize) -> usize {
     arena_len / 65536 * 65536
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lp_emu_core::arena::{GUARD, RESERVATION};
+
+    const LEN: usize = 64 * 1024;
+
+    fn creator(base: *mut u8, guard: Option<ArenaGuard>) -> ArenaMemoryCreator {
+        ArenaMemoryCreator {
+            base: base as usize,
+            len: LEN,
+            guard,
+        }
+    }
+
+    fn ty() -> wasmtime::MemoryType {
+        wasmtime::MemoryType::new(1, None)
+    }
+
+    /// The arena's constants as the byte counts wasmtime asks in.
+    fn res() -> usize {
+        usize::try_from(RESERVATION).expect("a 64-bit test host")
+    }
+
+    fn guard_len() -> usize {
+        usize::try_from(GUARD).expect("a 64-bit test host")
+    }
+
+    /// The one thing that must never happen: an arena with nothing behind it
+    /// handed to an engine that has already compiled its bounds checks away.
+    #[test]
+    fn an_unguarded_arena_refuses_an_engine_that_wants_a_guard() {
+        let mut bytes = alloc::vec![0u8; LEN];
+        let c = creator(bytes.as_mut_ptr(), None);
+        let refused = c.new_memory(ty(), LEN, None, Some(res()), guard_len());
+        assert!(refused.is_err(), "a guard we do not own must be refused");
+        let ok = c.new_memory(ty(), LEN, None, Some(0), 0);
+        assert!(ok.is_ok(), "and explicit bounds checks are still served");
+    }
+
+    /// The same check one step in: a mapping is only good for the span it
+    /// actually reserved, so an engine asking to run off further is refused
+    /// even though there *is* a guard.
+    #[test]
+    fn a_guarded_arena_refuses_more_than_it_mapped() {
+        let mut bytes = alloc::vec![0u8; LEN];
+        let guard = Some(ArenaGuard {
+            reservation: RESERVATION,
+            guard: GUARD,
+        });
+        let c = creator(bytes.as_mut_ptr(), guard);
+        assert!(
+            c.new_memory(ty(), LEN, None, Some(res()), guard_len())
+                .is_ok(),
+            "exactly what it mapped is served"
+        );
+        assert!(
+            c.new_memory(ty(), LEN, None, Some(res() * 2), guard_len())
+                .is_err(),
+            "a wider reservation than it mapped is refused"
+        );
+        assert!(
+            c.new_memory(ty(), LEN, None, Some(res()), guard_len() * 2)
+                .is_err(),
+            "and so is a wider guard"
+        );
+    }
+
+    /// The claim this whole change rests on: with a guard behind the arena,
+    /// cranelift stops emitting a bounds check on every guest access.
+    ///
+    /// Asked of the machine code rather than of a clock, because a clock on a
+    /// shared desk answers something else. The same module is compiled under
+    /// both configurations and the guarded one must come out materially
+    /// smaller — there is nothing else that could shrink it, and a
+    /// configuration that silently failed to engage would come out the same
+    /// size.
+    #[test]
+    fn the_guard_actually_removes_the_bounds_checks() {
+        use wasm_encoder::{
+            CodeSection, EntityType, ExportKind, ExportSection, Function, FunctionSection,
+            ImportSection, Instruction as I, MemArg, MemoryType, Module as M, TypeSection, ValType,
+        };
+
+        // A function that is nothing but guest accesses, so the code size is
+        // very nearly the checks themselves.
+        const ACCESSES: u32 = 512;
+        let wasm = {
+            let mut m = M::new();
+            let mut types = TypeSection::new();
+            types.ty().function([ValType::I32], [ValType::I32]);
+            m.section(&types);
+            let mut imports = ImportSection::new();
+            imports.import(
+                "emu",
+                "memory",
+                EntityType::Memory(MemoryType {
+                    minimum: 1,
+                    maximum: None,
+                    memory64: false,
+                    shared: false,
+                    page_size_log2: None,
+                }),
+            );
+            m.section(&imports);
+            let mut funcs = FunctionSection::new();
+            funcs.function(0);
+            m.section(&funcs);
+            let mut exports = ExportSection::new();
+            exports.export("run", ExportKind::Func, 0);
+            m.section(&exports);
+            let mut f = Function::new([]);
+            for i in 0..ACCESSES {
+                f.instruction(&I::LocalGet(0));
+                f.instruction(&I::I32Load(MemArg {
+                    offset: u64::from(i) * 4,
+                    align: 2,
+                    memory_index: 0,
+                }));
+                f.instruction(&I::LocalSet(0));
+            }
+            f.instruction(&I::LocalGet(0));
+            f.instruction(&I::End);
+            let mut code = CodeSection::new();
+            code.function(&f);
+            m.section(&code);
+            m.finish()
+        };
+
+        let compiled = |guard| {
+            Engine::new(&bounds_check_config(guard))
+                .expect("the engine builds")
+                .precompile_module(&wasm)
+                .expect("the module compiles")
+                .len()
+        };
+        let checked = compiled(None);
+        let elided = compiled(Some(ArenaGuard {
+            reservation: RESERVATION,
+            guard: GUARD,
+        }));
+        assert!(
+            elided + (ACCESSES as usize) * 4 < checked,
+            "the guarded build must drop at least a few bytes per access: \
+             {elided} guarded against {checked} checked, over {ACCESSES} accesses"
+        );
+    }
+
+    /// A module wanting more memory than the arena has is a build error, not
+    /// a silently truncated memory.
+    #[test]
+    fn a_module_wanting_more_than_the_arena_is_refused() {
+        let mut bytes = alloc::vec![0u8; LEN];
+        let c = creator(bytes.as_mut_ptr(), None);
+        assert!(c.new_memory(ty(), LEN + 1, None, Some(0), 0).is_err());
+    }
 }
