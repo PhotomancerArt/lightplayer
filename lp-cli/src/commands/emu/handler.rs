@@ -31,20 +31,39 @@ impl Grade {
     }
 }
 
+/// Which entry a machine takes, and out of what.
+///
+/// Three combinations, and the third is the one a *flashing* run needs: the
+/// bytes are not there yet, so the chip has to be writable AND booted from
+/// the reset vector.
+#[derive(Clone, Copy, Debug)]
+pub(super) enum Image<'a> {
+    /// `--elf` / `kind=elf`: loaded straight into memory at its entry point.
+    /// The flash part beside it is a separate, initially empty thing.
+    Elf(&'a Path),
+    /// `--merged` / `kind=merged`: the whole chip, booted ROM-up and
+    /// **read-only** — it is the image a gate named.
+    Merged(&'a Path),
+    /// `kind=rom-up`: ROM-up out of the WRITABLE flash file, which is the
+    /// only shape a board can be flashed in and then boot what was written.
+    /// The chip is whatever the flash file holds — nothing is loaded.
+    RomUp,
+}
+
 /// The image, and with it the boot path — the half of `run` that `serve`
 /// needs per board.
 ///
 /// `--merged` is the whole chip: the hart starts at the reset vector and the
 /// real ROM finds the bootloader, so a flash file beside it would be a second
-/// chip and is refused rather than silently ignored.
+/// chip and is refused rather than silently ignored. [`Image::RomUp`] is the
+/// same boot path over a chip that *does* keep its writes.
 pub(super) fn apply_image(
     mut builder: Esp32C6Builder,
-    elf: Option<&Path>,
-    merged: Option<&Path>,
+    image: Image<'_>,
     flash: Option<&Path>,
 ) -> Result<Esp32C6Builder> {
-    match (elf, merged) {
-        (Some(elf), None) => {
+    match image {
+        Image::Elf(elf) => {
             check_file(elf, "--elf")?;
             builder = builder.app(AppSource::Path(elf.to_path_buf()));
             builder = match flash {
@@ -52,7 +71,7 @@ pub(super) fn apply_image(
                 None => builder.flash(FlashBacking::Blank),
             };
         }
-        (None, Some(merged)) => {
+        Image::Merged(merged) => {
             check_file(merged, "--merged")?;
             if flash.is_some() {
                 bail!(
@@ -80,11 +99,16 @@ pub(super) fn apply_image(
                 .flash(FlashBacking::Copy(merged.to_path_buf()))
                 .flash_len(len);
         }
-        (Some(_), Some(_)) => unreachable!("clap's `image` group allows only one"),
-        (None, None) => bail!(
-            "nothing to run: pass --elf <fw-esp32c6> for a direct load, or --merged \
-             <chip.bin> to boot from the reset vector through the real ROM"
-        ),
+        // Nothing is loaded and nothing is copied: the hart starts at the
+        // reset vector and the real mask ROM reads whatever is in the part.
+        // An erased part has no valid image there, which is how a board with
+        // nothing on it reaches the ROM's download console by itself.
+        Image::RomUp => {
+            builder = builder.boot_mode(BootMode::RomUp).flash(match flash {
+                Some(path) => FlashBacking::File(path.to_path_buf()),
+                None => FlashBacking::Blank,
+            });
+        }
     }
     Ok(builder)
 }
@@ -113,12 +137,16 @@ fn run(args: RunArgs) -> Result<()> {
             UsbSjDrain::Auto
         });
 
-    builder = apply_image(
-        builder,
-        args.elf.as_deref(),
-        args.merged.as_deref(),
-        args.flash.as_deref(),
-    )?;
+    let image = match (args.elf.as_deref(), args.merged.as_deref()) {
+        (Some(elf), None) => Image::Elf(elf),
+        (None, Some(merged)) => Image::Merged(merged),
+        (Some(_), Some(_)) => unreachable!("clap's `image` group allows only one"),
+        (None, None) => bail!(
+            "nothing to run: pass --elf <fw-esp32c6> for a direct load, or --merged \
+             <chip.bin> to boot from the reset vector through the real ROM"
+        ),
+    };
+    builder = apply_image(builder, image, args.flash.as_deref())?;
 
     // The eFuse identity. `run` serves one board, so the default — the desk
     // board's MAC — is the right one; `serve` gives every board its own,

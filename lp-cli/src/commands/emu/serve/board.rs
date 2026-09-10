@@ -33,7 +33,7 @@ use lp_emu_esp32c6::machine::{
 };
 
 use super::air::AirTap;
-use crate::commands::emu::handler::{apply_image, describe};
+use crate::commands::emu::handler::{Image, apply_image, describe};
 
 /// How long one `run_until` call is allowed to hold the thread before the
 /// loop gets a turn: the shutdown flag, the flash flush, the air drain. Short
@@ -47,14 +47,46 @@ const SLICE: Duration = Duration::from_millis(40);
 /// just uploaded.
 const FLUSH_EVERY: Duration = Duration::from_secs(2);
 
+/// What kind of image a board was given, and with it which entry it takes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BoardKind {
+    /// `kind=elf`: a firmware ELF loaded at its entry point, with a separate
+    /// flash part beside it. Fast, and what every walk so far used.
+    #[default]
+    Elf,
+    /// `kind=merged`: a whole merged flash image booted from the reset
+    /// vector, **read-only** — the image a gate named.
+    Merged,
+    /// `kind=rom-up`: the reset vector out of the board's own WRITABLE flash
+    /// file. The only shape that can be flashed and then boot what was
+    /// written, which is plan two's acceptance criterion 5.
+    RomUp,
+}
+
+impl BoardKind {
+    /// How the startup line and `GET /boards` name this board's entry.
+    /// `direct` and `rom-up` are the machine's own two words
+    /// (`--boot-mode`), and `merged` is the read-only rom-up.
+    pub fn boot_word(self) -> &'static str {
+        match self {
+            BoardKind::Elf => "direct",
+            BoardKind::Merged => "rom-up (read-only)",
+            BoardKind::RomUp => "rom-up",
+        }
+    }
+}
+
 /// What one `--board` asked for.
 #[derive(Clone, Debug)]
 pub struct BoardSpec {
     pub id: String,
-    pub image: PathBuf,
-    /// A whole merged flash image rather than an ELF: boot from the reset
-    /// vector through the real mask ROM.
-    pub merged: bool,
+    /// The image, and what it is for: the ELF to load, the merged chip to
+    /// boot read-only, or the whole-chip image a `kind=rom-up` board's flash
+    /// file is **seeded** from the first time. `None` is a `kind=rom-up`
+    /// board with nothing on it — an erased chip, which is what
+    /// `s1-blank-flash` is.
+    pub image: Option<PathBuf>,
+    pub kind: BoardKind,
     pub mac: [u8; 6],
     /// The persistent flash file, `None` for a merged board (which carries
     /// the whole chip already) and for a serve with no `--state-dir`.
@@ -68,9 +100,21 @@ pub struct BoardSpec {
 pub struct Board {
     pub id: String,
     pub mac: [u8; 6],
-    /// `blank` / `loaded` / `merged` — what the board's flash was at
-    /// power-on, which is what `GET /boards` reports.
-    pub flash_state: &'static str,
+    /// True for a `kind=merged` board, whose chip is read-only by design.
+    merged: bool,
+    /// `direct` / `rom-up` / `rom-up (read-only)` — which entry this board
+    /// takes, as `GET /boards` reports it. A flashable board is a `rom-up`
+    /// one, and a page that offers "flash this board" wants to know.
+    pub boot: &'static str,
+    /// Whether the chip holds a bootable image at the reset vector, kept up
+    /// to date by the board thread on every flush.
+    ///
+    /// Plan two M5: the word used to be computed once in [`Board::start`]
+    /// from the flash FILE's length and never again, so a board flashed
+    /// through esptool-js still said `blank` until the server restarted —
+    /// and a board whose file was merely 4 MiB of `0xff` said `loaded`. Both
+    /// are gone: this is the same question the mask ROM asks.
+    has_image: Arc<AtomicBool>,
     pub bytes_addr: SocketAddr,
     pub control_addr: SocketAddr,
     /// One byte client at a time, like [`lp_emu_esp_common::TcpHost`]. A
@@ -106,36 +150,46 @@ impl Board {
     /// Returns once the ports are known, so the caller can publish them
     /// before the guest has booted.
     pub fn start(spec: BoardSpec, options: BoardOptions) -> Result<Board> {
-        let flash_state = if spec.merged {
-            "merged"
-        } else if spec
+        let merged = matches!(spec.kind, BoardKind::Merged);
+        // What is on the chip before the guest has run a cycle: the durable
+        // flash file if there is one, else whatever a `kind=rom-up` board is
+        // being seeded from. The board thread keeps this true from here on.
+        let at_start = spec
             .flash
-            .as_ref()
-            .and_then(|p| std::fs::metadata(p).ok())
-            .is_some_and(|m| m.len() > 0)
-        {
-            "loaded"
-        } else {
-            "blank"
-        };
+            .as_deref()
+            .filter(|p| p.is_file())
+            .or(spec.image.as_deref().filter(|_| !merged))
+            .is_some_and(file_starts_with_an_image);
 
         let shutdown = Arc::new(AtomicBool::new(false));
         let flush_now = Arc::new(AtomicBool::new(false));
         let stopped = Arc::new(AtomicBool::new(false));
         let reboots = Arc::new(AtomicU64::new(0));
+        let has_image = Arc::new(AtomicBool::new(at_start));
         let (tx, rx) = std::sync::mpsc::channel::<Result<(SocketAddr, SocketAddr)>>();
 
         let id = spec.id.clone();
         let mac = spec.mac;
+        let boot = spec.kind.boot_word();
         let thread = {
             let shutdown = Arc::clone(&shutdown);
             let flush_now = Arc::clone(&flush_now);
             let stopped = Arc::clone(&stopped);
             let reboots = Arc::clone(&reboots);
+            let has_image = Arc::clone(&has_image);
             std::thread::Builder::new()
                 .name(format!("emu-board-{id}"))
                 .spawn(move || {
-                    run_board(spec, options, tx, shutdown, flush_now, stopped, reboots);
+                    run_board(RunBoard {
+                        spec,
+                        options,
+                        tx,
+                        shutdown,
+                        flush_now,
+                        stopped,
+                        reboots,
+                        has_image,
+                    });
                 })
                 .context("spawning the board thread")?
         };
@@ -147,7 +201,9 @@ impl Board {
         Ok(Board {
             id,
             mac,
-            flash_state,
+            merged,
+            boot,
+            has_image,
             bytes_addr,
             control_addr,
             bytes_busy: Arc::new(AtomicBool::new(false)),
@@ -158,6 +214,25 @@ impl Board {
             shutdown,
             thread: std::sync::Mutex::new(Some(thread)),
         })
+    }
+
+    /// `blank` / `loaded` / `merged`, as of right now.
+    ///
+    /// The word is about the CHIP, never about what the board is running: a
+    /// `kind=elf` board runs an image that was never in its flash and
+    /// truthfully reports `blank` for as long as it lives (M3 measured that
+    /// and read it as a defect; it is the two things being independent). And
+    /// `loaded` is not a claim that the board BOOTS — only that there is an
+    /// image where the mask ROM looks for one. The board's own hello is the
+    /// evidence for booting, and nothing else is.
+    pub fn flash_state(&self) -> &'static str {
+        if self.merged {
+            "merged"
+        } else if self.has_image.load(Ordering::SeqCst) {
+            "loaded"
+        } else {
+            "blank"
+        }
     }
 
     /// Ask the board to stop, and wait for it to write its flash back.
@@ -181,8 +256,9 @@ impl Drop for Board {
     }
 }
 
-#[allow(clippy::too_many_arguments, reason = "one thread body, one call site")]
-fn run_board(
+/// One board thread's whole world. A struct rather than eight arguments,
+/// because every one of them is an `Arc` the door also holds.
+struct RunBoard {
     spec: BoardSpec,
     options: BoardOptions,
     tx: std::sync::mpsc::Sender<Result<(SocketAddr, SocketAddr)>>,
@@ -190,7 +266,20 @@ fn run_board(
     flush_now: Arc<AtomicBool>,
     stopped: Arc<AtomicBool>,
     reboots: Arc<AtomicU64>,
-) {
+    has_image: Arc<AtomicBool>,
+}
+
+fn run_board(this: RunBoard) {
+    let RunBoard {
+        spec,
+        options,
+        tx,
+        shutdown,
+        flush_now,
+        stopped,
+        reboots,
+        has_image,
+    } = this;
     let mut machine = match build(&spec, &options) {
         Ok(m) => m,
         Err(e) => {
@@ -254,11 +343,11 @@ fn run_board(
             }
         }
         if flush_now.swap(false, Ordering::SeqCst) || last_flush.elapsed() >= FLUSH_EVERY {
-            flush(&mut machine, &spec);
+            flush(&mut machine, &spec, &has_image);
             last_flush = Instant::now();
         }
     }
-    flush(&mut machine, &spec);
+    flush(&mut machine, &spec, &has_image);
     machine.flush_frames();
 }
 
@@ -287,7 +376,22 @@ fn working_path(flash: &std::path::Path) -> PathBuf {
 
 /// Write back everything a killed server must not lose: the flash part, and
 /// the console transcript.
-fn flush(machine: &mut lp_emu_esp32c6::machine::Esp32C6Machine, spec: &BoardSpec) {
+fn flush(
+    machine: &mut lp_emu_esp32c6::machine::Esp32C6Machine,
+    spec: &BoardSpec,
+    has_image: &AtomicBool,
+) {
+    // Asked of the CHIP rather than of the file, and on every flush rather
+    // than once: this is what turns `blank → flash → loaded` into a sequence
+    // a page can watch. `peek` does not count as a flash read.
+    if let Ok(flash) = machine.flash().lock() {
+        has_image.store(
+            flash
+                .peek(0, 1)
+                .is_some_and(|head| head[0] == ESP_IMAGE_MAGIC),
+            Ordering::SeqCst,
+        );
+    }
     match machine.flush_flash() {
         Ok(true) => {
             if let Some(durable) = &spec.flash
@@ -316,6 +420,26 @@ fn flush(machine: &mut lp_emu_esp32c6::machine::Esp32C6Machine, spec: &BoardSpec
             write_console(&untaken_path(path), untaken, &spec.id);
         }
     }
+}
+
+/// `esp_image_header_t.magic` — the byte the mask ROM looks for at the reset
+/// vector, and the one it complains about as `invalid header: 0xffffffff`
+/// when a chip is erased. It is the whole difference between `blank` and
+/// `loaded`, so it is asked rather than guessed from a file's length.
+const ESP_IMAGE_MAGIC: u8 = 0xe9;
+
+/// Does `path`'s first byte say there is a bootable image there?
+///
+/// Cheap on purpose: one byte, before the machine exists. A 4 MiB file of
+/// `0xff` is a chip with nothing on it, and the old "the file has bytes"
+/// test called that `loaded`.
+fn file_starts_with_an_image(path: &std::path::Path) -> bool {
+    use std::io::Read;
+    let mut head = [0u8; 1];
+    std::fs::File::open(path)
+        .and_then(|mut f| f.read_exact(&mut head))
+        .is_ok()
+        && head[0] == ESP_IMAGE_MAGIC
 }
 
 /// `<id>.console.log` → `<id>.console-untaken.log`.
@@ -371,28 +495,50 @@ fn build(
         .usb_sj(UsbSjSink::Tcp("127.0.0.1:0".to_string()))
         .control("127.0.0.1:0");
 
-    let (elf, merged) = if spec.merged {
-        (None, Some(spec.image.as_path()))
-    } else {
-        (Some(spec.image.as_path()), None)
+    let image = match spec.kind {
+        BoardKind::Elf => Image::Elf(
+            spec.image
+                .as_deref()
+                .ok_or_else(|| anyhow!("board `{}`: kind=elf needs an image", spec.id))?,
+        ),
+        BoardKind::Merged => Image::Merged(
+            spec.image
+                .as_deref()
+                .ok_or_else(|| anyhow!("board `{}`: kind=merged needs an image", spec.id))?,
+        ),
+        BoardKind::RomUp => Image::RomUp,
     };
     // The machine reads and writes the working file; `flush` renames it onto
     // the durable one. Seed it from whatever the last server left, so this
-    // board boots what it wrote.
+    // board boots what it wrote — and, on the FIRST run of a `kind=rom-up`
+    // board, from the image the `--board` named, which is that board's
+    // starting contents rather than something loaded into memory.
     let working = match &spec.flash {
         Some(durable) => {
             let working = working_path(durable);
             let _ = std::fs::remove_file(&working);
-            if durable.is_file() {
-                std::fs::copy(durable, &working).with_context(|| {
-                    format!("board `{}`: seeding {}", spec.id, working.display())
+            let source = if durable.is_file() {
+                Some(durable.as_path())
+            } else if matches!(spec.kind, BoardKind::RomUp) {
+                spec.image.as_deref()
+            } else {
+                None
+            };
+            if let Some(source) = source {
+                std::fs::copy(source, &working).with_context(|| {
+                    format!(
+                        "board `{}`: seeding {} from {}",
+                        spec.id,
+                        working.display(),
+                        source.display()
+                    )
                 })?;
             }
             Some(working)
         }
         None => None,
     };
-    builder = apply_image(builder, elf, merged, working.as_deref())
+    builder = apply_image(builder, image, working.as_deref())
         .with_context(|| format!("board `{}`", spec.id))?;
 
     builder

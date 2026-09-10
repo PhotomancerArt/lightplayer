@@ -48,7 +48,7 @@ use lp_emu_esp32c6::loader::EfuseIdentity;
 use lp_emu_esp32c6::machine::UsbHost;
 
 use super::args::{EmuChip, ServeArgs, ServeHost};
-use board::{Board, BoardOptions, BoardSpec, default_mac, format_mac};
+use board::{Board, BoardKind, BoardOptions, BoardSpec, default_mac, format_mac};
 use door::Registry;
 
 pub fn serve(args: ServeArgs) -> Result<()> {
@@ -104,12 +104,13 @@ pub fn serve(args: ServeArgs) -> Result<()> {
         };
         let id = spec.id.clone();
         let flash = spec.flash.clone();
+        let boot = spec.kind.boot_word();
         let board = Board::start(spec, options)?;
         eprintln!(
-            "emu serve: board `{id}` mac {} flash {}{} — bytes /board/{id}/bytes, control \
-             /board/{id}/control",
+            "emu serve: board `{id}` mac {} boot {boot} flash {}{} — bytes /board/{id}/bytes, \
+             control /board/{id}/control",
             format_mac(&board.mac),
-            board.flash_state,
+            board.flash_state(),
             flash
                 .as_ref()
                 .map(|p| format!(" ({})", p.display()))
@@ -160,7 +161,7 @@ pub fn serve(args: ServeArgs) -> Result<()> {
     Ok(())
 }
 
-/// `--board <id>=<image>[,mac=<aa:bb:…>][,kind=elf|merged]`.
+/// `--board <id>=<image>[,mac=<aa:bb:…>][,kind=elf|merged|rom-up]`.
 fn parse_boards(
     specs: &[String],
     state_dir: Option<&Path>,
@@ -211,13 +212,10 @@ fn parse_board(
     }
 
     let mut parts = rest.split(',');
-    let image = PathBuf::from(parts.next().unwrap_or_default().trim());
-    if image.as_os_str().is_empty() {
-        bail!("--board `{text}`: no image");
-    }
+    let image_text = parts.next().unwrap_or_default().trim().to_string();
 
     let mut mac = default_mac(index);
-    let mut merged = false;
+    let mut kind = BoardKind::Elf;
     for option in parts {
         let option = option.trim();
         if option.is_empty() {
@@ -228,33 +226,57 @@ fn parse_board(
                 mac = EfuseIdentity::parse_mac(value)
                     .map_err(|e| anyhow::anyhow!("--board `{text}`: mac=: {e}"))?;
             }
-            Some(("kind", "elf")) => merged = false,
-            Some(("kind", "merged")) => merged = true,
+            Some(("kind", "elf")) => kind = BoardKind::Elf,
+            Some(("kind", "merged")) => kind = BoardKind::Merged,
+            Some(("kind", "rom-up")) => kind = BoardKind::RomUp,
             _ => bail!(
                 "--board `{text}`: `{option}` is not a board option — mac=<aa:bb:cc:dd:ee:ff> or \
-                 kind=elf|merged"
+                 kind=elf|merged|rom-up"
             ),
         }
     }
 
-    // A merged image is the whole chip, so a flash file beside it would be a
-    // second one — the same refusal `run` makes, per board.
-    let flash = match (merged, state_dir) {
-        (true, _) => None,
-        (false, Some(dir)) => Some(dir.join(format!("{id}.flash.bin"))),
-        (false, None) => None,
+    // `blank` is the only reserved image word, and it means what `GET
+    // /boards` already calls a chip with nothing on it. A file of that name
+    // is still reachable as `./blank`.
+    let image = match (kind, image_text.as_str()) {
+        (BoardKind::RomUp, "blank" | "") => None,
+        (_, "") => bail!(
+            "--board `{text}`: no image. `kind=rom-up` may take `blank` for a chip with nothing \
+             on it; every other kind needs a file."
+        ),
+        (_, path) => Some(PathBuf::from(path)),
     };
-    if merged && state_dir.is_some() {
+
+    // A merged image is the whole chip, so a flash file beside it would be a
+    // second one — the same refusal `run` makes, per board. A `rom-up` board
+    // is the opposite case: its flash file IS the chip, so it wants one more
+    // than anybody.
+    let flash = match (kind, state_dir) {
+        (BoardKind::Merged, _) | (_, None) => None,
+        (_, Some(dir)) => Some(dir.join(format!("{id}.flash.bin"))),
+    };
+    if matches!(kind, BoardKind::Merged) && state_dir.is_some() {
         eprintln!(
             "emu serve: board `{id}` is kind=merged, which carries the whole chip — it keeps its \
              own flash and ignores --state-dir"
+        );
+    }
+    // A rom-up board with no `--state-dir` still boots from the reset vector
+    // and is still writable; it just forgets. Worth one line, because a
+    // flashing walk that forgets is a walk whose gate 6 cannot pass.
+    if matches!(kind, BoardKind::RomUp) && state_dir.is_none() {
+        eprintln!(
+            "emu serve: board `{id}` is kind=rom-up with no --state-dir — it boots ROM-up from a \
+             writable chip that lives and dies with this process, so anything flashed into it is \
+             gone when the server stops"
         );
     }
 
     Ok(BoardSpec {
         id: id.to_string(),
         image,
-        merged,
+        kind,
         mac,
         flash,
         console: console_dir.map(|dir| dir.join(format!("{id}.console.log"))),
@@ -299,8 +321,43 @@ mod tests {
     fn a_merged_board_keeps_its_own_flash() {
         let dir = PathBuf::from("/tmp/state");
         let spec = parse_board("c6-a=chip.bin,kind=merged", 0, Some(&dir), None).expect("parses");
-        assert!(spec.merged);
+        assert_eq!(spec.kind, BoardKind::Merged);
         assert_eq!(spec.flash, None, "--merged is the whole chip already");
+    }
+
+    /// The third combination, and plan two's criterion 5: a board that boots
+    /// from the reset vector out of a flash file it can be flashed into.
+    #[test]
+    fn a_rom_up_board_boots_from_a_writable_flash_file() {
+        let dir = PathBuf::from("/tmp/state");
+        let spec = parse_board("c6-a=chip.bin,kind=rom-up", 0, Some(&dir), None).expect("parses");
+        assert_eq!(spec.kind, BoardKind::RomUp);
+        assert_eq!(
+            spec.flash,
+            Some(dir.join("c6-a.flash.bin")),
+            "a rom-up board's flash file IS the chip"
+        );
+        assert_eq!(
+            spec.image,
+            Some(PathBuf::from("chip.bin")),
+            "the image seeds the chip the first time"
+        );
+        assert_eq!(spec.kind.boot_word(), "rom-up");
+    }
+
+    /// `blank` is the only reserved image word, and it is the word `GET
+    /// /boards` already uses for a chip with nothing on it.
+    #[test]
+    fn a_blank_rom_up_board_has_no_image_at_all() {
+        let dir = PathBuf::from("/tmp/state");
+        let spec = parse_board("c6-a=blank,kind=rom-up", 0, Some(&dir), None).expect("parses");
+        assert_eq!(spec.kind, BoardKind::RomUp);
+        assert_eq!(spec.image, None, "nothing seeds it: the chip is erased");
+        assert_eq!(spec.flash, Some(dir.join("c6-a.flash.bin")));
+        // `blank` only means "no image" for a rom-up board; every other kind
+        // gets a file called `blank`, because that is what it was told.
+        let elf = parse_board("c6-b=blank", 1, Some(&dir), None).expect("parses");
+        assert_eq!(elf.image, Some(PathBuf::from("blank")));
     }
 
     #[test]

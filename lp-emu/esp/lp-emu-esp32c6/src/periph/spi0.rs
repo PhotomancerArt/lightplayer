@@ -1,12 +1,13 @@
 //! `SPI0` at `0x6000_2000` — the cache controller's register block.
 //!
-//! Almost all of it is accept-and-remember; three registers are live, and
-//! they are the ones the mask ROM's `Cache_MMU_Init`, `Cache_MSPI_MMU_Set`
-//! and `MMU_Get_Page_Mode` touch (the disassembly is quoted in
-//! [`crate::cache`]):
+//! Almost all of it is accept-and-remember; four registers are live, and
+//! three of them are the ones the mask ROM's `Cache_MMU_Init`,
+//! `Cache_MSPI_MMU_Set` and `MMU_Get_Page_Mode` touch (the disassembly is
+//! quoted in [`crate::cache`]):
 //!
 //! | offset | PAC name | what it does here |
 //! |---|---|---|
+//! | `0x000` | `cmd` | reads idle, and a trigger written to it self-clears — see [`Spi0::refuse`], and note that **esptool addresses this block, not SPI1** |
 //! | `0x37c` | `mmu_item_content` | reads and writes the entry `mmu_item_index` selects |
 //! | `0x380` | `mmu_item_index` | selects it; no auto-increment |
 //! | `0x384` | `mmu_power_ctrl` | bits 4:3 are the page mode, and drive [`CacheMmu::set_page_mode`] |
@@ -24,10 +25,22 @@ use lp_emu_esp_common::{BusCx, Peripheral, RegFile, Width};
 use crate::cache::{CacheHandle, ITEM_CONTENT, ITEM_INDEX, POWER_CTRL};
 use crate::regs;
 
+/// `cmd` +0x000. Same layout as SPI1's: every bit above `mst_st`/`slv_st` is
+/// a self-clearing trigger, and the register reads back idle once whatever
+/// was asked for is done.
+const CMD: u32 = 0x000;
+
+/// The trigger bits of `cmd`, SPI1's set exactly ([`super::spi1`]): `usr`
+/// (1<<18) through `flash_read` (1<<31), plus `flash_pe` (1<<17).
+const CMD_TRIGGERS: u32 = 0xfffe_0000;
+
 /// The cache controller's register block, with the MMU behind it.
 pub struct Spi0 {
     regs: RegFile,
     mmu: CacheHandle,
+    /// Every `cmd` trigger written here, once each, so a run that leans on
+    /// SPI0 moving bytes says so instead of quietly reading zeros.
+    refused: Vec<u32>,
 }
 
 impl core::fmt::Debug for Spi0 {
@@ -50,7 +63,51 @@ impl core::fmt::Debug for Spi0 {
 impl Spi0 {
     pub fn new(mmu: CacheHandle) -> Self {
         let regs = RegFile::new("SPI0", 0x400).with_names(regs::SPI0);
-        Self { regs, mmu }
+        Self {
+            regs,
+            mmu,
+            refused: Vec::new(),
+        }
+    }
+
+    /// A `cmd` trigger this block does not perform: say so once, and leave
+    /// the buffer alone.
+    ///
+    /// **Why the bit clears anyway, and what that models.** `cmd`'s trigger
+    /// bits are self-clearing on the part — the operation completes and the
+    /// register reads idle, which is what `Wait_SPI_Idle` spins for — so a
+    /// model that REMEMBERED the write would wedge any host polling it. That
+    /// is not hypothetical: esptool-js 0.6.0 puts the ESP32-C6's
+    /// `SPI_REG_BASE` at `0x6000_2000`, which is **this** block and not SPI1
+    /// at `0x6000_3000` (the PAC's own map, `esp32c6-0.23.2/src/lib.rs`), so
+    /// `readFlashId`'s `RDID` lands here. Measured 2026-09-09 through
+    /// Studio's own flash flow: the poll read `1<<18` ten times and
+    /// `ESPLoader.main()` threw `Unable to verify flash chip connection Error:
+    /// SPI command did not complete in time` — before the chip guard, before
+    /// any write.
+    ///
+    /// **And why nothing is executed.** What the part does *next* is measured
+    /// too, on the desk C6 (rev 2, over USB-Serial-JTAG, 2026-07-31, quoted in
+    /// `browser_esp32_flash.js`): the ID probe reads **0** and esptool prints
+    /// "Failed to communicate with the flash chip", while the stub's own
+    /// reads and writes work fine. So the faithful model of this register on
+    /// this part is "the command completes and the buffer is unchanged" — a
+    /// `w0` of 0 — and `main()` logs its warning and carries on, exactly as
+    /// it does on the board. Implementing an SPI0 `usr` engine over the flash
+    /// would answer with a real JEDEC id, which is a better-looking answer
+    /// than the silicon gives and therefore the wrong one.
+    fn refuse(&mut self, triggered: u32, cx: &mut BusCx<'_>) {
+        if self.refused.contains(&triggered) {
+            return;
+        }
+        self.refused.push(triggered);
+        cx.trace.note(&format!(
+            "cyc={} pc={:#010x} SPI0 cmd trigger {triggered:#010x} is not performed here — the \
+             bit self-clears and the w0..w15 buffer is unchanged, which is what the part does \
+             for a host-driven flash-id probe (see Spi0::refuse). SPI1 at 0x6000_3000 is the \
+             block that moves flash bytes.",
+            cx.now, cx.pc
+        ));
     }
 }
 
@@ -66,12 +123,21 @@ impl Peripheral for Spi0 {
                 lane_of(mmu.entry(mmu.index()), off, width)
             }
             ITEM_INDEX => lane_of(self.mmu.lock().unwrap().index(), off, width),
+            // Idle, always — see the note on the write side.
+            CMD => lane_of(0, off, width),
             _ => self.regs.read(off, width, cx),
         }
     }
 
     fn write(&mut self, off: u32, width: Width, value: u32, cx: &mut BusCx<'_>) {
         match off & !3 {
+            CMD => {
+                let word = merge_lane(0, off, width, value);
+                if word & CMD_TRIGGERS != 0 {
+                    self.refuse(word & CMD_TRIGGERS, cx);
+                }
+                self.regs.poke(CMD, 0);
+            }
             ITEM_CONTENT => {
                 let mut mmu = self.mmu.lock().unwrap();
                 let index = mmu.index();
