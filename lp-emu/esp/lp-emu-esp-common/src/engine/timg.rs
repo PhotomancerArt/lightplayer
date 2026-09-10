@@ -325,7 +325,9 @@ mod tests {
     use super::*;
     use crate::periph::Sandbox;
 
-    const MASK54: u64 = (1 << 54) - 1;
+    /// A counter width no part on the roadmap uses, so a test can never
+    /// pass by agreeing with some chip's real one.
+    const MASK: u64 = (1 << 48) - 1;
 
     /// A rate no chip supplies, so a test can never pass by accident because
     /// it happened to agree with the C6's numbers.
@@ -335,7 +337,7 @@ mod tests {
             alarm_enabled: false,
             auto_reload: false,
             rate: TickRate { numer, denom },
-            mask: MASK54,
+            mask: MASK,
             alarm: 0,
             load_value: 0,
         }
@@ -363,6 +365,10 @@ mod tests {
             ..c
         };
         assert_eq!(e.count(0, &stopped, 1_000), 0);
+        // The width mask is the view's, and it is applied: a narrow counter
+        // wraps rather than growing past its top.
+        let narrow = CounterConfig { mask: 0xff, ..c };
+        assert_eq!(e.count(0, &narrow, 700), 300 & 0xff);
     }
 
     #[test]
