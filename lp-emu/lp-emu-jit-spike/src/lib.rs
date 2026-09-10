@@ -111,6 +111,8 @@ struct Host {
 // Only meaningful with a single `--jit-region` file naming ONE region.
 
 const TRACE_REC: usize = 4 + 8 + 8 + 8 + 8 + 128 + 4 + 4 + 8 + 4 + 4 + 128;
+/// Granule of the between-entries memory delta.
+const GRAN: usize = 64;
 
 struct Recorder {
     dir: PathBuf,
@@ -124,6 +126,12 @@ struct Recorder {
     trace: Vec<u8>,
     mmio: Vec<u8>,
     mmio_this: u32,
+    /// Offsets/lengths of every bus region in the wasm memory: the only bytes
+    /// that can change, so the only ones worth diffing.
+    watch: Vec<(usize, usize)>,
+    /// The memory as the replay will have it at the previous sync point.
+    shadow: Vec<u8>,
+    delta: Vec<u8>,
 }
 
 thread_local! {
@@ -185,18 +193,48 @@ impl Recorder {
             trace: Vec::new(),
             mmio: Vec::new(),
             mmio_this: 0,
+            watch: Vec::new(),
+            shadow: Vec::new(),
+            delta: Vec::new(),
         })
+    }
+
+    /// The region is NOT self-contained: the interpreter runs the other blocks
+    /// between entries and writes memory. So each recorded entry carries the
+    /// granules that changed since the last sync — enough for the replay to
+    /// stand in for the interpreter without running it.
+    fn diff(&mut self, data: &[u8]) {
+        let start = self.delta.len();
+        self.delta.extend_from_slice(&0u32.to_le_bytes());
+        let mut count = 0u32;
+        for &(off, len) in &self.watch {
+            let mut at = off;
+            while at < off + len {
+                let n = GRAN.min(off + len - at);
+                if data[at..at + n] != self.shadow[at..at + n] {
+                    self.delta.extend_from_slice(&(at as u32).to_le_bytes());
+                    self.delta.extend_from_slice(&(n as u32).to_le_bytes());
+                    self.delta.extend_from_slice(&data[at..at + n]);
+                    self.shadow[at..at + n].copy_from_slice(&data[at..at + n]);
+                    count += 1;
+                }
+                at += n;
+            }
+        }
+        self.delta[start..start + 4].copy_from_slice(&count.to_le_bytes());
     }
 
     fn finish(&mut self) {
         let _ = std::fs::create_dir_all(&self.dir);
         std::fs::write(self.dir.join("trace.bin"), &self.trace).expect("trace.bin");
         std::fs::write(self.dir.join("mmio.bin"), &self.mmio).expect("mmio.bin");
+        std::fs::write(self.dir.join("delta.bin"), &self.delta).expect("delta.bin");
         eprintln!(
-            "jit-spike: recorded {} entries ({} bytes of trace, {} MMIO results) to {}",
+            "jit-spike: recorded {} entries ({} bytes of trace, {} MMIO results, {} bytes of memory delta) to {}",
             self.taken,
             self.trace.len(),
             self.mmio.len() / 8,
+            self.delta.len(),
             self.dir.display()
         );
         self.done = true;
@@ -268,6 +306,15 @@ fn kind_read(bus: &mut SocBus, addr: u32, kind: i32) -> Result<i32, lp_emu_core:
 pub fn install(hart: &mut MachineHart<SocBus>, bus: &mut SocBus, specs: Vec<RegionSpec>, model: CycleModel) {
     let mut config = Config::new();
     config.cranelift_opt_level(wasmtime::OptLevel::Speed);
+    // Guard-page bounds checks, the way a browser engine always does them.
+    // Without these wasmtime emits an explicit check on EVERY guest load and
+    // store, and the region runs 4.8x slower — a property of the native host,
+    // not of the emitted module. Measured: 308 -> 1481 M instr/s on the
+    // rocaille region (`examples/replay.rs`).
+    config.signals_based_traps(true);
+    config.memory_reservation(1 << 32);
+    config.memory_guard_size(1 << 31);
+    config.memory_may_move(false);
     let engine = Engine::new(&config).expect("wasmtime engine");
     let mut store = Store::new(
         &engine,
@@ -614,9 +661,24 @@ impl RegionJit<SocBus> for Jit {
             true
         });
         if let Some(dir) = &dump_to {
-            dump_mem(memory.data(&*store), dir);
+            let data = memory.data(&*store);
+            dump_mem(data, dir);
+            let watch: Vec<(usize, usize)> = bus
+                .region_spans()
+                .iter()
+                .map(|&(b, len, _)| (b.wrapping_sub(GUEST_BASE) as usize, len as usize))
+                .filter(|&(off, len)| off + len <= data.len())
+                .collect();
+            REC.with(|c| {
+                let mut b = c.borrow_mut();
+                let r = b.as_mut().expect("recorder");
+                r.shadow = data.to_vec();
+                r.watch = watch;
+            });
         }
         if taking {
+            let data = memory.data(&*store);
+            REC.with(|c| c.borrow_mut().as_mut().expect("recorder").diff(data));
             REC.with(|c| {
                 let mut b = c.borrow_mut();
                 let r = b.as_mut().expect("recorder");

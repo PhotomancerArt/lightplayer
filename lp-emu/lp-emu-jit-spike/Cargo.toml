@@ -20,6 +20,6 @@ lp-riscv-emu = { path = "../lp-riscv-emu", features = ["std"] }
 # The spike's E-spend, named: wasmtime (Apache-2.0 WITH LLVM-exception) as the
 # native host for the generated modules, and wasm-encoder (same licence) to
 # emit them. Both already in the workspace lockfile via lps-filetests.
-wasmtime = { version = "42", default-features = false, features = ["cranelift", "runtime"] }
+wasmtime = { version = "42", default-features = false, features = ["cranelift", "runtime", "std"] }
 wasm-encoder = "0.245"
 log = { workspace = true }
