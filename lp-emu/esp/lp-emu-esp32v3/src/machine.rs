@@ -108,6 +108,8 @@ pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     "RTC_CNTL",
     // Direct load, stop 3: `Clocks::init` reads `APB_CTRL.sysclk_conf`.
     "APB_CTRL",
+    // Direct load, stop 4: `measure_rtc_clock` reads `TIMG0.rtccalicfg`.
+    "TIMG0",
     // ROM-up, stop 1: `_ResetHandler_efuse_check_patch` reads its own
     // fuses seven instructions after the reset vector.
     "EFUSE",
