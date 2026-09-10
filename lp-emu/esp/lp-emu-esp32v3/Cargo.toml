@@ -11,6 +11,10 @@ description = "The classic ESP32 (v3, LX6) machine: memory map, mask-ROM loader,
 [lints]
 workspace = true
 
+[[bin]]
+name = "lp-emu-esp32v3"
+path = "src/bin/lp-emu-esp32v3.rs"
+
 [dependencies]
 lp-emu-core = { path = "../../lp-emu-core", features = ["std"] }
 lp-emu-esp-common = { path = "../lp-emu-esp-common" }
@@ -21,8 +25,15 @@ lp-emu-esp-common = { path = "../lp-emu-esp-common" }
 # nothing.
 lp-xt-emu = { path = "../../lp-xt-emu" }
 log = { workspace = true }
+env_logger = { workspace = true }
 
 [dev-dependencies]
+# `tests/boot.rs` checks the ROM hook table's `break 1, 15` patch against the
+# ENCODER rather than against a hand-derived word. M0 found a real misdecode
+# in this repo that came from trusting an encoding by analogy, so the oracle
+# is `lp_xt_inst::encode` and not arithmetic in a comment. A dev-dependency:
+# the constant itself is `src/rom.rs`'s, and only the test needs the encoder.
+lp-xt-inst = { path = "../../../lp-xt/lp-xt-inst" }
 # The vendored ROM's checksum test. Reading `SHA256SUMS` and re-deriving the
 # digest in-process is what makes a swapped ROM fail the build's tests rather
 # than a boot; shelling out to `shasum` would make the assertion depend on

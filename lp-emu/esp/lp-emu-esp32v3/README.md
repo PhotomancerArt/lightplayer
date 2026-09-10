@@ -9,14 +9,105 @@ and a run loop, and the result takes a `fw-esp32v3` binary.
 It is `lp-emu-esp32c6`'s twin, deliberately: same shape, same module names,
 different silicon.
 
-> **M3 P1.** What exists today is the memory map, the generated register-name
-> tables and the vendored mask ROM. The sections below that name a later phase
-> are stubs, and they say so rather than describing a machine that does not
-> exist yet.
+> **M3 P2.** What exists today is the memory map, the generated register-name
+> tables, the vendored mask ROM, the bus, the two-slot machine, the run loop,
+> the snapshot and a CLI that runs to the first strict stop. **No peripheral
+> is modelled.** The sections below that name a later phase are stubs, and
+> they say so rather than describing a machine that does not exist yet.
 
 ## The machine
 
-*P2.* One bus, two `XtHart` slots with core 1 stalled, one schedule.
+One bus, **two** `XtHart<SocBus>` slots, one schedule.
+
+The layering is `lp-emu-esp32c6/README.md:15-69`'s, and the classic differs in
+exactly two ways:
+
+- the hart is `lp_xt_emu::mach::XtHart<SocBus>` rather than
+  `lp_riscv_emu::mach::MachineHart<SocBus>`, and
+- **`harts` has two slots, and slot 1 is stalled for the whole of M3.**
+
+### What "stalled" means here
+
+The classic is dual-core. Slot 1 is *constructed* — it holds architectural
+state, it appears in a snapshot, `--probe` and the run report name it — and it
+is **never given a slice**, so it consumes no guest time. `Machine::run_until`
+asserts `stalled[1]` before every slice rather than assuming it.
+
+That is Q5's answer for this milestone, and it is a supported configuration of
+the firmware rather than a hole: `start_app_core` times out and the image takes
+its documented single-core fallback (`lp-fw/fw-esp32v3/src/main.rs:838-845`,
+which prints `[INIT] APP core unavailable; RMT ISR on PRO core (single-core
+semantics)`). **M4 is where core 1 runs**, with an interrupt matrix and the
+deterministic quantum interleave.
+
+On silicon a stalled core is held by two register pairs, and P4 wires
+`Machine::core_stalled` to them: `RTC_CNTL.options0.sw_stall_appcpu_c0` plus
+`RTC_CNTL.sw_cpu_stall.sw_stall_appcpu_c1` (both halves of the key) and
+`DPORT.appcpu_ctrl_c.appcpu_runstall`. In P2 none of those registers exists,
+so it is a plain machine field.
+
+### The reset state, and the boot state
+
+`XtHart::new` leaves the **architectural** reset value: `PS = 0x1F`,
+`VECBASE = 0x4000_0000`, `pc = 0x4000_0400`. A rom-up run starts exactly there
+and seeds nothing — the ROM's own reset vector sets `PS` itself.
+
+A **direct load** seeds `PS = PS_BOOT = 0x0006_0020` (`WOE | UM |
+CALLINC(2)`), the Xtensa twin of the C6's `mstatus = 0x1888`. The `CALLINC(2)`
+is not decoration: the IDF bootloader reaches the application's entry through
+an ordinary C call, which on the windowed ABI is `callx8`, so the app's
+`Reset:` runs as frame **2** and the bootloader's frame 0 stays live behind it.
+
+Which is why a direct load also seeds a **boot frame** (`BootFrame`):
+
+- `a1`, the outermost live frame's stack pointer, and
+- the four words of that frame's base save area at `[a1-16, a1)`.
+
+Without them `a1 = 0`, and nothing notices until the first register spill —
+`_WindowOverflow8`'s `l32e a0, a1, -12` then reads `0xFFFF_FFF4`, faults, and
+the fault's own spill faults again. A double exception, forever, nowhere near
+its cause.
+
+P2 pins `a1` to the mask ROM's own PRO-core stack top, `__stack`, **resolved
+from the vendored ROM ELF** (`0x3FFE_3F20` — the same address
+`third_party/esp-hal/ld/esp32/memory.x:32` derives `reserved_rom_stack_pro`
+from). That is the right shape and a cited value; it is **not yet the
+bootloader's own SP**, which P3 pins from the bootloader disassembly or from a
+rom-up run that gets that far. `BootFrame` is a builder parameter for exactly
+that reason.
+
+### Time
+
+`TimeGrade` is **t1 only** in M3: cycles are instructions, and
+`micros = cycles / 240` (`memmap::CPU_HZ`). `--time-grade t2` is refused with a
+message naming the calibration that does not exist: there is no measured
+Xtensa per-instruction-class table in this repo, and six months from now an
+invented one would be indistinguishable from a measured one. The classic does
+have a better calibration source than the C6 ever had — `CCOUNT` is CPU cycles
+at 240 MHz — but that is an M5/M7 opportunity, not an M3 one.
+
+### Two decisions the bus makes, and one gap it has
+
+**RTC fast memory's instruction-bus view is not mapped.** `memory.x:51` and
+`:54` put the same 8 KiB block behind `0x400C_0000` (I) and `0x3FF8_0000` (D).
+`SocBus` cannot express that: its regions are asserted non-overlapping and its
+bytes live in one flat arena keyed on `address - arena_base`, so two regions
+are two independent stores and a write through one is invisible through the
+other. So the D-bus view is mapped and the I-bus view is **named and
+unmapped** — the SRAM1-alias rule applied consistently. A strict stop naming
+`0x400C_xxxx` is the evidence that would justify an alias region and a phase of
+its own.
+
+**SRAM0's word-only rule is named, not enforced.** `SocBus`'s `RamRegion`
+carries `exec` and `writable` and nothing else; the `AccessRule::WordOnly` the
+measurement calls for lives on `lp-xt-emu`'s own flat `Memory`, and adding one
+to the shared bus is an edit to `lp-emu-esp-common`, which M2 owns and M3 may
+only read. So on this machine a guest byte store into SRAM0 **succeeds** where
+silicon faults. A known gap, written down where the region is.
+
+`bus_setup::deliberately_unmapped()` is the list a strict stop consults, so a
+refusal inside one of these windows says which window it was and why it is
+absent, instead of "unmapped".
 
 ## The memory map
 
@@ -114,8 +205,13 @@ buffer (the same shim, for the same reason, as
 
 ## Direct load
 
-*P3.* `--elf`, and the list of everything the real ROM-and-bootloader path
-does that this one does not.
+*P2 seam, P3 completion.* `--elf` places the application's `PT_LOAD`s by vaddr
+and seeds the entry, `PS_BOOT` and the boot frame described above. That is
+**all** it does. The eleven things a direct load does not reproduce
+(`m3/notes.md` §3) — the partition table, the flash MMU programming, the ROM
+console, `g_rom_flashchip`, the reset cause, eFuse, the APP core's release from
+`sw_stall` — are P3's, and every one of them needs a peripheral P2 does not
+have.
 
 ## Booting from the reset vector
 
@@ -142,16 +238,85 @@ truth table is the board's, not the chip's.
 *P2 skeleton, P8 completion.* `just emu-esp32v3 <elf>` is the door; the recipe
 exists from P1 so the door has one name for its whole life.
 
+```
+--elf <path>            direct-load this image
+--boot-mode direct|rom-up
+--rom <path>            override the embedded mask ROM
+--strict-bus            an access nothing claims is a STOP, not a zero
+--time-grade t1         the only grade this machine defines
+--timeout <5s|1500ms|900us>   EMULATED time
+--wall-timeout <s>      the host-clock safety net; exits 4
+--break-at <symbol>     stop at its first instruction
+--probe <cycle>:<name>  print the word at a symbol at a guest cycle
+--trace <path|->  --trace-block <name>
+--seed <n>   --hooks   --map   --help
+```
+
+⚠️ `--timeout` is **emulated** time (PD9): no host gate runs on emulated
+microseconds, and `--wall-timeout` is the separate wall-clock end.
+
+⚠️ **An unrecognised flag is an error.** The doors P6/P7/P8 add (`--uart0`,
+`--uart0-script`, `--control`, `--flash`, `--cache-off-fetch`) are deliberately
+*not* stubbed with no-ops, so the phase that adds one is visible in the diff
+instead of silently changing what an old command line meant.
+
+Exit codes are the C6's contract: 0 deadline, 2 fault, 3 strict-bus refusal,
+4 wall timeout, 5 `--break-at`.
+
 ## Bring-up loop
 
-*P3.* Run strict, read the first stop, model that block, run again.
+P2 is the first phase that can run it, and P3 runs it in anger.
+
+1. Run `--strict-bus --trace`.
+2. Read the **first** stop. `Machine::first_strict_violation` names the
+   earliest, and **the earliest strict stop is the root** — an exception after
+   it is downstream and tells you nothing.
+3. Model that one block, with the pin cited: a PAC reset value, a ROM
+   disassembly, a linker-script constant. Never "what the boot needed".
+4. Run again.
+
+Without `--strict-bus` the run carries on with unmapped reads answering zero,
+which is how far the machine gets before a block is modelled — useful for
+scouting, never for a claim.
+
+**Where P2 leaves it.** Both of these are expected stops and the phase's
+evidence, not failures:
+
+```text
+$ lp-emu-esp32v3 --boot-mode rom-up --strict-bus --timeout 50ms
+STRICT BUS STOP
+  pc      = 0x4000fdd8 (~_rtc_trigger_sw_system_reset+0x11)
+  cycle   = 7 (0 us emulated)
+  access  = Read Word at 0x3ff5a000
+  where   = inside the declared MMIO window — an UNMODELLED BLOCK
+```
+
+`0x3FF5_A000` is **EFUSE**, and the pc is inside
+`_ResetHandler_efuse_check_patch` (`0x4000_FDA0` — the tilde on the reported
+name means "nearest preceding label", and this ROM's labels are mostly
+zero-sized). Seven instructions after the reset vector, the mask ROM reads its
+own eFuses.
+
+```text
+$ lp-emu-esp32v3 --elf …/fw-esp32v3 --strict-bus --timeout 50ms
+STRICT BUS STOP
+  pc      = 0x40125775 (esp_hal::soc::xtensa::esp32_init+0x175)
+  cycle   = 29 (0 us emulated)
+  access  = Write Word at 0x3ff00218
+  where   = inside the declared MMIO window — an UNMODELLED BLOCK
+```
+
+`0x3FF0_0218` is **DPORT + 0x218**, the first entry of `core_1_intr_map`:
+twenty-nine instructions in, `esp_hal::init` starts clearing the APP core's
+interrupt map.
 
 ## Tests
 
 | Test | What it holds |
 |---|---|
 | `tests/memmap.rs` | No two declared regions overlap; every `periph::*` base is inside the MMIO window; `dram_seg` is 8 KiB above the ROM's reserve with `RESERVE_DRAM = 0`; the vector table is 1 KiB below the IRAM; SRAM0 is one region containing the bootloader's `0x4007_8000`; the SRAM1 I-bus alias is named and unmapped; the ROM extents match the vendored ELF; 240 cycles to the microsecond |
-| `tests/rom_vendoring.rs` | The embedded ROM's sha256, re-derived in-process, is the one `SHA256SUMS` records — and the file on disk is still that file |
+| `tests/rom_vendoring.rs` | The embedded ROM's sha256, re-derived in-process from `rom::VENDORED_V3_ROM` itself, is the one `SHA256SUMS` records — and the file on disk is still that file |
+| `tests/boot.rs` | 39 `PT_LOAD`s, thirteen empty and counted, the ELF-header-mapping segment recognised, four relocated segments placed by vaddr; the ten vector sections at their documented `VECOFS`; at least eight non-alloc sections seeded with real bytes, `.data_xtos_pro` among them; `break 1, 15` matching `lp_xt_inst::encode`; the hook table shipping empty; two hart slots with slot 1 stalled and taking no cycles; `PS_BOOT` after a direct seed; the boot frame's spill target mapped where an unseeded one is not; a seeded hart surviving a real exception; a strict rom-up run stopping inside the MMIO window; snapshot round-trip |
 
 Run them with `just test-emu-esp32v3`.
 
