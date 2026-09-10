@@ -55,6 +55,10 @@ pub mod control;
 pub mod flash;
 pub mod image;
 pub mod intmatrix;
+/// The translated core, behind the optional `jit` feature. See its own docs
+/// for why the glue lives here and not in `lp-emu-jit`.
+#[cfg(feature = "jit")]
+pub mod jit;
 pub mod loader;
 pub mod lockstep;
 pub mod machine;

@@ -2405,6 +2405,26 @@ test-emu-c6-cli:
 test-emu-jit:
     LP_EMU_BUILD_FW=1 cargo test -p lp-emu-jit -- --include-ignored --nocapture
 
+# The translated module's answers, checked in three engines (M7 JD19).
+#
+# The round-trip test emits the modules and asserts them under wasmtime; each
+# case is written out with the memory it started from, the answers its imports
+# gave in call order — including the memory granules an escaped instruction's
+# interpreter wrote — and everything it produced. The same module bytes then
+# run under `node` (V8) and `bun` (JavaScriptCore, the phone's engine family)
+# against the same inputs, so a divergence is the engine or the emitter and
+# cannot be a second host disagreeing with the first.
+#
+# The spike found V8 and JSC 1.6x apart on speed; P2 found JSC's fused
+# `Table.grow` silently producing a table `call_indirect` could not use. A
+# single-engine wasm answer is not a wasm answer.
+test-emu-jit-engines:
+    rm -rf target/jit-cases
+    LP_EMU_JIT_ENGINE_CASE="$PWD/target/jit-cases" cargo test -q -p lp-emu-jit \
+        --features host-wasmtime --test translate_roundtrip
+    node scripts/emu/jit-engine-check.mjs target/jit-cases
+    bun scripts/emu/jit-engine-check.mjs target/jit-cases
+
 # `lp-cli emu serve`'s WebSocket door: the registry, the two endpoints, the
 # coupling rule, `reset`, and the upload walk over `serial:ws://…` landing
 # `upload-walk-usb`'s figures (emulator plan two, M1).

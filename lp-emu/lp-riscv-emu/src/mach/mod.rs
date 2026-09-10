@@ -230,7 +230,36 @@ pub struct MachineHart<B: Bus> {
     /// [`mach::translated`]: translated
     core: Option<translated::BoxedCore<B>>,
     core_entries: Vec<u32>,
+    /// An invalidation asked for while the core was lifted out of the hart —
+    /// see [`MachineHart::drain_core_flush`]. The block cache's
+    /// [`block_flush_pending`](Self::block_flush_pending) is the same idea,
+    /// and `fence.i` is why both exist.
+    core_flush_pending: PendingInvalidate,
     _bus: PhantomData<fn(&mut B)>,
+}
+
+/// An invalidation held for a translated core that is not currently in the
+/// hart.
+///
+/// Two ranges cannot be merged without losing precision in the *unsafe*
+/// direction, so a second range widens the whole thing to
+/// [`PendingInvalidate::All`]. Invalidating too much is slow; invalidating too
+/// little is wrong.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PendingInvalidate {
+    None,
+    Range(u32, u32),
+    All,
+}
+
+impl PendingInvalidate {
+    fn add(self, range: Option<(u32, u32)>) -> Self {
+        match (self, range) {
+            (Self::All, _) | (_, None) => Self::All,
+            (Self::None, Some((lo, hi))) => Self::Range(lo, hi),
+            (Self::Range(..), Some(_)) => Self::All,
+        }
+    }
 }
 
 impl<B: Bus> Clone for MachineHart<B> {
@@ -262,6 +291,7 @@ impl<B: Bus> Clone for MachineHart<B> {
             // clone's bus may not have.
             core: None,
             core_entries: Vec::new(),
+            core_flush_pending: PendingInvalidate::None,
             _bus: PhantomData,
         }
     }
@@ -308,6 +338,7 @@ impl<B: Bus> MachineHart<B> {
             block_flush_pending: false,
             core: None,
             core_entries: Vec::new(),
+            core_flush_pending: PendingInvalidate::None,
             _bus: PhantomData,
         }
     }
@@ -323,6 +354,9 @@ impl<B: Bus> MachineHart<B> {
     pub fn set_translated_core(&mut self, core: translated::BoxedCore<B>, entries: &[u32]) {
         self.core_entries = translated::entry_table(entries);
         self.core = Some(core);
+        // A freshly installed core knows exactly what it holds, so anything
+        // recorded for the core it replaces is not its business.
+        self.core_flush_pending = PendingInvalidate::None;
     }
 
     /// Remove the installed core, if any, and go back to interpreting.
@@ -332,6 +366,7 @@ impl<B: Bus> MachineHart<B> {
     pub fn clear_translated_core(&mut self) {
         self.core = None;
         self.core_entries = Vec::new();
+        self.core_flush_pending = PendingInvalidate::None;
     }
 
     /// Is a translated core installed?
@@ -458,8 +493,12 @@ impl<B: Bus> MachineHart<B> {
     /// restore, a reboot.
     #[inline]
     pub fn invalidate_blocks(&mut self) {
-        if let Some(core) = self.core.as_mut() {
-            core.invalidate(None);
+        match self.core.as_mut() {
+            Some(core) => core.invalidate(None),
+            // The core is lifted out of `self` for the whole of a slice, for
+            // the same reason the cache is, so a flush asked for from inside
+            // one is recorded and applied where the core is.
+            None => self.core_flush_pending = self.core_flush_pending.add(None),
         }
         match self.cache.as_mut() {
             Some(cache) => cache.invalidate_all(),
@@ -480,8 +519,9 @@ impl<B: Bus> MachineHart<B> {
     /// the safe direction.
     #[inline]
     pub fn invalidate_block_range(&mut self, lo: u32, hi: u32) {
-        if let Some(core) = self.core.as_mut() {
-            core.invalidate(Some((lo, hi)));
+        match self.core.as_mut() {
+            Some(core) => core.invalidate(Some((lo, hi))),
+            None => self.core_flush_pending = self.core_flush_pending.add(Some((lo, hi))),
         }
         match self.cache.as_mut() {
             Some(cache) => cache.invalidate_range(lo, hi),
@@ -519,6 +559,20 @@ impl<B: Bus> MachineHart<B> {
         if self.block_flush_pending {
             self.block_flush_pending = false;
             cache.invalidate_all();
+        }
+    }
+
+    /// Apply an invalidation that was asked for while the translated core was
+    /// lifted out of the hart. `fence.i` reached through the escape hatch is
+    /// the reason this exists: translated code called `step_one`, the
+    /// instruction it ran was the guest publishing its shader, and the core
+    /// that has to forget what it translated was in the caller's hand at the
+    /// time.
+    fn drain_core_flush(&mut self, core: &mut translated::BoxedCore<B>) {
+        match core::mem::replace(&mut self.core_flush_pending, PendingInvalidate::None) {
+            PendingInvalidate::None => {}
+            PendingInvalidate::Range(lo, hi) => core.invalidate(Some((lo, hi))),
+            PendingInvalidate::All => core.invalidate(None),
         }
     }
 
@@ -724,6 +778,40 @@ impl<B: Bus> MachineHart<B> {
         }
     }
 
+    /// Run **exactly one** guest instruction at `pc()`, the way the
+    /// interpreter always has, and report whether the slice is over.
+    ///
+    /// This is the escape hatch (M7 JD10): the one thing a translated core
+    /// calls when it meets an instruction it does not translate. It is the
+    /// same [`step_once`](Self::step_once) the single-stepping loop runs — not
+    /// a second copy of it — so the trap, CSR, `wfi`, `ebreak`, `fence.i` and
+    /// polling-point behaviour a translated stay inherits is the interpreter's
+    /// own by construction, and cannot drift from it.
+    ///
+    /// Afterwards [`pc`](Self::pc), [`cycle_count`](Self::cycle_count),
+    /// [`instruction_count`](Self::instruction_count) and
+    /// [`regs`](Self::regs) are what the interpreter would have left. `None`
+    /// means the caller may continue; `Some` is a slice end the caller must
+    /// report back, because a translated core does not get to swallow a `wfi`,
+    /// an `ebreak` or a bus yield.
+    pub fn step_one(&mut self, bus: &mut B) -> Option<SliceEnd> {
+        self.step_once(bus)
+    }
+
+    /// Set `mcycle` and `minstret` from outside the guest.
+    ///
+    /// A translated core keeps both in host registers for the length of a stay
+    /// and has to hand them back before anything the guest can observe reads
+    /// them — the escape hatch above, and every exit (M7 JD17). Neither
+    /// counter is WARL and neither is polled as a side effect, so this is a
+    /// plain write; the *monotonicity* [`advance_to_cycle`](Self::advance_to_cycle)
+    /// protects is the scheduler's idle skip, which is a different job.
+    #[inline]
+    pub fn set_counters(&mut self, cycle_count: u64, instruction_count: u64) {
+        self.cycle_count = cycle_count;
+        self.instruction_count = instruction_count;
+    }
+
     /// One instruction: fetch it, run it, charge what the bus billed.
     ///
     /// `None` means "keep going"; `Some` ends the slice.
@@ -760,22 +848,39 @@ impl<B: Bus> MachineHart<B> {
 
     /// The same slice, run out of pre-decoded blocks.
     ///
-    /// The cache is lifted out of `self` for the whole slice so the arena and
-    /// the hart's registers are two disjoint borrows rather than one; that is
-    /// two pointer moves per slice, against ~419 instructions per slice on
-    /// `render-basic`.
+    /// The cache **and the translated core** are lifted out of `self` for the
+    /// whole slice so the arena and the hart's registers are two disjoint
+    /// borrows rather than one, and so a core can be handed the hart it lives
+    /// on (see [`translated`]'s module docs). That is four pointer moves per
+    /// slice, against ~419 instructions per slice on `render-basic`. Both go
+    /// back on every exit path — including the one where `run_blocks` gives up
+    /// and finishes the slice by single-stepping.
     fn run_slice_cached(&mut self, bus: &mut B, end: u64) -> SliceEnd {
         let mut cache = self
             .cache
             .take()
             .unwrap_or_else(|| Box::new(BlockCache::with_defaults()));
+        let mut core = self.core.take();
         self.drain_block_flush(&mut cache);
-        let out = self.run_blocks(&mut cache, bus, end);
+        if let Some(core) = core.as_mut() {
+            self.drain_core_flush(core);
+        }
+        let out = self.run_blocks(&mut cache, core.as_mut(), bus, end);
+        if let Some(core) = core.as_mut() {
+            self.drain_core_flush(core);
+        }
+        self.core = core;
         self.cache = Some(cache);
         out
     }
 
-    fn run_blocks(&mut self, cache: &mut BlockCache<RvSlot<B>>, bus: &mut B, end: u64) -> SliceEnd {
+    fn run_blocks(
+        &mut self,
+        cache: &mut BlockCache<RvSlot<B>>,
+        mut core: Option<&mut translated::BoxedCore<B>>,
+        bus: &mut B,
+        end: u64,
+    ) -> SliceEnd {
         loop {
             if self.cycle_count >= end {
                 return SliceEnd::BudgetExhausted;
@@ -784,28 +889,49 @@ impl<B: Bus> MachineHart<B> {
             // The translated-core entry, ahead of the block cache: one table
             // read and one compare when no core is installed, which is what
             // keeps this free on the interpreted path.
-            if let Some(core) = self.core.as_mut()
+            if let Some(core) = core.as_mut()
                 && self.core_entries[translated::entry_slot(pc)] == pc
             {
-                let cx = translated::EntryCx {
-                    regs: &mut self.regs,
-                    pc,
-                    cycle_count: self.cycle_count,
-                    instruction_count: self.instruction_count,
-                    end,
-                };
+                // Read before the call: the escape hatch runs guest
+                // instructions through the hart itself, so `self` may not
+                // still hold the entry counter by the time the core returns.
+                let entry_instret = self.instruction_count;
+                let outcome = core.run(self, bus, end);
+                // The escape hatch can have retired a `fence.i`, and both the
+                // cache and the core it wanted flushed were out here rather
+                // than in the hart. Drain before either is consulted again.
+                self.drain_block_flush(cache);
+                self.drain_core_flush(core);
+                // The escape hatch ran something that ended the slice — a
+                // `wfi`, an `ebreak`, a bus yield, a fault. The interpreter's
+                // own answer, handed straight back: a translated stay does not
+                // get to swallow one, and the counters are applied first so the
+                // machine resumes exactly where it would have.
+                if let translated::RunOutcome::Ended {
+                    pc: new_pc,
+                    cycle_count,
+                    instruction_count,
+                    end: over,
+                } = outcome
+                {
+                    self.pc = new_pc;
+                    self.cycle_count = cycle_count;
+                    self.instruction_count = instruction_count;
+                    return over;
+                }
+                let mut progressed = false;
                 if let translated::RunOutcome::Ran {
                     pc: new_pc,
                     cycle_count,
                     instruction_count,
                     after_store,
-                } = core.run(cx, bus)
+                } = outcome
                     // The no-progress guard. A core whose first block does
                     // not fit the remaining budget returns `Ran` having done
                     // nothing; without this the loop would ask it again
                     // forever. The interpreter runs the block instead, which
                     // is exactly what happens when the budget is short.
-                    && (new_pc != pc || instruction_count != self.instruction_count)
+                    && (new_pc != pc || instruction_count != entry_instret)
                 {
                     self.pc = new_pc;
                     self.cycle_count = cycle_count;
@@ -820,6 +946,18 @@ impl<B: Bus> MachineHart<B> {
                             return SliceEnd::BusYield;
                         }
                     }
+                    progressed = true;
+                }
+                // The escape hatch runs arbitrary guest instructions, so it
+                // may also have run the CSR write that arms an execute
+                // watchpoint — the one thing that makes decoding ahead unsafe
+                // in the middle of a slice. Checked after the outcome is
+                // applied, so the hart resumes at the pc the core reported.
+                if !bus.fetch_is_pure() {
+                    cache.invalidate_all();
+                    return self.run_slice_stepping(bus, end);
+                }
+                if progressed {
                     continue;
                 }
             }

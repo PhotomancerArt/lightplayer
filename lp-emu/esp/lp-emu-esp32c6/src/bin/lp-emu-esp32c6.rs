@@ -211,6 +211,19 @@ OPTIONS:
                             and the same promise --no-block-cache makes:
                             every byte of every transcript must be the same
                             either way
+    --jit                   translate the blocks reachable from the entry
+                            point and run those through the host's wasm
+                            engine. Needs a build with `--features jit`;
+                            off by default (M7 JD18)
+    --jit-escape-all        with --jit: emit NO guest semantics at all and
+                            hand every instruction to the interpreter through
+                            the escape hatch. Complete, correct and slow, and
+                            the proof that a partial translator can only be
+                            slow and never wrong
+    --jit-blocks <N>        with --jit: how many blocks the sweep from the
+                            entry point may find. The default suits the
+                            emission policy, and a set the host refuses to
+                            compile is halved and retried
     --jit-report            print what the translated core translated, how
                             much of the run it covered, how often it left for
                             the interpreter, and what boot cost to build it
@@ -313,6 +326,12 @@ struct Args {
     /// boot cost of building it (emit ms, module bytes, engine compile ms,
     /// instantiate ms — M7 JD20).
     jit_report: bool,
+    /// `--jit`: build and install a translated core.
+    jit: bool,
+    /// `--jit-escape-all`: every instruction through the escape hatch.
+    jit_escape_all: bool,
+    /// `--jit-blocks <N>`: the bound on P3's sweep.
+    jit_blocks: Option<usize>,
     strict_grade: Option<RegGrade>,
     strict_grade_blocks: Option<Vec<&'static str>>,
     probes: Vec<(u64, String)>,
@@ -339,6 +358,8 @@ fn run() -> Result<ExitCode, String> {
         .block_cache(!args.no_block_cache)
         .translate(!args.interpreter)
         .jit_report(args.jit_report)
+        .jit(args.jit)
+        .jit_escape_all(args.jit_escape_all)
         .strict_grade(args.strict_grade)
         .strict_grade_blocks(args.strict_grade_blocks.clone())
         .efuse(args.efuse)
@@ -357,6 +378,9 @@ fn run() -> Result<ExitCode, String> {
         .tx_log(args.tx_log.clone())
         .strip(args.strip.order, args.strip.timing);
 
+    if let Some(blocks) = args.jit_blocks {
+        builder = builder.jit_blocks(blocks);
+    }
     if let Some(len) = args.flash_len {
         builder = builder.flash_len(len);
     }
@@ -680,6 +704,15 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--strict-bus" => args.strict = true,
             "--no-block-cache" => args.no_block_cache = true,
             "--interpreter" => args.interpreter = true,
+            "--jit" => args.jit = true,
+            "--jit-escape-all" => args.jit_escape_all = true,
+            "--jit-blocks" => {
+                let text = value("--jit-blocks")?;
+                args.jit_blocks = Some(
+                    text.parse()
+                        .map_err(|e| format!("--jit-blocks `{text}`: {e}"))?,
+                );
+            }
             "--jit-report" => args.jit_report = true,
             "--probe" => args.probes.push(parse_probe(&value("--probe")?)?),
             "--break-at" => args.break_at.push(value("--break-at")?),

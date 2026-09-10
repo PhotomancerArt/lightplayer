@@ -34,6 +34,21 @@ rustc-demangle = "0.1"
 # model of the same peripheral.
 lp-ws281x = { path = "../../../lp-fw/lp-ws281x", default-features = false }
 
+# The translator, and with it the wasmtime host that runs what it emits.
+# OPTIONAL and off by default, deliberately (JD9, JD18): the product host is
+# the browser's own engine, `wasmtime` needs minutes of cranelift compilation
+# on the images this ladder measures, and every test and CI job depends on
+# this binary starting fast. `--jit` on a build without this feature says so
+# and exits.
+[dependencies.lp-emu-jit]
+path = "../../lp-emu-jit"
+features = ["host-wasmtime"]
+optional = true
+
+[features]
+# `--jit`: install a translated core. See the dependency above.
+jit = ["dep:lp-emu-jit"]
+
 [dev-dependencies]
 test-log = { workspace = true }
 # The vendored ROM's checksum test. Reading `SHA256SUMS` and re-deriving the

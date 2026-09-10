@@ -29,6 +29,31 @@
 //! core is installed. A core leaves at exactly the boundaries the interpreter
 //! would have stopped at, and reports an after-store exit so the hart can
 //! take polling point (c) itself.
+//!
+//! # Why a core is handed the whole hart
+//!
+//! P1 handed a core a small `EntryCx` — the register file, the pc and the two
+//! counters — on the reasoning that a core which refuses should not be able to
+//! reach anything else. P3 had to widen that, because of the **escape hatch**
+//! (M7 JD10): translated code that meets an instruction it does not understand
+//! calls back in to have the interpreter run exactly that one instruction, and
+//! "exactly as the interpreter would" means traps, CSRs and interrupt
+//! delivery. That is [`MachineHart::step_one`], and it needs the hart.
+//!
+//! A core cannot borrow the hart while the hart owns the core, so
+//! [`MachineHart::run_slice`](super::MachineHart::run_slice)'s cached loop
+//! **lifts the core out of the hart** for the length of a slice, exactly as it
+//! already lifts the block cache out and for the same reason. Both go back on
+//! every exit path. An invalidation asked for while a core is lifted out is
+//! recorded and applied when it goes back — the same shape the block cache's
+//! deferred flush uses, and `fence.i` is why both exist.
+//!
+//! What [`RunOutcome`] promises is unchanged by that widening: a core reports
+//! where it left, what it charged and whether the exit was an after-store one,
+//! and a core that refuses has still changed nothing. The one new obligation
+//! is that a core which *does* run must leave the hart's own `pc`, `mcycle`
+//! and `minstret` agreeing with what it reports, because the escape hatch will
+//! have moved them.
 
 extern crate alloc;
 
@@ -38,28 +63,7 @@ use alloc::vec::Vec;
 
 use lp_emu_core::Bus;
 
-/// The hart state handed to a translated core at entry.
-///
-/// `regs` is read and written **in place** — a core that runs guest code has
-/// to leave the register file where the interpreter will find it. Everything
-/// else comes back in [`RunOutcome`], so a core that refuses has changed
-/// nothing.
-pub struct EntryCx<'a> {
-    /// The architectural register file. `x0` is index 0 and must still read
-    /// zero when the core returns.
-    pub regs: &'a mut [i32; 32],
-    /// Where the core is being entered.
-    pub pc: u32,
-    /// `mcycle` at entry.
-    pub cycle_count: u64,
-    /// `minstret` at entry.
-    pub instruction_count: u64,
-    /// The slice deadline, absolute. Not one instruction may **start** at or
-    /// past it: that is the interpreter's rule (M5 MD3) and a translated core
-    /// is held to the same one, per block, against the block's own maximum
-    /// cost.
-    pub end: u64,
-}
+use super::MachineHart;
 
 /// What a translated core did.
 pub enum RunOutcome {
@@ -74,6 +78,24 @@ pub enum RunOutcome {
         /// then `resample_external`, `take_yield()` then end the slice.
         after_store: bool,
     },
+    /// It ran, and the last thing it did **ended the slice**.
+    ///
+    /// P1 had no variant for this because P1 had no escape hatch. A core that
+    /// calls [`MachineHart::step_one`] is running arbitrary guest
+    /// instructions, and some of those end a slice rather than retiring into
+    /// the next one: a `wfi`, an `ebreak`, a bus yield, a double fault. The
+    /// interpreter's own loop returns those from `step_once` and a translated
+    /// core does not get to swallow them, so it hands the [`SliceEnd`] back
+    /// untouched and the hart returns it.
+    ///
+    /// `pc` and the counters are applied exactly as for [`RunOutcome::Ran`]
+    /// first, so the machine resumes where the interpreter would have.
+    Ended {
+        pc: u32,
+        cycle_count: u64,
+        instruction_count: u64,
+        end: super::SliceEnd,
+    },
     /// Nothing ran and nothing changed. The interpreter continues at the
     /// entry `pc` as if no core were installed.
     ///
@@ -86,8 +108,20 @@ pub enum RunOutcome {
 
 /// A core that can execute guest instructions in the hart's place.
 pub trait TranslatedCore<B: Bus> {
-    /// Run from `cx.pc` until the core decides to leave.
-    fn run(&mut self, cx: EntryCx<'_>, bus: &mut B) -> RunOutcome;
+    /// Run from `hart.pc()` until the core decides to leave.
+    ///
+    /// `end` is the slice deadline, absolute. Not one instruction may
+    /// **start** at or past it: that is the interpreter's rule (M5 MD3) and a
+    /// translated core is held to the same one, per block, against the block's
+    /// own maximum cost.
+    ///
+    /// The hart is handed over whole so the core can reach
+    /// [`MachineHart::step_one`] — see this module's docs. The core is *not*
+    /// installed on the hart it is given: the hart lifted it out before the
+    /// call and puts it back afterwards, so `hart.has_translated_core()` reads
+    /// `false` here and re-entering translated code from inside `run` is not
+    /// possible by construction.
+    fn run(&mut self, hart: &mut MachineHart<B>, bus: &mut B, end: u64) -> RunOutcome;
 
     /// Guest code may have changed: a `fence.i`, or a host-side write of
     /// guest code. Whatever the core holds for the affected addresses is no
