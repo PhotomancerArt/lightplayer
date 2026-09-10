@@ -225,3 +225,11 @@ whose board is boot-looping currently sees only flicker.
 - Note: step failed: no device-event record matched `pool:install` before the deadline
 - Trace: s9-two-boards.emu.failed.jsonl (235 events)
 
+## 2026-09-10T14:53:11.123Z — s3-current-fw-valid-project (emulated lane)
+
+- Expected: state:ready (missing: state:ready)
+- Observed (trace summary):
+  - (no lifecycle events captured)
+- Note: step failed: waiting for the page to say "Project loaded": page evaluation failed: Error: wait deadline
+- Trace: s3-current-fw-valid-project.emu.failed.jsonl (223 events)
+

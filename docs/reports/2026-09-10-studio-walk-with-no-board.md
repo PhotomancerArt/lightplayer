@@ -184,17 +184,24 @@ chip) and the worktree's own `just studio-dev` for the page.
 |---|---|---|---|
 | `s1-blank-flash` | connect → card reads **Blank flash — needs firmware**; door `flash=blank boot=rom-up` | `state:blank-flash` | ✗ FINDING |
 | `s2-fresh-fw-no-lpfs` | connect → **Ready**, hello identity on the card | `state:ready` | ✗ FINDING |
-| `s3-current-fw-valid-project` | connect → Ready → push Fyeah Sign | `state:ready` | ✗ FINDING |
+| `s3-current-fw-valid-project` | connect → Ready → push Fyeah Sign → **the push never lands** (F1; door ends `reboots=2`) | `state:ready` | ✗ FINDING, twice over |
 | `s7-unplug-mid-op` | connect → Ready → push → cable out → cable in | `state:gone` | ✗ FINDING |
 | `s8-repick-granted-port` | connect → Ready → re-pick the SAME board | `flow:connecting` | ✗ FINDING |
 | `s9-two-boards` | connect c6-a → Ready → connect c6-b → Ready; **both MACs on the page at once** | `pool:install` | ✗ FINDING |
 
-**Every walk succeeded. Every `expect` list failed.** That is not the emulator
-failing: five of those six matchers name record kinds that no code in the
-repository emits any more, and the sixth (`pool:install`) survived as a kind
-but changed what triggers it. §7 has the evidence. **A hardware capture
-sitting held today would fail identically**, because the producer is in
-`lpa-studio-core`, above the link layer, where the lane makes no difference.
+**Five of the six walks succeeded; `s3`'s push does not land, for F1. Every
+`expect` list failed.** The `expect` failures are not the emulator failing:
+five of those six matchers name record kinds that no code in the repository
+emits any more, and the sixth (`pool:install`) survived as a kind but changed
+what triggers it. §7 has the evidence. **A hardware capture sitting held today
+would fail identically**, because the producer is in `lpa-studio-core`, above
+the link layer, where the lane makes no difference.
+
+`s3` and `s7` push `fyeah-sign` because that is what the silicon capture
+pushed and the comparison is the point. `s3` waits for the board's own
+`Project loaded` and never gets it; `s7` does not wait, because its subject is
+the cable coming out *while* an operation runs, and a push that takes a long
+time is if anything the better vehicle for that.
 
 Not run, with reasons:
 
@@ -372,3 +379,18 @@ Both are filed; neither is fixed here, and the `expect` matchers are unchanged.
 - **The `pool:install` kind is live but its trigger moved**, and no scenario
   step was added to fire it, because adding one would change the procedure the
   silicon fixture recorded and make the two traces incomparable.
+- **An unexplained Studio panic, seen only under automation.** Several runs
+  logged, once each, in the page console:
+
+  ```
+  panicked at dioxus-signals-0.7.9/src/read.rs:259:38:
+  called `Result::unwrap()` on an `Err` value:
+    Dropped(ValueDroppedError { created_at: Location { file: "lp-app/lpa-studio-web/src/base/popover.rs", line: 167 } })
+  ```
+
+  It never stopped a walk and it did not reproduce on demand. It is a signal
+  read after its popover's scope dropped, and the runs that saw it were the
+  ones that opened and dismissed a popover quickly — which is what an
+  automated click does and a hand does not. Recorded rather than filed: this
+  milestone has no measurement that distinguishes "a latent bug in the popover
+  base" from "an artefact of clicking faster than a person can".

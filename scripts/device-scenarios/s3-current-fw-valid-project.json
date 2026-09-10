@@ -34,7 +34,7 @@
       { "do": "mark" },
       { "do": "project", "name": "Fyeah Sign", "describe": "Pick an example project from the gallery." },
       { "do": "push", "describe": "Push it onto the board." },
-      { "do": "text", "contains": "Fyeah Sign", "describe": "Wait until the card shows the running project." },
+      { "do": "text", "contains": "Project loaded", "describe": "Wait until the card shows the running project — the BOARD's own line, not the project's name, which the chooser's own button already puts on the page the moment it is picked." },
       { "do": "registry" },
       { "do": "shot", "name": "s3-project-running" },
       { "do": "await", "match": "state:ready", "describe": "LAST: the walk is already observed; this is the trace's own claim." }
