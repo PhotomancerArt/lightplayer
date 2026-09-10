@@ -11,5 +11,24 @@
     "Attach BOTH boards before this step.",
     "Connect the first board, then the second (the chooser must be reopened for it).",
     "Both cards should render, distinctly titled by chip."
-  ]
+  ],
+  "emulated": {
+    "note": "TWO C6s, not the silicon capture's C6 + S3 — there is no emulated S3 (plan three), and PD4's claim is about two boards being two identities rather than about two chips. Two C6s is the HARDER case for the defect this scenario exists to catch: the twin-duplication and one-session-per-port defects are about boards that look alike, and two identical chips with different eFuse MACs is exactly that. The two `text` steps check both MACs are on the page at once — neither board wallpapered the other.",
+    "boards": [
+      "c6-a={fw}",
+      "c6-b={fw}"
+    ],
+    "steps": [
+      { "do": "connect", "board": "c6-a", "describe": "Connect the first board." },
+      { "do": "settle", "words": ["Ready"] },
+      { "do": "mark" },
+      { "do": "connect", "board": "c6-b", "describe": "Then the second (the chooser must be reopened for it)." },
+      { "do": "settle", "words": ["Ready"] },
+      { "do": "text", "contains": "a0:f2:62:87:b4:8c", "describe": "The first board's identity is still on the page." },
+      { "do": "text", "contains": "a0:f2:62:87:b4:8d", "describe": "…and the second's is too — two identities, neither wallpapered (PD4)." },
+      { "do": "registry" },
+      { "do": "shot", "name": "s9-two-boards" },
+      { "do": "await", "match": "pool:install", "fresh": true, "describe": "LAST, and `fresh`: the SECOND board's install, not the first's." }
+    ]
+  }
 }

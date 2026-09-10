@@ -835,6 +835,13 @@ async function runOneEmulated(spec, state, studio, sinkUrl, options) {
   stopDoorSafely(door);
 
   console.log(`\nCaptured ${records.length} events.`);
+  // The census matters more than it looks: an `expect` naming a kind that is
+  // ZERO here has not been disproved by the emulator, it has not been
+  // MEASURED — a kind with no producer in this build emits nothing on any
+  // lane. Print it beside the verdict so the two are never confused.
+  const census = {};
+  for (const record of records) census[record.kind] = (census[record.kind] ?? 0) + 1;
+  console.log(`Record kinds in this capture: ${Object.entries(census).map(([k, n]) => `${k}=${n}`).join(" ") || "(none)"}`);
   console.log("\nWhat the trace says happened:");
   console.log(summarize(records));
   if (registry) {

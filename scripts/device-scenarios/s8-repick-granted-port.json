@@ -11,5 +11,20 @@
     "Connect to the board normally.",
     "With the board connected, open the chooser again (Connect / add device) and pick the SAME port.",
     "Watch for duplicate cards, disconnects, or a wedged session."
-  ]
+  ],
+  "emulated": {
+    "note": "The `mark` step is load-bearing here. This spec's `expect` is `flow:connecting`, which the FIRST connect already produces — so a lane that only checked the `expect` list would pass while proving nothing about the re-pick. `await ... fresh` refuses to be satisfied by anything captured before the second pick.",
+    "boards": [
+      "c6-a={fw}"
+    ],
+    "steps": [
+      { "do": "connect", "board": "c6-a", "describe": "Connect to the board normally." },
+      { "do": "settle", "words": ["Ready"] },
+      { "do": "shot", "name": "s8-first-connect" },
+      { "do": "mark" },
+      { "do": "connect", "board": "c6-a", "describe": "Open the chooser again and pick the SAME board." },
+      { "do": "shot", "name": "s8-repicked", "describe": "Watch for duplicate cards, disconnects, or a wedged session." },
+      { "do": "await", "match": "flow:connecting", "fresh": true, "describe": "LAST, and `fresh`: the spec's own `expect`, refused satisfaction by the FIRST connect." }
+    ]
+  }
 }

@@ -51,7 +51,7 @@ export const PACKAGED_C6_ELF = "target/riscv32imac-unknown-none-elf/release-esp3
 /// How long a wedged step may hang before the run is failed. NEVER an
 /// assertion: nothing in this milestone concludes anything from elapsed time,
 /// and an agent-driven tab is throttled to ~1 Hz anyway.
-const STEP_DEADLINE_MS = 180_000;
+const STEP_DEADLINE_MS = 90_000;
 
 // --- the door -------------------------------------------------------------
 
@@ -73,7 +73,10 @@ export async function startDoor({ root, id, boards, stateDir, consoleDir, logFil
   const args = ["emu", "serve"];
   for (const board of boards) args.push("--board", board.replaceAll("{fw}", PACKAGED_C6_ELF));
   args.push("--listen", "127.0.0.1:0", "--state-dir", stateDir, "--console-dir", consoleDir);
-  const fd = openSync(logFile, "a");
+  // TRUNCATED, not appended. The listen address is read back out of this
+  // file, and an appended log still holds the PREVIOUS run's address — which
+  // reads as a door that is up and answers every fetch with a dead socket.
+  const fd = openSync(logFile, "w");
   const child = spawn(binary, args, { cwd: root, detached: true, stdio: ["ignore", fd, fd] });
   child.unref();
   const addr = await readListenAddress(logFile, child, id);
@@ -100,7 +103,10 @@ function readListenAddress(logFile, child, id) {
       if (Date.now() > deadline) {
         return reject(new Error(`emu serve for ${id} never printed a listen address:\n${text.slice(-2000)}`));
       }
-      setTimeout(look, 100).unref?.();
+      // Deliberately NOT unref'd: this is the only thing keeping the event
+      // loop alive in a caller that has not started a server yet, and an
+      // unref'd timer here let node exit before the door had spoken.
+      setTimeout(look, 100);
     };
     look();
   });
