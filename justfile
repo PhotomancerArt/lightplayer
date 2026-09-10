@@ -2785,8 +2785,35 @@ fixture-fw variant port="":
 # args; `run <id> [--port /dev/...]` sets a board to a known state, then
 # captures Studio's device-event stream to a committed trace fixture. See
 # scripts/device-scenarios/README.md.
+#
+# TWO LANES since emulator plan two M6. `run <id> --emu` runs the same
+# scenario with NO BOARD, against an `lp-cli emu serve` the runner starts
+# itself, in headless Chrome; `check-guard` proves the emulated lane cannot
+# write a silicon fixture's name.
 device-scenario *args:
     node scripts/device-scenario.mjs {{ args }}
+
+# THE WALK WITH NO BOARD (emulator plan two, M6; acceptance criterion 6).
+#
+#   flash → connect → identify → upload a project → detach → re-attach
+#
+# One continuous Studio session in a headless browser against an emulated C6
+# that nothing is plugged into. Six screenshots, the device-event records each
+# step produced, and the board's own console beside them.
+#
+# NEEDS a dev server already up on this worktree's canonical port — start
+# `just studio-dev-emu` (or `just studio-dev`) first. It deliberately does not
+# start one: a walk that starts servers can adopt a sibling worktree's
+# listener (docs/defects/2026-07-27-launch-json-pinned-port.md).
+#
+# NOT a CI job and it must not become one (plan two PD9, pre-ruled E-cost):
+# Chrome + chromedriver + the emulator + a packaged firmware is far over the
+# ~5-minute line. This is a recipe an agent runs.
+#
+# Diff a produced trace against the silicon fixture for the same scenario with
+#   node scripts/emu/trace-diff.mjs <silicon>.jsonl <emulated>.emu.jsonl
+walk-no-board *args:
+    node scripts/emu/walk-no-board.mjs {{ args }}
 
 # The hardware-validation system: payloads, configurations, transcripts,
 # replay. `just validate list` with no other args; `replay <transcript>
