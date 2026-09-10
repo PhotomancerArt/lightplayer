@@ -29,6 +29,7 @@
 use std::cell::Cell;
 use std::sync::{Arc, Mutex};
 
+use lp_emu_core::bus::Watchpoint;
 use lp_emu_core::memory::{MemoryAccessKind, MemoryError};
 
 use crate::error::{Trap, TrapKind};
@@ -317,7 +318,30 @@ pub struct Memory {
     /// is checked before use and the scan re-seeds it.
     fetch_hint: Cell<usize>,
     data_hint: Cell<usize>,
+    /// The armed hardware watchpoints, one per `DBREAK` slot
+    /// ([`WATCHPOINT_SLOTS`]).
+    ///
+    /// Written only through [`lp_emu_core::bus::Bus::set_watchpoint`], which
+    /// the machine-mode hart drives from its `DBREAKA`/`DBREAKC` pair. **The
+    /// user-mode runner never arms one**, which is why every array entry is
+    /// `None` for the whole life of a user-mode `Memory` and why
+    /// [`Memory::watchpoints_armed`] is a single `bool` read on the load and
+    /// store paths rather than a scan.
+    watchpoints: [Option<Watchpoint>; WATCHPOINT_SLOTS],
+    /// `true` while any entry of [`watchpoints`](Self::watchpoints) is armed.
+    /// Kept beside the array so the common case — nothing armed — costs one
+    /// predictable branch per access and no NAPOT arithmetic at all.
+    watchpoints_armed: bool,
 }
+
+/// Hardware watchpoint slots this `Memory` honours.
+///
+/// Two, because that is what the hart above it has: the LX6 and LX7 both
+/// carry `XCHAL_NUM_DBREAK = 2`, and `mach::breakpoint` mirrors exactly those
+/// two onto the bus. A slot index past this is refused rather than silently
+/// dropped — silently dropping one is the defect this constant exists to have
+/// fixed (DD33).
+pub const WATCHPOINT_SLOTS: usize = 2;
 
 /// How a resolved address may be used.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -338,7 +362,61 @@ impl Memory {
             shared: None,
             fetch_hint: Cell::new(0),
             data_hint: Cell::new(0),
+            watchpoints: [None; WATCHPOINT_SLOTS],
+            watchpoints_armed: false,
         }
+    }
+
+    // --- hardware watchpoints (DBREAK) ---
+
+    /// The watchpoint armed in `slot`, if any — the state dump's view.
+    #[inline]
+    #[must_use]
+    pub fn watchpoint(&self, slot: usize) -> Option<Watchpoint> {
+        self.watchpoints.get(slot).copied().flatten()
+    }
+
+    /// Does any armed watchpoint cover a byte of `[address, address + len)`
+    /// for this kind of access?
+    ///
+    /// Nothing armed is the whole of user mode, so that case is one `bool`
+    /// read and the rest never runs.
+    #[inline(always)]
+    fn check_watchpoints(
+        &self,
+        address: u32,
+        len: u32,
+        kind: MemoryAccessKind,
+    ) -> Result<(), MemoryError> {
+        if !self.watchpoints_armed {
+            return Ok(());
+        }
+        self.matching_watchpoint(address, len, kind)
+    }
+
+    #[cold]
+    fn matching_watchpoint(
+        &self,
+        address: u32,
+        len: u32,
+        kind: MemoryAccessKind,
+    ) -> Result<(), MemoryError> {
+        for (slot, wp) in self.watchpoints.iter().enumerate() {
+            let Some(wp) = wp else { continue };
+            let watched = match kind {
+                MemoryAccessKind::Read => wp.on_load,
+                MemoryAccessKind::Write => wp.on_store,
+                MemoryAccessKind::InstructionFetch => wp.on_execute,
+            };
+            if watched && watchpoint_overlaps(wp, address, len) {
+                return Err(MemoryError::Watchpoint {
+                    address,
+                    kind,
+                    slot: slot as u8,
+                });
+            }
+        }
+        Ok(())
     }
 
     /// Add a plain read/write data region with no executable alias.
@@ -786,6 +864,34 @@ impl Default for Memory {
     }
 }
 
+/// The `[lo, hi)` byte span a watchpoint covers.
+///
+/// NAPOT is the RISC-V debug spec's `tdata2` encoding, and
+/// [`lp_emu_core::bus::Watchpoint`] carries it for both architectures: the
+/// trailing ones of the written value, plus the first zero above them, are the
+/// bits the compare ignores — so `mask = value ^ (value + 1)` and the region is
+/// `value & !mask`, of size `mask + 1`. `mach::breakpoint` encodes a `DBREAKC`
+/// mask into exactly this shape, so the two agree by construction.
+///
+/// `u64` throughout: a NAPOT region based at the top of the address space can
+/// end past `u32::MAX`, and a wrapping `u32` end would silently stop matching.
+fn watchpoint_span(wp: &Watchpoint) -> (u64, u64) {
+    let (base, size) = if wp.napot {
+        let mask = wp.address ^ wp.address.wrapping_add(1);
+        (wp.address & !mask, u64::from(mask) + 1)
+    } else {
+        (wp.address, 1)
+    };
+    (u64::from(base), u64::from(base) + size)
+}
+
+/// Does `wp` cover any byte of `[address, address + len)`?
+fn watchpoint_overlaps(wp: &Watchpoint, address: u32, len: u32) -> bool {
+    let (b0, b1) = watchpoint_span(wp);
+    let (a0, a1) = (u64::from(address), u64::from(address) + u64::from(len));
+    a0 < b1 && b0 < a1
+}
+
 // --- the bus seam (M1 P2, decision D1) -------------------------------------
 
 /// `Memory` is one [`lp_emu_core::bus::Bus`], so the executors can run against
@@ -843,40 +949,80 @@ impl lp_emu_core::bus::Bus for Memory {
     }
 
     fn read_word(&mut self, address: u32) -> Result<i32, MemoryError> {
+        self.check_watchpoints(address, 4, MemoryAccessKind::Read)?;
         Memory::read_u32(self, address)
             .map(|v| v as i32)
             .map_err(|t| bus_error(t, 4, MemoryAccessKind::Read))
     }
 
     fn read_halfword(&mut self, address: u32) -> Result<i16, MemoryError> {
+        self.check_watchpoints(address, 2, MemoryAccessKind::Read)?;
         Memory::read_u16(self, address)
             .map(|v| v as i16)
             .map_err(|t| bus_error(t, 2, MemoryAccessKind::Read))
     }
 
     fn read_byte(&mut self, address: u32) -> Result<i8, MemoryError> {
+        self.check_watchpoints(address, 1, MemoryAccessKind::Read)?;
         Memory::read_u8(self, address)
             .map(|v| v as i8)
             .map_err(|t| bus_error(t, 1, MemoryAccessKind::Read))
     }
 
     fn read_u8(&mut self, address: u32) -> Result<u8, MemoryError> {
+        self.check_watchpoints(address, 1, MemoryAccessKind::Read)?;
         Memory::read_u8(self, address).map_err(|t| bus_error(t, 1, MemoryAccessKind::Read))
     }
 
     fn write_word(&mut self, address: u32, value: i32) -> Result<(), MemoryError> {
+        self.check_watchpoints(address, 4, MemoryAccessKind::Write)?;
         Memory::write_u32(self, address, value as u32)
             .map_err(|t| bus_error(t, 4, MemoryAccessKind::Write))
     }
 
     fn write_halfword(&mut self, address: u32, value: i16) -> Result<(), MemoryError> {
+        self.check_watchpoints(address, 2, MemoryAccessKind::Write)?;
         Memory::write_u16(self, address, value as u16)
             .map_err(|t| bus_error(t, 2, MemoryAccessKind::Write))
     }
 
     fn write_byte(&mut self, address: u32, value: i8) -> Result<(), MemoryError> {
+        self.check_watchpoints(address, 1, MemoryAccessKind::Write)?;
         Memory::write_u8(self, address, value as u8)
             .map_err(|t| bus_error(t, 1, MemoryAccessKind::Write))
+    }
+
+    /// Arm or disarm one hardware watchpoint slot (DD33).
+    ///
+    /// `Memory` used to inherit the trait's default — which **ignores** the
+    /// call — so the machine-mode hart mirrored its `DBREAKA`/`DBREAKC` pair
+    /// onto a bus that dropped both, and a `DBREAK` armed against a bare
+    /// `Memory` could never fire. It fires now: a matching load or store
+    /// returns [`MemoryError::Watchpoint`] **instead of** performing the
+    /// access, exactly as [`lp_emu_core::bus::Bus::set_watchpoint`] specifies,
+    /// and `mach`'s `deliver_trap` turns that into the debug exception with
+    /// `DEBUGCAUSE.DBREAK` and the slot number.
+    ///
+    /// Additive by construction: with no slot armed nothing about a load or a
+    /// store changes, so the user-mode runner's behaviour and every golden
+    /// stay byte-identical.
+    ///
+    /// **Loads and stores only.** Xtensa's `DBREAK` is a data watchpoint —
+    /// `mach::breakpoint` never sets `on_execute` — and instruction breakpoints
+    /// are `IBREAK`, which the hart handles itself before the fetch. A slot
+    /// index at or past [`WATCHPOINT_SLOTS`] is refused loudly rather than
+    /// dropped quietly, because dropping one quietly is the defect this
+    /// method exists to fix.
+    fn set_watchpoint(&mut self, slot: usize, wp: Option<Watchpoint>) {
+        let Some(entry) = self.watchpoints.get_mut(slot) else {
+            log::warn!(
+                "Memory::set_watchpoint: slot {slot} is past the {WATCHPOINT_SLOTS} this bus has \
+                 — ignoring"
+            );
+            return;
+        };
+        *entry = wp;
+        self.watchpoints_armed = self.watchpoints.iter().any(Option::is_some);
     }
 }
 
@@ -1119,6 +1265,117 @@ mod bus_seam_tests {
         XtAccess::write_u32(&mut mem, ram, 0x8877_66FF).expect("word store");
         assert_eq!(Memory::read_u8(&mem, ram), Ok(0xFF));
         assert_eq!(Memory::read_u8(&mem, ram + 3), Ok(0x88));
+    }
+
+    // --- hardware watchpoints (DD33) ---------------------------------------
+
+    fn wp(address: u32, on_load: bool, on_store: bool) -> Watchpoint {
+        Watchpoint {
+            address,
+            napot: false,
+            on_store,
+            on_load,
+            on_execute: false,
+        }
+    }
+
+    /// The defect DD33 names, and its fix: an armed slot fires **instead of**
+    /// performing the access, and disarming it puts the access back.
+    ///
+    /// Before this, `Memory` inherited the trait's ignoring default, so the
+    /// hart's `DBREAK` mirror wrote into nothing and the watchpoint could
+    /// never fire against a bare `Memory`.
+    #[test]
+    fn an_armed_watchpoint_fires_instead_of_the_access() {
+        let profile = BoardProfile::esp32s3();
+        let mut mem = loaded(&profile);
+        let ram = profile.stack_dbus_base + 0x100;
+
+        // Nothing armed: the additive case, unchanged in every particular.
+        XtAccess::write_u32(&mut mem, ram, 0x1111_2222).expect("store with nothing armed");
+        assert_eq!(Memory::read_u32(&mem, ram), Ok(0x1111_2222));
+        assert_eq!(mem.watchpoint(0), None);
+
+        // Arm slot 1 on stores to `ram`.
+        Bus::set_watchpoint(&mut mem, 1, Some(wp(ram, false, true)));
+        assert_eq!(mem.watchpoint(1), Some(wp(ram, false, true)));
+        assert_eq!(
+            XtAccess::write_u32(&mut mem, ram, 0xDEAD_BEEF),
+            Err(MemoryError::Watchpoint {
+                address: ram,
+                kind: MemoryAccessKind::Write,
+                slot: 1,
+            }),
+            "the store must raise the watchpoint and name its slot"
+        );
+        assert_eq!(
+            Memory::read_u32(&mem, ram),
+            Ok(0x1111_2222),
+            "and must not have happened"
+        );
+        // A load is not watched by a store-only slot, and a neighbouring word
+        // is outside the one-byte compare.
+        assert_eq!(XtAccess::read_u32(&mut mem, ram), Ok(0x1111_2222));
+        XtAccess::write_u32(&mut mem, ram + 4, 0x3333).expect("a word away is not watched");
+
+        // The trap the hart will see: a debug exception carrying the slot.
+        let trap = trap_from_bus(XtAccess::write_u32(&mut mem, ram, 0).unwrap_err());
+        assert_eq!(trap.cause, crate::error::TRAP_CAUSE_WATCHPOINT | 1);
+        assert_eq!(trap.vaddr, ram);
+
+        // Disarmed, the store goes through again.
+        Bus::set_watchpoint(&mut mem, 1, None);
+        XtAccess::write_u32(&mut mem, ram, 0xDEAD_BEEF).expect("store after disarm");
+        assert_eq!(Memory::read_u32(&mem, ram), Ok(0xDEAD_BEEF));
+    }
+
+    /// The width of the access is part of the compare — a watchpoint one byte
+    /// into a word still fires on the word — and a NAPOT slot covers its whole
+    /// naturally aligned block.
+    #[test]
+    fn a_watchpoint_compares_against_the_whole_access() {
+        let profile = BoardProfile::esp32s3();
+        let mut mem = loaded(&profile);
+        let ram = profile.stack_dbus_base + 0x100;
+
+        Bus::set_watchpoint(&mut mem, 0, Some(wp(ram + 2, true, false)));
+        assert!(
+            XtAccess::read_u32(&mut mem, ram).is_err(),
+            "a word load covers the watched byte two in"
+        );
+        assert!(
+            XtAccess::read_u16(&mut mem, ram).is_ok(),
+            "a halfword load at ram stops one byte short of it"
+        );
+
+        // NAPOT: `...0011` names the naturally aligned 8-byte block.
+        Bus::set_watchpoint(
+            &mut mem,
+            0,
+            Some(Watchpoint {
+                address: ram + 3,
+                napot: true,
+                on_store: true,
+                on_load: false,
+                on_execute: false,
+            }),
+        );
+        for off in [0u32, 4] {
+            assert!(
+                XtAccess::write_u32(&mut mem, ram + off, 0).is_err(),
+                "offset {off} is inside the 8-byte NAPOT block"
+            );
+        }
+        assert!(
+            XtAccess::write_u32(&mut mem, ram + 8, 0).is_ok(),
+            "the next block is not watched"
+        );
+
+        // A slot index this bus does not have is refused, not dropped into
+        // slot 0 and not silently accepted.
+        Bus::set_watchpoint(&mut mem, WATCHPOINT_SLOTS, Some(wp(ram + 64, true, true)));
+        assert_eq!(mem.watchpoint(WATCHPOINT_SLOTS), None);
+        assert!(XtAccess::read_u32(&mut mem, ram + 64).is_ok());
     }
 }
 

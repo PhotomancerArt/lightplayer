@@ -116,8 +116,13 @@ pub const EXC_LOAD_STORE_ALIGNMENT: u32 = 9;
 /// The crate-private pseudo-cause a bus watchpoint travels under between the
 /// executors and the machine-mode hart: `TRAP_CAUSE_WATCHPOINT | slot`. It is
 /// **not** an EXCCAUSE value — it sits far above the 6-bit cause space so it
-/// can never be mistaken for one — and it never reaches user mode, whose
-/// `Memory` has no watchpoint slots.
+/// can never be mistaken for one.
+///
+/// It never reaches user mode. `Memory` does honour watchpoints (M1 P5, DD33)
+/// so that the hart's `DBREAK` mirror fires against a bare `Memory`, but the
+/// only thing that ever arms a slot is
+/// [`lp_emu_core::bus::Bus::set_watchpoint`], which only the machine-mode hart
+/// calls; the user-mode runner has no privileged state to arm one from.
 pub(crate) const TRAP_CAUSE_WATCHPOINT: u32 = 0x1_0000;
 /// EXCCAUSE for an integer divide (or remainder) by zero
 /// (`IntegerDivideByZeroCause`). Hardware raises this from `quos`/`quou`/

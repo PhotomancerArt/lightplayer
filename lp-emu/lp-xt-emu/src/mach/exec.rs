@@ -57,6 +57,11 @@ pub(super) fn is_hart_owned(inst: &Inst) -> bool {
             | Inst::AtomicLs(..)
             | Inst::WindowLs(..)
             | Inst::Nullary(NullaryOp::Syscall)
+            // `isync` has no architectural effect and the shared executor
+            // handles it as the barrier it is; the hart claims it only to
+            // raise the translation-invalidating event. See
+            // `super::translated`'s "three invalidation events".
+            | Inst::Nullary(NullaryOp::Isync)
             | Inst::Tlb(..)
             | Inst::TlbInv(..)
             | Inst::ExtReg(..)
@@ -265,6 +270,19 @@ impl<B: Bus> XtHart<B> {
 
             Inst::Break(..) => Ok(Priv::Break { narrow: false }),
             Inst::BreakN(_) => Ok(Priv::Break { narrow: true }),
+
+            // --- `isync`: the Xtensa `fence.i` ---
+            //
+            // Architecturally a pipeline barrier this model does not need, and
+            // the shared executor retires it as a no-op with exactly this
+            // class and flow. The hart claims it so that the *translation*
+            // event it carries is raised: the guest has just published
+            // instructions. With no translated core installed nothing happens
+            // beyond a counter, and the trace is byte-identical.
+            Inst::Nullary(NullaryOp::Isync) => {
+                self.on_isync();
+                retire(Flow::Next, InstClass::System, false)
+            }
 
             // --- zero-overhead loops (the LOOP/LOOPNEZ/LOOPGTZ pages) ---
             //
@@ -590,9 +608,23 @@ impl<B: Bus> XtHart<B> {
     ) -> Result<bool, Trap> {
         let now = self.cycle_count;
         match reg {
-            SpecialReg::Lbeg => self.sr.lbeg = v,
-            SpecialReg::Lend => self.sr.lend = v,
-            SpecialReg::Lcount => self.sr.lcount = v,
+            // The third invalidation event (`super::translated`): a translated
+            // block may have inlined the LEND it saw, and `restore_context`
+            // rewrites all three on every context switch. Cheap to raise, and
+            // the failure it prevents is silent. The `LOOP` instruction writes
+            // them too and is deliberately *not* an event — see that module.
+            SpecialReg::Lbeg => {
+                self.sr.lbeg = v;
+                self.invalidate_blocks();
+            }
+            SpecialReg::Lend => {
+                self.sr.lend = v;
+                self.invalidate_blocks();
+            }
+            SpecialReg::Lcount => {
+                self.sr.lcount = v;
+                self.invalidate_blocks();
+            }
             // SAR is 6 bits (Table 5-135).
             SpecialReg::Sar => self.cpu.sar = v & 0x3F,
             SpecialReg::Br => self.write_br(v, tracer),

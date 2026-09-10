@@ -1890,3 +1890,326 @@ fn ar_group_names_the_highest_referenced_group() {
     assert_eq!(ar_group(&Inst::NullaryN(NullaryNarrowOp::RetwN), 0), 0);
     assert_eq!(ar_group(&Inst::J(0), 0), 0);
 }
+
+// --- the translated-core seam (M1 P5) --------------------------------------
+//
+// Nothing is translated here and nothing ever will be by this crate. These
+// tests hold the seam to its one promise — that it idles — and check that the
+// events a translator has to hear are actually raised.
+
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use super::translated::{BoxedCore, RunOutcome, TranslatedCore, entry_slot};
+use crate::trace::TextTracer;
+
+/// What a stub core did, shared with the test that installed it.
+#[derive(Default)]
+struct CoreLog {
+    /// Every `invalidate` call, in order.
+    invalidations: Vec<Option<(u32, u32)>>,
+    /// How many times the hart entered the core.
+    runs: u32,
+}
+
+/// What a stub core answers when the hart enters it.
+#[derive(Clone, Copy)]
+enum Answer {
+    /// "I cannot be exact" — the interpreter continues.
+    Refuse,
+    /// A stay that retired one instruction's worth of work.
+    Ran { bytes: u32, after_store: bool },
+    /// A stay whose last instruction ended the slice.
+    Ended(SliceEnd),
+}
+
+struct StubCore {
+    log: Rc<RefCell<CoreLog>>,
+    answer: Answer,
+}
+
+impl StubCore {
+    fn install(
+        hart: &mut XtHart<TestBus>,
+        entries: &[u32],
+        answer: Answer,
+    ) -> Rc<RefCell<CoreLog>> {
+        let log = Rc::new(RefCell::new(CoreLog::default()));
+        let core: BoxedCore<TestBus> = Box::new(StubCore {
+            log: Rc::clone(&log),
+            answer,
+        });
+        hart.set_translated_core(core, entries);
+        log
+    }
+}
+
+impl TranslatedCore<TestBus> for StubCore {
+    fn run(&mut self, hart: &mut XtHart<TestBus>, _bus: &mut TestBus, _end: u64) -> RunOutcome {
+        self.log.borrow_mut().runs += 1;
+        // The seam's own contract, asserted from the inside: the hart lifted
+        // the core out before calling, so re-entry is impossible here.
+        assert!(
+            !hart.has_translated_core(),
+            "the core must be lifted out of the hart for the length of a stay"
+        );
+        match self.answer {
+            Answer::Refuse => RunOutcome::Refused,
+            Answer::Ran { bytes, after_store } => RunOutcome::Ran {
+                pc: hart.pc().wrapping_add(bytes),
+                cycle_count: hart.cycle_count() + 1,
+                instruction_count: hart.instruction_count() + 1,
+                after_store,
+            },
+            Answer::Ended(end) => RunOutcome::Ended {
+                pc: hart.pc(),
+                cycle_count: hart.cycle_count(),
+                instruction_count: hart.instruction_count(),
+                end,
+            },
+        }
+    }
+
+    fn invalidate(&mut self, range: Option<(u32, u32)>) {
+        self.log.borrow_mut().invalidations.push(range);
+    }
+
+    fn report(&self) -> String {
+        format!("stub core: {} entries", self.log.borrow().runs)
+    }
+}
+
+/// What a short program leaves behind, trace included.
+struct Observed {
+    trace: String,
+    pc: u32,
+    cycles: u64,
+    instrs: u64,
+}
+
+/// Run the same six-instruction program every time, traced.
+fn observe(hart: &mut XtHart<TestBus>, bus: &mut TestBus) -> Observed {
+    asm(
+        bus,
+        CODE,
+        &[
+            movi(2, 0x1234),
+            movi(3, 0),
+            addi(4, 2, 1),
+            s32i(2, 3, DATA),
+            l32i(5, 3, DATA),
+            nop(),
+        ],
+    );
+    let mut tracer = TextTracer::new();
+    let end = hart.run_slice_traced(bus, 6, &mut tracer);
+    assert_eq!(end, SliceEnd::BudgetExhausted);
+    Observed {
+        trace: tracer.dump(),
+        pc: hart.pc(),
+        cycles: hart.cycle_count(),
+        instrs: hart.instruction_count(),
+    }
+}
+
+fn assert_same(a: &Observed, b: &Observed, what: &str) {
+    assert_eq!(a.trace, b.trace, "{what}: the trace differs");
+    assert_eq!(a.pc, b.pc, "{what}: pc differs");
+    assert_eq!(a.cycles, b.cycles, "{what}: cycle count differs");
+    assert_eq!(a.instrs, b.instrs, "{what}: instruction count differs");
+}
+
+/// `--interpreter` semantics: a hart that never had a core and a hart that
+/// had one and had it cleared run byte-identically — same trace, same pc,
+/// same counters.
+#[test]
+fn no_core_is_byte_identical() {
+    let (mut bare, mut bus_a) = booted();
+    let bare = observe(&mut bare, &mut bus_a);
+
+    let (mut cleared, mut bus_b) = booted();
+    // A core good enough to run the whole program, then taken away.
+    StubCore::install(
+        &mut cleared,
+        &[CODE],
+        Answer::Ran {
+            bytes: 3,
+            after_store: false,
+        },
+    );
+    assert!(cleared.has_translated_core());
+    assert!(cleared.translated_core_report().is_some());
+    cleared.clear_translated_core();
+    assert!(!cleared.has_translated_core());
+    assert!(cleared.translated_core_report().is_none());
+    let cleared = observe(&mut cleared, &mut bus_b);
+
+    assert_same(&bare, &cleared, "installed-then-cleared");
+}
+
+/// A core that always refuses changes nothing: the interpreter continues from
+/// the entry pc and leaves exactly what it leaves with no core installed —
+/// and the core really was asked.
+#[test]
+fn refused_changes_nothing() {
+    let (mut bare, mut bus_a) = booted();
+    let bare = observe(&mut bare, &mut bus_a);
+
+    let (mut refusing, mut bus_b) = booted();
+    let log = StubCore::install(&mut refusing, &[CODE], Answer::Refuse);
+    let refusing = observe(&mut refusing, &mut bus_b);
+
+    assert_eq!(log.borrow().runs, 1, "the core was entered at CODE");
+    assert!(
+        log.borrow().invalidations.is_empty(),
+        "nothing in this program invalidates"
+    );
+    assert_same(&bare, &refusing, "always-refusing core");
+}
+
+/// A stay that reports `after_store` makes the hart take polling point (c)
+/// itself: `take_sideband`, then re-read the pending line, then poll — the
+/// same three steps in the same order an interpreted store takes.
+#[test]
+fn ran_after_store_takes_poll_point_c() {
+    let (mut hart, mut bus) = booted();
+    // A level-1 line the hart will take the moment it learns of it.
+    hart.interrupts_mut().intenable = 1 << IRQ_LEVEL_L1;
+    asm(&mut bus, CODE, &[nop(), nop()]);
+    asm(&mut bus, VEC + VECOFS_USER, &[brk()]);
+    StubCore::install(
+        &mut hart,
+        &[CODE],
+        Answer::Ran {
+            bytes: 3,
+            after_store: true,
+        },
+    );
+    // What an MMIO store would have left behind: a raised side-band and a
+    // line the bus can now name.
+    bus.sideband = true;
+    bus.pending = Some(IRQ_LEVEL_L1);
+
+    let end = hart.run_slice(&mut bus, 4);
+
+    assert!(
+        !bus.sideband,
+        "the side-band was consumed by the hart, not left standing"
+    );
+    assert_eq!(
+        hart.external_mask(),
+        1 << IRQ_LEVEL_L1,
+        "the hart replaced its asserted-line mask from the bus"
+    );
+    assert_eq!(
+        hart.pc(),
+        VEC + VECOFS_USER,
+        "and polled: the level-1 interrupt was delivered"
+    );
+    assert_eq!(hart.sr().exccause, cause::LEVEL1_INTERRUPT);
+    // The `break` at the head of the vector is what stops the slice, which
+    // proves the hart carried on interpreting from where the stay left it.
+    assert_eq!(
+        end,
+        SliceEnd::Ebreak {
+            pc: VEC + VECOFS_USER
+        }
+    );
+}
+
+/// A stay whose last instruction ended the slice hands the interpreter's own
+/// answer back untouched, with the counters applied first.
+#[test]
+fn ended_is_handed_back_untouched() {
+    let (mut hart, mut bus) = booted();
+    asm(&mut bus, CODE, &[nop()]);
+    StubCore::install(&mut hart, &[CODE], Answer::Ended(SliceEnd::Wfi));
+    assert_eq!(hart.run_slice(&mut bus, 4), SliceEnd::Wfi);
+    assert_eq!(hart.pc(), CODE, "the core reported where it left");
+}
+
+/// A cloned hart — the snapshot path — has no translated core and no entry
+/// table, and the original still has both.
+#[test]
+fn clone_has_no_core() {
+    let (mut hart, _bus) = booted();
+    StubCore::install(&mut hart, &[CODE], Answer::Refuse);
+    let twin = hart.clone();
+    assert!(!twin.has_translated_core(), "a clone starts without a core");
+    assert!(twin.translated_core_report().is_none());
+    assert!(hart.has_translated_core(), "the original keeps its own");
+}
+
+/// The third invalidation event, and the one most likely to be dropped: a
+/// `wsr` to `LBEG`, to `LEND` or to `LCOUNT` each invalidates.
+#[test]
+fn loop_register_write_invalidates() {
+    for reg in [SpecialReg::Lbeg, SpecialReg::Lend, SpecialReg::Lcount] {
+        let (mut hart, mut bus) = fresh();
+        asm(&mut bus, CODE, &[wsr(reg, 2)]);
+        let log = StubCore::install(&mut hart, &[], Answer::Refuse);
+        hart.run_slice(&mut bus, 1);
+        assert_eq!(
+            log.borrow().invalidations.as_slice(),
+            &[None],
+            "wsr to {reg:?} must invalidate the whole image, exactly once"
+        );
+    }
+}
+
+/// `isync` is the Xtensa `fence.i`: the guest has published instructions.
+#[test]
+fn isync_invalidates() {
+    let (mut hart, mut bus) = fresh();
+    asm(&mut bus, CODE, &[Inst::Nullary(NullaryOp::Isync)]);
+    let log = StubCore::install(&mut hart, &[], Answer::Refuse);
+    hart.run_slice(&mut bus, 1);
+    assert_eq!(log.borrow().invalidations.as_slice(), &[None]);
+    assert_eq!(hart.isync_count(), 1);
+    assert_eq!(hart.pc(), CODE + 3, "isync retires and advances, as before");
+    assert_eq!(hart.instruction_count(), 1);
+}
+
+/// An invalidation raised while the core is lifted out is not lost: it is
+/// recorded and applied when the core goes back.
+#[test]
+fn invalidation_survives_the_lift() {
+    let (mut hart, mut bus) = fresh();
+    // Two events in one slice collapse to one whole-image invalidation —
+    // `PendingInvalidate` widens rather than losing precision unsafely.
+    asm(
+        &mut bus,
+        CODE,
+        &[Inst::Nullary(NullaryOp::Isync), wsr(SpecialReg::Lend, 2)],
+    );
+    let log = StubCore::install(&mut hart, &[], Answer::Refuse);
+    hart.run_slice(&mut bus, 2);
+    assert_eq!(log.borrow().invalidations.as_slice(), &[None]);
+    // A range asked for with the core in the hart reaches it directly.
+    hart.invalidate_block_range(CODE, CODE + 8);
+    assert_eq!(
+        log.borrow().invalidations.as_slice(),
+        &[None, Some((CODE, CODE + 8))]
+    );
+}
+
+/// The hart's entry check is the byte-indexed one: a core installed at `pc`
+/// is not entered at `pc + 1`, `pc + 2` or `pc + 3`. `pc >> 1` — the RV32
+/// rule — would enter at `pc + 1`.
+#[test]
+fn entry_check_is_byte_granular() {
+    for delta in [0u32, 1, 2, 3] {
+        let (mut hart, mut bus) = fresh();
+        asm(&mut bus, CODE, &[nop(), nop()]);
+        let log = StubCore::install(&mut hart, &[CODE], Answer::Refuse);
+        hart.set_pc(CODE + delta);
+        hart.run_slice(&mut bus, 1);
+        let runs = log.borrow().runs;
+        if delta == 0 {
+            assert_eq!(runs, 1, "the core is entered at its own pc");
+        } else {
+            assert_eq!(runs, 0, "pc+{delta} is not an entry — the slots differ");
+            assert_ne!(entry_slot(CODE), entry_slot(CODE + delta));
+        }
+    }
+}

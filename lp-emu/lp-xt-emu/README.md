@@ -44,12 +44,15 @@ src/
                  float_math  everything that computes a float value (M6 P3)
   fp_policy.rs   every behavior IEEE-754 does not fix, measured or Unknown.
   fp_capture.rs  parse + diff a device conformance capture (M6 P5).
+  block.rs       XtSlot — one pre-decoded instruction, for the block cache and
+                 a translator to share.
   mach/          the machine-mode hart `XtHart<B: Bus>` — see "Machine mode":
                  mod (the slice loop, exception/interrupt entry) · sr (the SR/UR
                  file) · trap (causes, vector table, core-config constants) ·
                  window (WindowCheck, RETW/MOVSP checks, the policy enum) ·
                  interrupt · timer · breakpoint · mac16 · exec (the hart-owned
-                 instruction semantics) · tests
+                 instruction semantics) · translated (the translator seam,
+                 idle) · tests
 ```
 
 Decoding is delegated to [`lp-xt-inst`](../lp-xt-inst); this crate never
@@ -167,6 +170,44 @@ and level-3 interrupts, `loopnez`, `s32c1i`, a two-task context switch, a
 `DBREAK` stack guard and a load/store error. `just test-xt-mach`, and the
 `Validate Xtensa (host)` CI job — the only one with an esp toolchain, so the
 only one where they do anything.
+
+**The two `DBREAK` slots reach `Memory`.** `Bus::set_watchpoint` has a default
+that *ignores* the call, and `Memory` used to inherit it, so a watchpoint the
+guest armed was mirrored onto a bus that dropped it. `Memory` honours both
+slots now: a matching load or store returns `MemoryError::Watchpoint` instead
+of performing the access, and the hart turns that into the debug exception
+carrying `DEBUGCAUSE.DBREAK` and the slot number. With nothing armed — which
+is the whole of user mode, the only thing that arms a slot being the hart —
+the load and store paths cost one `bool` read and behave exactly as before.
+
+#### The translator seam, idling
+
+`src/mach/translated.rs` is the seam a **translated core** — something that has
+turned the guest's program into host code — would plug into: `TranslatedCore`,
+`RunOutcome`, the byte-indexed entry table, and `set_translated_core` /
+`clear_translated_core` / `has_translated_core` / `translated_core_report` on
+the hart. It is the Xtensa mirror of the RV32 hart's seam, deliberately, so
+that when an Xtensa translator opens it finds the same shape rather than a
+design argument.
+
+**Nothing plugs into it.** This crate contains no translator and gains no
+dependency on one. With no core installed, `run_slice` branches once per slice
+and runs the interpreter loop it has always run: same trace, same pc, same
+cycle count, same instruction count. That is what "not architectural state"
+means here — a translated core is absent from a snapshot, a cloned hart starts
+without one, and `--interpreter` is therefore a usable differential oracle
+rather than a second implementation to keep honest. The block cache, when it
+lands, lives under the same contract; `src/block.rs` holds the slot type
+(`XtSlot`) both it and a translator will name.
+
+Three things about the seam are Xtensa's own and are documented where they
+live: the entry table is indexed **by byte** (all four `pc mod 4` residues are
+equally live on this ISA, so the RV32 `pc >> 1` rule would collide half of
+everything); a write to `LBEG`, `LEND` or `LCOUNT` is a **third** invalidation
+event beside boot and `isync`, because `restore_context` rewrites all three on
+every context switch; and a translated stay cannot take the `CCOMPARE` polling
+point instruction by instruction, so the hart latches and polls once the stay
+ends.
 
 ### Board profiles — the memory map is a parameter
 
