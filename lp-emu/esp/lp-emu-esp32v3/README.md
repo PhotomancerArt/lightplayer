@@ -9,16 +9,21 @@ and a run loop, and the result takes a `fw-esp32v3` binary.
 It is `lp-emu-esp32c6`'s twin, deliberately: same shape, same module names,
 different silicon.
 
-> **M3 P3.** What exists today is the memory map (both peripheral buses),
+> **M3 P6.** What exists today is the memory map (both peripheral buses),
 > the generated register-name tables, the vendored mask ROM, the bus, the
-> two-slot machine, the run loop, the snapshot, the direct load, and
-> **thirteen accept-and-remember blocks** — the ones the strict bring-up
-> pass demanded, in the order it met them. **No peripheral has behaviour.**
-> The direct load prints its whole `[INIT]` chain into an accept block and
-> spins on the flash controller; the ROM path spins on the eFuse read
-> command. The sections below that name a later phase are stubs, and they
-> say so rather than describing a machine that does not exist yet. The stop
-> ledger is `docs/reports/2026-09-10-esp32v3-strict-boot-inventory.md`.
+> two-slot machine, the run loop, the snapshot, the direct load, the host's
+> side of the wire and the CH340 cable's own socket — and, of the fourteen
+> blocks the strict bring-up pass demanded, **eight with behaviour** and six
+> still accept-and-remember probes.
+>
+> **The shipped image says hello.** Direct-loaded under `--strict-bus`, it
+> prints its whole `[INIT]` chain out of UART0's FIFO, through a shifter
+> draining at 921,600 baud in emulated time, and onto a host stream: 543
+> bytes, byte for byte, deterministically. It then stands at the flash
+> controller's command word, which is **P7**'s, and the ROM path stands at
+> `RTC_IO`. The sections below that name a later phase are stubs and say so.
+> The stop ledger is
+> `docs/reports/2026-09-10-esp32v3-strict-boot-inventory.md`.
 
 ## The machine
 
@@ -297,10 +302,119 @@ bootloader, and the boot log is compared line for line against silicon.
 
 ## The CH340 cable
 
-*P6.* On the classic the port is a **bridge chip on the board**, not a
-peripheral inside the SoC, so opening the port moves no chip state: what
-resets the chip is the auto-reset circuit driven by the modem lines, and the
-truth table is the board's, not the chip's.
+**On the classic the port is a bridge chip on the board, not a peripheral
+inside the SoC.** That single sentence is the whole difference from the C6,
+and it changes what four verbs mean.
+
+The C6's `USB_DEVICE` can see the host: a client attaching moves chip state a
+guest can read. A CH340K cannot be seen from inside the ESP32 at all. There
+is no register anywhere on this part that reports a cable, a port, or a modem
+line. So:
+
+1. **Opening or closing the port moves no chip state.** A byte client
+   connecting to `--uart0 tcp:` is a program that opened a tty on a bridge
+   chip; the SoC does not know it happened, and there is no coupling rule to
+   write. (The C6 has one: a client on its byte socket *is* an application
+   opening the port. That rule does not exist here, and its absence is the
+   finding, not an omission.)
+2. **What resets the chip is the auto-reset circuit on the carrier board**,
+   driven by the two modem lines.
+3. **The truth table is the board's, not the chip's**, and half of it is
+   measured and half is documented.
+
+### The circuit
+
+esptool documents it as *Classic reset*: two transistors, wired so that
+neither line **alone** can hold both strap lines.
+
+```text
+    EN  low  ⟺  RTS asserted AND DTR not asserted
+    IO0 low  ⟺  DTR asserted AND RTS not asserted
+    both asserted → both EN and IO0 stay high
+```
+
+| dtr | rts | EN | IO0 | effect | grade |
+|-----|-----|----|-----|--------|-------|
+| 0 | 0 | 1 | 1 | run | **measured** — L0 drove `TIOCMSET 0` and the board ran |
+| 0 | 1 | 0 | 1 | RESET held | **measured** — L0 drove `TIOCMSET 0x4` (RTS only), EN went low and the board reset |
+| 1 | 0 | 1 | 0 | IO0 low: the download strap | `documented` |
+| 1 | 1 | 1 | 1 | run (the circuit's whole point) | `documented` |
+
+`../bench.md` is L0's measurement and it covers **two rows and no more**.
+Rows 3 and 4 are esptool's circuit plus this repo's own sequences
+(`spikes/serial-lab/index.html:341-357`), and they stay `documented` until L1
+captures a download-mode entry. A model that happens to work is not a
+measurement.
+
+### The verbs, and why the reboot is an edge
+
+```text
+reset          = {dtr:0,rts:1} → hold → {rts:0}
+download-mode  = {dtr:0,rts:1} → {dtr:1,rts:0} → {dtr:0}
+```
+
+Both are shorthands for the line sequence, and both are the sequences the
+repo's own serial lab uses. **The reboot happens on the release, not on the
+assert**: EN low holds the chip in reset, and EN going high is the chip
+starting, latching IO0's level at that instant as the strap. Writing it as
+edges rather than as verbs is what makes `signals dtr=0 rts=1` followed by
+`signals dtr=0 rts=0` exactly one reboot into the application, and the
+download dance exactly one reboot with IO0 low — the circuit, not a special
+case per verb, and the third step of the download dance harmless because the
+chip has already started.
+
+`--reboot-on-reset` decides what a release does. Off (the default for a plain
+run) it ends the run with `RESET` and names the strap; on, the machine goes
+back to the state it was built in. A reboot costs a whole copy of guest
+memory taken at build time, which is why it is not the default.
+
+**The reset cause does not change across a cable reset, and that is right.**
+An EN-pin reset on this part is a *chip* reset — it resets the RTC sub-system
+too — and the classic has no code for one. esp-hal's own `SocResetReason`
+table for esp32 (`third_party/esp-hal/src/rtc_cntl/rtc/esp32.rs:15-50`) runs
+`ChipPowerOn = 0x01`, `CoreSw = 0x03`, … `SysRtcWdt = 0x10` and has no
+external-reset variant at all, so `RTC_CNTL.reset_state` reads
+`POWERON_RESET` after a cable reset exactly as it does after a power-on. This
+is where the classic differs from the C6's `USB_UART_HPSYS`, and it differs
+by having **no** code rather than a different one.
+
+The console keeps its bytes across a reboot: a restore would put back the
+empty log the machine was built with, and a boot log that lost everything
+before the reset would be a worse record than one with both boots in it.
+
+### The protocol
+
+One command per line, one reply per command, `\n`-terminated, on the socket
+`--control tcp:<addr>` listens on. `--control-script <path>` is the
+deterministic twin: the same verbs with the times in the file.
+
+| verb | what it does here |
+|---|---|
+| `attach` / `detach` | the cable goes in or comes out. **Host bookkeeping only**; `detach` also lets both lines go slack, which on this circuit is "run" |
+| `open` / `close` | an application opened or closed the tty. **Host bookkeeping only** |
+| `dtr 0\|1`, `rts 0\|1` | one line |
+| `signals dtr=… rts=…` | both lines in one write — what whole-status `TIOCMSET` does, and the only thing the WCH macOS driver honours |
+| `reset` | the classic-reset dance above |
+| `download-mode` | the download dance above |
+| `state` | `ok state cyc=… us=… cable=… port=… dtr=… rts=… en=… io0=… strap=… reboots=…` |
+| `wait <ms>` | script only: shift every later line |
+
+The C6's `usb-write`, `pin` and `pins` are **not** verbs here, and the error
+says so by name: there is no USB endpoint to write into (a host on this board
+sends bytes down the wire, which is `--uart0-script` or the byte socket), and
+the pad fabric is P8's.
+
+### A host-side fact that belongs beside the cable
+
+The WCH macOS driver **silently ignores** the single-bit
+`TIOCMBIS`/`TIOCMBIC` ioctls behind pyserial's and serialport's `.dtr`/`.rts`
+setters, and honours only whole-status `TIOCMSET`. Verified on hardware and
+recorded in product code at
+`lp-app/lpa-client/src/stream/serialport_stream.rs:51-60`, which also notes
+that espflash carries `UnixTightReset` for the same reason. That constrains
+the lab script and `scripts/emu/`, **not** this emulator — written down here
+so nobody re-derives it, and so that a script driving the real board and one
+driving this socket are known to differ.
 
 ## Flash, and the cache window
 
@@ -380,8 +494,8 @@ while the running core's cache is off — a flash write's worth of instructions
 
 ## Peripherals
 
-*P4 and P5 between them gave six blocks behaviour; the rest are accept probes
-until P6–P8.* One row per block, in registration order
+*P4, P5 and P6 between them gave eight blocks behaviour; the rest are accept
+probes until P7 and P8.* One row per block, in registration order
 (`machine::PERIPHERAL_REGISTRATION_ORDER`, which is the order the boot met
 them). An **accept** block is a `RegFile` seeded from the PAC's reset values
 (`src/periph/accept.rs`) with no behaviour; a **view** computes something a
@@ -397,11 +511,12 @@ PAC and each carries its reason beside it.
 | `I2C_ANA_MST` | `0x6000_E000` (AHB) | `0x20` | **view** | direct #5, cycle 143,014 | the analog world as a `{block, register}` store behind eight host ports; `busy` reads 0 | P5 |
 | `TIMG1` | `0x3FF6_0000` | `0x100` | **view** | direct #6, cycle 3,563,841 | the same block at sources 18..21; the image only disables its MWDT | P5 |
 | `GPIO` | `0x3FF4_4000` | `0x600` | accept | direct #7, cycle 3,564,113 | the matrix routing U0RXD; `strap` reads the PAC's 0 | P8 |
-| `UART0` | `0x3FF4_0000` | `0x80` | accept | direct #8, cycle 3,564,269 | `Uart::new` at 921600; **every printed byte lands here and is forgotten** | P6 |
+| `UART0` | `0x3FF4_0000` | `0x80` | **view** | direct #8, cycle 3,564,269 | the FIFO pair on `engine::uart`, the shifter draining at the programmed baud in emulated time, `status.txfifo_cnt` counting down (the bit the ROM spins on), the thresholds, the receive timeout, the interrupt quad, `mem_rx_status`'s address pair (the RX-count errata), the auto-baud counters, and the host stream | P6 |
 | `IO_MUX` | `0x3FF4_9000` | `0x94` | accept | direct #9, cycle 3,568,671 | the U0TXD pad | P8 |
 | `SPI1` | `0x3FF4_2000` | `0x400` | accept | direct #10, cycle 3,644,210 | esp-storage's flash read; **the run spins on `cmd.flash_rdsr`** | P7 |
 | `SPI0` | `0x3FF4_3000` | `0x400` | accept | direct #11, cycle 3,644,282 | the ROM's idle wait on `ext2.st` | P7 |
 | `EFUSE` | `0x3FF5_A000` | `0x200` | **view** | rom-up #1, cycle 7 | the fuse array, the read-data registers, and the read command as a **completion**; the MAC and chip revision | P5 |
+| `UART1` | `0x3FF5_0000` | `0x80` | **view** | rom-up, cycle 30,992 | the same model at its own base and its own interrupt source (35). The ROM's `uartAttach` touches `+0x10` on every boot; the application never opens it, so it has no host stream and its bytes go nowhere | P6 |
 | `FLASH_MMU` | `0x3FF1_0000` | `0x4000` | not reached by P3 | **view** | the two flash MMU page tables, written by the ROM's `mmu_init` and `cache_flash_mmu_set`; the fill is P7's | P4 / P7 |
 
 The two deviations from the PAC, both inputs to the run rather than
@@ -419,9 +534,9 @@ the analog master, which the PAC does not know, and every register of the
 eFuse view are `modeled` throughout. Nothing is `measured`.
 
 Not modelled, on purpose, and unmapped so a strict run says so: everything
-neither boot has reached — `UART1` (where the ROM-up path now stands),
-`RTC_IO`, `SENS`, `RTC_I2C`, `FRC_TIMER`, `FLASH_ENCRYPTION`, `SHA`, `RMT`,
-`RNG` and the WiFi window. Their **AHB mirrors** are unmapped for the same
+neither boot has reached — `RTC_IO` (where the ROM-up path now stands, in
+`gpio_pad_unhold` reading `dig_pad_hold` at `+0x74`), `SENS`, `RTC_I2C`,
+`FRC_TIMER`, `FLASH_ENCRYPTION`, `SHA`, `RMT`, `RNG` and the WiFi window. Their **AHB mirrors** are unmapped for the same
 reason and by the same rule (DD38): an alias needs a registered block to
 point at, so a block gains its second address on the day it gains its first.
 
@@ -497,8 +612,8 @@ question the machine answers, and neither phase reads the other's file.
 
 ## The CLI
 
-*P2 skeleton, P8 completion.* `just emu-esp32v3 <elf>` is the door; the recipe
-exists from P1 so the door has one name for its whole life.
+*P2 skeleton, P6 doors, P8 completion.* `just emu-esp32v3 <elf>` is the
+door; the recipe exists from P1 so the door has one name for its whole life.
 
 ```
 --elf <path>            direct-load this image
@@ -513,23 +628,57 @@ exists from P1 so the door has one name for its whole life.
 --break-at <symbol>     stop at its first instruction
 --probe <cycle>:<name>  print the word at a symbol at a guest cycle
 --trace <path|->  --trace-block <name>
+--uart0 <spec>          where UART0's bytes go: `-`/`stdout`, `memory`,
+                        `file:<path>`, or `tcp:<addr>` to LISTEN for one
+                        client at a time (whose bytes are UART0's RX). They
+                        are always also kept in memory [memory]
+--uart0-script <path>   deterministic host input on the wire
+--uart0-baud <n>        the rate the host at the other end of the cable sends
+                        at [115200] — what the auto-baud counters measure,
+                        and nothing else
+--control <tcp:addr>    LISTEN for a control-channel client: the cable's own
+                        socket (see "The CH340 cable")
+--control-script <path> the same verbs at declared EMULATED times
+--reboot-on-reset       a release of EN reboots instead of ending the run
+--exit-on <line>        stop at a COMPLETE line of UART0's output; exits 0
 --efuse-mac <a:b:c:d:e:f>     the MAC the eFuse block answers [30:76:f5:ec:f6:34]
 --efuse-rev <major.minor>     the chip revision it answers [3.1]
 --seed <n>   --hooks   --map   --help
 ```
 
+### The two sockets, and why there are two
+
+A byte socket carries bytes and nothing else, because `lp-cli …
+serial:tcp://` is a plain byte client and in-band control would be a dialect
+every client would have to speak. So the wire is `--uart0` and the **cable**
+is `--control`, a second socket in its own line protocol. Mixing them is an
+error that names the other flag rather than a line quietly dropped.
+
+`--uart0-script` and `--control-script` are the deterministic path: their
+times are in the file, in emulated cycles, and two runs of one script deliver
+the same bytes and the same verbs at the same cycles. A **live** socket lets
+the host clock decide when a byte lands, so a run that must be a transcript
+uses the script — *host time is not guest time*.
+
+The byte script's grammar is the C6's: `<ms> "<string>"` or `<ms> <hex …>`
+for absolute emulated time, `after "<line>" [+<ms>] <bytes>` for a host that
+answers what it hears, and `then +<ms> <bytes>` for one pacing itself. `#`
+starts a comment.
+
 ⚠️ `--timeout` is **emulated** time (PD9): no host gate runs on emulated
 microseconds, and `--wall-timeout` is the separate wall-clock end.
 
-⚠️ **An unrecognised flag is an error.** The doors P6/P7/P8 add (`--uart0`,
-`--uart0-script`, `--control`, `--flash`) are deliberately *not* stubbed with
-no-ops, so the phase that adds one is visible in the diff instead of silently
-changing what an old command line meant. `--cache-off-fetch` arrived with P4.
+⚠️ **An unrecognised flag is an error.** The one door P7 still owes
+(`--flash`) is deliberately *not* stubbed with a no-op, so the phase that
+adds it is visible in the diff instead of silently changing what an old
+command line meant. `--cache-off-fetch` arrived with P4; the six above it
+with P6.
 
-Exit codes are the C6's contract: 0 deadline, 2 fault, 3 strict-bus refusal,
-4 wall timeout, 5 `--break-at`; plus **6, a cache-off fetch**, which extends
-the table rather than reusing one of its codes — a script that drives both
-machines reads 0/2/3/4/5 the same way on either.
+Exit codes are the C6's contract: 0 deadline **or an `--exit-on` match**,
+2 fault **or a cable reset without `--reboot-on-reset`**, 3 strict-bus
+refusal, 4 wall timeout, 5 `--break-at`; plus **6, a cache-off fetch**, which
+extends the table rather than reusing one of its codes — a script that drives
+both machines reads 0/2/3/4/5 the same way on either.
 
 ## Bring-up loop
 
@@ -621,7 +770,12 @@ P4–P7, is `docs/reports/2026-09-10-esp32v3-strict-boot-inventory.md`.
 | `tests/rom_vendoring.rs` | The embedded ROM's sha256, re-derived in-process from `rom::VENDORED_V3_ROM` itself, is the one `SHA256SUMS` records — and the file on disk is still that file |
 | `tests/boot.rs` | 39 `PT_LOAD`s, thirteen empty and counted, the ELF-header-mapping segment recognised, four relocated segments placed by vaddr; the ten vector sections at their documented `VECOFS`; at least eight non-alloc sections seeded with real bytes, `.data_xtos_pro` among them; `break 1, 15` matching `lp_xt_inst::encode`; the hook table shipping empty; two hart slots with slot 1 stalled and taking no cycles; `PS_BOOT` after a direct seed; the boot frame's spill target mapped where an unseeded one is not; a seeded hart surviving a real exception; a strict rom-up run on a **bare** machine stopping inside the MMIO window; the boot set registered in the declared order; the ROM path standing at `EFUSE.cmd`; snapshot round-trip. **With the image** (`just test-emu-esp32v3-boot`): `.data` a self-copy and placed; `.rtc_fast.persistent` the one relocated segment; the flash chip seeded over the ROM's 2 MiB default through `spi_w25q16`; the hart entered at `Reset` with the bootloader's `a1`; P2's first stop held on a bare machine; the `[INIT]` chain read back out of the UART0 trace and the run standing at `SPI1.cmd`; two runs identical |
 | `tests/clock.rs` | LACT counting at its derived 16 MHz and latching rather than reading live; TIMG0's three counters independent; the classic's interrupt registers at `0x98..0xa4` and the level source driven from `level_int_en`; the MWDT dropping a write without its key; the calibration answering 12,800 for `detect_xtal_freq` (40 MHz) and 273,066 for the slow clock (150 kHz); TIMG1 at sources 18..21; the block at the PAC's resets; state round-trip. **Through the machine**: the reset cause in both fields; the stall key reaching `Machine::core_stalled` only when *both* halves are written; the desk board's MAC and v3.1 out of the eFuse words plus `APB_CTRL.date`; a run in which no watchdog fires. Plus an `#[ignore]`d measurement of what a LACT timestamp costs |
+| `src/periph/uart.rs` (unit) | the reset state as the ROM console's 115,273 baud with `clkdiv` = the PAC's `0x2b6` and `status` the PAC's zero; the 921,600 divisor the image programs and its 2,610-cycle symbol; a byte leaving the wire one symbol after the FIFO write; **`status` bit 23 set at 128 queued bytes — the bit the ROM's `uart_tx_one_char` spins on**; esp-hal's own `rx_fifo_count` formula over `mem_rx_status` answering the true count; levels versus sticky; the timeout's empty-FIFO rule; `conf0`'s FIFO-reset bits at 17/18 and not the C6's 22/23; `tick_ref_always_on` moving the block onto REF_TICK; the auto-baud counters measuring the stated host rate; state round-trip; UART1 at its own source; and **no register in the block graded `measured`** |
+| `src/control.rs` (unit) | the auto-reset truth table as a table; every verb parsing to its command; the three verbs this chip does **not** have refused by name; the reply formats; each script refusing the other one's lines |
 | `src/periph/*.rs` (unit) | every accept block reads the PAC's resets except the listed deviation, and every listed deviation is real and has a reason; the eFuse read command reading set exactly once and then clearing itself, and three reloads comparing equal; RTC_CNTL's stall pair, its RWDT gate and its reported-not-performed software reset; the analog master answering the register asked for rather than the last one written |
+
+| `tests/boot_idle.rs` | **The hello.** With the image: the `[INIT]` chain comes out of the **host stream** — 543 bytes, sha256 `ea8bae30…`, the same count and the same digest P3 measured going *into* the accept block — with zero unmapped accesses and no strict stop; the line order held against L0's capture; two runs one digest, one cycle count, one instruction count; `--exit-on` stopping at a complete line; and the run standing at the flash until P7 with nothing left in the FIFO |
+| `tests/uart_socket.rs` | The view **through the bus**, at the addresses a guest uses: scripted bytes arriving at the cycles the file names and reading back in order; an `int_clr` unable to clear `rxfifo_full` while it holds; the receive timeout refusing to clear until the FIFO is empty (the classic's third category). And the **cable** at machine level: the reboot on the *release* of EN and not on the assert, `reset` and `download-mode` one reboot each with the right strap, a release without `--reboot-on-reset` ending the run and naming the strap, and `attach`/`open` moving no chip state. With the image: a cable reset of the running app, one reboot, and **both boots in one console log** — 1,086 bytes, two identical halves |
 
 Run them with `just test-emu-esp32v3`, and the image-backed ones with
 `just test-emu-esp32v3-boot`.
