@@ -31,11 +31,14 @@
 //! identical to hardware. This is the deliberate "model the effect, not the
 //! handler vectors" choice (see the milestone spec and README).
 
+use lp_emu_core::bus::Bus;
 use lp_xt_inst::Inst;
 
+use super::Exec;
 use crate::cpu::{Cpu, FrameRec, NUM_BASES};
-use crate::emu::{Emulator, Flow};
+use crate::emu::Flow;
 use crate::error::Trap;
+use crate::memory::XtAccess;
 use crate::trace::{TraceEvent, Tracer};
 
 /// Address of the save slot for a frame's register `r` (0-based within the
@@ -55,7 +58,7 @@ fn save_slot(callee_sp: u32, r: u8) -> u32 {
         .wrapping_add(within * 4)
 }
 
-impl Emulator {
+impl<B: Bus> Exec<'_, B> {
     pub(super) fn exec_entry<T: Tracer + ?Sized>(
         &mut self,
         inst: &Inst,

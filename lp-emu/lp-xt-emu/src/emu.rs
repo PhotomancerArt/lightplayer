@@ -2,11 +2,13 @@
 
 use std::collections::VecDeque;
 
+use lp_emu_core::bus::Bus;
 use lp_emu_core::{CycleModel, LogLevel};
 
 use crate::board::BoardProfile;
 use crate::cpu::Cpu;
 use crate::error::{Trap, TrapKind};
+use crate::executor::Exec;
 use crate::fp_policy::FpPolicy;
 use crate::memory::Memory;
 use crate::trace::{TraceEvent, Tracer};
@@ -556,7 +558,12 @@ impl Emulator {
     fn step<T: Tracer + ?Sized>(&mut self, tracer: &mut T, log: bool) -> Result<Step, Trap> {
         let pc = self.cpu.pc;
         let mut bytes = [0u8; 3];
-        let got = self.mem.fetch(pc, &mut bytes)?;
+        // Through the trait, not the inherent method: this is the fetch a
+        // machine-mode hart performs against its own bus (M1 P3). For
+        // `Memory` the trait impl *is* `Memory::fetch`, and the error takes
+        // the `Trap -> MemoryError -> Trap` round trip
+        // [`crate::error::trap_from_bus`] proves is the identity.
+        let got = Bus::fetch_bytes(&mut self.mem, pc, &mut bytes)?;
         let (inst, len) = lp_xt_inst::decode(&bytes[..got]).map_err(|_| Trap {
             kind: TrapKind::Exception,
             cause: crate::error::EXC_ILLEGAL_INSTRUCTION,
@@ -598,44 +605,46 @@ impl Emulator {
         Ok(Step::Normal)
     }
 
-    // --- small shared helpers used by the executor modules ---
+    // --- the executor seam (M1 P2) ---
 
-    /// Write windowed register `a{i}` and emit a trace event.
-    pub(crate) fn wreg<T: Tracer + ?Sized>(&mut self, i: u8, v: u32, tracer: &mut T) {
-        let phys = self.cpu.set_a(i, v);
-        tracer.event(TraceEvent::RegWrite {
-            index: i,
-            phys,
-            value: v,
-        });
-    }
-
-    /// Read windowed register `a{i}`.
-    #[inline]
-    pub(crate) fn rreg(&self, i: u8) -> u32 {
-        self.cpu.a(i)
-    }
-
-    /// Write float register `f{i}` (raw bits) and emit a trace event.
+    /// Borrow the state one instruction needs, as the executors' [`Exec`]
+    /// view.
     ///
-    /// Executors go through here rather than touching `cpu.fr` so that every FP
-    /// write is on one traced path — P6 bisects numeric divergences off this
-    /// trace, and an intermediate you cannot see is a bad day.
-    pub(crate) fn wfreg<T: Tracer + ?Sized>(&mut self, i: u8, bits: u32, tracer: &mut T) {
-        self.cpu.set_f(i, bits);
-        tracer.event(TraceEvent::FRegWrite { index: i, bits });
-    }
-
-    /// Read float register `f{i}` (raw bits).
+    /// This is the only place the user-mode emulator's concrete `Memory`
+    /// becomes a `B: Bus`, and it is why `Emulator` itself stays non-generic:
+    /// the *view* carries the type parameter, so no public signature has one.
     #[inline]
-    pub(crate) fn rfreg(&self, i: u8) -> u32 {
-        self.cpu.f(i)
+    fn exec_view(&mut self) -> Exec<'_, Memory> {
+        Exec {
+            cpu: &mut self.cpu,
+            mem: &mut self.mem,
+            fp_policy: &mut self.fp_policy,
+        }
     }
 
-    /// Write boolean register `b{i}` and emit a trace event.
-    pub(crate) fn wbreg<T: Tracer + ?Sized>(&mut self, i: u8, v: bool, tracer: &mut T) {
-        self.cpu.set_b(i, v);
-        tracer.event(TraceEvent::BRegWrite { index: i, value: v });
+    /// Execute one decoded instruction through the view. See
+    /// [`Exec::execute`](crate::executor::Exec::execute).
+    #[inline]
+    pub(crate) fn execute<T: Tracer + ?Sized>(
+        &mut self,
+        inst: &lp_xt_inst::Inst,
+        pc: u32,
+        tracer: &mut T,
+    ) -> Result<Flow, Trap> {
+        self.exec_view().execute(inst, pc, tracer)
+    }
+
+    /// Execute one decoded instruction through the view, reporting its cost
+    /// class. See
+    /// [`Exec::execute_classed`](crate::executor::Exec::execute_classed).
+    #[inline]
+    pub(crate) fn execute_classed<T: Tracer + ?Sized>(
+        &mut self,
+        inst: &lp_xt_inst::Inst,
+        pc: u32,
+        tracer: &mut T,
+    ) -> Result<(Flow, lp_emu_core::InstClass), Trap> {
+        self.exec_view().execute_classed(inst, pc, tracer)
     }
 
     // --- debug dumps (the consumer-facing shape of lp-riscv-emu's debug.rs) ---

@@ -1,6 +1,8 @@
 //! Traps: how a run stops abnormally, mirroring `xt_runner_proto::CrashReport`
 //! so dual-run can compare emulator faults against hardware crash reports.
 
+use lp_emu_core::memory::{MemoryAccessKind, MemoryError};
+
 /// Classification of an abnormal stop.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TrapKind {
@@ -22,6 +24,68 @@ pub struct Trap {
     pub pc: u32,
     /// Faulting data address for load/store errors (else 0).
     pub vaddr: u32,
+}
+
+/// Turn a bus error into the Xtensa trap the user-mode runner has always
+/// produced.
+///
+/// This is the round trip that keeps `Q3` true. The user-mode
+/// [`crate::memory::Memory`] raises exactly **two** EXCCAUSE values and both
+/// carry the faulting address:
+///
+/// | `Memory` | `MemoryError` |
+/// |---|---|
+/// | fetch fault, `cause = EXC_INSTR_FETCH_ERROR (2)`, `pc = vaddr = pc` | `InvalidAccess { address: pc, kind: InstructionFetch }` |
+/// | `load_fault(addr)`, `cause = EXC_LOAD_STORE_ERROR (3)`, `pc = 0` | `InvalidAccess { address: addr, kind: Read }` |
+/// | `store_fault(addr)`, `cause = EXC_LOAD_STORE_ERROR (3)`, `pc = 0` | `InvalidAccess { address: addr, kind: Write }` |
+///
+/// so `Trap -> MemoryError -> Trap` is the **identity** on everything user
+/// mode can raise. `size` carries no Xtensa meaning — no EXCCAUSE encodes an
+/// access width — so it is dropped on the way back, which is why the round
+/// trip starts from the `Trap` side and not from an arbitrary `MemoryError`.
+///
+/// `pc` follows what `Memory` has always done rather than a rule of its own:
+/// **0** for a load or a store, filled in by the run loop's error boundary
+/// (`emu.rs`'s `if trap.pc == 0 { trap.pc = self.cpu.pc }`), and **the
+/// faulting address** for a fetch, which is the pc by construction. A fetch
+/// trap therefore reaches the run loop already stamped, exactly as
+/// `Memory::fetch`'s own trap did.
+///
+/// [`MemoryError::Unaligned`] and [`MemoryError::Watchpoint`] are
+/// machine-mode-only shapes: `Memory` raises neither, and the privileged hart
+/// (M1 P3) maps them to their own EXCCAUSE values rather than reusing these.
+/// Until then they land on [`EXC_LOAD_STORE_ERROR`], which is the only honest
+/// user-mode answer — a user-mode `Memory` that produced one would be a bug in
+/// `Memory`, not a cause code this crate can invent.
+pub(crate) fn trap_from_bus(e: MemoryError) -> Trap {
+    let (address, kind) = match e {
+        MemoryError::InvalidAccess { address, kind, .. } => (address, kind),
+        MemoryError::Unaligned { address, .. } => (address, MemoryAccessKind::Read),
+        MemoryError::Watchpoint { address, kind, .. } => (address, kind),
+    };
+    match kind {
+        MemoryAccessKind::InstructionFetch => Trap {
+            kind: TrapKind::Exception,
+            cause: crate::memory::EXC_INSTR_FETCH_ERROR,
+            pc: address,
+            vaddr: address,
+        },
+        MemoryAccessKind::Read | MemoryAccessKind::Write => Trap {
+            kind: TrapKind::Exception,
+            cause: crate::memory::EXC_LOAD_STORE_ERROR,
+            pc: 0,
+            vaddr: address,
+        },
+    }
+}
+
+/// So the sixteen `self.mem.*` sites in `executor/` keep their spelling: they
+/// are `Result<_, MemoryError>` now and `?` converts.
+impl From<MemoryError> for Trap {
+    #[inline]
+    fn from(e: MemoryError) -> Trap {
+        trap_from_bus(e)
+    }
 }
 
 /// EXCCAUSE for an illegal / unsupported instruction (`IllegalInstructionCause`).

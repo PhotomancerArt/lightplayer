@@ -68,7 +68,11 @@ impl Registry {
                     "chip": "esp32c6",
                     "bytes": format!("/board/{}/bytes", b.id),
                     "control": format!("/board/{}/control", b.id),
-                    "flash": b.flash_state,
+                    // Recomputed on every request, not once at power-on: a
+                    // board flashed through esptool-js says `loaded` from
+                    // the first flush after the write (plan two M5).
+                    "flash": b.flash_state(),
+                    "boot": b.boot,
                     "link": "usb-serial-jtag",
                     "state": if b.stopped.load(Ordering::SeqCst) { "stopped" } else { "running" },
                     // Auditable, never a gate: how many times this board has

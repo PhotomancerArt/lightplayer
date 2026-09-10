@@ -110,6 +110,16 @@ fn the_walk_over_the_ws_door_lands_the_same_project_with_the_same_figures() {
     // sequence, and it only means something if the bytes survive.
     let flash = state.join("c6-a.flash.bin");
     assert!(flash.is_file(), "the board wrote its flash back");
+    // And it is a chip with something ON it, not merely a file that exists.
+    // This is the byte-level half of the survival claim, and it is here
+    // rather than in the `flash` word because of what M5 made that word mean
+    // — see the amended assertion below.
+    let written = std::fs::read(&flash).expect("reading the board's flash file");
+    assert!(
+        written.iter().any(|&byte| byte != 0xff),
+        "the write-back is an erased chip: {} bytes, every one of them 0xff",
+        written.len()
+    );
 
     // The console transcripts are the FIRST server's until the second one
     // flushes over them, and the first server's holds a blank board's boot —
@@ -123,10 +133,26 @@ fn the_walk_over_the_ws_door_lands_the_same_project_with_the_same_figures() {
     }
 
     let again = Serve::start_in(&elf, &["c6-a", "c6-b"], &[], state.clone());
+    // **Amended for plan two M5, deliberately.** This asserted `loaded`, and
+    // it passed because the word was then "the flash FILE is non-empty" —
+    // which a 4 MiB chip of `0xff` also satisfies. M5 made the word ask the
+    // mask ROM's own question instead: is there an `esp_image_header_t`
+    // magic byte at the reset vector? A `kind=elf` board's honest answer is
+    // `blank` for as long as it lives — its firmware was loaded straight
+    // into memory and never went through its chip, so the word was never
+    // evidence that the walk's bytes survived, and reading it as such was
+    // the coincidence M5's `flash_state()` header calls out by name.
+    //
+    // So the survival claim moves off the word and onto the two places that
+    // can actually be asked: the bytes above, and the guest's own second
+    // boot below. Both are stronger than what the word ever said; what
+    // remains here is the word itself, still pinned, so a regression in it
+    // is still a failure.
     assert_eq!(
         again.board("c6-a")["flash"],
-        "loaded",
-        "the second server mounted what the first formatted"
+        "blank",
+        "a kind=elf board's CHIP never holds a bootable image, whatever its \
+         data partitions hold for the guest"
     );
     let boot = again.wait_for_console("c6-a", "Boot:");
     // The milestone brief expected `Boot: found 1 entries in /projects`. The

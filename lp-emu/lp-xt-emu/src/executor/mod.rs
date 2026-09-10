@@ -1,17 +1,48 @@
 //! Per-group instruction executors, mirroring the lp-riscv-emu split
 //! (arith / imm / load_store / branch / jump / call / window / misc). Each
-//! module is an `impl Emulator` block; this file only routes a decoded
+//! module is an `impl Exec` block; this file only routes a decoded
 //! [`Inst`] to the right group.
 //!
 //! Semantics come from the Xtensa ISA Reference Manual; no QEMU/binutils source
 //! was used (see the repo license ADR).
 
 use lp_emu_core::InstClass;
+use lp_emu_core::bus::Bus;
 use lp_xt_inst::{AluRrr, FpLsiOp, FpLsxOp, FpRrOp, FpRrrOp, Inst, NullaryNarrowOp, NullaryOp};
 
-use crate::emu::{Emulator, Flow};
+use crate::cpu::Cpu;
+use crate::emu::Flow;
 use crate::error::Trap;
-use crate::trace::Tracer;
+use crate::fp_policy::FpPolicy;
+use crate::trace::{TraceEvent, Tracer};
+
+/// The per-instruction execution context: everything an executor touches,
+/// borrowed rather than owned.
+///
+/// The executors used to be `impl Emulator` blocks reading `self.cpu`,
+/// `self.mem` and `self.fp_policy`. They are the same code, over the same
+/// field names — the fields are references now, so every body is unchanged.
+/// What changes is who can build one: the user-mode [`crate::Emulator`] builds
+/// it from its own `Memory`, once per instruction in its `step`, and a
+/// machine-mode hart will build it from the machine's bus the same way (M1
+/// P3). Neither owns the other.
+///
+/// **The view is generic; `Emulator` is not.** That is the whole point of
+/// making this a borrow view rather than an `Emulator<B>`: no public signature
+/// gains a type parameter, and `SyscallHandler::syscall(&mut self, cpu: &mut
+/// Cpu, mem: &mut Memory)` — a user-mode-only concept — stays exactly as
+/// written (milestone ruling R6).
+///
+/// `pub(crate)`, and it stays that way: `Emulator::run_loop` dispatches once
+/// into `run_loop_with` **specifically** so both tracer instantiations are
+/// codegen'd inside this crate (M6 measured 25 % when that discipline lapsed).
+/// A public generic that `lp-xt-elf` could instantiate would reopen exactly
+/// that hole.
+pub(crate) struct Exec<'a, B: Bus> {
+    pub(crate) cpu: &'a mut Cpu,
+    pub(crate) mem: &'a mut B,
+    pub(crate) fp_policy: &'a mut FpPolicy,
+}
 
 /// Map a retired instruction (plus its control-flow outcome) onto
 /// [`lp_emu_core::InstClass`]'s cost buckets.
@@ -120,7 +151,47 @@ mod load_store;
 mod misc;
 mod window;
 
-impl Emulator {
+impl<B: Bus> Exec<'_, B> {
+    // --- small shared helpers used by the executor modules ---
+
+    /// Write windowed register `a{i}` and emit a trace event.
+    pub(crate) fn wreg<T: Tracer + ?Sized>(&mut self, i: u8, v: u32, tracer: &mut T) {
+        let phys = self.cpu.set_a(i, v);
+        tracer.event(TraceEvent::RegWrite {
+            index: i,
+            phys,
+            value: v,
+        });
+    }
+
+    /// Read windowed register `a{i}`.
+    #[inline]
+    pub(crate) fn rreg(&self, i: u8) -> u32 {
+        self.cpu.a(i)
+    }
+
+    /// Write float register `f{i}` (raw bits) and emit a trace event.
+    ///
+    /// Executors go through here rather than touching `cpu.fr` so that every FP
+    /// write is on one traced path — P6 bisects numeric divergences off this
+    /// trace, and an intermediate you cannot see is a bad day.
+    pub(crate) fn wfreg<T: Tracer + ?Sized>(&mut self, i: u8, bits: u32, tracer: &mut T) {
+        self.cpu.set_f(i, bits);
+        tracer.event(TraceEvent::FRegWrite { index: i, bits });
+    }
+
+    /// Read float register `f{i}` (raw bits).
+    #[inline]
+    pub(crate) fn rfreg(&self, i: u8) -> u32 {
+        self.cpu.f(i)
+    }
+
+    /// Write boolean register `b{i}` and emit a trace event.
+    pub(crate) fn wbreg<T: Tracer + ?Sized>(&mut self, i: u8, v: bool, tracer: &mut T) {
+        self.cpu.set_b(i, v);
+        tracer.event(TraceEvent::BRegWrite { index: i, value: v });
+    }
+
     /// Execute one decoded instruction. `pc`/`len` describe the current
     /// instruction; the returned [`Flow`] tells the run loop how to advance.
     ///

@@ -39,13 +39,16 @@
 //! GCC source was read or adapted (see
 //! `docs/adr/2026-07-29-license-provenance-discipline.md`).
 
+use lp_emu_core::bus::Bus;
 use lp_xt_inst::{FpLsiOp, FpLsxOp, FpRrOp, Inst, SpecialReg, SrOp, UrOp, UserReg};
 
-use crate::emu::{Emulator, Flow};
+use super::Exec;
+use crate::emu::Flow;
 use crate::error::{EXC_COPROCESSOR0_DISABLED, Trap, TrapKind};
+use crate::memory::XtAccess;
 use crate::trace::{TraceEvent, Tracer};
 
-impl Emulator {
+impl<B: Bus> Exec<'_, B> {
     /// Execute one FP / Boolean / special-register instruction.
     pub(super) fn exec_float<T: Tracer + ?Sized>(
         &mut self,

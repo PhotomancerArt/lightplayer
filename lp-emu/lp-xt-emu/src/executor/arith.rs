@@ -1,12 +1,14 @@
 //! Arithmetic, logical, shift, and register-move executors.
 
+use lp_emu_core::bus::Bus;
 use lp_xt_inst::{AluRrr, AluRs, AluRt, Inst, ShiftSetOp};
 
-use crate::emu::{Emulator, Flow};
+use super::Exec;
+use crate::emu::Flow;
 use crate::error::{EXC_INTEGER_DIVIDE_BY_ZERO, Trap, TrapKind};
 use crate::trace::Tracer;
 
-impl Emulator {
+impl<B: Bus> Exec<'_, B> {
     pub(super) fn exec_arith<T: Tracer + ?Sized>(
         &mut self,
         inst: &Inst,

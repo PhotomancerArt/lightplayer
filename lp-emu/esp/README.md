@@ -230,6 +230,31 @@ back on a cadence and on shutdown, a **console transcript** each under
 `--console-dir`, `--reboot-on-reset` **on** (see above), and `--air <addr>` —
 a one-way `LPA1` tap that is **auditable only** and never a transcript.
 
+**Three board kinds**, `kind=` on a `--board`, differing in which entry the
+hart takes and whether the chip keeps its writes:
+
+| kind | entry | chip |
+|---|---|---|
+| `elf` (default) | the ELF's entry point, loaded straight into memory | a separate, initially empty flash part |
+| `merged` | the reset vector, through the real mask ROM | the whole merged image, **read-only** — it is the image a gate named, so `--state-dir` is ignored |
+| `rom-up` | the reset vector, through the real mask ROM | the board's OWN flash file, which keeps its writes |
+
+`kind=rom-up` is the only shape that can be **flashed and then boot what was
+written**, which is what plan two's Studio walks do through esptool-js. Its
+image is a whole-chip image the flash file is *seeded* from the first time;
+the word `blank` means a chip with nothing on it (a file actually named
+`blank` is still reachable as `./blank`). A blank chip does not reach the
+download console on its own — the mask ROM prints `invalid header:
+0xffffffff` forever, as it does on the part — but the host's reset dance puts
+it there, which is what every flasher does first anyway.
+
+`GET /boards`'s `flash` word (`blank` / `loaded` / `merged`) is about the
+**chip**, never about what the board is running: it asks the question the mask
+ROM asks — is there an image magic at the reset vector — and it is recomputed
+on every flush, so `blank → flash → loaded` is a sequence you can watch. A
+`kind=elf` board runs an image that was never in its flash and truthfully
+reports `blank` for its whole life.
+
 `--usb-host` decides what a byte client finds. `attached` (the default, and
 `emu run`'s) is the cable in with the port open from power-on, so the boot
 console is on the wire and the first client is replayed it. `attached-idle` is
@@ -369,6 +394,16 @@ browser shim is glue rather than a translation:
 The dances are **decoded**, not pattern-matched: the model watches the RTS
 falling edge and whether DTR was ever high, exactly as `set_signals` does, so
 any host tool whose sequence has that shape works without being listed here.
+
+**One row that is deliberately absent: a reset does not re-enumerate the
+port.** On this part the USB-Serial-JTAG controller shares silicon with the
+CPU it resets, so the USB device survives every reset the serial channel can
+ask for — which is why a real C6 can be flashed over Web Serial at all — and
+the shim models that (plan two M5; the reasoning and the measurement are in
+`public/lpa-link/virtual_serial.js`'s header). Only `detach` then `attach`
+mints a new `SerialPort`. `Esp32C6Machine::reboot` puts the guest's clock back
+to zero, which is how a host learns a reboot happened at all; what it must not
+do is make the port vanish under the flasher that asked for it.
 
 ### `reset` and `download-mode`
 

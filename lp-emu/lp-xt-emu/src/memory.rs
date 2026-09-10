@@ -29,6 +29,8 @@
 use std::cell::Cell;
 use std::sync::{Arc, Mutex};
 
+use lp_emu_core::memory::{MemoryAccessKind, MemoryError};
+
 use crate::error::{Trap, TrapKind};
 
 /// Base D-bus address of the **host-shared** region — the window a host
@@ -781,6 +783,342 @@ impl Memory {
 impl Default for Memory {
     fn default() -> Self {
         Memory::new()
+    }
+}
+
+// --- the bus seam (M1 P2, decision D1) -------------------------------------
+
+/// `Memory` is one [`lp_emu_core::bus::Bus`], so the executors can run against
+/// any of them.
+///
+/// Mechanical forwarding onto the inherent methods above, with three
+/// adaptations and nothing else:
+///
+/// - **`&self` -> `&mut self`.** The trait takes `&mut self` because an MMIO
+///   read can have side effects. `Memory`'s reads are pure and its inherent
+///   `&self` accessors are **kept exactly as they are** — every user-mode path
+///   that relies on a shared borrow is unchanged, and these bodies just call
+///   them.
+/// - **Signedness.** `Bus` is signed at the word/halfword/byte level and
+///   `Memory` is unsigned; the casts are here. `read_u8` matches already.
+/// - **Error type.** `Memory` produces [`Trap`]; the trait produces
+///   [`MemoryError`]. `bus_error` below is one half of the round trip
+///   [`crate::error::trap_from_bus`] documents; that round trip is the
+///   identity on everything user mode can raise, which is what lets the
+///   executors take this seam without changing a single fault.
+///
+/// Inherent methods win name resolution, so `emu.mem.read_u32(a)` on a
+/// concrete `Memory` still calls the inherent `&self` one and still returns a
+/// `Trap`. Only code generic over `B: Bus` sees these.
+impl lp_emu_core::bus::Bus for Memory {
+    /// The RV32 fetch: one 32-bit instruction word.
+    ///
+    /// Xtensa has no such thing — 2- and 3-byte instructions at any alignment
+    /// — and fetches through [`lp_emu_core::bus::Bus::fetch_bytes`] instead,
+    /// so nothing in this crate calls this. It is implemented rather than
+    /// stubbed because a required trait method that panics is a trap laid for
+    /// the next caller: assembling the word byte by byte under `Access::Fetch`
+    /// applies the same execute permission and the same alias handling
+    /// [`Memory::fetch`] does, so whoever calls it one day gets the honest
+    /// answer instead of an abort.
+    fn fetch_instruction(&mut self, address: u32) -> Result<u32, MemoryError> {
+        let mut v = 0u32;
+        for i in 0..4u32 {
+            let a = address.wrapping_add(i);
+            let Some((ri, idx)) = self.resolve(a, Access::Fetch) else {
+                return Err(MemoryError::InvalidAccess {
+                    address: a,
+                    size: 4,
+                    kind: MemoryAccessKind::InstructionFetch,
+                });
+            };
+            v |= u32::from(self.regions[ri].data[idx]) << (8 * i);
+        }
+        Ok(v)
+    }
+
+    fn fetch_bytes(&mut self, pc: u32, out: &mut [u8; 3]) -> Result<usize, MemoryError> {
+        Memory::fetch(self, pc, out)
+            .map_err(|t| bus_error(t, 1, MemoryAccessKind::InstructionFetch))
+    }
+
+    fn read_word(&mut self, address: u32) -> Result<i32, MemoryError> {
+        Memory::read_u32(self, address)
+            .map(|v| v as i32)
+            .map_err(|t| bus_error(t, 4, MemoryAccessKind::Read))
+    }
+
+    fn read_halfword(&mut self, address: u32) -> Result<i16, MemoryError> {
+        Memory::read_u16(self, address)
+            .map(|v| v as i16)
+            .map_err(|t| bus_error(t, 2, MemoryAccessKind::Read))
+    }
+
+    fn read_byte(&mut self, address: u32) -> Result<i8, MemoryError> {
+        Memory::read_u8(self, address)
+            .map(|v| v as i8)
+            .map_err(|t| bus_error(t, 1, MemoryAccessKind::Read))
+    }
+
+    fn read_u8(&mut self, address: u32) -> Result<u8, MemoryError> {
+        Memory::read_u8(self, address).map_err(|t| bus_error(t, 1, MemoryAccessKind::Read))
+    }
+
+    fn write_word(&mut self, address: u32, value: i32) -> Result<(), MemoryError> {
+        Memory::write_u32(self, address, value as u32)
+            .map_err(|t| bus_error(t, 4, MemoryAccessKind::Write))
+    }
+
+    fn write_halfword(&mut self, address: u32, value: i16) -> Result<(), MemoryError> {
+        Memory::write_u16(self, address, value as u16)
+            .map_err(|t| bus_error(t, 2, MemoryAccessKind::Write))
+    }
+
+    fn write_byte(&mut self, address: u32, value: i8) -> Result<(), MemoryError> {
+        Memory::write_u8(self, address, value as u8)
+            .map_err(|t| bus_error(t, 1, MemoryAccessKind::Write))
+    }
+}
+
+/// The `Trap -> MemoryError` half of the seam's round trip.
+///
+/// Every trap `Memory` raises carries the faulting address in `vaddr`, so the
+/// bus error is that address plus the width and direction the caller already
+/// knew. See [`crate::error::trap_from_bus`] for the way back and for why it
+/// is lossless.
+fn bus_error(t: Trap, size: usize, kind: MemoryAccessKind) -> MemoryError {
+    MemoryError::InvalidAccess {
+        address: t.vaddr,
+        size,
+        kind,
+    }
+}
+
+/// The unsigned accessors the Xtensa executors are written against, over any
+/// [`Bus`](lp_emu_core::bus::Bus).
+///
+/// `Bus` is signed at the word/halfword/byte level; Xtensa loads and stores
+/// are unsigned (`l8ui`, `l16ui`, `l32i`, …) and every executor site spells
+/// them `read_u16` / `read_u32` / `write_u8` / `write_u16` / `write_u32`.
+/// Rather than widen the **contended** `lp-emu-core/src/bus.rs` with five more
+/// methods, the casts live here as a blanket-implemented crate-local trait:
+/// they are Xtensa's concern, not the core's, and the core's diff stays at the
+/// single `fetch_bytes` method the speed ladder was told about. Each body is
+/// one cast and folds away.
+///
+/// Inherent methods win name resolution, so this changes nothing for code
+/// holding a concrete `Memory` — `Memory::read_u32` is still the inherent one,
+/// still `&self`, still `Result<_, Trap>`.
+pub(crate) trait XtAccess: lp_emu_core::bus::Bus {
+    #[inline]
+    fn read_u16(&mut self, address: u32) -> Result<u16, MemoryError> {
+        Ok(self.read_halfword(address)? as u16)
+    }
+    #[inline]
+    fn read_u32(&mut self, address: u32) -> Result<u32, MemoryError> {
+        Ok(self.read_word(address)? as u32)
+    }
+    #[inline]
+    fn write_u8(&mut self, address: u32, value: u8) -> Result<(), MemoryError> {
+        self.write_byte(address, value as i8)
+    }
+    #[inline]
+    fn write_u16(&mut self, address: u32, value: u16) -> Result<(), MemoryError> {
+        self.write_halfword(address, value as i16)
+    }
+    #[inline]
+    fn write_u32(&mut self, address: u32, value: u32) -> Result<(), MemoryError> {
+        self.write_word(address, value as i32)
+    }
+}
+
+impl<B: lp_emu_core::bus::Bus + ?Sized> XtAccess for B {}
+
+#[cfg(test)]
+mod bus_seam_tests {
+    use lp_emu_core::bus::Bus;
+
+    use super::*;
+    use crate::board::BoardProfile;
+    use crate::error::trap_from_bus;
+
+    fn loaded(profile: &BoardProfile) -> Memory {
+        let mut mem = Memory::new();
+        profile.install(&mut mem);
+        // A recognisable, non-repeating image so a byte that comes from the
+        // wrong address is visible rather than accidentally equal.
+        let code: Vec<u8> = (0..profile.code_region_len)
+            .map(|i| (i as u32).wrapping_mul(31).wrapping_add(7) as u8)
+            .collect();
+        mem.load_bytes(profile.code_ibus_base(), &code);
+        mem
+    }
+
+    /// `Bus::fetch_bytes` **is** `Memory::fetch` — same bytes, same count, same
+    /// fault — across both alias shapes, at both views, and at the region ends
+    /// where the count drops below 3.
+    #[test]
+    fn memory_bus_fetch_bytes_equals_inherent_fetch() {
+        for profile in [
+            BoardProfile::esp32(),              // identity SRAM0, word-only
+            BoardProfile::esp32_sram1_legacy(), // word-mirrored SRAM1
+            BoardProfile::esp32s3(),            // offset alias
+        ] {
+            let mut mem = loaded(&profile);
+            let ibus = profile.code_ibus_base();
+            let len = profile.code_region_len as u32;
+            let mut sweep: Vec<u32> = Vec::new();
+            // The executable view: the first bytes, a mid-region stretch that
+            // crosses word boundaries at every alignment, and the last bytes
+            // of the region (where a 3-byte fetch runs out).
+            for i in 0..8 {
+                sweep.push(ibus.wrapping_add(i));
+                sweep.push(ibus.wrapping_add(len / 2).wrapping_add(i));
+            }
+            for back in 1..=6u32 {
+                sweep.push(ibus.wrapping_add(len).wrapping_sub(back));
+                // …and the same distance the other way, because a
+                // word-mirrored image runs downward.
+                sweep.push(ibus.wrapping_sub(back));
+            }
+            // The data view of the same bytes: a fetch there must fault
+            // (FINDINGS E2D) — and must fault the same way through both paths.
+            for i in 0..4 {
+                sweep.push(profile.code_dbus_base.wrapping_add(i));
+            }
+            // Unmapped, the ROM windows, and the stack.
+            sweep.extend([
+                0x0000_0000,
+                0xFFFF_FFFF,
+                profile.irom_base,
+                profile.irom_base + 1,
+                profile.drom_base,
+                profile.stack_dbus_base,
+            ]);
+
+            for pc in sweep {
+                let mut want = [0u8; 3];
+                let inherent = Memory::fetch(&mem, pc, &mut want);
+                let mut got = [0u8; 3];
+                let via_bus = Bus::fetch_bytes(&mut mem, pc, &mut got);
+                match (inherent, via_bus) {
+                    (Ok(n), Ok(m)) => assert_eq!(
+                        (n, &want[..n]),
+                        (m, &got[..m]),
+                        "{} fetch at {pc:#010x}",
+                        profile.name
+                    ),
+                    (Err(t), Err(e)) => assert_eq!(
+                        t,
+                        trap_from_bus(e),
+                        "{} fetch fault at {pc:#010x}",
+                        profile.name
+                    ),
+                    (a, b) => panic!("{} fetch at {pc:#010x}: {a:?} vs {b:?}", profile.name),
+                }
+            }
+        }
+    }
+
+    /// Every fault the user-mode `Memory` can raise survives
+    /// `Trap -> MemoryError -> Trap` **field for field**, `cause` and `vaddr`
+    /// included. This is what lets the executors move onto the bus without
+    /// changing a single trap the runner reports.
+    #[test]
+    fn trap_bus_error_round_trip() {
+        let profile = BoardProfile::esp32();
+        let mut mem = loaded(&profile);
+        let unmapped = 0x1234_5678u32;
+        // The code region is word-only (classic SRAM0), so a byte store into
+        // it is a LoadStoreError even though the address is mapped and
+        // writable.
+        let word_only = profile.code_ibus_base();
+
+        // fetch to a non-executable address (the D-bus-only stack region)
+        let mut out = [0u8; 3];
+        let t = Memory::fetch(&mem, profile.stack_dbus_base, &mut out).unwrap_err();
+        let e = Bus::fetch_bytes(&mut mem, profile.stack_dbus_base, &mut out).unwrap_err();
+        assert_eq!(t, trap_from_bus(e), "fetch fault");
+        assert_eq!(t.cause, EXC_INSTR_FETCH_ERROR);
+        assert_eq!(t.vaddr, profile.stack_dbus_base);
+
+        // load from an unmapped address, at all three widths
+        let t = Memory::read_u8(&mem, unmapped).unwrap_err();
+        assert_eq!(
+            t,
+            trap_from_bus(Bus::read_u8(&mut mem, unmapped).unwrap_err())
+        );
+        let t = Memory::read_u16(&mem, unmapped).unwrap_err();
+        assert_eq!(
+            t,
+            trap_from_bus(Bus::read_halfword(&mut mem, unmapped).unwrap_err())
+        );
+        let t = Memory::read_u32(&mem, unmapped).unwrap_err();
+        assert_eq!(
+            t,
+            trap_from_bus(Bus::read_word(&mut mem, unmapped).unwrap_err())
+        );
+        assert_eq!(t.cause, EXC_LOAD_STORE_ERROR);
+        assert_eq!(t.vaddr, unmapped);
+        assert_eq!(t.pc, 0, "the run loop fills the pc in, as it always has");
+
+        // store to an unmapped address
+        let t = Memory::write_u32(&mut mem, unmapped, 0xDEAD_BEEF).unwrap_err();
+        assert_eq!(
+            t,
+            trap_from_bus(Bus::write_word(&mut mem, unmapped, 0xDEAD_BEEFu32 as i32).unwrap_err())
+        );
+
+        // a byte store into a WordOnly region
+        let t = Memory::write_u8(&mut mem, word_only, 0xAB).unwrap_err();
+        assert_eq!(
+            t,
+            trap_from_bus(Bus::write_byte(&mut mem, word_only, 0xABu8 as i8).unwrap_err())
+        );
+        assert_eq!(t.cause, EXC_LOAD_STORE_ERROR);
+        assert_eq!(t.vaddr, word_only);
+    }
+
+    /// The five unsigned shims are the inherent accessors with a cast, and the
+    /// cast is the whole point: values with the high bit set must survive.
+    #[test]
+    fn bus_unsigned_helpers_round_trip() {
+        let profile = BoardProfile::esp32();
+        let mut mem = loaded(&profile);
+        let ram = profile.stack_dbus_base + 0x100;
+
+        for (i, &v) in [
+            0x0000_0000u32,
+            0x0000_0001,
+            0x8000_0000,
+            0xFFFF_FFFF,
+            0xDEAD_BEEF,
+        ]
+        .iter()
+        .enumerate()
+        {
+            let at = ram + (i as u32) * 8;
+
+            XtAccess::write_u32(&mut mem, at, v).expect("word store");
+            assert_eq!(Memory::read_u32(&mem, at), Ok(v), "u32 {v:#010x}");
+            assert_eq!(XtAccess::read_u32(&mut mem, at), Ok(v), "u32 {v:#010x}");
+
+            let h = v as u16;
+            XtAccess::write_u16(&mut mem, at + 4, h).expect("halfword store");
+            assert_eq!(Memory::read_u16(&mem, at + 4), Ok(h), "u16 {h:#06x}");
+            assert_eq!(XtAccess::read_u16(&mut mem, at + 4), Ok(h), "u16 {h:#06x}");
+
+            let b = v as u8;
+            XtAccess::write_u8(&mut mem, at + 6, b).expect("byte store");
+            assert_eq!(Memory::read_u8(&mem, at + 6), Ok(b), "u8 {b:#04x}");
+            assert_eq!(Bus::read_u8(&mut mem, at + 6), Ok(b), "u8 {b:#04x}");
+        }
+
+        // And the inherent path sees what the bus path wrote, byte for byte —
+        // the two are one store, not two implementations that agree.
+        XtAccess::write_u32(&mut mem, ram, 0x8877_66FF).expect("word store");
+        assert_eq!(Memory::read_u8(&mem, ram), Ok(0xFF));
+        assert_eq!(Memory::read_u8(&mem, ram + 3), Ok(0x88));
     }
 }
 

@@ -161,15 +161,19 @@ export class EmulatorPort {
     return Promise.resolve(null);
   }
 
+  // A chip reset is NOT a replug: see the `reboot` event below. These two
+  // report the reboot the same way an unrequested one is reported, so the
+  // shim's honesty does not depend on who asked.
+
   async reset() {
     const reply = await this.command("reset");
-    this._reenumerated();
+    this._rebooted();
     return reply;
   }
 
   async downloadMode() {
     const reply = await this.command("download-mode");
-    this._reenumerated();
+    this._rebooted();
     return reply;
   }
 
@@ -236,8 +240,11 @@ export class EmulatorPort {
 
   // --- events --------------------------------------------------------------
   //
-  // `reenumerate` — the board went back to power-on, so the port object above
-  // this one is a dead generation and its replacement must be a NEW object.
+  // `reboot` — the board went back to power-on. It is an OBSERVATION, not a
+  // replug: on a C6 the USB-Serial-JTAG controller is in the same silicon as
+  // the CPU it resets, so the USB device survives every reset the serial
+  // channel can ask for, and the port object above this one stays the port
+  // object. See the ruling in `virtual_serial.js`'s header.
   // `byteserror` — the byte channel failed under an open port; the polyfill
   // errors the `readable` stream, which is what a device going away does.
 
@@ -314,7 +321,7 @@ export class EmulatorPort {
     if (cycle !== null) {
       if (this._lastCycle >= 0 && cycle < this._lastCycle) {
         // The counter went backwards: the machine is back at power-on.
-        this._reenumerated();
+        this._rebooted();
       }
       this._lastCycle = cycle;
     }
@@ -328,11 +335,11 @@ export class EmulatorPort {
     }
   }
 
-  _reenumerated() {
+  _rebooted() {
     // A fresh generation starts its cycles from zero; forget the old high
     // water so the next reply is not read as a second reboot.
     this._lastCycle = -1;
-    this.emit("reenumerate", { boardId: this.boardId });
+    this.emit("reboot", { boardId: this.boardId });
   }
 
   _openBytes() {
