@@ -38,20 +38,29 @@ let modules = null;
 /// Load the shipped JS once, over HTTP, and hand every wrapper below the same
 /// instances. `browser_serial.js` pulls the device controller in itself, from
 /// the absolute path it hard-codes.
+///
+/// ONE AT A TIME, and that is load-bearing. These five used to be a
+/// `Promise.all`, and with the whole set in flight at once the runner's static
+/// server (`tiny-http`, inside `wasm-bindgen-test-runner`) sometimes never
+/// answers one of them: the import promise never settles, the first test hangs
+/// with nothing logged, and the harness reports "Failed to detect test as
+/// having been run" 20 seconds later. MEASURED 2026-09-09 in headless Firefox
+/// 148 on the desk, 10 runs per variant: 0/10 hangs with M2's smaller
+/// `virtual_serial.js`, 3/10 with M3's, and 1/8 with M2's file PADDED WITH
+/// COMMENTS to M3's byte length — so the trigger is response size and timing,
+/// not anything either file says. A traced failure showed three of the five
+/// imports started and never finished. Sequential imports remove the
+/// concurrency the race needs; the whole set is under 80 KB, so the cost is
+/// nothing a test suite can measure.
 async function load() {
-  modules ??= Promise.all([
-    import("/provider/browser_serial.js"),
-    import("/provider/browser_esp32_flash.js"),
-    import("/lpa-link/virtual_serial.js"),
-    import("/lpa-link/emulator_port.js"),
-    import("/lpa-link/browser_esp32_device_controller.js"),
-  ]).then(([serial, flash, shim, port, controller]) => ({
-    serial,
-    flash,
-    shim,
-    port,
-    controller,
-  }));
+  modules ??= (async () => {
+    const serial = await import("/provider/browser_serial.js");
+    const flash = await import("/provider/browser_esp32_flash.js");
+    const shim = await import("/lpa-link/virtual_serial.js");
+    const port = await import("/lpa-link/emulator_port.js");
+    const controller = await import("/lpa-link/browser_esp32_device_controller.js");
+    return { serial, flash, shim, port, controller };
+  })();
   return modules;
 }
 

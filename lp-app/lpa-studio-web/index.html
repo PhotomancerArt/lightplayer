@@ -334,6 +334,131 @@
                 .catch(() => null);
         </script>
         <!--
+          DEV MODE ONLY — the Web Serial shim's install seam (emulator plan
+          two, M3; PD5, PD6).
+
+          With `?emu=ws://<host>:<port>` in the URL, `navigator.serial` in
+          this page is a virtual USB bus over an `lp-cli emu serve` holding
+          emulated ESP32-C6 boards, and Studio's whole device stack —
+          `browser_serial.js`, `browser_esp32_device_controller.js`,
+          `browser_esp32_flash.js` and the Rust provider above them — runs
+          against it UNCHANGED. Studio is not supposed to be able to tell,
+          which is why nothing in `src/` reads this flag and why the honesty
+          is a page-level banner instead (PD12).
+
+          WITHOUT the flag, nothing here is fetched. Not fetched and ignored:
+          no network request for the modules at all, and `navigator.serial`
+          is Chromium's own. That is the whole meaning of "dev mode" and it is
+          checkable in the network panel.
+
+          A SYNCHRONOUS FAÇADE, resolved behind. A dynamic `import()` is
+          async and the wasm bundle may boot before it lands, so this defines
+          `navigator.serial` synchronously — as an `EventTarget` whose two
+          methods await the module — and hands it the bus when it arrives.
+          `browser_serial.js` re-reads `globalThis.navigator?.serial` at every
+          call site, so nothing races and no code above this line has to
+          await anything. It also matters for hotplug: `installSerialEvents`
+          installs its listeners at most ONCE per page, so they must land on
+          an object that is already there and stays.
+
+          `navigator.serial` is a getter on `Navigator.prototype` in Chromium
+          and an own property shadows it — proven in real Chrome by the M2
+          conformance suite, which asserts both the shadowing and its removal.
+
+          The flag is validated the way `capture_sink_url()` validates
+          `?capture-sink=` (`src/device_events_io.rs`): a query is user input,
+          an unknown value reads as no value, and the page says so once.
+        -->
+        <script>
+            (() => {
+                const raw = new URLSearchParams(window.location.search).get("emu");
+                // No flag, no fetch.
+                if (raw === null) return;
+                const backing = raw.trim();
+                if (!/^wss?:\/\/\S+$/.test(backing)) {
+                    console.warn(`emu ignored (not ws/wss): ${raw}`);
+                    return;
+                }
+                // The flag is spelled `ws://` because what it installs is a
+                // virtual USB bus, and that is the scheme its two endpoints
+                // speak. `EmulatorPort`'s base is the door's HTTP origin
+                // (`GET /boards`) and it derives the `ws://` URLs from it, so
+                // the one translation between the two spellings is here.
+                const httpBase = backing.replace(/^ws/, "http");
+
+                class LpEmuSerialFacade extends EventTarget {
+                    async requestPort(options) {
+                        return (await ready).requestPort(options);
+                    }
+                    async getPorts() {
+                        return (await ready).getPorts();
+                    }
+                }
+                const facade = new LpEmuSerialFacade();
+                Object.defineProperty(navigator, "serial", {
+                    value: facade,
+                    configurable: true,
+                    enumerable: true,
+                    writable: false,
+                });
+
+                const whenBody = (run) => {
+                    if (document.body) run();
+                    else document.addEventListener("DOMContentLoaded", run, { once: true });
+                };
+
+                const ready = (async () => {
+                    const [shim, chrome] = await Promise.all([
+                        import("/lpa-link/virtual_serial.js"),
+                        import("/lpa-link/emulator_picker.js"),
+                    ]);
+                    const bus = await shim.createBus(httpBase, {
+                        picker: chrome.createPicker({ backingUrl: backing }),
+                    });
+                    // The bus is where a re-enumeration and the banner's
+                    // cable buttons raise their edges; the façade is what
+                    // Studio listened to. Forward, one for one.
+                    for (const type of ["connect", "disconnect"]) {
+                        bus.addEventListener(type, (event) => {
+                            facade.dispatchEvent(new CustomEvent(type, { detail: event.detail }));
+                        });
+                    }
+                    // A page-internal contract, like `__lpShell`: the dev
+                    // banner's controls, and an agent at the console, reach
+                    // the boards through this. Studio never touches it.
+                    window.__lpEmuSerial = { bus, facade, backing, base: httpBase };
+                    whenBody(() =>
+                        chrome.installDevBanner({ bus, backingUrl: backing, facade }),
+                    );
+                    console.info(
+                        `[emu] navigator.serial is a shim over ${backing} ` +
+                            `(${bus.describeBoards().length} board(s))`,
+                    );
+                    return bus;
+                })();
+                ready.catch((error) => {
+                    console.error(`[emu] the shim over ${backing} did not install:`, error);
+                });
+
+                // Hand the boards back when this page goes away. The door
+                // admits ONE client per board and answers a second with 409
+                // (`emu serve`, M1) — and Chrome's back/forward cache keeps a
+                // navigated-away page, and its WebSockets, ALIVE. Measured
+                // 2026-09-09: without this, the second load of `?emu=` in a
+                // tab fails with "control channel refused" and stays failed
+                // until the door restarts. `pagehide` (unlike `unload`) does
+                // not itself make a page ineligible for bfcache, so a restored
+                // page would come back holding closed sockets — reload it
+                // instead and let the seam install cleanly.
+                window.addEventListener("pagehide", () => {
+                    ready.then((bus) => bus.dispose()).catch(() => {});
+                });
+                window.addEventListener("pageshow", (event) => {
+                    if (event.persisted) window.location.reload();
+                });
+            })();
+        </script>
+        <!--
           Vendored CodeMirror bundle (globalThis.LpCodeMirror), regenerated
           via `just studio-codemirror-bundle`; see vendor-src/codemirror/.
           The CodeEditor component polls for the global, so load order vs

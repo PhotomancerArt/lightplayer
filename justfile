@@ -481,6 +481,83 @@ claude-launch-json mode="":
 studio-dev-bench:
     STUDIO_BENCH=1 just studio-dev
 
+# studio-dev with emulated ESP32-C6 boards behind it — a Studio device walk
+# with no board (emulator plan two, M3).
+#
+# Starts `lp-cli emu serve` holding TWO boards (PD4: two identities is where
+# the multi-board defects live) on an ephemeral port, prints the URL to open,
+# and then runs `studio-dev` in the foreground. The emulator is stopped BY PID
+# when this recipe exits — never `pkill -f`, another worktree's `lp-cli` is
+# not ours to kill.
+#
+# The boards boot the SAME image Studio serves for flashing: this depends on
+# `studio-firmware-package-served`, whose `esp32c6-4mb` build leaves its ELF
+# at target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6. Pass a
+# different image as the argument to boot that instead.
+#
+# Two ports, and neither is pinned. The emulator takes an ephemeral one and
+# prints it; the dev server takes this worktree's hashed one
+# (scripts/dev-port.sh) and prints it. The URL printed by `studio-dev` is the
+# source of truth — the `?emu=` line below predicts it with `--query`, which
+# is what `claude-launch-json` does, and a prediction is not a promise.
+#
+# NO WebSerial grant, no Chromium policy profile, no bench port block: a
+# polyfilled `navigator.serial` grants itself (plan two, notes §8). Those
+# exist for HARDWARE walks (`just studio-dev-bench`, `just serial-grant`) and
+# wiring them in here would be reintroducing a constraint the shim removes.
+studio-dev-emu IMAGE="": install-wasm32-target studio-firmware-package-served
+    #!/usr/bin/env bash
+    set -euo pipefail
+    image="{{ IMAGE }}"
+    if [[ -z "${image}" ]]; then
+        image="target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6"
+    fi
+    if [[ ! -f "${image}" ]]; then
+        echo "studio-dev-emu: no emulator image at ${image}" >&2
+        echo "Build one with: cargo run -p lp-cli -- firmware package esp32c6-4mb" >&2
+        exit 1
+    fi
+    cargo build -p lp-cli
+    state="target/emu-serve/studio-dev"
+    mkdir -p "${state}"
+    log="${state}/serve.log"
+    # The door's port is hashed per worktree by the same script the dev
+    # server's is (never pinned, never shared), so the `?emu=` URL survives a
+    # restart. The address the door PRINTS is still the source of truth.
+    emu_port="$(scripts/dev-port.sh emu-serve "${EMU_SERVE_PORT:-}")"
+    ./target/debug/lp-cli emu serve \
+        --board "c6-a=${image}" \
+        --board "c6-b=${image}" \
+        --listen "127.0.0.1:${emu_port}" \
+        --state-dir "${state}" \
+        --console-dir "${state}" >"${log}" 2>&1 &
+    serve_pid=$!
+    trap 'kill "${serve_pid}" 2>/dev/null || true' EXIT
+    addr=""
+    for _ in $(seq 1 100); do
+        addr="$(sed -n 's/.*emu serve: listening on http:\/\/\(.*\)$/\1/p' "${log}" | head -1 || true)"
+        [[ -n "${addr}" ]] && break
+        if ! kill -0 "${serve_pid}" 2>/dev/null; then
+            echo "studio-dev-emu: emu serve exited before it listened; log follows" >&2
+            cat "${log}" >&2
+            exit 1
+        fi
+        sleep 0.2
+    done
+    if [[ -z "${addr}" ]]; then
+        echo "studio-dev-emu: emu serve never printed a listen address" >&2
+        exit 1
+    fi
+    studio_port="$(scripts/dev-port.sh --query studio-dev "${STUDIO_WEB_PORT:-}")"
+    echo
+    echo "Emulated boards:  http://${addr}/boards   (image: ${image})"
+    echo "Emulator console: ${state}/<board>.console.log"
+    echo "Open Studio with: ?emu=ws://${addr}"
+    echo "  predicted:      http://127.0.0.1:${studio_port}/?emu=ws://${addr}"
+    echo "  (the URL studio-dev prints below is the source of truth)"
+    echo
+    just studio-dev
+
 studio-dev: install-wasm32-target studio-firmware-package-served
     #!/usr/bin/env bash
     set -euo pipefail
