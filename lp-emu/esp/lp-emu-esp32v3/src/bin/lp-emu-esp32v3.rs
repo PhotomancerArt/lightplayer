@@ -46,10 +46,11 @@ OPTIONS:
     --rom <path>            a mask ROM ELF (default: the vendored ESP32
                             rev300 image, compiled in)
     --strict-bus            every access to an address nothing claims is a
-                            STOP instead of a silent zero. NO PERIPHERAL IS
-                            MODELLED YET, so this stops at the first MMIO
-                            access of the boot — which is the point: that
-                            stop is what M3 P3 reads
+                            STOP instead of a silent zero. Every block is an
+                            accept-and-remember probe (M3 P3), so a boot
+                            reaches its first spin on a register only a
+                            model can answer — see the phase report for
+                            which phase owns which
     --time-grade t1         t1 = cycles are instructions. The only grade this
                             machine defines; see --help output for why [t1]
     --timeout <5s|1500ms|900us>
@@ -191,11 +192,20 @@ fn print_map() {
     }
     for span in memmap::MMIO_WINDOWS {
         println!(
-            "  {:<20} {:#010x}..{:#010x}  declared, NO PERIPHERAL MODELLED (M3 P2)",
+            "  {:<20} {:#010x}..{:#010x}  declared; the blocks below are accept-and-remember \
+             (M3 P3), everything else in it is unmapped",
             span.name,
             span.base,
             span.end()
         );
+    }
+    match Esp32V3Builder::new().boot_mode(BootMode::RomUp).build() {
+        Ok(machine) => {
+            for (name, base, len) in machine.peripheral_map() {
+                println!("    {name:<18} {base:#010x}..{:#010x}  accept", base + len);
+            }
+        }
+        Err(e) => println!("    (could not build the boot set: {e})"),
     }
     println!("  deliberately unmapped:");
     for (span, why) in bus_setup::deliberately_unmapped() {
@@ -237,6 +247,22 @@ fn print_build_report(machine: &Machine, boot_mode: BootMode) {
     );
     if boot_mode == BootMode::Direct {
         println!("app: {} segments placed", machine.app_segments().len());
+        for seg in machine.app_segments().iter().filter(|s| s.relocated()) {
+            println!(
+                "app: segment vaddr={:#010x} paddr={:#010x} placed by vaddr (memsz {:#x})",
+                seg.vaddr, seg.paddr, seg.memsz
+            );
+        }
+        if let Some(seed) = machine.flash_seed() {
+            println!(
+                "flash chip: {} @ {:#010x} chip_size {:#x} -> {:#x} ({} MiB)",
+                lp_emu_esp32v3::loader::ROM_FLASH_CHIP_SYMBOL,
+                seed.chip,
+                seed.previous,
+                seed.chip_size,
+                seed.chip_size >> 20
+            );
+        }
         if let Some(frame) = machine.boot_frame() {
             println!(
                 "boot frame: a1={:#010x}, save area [a1-16..a1) = {:#010x} {:#010x} {:#010x} {:#010x}",
@@ -263,7 +289,12 @@ fn print_outcome(machine: &mut Machine, outcome: &Outcome) {
     let micros = cycle / memmap::CYCLES_PER_US;
     match outcome {
         Outcome::Deadline { .. } => {
-            println!("DEADLINE cycle={cycle} ({micros} us emulated)");
+            // Where the hart was when time ran out: a boot that is spinning
+            // on a register an accept block cannot answer ends here, and the
+            // pc is the whole diagnosis.
+            let pc = machine.harts[0].pc();
+            let sym = machine.symbolize(pc).unwrap_or_else(|| "?".into());
+            println!("DEADLINE cycle={cycle} ({micros} us emulated) pc={pc:#010x} ({sym})");
         }
         Outcome::Breakpoint { pc, .. } => {
             let sym = machine.symbolize(*pc).unwrap_or_else(|| "?".into());
@@ -281,7 +312,14 @@ fn print_outcome(machine: &mut Machine, outcome: &Outcome) {
                 .symbolize(violation.pc)
                 .unwrap_or_else(|| "?".into());
             let where_ = if violation.in_mmio_window {
-                "inside the declared MMIO window — an UNMODELLED BLOCK".to_string()
+                match memmap::ahb_to_dport(violation.address) {
+                    Some(twin) => format!(
+                        "inside the declared AHB peripheral window — an UNMODELLED BLOCK; \
+                         its DPORT twin is {twin:#010x} (memmap::MMIO_AHB_BASE)"
+                    ),
+                    None => "inside the declared DPORT peripheral window — an UNMODELLED BLOCK"
+                        .to_string(),
+                }
             } else if let Some((span, why)) = bus_setup::unmapped_window(violation.address) {
                 format!(
                     "inside `{}`, which this machine deliberately does not map: {why}",
@@ -352,9 +390,10 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             }
             other => {
                 return Err(format!(
-                    "unrecognised flag `{other}`. This machine has no peripherals yet, so the \
-                     doors a later phase adds (--uart0, --control, --flash, --cache-off-fetch) \
-                     are absent rather than accepted-and-ignored. `--help` lists what exists."
+                    "unrecognised flag `{other}`. This machine's blocks are accept probes, so \
+                     the doors a later phase adds (--uart0, --control, --flash, \
+                     --cache-off-fetch) are absent rather than accepted-and-ignored. `--help` \
+                     lists what exists."
                 ));
             }
         }

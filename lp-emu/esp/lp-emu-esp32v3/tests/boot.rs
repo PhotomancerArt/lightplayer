@@ -1,10 +1,11 @@
 //! The classic machine builds, the ROM places, the seeds land, the hart's
-//! reset and boot states are right, and a strict run stops somewhere honest.
+//! reset and boot states are right, a strict run on a bare machine stops
+//! somewhere honest — and, since P3, the direct load says its whole hello
+//! into an accept block and stands at the flash, the ROM path stands at the
+//! eFuse read command, and two runs are the same run.
 //!
-//! The last one is the phase's real deliverable. M3 P2 does not model a
-//! single peripheral, so a `--strict-bus` run **is expected to stop** — at
-//! the first block the boot touches. That stop, with its pc, symbol and
-//! cycle, is what P3 reads and turns into an accept-block table.
+//! The tests that need the shipped image are `#[ignore]`d and run through
+//! `just test-emu-esp32v3-boot`, which builds it and names the file.
 
 use lp_emu_esp32v3::machine::{
     BootFrame, BootMode, CORES, Esp32V3Builder, Machine, Outcome, RESET_VECTOR_OFS, StopCondition,
@@ -277,11 +278,36 @@ fn the_bus_maps_the_map_and_declares_the_mmio_window() {
         machine.bus().in_mmio_window(memmap::periph::UART0),
         "UART0's base is inside the declared MMIO window"
     );
-    assert!(
-        machine.bus().peripheral_count() == 0,
-        "M3 P2 models NO peripheral: the window is declared and empty on purpose, so a \
-         strict run stops at the first block the boot touches and names it"
+    assert_eq!(
+        machine.bus().peripheral_count(),
+        lp_emu_esp32v3::machine::PERIPHERAL_REGISTRATION_ORDER.len(),
+        "P3 registers exactly the accept blocks the strict runs demanded, in the declared order"
     );
+    let names: Vec<&str> = machine
+        .peripheral_map()
+        .iter()
+        .map(|(n, _, _)| *n)
+        .collect();
+    assert_eq!(
+        names,
+        lp_emu_esp32v3::machine::PERIPHERAL_REGISTRATION_ORDER,
+        "the registration order is the contract"
+    );
+    for (name, base, len) in machine.peripheral_map() {
+        assert!(
+            machine.bus().in_mmio_window(*base) && machine.bus().in_mmio_window(base + len - 1),
+            "`{name}` lies inside the declared MMIO window"
+        );
+    }
+
+    // And a bare machine is still P2's: an empty window, for reading the
+    // first stop of each path against nothing.
+    let bare = Esp32V3Builder::new()
+        .boot_mode(BootMode::RomUp)
+        .bare()
+        .build()
+        .expect("builds");
+    assert_eq!(bare.bus().peripheral_count(), 0);
 }
 
 #[test]
@@ -505,17 +531,20 @@ fn a_seeded_hart_survives_its_first_exception() {
 
 #[test]
 fn strict_stops_somewhere_honest_from_the_reset_vector() {
+    // A BARE machine: P2's reading of the ROM path, kept as the reference
+    // the P3 ledger starts from.
     let mut machine = Esp32V3Builder::new()
         .boot_mode(BootMode::RomUp)
+        .bare()
         .strict(true)
         .build()
         .expect("builds");
 
     let outcome = machine.run_until(&StopCondition::after_micros(50_000));
 
-    // P2 models no peripheral, so a strict run IS expected to stop. What
-    // this test pins is that it stops with a NAMED stop rather than running
-    // on through zeros or dying without a report.
+    // With no peripheral a strict run IS expected to stop. What this test
+    // pins is that it stops with a NAMED stop rather than running on
+    // through zeros or dying without a report.
     match &outcome {
         Outcome::StrictBus { violation } => {
             assert!(
@@ -540,6 +569,63 @@ fn strict_stops_somewhere_honest_from_the_reset_vector() {
         outcome.exit_code() != 0,
         true,
         "a stop is a non-zero exit code"
+    );
+}
+
+/// Where the ROM-up path stands at the end of P3, pinned: with EFUSE an
+/// accept block, the mask ROM's `_reload_efuses_and_check` writes `conf`
+/// (`+0xfc`) = `0x5aa5` (the read opcode) and `cmd` (`+0x104`) = 1
+/// (`read_cmd`), requires `cmd` to read back **non-zero** (a zero sends it
+/// to `_rtc_trigger_sw_system_reset`), then spins until it reads **zero**:
+///
+/// ```text
+/// 4000fc90:  l32r    a1, (3ff5a0fc)     ; EFUSE.conf
+/// 4000fc93:  l32r    a2, (3ff5a104)     ; EFUSE.cmd
+/// 4000fc9b:  s32i.n  a3, a1, 0          ; conf = 0x5aa5
+/// 4000fc9d:  s32i.n  a4, a2, 0          ; cmd = 1 (read_cmd)
+/// 4000fca2:  l32i.n  a1, a2, 0
+/// 4000fca6:  beqz    a1, _rtc_trigger_sw_system_reset
+/// 4000fcac:  l32i.n  a1, a2, 0          ; +0x1c
+/// 4000fcae:  bnez    a1, 4000fca9       ; +0x1e, the spin
+/// ```
+///
+/// No constant satisfies both reads, and no `RegFile` rule expresses "1
+/// until the read completes, then 0": the eFuse controller's read command
+/// is a **completion**, which is P5's eFuse view. So a strict rom-up run
+/// does not stop — it runs to its deadline in that loop, and this test
+/// holds that reading until P5 moves it.
+#[test]
+fn rom_up_stands_at_the_efuse_read_command_until_p5() {
+    let mut machine = Esp32V3Builder::new()
+        .boot_mode(BootMode::RomUp)
+        .strict(true)
+        .build()
+        .expect("builds");
+    let outcome = machine.run_until(&StopCondition::after_micros(2_000));
+    assert!(
+        matches!(outcome, Outcome::Deadline { .. }),
+        "no strict stop and no fault before the deadline: {outcome:?}"
+    );
+    let pc = machine.harts[0].pc();
+    let sym = machine.symbolize(pc).unwrap_or_default();
+    assert!(
+        sym.contains("_reload_efuses_and_check"),
+        "the ROM is spinning in _reload_efuses_and_check, got pc={pc:#010x} ({sym})"
+    );
+    assert!(
+        (0x4000_FCA9..=0x4000_FCB0).contains(&pc),
+        "inside the `l32i; bnez` loop on EFUSE.cmd: {pc:#010x}"
+    );
+    // The accept block holds the 1 the ROM wrote, which is why it spins.
+    assert_eq!(
+        machine.peek_word(memmap::periph::EFUSE + 0x104),
+        Some(1),
+        "EFUSE.cmd.read_cmd, remembered"
+    );
+    assert_eq!(
+        machine.peek_word(memmap::periph::EFUSE + 0x0fc),
+        Some(0x5aa5),
+        "EFUSE.conf, the read opcode the ROM wrote first"
     );
 }
 
@@ -583,4 +669,351 @@ fn snapshot_round_trip() {
     assert_eq!(machine.cycles(), cycle);
     assert_eq!(machine.harts[0].ps(), ps);
     assert!(machine.core_stalled(1));
+}
+
+// ---------------------------------------------------------------------------
+// The direct load (P3): what `loader.rs` reproduces, on the shipped image
+// ---------------------------------------------------------------------------
+
+use lp_emu_esp32v3::loader::{
+    BOOTLOADER_FRAME_CHAIN, BOOTLOADER_SP_AT_APP_ENTRY, DEFAULT_FLASH_SIZE, ROM_DEFAULT_FLASH_SIZE,
+    ROM_FLASH_CHIP_SYMBOL,
+};
+use lp_emu_esp32v3::machine::AppSource;
+use lp_emu_esp32v3::test_support::{fw_esp32v3_image, skip_notice};
+
+fn direct(strict: bool) -> Option<Machine> {
+    let elf = match fw_esp32v3_image() {
+        Ok(p) => p,
+        Err(reason) => {
+            skip_notice("direct load", &reason);
+            return None;
+        }
+    };
+    Some(
+        Esp32V3Builder::new()
+            .boot_mode(BootMode::Direct)
+            .app(AppSource::Path(elf))
+            .strict(strict)
+            .build()
+            .expect("the shipped image builds a machine"),
+    )
+}
+
+/// `.data` is a self-copy on the classic: `_sidata == _data_start`, so the
+/// bytes must already be at their vaddr when `Reset` runs, which is what
+/// placing the DRAM `PT_LOAD` does. Verified on the image itself, not on the
+/// linker script alone — if the two symbols ever differ the design changes
+/// and this is the test that says so.
+#[test]
+#[ignore = "needs the shipped image; run through `just test-emu-esp32v3-boot`"]
+fn data_is_a_self_copy_and_is_placed_at_its_vaddr() {
+    let Some(mut machine) = direct(false) else {
+        return;
+    };
+    let app = machine.app().expect("a direct machine has an app");
+    let sidata = app.symbol("_sidata").expect("_sidata").address;
+    let data_start = app.symbol("_data_start").expect("_data_start").address;
+    let data_end = app.symbol("_data_end").expect("_data_end").address;
+    assert_eq!(
+        sidata, data_start,
+        "`.data` is placed > RWDATA with no AT>, so its LMA is its VMA and the app's copy loop \
+         moves every word onto itself"
+    );
+    assert_eq!(data_start, memmap::DRAM_SEG_BASE, "`.data` opens dram_seg");
+    assert!(data_end > data_start);
+
+    // And the bytes are there: the segment that carries `.data` was placed
+    // by vaddr, with real bytes in it.
+    let seg = machine
+        .app_segments()
+        .iter()
+        .find(|s| s.vaddr == data_start)
+        .expect("the DRAM PT_LOAD starts at _data_start");
+    assert!(seg.filesz > 0);
+    let words: Vec<u32> = (0..16)
+        .filter_map(|i| machine.peek_word(data_start + 4 * i))
+        .collect();
+    assert!(
+        words.iter().any(|w| *w != 0),
+        "`.data` was placed, not left zero"
+    );
+}
+
+/// The one segment whose `paddr` differs from its `vaddr` is
+/// `.rtc_fast.persistent`: NOBITS, linked to RTC fast memory with a load
+/// address in the DROM window. Placed by vaddr, and recorded.
+#[test]
+#[ignore = "needs the shipped image; run through `just test-emu-esp32v3-boot`"]
+fn the_only_relocated_segment_is_rtc_fast_persistent() {
+    let Some(machine) = direct(false) else {
+        return;
+    };
+    let relocated: Vec<_> = machine
+        .app_segments()
+        .iter()
+        .filter(|s| s.relocated())
+        .collect();
+    assert_eq!(relocated.len(), 1, "{relocated:?}");
+    let seg = relocated[0];
+    assert_eq!(seg.vaddr, memmap::RTC_FAST_DBUS);
+    assert!(
+        memmap::Span {
+            name: "drom",
+            base: memmap::DROM_BASE,
+            len: memmap::DROM_LEN
+        }
+        .contains(seg.paddr),
+        "its load address is in the DROM window: {:#010x}",
+        seg.paddr
+    );
+    assert_eq!(seg.filesz, 0, "NOBITS: nothing to copy either way");
+    assert_eq!(seg.regions, vec!["rtc-fast-dbus"]);
+    assert_eq!(
+        machine.app_segments().len(),
+        6,
+        "readelf -l: seven headers, one GNU_STACK"
+    );
+}
+
+/// The flash chip's size goes into the ROM's own chip description, resolved
+/// by the ROM's own name for it — `spi_w25q16`, not the `g_rom_flashchip`
+/// alias ESP-IDF's linker script provides — and the word it replaces is the
+/// ROM's 2 MiB default, proving `.data_spi_flash` was seeded first.
+#[test]
+#[ignore = "needs the shipped image; run through `just test-emu-esp32v3-boot`"]
+fn the_flash_chip_size_is_seeded_over_the_roms_default() {
+    let Some(mut machine) = direct(false) else {
+        return;
+    };
+    let seed = machine.flash_seed().expect("a direct load seeds the chip");
+    let symbol = machine
+        .rom()
+        .symbol(ROM_FLASH_CHIP_SYMBOL)
+        .expect("the vendored ROM names its chip description");
+    assert_eq!(seed.chip, symbol.address);
+    assert_eq!(seed.chip, 0x3FFA_E270, "= _data_start_spi_flash");
+    assert!(
+        machine.rom().symbol("g_rom_flashchip").is_none(),
+        "the ROM ELF does NOT carry ESP-IDF's alias; the notes' claim is corrected here"
+    );
+    assert_eq!(
+        seed.previous, ROM_DEFAULT_FLASH_SIZE,
+        "2 MiB, the ROM's default"
+    );
+    assert_eq!(seed.chip_size, DEFAULT_FLASH_SIZE, "4 MiB, the desk board");
+    assert_eq!(machine.peek_word(seed.chip + 4), Some(DEFAULT_FLASH_SIZE));
+    // The rest of the struct is the ROM's: device_id first.
+    assert_eq!(machine.peek_word(seed.chip), Some(0x0015_40EF));
+}
+
+/// The hart at entry: the bootloader's `callx8` frame, on the ROM's stack
+/// 672 bytes down. `BOOTLOADER_FRAME_CHAIN` is the derivation.
+#[test]
+#[ignore = "needs the shipped image; run through `just test-emu-esp32v3-boot`"]
+fn the_direct_load_enters_the_app_where_the_bootloader_would() {
+    let Some(mut machine) = direct(false) else {
+        return;
+    };
+    let app_entry = machine.app().expect("app").entry;
+    assert_eq!(machine.harts[0].pc(), app_entry);
+    assert_eq!(app_entry, 0x4008_0844, "`Reset` in the shipped image");
+    assert_eq!(machine.harts[0].ps(), PS_BOOT);
+    let frame = machine.boot_frame().expect("a direct load seeds a frame");
+    assert_eq!(frame.sp, BOOTLOADER_SP_AT_APP_ENTRY);
+    assert_eq!(machine.harts[0].cpu().a(1), 0x3FFE_3C80);
+    let used: u32 = BOOTLOADER_FRAME_CHAIN.iter().map(|(_, _, n)| n).sum();
+    assert_eq!(memmap::ROM_PRO_STACK_TOP - used, frame.sp);
+    assert!(
+        memmap::ROM_PRO_STACK_BASE < frame.sp && frame.sp < memmap::ROM_PRO_STACK_TOP,
+        "inside the ROM's PRO stack"
+    );
+    assert_eq!(machine.peek_word(frame.sp - 12), Some(frame.sp));
+}
+
+/// P2's recorded first strict stop of the direct load, held on a **bare**
+/// machine: the loader change moved nothing the boot reads before its
+/// first MMIO access, and the P3 ledger starts where P2's reading ended.
+#[test]
+#[ignore = "needs the shipped image; run through `just test-emu-esp32v3-boot`"]
+fn the_first_strict_stop_of_a_bare_direct_load_is_dport() {
+    let Ok(elf) = fw_esp32v3_image() else {
+        skip_notice("bare direct load", "no image");
+        return;
+    };
+    let mut machine = Esp32V3Builder::new()
+        .boot_mode(BootMode::Direct)
+        .app(AppSource::Path(elf))
+        .bare()
+        .strict(true)
+        .build()
+        .expect("builds");
+    let outcome = machine.run_until(&StopCondition::after_micros(1_000));
+    let Outcome::StrictBus { violation } = outcome else {
+        panic!("a bare machine has no peripheral: expected a strict stop, got {outcome:?}");
+    };
+    assert_eq!(
+        violation.address,
+        memmap::periph::DPORT + 0x218,
+        "core_1_intr_map[0]"
+    );
+    assert_eq!(violation.cycle, 29);
+    assert!(
+        machine
+            .symbolize(violation.pc)
+            .is_some_and(|s| s.contains("esp32_init")),
+        "{violation:?}"
+    );
+}
+
+/// A trace sink a test can read back: the bus trace is the one record of
+/// what the guest wrote into an accept block byte by byte, because the
+/// block itself remembers only the last write.
+#[derive(Clone, Default)]
+struct SharedSink(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for SharedSink {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl SharedSink {
+    fn text(&self) -> String {
+        String::from_utf8_lossy(&self.0.lock().unwrap()).into_owned()
+    }
+}
+
+/// The bytes the guest wrote to `UART0.fifo`, in order, read out of a
+/// `--trace-block UART0` trace: every `W… UART0+0x000 fifo = 0x…` line.
+fn uart0_fifo_bytes(trace: &str) -> Vec<u8> {
+    trace
+        .lines()
+        .filter(|l| l.starts_with("cyc=") && l.contains(" UART0+0x000 fifo = 0x"))
+        .filter(|l| l.split_whitespace().any(|w| w.starts_with('W')))
+        .filter_map(|l| l.rsplit("= 0x").next())
+        .filter_map(|hex| u32::from_str_radix(hex.trim(), 16).ok())
+        .map(|v| (v & 0xff) as u8)
+        .collect()
+}
+
+/// Run the shipped image on the P3 boot set to `micros`, with UART0 traced
+/// into a sink, and hand back the machine, the outcome and the trace text.
+fn direct_traced(micros: u64) -> Option<(Machine, Outcome, String)> {
+    let elf = match fw_esp32v3_image() {
+        Ok(p) => p,
+        Err(reason) => {
+            skip_notice("direct load, traced", &reason);
+            return None;
+        }
+    };
+    let sink = SharedSink::default();
+    let mut machine = Esp32V3Builder::new()
+        .boot_mode(BootMode::Direct)
+        .app(AppSource::Path(elf))
+        .strict(true)
+        .trace(Box::new(sink.clone()), vec!["UART0".into()])
+        .build()
+        .expect("builds");
+    let outcome = machine.run_until(&StopCondition::after_micros(micros));
+    Some((machine, outcome, sink.text()))
+}
+
+/// **Where the direct load stands at the end of P3.** With every block the
+/// strict run demanded accepted, the boot prints its whole `[INIT]` chain
+/// — into a register that remembers only the last byte — and then reaches
+/// the flash: esp-storage's `esp_rom_spiflash_read_status` writes
+/// `SPI1.cmd.flash_rdsr` (bit 27) and spins until hardware clears it:
+///
+/// ```text
+/// 40083861:  s32i    a12, a10, 0        ; SPI1.cmd = 1 << 27
+/// 40083864:  memw                       ; +0x38, the spin
+/// 40083867:  l32i.n  a8, a10, 0
+/// 40083869:  bnez    a8, 40083864
+/// ```
+///
+/// A register file holds the bit forever. That is P7's question in the
+/// phase file's own words — *"SPI1 `CMD` write: no flash chip"* — and this
+/// test holds the reading until P7 moves it. The hello is P6's: the bytes
+/// are all there, and not one of them left the chip.
+#[test]
+#[ignore = "needs the shipped image; run through `just test-emu-esp32v3-boot`"]
+fn the_direct_load_says_hello_into_an_accept_block_and_stands_at_the_flash_until_p7() {
+    let Some((mut machine, outcome, trace)) = direct_traced(20_000) else {
+        return;
+    };
+    assert!(
+        matches!(outcome, Outcome::Deadline { .. }),
+        "no strict stop and no fault before the deadline: {outcome:?}"
+    );
+    let pc = machine.harts[0].pc();
+    let sym = machine.symbolize(pc).unwrap_or_default();
+    assert!(
+        sym.starts_with("esp_rom_spiflash_read_status"),
+        "spinning on the flash status command, got pc={pc:#010x} ({sym})"
+    );
+    assert!(
+        (0x4008_3864..=0x4008_386B).contains(&pc),
+        "inside the `memw; l32i; bnez` loop: {pc:#010x}"
+    );
+    assert_eq!(
+        machine.peek_word(memmap::periph::SPI1),
+        Some(1 << 27),
+        "SPI1.cmd.flash_rdsr, remembered — the bit no register file can clear"
+    );
+
+    // The hello, byte for byte, out of the trace: the silicon capture's
+    // `[INIT]` chain (`../bench.md`), as far as the I/O task.
+    let text = String::from_utf8_lossy(&uart0_fifo_bytes(&trace)).into_owned();
+    assert!(
+        text.starts_with("[INIT] fw-esp32v3 boot\n"),
+        "the first line the boot prints: {text:?}"
+    );
+    for line in [
+        "[INIT] chip=esp32 arch=xtensa heap=",
+        "[INIT] heap regions: 0 0x3ffe0440+15072 (ROM PRO stack)",
+        "[RECOVERY] boot: cause=power-on",
+        "[INIT] runtime started",
+        "[INIT] I/O task spawned (uart0 921600 8N1",
+    ] {
+        assert!(text.contains(line), "missing {line:?} in:\n{text}");
+    }
+    assert!(
+        !text.contains("flash filesystem mounted"),
+        "the mount is the line after the flash read, and there is no flash chip"
+    );
+    // And the block itself holds exactly one byte of all that: the last.
+    let last = *text.as_bytes().last().expect("bytes");
+    assert_eq!(
+        machine
+            .peek_word(memmap::periph::UART0)
+            .map(|w| (w & 0xff) as u8),
+        Some(last),
+        "an accept block remembers only the last write"
+    );
+}
+
+/// Determinism, pinned: two runs of the same image with the same flags end
+/// at the same cycle and the same pc and wrote the same UART0 bytes.
+#[test]
+#[ignore = "needs the shipped image; run through `just test-emu-esp32v3-boot`"]
+fn two_runs_of_the_direct_load_are_the_same_run() {
+    let Some((a, oa, ta)) = direct_traced(16_000) else {
+        return;
+    };
+    let Some((b, ob, tb)) = direct_traced(16_000) else {
+        return;
+    };
+    assert_eq!(oa, ob);
+    assert_eq!(a.harts[0].pc(), b.harts[0].pc());
+    assert_eq!(a.cycles(), b.cycles());
+    assert_eq!(a.instructions(), b.instructions());
+    let (ba, bb) = (uart0_fifo_bytes(&ta), uart0_fifo_bytes(&tb));
+    assert!(!ba.is_empty(), "the boot printed something");
+    assert_eq!(ba, bb, "identical UART bytes");
+    assert_eq!(ta, tb, "identical traces, cycle for cycle");
 }

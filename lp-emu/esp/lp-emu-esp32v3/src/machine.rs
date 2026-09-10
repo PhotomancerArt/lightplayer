@@ -24,13 +24,18 @@
 //! and `DPORT.appcpu_ctrl_c.appcpu_runstall`. In P2 none of those registers
 //! exists, so it is a plain machine field.
 //!
-//! # No peripherals
+//! # Peripherals: accept blocks, in the order the boot met them
 //!
-//! P2 registers **no** peripheral. The MMIO window is declared and empty on
-//! purpose: under `--strict-bus` the first access to any block stops the run
-//! and names it, which is the reading P3 exists to take, in order. Adding a
-//! block here — however obvious the first stop makes it — would hide the
-//! second one.
+//! P2 registered **no** peripheral, so a `--strict-bus` run stopped at the
+//! first MMIO access of each boot path. P3 ran that loop and registers, in
+//! [`PERIPHERAL_REGISTRATION_ORDER`], exactly the blocks the strict runs
+//! demanded — each an accept-and-remember [`lp_emu_esp_common::RegFile`]
+//! seeded from the PAC ([`crate::periph::accept`]), each a probe that lets
+//! the *next* stop become visible. The order is the ledger
+//! (`docs/reports/2026-09-10-esp32v3-strict-boot-inventory.md`), and it is
+//! a contract: the bus packs a peripheral's index into every scheduler event
+//! id, so a block a later phase adds goes in its place in the list, never on
+//! the end.
 //!
 //! # The bring-up loop
 //!
@@ -59,6 +64,8 @@ use lp_xt_emu::mach::sr::PS_BOOT;
 use lp_xt_emu::mach::trap::NUM_INTERRUPTS;
 use lp_xt_emu::mach::{CoreConfig, HartFault, SliceEnd, XtHart};
 
+pub use crate::loader::PlacedAppSegment;
+use crate::loader::{self, FlashChipSeed, LoadError};
 use crate::memmap;
 use crate::rom::{self, DataImage, HookResult, HookTable, PlacedSegment, RomError, SeededSection};
 use crate::snapshot::Snapshot;
@@ -84,6 +91,50 @@ pub const PRID_APP: u32 = 0x0000_ABAB;
 
 /// The number of cores the classic has. Both are constructed; M3 runs one.
 pub const CORES: usize = 2;
+
+/// The order the classic's peripheral blocks are registered in. See the
+/// module docs for why this is a contract.
+///
+/// The list is the blocks the P3 strict runs reached, **in the order the
+/// boot met them** — the direct load's stops first, then the ones only the
+/// mask ROM's reset path touches. A block a later phase needs is added in
+/// its place in this list, never appended for convenience.
+/// [`crate::periph::boot_set`] registers exactly this order.
+pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
+    // Direct load, stop 1: `esp32_init` clears the APP core's interrupt map.
+    "DPORT",
+    // Direct load, stop 2: the ROM's `rtc_get_reset_reason` reads
+    // `reset_state` for `esp_hal::rtc_cntl::reset_reason`.
+    "RTC_CNTL",
+    // Direct load, stop 3: `Clocks::init` reads `APB_CTRL.sysclk_conf`.
+    "APB_CTRL",
+    // Direct load, stop 4: `measure_rtc_clock` reads `TIMG0.rtccalicfg`.
+    "TIMG0",
+    // Direct load, stop 5: the ROM's `rom_chip_i2c_writeReg` programs the
+    // BBPLL through the analog I2C master — on the AHB bus.
+    "I2C_ANA_MST",
+    // Direct load, stop 6: `esp_hal::init` disables TIMG1's watchdog
+    // (`wdtwprotect` first, then `wdtconfig0`).
+    "TIMG1",
+    // Direct load, stop 7: `Uart::new(…).with_rx(GPIO3)` routes U0RXD
+    // through the GPIO matrix.
+    "GPIO",
+    // Direct load, stop 8: `Uart::new` reads `conf0` to pick the UART's
+    // clock source.
+    "UART0",
+    // Direct load, stop 9: `Uart::new(…).with_tx(GPIO1)` configures the
+    // U0TXD pad.
+    "IO_MUX",
+    // Direct load, stop 10: esp-storage's flash read reaches SPI1 — the
+    // last P3 stop on this path; the run then spins on `cmd.usr` (P7).
+    "SPI1",
+    // Direct load, stop 11: the ROM's idle wait polls SPI0's state machine
+    // as well as SPI1's.
+    "SPI0",
+    // ROM-up, stop 1: `_ResetHandler_efuse_check_patch` reads its own
+    // fuses seven instructions after the reset vector.
+    "EFUSE",
+];
 
 /// How far back [`Machine::symbolize`] will look for a name when no symbol's
 /// size covers the address. Four kilobytes: further than any routine in this
@@ -382,18 +433,70 @@ impl StopCondition {
 #[derive(Debug)]
 pub enum BuildError {
     Rom(RomError),
+    Load(LoadError),
     App(String),
     Io(String),
+    /// A peripheral was registered out of [`PERIPHERAL_REGISTRATION_ORDER`].
+    RegistrationOrder {
+        name: String,
+        after: String,
+    },
+    /// A peripheral name that is not in the declared order at all.
+    UndeclaredPeripheral {
+        name: String,
+    },
 }
 
 impl fmt::Display for BuildError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             BuildError::Rom(e) => write!(f, "{e}"),
+            BuildError::Load(e) => write!(f, "{e}"),
             BuildError::App(m) => write!(f, "application image: {m}"),
             BuildError::Io(m) => write!(f, "{m}"),
+            BuildError::RegistrationOrder { name, after } => write!(
+                f,
+                "peripheral `{name}` was registered after `{after}`, which contradicts \
+                 PERIPHERAL_REGISTRATION_ORDER. Peripheral indices are packed into scheduler \
+                 event ids; re-ordering them re-points already-scheduled events. Register in \
+                 the declared order, or move the entry in that list."
+            ),
+            BuildError::UndeclaredPeripheral { name } => write!(
+                f,
+                "peripheral `{name}` is not in PERIPHERAL_REGISTRATION_ORDER — add it in the \
+                 place the boot meets it, not at the end"
+            ),
         }
     }
+}
+
+/// Hold [`PERIPHERAL_REGISTRATION_ORDER`]: every block in the set is in the
+/// list, and the set is in the list's order.
+fn check_registration_order(
+    set: &[(u32, u32, lp_emu_esp_common::periph::BoxedPeripheral)],
+) -> Result<(), BuildError> {
+    let mut last: Option<(usize, &str)> = None;
+    for (_, _, periph) in set {
+        let name = periph.name();
+        let Some(pos) = PERIPHERAL_REGISTRATION_ORDER
+            .iter()
+            .position(|n| *n == name)
+        else {
+            return Err(BuildError::UndeclaredPeripheral {
+                name: name.to_string(),
+            });
+        };
+        if let Some((prev, prev_name)) = last
+            && pos < prev
+        {
+            return Err(BuildError::RegistrationOrder {
+                name: name.to_string(),
+                after: prev_name.to_string(),
+            });
+        }
+        last = Some((pos, name));
+    }
+    Ok(())
 }
 
 impl std::error::Error for BuildError {}
@@ -404,19 +507,13 @@ impl From<RomError> for BuildError {
     }
 }
 
-/// Where one of the application's `PT_LOAD`s went.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PlacedAppSegment {
-    pub vaddr: u32,
-    pub paddr: u32,
-    pub filesz: u32,
-    pub memsz: u32,
-    pub execute: bool,
-    pub regions: Vec<&'static str>,
+impl From<LoadError> for BuildError {
+    fn from(e: LoadError) -> Self {
+        BuildError::Load(e)
+    }
 }
 
 /// Builds a [`Machine`].
-#[derive(Default)]
 pub struct Esp32V3Builder {
     rom: RomSource,
     app: AppSource,
@@ -425,9 +522,32 @@ pub struct Esp32V3Builder {
     strict: bool,
     strict_unsupported: bool,
     boot_frame: Option<BootFrame>,
+    flash_size: u32,
+    reset_cause: loader::ResetCause,
+    boot_set: bool,
     trace: Option<Box<dyn std::io::Write + Send>>,
     trace_blocks: Vec<String>,
     seed: u64,
+}
+
+impl Default for Esp32V3Builder {
+    fn default() -> Self {
+        Self {
+            rom: RomSource::default(),
+            app: AppSource::default(),
+            boot_mode: BootMode::default(),
+            time_grade: TimeGrade::default(),
+            strict: false,
+            strict_unsupported: true,
+            boot_frame: None,
+            flash_size: loader::DEFAULT_FLASH_SIZE,
+            reset_cause: loader::ResetCause::default(),
+            boot_set: true,
+            trace: None,
+            trace_blocks: Vec::new(),
+            seed: 0,
+        }
+    }
 }
 
 impl fmt::Debug for Esp32V3Builder {
@@ -444,6 +564,9 @@ impl fmt::Debug for Esp32V3Builder {
             .field("strict", &self.strict)
             .field("strict_unsupported", &self.strict_unsupported)
             .field("boot_frame", &self.boot_frame)
+            .field("flash_size", &self.flash_size)
+            .field("reset_cause", &self.reset_cause)
+            .field("boot_set", &self.boot_set)
             .field("trace", &self.trace.is_some())
             .field("trace_blocks", &self.trace_blocks)
             .field("seed", &self.seed)
@@ -453,10 +576,7 @@ impl fmt::Debug for Esp32V3Builder {
 
 impl Esp32V3Builder {
     pub fn new() -> Self {
-        Self {
-            strict_unsupported: true,
-            ..Default::default()
-        }
+        Self::default()
     }
 
     pub fn rom(mut self, rom: RomSource) -> Self {
@@ -494,9 +614,32 @@ impl Esp32V3Builder {
         self
     }
 
-    /// Override the direct load's boot frame. See [`BootFrame`].
+    /// Override the direct load's boot frame. See [`BootFrame`]; the default
+    /// is [`BootFrame::idf_bootloader`].
     pub fn boot_frame(mut self, frame: BootFrame) -> Self {
         self.boot_frame = Some(frame);
+        self
+    }
+
+    /// The flash chip's size, written into the ROM's chip description by a
+    /// direct load ([`loader::seed_rom_flash_chip`]). Default
+    /// [`loader::DEFAULT_FLASH_SIZE`], the desk board's 4 MiB.
+    pub fn flash_size(mut self, bytes: u32) -> Self {
+        self.flash_size = bytes;
+        self
+    }
+
+    /// What the machine asserts the reset cause was (loader item 7).
+    pub fn reset_cause(mut self, cause: loader::ResetCause) -> Self {
+        self.reset_cause = cause;
+        self
+    }
+
+    /// A machine with **no** peripherals — the memory map, the ROM and the
+    /// harts alone. What P2 built; kept so a test can still read the first
+    /// strict stop of each boot path against an empty MMIO window.
+    pub fn bare(mut self) -> Self {
+        self.boot_set = false;
         self
     }
 
@@ -522,6 +665,19 @@ impl Esp32V3Builder {
         if let Some(sink) = self.trace {
             bus.trace =
                 lp_emu_esp_common::Trace::to_sink(sink).with_block_filter(self.trace_blocks);
+        }
+
+        // The peripherals, in the declared order, before any memory is
+        // placed: a block's index is fixed at registration and the schedule
+        // is empty until `start_peripherals`.
+        let mut peripheral_map = Vec::new();
+        if self.boot_set {
+            let set = crate::periph::boot_set(self.reset_cause);
+            check_registration_order(&set)?;
+            for (base, len, periph) in set {
+                peripheral_map.push((periph.name(), base, len));
+                bus.add_peripheral(base, len, periph);
+            }
         }
 
         // The ROM first, always (PD7), and its non-alloc data with it.
@@ -568,6 +724,8 @@ impl Esp32V3Builder {
             rom_data,
             rom_data_image,
             app_segments: Vec::new(),
+            flash_seed: None,
+            peripheral_map,
             hooks: HookTable::new(),
             boot_mode: self.boot_mode,
             time_grade: self.time_grade,
@@ -580,11 +738,13 @@ impl Esp32V3Builder {
         };
 
         if self.boot_mode == BootMode::Direct {
-            let frame = self
-                .boot_frame
-                .unwrap_or_else(|| BootFrame::rom_pro_stack(&machine.rom));
-            machine.direct_load(frame)?;
+            let frame = self.boot_frame.unwrap_or_else(BootFrame::idf_bootloader);
+            machine.direct_load(frame, self.flash_size)?;
         }
+
+        // Guest time is zero and everything is placed: the one moment a
+        // peripheral may schedule something before the guest touches it.
+        machine.bus.start_peripherals();
 
         Ok(machine)
     }
@@ -609,6 +769,8 @@ pub struct Machine {
     rom_data: Vec<SeededSection>,
     rom_data_image: DataImage,
     app_segments: Vec<PlacedAppSegment>,
+    flash_seed: Option<FlashChipSeed>,
+    peripheral_map: Vec<(&'static str, u32, u32)>,
     hooks: HookTable,
     boot_mode: BootMode,
     time_grade: TimeGrade,
@@ -624,45 +786,28 @@ impl Machine {
     // ---- construction ---------------------------------------------------
 
     /// Place the application's `PT_LOAD`s and seed the boot state a
-    /// bootloader would have left.
+    /// bootloader would have left: [`crate::loader`] is the documentation.
     ///
-    /// This is a **minimal** direct load: segments, entry, [`PS_BOOT`] and
-    /// the [`BootFrame`]. The eleven things a direct load does not reproduce
-    /// (`m3/notes.md` §3) — the partition table, the flash MMU programming,
-    /// the ROM console, `g_rom_flashchip`, the reset cause, eFuse — are P3's,
-    /// and every one of them needs a peripheral P2 does not have.
-    fn direct_load(&mut self, frame: BootFrame) -> Result<(), BuildError> {
+    /// Segments, the ROM's flash chip description, then the hart — entry,
+    /// [`PS_BOOT`] and the [`BootFrame`]. What a direct load does *not*
+    /// reproduce is the eleven-item list in the loader's module docs.
+    fn direct_load(&mut self, frame: BootFrame, flash_size: u32) -> Result<(), BuildError> {
         let Some(app) = self.app.as_ref() else {
             return Err(BuildError::App(
                 "--boot-mode direct needs an --elf to load".into(),
             ));
         };
-        // Cloned because `place_spanning` borrows the bus mutably and the
-        // app image is borrowed from `self`. Segment data on this image is
+        // Cloned because the loader borrows the bus mutably and the app
+        // image is borrowed from `self`. Segment data on this image is
         // ~2 MiB; it is placed once, at build.
-        let segments = app.segments.clone();
-        let entry = app.entry;
-        let mut placed = Vec::new();
-        for seg in &segments {
-            // The same two skips the ROM loader makes: an empty segment, and
-            // a segment whose file bytes are the ELF's own headers
-            // (`rom::is_header_map` — the classic ROM has one, and an
-            // application linked the same way would too).
-            if seg.memsz == 0 || rom::is_header_map(&seg.data) {
-                continue;
-            }
-            let regions = rom::place_spanning(&mut self.bus, seg.vaddr, &seg.data, seg.memsz)?;
-            placed.push(PlacedAppSegment {
-                vaddr: seg.vaddr,
-                paddr: seg.paddr,
-                filesz: seg.filesz(),
-                memsz: seg.memsz,
-                execute: seg.execute,
-                regions,
-            });
-        }
-        self.app_segments = placed;
-        self.seed_boot_state(entry, frame)?;
+        let app = app.clone();
+        self.app_segments = loader::load_app(&mut self.bus, &app)?;
+        self.flash_seed = Some(loader::seed_rom_flash_chip(
+            &mut self.bus,
+            &self.rom,
+            flash_size,
+        )?);
+        self.seed_boot_state(app.entry, frame)?;
         Ok(())
     }
 
@@ -724,6 +869,12 @@ impl Machine {
         &self.app_segments
     }
 
+    /// What a direct load wrote into the ROM's flash chip description;
+    /// `None` on a rom-up machine, where the bootloader does it.
+    pub fn flash_seed(&self) -> Option<FlashChipSeed> {
+        self.flash_seed
+    }
+
     pub fn hooks(&self) -> &HookTable {
         &self.hooks
     }
@@ -761,6 +912,11 @@ impl Machine {
 
     pub fn first_strict_violation(&self) -> Option<StrictViolation> {
         self.bus.first_strict_violation()
+    }
+
+    /// The registered blocks, in registration order: `(name, base, len)`.
+    pub fn peripheral_map(&self) -> &[(&'static str, u32, u32)] {
+        &self.peripheral_map
     }
 
     pub fn hook_calls(&self) -> u64 {

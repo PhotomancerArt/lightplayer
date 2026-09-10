@@ -59,15 +59,41 @@ fn the_ram_spans_are_in_address_order() {
 }
 
 #[test]
-fn every_peripheral_base_is_inside_the_mmio_window() {
-    let window = Span {
-        name: "mmio",
+fn every_peripheral_base_is_inside_a_declared_mmio_window() {
+    let dport = Span {
+        name: "mmio-dport",
         base: memmap::MMIO_BASE,
         len: memmap::MMIO_LEN,
     };
-    // The PAC's `RNG` at 0x6003_5000 is NOT in this list on purpose — it is
-    // an SVD leak from another family and would fail this very assertion.
-    // See `memmap::periph`'s docs and `pac-regnames.py`'s SKIP table.
+    let ahb = Span {
+        name: "mmio-ahb",
+        base: memmap::MMIO_AHB_BASE,
+        len: memmap::MMIO_AHB_LEN,
+    };
+    assert_eq!(
+        memmap::MMIO_WINDOWS.len(),
+        2,
+        "the DPORT window and its AHB mirror (P3)"
+    );
+    // Two bases are on the AHB bus — the analog I2C master the ROM drives
+    // and the PAC's `RNG`, whose 0x6003_5000 P1 had excluded as an SVD leak
+    // and P3 found to be the AHB address of WDEV (`memmap::MMIO_AHB_BASE`).
+    for (name, base) in [("I2C_ANA_MST", periph::I2C_ANA_MST), ("RNG", periph::RNG)] {
+        assert!(
+            ahb.contains(base),
+            "{name} at 0x{base:08x} is on the AHB bus"
+        );
+        assert!(!dport.contains(base));
+        let twin = memmap::ahb_to_dport(base).expect("inside the mirror");
+        assert!(dport.contains(twin), "{name}'s DPORT twin 0x{twin:08x}");
+    }
+    assert_eq!(
+        memmap::ahb_to_dport(periph::RNG),
+        Some(periph::WIFI + 0x2000),
+        "WDEV, the WiFi window's second page, seen from the DPORT side"
+    );
+    assert_eq!(memmap::ahb_to_dport(0x3FF4_0000), None);
+    let window = dport;
     for (name, base) in [
         ("DPORT", periph::DPORT),
         ("AES", periph::AES),

@@ -2406,13 +2406,21 @@ test-emu-c6-cli:
 
 # The classic ESP32 (v3) machine's own suite (plan three, M3).
 #
-# Nothing here is `#[ignore]`d and nothing here builds firmware yet: at P1 the
-# crate is a memory map, the generated register tables and a vendored ROM, and
-# all three are checked from committed bytes alone. P2 onward adds the boot
-# tests, which will be `#[ignore]`d for the same reason the C6's are — a plain
-# `cargo test --workspace` must never start a cross-target firmware build.
+# Nothing here builds firmware: a plain `cargo test --workspace` must never
+# start a cross-target firmware build. The tests that need the shipped image
+# are `#[ignore]`d and run through `test-emu-esp32v3-boot`, which builds it
+# first and names the file it built.
 test-emu-esp32v3:
     cargo test -p lp-emu-esp32v3
+
+# The boot half: build the shipped `fw-esp32v3` image, then run the whole
+# suite with the direct-load tests included. The path is passed explicitly
+# (`LP_EMU_ESP32V3_ELF`) rather than trusted by convention — every feature set
+# builds to the same target path, and a test that read whatever was there last
+# would pass against the wrong image (`lp-emu-esp32v3/src/test_support.rs`).
+# P8's `build-reference-image.sh` learns the classic and pins the commit.
+test-emu-esp32v3-boot: build-fw-esp32v3
+    LP_EMU_ESP32V3_ELF={{ justfile_directory() }}/target/xtensa-esp32-none-elf/release-esp32v3/fw-esp32v3 cargo test -p lp-emu-esp32v3 -- --include-ignored
 
 # Run an image on the classic ESP32 (v3) machine.
 #
