@@ -1,0 +1,18 @@
+Executing bindgen...                                                                                Running headless tests in Firefox on `http://127.0.0.1:52238/`
+Try find `webdriver.json` for configure browser's capabilities:
+Not found
+Starting new webdriver session...                 Visiting http://127.0.0.1:52237...                Loading page elements...                          Waiting for test to finish...                                                                       running 12 tests
+test tests::unusable_boot_manifest_fails_runtime_creation ... ok
+test tests::runtime_serves_protocol_messages_after_tick ... ok
+test tests::runtime_loads_project_and_renders_output_after_ticks ... ok
+test tests::load_project_tolerates_library_artifacts ... ok
+test tests::infinite_loop_shader_reports_fuel_error_and_keeps_ticking ... ok
+test tests::hello_reports_the_worn_board_and_the_supplied_identity ... ok
+test tests::get_fuel_builtin_links_and_reads_nonzero_on_browser_path ... ok
+test tests::fuel_on_bounded_loop_shader_renders ... ok
+test tests::file_sync_round_trips_over_the_protocol ... ok
+test tests::explicit_ticks_advance_the_clock_deterministically ... ok
+test tests::desktop_boot_accepts_a_dome_wire_label ... ok
+test tests::board_manifest_boot_wears_the_board_and_survives_a_wire_it_lacks ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 filtered out; finished in 0.17s

@@ -1,0 +1,62 @@
+Executing bindgen...                                                                                Running headless tests in Firefox on `http://127.0.0.1:52428/`
+Try find `webdriver.json` for configure browser's capabilities:
+Not found
+Starting new webdriver session...                 Visiting http://127.0.0.1:52427...                Loading page elements...                          Waiting for test to finish...                                                                       running 14 tests
+test the_signal_lines_pass_through_undecoded ... FAIL
+test the_read_pump_reports_a_lost_device_and_the_port_reopens ... FAIL
+test the_production_rust_boundary_enumerates_the_shims_ports ... FAIL
+test the_flash_bridge_acquires_the_live_generation ... FAIL
+test session_ids_are_stable_across_open_and_close ... FAIL
+test session_ids_are_stable_across_a_re_enumeration ... FAIL
+test request_port_resolves_to_the_first_board ... FAIL
+test openness_is_readable_or_writable ... FAIL
+test navigator_serial_is_shadowed_by_an_own_property_and_is_removable ... FAIL
+test hotplug_edges_arrive_from_a_re_enumeration ... FAIL
+test get_info_is_303a_1001_and_the_label_is_the_strong_one ... FAIL
+test bytes_travel_both_ways_through_the_controller ... FAIL
+test a_reboot_behind_our_back_re_enumerates_at_the_next_control_reply ... FAIL
+test a_closed_port_keeps_its_session_and_a_forgotten_one_does_not ... FAIL
+
+failures:
+
+---- the_signal_lines_pass_through_undecoded output ----
+    error output:
+        panicked at lp-app/lpa-link/tests/browser_serial_conformance.rs:195:18:
+        install the shim over the scripted door: JsValue(TypeError: error loading dynamically imported module: http://127.0.0.1:52427/provider/browser_serial.js
+        )
+        
+        Stack:
+        
+        __wbg_get_imports/__wbg_new_3b89a8aabb976b21/<@http://127.0.0.1:52427/wasm-bindgen-test:450:25
+        logError@http://127.0.0.1:52427/wasm-bindgen-test:890:18
+        __wbg_new_3b89a8aabb976b21@http://127.0.0.1:52427/wasm-bindgen-test:449:57
+        browser_serial_conformance-5150673e73d24a1d.wasm.<<wasm_bindgen_test[aba30d5ec0a5573a]::__rt::Context>::new::panic_handling::Error>::new::__wbg_new_3b89a8aabb976b21 externref shim@http://127.0.0.1:52427/wasm-bindgen-test_bg.wasm:wasm-function[1893]:0x85cd6
+        browser_serial_conformance-5150673e73d24a1d.wasm.<wasm_bindgen_test[aba30d5ec0a5573a]::__rt::Context>::new::panic_handling@http://127.0.0.1:52427/wasm-bindgen-test_bg.wasm:wasm-function[252]:0x468b6
+
+    [... 1164 lines elided when this fixture was captured ...]
+
+failures:
+
+    the_signal_lines_pass_through_undecoded
+    the_read_pump_reports_a_lost_device_and_the_port_reopens
+    the_production_rust_boundary_enumerates_the_shims_ports
+    the_flash_bridge_acquires_the_live_generation
+    session_ids_are_stable_across_open_and_close
+    session_ids_are_stable_across_a_re_enumeration
+    request_port_resolves_to_the_first_board
+    openness_is_readable_or_writable
+    navigator_serial_is_shadowed_by_an_own_property_and_is_removable
+    hotplug_edges_arrive_from_a_re_enumeration
+    get_info_is_303a_1001_and_the_label_is_the_strong_one
+    bytes_travel_both_ways_through_the_controller
+    a_reboot_behind_our_back_re_enumerates_at_the_next_control_reply
+    a_closed_port_keeps_its_session_and_a_forgotten_one_does_not
+
+test result: FAILED. 0 passed; 14 failed; 0 ignored; 0 filtered out; finished in 0.03s
+console.log div contained:
+    Invoking test: the_signal_lines_pass_through_undecoded
+
+    [... 642 lines elided when this fixture was captured ...]
+
+
+                                                  Error: some tests failed
