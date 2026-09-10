@@ -815,6 +815,15 @@ impl Machine {
     /// [`NEAREST_SYMBOL_WINDOW`]** — bounded so a fault in a hole is reported
     /// as a hole rather than attributed to a function a hundred kilobytes
     /// back.
+    ///
+    /// A nearest-match is prefixed with `~`, and the tilde is load-bearing.
+    /// The classic ROM's table is mostly zero-sized `NOTYPE` labels, so the
+    /// nearest preceding one is often *not* the enclosing function: the first
+    /// strict stop of a rom-up boot is at `0x4000_FDD8`, which this reports as
+    /// `~_rtc_trigger_sw_system_reset+0x11` while the routine it is really
+    /// inside is `_ResetHandler_efuse_check_patch` at `0x4000_FDA0`. Both
+    /// labels are zero-sized; nothing in the ELF says which one owns the
+    /// bytes. The tilde says "nearest label", not "this function".
     pub fn symbolize(&self, address: u32) -> Option<String> {
         let exact = |image: &ElfImage| {
             image.symbol_at(address).map(|s| {
@@ -833,7 +842,7 @@ impl Machine {
             let i = symbols.partition_point(|s| s.address <= address).checked_sub(1)?;
             let s = &symbols[i];
             let back = address - s.address;
-            (back <= NEAREST_SYMBOL_WINDOW).then(|| format!("{}+0x{back:x}", s.name))
+            (back <= NEAREST_SYMBOL_WINDOW).then(|| format!("~{}+0x{back:x}", s.name))
         };
         self.app
             .as_ref()
