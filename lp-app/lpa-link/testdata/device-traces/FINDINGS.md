@@ -177,3 +177,59 @@ nothing on screen naming the pattern. "This board keeps restarting"
 is a state Studio could recognise (repeated short-lived sessions on one
 endpoint) and is worth considering when M5 revisits the sweep — a user
 whose board is boot-looping currently sees only flicker.
+## 2026-09-10T13:12:40.752Z — s1-blank-flash (emulated lane)
+
+- Expected: state:blank-flash (missing: state:blank-flash)
+- Observed (trace summary):
+  - (no lifecycle events captured)
+- Note: step failed: no device-event record matched `state:blank-flash` before the deadline
+- Trace: s1-blank-flash.emu.failed.jsonl (74 events)
+
+## 2026-09-10T13:14:22.639Z — s2-fresh-fw-no-lpfs (emulated lane)
+
+- Expected: state:ready (missing: state:ready)
+- Observed (trace summary):
+  - (no lifecycle events captured)
+- Note: step failed: no device-event record matched `state:ready` before the deadline
+- Trace: s2-fresh-fw-no-lpfs.emu.failed.jsonl (96 events)
+
+## 2026-09-10T13:16:15.891Z — s3-current-fw-valid-project (emulated lane)
+
+- Expected: state:ready (missing: state:ready)
+- Observed (trace summary):
+  - (no lifecycle events captured)
+- Note: step failed: no device-event record matched `state:ready` before the deadline
+- Trace: s3-current-fw-valid-project.emu.failed.jsonl (155 events)
+
+## 2026-09-10T13:20:17.189Z — s7-unplug-mid-op (emulated lane)
+
+- Expected: state:gone (missing: state:gone)
+- Observed (trace summary):
+  - (no lifecycle events captured)
+- Note: step failed: no device-event record matched `state:gone` before the deadline
+- Trace: s7-unplug-mid-op.emu.failed.jsonl (98 events)
+
+## 2026-09-10T13:22:00.226Z — s8-repick-granted-port (emulated lane)
+
+- Expected: flow:connecting (missing: flow:connecting)
+- Observed (trace summary):
+  - (no lifecycle events captured)
+- Note: step failed: no device-event record matched `flow:connecting` before the deadline
+- Trace: s8-repick-granted-port.emu.failed.jsonl (106 events)
+
+## 2026-09-10T13:23:43.462Z — s9-two-boards (emulated lane)
+
+- Expected: pool:install (missing: pool:install)
+- Observed (trace summary):
+  - (no lifecycle events captured)
+- Note: step failed: no device-event record matched `pool:install` before the deadline
+- Trace: s9-two-boards.emu.failed.jsonl (235 events)
+
+## 2026-09-10T14:53:11.123Z — s3-current-fw-valid-project (emulated lane)
+
+- Expected: state:ready (missing: state:ready)
+- Observed (trace summary):
+  - (no lifecycle events captured)
+- Note: step failed: waiting for the page to say "Project loaded": page evaluation failed: Error: wait deadline
+- Trace: s3-current-fw-valid-project.emu.failed.jsonl (223 events)
+

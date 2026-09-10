@@ -541,6 +541,40 @@ per `emu serve`, and use `?on=` (a different, orthogonal flag) if you want a
 second lens on the same session. See
 `docs/adr/2026-09-09-studio-device-stack-over-a-virtual-serial-port.md`.
 
+### Running the device walk yourself
+
+With a dev server already up on this worktree's port:
+
+```bash
+just walk-no-board                        # flash → connect → identify → upload → detach → re-attach
+just device-scenario run s1 --emu         # one golden-trace scenario, no board
+just device-scenario                      # both lanes' capture status
+just device-scenario check-guard          # the overwrite guard, proved by trying
+```
+
+`walk-no-board` starts its own `emu serve` holding one blank `kind=rom-up`
+board, drives Studio in **headless** Chrome, and writes six screenshots, the
+device-event records each step produced, and the board's own console. It is
+not a CI job and must not become one.
+
+Three things to know before you read its output:
+
+- **Wait for the board's words, not Studio's.** Every weak predicate this walk
+  has had was a page string that something *other than the board* satisfied —
+  the project chooser's own button, or the card switching to `Flashing
+  firmware…`. Two of them shipped, produced confident wrong claims, and are
+  named in the code so nobody writes them again.
+- **Five of six scenarios cannot pass their own `expect` list** today, on a
+  board or off one:
+  `docs/defects/2026-09-10-eight-of-ten-device-event-kinds-lost-their-producer.md`.
+- **`fyeah-sign` cannot be pushed to an emulated board**, and that is a filed
+  defect rather than a thing to work around:
+  `docs/defects/2026-09-10-the-emulated-c6-builds-a-graphics-stage-40x-slower-than-silicon.md`.
+
+The worked example, with every difference between an emulated trace and its
+silicon fixture named, is
+`docs/reports/2026-09-10-studio-walk-with-no-board.md`.
+
 ## Handing off for review
 
 When stopping at a review gate — visual/feel gate, hardware walk, plan

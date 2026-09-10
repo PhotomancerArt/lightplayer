@@ -8,16 +8,29 @@
   ],
   "setup": [
     {
-      "describe": "Erase the ENTIRE flash (foreground \u2014 a backgrounded espflash has died silently mid-write before)",
+      "describe": "Erase the ENTIRE flash (foreground — a backgrounded espflash has died silently mid-write before)",
       "run": "espflash erase-flash --port {port}",
       "verified": false
     }
   ],
   "manual": [
     "Click Connect and pick this board's port in Chrome's chooser.",
-    "Wait for the card to settle \u2014 it should read as blank flash / needs firmware."
+    "Wait for the card to settle — it should read as blank flash / needs firmware."
   ],
   "port_filter": {
     "kind_contains": "USB-Serial/JTAG"
+  },
+  "emulated": {
+    "note": "`espflash erase-flash` has no emulated form and needs none: a blank board is a `kind=rom-up` board whose flash file was never written, on a state dir this run just created. That IS the erased chip — the mask ROM finds no image at the reset vector and loops `invalid header: 0xffffffff`, which is what the classifier reads.",
+    "boards": [
+      "c6-a=blank,kind=rom-up"
+    ],
+    "steps": [
+      { "do": "connect", "board": "c6-a", "describe": "Click Connect and pick this board in the in-page chooser." },
+      { "do": "settle", "words": ["Blank flash", "needs firmware"], "describe": "Wait for the card to settle — it should read as blank flash / needs firmware." },
+      { "do": "shot", "name": "s1-blank-flash" },
+      { "do": "registry" },
+      { "do": "await", "match": "state:blank-flash", "describe": "The classifier's verdict reaches the trace. LAST on purpose: this is the spec's own `expect`, and everything before it has already been observed, so a failure here is about the TRACE and not about the walk." }
+    ]
   }
 }

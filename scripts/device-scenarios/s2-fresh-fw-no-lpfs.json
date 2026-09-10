@@ -21,6 +21,11 @@
       "describe": "Erase the lpfs data partition (offset from lp-fw/fw-esp32c6/partitions.csv)",
       "run": "espflash erase-region --port {port} 0x310000 0xF0000",
       "verified": false
+    },
+    {
+      "describe": "EMULATED LANE (--emu): the two espflash steps have no counterpart. The board boots the packaged firmware ELF directly, and the fresh --state-dir means no lpfs was ever written — which is what erase-region produces on a chip.",
+      "run": null,
+      "verified": true
     }
   ],
   "manual": [
@@ -29,5 +34,19 @@
   ],
   "port_filter": {
     "kind_contains": "USB-Serial/JTAG"
+  },
+  "emulated": {
+    "note": "`kind=elf` (the default): the packaged firmware Studio itself serves, loaded at its entry point, with an empty flash file beside it. Flash state and the running image are independent here — the door will honestly say `flash=blank` while the board runs LightPlayer, which is DD34's word and not a bug.",
+    "boards": [
+      "c6-a={fw}"
+    ],
+    "steps": [
+      { "do": "connect", "board": "c6-a", "describe": "Connect to this board." },
+      { "do": "settle", "words": ["Ready"], "describe": "The card should reach Ready and ask for a name (unstamped, empty)." },
+      { "do": "text", "contains": "fw-esp32c6", "describe": "The board's own hello identity is on the card." },
+      { "do": "shot", "name": "s2-ready" },
+      { "do": "registry" },
+      { "do": "await", "match": "state:ready", "describe": "LAST: the walk is already observed; this is the trace's own claim." }
+    ]
   }
 }

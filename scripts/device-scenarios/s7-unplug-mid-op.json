@@ -11,5 +11,23 @@
     "Connect, and start a push or flash on the card.",
     "While the operation runs, PHYSICALLY UNPLUG the board.",
     "Watch what the card does; plug it back in when it settles."
-  ]
+  ],
+  "emulated": {
+    "note": "The unplug is the CABLE, and the cable is `bus.detach(id)` — not a chip reset and not a socket closing. That distinction is a ruling, not a shortcut: on native USB the serial block survives every reset the channel can ask for, so only the cable mints and un-mints a port (M5, virtual_serial.js's header). `detach` errors the open `readable` exactly as Chrome does on a real unplug, which is the half of a replug the sweep is written against.",
+    "boards": [
+      "c6-a={fw}"
+    ],
+    "steps": [
+      { "do": "connect", "board": "c6-a", "describe": "Connect." },
+      { "do": "settle", "words": ["Ready"] },
+      { "do": "project", "name": "Fyeah Sign", "describe": "Start a push on the card." },
+      { "do": "push" },
+      { "do": "mark" },
+      { "do": "detach", "board": "c6-a", "describe": "While the operation runs, unplug the board." },
+      { "do": "shot", "name": "s7-unplugged" },
+      { "do": "attach", "board": "c6-a", "describe": "Plug it back in when it settles." },
+      { "do": "shot", "name": "s7-replugged" },
+      { "do": "await", "match": "state:gone", "fresh": true, "describe": "LAST: the walk is already observed; this is the trace's own claim." }
+    ]
+  }
 }
