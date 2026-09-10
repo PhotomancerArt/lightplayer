@@ -118,6 +118,13 @@ impl RamRegion {
         self
     }
 
+    /// May the guest fetch instructions from here? A translated core asks,
+    /// because a symbol that is not in an executable region is not a place to
+    /// start decoding from.
+    pub fn is_executable(&self) -> bool {
+        self.exec
+    }
+
     pub fn len(&self) -> u32 {
         self.len
     }
@@ -808,9 +815,58 @@ impl SocBus {
         &self.arena
     }
 
+    /// The whole arena, writable.
+    ///
+    /// Two callers, both outside the guest's own execution:
+    ///
+    /// - a **translated core**, which runs guest stores against these bytes
+    ///   directly on the pages the [permission table](Self::permission_table)
+    ///   marks as plain RAM — that is the point of the arena;
+    /// - the same core's own **tables**. A translated module needs its
+    ///   permission table and its host exchange area to be at fixed offsets in
+    ///   the *same* linear memory as guest RAM, and the arena is flat across
+    ///   the gaps between regions — ~7.7 MiB of them on the C6, which the bus
+    ///   never serves and never will. Putting the tables in a gap keeps the
+    ///   arena one allocation with no copy, and a guest access to a gap page
+    ///   goes out through the bus and faults there exactly as it always has,
+    ///   because a gap has no region and so has permission zero.
+    ///
+    /// It does not fire watchpoints, does not charge and is not a store: this
+    /// is the host reaching into memory, not the guest.
+    pub fn guest_arena_mut(&mut self) -> &mut [u8] {
+        &mut self.arena
+    }
+
     /// The guest address of `guest_arena()[0]`.
     pub fn guest_arena_base(&self) -> u32 {
         self.arena_base
+    }
+
+    /// The largest `[base, base + len)` inside the arena that **no region
+    /// covers**, or `None` when the arena is fully covered.
+    ///
+    /// A translated core's tables go here — see [`Self::guest_arena_mut`].
+    /// Reported as a guest address so the caller can check it against the
+    /// permission table it builds.
+    pub fn largest_arena_gap(&self) -> Option<(u32, u32)> {
+        let lo = u64::from(self.arena_base);
+        let hi = lo + self.arena.len() as u64;
+        let mut best: Option<(u32, u32)> = None;
+        let mut at = lo;
+        let consider = |from: u64, to: u64, best: &mut Option<(u32, u32)>| {
+            if to > from && best.is_none_or(|(_, len)| u64::from(len) < to - from) {
+                *best = Some((from as u32, (to - from) as u32));
+            }
+        };
+        // `regions` is base-sorted and non-overlapping, so one pass with a
+        // watermark finds every gap, and the tail after the last region is one
+        // more.
+        for r in &self.regions {
+            consider(at, u64::from(r.base), &mut best);
+            at = at.max(u64::from(r.end()));
+        }
+        consider(at, hi, &mut best);
+        best
     }
 
     /// The arena offset of a guest address, or `None` when it is outside the

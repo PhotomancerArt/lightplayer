@@ -902,6 +902,23 @@ impl<B: Bus> MachineHart<B> {
                 // than in the hart. Drain before either is consulted again.
                 self.drain_block_flush(cache);
                 self.drain_core_flush(core);
+                // The escape hatch ran something that ended the slice — a
+                // `wfi`, an `ebreak`, a bus yield, a fault. The interpreter's
+                // own answer, handed straight back: a translated stay does not
+                // get to swallow one, and the counters are applied first so the
+                // machine resumes exactly where it would have.
+                if let translated::RunOutcome::Ended {
+                    pc: new_pc,
+                    cycle_count,
+                    instruction_count,
+                    end: over,
+                } = outcome
+                {
+                    self.pc = new_pc;
+                    self.cycle_count = cycle_count;
+                    self.instruction_count = instruction_count;
+                    return over;
+                }
                 let mut progressed = false;
                 if let translated::RunOutcome::Ran {
                     pc: new_pc,

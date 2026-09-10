@@ -130,16 +130,24 @@ impl BlockSet {
     ) -> Self {
         let mut starts: BTreeSet<u32> = BTreeSet::new();
         let mut queue: Vec<u32> = Vec::new();
-        for &pc in seeds {
-            if starts.insert(pc) {
-                queue.push(pc);
-            }
-        }
+        let mut walked: BTreeSet<u32> = BTreeSet::new();
 
         // Pass one: find the block starts. Every static edge a branch or a
         // `jal` names is one, and so is a branch's fall-through.
-        let mut walked: BTreeSet<u32> = BTreeSet::new();
-        while let Some(pc) = queue.pop() {
+        //
+        // Seeds are taken **one at a time and explored to exhaustion**, rather
+        // than all queued first. With the budget spent on seeds up front, no
+        // edge is ever followed and every block ends at the next seed: on a
+        // real image that produced 511 blocks of one instruction each. A seed
+        // is a place to start looking, not a block to have.
+        let mut seeds = seeds.iter().copied();
+        loop {
+            let Some(pc) = queue
+                .pop()
+                .or_else(|| seeds.find(|&pc| starts.len() < max_blocks && starts.insert(pc)))
+            else {
+                break;
+            };
             if !walked.insert(pc) {
                 continue;
             }

@@ -101,6 +101,23 @@ const LP_CLKRST_RESET_CAUSE: u32 = 0x010;
 
 pub const MAX_SLICE_CYCLES: u64 = 8_192;
 
+/// The default bound on P3's sweep (`--jit-blocks`).
+///
+/// P3 translates a *sample* of the image and proves the translation on it;
+/// whole-image discovery is P4's, and the census says a render image executes
+/// ~37,600 distinct blocks.
+///
+/// The bound is not arbitrary and it is not a policy: **wasm caps a single
+/// function body at 7,654,321 bytes**, and P3 emits one function for the whole
+/// block set, so the set has to fit under it. At the ~2 KB per block this
+/// translator emits — more than the spike's ~808 B, because the store path
+/// carries a watchpoint check and every access carries the permission
+/// compare — 2,048 blocks is ~3-4 MB of body, comfortably inside. Splitting
+/// the module so the whole image fits is P5's job (JD8), and it is the one
+/// structural fact a reader of this crate will otherwise rediscover the hard
+/// way.
+pub const DEFAULT_JIT_BLOCKS: usize = 2048;
+
 /// The slice cap while strict mode is on.
 ///
 /// A strict refusal reaches the guest as an ordinary access fault, so the
@@ -827,6 +844,15 @@ pub struct Esp32C6Builder {
     /// Print the translated core's report and the boot cost of building it.
     /// See [`Esp32C6Builder::jit_report`].
     jit_report: bool,
+    /// Actually build and install a translated core. See
+    /// [`Esp32C6Builder::jit`].
+    jit: bool,
+    /// Send every instruction through the escape hatch. See
+    /// [`Esp32C6Builder::jit_escape_all`].
+    jit_escape_all: bool,
+    /// How many blocks the P3 sweep may find. See
+    /// [`Esp32C6Builder::jit_blocks`].
+    jit_blocks: usize,
     efuse: EfuseIdentity,
     time_grade: TimeGrade,
     strict: bool,
@@ -896,6 +922,9 @@ impl Esp32C6Builder {
             block_cache: true,
             translate: true,
             jit_report: false,
+            jit: false,
+            jit_escape_all: false,
+            jit_blocks: DEFAULT_JIT_BLOCKS,
             efuse: EfuseIdentity::default(),
             time_grade: TimeGrade::default(),
             strict: false,
@@ -1045,6 +1074,41 @@ impl Esp32C6Builder {
     /// a gate.
     pub fn jit_report(mut self, on: bool) -> Self {
         self.jit_report = on;
+        self
+    }
+
+    /// Build and install a translated core (`--jit`). Off by default.
+    ///
+    /// Needs the crate's `jit` feature; without it `build` fails rather than
+    /// quietly interpreting, because a run that asked to be translated and was
+    /// not is a measurement nobody can read.
+    pub fn jit(mut self, on: bool) -> Self {
+        self.jit = on;
+        self
+    }
+
+    /// Send **every** translated instruction through the escape hatch
+    /// (`--jit-escape-all`).
+    ///
+    /// The complete, correct, slow translation: the module emits no guest
+    /// semantics at all and hands each instruction to the interpreter, and the
+    /// transcript still has to come out byte for byte identical. It is kept as
+    /// a permanent test rather than as a stage that was passed, because it is
+    /// the proof that a partial translator can only be slow and never wrong
+    /// (M7 R9).
+    pub fn jit_escape_all(mut self, on: bool) -> Self {
+        self.jit_escape_all = on;
+        self
+    }
+
+    /// How many blocks the sweep from the entry point may find
+    /// (`--jit-blocks`).
+    ///
+    /// P3 translates a *sample* of the image and proves the translation on it;
+    /// whole-image discovery is P4's. The bound is what keeps the sample a
+    /// sample.
+    pub fn jit_blocks(mut self, blocks: usize) -> Self {
+        self.jit_blocks = blocks;
         self
     }
 
@@ -1305,6 +1369,9 @@ impl Esp32C6Builder {
             block_cache,
             translate,
             jit_report,
+            jit,
+            jit_escape_all,
+            jit_blocks,
             efuse,
             time_grade,
             strict,
@@ -1773,6 +1840,9 @@ impl Esp32C6Builder {
             machine.power_on = Some(machine.snapshot());
         }
         machine.sync_translated_core();
+        if jit && machine.translate {
+            machine.install_translated_core(entry, jit_escape_all, jit_blocks)?;
+        }
         Ok(machine)
     }
 }
@@ -2132,6 +2202,98 @@ impl Esp32C6Machine {
                 hart.clear_translated_core();
             }
         }
+    }
+
+    /// Sweep a block set from `entry` and install a translated core for it.
+    ///
+    /// P3's caller: the entry point plus the static edges reachable from it,
+    /// bounded. Whole-image discovery and the two translation events are P4's.
+    ///
+    /// # Errors
+    ///
+    /// Anything that stops a core being built. A run that asked for `--jit`
+    /// and did not get it fails rather than interpreting quietly, because a
+    /// measurement nobody can tell apart from the control is worse than no
+    /// measurement.
+    #[cfg(feature = "jit")]
+    fn install_translated_core(
+        &mut self,
+        entry: u32,
+        escape_all: bool,
+        blocks: usize,
+    ) -> Result<(), BuildError> {
+        let policy = if escape_all {
+            lp_emu_jit::translate::Emit::NOTHING
+        } else {
+            lp_emu_jit::translate::Emit::EVERYTHING
+        };
+        let model = self.time_grade.cycle_model();
+        // The entry point, and every symbol in an executable region.
+        //
+        // The phase's own instruction is "the entry point plus static edges
+        // from it, or a hand-supplied list", and the entry point alone reaches
+        // two instructions: `_start` runs into a CSR write, which the
+        // translator refuses, and the walk stops there. Symbols are the
+        // cheapest honest way to have something real to translate, and they
+        // are the same seed JD6's discovery uses — what P4 adds is the ROM and
+        // IRAM sweeps, the coverage measurement against a census, and the
+        // two-event model. A symbol that turns out to name data decodes into
+        // nothing and costs one empty block, which is `Undecodable` doing its
+        // job (JD7).
+        let mut seeds = vec![entry];
+        if let Some(app) = &self.app {
+            let exec: Vec<(u32, u32)> = self
+                .bus
+                .regions()
+                .iter()
+                .filter(|r| r.is_executable())
+                .map(|r| (r.base, r.end()))
+                .collect();
+            seeds.extend(
+                app.symbols()
+                    .iter()
+                    .filter(|s| {
+                        exec.iter()
+                            .any(|&(lo, hi)| s.address >= lo && s.address < hi)
+                    })
+                    .map(|s| s.address),
+            );
+        }
+        let report = crate::jit::install(
+            &mut self.harts[0],
+            &mut self.bus,
+            &seeds,
+            blocks,
+            model,
+            policy,
+        )
+        .map_err(|e| BuildError::Io(format!("--jit: {e}")))?;
+        if self.jit_report {
+            eprintln!(
+                "jit: boot {} blocks / {} instr, {} B module, emit {:.2} ms, compile {:.2} ms",
+                report.blocks,
+                report.insts,
+                report.module_bytes,
+                report.emit_us as f64 / 1000.0,
+                report.compile_us as f64 / 1000.0,
+            );
+        }
+        Ok(())
+    }
+
+    /// `--jit` on a build without the `jit` feature.
+    #[cfg(not(feature = "jit"))]
+    fn install_translated_core(
+        &mut self,
+        _entry: u32,
+        _escape_all: bool,
+        _blocks: usize,
+    ) -> Result<(), BuildError> {
+        Err(BuildError::Io(
+            "--jit needs this binary built with `--features jit`; wasmtime is an optional \
+             dependency and never a default (M7 JD18)"
+                .to_string(),
+        ))
     }
 
     /// Whether the hart is allowed to pre-decode blocks at all.

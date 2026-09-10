@@ -78,6 +78,24 @@ pub enum RunOutcome {
         /// then `resample_external`, `take_yield()` then end the slice.
         after_store: bool,
     },
+    /// It ran, and the last thing it did **ended the slice**.
+    ///
+    /// P1 had no variant for this because P1 had no escape hatch. A core that
+    /// calls [`MachineHart::step_one`] is running arbitrary guest
+    /// instructions, and some of those end a slice rather than retiring into
+    /// the next one: a `wfi`, an `ebreak`, a bus yield, a double fault. The
+    /// interpreter's own loop returns those from `step_once` and a translated
+    /// core does not get to swallow them, so it hands the [`SliceEnd`] back
+    /// untouched and the hart returns it.
+    ///
+    /// `pc` and the counters are applied exactly as for [`RunOutcome::Ran`]
+    /// first, so the machine resumes where the interpreter would have.
+    Ended {
+        pc: u32,
+        cycle_count: u64,
+        instruction_count: u64,
+        end: super::SliceEnd,
+    },
     /// Nothing ran and nothing changed. The interpreter continues at the
     /// entry `pc` as if no core were installed.
     ///

@@ -5685,6 +5685,7 @@ dependencies = [
  "log",
  "lp-emu-core",
  "lp-emu-esp-common",
+ "lp-emu-jit",
  "lp-emu-validate",
  "lp-riscv-emu",
  "lp-ws281x",
