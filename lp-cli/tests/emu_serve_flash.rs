@@ -202,7 +202,10 @@ fn the_download_console_answers_a_sync_through_the_door() {
                 Ok(_) => continue,
                 Err(_) => break,
             }
-            if seen.windows(SYNC_REPLY_HEAD.len()).any(|w| w == SYNC_REPLY_HEAD) {
+            if seen
+                .windows(SYNC_REPLY_HEAD.len())
+                .any(|w| w == SYNC_REPLY_HEAD)
+            {
                 answered = true;
                 break;
             }
