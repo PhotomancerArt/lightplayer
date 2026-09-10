@@ -9,9 +9,11 @@ Amended by
 this boundary is the seam a `navigator.serial` polyfill installs UNDER, and it
 does not move to make room. The controller's single `requestPort()` call site
 is answered by an in-page picker instead of Chrome's chooser, and
-`browser_esp32_device_controller.js` is frozen by content hash in CI
-(`just lint-browser-serial-js-frozen`) so that "the same code runs against an
-emulated board" stays a fact rather than a claim.
+`browser_esp32_device_controller.js` did not change to accommodate the shim.
+While plan two was live a content-hash lint pinned it in CI; the lint was
+retired when the plan closed, and the rule — "the Studio JS/Rust device layer
+does not change to accommodate it" — now lives permanently in that ADR's
+rule 1.
 
 ## Context
 

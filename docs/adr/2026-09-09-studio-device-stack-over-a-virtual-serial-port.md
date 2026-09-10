@@ -71,12 +71,20 @@ Five rules follow, and they are the decision.
 code runs") had quietly become "nearly the same code runs", and the value of
 every gate under it would drop to nothing.
 
-This is mechanical, not a promise: `just lint-browser-serial-js-frozen` pins the
-three JS files by content hash and runs in CI. A milestone that needs one of
-them to change has found something the premise did not survive, and its job at
-that moment is to stop and report, not to make the change small.
+While the plan was live this was mechanical, not a promise: a content-hash lint
+(`scripts/check-browser-serial-js-frozen.sh`, `just lint-browser-serial-js-frozen`)
+pinned the three JS files and ran in CI, so a change to one had to move the hash
+deliberately, in the same commit, with the reason in the PR — which is exactly
+the conversation the invariant exists to force. **The lint was retired when
+plan two closed** (M7): it was the claim's mechanical form *while the claim was
+being made*, and across seven milestones the three files stayed byte-identical
+to their pre-plan state. A milestone that needed one to change would have found
+something the premise did not survive, and its job at that moment was to stop
+and report, not to make the change small.
 
-The rule outlives the plan that produced it, which is why it is in an ADR.
+The rule outlives the plan and the lint that once enforced it, which is why it
+is here: **the Studio JS/Rust device layer does not change to accommodate the
+shim**, and this ADR is now its only home.
 
 ### 2. The polyfill implements exactly eleven calls, and reproduces two scars
 
@@ -196,9 +204,11 @@ axes**. A page may carry both, and neither reads the other.
   suite (`lp-app/lpa-link/tests/browser_serial_conformance.rs`) runs the shipped
   JS over the polyfill over a scripted door, hermetically, in CI — and the same
   assertions run against a live `emu serve`.
-- The three frozen JS files are now load-bearing for a CI lint. Legitimate
-  future work on them has to move the hash deliberately, with the reason in the
-  commit — which is the intent.
+- The three JS files were load-bearing for a CI content-hash lint while plan
+  two ran, so that legitimate future work on them had to move the hash
+  deliberately with the reason in the commit. That lint was retired at plan
+  close (M7); rule 1 above is now the standing constraint, and future work on
+  those files is ordinary review against it.
 - Anything Chromium's USB stack owns is now *explicitly* hardware-only rather
   than accidentally untested. The list is in rule 3, and it is the honest
   residue of the debt file.
@@ -308,9 +318,49 @@ because the word was then "the flash FILE is non-empty", which a 4 MiB chip of
 survival claim onto the two things that can carry it: the written bytes are
 not an erased chip, and the guest's own second boot mounts the project.
 
+## The contract a wasm backing (mode A) inherits
+
+This is a handoff, not a build: **mode A is the sibling effort's** (plan.md
+Scope, out; archived at `_archive/2026-09-07-0118-studio-emulated-boards/`).
+Plan two shipped only the native backing, and the two "refused" rows in the
+eight-point table above are exactly the gaps mode A's wasm backing fills. What
+that backing — or a door that wanted to fill them in for the native case —
+would have to add, stated against the door as it actually is:
+
+- **The routes that do not exist.** The door's route table is exactly three
+  (`lp-cli/src/commands/emu/serve/door.rs`, `fn route`): `GET /boards`,
+  `ws /board/<id>/bytes`, `ws /board/<id>/control`. Points 5 and 6 need routes
+  that are **not** there: a `GET`/`PUT` of a board's flash bytes, and a
+  snapshot route. `getFlash` / `putFlash` / `snapshot` reject with
+  `NotSupportedError` precisely because there is nowhere to send them. Adding
+  any of these is a deliberate route addition, and it changes what a second
+  consumer of the door can assume.
+- **The door admits one client per endpoint** and answers a second with **409**
+  (`door.rs`, `fn busy`; a `compare_exchange` on an `AtomicBool` held for the
+  connection's life). There is no last-wins takeover and no reaping of a
+  half-open socket — a design constraint any second consumer inherits. Plan
+  two's flash walk never hit it (the control channel is page-held and only the
+  byte endpoint cycles), but a client that dies without closing is unmeasured,
+  not ruled out.
+- **`flashState()` is independent of the running image, and now answers the
+  chip's question.** As of M5 (DD34) `GET /boards`'s `flash` word is recomputed
+  per flush and answers "does an image magic sit at the reset vector" — so a
+  `kind=elf` board, whose firmware is loaded straight into memory and never
+  went through its chip, truthfully reports `blank` for as long as it lives.
+  A backing must never treat `flash` as "is this board running something"; the
+  board's own hello, or its console transcript, is the survival evidence.
+
+**Where a backing cannot answer, it says so** (as the native one does). The
+wasm backing carries a machine in the page and can answer points 5 and 6 from
+it; a lie inside the contract is worse than a `NotSupportedError`.
+
 ## Follow-ups
 - **The wasm backing** of `EmulatorPort` (the sibling's mode A) fills points 5
   and 6 above; when it lands, this table stops having "refused" rows for the
-  browser case.
-- **The golden-trace question** (plan two OQ3, G2): whether an emulator-captured
-  trace is a fixture of the same standing as a silicon one.
+  browser case. The contract it inherits is the section just above.
+- **The golden-trace question** (plan two OQ3) was answered at G2 and is its own
+  ADR: [2026-09-10-an-emulator-captured-trace-is-evidence-not-a-fixture.md](2026-09-10-an-emulator-captured-trace-is-evidence-not-a-fixture.md).
+  An emulator-captured trace is named `<id>.emu.jsonl`, a code guard makes
+  overwriting a silicon fixture impossible, and — the rule that made it an ADR —
+  an emulator-captured trace may never be the sole evidence for a claim about
+  hardware (plan two M6, PR #658).

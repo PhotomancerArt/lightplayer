@@ -246,7 +246,14 @@ lpa-fs-opfs-test: install-wasm32-target
 #
 # `scripts/wasm-serial-test-runner.sh` is the runner: it serves Studio's own
 # static root so `/lpa-link/*.js` resolves the way it does in a real Studio.
-# CI runs this in the path-gated `validate-browser` job.
+# CI runs this in the path-gated `validate-browser` job (in Firefox — the
+# runner's default there).
+#
+# To run it locally in Chrome or Brave (the desk's stock chromedriver usually
+# drifts a version behind system Chrome), point the runner at a matched driver
+# with `CHROMEDRIVER=… LP_WEBDRIVER_JSON=…`. The recipe, verbatim, is in
+# AGENTS.md, "Running the conformance suite in Chrome or Brave"; the
+# `LP_WEBDRIVER_JSON` hook's own comment is in `scripts/wasm-serial-test-runner.sh`.
 lpa-link-browser-test: install-wasm32-target
     #!/usr/bin/env bash
     set -euo pipefail
@@ -2267,17 +2274,10 @@ test-glsl-filetests:
 # (which need chip builds this gate deliberately avoids). Note the narrow
 # residue: drift unique to the emu fixture itself is only caught locally.
 [parallel]
-check-lint: fmt-check clippy check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-browser-serial-js-frozen lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities
+check-lint: fmt-check clippy check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
-
-# Emulator plan two's inviolable invariant, made mechanical: the three JS
-# files of Studio's browser device layer run UNCHANGED against the virtual
-# serial port, so their content hashes are pinned. Changing one deliberately
-# means changing its hash in the same commit.
-lint-browser-serial-js-frozen:
-    ./scripts/check-browser-serial-js-frozen.sh
 
 # Guard against serde Content-machinery reintroduction (tag/untagged/flatten).
 # See docs/adr/2026-07-04-json-only-artifacts.md and the script's allowlist.

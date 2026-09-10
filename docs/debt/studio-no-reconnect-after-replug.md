@@ -30,9 +30,21 @@ inside Studio (see `safe-mode-dim-boot-unproven.md`).
 through the normal device picker; the Web Serial permission grant
 survives, so this is clicks, not re-pairing.
 
+**Incident log**
+- 2026-09-10 — reproduced with no board (emulator plan two, M6). Under
+  `?emu=`, a `detach` then `attach` on the shim's cable re-enumerates
+  the port and the card lands at `Attached — not listening` — the same
+  code path a hardware replug takes, now observable in an agent-driven
+  headless browser with no desk sitting. The shim did not fix this; it
+  *reproduced* it without a board, which turns a hardware-gated entry
+  into a testable one. (Testing is no longer blocked on
+  `web-serial-js-untestable.md`, which retired the same day — but this
+  entry stays `carried`: the reconnect behaviour itself is unchanged.)
+
 **Exit criteria** — After a bootloader-mode op ends awaiting replug, a
 re-enumerated granted port is re-opened automatically (or one click),
 the op card resolves, and `[device]` output flows. Note Web Serial
 `connect` events only fire for previously-granted ports — the grant
-retention in `browser_serial.js` is the hook. Testing falls under the
-`web-serial-js-untestable.md` gap: expect this to need a hardware walk.
+retention in `browser_serial.js` is the hook. Testing no longer needs a
+board: the emulated shim (`?emu=`) drives the same re-enumeration path
+headlessly (see the 2026-09-10 incident).

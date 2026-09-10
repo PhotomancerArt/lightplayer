@@ -25,10 +25,16 @@
 //! differently under the shim, the shim is wrong.
 //!
 //! The claim that this layer runs unchanged is a test, not a hope:
-//! `tests/browser_serial_conformance.rs` drives it in a real Chrome
-//! (`just lpa-link-browser-test`), and
-//! `scripts/check-browser-serial-js-frozen.sh` fails if `browser_serial.js`,
-//! `browser_esp32_flash.js` or `browser_esp32_device_controller.js` changes.
+//! `tests/browser_serial_conformance.rs` drives it over the polyfill. The
+//! CI half (`just lpa-link-browser-test`) runs in the runner's browser —
+//! Firefox on CI, where the polyfill is the whole `navigator.serial` — and the
+//! live half against a real `emu serve` (`just lpa-link-browser-test-live`)
+//! runs in Chrome; the suite is documented as runnable locally in Chrome and
+//! Brave too (`AGENTS.md`). The frozen-file discipline that once backed the
+//! "runs unchanged" claim mechanically (a content-hash lint) was retired when
+//! emulator plan two closed — the rule now lives permanently in
+//! `docs/adr/2026-09-09-studio-device-stack-over-a-virtual-serial-port.md`,
+//! rule 1.
 
 mod browser_esp32_flash;
 mod browser_serial;

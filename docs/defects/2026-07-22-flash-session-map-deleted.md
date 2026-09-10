@@ -31,9 +31,20 @@ releases what, and nobody re-decided ownership.
 grant handles persist across close, and ids are stable per port
 identity, so a later `flashFirmware` finds the port it was granted.
 
-**Regression coverage** — None: the JS session map has no
-host-testable harness today. Noted as a gap; the conformance-suite
-chip covers the class of "browser-side state invisible to host tests".
+**Regression coverage** — Now covered (2026-09-09, emulator plan two
+M2 → PR #642). The JS session map got a host-testable harness: the
+browser-serial conformance suite
+(`lp-app/lpa-link/tests/browser_serial_conformance.rs`) drives the
+shipped JS over a `navigator.serial` polyfill. This exact
+close-keeps-the-grant behaviour is pinned by
+`a_closed_port_keeps_its_session_and_a_forgotten_one_does_not` (a
+`close()`d port keeps its session, only `forget()` drops it) and
+`the_flash_bridge_acquires_the_live_generation` (the flash bridge finds
+the port it was granted). See
+`../debt/web-serial-js-untestable.md` (retired) for the harness and its
+residue. Originally "None": the JS session map had no host-testable
+harness, and the conformance-suite chip covered the class of
+"browser-side state invisible to host tests".
 
 **Lesson** — When two layers both "clean up" the same resource,
 ownership was never actually decided — each layer's cleanup is correct

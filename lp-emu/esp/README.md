@@ -377,6 +377,22 @@ timeouts as its safety net.
 
 ### What plan two's shim maps onto this
 
+Plan two shipped, and this is what ran: `lp-cli emu serve`'s WebSocket door in
+front of these two sockets, a `navigator.serial` polyfill
+(`lp-app/lpa-studio-web/public/lpa-link/virtual_serial.js` + `emulator_port.js`)
+in the page, and esptool-js 0.6.0 flashing the packaged image ROM-up — all
+under Studio's *unchanged* device stack. The design and its rules are
+`docs/adr/2026-09-09-studio-device-stack-over-a-virtual-serial-port.md`. The
+table below is that mapping.
+
+<!-- TODO(E2, open with Yona): the walk runs against `lp-cli emu serve`, the
+native path, where the wasm translator is off and no flag turns it on; whether
+`emu serve` gets a translator passthrough (and whether a fifth oracle image
+covers the ROM-download flasher-stub path) is unresolved — see the plan-two
+director log's E2 and `NOTE-from-m7-translator.md`. Our own `emu_serve_flash`
+and door tests remain the only gate on the stub path until then. -->
+
+
 The vocabulary is the scripted fake device's
 (`lp-app/lpa-link/src/providers/fake_device/fake_device_core.rs`) so that the
 browser shim is glue rather than a translation:
