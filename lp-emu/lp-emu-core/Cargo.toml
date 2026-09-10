@@ -30,6 +30,14 @@ rlsf = { version = "0.2.2", default-features = false, features = [
     "unstable",
 ], optional = true }
 
+# `mmap`/`mprotect`/`munmap` for the guard-paged guest arena (`arena`). MIT OR
+# Apache-2.0, already in the tree via `lp-riscv-emu`, and a raw syscall surface
+# rather than a library. Declared per-target rather than optional so that the
+# hosts that HAVE virtual memory always get the guarded arena and the hosts
+# that do not — `wasm32-wasip1`, the browser rig — cannot even name it.
+[target.'cfg(all(unix, not(target_family = "wasm")))'.dependencies]
+libc = { version = "0.2", default-features = false }
+
 [features]
 std = [
     "log/std",

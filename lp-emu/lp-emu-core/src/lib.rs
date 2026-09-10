@@ -6,7 +6,8 @@
 //! - Logging verbosity levels
 //! - Per-instruction cycle-cost accounting
 //! - Emulator time control (real vs simulated)
-//! - The guest memory model ([`Memory`])
+//! - The guest memory model ([`Memory`]) and the guard-paged guest arena
+//!   ([`arena`]) a bus maps it into
 //! - An ISA-neutral pre-decoded basic-block cache ([`block`])
 //! - The run-loop result contract ([`StepResult`]) and trap codes ([`TrapCode`])
 //! - A deterministic discrete-event scheduler over guest cycles ([`Scheduler`])
@@ -22,6 +23,7 @@ extern crate std;
 // Compile-time configuration
 pub mod config;
 
+pub mod arena;
 pub mod block;
 pub mod bus;
 pub mod cycle_model;
