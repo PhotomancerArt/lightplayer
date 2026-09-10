@@ -170,17 +170,15 @@ unsafe impl MemoryCreator for ArenaMemoryCreator {
         // What the engine will treat as addressable-or-trapping: everything
         // from the base out to the end of the reservation, plus the guard it
         // has already told cranelift it may run off into.
-        let wants = reserved_size_in_bytes
-            .unwrap_or(self.len)
-            .max(self.len)
-            .checked_add(guard_size_in_bytes)
+        let wants = (reserved_size_in_bytes.unwrap_or(self.len).max(self.len) as u64)
+            .checked_add(guard_size_in_bytes as u64)
             .ok_or_else(|| String::from("the engine's reservation plus guard overflows"))?;
         // The arena's mapping is `reservation + guard` bytes long with only
         // its first `len` readable, so everything past `len` traps. Anything
         // the engine wants beyond that span is address space we do not own.
         let have = match self.guard {
-            Some(g) => g.reservation.max(self.len).saturating_add(g.guard),
-            None => self.len,
+            Some(g) => g.reservation.max(self.len as u64).saturating_add(g.guard),
+            None => self.len as u64,
         };
         if wants > have {
             return Err(alloc::format!(
@@ -269,8 +267,8 @@ impl<H: HostOps + 'static> WasmtimeCore<H> {
             // Measured: 308 -> 1481 M instr/s.
             Some(g) => {
                 config.signals_based_traps(true);
-                config.memory_reservation(g.reservation as u64);
-                config.memory_guard_size(g.guard as u64);
+                config.memory_reservation(g.reservation);
+                config.memory_guard_size(g.guard);
                 config.memory_may_move(false);
             }
             // No mapping behind this arena, so no guard may be promised: the
@@ -478,13 +476,22 @@ mod tests {
         wasmtime::MemoryType::new(1, None)
     }
 
+    /// The arena's constants as the byte counts wasmtime asks in.
+    fn res() -> usize {
+        usize::try_from(RESERVATION).expect("a 64-bit test host")
+    }
+
+    fn guard_len() -> usize {
+        usize::try_from(GUARD).expect("a 64-bit test host")
+    }
+
     /// The one thing that must never happen: an arena with nothing behind it
     /// handed to an engine that has already compiled its bounds checks away.
     #[test]
     fn an_unguarded_arena_refuses_an_engine_that_wants_a_guard() {
         let mut bytes = alloc::vec![0u8; LEN];
         let c = creator(bytes.as_mut_ptr(), None);
-        let refused = c.new_memory(ty(), LEN, None, Some(RESERVATION), GUARD);
+        let refused = c.new_memory(ty(), LEN, None, Some(res()), guard_len());
         assert!(refused.is_err(), "a guard we do not own must be refused");
         let ok = c.new_memory(ty(), LEN, None, Some(0), 0);
         assert!(ok.is_ok(), "and explicit bounds checks are still served");
@@ -502,16 +509,17 @@ mod tests {
         });
         let c = creator(bytes.as_mut_ptr(), guard);
         assert!(
-            c.new_memory(ty(), LEN, None, Some(RESERVATION), GUARD).is_ok(),
+            c.new_memory(ty(), LEN, None, Some(res()), guard_len())
+                .is_ok(),
             "exactly what it mapped is served"
         );
         assert!(
-            c.new_memory(ty(), LEN, None, Some(RESERVATION * 2), GUARD)
+            c.new_memory(ty(), LEN, None, Some(res() * 2), guard_len())
                 .is_err(),
             "a wider reservation than it mapped is refused"
         );
         assert!(
-            c.new_memory(ty(), LEN, None, Some(RESERVATION), GUARD * 2)
+            c.new_memory(ty(), LEN, None, Some(res()), guard_len() * 2)
                 .is_err(),
             "and so is a wider guard"
         );

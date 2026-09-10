@@ -49,13 +49,13 @@ use core::ops::{Deref, DerefMut};
 /// bounds check on a 32-bit linear memory: every address a wasm module can
 /// compute is `base + zext(u32 index) + static offset`, so a 4 GiB
 /// reservation plus a guard covers all of them.
-pub const RESERVATION: usize = 1 << 32;
+pub const RESERVATION: u64 = 1 << 32;
 
 /// The unmapped guard a guarded arena keeps after [`RESERVATION`], and the
 /// value a wasmtime host must configure as `memory_guard_size` (M7 JD18).
 ///
 /// 2 GiB, which covers any static offset a 32-bit module can encode.
-pub const GUARD: usize = 1 << 31;
+pub const GUARD: u64 = 1 << 31;
 
 /// What a guarded arena promises the bytes after its base look like.
 ///
@@ -66,9 +66,14 @@ pub const GUARD: usize = 1 << 31;
 pub struct ArenaGuard {
     /// Bytes of reservation from the arena's base. Everything in it past the
     /// arena's live length is unmapped.
-    pub reservation: usize,
+    ///
+    /// `u64` rather than `usize` because these are the sizes a wasm engine is
+    /// configured with, and 4 GiB does not fit a 32-bit host's `usize` — a
+    /// host that cannot even name the reservation is one that cannot make it,
+    /// and falls back to the heap.
+    pub reservation: u64,
     /// Unmapped bytes after `reservation`.
-    pub guard: usize,
+    pub guard: u64,
 }
 
 /// How the bytes are owned.
@@ -168,9 +173,7 @@ impl Deref for GuestArena {
             // least `len` bytes long (it rounds `len` up to a host page).
             // `&self` borrows the arena for the slice's lifetime, and the
             // mapping can neither move nor be released while it is borrowed.
-            Owned::Mapped { base, .. } => unsafe {
-                core::slice::from_raw_parts(*base, self.len)
-            },
+            Owned::Mapped { base, .. } => unsafe { core::slice::from_raw_parts(*base, self.len) },
         }
     }
 }
@@ -182,9 +185,7 @@ impl DerefMut for GuestArena {
             Owned::Heap(heap) => heap,
             // SAFETY: as for `deref`, and `&mut self` is exclusive, so no
             // other borrow of these bytes exists.
-            Owned::Mapped { base, .. } => unsafe {
-                core::slice::from_raw_parts_mut(*base, len)
-            },
+            Owned::Mapped { base, .. } => unsafe { core::slice::from_raw_parts_mut(*base, len) },
         }
     }
 }
@@ -203,7 +204,11 @@ impl Drop for GuestArena {
 /// Returns `(base, span, guard)`.
 #[cfg(all(unix, not(target_family = "wasm")))]
 fn map(len: usize) -> Option<(*mut u8, usize, ArenaGuard)> {
-    if len == 0 || len > RESERVATION {
+    // On a 32-bit host the reservation does not fit an address space at all,
+    // and `try_from` says so rather than this silently reserving less.
+    let reservation = usize::try_from(RESERVATION).ok()?;
+    let guard = usize::try_from(GUARD).ok()?;
+    if len == 0 || len > reservation {
         // Nothing to guard, or too large to be a 32-bit linear memory at all.
         return None;
     }
@@ -214,7 +219,7 @@ fn map(len: usize) -> Option<(*mut u8, usize, ArenaGuard)> {
     // `mprotect` works in whole pages, so the writable prefix rounds up. The
     // rounding slop sits past `len`, and the arena is `len` bytes long.
     let rw = len.checked_next_multiple_of(page)?;
-    let span = RESERVATION.checked_add(GUARD)?;
+    let span = reservation.checked_add(guard)?;
 
     // SAFETY: an anonymous `MAP_PRIVATE` mapping at a kernel-chosen address.
     // The length is non-zero, no file descriptor is involved (`-1`, as
@@ -236,7 +241,7 @@ fn map(len: usize) -> Option<(*mut u8, usize, ArenaGuard)> {
     }
 
     // SAFETY: `base` is a live mapping of `span` bytes that we own, `rw <=
-    // RESERVATION <= span` is page-aligned, and no pointer into the mapping
+    // reservation <= span` is page-aligned, and no pointer into the mapping
     // has escaped yet.
     let ok = unsafe { libc::mprotect(base, rw, libc::PROT_READ | libc::PROT_WRITE) } == 0;
     if !ok {
@@ -314,6 +319,6 @@ mod tests {
     fn an_arena_too_large_for_a_32_bit_memory_is_never_mapped() {
         // `map` refuses on the length before it reserves anything, so
         // `zeroed` would fall back to the heap and report no guard.
-        assert!(map(RESERVATION + 1).is_none());
+        assert!(map(usize::try_from(RESERVATION).unwrap() + 1).is_none());
     }
 }
