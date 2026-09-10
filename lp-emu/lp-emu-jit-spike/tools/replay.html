@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Region JIT — phone replay</title>
+<style>
+  :root { color-scheme: light dark; --ok:#0a7d28; --bad:#b3001b; --dim:#666; --line:#ccc; }
+  @media (prefers-color-scheme: dark) { :root { --ok:#3ddc6b; --bad:#ff6b7f; --dim:#999; --line:#333; } }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:14px; font:16px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;
+         -webkit-text-size-adjust:100%; }
+  h1 { font-size:19px; margin:0 0 2px; }
+  .sub { color:var(--dim); font-size:13px; margin-bottom:14px; }
+  #verdict { font-size:30px; font-weight:700; line-height:1.15; padding:16px 14px; border-radius:12px;
+             border:3px solid var(--line); margin-bottom:14px; }
+  #verdict.ok { color:var(--ok); border-color:var(--ok); }
+  #verdict.bad { color:var(--bad); border-color:var(--bad); }
+  #verdict.run { color:var(--dim); }
+  .num { font-size:34px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .card { border:1px solid var(--line); border-radius:10px; padding:12px; margin-bottom:12px; }
+  .card h2 { font-size:16px; margin:0 0 6px; }
+  .row { display:flex; justify-content:space-between; gap:10px; padding:3px 0;
+         font-variant-numeric:tabular-nums; border-bottom:1px solid var(--line); }
+  .row:last-child { border-bottom:0; }
+  .row b { font-weight:600; }
+  .k { color:var(--dim); }
+  button { font-size:19px; padding:14px 20px; width:100%; border-radius:10px; border:1px solid var(--line);
+           background:transparent; color:inherit; margin-bottom:12px; }
+  pre { font:12px/1.35 ui-monospace,Menlo,monospace; white-space:pre-wrap; word-break:break-all;
+        border:1px solid var(--line); border-radius:8px; padding:10px; margin:0;
+        -webkit-user-select:text; user-select:text; }
+  #log { color:var(--dim); font-size:13px; min-height:1.4em; margin-bottom:12px; }
+</style>
+</head>
+<body>
+
+<h1>Region JIT — phone replay</h1>
+<div class="sub">M7 spike. Runs the desk's exact wasm module bytes against the desk's exact recorded trace, in this phone's engine.</div>
+
+<div id="verdict" class="run">Tap Run.</div>
+<button id="go">Run both recordings</button>
+<div id="log"></div>
+
+<div id="cards"></div>
+
+<div class="card">
+  <h2>Result JSON (select &amp; copy)</h2>
+  <pre id="json">—</pre>
+</div>
+
+<div class="card">
+  <h2>What this is</h2>
+  <div class="row"><span class="k">branch</span><b>claude/emu-speed-spike-region-jit</b></div>
+  <div class="row"><span class="k">head</span><b>3d0f967f4</b></div>
+  <div class="row"><span class="k">rec-rb</span><b>render-basic r1, 210 blocks</b></div>
+  <div class="row"><span class="k">rec-rk</span><b>render-rocaille r1, 161 blocks</b></div>
+  <div class="row"><span class="k">entries each</span><b>5,000</b></div>
+  <div class="row"><span class="k">timed passes</span><b>2 (best), after 1 checked pass</b></div>
+  <div id="prov"></div>
+  <div class="sub" style="margin:8px 0 0">
+    Identity checks per entry: exit pc, cycle count, retired-instruction delta,
+    after-store flag, and all 31 architectural registers, against the native
+    recording. Memory equivalence is enforced transitively — any divergence
+    surfaces as a register or pc mismatch on a later entry, which is exactly how
+    the desk caught its first bug. Only the <code>run</code> calls are timed;
+    fetching, snapshot reloads and the between-entry memory deltas are not.
+    Desk reference (bun/JSC, M2 Max): rec-rb 1.44 ns/instr, rec-rk 1.05.
+  </div>
+</div>
+
+<script type="module">
+import { replay } from "./replay-core.js";
+
+const verdict = document.getElementById("verdict");
+const logEl = document.getElementById("log");
+const cards = document.getElementById("cards");
+const jsonEl = document.getElementById("json");
+const prov = document.getElementById("prov");
+const go = document.getElementById("go");
+const log = (m) => { logEl.textContent = m; };
+
+function card(r) {
+  const d = document.createElement("div");
+  d.className = "card";
+  const ok = r.identity_ok;
+  d.innerHTML =
+    `<h2>${r.dir} — ${r.dir === "rec-rb" ? "render-basic" : "render-rocaille"} r1</h2>` +
+    `<div class="row"><span class="k">identity</span><b style="color:var(--${ok ? "ok" : "bad"})">` +
+    `${ok ? "OK — all 5,000 entries" : `FAIL — ${r.mismatches} mismatches, first at entry ${r.first_bad_entry}`}</b></div>` +
+    `<div class="row"><span class="k">ns / guest instruction</span><span class="num">${r.ns_per_instruction}</span></div>` +
+    `<div class="row"><span class="k">M instr / s</span><span class="num">${r.m_instr_per_sec}</span></div>` +
+    `<div class="row"><span class="k">instructions</span><b>${r.instructions.toLocaleString()}</b></div>` +
+    `<div class="row"><span class="k">per entry</span><b>${r.instr_per_entry}</b></div>` +
+    `<div class="row"><span class="k">best timed pass</span><b>${r.best_ms} ms</b></div>` +
+    `<div class="row"><span class="k">compile+instantiate</span><b>${r.compile_ms} ms</b></div>` +
+    `<div class="row"><span class="k">module bytes</span><b>${r.wasm_bytes.toLocaleString()}</b></div>`;
+  cards.appendChild(d);
+}
+
+async function upload(payload) {
+  const name = `jit-replay-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+  try {
+    const fd = new FormData();
+    fd.append("file_to_upload", new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }), name);
+    const resp = await fetch("/upload?path=/", { method: "POST", body: fd });
+    return resp.ok ? `uploaded ${name}` : `upload failed: HTTP ${resp.status}`;
+  } catch (e) {
+    return `upload failed: ${e.message}`;
+  }
+}
+
+go.onclick = async () => {
+  go.disabled = true;
+  cards.innerHTML = "";
+  verdict.className = "run";
+  verdict.textContent = "Running…";
+  const results = [];
+  try {
+    for (const dir of ["rec-rb", "rec-rk"]) {
+      const r = await replay("", dir, 2, log);
+      results.push(r);
+      card(r);
+    }
+    const allOk = results.every((r) => r.identity_ok);
+    verdict.className = allOk ? "ok" : "bad";
+    verdict.innerHTML = allOk
+      ? `IDENTITY OK<br><span style="font-size:20px;font-weight:600">` +
+        results.map((r) => `${r.dir === "rec-rb" ? "basic" : "rocaille"} ${r.ns_per_instruction} ns/instr`).join(" &middot; ") +
+        `</span>`
+      : `IDENTITY FAIL`;
+
+    const payload = {
+      what: "M7 region-JIT spike — phone replay",
+      branch: "claude/emu-speed-spike-region-jit",
+      head: "3d0f967f4",
+      when: new Date().toISOString(),
+      user_agent: navigator.userAgent,
+      hardware_concurrency: navigator.hardwareConcurrency ?? null,
+      device_memory_gb: navigator.deviceMemory ?? null,
+      desk_reference_bun_jsc: { "rec-rb": 1.44, "rec-rk": 1.05, units: "ns per guest instruction" },
+      results,
+    };
+    jsonEl.textContent = JSON.stringify(payload, null, 2);
+    log(await upload(payload));
+  } catch (e) {
+    verdict.className = "bad";
+    verdict.textContent = "ERROR";
+    jsonEl.textContent = `${e.name}: ${e.message}\n\n${e.stack ?? ""}`;
+    log(e.message);
+  }
+  go.disabled = false;
+};
+
+prov.innerHTML =
+  `<div class="row"><span class="k">engine</span><b>${navigator.userAgent.slice(0, 60)}</b></div>` +
+  `<div class="row"><span class="k">wasm memory</span><b>256 MiB (fixed by the module)</b></div>`;
+</script>
+</body>
+</html>
