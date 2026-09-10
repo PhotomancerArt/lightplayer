@@ -24,13 +24,18 @@
 //! and `DPORT.appcpu_ctrl_c.appcpu_runstall`. In P2 none of those registers
 //! exists, so it is a plain machine field.
 //!
-//! # No peripherals
+//! # Peripherals: accept blocks, in the order the boot met them
 //!
-//! P2 registers **no** peripheral. The MMIO window is declared and empty on
-//! purpose: under `--strict-bus` the first access to any block stops the run
-//! and names it, which is the reading P3 exists to take, in order. Adding a
-//! block here — however obvious the first stop makes it — would hide the
-//! second one.
+//! P2 registered **no** peripheral, so a `--strict-bus` run stopped at the
+//! first MMIO access of each boot path. P3 ran that loop and registers, in
+//! [`PERIPHERAL_REGISTRATION_ORDER`], exactly the blocks the strict runs
+//! demanded — each an accept-and-remember [`lp_emu_esp_common::RegFile`]
+//! seeded from the PAC ([`crate::periph::accept`]), each a probe that lets
+//! the *next* stop become visible. The order is the ledger
+//! (`docs/reports/2026-09-10-esp32v3-strict-boot-inventory.md`), and it is
+//! a contract: the bus packs a peripheral's index into every scheduler event
+//! id, so a block a later phase adds goes in its place in the list, never on
+//! the end.
 //!
 //! # The bring-up loop
 //!
@@ -86,6 +91,25 @@ pub const PRID_APP: u32 = 0x0000_ABAB;
 
 /// The number of cores the classic has. Both are constructed; M3 runs one.
 pub const CORES: usize = 2;
+
+/// The order the classic's peripheral blocks are registered in. See the
+/// module docs for why this is a contract.
+///
+/// The list is the blocks the P3 strict runs reached, **in the order the
+/// boot met them** — the direct load's stops first, then the ones only the
+/// mask ROM's reset path touches. A block a later phase needs is added in
+/// its place in this list, never appended for convenience.
+/// [`crate::periph::boot_set`] registers exactly this order.
+pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
+    // Direct load, stop 1: `esp32_init` clears the APP core's interrupt map.
+    "DPORT",
+    // Direct load, stop 2: the ROM's `rtc_get_reset_reason` reads
+    // `reset_state` for `esp_hal::rtc_cntl::reset_reason`.
+    "RTC_CNTL",
+    // ROM-up, stop 1: `_ResetHandler_efuse_check_patch` reads its own
+    // fuses seven instructions after the reset vector.
+    "EFUSE",
+];
 
 /// How far back [`Machine::symbolize`] will look for a name when no symbol's
 /// size covers the address. Four kilobytes: further than any routine in this
@@ -387,6 +411,15 @@ pub enum BuildError {
     Load(LoadError),
     App(String),
     Io(String),
+    /// A peripheral was registered out of [`PERIPHERAL_REGISTRATION_ORDER`].
+    RegistrationOrder {
+        name: String,
+        after: String,
+    },
+    /// A peripheral name that is not in the declared order at all.
+    UndeclaredPeripheral {
+        name: String,
+    },
 }
 
 impl fmt::Display for BuildError {
@@ -396,8 +429,49 @@ impl fmt::Display for BuildError {
             BuildError::Load(e) => write!(f, "{e}"),
             BuildError::App(m) => write!(f, "application image: {m}"),
             BuildError::Io(m) => write!(f, "{m}"),
+            BuildError::RegistrationOrder { name, after } => write!(
+                f,
+                "peripheral `{name}` was registered after `{after}`, which contradicts \
+                 PERIPHERAL_REGISTRATION_ORDER. Peripheral indices are packed into scheduler \
+                 event ids; re-ordering them re-points already-scheduled events. Register in \
+                 the declared order, or move the entry in that list."
+            ),
+            BuildError::UndeclaredPeripheral { name } => write!(
+                f,
+                "peripheral `{name}` is not in PERIPHERAL_REGISTRATION_ORDER — add it in the \
+                 place the boot meets it, not at the end"
+            ),
         }
     }
+}
+
+/// Hold [`PERIPHERAL_REGISTRATION_ORDER`]: every block in the set is in the
+/// list, and the set is in the list's order.
+fn check_registration_order(
+    set: &[(u32, u32, lp_emu_esp_common::periph::BoxedPeripheral)],
+) -> Result<(), BuildError> {
+    let mut last: Option<(usize, &str)> = None;
+    for (_, _, periph) in set {
+        let name = periph.name();
+        let Some(pos) = PERIPHERAL_REGISTRATION_ORDER
+            .iter()
+            .position(|n| *n == name)
+        else {
+            return Err(BuildError::UndeclaredPeripheral {
+                name: name.to_string(),
+            });
+        };
+        if let Some((prev, prev_name)) = last
+            && pos < prev
+        {
+            return Err(BuildError::RegistrationOrder {
+                name: name.to_string(),
+                after: prev_name.to_string(),
+            });
+        }
+        last = Some((pos, name));
+    }
+    Ok(())
 }
 
 impl std::error::Error for BuildError {}
@@ -424,6 +498,8 @@ pub struct Esp32V3Builder {
     strict_unsupported: bool,
     boot_frame: Option<BootFrame>,
     flash_size: u32,
+    reset_cause: loader::ResetCause,
+    boot_set: bool,
     trace: Option<Box<dyn std::io::Write + Send>>,
     trace_blocks: Vec<String>,
     seed: u64,
@@ -440,6 +516,8 @@ impl Default for Esp32V3Builder {
             strict_unsupported: true,
             boot_frame: None,
             flash_size: loader::DEFAULT_FLASH_SIZE,
+            reset_cause: loader::ResetCause::default(),
+            boot_set: true,
             trace: None,
             trace_blocks: Vec::new(),
             seed: 0,
@@ -462,6 +540,8 @@ impl fmt::Debug for Esp32V3Builder {
             .field("strict_unsupported", &self.strict_unsupported)
             .field("boot_frame", &self.boot_frame)
             .field("flash_size", &self.flash_size)
+            .field("reset_cause", &self.reset_cause)
+            .field("boot_set", &self.boot_set)
             .field("trace", &self.trace.is_some())
             .field("trace_blocks", &self.trace_blocks)
             .field("seed", &self.seed)
@@ -524,6 +604,20 @@ impl Esp32V3Builder {
         self
     }
 
+    /// What the machine asserts the reset cause was (loader item 7).
+    pub fn reset_cause(mut self, cause: loader::ResetCause) -> Self {
+        self.reset_cause = cause;
+        self
+    }
+
+    /// A machine with **no** peripherals — the memory map, the ROM and the
+    /// harts alone. What P2 built; kept so a test can still read the first
+    /// strict stop of each boot path against an empty MMIO window.
+    pub fn bare(mut self) -> Self {
+        self.boot_set = false;
+        self
+    }
+
     pub fn trace(mut self, sink: Box<dyn std::io::Write + Send>, blocks: Vec<String>) -> Self {
         self.trace = Some(sink);
         self.trace_blocks = blocks;
@@ -546,6 +640,19 @@ impl Esp32V3Builder {
         if let Some(sink) = self.trace {
             bus.trace =
                 lp_emu_esp_common::Trace::to_sink(sink).with_block_filter(self.trace_blocks);
+        }
+
+        // The peripherals, in the declared order, before any memory is
+        // placed: a block's index is fixed at registration and the schedule
+        // is empty until `start_peripherals`.
+        let mut peripheral_map = Vec::new();
+        if self.boot_set {
+            let set = crate::periph::boot_set(self.reset_cause);
+            check_registration_order(&set)?;
+            for (base, len, periph) in set {
+                peripheral_map.push((periph.name(), base, len));
+                bus.add_peripheral(base, len, periph);
+            }
         }
 
         // The ROM first, always (PD7), and its non-alloc data with it.
@@ -593,6 +700,7 @@ impl Esp32V3Builder {
             rom_data_image,
             app_segments: Vec::new(),
             flash_seed: None,
+            peripheral_map,
             hooks: HookTable::new(),
             boot_mode: self.boot_mode,
             time_grade: self.time_grade,
@@ -608,6 +716,10 @@ impl Esp32V3Builder {
             let frame = self.boot_frame.unwrap_or_else(BootFrame::idf_bootloader);
             machine.direct_load(frame, self.flash_size)?;
         }
+
+        // Guest time is zero and everything is placed: the one moment a
+        // peripheral may schedule something before the guest touches it.
+        machine.bus.start_peripherals();
 
         Ok(machine)
     }
@@ -633,6 +745,7 @@ pub struct Machine {
     rom_data_image: DataImage,
     app_segments: Vec<PlacedAppSegment>,
     flash_seed: Option<FlashChipSeed>,
+    peripheral_map: Vec<(&'static str, u32, u32)>,
     hooks: HookTable,
     boot_mode: BootMode,
     time_grade: TimeGrade,
@@ -774,6 +887,11 @@ impl Machine {
 
     pub fn first_strict_violation(&self) -> Option<StrictViolation> {
         self.bus.first_strict_violation()
+    }
+
+    /// The registered blocks, in registration order: `(name, base, len)`.
+    pub fn peripheral_map(&self) -> &[(&'static str, u32, u32)] {
+        &self.peripheral_map
     }
 
     pub fn hook_calls(&self) -> u64 {

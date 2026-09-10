@@ -277,11 +277,36 @@ fn the_bus_maps_the_map_and_declares_the_mmio_window() {
         machine.bus().in_mmio_window(memmap::periph::UART0),
         "UART0's base is inside the declared MMIO window"
     );
-    assert!(
-        machine.bus().peripheral_count() == 0,
-        "M3 P2 models NO peripheral: the window is declared and empty on purpose, so a \
-         strict run stops at the first block the boot touches and names it"
+    assert_eq!(
+        machine.bus().peripheral_count(),
+        lp_emu_esp32v3::machine::PERIPHERAL_REGISTRATION_ORDER.len(),
+        "P3 registers exactly the accept blocks the strict runs demanded, in the declared order"
     );
+    let names: Vec<&str> = machine
+        .peripheral_map()
+        .iter()
+        .map(|(n, _, _)| *n)
+        .collect();
+    assert_eq!(
+        names,
+        lp_emu_esp32v3::machine::PERIPHERAL_REGISTRATION_ORDER,
+        "the registration order is the contract"
+    );
+    for (name, base, len) in machine.peripheral_map() {
+        assert!(
+            machine.bus().in_mmio_window(*base) && machine.bus().in_mmio_window(base + len - 1),
+            "`{name}` lies inside the declared MMIO window"
+        );
+    }
+
+    // And a bare machine is still P2's: an empty window, for reading the
+    // first stop of each path against nothing.
+    let bare = Esp32V3Builder::new()
+        .boot_mode(BootMode::RomUp)
+        .bare()
+        .build()
+        .expect("builds");
+    assert_eq!(bare.bus().peripheral_count(), 0);
 }
 
 #[test]
@@ -505,17 +530,20 @@ fn a_seeded_hart_survives_its_first_exception() {
 
 #[test]
 fn strict_stops_somewhere_honest_from_the_reset_vector() {
+    // A BARE machine: P2's reading of the ROM path, kept as the reference
+    // the P3 ledger starts from.
     let mut machine = Esp32V3Builder::new()
         .boot_mode(BootMode::RomUp)
+        .bare()
         .strict(true)
         .build()
         .expect("builds");
 
     let outcome = machine.run_until(&StopCondition::after_micros(50_000));
 
-    // P2 models no peripheral, so a strict run IS expected to stop. What
-    // this test pins is that it stops with a NAMED stop rather than running
-    // on through zeros or dying without a report.
+    // With no peripheral a strict run IS expected to stop. What this test
+    // pins is that it stops with a NAMED stop rather than running on
+    // through zeros or dying without a report.
     match &outcome {
         Outcome::StrictBus { violation } => {
             assert!(
@@ -540,6 +568,63 @@ fn strict_stops_somewhere_honest_from_the_reset_vector() {
         outcome.exit_code() != 0,
         true,
         "a stop is a non-zero exit code"
+    );
+}
+
+/// Where the ROM-up path stands at the end of P3, pinned: with EFUSE an
+/// accept block, the mask ROM's `_reload_efuses_and_check` writes `conf`
+/// (`+0xfc`) = `0x5aa5` (the read opcode) and `cmd` (`+0x104`) = 1
+/// (`read_cmd`), requires `cmd` to read back **non-zero** (a zero sends it
+/// to `_rtc_trigger_sw_system_reset`), then spins until it reads **zero**:
+///
+/// ```text
+/// 4000fc90:  l32r    a1, (3ff5a0fc)     ; EFUSE.conf
+/// 4000fc93:  l32r    a2, (3ff5a104)     ; EFUSE.cmd
+/// 4000fc9b:  s32i.n  a3, a1, 0          ; conf = 0x5aa5
+/// 4000fc9d:  s32i.n  a4, a2, 0          ; cmd = 1 (read_cmd)
+/// 4000fca2:  l32i.n  a1, a2, 0
+/// 4000fca6:  beqz    a1, _rtc_trigger_sw_system_reset
+/// 4000fcac:  l32i.n  a1, a2, 0          ; +0x1c
+/// 4000fcae:  bnez    a1, 4000fca9       ; +0x1e, the spin
+/// ```
+///
+/// No constant satisfies both reads, and no `RegFile` rule expresses "1
+/// until the read completes, then 0": the eFuse controller's read command
+/// is a **completion**, which is P5's eFuse view. So a strict rom-up run
+/// does not stop — it runs to its deadline in that loop, and this test
+/// holds that reading until P5 moves it.
+#[test]
+fn rom_up_stands_at_the_efuse_read_command_until_p5() {
+    let mut machine = Esp32V3Builder::new()
+        .boot_mode(BootMode::RomUp)
+        .strict(true)
+        .build()
+        .expect("builds");
+    let outcome = machine.run_until(&StopCondition::after_micros(2_000));
+    assert!(
+        matches!(outcome, Outcome::Deadline { .. }),
+        "no strict stop and no fault before the deadline: {outcome:?}"
+    );
+    let pc = machine.harts[0].pc();
+    let sym = machine.symbolize(pc).unwrap_or_default();
+    assert!(
+        sym.contains("_reload_efuses_and_check"),
+        "the ROM is spinning in _reload_efuses_and_check, got pc={pc:#010x} ({sym})"
+    );
+    assert!(
+        (0x4000_FCA9..=0x4000_FCB0).contains(&pc),
+        "inside the `l32i; bnez` loop on EFUSE.cmd: {pc:#010x}"
+    );
+    // The accept block holds the 1 the ROM wrote, which is why it spins.
+    assert_eq!(
+        machine.peek_word(memmap::periph::EFUSE + 0x104),
+        Some(1),
+        "EFUSE.cmd.read_cmd, remembered"
+    );
+    assert_eq!(
+        machine.peek_word(memmap::periph::EFUSE + 0x0fc),
+        Some(0x5aa5),
+        "EFUSE.conf, the read opcode the ROM wrote first"
     );
 }
 

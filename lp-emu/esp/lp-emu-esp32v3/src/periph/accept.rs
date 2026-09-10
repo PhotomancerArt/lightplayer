@@ -1,0 +1,278 @@
+//! The accept-and-remember blocks: a [`RegFile`] each, seeded from the PAC's
+//! reset values, with the exceptions the boot path needs written down as
+//! overrides — **each carrying its evidence beside it.**
+//!
+//! # The two rules this file exists to hold
+//!
+//! **A reset value comes from the PAC's `Resettable`.** [`RegFile::with_names`]
+//! seeds every register of a block from the generated `regs/<block>.rs`
+//! table, so a block reads what the part reads before anyone writes it. A
+//! `with_reset` in this file is a **deviation from the PAC**, and the test
+//! `the_only_deviations_from_the_pacs_resets_are_the_listed_ones` is the
+//! list. The sweep that produced the rule is
+//! `docs/defects/2026-09-07-accept-blocks-carry-only-the-reset-values-a-boot-needed.md`:
+//! an accept block seeded with the value a spin happened to want looks
+//! exactly like one seeded from the PAC, right up to the moment a different
+//! image spins on a different value.
+//!
+//! **An exception carries its evidence beside it.** Not "the boot spins
+//! here", but *why the value is what it is*: a ROM disassembly line, a PAC
+//! field doc, a linker constant, an esp-hal source line. A spin no pin table
+//! can justify is an **E-premise stop** — reported in the phase report, not
+//! answered with an invented value.
+//!
+//! # Which phase owns which block
+//!
+//! Every block here is a probe. The phase that gives it behaviour is named
+//! on the block, and the order the strict run needed them in is the ledger
+//! in `docs/reports/2026-09-10-esp32v3-strict-boot-inventory.md`.
+
+use lp_emu_esp_common::RegFile;
+
+use crate::regs;
+
+/// `DPORT`'s aperture: the generated table runs to `+0xffc` (`date`), and
+/// the next block (`AES`) is at `+0x1000`. The flash MMU page tables at
+/// `0x3FF1_0000` / `0x3FF1_2000` are **not** inside it — they are raw arrays
+/// P4 declares from the ROM's own `cache_flash_mmu_set`
+/// (`crate::memmap::FLASH_MMU_PRO`).
+pub const DPORT_LEN: u32 = 0x1000;
+
+/// `DPORT` — **P4's block**, accept-and-remember here.
+///
+/// The first strict stop of the direct load: twenty-nine instructions in,
+/// `esp_hal::soc::xtensa::esp32_init` → `interrupt::setup_interrupts` starts
+/// clearing the APP core's interrupt map (`core_1_intr_map[0]` at `+0x218`,
+/// `Write Word 0x3ff00218` at cycle 29). Everything `esp_hal::init` does to
+/// this block on the way to `main` — both cores' interrupt maps, the
+/// peripheral clock/reset gates (`perip_clk_en`/`perip_rst_en`, `+0xc0`/
+/// `+0xc4`), `cpu_per_conf` for `CpuClock::max()`, the software interrupts
+/// (`cpu_intr_from_cpu[0..4]`) — is written and, where read back, read back
+/// as written.
+///
+/// What an accept block cannot do for it, and P4 does: route
+/// `core_0_intr_map[src]` writes into `CpuIntMatrix::asserted`, hold core 1
+/// through `appcpu_ctrl_c.appcpu_runstall`, and give `pro_cache_ctrl.
+/// pro_cache_enable` (bit 3) the cache-off fetch stop D4 defines against it.
+/// Every reset value is the PAC's (`esp32-0.40.2/src/dport.rs`, 49 non-zero
+/// resets); no exception is needed to reach the next stop.
+pub fn dport() -> RegFile {
+    RegFile::new("DPORT", DPORT_LEN)
+        .with_names(regs::DPORT)
+        .with_pac_grades()
+}
+
+/// `RTC_CNTL`'s aperture, **tight**: the generated table runs to `+0x13c`
+/// (`date`); the PAC's next block (`RTC_IO`) is at `+0x400`. Tight so that
+/// an access into the gap is a strict stop naming an undocumented offset,
+/// not a silent zero.
+pub const RTC_CNTL_LEN: u32 = 0x140;
+
+/// `RTC_CNTL` — **P5's block**, accept-and-remember here.
+///
+/// The second strict stop of the direct load, 107,539 cycles in:
+/// `rtc_get_reset_reason+0xb` (`0x400081df`, the mask ROM) reads
+/// `reset_state` at `+0x34` for `esp_hal::rtc_cntl::reset_reason`
+/// (`rtc_cntl/mod.rs:679-682`), which the firmware's recovery ledger turns
+/// into `[RECOVERY] boot: cause=power-on`.
+///
+/// # The one deviation: `reset_state`, loader item 7
+///
+/// The PAC's reset for `+0x34` is `0x0000_3000` — both `reset_cause_*`
+/// fields **zero**, because an SVD cannot know why a chip is starting. The
+/// ROM masks the field per core:
+///
+/// ```text
+/// 400081df:  l32i.n  a2, a8, 0        ; RTC_CNTL + 0x34
+/// 400081e1:  extui   a2, a2, 0, 6     ; PRO: bits 5:0
+/// 400081ed:  extui   a2, a2, 6, 6     ; APP: bits 11:6
+/// ```
+///
+/// and `1` in either field is `POWERON_RESET` — the value L0's silicon
+/// banner printed as `rst:0x1 (POWERON_RESET)` (`../bench.md`) and
+/// `SocResetReason::ChipPowerOn` in esp-hal. The machine asserts the cause
+/// ([`crate::loader::ResetCause`]) in **both** fields, because a power-on
+/// resets both cores and the ROM's own `rtc_get_reset_reason(1)` would
+/// otherwise answer "no reason" for the APP core. The cause is an input to
+/// the run, not a property of the part; it is the listed deviation.
+///
+/// Everything else is the PAC's, including `wdtwprotect` resetting to the
+/// write-protect key `0x50D8_3AA1` — so `esp_hal::init`'s
+/// `rwdt.disable()` writes it, writes `wdtconfig0`, and reads back what it
+/// wrote. P5 makes the RWDT count.
+pub fn rtc_cntl(cause: crate::loader::ResetCause) -> RegFile {
+    let code = cause.rom_code();
+    RegFile::new("RTC_CNTL", RTC_CNTL_LEN)
+        .with_names(regs::RTC_CNTL)
+        .with_reset(0x034, 0x0000_3000 | code | (code << 6))
+        .with_pac_grades()
+}
+
+/// `EFUSE`'s aperture: the generated table runs to `+0x1fc` (`date`).
+pub const EFUSE_LEN: u32 = 0x200;
+
+/// `EFUSE` — **P5's block**, accept-and-remember here.
+///
+/// The first strict stop of the ROM-up path, **seven instructions after
+/// the reset vector**: `_ResetHandler_efuse_check_patch` (`0x4000_FDA0`,
+/// reported as `~_rtc_trigger_sw_system_reset+0x11` because both labels are
+/// zero-sized) reads `blk0_rdata0`, `blk0_rdata5` and `blk0_rdata6`
+/// (`+0x00`, `+0x14`, `+0x18`), parks them at `0x3FFE_1320`, and calls
+/// `_reload_efuses_and_check` three times to compare — the ROM's anti-glitch
+/// check on its own fuses.
+///
+/// Every register is the PAC's: the burned words all read **0** because an
+/// SVD cannot know what a part had burned into it, and this phase does not
+/// invent a MAC or a chip revision. The desk board's identity (MAC
+/// `30:76:f5:ec:f6:34`, silicon v3.1, L0) is P5's `EfuseIdentity` seed, the
+/// way the C6's `periph/efuse.rs` carries its board's — and the ROM-up path
+/// is where it will matter first, because the ROM's clock and boot-mode
+/// decisions read chip-revision bits out of `blk0_rdata3`/`blk0_rdata5`.
+pub fn efuse() -> RegFile {
+    RegFile::new("EFUSE", EFUSE_LEN)
+        .with_names(regs::EFUSE)
+        .with_pac_grades()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::loader::ResetCause;
+    use lp_emu_esp_common::{Peripheral, Sandbox};
+
+    /// The accept blocks, each with the generated table it is built from.
+    fn every_block() -> Vec<(RegFile, lp_emu_esp_common::regnames::RegNames)> {
+        vec![
+            (dport(), regs::DPORT),
+            (rtc_cntl(ResetCause::PowerOn), regs::RTC_CNTL),
+            (efuse(), regs::EFUSE),
+        ]
+    }
+
+    /// Where an accept block's power-on state differs from what the PAC
+    /// states, and why. Anything not on this list is a bug in the seeding
+    /// or an undocumented hand exception — the whole point of the sweep.
+    ///
+    /// `(block, offset, what this machine reads instead, why)`.
+    const DEVIATIONS: &[(&str, u32, u32, &str)] = &[(
+        "RTC_CNTL",
+        0x034,
+        0x0000_3041,
+        "reset_state's two reset_cause fields are an input to the run, not a property of the \
+         part: the machine asserts POWERON_RESET (1) for both cores, the value the ROM's \
+         rtc_get_reset_reason masks out (extui 0,6 / 6,6) and the silicon banner printed",
+    )];
+
+    #[test]
+    fn the_only_deviations_from_the_pacs_resets_are_the_listed_ones() {
+        let mut unlisted = Vec::new();
+        for (block, names) in every_block() {
+            let name = Peripheral::name(&block);
+            for (off, _) in names.entries {
+                if *off >= block.len_bytes() {
+                    // Not mapped by this machine: reads 0 for the guest
+                    // whatever the part does.
+                    continue;
+                }
+                let want = names.reset(*off).unwrap_or(0);
+                let got = block.stored(*off);
+                if got == want {
+                    continue;
+                }
+                match DEVIATIONS
+                    .iter()
+                    .find(|(b, o, _, _)| *b == name && o == off)
+                {
+                    Some((_, _, expected, _)) => assert_eq!(
+                        got, *expected,
+                        "{name}+{off:#05x} is a listed deviation, but it reads {got:#010x} \
+                         rather than the {expected:#010x} the list says"
+                    ),
+                    None => unlisted.push(format!(
+                        "  {name}+{off:#05x} {}: reads {got:#010x}, the PAC says {want:#010x}",
+                        names.name(*off).unwrap_or("?")
+                    )),
+                }
+            }
+        }
+        assert!(
+            unlisted.is_empty(),
+            "these accept-block registers do not read what the PAC says, and are not on \
+             DEVIATIONS:\n{}",
+            unlisted.join("\n")
+        );
+    }
+
+    /// The other half: every listed deviation is real, and has a reason. A
+    /// stale entry would otherwise sit here excusing something that no
+    /// longer happens; an entry with no reason is the rule this phase exists
+    /// to hold, broken.
+    #[test]
+    fn every_listed_deviation_is_one_and_has_a_reason() {
+        for (name, off, _, why) in DEVIATIONS {
+            let (block, names) = every_block()
+                .into_iter()
+                .find(|(b, _)| Peripheral::name(b) == *name)
+                .unwrap_or_else(|| panic!("DEVIATIONS names `{name}`, which is not a block"));
+            assert!(!why.is_empty(), "{name}+{off:#05x} has no reason");
+            assert_ne!(
+                block.stored(*off),
+                names.reset(*off).unwrap_or(0),
+                "{name}+{off:#05x} agrees with the PAC now; take it off the list"
+            );
+        }
+    }
+
+    /// Every block carries its generated names, so a trace line is readable
+    /// without a second lookup, and every block is graded.
+    #[test]
+    fn the_blocks_carry_their_names_and_grades() {
+        for (block, names) in every_block() {
+            let (off, expected) = names.entries[0];
+            assert_eq!(block.reg_name(off), Some(expected));
+            assert!(
+                block.reg_grade(off).is_some(),
+                "`{}` publishes no grade table",
+                Peripheral::name(&block)
+            );
+        }
+    }
+
+    #[test]
+    fn the_reset_cause_reads_power_on_for_both_cores() {
+        let mut sb = Sandbox::new();
+        let mut r = rtc_cntl(ResetCause::PowerOn);
+        assert_eq!(r.reg_name(0x034), Some("reset_state"));
+        let word = sb.read(&mut r, 0x034);
+        assert_eq!(word & 0x3f, 1, "PRO: rtc_get_reset_reason(0)");
+        assert_eq!((word >> 6) & 0x3f, 1, "APP: rtc_get_reset_reason(1)");
+        assert_eq!(word & !0xfff, 0x3000, "the rest of the word is the PAC's");
+        // The RWDT write-protect key is the PAC's reset, so a disable that
+        // writes it reads it back.
+        assert_eq!(r.reg_name(0x0a4), Some("wdtwprotect"));
+        assert_eq!(sb.read(&mut r, 0x0a4), 0x50d8_3aa1);
+    }
+
+    #[test]
+    fn efuse_reads_the_pacs_zeros_and_remembers_nothing_it_is_not_told() {
+        let mut sb = Sandbox::new();
+        let mut e = efuse();
+        assert_eq!(e.reg_name(0x000), Some("blk0_rdata0"));
+        assert_eq!(sb.read(&mut e, 0x000), 0, "no MAC is invented here");
+        assert_eq!(sb.read(&mut e, 0x014), 0);
+        assert_eq!(sb.read(&mut e, 0x018), 0);
+    }
+
+    #[test]
+    fn dport_remembers_the_interrupt_map_it_is_written() {
+        let mut sb = Sandbox::new();
+        let mut d = dport();
+        assert_eq!(d.reg_name(0x218), Some("core_1_intr_map0"));
+        sb.write(&mut d, 0x218, 16);
+        assert_eq!(sb.read(&mut d, 0x218), 16);
+        // D4's register, at the PAC's reset: `pro_cache_enable` (bit 3) is
+        // whatever the PAC says, and P4 reads it, not this file.
+        assert_eq!(d.reg_name(0x040), Some("pro_cache_ctrl"));
+        assert_eq!(d.stored(0x040), regs::DPORT.reset(0x040).unwrap_or(0));
+    }
+}

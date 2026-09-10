@@ -191,11 +191,20 @@ fn print_map() {
     }
     for span in memmap::MMIO_WINDOWS {
         println!(
-            "  {:<20} {:#010x}..{:#010x}  declared, NO PERIPHERAL MODELLED (M3 P2)",
+            "  {:<20} {:#010x}..{:#010x}  declared; the blocks below are accept-and-remember \
+             (M3 P3), everything else in it is unmapped",
             span.name,
             span.base,
             span.end()
         );
+    }
+    match Esp32V3Builder::new().boot_mode(BootMode::RomUp).build() {
+        Ok(machine) => {
+            for (name, base, len) in machine.peripheral_map() {
+                println!("    {name:<18} {base:#010x}..{:#010x}  accept", base + len);
+            }
+        }
+        Err(e) => println!("    (could not build the boot set: {e})"),
     }
     println!("  deliberately unmapped:");
     for (span, why) in bus_setup::deliberately_unmapped() {
@@ -279,7 +288,12 @@ fn print_outcome(machine: &mut Machine, outcome: &Outcome) {
     let micros = cycle / memmap::CYCLES_PER_US;
     match outcome {
         Outcome::Deadline { .. } => {
-            println!("DEADLINE cycle={cycle} ({micros} us emulated)");
+            // Where the hart was when time ran out: a boot that is spinning
+            // on a register an accept block cannot answer ends here, and the
+            // pc is the whole diagnosis.
+            let pc = machine.harts[0].pc();
+            let sym = machine.symbolize(pc).unwrap_or_else(|| "?".into());
+            println!("DEADLINE cycle={cycle} ({micros} us emulated) pc={pc:#010x} ({sym})");
         }
         Outcome::Breakpoint { pc, .. } => {
             let sym = machine.symbolize(*pc).unwrap_or_else(|| "?".into());
