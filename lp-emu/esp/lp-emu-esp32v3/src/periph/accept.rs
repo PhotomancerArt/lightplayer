@@ -158,52 +158,6 @@ pub fn apb_ctrl(id: crate::loader::EfuseIdentity) -> RegFile {
         .with_pac_grades()
 }
 
-/// A timer group's aperture, tight: the generated table runs to `+0xfc`
-/// (`timgclk`); the PAC gives TIMG0 and TIMG1 one `RegisterBlock`, so one
-/// length and one table serve both.
-pub const TIMG_LEN: u32 = 0x100;
-
-/// `TIMG0` / `TIMG1` — **P5's blocks**, accept-and-remember here.
-///
-/// The fourth strict stop of the direct load, 109,989 cycles in:
-/// `esp_hal::clock::Clocks::measure_rtc_clock+0xb` reads `TIMG0.rtccalicfg`
-/// (`+0x68`) — the RTC calibration unit, which `detect_xtal_freq`
-/// (`soc/esp32/clocks.rs:135-160`) and `calibrate_rtc_slow_clock`
-/// (`clock/mod.rs:506`) both drive: set `rtc_cali_max`, set
-/// `rtc_cali_start`, `ets_delay_us`, then poll `rtc_cali_rdy` (bit 15) and
-/// read `rtccalicfg1.rtc_cali_value`.
-///
-/// # This is the first thing on the direct path an accept block cannot answer
-///
-/// `rtc_cali_value` is a **measurement** — XTAL cycles counted over `N`
-/// cycles of the calibration clock — and the two calls want two different
-/// numbers (`10` cycles of RC_FAST/256 for the XTAL estimate, `1024` cycles
-/// of RC_SLOW for the slow-clock period). No constant serves both, and a
-/// `RegFile` cannot compute one, so **no override is carried**: the block
-/// is the PAC's resets (`rtccalicfg` = `0x0001_3000`, `rtc_cali_rdy` clear)
-/// and what the firmware writes. The firmware's own timeout arm
-/// (`clock/mod.rs:433-440`, `#[cfg(esp32)]`: `ets_delay_us(1)` per poll,
-/// `timeout_us` polls) then answers **0** — `warn!("calibration failed")`,
-/// `detect_xtal_freq` picks **26 MHz** (`0.abs_diff(40) < 0.abs_diff(26)`
-/// is false), and `cal_val = 0` goes into `RTC_CNTL.store1`.
-///
-/// That is a recorded divergence from silicon (the desk board is 40 MHz),
-/// **not** an E-premise stop — every read is documented and the fallback is
-/// the firmware's own — and it is P5's first job: the TIMG view on
-/// `engine::timg` computes `rtc_cali_value` from the clock tree. Until then
-/// the direct path spends ~320 µs + ~6.8 ms emulated in the two timeout
-/// loops and boots with `XtalClkConfig::_26`. The phase report carries it.
-///
-/// The watchdog half is simpler: `esp_hal::init` disables both groups'
-/// MWDTs (`wdtwprotect` = the key, `wdtconfig0.wdt_en` clear) and reads
-/// back what it wrote; `wdtwprotect` resets to `0x50D8_3AA1` in the PAC.
-/// esp-rtos's tick on `t0` and the io pacer on `t1` are P5's timers.
-pub fn timg(name: &'static str) -> RegFile {
-    RegFile::new(name, TIMG_LEN)
-        .with_names(regs::TIMG0)
-        .with_pac_grades()
-}
-
 /// The analog I2C master's aperture: eight command/status words, one per
 /// `host_id` (`0x6000_E000 + 4·host_id`; the BBPLL is host 4, the highest
 /// esp-idf names for this chip is 7). Tight on purpose — a ninth host is a
@@ -425,9 +379,7 @@ mod tests {
             (dport(), regs::DPORT),
             (rtc_cntl(ResetCause::PowerOn), regs::RTC_CNTL),
             (apb_ctrl(EfuseIdentity::default()), regs::APB_CTRL),
-            (timg("TIMG0"), regs::TIMG0),
             (i2c_ana_mst(), I2C_ANA_MST_NAMES),
-            (timg("TIMG1"), regs::TIMG0),
             (gpio(), regs::GPIO),
             (uart0(), regs::UART0),
             (io_mux(), regs::IO_MUX),
@@ -550,22 +502,6 @@ mod tests {
         // writes it reads it back.
         assert_eq!(r.reg_name(0x0a4), Some("wdtwprotect"));
         assert_eq!(sb.read(&mut r, 0x0a4), 0x50d8_3aa1);
-    }
-
-    #[test]
-    fn timg_carries_no_calibration_pretence() {
-        let mut sb = Sandbox::new();
-        let mut t = timg("TIMG0");
-        assert_eq!(t.reg_name(0x068), Some("rtccalicfg"));
-        assert_eq!(sb.read(&mut t, 0x068), 0x0001_3000, "the PAC's reset");
-        // Start a calibration the way `measure_rtc_clock` does: `rdy` (bit
-        // 15) stays whatever was written — nothing here pretends the count
-        // finished, because nothing here counted.
-        sb.write(&mut t, 0x068, 0x0001_3000 | (1 << 31));
-        assert_eq!(sb.read(&mut t, 0x068) & (1 << 15), 0);
-        assert_eq!(sb.read(&mut t, 0x06c), 0, "rtc_cali_value: nothing counted");
-        assert_eq!(t.reg_name(0x064), Some("wdtwprotect"));
-        assert_eq!(sb.read(&mut t, 0x064), 0x50d8_3aa1);
     }
 
     #[test]
