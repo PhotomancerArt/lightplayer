@@ -1,0 +1,7 @@
+fixture: mach_loopnez
+vecbase: 0x40378000
+end: break
+as=1: lcount_start=0 iterations=1 lcount_after=0
+as=2: lcount_start=1 iterations=2 lcount_after=0
+as=8: lcount_start=7 iterations=8 lcount_after=0
+lcount inside first iteration (as=8): 7

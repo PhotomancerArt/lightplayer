@@ -14,6 +14,7 @@ if [[ ! -x "$GCC_BIN/xtensa-esp32s3-elf-gcc" ]]; then
 fi
 export PATH="$GCC_BIN:$PATH"
 OBJDUMP="$GCC_BIN/xtensa-esp32s3-elf-objdump"
+NM="$GCC_BIN/xtensa-esp32s3-elf-nm"
 
 # Keep artifacts local regardless of any global cargo build-dir config.
 export CARGO_TARGET_DIR="$PWD/target"
@@ -30,7 +31,7 @@ cargo build --release
 
 mkdir -p elf
 count=0
-for src in corpus/src/bin/*.rs; do
+for src in corpus/src/bin/*.rs mach/src/bin/*.rs; do
   name="$(basename "$src" .rs)"
   bin="target/xtensa-esp32s3-none-elf/release/$name"
   if [[ ! -f "$bin" ]]; then
@@ -40,6 +41,38 @@ for src in corpus/src/bin/*.rs; do
   cp "$bin" "elf/$name.elf"
   echo "built elf/$name.elf"
   count=$((count + 1))
+done
+
+# The `mach` fixtures are bare-metal images for the PRIVILEGED hart and carry
+# xtensa-lx-rt's real vector table. Two properties the host tests depend on are
+# checked here, at the source, rather than surfacing as a baffling failure in
+# the emulator:
+#
+#  1. `.data` must be EMPTY. lx-rt's `xtensa.in.x` links `.data` with
+#     `AT > RODATA`, giving it an LMA distinct from its VMA; `lp-xt-elf`'s
+#     loader writes PT_LOAD segments to `p_vaddr`, so `Reset`'s `.data` copy
+#     would read zeros over the real bytes. See mach/memory.x.
+#  2. The vector table must be present and 1 KiB aligned at `_init_start` —
+#     `Reset` does `wsr.vecbase _init_start` and VECBASE's low 10 bits are not
+#     writable, so a misaligned table silently vectors somewhere else.
+for src in mach/src/bin/*.rs; do
+  name="$(basename "$src" .rs)"
+  syms="$("$NM" "elf/$name.elf")"
+  get() { echo "$syms" | awk -v s="$1" '$3 == s { print $1 }'; }
+  dstart="$(get _data_start)"; dend="$(get _data_end)"
+  istart="$(get _init_start)"; iend="$(get _init_end)"
+  if [[ -z "$dstart" || -z "$dend" || "$dstart" != "$dend" ]]; then
+    echo "error: $name has a non-empty .data ($dstart..$dend); see mach/memory.x" >&2
+    exit 1
+  fi
+  if [[ -z "$istart" || -z "$iend" ]]; then
+    echo "error: $name has no vector table (_init_start/_init_end missing)" >&2
+    exit 1
+  fi
+  if (( 0x$istart % 0x400 != 0 )) || (( 0x$iend - 0x$istart != 0x400 )); then
+    echo "error: $name vector table $istart..$iend is not a 1 KiB-aligned 0x400 block" >&2
+    exit 1
+  fi
 done
 
 # Count what this loop built — elf/ also holds the builtins image

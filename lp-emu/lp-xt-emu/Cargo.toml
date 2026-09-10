@@ -24,3 +24,9 @@ log = { workspace = true, default-features = false }
 # and `fingerprint()` is what makes that checkable rather than assumed.
 [dev-dependencies]
 lp-xt-fp-vectors = { path = "../../lp-xt/lp-xt-fp-vectors" }
+# The ELF reader the `mach` fixture tests parse images with. A dev-dependency
+# and a CYCLE (`lp-xt-elf` depends on this crate) — cargo permits that for dev
+# dependencies, and it is the honest shape: the fixtures are ELF files, and the
+# repo already has one Xtensa ELF reader. Allowlisted in the MIT fence
+# (`scripts/check-emu-fence.sh`) alongside `lp-xt-inst`.
+lp-xt-elf = { path = "../../lp-xt/lp-xt-elf" }
