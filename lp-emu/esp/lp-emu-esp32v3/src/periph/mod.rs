@@ -27,6 +27,7 @@
 
 pub mod accept;
 pub mod efuse;
+pub mod rtc_cntl;
 pub mod timg;
 
 use lp_emu_esp_common::periph::BoxedPeripheral;
@@ -75,10 +76,14 @@ pub const WDT_WKEY: u32 = 0x50D8_3AA1;
 ///
 /// `reset_cause` is what a direct load asserts (loader item 7); `identity`
 /// is the part this run claims to be (MAC and chip revision), which reaches
-/// two blocks — the eFuse view and, for the revision's top bit, `APB_CTRL`.
+/// two blocks — the eFuse view and, for the revision's top bit, `APB_CTRL`;
+/// `stall` is the handle RTC_CNTL publishes its half of the CPU stall key
+/// through, which the machine reads and P4's DPORT view adds its third
+/// input to.
 pub fn boot_set(
     reset_cause: ResetCause,
     identity: EfuseIdentity,
+    stall: rtc_cntl::StallKey,
 ) -> Vec<(u32, u32, BoxedPeripheral)> {
     vec![
         (
@@ -88,8 +93,8 @@ pub fn boot_set(
         ),
         (
             base::RTC_CNTL,
-            accept::RTC_CNTL_LEN,
-            Box::new(accept::rtc_cntl(reset_cause)),
+            rtc_cntl::RTC_CNTL_LEN,
+            Box::new(rtc_cntl::RtcCntl::new(reset_cause, stall)),
         ),
         (
             base::APB_CTRL,

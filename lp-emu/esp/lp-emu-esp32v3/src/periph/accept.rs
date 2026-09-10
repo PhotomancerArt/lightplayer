@@ -62,52 +62,6 @@ pub fn dport() -> RegFile {
         .with_pac_grades()
 }
 
-/// `RTC_CNTL`'s aperture, **tight**: the generated table runs to `+0x13c`
-/// (`date`); the PAC's next block (`RTC_IO`) is at `+0x400`. Tight so that
-/// an access into the gap is a strict stop naming an undocumented offset,
-/// not a silent zero.
-pub const RTC_CNTL_LEN: u32 = 0x140;
-
-/// `RTC_CNTL` — **P5's block**, accept-and-remember here.
-///
-/// The second strict stop of the direct load, 107,539 cycles in:
-/// `rtc_get_reset_reason+0xb` (`0x400081df`, the mask ROM) reads
-/// `reset_state` at `+0x34` for `esp_hal::rtc_cntl::reset_reason`
-/// (`rtc_cntl/mod.rs:679-682`), which the firmware's recovery ledger turns
-/// into `[RECOVERY] boot: cause=power-on`.
-///
-/// # The one deviation: `reset_state`, loader item 7
-///
-/// The PAC's reset for `+0x34` is `0x0000_3000` — both `reset_cause_*`
-/// fields **zero**, because an SVD cannot know why a chip is starting. The
-/// ROM masks the field per core:
-///
-/// ```text
-/// 400081df:  l32i.n  a2, a8, 0        ; RTC_CNTL + 0x34
-/// 400081e1:  extui   a2, a2, 0, 6     ; PRO: bits 5:0
-/// 400081ed:  extui   a2, a2, 6, 6     ; APP: bits 11:6
-/// ```
-///
-/// and `1` in either field is `POWERON_RESET` — the value L0's silicon
-/// banner printed as `rst:0x1 (POWERON_RESET)` (`../bench.md`) and
-/// `SocResetReason::ChipPowerOn` in esp-hal. The machine asserts the cause
-/// ([`crate::loader::ResetCause`]) in **both** fields, because a power-on
-/// resets both cores and the ROM's own `rtc_get_reset_reason(1)` would
-/// otherwise answer "no reason" for the APP core. The cause is an input to
-/// the run, not a property of the part; it is the listed deviation.
-///
-/// Everything else is the PAC's, including `wdtwprotect` resetting to the
-/// write-protect key `0x50D8_3AA1` — so `esp_hal::init`'s
-/// `rwdt.disable()` writes it, writes `wdtconfig0`, and reads back what it
-/// wrote. P5 makes the RWDT count.
-pub fn rtc_cntl(cause: crate::loader::ResetCause) -> RegFile {
-    let code = cause.rom_code();
-    RegFile::new("RTC_CNTL", RTC_CNTL_LEN)
-        .with_names(regs::RTC_CNTL)
-        .with_reset(0x034, 0x0000_3000 | code | (code << 6))
-        .with_pac_grades()
-}
-
 /// `APB_CTRL`'s aperture, tight: the generated table runs to `+0x7c`
 /// (`date`).
 pub const APB_CTRL_LEN: u32 = 0x80;
@@ -370,14 +324,13 @@ pub fn spi(name: &'static str) -> RegFile {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::loader::{EfuseIdentity, ResetCause};
+    use crate::loader::EfuseIdentity;
     use lp_emu_esp_common::{Peripheral, Sandbox};
 
     /// The accept blocks, each with the generated table it is built from.
     fn every_block() -> Vec<(RegFile, lp_emu_esp_common::regnames::RegNames)> {
         vec![
             (dport(), regs::DPORT),
-            (rtc_cntl(ResetCause::PowerOn), regs::RTC_CNTL),
             (apb_ctrl(EfuseIdentity::default()), regs::APB_CTRL),
             (i2c_ana_mst(), I2C_ANA_MST_NAMES),
             (gpio(), regs::GPIO),
@@ -393,26 +346,15 @@ mod tests {
     /// or an undocumented hand exception — the whole point of the sweep.
     ///
     /// `(block, offset, what this machine reads instead, why)`.
-    const DEVIATIONS: &[(&str, u32, u32, &str)] = &[
-        (
-            "APB_CTRL",
-            0x07c,
-            0x8000_0000,
-            "date bit 31 is esp-hal's eco_bit2 — the top bit of the chip's major revision \
+    const DEVIATIONS: &[(&str, u32, u32, &str)] = &[(
+        "APB_CTRL",
+        0x07c,
+        0x8000_0000,
+        "date bit 31 is esp-hal's eco_bit2 — the top bit of the chip's major revision \
              (efuse/esp32/mod.rs major_chip_version), which no eFuse word on this part \
              carries. The revision is an input to the run, like the reset cause; the desk \
              board is v3.1 and the PAC's reset for date is 0",
-        ),
-        (
-            "RTC_CNTL",
-            0x034,
-            0x0000_3041,
-            "reset_state's two reset_cause fields are an input to the run, not a property of \
-             the part: the machine asserts POWERON_RESET (1) for both cores, the value the \
-             ROM's rtc_get_reset_reason masks out (extui 0,6 / 6,6) and the silicon banner \
-             printed",
-        ),
-    ];
+    )];
 
     #[test]
     fn the_only_deviations_from_the_pacs_resets_are_the_listed_ones() {
@@ -487,21 +429,6 @@ mod tests {
                 Peripheral::name(&block)
             );
         }
-    }
-
-    #[test]
-    fn the_reset_cause_reads_power_on_for_both_cores() {
-        let mut sb = Sandbox::new();
-        let mut r = rtc_cntl(ResetCause::PowerOn);
-        assert_eq!(r.reg_name(0x034), Some("reset_state"));
-        let word = sb.read(&mut r, 0x034);
-        assert_eq!(word & 0x3f, 1, "PRO: rtc_get_reset_reason(0)");
-        assert_eq!((word >> 6) & 0x3f, 1, "APP: rtc_get_reset_reason(1)");
-        assert_eq!(word & !0xfff, 0x3000, "the rest of the word is the PAC's");
-        // The RWDT write-protect key is the PAC's reset, so a disable that
-        // writes it reads it back.
-        assert_eq!(r.reg_name(0x0a4), Some("wdtwprotect"));
-        assert_eq!(sb.read(&mut r, 0x0a4), 0x50d8_3aa1);
     }
 
     #[test]
