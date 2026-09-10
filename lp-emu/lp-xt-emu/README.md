@@ -37,7 +37,8 @@ src/
   trace.rs       `trait Tracer` (no-op default) + a basic text tracer.
   error.rs       Trap { Exception | Timeout }, mirroring CrashReport.
   emu.rs         Emulator: fetch/decode/execute loop + the windowed-ABI run API.
-  executor/      one module per instruction group (the lp-riscv-emu split):
+  executor/      one module per instruction group (the lp-riscv-emu split),
+                 each an `impl<B: Bus> Exec<'_, B>` block over the borrow view:
                  arith · imm · load_store · branch · jump · call · window · misc
                  float       FP/Boolean/SR data movement + the CPENABLE gate
                  float_math  everything that computes a float value (M6 P3)
@@ -48,6 +49,27 @@ src/
 Decoding is delegated to [`lp-xt-inst`](../lp-xt-inst); this crate never
 re-implements it. Instruction semantics come from the Xtensa ISA Reference
 Manual and are validated by diffing against real hardware (see below).
+
+### The bus seam
+
+The executors do not read a `Memory`. They run against **any**
+[`lp_emu_core::bus::Bus`](../lp-emu-core/src/bus.rs), through a `pub(crate)`
+borrow view — `Exec<'a, B> { cpu, mem, fp_policy }` — that the run loop builds
+once per instruction. `Memory` is one such bus: `impl Bus for Memory` forwards
+onto the inherent `&self` accessors, which are unchanged, so nothing that
+holds a concrete `Memory` sees a difference (inherent methods win name
+resolution). The fetch goes through `Bus::fetch_bytes`, an additive default
+method on the trait — Xtensa instructions are 2 or 3 bytes at any alignment,
+so there is no instruction *word* for `Bus::fetch_instruction` to return.
+
+**The user-mode runner's semantics are unchanged by this.** `Emulator` stays
+non-generic; its public API gained no type parameter, `SyscallHandler` still
+names `Memory` concretely, and the `Trap ↔ MemoryError` mapping the seam needs
+is the identity on every fault user-mode `Memory` can raise (see
+`error::trap_from_bus`, and `memory.rs`'s `trap_bus_error_round_trip`, which
+asserts it field for field). The seam exists so a privileged hart can run the
+same executors against a SoC bus; the machine-mode half of that is not here
+yet.
 
 ### The windowed register view
 
