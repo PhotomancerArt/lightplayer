@@ -518,6 +518,42 @@ in a plan file or config you didn't generate this session as a red flag.
 preview) instead of writing it by hand. See
 `docs/adr/2026-07-27-worktree-local-launch-json.md`.
 
+## Emulator-first device validation (the norm)
+
+The emulator-driven walk is **the norm for validating device work** —
+firmware behaviour, performance, memory, boot, Studio's device stack. Reach
+for a real board only when the work is likely affected by a seam the emulator
+does not model. The full reasoning, in Yona's words, is
+`docs/adr/2026-09-10-the-emulator-first-device-walk.md`; the operative rules:
+
+- **Default to the emulator.** `just walk-no-board` (Studio, no hardware),
+  `just walk-esp32c6-emu` (the firmware twin of the C6 hardware walk). A
+  planning agent decides whether a real-hardware walk is needed — the default
+  answer is no.
+- **A real-hardware walk is likely warranted only when the work touches a
+  non-emulatable seam:** byte-level serial-line interleaving
+  (`docs/defects/2026-08-02-serial-line-interleaving.md`), anything
+  wall-clock-dependent, or **a real hardware edge the work is changing** —
+  flashing firmware is the example, and Chromium's own USB stack (device-loss
+  reporting, Brave grant revocation, the real chooser) is the shim's residue
+  (`docs/adr/2026-09-09-studio-device-stack-over-a-virtual-serial-port.md`,
+  rule 3).
+- **When you do a hardware walk, do the emulator walk first**, and what
+  hardware checks is **parity**. If hardware disagrees with the emulator, fix
+  the *emulator* first — file a fidelity defect under `docs/defects/` (e.g.
+  `2026-09-10-the-emulated-c6-builds-a-graphics-stage-40x-slower-than-silicon.md`)
+  and correct the model — so every later walk inherits the accurate behaviour.
+- **Emulated measurements are valid evidence, but never claim they are
+  hardware-validated.** Name the emulator and its `lp-emu` commit hash inline
+  with any quoted number, the way trace provenance does
+  (`configuration=lp-emu:esp32c6:t1`); an open fidelity defect for a
+  measurement's class is a reason to distrust it. Emulated *time* is exact and
+  deterministic — never gate on host wall-clock from an emulated run.
+
+(Two riders to the parity rule — a mandatory-filed-defect escape hatch, and
+the fidelity-defect registry as the "reason to believe the emulator is wrong" —
+are director-proposed and pending Yona's ship-gate decision; see the ADR.)
+
 ## Studio against an emulated board (no hardware)
 
 `just studio-dev-emu` starts `lp-cli emu serve` holding two emulated ESP32-C6
