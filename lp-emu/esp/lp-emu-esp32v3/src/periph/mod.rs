@@ -27,6 +27,7 @@
 
 pub mod accept;
 pub mod efuse;
+pub mod i2c_ana_mst;
 pub mod rtc_cntl;
 pub mod timg;
 
@@ -104,8 +105,8 @@ pub fn boot_set(
         (base::TIMG0, timg::TIMG_LEN, Box::new(timg::Timg::timg0())),
         (
             base::I2C_ANA_MST,
-            accept::I2C_ANA_MST_LEN,
-            Box::new(accept::i2c_ana_mst()),
+            i2c_ana_mst::I2C_ANA_MST_LEN,
+            Box::new(i2c_ana_mst::I2cAnaMst::new()),
         ),
         (base::TIMG1, timg::TIMG_LEN, Box::new(timg::Timg::timg1())),
         (base::GPIO, accept::GPIO_LEN, Box::new(accept::gpio())),
