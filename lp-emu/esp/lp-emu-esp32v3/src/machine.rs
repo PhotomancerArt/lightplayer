@@ -119,6 +119,9 @@ pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     // Direct load, stop 7: `Uart::new(…).with_rx(GPIO3)` routes U0RXD
     // through the GPIO matrix.
     "GPIO",
+    // Direct load, stop 8: `Uart::new` reads `conf0` to pick the UART's
+    // clock source.
+    "UART0",
     // ROM-up, stop 1: `_ResetHandler_efuse_check_patch` reads its own
     // fuses seven instructions after the reset vector.
     "EFUSE",

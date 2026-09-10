@@ -288,6 +288,44 @@ pub fn gpio() -> RegFile {
         .with_pac_grades()
 }
 
+/// `UART0`'s aperture, tight: the generated table runs to `+0x7c` (`id`).
+pub const UART0_LEN: u32 = 0x80;
+
+/// `UART0` — **P6's block**, accept-and-remember here, and the reason P6
+/// exists: a hello that comes out of an accept block is not a hello.
+///
+/// The eighth strict stop of the direct load, 3,564,269 cycles in:
+/// `esp_hal::soc::…::clocks::UartInstance::configure_function_clock+0x98`
+/// reads `conf0` (`+0x20`) to set `tick_ref_always_on` — the first touch of
+/// `Uart::new(peripherals.UART0, Config::default().with_baudrate(921_600))`
+/// in `board/esp32v3/init.rs`, which then programs `clkdiv`, `conf0`,
+/// `conf1`, `mem_conf`, the interrupt registers and the FIFO resets, and
+/// reads back what it wrote.
+///
+/// Every reset is the PAC's (`clkdiv` = `0x2b6`, `conf0` = `0x0800_001c`,
+/// `conf1` = `0x6060`, `status` = 0, …). No exception is carried, and the
+/// two spins the boot has are answered by the PAC's zeros:
+///
+/// - the mask ROM's `uart_tx_one_char` (`0x4000_9200`, which `esp-println`
+///   calls for every byte) spins while `status & 0x0080_0000` — bit 23,
+///   the top bit of `txfifo_cnt`, i.e. "128 bytes queued" — and a count
+///   that is always 0 never blocks;
+/// - esp-hal's `write_bytes` reads `status.txfifo_cnt` for room the same
+///   way.
+///
+/// So **every byte the boot prints falls into a register that remembers
+/// only the last one**, and the run reaches its `[INIT]` lines without a
+/// single one leaving the chip. That is the threshold the phase file names
+/// and the finding P6 is built on: UART0 needs `engine::uart` — the FIFO,
+/// the shifter at baud, `txfifo_cnt` counting down, the host stream — not a
+/// pin. `status` is read-only in the PAC and *modeled* here; nothing in it
+/// is measured.
+pub fn uart0() -> RegFile {
+    RegFile::new("UART0", UART0_LEN)
+        .with_names(regs::UART0)
+        .with_pac_grades()
+}
+
 /// `EFUSE`'s aperture: the generated table runs to `+0x1fc` (`date`).
 pub const EFUSE_LEN: u32 = 0x200;
 
@@ -330,6 +368,7 @@ mod tests {
             (i2c_ana_mst(), I2C_ANA_MST_NAMES),
             (timg("TIMG1"), regs::TIMG0),
             (gpio(), regs::GPIO),
+            (uart0(), regs::UART0),
             (efuse(), regs::EFUSE),
         ]
     }
