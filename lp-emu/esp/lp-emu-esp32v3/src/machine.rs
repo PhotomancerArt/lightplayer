@@ -678,9 +678,9 @@ impl Machine {
         self.harts[0].cpu_mut().set_a(1, frame.sp);
         for (i, word) in frame.save_area.iter().enumerate() {
             let at = frame.sp.wrapping_sub(16).wrapping_add(4 * i as u32);
-            self.bus
-                .load_image(at, &word.to_le_bytes())
-                .map_err(|e| BuildError::Io(format!("seeding the boot frame at {at:#010x}: {e}")))?;
+            self.bus.load_image(at, &word.to_le_bytes()).map_err(|e| {
+                BuildError::Io(format!("seeding the boot frame at {at:#010x}: {e}"))
+            })?;
         }
         self.boot_frame = Some(frame);
         Ok(())
@@ -834,12 +834,19 @@ impl Machine {
                 }
             })
         };
-        if let Some(name) = self.app.as_ref().and_then(exact).or_else(|| exact(&self.rom)) {
+        if let Some(name) = self
+            .app
+            .as_ref()
+            .and_then(exact)
+            .or_else(|| exact(&self.rom))
+        {
             return Some(name);
         }
         let nearest = |image: &ElfImage| {
             let symbols = image.symbols();
-            let i = symbols.partition_point(|s| s.address <= address).checked_sub(1)?;
+            let i = symbols
+                .partition_point(|s| s.address <= address)
+                .checked_sub(1)?;
             let s = &symbols[i];
             let back = address - s.address;
             (back <= NEAREST_SYMBOL_WINDOW).then(|| format!("~{}+0x{back:x}", s.name))
@@ -1074,9 +1081,9 @@ impl Machine {
 
     fn report_probe(&mut self, at: Cycles, name: &str) {
         match self.peek_symbol(name) {
-            Some((address, value)) => log::info!(
-                "probe cycle={at} {name} @ {address:#010x} = {value:#010x} ({value})"
-            ),
+            Some((address, value)) => {
+                log::info!("probe cycle={at} {name} @ {address:#010x} = {value:#010x} ({value})")
+            }
             None => log::warn!("probe cycle={at} {name}: no such symbol"),
         }
     }

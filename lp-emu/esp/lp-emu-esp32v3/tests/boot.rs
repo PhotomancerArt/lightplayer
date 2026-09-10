@@ -132,7 +132,10 @@ fn the_two_relocated_segments_are_recorded_and_placed_by_vaddr() {
     );
     let mut bases: Vec<u32> = relocated.iter().map(|s| s.vaddr).collect();
     bases.sort_unstable();
-    assert_eq!(bases, vec![0x3FF9_6000, 0x3FF9_F100, 0x3FFA_E000, 0x3FFE_0000]);
+    assert_eq!(
+        bases,
+        vec![0x3FF9_6000, 0x3FF9_F100, 0x3FFA_E000, 0x3FFE_0000]
+    );
     for seg in relocated {
         assert!(
             !seg.regions.is_empty(),
@@ -207,8 +210,10 @@ fn vector_table_offsets() {
             .iter()
             .find(|s| s.vaddr == vaddr)
             .unwrap_or_else(|| {
-                panic!("`.{name}.text` has no PT_LOAD at {vaddr:#010x} — the ROM's vector table \
-                        is one PT_LOAD per vector (m3/notes.md §2)")
+                panic!(
+                    "`.{name}.text` has no PT_LOAD at {vaddr:#010x} — the ROM's vector table \
+                        is one PT_LOAD per vector (m3/notes.md §2)"
+                )
             });
         assert_eq!(
             seg.memsz, *size,
@@ -374,8 +379,7 @@ fn the_boot_frame_is_the_roms_own_pro_stack() {
     let machine = rom_up();
     let frame = BootFrame::rom_pro_stack(machine.rom());
     assert_eq!(
-        frame.sp,
-        0x3FFE_3F20,
+        frame.sp, 0x3FFE_3F20,
         "`__stack` in the vendored ROM ELF, which is also `reserved_rom_stack_pro`'s end in \
          third_party/esp-hal/ld/esp32/memory.x:32"
     );
@@ -482,10 +486,7 @@ fn a_seeded_hart_survives_its_first_exception() {
 
     if let Outcome::Fault { fault, .. } = &outcome {
         assert!(
-            !matches!(
-                fault,
-                lp_xt_emu::mach::HartFault::TrapVectorFetch { .. }
-            ),
+            !matches!(fault, lp_xt_emu::mach::HartFault::TrapVectorFetch { .. }),
             "a seeded hart must not double-fault on its first exception: {fault:?}"
         );
     }
@@ -531,9 +532,9 @@ fn strict_stops_somewhere_honest_from_the_reset_vector() {
             // Also honest: the ROM reached an instruction this emulator does
             // not implement, or a vector it cannot fetch. P3 reads it.
         }
-        other => panic!(
-            "a strict rom-up run with no peripherals should stop, not finish: {other:?}"
-        ),
+        other => {
+            panic!("a strict rom-up run with no peripherals should stop, not finish: {other:?}")
+        }
     }
     assert_eq!(
         outcome.exit_code() != 0,

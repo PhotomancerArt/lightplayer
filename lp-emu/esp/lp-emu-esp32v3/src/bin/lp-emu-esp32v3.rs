@@ -140,10 +140,7 @@ fn run() -> Result<ExitCode, String> {
         let sink: Box<dyn std::io::Write + Send> = if spec == "-" {
             Box::new(std::io::stderr())
         } else {
-            Box::new(
-                std::fs::File::create(spec)
-                    .map_err(|e| format!("--trace {spec}: {e}"))?,
-            )
+            Box::new(std::fs::File::create(spec).map_err(|e| format!("--trace {spec}: {e}"))?)
         };
         builder = builder.trace(sink, args.trace_blocks.clone());
     }
@@ -286,7 +283,10 @@ fn print_outcome(machine: &mut Machine, outcome: &Outcome) {
             let where_ = if violation.in_mmio_window {
                 "inside the declared MMIO window — an UNMODELLED BLOCK".to_string()
             } else if let Some((span, why)) = bus_setup::unmapped_window(violation.address) {
-                format!("inside `{}`, which this machine deliberately does not map: {why}", span.name)
+                format!(
+                    "inside `{}`, which this machine deliberately does not map: {why}",
+                    span.name
+                )
             } else {
                 "outside every region and every declared window".to_string()
             };
@@ -315,10 +315,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
     let mut args = Args::default();
     let mut it = argv.into_iter();
     while let Some(flag) = it.next() {
-        let mut value = || {
-            it.next()
-                .ok_or_else(|| format!("`{flag}` needs a value"))
-        };
+        let mut value = || it.next().ok_or_else(|| format!("`{flag}` needs a value"));
         match flag.as_str() {
             "-h" | "--help" => args.help = true,
             "--map" => args.map = true,
@@ -339,9 +336,9 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--break-at" => args.break_at.push(value()?),
             "--probe" => {
                 let v = value()?;
-                let (cycle, name) = v.split_once(':').ok_or_else(|| {
-                    format!("--probe {v}: expected <cycle>:<symbol>")
-                })?;
+                let (cycle, name) = v
+                    .split_once(':')
+                    .ok_or_else(|| format!("--probe {v}: expected <cycle>:<symbol>"))?;
                 let cycle: u64 = cycle
                     .parse()
                     .map_err(|_| format!("--probe {v}: `{cycle}` is not a cycle count"))?;
@@ -351,9 +348,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--trace-block" => args.trace_blocks.push(value()?),
             "--seed" => {
                 let v = value()?;
-                args.seed = v
-                    .parse()
-                    .map_err(|_| format!("--seed {v}: not a number"))?;
+                args.seed = v.parse().map_err(|_| format!("--seed {v}: not a number"))?;
             }
             other => {
                 return Err(format!(

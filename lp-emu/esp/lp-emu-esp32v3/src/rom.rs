@@ -137,7 +137,11 @@ pub enum RomError {
     /// A `PT_LOAD` or a seeded section covers an address no region claims.
     /// The brief's stop-and-report case: either the ROM is not the chip we
     /// think it is, or [`crate::memmap`] is wrong.
-    Unmapped { vaddr: u32, memsz: u32, at: u32 },
+    Unmapped {
+        vaddr: u32,
+        memsz: u32,
+        at: u32,
+    },
     /// A hooked symbol is not in the ROM's symbol table.
     NoSuchSymbol(String),
 }
@@ -335,11 +339,7 @@ pub fn load(bus: &mut SocBus, rom: &ElfImage) -> Result<Vec<PlacedSegment>, RomE
             // The file half is the ELF's own headers; only the zero-fill
             // tail is guest memory. See `is_header_map`.
             let skip = seg.filesz();
-            (
-                seg.vaddr + skip,
-                &[][..],
-                seg.memsz.saturating_sub(skip),
-            )
+            (seg.vaddr + skip, &[][..], seg.memsz.saturating_sub(skip))
         } else {
             (seg.vaddr, &seg.data[..], seg.memsz)
         };

@@ -48,8 +48,8 @@
 //! `RamRegion` (an M2 phase) or a chip-side check, and it is not P2's to
 //! decide.
 
-use lp_emu_esp_common::bus::RamRegion;
 use lp_emu_esp_common::SocBus;
+use lp_emu_esp_common::bus::RamRegion;
 
 use crate::memmap::{self, Span};
 
