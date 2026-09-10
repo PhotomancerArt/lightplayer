@@ -1811,6 +1811,7 @@ impl Esp32C6Builder {
             reboot_on_reset,
             translate,
             jit_report,
+            jit_seed_override: None,
             boot_entry: entry,
             jit_entry: None,
             jit_escape_all: false,
@@ -2067,6 +2068,9 @@ pub struct Esp32C6Machine {
     /// Print the translated core's report line and the boot cost of building
     /// it ([`Esp32C6Builder::jit_report`]).
     jit_report: bool,
+    /// Seeds a caller supplied instead of the image's symbols, for a guest
+    /// that has no ELF. See [`Esp32C6Machine::translate_from_seeds`].
+    jit_seed_override: Option<Vec<u32>>,
     /// The pc the machine handed the hart at reset — the app's ELF entry
     /// point, or the ROM's on a `rom-up` boot. Discovery's first seed, and
     /// the census's too.
@@ -2381,7 +2385,10 @@ impl Esp32C6Machine {
             .collect();
         let in_text = |address: u32| exec.iter().any(|&(lo, hi)| address >= lo && address < hi);
 
-        let mut seeds = vec![entry];
+        let mut seeds = self
+            .jit_seed_override
+            .clone()
+            .unwrap_or_else(|| vec![entry]);
         // Reached by hardware and by `mret`, never by an edge a walk can
         // follow. Zero before the firmware writes it, which `in_text` drops.
         let trap = self.harts[0].trap_vector();
@@ -2401,8 +2408,10 @@ impl Esp32C6Machine {
             named.sort_unstable_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
             named
         };
-        seeds.extend(sorted(self.app.as_ref()).into_iter().map(|(_, at)| at));
-        seeds.extend(sorted(Some(&self.rom)).into_iter().map(|(_, at)| at));
+        if self.jit_seed_override.is_none() {
+            seeds.extend(sorted(self.app.as_ref()).into_iter().map(|(_, at)| at));
+            seeds.extend(sorted(Some(&self.rom)).into_iter().map(|(_, at)| at));
+        }
         // Last, and never dropped: code the guest wrote and published. It is
         // last only because the symbol lists are the bulk; under a budget
         // that binds these are cheap and there are a handful of them.
@@ -2598,6 +2607,36 @@ impl Esp32C6Machine {
     #[must_use]
     pub fn jit_retranslations(&self) -> u64 {
         self.jit_retranslations
+    }
+
+    /// Install a translated core over a hand-supplied seed list, and arm the
+    /// two translation events (JD5) for it.
+    ///
+    /// The product path is `--jit`, which seeds from the image's own symbols
+    /// through [`Esp32C6Builder::jit`]. This is for a **constructed** guest —
+    /// a few words placed into RAM, with no ELF and so no symbol table — so
+    /// the discovery rules and both translation events can be tested without
+    /// a firmware build. Beyond the seeds given, the walk still picks up
+    /// whatever the guest publishes with a `fence.i`.
+    ///
+    /// # Errors
+    ///
+    /// Anything that stops a core being built; see
+    /// [`Esp32C6Machine::install_translated_core`].
+    pub fn translate_from_seeds(
+        &mut self,
+        seeds: &[u32],
+        escape_all: bool,
+        blocks: usize,
+    ) -> Result<(), BuildError> {
+        let entry = seeds.first().copied().unwrap_or(self.boot_entry);
+        self.jit_seed_override = Some(seeds.to_vec());
+        self.jit_entry = Some(entry);
+        self.jit_escape_all = escape_all;
+        self.jit_block_budget = blocks;
+        self.jit_fence_i_at = self.harts[0].fence_i_count();
+        self.bus.watch_guest_code(true);
+        self.install_translated_core(entry, escape_all, blocks, "seeded")
     }
 
     /// The second translation event (JD5): the guest published code.

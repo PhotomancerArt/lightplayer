@@ -1076,12 +1076,26 @@ impl<B: Bus> MachineHart<B> {
                             // single-stepping loop always has.
                             if let Some(over) = self.step_once(bus) {
                                 self.drain_block_flush(cache);
+                                if let Some(core) = core.as_mut() {
+                                    self.drain_core_flush(core);
+                                }
                                 return over;
                             }
                             // That instruction may have been a `fence.i`, and
                             // the cache it wanted flushed is out here rather
                             // than in the hart.
                             self.drain_block_flush(cache);
+                            // **And so is the translated core** (M7 P4). A
+                            // `fence.i` is not cacheable, so this is the path
+                            // that retires the guest's own publish — and
+                            // before this drain the core kept running the
+                            // bytes it was translated from for the rest of
+                            // the slice. A constructed guest that rewrites a
+                            // subroutine, fences, and calls it again ran the
+                            // old instruction: `tests/jit_discovery.rs`.
+                            if let Some(core) = core.as_mut() {
+                                self.drain_core_flush(core);
+                            }
                             // It may also have been the CSR write
                             // that arms an execute watchpoint, which is the
                             // one thing that can make decoding ahead unsafe

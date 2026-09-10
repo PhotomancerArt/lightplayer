@@ -135,6 +135,13 @@ fn encoded_width(word: u32) -> u32 {
     if word & 0b11 == 0b11 { 4 } else { 2 }
 }
 
+/// How many words in a row the walk will step over without decoding one.
+///
+/// See the call site: this is what separates "an instruction the translator
+/// refuses" from "data", with no way to tell them apart except how many of
+/// them there are in a row.
+const MAX_SKIP: usize = 4;
+
 /// Pass one: where do blocks start?
 ///
 /// Every static edge a branch or a `jal` names is a start, and so is a
@@ -181,6 +188,7 @@ fn find_starts(
             }
         };
         let mut room = MAX_BLOCK_INSTS;
+        let mut skipped = 0usize;
         loop {
             let Some(word) = fetch(at) else { break };
             let Some(d) = decode(word) else {
@@ -198,14 +206,34 @@ fn find_starts(
                 // read a CSR early are exactly the hot ones — the scheduler,
                 // the interrupt path and the cycle-counter reads.
                 //
-                // On real data-in-text the length bits mean nothing and this
-                // manufactures a start that is not one. That is safe rather
-                // than merely tolerable: the hart enters translated code only
-                // at its own pc, so a block nothing ever jumps to is dead
-                // weight in the module and can never be executed.
-                edge(at.wrapping_add(encoded_width(word)), &mut starts, &mut queue);
-                break;
+                // On real data-in-text the length bits mean nothing, and the
+                // step is then a guess. It is a *safe* guess — the hart
+                // enters translated code only at its own pc, so a block
+                // nothing jumps to is dead weight and can never run — but an
+                // unbounded one walks the whole of RAM: zeroed memory does
+                // not decode, so every two bytes of it becomes another start.
+                // Measured on a bare machine: 259,843 starts, of which
+                // 259,723 held nothing, and 420 ms of walk.
+                //
+                // So the step is bounded. A refused *instruction* comes in
+                // ones and twos among decodable ones — a `csrr`, an `ecall`,
+                // an atomic — and a run longer than that is data, which the
+                // walk stops at rather than marching through.
+                if skipped == MAX_SKIP {
+                    break;
+                }
+                skipped += 1;
+                let next = at.wrapping_add(encoded_width(word));
+                edge(next, &mut starts, &mut queue);
+                // Walked here rather than queued-and-restarted, so the count
+                // above is a bound on the whole run and not on each step of
+                // it. Marking it walked is what stops the queue re-entering
+                // the same march with the counter reset.
+                walked.insert(next);
+                at = next;
+                continue;
             };
+            skipped = 0;
             let next = at.wrapping_add(u32::from(d.width));
             match d.inst {
                 Inst::Branch { imm, .. } => {

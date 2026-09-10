@@ -223,6 +223,9 @@ pub struct JitStats {
     /// Refused: the bus charges for accesses, or an execute watchpoint is
     /// armed, so an inline access would not be exact.
     pub refused_impure: u64,
+    /// Refused: guest code this module was translated from has changed, so
+    /// the whole module is stale. See [`JitCore::verify`].
+    pub refused_stale: u64,
     /// Guest instructions handed back to the interpreter from inside
     /// translated code (JD10). Allowed to be non-zero; not allowed to be
     /// unmeasured.
@@ -440,6 +443,11 @@ pub struct JitCore {
     /// Something the core cannot recover from: a trap out of translated code,
     /// or a cost model that changed under the module. It stops being entered.
     dead: bool,
+    /// Guest bytes this module was translated from have changed. Like
+    /// [`dead`](Self::dead) it stops the core being entered, but it is not a
+    /// bug — it is the module waiting to be replaced at the next translation
+    /// event (JD5).
+    stale: bool,
 }
 
 /// Where a translated module's three areas sit in the arena.
@@ -615,6 +623,7 @@ impl JitCore {
             stats: JitStats::default(),
             verify_pending: false,
             dead: false,
+            stale: false,
             report: BuildReport {
                 discovery,
                 blocks: set.blocks.len(),
@@ -629,41 +638,56 @@ impl JitCore {
         })
     }
 
-    /// Drop every block whose guest bytes are no longer what it was
-    /// translated from.
+    /// Check whether the guest bytes this module was translated from are
+    /// still what it was translated from, and stop using it if they are not.
     ///
-    /// This is the answer to an invalidation, and it is **exact**: a block
-    /// whose bytes are unchanged is still a correct translation of them,
-    /// whatever the reason the machine gave for asking. It is what keeps a
-    /// `fence.i` — the guest publishing a shader it wrote into RAM — from
-    /// costing the translation of the app's read-only `.text`, which cannot
-    /// have changed and which is most of what a render loop runs.
+    /// This is the answer to an invalidation, and it is **exact**: a module
+    /// whose every block's bytes are unchanged is still a correct
+    /// translation of them, whatever the reason the machine gave for asking.
+    /// It is what keeps a `fence.i` — the guest publishing a shader it wrote
+    /// into RAM — from costing the translation of the app's read-only
+    /// `.text`, which cannot have changed and which is most of what a render
+    /// loop runs. Measured on all four pinned images: 2 invalidations, no
+    /// block's bytes changed.
     ///
-    /// The spike re-checked these bytes on **every entry**; JD1 dropped that
-    /// in favour of `fence.i` as the trigger. This is the same check on the
-    /// same bytes, driven by the trigger rather than by the clock: once per
-    /// invalidation, over ~10 KB.
+    /// # Why one changed block retires the whole module, and not just itself
+    ///
+    /// P3 dropped the changed blocks from the entry index and kept the rest.
+    /// That is not sound, and M7 P4's `fence.i` test is what caught it: the
+    /// index governs where the hart may **enter**, and a block's edges to
+    /// other blocks are compiled *into the module*. Dropping a block from the
+    /// index does not stop a surviving block's `br` from reaching its body,
+    /// so a caller that was translated before the guest rewrote its callee
+    /// went on running the callee it was translated from. It never fired on
+    /// the pinned images — nothing ever changed — which is exactly the kind
+    /// of bug that waits.
+    ///
+    /// So a changed byte makes the whole module **stale**: it stops being
+    /// entered, the run continues interpreted, and the next translation
+    /// event replaces it. That is not a fallback, it is the design — JD5 has
+    /// an event for precisely this.
     fn verify(&mut self, bus: &SocBus) {
         self.verify_pending = false;
         self.stats.invalidations += 1;
         let base = bus.guest_arena_base();
         let arena = bus.guest_arena();
-        let mut dropped = 0u64;
-        self.index.retain(|_, &mut i| {
-            let (pc, bytes) = &self.code[i as usize];
-            let at = match usize::try_from(u64::from(*pc) - u64::from(base)) {
-                Ok(at) => at,
-                Err(_) => return false,
+        let changed = self.code.iter().filter(|(pc, bytes)| {
+            let Ok(at) = usize::try_from(u64::from(*pc) - u64::from(base)) else {
+                return true;
             };
-            let same = arena
+            !arena
                 .get(at..at + bytes.len())
-                .is_some_and(|now| now == &bytes[..]);
-            if !same {
-                dropped += 1;
-            }
-            same
+                .is_some_and(|now| now == &bytes[..])
         });
-        self.stats.dropped_blocks += dropped;
+        let dropped = changed.count() as u64;
+        if dropped > 0 {
+            self.stats.dropped_blocks += dropped;
+            self.stale = true;
+            log::debug!(
+                "jit: {dropped} translated block(s) no longer match the guest's bytes; \
+                 the module is stale until the next translation event"
+            );
+        }
     }
 
     #[must_use]
@@ -683,6 +707,10 @@ impl TranslatedCore<SocBus> for JitCore {
             self.stats.refused_no_entry += 1;
             return RunOutcome::Refused;
         }
+        if self.stale {
+            self.stats.refused_stale += 1;
+            return RunOutcome::Refused;
+        }
         // The block set's budget checks have the cost model folded in as
         // constants, so a model that changed since emission is not something
         // the byte re-check below would catch.
@@ -693,6 +721,10 @@ impl TranslatedCore<SocBus> for JitCore {
         }
         if self.verify_pending {
             self.verify(bus);
+            if self.stale {
+                self.stats.refused_stale += 1;
+                return RunOutcome::Refused;
+            }
         }
         let pc = hart.pc();
         let Some(&entry) = self.index.get(&pc) else {
@@ -815,11 +847,13 @@ impl TranslatedCore<SocBus> for JitCore {
     fn invalidate(&mut self, _range: Option<(u32, u32)>) {
         // The range is not used, and deliberately: `verify` re-checks every
         // block's own bytes, which answers a range and a whole flush with the
-        // same, exact, question. What it costs is one pass over ~10 KB at each
-        // of the ~98 cache refills and one `fence.i` a render run performs.
+        // same, exact, question. What it costs is one pass over ~40 KB at
+        // each of the ~98 cache refills and one `fence.i` a render run
+        // performs.
         //
-        // P3 does not retranslate what it drops — the two translation events
-        // are P4's (JD5) — so coverage only falls.
+        // What happens after a change is JD5's second event: the machine
+        // retranslates at the `fence.i`, and until it does the module is
+        // stale and the run is interpreted.
         self.verify_pending = true;
     }
 
@@ -839,7 +873,8 @@ impl TranslatedCore<SocBus> for JitCore {
              instantiate {:.2} ms; \
              entries {}, retired {}, escape_hatch {}, \
              invalidations {} (dropped {} blocks), \
-             refused_pending {}, refused_watch {}, refused_no_entry {}, refused_impure {}",
+             refused_pending {}, refused_watch {}, refused_no_entry {}, refused_impure {}, \
+             refused_stale {}",
             d.blocks,
             d.insts,
             d.seeds,
@@ -874,6 +909,7 @@ impl TranslatedCore<SocBus> for JitCore {
             s.refused_watch,
             s.refused_no_entry,
             s.refused_impure,
+            s.refused_stale,
         )
     }
 }
