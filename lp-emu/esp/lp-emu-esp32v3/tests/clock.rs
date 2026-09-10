@@ -495,7 +495,9 @@ fn efuse_mac_default() {
     // in APB_CTRL.date bit 31, which is not an eFuse at all.
     let w3 = m.peek_word(memmap::periph::EFUSE + 0x0c).expect("mapped");
     let w5 = m.peek_word(memmap::periph::EFUSE + 0x14).expect("mapped");
-    let date = m.peek_word(memmap::periph::APB_CTRL + 0x7c).expect("mapped");
+    let date = m
+        .peek_word(memmap::periph::APB_CTRL + 0x7c)
+        .expect("mapped");
     let eco0 = (w3 >> 15) & 1;
     let eco1 = (w5 >> 20) & 1;
     let eco2 = date >> 31;
