@@ -1044,11 +1044,17 @@ fn direct_traced(micros: u64) -> Option<(Machine, Outcome, String)> {
 ///
 /// A register file holds the bit forever. That is P7's question in the
 /// phase file's own words — *"SPI1 `CMD` write: no flash chip"* — and this
-/// test holds the reading until P7 moves it. The hello is P6's: the bytes
-/// are all there, and not one of them left the chip.
+/// test holds the reading until P7 moves it.
+///
+/// The hello was **P6's**, and it landed: the bytes below are the ones the
+/// guest wrote into `fifo`, and `tests/boot_idle.rs` is the same 543 bytes
+/// coming out of the host stream. The last assertion here used to read the
+/// block back and find the last byte, because an accept block remembers only
+/// the last write; UART0 is a view now, so `fifo` reads the **receive** side
+/// and an empty receive FIFO reads zero. That change of meaning is the phase.
 #[test]
 #[ignore = "needs the shipped image; run through `just test-emu-esp32v3-boot`"]
-fn the_direct_load_says_hello_into_an_accept_block_and_stands_at_the_flash_until_p7() {
+fn the_direct_load_says_hello_and_stands_at_the_flash_until_p7() {
     let Some((mut machine, outcome, trace)) = direct_traced(20_000) else {
         return;
     };
@@ -1092,14 +1098,20 @@ fn the_direct_load_says_hello_into_an_accept_block_and_stands_at_the_flash_until
         !text.contains("flash filesystem mounted"),
         "the mount is the line after the flash read, and there is no flash chip"
     );
-    // And the block itself holds exactly one byte of all that: the last.
-    let last = *text.as_bytes().last().expect("bytes");
+    // And the block holds none of it: `fifo` is the receive side on the read
+    // path, the host sent nothing, and an empty receive FIFO reads zero.
+    // Every byte above left the chip through the shifter at 921,600 baud.
     assert_eq!(
         machine
             .peek_word(memmap::periph::UART0)
             .map(|w| (w & 0xff) as u8),
-        Some(last),
-        "an accept block remembers only the last write"
+        Some(0),
+        "the view's `fifo` read is a receive pop, not the last thing written"
+    );
+    assert_eq!(
+        machine.uart0().len(),
+        text.len(),
+        "and what the wire carried is what the guest wrote, byte for byte"
     );
 }
 

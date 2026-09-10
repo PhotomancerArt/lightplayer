@@ -2136,6 +2136,12 @@ impl Machine {
         self.restore(&power_on);
         self.uart0_log.replace(&uart0);
         self.reboots += 1;
+        log::info!(
+            "machine: reboot {} — back to cycle {}, pc {:#010x}, strap {strap}",
+            self.reboots,
+            self.cycles(),
+            self.harts[0].pc()
+        );
 
         // The host-poll deadline is an ABSOLUTE guest cycle and it lives
         // outside the snapshot, so a restore that puts the clock back to zero
@@ -2272,9 +2278,44 @@ impl Machine {
         self.bus.restore_scalars(&snap.scalars);
         self.bus.matrix_mut().load_state(&snap.matrix);
         self.bus.sched.restore(&snap.sched);
+        self.rearm_watchpoints();
         self.rng = snap.rng;
         self.hook_calls = snap.hook_calls;
         self.idle_skips = snap.idle_skips;
+    }
+
+    /// Re-arm the bus's hardware watchpoints after a restore.
+    ///
+    /// **A bug P6 found by being the first code that reboots.** A DBREAK
+    /// watchpoint lives on the **bus** and is written only by the hart's
+    /// `wsr` to `DBREAKA`/`DBREAKC` (`lp-xt-emu/src/mach/exec.rs:651-660`).
+    /// A restore replaces the hart wholesale, so the bus keeps whatever the
+    /// *previous* hart had armed while the restored hart's `DBREAK` pair
+    /// reads zero — and the two disagree until something writes `DBREAK`
+    /// again, which on a fresh boot nothing does for milliseconds.
+    ///
+    /// The shipped image arms one: esp-hal's stack guard is a four-byte
+    /// store watchpoint (`lp-xt-emu/src/mach/tests.rs:1448-1457`). Before
+    /// this call, a cable reset of a running app took a **debug exception**
+    /// fourteen instructions into the second boot, vectored through the mask
+    /// ROM's table and died on an unsupported instruction at `0x4000_0705`.
+    /// `src/snapshot.rs` already promised that "a restore re-arms them from
+    /// the restored hart"; nothing did.
+    ///
+    /// ⚠️ **This re-arms them from the power-on state, not from the restored
+    /// hart.** Every slot is disarmed through the ordinary
+    /// [`Bus::set_watchpoint`] path, so the armed bitmask and the
+    /// single-store fast path are recomputed with it. That is exactly right
+    /// for a reboot — the power-on
+    /// snapshot has `DBREAK` clear — and for every snapshot this machine
+    /// takes. Reading the pair back off the hart would need a public
+    /// accessor for its `BreakUnit`, which `lp-xt-emu` does not publish;
+    /// **M1 owns that crate and M3 reads it**, so the accessor is an M1
+    /// item and this is the honest half of the fix, not the whole one.
+    fn rearm_watchpoints(&mut self) {
+        for slot in 0..crate::bus_setup::WATCHPOINT_SLOTS {
+            Bus::set_watchpoint(&mut self.bus, slot, None);
+        }
     }
 }
 
