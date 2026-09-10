@@ -281,6 +281,57 @@ fn the_two_rtc_fast_views_are_the_same_size_and_do_not_overlap() {
     assert!(ibus.end() <= dbus.base || dbus.end() <= ibus.base);
 }
 
+/// **DD37 acceptance.** SRAM0 takes aligned 32-bit data access and nothing
+/// else, and the refusal is the `MemoryError` a hart maps to `LoadStoreError`
+/// (EXCCAUSE 3) — the fault `fw-esp32v3`'s `test_sram0_exec` rig measured on
+/// the desk board (`lp-xt-emu/src/board.rs:158-172`).
+///
+/// Instruction fetch is untouched, because that is what the memory is for.
+#[test]
+fn a_byte_store_into_sram0_faults_and_a_word_store_does_not() {
+    use lp_emu_core::Bus;
+    use lp_emu_core::memory::{MemoryAccessKind, MemoryError};
+
+    let at = 0x4008_8000u32; // the address the rig faulted at.
+    assert!(
+        memmap::RAM_SPANS
+            .iter()
+            .any(|s| s.name == "sram0" && s.contains(at))
+    );
+
+    let mut bus = lp_emu_esp32v3::bus_setup::build();
+    bus.write_word(at, 0x1234_5678u32 as i32)
+        .expect("an aligned word store into SRAM0 is what the rig measured 16,384 of");
+    assert_eq!(bus.read_word(at).unwrap(), 0x1234_5678u32 as i32);
+
+    let e = bus.write_byte(at, 0x5a).unwrap_err();
+    assert!(
+        matches!(
+            e,
+            MemoryError::InvalidAccess {
+                address,
+                kind: MemoryAccessKind::Write,
+                ..
+            } if address == at
+        ),
+        "a byte store into SRAM0 must be the load/store *error*, not the alignment cause: {e:?}"
+    );
+    // It faulted, so it wrote nothing.
+    assert_eq!(bus.read_word(at).unwrap(), 0x1234_5678u32 as i32);
+
+    assert!(bus.write_halfword(at, 0x5a5a).is_err());
+    assert!(bus.read_byte(at).is_err());
+    assert!(bus.write_word(at + 2, 0).is_err());
+
+    // Fetch is unaffected.
+    assert_eq!(bus.fetch_instruction(at).unwrap(), 0x1234_5678);
+
+    // SRAM2 is an ordinary data RAM: the rule is SRAM0's alone.
+    let dram = 0x3FFB_0000u32;
+    bus.write_byte(dram, 0x5a).unwrap();
+    assert_eq!(bus.read_byte(dram).unwrap(), 0x5a);
+}
+
 #[test]
 fn one_emulated_microsecond_is_240_cycles() {
     // `CpuClock::max()` is 240 MHz on this chip, and `init_board` sets it:

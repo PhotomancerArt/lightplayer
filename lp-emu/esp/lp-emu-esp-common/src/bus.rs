@@ -61,6 +61,35 @@ const UNMAPPED_SITES_CAP: usize = 4096;
 /// forever. One `run_due_events` call will not dispatch more than this.
 const MAX_EVENTS_PER_TICK: u32 = 100_000;
 
+/// Which **data** accesses a [`RamRegion`] accepts.
+///
+/// Some SoC memories hang off the instruction bus only: aligned 32-bit loads
+/// and stores work and anything narrower or misaligned raises the ISA's
+/// load/store error. The rule is a property of the *bus the memory hangs
+/// off*, not of the ISA, so it lives on the region rather than in the hart —
+/// and the hart is what turns the refusal into an architectural cause.
+///
+/// [`Any`](AccessRule::Any) is the default and is what every region on this
+/// bus had before the rule existed, so adding one to a region is the only
+/// thing that can change a run.
+///
+/// Instruction **fetch** is deliberately unaffected: a memory that takes
+/// word-only data access is usually an instruction RAM, and refusing to fetch
+/// from it would be the opposite of the truth. The same split is drawn in
+/// `lp-xt-emu/src/memory.rs`'s `AccessRule`, whose doc carries the silicon
+/// measurement behind the rule (`lp-xt-emu/src/board.rs:158-172`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AccessRule {
+    /// Any width at any alignment.
+    #[default]
+    Any,
+    /// Aligned 32-bit loads and stores only. A narrower or misaligned data
+    /// access is refused with [`MemoryError::InvalidAccess`] — the variant a
+    /// hart maps to its load/store *error*, not to its alignment cause,
+    /// because that is what the silicon this models raises.
+    WordOnly,
+}
+
 /// A span of guest RAM at a chip-specific base.
 ///
 /// A region **describes** a span; it does not own its bytes. Those live in
@@ -82,6 +111,10 @@ pub struct RamRegion {
     /// Guest stores are allowed. `false` models ROM and a read-only flash
     /// cache window.
     pub writable: bool,
+    /// Which **data** widths and alignments this region's bus accepts. See
+    /// [`AccessRule`]; the default is [`AccessRule::Any`], which is what
+    /// every region did before the rule existed.
+    pub access: AccessRule,
     len: u32,
     /// Initial contents, moved into the bus's arena by
     /// [`SocBus::add_region`]. Empty for every region that is on a bus — it
@@ -98,6 +131,7 @@ impl RamRegion {
             base,
             exec: false,
             writable: true,
+            access: AccessRule::Any,
             len,
             init: Vec::new(),
         }
@@ -110,6 +144,7 @@ impl RamRegion {
             base,
             exec: false,
             writable: true,
+            access: AccessRule::Any,
             len: data.len() as u32,
             init: data,
         }
@@ -123,6 +158,22 @@ impl RamRegion {
     pub fn read_only(mut self) -> Self {
         self.writable = false;
         self
+    }
+
+    /// Aligned 32-bit data access only. See [`AccessRule::WordOnly`].
+    pub fn word_only(mut self) -> Self {
+        self.access = AccessRule::WordOnly;
+        self
+    }
+
+    /// Does this region's [`AccessRule`] accept an `len`-byte **data** access
+    /// at `address`? Fetch never asks.
+    #[inline(always)]
+    fn accepts_data(&self, address: u32, len: u32) -> bool {
+        match self.access {
+            AccessRule::Any => true,
+            AccessRule::WordOnly => len == 4 && address % 4 == 0,
+        }
     }
 
     /// May the guest fetch instructions from here? A translated core asks,
@@ -210,6 +261,19 @@ struct MmioRange {
     periph: BoxedPeripheral,
 }
 
+/// A second address a peripheral answers at (DD38).
+///
+/// A *decode* entry, not a registration: it names the peripheral index whose
+/// state answers, and nothing else. See
+/// [`SocBus::add_peripheral_alias`](SocBus::add_peripheral_alias).
+#[derive(Clone, Copy, Debug)]
+struct MmioAlias {
+    base: u32,
+    len: u32,
+    /// The index [`SocBus::add_peripheral`] returned for the real block.
+    target: usize,
+}
+
 /// The SoC bus.
 /// Granularity of the `--strict-bus` code-page checker: the chip's own MMU
 /// page, and the granularity P1 measured the executed-page set at (428 pages
@@ -280,12 +344,16 @@ pub struct SocBus {
     mmio: Vec<MmioRange>,
     /// Indices into `mmio`, sorted by base. The decode's binary search.
     mmio_by_base: Vec<usize>,
+    /// Second addresses peripherals answer at, sorted by base and checked
+    /// only after `mmio_by_base` misses. See
+    /// [`SocBus::add_peripheral_alias`].
+    mmio_aliases: Vec<MmioAlias>,
     /// "Last hit" cache for the MMIO decode: the peripheral index plus its
     /// `(base, len)`, checked with one subtract-compare before
     /// `mmio_by_base`'s binary search. 86% of a boot's MMIO traffic is
     /// UART0's TX-FIFO status register polled at baud, so the same
     /// peripheral answers back-to-back almost always.
-    last_mmio: Option<(usize, u32, u32)>,
+    last_mmio: Option<(usize, u32, u32, bool)>,
     /// Address ranges that belong to MMIO even where no peripheral claims
     /// them. The chip crate registers these; the common crate has no
     /// addresses of its own.
@@ -471,6 +539,7 @@ impl SocBus {
             last_fetch_region: 0,
             mmio: Vec::new(),
             mmio_by_base: Vec::new(),
+            mmio_aliases: Vec::new(),
             last_mmio: None,
             mmio_windows: Vec::new(),
             strict: false,
@@ -610,11 +679,108 @@ impl SocBus {
                 r.base + r.len
             );
         }
+        for a in &self.mmio_aliases {
+            let overlaps = base < a.base + a.len && a.base < base + len;
+            assert!(
+                !overlaps,
+                "SocBus: peripheral `{}` at 0x{:08x}..0x{:08x} overlaps the alias of `{}` at \
+                 0x{:08x}..0x{:08x}",
+                periph.name(),
+                base,
+                base + len,
+                self.mmio[a.target].periph.name(),
+                a.base,
+                a.base + a.len
+            );
+        }
         self.mmio.push(MmioRange { base, len, periph });
         let index = self.mmio.len() - 1;
         self.mmio_by_base.push(index);
         self.mmio_by_base.sort_by_key(|&i| self.mmio[i].base);
         index
+    }
+
+    /// Make the peripheral at `index` answer at a **second** base as well
+    /// (DD38): one state, two decodes.
+    ///
+    /// The case is a chip whose peripherals hang off two buses — the classic
+    /// ESP32 reaches the same blocks from the DPORT bus and from an AHB
+    /// window, and the mask ROM uses the AHB addresses of blocks the PAC only
+    /// names on the DPORT side. Registering the block twice would be two
+    /// `Peripheral`s with two states, which is the aliasing mistake this bus
+    /// refuses to make for RAM regions and must not make for MMIO either: a
+    /// write through one address would be invisible through the other, and
+    /// *silently* so.
+    ///
+    /// An alias is a decode entry, not a registration. `index` keeps its
+    /// meaning everywhere it is used — the scheduler's event tags
+    /// ([`event_id`]), [`peripheral`](Self::peripheral),
+    /// [`save_peripherals`](Self::save_peripherals) — and
+    /// [`Peripheral::attached`] is **not** called again, because nothing new
+    /// was attached. The offset the peripheral sees is measured from the base
+    /// the access came through, so an alias must have the same register
+    /// layout at the same offsets, which is what makes it a mirror rather
+    /// than a second block.
+    ///
+    /// The trace says which door an access came through: an access through an
+    /// alias carries the `alias` flag, so `DPORT+0x40` reached from the AHB
+    /// window does not read as if the guest had used the DPORT address.
+    ///
+    /// Panics on an unknown index or an overlap with any peripheral or alias
+    /// already registered — a decode table that contradicts itself is a
+    /// build-time bug, exactly as it is in [`add_peripheral`](Self::add_peripheral).
+    pub fn add_peripheral_alias(&mut self, base: u32, len: u32, index: usize) {
+        assert!(
+            index < self.mmio.len(),
+            "SocBus: peripheral alias at 0x{base:08x} names index {index}, and only {} \
+             peripherals are registered",
+            self.mmio.len()
+        );
+        for r in &self.mmio {
+            let overlaps = base < r.base + r.len && r.base < base + len;
+            assert!(
+                !overlaps,
+                "SocBus: alias of `{}` at 0x{:08x}..0x{:08x} overlaps `{}` at 0x{:08x}..0x{:08x}",
+                self.mmio[index].periph.name(),
+                base,
+                base + len,
+                r.periph.name(),
+                r.base,
+                r.base + r.len
+            );
+        }
+        for a in &self.mmio_aliases {
+            let overlaps = base < a.base + a.len && a.base < base + len;
+            assert!(
+                !overlaps,
+                "SocBus: alias of `{}` at 0x{:08x}..0x{:08x} overlaps the alias of `{}` at \
+                 0x{:08x}..0x{:08x}",
+                self.mmio[index].periph.name(),
+                base,
+                base + len,
+                self.mmio[a.target].periph.name(),
+                a.base,
+                a.base + a.len
+            );
+        }
+        self.mmio_aliases.push(MmioAlias {
+            base,
+            len,
+            target: index,
+        });
+        self.mmio_aliases.sort_by_key(|a| a.base);
+        // The last-hit cache holds a base and a length that may no longer be
+        // the nearest match.
+        self.last_mmio = None;
+    }
+
+    /// Every alias registered, as `(base, len, peripheral index)`, in address
+    /// order. What a `--map` report prints and what a test asserts on.
+    pub fn peripheral_aliases(&self) -> Vec<(u32, u32, usize)> {
+        self.mmio_aliases
+            .iter()
+            .map(|a| (a.base, a.len, a.target))
+            .collect()
     }
 
     /// Declare an address range as MMIO. Accesses inside a window that no
@@ -1524,28 +1690,49 @@ impl SocBus {
         self.regions[i].contains(address).then_some(i)
     }
 
+    /// Decode an MMIO address to `(peripheral index, register offset,
+    /// through an alias)`.
+    ///
+    /// The offset is measured from the base the access actually came through,
+    /// which for an alias is the alias's base — one peripheral, one state, two
+    /// decodes ([`add_peripheral_alias`](Self::add_peripheral_alias)).
     #[inline(always)]
-    fn mmio_index(&mut self, address: u32) -> Option<usize> {
+    fn mmio_index(&mut self, address: u32) -> Option<(usize, u32, bool)> {
         // The last-hit cache: one subtract-compare, checked before the
         // sorted-by-base binary search.
-        if let Some((i, base, len)) = self.last_mmio
+        if let Some((i, base, len, alias)) = self.last_mmio
             && address.wrapping_sub(base) < len
         {
-            return Some(i);
+            return Some((i, address - base, alias));
         }
         self.mmio_index_slow(address)
     }
 
     #[inline(never)]
-    fn mmio_index_slow(&mut self, address: u32) -> Option<usize> {
+    fn mmio_index_slow(&mut self, address: u32) -> Option<(usize, u32, bool)> {
         let k = self
             .mmio_by_base
             .partition_point(|&i| self.mmio[i].base <= address);
-        let i = self.mmio_by_base[k.checked_sub(1)?];
-        let r = &self.mmio[i];
-        if address.wrapping_sub(r.base) < r.len {
-            self.last_mmio = Some((i, r.base, r.len));
-            Some(i)
+        if let Some(k) = k.checked_sub(1) {
+            let i = self.mmio_by_base[k];
+            let r = &self.mmio[i];
+            if address.wrapping_sub(r.base) < r.len {
+                self.last_mmio = Some((i, r.base, r.len, false));
+                return Some((i, address - r.base, false));
+            }
+        }
+        // Aliases are a second, much shorter table: a chip declares a handful
+        // (the classic's AHB mirror), and keeping them out of `mmio` is what
+        // makes every index-keyed thing on this bus — the scheduler's event
+        // tags, the peripheral map, the snapshot — mean the same as before.
+        let k = self
+            .mmio_aliases
+            .partition_point(|a| a.base <= address)
+            .checked_sub(1)?;
+        let a = self.mmio_aliases[k];
+        if address.wrapping_sub(a.base) < a.len {
+            self.last_mmio = Some((a.target, a.base, a.len, true));
+            Some((a.target, address - a.base, true))
         } else {
             None
         }
@@ -1684,7 +1871,7 @@ impl SocBus {
             let room = self.regions[i].end().wrapping_sub(address);
             let off = (address - self.arena_base) as usize;
             let data = &self.arena;
-            let v = if room < len {
+            let v = if room < len || !self.regions[i].accepts_data(address, len) {
                 None
             } else {
                 match width {
@@ -1711,10 +1898,8 @@ impl SocBus {
     /// the RAM path stays small enough to inline into the executors.
     #[inline(never)]
     fn read_mmio(&mut self, address: u32, width: Width) -> Result<u32, MemoryError> {
-        if let Some(i) = self.mmio_index(address) {
+        if let Some((i, off, alias)) = self.mmio_index(address) {
             self.require_mmio_alignment(address, width)?;
-            let base = self.mmio[i].base;
-            let off = address - base;
             // Names are for the trace line only; `reg_name` is a table walk
             // and this runs on every MMIO access, traced or not.
             let traced = self.trace.is_enabled();
@@ -1754,7 +1939,7 @@ impl SocBus {
                         off,
                         name,
                         value,
-                        flags: "",
+                        flags: if alias { "alias" } else { "" },
                     },
                 );
             }
@@ -1787,6 +1972,9 @@ impl SocBus {
             if self.regions[i].end().wrapping_sub(address) < len {
                 return Err(fault);
             }
+            if !self.regions[i].accepts_data(address, len) {
+                return Err(fault);
+            }
             let off = (address - self.arena_base) as usize;
             if self.strict {
                 self.note_guest_code_write(off, address, len, value);
@@ -1817,10 +2005,8 @@ impl SocBus {
     /// [`read_mmio`](Self::read_mmio).
     #[inline(never)]
     fn write_mmio(&mut self, address: u32, width: Width, value: u32) -> Result<(), MemoryError> {
-        if let Some(i) = self.mmio_index(address) {
+        if let Some((i, off, alias)) = self.mmio_index(address) {
             self.require_mmio_alignment(address, width)?;
-            let base = self.mmio[i].base;
-            let off = address - base;
             let traced = self.trace.is_enabled();
             let (block, name) = if traced {
                 let p = &self.mmio[i].periph;
@@ -1861,7 +2047,7 @@ impl SocBus {
                         off,
                         name,
                         value,
-                        flags: "",
+                        flags: if alias { "alias" } else { "" },
                     },
                 );
             }
@@ -2399,6 +2585,10 @@ mod tests {
             (off == 0x1c).then_some("status")
         }
 
+        fn as_any(&self) -> Option<&dyn core::any::Any> {
+            Some(self)
+        }
+
         fn save_state(&self) -> Vec<u8> {
             alloc::vec![self.reads as u8]
         }
@@ -2463,6 +2653,110 @@ mod tests {
         assert_eq!(p.name(), "UART0");
         assert_eq!(p.save_state(), alloc::vec![0]);
         assert_eq!(bus.read_word(0x6000_001c).unwrap(), 0);
+    }
+
+    /// **DD38.** An alias is one peripheral answering at two bases: a write
+    /// through either address reaches the same state, and the offset is
+    /// measured from the base the access came through.
+    #[test]
+    fn a_peripheral_alias_is_one_state_at_two_bases() {
+        let mut bus = SocBus::new();
+        let i = bus.add_peripheral(0x3FF0_0000, 0x100, Box::new(Probe::new("DPORT")));
+        bus.add_peripheral_alias(0x6000_0000, 0x100, i);
+
+        assert_eq!(
+            bus.peripheral_aliases(),
+            alloc::vec![(0x6000_0000, 0x100, i)]
+        );
+        // No second peripheral was registered: the index space is unchanged.
+        assert_eq!(bus.peripheral_count(), 1);
+
+        // The offset is the alias's own, so the same register is reached.
+        bus.write_word(0x6000_0040, 0x5a5a_5a5a_u32 as i32).unwrap();
+        let last = bus
+            .peripheral(i)
+            .and_then(|p| p.as_any())
+            .and_then(|a| a.downcast_ref::<Probe>())
+            .map(|p| p.last);
+        assert_eq!(last, Some(Some((0x40, Width::Word, 0x5a5a_5a5a))));
+
+        // And a read through the DPORT-side base reaches the same block: the
+        // read counter it keeps is the shared state.
+        let before = bus
+            .peripheral(i)
+            .and_then(|p| p.as_any())
+            .and_then(|a| a.downcast_ref::<Probe>())
+            .map(|p| p.reads)
+            .unwrap();
+        bus.read_word(0x3FF0_0040).unwrap();
+        bus.read_word(0x6000_0040).unwrap();
+        let after = bus
+            .peripheral(i)
+            .and_then(|p| p.as_any())
+            .and_then(|a| a.downcast_ref::<Probe>())
+            .map(|p| p.reads)
+            .unwrap();
+        assert_eq!(after, before + 2);
+    }
+
+    /// The alias table is consulted only after the real one misses, and the
+    /// last-hit cache must not answer for the wrong door.
+    #[test]
+    fn the_alias_decode_agrees_with_itself_at_every_boundary() {
+        let mut bus = SocBus::new();
+        let a = bus.add_peripheral(0x3FF0_0000, 0x100, Box::new(Probe::new("A")));
+        let b = bus.add_peripheral(0x3FF0_1000, 0x100, Box::new(Probe::new("B")));
+        bus.add_peripheral_alias(0x6000_0000, 0x100, a);
+        bus.add_peripheral_alias(0x6000_1000, 0x100, b);
+
+        let probes: &[(u32, Option<(usize, u32, bool)>)] = &[
+            (0x3FF0_0000, Some((a, 0, false))),
+            (0x3FF0_00ff, Some((a, 0xff, false))),
+            (0x3FF0_0100, None),
+            (0x6000_0000, Some((a, 0, true))),
+            (0x6000_00ff, Some((a, 0xff, true))),
+            (0x6000_0100, None),
+            (0x6000_0fff, None),
+            (0x6000_1000, Some((b, 0, true))),
+            (0x6000_10ff, Some((b, 0xff, true))),
+            (0x6000_1100, None),
+            (0x5FFF_FFFF, None),
+        ];
+        for &(addr, want) in probes {
+            // Warm the cache on both aliases, so a hit here can only come
+            // from the real decode.
+            let _ = bus.mmio_index(0x6000_0000);
+            let _ = bus.mmio_index(0x6000_1000);
+            let cached = bus.mmio_index(addr);
+            bus.last_mmio = None;
+            let slow = bus.mmio_index_slow(addr);
+            assert_eq!(cached, want, "cached decode at {addr:#010x}");
+            assert_eq!(slow, want, "slow decode at {addr:#010x}");
+        }
+    }
+
+    #[test]
+    fn the_trace_says_an_access_came_through_an_alias() {
+        let sink = SharedBuffer::default();
+        let mut bus = SocBus::new();
+        bus.trace = Trace::to_sink(Box::new(sink.clone()));
+        let i = bus.add_peripheral(0x3FF0_0000, 0x100, Box::new(Probe::new("DPORT")));
+        bus.add_peripheral_alias(0x6000_0000, 0x100, i);
+
+        bus.write_word(0x3FF0_001c, 1).unwrap();
+        bus.write_word(0x6000_001c, 1).unwrap();
+        let lines = sink.lines();
+        assert!(!lines[0].contains("alias"), "{}", lines[0]);
+        assert!(lines[1].contains("alias"), "{}", lines[1]);
+    }
+
+    #[test]
+    #[should_panic(expected = "overlaps")]
+    fn an_alias_that_overlaps_a_registered_peripheral_is_a_build_time_bug() {
+        let mut bus = SocBus::new();
+        let i = bus.add_peripheral(0x3FF0_0000, 0x100, Box::new(Probe::new("A")));
+        bus.add_peripheral(0x6000_0000, 0x100, Box::new(Probe::new("B")));
+        bus.add_peripheral_alias(0x6000_0000, 0x100, i);
     }
 
     /// `mmio_index`'s last-hit cache must never disagree with the sorted
@@ -3071,6 +3365,73 @@ mod tests {
         bus.load_image(0x4000_0000, &[0x13, 0x00, 0x00, 0x00])
             .unwrap();
         assert_eq!(bus.fetch_instruction(0x4000_0000).unwrap(), 0x13);
+    }
+
+    /// [`AccessRule::WordOnly`] (DD37): aligned words pass, everything
+    /// narrower or misaligned is refused, and **fetch is untouched** —
+    /// a word-only region is an instruction RAM.
+    #[test]
+    fn a_word_only_region_takes_aligned_words_and_nothing_else() {
+        let mut bus = SocBus::new();
+        bus.add_region(
+            RamRegion::new("iram", 0x4008_0000, 0x100)
+                .executable()
+                .word_only(),
+        );
+
+        // Aligned words: both directions.
+        bus.write_word(0x4008_0000, 0x1234_5678u32 as i32).unwrap();
+        assert_eq!(bus.read_word(0x4008_0000).unwrap(), 0x1234_5678u32 as i32);
+
+        // A byte store is the measured fault (`lp-xt-emu/src/board.rs:160`),
+        // and it must be `InvalidAccess`, not `Unaligned`: the hart maps the
+        // first to LoadStoreError (EXCCAUSE 3) and the second to the
+        // alignment cause (9).
+        let e = bus.write_byte(0x4008_0000, 1).unwrap_err();
+        assert!(
+            matches!(
+                e,
+                MemoryError::InvalidAccess {
+                    address: 0x4008_0000,
+                    kind: MemoryAccessKind::Write,
+                    ..
+                }
+            ),
+            "byte store into a word-only region: {e:?}"
+        );
+        assert!(bus.read_byte(0x4008_0004).is_err());
+        assert!(bus.write_halfword(0x4008_0008, 1).is_err());
+        assert!(bus.read_halfword(0x4008_0008).is_err());
+        // A misaligned word is refused too.
+        assert!(bus.write_word(0x4008_0002, 1).is_err());
+        assert!(bus.read_word(0x4008_0002).is_err());
+
+        // The byte store faulted, so it wrote nothing.
+        assert_eq!(bus.read_word(0x4008_0000).unwrap(), 0x1234_5678u32 as i32);
+
+        // Fetch is unaffected, at any alignment the fetch path allows.
+        assert_eq!(bus.fetch_instruction(0x4008_0000).unwrap(), 0x1234_5678);
+        let mut out = [0u8; 3];
+        assert_eq!(bus.fetch_bytes(0x4008_0001, &mut out).unwrap(), 3);
+        assert_eq!(out, [0x56, 0x34, 0x12]);
+
+        // The host side places bytes regardless: a loader, a ROM seed and a
+        // cache fill are not the guest.
+        bus.load_image(0x4008_0010, &[1, 2, 3]).unwrap();
+    }
+
+    /// The default is today's behaviour, so a region that does not ask for
+    /// the rule cannot have changed.
+    #[test]
+    fn the_default_access_rule_is_any_width() {
+        let r = RamRegion::new("ram", 0, 4);
+        assert_eq!(r.access, AccessRule::Any);
+        let mut bus = SocBus::new();
+        bus.add_region(RamRegion::new("ram", 0x4080_0000, 0x100));
+        bus.write_byte(0x4080_0001, 0x5a).unwrap();
+        assert_eq!(bus.read_byte(0x4080_0001).unwrap(), 0x5a);
+        bus.write_halfword(0x4080_0002, 0x1234).unwrap();
+        assert_eq!(bus.read_halfword(0x4080_0002).unwrap(), 0x1234);
     }
 
     #[test]

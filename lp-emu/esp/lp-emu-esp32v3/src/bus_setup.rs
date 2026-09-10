@@ -32,7 +32,7 @@
 //! shared bus (M2's, read-only to this milestone) is where an alias would
 //! have to be built.
 //!
-//! ## 2. SRAM0's word-only rule is **not enforced** by this bus
+//! ## 2. SRAM0's word-only rule **is** enforced by this bus (DD37)
 //!
 //! [`memmap::SRAM0_WORD_ONLY`] records a measurement: on the desk board a
 //! byte store at `0x4008_8000` faulted with `LoadStoreError` / EXCCAUSE 3,
@@ -40,14 +40,16 @@
 //! (`lp-xt-emu/src/board.rs:156-172`). `lp-xt-emu`'s own flat `Memory` has an
 //! `AccessRule::WordOnly` for it.
 //!
-//! [`SocBus`] has no such rule — a [`RamRegion`] carries `exec` and
-//! `writable` and nothing else — and adding one would be an edit to
-//! `lp-emu-esp-common`, which M2 owns and M3 may only read. So on this
-//! machine a guest byte store into SRAM0 **succeeds** where silicon faults.
-//! Named here so it is a known gap rather than a surprise, and reported to
-//! the director as a P2 finding: it wants either an `AccessRule` on
-//! `RamRegion` (an M2 phase) or a chip-side check, and it is not P2's to
-//! decide.
+//! P2 recorded the gap: `SocBus` had no such rule, so a guest byte store into
+//! SRAM0 *succeeded* here where silicon faults. The director ruled **DD37**
+//! and P4 landed [`lp_emu_esp_common::AccessRule`] on [`RamRegion`] — an
+//! additive field whose default is the old behaviour — so `sram0` is now
+//! registered with [`RamRegion::word_only`] and the measurement is enforced:
+//! a byte or half-word or misaligned data access into `0x4008_0000..` is
+//! `MemoryError::InvalidAccess`, which `lp-xt-emu`'s `trap_from_bus`
+//! (`lp-xt-emu/src/error.rs:63-98`) turns into EXCCAUSE 3 with `EXCVADDR` set
+//! — the fault the rig measured. Instruction fetch is untouched, which is
+//! what the memory is for.
 
 use lp_emu_esp_common::SocBus;
 use lp_emu_esp_common::bus::RamRegion;
@@ -82,6 +84,11 @@ const EXECUTABLE: &[&str] = &["rom-mask", "sram0", "irom-window"];
 /// windows (P7 fills those through the cache MMU, not through a guest store).
 const READ_ONLY: &[&str] = &["rom-mask", "rom-data", "drom-window", "irom-window"];
 
+/// Regions whose bus takes **aligned 32-bit data access only**
+/// ([`memmap::SRAM0_WORD_ONLY`], DD37). One entry, and it is a measurement —
+/// see the module docs.
+const WORD_ONLY: &[&str] = &["sram0"];
+
 /// Build the classic's bus: every region of [`memmap::RAM_SPANS`] this
 /// machine maps, the MMIO windows declared and **unmodelled**, and two
 /// watchpoint slots.
@@ -106,6 +113,9 @@ pub fn build() -> SocBus {
         }
         if READ_ONLY.contains(&span.name) {
             region = region.read_only();
+        }
+        if memmap::SRAM0_WORD_ONLY && WORD_ONLY.contains(&span.name) {
+            region = region.word_only();
         }
         bus.add_region(region);
     }

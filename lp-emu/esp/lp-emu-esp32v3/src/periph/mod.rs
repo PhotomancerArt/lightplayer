@@ -26,15 +26,19 @@
 //! for convenience.
 
 pub mod accept;
+pub mod dport;
 pub mod efuse;
+pub mod flash_mmu;
 pub mod i2c_ana_mst;
 pub mod rtc_cntl;
 pub mod timg;
 
 use lp_emu_esp_common::periph::BoxedPeripheral;
 
+use crate::cache::CacheHandle;
 use crate::loader::{EfuseIdentity, ResetCause};
 use crate::memmap::periph as base;
+use crate::memmap::{self};
 
 /// The desk board's crystal: **40 MHz** (`../bench.md`, "40 MHz crystal").
 ///
@@ -79,18 +83,21 @@ pub const WDT_WKEY: u32 = 0x50D8_3AA1;
 /// is the part this run claims to be (MAC and chip revision), which reaches
 /// two blocks — the eFuse view and, for the revision's top bit, `APB_CTRL`;
 /// `stall` is the handle RTC_CNTL publishes its half of the CPU stall key
-/// through, which the machine reads and P4's DPORT view adds its third
-/// input to.
+/// through, which the machine reads and to which P4's DPORT view adds its
+/// third input; `cache` and `appcpu` are the two states the machine shares
+/// with DPORT's view and with the flash MMU tables (P4).
 pub fn boot_set(
     reset_cause: ResetCause,
     identity: EfuseIdentity,
     stall: rtc_cntl::StallKey,
+    cache: CacheHandle,
+    appcpu: dport::AppCoreHandle,
 ) -> Vec<(u32, u32, BoxedPeripheral)> {
     vec![
         (
             base::DPORT,
             accept::DPORT_LEN,
-            Box::new(accept::dport()) as BoxedPeripheral,
+            Box::new(dport::DportView::new(cache.clone(), appcpu)) as BoxedPeripheral,
         ),
         (
             base::RTC_CNTL,
@@ -118,6 +125,15 @@ pub fn boot_set(
             base::EFUSE,
             efuse::EFUSE_LEN,
             Box::new(efuse::Efuse::new(identity)),
+        ),
+        // ROM-up, after the eFuse gate: `mmu_init` (`0x4000_95A4`) clears
+        // both flash MMU tables, and `cache_flash_mmu_set` fills them. The
+        // direct load never reaches them — P3's ledger has no entry — so
+        // they go last, which is where the boot meets them.
+        (
+            memmap::FLASH_MMU_PRO,
+            flash_mmu::LEN,
+            Box::new(flash_mmu::FlashMmuView::new(cache)),
         ),
     ]
 }

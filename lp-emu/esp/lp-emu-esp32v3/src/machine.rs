@@ -134,6 +134,10 @@ pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     // ROM-up, stop 1: `_ResetHandler_efuse_check_patch` reads its own
     // fuses seven instructions after the reset vector.
     "EFUSE",
+    // ROM-up, after the eFuse gate: `mmu_init` clears both flash MMU tables
+    // and `cache_flash_mmu_set` fills them (P4). The direct load never
+    // reaches them, so this is where the boot meets them — last.
+    "FLASH_MMU",
 ];
 
 /// How far back [`Machine::symbolize`] will look for a name when no symbol's
@@ -377,6 +381,16 @@ pub enum Outcome {
     /// A `--break-at` symbol was reached; the guest is stopped at its first
     /// instruction with every register as the caller left it.
     Breakpoint { cycle: Cycles, pc: u32 },
+    /// **D4.** A core reached through a flash window with its own read cache
+    /// disabled. See [`crate::cache`] for the design and
+    /// [`Machine::cache_off_message`] for what the message claims and what it
+    /// does not.
+    CacheOffFetch {
+        cycle: Cycles,
+        pc: u32,
+        symbol: Option<String>,
+        access: crate::cache::CacheOffAccess,
+    },
 }
 
 impl Outcome {
@@ -389,6 +403,11 @@ impl Outcome {
             Outcome::StrictBus { .. } => 3,
             Outcome::WallTimeout { .. } => 4,
             Outcome::Breakpoint { .. } => 5,
+            // Six is new with P4 and extends the C6's table rather than
+            // reusing one of its codes: a script that drives both machines
+            // reads 0/2/3/4/5 the same way on either, and 6 is a stop only
+            // this chip can produce.
+            Outcome::CacheOffFetch { .. } => 6,
         }
     }
 
@@ -397,7 +416,8 @@ impl Outcome {
             Outcome::Deadline { cycle }
             | Outcome::Fault { cycle, .. }
             | Outcome::WallTimeout { cycle }
-            | Outcome::Breakpoint { cycle, .. } => *cycle,
+            | Outcome::Breakpoint { cycle, .. }
+            | Outcome::CacheOffFetch { cycle, .. } => *cycle,
             Outcome::StrictBus { violation } => violation.cycle,
         }
     }
@@ -525,6 +545,7 @@ pub struct Esp32V3Builder {
     flash_size: u32,
     reset_cause: loader::ResetCause,
     efuse: loader::EfuseIdentity,
+    cache_off: crate::cache::CacheOffPolicy,
     boot_set: bool,
     trace: Option<Box<dyn std::io::Write + Send>>,
     trace_blocks: Vec<String>,
@@ -544,6 +565,7 @@ impl Default for Esp32V3Builder {
             flash_size: loader::DEFAULT_FLASH_SIZE,
             reset_cause: loader::ResetCause::default(),
             efuse: loader::EfuseIdentity::default(),
+            cache_off: crate::cache::CacheOffPolicy::default(),
             boot_set: true,
             trace: None,
             trace_blocks: Vec::new(),
@@ -569,6 +591,7 @@ impl fmt::Debug for Esp32V3Builder {
             .field("flash_size", &self.flash_size)
             .field("reset_cause", &self.reset_cause)
             .field("efuse", &self.efuse)
+            .field("cache_off", &self.cache_off)
             .field("boot_set", &self.boot_set)
             .field("trace", &self.trace.is_some())
             .field("trace_blocks", &self.trace_blocks)
@@ -647,6 +670,14 @@ impl Esp32V3Builder {
         self
     }
 
+    /// `--cache-off-fetch` (D4). The default is
+    /// [`crate::cache::CacheOffPolicy::Stop`], and that is what every gate
+    /// run uses.
+    pub fn cache_off_fetch(mut self, policy: crate::cache::CacheOffPolicy) -> Self {
+        self.cache_off = policy;
+        self
+    }
+
     /// A machine with **no** peripherals — the memory map, the ROM and the
     /// harts alone. What P2 built; kept so a test can still read the first
     /// strict stop of each boot path against an empty MMIO window.
@@ -684,18 +715,48 @@ impl Esp32V3Builder {
         // is empty until `start_peripherals`.
         // RTC_CNTL publishes its half of the CPU stall key through this
         // handle and the machine reads it; P5 owns the two RTC_CNTL halves
-        // and P4 adds DPORT's `appcpu_runstall` alongside. A machine built
+        // and P4 adds DPORT's `appcpu_ctrl_*` alongside. A machine built
         // with `bare()` has no RTC_CNTL and therefore an all-zero key,
         // which reads as "not stalled" — the right answer for a block that
         // is not there.
         let stall_key = crate::periph::rtc_cntl::StallKey::new();
+
+        // The chip's interrupt matrix, before any peripheral: the DPORT view
+        // downcasts to it on its first store, and `esp32_init` performs that
+        // store twenty-nine instructions in.
+        bus.set_matrix(Box::new(crate::intmatrix::Esp32V3IntMatrix::new()));
+
+        let cache = crate::cache::ClassicCache::handle();
+        cache
+            .lock()
+            .expect("cache poisoned")
+            .set_policy(self.cache_off);
+        let appcpu = crate::periph::dport::AppCoreControl::handle();
+
         let mut peripheral_map = Vec::new();
+        let mut alias_map = Vec::new();
         if self.boot_set {
-            let set = crate::periph::boot_set(self.reset_cause, self.efuse, stall_key.clone());
+            let set = crate::periph::boot_set(
+                self.reset_cause,
+                self.efuse,
+                stall_key.clone(),
+                cache.clone(),
+                appcpu.clone(),
+            );
             check_registration_order(&set)?;
             for (base, len, periph) in set {
-                peripheral_map.push((periph.name(), base, len));
-                bus.add_peripheral(base, len, periph);
+                let name = periph.name();
+                peripheral_map.push((name, base, len));
+                let index = bus.add_peripheral(base, len, periph);
+                // The classic's second peripheral window (P3 §3.2): every
+                // block from `0x3FF4_0000` up answers at its AHB address too,
+                // and it is the **same state** — one registration, a second
+                // decode (DD38). Registered here rather than in `boot_set`
+                // because an alias needs the index the bus just handed back.
+                if let Some(ahb) = memmap::dport_to_ahb(base) {
+                    bus.add_peripheral_alias(ahb, len, index);
+                    alias_map.push((name, ahb, len));
+                }
             }
         }
 
@@ -734,9 +795,12 @@ impl Esp32V3Builder {
         let mut machine = Machine {
             bus,
             harts,
-            // M3 never runs core 1 (Q5). `core_stalled` ORs this field
-            // with `stall_key` (RTC_CNTL's two halves, P5); P4 adds
-            // DPORT's `appcpu_runstall` as the third input.
+            cache,
+            appcpu,
+            cache_watch_armed: false,
+            // M3 never runs core 1 (Q5). `core_stalled` ORs this field with
+            // `stall_key` (RTC_CNTL's two halves, P5) and with DPORT's
+            // `appcpu_ctrl_*` (P4).
             stalled: [false, true],
             stall_key,
             rom: rom_image,
@@ -747,6 +811,7 @@ impl Esp32V3Builder {
             app_segments: Vec::new(),
             flash_seed: None,
             peripheral_map,
+            alias_map,
             hooks: HookTable::new(),
             boot_mode: self.boot_mode,
             time_grade: self.time_grade,
@@ -790,6 +855,13 @@ pub struct Machine {
     /// whole of M3 — see the module docs.
     pub harts: Vec<XtHart<SocBus>>,
     stalled: [bool; CORES],
+    /// The flash MMU tables and the cache-enable state, shared with the
+    /// DPORT and FLASH_MMU views.
+    cache: crate::cache::CacheHandle,
+    /// `appcpu_ctrl_*`, shared with the DPORT view.
+    appcpu: crate::periph::dport::AppCoreHandle,
+    /// Whether D4's watch is installed on the bus right now.
+    cache_watch_armed: bool,
     rom: ElfImage,
     app: Option<ElfImage>,
     rom_segments: Vec<PlacedSegment>,
@@ -798,6 +870,7 @@ pub struct Machine {
     app_segments: Vec<PlacedAppSegment>,
     flash_seed: Option<FlashChipSeed>,
     peripheral_map: Vec<(&'static str, u32, u32)>,
+    alias_map: Vec<(&'static str, u32, u32)>,
     hooks: HookTable,
     boot_mode: BootMode,
     time_grade: TimeGrade,
@@ -834,6 +907,9 @@ impl Machine {
             &self.rom,
             flash_size,
         )?);
+        // Item 11: the bootloader hands the app a core whose read cache is
+        // on, and a direct load runs no bootloader.
+        loader::seed_cache_enabled(&self.cache);
         self.seed_boot_state(app.entry, frame)?;
         Ok(())
     }
@@ -914,22 +990,48 @@ impl Machine {
         &mut self.bus
     }
 
-    /// Is core `n` stalled?
+    /// Is core `n` held?
     ///
-    /// Two inputs today and three from P4: the machine's own field (slot 1
-    /// is held for the whole of M3, Q5) and **RTC_CNTL's two-register stall
-    /// key** — `options0.sw_stall_*_c0` and `sw_cpu_stall.sw_stall_*_c1`,
-    /// which stall a core only when the pair reads `0x86`
-    /// (`esp-hal-1.1.1/src/soc/esp32/cpu_control.rs:57-81`). P4 adds
-    /// `DPORT.appcpu_ctrl_c.appcpu_runstall`, and the OR is where it goes.
+    /// **Three inputs, three owners, one OR.** Composed here rather than in
+    /// any one block, which is the seam P4 and P5 were dispatched against —
+    /// neither phase reads the other's file.
+    ///
+    /// - The machine's own `stalled`: slot 1 is held for the whole of M3
+    ///   (Q5), whatever the guest writes.
+    /// - **RTC_CNTL's two-register stall key** — `options0.sw_stall_*_c0`
+    ///   and `sw_cpu_stall.sw_stall_*_c1`, which stall a core only when the
+    ///   pair reads `0x86` (`esp-hal-1.1.1/src/soc/esp32/cpu_control.rs:57-81`).
+    ///   P5's registers, published through
+    ///   [`crate::periph::rtc_cntl::StallKey`].
+    /// - **DPORT's `appcpu_ctrl_*`** — `appcpu_ctrl_c.appcpu_runstall` and
+    ///   `appcpu_ctrl_a.appcpu_resetting`, P4's, through
+    ///   [`crate::periph::dport::AppCoreControl`]. They name the APP core and
+    ///   have no PRO twin, so they answer for core 1 only.
     pub fn core_stalled(&self, core: usize) -> bool {
-        self.stalled.get(core).copied().unwrap_or(true) || self.stall_key.stalled(core)
+        if self.stalled.get(core).copied().unwrap_or(true) {
+            return true;
+        }
+        if self.stall_key.stalled(core) {
+            return true;
+        }
+        core == 1 && self.appcpu.lock().expect("appcpu poisoned").holds_core1()
     }
 
     /// RTC_CNTL's half of the stall key, for a test or a report that wants
     /// to see which input is holding a core.
     pub fn stall_key(&self) -> &crate::periph::rtc_cntl::StallKey {
         &self.stall_key
+    }
+
+    /// DPORT's `appcpu_ctrl_*` as the guest left them, for a test and for the
+    /// run report.
+    pub fn app_core_control(&self) -> crate::periph::dport::AppCoreControl {
+        *self.appcpu.lock().expect("appcpu poisoned")
+    }
+
+    /// The cache state and the flash MMU tables, for a test and for P7.
+    pub fn cache(&self) -> &crate::cache::CacheHandle {
+        &self.cache
     }
 
     /// One line per core, for `--probe` and the run report. Slot 1 is never
@@ -957,6 +1059,13 @@ impl Machine {
     /// The registered blocks, in registration order: `(name, base, len)`.
     pub fn peripheral_map(&self) -> &[(&'static str, u32, u32)] {
         &self.peripheral_map
+    }
+
+    /// The **second** address each block answers at, in the same order:
+    /// `(name, ahb base, len)`. The classic's AHB mirror (DD38); empty on a
+    /// machine built with [`Esp32V3Builder::bare`].
+    pub fn peripheral_alias_map(&self) -> &[(&'static str, u32, u32)] {
+        &self.alias_map
     }
 
     pub fn hook_calls(&self) -> u64 {
@@ -1096,9 +1205,20 @@ impl Machine {
     pub fn peek_word(&mut self, address: u32) -> Option<u32> {
         let saved = self.bus.pc();
         self.bus.set_pc(0);
+        self.set_host_access(true);
         let value = self.bus.read_word(address).ok().map(|v| v as u32);
+        self.set_host_access(false);
         self.bus.set_pc(saved);
         value
+    }
+
+    /// Tell D4's watch that the accesses that follow are the emulator's, not
+    /// the guest's. See [`crate::cache`].
+    fn set_host_access(&mut self, on: bool) {
+        self.cache
+            .lock()
+            .expect("cache poisoned")
+            .set_host_access(on);
     }
 
     /// Write a word of guest memory from the host side — the same decode
@@ -1106,7 +1226,9 @@ impl Machine {
     pub fn poke_word(&mut self, address: u32, value: u32) -> bool {
         let saved = self.bus.pc();
         self.bus.set_pc(0);
+        self.set_host_access(true);
         let ok = self.bus.write_word(address, value as i32).is_ok();
+        self.set_host_access(false);
         self.bus.set_pc(saved);
         ok
     }
@@ -1164,20 +1286,39 @@ impl Machine {
             if self.bus.strict() {
                 deadline = deadline.min(now + STRICT_SLICE_CYCLES);
             }
-            let budget = deadline.saturating_sub(now).max(1);
+            let mut budget = deadline.saturating_sub(now).max(1);
+
+            // D4. Arming and disarming happen here, between slices, and the
+            // DPORT view asks for a boundary the moment either cache-enable
+            // bit moves — so the window between "the cache went off" and
+            // "the check is on" is zero instructions.
+            self.sync_cache_watch();
+            if self.cache_watch_armed {
+                // `MemoryCost` sees the address and not the pc, so while the
+                // watch is armed the hart runs one instruction at a time and
+                // the pc below is exactly the one that made the access. The
+                // armed window is a flash write's worth of instructions.
+                budget = 1;
+            }
+            let issuing_pc = self.harts[0].pc();
 
             // M3's invariant, asserted every slice rather than assumed: core
-            // 1 is stalled and is never given time. P4 turns the field into
-            // a DPORT view; until then a slice for slot 1 would be a bug
+            // 1 is stalled and is never given time. P4 composes the three
+            // keys in `core_stalled`; a slice for slot 1 would be a bug
             // nobody wrote a test for.
             assert!(
-                self.stalled[1],
+                self.core_stalled(1),
                 "core 1 is not stalled: M3 is single-core (Q5) and has no scheduler for two"
             );
 
             self.bus.set_time(now);
             self.bus.set_hart(0);
             let end = self.harts[0].run_slice(&mut self.bus, budget);
+
+            if let Some(outcome) = self.take_cache_off_fetch(issuing_pc) {
+                return outcome;
+            }
+            self.report_app_core_start();
 
             match end {
                 SliceEnd::BudgetExhausted | SliceEnd::BusYield => {}
@@ -1244,6 +1385,117 @@ impl Machine {
         }
     }
 
+    // ---- D4, the cache-off fetch stop ------------------------------------
+
+    /// Install or remove the watch, following
+    /// [`crate::cache::ClassicCache::watch_wanted`].
+    ///
+    /// A run whose guest never disables the cache never installs it and pays
+    /// one `Option` test per access, which is what the bus already cost.
+    fn sync_cache_watch(&mut self) {
+        // Core 0 is the only core M3 gives slices to (Q5). M4 asks per core.
+        let wanted = self.cache.lock().expect("cache poisoned").watch_wanted(0);
+        if wanted == self.cache_watch_armed {
+            return;
+        }
+        if wanted {
+            self.bus
+                .set_memory_cost(Some(Box::new(crate::cache::CacheOffWatch::new(
+                    self.cache.clone(),
+                    0,
+                ))));
+        } else {
+            self.bus.set_memory_cost(None);
+        }
+        self.cache_watch_armed = wanted;
+    }
+
+    /// The offence the watch recorded during the slice just run, as an
+    /// outcome. `pc` is the instruction that made the access — the slice was
+    /// one instruction long, which is what makes that exact rather than
+    /// approximate.
+    fn take_cache_off_fetch(&mut self, pc: u32) -> Option<Outcome> {
+        let access = self.cache.lock().expect("cache poisoned").take_offence()?;
+        Some(Outcome::CacheOffFetch {
+            cycle: self.cycles(),
+            pc,
+            symbol: self.symbolize(pc),
+            access,
+        })
+    }
+
+    /// What D4's stop says, and what it does not claim. Written for a reader
+    /// who has just been stopped by it.
+    pub fn cache_off_message(
+        &self,
+        cycle: Cycles,
+        pc: u32,
+        access: &crate::cache::CacheOffAccess,
+    ) -> String {
+        let symbol = |at: u32| match self.symbolize(at) {
+            Some(name) => format!(" ({name})"),
+            None => String::new(),
+        };
+        let side = if access.core == 0 { "pro" } else { "app" };
+        let ctrl = if access.core == 0 {
+            crate::periph::dport::PRO_CACHE_CTRL
+        } else {
+            crate::periph::dport::APP_CACHE_CTRL
+        };
+        let why = match access.disabled_by {
+            Some(by) => format!(
+                "at cycle {} by a write to\n  DPORT+{ctrl:#05x} \
+                 ({side}_cache_ctrl.{side}_cache_enable <- 0) from pc={by:#010x}{}",
+                access.disabled_at,
+                symbol(by),
+            ),
+            // Nothing ever turned it on. On a direct load that would be a bug
+            // in `loader::seed_cache_enabled`; on a ROM-up boot it means the
+            // guest reached the window before `Cache_Read_Enable`.
+            None => format!(
+                "by reset and never turned on: {side}_cache_ctrl's PAC reset is\n  \
+                 {:#010x}, with {side}_cache_enable (bit 3) clear, and on silicon it is \
+                 the\n  bootloader's `Cache_Read_Enable` that sets it",
+                crate::cache::CACHE_CTRL_RESET
+            ),
+        };
+        let what = if access.fetch { "fetch" } else { "read" };
+        format!(
+            "CACHE-OFF FETCH  core={}  cycle={cycle}\n  \
+             pc={pc:#010x}{}  {what} from {} {:#010x}\n  \
+             this core's cache was disabled {why}\n\n  \
+             On silicon this core stalls until the cache returns; nothing observes it\n  \
+             except a crash or a watchdog. This emulator refuses instead.\n  \
+             `--cache-off-fetch permit` continues (and claims nothing about the stall).",
+            access.core,
+            symbol(pc),
+            access.window,
+            access.addr,
+        )
+    }
+
+    /// Report the guest's attempt to start core 1, once.
+    ///
+    /// M3 does not start it (Q5). The firmware's own timeout arm then prints
+    /// `[INIT] APP core unavailable; RMT ISR on PRO core (single-core
+    /// semantics)` (`lp-fw/fw-esp32v3/src/main.rs:838-845`), which is a
+    /// supported configuration rather than a hole. M4 is what makes the
+    /// attempt succeed.
+    fn report_app_core_start(&mut self) {
+        let mut a = self.appcpu.lock().expect("appcpu poisoned");
+        let Some((at, entry)) = a.start_attempt else {
+            return;
+        };
+        if a.reported {
+            return;
+        }
+        a.reported = true;
+        log::info!(
+            "core 1: start requested at cycle {at} (entry {entry:#010x}); M3 is \
+             single-core (Q5) — the firmware takes its documented fallback"
+        );
+    }
+
     /// Give the hook table first refusal on a `break` at `pc`. Returns
     /// `false` when nothing claims it, in which case the guest gets the
     /// architectural breakpoint.
@@ -1294,6 +1546,7 @@ impl Machine {
             regions: self.bus.save_regions(),
             periph: self.bus.save_peripherals(),
             scalars: self.bus.save_scalars(),
+            matrix: self.bus.matrix().save_state(),
             sched: self.bus.sched.save(),
             rng: self.rng,
             hook_calls: self.hook_calls,
@@ -1309,6 +1562,7 @@ impl Machine {
         self.bus.restore_regions(&snap.regions);
         self.bus.restore_peripherals(&snap.periph);
         self.bus.restore_scalars(&snap.scalars);
+        self.bus.matrix_mut().load_state(&snap.matrix);
         self.bus.sched.restore(&snap.sched);
         self.rng = snap.rng;
         self.hook_calls = snap.hook_calls;

@@ -288,28 +288,55 @@ pub const MMIO_LEN: u32 = 0x0008_0000;
 /// So: `AHB = 0x6000_0000 + (DPORT − 0x3FF4_0000)` for the blocks from
 /// `UART0` up, `0x4_0000` long, ending where the DPORT window ends.
 ///
-/// ⚠️ **What this machine does with the mirror.** `SocBus` registers a
-/// peripheral at one base; two registrations would be two blocks with two
-/// states, which is the SRAM1-alias mistake in MMIO form (DD24/DD36). So a
-/// block is registered at **one** of its two addresses — the DPORT one where
-/// the PAC names it, the AHB one where only the ROM does (the analog I2C
-/// master has no DPORT-side name in the PAC) — and an access through the
-/// *other* address is a strict stop naming this window. A guest that reaches
-/// a PAC-named block through AHB is the evidence that would justify a
-/// forwarding view (chip-side, one shared state) or a bus feature (M2's), and
-/// P3 reports the question rather than answering it.
+/// **What this machine does with the mirror, since P4 (DD38).** P3 could
+/// register a block at only *one* of its two addresses — two registrations
+/// would be two blocks with two states, which is the SRAM1-alias mistake in
+/// MMIO form (DD24/DD36) — and reported the question. The director ruled
+/// **DD38** and P4 landed `SocBus::add_peripheral_alias`: **one state, two
+/// decodes**. Every block this machine registers inside `0x3FF4_0000..` now
+/// also answers at [`dport_to_ahb`]'s address, and the trace flags an access
+/// that came through the alias so the two doors stay distinguishable.
+///
+/// ⚠️ The alias is registered **only in the direction the evidence runs**:
+/// from a PAC-named DPORT base to its AHB address. [`periph::I2C_ANA_MST`],
+/// whose only cited address is the AHB one (the PAC names no block there),
+/// gets **no** DPORT-side alias — putting one at `0x3FF4_E000` would be a
+/// claim about a base nothing in this repo names, and a guest reaching it
+/// should stop rather than silently find the analog master.
+///
+/// The blocks the ROM's `main` reaches through AHB and this machine does not
+/// map at all (`SENS`, `FE`/`FE2`, `NRX`/`BB`, `FLASH_ENCRYPTION`) stay
+/// unmapped: an alias needs a registered block to point at. They are P5's and
+/// P7's, and their AHB addresses become aliases when they are registered.
 pub const MMIO_AHB_BASE: u32 = 0x6000_0000;
 
 /// `0x4_0000`: the mirror of `0x3FF4_0000..0x3FF8_0000`. See
 /// [`MMIO_AHB_BASE`].
 pub const MMIO_AHB_LEN: u32 = 0x0004_0000;
 
+/// The low end of the DPORT window the AHB bus mirrors. Below it — `DPORT`
+/// itself at `0x3FF0_0000`, `AES`, `RSA`, `SHA` — there is no AHB address,
+/// which is why the ROM reaches those four only through the DPORT bus.
+pub const MMIO_AHB_MIRROR_FROM: u32 = 0x3FF4_0000;
+
 /// The DPORT address a mirrored AHB address corresponds to, or `None` for an
-/// address outside the AHB window. Reporting only: nothing in this machine
-/// forwards through it.
+/// address outside the AHB window. Reporting only: the forwarding itself is
+/// the bus's ([`dport_to_ahb`] is what registers it).
 pub const fn ahb_to_dport(address: u32) -> Option<u32> {
     if address >= MMIO_AHB_BASE && address < MMIO_AHB_BASE + MMIO_AHB_LEN {
-        Some(address - MMIO_AHB_BASE + 0x3FF4_0000)
+        Some(address - MMIO_AHB_BASE + MMIO_AHB_MIRROR_FROM)
+    } else {
+        None
+    }
+}
+
+/// The AHB address that mirrors a DPORT one, or `None` for a DPORT address
+/// the AHB window does not cover. [`ahb_to_dport`]'s inverse, and the
+/// function [`crate::machine::Machine`] registers a block's alias from
+/// (DD38).
+pub const fn dport_to_ahb(address: u32) -> Option<u32> {
+    if address >= MMIO_AHB_MIRROR_FROM && address < MMIO_AHB_MIRROR_FROM + MMIO_AHB_LEN {
+        Some(address - MMIO_AHB_MIRROR_FROM + MMIO_AHB_BASE)
     } else {
         None
     }

@@ -112,12 +112,27 @@ applied consistently, and `memmap.rs`'s `RAM_SPANS` comment says so since
 P3. A strict stop naming `0x400C_xxxx` is the evidence that would justify an
 alias region and a phase of its own.
 
-**SRAM0's word-only rule is named, not enforced.** `SocBus`'s `RamRegion`
-carries `exec` and `writable` and nothing else; the `AccessRule::WordOnly` the
-measurement calls for lives on `lp-xt-emu`'s own flat `Memory`, and adding one
-to the shared bus is an edit to `lp-emu-esp-common`, which M2 owns and M3 may
-only read. So on this machine a guest byte store into SRAM0 **succeeds** where
-silicon faults. A known gap, written down where the region is.
+**SRAM0 takes aligned 32-bit data access and nothing else** (ruling DD37).
+`fw-esp32v3`'s `test_sram0_exec` rig measured that on the desk board: a byte
+store at `0x4008_8000` raised `LoadStoreError` / EXCCAUSE 3 / EXCVADDR = that
+address, while 16,384 aligned word stores across the same span read back.
+P2 and P3 could only *name* the rule — `RamRegion` carried `exec` and
+`writable` and nothing else — and P4 landed `AccessRule` on the shared bus,
+so it is now enforced: a byte, half-word or misaligned **data** access into
+`0x4007_0000..0x400A_0000` is a fault with the cause the rig measured.
+Instruction fetch is untouched, which is what the memory is for, and the host
+side (a loader, a ROM seed, a cache fill) still writes bytes.
+
+**Every block from `0x3FF4_0000` up answers at its AHB address too** (ruling
+DD38). The classic has two peripheral buses, and the mask ROM reaches blocks
+through `0x6000_0000 + (base - 0x3FF4_0000)` that the PAC names only on the
+DPORT side (P3 §3.2). Registering a block twice would be two states — the
+SRAM1-alias mistake in MMIO form — so the shared bus grew
+`add_peripheral_alias`: **one state, two decodes**, with the trace flagging
+which door an access came through. `lp-emu-esp32v3 --map` prints the mirror.
+The direction is the evidence's: a PAC-named DPORT base gets an AHB alias,
+and `I2C_ANA_MST`, whose only cited address is the AHB one, gets no
+DPORT-side twin.
 
 `bus_setup::deliberately_unmapped()` is the list a strict stop consults, so a
 refusal inside one of these windows says which window it was and why it is
@@ -289,12 +304,84 @@ truth table is the board's, not the chip's.
 
 ## Flash, and the cache window
 
-*P7.* SPI0/SPI1 on `engine::spi_flash`, and the classic cache-MMU fill.
+*P4 lands the tables and the enable bits; P7 lands the chip and the fill.*
+
+The flash MMU is **two raw 2048-entry `u32` arrays** at `0x3FF1_0000` (PRO)
+and `0x3FF1_2000` (APP) — inside the DPORT window but past the end of the
+register block svd2rust generates, so nothing in the PAC names them. Every
+number in `src/cache.rs` comes from the mask ROM's own disassembly, quoted in
+the module header: `mmu_init` (`0x4000_95A4`) for the tables' size and base,
+`cache_flash_mmu_set` (`0x4000_95E0`) for the entry format and the four
+windows' index bases, and `*_cache_ctrl1` bits 10:9 for the page size (the
+PAC's `pro_cmmu_flash_page_mode` says the same from the other side).
+
+⚠️ **The classic's entry is a bare physical page number with no valid bit** —
+the opposite of the C6, whose `Cache_MSPI_MMU_Set` ORs bit 9 in. The ROM sets
+none and tests none, and `mmu_init` clears the table to zero, so a zeroed
+entry means *flash page 0* rather than "unmapped". `translate` therefore
+answers `None` only for an address outside the four windows, and P7 — the
+first code that can tell a mapped page from an unwritten one — decides what an
+unwritten entry serves.
+
+The four windows and their index bases, from the ROM:
+
+| virtual window | entries |
+|---|---:|
+| `0x3F40_0000..0x3F80_0000` (DROM) | 0..63 |
+| `0x400D_0000..0x4040_0000` (IROM) | 64..127 (`0x400D_0000` is entry 77) |
+| `0x4040_0000..0x4080_0000` | 128..191 |
+| `0x4080_0000..0x40C0_0000` | 192..255 |
+
+The window itself is served as a **cache fill**, not per-access translation
+(P7): instruction fetch stays a RAM read, which is what keeps the machine
+usable, and the model is stricter than silicon about staleness.
+
+### The cache-off fetch stop
+
+*If a run just stopped with `CACHE-OFF FETCH`, this section is for you.*
+
+```text
+CACHE-OFF FETCH  core=0  cycle=1_284_991
+  pc=0x400d1a2c (lp_flash::write+0x38)  fetch from IROM 0x400d1a2c
+  this core's cache was disabled at cycle 1_284_610 by a write to
+  DPORT+0x040 (pro_cache_ctrl.pro_cache_enable <- 0) from pc=0x40081c04
+  (esp_storage::write+0x1c)
+
+  On silicon this core stalls until the cache returns; nothing observes it
+  except a crash or a watchdog. This emulator refuses instead.
+  `--cache-off-fetch permit` continues (and claims nothing about the stall).
+```
+
+**What happened.** A core reached through a flash window — `0x400D_0000..`
+for instructions, `0x3F40_0000..` for data — while its own read cache was
+disabled. `pro_cache_ctrl.pro_cache_enable` (bit 3) is the bit; the ROM's
+`Cache_Read_Enable` (`0x4000_9A84`) sets it and `Cache_Read_Disable`
+(`0x4000_9AB8`) clears it, and firmware turns it off around a flash write
+because the SPI controller cannot serve the cache and a program at the same
+time. Code that runs during that window has to live in IRAM.
+
+**Why it is a stop.** On a board the core stalls; here the window is ordinary
+RAM, so the guest sails through. Refusing is the only way an emulator can
+report a hang it cannot reproduce (plan **D4**), and it is on by default so
+every gate run has it.
+
+**How to turn it off.** `--cache-off-fetch permit`. That does not run the
+check and swallow the answer — it does not check at all, so the run keeps its
+full-speed slices.
+
+**What it does not claim.** Not how long the stall would be. Not that silicon
+would crash. Not that the access is a bug: a firmware that knows what it is
+doing may be doing it deliberately. Only this: *this happened, here, while the
+cache was off.*
+
+**What it costs when nothing is wrong: nothing.** The check is installed only
+while the running core's cache is off — a flash write's worth of instructions
+— and a run whose guest never disables the cache never installs it.
 
 ## Peripherals
 
-*P5: four blocks have behaviour; the rest are accept probes until P4 and
-P6–P8.* One row per block, in registration order
+*P4 and P5 between them gave six blocks behaviour; the rest are accept probes
+until P6–P8.* One row per block, in registration order
 (`machine::PERIPHERAL_REGISTRATION_ORDER`, which is the order the boot met
 them). An **accept** block is a `RegFile` seeded from the PAC's reset values
 (`src/periph/accept.rs`) with no behaviour; a **view** computes something a
@@ -303,7 +390,7 @@ PAC and each carries its reason beside it.
 
 | block | base | aperture | grade | stop | what it is trusted for | owner |
 |---|---|---|---|---|---|---|
-| `DPORT` | `0x3FF0_0000` | `0x1000` | accept | direct #1, cycle 29 | interrupt maps, clock/reset gates, `cpu_per_conf` — written, read back | P4 |
+| `DPORT` | `0x3FF0_0000` | `0x1000` | **view** | direct #1, cycle 29 | the two per-core interrupt maps and the status words → the matrix; the four software interrupts → `IrqLines` sources 24..27; `appcpu_ctrl_*` → the app-core control; `pro/app_cache_ctrl{,1}` → the cache. The clock/reset gates and `cpu_per_conf` stay written-and-read-back | P4 |
 | `RTC_CNTL` | `0x3FF4_8000` | `0x140` | **view** | direct #2, cycle 107,539 | the asserted reset cause (**a deviation**), both halves of the CPU stall key, the RWDT's write-protect key, the clock and store registers | P5 |
 | `APB_CTRL` | `0x3FF6_6000` | `0x80` | accept | direct #3, cycle 109,663 | `sysclk_conf.pre_div_cnt`, the tick confs, and `date` bit 31 — the chip revision's top bit (**a deviation**) | P5 |
 | `TIMG0` | `0x3FF5_F000` | `0x100` | **view** | direct #4, cycle 109,989 | three counters (`t0`, `t1`, LACT), the RTC calibration, the MWDT gate | P5 |
@@ -315,6 +402,7 @@ PAC and each carries its reason beside it.
 | `SPI1` | `0x3FF4_2000` | `0x400` | accept | direct #10, cycle 3,644,210 | esp-storage's flash read; **the run spins on `cmd.flash_rdsr`** | P7 |
 | `SPI0` | `0x3FF4_3000` | `0x400` | accept | direct #11, cycle 3,644,282 | the ROM's idle wait on `ext2.st` | P7 |
 | `EFUSE` | `0x3FF5_A000` | `0x200` | **view** | rom-up #1, cycle 7 | the fuse array, the read-data registers, and the read command as a **completion**; the MAC and chip revision | P5 |
+| `FLASH_MMU` | `0x3FF1_0000` | `0x4000` | not reached by P3 | **view** | the two flash MMU page tables, written by the ROM's `mmu_init` and `cache_flash_mmu_set`; the fill is P7's | P4 / P7 |
 
 The two deviations from the PAC, both inputs to the run rather than
 properties of the part:
@@ -333,7 +421,9 @@ eFuse view are `modeled` throughout. Nothing is `measured`.
 Not modelled, on purpose, and unmapped so a strict run says so: everything
 neither boot has reached — `UART1` (where the ROM-up path now stands),
 `RTC_IO`, `SENS`, `RTC_I2C`, `FRC_TIMER`, `FLASH_ENCRYPTION`, `SHA`, `RMT`,
-`RNG`, the WiFi window, and every AHB mirror of a DPORT block.
+`RNG` and the WiFi window. Their **AHB mirrors** are unmapped for the same
+reason and by the same rule (DD38): an alias needs a registered block to
+point at, so a block gains its second address on the day it gains its first.
 
 ### Why TIMG0 is three things at once
 
@@ -398,10 +488,12 @@ A core is stalled only when `options0.sw_stall_*_c0` and
 writes `c1 = 0x21` and then `c0 = 0x02`, so a model watching one register
 would answer wrong through both halves of that sequence. `RTC_CNTL` computes
 the pair and publishes it through `rtc_cntl::StallKey`, a shared cell the
-machine holds, and `Machine::core_stalled` ORs it with its own field. **P4
-adds `DPORT.appcpu_ctrl_c.appcpu_runstall`** as the third input to the same
-OR: two blocks in two phases each own one input to one question the machine
-answers.
+machine holds, and `Machine::core_stalled` ORs it with its own field. **P4 added the third input**: DPORT's
+`appcpu_ctrl_b.appcpu_clkgate_en`, `appcpu_ctrl_c.appcpu_runstall` and
+`appcpu_ctrl_a.appcpu_resetting`, which esp-hal's `is_running` reads *before*
+it looks at the RTC key at all (`cpu_control.rs:41-55`), published through
+`dport::AppCoreControl`. Two blocks in two phases each own one input to one
+question the machine answers, and neither phase reads the other's file.
 
 ## The CLI
 
@@ -413,6 +505,8 @@ exists from P1 so the door has one name for its whole life.
 --boot-mode direct|rom-up
 --rom <path>            override the embedded mask ROM
 --strict-bus            an access nothing claims is a STOP, not a zero
+--cache-off-fetch stop|permit
+                        D4; stop is the default and what every gate run uses
 --time-grade t1         the only grade this machine defines
 --timeout <5s|1500ms|900us>   EMULATED time
 --wall-timeout <s>      the host-clock safety net; exits 4
@@ -428,12 +522,14 @@ exists from P1 so the door has one name for its whole life.
 microseconds, and `--wall-timeout` is the separate wall-clock end.
 
 ⚠️ **An unrecognised flag is an error.** The doors P6/P7/P8 add (`--uart0`,
-`--uart0-script`, `--control`, `--flash`, `--cache-off-fetch`) are deliberately
-*not* stubbed with no-ops, so the phase that adds one is visible in the diff
-instead of silently changing what an old command line meant.
+`--uart0-script`, `--control`, `--flash`) are deliberately *not* stubbed with
+no-ops, so the phase that adds one is visible in the diff instead of silently
+changing what an old command line meant. `--cache-off-fetch` arrived with P4.
 
 Exit codes are the C6's contract: 0 deadline, 2 fault, 3 strict-bus refusal,
-4 wall timeout, 5 `--break-at`.
+4 wall timeout, 5 `--break-at`; plus **6, a cache-off fetch**, which extends
+the table rather than reusing one of its codes — a script that drives both
+machines reads 0/2/3/4/5 the same way on either.
 
 ## Bring-up loop
 

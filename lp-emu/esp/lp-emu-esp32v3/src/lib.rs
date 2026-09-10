@@ -36,6 +36,8 @@
 //! (`docs/reports/2026-09-10-esp32v3-strict-boot-inventory.md`).
 
 pub mod bus_setup;
+pub mod cache;
+pub mod intmatrix;
 pub mod loader;
 pub mod machine;
 pub mod memmap;

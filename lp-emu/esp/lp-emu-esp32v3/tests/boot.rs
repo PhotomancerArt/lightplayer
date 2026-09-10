@@ -310,6 +310,63 @@ fn the_bus_maps_the_map_and_declares_the_mmio_window() {
     assert_eq!(bare.bus().peripheral_count(), 0);
 }
 
+/// **DD38 acceptance.** Every block from `0x3FF4_0000` up answers at its AHB
+/// address as well, and it is the **same state**: a write through one door is
+/// read back through the other. The four blocks below that base — `DPORT`
+/// itself, `AES`, `RSA`, `SHA` — get no alias, which is why the ROM reaches
+/// them only through the DPORT bus (P3 §4.3).
+#[test]
+fn the_ahb_mirror_is_the_same_block_at_a_second_base() {
+    use lp_emu_core::Bus;
+
+    let mut machine = Esp32V3Builder::new()
+        .boot_mode(BootMode::RomUp)
+        .build()
+        .expect("builds");
+
+    let aliased: Vec<&str> = machine
+        .peripheral_alias_map()
+        .iter()
+        .map(|(n, _, _)| *n)
+        .collect();
+    assert!(
+        !aliased.contains(&"DPORT"),
+        "DPORT is at 0x3FF0_0000, below the mirror's low end — it has no AHB address"
+    );
+    for (name, ahb, _) in machine.peripheral_alias_map() {
+        let dport = memmap::ahb_to_dport(*ahb).expect("an alias is inside the AHB window");
+        let (_, base, _) = machine
+            .peripheral_map()
+            .iter()
+            .find(|(n, _, _)| n == name)
+            .expect("every alias names a registered block");
+        assert_eq!(dport, *base, "`{name}`'s alias mirrors its own base");
+    }
+    // The analog master's only cited address is the AHB one, so it gets no
+    // DPORT-side alias: a claim about 0x3FF4_E000 is a claim nothing backs.
+    assert!(!aliased.contains(&"I2C_ANA_MST"));
+
+    // One state, two decodes: `UART0.clkdiv` written through DPORT reads back
+    // through AHB, and again the other way round.
+    let dport = memmap::periph::UART0 + 0x14;
+    let ahb = memmap::dport_to_ahb(memmap::periph::UART0).expect("UART0 is mirrored") + 0x14;
+    assert_eq!(ahb, 0x6000_0014);
+    machine.bus_mut().write_word(dport, 0x0000_2b6a).unwrap();
+    assert_eq!(machine.bus_mut().read_word(ahb).unwrap(), 0x0000_2b6a);
+    machine.bus_mut().write_word(ahb, 0x0000_0057).unwrap();
+    assert_eq!(machine.bus_mut().read_word(dport).unwrap(), 0x0000_0057);
+
+    // The blocks nothing maps stay a strict stop through either door: an
+    // alias needs a registered block to point at (`SENS` is P5's).
+    let sens_ahb = memmap::dport_to_ahb(memmap::periph::SENS).expect("SENS is mirrored");
+    assert!(
+        machine
+            .peripheral_alias_map()
+            .iter()
+            .all(|(_, base, len)| sens_ahb < *base || sens_ahb >= base + len)
+    );
+}
+
 #[test]
 fn the_windows_this_machine_will_not_map_are_named() {
     let unmapped = bus_setup::deliberately_unmapped();
@@ -1030,6 +1087,112 @@ fn the_direct_load_says_hello_into_an_accept_block_and_stands_at_the_flash_until
             .map(|w| (w & 0xff) as u8),
         Some(last),
         "an accept block remembers only the last write"
+    );
+}
+
+/// The sha256 of the 543 bytes the direct load prints, **pinned**.
+///
+/// P3 measured the chain and printed it in
+/// `docs/reports/2026-09-10-esp32v3-strict-boot-inventory.md` §1.1; P4
+/// replaced DPORT's accept block with a view, which is the largest change a
+/// phase can make to a boot without touching the firmware, so the bytes get a
+/// golden rather than a spot check. The heap line inside it is byte-identical
+/// to L0's silicon capture (`../bench.md`).
+///
+/// ⚠️ It is a property of **this image**, not of the machine: the desk board
+/// runs a different commit (ruling R7), and a firmware change moves it. A
+/// failure here means "the boot printed something else", and the diff the
+/// test prints is what says whether that is a regression or a rebuild.
+const INIT_CHAIN_SHA256: &str = "ea8bae305953ef613f68a97fb84919378f33b37eb5623dcb970e8dce2b7343e7";
+
+/// How many bytes that is.
+const INIT_CHAIN_LEN: usize = 543;
+
+/// **P4's acceptance for the boot threshold.** The direct load with the DPORT
+/// view in place reaches the same place P3 left it — the flash status spin —
+/// and prints the same 543 bytes on the way.
+#[test]
+#[ignore = "needs the shipped image; run through `just test-emu-esp32v3-boot`"]
+fn the_init_chain_is_the_golden_543_bytes() {
+    use sha2::{Digest, Sha256};
+
+    let Some((_, outcome, trace)) = direct_traced(300_000) else {
+        return;
+    };
+    assert!(
+        matches!(outcome, Outcome::Deadline { .. }),
+        "no strict stop, no fault and no cache-off stop: {outcome:?}"
+    );
+    let bytes = uart0_fifo_bytes(&trace);
+    let text = String::from_utf8_lossy(&bytes).into_owned();
+    assert_eq!(bytes.len(), INIT_CHAIN_LEN, "the chain is:\n{text}");
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&bytes)),
+        INIT_CHAIN_SHA256,
+        "the chain is:\n{text}"
+    );
+}
+
+/// **P4's acceptance for the software interrupts.** `swi2` drives the io
+/// task's `InterruptExecutor` at Priority2, so it has to actually fire — the
+/// phase file's words. It does: the guest writes `cpu_intr_from_cpu2`, the
+/// matrix routes source 26, the hart takes the interrupt, and the handler
+/// reads `core_0_intr_status0` with bit 26 set and then clears the source.
+///
+/// The whole path is here rather than in a unit test because the unit test
+/// can only prove the matrix reports it; only the boot proves the hart takes
+/// it.
+#[test]
+#[ignore = "needs the shipped image; run through `just test-emu-esp32v3-boot`"]
+fn swi2_fires_and_the_handler_sees_it_in_the_status_word() {
+    let elf = match fw_esp32v3_image() {
+        Ok(p) => p,
+        Err(reason) => {
+            skip_notice("direct load, DPORT traced", &reason);
+            return;
+        }
+    };
+    let sink = SharedSink::default();
+    let mut machine = Esp32V3Builder::new()
+        .boot_mode(BootMode::Direct)
+        .app(AppSource::Path(elf))
+        .strict(true)
+        .trace(Box::new(sink.clone()), vec!["DPORT".into()])
+        .build()
+        .expect("builds");
+    machine.run_until(&StopCondition::after_micros(20_000));
+    let trace = sink.text();
+
+    let raised = trace
+        .lines()
+        .find(|l| l.contains("W4 DPORT+0x0e4 cpu_intr_from_cpu2 = 0x00000001"))
+        .expect("the io task raises swi2");
+    let seen = trace
+        .lines()
+        .find(|l| l.contains("R4 DPORT+0x0ec core_0_intr_status0 = 0x04000000"))
+        .unwrap_or_else(|| {
+            panic!(
+                "the handler must see source 26 (FROM_CPU_INTR2) in the status word; the \
+                 raise was:\n{raised}\nthe DPORT trace:\n{trace}"
+            )
+        });
+    let cleared = trace
+        .lines()
+        .find(|l| l.contains("W4 DPORT+0x0e4 cpu_intr_from_cpu2 = 0x00000000"))
+        .expect("and clears it");
+    // In that order, and the raise is what the level came from.
+    let at = |line: &str| {
+        trace
+            .lines()
+            .position(|l| l == line)
+            .expect("a line of this trace")
+    };
+    assert!(at(raised) < at(seen) && at(seen) < at(cleared));
+
+    // swi0 (esp-rtos) takes the same path, one source lower.
+    assert!(
+        trace.contains("R4 DPORT+0x0ec core_0_intr_status0 = 0x01000000"),
+        "swi0 = FROM_CPU_INTR0 = source 24"
     );
 }
 
