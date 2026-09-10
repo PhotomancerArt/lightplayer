@@ -71,12 +71,20 @@ Five rules follow, and they are the decision.
 code runs") had quietly become "nearly the same code runs", and the value of
 every gate under it would drop to nothing.
 
-This is mechanical, not a promise: `just lint-browser-serial-js-frozen` pins the
-three JS files by content hash and runs in CI. A milestone that needs one of
-them to change has found something the premise did not survive, and its job at
-that moment is to stop and report, not to make the change small.
+While the plan was live this was mechanical, not a promise: a content-hash lint
+(`scripts/check-browser-serial-js-frozen.sh`, `just lint-browser-serial-js-frozen`)
+pinned the three JS files and ran in CI, so a change to one had to move the hash
+deliberately, in the same commit, with the reason in the PR — which is exactly
+the conversation the invariant exists to force. **The lint was retired when
+plan two closed** (M7): it was the claim's mechanical form *while the claim was
+being made*, and across seven milestones the three files stayed byte-identical
+to their pre-plan state. A milestone that needed one to change would have found
+something the premise did not survive, and its job at that moment was to stop
+and report, not to make the change small.
 
-The rule outlives the plan that produced it, which is why it is in an ADR.
+The rule outlives the plan and the lint that once enforced it, which is why it
+is here: **the Studio JS/Rust device layer does not change to accommodate the
+shim**, and this ADR is now its only home.
 
 ### 2. The polyfill implements exactly eleven calls, and reproduces two scars
 
@@ -196,9 +204,11 @@ axes**. A page may carry both, and neither reads the other.
   suite (`lp-app/lpa-link/tests/browser_serial_conformance.rs`) runs the shipped
   JS over the polyfill over a scripted door, hermetically, in CI — and the same
   assertions run against a live `emu serve`.
-- The three frozen JS files are now load-bearing for a CI lint. Legitimate
-  future work on them has to move the hash deliberately, with the reason in the
-  commit — which is the intent.
+- The three JS files were load-bearing for a CI content-hash lint while plan
+  two ran, so that legitimate future work on them had to move the hash
+  deliberately with the reason in the commit. That lint was retired at plan
+  close (M7); rule 1 above is now the standing constraint, and future work on
+  those files is ordinary review against it.
 - Anything Chromium's USB stack owns is now *explicitly* hardware-only rather
   than accidentally untested. The list is in rule 3, and it is the honest
   residue of the debt file.
