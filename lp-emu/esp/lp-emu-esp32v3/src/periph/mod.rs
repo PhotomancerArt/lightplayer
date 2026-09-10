@@ -69,6 +69,11 @@ pub fn boot_set(reset_cause: ResetCause) -> Vec<(u32, u32, BoxedPeripheral)> {
         ),
         (base::GPIO, accept::GPIO_LEN, Box::new(accept::gpio())),
         (base::UART0, accept::UART0_LEN, Box::new(accept::uart0())),
+        (
+            base::IO_MUX,
+            accept::IO_MUX_LEN,
+            Box::new(accept::io_mux()),
+        ),
         (base::EFUSE, accept::EFUSE_LEN, Box::new(accept::efuse())),
     ]
 }

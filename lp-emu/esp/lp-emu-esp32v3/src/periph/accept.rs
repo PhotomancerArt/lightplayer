@@ -326,6 +326,26 @@ pub fn uart0() -> RegFile {
         .with_pac_grades()
 }
 
+/// `IO_MUX`'s aperture, tight: `pin_ctrl` and the 36 pad words the PAC
+/// names, the last at `+0x90` (`gpio24`).
+pub const IO_MUX_LEN: u32 = 0x94;
+
+/// `IO_MUX` — **P8's block**, accept-and-remember here.
+///
+/// The ninth strict stop of the direct load, 3,568,671 cycles in:
+/// `boot_firmware+0x1553` reads `gpio1` (`+0x88`) — the U0TXD pad's
+/// configuration word, for `Uart::new(…).with_tx(peripherals.GPIO1)`. The
+/// pad words are read-modify-written (function select, pull-ups, drive)
+/// and read back as written. The PAC carries **no** reset for this block,
+/// so every pad reads 0 until the firmware configures it; nothing spins
+/// here. P8 pushes each pad's `fun_ie` into the signal fabric as the pad's
+/// input enable, the way the C6's `io_mux` does.
+pub fn io_mux() -> RegFile {
+    RegFile::new("IO_MUX", IO_MUX_LEN)
+        .with_names(regs::IO_MUX)
+        .with_pac_grades()
+}
+
 /// `EFUSE`'s aperture: the generated table runs to `+0x1fc` (`date`).
 pub const EFUSE_LEN: u32 = 0x200;
 
@@ -369,6 +389,7 @@ mod tests {
             (timg("TIMG1"), regs::TIMG0),
             (gpio(), regs::GPIO),
             (uart0(), regs::UART0),
+            (io_mux(), regs::IO_MUX),
             (efuse(), regs::EFUSE),
         ]
     }

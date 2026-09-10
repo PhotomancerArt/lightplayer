@@ -122,6 +122,9 @@ pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     // Direct load, stop 8: `Uart::new` reads `conf0` to pick the UART's
     // clock source.
     "UART0",
+    // Direct load, stop 9: `Uart::new(…).with_tx(GPIO1)` configures the
+    // U0TXD pad.
+    "IO_MUX",
     // ROM-up, stop 1: `_ResetHandler_efuse_check_patch` reads its own
     // fuses seven instructions after the reset vector.
     "EFUSE",
