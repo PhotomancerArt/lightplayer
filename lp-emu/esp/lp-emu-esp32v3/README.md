@@ -93,7 +93,7 @@ declares, so two independent sources agree on where a reset lands.
 **Which revision, and why only one.** The release tarball carries `rev0` and
 `rev300`; this crate vendors **`rev300` only** (plan decision Q2). The desk
 board and every board this firmware ships on are v3 silicon, and a second
-790 KB ELF that no configuration loads is 790 KB of repository nobody can
+826 KB ELF that no configuration loads is 826 KB of repository nobody can
 check. Adding one later is one line in the fetch script's `WANTED` array.
 
 **Nothing here is edited, ever.** `scripts/emu/fetch-rom-elfs.sh` fetches the
