@@ -443,10 +443,7 @@ mod tests {
 
         // One byte short: nothing is applied.
         let mut untouched = ShaState::new();
-        assert_eq!(
-            untouched.load_state(&vec![0u8; ShaState::SAVE_LEN - 1]),
-            0
-        );
+        assert_eq!(untouched.load_state(&vec![0u8; ShaState::SAVE_LEN - 1]), 0);
         assert_eq!(untouched, ShaState::new());
     }
 }

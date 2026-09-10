@@ -9,6 +9,14 @@
 //! model is the real compression function, and the gate is that the boot log
 //! reaches `Loaded app from partition at offset 0x10000`.
 //!
+//! The arithmetic itself is not here. It lives in
+//! [`lp_emu_esp_common::engine::sha`], because it is the one thing three
+//! Espressif parts have to agree on bit for bit while driving it through
+//! register protocols that are not merely offset-shifted but differently
+//! shaped. What is here is this chip's protocol: its offsets, its mode
+//! numbers, its two strobes, its byte order, and its own words for a mode
+//! it does not have.
+//!
 //! # The protocol, from the ROM's own driver
 //!
 //! `ets_sha_process` (`0x4001a316`) and `ets_sha_get_state` (`0x4001a2b2`)
@@ -51,6 +59,7 @@
 
 use core::any::Any;
 
+use lp_emu_esp_common::engine::sha::{ShaFamily, ShaState};
 use lp_emu_esp_common::regfile::{lane_of, merge_lane};
 use lp_emu_esp_common::{BusCx, Peripheral, RegFile, Width};
 
@@ -73,191 +82,25 @@ const MODE_SHA1: u32 = 0;
 const MODE_SHA224: u32 = 1;
 const MODE_SHA256: u32 = 2;
 
-/// SHA-256's initial vector (FIPS 180-4 §5.3.3).
-const IV_SHA256: [u32; 8] = [
-    0x6a09_e667,
-    0xbb67_ae85,
-    0x3c6e_f372,
-    0xa54f_f53a,
-    0x510e_527f,
-    0x9b05_688c,
-    0x1f83_d9ab,
-    0x5be0_cd19,
-];
-
-/// SHA-224's initial vector (FIPS 180-4 §5.3.2).
-const IV_SHA224: [u32; 8] = [
-    0xc105_9ed8,
-    0x367c_d507,
-    0x3070_dd17,
-    0xf70e_5939,
-    0xffc0_0b31,
-    0x6858_1511,
-    0x64f9_8fa7,
-    0xbefa_4fa4,
-];
-
-/// SHA-1's initial vector (FIPS 180-4 §5.3.1); the fifth word is the last
-/// of its 160-bit state and the upper three are unused.
-const IV_SHA1: [u32; 8] = [
-    0x6745_2301,
-    0xefcd_ab89,
-    0x98ba_dcfe,
-    0x1032_5476,
-    0xc3d2_e1f0,
-    0,
-    0,
-    0,
-];
-
-/// SHA-256's round constants (FIPS 180-4 §4.2.2).
-const K256: [u32; 64] = [
-    0x428a_2f98,
-    0x7137_4491,
-    0xb5c0_fbcf,
-    0xe9b5_dba5,
-    0x3956_c25b,
-    0x59f1_11f1,
-    0x923f_82a4,
-    0xab1c_5ed5,
-    0xd807_aa98,
-    0x1283_5b01,
-    0x2431_85be,
-    0x550c_7dc3,
-    0x72be_5d74,
-    0x80de_b1fe,
-    0x9bdc_06a7,
-    0xc19b_f174,
-    0xe49b_69c1,
-    0xefbe_4786,
-    0x0fc1_9dc6,
-    0x240c_a1cc,
-    0x2de9_2c6f,
-    0x4a74_84aa,
-    0x5cb0_a9dc,
-    0x76f9_88da,
-    0x983e_5152,
-    0xa831_c66d,
-    0xb003_27c8,
-    0xbf59_7fc7,
-    0xc6e0_0bf3,
-    0xd5a7_9147,
-    0x06ca_6351,
-    0x1429_2967,
-    0x27b7_0a85,
-    0x2e1b_2138,
-    0x4d2c_6dfc,
-    0x5338_0d13,
-    0x650a_7354,
-    0x766a_0abb,
-    0x81c2_c92e,
-    0x9272_2c85,
-    0xa2bf_e8a1,
-    0xa81a_664b,
-    0xc24b_8b70,
-    0xc76c_51a3,
-    0xd192_e819,
-    0xd699_0624,
-    0xf40e_3585,
-    0x106a_a070,
-    0x19a4_c116,
-    0x1e37_6c08,
-    0x2748_774c,
-    0x34b0_bcb5,
-    0x391c_0cb3,
-    0x4ed8_aa4a,
-    0x5b9c_ca4f,
-    0x682e_6ff3,
-    0x748f_82ee,
-    0x78a5_636f,
-    0x84c8_7814,
-    0x8cc7_0208,
-    0x90be_fffa,
-    0xa450_6ceb,
-    0xbef9_a3f7,
-    0xc671_78f2,
-];
-
-/// One SHA-256 (or SHA-224) block compression, FIPS 180-4 §6.2.2.
-pub fn compress_sha256(state: &mut [u32; 8], block: &[u32; 16]) {
-    let mut w = [0u32; 64];
-    w[..16].copy_from_slice(block);
-    for i in 16..64 {
-        let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
-        let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
-        w[i] = w[i - 16]
-            .wrapping_add(s0)
-            .wrapping_add(w[i - 7])
-            .wrapping_add(s1);
-    }
-    let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = *state;
-    for i in 0..64 {
-        let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
-        let ch = (e & f) ^ (!e & g);
-        let t1 = h
-            .wrapping_add(s1)
-            .wrapping_add(ch)
-            .wrapping_add(K256[i])
-            .wrapping_add(w[i]);
-        let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
-        let maj = (a & b) ^ (a & c) ^ (b & c);
-        let t2 = s0.wrapping_add(maj);
-        h = g;
-        g = f;
-        f = e;
-        e = d.wrapping_add(t1);
-        d = c;
-        c = b;
-        b = a;
-        a = t1.wrapping_add(t2);
-    }
-    for (s, v) in state.iter_mut().zip([a, b, c, d, e, f, g, h]) {
-        *s = s.wrapping_add(v);
+/// This chip's `mode` number as a family the engine understands, or `None`
+/// for a mode the C6 does not have. The mapping is the view's because the
+/// numbers are the chip's; the engine's `ShaFamily` names none of them.
+fn family_of(mode: u32) -> Option<ShaFamily> {
+    match mode {
+        MODE_SHA1 => Some(ShaFamily::Sha1),
+        MODE_SHA224 => Some(ShaFamily::Sha224),
+        MODE_SHA256 => Some(ShaFamily::Sha256),
+        _ => None,
     }
 }
 
-/// One SHA-1 block compression, FIPS 180-4 §6.1.2. Only the first five words
-/// of `state` are used.
-pub fn compress_sha1(state: &mut [u32; 8], block: &[u32; 16]) {
-    let mut w = [0u32; 80];
-    w[..16].copy_from_slice(block);
-    for i in 16..80 {
-        w[i] = (w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]).rotate_left(1);
-    }
-    let (mut a, mut b, mut c, mut d, mut e) = (state[0], state[1], state[2], state[3], state[4]);
-    for (i, wi) in w.iter().enumerate() {
-        let (f, k) = match i {
-            0..=19 => ((b & c) | (!b & d), 0x5a82_7999),
-            20..=39 => (b ^ c ^ d, 0x6ed9_eba1),
-            40..=59 => ((b & c) | (b & d) | (c & d), 0x8f1b_bcdc),
-            _ => (b ^ c ^ d, 0xca62_c1d6),
-        };
-        let t = a
-            .rotate_left(5)
-            .wrapping_add(f)
-            .wrapping_add(e)
-            .wrapping_add(k)
-            .wrapping_add(*wi);
-        e = d;
-        d = c;
-        c = b.rotate_left(30);
-        b = a;
-        a = t;
-    }
-    for (s, v) in state.iter_mut().zip([a, b, c, d, e]) {
-        *s = s.wrapping_add(v);
-    }
-}
-
-/// The C6's SHA accelerator.
+/// The C6's SHA accelerator: this chip's register view over
+/// [`lp_emu_esp_common::engine::sha`].
 pub struct Sha {
     regs: RegFile,
-    /// The hash state, in SHA's own word order (not `H_MEM`'s byte order).
-    h: [u32; 8],
-    /// The message block, likewise.
-    m: [u32; 16],
-    /// How many blocks this run has compressed. Reported, never gated.
-    blocks: u64,
+    /// The hash state and the message block, both in SHA's own word order
+    /// (not `H_MEM`'s or `M_MEM`'s byte order), plus the block count.
+    sha: ShaState,
 }
 
 impl Default for Sha {
@@ -275,20 +118,18 @@ impl Sha {
                 // them back, and a stored 1 would read as "still starting".
                 .with_write_one_pulse(START, 0xffff_ffff)
                 .with_write_one_pulse(CONTINUE, 0xffff_ffff),
-            h: [0; 8],
-            m: [0; 16],
-            blocks: 0,
+            sha: ShaState::new(),
         }
     }
 
     /// How many block compressions this run performed.
     pub fn blocks(&self) -> u64 {
-        self.blocks
+        self.sha.blocks()
     }
 
     /// The hash state, in SHA's word order.
     pub fn state(&self) -> [u32; 8] {
-        self.h
+        self.sha.h
     }
 
     fn mode(&self) -> u32 {
@@ -300,28 +141,22 @@ impl Sha {
     fn run(&mut self, from_iv: bool) {
         let mode = self.mode();
         if from_iv {
-            self.h = match mode {
-                MODE_SHA1 => IV_SHA1,
-                MODE_SHA224 => IV_SHA224,
-                MODE_SHA256 => IV_SHA256,
-                _ => {
+            match family_of(mode) {
+                Some(family) => self.sha.set_iv(family),
+                None => {
                     log::error!(
                         "SHA: mode {mode} is not one this chip has (0 SHA-1, 1 SHA-224, \
                          2 SHA-256); the state is left alone and the digest will be wrong"
                     );
                     return;
                 }
-            };
-        }
-        match mode {
-            MODE_SHA1 => compress_sha1(&mut self.h, &self.m),
-            MODE_SHA224 | MODE_SHA256 => compress_sha256(&mut self.h, &self.m),
-            _ => {
-                log::error!("SHA: mode {mode} is not one this chip has; block ignored");
-                return;
             }
         }
-        self.blocks += 1;
+        let Some(family) = family_of(mode) else {
+            log::error!("SHA: mode {mode} is not one this chip has; block ignored");
+            return;
+        };
+        self.sha.compress(family);
     }
 }
 
@@ -336,8 +171,12 @@ impl Peripheral for Sha {
             // Nothing takes time here: the compression ran inside the store
             // to `start`/`continue`, so the accelerator is never busy.
             BUSY => 0,
-            w if (H_MEM..H_MEM_END).contains(&w) => self.h[((w - H_MEM) / 4) as usize].swap_bytes(),
-            w if (M_MEM..M_MEM_END).contains(&w) => self.m[((w - M_MEM) / 4) as usize].swap_bytes(),
+            w if (H_MEM..H_MEM_END).contains(&w) => {
+                self.sha.h[((w - H_MEM) / 4) as usize].swap_bytes()
+            }
+            w if (M_MEM..M_MEM_END).contains(&w) => {
+                self.sha.m[((w - M_MEM) / 4) as usize].swap_bytes()
+            }
             _ => return self.regs.read(off, width, _cx),
         };
         lane_of(value, off, width)
@@ -356,13 +195,13 @@ impl Peripheral for Sha {
             }
             w if (H_MEM..H_MEM_END).contains(&w) => {
                 let i = ((w - H_MEM) / 4) as usize;
-                let merged = merge_lane(self.h[i].swap_bytes(), off, width, value);
-                self.h[i] = merged.swap_bytes();
+                let merged = merge_lane(self.sha.h[i].swap_bytes(), off, width, value);
+                self.sha.h[i] = merged.swap_bytes();
             }
             w if (M_MEM..M_MEM_END).contains(&w) => {
                 let i = ((w - M_MEM) / 4) as usize;
-                let merged = merge_lane(self.m[i].swap_bytes(), off, width, value);
-                self.m[i] = merged.swap_bytes();
+                let merged = merge_lane(self.sha.m[i].swap_bytes(), off, width, value);
+                self.sha.m[i] = merged.swap_bytes();
             }
             _ => self.regs.write(off, width, value, cx),
         }
@@ -373,39 +212,23 @@ impl Peripheral for Sha {
     }
 
     fn save_state(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(0x100 + 8 * 4 + 16 * 4 + 8);
-        for w in self.h.iter().chain(self.m.iter()) {
-            out.extend_from_slice(&w.to_le_bytes());
-        }
-        out.extend_from_slice(&self.blocks.to_le_bytes());
+        // The engine's chunk first, then the register file — the same bytes
+        // in the same order this block has always written, because a
+        // snapshot from before the engine existed must still load.
+        let mut out = Vec::with_capacity(0x100 + ShaState::SAVE_LEN);
+        self.sha.save(&mut out);
         out.extend_from_slice(&self.regs.save_state());
         out
     }
 
     fn load_state(&mut self, bytes: &[u8]) {
-        let fixed = (8 + 16) * 4 + 8;
+        let fixed = ShaState::SAVE_LEN;
         if bytes.len() < fixed {
             log::warn!("SHA: load_state blob too short, ignored");
             return;
         }
-        let word = |i: usize| {
-            u32::from_le_bytes([
-                bytes[i * 4],
-                bytes[i * 4 + 1],
-                bytes[i * 4 + 2],
-                bytes[i * 4 + 3],
-            ])
-        };
-        for (i, h) in self.h.iter_mut().enumerate() {
-            *h = word(i);
-        }
-        for (i, m) in self.m.iter_mut().enumerate() {
-            *m = word(8 + i);
-        }
-        let mut blocks = [0u8; 8];
-        blocks.copy_from_slice(&bytes[(8 + 16) * 4..fixed]);
-        self.blocks = u64::from_le_bytes(blocks);
-        self.regs.load_state(&bytes[fixed..]);
+        let used = self.sha.load_state(bytes);
+        self.regs.load_state(&bytes[used..]);
     }
 
     fn as_any(&self) -> Option<&dyn Any> {
