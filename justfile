@@ -1862,7 +1862,7 @@ build-ci: build-host build-rv32-builtins build-rv32-emu-guest-test-app
 # build-host pass only duplicated that work (~12 min/run when CI ran
 # `build-ci` as its own phase).
 [parallel]
-ci-prereqs: build-rv32-builtins build-rv32-emu-guest-test-app build-xt-builtins
+ci-prereqs: build-rv32-builtins build-rv32-emu-guest-test-app build-xt-builtins build-xt-fixtures
 
 # riscv32: builtins only (for filetests; no ESP32 firmware)
 build-rv32-builtins: install-rv32-target
@@ -2111,7 +2111,7 @@ clippy-glsl-fix:
 # image is the rv32 one's gitignored twin, and building it before the parallel
 # half both keeps `test-xt-host` meaningful after a cache wipe and leaves the
 # `[parallel]` half with no writer for it either.
-test: build-rv32-builtins build-xt-builtins _test-parallel
+test: build-rv32-builtins build-xt-builtins build-xt-fixtures _test-parallel
 
 [parallel]
 [private]
@@ -2156,6 +2156,27 @@ test-rust-core:
 # would otherwise be silent in exactly the way the note above describes.
 test-xt-host:
     cargo test -p lpvm-native --features emu-xt,xt-corpus
+
+# The `mach` fixtures: bare-metal Xtensa images running **xtensa-lx-rt's own
+# vector table** on the privileged hart (`lp_xt_emu::mach::XtHart`), built by
+# the esp toolchain in lp-xt/fixtures/mach.
+#
+# This is the hart's evidence, as distinct from `src/mach/tests.rs`, which is
+# its claim — the claim is written by the same reasoning that wrote the hart.
+#
+# `lp-xt/fixtures/elf/` is GITIGNORED, so with no esp toolchain the ELFs are
+# absent and every test in the file skips with a note. That is correct on a
+# machine without the toolchain and a disaster in CI, so the `Validate Xtensa
+# (host)` job sets **LP_XT_MACH_FIXTURES_REQUIRED=1**, under which a missing
+# ELF is a hard failure instead. Do not set it here: this recipe has to stay
+# runnable on the stable host workspace.
+test-xt-mach: build-xt-fixtures
+    cargo test -p lp-xt-emu --test mach_fixtures
+
+# Build the device-target fixture corpus (`lp-xt/fixtures/build.sh`). A no-op
+# without espup, like `build-xt-builtins`.
+build-xt-fixtures:
+    ./lp-xt/fixtures/build.sh --if-toolchain
 
 # Studio web view layer is outside default-members (Dioxus web dep tree);
 # its unit tests are pure host-runnable view helpers. Separate invocation

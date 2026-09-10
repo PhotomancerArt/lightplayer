@@ -1,0 +1,32 @@
+# The `mach` fixtures: bare-metal Xtensa images for `lp-xt-emu`'s PRIVILEGED
+# hart (`lp_xt_emu::mach::XtHart`), as distinct from `corpus/`, whose programs
+# run in the user-mode `Emulator`.
+#
+# Each `src/bin/*.rs` links **xtensa-lx-rt's own vectors** — the window
+# overflow/underflow handlers, the user-exception vector, the level-3 and debug
+# vectors that ship in real ESP32 firmware — and runs on a RAM-only bus with the
+# interrupt line driven by the host test. That is the point: a wrong-but-
+# plausible exception model passes every test written by the reasoning that
+# wrote the model, and does not survive running the code that ships.
+#
+# DEVICE-target crate (esp toolchain), a member of the `lp-xt/fixtures`
+# workspace, NOT the host workspace.
+[package]
+name = "mach"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+description = "Bare-metal Xtensa fixtures for lp-xt-emu's privileged hart (xtensa-lx-rt vectors on a RAM-only bus)."
+
+[dependencies]
+# The real vectors. A device crate: the `lp-emu/**` MIT fence forbids this
+# dependency inside the fence, which is exactly why the fixtures live here and
+# the host tests read only ELF bytes.
+xtensa-lx-rt = "0.22"
+# Fixture (a) takes its backtrace with the **shipping** crash-report walker,
+# not a reimplementation of it: `force_window_spill` + the base save-area chain
+# walk are the claim about the hart's window exceptions that this milestone is
+# about, and a copy of them here would only test the copy. `default-features =
+# false` drops its `std`; the ESP32-S3 window set is the default and matches
+# `memory.x`'s layout.
+lpc-shared = { path = "../../../lp-core/lpc-shared", default-features = false }

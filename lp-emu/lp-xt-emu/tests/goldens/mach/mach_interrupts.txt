@@ -1,0 +1,12 @@
+fixture: mach_interrupts
+vectors entered: 0x340 x1, 0x080 x3, 0x000 x1, 0x0c0 x2, 0x1c0 x1
+l1 handler runs: 1
+l1 exccause: 4
+l1 ps before: 0x00060020
+l1 ps after: 0x00060020
+l3 handler runs: 1
+l3 epc3 in: raise_level3
+l3 eps3: 0x00060520
+l3 ps before: 0x00060520
+l3 ps after: 0x00060520
+resume marker after rfi 3: 0xa5a51234

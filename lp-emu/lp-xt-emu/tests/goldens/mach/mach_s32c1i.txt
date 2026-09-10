@@ -1,0 +1,7 @@
+fixture: mach_s32c1i
+vectors entered: (none)
+initial: 0x11112222
+new: 0x33334444
+wrong expectation: 0x55556666
+success: mem=0x33334444 reg=0x11112222
+failure: mem=0x33334444 reg=0x33334444

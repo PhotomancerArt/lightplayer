@@ -770,12 +770,29 @@ jobs:
       - name: Build the RV32 builtins image (the differential oracle)
         run: cd lp2025 && just build-rv32-builtins
 
+      # The bare-metal fixture corpus: the `corpus/` guests `lp-xt-elf`'s tests
+      # run in the user-mode emulator, and the `mach/` images that run
+      # xtensa-lx-rt's REAL vector table on the privileged hart (M1 P4). Same
+      # gitignored-artifact story as the builtins image above, same
+      # skip-and-report-success failure if it is absent.
+      - name: Build the Xtensa fixture corpus (user-mode + mach)
+        run: cd lp2025 && lp-xt/fixtures/build.sh
+
       # Guard the whole point of this job. Without the Xtensa image the tests
       # SKIP and still report success, which is what was happening before this
       # job existed; without the RV32 image they fail three minutes into a
       # compile with a message that reads like a codegen bug. Fail here, fast
       # and unambiguously, rather than either.
-      - name: Assert both builtins images are present
+      #
+      # The seven `mach_*` ELFs are here for exactly the same reason and it is
+      # worth saying it twice: `lp-xt/fixtures/elf/` is gitignored, and
+      # `lp-emu/lp-xt-emu/tests/mach_fixtures.rs` skips every test whose ELF is
+      # missing. A phase's worth of evidence about the privileged hart would
+      # then report green having executed nothing. Two guards, because one has
+      # already failed here historically: this step, and
+      # LP_XT_MACH_FIXTURES_REQUIRED below, which turns the skip into a failure
+      # inside the test binary itself.
+      - name: Assert both builtins images and the seven mach fixtures are present
         run: |
           cd lp2025
           xt=lp-xt/fixtures/elf/lps-builtins-xt-app.elf
@@ -789,6 +806,64 @@ jobs:
               rc=1
             fi
           done
+          for name in mach_backtrace mach_interrupts mach_loopnez mach_s32c1i \
+                      mach_ctxswitch mach_dbreak mach_lserr; do
+            elf="lp-xt/fixtures/elf/$name.elf"
+            if [ -s "$elf" ]; then
+              echo "ok: $elf ($(wc -c < "$elf") bytes)"
+            else
+              echo "::error::$elf missing or empty — the mach hart tests would SKIP and report success"
+              rc=1
+            fi
+          done
+          exit $rc
+
+      # The privileged hart's evidence. Named explicitly rather than left to
+      # `cargo test`, because this is the only job in the workflow with an esp
+      # toolchain and therefore the only one where these tests do anything at
+      # all: `validate-x64` runs the same binary against an empty `elf/` and
+      # every test in it skips.
+      #
+      # LP_XT_MACH_FIXTURES_REQUIRED=1 is the in-binary half of the guard
+      # above: with it set, a missing ELF panics by name instead of printing
+      # SKIP and passing.
+      - name: Xtensa mach fixtures (the privileged hart)
+        env:
+          LP_XT_MACH_FIXTURES_REQUIRED: "1"
+        run: |
+          cd lp2025
+          set -o pipefail
+          just test-xt-mach 2>&1 | sed -E 's/\x1b\[[0-9;]*[mGKHF]//g' | tee /tmp/xt-mach.log
+
+      # Run and then CHECK THAT IT RAN, as the step below does for the engine
+      # suite. Twelve tests: seven fixtures' assertions plus the goldens, the
+      # presence guard, the golden/FIXTURES drift check and the runner's own
+      # determinism check. A floor rather than an equality, so adding a test
+      # never requires touching this; it trips only when tests DISAPPEAR.
+      - name: Assert the mach fixtures actually ran
+        run: |
+          log=/tmp/xt-mach.log
+          rc=0
+          for canary in mach_backtrace_25_deep mach_interrupt_level1_cause4 \
+                        mach_interrupt_level3_rfi mach_loopnez_runs_every_iteration \
+                        mach_s32c1i_success_and_failure mach_esp_rtos_context_switch \
+                        mach_dbreak_stack_guard mach_load_store_error_excvaddr \
+                        mach_goldens mach_fixtures_present; do
+            if ! grep -qF "test $canary ... ok" "$log"; then
+              echo "::error::'$canary' did not run or did not pass — this job proved nothing about the privileged hart"
+              rc=1
+            fi
+          done
+          if grep -qF "SKIP " "$log"; then
+            echo "::error::a mach test printed SKIP; LP_XT_MACH_FIXTURES_REQUIRED should have made that a failure"
+            rc=1
+          fi
+          total=$(awk '/^test result: ok\./ {s+=$4} END {print s+0}' "$log")
+          echo "mach tests passed: $total"
+          if [ "$total" -lt 12 ]; then
+            echo "::error::only $total mach tests ran (floor 12) — tests disappeared rather than were added"
+            rc=1
+          fi
           exit $rc
 
       # Run and then CHECK THAT IT RAN. A file-level `#![cfg(feature = "…")]`

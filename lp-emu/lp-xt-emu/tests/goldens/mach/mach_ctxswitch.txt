@@ -1,0 +1,10 @@
+fixture: mach_ctxswitch
+vectors entered: 0x340 x18, 0x080 x12, 0x000 x2, 0x0c0 x10
+task A rounds: 6
+task B rounds: 4
+switches: 18
+cross-task loop-state sightings: 0
+task A lcount fold: 2016
+task B lcount fold: 1128
+task A loop bounds stable: 1
+task B loop bounds stable: 1

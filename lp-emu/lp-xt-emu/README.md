@@ -156,6 +156,18 @@ The hart knows one thing about the outside world: an asserted CPU-interrupt
 bitmask (`set_external_mask`), which M2's interrupt matrix will produce. No
 memory map, no peripherals, no chip numbers — those are the machine's (M3).
 
+**The hart's evidence is `tests/mach_fixtures.rs`.** `src/mach/tests.rs` is the
+*claim* — every program in it is hand-encoded by the same reasoning that wrote
+the hart, and a wrong-but-plausible exception model passes all of it. The
+fixtures are seven bare-metal images built by the esp toolchain in
+[`lp-xt/fixtures/mach`](../../lp-xt/fixtures/README.md#the-mach-fixtures--bare-metal-for-the-privileged-hart),
+each linking **xtensa-lx-rt's own vector table** and running on a RAM-only
+`Memory` bus: a 25-deep backtrace taken by the shipping crash reporter, level-1
+and level-3 interrupts, `loopnez`, `s32c1i`, a two-task context switch, a
+`DBREAK` stack guard and a load/store error. `just test-xt-mach`, and the
+`Validate Xtensa (host)` CI job — the only one with an esp toolchain, so the
+only one where they do anything.
+
 ### Board profiles — the memory map is a parameter
 
 Instruction semantics are board-independent (FINDINGS: LX6 vs LX7 divergence is
