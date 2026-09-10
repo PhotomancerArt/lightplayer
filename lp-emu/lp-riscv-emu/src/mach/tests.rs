@@ -1461,6 +1461,12 @@ impl super::translated::TranslatedCore<TestBus> for alloc::rc::Rc<core::cell::Re
     fn report(&self) -> alloc::string::String {
         alloc::format!("{} entr(ies)", self.borrow().entries)
     }
+
+    fn retired(&self) -> u64 {
+        // This core runs no guest instructions of its own; the outcomes it
+        // reports are the test's, not a translation's.
+        0
+    }
 }
 
 fn shared(core: FakeCore) -> alloc::rc::Rc<core::cell::RefCell<FakeCore>> {

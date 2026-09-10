@@ -31,11 +31,12 @@
 //! code sends it out to the bus, which faults it exactly as it always has.
 //! Nothing is copied and nothing about the guest's view of memory changes.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use lp_emu_core::{Bus, CycleModel};
 use lp_emu_esp_common::bus::{PERM_NONE, PERM_READ, PERM_READ_WRITE, PERMISSION_PAGE_LEN, SocBus};
 use lp_emu_jit::blocks::BlockSet;
+use lp_emu_jit::discover::{DiscoverStats, discover};
 use lp_emu_jit::host::{
     self, EXCHANGE_LEN, FLAG_AFTER_STORE, FLAG_SLICE_ENDED, HostOps, MMIO_LEAVE_AFTER, MMIO_OK,
     MMIO_PENDING, MMIO_REFUSED, MmioLoad, MmioStore, PERM_ENTRIES, PERM_SHIFT, STEP_CONTINUE,
@@ -67,12 +68,44 @@ fn arena_word(arena: &[u8], base: u32, spans: &[(u32, u32, bool)], pc: u32) -> O
     }
 }
 
-/// Sweep a block set from `seeds`, translate it, and install it on `hart`.
-///
 /// The smallest block budget worth retrying at. Below this the set is too
 /// small to be evidence of anything, and a failure is a real failure.
 const MIN_BLOCKS: usize = 64;
 
+/// Every guest pc the whole-image walk finds an instruction at, unbounded by
+/// any host's ceiling.
+///
+/// This is what separates the two questions a coverage number confuses:
+/// **did discovery find the code** (this), and **would a host compile what it
+/// found** (the installed set). P4 owns the first and P5 owns the second, and
+/// a run has to be able to say which one a shortfall belongs to.
+///
+/// Pure — it reads the arena and touches no peripheral — so it is safe to run
+/// at the end of a run, which is also when it is most honest: the image then
+/// includes whatever the guest wrote and published.
+#[must_use]
+pub fn discovered_instruction_pcs(bus: &SocBus, seeds: &[u32]) -> BTreeSet<u32> {
+    let spans = bus.region_spans();
+    let base = bus.guest_arena_base();
+    let arena = bus.guest_arena();
+    let found = discover(seeds, usize::MAX, &mut |pc| {
+        arena_word(arena, base, &spans, pc)
+    });
+    found
+        .set
+        .blocks
+        .iter()
+        .flat_map(|b| b.insts.iter().map(|&(pc, _)| pc))
+        .collect()
+}
+
+/// Discover the image from `seeds`, translate it, and install it on `hart`.
+///
+/// This is **both** of JD5's translation events: the machine calls it once
+/// before the hart runs, and again at each `fence.i`. There is no third
+/// caller, no counter and no threshold — the census the spike used to pick
+/// hot regions is a diagnostic now (`--blockprof`) and is not on this path.
+///
 /// # Errors
 ///
 /// Nothing reachable to translate, an arena with no room for the tables, or a
@@ -96,6 +129,10 @@ const MIN_BLOCKS: usize = 64;
 /// a real translator bug behind a smaller module. Translated code is not
 /// architectural state, so what was translated cannot change a transcript —
 /// only how much of the run was fast.
+///
+/// **The discovered figure in the report is the whole image**, whatever the
+/// budget ends up installing. That gap is the number P5's module splitting is
+/// sized against, so burying it under the budget would hide the finding.
 pub fn install(
     hart: &mut MachineHart<SocBus>,
     bus: &mut SocBus,
@@ -104,30 +141,52 @@ pub fn install(
     model: CycleModel,
     policy: Emit,
 ) -> Result<BuildReport, String> {
-    let mut budget = max_blocks;
+    let walk = |bus: &SocBus, budget: usize| {
+        let spans = bus.region_spans();
+        let base = bus.guest_arena_base();
+        let arena = bus.guest_arena();
+        let started = std::time::Instant::now();
+        let found = discover(seeds, budget, &mut |pc| arena_word(arena, base, &spans, pc));
+        (found, started.elapsed().as_micros())
+    };
+
+    // The whole image first, and **unbounded**, whatever budget the caller
+    // named. `max_blocks` is a bound on what a host will compile, not on what
+    // the program can run, and reporting the walk through the budget would
+    // hide the very number P5 is sized against.
+    let (whole, discover_us) = walk(bus, usize::MAX);
+    if whole.set.is_empty() {
+        return Err(format!(
+            "nothing translatable is reachable from {:#010x}",
+            seeds.first().copied().unwrap_or(0)
+        ));
+    }
+    let discovery = Discovery {
+        stats: whole.stats,
+        discover_us,
+    };
+
+    let mut budget = whole.set.blocks.len().min(max_blocks);
+    let mut found = if budget < whole.set.blocks.len() {
+        walk(bus, budget).0
+    } else {
+        whole
+    };
     loop {
-        let set = {
-            let spans = bus.region_spans();
-            let base = bus.guest_arena_base();
-            let arena = bus.guest_arena();
-            BlockSet::sweep(seeds, budget, &mut |pc| arena_word(arena, base, &spans, pc))
-        };
-        if set.is_empty() {
-            return Err(format!(
-                "nothing translatable is reachable from {:#010x}",
-                seeds.first().copied().unwrap_or(0)
-            ));
-        }
-        match JitCore::build(bus, &set, model, policy) {
+        match JitCore::build(bus, &found.set, model, policy, discovery) {
             Ok(core) => {
                 let report = core.build_report();
-                let entries = set.entries().to_vec();
+                let entries = found.set.entries().to_vec();
                 hart.set_translated_core(Box::new(core), &entries);
                 return Ok(report);
             }
             Err(e) if budget > MIN_BLOCKS => {
                 budget /= 2;
                 log::warn!("jit: {e}; retrying with {budget} blocks");
+                found = walk(bus, budget).0;
+                if found.set.is_empty() {
+                    return Err(e);
+                }
             }
             Err(e) => return Err(e),
         }
@@ -172,9 +231,18 @@ pub struct JitStats {
     pub retired: u64,
 }
 
+/// What the walk found, before any host ceiling was applied.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Discovery {
+    pub stats: DiscoverStats,
+    pub discover_us: u128,
+}
+
 /// What the machine asked for, so a report can say what it got.
 #[derive(Clone, Copy, Debug)]
 pub struct BuildReport {
+    /// The whole image, whatever was installed of it.
+    pub discovery: Discovery,
     pub blocks: usize,
     pub insts: usize,
     pub native_insts: usize,
@@ -182,6 +250,34 @@ pub struct BuildReport {
     pub module_bytes: usize,
     pub emit_us: u128,
     pub compile_us: u128,
+    pub instantiate_us: u128,
+}
+
+impl BuildReport {
+    /// The boot-cost line (JD20), in host milliseconds and said to be.
+    ///
+    /// One line per translation event, on every `--jit-report` run and in
+    /// every PR body: it is a product number — what a phone pays before the
+    /// first guest instruction runs — and a number nobody prints is a number
+    /// nobody notices going from 0.4 s to 4 s.
+    #[must_use]
+    pub fn boot_line(&self, event: &str) -> String {
+        let d = &self.discovery;
+        let ms = |us: u128| us as f64 / 1000.0;
+        format!(
+            "{event}: discovered {} blocks / {} instr in {:.1} ms; installed {} blocks / {} instr; \
+             emitted {} B in {:.1} ms; compiled in {:.1} ms; instantiated in {:.2} ms",
+            d.stats.blocks,
+            d.stats.insts,
+            ms(d.discover_us),
+            self.blocks,
+            self.insts,
+            self.module_bytes,
+            ms(self.emit_us),
+            ms(self.compile_us),
+            ms(self.instantiate_us),
+        )
+    }
 }
 
 /// What translated code calls back into.
@@ -431,6 +527,7 @@ impl JitCore {
         set: &BlockSet,
         model: CycleModel,
         policy: Emit,
+        discovery: Discovery,
     ) -> Result<Self, String> {
         let at = areas(bus)?;
         write_permission_table(bus, at);
@@ -499,7 +596,6 @@ impl JitCore {
             slice_end: None,
             escape_hatch: 0,
         };
-        let started = std::time::Instant::now();
         // SAFETY: `arena_base` is the bus's own arena, allocated once during
         // construction from the chip's declared memory map and documented as
         // not moving for the life of the machine; the memory wasmtime is given
@@ -509,7 +605,7 @@ impl JitCore {
         // otherwise.
         let core = unsafe { WasmtimeCore::new(&emitted.wasm, ops, arena_ptr, arena_len) }
             .map_err(|e| format!("the translated module did not build: {e:?}"))?;
-        let compile_us = started.elapsed().as_micros();
+        let (compile_us, instantiate_us) = (core.compile_us(), core.instantiate_us());
 
         Ok(Self {
             core,
@@ -520,6 +616,7 @@ impl JitCore {
             verify_pending: false,
             dead: false,
             report: BuildReport {
+                discovery,
                 blocks: set.blocks.len(),
                 insts: set.inst_count(),
                 native_insts: emitted.native_insts,
@@ -527,6 +624,7 @@ impl JitCore {
                 module_bytes: emitted.wasm.len(),
                 emit_us,
                 compile_us,
+                instantiate_us,
             },
         })
     }
@@ -725,15 +823,34 @@ impl TranslatedCore<SocBus> for JitCore {
         self.verify_pending = true;
     }
 
+    fn retired(&self) -> u64 {
+        self.stats.retired
+    }
+
     fn report(&self) -> String {
         let r = self.report;
         let s = self.stats;
+        let d = r.discovery.stats;
         format!(
-            "{} blocks / {} instr ({} emitted, {} escaped, {:.1} % static escape); \
-             module {} B, emit {:.2} ms, compile {:.2} ms; \
+            "discovered {} blocks / {} instr from {} seeds ({} starts, {} ended undecodable, \
+             {} named no code{}); \
+             installed {} blocks / {} instr ({} emitted, {} escaped, {:.1} % static escape); \
+             module {} B, discover {:.2} ms, emit {:.2} ms, compile {:.2} ms, \
+             instantiate {:.2} ms; \
              entries {}, retired {}, escape_hatch {}, \
              invalidations {} (dropped {} blocks), \
              refused_pending {}, refused_watch {}, refused_no_entry {}, refused_impure {}",
+            d.blocks,
+            d.insts,
+            d.seeds,
+            d.starts,
+            d.undecodable,
+            d.empty_starts,
+            if d.truncated {
+                ", budget-truncated"
+            } else {
+                ""
+            },
             r.blocks,
             r.insts,
             r.native_insts,
@@ -744,8 +861,10 @@ impl TranslatedCore<SocBus> for JitCore {
                 100.0 * r.escaped_insts as f64 / r.insts as f64
             },
             r.module_bytes,
+            r.discovery.discover_us as f64 / 1000.0,
             r.emit_us as f64 / 1000.0,
             r.compile_us as f64 / 1000.0,
+            r.instantiate_us as f64 / 1000.0,
             s.entries,
             s.retired,
             s.escape_hatch,

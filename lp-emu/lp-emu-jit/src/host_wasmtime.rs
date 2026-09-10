@@ -51,6 +51,12 @@
 //!   care how fast it is proven.
 
 extern crate alloc;
+// The crate is `no_std`; this module is not, and only exists behind the
+// `host-wasmtime` feature — which drags in wasmtime, which is `std`. Named
+// here so JD20's boot-cost line can be timed with a real clock: the emitting
+// half of that line is timed by the caller, and the compiling half can only
+// be timed where the compiler is called.
+extern crate std;
 
 use alloc::boxed::Box;
 use alloc::string::String;
@@ -167,6 +173,12 @@ pub struct WasmtimeCore<H: HostOps + 'static> {
     store: Store<H>,
     run: TypedFunc<(i32, i64, i64, i64, i64, i64), i32>,
     module_bytes: usize,
+    /// Host microseconds the engine spent compiling the translated module,
+    /// and instantiating it. Separate because JD20's boot-cost line reports
+    /// them separately: compilation is the number that scales with the image
+    /// and instantiation is the number the spike measured at 0.1 ms.
+    compile_us: u128,
+    instantiate_us: u128,
 }
 
 impl<H: HostOps + 'static> WasmtimeCore<H> {
@@ -205,7 +217,9 @@ impl<H: HostOps + 'static> WasmtimeCore<H> {
         }));
 
         let engine = Engine::new(&config)?;
+        let compiling = std::time::Instant::now();
         let module = Module::new(&engine, wasm)?;
+        let compile_us = compiling.elapsed().as_micros();
         let mut store = Store::new(&engine, ops);
 
         let mmio_load = wasmtime::Func::wrap(
@@ -254,6 +268,7 @@ impl<H: HostOps + 'static> WasmtimeCore<H> {
         // host has anyway, where the emulator instance owns the memory and the
         // translated module imports it.
         let pages = u32::try_from(arena_len / 65536).unwrap_or(u32::MAX);
+        let instantiating = std::time::Instant::now();
         let shim = Module::new(&engine, &memory_shim(pages))?;
         let shim = Instance::new(&mut store, &shim, &[])?;
         let memory = shim
@@ -276,7 +291,24 @@ impl<H: HostOps + 'static> WasmtimeCore<H> {
             store,
             run,
             module_bytes: wasm.len(),
+            compile_us,
+            instantiate_us: instantiating.elapsed().as_micros(),
         })
+    }
+
+    /// Host microseconds the engine spent compiling the translated module
+    /// (JD20's boot-cost line).
+    #[must_use]
+    pub fn compile_us(&self) -> u128 {
+        self.compile_us
+    }
+
+    /// Host microseconds spent instantiating it — the memory shim included,
+    /// because that is what a host has to build to hand the module the
+    /// arena.
+    #[must_use]
+    pub fn instantiate_us(&self) -> u128 {
+        self.instantiate_us
     }
 
     /// The ops this core calls back into, so the caller can point them at the
