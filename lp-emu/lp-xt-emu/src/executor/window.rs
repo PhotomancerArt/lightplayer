@@ -1,8 +1,17 @@
-//! The window machinery: `ENTRY`, `RETW`, `RET`, and window overflow/underflow
-//! implemented *directly* (spill/reload to the ABI stack save areas) rather than
-//! by emulating the `_WindowOverflow`/`_WindowUnderflow` handler vectors.
+//! The window machinery: `ENTRY`, `RETW`, `RET`, and — under
+//! [`WindowPolicy::Direct`], the **user-mode** runner's model — window
+//! overflow/underflow implemented *directly* (spill/reload to the ABI stack
+//! save areas) rather than by emulating the `_WindowOverflow`/`_WindowUnderflow`
+//! handler vectors.
 //!
-//! ## Model
+//! Under [`WindowPolicy::Exception`] (the machine-mode hart, `crate::mach`)
+//! the same two executors only rotate: overflow and underflow are detected
+//! by the hart before the instruction runs (`mach::window`) and raise the
+//! architectural exception, so the guest's own handlers do the spilling. This
+//! file is the **branch point** — one `ENTRY`, one `RETW`, selected here —
+//! which is what keeps the two models from drifting apart silently (Q3).
+//!
+//! ## Model (user mode, `WindowPolicy::Direct`)
 //!
 //! `WindowStart` bit `k` set ⇒ the frame based at window `k` is *resident* in the
 //! physical register file. A frame entered with call-increment `inc` owns `inc`
@@ -38,6 +47,7 @@ use super::Exec;
 use crate::cpu::{Cpu, FrameRec, NUM_BASES};
 use crate::emu::Flow;
 use crate::error::Trap;
+use crate::mach::window::WindowPolicy;
 use crate::memory::XtAccess;
 use crate::trace::{TraceEvent, Tracer};
 
@@ -68,12 +78,30 @@ impl<B: Bus> Exec<'_, B> {
             Inst::Entry(rs, imm) => (rs.num(), imm),
             _ => unreachable!("exec_entry got {inst:?}"),
         };
-        let inc = self.cpu.ps_callinc.max(1);
         let old_base = self.cpu.window_base;
+        let inc = match self.window {
+            // The direct model has always treated a stray `CALLINC = 0` as
+            // a call4; unchanged, because every golden was made under it.
+            WindowPolicy::Direct => self.cpu.ps_callinc.max(1),
+            // The RM's mechanism (§4.7.1.4): rotate by PS.CALLINC as it is.
+            // The overflow check for the new frame's group already ran on
+            // the hart (`mach::window`), and the WOE/EXCM/`s > 3` legality
+            // checks with it; there is nothing left here but the rotation.
+            WindowPolicy::Exception => {
+                debug_assert!(
+                    self.cpu.call_stack.is_empty(),
+                    "the call-stack shadow is a user-mode artefact; machine mode must not touch it"
+                );
+                self.cpu.ps_callinc
+            }
+        };
         let new_base = (old_base + inc) % NUM_BASES;
 
-        // Overflow: make room for the new frame's owned registers.
-        self.ensure_window_free(new_base, inc, tracer)?;
+        // Overflow, user mode only: make room for the new frame's owned
+        // registers by spilling the ancestor that owns them.
+        if self.window == WindowPolicy::Direct {
+            self.ensure_window_free(new_base, inc, tracer)?;
+        }
 
         // SP is read in the caller's (current) window, then the callee's SP is
         // written after the rotation.
@@ -83,12 +111,14 @@ impl<B: Bus> Exec<'_, B> {
         self.cpu.window_base = new_base;
         self.wreg(as_reg, new_sp, tracer);
         self.cpu.window_start |= 1 << new_base;
-        self.cpu.call_stack.push(FrameRec {
-            base: new_base,
-            sp: new_sp,
-            inc,
-            resident: true,
-        });
+        if self.window == WindowPolicy::Direct {
+            self.cpu.call_stack.push(FrameRec {
+                base: new_base,
+                sp: new_sp,
+                inc,
+                resident: true,
+            });
+        }
 
         tracer.event(TraceEvent::WindowRotate {
             what: "entry",
@@ -106,6 +136,28 @@ impl<B: Bus> Exec<'_, B> {
         let ret_pc = (self.cpu.pc & 0xC000_0000) | (a0 & 0x3FFF_FFFF);
         let old_base = self.cpu.window_base;
         let new_base = (old_base + NUM_BASES - n) % NUM_BASES;
+
+        if self.window == WindowPolicy::Exception {
+            // The RM's RETW (§4.7.1.4), completing: the hart has already
+            // checked that `n != 0`, that WOE is on and EXCM off, and that
+            // the caller's WindowStart bit is set (else it raised the
+            // underflow, with WindowBase left decremented, and this
+            // instruction never reached the executor). What remains is
+            // "clear its own WindowStart bit and jump".
+            debug_assert!(
+                self.cpu.call_stack.is_empty(),
+                "the call-stack shadow is a user-mode artefact; machine mode must not touch it"
+            );
+            self.cpu.window_start &= !(1 << old_base);
+            self.cpu.window_base = new_base;
+            tracer.event(TraceEvent::WindowRotate {
+                what: "retw",
+                old_base,
+                new_base,
+                window_start: self.cpu.window_start,
+            });
+            return Ok(Flow::Jump(ret_pc));
+        }
 
         // The returning (current) frame's stack pointer locates the caller's
         // base save area at `[callee_sp - 16, callee_sp)`.

@@ -17,6 +17,7 @@ use crate::cpu::Cpu;
 use crate::emu::Flow;
 use crate::error::{Trap, TrapKind};
 use crate::fp_policy::FpPolicy;
+use crate::mach::window::WindowPolicy;
 use crate::trace::{TraceEvent, Tracer};
 
 /// The per-instruction execution context: everything an executor touches,
@@ -45,6 +46,10 @@ pub(crate) struct Exec<'a, B: Bus> {
     pub(crate) cpu: &'a mut Cpu,
     pub(crate) mem: &'a mut B,
     pub(crate) fp_policy: &'a mut FpPolicy,
+    /// How `ENTRY`/`RETW` handle a window that has wrapped: the user-mode
+    /// runner spills and reloads directly, the machine-mode hart raises the
+    /// architectural exception. See [`WindowPolicy`].
+    pub(crate) window: WindowPolicy,
 }
 
 /// The trap a machine-mode-only instruction raises in the **user-mode** runner.
