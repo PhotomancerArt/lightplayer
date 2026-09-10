@@ -7,7 +7,12 @@
 - **Superseded by:** None
 - **Amended by:** [2026-09-07-always-a-device-target-real-emu-sim.md](2026-09-07-always-a-device-target-real-emu-sim.md)
   (the tab's ONE session is a device lens, whatever backs it — "one sim OR
-  one device" becomes "one device per tab")
+  one device" becomes "one device per tab") and
+  [2026-09-09-studio-device-stack-over-a-virtual-serial-port.md](2026-09-09-studio-device-stack-over-a-virtual-serial-port.md)
+  (this ADR's M9 item: what a session is attached to may be an EMULATED board
+  reached through a `navigator.serial` polyfill, and the pool learns no new
+  kind — the sessions, their ids and their identities are the same objects
+  over a virtual port)
 
 ## Context
 

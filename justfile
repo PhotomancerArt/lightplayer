@@ -218,7 +218,7 @@ fw-browser-test: install-wasm32-target
         echo "wasm-bindgen-test-runner not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
         exit 1
     fi
-    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner \
+    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="$PWD/scripts/browser-test-harness.sh" \
         cargo test -p fw-browser --target wasm32-unknown-unknown
 
 # Local project store tests: real browser + real OPFS. Needs a chromedriver
@@ -231,7 +231,7 @@ lpa-fs-opfs-test: install-wasm32-target
         echo "wasm-bindgen-test-runner not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
         exit 1
     fi
-    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner \
+    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="$PWD/scripts/browser-test-harness.sh" \
         cargo test -p lpa-fs-opfs --target wasm32-unknown-unknown
 
 # The Web Serial JS layer in a real Chrome — the harness
@@ -480,6 +480,83 @@ claude-launch-json mode="":
 # of truth, as always (docs/defects/2026-07-27-launch-json-pinned-port.md).
 studio-dev-bench:
     STUDIO_BENCH=1 just studio-dev
+
+# studio-dev with emulated ESP32-C6 boards behind it — a Studio device walk
+# with no board (emulator plan two, M3).
+#
+# Starts `lp-cli emu serve` holding TWO boards (PD4: two identities is where
+# the multi-board defects live) on an ephemeral port, prints the URL to open,
+# and then runs `studio-dev` in the foreground. The emulator is stopped BY PID
+# when this recipe exits — never `pkill -f`, another worktree's `lp-cli` is
+# not ours to kill.
+#
+# The boards boot the SAME image Studio serves for flashing: this depends on
+# `studio-firmware-package-served`, whose `esp32c6-4mb` build leaves its ELF
+# at target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6. Pass a
+# different image as the argument to boot that instead.
+#
+# Two ports, and neither is pinned. The emulator takes an ephemeral one and
+# prints it; the dev server takes this worktree's hashed one
+# (scripts/dev-port.sh) and prints it. The URL printed by `studio-dev` is the
+# source of truth — the `?emu=` line below predicts it with `--query`, which
+# is what `claude-launch-json` does, and a prediction is not a promise.
+#
+# NO WebSerial grant, no Chromium policy profile, no bench port block: a
+# polyfilled `navigator.serial` grants itself (plan two, notes §8). Those
+# exist for HARDWARE walks (`just studio-dev-bench`, `just serial-grant`) and
+# wiring them in here would be reintroducing a constraint the shim removes.
+studio-dev-emu IMAGE="": install-wasm32-target studio-firmware-package-served
+    #!/usr/bin/env bash
+    set -euo pipefail
+    image="{{ IMAGE }}"
+    if [[ -z "${image}" ]]; then
+        image="target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6"
+    fi
+    if [[ ! -f "${image}" ]]; then
+        echo "studio-dev-emu: no emulator image at ${image}" >&2
+        echo "Build one with: cargo run -p lp-cli -- firmware package esp32c6-4mb" >&2
+        exit 1
+    fi
+    cargo build -p lp-cli
+    state="target/emu-serve/studio-dev"
+    mkdir -p "${state}"
+    log="${state}/serve.log"
+    # The door's port is hashed per worktree by the same script the dev
+    # server's is (never pinned, never shared), so the `?emu=` URL survives a
+    # restart. The address the door PRINTS is still the source of truth.
+    emu_port="$(scripts/dev-port.sh emu-serve "${EMU_SERVE_PORT:-}")"
+    ./target/debug/lp-cli emu serve \
+        --board "c6-a=${image}" \
+        --board "c6-b=${image}" \
+        --listen "127.0.0.1:${emu_port}" \
+        --state-dir "${state}" \
+        --console-dir "${state}" >"${log}" 2>&1 &
+    serve_pid=$!
+    trap 'kill "${serve_pid}" 2>/dev/null || true' EXIT
+    addr=""
+    for _ in $(seq 1 100); do
+        addr="$(sed -n 's/.*emu serve: listening on http:\/\/\(.*\)$/\1/p' "${log}" | head -1 || true)"
+        [[ -n "${addr}" ]] && break
+        if ! kill -0 "${serve_pid}" 2>/dev/null; then
+            echo "studio-dev-emu: emu serve exited before it listened; log follows" >&2
+            cat "${log}" >&2
+            exit 1
+        fi
+        sleep 0.2
+    done
+    if [[ -z "${addr}" ]]; then
+        echo "studio-dev-emu: emu serve never printed a listen address" >&2
+        exit 1
+    fi
+    studio_port="$(scripts/dev-port.sh --query studio-dev "${STUDIO_WEB_PORT:-}")"
+    echo
+    echo "Emulated boards:  http://${addr}/boards   (image: ${image})"
+    echo "Emulator console: ${state}/<board>.console.log"
+    echo "Open Studio with: ?emu=ws://${addr}"
+    echo "  predicted:      http://127.0.0.1:${studio_port}/?emu=ws://${addr}"
+    echo "  (the URL studio-dev prints below is the source of truth)"
+    echo
+    just studio-dev
 
 studio-dev: install-wasm32-target studio-firmware-package-served
     #!/usr/bin/env bash
@@ -2155,7 +2232,7 @@ test-glsl-filetests:
 # (which need chip builds this gate deliberately avoids). Note the narrow
 # residue: drift unique to the emu fixture itself is only caught locally.
 [parallel]
-check-lint: fmt-check clippy check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-serial-js-frozen lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities
+check-lint: fmt-check clippy check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-browser-serial-js-frozen lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
@@ -2171,6 +2248,14 @@ lint-browser-serial-js-frozen:
 # See docs/adr/2026-07-04-json-only-artifacts.md and the script's allowlist.
 lint-serde-content:
     ./scripts/check-serde-content.sh
+
+# The browser suites' runner reports "Error: some tests failed" whether a test
+# failed or headless Firefox was SIGKILLed mid-run (PR #651). The harness in
+# front of it tells those apart; this runs its classifier against captured
+# logs of both, so a widened rule that would retry a real red suite fails here
+# instead of on a branch someone trusts.
+lint-browser-test-harness:
+    ./scripts/browser-test-harness.sh --self-test
 
 # The control-flow torture corpus is generated; without this gate, hand edits to
 # those files are silently reverted by the next `--write` (that is how the

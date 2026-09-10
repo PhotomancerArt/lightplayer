@@ -1,0 +1,5 @@
+Executing bindgen...                                                                                Running headless tests in Safari on `http://127.0.0.1:52393/`
+Try find `webdriver.json` for configure browser's capabilities:
+Not found
+Starting new webdriver session...                                                                   driver status: signal: 9 (SIGKILL)
+                                                  Error: http status: 500

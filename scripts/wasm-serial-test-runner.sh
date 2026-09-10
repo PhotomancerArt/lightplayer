@@ -58,5 +58,26 @@ mkdir -p "$root/lpa-link" "$root/provider"
 cp "$public"/*.js "$root/lpa-link/"
 cp "$provider"/*.js "$root/provider/"
 
+# `wasm-bindgen-test-runner` reads `webdriver.json` from its CWD and nowhere
+# else (measured 2026-09-09: one in the repo root reads "Not found"), and its
+# CWD is the root built above. `LP_WEBDRIVER_JSON` puts a capabilities file
+# there — the way to point the suite at a browser binary that MATCHES the
+# chromedriver on this machine. It exists because the desk's system Chrome and
+# its homebrew chromedriver drift apart (152 vs 150 on 2026-09-09, with the
+# cask disabled by Gatekeeper), which makes this suite unrunnable locally and
+# leaves CI as the only oracle for a browser-only failure. CI sets nothing and
+# uses the runner's own defaults.
+if [ -n "${LP_WEBDRIVER_JSON:-}" ]; then
+    if [ ! -f "$LP_WEBDRIVER_JSON" ]; then
+        echo "wasm-serial-test-runner: LP_WEBDRIVER_JSON=$LP_WEBDRIVER_JSON does not exist" >&2
+        exit 1
+    fi
+    cp "$LP_WEBDRIVER_JSON" "$root/webdriver.json"
+fi
+
 cd "$root"
-exec wasm-bindgen-test-runner "$wasm_abs" "$@"
+# Through `browser-test-harness.sh`, never `wasm-bindgen-test-runner`
+# directly: the runner reports a dead browser and a red suite with the same
+# "Error: some tests failed", and this suite is the one that has actually been
+# bitten by it (PR #651, and again locally on 2026-09-09).
+exec "$repo_root/scripts/browser-test-harness.sh" "$wasm_abs" "$@"

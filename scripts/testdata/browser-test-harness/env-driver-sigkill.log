@@ -1,0 +1,28 @@
+Executing bindgen...                                                                                Running headless tests in Firefox on `http://127.0.0.1:52114/`
+Try find `webdriver.json` for configure browser's capabilities:
+Not found
+Starting new webdriver session...                 Visiting http://127.0.0.1:52113...                Loading page elements...                          Waiting for test to finish...                                                                       Failed to detect test as having been run. It might have timed out.
+output div contained:
+    running 14 tests
+
+console.log div contained:
+    Invoking test: the_signal_lines_pass_through_undecoded
+
+                                                  driver status: signal: 9 (SIGKILL)
+driver stdout:
+    1789021219760	geckodriver	INFO	Listening on 127.0.0.1:52114
+    1789021219875	mozrunner::runner	INFO	Running command: MOZ_CRASHREPORTER="1" MOZ_CRASHREPORTER_NO_REPORT="1" MOZ_CRASHREPORTER_SHUTDOWN="1" "/Applications/Firefox. ... e" "-headless" "-foreground" "-no-remote" "-profile" "/var/folders/4k/sz_fzyrd7d7656btz16_q20r0000gp/T/rust_mozprofilel087OH"
+    1789021220307	Marionette	INFO	Marionette enabled
+    1789021220474	Marionette	INFO	Listening on port 52118
+    [GFX1-]: RenderCompositorSWGL failed mapping default framebuffer, no dt
+    console.error: "Experiment desktop-release-rollout-show-relay-to-all-browsers-next-sign-up-modal-cta has unknown featureId: email-autocomplete-relay"
+    console.error: "Experiment visual-card-updates has unknown featureId: newtabRefinedCardsLayout"
+    console.error: "Experiment enable-nimbus-unenrollment-synchronization has unknown featureId: nimbusStore"
+    console.error: "Experiment private-window-visual-refresh-design-change-only has unknown featureId: feltPrivacy"
+    1789021241831	Marionette	INFO	Stopped listening on port 52118
+
+driver stderr:
+    *** You are running in headless mode.
+    JavaScript error: resource://gre/modules/PrivateBrowsingUtils.sys.mjs, line 50: TypeError: can't access property "QueryInterface", aWindow.docShell is null
+
+                                                  Error: some tests failed
