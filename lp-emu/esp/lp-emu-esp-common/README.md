@@ -74,6 +74,16 @@ Three policies:
   afterwards would have already destroyed the evidence. NAPOT decodes as the
   RISC-V debug spec says (`mask = tdata2 ^ (tdata2 + 1)`).
 
+**How many watchpoint slots a machine has is a chip fact, so the bus does not
+hold it.** `MAX_WATCHPOINT_SLOTS` is the size of the array the slots live in —
+a capacity, not a claim about any chip — and each machine declares its own
+count with `SocBus::set_watchpoint_slots`. The ESP32-C6 has four (the RISC-V
+debug spec's `mcontrol` triggers) and Xtensa LX6/LX7 have two (`DBREAK`), and
+both numbers live in their own chip crates. A fresh `SocBus` has the maximum,
+so a machine that declares nothing behaves as it always did; narrowing the
+count clears the slots it takes away, because a slot left armed above the
+count would be armed and unreachable.
+
 MMIO writes set the **sideband** flag; RAM writes and MMIO reads do not. The
 privileged stepper consumes it after store- and system-class instructions to
 know whether the interrupt state may have moved.
@@ -258,6 +268,14 @@ machine.
 using `vaddr` for both is how `.rtc_fast` ends up in the wrong place),
 carries per-segment flags and the zero-fill tail, and looks symbols up by
 name and by address — what the ROM intercept table and `--probe` need.
+
+The view accepts two `e_machine` values, `EM_RISCV` and `EM_XTENSA`
+(`ACCEPTED_MACHINES`), and rejects everything else as
+`ElfError::UnsupportedMachine`. That is not a hole in the neutrality rule: an
+ELF machine number is a **format** constant from the ELF specification's `EM_*`
+table, not a chip number — `EM_XTENSA` says LX6/LX7 no more than `EM_RISCV`
+says C6 — and nothing else about the parse is machine-dependent. A `PT_LOAD`
+is a `PT_LOAD`.
 
 ## Tests
 
