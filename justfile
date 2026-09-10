@@ -521,10 +521,14 @@ studio-dev-emu IMAGE="": install-wasm32-target studio-firmware-package-served
     state="target/emu-serve/studio-dev"
     mkdir -p "${state}"
     log="${state}/serve.log"
+    # The door's port is hashed per worktree by the same script the dev
+    # server's is (never pinned, never shared), so the `?emu=` URL survives a
+    # restart. The address the door PRINTS is still the source of truth.
+    emu_port="$(scripts/dev-port.sh emu-serve "${EMU_SERVE_PORT:-}")"
     ./target/debug/lp-cli emu serve \
         --board "c6-a=${image}" \
         --board "c6-b=${image}" \
-        --listen 127.0.0.1:0 \
+        --listen "127.0.0.1:${emu_port}" \
         --state-dir "${state}" \
         --console-dir "${state}" >"${log}" 2>&1 &
     serve_pid=$!
