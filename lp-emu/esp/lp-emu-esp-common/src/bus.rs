@@ -1935,6 +1935,85 @@ impl Bus for SocBus {
         }
     }
 
+    /// The variable-length fetch: up to three bytes at `pc`, for a decoder
+    /// whose instructions are 2 or 3 bytes long and start at any alignment.
+    ///
+    /// This is [`fetch_instruction`](Bus::fetch_instruction)'s sibling, not
+    /// its replacement: the two serve two instruction sets and neither is
+    /// written in terms of the other, because the answers differ. The word
+    /// form rejects an odd address (an RV32 fact) and assembles a `u32`; this
+    /// one has no alignment rule at all, and returns the *count* of bytes it
+    /// could really read.
+    ///
+    /// The count is the honest answer, not a courtesy: a decoder that needs
+    /// more bytes than it got has run off the end of the region, and that is a
+    /// fault for the decoder to raise, not something to paper over by reading
+    /// the next region's first byte or by wrapping to the arena's start.
+    ///
+    /// **`SocBus` must not inherit the default.** `Bus::fetch_bytes`'s default
+    /// is three [`read_u8`](Bus::read_u8) calls, and `read_u8` on this bus
+    /// reaches the MMIO decode table, where a read has side effects: reading
+    /// UART0's FIFO pops a byte. A fetch that walked off the end of an exec
+    /// region into peripheral space would therefore clock a FIFO, silently, on
+    /// the fetch path. Same rule as `fetch_instruction`'s, and for the same
+    /// reason: fetch never routes to MMIO.
+    #[inline]
+    fn fetch_bytes(&mut self, pc: u32, out: &mut [u8; 3]) -> Result<usize, MemoryError> {
+        // Two, matching `fetch_instruction`, and deliberately not the byte
+        // count: the watchpoint models a hardware fetch trigger, which watches
+        // the instruction's *address*. Sizing the check by the bytes returned
+        // would make a 3-byte instruction trip a trigger that a 2-byte one at
+        // the same address does not.
+        self.check_watchpoints(pc, 2, MemoryAccessKind::InstructionFetch)?;
+
+        let fault = || MemoryError::InvalidAccess {
+            address: pc,
+            size: 1,
+            kind: MemoryAccessKind::InstructionFetch,
+        };
+
+        // Fetch never routes to MMIO: a jump into peripheral space is a
+        // wild branch, and returning a register's value as an instruction
+        // would turn it into a puzzle.
+        let i = self.fetch_region_index(pc).ok_or_else(fault)?;
+        if !self.regions[i].exec {
+            return Err(fault());
+        }
+        self.last_fetch_region = i;
+        if self.strict {
+            self.check_code_word(pc, true);
+        }
+        if let Some(cost) = self.memory_cost.as_mut() {
+            self.memory_cycles += cost.fetch(pc);
+        }
+        // The arena is flat across region boundaries, so the region's own end
+        // — not the arena's — is what says how much of this fetch is real.
+        // Two regions that happen to sit next to each other in the arena are
+        // still two regions, and an instruction does not straddle them. The
+        // subtraction cannot wrap: `fetch_region_index` already placed `pc`
+        // inside the region, so `pc < end()`.
+        let room = self.regions[i].end().wrapping_sub(pc).min(3) as usize;
+        let off = (pc - self.arena_base) as usize;
+        let d = &self.arena;
+        // One bounds check, one copy — no per-byte loop, because the count is
+        // the whole answer and a partial copy would be the same slice anyway.
+        let got = match d.get(off..off + room) {
+            Some(b) => {
+                out[..b.len()].copy_from_slice(b);
+                b.len()
+            }
+            None => return Err(fault()),
+        };
+        // Unreachable while `fetch_region_index` succeeded on a non-empty
+        // region, but making `Ok(0)` impossible by construction beats making
+        // it impossible by argument: a decoder handed zero bytes would see an
+        // empty instruction rather than a fault.
+        if got == 0 {
+            return Err(fault());
+        }
+        Ok(got)
+    }
+
     #[inline]
     fn read_word(&mut self, address: u32) -> Result<i32, MemoryError> {
         self.read(address, Width::Word).map(|v| v as i32)
@@ -2577,6 +2656,260 @@ mod tests {
         bus.write_word(0x4080_0000, 0x0000_4501).unwrap();
         assert_eq!(bus.fetch_instruction(0x4080_0002).unwrap(), 0x0000_0000);
         assert!(bus.fetch_instruction(0x4080_0004).is_err());
+    }
+
+    // ---- byte-granular fetch (`Bus::fetch_bytes`) ----------------------
+    //
+    // The fixture is the shape that makes the interesting cases reachable:
+    // two **adjacent** exec regions, an MMIO window that abuts the second
+    // one's end, and a non-exec region above the window. The arena is one
+    // flat allocation covering 0x4080_0000..0x4080_0130, so it physically
+    // holds bytes underneath the MMIO hole — which is exactly what a fetch
+    // must refuse to hand back.
+
+    const FETCH_A: u32 = 0x4080_0000; // exec, 0x10 bytes
+    const FETCH_B: u32 = 0x4080_0010; // exec, 0x10 bytes, adjacent to A
+    const FETCH_MMIO: u32 = 0x4080_0020; // peripheral window, abuts B's end
+    const FETCH_DATA: u32 = 0x4080_0120; // non-exec RAM above the window
+
+    /// The fixture, plus the peripheral's index so a test can ask how many
+    /// reads it saw.
+    fn bus_for_byte_fetch() -> (SocBus, usize) {
+        let mut bus = SocBus::new();
+        bus.add_region(RamRegion::new("code-a", FETCH_A, 0x10).executable());
+        bus.add_region(RamRegion::new("code-b", FETCH_B, 0x10).executable());
+        bus.add_region(RamRegion::new("data", FETCH_DATA, 0x10));
+        let probe = bus.add_peripheral(FETCH_MMIO, 0x100, Box::new(Probe::new("UART0")));
+        // Distinct, recognisable bytes per region: A is 0xa0.., B is 0xb0..,
+        // the non-exec region is 0xd0.., so a byte that leaked across a
+        // boundary names the region it came from.
+        let a: Vec<u8> = (0..0x10u8).map(|i| 0xa0 | i).collect();
+        let b: Vec<u8> = (0..0x10u8).map(|i| 0xb0 | i).collect();
+        let d: Vec<u8> = (0..0x10u8).map(|i| 0xd0 | i).collect();
+        bus.load_image(FETCH_A, &a).unwrap();
+        bus.load_image(FETCH_B, &b).unwrap();
+        bus.load_image(FETCH_DATA, &d).unwrap();
+        (bus, probe)
+    }
+
+    /// How many MMIO reads the fixture's peripheral has served. `Probe`'s
+    /// `save_state` is its read count, which beats downcasting.
+    fn probe_reads(bus: &mut SocBus, probe: usize) -> u8 {
+        bus.peripheral_mut(probe).unwrap().save_state()[0]
+    }
+
+    /// A cost model that charges a different, recognisable amount per access
+    /// kind, so "charged once, as a fetch" is distinguishable from "charged
+    /// three times, as loads" — which is what inheriting the default
+    /// `Bus::fetch_bytes` would look like.
+    struct CountingCost;
+
+    impl lp_emu_core::cycle_model::MemoryCost for CountingCost {
+        fn fetch(&mut self, _addr: u32) -> u32 {
+            7
+        }
+        fn load(&mut self, _addr: u32, _width: u8) -> u32 {
+            100
+        }
+        fn store(&mut self, _addr: u32, _width: u8) -> u32 {
+            1000
+        }
+    }
+
+    #[test]
+    fn fetch_bytes_reads_three_at_any_alignment() {
+        let (mut bus, _) = bus_for_byte_fetch();
+        // Xtensa instructions start wherever the previous one ended, so every
+        // alignment is a real fetch address. No `Unaligned` here, ever.
+        for k in 0..4u32 {
+            let mut out = [0u8; 3];
+            let got = bus.fetch_bytes(FETCH_A + k, &mut out).unwrap();
+            assert_eq!(got, 3, "three bytes of room at +{k}");
+            assert_eq!(
+                out,
+                [
+                    0xa0 | k as u8,
+                    0xa0 | (k + 1) as u8,
+                    0xa0 | (k + 2) as u8
+                ],
+                "the arena's own bytes at +{k}"
+            );
+        }
+    }
+
+    #[test]
+    fn fetch_bytes_at_a_region_edge_returns_what_is_there() {
+        let (mut bus, _) = bus_for_byte_fetch();
+        // Two bytes before the end of `code-b`, the last exec region, whose
+        // end abuts the MMIO window: the count is what is really there.
+        let mut out = [0u8; 3];
+        let got = bus.fetch_bytes(FETCH_B + 0xe, &mut out).unwrap();
+        assert_eq!(got, 2);
+        assert_eq!(&out[..2], &[0xbe, 0xbf]);
+
+        let mut out = [0u8; 3];
+        let got = bus.fetch_bytes(FETCH_B + 0xf, &mut out).unwrap();
+        assert_eq!(got, 1);
+        assert_eq!(out[0], 0xbf);
+
+        // One past the end is not an edge, it is a fault.
+        let mut out = [0u8; 3];
+        assert!(bus.fetch_bytes(FETCH_B + 0x10, &mut out).is_err());
+    }
+
+    #[test]
+    fn fetch_bytes_does_not_straddle_into_the_next_region() {
+        let (mut bus, _) = bus_for_byte_fetch();
+        // `code-a` and `code-b` are adjacent in the arena and both executable,
+        // so a fetch that used the ARENA's bounds instead of the REGION's
+        // would happily return `code-b`'s first byte as the third byte of an
+        // instruction in `code-a`. This is the test the phase exists for.
+        let mut out = [0xffu8; 3];
+        let got = bus.fetch_bytes(FETCH_A + 0xe, &mut out).unwrap();
+        assert_eq!(got, 2, "two bytes are what is really there");
+        assert_eq!(&out[..2], &[0xae, 0xaf]);
+        assert_ne!(
+            out[2], 0xb0,
+            "the third byte must not be `code-b`'s first byte"
+        );
+        assert_eq!(out[2], 0xff, "and nothing was written past the count");
+
+        // The region really is adjacent — `code-b`'s own first byte is there
+        // when it is asked for by its own address.
+        let mut out = [0u8; 3];
+        assert_eq!(bus.fetch_bytes(FETCH_B, &mut out).unwrap(), 3);
+        assert_eq!(out[0], 0xb0);
+    }
+
+    #[test]
+    fn fetch_bytes_never_routes_to_mmio() {
+        let (mut bus, probe) = bus_for_byte_fetch();
+        // Straight at the peripheral's base: a wild branch into peripheral
+        // space is a fault, not a register read dressed up as an instruction.
+        let mut out = [0u8; 3];
+        let err = bus.fetch_bytes(FETCH_MMIO, &mut out).unwrap_err();
+        assert!(matches!(
+            err,
+            MemoryError::InvalidAccess {
+                address: FETCH_MMIO,
+                kind: MemoryAccessKind::InstructionFetch,
+                ..
+            }
+        ));
+        assert_eq!(probe_reads(&mut bus, probe), 0, "no MMIO read happened");
+
+        // And at the last bytes of the exec region whose end abuts that
+        // window: the third byte would be the peripheral's first register.
+        // The default `Bus::fetch_bytes` (three `read_u8` calls) would read
+        // it, and on a real UART that pops a FIFO byte.
+        let mut out = [0u8; 3];
+        assert_eq!(bus.fetch_bytes(FETCH_B + 0xe, &mut out).unwrap(), 2);
+        assert_eq!(probe_reads(&mut bus, probe), 0, "still no MMIO read");
+    }
+
+    #[test]
+    fn fetch_bytes_refuses_a_non_exec_region() {
+        let (mut bus, probe) = bus_for_byte_fetch();
+        let mut out = [0u8; 3];
+        let err = bus.fetch_bytes(FETCH_DATA, &mut out).unwrap_err();
+        assert!(matches!(
+            err,
+            MemoryError::InvalidAccess {
+                address: FETCH_DATA,
+                kind: MemoryAccessKind::InstructionFetch,
+                ..
+            }
+        ));
+        assert_eq!(out, [0u8; 3], "and no bytes were handed back");
+        assert_eq!(probe_reads(&mut bus, probe), 0);
+    }
+
+    #[test]
+    fn fetch_bytes_agrees_with_fetch_instruction_where_both_are_defined() {
+        let (mut bus, _) = bus_for_byte_fetch();
+        // The two methods are separate bodies with separate contracts; this
+        // is the check that they read the same memory. Word-aligned, four
+        // bytes of room: the only place `fetch_instruction` returns a whole
+        // word, and therefore the only place the two are comparable.
+        for base in [FETCH_A, FETCH_B] {
+            for off in (0..0x10u32 - 4).step_by(4) {
+                let at = base + off;
+                let word = bus.fetch_instruction(at).unwrap();
+                let mut out = [0u8; 3];
+                assert_eq!(bus.fetch_bytes(at, &mut out).unwrap(), 3);
+                let fourth = bus.read_u8(at + 3).unwrap();
+                assert_eq!(
+                    word,
+                    u32::from_le_bytes([out[0], out[1], out[2], fourth]),
+                    "the two fetch paths disagree at {at:#010x}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn fetch_bytes_honours_a_watchpoint() {
+        let (mut bus, _) = bus_for_byte_fetch();
+        bus.set_watchpoint(
+            1,
+            Some(Watchpoint {
+                address: FETCH_A + 4,
+                napot: false,
+                on_store: false,
+                on_load: false,
+                on_execute: true,
+            }),
+        );
+        let mut out = [0xffu8; 3];
+        let err = bus.fetch_bytes(FETCH_A + 4, &mut out).unwrap_err();
+        assert!(matches!(
+            err,
+            MemoryError::Watchpoint {
+                slot: 1,
+                kind: MemoryAccessKind::InstructionFetch,
+                ..
+            }
+        ));
+        assert_eq!(out, [0xffu8; 3], "the trigger fires before any byte moves");
+
+        // Disarmed, the same address fetches normally.
+        bus.set_watchpoint(1, None);
+        let mut out = [0u8; 3];
+        assert_eq!(bus.fetch_bytes(FETCH_A + 4, &mut out).unwrap(), 3);
+        assert_eq!(out[0], 0xa4);
+    }
+
+    #[test]
+    fn fetch_bytes_unmapped_is_a_fault_with_the_address() {
+        let (mut bus, _) = bus_for_byte_fetch();
+        let mut out = [0u8; 3];
+        let err = bus.fetch_bytes(0x7000_0000, &mut out).unwrap_err();
+        assert!(matches!(
+            err,
+            MemoryError::InvalidAccess {
+                address: 0x7000_0000,
+                kind: MemoryAccessKind::InstructionFetch,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn fetch_bytes_charges_the_memory_cost_model_once() {
+        let (mut bus, _) = bus_for_byte_fetch();
+        bus.set_memory_cost(Some(Box::new(CountingCost)));
+        assert_eq!(bus.take_memory_cost(), 0);
+
+        let mut out = [0u8; 3];
+        bus.fetch_bytes(FETCH_A, &mut out).unwrap();
+        // Exactly one fetch. Three loads (the default's three `read_u8`
+        // calls) would be 300, and a fetch plus loads would be 307.
+        assert_eq!(bus.take_memory_cost(), 7);
+
+        // A two-byte fetch at a region edge is still one fetch, not two.
+        let mut out = [0u8; 3];
+        bus.fetch_bytes(FETCH_B + 0xe, &mut out).unwrap();
+        assert_eq!(bus.take_memory_cost(), 7);
     }
 
     #[test]
