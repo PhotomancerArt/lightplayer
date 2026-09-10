@@ -523,7 +523,9 @@ fn run(name: &'static str, script: &Script) -> Option<Run> {
     // handler, where it would look like a fixture bug.
     hart.set_strict_unsupported(true);
 
-    let tail_env = std::env::var("LP_XT_MACH_TAIL").ok().filter(|v| !v.is_empty());
+    let tail_env = std::env::var("LP_XT_MACH_TAIL")
+        .ok()
+        .filter(|v| !v.is_empty());
     let mut vectors = VectorTracer {
         arm_at: tail_env
             .as_deref()
@@ -594,7 +596,8 @@ fn run(name: &'static str, script: &Script) -> Option<Run> {
         .collect();
 
     assert_ne!(
-        slots[0], MAGIC_PANIC,
+        slots[0],
+        MAGIC_PANIC,
         "{name}: the fixture PANICKED (slot 0 = MAGIC_PANIC) — its own \
          assertions failed. Vectors entered: {}",
         vectors.summary()
@@ -1030,8 +1033,16 @@ fn mach_esp_rtos_context_switch() {
     // 64 iterations folding LCOUNT 63..0, and 48 folding 47..0.
     assert_eq!(run.slot(5), 64 * 63 / 2, "task A's LCOUNT fold");
     assert_eq!(run.slot(6), 48 * 47 / 2, "task B's LCOUNT fold");
-    assert_eq!(run.slot(7), 1, "task A's LBEG/LEND survived its preemptions");
-    assert_eq!(run.slot(8), 1, "task B's LBEG/LEND survived its preemptions");
+    assert_eq!(
+        run.slot(7),
+        1,
+        "task A's LBEG/LEND survived its preemptions"
+    );
+    assert_eq!(
+        run.slot(8),
+        1,
+        "task B's LBEG/LEND survived its preemptions"
+    );
 }
 
 // ===========================================================================
