@@ -1414,10 +1414,14 @@ impl SocBus {
             // running off the end of a region would otherwise read the next
             // one's bytes instead of faulting — this compare is what the
             // region-owned `Vec`'s bounds check used to do.
-            let end = self.regions[i].end();
+            // `region_index` guarantees `base <= address < end`, so the
+            // wrapping subtract lands in `1..=region.len()` and one u32
+            // compare is exact — the same shape `fetch_instruction` uses, and
+            // no widening to u64.
+            let room = self.regions[i].end().wrapping_sub(address);
             let off = (address - self.arena_base) as usize;
             let data = &self.arena;
-            let v = if u64::from(address) + u64::from(len) > u64::from(end) {
+            let v = if room < len {
                 None
             } else {
                 match width {
@@ -1516,9 +1520,8 @@ impl SocBus {
                 return Err(fault);
             }
             // See `read`: the arena is flat, so the region's own end is what
-            // bounds the access.
-            let end = self.regions[i].end();
-            if u64::from(address) + u64::from(len) > u64::from(end) {
+            // bounds the access, and one u32 compare says so exactly.
+            if self.regions[i].end().wrapping_sub(address) < len {
                 return Err(fault);
             }
             let off = (address - self.arena_base) as usize;
@@ -1798,7 +1801,7 @@ impl Bus for SocBus {
         }
         // The arena is flat across region boundaries, so the region's own end
         // — not the arena's — is what says how much of this fetch is real.
-        let room = u64::from(self.regions[i].end()) - u64::from(address);
+        let room = self.regions[i].end().wrapping_sub(address);
         let off = (address - self.arena_base) as usize;
         let d = &self.arena;
         if room >= 4
