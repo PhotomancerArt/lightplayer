@@ -69,6 +69,9 @@ pub enum SpecialReg {
     WindowBase,
     /// `WINDOWSTART` — the live-window bitmap, SR 73.
     WindowStart,
+    /// `MMID` — the trace-port module id, SR 89. **Write-only**; the assembler
+    /// accepts `wsr.mmid` and refuses `rsr.mmid`/`xsr.mmid`.
+    Mmid,
     /// `IBREAKENABLE` — instruction-breakpoint enable bits, SR 96.
     IbreakEnable,
     /// `MEMCTL` — cache/memory control, SR 97. Present on **both** LX6 and LX7.
@@ -181,7 +184,7 @@ impl SpecialReg {
     /// `tests/roundtrip.rs` checks this list against [`SpecialReg::from_num`]
     /// in both directions, so a variant added to the enum but not to this list
     /// (or vice versa) fails the build's tests rather than going unnoticed.
-    pub const ALL: [SpecialReg; 66] = [
+    pub const ALL: [SpecialReg; 67] = [
         SpecialReg::Lbeg,
         SpecialReg::Lend,
         SpecialReg::Lcount,
@@ -197,6 +200,7 @@ impl SpecialReg {
         SpecialReg::M3,
         SpecialReg::WindowBase,
         SpecialReg::WindowStart,
+        SpecialReg::Mmid,
         SpecialReg::IbreakEnable,
         SpecialReg::Memctl,
         SpecialReg::Atomctl,
@@ -269,6 +273,7 @@ impl SpecialReg {
             SpecialReg::M3 => 35,
             SpecialReg::WindowBase => 72,
             SpecialReg::WindowStart => 73,
+            SpecialReg::Mmid => 89,
             SpecialReg::IbreakEnable => 96,
             SpecialReg::Memctl => 97,
             SpecialReg::Atomctl => 99,
@@ -345,6 +350,7 @@ impl SpecialReg {
             35 => Some(SpecialReg::M3),
             72 => Some(SpecialReg::WindowBase),
             73 => Some(SpecialReg::WindowStart),
+            89 => Some(SpecialReg::Mmid),
             96 => Some(SpecialReg::IbreakEnable),
             97 => Some(SpecialReg::Memctl),
             99 => Some(SpecialReg::Atomctl),
@@ -411,12 +417,14 @@ impl SpecialReg {
     /// | SR 226 | `rsr.interrupt` | `wsr.intset` | — |
     /// | SR 227 | — | `wsr.intclear` | — |
     /// | SR 235 | `rsr.prid` | — | — |
+    /// | SR 89 | — | `wsr.mmid` | — |
     #[inline]
     pub const fn allows(self, op: SrOp) -> bool {
         match self {
             SpecialReg::Interrupt => matches!(op, SrOp::Rsr | SrOp::Wsr),
             SpecialReg::Intclear => matches!(op, SrOp::Wsr),
             SpecialReg::Prid => matches!(op, SrOp::Rsr),
+            SpecialReg::Mmid => matches!(op, SrOp::Wsr),
             _ => true,
         }
     }
@@ -454,6 +462,7 @@ impl SpecialReg {
             SpecialReg::M3 => "m3",
             SpecialReg::WindowBase => "windowbase",
             SpecialReg::WindowStart => "windowstart",
+            SpecialReg::Mmid => "mmid",
             SpecialReg::IbreakEnable => "ibreakenable",
             SpecialReg::Memctl => "memctl",
             SpecialReg::Atomctl => "atomctl",

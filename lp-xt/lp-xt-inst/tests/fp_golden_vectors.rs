@@ -563,6 +563,8 @@ fn asymmetric_special_registers_refuse_the_illegal_direction() {
         (227, 1, 6),         // xsr.intclear
         (235, 3, 1),         // wsr.prid
         (235, 1, 6),         // xsr.prid
+        (89, 3, 0),          // rsr.mmid
+        (89, 1, 6),          // xsr.mmid
     ] {
         let w = (op2 << 20) | (op1 << 16) | ((num as u32) << 8) | (3 << 4);
         let bytes = [w as u8, (w >> 8) as u8, (w >> 16) as u8];

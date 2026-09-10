@@ -514,16 +514,47 @@ fn integer_helper_booleans_and_region_protection() {
             }
         }
     }
-    for op in [
-        BoolAllOp::Any4,
-        BoolAllOp::All4,
-        BoolAllOp::Any8,
-        BoolAllOp::All8,
-    ] {
+    // The reduction's source names an ALIGNED group: 4-forms take b0/b4/b8/b12
+    // and 8-forms take b0/b8. The assembler refuses anything else.
+    for op in [BoolAllOp::Any4, BoolAllOp::All4] {
         for &x in &REGS {
-            for &y in &REGS {
+            for y in [0u8, 4, 8, 12] {
                 rt(Inst::BoolAll(op, b(x), b(y)), 3);
             }
+        }
+    }
+    for op in [BoolAllOp::Any8, BoolAllOp::All8] {
+        for &x in &REGS {
+            for y in [0u8, 8] {
+                rt(Inst::BoolAll(op, b(x), b(y)), 3);
+            }
+        }
+    }
+}
+
+/// The boolean reductions read an aligned group base, and a word whose `s`
+/// field is not aligned is not one of them. objdump prints such a word as
+/// `all4 b0, b0:b1:b2:b3` (it aligns the base down); the assembler refuses to
+/// produce one, so this crate refuses to decode one.
+#[test]
+fn boolean_reductions_require_an_aligned_group() {
+    // op0=0, op1=0, op2=0, r = 8/9 (4-forms) or 0xA/0xB (8-forms); s = base.
+    for (r_field, bad_bases) in [
+        (0x8u32, [1u32, 2, 3, 5].as_slice()),
+        (0x9, [1, 2, 3, 5].as_slice()),
+        (0xa, [1, 2, 4, 7].as_slice()),
+        (0xb, [1, 2, 4, 7].as_slice()),
+    ] {
+        for &s in bad_bases {
+            let w = (r_field << 12) | (s << 8);
+            let bytes = [w as u8, (w >> 8) as u8, (w >> 16) as u8];
+            assert!(
+                matches!(
+                    decode(&bytes).unwrap_err(),
+                    DecodeError::Unsupported { len: 3, .. }
+                ),
+                "r={r_field:#x} base b{s} is unaligned and must not decode"
+            );
         }
     }
 }

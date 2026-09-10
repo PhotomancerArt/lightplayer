@@ -24,7 +24,7 @@
 //!
 //! The `SR_UR_VECTORS` table below is the full `rsr`/`wsr`/`xsr` × modelled-SR
 //! and `rur`/`wur` × modelled-UR cross product, generated from the assembler's
-//! own output — 207 vectors, one per legal mnemonic in the space.
+//! own output plus `wsr.mmid` — 208 vectors, one per legal mnemonic in the space.
 
 use lp_xt_inst::*;
 
@@ -157,6 +157,7 @@ const SR_UR_VECTORS: &[(&[u8], &str)] = &[
     (&[0x30, 0x49, 0x03], "rsr.windowstart a3"),
     (&[0x30, 0x49, 0x13], "wsr.windowstart a3"),
     (&[0x30, 0x49, 0x61], "xsr.windowstart a3"),
+    (&[0x30, 0x59, 0x13], "wsr.mmid a3"),
     (&[0x30, 0x60, 0x03], "rsr.ibreakenable a3"),
     (&[0x30, 0x60, 0x13], "wsr.ibreakenable a3"),
     (&[0x30, 0x60, 0x61], "xsr.ibreakenable a3"),
@@ -326,7 +327,7 @@ const SR_UR_VECTORS: &[(&[u8], &str)] = &[
 /// disassembles to objdump's own text.
 #[test]
 fn sr_ur_space() {
-    assert_eq!(SR_UR_VECTORS.len(), 207, "the generated table lost entries");
+    assert_eq!(SR_UR_VECTORS.len(), 208, "the generated table lost entries");
     for (bytes, text) in SR_UR_VECTORS {
         dec(bytes);
         agrees_with_objdump(bytes, text);

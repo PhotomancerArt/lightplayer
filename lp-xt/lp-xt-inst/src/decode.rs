@@ -475,11 +475,18 @@ fn decode_st0(w: u32) -> Option<Inst> {
         0x6 => Some(Inst::Rsil(reg_t(w), s(w))),
         // WAITI level: s = level, t reserved 0.
         0x7 if t(w) == 0 => Some(Inst::Waiti(s(w))),
-        // Boolean-file reductions over an aligned group: t = br, s = bs.
-        0x8 => Some(Inst::BoolAll(BoolAllOp::Any4, breg_t(w), breg_s(w))),
-        0x9 => Some(Inst::BoolAll(BoolAllOp::All4, breg_t(w), breg_s(w))),
-        0xa => Some(Inst::BoolAll(BoolAllOp::Any8, breg_t(w), breg_s(w))),
-        0xb => Some(Inst::BoolAll(BoolAllOp::All8, breg_t(w), breg_s(w))),
+        // Boolean-file reductions over an **aligned** group: t = br, s = bs.
+        // The assembler refuses an unaligned base (`all4 b0, b1` and
+        // `all8 b0, b4` are both errors on LX6 and LX7), so the low bits of `s`
+        // are reserved and a word with them set is not one of these
+        // instructions. objdump disagrees — it silently aligns the base down
+        // and prints `all4 b0, b0:b1:b2:b3` for a word whose `s` is 2 — which
+        // is how the too-loose version of this arm showed up as ten objdiff
+        // mismatches on literal-pool words in the shipped image.
+        0x8 if s(w) & 0x3 == 0 => Some(Inst::BoolAll(BoolAllOp::Any4, breg_t(w), breg_s(w))),
+        0x9 if s(w) & 0x3 == 0 => Some(Inst::BoolAll(BoolAllOp::All4, breg_t(w), breg_s(w))),
+        0xa if s(w) & 0x7 == 0 => Some(Inst::BoolAll(BoolAllOp::Any8, breg_t(w), breg_s(w))),
+        0xb if s(w) & 0x7 == 0 => Some(Inst::BoolAll(BoolAllOp::All8, breg_t(w), breg_s(w))),
         // SYSCALL: r=5, s=0, t=0 (assembler golden bytes `00 50 00`).
         0x5 if s(w) == 0 && t(w) == 0 => Some(Inst::Nullary(NullaryOp::Syscall)),
         0x2 => {

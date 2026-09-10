@@ -1,11 +1,30 @@
 //! Differential disassembler conformance rig (host-only).
 //!
-//! Disassembles the entire `.text` of an ELF with `lp-xt-inst` and diffs against
-//! `xtensa-esp32s3-elf-objdump -d`. Every instruction is either MATCHED (its
-//! mnemonic and operand values agree, resolving hex/decimal/target formatting
-//! differences), or placed on the printed UNSUPPORTED allowlist (counted by
-//! mnemonic, never silently skipped). Data directives (`.byte`, `.long`) are
-//! counted apart.
+//! Disassembles **every executable section** of an ELF with `lp-xt-inst` and
+//! diffs against `xtensa-esp*-elf-objdump -d`. Every instruction is either
+//! MATCHED (its mnemonic and operand values agree, resolving hex/decimal/target
+//! formatting differences), or placed on the printed UNSUPPORTED allowlist
+//! (counted by mnemonic, never silently skipped). Data directives (`.byte`,
+//! `.long`) are counted apart.
+//!
+//! # What "every executable section" means, and why
+//!
+//! M1 P1 widened this from `.text` alone. The ROM ELFs and the ESP-IDF
+//! second-stage bootloader put code in sections this rig used to skip, and the
+//! app image's `.vectors` — the exception handlers, which is precisely the code
+//! a machine-mode hart has to run — is one of them. Sections are selected by
+//! the `SHF_EXECINSTR` flag, so nothing is chosen by name.
+//!
+//! # A warning the number depends on
+//!
+//! objdump **mis-disassembles literal pools as instructions**. Xtensa literal
+//! pools sit inside `.text`, interleaved with code, and objdump has no way to
+//! tell them apart; it emits plausible-looking mnemonics for constants. Those
+//! land in the UNSUPPORTED allowlist and inflate it. They are *not* evidence
+//! that this crate is missing an instruction — see the crate README's residue
+//! section for how to tell the two apart. Data directives objdump *does*
+//! recognise are counted separately and must stay that way: reclassifying them
+//! would "improve" the number by deleting the evidence.
 //!
 //! Usage: `cargo run -p lp-xt-inst --features objdiff --bin objdiff -- <elf> [objdump]`
 
@@ -45,19 +64,36 @@ fn main() {
         std::env::var("XT_OBJDUMP").unwrap_or_else(|_| DEFAULT_OBJDUMP.to_string())
     });
 
-    // --- load .text via the object crate ---
+    // --- load every executable section via the object crate ---
     let data = std::fs::read(&elf_path).expect("read elf");
     let file = object::File::parse(&*data).expect("parse elf");
-    let text = file
-        .section_by_name(".text")
-        .expect(".text section present");
-    let text_vma = text.address() as u32;
-    let text_bytes = text.data().expect(".text data").to_vec();
-    let text_end = text_vma + text_bytes.len() as u32;
+    let mut regions: Vec<(String, u32, Vec<u8>)> = Vec::new();
+    for section in file.sections() {
+        let exec = match section.flags() {
+            object::SectionFlags::Elf { sh_flags } => {
+                sh_flags & u64::from(object::elf::SHF_EXECINSTR) != 0
+            }
+            _ => false,
+        };
+        if !exec || section.size() == 0 {
+            continue;
+        }
+        let Ok(bytes) = section.data() else { continue };
+        if bytes.is_empty() {
+            continue;
+        }
+        let name = section.name().unwrap_or("<unnamed>").to_string();
+        regions.push((name, section.address() as u32, bytes.to_vec()));
+    }
+    if regions.is_empty() {
+        eprintln!("no SHF_EXECINSTR section with contents in {elf_path}");
+        std::process::exit(1);
+    }
+    regions.sort_by_key(|(_, vma, _)| *vma);
 
-    // --- run objdump -d -j .text ---
+    // --- run objdump -d over the whole file ---
     let out = Command::new(&objdump)
-        .args(["-d", "-j", ".text", &elf_path])
+        .args(["-d", &elf_path])
         .output()
         .expect("spawn objdump");
     if !out.status.success() {
@@ -77,10 +113,13 @@ fn main() {
         let Some((addr, hex, text_field)) = parse_line(line) else {
             continue;
         };
-        // Only consider instructions that live inside .text bounds we loaded.
-        if addr < text_vma || addr >= text_end {
+        // Only consider instructions that live inside an executable section.
+        let Some((_, vma, section_bytes)) = regions
+            .iter()
+            .find(|(_, vma, b)| addr >= *vma && addr < *vma + b.len() as u32)
+        else {
             continue;
-        }
+        };
         let od_mnem = text_field.split_whitespace().next().unwrap_or("");
         if od_mnem.starts_with('.') || od_mnem.is_empty() {
             // objdump data directive (.byte/.short/.long/.word) — count as data.
@@ -90,11 +129,11 @@ fn main() {
         n_insns += 1;
 
         let len = hex.len() / 2; // objdump byte count for this instruction
-        let off = (addr - text_vma) as usize;
-        if off + len > text_bytes.len() {
+        let off = (addr - *vma) as usize;
+        if off + len > section_bytes.len() {
             continue;
         }
-        let bytes = &text_bytes[off..off + len];
+        let bytes = &section_bytes[off..off + len];
 
         match decode(bytes) {
             Ok((inst, my_len)) => {
@@ -135,7 +174,10 @@ fn main() {
     let n_mismatched = n_supported_seen - n_matched;
 
     println!("=== lp-xt-inst objdiff over {elf_path} ===");
-    println!(".text: vma={text_vma:#x} size={} bytes", text_bytes.len());
+    println!("executable sections ({}):", regions.len());
+    for (name, vma, bytes) in &regions {
+        println!("  {name:<20} vma={vma:#010x} size={} bytes", bytes.len());
+    }
     println!();
     println!("instructions (objdump):   {n_insns}");
     println!("  supported (decoded):    {n_supported_seen}");
@@ -337,7 +379,10 @@ fn parse_operands(text: &str, hints: &[Operand]) -> Option<Vec<Operand>> {
                 Operand::FReg(n.parse().ok()?)
             }
             Operand::BReg(_) => {
-                let n = tok.strip_prefix('b')?;
+                // objdump renders a boolean *group* as its whole range
+                // (`all4 b0, b4:b5:b6:b7`); the field holds only the base,
+                // which is what this crate decodes.
+                let n = tok.split(':').next().unwrap_or(tok).strip_prefix('b')?;
                 Operand::BReg(n.parse().ok()?)
             }
             Operand::MReg(_) => {
