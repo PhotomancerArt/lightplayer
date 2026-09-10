@@ -5,16 +5,44 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# `--if-toolchain` turns a missing esp toolchain from an error into a no-op
+# exit 0, so a `just` recipe can depend on this unconditionally. Mirrors
+# scripts/build-builtins-xt.sh, and carries the same warning: on a machine that
+# HAS the toolchain the ELFs are rebuilt rather than assumed, because
+# `fixtures/elf/` is gitignored and a fresh worktree leaves it empty — which is
+# how a host test suite comes to skip and report success.
+IF_TOOLCHAIN=false
+if [[ "${1:-}" == "--if-toolchain" ]]; then
+  IF_TOOLCHAIN=true
+  shift
+fi
+
 # The GNU xtensa binutils/gcc shipped inside the rustup `esp` toolchain: the
 # rust target spec links via xtensa-esp32s3-elf-gcc, so it must be on PATH.
+#
+# Two install shapes to find it in, as scripts/build-builtins-xt.sh explains:
+# espup (developer machines) puts it under ~/.rustup/toolchains/esp; the CI
+# action adds it to PATH itself. Check the espup layout first, then fall back
+# to PATH, so the same script serves both.
 GCC_BIN="$(echo "$HOME"/.rustup/toolchains/esp/xtensa-esp-elf/esp-*/xtensa-esp-elf/bin | tr ' ' '\n' | tail -1)"
-if [[ ! -x "$GCC_BIN/xtensa-esp32s3-elf-gcc" ]]; then
+if [[ -x "$GCC_BIN/xtensa-esp32s3-elf-gcc" ]]; then
+  export PATH="$GCC_BIN:$PATH"
+elif ! command -v xtensa-esp32s3-elf-gcc >/dev/null 2>&1; then
+  if [[ "$IF_TOOLCHAIN" == true ]]; then
+    echo "note: esp toolchain not installed — not building the Xtensa fixtures."
+    echo "      The lp-xt-elf and lp-xt-emu mach tests will skip. Run \`espup install\`."
+    exit 0
+  fi
   echo "error: xtensa-esp32s3-elf-gcc not found under ~/.rustup/toolchains/esp" >&2
+  echo "       and not on PATH. Install the esp toolchain (espup install) first." >&2
   exit 1
 fi
-export PATH="$GCC_BIN:$PATH"
-OBJDUMP="$GCC_BIN/xtensa-esp32s3-elf-objdump"
-NM="$GCC_BIN/xtensa-esp32s3-elf-nm"
+OBJDUMP="$(command -v xtensa-esp32s3-elf-objdump)"
+NM="$(command -v xtensa-esp32s3-elf-nm)"
+if [[ -z "$NM" ]]; then
+  echo "error: xtensa-esp32s3-elf-nm not found alongside the gcc above" >&2
+  exit 1
+fi
 
 # Keep artifacts local regardless of any global cargo build-dir config.
 export CARGO_TARGET_DIR="$PWD/target"
