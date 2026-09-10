@@ -929,4 +929,92 @@ mod tests {
         );
         assert!(result.log.is_none());
     }
+
+    /// Every OP-IMM bit-manipulation encoding this executor has ever named,
+    /// and what it actually does.
+    ///
+    /// The words are the assembler's, not this file's: they come from
+    /// `rustc --target riscv32imac-unknown-none-elf --emit=obj` over a
+    /// `global_asm!` block opening with
+    /// `.option arch, +zba, +zbb, +zbs, +zbkb`, disassembled with
+    /// `llvm-objdump`. Deriving an encoding from the shape of a sibling is how
+    /// this block went wrong in the first place
+    /// (`docs/defects/2026-07-31-zexth-encoding-steals-xori-128.md`), so the
+    /// test refuses to do it too.
+    ///
+    /// This is the test that would have caught the dead arms: `rori`, `rev8`,
+    /// `brev8` and `bexti` all have funct7 bit 5 set, the bit the `funct3 == 5`
+    /// arm tests first, so each one executed as `srai` while an arm below
+    /// claimed to implement it. Naming the expected result as a *shift* rather
+    /// than as the instruction's own semantics is the whole point — a future
+    /// change that wires one of them up has to come here and say so.
+    #[test]
+    fn zb_immediates_are_shifts_or_faults() {
+        const V: u32 = 0x1234_5678;
+
+        /// `a0 <- op a1`, with a1 holding [`V`].
+        fn run(word: u32) -> Result<u32, ()> {
+            let mut regs = [0i32; 32];
+            regs[11] = V as i32;
+            let mut memory = Memory::with_default_addresses(vec![], vec![]);
+            match decode_execute_itype::<LoggingDisabled, _>(word, 0, &mut regs, &mut memory) {
+                Ok(_) => Ok(regs[10] as u32),
+                Err(_) => Err(()),
+            }
+        }
+
+        // --- Implemented, reachable, and equal to what the instruction means.
+        assert_eq!(run(0x6835_9513), Ok(V ^ (1 << 3)), "binvi a0, a1, 3");
+        assert_eq!(run(0x2875_d513), Ok(0xffff_ffff), "orc.b a0, a1");
+        assert_eq!(run(0x6005_9513), Ok(V.leading_zeros()), "clz a0, a1");
+        assert_eq!(run(0x6015_9513), Ok(V.trailing_zeros()), "ctz a0, a1");
+        assert_eq!(run(0x6025_9513), Ok(V.count_ones()), "cpop a0, a1");
+        assert_eq!(run(0x6045_9513), Ok(V & 0xff), "sext.b a0, a1(positive)");
+        assert_eq!(run(0x6055_9513), Ok(V & 0xffff), "sext.h a0, a1(positive)");
+
+        // --- funct3 == 5, funct7 bit 5 set: SRAI takes the arm first, so each
+        // of these is an arithmetic shift by the low five bits of the funct12
+        // field, and never the instruction it is written as.
+        let srai = |shamt: u32| Ok(((V as i32) >> shamt) as u32);
+        assert_eq!(run(0x6045_d513), srai(0x604 & 0x1f), "rori a0, a1, 4");
+        assert_eq!(run(0x6985_d513), srai(0x698 & 0x1f), "rev8 a0, a1(RV32)");
+        assert_eq!(run(0x6b85_d513), srai(0x6b8 & 0x1f), "rev8 a0, a1(RV64)");
+        assert_eq!(run(0x6875_d513), srai(0x687 & 0x1f), "brev8 a0, a1");
+        assert_eq!(run(0x4835_d513), srai(0x483 & 0x1f), "bexti a0, a1, 3");
+        // The instructions those words are actually written as, none of which
+        // this executor computes. Stated so the difference is on the page.
+        assert_ne!(
+            run(0x6045_d513),
+            Ok(V.rotate_right(4)),
+            "rori is not rotating"
+        );
+        assert_ne!(
+            run(0x6985_d513),
+            Ok(V.swap_bytes()),
+            "rev8 is not reversing"
+        );
+        assert_ne!(
+            run(0x4835_d513),
+            Ok((V >> 3) & 1),
+            "bexti is not extracting"
+        );
+
+        // --- funct3 == 1: `bclri` and `bseti` both fault. `bclri` used to
+        // reach `execute_bseti` — funct6 0b010010 is bclri's, and the arm was
+        // labelled bseti — and so *set* the bit its mnemonic clears. A fault is
+        // what the C6 does with either.
+        assert_eq!(run(0x4835_9513), Err(()), "bclri a0, a1, 3");
+        assert_eq!(run(0x2835_9513), Err(()), "bseti a0, a1, 3");
+        // `slli.uw` is RV64-only Zba; on RV32 that funct7 is a reserved `slli`.
+        assert_eq!(run(0x0835_9513), Err(()), "slli.uw a0, a1, 3");
+
+        // --- And the base shifts this arm exists for, unchanged throughout.
+        assert_eq!(run(0x0045_d513), Ok(V >> 4), "srli a0, a1, 4");
+        assert_eq!(
+            run(0x4045_d513),
+            Ok(((V as i32) >> 4) as u32),
+            "srai a0, a1, 4"
+        );
+        assert_eq!(run(0x0045_9513), Ok(V << 4), "slli a0, a1, 4");
+    }
 }
