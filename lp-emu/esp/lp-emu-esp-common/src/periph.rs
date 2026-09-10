@@ -350,18 +350,28 @@ impl IrqLines {
     }
 }
 
-/// Turns chip-wide interrupt **source** levels into "the CPU interrupt this
-/// hart should take right now", or `None`.
+/// Turns chip-wide interrupt **source** levels into what a hart's interrupt
+/// input looks like.
 ///
 /// The half of the interrupt path that is chip-specific: which source is
 /// routed to which CPU interrupt, which are enabled, and what the priority
 /// threshold is are all PLIC_MX / INTERRUPT_CORE0 questions, and this crate
 /// holds no chip numbers. [`crate::bus::SocBus`] holds one of these and
-/// answers `Bus::pending_cpu_interrupt` from it, which is what lets an MMIO
-/// store that raises a line be delivered before the next instruction
-/// retires.
+/// answers `Bus::pending_cpu_interrupt` and
+/// [`SocBus::pending_cpu_interrupt_mask`](crate::bus::SocBus::pending_cpu_interrupt_mask)
+/// from it, which is what lets an MMIO store that raises a line be delivered
+/// before the next instruction retires.
 ///
-/// It is asked on every side-band consumption, so it must be cheap and it
+/// **It answers two questions, and which one a machine asks is an ISA fact.**
+/// [`asserted`](Self::asserted) says *which CPU interrupts are asserted*, a
+/// bitmask; [`cpu_interrupt`](Self::cpu_interrupt) says *which one the hart
+/// should take*. A hart whose enable mask and priorities live in this
+/// matrix's own registers — an RV32 hart, whose `PLIC_MX` is right here — can
+/// be answered the second question from the bus side. A hart that holds its
+/// own enable mask in a CPU register cannot be, so it asks the first and
+/// resolves it itself (plan D3).
+///
+/// Both are asked on every side-band consumption, so both must be cheap and
 /// must be a **pure function of the levels and its own configuration** — no
 /// scheduling, no logging per call.
 ///
@@ -370,8 +380,40 @@ impl IrqLines {
 /// accessors: the chip's register-view peripherals downcast to the chip's
 /// concrete matrix type. This crate never learns what that type is.
 pub trait CpuIntMatrix: Send + 'static {
-    /// The highest-priority CPU interrupt asserted for `hart`, or `None`.
-    fn cpu_interrupt(&self, hart: usize, irq: &IrqLines) -> Option<u8>;
+    /// Every CPU interrupt asserted at `hart`'s input right now, as a
+    /// bitmask: bit `n` set means some source routed to CPU interrupt `n` is
+    /// high.
+    ///
+    /// A `u32` because a CPU-interrupt space is 32 wide on both of the ISAs
+    /// this crate serves — it is a property of the interrupt input, not a
+    /// count of the chip's sources, of which this crate knows nothing.
+    ///
+    /// **Asserted, not takeable.** This is the chip's routing applied to the
+    /// source levels and nothing else — no enable mask, no priority, no
+    /// threshold. Whether the hart takes one of them is the hart's question,
+    /// and the two ISAs answer it in different places: on RV32 the enables
+    /// and priorities are this matrix's own registers (see
+    /// [`cpu_interrupt`](Self::cpu_interrupt)); on Xtensa they are
+    /// `INTENABLE` and `PS.INTLEVEL`, CPU registers this trait cannot see and
+    /// must not pretend to.
+    ///
+    /// Purity contract: called on every side-band consumption — which means
+    /// on every MMIO store — so it must be cheap and a **pure function of
+    /// `irq` and its own configuration**. No scheduling, no logging per call.
+    fn asserted(&self, hart: usize, irq: &IrqLines) -> u32;
+
+    /// The highest-priority CPU interrupt `hart` should take right now, or
+    /// `None`.
+    ///
+    /// The RV32 form of the question. A matrix whose enable mask and
+    /// priorities are its own MMIO registers resolves here; a matrix on a
+    /// chip whose CPU holds the enable mask leaves this default and its hart
+    /// resolves [`asserted`](Self::asserted) itself.
+    ///
+    /// Same purity contract as [`asserted`](Self::asserted).
+    fn cpu_interrupt(&self, _hart: usize, _irq: &IrqLines) -> Option<u8> {
+        None
+    }
 
     /// The downcast seam for the chip's register views.
     fn as_any(&self) -> &dyn Any;
@@ -389,15 +431,17 @@ pub trait CpuIntMatrix: Send + 'static {
 
 /// The default matrix: nothing is ever asserted.
 ///
-/// What a bus has before a chip crate installs its own. A stub that returns
-/// `None` is honest about having no routing where a stub that guessed would
-/// not be.
+/// What a bus has before a chip crate installs its own. A stub that asserts
+/// an empty mask is honest about having no routing where a stub that guessed
+/// would not be — and with no routing there is nothing to take either, so
+/// [`CpuIntMatrix::cpu_interrupt`]'s default `None` is exactly right and is
+/// left as the default rather than restated here.
 #[derive(Copy, Clone, Debug, Default)]
 pub struct NoCpuInterrupts;
 
 impl CpuIntMatrix for NoCpuInterrupts {
-    fn cpu_interrupt(&self, _hart: usize, _irq: &IrqLines) -> Option<u8> {
-        None
+    fn asserted(&self, _hart: usize, _irq: &IrqLines) -> u32 {
+        0
     }
 
     fn as_any(&self) -> &dyn Any {

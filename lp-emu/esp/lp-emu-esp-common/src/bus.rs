@@ -740,6 +740,25 @@ impl SocBus {
         &mut *self.matrix
     }
 
+    /// Every CPU interrupt the chip's matrix currently asserts at the issuing
+    /// hart, as a bitmask.
+    ///
+    /// The Xtensa form of [`Bus::pending_cpu_interrupt`]: the hart resolves it
+    /// against `INTENABLE` and `PS.INTLEVEL`, CPU registers this bus cannot
+    /// see. An RV32 hart keeps asking `pending_cpu_interrupt`, because its
+    /// enables and priorities are the matrix's own MMIO registers. See
+    /// [`CpuIntMatrix::asserted`].
+    ///
+    /// Same side-band contract as `pending_cpu_interrupt`: a bus that raises
+    /// [`Bus::take_sideband`] must be prepared for this to be read before the
+    /// next instruction retires.
+    ///
+    /// M2 P2 — this is the honest feed for `XtHart::set_external_mask` (M1
+    /// R5); the wiring itself lands with the Xtensa machine in M3.
+    pub fn pending_cpu_interrupt_mask(&self) -> u32 {
+        self.matrix.asserted(self.hart, &self.irq)
+    }
+
     // ---- machine plumbing --------------------------------------------
 
     /// Tell the bus what cycle it is. The machine sets this before stepping;
@@ -2686,6 +2705,12 @@ mod tests {
     struct TestMatrix;
 
     impl CpuIntMatrix for TestMatrix {
+        fn asserted(&self, _hart: usize, irq: &IrqLines) -> u32 {
+            (0u8..16)
+                .filter(|n| irq.level(u16::from(*n) + 40))
+                .fold(0u32, |acc, n| acc | 1 << n)
+        }
+
         fn cpu_interrupt(&self, _hart: usize, irq: &IrqLines) -> Option<u8> {
             (0u8..16).find(|n| irq.level(u16::from(*n) + 40))
         }
@@ -2987,6 +3012,51 @@ mod tests {
         );
 
         bus.irq.set_level(43, false);
+        assert_eq!(bus.pending_cpu_interrupt(), None);
+    }
+
+    #[test]
+    fn the_mask_and_the_option_agree_on_the_test_matrix() {
+        let mut bus = SocBus::new();
+        bus.set_matrix(Box::new(TestMatrix));
+        assert_eq!(bus.pending_cpu_interrupt_mask(), 0, "no source is high");
+
+        // Sources 40, 43 and 51 route to CPU interrupts 0, 3 and 11.
+        bus.irq.set_level(40, true);
+        bus.irq.set_level(43, true);
+        bus.irq.set_level(51, true);
+        assert_eq!(
+            bus.pending_cpu_interrupt_mask(),
+            (1 << 0) | (1 << 3) | (1 << 11),
+            "exactly the bits for the raised sources, and nothing else"
+        );
+
+        // The `Option` answer is one of the bits the mask has set: the mask is
+        // asserted, the option is takeable, and takeable implies asserted.
+        let taken = bus.pending_cpu_interrupt().expect("something is asserted");
+        assert!(
+            bus.pending_cpu_interrupt_mask() & (1 << taken) != 0,
+            "cpu_interrupt returned {taken}, which the mask does not assert"
+        );
+
+        // A source going low clears its bit and nothing else's.
+        bus.irq.set_level(43, false);
+        assert_eq!(
+            bus.pending_cpu_interrupt_mask(),
+            (1 << 0) | (1 << 11),
+            "only CPU interrupt 3 dropped"
+        );
+    }
+
+    #[test]
+    fn a_bus_with_no_matrix_asserts_nothing() {
+        let mut bus = SocBus::new();
+        assert_eq!(bus.pending_cpu_interrupt_mask(), 0);
+        assert_eq!(bus.pending_cpu_interrupt(), None);
+
+        // Raising a source changes nothing: `NoCpuInterrupts` has no routing.
+        bus.irq.set_level(43, true);
+        assert_eq!(bus.pending_cpu_interrupt_mask(), 0);
         assert_eq!(bus.pending_cpu_interrupt(), None);
     }
 
