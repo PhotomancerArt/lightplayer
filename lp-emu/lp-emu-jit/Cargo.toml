@@ -24,7 +24,7 @@ lp-emu-core = { path = "../lp-emu-core" }
 #
 # Declared here, unused until P3: the crate is defined now, and a dependency
 # that appears with the code that uses it is a dependency nobody reviewed.
-wasm-encoder = "0.245"
+wasm-encoder = { version = "0.245", default-features = false }
 
 [dependencies.wasmtime]
 version = "42"

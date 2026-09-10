@@ -12,6 +12,14 @@
 //!   executors and cannot be asked "what is this?" without also being told
 //!   "and do it". `tests/decoder_agreement.rs` is what makes a second decoder
 //!   acceptable rather than a divergence waiting to happen (M7 JD3).
+//! - [`blocks`] — the guest blocks a translation is *of*, and the simple walk
+//!   P3 uses to find some. Discovery proper is P4's.
+//! - [`translate`] — the block set to one wasm function: registers in locals,
+//!   the arena as the imported memory, RAM behind a permission byte, MMIO and
+//!   the escape hatch through imports.
+//! - [`host`] — the contract an emitted module is run against, written out
+//!   once so a reader does not have to reconstruct the exit protocol from the
+//!   emitter.
 //! - [`replay`] — the record/compare shapes of the identity harness: an
 //!   interpreter run records what each entry into translated code did, and the
 //!   translated module is replayed against that recording, in every engine it
@@ -43,5 +51,10 @@
 
 extern crate alloc;
 
+pub mod blocks;
 pub mod decode;
+pub mod host;
+#[cfg(feature = "host-wasmtime")]
+pub mod host_wasmtime;
 pub mod replay;
+pub mod translate;
