@@ -583,11 +583,15 @@ fn decode_op0_6(w: u32) -> Option<Inst> {
                     off,
                 ))
             }
-            // BI1: bf/bt boolean branches (r = 0/1); the loop family
-            // (r = 8/9/0xA) stays unsupported.
+            // BI1: bf/bt boolean branches (r = 0/1) and the zero-overhead loop
+            // family (r = 8/9/0xA). The loop offset is **unsigned** — the
+            // label is always forward, past the body.
             0x1 => match r(w) {
                 0x0 => Some(Inst::BranchBool(false, breg_s(w), imm8(w) as i8 as i32)),
                 0x1 => Some(Inst::BranchBool(true, breg_s(w), imm8(w) as i8 as i32)),
+                0x8 => Some(Inst::Loop(LoopOp::Loop, reg_s(w), imm8(w))),
+                0x9 => Some(Inst::Loop(LoopOp::Loopnez, reg_s(w), imm8(w))),
+                0xa => Some(Inst::Loop(LoopOp::Loopgtz, reg_s(w), imm8(w))),
                 _ => None,
             },
             _ => unreachable!(),

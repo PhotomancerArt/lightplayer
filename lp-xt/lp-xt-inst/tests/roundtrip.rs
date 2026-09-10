@@ -433,6 +433,17 @@ fn atomic_loads_and_stores() {
     }
 }
 
+#[test]
+fn zero_overhead_loops() {
+    for op in [LoopOp::Loop, LoopOp::Loopnez, LoopOp::Loopgtz] {
+        for &ars in &REGS {
+            for imm in [0u8, 1, 127, 128, 254, 255] {
+                rt(Inst::Loop(op, r(ars), imm), 3);
+            }
+        }
+    }
+}
+
 /// The SR / UR tables are total in both directions: every variant's number maps
 /// back to that variant, `ALL` and `from_num` agree on the modelled set, and
 /// numbers outside it stay `None`.

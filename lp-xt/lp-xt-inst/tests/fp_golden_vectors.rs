@@ -440,11 +440,14 @@ fn boolean_register_reads() {
     dis(&[0x76, 0x13, 0xfc], "bt\tb3, 0x0");
 }
 
-/// The loop family shares the BI1 slot with `bt`/`bf` and must stay unsupported.
+/// The BI1 slot holds `bt`/`bf` (r = 0/1) and the loop family (r = 8/9/0xA);
+/// M1 P1 added the loops, so what stays unsupported is the *rest* of the slot.
+/// Those `r` values have no mnemonic on either LX6 or LX7, and a decoder that
+/// invented one would be guessing.
 #[test]
-fn bi1_loop_family_stays_unsupported() {
-    // op0=6, n=3, m=1 (t nibble = 7), r = 8/9/0xA -> loop / loopnez / loopgtz.
-    for r in [0x8u32, 0x9, 0xa] {
+fn bi1_unassigned_slots_stay_unsupported() {
+    // op0=6, n=3, m=1 (t nibble = 7); r = 2..7 and 0xB..0xF are unassigned.
+    for r in [0x2u32, 0x3, 0x4, 0x5, 0x6, 0x7, 0xb, 0xc, 0xd, 0xe, 0xf] {
         let w = 0x6 | (7 << 4) | (r << 12);
         let bytes = [w as u8, (w >> 8) as u8, (w >> 16) as u8];
         assert!(
@@ -452,7 +455,7 @@ fn bi1_loop_family_stays_unsupported() {
                 decode(&bytes).unwrap_err(),
                 DecodeError::Unsupported { len: 3, .. }
             ),
-            "BI1 r={r:#x} (loop family) must not decode"
+            "BI1 r={r:#x} must not decode"
         );
     }
 }

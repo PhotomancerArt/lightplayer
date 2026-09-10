@@ -405,6 +405,83 @@ fn atomic_loads_and_stores() {
 }
 
 // ---------------------------------------------------------------------------
+// Family 2 — zero-overhead loops
+// ---------------------------------------------------------------------------
+
+/// Assembled as one `.S` file so the offsets are real ones the assembler
+/// computed, not values invented here. LX6 bytes == LX7 bytes.
+///
+/// ```text
+///        loop a3, 1f      ; nop ; nop
+///   1:   loopnez a3, 2f   ; nop
+///   2:   loopgtz a4, 3f   ; memw ; memw ; memw
+///   3:   loop a0, 4f      ; .rept 84 nop .endr
+///   4:   loopnez a15, 5f  ; .rept 85 nop .endr
+///   5:   nop
+/// ```
+///
+/// objdump's listing, with the pc each instruction sat at:
+///
+/// | pc | bytes | text |
+/// |---|---|---|
+/// | 0x00 | `76 83 05` | `loop a3, 0x9` |
+/// | 0x09 | `76 93 02` | `loopnez a3, 0xf` |
+/// | 0x0f | `76 a4 08` | `loopgtz a4, 0x1b` |
+/// | 0x1b | `76 80 fb` | `loop a0, 0x11a` |
+/// | 0x11a | `76 9f fe` | `loopnez a15, 0x21c` |
+#[rustfmt::skip]
+const LOOP_VECTORS: &[(u32, &[u8], &str)] = &[
+    (0x00,  &[0x76, 0x83, 0x05], "loop a3, 0x9"),
+    (0x09,  &[0x76, 0x93, 0x02], "loopnez a3, 0xf"),
+    (0x0f,  &[0x76, 0xa4, 0x08], "loopgtz a4, 0x1b"),
+    (0x1b,  &[0x76, 0x80, 0xfb], "loop a0, 0x11a"),
+    (0x11a, &[0x76, 0x9f, 0xfe], "loopnez a15, 0x21c"),
+];
+
+#[test]
+fn zero_overhead_loops() {
+    for (pc, bytes, text) in LOOP_VECTORS {
+        dec(bytes);
+        let mine = format_instruction(bytes, *pc);
+        let (my_mnem, my_ops) = split(&mine);
+        let (od_mnem, od_ops) = split(text);
+        assert_eq!(my_mnem, od_mnem, "{mine} vs {text}");
+        assert_eq!(my_ops, od_ops, "{mine} vs {text} at pc {pc:#x}");
+    }
+
+    assert_eq!(
+        dec(&[0x76, 0x93, 0x02]),
+        Inst::Loop(LoopOp::Loopnez, a(3), 2)
+    );
+    assert_eq!(dec(&[0x76, 0x83, 0x05]), Inst::Loop(LoopOp::Loop, a(3), 5));
+    assert_eq!(
+        dec(&[0x76, 0xa4, 0x08]),
+        Inst::Loop(LoopOp::Loopgtz, a(4), 8)
+    );
+}
+
+/// `LEND = pc + 4 + imm8`, checked against the address objdump printed for the
+/// same bytes at the same pc — including the two large offsets, where reading
+/// the field as *signed* would land 256 bytes backwards instead.
+#[test]
+fn loop_end_matches_objdump() {
+    for (pc, bytes, text) in LOOP_VECTORS {
+        let Inst::Loop(_, _, imm) = decode(bytes).unwrap().0 else {
+            panic!("not a loop: {bytes:02x?}");
+        };
+        let expected = parse_int(split(text).1[1].as_str()).unwrap() as u32;
+        assert_eq!(
+            lp_xt_inst::disasm::loop_end(*pc, imm),
+            expected,
+            "LEND for {text} at pc {pc:#x}"
+        );
+    }
+    // The two big ones read forward, not backward.
+    assert_eq!(lp_xt_inst::disasm::loop_end(0x1b, 0xfb), 0x11a);
+    assert_eq!(lp_xt_inst::disasm::loop_end(0x11a, 0xfe), 0x21c);
+}
+
+// ---------------------------------------------------------------------------
 // The SSAI reserved-field fix
 // ---------------------------------------------------------------------------
 

@@ -21,6 +21,24 @@ fn call_target(pc: u32, word_offset: i32) -> u32 {
         .wrapping_add(4)
 }
 
+/// Compute the `LEND` value a `loop`/`loopnez`/`loopgtz` at `pc` latches.
+///
+/// **The formula is `LEND = pc + 4 + imm8`**, with `imm8` unsigned (0..=255) —
+/// the same `pc + 4` base every Xtensa PC-relative branch uses, independent of
+/// the instruction's own 3-byte width. Verified against `xtensa-esp32-elf-as`
+/// and `xtensa-esp32s3-elf-as` at five offsets spanning the field, including
+/// the wraparound-looking ones (`imm8 = 0xfb` at pc 0x1b resolves to 0x11a, not
+/// backwards).
+///
+/// It lives here, once, because a decoder that silently drops the loop
+/// back-edge produces a wrong answer with no fault: everything that needs
+/// `LEND` — the machine hart, the block-discovery sweep, the disassembler —
+/// must get it from the same place rather than each redoing the arithmetic.
+#[inline]
+pub fn loop_end(pc: u32, imm8: u8) -> u32 {
+    pc.wrapping_add(4).wrapping_add(imm8 as u32)
+}
+
 /// Compute an `l32r` literal address from the raw 16-bit field (always backward).
 #[inline]
 pub fn l32r_target(pc: u32, imm16: u16) -> u32 {
@@ -169,6 +187,14 @@ pub fn format_inst(inst: &Inst, pc: u32) -> String {
         BranchZN(nez, rs, imm6) => {
             let m = if nez { "bnez.n" } else { "beqz.n" };
             format!("{m}\t{rs:?}, {:#x}", br_target(pc, imm6 as i32))
+        }
+        Loop(op, ars, imm) => {
+            let m = match op {
+                LoopOp::Loop => "loop",
+                LoopOp::Loopnez => "loopnez",
+                LoopOp::Loopgtz => "loopgtz",
+            };
+            format!("{m}\t{ars:?}, {:#x}", loop_end(pc, imm))
         }
         J(off) => format!("j\t{:#x}", br_target(pc, off)),
         Jx(rs) => format!("jx\t{rs:?}"),

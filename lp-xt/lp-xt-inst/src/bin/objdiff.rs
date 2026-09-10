@@ -247,6 +247,7 @@ fn typed_operands(inst: &Inst, pc: u32) -> Vec<Operand> {
         BranchZ(_, a, off) => vec![reg(a), br(off)],
         BranchBiI(_, a, imm, off) => vec![reg(a), Operand::Imm(imm as i64), br(off)],
         BranchZN(_, a, imm6) => vec![reg(a), br(imm6 as i32)],
+        Loop(_, a, imm) => vec![reg(a), Operand::Addr(lp_xt_inst::disasm::loop_end(pc, imm))],
         J(off) => vec![br(off)],
         Jx(a) => vec![reg(a)],
         Call(_, off) => vec![Operand::Addr(

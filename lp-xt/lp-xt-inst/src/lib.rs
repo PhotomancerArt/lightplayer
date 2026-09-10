@@ -219,6 +219,21 @@ pub enum CallxOp {
     Callx12,
 }
 
+/// The zero-overhead loop opcodes (`BRI8`, `op0 = 6`, `n = 3`, `m = 1`).
+///
+/// All three take `op as, label`: `as` is the trip count and the label is the
+/// first instruction *after* the loop body, which the hardware latches into
+/// `LEND`. See [`crate::disasm::loop_end`] for the address formula.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LoopOp {
+    /// `loop as, label` — `r = 8`. Always executes the body `AR[s]` times.
+    Loop,
+    /// `loopnez as, label` — `r = 9`. Skips the body entirely if `AR[s] == 0`.
+    Loopnez,
+    /// `loopgtz as, label` — `r = 0xA`. Skips the body if `AR[s] <= 0` signed.
+    Loopgtz,
+}
+
 /// Zero-operand barrier / sync / nop opcodes (`RRR`, `op0 = 0`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum NullaryOp {
@@ -314,6 +329,10 @@ pub enum Inst {
     BranchBiI(bool /* set? bbsi:true, bbci:false */, Reg, u8, i32),
     /// `beqz.n`/`bnez.n rs, target` (16-bit). Stores unsigned 6-bit forward offset.
     BranchZN(bool /* nez? */, Reg, u32),
+    /// `op as, label` — a zero-overhead loop. Stores the **unsigned** 8-bit
+    /// encoded offset, not an address; [`crate::disasm::loop_end`] turns it
+    /// into the `LEND` value.
+    Loop(LoopOp, Reg, u8),
     /// `j target`. Stores signed 18-bit byte offset.
     J(i32),
     /// `jx rs`

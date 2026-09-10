@@ -417,6 +417,16 @@ pub fn encode(inst: &Inst) -> Vec<u8> {
             let t = (1 << 3) | ((nez as u32) << 2) | hi;
             emit(&mut out, narrow(0xc, t, rs.num() as u32, r), 2);
         }
+        Inst::Loop(op, ars, imm) => {
+            // op0 = 6, n = 3, m = 1 -> t nibble = (m << 2) | n = 7; r selects
+            // which loop; s = the trip-count register; imm8 = the raw offset.
+            let r = match op {
+                LoopOp::Loop => 8,
+                LoopOp::Loopnez => 9,
+                LoopOp::Loopgtz => 0xa,
+            };
+            emit(&mut out, rri8(6, 7, ars.num() as u32, r, imm as u32), 3);
+        }
         Inst::J(off) => {
             let w = 6 | (((off as u32) & 0x3ffff) << 6);
             emit(&mut out, w, 3);
