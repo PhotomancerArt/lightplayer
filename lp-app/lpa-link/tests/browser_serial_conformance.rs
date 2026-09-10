@@ -568,7 +568,7 @@ async fn a_chip_reset_does_not_re_enumerate() {
          the USB device does not go away"
     );
     assert!(
-        boolean(js_port_readable_is_null(&after)).await,
+        js_port_readable_is_null(&after),
         "the surviving port is enumerated but was never opened here, so its \
          readable must still be null"
     );
