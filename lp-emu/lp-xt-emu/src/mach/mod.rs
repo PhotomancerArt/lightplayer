@@ -90,8 +90,13 @@
 //! - **Rings.** `PS.RING` is stored and ignored: `CRING` is always 0, so no
 //!   `PrivilegedCause` (8) is ever raised and every privileged instruction
 //!   runs. The firmware never leaves ring 0.
-//! - **The block cache and the translated seam** — P5's. `invalidate_block_range`
-//!   exists for the contract and does nothing yet.
+//! - **The block cache.** [`XtHart::invalidate_block_range`] and
+//!   [`XtHart::invalidate_blocks`] exist for the contract and reach only the
+//!   translated seam ([`translated`]) today; the pre-decoded cache itself is
+//!   the speed ladder's.
+//! - **A translator.** [`translated`] is the seam one would plug into and
+//!   nothing is plugged into it: with no core installed the hart runs the loop
+//!   it has always run, and everything observable is byte-identical.
 //! - **ICOUNT** counting, `LITBASE`-relative `l32r`, external registers
 //!   (`rer`/`wer` raise an illegal instruction, loudly), and any cache or
 //!   region-protection *behaviour* (the TLB attributes are accepted and
@@ -103,6 +108,7 @@ pub mod interrupt;
 pub mod mac16;
 pub mod sr;
 pub mod timer;
+pub mod translated;
 pub mod trap;
 pub mod window;
 
@@ -240,7 +246,48 @@ pub struct XtHart<B: Bus> {
     /// [`XtHart::deliver_breakpoint`] knows its width and form.
     pending_break: Option<PendingBreak>,
     strict_unsupported: bool,
+    /// How many `isync` instructions the guest has retired — the Xtensa
+    /// analogue of RV32's `fence_i_count`, and the same diagnostic: a run that
+    /// published code and shows a zero here has a fence that is not reaching
+    /// the machine.
+    isync_count: u64,
+    /// The installed translated core, if any, and the entry table that says
+    /// where it may be entered (direct-mapped **by byte**, `0` = no entry).
+    ///
+    /// **Not architectural state**: absent from a snapshot, empty on a clone,
+    /// and a run with no core installed must produce a byte-identical
+    /// everything. See [`translated`].
+    core: Option<translated::BoxedCore<B>>,
+    core_entries: Vec<u32>,
+    /// An invalidation asked for while the core was lifted out of the hart —
+    /// see [`XtHart::drain_core_flush`]. `isync` and a `wsr` to `LEND` are why
+    /// it exists.
+    core_flush_pending: PendingInvalidate,
     _bus: PhantomData<fn(&mut B)>,
+}
+
+/// An invalidation held for a translated core that is not currently in the
+/// hart.
+///
+/// Two ranges cannot be merged without losing precision in the *unsafe*
+/// direction, so a second range widens the whole thing to
+/// [`PendingInvalidate::All`]. Invalidating too much is slow; invalidating too
+/// little is wrong.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PendingInvalidate {
+    None,
+    Range(u32, u32),
+    All,
+}
+
+impl PendingInvalidate {
+    fn add(self, range: Option<(u32, u32)>) -> Self {
+        match (self, range) {
+            (Self::All, _) | (_, None) => Self::All,
+            (Self::None, Some((lo, hi))) => Self::Range(lo, hi),
+            (Self::Range(..), Some(_)) => Self::All,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -269,6 +316,13 @@ impl<B: Bus> Clone for XtHart<B> {
             waiti: self.waiti,
             pending_break: self.pending_break,
             strict_unsupported: self.strict_unsupported,
+            isync_count: self.isync_count,
+            // Not copied: a translated core is not architectural state, and
+            // it holds host code for guest bytes that the clone's bus may not
+            // have. The snapshot path is exactly the case that matters.
+            core: None,
+            core_entries: Vec::new(),
+            core_flush_pending: PendingInvalidate::None,
             _bus: PhantomData,
         }
     }
@@ -326,8 +380,51 @@ impl<B: Bus> XtHart<B> {
             waiti: false,
             pending_break: None,
             strict_unsupported: false,
+            isync_count: 0,
+            core: None,
+            core_entries: Vec::new(),
+            core_flush_pending: PendingInvalidate::None,
             _bus: PhantomData,
         }
+    }
+
+    // --- the translated core ----------------------------------------------
+
+    /// Install a translated core and the guest pcs at which it may be
+    /// entered, replacing any core already installed.
+    ///
+    /// See [`translated`] for what a core is and what it promises. Installing
+    /// one changes no architectural state and no transcript; it is the
+    /// mechanism, not the decision.
+    pub fn set_translated_core(&mut self, core: translated::BoxedCore<B>, entries: &[u32]) {
+        self.core_entries = translated::entry_table(entries);
+        self.core = Some(core);
+        // A freshly installed core knows exactly what it holds, so anything
+        // recorded for the core it replaces is not its business.
+        self.core_flush_pending = PendingInvalidate::None;
+    }
+
+    /// Remove the installed core, if any, and go back to interpreting.
+    ///
+    /// This is what `--interpreter` reaches: every build can turn the
+    /// translator off entirely and must then produce an identical everything.
+    pub fn clear_translated_core(&mut self) {
+        self.core = None;
+        self.core_entries = Vec::new();
+        self.core_flush_pending = PendingInvalidate::None;
+    }
+
+    /// Is a translated core installed?
+    #[inline]
+    #[must_use]
+    pub fn has_translated_core(&self) -> bool {
+        self.core.is_some()
+    }
+
+    /// The installed core's own report line, if any.
+    #[must_use]
+    pub fn translated_core_report(&self) -> Option<String> {
+        self.core.as_ref().map(|c| c.report())
     }
 
     // --- plain accessors ---------------------------------------------------
@@ -472,12 +569,68 @@ impl<B: Bus> XtHart<B> {
         self.strict_unsupported
     }
 
-    /// Forget any pre-decoded block overlapping `[lo, hi)`. There is no
-    /// block cache on this hart yet (P5 brings the seam); the method is the
-    /// contract, and a caller that writes guest code from the host side may
-    /// already call it.
+    /// Forget whatever has been pre-decoded or translated for `[lo, hi)`.
+    ///
+    /// There is no pre-decoded block cache on this hart yet — that is the
+    /// speed ladder's — so this reaches only the translated core. A caller
+    /// that writes guest code from the host side calls it; so does the hart
+    /// itself, from the three invalidation events [`translated`] documents.
     #[inline]
-    pub fn invalidate_block_range(&mut self, _lo: u32, _hi: u32) {}
+    pub fn invalidate_block_range(&mut self, lo: u32, hi: u32) {
+        match self.core.as_mut() {
+            Some(core) => core.invalidate(Some((lo, hi))),
+            None => self.core_flush_pending = self.core_flush_pending.add(Some((lo, hi))),
+        }
+    }
+
+    /// Forget everything pre-decoded or translated — the whole-image form of
+    /// [`XtHart::invalidate_block_range`].
+    ///
+    /// `None` reaching a core means "everything". A hart with no core
+    /// installed records the request instead, because the core the hart is
+    /// *about to be given back* (it is lifted out for the length of a slice)
+    /// is the one that has to hear it.
+    #[inline]
+    pub fn invalidate_blocks(&mut self) {
+        match self.core.as_mut() {
+            Some(core) => core.invalidate(None),
+            None => self.core_flush_pending = self.core_flush_pending.add(None),
+        }
+    }
+
+    /// Apply an invalidation that was asked for while the translated core was
+    /// lifted out of the hart.
+    ///
+    /// The escape hatch is the reason this exists: translated code called
+    /// [`XtHart::step_one`], the instruction it ran was an `isync` or a `wsr`
+    /// to `LEND`, and the core that has to forget what it translated was in
+    /// the caller's hand at the time.
+    fn drain_core_flush(&mut self, core: &mut translated::BoxedCore<B>) {
+        match core::mem::replace(&mut self.core_flush_pending, PendingInvalidate::None) {
+            PendingInvalidate::None => {}
+            PendingInvalidate::Range(lo, hi) => core.invalidate(Some((lo, hi))),
+            PendingInvalidate::All => core.invalidate(None),
+        }
+    }
+
+    /// The `isync` hook: the guest has published instructions, so anything
+    /// pre-decoded or translated for them is suspect.
+    ///
+    /// A whole-image invalidation rather than a range, exactly as RV32 does
+    /// for `fence.i`: it fires a handful of times in a run, so range precision
+    /// would buy nothing measurable and would cost correctness surface.
+    #[inline]
+    pub(crate) fn on_isync(&mut self) {
+        self.isync_count += 1;
+        self.invalidate_blocks();
+    }
+
+    /// How many `isync` instructions the guest has retired.
+    #[inline]
+    #[must_use]
+    pub const fn isync_count(&self) -> u64 {
+        self.isync_count
+    }
 
     /// The earliest cycle at which a `CCOMPARE` timer matches, so a machine
     /// can end a slice or an idle skip there rather than overshoot.
@@ -614,6 +767,24 @@ impl<B: Bus> XtHart<B> {
         // The deadline as an absolute cycle; `saturating_add` keeps a
         // `u64::MAX` budget meaning "never".
         let end = self.cycle_count.saturating_add(budget);
+        // One branch per slice, not per instruction: a hart with no
+        // translated core runs the loop it has always run, and the seam costs
+        // it nothing. See [`translated`].
+        if self.core.is_some() {
+            self.run_slice_cored(bus, end, tracer)
+        } else {
+            self.run_slice_stepping(bus, end, tracer)
+        }
+    }
+
+    /// The interpreter's slice loop, unchanged and unconditional.
+    #[inline]
+    fn run_slice_stepping<T: Tracer + ?Sized>(
+        &mut self,
+        bus: &mut B,
+        end: u64,
+        tracer: &mut T,
+    ) -> SliceEnd {
         loop {
             if self.cycle_count >= end {
                 return SliceEnd::BudgetExhausted;
@@ -622,6 +793,162 @@ impl<B: Bus> XtHart<B> {
                 return over;
             }
         }
+    }
+
+    /// The same slice with a translated core installed.
+    ///
+    /// The core is **lifted out of `self`** for the whole slice, so the core
+    /// and the hart's registers are two disjoint borrows rather than one and a
+    /// core can be handed the hart it lives on (see [`translated`]'s module
+    /// docs). It goes back on every exit path. An invalidation asked for while
+    /// it was out is drained into it on the way in and on the way out.
+    fn run_slice_cored<T: Tracer + ?Sized>(
+        &mut self,
+        bus: &mut B,
+        end: u64,
+        tracer: &mut T,
+    ) -> SliceEnd {
+        let mut core = self.core.take();
+        if let Some(core) = core.as_mut() {
+            self.drain_core_flush(core);
+        }
+        let out = self.run_entries(core.as_mut(), bus, end, tracer);
+        if let Some(core) = core.as_mut() {
+            self.drain_core_flush(core);
+        }
+        self.core = core;
+        out
+    }
+
+    /// The slice loop with the translated-core entry check at its top.
+    ///
+    /// Structurally the RV32 hart's `run_blocks` with the block-cache half
+    /// removed: there is no pre-decoded cache on this hart, so a pc the core
+    /// does not claim falls through to exactly the `step_once` the
+    /// single-stepping loop runs.
+    fn run_entries<T: Tracer + ?Sized>(
+        &mut self,
+        mut core: Option<&mut translated::BoxedCore<B>>,
+        bus: &mut B,
+        end: u64,
+        tracer: &mut T,
+    ) -> SliceEnd {
+        loop {
+            if self.cycle_count >= end {
+                return SliceEnd::BudgetExhausted;
+            }
+            let pc = self.cpu.pc;
+            // The entry check: one table read and one compare, ahead of
+            // anything else. Byte-indexed — see `translated::entry_slot`.
+            if let Some(core) = core.as_mut()
+                && self.core_entries[translated::entry_slot(pc)] == pc
+            {
+                // Read before the call: the escape hatch runs guest
+                // instructions through the hart itself, so `self` may not
+                // still hold the entry counter by the time the core returns.
+                let entry_instret = self.instruction_count;
+                let outcome = core.run(self, bus, end);
+                // The escape hatch can have retired an `isync` or a `wsr` to
+                // `LEND`, and the core it wanted invalidated was out here
+                // rather than in the hart. Drain before it is consulted again.
+                self.drain_core_flush(core);
+                // The escape hatch ran something that ended the slice — a
+                // `waiti`, a `break`, a bus yield, a fault. The interpreter's
+                // own answer, handed straight back: a translated stay does not
+                // get to swallow one, and the counters are applied first so
+                // the machine resumes exactly where it would have.
+                if let translated::RunOutcome::Ended {
+                    pc: new_pc,
+                    cycle_count,
+                    instruction_count,
+                    end: over,
+                } = outcome
+                {
+                    self.cpu.pc = new_pc;
+                    self.cycle_count = cycle_count;
+                    self.instruction_count = instruction_count;
+                    return over;
+                }
+                let mut progressed = false;
+                if let translated::RunOutcome::Ran {
+                    pc: new_pc,
+                    cycle_count,
+                    instruction_count,
+                    after_store,
+                } = outcome
+                    // The no-progress guard. A core whose first block does not
+                    // fit the remaining budget returns `Ran` having done
+                    // nothing; without this the loop would ask it again
+                    // forever. The interpreter runs the instruction instead,
+                    // which is what happens when the budget is short.
+                    && (new_pc != pc || instruction_count != entry_instret)
+                {
+                    self.cpu.pc = new_pc;
+                    self.cycle_count = cycle_count;
+                    self.instruction_count = instruction_count;
+                    if after_store {
+                        // Polling point (c), byte for byte what `step` does
+                        // after an interpreted store.
+                        if bus.take_sideband() {
+                            self.resample_external(bus);
+                        }
+                        if bus.take_yield() {
+                            return SliceEnd::BusYield;
+                        }
+                    }
+                    // (e) a `CCOMPARE` match inside the stay. The interpreter
+                    // tests this after every retire and a core cannot, so the
+                    // hart latches and polls once the stay is over; a core
+                    // that wants the interrupt delivered on the exact
+                    // instruction leaves at `next_timer_cycle` or refuses.
+                    self.tick_timers();
+                    progressed = true;
+                }
+                if progressed {
+                    continue;
+                }
+            }
+            if let Some(over) = self.step_once(bus, tracer) {
+                return over;
+            }
+        }
+    }
+
+    /// Run **exactly one** guest instruction at [`pc`](Self::pc), the way the
+    /// interpreter always has, and report whether the slice is over.
+    ///
+    /// This is the escape hatch: the one thing a translated core calls when it
+    /// meets an instruction it does not translate. It is the same `step_once`
+    /// the single-stepping loop runs — not a second copy of it — so the trap,
+    /// special-register, `waiti`, `break`, `isync` and polling-point behaviour
+    /// a translated stay inherits is the interpreter's own by construction and
+    /// cannot drift from it.
+    ///
+    /// Afterwards [`pc`](Self::pc), [`cycle_count`](Self::cycle_count),
+    /// [`instruction_count`](Self::instruction_count) and the AR file are what
+    /// the interpreter would have left. `None` means the caller may continue;
+    /// `Some` is a slice end the caller must report back, because a translated
+    /// core does not get to swallow a `waiti`, a `break` or a bus yield.
+    ///
+    /// No trace is emitted: see [`translated::TranslatedCore::run`].
+    pub fn step_one(&mut self, bus: &mut B) -> Option<SliceEnd> {
+        self.step_once(bus, &mut NoopTracer)
+    }
+
+    /// Set the cycle and instruction counters from outside the guest.
+    ///
+    /// A translated core keeps both in host registers for the length of a stay
+    /// and has to hand them back before anything the guest can observe reads
+    /// them — the escape hatch above, and every exit. Neither counter is polled
+    /// as a side effect, so this is a plain write; the *monotonicity*
+    /// [`advance_to_cycle`](Self::advance_to_cycle) protects is the scheduler's
+    /// idle skip, which is a different job. Note that `CCOUNT` is
+    /// [`cycle_count`](Self::cycle_count) seen through an offset, so moving it
+    /// moves guest time.
+    #[inline]
+    pub fn set_counters(&mut self, cycle_count: u64, instruction_count: u64) {
+        self.cycle_count = cycle_count;
+        self.instruction_count = instruction_count;
     }
 
     /// One instruction: fetch it, decode it, run it, charge what the bus
