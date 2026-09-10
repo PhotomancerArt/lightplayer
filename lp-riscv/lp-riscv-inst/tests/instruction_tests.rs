@@ -252,3 +252,274 @@ fn zexth_zero_extends_halfword() {
         "zext.h keeps only the low 16 bits"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Zb* immediate forms.
+//
+// Every word below came out of the assembler, not out of a sibling
+// instruction's shape — that is the standing lesson of
+// `docs/defects/2026-07-31-zexth-encoding-steals-xori-128.md`. They were
+// produced by assembling
+//
+//     .option arch, +zba, +zbb, +zbs, +zbkb
+//     rori a0,a1,4 / rev8 a0,a1 / brev8 a0,a1 / orc.b a0,a1
+//     bexti a0,a1,3 / bclri a0,a1,3 / bseti a0,a1,3 / binvi a0,a1,3
+//
+// for `riscv32imac-unknown-none-elf` and reading the words back with
+// llvm-objdump.
+// ---------------------------------------------------------------------------
+
+/// The whole table, three ways: the word decodes to the right instruction, the
+/// instruction re-encodes to the same word, and the disassembly prints the
+/// mnemonic the assembler accepts.
+#[test]
+fn zb_immediate_forms_match_the_assembler() {
+    let cases: &[(u32, Inst, &str)] = &[
+        (
+            0x6045_D513,
+            Inst::Rori {
+                rd: Gpr::A0,
+                rs1: Gpr::A1,
+                imm: 4,
+            },
+            "rori a0, a1, 4",
+        ),
+        (
+            0x6985_D513,
+            Inst::Rev8 {
+                rd: Gpr::A0,
+                rs1: Gpr::A1,
+            },
+            "rev8 a0, a1",
+        ),
+        (
+            0x6875_D513,
+            Inst::Brev8 {
+                rd: Gpr::A0,
+                rs1: Gpr::A1,
+            },
+            "brev8 a0, a1",
+        ),
+        (
+            0x2875_D513,
+            Inst::Orcb {
+                rd: Gpr::A0,
+                rs1: Gpr::A1,
+            },
+            "orc.b a0, a1",
+        ),
+        (
+            0x4835_D513,
+            Inst::Bexti {
+                rd: Gpr::A0,
+                rs1: Gpr::A1,
+                imm: 3,
+            },
+            "bexti a0, a1, 3",
+        ),
+        (
+            0x4835_9513,
+            Inst::Bclri {
+                rd: Gpr::A0,
+                rs1: Gpr::A1,
+                imm: 3,
+            },
+            "bclri a0, a1, 3",
+        ),
+        (
+            0x2835_9513,
+            Inst::Bseti {
+                rd: Gpr::A0,
+                rs1: Gpr::A1,
+                imm: 3,
+            },
+            "bseti a0, a1, 3",
+        ),
+        (
+            0x6835_9513,
+            Inst::Binvi {
+                rd: Gpr::A0,
+                rs1: Gpr::A1,
+                imm: 3,
+            },
+            "binvi a0, a1, 3",
+        ),
+        // The funct12 neighbours these arms sit next to, so a future edit to
+        // one cannot quietly swallow another.
+        (
+            0x6005_9513,
+            Inst::Clz {
+                rd: Gpr::A0,
+                rs1: Gpr::A1,
+            },
+            "clz a0, a1",
+        ),
+        (
+            0x6015_9513,
+            Inst::Ctz {
+                rd: Gpr::A0,
+                rs1: Gpr::A1,
+            },
+            "ctz a0, a1",
+        ),
+        (
+            0x6025_9513,
+            Inst::Cpop {
+                rd: Gpr::A0,
+                rs1: Gpr::A1,
+            },
+            "cpop a0, a1",
+        ),
+        (
+            0x6045_9513,
+            Inst::Sextb {
+                rd: Gpr::A0,
+                rs1: Gpr::A1,
+            },
+            "sext.b a0, a1",
+        ),
+        (
+            0x6055_9513,
+            Inst::Sexth {
+                rd: Gpr::A0,
+                rs1: Gpr::A1,
+            },
+            "sext.h a0, a1",
+        ),
+        // The base-ISA shifts that share this funct3 space, unchanged.
+        (
+            0x0035_9513,
+            Inst::Slli {
+                rd: Gpr::A0,
+                rs1: Gpr::A1,
+                imm: 3,
+            },
+            "slli a0, a1, 3",
+        ),
+        (
+            0x0035_D513,
+            Inst::Srli {
+                rd: Gpr::A0,
+                rs1: Gpr::A1,
+                imm: 3,
+            },
+            "srli a0, a1, 3",
+        ),
+        (
+            0x4035_D513,
+            Inst::Srai {
+                rd: Gpr::A0,
+                rs1: Gpr::A1,
+                imm: 3,
+            },
+            "srai a0, a1, 3",
+        ),
+    ];
+
+    for (word, want, text) in cases {
+        let got = decode_instruction(*word)
+            .unwrap_or_else(|e| panic!("{text} ({word:#010x}) failed to decode: {e}"));
+        assert_eq!(&got, want, "decode of {word:#010x} ({text})");
+        assert_eq!(
+            got.encode(),
+            *word,
+            "re-encode of {text}: {:#010x} != {word:#010x}",
+            got.encode()
+        );
+        assert_eq!(got.format(), *text, "disassembly of {word:#010x}");
+    }
+}
+
+/// The headline mis-transcription: funct6 0x12 is `bclri`, and the decoder
+/// named it `bseti`. Nothing failed loudly, because both are real
+/// instructions — a disassembly said `bseti`, and a disassemble/re-assemble
+/// round trip turned a bit-clear into a bit-set at a different encoding.
+#[test]
+fn bclri_disassembles_as_bclri_not_bseti() {
+    let bclri = 0x4835_9513u32; // bclri a0, a1, 3
+    let bseti = 0x2835_9513u32; // bseti a0, a1, 3
+
+    assert_eq!(
+        decode_instruction(bclri).unwrap().format(),
+        "bclri a0, a1, 3"
+    );
+    assert_eq!(
+        decode_instruction(bseti).unwrap().format(),
+        "bseti a0, a1, 3"
+    );
+    assert_ne!(
+        decode_instruction(bclri).unwrap().encode(),
+        bseti,
+        "a bclri word must never re-encode as bseti"
+    );
+    assert_eq!(encode::bclri(Gpr::A0, Gpr::A1, 3), bclri);
+    assert_eq!(encode::bseti(Gpr::A0, Gpr::A1, 3), bseti);
+}
+
+/// `rev8` is the one where encode and decode were wrong the *same* way: both
+/// used the RV64 funct12 0x6b8, so any round-trip test written against the
+/// crate's own encoder would have passed on a word that is not an RV32
+/// instruction at all. The assembler is the only witness that catches it.
+#[test]
+fn rev8_uses_the_rv32_funct12() {
+    let word = 0x6985_D513u32; // rev8 a0, a1 on RV32
+    assert_eq!(encode::rev8(Gpr::A0, Gpr::A1), word);
+    assert_eq!((word >> 20) & 0xfff, 0x698);
+    assert_eq!(decode_instruction(word).unwrap().format(), "rev8 a0, a1");
+}
+
+/// Words that are RV64-only spellings, or that RV32 reserves. `llvm-objdump`
+/// renders all three as `.word` for `riscv32` with every Zb extension enabled,
+/// so an RV32 disassembler must not put a mnemonic on them.
+#[test]
+fn rv64_only_bitmanip_words_do_not_decode_on_rv32() {
+    for (word, what) in [
+        (0x6B85_D513u32, "rev8 a0, a1 as spelled on RV64"),
+        (0x0835_9513u32, "slli.uw a0, a1, 3 (RV64-only Zba)"),
+        (0x4A35_9513u32, "bclri a0, a1, 35 (shamt >= 32 needs RV64)"),
+    ] {
+        let decoded = decode_instruction(word);
+        assert!(
+            decoded.is_err(),
+            "{what} ({word:#010x}) is reserved on RV32 but decoded as {:?}",
+            decoded.ok()
+        );
+    }
+}
+
+/// A 5-bit shift amount is all RV32 has: bit 25 belongs to funct7. Encoding a
+/// larger amount must not walk into the neighbouring instruction — `bclri`
+/// with shamt 35 would otherwise emit funct7 0x25, a reserved word.
+#[test]
+fn zb_shift_immediates_stay_within_five_bits() {
+    for shamt in 0..32i32 {
+        for (name, encoded) in [
+            ("bclri", encode::bclri(Gpr::A0, Gpr::A1, shamt)),
+            ("bseti", encode::bseti(Gpr::A0, Gpr::A1, shamt)),
+            ("binvi", encode::binvi(Gpr::A0, Gpr::A1, shamt)),
+            ("bexti", encode::bexti(Gpr::A0, Gpr::A1, shamt)),
+            ("rori", encode::rori(Gpr::A0, Gpr::A1, shamt)),
+        ] {
+            let decoded = decode_instruction(encoded)
+                .unwrap_or_else(|e| panic!("{name} shamt={shamt} failed to decode: {e}"));
+            assert_eq!(
+                decoded.encode(),
+                encoded,
+                "{name} shamt={shamt} does not round-trip"
+            );
+            assert!(
+                decoded.format().starts_with(name),
+                "{name} shamt={shamt} disassembled as {}",
+                decoded.format()
+            );
+        }
+    }
+
+    // Bit 25 is funct7, so an out-of-range amount is masked rather than
+    // carried into it.
+    assert_eq!(
+        encode::bclri(Gpr::A0, Gpr::A1, 35),
+        encode::bclri(Gpr::A0, Gpr::A1, 3),
+        "shamt 35 must not become the reserved funct7 0x25"
+    );
+}

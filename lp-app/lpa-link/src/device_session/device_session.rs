@@ -322,9 +322,22 @@ impl DeviceShared {
     /// free for a management tool; the browser provider closes its Web
     /// Serial port). Best-effort — the link may already be dead when this
     /// runs (Gone recovery).
+    ///
+    /// Best-effort about the OUTCOME, not about the reporting: a close that
+    /// fails means the port is still held, and the operation about to run
+    /// will fail to open it. Left silent, that surfaced a whole step later
+    /// as an unexplained "Device or resource busy"
+    /// (`docs/defects/2026-09-08-serial-close-leaks-the-port-on-a-wedged-device.md`),
+    /// so the
+    /// failure goes to the console feed where the operator reads the walk.
     pub(super) async fn release_link(&self) {
         let session_id = self.session_id();
-        let _ = self.connector.close(&session_id).await;
+        if let Err(error) = self.connector.close(&session_id).await {
+            self.sink.emit(DeviceEvent::LogLine {
+                line: format!("device link release failed: {error}"),
+                origin: DeviceLineOrigin::Link,
+            });
+        }
     }
 
     /// Reconnect = rebuild: open a NEW link (fresh provider session, fresh

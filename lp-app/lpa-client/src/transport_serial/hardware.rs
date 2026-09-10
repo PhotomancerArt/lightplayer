@@ -85,11 +85,41 @@ fn serial_thread_loop(
                 data.len()
             );
 
-            // Write to the stream (implementations flush internally)
-            if let Err(e) = stream.write_all(&data) {
-                log::error!("Serial thread: Write error: {e}");
-                connection_lost = true;
-                break;
+            // Write to the stream (bounded — see `DeviceByteStream::write_all`)
+            match stream.write_all(&data) {
+                Ok(()) => {}
+                // The device stopped draining its receive FIFO. Drop the
+                // frame and keep the link: this is what an unresponsive
+                // board looks like from the write side, and the readiness
+                // engine's own deadline is what gets to classify it. Tearing
+                // the link down here reported a repairable board as `Gone`,
+                // a state management never runs from (bench, 2026-09-08).
+                Err(ByteStreamError::WriteStalled) => {
+                    log::warn!(
+                        "Serial thread: {stream_label} is not accepting output; \
+                         dropped message id={}",
+                        msg.id
+                    );
+                    // And stop draining. Everything queued behind this frame
+                    // is equally undeliverable, and each attempt costs the
+                    // port's full write timeout — readiness leaves ~30 of
+                    // them behind a silent board, which is minutes of writes
+                    // nobody will read, past any close's join budget. The
+                    // outer pass re-checks the shutdown signal immediately.
+                    //
+                    // Deliberately keyed on the STALL and not on shutdown: a
+                    // peer that is still accepting gets the queue it was
+                    // already being handed (the studio device bench depends
+                    // on a close mid-drain finishing what it started), and a
+                    // peer that is not gets abandoned at the first frame it
+                    // refused.
+                    break;
+                }
+                Err(e) => {
+                    log::error!("Serial thread: Write error: {e}");
+                    connection_lost = true;
+                    break;
+                }
             }
         }
 
@@ -166,7 +196,15 @@ fn serial_thread_loop(
         drop(server_tx);
     }
 
-    log::debug!("Serial thread: Exiting");
+    // Explicit, and load-bearing: this thread is the ONLY owner of the byte
+    // stream, so the OS serial port is released here and nowhere else.
+    // `ClientTransport::close` joins this thread precisely to observe that,
+    // and the next management operation reopens the same port immediately
+    // after — see
+    // `docs/defects/2026-09-08-serial-close-leaks-the-port-on-a-wedged-device.md`.
+    drop(stream);
+
+    log::debug!("Serial thread: Exiting ({stream_label} released)");
 }
 
 /// How the DTR/RTS lines reach the chip's reset, which decides the dance.
@@ -301,7 +339,8 @@ pub fn create_hardware_serial_transport_pair(
 /// The caller owns port opening (the `host-serial-esp32` provider opens
 /// native ports; `lpa-link`'s fake device supplies a scripted stream). The
 /// returned transport speaks the `M!` JSON line protocol over the stream from
-/// a dedicated I/O thread. `stream_label` only names the stream in logs.
+/// a dedicated I/O thread. `stream_label` names the stream in logs and in
+/// the close-timeout error (where it is the held port's name).
 pub fn create_hardware_serial_transport_pair_with_options(
     stream: Box<dyn DeviceByteStream>,
     stream_label: &str,
@@ -316,6 +355,7 @@ pub fn create_hardware_serial_transport_pair_with_options(
 
     // Spawn serial thread
     let stream_label = stream_label.to_string();
+    let label_for_error = stream_label.clone();
     let thread_handle = thread::Builder::new()
         .name("lp-hardware-serial".to_string())
         .spawn(move || {
@@ -335,5 +375,150 @@ pub fn create_hardware_serial_transport_pair_with_options(
         server_rx,
         shutdown_tx,
         thread_handle,
+        label_for_error,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::time::Instant;
+
+    use super::*;
+    use crate::transport::ClientTransport;
+    use crate::transport_serial::client::CLOSE_JOIN_BUDGET;
+
+    /// A byte stream that answers reads the way a silent device does and
+    /// records the two things `close` is supposed to guarantee: that the
+    /// stream was DROPPED (on a real port, that is the fd closing), and how
+    /// many writes were attempted before it was.
+    ///
+    /// `stalls` makes writes behave like a port whose peer has stopped
+    /// reading: each attempt costs the port's write timeout and then reports
+    /// [`ByteStreamError::WriteStalled`].
+    struct SilentStream {
+        dropped: Arc<AtomicBool>,
+        writes: Arc<AtomicUsize>,
+        write_cost: Duration,
+        stalls: bool,
+    }
+
+    impl DeviceByteStream for SilentStream {
+        fn read_available(&mut self, _buf: &mut [u8]) -> Result<usize, ByteStreamError> {
+            // The port's read timeout, as the real stream reports it.
+            thread::sleep(Duration::from_millis(100));
+            Ok(0)
+        }
+
+        fn write_all(&mut self, _bytes: &[u8]) -> Result<(), ByteStreamError> {
+            thread::sleep(self.write_cost);
+            self.writes.fetch_add(1, Ordering::SeqCst);
+            if self.stalls {
+                return Err(ByteStreamError::WriteStalled);
+            }
+            Ok(())
+        }
+
+        fn set_signals(
+            &mut self,
+            _dtr: Option<bool>,
+            _rts: Option<bool>,
+        ) -> Result<(), ByteStreamError> {
+            Ok(())
+        }
+
+        fn reopen(&mut self, _baud_rate: u32) -> Result<(), ByteStreamError> {
+            Ok(())
+        }
+    }
+
+    impl Drop for SilentStream {
+        fn drop(&mut self) {
+            self.dropped.store(true, Ordering::SeqCst);
+        }
+    }
+
+    fn hello(id: u64) -> ClientMessage {
+        ClientMessage {
+            id,
+            msg: lpc_wire::ClientRequest::Hello,
+        }
+    }
+
+    /// `close()` returning `Ok` means the byte stream is gone — which on the
+    /// host serial provider is the promise that the OS port is free for the
+    /// management operation that opens it next.
+    #[tokio::test]
+    async fn close_drops_the_byte_stream() {
+        let dropped = Arc::new(AtomicBool::new(false));
+        let mut transport = create_hardware_serial_transport_pair_with_options(
+            Box::new(SilentStream {
+                dropped: Arc::clone(&dropped),
+                writes: Arc::new(AtomicUsize::new(0)),
+                write_cost: Duration::ZERO,
+                stalls: false,
+            }),
+            "/dev/test-silent",
+            HardwareSerialOptions::default(),
+        )
+        .expect("transport");
+
+        transport.close().await.expect("close");
+        assert!(
+            dropped.load(Ordering::SeqCst),
+            "close returned Ok while the framing thread still owned the stream"
+        );
+    }
+
+    /// A backlog aimed at a peer that has stopped reading must not outlive
+    /// the close. The readiness engine queues one hello per second for its
+    /// whole budget, and a board that never answers leaves them all unsent;
+    /// attempting each of them at the port's full write timeout is what
+    /// pushed the framing thread past the close's join budget and left the
+    /// port held.
+    ///
+    /// The break is keyed on the STALL, not on the shutdown signal: a peer
+    /// that is still accepting gets the queue it was already being handed.
+    #[tokio::test]
+    async fn a_stalled_peer_does_not_hold_the_close_hostage() {
+        let dropped = Arc::new(AtomicBool::new(false));
+        let writes = Arc::new(AtomicUsize::new(0));
+        let mut transport = create_hardware_serial_transport_pair_with_options(
+            Box::new(SilentStream {
+                dropped: Arc::clone(&dropped),
+                writes: Arc::clone(&writes),
+                // One port write timeout per attempt: 60 × 100 ms = 6 s if
+                // every queued frame is attempted.
+                write_cost: Duration::from_millis(100),
+                stalls: true,
+            }),
+            "/dev/test-backlog",
+            HardwareSerialOptions::default(),
+        )
+        .expect("transport");
+
+        for id in 0..60 {
+            transport.send(hello(id)).await.expect("queue hello");
+        }
+
+        // Let the framing thread get INSIDE its drain loop before closing.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        let start = Instant::now();
+        transport.close().await.expect("close");
+        let elapsed = start.elapsed();
+
+        assert!(
+            dropped.load(Ordering::SeqCst),
+            "close returned Ok while the framing thread still owned the stream"
+        );
+        assert!(
+            elapsed < CLOSE_JOIN_BUDGET,
+            "close took {elapsed:?}, past the {CLOSE_JOIN_BUDGET:?} join budget"
+        );
+        assert!(
+            writes.load(Ordering::SeqCst) < 60,
+            "every queued frame was attempted against a peer that refused the first"
+        );
+    }
 }

@@ -28,7 +28,21 @@ pub struct AsyncSerialClientTransport {
     thread_handle: Option<JoinHandle<()>>,
     /// Whether the transport is closed
     closed: bool,
+    /// What the backend thread is talking to (a port name, `emulator`, …).
+    /// Names the resource in the close-timeout error, which is otherwise a
+    /// mystery "resource busy" one layer up.
+    backend_label: String,
 }
+
+/// How long [`ClientTransport::close`] waits for the backend thread to exit
+/// and release whatever it owns.
+///
+/// Generous against the backend's own bounds, not a guess: the hardware
+/// loop's slowest pass is one 100 ms read timeout plus a bounded write, and
+/// it re-checks the shutdown signal between writes. Anything past this is a
+/// backend wedged inside a blocking call, which is a bug in that backend —
+/// see `docs/defects/2026-09-08-serial-close-leaks-the-port-on-a-wedged-device.md`.
+pub(crate) const CLOSE_JOIN_BUDGET: Duration = Duration::from_secs(2);
 
 impl AsyncSerialClientTransport {
     /// Create a new async serial client transport
@@ -42,12 +56,14 @@ impl AsyncSerialClientTransport {
     /// * `server_rx` - Receiver for server messages
     /// * `shutdown_tx` - Shutdown signal sender
     /// * `thread_handle` - Handle to the backend thread
+    /// * `backend_label` - What the thread talks to, for close diagnostics
     #[cfg(any(feature = "serial", test))]
     pub(crate) fn new(
         client_tx: mpsc::UnboundedSender<ClientMessage>,
         server_rx: mpsc::UnboundedReceiver<WireServerMessage>,
         shutdown_tx: oneshot::Sender<()>,
         thread_handle: JoinHandle<()>,
+        backend_label: impl Into<String>,
     ) -> Self {
         Self {
             client_tx: Some(client_tx),
@@ -55,6 +71,7 @@ impl AsyncSerialClientTransport {
             shutdown_tx: Some(shutdown_tx),
             thread_handle: Some(thread_handle),
             closed: false,
+            backend_label: backend_label.into(),
         }
     }
 }
@@ -83,6 +100,15 @@ impl ClientTransport for AsyncSerialClientTransport {
             .ok_or(TransportError::ConnectionLost)
     }
 
+    /// Shut the backend thread down and WAIT for it to exit.
+    ///
+    /// The wait is the contract, not politeness: the backend thread is the
+    /// sole owner of the byte stream, so returning `Ok` here is what
+    /// promises that the OS resource behind it (a serial port) is free for
+    /// the next holder — a management operation reopens the same port
+    /// immediately after this returns. An `Err` therefore means the resource
+    /// is still held, and callers must surface it rather than treat close as
+    /// best-effort.
     async fn close(&mut self) -> Result<(), TransportError> {
         if self.closed {
             return Ok(());
@@ -108,15 +134,20 @@ impl ClientTransport for AsyncSerialClientTransport {
                     })?;
                     break;
                 }
-                if start.elapsed() > Duration::from_secs(1) {
-                    return Err(TransportError::Other(
-                        "Backend thread did not stop within timeout".to_string(),
-                    ));
+                if start.elapsed() > CLOSE_JOIN_BUDGET {
+                    let message = format!(
+                        "serial backend thread for {} did not stop within {:.1}s; \
+                         it still holds the connection",
+                        self.backend_label,
+                        CLOSE_JOIN_BUDGET.as_secs_f64()
+                    );
+                    log::error!("{message}");
+                    return Err(TransportError::Other(message));
                 }
                 // Runtime-neutral wait: `close` must work without a tokio
                 // reactor (DeviceSession drives it from single-actor edges).
                 // Blocking briefly is fine — this waits for an OS thread to
-                // exit, bounded by the 1 s timeout above.
+                // exit, bounded by the budget above.
                 std::thread::sleep(Duration::from_millis(10));
             }
         }
@@ -149,7 +180,15 @@ impl Drop for AsyncSerialClientTransport {
                         break;
                     }
                     if start.elapsed() > Duration::from_millis(100) {
-                        // Timeout - don't wait forever in Drop
+                        // Timeout - don't wait forever in Drop. The thread
+                        // still owns the byte stream, so whatever it holds
+                        // stays held; say so, because the symptom one layer
+                        // up is an unexplained "resource busy".
+                        log::warn!(
+                            "serial backend thread for {} still running after drop; \
+                             its connection is still held",
+                            self.backend_label
+                        );
                         break;
                     }
                     std::thread::yield_now();
@@ -173,8 +212,13 @@ mod tests {
         // Create a dummy thread that just exits immediately
         let thread_handle = std::thread::spawn(|| {});
 
-        let mut transport =
-            AsyncSerialClientTransport::new(client_tx, server_rx, shutdown_tx, thread_handle);
+        let mut transport = AsyncSerialClientTransport::new(
+            client_tx,
+            server_rx,
+            shutdown_tx,
+            thread_handle,
+            "test",
+        );
 
         // Verify we can call close
         transport.close().await.unwrap();

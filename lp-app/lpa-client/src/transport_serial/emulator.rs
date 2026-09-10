@@ -306,6 +306,7 @@ pub fn create_emulator_serial_transport_pair(
         server_rx,
         shutdown_tx,
         thread_handle,
+        "emulator",
     ))
 }
 

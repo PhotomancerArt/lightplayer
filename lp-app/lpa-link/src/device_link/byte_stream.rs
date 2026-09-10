@@ -106,6 +106,14 @@ impl<S: DeviceByteStream> ByteStreamLink<S> {
             ));
             return;
         }
+        // Note for the host-serial instantiation this model anticipates (see
+        // `run_reset` below): a real port answers a peer that has stopped
+        // reading with `ByteStreamError::WriteStalled`, which is a dropped
+        // frame, NOT a failing link — treating it as a failure reports a
+        // board management could repair as one it refuses to touch (defect
+        // `docs/defects/2026-09-08-serial-close-leaks-the-port-on-a-wedged-device.md`).
+        // Harmless today because the only instantiation is the fake device,
+        // which never stalls, and `fail` does not close the link.
         if let Err(error) = self.stream.write_all(bytes) {
             self.fail(&error);
         }
