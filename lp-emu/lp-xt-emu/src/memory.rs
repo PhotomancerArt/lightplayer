@@ -894,6 +894,46 @@ fn bus_error(t: Trap, size: usize, kind: MemoryAccessKind) -> MemoryError {
     }
 }
 
+/// The unsigned accessors the Xtensa executors are written against, over any
+/// [`Bus`](lp_emu_core::bus::Bus).
+///
+/// `Bus` is signed at the word/halfword/byte level; Xtensa loads and stores
+/// are unsigned (`l8ui`, `l16ui`, `l32i`, …) and every executor site spells
+/// them `read_u16` / `read_u32` / `write_u8` / `write_u16` / `write_u32`.
+/// Rather than widen the **contended** `lp-emu-core/src/bus.rs` with five more
+/// methods, the casts live here as a blanket-implemented crate-local trait:
+/// they are Xtensa's concern, not the core's, and the core's diff stays at the
+/// single `fetch_bytes` method the speed ladder was told about. Each body is
+/// one cast and folds away.
+///
+/// Inherent methods win name resolution, so this changes nothing for code
+/// holding a concrete `Memory` — `Memory::read_u32` is still the inherent one,
+/// still `&self`, still `Result<_, Trap>`.
+pub(crate) trait XtAccess: lp_emu_core::bus::Bus {
+    #[inline]
+    fn read_u16(&mut self, address: u32) -> Result<u16, MemoryError> {
+        Ok(self.read_halfword(address)? as u16)
+    }
+    #[inline]
+    fn read_u32(&mut self, address: u32) -> Result<u32, MemoryError> {
+        Ok(self.read_word(address)? as u32)
+    }
+    #[inline]
+    fn write_u8(&mut self, address: u32, value: u8) -> Result<(), MemoryError> {
+        self.write_byte(address, value as i8)
+    }
+    #[inline]
+    fn write_u16(&mut self, address: u32, value: u16) -> Result<(), MemoryError> {
+        self.write_halfword(address, value as i16)
+    }
+    #[inline]
+    fn write_u32(&mut self, address: u32, value: u32) -> Result<(), MemoryError> {
+        self.write_word(address, value as i32)
+    }
+}
+
+impl<B: lp_emu_core::bus::Bus + ?Sized> XtAccess for B {}
+
 #[cfg(test)]
 mod bus_seam_tests {
     use lp_emu_core::bus::Bus;
@@ -1039,6 +1079,47 @@ mod bus_seam_tests {
         assert_eq!(t.vaddr, word_only);
     }
 
+    /// The five unsigned shims are the inherent accessors with a cast, and the
+    /// cast is the whole point: values with the high bit set must survive.
+    #[test]
+    fn bus_unsigned_helpers_round_trip() {
+        let profile = BoardProfile::esp32();
+        let mut mem = loaded(&profile);
+        let ram = profile.stack_dbus_base + 0x100;
+
+        for (i, &v) in [
+            0x0000_0000u32,
+            0x0000_0001,
+            0x8000_0000,
+            0xFFFF_FFFF,
+            0xDEAD_BEEF,
+        ]
+        .iter()
+        .enumerate()
+        {
+            let at = ram + (i as u32) * 8;
+
+            XtAccess::write_u32(&mut mem, at, v).expect("word store");
+            assert_eq!(Memory::read_u32(&mem, at), Ok(v), "u32 {v:#010x}");
+            assert_eq!(XtAccess::read_u32(&mut mem, at), Ok(v), "u32 {v:#010x}");
+
+            let h = v as u16;
+            XtAccess::write_u16(&mut mem, at + 4, h).expect("halfword store");
+            assert_eq!(Memory::read_u16(&mem, at + 4), Ok(h), "u16 {h:#06x}");
+            assert_eq!(XtAccess::read_u16(&mut mem, at + 4), Ok(h), "u16 {h:#06x}");
+
+            let b = v as u8;
+            XtAccess::write_u8(&mut mem, at + 6, b).expect("byte store");
+            assert_eq!(Memory::read_u8(&mem, at + 6), Ok(b), "u8 {b:#04x}");
+            assert_eq!(Bus::read_u8(&mut mem, at + 6), Ok(b), "u8 {b:#04x}");
+        }
+
+        // And the inherent path sees what the bus path wrote, byte for byte —
+        // the two are one store, not two implementations that agree.
+        XtAccess::write_u32(&mut mem, ram, 0x8877_66FF).expect("word store");
+        assert_eq!(Memory::read_u8(&mem, ram), Ok(0xFF));
+        assert_eq!(Memory::read_u8(&mem, ram + 3), Ok(0x88));
+    }
 }
 
 /// EXCCAUSE for an instruction fetch to a non-executable address (matches the

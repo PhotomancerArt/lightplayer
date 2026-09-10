@@ -1,11 +1,13 @@
 //! Unconditional-jump executors.
 
+use lp_emu_core::bus::Bus;
 use lp_xt_inst::Inst;
 
-use crate::emu::{Emulator, Flow};
+use super::Exec;
+use crate::emu::Flow;
 use crate::error::Trap;
 
-impl Emulator {
+impl<B: Bus> Exec<'_, B> {
     pub(super) fn exec_jump(&mut self, inst: &Inst, pc: u32) -> Result<Flow, Trap> {
         match *inst {
             // J: target = PC + 4 + offset (18-bit signed byte offset).

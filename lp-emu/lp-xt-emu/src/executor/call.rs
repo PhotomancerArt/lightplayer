@@ -6,13 +6,15 @@
 //! rotation, so `a[4*inc]` becomes the callee's `a0` and the caller's argument
 //! registers `a[4*inc + 2..]` become the callee's `a2..`.
 
+use lp_emu_core::bus::Bus;
 use lp_xt_inst::{CallOp, CallxOp, Inst};
 
-use crate::emu::{Emulator, Flow};
+use super::Exec;
+use crate::emu::Flow;
 use crate::error::Trap;
 use crate::trace::Tracer;
 
-impl Emulator {
+impl<B: Bus> Exec<'_, B> {
     pub(super) fn exec_call<T: Tracer + ?Sized>(
         &mut self,
         inst: &Inst,
