@@ -26,6 +26,46 @@ pub trait Bus {
     fn write_halfword(&mut self, address: u32, value: i16) -> Result<(), MemoryError>;
     fn write_byte(&mut self, address: u32, value: i8) -> Result<(), MemoryError>;
 
+    /// Read up to three instruction bytes starting at `pc`, for a
+    /// variable-length decoder.
+    ///
+    /// Xtensa instructions are 2 or 3 bytes and start at **any** alignment, so
+    /// there is no word to return: the caller gets the bytes and the decoder's
+    /// length rule says how many of them are the instruction. `Ok(n)` with
+    /// `n < 3` means the mapping ran out — legal, and the decoder decides
+    /// whether that truncates a real instruction.
+    ///
+    /// The default assembles the answer from [`Bus::read_u8`], so an RV32-only
+    /// bus implements nothing and behaves correctly if something ever asks. A
+    /// bus with a cheaper contiguous path (a flat region table, a cache line)
+    /// overrides it. It is **not** a fetch-permission shortcut: an
+    /// implementation must apply the same execute permission its
+    /// [`Bus::fetch_instruction`] does — and note that the *default* reads
+    /// through [`Bus::read_u8`], which is a **data** read. On a bus where data
+    /// and fetch differ in permission or in side effects the default is wrong
+    /// and the bus must override. Today only `lp-xt-emu`'s `Memory` overrides
+    /// it, and only RV32 buses inherit it, where nothing calls it.
+    ///
+    /// The first byte classifies the address: if it cannot be fetched, that is
+    /// the error. Later bytes that fall outside the mapping stop the count
+    /// instead of failing.
+    #[inline]
+    fn fetch_bytes(&mut self, pc: u32, out: &mut [u8; 3]) -> Result<usize, MemoryError> {
+        // The first byte must be readable; that classifies the address.
+        out[0] = self.read_u8(pc)?;
+        let mut got = 1;
+        for i in 1..3u32 {
+            match self.read_u8(pc.wrapping_add(i)) {
+                Ok(b) => {
+                    out[i as usize] = b;
+                    got += 1;
+                }
+                Err(_) => break,
+            }
+        }
+        Ok(got)
+    }
+
     /// A hardware watchpoint slot (RISC-V trigger `mcontrol`, Xtensa
     /// `DBREAK`). The privileged layer mirrors its trigger CSRs here; a bus
     /// that honours it returns [`MemoryError::Watchpoint`] *instead of*
@@ -247,4 +287,140 @@ pub struct Watchpoint {
     pub on_store: bool,
     pub on_load: bool,
     pub on_execute: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::memory::MemoryAccessKind;
+
+    /// A bus that implements **only** the eight required methods, so
+    /// everything it answers past them is the trait's own default. The
+    /// mapping is `[base, base + data.len())`; anything else is an invalid
+    /// access.
+    struct TinyBus {
+        base: u32,
+        data: alloc::vec::Vec<u8>,
+    }
+
+    impl TinyBus {
+        fn index(&self, address: u32) -> Option<usize> {
+            let off = address.checked_sub(self.base)? as usize;
+            (off < self.data.len()).then_some(off)
+        }
+        fn oob(address: u32, size: usize, kind: MemoryAccessKind) -> MemoryError {
+            MemoryError::InvalidAccess {
+                address,
+                size,
+                kind,
+            }
+        }
+    }
+
+    impl Bus for TinyBus {
+        fn fetch_instruction(&mut self, address: u32) -> Result<u32, MemoryError> {
+            self.read_word(address).map(|w| w as u32)
+        }
+        fn read_word(&mut self, address: u32) -> Result<i32, MemoryError> {
+            let mut v = 0u32;
+            for i in 0..4u32 {
+                v |= u32::from(self.read_u8(address.wrapping_add(i))?) << (8 * i);
+            }
+            Ok(v as i32)
+        }
+        fn read_halfword(&mut self, address: u32) -> Result<i16, MemoryError> {
+            let lo = u16::from(self.read_u8(address)?);
+            let hi = u16::from(self.read_u8(address.wrapping_add(1))?);
+            Ok((lo | (hi << 8)) as i16)
+        }
+        fn read_byte(&mut self, address: u32) -> Result<i8, MemoryError> {
+            self.read_u8(address).map(|b| b as i8)
+        }
+        fn read_u8(&mut self, address: u32) -> Result<u8, MemoryError> {
+            match self.index(address) {
+                Some(i) => Ok(self.data[i]),
+                None => Err(Self::oob(address, 1, MemoryAccessKind::Read)),
+            }
+        }
+        fn write_word(&mut self, address: u32, value: i32) -> Result<(), MemoryError> {
+            for i in 0..4u32 {
+                self.write_byte(address.wrapping_add(i), (value >> (8 * i)) as i8)?;
+            }
+            Ok(())
+        }
+        fn write_halfword(&mut self, address: u32, value: i16) -> Result<(), MemoryError> {
+            self.write_byte(address, value as i8)?;
+            self.write_byte(address.wrapping_add(1), (value >> 8) as i8)
+        }
+        fn write_byte(&mut self, address: u32, value: i8) -> Result<(), MemoryError> {
+            match self.index(address) {
+                Some(i) => {
+                    self.data[i] = value as u8;
+                    Ok(())
+                }
+                None => Err(Self::oob(address, 1, MemoryAccessKind::Write)),
+            }
+        }
+    }
+
+    /// The default `fetch_bytes` is exactly three `read_u8` calls that stop at
+    /// the first failure — including at the very end of the mapping, where it
+    /// returns `Ok(2)` and `Ok(1)` rather than an error.
+    #[test]
+    fn bus_fetch_bytes_default_matches_read_u8() {
+        let base = 0x4000_0000u32;
+        let mut bus = TinyBus {
+            base,
+            data: alloc::vec![0x11, 0x22, 0x33, 0x44, 0x55],
+        };
+
+        // Fully inside the mapping.
+        let mut out = [0u8; 3];
+        assert_eq!(bus.fetch_bytes(base, &mut out), Ok(3));
+        assert_eq!(out, [0x11, 0x22, 0x33]);
+
+        let mut out = [0u8; 3];
+        assert_eq!(bus.fetch_bytes(base + 1, &mut out), Ok(3));
+        assert_eq!(out, [0x22, 0x33, 0x44]);
+
+        // Two bytes left: the third read fails and stops the count.
+        let mut out = [0u8; 3];
+        assert_eq!(bus.fetch_bytes(base + 3, &mut out), Ok(2));
+        assert_eq!(out[..2], [0x44, 0x55]);
+
+        // One byte left.
+        let mut out = [0u8; 3];
+        assert_eq!(bus.fetch_bytes(base + 4, &mut out), Ok(1));
+        assert_eq!(out[0], 0x55);
+
+        // The first byte classifies the address: unmapped is the error.
+        let mut out = [0u8; 3];
+        assert_eq!(
+            bus.fetch_bytes(base + 5, &mut out),
+            Err(MemoryError::InvalidAccess {
+                address: base + 5,
+                size: 1,
+                kind: MemoryAccessKind::Read,
+            })
+        );
+
+        // And the bytes it produced are the same bytes three `read_u8` calls
+        // produce, address for address, everywhere it returned `Ok`.
+        for pc in base..base + 5 {
+            let mut out = [0u8; 3];
+            let got = bus.fetch_bytes(pc, &mut out).expect("mapped");
+            let mut want = [0u8; 3];
+            let mut want_got = 0usize;
+            for i in 0..3u32 {
+                match bus.read_u8(pc.wrapping_add(i)) {
+                    Ok(b) => {
+                        want[i as usize] = b;
+                        want_got += 1;
+                    }
+                    Err(_) => break,
+                }
+            }
+            assert_eq!((got, &out[..got]), (want_got, &want[..want_got]));
+        }
+    }
 }
