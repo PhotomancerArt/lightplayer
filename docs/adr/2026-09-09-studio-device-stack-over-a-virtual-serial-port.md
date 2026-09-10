@@ -223,11 +223,69 @@ axes**. A page may carry both, and neither reads the other.
   G1 as OQ2, with the page banner as the current answer. Under mode B the card
   being indistinguishable is not a UX oversight — it is the assertion.
 
-## Follow-ups
+## Amendment 2026-09-09 — flashing is real, and a reset is not a replug (plan two M5)
 
-- **Amend when flashing is real** (plan two M5): what `esptool-js` needed from
-  the ROM download console and the flasher stub, and whether the "runs
-  unchanged" claim survived a write path.
+The write path ran. Studio's own **Flash firmware** verb, through the frozen
+`browser_esp32_flash.js`, through esptool-js 0.6.0 fetched from jsDelivr, wrote
+the packaged `esp32c6-4mb` image into an emulated board with nothing on its
+chip; the board then booted it from the reset vector, through the real mask ROM
+and the real ESP-IDF second-stage bootloader, and said hello with its own eFuse
+MAC. **The "runs unchanged" claim survived**: the three frozen files are
+byte-identical and `lp-app/lpa-studio-web/src/**` has no diff.
+
+**What esptool-js needed, and it was not what the plan feared.** The flasher
+stub was never the problem — it uploads, runs and writes (the native half was
+pinned by #638). Three things had to be true that were not:
+
+1. **A chip reset must not re-enumerate the port.** This is the ruling, and it
+   amends rule 2 above. `EmulatorPort` learns of a reboot from a control reply's
+   guest cycle going backwards; it used to answer that by minting a new
+   `SerialPort`, on the model that a resetting USB-Serial-JTAG chip looks like a
+   replug. It does not on this part: the USB-Serial-JTAG controller is in the
+   same silicon block as the CPU it resets, which is exactly why Studio can
+   flash a real C6 over Web Serial without the port vanishing. Measured: the
+   shim killed the port object esptool-js was holding, mid-`Connecting…`, every
+   run — and `browser_esp32_flash.js` holds one port for the whole call and is
+   frozen, so "tolerate it" was never available. **The cable (`detach`/`attach`)
+   is now the only thing that mints a port.** A reboot is still *noticed* — the
+   `reboot` event, and the dev banner re-renders — it simply is not a replug.
+   M2's conformance suite carries the amendment: one test's claim is reversed
+   and says so, three drive their re-enumeration from a replug instead, and
+   `a_chip_reset_does_not_re_enumerate` pins the new rule on both halves.
+
+2. **A rebooted board must answer its host again.** `next_host_poll` and
+   `next_pin_poll` are absolute guest cycles outside the machine's snapshot, so
+   a reboot put the clock back to zero and left both deadlines in the guest's
+   future — the board went deaf for as long as it had been up (~6 s of wall for
+   a 33-second-old board, ~3.5 minutes for a 120-second-old one). Its twin: the
+   port's open/closed state IS in the snapshot and the byte client's
+   connectedness is not, and the coupling fires only on an edge, so a board
+   could come back with its port closed and nothing to re-open it. Both are
+   fixed in `Esp32C6Machine::reboot`.
+
+3. **`SPI_CMD` must self-clear on SPI0 as well as SPI1.** `ESPLoader.main()`
+   ends with a mandatory `readFlashId()` whose failure it re-throws, and
+   esptool-js 0.6.0 puts the C6's `SPI_REG_BASE` at `0x6000_2000` — **SPI0**,
+   the cache controller, not SPI1 at `0x6000_3000`. SPI0's `cmd` was a plain
+   `RegFile`, so the `usr` trigger read back set forever and the host's poll
+   wedged with `SPI command did not complete in time`. SPI0's `cmd` now reads
+   idle and clears; nothing is executed there, because the desk C6's own answer
+   to this probe is a flash id of **0** and esptool's "Failed to communicate
+   with the flash chip" warning while the stub's reads and writes work fine.
+
+**What the ROM download console needed: nothing.** #620's work stood up
+untouched under a real flasher driven from a browser — SYNC, chip detect
+(`ESP32-C6 (revision 2)`), the eFuse MAC, `MEM_*` stub upload, deflate
+`FLASH_DEFL_*`, `Leaving...`, `Hard resetting via RTS pin...`.
+
+**One more thing the shim must own, recorded for mode A:** `emu serve` grew a
+third `--board` kind, `kind=rom-up` — the reset vector out of the board's own
+writable flash file. It is the only shape that can be flashed and then boot
+what was written, and `GET /boards`'s `flash` word became live (an image magic
+at the reset vector, recomputed on every flush) so `blank → flash → loaded` is
+a sequence a page can watch.
+
+## Follow-ups
 - **The wasm backing** of `EmulatorPort` (the sibling's mode A) fills points 5
   and 6 above; when it lands, this table stops having "refused" rows for the
   browser case.

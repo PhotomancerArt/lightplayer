@@ -67,12 +67,22 @@ impl Serve {
     /// Start a server on an existing state directory — what gate 5 needs to
     /// ask whether the flash survived the last one.
     pub fn start_in(elf: &Path, ids: &[&str], extra: &[&str], dir: PathBuf) -> Serve {
+        let specs: Vec<String> = ids
+            .iter()
+            .map(|id| format!("{id}={}", elf.display()))
+            .collect();
+        Serve::start_specs(&specs, extra, dir)
+    }
+
+    /// Start a server from whole `--board` specs, so a test can ask for a
+    /// `kind=` other than the default (plan two M5's `kind=rom-up`).
+    pub fn start_specs(specs: &[String], extra: &[&str], dir: PathBuf) -> Serve {
         std::fs::create_dir_all(&dir).expect("the scratch dir");
         let mut command = Command::new(env!("CARGO_BIN_EXE_lp-cli"));
         command.args(["emu", "serve", "--listen", "127.0.0.1:0"]);
-        for id in ids {
+        for spec in specs {
             command.arg("--board");
-            command.arg(format!("{id}={}", elf.display()));
+            command.arg(spec);
         }
         command.arg("--state-dir").arg(&dir);
         command.arg("--console-dir").arg(&dir);

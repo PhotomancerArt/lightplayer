@@ -357,6 +357,34 @@ register.
 | `espflash` **library** | `espflash::flasher::Flasher`, driven by `tests/flash_over_socket.rs` — the CI gate | **yes**, `--no-stub` |
 | `esptool` CLI | `--client esptool`, the recipe's default; local only (OQ8) | **yes**, `--no-stub` |
 | `espflash` CLI | `--client espflash` | **no**, and not for a reason on this side |
+| `esptool-js` 0.6.0 | in a browser, over `lp-cli emu serve`'s WebSocket door — Studio's own flash flow (plan two M5) | **yes**, with the **stub** and `compress: true` |
+
+### What the browser's esptool-js needed, over and above the above
+
+Three model facts, all measured through Studio's own **Flash firmware** verb
+and none of them the flasher stub (which uploads, runs and writes — #638
+pinned that natively):
+
+1. **`SPI_CMD` self-clears on SPI0 too.** `ESPLoader.main()` ends with a
+   mandatory `readFlashId()` whose failure it re-throws, and esptool-js 0.6.0
+   puts the C6's `SPI_REG_BASE` at `0x6000_2000` — **SPI0**, not SPI1 at
+   `0x6000_3000`. `periph/spi0.rs` now clears the trigger and traces it once;
+   it executes nothing, because the desk C6's own answer to this probe is a
+   flash id of 0 and a "Failed to communicate with the flash chip" warning
+   while the stub's reads and writes work fine.
+2. **A reboot must not leave the board deaf.** `next_host_poll` /
+   `next_pin_poll` are absolute guest cycles outside the snapshot and now go
+   back to zero with the clock; the byte client's coupling is re-derived from
+   the port the restore produced.
+3. **A reset is not a replug** — the shim's side of it; see
+   `lp-emu/esp/README.md` §"What plan two's shim maps onto this".
+
+The whole run, from Studio's button: sync, `ESP32-C6 (revision 2)`, the run's
+own eFuse MAC, `Uploading stub… / Running stub… / Stub running…`,
+`Compressed 2479968 bytes to 1431158…`, `Wrote 2479968 bytes … at 0x0 in
+8.715 seconds.`, `Leaving…`, `Hard resetting via RTS pin…` — then the ROM, the
+ESP-IDF second-stage bootloader, and the app's hello carrying the commit that
+was written.
 
 `espflash --port <path>` does not open `<path>`. It looks the name up in the
 operating system's serial-port **enumeration** (`available_ports()` — IOKit
