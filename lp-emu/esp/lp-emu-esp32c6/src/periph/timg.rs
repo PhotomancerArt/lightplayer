@@ -61,6 +61,9 @@
 //! either way); it is stated because the model used to hold both locked.
 
 use lp_emu_core::sched::EventId;
+use lp_emu_esp_common::engine::timg::{
+    CounterConfig, TickRate, TimgEngine, TimgEventIds, WdtWrite, wdt_write,
+};
 use lp_emu_esp_common::regfile::{lane_of, merge_lane};
 use lp_emu_esp_common::{BusCx, Peripheral, RegFile, Width, event_id, event_local};
 
@@ -114,17 +117,33 @@ const CALI2_TIMEOUT: u32 = 1;
 const EV_ALARM: u16 = 0;
 const EV_CALI: u16 = 1;
 
-/// One timer group.
+/// The C6 TIMG has one timer (`timg0.rs:5`, `t: [T; 1]`). The S3 and the
+/// classic have two, and the classic a third (LACT) besides — which is why
+/// the engine takes a count and this view passes 1.
+const COUNTERS: usize = 1;
+/// This view's only counter, in the engine's `Vec`.
+const T0: usize = 0;
+
+/// One timer group: **a view over
+/// [`TimgEngine`](lp_emu_esp_common::engine::timg::TimgEngine)**.
+///
+/// The counters, their alarms and the watchdog gate are behaviour and live
+/// in the engine. What lives here is everything that would be wrong on
+/// another part: the offsets, the bit positions, the `RegFile` and its PAC
+/// reset values, the XTAL and CPU rates, the 54-bit counter width, the
+/// interrupt source numbers, the `EventId` packing — **and the RTC
+/// calibration**, which is generic in shape but two chip clock rates in
+/// content, has exactly one consumer, and whose classic counterpart runs off
+/// a different clock path. It stays here deliberately; its absence from the
+/// engine is not an oversight.
 #[derive(Debug)]
 pub struct Timg {
     name: &'static str,
     index: usize,
     /// Every register's stored value, and the block's names.
     regs: RegFile,
-    /// The count at `base_cycle`.
-    base_ticks: u64,
-    base_cycle: u64,
-    latched: u64,
+    /// The counters and their alarms.
+    engine: TimgEngine,
     cali_rdy: bool,
     cali_value: u32,
     t0_source: u16,
@@ -138,9 +157,7 @@ impl Timg {
             name,
             index: 0,
             regs: RegFile::new(name, 0x100).with_names(regs::TIMG0),
-            base_ticks: 0,
-            base_cycle: 0,
-            latched: 0,
+            engine: TimgEngine::new(COUNTERS),
             // Reset: `start_cycling` set → a cycling calibration that has
             // already completed once (modeled).
             cali_rdy: true,
@@ -172,19 +189,51 @@ impl Timg {
         }
     }
 
-    fn enabled(&self) -> bool {
-        self.config() & CFG_EN != 0
+    /// The scheduler ids this block has assigned to T0's events. The engine
+    /// never packs one: it does not know the peripheral index.
+    fn ids(&self) -> TimgEventIds {
+        TimgEventIds {
+            alarm: event_id(self.index, EV_ALARM),
+        }
+    }
+
+    /// Everything the engine needs about T0, read out of this chip's own
+    /// registers. Cheap enough to build unconditionally at each call site.
+    ///
+    /// **The rate.** T0 counts XTAL ticks at `divider` against a CPU running
+    /// at `memmap::CPU_HZ`, so `numer / denom` is `XTAL_HZ / (divider ×
+    /// CPU_HZ)` — which is the block's own arithmetic, folded: the count was
+    /// `delta × XTAL_HZ / (divider × CPU_HZ)` and the re-arm
+    /// `(ticks × divider × CPU_HZ).div_ceil(XTAL_HZ)`, both in `u128`, and
+    /// both become `delta × numer / denom` and `(ticks × denom)
+    /// .div_ceil(numer)` in the same `u128`. `divider × CPU_HZ` is at most
+    /// `65536 × 160_000_000 ≈ 2^43.3`, so folding it into a `u64` `denom`
+    /// cannot overflow and the products are the same integers they were.
+    fn counter_config(&self) -> CounterConfig {
+        let cfg = self.config();
+        CounterConfig {
+            enabled: cfg & CFG_EN != 0,
+            alarm_enabled: cfg & CFG_ALARM_EN != 0,
+            auto_reload: cfg & CFG_AUTORELOAD != 0,
+            rate: TickRate {
+                numer: XTAL_HZ,
+                denom: self.divider() * memmap::CPU_HZ,
+            },
+            mask: COUNTER_MASK,
+            alarm: self.alarm(),
+            load_value: self.load_value(),
+        }
     }
 
     /// The count at `now`.
     pub fn count(&self, now: u64) -> u64 {
-        if !self.enabled() {
-            return self.base_ticks;
-        }
-        let delta = u128::from(now.saturating_sub(self.base_cycle));
-        let ticks =
-            delta * u128::from(XTAL_HZ) / (u128::from(self.divider()) * u128::from(memmap::CPU_HZ));
-        (self.base_ticks + ticks as u64) & COUNTER_MASK
+        self.engine.count(T0, &self.counter_config(), now)
+    }
+
+    /// What a read of `t0lo`/`t0hi` returns: the value the last `update`
+    /// pulse latched.
+    pub fn latched(&self) -> u64 {
+        self.engine.latched(T0)
     }
 
     fn alarm(&self) -> u64 {
@@ -204,25 +253,9 @@ impl Timg {
     }
 
     fn rearm(&mut self, cx: &mut BusCx<'_>) {
-        let ev = event_id(self.index, EV_ALARM);
-        cx.sched.cancel(ev);
-        let cfg = self.config();
-        if cfg & CFG_EN == 0 || cfg & CFG_ALARM_EN == 0 {
-            return;
-        }
-        let alarm = self.alarm();
-        let now = self.count(cx.now);
-        if alarm <= now {
-            cx.sched.schedule_at(cx.now, ev);
-            return;
-        }
-        // Cycles for `alarm - base_ticks` ticks, rounded up.
-        let ticks = u128::from(alarm - self.base_ticks);
-        let num = ticks * u128::from(self.divider()) * u128::from(memmap::CPU_HZ);
-        let den = u128::from(XTAL_HZ);
-        let cycles = num.div_ceil(den) as u64;
-        cx.sched
-            .schedule_at(self.base_cycle.saturating_add(cycles), ev);
+        let cfg = self.counter_config();
+        let ids = self.ids();
+        self.engine.rearm(T0, &cfg, ids, cx);
     }
 
     fn write_config(&mut self, value: u32, cx: &mut BusCx<'_>) {
@@ -236,12 +269,12 @@ impl Timg {
             );
         }
         if (old ^ new) & CFG_EN != 0 {
-            if new & CFG_EN == 0 {
-                // Freeze at the current count.
-                self.base_ticks = self.count(cx.now);
-            } else {
-                self.base_cycle = cx.now;
-            }
+            // The engine freezes against the configuration as it stood
+            // *before* this write — its divider included — because that is
+            // the rate the count it is freezing was produced at.
+            let before = self.counter_config();
+            self.engine
+                .set_enabled(T0, &before, new & CFG_EN != 0, cx.now);
         }
         // The divider-counter reset is a pulse.
         new &= !CFG_DIVCNT_RST;
@@ -255,8 +288,8 @@ impl Timg {
 
     fn read_word(&self, off: u32) -> u32 {
         match off {
-            T0_LO => self.latched as u32,
-            T0_HI => (self.latched >> 32) as u32,
+            T0_LO => self.latched() as u32,
+            T0_HI => (self.latched() >> 32) as u32,
             T0_UPDATE | T0_LOAD | WDTFEED | INT_CLR => 0,
             RTCCALICFG => {
                 let v = self.regs.stored(RTCCALICFG) & !CALI_RDY;
@@ -274,7 +307,8 @@ impl Timg {
             T0_CONFIG => self.write_config(value, cx),
             T0_UPDATE => {
                 if value & UPDATE_BIT != 0 {
-                    self.latched = self.count(cx.now);
+                    let cfg = self.counter_config();
+                    self.engine.latch(T0, &cfg, cx.now);
                 }
             }
             T0_ALARMLO | T0_ALARMHI => {
@@ -284,22 +318,31 @@ impl Timg {
             T0_LOADLO | T0_LOADHI => self.regs.poke(off, value),
             T0_LOAD => {
                 if value & 1 != 0 {
-                    self.base_ticks = self.load_value();
-                    self.base_cycle = cx.now;
+                    let cfg = self.counter_config();
+                    self.engine.load(T0, &cfg, cx.now);
                     self.rearm(cx);
                 }
             }
             WDTCONFIG0..=WDTFEED => {
-                if !self.wdt_unlocked() {
+                // The enable bit is `wdtconfig0`'s alone; the gate is asked
+                // about an arming edge only when that is the register being
+                // written.
+                let cfg0 = off == WDTCONFIG0;
+                let old = self.regs.stored(off);
+                let verdict = wdt_write(
+                    self.wdt_unlocked(),
+                    cfg0 && old & WDT_EN != 0,
+                    cfg0 && value & WDT_EN != 0,
+                );
+                if verdict == WdtWrite::Locked {
                     log::debug!("{}: write to +{off:#05x} dropped, WDT locked", self.name);
                     return;
                 }
                 if off == WDTFEED {
                     return;
                 }
-                let old = self.regs.stored(off);
                 self.regs.poke(off, value);
-                if off == WDTCONFIG0 && value & WDT_EN != 0 && old & WDT_EN == 0 {
+                if verdict == WdtWrite::ArmedNow {
                     let line = format!(
                         "cyc={} pc=0x{:08x} {} WDT ARMED (MWDT expiry is not modelled)",
                         cx.now, cx.pc, self.name
@@ -372,18 +415,17 @@ impl Peripheral for Timg {
         match event_local(id) {
             EV_ALARM => {
                 let cfg = self.config();
-                if cfg & CFG_EN == 0 || cfg & CFG_ALARM_EN == 0 {
+                let counter = self.counter_config();
+                // The engine's verdict — is the alarm really due, or was the
+                // compare moved out since this event was scheduled? — plus
+                // the auto-reload, which is its state. The register work
+                // below is this view's.
+                if !self.engine.on_alarm(T0, &counter, cx.now) {
                     return;
                 }
-                if self.count(cx.now) < self.alarm() {
-                    // Re-armed for later since this was scheduled.
-                    return;
-                }
+                // "Automatically cleared once an alarm occurs" (the PAC's
+                // field doc).
                 self.regs.poke(T0_CONFIG, cfg & !CFG_ALARM_EN);
-                if cfg & CFG_AUTORELOAD != 0 {
-                    self.base_ticks = self.load_value();
-                    self.base_cycle = cx.now;
-                }
                 self.regs.poke(INT_RAW, self.regs.stored(INT_RAW) | 1);
                 self.update_lines(cx);
             }
@@ -403,9 +445,10 @@ impl Peripheral for Timg {
     fn save_state(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(0x100 + 48);
         out.extend_from_slice(&(self.index as u64).to_le_bytes());
-        out.extend_from_slice(&self.base_ticks.to_le_bytes());
-        out.extend_from_slice(&self.base_cycle.to_le_bytes());
-        out.extend_from_slice(&self.latched.to_le_bytes());
+        // Exactly where `base_ticks`, `base_cycle` and `latched` were
+        // written before the engine held them: the blob's bytes do not move
+        // when a block becomes a view.
+        self.engine.save(&mut out);
         out.extend_from_slice(&u32::from(self.cali_rdy).to_le_bytes());
         out.extend_from_slice(&self.cali_value.to_le_bytes());
         out.extend_from_slice(&u32::from(self.warned_decrement).to_le_bytes());
@@ -415,16 +458,19 @@ impl Peripheral for Timg {
 
     fn load_state(&mut self, bytes: &[u8]) {
         let mut r = Reader(bytes);
-        let (Some(index), Some(base_ticks), Some(base_cycle), Some(latched)) =
-            (r.u64(), r.u64(), r.u64(), r.u64())
-        else {
+        // The engine's three words per counter sit where they always did.
+        // It parses before it applies, so a short blob leaves it untouched
+        // rather than half-loaded — which is what this early return needs.
+        let Some(index) = r.u64() else {
             log::warn!("{}: load_state blob too short, ignored", self.name);
             return;
         };
+        let Some(used) = self.engine.load_state(r.0) else {
+            log::warn!("{}: load_state blob too short, ignored", self.name);
+            return;
+        };
+        r.0 = &r.0[used..];
         self.index = index as usize;
-        self.base_ticks = base_ticks;
-        self.base_cycle = base_cycle;
-        self.latched = latched;
         self.cali_rdy = r.u32().unwrap_or(1) != 0;
         self.cali_value = r.u32().unwrap_or(0);
         self.warned_decrement = r.u32().unwrap_or(0) != 0;
@@ -624,7 +670,7 @@ mod tests {
         let mut other = Timg::timg0();
         other.load_state(&blob);
         assert_eq!(other.count(sb.now), t.count(sb.now));
-        assert_eq!(other.latched, t.latched);
+        assert_eq!(other.latched(), t.latched());
         assert_eq!(other.index, 9);
         assert_eq!(other.regs.stored(T0_CONFIG), pac(T0_CONFIG) | CFG_EN);
     }

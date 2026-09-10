@@ -57,6 +57,16 @@ events fire.
 | engine | why it earned one |
 |---|---|
 | `engine::uart` | Two writers share a real UART — a mask ROM's direct FIFO store and an async driver filling it and awaiting a threshold — behind a shifter draining at the programmed baud in emulated cycles, a receive timeout, threshold levels, and a `HostSinks` byte stream with a scheduled source poll. Scheduled behaviour with host-stream coupling, and on the classic ESP32 the UART is the *only* host link |
+| `engine::timg` | Counters at a rate with alarms, auto-reload, the load/update pair, and the watchdog's write-protect gate. The classic ESP32 has no SYSTIMER: TIMG0 is its rtos tick, its 1 ms io pacer **and** its `Instant::now()`. Three scheduled counters feeding `IrqLines`, and the engine takes the count as a parameter so the classic's third one needs no new type |
+
+Two things a reader might look for in `engine::timg` and not find. The
+**RTC calibration** stayed in the C6's view: its shape is generic but its
+content is two chip clock rates, it has exactly one consumer, and the
+classic's RTC path differs enough that a shared version would be a fiction
+before it was a saving — the classic's own view may revisit that in M3. And
+the **MWDT's expiry** is not modelled at all, here or in the view: arming
+one leaves a trace note saying so, and no stage ever fires. A watchdog that
+started firing would be a behaviour change wearing a refactor's clothes.
 
 ### The USB-Serial-JTAG finding (M2, for M6)
 
