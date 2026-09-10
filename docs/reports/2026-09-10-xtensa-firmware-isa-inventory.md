@@ -52,6 +52,26 @@ references the SRAM1 I-bus alias (`0x400A_0000..0x400C_0000`).
   Splitting the flags into a separate `--set-section-flags` call fixes it —
   verified by hand before trusting the script's numbers (see §1 below).
 
+  > **2026-09-10 follow-up correction (M1 P1, PR #660 → the `census.py`
+  > rewrite that landed same-day).** The section-lifting approach itself —
+  > not just the `objcopy` flags bug above — under-measured every ELF
+  > artefact. Lifting a CODE section into its own one-section ELF drops the
+  > Xtensa configuration (`e_flags`) the original ELF carries; `objdump` then
+  > falls back to a config-less opcode table where a loose `lsi` entry beats
+  > real MAC16 entries. Same bytes, same `objdump` binary, same decoder: the
+  > classic ROM read **96.52 % / 60 mismatches** through this report's
+  > `census.py`, and reads **99.96 % / 0 mismatches** when `objdiff` — widened
+  > in PR #660 to iterate every `SHF_EXECINSTR` section itself — is run over
+  > the whole ELF instead. The v3 image moved **98.48 % → 98.86 %** the same
+  > way (both numbers post-#660's decoder fixes; this report's own *first*
+  > numbers below, 98.21 % / 95.69 %, predate #660 entirely and are lower
+  > again). `census.py` was rewritten to hand `objdiff` the artefact whole and
+  > let it do the section iteration, rather than lifting sections itself; see
+  > `scripts/emu/xtensa-inventory/README.md` and the Deviations section
+  > below. The bootloader's raw-binary (`--base`) path was never an instance
+  > of this — a raw blob has no Xtensa configuration to lose — and its number
+  > is unchanged by the rewrite.
+
 ## 1. Exact decoder coverage (item 1)
 
 Run: `scripts/emu/xtensa-inventory/census.py <artefact> --objdiff
@@ -353,6 +373,16 @@ trust this best-effort symbol attribution for the unsized regions.
 1. **`census.py`'s `objcopy` section-lift bug** (silently zeroes content when
    flags ride on `--rename-section`) — found and fixed before any measurement
    was trusted; documented in the script itself.
+   **2026-09-10 update**: the section-lift *approach* itself, not just this
+   flags bug, turned out to under-measure every ELF artefact — see the
+   dated note in Provenance above. `census.py` was rewritten same-day to run
+   `objdiff` once over each artefact whole (PR #660 widened `objdiff` to
+   iterate every executable section itself, closing the reason this script
+   used to lift sections at all). ROM: 96.52 % (60 mismatches, section-lifted)
+   → 99.96 % (0 mismatches, whole). v3 image: 98.48 % → 98.86 % (both
+   post-#660 decoder fixes). Bootloader (`--base`, raw binary): unchanged —
+   that path was never lifting a section out of a larger ELF, so it never had
+   this bug.
 2. **`sweep.py`'s hex-byte regex bug** (assumed space-separated byte pairs;
    this toolchain concatenates them) — found and fixed the same way,
    verified against `objdiff.rs`'s own parsing convention.
