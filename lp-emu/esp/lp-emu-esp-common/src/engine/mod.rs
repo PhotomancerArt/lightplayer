@@ -33,5 +33,6 @@
 //! does not know its peripheral index, and a renumbering would change *when*
 //! events fire. The view packs the ids and hands them in.
 
+pub mod spi_flash;
 pub mod timg;
 pub mod uart;
