@@ -204,6 +204,37 @@ pub struct Exit {
     pub flags: i32,
 }
 
+/// How an engine over `guard` should bounds-check the guest's accesses.
+///
+/// Separated from [`WasmtimeCore::new`] so the choice is one readable thing
+/// and so `tests::the_guard_actually_removes_the_bounds_checks` can compile
+/// the same module both ways and see the difference in the machine code.
+fn bounds_check_config(guard: Option<ArenaGuard>) -> Config {
+    let mut config = Config::new();
+    match guard {
+        // Guard-page bounds checks, the way a browser engine always does
+        // them. Without these wasmtime emits an explicit check on EVERY guest
+        // load and store, and the region runs 4.8x slower — a property of the
+        // native host, not of the emitted module. Measured: 308 -> 1481
+        // M instr/s.
+        Some(g) => {
+            config.signals_based_traps(true);
+            config.memory_reservation(g.reservation);
+            config.memory_guard_size(g.guard);
+            config.memory_may_move(false);
+        }
+        // No mapping behind this arena, so no guard may be promised: the
+        // engine has to check every access itself. See the module docs.
+        None => {
+            config.signals_based_traps(false);
+            config.memory_reservation(0);
+            config.memory_guard_size(0);
+            config.memory_may_move(false);
+        }
+    }
+    config
+}
+
 /// One compiled, instantiated translated module and the store it lives in.
 ///
 /// Generic over the ops rather than boxing them, because a `Store`'s data has
@@ -258,28 +289,7 @@ impl<H: HostOps + 'static> WasmtimeCore<H> {
         arena_len: usize,
         guard: Option<ArenaGuard>,
     ) -> wasmtime::Result<Self> {
-        let mut config = Config::new();
-        match guard {
-            // Guard-page bounds checks, the way a browser engine always does
-            // them. Without these wasmtime emits an explicit check on EVERY
-            // guest load and store, and the region runs 4.8x slower — a
-            // property of the native host, not of the emitted module.
-            // Measured: 308 -> 1481 M instr/s.
-            Some(g) => {
-                config.signals_based_traps(true);
-                config.memory_reservation(g.reservation);
-                config.memory_guard_size(g.guard);
-                config.memory_may_move(false);
-            }
-            // No mapping behind this arena, so no guard may be promised: the
-            // engine has to check every access itself. See the module docs.
-            None => {
-                config.signals_based_traps(false);
-                config.memory_reservation(0);
-                config.memory_guard_size(0);
-                config.memory_may_move(false);
-            }
-        }
+        let mut config = bounds_check_config(guard);
         config.with_host_memory(Arc::new(ArenaMemoryCreator {
             base: arena_base as usize,
             len: arena_len,
@@ -522,6 +532,86 @@ mod tests {
             c.new_memory(ty(), LEN, None, Some(res()), guard_len() * 2)
                 .is_err(),
             "and so is a wider guard"
+        );
+    }
+
+    /// The claim this whole change rests on: with a guard behind the arena,
+    /// cranelift stops emitting a bounds check on every guest access.
+    ///
+    /// Asked of the machine code rather than of a clock, because a clock on a
+    /// shared desk answers something else. The same module is compiled under
+    /// both configurations and the guarded one must come out materially
+    /// smaller — there is nothing else that could shrink it, and a
+    /// configuration that silently failed to engage would come out the same
+    /// size.
+    #[test]
+    fn the_guard_actually_removes_the_bounds_checks() {
+        use wasm_encoder::{
+            CodeSection, EntityType, ExportKind, ExportSection, Function, FunctionSection,
+            ImportSection, Instruction as I, MemArg, MemoryType, Module as M, TypeSection, ValType,
+        };
+
+        // A function that is nothing but guest accesses, so the code size is
+        // very nearly the checks themselves.
+        const ACCESSES: u32 = 512;
+        let wasm = {
+            let mut m = M::new();
+            let mut types = TypeSection::new();
+            types.ty().function([ValType::I32], [ValType::I32]);
+            m.section(&types);
+            let mut imports = ImportSection::new();
+            imports.import(
+                "emu",
+                "memory",
+                EntityType::Memory(MemoryType {
+                    minimum: 1,
+                    maximum: None,
+                    memory64: false,
+                    shared: false,
+                    page_size_log2: None,
+                }),
+            );
+            m.section(&imports);
+            let mut funcs = FunctionSection::new();
+            funcs.function(0);
+            m.section(&funcs);
+            let mut exports = ExportSection::new();
+            exports.export("run", ExportKind::Func, 0);
+            m.section(&exports);
+            let mut f = Function::new([]);
+            for i in 0..ACCESSES {
+                f.instruction(&I::LocalGet(0));
+                f.instruction(&I::I32Load(MemArg {
+                    offset: u64::from(i) * 4,
+                    align: 2,
+                    memory_index: 0,
+                }));
+                f.instruction(&I::LocalSet(0));
+            }
+            f.instruction(&I::LocalGet(0));
+            f.instruction(&I::End);
+            let mut code = CodeSection::new();
+            code.function(&f);
+            m.section(&code);
+            m.finish()
+        };
+
+        let compiled = |guard| {
+            Engine::new(&bounds_check_config(guard))
+                .expect("the engine builds")
+                .precompile_module(&wasm)
+                .expect("the module compiles")
+                .len()
+        };
+        let checked = compiled(None);
+        let elided = compiled(Some(ArenaGuard {
+            reservation: RESERVATION,
+            guard: GUARD,
+        }));
+        assert!(
+            elided + (ACCESSES as usize) * 4 < checked,
+            "the guarded build must drop at least a few bytes per access: \
+             {elided} guarded against {checked} checked, over {ACCESSES} accesses"
         );
     }
 

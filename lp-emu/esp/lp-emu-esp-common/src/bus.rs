@@ -3695,6 +3695,28 @@ mod tests {
         assert_eq!(bus.guest_arena_base(), 0x4000_0000);
     }
 
+    /// The C6's own span, at the size the chip crate reserves it, really does
+    /// get a guarded mapping on a host that has virtual memory — which is what
+    /// the native `--jit` path's guard-page bounds checks rest on (M7 JD21).
+    #[cfg(all(unix, not(target_family = "wasm")))]
+    #[test]
+    fn the_chip_sized_span_is_guarded() {
+        let mut bus = SocBus::new();
+        assert_eq!(
+            bus.guest_arena_guard(),
+            None,
+            "an arena with no bytes has nothing to guard"
+        );
+        bus.reserve_guest_span(0x4000_0000, 0x1000_4000);
+        let guard = bus
+            .guest_arena_guard()
+            .expect("this host maps its arenas, so the C6's span is guarded");
+        assert!(
+            guard.reservation >= bus.guest_arena().len() as u64 && guard.guard > 0,
+            "the reservation must cover the arena and leave a guard behind it: {guard:?}"
+        );
+    }
+
     #[test]
     fn a_snapshot_round_trips_through_the_arena() {
         let mut bus = bus_with_ram();
