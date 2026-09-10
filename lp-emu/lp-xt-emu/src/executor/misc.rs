@@ -1,11 +1,13 @@
 //! Miscellaneous zero-operand executors: barriers, nops, and the illegal trap.
 
+use lp_emu_core::bus::Bus;
 use lp_xt_inst::{Inst, NullaryNarrowOp, NullaryOp};
 
-use crate::emu::{Emulator, Flow};
+use super::Exec;
+use crate::emu::Flow;
 use crate::error::{EXC_ILLEGAL_INSTRUCTION, Trap, TrapKind};
 
-impl Emulator {
+impl<B: Bus> Exec<'_, B> {
     pub(super) fn exec_misc(&mut self, inst: &Inst, pc: u32) -> Result<Flow, Trap> {
         match *inst {
             // Barriers / sync / nop: no architectural effect in this model.

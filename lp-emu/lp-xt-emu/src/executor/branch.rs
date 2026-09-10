@@ -1,12 +1,14 @@
 //! Conditional-branch executors. All Xtensa PC-relative branches target
 //! `PC + 4 + offset` (the `+4` is fixed, independent of instruction width).
 
+use lp_emu_core::bus::Bus;
 use lp_xt_inst::{BrRi, BrRiu, BrRr, BrZ, Inst};
 
-use crate::emu::{Emulator, Flow};
+use super::Exec;
+use crate::emu::Flow;
 use crate::error::Trap;
 
-impl Emulator {
+impl<B: Bus> Exec<'_, B> {
     pub(super) fn exec_branch(&mut self, inst: &Inst, pc: u32) -> Result<Flow, Trap> {
         let taken = match *inst {
             Inst::BranchRr(op, rs, rt, off) => {

@@ -50,10 +50,12 @@
 //! the M6 P6 silicon captures under `tests/fixtures/fp/captures/`. No manual
 //! text is reproduced, and no QEMU, binutils, or GCC source was read.
 
+use lp_emu_core::bus::Bus;
 use lp_xt_inst::{FpCmpOp, FpMovArOp, FpMovBrOp, FpRrOp, FpRrrOp, FpToIntOp, Inst, IntToFpOp};
 
+use super::Exec;
 use crate::cpu::{FSR_INEXACT, FSR_INVALID, FSR_OVERFLOW, FSR_UNDERFLOW};
-use crate::emu::{Emulator, Flow};
+use crate::emu::Flow;
 use crate::error::Trap;
 use crate::fp_policy::{NanRule, OutOfRangeRule, TiesRule, UtruncNegativeRule};
 use crate::fp_rom;
@@ -81,7 +83,7 @@ fn is_snan(bits: u32) -> bool {
 /// The result of one arithmetic step: the bits, plus the FSR flags it raised.
 type FpOut = (u32, u32);
 
-impl Emulator {
+impl<B: Bus> Exec<'_, B> {
     pub(super) fn exec_float_math<T: Tracer + ?Sized>(
         &mut self,
         inst: &Inst,
