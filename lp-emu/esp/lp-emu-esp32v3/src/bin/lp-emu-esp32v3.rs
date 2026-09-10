@@ -19,6 +19,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
+use lp_emu_esp32v3::loader::EfuseIdentity;
 use lp_emu_esp32v3::machine::{
     AppSource, BootMode, Esp32V3Builder, Machine, Outcome, RomSource, StopCondition, TimeGrade,
 };
@@ -63,6 +64,8 @@ OPTIONS:
     --trace <path|->        write the bus trace here
     --trace-block <name>    only trace this block (repeatable)
     --seed <n>              the machine's PRNG seed [0]
+    --efuse-mac <a:b:..>    the MAC the eFuse block answers [30:76:f5:ec:f6:34, the desk board]
+    --efuse-rev <maj.min>   the chip revision it answers [3.1, the desk board]
     --hooks                 list the ROM hook table and exit. It is EMPTY,
                             and stays empty: try the real ROM path first
     --map                   print the memory map and exit
@@ -101,6 +104,7 @@ struct Args {
     trace: Option<String>,
     trace_blocks: Vec<String>,
     seed: u64,
+    efuse: EfuseIdentity,
     hooks: bool,
     map: bool,
     help: bool,
@@ -130,7 +134,8 @@ fn run() -> Result<ExitCode, String> {
         .boot_mode(boot_mode)
         .time_grade(args.time_grade)
         .strict(args.strict)
-        .seed(args.seed);
+        .seed(args.seed)
+        .efuse(args.efuse);
     if let Some(path) = args.rom {
         builder = builder.rom(RomSource::Path(path));
     }
@@ -384,6 +389,18 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             }
             "--trace" => args.trace = Some(value()?),
             "--trace-block" => args.trace_blocks.push(value()?),
+            "--efuse-mac" => {
+                let v = value()?;
+                args.efuse.mac =
+                    EfuseIdentity::parse_mac(&v).map_err(|e| format!("--efuse-mac {v}: {e}"))?;
+            }
+            "--efuse-rev" => {
+                let v = value()?;
+                let (major, minor) =
+                    EfuseIdentity::parse_rev(&v).map_err(|e| format!("--efuse-rev {v}: {e}"))?;
+                args.efuse.chip_major = major;
+                args.efuse.chip_minor = minor;
+            }
             "--seed" => {
                 let v = value()?;
                 args.seed = v.parse().map_err(|_| format!("--seed {v}: not a number"))?;

@@ -572,60 +572,96 @@ fn strict_stops_somewhere_honest_from_the_reset_vector() {
     );
 }
 
-/// Where the ROM-up path stands at the end of P3, pinned: with EFUSE an
-/// accept block, the mask ROM's `_reload_efuses_and_check` writes `conf`
-/// (`+0xfc`) = `0x5aa5` (the read opcode) and `cmd` (`+0x104`) = 1
-/// (`read_cmd`), requires `cmd` to read back **non-zero** (a zero sends it
-/// to `_rtc_trigger_sw_system_reset`), then spins until it reads **zero**:
+/// **Where the ROM-up path stands at the end of P5.** P3 left it spinning
+/// seven instructions after the reset vector, inside the mask ROM's
+/// anti-glitch check on its own fuses: `_reload_efuses_and_check` writes
+/// `conf` (`+0xfc`) = `0x5aa5` and `cmd` (`+0x104`) = 1, requires `cmd` to
+/// read back **1** exactly once — the value is added to a checksum the
+/// caller compares against `0xee10101a`, three calls from a seed of
+/// `0xee101017` — and then spins until it reads **0**:
 ///
 /// ```text
-/// 4000fc90:  l32r    a1, (3ff5a0fc)     ; EFUSE.conf
-/// 4000fc93:  l32r    a2, (3ff5a104)     ; EFUSE.cmd
 /// 4000fc9b:  s32i.n  a3, a1, 0          ; conf = 0x5aa5
 /// 4000fc9d:  s32i.n  a4, a2, 0          ; cmd = 1 (read_cmd)
 /// 4000fca2:  l32i.n  a1, a2, 0
+/// 4000fca4:  add.n   a13, a13, a1       ; the checksum
 /// 4000fca6:  beqz    a1, _rtc_trigger_sw_system_reset
 /// 4000fcac:  l32i.n  a1, a2, 0          ; +0x1c
 /// 4000fcae:  bnez    a1, 4000fca9       ; +0x1e, the spin
 /// ```
 ///
-/// No constant satisfies both reads, and no `RegFile` rule expresses "1
-/// until the read completes, then 0": the eFuse controller's read command
-/// is a **completion**, which is P5's eFuse view. So a strict rom-up run
-/// does not stop — it runs to its deadline in that loop, and this test
-/// holds that reading until P5 moves it.
+/// `crate::periph::efuse` makes the read command a completion, so the check
+/// passes, the three reloads compare equal, and the ROM walks on into
+/// `main` — where it stops on the **next** unmodelled block: `uartAttach`
+/// (`0x4000_9013`) writing `UART1 +0x10`, which the P3 ledger's §4.3 named
+/// in advance and which P6 owns. This test holds that reading.
 #[test]
-fn rom_up_stands_at_the_efuse_read_command_until_p5() {
+fn rom_up_passes_the_efuse_check_and_stands_at_uart1_until_p6() {
     let mut machine = Esp32V3Builder::new()
         .boot_mode(BootMode::RomUp)
         .strict(true)
         .build()
         .expect("builds");
-    let outcome = machine.run_until(&StopCondition::after_micros(2_000));
+    let outcome = machine.run_until(&StopCondition::after_micros(20_000));
+    let Outcome::StrictBus { violation } = outcome else {
+        panic!("the ROM-up path stops on UART1, not on {outcome:?}");
+    };
+    let sym = machine.symbolize(violation.pc).unwrap_or_default();
     assert!(
-        matches!(outcome, Outcome::Deadline { .. }),
-        "no strict stop and no fault before the deadline: {outcome:?}"
+        sym.starts_with("uartAttach"),
+        "the stop is in the ROM's uartAttach, got pc={:#010x} ({sym})",
+        violation.pc
     );
-    let pc = machine.harts[0].pc();
-    let sym = machine.symbolize(pc).unwrap_or_default();
+    assert_eq!(violation.pc, 0x4000_9013);
+    assert_eq!(violation.address, memmap::periph::UART1 + 0x10);
     assert!(
-        sym.contains("_reload_efuses_and_check"),
-        "the ROM is spinning in _reload_efuses_and_check, got pc={pc:#010x} ({sym})"
+        violation.in_mmio_window,
+        "an unmodelled block, not a wild pointer"
     );
-    assert!(
-        (0x4000_FCA9..=0x4000_FCB0).contains(&pc),
-        "inside the `l32i; bnez` loop on EFUSE.cmd: {pc:#010x}"
-    );
-    // The accept block holds the 1 the ROM wrote, which is why it spins.
+
+    // The eFuse check is behind it: the read command self-cleared and the
+    // opcode the ROM wrote is remembered.
     assert_eq!(
         machine.peek_word(memmap::periph::EFUSE + 0x104),
-        Some(1),
-        "EFUSE.cmd.read_cmd, remembered"
+        Some(0),
+        "EFUSE.cmd.read_cmd cleared itself"
     );
     assert_eq!(
         machine.peek_word(memmap::periph::EFUSE + 0x0fc),
         Some(0x5aa5),
-        "EFUSE.conf, the read opcode the ROM wrote first"
+        "EFUSE.conf, the read opcode the ROM wrote"
+    );
+    // And the identity the check reloaded and compared three times over.
+    assert_eq!(
+        machine.peek_word(memmap::periph::EFUSE + 0x04),
+        Some(0xf5ec_f634),
+        "blk0_rdata1: MAC[2..6] of the desk board, big-endian"
+    );
+}
+
+/// The one number the ROM's check pins exactly: `cmd`'s first read must be
+/// 1 on each of the three calls, because the caller adds it to a checksum.
+#[test]
+fn the_efuse_checks_accumulator_lands_on_the_roms_own_constant() {
+    let mut machine = Esp32V3Builder::new()
+        .boot_mode(BootMode::RomUp)
+        .strict(true)
+        .build()
+        .expect("builds");
+    // `_ResetHandler_efuse_check_patch` seeds a13 with 0xee101017 and
+    // requires 0xee10101a after three calls (`4000fdef`, `4000fdfe`); the
+    // difference is three ones. Reaching `uartAttach` at all is the proof —
+    // a wrong first read sends the ROM to `_rtc_trigger_sw_system_reset`
+    // (`0x4000_FDC7`), which writes RTC_CNTL +0x00 and then `ill.n`.
+    let outcome = machine.run_until(&StopCondition::after_micros(20_000));
+    assert!(
+        matches!(outcome, Outcome::StrictBus { .. }),
+        "no fault: the anti-glitch check passed rather than resetting: {outcome:?}"
+    );
+    let pc = machine.harts[0].pc();
+    assert!(
+        !(0x4000_FDC7..=0x4000_FDD4).contains(&pc),
+        "the ROM took its software-reset path: {pc:#010x}"
     );
 }
 

@@ -26,16 +26,66 @@
 //! for convenience.
 
 pub mod accept;
+pub mod efuse;
+pub mod i2c_ana_mst;
+pub mod rtc_cntl;
+pub mod timg;
 
 use lp_emu_esp_common::periph::BoxedPeripheral;
 
-use crate::loader::ResetCause;
+use crate::loader::{EfuseIdentity, ResetCause};
 use crate::memmap::periph as base;
+
+/// The desk board's crystal: **40 MHz** (`../bench.md`, "40 MHz crystal").
+///
+/// The classic ships with either 26 or 40 MHz and the firmware *measures*
+/// which through the TIMG calibration ([`timg`]), so this is the number the
+/// model is calibrating against rather than one it asserts to the guest.
+pub const XTAL_HZ: u64 = 40_000_000;
+
+/// APB, **80 MHz** — `apb_clk_80m_frequency` in the generated clock tree
+/// (`esp-metadata-generated-0.4.0/src/_generated_esp32.rs`), and what
+/// `esp_hal::init` leaves the tree at on this image (P3's ledger §3.1: the
+/// CPU ends up at 240 MHz on the PLL and APB at 80). Every TIMG counter's
+/// tick comes from here through its own prescaler.
+pub const APB_HZ: u64 = 80_000_000;
+
+/// RC_FAST, **8 MHz** — `rc_fast_clk_frequency` in the same generated file.
+pub const RC_FAST_HZ: u64 = 8_000_000;
+
+/// RC_FAST divided by 256 — `rc_fast_div_clk_frequency` in the same file,
+/// and the calibration clock `detect_xtal_freq` picks (`RcFastDivClk`).
+pub const RC_FAST_DIV_HZ: u64 = RC_FAST_HZ / 256;
+
+/// RC_SLOW, **150 kHz** — `rc_slow_clk_frequency` in the same file, and the
+/// calibration clock `calibrate_rtc_slow_clock` picks (`RcSlowClk`).
+pub const RC_SLOW_HZ: u64 = 150_000;
+
+/// The 32.768 kHz crystal input — `xtal32k_clk_frequency` in the same file.
+/// The desk board has no 32k crystal; the rate is here because
+/// `rtc_cali_clk_sel = 2` selects it and a model that answered the wrong
+/// clock silently would be worse than one that answers this.
+pub const XTAL32K_HZ: u64 = 32_768;
+
+/// The watchdog write-protect key, `0x50D8_3AA1` — the same number on the
+/// MWDTs and the RWDT, and the PAC's own reset value for both
+/// `TIMG0.wdtwprotect` and `RTC_CNTL.wdtwprotect`, so both come out of reset
+/// **unlocked**.
+pub const WDT_WKEY: u32 = 0x50D8_3AA1;
 
 /// The whole boot set, in [`crate::machine::PERIPHERAL_REGISTRATION_ORDER`].
 ///
-/// `reset_cause` is what a direct load asserts (loader item 7).
-pub fn boot_set(reset_cause: ResetCause) -> Vec<(u32, u32, BoxedPeripheral)> {
+/// `reset_cause` is what a direct load asserts (loader item 7); `identity`
+/// is the part this run claims to be (MAC and chip revision), which reaches
+/// two blocks — the eFuse view and, for the revision's top bit, `APB_CTRL`;
+/// `stall` is the handle RTC_CNTL publishes its half of the CPU stall key
+/// through, which the machine reads and P4's DPORT view adds its third
+/// input to.
+pub fn boot_set(
+    reset_cause: ResetCause,
+    identity: EfuseIdentity,
+    stall: rtc_cntl::StallKey,
+) -> Vec<(u32, u32, BoxedPeripheral)> {
     vec![
         (
             base::DPORT,
@@ -44,34 +94,30 @@ pub fn boot_set(reset_cause: ResetCause) -> Vec<(u32, u32, BoxedPeripheral)> {
         ),
         (
             base::RTC_CNTL,
-            accept::RTC_CNTL_LEN,
-            Box::new(accept::rtc_cntl(reset_cause)),
+            rtc_cntl::RTC_CNTL_LEN,
+            Box::new(rtc_cntl::RtcCntl::new(reset_cause, stall)),
         ),
         (
             base::APB_CTRL,
             accept::APB_CTRL_LEN,
-            Box::new(accept::apb_ctrl()),
+            Box::new(accept::apb_ctrl(identity)),
         ),
-        (
-            base::TIMG0,
-            accept::TIMG_LEN,
-            Box::new(accept::timg("TIMG0")),
-        ),
+        (base::TIMG0, timg::TIMG_LEN, Box::new(timg::Timg::timg0())),
         (
             base::I2C_ANA_MST,
-            accept::I2C_ANA_MST_LEN,
-            Box::new(accept::i2c_ana_mst()),
+            i2c_ana_mst::I2C_ANA_MST_LEN,
+            Box::new(i2c_ana_mst::I2cAnaMst::new()),
         ),
-        (
-            base::TIMG1,
-            accept::TIMG_LEN,
-            Box::new(accept::timg("TIMG1")),
-        ),
+        (base::TIMG1, timg::TIMG_LEN, Box::new(timg::Timg::timg1())),
         (base::GPIO, accept::GPIO_LEN, Box::new(accept::gpio())),
         (base::UART0, accept::UART0_LEN, Box::new(accept::uart0())),
         (base::IO_MUX, accept::IO_MUX_LEN, Box::new(accept::io_mux())),
         (base::SPI1, accept::SPI_LEN, Box::new(accept::spi("SPI1"))),
         (base::SPI0, accept::SPI_LEN, Box::new(accept::spi("SPI0"))),
-        (base::EFUSE, accept::EFUSE_LEN, Box::new(accept::efuse())),
+        (
+            base::EFUSE,
+            efuse::EFUSE_LEN,
+            Box::new(efuse::Efuse::new(identity)),
+        ),
     ]
 }

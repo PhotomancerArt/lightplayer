@@ -45,11 +45,14 @@ which prints `[INIT] APP core unavailable; RMT ISR on PRO core (single-core
 semantics)`). **M4 is where core 1 runs**, with an interrupt matrix and the
 deterministic quantum interleave.
 
-On silicon a stalled core is held by two register pairs, and P4 wires
-`Machine::core_stalled` to them: `RTC_CNTL.options0.sw_stall_appcpu_c0` plus
-`RTC_CNTL.sw_cpu_stall.sw_stall_appcpu_c1` (both halves of the key) and
-`DPORT.appcpu_ctrl_c.appcpu_runstall`. In P2 none of those registers exists,
-so it is a plain machine field.
+On silicon a stalled core is held by three inputs, and `Machine::core_stalled`
+is the OR of them. **P5 wired the first two**:
+`RTC_CNTL.options0.sw_stall_appcpu_c0` plus
+`RTC_CNTL.sw_cpu_stall.sw_stall_appcpu_c1` — both halves of one key, which
+stalls only when `(c1 << 2) | c0 == 0x86` — computed by the block that owns
+them and published through `rtc_cntl::StallKey`, a shared cell the machine
+holds. **P4 adds the third**, `DPORT.appcpu_ctrl_c.appcpu_runstall`, into the
+same OR. The machine's own field still holds slot 1 for the whole of M3.
 
 ### The reset state, and the boot state
 
@@ -267,6 +270,13 @@ from inside a test).
 
 ## Booting from the reset vector
 
+*P5 opened it; P7 finishes it.* P3 left a `--boot-mode rom-up --strict-bus`
+run spinning seven instructions after the reset vector, inside the ROM's
+anti-glitch check on its own fuses. With `periph::efuse` making the read
+command a completion the check passes, the ROM walks into `main`, and the run
+now stops at `uartAttach+0x43` (`0x4000_9013`) writing `UART1 +0x10` at cycle
+9,488 — the block P3's §4.3 named next.
+
 *P7.* The mask ROM boots the espflash-merged image through the real IDF
 bootloader, and the boot log is compared line for line against silicon.
 
@@ -283,37 +293,115 @@ truth table is the board's, not the chip's.
 
 ## Peripherals
 
-*P3: accept blocks only; P4–P8 give them behaviour.* One row per block, in
-registration order (`machine::PERIPHERAL_REGISTRATION_ORDER`, which is the
-order the boot met them). Every block is a `RegFile` seeded from the PAC's
-reset values (`src/periph/accept.rs`); **one** register deviates from the
-PAC and the test `the_only_deviations_from_the_pacs_resets_are_the_listed_ones`
-is the list.
+*P5: four blocks have behaviour; the rest are accept probes until P4 and
+P6–P8.* One row per block, in registration order
+(`machine::PERIPHERAL_REGISTRATION_ORDER`, which is the order the boot met
+them). An **accept** block is a `RegFile` seeded from the PAC's reset values
+(`src/periph/accept.rs`) with no behaviour; a **view** computes something a
+register file cannot. Two registers in the whole machine deviate from the
+PAC and each carries its reason beside it.
 
-| block | base | aperture | stop | what it answers here | owner |
-|---|---|---|---|---|---|
-| `DPORT` | `0x3FF0_0000` | `0x1000` | direct #1, cycle 29 | interrupt maps, clock/reset gates, `cpu_per_conf` — written, read back | P4 |
-| `RTC_CNTL` | `0x3FF4_8000` | `0x140` | direct #2, cycle 107,539 | `reset_state` = POWERON in both fields (**the deviation**); RWDT disable | P5 |
-| `APB_CTRL` | `0x3FF6_6000` | `0x80` | direct #3, cycle 109,663 | `sysclk_conf.pre_div_cnt`, the tick confs | P5 |
-| `TIMG0` | `0x3FF5_F000` | `0x100` | direct #4, cycle 109,989 | MWDT disable; the RTC calibration **times out** (no pretence) | P5 |
-| `I2C_ANA_MST` | `0x6000_E000` (AHB) | `0x20` | direct #5, cycle 143,014 | BBPLL writes through the ROM's `rom_i2c_writeReg`; busy is a bit the guest never sets | P5 |
-| `TIMG1` | `0x3FF6_0000` | `0x100` | direct #6, cycle 3,563,841 | MWDT disable | P5 |
-| `GPIO` | `0x3FF4_4000` | `0x600` | direct #7, cycle 3,564,113 | the matrix routing U0RXD; `strap` reads the PAC's 0 | P8 |
-| `UART0` | `0x3FF4_0000` | `0x80` | direct #8, cycle 3,564,269 | `Uart::new` at 921600; **every printed byte lands here and is forgotten** | P6 |
-| `IO_MUX` | `0x3FF4_9000` | `0x94` | direct #9, cycle 3,568,671 | the U0TXD pad | P8 |
-| `SPI1` | `0x3FF4_2000` | `0x400` | direct #10, cycle 3,644,210 | esp-storage's flash read; **the run spins on `cmd.flash_rdsr`** | P7 |
-| `SPI0` | `0x3FF4_3000` | `0x400` | direct #11, cycle 3,644,282 | the ROM's idle wait on `ext2.st` | P7 |
-| `EFUSE` | `0x3FF5_A000` | `0x200` | rom-up #1, cycle 7 | the ROM's fuse read; **the ROM spins on `cmd.read_cmd`** | P5 |
+| block | base | aperture | grade | stop | what it is trusted for | owner |
+|---|---|---|---|---|---|---|
+| `DPORT` | `0x3FF0_0000` | `0x1000` | accept | direct #1, cycle 29 | interrupt maps, clock/reset gates, `cpu_per_conf` — written, read back | P4 |
+| `RTC_CNTL` | `0x3FF4_8000` | `0x140` | **view** | direct #2, cycle 107,539 | the asserted reset cause (**a deviation**), both halves of the CPU stall key, the RWDT's write-protect key, the clock and store registers | P5 |
+| `APB_CTRL` | `0x3FF6_6000` | `0x80` | accept | direct #3, cycle 109,663 | `sysclk_conf.pre_div_cnt`, the tick confs, and `date` bit 31 — the chip revision's top bit (**a deviation**) | P5 |
+| `TIMG0` | `0x3FF5_F000` | `0x100` | **view** | direct #4, cycle 109,989 | three counters (`t0`, `t1`, LACT), the RTC calibration, the MWDT gate | P5 |
+| `I2C_ANA_MST` | `0x6000_E000` (AHB) | `0x20` | **view** | direct #5, cycle 143,014 | the analog world as a `{block, register}` store behind eight host ports; `busy` reads 0 | P5 |
+| `TIMG1` | `0x3FF6_0000` | `0x100` | **view** | direct #6, cycle 3,563,841 | the same block at sources 18..21; the image only disables its MWDT | P5 |
+| `GPIO` | `0x3FF4_4000` | `0x600` | accept | direct #7, cycle 3,564,113 | the matrix routing U0RXD; `strap` reads the PAC's 0 | P8 |
+| `UART0` | `0x3FF4_0000` | `0x80` | accept | direct #8, cycle 3,564,269 | `Uart::new` at 921600; **every printed byte lands here and is forgotten** | P6 |
+| `IO_MUX` | `0x3FF4_9000` | `0x94` | accept | direct #9, cycle 3,568,671 | the U0TXD pad | P8 |
+| `SPI1` | `0x3FF4_2000` | `0x400` | accept | direct #10, cycle 3,644,210 | esp-storage's flash read; **the run spins on `cmd.flash_rdsr`** | P7 |
+| `SPI0` | `0x3FF4_3000` | `0x400` | accept | direct #11, cycle 3,644,282 | the ROM's idle wait on `ext2.st` | P7 |
+| `EFUSE` | `0x3FF5_A000` | `0x200` | **view** | rom-up #1, cycle 7 | the fuse array, the read-data registers, and the read command as a **completion**; the MAC and chip revision | P5 |
 
-Grades: every register is `documented` where the PAC calls it read-write
-and the block pretends nothing, `modeled` otherwise (`RegFile::with_pac_
-grades`); the analog master, which the PAC does not know, is `modeled`
-throughout. Nothing is `measured`.
+The two deviations from the PAC, both inputs to the run rather than
+properties of the part:
+
+- `RTC_CNTL.reset_state` — POWERON_RESET in both cause fields, the value
+  L0's banner printed (`rtc_cntl::DEVIATIONS`);
+- `APB_CTRL.date` bit 31 — esp-hal's `eco_bit2`, the top bit of the major
+  chip revision, which no eFuse word on this part carries
+  (`accept::DEVIATIONS`).
+
+Grades: every register is `documented` where the PAC calls it read-write and
+the block pretends nothing, `modeled` otherwise (`RegFile::with_pac_grades`);
+the analog master, which the PAC does not know, and every register of the
+eFuse view are `modeled` throughout. Nothing is `measured`.
 
 Not modelled, on purpose, and unmapped so a strict run says so: everything
-the boot has not reached — `RTC_IO`, `SENS`, `RTC_I2C`, `FRC_TIMER`,
-`FLASH_ENCRYPTION`, `SHA`, `RMT`, `RNG`, the WiFi window, and every AHB
-mirror of a DPORT block.
+neither boot has reached — `UART1` (where the ROM-up path now stands),
+`RTC_IO`, `SENS`, `RTC_I2C`, `FRC_TIMER`, `FLASH_ENCRYPTION`, `SHA`, `RMT`,
+`RNG`, the WiFi window, and every AHB mirror of a DPORT block.
+
+### Why TIMG0 is three things at once
+
+The classic ESP32 has **no SYSTIMER**. Every other part on this roadmap has
+a dedicated system counter that `Instant::now()` reads; this one does not, so
+one timer group carries three unrelated jobs at the same time — and a fourth
+that is not a timer at all:
+
+| use | registers | evidence |
+|---|---|---|
+| the esp-rtos tick / alarm | `t0` (`+0x00..+0x20`) | `board/esp32v3/init.rs` hands `timg0.timer0` to `esp_rtos::start` |
+| the 1 ms io pacer, Priority 1 | `t1` (`+0x24..+0x44`) | L0: `[INIT] I/O task spawned (… timg0t1 pacer 1ms)` |
+| `Instant::now()` | **LACT** (`+0x70..+0x94`) | `esp-hal-1.1.1/src/time.rs:713-758`, the `#[cfg(esp32)]` `implem` |
+| the RTC clock calibration | `rtccalicfg`/`rtccalicfg1` (`+0x68`) | `esp-hal-1.1.1/src/clock/mod.rs:276-473` |
+
+So a single block answers the scheduler's tick, the I/O pacer's deadline,
+every timestamp the firmware takes, and the measurement that decides what the
+crystal is. It is why the shared `engine::timg` takes a **count** of counters
+rather than assuming one, and it is the single most surprising fact about
+this chip's timekeeping.
+
+All three counters tick from APB through their own 16-bit prescaler, whose
+reading is the ESP32 TRM's ("11.2.1 16-bit Prescaler and Clock Selection",
+quoted inside esp-hal: 0 → 65536, 1 or 2 → 2, else the value). esp-hal
+programs LACT with `divider = apb / 16_000_000` = 5 and divides the count by
+16, so 80 MHz / 5 = 16 MHz and 16 ticks is one microsecond.
+
+⚠️ `int_ena` **does not gate an interrupt on this chip** — esp-hal says so in
+as many words and uses `tconfig.level_int_en` as the enable instead — so the
+view drives the level sources from `int_raw & level_int_en` and keeps
+`int_st = int_raw & int_ena` as the PAC defines it.
+
+⚠️ **PD9**: `Instant::now()` is the guest reading a modelled counter. It is
+self-consistent and deterministic; it is not a wall clock, and no host gate
+runs on emulated microseconds.
+
+### The RTC calibration, and the crystal
+
+`rtccalicfg` counts XTAL cycles over `rtc_cali_max` cycles of the clock
+`rtc_cali_clk_sel` picks. The view computes the measurement from modelled
+clocks — XTAL 40 MHz (the desk board's crystal), RC_SLOW 150 kHz,
+RC_FAST/256 = 31,250 Hz, XTAL32K 32,768 Hz, all from esp-hal's generated
+clock tree — so on the direct load `detect_xtal_freq` reads 12,800 and
+computes 40 MHz, `RTC_CNTL.store4` holds `0x0028_0028`, and
+`calibrate_rtc_slow_clock` reads 273,066 and puts a real 150 kHz period in
+`store1`. Before this phase all three were the 26 MHz / zero answers the
+firmware's own timeout arm produced.
+
+⚠️ The *duration* of a measurement is counted in **crystal** cycles rather
+than `memmap::CPU_HZ`, because this machine has one guest-cycle rate for the
+whole run while the guest has two (crystal inside `Clocks::init`, PLL after).
+Completing early is unobservable — the driver delays and then polls;
+completing late makes the driver time out and mis-detect the crystal, which
+is exactly what P3 recorded. The full reasoning is on `Timg::cali_cycles`,
+and the value the firmware consumes does not depend on it.
+
+### The stall key is a pair, and the machine answers the question
+
+A core is stalled only when `options0.sw_stall_*_c0` and
+`sw_cpu_stall.sw_stall_*_c1` together read `(c1 << 2) | c0 == 0x86`
+(`esp-hal-1.1.1/src/soc/esp32/cpu_control.rs:57-81`); `internal_park_core`
+writes `c1 = 0x21` and then `c0 = 0x02`, so a model watching one register
+would answer wrong through both halves of that sequence. `RTC_CNTL` computes
+the pair and publishes it through `rtc_cntl::StallKey`, a shared cell the
+machine holds, and `Machine::core_stalled` ORs it with its own field. **P4
+adds `DPORT.appcpu_ctrl_c.appcpu_runstall`** as the third input to the same
+OR: two blocks in two phases each own one input to one question the machine
+answers.
 
 ## The CLI
 
@@ -331,6 +419,8 @@ exists from P1 so the door has one name for its whole life.
 --break-at <symbol>     stop at its first instruction
 --probe <cycle>:<name>  print the word at a symbol at a guest cycle
 --trace <path|->  --trace-block <name>
+--efuse-mac <a:b:c:d:e:f>     the MAC the eFuse block answers [30:76:f5:ec:f6:34]
+--efuse-rev <major.minor>     the chip revision it answers [3.1]
 --seed <n>   --hooks   --map   --help
 ```
 
@@ -434,7 +524,8 @@ P4–P7, is `docs/reports/2026-09-10-esp32v3-strict-boot-inventory.md`.
 | `tests/memmap.rs` | No two declared regions overlap; every `periph::*` base is inside the MMIO window; `dram_seg` is 8 KiB above the ROM's reserve with `RESERVE_DRAM = 0`; the vector table is 1 KiB below the IRAM; SRAM0 is one region containing the bootloader's `0x4007_8000`; the SRAM1 I-bus alias is named and unmapped; the ROM extents match the vendored ELF; 240 cycles to the microsecond |
 | `tests/rom_vendoring.rs` | The embedded ROM's sha256, re-derived in-process from `rom::VENDORED_V3_ROM` itself, is the one `SHA256SUMS` records — and the file on disk is still that file |
 | `tests/boot.rs` | 39 `PT_LOAD`s, thirteen empty and counted, the ELF-header-mapping segment recognised, four relocated segments placed by vaddr; the ten vector sections at their documented `VECOFS`; at least eight non-alloc sections seeded with real bytes, `.data_xtos_pro` among them; `break 1, 15` matching `lp_xt_inst::encode`; the hook table shipping empty; two hart slots with slot 1 stalled and taking no cycles; `PS_BOOT` after a direct seed; the boot frame's spill target mapped where an unseeded one is not; a seeded hart surviving a real exception; a strict rom-up run on a **bare** machine stopping inside the MMIO window; the boot set registered in the declared order; the ROM path standing at `EFUSE.cmd`; snapshot round-trip. **With the image** (`just test-emu-esp32v3-boot`): `.data` a self-copy and placed; `.rtc_fast.persistent` the one relocated segment; the flash chip seeded over the ROM's 2 MiB default through `spi_w25q16`; the hart entered at `Reset` with the bootloader's `a1`; P2's first stop held on a bare machine; the `[INIT]` chain read back out of the UART0 trace and the run standing at `SPI1.cmd`; two runs identical |
-| `src/periph/accept.rs` (unit) | every accept block reads the PAC's resets except the listed deviation, and every listed deviation is real and has a reason; the reset cause in both fields; the analog master's busy bit; no calibration pretence |
+| `tests/clock.rs` | LACT counting at its derived 16 MHz and latching rather than reading live; TIMG0's three counters independent; the classic's interrupt registers at `0x98..0xa4` and the level source driven from `level_int_en`; the MWDT dropping a write without its key; the calibration answering 12,800 for `detect_xtal_freq` (40 MHz) and 273,066 for the slow clock (150 kHz); TIMG1 at sources 18..21; the block at the PAC's resets; state round-trip. **Through the machine**: the reset cause in both fields; the stall key reaching `Machine::core_stalled` only when *both* halves are written; the desk board's MAC and v3.1 out of the eFuse words plus `APB_CTRL.date`; a run in which no watchdog fires. Plus an `#[ignore]`d measurement of what a LACT timestamp costs |
+| `src/periph/*.rs` (unit) | every accept block reads the PAC's resets except the listed deviation, and every listed deviation is real and has a reason; the eFuse read command reading set exactly once and then clearing itself, and three reloads comparing equal; RTC_CNTL's stall pair, its RWDT gate and its reported-not-performed software reset; the analog master answering the register asked for rather than the last one written |
 
 Run them with `just test-emu-esp32v3`, and the image-backed ones with
 `just test-emu-esp32v3-boot`.

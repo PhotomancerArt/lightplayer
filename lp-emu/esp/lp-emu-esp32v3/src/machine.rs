@@ -524,6 +524,7 @@ pub struct Esp32V3Builder {
     boot_frame: Option<BootFrame>,
     flash_size: u32,
     reset_cause: loader::ResetCause,
+    efuse: loader::EfuseIdentity,
     boot_set: bool,
     trace: Option<Box<dyn std::io::Write + Send>>,
     trace_blocks: Vec<String>,
@@ -542,6 +543,7 @@ impl Default for Esp32V3Builder {
             boot_frame: None,
             flash_size: loader::DEFAULT_FLASH_SIZE,
             reset_cause: loader::ResetCause::default(),
+            efuse: loader::EfuseIdentity::default(),
             boot_set: true,
             trace: None,
             trace_blocks: Vec::new(),
@@ -566,6 +568,7 @@ impl fmt::Debug for Esp32V3Builder {
             .field("boot_frame", &self.boot_frame)
             .field("flash_size", &self.flash_size)
             .field("reset_cause", &self.reset_cause)
+            .field("efuse", &self.efuse)
             .field("boot_set", &self.boot_set)
             .field("trace", &self.trace.is_some())
             .field("trace_blocks", &self.trace_blocks)
@@ -635,6 +638,15 @@ impl Esp32V3Builder {
         self
     }
 
+    /// The part this run claims to be: the MAC and the chip revision the
+    /// eFuse block answers with, and — through `APB_CTRL.date` bit 31 — the
+    /// top bit of that revision. Default: the desk board, `30:76:f5:ec:f6:34`
+    /// and v3.1 (`../bench.md`).
+    pub fn efuse(mut self, identity: loader::EfuseIdentity) -> Self {
+        self.efuse = identity;
+        self
+    }
+
     /// A machine with **no** peripherals — the memory map, the ROM and the
     /// harts alone. What P2 built; kept so a test can still read the first
     /// strict stop of each boot path against an empty MMIO window.
@@ -670,9 +682,16 @@ impl Esp32V3Builder {
         // The peripherals, in the declared order, before any memory is
         // placed: a block's index is fixed at registration and the schedule
         // is empty until `start_peripherals`.
+        // RTC_CNTL publishes its half of the CPU stall key through this
+        // handle and the machine reads it; P5 owns the two RTC_CNTL halves
+        // and P4 adds DPORT's `appcpu_runstall` alongside. A machine built
+        // with `bare()` has no RTC_CNTL and therefore an all-zero key,
+        // which reads as "not stalled" — the right answer for a block that
+        // is not there.
+        let stall_key = crate::periph::rtc_cntl::StallKey::new();
         let mut peripheral_map = Vec::new();
         if self.boot_set {
-            let set = crate::periph::boot_set(self.reset_cause);
+            let set = crate::periph::boot_set(self.reset_cause, self.efuse, stall_key.clone());
             check_registration_order(&set)?;
             for (base, len, periph) in set {
                 peripheral_map.push((periph.name(), base, len));
@@ -715,9 +734,11 @@ impl Esp32V3Builder {
         let mut machine = Machine {
             bus,
             harts,
-            // P4 wires this to DPORT.appcpu_ctrl_c.appcpu_runstall +
-            // RTC_CNTL.options0/sw_cpu_stall. M3 never runs core 1 (Q5).
+            // M3 never runs core 1 (Q5). `core_stalled` ORs this field
+            // with `stall_key` (RTC_CNTL's two halves, P5); P4 adds
+            // DPORT's `appcpu_runstall` as the third input.
             stalled: [false, true],
+            stall_key,
             rom: rom_image,
             app: app_image,
             rom_segments,
@@ -759,6 +780,12 @@ pub const RESET_VECTOR_OFS: u32 = 0x400;
 /// The classic ESP32 machine.
 pub struct Machine {
     bus: SocBus,
+    /// RTC_CNTL's half of the CPU stall key
+    /// ([`crate::periph::rtc_cntl::StallKey`]): both `options0` fields and
+    /// both `sw_cpu_stall` fields, computed by the block that owns them.
+    /// [`Machine::core_stalled`] reads it; P4 adds DPORT's
+    /// `appcpu_runstall` as the third input to the same question.
+    stall_key: crate::periph::rtc_cntl::StallKey,
     /// **Two** slots: the classic is dual-core. Slot 1 is stalled for the
     /// whole of M3 — see the module docs.
     pub harts: Vec<XtHart<SocBus>>,
@@ -887,9 +914,22 @@ impl Machine {
         &mut self.bus
     }
 
-    /// Is core `n` stalled? Slot 1 is, for the whole of M3 (Q5).
+    /// Is core `n` stalled?
+    ///
+    /// Two inputs today and three from P4: the machine's own field (slot 1
+    /// is held for the whole of M3, Q5) and **RTC_CNTL's two-register stall
+    /// key** — `options0.sw_stall_*_c0` and `sw_cpu_stall.sw_stall_*_c1`,
+    /// which stall a core only when the pair reads `0x86`
+    /// (`esp-hal-1.1.1/src/soc/esp32/cpu_control.rs:57-81`). P4 adds
+    /// `DPORT.appcpu_ctrl_c.appcpu_runstall`, and the OR is where it goes.
     pub fn core_stalled(&self, core: usize) -> bool {
-        self.stalled.get(core).copied().unwrap_or(true)
+        self.stalled.get(core).copied().unwrap_or(true) || self.stall_key.stalled(core)
+    }
+
+    /// RTC_CNTL's half of the stall key, for a test or a report that wants
+    /// to see which input is holding a core.
+    pub fn stall_key(&self) -> &crate::periph::rtc_cntl::StallKey {
+        &self.stall_key
     }
 
     /// One line per core, for `--probe` and the run report. Slot 1 is never
