@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M7 P2 Seam Probe</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; padding: 20px; font: 15px/1.5 -apple-system, system-ui, sans-serif; background: #eef1f3; color: #1b2229; }
+  @media (prefers-color-scheme: dark) { body { background: #151b20; color: #e6ecef; } }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 22px 0 6px; opacity: .85; }
+  .sub { opacity: .7; font-size: 12px; word-break: break-all; }
+  .sentinel { font-family: ui-monospace, monospace; font-size: 11px; opacity: .5; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; font-size: 13px; margin-bottom: 6px; }
+  th, td { text-align: right; padding: 4px 8px; border-bottom: 1px solid rgba(128,128,128,.3); }
+  th:first-child, td:first-child { text-align: left; }
+  td.fail { color: #c0392b; font-weight: 700; }
+  td.pass { color: #1e8e5a; }
+  pre { font-size: 11px; white-space: pre-wrap; opacity: .75; background: rgba(128,128,128,.08); padding: 8px; border-radius: 6px; max-height: 240px; overflow: auto; }
+  #status { min-height: 1.4em; margin: 10px 0; }
+</style>
+</head>
+<body>
+<h1>M7 P2 -- browser seam probe</h1>
+<div class="sub" id="ua"></div>
+<div class="sentinel">sentinel: m7-p2-seam-probe-v1 (confirms this page, not an adopted stale listener)</div>
+<div id="status">Starting the Worker...</div>
+<div id="tables"></div>
+<h2>Raw result JSON</h2>
+<pre id="raw"></pre>
+<script>
+  const ua = document.getElementById('ua');
+  ua.textContent = navigator.userAgent + ' · cores ' + (navigator.hardwareConcurrency || '?');
+  const status = document.getElementById('status');
+  const tables = document.getElementById('tables');
+  const raw = document.getElementById('raw');
+
+  function row(cells) {
+    const tr = document.createElement('tr');
+    for (const c of cells) {
+      const td = document.createElement('td');
+      if (typeof c === 'object' && c !== null) { td.textContent = c.text; td.className = c.cls || ''; }
+      else td.textContent = c;
+      tr.appendChild(td);
+    }
+    return tr;
+  }
+  function boolCell(b) { return { text: b ? 'yes' : 'no', cls: b ? 'pass' : 'fail' }; }
+  function table(headers, rows) {
+    const t = document.createElement('table');
+    t.appendChild(row(headers.map((h) => ({ text: h }))));
+    for (const r of rows) t.appendChild(row(r));
+    return t;
+  }
+
+  function renderResults(d) {
+    tables.innerHTML = '';
+    const h2a = document.createElement('h2'); h2a.textContent = 'S1 -- 6 MB synchronous compile in a Worker';
+    tables.appendChild(h2a);
+    tables.appendChild(table(['metric', 'value'], [
+      ['bytes', d.s1.bytes], ['function count', d.s1.functionCount],
+      ['sync compile ok', boolCell(d.s1.syncOk)], ['sync ms', d.s1.syncMs.toFixed(2)],
+      ['async compile ok', boolCell(d.s1.asyncOk)], ['async ms', d.s1.asyncMs.toFixed(2)],
+      ['instantiate+call ok', boolCell(d.s1.callOk === true)],
+    ]));
+
+    const h2b = document.createElement('h2'); h2b.textContent = 'S2 -- cross-instance memory import';
+    tables.appendChild(h2b);
+    tables.appendChild(table(['check', 'result'], Object.entries(d.s2).filter(([k]) => k !== 'ok').map(([k, v]) => [k, typeof v === 'boolean' ? boolCell(v) : v])));
+
+    const h2c = document.createElement('h2'); h2c.textContent = 'S3 -- MMIO call cost (ns/call, ' + d.s3.iters.toLocaleString() + ' iters)';
+    tables.appendChild(h2c);
+    tables.appendChild(table(['variant', 'ns/call', 'ms total'], Object.entries(d.s3.variants).map(([k, v]) => [k, v.nsPerCall.toFixed(3), v.ms.toFixed(1)])));
+
+    const h2d = document.createElement('h2'); h2d.textContent = 'S4 -- entry mechanism (ns/entry, ' + d.s4.entries.toLocaleString() + ' entries)';
+    tables.appendChild(h2d);
+    tables.appendChild(table(['mechanism', 'ok', 'ns/entry'], [
+      ['(a) shared function table', boolCell(d.s4.table.ok), d.s4.table.ok ? d.s4.table.nsPerEntry.toFixed(3) : d.s4.table.error],
+      ['(b) host import per entry', boolCell(d.s4.hostImport.ok), d.s4.hostImport.ok ? d.s4.hostImport.nsPerEntry.toFixed(3) : d.s4.hostImport.error],
+    ]));
+
+    const h2e = document.createElement('h2'); h2e.textContent = 'S5 -- re-entrancy (' + d.s5.entries.toLocaleString() + ' round trips)';
+    tables.appendChild(h2e);
+    tables.appendChild(table(['metric', 'value'], [
+      ['ok', boolCell(d.s5.ok)], ['ns/round trip', d.s5.nsPerRoundTrip.toFixed(3)],
+      ['rss before', d.s5.memBefore ? d.s5.memBefore.rssBytes || d.s5.memBefore.usedJSHeapBytes || '–' : '–'],
+      ['rss after', d.s5.memAfter ? d.s5.memAfter.rssBytes || d.s5.memAfter.usedJSHeapBytes || '–' : '–'],
+    ]));
+
+    const h2f = document.createElement('h2'); h2f.textContent = 'S6 -- ~257 MiB memory, Worker + imported-into-B';
+    tables.appendChild(h2f);
+    tables.appendChild(table(['metric', 'value'], [
+      ['pages', d.s6.pages], ['bytes', d.s6.actualBytes],
+      ['instantiate ok', boolCell(d.s6.ok)], ['instantiate ms', d.s6.instantiateMs.toFixed(2)],
+      ['B import ok', boolCell(d.s6.clientOk === true)],
+      ['error', d.s6.err || '–'],
+    ]));
+
+    const h2g = document.createElement('h2'); h2g.textContent = 'S7 -- module count against one shared memory';
+    tables.appendChild(h2g);
+    tables.appendChild(table(['modules', 'ms/instance', 'all correct'], d.s7.rows.map((r) => [r.target, r.msPerInstance.toFixed(4), boolCell(r.allCorrect)])));
+  }
+
+  async function send(payload) {
+    const name = 'seam-probe-' + payload.at.replace(/[:.]/g, '-') + '.json';
+    const fd = new FormData();
+    fd.append('file_to_upload', new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), name);
+    try {
+      const resp = await fetch('/upload?path=/', { method: 'POST', body: fd });
+      return resp.ok ? 'uploaded as ' + name : 'upload failed (' + resp.status + ')';
+    } catch (e) { return 'upload failed: ' + e; }
+  }
+
+  async function start() {
+    const worker = new Worker('worker-entry.mjs', { type: 'module' });
+    worker.onmessage = async (ev) => {
+      const d = ev.data;
+      raw.textContent = JSON.stringify(d, null, 2);
+      renderResults(d);
+      const payload = { ua: navigator.userAgent, cores: navigator.hardwareConcurrency, sentinel: 'm7-p2-seam-probe-v1', ...d };
+      const sendStatus = await send(payload);
+      status.textContent = 'Done. ' + sendStatus + '.';
+    };
+    worker.onerror = (e) => { status.textContent = 'Worker error: ' + e.message; };
+  }
+  start();
+</script>
+</body>
+</html>
