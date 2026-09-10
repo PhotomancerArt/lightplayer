@@ -125,6 +125,9 @@ pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     // Direct load, stop 9: `Uart::new(…).with_tx(GPIO1)` configures the
     // U0TXD pad.
     "IO_MUX",
+    // Direct load, stop 10: esp-storage's flash read reaches SPI1 — the
+    // last P3 stop on this path; the run then spins on `cmd.usr` (P7).
+    "SPI1",
     // ROM-up, stop 1: `_ResetHandler_efuse_check_patch` reads its own
     // fuses seven instructions after the reset vector.
     "EFUSE",

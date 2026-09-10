@@ -346,6 +346,38 @@ pub fn io_mux() -> RegFile {
         .with_pac_grades()
 }
 
+/// An SPI controller's aperture: the generated table runs to `+0x3fc`
+/// (`date`); the PAC gives SPI0..SPI3 one `RegisterBlock`, so one length and
+/// one table serve them all.
+pub const SPI_LEN: u32 = 0x400;
+
+/// `SPI1` — the flash controller esp-storage drives; **P7's block**,
+/// accept-and-remember here, and the direct load's **last** P3 stop.
+///
+/// The tenth strict stop of the direct load, 3,644,210 cycles in:
+/// `esp_rom_spiflash_read+0xc` (`0x4008_3C98`, in the app's own `.rwtext` —
+/// esp-storage's IRAM copy of the read routine, not the mask ROM's) reads
+/// `ctrl` (`+0x08`), the first touch of the flash read that mounts `lpfs`
+/// (`[INIT] flash filesystem mounted` is the line after it on silicon).
+///
+/// Every reset is the PAC's — notably `user` (`+0x1c`) = `0x8000_0040`
+/// with `usr_command` set, the value whose absence was the C6's
+/// accept-block defect
+/// (`docs/defects/2026-09-07-accept-blocks-carry-only-the-reset-values-a-boot-needed.md`).
+/// No exception is carried, and none could be: a flash read sets `cmd.
+/// usr` (`+0x00`, bit 18) and spins until hardware clears it when the
+/// transfer is done, and a block that remembers holds it set forever. That
+/// spin is where the direct load stands at the end of P3
+/// (`tests/boot.rs`), and it is the phase file's own example of a stop that
+/// names its owner: *"SPI1 `CMD` write: no flash chip"* — P7, on
+/// `engine::spi_flash`, with the chip the loader's `chip_size` already
+/// describes.
+pub fn spi(name: &'static str) -> RegFile {
+    RegFile::new(name, SPI_LEN)
+        .with_names(regs::SPI0)
+        .with_pac_grades()
+}
+
 /// `EFUSE`'s aperture: the generated table runs to `+0x1fc` (`date`).
 pub const EFUSE_LEN: u32 = 0x200;
 
@@ -390,6 +422,7 @@ mod tests {
             (gpio(), regs::GPIO),
             (uart0(), regs::UART0),
             (io_mux(), regs::IO_MUX),
+            (spi("SPI1"), regs::SPI0),
             (efuse(), regs::EFUSE),
         ]
     }
