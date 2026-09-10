@@ -101,13 +101,37 @@ impl DeviceByteStream for SerialPortByteStream {
         }
     }
 
+    /// Hand `bytes` to the kernel's output queue. Deliberately does NOT
+    /// `flush()`.
+    ///
+    /// `serialport`'s `flush` is `tcdrain(fd)`: "block until every queued
+    /// byte has been transmitted", with no timeout (the port timeout there
+    /// only bounds `EINTR` retries). A device that stops draining its
+    /// receive FIFO — a C6 hung in its bootloader is the case that found
+    /// this — backs the queue up and turns that into a permanent block. The
+    /// framing thread that owns this stream then never reaches its shutdown
+    /// check, `ClientTransport::close` gives up at its join budget, and the
+    /// OS port stays open for the life of the process
+    /// (`docs/defects/2026-09-08-serial-close-leaks-the-port-on-a-wedged-device.md`).
+    ///
+    /// Nothing is lost by skipping it: `write` has already handed the bytes
+    /// to the driver, which transmits them on its own schedule, and no
+    /// caller here needs "already on the wire" semantics — the only
+    /// operation that would care (the reset dance, which cuts transmission
+    /// short) runs before the first write. `write` itself stays bounded: it
+    /// waits for writability under the port's 100 ms timeout, and a device
+    /// that has stopped draining fills the kernel's output queue and trips
+    /// that timeout — reported as [`ByteStreamError::WriteStalled`], a
+    /// dropped frame rather than a dead stream, because a board that stopped
+    /// reading is `Unresponsive`, not gone.
     fn write_all(&mut self, bytes: &[u8]) -> Result<(), ByteStreamError> {
-        self.port
-            .write_all(bytes)
-            .map_err(|error| ByteStreamError::io(error.to_string()))?;
-        self.port
-            .flush()
-            .map_err(|error| ByteStreamError::io(error.to_string()))
+        self.port.write_all(bytes).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::TimedOut {
+                ByteStreamError::WriteStalled
+            } else {
+                ByteStreamError::io(error.to_string())
+            }
+        })
     }
 
     fn set_signals(&mut self, dtr: Option<bool>, rts: Option<bool>) -> Result<(), ByteStreamError> {
@@ -133,6 +157,10 @@ impl DeviceByteStream for SerialPortByteStream {
     }
 
     fn reopen(&mut self, baud_rate: u32) -> Result<(), ByteStreamError> {
+        // The old port is closed by the assignment below, and a tty close
+        // DRAINS — same hazard the `Drop` impl exists for, reached by a
+        // different route.
+        let _ = self.port.clear(serialport::ClearBuffer::Output);
         #[cfg(unix)]
         {
             let reopened = open_serial_port_native(&self.port_name, baud_rate)?;
@@ -144,6 +172,30 @@ impl DeviceByteStream for SerialPortByteStream {
             self.port = open_serial_port(&self.port_name, baud_rate)?;
         }
         Ok(())
+    }
+}
+
+impl Drop for SerialPortByteStream {
+    /// Throw away queued output before the fd closes.
+    ///
+    /// Load-bearing, and the second half of the same lesson as
+    /// [`Self::write_all`]: on macOS `close(2)` of a tty DRAINS. The closing
+    /// thread blocks until the output queue empties, and a device that has
+    /// stopped reading never lets it — so the close never returns, the port
+    /// stays held, and the next `open()` of it blocks too. Seen exactly that
+    /// way on the bench (2026-09-08, C6 hung in its bootloader): a `sample`
+    /// of the wedged process showed the framing thread parked in `close`
+    /// inside this very drop while the main thread sat in `open` on the same
+    /// port. `tcflush(TCOFLUSH)` leaves the close nothing to wait for.
+    ///
+    /// Discarding unsent bytes is right *here* and only here. The stream is
+    /// being torn down: whatever is still queued is a frame nobody is waiting
+    /// on any more (a close abandons the write backlog by design), the peer
+    /// gets reset or reflashed next, and the link that follows is a fresh
+    /// one. The alternative is not "the bytes arrive" — the peer is not
+    /// reading them — it is a thread that never comes back.
+    fn drop(&mut self) {
+        let _ = self.port.clear(serialport::ClearBuffer::Output);
     }
 }
 

@@ -443,6 +443,7 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 | lifecycle-ownership | 2026-09-02 | [same-gpio-rebind-disconnects-the-pad](2026-09-02-same-gpio-rebind-disconnects-the-pad.md) | fixed | fw-esp32c6 + fw-esp32s3 output/rmt `bind_channel` (esp-hal `with_pin` guard order) |
 | untested-path | 2026-09-06 | [emu-transport-drops-unprefixed-client-lines](2026-09-06-emu-transport-drops-unprefixed-client-lines.md) | fixed | lpa-client transport_serial/emulator (async `M!` framing) + lp-cli `emu` host spec |
 | shared-namespace-collision | 2026-09-08 | [a-stray-hello-answered-a-request-that-never-asked](2026-09-08-a-stray-hello-answered-a-request-that-never-asked.md) | fixed | lpa-client protocol_session/client/tokio_client/project_read_stream (correlation) |
+| lifecycle-ownership | 2026-09-08 | [serial-close-leaks-the-port-on-a-wedged-device](2026-09-08-serial-close-leaks-the-port-on-a-wedged-device.md) | fixed | lpa-client stream/serialport_stream + transport_serial framing thread/close; lpa-link host_serial_esp32 provider + DeviceSession::release_link |
 
 ## Predecessor: `docs/bugs/`
 
