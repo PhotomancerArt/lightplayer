@@ -115,7 +115,11 @@ pub(crate) fn inst_class(inst: &Inst, flow: &Flow) -> InstClass {
         | Inst::Waiti(..)
         | Inst::Rotw(..)
         | Inst::Break(..)
-        | Inst::BreakN(..) => InstClass::System,
+        | Inst::BreakN(..)
+        | Inst::Tlb(..)
+        | Inst::TlbInv(..)
+        | Inst::ExtReg(..) => InstClass::System,
+        Inst::Clamps(..) | Inst::BoolLogic(..) | Inst::BoolAll(..) => InstClass::Alu,
         Inst::WindowLs(WindowLsOp::L32e, ..) => InstClass::Load,
         Inst::WindowLs(..) => InstClass::Store,
         Inst::AtomicLs(..) => InstClass::Store,
@@ -413,7 +417,13 @@ impl<B: Bus> Exec<'_, B> {
             | Inst::Rotw(..)
             | Inst::WindowLs(..)
             | Inst::Break(..)
-            | Inst::BreakN(..) => return Err(machine_mode_only()),
+            | Inst::BreakN(..)
+            | Inst::Clamps(..)
+            | Inst::BoolLogic(..)
+            | Inst::BoolAll(..)
+            | Inst::Tlb(..)
+            | Inst::TlbInv(..)
+            | Inst::ExtReg(..) => return Err(machine_mode_only()),
         };
         debug_assert_eq!(
             class,

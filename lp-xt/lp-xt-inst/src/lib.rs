@@ -265,6 +265,63 @@ pub enum WindowLsOp {
     S32e,
 }
 
+/// Boolean-file logic ops (`RRR`, `op0 = 0`, `op1 = 2`). Shape: `op br, bs, bt`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BoolOp {
+    /// `andb br, bs, bt` — `op2 = 0`.
+    Andb,
+    /// `andbc br, bs, bt` — `bs AND NOT bt`; `op2 = 1`.
+    Andbc,
+    /// `orb br, bs, bt` — `op2 = 2`.
+    Orb,
+    /// `orbc br, bs, bt` — `bs OR NOT bt`; `op2 = 3`.
+    Orbc,
+    /// `xorb br, bs, bt` — `op2 = 4`.
+    Xorb,
+}
+
+/// Boolean-file reductions (`RRR`, `op0 = 0`, `op1 = 0`, `op2 = 0`, by `r`).
+///
+/// Shape: `op br, bs` where `bs` names the **first** register of a 4- or
+/// 8-register aligned group; objdump renders the whole range
+/// (`all4 b0, b4:b5:b6:b7`), which is the same field.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BoolAllOp {
+    /// `any4 br, bs` — `r = 8`.
+    Any4,
+    /// `all4 br, bs` — `r = 9`.
+    All4,
+    /// `any8 br, bs` — `r = 0xA`.
+    Any8,
+    /// `all8 br, bs` — `r = 0xB`.
+    All8,
+}
+
+/// Region-protection / TLB accesses taking `at, as` (`RRR`, `op0 = 0`,
+/// `op1 = 0`, `op2 = 5`, sub-selected by `r`).
+///
+/// **Decode and disassembly only.** This crate holds no semantics for any of
+/// them, and the "accept and remember" model a machine needs is P3's or later.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TlbOp {
+    /// `ritlb0 at, as` — `r = 3`.
+    Ritlb0,
+    /// `pitlb at, as` — `r = 5`.
+    Pitlb,
+    /// `witlb at, as` — `r = 6`.
+    Witlb,
+    /// `ritlb1 at, as` — `r = 7`.
+    Ritlb1,
+    /// `rdtlb0 at, as` — `r = 0xB`.
+    Rdtlb0,
+    /// `pdtlb at, as` — `r = 0xD`.
+    Pdtlb,
+    /// `wdtlb at, as` — `r = 0xE`.
+    Wdtlb,
+    /// `rdtlb1 at, as` — `r = 0xF`.
+    Rdtlb1,
+}
+
 /// Zero-operand barrier / sync / nop opcodes (`RRR`, `op0 = 0`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum NullaryOp {
@@ -321,6 +378,8 @@ pub enum Inst {
     Extui(Reg, Reg, u8, u8),
     /// `sext rd, rs, imm` (imm 7..=22)
     Sext(Reg, Reg, u8),
+    /// `clamps rd, rs, imm` (imm 7..=22) — saturate to a signed `imm+1`-bit range.
+    Clamps(Reg, Reg, u8),
     /// `mov.n rt, rs` (16-bit)
     MovN(Reg, Reg),
     /// `add.n rd, rs, rt` (16-bit)
@@ -426,6 +485,18 @@ pub enum Inst {
     MovBool(bool /* set? movt:movf */, Reg, Reg, BReg),
     /// `bt`/`bf bs, target`. Stores the signed 8-bit PC-relative offset.
     BranchBool(bool /* set? bt:bf */, BReg, i32),
+    /// `op br, bs, bt` — boolean-file logic.
+    BoolLogic(BoolOp, BReg, BReg, BReg),
+    /// `op br, bs` — boolean-file reduction over an aligned 4- or 8-group.
+    BoolAll(BoolAllOp, BReg, BReg),
+
+    // --- region protection (decode and disassembly only) ---
+    /// `op at, as` — a TLB read/probe/write.
+    Tlb(TlbOp, Reg, Reg),
+    /// `idtlb as` (`data = true`, `r = 0xC`) / `iitlb as` (`r = 4`) — invalidate.
+    TlbInv(bool /* data? idtlb:iitlb */, Reg),
+    /// `rer at, as` (`write = false`) / `wer at, as` — external-register access.
+    ExtReg(bool /* write? wer:rer */, Reg, Reg),
 
     // --- special / user registers (see the [`sr`] module doc) ---
     /// `rsr.<sr>`/`wsr.<sr>`/`xsr.<sr> at`

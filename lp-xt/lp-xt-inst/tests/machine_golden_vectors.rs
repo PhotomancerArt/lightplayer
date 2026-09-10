@@ -31,6 +31,9 @@ use lp_xt_inst::*;
 fn a(n: u8) -> Reg {
     Reg::new(n)
 }
+fn br(n: u8) -> BReg {
+    BReg::new(n)
+}
 
 /// Decode one instruction, asserting it round-trips to the exact input bytes.
 #[track_caller]
@@ -556,6 +559,68 @@ fn privileged_control_flow_and_windows() {
     assert_eq!(dec(&[0x20, 0x41, 0x00]), Inst::Break(1, 2));
     assert_eq!(dec(&[0x10, 0x42, 0x00]), Inst::Break(2, 1));
     assert_eq!(dec(&[0x2d, 0xf1]), Inst::BreakN(1));
+}
+
+// ---------------------------------------------------------------------------
+// Families 6, 7, 8 — the integer helper, the boolean file, region protection
+// ---------------------------------------------------------------------------
+
+/// LX6 bytes == LX7 bytes for every vector, `rer`/`wer` included.
+///
+/// objdump renders the boolean reductions with the whole register range
+/// (`all4 b0, b4:b5:b6:b7`); the field holds only the first register of the
+/// group, which is what `agrees_with_objdump` compares.
+#[rustfmt::skip]
+const HELPER_VECTORS: &[(&[u8], &str)] = &[
+    (&[0x00, 0x34, 0x33], "clamps a3, a4, 7"),
+    (&[0xf0, 0x34, 0x33], "clamps a3, a4, 22"),
+    (&[0x20, 0x01, 0x02], "andb b0, b1, b2"),
+    (&[0x20, 0x01, 0x12], "andbc b0, b1, b2"),
+    (&[0x20, 0x01, 0x22], "orb b0, b1, b2"),
+    (&[0x20, 0x01, 0x32], "orbc b0, b1, b2"),
+    (&[0x20, 0x01, 0x42], "xorb b0, b1, b2"),
+    (&[0x00, 0x94, 0x00], "all4 b0, b4:b5:b6:b7"),
+    (&[0x00, 0x84, 0x00], "any4 b0, b4:b5:b6:b7"),
+    (&[0x00, 0xb8, 0x00], "all8 b0, b8:b9:b10:b11:b12:b13:b14:b15"),
+    (&[0x00, 0xa8, 0x00], "any8 b0, b8:b9:b10:b11:b12:b13:b14:b15"),
+    (&[0x00, 0xc3, 0x50], "idtlb a3"),
+    (&[0x00, 0x43, 0x50], "iitlb a3"),
+    (&[0x20, 0xe3, 0x50], "wdtlb a2, a3"),
+    (&[0x20, 0x63, 0x50], "witlb a2, a3"),
+    (&[0x20, 0xb3, 0x50], "rdtlb0 a2, a3"),
+    (&[0x20, 0xf3, 0x50], "rdtlb1 a2, a3"),
+    (&[0x20, 0x33, 0x50], "ritlb0 a2, a3"),
+    (&[0x20, 0x73, 0x50], "ritlb1 a2, a3"),
+    (&[0x20, 0xd3, 0x50], "pdtlb a2, a3"),
+    (&[0x20, 0x53, 0x50], "pitlb a2, a3"),
+    (&[0x40, 0x60, 0x40], "rer a4, a0"),
+    (&[0x40, 0x70, 0x40], "wer a4, a0"),
+    (&[0xf0, 0x63, 0x40], "rer a15, a3"),
+    (&[0x00, 0x7f, 0x40], "wer a0, a15"),
+];
+
+#[test]
+fn integer_helper_booleans_and_region_protection() {
+    for (bytes, text) in HELPER_VECTORS {
+        dec(bytes);
+        agrees_with_objdump(bytes, text);
+    }
+    assert_eq!(dec(&[0x00, 0x34, 0x33]), Inst::Clamps(a(3), a(4), 7));
+    assert_eq!(
+        dec(&[0x20, 0x01, 0x42]),
+        Inst::BoolLogic(BoolOp::Xorb, br(0), br(1), br(2))
+    );
+    assert_eq!(
+        dec(&[0x00, 0x94, 0x00]),
+        Inst::BoolAll(BoolAllOp::All4, br(0), br(4))
+    );
+    assert_eq!(
+        dec(&[0x20, 0xe3, 0x50]),
+        Inst::Tlb(TlbOp::Wdtlb, a(2), a(3))
+    );
+    assert_eq!(dec(&[0x00, 0xc3, 0x50]), Inst::TlbInv(true, a(3)));
+    assert_eq!(dec(&[0x00, 0x43, 0x50]), Inst::TlbInv(false, a(3)));
+    assert_eq!(dec(&[0x40, 0x70, 0x40]), Inst::ExtReg(true, a(4), a(0)));
 }
 
 // ---------------------------------------------------------------------------

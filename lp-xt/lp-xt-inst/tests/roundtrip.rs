@@ -476,6 +476,58 @@ fn privileged_control_flow_and_windows() {
     }
 }
 
+#[test]
+fn integer_helper_booleans_and_region_protection() {
+    for &x in &REGS {
+        for &y in &REGS {
+            for imm in 7..=22u8 {
+                rt(Inst::Clamps(r(x), r(y), imm), 3);
+            }
+            rt(Inst::ExtReg(false, r(x), r(y)), 3);
+            rt(Inst::ExtReg(true, r(x), r(y)), 3);
+            for op in [
+                TlbOp::Ritlb0,
+                TlbOp::Pitlb,
+                TlbOp::Witlb,
+                TlbOp::Ritlb1,
+                TlbOp::Rdtlb0,
+                TlbOp::Pdtlb,
+                TlbOp::Wdtlb,
+                TlbOp::Rdtlb1,
+            ] {
+                rt(Inst::Tlb(op, r(x), r(y)), 3);
+            }
+        }
+        rt(Inst::TlbInv(true, r(x)), 3);
+        rt(Inst::TlbInv(false, r(x)), 3);
+    }
+    for op in [
+        BoolOp::Andb,
+        BoolOp::Andbc,
+        BoolOp::Orb,
+        BoolOp::Orbc,
+        BoolOp::Xorb,
+    ] {
+        for &x in &REGS {
+            for &y in &REGS {
+                rt(Inst::BoolLogic(op, b(x), b(y), b(15 - x)), 3);
+            }
+        }
+    }
+    for op in [
+        BoolAllOp::Any4,
+        BoolAllOp::All4,
+        BoolAllOp::Any8,
+        BoolAllOp::All8,
+    ] {
+        for &x in &REGS {
+            for &y in &REGS {
+                rt(Inst::BoolAll(op, b(x), b(y)), 3);
+            }
+        }
+    }
+}
+
 /// The SR / UR tables are total in both directions: every variant's number maps
 /// back to that variant, `ALL` and `from_num` agree on the modelled set, and
 /// numbers outside it stay `None`.
@@ -537,9 +589,12 @@ fn length_rule() {
 /// correct length so a stream walk stays aligned.
 #[test]
 fn unsupported_reports_length() {
-    // `andb b0, b1, b2` (op0=0, op1=2, op2=0) — the boolean *logic* ops are
-    // deliberately outside the subset (M6 needs only the compare readback
-    // paths); 3 bytes. Assembler-derived bytes.
-    let e = decode(&[0x20, 0x01, 0x02]).unwrap_err();
+    // `s32nb a2, a3, 4` (op0=0, op1=9, op2=5) — the narrow-bus store, outside
+    // this crate's set and outside M1 P1's families; 3 bytes. Assembler-derived
+    // bytes (both LX6 and LX7 emit `20 13 59`).
+    let e = decode(&[0x20, 0x13, 0x59]).unwrap_err();
+    assert!(matches!(e, DecodeError::Unsupported { len: 3, .. }));
+    // `sddr32.p a2` — likewise; 3 bytes, `f0 72 00`.
+    let e = decode(&[0xf0, 0x72, 0x00]).unwrap_err();
     assert!(matches!(e, DecodeError::Unsupported { len: 3, .. }));
 }

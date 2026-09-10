@@ -326,6 +326,7 @@ fn decode_rst0(w: u32) -> Option<Inst> {
         0x2 => alu(AluRrr::Or),
         0x3 => alu(AluRrr::Xor),
         0x4 => decode_st1(w),
+        0x5 => decode_tlb(w),
         0x6 => match s(w) {
             0x0 => Some(Inst::Rt(AluRt::Neg, reg_r(w), reg_t(w))),
             0x1 => Some(Inst::Rt(AluRt::Abs, reg_r(w), reg_t(w))),
@@ -392,6 +393,11 @@ fn decode_st0(w: u32) -> Option<Inst> {
         0x6 => Some(Inst::Rsil(reg_t(w), s(w))),
         // WAITI level: s = level, t reserved 0.
         0x7 if t(w) == 0 => Some(Inst::Waiti(s(w))),
+        // Boolean-file reductions over an aligned group: t = br, s = bs.
+        0x8 => Some(Inst::BoolAll(BoolAllOp::Any4, breg_t(w), breg_s(w))),
+        0x9 => Some(Inst::BoolAll(BoolAllOp::All4, breg_t(w), breg_s(w))),
+        0xa => Some(Inst::BoolAll(BoolAllOp::Any8, breg_t(w), breg_s(w))),
+        0xb => Some(Inst::BoolAll(BoolAllOp::All8, breg_t(w), breg_s(w))),
         // SYSCALL: r=5, s=0, t=0 (assembler golden bytes `00 50 00`).
         0x5 if s(w) == 0 && t(w) == 0 => Some(Inst::Nullary(NullaryOp::Syscall)),
         0x2 => {
@@ -415,6 +421,27 @@ fn decode_st0(w: u32) -> Option<Inst> {
     }
 }
 
+/// `op0 = 0, op1 = 0, op2 = 5`: the region-protection group, sub-decoded by `r`.
+///
+/// Decode and disassembly only — this crate holds no TLB model.
+fn decode_tlb(w: u32) -> Option<Inst> {
+    let two = |op| Some(Inst::Tlb(op, reg_t(w), reg_s(w)));
+    match r(w) {
+        0x3 => two(TlbOp::Ritlb0),
+        // The invalidates take only `as`; `t` is reserved and assembled as 0.
+        0x4 if t(w) == 0 => Some(Inst::TlbInv(false, reg_s(w))),
+        0x5 => two(TlbOp::Pitlb),
+        0x6 => two(TlbOp::Witlb),
+        0x7 => two(TlbOp::Ritlb1),
+        0xb => two(TlbOp::Rdtlb0),
+        0xc if t(w) == 0 => Some(Inst::TlbInv(true, reg_s(w))),
+        0xd => two(TlbOp::Pdtlb),
+        0xe => two(TlbOp::Wdtlb),
+        0xf => two(TlbOp::Rdtlb1),
+        _ => None,
+    }
+}
+
 /// `op0 = 0, op1 = 0, op2 = 4`: ST1, sub-decoded by `r`.
 fn decode_st1(w: u32) -> Option<Inst> {
     match r(w) {
@@ -432,6 +459,9 @@ fn decode_st1(w: u32) -> Option<Inst> {
             let imm = s(w) | ((t(w) & 0x1) << 4);
             Some(Inst::Ssai(imm))
         }
+        // External-register access (ESP32/ESP32-S3 only): `op at, as`.
+        0x6 => Some(Inst::ExtReg(false, reg_t(w), reg_s(w))),
+        0x7 => Some(Inst::ExtReg(true, reg_t(w), reg_s(w))),
         // ROTW simm4: the rotation rides in `t`, `s` is reserved 0.
         0x8 if s(w) == 0 => Some(Inst::Rotw(sext(t(w) as u32, 4) as i8)),
         0xe => Some(Inst::Rt(AluRt::Nsa, reg_t(w), reg_s(w))),
@@ -470,7 +500,14 @@ fn decode_rst1(w: u32) -> Option<Inst> {
 /// `op0 = 0, op1 = 2`: RST2, sub-decoded by `op2` (mul32, div32).
 fn decode_rst2(w: u32) -> Option<Inst> {
     let alu = |op| Some(Inst::Rrr(op, reg_r(w), reg_s(w), reg_t(w)));
+    let bool_logic = |op| Some(Inst::BoolLogic(op, breg_r(w), breg_s(w), breg_t(w)));
     match op2(w) {
+        // The boolean *logic* ops share RST2 with the 32-bit mul/div group.
+        0x0 => bool_logic(BoolOp::Andb),
+        0x1 => bool_logic(BoolOp::Andbc),
+        0x2 => bool_logic(BoolOp::Orb),
+        0x3 => bool_logic(BoolOp::Orbc),
+        0x4 => bool_logic(BoolOp::Xorb),
         0x8 => alu(AluRrr::Mull),
         0xa => alu(AluRrr::Muluh),
         0xb => alu(AluRrr::Mulsh),
@@ -489,6 +526,7 @@ fn decode_rst3(w: u32) -> Option<Inst> {
         0x0 => sr_access(w, SrOp::Rsr),
         0x1 => sr_access(w, SrOp::Wsr),
         0x2 => Some(Inst::Sext(reg_r(w), reg_s(w), t(w) + 7)),
+        0x3 => Some(Inst::Clamps(reg_r(w), reg_s(w), t(w) + 7)),
         0x4 => alu(AluRrr::Min),
         0x5 => alu(AluRrr::Max),
         0x6 => alu(AluRrr::Minu),

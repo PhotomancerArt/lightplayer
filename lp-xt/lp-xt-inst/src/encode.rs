@@ -463,6 +463,68 @@ pub fn encode(inst: &Inst) -> Vec<u8> {
             let w = (6 | (3 << 4)) | ((rs.num() as u32) << 8) | (imm12 << 12);
             emit(&mut out, w, 3);
         }
+        Inst::Clamps(rd, rs, imm) => {
+            let t = (imm - 7) as u32;
+            emit(
+                &mut out,
+                pack(0, t, rs.num() as u32, rd.num() as u32, 3, 3),
+                3,
+            );
+        }
+        Inst::BoolLogic(op, br, bs, bt) => {
+            let op2 = match op {
+                BoolOp::Andb => 0,
+                BoolOp::Andbc => 1,
+                BoolOp::Orb => 2,
+                BoolOp::Orbc => 3,
+                BoolOp::Xorb => 4,
+            };
+            let w = pack(0, bt.num() as u32, bs.num() as u32, br.num() as u32, 2, op2);
+            emit(&mut out, w, 3);
+        }
+        Inst::BoolAll(op, br, bs) => {
+            let r = match op {
+                BoolAllOp::Any4 => 8,
+                BoolAllOp::All4 => 9,
+                BoolAllOp::Any8 => 0xa,
+                BoolAllOp::All8 => 0xb,
+            };
+            emit(
+                &mut out,
+                pack(0, br.num() as u32, bs.num() as u32, r, 0, 0),
+                3,
+            );
+        }
+        Inst::Tlb(op, at, ars) => {
+            let r = match op {
+                TlbOp::Ritlb0 => 0x3,
+                TlbOp::Pitlb => 0x5,
+                TlbOp::Witlb => 0x6,
+                TlbOp::Ritlb1 => 0x7,
+                TlbOp::Rdtlb0 => 0xb,
+                TlbOp::Pdtlb => 0xd,
+                TlbOp::Wdtlb => 0xe,
+                TlbOp::Rdtlb1 => 0xf,
+            };
+            emit(
+                &mut out,
+                pack(0, at.num() as u32, ars.num() as u32, r, 0, 5),
+                3,
+            );
+        }
+        Inst::TlbInv(data, ars) => {
+            let r = if data { 0xc } else { 0x4 };
+            emit(&mut out, pack(0, 0, ars.num() as u32, r, 0, 5), 3);
+        }
+        Inst::ExtReg(write, at, ars) => {
+            let r = if write { 7 } else { 6 };
+            emit(
+                &mut out,
+                pack(0, at.num() as u32, ars.num() as u32, r, 0, 4),
+                3,
+            );
+        }
+
         // --- privileged control flow and windows ---
         Inst::Rf(op) => {
             // ST0 r = 3, t = 0; `s` selects the variant.

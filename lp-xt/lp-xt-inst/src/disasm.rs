@@ -217,6 +217,47 @@ pub fn format_inst(inst: &Inst, pc: u32) -> String {
             format!("{m}\t{rs:?}")
         }
         Entry(rs, imm) => format!("entry\t{rs:?}, {imm}"),
+        Clamps(rd, rs, imm) => format!("clamps\t{rd:?}, {rs:?}, {imm}"),
+        BoolLogic(op, br, bs, bt) => {
+            let m = match op {
+                BoolOp::Andb => "andb",
+                BoolOp::Andbc => "andbc",
+                BoolOp::Orb => "orb",
+                BoolOp::Orbc => "orbc",
+                BoolOp::Xorb => "xorb",
+            };
+            format!("{m}\t{br:?}, {bs:?}, {bt:?}")
+        }
+        BoolAll(op, br, bs) => {
+            let m = match op {
+                BoolAllOp::Any4 => "any4",
+                BoolAllOp::All4 => "all4",
+                BoolAllOp::Any8 => "any8",
+                BoolAllOp::All8 => "all8",
+            };
+            format!("{m}\t{br:?}, {bs:?}")
+        }
+        Tlb(op, at, ars) => {
+            let m = match op {
+                TlbOp::Ritlb0 => "ritlb0",
+                TlbOp::Pitlb => "pitlb",
+                TlbOp::Witlb => "witlb",
+                TlbOp::Ritlb1 => "ritlb1",
+                TlbOp::Rdtlb0 => "rdtlb0",
+                TlbOp::Pdtlb => "pdtlb",
+                TlbOp::Wdtlb => "wdtlb",
+                TlbOp::Rdtlb1 => "rdtlb1",
+            };
+            format!("{m}\t{at:?}, {ars:?}")
+        }
+        TlbInv(data, ars) => {
+            let m = if data { "idtlb" } else { "iitlb" };
+            format!("{m}\t{ars:?}")
+        }
+        ExtReg(write, at, ars) => {
+            let m = if write { "wer" } else { "rer" };
+            format!("{m}\t{at:?}, {ars:?}")
+        }
         Rf(op) => match op {
             RfOp::Rfe => "rfe".to_string(),
             RfOp::Rfde => "rfde".to_string(),
