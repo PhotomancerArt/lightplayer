@@ -36,6 +36,24 @@ absorbs all four RMT blocks — a 192-word window with 96-word halves
 only the **2-channel** tradeoff: a board that declares both outputs still
 splits into 24-word halves and keeps the scan-truncation exposure above.
 
+**What the virtual air (M4, 2026-09-08) does not change** — the emulator now
+models ESP-NOW: a frame the blob hands the MAC is delivered, after a stated
+latency, into every other machine's RX ring (`docs/adr/2026-09-08-virtual-air-claim-policy.md`).
+That is **byte delivery on a perfect medium**, not a radio, and it cannot
+reproduce this entry's truncation for the same reason it never claimed to:
+the 28 % figure above is a *timing* property of the blob and the MAC — how
+long the receive path is masked while a scan runs, measured against a 30 µs
+refill deadline on real silicon — and the air has no scan, no PHY and no
+interrupt-masking window to model. `validate.toml`'s `espnow-broadcast` set
+says the same thing from the other side: what a replay holds equal is "every
+**non-timing** field" (device ids, event numbers, kinds, byte counts, `gap`,
+`len_ok`); nothing about when a frame arrived is claimed. A guest on
+the air could run the exact `test_espnow`/`espnow-broadcast` image through a
+scan loop and it would show no truncation whatsoever, which would not mean
+the truncation is fixed — it would mean the air is not the instrument that
+can see it. Closing this entry still wants the desk jig, on silicon, under
+real scan traffic.
+
 **Exit criteria** — reopens if OPC or E1.31 streaming (or any sustained
 STA/UDP usage — the never-measured S4 scenario) enters the C6's product
 path: measure S4 first, then revisit the 2-channel split via the recorded

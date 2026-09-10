@@ -1,6 +1,6 @@
 //! Two (or more) machines advanced alternately over a fixed guest-cycle
 //! quantum, in **one thread**, exchanging frames through an
-//! [`Air`](lp_emu_esp_common::air::Air) at quantum boundaries (plan RD11).
+//! [`lp_emu_esp_common::air::Air`] at quantum boundaries (plan RD11).
 //!
 //! # Why this is a module of its own and not more of `machine.rs`
 //!

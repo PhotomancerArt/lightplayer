@@ -13,7 +13,7 @@
 //! ([`fw_esp32c6_image`]), a pinned reference ELF ([`reference_image`]) and
 //! the merged flash image beside it ([`merged_image`]) — and they used to
 //! carry three copies of the same careful sequence. They now share one:
-//! [`resolve`]. It answers three questions and nothing else does.
+//! `resolve` (private). It answers three questions and nothing else does.
 //!
 //! **Which file?** In order:
 //!
@@ -39,11 +39,12 @@
 //! is whatever was built last — P5 found the shipped-image test running
 //! against a no-radio build that way.
 //!
-//! **May I build it?** Only if `LP_EMU_BUILD_FW=1`. Without it, [`resolve`]
-//! returns `Err` and the caller prints a [`skip_notice`] — a machine with no
-//! esp toolchain must not fail the suite. **With** it, a failed build is a
-//! failed *test*, not a skip, and [`resolve`] panics rather than returning
-//! `Err`. That distinction is load-bearing: returning `Err` for it once made
+//! **May I build it?** Only if `LP_EMU_BUILD_FW=1`. Without it, `resolve`
+//! (private) returns `Err` and the caller prints a [`skip_notice`] — a
+//! machine with no esp toolchain must not fail the suite. **With** it, a
+//! failed build is a failed *test*, not a skip, and `resolve` panics rather
+//! than returning `Err`. That distinction is load-bearing: returning `Err`
+//! for it once made
 //! three boot tests report `ok` in 0.2 s while building nothing at all
 //! (`git worktree add` was exiting 128 on a registered-but-deleted
 //! worktree, every test skipped, and the run was green and hollow).
@@ -51,7 +52,7 @@
 //! **Am I the only one building it?** Two locks, at two scopes, because a
 //! test binary is a process and a test is a thread:
 //!
-//! - [`BUILD_LOCK`], in this process. Three tests in one binary each resolve
+//! - `BUILD_LOCK` (private), in this process. Three tests in one binary each resolve
 //!   an image on their own thread; with `LP_EMU_BUILD_FW=1` and nothing on
 //!   disk, each would start a build into the same output path. M5 P1's CI
 //!   run loaded a memfs image built that way and read a stack high-water
@@ -581,8 +582,9 @@ impl ReferenceImage {
     }
 }
 
-/// A reference image's ELF, or the reason there is none — [`resolve`] with
-/// the pinned commit as the key, and `scripts/emu/build-reference-image.sh`
+/// A reference image's ELF, or the reason there is none — `resolve`
+/// (private) with the pinned commit as the key, and
+/// `scripts/emu/build-reference-image.sh`
 /// as the build. The script adds a detached worktree at the reference commit
 /// under `target/emu-ref/` and builds there; it holds the cross-process lock
 /// the module docs describe, and publishes by `mv`.

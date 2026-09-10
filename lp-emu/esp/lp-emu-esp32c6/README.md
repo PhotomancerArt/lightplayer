@@ -1301,12 +1301,21 @@ Replayed against those two silicon transcripts, the emulated pair now compares
 capture compares 55 — the five differences being exactly `espnow-rx[1..5].gap`,
 2 against silicon's 1.
 
-⚠️ **The emulated pair's four committed transcripts
-(`lp-emu/transcripts/esp32c6/espnow-broadcast/`, `t1` and `t2`, one per
-machine) predate the fix** and still carry `"gap":2`, so a replay of *them*
-still fails those five fields. They want re-recording, which is a transcript
-change and belongs with whoever holds that directory; the 60-of-60 above was
-measured on a scratch re-run of the same pair.
+**Re-recorded, 2026-09-09 (M6 sweep note: this paragraph was stale — the
+re-recording it asked for had already landed).** The pre-fix transcripts
+(`lp-emu-esp32c6-t1-2026-09-08-bd2154368-*.txt` and their `t2` twins) are
+kept, unedited, as the historical record of the bug — a re-recording is a
+new commit and a new stem, never an edit of the old one. The current pair
+(`lp-emu-esp32c6-t1-2026-09-09-58ae17f86-*.txt`, `t2` twins alongside) is
+post-fix and carries `"gap":1` throughout; replayed against the two silicon
+transcripts above it is **60 of 60**, confirmed directly
+(`cargo run -p lp-cli -- validate replay <silicon file> --against <this
+file>` on both machines, both `REPLAY OK`). Four transcripts now share one
+configuration and payload, so `validate replay` needs the file named
+explicitly rather than resolved by configuration alone — there is no
+automated gate in this crate that replays `espnow-broadcast` against silicon
+today, so nothing is silently picking the wrong one, but a future gate here
+should name the `58ae17f86` stem.
 
 **No pin claim, and the reason is the payload.** ESP-NOW events are **console
 fields, not pin fields**: `espnow-broadcast` declares no pin capture, so no
@@ -1316,11 +1325,16 @@ it says nothing about pins at all. That is a different situation from
 `pin capture: … records none` because a board has no logic analyser on it
 (#624).
 
-**The socket form does not exist.** `--air <addr>` is a described flag with a
-tested wire codec and **no implementation** (see below); nothing is gated on
-it, and plan two's `lp-cli emu serve` is where it lands. The deterministic
-form — the only one any gate uses — is `lockstep::Lockstep`, two machines in
-one thread.
+**The socket form exists now, on `lp-cli emu serve`, and it is a tap, not a
+delivery path.** Plan two's M1 (PR #639) landed `--air <addr>`: a TCP listener
+(`lp-cli/src/commands/emu/serve/air.rs`) that encodes every frame a served
+board's radio hands the MAC in the wire codec below and writes it to whoever
+is watching. **Auditable only** — nothing is ever delivered *into* a board
+from this socket, so two boards served with `--air` do not hear each other;
+nothing about a run that used it is a transcript, and no gate, validation
+configuration or CI job uses it. This crate's own binary
+(`lp-emu-esp32c6.rs`) never grew the flag. The deterministic form — the only
+one any gate uses — is `lockstep::Lockstep`, two machines in one thread.
 
 ##### What the two-board payload settled about the TX descriptor (M4 P3)
 
@@ -1438,11 +1452,15 @@ emulator never uses it — `just lint-emu-fence`):
   18      n     the frame, verbatim
 ```
 
-When the flag lands it is spelled `--air listen:<host:port>` or
-`--air connect:<host:port>` (a bare `<host:port>` means connect), on this
-crate's binary and mirrored on `lp-cli emu run` the way `--pin-log` and
-`--tx-log` are; when plan two's `lp-cli emu serve` arrives it takes the same
-flag and the same wire form.
+**Landed, and spelled differently than predicted.** This section originally
+said the flag would take `listen:<host:port>` / `connect:<host:port>` forms on
+this crate's own binary. What plan two's M1 (PR #639) actually shipped is
+simpler and narrower: `lp-cli emu serve --air <addr>` binds `addr` as a TCP
+listener and only **taps** — it writes every served board's outgoing frames
+to whoever connects and watches, in the wire form above, and delivers nothing
+back into any board. This crate's own binary and `lp-cli emu run` never grew
+the flag; there is no `connect:` form and no way for a socket peer to inject a
+frame.
 
 **Auditable only, never a gate.** A socket pair is not byte-identical — two
 processes interleave however the operating system schedules them — so no
