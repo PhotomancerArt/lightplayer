@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-09-09      # how: ci
-fixed: this change
+fixed: 94575e62b
 area: scripts/browser-test-harness.sh (the browser wasm suites' cargo runner)
 class: state-conflation
 related: []
