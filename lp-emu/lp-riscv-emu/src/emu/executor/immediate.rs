@@ -1,4 +1,30 @@
-//! Immediate instruction execution (I-type: ADDI, SLLI, SRLI, SRAI, ANDI, ORI, XORI, SLTI, SLTIU)
+//! Immediate instruction execution (I-type: ADDI, SLLI, SRLI, SRAI, ANDI, ORI,
+//! XORI, SLTI, SLTIU).
+//!
+//! # The Zb* encodings in OP-IMM
+//!
+//! This executor also carries a handful of bit-manipulation instructions. No
+//! guest this repository builds contains one: every target here is
+//! `riscv32imac`, the ESP32-C6 has no B extension and traps all of them, and no
+//! backend emits one. So none of it was ever exercised, and it was transcribed
+//! rather than derived — and a transcription of a dense encoding space is a bug
+//! report until checked, the lesson of
+//! `docs/defects/2026-07-31-zexth-encoding-steals-xori-128.md`.
+//!
+//! Checked against an assembler (`rustc --target riscv32imac-unknown-none-elf`
+//! with `.option arch, +zba,+zbb,+zbs,+zbkb`), a bit over half of what was here
+//! did not survive; see
+//! `docs/defects/2026-09-09-op-imm-bitmanip-dispatch-dead-and-mislabelled.md`.
+//! What remains — `binvi`, `orc.b`, `clz`, `ctz`, `cpop`, `sext.b`, `sext.h` —
+//! is reachable and agrees with the assembler, and
+//! [`tests::zb_immediates_are_shifts_or_faults`] pins the whole surface,
+//! including the encodings that fall through to a shift and the ones that
+//! fault.
+//!
+//! Whether an RV32IMAC emulator should execute *any* of the survivors, rather
+//! than trapping them as the chip would, is the open question raised by
+//! `docs/reports/2026-04-27-rv32-load16-issue.md`. This module does not answer
+//! it; it only stops claiming instructions it does not implement.
 
 extern crate alloc;
 
@@ -21,8 +47,10 @@ pub(crate) fn decode_execute_itype<M: LoggingMode, B: Bus>(
     let funct3 = i.func;
     let imm = i.imm;
 
-    // For shift instructions, check bit 5 of funct7 (imm[11:5] bit 5) to distinguish SRLI from SRAI
-    // SRAI has imm[11:5] = 0x20 (bit 5 set), SRLI has imm[11:5] = 0x00 (bit 5 clear)
+    // SRAI is distinguished from SRLI by bit 5 of funct7 (instruction bit 30):
+    // SRAI has funct7 0b0100000, SRLI has 0b0000000. Every other funct7 in this
+    // funct3 belongs to an extension the C6 does not have, and this arm swallows
+    // all of them — see the module comment on the Zb* encodings.
     let funct7_bit5 = ((inst_word >> 25) & 0x20) != 0;
 
     match funct3 {
@@ -35,10 +63,9 @@ pub(crate) fn decode_execute_itype<M: LoggingMode, B: Bus>(
 
             match funct6 {
                 0x00 => execute_slli::<M>(rd, rs1, imm, inst_word, pc, regs),
-                0x12 => execute_bseti::<M>(rd, rs1, imm_5_0 as i32, inst_word, pc, regs),
+                // Zbs `binvi`, funct6 0b011010. The only member of the
+                // bit-immediate trio whose constant here matches the spec.
                 0x1a => execute_binvi::<M>(rd, rs1, imm_5_0 as i32, inst_word, pc, regs),
-                0x09 => execute_bclri::<M>(rd, rs1, imm_5_0 as i32, inst_word, pc, regs),
-                0x02 => execute_slliuw::<M>(rd, rs1, imm_5_0 as i32, inst_word, pc, regs),
                 _ => {
                     // Check for funct12 encodings (CLZ, CTZ, CPOP, SEXTB, SEXTH)
                     match funct12 {
@@ -69,25 +96,22 @@ pub(crate) fn decode_execute_itype<M: LoggingMode, B: Bus>(
         // `docs/defects/2026-07-31-zexth-encoding-steals-xori-128.md`.
         0x4 => execute_xori::<M>(rd, rs1, imm, inst_word, pc, regs),
         0x5 => {
-            // SRLI/SRAI and other funct3=0x5 instructions
-            let funct6 = ((inst_word >> 26) & 0x3f) as u8;
-            let imm_5_0 = ((inst_word >> 20) & 0x3f) as u8;
             let funct12 = ((inst_word >> 20) & 0xfff) as u16;
 
             if funct7_bit5 {
+                // SRAI, and — because this test comes first and only looks at
+                // one bit — every funct7 with bit 5 set. `rori`, `rev8`,
+                // `brev8` and `bexti` all live up here, so the arms that used
+                // to name them below could never run; they are gone. Their
+                // encodings still execute as shifts, which is what they have
+                // always done. See `tests::zb_immediates_are_shifts_or_faults`.
                 execute_srai::<M>(rd, rs1, imm, inst_word, pc, regs)
-            } else if funct6 == 0x18 {
-                // RORI: funct6=0b011000 (0x18)
-                execute_rori::<M>(rd, rs1, imm_5_0 as i32, inst_word, pc, regs)
-            } else if funct6 == 0x09 {
-                // BEXTI: funct6=0b010010 (0x09)
-                execute_bexti::<M>(rd, rs1, imm_5_0 as i32, inst_word, pc, regs)
             } else {
-                // Check for funct12 encodings (REV8, ORCB, BREV8)
+                // Zbb `orc.b`, funct12 0b001010000111 — the one Zb* encoding in
+                // this funct3 whose funct7 bit 5 is clear, and so the one that
+                // has ever reached its own arm.
                 match funct12 {
-                    0x6b8 => execute_rev8::<M>(rd, rs1, inst_word, pc, regs),
                     0x287 => execute_orcb::<M>(rd, rs1, inst_word, pc, regs),
-                    0x687 => execute_brev8::<M>(rd, rs1, inst_word, pc, regs),
                     _ => execute_srli::<M>(rd, rs1, imm, inst_word, pc, regs),
                 }
             }
@@ -463,89 +487,8 @@ fn execute_sltiu<M: LoggingMode>(
     })
 }
 
-// Bitmanip extension instructions (Zbs, Zbb, Zba)
-
-#[inline(always)]
-fn execute_bclri<M: LoggingMode>(
-    rd: Gpr,
-    rs1: Gpr,
-    imm: i32,
-    instruction_word: u32,
-    pc: u32,
-    regs: &mut [i32; 32],
-) -> Result<ExecutionResult, EmulatorError> {
-    let val1 = read_reg(regs, rs1);
-    let rd_old = if M::ENABLED { read_reg(regs, rd) } else { 0 };
-    let bit_pos = (imm & 0x1f) as u32; // Only use bottom 5 bits
-    let mask = !(1u32 << bit_pos);
-    let result = ((val1 as u32) & mask) as i32;
-    if rd.num() != 0 {
-        regs[rd.num() as usize] = result;
-    }
-    let log = if M::ENABLED {
-        Some(InstLog::Arithmetic {
-            cycle: 0,
-            pc,
-            instruction: instruction_word,
-            rd,
-            rs1_val: val1,
-            rs2_val: None,
-            rd_old,
-            rd_new: result,
-        })
-    } else {
-        None
-    };
-    Ok(ExecutionResult {
-        new_pc: None,
-        should_halt: false,
-        syscall: false,
-        class: InstClass::Alu,
-        inst_size: 4,
-        log,
-    })
-}
-
-#[inline(always)]
-fn execute_bseti<M: LoggingMode>(
-    rd: Gpr,
-    rs1: Gpr,
-    imm: i32,
-    instruction_word: u32,
-    pc: u32,
-    regs: &mut [i32; 32],
-) -> Result<ExecutionResult, EmulatorError> {
-    let val1 = read_reg(regs, rs1);
-    let rd_old = if M::ENABLED { read_reg(regs, rd) } else { 0 };
-    let bit_pos = (imm & 0x1f) as u32; // Only use bottom 5 bits
-    let mask = 1u32 << bit_pos;
-    let result = ((val1 as u32) | mask) as i32;
-    if rd.num() != 0 {
-        regs[rd.num() as usize] = result;
-    }
-    let log = if M::ENABLED {
-        Some(InstLog::Arithmetic {
-            cycle: 0,
-            pc,
-            instruction: instruction_word,
-            rd,
-            rs1_val: val1,
-            rs2_val: None,
-            rd_old,
-            rd_new: result,
-        })
-    } else {
-        None
-    };
-    Ok(ExecutionResult {
-        new_pc: None,
-        should_halt: false,
-        syscall: false,
-        class: InstClass::Alu,
-        inst_size: 4,
-        log,
-    })
-}
+// The bit-manipulation instructions that are both reachable and correct.
+// See the module comment for the ones that were neither.
 
 #[inline(always)]
 fn execute_binvi<M: LoggingMode>(
@@ -574,174 +517,6 @@ fn execute_binvi<M: LoggingMode>(
             rs2_val: None,
             rd_old,
             rd_new: result,
-        })
-    } else {
-        None
-    };
-    Ok(ExecutionResult {
-        new_pc: None,
-        should_halt: false,
-        syscall: false,
-        class: InstClass::Alu,
-        inst_size: 4,
-        log,
-    })
-}
-
-#[inline(always)]
-fn execute_bexti<M: LoggingMode>(
-    rd: Gpr,
-    rs1: Gpr,
-    imm: i32,
-    instruction_word: u32,
-    pc: u32,
-    regs: &mut [i32; 32],
-) -> Result<ExecutionResult, EmulatorError> {
-    let val1 = read_reg(regs, rs1);
-    let rd_old = if M::ENABLED { read_reg(regs, rd) } else { 0 };
-    let bit_pos = (imm & 0x1f) as u32; // Only use bottom 5 bits
-    let result = (((val1 as u32) >> bit_pos) & 1) as i32;
-    if rd.num() != 0 {
-        regs[rd.num() as usize] = result;
-    }
-    let log = if M::ENABLED {
-        Some(InstLog::Arithmetic {
-            cycle: 0,
-            pc,
-            instruction: instruction_word,
-            rd,
-            rs1_val: val1,
-            rs2_val: None,
-            rd_old,
-            rd_new: result,
-        })
-    } else {
-        None
-    };
-    Ok(ExecutionResult {
-        new_pc: None,
-        should_halt: false,
-        syscall: false,
-        class: InstClass::Alu,
-        inst_size: 4,
-        log,
-    })
-}
-
-#[inline(always)]
-fn execute_rori<M: LoggingMode>(
-    rd: Gpr,
-    rs1: Gpr,
-    imm: i32,
-    instruction_word: u32,
-    pc: u32,
-    regs: &mut [i32; 32],
-) -> Result<ExecutionResult, EmulatorError> {
-    let val1 = read_reg(regs, rs1);
-    let rd_old = if M::ENABLED { read_reg(regs, rd) } else { 0 };
-    let shift_amount = (imm & 0x1f) as u32; // Only use bottom 5 bits
-    let val_u = val1 as u32;
-    let result = (val_u.rotate_right(shift_amount)) as i32;
-    if rd.num() != 0 {
-        regs[rd.num() as usize] = result;
-    }
-    let log = if M::ENABLED {
-        Some(InstLog::Arithmetic {
-            cycle: 0,
-            pc,
-            instruction: instruction_word,
-            rd,
-            rs1_val: val1,
-            rs2_val: None,
-            rd_old,
-            rd_new: result,
-        })
-    } else {
-        None
-    };
-    Ok(ExecutionResult {
-        new_pc: None,
-        should_halt: false,
-        syscall: false,
-        class: InstClass::Alu,
-        inst_size: 4,
-        log,
-    })
-}
-
-#[inline(always)]
-fn execute_rev8<M: LoggingMode>(
-    rd: Gpr,
-    rs1: Gpr,
-    instruction_word: u32,
-    pc: u32,
-    regs: &mut [i32; 32],
-) -> Result<ExecutionResult, EmulatorError> {
-    let val1 = read_reg(regs, rs1);
-    let rd_old = if M::ENABLED { read_reg(regs, rd) } else { 0 };
-    let val_u = val1 as u32;
-    // Reverse bytes: swap byte 0<->3, 1<->2
-    let result =
-        ((val_u << 24) | ((val_u & 0xff00) << 8) | ((val_u & 0xff0000) >> 8) | (val_u >> 24))
-            as i32;
-    if rd.num() != 0 {
-        regs[rd.num() as usize] = result;
-    }
-    let log = if M::ENABLED {
-        Some(InstLog::Arithmetic {
-            cycle: 0,
-            pc,
-            instruction: instruction_word,
-            rd,
-            rs1_val: val1,
-            rs2_val: None,
-            rd_old,
-            rd_new: result,
-        })
-    } else {
-        None
-    };
-    Ok(ExecutionResult {
-        new_pc: None,
-        should_halt: false,
-        syscall: false,
-        class: InstClass::Alu,
-        inst_size: 4,
-        log,
-    })
-}
-
-#[inline(always)]
-fn execute_brev8<M: LoggingMode>(
-    rd: Gpr,
-    rs1: Gpr,
-    instruction_word: u32,
-    pc: u32,
-    regs: &mut [i32; 32],
-) -> Result<ExecutionResult, EmulatorError> {
-    let val1 = read_reg(regs, rs1);
-    let rd_old = if M::ENABLED { read_reg(regs, rd) } else { 0 };
-    let val_u = val1 as u32;
-    // Bit-reverse within each byte
-    let mut result = 0u32;
-    for i in 0..4 {
-        let byte = ((val_u >> (i * 8)) & 0xff) as u8;
-        let reversed = byte.reverse_bits();
-        result |= (reversed as u32) << (i * 8);
-    }
-    if rd.num() != 0 {
-        regs[rd.num() as usize] = result as i32;
-    }
-    let log = if M::ENABLED {
-        Some(InstLog::Arithmetic {
-            cycle: 0,
-            pc,
-            instruction: instruction_word,
-            rd,
-            rs1_val: val1,
-            rs2_val: None,
-            rd_old,
-            rd_new: result as i32,
         })
     } else {
         None
@@ -1003,47 +778,6 @@ fn execute_sexth<M: LoggingMode>(
     })
 }
 
-#[inline(always)]
-fn execute_slliuw<M: LoggingMode>(
-    rd: Gpr,
-    rs1: Gpr,
-    imm: i32,
-    instruction_word: u32,
-    pc: u32,
-    regs: &mut [i32; 32],
-) -> Result<ExecutionResult, EmulatorError> {
-    let val1 = read_reg(regs, rs1);
-    let rd_old = if M::ENABLED { read_reg(regs, rd) } else { 0 };
-    let shift_amount = (imm & 0x1f) as u32; // Only use bottom 5 bits
-    // On RV32, this is just a left shift (zero-extend is a no-op)
-    let result = ((val1 as u32).wrapping_shl(shift_amount)) as i32;
-    if rd.num() != 0 {
-        regs[rd.num() as usize] = result;
-    }
-    let log = if M::ENABLED {
-        Some(InstLog::Arithmetic {
-            cycle: 0,
-            pc,
-            instruction: instruction_word,
-            rd,
-            rs1_val: val1,
-            rs2_val: None,
-            rd_old,
-            rd_new: result,
-        })
-    } else {
-        None
-    };
-    Ok(ExecutionResult {
-        new_pc: None,
-        should_halt: false,
-        syscall: false,
-        class: InstClass::Alu,
-        inst_size: 4,
-        log,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     extern crate alloc;
@@ -1194,5 +928,93 @@ mod tests {
             "SRAI on positive: 0x7FFFFFFF >> 16 = 0x7FFF"
         );
         assert!(result.log.is_none());
+    }
+
+    /// Every OP-IMM bit-manipulation encoding this executor has ever named,
+    /// and what it actually does.
+    ///
+    /// The words are the assembler's, not this file's: they come from
+    /// `rustc --target riscv32imac-unknown-none-elf --emit=obj` over a
+    /// `global_asm!` block opening with
+    /// `.option arch, +zba, +zbb, +zbs, +zbkb`, disassembled with
+    /// `llvm-objdump`. Deriving an encoding from the shape of a sibling is how
+    /// this block went wrong in the first place
+    /// (`docs/defects/2026-07-31-zexth-encoding-steals-xori-128.md`), so the
+    /// test refuses to do it too.
+    ///
+    /// This is the test that would have caught the dead arms: `rori`, `rev8`,
+    /// `brev8` and `bexti` all have funct7 bit 5 set, the bit the `funct3 == 5`
+    /// arm tests first, so each one executed as `srai` while an arm below
+    /// claimed to implement it. Naming the expected result as a *shift* rather
+    /// than as the instruction's own semantics is the whole point — a future
+    /// change that wires one of them up has to come here and say so.
+    #[test]
+    fn zb_immediates_are_shifts_or_faults() {
+        const V: u32 = 0x1234_5678;
+
+        /// `a0 <- op a1`, with a1 holding [`V`].
+        fn run(word: u32) -> Result<u32, ()> {
+            let mut regs = [0i32; 32];
+            regs[11] = V as i32;
+            let mut memory = Memory::with_default_addresses(vec![], vec![]);
+            match decode_execute_itype::<LoggingDisabled, _>(word, 0, &mut regs, &mut memory) {
+                Ok(_) => Ok(regs[10] as u32),
+                Err(_) => Err(()),
+            }
+        }
+
+        // --- Implemented, reachable, and equal to what the instruction means.
+        assert_eq!(run(0x6835_9513), Ok(V ^ (1 << 3)), "binvi a0, a1, 3");
+        assert_eq!(run(0x2875_d513), Ok(0xffff_ffff), "orc.b a0, a1");
+        assert_eq!(run(0x6005_9513), Ok(V.leading_zeros()), "clz a0, a1");
+        assert_eq!(run(0x6015_9513), Ok(V.trailing_zeros()), "ctz a0, a1");
+        assert_eq!(run(0x6025_9513), Ok(V.count_ones()), "cpop a0, a1");
+        assert_eq!(run(0x6045_9513), Ok(V & 0xff), "sext.b a0, a1(positive)");
+        assert_eq!(run(0x6055_9513), Ok(V & 0xffff), "sext.h a0, a1(positive)");
+
+        // --- funct3 == 5, funct7 bit 5 set: SRAI takes the arm first, so each
+        // of these is an arithmetic shift by the low five bits of the funct12
+        // field, and never the instruction it is written as.
+        let srai = |shamt: u32| Ok(((V as i32) >> shamt) as u32);
+        assert_eq!(run(0x6045_d513), srai(0x604 & 0x1f), "rori a0, a1, 4");
+        assert_eq!(run(0x6985_d513), srai(0x698 & 0x1f), "rev8 a0, a1(RV32)");
+        assert_eq!(run(0x6b85_d513), srai(0x6b8 & 0x1f), "rev8 a0, a1(RV64)");
+        assert_eq!(run(0x6875_d513), srai(0x687 & 0x1f), "brev8 a0, a1");
+        assert_eq!(run(0x4835_d513), srai(0x483 & 0x1f), "bexti a0, a1, 3");
+        // The instructions those words are actually written as, none of which
+        // this executor computes. Stated so the difference is on the page.
+        assert_ne!(
+            run(0x6045_d513),
+            Ok(V.rotate_right(4)),
+            "rori is not rotating"
+        );
+        assert_ne!(
+            run(0x6985_d513),
+            Ok(V.swap_bytes()),
+            "rev8 is not reversing"
+        );
+        assert_ne!(
+            run(0x4835_d513),
+            Ok((V >> 3) & 1),
+            "bexti is not extracting"
+        );
+
+        // --- funct3 == 1: `bclri` and `bseti` both fault. `bclri` used to
+        // reach `execute_bseti` — funct6 0b010010 is bclri's, and the arm was
+        // labelled bseti — and so *set* the bit its mnemonic clears. A fault is
+        // what the C6 does with either.
+        assert_eq!(run(0x4835_9513), Err(()), "bclri a0, a1, 3");
+        assert_eq!(run(0x2835_9513), Err(()), "bseti a0, a1, 3");
+        // `slli.uw` is RV64-only Zba; on RV32 that funct7 is a reserved `slli`.
+        assert_eq!(run(0x0835_9513), Err(()), "slli.uw a0, a1, 3");
+
+        // --- And the base shifts this arm exists for, unchanged throughout.
+        assert_eq!(run(0x0045_d513), Ok(V >> 4), "srli a0, a1, 4");
+        assert_eq!(
+            run(0x4045_d513),
+            Ok(((V as i32) >> 4) as u32),
+            "srai a0, a1, 4"
+        );
+        assert_eq!(run(0x0045_9513), Ok(V << 4), "slli a0, a1, 4");
     }
 }
