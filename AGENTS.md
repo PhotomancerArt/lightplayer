@@ -517,6 +517,29 @@ in a plan file or config you didn't generate this session as a red flag.
 preview) instead of writing it by hand. See
 `docs/adr/2026-07-27-worktree-local-launch-json.md`.
 
+## Studio against an emulated board (no hardware)
+
+`just studio-dev-emu` starts `lp-cli emu serve` holding two emulated ESP32-C6
+boards beside the dev server and prints three lines: the door's `/boards` URL,
+the `?emu=` query to open Studio with, and a *predicted* Studio URL. The URL
+`studio-dev` prints below them is the source of truth, as always.
+
+Open `http://127.0.0.1:<studio port>/?emu=ws://127.0.0.1:<emu port>`. That flag
+— and only that flag — replaces `navigator.serial` in the page with a virtual
+USB bus over those boards, so Studio's real device stack connects, identifies
+and runs against them. Without it nothing is fetched and `navigator.serial` is
+Chromium's own. Connect a device the way you would with a board: the in-page
+picker stands where Chrome's chooser would be, and a page-level banner names
+the shim, the backing URL and each board, with `detach` / `attach` buttons that
+are the cable. You need **no** WebSerial grant, no `just serial-grant`, no
+bench port and no Chromium policy profile: a polyfilled `navigator.serial`
+grants itself.
+
+The door admits **one client per board** (a second gets 409), so one Studio tab
+per `emu serve`, and use `?on=` (a different, orthogonal flag) if you want a
+second lens on the same session. See
+`docs/adr/2026-09-09-studio-device-stack-over-a-virtual-serial-port.md`.
+
 ## Handing off for review
 
 When stopping at a review gate — visual/feel gate, hardware walk, plan

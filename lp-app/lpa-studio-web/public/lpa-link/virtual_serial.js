@@ -202,6 +202,19 @@ class VirtualSerial extends EventTarget {
     return null;
   }
 
+  /// The newest generation for a board, live or dead. A detached board has no
+  /// live port — `getPorts()` and the picker must not offer it — but the page
+  /// still has to name it in the banner, and `attach` still has to find the
+  /// `EmulatorPort` underneath to plug back in.
+  newestPortFor(boardId) {
+    for (let i = this.generations.length - 1; i >= 0; i -= 1) {
+      if (this.generations[i].boardId === boardId) {
+        return this.generations[i];
+      }
+    }
+    return null;
+  }
+
   // The board went back to power-on. Chrome's answer to that is a NEW
   // `SerialPort` object with the same grant, and so is ours: the old one goes
   // dead (enumerated no longer, `getInfo()` still answering) and the new one
@@ -224,6 +237,16 @@ class VirtualSerial extends EventTarget {
 
   forget(port) {
     this.granted.delete(port);
+    this.noteState(port);
+  }
+
+  /// A port opened, closed or lost its grant. This is NOT a Web Serial event —
+  /// Studio listens for `connect`/`disconnect` and nothing else — it exists so
+  /// the page's own chrome can stop saying "closed" about a port an
+  /// application is holding open. Measured 2026-09-09: the dev banner rendered
+  /// only on hotplug edges and said "closed" under two boards Studio had open.
+  noteState(port) {
+    this.dispatchEvent(new CustomEvent("boardstate", { detail: { port } }));
   }
 
   // --- the three `navigator.serial` calls ---------------------------------
@@ -310,13 +333,16 @@ class VirtualSerial extends EventTarget {
       usbProductId: info.usbProductId,
       granted: this.granted.has(port),
       open: port.opened,
+      attached: !port.dead,
     };
   }
 
-  /// Every live board, described. The dev banner lists these.
+  /// Every board the bus holds, described, newest generation first — a
+  /// DETACHED board included, because the banner has to name it and offer the
+  /// cable back. `getPorts()` and the picker are the ones that must not see it.
   describeBoards() {
     return this.boardIds
-      .map((boardId) => this.livePortFor(boardId))
+      .map((boardId) => this.newestPortFor(boardId))
       .filter((port) => port !== null)
       .map((port) => this.describe(port));
   }
@@ -330,18 +356,46 @@ class VirtualSerial extends EventTarget {
   // them to `StudioCommand::DeviceHotplug`, and both edges are re-derivation
   // triggers carrying no port (`web_app.rs:1908-1913`).
 
+  /// The cable comes out. The emulator hears the verb, and the PORT dies the
+  /// way Chrome's does when a board is unplugged: an open `readable` errors,
+  /// the port stops being enumerated, and `disconnect` fires.
+  ///
+  /// MEASURED 2026-09-09, and the reason this is not just the verb: with the
+  /// port left open, Studio's hotplug sweep saw a link that was still open,
+  /// re-derived nothing, and the card stayed Ready with the cable out. The
+  /// edge is only half of what a replug is — the other half is that the port
+  /// object goes away, and the sweep is written against exactly that
+  /// ("disconnect" means detach the links that stopped being open,
+  /// `web_app.rs:1908-1913`).
   async detach(boardId) {
     const port = this.requireLivePort(boardId);
     await port.emulator.detach();
+    port.unplug("The emulated board was detached.");
     this.dispatchEvent(new CustomEvent("disconnect", { detail: { port } }));
     return port;
   }
 
+  /// The cable goes back in. A replug is an enumeration, so the grant survives
+  /// onto a NEW `SerialPort` object — the same thing `reenumerate` does after a
+  /// reset, and the reason `adoptReenumeratedPorts` exists upstream.
   async attach(boardId) {
-    const port = this.requireLivePort(boardId);
-    await port.emulator.attach();
-    this.dispatchEvent(new CustomEvent("connect", { detail: { port } }));
-    return port;
+    const previous = this.newestPortFor(boardId);
+    if (!previous) {
+      throw new Error(`no emulated board \`${boardId}\` on this bus`);
+    }
+    await previous.emulator.attach();
+    if (!previous.dead) {
+      // Already plugged in: the verb is idempotent and the edge still fires,
+      // because a page that pressed the button asked for a re-derivation.
+      this.dispatchEvent(new CustomEvent("connect", { detail: { port: previous } }));
+      return previous;
+    }
+    const fresh = this.mint(boardId, previous.emulator, previous.board);
+    if (this.granted.delete(previous)) {
+      this.granted.add(fresh);
+    }
+    this.dispatchEvent(new CustomEvent("connect", { detail: { port: fresh } }));
+    return fresh;
   }
 
   requireLivePort(boardId) {
@@ -427,6 +481,7 @@ class VirtualSerialPort {
     await this.emulator.open();
     this.opened = true;
     this._attachStreams();
+    this.bus.noteState(this);
   }
 
   async close() {
@@ -436,6 +491,7 @@ class VirtualSerialPort {
     this.opened = false;
     this._detachStreams();
     await this.emulator.close();
+    this.bus.noteState(this);
   }
 
   async setSignals(signals = {}) {
@@ -476,6 +532,16 @@ class VirtualSerialPort {
     if (this.opened) {
       this.opened = false;
       this._detachStreams();
+    }
+  }
+
+  /// The board was unplugged under this port. Same as `markDead`, except an
+  /// open `readable` is ERRORED rather than cancelled — which is what Chrome
+  /// does, and what the controller's read pump is written to catch.
+  unplug(reason) {
+    this.dead = true;
+    if (this.opened) {
+      this._errorStream(reason);
     }
   }
 

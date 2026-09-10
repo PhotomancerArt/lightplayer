@@ -4,6 +4,15 @@
 
 Accepted
 
+Amended by
+[2026-09-09-studio-device-stack-over-a-virtual-serial-port.md](2026-09-09-studio-device-stack-over-a-virtual-serial-port.md):
+this boundary is the seam a `navigator.serial` polyfill installs UNDER, and it
+does not move to make room. The controller's single `requestPort()` call site
+is answered by an in-page picker instead of Chrome's chooser, and
+`browser_esp32_device_controller.js` is frozen by content hash in CI
+(`just lint-browser-serial-js-frozen`) so that "the same code runs against an
+emulated board" stays a fact rather than a claim.
+
 ## Context
 
 Studio's browser ESP32 path needs to do more than open a serial transport. The

@@ -267,6 +267,9 @@ export function installDevBanner({ bus, backingUrl, facade = null }) {
   const target = facade ?? bus;
   target.addEventListener("connect", render);
   target.addEventListener("disconnect", render);
+  // …and so is "closed" the moment Studio opens a port. `boardstate` is the
+  // bus's own signal for that, never a Web Serial event (see `noteState`).
+  bus.addEventListener("boardstate", render);
 
   banner.append(head, body);
   document.body.append(banner);
@@ -283,15 +286,19 @@ function boardRow(bus, board, refresh) {
   name.textContent = board.boardId;
   style(name, { fontWeight: "600" });
 
+  // A detached board says so where a plugged-in one says whether an
+  // application holds it open: with the cable out there is no port to be open.
+  const state = board.attached === false ? "detached" : board.open ? "open" : "closed";
   const detail = document.createElement("span");
-  detail.textContent = [board.mac, board.open ? "open" : "closed"].filter(Boolean).join("  ·  ");
-  style(detail, { color: PALETTE.dim });
+  detail.textContent = [board.mac, state].filter(Boolean).join("  ·  ");
+  style(detail, { color: board.attached === false ? PALETTE.warn : PALETTE.dim });
 
   const cable = document.createElement("button");
   cable.type = "button";
   cable.className = "lp-emu-banner-detach";
   cable.dataset.boardId = board.boardId;
   cable.textContent = "detach";
+  cable.disabled = board.attached === false;
   style(cable, { ...buttonStyle(), marginLeft: "auto" });
 
   const plug = document.createElement("button");
@@ -299,6 +306,7 @@ function boardRow(bus, board, refresh) {
   plug.className = "lp-emu-banner-attach";
   plug.dataset.boardId = board.boardId;
   plug.textContent = "attach";
+  plug.disabled = board.attached !== false;
   style(plug, buttonStyle());
 
   const run = async (button, work) => {

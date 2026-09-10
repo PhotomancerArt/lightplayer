@@ -439,6 +439,23 @@
                 ready.catch((error) => {
                     console.error(`[emu] the shim over ${backing} did not install:`, error);
                 });
+
+                // Hand the boards back when this page goes away. The door
+                // admits ONE client per board and answers a second with 409
+                // (`emu serve`, M1) — and Chrome's back/forward cache keeps a
+                // navigated-away page, and its WebSockets, ALIVE. Measured
+                // 2026-09-09: without this, the second load of `?emu=` in a
+                // tab fails with "control channel refused" and stays failed
+                // until the door restarts. `pagehide` (unlike `unload`) does
+                // not itself make a page ineligible for bfcache, so a restored
+                // page would come back holding closed sockets — reload it
+                // instead and let the seam install cleanly.
+                window.addEventListener("pagehide", () => {
+                    ready.then((bus) => bus.dispose()).catch(() => {});
+                });
+                window.addEventListener("pageshow", (event) => {
+                    if (event.persisted) window.location.reload();
+                });
             })();
         </script>
         <!--
