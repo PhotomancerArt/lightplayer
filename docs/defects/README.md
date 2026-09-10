@@ -378,6 +378,7 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 | upstream-toolchain-limitation | 2026-08-01 | [xtensa-backend-cannot-select-float-constant-pool](2026-08-01-xtensa-backend-cannot-select-float-constant-pool.md) | **open** (worked around) | lps-builtins + esp Rust toolchain |
 | invented-encoding | 2026-07-31 | [zexth-encoding-steals-xori-128](2026-07-31-zexth-encoding-steals-xori-128.md) | fixed | lp-riscv-inst (encode/decode) + lp-riscv-emu (executor) |
 | invented-encoding | 2026-07-31 | [elf-loader-riscv-reloc-numbering](2026-07-31-elf-loader-riscv-reloc-numbering.md) | **open** | lp-riscv-elf (relocations) |
+| invented-encoding | 2026-09-09 | [zbs-funct6-hex-mistranscribed-in-the-disassembler](2026-09-09-zbs-funct6-hex-mistranscribed-in-the-disassembler.md) | fixed | lp-riscv-inst (decode/encode/inst) |
 | partial-knowledge-loss | 2026-07-31 | [elf-loader-drops-relocation-addends](2026-07-31-elf-loader-drops-relocation-addends.md) | fixed | lp-riscv-elf (relocations) |
 | incomplete-subset | 2026-07-31 | [mksadj-missing-from-fp-subset](2026-07-31-mksadj-missing-from-fp-subset.md) | fixed | lp-xt/lp-xt-inst (FP subset) |
 | split-source-of-truth | 2026-07-30 | [jit-sret-return-count-zero](2026-07-30-jit-sret-return-count-zero.md) | fixed | lpvm-native/rt_jit (module.rs) |

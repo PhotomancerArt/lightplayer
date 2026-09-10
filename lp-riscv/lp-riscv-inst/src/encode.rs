@@ -332,17 +332,22 @@ fn encode_i_with_imm_hi(opcode: u8, rd: Gpr, rs1: Gpr, imm_lo: i32, imm_hi: u8, 
     opcode | (rd << 7) | (funct3 << 12) | (rs1 << 15) | (imm_lo << 20) | (imm_hi << 25)
 }
 
-/// Encode an I-type instruction with funct6 encoding (for Zbs/Zbb instructions)
-/// funct6 is in bits [31:26], imm[5:0] is in bits [25:20]
-fn encode_i_with_funct6(opcode: u8, rd: Gpr, rs1: Gpr, imm: i32, funct6: u8, funct3: u8) -> u32 {
+/// Encode an RV32 shift-immediate form (the Zbs/Zbb immediate instructions):
+/// funct7 in bits [31:25], shamt[4:0] in bits [24:20].
+///
+/// RV32 shift immediates are 5 bits wide — bit 25 belongs to funct7, not to the
+/// shift amount. Encoding these against a 6-bit funct6 lets a shamt of 32 or
+/// more flip a funct7 bit and emit a different (reserved) instruction, so the
+/// amount is masked to 5 bits here.
+fn encode_i_shift_funct7(opcode: u8, rd: Gpr, rs1: Gpr, shamt: i32, funct7: u8, funct3: u8) -> u32 {
     let opcode = opcode as u32;
     let rd = rd.num() as u32;
     let funct3 = funct3 as u32;
     let rs1 = rs1.num() as u32;
-    let imm_5_0 = (imm as u32) & 0x3f; // bits [5:0]
-    let funct6_u32 = funct6 as u32;
+    let shamt = (shamt as u32) & 0x1f; // bits [4:0]
+    let funct7 = funct7 as u32;
 
-    opcode | (rd << 7) | (funct3 << 12) | (rs1 << 15) | (imm_5_0 << 20) | (funct6_u32 << 26)
+    opcode | (rd << 7) | (funct3 << 12) | (rs1 << 15) | (shamt << 20) | (funct7 << 25)
 }
 
 /// Encode an I-type instruction with funct12 encoding (for CLZ, CTZ, etc.)
@@ -356,21 +361,22 @@ fn encode_i_with_funct12(opcode: u8, rd: Gpr, rs1: Gpr, funct12: u16, funct3: u8
     opcode | (rd << 7) | (funct3 << 12) | (rs1 << 15) | (funct12_u32 << 20)
 }
 
-// Zbs: Single-bit instructions (immediate)
+// Zbs: Single-bit instructions (immediate). The funct7 values are the ones the
+// register forms use (`bclr` 0x24, `bset` 0x14, `binv` 0x34, `bext` 0x24).
 pub fn bclri(rd: Gpr, rs1: Gpr, imm: i32) -> u32 {
-    encode_i_with_funct6(0x13, rd, rs1, imm, 0b010010, 0x1)
+    encode_i_shift_funct7(0x13, rd, rs1, imm, 0x24, 0x1)
 }
 
 pub fn bseti(rd: Gpr, rs1: Gpr, imm: i32) -> u32 {
-    encode_i_with_funct6(0x13, rd, rs1, imm, 0b001010, 0x1)
+    encode_i_shift_funct7(0x13, rd, rs1, imm, 0x14, 0x1)
 }
 
 pub fn binvi(rd: Gpr, rs1: Gpr, imm: i32) -> u32 {
-    encode_i_with_funct6(0x13, rd, rs1, imm, 0b011010, 0x1)
+    encode_i_shift_funct7(0x13, rd, rs1, imm, 0x34, 0x1)
 }
 
 pub fn bexti(rd: Gpr, rs1: Gpr, imm: i32) -> u32 {
-    encode_i_with_funct6(0x13, rd, rs1, imm, 0b010010, 0x5)
+    encode_i_shift_funct7(0x13, rd, rs1, imm, 0x24, 0x5)
 }
 
 // Zbs: Single-bit instructions (register)
@@ -427,7 +433,7 @@ pub fn zexth(rd: Gpr, rs1: Gpr) -> u32 {
 
 // Zbb: Rotate instructions
 pub fn rori(rd: Gpr, rs1: Gpr, imm: i32) -> u32 {
-    encode_i_with_funct6(0x13, rd, rs1, imm, 0b011000, 0x5)
+    encode_i_shift_funct7(0x13, rd, rs1, imm, 0x30, 0x5)
 }
 
 pub fn rol(rd: Gpr, rs1: Gpr, rs2: Gpr) -> u32 {
@@ -439,8 +445,13 @@ pub fn ror(rd: Gpr, rs1: Gpr, rs2: Gpr) -> u32 {
 }
 
 // Zbb: Byte reverse
+/// Zbb `rev8 rd, rs1`.
+///
+/// RV32 encodes this as funct12 0x698. 0x6b8 — which this used to emit — is the
+/// RV64 spelling, where the funct12 carries the wider shift amount; on RV32 it
+/// is a reserved word that no assembler produces and none decodes.
 pub fn rev8(rd: Gpr, rs1: Gpr) -> u32 {
-    encode_i_with_funct12(0x13, rd, rs1, 0x6b8, 0x5)
+    encode_i_with_funct12(0x13, rd, rs1, 0x698, 0x5)
 }
 
 pub fn brev8(rd: Gpr, rs1: Gpr) -> u32 {
@@ -492,10 +503,6 @@ pub fn sh2add(rd: Gpr, rs1: Gpr, rs2: Gpr) -> u32 {
 
 pub fn sh3add(rd: Gpr, rs1: Gpr, rs2: Gpr) -> u32 {
     encode_r(0x33, rd, rs1, rs2, 0x6, 0x10)
-}
-
-pub fn slli_uw(rd: Gpr, rs1: Gpr, imm: i32) -> u32 {
-    encode_i_with_funct6(0x13, rd, rs1, imm, 0b000010, 0x1)
 }
 
 // Immediate generation
