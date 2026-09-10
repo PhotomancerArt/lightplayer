@@ -263,6 +263,19 @@ pinned by #638). Three things had to be true that were not:
    could come back with its port closed and nothing to re-open it. Both are
    fixed in `Esp32C6Machine::reboot`.
 
+   The second fix needed a second pass, and the lesson is worth the two lines.
+   Re-deriving the coupling's memory of the byte client **from the restored
+   port alone** is too coarse: `--usb-host attached` — `emu serve`'s own
+   default — powers on with the port OPEN and no byte client at all, so a
+   reboot then claimed a client that did not exist and the very next poll (due
+   immediately, by the fix above) issued the matching `close` — shutting the
+   port the restore had just opened, on a board nobody had touched. It is a
+   race with the guest's own boot for the hello, and it read as an
+   intermittent `emu serve` door test rather than as a wrong answer. The
+   memory is derived from **both** sides now: the port the restore produced
+   AND the socket that outlived it. "The port is open BECAUSE a client has it
+   open" is the only state the coupling may assume it already applied.
+
 3. **`SPI_CMD` must self-clear on SPI0 as well as SPI1.** `ESPLoader.main()`
    ends with a mandatory `readFlashId()` whose failure it re-throws, and
    esptool-js 0.6.0 puts the C6's `SPI_REG_BASE` at `0x6000_2000` — **SPI0**,
@@ -284,6 +297,16 @@ writable flash file. It is the only shape that can be flashed and then boot
 what was written, and `GET /boards`'s `flash` word became live (an image magic
 at the reset vector, recomputed on every flush) so `blank → flash → loaded` is
 a sequence a page can watch.
+
+That live word has a consequence worth naming, because it retired an
+assertion. The word is about the **chip**, and a `kind=elf` board's firmware
+was loaded straight into memory and never went through its chip — so such a
+board reports `blank` for as long as it lives, however much its data
+partitions hold. M1's walk gate had asserted `loaded` there and passed only
+because the word was then "the flash FILE is non-empty", which a 4 MiB chip of
+`0xff` also satisfies. `emu_serve_walk.rs` now pins the new word and moves the
+survival claim onto the two things that can carry it: the written bytes are
+not an erased chip, and the guest's own second boot mounts the project.
 
 ## Follow-ups
 - **The wasm backing** of `EmulatorPort` (the sibling's mode A) fills points 5
