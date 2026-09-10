@@ -9,11 +9,16 @@ and a run loop, and the result takes a `fw-esp32v3` binary.
 It is `lp-emu-esp32c6`'s twin, deliberately: same shape, same module names,
 different silicon.
 
-> **M3 P2.** What exists today is the memory map, the generated register-name
-> tables, the vendored mask ROM, the bus, the two-slot machine, the run loop,
-> the snapshot and a CLI that runs to the first strict stop. **No peripheral
-> is modelled.** The sections below that name a later phase are stubs, and
-> they say so rather than describing a machine that does not exist yet.
+> **M3 P3.** What exists today is the memory map (both peripheral buses),
+> the generated register-name tables, the vendored mask ROM, the bus, the
+> two-slot machine, the run loop, the snapshot, the direct load, and
+> **thirteen accept-and-remember blocks** — the ones the strict bring-up
+> pass demanded, in the order it met them. **No peripheral has behaviour.**
+> The direct load prints its whole `[INIT]` chain into an accept block and
+> spins on the flash controller; the ROM path spins on the eFuse read
+> command. The sections below that name a later phase are stubs, and they
+> say so rather than describing a machine that does not exist yet. The stop
+> ledger is `docs/reports/2026-09-10-esp32v3-strict-boot-inventory.md`.
 
 ## The machine
 
@@ -68,13 +73,18 @@ Without them `a1 = 0`, and nothing notices until the first register spill —
 the fault's own spill faults again. A double exception, forever, nowhere near
 its cause.
 
-P2 pins `a1` to the mask ROM's own PRO-core stack top, `__stack`, **resolved
-from the vendored ROM ELF** (`0x3FFE_3F20` — the same address
-`third_party/esp-hal/ld/esp32/memory.x:32` derives `reserved_rom_stack_pro`
-from). That is the right shape and a cited value; it is **not yet the
-bootloader's own SP**, which P3 pins from the bootloader disassembly or from a
-rom-up run that gets that far. `BootFrame` is a builder parameter for exactly
-that reason.
+P2 pinned `a1` to the mask ROM's own PRO-core stack top, `__stack`
+(`0x3FFE_3F20`, resolved from the vendored ROM ELF). **P3 pinned the
+bootloader's own SP** from the disassembly of both halves of the chain:
+`__stack` minus the four `entry` frames between the ROM's `_start` and the
+IDF bootloader's `callx8` into the app — `main` 112, `call_start_cpu0` 192,
+`bootloader_utility_load_boot_image` 304, `load_image` 64 — is
+**`0x3FFE_3C80`**, `loader::BOOTLOADER_SP_AT_APP_ENTRY`, with the chain in
+`loader::BOOTLOADER_FRAME_CHAIN` and a test that re-derives it. The
+bootloader never sets a stack pointer of its own; it runs on the ROM's. What
+the four save-area words hold on silicon is P7's ROM-up run to measure.
+`BootFrame` stays a builder parameter so that measurement has somewhere to
+land.
 
 ### Time
 
@@ -88,15 +98,16 @@ at 240 MHz — but that is an M5/M7 opportunity, not an M3 one.
 
 ### Two decisions the bus makes, and one gap it has
 
-**RTC fast memory's instruction-bus view is not mapped.** `memory.x:51` and
-`:54` put the same 8 KiB block behind `0x400C_0000` (I) and `0x3FF8_0000` (D).
-`SocBus` cannot express that: its regions are asserted non-overlapping and its
-bytes live in one flat arena keyed on `address - arena_base`, so two regions
-are two independent stores and a write through one is invisible through the
-other. So the D-bus view is mapped and the I-bus view is **named and
-unmapped** — the SRAM1-alias rule applied consistently. A strict stop naming
-`0x400C_xxxx` is the evidence that would justify an alias region and a phase of
-its own.
+**RTC fast memory's instruction-bus view is not mapped** (ruling DD36).
+`memory.x:51` and `:54` put the same 8 KiB block behind `0x400C_0000` (I)
+and `0x3FF8_0000` (D). `SocBus` cannot express that: its regions are
+asserted non-overlapping and its bytes live in one flat arena keyed on
+`address - arena_base`, so two regions are two independent stores and a
+write through one is invisible through the other. So the D-bus view is
+mapped and the I-bus view is **named and unmapped** — the SRAM1-alias rule
+applied consistently, and `memmap.rs`'s `RAM_SPANS` comment says so since
+P3. A strict stop naming `0x400C_xxxx` is the evidence that would justify an
+alias region and a phase of its own.
 
 **SRAM0's word-only rule is named, not enforced.** `SocBus`'s `RamRegion`
 carries `exec` and `writable` and nothing else; the `AccessRule::WordOnly` the
@@ -118,7 +129,7 @@ or `esp32-0.40.2`. Nothing else in the crate writes an address literal.
 
 ```text
 0x3F40_0000 +0x40_0000  DROM window   flash .rodata (cache MMU)  R
-0x3FF0_0000 +0x08_0000  MMIO          the peripheral window
+0x3FF0_0000 +0x08_0000  MMIO (DPORT)  the peripheral window
 0x3FF8_0000 +0x0_2000   RTC_FAST (D)  8 KiB
 0x3FF9_6000 +0x0_942A   ROM data      mask ROM .rodata           R
 0x3FFA_E000 +0x0_2000   SRAM2 (ROM)   the 8 KiB memory.x reserves
@@ -129,7 +140,26 @@ or `esp32-0.40.2`. Nothing else in the crate writes an address literal.
 0x400C_0000 +0x0_2000   RTC_FAST (I)  same block as 0x3FF8_0000  RWX
 0x400D_0000 +0x30_0000  IROM window   flash .text (cache MMU)    RX
 0x5000_0000 +0x0_2000   RTC_SLOW      8 KiB                      RW
+0x6000_0000 +0x04_0000  MMIO (AHB)    the same peripherals, second bus (P3)
 ```
+
+**The classic has two peripheral buses.** P3's fifth strict stop was the
+mask ROM's `rom_chip_i2c_writeReg` writing `0x6000_E010` — outside every
+window the map declared. The ROM computes the analog I2C master's address
+as `(0x1800_3800 + host_id) << 2`, its `.text` loads forty-odd literals in
+`0x6000_0000..0x6002_2000` that line up with PAC-named DPORT blocks
+(`SENS`, `NRX`/`BB`, `FLASH_ENCRYPTION`) offset by `0x3FF4_0000 −
+0x6000_0000`, and the PAC's `RNG` at `0x6003_5000` — which P1 had excluded
+as an SVD leak — is WDEV's AHB address, its `data` at `+0x144` the
+classic's `WDEV_RND_REG`. So `AHB = 0x6000_0000 + (DPORT − 0x3FF4_0000)`,
+declared as the second MMIO window (`memmap::MMIO_AHB_BASE`, with the
+evidence). What the machine does about the mirror: a block is registered at
+**one** of its two addresses — the DPORT one where the PAC names it, the AHB
+one where only the ROM does — and an access through the other is a strict
+stop that names the window and the twin address, because `SocBus` cannot
+put one state behind two bases (the SRAM1-alias rule, DD24/DD36, in MMIO
+form). A guest reaching a PAC-named block through AHB is the evidence for a
+forwarding view or a bus feature; P3 reports the question.
 
 Three splits are decisions rather than transcription, and each is argued in
 `memmap.rs`'s own module docs:
@@ -205,13 +235,35 @@ buffer (the same shim, for the same reason, as
 
 ## Direct load
 
-*P2 seam, P3 completion.* `--elf` places the application's `PT_LOAD`s by vaddr
-and seeds the entry, `PS_BOOT` and the boot frame described above. That is
-**all** it does. The eleven things a direct load does not reproduce
-(`m3/notes.md` §3) — the partition table, the flash MMU programming, the ROM
-console, `g_rom_flashchip`, the reset cause, eFuse, the APP core's release from
-`sw_stall` — are P3's, and every one of them needs a peripheral P2 does not
-have.
+`src/loader.rs`'s module doc is the documentation; this section points at
+it. `--elf` places the application's `PT_LOAD`s by vaddr (recording the one
+whose `paddr` differs — `.rtc_fast.persistent`), seeds the ROM's flash chip
+description with the chip size (through the ROM's own symbol for it,
+`spi_w25q16`; the vendored ELF has no `g_rom_flashchip` — that is ESP-IDF's
+linker alias, and the notes' claim is corrected in the loader), and seeds
+the entry, `PS_BOOT` and the bootloader's frame described above.
+
+**`.data` is a self-copy on the classic** — verified on the image
+(`_sidata == _data_start == 0x3ffb0000`): the app's `Reset` runs its copy
+loop, unlike the C6's, and moves every word onto itself, so the loader
+placing the DRAM segment at its vaddr is what makes the copy a no-op.
+
+**The eleven things a direct load does not reproduce**, numbered in the
+loader's module doc so P7's cross-check can cite them: (1) no partition
+table or image validation; (2) no flash MMU programming — in P3 the flash
+windows are plain RAM with no chip behind them; (3) the ROM console never
+initialised; (4) no ROM banner, no bootloader log; (5) no early RNG entropy;
+(6) eFuse asserted, not read; (7) the reset cause asserted as POWERON; (8)
+`.data` placed rather than copied; (9) core 1 stalled by assertion, not by
+the ROM's `sw_stall` path; (10) `chip_size` written by the loader in place
+of `esp_rom_spiflash_config_param`; (11) the cache MMU "left enabled" by
+there being no cache model at all — the state D4's stop (P4) is defined
+against.
+
+`just test-emu-esp32v3-boot` builds the shipped image and runs the
+direct-load tests against the file it built (`LP_EMU_ESP32V3_ELF`; see
+`src/test_support.rs` for why the conventional target path is never trusted
+from inside a test).
 
 ## Booting from the reset vector
 
@@ -231,7 +283,37 @@ truth table is the board's, not the chip's.
 
 ## Peripherals
 
-*P4–P8.* The grade table, one row per block, as the C6's README carries.
+*P3: accept blocks only; P4–P8 give them behaviour.* One row per block, in
+registration order (`machine::PERIPHERAL_REGISTRATION_ORDER`, which is the
+order the boot met them). Every block is a `RegFile` seeded from the PAC's
+reset values (`src/periph/accept.rs`); **one** register deviates from the
+PAC and the test `the_only_deviations_from_the_pacs_resets_are_the_listed_ones`
+is the list.
+
+| block | base | aperture | stop | what it answers here | owner |
+|---|---|---|---|---|---|
+| `DPORT` | `0x3FF0_0000` | `0x1000` | direct #1, cycle 29 | interrupt maps, clock/reset gates, `cpu_per_conf` — written, read back | P4 |
+| `RTC_CNTL` | `0x3FF4_8000` | `0x140` | direct #2, cycle 107,539 | `reset_state` = POWERON in both fields (**the deviation**); RWDT disable | P5 |
+| `APB_CTRL` | `0x3FF6_6000` | `0x80` | direct #3, cycle 109,663 | `sysclk_conf.pre_div_cnt`, the tick confs | P5 |
+| `TIMG0` | `0x3FF5_F000` | `0x100` | direct #4, cycle 109,989 | MWDT disable; the RTC calibration **times out** (no pretence) | P5 |
+| `I2C_ANA_MST` | `0x6000_E000` (AHB) | `0x20` | direct #5, cycle 143,014 | BBPLL writes through the ROM's `rom_i2c_writeReg`; busy is a bit the guest never sets | P5 |
+| `TIMG1` | `0x3FF6_0000` | `0x100` | direct #6, cycle 3,563,841 | MWDT disable | P5 |
+| `GPIO` | `0x3FF4_4000` | `0x600` | direct #7, cycle 3,564,113 | the matrix routing U0RXD; `strap` reads the PAC's 0 | P8 |
+| `UART0` | `0x3FF4_0000` | `0x80` | direct #8, cycle 3,564,269 | `Uart::new` at 921600; **every printed byte lands here and is forgotten** | P6 |
+| `IO_MUX` | `0x3FF4_9000` | `0x94` | direct #9, cycle 3,568,671 | the U0TXD pad | P8 |
+| `SPI1` | `0x3FF4_2000` | `0x400` | direct #10, cycle 3,644,210 | esp-storage's flash read; **the run spins on `cmd.flash_rdsr`** | P7 |
+| `SPI0` | `0x3FF4_3000` | `0x400` | direct #11, cycle 3,644,282 | the ROM's idle wait on `ext2.st` | P7 |
+| `EFUSE` | `0x3FF5_A000` | `0x200` | rom-up #1, cycle 7 | the ROM's fuse read; **the ROM spins on `cmd.read_cmd`** | P5 |
+
+Grades: every register is `documented` where the PAC calls it read-write
+and the block pretends nothing, `modeled` otherwise (`RegFile::with_pac_
+grades`); the analog master, which the PAC does not know, is `modeled`
+throughout. Nothing is `measured`.
+
+Not modelled, on purpose, and unmapped so a strict run says so: everything
+the boot has not reached — `RTC_IO`, `SENS`, `RTC_I2C`, `FRC_TIMER`,
+`FLASH_ENCRYPTION`, `SHA`, `RMT`, `RNG`, the WiFi window, and every AHB
+mirror of a DPORT block.
 
 ## The CLI
 
@@ -265,50 +347,85 @@ Exit codes are the C6's contract: 0 deadline, 2 fault, 3 strict-bus refusal,
 
 ## Bring-up loop
 
-P2 is the first phase that can run it, and P3 runs it in anger.
+P2 was the first phase that could run it; P3 ran it, and the commit history
+of P3 is the log — one commit per block, each naming its stop.
 
-1. Run `--strict-bus --trace`.
+1. `cargo run -p lp-emu-esp32v3 --release -- --elf <image> --strict-bus
+   --timeout 300ms` (and `--boot-mode rom-up` for the other path).
 2. Read the **first** stop. `Machine::first_strict_violation` names the
    earliest, and **the earliest strict stop is the root** — an exception after
    it is downstream and tells you nothing.
-3. Model that one block, with the pin cited: a PAC reset value, a ROM
-   disassembly, a linker-script constant. Never "what the boot needed".
-4. Run again.
+3. Classify it: an unmapped address in a declared window is a block to
+   name; one outside every window is a memory-map question (P3's fifth stop
+   was one, and the answer was a second bus); an unsupported opcode is an
+   M1 finding; a tight spin on a register whose value no document gives is
+   an **E-premise stop** — report it, do not invent a value.
+4. Answer a block with an accept-and-remember `RegFile` seeded from the
+   PAC, with any exception's evidence beside it: a ROM disassembly line, a
+   PAC field, a linker constant, an esp-hal source line. Never "what the
+   boot needed".
+5. Run again, and record the cycle the run reached.
 
 Without `--strict-bus` the run carries on with unmapped reads answering zero,
 which is how far the machine gets before a block is modelled — useful for
 scouting, never for a claim.
 
-**Where P2 leaves it.** Both of these are expected stops and the phase's
-evidence, not failures:
+**The first three stops, as worked examples.** A bare machine
+(`Esp32V3Builder::bare()`, P2's) still produces the first two.
 
 ```text
-$ lp-emu-esp32v3 --boot-mode rom-up --strict-bus --timeout 50ms
+$ lp-emu-esp32v3 --boot-mode rom-up --strict-bus --timeout 50ms      (bare)
 STRICT BUS STOP
   pc      = 0x4000fdd8 (~_rtc_trigger_sw_system_reset+0x11)
   cycle   = 7 (0 us emulated)
   access  = Read Word at 0x3ff5a000
-  where   = inside the declared MMIO window — an UNMODELLED BLOCK
 ```
 
-`0x3FF5_A000` is **EFUSE**, and the pc is inside
-`_ResetHandler_efuse_check_patch` (`0x4000_FDA0` — the tilde on the reported
-name means "nearest preceding label", and this ROM's labels are mostly
-zero-sized). Seven instructions after the reset vector, the mask ROM reads its
-own eFuses.
+`0x3FF5_A000` is **EFUSE** `blk0_rdata0`, and the pc is inside
+`_ResetHandler_efuse_check_patch` (`0x4000_FDA0` — the tilde means "nearest
+preceding label"; this ROM's labels are mostly zero-sized). Seven
+instructions after the reset vector the ROM reads its own fuses. Answer:
+`accept::efuse()`, the PAC's zeros. The next reading of the ROM path is not
+a strict stop but a spin — `_reload_efuses_and_check` writes `cmd.read_cmd`
+and needs it to read 1, then 0 — and that is where the ROM path stands
+until P5 models the eFuse controller's completion.
 
 ```text
-$ lp-emu-esp32v3 --elf …/fw-esp32v3 --strict-bus --timeout 50ms
+$ lp-emu-esp32v3 --elf …/fw-esp32v3 --strict-bus --timeout 50ms      (bare)
 STRICT BUS STOP
   pc      = 0x40125775 (esp_hal::soc::xtensa::esp32_init+0x175)
   cycle   = 29 (0 us emulated)
   access  = Write Word at 0x3ff00218
-  where   = inside the declared MMIO window — an UNMODELLED BLOCK
 ```
 
-`0x3FF0_0218` is **DPORT + 0x218**, the first entry of `core_1_intr_map`:
-twenty-nine instructions in, `esp_hal::init` starts clearing the APP core's
-interrupt map.
+`0x3FF0_0218` is **DPORT** `core_1_intr_map[0]`: twenty-nine instructions
+in, `esp_hal::init` starts clearing the APP core's interrupt map. Answer:
+`accept::dport()`, the PAC's 49 non-zero resets, no exception.
+
+```text
+$ lp-emu-esp32v3 --elf …/fw-esp32v3 --strict-bus --timeout 50ms   (DPORT accepted)
+STRICT BUS STOP
+  pc      = 0x400081df (rtc_get_reset_reason+0xb)
+  cycle   = 107539 (448 us emulated)
+  access  = Read Word at 0x3ff48034
+```
+
+`0x3FF4_8034` is **RTC_CNTL** `reset_state`, read by the mask ROM for
+`esp_hal::rtc_cntl::reset_reason`. Answer: `accept::rtc_cntl(cause)` — and
+the one deviation from the PAC in the whole set, because the PAC's reset
+has both cause fields zero and a chip that just powered on reads
+`POWERON_RESET` (1) in each; the ROM's `extui` masks and the silicon banner
+are the citation.
+
+**Where P3 leaves it.** The direct load runs eleven stops deep, prints its
+whole `[INIT]` chain into `UART0.fifo` (543 bytes, cycles 3,622,541 to
+3,642,925, the silicon capture's lines as far as `[INIT] I/O task
+spawned`) and then spins in `esp_rom_spiflash_read_status` on
+`SPI1.cmd.flash_rdsr` — the phase file's own example of a stop that names
+its owner, P7. The ROM path spins on `EFUSE.cmd.read_cmd` — P5. Both
+readings are pinned in `tests/boot.rs`, along with the determinism of the
+run. The full ledger, with every pin's citation and the order it fixes for
+P4–P7, is `docs/reports/2026-09-10-esp32v3-strict-boot-inventory.md`.
 
 ## Tests
 
@@ -316,9 +433,11 @@ interrupt map.
 |---|---|
 | `tests/memmap.rs` | No two declared regions overlap; every `periph::*` base is inside the MMIO window; `dram_seg` is 8 KiB above the ROM's reserve with `RESERVE_DRAM = 0`; the vector table is 1 KiB below the IRAM; SRAM0 is one region containing the bootloader's `0x4007_8000`; the SRAM1 I-bus alias is named and unmapped; the ROM extents match the vendored ELF; 240 cycles to the microsecond |
 | `tests/rom_vendoring.rs` | The embedded ROM's sha256, re-derived in-process from `rom::VENDORED_V3_ROM` itself, is the one `SHA256SUMS` records — and the file on disk is still that file |
-| `tests/boot.rs` | 39 `PT_LOAD`s, thirteen empty and counted, the ELF-header-mapping segment recognised, four relocated segments placed by vaddr; the ten vector sections at their documented `VECOFS`; at least eight non-alloc sections seeded with real bytes, `.data_xtos_pro` among them; `break 1, 15` matching `lp_xt_inst::encode`; the hook table shipping empty; two hart slots with slot 1 stalled and taking no cycles; `PS_BOOT` after a direct seed; the boot frame's spill target mapped where an unseeded one is not; a seeded hart surviving a real exception; a strict rom-up run stopping inside the MMIO window; snapshot round-trip |
+| `tests/boot.rs` | 39 `PT_LOAD`s, thirteen empty and counted, the ELF-header-mapping segment recognised, four relocated segments placed by vaddr; the ten vector sections at their documented `VECOFS`; at least eight non-alloc sections seeded with real bytes, `.data_xtos_pro` among them; `break 1, 15` matching `lp_xt_inst::encode`; the hook table shipping empty; two hart slots with slot 1 stalled and taking no cycles; `PS_BOOT` after a direct seed; the boot frame's spill target mapped where an unseeded one is not; a seeded hart surviving a real exception; a strict rom-up run on a **bare** machine stopping inside the MMIO window; the boot set registered in the declared order; the ROM path standing at `EFUSE.cmd`; snapshot round-trip. **With the image** (`just test-emu-esp32v3-boot`): `.data` a self-copy and placed; `.rtc_fast.persistent` the one relocated segment; the flash chip seeded over the ROM's 2 MiB default through `spi_w25q16`; the hart entered at `Reset` with the bootloader's `a1`; P2's first stop held on a bare machine; the `[INIT]` chain read back out of the UART0 trace and the run standing at `SPI1.cmd`; two runs identical |
+| `src/periph/accept.rs` (unit) | every accept block reads the PAC's resets except the listed deviation, and every listed deviation is real and has a reason; the reset cause in both fields; the analog master's busy bit; no calibration pretence |
 
-Run them with `just test-emu-esp32v3`.
+Run them with `just test-emu-esp32v3`, and the image-backed ones with
+`just test-emu-esp32v3-boot`.
 
 ## Provenance
 
@@ -329,11 +448,10 @@ Run them with `just test-emu-esp32v3`.
   and carry the provenance header
   `docs/adr/2026-07-29-license-provenance-discipline.md` requires. Never
   hand-edit one; `just lint-emu-regnames` catches it, for both chips.
-- `RNG` is **not** generated. `esp32-0.40.2/src/lib.rs:647` gives it base
-  `0x6003_5000`, an address that does not exist on this part — an SVD leak
-  from the S2/C3 family. It is in the generator's `SKIP` table with that
-  reason; P7 resolves the classic's `WDEV_RND_REG` from the ROM ELF's own
-  symbol or from esp-hal's classic `rng`.
+- `RNG` **is** generated, since P3. P1 had excluded it — `esp32-0.40.2/
+  src/lib.rs:647` gives it base `0x6003_5000`, which is not in the DPORT
+  window — as an SVD leak; P3 found the AHB bus, where `0x6003_5000 +
+  0x144` is the classic's `WDEV_RND_REG`. See "The memory map".
 - Every constant in `memmap.rs` carries the `file:line` it was read from.
 - The crate is MIT, as a unit with the rest of `lp-emu/`. See
   `../../README.md` and `just lint-emu-fence`.

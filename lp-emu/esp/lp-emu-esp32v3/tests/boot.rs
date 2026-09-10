@@ -1,10 +1,11 @@
 //! The classic machine builds, the ROM places, the seeds land, the hart's
-//! reset and boot states are right, and a strict run stops somewhere honest.
+//! reset and boot states are right, a strict run on a bare machine stops
+//! somewhere honest — and, since P3, the direct load says its whole hello
+//! into an accept block and stands at the flash, the ROM path stands at the
+//! eFuse read command, and two runs are the same run.
 //!
-//! The last one is the phase's real deliverable. M3 P2 does not model a
-//! single peripheral, so a `--strict-bus` run **is expected to stop** — at
-//! the first block the boot touches. That stop, with its pc, symbol and
-//! cycle, is what P3 reads and turns into an accept-block table.
+//! The tests that need the shipped image are `#[ignore]`d and run through
+//! `just test-emu-esp32v3-boot`, which builds it and names the file.
 
 use lp_emu_esp32v3::machine::{
     BootFrame, BootMode, CORES, Esp32V3Builder, Machine, Outcome, RESET_VECTOR_OFS, StopCondition,

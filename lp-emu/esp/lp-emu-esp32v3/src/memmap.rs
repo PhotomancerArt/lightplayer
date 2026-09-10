@@ -23,6 +23,7 @@
 //!   0x400C_0000 +0x0_2000   RTC_FAST (I)  same block as 0x3FF8_0000  RWX
 //!   0x400D_0000 +0x30_0000  IROM window   flash .text (cache MMU)    RX
 //!   0x5000_0000 +0x0_2000   RTC_SLOW      8 KiB                      RW
+//!   0x6000_0000 +0x04_0000  MMIO (AHB)    the same peripherals, second bus (P3)
 //! ```
 //!
 //! # Why [`SRAM1_IBUS_ALIAS_BASE`] exists as a name with no region
@@ -233,8 +234,9 @@ pub const DROM_LEN: u32 = 0x0040_0000;
 pub const RTC_FAST_IBUS: u32 = 0x400C_0000;
 
 /// `rtc_fast_dram_seg` (`memory.x:54`) — **the same 8 KiB block** seen from
-/// the data bus. Two addresses, one memory; the machine backs them with one
-/// store or it will have two answers for one byte.
+/// the data bus. Two addresses, one memory: this is the view the machine
+/// maps, and [`RTC_FAST_IBUS`] is named and unmapped (DD36; see
+/// [`RAM_SPANS`]), because two stores would have two answers for one byte.
 pub const RTC_FAST_DBUS: u32 = 0x3FF8_0000;
 
 /// 8 KiB (`memory.x:51`/`:54`).
@@ -432,8 +434,13 @@ impl Span {
 ///
 /// `rtc-fast-dbus` and `rtc-fast-ibus` are two spans of **one** 8 KiB memory
 /// (`memory.x:51` and `:54` say so in as many words); they are listed
-/// separately because they decode separately, and P2 backs them with one
-/// store.
+/// separately because they decode separately. ⚠️ **Only the D-bus span is
+/// mapped** (ruling DD36, amending what this comment promised before P3):
+/// `SocBus` keeps one flat store per region and cannot put one store behind
+/// two windows, so `bus_setup` maps `rtc-fast-dbus` and leaves
+/// `rtc-fast-ibus` named and unmapped, the way the SRAM1 I-bus alias is. A
+/// strict stop at `0x400C_xxxx` is the evidence that would justify an alias
+/// region and a phase of its own.
 pub const RAM_SPANS: &[Span] = &[
     Span {
         name: "drom-window",

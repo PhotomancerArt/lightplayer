@@ -25,11 +25,12 @@
 //! alias region and a phase of its own. [`deliberately_unmapped`] is what
 //! makes such a stop say *which* window it was.
 //!
-//! ⚠️ This is a **deviation from `memmap`'s doc comment**, which says
-//! `RAM_SPANS` lists `rtc-fast-ibus` separately and that "P2 backs them with
-//! one store". P2 cannot: the shared bus is M2's and this milestone reads it
-//! only (`m3/notes.md` §12). Recorded for the director as a P2 ruling rather
-//! than papered over with two stores that disagree.
+//! P2 recorded this as a deviation from `memmap`'s doc comment, which then
+//! promised "P2 backs them with one store"; the director ruled it **DD36**
+//! and P3 amended the comment, so the two files now say the same thing:
+//! the D-bus view is mapped, the I-bus view is named and unmapped, and the
+//! shared bus (M2's, read-only to this milestone) is where an alias would
+//! have to be built.
 //!
 //! ## 2. SRAM0's word-only rule is **not enforced** by this bus
 //!
