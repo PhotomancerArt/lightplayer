@@ -1609,6 +1609,14 @@ impl Esp32C6Builder {
         bus.set_strict(strict);
         bus.set_strict_grade(strict_grade);
         bus.set_strict_grade_blocks(strict_grade_blocks);
+        // The C6 core has four hardware triggers (the RISC-V debug spec's
+        // `mcontrol`), one of which esp-hal's stack guard holds for the whole
+        // run. This is documentation that happens to execute: `SocBus::new`
+        // already defaults to `MAX_WATCHPOINT_SLOTS`, which is four today —
+        // and stops being redundant the day some other chip makes that
+        // capacity larger. The count is a chip fact, so it is stated here and
+        // not in the common crate.
+        bus.set_watchpoint_slots(4);
 
         // Guest time is zero and the schedule is empty: the peripherals that
         // need a first event (a UART polling its host source) take it now.
