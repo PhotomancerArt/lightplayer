@@ -6,6 +6,20 @@
 //! `regs::UART0`; bit positions and reset values cited per register below)
 //! and esp-hal 1.1.1's driver (`src/uart/mod.rs`, discovery §5).
 //!
+//! # This file is a *view*
+//!
+//! The behaviour under the registers — the FIFO pair, the shifter draining
+//! in emulated time, the source poll, the receive-timeout arm, the sticky
+//! events as **names** — is
+//! [`lp_emu_esp_common::engine::uart::UartEngine`], because it is the same
+//! IP across three generations of the part while every offset below is not
+//! (M2 D2; the common crate's README, "Engines and views"). What lives here
+//! is what is a C6 fact: the offsets, the bit positions, the reset values,
+//! the grade table, PCR's clock selection, the auto-baud counters, the three
+//! local event numbers, and the `Peripheral` impl. The view computes a
+//! [`UartConfig`] from its own registers and maps the engine's named events
+//! onto the `int_raw` bits this PAC declares.
+//!
 //! # Who drives it
 //!
 //! Two very different clients share this block, and both are the reason it
@@ -148,9 +162,10 @@
 //! auto-baud counters it reads are the PAC's statement, computed, and no
 //! transcript has measured them (`tests/rom_download_console.rs`).
 
-use std::collections::VecDeque;
-
 use lp_emu_core::sched::EventId;
+use lp_emu_esp_common::engine::uart::{
+    RxDeliver, TxPush, UartConfig, UartEngine, UartEventIds, UartEvents,
+};
 use lp_emu_esp_common::regfile::{lane_of, merge_lane};
 use lp_emu_esp_common::{
     BusCx, Peripheral, RegFile, RegGrade, RegGrades, StreamId, Width, event_id, event_local,
@@ -292,7 +307,16 @@ impl Autobaud {
     };
 }
 
-/// One UART instance.
+/// One UART instance: this chip's **view** of the block.
+///
+/// Everything below the registers — the FIFO pair, the shifter and its
+/// `tx_due`, the source poll and its `rx_due`, the receive-timeout arm, the
+/// sticky events as *names* — is
+/// [`UartEngine`](lp_emu_esp_common::engine::uart::UartEngine), shared with
+/// whatever chip comes next. What stays here is what is a C6 fact: the
+/// offsets, the bit positions, the reset values, the grade table, PCR's
+/// clock selection, the auto-baud counters and the three local event
+/// numbers. See the common crate's README, "Engines and views".
 #[derive(Debug)]
 pub struct Uart {
     name: &'static str,
@@ -307,26 +331,8 @@ pub struct Uart {
     /// for — the two agree only once the ROM's detection has run.
     host_baud: u64,
     autobaud: Autobaud,
-    tx: VecDeque<u8>,
-    rx: VecDeque<u8>,
-    /// The byte on the wire, if any.
-    shifter: Option<u8>,
-    /// The cycle the byte on the wire leaves it. The next symbol is timed
-    /// from here, never from the cycle the event happened to be dispatched
-    /// at: a slice ends *at or after* an event, and a chain scheduled from
-    /// dispatch time would drift by the lateness of every link.
-    tx_due: u64,
-    /// The cycle the next host byte is delivered (or the source polled).
-    /// Same rule.
-    rx_due: u64,
-    /// Sticky `int_raw` bits (the level bits are derived).
-    sticky: u32,
-    tx_pushed: u32,
-    tx_popped: u32,
-    rx_pushed: u32,
-    rx_popped: u32,
-    /// Bytes the guest wrote into a full TX FIFO, dropped.
-    tx_dropped: u64,
+    /// The FIFO pair, the shifter and the host stream's schedule.
+    engine: UartEngine,
     warned_at_cmd: bool,
 }
 
@@ -351,17 +357,7 @@ impl Uart {
             stream,
             host_baud: DEFAULT_HOST_BAUD,
             autobaud: Autobaud::RESET,
-            tx: VecDeque::with_capacity(FIFO_DEPTH),
-            rx: VecDeque::with_capacity(FIFO_DEPTH),
-            shifter: None,
-            tx_due: 0,
-            rx_due: 0,
-            sticky: 0,
-            tx_pushed: 0,
-            tx_popped: 0,
-            rx_pushed: 0,
-            rx_popped: 0,
-            tx_dropped: 0,
+            engine: UartEngine::new(FIFO_DEPTH),
             warned_at_cmd: false,
         }
     }
@@ -635,6 +631,38 @@ impl Uart {
         Some(((bit * u128::from(self.symbol_half_bits())).div_ceil(2)).max(1) as u64)
     }
 
+    // ---- what the engine is told ------------------------------------------
+
+    /// This block's three local event numbers, packed with its peripheral
+    /// index. The engine never packs one itself — it does not know the
+    /// index, and a renumbering would change *when* events fire.
+    fn ids(&self) -> UartEventIds {
+        UartEventIds {
+            tx: event_id(self.index, EV_TX),
+            rx_poll: event_id(self.index, EV_RX_POLL),
+            rx_tout: event_id(self.index, EV_RX_TOUT),
+        }
+    }
+
+    /// Everything the engine needs, read out of this chip's registers.
+    /// Cheap enough to build unconditionally at each call site.
+    fn config(&self) -> UartConfig {
+        let clk_conf = self.regs.stored(CLK_CONF);
+        UartConfig {
+            symbol_cycles: self.symbol_cycles(),
+            bit_cycles: self.bit_cycles(),
+            rx_full_thrhd: self.rx_full_thrhd(),
+            tx_empty_thrhd: self.tx_empty_thrhd(),
+            tout_bits: self.tout_enabled().then(|| self.tout_bits()),
+            // `clk_conf.tx_sclk_en` / `rx_sclk_en` clear: that half has no
+            // clock (documented; nothing on this part has been seen to
+            // clear either).
+            tx_clocked: clk_conf & CLK_CONF_TX_SCLK_EN != 0,
+            rx_clocked: clk_conf & CLK_CONF_RX_SCLK_EN != 0,
+            baud: self.baud(),
+        }
+    }
+
     // ---- interrupt state ------------------------------------------------
 
     fn rx_full_thrhd(&self) -> usize {
@@ -645,13 +673,39 @@ impl Uart {
         ((self.regs.stored(CONF1) >> 8) & 0xff) as usize
     }
 
+    /// The engine's named sticky events in *this* block's `int_raw` bits.
+    fn sticky_word(&self) -> u32 {
+        let ev = self.engine.sticky();
+        let mut word = 0;
+        if ev.rx_overflow {
+            word |= INT_RXFIFO_OVF;
+        }
+        if ev.rx_timeout {
+            word |= INT_RXFIFO_TOUT;
+        }
+        if ev.tx_done {
+            word |= INT_TX_DONE;
+        }
+        word
+    }
+
+    /// The inverse: which named events an `int_clr` word names.
+    fn sticky_events(word: u32) -> UartEvents {
+        UartEvents {
+            rx_overflow: word & INT_RXFIFO_OVF != 0,
+            rx_timeout: word & INT_RXFIFO_TOUT != 0,
+            tx_done: word & INT_TX_DONE != 0,
+        }
+    }
+
     /// `int_raw` as the guest reads it: the sticky events plus the levels.
     fn int_raw(&self) -> u32 {
-        let mut raw = self.sticky;
-        if self.rx.len() > self.rx_full_thrhd() {
+        let mut raw = self.sticky_word();
+        let levels = self.engine.levels(&self.config());
+        if levels.rx_over_threshold {
             raw |= INT_RXFIFO_FULL;
         }
-        if self.tx.len() < self.tx_empty_thrhd() {
+        if levels.tx_under_threshold {
             raw |= INT_TXFIFO_EMPTY;
         }
         raw
@@ -664,58 +718,22 @@ impl Uart {
 
     // ---- the transmit side ----------------------------------------------
 
-    /// Move the next FIFO byte onto the wire at cycle `start`: the guest's
-    /// write cycle for an idle shifter, the previous byte's `tx_due` when
-    /// chaining.
-    fn start_shifter_if_idle(&mut self, start: u64, cx: &mut BusCx<'_>) {
-        if self.shifter.is_some() {
-            return;
-        }
-        if self.regs.stored(CLK_CONF) & CLK_CONF_TX_SCLK_EN == 0 {
-            // `clk_conf.tx_sclk_en` clear: the transmitter has no clock and
-            // the FIFO holds what it has (documented; nothing on this part
-            // has been seen to clear it).
-            return;
-        }
-        let Some(byte) = self.tx.pop_front() else {
-            return;
-        };
-        self.tx_popped = self.tx_popped.wrapping_add(1);
-        self.shifter = Some(byte);
-        match self.symbol_cycles() {
-            Some(cycles) => {
-                self.tx_due = start.saturating_add(cycles);
-                cx.sched
-                    .schedule_at(self.tx_due, event_id(self.index, EV_TX));
-            }
-            None => {
-                // No clock: the byte sits in the shifter until PCR gives it
-                // one — which nothing in the firmware ever undoes, so say so.
-                log::warn!(
-                    "{}: no function clock; the TX shifter is stalled",
-                    self.name
-                );
-            }
-        }
-    }
-
     fn push_tx(&mut self, byte: u8, cx: &mut BusCx<'_>) {
-        if self.tx.len() >= FIFO_DEPTH {
-            if self.tx_dropped == 0 {
+        let cfg = self.config();
+        if let TxPush::Dropped { first } =
+            self.engine.push_tx(byte, &cfg, self.ids(), self.name, cx)
+        {
+            if first {
                 let line = format!(
                     "cyc={} pc=0x{:08x} {} TX FIFO full: byte 0x{byte:02x} dropped (the guest \
-                     wrote past txfifo_cnt = 128)",
+                     wrote past txfifo_cnt = {FIFO_DEPTH})",
                     cx.now, cx.pc, self.name
                 );
                 cx.trace.note(&line);
                 log::warn!("{}: TX FIFO overflow, byte dropped", self.name);
             }
-            self.tx_dropped += 1;
             return;
         }
-        self.tx.push_back(byte);
-        self.tx_pushed = self.tx_pushed.wrapping_add(1);
-        self.start_shifter_if_idle(cx.now, cx);
         self.update_lines(cx);
     }
 
@@ -729,105 +747,53 @@ impl Uart {
         u64::from((self.regs.stored(TOUT_CONF) >> TOUT_THRHD_SHIFT) & TOUT_THRHD_MASK)
     }
 
-    /// (Re)arm the receive timeout from `from` (the last byte's arrival): it
-    /// fires `rx_tout_thrhd` bit-times later if nothing else arrives and the
-    /// FIFO is still non-empty.
-    fn rearm_tout(&mut self, from: u64, cx: &mut BusCx<'_>) {
-        let ev = event_id(self.index, EV_RX_TOUT);
-        cx.sched.cancel(ev);
-        if !self.tout_enabled() || self.rx.is_empty() {
-            return;
-        }
-        let Some(bit) = self.bit_cycles() else {
-            return;
-        };
-        let delay = bit.saturating_mul(self.tout_bits().max(1));
-        cx.sched.schedule_at(from.saturating_add(delay), ev);
+    fn pop_rx(&mut self, cx: &mut BusCx<'_>) -> u8 {
+        let byte = self.engine.pop_rx(self.ids(), cx);
+        self.update_lines(cx);
+        byte
     }
 
-    /// A byte arrived on the wire at cycle `at`.
-    fn push_rx(&mut self, byte: u8, at: u64, cx: &mut BusCx<'_>) {
+    /// Ask the host source for its next byte, delivered at cycle `at`.
+    ///
+    /// The engine reads the stream, queues the byte and schedules the poll
+    /// after; what comes back is the byte the **wire** carried and what
+    /// became of it — because the pulse counters below see the line, not the
+    /// FIFO, and because the two diagnostics name this chip's own registers.
+    fn poll_source(&mut self, at: u64, cx: &mut BusCx<'_>) {
+        let cfg = self.config();
+        let arrival =
+            self.engine
+                .poll_source(self.stream, at, &cfg, LIVE_POLL_CYCLES, self.ids(), cx);
+        let Some((byte, outcome)) = arrival else {
+            return;
+        };
         if self.autobaud_enabled() {
             self.autobaud_observe(byte, at);
         }
-        if self.regs.stored(CLK_CONF) & CLK_CONF_RX_SCLK_EN == 0 {
-            // `clk_conf.rx_sclk_en` clear: the receiver has no clock and the
-            // byte on the wire is not sampled (documented; same caveat).
-            cx.trace.note(&format!(
-                "cyc={at} {} RX byte 0x{byte:02x} not sampled: clk_conf.rx_sclk_en is clear",
-                self.name
-            ));
-            return;
-        }
-        if self.rx.len() >= FIFO_DEPTH {
+        match outcome {
+            RxDeliver::NotSampled => {
+                cx.trace.note(&format!(
+                    "cyc={at} {} RX byte 0x{byte:02x} not sampled: clk_conf.rx_sclk_en is clear",
+                    self.name
+                ));
+                return;
+            }
             // A dropped byte is a corrupt line three layers up ("dropping
             // unparseable N B M! line"), so the first one says so here
             // rather than only as a sticky bit nobody reads.
-            if self.sticky & INT_RXFIFO_OVF == 0 {
+            RxDeliver::Overflowed { first: true } => {
                 cx.trace.note(&format!(
                     "cyc={at} {} RX FIFO overflow: {FIFO_DEPTH} bytes unread and another \
                      arrived; it is dropped, as the part drops it. The host is sending faster \
                      than the guest is reading — at {} baud, {} cycles a symbol",
                     self.name,
-                    self.baud(),
-                    self.symbol_cycles().unwrap_or(0),
+                    cfg.baud,
+                    cfg.symbol_cycles.unwrap_or(0),
                 ));
             }
-            self.sticky |= INT_RXFIFO_OVF;
-        } else {
-            self.rx.push_back(byte);
-            self.rx_pushed = self.rx_pushed.wrapping_add(1);
-        }
-        self.rearm_tout(at, cx);
-        self.update_lines(cx);
-    }
-
-    fn pop_rx(&mut self, cx: &mut BusCx<'_>) -> u8 {
-        let byte = self.rx.pop_front().unwrap_or(0);
-        if self.rx.len() < FIFO_DEPTH {
-            self.rx_popped = self.rx_popped.wrapping_add(1);
-        }
-        if self.rx.is_empty() {
-            cx.sched.cancel(event_id(self.index, EV_RX_TOUT));
+            RxDeliver::Overflowed { first: false } | RxDeliver::Queued => {}
         }
         self.update_lines(cx);
-        byte
-    }
-
-    /// Ask the host source for its next byte, delivered at cycle `at`, and
-    /// schedule the poll after.
-    fn poll_source(&mut self, at: u64, cx: &mut BusCx<'_>) {
-        let Some(id) = self.stream else {
-            return;
-        };
-        let ev = event_id(self.index, EV_RX_POLL);
-        let (byte, next_ready, live) = {
-            let stream = cx.host.stream(id);
-            (stream.next_byte(at), stream.next_ready(), stream.is_live())
-        };
-        match byte {
-            Some(b) => {
-                self.push_rx(b, at, cx);
-                // The wire delivers at baud: the next byte, if there is one,
-                // is one symbol behind this one.
-                let gap = self.symbol_cycles().unwrap_or(LIVE_POLL_CYCLES);
-                self.rx_due = at.saturating_add(gap);
-                cx.sched.schedule_at(self.rx_due, ev);
-            }
-            None => match next_ready {
-                Some(ready) => {
-                    self.rx_due = ready.max(at + 1);
-                    cx.sched.schedule_at(self.rx_due, ev);
-                }
-                None if live => {
-                    // A socket: wall clock decides when bytes appear, so
-                    // poll from the machine's actual time, not the chain's.
-                    self.rx_due = cx.now.max(at).saturating_add(LIVE_POLL_CYCLES);
-                    cx.sched.schedule_at(self.rx_due, ev);
-                }
-                None => {}
-            },
-        }
     }
 
     // ---- registers --------------------------------------------------------
@@ -838,8 +804,10 @@ impl Uart {
             INT_ST => self.int_raw() & self.regs.stored(INT_ENA),
             INT_CLR | REG_UPDATE => 0,
             STATUS => {
-                let mut v = STATUS_IDLE | (self.rx.len() as u32) | ((self.tx.len() as u32) << 16);
-                if self.shifter.is_some() {
+                let mut v = STATUS_IDLE
+                    | (self.engine.rx_len() as u32)
+                    | ((self.engine.tx_len() as u32) << 16);
+                if self.engine.is_shifting() {
                     // The line is toggling (modeled: reported low while a
                     // symbol is on the wire).
                     v &= !STATUS_TXD;
@@ -847,16 +815,19 @@ impl Uart {
                 v
             }
             FSM_STATUS => {
-                if self.shifter.is_some() {
+                if self.engine.is_shifting() {
                     1 << 4
                 } else {
                     0
                 }
             }
-            MEM_TX_STATUS => (self.tx_pushed & 0x7f) | ((self.tx_popped & 0x7f) << 9),
+            MEM_TX_STATUS => {
+                (self.engine.tx_pushed() & 0x7f) | ((self.engine.tx_popped() & 0x7f) << 9)
+            }
             // The RX SRAM starts at 0x80 (the PAC reset value `0x0001_0080`).
             MEM_RX_STATUS => {
-                (0x80 | (self.rx_popped & 0x7f)) | ((0x80 | (self.rx_pushed & 0x7f)) << 9)
+                (0x80 | (self.engine.rx_popped() & 0x7f))
+                    | ((0x80 | (self.engine.rx_pushed() & 0x7f)) << 9)
             }
             POSPULSE => self.autobaud.pos_min,
             NEGPULSE => self.autobaud.neg_min,
@@ -878,7 +849,8 @@ impl Uart {
             INT_CLR => {
                 // Levels cannot be cleared while they hold; everything else
                 // is write-one-to-clear.
-                self.sticky &= !(value & !INT_LEVEL_BITS);
+                self.engine
+                    .clear_sticky(Self::sticky_events(value & !INT_LEVEL_BITS));
                 self.update_lines(cx);
             }
             INT_RAW | INT_ST | STATUS | FSM_STATUS | MEM_TX_STATUS | MEM_RX_STATUS
@@ -905,11 +877,10 @@ impl Uart {
                     cx.trace.note(&line);
                 }
                 if value & CONF0_RXFIFO_RST != 0 {
-                    self.rx.clear();
-                    cx.sched.cancel(event_id(self.index, EV_RX_TOUT));
+                    self.engine.reset_rx(self.ids(), cx);
                 }
                 if value & CONF0_TXFIFO_RST != 0 {
-                    self.tx.clear();
+                    self.engine.reset_tx();
                 }
                 self.update_lines(cx);
             }
@@ -921,11 +892,14 @@ impl Uart {
                 self.regs.poke(CLK_CONF, value);
                 // A transmitter given its clock back picks up where the FIFO
                 // left it.
-                self.start_shifter_if_idle(cx.now, cx);
+                let cfg = self.config();
+                self.engine
+                    .start_shifter_if_idle(cx.now, &cfg, self.ids(), self.name, cx);
             }
             TOUT_CONF => {
                 self.regs.poke(TOUT_CONF, value);
-                self.rearm_tout(cx.now, cx);
+                let cfg = self.config();
+                self.engine.rearm_tout(cx.now, &cfg, self.ids(), cx);
             }
             AT_CMD_CHAR => {
                 self.regs.poke(AT_CMD_CHAR, value);
@@ -946,11 +920,11 @@ impl Uart {
     /// Bytes waiting in the TX FIFO plus the one on the wire — what a run
     /// that stops now has not yet delivered.
     pub fn tx_pending(&self) -> usize {
-        self.tx.len() + usize::from(self.shifter.is_some())
+        self.engine.tx_pending()
     }
 
     pub fn tx_dropped(&self) -> u64 {
-        self.tx_dropped
+        self.engine.tx_dropped()
     }
 }
 
@@ -1000,29 +974,19 @@ impl Peripheral for Uart {
     fn on_event(&mut self, id: EventId, cx: &mut BusCx<'_>) {
         match event_local(id) {
             EV_TX => {
-                let Some(byte) = self.shifter.take() else {
-                    return;
-                };
-                if let Some(id) = self.stream {
-                    cx.host.stream(id).write_byte(byte);
-                }
-                if self.tx.is_empty() {
-                    self.sticky |= INT_TX_DONE;
-                } else {
-                    let due = self.tx_due;
-                    self.start_shifter_if_idle(due, cx);
-                }
+                let cfg = self.config();
+                self.engine
+                    .on_tx_due(self.stream, &cfg, self.ids(), self.name, cx);
                 self.update_lines(cx);
             }
             EV_RX_POLL => {
-                let due = self.rx_due;
+                let due = self.engine.rx_due();
                 self.poll_source(due, cx);
             }
             EV_RX_TOUT => {
-                if self.tout_enabled() && !self.rx.is_empty() {
-                    self.sticky |= INT_RXFIFO_TOUT;
-                    self.update_lines(cx);
-                }
+                let cfg = self.config();
+                self.engine.on_rx_timeout(&cfg);
+                self.update_lines(cx);
             }
             _ => {}
         }
@@ -1037,23 +1001,16 @@ impl Peripheral for Uart {
     }
 
     fn save_state(&self) -> Vec<u8> {
+        // The byte format is pinned by the round-trip test below, so the
+        // engine's two halves are written at exactly the points in this
+        // stream where those fields have always been — with this block's own
+        // two fields interleaved between them, as they have always been.
         let mut out = Vec::with_capacity(0x100 + 2 * FIFO_DEPTH + 128);
         out.extend_from_slice(&(self.index as u64).to_le_bytes());
-        out.extend_from_slice(&self.sticky.to_le_bytes());
-        out.extend_from_slice(&self.tx_pushed.to_le_bytes());
-        out.extend_from_slice(&self.tx_popped.to_le_bytes());
-        out.extend_from_slice(&self.rx_pushed.to_le_bytes());
-        out.extend_from_slice(&self.rx_popped.to_le_bytes());
-        out.extend_from_slice(&self.tx_dropped.to_le_bytes());
+        out.extend_from_slice(&self.sticky_word().to_le_bytes());
+        self.engine.save_counters(&mut out);
         out.extend_from_slice(&u32::from(self.warned_at_cmd).to_le_bytes());
-        let shifter = self.shifter.map(|b| 0x100 | u32::from(b)).unwrap_or(0);
-        out.extend_from_slice(&shifter.to_le_bytes());
-        out.extend_from_slice(&self.tx_due.to_le_bytes());
-        out.extend_from_slice(&self.rx_due.to_le_bytes());
-        out.extend_from_slice(&(self.tx.len() as u32).to_le_bytes());
-        out.extend(self.tx.iter());
-        out.extend_from_slice(&(self.rx.len() as u32).to_le_bytes());
-        out.extend(self.rx.iter());
+        self.engine.save_stream(&mut out);
         // The auto-baud state (M3 P1), between the FIFOs and the registers.
         out.extend_from_slice(&self.host_baud.to_le_bytes());
         let ab = &self.autobaud;
@@ -1069,38 +1026,24 @@ impl Peripheral for Uart {
 
     fn load_state(&mut self, bytes: &[u8]) {
         let mut r = Reader(bytes);
-        let (Some(index), Some(sticky), Some(tx_pushed), Some(tx_popped), Some(rx_pushed)) =
-            (r.u64(), r.u32(), r.u32(), r.u32(), r.u32())
-        else {
+        let (Some(index), Some(sticky)) = (r.u64(), r.u32()) else {
             log::warn!("{}: load_state blob too short, ignored", self.name);
             return;
         };
-        let (Some(rx_popped), Some(tx_dropped), Some(warned), Some(shifter)) =
-            (r.u32(), r.u64(), r.u32(), r.u32())
-        else {
+        let Some((counters, used)) = UartEngine::load_counters(r.0) else {
             log::warn!("{}: load_state blob too short, ignored", self.name);
             return;
         };
-        let (Some(tx_due), Some(rx_due), Some(tx_len)) = (r.u64(), r.u64(), r.u32()) else {
+        r.0 = &r.0[used..];
+        let Some(warned) = r.u32() else {
             log::warn!("{}: load_state blob too short, ignored", self.name);
             return;
         };
-        let tx_len = tx_len as usize;
-        if r.0.len() < tx_len {
+        let Some((stream, used)) = UartEngine::load_stream(r.0) else {
             log::warn!("{}: load_state blob too short, ignored", self.name);
             return;
-        }
-        let (tx, rest) = r.0.split_at(tx_len);
-        r.0 = rest;
-        let Some(rx_len) = r.u32() else {
-            return;
         };
-        let rx_len = rx_len as usize;
-        if r.0.len() < rx_len {
-            return;
-        }
-        let (rx, rest) = r.0.split_at(rx_len);
-        r.0 = rest;
+        r.0 = &r.0[used..];
         let (
             Some(host_baud),
             Some(rxd_cnt),
@@ -1135,18 +1078,9 @@ impl Peripheral for Uart {
             trailing: (trail_at != u64::MAX).then_some((trail_at, trail_half)),
         };
         self.index = index as usize;
-        self.sticky = sticky;
-        self.tx_pushed = tx_pushed;
-        self.tx_popped = tx_popped;
-        self.rx_pushed = rx_pushed;
-        self.rx_popped = rx_popped;
-        self.tx_dropped = tx_dropped;
+        self.engine.set_sticky(Self::sticky_events(sticky));
+        self.engine.restore(counters, stream);
         self.warned_at_cmd = warned != 0;
-        self.shifter = (shifter & 0x100 != 0).then_some((shifter & 0xff) as u8);
-        self.tx_due = tx_due;
-        self.rx_due = rx_due;
-        self.tx = tx.iter().copied().collect();
-        self.rx = rx.iter().copied().collect();
         self.regs.load_state(rest);
     }
 }
@@ -1427,8 +1361,8 @@ mod tests {
         let mut other = Uart::uart0(ClockLine::default(), None).with_host_baud(1);
         other.load_state(&blob);
         assert_eq!(other.index, 3);
-        assert_eq!(other.shifter, Some(0x41));
-        assert_eq!(other.tx, [0x42]);
+        assert_eq!(other.engine.shifter(), Some(0x41));
+        assert_eq!(*other.engine.tx(), [0x42]);
         assert_eq!(other.regs.stored(CLKDIV), 0x0055);
         assert_eq!(other.tx_pending(), 2);
         assert_eq!(other.host_baud, DEFAULT_HOST_BAUD);

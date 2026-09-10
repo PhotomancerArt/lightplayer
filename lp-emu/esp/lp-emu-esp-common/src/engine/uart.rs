@@ -292,7 +292,8 @@ impl UartEngine {
             return;
         };
         let delay = bit.saturating_mul(bits.max(1));
-        cx.sched.schedule_at(from.saturating_add(delay), ids.rx_tout);
+        cx.sched
+            .schedule_at(from.saturating_add(delay), ids.rx_tout);
     }
 
     /// A byte arrived on the wire at cycle `at`.
@@ -445,6 +446,17 @@ impl UartEngine {
     /// The byte on the wire, if any.
     pub fn shifter(&self) -> Option<u8> {
         self.shifter
+    }
+
+    /// The transmit FIFO's contents, oldest first. For a view's state tests
+    /// and diagnostics; the guest reaches it through the methods above.
+    pub fn tx(&self) -> &VecDeque<u8> {
+        &self.tx
+    }
+
+    /// The receive FIFO's contents, oldest first. Same caveat.
+    pub fn rx(&self) -> &VecDeque<u8> {
+        &self.rx
     }
 
     /// Whether a symbol is on the wire right now.
@@ -626,11 +638,9 @@ mod tests {
     fn rig(script: ScriptedSource) -> (Sandbox, UartEngine, ByteLog, StreamId) {
         let mut sb = Sandbox::new();
         let log = ByteLog::new();
-        let id = sb.host.add(
-            "wire",
-            Box::new(MemorySink(log.clone())),
-            Box::new(script),
-        );
+        let id = sb
+            .host
+            .add("wire", Box::new(MemorySink(log.clone())), Box::new(script));
         (sb, UartEngine::new(4), log, id)
     }
 
