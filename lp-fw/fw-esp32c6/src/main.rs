@@ -70,6 +70,7 @@ use fw_esp32_common::boot;
     not(fw_harness),
     feature = "test_button",
     feature = "test_espnow",
+    feature = "test_espnow_broadcast",
     feature = "test_gpio_input",
 ))]
 mod hardware;
@@ -82,6 +83,7 @@ pub use fw_esp32_common::logger;
 #[cfg(any(
     not(fw_harness),
     feature = "test_rmt",
+    feature = "test_rmt_rx",
     feature = "test_dither",
     feature = "test_usb",
     feature = "test_json",
@@ -146,6 +148,8 @@ use server_loop::run_server_loop;
 mod tests {
     #[cfg(feature = "test_cycle_probe")]
     pub mod cycle_probe;
+    #[cfg(feature = "test_espnow_broadcast")]
+    pub mod espnow_broadcast;
     #[cfg(feature = "test_f32_softfloat")]
     pub mod f32_softfloat;
     #[cfg(feature = "test_fluid_demo")]
@@ -158,6 +162,8 @@ mod tests {
     pub mod jit_math_perf;
     #[cfg(any(feature = "test_msafluid", feature = "test_fluid_demo"))]
     pub mod msafluid_solver;
+    #[cfg(feature = "test_rmt_rx")]
+    pub mod rmt_rx;
     #[cfg(feature = "test_button")]
     pub mod test_button;
     #[cfg(feature = "test_dither")]
@@ -623,6 +629,12 @@ async fn main(spawner: embassy_executor::Spawner) {
         run_gpio_input(spawner).await;
     }
 
+    #[cfg(feature = "test_rmt_rx")]
+    {
+        use tests::rmt_rx::run_rmt_rx;
+        run_rmt_rx(spawner).await;
+    }
+
     #[cfg(feature = "test_shader_compile_incremental")]
     {
         use tests::incremental_shader_compile::run_incremental_shader_compile;
@@ -633,6 +645,12 @@ async fn main(spawner: embassy_executor::Spawner) {
     {
         use tests::test_espnow::run_espnow_test;
         run_espnow_test(spawner).await;
+    }
+
+    #[cfg(feature = "test_espnow_broadcast")]
+    {
+        use tests::espnow_broadcast::run_espnow_broadcast;
+        run_espnow_broadcast(spawner).await;
     }
 
     #[cfg(feature = "test_f32_softfloat")]

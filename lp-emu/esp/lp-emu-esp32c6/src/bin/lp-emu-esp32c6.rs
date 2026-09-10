@@ -20,7 +20,7 @@ use lp_emu_esp32c6::control::parse_usb_script;
 use lp_emu_esp32c6::flash::FlashBacking;
 use lp_emu_esp32c6::loader::EfuseIdentity;
 use lp_emu_esp32c6::machine::{
-    AppSource, Esp32C6Builder, Esp32C6Machine, FrameSink, Outcome, PinLogSink, RomSource,
+    AppSource, BootMode, Esp32C6Builder, Esp32C6Machine, FrameSink, Outcome, PinLogSink, RomSource,
     StopCondition, StripConfig, TimeGrade, TxLogSink, Uart0Sink, UsbHost, UsbSjDrain, UsbSjSink,
 };
 use lp_emu_esp32c6::memmap;
@@ -33,6 +33,7 @@ lp-emu-esp32c6 — the ESP32-C6 machine
 USAGE:
     lp-emu-esp32c6 --elf <app.elf> [options]
     lp-emu-esp32c6 --merged <chip.bin> [--elf <app.elf>] [options]
+    lp-emu-esp32c6 --boot-mode rom-up --flash <chip.bin> [options]
     lp-emu-esp32c6 --hooks
 
 OPTIONS:
@@ -47,6 +48,16 @@ OPTIONS:
                             writes (scripts/emu/build-merged-image.sh). The
                             real mask ROM and the real bootloader do the
                             loading. Read-only; implies the chip's size
+    --boot-mode direct|rom-up
+                            direct = place --elf's segments in memory and
+                            start at its entry; rom-up = start at the RESET
+                            VECTOR and let the real mask ROM read whatever
+                            the chip holds. --merged implies rom-up (and is
+                            read-only); this flag is how a run boots rom-up
+                            from a WRITABLE chip — the flashing scenario,
+                            where the bytes arrive over the download console
+                            and --flash is what keeps them. With rom-up an
+                            --elf is optional and is never loaded [direct]
     --rom <path>            a mask ROM ELF (default: the vendored C6 rev0 image)
     --time-grade t1|t2|t3   t1 = instruction count, t2 = the per-class model,
                             t3 = the measured class costs plus cache and bus [t1]
@@ -60,6 +71,16 @@ OPTIONS:
                             where UART0's bytes go; tcp: LISTENS, one client at a
                             time, and the client's bytes are UART0's RX (not
                             deterministic: wall clock decides their cycle)
+    --uart0-baud <n>        the rate the HOST on UART0 sends at [115200].
+                            UART0 carries no clock, so a model that answers
+                            the ROM's baud auto-detection has to be told the
+                            host's rate: the pulse-width counters report
+                            `sclk / n` clocks a bit and `rxd_cnt` counts the
+                            edges actually sent. Changing it changes the
+                            divisor the ROM computes and writes to
+                            UART0.clkdiv. It says nothing about how fast
+                            bytes arrive — a scripted byte lands when the
+                            script says it does
     --uart0-script <file>   scripted host input for UART0, deterministic:
                             one chunk per line, either at an EMULATED time
                             (`1500 \"M!{...}\\n\"`, `2000 4d 21 0a`) or waiting
@@ -178,7 +199,13 @@ OPTIONS:
     --seed <u64>            the machine PRNG's seed [0]
     --trace [BLOCK,BLOCK]   log every MMIO access; an optional block filter
     --trace-file <path>     write the trace here instead of stderr
-    --strict-bus            an access nothing claims is fatal; exits 3
+    --strict-bus            an access nothing claims is fatal; exits 3.
+                            Also arms the missing-fence checker: a code page
+                            the guest wrote and then executed with no
+                            `fence.i` between is named as a firmware bug
+    --no-block-cache        do not pre-decode blocks of instructions. Slower,
+                            and the identity oracle: every byte of every
+                            transcript must be the same either way
     --strict-grade-blocks <NAME,NAME>
                             narrow --strict-grade to these blocks by name.
                             The default is every block that publishes a
@@ -192,8 +219,10 @@ OPTIONS:
                             whose behaviour is only our reading of the PAC,
                             `measured` on anything no transcript has proved.
                             It applies to the blocks that PUBLISH a grade
-                            table — every accept block plus USB_DEVICE — and
-                            passes over the
+                            table — every accept block, plus the modelled
+                            ones that grade themselves: USB_DEVICE, UART0,
+                            UART1, GPIO, RMT, PCR, SPI1, EFUSE, I2C_ANA_MST —
+                            and passes over the
                             rest, because `nobody graded this block` is not
                             the same statement as `this block is modelled`.
                             The report names the blocks it checked. Tables
@@ -228,6 +257,9 @@ fn main() -> ExitCode {
 struct Args {
     elf: Option<PathBuf>,
     merged: Option<PathBuf>,
+    /// `--boot-mode`. `None` is "whatever the image implies": `--merged` is
+    /// rom-up, an `--elf` on its own is direct.
+    boot_mode: Option<BootMode>,
     rom: Option<PathBuf>,
     time_grade: TimeGrade,
     timeout: Option<u64>,
@@ -235,6 +267,7 @@ struct Args {
     exit_on: Option<String>,
     uart0: Uart0Sink,
     uart0_script: Option<PathBuf>,
+    uart0_baud: Option<u64>,
     usb_sj: UsbSjSink,
     flash: FlashBacking,
     flash_len: Option<u32>,
@@ -256,6 +289,9 @@ struct Args {
     trace_blocks: Vec<String>,
     trace_file: Option<PathBuf>,
     strict: bool,
+    /// `--no-block-cache`. The cache is ON by default, so the flag is held
+    /// as its negation: `Args` derives `Default`.
+    no_block_cache: bool,
     strict_grade: Option<RegGrade>,
     strict_grade_blocks: Option<Vec<&'static str>>,
     probes: Vec<(u64, String)>,
@@ -279,6 +315,7 @@ fn run() -> Result<ExitCode, String> {
     let mut builder = Esp32C6Builder::new()
         .time_grade(args.time_grade)
         .strict(args.strict)
+        .block_cache(!args.no_block_cache)
         .strict_grade(args.strict_grade)
         .strict_grade_blocks(args.strict_grade_blocks.clone())
         .efuse(args.efuse)
@@ -357,10 +394,30 @@ fn run() -> Result<ExitCode, String> {
     if let Some(rom) = args.rom.clone() {
         builder = builder.rom(RomSource::Path(rom));
     }
+    if let Some(baud) = args.uart0_baud {
+        builder = builder.uart0_baud(baud);
+    }
+    // `--boot-mode` is stated before `--merged` is folded in, so that the
+    // two disagreeing is an error rather than a silent last-writer-wins.
+    let rom_up = match (args.boot_mode, args.merged.is_some()) {
+        (Some(BootMode::Direct), true) => {
+            return Err(
+                "--boot-mode direct with --merged: a merged image IS the chip's bytes, \
+                        and a direct load never reads them — pass --elf instead"
+                    .to_string(),
+            );
+        }
+        (mode, merged) => merged || mode == Some(BootMode::RomUp),
+    };
+    if rom_up {
+        builder = builder.boot_mode(BootMode::RomUp);
+    }
     if let Some(elf) = args.elf.clone() {
         builder = builder.app(AppSource::Path(elf));
-    } else if !args.hooks && args.merged.is_none() {
-        return Err("--elf or --merged is required (or --hooks / --map)".to_string());
+    } else if !args.hooks && !rom_up {
+        return Err(
+            "--elf, --merged or --boot-mode rom-up is required (or --hooks / --map)".to_string(),
+        );
     }
     if let Some(image) = args.merged.clone() {
         if !matches!(args.flash, FlashBacking::Blank) {
@@ -389,7 +446,6 @@ fn run() -> Result<ExitCode, String> {
         // wrote back into it would quietly stop being the image the gate
         // named. `--flash` is how a run keeps its writes.
         builder = builder
-            .boot_mode(lp_emu_esp32c6::machine::BootMode::RomUp)
             .flash(FlashBacking::Copy(image))
             .flash_len(args.flash_len.unwrap_or(len));
     }
@@ -463,6 +519,13 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             }
             "--elf" => args.elf = Some(value("--elf")?.into()),
             "--merged" => args.merged = Some(value("--merged")?.into()),
+            "--boot-mode" => {
+                let text = value("--boot-mode")?;
+                args.boot_mode =
+                    Some(BootMode::parse(&text).ok_or_else(|| {
+                        format!("--boot-mode `{text}`: expected direct or rom-up")
+                    })?);
+            }
             "--rom" => args.rom = Some(value("--rom")?.into()),
             "--time-grade" => args.time_grade = TimeGrade::parse(&value("--time-grade")?)?,
             "--timeout" => args.timeout = Some(parse_duration_us(&value("--timeout")?)?),
@@ -477,6 +540,18 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--exit-on" => args.exit_on = Some(value("--exit-on")?),
             "--uart0" => args.uart0 = parse_uart0(&value("--uart0")?)?,
             "--uart0-script" => args.uart0_script = Some(value("--uart0-script")?.into()),
+            "--uart0-baud" => {
+                let text = value("--uart0-baud")?;
+                let baud: u64 = text
+                    .parse()
+                    .map_err(|e| format!("--uart0-baud `{text}`: {e}"))?;
+                if baud == 0 {
+                    return Err(
+                        "--uart0-baud 0: a host that sends nothing has no bit time".to_string()
+                    );
+                }
+                args.uart0_baud = Some(baud);
+            }
             "--usb-sj" => args.usb_sj = parse_usb_sj(&value("--usb-sj")?)?,
             "--flash" => args.flash = FlashBacking::File(value("--flash")?.into()),
             "--flash-copy" => args.flash = FlashBacking::Copy(value("--flash-copy")?.into()),
@@ -580,6 +655,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                     .ok_or_else(|| format!("--strip-timing `{text}`: expected ws2812 or ws2811"))?;
             }
             "--strict-bus" => args.strict = true,
+            "--no-block-cache" => args.no_block_cache = true,
             "--probe" => args.probes.push(parse_probe(&value("--probe")?)?),
             "--break-at" => args.break_at.push(value("--break-at")?),
             "--hooks" => args.hooks = true,
@@ -934,6 +1010,51 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
             None => String::new(),
         }
     );
+    // The block cache, when it ran. Never part of a compared transcript: the
+    // oracle sweep compares the `stopped after` line, the UART bytes and the
+    // decoded frames, and this is none of those — but it IS how a run says
+    // whether the firmware's `fence.i` reached the machine.
+    match machine.block_stats() {
+        Some(stats) => eprintln!(
+            "blocks: {} cached, {} hits ({:.2}% of {} entries), mean length {:.2}; \
+             {} flush(es) ({} for capacity), {} range invalidation(s) dropping {} entr(ies), \
+             {} collision(s); {} fence.i",
+            stats.decodes,
+            stats.hits,
+            stats.hit_rate() * 100.0,
+            stats.decodes + stats.hits,
+            stats.mean_block_len(),
+            stats.flushes,
+            stats.capacity_flushes,
+            stats.range_invalidations,
+            stats.range_entries_dropped,
+            stats.collisions,
+            machine.fence_i_count(),
+        ),
+        None => eprintln!(
+            "blocks: no cache ({}); {} fence.i",
+            if machine.block_cache() {
+                "never needed one"
+            } else {
+                "--no-block-cache, or a rom-up boot"
+            },
+            machine.fence_i_count(),
+        ),
+    }
+    if machine.bus.strict() {
+        let reports = machine.bus.missing_fence_reports();
+        eprintln!(
+            "strict-bus: {} code page(s) executed from; {} of them executed after a guest write \
+             with no `fence.i` between{}",
+            machine.bus.code_pages_seen(),
+            reports,
+            if reports == 0 {
+                " — the fence contract holds"
+            } else {
+                " — see the errors above"
+            }
+        );
+    }
     let census = machine.flash_census();
     if census.commands() > 0 || census.status_reads > 0 || machine.cache_fills() > 0 {
         eprintln!(

@@ -34,8 +34,10 @@ lp-cli validate            payloads, transcripts, replay, trust grading
   `BusCx`, `RegFile` (accept-and-remember with a table of exceptions), the
   bus trace with its spin detector, host byte streams, the interrupt-matrix
   seam, the machine-request slot, the **signal fabric** (pads, signals and
-  edges — where an output actually goes) with the WS281x decoder that reads
-  it, and the PT_LOAD view of an ELF. It holds **no chip numbers** — see its
+  edges — where an output actually goes, and since M2 which pad an input
+  signal reads and what an outside driver or a pad-to-pad wire holds on a
+  pad) with the WS281x decoder that reads it, and the PT_LOAD view of an
+  ELF. It holds **no chip numbers** — see its
   README.
 
 - **`lp-emu-esp32c6/`** — the C6 machine: the memory map (every base cited to
@@ -82,12 +84,14 @@ protocol.
 ## What it is trusted for
 
 Every field class of `lp-emu:esp32c6:*` is graded **`modeled`**, each with its
-reason in `validate.toml`. That is not modesty and it is not a placeholder:
+reason in `validate.toml` — with one exception since M1 P4, `t3`'s `timing`
+row, which is `documented` **within a stated band**. That is not modesty and
+it is not a placeholder:
 
 | class | why it is `modeled` |
 |---|---|
 | memory | byte-equal to silicon on the compile harness — 372/372 values — which is *evidence in the reason*, not a promotion. `measured` would want a transcript per class |
-| timing | `t1` counts instructions, `t2` uses a per-class model, `t3` adds the flash cache's fills and the APB's wait states on top of class costs the `cycle-probe` kernels measured — and no transcript grades any of them yet (the vision's graded ladder). `t3` is calibrated on those kernels and validated against 92 like-for-like silicon ticks in `docs/reports/2026-09-08-esp32c6-t3-calibration.md`; what it still lacks is a stated band it is allowed to be wrong inside, which is what would let `timing` move off `modeled` |
+| timing | `t1` counts instructions, `t2` uses a per-class model, `t3` adds the flash cache's fills and the APB's wait states on top of class costs the `cycle-probe` kernels measured. `t1` and `t2` stay `modeled`. **`t3` is `documented` inside a band** — the first use of a trust entry's `band` field, which is what a class that is never exact is graded against instead of equality: 85 of 92 like-for-like silicon slices inside [0.80, 1.25] with an aggregate of 1.154, on `shader-compile-stress` and `cycle-probe` and nowhere else, replayed by `--strict-timing`. Not `measured`: the compute residual is one-signed (the model is systematically cheap, with three named unmodelled causes), and `cycle-probe` is the payload the model was calibrated on, so the band rests on one independent workload. A second payload is what promotes it. Derivation: `docs/reports/2026-09-08-esp32c6-t3-calibration.md` §4; the rule: the hardware-validation ADR's 2026-09-08 amendment |
 | boot-log | `modeled` on a direct load, which prints no banner at all; **`measured`** on a `--merged` ROM-up boot, whose log is diffed line for line against the committed silicon capture |
 | usb-serial-jtag | the host's three states and the transitions between them, with four committed transcripts behind them (M6) — `boot-idle` over the shipped link against silicon's capture of the *same image bytes*, the port held closed from boot, an unplug mid-session, and no cable at all. M6 P5 adds the working half: the shipped image from flash takes a real `lp-cli upload` over this link, and every filesystem write, heap gate and compiler output is identical to the same script run over UART0. The block's own data path is graded `measured` register by register in `periph/usb_sj.rs`; the **class** stays `modeled` by the rule below. The silicon transcript that would let anybody argue otherwise has landed (`usb-negative-control/silicon-…-b18360ea6.txt`); whether it promotes the class is the director's to rule |
 | pin | the waveform is a modelled peripheral's, decoded by our own decoder (M5 P2), and two pin captures are committed beside their transcripts: on `rmt-chase` the guest's per-frame checksums agree with the pad on all 768 frames (M5 P3), and on `shader-oracle-walk` the **shipped** image's first lit frame off gpio18 is byte-equal to the host oracle's `[ORACLE] rgb=` / `[ORACLE-RV32] rgb=` line, with every later frame the same (M5 P4). The oracle never touched the machine, which makes it the nearest independent check there is; it is still not a measurement, because both readings of the *pad* are ours. A silicon pin transcript — a logic analyser, or M8's C6 `frame-dump` port read beside the decoder — is the `measured` step |
@@ -117,7 +121,9 @@ protocol of its own.
 | USB-Serial-JTAG | `--usb-sj tcp:<host:port>` (listens, one client; the client's bytes are the OUT endpoint's) | `--control tcp:<host:port>` |
 
 Both are also available as **files**: `--uart0-script` and `--usb-script`.
-Those are the deterministic path and the one gates use.
+Those are the deterministic path and the one gates use. And both USB sockets
+are available over **WebSocket**, for N boards at once, through `lp-cli emu
+serve` — see "The WebSocket door" below.
 
 ### The commands
 
@@ -185,6 +191,51 @@ client the host is attached-idle or absent, so no packet is ever delivered
 and no backlog accumulates; the backlog exists only for a client that
 disconnects and reconnects while `draining` is held on by
 `--usb-sj-drain manual`.
+
+### The WebSocket door: `lp-cli emu serve`
+
+The two sockets above are TCP, one machine per process, bound before the run
+and gone with it. A browser cannot open a TCP socket, and a browser is what
+plan two's Studio walks need — so there is a third door, and it lives in
+**`lp-cli`**, outside this fence:
+
+```text
+GET  /boards                 → the registry, as JSON (Access-Control-Allow-Origin: *, so a Studio page on another origin can fetch it)
+WS   /board/<id>/bytes       → binary frames both ways; the payload IS the bytes
+WS   /board/<id>/control     → the line protocol above, verbatim
+```
+
+```sh
+lp-cli emu serve --board c6-a=target/emu-ref/…/fw-esp32c6 \
+                 --board c6-b=target/emu-ref/…/fw-esp32c6 \
+                 --listen 127.0.0.1:5599 --state-dir target/emu-serve
+lp-cli upload projects/test/basic serial:ws://127.0.0.1:5599/board/c6-a/bytes
+```
+
+It is a **pump, not a translation**. Each board runs on its own thread with
+`--usb-sj tcp:127.0.0.1:0` and `--control tcp:127.0.0.1:0` — ephemeral
+loopback ports, read back through `Esp32C6Machine::usb_sj_tcp()` and
+`control_tcp()` — and the WebSocket endpoints move bytes and lines between a
+socket and those ports. Nothing under `lp-emu/` changed for it, which is the
+point: the TCP client the pump opens **is** the byte client the coupling rule
+watches, so connect ⇒ `open`, disconnect ⇒ `close`, `attach`/`detach` never
+implied and one reply per command are all this machine's own behaviour rather
+than a re-implementation of it. One byte client and one control client per
+board at a time, as `TcpHost` has; a second is refused with `409`.
+
+What `serve` adds beyond `run`: a registry of N named boards, one **eFuse
+MAC** each (the desk board's with the last octet stepped, or `mac=` on the
+`--board`), one persistent **flash file** each under `--state-dir` written
+back on a cadence and on shutdown, a **console transcript** each under
+`--console-dir`, `--reboot-on-reset` **on** (see above), and `--air <addr>` —
+a one-way `LPA1` tap that is **auditable only** and never a transcript.
+
+`--usb-host` decides what a byte client finds. `attached` (the default, and
+`emu run`'s) is the cable in with the port open from power-on, so the boot
+console is on the wire and the first client is replayed it. `attached-idle` is
+the cable in with the port **closed**, which is what makes the coupling rule
+visible on `state` — at the cost of the boot log, because the firmware does
+not write while nothing is draining, exactly as a board does not.
 
 ### The scripted form
 
@@ -319,11 +370,22 @@ The dances are **decoded**, not pattern-matched: the model watches the RTS
 falling edge and whether DTR was ever high, exactly as `set_signals` does, so
 any host tool whose sequence has that shape works without being listed here.
 
-### `reset` and `download-mode` until M7
+### `reset` and `download-mode`
 
-Both end the run. The chip would reboot, and the emulator does not yet have a
-boot chain to reboot into (M7 owns it), so the machine reports the request
-instead of performing it:
+Both end the run **unless `--reboot-on-reset`**. M7 shipped the boot chain and
+the flag: with it the machine performs the reset — `Esp32C6Machine::reboot`
+puts the chip back to its power-on state with the strap and the reset cause
+re-seeded, keeps both consoles' bytes so a log with two boots in it is a
+better record than one that lost everything before the reset, and the run
+carries on with `reboots()` incremented. The flag is **off by default** on
+purpose: three merged M6 scenarios read the exit code of a run that ended on
+a reset as their evidence.
+
+`lp-cli emu serve` is the one place it is on and not configurable off. A
+server cannot lose a board to esptool-js's DTR/RTS dance, whose whole purpose
+is to reset the chip — see "The WebSocket door" above.
+
+Without the flag, the machine reports the request instead of performing it:
 
 ```text
 RESET requested by USB_DEVICE chip_rst (serial) at cycle 96000000 (600000 us),

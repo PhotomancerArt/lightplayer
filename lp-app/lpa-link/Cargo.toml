@@ -65,6 +65,18 @@ tokio = { version = "1", features = ["macros", "rt", "time"] }
 # golden-trace replay (tests/trace_replay.rs) parses the device-event JSONL
 serde_json = { workspace = true }
 
+# The real-Chrome conformance suite (`tests/browser_serial_conformance.rs`):
+# `wasm-bindgen-test` through `wasm-bindgen-test-runner` against a headless
+# Chrome, driving the SHIPPED `browser_serial.js` over the `navigator.serial`
+# polyfill. Target-gated so a native `cargo test -p lpa-link` pays nothing.
+# The recipe is `just lpa-link-browser-test`; CI runs it in `validate-browser`.
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+js-sys = "0.3"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+wasm-bindgen-test = "0.3"
+web-sys = { version = "0.3", features = ["Window"] }
+
 [features]
 default = []
 browser-serial-esp32 = [

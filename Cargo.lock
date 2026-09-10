@@ -5525,6 +5525,7 @@ dependencies = [
  "log",
  "lp-collection 1.0.0",
  "lp-emu-core",
+ "lp-emu-esp-common",
  "lp-emu-esp32c6",
  "lp-emu-validate",
  "lp-gfx-lpvm",
@@ -5535,6 +5536,7 @@ dependencies = [
  "lp-shader",
  "lpa-boards",
  "lpa-client",
+ "lpa-devices",
  "lpa-link",
  "lpa-server",
  "lpa-upgrade",
@@ -5679,6 +5681,7 @@ name = "lp-emu-esp32c6"
 version = "40.0.0"
 dependencies = [
  "env_logger 0.11.9",
+ "espflash",
  "log",
  "lp-emu-core",
  "lp-emu-esp-common",
@@ -5686,6 +5689,7 @@ dependencies = [
  "lp-riscv-emu",
  "lp-ws281x",
  "rustc-demangle",
+ "serialport",
  "sha2",
  "test-log",
 ]
@@ -5970,6 +5974,7 @@ dependencies = [
  "test-log",
  "tokio",
  "tokio-tungstenite",
+ "tungstenite 0.21.0",
 ]
 
 [[package]]
@@ -6033,6 +6038,7 @@ dependencies = [
  "tokio",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wasm-bindgen-test",
  "web-sys",
 ]
 

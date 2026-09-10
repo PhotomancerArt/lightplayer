@@ -35,6 +35,13 @@ env:
   # (GHA backend) caches individual rustc invocations content-addressed.
   # CARGO_INCREMENTAL=0 because sccache cannot cache incremental compiles.
   CARGO_INCREMENTAL: "0"
+  # Match pre-merge.yml exactly: these two are part of the rustc arguments
+  # sccache hashes, and the deployed artifact (the wasm bundle + release
+  # firmware images) does not carry host debuginfo anyway. Without them the
+  # deploy's lp-cli build was `dev [unoptimized + debuginfo]`, sharing
+  # nothing with CI and half again as much output to link (2026-09-08).
+  CARGO_PROFILE_DEV_DEBUG: "false"
+  CARGO_PROFILE_TEST_DEBUG: "false"
   SCCACHE_GHA_ENABLED: "true"
   RUSTC_WRAPPER: sccache
 
@@ -42,15 +49,26 @@ jobs:
   deploy:
     name: Build and deploy ${{ inputs.channel }}
     runs-on: ubuntu-latest
+    # Every `run` step works inside lp2025/, the path pre-merge.yml checks
+    # out into, because sccache hashes the compile's working directory —
+    # see deploy-cloud.yml. The checkout comes first because the directory
+    # must exist before any `run` step.
+    defaults:
+      run:
+        working-directory: lp2025
     steps:
-      - name: Install system deps
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
-
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          path: lp2025
           ref: ${{ inputs.ref }}
           fetch-depth: 0
+
+      - name: Install system deps
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google*
+          sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
+          sudo apt-get install -y libudev-dev pkg-config
 
       # Before the build, for the same reason as the production deploy in
       # deploy-cloud.yml: `print-app-version.sh` reads `git status --porcelain`,
@@ -108,7 +126,9 @@ jobs:
       - name: Cache cargo registry
         uses: Swatinem/rust-cache@v2
         with:
+          workspaces: lp2025 -> target
           cache-targets: false
+          cache-bin: false
           shared-key: deploy
 
       - name: Run sccache

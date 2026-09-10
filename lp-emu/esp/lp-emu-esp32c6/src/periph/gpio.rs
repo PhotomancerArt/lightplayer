@@ -10,7 +10,8 @@
 //! |---|---|
 //! | `func_out_sel_cfg[n]` (`+0x554 + 4n`, n < 31) | `out_sel` names the signal pad `n` follows; `128` means "follow `GPIO_OUT[n]`" (PAC: "s=128: output of GPIO\[n\] equals GPIO_OUT_REG\[n\]"). `inv_sel` inverts. `oen_sel` is recorded and reported, never gated on. |
 //! | `out` / `out_w1ts` / `out_w1tc` | the GPIO output bitmap a pad routed to `GPIO_OUT` follows |
-//! | `enable` / `enable_w1ts` / `enable_w1tc` | the output-**enable** bitmap; recorded, reported in the routing note as `oe=`, never gated on |
+//! | `enable` / `enable_w1ts` / `enable_w1tc` | the output-**enable** bitmap. Since M2 P3 (plan DD38) this is what makes a routed pad *drive* the wire: a pad whose bit is clear carries whatever the wire carries and contributes nothing. `Fabric::output_enabled` says why `enable` and not `oen_sel`. |
+//! | `func_in_sel_cfg[s]` (`+0x154 + 4s`, s < 128) | the **input** half of the matrix: `in_sel` names the pad signal `s` reads, `in_inv_sel` inverts it, `sig_in_sel = 1` is the matrix route. `sig_in_sel = 0` and the constant selectors `0x38`/`0x3C` are accepted, unrouted and noted. |
 //!
 //! The sequence esp-hal writes at `Channel::with_pin` is exactly these
 //! (M5 discovery §2a, §8): `out_w1tc` bit 18, `IO_MUX.gpio18.mcu_sel = 1`,
@@ -82,10 +83,13 @@
 //!   that started setting bit 14 would find it unmodelled rather than wrong,
 //!   and the strict grade says so.
 //! - **`in1` / `status1` / `pcpu_int1` (pads 32+) read 0.** The C6 has 31.
-//! - **`status_next` / `cpusdio_int` / `func_in_sel_cfg`** are
-//!   accept-and-remember: nothing routes an input *signal* to a peripheral
-//!   yet, which is a different question from a pad's level and is not this
-//!   phase's.
+//! - **`status_next` / `cpusdio_int`** are accept-and-remember.
+//! - **`func_in_sel_cfg`** is a real view since M2 P3 — it is how the RMT's
+//!   receiver finds its pad — but only the matrix route is modelled. A
+//!   signal taken straight off a pad's IO_MUX function (`sig_in_sel = 0`) or
+//!   tied to a constant (`in_sel` `0x38`/`0x3C`) is accepted, left unrouted,
+//!   and named once in the trace; a peripheral that read one would find
+//!   nothing connected rather than a level this model invented.
 //! - **Sub-sample pulses.** The input side is evaluated at every access to
 //!   this block and at every slice boundary, from the edges the fabric
 //!   recorded — so an edge is never missed. But `wakeup_enable`,
@@ -98,8 +102,8 @@
 //! | grade | registers |
 //! |---|---|
 //! | `measured` | none. No committed transcript covers this block yet; M2 P2 earns the first, on a `gpio-input` payload with a silicon twin. |
-//! | `documented` | `out`, `out_w1ts`, `out_w1tc`, `enable`, `enable_w1ts`, `enable_w1tc`, `strap`, `in_`, `status`, `status_w1ts`, `status_w1tc`, `pcpu_int`, `pin0`…`pin30`, `func0_out_sel_cfg`…`func30_out_sel_cfg` — the PAC's bit map is the source, and the behaviour above is that bit map read out loud. |
-//! | `modeled` | everything else in the window: `bt_select`, `sdio_select`, `out1*`, `enable1*`, `in1`, `status1*`, `pcpu_nmi_int*`, `cpusdio_int*`, `pin31`…`pin34`, `status_next*`, `func*_in_sel_cfg`, `clock_gate`, `date` and the register at `+0x074`'s neighbours. Accept-and-remember, at the PAC's reset value: nothing on the C6 boot or run path reaches one, and a run under `--strict-grade documented` that did would stop with the register's name. |
+//! | `documented` | `out`, `out_w1ts`, `out_w1tc`, `enable`, `enable_w1ts`, `enable_w1tc`, `strap`, `in_`, `status`, `status_w1ts`, `status_w1tc`, `pcpu_int`, `pin0`…`pin30`, `func0_out_sel_cfg`…`func30_out_sel_cfg`, `func0_in_sel_cfg`…`func127_in_sel_cfg` — the PAC's bit map is the source, and the behaviour above is that bit map read out loud. |
+//! | `modeled` | everything else in the window: `bt_select`, `sdio_select`, `out1*`, `enable1*`, `in1`, `status1*`, `pcpu_nmi_int*`, `cpusdio_int*`, `pin31`…`pin34`, `status_next*`, `clock_gate`, `date` and the register at `+0x074`'s neighbours. Accept-and-remember, at the PAC's reset value: nothing on the C6 boot or run path reaches one, and a run under `--strict-grade documented` that did would stop with the register's name. |
 
 use lp_emu_esp_common::pins::Edge;
 use lp_emu_esp_common::regfile::merge_lane;
@@ -139,9 +143,30 @@ const PIN_END: u32 = PIN + 4 * PAD_COUNT;
 const FUNC_OUT_SEL_CFG: u32 = 0x554;
 const FUNC_OUT_SEL_CFG_END: u32 = FUNC_OUT_SEL_CFG + 4 * PAD_COUNT;
 
+/// `func0_in_sel_cfg` (`+0x154`), four bytes each up to `func127_in_sel_cfg`
+/// (`+0x350`) — one register per peripheral **input** signal, not per pad.
+const FUNC_IN_SEL_CFG: u32 = 0x154;
+/// Input signals the C6's matrix carries: `func0` … `func127`.
+pub const IN_SIGNAL_COUNT: u32 = 128;
+const FUNC_IN_SEL_CFG_END: u32 = FUNC_IN_SEL_CFG + 4 * IN_SIGNAL_COUNT;
+
 const OUT_SEL_MASK: u32 = 0xff;
 const INV_SEL: u32 = 1 << 8;
 const OEN_SEL: u32 = 1 << 9;
+
+/// `func_in_sel_cfg[s].in_sel`, bits 0:5 (PAC: *"s=0-34: connect GPIO\[s\] to
+/// this port. s=0x38: set this port always high level. s=0x3C: set this port
+/// always low level."*).
+const IN_SEL_MASK: u32 = 0x3f;
+/// `in_inv_sel`, bit 6: *"set this bit to invert input signal."*
+const IN_INV_SEL: u32 = 1 << 6;
+/// `sig_in_sel`, bit 7: *"set this bit to bypass GPIO. 1: do not bypass GPIO.
+/// 0: bypass GPIO."* — 1 is the matrix route, which is what esp-hal's
+/// `connect_input_to_peripheral` writes.
+const SIG_IN_SEL: u32 = 1 << 7;
+/// `in_sel` values that are levels rather than pads (PAC, above).
+const IN_SEL_ALWAYS_HIGH: u32 = 0x38;
+const IN_SEL_ALWAYS_LOW: u32 = 0x3c;
 
 /// `pin[n].int_type`, bits 7:9 (PAC `INT_TYPE`).
 const INT_TYPE_SHIFT: u32 = 7;
@@ -221,6 +246,12 @@ fn signal_name(sel: u16) -> String {
     output_signal_name(sel).map_or_else(|| format!("sig{sel}"), str::to_string)
 }
 
+/// The same, for the input half of the matrix.
+fn input_signal_name(sel: u32) -> String {
+    crate::regs::output_signals::input_signal_name(sel as u16)
+        .map_or_else(|| format!("in_sig{sel}"), str::to_string)
+}
+
 impl Gpio {
     /// `strap` is the word the pads were latched into at reset
     /// (`crate::loader::strap_word`). It is read-only on the chip and the
@@ -263,6 +294,11 @@ impl Gpio {
             g = g
                 .with_grade(PIN + 4 * pad, RegGrade::Documented)
                 .with_grade(FUNC_OUT_SEL_CFG + 4 * pad, RegGrade::Documented);
+        }
+        // The input half of the matrix (M2 P3): decoded from the PAC's own
+        // bit map, the same way its output twin is.
+        for signal in 0..IN_SIGNAL_COUNT {
+            g = g.with_grade(FUNC_IN_SEL_CFG + 4 * signal, RegGrade::Documented);
         }
         g
     }
@@ -317,19 +353,24 @@ impl Gpio {
         }
     }
 
-    /// Write the `enable` bitmap. Recorded only — see the module docs.
+    /// Write the `enable` bitmap and push every changed bit into the fabric.
+    ///
+    /// Since M2 P3 this is what decides whether a routed pad drives the wire
+    /// at all (plan DD38), so it settles the pad the way `out` does rather
+    /// than only being recorded.
     fn set_enable(&mut self, new: u32, cx: &mut BusCx<'_>) {
         let old = self.regs.stored(ENABLE);
         if old == new {
             return;
         }
         self.regs.poke(ENABLE, new);
+        let at = cx.now;
         let mut changed = old ^ new;
         while changed != 0 {
             let pad = changed.trailing_zeros();
             changed &= changed - 1;
             cx.pins
-                .set_gpio_enable(PadId(pad as u8), new & (1 << pad) != 0);
+                .set_gpio_enable(PadId(pad as u8), new & (1 << pad) != 0, at);
         }
     }
 
@@ -362,6 +403,63 @@ impl Gpio {
                 "cyc={at} PIN gpio{pad} <- {name} (out_sel={sel} inv={} oen_sel={} oe={oe})",
                 u8::from(invert),
                 u8::from(oen_from_gpio),
+            )
+        });
+    }
+
+    /// A write to `func_in_sel_cfg[signal]`: which pad a peripheral's input
+    /// signal reads (M2 P3).
+    ///
+    /// The mirror of [`Gpio::set_route`], and the seam the RMT's receiver
+    /// reads its wire through. esp-hal's `connect_input_to_peripheral` writes
+    /// `{ in_sel: <pad>, in_inv_sel: false, sig_in_sel: true }` — the RMT's
+    /// `Channel<Rx>::with_pin` is one caller — and that write is the whole of
+    /// how a pad reaches a receiving peripheral.
+    ///
+    /// Three cases are **not** routed, and each says so once rather than
+    /// pretending: `sig_in_sel = 0` (bypass the matrix and take the pad's
+    /// IO_MUX direct function, which nothing this project runs uses), and the
+    /// two constant selectors `0x38` / `0x3C`, which tie a port high or low
+    /// with no pad at all.
+    fn set_in_route(&mut self, signal: u32, value: u32, cx: &mut BusCx<'_>) {
+        let off = FUNC_IN_SEL_CFG + 4 * signal;
+        let before = self.regs.stored(off);
+        self.regs.poke(off, value);
+        let sel = value & IN_SEL_MASK;
+        let invert = value & IN_INV_SEL != 0;
+        let at = cx.now;
+        let sid = SignalId(signal as u16);
+        if value & SIG_IN_SEL == 0 || sel >= PAD_COUNT {
+            cx.pins.unroute_in(sid);
+            if before == value {
+                return;
+            }
+            let why = if value & SIG_IN_SEL == 0 {
+                "sig_in_sel=0 (the pad's direct IO_MUX function)"
+            } else if sel == IN_SEL_ALWAYS_HIGH {
+                "in_sel=0x38 (always high)"
+            } else if sel == IN_SEL_ALWAYS_LOW {
+                "in_sel=0x3c (always low)"
+            } else {
+                "in_sel names no pad on this chip"
+            };
+            note(cx, || {
+                format!(
+                    "cyc={at} PIN {name} <- nothing: {why}, not modelled",
+                    name = input_signal_name(signal),
+                )
+            });
+            return;
+        }
+        cx.pins.route_in(sid, PadId(sel as u8), invert);
+        if before == value {
+            return;
+        }
+        note(cx, || {
+            format!(
+                "cyc={at} PIN {name} <- gpio{sel} (in_sel={sel} in_inv={})",
+                u8::from(invert),
+                name = input_signal_name(signal),
             )
         });
     }
@@ -605,6 +703,11 @@ impl Peripheral for Gpio {
                 self.set_route(pad, new, cx);
                 self.sync(cx);
             }
+            w if (FUNC_IN_SEL_CFG..FUNC_IN_SEL_CFG_END).contains(&w) => {
+                let signal = (w - FUNC_IN_SEL_CFG) / 4;
+                let new = merge_lane(self.regs.stored(w), off, width, value);
+                self.set_in_route(signal, new, cx);
+            }
             _ => self.regs.write(off, width, value, cx),
         }
     }
@@ -694,6 +797,9 @@ mod tests {
     fn the_guard_drop_puts_the_pad_back_on_gpio_out() {
         let mut sb = Sandbox::new();
         let mut g = Gpio::new(crate::loader::STRAP_APP);
+        // The output enable first, the way esp-hal writes it: since M2 P3 a
+        // pad drives the wire only when `enable` says it does.
+        sb.write(&mut g, ENABLE_W1TS, 1 << GPIO18);
         sb.write(&mut g, FUNC18, RMT_SIG_0);
         sb.now = 10;
         sb.write(&mut g, FUNC18, u32::from(OUT_SEL_GPIO));
@@ -719,6 +825,7 @@ mod tests {
     fn inv_sel_and_oen_sel_are_carried_into_the_route() {
         let mut sb = Sandbox::new();
         let mut g = Gpio::new(crate::loader::STRAP_APP);
+        sb.write(&mut g, ENABLE_W1TS, 1 << GPIO18);
         sb.write(&mut g, FUNC18, RMT_SIG_0 | INV_SEL | OEN_SEL);
         let route = sb.pins.route_of(PadId(18)).expect("routed");
         assert_eq!(
@@ -766,6 +873,7 @@ mod tests {
         let mut g = Gpio::new(crate::loader::STRAP_APP);
         // Its `out` bit is tracked, so a later route starts at the right
         // level — but nothing is observed until something routes it.
+        sb.write(&mut g, ENABLE_W1TS, 1 << 5);
         sb.write(&mut g, OUT_W1TS, 1 << 5);
         assert!(sb.pins.route_of(PadId(5)).is_none());
         assert!(sb.pins.take_edges().is_empty());
@@ -1311,10 +1419,14 @@ mod tests {
             PCPU_INT,
             PIN20,
             FUNC20,
+            // The input half of the matrix, since M2 P3.
+            FUNC_IN_SEL_CFG,
+            FUNC_IN_SEL_CFG + 4 * 71,
+            FUNC_IN_SEL_CFG_END - 4,
         ] {
             assert_eq!(g.reg_grade(off), Some(RegGrade::Documented), "{off:#05x}");
         }
-        for off in [0x000, 0x010, 0x040, 0x050, 0x060, 0x154] {
+        for off in [0x000, 0x010, 0x040, 0x050, 0x060, 0x354] {
             assert_eq!(g.reg_grade(off), Some(RegGrade::Modeled), "{off:#05x}");
         }
         let modeled = Gpio::modeled_registers();

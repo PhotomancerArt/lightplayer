@@ -12,6 +12,8 @@ pub struct EmuCli {
 pub enum EmuCommand {
     /// Boot an ESP32-C6 firmware image and serve it on a socket.
     Run(RunArgs),
+    /// Hold N emulated boards and serve each as two WebSocket endpoints.
+    Serve(ServeArgs),
 }
 
 /// Which chip. One today; the enum is here because `--chip` reads better than
@@ -165,4 +167,115 @@ pub struct RunArgs {
     /// reading zero and carrying on.
     #[arg(long = "strict-bus")]
     pub strict_bus: bool,
+
+    /// The board's eFuse MAC, `a0:f2:62:87:b4:8c`. Defaults to the desk
+    /// board's, which is what every transcript was captured against.
+    #[arg(long = "efuse-mac")]
+    pub efuse_mac: Option<String>,
+
+    /// The rate a host on UART0 sends at, default 115200. UART0 carries no
+    /// clock, so the pulse-width counters the mask ROM's baud auto-detection
+    /// reads can only report a rate the run STATES — this states it. It
+    /// changes the divisor the ROM computes and writes to `UART0.clkdiv` and
+    /// nothing else: a scripted byte still lands when the script says it
+    /// does. Applied before the power-on snapshot, so a reboot keeps it.
+    #[arg(long = "uart0-baud")]
+    pub uart0_baud: Option<u64>,
+}
+
+/// The USB host's state at a served board's power-on. The same three the
+/// `lp-emu-esp32c6` binary's `--usb-host` takes, spelled the same way, so
+/// nobody has to learn a second vocabulary for one chip.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
+pub enum ServeHost {
+    /// Cable in, port open and draining from power-on — `emu run`'s default.
+    #[default]
+    Attached,
+    /// Cable in, port CLOSED. The byte client's connect is what opens it.
+    #[value(name = "attached-idle")]
+    AttachedIdle,
+    /// No cable. An `attach` on the control channel is the plug-in edge.
+    Absent,
+}
+
+/// `lp-cli emu serve` — a registry of named boards behind a WebSocket door.
+///
+/// `run` is one image, one socket and a deadline; `serve` outlives any one
+/// board and is what a browser (and `lp-cli upload … serial:ws://…`) talks
+/// to. See `commands/emu/serve/mod.rs` for the shape of the door.
+#[derive(Debug, Args)]
+pub struct ServeArgs {
+    #[arg(long, value_enum, default_value_t = EmuChip::Esp32C6)]
+    pub chip: EmuChip,
+
+    /// A board: `<id>=<image>[,mac=<aa:bb:cc:dd:ee:ff>][,kind=elf|merged]`.
+    /// Repeatable, and the whole point — `s9-two-boards` is about two
+    /// identities, so every board gets its own MAC (the desk board's with
+    /// the last octet stepped, unless `mac=` says otherwise) and its own
+    /// flash file under `--state-dir`.
+    ///
+    /// `kind=merged` is a whole merged flash image booted from the reset
+    /// vector through the real mask ROM; the default `kind=elf` is a
+    /// firmware ELF loaded at its entry point.
+    #[arg(long = "board", value_name = "ID=IMAGE[,OPTS]")]
+    pub board: Vec<String>,
+
+    /// Where the door listens. `127.0.0.1:0` takes an ephemeral port and
+    /// prints it, which is what a test and a second server want.
+    #[arg(long, default_value = "127.0.0.1:5599")]
+    pub listen: String,
+
+    /// A directory holding one persistent flash file per board,
+    /// `<id>.flash.bin` (PD8). Written back on a cadence, whenever a byte
+    /// client closes the port, and on shutdown — so blank → flash → loaded
+    /// is a sequence rather than three unrelated runs. Without it every
+    /// board boots blank and forgets.
+    #[arg(long = "state-dir")]
+    pub state_dir: Option<PathBuf>,
+
+    /// A directory to write each board's console transcript into,
+    /// `<id>.console.log` — `run`'s `--console`, once per board.
+    ///
+    /// Everything the board said on its link since power-on, whether or not
+    /// anyone was listening at the time, rewritten on the same cadence the
+    /// flash is written back. A serve with no byte client still has a
+    /// console; this is where to read it.
+    #[arg(long = "console-dir")]
+    pub console_dir: Option<PathBuf>,
+
+    #[arg(long = "time-grade", value_enum, default_value_t = Grade::T1)]
+    pub time_grade: Grade,
+
+    /// The USB host's state at power-on, spelled as `lp-emu-esp32c6
+    /// --usb-host` spells it.
+    ///
+    /// `attached` is the default and matches `emu run`: the cable is in and
+    /// the port is open from power-on, so the board's boot console is on the
+    /// wire and the first byte client is replayed it — which is what
+    /// "connect and watch it boot" means and what every walk over this door
+    /// wants.
+    ///
+    /// `attached-idle` is the cable in with the port CLOSED, which is what
+    /// makes the coupling rule literal: the byte client's connect is the
+    /// `open` and its disconnect is the `close`, provable through `state`.
+    /// The cost is the board's boot log, which the firmware does not write
+    /// while nothing is draining — a real board does that too.
+    #[arg(long = "usb-host", value_enum, default_value_t = ServeHost::Attached)]
+    pub usb_host: ServeHost,
+
+    /// Refuse any access to an address no peripheral claims.
+    #[arg(long = "strict-bus")]
+    pub strict_bus: bool,
+
+    /// Serve the boards' radio frames on this TCP address, in the `LPA1`
+    /// wire codec.
+    ///
+    /// AUDITABLE ONLY. One way: frames the boards' radios hand over are
+    /// written to whoever is watching, and nothing is ever delivered into a
+    /// board from it. A run that used this is NOT a transcript — the
+    /// deterministic form of an air is `lp-emu-esp32c6`'s in-process
+    /// lockstep runner, and that is the only form any transcript,
+    /// validation configuration or CI job ever uses.
+    #[arg(long = "air")]
+    pub air: Option<String>,
 }

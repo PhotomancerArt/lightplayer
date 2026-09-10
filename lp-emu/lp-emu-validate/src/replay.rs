@@ -13,12 +13,22 @@
 //!   5 ms slice budget passing under esp-emu and failing on silicon.
 //! * `--strict` additionally refuses any class where either configuration's
 //!   trust table grades the claim below `measured`.
+//!
+//! `--strict-timing` compared timing fields for **equality** until M1 P4, and
+//! a cycle model is never equal. A trust entry may now carry a [`Band`] — a
+//! stated interval, a coverage fraction and an aggregate tolerance, naming the
+//! payloads that measured it — and where one side of the replay carries one
+//! for the payload in hand, `--strict-timing` enforces *within-band* instead.
+//! Where neither side does, it is the same exact comparison it always was.
+//! The report's ratios are printed either way; the band changes what fails,
+//! never what is shown.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use anyhow::{Result, bail};
 
+use crate::configuration::Band;
 use crate::grade::{FieldClass, Grade};
 use crate::payload::PinCapture;
 use crate::transcript::Transcript;
@@ -91,7 +101,61 @@ pub struct ReplayReport {
     /// claims the guest makes about its own driver and they arrive in the
     /// console. This is about the pad itself.
     pub pin_not_compared: Option<String>,
+    /// The timing band in force for this replay, if either side stated one for
+    /// this payload. `None` means `--strict-timing` compares exactly, as it
+    /// did before bands existed.
+    pub timing_band: Option<AppliedBand>,
     pub options: ReplayOptions,
+}
+
+/// A band, resolved against this particular pair of transcripts.
+#[derive(Clone, Debug)]
+pub struct AppliedBand {
+    pub band: Band,
+    /// The configuration whose trust entry stated it.
+    pub stated_by: String,
+    /// True when the banded side is the **left** transcript, so the canonical
+    /// reference-over-model ratio is `right / left` — the reciprocal of the
+    /// `left / right` the report prints. See [`Band`]'s "Direction".
+    pub invert: bool,
+}
+
+impl AppliedBand {
+    /// `FieldCompare::ratio` is `left / right`; the band is read
+    /// reference-over-model. Turn one into the other.
+    fn canonical(&self, ratio: f64) -> Option<f64> {
+        if self.invert {
+            (ratio != 0.0).then(|| 1.0 / ratio)
+        } else {
+            Some(ratio)
+        }
+    }
+
+    fn direction(&self) -> &'static str {
+        if self.invert {
+            "right/left"
+        } else {
+            "left/right"
+        }
+    }
+}
+
+/// How one timing field fared against the band.
+#[derive(Clone, Debug)]
+pub struct BandVerdict {
+    /// `compile-tick.slice_cycles`.
+    pub scope: String,
+    pub field: String,
+    pub samples: usize,
+    pub in_band: usize,
+    /// `in_band / samples`.
+    pub coverage: f64,
+    /// `sum(reference) / sum(model)`, in the band's own direction.
+    pub aggregate: Option<f64>,
+    /// Samples whose value did not parse as a number on one side or the other:
+    /// a band cannot speak for those, so they are still compared exactly.
+    pub unbandable_differences: usize,
+    pub passed: bool,
 }
 
 /// Classes whose divergence fails a replay.
@@ -134,12 +198,149 @@ impl ReplayReport {
             }
         }
         if self.options.strict_timing {
-            for c in self.differences_in(FieldClass::Timing) {
-                out.push(format!(
-                    "timing field {}.{} differs: {} vs {} (--strict-timing)",
-                    c.scope, c.field, c.left, c.right
-                ));
+            match &self.timing_band {
+                // No band on either side, or the band does not speak for this
+                // payload: exactly the comparison this has always been.
+                None => {
+                    for c in self.differences_in(FieldClass::Timing) {
+                        out.push(format!(
+                            "timing field {}.{} differs: {} vs {} (--strict-timing)",
+                            c.scope, c.field, c.left, c.right
+                        ));
+                    }
+                }
+                Some(applied) => {
+                    for v in self.band_verdicts() {
+                        if v.passed {
+                            continue;
+                        }
+                        let mut why = Vec::new();
+                        if v.coverage < applied.band.per_sample_coverage {
+                            why.push(format!(
+                                "{}/{} samples ({:.1} %) inside [{:.2}, {:.2}], band asks for \
+                                 {:.0} %",
+                                v.in_band,
+                                v.samples,
+                                v.coverage * 100.0,
+                                applied.band.per_sample[0],
+                                applied.band.per_sample[1],
+                                applied.band.per_sample_coverage * 100.0
+                            ));
+                        }
+                        match v.aggregate {
+                            Some(a) if (a - 1.0).abs() > applied.band.aggregate => {
+                                why.push(format!(
+                                    "aggregate {a:.3} is {:.1} % out, band allows {:.0} %",
+                                    (a - 1.0).abs() * 100.0,
+                                    applied.band.aggregate * 100.0
+                                ));
+                            }
+                            None => why.push("no aggregate could be computed".into()),
+                            Some(_) => {}
+                        }
+                        if v.unbandable_differences > 0 {
+                            why.push(format!(
+                                "{} sample(s) differ and are not numbers, so no band speaks for \
+                                 them",
+                                v.unbandable_differences
+                            ));
+                        }
+                        out.push(format!(
+                            "timing field {}.{} is outside the band `{}` stated by `{}` \
+                             (ratios read {}): {} (--strict-timing)",
+                            v.scope,
+                            v.field,
+                            applied.band.describe(),
+                            applied.stated_by,
+                            applied.direction(),
+                            why.join("; ")
+                        ));
+                    }
+                }
             }
+        }
+        out
+    }
+
+    /// How each timing field fared against the band in force.
+    ///
+    /// Empty when no band is in force. Coverage is per **field**, over all of
+    /// that field's samples in this replay: `compile-tick[1..92].slice_cycles`
+    /// is one verdict over 92 samples, and a record field that appears once is
+    /// one verdict over one sample (which must then be in band, since no
+    /// coverage fraction of one sample is less than one).
+    pub fn band_verdicts(&self) -> Vec<BandVerdict> {
+        let Some(applied) = &self.timing_band else {
+            return Vec::new();
+        };
+        // Series scopes are `compile-tick[17]`; the samples of one field
+        // belong together, so the index is not part of the key.
+        let family = |scope: &str| -> String {
+            scope
+                .split_once('[')
+                .map_or_else(|| scope.to_string(), |(head, _)| head.to_string())
+        };
+        let mut groups: BTreeMap<(String, String), Vec<&FieldCompare>> = BTreeMap::new();
+        for c in self.comparisons_in(FieldClass::Timing) {
+            groups
+                .entry((family(&c.scope), c.field.clone()))
+                .or_default()
+                .push(c);
+        }
+        let mut out = Vec::new();
+        for ((scope, field), cs) in groups {
+            let mut samples = 0usize;
+            let mut in_band = 0usize;
+            let mut sum_ref = 0.0f64;
+            let mut sum_model = 0.0f64;
+            let mut sums_ok = true;
+            let mut unbandable = 0usize;
+            for c in &cs {
+                let Some(ratio) = c.ratio.and_then(|r| applied.canonical(r)) else {
+                    // Not a number on one side, or a zero denominator. A band
+                    // is a statement about magnitudes and has nothing to say
+                    // here, so the old rule stands: it has to be equal.
+                    if !c.equal {
+                        unbandable += 1;
+                    }
+                    continue;
+                };
+                samples += 1;
+                if applied.band.contains(ratio) {
+                    in_band += 1;
+                }
+                match (c.left.parse::<f64>(), c.right.parse::<f64>()) {
+                    (Ok(l), Ok(r)) => {
+                        let (reference, model) = if applied.invert { (r, l) } else { (l, r) };
+                        sum_ref += reference;
+                        sum_model += model;
+                    }
+                    _ => sums_ok = false,
+                }
+            }
+            if samples == 0 && unbandable == 0 {
+                continue;
+            }
+            let coverage = if samples == 0 {
+                0.0
+            } else {
+                in_band as f64 / samples as f64
+            };
+            let aggregate = (sums_ok && sum_model != 0.0).then_some(sum_ref / sum_model);
+            let passed = unbandable == 0
+                && samples > 0
+                && coverage >= applied.band.per_sample_coverage
+                && aggregate.is_some_and(|a| (a - 1.0).abs() <= applied.band.aggregate);
+            out.push(BandVerdict {
+                scope,
+                field,
+                samples,
+                in_band,
+                coverage,
+                aggregate,
+                unbandable_differences: unbandable,
+                passed,
+            });
         }
         out
     }
@@ -187,6 +388,36 @@ impl ReplayReport {
             // different reading of the same pin and the only one an
             // instrument could confirm.
             let _ = writeln!(s, "  {:<16} {:>9}   — {why}", "pin capture", "not compared");
+        }
+
+        // The band, and how each timing field sat in it. Printed whether or
+        // not `--strict-timing` is on: what the band says is a fact about this
+        // pair of transcripts, and a reader deciding whether to trust the
+        // timing column should see it without having to ask for a gate. The
+        // ratios below are unchanged either way (PD9/D13: a band is not a
+        // licence to gate a product number on emulated microseconds).
+        if let Some(applied) = &self.timing_band {
+            let _ = writeln!(
+                s,
+                "\n  timing band {} — stated by {}, ratios read {} (reference / model):",
+                applied.band.describe(),
+                applied.stated_by,
+                applied.direction()
+            );
+            for v in self.band_verdicts() {
+                let agg = v
+                    .aggregate
+                    .map_or_else(|| "—".to_string(), |a| format!("{a:.3}"));
+                let _ = writeln!(
+                    s,
+                    "    {:<34} {:>3}/{:<3} in band ({:>5.1} %), aggregate {agg}  {}",
+                    format!("{}.{}", v.scope, v.field),
+                    v.in_band,
+                    v.samples,
+                    v.coverage * 100.0,
+                    if v.passed { "within band" } else { "OUTSIDE" }
+                );
+            }
         }
 
         let timing: Vec<_> = self
@@ -533,6 +764,59 @@ pub fn replay(
         }
     }
 
+    // --- the timing band ---------------------------------------------------
+    //
+    // Resolved here rather than in `failures()` so the report carries what it
+    // was judged against, and so the ratio's direction is decided once. The
+    // band belongs to the configuration that stated it, and the *other* side
+    // is the reference: silicon / t3, the direction the calibration record's
+    // tables use. A band that named no payloads was refused at parse time; a
+    // band that does not name THIS payload does not travel to it.
+    // A grade is frozen in the sidecar because it is a claim about the run
+    // that produced it. A band is not: it is the contract this tree states
+    // *today* for that configuration, and the whole point of the mechanism is
+    // that the number is a policy somebody chooses. So it is read from
+    // `validate.toml` — the same live source `records_pins` above is read
+    // from, and for the same reason — with the sidecar's own entry as the
+    // fallback for a configuration the live table no longer knows. That also
+    // means changing a band never asks anyone to re-record a transcript,
+    // which matters: "never edit a transcript" and "a band is Yona's to
+    // choose" would otherwise be in direct conflict.
+    fn band_of<'a>(t: &'a Transcript, cfg: &'a crate::config::ValidateConfig) -> Option<&'a Band> {
+        cfg.configuration(&t.header.configuration)
+            .ok()
+            .and_then(|c| c.trust.band(FieldClass::Timing))
+            .or_else(|| t.header.trust.band(FieldClass::Timing))
+    }
+    fn covers<'a>(b: Option<&'a Band>, payload: &str) -> Option<&'a Band> {
+        b.filter(|b| b.covers(payload))
+    }
+    let (left_band, right_band) = (
+        covers(band_of(left, &cfg), payload.name),
+        covers(band_of(right, &cfg), payload.name),
+    );
+    let timing_band = match (left_band, right_band) {
+        (None, None) => None,
+        // Both sides state one: there is no reference side to divide by, so
+        // the printed direction is kept and the left's band is enforced. No
+        // configuration pair in the tree does this today.
+        (Some(b), Some(_)) => Some(AppliedBand {
+            band: b.clone(),
+            stated_by: left.header.configuration.clone(),
+            invert: false,
+        }),
+        (Some(b), None) => Some(AppliedBand {
+            band: b.clone(),
+            stated_by: left.header.configuration.clone(),
+            invert: true,
+        }),
+        (None, Some(b)) => Some(AppliedBand {
+            band: b.clone(),
+            stated_by: right.header.configuration.clone(),
+            invert: false,
+        }),
+    };
+
     Ok(ReplayReport {
         payload: payload.name,
         left_name: describe(left),
@@ -545,6 +829,7 @@ pub fn replay(
         structural_problems,
         grade_problems,
         pin_not_compared: pin_note,
+        timing_band,
         options,
     })
 }

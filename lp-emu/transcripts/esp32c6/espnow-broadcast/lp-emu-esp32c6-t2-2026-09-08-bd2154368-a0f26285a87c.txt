@@ -1,0 +1,29 @@
+[fw-checks-header] {"schema":1,"payload":"espnow-broadcast","chip":"esp32c6","firmware_commit":"bd2154368792","firmware_features":"default,esp32c6,esp_radio,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_espnow_broadcast","firmware_dirty":false}
+[INFO] fw_esp32c6::hardware::espnow_radio_driver: [fw-esp32c6] ESP-NOW radio version=2 channel=11
+[espnow-broadcast] radio ready device=0x7ca88562 espnow_channel=11 logical_channel=1 tick_ms=50 ticks_per_send=2 tx_events=6 rx_events=6
+[espnow-broadcast] tx device=0x7ca88562 event=0 kind=1 payload_len=0
+[fw-check-json] {"kind":"espnow-tx","n":0,"device":2091418978,"event":0,"msg_kind":1,"payload_len":0}
+[espnow-broadcast] rx device=0x8cb48762 event=2 kind=1 payload_len=24
+[fw-check-json] {"kind":"espnow-rx","n":0,"peer":2360641378,"gap":0,"msg_kind":1,"len_ok":true}
+[espnow-broadcast] tx device=0x7ca88562 event=1 kind=1 payload_len=8
+[fw-check-json] {"kind":"espnow-tx","n":1,"device":2091418978,"event":1,"msg_kind":1,"payload_len":8}
+[espnow-broadcast] tx device=0x7ca88562 event=2 kind=1 payload_len=24
+[fw-check-json] {"kind":"espnow-tx","n":2,"device":2091418978,"event":2,"msg_kind":1,"payload_len":24}
+[espnow-broadcast] rx device=0x8cb48762 event=4 kind=1 payload_len=0
+[fw-check-json] {"kind":"espnow-rx","n":1,"peer":2360641378,"gap":2,"msg_kind":1,"len_ok":true}
+[espnow-broadcast] tx device=0x7ca88562 event=3 kind=1 payload_len=64
+[fw-check-json] {"kind":"espnow-tx","n":3,"device":2091418978,"event":3,"msg_kind":1,"payload_len":64}
+[espnow-broadcast] tx device=0x7ca88562 event=4 kind=1 payload_len=0
+[fw-check-json] {"kind":"espnow-tx","n":4,"device":2091418978,"event":4,"msg_kind":1,"payload_len":0}
+[espnow-broadcast] rx device=0x8cb48762 event=6 kind=1 payload_len=24
+[fw-check-json] {"kind":"espnow-rx","n":2,"peer":2360641378,"gap":2,"msg_kind":1,"len_ok":true}
+[espnow-broadcast] tx device=0x7ca88562 event=5 kind=1 payload_len=8
+[fw-check-json] {"kind":"espnow-tx","n":5,"device":2091418978,"event":5,"msg_kind":1,"payload_len":8}
+[espnow-broadcast] rx device=0x8cb48762 event=8 kind=1 payload_len=0
+[fw-check-json] {"kind":"espnow-rx","n":3,"peer":2360641378,"gap":2,"msg_kind":1,"len_ok":true}
+[espnow-broadcast] rx device=0x8cb48762 event=10 kind=1 payload_len=24
+[fw-check-json] {"kind":"espnow-rx","n":4,"peer":2360641378,"gap":2,"msg_kind":1,"len_ok":true}
+[espnow-broadcast] rx device=0x8cb48762 event=12 kind=1 payload_len=0
+[fw-check-json] {"kind":"espnow-rx","n":5,"peer":2360641378,"gap":2,"msg_kind":1,"len_ok":true}
+[espnow-broadcast] tx=6 rx=6 peers=1 peer_overflow=false dropped=0
+[espnow-broadcast] === DONE ===

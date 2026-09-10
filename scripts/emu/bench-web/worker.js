@@ -137,7 +137,11 @@ function makeWasi(args, elfFilename, elfBytes) {
 async function loadModule() {
   if (compiled) return;
   const t0 = performance.now();
-  compiled = await WebAssembly.compile(await (await fetch('emu.wasm')).arrayBuffer());
+  // The worker is loaded as worker.js?v=<short sha> (set by index.html from
+  // manifest.json's build.short) so a phone with a stale cache picks up the
+  // matching emu.wasm on refresh instead of silently running an old build.
+  const v = new URL(self.location.href).searchParams.get('v');
+  compiled = await WebAssembly.compile(await (await fetch('emu.wasm' + (v ? '?v=' + v : ''))).arrayBuffer());
   postMessage({ type: 'loaded', compileMs: performance.now() - t0 });
 }
 

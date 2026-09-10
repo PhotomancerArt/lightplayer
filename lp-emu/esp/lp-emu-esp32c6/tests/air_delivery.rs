@@ -136,23 +136,24 @@ fn offer(m: &mut Esp32C6Machine, at: u64, bytes: Vec<u8>) {
 /// **G2-1 and G2-2.** Two machines on one air, and the receiving guest's own
 /// application prints the frame the sending guest's blob armed.
 ///
-/// # What this gate is, and what it is not
+/// # What this gate is — amended by M4 U1
 ///
-/// The milestone asked for "each prints the other's `rx` lines for at least
-/// three consecutive events". **That is out of reach on this image and no
-/// amount of delivery will bring it into reach**, for a reason that is
-/// nothing to do with the air: the `test_espnow` guest arms exactly one
-/// frame and then never returns from its own `send`
-/// (`docs/debt/emu-c6-radio-tx-never-completes.md`). One frame per machine,
-/// ever. And the machine that sends *second* is always sending into a
-/// machine that has already stopped draining, so the traffic is one-way.
+/// P2 wrote this gate as a one-way claim, because at the time the
+/// `test_espnow` guest armed exactly one frame and never returned from its
+/// own `send`: one frame per machine ever, and the machine that sent
+/// *second* was always sending into a machine that had already stopped
+/// draining.
 ///
-/// So the gate is the one the director's dispatch named: **the one frame the
-/// blob does send is delivered, and the receiving guest prints it.** The
-/// pair is staggered ([`Lockstep::stagger`]) because two identical images
-/// started in the same cycle wedge in the same cycle — see that method's
-/// docs, and `the_symmetric_pair_delivers_but_cannot_print` below, which
-/// pins the failure so nobody has to rediscover it.
+/// **M4 U1 closed that debt** — a machine on an air completes its
+/// transmissions — so this run is now a **conversation**: both guests print
+/// the other's frame *and* their own `tx` line. The gate is amended to say
+/// so rather than left asserting a wedge that no longer exists.
+///
+/// The stagger stays. It is no longer load-bearing for the printing (see
+/// `the_symmetric_pair_talks_both_ways` below, which was P2's
+/// `the_symmetric_pair_delivers_but_cannot_print`), but it is what makes the
+/// two machines' sends land at different times, which is the interesting
+/// case.
 #[test]
 #[ignore = "needs a test_espnow ELF in LP_EMU_C6_ESPNOW_ELF"]
 fn the_pair_hears_itself() {
@@ -183,19 +184,22 @@ fn the_pair_hears_itself() {
         );
     }
 
-    // Both armed their one frame; the air carried both; only the machine
-    // that was still draining printed one.
+    // Both armed their one frame in this window; the air carried both; and
+    // now that a TX completes, **both** guests drained the other's and both
+    // printed their own `tx` line.
     assert_eq!(report.machines[0].frames_sent, 1);
     assert_eq!(report.machines[1].frames_sent, 1);
     assert_eq!(pair.machine(second).expect("b").air_frames_delivered(), 1);
-    assert!(
-        console_b.contains("[test_espnow] rx "),
-        "the receiving guest never printed an rx line:\n{console_b}"
-    );
-    assert!(
-        !console_a.contains("[test_espnow] rx "),
-        "machine 0 was wedged in its own send and cannot have drained one"
-    );
+    for (label, console) in [("machine 0", &console_a), ("machine 1", &console_b)] {
+        assert!(
+            console.contains("[test_espnow] rx "),
+            "{label} never printed an rx line:\n{console}"
+        );
+        assert!(
+            console.contains("[test_espnow] tx simulated_button device= event=1"),
+            "{label}'s own send never returned:\n{console}"
+        );
+    }
 
     // G2-2, the hex triple: the bytes the sender's own `--tx-log` printed,
     // the bytes the air carried, and the bytes read back out of the
@@ -233,16 +237,19 @@ fn the_pair_hears_itself() {
     );
 }
 
-/// The failure the stagger exists for, pinned: two identical images started
-/// in the same cycle both **deliver** and neither **prints**, because each
-/// is wedged inside its own `send` by the time the other's frame arrives.
+/// P2 wrote this as `the_symmetric_pair_delivers_but_cannot_print`, and said
+/// in its own docstring: "if this ever starts printing, a TX has completed
+/// and `docs/debt/emu-c6-radio-tx-never-completes.md` is closed — which would
+/// be very good news and should be chased, not silenced."
 ///
-/// If this ever starts printing, a TX has completed and
-/// `docs/debt/emu-c6-radio-tx-never-completes.md` is closed — which would be
-/// very good news and should be chased, not silenced.
+/// **M4 U1 chased it.** Two identical images started in the same cycle both
+/// deliver *and* both print — the frame they received and their own `tx`
+/// line — because neither is wedged in its own `send` any more. The gate is
+/// the same run with the opposite expectation, kept under a new name so the
+/// change is visible in a diff rather than hidden in an assertion.
 #[test]
 #[ignore = "needs a test_espnow ELF in LP_EMU_C6_ESPNOW_ELF"]
-fn the_symmetric_pair_delivers_but_cannot_print() {
+fn the_symmetric_pair_talks_both_ways() {
     let Some(elf) = espnow_elf() else { return };
     let a = machine(&elf, "a0:f2:62:87:b4:8c");
     let b = machine(&elf, "a0:f2:62:85:a8:7c");
@@ -250,14 +257,19 @@ fn the_symmetric_pair_delivers_but_cannot_print() {
     let report = pair.run_until(ms(1_200), &StopCondition::default());
     for i in 0..2 {
         let m = pair.machine(ParticipantId(i)).expect("a machine");
+        let console = m.usb_sj().text();
+        println!("--- machine {i} ---\n{console}");
         assert_eq!(report.machines[i].frames_sent, 1);
         assert_eq!(m.air_frames_delivered(), 1, "the ring took it");
         assert!(
-            !m.usb_sj().text().contains("[test_espnow] rx "),
-            "machine {i} printed an rx line — has a TX completed?"
+            console.contains("[test_espnow] rx "),
+            "machine {i} never printed an rx line:\n{console}"
+        );
+        assert!(
+            console.contains("[test_espnow] tx simulated_button device= event=1"),
+            "machine {i}'s own send never returned:\n{console}"
         );
     }
-    println!("both delivered, neither printed: the wedge, not the air");
 }
 
 /// **G2-5, the ring's end.** The blob posts ten descriptors and the chain
@@ -648,5 +660,916 @@ fn the_descriptor_words_undetermined_bits_change_nothing() {
         run(Some(0x41a9_06a4)).0,
         delivered.0,
         "if these ever agree, the guest has stopped reading [23:12]"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// M4 U1 — the TX-completion pass.
+//
+// The experiment `docs/debt/emu-c6-radio-tx-never-completes.md` asks for, run
+// against **the state a real completion would find** rather than against the
+// machine as it sits: M4 P2's lesson (Appendix B.5) is that a sweep with
+// nothing to find measures the experiment. `test_espnow`'s own
+// `[test_espnow] tx simulated_button … event=N` line and `--break-at
+// lmacTxDone` are the two oracles.
+// ---------------------------------------------------------------------------
+
+/// The TX slot's PLCP0, for reading back the descriptor the blob armed.
+const TX_PLCP0: u32 = 0x4d6c;
+
+/// A machine run past its own arming write (~1,036 ms) with the air armed —
+/// one frame handed to the MAC, the blob waiting for a completion.
+fn a_machine_that_armed_a_frame(elf: &str, buf: Option<&SharedBuffer>) -> Esp32C6Machine {
+    let mut m = build(elf, "a0:f2:62:87:b4:8c", buf, TxLogSink::Off);
+    m.arm_air(ParticipantId(0));
+    m.run_until(&until(ms(1_100)));
+    assert!(
+        m.usb_sj().text().contains("[test_espnow] radio ready"),
+        "the radio never came up"
+    );
+    m
+}
+
+/// The descriptor PLCP0 points at, and a check that the go strobe is there —
+/// i.e. that this machine really did arm a frame.
+fn armed_descriptor(m: &mut Esp32C6Machine) -> u32 {
+    let plcp0 = m.peek_word(WIFI_MAC + TX_PLCP0).expect("the PLCP0 word");
+    assert_eq!(
+        plcp0 & 0xc000_0000,
+        0xc000_0000,
+        "no go strobe in PLCP0 ({plcp0:#010x}): this machine armed nothing"
+    );
+    0x4080_0000 | (plcp0 & 0x000f_ffff)
+}
+
+fn raise_mac(m: &mut Esp32C6Machine, bits: u32) {
+    let i = m
+        .bus
+        .peripheral_index("WIFI_MAC")
+        .expect("the radio window");
+    m.bus
+        .with_peripheral::<lp_emu_esp32c6::periph::wifi_stub::WifiStub, _>(i, |w, _| {
+            w.raise_event(bits)
+        });
+    m.bus
+        .irq
+        .set_level(lp_emu_esp32c6::regs::source::WIFI_MAC, true);
+}
+
+/// A trace line's `pc=0x…`, symbolized against the image.
+fn pc_of(line: &str) -> Option<u32> {
+    let rest = line.split("pc=0x").nth(1)?;
+    u32::from_str_radix(rest.get(..8)?, 16).ok()
+}
+
+/// **Where the wedge is.** M4 P0 §3 measured that the guest stops making
+/// progress after the arming write — no `wfi`, no MMIO, 160 M instructions a
+/// second — and called it "a spin on RAM" without saying where. The frame
+/// pointer chain says where.
+#[test]
+#[ignore = "needs a test_espnow ELF in LP_EMU_C6_ESPNOW_ELF"]
+fn u1_where_the_guest_is_wedged() {
+    let Some(elf) = espnow_elf() else { return };
+    let mut m = build(&elf, "a0:f2:62:87:b4:8c", None, TxLogSink::Off);
+    m.arm_air(ParticipantId(0));
+    for at in [900u64, 1_030, 1_040, 1_100, 1_500, 2_000] {
+        m.run_until(&until(ms(at)));
+        println!("\n=== at {at} ms, {} instructions ===", m.instructions());
+        for (i, (addr, sym)) in m.backtrace().into_iter().enumerate() {
+            println!("  #{i:<2} {addr:#010x}  {sym}");
+        }
+        let regs = m.registers();
+        let named = ["zero", "ra", "sp", "gp", "tp", "t0", "t1", "t2", "s0", "s1"];
+        for (i, v) in regs.iter().enumerate().take(18) {
+            let name = named.get(i).copied().unwrap_or("");
+            let sym = m.symbolize(*v).unwrap_or_default();
+            println!("  x{i:<2} {name:<5} {v:#010x} {sym}");
+        }
+    }
+}
+
+/// One sweep candidate: a register to put `bits` in before the raise.
+#[derive(Clone, Copy, Debug)]
+struct Candidate {
+    block: &'static str,
+    off: u32,
+    bits: u32,
+    state: TxState,
+}
+
+/// The registers this pass sweeps, and why each is a candidate:
+///
+/// - `WIFI_MAC+0x4c48` — the event word M4 P1 swept with an empty RX ring.
+/// - `WIFI_MAC+0x4c34` — **never swept.** The ISR reads it immediately after
+///   the event word (`hal_mac_interrupt_get_bsscolor+0x4`) and clears through
+///   `+0x4c38`: the shape of a second event register, and P1 read its zero as
+///   scenery rather than as a candidate.
+/// - `WIFI_PWR+0x37b0` — the PWR block's event word.
+/// - `WIFI_PWR+0x37ac` — read beside it by `pwr_hal_get_intr_raw_signal+0x4`
+///   and never cleared: a raw-signal twin.
+const SWEPT_REGISTERS: [(&str, u32); 4] = [
+    ("WIFI_MAC", 0x4c48),
+    ("WIFI_MAC", 0x4c34),
+    ("WIFI_PWR", 0x37b0),
+    ("WIFI_PWR", 0x37ac),
+];
+
+/// What one candidate did.
+///
+/// **The instruction count is not a discriminator on this path and must not
+/// be read as one.** The wedged guest retires one instruction per cycle in
+/// `send_channel`'s spin, so a run bounded by a cycle deadline retires the
+/// same number whatever the ISR did with its tens of instructions — which is
+/// also why M4 P1's "identical instruction count for all 64 candidates" was
+/// never the strong evidence it read as. What separates the paths is the
+/// number of radio-window accesses the raise produced and which of them are
+/// not the ISR's staples.
+#[derive(Debug)]
+struct Row {
+    candidate: Candidate,
+    instructions: u64,
+    /// Accesses to either radio block after the raise: the path length.
+    accesses: usize,
+    tx_done: bool,
+    tx_line: bool,
+    /// The first access to either radio block, after the raise, that is not
+    /// one of the reads and writes the ISR always makes — the "next register
+    /// read" the brief asks each row to name.
+    novel: Option<String>,
+}
+
+/// The accesses every ISR entry makes, whatever it is told. Anything else is
+/// a path this candidate opened.
+const ISR_STAPLES: [&str; 7] = [
+    "+0x4c48", "+0x4c34", "+0x37b0", "+0x37ac", "+0x4c4c", "+0x4c38", "+0x37b4",
+];
+
+/// What state to put the TX slot in before raising — "what a real completion
+/// would find", enumerated rather than assumed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TxState {
+    /// Exactly as the blob left it: `owner` and `eof` set in the descriptor,
+    /// the go strobe still in PLCP0.
+    AsArmed,
+    /// `owner` cleared on the TX descriptor — the `lldesc` convention for
+    /// "the hardware has handed this back".
+    OwnerClear,
+    /// The go strobe cleared out of PLCP0 — "the queue is idle again".
+    StrobeClear,
+    /// Both.
+    Both,
+}
+
+impl TxState {
+    fn label(self) -> &'static str {
+        match self {
+            TxState::AsArmed => "as-armed",
+            TxState::OwnerClear => "owner-clear",
+            TxState::StrobeClear => "strobe-clear",
+            TxState::Both => "both",
+        }
+    }
+}
+
+/// Run one candidate to the oracles, with the TX slot put into its state
+/// first.
+fn sweep_one(elf: &str, candidate: Candidate) -> Row {
+    let state = candidate.state;
+    let buf = SharedBuffer::new();
+    let mut m = a_machine_that_armed_a_frame(elf, Some(&buf));
+    let desc = armed_descriptor(&mut m);
+    if matches!(state, TxState::OwnerClear | TxState::Both) {
+        let dw0 = m.peek_word(desc).expect("the descriptor word");
+        m.poke_word(desc, dw0 & !(1 << 31));
+    }
+    if matches!(state, TxState::StrobeClear | TxState::Both) {
+        let plcp0 = m.peek_word(WIFI_MAC + TX_PLCP0).expect("PLCP0");
+        m.poke_word(WIFI_MAC + TX_PLCP0, plcp0 & !0xc000_0000);
+    }
+    let _ = m.break_at("lmacTxDone");
+    let mark = buf.lines().len();
+    let (block, off) = (candidate.block, candidate.off);
+    let i = m.bus.peripheral_index(block).expect("the block");
+    m.bus
+        .with_peripheral::<lp_emu_esp32c6::periph::wifi_stub::WifiStub, _>(i, |w, _| {
+            w.raise_event(0)
+        });
+    let base = if block == "WIFI_MAC" {
+        WIFI_MAC
+    } else {
+        0x600a_9900
+    };
+    m.poke_word(base + off, candidate.bits);
+    m.bus
+        .irq
+        .set_level(lp_emu_esp32c6::regs::source::WIFI_MAC, true);
+    let outcome = m.run_until(&until(ms(1_400)));
+    let lines = buf.lines();
+    let novel = lines
+        .iter()
+        .skip(mark)
+        .find(|l| {
+            (l.contains(" R4 ") || l.contains(" W4 ")) && !ISR_STAPLES.iter().any(|s| l.contains(s))
+        })
+        .map(|l| {
+            let sym = pc_of(l).and_then(|pc| m.symbolize(pc)).unwrap_or_default();
+            let short = l.split(" R4 ").last().unwrap_or(l);
+            let short = short.split(" W4 ").last().unwrap_or(short);
+            format!("{short}  pc={:#010x} {sym}", pc_of(l).unwrap_or(0))
+        });
+    let accesses = lines
+        .iter()
+        .skip(mark)
+        .filter(|l| l.contains(" R4 ") || l.contains(" W4 "))
+        .count();
+    Row {
+        candidate,
+        instructions: m.instructions(),
+        accesses,
+        tx_done: matches!(outcome, Outcome::Breakpoint { .. }),
+        tx_line: m
+            .usb_sj()
+            .text()
+            .contains("[test_espnow] tx simulated_button"),
+        novel,
+    }
+}
+
+fn print_rows(rows: &[Row]) {
+    println!(
+        "{:<9} {:<8} {:<12} {:<13} {:>7}  {:<10} {:<7}  next-novel-access",
+        "block", "off", "bits", "tx-state", "acc", "lmacTxDone", "tx-line"
+    );
+    for r in rows {
+        println!(
+            "{:<9} +{:#06x} {:#012x} {:<13} {:>7}  {:<10} {:<7}  {}",
+            r.candidate.block,
+            r.candidate.off,
+            r.candidate.bits,
+            r.candidate.state.label(),
+            r.accesses,
+            r.tx_done,
+            r.tx_line,
+            r.novel.as_deref().unwrap_or("-")
+        );
+    }
+    let paths: std::collections::BTreeSet<usize> = rows.iter().map(|r| r.accesses).collect();
+    let counts: std::collections::BTreeSet<u64> = rows.iter().map(|r| r.instructions).collect();
+    println!(
+        "{} candidates, {} distinct access counts {:?}, {} distinct instruction counts \
+         (the latter measures the deadline, not the path)",
+        rows.len(),
+        paths.len(),
+        paths,
+        counts.len()
+    );
+}
+
+/// **Method 2, the sweep.** One bit at a time in each of the four registers
+/// the ISR touches, then the enable mask `hal_init` programmed
+/// (`WIFI_MAC+0x4c40 = 0x19a879e0`) and its own bits, against both oracles.
+#[test]
+#[ignore = "needs a test_espnow ELF in LP_EMU_C6_ESPNOW_ELF"]
+fn u1_sweep_every_event_bit_after_an_armed_tx() {
+    let Some(elf) = espnow_elf() else { return };
+    let mut rows = Vec::new();
+    for (block, off) in SWEPT_REGISTERS {
+        for bits in (0..32u32)
+            .map(|n| 1u32 << n)
+            .chain([0xffff_ffff, 0x19a8_79e0])
+        {
+            rows.push(sweep_one(
+                &elf,
+                Candidate {
+                    block,
+                    off,
+                    bits,
+                    state: TxState::AsArmed,
+                },
+            ));
+        }
+    }
+    print_rows(&rows);
+    let hits: Vec<&Row> = rows.iter().filter(|r| r.tx_done || r.tx_line).collect();
+    println!("candidates that reached an oracle: {hits:?}");
+}
+
+/// **Method 3.** The same sweep of the MAC's event word, but with the TX slot
+/// put into the state a *finished* transmission would leave it in — `owner`
+/// handed back on the descriptor, the go strobe gone from PLCP0, or both.
+///
+/// M4 P2's lesson applied to the TX side: P1 swept an event word on a machine
+/// whose TX slot still said "armed and busy", which is a machine with nothing
+/// to find.
+#[test]
+#[ignore = "needs a test_espnow ELF in LP_EMU_C6_ESPNOW_ELF"]
+fn u1_sweep_the_event_word_against_a_finished_tx_slot() {
+    let Some(elf) = espnow_elf() else { return };
+    let mut rows = Vec::new();
+    for state in [TxState::OwnerClear, TxState::StrobeClear, TxState::Both] {
+        for bits in (0..32u32)
+            .map(|n| 1u32 << n)
+            .chain([0xffff_ffff, 0x19a8_79e0])
+        {
+            rows.push(sweep_one(
+                &elf,
+                Candidate {
+                    block: "WIFI_MAC",
+                    off: 0x4c48,
+                    bits,
+                    state,
+                },
+            ));
+        }
+    }
+    print_rows(&rows);
+    let hits: Vec<&Row> = rows.iter().filter(|r| r.tx_done || r.tx_line).collect();
+    println!("candidates that reached an oracle: {hits:?}");
+}
+
+/// **Why nothing else runs either.** M4 P0 §3 measured "no MMIO of any kind"
+/// after the arming write and read it as a RAM spin with the timer interrupt
+/// not being taken. This is the unfiltered version of that measurement,
+/// bucketed by block, over the window either side of the arming write.
+#[test]
+#[ignore = "needs a test_espnow ELF in LP_EMU_C6_ESPNOW_ELF"]
+fn u1_what_the_machine_touches_after_the_arming_write() {
+    let Some(elf) = espnow_elf() else { return };
+    let buf = SharedBuffer::new();
+    let mut m = Esp32C6Builder::new()
+        .app(AppSource::Path(elf.clone().into()))
+        .trace(Box::new(buf.clone()), vec![])
+        .usb_host(UsbHost::Attached { draining: true })
+        .efuse(EfuseIdentity {
+            mac: EfuseIdentity::parse_mac("a0:f2:62:87:b4:8c").expect("a MAC"),
+            ..EfuseIdentity::default()
+        })
+        .build()
+        .expect("a machine");
+    m.arm_air(ParticipantId(0));
+    for (from, to) in [(1_000u64, 1_036u64), (1_036, 1_100), (1_100, 1_400)] {
+        m.run_until(&until(ms(from)));
+        let mark = buf.lines().len();
+        let idle_before = m.idle_skips();
+        m.run_until(&until(ms(to)));
+        let lines = buf.lines();
+        let mut by_block: std::collections::BTreeMap<String, usize> =
+            std::collections::BTreeMap::new();
+        for line in lines.iter().skip(mark) {
+            if !(line.contains(" R4 ") || line.contains(" W4 ")) {
+                continue;
+            }
+            let block = line
+                .split_whitespace()
+                .find(|w| w.contains('+') && w.contains("0x"))
+                .unwrap_or("?")
+                .split('+')
+                .next()
+                .unwrap_or("?")
+                .to_string();
+            *by_block.entry(block).or_default() += 1;
+        }
+        println!(
+            "\n{from}–{to} ms: {} accesses, wfi skips {} -> {}, {by_block:?}",
+            lines.len() - mark,
+            idle_before,
+            m.idle_skips()
+        );
+        let tail: Vec<&String> = lines
+            .iter()
+            .skip(mark)
+            .filter(|l| l.contains(" R4 ") || l.contains(" W4 "))
+            .collect();
+        for line in tail.iter().rev().take(30).rev() {
+            let sym = pc_of(line)
+                .and_then(|pc| m.symbolize(pc))
+                .unwrap_or_default();
+            println!("  {line}   {sym}");
+        }
+    }
+}
+
+/// The paths the sweep separated, printed in full. The interesting one is
+/// `WIFI_PWR+0x37b0` bit 3: it is the only candidate in 132 that takes the
+/// ISR into a **TX-queue** function (`hal_pm_unblock_txq`).
+#[test]
+#[ignore = "needs a test_espnow ELF in LP_EMU_C6_ESPNOW_ELF"]
+fn u1_the_paths_the_event_words_open() {
+    let Some(elf) = espnow_elf() else { return };
+    for (block, off, bits) in [
+        ("WIFI_PWR", 0x37b0u32, 1u32 << 3),
+        ("WIFI_PWR", 0x37b0, 1 << 4),
+        ("WIFI_PWR", 0x37b0, 0xffff_ffff),
+        ("WIFI_MAC", 0x4c48, 1 << 14),
+    ] {
+        let buf = SharedBuffer::new();
+        let mut m = a_machine_that_armed_a_frame(&elf, Some(&buf));
+        let desc = armed_descriptor(&mut m);
+        println!(
+            "\n=== {block}+{off:#06x} = {bits:#010x}, descriptor {desc:#010x} dw0={:#010x} ===",
+            m.peek_word(desc).unwrap_or(0)
+        );
+        let _ = m.break_at("lmacTxDone");
+        let mark = buf.lines().len();
+        let base = if block == "WIFI_MAC" {
+            WIFI_MAC
+        } else {
+            0x600a_9900
+        };
+        m.poke_word(base + off, bits);
+        m.bus
+            .irq
+            .set_level(lp_emu_esp32c6::regs::source::WIFI_MAC, true);
+        let outcome = m.run_until(&until(ms(1_400)));
+        let lines = buf.lines();
+        for line in lines
+            .iter()
+            .skip(mark)
+            .filter(|l| l.contains(" R4 ") || l.contains(" W4 "))
+            .take(48)
+        {
+            let sym = pc_of(line)
+                .and_then(|pc| m.symbolize(pc))
+                .unwrap_or_default();
+            println!("  {line}   {sym}");
+        }
+        println!("  outcome={outcome:?}, console={:?}", m.usb_sj().text());
+    }
+}
+
+/// **The gate the sweep found.** Event bits 7, 8 and 19 of
+/// `WIFI_MAC+0x4c48` are the only ones in 132 that take the ISR into
+/// `hal_mac_get_txq_state` (`0x40806382`), which reads `WIFI_MAC+0x4cb0` and
+/// `+0x4cb8`, finds zero and returns. This answers those two with every
+/// candidate value and asks the oracles again.
+#[test]
+#[ignore = "needs a test_espnow ELF in LP_EMU_C6_ESPNOW_ELF"]
+fn u1_answer_the_txq_state_registers() {
+    let Some(elf) = espnow_elf() else { return };
+    let mut rows: Vec<(u32, String, u32, usize, bool, bool, Option<String>)> = Vec::new();
+    for event in [1u32 << 7, 1 << 8, 1 << 19, 0x19a8_79e0, 0xffff_ffff] {
+        for (label, a, b) in [
+            ("+0x4cb0 all ones", 0xffff_ffffu32, 0u32),
+            ("+0x4cb8 all ones", 0, 0xffff_ffff),
+            ("both all ones", 0xffff_ffff, 0xffff_ffff),
+            ("both = 1", 1, 1),
+            ("both = 0x10", 0x10, 0x10),
+        ] {
+            let buf = SharedBuffer::new();
+            let mut m = a_machine_that_armed_a_frame(&elf, Some(&buf));
+            let desc = armed_descriptor(&mut m);
+            let dw0 = m.peek_word(desc).expect("dw0");
+            m.poke_word(desc, dw0 & !(1 << 31));
+            let _ = m.break_at("lmacTxDone");
+            let mark = buf.lines().len();
+            m.poke_word(WIFI_MAC + 0x4cb0, a);
+            m.poke_word(WIFI_MAC + 0x4cb8, b);
+            m.poke_word(WIFI_MAC + 0x4c48, event);
+            m.bus
+                .irq
+                .set_level(lp_emu_esp32c6::regs::source::WIFI_MAC, true);
+            let outcome = m.run_until(&until(ms(1_400)));
+            let lines = buf.lines();
+            let accesses = lines
+                .iter()
+                .skip(mark)
+                .filter(|l| l.contains(" R4 ") || l.contains(" W4 "))
+                .count();
+            let novel = lines
+                .iter()
+                .skip(mark)
+                .filter(|l| l.contains(" R4 ") || l.contains(" W4 "))
+                .find(|l| {
+                    !ISR_STAPLES.iter().any(|s| l.contains(s))
+                        && !l.contains("+0x4cb0")
+                        && !l.contains("+0x4cb8")
+                })
+                .map(|l| {
+                    let sym = pc_of(l).and_then(|pc| m.symbolize(pc)).unwrap_or_default();
+                    format!("{} {sym}", l.split(" bb = ").next().unwrap_or(l))
+                });
+            rows.push((
+                event,
+                label.to_string(),
+                a,
+                accesses,
+                matches!(outcome, Outcome::Breakpoint { .. }),
+                m.usb_sj()
+                    .text()
+                    .contains("[test_espnow] tx simulated_button"),
+                novel,
+            ));
+        }
+    }
+    println!(
+        "{:<12} {:<18} {:>7}  {:<10} {:<7}  next-novel-access",
+        "event", "txq-state", "acc", "lmacTxDone", "tx-line"
+    );
+    for (event, label, _, acc, done, line, novel) in &rows {
+        println!(
+            "{event:#012x} {label:<18} {acc:>7}  {done:<10} {line:<7}  {}",
+            novel.as_deref().unwrap_or("-")
+        );
+    }
+}
+
+/// **U1's gate.** A machine on an air completes its transmissions, so the
+/// `test_espnow` guest's own `send` returns and it goes round its loop:
+/// `event=1`, then `event=2` a second later. Before this it printed neither.
+#[test]
+#[ignore = "needs a test_espnow ELF in LP_EMU_C6_ESPNOW_ELF"]
+fn a_tx_completes_and_the_guest_sends_again() {
+    let Some(elf) = espnow_elf() else { return };
+    let mut m = machine(&elf, "a0:f2:62:87:b4:8c");
+    m.arm_air(ParticipantId(0));
+    m.run_until(&until(ms(2_400)));
+    let console = m.usb_sj().text();
+    println!("{console}");
+    println!(
+        "{} instructions, {} wfi skips",
+        m.instructions(),
+        m.idle_skips()
+    );
+    assert!(
+        console.contains("[test_espnow] tx simulated_button device= event=1"),
+        "the first send never returned:\n{console}"
+    );
+    assert!(
+        console.contains("[test_espnow] tx simulated_button device= event=2"),
+        "the guest sent once and stopped — a completion that does not repeat \
+         is a one-off, not a model:\n{console}"
+    );
+    assert!(
+        !console.contains("tx failed"),
+        "the send returned an error:\n{console}"
+    );
+}
+
+/// The off switch, restated for the completion: a machine that is **not** on
+/// an air still never completes a TX, and retires the instruction count every
+/// C6 gate and transcript in the tree was recorded against.
+#[test]
+#[ignore = "needs a test_espnow ELF in LP_EMU_C6_ESPNOW_ELF"]
+fn a_machine_not_in_an_air_still_never_completes_a_tx() {
+    let Some(elf) = espnow_elf() else { return };
+    let mut plain = machine(&elf, "a0:f2:62:87:b4:8c");
+    plain.run_until(&until(ms(1_500)));
+    assert_eq!(plain.instructions(), 79_871_852, "M4 P0 §7's figure");
+    assert!(
+        !plain.usb_sj().text().contains("tx simulated_button"),
+        "a machine nobody asked for radio behaviour from completed a TX"
+    );
+}
+
+/// The chase, past `lmacTxDone`: event bit 7, `+0x4cb8` bit 0, and whatever
+/// further registers the run below says are read next, answered one at a time
+/// until the guest's own `tx simulated_button` line appears or the trace stops
+/// saying anything new.
+#[test]
+#[ignore = "needs a test_espnow ELF in LP_EMU_C6_ESPNOW_ELF"]
+fn u1_chase_the_completion_past_lmac_tx_done() {
+    let Some(elf) = espnow_elf() else { return };
+    let extra: Vec<(u32, u32)> = std::env::var("LP_U1_ANSWERS")
+        .unwrap_or_default()
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .map(|pair| {
+            let (off, value) = pair.split_once('=').expect("off=value");
+            (
+                u32::from_str_radix(off.trim_start_matches("0x"), 16).expect("an offset"),
+                u32::from_str_radix(value.trim_start_matches("0x"), 16).expect("a value"),
+            )
+        })
+        .collect();
+    println!("extra answers: {extra:x?}");
+    let buf = SharedBuffer::new();
+    let mut m = a_machine_that_armed_a_frame(&elf, Some(&buf));
+    let desc = armed_descriptor(&mut m);
+    let dw0 = m.peek_word(desc).expect("dw0");
+    m.poke_word(desc, dw0 & !(1 << 31));
+    let mark = buf.lines().len();
+    for (off, value) in &extra {
+        m.poke_word(WIFI_MAC + off, *value);
+    }
+    m.poke_word(WIFI_MAC + 0x4cb8, 1);
+    m.poke_word(WIFI_MAC + 0x4c48, 1 << 7);
+    m.bus
+        .irq
+        .set_level(lp_emu_esp32c6::regs::source::WIFI_MAC, true);
+    let outcome = m.run_until(&until(ms(2_400)));
+    let lines = buf.lines();
+    let after: Vec<&String> = lines
+        .iter()
+        .skip(mark)
+        .filter(|l| l.contains(" R4 ") || l.contains(" W4 "))
+        .collect();
+    for line in after.iter().take(70) {
+        let sym = pc_of(line)
+            .and_then(|pc| m.symbolize(pc))
+            .unwrap_or_default();
+        println!("  {line}   {sym}");
+    }
+    println!(
+        "{} accesses, outcome={outcome:?}\nconsole:\n{}",
+        after.len(),
+        m.usb_sj().text()
+    );
+}
+
+/// **Method 1.** What the blob's ISR reads when source 0 is raised on a
+/// machine that has *armed a frame*, with the TX descriptor as the blob left
+/// it and with `owner` cleared — the `lldesc` convention for "the hardware is
+/// done with this one".
+#[test]
+#[ignore = "needs a test_espnow ELF in LP_EMU_C6_ESPNOW_ELF"]
+fn u1_what_the_isr_reads_after_an_armed_tx() {
+    let Some(elf) = espnow_elf() else { return };
+    for (label, clear_owner) in [("as armed", false), ("owner cleared", true)] {
+        let buf = SharedBuffer::new();
+        let mut m = a_machine_that_armed_a_frame(&elf, Some(&buf));
+        let desc = armed_descriptor(&mut m);
+        let dw0 = m.peek_word(desc).expect("the descriptor word");
+        println!("\n=== {label}: descriptor {desc:#010x} dw0={dw0:#010x} ===");
+        if clear_owner {
+            m.poke_word(desc, dw0 & !(1 << 31));
+        }
+        let before = m.instructions();
+        let mark = buf.lines().len();
+        let _ = m.break_at("lmacTxDone");
+        raise_mac(&mut m, 0xffff_ffff);
+        let outcome = m.run_until(&until(ms(1_120)));
+        let lines = buf.lines();
+        for line in lines.iter().skip(mark).take(60) {
+            let sym = pc_of(line)
+                .and_then(|pc| m.symbolize(pc))
+                .unwrap_or_default();
+            println!("{line}   {sym}");
+        }
+        println!(
+            "{label}: {} lines, {} instructions, outcome={outcome:?}",
+            lines.len() - mark,
+            m.instructions() - before
+        );
+        println!("console: {:?}", m.usb_sj().text());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The every-other-frame delivery
+// ---------------------------------------------------------------------------
+
+/// The `espnow-broadcast` image — the first payload on this machine that both
+/// sends and receives repeatedly, and so the only one that can show a *stream*
+/// of receptions. Driven by **`LP_EMU_C6_ESPNOW_BROADCAST_ELF`**.
+fn broadcast_elf() -> Option<String> {
+    match std::env::var("LP_EMU_C6_ESPNOW_BROADCAST_ELF") {
+        Ok(path) if std::path::Path::new(&path).is_file() => Some(path),
+        Ok(path) => panic!("LP_EMU_C6_ESPNOW_BROADCAST_ELF={path} is not a file"),
+        Err(_) => {
+            eprintln!(
+                "air_delivery: skipped — set LP_EMU_C6_ESPNOW_BROADCAST_ELF to a \
+                 `test_espnow_broadcast,esp32c6` ELF"
+            );
+            None
+        }
+    }
+}
+
+/// Every descriptor in the guest's RX ring, walked from the base it programmed:
+/// `(address, dw0)` in the chain's own order.
+fn ring(m: &mut Esp32C6Machine) -> Vec<(u32, u32)> {
+    let Some(base) = m.peek_word(WIFI_MAC + 0x4084) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let mut desc = base;
+    while out.len() < 16 {
+        let Some(dw0) = m.peek_word(desc) else { break };
+        out.push((desc, dw0));
+        match m.peek_word(desc + 8) {
+            Some(0) | None => break,
+            Some(next) => desc = next,
+        }
+    }
+    out
+}
+
+/// One character per descriptor: `H` where the hardware still owns it
+/// (`dw0[31]`), `.` where it has been handed back.
+fn owners(ring: &[(u32, u32)]) -> String {
+    ring.iter()
+        .map(|(_, dw0)| if dw0 & (1 << 31) != 0 { 'H' } else { '.' })
+        .collect()
+}
+
+/// The index of the descriptor a delivery would take — the first one the
+/// hardware still owns.
+fn first_owned(ring: &[(u32, u32)]) -> Option<usize> {
+    ring.iter().position(|(_, dw0)| dw0 & (1 << 31) != 0)
+}
+
+/// A sender and a receiver of the `espnow-broadcast` image, both up.
+///
+/// This is the lockstep pair taken apart, so that the receiving machine can be
+/// stopped and read *between* deliveries — the one thing [`Lockstep`] does not
+/// offer and the whole question needs.
+fn broadcast_sender_and_receiver(
+    elf: &str,
+    trace: Option<&SharedBuffer>,
+) -> (Esp32C6Machine, Esp32C6Machine) {
+    let mut sender = machine(elf, "a0:f2:62:87:b4:8c");
+    sender.arm_air(ParticipantId(1));
+    let mut receiver = build(elf, "a0:f2:62:85:a8:7c", trace, TxLogSink::Off);
+    receiver.arm_air(ParticipantId(0));
+    sender.run_until(&until(ms(1_000)));
+    receiver.run_until(&until(ms(1_000)));
+    (sender, receiver)
+}
+
+/// **The instrumentation that named the cause of
+/// `docs/debt/emu-c6-air-delivers-every-other-frame.md`.**
+///
+/// Eight frames from a real `espnow-broadcast` sender, handed to a real
+/// `espnow-broadcast` receiver **one at a time, with the receiver run in
+/// between**, and after every one: the ring's owner bits, the descriptor the
+/// walk chose, the cursors the delivery wrote, what the guest read back from
+/// `+0x4084` / `+0x4088` / `+0x408c`, and whether the application printed an
+/// `rx` line.
+#[test]
+#[ignore = "needs an espnow-broadcast ELF in LP_EMU_C6_ESPNOW_BROADCAST_ELF"]
+fn what_the_guests_isr_reads_after_each_delivery() {
+    let Some(elf) = broadcast_elf() else { return };
+    let buf = SharedBuffer::new();
+    let (mut sender, mut receiver) = broadcast_sender_and_receiver(&elf, Some(&buf));
+    println!("ring at rest: {}", owners(&ring(&mut receiver)));
+
+    let mut at = ms(1_000);
+    let mut carried: Vec<Vec<u8>> = Vec::new();
+    while carried.len() < 8 && at < ms(2_000) {
+        at += ms(50);
+        sender.run_until(&until(at));
+        carried.extend(sender.take_air_frames().into_iter().map(|f| f.bytes));
+    }
+    println!("the sender armed {} frames", carried.len());
+
+    println!(
+        "\n {:>2} {:<10} {:>10} {:<10}  {:<10} {:<10} {:>4}  {}",
+        "#", "base", "ring", "wrote into", "+0x408c", "+0x4088", "rx?", "what the guest read back"
+    );
+    let mut rx_lines = 0usize;
+    let mut wrote_into: Vec<u32> = Vec::new();
+    let mut null_cursor = 0usize;
+    let mut reload_strobes = 0usize;
+    for frame in carried.iter() {
+        let n = wrote_into.len();
+        let base = receiver
+            .peek_word(WIFI_MAC + 0x4084)
+            .expect("the ring base");
+        let before = ring(&mut receiver);
+        let took = first_owned(&before);
+        let mark = buf.lines().len();
+        offer(&mut receiver, at, frame.clone());
+        let last = receiver.peek_word(WIFI_MAC + 0x408c);
+        let next = receiver.peek_word(WIFI_MAC + 0x4088);
+        at += ms(50);
+        receiver.run_until(&until(at));
+        let lines = buf.lines();
+        let reads: Vec<String> = lines
+            .iter()
+            .skip(mark)
+            .filter(|l| l.contains("+0x4084") || l.contains("+0x4088") || l.contains("+0x408c"))
+            .map(|l| {
+                let off = l
+                    .split("+0x")
+                    .nth(1)
+                    .unwrap_or("")
+                    .split(' ')
+                    .next()
+                    .unwrap_or("");
+                let value = l
+                    .split("= ")
+                    .nth(1)
+                    .unwrap_or("")
+                    .split(' ')
+                    .next()
+                    .unwrap_or("");
+                let kind = if l.contains(" R4 ") { 'R' } else { 'W' };
+                format!("{kind}{off}={value}")
+            })
+            .collect();
+        reload_strobes += lines
+            .iter()
+            .skip(mark)
+            .filter(|l| l.contains("+0x4080"))
+            .count();
+        let now = receiver
+            .usb_sj()
+            .text()
+            .matches("[espnow-broadcast] rx ")
+            .count();
+        let printed = now > rx_lines;
+        rx_lines = now;
+        if next == Some(0) {
+            null_cursor += 1;
+        }
+        wrote_into.push(last.unwrap_or(0));
+        let _ = took;
+        println!(
+            " {:>2} {:#010x} {:>10} {:#010x}  {:<10} {:<10} {:>4}  {}",
+            n,
+            base,
+            owners(&before),
+            last.unwrap_or(0),
+            last.map(|v| format!("{v:#010x}")).unwrap_or_default(),
+            next.map(|v| format!("{v:#010x}")).unwrap_or_default(),
+            if printed { "yes" } else { "NO" },
+            reads.join(" ")
+        );
+    }
+    println!("\nfinal ring: {}", owners(&ring(&mut receiver)));
+
+    // The three facts the fix rests on.
+    let repeats = wrote_into.windows(2).filter(|w| w[0] == w[1]).count();
+    println!(
+        "descriptors written into : {:?}",
+        wrote_into
+            .iter()
+            .map(|d| format!("{d:#x}"))
+            .collect::<Vec<_>>()
+    );
+    println!(
+        "consecutive repeats      : {repeats} of {}",
+        wrote_into.len() - 1
+    );
+    println!("deliveries publishing +0x4088 = 0 : {null_cursor}");
+    println!("accesses to the reload strobe +0x4080 : {reload_strobes}");
+    println!("rx lines the application printed : {rx_lines}");
+    println!("console:\n{}", receiver.usb_sj().text());
+
+    // **The regression, at the mechanism rather than at the payload's
+    // arithmetic.** Before the fix this read `4 of 8` repeats and `4` null
+    // cursors; the payload's `gap` is downstream of both.
+    assert_eq!(
+        repeats, 0,
+        "two deliveries in a row went into the same descriptor — the base was \
+         walked again before the guest advanced it: {wrote_into:#x?}"
+    );
+    assert_eq!(
+        null_cursor, 0,
+        "a delivery published +0x4088 = 0, the null RX cursor M4 P2 recorded \
+         the blob refusing to follow"
+    );
+}
+
+/// **The regression this file owes the fix**, stated without the payload in
+/// the way: eight frames offered to a running guest, one at a time, and the
+/// air puts each of them in a **different** descriptor.
+///
+/// The defect wrote every second frame into the descriptor it had just used —
+/// the one the guest had already read and recycled to the tail of its chain,
+/// while `+0x4084` still named it. That is a fact about the delivery walk, and
+/// it is checkable without asking the application what it thought it heard,
+/// which is what [`what_the_guests_isr_reads_after_each_delivery`] prints and
+/// what this asserts.
+#[test]
+#[ignore = "needs an espnow-broadcast ELF in LP_EMU_C6_ESPNOW_BROADCAST_ELF"]
+fn every_delivery_takes_a_descriptor_the_guest_has_not_already_read() {
+    let Some(elf) = broadcast_elf() else { return };
+    let (mut sender, mut receiver) = broadcast_sender_and_receiver(&elf, None);
+    let mut at = ms(1_000);
+    let mut carried: Vec<Vec<u8>> = Vec::new();
+    while carried.len() < 8 && at < ms(2_000) {
+        at += ms(50);
+        sender.run_until(&until(at));
+        carried.extend(sender.take_air_frames().into_iter().map(|f| f.bytes));
+    }
+    assert!(carried.len() >= 8, "the sender armed {}", carried.len());
+
+    let mut wrote_into = Vec::new();
+    for frame in carried.iter().take(8) {
+        let before = receiver.air_frames_delivered();
+        offer(&mut receiver, at, frame.clone());
+        assert_eq!(
+            receiver.air_frames_delivered(),
+            before + 1,
+            "the ring refused a frame: {:?}",
+            owners(&ring(&mut receiver))
+        );
+        wrote_into.push(
+            receiver
+                .peek_word(WIFI_MAC + 0x408c)
+                .expect("the last-filled register"),
+        );
+        at += ms(50);
+        receiver.run_until(&until(at));
+    }
+    println!("descriptors written into: {wrote_into:#x?}");
+    let distinct: std::collections::BTreeSet<u32> = wrote_into.iter().copied().collect();
+    assert_eq!(
+        distinct.len(),
+        wrote_into.len(),
+        "eight deliveries, {} descriptors — the every-other-frame defect wrote \
+         each one twice",
+        distinct.len()
     );
 }

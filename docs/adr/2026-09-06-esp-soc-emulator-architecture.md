@@ -26,7 +26,10 @@
   grade means now that the shipped image's frame is held against the host
   oracle. **Completed by M7** (PR #596): ROM-up boot, the cross-check, and
   the two new seams the boot needed (`Bus::take_yield`,
-  `RegFile::with_read_mirror`).
+  `RegFile::with_read_mirror`). **Amended by plan two's M1** (2026-09-09): the
+  WebSocket door and the board registry — a third door that is `lp-cli`'s
+  rather than the machine's, and the one place `--reboot-on-reset` defaults
+  the other way.
 
 ## Context
 
@@ -303,13 +306,23 @@ The list the direct loader carries has a counterpart, and it is short:
 1. **`Saved PC:`** — `ASSIST_DEBUG.core_0_lastpc_before_exception` is zero on
    a machine that has never run. Silicon's boot after an espflash reset had
    the PC it interrupted in it.
-2. **The download console does not answer commands.** The strap reaches the
+2. ~~**The download console does not answer commands.** The strap reaches the
    ROM's real download path and it prints `waiting for download`, but a
    scripted esptool SYNC gets no reply: the ROM begins with baud-rate
    auto-detection over `UART0`'s pulse-width counters (`rxd_cnt`,
-   `low_pulse_cnt`, `high_pulse_cnt`), which the UART model does not drive.
-   That is one measurable thing with a name, and plan two's shim is where it
-   belongs.
+   `low_pulse_cnt`, `high_pulse_cnt`), which the UART model does not drive.~~
+   **Closed 2026-09-08/09** — and the stated cause was wrong, which is worth
+   more than the closure. The USB console never reads the pulse-width
+   counters at all, and the USB model answered unchanged: the SYNC was never
+   *delivered*, because `scripts/rom-download-sync.usb` stamped `20000` in a
+   slot the grammar reads as **milliseconds** and the script meant
+   microseconds, so the frame arrived twenty seconds after the run had ended
+   (M3 P1, #620). A script unit bug had been written down as a missing
+   peripheral model for two days. The auto-baud model is real, but it belongs
+   to the **UART0** console, which the ROM does drive that way: `--uart0-baud`
+   states the rate the counters measure, the first SYNC is consumed by
+   detection as it is on silicon, and the second is the one answered. See the
+   amendment below.
 3. ~~**Three `pll_cal exceeds 2ms` lines**, from the ROM's
    `wait_rfpll_cal_end` polling an analog register the `I2C_ANA_MST` accept
    block cannot answer per-register.~~ **Closed 2026-09-08**: the block is
@@ -317,7 +330,8 @@ The list the direct loader carries has a counterpart, and it is short:
    ROM both address, so a `regi2c` read answers the register it asked for
    (`periph/i2c_ana_mst.rs`,
    `docs/defects/2026-09-08-regi2c-is-one-data-register-not-a-register-file.md`).
-   The list is two items now.
+   With item 2 closed a day later, **the list is one item now** — `Saved PC:`,
+   which is a memory of a previous run that a fresh chip cannot have.
 (A fourth item lasted one day. The mask ROM's console drops a character
 rather than waiting when the IN endpoint is not free, so the modelled
 `IN_DRAIN_LATENCY_US` was losing runs of the densest output over USB while
@@ -349,7 +363,121 @@ should *default* to, and M8 answered it by what each is for:
 which one it means — `rom-up-boot` is the first and, for now, only `RomUp`
 one.
 
+#### Amendment (M3, 2026-09-08/09): the download console answers, and a real flasher writes a real image
+
+Deviation 2 above is closed, and the sentence it was written in was wrong in
+a way worth keeping on the record: **"the ROM begins with baud-rate
+auto-detection over UART0's pulse-width counters, which the UART model does
+not drive" was not why the console was silent.** The USB console does not
+read those counters at all, and the USB model needed no change. The SYNC was
+never delivered: `scripts/rom-download-sync.usb` stamped `20000` in a slot
+whose grammar reads **milliseconds**, and the script meant microseconds, so
+the frame was scheduled twenty seconds into a run that ended long before. A
+unit bug in a test script had been recorded as a missing peripheral model.
+
+What is now true, and what each half of it rests on.
+
+**The console answers, on both consoles.** `SYNC` and `READ_REG` are answered
+by the real mask ROM — no hook, the hook table is still empty — over
+USB-Serial-JTAG and over UART0, and `READ_REG` returns the eFuse MAC *the run
+was given* (`--efuse-mac`), so the gate cannot pass on a constant.
+`tests/rom_download_console.rs` is the gate; `scripts/rom-download-sync.usb`
+is a script somebody runs, not the thing being trusted.
+
+**The UART0 auto-baud model is real, and is what it says it is.** The ROM
+does drive `rxd_cnt` / `low_pulse_cnt` / `high_pulse_cnt` on the UART0
+console, and `Uart::with_host_baud` (the `--uart0-baud` flag, mirrored on
+`lp-cli emu run`) models them **from a stated host baud** rather than from a
+measured edge: the rate is configuration, the consumption is not. The first
+SYNC is eaten by detection exactly as it is on silicon, and the second is the
+one answered. Applied before the power-on snapshot, so a reboot keeps it.
+
+**A real flasher writes a real image, over a socket.** The machine comes up
+`--boot-mode rom-up` with a **writable** chip — `--merged` stays read-only by
+design, because it is the image a gate named, and here the image is the
+flasher's *input*, not the chip's contents — a pty appears in front of the
+machine's byte socket (`scripts/emu/pty-tcp-bridge.py`), the flasher writes,
+the host performs its reset dance on the `--control` channel, and the chip
+boots what was just written. `scripts/emu/flash-over-socket.sh` is the whole
+story with one exit code per failure. A full run writes 4 MiB, verifies the
+hash, resets, and the app says hello.
+
+That the hello came from the *newly written* image is shown rather than
+assumed, by running the recipe twice with two images that differ only in the
+commit they were built at, each seeding the chip for the other's run:
+
+```text
+--seed d6cfaa205 …, flash 735af98ae …  →  "commit":"735af98ae9d9"
+--seed 735af98ae …, flash d6cfaa205 …  →  "commit":"d6cfaa2051ae"
+```
+
+The chip was holding a complete, bootable image in both runs, and the hello
+followed what the flasher wrote both times.
+
+**Stub versus `--no-stub`, which is the finding plan two asked for.** Both
+paths were driven, and they end differently.
+
+- `--no-stub` **works**, end to end: sync, chip detection, eFuse read, attach,
+  erase, program, and the ROM's own `SPI_FLASH_MD5` over what it programmed.
+  The bytes in the persistent backing are byte-identical to the image.
+- The **stub** uploads and runs — it is real RV32 code, and the modelled hart
+  executes it for 19.5 M cycles — and then reads `0x6000_4038`, which is
+  `I2C0.scl_high_period`, to pick the argument for the ROM's
+  `spi_flash_attach`. This machine's C6 boot set does not map I2C0, so the
+  strict bus refuses and the run ends. Run permissively, where an unclaimed
+  address reads 0 and is *counted*, the same stub goes on to erase and program
+  correctly, with `unmapped_reads() == 1` and `unmapped_writes() == 0` for the
+  whole run. **The stub is one unmapped block away from working, and that
+  block is touched once.** I2C0 was not added to the boot set: nobody has
+  measured what that register reads on a part, and mapping it would be the
+  machine asserting the PAC's reset value as behaviour. Filed at
+  `docs/defects/2026-09-09-the-esptool-stub-reads-i2c0-a-block-the-c6-boot-set-does-not-map.md`.
+
+**One grade moved, and it was the derived metadata that was wrong.** Naming
+`SPI1` in a run's strict-grade scope refused the mask ROM's own flash-timing
+setup, because `with_pac_grades()` reads the generated access table and the
+PAC calls `ctrl2` write-only. It is not: `spi_common_set_flash_cs_timing`
+(`0x4002_497e`) read-modify-writes it twice and both `andi`s preserve bits it
+did not write. The behaviour had always been right — `RegFile` does not
+enforce the access table — but the *grade* was wrong in the direction that
+hides a working path behind a refusal
+(`docs/defects/2026-09-09-the-pac-calls-spi-ctrl2-write-only-and-the-mask-rom-reads-it.md`).
+
+#### What this amendment does **not** claim
+
+- **Nothing here is `measured`.** SPI1's rows are `documented`, sourced from
+  the PAC and from the vendored ROM's disassembly; the eFuse identity words
+  are `documented` from esp-hal's field table. A `measured` grade needs a
+  committed silicon transcript naming the register, and this milestone
+  produced none.
+- **`EFUSE` is deliberately ungraded for strict purposes.** The mask ROM reads
+  `rd_repeat_data0` on its way to the console and the model answers zero from
+  a reading, not from a part; `modeled` is honest, so the block stays out of a
+  `documented` scope rather than being promoted to make a gate green.
+- **The browser half is untouched.** esptool-js, a Web Serial shim, and the
+  in-browser stub are plan two's M5. What this milestone hands that work is
+  the native half and the stub finding above, not a browser path.
+- **The stub's own path is only partly graded.** What it touched through SPI1
+  and the two consoles is graded; I2C0 is unmapped, and anything the stub
+  would have reached *after* `spi_flash_attach` on a machine that mapped it is
+  unexplored, because the permissive run is a probe and not a claim.
+- **`esptool` is not a gate.** It is installed locally and
+  `flash-over-socket.sh` defaults to it as a second client (OQ8); CI gates the
+  espflash **library** path, which needs no new tool in any job.
+
+This milestone satisfies plan two's **M4 row (RD8)** — the native download
+console, both exchanges, both consoles, strict-clean, as tests rather than as
+a script somebody runs — and plan two's **M5 keeps the browser stub path**,
+now with the measured answer above about what that stub does and does not
+need.
+
 ### Honest peripherals: strict bus, `modeled` grades, and no invented answers
+
+> **Pointer, not an amendment.** This section governs **registers that
+> answer**. A peripheral that *originates* an event the hardware would have
+> originated — a virtual radio raising a completion or an RX interrupt — is a
+> different kind of claim and has its own policy in
+> `docs/adr/2026-09-08-virtual-air-claim-policy.md`. Nothing below changes.
 
 A peripheral is either **modelled** (a real type with behaviour and scheduled
 events) or **accepted** (a register file that remembers writes, with a short
@@ -461,6 +589,95 @@ By the rule above, byte-equality is evidence weighed in the `because`, and
 `measured` waits for a silicon pin transcript — a logic analyser on the
 desk, or the C6 `frame-dump` port (M8's) read beside the decoder.
 
+#### Amendment (M2, 2026-09-08): the fabric's other side, and the RMT receiver
+
+The fabric above has one direction: a peripheral drives a signal, a pad
+follows it, a decoder reads the edges. M2 gives it the other, and the shape is
+the same one — one state on the bus, register views writing into it — because
+the rule that forced it has not changed.
+
+**Something outside the chip can now hold a level on a pad** (M2 P1).
+`drive_pad`/`release_pad` are a bench driver: a button to ground, an encoder's
+quadrature pair, the far end of a jumper. `wire(a, b)` ties two pads so that
+whatever one carries the other carries. `set_pad_input_enable` records the
+chip's IO_MUX `fun_ie` — recorded, never gated on in the fabric, and read back
+by the GPIO block to decide whether to serve a pad's bit in `GPIO.in_`, which
+is where a chip fact belongs. `pad_level` is the **resolved** level of a pad:
+what a scope on the pin header would read. The rule is four lines and every
+input payload depends on it: collect the pad and everything wired to it; an
+outside driver on any of them wins; otherwise a *driving* pad in the group
+wins; otherwise the group is unobserved and reads low. Where an outside driver
+and a driving pad disagree, that is a **conflict** — logged with both levels
+and the cycle, counted, and then ignored. Never gated: an emulator that
+refused to run because a bench shorted an output tells you less than one that
+says so and carries on (RD5).
+
+**What makes a pad a driver is `GPIO.enable`, and that is a correction** (M2
+P3, DD38). M2 P1 read `oen_sel = 0` — "the peripheral owns the output enable"
+— as "assume enabled", because peripheral OE lines are not modelled. That made
+every *input* pad a driver: esp-hal's `Input::new` writes `func_out_sel_cfg` on
+its way to configuring an input, so a pad nothing was driving out of counted as
+an enabled output and every scripted level on it logged a conflict with itself
+— eight lines per `gpio-input` run, all of them false. The bit drivers actually
+maintain is `GPIO.enable`: esp-hal sets it in the same breath as every output
+route and clears it when it configures an input. So `enable` decides, for the
+conflict line and for the resolution rule alike, and enabling an already-routed
+output is itself an edge. The limitation that leaves is stated rather than
+hidden: a peripheral that drove a pad without its driver having set
+`GPIO.enable` would read here as not driving. No driver this project replays
+does that, and the failure mode is a pad resting low rather than a level the
+model invented.
+
+**Signals can now read pads as well as drive them.** `route_in`/`input_level`
+mirror `route`/`pad_level`, and the GPIO block's `func_in_sel_cfg[s]` view
+writes them: `in_sel` names the pad a peripheral input signal reads,
+`in_inv_sel` inverts it, `sig_in_sel = 1` is the matrix route esp-hal's
+`connect_input_to_peripheral` writes. `sig_in_sel = 0` (a pad's direct IO_MUX
+function) and the constant selectors `0x38`/`0x3C` are accepted, left unrouted
+and named once — a peripheral that read one finds nothing connected rather
+than a level this model invented.
+
+**RMT channels 2 and 3 are receivers** (M2 P3, RD7), and that is what turns
+M5's esp-emu task into a differential rather than a one-sided capture. Each
+samples the pad its input signal reads, measures every run in channel ticks and
+writes them into the channel's RAM window two runs to a word, with `idle_thres`
+ending the reception, `rx_filter` swallowing a pulse narrower than its
+threshold, `rx_lim` raising `rx_thr_event` and `mem_rx_wrap_en` wrapping the
+write pointer; `rx_end` and `rx_thr_event` go out on source 49 with the status
+and clear semantics the transmitters already had. It is fed the fabric's
+**edges** rather than sampled tick by tick — 100 events per WS2812 bit would be
+614,400 a frame — which is the same model, because a sampler's only output is
+where the level changed, at one stated cost: the two interrupts are raised at
+the slice boundary after the edge, never the words, which carry the edges' own
+cycles.
+
+Three things it does not model, each named where it is made: the carrier
+(modulation out, demodulation in), the APB FIFO, and RAM ownership — there is
+one RAM and no arbiter, so `mem_owner` is recorded rather than enforced and
+`mem_owner_err` never rises. Two behaviours are **modeled choices** rather than
+bit maps, and the second is the one to argue with: the reception begins at the
+first edge (a receiver that started its idle timer on an already-idle line
+could never be armed for a frame that had not arrived), and `rx_lim` **counts**
+rather than naming a position. Its transmitting twin `tx_lim` is a position,
+pinned against silicon over 5,520 frames; nothing pins `rx_lim`, and the
+counter reading is what esp-hal's own reader needs — it reads half a window per
+event and never rewrites the register. That is a model chosen to make a driver
+work, which is the weakest kind, and it is exactly what the silicon capture
+below would settle.
+
+**The `pin` grade does not move.** The gate this engine passes is that the
+receiver's per-frame checksum equals the transmitter's, frame for frame, on a
+`--wire 18:19` loopback — 32 of 32 on both time grades, with the machine's own
+WS281x decoder agreeing off the same pad as a third reading. That is three
+readings of one frame and they agree, and it is still not a measurement,
+because all three are ours: our transmitter puts the waveform on our fabric and
+our receiver and our decoder read it back. The `because` above is unchanged and
+must not be weakened. What would move it is the same thing it always was — an
+instrument, or silicon: a jumper between gpio18 and gpio19 on the desk board
+and an `rmt-rx` capture beside these, which RD7 calls this engine's *promotion*
+rather than its gate, and which `d1-desk-batch.md` carries as an optional
+hands-only item.
+
 ### Provenance on everything derived
 
 Per `2026-07-29-license-provenance-discipline.md`. The register-name tables in
@@ -474,6 +691,72 @@ LICENSE and `SHA256SUMS`, never edited, re-derivable by
 `just lint-emu-fence` and may not import a product crate — which is why the
 validation system's payload registry *mirrors* `fw-checks` instead of
 importing it.
+
+### Amendment (2026-09-09, plan two M1): the WebSocket door and the board registry
+
+The two doors above are the *machine's*: one byte socket and one control
+socket per link, TCP, one machine per process, bound before the run and torn
+down with it. A browser cannot open a TCP socket, and Studio's device walks
+are the whole point of the emulator's second plan. So there is now a **third
+door, and it is not the machine's** — it is `lp-cli emu serve`, in `lp-cli`,
+outside the MIT fence, and it is a *pump*.
+
+```text
+GET  /boards                 → the registry, as JSON
+WS   /board/<id>/bytes       → binary frames both ways; the payload IS the bytes
+WS   /board/<id>/control     → control.rs's line protocol, verbatim
+```
+
+**How it holds a board, and why that is the design.** Each board runs on its
+own OS thread with `usb_sj(UsbSjSink::Tcp("127.0.0.1:0"))` and
+`control("127.0.0.1:0")` — ephemeral loopback ports, read back through
+`Esp32C6Machine::usb_sj_tcp()` and `control_tcp()`. The WebSocket endpoints
+move bytes and lines between a socket and those ports and do nothing else.
+
+The alternative was a public seam on the machine (`apply_control` made public,
+or a `control_line(&str) -> String`), which is fewer moving parts at runtime.
+It was rejected because the loopback bridge **changes nothing under
+`lp-emu/`**, and that is worth a hop per byte three times over:
+
+- the licence fence never enters the conversation, so the door can depend on
+  `tokio-tungstenite` without it becoming an E-license question;
+- the coupling rule (a byte client's connect **is** an application opening the
+  port), the rule that `attach`/`detach` are never implied by a socket, the
+  one-reply-per-command rule and the slice-boundary semantics all survive
+  **literally** rather than by re-implementation — the TCP client the pump
+  opens *is* the byte client `service_host` watches;
+- `machine.rs` is the most contended file in two roadmaps, and a door that
+  needs none of it can ship beside anything else.
+
+**The registry is plural from the first commit.** N named boards, each with
+its own id (the endpoint path), its own eFuse MAC — the desk board's with the
+last octet stepped, or a spelled `mac=` — and its own persistent flash file
+under `--state-dir`. A registry of N boards that all answer with one identity
+is one board N times, and the scenarios this exists for (`s9-two-boards`, and
+the duplication defects a twin is best placed to catch) are multi-board
+scenarios. `GET /boards` is what an in-page picker lists.
+
+**One default flips here, and only here: `--reboot-on-reset` is ON.** M7 left
+it off deliberately, because three merged M6 scenarios read the exit code of a
+run that ended on `MachineRequest::Reset` as their evidence. A *server* cannot
+have that: esptool-js opens with a DTR/RTS dance whose whole purpose is to
+reset the chip, and a board that disappears when it is reset is not a board.
+So `serve` passes it and does not offer a way to turn it off; `run` keeps M7's
+default and the three scenarios keep their meaning.
+
+**What is auditable and what is a gate.** Nothing this door produces is a
+transcript. A socket is not deterministic — a command lands at whichever slice
+boundary the host's poll fell on — so the reply's `cyc=`/`us=` is for a human
+reading a log, and the door's own tests assert outcomes only. `--air <addr>`
+is the same shape and says so in its help text: a one-way tap in the `LPA1`
+wire codec, so a watcher can see what the boards' radios hand over. The
+deterministic form of an air remains the in-process lockstep runner, and that
+is the only form a transcript, a validation configuration or a CI job ever
+uses.
+
+The host side of the door is `serial:ws://<addr>/board/<id>/bytes`, the
+sibling of `serial:tcp://<addr>` — raw bytes, not the lpc-wire protocol a bare
+`ws://` specifier means.
 
 ## Alternatives considered
 
@@ -529,3 +812,84 @@ the second chip is the test of the design, and a flat crate fails it.
   was not complete — the ROM's own data image was missing from it, because
   nothing on the direct path executes `_init` — and the boot-log diff is
   above.)
+
+#### Amendment (M1 P4, 2026-09-08, PR #630): grade 3, and the rule that an address costs
+
+This amends "Time is a discrete-event schedule over a cycle model, and the
+wall clock never enters" above. It was drafted by M1 P3 (PR #627), which
+built the thing; it lands here with the contract that judges it.
+
+The ladder gains a third rung. `t1` counts instructions and `t2` charges a
+per-class table; both answer "what does this instruction cost?" and neither
+can answer "what does this *address* cost?", which on a part whose code lives
+behind a 32 KiB cache in front of a serial flash is where most of the
+difference from silicon was. Measured: a fetch out of cold flash costs 43.3
+cycles an instruction on silicon and 1 on the emulator, and one instruction in
+twelve of the compile harness is an MMIO read that silicon charges 10 cycles
+and the emulator charged 1.
+
+`t3` adds one neutral hook and one chip implementation:
+
+- **`lp_emu_core::MemoryCost`** — `fetch(addr)`, `load(addr, width)`,
+  `store(addr, width)`, each returning cycles *beyond* the instruction's own
+  class. The hart never sees an address: the bus accumulates and the
+  privileged stepper drains once per instruction through
+  `Bus::take_memory_cost`, whose default is a constant zero. The neutral
+  crates gain no cache concept and no chip number.
+- **`lp_emu_esp32c6::cache::CacheCost`** — the C6's answer, beside the address
+  path `CacheMmu::translate` already owned.
+
+Three rules the rung carries, and they bind every rung after it:
+
+1. **A grade installs its own memory-cost model, or none.** `t1` and `t2`
+   install none, which is why adding `t3` moved no cycle count already on the
+   record. A grade is a *configuration*, and a transcript names it.
+2. **No constant without a kernel, and no scale factor at all.** Every number
+   in a cost model carries `measured` / `documented` / `modeled` and the
+   capture or the disassembly that fixes it. A term the calibration payload
+   did not isolate is not added — it is named in the calibration record as a
+   capture that is owed. A scale factor is refused outright: the residual it
+   would fit has two signs.
+3. **Calibrate on kernels, validate on a workload, and never the reverse.**
+   The calibration set is a payload of single-purpose kernels; the validation
+   set is a workload the model has never been fitted to. A model that
+   reproduces its calibration set and misses its validation set is reported as
+   over-fitted rather than repaired with a term.
+
+**Neutrality, and the one thing to see named.** `CycleModel` in `lp-emu-core`
+already carried a C6 per-class table (`CycleModel::Esp32C6`), and `t3` adds a
+second C6 variant beside it, `Esp32C6Kernels`, rather than correcting the
+first — because a committed transcript names its grade, and correcting
+`Esp32C6` in place would move every `t2` cycle count on the record. The rule
+that holds is therefore the precise one: **no C6 number is charged by the
+hart.** The cache and bus model, which is what this rung is about, is entirely
+in the chip's own `cache.rs`.
+
+A time grade must still not move a heap byte, and `t3` does not (372/372).
+What it *does* move, and no grade before it did, is the **instruction count**:
+a guest polling until a scheduled event lands retires fewer instructions under
+a more expensive clock (21.6M / 18.0M / 14.9M across the three grades on the
+compile harness). It is not accuracy bought by shortening spins — not one of
+the 92 validation slices costs fewer cycles at `t3` than at `t1` — and silicon
+has the same property, which is why `slice_cycles` and not an instruction
+count is the comparison. Emulated cycles remain the only comparable quantity,
+and never a host gate (PD9/D13).
+
+**`timing` does not become `measured` here.** The draft in #627 said "the
+model exists; the contract that says how wrong it is allowed to be does not",
+and that contract now exists — a **band** on a trust entry, in the
+hardware-validation ADR's 2026-09-08 amendment. `lp-emu:esp32c6:t3` states one
+and is graded `documented` under it: 85 of 92 like-for-like slices inside
+[0.80, 1.25] with an aggregate of 1.154, a one-signed compute residual, and
+one independent workload. What promotes it is a second payload, not a
+better paragraph. The derivation is
+`docs/reports/2026-09-08-esp32c6-t3-calibration.md` §4.
+
+The ladder now reads:
+
+- `t1` — one cycle per instruction. No cache, no flash wait states.
+- `t2` — a measured per-class table. Still no address.
+- `t3` — `t2`'s classes, corrected on kernels, plus what an address costs: the
+  flash cache's fills and the APB's wait states. The first grade in which two
+  instructions with the same opcode cost different amounts, and the first with
+  a band it is allowed to be wrong inside.

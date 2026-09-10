@@ -11,7 +11,7 @@ use crate::{
     LinkManagementRequest, LinkManagementResult, LinkProvider, LinkServerConnection, LinkSession,
     LinkSessionStatus,
 };
-use lpa_client::stream::{SerialPortByteStream, TcpByteStream};
+use lpa_client::stream::{SerialPortByteStream, TcpByteStream, WsByteStream};
 use lpa_client::transport_serial::{
     HardwareSerialOptions, SerialLineObserver, create_hardware_serial_transport_pair_with_options,
 };
@@ -381,20 +381,13 @@ impl LinkProvider for HostSerialEsp32Provider {
         // the device console feed. An app-supplied observer still sees
         // every line too.
         let observed_lines = Arc::new(std::sync::Mutex::new(Vec::new()));
-        // `tcp://host:port` (from the `serial:tcp://host:port` host
-        // specifier — documented in `lp-cli/README.md`) names a device
-        // link over TCP instead of a real serial port: an emulator's UART
-        // (esp-emu `--uart-tcp`, QEMU `-serial tcp::PORT,server`), and the
-        // only way to reach one on macOS, where a pty cannot stand in for
-        // a serial port (`serialport` sets the baud rate through
-        // `IOSSIOSPEED`, which a pty driver refuses with `ENOTTY`). No
-        // modem lines, so no reset on open — the readiness hello request
-        // establishes the session instead. Permanent as of D4
-        // (`~/.photomancer/planning/lp2025/2026-09-06-1001-esp-emulator/vision.md`),
-        // not a spike.
-        let tcp_addr = endpoint.port_name.strip_prefix("tcp://");
+        // A port name that names a socket rather than a serial device — see
+        // `SocketEndpoint` below for both spellings and why each exists.
+        // Neither has modem lines, so neither resets on open: the readiness
+        // hello request establishes the session instead.
+        let socket = SocketEndpoint::of(&endpoint.port_name);
         let serial_options = HardwareSerialOptions {
-            reset_after_open: self.options.reset_after_open && tcp_addr.is_none(),
+            reset_after_open: self.options.reset_after_open && socket.is_none(),
             line_observer: Some(Arc::new(TeeLineObserver {
                 buffer: Arc::clone(&observed_lines),
                 inner: self.options.line_observer.clone(),
@@ -403,12 +396,21 @@ impl LinkProvider for HostSerialEsp32Provider {
         // Port opening happens here (the provider owns the endpoint→port
         // mapping); the transport machinery below the byte-stream seam is
         // port-agnostic and shared with the fake device.
-        let stream: Box<dyn lpa_client::DeviceByteStream> = match tcp_addr {
-            Some(addr) => Box::new(TcpByteStream::connect(addr).map_err(|error| {
-                LinkError::ConnectionFailed {
-                    message: error.to_string(),
-                }
-            })?),
+        let stream: Box<dyn lpa_client::DeviceByteStream> = match socket {
+            Some(SocketEndpoint::Tcp(addr)) => {
+                Box::new(TcpByteStream::connect(addr).map_err(|error| {
+                    LinkError::ConnectionFailed {
+                        message: error.to_string(),
+                    }
+                })?)
+            }
+            Some(SocketEndpoint::WebSocket(url)) => {
+                Box::new(WsByteStream::connect(url).map_err(|error| {
+                    LinkError::ConnectionFailed {
+                        message: error.to_string(),
+                    }
+                })?)
+            }
             None => Box::new(
                 SerialPortByteStream::open(&endpoint.port_name, baud_rate).map_err(|error| {
                     LinkError::ConnectionFailed {
@@ -657,6 +659,42 @@ impl HostSerialEsp32SessionState {
             logs,
             diagnostics,
         }
+    }
+}
+
+/// A port name that names a socket instead of a serial device.
+///
+/// Both spellings reach an emulated board and neither has modem lines, so
+/// both skip the reset-on-open that would otherwise race the readiness hello.
+///
+/// - **`tcp://host:port`** (from `serial:tcp://host:port`) — an emulator's
+///   byte link over TCP: `lp-cli emu run --link`, esp-emu `--uart-tcp`, QEMU
+///   `-serial tcp::PORT,server`. It is also the only path that works on
+///   macOS, where a pty cannot stand in for a serial port (`serialport` sets
+///   the rate through `IOSSIOSPEED`, which a pty driver refuses with
+///   `ENOTTY`). Permanent as of the emulator vision's D4, not a spike.
+/// - **`ws://host:port/path`** (from `serial:ws://…`) — the same bytes over
+///   a WebSocket, which is what `lp-cli emu serve` serves and the only door
+///   a browser can also open (emulator plan two, M1). Note that a **bare**
+///   `ws://` host specifier means something else entirely: the lpc-wire
+///   protocol against an `lpa-server` (`lpa_client::HostSpecifier::WebSocket`).
+///   The `serial:` prefix is what says "raw bytes".
+///
+/// Both are documented in `lp-cli/README.md`'s host-specifier table.
+enum SocketEndpoint<'a> {
+    Tcp(&'a str),
+    WebSocket(&'a str),
+}
+
+impl<'a> SocketEndpoint<'a> {
+    fn of(port_name: &'a str) -> Option<SocketEndpoint<'a>> {
+        if let Some(addr) = port_name.strip_prefix("tcp://") {
+            return Some(SocketEndpoint::Tcp(addr));
+        }
+        if port_name.starts_with("ws://") || port_name.starts_with("wss://") {
+            return Some(SocketEndpoint::WebSocket(port_name));
+        }
+        None
     }
 }
 

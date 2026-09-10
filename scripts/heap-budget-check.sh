@@ -48,10 +48,12 @@ set -euo pipefail
 # The chip half needs a firmware ELF, so it does **not** run in the required
 # `test-rust-core` job: the cost rule that keeps a cross-target build out of
 # every workspace test run applies here too (`lp-emu-esp32c6`'s
-# `test_support` module says why). It runs in the path-gated `emu-c6` job,
-# which builds firmware already. Without an image the chip half prints a
-# named SKIP and the projects half still gates; in `emu-c6`, where
-# `LP_EMU_BUILD_FW=1` is set, a skip is a failure.
+# `test_support` module says why). It runs in the path-gated
+# `heap-budget-chips` job (`Heap budget (esp32c6 chip)`), which builds the
+# firmware itself under `LP_EMU_BUILD_FW=1`. Without an image the chip half prints a
+# named SKIP and the projects half still gates; in `heap-budget-chips`
+# (CI's `Heap budget (esp32c6 chip)` job), where `LP_EMU_BUILD_FW=1` is
+# set, a skip is a failure.
 #
 # Usage:
 #   heap-budget-check.sh check [margin_pct]   # default margin 0
@@ -60,6 +62,14 @@ set -euo pipefail
 #   heap-budget-check.sh chips-baseline
 
 cd "$(dirname "$0")/.."
+
+# The lp-cli invocation for the projects half (dev profile). `LP_CLI` overrides
+# it with a command prefix: CI sets it to the `target/debug/lp-cli` the
+# workspace `cargo test` already built, because a `-p lp-cli` dev build
+# unifies features differently and rebuilt every dependency (4m49s on
+# 2026-09-08). Word-split on purpose — it is a command, not a path.
+# shellcheck disable=SC2206
+LP_CLI_CMD=(${LP_CLI:-cargo run -q -p lp-cli --})
 
 RECORD="scripts/heap-budget-record.json"
 MODES=(startup steady-render)
@@ -92,7 +102,7 @@ run_profile() {
     # free-list figures. See docs/heap-budget-gate.md "Cost". Meteor's startup
     # capture never fit the default at all (`MAX_CYCLES` above); a session
     # that still hits the cap is refused by `budget_for`.
-    cargo run -q -p lp-cli -- profile "$project" --collect alloc --mode "$mode" \
+    "${LP_CLI_CMD[@]}" profile "$project" --collect alloc --mode "$mode" \
         --max-cycles "$MAX_CYCLES" 2>/dev/null | tail -1
 }
 
@@ -243,7 +253,7 @@ chip_check() {
     local elf
     if ! elf="$(chip_elf)"; then
         echo "heap-budget: ${CHIP_ID}: SKIPPED — no firmware image (see stderr). The chip half \
-runs in CI's path-gated 'emu-c6' job, which sets LP_EMU_BUILD_FW=1."
+runs in CI's path-gated 'Heap budget (esp32c6 chip)' job, which sets LP_EMU_BUILD_FW=1."
         return 0
     fi
     echo "heap-budget: booting ${CHIP_ID} (${CHIP_FEATURES}) on lp-emu:esp32c6:t1 — $elf"

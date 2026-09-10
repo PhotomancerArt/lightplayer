@@ -7,6 +7,7 @@
 //! - Per-instruction cycle-cost accounting
 //! - Emulator time control (real vs simulated)
 //! - The guest memory model ([`Memory`])
+//! - An ISA-neutral pre-decoded basic-block cache ([`block`])
 //! - The run-loop result contract ([`StepResult`]) and trap codes ([`TrapCode`])
 //! - A deterministic discrete-event scheduler over guest cycles ([`Scheduler`])
 //! - Host-side profiling (collectors, sessions, trace layout) behind the `std`
@@ -21,6 +22,7 @@ extern crate std;
 // Compile-time configuration
 pub mod config;
 
+pub mod block;
 pub mod bus;
 pub mod cycle_model;
 pub mod log_level;
@@ -34,6 +36,7 @@ pub mod time;
 pub mod trap_code;
 
 // Re-exports for convenience
+pub use block::{Block, BlockCache, BlockStats, Slot};
 pub use bus::{Bus, Watchpoint};
 pub use cycle_model::{CycleModel, InstClass, MemoryCost, NoMemoryCost};
 pub use log_level::LogLevel;

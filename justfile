@@ -234,6 +234,48 @@ lpa-fs-opfs-test: install-wasm32-target
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner \
         cargo test -p lpa-fs-opfs --target wasm32-unknown-unknown
 
+# The Web Serial JS layer in a real Chrome — the harness
+# `docs/debt/web-serial-js-untestable.md` has been asking for since
+# 2026-07-10 (emulator plan two, M2).
+#
+# It drives the SHIPPED `browser_serial.js` (and, through its own dynamic
+# import, `browser_esp32_device_controller.js`) over the `navigator.serial`
+# polyfill, which sits on `EmulatorPort`, which sits on a SCRIPTED door
+# standing in for `lp-cli emu serve`. Hermetic: no server, no sockets, no
+# firmware, no timers, and nothing in it asserts a duration.
+#
+# `scripts/wasm-serial-test-runner.sh` is the runner: it serves Studio's own
+# static root so `/lpa-link/*.js` resolves the way it does in a real Studio.
+# CI runs this in the path-gated `validate-browser` job.
+lpa-link-browser-test: install-wasm32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v wasm-bindgen-test-runner >/dev/null 2>&1; then
+        echo "wasm-bindgen-test-runner not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
+        exit 1
+    fi
+    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="$PWD/scripts/wasm-serial-test-runner.sh" \
+        cargo test -p lpa-link --target wasm32-unknown-unknown \
+            --features browser-serial-esp32 --test browser_serial_conformance
+
+# The SAME assertions against a live `lp-cli emu serve` holding a real
+# emulated C6 — the other half of M2's conformance suite.
+#
+# Deliberately NOT a CI job (plan two PD9, E-cost pre-ruled): Chrome +
+# chromedriver + the emulator + a firmware build is far over the ~5-minute
+# line. An agent runs this by hand; CI runs the scripted half above.
+#
+# The script starts the server, reads the ephemeral port it prints, runs the
+# suite against it, and stops the server BY PID — never `pkill -f`.
+lpa-link-browser-test-live IMAGE="": install-wasm32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v wasm-bindgen-test-runner >/dev/null 2>&1; then
+        echo "wasm-bindgen-test-runner not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
+        exit 1
+    fi
+    exec scripts/emu/browser-conformance-live.sh "{{IMAGE}}"
+
 # Serve the smoke page for a human to watch (render product, output ring, boot
 # checklist). This recipe never exits on its own: it cannot fail, it can only
 # serve a page that says "error". Use `fw-browser-smoke-check` for a verdict.
@@ -634,8 +676,14 @@ schema-gen:
     cargo run -p lp-cli -- schema gen
 
 # Verify schemas/ matches the generator byte-for-byte (drift gate, CI-style).
+#
+# `LP_CLI` overrides the lp-cli invocation (a command prefix). CI points it
+# at the binary the workspace `cargo test` already built, so the gate costs
+# no second tree build: a `-p lp-cli` dev build unifies features differently
+# from the workspace test build and rebuilt every dependency — 4m49s per
+# Validate run on 2026-09-08. Locally the default builds lp-cli as before.
 schema-check:
-    cargo run -p lp-cli -- schema gen --check
+    ${LP_CLI:-cargo run -q -p lp-cli --} schema gen --check
 
 # Snapshot the outgoing format into schemas/history/v<N>/ BEFORE bumping
 # PROJECT_FORMAT_VERSION (N = the current constant). Copies the schemas, the
@@ -1839,7 +1887,7 @@ clippy-fw-esp32c6-harnesses: install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
     cd lp-fw/fw-esp32c6
-    for feature in test_rmt test_dither test_gpio test_gpio_calibrate test_button \
+    for feature in test_rmt test_rmt_rx test_dither test_gpio test_gpio_calibrate test_button \
                    test_usb test_json test_msafluid test_fluid_demo \
                    test_jit_math_perf test_shader_compile_incremental \
                    test_cycle_probe test_gpio_input; do
@@ -2107,10 +2155,17 @@ test-glsl-filetests:
 # (which need chip builds this gate deliberately avoids). Note the narrow
 # residue: drift unique to the emu fixture itself is only caught locally.
 [parallel]
-check-lint: fmt-check clippy check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities
+check-lint: fmt-check clippy check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-serial-js-frozen lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
+
+# Emulator plan two's inviolable invariant, made mechanical: the three JS
+# files of Studio's browser device layer run UNCHANGED against the virtual
+# serial port, so their content hashes are pinned. Changing one deliberately
+# means changing its hash in the same commit.
+lint-browser-serial-js-frozen:
+    ./scripts/check-browser-serial-js-frozen.sh
 
 # Guard against serde Content-machinery reintroduction (tag/untagged/flatten).
 # See docs/adr/2026-07-04-json-only-artifacts.md and the script's allowlist.
@@ -2179,10 +2234,38 @@ lint-emu-fence:
 # log's CI cost rule says a gated job or a nightly, never the default path.
 # `m3_replays`..`m7_replays` need no firmware and do run everywhere.
 #
+# So does `band_contract` (M1 P4), and that is the whole shape of RD4/OQ7: a
+# grade-3 gate replays two committed transcripts and builds NOTHING, which is
+# what makes it free enough for the default path. The risk that trades for is
+# the other one — a transcript quietly swapped for one recorded from a PR's
+# own image — so the test asserts each transcript's recorded `firmware_sha256`
+# against the pinned image at that transcript's commit
+# (`the_grade_3_replays_run_against_the_pinned_images`). A re-recording has to
+# arrive as a new stem with its own sha and its own line in that test; it can
+# never arrive as a rebuild. It is listed here as well as running everywhere
+# because this is the job a reader looks in for the C6 emulator's gates.
+#
 # `emu_usb_hello` is in `lp-cli` rather than the emulator because it sends a
 # real `M!` frame, and the single framer for those (`lpc_wire::json::to_serial_line`)
 # is a product crate the fence keeps out of `lp-emu/` — see the test's header.
-test-emu-c6:
+#
+# Two halves, because CI runs them in two jobs. The `-p lp-cli` half is a
+# second full test-tree build (features unify differently from
+# `-p lp-emu-esp32c6`; 6m07s on a CI runner, 2026-09-08), so CI runs it in
+# `Heap budget (esp32c6 chip)` beside the chip ratchet, which needs the same
+# build, and `Emulator C6 (x64)` keeps the emulator's own suite. Locally,
+# `just test-emu-c6` is still the whole thing.
+test-emu-c6: test-emu-c6-boot test-emu-c6-cli
+
+# The emulator's own suite: boot tests against built fw-esp32c6 ELFs, then the
+# lp-emu-validate replays. CI's `Emulator C6 (x64)` job runs this half.
+#
+# `test-emu-serve` rides along at the end (DD13, plan two): the M1 gates want
+# the reference image, and this is the one recipe whose CI job has already
+# built it — anywhere else in CI they would only skip. Last, not a
+# dependency, because a socket suite is the slow half and the emulator's own
+# answers should not wait behind it.
+test-emu-c6-boot:
     LP_EMU_BUILD_FW=1 cargo test -p lp-emu-esp32c6 -- --include-ignored --nocapture
     cargo test -p lp-emu-validate --test m3_replays
     cargo test -p lp-emu-validate --test m4_replays
@@ -2190,8 +2273,37 @@ test-emu-c6:
     cargo test -p lp-emu-validate --test m6_replays
     cargo test -p lp-emu-validate --test m7_replays
     cargo test -p lp-emu-validate --test cycle_probe_two_clocks
+    cargo test -p lp-emu-validate --test band_contract
+    just test-emu-serve
+
+# lp-cli's two emulator-backed tests. Both resolve the ELF through
+# `lp_emu_esp32c6::test_support` under `LP_EMU_BUILD_FW=1` — a plain
+# `cargo build`, not a reference image, so no espflash and no git history.
+# CI's `Heap budget (esp32c6 chip)` job runs this half.
+test-emu-c6-cli:
     cargo test -p lp-cli --test validate_registry_parity
     LP_EMU_BUILD_FW=1 cargo test -p lp-cli --test emu_usb_hello -- --include-ignored
+
+# `lp-cli emu serve`'s WebSocket door: the registry, the two endpoints, the
+# coupling rule, `reset`, and the upload walk over `serial:ws://…` landing
+# `upload-walk-usb`'s figures (emulator plan two, M1).
+#
+# It wants the REFERENCE image — a riscv32 build of firmware commit d6cfaa205
+# through `scripts/emu/build-reference-image.sh` — and a `git archive` of the
+# project the walk was captured against. Both skip honestly when they cannot
+# be had, so a run with neither says so rather than passing quietly.
+#
+# Run from `test-emu-c6-boot` (DD13), which is the one CI job that has both:
+# `Emulator C6 (x64)` builds the reference image a step earlier and checks out
+# with `fetch-depth: 0`, so the `git archive` resolves. No new job — PD9 /
+# E-cost still stands, this is a step on a path-gated one that already pays
+# for the image.
+#
+# Serial on purpose: each test holds N emulated boards and a port, and a
+# loaded box is where a socket test goes flaky.
+test-emu-serve:
+    LP_EMU_BUILD_FW=1 cargo test -p lp-cli --test emu_serve_door -- --include-ignored --test-threads=1
+    LP_EMU_BUILD_FW=1 cargo test -p lp-cli --test emu_serve_walk -- --include-ignored --test-threads=1
 
 # The hardware walk, with the emulator where the board goes.
 #

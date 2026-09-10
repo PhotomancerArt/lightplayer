@@ -16,7 +16,11 @@ pub mod button;
 #[cfg(all(
     feature = "radio",
     not(any(feature = "stress_s2", feature = "stress_s3")),
-    any(not(fw_harness), feature = "test_espnow")
+    any(
+        not(fw_harness),
+        feature = "test_espnow",
+        feature = "test_espnow_broadcast"
+    )
 ))]
 pub mod espnow_radio_driver;
 #[cfg(not(fw_harness))]
