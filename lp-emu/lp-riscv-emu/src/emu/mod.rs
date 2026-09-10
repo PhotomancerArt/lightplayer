@@ -1,4 +1,8 @@
 pub mod abi_helper;
+/// The width and cost class the executors give a word, for anything that must
+/// decode without running — see the module docs. `lp-emu-jit`'s agreement test
+/// (M7 JD3) is its reason for being public.
+pub mod class_oracle;
 mod decoder;
 pub mod emulator;
 pub mod error;
