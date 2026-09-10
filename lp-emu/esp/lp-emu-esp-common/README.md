@@ -59,6 +59,7 @@ events fire.
 | `engine::uart` | Two writers share a real UART — a mask ROM's direct FIFO store and an async driver filling it and awaiting a threshold — behind a shifter draining at the programmed baud in emulated cycles, a receive timeout, threshold levels, and a `HostSinks` byte stream with a scheduled source poll. Scheduled behaviour with host-stream coupling, and on the classic ESP32 the UART is the *only* host link |
 | `engine::spi_flash` | The flash side of a controller's command word — the `usr` transaction's operations, the WIP/WEL latch a mask ROM spins on, the SPI-NOR command set — and the NOR chip itself: program is `&=` so a double-write without an erase shows up, erase is the only way back to `0xff`, the JEDEC capacity byte comes from the same length the ROM's `chip_size` word does, and `--flash` / `--flash-copy` / blank are three distinct persistence policies. Every part in this emulator boots off SPI-NOR, and a second view would otherwise re-derive file-backed persistence exactly or its transcripts would mean nothing |
 | `engine::timg` | Counters at a rate with alarms, auto-reload, the load/update pair, and the watchdog's write-protect gate. The classic ESP32 has no SYSTIMER: TIMG0 is its rtos tick, its 1 ms io pacer **and** its `Instant::now()`. Three scheduled counters feeding `IrqLines`, and the engine takes the count as a parameter so the classic's third one needs no new type |
+| `engine::sha` | **A different justification from the rest — see below.** The SHA-1 and SHA-256 compression functions, `K256`, the three initial vectors and the eight-word state. Not shared scheduled behaviour: one implementation of a standard algorithm that three chips must agree on bit for bit, because an ESP-IDF second-stage bootloader will not run an image whose hash does not match the digest `esptool` appended. Cheap to share (a pure function, no `BusCx`, no scheduler), expensive to get wrong twice. SHA-384/512 are **not** here: the classic has them and the C6 does not, and they arrive when a boot actually needs them |
 
 Two things a reader might look for in `engine::timg` and not find. The
 **RTC calibration** stayed in the C6's view: its shape is generic but its
@@ -78,6 +79,17 @@ positions — and bit positions are exactly what an engine may not hold. The
 cache MMU, the cache-fill path and the flash window stay in the chip crate for
 the same reason. So does every trigger-bit number: they happen to agree across
 two generations of this IP, and this crate does not encode coincidences.
+
+**`engine::sha` is the one engine whose justification is not the test above,
+and it is not a precedent.** A block compression schedules nothing and touches
+no host stream, so on the rule as written it does not qualify. It is extracted
+anyway because bit-exactness across chips is a different kind of win and a
+real one: a second hand-transcribed copy of sixty-four round constants and a
+round function is duplication that fails only at the last mile of a boot,
+where it is most expensive to diagnose. Do not cite it when arguing for
+extracting a struct two chips happen to share — the argument has to be that
+*this* algorithm has an external standard three views must agree with, not
+that two views have similar fields.
 
 ### The USB-Serial-JTAG finding (M2, for M6)
 

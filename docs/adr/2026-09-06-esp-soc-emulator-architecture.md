@@ -758,6 +758,52 @@ The host side of the door is `serial:ws://<addr>/board/<id>/bytes`, the
 sibling of `serial:tcp://<addr>` — raw bytes, not the lpc-wire protocol a bare
 `ws://` specifier means.
 
+### Amendment (M2, 2026-09-10): engines and views, and the matrix's two halves
+
+Plan: `~/.photomancer/planning/lp2025/2026-09-10-0021-xtensa-emulator/`
+(milestone M2, decisions D2 and D3).
+
+**A block is now two things with two homes.** What the IP *does* — scheduled
+behaviour, host streams, fabric coupling — may live in
+`lp-emu-esp-common::engine` as a plain struct a chip's view owns **by value**;
+where the guest pokes it stays in the chip crate, which keeps every offset,
+bit position, reset value, interrupt source number and `RegGrade`, owns the
+`Peripheral` impl, and maps the engine's *named* events onto its own PAC's
+bits. An engine never packs an `EventId` — the view does, because an engine
+does not know its peripheral index and a renumbering would change *when*
+events fire. The bar for extracting one (D2) is that a second chip's view
+would otherwise re-implement scheduled behaviour with host-stream or fabric
+coupling; a struct two views happen to share is not a win. Four cleared it —
+`uart`, `timg`, `spi_flash`, `sha` — and two were declared noes with the
+evidence recorded: the **RMT**, whose classic and C6 blocks are different
+channel taxonomies rather than one IP at different offsets, and **GPIO**,
+whose shared part already exists and is called `Fabric`, the block above it
+being a thin routing view. `sha` is the one exception to the bar and the crate
+README says so where a reader will meet it: a block compression schedules
+nothing and touches no host stream, and it is extracted because three chips
+must agree with an external standard bit for bit — an ESP-IDF second-stage
+bootloader will not run an image whose hash does not match — not because two
+views have similar fields. It is not a precedent. The neutrality rule is
+unchanged by any of this; engines are how it is kept once a second chip
+arrives.
+
+**The interrupt seam has two halves, and which one a machine asks is an ISA
+fact.** `CpuIntMatrix` above resolves *the* CPU interrupt to take; that shape
+cannot be written from the bus side on Xtensa, where the enable mask is
+`INTENABLE` and the level gate is `PS.INTLEVEL` — CPU registers a bus-side
+trait cannot see. So the trait now **requires** `asserted(hart, irq) -> u32`,
+the routing applied to the source levels and nothing else, and **defaults**
+`cpu_interrupt(hart, irq) -> Option<u8>` to `None`. A chip whose matrix holds
+its own enables and priorities answers `cpu_interrupt` and the RV32 path is
+exactly as it was; a chip whose CPU holds them leaves the default and its hart
+resolves the mask itself. `SocBus` exposes both, one call each
+(`pending_cpu_interrupt`, `pending_cpu_interrupt_mask`). The **purity contract
+is preserved and now covers both**: each is called on every MMIO store, so
+each must be cheap and a pure function of the levels and its own
+configuration — no scheduling, no logging per call. Nothing was added to
+`lp_emu_core::Bus`; whether the arch-neutral trait should carry the mask is
+re-asked when a hart is actually bound to a `SocBus`.
+
 ## Alternatives considered
 
 **Keep using `esp-emu`.** It is free, it exists, and it was right about memory.
