@@ -40,9 +40,15 @@ use crate::periph::{
 use crate::pins::Fabric;
 use crate::trace::{Access, MmioEvent, Trace};
 
-/// Hardware trigger slots, matching the RISC-V debug spec's count on the
-/// ESP32-C6 (four `mcontrol` triggers).
-pub const WATCHPOINT_SLOTS: usize = 4;
+/// The most watchpoint slots any machine on this bus can arm — a **capacity**,
+/// not a claim about any chip.
+///
+/// How many a machine actually has is a chip fact and lives in the chip crate:
+/// the RISC-V debug spec's `mcontrol` triggers number four on the ESP32-C6,
+/// and Xtensa LX6/LX7 have two `DBREAK` slots. Each machine declares its own
+/// with [`SocBus::set_watchpoint_slots`]; this is only the size of the array
+/// that holds them, and it grows when some machine needs more.
+pub const MAX_WATCHPOINT_SLOTS: usize = 4;
 
 /// How many distinct `(pc, address)` unmapped sites are remembered before
 /// the bus stops recording new ones. Counting continues; only the
@@ -282,7 +288,10 @@ pub struct SocBus {
     /// sets both permissive; the flag lives here because the bus is the
     /// component that actually decides.
     allow_unaligned: bool,
-    watchpoints: [Option<Watchpoint>; WATCHPOINT_SLOTS],
+    watchpoints: [Option<Watchpoint>; MAX_WATCHPOINT_SLOTS],
+    /// How many of [`MAX_WATCHPOINT_SLOTS`] this machine actually has. See
+    /// [`SocBus::set_watchpoint_slots`]; the default is the maximum.
+    slots: usize,
     /// Bit per armed slot that wants each access kind, indexed by
     /// [`kind_index`]; `0` short-circuits the per-access check. esp-hal keeps
     /// a store trigger on the stack guard for the whole run, so *something*
@@ -416,7 +425,8 @@ impl SocBus {
             sideband: false,
             yield_now: false,
             allow_unaligned: false,
-            watchpoints: [None; WATCHPOINT_SLOTS],
+            watchpoints: [None; MAX_WATCHPOINT_SLOTS],
+            slots: MAX_WATCHPOINT_SLOTS,
             armed_for: [0; 3],
             single_store_watch: None,
             unmapped_sites: BTreeSet::new(),
@@ -660,6 +670,39 @@ impl SocBus {
 
     pub fn allow_unaligned(&self) -> bool {
         self.allow_unaligned
+    }
+
+    /// Declare how many watchpoint slots this machine's hart has, of the
+    /// [`MAX_WATCHPOINT_SLOTS`] the array holds.
+    ///
+    /// A fresh [`SocBus`] has the maximum, so a machine that never calls this
+    /// behaves exactly as it always did. Arming a slot at or above the count
+    /// is ignored with a warning — exactly what arming one at or above the
+    /// array's size always did.
+    ///
+    /// Called once at machine construction. Narrowing it after a slot above
+    /// the new count is armed would leave that slot armed and unreachable, so
+    /// this clears every slot from `count` up as it narrows — through the
+    /// ordinary [`set_watchpoint`](Bus::set_watchpoint) path, so the armed
+    /// bitmask and the single-store fast path are recomputed with it.
+    pub fn set_watchpoint_slots(&mut self, count: usize) {
+        assert!(
+            count <= MAX_WATCHPOINT_SLOTS,
+            "SocBus: {count} watchpoint slots asked for, {MAX_WATCHPOINT_SLOTS} is the array's size"
+        );
+        // Widen first, so the disarm below is not itself rejected by the
+        // bounds guard when the count is being narrowed.
+        self.slots = MAX_WATCHPOINT_SLOTS;
+        for slot in count..MAX_WATCHPOINT_SLOTS {
+            Bus::set_watchpoint(self, slot, None);
+        }
+        self.slots = count;
+    }
+
+    /// How many watchpoint slots this machine has. See
+    /// [`set_watchpoint_slots`](Self::set_watchpoint_slots).
+    pub fn watchpoint_slots(&self) -> usize {
+        self.slots
     }
 
     /// Install the chip's interrupt matrix. See [`CpuIntMatrix`].
@@ -1339,7 +1382,7 @@ impl SocBus {
         kind: MemoryAccessKind,
         mask: u32,
     ) -> Result<(), MemoryError> {
-        for slot in 0..WATCHPOINT_SLOTS {
+        for slot in 0..self.slots {
             if mask & (1 << slot) == 0 {
                 continue;
             }
@@ -1853,7 +1896,7 @@ impl Bus for SocBus {
     }
 
     fn set_watchpoint(&mut self, slot: usize, wp: Option<Watchpoint>) {
-        if slot >= WATCHPOINT_SLOTS {
+        if slot >= self.slots {
             log::warn!("SocBus: watchpoint slot {slot} is out of range, ignored");
             return;
         }
@@ -2328,8 +2371,79 @@ mod tests {
         bus.set_watchpoint(0, None);
         assert!(bus.write_word(0x4080_0100, 0).is_ok());
         // Out-of-range slots are ignored, not fatal.
-        bus.set_watchpoint(WATCHPOINT_SLOTS, Some(wp));
+        bus.set_watchpoint(MAX_WATCHPOINT_SLOTS, Some(wp));
         assert!(bus.write_word(0x4080_0100, 0).is_ok());
+    }
+
+    /// A machine with fewer slots than the array holds: the slots it has
+    /// work, and the ones above the count are not arm-able.
+    #[test]
+    fn a_narrowed_slot_count_ignores_the_slots_above_it() {
+        let mut bus = bus_with_ram();
+        bus.set_watchpoint_slots(2);
+        assert_eq!(bus.watchpoint_slots(), 2);
+
+        let in_range = Watchpoint {
+            address: 0x4080_0100,
+            napot: false,
+            on_store: true,
+            on_load: false,
+            on_execute: false,
+        };
+        bus.set_watchpoint(1, Some(in_range));
+        assert!(bus.write_word(0x4080_0100, 0).is_err(), "slot 1 fires");
+
+        let above = Watchpoint {
+            address: 0x4080_0200,
+            napot: false,
+            on_store: true,
+            on_load: false,
+            on_execute: false,
+        };
+        bus.set_watchpoint(2, Some(above));
+        assert!(
+            bus.write_word(0x4080_0200, 0).is_ok(),
+            "slot 2 is above the count: the arm is ignored and its range is clear"
+        );
+    }
+
+    /// The ordering the setter's disarm loop exists to prevent: a slot armed
+    /// while the count was wide must not survive the narrowing, armed and
+    /// unreachable.
+    #[test]
+    fn narrowing_disarms_a_slot_that_was_already_armed() {
+        let mut bus = bus_with_ram();
+        let wp = Watchpoint {
+            address: 0x4080_0300,
+            napot: false,
+            on_store: true,
+            on_load: false,
+            on_execute: false,
+        };
+        bus.set_watchpoint(3, Some(wp));
+        assert!(bus.write_word(0x4080_0300, 0).is_err(), "armed while wide");
+
+        bus.set_watchpoint_slots(2);
+        assert!(
+            bus.write_word(0x4080_0300, 0).is_ok(),
+            "narrowing cleared slot 3"
+        );
+    }
+
+    /// Nothing changed for a caller that never declares a count.
+    #[test]
+    fn the_default_slot_count_is_the_maximum() {
+        let mut bus = bus_with_ram();
+        assert_eq!(bus.watchpoint_slots(), MAX_WATCHPOINT_SLOTS);
+        let wp = Watchpoint {
+            address: 0x4080_0400,
+            napot: false,
+            on_store: true,
+            on_load: false,
+            on_execute: false,
+        };
+        bus.set_watchpoint(MAX_WATCHPOINT_SLOTS - 1, Some(wp));
+        assert!(bus.write_word(0x4080_0400, 0).is_err());
     }
 
     #[test]

@@ -24,15 +24,18 @@ use object::{Object, ObjectSection, ObjectSymbol, SectionFlags, SectionKind};
 pub enum ElfError {
     /// `object` could not parse it.
     Parse(String),
-    /// Parsed, but not a 32-bit little-endian RISC-V image.
-    NotRv32(String),
+    /// Parsed, but not a 32-bit little-endian image for a machine this view
+    /// serves. The payload names the `e_machine` it saw.
+    UnsupportedMachine(String),
 }
 
 impl core::fmt::Display for ElfError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             ElfError::Parse(m) => write!(f, "ELF parse failed: {m}"),
-            ElfError::NotRv32(m) => write!(f, "not an rv32 ELF: {m}"),
+            ElfError::UnsupportedMachine(m) => {
+                write!(f, "not an ELF this view serves (rv32 or Xtensa): {m}")
+            }
         }
     }
 }
@@ -93,6 +96,19 @@ pub struct InitSection {
     pub data: Vec<u8>,
 }
 
+/// The `e_machine` values [`ElfImage::parse`] accepts.
+///
+/// An ELF machine number is a **format** constant, not a chip number: it is
+/// defined by the ELF specification's `EM_*` table (`object::elf`), and
+/// `EM_XTENSA` says LX6/LX7 no more than `EM_RISCV` says ESP32-C6. The
+/// crate's neutrality rule is about chip facts — register offsets, counts,
+/// reset values — and is intact.
+///
+/// Nothing else about the parse is machine-dependent: a `PT_LOAD` is a
+/// `PT_LOAD`, and this view carries no relocation or section-flag handling
+/// that could differ between the two.
+pub const ACCEPTED_MACHINES: [u16; 2] = [object::elf::EM_RISCV, object::elf::EM_XTENSA];
+
 /// A parsed ELF image: entry, `PT_LOAD` segments, symbols.
 #[derive(Clone, Debug, Default)]
 pub struct ElfImage {
@@ -105,16 +121,17 @@ pub struct ElfImage {
 }
 
 impl ElfImage {
-    /// Parse an rv32 little-endian ELF.
+    /// Parse a 32-bit little-endian ELF for one of the machines this view
+    /// serves — see [`ACCEPTED_MACHINES`].
     pub fn parse(bytes: &[u8]) -> Result<Self, ElfError> {
         let file =
             ElfFile32::<Endianness>::parse(bytes).map_err(|e| ElfError::Parse(e.to_string()))?;
         let endian = file.endian();
         let header = file.elf_header();
-        if header.e_machine(endian) != object::elf::EM_RISCV {
-            return Err(ElfError::NotRv32(alloc::format!(
-                "e_machine = {}",
-                header.e_machine(endian)
+        let machine = header.e_machine(endian);
+        if !ACCEPTED_MACHINES.contains(&machine) {
+            return Err(ElfError::UnsupportedMachine(alloc::format!(
+                "e_machine = {machine}"
             )));
         }
 
@@ -313,13 +330,33 @@ mod tests {
     }
 
     #[test]
-    fn rejects_a_non_riscv_elf() {
+    fn rejects_an_unsupported_machine() {
         let mut bytes = tiny_elf(0, 0, 0, 4, &[0; 4]);
         bytes[18] = 0x3e; // EM_X86_64
         assert!(matches!(
             ElfImage::parse(&bytes).unwrap_err(),
-            ElfError::NotRv32(_)
+            ElfError::UnsupportedMachine(_)
         ));
+    }
+
+    /// Acceptance changed and nothing else did: the same bytes with `94`
+    /// (`EM_XTENSA`) where `243` (`EM_RISCV`) was parse to the same image.
+    #[test]
+    fn an_xtensa_elf_parses_the_same_as_an_rv32_one() {
+        let rv32 = tiny_elf(0x4080_0010, 0x4080_0000, 0x4200_0000, 0x40, &[1, 2, 3, 4]);
+        assert_eq!(rv32[18], 243, "tiny_elf is the rv32 leg");
+        let mut xtensa = rv32.clone();
+        xtensa[18] = 94; // EM_XTENSA
+        assert_eq!(xtensa[19], 0);
+
+        let a = ElfImage::parse(&rv32).unwrap();
+        let b = ElfImage::parse(&xtensa).unwrap();
+
+        assert_eq!(a.entry, b.entry);
+        assert_eq!(a.segments.len(), b.segments.len());
+        assert_eq!(a.segments, b.segments);
+        assert_eq!(a.init_sections, b.init_sections);
+        assert_eq!(a.memory_footprint(), b.memory_footprint());
     }
 
     #[test]
