@@ -75,6 +75,7 @@ pub fn boot_set(reset_cause: ResetCause) -> Vec<(u32, u32, BoxedPeripheral)> {
             Box::new(accept::io_mux()),
         ),
         (base::SPI1, accept::SPI_LEN, Box::new(accept::spi("SPI1"))),
+        (base::SPI0, accept::SPI_LEN, Box::new(accept::spi("SPI0"))),
         (base::EFUSE, accept::EFUSE_LEN, Box::new(accept::efuse())),
     ]
 }

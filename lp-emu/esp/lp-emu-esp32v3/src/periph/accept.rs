@@ -351,8 +351,15 @@ pub fn io_mux() -> RegFile {
 /// one table serve them all.
 pub const SPI_LEN: u32 = 0x400;
 
-/// `SPI1` — the flash controller esp-storage drives; **P7's block**,
-/// accept-and-remember here, and the direct load's **last** P3 stop.
+/// `SPI1` — the flash controller esp-storage drives — and `SPI0`, the
+/// cache's own flash port; **P7's blocks**, accept-and-remember here, and
+/// the direct load's last two P3 stops.
+///
+/// `SPI0` is the eleventh, 72 cycles after SPI1: `esp_rom_spiflash_wait_idle
+/// +0x1a` (`0x4008_38AA`) reads `SPI0.ext2` (`+0xf8`), whose `st` field is
+/// the controller's state machine — the ROM's idle wait polls both
+/// controllers' `ext2.st == 0` before it touches the flash, and the PAC's
+/// reset (0) is *idle*, so the wait passes without a pin.
 ///
 /// The tenth strict stop of the direct load, 3,644,210 cycles in:
 /// `esp_rom_spiflash_read+0xc` (`0x4008_3C98`, in the app's own `.rwtext` —
@@ -423,6 +430,7 @@ mod tests {
             (uart0(), regs::UART0),
             (io_mux(), regs::IO_MUX),
             (spi("SPI1"), regs::SPI0),
+            (spi("SPI0"), regs::SPI0),
             (efuse(), regs::EFUSE),
         ]
     }
