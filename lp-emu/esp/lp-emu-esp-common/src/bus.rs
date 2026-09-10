@@ -2727,11 +2727,7 @@ mod tests {
             assert_eq!(got, 3, "three bytes of room at +{k}");
             assert_eq!(
                 out,
-                [
-                    0xa0 | k as u8,
-                    0xa0 | (k + 1) as u8,
-                    0xa0 | (k + 2) as u8
-                ],
+                [0xa0 | k as u8, 0xa0 | (k + 1) as u8, 0xa0 | (k + 2) as u8],
                 "the arena's own bytes at +{k}"
             );
         }
