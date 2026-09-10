@@ -46,10 +46,11 @@ OPTIONS:
     --rom <path>            a mask ROM ELF (default: the vendored ESP32
                             rev300 image, compiled in)
     --strict-bus            every access to an address nothing claims is a
-                            STOP instead of a silent zero. NO PERIPHERAL IS
-                            MODELLED YET, so this stops at the first MMIO
-                            access of the boot — which is the point: that
-                            stop is what M3 P3 reads
+                            STOP instead of a silent zero. Every block is an
+                            accept-and-remember probe (M3 P3), so a boot
+                            reaches its first spin on a register only a
+                            model can answer — see the phase report for
+                            which phase owns which
     --time-grade t1         t1 = cycles are instructions. The only grade this
                             machine defines; see --help output for why [t1]
     --timeout <5s|1500ms|900us>
@@ -389,9 +390,10 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             }
             other => {
                 return Err(format!(
-                    "unrecognised flag `{other}`. This machine has no peripherals yet, so the \
-                     doors a later phase adds (--uart0, --control, --flash, --cache-off-fetch) \
-                     are absent rather than accepted-and-ignored. `--help` lists what exists."
+                    "unrecognised flag `{other}`. This machine's blocks are accept probes, so \
+                     the doors a later phase adds (--uart0, --control, --flash, \
+                     --cache-off-fetch) are absent rather than accepted-and-ignored. `--help` \
+                     lists what exists."
                 ));
             }
         }

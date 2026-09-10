@@ -830,17 +830,26 @@ fn the_direct_load_enters_the_app_where_the_bootloader_would() {
     assert_eq!(machine.peek_word(frame.sp - 12), Some(frame.sp));
 }
 
-/// P2's recorded first strict stop of the direct load, held: the loader
-/// change moved nothing the boot reads before its first MMIO access.
+/// P2's recorded first strict stop of the direct load, held on a **bare**
+/// machine: the loader change moved nothing the boot reads before its
+/// first MMIO access, and the P3 ledger starts where P2's reading ended.
 #[test]
 #[ignore = "needs the shipped image; run through `just test-emu-esp32v3-boot`"]
-fn the_first_strict_stop_of_the_direct_load_is_dport() {
-    let Some(mut machine) = direct(true) else {
+fn the_first_strict_stop_of_a_bare_direct_load_is_dport() {
+    let Ok(elf) = fw_esp32v3_image() else {
+        skip_notice("bare direct load", "no image");
         return;
     };
+    let mut machine = Esp32V3Builder::new()
+        .boot_mode(BootMode::Direct)
+        .app(AppSource::Path(elf))
+        .bare()
+        .strict(true)
+        .build()
+        .expect("builds");
     let outcome = machine.run_until(&StopCondition::after_micros(1_000));
     let Outcome::StrictBus { violation } = outcome else {
-        panic!("no peripheral is modelled at this commit: expected a strict stop, got {outcome:?}");
+        panic!("a bare machine has no peripheral: expected a strict stop, got {outcome:?}");
     };
     assert_eq!(
         violation.address,
@@ -854,4 +863,156 @@ fn the_first_strict_stop_of_the_direct_load_is_dport() {
             .is_some_and(|s| s.contains("esp32_init")),
         "{violation:?}"
     );
+}
+
+/// A trace sink a test can read back: the bus trace is the one record of
+/// what the guest wrote into an accept block byte by byte, because the
+/// block itself remembers only the last write.
+#[derive(Clone, Default)]
+struct SharedSink(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for SharedSink {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl SharedSink {
+    fn text(&self) -> String {
+        String::from_utf8_lossy(&self.0.lock().unwrap()).into_owned()
+    }
+}
+
+/// The bytes the guest wrote to `UART0.fifo`, in order, read out of a
+/// `--trace-block UART0` trace: every `W… UART0+0x000 fifo = 0x…` line.
+fn uart0_fifo_bytes(trace: &str) -> Vec<u8> {
+    trace
+        .lines()
+        .filter(|l| l.starts_with("cyc=") && l.contains(" UART0+0x000 fifo = 0x"))
+        .filter(|l| l.split_whitespace().any(|w| w.starts_with('W')))
+        .filter_map(|l| l.rsplit("= 0x").next())
+        .filter_map(|hex| u32::from_str_radix(hex.trim(), 16).ok())
+        .map(|v| (v & 0xff) as u8)
+        .collect()
+}
+
+/// Run the shipped image on the P3 boot set to `micros`, with UART0 traced
+/// into a sink, and hand back the machine, the outcome and the trace text.
+fn direct_traced(micros: u64) -> Option<(Machine, Outcome, String)> {
+    let elf = match fw_esp32v3_image() {
+        Ok(p) => p,
+        Err(reason) => {
+            skip_notice("direct load, traced", &reason);
+            return None;
+        }
+    };
+    let sink = SharedSink::default();
+    let mut machine = Esp32V3Builder::new()
+        .boot_mode(BootMode::Direct)
+        .app(AppSource::Path(elf))
+        .strict(true)
+        .trace(Box::new(sink.clone()), vec!["UART0".into()])
+        .build()
+        .expect("builds");
+    let outcome = machine.run_until(&StopCondition::after_micros(micros));
+    Some((machine, outcome, sink.text()))
+}
+
+/// **Where the direct load stands at the end of P3.** With every block the
+/// strict run demanded accepted, the boot prints its whole `[INIT]` chain
+/// — into a register that remembers only the last byte — and then reaches
+/// the flash: esp-storage's `esp_rom_spiflash_read_status` writes
+/// `SPI1.cmd.flash_rdsr` (bit 27) and spins until hardware clears it:
+///
+/// ```text
+/// 40083861:  s32i    a12, a10, 0        ; SPI1.cmd = 1 << 27
+/// 40083864:  memw                       ; +0x38, the spin
+/// 40083867:  l32i.n  a8, a10, 0
+/// 40083869:  bnez    a8, 40083864
+/// ```
+///
+/// A register file holds the bit forever. That is P7's question in the
+/// phase file's own words — *"SPI1 `CMD` write: no flash chip"* — and this
+/// test holds the reading until P7 moves it. The hello is P6's: the bytes
+/// are all there, and not one of them left the chip.
+#[test]
+#[ignore = "needs the shipped image; run through `just test-emu-esp32v3-boot`"]
+fn the_direct_load_says_hello_into_an_accept_block_and_stands_at_the_flash_until_p7() {
+    let Some((mut machine, outcome, trace)) = direct_traced(20_000) else {
+        return;
+    };
+    assert!(
+        matches!(outcome, Outcome::Deadline { .. }),
+        "no strict stop and no fault before the deadline: {outcome:?}"
+    );
+    let pc = machine.harts[0].pc();
+    let sym = machine.symbolize(pc).unwrap_or_default();
+    assert!(
+        sym.starts_with("esp_rom_spiflash_read_status"),
+        "spinning on the flash status command, got pc={pc:#010x} ({sym})"
+    );
+    assert!(
+        (0x4008_3864..=0x4008_386B).contains(&pc),
+        "inside the `memw; l32i; bnez` loop: {pc:#010x}"
+    );
+    assert_eq!(
+        machine.peek_word(memmap::periph::SPI1),
+        Some(1 << 27),
+        "SPI1.cmd.flash_rdsr, remembered — the bit no register file can clear"
+    );
+
+    // The hello, byte for byte, out of the trace: the silicon capture's
+    // `[INIT]` chain (`../bench.md`), as far as the I/O task.
+    let text = String::from_utf8_lossy(&uart0_fifo_bytes(&trace)).into_owned();
+    assert!(
+        text.starts_with("[INIT] fw-esp32v3 boot\n"),
+        "the first line the boot prints: {text:?}"
+    );
+    for line in [
+        "[INIT] chip=esp32 arch=xtensa heap=",
+        "[INIT] heap regions: 0 0x3ffe0440+15072 (ROM PRO stack)",
+        "[RECOVERY] boot: cause=power-on",
+        "[INIT] runtime started",
+        "[INIT] I/O task spawned (uart0 921600 8N1",
+    ] {
+        assert!(text.contains(line), "missing {line:?} in:\n{text}");
+    }
+    assert!(
+        !text.contains("flash filesystem mounted"),
+        "the mount is the line after the flash read, and there is no flash chip"
+    );
+    // And the block itself holds exactly one byte of all that: the last.
+    let last = *text.as_bytes().last().expect("bytes");
+    assert_eq!(
+        machine
+            .peek_word(memmap::periph::UART0)
+            .map(|w| (w & 0xff) as u8),
+        Some(last),
+        "an accept block remembers only the last write"
+    );
+}
+
+/// Determinism, pinned: two runs of the same image with the same flags end
+/// at the same cycle and the same pc and wrote the same UART0 bytes.
+#[test]
+#[ignore = "needs the shipped image; run through `just test-emu-esp32v3-boot`"]
+fn two_runs_of_the_direct_load_are_the_same_run() {
+    let Some((a, oa, ta)) = direct_traced(16_000) else {
+        return;
+    };
+    let Some((b, ob, tb)) = direct_traced(16_000) else {
+        return;
+    };
+    assert_eq!(oa, ob);
+    assert_eq!(a.harts[0].pc(), b.harts[0].pc());
+    assert_eq!(a.cycles(), b.cycles());
+    assert_eq!(a.instructions(), b.instructions());
+    let (ba, bb) = (uart0_fifo_bytes(&ta), uart0_fifo_bytes(&tb));
+    assert!(!ba.is_empty(), "the boot printed something");
+    assert_eq!(ba, bb, "identical UART bytes");
+    assert_eq!(ta, tb, "identical traces, cycle for cycle");
 }
