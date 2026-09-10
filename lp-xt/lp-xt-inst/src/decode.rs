@@ -393,8 +393,13 @@ fn decode_st1(w: u32) -> Option<Inst> {
         0x1 if t(w) == 0 => Some(Inst::ShiftSet(ShiftSetOp::Ssl, reg_s(w))),
         0x2 if t(w) == 0 => Some(Inst::ShiftSet(ShiftSetOp::Ssa8l, reg_s(w))),
         0x3 if t(w) == 0 => Some(Inst::ShiftSet(ShiftSetOp::Ssa8b, reg_s(w))),
-        0x4 => {
-            // SSAI: imm = s | (t{0} << 4)
+        // SSAI: imm = s | (t{0} << 4). `t{3-1}` is a reserved field and the
+        // assembler always emits it as zero; a word with those bits set is NOT
+        // an `ssai` and must not decode as one. Accepting them silently
+        // mis-decoded six literal-pool words in the shipped `fw-esp32v3` image
+        // as `ssai 0` (M0's inventory, 2026-09-10) — the exact
+        // silently-wrong-answer shape this crate exists to avoid.
+        0x4 if t(w) & 0xe == 0 => {
             let imm = s(w) | ((t(w) & 0x1) << 4);
             Some(Inst::Ssai(imm))
         }
@@ -474,10 +479,17 @@ fn decode_rst3(w: u32) -> Option<Inst> {
 }
 
 /// Decode an `RSR`/`WSR`/`XSR` word: the special-register number is
-/// `(r << 4) | s` and `t` is the address register. `None` for any register
-/// outside [`SpecialReg`]'s narrow modeled set.
+/// `(r << 4) | s` and `t` is the address register.
+///
+/// `None` for any register outside [`SpecialReg`]'s modelled set **and** for a
+/// direction the assembler refuses (`xsr.interrupt`, `rsr.intclear`,
+/// `wsr.prid`) — see [`SpecialReg::allows`].
 fn sr_access(w: u32, op: SrOp) -> Option<Inst> {
-    SpecialReg::from_num((r(w) << 4) | s(w)).map(|sreg| Inst::Sr(op, sreg, reg_t(w)))
+    let sreg = SpecialReg::from_num((r(w) << 4) | s(w))?;
+    if !sreg.allows(op) {
+        return None;
+    }
+    Some(Inst::Sr(op, sreg, reg_t(w)))
 }
 
 /// `op0 = 2`: RRI8 loads/stores plus movi/addi/addmi (disambiguated by `r`).

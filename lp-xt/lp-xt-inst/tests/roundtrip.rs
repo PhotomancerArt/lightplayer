@@ -402,18 +402,57 @@ fn boolean_moves_and_branches() {
 #[test]
 fn special_and_user_registers() {
     for op in [SrOp::Rsr, SrOp::Wsr, SrOp::Xsr] {
-        for sreg in [SpecialReg::Br, SpecialReg::Cpenable] {
+        for sreg in SpecialReg::ALL {
+            if !sreg.allows(op) {
+                continue;
+            }
             for &x in &REGS {
                 rt(Inst::Sr(op, sreg, r(x)), 3);
             }
         }
     }
     for op in [UrOp::Rur, UrOp::Wur] {
-        for ureg in [UserReg::Fcr, UserReg::Fsr] {
+        for ureg in UserReg::ALL {
             for &x in &REGS {
                 rt(Inst::Ur(op, ureg, r(x)), 3);
             }
         }
+    }
+}
+
+/// The SR / UR tables are total in both directions: every variant's number maps
+/// back to that variant, `ALL` and `from_num` agree on the modelled set, and
+/// numbers outside it stay `None`.
+#[test]
+fn sr_ur_tables_are_total_both_ways() {
+    for sreg in SpecialReg::ALL {
+        assert_eq!(
+            SpecialReg::from_num(sreg.num()),
+            Some(sreg),
+            "SR {} ({}) does not round-trip through from_num",
+            sreg.num(),
+            sreg.name()
+        );
+    }
+    let modelled: usize = (0u8..=255).filter(|&n| SpecialReg::from_num(n).is_some()).count();
+    assert_eq!(
+        modelled,
+        SpecialReg::ALL.len(),
+        "SpecialReg::ALL and from_num disagree on how many registers are modelled"
+    );
+
+    for ureg in UserReg::ALL {
+        assert_eq!(UserReg::from_num(ureg.num()), Some(ureg), "UR {}", ureg.num());
+    }
+    let modelled_ur: usize = (0u8..=255).filter(|&n| UserReg::from_num(n).is_some()).count();
+    assert_eq!(modelled_ur, UserReg::ALL.len());
+
+    // A sample of numbers the LX6/LX7 assemblers have no name for.
+    for n in [6u8, 13, 100, 105, 200, 216, 229, 239, 243, 248, 255] {
+        assert_eq!(SpecialReg::from_num(n), None, "SR {n} must stay unmodelled");
+    }
+    for n in [0u8, 100, 229, 237, 255] {
+        assert_eq!(UserReg::from_num(n), None, "UR {n} must stay unmodelled");
     }
 }
 

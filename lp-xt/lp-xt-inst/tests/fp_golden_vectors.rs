@@ -525,18 +525,50 @@ fn special_and_user_registers() {
     dis(&[0xf0, 0xe8, 0xf3], "wur.fcr\ta15");
 }
 
-/// Special registers outside the modeled set stay unsupported — this crate does
-/// not claim a general SR model. `rsr.sar a3` / `wsr.sar a3` are the witnesses
-/// (SAR is SR 3, and the emulator models `SAR` through `ssai`/`ssl`, not here).
+/// Special-register numbers outside the modelled table stay unsupported. M1 P1
+/// widened the table to the whole firmware SR space, but `from_num` is still
+/// deliberately **partial**: SR 6, SR 100 and SR 200 are unassigned on both
+/// LX6 and LX7 (the assembler has no name for them) and must not decode into
+/// something that looks executable.
+///
+/// The word layout is `rsr`: `op1 = 3`, `op2 = 0`, register = `(r << 4) | s`,
+/// `t` = a3 — i.e. bytes `30 <s|r<<4 ...> 03`.
 #[test]
 fn unmodeled_special_registers_stay_unsupported() {
-    for bytes in [[0x30u8, 0x03, 0x03], [0x30, 0x03, 0x13]] {
+    for num in [6u8, 100, 200, 243, 255] {
+        let bytes = [0x30u8, num, 0x03];
         assert!(
             matches!(
                 decode(&bytes).unwrap_err(),
                 DecodeError::Unsupported { len: 3, .. }
             ),
-            "SR 3 (sar) must not decode: {bytes:02x?}"
+            "SR {num} must not decode: {bytes:02x?}"
+        );
+    }
+}
+
+/// The three asymmetric registers refuse the direction the assembler refuses:
+/// `xsr.interrupt` (SR 226), `rsr.intclear` / `xsr.intclear` (SR 227) and
+/// `wsr.prid` / `xsr.prid` (SR 235) do not exist, so they must not decode.
+#[test]
+fn asymmetric_special_registers_refuse_the_illegal_direction() {
+    // (register number, op1, op2) for rsr = (_, 3, 0), wsr = (_, 3, 1),
+    // xsr = (_, 1, 6).
+    for (num, op1, op2) in [
+        (226u8, 1u32, 6u32), // xsr.interrupt
+        (227, 3, 0),         // rsr.intclear
+        (227, 1, 6),         // xsr.intclear
+        (235, 3, 1),         // wsr.prid
+        (235, 1, 6),         // xsr.prid
+    ] {
+        let w = (op2 << 20) | (op1 << 16) | ((num as u32) << 8) | (3 << 4);
+        let bytes = [w as u8, (w >> 8) as u8, (w >> 16) as u8];
+        assert!(
+            matches!(
+                decode(&bytes).unwrap_err(),
+                DecodeError::Unsupported { len: 3, .. }
+            ),
+            "SR {num} op1={op1} op2={op2} must not decode: {bytes:02x?}"
         );
     }
 }

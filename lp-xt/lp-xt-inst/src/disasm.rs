@@ -290,7 +290,7 @@ pub fn format_inst(inst: &Inst, pc: u32) -> String {
         }
 
         // --- special / user registers ---
-        Sr(op, sreg, at) => format!("{}.{}\t{at:?}", op.name(), sreg.name()),
+        Sr(op, sreg, at) => format!("{}.{}\t{at:?}", op.name(), sreg.name_for(op)),
         Ur(op, ureg, at) => format!("{}.{}\t{at:?}", op.name(), ureg.name()),
     }
 }
