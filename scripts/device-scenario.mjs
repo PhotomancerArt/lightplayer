@@ -26,6 +26,23 @@
 //    (docs/defects/2026-07-27-launch-json-pinned-port.md).
 //  - A re-run that captures nothing never destroys a previous fixture
 //    (.partial swap on non-empty finish only).
+//
+// TWO LANES (emulator plan two, M6). The SILICON lane above is unchanged. The
+// EMULATED lane (`--emu`) runs the same scenarios with no board: `setup:`
+// becomes an `lp-cli emu serve` holding boards on a fresh state dir, and
+// `manual:` becomes the spec's `emulated.steps`, driven in headless Chrome.
+// See scripts/emu/emulated-lane.mjs, and README.md's "The emulated lane".
+//
+//  - THE GUARD (the single most important rule in the emulated lane): an
+//    emulated run can only ever write a name containing `.emu.`. It is code —
+//    `assertLaneMayWrite` below, called at every write site — not a
+//    convention, because a board's bytes are not reproducible and a
+//    clobbered silicon fixture is gone. `just device-scenario check-guard`
+//    proves it by trying, and prints the silicon shas it did not touch.
+//  - The emulated lane never prompts. There is no person at a chooser, so
+//    there is nothing to ask; a run whose capture misses its `expect` list
+//    files a FINDING (`.emu.failed.jsonl`) and says so. The silicon lane's
+//    "k = keep as the golden fixture" branch DOES NOT EXIST here.
 
 import { readdirSync, readFileSync, existsSync, statSync, mkdirSync, appendFileSync, writeFileSync, renameSync, rmSync, openSync } from "node:fs";
 import { createServer } from "node:http";
@@ -34,6 +51,18 @@ import { createInterface } from "node:readline";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import process from "node:process";
+
+// The emulated lane's machinery. Importing it has no side effects; the
+// silicon lane never calls any of it.
+import {
+  PACKAGED_C6_ELF as LANE_PACKAGED_C6_ELF,
+  StudioDriver as LaneStudioDriver,
+  boardRegistry as lane_boardRegistry,
+  runSteps as lane_runSteps,
+  startDoor as lane_startDoor,
+  stopDoor as lane_stopDoor,
+  studioUrlFor as lane_studioUrlFor,
+} from "./emu/emulated-lane.mjs";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const SPEC_DIR = path.join(ROOT, "scripts", "device-scenarios");
@@ -57,46 +86,128 @@ function loadScenarios() {
     });
 }
 
-function tracePath(id) {
-  return path.join(TRACE_DIR, `${id}.jsonl`);
+/// The two lanes' file names, and the whole of OQ3's mechanism.
+///
+/// `<id>.jsonl`      — a BOARD's bytes through Studio's own classifier.
+/// `<id>.emu.jsonl`  — the same scenario on `lp-cli emu serve`, with no board.
+///
+/// A filename discriminator rather than a sidecar, because it is the only one
+/// of the three shapes a GUARD can be written against: "the emulated lane may
+/// only ever write a name containing `.emu.`" is a string test, and
+/// `trace_replay.rs` picks the new file up with no change because it walks
+/// `*.jsonl`. Provenance that survives a copy rides INSIDE the file, as the
+/// first `journal` record (`provenanceRecord` below) — the record kind
+/// already exists, so nothing about the JSONL contract changes.
+function tracePath(id, lane = "silicon") {
+  return path.join(TRACE_DIR, lane === "emulated" ? `${id}.emu.jsonl` : `${id}.jsonl`);
 }
 
-function captureStatus(id) {
-  const file = tracePath(id);
+function findingPath(id, lane = "silicon") {
+  return path.join(TRACE_DIR, lane === "emulated" ? `${id}.emu.failed.jsonl` : `${id}.failed.jsonl`);
+}
+
+/// THE GUARD. A silicon fixture is a board's own bytes; it is not
+/// reproducible and a clobbered one is gone, so an emulated run must not be
+/// ABLE to write one — not on the happy path, not through a prompt, not
+/// through a flag. Every rename in this file goes through here.
+function assertLaneMayWrite(file, lane) {
+  const name = path.basename(file);
+  if (lane !== "emulated") {
+    return file;
+  }
+  if (!name.includes(".emu.")) {
+    throw new Error(
+      `the emulated lane tried to write ${name}, which is a SILICON fixture name.\n` +
+        `  A board's bytes are not reproducible and a clobbered fixture is gone, so this is\n` +
+        `  refused rather than confirmed. Emulated captures are <id>.emu.jsonl (plan two, OQ3).`,
+    );
+  }
+  return file;
+}
+
+function captureStatus(id, lane = "silicon") {
+  const file = tracePath(id, lane);
   if (existsSync(file) && statSync(file).size > 0) {
     return { state: "captured", when: statSync(file).mtime.toISOString().slice(0, 16).replace("T", " ") };
   }
   // A filed FINDING (the run happened but did not do what the spec
   // expects) is a visible state of its own — not silently "missing".
-  const failed = path.join(TRACE_DIR, `${id}.failed.jsonl`);
+  const failed = findingPath(id, lane);
   if (existsSync(failed)) {
     return { state: "finding", when: statSync(failed).mtime.toISOString().slice(0, 16).replace("T", " ") };
   }
   return { state: "missing" };
 }
 
+function statusWord(cap) {
+  return cap.state === "captured" ? `captured ${cap.when}`
+    : cap.state === "finding" ? `✗ finding ${cap.when}`
+    : "—";
+}
+
 function printStatus(scenarios) {
   console.log("\nDevice scenarios — golden-trace capture status\n");
+  console.log("  Two lanes. SILICON is a board's own bytes (<id>.jsonl); EMULATED is the same");
+  console.log("  scenario on `lp-cli emu serve` with no board (<id>.emu.jsonl). An emulated");
+  console.log("  capture never overwrites a silicon one — see check-guard.\n");
   const rows = scenarios.map((s) => {
-    const cap = captureStatus(s.id);
     const setup = s.setup?.length
       ? s.setup.every((step) => step.verified) ? "scripted" : "scripted (unverified)"
       : "procedure only";
-    const status =
-      cap.state === "captured" ? `captured ${cap.when}`
-      : cap.state === "finding" ? `✗ finding ${cap.when} (FINDINGS.md)`
-      : cap.state;
-    return [s.id, status, setup, s.board, s.title];
+    return [
+      s.id,
+      statusWord(captureStatus(s.id, "silicon")),
+      s.emulated ? statusWord(captureStatus(s.id, "emulated")) : "(no lane)",
+      setup,
+      s.board,
+      s.title,
+    ];
   });
-  const widths = [0, 0, 0, 0];
-  for (const row of rows) for (let i = 0; i < 4; i++) widths[i] = Math.max(widths[i], row[i].length);
-  for (const row of rows) {
-    console.log(
-      `  ${row[0].padEnd(widths[0])}  ${row[1].padEnd(widths[1])}  ${row[2].padEnd(widths[2])}  ${row[3].padEnd(widths[3])}  ${row[4]}`,
-    );
-  }
-  console.log(`\nRun one with: just device-scenario run <id> [--port /dev/cu.usbmodemXXXX]`);
+  const header = ["scenario", "silicon", "emulated", "setup", "board", "title"];
+  const widths = [0, 0, 0, 0, 0];
+  for (const row of [header, ...rows]) for (let i = 0; i < 5; i++) widths[i] = Math.max(widths[i], row[i].length);
+  const line = (row) =>
+    `  ${row[0].padEnd(widths[0])}  ${row[1].padEnd(widths[1])}  ${row[2].padEnd(widths[2])}  ${row[3].padEnd(widths[3])}  ${row[4].padEnd(widths[4])}  ${row[5]}`;
+  console.log(line(header));
+  console.log(`  ${widths.map((w) => "-".repeat(w)).join("  ")}  -----`);
+  for (const row of rows) console.log(line(row));
+  console.log(`\nSilicon (a board on the desk):  just device-scenario run <id> [--port /dev/cu.usbmodemXXXX]`);
+  console.log(`Emulated (no board at all):     just device-scenario run <id> --emu [--shots <dir>]`);
+  console.log(`The overwrite guard, proved:    just device-scenario check-guard`);
   console.log(`Captures land in ${path.relative(ROOT, TRACE_DIR)}/ (commit them — they are fixtures).\n`);
+}
+
+/// Prove the guard by trying it, and print the silicon fixtures' sha256 so a
+/// caller can see they were not touched. This is the re-runnable form of
+/// invariant 1 (plan two, M6).
+function checkGuard(scenarios) {
+  console.log("\nThe overwrite guard — trying to make the emulated lane write silicon names\n");
+  let refused = 0;
+  for (const spec of scenarios) {
+    for (const candidate of [tracePath(spec.id, "silicon"), findingPath(spec.id, "silicon")]) {
+      try {
+        assertLaneMayWrite(candidate, "emulated");
+        console.log(`  ✗ ALLOWED  ${path.basename(candidate)}  ← the guard did not hold`);
+      } catch (error) {
+        refused += 1;
+        console.log(`  ✓ refused  ${path.basename(candidate)}  (${error.message.split("\n")[0]})`);
+      }
+    }
+    // …and the names it IS allowed to write.
+    for (const candidate of [tracePath(spec.id, "emulated"), findingPath(spec.id, "emulated")]) {
+      assertLaneMayWrite(candidate, "emulated");
+    }
+  }
+  console.log(`\n  ${refused} silicon name(s) refused; every <id>.emu.* name allowed.`);
+  console.log("\n  sha256 of the committed silicon fixtures, for a before/after comparison:");
+  for (const name of readdirSync(TRACE_DIR).filter((n) => n.endsWith(".jsonl") && !n.includes(".emu."))) {
+    const sum = execSync(`shasum -a 256 ${JSON.stringify(path.join(TRACE_DIR, name))}`, { encoding: "utf8" })
+      .trim()
+      .split(/\s+/)[0];
+    console.log(`    ${sum}  ${name}`);
+  }
+  console.log("");
+  return refused;
 }
 
 function ask(question) {
@@ -354,22 +465,25 @@ function summarize(records) {
   return lines.join("\n") || "  (no lifecycle events captured)";
 }
 
-function validate(spec, records) {
-  const failures = [];
-  for (const expectation of spec.expect) {
-    // "state:ready" or alternatives "a|b" — any match passes.
-    const ok = expectation.split("|").some((alt) => {
-      const [kind, value] = alt.split(":");
-      return records.some((record) => {
-        if (record.kind !== kind) return false;
-        if (!value) return true;
-        return record.to === value || record.action === value || record.disposition === value
-          || record.phase === value || record.from === value || record.content === value;
-      });
+/// One `expect` entry against a set of records. "state:ready", or
+/// alternatives "a|b" — any match passes; a bare "<kind>" matches any record
+/// of that kind. UNCHANGED by the emulated lane, deliberately: the whole
+/// claim of M6 is that the same matchers pass with no board, so a matcher
+/// loosened to make the emulator pass would be the failure, not the fix.
+function matchesExpectation(expectation, records) {
+  return expectation.split("|").some((alt) => {
+    const [kind, value] = alt.split(":");
+    return records.some((record) => {
+      if (record.kind !== kind) return false;
+      if (!value) return true;
+      return record.to === value || record.action === value || record.disposition === value
+        || record.phase === value || record.from === value || record.content === value;
     });
-    if (!ok) failures.push(expectation);
-  }
-  return failures;
+  });
+}
+
+function validate(spec, records) {
+  return spec.expect.filter((expectation) => !matchesExpectation(expectation, records));
 }
 
 /// Resolve a scenario by exact id, short id ("s2" → "s2-fresh-fw-no-lpfs";
@@ -420,7 +534,17 @@ async function menuPick(scenarios) {
 /// switches which scenario's .partial the events land in. Events arriving
 /// between scenarios are counted and dropped.
 function startSink() {
-  const state = { active: null, dropped: 0 };
+  const state = { active: null, dropped: 0, waiters: [] };
+  const offer = (record) => {
+    // The emulated lane's `await` step resolves HERE: a record arriving is
+    // the event, so no wait in that lane polls a throttled page.
+    for (const waiter of [...state.waiters]) {
+      if (waiter.matches(record)) {
+        state.waiters.splice(state.waiters.indexOf(waiter), 1);
+        waiter.resolve(record);
+      }
+    }
+  };
   const sink = createServer((request, response) => {
     let body = "";
     request.on("data", (chunk) => { body += chunk; });
@@ -428,7 +552,11 @@ function startSink() {
       const lines = body.split("\n").filter((line) => line.trim().length > 0);
       if (state.active) {
         for (const line of lines) {
-          try { state.active.records.push(JSON.parse(line)); } catch { /* keep raw anyway */ }
+          try {
+            const record = JSON.parse(line);
+            state.active.records.push(record);
+            offer(record);
+          } catch { /* keep raw anyway */ }
         }
         if (lines.length) appendFileSync(state.active.partial, lines.join("\n") + "\n");
       } else {
@@ -438,6 +566,26 @@ function startSink() {
       response.end();
     });
   });
+  /// Wait for a record matching one `expect`-style matcher. Records already
+  /// captured in this scenario count — a step that asks for something that
+  /// has already happened must not hang.
+  state.mark = () => { state.markAt = state.active?.records.length ?? 0; };
+  state.awaitRecord = (matcher, timeoutMs, fresh = false) =>
+    new Promise((resolve, reject) => {
+      const matches = (record) => matchesExpectation(matcher, [record]);
+      const from = fresh ? (state.markAt ?? 0) : 0;
+      const already = (state.active?.records ?? []).slice(from).find(matches);
+      if (already) return resolve(already);
+      const waiter = { matches, resolve };
+      state.waiters.push(waiter);
+      const timer = setTimeout(() => {
+        const index = state.waiters.indexOf(waiter);
+        if (index >= 0) state.waiters.splice(index, 1);
+        reject(new Error(`no device-event record matched \`${matcher}\` before the deadline`));
+      }, timeoutMs);
+      timer.unref?.();
+      waiter.resolve = (record) => { clearTimeout(timer); resolve(record); };
+    });
   return { sink, state };
 }
 
@@ -446,12 +594,12 @@ function startSink() {
 /// a way of indicating that for you to look at later"): the trace moves to
 /// <id>.failed.jsonl and FINDINGS.md gets an entry an agent can pick up.
 /// Failed traces are never golden fixtures — the replay test skips them.
-function fileFinding(spec, records, failures, partial, note) {
-  const failed = path.join(TRACE_DIR, `${spec.id}.failed.jsonl`);
+function fileFinding(spec, records, failures, partial, note, lane = "silicon") {
+  const failed = assertLaneMayWrite(findingPath(spec.id, lane), lane);
   renameSync(partial, failed);
   const findings = path.join(TRACE_DIR, "FINDINGS.md");
   const entry = [
-    `## ${new Date().toISOString()} — ${spec.id}`,
+    `## ${new Date().toISOString()} — ${spec.id}${lane === "emulated" ? " (emulated lane)" : ""}`,
     ``,
     `- Expected: ${spec.expect.join(", ")} (missing: ${failures.join(", ")})`,
     `- Observed (trace summary):`,
@@ -588,6 +736,182 @@ async function runOne(spec, state, argPort, studioUrl) {
   return true;
 }
 
+// --- the emulated lane ----------------------------------------------------
+//
+// One scenario, no board: its own `emu serve` on a fresh state dir, the
+// worktree's own `just studio-dev` for the page, one headless Chrome, and the
+// spec's `emulated.steps` where the `manual:` list would be.
+
+/// The provenance line, and OQ3's answer to "what tells them apart INSIDE the
+/// file". `journal` is an existing record kind (`scope` + `entry`), so this
+/// changes nothing about the JSONL contract: `trace_replay.rs` reads `rx` and
+/// `state` and ignores it, `validate()` cannot match it (no spec expects a
+/// `journal`), and a copy of the file carries its own provenance.
+///
+/// `configuration` mirrors the transcript system's `lp-emu:<chip>:<grade>`
+/// naming (vision D18) — the same words the `.txt.meta.json` sidecars use.
+function provenanceRecord(spec, { doorAddr, boards, image, command }) {
+  return JSON.stringify({
+    t: Date.now() / 1000,
+    kind: "journal",
+    scope: "capture",
+    entry:
+      `emulator-captured trace (plan two M6). configuration=lp-emu:esp32c6:t1 ` +
+      `scenario=${spec.id} boards=${boards.join(" ")} image=${image} door=${doorAddr} ` +
+      `command=${command}. NOT a silicon fixture: no board produced these bytes.`,
+  });
+}
+
+async function runOneEmulated(spec, state, studio, sinkUrl, options) {
+  const lane = "emulated";
+  const emulated = spec.emulated;
+  if (!emulated) {
+    console.log(`\n=== ${spec.id} — SKIPPED: no \`emulated\` block in the spec.`);
+    console.log(`    ${spec.title}`);
+    return { id: spec.id, skipped: "no emulated lane in the spec" };
+  }
+  console.log(`\n=== ${spec.id} — ${spec.title}   [EMULATED LANE — no board]`);
+  console.log(`Board(s): ${emulated.boards.join(", ")}`);
+  if (emulated.note) console.log(`Note: ${emulated.note}`);
+
+  const runDir = path.join(ROOT, "target", "emu-scenarios", spec.id);
+  const door = await lane_startDoor({
+    root: ROOT,
+    id: spec.id,
+    boards: emulated.boards,
+    stateDir: path.join(runDir, "state"),
+    consoleDir: path.join(runDir, "console"),
+    logFile: path.join(runDir, "serve.log"),
+    fresh: options.freshState !== false,
+  });
+  console.log(`  emu serve: http://${door.addr}/boards  (pid ${door.pid}, state ${path.relative(ROOT, door.stateDir)})`);
+
+  mkdirSync(TRACE_DIR, { recursive: true });
+  const file = assertLaneMayWrite(tracePath(spec.id, lane), lane);
+  const partial = `${file}.partial`;
+  const records = [];
+  writeFileSync(
+    partial,
+    provenanceRecord(spec, {
+      doorAddr: door.addr,
+      boards: emulated.boards,
+      image: laneImage(),
+      command: `just device-scenario run ${spec.id} --emu`,
+    }) + "\n",
+  );
+  state.active = { records, partial };
+
+  const studioUrl = lane_studioUrlFor({ studioPort: studio.port, doorAddr: door.addr, sinkUrl });
+  console.log(`  studio:    ${studioUrl}`);
+  // NEVER `spawnSync("open", …)` here: a visible window steals the desk's
+  // focus and there are other agents on this box. Headless, always.
+  const driver = await LaneStudioDriver.launch();
+  let stepError = null;
+  let steps = [];
+  try {
+    await driver.navigate(studioUrl);
+    await driver.awaitShim();
+    steps = await lane_runSteps(emulated.steps, {
+      driver,
+      shotDir: options.shotDir,
+      doorAddr: door.addr,
+      awaitRecord: state.awaitRecord,
+      mark: state.mark,
+    });
+  } catch (error) {
+    stepError = error;
+    console.error(`  ✗ step failed: ${error.message}`);
+    if (options.shotDir) {
+      try {
+        console.error(`    (failure screenshot → ${await driver.screenshot(path.join(options.shotDir, `${spec.id}-FAILED.png`))})`);
+      } catch { /* the page may be gone */ }
+    }
+  }
+
+  const registry = await lane_boardRegistry(door.addr).catch(() => null);
+  const consoleNoise = driver.consoleLines().filter((line) => line.startsWith("[error]") || line.startsWith("[exception]"));
+  await driver.close();
+  state.active = null;
+  stopDoorSafely(door);
+
+  console.log(`\nCaptured ${records.length} events.`);
+  console.log("\nWhat the trace says happened:");
+  console.log(summarize(records));
+  if (registry) {
+    console.log(`\nDoor's live registry at the end: ${registry.map((b) => `${b.id} flash=${b.flash} boot=${b.boot} reboots=${b.reboots} state=${b.state}`).join(" · ")}`);
+  }
+  if (consoleNoise.length) {
+    console.log("\nPage console errors:");
+    for (const line of consoleNoise.slice(-10)) console.log(`  ${line}`);
+  }
+
+  const failures = validate(spec, records);
+  if (records.length === 0) {
+    rmSync(partial, { force: true });
+    console.log("\n✗ nothing arrived at the sink — did the page carry ?capture-sink=?");
+    return { id: spec.id, ok: false, failures: spec.expect, records: 0, stepError, door, registry };
+  }
+  if (failures.length || stepError) {
+    console.log(`\n✗ capture is missing expected evidence: ${failures.join(", ") || "(steps failed)"}`);
+    // No prompt and no "keep as the golden fixture" branch: the emulated lane
+    // has nobody to ask, and a fixture kept because the spec was inconvenient
+    // is exactly what this milestone must not produce.
+    fileFinding(spec, records, failures, partial, stepError ? `step failed: ${stepError.message.split("\n")[0]}` : "emulated lane", lane);
+    return { id: spec.id, ok: false, failures, records: records.length, stepError, door, registry, steps };
+  }
+  renameSync(partial, assertLaneMayWrite(file, lane));
+  console.log(`\n✓ capture validates → ${path.relative(ROOT, file)} — commit it (a fixture, not a story PNG).`);
+  return { id: spec.id, ok: true, failures: [], records: records.length, door, registry, steps, file };
+}
+
+function laneImage() {
+  return LANE_PACKAGED_C6_ELF;
+}
+
+function stopDoorSafely(door) {
+  try {
+    lane_stopDoor(door);
+  } catch (error) {
+    console.warn(`  (could not stop emu serve ${door.pid}: ${error.message})`);
+  }
+}
+
+/// The emulated sitting: Studio once, a sink once, then N scenarios each with
+/// their own door and their own browser. Non-interactive from end to end.
+async function emulatedSitting(ids, options) {
+  const scenarios = loadScenarios();
+  const chosen = ids.length
+    ? ids.map((id) => resolveScenario(scenarios, id)).filter(Boolean)
+    : scenarios.filter((spec) => spec.emulated);
+  if (chosen.length === 0) {
+    console.error("no scenarios with an emulated lane matched.");
+    process.exit(2);
+  }
+  const studio = await ensureStudio();
+  if (!studio) process.exit(1);
+  const { sink, state } = startSink();
+  await new Promise((resolve) => sink.listen(0, "127.0.0.1", resolve));
+  const sinkUrl = `http://127.0.0.1:${sink.address().port}/ingest`;
+
+  const results = [];
+  for (const spec of chosen) {
+    results.push(await runOneEmulated(spec, state, studio, sinkUrl, options));
+  }
+  sink.close();
+
+  console.log("\n=== emulated lane — verdicts\n");
+  for (const result of results) {
+    const verdict = result.skipped ? `SKIP (${result.skipped})` : result.ok ? "✓ validates" : `✗ ${result.failures.join(", ") || "steps failed"}`;
+    console.log(`  ${result.id.padEnd(28)} ${verdict}`);
+  }
+  console.log("");
+  printStatus(loadScenarios());
+  if (studio.startedPid) {
+    console.log(`Studio (started by this run) is still serving on port ${studio.port} — stop it with: kill ${studio.startedPid}`);
+  }
+  return results.every((result) => result.ok || result.skipped) ? 0 : 1;
+}
+
 /// The sitting: Studio up (reused or started), ONE sink + ONE browser tab,
 /// then scenarios in a loop until `q`. Enter-through walks the happy path:
 /// next uncaptured scenario, first serial port, same tab.
@@ -641,21 +965,64 @@ async function sitting(initialId, argPort) {
   printStatus(scenarios);
 }
 
-const [, , command, maybeId, ...rest] = process.argv;
-const portFlag = (() => {
-  const all = [maybeId, ...rest];
-  const index = all.indexOf("--port");
-  return index >= 0 ? all[index + 1] : null;
-})();
+const [, , command, ...rest] = process.argv;
+
+/// `--flag value` for the two that take one, `--emu` as a bare switch;
+/// everything else positional is a scenario id.
+function parseArgs(argv) {
+  const takesValue = new Set(["--port", "--shots"]);
+  const flags = { emu: false, port: null, shots: null, keepState: false, ids: [] };
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--emu") flags.emu = true;
+    else if (arg === "--keep-state") flags.keepState = true;
+    else if (takesValue.has(arg)) {
+      flags[arg.slice(2)] = argv[index + 1] ?? null;
+      index += 1;
+    } else if (arg.startsWith("--")) {
+      console.error(`unknown flag ${arg}`);
+      process.exit(2);
+    } else {
+      flags.ids.push(arg);
+    }
+  }
+  return flags;
+}
+
+const usage = [
+  "usage: just device-scenario                    # status table (both lanes)",
+  "",
+  "  SILICON lane — a board on the desk:",
+  "       just device-scenario run [id] [--port /dev/cu.usbmodemXXXX]",
+  "         The sitting: setup, hand-off, the tab, capture, validate.",
+  "",
+  "  EMULATED lane — no board at all (emulator plan two, M6):",
+  "       just device-scenario run [id...] --emu [--shots <dir>] [--keep-state]",
+  "         Its own `lp-cli emu serve` per scenario on a fresh state dir, the",
+  "         worktree's own `just studio-dev` for the page, and the spec's",
+  "         `emulated.steps` driven in HEADLESS Chrome. No id runs every",
+  "         scenario that has an emulated lane. Writes <id>.emu.jsonl only.",
+  "",
+  "       just device-scenario check-guard",
+  "         Prove, by trying, that the emulated lane cannot write a silicon",
+  "         fixture name; prints the silicon fixtures' sha256.",
+].join("\n");
 
 if (!command || command === "status" || command === "list") {
   printStatus(loadScenarios());
+} else if (command === "check-guard") {
+  checkGuard(loadScenarios());
 } else if (command === "run") {
-  const initial = maybeId && maybeId !== "--port" ? maybeId : null;
-  await sitting(initial, portFlag);
+  const flags = parseArgs(rest);
+  if (flags.emu) {
+    process.exitCode = await emulatedSitting(flags.ids, {
+      shotDir: flags.shots,
+      freshState: !flags.keepState,
+    });
+  } else {
+    await sitting(flags.ids[0] ?? null, flags.port);
+  }
 } else {
-  console.error("usage: just device-scenario            # status table");
-  console.error("       just device-scenario run [id]   # the sitting (Enter-through happy path)");
-  console.error("                [--port /dev/cu.usbmodemXXXX]");
+  console.error(usage);
   process.exit(2);
 }
