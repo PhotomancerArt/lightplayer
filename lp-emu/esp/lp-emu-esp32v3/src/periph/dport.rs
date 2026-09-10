@@ -536,7 +536,7 @@ mod tests {
         let ctrl = sb.read(&mut d, PRO_CACHE_CTRL);
         sb.write(&mut d, PRO_CACHE_CTRL, ctrl & !CACHE_ENABLE);
         assert!(!cache.lock().unwrap().enabled(0));
-        assert_eq!(cache.lock().unwrap().disabled(0), (1_284_610, 0x4008_1c04));
+        assert_eq!(cache.lock().unwrap().disabled(0), (1_284_610, Some(0x4008_1c04)));
 
         // `Cache_Flush`'s handshake, from the guest's side.
         let ctrl = sb.read(&mut d, PRO_CACHE_CTRL);
