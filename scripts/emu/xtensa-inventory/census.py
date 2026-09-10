@@ -6,20 +6,37 @@ Why this exists
 `lp-xt/lp-xt-inst/src/bin/objdiff.rs` is the decoder-coverage oracle: it
 disassembles an ELF with `lp-xt-inst`'s own `decode()` and diffs every
 instruction against GNU `objdump`, so its numbers are `decode()`-exact rather
-than a mnemonic-name-table proxy. It has one limitation for an inventory: it
-looks only at the section literally named `.text`.
+than a mnemonic-name-table proxy. As of M1 P1 (PR #660) it looks at **every**
+`SHF_EXECINSTR` section of the ELF it is given, not just `.text` — so this
+script hands it the artefact **whole** and lets it do that iteration itself.
 
-Real artefacts carry executable code in several sections — the v3 firmware
-image has `.text`, `.rwtext` and `.vectors`; the classic mask ROM has
-`.text`, `.bt_text`, two secure-boot patch sections and eleven vector
-sections; the IDF second-stage bootloader is not an ELF at all.
+2026-09-10 correction (was: per-section lifting, PR #657 → #660): the
+original version of this script closed the "only `.text`" gap itself, before
+`objdiff.rs` did, by using `objcopy` to lift each CODE section into its own
+one-section ELF and running `objdiff` on that. That under-measured: lifting a
+section drops the Xtensa configuration the original ELF carries (`e_flags`
+and friends), and `xtensa-esp32-elf-objdump` then falls back to a
+config-less opcode table where a loose `lsi` entry beats real MAC16 entries.
+Same bytes, same objdump binary, same decoder — the classic mask ROM read
+**96.52 % / 60 mismatches** section-by-section and **99.96 % / 0 mismatches**
+read whole (PR #660's numbers; this script now reproduces the latter). See
+`lp-xt/lp-xt-inst/README.md`'s "do not measure this with a per-section lifted
+ELF" warning, which flagged the same failure mode in `objdiff.rs` before this
+script's version of it was found.
 
-This script closes that gap **without touching `lp-xt-inst`** (M1 owns that
-crate). For each CODE section it uses `objcopy` to lift the section's bytes
-into a one-section ELF whose single section is named `.text` and carries the
-original VMA, then runs `objdiff` on that. The disassembly objdump produces is
-identical either way — same bytes, same load address — so the per-section
-numbers sum to an exact whole-artefact figure.
+This script now runs `objdiff` **once**, directly on the artefact (or, for
+`--skip`, on an ELF-to-ELF `objcopy --remove-section` trim of it — see
+`build_measured_elf`, which explains why *that* doesn't reintroduce the bug).
+The per-section table below is metadata only, read back from `objdiff`'s own
+"executable sections" listing; the instruction/coverage numbers are only ever
+computed once, over the whole artefact, by `objdiff` itself.
+
+The bootloader case (`--base`) is different in kind, not just degree: a raw
+`espflash`-carved binary blob is not an ELF and never carried Xtensa
+configuration to lose in the first place. Wrapping it with `objcopy -I binary
+-O elf32-xtensa-le` (see `wrap_raw`) is the *only* ELF it ever has — there is
+no "whole, unlifted" original to prefer it over, so that path is unchanged
+from before and is not an instance of this bug.
 
 Licence note (AGENTS.md): binutils is used here as a *tool whose output is
 fact*. No binutils source, table, or logic is read or adapted.
@@ -28,13 +45,16 @@ Usage
 -----
     scripts/emu/xtensa-inventory/census.py <artefact> [--out DIR]
         [--objdump PATH] [--objdiff PATH] [--base ADDR] [--json FILE]
+        [--skip SECTION]...
 
 `<artefact>` is an Xtensa ELF, or a raw binary when `--base` gives its load
-address (that is the bootloader case).
+address (that is the bootloader case). `--skip` names a CODE section to
+exclude from the ELF case (ignored, with a warning, for `--base`, which has
+only the one implicit section).
 
-Output: a per-section table, the aggregate totals, the ranked unsupported
-mnemonics, and the special/user register census, on stdout; optionally the
-same as JSON.
+Output: a per-section metadata table, the aggregate totals, the ranked
+unsupported mnemonics, and the special/user register census, on stdout;
+optionally the same as JSON.
 """
 
 from __future__ import annotations
@@ -55,12 +75,9 @@ DEFAULT_TOOLCHAIN = Path(
     )
 )
 
-# objdump's section header table, two lines per section:
-#   " 10 .text         001c8231  400d0020  400d0020  00051020  2**2"
-#   "                 CONTENTS, ALLOC, LOAD, READONLY, CODE"
-_SEC_RE = re.compile(
-    r"^\s*\d+\s+(\S+)\s+([0-9a-f]+)\s+([0-9a-f]+)\s+([0-9a-f]+)\s+([0-9a-f]+)\s+2\*\*"
-)
+# objdiff.rs's own "executable sections" listing, one line per section:
+#   "  .text                vma=0x400d0020 size=1826353 bytes"
+_REGION_RE = re.compile(r"^\s{2}(\S+)\s+vma=(0x[0-9a-f]+)\s+size=(\d+) bytes$")
 
 # objdiff's own report lines.
 _COUNT_RE = re.compile(r"^\s*(instructions \(objdump\)|supported \(decoded\)|matched|MISMATCHED|unsupported|data-directive bytes):\s+(\d+)")
@@ -76,53 +93,40 @@ def run(cmd: list[str]) -> str:
     return proc.stdout
 
 
-def code_sections(objdump: Path, elf: Path) -> list[tuple[str, int, int]]:
-    """Every section flagged CODE, as `(name, size, vma)`, size > 0."""
-    lines = run([str(objdump), "-h", str(elf)]).splitlines()
-    out: list[tuple[str, int, int]] = []
-    for i, line in enumerate(lines):
-        m = _SEC_RE.match(line)
-        if not m:
-            continue
-        flags = lines[i + 1] if i + 1 < len(lines) else ""
-        if "CODE" not in flags:
-            continue
-        name, size, vma = m.group(1), int(m.group(2), 16), int(m.group(3), 16)
-        if size:
-            out.append((name, size, vma))
-    return out
+def build_measured_elf(objcopy: Path, elf: Path, skip: list[str], workdir: Path) -> Path:
+    """The ELF actually handed to `objdiff`.
 
-
-def lift_section(objcopy: Path, elf: Path, name: str, vma: int, workdir: Path) -> Path:
-    """Lift one section into a one-section ELF whose section is `.text` at `vma`."""
-    raw = workdir / f"{name.strip('.').replace('.', '_')}.bin"
-    out = workdir / f"{name.strip('.').replace('.', '_')}.elf"
-    run([str(objcopy), "-O", "binary", f"--only-section={name}", str(elf), str(raw)])
-    # NOTE: this toolchain's objcopy (crosstool-NG esp-14.2.0_20240906,
-    # GNU objcopy 2.43.1) silently zeroes the section's *content* — while
-    # keeping the correct size — when section flags are attached directly
-    # to `--rename-section` (`.data=.text,alloc,load,readonly,code`).
-    # Verified by hand: the same rename with a separate `--set-section-flags`
-    # preserves content; adding flags to `--rename-section` zeroes it, with
-    # or without `--change-section-address` also present. So flags and
-    # rename are always issued as two separate options here.
-    run(
-        [
-            str(objcopy),
-            "-I", "binary",
-            "-O", "elf32-xtensa-le",
-            "-B", "xtensa",
-            "--rename-section", ".data=.text",
-            "--set-section-flags", ".text=alloc,load,readonly,code",
-            "--change-section-address", f".data={vma:#x}",
-            str(raw),
-            str(out),
-        ]
-    )
+    With no `--skip`, this is the artefact unchanged — the whole point of
+    this rewrite is to stop constructing a derived ELF at all. `--skip`
+    still needs *some* derived ELF (to drop a named CODE section from the
+    measurement), but it does it as an ELF-to-ELF `objcopy
+    --remove-section`, not a binary round-trip: `objcopy` copies the input
+    ELF's header (including `e_flags`, the Xtensa configuration the original
+    per-section lifting dropped) and only strips the named section's
+    contents, so the surviving sections keep the same config context they'd
+    have had unmodified. That is a different `objcopy` mode from the one
+    this script used to use (`-I binary -O elf32-xtensa-le`, which builds a
+    *new* ELF header from scratch and carries no source config at all — the
+    actual bug), so `--skip` does not reintroduce it.
+    """
+    if not skip:
+        return elf
+    out = workdir / f"skip_{'_'.join(s.strip('.').replace('.', '_') for s in skip)}.elf"
+    cmd = [str(objcopy)]
+    for name in skip:
+        cmd += ["--remove-section", name]
+    cmd += [str(elf), str(out)]
+    run(cmd)
     return out
 
 
 def wrap_raw(objcopy: Path, blob: Path, vma: int, workdir: Path) -> Path:
+    """Wrap a raw binary blob (the bootloader case) as a one-section ELF.
+
+    Not an instance of the section-lifting bug: `blob` is raw bytes with no
+    ELF header of its own, so there is no original Xtensa configuration this
+    wrapping could drop. It is the only ELF this artefact ever has.
+    """
     out = workdir / (blob.stem + ".elf")
     run(
         [
@@ -141,12 +145,18 @@ def wrap_raw(objcopy: Path, blob: Path, vma: int, workdir: Path) -> Path:
 
 
 def parse_objdiff(text: str) -> dict:
-    """Pull the counters and the two mnemonic tallies out of an objdiff report."""
+    """Pull the section listing, counters, and the two mnemonic tallies out
+    of a whole-artefact `objdiff` report."""
+    regions: list[tuple[str, int, int]] = []
     counts: dict[str, int] = {}
     supported: Counter = Counter()
     unsupported: Counter = Counter()
     bucket = None
     for line in text.splitlines():
+        m = _REGION_RE.match(line)
+        if m:
+            regions.append((m.group(1), int(m.group(3)), int(m.group(2), 16)))
+            continue
         m = _COUNT_RE.match(line)
         if m:
             counts[m.group(1)] = int(m.group(2))
@@ -165,6 +175,7 @@ def parse_objdiff(text: str) -> dict:
             if t:
                 bucket[t.group(2).strip()] += int(t.group(1))
     return {
+        "regions": regions,
         "insns": counts.get("instructions (objdump)", 0),
         "decoded": counts.get("supported (decoded)", 0),
         "matched": counts.get("matched", 0),
@@ -184,9 +195,9 @@ def main() -> None:
     ap.add_argument("--objdump", type=Path, default=DEFAULT_TOOLCHAIN / "xtensa-esp32-elf-objdump")
     ap.add_argument("--objcopy", type=Path, default=DEFAULT_TOOLCHAIN / "xtensa-esp32-elf-objcopy")
     ap.add_argument("--objdiff", type=Path, default=Path("target/release/objdiff"))
-    ap.add_argument("--out", type=Path, help="directory to keep the per-section objdiff reports")
+    ap.add_argument("--out", type=Path, help="directory to keep the objdiff report")
     ap.add_argument("--json", type=Path)
-    ap.add_argument("--skip", action="append", default=[], help="section name to exclude")
+    ap.add_argument("--skip", action="append", default=[], help="CODE section name to exclude (ELF artefacts only)")
     args = ap.parse_args()
 
     if not args.objdiff.exists():
@@ -195,7 +206,6 @@ def main() -> None:
             "  cargo build -p lp-xt-inst --features objdiff --bin objdiff --release"
         )
 
-    env_objdump = str(args.objdump)
     tmp = tempfile.TemporaryDirectory(prefix="xt-census-")
     workdir = Path(tmp.name)
     outdir = args.out
@@ -203,52 +213,53 @@ def main() -> None:
         outdir.mkdir(parents=True, exist_ok=True)
 
     if args.base:
+        if args.skip:
+            print("census: --skip has no effect with --base (one implicit section)", file=sys.stderr)
         base = int(args.base, 0)
-        secs = [(args.artefact.name, args.artefact.stat().st_size, base)]
-        elves = {args.artefact.name: wrap_raw(args.objcopy, args.artefact, base, workdir)}
+        measured = wrap_raw(args.objcopy, args.artefact, base, workdir)
     else:
-        secs = [s for s in code_sections(args.objdump, args.artefact) if s[0] not in args.skip]
-        elves = {
-            name: lift_section(args.objcopy, args.artefact, name, vma, workdir)
-            for (name, _size, vma) in secs
-        }
+        measured = build_measured_elf(args.objcopy, args.artefact, args.skip, workdir)
 
-    rows = []
-    tot_sup: Counter = Counter()
-    tot_uns: Counter = Counter()
-    totals = Counter()
-    for name, size, vma in secs:
-        env = dict(os.environ, XT_OBJDUMP=env_objdump)
-        proc = subprocess.run(
-            [str(args.objdiff), str(elves[name])], capture_output=True, text=True, env=env
-        )
-        rep = parse_objdiff(proc.stdout)
-        if outdir:
-            (outdir / f"{name.strip('.').replace('.', '_')}.objdiff.txt").write_text(proc.stdout)
-        rows.append((name, size, vma, rep))
-        tot_sup.update(rep["supported"])
-        tot_uns.update(rep["unsupported"])
-        for k in ("insns", "decoded", "matched", "mismatched", "unsupported_n", "data_bytes"):
-            totals[k] += rep[k]
+    env = dict(os.environ, XT_OBJDUMP=str(args.objdump))
+    proc = subprocess.run(
+        [str(args.objdiff), str(measured)], capture_output=True, text=True, env=env
+    )
+    if proc.returncode not in (0, 1):  # objdiff exits 1 when mismatches exist
+        sys.exit(f"census: objdiff failed ({proc.returncode}): {proc.stderr}")
+    rep = parse_objdiff(proc.stdout)
+    if outdir:
+        (outdir / "objdiff.txt").write_text(proc.stdout)
+
+    regions = rep["regions"]
+    tot_sup = rep["supported"]
+    tot_uns = rep["unsupported"]
+    totals = {k: rep[k] for k in ("insns", "decoded", "matched", "mismatched", "unsupported_n", "data_bytes")}
 
     def pct(n: int, d: int) -> str:
         return f"{100.0 * n / d:.2f}%" if d else "n/a"
 
     print(f"=== xtensa-inventory census: {args.artefact} ===")
     print(f"objdump: {args.objdump}")
+    print(f"objdiff run whole over: {measured}" + (" (skip: " + ", ".join(args.skip) + ")" if args.skip else ""))
     print()
-    print(f"{'section':<28} {'bytes':>9} {'vma':>10} {'insns':>9} {'decoded':>9} {'cover':>8} {'mism':>5} {'unsup':>7} {'data':>7}")
-    for name, size, vma, r in rows:
-        print(
-            f"{name:<28} {size:>9} {vma:>#10x} {r['insns']:>9} {r['decoded']:>9} "
-            f"{pct(r['decoded'], r['insns']):>8} {r['mismatched']:>5} {r['unsupported_n']:>7} {r['data_bytes']:>7}"
-        )
+    print(f"{'section':<28} {'bytes':>9} {'vma':>10}")
+    for name, size, vma in regions:
+        print(f"{name:<28} {size:>9} {vma:>#10x}")
+    print(f"{'TOTAL (metadata only)':<28} {sum(s for _, s, _ in regions):>9} {'':>10}")
     print(
-        f"{'TOTAL':<28} {sum(s for _, s, _ in secs):>9} {'':>10} {totals['insns']:>9} "
-        f"{totals['decoded']:>9} {pct(totals['decoded'], totals['insns']):>8} "
-        f"{totals['mismatched']:>5} {totals['unsupported_n']:>7} {totals['data_bytes']:>7}"
+        "note: instruction/coverage numbers below are measured once, over the "
+        "whole artefact above — objdiff iterates its own executable sections "
+        "internally, so there is no per-section breakdown to print here "
+        "without re-lifting sections (the bug this rewrite removes)."
     )
     print()
+    print(
+        f"instructions {totals['insns']}  decoded {totals['decoded']}  "
+        f"matched {totals['matched']}  mismatched {totals['mismatched']}  "
+        f"unsupported {totals['unsupported_n']}  data-bytes {totals['data_bytes']}"
+    )
+    print()
+
     print(f"exact coverage: {totals['decoded']}/{totals['insns']} = {pct(totals['decoded'], totals['insns'])} decoded; "
           f"{totals['matched']}/{totals['insns']} = {pct(totals['matched'], totals['insns'])} decoded AND matching objdump")
     print()
@@ -278,16 +289,9 @@ def main() -> None:
             json.dumps(
                 {
                     "artefact": str(args.artefact),
-                    "sections": [
-                        {
-                            "name": n, "bytes": s, "vma": v,
-                            "insns": r["insns"], "decoded": r["decoded"],
-                            "matched": r["matched"], "mismatched": r["mismatched"],
-                            "unsupported": r["unsupported_n"], "data_bytes": r["data_bytes"],
-                        }
-                        for n, s, v, r in rows
-                    ],
-                    "totals": dict(totals),
+                    "measured_elf": str(measured),
+                    "sections": [{"name": n, "bytes": s, "vma": v} for n, s, v in regions],
+                    "totals": totals,
                     "unsupported": dict(tot_uns),
                     "supported": dict(tot_sup),
                     "special_registers": {f"{op}.{reg}": n for (reg, op), n in srs.items()},
