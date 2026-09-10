@@ -208,15 +208,29 @@ pub struct ServeArgs {
     #[arg(long, value_enum, default_value_t = EmuChip::Esp32C6)]
     pub chip: EmuChip,
 
-    /// A board: `<id>=<image>[,mac=<aa:bb:cc:dd:ee:ff>][,kind=elf|merged]`.
+    /// A board:
+    /// `<id>=<image>[,mac=<aa:bb:cc:dd:ee:ff>][,kind=elf|merged|rom-up]`.
     /// Repeatable, and the whole point — `s9-two-boards` is about two
     /// identities, so every board gets its own MAC (the desk board's with
     /// the last octet stepped, unless `mac=` says otherwise) and its own
     /// flash file under `--state-dir`.
     ///
-    /// `kind=merged` is a whole merged flash image booted from the reset
-    /// vector through the real mask ROM; the default `kind=elf` is a
-    /// firmware ELF loaded at its entry point.
+    /// Three kinds, and they differ in which entry the hart takes and
+    /// whether the chip keeps its writes:
+    ///
+    /// * `kind=elf` (the default) — a firmware ELF loaded straight into
+    ///   memory at its entry point, with a persistent flash part beside it.
+    ///   Fast; the running image and the flash file are independent.
+    /// * `kind=merged` — a whole merged flash image booted from the reset
+    ///   vector through the real mask ROM, READ-ONLY: it is the image a gate
+    ///   named, so it ignores `--state-dir`.
+    /// * `kind=rom-up` — the reset vector out of the board's OWN flash file,
+    ///   which keeps its writes. The only kind that can be flashed (by
+    ///   esptool-js, espflash, esptool) and then boot what was written. The
+    ///   image is a whole-chip image the flash file is SEEDED from the first
+    ///   time; `blank` means a chip with nothing on it, which reaches the
+    ///   mask ROM's download console by itself. (A file actually named
+    ///   `blank` is still reachable as `./blank`.)
     #[arg(long = "board", value_name = "ID=IMAGE[,OPTS]")]
     pub board: Vec<String>,
 
