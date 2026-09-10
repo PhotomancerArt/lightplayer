@@ -259,10 +259,7 @@ impl DportView {
 /// `core_N_intr_map` offset → `(core, source)`.
 fn map_index(off: u32) -> (usize, usize) {
     let word = (off - CORE_0_INTR_MAP) / 4;
-    (
-        (word as usize) / SOURCES,
-        (word as usize) % SOURCES,
-    )
+    ((word as usize) / SOURCES, (word as usize) % SOURCES)
 }
 
 fn matrix_ref<'a>(cx: &'a BusCx<'_>) -> &'a Esp32V3IntMatrix {
@@ -389,7 +386,10 @@ impl Peripheral for DportView {
         let file_len = self.file.save_state().len();
         const APPCPU_LEN: usize = 4 + 4 + 13;
         if bytes.len() < file_len + APPCPU_LEN {
-            log::warn!("DportView::load_state: {} bytes is too short; ignored", bytes.len());
+            log::warn!(
+                "DportView::load_state: {} bytes is too short; ignored",
+                bytes.len()
+            );
             return;
         }
         self.file.load_state(&bytes[..file_len]);
@@ -536,7 +536,10 @@ mod tests {
         let ctrl = sb.read(&mut d, PRO_CACHE_CTRL);
         sb.write(&mut d, PRO_CACHE_CTRL, ctrl & !CACHE_ENABLE);
         assert!(!cache.lock().unwrap().enabled(0));
-        assert_eq!(cache.lock().unwrap().disabled(0), (1_284_610, Some(0x4008_1c04)));
+        assert_eq!(
+            cache.lock().unwrap().disabled(0),
+            (1_284_610, Some(0x4008_1c04))
+        );
 
         // `Cache_Flush`'s handshake, from the guest's side.
         let ctrl = sb.read(&mut d, PRO_CACHE_CTRL);
@@ -560,7 +563,11 @@ mod tests {
         let mut d = DportView::new(ClassicCache::handle(), appcpu.clone());
         let mut sb = sandbox();
 
-        assert_eq!(sb.read(&mut d, APPCPU_CTRL_A), 1, "the PAC holds it in reset");
+        assert_eq!(
+            sb.read(&mut d, APPCPU_CTRL_A),
+            1,
+            "the PAC holds it in reset"
+        );
         assert!(appcpu.lock().unwrap().holds_core1());
 
         sb.now = 4_000_000;

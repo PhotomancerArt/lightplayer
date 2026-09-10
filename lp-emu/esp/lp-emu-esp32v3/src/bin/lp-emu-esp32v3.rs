@@ -221,9 +221,7 @@ fn print_map() {
             for (name, base, len) in machine.peripheral_map() {
                 println!("    {name:<18} {base:#010x}..{:#010x}", base + len);
             }
-            println!(
-                "  the AHB mirror: the same blocks, the same state, a second decode (DD38)"
-            );
+            println!("  the AHB mirror: the same blocks, the same state, a second decode (DD38)");
             for (name, base, len) in machine.peripheral_alias_map() {
                 println!(
                     "    {name:<18} {base:#010x}..{:#010x}  alias of {:#010x}",

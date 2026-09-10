@@ -53,7 +53,12 @@ impl Peripheral for FlashMmuView {
 
     fn read(&mut self, off: u32, width: Width, _cx: &mut BusCx<'_>) -> u32 {
         let (core, index) = Self::slot(off & !3);
-        let word = self.cache.lock().expect("cache poisoned").mmu.entry(core, index);
+        let word = self
+            .cache
+            .lock()
+            .expect("cache poisoned")
+            .mmu
+            .entry(core, index);
         lane_of(word, off, width)
     }
 

@@ -452,9 +452,7 @@ impl ClassicCache {
         if was_on && !now_on {
             self.disabled_at[core] = at;
             self.disabled_by[core] = Some(pc);
-            log::debug!(
-                "cache: core {core}'s read cache disabled at cycle {at} by pc {pc:#010x}"
-            );
+            log::debug!("cache: core {core}'s read cache disabled at cycle {at} by pc {pc:#010x}");
         }
     }
 
@@ -567,12 +565,10 @@ impl ClassicCache {
             let w = |at: usize| u32::from_le_bytes(chunk[at..at + 4].try_into().expect("4 bytes"));
             self.ctrl[core] = w(0);
             self.ctrl1[core] = w(4);
-            self.disabled_at[core] =
-                u64::from_le_bytes(chunk[8..16].try_into().expect("8 bytes"));
+            self.disabled_at[core] = u64::from_le_bytes(chunk[8..16].try_into().expect("8 bytes"));
             self.disabled_by[core] = (chunk[16] != 0).then(|| w(17));
             for (i, entry) in chunk[21..].chunks_exact(4).enumerate() {
-                self.mmu.tables[core][i] =
-                    u32::from_le_bytes(entry.try_into().expect("4 bytes"));
+                self.mmu.tables[core][i] = u32::from_le_bytes(entry.try_into().expect("4 bytes"));
             }
         }
     }
@@ -728,7 +724,10 @@ mod tests {
             .lock()
             .unwrap()
             .write_ctrl(0, CACHE_ENABLE, 10, 0x4000_9a97);
-        handle.lock().unwrap().write_ctrl(0, 0, 1_284_610, 0x4008_1c04);
+        handle
+            .lock()
+            .unwrap()
+            .write_ctrl(0, 0, 1_284_610, 0x4008_1c04);
 
         let mut watch = CacheOffWatch::new(handle.clone(), 0);
         // SRAM0 is not a flash window: the bootloader runs there and must
@@ -737,7 +736,11 @@ mod tests {
         assert!(handle.lock().unwrap().offence.is_none());
 
         assert_eq!(watch.fetch(0x400D_1A2C), 0);
-        let hit = handle.lock().unwrap().take_offence().expect("a fetch through IROM");
+        let hit = handle
+            .lock()
+            .unwrap()
+            .take_offence()
+            .expect("a fetch through IROM");
         assert_eq!(hit.core, 0);
         assert_eq!(hit.addr, 0x400D_1A2C);
         assert_eq!(hit.window, Window::Irom);
@@ -747,7 +750,11 @@ mod tests {
 
         // A data read through DROM is the same finding.
         watch.load(0x3F40_0100, 4);
-        let hit = handle.lock().unwrap().take_offence().expect("a read through DROM");
+        let hit = handle
+            .lock()
+            .unwrap()
+            .take_offence()
+            .expect("a read through DROM");
         assert_eq!(hit.window, Window::Drom);
         assert!(!hit.fetch);
     }

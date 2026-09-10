@@ -1103,8 +1103,7 @@ fn the_direct_load_says_hello_into_an_accept_block_and_stands_at_the_flash_until
 /// runs a different commit (ruling R7), and a firmware change moves it. A
 /// failure here means "the boot printed something else", and the diff the
 /// test prints is what says whether that is a regression or a rebuild.
-const INIT_CHAIN_SHA256: &str =
-    "ea8bae305953ef613f68a97fb84919378f33b37eb5623dcb970e8dce2b7343e7";
+const INIT_CHAIN_SHA256: &str = "ea8bae305953ef613f68a97fb84919378f33b37eb5623dcb970e8dce2b7343e7";
 
 /// How many bytes that is.
 const INIT_CHAIN_LEN: usize = 543;

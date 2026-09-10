@@ -129,7 +129,10 @@ fn fixture(policy: CacheOffPolicy) -> Machine {
 fn the_fixture_decodes_back_to_what_it_says_it_is() {
     let mut at = CODE;
     for (pc, inst) in program() {
-        assert_eq!(pc, at, "the layout and the encoder agree on where {inst:?} sits");
+        assert_eq!(
+            pc, at,
+            "the layout and the encoder agree on where {inst:?} sits"
+        );
         let bytes = lp_xt_inst::encode(&inst);
         let (back, len) = lp_xt_inst::decode(&bytes).expect("the fixture decodes");
         assert_eq!(back, inst, "{inst:?} round-trips");
@@ -178,7 +181,10 @@ fn the_cache_off_fetch_stop_fires_and_names_the_write_that_disabled_the_cache() 
         access.disabled_at
     );
     // Eight instructions in the fixture, and the fetch is the ninth.
-    assert!(cycle < 32, "the fixture is eight instructions long: {cycle}");
+    assert!(
+        cycle < 32,
+        "the fixture is eight instructions long: {cycle}"
+    );
     assert_eq!(outcome.exit_code(), 6);
     assert_eq!(outcome.cycle(), cycle);
 
@@ -304,7 +310,13 @@ fn the_stop_is_deterministic() {
     let oa = a.run_until(&StopCondition::after_micros(10));
     let ob = b.run_until(&StopCondition::after_micros(10));
     assert_eq!(oa, ob);
-    let (Outcome::CacheOffFetch { cycle, pc, access, .. }, _) = (oa, ()) else {
+    let (
+        Outcome::CacheOffFetch {
+            cycle, pc, access, ..
+        },
+        _,
+    ) = (oa, ())
+    else {
         panic!("both stopped");
     };
     assert_eq!(

@@ -2664,7 +2664,10 @@ mod tests {
         let i = bus.add_peripheral(0x3FF0_0000, 0x100, Box::new(Probe::new("DPORT")));
         bus.add_peripheral_alias(0x6000_0000, 0x100, i);
 
-        assert_eq!(bus.peripheral_aliases(), alloc::vec![(0x6000_0000, 0x100, i)]);
+        assert_eq!(
+            bus.peripheral_aliases(),
+            alloc::vec![(0x6000_0000, 0x100, i)]
+        );
         // No second peripheral was registered: the index space is unchanged.
         assert_eq!(bus.peripheral_count(), 1);
 

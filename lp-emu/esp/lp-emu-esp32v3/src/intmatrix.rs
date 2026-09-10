@@ -317,7 +317,11 @@ mod tests {
         m.set_map(0, 9, 0xffff_ffff);
         irq.set_level(9, true);
         assert_eq!(m.asserted(0, &irq), 0);
-        assert_eq!(m.map(0, 9), Some(0xffff_ffff), "the guest reads what it wrote");
+        assert_eq!(
+            m.map(0, 9),
+            Some(0xffff_ffff),
+            "the guest reads what it wrote"
+        );
     }
 
     #[test]
