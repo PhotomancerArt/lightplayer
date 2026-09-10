@@ -280,8 +280,23 @@ impl Esp32C6IntMatrix {
 }
 
 impl CpuIntMatrix for Esp32C6IntMatrix {
+    /// The routing applied to the source levels, and nothing else. The
+    /// inherent [`Esp32C6IntMatrix::asserted`] is the same answer; this is the
+    /// trait's `hart`-taking spelling of it.
+    ///
+    /// One matrix, one core: `INTERRUPT_CORE0` is in the name, so `hart` is
+    /// ignored (plan D3, PD6).
+    #[inline]
+    fn asserted(&self, _hart: usize, irq: &IrqLines) -> u32 {
+        Esp32C6IntMatrix::asserted(self, irq)
+    }
+
     fn cpu_interrupt(&self, _hart: usize, irq: &IrqLines) -> Option<u8> {
-        let mut eligible = self.asserted(irq) & self.enable;
+        // `Esp32C6IntMatrix::asserted`, spelled out: with a trait method of
+        // the same name now in scope, `self.asserted(irq)` would resolve to
+        // the inherent one by precedence rather than by intent. Same value,
+        // same answer — the scan below is untouched.
+        let mut eligible = Esp32C6IntMatrix::asserted(self, irq) & self.enable;
         let mut best: Option<(u8, u8)> = None;
         while eligible != 0 {
             let n = eligible.trailing_zeros() as u8;
@@ -603,6 +618,134 @@ mod tests {
         assert_eq!(other.map(22), Some(1));
         assert_eq!(other.priority(1), 1);
         assert_eq!(other.enable() & 2, 2);
+    }
+
+    /// Route nothing anywhere, then hand back the views: the starting point
+    /// for a table whose expected answers are written out by hand. The reset
+    /// `map` is all zeroes, which routes *every* source to CPU interrupt 0.
+    fn nothing_routed(sb: &mut Sandbox) {
+        let mut core0 = InterruptCore0View;
+        for s in 0..SOURCE_COUNT {
+            sb.write(&mut core0, 4 * u32::from(s), 31);
+        }
+    }
+
+    #[test]
+    fn the_trait_mask_is_the_inherent_one() {
+        let mut sb = sandbox();
+        nothing_routed(&mut sb);
+        let mut core0 = InterruptCore0View;
+        sb.write(&mut core0, 4 * u32::from(source::UART0), 5);
+        sb.write(&mut core0, 4 * u32::from(source::TG0_T0_LEVEL), 7);
+        sb.write(&mut core0, 4 * u32::from(source::SYSTIMER_TARGET0), 5);
+
+        for levels in [
+            &[][..],
+            &[source::UART0][..],
+            &[source::TG0_T0_LEVEL][..],
+            &[source::UART0, source::SYSTIMER_TARGET0][..],
+            &[source::UART0, source::TG0_T0_LEVEL, source::FROM_CPU_INTR0][..],
+        ] {
+            sb.irq.clear();
+            for s in levels {
+                sb.irq.set_level(*s, true);
+            }
+            let m = matrix_of(&sb);
+            assert_eq!(
+                CpuIntMatrix::asserted(m, 0, &sb.irq),
+                Esp32C6IntMatrix::asserted(m, &sb.irq),
+                "the trait method is the inherent one for levels {levels:?}"
+            );
+        }
+
+        // And the mask is the routing, not the enable mask: nothing above is
+        // enabled, yet the bits are there.
+        sb.irq.clear();
+        sb.irq.set_level(source::UART0, true);
+        sb.irq.set_level(source::TG0_T0_LEVEL, true);
+        let m = matrix_of(&sb);
+        assert_eq!(m.enable(), 0, "nothing was enabled");
+        assert_eq!(CpuIntMatrix::asserted(m, 0, &sb.irq), (1 << 5) | (1 << 7));
+        assert_eq!(m.cpu_interrupt(0, &sb.irq), None, "asserted, not takeable");
+    }
+
+    #[test]
+    fn cpu_interrupt_is_unchanged_by_the_split() {
+        let mut sb = sandbox();
+        nothing_routed(&mut sb);
+        let mut core0 = InterruptCore0View;
+        let mut plic = PlicMxView;
+        // UART0 → 5, SYSTIMER_TARGET0 → 5 as well (two sources, one CPU
+        // interrupt), TG0_T0_LEVEL → 7, FROM_CPU_INTR0 → 9.
+        sb.write(&mut core0, 4 * u32::from(source::UART0), 5);
+        sb.write(&mut core0, 4 * u32::from(source::SYSTIMER_TARGET0), 5);
+        sb.write(&mut core0, 4 * u32::from(source::TG0_T0_LEVEL), 7);
+        sb.write(&mut core0, 4 * u32::from(source::FROM_CPU_INTR0), 9);
+        // Priorities: 5 and 7 tie at 2; 9 outranks both at 4 but is never
+        // enabled, which is what pins the enable mask.
+        sb.write(&mut plic, PLIC_PRI0 + 4 * 5, 2);
+        sb.write(&mut plic, PLIC_PRI0 + 4 * 7, 2);
+        sb.write(&mut plic, PLIC_PRI0 + 4 * 9, 4);
+        sb.write(&mut plic, PLIC_ENABLE, (1 << 5) | (1 << 7));
+        assert_eq!(sb.read(&mut plic, PLIC_THRESH), 1, "reset threshold");
+
+        // (raised sources, threshold, expected) — every answer written by
+        // hand, never computed from the code under test.
+        let table: &[(&[u16], u32, Option<u8>)] = &[
+            (&[], 1, None),
+            (&[source::UART0], 1, Some(5)),
+            (&[source::SYSTIMER_TARGET0], 1, Some(5)),
+            (&[source::TG0_T0_LEVEL], 1, Some(7)),
+            // Priority 2 against priority 2: the tie goes to the higher
+            // number, because the scan is ascending and the compare is `>=`.
+            (&[source::UART0, source::TG0_T0_LEVEL], 1, Some(7)),
+            (
+                &[source::SYSTIMER_TARGET0, source::TG0_T0_LEVEL],
+                1,
+                Some(7),
+            ),
+            // CPU interrupt 9 is asserted at priority 4 and still loses:
+            // `MXINT_ENABLE` does not have its bit.
+            (&[source::FROM_CPU_INTR0], 1, None),
+            (&[source::FROM_CPU_INTR0, source::UART0], 1, Some(5)),
+            // The threshold gates by priority: `p < thresh` is skipped, so a
+            // threshold of 2 still admits priority 2 and 3 shuts both out.
+            (&[source::UART0, source::TG0_T0_LEVEL], 2, Some(7)),
+            (&[source::UART0, source::TG0_T0_LEVEL], 3, None),
+            (&[source::UART0], 3, None),
+        ];
+
+        for (levels, thresh, expected) in table {
+            sb.irq.clear();
+            for s in *levels {
+                sb.irq.set_level(*s, true);
+            }
+            sb.write(&mut plic, PLIC_THRESH, *thresh);
+            assert_eq!(
+                matrix_of(&sb).cpu_interrupt(0, &sb.irq),
+                *expected,
+                "levels {levels:?} at threshold {thresh}"
+            );
+        }
+
+        // Strictly higher priority wins regardless of number, in both
+        // directions — the half of the scan the tie rule does not cover.
+        sb.write(&mut plic, PLIC_THRESH, 1);
+        sb.irq.clear();
+        sb.irq.set_level(source::UART0, true);
+        sb.irq.set_level(source::TG0_T0_LEVEL, true);
+        sb.write(&mut plic, PLIC_PRI0 + 4 * 5, 3);
+        assert_eq!(
+            matrix_of(&sb).cpu_interrupt(0, &sb.irq),
+            Some(5),
+            "priority 3 on the lower number beats priority 2 on the higher"
+        );
+        sb.write(&mut plic, PLIC_PRI0 + 4 * 7, 4);
+        assert_eq!(
+            matrix_of(&sb).cpu_interrupt(0, &sb.irq),
+            Some(7),
+            "priority 4 on the higher number beats priority 3 on the lower"
+        );
     }
 
     #[test]

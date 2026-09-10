@@ -148,6 +148,26 @@ the chip's matrix, one layer up. `IrqLines` is chip-wide and per-source,
 `BusCx.hart` says who is asking — which is the whole of plan PD6's
 multi-hart shape until a second hart exists.
 
+**The matrix answers two questions, and which one a machine asks is an ISA
+fact.** `CpuIntMatrix::asserted(hart, irq) -> u32` says *which CPU interrupts
+are asserted* — the chip's routing applied to the source levels and nothing
+else. `CpuIntMatrix::cpu_interrupt(hart, irq) -> Option<u8>` says *which one
+the hart should take*. A RISC-V hart asks the second, because its enable mask
+and priorities live in the matrix's own MMIO registers, so the bus can resolve
+it: `SocBus` answers `Bus::pending_cpu_interrupt` from there. An Xtensa hart
+cannot be answered that way at all, because its enable mask is `INTENABLE` and
+its level gate is `PS.INTLEVEL`, both **CPU** registers the bus cannot see — so
+it asks the first, through `SocBus::pending_cpu_interrupt_mask()`, and resolves
+the mask itself. That is the whole reason the trait has two methods instead of
+one, and it is why `asserted` is the **required** one: a chip that implemented
+only the RISC-V half would leave an Xtensa hart silently taking nothing.
+
+Both are on the every-MMIO-store path, so both carry the same purity contract:
+cheap, and a pure function of the levels and the matrix's own configuration —
+no scheduling, no logging per call. The mask is a `u32` because a CPU-interrupt
+space is 32 wide on both ISAs this crate serves; it is a property of the
+interrupt input, not a count of any chip's sources.
+
 ### `pins` — the signal fabric (M5 P2, input side M2 P1, input routing M2 P3)
 
 Where a peripheral's output actually goes. A peripheral never sees another
