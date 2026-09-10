@@ -2125,8 +2125,48 @@ impl Esp32C6Machine {
             }
             mmu.take_dirty();
         }
+        // The two host-poll deadlines are ABSOLUTE guest cycles and they live
+        // outside the snapshot, so a restore that puts the clock back to zero
+        // leaves them in the guest's future — for as long as the board had
+        // been up. Until the guest re-earns those cycles the machine reads no
+        // control line, writes no reply and moves no host byte.
+        //
+        // MEASURED (plan two M5, `emu serve` over the WebSocket door): a
+        // board 33 s of guest time old went silent for ~6 s of wall after
+        // esptool-js's download-mode dance; one 120 s old went silent for
+        // ~3.5 minutes, and the replies then arrived in a burst stamped 1 ms
+        // after the reset. The stall is proportional to uptime, which is the
+        // signature of exactly this. A reset is the moment a flasher needs
+        // the chip MOST, so the deadlines go back with the clock.
+        self.next_host_poll = 0;
+        self.next_pin_poll = 0;
+        // Same class, one layer up: the port's open/closed state IS in the
+        // snapshot (USB_DEVICE's `HostState`) and the byte client's
+        // connectedness is not, and the coupling only fires on an EDGE. So a
+        // board whose power-on state was "cable in, port closed" comes back
+        // closed while this still says a client is attached, and nothing
+        // re-opens it — host bytes then stage forever and the chip is deaf to
+        // the flasher that just reset it. Re-derive from the port the restore
+        // actually produced, so the next poll sees an edge exactly when there
+        // is one and re-opens; an already-open port needs nothing and must not
+        // be told to open again.
+        self.usb_client_connected = self.usb_sj_open();
         self.reboots += 1;
         true
+    }
+
+    /// Is the USB-Serial-JTAG port open — a host attached AND draining the IN
+    /// endpoint? That pair is what "an application has the port open" means
+    /// on this chip, and it is the state the byte socket's coupling mirrors.
+    fn usb_sj_open(&mut self) -> bool {
+        let Some(index) = self.usb_index else {
+            return false;
+        };
+        self.bus
+            .with_peripheral::<UsbSerialJtag, _>(index, |u, _| {
+                u.host().attached() && u.host().draining()
+            })
+            .unwrap_or(false)
     }
 
     pub fn rom(&self) -> &ElfImage {

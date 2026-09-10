@@ -298,6 +298,34 @@ class ScriptedSocket {
 
 // --- what the Rust suite drives -------------------------------------------
 
+/// How many reboots the SHIM noticed per board — `EmulatorPort`'s `reboot`
+/// event, which is fired when a control reply's guest cycle goes backwards
+/// and by the explicit `reset`/`download-mode` verbs.
+///
+/// M5 rules that a chip reset does not re-enumerate, and a test that only
+/// asserted "the port object survived" would also pass on a shim that read no
+/// control reply at all. This is the other half of that claim.
+const rebootsNoticedByBoard = new Map();
+
+export function rebootsNoticed(boardId) {
+  return rebootsNoticedByBoard.get(boardId) ?? 0;
+}
+
+async function watchReboots() {
+  const { bus } = await polyfill();
+  rebootsNoticedByBoard.clear();
+  for (const port of bus()?.generations ?? []) {
+    const id = port.boardId;
+    if (rebootsNoticedByBoard.has(id)) {
+      continue;
+    }
+    rebootsNoticedByBoard.set(id, 0);
+    port.emulator.on("reboot", () =>
+      rebootsNoticedByBoard.set(id, rebootsNoticedByBoard.get(id) + 1),
+    );
+  }
+}
+
 /// Install the polyfill over a scripted door holding `boardIds`.
 export async function installScripted(boardIds) {
   door = new ScriptedDoor(boardIds);
@@ -305,6 +333,7 @@ export async function installScripted(boardIds) {
   await install("http://scripted.emu.invalid/", {
     backing: nativeBackingOverScript(),
   });
+  await watchReboots();
 }
 
 function nativeBackingOverScript() {
@@ -333,6 +362,7 @@ export async function installLive(baseUrl, boardIds) {
   // the registry is unreadable from a browser today (see `virtual_serial.js`
   // `list()`). Naming them exercises everything else.
   await install(baseUrl, { boards: boardIds });
+  await watchReboots();
 }
 
 export async function uninstallShim() {
@@ -383,11 +413,22 @@ export function dropByteChannel(boardId) {
 
 /// Reset a board over the CONTROL CHANNEL, the way M3's dev controls and the
 /// emulator's own `reset` verb do. Returns the port object that was live
-/// before, so a test can assert identity moved.
+/// before, so a test can assert whether identity moved.
 export async function resetOverControlChannel(boardId) {
   const { bus } = await polyfill();
   const port = bus().livePortFor(boardId);
   await port.emulator.reset();
+  return port;
+}
+
+/// Pull the cable out and put it back — the one thing on this bus that makes
+/// a board enumerate again (M5's ruling: a chip reset does not). Returns the
+/// port object that was live before the replug.
+export async function replugOverTheCable(boardId) {
+  const { bus } = await polyfill();
+  const port = bus().livePortFor(boardId);
+  await bus().detach(boardId);
+  await bus().attach(boardId);
   return port;
 }
 

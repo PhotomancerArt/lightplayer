@@ -23,6 +23,15 @@
 //! | read-pump error paths | [`the_read_pump_reports_a_lost_device_and_the_port_reopens`] | `browser_esp32_device_controller.js:380-410` (`readPump`) |
 //! | the flash bridge's port acquisition | [`the_flash_bridge_acquires_the_live_generation`] | `browser_serial.js:195-213` (`getPort`'s adoption pass) |
 //!
+//! **What re-enumerates, since plan two M5:** the CABLE, and nothing else.
+//! A chip reset — the `reset` verb, `download-mode`, or the DTR/RTS dance the
+//! emulator decodes into one — leaves the `SerialPort` object alone, because
+//! on this part the USB-Serial-JTAG controller shares silicon with the CPU it
+//! resets. [`a_chip_reset_does_not_re_enumerate`] and
+//! [`a_reboot_behind_our_back_is_noticed_and_does_not_re_enumerate`] pin both
+//! halves of that; the three tests that used to drive a re-enumeration from a
+//! reset now drive it from a replug, and say so.
+//!
 //! No assertion here is about a duration: an agent-driven hidden tab is
 //! throttled to ~1 Hz, so everything waits on an event or an await.
 
@@ -119,6 +128,12 @@ extern "C" {
 
     #[wasm_bindgen(js_name = resetOverControlChannel)]
     fn js_reset_over_control_channel(board_id: &str) -> Promise;
+
+    #[wasm_bindgen(js_name = replugOverTheCable)]
+    fn js_replug_over_the_cable(board_id: &str) -> Promise;
+
+    #[wasm_bindgen(js_name = rebootsNoticed)]
+    fn reboots_seen(board_id: &str) -> u32;
 
     #[wasm_bindgen(js_name = rebootBehindOurBack)]
     fn js_reboot_behind_our_back(board_id: &str);
@@ -409,11 +424,18 @@ async fn session_ids_are_stable_across_open_and_close() {
 // Criterion 1 — session-id stability across re-enumerate
 // ---------------------------------------------------------------------------
 
-/// A `reset` over the control channel makes the emulator re-enumerate, and
-/// the shim answers it the way Chrome answers a replug: a NEW `SerialPort`
-/// object. `adoptReenumeratedPorts` (`browser_serial.js:58-84`) pairs the dead
-/// generation to its replacement by vid:pid, so the SESSION id survives — the
-/// gallery-wallpaper defect (G1, 2026-08-31), pinned.
+/// A REPLUG makes the emulator enumerate again, and the shim answers it the
+/// way Chrome does: a NEW `SerialPort` object. `adoptReenumeratedPorts`
+/// (`browser_serial.js:58-84`) pairs the dead generation to its replacement by
+/// vid:pid, so the SESSION id survives — the gallery-wallpaper defect (G1,
+/// 2026-08-31), pinned.
+///
+/// **Amended for plan two M5.** It used to drive this from a `reset` over the
+/// control channel, on the model that a chip reset looks like a replug. It
+/// does not on this part, and the frozen flash flow cannot survive one — see
+/// `a_chip_reset_does_not_re_enumerate` below, and `virtual_serial.js`'s
+/// header for the measurement. The claim being pinned is unchanged; only the
+/// thing that produces a re-enumeration is.
 #[wasm_bindgen_test]
 async fn session_ids_are_stable_across_a_re_enumeration() {
     shim_over(&["c6-a"]).await;
@@ -423,12 +445,12 @@ async fn session_ids_are_stable_across_a_re_enumeration() {
     let before = granted_sessions().await;
     let old_port = live_port(&board).await;
 
-    let returned = JsFuture::from(js_reset_over_control_channel(&board))
+    let returned = JsFuture::from(js_replug_over_the_cable(&board))
         .await
-        .expect("reset over the control channel");
+        .expect("a replug over the cable");
     assert!(
         Object::is(&returned, &old_port),
-        "the port that was live before the reset is not the one the reset saw"
+        "the port that was live before the replug is not the one the replug saw"
     );
 
     let new_port = live_port(&board).await;
@@ -457,11 +479,24 @@ async fn session_ids_are_stable_across_a_re_enumeration() {
     shim_off().await;
 }
 
-/// The same claim for a reboot the shim did not ask for. It learns of it from
-/// the guest cycle in the next control reply going backwards — never by
-/// pattern-matching a DTR/RTS dance, which is the emulator's job to decode.
+/// A reboot the shim did not ask for is NOTICED — from the guest cycle in the
+/// next control reply going backwards, never by pattern-matching a DTR/RTS
+/// dance, which is the emulator's job to decode — and it does **not**
+/// re-enumerate.
+///
+/// **Amended for plan two M5, and the claim is reversed.** As merged this
+/// test asserted that an unrequested reboot mints a new `SerialPort`. It was
+/// written before flashing existed, and it is wrong about this part: a C6's
+/// USB-Serial-JTAG controller shares silicon with the CPU it resets, so the
+/// USB device survives, which is why Studio can flash a real C6 over Web
+/// Serial at all. Measured on the real esptool-js/Chrome path — the shim
+/// killed the port object esptool-js was holding, mid-`Connecting…`, every
+/// run; the quoted trace is in `virtual_serial.js`'s header. `esptool-js` is
+/// reached through `browser_esp32_flash.js`, which is frozen and holds one
+/// port for the whole call, so tolerating a re-enumeration was never
+/// available.
 #[wasm_bindgen_test]
-async fn a_reboot_behind_our_back_re_enumerates_at_the_next_control_reply() {
+async fn a_reboot_behind_our_back_is_noticed_and_does_not_re_enumerate() {
     if live_backing() {
         log("SKIPPED against the live door (this claim is pinned by the scripted half)");
         // The live door decides its own cycle counter; the scripted half is
@@ -488,14 +523,56 @@ async fn a_reboot_behind_our_back_re_enumerates_at_the_next_control_reply() {
 
     let new_port = live_port(&board).await;
     assert!(
-        !Object::is(&new_port, &old_port),
-        "a reboot the shim did not ask for did not re-enumerate the port"
+        Object::is(&new_port, &old_port),
+        "a chip reset re-enumerated the port — the object esptool-js is \
+         holding must survive one, as it does on the silicon"
+    );
+    assert_eq!(
+        reboots_seen(&board),
+        1,
+        "the shim did not NOTICE the reboot; a port that survives because \
+         nothing was watching is not the same claim"
     );
     assert_eq!(
         ids(&before),
         ids(&granted_sessions().await),
         "the session id moved across an unrequested reboot"
     );
+
+    shim_off().await;
+}
+
+/// The ruling itself, on BOTH halves of the suite: an explicit chip reset —
+/// the `reset` verb, which is what the dev banner and an agent at the console
+/// press, and what esptool-js's DTR/RTS dance makes the emulator decode —
+/// leaves the `SerialPort` object exactly where it was.
+///
+/// New in plan two M5. The port a flasher is holding must survive the reset
+/// that flasher just asked for, or the flash dies between "Connecting…" and
+/// the chip guard — measured, quoted in `virtual_serial.js`'s header.
+#[wasm_bindgen_test]
+async fn a_chip_reset_does_not_re_enumerate() {
+    shim_over(&["c6-a"]).await;
+    let board = board_ids().await.first().cloned().expect("a board");
+    let before = live_port(&board).await;
+
+    JsFuture::from(js_reset_over_control_channel(&board))
+        .await
+        .expect("reset over the control channel");
+
+    let after = live_port(&board).await;
+    assert!(
+        Object::is(&after, &before),
+        "a chip reset minted a new SerialPort — on this part the \
+         USB-Serial-JTAG controller shares silicon with the CPU it resets, so \
+         the USB device does not go away"
+    );
+    assert!(
+        boolean(js_port_readable_is_null(&after)).await,
+        "the surviving port is enumerated but was never opened here, so its \
+         readable must still be null"
+    );
+    log("chip reset: the port object survived, as it does on the silicon");
 
     shim_off().await;
 }
@@ -615,6 +692,11 @@ async fn the_read_pump_reports_a_lost_device_and_the_port_reopens() {
 /// session was holding — the bench failure its own comment names ("flashing
 /// the blank C6 lost the race on the first try", G1 2026-08-31). All five of
 /// `browser_esp32_flash.js`'s entry points open with this one call.
+///
+/// **Amended for plan two M5**: driven by a replug, since a chip reset no
+/// longer moves the port object. The claim — `getPort` resolves the LIVE
+/// generation, whatever moved it — is unchanged, and it is the one that
+/// matters to the flash bridge.
 #[wasm_bindgen_test]
 async fn the_flash_bridge_acquires_the_live_generation() {
     shim_over(&["c6-a"]).await;
@@ -628,9 +710,9 @@ async fn the_flash_bridge_acquires_the_live_generation() {
         "getPort did not resolve the live port"
     );
 
-    JsFuture::from(js_reset_over_control_channel(&board))
+    JsFuture::from(js_replug_over_the_cable(&board))
         .await
-        .expect("reset");
+        .expect("a replug over the cable");
     let live = live_port(&board).await;
     assert!(!Object::is(&live, &dead), "the port object did not move");
 
@@ -650,7 +732,7 @@ async fn the_flash_bridge_acquires_the_live_generation() {
         boolean(js_flash_bridge_is_supported()).await,
         "browser_esp32_flash.js reports Web Serial unsupported under the shim"
     );
-    log("flash-bridge acquisition: getPort resolved the live generation after a reset");
+    log("flash-bridge acquisition: getPort resolved the live generation after a replug");
 
     shim_off().await;
 }
@@ -803,6 +885,10 @@ async fn request_port_resolves_to_the_first_board() {
 /// `installSerialEvents` wires Studio's hotplug sweep to the bus's `connect`
 /// and `disconnect`. It is installed at most once per page, so this is the
 /// suite's only caller.
+///
+/// **Amended for plan two M5**: driven by a replug rather than by a chip
+/// reset, for the reason `a_reboot_behind_our_back_is_noticed_and_does_not_re_enumerate`
+/// gives. The edges and their order are the claim, and they are unchanged.
 #[wasm_bindgen_test]
 async fn hotplug_edges_arrive_from_a_re_enumeration() {
     shim_over(&["c6-a"]).await;
@@ -827,9 +913,9 @@ async fn hotplug_edges_arrive_from_a_re_enumeration() {
         "installSerialEvents() found no navigator.serial to listen on"
     );
 
-    JsFuture::from(js_reset_over_control_channel(&board))
+    JsFuture::from(js_replug_over_the_cable(&board))
         .await
-        .expect("reset");
+        .expect("a replug over the cable");
     yield_to_event_loop().await;
 
     assert_eq!(

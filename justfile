@@ -484,16 +484,29 @@ studio-dev-bench:
 # studio-dev with emulated ESP32-C6 boards behind it — a Studio device walk
 # with no board (emulator plan two, M3).
 #
-# Starts `lp-cli emu serve` holding TWO boards (PD4: two identities is where
-# the multi-board defects live) on an ephemeral port, prints the URL to open,
-# and then runs `studio-dev` in the foreground. The emulator is stopped BY PID
-# when this recipe exits — never `pkill -f`, another worktree's `lp-cli` is
-# not ours to kill.
+# Starts `lp-cli emu serve` holding THREE boards on an ephemeral port, prints
+# the URL to open, and then runs `studio-dev` in the foreground. The emulator
+# is stopped BY PID when this recipe exits — never `pkill -f`, another
+# worktree's `lp-cli` is not ours to kill.
+#
+#   c6-a   kind=elf     already running LightPlayer: the card reaches Ready
+#                       and offers "Update firmware".
+#   c6-b   kind=rom-up  NOTHING on the chip: the mask ROM finds no image, the
+#   c6-c   kind=rom-up  card shows a needs-firmware face and offers "Flash
+#                       firmware", and what Studio's esptool-js flow writes is
+#                       what the board then boots, from the reset vector (plan
+#                       two M5, criterion 5). Two of them, because two boards
+#                       is where the multi-board defects live (PD4) and one
+#                       flash must not disturb the other.
 #
 # The boards boot the SAME image Studio serves for flashing: this depends on
 # `studio-firmware-package-served`, whose `esp32c6-4mb` build leaves its ELF
 # at target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6. Pass a
-# different image as the argument to boot that instead.
+# different image as the argument to boot c6-a from that instead.
+#
+# The blank boards keep whatever is flashed into them under
+# target/emu-serve/studio-dev — that is what makes `blank -> flash -> loaded`
+# a sequence (PD8). Delete that directory to get two blank boards back.
 #
 # Two ports, and neither is pinned. The emulator takes an ephemeral one and
 # prints it; the dev server takes this worktree's hashed one
@@ -527,7 +540,8 @@ studio-dev-emu IMAGE="": install-wasm32-target studio-firmware-package-served
     emu_port="$(scripts/dev-port.sh emu-serve "${EMU_SERVE_PORT:-}")"
     ./target/debug/lp-cli emu serve \
         --board "c6-a=${image}" \
-        --board "c6-b=${image}" \
+        --board "c6-b=blank,kind=rom-up" \
+        --board "c6-c=blank,kind=rom-up" \
         --listen "127.0.0.1:${emu_port}" \
         --state-dir "${state}" \
         --console-dir "${state}" >"${log}" 2>&1 &

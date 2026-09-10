@@ -18,9 +18,7 @@
 // behind them, and a polyfill that "improved" on either would make the
 // emulator LESS faithful than a board:
 //
-//  1. **Re-enumeration mints a NEW `SerialPort` object.** A USB-Serial-JTAG
-//     chip resetting looks exactly like a replug, and it is exactly what the
-//     emulator does on `reset` / `download-mode`. So after one, `getPorts()`
+//  1. **A REPLUG mints a NEW `SerialPort` object.** After one, `getPorts()`
 //     returns a new object for that board and the old one stops being
 //     enumerated — while still answering `getInfo()`, because that is how
 //     `adoptReenumeratedPorts` pairs the dead generation to its replacement
@@ -29,6 +27,34 @@
 //     streams and nothing else; only `forget()` revokes the grant and takes
 //     the port out of `getPorts()` (2026-07-22: deleting the grant handle on
 //     close broke flashing).
+//
+// A CHIP RESET IS NOT A REPLUG, and that is a ruling, not an omission (plan
+// two M5). On this part the USB-Serial-JTAG controller is in the same silicon
+// block as the CPU it resets, so the USB device survives every reset the
+// serial channel can ask for — which is exactly why Studio can flash a real
+// C6 over Web Serial today without the port vanishing under esptool-js. This
+// file claims `303a:1001`, native USB, so it must model native USB: a bus
+// that re-enumerated on reset would be modelling a USB-CDC BRIDGE (an S3 over
+// OTG, a CH340 whose DTR/RTS dance really does drop the port) while calling
+// itself the other thing.
+//
+// MEASURED, on the real esptool-js/Chrome path (2026-09-09, `emu serve`
+// holding a `kind=rom-up` board, Studio's own Flash firmware verb):
+//
+//   [m5] +9.02s EmulatorPort._reenumerated c6-c (lastCycle=2965920001)
+//   [m5] +9.02s bus.reenumerate c6-c -> mints a NEW SerialPort
+//   [m5] +9.02s port.markDead c6-c (opened was true)
+//   [esp32-flash] esptool.js
+//   [esp32-flash] Connecting...
+//   [esp32-flash] emulated board c6-c is already open in this page
+//
+// `browser_esp32_flash.js` holds ONE `port` object for the whole call and is
+// frozen, so "it re-enumerates and the flash flow tolerates it" is not
+// available: the flash died between "Connecting…" and the chip guard, every
+// time. The reboot is still OBSERVED — `EmulatorPort` fires `reboot` when a
+// control reply's guest cycle goes backwards, and the banner re-renders — it
+// simply does not mint a port. The cable (`detach`/`attach`) remains the one
+// thing that does.
 //
 // `getInfo()` reports **303a:1001** — Espressif native USB, honestly
 // indistinguishable (PD7). An emulated C6 *is* native USB, so the existing
@@ -157,7 +183,9 @@ class VirtualSerial extends EventTarget {
       if (!this.picker) {
         this.granted.add(port);
       }
-      emulator.on("reenumerate", () => this.reenumerate(id));
+      // The board went back to power-on. The port SURVIVES (see the header):
+      // all this does is let the page's own chrome re-read it.
+      emulator.on("reboot", () => this.noteState(this.newestPortFor(id)));
     }
   }
 
@@ -215,24 +243,33 @@ class VirtualSerial extends EventTarget {
     return null;
   }
 
-  // The board went back to power-on. Chrome's answer to that is a NEW
-  // `SerialPort` object with the same grant, and so is ours: the old one goes
-  // dead (enumerated no longer, `getInfo()` still answering) and the new one
-  // takes its place in the granted set, with `disconnect` then `connect` on
-  // the bus so Studio's hotplug sweep re-derives.
+  /// The board enumerated again — which on this bus means the CABLE went out
+  /// and back in, and nothing else (a chip reset does not; see the header).
+  /// Chrome's answer to a replug is a NEW `SerialPort` object with the same
+  /// grant, and so is ours: the old one goes dead (enumerated no longer,
+  /// `getInfo()` still answering) and the new one takes its place in the
+  /// granted set, with `disconnect` then `connect` on the bus so Studio's
+  /// hotplug sweep re-derives.
   reenumerate(boardId) {
     const old = this.livePortFor(boardId);
     if (!old) {
       return;
     }
     old.markDead();
+    const fresh = this.adopt(old);
+    this.dispatchEvent(new CustomEvent("disconnect", { detail: { port: old } }));
+    this.dispatchEvent(new CustomEvent("connect", { detail: { port: fresh } }));
+    return fresh;
+  }
+
+  /// Mint the generation that replaces `old` and move its grant onto it.
+  adopt(old) {
     const wasGranted = this.granted.delete(old);
-    const fresh = this.mint(boardId, old.emulator, old.board);
+    const fresh = this.mint(old.boardId, old.emulator, old.board);
     if (wasGranted) {
       this.granted.add(fresh);
     }
-    this.dispatchEvent(new CustomEvent("disconnect", { detail: { port: old } }));
-    this.dispatchEvent(new CustomEvent("connect", { detail: { port: fresh } }));
+    return fresh;
   }
 
   forget(port) {
@@ -390,10 +427,7 @@ class VirtualSerial extends EventTarget {
       this.dispatchEvent(new CustomEvent("connect", { detail: { port: previous } }));
       return previous;
     }
-    const fresh = this.mint(boardId, previous.emulator, previous.board);
-    if (this.granted.delete(previous)) {
-      this.granted.add(fresh);
-    }
+    const fresh = this.adopt(previous);
     this.dispatchEvent(new CustomEvent("connect", { detail: { port: fresh } }));
     return fresh;
   }
