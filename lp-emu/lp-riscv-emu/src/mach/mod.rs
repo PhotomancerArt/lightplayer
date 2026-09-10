@@ -66,7 +66,7 @@ extern crate alloc;
 
 use core::marker::PhantomData;
 
-use alloc::{boxed::Box, string::String, vec::Vec};
+use alloc::{boxed::Box, collections::BTreeMap, string::String, vec::Vec};
 
 use lp_emu_core::block::{BlockCache, BlockStats};
 use lp_emu_core::{Bus, CycleModel, InstClass, MemoryAccessKind, MemoryError};
@@ -235,7 +235,64 @@ pub struct MachineHart<B: Bus> {
     /// [`block_flush_pending`](Self::block_flush_pending) is the same idea,
     /// and `fence.i` is why both exist.
     core_flush_pending: PendingInvalidate,
+    /// The `blockprof` census, when a run asked for it. `None` — the default
+    /// — is one `Option` test per block on the interpreted path and nothing
+    /// at all on the translated one. See [`BlockProfile`].
+    blockprof: Option<Box<BlockProfile>>,
     _bus: PhantomData<fn(&mut B)>,
+}
+
+/// A census of where guest instructions retire — **off by default**, and a
+/// diagnostic only (M7 JD5).
+///
+/// One entry per block start the *interpreter* ran, holding how many times it
+/// was entered and how many instructions retired there. Nothing in the
+/// emulator's behaviour may depend on it: it is what turns "coverage is
+/// 41 %" into "and here are the eleven block starts that are the other 59 %".
+///
+/// # Two ways to read it, and they answer different questions
+///
+/// - With **no translated core installed** it is the whole run: the ceiling
+///   discovery is measured against, and the distribution of retired
+///   instructions over block starts.
+/// - With a core installed it is exactly the **shortfall**: every instruction
+///   the census saw is one translated code did not run. The largest entries
+///   are the blocks discovery missed, or that the block budget did not reach.
+///
+/// It is never on in a run whose numbers matter for speed, and it is never
+/// consulted by the translator.
+#[derive(Clone, Debug, Default)]
+pub struct BlockProfile {
+    /// Block start pc → (entries, instructions retired starting there).
+    counts: BTreeMap<u32, (u64, u64)>,
+    retired: u64,
+}
+
+impl BlockProfile {
+    /// Instructions the census saw retire, over every block start.
+    #[must_use]
+    pub fn retired(&self) -> u64 {
+        self.retired
+    }
+
+    /// Distinct block starts the census saw.
+    #[must_use]
+    pub fn starts(&self) -> usize {
+        self.counts.len()
+    }
+
+    /// `(block pc, entries, instructions retired)`, in pc order.
+    pub fn iter(&self) -> impl Iterator<Item = (u32, u64, u64)> + '_ {
+        self.counts.iter().map(|(&pc, &(n, r))| (pc, n, r))
+    }
+
+    #[inline]
+    fn note(&mut self, pc: u32, retired: u32) {
+        let slot = self.counts.entry(pc).or_insert((0, 0));
+        slot.0 += 1;
+        slot.1 += u64::from(retired);
+        self.retired += u64::from(retired);
+    }
 }
 
 /// An invalidation held for a translated core that is not currently in the
@@ -292,6 +349,9 @@ impl<B: Bus> Clone for MachineHart<B> {
             core: None,
             core_entries: Vec::new(),
             core_flush_pending: PendingInvalidate::None,
+            // A diagnostic, not architectural state: a clone starts with a
+            // fresh census exactly as it starts with an empty block cache.
+            blockprof: self.blockprof.as_ref().map(|_| Box::default()),
             _bus: PhantomData,
         }
     }
@@ -339,6 +399,7 @@ impl<B: Bus> MachineHart<B> {
             core: None,
             core_entries: Vec::new(),
             core_flush_pending: PendingInvalidate::None,
+            blockprof: None,
             _bus: PhantomData,
         }
     }
@@ -380,6 +441,13 @@ impl<B: Bus> MachineHart<B> {
     #[must_use]
     pub fn translated_core_report(&self) -> Option<String> {
         self.core.as_ref().map(|c| c.report())
+    }
+
+    /// Guest instructions retired inside translated code, or `None` when no
+    /// core is installed. The numerator of the coverage number (JD6).
+    #[must_use]
+    pub fn translated_retired(&self) -> Option<u64> {
+        self.core.as_ref().map(|c| c.retired())
     }
 
     // --- plain accessors ---------------------------------------------------
@@ -477,6 +545,30 @@ impl<B: Bus> MachineHart<B> {
     #[must_use]
     pub fn block_stats(&self) -> Option<BlockStats> {
         self.cache.as_ref().map(|c| c.stats())
+    }
+
+    /// Turn the `blockprof` census on or off (M7 JD5). Off by default, and
+    /// turning it on discards whatever it had recorded.
+    pub fn set_blockprof(&mut self, on: bool) {
+        self.blockprof = on.then(Box::default);
+    }
+
+    /// The census, or `None` when the run did not ask for one.
+    #[inline]
+    #[must_use]
+    pub fn blockprof(&self) -> Option<&BlockProfile> {
+        self.blockprof.as_deref()
+    }
+
+    /// The trap vector the hart would jump to, base only.
+    ///
+    /// Discovery seeds on it (JD6): a trap handler is reached by hardware and
+    /// by `mret`, never by an edge a walk can follow, so without this it is
+    /// found only if the ELF happens to name it.
+    #[inline]
+    #[must_use]
+    pub fn trap_vector(&self) -> u32 {
+        self.csr.mtvec & !0b11
     }
 
     /// `fence.i` instructions the guest has retired.
@@ -835,11 +927,20 @@ impl<B: Bus> MachineHart<B> {
             }
         };
 
+        let before = self.instruction_count;
         let outcome = self.step(bus, pc, inst_word);
         // Drained after the instruction, so the fetch and any load or
         // store it made are charged together, once, in the same place
         // `charge` bills the instruction's class.
         self.charge_memory(bus);
+        // The census (JD5), off unless a run asked for it. An instruction
+        // that trapped did not retire, so it is not counted — `minstret` is
+        // the definition the coverage number is a share of.
+        if let Some(prof) = self.blockprof.as_mut()
+            && self.instruction_count != before
+        {
+            prof.note(pc, 1);
+        }
         match outcome {
             StepOutcome::Continue => None,
             StepOutcome::End(end) => Some(end),
@@ -975,12 +1076,26 @@ impl<B: Bus> MachineHart<B> {
                             // single-stepping loop always has.
                             if let Some(over) = self.step_once(bus) {
                                 self.drain_block_flush(cache);
+                                if let Some(core) = core.as_mut() {
+                                    self.drain_core_flush(core);
+                                }
                                 return over;
                             }
                             // That instruction may have been a `fence.i`, and
                             // the cache it wanted flushed is out here rather
                             // than in the hart.
                             self.drain_block_flush(cache);
+                            // **And so is the translated core** (M7 P4). A
+                            // `fence.i` is not cacheable, so this is the path
+                            // that retires the guest's own publish — and
+                            // before this drain the core kept running the
+                            // bytes it was translated from for the rest of
+                            // the slice. A constructed guest that rewrites a
+                            // subroutine, fences, and calls it again ran the
+                            // old instruction: `tests/jit_discovery.rs`.
+                            if let Some(core) = core.as_mut() {
+                                self.drain_core_flush(core);
+                            }
                             // It may also have been the CSR write
                             // that arms an execute watchpoint, which is the
                             // one thing that can make decoding ahead unsafe
@@ -1014,6 +1129,11 @@ impl<B: Bus> MachineHart<B> {
                 self.run_block(slots, bus, block.pc, whole, end)
             };
             cache.note_slots_run(ran);
+            // The census (JD5). One map update per block — ~6 instructions —
+            // and only when a run asked for one.
+            if let Some(prof) = self.blockprof.as_mut() {
+                prof.note(block.pc, ran);
+            }
             if let Some(over) = out {
                 return over;
             }

@@ -215,6 +215,11 @@ struct MmioRange {
 /// on a whole render run).
 const CODE_PAGE_LEN: u32 = 4096;
 
+/// How many separate guest-written code spans are remembered before new
+/// writes start widening the last one instead of adding another. A run
+/// publishes one JIT buffer, so this is slack rather than a budget.
+const MAX_GUEST_CODE_SPANS: usize = 256;
+
 /// The page granularity of [`SocBus::permission_table`]. 16 KiB is the
 /// spike's, and the size the 0.849 ns/instruction phone reading was taken
 /// with: small enough that a region boundary costs at most one page, large
@@ -327,6 +332,42 @@ pub struct SocBus {
     /// [`SocBus::load_image`], which is the funnel, so recording it here is
     /// the whole of the emulator side of the block cache's invalidation.
     code_writes: Vec<(u32, u32)>,
+
+    /// Spans of **executable** guest memory that the *guest itself* wrote,
+    /// since the machine last drained them
+    /// ([`SocBus::take_guest_code_writes`]).
+    ///
+    /// M7 P4 (JD5/JD6). Discovery is seeded from the image's symbols, and
+    /// guest-written code has none: the firmware's shader JIT publishes into
+    /// a buffer inside its static heap, reached through a function pointer,
+    /// and nothing in the ELF names it. So the emulator records where the
+    /// guest wrote code and the machine seeds its `fence.i` retranslation
+    /// from those spans. On `render-basic` that is 10.8 % of every
+    /// instruction the run retires.
+    ///
+    /// # Why the most recent spans, and not all of them
+    ///
+    /// On this chip **the whole of HP SRAM is executable**, so "the guest
+    /// wrote executable memory" is very nearly "the guest wrote RAM" — every
+    /// stack push qualifies. What distinguishes the publish is *when*: a JIT
+    /// buffer is filled by one contiguous copy and the `fence.i` follows it
+    /// immediately, so the copy is among the last spans written before the
+    /// fence. This is therefore a **ring of the most recent
+    /// [`MAX_GUEST_CODE_SPANS`] spans**, not a growing list: contiguous
+    /// stores coalesce into one span, and the oldest span falls off rather
+    /// than being merged into its neighbour, because a merged span's *base*
+    /// is a seed pointing at whatever data happened to be lowest.
+    ///
+    /// A span that turns out to be data costs one empty block and nothing
+    /// else — a seed is a place to start decoding, and a place where nothing
+    /// decodes yields nothing (JD7).
+    guest_code_writes: [(u32, u32); MAX_GUEST_CODE_SPANS],
+    /// Where the next span goes in the ring above, and how many are live.
+    guest_code_head: usize,
+    guest_code_len: usize,
+    /// Whether to record the above at all. Off unless a translated core is
+    /// installed, so an interpreted run pays one `bool` test per guest store.
+    watch_guest_code: bool,
 
     /// `--strict-bus` only: the 4 KiB pages the guest has fetched
     /// instructions from.
@@ -444,6 +485,10 @@ impl SocBus {
             code_pages: BTreeSet::new(),
             unpublished_code_words: BTreeSet::new(),
             missing_fence_reports: 0,
+            guest_code_writes: [(0, 0); MAX_GUEST_CODE_SPANS],
+            guest_code_head: 0,
+            guest_code_len: 0,
+            watch_guest_code: false,
             matrix: Box::new(NoCpuInterrupts),
             request: None,
             memory_cost: None,
@@ -1050,6 +1095,89 @@ impl SocBus {
         core::mem::take(&mut self.code_writes)
     }
 
+    /// Record a guest store into an executable region. See
+    /// [`guest_code_writes`](Self::guest_code_writes).
+    ///
+    /// `#[inline(never)]` and off the fast path: the caller's `bool` test is
+    /// what an interpreted run pays.
+    ///
+    /// # Only a store that *changes* bytes is a store worth recording
+    ///
+    /// The whole of HP SRAM is executable on this chip, so without this the
+    /// record fills with `.bss` zeroing — a march over 270 KB writing zeros
+    /// onto zeros — and every later code copy merges into the span that
+    /// march left behind, whose base points at data. Comparing first costs a
+    /// four-byte read on a path only a `--jit` run takes, and it is the one
+    /// test that tells "the guest published something here" from "the guest
+    /// wrote here".
+    #[inline(never)]
+    fn note_guest_code_span(&mut self, address: u32, len: u32) {
+        /// How far apart two stores may be and still be one span. A code copy
+        /// is contiguous; this only has to survive the alignment gaps a
+        /// `memcpy` leaves at either end.
+        const SLOP: u32 = 8;
+        /// How many recent spans a store may be merged into. A copy loop
+        /// interleaves its stores with a handful of stack writes, so looking
+        /// only at the newest span would split the copy into hundreds.
+        const LOOK_BACK: usize = 8;
+        /// The longest a span may grow before a further store starts a new
+        /// one instead of extending it.
+        ///
+        /// Without a cap, one `.bss`-zeroing loop swallows the whole of
+        /// static RAM into a single span whose base is the bottom of `.bss`,
+        /// and every later code copy merges into it. The seed then points at
+        /// data and the published code is invisible — measured, on
+        /// `render-basic`, as the whole of the 10.8 % this record exists to
+        /// find. A cap turns one useless span into a run of spans that step
+        /// through what was written, which is what a seed list wants.
+        const MAX_SPAN: u32 = 4096;
+
+        let end = address.saturating_add(len);
+        for back in 0..LOOK_BACK.min(self.guest_code_len) {
+            let i = (self.guest_code_head + MAX_GUEST_CODE_SPANS - 1 - back) % MAX_GUEST_CODE_SPANS;
+            let span = &mut self.guest_code_writes[i];
+            if address.saturating_add(SLOP) >= span.0 && address <= span.1.saturating_add(SLOP) {
+                let (lo, hi) = (span.0.min(address), span.1.max(end));
+                if hi.wrapping_sub(lo) <= MAX_SPAN {
+                    span.0 = lo;
+                    span.1 = hi;
+                    return;
+                }
+                break;
+            }
+        }
+        self.guest_code_writes[self.guest_code_head] = (address, end);
+        self.guest_code_head = (self.guest_code_head + 1) % MAX_GUEST_CODE_SPANS;
+        self.guest_code_len = (self.guest_code_len + 1).min(MAX_GUEST_CODE_SPANS);
+    }
+
+    /// The most recent spans of executable memory the guest wrote, oldest
+    /// first, and start recording again from empty.
+    pub fn take_guest_code_writes(&mut self) -> Vec<(u32, u32)> {
+        let out = (0..self.guest_code_len)
+            .map(|k| {
+                let i = (self.guest_code_head + MAX_GUEST_CODE_SPANS - self.guest_code_len + k)
+                    % MAX_GUEST_CODE_SPANS;
+                self.guest_code_writes[i]
+            })
+            .collect();
+        self.guest_code_head = 0;
+        self.guest_code_len = 0;
+        out
+    }
+
+    /// Record guest writes to executable regions, or stop.
+    ///
+    /// The machine turns this on when it installs a translated core and
+    /// leaves it off otherwise, so nothing but a `--jit` run pays for it.
+    pub fn watch_guest_code(&mut self, on: bool) {
+        self.watch_guest_code = on;
+        if !on {
+            self.guest_code_head = 0;
+            self.guest_code_len = 0;
+        }
+    }
+
     /// True when nothing is waiting to be invalidated — the one-`bool` check
     /// the slice boundary makes before doing anything.
     #[inline]
@@ -1645,6 +1773,12 @@ impl SocBus {
             let off = (address - self.arena_base) as usize;
             if self.strict {
                 self.note_guest_code_write(off, address, len, value);
+            }
+            if self.watch_guest_code
+                && self.regions[i].exec
+                && self.arena[off..off + len as usize] != value.to_le_bytes()[..len as usize]
+            {
+                self.note_guest_code_span(address, len);
             }
             let data = &mut self.arena;
             let stored = match width {

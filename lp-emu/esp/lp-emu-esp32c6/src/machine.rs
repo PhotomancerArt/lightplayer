@@ -101,21 +101,31 @@ const LP_CLKRST_RESET_CAUSE: u32 = 0x010;
 
 pub const MAX_SLICE_CYCLES: u64 = 8_192;
 
-/// The default bound on P3's sweep (`--jit-blocks`).
+/// The default bound on how many discovered blocks are **installed**
+/// (`--jit-blocks`).
 ///
-/// P3 translates a *sample* of the image and proves the translation on it;
-/// whole-image discovery is P4's, and the census says a render image executes
-/// ~37,600 distinct blocks.
+/// Not a bound on discovery: since M7 P4 the walk always covers the whole
+/// image and the boot line reports what it found, because the gap between
+/// what was found and what fits is the number P5 is sized against. On
+/// `render-basic` the walk finds **156,053 blocks / 656,817 instructions**
+/// and this budget installs about 2,010 of them.
 ///
-/// The bound is not arbitrary and it is not a policy: **wasm caps a single
-/// function body at 7,654,321 bytes**, and P3 emits one function for the whole
-/// block set, so the set has to fit under it. At the ~2 KB per block this
-/// translator emits — more than the spike's ~808 B, because the store path
-/// carries a watchpoint check and every access carries the permission
-/// compare — 2,048 blocks is ~3-4 MB of body, comfortably inside. Splitting
-/// the module so the whole image fits is P5's job (JD8), and it is the one
-/// structural fact a reader of this crate will otherwise rediscover the hard
-/// way.
+/// The bound is not arbitrary and it is not a policy — it is two host
+/// ceilings, measured:
+///
+/// - **wasm caps a single function body at 7,654,321 bytes**, and this
+///   translator emits one function per block set. 17,104 blocks emit
+///   8,056,915 B and are refused, so wasm's own ceiling is around 16,000
+///   blocks — an order of magnitude under the image.
+/// - **cranelift refuses far earlier**, somewhere under 8,586 blocks, and it
+///   is slow long before it refuses: 6.0 s at 2,014 blocks, **116 s at
+///   4,272**. The default is chosen so a desk run pays seconds rather than
+///   minutes at each of JD5's two translation events.
+///
+/// `jit::install` halves and retries either way, so this is what keeps the
+/// common case from paying for a refused compile first. Splitting the module
+/// so the whole image fits is P5's job (JD8), and these are the numbers it
+/// starts from.
 pub const DEFAULT_JIT_BLOCKS: usize = 2048;
 
 /// The default bound when every instruction goes through the escape hatch
@@ -860,6 +870,8 @@ pub struct Esp32C6Builder {
     /// Print the translated core's report and the boot cost of building it.
     /// See [`Esp32C6Builder::jit_report`].
     jit_report: bool,
+    /// See [`Esp32C6Builder::blockprof`].
+    blockprof: bool,
     /// Actually build and install a translated core. See
     /// [`Esp32C6Builder::jit`].
     jit: bool,
@@ -938,6 +950,7 @@ impl Esp32C6Builder {
             block_cache: true,
             translate: true,
             jit_report: false,
+            blockprof: false,
             jit: false,
             jit_escape_all: false,
             jit_blocks: None,
@@ -1093,6 +1106,21 @@ impl Esp32C6Builder {
         self
     }
 
+    /// Record the `blockprof` census (`--blockprof`). Off by default.
+    ///
+    /// A diagnostic and nothing else (M7 JD5): it counts, per block start,
+    /// how many instructions retired there **in the interpreter**. With no
+    /// translated core that is the whole run — the ceiling discovery is
+    /// measured against. With one installed it is exactly the shortfall, so
+    /// the largest entries name the blocks discovery missed.
+    ///
+    /// It costs one map update per interpreted block, so a run that measures
+    /// host time must not have it on.
+    pub fn blockprof(mut self, on: bool) -> Self {
+        self.blockprof = on;
+        self
+    }
+
     /// Build and install a translated core (`--jit`). Off by default.
     ///
     /// Needs the crate's `jit` feature; without it `build` fails rather than
@@ -1117,12 +1145,12 @@ impl Esp32C6Builder {
         self
     }
 
-    /// How many blocks the sweep from the entry point may find
-    /// (`--jit-blocks`).
+    /// How many discovered blocks may be **installed** (`--jit-blocks`).
     ///
-    /// P3 translates a *sample* of the image and proves the translation on it;
-    /// whole-image discovery is P4's. The bound is what keeps the sample a
-    /// sample.
+    /// Discovery itself is unbounded and always covers the whole image; this
+    /// is the bound on what the host is asked to compile, and it exists
+    /// because every wasm engine refuses a large enough function body. See
+    /// [`DEFAULT_JIT_BLOCKS`].
     pub fn jit_blocks(mut self, blocks: usize) -> Self {
         self.jit_blocks = Some(blocks);
         self
@@ -1385,6 +1413,7 @@ impl Esp32C6Builder {
             block_cache,
             translate,
             jit_report,
+            blockprof,
             jit,
             jit_escape_all,
             jit_blocks,
@@ -1792,6 +1821,14 @@ impl Esp32C6Builder {
             reboot_on_reset,
             translate,
             jit_report,
+            jit_seed_override: None,
+            boot_entry: entry,
+            jit_entry: None,
+            jit_escape_all: false,
+            jit_block_budget: 0,
+            jit_fence_i_at: 0,
+            jit_retranslations: 0,
+            jit_published_seeds: Vec::new(),
             power_on: None,
             reboots: 0,
             seed,
@@ -1864,13 +1901,41 @@ impl Esp32C6Builder {
             machine.power_on = Some(machine.snapshot());
         }
         machine.sync_translated_core();
-        if jit && machine.translate {
+        // After the power-on snapshot: the census is a diagnostic, not
+        // architectural state, and a reboot restores a machine that is still
+        // measuring.
+        if blockprof {
+            for hart in &mut machine.harts {
+                hart.set_blockprof(true);
+            }
+            // So the census can report what the walk *would* have found,
+            // guest-published code included, on a run with no core at all.
+            machine.bus.watch_guest_code(true);
+        }
+        // `BootMode::RomUp` runs with translation **off**, for the same
+        // reason M5 turns the block cache off there (line above): the guest
+        // mask ROM and the real ESP-IDF second-stage bootloader copy code
+        // into RAM and jump into it, and neither will ever emit a `fence.i`,
+        // so neither of JD5's two events can see what they publish. The
+        // block cache being off already keeps the hart out of the seam — it
+        // is only entered from the cached loop — but a core that is built
+        // and never entered is a compile nobody asked for and a live path
+        // one refactor away.
+        if jit && machine.translate && boot_mode != BootMode::RomUp {
             let blocks = jit_blocks.unwrap_or(if jit_escape_all {
                 DEFAULT_JIT_ESCAPE_BLOCKS
             } else {
                 DEFAULT_JIT_BLOCKS
             });
-            machine.install_translated_core(entry, jit_escape_all, blocks)?;
+            // Remembered so the *second* translation event (JD5) can run the
+            // same discovery over the image the guest has since written to.
+            machine.jit_entry = Some(entry);
+            machine.jit_escape_all = jit_escape_all;
+            machine.jit_block_budget = blocks;
+            // Only a `--jit` run pays for the guest-code-write record; see
+            // `Esp32C6Machine::jit_published_seeds`.
+            machine.bus.watch_guest_code(true);
+            machine.install_translated_core(entry, jit_escape_all, blocks, "boot")?;
         }
         Ok(machine)
     }
@@ -2022,6 +2087,36 @@ pub struct Esp32C6Machine {
     /// Print the translated core's report line and the boot cost of building
     /// it ([`Esp32C6Builder::jit_report`]).
     jit_report: bool,
+    /// Seeds a caller supplied instead of the image's symbols, for a guest
+    /// that has no ELF. See [`Esp32C6Machine::translate_from_seeds`].
+    jit_seed_override: Option<Vec<u32>>,
+    /// The pc the machine handed the hart at reset — the app's ELF entry
+    /// point, or the ROM's on a `rom-up` boot. Discovery's first seed, and
+    /// the census's too.
+    boot_entry: u32,
+    /// What the two translation events (JD5) need to run the second one: the
+    /// pc discovery seeds from, the emission policy and the block budget.
+    /// `None` when no core was ever installed, which is every run without
+    /// `--jit`.
+    jit_entry: Option<u32>,
+    jit_escape_all: bool,
+    jit_block_budget: usize,
+    /// The `fence.i` count the installed core was translated at. The run loop
+    /// compares the hart's against it, and a difference is the guest having
+    /// published code — the second translation event.
+    jit_fence_i_at: u64,
+    /// Retranslations performed, so a run can say whether the "exactly one
+    /// `fence.i`, exactly one retranslation" the spike observed still holds.
+    jit_retranslations: u64,
+    /// Seeds the *image* does not name: the base of every span of executable
+    /// memory the guest has written and then published with a `fence.i`.
+    ///
+    /// The firmware's shader JIT writes into a buffer inside its static heap
+    /// and calls it through a function pointer, so no symbol and no static
+    /// edge reaches it — and on `render-basic` it is **10.8 % of every
+    /// instruction the run retires**. Kept across events, because a buffer
+    /// published once stays published.
+    jit_published_seeds: Vec<u32>,
     /// The machine as it was built, kept only when
     /// [`Esp32C6Builder::reboot_on_reset`] asked for it — a reboot is a
     /// restore of this.
@@ -2233,10 +2328,32 @@ impl Esp32C6Machine {
         }
     }
 
-    /// Sweep a block set from `entry` and install a translated core for it.
+    /// Discover the whole image and install a translated core for it.
     ///
-    /// P3's caller: the entry point plus the static edges reachable from it,
-    /// bounded. Whole-image discovery and the two translation events are P4's.
+    /// **One of JD5's two translation events**, and the same code runs both:
+    /// once here before the hart runs, and again from
+    /// [`Esp32C6::retranslate_after_fence_i`] when the guest publishes code.
+    /// There is no counter, no threshold and no warm-up tier anywhere on this
+    /// path — hotness was ruled out on the spike's own measurements (R8), and
+    /// the census that would feed one is a diagnostic (`--blockprof`).
+    ///
+    /// # The seeds, and why they are what they are
+    ///
+    /// The entry point alone reaches **two instructions**: `_start` runs into
+    /// a CSR write the translator refuses and the walk stops. So the seeds
+    /// are the entry point, the hart's trap vector, and every symbol in an
+    /// executable region — of the app **and of the mask ROM**, because
+    /// 3.5–11 % of the instructions these images retire are mask-ROM code and
+    /// a walk without it hands that share to the interpreter by construction.
+    ///
+    /// Biggest symbol first. The bound is a budget, so the order decides what
+    /// it is spent on: a symbol's size is the cheapest signal available that
+    /// it names a function rather than a label or a jump table, and a big
+    /// function is both likelier to be hot and likelier to yield long blocks.
+    /// Address order spends the whole budget on whatever happens to link
+    /// first, which on these images is boot code the render loop never runs
+    /// again. A symbol that turns out to name *data* decodes into nothing and
+    /// costs one empty block, which is `Undecodable` doing its job (JD7).
     ///
     /// # Errors
     ///
@@ -2250,6 +2367,7 @@ impl Esp32C6Machine {
         entry: u32,
         escape_all: bool,
         blocks: usize,
+        event: &str,
     ) -> Result<(), BuildError> {
         let policy = if escape_all {
             lp_emu_jit::translate::Emit::NOTHING
@@ -2257,46 +2375,7 @@ impl Esp32C6Machine {
             lp_emu_jit::translate::Emit::EVERYTHING
         };
         let model = self.time_grade.cycle_model();
-        // The entry point, and every symbol in an executable region.
-        //
-        // The phase's own instruction is "the entry point plus static edges
-        // from it, or a hand-supplied list", and the entry point alone reaches
-        // two instructions: `_start` runs into a CSR write, which the
-        // translator refuses, and the walk stops there. Symbols are the
-        // cheapest honest way to have something real to translate, and they
-        // are the same seed JD6's discovery uses — what P4 adds is the ROM and
-        // IRAM sweeps, the coverage measurement against a census, and the
-        // two-event model. A symbol that turns out to name data decodes into
-        // nothing and costs one empty block, which is `Undecodable` doing its
-        // job (JD7).
-        let mut seeds = vec![entry];
-        if let Some(app) = &self.app {
-            let exec: Vec<(u32, u32)> = self
-                .bus
-                .regions()
-                .iter()
-                .filter(|r| r.is_executable())
-                .map(|r| (r.base, r.end()))
-                .collect();
-            // Biggest first. The bound is a budget, so the order decides what
-            // it is spent on: a symbol's size is the cheapest signal available
-            // that it names a function rather than a label or a jump table,
-            // and a big function is both likelier to be hot and likelier to
-            // yield long blocks. Address order spends the whole budget on
-            // whatever happens to link first, which on these images is boot
-            // code the render loop never runs again.
-            let mut named: Vec<(u32, u32)> = app
-                .symbols()
-                .iter()
-                .filter(|s| {
-                    exec.iter()
-                        .any(|&(lo, hi)| s.address >= lo && s.address < hi)
-                })
-                .map(|s| (s.size, s.address))
-                .collect();
-            named.sort_unstable_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
-            seeds.extend(named.into_iter().map(|(_, address)| address));
-        }
+        let seeds = self.translation_seeds(entry);
         let report = crate::jit::install(
             &mut self.harts[0],
             &mut self.bus,
@@ -2307,16 +2386,329 @@ impl Esp32C6Machine {
         )
         .map_err(|e| BuildError::Io(format!("--jit: {e}")))?;
         if self.jit_report {
-            eprintln!(
-                "jit: boot {} blocks / {} instr, {} B module, emit {:.2} ms, compile {:.2} ms",
-                report.blocks,
-                report.insts,
-                report.module_bytes,
-                report.emit_us as f64 / 1000.0,
-                report.compile_us as f64 / 1000.0,
-            );
+            eprintln!("jit: {}", report.boot_line(event));
         }
         Ok(())
+    }
+
+    /// The addresses discovery starts looking from. See
+    /// [`Esp32C6::install_translated_core`] for why they are these.
+    #[cfg(feature = "jit")]
+    fn translation_seeds(&self, entry: u32) -> Vec<u32> {
+        let exec: Vec<(u32, u32)> = self
+            .bus
+            .regions()
+            .iter()
+            .filter(|r| r.is_executable())
+            .map(|r| (r.base, r.end()))
+            .collect();
+        let in_text = |address: u32| exec.iter().any(|&(lo, hi)| address >= lo && address < hi);
+
+        let mut seeds = self
+            .jit_seed_override
+            .clone()
+            .unwrap_or_else(|| vec![entry]);
+        // Reached by hardware and by `mret`, never by an edge a walk can
+        // follow. Zero before the firmware writes it, which `in_text` drops.
+        let trap = self.harts[0].trap_vector();
+        if in_text(trap) {
+            seeds.push(trap);
+        }
+        // Biggest first, the app's symbols before the ROM's: with a budget
+        // that binds, app text is what a render loop spends its time in.
+        let sorted = |image: Option<&ElfImage>| {
+            let Some(image) = image else {
+                return Vec::new();
+            };
+            let mut named: Vec<(u32, u32)> = image
+                .symbols()
+                .iter()
+                .filter(|s| in_text(s.address))
+                .map(|s| (s.size, s.address))
+                .collect();
+            named.sort_unstable_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+            named
+        };
+        if self.jit_seed_override.is_none() {
+            seeds.extend(sorted(self.app.as_ref()).into_iter().map(|(_, at)| at));
+            seeds.extend(sorted(Some(&self.rom)).into_iter().map(|(_, at)| at));
+        }
+        // Last, and never dropped: code the guest wrote and published. It is
+        // last only because the symbol lists are the bulk; under a budget
+        // that binds these are cheap and there are a handful of them.
+        seeds.extend(
+            self.jit_published_seeds
+                .iter()
+                .copied()
+                .filter(|&at| in_text(at)),
+        );
+        seeds
+    }
+
+    /// Coverage: the share of **retired** instructions that ran inside
+    /// translated code (M7 JD6's bar), or `None` with no core installed.
+    ///
+    /// Exact, and not a sample: the numerator is what the core counted itself
+    /// retiring and the denominator is the hart's `minstret`. The escape
+    /// hatch counts as covered — those instructions did run inside a
+    /// translated stay, through the interpreter — which is why
+    /// `--jit-escape-all` reads near 100 % and is a correctness proof rather
+    /// than a speed one.
+    #[must_use]
+    pub fn translated_coverage(&self) -> Option<(u64, u64)> {
+        let retired = self.harts[0].translated_retired()?;
+        Some((retired, self.harts[0].instruction_count()))
+    }
+
+    /// The `blockprof` census as report lines, or `None` if the run did not
+    /// ask for one.
+    ///
+    /// `top` block starts, largest first. With a core installed these are the
+    /// **uncovered** blocks in order of what they cost, which is the whole
+    /// point of having a census: a coverage shortfall that cannot be
+    /// attributed is a coverage shortfall nobody can fix.
+    #[must_use]
+    pub fn blockprof_report(&self, top: usize) -> Option<Vec<String>> {
+        let prof = self.harts[0].blockprof()?;
+        let mut lines = vec![format!(
+            "blockprof: {} instructions retired outside translated code, over {} distinct \
+             block starts",
+            prof.retired(),
+            prof.starts(),
+        )];
+        lines.push(format!(
+            "blockprof: {} `fence.i`, {} guest-published code span(s) seeded{}",
+            self.fence_i_count(),
+            self.jit_published_seeds.len(),
+            self.jit_published_seeds
+                .iter()
+                .map(|at| format!(" {at:#010x}"))
+                .collect::<String>(),
+        ));
+        // Where the run's instructions retire, by region. The one split that
+        // says how much of an image is statically discoverable at all:
+        // flash-cache text is in the ELF and cannot change, while hp-SRAM and
+        // IRAM hold code the guest may have written itself.
+        let mut retired_by_region: BTreeMap<&str, u64> = BTreeMap::new();
+        for (pc, _, retired) in prof.iter() {
+            *retired_by_region.entry(self.region_of(pc)).or_default() += retired;
+        }
+        let all = prof.retired().max(1);
+        lines.push(format!(
+            "blockprof: retired by region:{}",
+            retired_by_region
+                .iter()
+                .map(|(name, r)| format!(" {name} {r} ({:.2} %)", 100.0 * *r as f64 / all as f64))
+                .collect::<String>(),
+        ));
+        let found = self.discovered_pcs();
+        lines.extend(self.discovery_coverage_line(prof, &found));
+        let mut by_cost: Vec<(u32, u64, u64)> = prof.iter().collect();
+        by_cost.sort_unstable_by(|a, b| b.2.cmp(&a.2).then_with(|| a.0.cmp(&b.0)));
+        let total = prof.retired().max(1);
+        let line = |&(pc, entries, retired): &(u32, u64, u64)| {
+            format!(
+                "blockprof:   {pc:#010x} {retired:>12} instr ({:>5.2} %) in {entries:>9} \
+                 entries{}",
+                100.0 * retired as f64 / total as f64,
+                self.region_note(pc),
+            )
+        };
+        lines.push("blockprof: the largest, whatever the reason:".into());
+        lines.extend(by_cost.iter().take(top).map(line));
+        // The walk's own gap, named. Separate from the list above because
+        // "the module had no room for it" and "nothing pointed at it" are
+        // different problems with different owners — P5's and this phase's.
+        let mut missed = by_cost.iter().filter(|(pc, _, _)| !found.contains(pc));
+        let head: Vec<String> = missed.by_ref().take(top).map(line).collect();
+        if !head.is_empty() {
+            lines.push("blockprof: the largest the walk did not find:".into());
+            lines.extend(head);
+        }
+        Some(lines)
+    }
+
+    /// What the walk would have covered had no host ceiling applied.
+    ///
+    /// The census is what the *interpreter* ran, so with a core installed it
+    /// is the shortfall; this asks how much of that shortfall discovery
+    /// actually found and the module simply had no room for. The two numbers
+    /// belong to different phases — M7 P4 owns finding the code and P5 owns
+    /// fitting it into a module a host will compile — and a run that reports
+    /// only one of them cannot say which is short.
+    ///
+    /// A census entry is attributed to the walk by its **block start**. A
+    /// block runs from its start, and both the interpreter and the walk cut a
+    /// block at a control transfer, so the two agree on where blocks begin;
+    /// where they disagree is only how far one runs, and a census block whose
+    /// start the walk found is inside a translated block for all but its
+    /// tail. It is an attribution, not an identity, and it is one only
+    /// because the diagnostic's job is to point at the missing blocks.
+    fn discovery_coverage_line(
+        &self,
+        prof: &lp_riscv_emu::mach::BlockProfile,
+        found: &BTreeSet<u32>,
+    ) -> Option<String> {
+        if found.is_empty() {
+            return None;
+        }
+        let (mut hit, mut miss) = (0u64, 0u64);
+        for (pc, _, retired) in prof.iter() {
+            if found.contains(&pc) {
+                hit += retired;
+            } else {
+                miss += retired;
+            }
+        }
+        let total = (hit + miss).max(1);
+        let mut line = format!(
+            "blockprof: of those, {hit} ({:.2} %) started in a block the walk DID find and the \
+             module had no room for, {miss} ({:.2} %) in one it did not find",
+            100.0 * hit as f64 / total as f64,
+            100.0 * miss as f64 / total as f64,
+        );
+        // Where the walk's own gap is, by region. One line, because "10.8 %
+        // missing" and "10.8 % missing, all of it in writable RAM" are
+        // different findings with different owners.
+        let mut by_region: BTreeMap<&str, u64> = BTreeMap::new();
+        for (pc, _, retired) in prof.iter() {
+            if found.contains(&pc) {
+                continue;
+            }
+            *by_region.entry(self.region_of(pc)).or_default() += retired;
+        }
+        for (name, retired) in by_region {
+            line.push_str(&format!(
+                "; not found in {name}: {retired} ({:.2} %)",
+                100.0 * retired as f64 / total as f64
+            ));
+        }
+        Some(line)
+    }
+
+    /// Every pc the whole-image walk finds an instruction at, or an empty set
+    /// on a build without the `jit` feature, where there is no walk.
+    #[cfg(feature = "jit")]
+    fn discovered_pcs(&self) -> BTreeSet<u32> {
+        let seeds = self.translation_seeds(self.boot_entry);
+        crate::jit::discovered_instruction_pcs(&self.bus, &seeds)
+    }
+
+    #[cfg(not(feature = "jit"))]
+    fn discovered_pcs(&self) -> BTreeSet<u32> {
+        BTreeSet::new()
+    }
+
+    /// The region an address belongs to, by name.
+    fn region_of(&self, at: u32) -> &'static str {
+        self.bus
+            .regions()
+            .iter()
+            .find(|r| at >= r.base && at < r.end())
+            .map_or("unmapped", |r| r.name)
+    }
+
+    /// Which region an address belongs to, for a census line.
+    fn region_note(&self, at: u32) -> String {
+        self.bus
+            .regions()
+            .iter()
+            .find(|r| at >= r.base && at < r.end())
+            .map_or_else(String::new, |r| format!("  [{}]", r.name))
+    }
+
+    /// Run the second translation event if the guest has retired a `fence.i`
+    /// since the core was built.
+    ///
+    /// One `u64` compare per slice when no core is installed, which is every
+    /// run without `--jit`.
+    fn translate_if_code_was_published(&mut self) {
+        let now = self.harts[0].fence_i_count();
+        if now == self.jit_fence_i_at {
+            return;
+        }
+        self.jit_fence_i_at = now;
+        // What the guest published. Its base is the seed no symbol supplies.
+        // Recorded whether or not there is a core to rebuild, because
+        // `--blockprof` on its own has to be able to say what the walk would
+        // have found.
+        for (base, _) in self.bus.take_guest_code_writes() {
+            if !self.jit_published_seeds.contains(&base) {
+                self.jit_published_seeds.push(base);
+            }
+        }
+        if self.jit_entry.is_none() {
+            return;
+        }
+        self.jit_retranslations += 1;
+        #[cfg(feature = "jit")]
+        self.retranslate_after_fence_i();
+    }
+
+    /// How many times the guest's `fence.i` made the machine retranslate.
+    ///
+    /// The spike observed exactly one per run on the pinned images. A run
+    /// that reports many is a finding, not a tuning opportunity.
+    #[must_use]
+    pub fn jit_retranslations(&self) -> u64 {
+        self.jit_retranslations
+    }
+
+    /// Install a translated core over a hand-supplied seed list, and arm the
+    /// two translation events (JD5) for it.
+    ///
+    /// The product path is `--jit`, which seeds from the image's own symbols
+    /// through [`Esp32C6Builder::jit`]. This is for a **constructed** guest —
+    /// a few words placed into RAM, with no ELF and so no symbol table — so
+    /// the discovery rules and both translation events can be tested without
+    /// a firmware build. Beyond the seeds given, the walk still picks up
+    /// whatever the guest publishes with a `fence.i`.
+    ///
+    /// # Errors
+    ///
+    /// Anything that stops a core being built; see
+    /// [`Esp32C6Machine::install_translated_core`].
+    pub fn translate_from_seeds(
+        &mut self,
+        seeds: &[u32],
+        escape_all: bool,
+        blocks: usize,
+    ) -> Result<(), BuildError> {
+        let entry = seeds.first().copied().unwrap_or(self.boot_entry);
+        self.jit_seed_override = Some(seeds.to_vec());
+        self.jit_entry = Some(entry);
+        self.jit_escape_all = escape_all;
+        self.jit_block_budget = blocks;
+        self.jit_fence_i_at = self.harts[0].fence_i_count();
+        self.bus.watch_guest_code(true);
+        self.install_translated_core(entry, escape_all, blocks, "seeded")
+    }
+
+    /// The second translation event (JD5): the guest published code.
+    ///
+    /// `fence.i` is the whole trigger. The firmware's own JIT emits one after
+    /// every publish (`JitBuffer::from_code`, M5) because real silicon
+    /// requires it, so there is nothing to guess and nothing to poll: the
+    /// hart's `fence.i` hook has already dropped the blocks whose bytes
+    /// changed, and this rebuilds the core over the image as it now is.
+    ///
+    /// The spike observed **exactly one `fence.i` and one retranslation per
+    /// run** on the pinned images, so the simple thing is the right thing. A
+    /// run that shows many is a finding, and
+    /// [`MachineHart::fence_i_count`](lp_riscv_emu::mach::MachineHart::fence_i_count)
+    /// is what reports it.
+    ///
+    /// A failure here is **not** fatal, unlike the one at boot: the machine
+    /// already has a working core and a correct transcript either way, so it
+    /// says so and carries on with what it has.
+    #[cfg(feature = "jit")]
+    fn retranslate_after_fence_i(&mut self) {
+        let Some(entry) = self.jit_entry else { return };
+        let escape_all = self.jit_escape_all;
+        let blocks = self.jit_block_budget;
+        if let Err(e) = self.install_translated_core(entry, escape_all, blocks, "fence.i") {
+            log::warn!("jit: retranslation after `fence.i` failed; keeping the old core: {e}");
+        }
     }
 
     /// `--jit` on a build without the `jit` feature.
@@ -2326,6 +2718,7 @@ impl Esp32C6Machine {
         _entry: u32,
         _escape_all: bool,
         _blocks: usize,
+        _event: &str,
     ) -> Result<(), BuildError> {
         Err(BuildError::Io(
             "--jit needs this binary built with `--features jit`; wasmtime is an optional \
@@ -3494,6 +3887,18 @@ impl Esp32C6Machine {
 
             self.bus.set_time(now);
             let end = self.harts[0].run_slice(&mut self.bus, budget);
+
+            // The second translation event (JD5). The hart's `fence.i` hook
+            // has already dropped the blocks whose bytes changed; this is
+            // where what the guest published gets translated. Checked
+            // between slices rather than inside the hook because rebuilding
+            // a core needs the machine, and the hart is what the hook has.
+            //
+            // A slice boundary is not a delay the guest can see: translated
+            // code is not architectural state, so the instructions between
+            // the `fence.i` and here are interpreted, exactly as they would
+            // have been with no core at all.
+            self.translate_if_code_was_published();
 
             match end {
                 SliceEnd::BudgetExhausted => {}

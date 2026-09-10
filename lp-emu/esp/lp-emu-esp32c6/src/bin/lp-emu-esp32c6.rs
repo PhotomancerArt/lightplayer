@@ -211,22 +211,31 @@ OPTIONS:
                             and the same promise --no-block-cache makes:
                             every byte of every transcript must be the same
                             either way
-    --jit                   translate the blocks reachable from the entry
-                            point and run those through the host's wasm
-                            engine. Needs a build with `--features jit`;
-                            off by default (M7 JD18)
+    --jit                   discover the whole image, translate it, and run
+                            it through the host's wasm engine. Translation
+                            happens at exactly two events: image load and
+                            each guest `fence.i`. Needs a build with
+                            `--features jit`; off by default (M7 JD18)
     --jit-escape-all        with --jit: emit NO guest semantics at all and
                             hand every instruction to the interpreter through
                             the escape hatch. Complete, correct and slow, and
                             the proof that a partial translator can only be
                             slow and never wrong
-    --jit-blocks <N>        with --jit: how many blocks the sweep from the
-                            entry point may find. The default suits the
-                            emission policy, and a set the host refuses to
-                            compile is halved and retried
+    --jit-blocks <N>        with --jit: how many DISCOVERED blocks may be
+                            installed. Discovery itself always covers the
+                            whole image and the boot line reports what it
+                            found; this bounds only what the host is asked to
+                            compile, and a set it refuses is halved and
+                            retried
     --jit-report            print what the translated core translated, how
                             much of the run it covered, how often it left for
                             the interpreter, and what boot cost to build it
+    --blockprof             record the block census: per block start, how many
+                            instructions retired there IN THE INTERPRETER.
+                            With --jit that is exactly the coverage shortfall,
+                            largest first; without it, the whole run. A
+                            diagnostic — it costs host time, so never turn it
+                            on in a run that measures speed (M7 JD5)
     --strict-grade-blocks <NAME,NAME>
                             narrow --strict-grade to these blocks by name.
                             The default is every block that publishes a
@@ -326,6 +335,8 @@ struct Args {
     /// boot cost of building it (emit ms, module bytes, engine compile ms,
     /// instantiate ms — M7 JD20).
     jit_report: bool,
+    /// `--blockprof`: the off-by-default block census (M7 JD5).
+    blockprof: bool,
     /// `--jit`: build and install a translated core.
     jit: bool,
     /// `--jit-escape-all`: every instruction through the escape hatch.
@@ -358,6 +369,7 @@ fn run() -> Result<ExitCode, String> {
         .block_cache(!args.no_block_cache)
         .translate(!args.interpreter)
         .jit_report(args.jit_report)
+        .blockprof(args.blockprof)
         .jit(args.jit)
         .jit_escape_all(args.jit_escape_all)
         .strict_grade(args.strict_grade)
@@ -714,6 +726,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                 );
             }
             "--jit-report" => args.jit_report = true,
+            "--blockprof" => args.blockprof = true,
             "--probe" => args.probes.push(parse_probe(&value("--probe")?)?),
             "--break-at" => args.break_at.push(value("--break-at")?),
             "--hooks" => args.hooks = true,
@@ -1114,6 +1127,24 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
                     "--interpreter"
                 }
             ),
+        }
+        // The bar M7 P4 is measured against (JD6), stated rather than left to
+        // be worked out from two other numbers.
+        if let Some((covered, total)) = machine.translated_coverage() {
+            eprintln!(
+                "jit: coverage {:.2} % of retired ({covered} of {total} instructions ran inside \
+                 translated code); {} retranslation(s) after {} `fence.i`",
+                100.0 * covered as f64 / total.max(1) as f64,
+                machine.jit_retranslations(),
+                machine.fence_i_count(),
+            );
+        }
+    }
+    // Independent of `--jit-report`: the census answers "where did the rest
+    // go", and a run may want it with no core installed at all.
+    if let Some(lines) = machine.blockprof_report(20) {
+        for line in lines {
+            eprintln!("{line}");
         }
     }
     if machine.bus.strict() {

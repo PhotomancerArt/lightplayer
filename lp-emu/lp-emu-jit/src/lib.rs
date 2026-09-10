@@ -12,8 +12,10 @@
 //!   executors and cannot be asked "what is this?" without also being told
 //!   "and do it". `tests/decoder_agreement.rs` is what makes a second decoder
 //!   acceptable rather than a divergence waiting to happen (M7 JD3).
-//! - [`blocks`] — the guest blocks a translation is *of*, and the simple walk
-//!   P3 uses to find some. Discovery proper is P4's.
+//! - [`blocks`] — the guest blocks a translation is *of*.
+//! - [`discover`] — how they are found: a symbol-seeded, width-following
+//!   sweep over the whole image that follows every static edge and degrades
+//!   to the interpreter at everything else (JD6, JD7).
 //! - [`translate`] — the block set to one wasm function: registers in locals,
 //!   the arena as the imported memory, RAM behind a permission byte, MMIO and
 //!   the escape hatch through imports.
@@ -53,6 +55,7 @@ extern crate alloc;
 
 pub mod blocks;
 pub mod decode;
+pub mod discover;
 pub mod host;
 #[cfg(feature = "host-wasmtime")]
 pub mod host_wasmtime;

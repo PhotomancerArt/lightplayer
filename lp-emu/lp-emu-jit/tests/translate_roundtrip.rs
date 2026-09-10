@@ -15,6 +15,7 @@
 
 use lp_emu_core::CycleModel;
 use lp_emu_jit::blocks::BlockSet;
+use lp_emu_jit::discover::discover;
 use lp_emu_jit::host::{
     self, EXCHANGE_CYCLE, EXCHANGE_INSTRET, EXCHANGE_LEN, EXCHANGE_REGS, HostOps, MMIO_OK,
     MmioLoad, MmioStore, PERM_ENTRIES, PERM_NONE, PERM_READ_WRITE, PERM_SHIFT, STEP_CONTINUE,
@@ -553,13 +554,14 @@ fn straight_line() -> Vec<(u32, u32)> {
 }
 
 fn set_of(rig: &Rig, seed: u32) -> BlockSet {
-    BlockSet::sweep(&[seed], 64, &mut |pc| {
+    discover(&[seed], 64, &mut |pc| {
         if (GUEST_BASE..GUEST_BASE + ARENA_LEN).contains(&pc) {
             Some(rig.word_at(pc))
         } else {
             None
         }
     })
+    .set
 }
 
 #[test]

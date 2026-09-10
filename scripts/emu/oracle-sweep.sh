@@ -62,6 +62,16 @@ images=(
     "render-rocaille|LP_EMU_C6_REF_RENDER_ROCAILLE|esp32c6,server,radio,spike_uart0_link,memory_fs,bench_project_rocaille|8s|[render-loop] === DONE ===|8ffc4b325|none"
 )
 
+# Optionally narrow the sweep to a few images, space-separated by slug:
+#
+#   LP_EMU_ORACLE_IMAGES="render-basic render-rocaille" oracle-sweep.sh a b
+#
+# The default is every image and that is what a gate runs. This exists because
+# a `--jit` leg pays a wasm compile per translation event, so the whole sweep
+# can outlast an agent harness's per-command cap; splitting it by image keeps
+# every cell in the same shape rather than inventing a shorter bar.
+only="${LP_EMU_ORACLE_IMAGES:-}"
+
 resolve_image() {
     local slug="$1" var="$2" features="$3" commit="$4" spike="$5" path
     path="${!var:-}"
@@ -101,6 +111,7 @@ fail=0
 rows=()
 for spec in "${images[@]}"; do
     IFS='|' read -r slug var features timeout exit_on commit spike <<<"$spec"
+    if [[ -n "$only" && " $only " != *" $slug "* ]]; then continue; fi
     elf="$(resolve_image "$slug" "$var" "$features" "$commit" "$spike")"
     for grade in t1 t2; do
         run_leg "$bin_a" "$elf" "$slug" "$grade" "$timeout" "$exit_on" a

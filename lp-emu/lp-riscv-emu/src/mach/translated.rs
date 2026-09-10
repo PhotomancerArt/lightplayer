@@ -136,6 +136,14 @@ pub trait TranslatedCore<B: Bus> {
     /// One line for `--jit-report`: what the core translated, how much of the
     /// run it covered, and how often it left for the interpreter.
     fn report(&self) -> String;
+
+    /// Guest instructions retired **inside** translated code.
+    ///
+    /// The numerator of the coverage number M7's P4 has a bar under (JD6);
+    /// the denominator is the hart's own `minstret`. A number rather than a
+    /// line in [`TranslatedCore::report`] because the machine has to divide
+    /// by something only it knows.
+    fn retired(&self) -> u64;
 }
 
 /// `log2` of the hart's entry table, which is direct-mapped by `pc >> 1`
