@@ -584,3 +584,189 @@ fn snapshot_round_trip() {
     assert_eq!(machine.harts[0].ps(), ps);
     assert!(machine.core_stalled(1));
 }
+
+// ---------------------------------------------------------------------------
+// The direct load (P3): what `loader.rs` reproduces, on the shipped image
+// ---------------------------------------------------------------------------
+
+use lp_emu_esp32v3::loader::{
+    BOOTLOADER_FRAME_CHAIN, BOOTLOADER_SP_AT_APP_ENTRY, DEFAULT_FLASH_SIZE, ROM_DEFAULT_FLASH_SIZE,
+    ROM_FLASH_CHIP_SYMBOL,
+};
+use lp_emu_esp32v3::machine::AppSource;
+use lp_emu_esp32v3::test_support::{fw_esp32v3_image, skip_notice};
+
+fn direct(strict: bool) -> Option<Machine> {
+    let elf = match fw_esp32v3_image() {
+        Ok(p) => p,
+        Err(reason) => {
+            skip_notice("direct load", &reason);
+            return None;
+        }
+    };
+    Some(
+        Esp32V3Builder::new()
+            .boot_mode(BootMode::Direct)
+            .app(AppSource::Path(elf))
+            .strict(strict)
+            .build()
+            .expect("the shipped image builds a machine"),
+    )
+}
+
+/// `.data` is a self-copy on the classic: `_sidata == _data_start`, so the
+/// bytes must already be at their vaddr when `Reset` runs, which is what
+/// placing the DRAM `PT_LOAD` does. Verified on the image itself, not on the
+/// linker script alone — if the two symbols ever differ the design changes
+/// and this is the test that says so.
+#[test]
+#[ignore = "needs the shipped image; run through `just test-emu-esp32v3-boot`"]
+fn data_is_a_self_copy_and_is_placed_at_its_vaddr() {
+    let Some(mut machine) = direct(false) else {
+        return;
+    };
+    let app = machine.app().expect("a direct machine has an app");
+    let sidata = app.symbol("_sidata").expect("_sidata").address;
+    let data_start = app.symbol("_data_start").expect("_data_start").address;
+    let data_end = app.symbol("_data_end").expect("_data_end").address;
+    assert_eq!(
+        sidata, data_start,
+        "`.data` is placed > RWDATA with no AT>, so its LMA is its VMA and the app's copy loop \
+         moves every word onto itself"
+    );
+    assert_eq!(data_start, memmap::DRAM_SEG_BASE, "`.data` opens dram_seg");
+    assert!(data_end > data_start);
+
+    // And the bytes are there: the segment that carries `.data` was placed
+    // by vaddr, with real bytes in it.
+    let seg = machine
+        .app_segments()
+        .iter()
+        .find(|s| s.vaddr == data_start)
+        .expect("the DRAM PT_LOAD starts at _data_start");
+    assert!(seg.filesz > 0);
+    let words: Vec<u32> = (0..16)
+        .filter_map(|i| machine.peek_word(data_start + 4 * i))
+        .collect();
+    assert!(
+        words.iter().any(|w| *w != 0),
+        "`.data` was placed, not left zero"
+    );
+}
+
+/// The one segment whose `paddr` differs from its `vaddr` is
+/// `.rtc_fast.persistent`: NOBITS, linked to RTC fast memory with a load
+/// address in the DROM window. Placed by vaddr, and recorded.
+#[test]
+#[ignore = "needs the shipped image; run through `just test-emu-esp32v3-boot`"]
+fn the_only_relocated_segment_is_rtc_fast_persistent() {
+    let Some(machine) = direct(false) else {
+        return;
+    };
+    let relocated: Vec<_> = machine
+        .app_segments()
+        .iter()
+        .filter(|s| s.relocated())
+        .collect();
+    assert_eq!(relocated.len(), 1, "{relocated:?}");
+    let seg = relocated[0];
+    assert_eq!(seg.vaddr, memmap::RTC_FAST_DBUS);
+    assert!(
+        memmap::Span {
+            name: "drom",
+            base: memmap::DROM_BASE,
+            len: memmap::DROM_LEN
+        }
+        .contains(seg.paddr),
+        "its load address is in the DROM window: {:#010x}",
+        seg.paddr
+    );
+    assert_eq!(seg.filesz, 0, "NOBITS: nothing to copy either way");
+    assert_eq!(seg.regions, vec!["rtc-fast-dbus"]);
+    assert_eq!(
+        machine.app_segments().len(),
+        6,
+        "readelf -l: seven headers, one GNU_STACK"
+    );
+}
+
+/// The flash chip's size goes into the ROM's own chip description, resolved
+/// by the ROM's own name for it — `spi_w25q16`, not the `g_rom_flashchip`
+/// alias ESP-IDF's linker script provides — and the word it replaces is the
+/// ROM's 2 MiB default, proving `.data_spi_flash` was seeded first.
+#[test]
+#[ignore = "needs the shipped image; run through `just test-emu-esp32v3-boot`"]
+fn the_flash_chip_size_is_seeded_over_the_roms_default() {
+    let Some(mut machine) = direct(false) else {
+        return;
+    };
+    let seed = machine.flash_seed().expect("a direct load seeds the chip");
+    let symbol = machine
+        .rom()
+        .symbol(ROM_FLASH_CHIP_SYMBOL)
+        .expect("the vendored ROM names its chip description");
+    assert_eq!(seed.chip, symbol.address);
+    assert_eq!(seed.chip, 0x3FFA_E270, "= _data_start_spi_flash");
+    assert!(
+        machine.rom().symbol("g_rom_flashchip").is_none(),
+        "the ROM ELF does NOT carry ESP-IDF's alias; the notes' claim is corrected here"
+    );
+    assert_eq!(
+        seed.previous, ROM_DEFAULT_FLASH_SIZE,
+        "2 MiB, the ROM's default"
+    );
+    assert_eq!(seed.chip_size, DEFAULT_FLASH_SIZE, "4 MiB, the desk board");
+    assert_eq!(machine.peek_word(seed.chip + 4), Some(DEFAULT_FLASH_SIZE));
+    // The rest of the struct is the ROM's: device_id first.
+    assert_eq!(machine.peek_word(seed.chip), Some(0x0015_40EF));
+}
+
+/// The hart at entry: the bootloader's `callx8` frame, on the ROM's stack
+/// 672 bytes down. `BOOTLOADER_FRAME_CHAIN` is the derivation.
+#[test]
+#[ignore = "needs the shipped image; run through `just test-emu-esp32v3-boot`"]
+fn the_direct_load_enters_the_app_where_the_bootloader_would() {
+    let Some(mut machine) = direct(false) else {
+        return;
+    };
+    let app_entry = machine.app().expect("app").entry;
+    assert_eq!(machine.harts[0].pc(), app_entry);
+    assert_eq!(app_entry, 0x4008_0844, "`Reset` in the shipped image");
+    assert_eq!(machine.harts[0].ps(), PS_BOOT);
+    let frame = machine.boot_frame().expect("a direct load seeds a frame");
+    assert_eq!(frame.sp, BOOTLOADER_SP_AT_APP_ENTRY);
+    assert_eq!(machine.harts[0].cpu().a(1), 0x3FFE_3C80);
+    let used: u32 = BOOTLOADER_FRAME_CHAIN.iter().map(|(_, _, n)| n).sum();
+    assert_eq!(memmap::ROM_PRO_STACK_TOP - used, frame.sp);
+    assert!(
+        memmap::ROM_PRO_STACK_BASE < frame.sp && frame.sp < memmap::ROM_PRO_STACK_TOP,
+        "inside the ROM's PRO stack"
+    );
+    assert_eq!(machine.peek_word(frame.sp - 12), Some(frame.sp));
+}
+
+/// P2's recorded first strict stop of the direct load, held: the loader
+/// change moved nothing the boot reads before its first MMIO access.
+#[test]
+#[ignore = "needs the shipped image; run through `just test-emu-esp32v3-boot`"]
+fn the_first_strict_stop_of_the_direct_load_is_dport() {
+    let Some(mut machine) = direct(true) else {
+        return;
+    };
+    let outcome = machine.run_until(&StopCondition::after_micros(1_000));
+    let Outcome::StrictBus { violation } = outcome else {
+        panic!("no peripheral is modelled at this commit: expected a strict stop, got {outcome:?}");
+    };
+    assert_eq!(
+        violation.address,
+        memmap::periph::DPORT + 0x218,
+        "core_1_intr_map[0]"
+    );
+    assert_eq!(violation.cycle, 29);
+    assert!(
+        machine
+            .symbolize(violation.pc)
+            .is_some_and(|s| s.contains("esp32_init")),
+        "{violation:?}"
+    );
+}

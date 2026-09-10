@@ -59,6 +59,8 @@ use lp_xt_emu::mach::sr::PS_BOOT;
 use lp_xt_emu::mach::trap::NUM_INTERRUPTS;
 use lp_xt_emu::mach::{CoreConfig, HartFault, SliceEnd, XtHart};
 
+pub use crate::loader::PlacedAppSegment;
+use crate::loader::{self, FlashChipSeed, LoadError};
 use crate::memmap;
 use crate::rom::{self, DataImage, HookResult, HookTable, PlacedSegment, RomError, SeededSection};
 use crate::snapshot::Snapshot;
@@ -382,6 +384,7 @@ impl StopCondition {
 #[derive(Debug)]
 pub enum BuildError {
     Rom(RomError),
+    Load(LoadError),
     App(String),
     Io(String),
 }
@@ -390,6 +393,7 @@ impl fmt::Display for BuildError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             BuildError::Rom(e) => write!(f, "{e}"),
+            BuildError::Load(e) => write!(f, "{e}"),
             BuildError::App(m) => write!(f, "application image: {m}"),
             BuildError::Io(m) => write!(f, "{m}"),
         }
@@ -404,19 +408,13 @@ impl From<RomError> for BuildError {
     }
 }
 
-/// Where one of the application's `PT_LOAD`s went.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PlacedAppSegment {
-    pub vaddr: u32,
-    pub paddr: u32,
-    pub filesz: u32,
-    pub memsz: u32,
-    pub execute: bool,
-    pub regions: Vec<&'static str>,
+impl From<LoadError> for BuildError {
+    fn from(e: LoadError) -> Self {
+        BuildError::Load(e)
+    }
 }
 
 /// Builds a [`Machine`].
-#[derive(Default)]
 pub struct Esp32V3Builder {
     rom: RomSource,
     app: AppSource,
@@ -425,9 +423,28 @@ pub struct Esp32V3Builder {
     strict: bool,
     strict_unsupported: bool,
     boot_frame: Option<BootFrame>,
+    flash_size: u32,
     trace: Option<Box<dyn std::io::Write + Send>>,
     trace_blocks: Vec<String>,
     seed: u64,
+}
+
+impl Default for Esp32V3Builder {
+    fn default() -> Self {
+        Self {
+            rom: RomSource::default(),
+            app: AppSource::default(),
+            boot_mode: BootMode::default(),
+            time_grade: TimeGrade::default(),
+            strict: false,
+            strict_unsupported: true,
+            boot_frame: None,
+            flash_size: loader::DEFAULT_FLASH_SIZE,
+            trace: None,
+            trace_blocks: Vec::new(),
+            seed: 0,
+        }
+    }
 }
 
 impl fmt::Debug for Esp32V3Builder {
@@ -444,6 +461,7 @@ impl fmt::Debug for Esp32V3Builder {
             .field("strict", &self.strict)
             .field("strict_unsupported", &self.strict_unsupported)
             .field("boot_frame", &self.boot_frame)
+            .field("flash_size", &self.flash_size)
             .field("trace", &self.trace.is_some())
             .field("trace_blocks", &self.trace_blocks)
             .field("seed", &self.seed)
@@ -453,10 +471,7 @@ impl fmt::Debug for Esp32V3Builder {
 
 impl Esp32V3Builder {
     pub fn new() -> Self {
-        Self {
-            strict_unsupported: true,
-            ..Default::default()
-        }
+        Self::default()
     }
 
     pub fn rom(mut self, rom: RomSource) -> Self {
@@ -494,9 +509,18 @@ impl Esp32V3Builder {
         self
     }
 
-    /// Override the direct load's boot frame. See [`BootFrame`].
+    /// Override the direct load's boot frame. See [`BootFrame`]; the default
+    /// is [`BootFrame::idf_bootloader`].
     pub fn boot_frame(mut self, frame: BootFrame) -> Self {
         self.boot_frame = Some(frame);
+        self
+    }
+
+    /// The flash chip's size, written into the ROM's chip description by a
+    /// direct load ([`loader::seed_rom_flash_chip`]). Default
+    /// [`loader::DEFAULT_FLASH_SIZE`], the desk board's 4 MiB.
+    pub fn flash_size(mut self, bytes: u32) -> Self {
+        self.flash_size = bytes;
         self
     }
 
@@ -568,6 +592,7 @@ impl Esp32V3Builder {
             rom_data,
             rom_data_image,
             app_segments: Vec::new(),
+            flash_seed: None,
             hooks: HookTable::new(),
             boot_mode: self.boot_mode,
             time_grade: self.time_grade,
@@ -580,10 +605,8 @@ impl Esp32V3Builder {
         };
 
         if self.boot_mode == BootMode::Direct {
-            let frame = self
-                .boot_frame
-                .unwrap_or_else(|| BootFrame::rom_pro_stack(&machine.rom));
-            machine.direct_load(frame)?;
+            let frame = self.boot_frame.unwrap_or_else(BootFrame::idf_bootloader);
+            machine.direct_load(frame, self.flash_size)?;
         }
 
         Ok(machine)
@@ -609,6 +632,7 @@ pub struct Machine {
     rom_data: Vec<SeededSection>,
     rom_data_image: DataImage,
     app_segments: Vec<PlacedAppSegment>,
+    flash_seed: Option<FlashChipSeed>,
     hooks: HookTable,
     boot_mode: BootMode,
     time_grade: TimeGrade,
@@ -624,45 +648,28 @@ impl Machine {
     // ---- construction ---------------------------------------------------
 
     /// Place the application's `PT_LOAD`s and seed the boot state a
-    /// bootloader would have left.
+    /// bootloader would have left: [`crate::loader`] is the documentation.
     ///
-    /// This is a **minimal** direct load: segments, entry, [`PS_BOOT`] and
-    /// the [`BootFrame`]. The eleven things a direct load does not reproduce
-    /// (`m3/notes.md` §3) — the partition table, the flash MMU programming,
-    /// the ROM console, `g_rom_flashchip`, the reset cause, eFuse — are P3's,
-    /// and every one of them needs a peripheral P2 does not have.
-    fn direct_load(&mut self, frame: BootFrame) -> Result<(), BuildError> {
+    /// Segments, the ROM's flash chip description, then the hart — entry,
+    /// [`PS_BOOT`] and the [`BootFrame`]. What a direct load does *not*
+    /// reproduce is the eleven-item list in the loader's module docs.
+    fn direct_load(&mut self, frame: BootFrame, flash_size: u32) -> Result<(), BuildError> {
         let Some(app) = self.app.as_ref() else {
             return Err(BuildError::App(
                 "--boot-mode direct needs an --elf to load".into(),
             ));
         };
-        // Cloned because `place_spanning` borrows the bus mutably and the
-        // app image is borrowed from `self`. Segment data on this image is
+        // Cloned because the loader borrows the bus mutably and the app
+        // image is borrowed from `self`. Segment data on this image is
         // ~2 MiB; it is placed once, at build.
-        let segments = app.segments.clone();
-        let entry = app.entry;
-        let mut placed = Vec::new();
-        for seg in &segments {
-            // The same two skips the ROM loader makes: an empty segment, and
-            // a segment whose file bytes are the ELF's own headers
-            // (`rom::is_header_map` — the classic ROM has one, and an
-            // application linked the same way would too).
-            if seg.memsz == 0 || rom::is_header_map(&seg.data) {
-                continue;
-            }
-            let regions = rom::place_spanning(&mut self.bus, seg.vaddr, &seg.data, seg.memsz)?;
-            placed.push(PlacedAppSegment {
-                vaddr: seg.vaddr,
-                paddr: seg.paddr,
-                filesz: seg.filesz(),
-                memsz: seg.memsz,
-                execute: seg.execute,
-                regions,
-            });
-        }
-        self.app_segments = placed;
-        self.seed_boot_state(entry, frame)?;
+        let app = app.clone();
+        self.app_segments = loader::load_app(&mut self.bus, &app)?;
+        self.flash_seed = Some(loader::seed_rom_flash_chip(
+            &mut self.bus,
+            &self.rom,
+            flash_size,
+        )?);
+        self.seed_boot_state(app.entry, frame)?;
         Ok(())
     }
 
@@ -722,6 +729,12 @@ impl Machine {
 
     pub fn app_segments(&self) -> &[PlacedAppSegment] {
         &self.app_segments
+    }
+
+    /// What a direct load wrote into the ROM's flash chip description;
+    /// `None` on a rom-up machine, where the bootloader does it.
+    pub fn flash_seed(&self) -> Option<FlashChipSeed> {
+        self.flash_seed
     }
 
     pub fn hooks(&self) -> &HookTable {

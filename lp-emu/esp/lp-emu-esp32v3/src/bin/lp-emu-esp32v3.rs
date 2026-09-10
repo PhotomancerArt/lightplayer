@@ -237,6 +237,22 @@ fn print_build_report(machine: &Machine, boot_mode: BootMode) {
     );
     if boot_mode == BootMode::Direct {
         println!("app: {} segments placed", machine.app_segments().len());
+        for seg in machine.app_segments().iter().filter(|s| s.relocated()) {
+            println!(
+                "app: segment vaddr={:#010x} paddr={:#010x} placed by vaddr (memsz {:#x})",
+                seg.vaddr, seg.paddr, seg.memsz
+            );
+        }
+        if let Some(seed) = machine.flash_seed() {
+            println!(
+                "flash chip: {} @ {:#010x} chip_size {:#x} -> {:#x} ({} MiB)",
+                lp_emu_esp32v3::loader::ROM_FLASH_CHIP_SYMBOL,
+                seed.chip,
+                seed.previous,
+                seed.chip_size,
+                seed.chip_size >> 20
+            );
+        }
         if let Some(frame) = machine.boot_frame() {
             println!(
                 "boot frame: a1={:#010x}, save area [a1-16..a1) = {:#010x} {:#010x} {:#010x} {:#010x}",
