@@ -21,6 +21,54 @@ register layout is chip-family data. `regnames` holds the type and the
 lookup, never a table. (The two tables under `tests/regs/` are the
 generator's proof, not the crate's data; see below.)
 
+## Engines and views
+
+**An engine is behaviour without a register map.** A peripheral block on an
+Espressif part is two things wearing one name: what the hardware *does* — a
+FIFO pair draining at a baud, a counter reaching an alarm, a flash command
+engine walking its phases — and *where the guest pokes it*. The first is the
+same IP across three generations of the part. The second is different on
+every one of them.
+
+So: **behaviour, scheduled events and host streams may live in an engine. A
+register offset, a bit position, a reset value, an interrupt source number
+and a `RegGrade` may not.** An engine names its events (`rx_overflow`,
+`tx_done`); the chip's **view** maps those names onto the bit positions its
+PAC declares, seeds its own reset values, publishes its own grades, and owns
+the `Peripheral` impl. The neutrality rule is not weakened by engines —
+engines are how it is kept once a second chip arrives.
+
+Engines exist **only where the win is real**: a second chip's view would
+otherwise re-implement scheduled behaviour with host-stream or fabric
+coupling. A shared struct with no scheduling in it is not a win, and a
+forced abstraction over two generations of different IP is a cost. The RMT
+is the worked example of a **no**: the classic's eight symmetric channels
+and the C6's split TX/RX register families are different enough that a
+shared engine would be a fiction. GPIO is a second no, for the opposite
+reason: its shared part already exists and is called `Fabric`.
+
+An engine is a plain struct, not a trait: the view owns one **by value**,
+calls methods on it and passes its `BusCx` through. No generics, no
+callbacks, no trait objects on a hot path — and every scheduling decision
+stays visible at the call site. An engine never packs an `EventId` either;
+it does not know its peripheral index, and a renumbering would change *when*
+events fire.
+
+| engine | why it earned one |
+|---|---|
+| `engine::uart` | Two writers share a real UART — a mask ROM's direct FIFO store and an async driver filling it and awaiting a threshold — behind a shifter draining at the programmed baud in emulated cycles, a receive timeout, threshold levels, and a `HostSinks` byte stream with a scheduled source poll. Scheduled behaviour with host-stream coupling, and on the classic ESP32 the UART is the *only* host link |
+
+### The USB-Serial-JTAG finding (M2, for M6)
+
+The C6's `usb_sj` block is offset-identical to the S3's for the whole range
+the S3 has (`EP1` @0x00 through `FRAM_NUM` @0x24, the interrupt quad at
+0x08–0x14 in the same order), and the C6's extra registers are a superset
+rather than a conflict — so M6 should **reuse the C6's file** rather than
+re-derive it. Where such a file lives is a placement question, not an
+engine/view one, and it is M6's to execute: this crate is not the home,
+because its rule forbids register offsets and that block is nothing but
+offsets.
+
 ## The layering
 
 ```text
@@ -29,8 +77,9 @@ generator's proof, not the crate's data; see below.)
   SocBus                 RAM regions + MMIO decode + watchpoints
    |        |            + the unmapped policy + sideband
    |    Peripheral       read / write / on_event against a BusCx
-   |        |
-   |     RegFile         accept-and-remember, with a table of exceptions
+   |        |            — a chip's register VIEW of one block
+   |        |--- RegFile accept-and-remember, with a table of exceptions
+   |        |--- engine  what the block DOES, with no register map
    |
   Trace                  every MMIO access, with the PC, plus SPIN
   HostSinks              where a UART's bytes actually go
