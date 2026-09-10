@@ -113,6 +113,9 @@ pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     // Direct load, stop 5: the ROM's `rom_chip_i2c_writeReg` programs the
     // BBPLL through the analog I2C master — on the AHB bus.
     "I2C_ANA_MST",
+    // Direct load, stop 6: `esp_hal::init` disables TIMG1's watchdog
+    // (`wdtwprotect` first, then `wdtconfig0`).
+    "TIMG1",
     // ROM-up, stop 1: `_ResetHandler_efuse_check_patch` reads its own
     // fuses seven instructions after the reset vector.
     "EFUSE",

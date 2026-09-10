@@ -300,6 +300,7 @@ mod tests {
             (apb_ctrl(), regs::APB_CTRL),
             (timg("TIMG0"), regs::TIMG0),
             (i2c_ana_mst(), I2C_ANA_MST_NAMES),
+            (timg("TIMG1"), regs::TIMG0),
             (efuse(), regs::EFUSE),
         ]
     }
