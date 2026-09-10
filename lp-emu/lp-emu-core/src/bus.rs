@@ -170,6 +170,67 @@ pub trait Bus {
     /// publish. The default is empty.
     #[inline(always)]
     fn note_fence_i(&mut self) {}
+
+    // ---- what a translated core needs to peek at before it runs ----------
+    //
+    // A translated core (`lp-emu-jit`) executes many guest instructions
+    // between two visits to this trait, so the three questions below have to
+    // be answerable *without* consuming anything. Each one encodes a
+    // correctness constraint that cost the M7 spike real debugging; the doc
+    // comments are the record of why.
+
+    /// Is a store side-band or a machine yield pending **right now**? A peek:
+    /// nothing is consumed.
+    ///
+    /// Translated code must not be entered while one is pending, and must
+    /// leave immediately after the access that raised one, so the interpreter
+    /// observes it at exactly the store it always has — polling point (c) in
+    /// this module's docs does not move because a block was translated.
+    ///
+    /// The default is a constant the optimizer removes.
+    #[inline(always)]
+    fn sideband_or_yield_pending(&self) -> bool {
+        false
+    }
+
+    /// Is any **load** watchpoint armed?
+    ///
+    /// Translated code performs RAM loads the bus never sees, so a load
+    /// watchpoint could not fire. It therefore refuses to run at all while
+    /// one is armed, rather than running and missing the trap.
+    ///
+    /// The default is a constant the optimizer removes.
+    #[inline(always)]
+    fn load_watchpoints_armed(&self) -> bool {
+        false
+    }
+
+    /// The **store** watchpoints, in the shape translated code can honour.
+    ///
+    /// Stores are the asymmetric case: esp-hal arms its stack guard for whole
+    /// runs, so refusing on any armed store watchpoint would refuse the whole
+    /// product run. One range can be honoured inline; more than one is a
+    /// refusal.
+    ///
+    /// The default is [`StoreWatch::None`], which the optimizer folds.
+    #[inline(always)]
+    fn store_watch(&self) -> StoreWatch {
+        StoreWatch::None
+    }
+}
+
+/// The store watchpoints a translated core has to honour — see
+/// [`Bus::store_watch`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum StoreWatch {
+    /// Nothing armed; stores need no check.
+    #[default]
+    None,
+    /// Exactly one armed `[lo, hi)` range, which translated code can compare
+    /// against inline.
+    One { lo: u64, hi: u64 },
+    /// More than one range: translated code refuses to run.
+    Many,
 }
 
 /// A hardware watchpoint slot's configuration.

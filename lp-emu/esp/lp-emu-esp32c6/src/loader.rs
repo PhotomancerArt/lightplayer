@@ -493,7 +493,7 @@ fn read_bytes(bus: &SocBus, address: u32, out: &mut [u8]) -> Option<()> {
     for region in bus.regions() {
         if region.contains(address) && region.contains(address + out.len() as u32 - 1) {
             let at = (address - region.base) as usize;
-            out.copy_from_slice(&region.data[at..at + out.len()]);
+            out.copy_from_slice(&bus.region_bytes(region)[at..at + out.len()]);
             return Some(());
         }
     }

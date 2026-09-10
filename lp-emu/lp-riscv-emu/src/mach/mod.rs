@@ -58,6 +58,7 @@
 
 mod block;
 pub mod csr;
+pub mod translated;
 pub mod trap;
 pub mod trigger;
 
@@ -65,7 +66,7 @@ extern crate alloc;
 
 use core::marker::PhantomData;
 
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, string::String, vec::Vec};
 
 use lp_emu_core::block::{BlockCache, BlockStats};
 use lp_emu_core::{Bus, CycleModel, InstClass, MemoryAccessKind, MemoryError};
@@ -219,6 +220,16 @@ pub struct MachineHart<B: Bus> {
     /// A flush asked for while the cache was lifted out of the hart — see
     /// [`MachineHart::drain_block_flush`].
     block_flush_pending: bool,
+    /// The installed translated core, if any, and the entry table that says
+    /// where it may be entered (direct-mapped by `pc >> 1`, `0` = no entry).
+    ///
+    /// **Not architectural state**, exactly like `cache` above: absent from a
+    /// snapshot, empty on a clone, and a run with no core installed must
+    /// produce a byte-identical everything. See [`mach::translated`].
+    ///
+    /// [`mach::translated`]: translated
+    core: Option<translated::BoxedCore<B>>,
+    core_entries: Vec<u32>,
     _bus: PhantomData<fn(&mut B)>,
 }
 
@@ -246,6 +257,11 @@ impl<B: Bus> Clone for MachineHart<B> {
             block_cache: self.block_cache,
             fence_i_count: self.fence_i_count,
             block_flush_pending: false,
+            // Not copied, for the same reason the block cache is not: a
+            // translated core holds host code for guest bytes that the
+            // clone's bus may not have.
+            core: None,
+            core_entries: Vec::new(),
             _bus: PhantomData,
         }
     }
@@ -290,8 +306,45 @@ impl<B: Bus> MachineHart<B> {
             block_cache: true,
             fence_i_count: 0,
             block_flush_pending: false,
+            core: None,
+            core_entries: Vec::new(),
             _bus: PhantomData,
         }
+    }
+
+    // --- the translated core ----------------------------------------------
+
+    /// Install a translated core and the guest pcs at which it may be
+    /// entered, replacing any core already installed.
+    ///
+    /// See [`mach::translated`](translated) for what a core is and what it
+    /// promises. Installing one changes no architectural state and no
+    /// transcript; it is the mechanism, not the decision.
+    pub fn set_translated_core(&mut self, core: translated::BoxedCore<B>, entries: &[u32]) {
+        self.core_entries = translated::entry_table(entries);
+        self.core = Some(core);
+    }
+
+    /// Remove the installed core, if any, and go back to interpreting.
+    ///
+    /// This is what `--interpreter` reaches: every build can turn the
+    /// translator off entirely and must then print an identical everything.
+    pub fn clear_translated_core(&mut self) {
+        self.core = None;
+        self.core_entries = Vec::new();
+    }
+
+    /// Is a translated core installed?
+    #[inline]
+    #[must_use]
+    pub fn has_translated_core(&self) -> bool {
+        self.core.is_some()
+    }
+
+    /// The installed core's own report line, if any.
+    #[must_use]
+    pub fn translated_core_report(&self) -> Option<String> {
+        self.core.as_ref().map(|c| c.report())
     }
 
     // --- plain accessors ---------------------------------------------------
@@ -405,6 +458,9 @@ impl<B: Bus> MachineHart<B> {
     /// restore, a reboot.
     #[inline]
     pub fn invalidate_blocks(&mut self) {
+        if let Some(core) = self.core.as_mut() {
+            core.invalidate(None);
+        }
         match self.cache.as_mut() {
             Some(cache) => cache.invalidate_all(),
             // The cache is lifted out of `self` for the whole of a slice
@@ -424,6 +480,9 @@ impl<B: Bus> MachineHart<B> {
     /// the safe direction.
     #[inline]
     pub fn invalidate_block_range(&mut self, lo: u32, hi: u32) {
+        if let Some(core) = self.core.as_mut() {
+            core.invalidate(Some((lo, hi)));
+        }
         match self.cache.as_mut() {
             Some(cache) => cache.invalidate_range(lo, hi),
             None => self.block_flush_pending = true,
@@ -438,6 +497,14 @@ impl<B: Bus> MachineHart<B> {
     /// precision would buy nothing measurable and would cost correctness
     /// surface. The bus is told too, so a `--strict-bus` run can clear its
     /// "written but not yet published" marks.
+    ///
+    /// It has a second job for a translated core, and it is the *only* thing
+    /// that gives it one: the guest writes its shader code and publishes it
+    /// with exactly this instruction, so `fence.i` is where a core learns
+    /// that guest code it has translated is now different code. M5's fence
+    /// ruling (MD12) is what makes that a contract rather than a hope. The
+    /// invalidation itself rides on [`MachineHart::invalidate_blocks`], which
+    /// tells the core and the block cache in that order.
     #[inline]
     fn on_fence_i(&mut self, bus: &mut B) {
         self.fence_i_count += 1;
@@ -714,6 +781,48 @@ impl<B: Bus> MachineHart<B> {
                 return SliceEnd::BudgetExhausted;
             }
             let pc = self.pc;
+            // The translated-core entry, ahead of the block cache: one table
+            // read and one compare when no core is installed, which is what
+            // keeps this free on the interpreted path.
+            if let Some(core) = self.core.as_mut()
+                && self.core_entries[translated::entry_slot(pc)] == pc
+            {
+                let cx = translated::EntryCx {
+                    regs: &mut self.regs,
+                    pc,
+                    cycle_count: self.cycle_count,
+                    instruction_count: self.instruction_count,
+                    end,
+                };
+                if let translated::RunOutcome::Ran {
+                    pc: new_pc,
+                    cycle_count,
+                    instruction_count,
+                    after_store,
+                } = core.run(cx, bus)
+                    // The no-progress guard. A core whose first block does
+                    // not fit the remaining budget returns `Ran` having done
+                    // nothing; without this the loop would ask it again
+                    // forever. The interpreter runs the block instead, which
+                    // is exactly what happens when the budget is short.
+                    && (new_pc != pc || instruction_count != self.instruction_count)
+                {
+                    self.pc = new_pc;
+                    self.cycle_count = cycle_count;
+                    self.instruction_count = instruction_count;
+                    if after_store {
+                        // Polling point (c), byte for byte what `run_block`
+                        // does after an interpreted store.
+                        if bus.take_sideband() {
+                            self.resample_external(bus);
+                        }
+                        if bus.take_yield() {
+                            return SliceEnd::BusYield;
+                        }
+                    }
+                    continue;
+                }
+            }
             let block = match cache.lookup(pc) {
                 Some(block) => block,
                 None => {

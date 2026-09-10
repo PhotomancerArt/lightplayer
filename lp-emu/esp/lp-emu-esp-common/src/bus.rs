@@ -55,6 +55,17 @@ const UNMAPPED_SITES_CAP: usize = 4096;
 const MAX_EVENTS_PER_TICK: u32 = 100_000;
 
 /// A span of guest RAM at a chip-specific base.
+///
+/// A region **describes** a span; it does not own its bytes. Those live in
+/// the bus's [guest arena](SocBus::guest_arena), one contiguous host
+/// allocation in which a guest address sits at `address - arena_base`, flat
+/// across the whole mapped span. Read them with
+/// [`SocBus::region_bytes`].
+///
+/// The arena is what lets a translated core address guest memory with a
+/// constant folded into each emitted access instead of a per-access region
+/// lookup (M7 JD4). It also means a region cannot be read without the bus it
+/// belongs to, which is why the byte accessors are on `SocBus`.
 #[derive(Clone, Debug)]
 pub struct RamRegion {
     pub name: &'static str,
@@ -64,7 +75,12 @@ pub struct RamRegion {
     /// Guest stores are allowed. `false` models ROM and a read-only flash
     /// cache window.
     pub writable: bool,
-    pub data: Vec<u8>,
+    len: u32,
+    /// Initial contents, moved into the bus's arena by
+    /// [`SocBus::add_region`]. Empty for every region that is on a bus — it
+    /// exists only to carry [`RamRegion::from_bytes`]'s bytes across the
+    /// hand-off.
+    init: Vec<u8>,
 }
 
 impl RamRegion {
@@ -75,7 +91,8 @@ impl RamRegion {
             base,
             exec: false,
             writable: true,
-            data: alloc::vec![0; len as usize],
+            len,
+            init: Vec::new(),
         }
     }
 
@@ -86,7 +103,8 @@ impl RamRegion {
             base,
             exec: false,
             writable: true,
-            data,
+            len: data.len() as u32,
+            init: data,
         }
     }
 
@@ -101,11 +119,11 @@ impl RamRegion {
     }
 
     pub fn len(&self) -> u32 {
-        self.data.len() as u32
+        self.len
     }
 
     pub fn is_empty(&self) -> bool {
-        self.data.is_empty()
+        self.len == 0
     }
 
     pub fn end(&self) -> u32 {
@@ -184,7 +202,41 @@ struct MmioRange {
 /// on a whole render run).
 const CODE_PAGE_LEN: u32 = 4096;
 
+/// The page granularity of [`SocBus::permission_table`]. 16 KiB is the
+/// spike's, and the size the 0.849 ns/instruction phone reading was taken
+/// with: small enough that a region boundary costs at most one page, large
+/// enough that the whole table is 16 KiB for a 256 MiB span.
+pub const PERMISSION_PAGE_LEN: u32 = 16 * 1024;
+
+/// [`SocBus::permission_table`]: not plain RAM. Every access on this page
+/// must go through the bus.
+pub const PERM_NONE: u8 = 0;
+/// [`SocBus::permission_table`]: plain RAM, loads may be performed inline;
+/// stores must go through the bus.
+pub const PERM_READ: u8 = 1;
+/// [`SocBus::permission_table`]: plain RAM, loads and stores may both be
+/// performed inline.
+pub const PERM_READ_WRITE: u8 = 2;
+
 pub struct SocBus {
+    /// Every region's bytes, in one contiguous allocation: the guest address
+    /// `a` is at `a - arena_base`, flat across the whole mapped span,
+    /// including the gaps between regions.
+    ///
+    /// The flat map is the point (M7 JD4). It costs address space — the C6's
+    /// regions span 0x4000_0000..0x5000_4000, so the arena is ~256 MiB of
+    /// *reservation* against ~17 MiB of real regions — and it buys a
+    /// translated core that reaches guest memory with one constant fold and
+    /// no per-access region lookup. The allocation is zero-filled by the
+    /// allocator, so the pages in the gaps are never touched and never
+    /// resident.
+    ///
+    /// It must not move once the machine is running: [`SocBus::add_region`]
+    /// is the only thing that can reallocate it, and every region is added
+    /// during construction.
+    arena: Vec<u8>,
+    /// The guest address of `arena[0]`.
+    arena_base: u32,
     /// Sorted by base, non-overlapping.
     regions: Vec<RamRegion>,
     /// Two-entry "last hit" data-region cache, checked before the binary
@@ -349,6 +401,8 @@ pub const fn event_local(id: EventId) -> u16 {
 impl SocBus {
     pub fn new() -> Self {
         Self {
+            arena: Vec::new(),
+            arena_base: 0,
             regions: Vec::new(),
             last_regions: [0, 0],
             last_fetch_region: 0,
@@ -394,7 +448,7 @@ impl SocBus {
     /// machine whose memory map contradicts itself is a build-time bug, and
     /// discovering it as a mysterious aliasing read at cycle 400,000 is
     /// strictly worse than discovering it here.
-    pub fn add_region(&mut self, region: RamRegion) {
+    pub fn add_region(&mut self, mut region: RamRegion) {
         for r in &self.regions {
             let overlaps = region.base < r.end() && r.base < region.end();
             assert!(
@@ -408,10 +462,60 @@ impl SocBus {
                 r.end()
             );
         }
+        self.cover_in_arena(region.base, region.len);
+        let init = core::mem::take(&mut region.init);
+        if !init.is_empty() {
+            let off = (region.base - self.arena_base) as usize;
+            self.arena[off..off + init.len()].copy_from_slice(&init);
+        }
         self.regions.push(region);
         self.regions.sort_by_key(|r| r.base);
         self.last_regions = [0, 0];
         self.last_fetch_region = 0;
+    }
+
+    /// Reserve the guest span the arena covers, before any region is added.
+    ///
+    /// A chip declares its whole memory map here so the arena is allocated
+    /// **once** and never moves. Without it the arena still grows to cover
+    /// each region as it arrives, copying the regions already placed — fine
+    /// for a handful of small test regions, wasteful for a real map, and it
+    /// would move an allocation a translated core may already be holding.
+    ///
+    /// Calling it after regions exist only widens the span; it never shrinks
+    /// it and never drops bytes.
+    pub fn reserve_guest_span(&mut self, base: u32, len: u32) {
+        self.cover_in_arena(base, len);
+    }
+
+    /// Grow the arena so `[base, base + len)` is inside it, moving the bytes
+    /// of every region already placed to their new offsets.
+    fn cover_in_arena(&mut self, base: u32, len: u32) {
+        let want_hi = u64::from(base) + u64::from(len);
+        if self.arena.is_empty() {
+            self.arena_base = base;
+            self.arena = alloc::vec![0u8; len as usize];
+            return;
+        }
+        let have_lo = u64::from(self.arena_base);
+        let have_hi = have_lo + self.arena.len() as u64;
+        let lo = have_lo.min(u64::from(base));
+        let hi = have_hi.max(want_hi);
+        if lo == have_lo && hi == have_hi {
+            return;
+        }
+        let mut grown = alloc::vec![0u8; (hi - lo) as usize];
+        // Only the regions carry meaningful bytes; the gaps are zero in both
+        // the old arena and the new one, so copying region by region is both
+        // cheaper than copying the whole span and exactly equivalent.
+        for r in &self.regions {
+            let from = (u64::from(r.base) - have_lo) as usize;
+            let to = (u64::from(r.base) - lo) as usize;
+            let n = r.len as usize;
+            grown[to..to + n].copy_from_slice(&self.arena[from..from + n]);
+        }
+        self.arena = grown;
+        self.arena_base = lo as u32;
     }
 
     /// Add a peripheral at `base` covering `len` bytes. Returns its index —
@@ -685,6 +789,106 @@ impl SocBus {
         self.regions.iter_mut().find(|r| r.name == name)
     }
 
+    // ---- the guest arena ------------------------------------------------
+
+    /// `region`'s bytes, as a view into the guest arena.
+    ///
+    /// Panics if `region` is not one of this bus's regions — the arena is
+    /// where the bytes are, so a region from another bus has none here.
+    pub fn region_bytes(&self, region: &RamRegion) -> &[u8] {
+        let off = self.arena_offset(region.base).expect("region on this bus");
+        &self.arena[off..off + region.len as usize]
+    }
+
+    /// The whole arena: guest address `a` is at `a - guest_arena_base()`.
+    ///
+    /// This is what a translated core is handed. Everything outside a region
+    /// is zero and stays zero — the bus never serves it.
+    pub fn guest_arena(&self) -> &[u8] {
+        &self.arena
+    }
+
+    /// The guest address of `guest_arena()[0]`.
+    pub fn guest_arena_base(&self) -> u32 {
+        self.arena_base
+    }
+
+    /// The arena offset of a guest address, or `None` when it is outside the
+    /// arena's span.
+    #[inline(always)]
+    fn arena_offset(&self, address: u32) -> Option<usize> {
+        let off = u64::from(address).checked_sub(u64::from(self.arena_base))?;
+        (off < self.arena.len() as u64).then_some(off as usize)
+    }
+
+    /// `(base, len, writable)` per region, base-sorted.
+    pub fn region_spans(&self) -> Vec<(u32, u32, bool)> {
+        self.regions
+            .iter()
+            .map(|r| (r.base, r.len(), r.writable))
+            .collect()
+    }
+
+    /// One byte per [`PERMISSION_PAGE_LEN`] page of the arena, saying what a
+    /// translated core may do on that page without going through the bus:
+    /// [`PERM_NONE`], [`PERM_READ`] or [`PERM_READ_WRITE`].
+    ///
+    /// A page is plain RAM only when the regions cover **all** of it with a
+    /// single writability. A page that is partly covered, or that straddles a
+    /// read-only and a writable region, is [`PERM_NONE`]: the alternative is
+    /// a per-access region lookup, which is the cost the flat arena exists to
+    /// delete.
+    ///
+    /// Three things take the whole table to [`PERM_NONE`], because each one
+    /// makes an access the bus never sees observably different from one it
+    /// does:
+    ///
+    /// - a **memory-cost model** ([`SocBus::set_memory_cost`]) charges cycles
+    ///   per access, and an inline access charges none. This is the same
+    ///   condition [`Bus::fetch_is_pure`] already refuses on, for the same
+    ///   reason.
+    /// - **`--strict-bus`** ([`SocBus::set_strict`]) watches guest stores for
+    ///   the missing-fence checker, and an inline store is not watched.
+    /// - an **MMIO window** overlapping the page, which would make an inline
+    ///   access read RAM where the bus would have reached a peripheral. The
+    ///   C6's windows do not overlap its regions, so this costs nothing
+    ///   there; it is checked so a chip whose map does overlap cannot get a
+    ///   wrong answer.
+    ///
+    /// Computed on demand rather than cached: a run translates twice (the
+    /// image at boot and the shader at its `fence.i`), so a 16 KiB table is
+    /// far cheaper to rebuild than to keep correct.
+    pub fn permission_table(&self) -> Vec<u8> {
+        let pages = self.arena.len().div_ceil(PERMISSION_PAGE_LEN as usize);
+        let mut table = alloc::vec![PERM_NONE; pages];
+        if self.memory_cost.is_some() || self.strict {
+            return table;
+        }
+        for (page, slot) in table.iter_mut().enumerate() {
+            let lo = u64::from(self.arena_base) + (page as u64) * u64::from(PERMISSION_PAGE_LEN);
+            let hi = (lo + u64::from(PERMISSION_PAGE_LEN))
+                .min(u64::from(self.arena_base) + self.arena.len() as u64);
+            let covering = self
+                .regions
+                .iter()
+                .find(|r| u64::from(r.base) <= lo && u64::from(r.end()) >= hi && r.len() != 0);
+            let Some(r) = covering else { continue };
+            let mmio_overlap = self
+                .mmio_windows
+                .iter()
+                .any(|&(base, len)| lo < u64::from(base) + u64::from(len) && u64::from(base) < hi);
+            if mmio_overlap {
+                continue;
+            }
+            *slot = if r.writable {
+                PERM_READ_WRITE
+            } else {
+                PERM_READ
+            };
+        }
+        table
+    }
+
     /// Place bytes into RAM from the host side — ELF segments, a ROM image,
     /// the bootloader's leftovers. Ignores `writable` (this is not the guest
     /// storing) and fires no watchpoints.
@@ -703,8 +907,8 @@ impl SocBus {
                 kind: MemoryAccessKind::Write,
             });
         }
-        let off = (address - self.regions[i].base) as usize;
-        self.regions[i].data[off..off + bytes.len()].copy_from_slice(bytes);
+        let off = (address - self.arena_base) as usize;
+        self.arena[off..off + bytes.len()].copy_from_slice(bytes);
         if self.regions[i].exec {
             // The block cache's emulator-side funnel. Every host-side write
             // of guest code comes through here — a flash-cache MMU refill
@@ -761,12 +965,12 @@ impl SocBus {
     /// `--strict-bus`, mark the words it **changed** when they are on a page
     /// the guest has executed from.
     #[inline(never)]
-    fn note_guest_code_write(&mut self, i: usize, off: usize, address: u32, len: u32, value: u32) {
+    fn note_guest_code_write(&mut self, off: usize, address: u32, len: u32, value: u32) {
         let page = address & !(CODE_PAGE_LEN - 1);
         if !self.code_pages.contains(&page) {
             return;
         }
-        let old = &self.regions[i].data[off..off + len as usize];
+        let old = &self.arena[off..off + len as usize];
         if old == &value.to_le_bytes()[..len as usize] {
             // A store that writes what was already there publishes nothing
             // and owes no fence. P1 measured 36 % of the render loop's stores
@@ -909,7 +1113,10 @@ impl SocBus {
 
     /// Every RAM region's bytes, in the bus's own (base-sorted) order.
     pub fn save_regions(&self) -> Vec<Vec<u8>> {
-        self.regions.iter().map(|r| r.data.clone()).collect()
+        self.regions
+            .iter()
+            .map(|r| self.region_bytes(r).to_vec())
+            .collect()
     }
 
     /// Put region bytes back. A length mismatch is a snapshot taken from a
@@ -923,16 +1130,19 @@ impl SocBus {
             data.len(),
             self.regions.len()
         );
-        for (region, bytes) in self.regions.iter_mut().zip(data) {
+        for (i, bytes) in data.iter().enumerate() {
+            let (name, base, len) = {
+                let r = &self.regions[i];
+                (r.name, r.base, r.len as usize)
+            };
             assert_eq!(
                 bytes.len(),
-                region.data.len(),
-                "SocBus::restore_regions: region `{}` is {} bytes, snapshot has {}",
-                region.name,
-                region.data.len(),
+                len,
+                "SocBus::restore_regions: region `{name}` is {len} bytes, snapshot has {}",
                 bytes.len()
             );
-            region.data.copy_from_slice(bytes);
+            let off = (base - self.arena_base) as usize;
+            self.arena[off..off + len].copy_from_slice(bytes);
         }
         self.last_regions = [0, 0];
         self.last_fetch_region = 0;
@@ -1198,19 +1408,27 @@ impl SocBus {
         }
 
         if let Some(i) = self.region_index(address) {
-            // `region_index` guarantees `address` is inside the region, so
-            // "the span fits" is exactly "the slice exists"; it also updated
-            // its own cache, so there is nothing left to record here.
-            let off = (address - self.regions[i].base) as usize;
-            let data = &self.regions[i].data;
-            let v = match width {
-                Width::Word => data
-                    .get(off..off + 4)
-                    .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]])),
-                Width::Half => data
-                    .get(off..off + 2)
-                    .map(|b| u32::from(u16::from_le_bytes([b[0], b[1]]))),
-                Width::Byte => data.get(off).map(|b| u32::from(*b)),
+            // `region_index` guarantees `address` is inside the region and
+            // updated its own cache, so all that is left is "does the *span*
+            // fit". The arena is flat across region boundaries, so an access
+            // running off the end of a region would otherwise read the next
+            // one's bytes instead of faulting — this compare is what the
+            // region-owned `Vec`'s bounds check used to do.
+            let end = self.regions[i].end();
+            let off = (address - self.arena_base) as usize;
+            let data = &self.arena;
+            let v = if u64::from(address) + u64::from(len) > u64::from(end) {
+                None
+            } else {
+                match width {
+                    Width::Word => data
+                        .get(off..off + 4)
+                        .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]])),
+                    Width::Half => data
+                        .get(off..off + 2)
+                        .map(|b| u32::from(u16::from_le_bytes([b[0], b[1]]))),
+                    Width::Byte => data.get(off).map(|b| u32::from(*b)),
+                }
             };
             return v.ok_or(MemoryError::InvalidAccess {
                 address,
@@ -1297,11 +1515,17 @@ impl SocBus {
             if !self.regions[i].writable {
                 return Err(fault);
             }
-            let off = (address - self.regions[i].base) as usize;
-            if self.strict {
-                self.note_guest_code_write(i, off, address, len, value);
+            // See `read`: the arena is flat, so the region's own end is what
+            // bounds the access.
+            let end = self.regions[i].end();
+            if u64::from(address) + u64::from(len) > u64::from(end) {
+                return Err(fault);
             }
-            let data = &mut self.regions[i].data;
+            let off = (address - self.arena_base) as usize;
+            if self.strict {
+                self.note_guest_code_write(off, address, len, value);
+            }
+            let data = &mut self.arena;
             let stored = match width {
                 Width::Word => data
                     .get_mut(off..off + 4)
@@ -1572,15 +1796,19 @@ impl Bus for SocBus {
         if let Some(cost) = self.memory_cost.as_mut() {
             self.memory_cycles += cost.fetch(address);
         }
-        let region = &self.regions[i];
-        let off = (address - region.base) as usize;
-        let d = &region.data;
-        if let Some(b) = d.get(off..off + 4) {
+        // The arena is flat across region boundaries, so the region's own end
+        // — not the arena's — is what says how much of this fetch is real.
+        let room = u64::from(self.regions[i].end()) - u64::from(address);
+        let off = (address - self.arena_base) as usize;
+        let d = &self.arena;
+        if room >= 4
+            && let Some(b) = d.get(off..off + 4)
+        {
             return Ok(u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
         }
         // Two bytes are enough: a compressed instruction at the very end of
         // a region is legal, and the decoder asks for no more than it needs.
-        match d.get(off..off + 2) {
+        match (room >= 2).then(|| d.get(off..off + 2)).flatten() {
             Some(b) => Ok(u32::from(u16::from_le_bytes([b[0], b[1]]))),
             None => Err(fault()),
         }
@@ -1739,6 +1967,24 @@ impl Bus for SocBus {
     /// The guest retired a `fence.i`: everything it has written is published.
     fn note_fence_i(&mut self) {
         self.unpublished_code_words.clear();
+    }
+
+    fn sideband_or_yield_pending(&self) -> bool {
+        self.sideband || self.yield_now
+    }
+
+    fn load_watchpoints_armed(&self) -> bool {
+        self.armed_for[kind_index(MemoryAccessKind::Read)] != 0
+    }
+
+    fn store_watch(&self) -> lp_emu_core::StoreWatch {
+        if self.armed_for[kind_index(MemoryAccessKind::Write)] == 0 {
+            return lp_emu_core::StoreWatch::None;
+        }
+        match self.single_store_watch {
+            Some((lo, hi, _)) => lp_emu_core::StoreWatch::One { lo, hi },
+            None => lp_emu_core::StoreWatch::Many,
+        }
     }
 }
 
@@ -2626,6 +2872,230 @@ mod tests {
                 "cyc=99 pc=0x42001000 R4 UART0+0x01c status = 0x00000000",
                 "cyc=99 pc=0x42001000 R4 UART0+0x020 = 0x00000000",
             ]
+        );
+    }
+
+    // ---- the guest arena (M7 JD4) ---------------------------------------
+
+    #[test]
+    fn regions_are_views_into_one_flat_arena() {
+        let bus = bus_with_ram();
+        // The arena spans from the lowest base to the highest end, gaps and
+        // all: that flatness is the point — a guest address is at
+        // `address - base` with no region lookup.
+        assert_eq!(bus.guest_arena_base(), 0x4080_0000);
+        assert_eq!(
+            bus.guest_arena().len(),
+            (0x5000_0100u64 - 0x4080_0000) as usize
+        );
+        for r in bus.regions() {
+            let off = (r.base - bus.guest_arena_base()) as usize;
+            assert_eq!(
+                bus.region_bytes(r).as_ptr(),
+                bus.guest_arena()[off..].as_ptr(),
+                "`{}` is a view into the arena at its own offset",
+                r.name
+            );
+        }
+    }
+
+    #[test]
+    fn a_guest_store_lands_in_the_arena_at_the_flat_offset() {
+        let mut bus = bus_with_ram();
+        bus.write_word(0x4080_0010, 0x1234_5678).unwrap();
+        let off = (0x4080_0010u32 - bus.guest_arena_base()) as usize;
+        assert_eq!(
+            &bus.guest_arena()[off..off + 4],
+            &0x1234_5678u32.to_le_bytes()
+        );
+    }
+
+    #[test]
+    fn an_access_running_off_the_end_of_a_region_still_faults() {
+        // The regression the flat arena creates and this compare closes: the
+        // last word of `hp-ram` is followed in the *arena* by the gap before
+        // `lp-ram`, so an access that straddles the end would read zeros
+        // instead of faulting if the region's own end were not checked.
+        let mut bus = bus_with_ram();
+        let last = 0x4080_0000 + 0x1000 - 2;
+        assert!(
+            bus.read_word(last).is_err(),
+            "a word straddling the end faults"
+        );
+        assert!(bus.write_word(last, 1).is_err(), "so does a store");
+        assert!(
+            bus.read_halfword(last).is_ok(),
+            "a halfword that fits does not"
+        );
+    }
+
+    #[test]
+    fn a_fetch_off_the_end_of_a_region_reads_no_further_than_the_region() {
+        let mut bus = SocBus::new();
+        bus.add_region(RamRegion::new("code", 0x4080_0000, 4).executable());
+        bus.add_region(RamRegion::new("data", 0x4080_1000, 4));
+        bus.load_image(0x4080_0000, &[0x01, 0x02, 0x03, 0x04])
+            .unwrap();
+        bus.load_image(0x4080_1000, &[0xaa, 0xbb, 0xcc, 0xdd])
+            .unwrap();
+        // Two bytes left in the region: a compressed instruction is legal
+        // there and a 32-bit fetch must not reach past the region's end.
+        assert_eq!(bus.fetch_instruction(0x4080_0002).unwrap(), 0x0403);
+        assert!(bus.fetch_instruction(0x4080_0004).is_err());
+    }
+
+    #[test]
+    fn growing_the_arena_keeps_every_region_s_bytes() {
+        let mut bus = SocBus::new();
+        bus.add_region(RamRegion::new("high", 0x4080_0000, 0x100));
+        bus.write_word(0x4080_0000, 0xdead_beefu32 as i32).unwrap();
+        // A region below the current base moves every existing region's
+        // offset; the bytes must move with them.
+        bus.add_region(RamRegion::from_bytes(
+            "low",
+            0x4000_0000,
+            alloc::vec![7u8; 8],
+        ));
+        assert_eq!(bus.guest_arena_base(), 0x4000_0000);
+        assert_eq!(bus.read_word(0x4080_0000).unwrap(), 0xdead_beefu32 as i32);
+        assert_eq!(bus.read_byte(0x4000_0003).unwrap(), 7);
+    }
+
+    #[test]
+    fn reserving_the_span_first_leaves_the_arena_where_it_is() {
+        let mut bus = SocBus::new();
+        bus.reserve_guest_span(0x4000_0000, 0x1000_0100);
+        let base = bus.guest_arena().as_ptr();
+        bus.add_region(RamRegion::new("rom", 0x4000_0000, 0x100));
+        bus.add_region(RamRegion::new("ram", 0x5000_0000, 0x100));
+        assert_eq!(bus.guest_arena().as_ptr(), base, "the arena did not move");
+        assert_eq!(bus.guest_arena_base(), 0x4000_0000);
+    }
+
+    #[test]
+    fn a_snapshot_round_trips_through_the_arena() {
+        let mut bus = bus_with_ram();
+        bus.write_word(0x4080_0010, 0x1234_5678).unwrap();
+        let saved = bus.save_regions();
+        bus.write_word(0x4080_0010, 0).unwrap();
+        bus.restore_regions(&saved);
+        assert_eq!(bus.read_word(0x4080_0010).unwrap(), 0x1234_5678);
+    }
+
+    // ---- the permission table -------------------------------------------
+
+    #[test]
+    fn a_fully_covered_page_reports_its_writability() {
+        let mut bus = SocBus::new();
+        bus.reserve_guest_span(0x4000_0000, 3 * PERMISSION_PAGE_LEN);
+        bus.add_region(RamRegion::new("rw", 0x4000_0000, PERMISSION_PAGE_LEN));
+        bus.add_region(
+            RamRegion::new("ro", 0x4000_0000 + PERMISSION_PAGE_LEN, PERMISSION_PAGE_LEN)
+                .read_only(),
+        );
+        let table = bus.permission_table();
+        assert_eq!(table.len(), 3);
+        assert_eq!(table[0], PERM_READ_WRITE);
+        assert_eq!(table[1], PERM_READ);
+        // Covered by nothing.
+        assert_eq!(table[2], PERM_NONE);
+    }
+
+    #[test]
+    fn a_partly_covered_page_is_not_plain_ram() {
+        let mut bus = SocBus::new();
+        bus.reserve_guest_span(0x4000_0000, 2 * PERMISSION_PAGE_LEN);
+        // Half a page: an inline access to the other half would read a byte
+        // the bus would have refused.
+        bus.add_region(RamRegion::new("half", 0x4000_0000, PERMISSION_PAGE_LEN / 2));
+        assert_eq!(bus.permission_table()[0], PERM_NONE);
+    }
+
+    #[test]
+    fn a_cost_model_or_strict_bus_takes_the_whole_table_to_none() {
+        let mut bus = SocBus::new();
+        bus.reserve_guest_span(0x4000_0000, PERMISSION_PAGE_LEN);
+        bus.add_region(RamRegion::new("rw", 0x4000_0000, PERMISSION_PAGE_LEN));
+        assert_eq!(bus.permission_table()[0], PERM_READ_WRITE);
+
+        bus.set_strict(true);
+        assert_eq!(
+            bus.permission_table()[0],
+            PERM_NONE,
+            "--strict-bus watches guest stores, and an inline store is not watched"
+        );
+        bus.set_strict(false);
+
+        bus.set_memory_cost(Some(Box::new(lp_emu_core::cycle_model::NoMemoryCost)));
+        assert_eq!(
+            bus.permission_table()[0],
+            PERM_NONE,
+            "a cost model charges per access, and an inline access charges none"
+        );
+    }
+
+    #[test]
+    fn an_mmio_window_over_a_page_takes_it_to_none() {
+        let mut bus = SocBus::new();
+        bus.reserve_guest_span(0x4000_0000, PERMISSION_PAGE_LEN);
+        bus.add_region(RamRegion::new("rw", 0x4000_0000, PERMISSION_PAGE_LEN));
+        bus.add_mmio_window(0x4000_0000 + 0x100, 0x10);
+        assert_eq!(bus.permission_table()[0], PERM_NONE);
+    }
+
+    // ---- the peek methods a translated core reads ------------------------
+
+    #[test]
+    fn store_watch_reports_one_range_and_refuses_two() {
+        let mut bus = bus_with_ram();
+        assert_eq!(bus.store_watch(), lp_emu_core::StoreWatch::None);
+        assert!(!bus.load_watchpoints_armed());
+
+        bus.set_watchpoint(
+            0,
+            Some(lp_emu_core::Watchpoint {
+                address: 0x4080_0100,
+                napot: false,
+                on_store: true,
+                on_load: false,
+                on_execute: false,
+            }),
+        );
+        assert_eq!(
+            bus.store_watch(),
+            lp_emu_core::StoreWatch::One {
+                lo: 0x4080_0100,
+                hi: 0x4080_0101
+            },
+            "esp-hal's stack guard is one range and has to stay honourable"
+        );
+        assert!(!bus.load_watchpoints_armed());
+
+        bus.set_watchpoint(
+            1,
+            Some(lp_emu_core::Watchpoint {
+                address: 0x4080_0200,
+                napot: false,
+                on_store: true,
+                on_load: false,
+                on_execute: false,
+            }),
+        );
+        assert_eq!(bus.store_watch(), lp_emu_core::StoreWatch::Many);
+
+        bus.set_watchpoint(
+            2,
+            Some(lp_emu_core::Watchpoint {
+                address: 0x4080_0300,
+                napot: false,
+                on_store: false,
+                on_load: true,
+                on_execute: false,
+            }),
+        );
+        assert!(
+            bus.load_watchpoints_armed(),
+            "translated code does loads the bus never sees, so it refuses"
         );
     }
 }

@@ -821,6 +821,12 @@ pub struct Esp32C6Builder {
     /// Let the hart pre-decode blocks. See
     /// [`Esp32C6Builder::block_cache`].
     block_cache: bool,
+    /// Let the hart run a translated core. See
+    /// [`Esp32C6Builder::translate`].
+    translate: bool,
+    /// Print the translated core's report and the boot cost of building it.
+    /// See [`Esp32C6Builder::jit_report`].
+    jit_report: bool,
     efuse: EfuseIdentity,
     time_grade: TimeGrade,
     strict: bool,
@@ -888,6 +894,8 @@ impl Esp32C6Builder {
             strap: Strap::App,
             reboot_on_reset: false,
             block_cache: true,
+            translate: true,
+            jit_report: false,
             efuse: EfuseIdentity::default(),
             time_grade: TimeGrade::default(),
             strict: false,
@@ -1010,6 +1018,33 @@ impl Esp32C6Builder {
     /// path, so refusing to cache there costs nothing worth having.
     pub fn block_cache(mut self, on: bool) -> Self {
         self.block_cache = on;
+        self
+    }
+
+    /// May this machine install a **translated core** — `lp-emu-jit` turning
+    /// the guest's own program into host code the engine runs directly?
+    ///
+    /// `false` is `--interpreter`, and it carries the same promise
+    /// [`Esp32C6Builder::block_cache`] does and for the same reason:
+    /// translated code is not architectural state, so the same binary with
+    /// the translator off must produce the same `stopped after` line, the
+    /// same UART bytes, the same decoded frames off the pad and the same
+    /// trace. That is what makes the interpreter this milestone's differential
+    /// oracle (M7 JD15).
+    ///
+    /// **Nothing installs a core yet.** M7's P1 lands the seam and this
+    /// switch; P3 is what first puts something behind it. Until then the flag
+    /// is honest and inert: it already turns off something that is not there.
+    pub fn translate(mut self, on: bool) -> Self {
+        self.translate = on;
+        self
+    }
+
+    /// Print the translated core's own report line at the end of a run, plus
+    /// the boot cost of building it (M7 JD20). Off by default; a probe, never
+    /// a gate.
+    pub fn jit_report(mut self, on: bool) -> Self {
+        self.jit_report = on;
         self
     }
 
@@ -1228,6 +1263,13 @@ impl Esp32C6Builder {
     /// and what `build` starts from.
     pub fn bare_bus() -> SocBus {
         let mut bus = SocBus::new();
+        // The guest arena is flat from the lowest region base to the highest
+        // region end, so declaring the whole map before adding anything is
+        // what makes it one allocation that never moves. `RAM_SPANS` is
+        // base-sorted and its overlap is asserted in `memmap`'s own tests.
+        let lo = memmap::RAM_SPANS[0].base;
+        let hi = memmap::RAM_SPANS[memmap::RAM_SPANS.len() - 1].end();
+        bus.reserve_guest_span(lo, hi - lo);
         for span in memmap::RAM_SPANS {
             let region = RamRegion::new(span.name, span.base, span.len);
             let region = match span.name {
@@ -1261,6 +1303,8 @@ impl Esp32C6Builder {
             strap,
             reboot_on_reset,
             block_cache,
+            translate,
+            jit_report,
             efuse,
             time_grade,
             strict,
@@ -1655,6 +1699,8 @@ impl Esp32C6Builder {
             reset_cause,
             strap,
             reboot_on_reset,
+            translate,
+            jit_report,
             power_on: None,
             reboots: 0,
             seed,
@@ -1726,6 +1772,7 @@ impl Esp32C6Builder {
         if reboot_on_reset {
             machine.power_on = Some(machine.snapshot());
         }
+        machine.sync_translated_core();
         Ok(machine)
     }
 }
@@ -1870,6 +1917,12 @@ pub struct Esp32C6Machine {
     reset_cause: ResetCause,
     strap: Strap,
     reboot_on_reset: bool,
+    /// May a translated core be installed on this machine's hart
+    /// ([`Esp32C6Builder::translate`])? `false` is `--interpreter`.
+    translate: bool,
+    /// Print the translated core's report line and the boot cost of building
+    /// it ([`Esp32C6Builder::jit_report`]).
+    jit_report: bool,
     /// The machine as it was built, kept only when
     /// [`Esp32C6Builder::reboot_on_reset`] asked for it — a reboot is a
     /// restore of this.
@@ -2038,6 +2091,47 @@ impl Esp32C6Machine {
     /// never built (`--no-block-cache`, or a `--boot rom-up` run).
     pub fn block_stats(&self) -> Option<lp_emu_core::BlockStats> {
         self.harts[0].block_stats()
+    }
+
+    /// Whether a translated core may be installed on the hart at all.
+    ///
+    /// `false` is `--interpreter`, the translator's free oracle: the same
+    /// binary, the same image, every instruction interpreted, and a
+    /// transcript that must match byte for byte (M7 JD15).
+    ///
+    /// Nothing installs a core yet — M7 P3 is what first does — so today this
+    /// reports the policy and [`Esp32C6Machine::sync_translated_core`]
+    /// enforces it.
+    pub fn translate(&self) -> bool {
+        self.translate
+    }
+
+    /// Whether `--jit-report` asked for the translated core's report line and
+    /// the boot cost of building it (M7 JD20).
+    pub fn jit_report(&self) -> bool {
+        self.jit_report
+    }
+
+    /// The installed translated core's report line, if there is one and
+    /// `--jit-report` asked for it.
+    pub fn translated_core_report(&self) -> Option<String> {
+        self.jit_report
+            .then(|| self.harts[0].translated_core_report())
+            .flatten()
+    }
+
+    /// Hold the hart to this machine's translation policy.
+    ///
+    /// With `--interpreter` there must be no core installed, whatever else
+    /// happened — a snapshot restore, a reboot, or a translation event that
+    /// should never have fired. Called wherever a core could have appeared,
+    /// so the flag is enforced rather than merely consulted.
+    pub fn sync_translated_core(&mut self) {
+        if !self.translate {
+            for hart in &mut self.harts {
+                hart.clear_translated_core();
+            }
+        }
     }
 
     /// Whether the hart is allowed to pre-decode blocks at all.
@@ -3741,9 +3835,11 @@ impl Esp32C6Machine {
     pub fn restore(&mut self, s: &Snapshot) {
         // The block cache is not architectural state and is absent from a
         // snapshot: `Clone for MachineHart` hands back an empty one, which is
-        // the whole of "restore invalidates all". The bus's pending code
-        // writes go with it — they described the machine that was, and the
-        // regions are about to be replaced wholesale.
+        // the whole of "restore invalidates all". A translated core rides on
+        // exactly the same rule, and for a sharper reason — it holds host
+        // code compiled from guest bytes the restored regions are about to
+        // replace. The bus's pending code writes go with it: they described
+        // the machine that was.
         self.harts.clone_from(&s.harts);
         self.bus.restore_regions(&s.regions);
         let _ = self.bus.take_code_writes();
