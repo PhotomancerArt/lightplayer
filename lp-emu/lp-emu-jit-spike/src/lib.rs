@@ -22,7 +22,9 @@
 pub mod decode;
 pub mod translate;
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::time::Instant;
 
 use lp_emu_core::{Bus, CycleModel};
@@ -95,6 +97,110 @@ fn parse_hex(s: &str) -> Option<u32> {
 
 struct Host {
     bus: *mut SocBus,
+}
+
+// ---------------------------------------------------------------------------
+// spike: record/replay capture, so the SAME module can be timed in a browser
+// engine. `LP_EMU_JIT_RECORD=<dir>` dumps the wasm memory at entry
+// `LP_EMU_JIT_RECORD_SKIP` (default 20000) and then records the next
+// `LP_EMU_JIT_RECORD_N` (default 20000) entries: the host-supplied inputs, the
+// MMIO results the region consumed, and the architectural outputs. `replay.mjs`
+// replays exactly that against the dumped module and checks every output — an
+// identity check in the other engine, not just a stopwatch.
+//
+// Only meaningful with a single `--jit-region` file naming ONE region.
+
+const TRACE_REC: usize = 4 + 8 + 8 + 8 + 8 + 128 + 4 + 4 + 8 + 4 + 4 + 128;
+
+struct Recorder {
+    dir: PathBuf,
+    skip: u64,
+    n: u64,
+    seen: u64,
+    taken: u64,
+    started: bool,
+    active: bool,
+    done: bool,
+    trace: Vec<u8>,
+    mmio: Vec<u8>,
+    mmio_this: u32,
+}
+
+thread_local! {
+    static REC: RefCell<Option<Recorder>> = const { RefCell::new(None) };
+}
+
+/// Every MMIO result the recorded entry consumed, in order, 8 bytes each.
+fn rec_mmio(v: i64) {
+    REC.with(|c| {
+        if let Some(r) = c.borrow_mut().as_mut()
+            && r.active
+        {
+            r.mmio.extend_from_slice(&v.to_le_bytes());
+            r.mmio_this += 1;
+        }
+    });
+}
+
+/// Chunked sparse dump: `[u32 offset][u32 len][bytes]*`, 64 KiB chunks, only
+/// the ones that hold a non-zero byte.
+fn dump_mem(data: &[u8], dir: &PathBuf) {
+    const CHUNK: usize = 65536;
+    let mut out = Vec::new();
+    let mut chunks = 0u32;
+    for (i, c) in data.chunks(CHUNK).enumerate() {
+        if c.iter().any(|&b| b != 0) {
+            out.extend_from_slice(&((i * CHUNK) as u32).to_le_bytes());
+            out.extend_from_slice(&(c.len() as u32).to_le_bytes());
+            out.extend_from_slice(c);
+            chunks += 1;
+        }
+    }
+    let _ = std::fs::create_dir_all(dir);
+    std::fs::write(dir.join("mem.bin"), &out).expect("mem.bin");
+    eprintln!(
+        "jit-spike: recorded memory snapshot: {chunks} chunk(s), {} bytes on disk",
+        out.len()
+    );
+}
+
+impl Recorder {
+    fn from_env() -> Option<Recorder> {
+        let dir = std::env::var_os("LP_EMU_JIT_RECORD")?;
+        let num = |k: &str, d: u64| {
+            std::env::var(k)
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(d)
+        };
+        Some(Recorder {
+            dir: PathBuf::from(dir),
+            skip: num("LP_EMU_JIT_RECORD_SKIP", 20_000),
+            n: num("LP_EMU_JIT_RECORD_N", 20_000),
+            seen: 0,
+            taken: 0,
+            started: false,
+            active: false,
+            done: false,
+            trace: Vec::new(),
+            mmio: Vec::new(),
+            mmio_this: 0,
+        })
+    }
+
+    fn finish(&mut self) {
+        let _ = std::fs::create_dir_all(&self.dir);
+        std::fs::write(self.dir.join("trace.bin"), &self.trace).expect("trace.bin");
+        std::fs::write(self.dir.join("mmio.bin"), &self.mmio).expect("mmio.bin");
+        eprintln!(
+            "jit-spike: recorded {} entries ({} bytes of trace, {} MMIO results) to {}",
+            self.taken,
+            self.trace.len(),
+            self.mmio.len() / 8,
+            self.dir.display()
+        );
+        self.done = true;
+    }
 }
 
 struct Translated {
@@ -222,13 +328,15 @@ pub fn install(hart: &mut MachineHart<SocBus>, bus: &mut SocBus, specs: Vec<Regi
             // SAFETY: `Host::bus` is set by `run` for the duration of one call.
             let bus = unsafe { &mut *caller.data().bus };
             bus.set_issuing(pc as u32, cyc as u64);
-            match kind_read(bus, addr as u32, kind) {
+            let out = match kind_read(bus, addr as u32, kind) {
                 Ok(v) => {
                     let st: i64 = if bus.sideband_or_yield_pending() { 2 } else { 0 };
                     (st << 32) | i64::from(v as u32)
                 }
                 Err(_) => 1 << 32,
-            }
+            };
+            rec_mmio(out);
+            out
         },
     );
     let mmio_store = Func::wrap(
@@ -242,7 +350,7 @@ pub fn install(hart: &mut MachineHart<SocBus>, bus: &mut SocBus, specs: Vec<Regi
                 1 => bus.write_halfword(addr as u32, value as i16),
                 _ => bus.write_word(addr as u32, value),
             };
-            match r {
+            let out = match r {
                 Ok(()) => {
                     if bus.sideband_or_yield_pending() {
                         2
@@ -251,7 +359,9 @@ pub fn install(hart: &mut MachineHart<SocBus>, bus: &mut SocBus, specs: Vec<Regi
                     }
                 }
                 Err(_) => 1,
-            }
+            };
+            rec_mmio(i64::from(out));
+            out
         },
     );
 
@@ -287,6 +397,7 @@ pub fn install(hart: &mut MachineHart<SocBus>, bus: &mut SocBus, specs: Vec<Regi
         stats: Stats::default(),
         timed: std::env::var_os("LP_EMU_JIT_TIME").is_some(),
     };
+    REC.with(|c| *c.borrow_mut() = Recorder::from_env());
     hart.set_region_jit(Box::new(jit), &entries);
 }
 
@@ -482,6 +593,44 @@ impl RegionJit<SocBus> for Jit {
             return RunOutcome::Refused;
         };
 
+        // spike: record/replay capture (see `Recorder`).
+        let mut dump_to: Option<PathBuf> = None;
+        let taking = REC.with(|c| {
+            let mut b = c.borrow_mut();
+            let Some(r) = b.as_mut() else { return false };
+            if r.done {
+                return false;
+            }
+            r.seen += 1;
+            if !r.started {
+                if r.seen <= r.skip {
+                    return false;
+                }
+                r.started = true;
+                dump_to = Some(r.dir.clone());
+            }
+            r.active = true;
+            r.mmio_this = 0;
+            true
+        });
+        if let Some(dir) = &dump_to {
+            dump_mem(memory.data(&*store), dir);
+        }
+        if taking {
+            REC.with(|c| {
+                let mut b = c.borrow_mut();
+                let r = b.as_mut().expect("recorder");
+                r.trace.extend_from_slice(&idx.to_le_bytes());
+                r.trace.extend_from_slice(&(cx.cycle_count as i64).to_le_bytes());
+                r.trace.extend_from_slice(&(cx.end as i64).to_le_bytes());
+                r.trace.extend_from_slice(&wlo.to_le_bytes());
+                r.trace.extend_from_slice(&whi.to_le_bytes());
+                for v in cx.regs.iter() {
+                    r.trace.extend_from_slice(&v.to_le_bytes());
+                }
+            });
+        }
+
         let t0 = if *timed { Some(Instant::now()) } else { None };
         {
             let data = memory.data_mut(&mut *store);
@@ -513,6 +662,26 @@ impl RegionJit<SocBus> for Jit {
         };
         if let Some(t0) = t0 {
             stats.time_ns += t0.elapsed().as_nanos();
+        }
+        if taking {
+            REC.with(|c| {
+                let mut b = c.borrow_mut();
+                let r = b.as_mut().expect("recorder");
+                r.active = false;
+                r.trace.extend_from_slice(&r.mmio_this.to_le_bytes());
+                r.trace.extend_from_slice(&pc.to_le_bytes());
+                r.trace.extend_from_slice(&(cycle_count as i64).to_le_bytes());
+                r.trace.extend_from_slice(&ran.to_le_bytes());
+                r.trace.extend_from_slice(&flag.to_le_bytes());
+                for v in cx.regs.iter() {
+                    r.trace.extend_from_slice(&v.to_le_bytes());
+                }
+                debug_assert_eq!(r.trace.len() % TRACE_REC, 0);
+                r.taken += 1;
+                if r.taken >= r.n {
+                    r.finish();
+                }
+            });
         }
         stats.entries += 1;
         stats.ran += u64::from(ran);
