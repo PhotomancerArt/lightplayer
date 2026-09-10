@@ -61,6 +61,35 @@ const UNMAPPED_SITES_CAP: usize = 4096;
 /// forever. One `run_due_events` call will not dispatch more than this.
 const MAX_EVENTS_PER_TICK: u32 = 100_000;
 
+/// Which **data** accesses a [`RamRegion`] accepts.
+///
+/// Some SoC memories hang off the instruction bus only: aligned 32-bit loads
+/// and stores work and anything narrower or misaligned raises the ISA's
+/// load/store error. The rule is a property of the *bus the memory hangs
+/// off*, not of the ISA, so it lives on the region rather than in the hart —
+/// and the hart is what turns the refusal into an architectural cause.
+///
+/// [`Any`](AccessRule::Any) is the default and is what every region on this
+/// bus had before the rule existed, so adding one to a region is the only
+/// thing that can change a run.
+///
+/// Instruction **fetch** is deliberately unaffected: a memory that takes
+/// word-only data access is usually an instruction RAM, and refusing to fetch
+/// from it would be the opposite of the truth. The same split is drawn in
+/// `lp-xt-emu/src/memory.rs`'s `AccessRule`, whose doc carries the silicon
+/// measurement behind the rule (`lp-xt-emu/src/board.rs:158-172`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AccessRule {
+    /// Any width at any alignment.
+    #[default]
+    Any,
+    /// Aligned 32-bit loads and stores only. A narrower or misaligned data
+    /// access is refused with [`MemoryError::InvalidAccess`] — the variant a
+    /// hart maps to its load/store *error*, not to its alignment cause,
+    /// because that is what the silicon this models raises.
+    WordOnly,
+}
+
 /// A span of guest RAM at a chip-specific base.
 ///
 /// A region **describes** a span; it does not own its bytes. Those live in
@@ -82,6 +111,10 @@ pub struct RamRegion {
     /// Guest stores are allowed. `false` models ROM and a read-only flash
     /// cache window.
     pub writable: bool,
+    /// Which **data** widths and alignments this region's bus accepts. See
+    /// [`AccessRule`]; the default is [`AccessRule::Any`], which is what
+    /// every region did before the rule existed.
+    pub access: AccessRule,
     len: u32,
     /// Initial contents, moved into the bus's arena by
     /// [`SocBus::add_region`]. Empty for every region that is on a bus — it
@@ -98,6 +131,7 @@ impl RamRegion {
             base,
             exec: false,
             writable: true,
+            access: AccessRule::Any,
             len,
             init: Vec::new(),
         }
@@ -110,6 +144,7 @@ impl RamRegion {
             base,
             exec: false,
             writable: true,
+            access: AccessRule::Any,
             len: data.len() as u32,
             init: data,
         }
@@ -123,6 +158,22 @@ impl RamRegion {
     pub fn read_only(mut self) -> Self {
         self.writable = false;
         self
+    }
+
+    /// Aligned 32-bit data access only. See [`AccessRule::WordOnly`].
+    pub fn word_only(mut self) -> Self {
+        self.access = AccessRule::WordOnly;
+        self
+    }
+
+    /// Does this region's [`AccessRule`] accept an `len`-byte **data** access
+    /// at `address`? Fetch never asks.
+    #[inline(always)]
+    fn accepts_data(&self, address: u32, len: u32) -> bool {
+        match self.access {
+            AccessRule::Any => true,
+            AccessRule::WordOnly => len == 4 && address % 4 == 0,
+        }
     }
 
     /// May the guest fetch instructions from here? A translated core asks,
@@ -1684,7 +1735,7 @@ impl SocBus {
             let room = self.regions[i].end().wrapping_sub(address);
             let off = (address - self.arena_base) as usize;
             let data = &self.arena;
-            let v = if room < len {
+            let v = if room < len || !self.regions[i].accepts_data(address, len) {
                 None
             } else {
                 match width {
@@ -1785,6 +1836,9 @@ impl SocBus {
             // See `read`: the arena is flat, so the region's own end is what
             // bounds the access, and one u32 compare says so exactly.
             if self.regions[i].end().wrapping_sub(address) < len {
+                return Err(fault);
+            }
+            if !self.regions[i].accepts_data(address, len) {
                 return Err(fault);
             }
             let off = (address - self.arena_base) as usize;
@@ -3071,6 +3125,73 @@ mod tests {
         bus.load_image(0x4000_0000, &[0x13, 0x00, 0x00, 0x00])
             .unwrap();
         assert_eq!(bus.fetch_instruction(0x4000_0000).unwrap(), 0x13);
+    }
+
+    /// [`AccessRule::WordOnly`] (DD37): aligned words pass, everything
+    /// narrower or misaligned is refused, and **fetch is untouched** —
+    /// a word-only region is an instruction RAM.
+    #[test]
+    fn a_word_only_region_takes_aligned_words_and_nothing_else() {
+        let mut bus = SocBus::new();
+        bus.add_region(
+            RamRegion::new("iram", 0x4008_0000, 0x100)
+                .executable()
+                .word_only(),
+        );
+
+        // Aligned words: both directions.
+        bus.write_word(0x4008_0000, 0x1234_5678u32 as i32).unwrap();
+        assert_eq!(bus.read_word(0x4008_0000).unwrap(), 0x1234_5678u32 as i32);
+
+        // A byte store is the measured fault (`lp-xt-emu/src/board.rs:160`),
+        // and it must be `InvalidAccess`, not `Unaligned`: the hart maps the
+        // first to LoadStoreError (EXCCAUSE 3) and the second to the
+        // alignment cause (9).
+        let e = bus.write_byte(0x4008_0000, 1).unwrap_err();
+        assert!(
+            matches!(
+                e,
+                MemoryError::InvalidAccess {
+                    address: 0x4008_0000,
+                    kind: MemoryAccessKind::Write,
+                    ..
+                }
+            ),
+            "byte store into a word-only region: {e:?}"
+        );
+        assert!(bus.read_byte(0x4008_0004).is_err());
+        assert!(bus.write_halfword(0x4008_0008, 1).is_err());
+        assert!(bus.read_halfword(0x4008_0008).is_err());
+        // A misaligned word is refused too.
+        assert!(bus.write_word(0x4008_0002, 1).is_err());
+        assert!(bus.read_word(0x4008_0002).is_err());
+
+        // The byte store faulted, so it wrote nothing.
+        assert_eq!(bus.read_word(0x4008_0000).unwrap(), 0x1234_5678u32 as i32);
+
+        // Fetch is unaffected, at any alignment the fetch path allows.
+        assert_eq!(bus.fetch_instruction(0x4008_0000).unwrap(), 0x1234_5678);
+        let mut out = [0u8; 3];
+        assert_eq!(bus.fetch_bytes(0x4008_0001, &mut out).unwrap(), 3);
+        assert_eq!(out, [0x56, 0x34, 0x12]);
+
+        // The host side places bytes regardless: a loader, a ROM seed and a
+        // cache fill are not the guest.
+        bus.load_image(0x4008_0010, &[1, 2, 3]).unwrap();
+    }
+
+    /// The default is today's behaviour, so a region that does not ask for
+    /// the rule cannot have changed.
+    #[test]
+    fn the_default_access_rule_is_any_width() {
+        let r = RamRegion::new("ram", 0, 4);
+        assert_eq!(r.access, AccessRule::Any);
+        let mut bus = SocBus::new();
+        bus.add_region(RamRegion::new("ram", 0x4080_0000, 0x100));
+        bus.write_byte(0x4080_0001, 0x5a).unwrap();
+        assert_eq!(bus.read_byte(0x4080_0001).unwrap(), 0x5a);
+        bus.write_halfword(0x4080_0002, 0x1234).unwrap();
+        assert_eq!(bus.read_halfword(0x4080_0002).unwrap(), 0x1234);
     }
 
     #[test]

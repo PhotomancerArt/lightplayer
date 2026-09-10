@@ -53,7 +53,8 @@ pub mod trace;
 
 pub use air::{Air, AirFrame, ParticipantId, PerfectAir};
 pub use bus::{
-    BusScalars, RamRegion, SocBus, StrictViolation, event_id, event_local, event_peripheral,
+    AccessRule, BusScalars, RamRegion, SocBus, StrictViolation, event_id, event_local,
+    event_peripheral,
 };
 pub use elf::{ElfImage, LoadSegment};
 pub use host::{ByteLog, ByteSink, ByteSource, HostSinks, ScriptedSource, StreamId, TcpHost};
