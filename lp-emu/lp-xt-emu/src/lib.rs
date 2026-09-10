@@ -39,6 +39,7 @@
 //! campaign runs; corners IEEE-754 does not fix are [`fp_policy::Unknown`] and
 //! reading one panics rather than guessing.
 
+pub mod block;
 pub mod board;
 pub mod cpu;
 pub mod emu;
