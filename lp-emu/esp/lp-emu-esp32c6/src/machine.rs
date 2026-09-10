@@ -1912,7 +1912,16 @@ impl Esp32C6Builder {
             // guest-published code included, on a run with no core at all.
             machine.bus.watch_guest_code(true);
         }
-        if jit && machine.translate {
+        // `BootMode::RomUp` runs with translation **off**, for the same
+        // reason M5 turns the block cache off there (line above): the guest
+        // mask ROM and the real ESP-IDF second-stage bootloader copy code
+        // into RAM and jump into it, and neither will ever emit a `fence.i`,
+        // so neither of JD5's two events can see what they publish. The
+        // block cache being off already keeps the hart out of the seam — it
+        // is only entered from the cached loop — but a core that is built
+        // and never entered is a compile nobody asked for and a live path
+        // one refactor away.
+        if jit && machine.translate && boot_mode != BootMode::RomUp {
             let blocks = jit_blocks.unwrap_or(if jit_escape_all {
                 DEFAULT_JIT_ESCAPE_BLOCKS
             } else {
