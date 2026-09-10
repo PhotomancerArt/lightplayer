@@ -229,7 +229,7 @@ pub struct MachineHart<B: Bus> {
     ///
     /// [`mach::translated`]: translated
     core: Option<translated::BoxedCore<B>>,
-    core_entries: Vec<u32>,
+    core_entries: translated::EntryIndex,
     /// An invalidation asked for while the core was lifted out of the hart —
     /// see [`MachineHart::drain_core_flush`]. The block cache's
     /// [`block_flush_pending`](Self::block_flush_pending) is the same idea,
@@ -347,7 +347,7 @@ impl<B: Bus> Clone for MachineHart<B> {
             // translated core holds host code for guest bytes that the
             // clone's bus may not have.
             core: None,
-            core_entries: Vec::new(),
+            core_entries: translated::EntryIndex::default(),
             core_flush_pending: PendingInvalidate::None,
             // A diagnostic, not architectural state: a clone starts with a
             // fresh census exactly as it starts with an empty block cache.
@@ -397,7 +397,7 @@ impl<B: Bus> MachineHart<B> {
             fence_i_count: 0,
             block_flush_pending: false,
             core: None,
-            core_entries: Vec::new(),
+            core_entries: translated::EntryIndex::default(),
             core_flush_pending: PendingInvalidate::None,
             blockprof: None,
             _bus: PhantomData,
@@ -413,7 +413,7 @@ impl<B: Bus> MachineHart<B> {
     /// promises. Installing one changes no architectural state and no
     /// transcript; it is the mechanism, not the decision.
     pub fn set_translated_core(&mut self, core: translated::BoxedCore<B>, entries: &[u32]) {
-        self.core_entries = translated::entry_table(entries);
+        self.core_entries = translated::EntryIndex::build(entries);
         self.core = Some(core);
         // A freshly installed core knows exactly what it holds, so anything
         // recorded for the core it replaces is not its business.
@@ -426,7 +426,7 @@ impl<B: Bus> MachineHart<B> {
     /// translator off entirely and must then print an identical everything.
     pub fn clear_translated_core(&mut self) {
         self.core = None;
-        self.core_entries = Vec::new();
+        self.core_entries = translated::EntryIndex::default();
         self.core_flush_pending = PendingInvalidate::None;
     }
 
@@ -991,7 +991,7 @@ impl<B: Bus> MachineHart<B> {
             // read and one compare when no core is installed, which is what
             // keeps this free on the interpreted path.
             if let Some(core) = core.as_mut()
-                && self.core_entries[translated::entry_slot(pc)] == pc
+                && self.core_entries.contains(pc)
             {
                 // Read before the call: the escape hatch runs guest
                 // instructions through the hart itself, so `self` may not

@@ -122,11 +122,28 @@ pub const MAX_SLICE_CYCLES: u64 = 8_192;
 ///   4,272**. The default is chosen so a desk run pays seconds rather than
 ///   minutes at each of JD5's two translation events.
 ///
-/// `jit::install` halves and retries either way, so this is what keeps the
-/// common case from paying for a refused compile first. Splitting the module
-/// so the whole image fits is P5's job (JD8), and these are the numbers it
-/// starts from.
-pub const DEFAULT_JIT_BLOCKS: usize = 2048;
+/// **P5 removed this bound's reason to exist.** The limit is per wasm
+/// *function*, and the module is now a selector over as many sub-dispatchers
+/// as the image needs (JD8), so the whole discovered set installs and
+/// `--jit-blocks` is a diagnostic knob rather than a ceiling. What replaces
+/// it as the sizing lever is [`DEFAULT_JIT_FN_BLOCKS`].
+pub const DEFAULT_JIT_BLOCKS: usize = usize::MAX;
+
+/// How many guest blocks one **sub-dispatcher** holds (`--jit-fn-blocks`).
+///
+/// The number JD26 says is chosen by measured steady-state throughput in
+/// JavaScriptCore — the phone's engine family — and not by the
+/// 7,654,321-byte function limit alone. The limit allows ~16,000 blocks at
+/// the census's ~470 B a block; whether a lazily tiering engine ever
+/// *optimises* a body that size is a separate question, and the one this
+/// default answers. See `lp-emu-jit/README.md` for the table it was read off.
+pub const DEFAULT_JIT_FN_BLOCKS: usize = 2048;
+
+/// The same for `--jit-escape-all`, where a block emits several times the
+/// wasm: a register flush, a call and a reload per instruction instead of a
+/// few opcodes. `jit::install` halves on a refusal anyway; this keeps the
+/// common case from paying for one first.
+pub const DEFAULT_JIT_ESCAPE_FN_BLOCKS: usize = 512;
 
 /// The default bound when every instruction goes through the escape hatch
 /// (`--jit-escape-all`).
@@ -143,6 +160,25 @@ pub const DEFAULT_JIT_BLOCKS: usize = 2048;
 /// `jit::install` halves and retries anyway, so this is what keeps the common
 /// case from paying for a refused compile first.
 pub const DEFAULT_JIT_ESCAPE_BLOCKS: usize = 512;
+
+/// Where whole-image discovery starts looking (`--jit-seeds`, JD26).
+///
+/// Not a correctness choice — nothing a walk misses can be wrong, only
+/// interpreted (JD7) — but a size one: all-symbols finds every function the
+/// image names, reachable or not, and entry-reachable finds only what the
+/// program can actually get to. P5 measures both; see
+/// `lp-emu-jit/README.md`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SeedScope {
+    /// Every symbol in an executable region, of the app and of the mask ROM,
+    /// plus the entry point and the trap vector.
+    #[default]
+    AllSymbols,
+    /// The entry point, the trap vector and its vectored arms, and the spans
+    /// the guest publishes with a `fence.i` — everything else has to be
+    /// reached by an edge.
+    EntryReachable,
+}
 
 /// The slice cap while strict mode is on.
 ///
@@ -881,6 +917,18 @@ pub struct Esp32C6Builder {
     /// How many blocks the P3 sweep may find, or `None` for the default that
     /// suits the emission policy. See [`Esp32C6Builder::jit_blocks`].
     jit_blocks: Option<usize>,
+    /// `--jit-fn-blocks`: blocks per sub-dispatcher, or the default that
+    /// suits the emission policy. See [`Esp32C6Builder::jit_fn_blocks`].
+    jit_fn_blocks: Option<usize>,
+    /// `--jit-seeds`: where discovery starts from.
+    jit_seed_scope: SeedScope,
+    /// `--jit-emit-only <path>`: emit the module and write it out instead of
+    /// installing it. The half of the JD26 sizing sweep that does not need an
+    /// engine at all.
+    jit_emit_only: Option<std::path::PathBuf>,
+    /// `--jit-record <dir>`: record entries into translated code for another
+    /// engine to replay.
+    jit_record: Option<(std::path::PathBuf, u64, usize)>,
     efuse: EfuseIdentity,
     time_grade: TimeGrade,
     strict: bool,
@@ -954,6 +1002,10 @@ impl Esp32C6Builder {
             jit: false,
             jit_escape_all: false,
             jit_blocks: None,
+            jit_fn_blocks: None,
+            jit_seed_scope: SeedScope::AllSymbols,
+            jit_emit_only: None,
+            jit_record: None,
             efuse: EfuseIdentity::default(),
             time_grade: TimeGrade::default(),
             strict: false,
@@ -1153,6 +1205,41 @@ impl Esp32C6Builder {
     /// [`DEFAULT_JIT_BLOCKS`].
     pub fn jit_blocks(mut self, blocks: usize) -> Self {
         self.jit_blocks = Some(blocks);
+        self
+    }
+
+    /// How many guest blocks one sub-dispatcher holds (`--jit-fn-blocks`).
+    ///
+    /// The knob JD26's sizing table is taken with. See
+    /// [`DEFAULT_JIT_FN_BLOCKS`].
+    pub fn jit_fn_blocks(mut self, blocks: usize) -> Self {
+        self.jit_fn_blocks = Some(blocks);
+        self
+    }
+
+    /// Where discovery starts from (`--jit-seeds`).
+    pub fn jit_seeds(mut self, scope: SeedScope) -> Self {
+        self.jit_seed_scope = scope;
+        self
+    }
+
+    /// Emit the module and write it to `path` instead of installing it
+    /// (`--jit-emit-only`). The run then proceeds interpreted.
+    pub fn jit_emit_only(mut self, path: std::path::PathBuf) -> Self {
+        self.jit_emit_only = Some(path);
+        self
+    }
+
+    /// Record `entries` entries into translated code, once the run is past
+    /// `after_cycles`, to `dir` (`--jit-record`). See
+    /// [`crate::jit_record`](../jit_record/index.html).
+    pub fn jit_record(
+        mut self,
+        dir: std::path::PathBuf,
+        after_cycles: u64,
+        entries: usize,
+    ) -> Self {
+        self.jit_record = Some((dir, after_cycles, entries));
         self
     }
 
@@ -1417,6 +1504,10 @@ impl Esp32C6Builder {
             jit,
             jit_escape_all,
             jit_blocks,
+            jit_fn_blocks,
+            jit_seed_scope,
+            jit_emit_only,
+            jit_record,
             efuse,
             time_grade,
             strict,
@@ -1826,9 +1917,15 @@ impl Esp32C6Builder {
             jit_entry: None,
             jit_escape_all: false,
             jit_block_budget: 0,
+            jit_fn_blocks: DEFAULT_JIT_FN_BLOCKS,
+            jit_seed_scope: SeedScope::AllSymbols,
+            jit_emit_only: None,
+            jit_record: None,
             jit_fence_i_at: 0,
             jit_retranslations: 0,
             jit_published_seeds: Vec::new(),
+            jit_code_shadow: Vec::new(),
+            jit_code_spans: Vec::new(),
             power_on: None,
             reboots: 0,
             seed,
@@ -1911,6 +2008,7 @@ impl Esp32C6Builder {
             // So the census can report what the walk *would* have found,
             // guest-published code included, on a run with no core at all.
             machine.bus.watch_guest_code(true);
+            machine.arm_code_shadow();
         }
         // `BootMode::RomUp` runs with translation **off**, for the same
         // reason M5 turns the block cache off there (line above): the guest
@@ -1927,15 +2025,25 @@ impl Esp32C6Builder {
             } else {
                 DEFAULT_JIT_BLOCKS
             });
+            let fn_blocks = jit_fn_blocks.unwrap_or(if jit_escape_all {
+                DEFAULT_JIT_ESCAPE_FN_BLOCKS
+            } else {
+                DEFAULT_JIT_FN_BLOCKS
+            });
             // Remembered so the *second* translation event (JD5) can run the
             // same discovery over the image the guest has since written to.
             machine.jit_entry = Some(entry);
             machine.jit_escape_all = jit_escape_all;
             machine.jit_block_budget = blocks;
+            machine.jit_fn_blocks = fn_blocks;
+            machine.jit_seed_scope = jit_seed_scope;
+            machine.jit_emit_only = jit_emit_only;
+            machine.jit_record = jit_record;
             // Only a `--jit` run pays for the guest-code-write record; see
             // `Esp32C6Machine::jit_published_seeds`.
             machine.bus.watch_guest_code(true);
-            machine.install_translated_core(entry, jit_escape_all, blocks, "boot")?;
+            machine.arm_code_shadow();
+            machine.install_translated_core(entry, jit_escape_all, blocks, fn_blocks, "boot")?;
         }
         Ok(machine)
     }
@@ -2101,6 +2209,16 @@ pub struct Esp32C6Machine {
     jit_entry: Option<u32>,
     jit_escape_all: bool,
     jit_block_budget: usize,
+    /// Blocks per sub-dispatcher (JD26). The lever that decides how the
+    /// module is split, and the only one a refused build now moves.
+    jit_fn_blocks: usize,
+    /// Where discovery starts from, so the second translation event uses the
+    /// scope the first did.
+    jit_seed_scope: SeedScope,
+    /// Emit the module to this path instead of installing it.
+    jit_emit_only: Option<std::path::PathBuf>,
+    /// A recording request, armed at every translation event.
+    jit_record: Option<(std::path::PathBuf, u64, usize)>,
     /// The `fence.i` count the installed core was translated at. The run loop
     /// compares the hart's against it, and a difference is the guest having
     /// published code — the second translation event.
@@ -2117,6 +2235,24 @@ pub struct Esp32C6Machine {
     /// instruction the run retires**. Kept across events, because a buffer
     /// published once stays published.
     jit_published_seeds: Vec<u32>,
+    /// Executable **writable** memory as it stood at the last translation
+    /// event, and the spans it covers.
+    ///
+    /// The other half of "what did the guest publish", and the half that only
+    /// P5 needed. [`SocBus::take_guest_code_writes`] records stores the *bus*
+    /// serves, and translated code does not go through the bus for a store to
+    /// a page the permission table calls plain RAM — that is the point of the
+    /// arena. So once the shader JIT's own writer is itself translated, the
+    /// bus stops seeing it write, the publish stops being seeded, and the
+    /// walk stops finding the code: measured at **12 points of coverage** on
+    /// `render-basic`, all of it the guest's own shader.
+    ///
+    /// A diff answers the same question without depending on which side of the
+    /// seam a store came from. It costs one copy of HP SRAM and LP SRAM
+    /// (528 KiB on the C6) and one `memcmp` of it per `fence.i`, of which a
+    /// render run has two.
+    jit_code_shadow: Vec<u8>,
+    jit_code_spans: Vec<(u32, u32)>,
     /// The machine as it was built, kept only when
     /// [`Esp32C6Builder::reboot_on_reset`] asked for it — a reboot is a
     /// restore of this.
@@ -2367,6 +2503,7 @@ impl Esp32C6Machine {
         entry: u32,
         escape_all: bool,
         blocks: usize,
+        fn_blocks: usize,
         event: &str,
     ) -> Result<(), BuildError> {
         let policy = if escape_all {
@@ -2376,13 +2513,30 @@ impl Esp32C6Machine {
         };
         let model = self.time_grade.cycle_model();
         let seeds = self.translation_seeds(entry);
+        if let Some(path) = self.jit_emit_only.clone() {
+            let line =
+                crate::jit::emit_only(&mut self.bus, &seeds, fn_blocks, model, policy, &path)
+                    .map_err(|e| BuildError::Io(format!("--jit-emit-only: {e}")))?;
+            eprintln!("jit: {line}");
+            return Ok(());
+        }
+        let record = self
+            .jit_record
+            .as_ref()
+            .map(|(dir, after_cycles, entries)| crate::jit::RecordRequest {
+                dir: dir.clone(),
+                after_cycles: *after_cycles,
+                entries: *entries,
+            });
         let report = crate::jit::install(
             &mut self.harts[0],
             &mut self.bus,
             &seeds,
             blocks,
+            fn_blocks,
             model,
             policy,
+            record.as_ref(),
         )
         .map_err(|e| BuildError::Io(format!("--jit: {e}")))?;
         if self.jit_report {
@@ -2395,6 +2549,7 @@ impl Esp32C6Machine {
     /// [`Esp32C6::install_translated_core`] for why they are these.
     #[cfg(feature = "jit")]
     fn translation_seeds(&self, entry: u32) -> Vec<u32> {
+        let all_symbols = self.jit_seed_scope == SeedScope::AllSymbols;
         let exec: Vec<(u32, u32)> = self
             .bus
             .regions()
@@ -2429,9 +2584,22 @@ impl Esp32C6Machine {
             named.sort_unstable_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
             named
         };
-        if self.jit_seed_override.is_none() {
+        if self.jit_seed_override.is_none() && all_symbols {
             seeds.extend(sorted(self.app.as_ref()).into_iter().map(|(_, at)| at));
             seeds.extend(sorted(Some(&self.rom)).into_iter().map(|(_, at)| at));
+        }
+        if self.jit_seed_override.is_none() && !all_symbols {
+            // Entry-reachable: the entry point and the trap vector above,
+            // plus the vector table's own arms. A vectored `mtvec` sends
+            // interrupt `n` to `base + 4n`, and those arms are reached by
+            // hardware rather than by any edge a walk can follow, so they are
+            // seeds or they are invisible. Everything else has to be reached
+            // from these through the static and call/return edges
+            // `lp_emu_jit::discover` already follows.
+            let base = trap & !0b11;
+            if trap & 0b11 == 1 && in_text(base) {
+                seeds.extend((0..32u32).map(|n| base + 4 * n).filter(|&at| in_text(at)));
+            }
         }
         // Last, and never dropped: code the guest wrote and published. It is
         // last only because the symbol lists are the bulk; under a budget
@@ -2622,6 +2790,75 @@ impl Esp32C6Machine {
     ///
     /// One `u64` compare per slice when no core is installed, which is every
     /// run without `--jit`.
+    /// Take a copy of executable writable memory, so the next `fence.i` can
+    /// say what changed. See [`Esp32C6Machine::jit_code_shadow`].
+    fn arm_code_shadow(&mut self) {
+        if self.jit_code_spans.is_empty() {
+            self.jit_code_spans = self
+                .bus
+                .regions()
+                .iter()
+                .filter(|r| r.is_executable() && r.writable)
+                .map(|r| (r.base, r.len()))
+                .collect();
+            let total = self.jit_code_spans.iter().map(|&(_, l)| l as usize).sum();
+            self.jit_code_shadow = vec![0u8; total];
+        }
+        let base = self.bus.guest_arena_base();
+        let arena = self.bus.guest_arena();
+        let mut at = 0usize;
+        for &(b, l) in &self.jit_code_spans {
+            let off = (b - base) as usize;
+            self.jit_code_shadow[at..at + l as usize]
+                .copy_from_slice(&arena[off..off + l as usize]);
+            at += l as usize;
+        }
+    }
+
+    /// The base of every run of executable writable memory that changed since
+    /// [`Esp32C6Machine::arm_code_shadow`], and a fresh shadow.
+    ///
+    /// Runs are coalesced across gaps of up to `SLOP` bytes, the same slop
+    /// [`SocBus`]'s own store watcher uses, because a code copy is contiguous
+    /// and a `memcpy` leaves alignment gaps at either end. A run's base is a
+    /// seed; the walk sweeps forward from it by decoded widths, and anything
+    /// that does not decode ends a block rather than the walk (JD7).
+    fn published_by_diff(&mut self) -> Vec<u32> {
+        /// A bound, so a `fence.i` after a run that rewrote all of RAM
+        /// cannot make the seed list the cost of the phase.
+        const MAX_SEEDS: usize = 65_536;
+        if self.jit_code_spans.is_empty() {
+            return Vec::new();
+        }
+        let base = self.bus.guest_arena_base();
+        let mut out: Vec<u32> = Vec::new();
+        let mut at = 0usize;
+        for &(b, l) in &self.jit_code_spans {
+            let off = (b - base) as usize;
+            let now = &self.bus.guest_arena()[off..off + l as usize];
+            let was = &mut self.jit_code_shadow[at..at + l as usize];
+            let mut i = 0usize;
+            while i < l as usize {
+                let end = (i + 4).min(l as usize);
+                if now[i..end] != was[i..end] && out.len() < MAX_SEEDS {
+                    // Every changed word, not the base of a coalesced run.
+                    // A run's base is wherever the diff happened to start —
+                    // on the C6 that is usually the stack, because the whole
+                    // of HP SRAM is executable and the stack never stops
+                    // moving — and a seed on data sweeps into nothing. A
+                    // word-granular seed list is what the bus's own store
+                    // watcher produced, and it is what made the walk find the
+                    // shader when the writer was interpreted.
+                    out.push(b + i as u32);
+                }
+                i = end;
+            }
+            was.copy_from_slice(now);
+            at += l as usize;
+        }
+        out
+    }
+
     fn translate_if_code_was_published(&mut self) {
         let now = self.harts[0].fence_i_count();
         if now == self.jit_fence_i_at {
@@ -2632,7 +2869,18 @@ impl Esp32C6Machine {
         // Recorded whether or not there is a core to rebuild, because
         // `--blockprof` on its own has to be able to say what the walk would
         // have found.
-        for (base, _) in self.bus.take_guest_code_writes() {
+        // Two sources, because neither sees everything. The bus's own store
+        // watcher sees what an interpreted store did; the diff sees what
+        // happened to memory however it happened, which is the only one that
+        // survives the writer itself being translated.
+        let published: Vec<u32> = self
+            .bus
+            .take_guest_code_writes()
+            .into_iter()
+            .map(|(base, _)| base)
+            .chain(self.published_by_diff())
+            .collect();
+        for base in published {
             if !self.jit_published_seeds.contains(&base) {
                 self.jit_published_seeds.push(base);
             }
@@ -2681,7 +2929,8 @@ impl Esp32C6Machine {
         self.jit_block_budget = blocks;
         self.jit_fence_i_at = self.harts[0].fence_i_count();
         self.bus.watch_guest_code(true);
-        self.install_translated_core(entry, escape_all, blocks, "seeded")
+        let fn_blocks = self.jit_fn_blocks;
+        self.install_translated_core(entry, escape_all, blocks, fn_blocks, "seeded")
     }
 
     /// The second translation event (JD5): the guest published code.
@@ -2706,7 +2955,10 @@ impl Esp32C6Machine {
         let Some(entry) = self.jit_entry else { return };
         let escape_all = self.jit_escape_all;
         let blocks = self.jit_block_budget;
-        if let Err(e) = self.install_translated_core(entry, escape_all, blocks, "fence.i") {
+        let fn_blocks = self.jit_fn_blocks;
+        if let Err(e) =
+            self.install_translated_core(entry, escape_all, blocks, fn_blocks, "fence.i")
+        {
             log::warn!("jit: retranslation after `fence.i` failed; keeping the old core: {e}");
         }
     }
@@ -2718,6 +2970,7 @@ impl Esp32C6Machine {
         _entry: u32,
         _escape_all: bool,
         _blocks: usize,
+        _fn_blocks: usize,
         _event: &str,
     ) -> Result<(), BuildError> {
         Err(BuildError::Io(

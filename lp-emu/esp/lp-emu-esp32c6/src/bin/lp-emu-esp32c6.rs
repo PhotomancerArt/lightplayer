@@ -21,7 +21,8 @@ use lp_emu_esp32c6::flash::FlashBacking;
 use lp_emu_esp32c6::loader::EfuseIdentity;
 use lp_emu_esp32c6::machine::{
     AppSource, BootMode, Esp32C6Builder, Esp32C6Machine, FrameSink, Outcome, PinLogSink, RomSource,
-    StopCondition, StripConfig, TimeGrade, TxLogSink, Uart0Sink, UsbHost, UsbSjDrain, UsbSjSink,
+    SeedScope, StopCondition, StripConfig, TimeGrade, TxLogSink, Uart0Sink, UsbHost, UsbSjDrain,
+    UsbSjSink,
 };
 use lp_emu_esp32c6::memmap;
 use lp_emu_esp32c6::periph::rmt::RefillStats;
@@ -222,11 +223,38 @@ OPTIONS:
                             the proof that a partial translator can only be
                             slow and never wrong
     --jit-blocks <N>        with --jit: how many DISCOVERED blocks may be
-                            installed. Discovery itself always covers the
-                            whole image and the boot line reports what it
-                            found; this bounds only what the host is asked to
-                            compile, and a set it refuses is halved and
-                            retried
+                            installed. Unbounded by default since P5 — the
+                            whole image installs — and kept as a diagnostic
+                            for asking what a smaller set costs
+    --jit-fn-blocks <N>     with --jit: how many guest blocks one wasm
+                            sub-dispatcher holds. wasm caps a function body
+                            at 7,654,321 bytes, so the module is a selector
+                            over as many functions as the image needs; this
+                            is the size of one, and a module the engine
+                            refuses halves it and retries (M7 JD26)
+    --jit-seeds <scope>     with --jit: where discovery starts.
+                            `all-symbols` (default) seeds from every symbol
+                            in an executable region, of the app and of the
+                            mask ROM; `entry-reachable` seeds only from the
+                            entry point, the trap vector and its vectored
+                            arms, and the spans the guest publishes
+    --jit-emit-only <path>  with --jit: emit the module and write it to
+                            <path> instead of installing it, then carry on
+                            interpreted. The half of the sizing sweep that
+                            needs no engine at all
+    --jit-record <dir>      with --jit: record entries into translated code —
+                            the arguments, every import answer in call order,
+                            what changed in guest memory between them and
+                            what each entry produced — so another wasm engine
+                            can replay the same module against the same
+                            inputs (M7 JD26)
+    --jit-record-after <n>  with --jit-record: start recording once the run
+                            has charged <n> guest cycles, so the recording
+                            lands on the module the LAST translation event
+                            installed (default 700000000, past both
+                            `fence.i`)
+    --jit-record-entries <n>  with --jit-record: how many entries to record
+                            (default 20000)
     --jit-report            print what the translated core translated, how
                             much of the run it covered, how often it left for
                             the interpreter, and what boot cost to build it
@@ -341,8 +369,18 @@ struct Args {
     jit: bool,
     /// `--jit-escape-all`: every instruction through the escape hatch.
     jit_escape_all: bool,
-    /// `--jit-blocks <N>`: the bound on P3's sweep.
+    /// `--jit-blocks <N>`: the bound on what is installed.
     jit_blocks: Option<usize>,
+    /// `--jit-fn-blocks <N>`: blocks per sub-dispatcher (M7 JD26).
+    jit_fn_blocks: Option<usize>,
+    /// `--jit-seeds <scope>`: where discovery starts.
+    jit_seeds: Option<SeedScope>,
+    /// `--jit-emit-only <path>`: emit the module rather than install it.
+    jit_emit_only: Option<PathBuf>,
+    /// `--jit-record <dir>` and its two shapes.
+    jit_record: Option<PathBuf>,
+    jit_record_after: u64,
+    jit_record_entries: usize,
     strict_grade: Option<RegGrade>,
     strict_grade_blocks: Option<Vec<&'static str>>,
     probes: Vec<(u64, String)>,
@@ -392,6 +430,30 @@ fn run() -> Result<ExitCode, String> {
 
     if let Some(blocks) = args.jit_blocks {
         builder = builder.jit_blocks(blocks);
+    }
+    if let Some(blocks) = args.jit_fn_blocks {
+        builder = builder.jit_fn_blocks(blocks);
+    }
+    if let Some(scope) = args.jit_seeds {
+        builder = builder.jit_seeds(scope);
+    }
+    if let Some(path) = args.jit_emit_only.clone() {
+        builder = builder.jit_emit_only(path);
+    }
+    if let Some(dir) = args.jit_record.clone() {
+        // Past both `fence.i` on the render images, so the recording is of
+        // the module JD5's LAST translation event installed.
+        let after = if args.jit_record_after == 0 {
+            700_000_000
+        } else {
+            args.jit_record_after
+        };
+        let entries = if args.jit_record_entries == 0 {
+            20_000
+        } else {
+            args.jit_record_entries
+        };
+        builder = builder.jit_record(dir, after, entries);
     }
     if let Some(len) = args.flash_len {
         builder = builder.flash_len(len);
@@ -724,6 +786,41 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                     text.parse()
                         .map_err(|e| format!("--jit-blocks `{text}`: {e}"))?,
                 );
+            }
+            "--jit-fn-blocks" => {
+                let text = value("--jit-fn-blocks")?;
+                args.jit_fn_blocks = Some(
+                    text.parse()
+                        .map_err(|e| format!("--jit-fn-blocks `{text}`: {e}"))?,
+                );
+            }
+            "--jit-seeds" => {
+                let text = value("--jit-seeds")?;
+                args.jit_seeds = Some(match text.as_str() {
+                    "all-symbols" => SeedScope::AllSymbols,
+                    "entry-reachable" => SeedScope::EntryReachable,
+                    other => {
+                        return Err(format!(
+                            "--jit-seeds `{other}`: expected `all-symbols` or `entry-reachable`"
+                        ));
+                    }
+                });
+            }
+            "--jit-emit-only" => {
+                args.jit_emit_only = Some(PathBuf::from(value("--jit-emit-only")?));
+            }
+            "--jit-record" => args.jit_record = Some(PathBuf::from(value("--jit-record")?)),
+            "--jit-record-after" => {
+                let text = value("--jit-record-after")?;
+                args.jit_record_after = text
+                    .parse()
+                    .map_err(|e| format!("--jit-record-after `{text}`: {e}"))?;
+            }
+            "--jit-record-entries" => {
+                let text = value("--jit-record-entries")?;
+                args.jit_record_entries = text
+                    .parse()
+                    .map_err(|e| format!("--jit-record-entries `{text}`: {e}"))?;
             }
             "--jit-report" => args.jit_report = true,
             "--blockprof" => args.blockprof = true,

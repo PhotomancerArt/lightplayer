@@ -41,6 +41,7 @@
 //! | `+148` | the status [`HostOps::step_one`] last reported |
 //! | `+152` | [`EXCHANGE_CROSS`] — cross-function transfers this stay |
 //! | `+160` | [`EXCHANGE_INDIRECT_MISS`] — unresolved indirect jumps |
+//! | `+168` | [`EXCHANGE_EXIT_WHY`] — why the stay ended |
 //!
 //! The **whole** register file is in the exchange area, not just the registers
 //! the block set touches: [`HostOps::step_one`] runs an arbitrary guest
@@ -82,6 +83,14 @@ pub const EXCHANGE_CROSS: u64 = 152;
 /// Incremented only on the miss, so a resolved `jalr` — the common case once
 /// the whole image is installed — pays nothing for the counter.
 pub const EXCHANGE_INDIRECT_MISS: u64 = 160;
+/// Why the stay ended, as an `i32`: one of the [`why`] codes.
+///
+/// Written at every exit, so a coverage shortfall names its own cause. With
+/// the whole image installed this is the only thing that separates "the
+/// translator refused an encoding" from "the walk never found the code" from
+/// "the polling contract said leave" — three very different problems that all
+/// read as interpreted instructions.
+pub const EXCHANGE_EXIT_WHY: u64 = 168;
 /// How much of the imported memory the exchange area claims.
 pub const EXCHANGE_LEN: u32 = 256;
 
@@ -104,6 +113,40 @@ pub const FLAG_SLICE_ENDED: i32 = 2;
 /// the whole field when the host enters, so a stale bit from the last exit
 /// cannot be read as this stay's.
 pub const FLAG_PENDING: i32 = 4;
+
+/// Why a stay ended. Reported, never acted on.
+pub mod why {
+    /// The block's own maximum cost did not fit the remaining slice budget.
+    pub const BUDGET: i32 = 1;
+    /// A `jal`, a branch or a fall-through named a pc the block set does not
+    /// hold.
+    pub const EDGE_OUT: i32 = 2;
+    /// An MMIO store the bus wants observed now — polling point (c).
+    pub const AFTER_STORE: i32 = 3;
+    /// An indirect jump the target table did not resolve.
+    pub const INDIRECT_MISS: i32 = 4;
+    /// An indirect jump in a module built with no target table at all.
+    pub const INDIRECT_NO_TABLE: i32 = 5;
+    /// A load the bus refused: it faulted, or it hit a watchpoint.
+    pub const LOAD_REFUSED: i32 = 6;
+    /// A load straddling two kinds of page.
+    pub const LOAD_STRADDLE: i32 = 7;
+    /// A store on a page the permission table does not call writable RAM.
+    pub const STORE_PERM: i32 = 8;
+    /// A store the bus refused.
+    pub const STORE_REFUSED: i32 = 9;
+    /// A store straddling two kinds of page, or onto read-only RAM.
+    pub const STORE_STRADDLE: i32 = 10;
+    /// The word after this block is one `decode` does not recognise, so the
+    /// block ended before it (JD7).
+    pub const UNDECODABLE: i32 = 11;
+    /// An escaped instruction left the decoder's straight line.
+    pub const ESCAPE_DIVERGED: i32 = 12;
+    /// An escaped terminator landed somewhere this module does not hold.
+    pub const ESCAPE_TARGET: i32 = 13;
+    /// `step_one` reported the slice over.
+    pub const SLICE_ENDED: i32 = 14;
+}
 
 // ---- the permission table -------------------------------------------------
 

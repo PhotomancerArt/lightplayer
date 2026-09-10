@@ -55,9 +55,10 @@ use wasm_encoder::{BlockType, Function, Instruction as I, MemArg, ValType};
 use crate::blocks::{Block, BlockEnd, BlockSet};
 use crate::decode::{Cond, Decoded, Inst, LoadKind, Op, OpI, StoreKind};
 use crate::host::{
-    EXCHANGE_CYCLE, EXCHANGE_FLAGS, EXCHANGE_INDIRECT_MISS, EXCHANGE_INSTRET, EXCHANGE_REGS,
-    EXCHANGE_STATUS, FLAG_AFTER_STORE, FLAG_PENDING, FLAG_SLICE_ENDED, MMIO_LEAVE_AFTER,
-    MMIO_PENDING, MMIO_REFUSED, PERM_READ_WRITE, PERM_SHIFT, load_kind, store_kind,
+    EXCHANGE_CYCLE, EXCHANGE_EXIT_WHY, EXCHANGE_FLAGS, EXCHANGE_INDIRECT_MISS, EXCHANGE_INSTRET,
+    EXCHANGE_REGS, EXCHANGE_STATUS, FLAG_AFTER_STORE, FLAG_PENDING, FLAG_SLICE_ENDED,
+    MMIO_LEAVE_AFTER, MMIO_PENDING, MMIO_REFUSED, PERM_READ_WRITE, PERM_SHIFT, load_kind,
+    store_kind, why,
 };
 
 /// The module the host imports `memory` from, and the module the three
@@ -200,6 +201,8 @@ const L_T: u32 = 48;
 const L_CROSS: u32 = 49;
 /// The global block index an indirect jump's target lookup produced, or `-1`.
 const L_GID: u32 = 50;
+/// Why the stay is ending. Reported at the exit, never acted on.
+const L_WHY: u32 = 51;
 
 /// The locals every sub-dispatcher declares, past its six parameters.
 ///
@@ -212,7 +215,7 @@ fn body_locals() -> Vec<(u32, ValType)> {
         (8, ValType::I32),  // exit pc, flags, next, pending, address, perm x2, status
         (1, ValType::I64),  // the 64-bit scratch an mmio load returns into
         (1, ValType::I32),  // the 32-bit scratch a divide needs
-        (2, ValType::I32),  // the cross-function flag and the resolved block id
+        (3, ValType::I32),  // the cross-function flag, the resolved block id, the exit reason
     ]
 }
 
@@ -318,7 +321,9 @@ impl Emitter<'_> {
 
     /// Leave the stay at `pc` — or at the address in [`L_ADDR`] when `None` —
     /// after charging `cycles` and retiring `retired`.
-    fn exit(&mut self, k: usize, pc: Option<u32>, cycles: u64, retired: u32, flags: i32) {
+    fn exit(&mut self, k: usize, pc: Option<u32>, cycles: u64, retired: u32, flags: i32, why: i32) {
+        self.i(I::I32Const(why));
+        self.i(I::LocalSet(L_WHY));
         self.add_cycles(cycles);
         self.add_retired(retired);
         match pc {
@@ -369,7 +374,7 @@ impl Emitter<'_> {
     fn goto(&mut self, k: usize, target: u32) {
         match self.set.index.get(&target).copied() {
             Some(g) => self.goto_index(k, g),
-            None => self.exit(k, Some(target), 0, 0, 0),
+            None => self.exit(k, Some(target), 0, 0, 0, why::EDGE_OUT),
         }
     }
 
@@ -444,6 +449,8 @@ impl Emitter<'_> {
         self.i(I::LocalSet(L_EXIT_PC));
         self.i(I::I32Const(FLAG_SLICE_ENDED));
         self.i(I::LocalSet(L_FLAGS));
+        self.i(I::I32Const(why::SLICE_ENDED));
+        self.i(I::LocalSet(L_WHY));
         self.i(I::Br(self.exit_depth(k)));
         self.extra -= 1;
         self.i(I::End);
@@ -459,7 +466,7 @@ impl Emitter<'_> {
         self.i(I::I32Ne);
         self.i(I::If(BlockType::Empty));
         self.extra += 1;
-        self.exit(k, None, 0, 0, 0);
+        self.exit(k, None, 0, 0, 0, why::ESCAPE_DIVERGED);
         self.extra -= 1;
         self.i(I::End);
     }
@@ -492,7 +499,7 @@ impl Emitter<'_> {
             self.extra -= 1;
             self.i(I::End);
         }
-        self.exit(k, None, 0, 0, 0);
+        self.exit(k, None, 0, 0, 0, why::ESCAPE_TARGET);
     }
 
     // --- indirect jumps -----------------------------------------------------
@@ -517,7 +524,7 @@ impl Emitter<'_> {
         let Some(pagemap) = self.layout.indirect else {
             // No table: P3's behaviour, and the shape every test that does
             // not build one still gets.
-            self.exit(k, None, 0, 0, 0);
+            self.exit(k, None, 0, 0, 0, why::INDIRECT_NO_TABLE);
             return;
         };
 
@@ -551,7 +558,7 @@ impl Emitter<'_> {
         self.i(I::I64Const(1));
         self.i(I::I64Add);
         self.i(I::I64Store(miss_at));
-        self.exit(k, None, 0, 0, 0);
+        self.exit(k, None, 0, 0, 0, why::INDIRECT_MISS);
         self.extra -= 1;
         self.i(I::End);
 
@@ -694,7 +701,7 @@ impl Emitter<'_> {
         self.extra += 1;
         // The access did not happen. Leave at this instruction, having
         // retired nothing of it, and let the interpreter take the trap.
-        self.exit(k, Some(pc), cycles, retired, 0);
+        self.exit(k, Some(pc), cycles, retired, 0, why::LOAD_REFUSED);
         self.extra -= 1;
         self.i(I::End);
         self.i(I::LocalGet(L_T64));
@@ -702,7 +709,7 @@ impl Emitter<'_> {
         self.i(I::Else);
         // Straddling a RAM page and a non-RAM page: one guest access the bus
         // would serve as one and this cannot. Leave and let it.
-        self.exit(k, Some(pc), cycles, retired, 0);
+        self.exit(k, Some(pc), cycles, retired, 0, why::LOAD_STRADDLE);
         self.i(I::I32Const(0));
         self.i(I::End);
         self.extra -= 1;
@@ -770,7 +777,7 @@ impl Emitter<'_> {
         self.i(I::I32And);
         self.i(I::If(BlockType::Empty));
         self.extra += 1;
-        self.exit(k, Some(pc), cycles, retired, 0);
+        self.exit(k, Some(pc), cycles, retired, 0, why::STORE_PERM);
         self.extra -= 1;
         self.i(I::End);
 
@@ -814,12 +821,12 @@ impl Emitter<'_> {
         self.i(I::I32Eq);
         self.i(I::If(BlockType::Empty));
         self.extra += 1;
-        self.exit(k, Some(pc), cycles, retired, 0);
+        self.exit(k, Some(pc), cycles, retired, 0, why::STORE_REFUSED);
         self.extra -= 1;
         self.i(I::End);
         self.i(I::Else);
         // Read-only RAM, or an access straddling two kinds of page.
-        self.exit(k, Some(pc), cycles, retired, 0);
+        self.exit(k, Some(pc), cycles, retired, 0, why::STORE_STRADDLE);
         self.i(I::End);
         self.extra -= 1;
         self.i(I::End);
@@ -839,6 +846,7 @@ impl Emitter<'_> {
             cycles + cost,
             retired + 1,
             FLAG_AFTER_STORE,
+            why::AFTER_STORE,
         );
         self.extra -= 1;
         self.i(I::End);
@@ -996,7 +1004,7 @@ impl Emitter<'_> {
         self.i(I::I64GtU);
         self.i(I::If(BlockType::Empty));
         self.extra += 1;
-        self.exit(k, Some(block_pc), 0, 0, 0);
+        self.exit(k, Some(block_pc), 0, 0, 0, why::BUDGET);
         self.extra -= 1;
         self.i(I::End);
 
@@ -1114,7 +1122,7 @@ impl Emitter<'_> {
                 unreachable!("a block ending in a terminator returns from the loop above")
             }
             BlockEnd::Fall(pc) => self.fall_through(k, pc),
-            BlockEnd::Undecodable(pc) => self.exit(k, Some(pc), 0, 0, 0),
+            BlockEnd::Undecodable(pc) => self.exit(k, Some(pc), 0, 0, 0, why::UNDECODABLE),
         }
     }
 }
@@ -1287,6 +1295,9 @@ pub fn emit_body(
     e.i(I::LocalGet(L_PENDING));
     e.i(I::I32Or);
     e.i(I::I32Store(e.exchange(EXCHANGE_FLAGS)));
+    e.i(I::I32Const(0));
+    e.i(I::LocalGet(L_WHY));
+    e.i(I::I32Store(e.exchange(EXCHANGE_EXIT_WHY)));
     // `(cross << 32) | value`.
     e.i(I::LocalGet(L_EXIT_PC));
     e.i(I::I64ExtendI32U);

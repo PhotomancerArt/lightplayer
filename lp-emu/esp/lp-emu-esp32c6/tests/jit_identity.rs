@@ -193,9 +193,17 @@ fn run(policy: Option<Emit>) -> (Outcome, Option<String>) {
         // A hand-supplied seed list, which is the other half of what P3's
         // scope allows: no ELF here, so no symbols to seed from.
         let model = m.harts[0].cycle_model();
-        let report =
-            lp_emu_esp32c6::jit::install(&mut m.harts[0], &mut m.bus, &[entry], 256, model, policy)
-                .expect("the guest translates");
+        let report = lp_emu_esp32c6::jit::install(
+            &mut m.harts[0],
+            &mut m.bus,
+            &[entry],
+            256,
+            256,
+            model,
+            policy,
+            None,
+        )
+        .expect("the guest translates");
         assert!(report.blocks > 0, "something was translated");
         if policy == Emit::NOTHING {
             assert_eq!(
@@ -286,8 +294,10 @@ fn a_core_whose_entries_are_never_reached_is_invisible() {
         &mut m.bus,
         &[entry + 4 * (program.len() as u32 - 2)],
         256,
+        256,
         model,
         Emit::EVERYTHING,
+        None,
     )
     .expect("the subroutine translates");
     m.run_until(&StopCondition::after_micros(2_000));
