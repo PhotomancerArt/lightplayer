@@ -130,6 +130,21 @@ turns a crash into a puzzle), and a read-only region models ROM and the
 flash cache window while `load_image` still places bytes into it from the
 host side.
 
+The bus serves **two fetch shapes**, because it serves two instruction sets.
+`fetch_instruction` is the word-assembling one: fixed-width and compressed
+RV32, which means a two-byte alignment rule and a `u32` built 4-bytes-then-2.
+`fetch_bytes` is the byte-granular one: Xtensa's instructions are 2 or 3 bytes
+and start at **any** alignment, so there is no word to return and no alignment
+rule to apply — the caller gets up to three bytes and a count. Both obey the
+same two rules. Neither ever routes to MMIO (the default `Bus::fetch_bytes` in
+`lp-emu-core` does, because it is built from `read_u8`, which is why `SocBus`
+overrides it: a fetch that walked into UART0 would pop its FIFO). And both are
+bounded by the **region's** own end rather than the arena's, even though the
+arena is one flat allocation in which two adjacent regions are contiguous
+bytes. The straddle rule follows: *the count says how many bytes are really
+there; a decoder that needs more than it got has run off the end of the
+region, and that is a fault, not a wrap.*
+
 MMIO is a second sorted table. A peripheral's **index is its insertion
 order and never moves**; the sorted view lives in a side table. That matters
 because `event_id(peripheral, local)` packs the index into the scheduler's
