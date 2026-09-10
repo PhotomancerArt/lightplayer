@@ -69,9 +69,20 @@ which is why the grade is `modeled` and not higher.
    policy's rule, unchanged, and it applies here without exception:
    byte-equality with silicon, agreement across configurations, and a
    guest-observed derivation are **evidence, weighed where a reader can see
-   it**, never a promotion. As of this ADR the air has **no silicon twin at
-   all** — `d1-desk-batch.md` step 3 is owed — so every claim it makes is
-   `modeled`.
+   it**, never a promotion. **Amended 2026-09-09** (M6 sweep, a factual
+   correction rather than a grade change): `d1-desk-batch.md` step 3 landed
+   — two-board silicon capture, `docs/reports/2026-09-09-espnow-broadcast-two-board-silicon-replay.md`
+   — so the sentence above is no longer accurate as written. The pair now
+   replays against silicon at 60/60 structural fields equal, on both
+   machines. That is payload-level agreement (device ids, event numbers,
+   byte counts, and — after the every-other-frame fix below — `gap`): it
+   confirms what the application sees, not the register-level completion
+   mechanism (`WIFI_MAC+0x4c48` bit 7, `+0x4cb8` bit 0) M4 U1 chose without a
+   silicon witness. Every claim the air makes is still `modeled`; whether the
+   payload-level agreement is enough to promote it is the case "What would
+   have to be true for this to change" below describes, and it is still a
+   ruling for a person, not an automatic consequence of this sweep finding
+   the capture.
 4. **A stated constant is stated, not derived.** The air's latency is one
    number in one place (`lockstep::DEFAULT_LATENCY_US`, 672 µs), and the
    arithmetic it was chosen from is written beside it. It does not vary with
