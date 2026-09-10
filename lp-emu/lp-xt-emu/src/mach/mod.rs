@@ -510,6 +510,12 @@ impl<B: Bus> XtHart<B> {
     /// the seam ruling R5 names: M2's matrix produces exactly this mask, and
     /// [`Bus::pending_cpu_interrupt`] is read at poll point (c) as a
     /// one-line degenerate of it until M2 lands.
+    ///
+    /// M2 P2 landed the honest feed:
+    /// `lp_emu_esp_common::SocBus::pending_cpu_interrupt_mask()` returns this
+    /// mask directly, from `CpuIntMatrix::asserted`. The approximation at
+    /// poll point (c) is retired when M3's Xtensa machine binds a hart to a
+    /// `SocBus` and calls it; nothing here changes until then.
     #[inline]
     pub fn set_external_mask(&mut self, mask: u32) {
         self.ints.set_external(mask);
