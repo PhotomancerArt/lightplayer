@@ -1,6 +1,7 @@
 # ADR: An emulator-captured device trace is evidence, not a golden fixture
 
-- **Status:** **Proposed** (emulator plan two, M6; OQ3). Yona ratifies at G2.
+- **Status:** **Accepted** (emulator plan two, M6; OQ3 — ratified by Yona at
+  G2, 2026-09-10).
 - **Date:** 2026-09-10
 - **Deciders:** Photomancer
 - **Amends:** the golden-trace library described in

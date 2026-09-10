@@ -308,9 +308,49 @@ because the word was then "the flash FILE is non-empty", which a 4 MiB chip of
 survival claim onto the two things that can carry it: the written bytes are
 not an erased chip, and the guest's own second boot mounts the project.
 
+## The contract a wasm backing (mode A) inherits
+
+This is a handoff, not a build: **mode A is the sibling effort's** (plan.md
+Scope, out; archived at `_archive/2026-09-07-0118-studio-emulated-boards/`).
+Plan two shipped only the native backing, and the two "refused" rows in the
+eight-point table above are exactly the gaps mode A's wasm backing fills. What
+that backing — or a door that wanted to fill them in for the native case —
+would have to add, stated against the door as it actually is:
+
+- **The routes that do not exist.** The door's route table is exactly three
+  (`lp-cli/src/commands/emu/serve/door.rs`, `fn route`): `GET /boards`,
+  `ws /board/<id>/bytes`, `ws /board/<id>/control`. Points 5 and 6 need routes
+  that are **not** there: a `GET`/`PUT` of a board's flash bytes, and a
+  snapshot route. `getFlash` / `putFlash` / `snapshot` reject with
+  `NotSupportedError` precisely because there is nowhere to send them. Adding
+  any of these is a deliberate route addition, and it changes what a second
+  consumer of the door can assume.
+- **The door admits one client per endpoint** and answers a second with **409**
+  (`door.rs`, `fn busy`; a `compare_exchange` on an `AtomicBool` held for the
+  connection's life). There is no last-wins takeover and no reaping of a
+  half-open socket — a design constraint any second consumer inherits. Plan
+  two's flash walk never hit it (the control channel is page-held and only the
+  byte endpoint cycles), but a client that dies without closing is unmeasured,
+  not ruled out.
+- **`flashState()` is independent of the running image, and now answers the
+  chip's question.** As of M5 (DD34) `GET /boards`'s `flash` word is recomputed
+  per flush and answers "does an image magic sit at the reset vector" — so a
+  `kind=elf` board, whose firmware is loaded straight into memory and never
+  went through its chip, truthfully reports `blank` for as long as it lives.
+  A backing must never treat `flash` as "is this board running something"; the
+  board's own hello, or its console transcript, is the survival evidence.
+
+**Where a backing cannot answer, it says so** (as the native one does). The
+wasm backing carries a machine in the page and can answer points 5 and 6 from
+it; a lie inside the contract is worse than a `NotSupportedError`.
+
 ## Follow-ups
 - **The wasm backing** of `EmulatorPort` (the sibling's mode A) fills points 5
   and 6 above; when it lands, this table stops having "refused" rows for the
-  browser case.
-- **The golden-trace question** (plan two OQ3, G2): whether an emulator-captured
-  trace is a fixture of the same standing as a silicon one.
+  browser case. The contract it inherits is the section just above.
+- **The golden-trace question** (plan two OQ3) was answered at G2 and is its own
+  ADR: [2026-09-10-an-emulator-captured-trace-is-evidence-not-a-fixture.md](2026-09-10-an-emulator-captured-trace-is-evidence-not-a-fixture.md).
+  An emulator-captured trace is named `<id>.emu.jsonl`, a code guard makes
+  overwriting a silicon fixture impossible, and — the rule that made it an ADR —
+  an emulator-captured trace may never be the sole evidence for a claim about
+  hardware (plan two M6, PR #658).
