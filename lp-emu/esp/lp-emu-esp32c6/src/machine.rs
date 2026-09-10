@@ -101,21 +101,31 @@ const LP_CLKRST_RESET_CAUSE: u32 = 0x010;
 
 pub const MAX_SLICE_CYCLES: u64 = 8_192;
 
-/// The default bound on P3's sweep (`--jit-blocks`).
+/// The default bound on how many discovered blocks are **installed**
+/// (`--jit-blocks`).
 ///
-/// P3 translates a *sample* of the image and proves the translation on it;
-/// whole-image discovery is P4's, and the census says a render image executes
-/// ~37,600 distinct blocks.
+/// Not a bound on discovery: since M7 P4 the walk always covers the whole
+/// image and the boot line reports what it found, because the gap between
+/// what was found and what fits is the number P5 is sized against. On
+/// `render-basic` the walk finds **156,053 blocks / 656,817 instructions**
+/// and this budget installs about 2,010 of them.
 ///
-/// The bound is not arbitrary and it is not a policy: **wasm caps a single
-/// function body at 7,654,321 bytes**, and P3 emits one function for the whole
-/// block set, so the set has to fit under it. At the ~2 KB per block this
-/// translator emits — more than the spike's ~808 B, because the store path
-/// carries a watchpoint check and every access carries the permission
-/// compare — 2,048 blocks is ~3-4 MB of body, comfortably inside. Splitting
-/// the module so the whole image fits is P5's job (JD8), and it is the one
-/// structural fact a reader of this crate will otherwise rediscover the hard
-/// way.
+/// The bound is not arbitrary and it is not a policy — it is two host
+/// ceilings, measured:
+///
+/// - **wasm caps a single function body at 7,654,321 bytes**, and this
+///   translator emits one function per block set. 17,104 blocks emit
+///   8,056,915 B and are refused, so wasm's own ceiling is around 16,000
+///   blocks — an order of magnitude under the image.
+/// - **cranelift refuses far earlier**, somewhere under 8,586 blocks, and it
+///   is slow long before it refuses: 6.0 s at 2,014 blocks, **116 s at
+///   4,272**. The default is chosen so a desk run pays seconds rather than
+///   minutes at each of JD5's two translation events.
+///
+/// `jit::install` halves and retries either way, so this is what keeps the
+/// common case from paying for a refused compile first. Splitting the module
+/// so the whole image fits is P5's job (JD8), and these are the numbers it
+/// starts from.
 pub const DEFAULT_JIT_BLOCKS: usize = 2048;
 
 /// The default bound when every instruction goes through the escape hatch
@@ -1135,12 +1145,12 @@ impl Esp32C6Builder {
         self
     }
 
-    /// How many blocks the sweep from the entry point may find
-    /// (`--jit-blocks`).
+    /// How many discovered blocks may be **installed** (`--jit-blocks`).
     ///
-    /// P3 translates a *sample* of the image and proves the translation on it;
-    /// whole-image discovery is P4's. The bound is what keeps the sample a
-    /// sample.
+    /// Discovery itself is unbounded and always covers the whole image; this
+    /// is the bound on what the host is asked to compile, and it exists
+    /// because every wasm engine refuses a large enough function body. See
+    /// [`DEFAULT_JIT_BLOCKS`].
     pub fn jit_blocks(mut self, blocks: usize) -> Self {
         self.jit_blocks = Some(blocks);
         self

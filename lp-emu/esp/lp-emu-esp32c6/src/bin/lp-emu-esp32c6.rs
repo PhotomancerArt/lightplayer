@@ -211,19 +211,22 @@ OPTIONS:
                             and the same promise --no-block-cache makes:
                             every byte of every transcript must be the same
                             either way
-    --jit                   translate the blocks reachable from the entry
-                            point and run those through the host's wasm
-                            engine. Needs a build with `--features jit`;
-                            off by default (M7 JD18)
+    --jit                   discover the whole image, translate it, and run
+                            it through the host's wasm engine. Translation
+                            happens at exactly two events: image load and
+                            each guest `fence.i`. Needs a build with
+                            `--features jit`; off by default (M7 JD18)
     --jit-escape-all        with --jit: emit NO guest semantics at all and
                             hand every instruction to the interpreter through
                             the escape hatch. Complete, correct and slow, and
                             the proof that a partial translator can only be
                             slow and never wrong
-    --jit-blocks <N>        with --jit: how many blocks the sweep from the
-                            entry point may find. The default suits the
-                            emission policy, and a set the host refuses to
-                            compile is halved and retried
+    --jit-blocks <N>        with --jit: how many DISCOVERED blocks may be
+                            installed. Discovery itself always covers the
+                            whole image and the boot line reports what it
+                            found; this bounds only what the host is asked to
+                            compile, and a set it refuses is halved and
+                            retried
     --jit-report            print what the translated core translated, how
                             much of the run it covered, how often it left for
                             the interpreter, and what boot cost to build it
