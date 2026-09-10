@@ -80,7 +80,11 @@ directories are allowed to assume MMIO at all.
   run compiled shader code against a vmctx in host memory, and an FPU proven
   equal to real ESP32-S3 silicon behind an explicit policy layer. Its FP
   predictions and silicon captures live in `tests/fixtures/fp/` and are
-  committed **before** any hardware run.
+  committed **before** any hardware run. Since Xtensa M1 it also carries the
+  **machine-mode hart** (`mach::XtHart`) — PS and the SR file, exceptions and
+  window exceptions vectoring through VECBASE, interrupt level selection,
+  CCOMPARE timers, DBREAK/IBREAK — the twin of `lp-riscv-emu::mach`, which a
+  classic-ESP32 machine will drive.
 
 - **`lp-xt-emu-guest`** — the `no_std` Xtensa guest runtime. A DEVICE-target
   crate: excluded from the host workspace and built as a member of the

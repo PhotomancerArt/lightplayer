@@ -44,6 +44,12 @@ src/
                  float_math  everything that computes a float value (M6 P3)
   fp_policy.rs   every behavior IEEE-754 does not fix, measured or Unknown.
   fp_capture.rs  parse + diff a device conformance capture (M6 P5).
+  mach/          the machine-mode hart `XtHart<B: Bus>` — see "Machine mode":
+                 mod (the slice loop, exception/interrupt entry) · sr (the SR/UR
+                 file) · trap (causes, vector table, core-config constants) ·
+                 window (WindowCheck, RETW/MOVSP checks, the policy enum) ·
+                 interrupt · timer · breakpoint · mac16 · exec (the hart-owned
+                 instruction semantics) · tests
 ```
 
 Decoding is delegated to [`lp-xt-inst`](../lp-xt-inst); this crate never
@@ -68,8 +74,7 @@ names `Memory` concretely, and the `Trap ↔ MemoryError` mapping the seam needs
 is the identity on every fault user-mode `Memory` can raise (see
 `error::trap_from_bus`, and `memory.rs`'s `trap_bus_error_round_trip`, which
 asserts it field for field). The seam exists so a privileged hart can run the
-same executors against a SoC bus; the machine-mode half of that is not here
-yet.
+same executors against a SoC bus — that hart is [`mach::XtHart`](#machine-mode).
 
 ### The windowed register view
 
@@ -87,7 +92,12 @@ registers are currently *resident* (not spilled).
 - **RETW** rotates back by the increment recorded in `a0`'s top two bits and
   unmangles the return PC (`(PC & 0xC000_0000) | (a0 & 0x3FFF_FFFF)`).
 
-### Window overflow / underflow — modeled directly
+### Window overflow / underflow — modeled directly (user mode only)
+
+**This paragraph describes the user-mode `Emulator` and nothing else.** The
+machine-mode hart raises the real exceptions and runs the guest's handlers
+(see [Machine mode](#machine-mode)); the two share one `ENTRY`/`RETW`
+implementation that branches on `mach::window::WindowPolicy`.
 
 When the register ring wraps so a new frame's registers would overwrite a still
 live ancestor, the ancestor is **spilled** to its ABI stack save area, and
@@ -104,7 +114,47 @@ chain recovers it by walking the resident window — so a spill and its later
 reload always address the same bytes. Extra register groups (`a4..`, `a8..`) for
 call8/call12 frames are placed just below; their exact byte placement is not
 observable for bare payloads (which never read another frame's save area), the
-deliberate "model the effect, not the handler vectors" boundary.
+deliberate "model the effect, not the handler vectors" boundary. Real firmware
+*does* read other frames' save areas (`lpc_shared::backtrace::force_window_spill`),
+which is why machine mode does not use this model.
+
+### Machine mode
+
+`mach::XtHart<B: Bus>` is the privileged hart — the Xtensa twin of
+`lp-riscv-emu::mach::MachineHart`, same contract (`run_slice` / `SliceEnd`,
+`advance_to_cycle`, `poll_interrupts`, `deliver_breakpoint`,
+`invalidate_block_range`, hand-written `Clone`), same four polling points (plus
+a fifth, Xtensa-only one: an internal `CCOMPARE` timer match), same
+reset-state posture (the hart resets to the architectural `PS = 0x1F`; the
+*machine* seeds `sr::PS_BOOT` for a direct load), same cycle-counting rule.
+The module doc in `src/mach/mod.rs` is the load-bearing statement of all
+three.
+
+What it adds over the user-mode runner, all from the ISA Reference Manual:
+`PS` as a real register; the whole SR/UR file `lp-xt-inst` decodes; exceptions
+vectoring through `VECBASE` (user / kernel / double, the six window vectors,
+the per-level interrupt vectors); **window overflow and underflow as real
+exceptions** — the RM's per-instruction `WindowCheck` on every address-register
+operand, `rfwo`/`rfwu`, `movsp`'s alloca exception, `PS.OWB` maintained for
+`_AllocAException`; `rfe`/`rfi`/`rfde`, `rsil`, `waiti` (→ `SliceEnd::Wfi`);
+level-1 interrupts as `EXCCAUSE = 4` through the general vector, levels 2..7
+through their own; `INTERRUPT`/`INTSET`/`INTCLEAR`/`INTENABLE` with per-line
+level and type supplied by the machine as core configuration; `CCOUNT` and
+three `CCOMPARE` timers; two `DBREAK` slots mirrored onto
+`Bus::set_watchpoint` and two `IBREAK`s; zero-overhead loops with the RM's
+loop-back rule; `s32c1i`; MAC16; the Boolean ops, `clamps`, `l32e`/`s32e`,
+`rotw`; region-protection TLB ops accepted and remembered.
+
+**The policy enum.** `mach::window::WindowPolicy { Direct, Exception }` is
+what the executors' `Exec` view carries. The user-mode `Emulator` passes
+`Direct` and is byte-for-byte what it was (the corpus goldens, the FP
+conformance replay and the silicon replay are the proof, run on every push);
+the hart passes `Exception`. Under `Exception` the `Cpu::call_stack` shadow is
+never touched (a `debug_assert!` says so).
+
+The hart knows one thing about the outside world: an asserted CPU-interrupt
+bitmask (`set_external_mask`), which M2's interrupt matrix will produce. No
+memory map, no peripherals, no chip numbers — those are the machine's (M3).
 
 ### Board profiles — the memory map is a parameter
 

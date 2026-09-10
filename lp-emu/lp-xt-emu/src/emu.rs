@@ -619,6 +619,8 @@ impl Emulator {
             cpu: &mut self.cpu,
             mem: &mut self.mem,
             fp_policy: &mut self.fp_policy,
+            // The user-mode runner keeps the direct spill model — Q3.
+            window: crate::mach::window::WindowPolicy::Direct,
         }
     }
 

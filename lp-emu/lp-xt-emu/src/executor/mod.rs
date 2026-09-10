@@ -17,6 +17,7 @@ use crate::cpu::Cpu;
 use crate::emu::Flow;
 use crate::error::{Trap, TrapKind};
 use crate::fp_policy::FpPolicy;
+use crate::mach::window::WindowPolicy;
 use crate::trace::{TraceEvent, Tracer};
 
 /// The per-instruction execution context: everything an executor touches,
@@ -45,6 +46,10 @@ pub(crate) struct Exec<'a, B: Bus> {
     pub(crate) cpu: &'a mut Cpu,
     pub(crate) mem: &'a mut B,
     pub(crate) fp_policy: &'a mut FpPolicy,
+    /// How `ENTRY`/`RETW` handle a window that has wrapped: the user-mode
+    /// runner spills and reloads directly, the machine-mode hart raises the
+    /// architectural exception. See [`WindowPolicy`].
+    pub(crate) window: WindowPolicy,
 }
 
 /// The trap a machine-mode-only instruction raises in the **user-mode** runner.
@@ -118,10 +123,12 @@ pub(crate) fn inst_class(inst: &Inst, flow: &Flow) -> InstClass {
         | Inst::BreakN(..)
         | Inst::Tlb(..)
         | Inst::TlbInv(..)
-        | Inst::ExtReg(..)
-        | Inst::MacLd(..)
-        | Inst::MacLoad(..) => InstClass::System,
-        Inst::Mac(..) => InstClass::Mul,
+        | Inst::ExtReg(..) => InstClass::System,
+        // A MAC16 multiply is a multiply; the multiply-and-load forms are
+        // charged as the multiply (the load rides along); the bare MR load
+        // is a load.
+        Inst::Mac(..) | Inst::MacLd(..) => InstClass::Mul,
+        Inst::MacLoad(..) => InstClass::Load,
         Inst::Clamps(..) | Inst::BoolLogic(..) | Inst::BoolAll(..) => InstClass::Alu,
         Inst::WindowLs(WindowLsOp::L32e, ..) => InstClass::Load,
         Inst::WindowLs(..) => InstClass::Store,

@@ -52,16 +52,33 @@ pub struct Trap {
 /// `Memory::fetch`'s own trap did.
 ///
 /// [`MemoryError::Unaligned`] and [`MemoryError::Watchpoint`] are
-/// machine-mode-only shapes: `Memory` raises neither, and the privileged hart
-/// (M1 P3) maps them to their own EXCCAUSE values rather than reusing these.
-/// Until then they land on [`EXC_LOAD_STORE_ERROR`], which is the only honest
-/// user-mode answer — a user-mode `Memory` that produced one would be a bug in
-/// `Memory`, not a cause code this crate can invent.
+/// machine-mode-only shapes: `Memory` raises neither, so mapping them changes
+/// no user-mode byte. They carry their own causes so the privileged hart
+/// ([`crate::mach`]) can tell them apart at its error boundary: an unaligned
+/// access is [`EXC_LOAD_STORE_ALIGNMENT`] with the address in `vaddr`, and a
+/// watchpoint is the crate-private [`TRAP_CAUSE_WATCHPOINT`] pseudo-cause
+/// with the slot in its low bits — not an EXCCAUSE at all, because a DBREAK
+/// hit is a *debug* exception (DEBUGCAUSE, level `DEBUGLEVEL`), and only the
+/// hart can raise one.
 pub(crate) fn trap_from_bus(e: MemoryError) -> Trap {
     let (address, kind) = match e {
         MemoryError::InvalidAccess { address, kind, .. } => (address, kind),
-        MemoryError::Unaligned { address, .. } => (address, MemoryAccessKind::Read),
-        MemoryError::Watchpoint { address, kind, .. } => (address, kind),
+        MemoryError::Unaligned { address, .. } => {
+            return Trap {
+                kind: TrapKind::Exception,
+                cause: EXC_LOAD_STORE_ALIGNMENT,
+                pc: 0,
+                vaddr: address,
+            };
+        }
+        MemoryError::Watchpoint { address, slot, .. } => {
+            return Trap {
+                kind: TrapKind::Exception,
+                cause: TRAP_CAUSE_WATCHPOINT | u32::from(slot),
+                pc: 0,
+                vaddr: address,
+            };
+        }
     };
     match kind {
         MemoryAccessKind::InstructionFetch => Trap {
@@ -92,6 +109,16 @@ impl From<MemoryError> for Trap {
 pub const EXC_ILLEGAL_INSTRUCTION: u32 = 0;
 /// EXCCAUSE for a `SYSCALL` with no host handler installed (`SyscallCause`).
 pub const EXC_SYSCALL: u32 = 1;
+/// EXCCAUSE for a load or store whose address the access width cannot use
+/// (`LoadStoreAlignmentCause`, ISA RM §4.4.3, Table 4-68). Machine-mode
+/// only: user-mode `Memory` never raises [`MemoryError::Unaligned`].
+pub const EXC_LOAD_STORE_ALIGNMENT: u32 = 9;
+/// The crate-private pseudo-cause a bus watchpoint travels under between the
+/// executors and the machine-mode hart: `TRAP_CAUSE_WATCHPOINT | slot`. It is
+/// **not** an EXCCAUSE value — it sits far above the 6-bit cause space so it
+/// can never be mistaken for one — and it never reaches user mode, whose
+/// `Memory` has no watchpoint slots.
+pub(crate) const TRAP_CAUSE_WATCHPOINT: u32 = 0x1_0000;
 /// EXCCAUSE for an integer divide (or remainder) by zero
 /// (`IntegerDivideByZeroCause`). Hardware raises this from `quos`/`quou`/
 /// `rems`/`remu` with a zero divisor; the P3 dual-run corpus asserts the

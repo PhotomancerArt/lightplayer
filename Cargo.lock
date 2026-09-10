@@ -5891,6 +5891,7 @@ dependencies = [
 name = "lp-xt-emu"
 version = "40.0.0"
 dependencies = [
+ "log",
  "lp-emu-core",
  "lp-xt-fp-vectors",
  "lp-xt-inst",

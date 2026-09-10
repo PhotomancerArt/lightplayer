@@ -113,6 +113,10 @@ pub struct FrameRec {
 }
 
 /// Full architectural register state.
+///
+/// `Clone` so the machine-mode hart ([`crate::mach::XtHart`]) can be
+/// snapshotted: the clone *is* the architectural state.
+#[derive(Clone)]
 pub struct Cpu {
     /// Program counter (an I-bus / executable address while running).
     pub pc: u32,
