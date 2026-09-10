@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate `RegNames` tables from the esp32c6 PAC: register names and resets.
+"""Generate `RegNames` tables from an Espressif PAC: register names and resets.
 
 A bus log that says `UART0+0x01c` has to be decoded by hand against a PAC.
 One that says `UART0+0x01c status` can be read. The names come from the same
@@ -26,15 +26,24 @@ the same source and under the same provenance and `--check` lint:
 
 Two modes:
 
-    scripts/emu/pac-regnames.py            regenerate every table
-    scripts/emu/pac-regnames.py --check    fail if any table is out of date
+    scripts/emu/pac-regnames.py            regenerate the esp32c6's tables
+    scripts/emu/pac-regnames.py --pac esp32
+                                           regenerate the classic's tables
+    scripts/emu/pac-regnames.py --check    fail if ANY chip's table is stale
 
 `just lint-emu-regnames` runs `--check`, so a hand edit is caught the way
 `lint-vec-corpus` catches one in the shader corpus.
 
+**One script, several chips.** [`CHIPS`] names each machine crate's PAC, its
+block table, and the blocks that must NOT be emitted for it. `--pac` selects
+one for a regenerate run and defaults to `esp32c6`, so no existing invocation
+changes; `--check` ignores it and checks them all, because a lint that
+depended on which chip you named would pass for the chip you were not
+working on.
+
 Source resolution, in order:
 
-    1. an unpacked crate under $CARGO_HOME/registry/src/*/esp32c6-<version>/
+    1. an unpacked crate under $CARGO_HOME/registry/src/*/<pac>-<version>/
     2. the `.crate` tarball under $CARGO_HOME/registry/cache/*/
     3. `cargo fetch --locked`, then 1 and 2 again
 
@@ -59,8 +68,6 @@ from dataclasses import dataclass
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-PAC_CRATE = "esp32c6"
-PAC_VERSION = "0.23.2"
 PAC_REPO = "https://github.com/esp-rs/esp-pacs"
 PAC_LICENSE = "MIT OR Apache-2.0"
 VENDORED_LICENSE = "licenses/esp-pacs-MIT.txt"
@@ -75,7 +82,7 @@ class Target:
     out: str  # repo-relative output path
 
 
-# The blocks generated today.
+# The blocks generated today for the **C6**.
 #
 # The first two live in `lp-emu-esp-common/tests/` and are P3's proof that
 # the generator handles both shapes: a flat block (uart0) and one with
@@ -88,7 +95,7 @@ class Target:
 # mask ROM reads before `.bss` is zeroed, and `interrupt_core0`, whose 77 map
 # entries `_setup_interrupts` writes. P5/P6/M4 add a row each as they model a
 # block.
-TARGETS = [
+C6_TARGETS = [
     Target(
         block="uart0",
         static="UART0",
@@ -300,6 +307,101 @@ TARGETS = [
 ]
 
 
+def _v3(block: str, static: str) -> Target:
+    return Target(
+        block=block,
+        static=static,
+        out=f"lp-emu/esp/lp-emu-esp32v3/src/regs/{block}.rs",
+    )
+
+
+# The blocks generated for the **classic ESP32 (v3)**, from the inventory in
+# `m3/notes.md` §4: every block the shipped image's boot path can reach,
+# modelled or accepted, plus RMT — generated now so M4 adds a peripheral view
+# rather than touching this script.
+#
+# Three of these serve more than one peripheral, because the PAC gives them
+# one `RegisterBlock` type each: `spi0` is SPI0/SPI1/SPI2/SPI3, `timg0` is
+# TIMG0/TIMG1, `uart0` is UART0/UART1/UART2. One table, several bases.
+ESP32_TARGETS = [
+    # The system block: cache control, the per-core interrupt maps, the
+    # clock/reset gates, and core 1's stall (P4).
+    _v3("dport", "DPORT"),
+    # Reset cause, the two halves of the CPU stall key, and the RWDT (P5).
+    _v3("rtc_cntl", "RTC_CNTL"),
+    _v3("rtc_io", "RTC_IO"),
+    _v3("sens", "SENS"),
+    _v3("rtc_i2c", "RTC_I2C"),
+    # The esp-rtos tick, and LACT as the classic's clock (P5).
+    _v3("timg0", "TIMG0"),
+    # The console: the ROM banner at 115200, the app at 921600 (P6).
+    _v3("uart0", "UART0"),
+    # The flash controller and the cache's own port (P7).
+    _v3("spi0", "SPI0"),
+    # The IDF bootloader hashes the app image with it (P7).
+    _v3("sha", "SHA"),
+    # MAC and chip revision (P5).
+    _v3("efuse", "EFUSE"),
+    # The 40-pad fabric (P8).
+    _v3("gpio", "GPIO"),
+    _v3("io_mux", "IO_MUX"),
+    _v3("apb_ctrl", "APB_CTRL"),
+    _v3("frc_timer", "FRC_TIMER"),
+    # M4's peripheral, generated here so M4 does not touch this script.
+    _v3("rmt", "RMT"),
+]
+
+
+@dataclass(frozen=True)
+class Chip:
+    """One machine crate's PAC, its block table and its exclusions."""
+
+    pac: str  # the PAC crate name, e.g. "esp32c6"
+    version: str  # the version `Cargo.lock` pins
+    targets: list[Target]
+    # `(block, reason)` — blocks this chip must NOT emit. A block named here
+    # and also in `targets` is a bug, and `main` says so rather than
+    # generating it.
+    skip: tuple[tuple[str, str], ...] = ()
+    # Where the PAC's `Interrupt` enum goes, or None if the chip has no such
+    # enum. The classic has none: `esp32-0.40.2` ships no `src/interrupt.rs`,
+    # because its interrupt sources are DPORT `core_N_intr_map` indices
+    # rather than a PLIC-style numbered table.
+    sources_out: str | None = None
+
+
+CHIPS = {
+    "esp32c6": Chip(
+        pac="esp32c6",
+        version="0.23.2",
+        targets=C6_TARGETS,
+        sources_out="lp-emu/esp/lp-emu-esp32c6/src/regs/interrupt_sources.rs",
+    ),
+    "esp32": Chip(
+        pac="esp32",
+        version="0.40.2",
+        targets=ESP32_TARGETS,
+        skip=(
+            (
+                "rng",
+                # esp32-0.40.2/src/lib.rs:647 gives RNG the base 0x6003_5000,
+                # an address that DOES NOT EXIST on the classic: it is an
+                # S2/C3-family address that leaked into the SVD. The classic's
+                # random register is WDEV_RND_REG inside the WiFi window, and
+                # M3 P7 resolves it from the ROM ELF's own symbol or from
+                # esp-hal's classic `rng` — never from that PAC line. Emitting
+                # a table for it would give a wrong address a provenance
+                # header, which is worse than having no table at all.
+                "the PAC's base 0x6003_5000 is an SVD leak from another "
+                "family; see m3/notes.md §4 and memmap::periph",
+            ),
+        ),
+    ),
+}
+
+DEFAULT_PAC = "esp32c6"
+
+
 # --------------------------------------------------------------------------
 # reading the PAC
 
@@ -307,7 +409,8 @@ TARGETS = [
 class PacSource:
     """Reads files out of the PAC crate, unpacked or still in its tarball."""
 
-    def __init__(self) -> None:
+    def __init__(self, chip: Chip) -> None:
+        self.chip = chip
         self.src_dir: str | None = None
         self.tar: tarfile.TarFile | None = None
         self.origin = "not found"
@@ -320,7 +423,7 @@ class PacSource:
 
     def _try_open(self) -> bool:
         home = self._cargo_home()
-        stem = f"{PAC_CRATE}-{PAC_VERSION}"
+        stem = f"{self.chip.pac}-{self.chip.version}"
         dirs = glob.glob(os.path.join(home, "registry", "src", "*", stem))
         if dirs:
             self.src_dir = dirs[0]
@@ -360,7 +463,7 @@ class PacSource:
             with open(path, encoding="utf-8") as f:
                 return f.read()
         if self.tar is not None:
-            member = f"{PAC_CRATE}-{PAC_VERSION}/{relpath}"
+            member = f"{self.chip.pac}-{self.chip.version}/{relpath}"
             try:
                 fh = self.tar.extractfile(member)
             except KeyError:
@@ -548,7 +651,7 @@ def collect(
     """
     top = pac.read(f"src/{block}.rs")
     if top is None:
-        raise SystemExit(f"pac-regnames: {PAC_CRATE} has no src/{block}.rs")
+        raise SystemExit(f"pac-regnames: {pac.chip.pac} has no src/{block}.rs")
 
     accessors = parse_impl(top, "RegisterBlock")
     lengths = array_lengths(top)
@@ -608,26 +711,29 @@ def collect(
 # --------------------------------------------------------------------------
 # the interrupt-source table
 
-# Where the peripheral interrupt source numbers go. `esp32c6::Interrupt` is
+# The peripheral interrupt source numbers. `esp32c6::Interrupt` is
 # `#[repr(u16)]` with one `#[doc = "N - NAME"]` per variant; the numbers are
 # the indices of `INTERRUPT_CORE0.core_0_intr_map[n]`, so they are as much
 # SVD-derived data as a register offset and carry the same header.
-SOURCES_OUT = "lp-emu/esp/lp-emu-esp32c6/src/regs/interrupt_sources.rs"
+#
+# Not every chip has one: `Chip.sources_out` is None for a PAC that ships no
+# `src/interrupt.rs`, which is the classic's case (its sources are DPORT
+# `core_N_intr_map` indices rather than a numbered enum).
 SOURCE_DOC = re.compile(r'#\[doc = "(\d+) - (\w+)"\]')
 
 
 def collect_sources(pac: PacSource) -> list[tuple[int, str]]:
     text = pac.read("src/interrupt.rs")
     if text is None:
-        raise SystemExit(f"pac-regnames: {PAC_CRATE} has no src/interrupt.rs")
+        raise SystemExit(f"pac-regnames: {pac.chip.pac} has no src/interrupt.rs")
     out = [(int(m.group(1)), m.group(2)) for m in SOURCE_DOC.finditer(text)]
     return sorted(out)
 
 
-def render_sources(entries: list[tuple[int, str]], svd2rust: str) -> str:
+def render_sources(chip: Chip, entries: list[tuple[int, str]], svd2rust: str) -> str:
     lines = [
         "// Peripheral interrupt source numbers derived from esp-rs/esp-pacs:",
-        f"//   {PAC_CRATE}/src/interrupt.rs  (crate {PAC_CRATE} {PAC_VERSION},",
+        f"//   {chip.pac}/src/interrupt.rs  (crate {chip.pac} {chip.version},",
         f"//   generated by {svd2rust})",
         f"// Repository: {PAC_REPO}",
         f"// {PAC_LICENSE}; MIT text vendored at {VENDORED_LICENSE}.",
@@ -683,6 +789,7 @@ ACCESS_VARIANT = {"r": "ReadOnly", "w": "WriteOnly", "none": "NoAccess"}
 
 
 def render(
+    chip: Chip,
     target: Target,
     entries: list[tuple[int, str]],
     resets: list[tuple[int, int]],
@@ -691,7 +798,7 @@ def render(
 ) -> str:
     lines = [
         "// Register offsets, names and reset values derived from esp-rs/esp-pacs:",
-        f"//   {PAC_CRATE}/src/{target.block}.rs  (crate {PAC_CRATE} {PAC_VERSION},",
+        f"//   {chip.pac}/src/{target.block}.rs  (crate {chip.pac} {chip.version},",
         f"//   generated by {svd2rust})",
         f"// Repository: {PAC_REPO}",
         f"// {PAC_LICENSE}; MIT text vendored at {VENDORED_LICENSE}.",
@@ -726,47 +833,55 @@ def render(
 # --------------------------------------------------------------------------
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument(
-        "--check",
-        action="store_true",
-        help="fail if a generated table differs from what this script produces",
-    )
-    args = ap.parse_args()
+def run_chip(chip: Chip, check: bool, stale: list[str]) -> int:
+    """Generate (or check) every table for one chip. Returns a process code:
+    0 to carry on, 1 to stop. `stale` collects the drifted paths under
+    `--check`."""
+    # A block named in both `targets` and `skip` would be an exclusion that
+    # silently did nothing, which is the failure mode the SKIP table exists
+    # to prevent. Say so before touching a file.
+    skipped = {block for block, _ in chip.skip}
+    both = sorted(skipped.intersection(t.block for t in chip.targets))
+    if both:
+        print(
+            f"pac-regnames: {chip.pac}: {', '.join(both)} is in BOTH the target "
+            "table and the SKIP table",
+            file=sys.stderr,
+        )
+        return 1
 
-    pac = PacSource()
+    pac = PacSource(chip)
     if not pac.open():
         msg = (
-            f"pac-regnames: the {PAC_CRATE} {PAC_VERSION} sources are not in this\n"
+            f"pac-regnames: the {chip.pac} {chip.version} sources are not in this\n"
             f"    machine's cargo registry (neither unpacked nor as a .crate), and\n"
             f"    `cargo fetch` did not produce them."
         )
-        if args.check:
+        if check:
             print(msg)
-            print("    SKIPPED: the generated tables were not checked here.")
+            print(f"    SKIPPED: {chip.pac}'s generated tables were not checked here.")
             return 0
         print(msg, file=sys.stderr)
         return 1
 
     svd2rust = pac.svd2rust_line()
-    stale: list[str] = []
-    for target in TARGETS:
+    stale_before = len(stale)
+    for target in chip.targets:
         entries, resets, access = collect(pac, target.block)
         if not entries:
             print(
-                f"pac-regnames: no registers parsed for `{target.block}` — the PAC's "
-                "shape changed",
+                f"pac-regnames: no registers parsed for `{target.block}` — the "
+                f"{chip.pac} PAC's shape changed",
                 file=sys.stderr,
             )
             return 1
-        text = render(target, entries, resets, access, svd2rust)
+        text = render(chip, target, entries, resets, access, svd2rust)
         path = os.path.join(REPO, target.out)
         current = None
         if os.path.exists(path):
             with open(path, encoding="utf-8") as f:
                 current = f.read()
-        if args.check:
+        if check:
             if current != text:
                 stale.append(target.out)
             continue
@@ -784,44 +899,82 @@ def main() -> int:
             f"{len(resets)} resets, {len(access)} non-rw)"
         )
 
-    # The interrupt-source table, same discipline.
-    sources = collect_sources(pac)
-    if len(sources) < 2:
-        print("pac-regnames: no interrupt sources parsed — the PAC's shape changed", file=sys.stderr)
-        return 1
-    text = render_sources(sources, svd2rust)
-    path = os.path.join(REPO, SOURCES_OUT)
-    current = None
-    if os.path.exists(path):
-        with open(path, encoding="utf-8") as f:
-            current = f.read()
-    if args.check:
-        if current != text:
-            stale.append(SOURCES_OUT)
-    elif current == text:
-        print(f"  unchanged  {SOURCES_OUT} ({len(sources)} sources)")
-    else:
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(text)
-        print(f"  wrote      {SOURCES_OUT} ({len(sources)} sources)")
-
-    if args.check:
-        if stale:
-            print("pac-regnames: these generated tables are out of date:")
-            for s in stale:
-                print(f"    {s}")
-            print()
-            print("They are generated from the esp32c6 PAC and must never be edited")
-            print("by hand — a hand edit is reverted by the next regeneration and")
-            print("takes its provenance with it. Run:")
-            print()
-            print("    scripts/emu/pac-regnames.py")
-            print()
+    # The interrupt-source table, same discipline — for the chips that have
+    # one. See `Chip.sources_out`.
+    if chip.sources_out is not None:
+        sources = collect_sources(pac)
+        if len(sources) < 2:
+            print(
+                f"pac-regnames: no interrupt sources parsed — the {chip.pac} PAC's "
+                "shape changed",
+                file=sys.stderr,
+            )
             return 1
+        text = render_sources(chip, sources, svd2rust)
+        path = os.path.join(REPO, chip.sources_out)
+        current = None
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as f:
+                current = f.read()
+        if check:
+            if current != text:
+                stale.append(chip.sources_out)
+        elif current == text:
+            print(f"  unchanged  {chip.sources_out} ({len(sources)} sources)")
+        else:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+            print(f"  wrote      {chip.sources_out} ({len(sources)} sources)")
+
+    if check and len(stale) == stale_before:
+        extra = " + the interrupt-source table" if chip.sources_out else ""
         print(
-            f"pac-regnames: {len(TARGETS)} generated table(s) + the interrupt-source "
-            f"table up to date (source: {pac.origin})"
+            f"pac-regnames: {chip.pac}: {len(chip.targets)} generated table(s)"
+            f"{extra} up to date (source: {pac.origin})"
         )
+    return 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument(
+        "--check",
+        action="store_true",
+        help="fail if any chip's generated table differs from what this script "
+        "produces. Checks EVERY chip, whatever --pac says.",
+    )
+    ap.add_argument(
+        "--pac",
+        choices=sorted(CHIPS),
+        default=DEFAULT_PAC,
+        help=f"which chip's tables to regenerate (default: {DEFAULT_PAC}). "
+        "Ignored under --check.",
+    )
+    args = ap.parse_args()
+
+    # `--check` covers every chip: a lint that only saw the chip you happened
+    # to name would pass for the one you were not working on.
+    chips = list(CHIPS.values()) if args.check else [CHIPS[args.pac]]
+
+    stale: list[str] = []
+    for chip in chips:
+        code = run_chip(chip, args.check, stale)
+        if code != 0:
+            return code
+
+    if args.check and stale:
+        print("pac-regnames: these generated tables are out of date:")
+        for s in stale:
+            print(f"    {s}")
+        print()
+        print("They are generated from an Espressif PAC and must never be edited")
+        print("by hand — a hand edit is reverted by the next regeneration and")
+        print("takes its provenance with it. Run:")
+        print()
+        for chip in chips:
+            print(f"    scripts/emu/pac-regnames.py --pac {chip.pac}")
+        print()
+        return 1
     return 0
 
 

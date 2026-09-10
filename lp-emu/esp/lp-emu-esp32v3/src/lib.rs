@@ -25,3 +25,4 @@
 //! own, before anything depends on them.
 
 pub mod memmap;
+pub mod regs;

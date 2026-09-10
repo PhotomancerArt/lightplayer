@@ -2560,11 +2560,15 @@ bench-emu-xt *args:
     scripts/emu/bench-xt.sh {{ args }}
 
 # The generated `RegNames` tables (offset -> register name) are derived from
-# the esp32c6 PAC's svd2rust offset comments and carry a provenance header.
+# an Espressif PAC's svd2rust offset comments and carry a provenance header.
 # A hand edit is reverted by the next regeneration and takes its provenance
 # with it, so this checks them the way `lint-vec-corpus` checks the shader
 # corpus. It prints a notice and passes when the PAC sources are not in this
 # machine's cargo registry — see the script's header for why.
+#
+# `--check` covers EVERY chip in the script's `CHIPS` table (esp32c6 and
+# esp32 today), whatever `--pac` a regenerate run last named: a lint that only
+# saw the chip you happened to be working on would pass for the other one.
 lint-emu-regnames:
     python3 scripts/emu/pac-regnames.py --check
 

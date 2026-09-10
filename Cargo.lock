@@ -5699,13 +5699,11 @@ dependencies = [
 name = "lp-emu-esp32v3"
 version = "40.0.0"
 dependencies = [
- "env_logger 0.11.9",
  "log",
  "lp-emu-core",
  "lp-emu-esp-common",
  "lp-xt-emu",
  "sha2",
- "test-log",
 ]
 
 [[package]]
