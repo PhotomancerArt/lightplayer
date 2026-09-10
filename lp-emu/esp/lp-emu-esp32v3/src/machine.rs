@@ -116,6 +116,9 @@ pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     // Direct load, stop 6: `esp_hal::init` disables TIMG1's watchdog
     // (`wdtwprotect` first, then `wdtconfig0`).
     "TIMG1",
+    // Direct load, stop 7: `Uart::new(…).with_rx(GPIO3)` routes U0RXD
+    // through the GPIO matrix.
+    "GPIO",
     // ROM-up, stop 1: `_ResetHandler_efuse_check_patch` reads its own
     // fuses seven instructions after the reset vector.
     "EFUSE",

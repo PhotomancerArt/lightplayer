@@ -260,6 +260,34 @@ pub fn i2c_ana_mst() -> RegFile {
     })
 }
 
+/// `GPIO`'s aperture, tight: the generated table runs to `+0x5cc`
+/// (`func39_out_sel_cfg`).
+pub const GPIO_LEN: u32 = 0x600;
+
+/// `GPIO` — **P8's block** (the 40-pad fabric), accept-and-remember here.
+///
+/// The seventh strict stop of the direct load, 3,564,113 cycles in:
+/// `boot_firmware+0xe02` writes `func14_in_sel_cfg` (`+0x168`) — the GPIO
+/// matrix routing `U0RXD_IN` (signal 14) from pad 3, which is
+/// `Uart::new(…).with_rx(peripherals.GPIO3)` in `board/esp32v3/init.rs`.
+/// The matrix's `func*_in_sel_cfg` / `func*_out_sel_cfg` words, `enable`,
+/// `out`, and the per-pin `pin*` words are written and read back as
+/// written; every reset is the PAC's (the table carries none, so the block
+/// reads 0 before it is written).
+///
+/// What an accept block does *not* do: `strap` (`+0x38`, read-only) reads
+/// **0** — the PAC's reset for a register whose value is the board's pins at
+/// reset. The mask ROM's `main` reads it fifteen times to choose its boot
+/// mode, and the C6's `Gpio::new(strap_word)` is the shape P7/P8 give it
+/// (the desk board boots `boot:0x13 (SPI_FAST_FLASH_BOOT)`, L0). `in_`
+/// (`+0x3c`) reads 0 for the same reason: no pad is driven from outside
+/// until the fabric exists.
+pub fn gpio() -> RegFile {
+    RegFile::new("GPIO", GPIO_LEN)
+        .with_names(regs::GPIO)
+        .with_pac_grades()
+}
+
 /// `EFUSE`'s aperture: the generated table runs to `+0x1fc` (`date`).
 pub const EFUSE_LEN: u32 = 0x200;
 
@@ -301,6 +329,7 @@ mod tests {
             (timg("TIMG0"), regs::TIMG0),
             (i2c_ana_mst(), I2C_ANA_MST_NAMES),
             (timg("TIMG1"), regs::TIMG0),
+            (gpio(), regs::GPIO),
             (efuse(), regs::EFUSE),
         ]
     }
