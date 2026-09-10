@@ -27,7 +27,7 @@ emu_bin="${1:?usage: two-binary-probe.sh <lp-emu-esp32c6-bin> <lp-cli-bin> [runs
 cli_bin="${2:?usage: two-binary-probe.sh <lp-emu-esp32c6-bin> <lp-cli-bin> [runs]}"
 runs="${3:-3}"
 
-elf="${LP_EMU_C6_REF_RENDER_BASIC:-target/emu-ref/8ffc4b325-render-basic/fw-esp32c6}"
+elf="${LP_EMU_C6_REF_RENDER_BASIC:-target/emu-ref/77384a894-render-basic/fw-esp32c6}"
 [[ -f "$elf" ]] || { echo "two-binary-probe: no render-basic image at $elf" >&2; exit 1; }
 
 out_dir="target/emu-bench/two-binary"

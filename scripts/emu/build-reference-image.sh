@@ -49,6 +49,15 @@
 # 2026-09-08 `links = "esp-hal"` fix, so `image_drift`'s `.rodata_merge` heal
 # should never fire for them; if it does, that is a finding, not a heal.
 #
+# THEIR PIN MOVED 2026-09-10, from 8ffc4b325 to 77384a894 (M7 JD22). The old
+# pair predated fb55913ae, the commit that gave `lpvm-native`'s
+# `rt_jit/buffer.rs` its `fence.i` — so on those images the guest wrote its
+# shader code into the heap and never published it, and the emulator's second
+# translation event could not see it. That was the whole remaining discovery
+# shortfall: 12.28 % of retired instructions on `render-basic` and 17.96 % on
+# `render-rocaille`, all of it inside 0x40843000-0x40846000. The old pair is
+# still buildable — this recipe takes any commit — and nothing references it.
+#
 # `--features` adds to the crate's defaults (`esp32c6,server,radio`), which is
 # how the spike built them (§5.4: "defaults on").
 set -euo pipefail

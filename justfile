@@ -2429,7 +2429,7 @@ emu-esp32v3 elf *args:
 # to the same `(width, InstClass)`. Its **sweep** half needs nothing and runs in
 # every `cargo test`; its **corpus** half decodes every 16- and 32-bit word of
 # the two pinned render images and so needs those images — a riscv32 firmware
-# build at commit 8ffc4b325, two of them, minutes each.
+# build at commit 77384a894, two of them, minutes each.
 #
 # So the corpus half is `#[ignore]`d, exactly like the C6 boot tests and for
 # exactly the reason in `lp_emu_esp32c6::test_support`'s module docs: a plain

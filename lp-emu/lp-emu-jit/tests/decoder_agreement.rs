@@ -317,7 +317,7 @@ struct RenderImage {
     features: &'static str,
 }
 
-const RENDER_COMMIT: &str = "8ffc4b325";
+const RENDER_COMMIT: &str = "77384a894";
 
 const RENDER_BASIC: RenderImage = RenderImage {
     slug: "render-basic",
