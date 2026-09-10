@@ -1418,6 +1418,21 @@ impl super::translated::TranslatedCore<TestBus> for alloc::rc::Rc<core::cell::Re
         );
         match me.outcome {
             super::translated::RunOutcome::Refused => super::translated::RunOutcome::Refused,
+            super::translated::RunOutcome::Ended {
+                pc,
+                cycle_count,
+                instruction_count,
+                end,
+            } => {
+                hart.set_pc(pc);
+                hart.set_counters(cycle_count, instruction_count);
+                super::translated::RunOutcome::Ended {
+                    pc,
+                    cycle_count,
+                    instruction_count,
+                    end,
+                }
+            }
             super::translated::RunOutcome::Ran {
                 pc,
                 cycle_count,

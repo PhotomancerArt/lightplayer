@@ -2249,15 +2249,24 @@ impl Esp32C6Machine {
                 .filter(|r| r.is_executable())
                 .map(|r| (r.base, r.end()))
                 .collect();
-            seeds.extend(
-                app.symbols()
-                    .iter()
-                    .filter(|s| {
-                        exec.iter()
-                            .any(|&(lo, hi)| s.address >= lo && s.address < hi)
-                    })
-                    .map(|s| s.address),
-            );
+            // Biggest first. The bound is a budget, so the order decides what
+            // it is spent on: a symbol's size is the cheapest signal available
+            // that it names a function rather than a label or a jump table,
+            // and a big function is both likelier to be hot and likelier to
+            // yield long blocks. Address order spends the whole budget on
+            // whatever happens to link first, which on these images is boot
+            // code the render loop never runs again.
+            let mut named: Vec<(u32, u32)> = app
+                .symbols()
+                .iter()
+                .filter(|s| {
+                    exec.iter()
+                        .any(|&(lo, hi)| s.address >= lo && s.address < hi)
+                })
+                .map(|s| (s.size, s.address))
+                .collect();
+            named.sort_unstable_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+            seeds.extend(named.into_iter().map(|(_, address)| address));
         }
         let report = crate::jit::install(
             &mut self.harts[0],
