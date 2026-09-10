@@ -118,6 +118,31 @@ fn fp_to_int_op2(op: FpToIntOp) -> u32 {
     }
 }
 
+/// `op1{3-2}` for a MAC16 multiply.
+fn mac_which(op: MacOp) -> u32 {
+    match op {
+        MacOp::Umul => 0,
+        MacOp::Mul => 1,
+        MacOp::Mula => 2,
+        MacOp::Muls => 3,
+    }
+}
+
+/// `op1{1-0}` for a MAC16 half selector.
+fn mac_half(half: MacHalf) -> u32 {
+    match half {
+        MacHalf::Ll => 0,
+        MacHalf::Hl => 1,
+        MacHalf::Lh => 2,
+        MacHalf::Hh => 3,
+    }
+}
+
+/// The `t` field for a MAC16 `y`-from-MR operand: `m2` -> 0, `m3` -> 4.
+fn mac_y(my: MReg) -> u32 {
+    ((my.num() & 0x1) << 2) as u32
+}
+
 /// Encode `inst` to little-endian machine bytes.
 pub fn encode(inst: &Inst) -> Vec<u8> {
     let mut out = Vec::with_capacity(3);
@@ -521,6 +546,44 @@ pub fn encode(inst: &Inst) -> Vec<u8> {
             emit(
                 &mut out,
                 pack(0, at.num() as u32, ars.num() as u32, r, 0, 4),
+                3,
+            );
+        }
+
+        // --- MAC16 (op0 = 4) ---
+        Inst::Mac(which, half, src) => {
+            let op1 = (mac_which(which) << 2) | mac_half(half);
+            let w = match src {
+                MacSrc::Aa(ars, at) => pack(4, at.num() as u32, ars.num() as u32, 0, op1, 7),
+                MacSrc::Ad(ars, my) => pack(4, mac_y(my), ars.num() as u32, 0, op1, 3),
+                MacSrc::Da(mx, at) => pack(
+                    4,
+                    at.num() as u32,
+                    0,
+                    ((mx.num() & 0x1) as u32) << 2,
+                    op1,
+                    6,
+                ),
+                MacSrc::Dd(mx, my) => pack(4, mac_y(my), 0, ((mx.num() & 0x1) as u32) << 2, op1, 2),
+            };
+            emit(&mut out, w, 3);
+        }
+        Inst::MacLd(dec, half, mw, ars, mx, y) => {
+            // Always the MULA multiply; op2 picks .dd (0/1) vs .da (4/5) and
+            // ldinc (even) vs lddec (odd).
+            let op1 = (mac_which(MacOp::Mula) << 2) | mac_half(half);
+            let r = (((mx.num() & 0x1) << 2) | (mw.num() & 0x3)) as u32;
+            let (t, op2) = match y {
+                MacY::Mr(my) => (mac_y(my), if dec { 1 } else { 0 }),
+                MacY::Ar(at) => (at.num() as u32, if dec { 5 } else { 4 }),
+            };
+            emit(&mut out, pack(4, t, ars.num() as u32, r, op1, op2), 3);
+        }
+        Inst::MacLoad(dec, mw, ars) => {
+            let op2 = if dec { 9 } else { 8 };
+            emit(
+                &mut out,
+                pack(4, 0, ars.num() as u32, (mw.num() & 0x3) as u32, 0, op2),
                 3,
             );
         }

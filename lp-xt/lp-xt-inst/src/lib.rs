@@ -265,6 +265,96 @@ pub enum WindowLsOp {
     S32e,
 }
 
+/// A MAC16 operand register `m0`..`m3`.
+///
+/// A separate type from [`Reg`] for the same reason [`FReg`] is: the MR file is
+/// four registers wide and unrelated to the windowed AR file, and the two are
+/// not interchangeable in any MAC16 operand slot.
+///
+/// The architecture constrains which half of the file each slot can name — the
+/// **x** operand is `m0`/`m1`, the **y** operand is `m2`/`m3` — and the encoded
+/// fields are one bit wide accordingly, so `decode` never produces an out-of-
+/// range pairing and `encode` masks to the same bit.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MReg(u8);
+
+impl MReg {
+    /// Create a MAC16 register from a raw number, panicking if `>3`.
+    #[inline]
+    pub const fn new(n: u8) -> MReg {
+        assert!(n < 4, "Xtensa MAC16 register out of range");
+        MReg(n)
+    }
+
+    /// The raw register number `0..=3`.
+    #[inline]
+    pub const fn num(self) -> u8 {
+        self.0
+    }
+}
+
+impl core::fmt::Debug for MReg {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "m{}", self.0)
+    }
+}
+
+/// Which MAC16 multiply a word performs (`op1{3-2}`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MacOp {
+    /// `umul.aa.<half>` — unsigned multiply into the accumulator; `op1{3-2} = 0`.
+    /// Only the AA operand form exists.
+    Umul,
+    /// `mul.<xy>.<half>` — signed multiply, replacing the accumulator; `= 1`.
+    Mul,
+    /// `mula.<xy>.<half>` — multiply-accumulate; `= 2`.
+    Mula,
+    /// `muls.<xy>.<half>` — multiply-subtract; `= 3`.
+    Muls,
+}
+
+/// Which 16-bit half of each 32-bit multiplicand a MAC16 word uses
+/// (`op1{1-0}`): the first letter is the **x** operand, the second the **y**.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MacHalf {
+    /// `.ll` — low × low; `op1{1-0} = 0`.
+    Ll,
+    /// `.hl` — high × low; `= 1`.
+    Hl,
+    /// `.lh` — low × high; `= 2`.
+    Lh,
+    /// `.hh` — high × high; `= 3`.
+    Hh,
+}
+
+/// Where a MAC16 multiply's two operands come from (`op2`), with the registers.
+///
+/// The letters name the files: `A` = the address-register file, `D` = the MAC16
+/// `m0..m3` file, x first then y. The `x`-from-MR forms may only name `m0`/`m1`
+/// and the `y`-from-MR forms only `m2`/`m3` — a hardware constraint, not a
+/// modelling choice.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MacSrc {
+    /// `op.aa.<half> as, at` — both from the AR file; `op2 = 7`.
+    Aa(Reg, Reg),
+    /// `op.ad.<half> as, my` — x from AR, y from MR; `op2 = 3`.
+    Ad(Reg, MReg),
+    /// `op.da.<half> mx, at` — x from MR, y from AR; `op2 = 6`.
+    Da(MReg, Reg),
+    /// `op.dd.<half> mx, my` — both from MR; `op2 = 2`.
+    Dd(MReg, MReg),
+}
+
+/// The `y` operand of a MAC16 multiply-and-load, which decides whether the word
+/// is the `.da` or the `.dd` form.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MacY {
+    /// `.da…` — y from the AR file; `op2{2} = 1`.
+    Ar(Reg),
+    /// `.dd…` — y from the MR file (`m2`/`m3`); `op2{2} = 0`.
+    Mr(MReg),
+}
+
 /// Boolean-file logic ops (`RRR`, `op0 = 0`, `op1 = 2`). Shape: `op br, bs, bt`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BoolOp {
@@ -497,6 +587,22 @@ pub enum Inst {
     TlbInv(bool /* data? idtlb:iitlb */, Reg),
     /// `rer at, as` (`write = false`) / `wer at, as` — external-register access.
     ExtReg(bool /* write? wer:rer */, Reg, Reg),
+
+    // --- MAC16 (`op0 = 4`; decode and disassembly only) ---
+    /// `op.<xy>.<half> …` — a MAC16 multiply.
+    Mac(MacOp, MacHalf, MacSrc),
+    /// `mula.<xy>.<half>.ldinc`/`.lddec mw, as, mx, y` — multiply-accumulate
+    /// with an autoincrementing MR load. `dec = true` selects `.lddec`.
+    MacLd(
+        bool, /* dec? lddec:ldinc */
+        MacHalf,
+        MReg,
+        Reg,
+        MReg,
+        MacY,
+    ),
+    /// `ldinc`/`lddec mw, as` — the bare MR load; `dec = true` for `lddec`.
+    MacLoad(bool /* dec? lddec:ldinc */, MReg, Reg),
 
     // --- special / user registers (see the [`sr`] module doc) ---
     /// `rsr.<sr>`/`wsr.<sr>`/`xsr.<sr> at`

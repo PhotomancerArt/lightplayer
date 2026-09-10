@@ -118,7 +118,10 @@ pub(crate) fn inst_class(inst: &Inst, flow: &Flow) -> InstClass {
         | Inst::BreakN(..)
         | Inst::Tlb(..)
         | Inst::TlbInv(..)
-        | Inst::ExtReg(..) => InstClass::System,
+        | Inst::ExtReg(..)
+        | Inst::MacLd(..)
+        | Inst::MacLoad(..) => InstClass::System,
+        Inst::Mac(..) => InstClass::Mul,
         Inst::Clamps(..) | Inst::BoolLogic(..) | Inst::BoolAll(..) => InstClass::Alu,
         Inst::WindowLs(WindowLsOp::L32e, ..) => InstClass::Load,
         Inst::WindowLs(..) => InstClass::Store,
@@ -423,7 +426,10 @@ impl<B: Bus> Exec<'_, B> {
             | Inst::BoolAll(..)
             | Inst::Tlb(..)
             | Inst::TlbInv(..)
-            | Inst::ExtReg(..) => return Err(machine_mode_only()),
+            | Inst::ExtReg(..)
+            | Inst::Mac(..)
+            | Inst::MacLd(..)
+            | Inst::MacLoad(..) => return Err(machine_mode_only()),
         };
         debug_assert_eq!(
             class,

@@ -26,6 +26,8 @@ enum Operand {
     FReg(u8),
     /// A boolean register, rendered `b3`.
     BReg(u8),
+    /// A MAC16 operand register, rendered `m2`.
+    MReg(u8),
     Imm(i64),
     Addr(u32),
 }
@@ -213,6 +215,7 @@ fn typed_operands(inst: &Inst, pc: u32) -> Vec<Operand> {
     let reg = |r: lp_xt_inst::Reg| Operand::Reg(r.num());
     let freg = |r: lp_xt_inst::FReg| Operand::FReg(r.num());
     let breg = |r: lp_xt_inst::BReg| Operand::BReg(r.num());
+    let mreg = |r: lp_xt_inst::MReg| Operand::MReg(r.num());
     let br = |off: i32| Operand::Addr(pc.wrapping_add(4).wrapping_add(off as u32));
     match *inst {
         Rrr(_, a, b, c) => vec![reg(a), reg(b), reg(c)],
@@ -234,6 +237,20 @@ fn typed_operands(inst: &Inst, pc: u32) -> Vec<Operand> {
         BoolAll(_, x, y) => vec![breg(x), breg(y)],
         Tlb(_, x, y) | ExtReg(_, x, y) => vec![reg(x), reg(y)],
         TlbInv(_, x) => vec![reg(x)],
+        Mac(_, _, src) => match src {
+            lp_xt_inst::MacSrc::Aa(x, y) => vec![reg(x), reg(y)],
+            lp_xt_inst::MacSrc::Ad(x, y) => vec![reg(x), mreg(y)],
+            lp_xt_inst::MacSrc::Da(x, y) => vec![mreg(x), reg(y)],
+            lp_xt_inst::MacSrc::Dd(x, y) => vec![mreg(x), mreg(y)],
+        },
+        MacLd(_, _, mw, ars, mx, y) => {
+            let last = match y {
+                lp_xt_inst::MacY::Ar(at) => reg(at),
+                lp_xt_inst::MacY::Mr(my) => mreg(my),
+            };
+            vec![mreg(mw), reg(ars), mreg(mx), last]
+        }
+        MacLoad(_, mw, ars) => vec![mreg(mw), reg(ars)],
         MovN(a, b) => vec![reg(a), reg(b)],
         AddN(a, b, c) => vec![reg(a), reg(b), reg(c)],
         AddiN(a, b, i) => vec![reg(a), reg(b), Operand::Imm(i as i64)],
@@ -322,6 +339,10 @@ fn parse_operands(text: &str, hints: &[Operand]) -> Option<Vec<Operand>> {
             Operand::BReg(_) => {
                 let n = tok.strip_prefix('b')?;
                 Operand::BReg(n.parse().ok()?)
+            }
+            Operand::MReg(_) => {
+                let n = tok.strip_prefix('m')?;
+                Operand::MReg(n.parse().ok()?)
             }
             Operand::Imm(_) => Operand::Imm(parse_int(tok)? & 0xffff_ffff),
             Operand::Addr(_) => {

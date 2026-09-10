@@ -528,6 +528,83 @@ fn integer_helper_booleans_and_region_protection() {
     }
 }
 
+#[test]
+fn mac16() {
+    const HALVES: [MacHalf; 4] = [MacHalf::Ll, MacHalf::Hl, MacHalf::Lh, MacHalf::Hh];
+    // The x MR operand is m0/m1, the y MR operand m2/m3 — a hardware
+    // constraint, so the round-trip only covers the pairings that exist.
+    for half in HALVES {
+        for which in [MacOp::Mul, MacOp::Mula, MacOp::Muls] {
+            for &x in &REGS {
+                for &y in &REGS {
+                    rt(Inst::Mac(which, half, MacSrc::Aa(r(x), r(y))), 3);
+                }
+                for my in 2..=3u8 {
+                    rt(Inst::Mac(which, half, MacSrc::Ad(r(x), MReg::new(my))), 3);
+                }
+            }
+            for mx in 0..=1u8 {
+                for &y in &REGS {
+                    rt(Inst::Mac(which, half, MacSrc::Da(MReg::new(mx), r(y))), 3);
+                }
+                for my in 2..=3u8 {
+                    rt(
+                        Inst::Mac(which, half, MacSrc::Dd(MReg::new(mx), MReg::new(my))),
+                        3,
+                    );
+                }
+            }
+        }
+        // `umul` exists only in the AA form.
+        for &x in &REGS {
+            for &y in &REGS {
+                rt(Inst::Mac(MacOp::Umul, half, MacSrc::Aa(r(x), r(y))), 3);
+            }
+        }
+        for dec in [false, true] {
+            for mw in 0..=3u8 {
+                for mx in 0..=1u8 {
+                    for &ars in &REGS {
+                        for &at in &REGS {
+                            rt(
+                                Inst::MacLd(
+                                    dec,
+                                    half,
+                                    MReg::new(mw),
+                                    r(ars),
+                                    MReg::new(mx),
+                                    MacY::Ar(r(at)),
+                                ),
+                                3,
+                            );
+                        }
+                        for my in 2..=3u8 {
+                            rt(
+                                Inst::MacLd(
+                                    dec,
+                                    half,
+                                    MReg::new(mw),
+                                    r(0),
+                                    MReg::new(mx),
+                                    MacY::Mr(MReg::new(my)),
+                                ),
+                                3,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for dec in [false, true] {
+        for mw in 0..=3u8 {
+            for &ars in &REGS {
+                rt(Inst::MacLoad(dec, MReg::new(mw), r(ars)), 3);
+            }
+        }
+    }
+}
+
 /// The SR / UR tables are total in both directions: every variant's number maps
 /// back to that variant, `ALL` and `from_num` agree on the modelled set, and
 /// numbers outside it stay `None`.

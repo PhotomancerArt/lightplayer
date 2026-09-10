@@ -162,6 +162,7 @@ fn decode24(w: u32) -> Option<Inst> {
         0x1 => Some(Inst::L32r(reg_t(w), ((w >> 8) & 0xffff) as u16)),
         0x2 => decode_rri8_ls_movi(w),
         0x3 => decode_fp_lsi(w),
+        0x4 => decode_mac16(w),
         0x5 => {
             // CALL format: call0/4/8/12
             let n = (w >> 4) & 0x3;
@@ -315,6 +316,87 @@ fn decode_fp_lsi(w: u32) -> Option<Inst> {
         _ => return None,
     };
     Some(Inst::FpLsi(op, freg_t(w), reg_s(w), imm8(w) as u32 * 4))
+}
+
+/// `op0 = 4`: the MAC16 major opcode, sub-decoded by `op2` then `op1`.
+///
+/// Field layout, all of it assembler-derived:
+///
+/// | `op2` | form |
+/// |---|---|
+/// | 0 / 1 | `mula.dd.<half>.ldinc` / `.lddec` |
+/// | 2 | `mul`/`mula`/`muls`` .dd.<half>` |
+/// | 3 | `… .ad.<half>` |
+/// | 4 / 5 | `mula.da.<half>.ldinc` / `.lddec` |
+/// | 6 | `… .da.<half>` |
+/// | 7 | `umul`/`mul`/`mula`/`muls`` .aa.<half>` |
+/// | 8 / 9 | `ldinc` / `lddec` |
+///
+/// `op1 = (which multiply << 2) | half`. The `x` MR operand rides in `r{3-2}`
+/// and can only be `m0`/`m1`; the `y` MR operand rides in `t{2}` and can only
+/// be `m2`/`m3`; `mw` (the load destination) rides in `r{1-0}`.
+///
+/// Every field the assembler emits as zero is **required** to be zero here. A
+/// MAC16 word with a reserved field set is not a MAC16 instruction, and
+/// decoding it as one is the mistake the `ssai` fix in this same phase was
+/// about.
+fn decode_mac16(w: u32) -> Option<Inst> {
+    let half = match op1(w) & 0x3 {
+        0 => MacHalf::Ll,
+        1 => MacHalf::Hl,
+        2 => MacHalf::Lh,
+        _ => MacHalf::Hh,
+    };
+    let which = match (op1(w) >> 2) & 0x3 {
+        0 => MacOp::Umul,
+        1 => MacOp::Mul,
+        2 => MacOp::Mula,
+        _ => MacOp::Muls,
+    };
+    // x from MR: r{3-2} selects m0/m1. y from MR: t{2} selects m2/m3.
+    let mx = MReg::new((r(w) >> 2) & 0x1);
+    let my = MReg::new(2 + ((t(w) >> 2) & 0x1));
+    let mw = MReg::new(r(w) & 0x3);
+    let r_hi_clear = r(w) & 0xc == 0;
+    let r_lo_clear = r(w) & 0x3 == 0;
+    // `t` carries only bit 2 when it names an MR operand.
+    let t_reserved_clear = t(w) & 0xb == 0;
+
+    match op2(w) {
+        // mula.dd.<half>.ldinc / .lddec — mula only.
+        0x0 | 0x1 if which == MacOp::Mula && t_reserved_clear => Some(Inst::MacLd(
+            op2(w) == 1,
+            half,
+            mw,
+            reg_s(w),
+            mx,
+            MacY::Mr(my),
+        )),
+        // mula.da.<half>.ldinc / .lddec — mula only.
+        0x4 | 0x5 if which == MacOp::Mula => Some(Inst::MacLd(
+            op2(w) == 5,
+            half,
+            mw,
+            reg_s(w),
+            mx,
+            MacY::Ar(reg_t(w)),
+        )),
+        0x2 if which != MacOp::Umul && r_lo_clear && s(w) == 0 && t_reserved_clear => {
+            Some(Inst::Mac(which, half, MacSrc::Dd(mx, my)))
+        }
+        0x3 if which != MacOp::Umul && r(w) == 0 && t_reserved_clear => {
+            Some(Inst::Mac(which, half, MacSrc::Ad(reg_s(w), my)))
+        }
+        0x6 if which != MacOp::Umul && r_lo_clear && s(w) == 0 => {
+            Some(Inst::Mac(which, half, MacSrc::Da(mx, reg_t(w))))
+        }
+        0x7 if r(w) == 0 => Some(Inst::Mac(which, half, MacSrc::Aa(reg_s(w), reg_t(w)))),
+        // The bare MR loads: op1 = 0 entirely, mw in r{1-0}.
+        0x8 | 0x9 if op1(w) == 0 && t(w) == 0 && r_hi_clear => {
+            Some(Inst::MacLoad(op2(w) == 9, mw, reg_s(w)))
+        }
+        _ => None,
+    }
 }
 
 /// `op0 = 0, op1 = 0`: RST0, sub-decoded by `op2`.

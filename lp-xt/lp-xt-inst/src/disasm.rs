@@ -258,6 +258,32 @@ pub fn format_inst(inst: &Inst, pc: u32) -> String {
             let m = if write { "wer" } else { "rer" };
             format!("{m}\t{at:?}, {ars:?}")
         }
+        Mac(which, half, src) => {
+            let w = mac_which_name(which);
+            let h = mac_half_name(half);
+            match src {
+                MacSrc::Aa(ars, at) => format!("{w}.aa.{h}\t{ars:?}, {at:?}"),
+                MacSrc::Ad(ars, my) => format!("{w}.ad.{h}\t{ars:?}, {my:?}"),
+                MacSrc::Da(mx, at) => format!("{w}.da.{h}\t{mx:?}, {at:?}"),
+                MacSrc::Dd(mx, my) => format!("{w}.dd.{h}\t{mx:?}, {my:?}"),
+            }
+        }
+        MacLd(dec, half, mw, ars, mx, y) => {
+            let ld = if dec { "lddec" } else { "ldinc" };
+            let h = mac_half_name(half);
+            match y {
+                MacY::Ar(at) => {
+                    format!("mula.da.{h}.{ld}\t{mw:?}, {ars:?}, {mx:?}, {at:?}")
+                }
+                MacY::Mr(my) => {
+                    format!("mula.dd.{h}.{ld}\t{mw:?}, {ars:?}, {mx:?}, {my:?}")
+                }
+            }
+        }
+        MacLoad(dec, mw, ars) => {
+            let m = if dec { "lddec" } else { "ldinc" };
+            format!("{m}\t{mw:?}, {ars:?}")
+        }
         Rf(op) => match op {
             RfOp::Rfe => "rfe".to_string(),
             RfOp::Rfde => "rfde".to_string(),
@@ -386,6 +412,24 @@ pub fn format_inst(inst: &Inst, pc: u32) -> String {
         // --- special / user registers ---
         Sr(op, sreg, at) => format!("{}.{}\t{at:?}", op.name(), sreg.name_for(op)),
         Ur(op, ureg, at) => format!("{}.{}\t{at:?}", op.name(), ureg.name()),
+    }
+}
+
+fn mac_which_name(op: MacOp) -> &'static str {
+    match op {
+        MacOp::Umul => "umul",
+        MacOp::Mul => "mul",
+        MacOp::Mula => "mula",
+        MacOp::Muls => "muls",
+    }
+}
+
+fn mac_half_name(half: MacHalf) -> &'static str {
+    match half {
+        MacHalf::Ll => "ll",
+        MacHalf::Hl => "hl",
+        MacHalf::Lh => "lh",
+        MacHalf::Hh => "hh",
     }
 }
 

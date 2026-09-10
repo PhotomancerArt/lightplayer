@@ -34,6 +34,9 @@ fn a(n: u8) -> Reg {
 fn br(n: u8) -> BReg {
     BReg::new(n)
 }
+fn m(n: u8) -> MReg {
+    MReg::new(n)
+}
 
 /// Decode one instruction, asserting it round-trips to the exact input bytes.
 #[track_caller]
@@ -621,6 +624,166 @@ fn integer_helper_booleans_and_region_protection() {
     assert_eq!(dec(&[0x00, 0xc3, 0x50]), Inst::TlbInv(true, a(3)));
     assert_eq!(dec(&[0x00, 0x43, 0x50]), Inst::TlbInv(false, a(3)));
     assert_eq!(dec(&[0x40, 0x70, 0x40]), Inst::ExtReg(true, a(4), a(0)));
+}
+
+// ---------------------------------------------------------------------------
+// Family 9 — MAC16
+// ---------------------------------------------------------------------------
+
+/// The whole MAC16 space the LX6 and LX7 assemblers accept, one vector per
+/// legal mnemonic: `umul`/`mul`/`mula`/`muls` x `aa`/`ad`/`da`/`dd` x the four
+/// half selectors, the eight `mula.*.ldinc`/`.lddec` forms, and `ldinc`/`lddec`
+/// for all four `mw`. LX6 bytes == LX7 bytes throughout.
+///
+/// Two facts the table pins that a from-first-principles guess would miss:
+/// the **x** MR operand is one bit (`m0`/`m1`, in `r{3-2}`) and the **y** MR
+/// operand is one bit (`m2`/`m3`, in `t{2}`) — assembling `mul.da.ll m2, a3`
+/// produces the same word as `m0` and disassembles back as `m0`.
+#[rustfmt::skip]
+const MAC16_VECTORS: &[(&[u8], &str)] = &[
+    (&[0x34, 0x02, 0x74], "mul.aa.ll a2, a3"),
+    (&[0x04, 0x02, 0x34], "mul.ad.ll a2, m2"),
+    (&[0x34, 0x40, 0x64], "mul.da.ll m1, a3"),
+    (&[0x04, 0x40, 0x24], "mul.dd.ll m1, m2"),
+    (&[0x34, 0x02, 0x78], "mula.aa.ll a2, a3"),
+    (&[0x04, 0x02, 0x38], "mula.ad.ll a2, m2"),
+    (&[0x34, 0x40, 0x68], "mula.da.ll m1, a3"),
+    (&[0x04, 0x40, 0x28], "mula.dd.ll m1, m2"),
+    (&[0x34, 0x02, 0x7c], "muls.aa.ll a2, a3"),
+    (&[0x04, 0x02, 0x3c], "muls.ad.ll a2, m2"),
+    (&[0x34, 0x40, 0x6c], "muls.da.ll m1, a3"),
+    (&[0x04, 0x40, 0x2c], "muls.dd.ll m1, m2"),
+    (&[0x34, 0x02, 0x70], "umul.aa.ll a2, a3"),
+    (&[0x34, 0x48, 0x48], "mula.da.ll.ldinc m0, a8, m1, a3"),
+    (&[0x04, 0x48, 0x08], "mula.dd.ll.ldinc m0, a8, m1, m2"),
+    (&[0x34, 0x48, 0x58], "mula.da.ll.lddec m0, a8, m1, a3"),
+    (&[0x04, 0x48, 0x18], "mula.dd.ll.lddec m0, a8, m1, m2"),
+    (&[0x34, 0x02, 0x75], "mul.aa.hl a2, a3"),
+    (&[0x04, 0x02, 0x35], "mul.ad.hl a2, m2"),
+    (&[0x34, 0x40, 0x65], "mul.da.hl m1, a3"),
+    (&[0x04, 0x40, 0x25], "mul.dd.hl m1, m2"),
+    (&[0x34, 0x02, 0x79], "mula.aa.hl a2, a3"),
+    (&[0x04, 0x02, 0x39], "mula.ad.hl a2, m2"),
+    (&[0x34, 0x40, 0x69], "mula.da.hl m1, a3"),
+    (&[0x04, 0x40, 0x29], "mula.dd.hl m1, m2"),
+    (&[0x34, 0x02, 0x7d], "muls.aa.hl a2, a3"),
+    (&[0x04, 0x02, 0x3d], "muls.ad.hl a2, m2"),
+    (&[0x34, 0x40, 0x6d], "muls.da.hl m1, a3"),
+    (&[0x04, 0x40, 0x2d], "muls.dd.hl m1, m2"),
+    (&[0x34, 0x02, 0x71], "umul.aa.hl a2, a3"),
+    (&[0x34, 0x48, 0x49], "mula.da.hl.ldinc m0, a8, m1, a3"),
+    (&[0x04, 0x48, 0x09], "mula.dd.hl.ldinc m0, a8, m1, m2"),
+    (&[0x34, 0x48, 0x59], "mula.da.hl.lddec m0, a8, m1, a3"),
+    (&[0x04, 0x48, 0x19], "mula.dd.hl.lddec m0, a8, m1, m2"),
+    (&[0x34, 0x02, 0x76], "mul.aa.lh a2, a3"),
+    (&[0x04, 0x02, 0x36], "mul.ad.lh a2, m2"),
+    (&[0x34, 0x40, 0x66], "mul.da.lh m1, a3"),
+    (&[0x04, 0x40, 0x26], "mul.dd.lh m1, m2"),
+    (&[0x34, 0x02, 0x7a], "mula.aa.lh a2, a3"),
+    (&[0x04, 0x02, 0x3a], "mula.ad.lh a2, m2"),
+    (&[0x34, 0x40, 0x6a], "mula.da.lh m1, a3"),
+    (&[0x04, 0x40, 0x2a], "mula.dd.lh m1, m2"),
+    (&[0x34, 0x02, 0x7e], "muls.aa.lh a2, a3"),
+    (&[0x04, 0x02, 0x3e], "muls.ad.lh a2, m2"),
+    (&[0x34, 0x40, 0x6e], "muls.da.lh m1, a3"),
+    (&[0x04, 0x40, 0x2e], "muls.dd.lh m1, m2"),
+    (&[0x34, 0x02, 0x72], "umul.aa.lh a2, a3"),
+    (&[0x34, 0x48, 0x4a], "mula.da.lh.ldinc m0, a8, m1, a3"),
+    (&[0x04, 0x48, 0x0a], "mula.dd.lh.ldinc m0, a8, m1, m2"),
+    (&[0x34, 0x48, 0x5a], "mula.da.lh.lddec m0, a8, m1, a3"),
+    (&[0x04, 0x48, 0x1a], "mula.dd.lh.lddec m0, a8, m1, m2"),
+    (&[0x34, 0x02, 0x77], "mul.aa.hh a2, a3"),
+    (&[0x04, 0x02, 0x37], "mul.ad.hh a2, m2"),
+    (&[0x34, 0x40, 0x67], "mul.da.hh m1, a3"),
+    (&[0x04, 0x40, 0x27], "mul.dd.hh m1, m2"),
+    (&[0x34, 0x02, 0x7b], "mula.aa.hh a2, a3"),
+    (&[0x04, 0x02, 0x3b], "mula.ad.hh a2, m2"),
+    (&[0x34, 0x40, 0x6b], "mula.da.hh m1, a3"),
+    (&[0x04, 0x40, 0x2b], "mula.dd.hh m1, m2"),
+    (&[0x34, 0x02, 0x7f], "muls.aa.hh a2, a3"),
+    (&[0x04, 0x02, 0x3f], "muls.ad.hh a2, m2"),
+    (&[0x34, 0x40, 0x6f], "muls.da.hh m1, a3"),
+    (&[0x04, 0x40, 0x2f], "muls.dd.hh m1, m2"),
+    (&[0x34, 0x02, 0x73], "umul.aa.hh a2, a3"),
+    (&[0x34, 0x48, 0x4b], "mula.da.hh.ldinc m0, a8, m1, a3"),
+    (&[0x04, 0x48, 0x0b], "mula.dd.hh.ldinc m0, a8, m1, m2"),
+    (&[0x34, 0x48, 0x5b], "mula.da.hh.lddec m0, a8, m1, a3"),
+    (&[0x04, 0x48, 0x1b], "mula.dd.hh.lddec m0, a8, m1, m2"),
+    (&[0x04, 0x08, 0x80], "ldinc m0, a8"),
+    (&[0x04, 0x08, 0x90], "lddec m0, a8"),
+    (&[0x04, 0x18, 0x80], "ldinc m1, a8"),
+    (&[0x04, 0x18, 0x90], "lddec m1, a8"),
+    (&[0x04, 0x28, 0x80], "ldinc m2, a8"),
+    (&[0x04, 0x28, 0x90], "lddec m2, a8"),
+    (&[0x04, 0x38, 0x80], "ldinc m3, a8"),
+    (&[0x04, 0x38, 0x90], "lddec m3, a8"),
+    (&[0x34, 0x00, 0x64], "mul.da.ll m0, a3"),
+    (&[0x44, 0x02, 0x34], "mul.ad.ll a2, m3"),
+];
+
+#[test]
+fn mac16() {
+    assert_eq!(MAC16_VECTORS.len(), 78, "the generated table lost entries");
+    for (bytes, text) in MAC16_VECTORS {
+        dec(bytes);
+        agrees_with_objdump(bytes, text);
+    }
+
+    assert_eq!(
+        dec(&[0x34, 0x02, 0x74]),
+        Inst::Mac(MacOp::Mul, MacHalf::Ll, MacSrc::Aa(a(2), a(3)))
+    );
+    assert_eq!(
+        dec(&[0x44, 0x02, 0x34]),
+        Inst::Mac(MacOp::Mul, MacHalf::Ll, MacSrc::Ad(a(2), m(3)))
+    );
+    assert_eq!(
+        dec(&[0x34, 0x40, 0x64]),
+        Inst::Mac(MacOp::Mul, MacHalf::Ll, MacSrc::Da(m(1), a(3)))
+    );
+    assert_eq!(
+        dec(&[0x04, 0x40, 0x24]),
+        Inst::Mac(MacOp::Mul, MacHalf::Ll, MacSrc::Dd(m(1), m(2)))
+    );
+    assert_eq!(
+        dec(&[0x34, 0x02, 0x70]),
+        Inst::Mac(MacOp::Umul, MacHalf::Ll, MacSrc::Aa(a(2), a(3)))
+    );
+    // The two forms M0's inventory found in the classic ROM and the bootloader.
+    assert_eq!(
+        dec(&[0x04, 0x48, 0x08]),
+        Inst::MacLd(false, MacHalf::Ll, m(0), a(8), m(1), MacY::Mr(m(2)))
+    );
+    assert_eq!(
+        dec(&[0x04, 0x48, 0x18]),
+        Inst::MacLd(true, MacHalf::Ll, m(0), a(8), m(1), MacY::Mr(m(2)))
+    );
+    assert_eq!(dec(&[0x04, 0x38, 0x80]), Inst::MacLoad(false, m(3), a(8)));
+    assert_eq!(dec(&[0x04, 0x38, 0x90]), Inst::MacLoad(true, m(3), a(8)));
+}
+
+/// `umul` exists only in the AA operand form, and MAC16 words with a reserved
+/// field set are not MAC16 instructions. Neither is guessed at.
+#[test]
+fn mac16_reserved_fields_and_umul_are_not_guessed() {
+    // op0 = 4, op1 = 0 (umul), op2 = 3/6/2 -> `umul.ad`/`.da`/`.dd`, which
+    // neither assembler accepts.
+    for op2 in [0x2u32, 0x3, 0x6] {
+        let w = 4 | (op2 << 20);
+        let bytes = [w as u8, (w >> 8) as u8, (w >> 16) as u8];
+        assert!(
+            decode(&bytes).is_err(),
+            "umul has no {op2:#x} operand form: {bytes:02x?}"
+        );
+    }
+    // `mul.aa.ll a2, a3` with `r` (reserved) set.
+    assert!(decode(&[0x34, 0x12, 0x74]).is_err());
+    // `mul.da.ll m1, a3` with `s` (reserved) set.
+    assert!(decode(&[0x34, 0x41, 0x64]).is_err());
+    // `mul.dd.ll m1, m2` with t{0} (reserved) set.
+    assert!(decode(&[0x14, 0x40, 0x24]).is_err());
+    // `ldinc m0, a8` with op1 (reserved) set.
+    assert!(decode(&[0x04, 0x08, 0x81]).is_err());
 }
 
 // ---------------------------------------------------------------------------
