@@ -288,7 +288,7 @@ struct Emitter<'a> {
     escaped_insts: usize,
 }
 
-impl Emitter<'_> {
+impl<'a> Emitter<'a> {
     fn i(&mut self, ins: I<'static>) {
         self.f.instruction(&ins);
     }
@@ -1019,9 +1019,18 @@ impl Emitter<'_> {
     }
 
     fn block(&mut self, k: usize) {
-        let b: &Block = &self.set.blocks[self.lo + k];
+        // The block set outlives this emitter, so a reference into it is not a
+        // reborrow of `self` and the `&mut self` calls below do not conflict
+        // with it. M7b P1: this used to be `b.insts.clone()` — a heap
+        // allocation and a copy **per block**, 201,244 times per emit, purely
+        // to dodge that borrow. Taking the `&'a BlockSet` out of `self` first
+        // is the same emitted bytes with no allocation; `tests/
+        // translate_roundtrip.rs` and an emit-only sha256 of the whole
+        // `render-basic` module are the oracle that says so.
+        let set: &'a BlockSet = self.set;
+        let b: &'a Block = &set.blocks[self.lo + k];
         let block_pc = b.pc;
-        let pcs: Vec<(u32, Decoded)> = b.insts.clone();
+        let pcs: &'a [(u32, Decoded)] = &b.insts;
         let end = b.end;
 
         // The budget rule (M5 MD3): not one instruction may start at or past
@@ -1042,7 +1051,7 @@ impl Emitter<'_> {
 
         let mut cycles = 0u64;
         let mut retired = 0u32;
-        for (pc, d) in &pcs {
+        for (pc, d) in pcs {
             let (pc, d) = (*pc, *d);
             let cost = self.cost(d.class);
             let next_pc = pc.wrapping_add(u32::from(d.width));
