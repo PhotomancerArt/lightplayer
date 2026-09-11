@@ -363,6 +363,9 @@ fn the_rom_up_boot_reaches_the_idle_heartbeat() {
 /// paths produce the **same** figures as each other, and that the numbers are
 /// printed where the gate packet can quote them. The equality against silicon
 /// is L1's, and it is held until L1 captures from a clean pinned commit.
+///
+/// ⚠️ With core 1 running, "the same figures" excludes the main stack's
+/// high-water — see [`PATH_HIGH_WATER_GAP`] and the comment at the assertion.
 #[test]
 #[ignore = "needs the shipped image and espflash; run through `just test-emu-esp32v3-boot`"]
 fn the_two_paths_report_the_same_memory_figures() {
@@ -420,9 +423,37 @@ fn the_two_paths_report_the_same_memory_figures() {
     let a = triple(&direct.uart0().text());
     let b = triple(&rom_up.uart0().text());
     assert_eq!(a.len(), 3, "the direct run printed the triple: {a:?}");
+    assert_eq!(b.len(), 3, "the rom-up run printed the triple: {b:?}");
     println!("direct:\n  {}", a.join("\n  "));
     println!("rom-up:\n  {}", b.join("\n  "));
-    assert_eq!(a, b, "the two boot paths report the same memory figures");
+    // ⚠️ **The `[stack]` line is compared apart from the other two, and M4 P1
+    // split it.** With one core the two paths agreed on all three lines. With
+    // core 1 running they still agree **exactly** on every memory-transfer
+    // field — `[MEM]`'s `free`/`used`/`largest_free`/`retry_saves` and the
+    // whole `[JIT]` census — and differ on the main stack's high-water by
+    // [`PATH_HIGH_WATER_GAP`], which is not a memory-transfer field: it is
+    // how deep an interrupt happened to land, and the two paths reach the
+    // heartbeat at different points in the pacer's phase.
+    assert_eq!(
+        a[1..],
+        b[1..],
+        "the two boot paths report the same memory figures"
+    );
+    let (hw_direct, hw_rom_up) = (number(&a[0], "high-water "), number(&b[0], "high-water "));
+    assert_eq!(
+        hw_rom_up - hw_direct,
+        PATH_HIGH_WATER_GAP,
+        "the cross-path high-water gap is the measured one; see PATH_HIGH_WATER_GAP"
+    );
+    assert_eq!(
+        a[0].split("high-water").next(),
+        b[0].split("high-water").next(),
+        "and it is the same stack, reported the same way"
+    );
+    assert!(
+        a[0].contains(" of 45280 B ") && b[0].contains(" of 45280 B "),
+        "the stack's size is the same on both paths: {a:?} vs {b:?}"
+    );
     // The one figure the boot banner carries too, so the triple can be read
     // against `[INIT] chip=esp32 … heap=…`.
     assert!(
@@ -497,10 +528,27 @@ fn number(line: &str, key: &str) -> u64 {
 /// rather than within fifty, and silicon did not move — and it is not
 /// sampling noise, even though silicon's own three samples span 536 B.
 ///
-/// The one structural difference known to exist between the two runs is
-/// **Q5**: silicon binds the RMT ISR to the APP core and this machine has no
-/// APP core, so the firmware takes its documented single-core arm
-/// ([`SINGLE_CORE_LINE`]). It is the prime suspect and it is not proven.
+/// The one structural difference known to exist between the two runs was
+/// **Q5**: silicon bound the RMT ISR to the APP core and this machine had no
+/// APP core, so the firmware took its documented single-core arm
+/// ([`SINGLE_CORE_LINE`]). It was the prime suspect, and it is now
+/// **refuted**.
+///
+/// ⚠️ **Re-measured on 2026-09-11 with core 1 running and both sides printing
+/// `[INIT] RMT ISR on APP core`, and it did not move by one byte:**
+///
+/// ```text
+/// silicon   [MEM] free=223352 used=18200 largest_free=108526 retry_saves=0
+/// emulator  [MEM] free=223268 used=18284 largest_free=108526 retry_saves=0
+/// ```
+///
+/// The same 84, with the structural difference removed. So these are not
+/// core 1's bytes — DD51 had already reached that from the other side, when
+/// the diagnostic firmware read the identical `used=18284` single-core — and
+/// the gap now has no suspect at all. `largest_free` is still exact, and
+/// `free + used` still partitions the same arena on both sides, so whatever
+/// this is, it is 84 B of *placement* rather than of accounting.
+///
 /// Pinned rather than tolerated: a change in either direction is a finding.
 const HEAP_USED_GAP: u64 = 84;
 
@@ -514,20 +562,64 @@ const HEAP_USED_GAP: u64 = 84;
 /// High-water is monotonic, so a later sample can only be larger — and
 /// silicon's stayed 16972 through three requests over twelve seconds.
 ///
-/// Q5 again is the suspect and again unproven; note that the naive reading of
-/// it points the wrong way (an RMT ISR moved onto the PRO core should make
-/// *this* machine's main stack deeper, not shallower). Pinned, not tolerated.
+/// ⚠️ **Re-measured with core 1 running, and this one moved: 960 → 752.**
+/// A correction, not a widening — the old figure was taken when this machine
+/// had no APP core at all and the firmware took its single-core arm. M4 P1
+/// released core 1 but could not re-measure, because the shipped image died
+/// in `LpFs::read_file` ~30k cycles after the release; that was the
+/// emulator's own defect (the APP core was being run through the mask ROM's
+/// reset path over heap region 0 —
+/// `docs/defects/2026-09-11-the-emulator-ran-the-rom-reset-path-on-the-app-core.md`),
+/// and with it fixed the boot reaches the heartbeat and the figure can be
+/// read. On 2026-09-11, second boot, `[INIT] RMT ISR on APP core` on both
+/// sides:
 ///
-/// ⚠️ **M4 P1 could not re-measure either gap.** With core 1 running, the
-/// shipped image dies in `LpFs::read_file` ~30k cycles after the release
-/// (`docs/defects/2026-09-10-the-app-cores-rom-boot-rewrites-heap-region-0.md`),
-/// before any heartbeat — so both constants still carry the single-core
-/// fallback's figures, this test is red on the shipped image until the
-/// defect is fixed, and the first green run after that fix is the one that
-/// re-pins them. A diagnostic firmware with ESP-IDF's region ordering read
-/// `high-water 16268 B` and `free=223268 used=18284` on its second boot,
-/// which is not the shipped image and is quoted in the P1 report, not here.
-const STACK_HIGH_WATER_GAP: u64 = 960;
+/// ```text
+/// silicon   [stack] heartbeat: high-water 16972 B of 45280 B (28308 B headroom)
+/// emulator  [stack] heartbeat: high-water 16220 B of 45280 B (29060 B headroom)
+/// ```
+///
+/// # What that settled, and what it did not
+///
+/// **Q5 is gone as an explanation.** It was the one known structural
+/// difference behind this gap, and it no longer exists: both sides now bind
+/// the RMT ISR to the APP core and print the same line. 752 B of the 960
+/// survived it, so most of this gap was never Q5's.
+///
+/// The 208 B that did move go the **opposite** way to the naive reading.
+/// That reading said an RMT ISR sitting on the PRO core should make this
+/// machine's main stack *deeper* than silicon's, so taking the ISR off the
+/// PRO core should make it shallower still and widen the gap. It narrowed:
+/// this machine's high-water rose from 16012 to 16220. Nothing here explains
+/// that, and the two runs differ in more than Q5 — the second core changes
+/// when interrupts land as well as where — so the 208 B is not attributed to
+/// anything. It is recorded because the number moved.
+///
+/// Still unexplained, still pinned, still not tolerated: a change in either
+/// direction is a finding. With Q5 spent, the next suspect has to come from
+/// somewhere else.
+const STACK_HIGH_WATER_GAP: u64 = 752;
+
+/// **The two boot paths' own high-water gap: the ROM-up boot goes 160 B
+/// deeper than the direct load.**
+///
+/// New with M4 P1, and it is a *cross-path* number rather than a
+/// silicon-vs-emulator one — both sides of it are this machine. Measured on
+/// 2026-09-11 with core 1 running: `direct 16124`, `rom-up 16284`.
+///
+/// The rest of the triple is identical between the paths to the byte
+/// (`free=223096 used=18456 largest_free=106494 retry_saves=0` on both), so
+/// this is not a memory-transfer difference: it is how deep an interrupt
+/// happened to land. The two paths reach the heartbeat at different points
+/// in the pacer's phase — the ROM-up boot spends several hundred thousand
+/// extra cycles in the mask ROM and the second-stage bootloader before the
+/// application starts, and the heartbeat's sample lands at a different
+/// place in the cycle. High-water is a maximum over time, so a path that
+/// takes one more interrupt inside a deeper call reports a larger one.
+///
+/// Pinned rather than tolerated, like its two neighbours: a change in
+/// either direction is a finding.
+const PATH_HIGH_WATER_GAP: u64 = 160;
 
 /// **G2 (e).** Every memory-class field of the idle heartbeat, this machine
 /// against the desk board, on the same image and the same request.
