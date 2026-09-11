@@ -313,7 +313,7 @@ pub fn emit_only(
     }
     let at = areas(bus, &found.set)?;
     write_permission_table(bus, at);
-    write_target_tables(bus.guest_arena_mut(), at.indirect_at, &found.set);
+    write_target_tables(bus.guest_arena_mut(), 0, at.indirect_at, &found.set);
     let layout = Layout {
         memory_pages: at.pages,
         guest_base: base,
@@ -842,7 +842,6 @@ impl JitCore {
     ) -> Result<Self, String> {
         let at = areas(bus, set)?;
         write_permission_table(bus, at);
-        write_target_tables(bus.guest_arena_mut(), at.indirect_at, set);
 
         let arena_len = bus.guest_arena().len();
         let guest_base = bus.guest_arena_base();
@@ -865,6 +864,11 @@ impl JitCore {
         );
         #[cfg(not(target_family = "wasm"))]
         let (mem_base, memory_pages) = (0u32, at.pages);
+
+        // After `mem_base` is known, and that ordering is the point: the page
+        // map's entries are pointers into the module's memory, not into the
+        // host's view of the arena.
+        write_target_tables(bus.guest_arena_mut(), mem_base, at.indirect_at, set);
 
         let layout = Layout {
             memory_pages,

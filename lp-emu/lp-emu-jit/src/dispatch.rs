@@ -135,15 +135,27 @@ pub fn target_table_bytes(set: &BlockSet) -> u64 {
 /// Write the indirect-target page map and slot arrays into `mem` at `at`,
 /// and report how many bytes they took.
 ///
-/// `at` is a byte offset into the module's imported memory, and so are the
-/// page map's entries: the emitted lookup adds nothing to what it loads.
+/// `at` is a byte offset into **`mem`**; `base` is where `mem`'s own first
+/// byte sits inside the module's imported memory. The page map's entries are
+/// **memory**-relative, because the emitted lookup's second load adds nothing
+/// to what the first one produced — so a value written here is
+/// `base + <offset in mem>`.
+///
+/// The two bases are the same number natively, where the module's memory *is*
+/// the arena and `base` is zero. They are not the same in the browser, where
+/// the module imports the emulator's whole linear memory and the arena is an
+/// allocation inside it (M7 P6, JD11): the host writes these tables through
+/// its own `&mut [u8]` view of the arena and translated code reads them
+/// through the memory. A page map holding arena-relative pointers there sends
+/// every resolved `jalr` to a block index read out of guest data, which is how
+/// this was found.
 ///
 /// # Panics
 ///
 /// Panics when `mem` is shorter than [`target_table_bytes`] past `at`, or
 /// when the tables would not fit a 32-bit offset. Both are the host's sizing
 /// to get right before it promises [`Layout::indirect`].
-pub fn write_target_tables(mem: &mut [u8], at: u32, set: &BlockSet) -> u32 {
+pub fn write_target_tables(mem: &mut [u8], base: u32, at: u32, set: &BlockSet) -> u32 {
     let need = target_table_bytes(set);
     let end = u64::from(at) + need;
     assert!(
@@ -162,7 +174,7 @@ pub fn write_target_tables(mem: &mut [u8], at: u32, set: &BlockSet) -> u32 {
         put(mem, dead + slot * 4, -1);
     }
     for page in 0..PAGEMAP_ENTRIES {
-        put(mem, at + page * 4, dead as i32);
+        put(mem, at + page * 4, (base + dead) as i32);
     }
 
     let mut next = dead + SLOT_ARRAY_BYTES;
@@ -170,7 +182,7 @@ pub fn write_target_tables(mem: &mut [u8], at: u32, set: &BlockSet) -> u32 {
         for slot in 0..SLOTS_PER_PAGE {
             put(mem, next + slot * 4, -1);
         }
-        put(mem, at + page * 4, next as i32);
+        put(mem, at + page * 4, (base + next) as i32);
         next += SLOT_ARRAY_BYTES;
     }
     for (i, b) in set.blocks.iter().enumerate() {
@@ -181,13 +193,16 @@ pub fn write_target_tables(mem: &mut [u8], at: u32, set: &BlockSet) -> u32 {
         if b.pc & 1 != 0 {
             continue;
         }
-        let base = i32::from_le_bytes(
+        // The page map holds a memory-relative pointer; writing through
+        // `mem` needs it back in `mem`'s own terms.
+        let array = i32::from_le_bytes(
             mem[(at + (b.pc >> PERM_SHIFT) * 4) as usize..][..4]
                 .try_into()
                 .expect("four bytes"),
-        ) as u32;
+        ) as u32
+            - base;
         let slot = (b.pc & ((1 << PERM_SHIFT) - 1)) >> 1;
-        put(mem, base + slot * 4, i as i32);
+        put(mem, array + slot * 4, i as i32);
     }
     next - at
 }
@@ -599,42 +614,58 @@ mod tests {
 
     /// The two tables answer every address in the 32-bit space, and they say
     /// `-1` everywhere a block does not start.
+    ///
+    /// Run at **two bases**, and the second one is the point. Natively the
+    /// host's `&mut [u8]` view and the module's imported memory are the same
+    /// bytes at the same offsets, so a page map holding
+    /// pointers-into-the-view and a page map holding pointers-into-the-memory
+    /// are indistinguishable. In the browser they are not, and every table in
+    /// this file was written before there was a browser host to notice — a
+    /// resolved `jalr` there read a block index out of guest data, and the
+    /// only symptom was a run that diverged half a second in. The lookup below
+    /// is deliberately written the way the *emitted code* does it: follow the
+    /// page map's value as a memory offset, adding nothing.
     #[test]
     fn the_target_tables_answer_every_address() {
-        let set = ladder(0x4200_0000, 300);
-        let at = 0u32;
-        let need = target_table_bytes(&set);
-        let mut mem = alloc::vec![0u8; need as usize + 16];
-        let used = write_target_tables(&mut mem, at, &set);
-        assert_eq!(u64::from(used), need);
-        // 300 blocks of 16 bytes is 4,800: one 16 KiB page of slots, plus the
-        // shared dead array every other page points at.
-        assert_eq!(
-            need,
-            u64::from(PAGEMAP_BYTES) + 2 * u64::from(SLOT_ARRAY_BYTES)
-        );
+        for base in [0u32, 0x0011_0000] {
+            let set = ladder(0x4200_0000, 300);
+            let at = 32u32;
+            let need = target_table_bytes(&set);
+            let mut mem = alloc::vec![0u8; at as usize + need as usize + 16];
+            let used = write_target_tables(&mut mem, base, at, &set);
+            assert_eq!(u64::from(used), need);
+            // 300 blocks of 16 bytes is 4,800: one 16 KiB page of slots, plus
+            // the shared dead array every other page points at.
+            assert_eq!(
+                need,
+                u64::from(PAGEMAP_BYTES) + 2 * u64::from(SLOT_ARRAY_BYTES)
+            );
 
-        let lookup = |addr: u32| -> i32 {
-            let base = i32::from_le_bytes(
-                mem[(at + (addr >> PERM_SHIFT) * 4) as usize..][..4]
-                    .try_into()
-                    .expect("four bytes"),
-            ) as u32;
-            let slot = (addr & ((1 << PERM_SHIFT) - 1)) >> 1;
-            i32::from_le_bytes(
-                mem[(base + slot * 4) as usize..][..4]
-                    .try_into()
-                    .expect("four bytes"),
-            )
-        };
-        for (i, b) in set.blocks.iter().enumerate() {
-            assert_eq!(lookup(b.pc), i as i32, "block {i} at {:#010x}", b.pc);
-            assert_eq!(lookup(b.pc + 2), -1, "mid-block at {:#010x}", b.pc + 2);
-        }
-        // Every page with no block start reads -1, page zero and the top of
-        // the address space included.
-        for addr in [0u32, 2, 0x4080_0000, 0x5000_0000, 0xffff_fffe] {
-            assert_eq!(lookup(addr), -1, "{addr:#010x} starts no block");
+            let lookup = |addr: u32| -> i32 {
+                // `memarg(pagemap)`: the page map is at `base + at` in the
+                // memory, and `mem` starts at `base`.
+                let array = i32::from_le_bytes(
+                    mem[(at + (addr >> PERM_SHIFT) * 4) as usize..][..4]
+                        .try_into()
+                        .expect("four bytes"),
+                ) as u32;
+                // `memarg(0)`: whatever the page map said, used as-is.
+                let slot = (addr & ((1 << PERM_SHIFT) - 1)) >> 1;
+                i32::from_le_bytes(
+                    mem[(array - base + slot * 4) as usize..][..4]
+                        .try_into()
+                        .expect("four bytes"),
+                )
+            };
+            for (i, b) in set.blocks.iter().enumerate() {
+                assert_eq!(lookup(b.pc), i as i32, "base {base:#x}, block {i} at {:#010x}", b.pc);
+                assert_eq!(lookup(b.pc + 2), -1, "base {base:#x}, mid-block at {:#010x}", b.pc + 2);
+            }
+            // Every page with no block start reads -1, page zero and the top
+            // of the address space included.
+            for addr in [0u32, 2, 0x4080_0000, 0x5000_0000, 0xffff_fffe] {
+                assert_eq!(lookup(addr), -1, "base {base:#x}, {addr:#010x} starts no block");
+            }
         }
     }
 }
