@@ -273,15 +273,26 @@ placing the DRAM segment at its vaddr is what makes the copy a no-op.
 
 **The eleven things a direct load does not reproduce**, numbered in the
 loader's module doc so P7's cross-check can cite them: (1) no partition
-table or image validation; (2) no flash MMU programming — in P3 the flash
-windows are plain RAM with no chip behind them; (3) the ROM console never
-initialised; (4) no ROM banner, no bootloader log; (5) no early RNG entropy;
-(6) eFuse asserted, not read; (7) the reset cause asserted as POWERON; (8)
-`.data` placed rather than copied; (9) core 1 stalled by assertion, not by
-the ROM's `sw_stall` path; (10) `chip_size` written by the loader in place
-of `esp_rom_spiflash_config_param`; (11) the cache MMU "left enabled" by
-there being no cache model at all — the state D4's stop (P4) is defined
-against.
+table or image validation; (2) the flash MMU is programmed by the **loader**
+— since P7 `stage_image_in_flash` puts the image's flash-resident pages into
+`factory` and maps them, so the windows really are served through the table,
+but the offsets are the loader's arithmetic and not an `esptool` image's
+layout; (3) the ROM console never initialised; (4) no ROM banner, no
+bootloader log; (5) no early RNG entropy; (6) eFuse asserted, not read; (7)
+the reset cause asserted as POWERON; (8) `.data` placed rather than copied;
+(9) core 1 stalled by assertion, not by the ROM's `sw_stall` path; (10)
+`chip_size` written by the loader in place of
+`esp_rom_spiflash_config_param`; (11) the cache left enabled, as the
+bootloader's `Cache_Read_Enable` leaves it — the state D4's stop (P4) is
+defined against.
+
+**What is behind SPI1 matters to what the boot prints.** A direct load with
+no `--flash` gets a *blank* part: there is no partition table at `0x8000`, so
+the firmware's `lpfs` lookup fails and it says so and falls back to its
+memory filesystem. With the merged image behind it (`--flash-copy`, or
+`--merged`) the mount succeeds and the chain ends `[INIT] flash filesystem
+mounted`. Both readings are pinned in `tests/boot.rs`, each as a whole byte
+stream with its own sha.
 
 `just test-emu-esp32v3-boot` builds the shipped image and runs the
 direct-load tests against the file it built (`LP_EMU_ESP32V3_ELF`; see
@@ -446,9 +457,79 @@ The four windows and their index bases, from the ROM:
 | `0x4040_0000..0x4080_0000` | 128..191 |
 | `0x4080_0000..0x40C0_0000` | 192..255 |
 
-The window itself is served as a **cache fill**, not per-access translation
-(P7): instruction fetch stays a RAM read, which is what keeps the machine
-usable, and the model is stricter than silicon about staleness.
+### The chip, and where its bytes come from
+
+`src/flash.rs` holds this board's numbers — 4 MiB (the desk board), the
+bootloader at **`0x1000`** (⚠️ *not* the C6's `0x0`), the partition table at
+`0x8000`, `factory` at `0x10000` and `lpfs` at `0x310000` — over the chip
+model in `lp_emu_esp_common::engine::spi_flash`. Program is an `&=`, erase is
+the only way back to `0xff`, and the JEDEC capacity byte and the ROM's
+`chip_size` word are derived from the same length, so `esp_storage`'s
+`flash_rdid` decode and the ROM's own bounds check describe one part.
+
+Three backings, and `tests/flash_persistence.rs` is the proof:
+
+| flag | what it does |
+|---|---|
+| *(none)* | a blank chip that lives and dies with the process |
+| `--flash <path>` | read at start, written back at the end of the run; a path that does not exist is created blank |
+| `--flash-copy <path>` / `--merged <path>` | read once, never written — a scratch copy of a known image |
+
+### ⚠️ `SPI1.addr` is packed two ways, and the trigger says which
+
+The generic `usr` engine shifts its address phase out of `addr` **MSB-first**
+for `user1.usr_addr_bitlen` bits, so a 24-bit flash address sits
+**left-justified in bits 31:8**. The dedicated `flash_pp` / `flash_se` /
+`flash_read` triggers take the address from bits **23:0** with the byte count
+in bits 31:24 — the mask ROM says so in one instruction
+(`SPI_page_program` `0x4006_2368`: `slli a10, a5, 24` / `and a9, a3,
+0xffffff` / `or` / `s32i` to `SPI1+0x04`).
+
+The C6 has only the second convention. Carrying it across reads the right
+register and asks for an address 256 times too big, which the first run of
+this block did:
+
+```text
+W4 SPI1+0x02c miso_dlen = 0x000001ff
+W4 SPI1+0x004 addr      = 0x00800000
+SPI1 read 64 bytes at 0x00800000 leaves the 0x400000-byte chip
+```
+
+— the partition table at `0x8000`, refused as past the end of the part, 64
+bytes of `0xff` handed back, and the firmware printing `[ERROR] no lpfs
+partition in the flashed table`. A plausible failure a long way from its
+cause, which is what this convention costs when it is got wrong.
+
+### The fill
+
+The window is served as a **cache fill**, not per-access translation:
+`cache::fill` copies a whole page out of the chip into the RAM behind its
+window whenever an MMU entry moves, the page mode changes, or the flash under
+a mapped page is written. Instruction fetch stays a plain RAM read, which is
+what keeps this machine fast enough to be used, and the price is stated
+rather than hidden: **this model is stricter than silicon about staleness** —
+a real cache serves stale lines until it is flushed, and this one never does.
+
+Two consequences of the missing valid bit, both in `cache::fill`'s own words:
+
+- a zeroed entry means flash page 0 and is **served**, because refusing would
+  be inventing a bit the silicon does not have. `mmu_init`'s 8 KiB `memset`
+  costs nothing anyway, because the MMU view only marks an entry dirty when
+  the write *changes* it;
+- entries **64..=76** name virtual addresses inside SRAM0, where the vectors
+  and the IDF bootloader live. `FlashMmu::entry_vaddr` checks the round trip
+  through `entry_index` and answers `None` for them, so a fill can never
+  overwrite the code it is running.
+
+And one this machine's shape forces: `SocBus` holds the two windows in a
+single arena, so there is no per-core copy for the APP core's table to fill.
+The fill serves the **PRO** core's table and says so out loud when core 1's
+table disagrees — which is the case a per-core window would be needed for,
+and M4's to answer.
+
+The host-side fill never arms D4's check: it goes through
+`SocBus::load_image`, and the machine marks the window around it with
+`ClassicCache::set_host_access`.
 
 ### The cache-off fetch stop
 
@@ -513,11 +594,12 @@ PAC and each carries its reason beside it.
 | `GPIO` | `0x3FF4_4000` | `0x600` | accept | direct #7, cycle 3,564,113 | the matrix routing U0RXD; `strap` reads the PAC's 0 | P8 |
 | `UART0` | `0x3FF4_0000` | `0x80` | **view** | direct #8, cycle 3,564,269 | the FIFO pair on `engine::uart`, the shifter draining at the programmed baud in emulated time, `status.txfifo_cnt` counting down (the bit the ROM spins on), the thresholds, the receive timeout, the interrupt quad, `mem_rx_status`'s address pair (the RX-count errata), the auto-baud counters, and the host stream | P6 |
 | `IO_MUX` | `0x3FF4_9000` | `0x94` | accept | direct #9, cycle 3,568,671 | the U0TXD pad | P8 |
-| `SPI1` | `0x3FF4_2000` | `0x400` | accept | direct #10, cycle 3,644,210 | esp-storage's flash read; **the run spins on `cmd.flash_rdsr`** | P7 |
-| `SPI0` | `0x3FF4_3000` | `0x400` | accept | direct #11, cycle 3,644,282 | the ROM's idle wait on `ext2.st` | P7 |
+| `SPI1` | `0x3FF4_2000` | `0x400` | **view** | direct #10, cycle 3,644,210 | the flash controller over `engine::spi_flash`: the `usr` engine and the dedicated triggers, the WIP/WEL latch the ROM spins on, the JEDEC id `esp_storage` decodes, and the two `addr` packings | P7 |
+| `SPI0` | `0x3FF4_3000` | `0x400` | accept + refusal | direct #11, cycle 3,644,282 | the ROM's idle wait on `ext2.st`, `cache_fctrl` bit 0 (`Cache_Read_Enable`'s other half), and `spi_flash_attach`'s eight writes. A `cmd` trigger here **refuses** rather than inventing a JEDEC id | P7 |
 | `EFUSE` | `0x3FF5_A000` | `0x200` | **view** | rom-up #1, cycle 7 | the fuse array, the read-data registers, and the read command as a **completion**; the MAC and chip revision | P5 |
 | `UART1` | `0x3FF5_0000` | `0x80` | **view** | rom-up, cycle 30,992 | the same model at its own base and its own interrupt source (35). The ROM's `uartAttach` touches `+0x10` on every boot; the application never opens it, so it has no host stream and its bytes go nowhere | P6 |
-| `FLASH_MMU` | `0x3FF1_0000` | `0x4000` | not reached by P3 | **view** | the two flash MMU page tables, written by the ROM's `mmu_init` and `cache_flash_mmu_set`; the fill is P7's | P4 / P7 |
+| `FLASH_MMU` | `0x3FF1_0000` | `0x4000` | **view** | not reached by P3 | the two flash MMU page tables, written by the ROM's `mmu_init` and `cache_flash_mmu_set`; an entry write marks its page for P7's fill | P4 / P7 |
+| `SHA` | `0x3FF0_3000` | `0xc0` | **view** | not reached by P3 | the `TEXT` window (message **and** digest read-back) and the four per-family strobe quads over `engine::sha`, including the **`load`** step the C6 has no equivalent for. SHA-1 and SHA-256 compute; SHA-384/512 refuse. The ESP-IDF bootloader's image hash is the only caller | P7 |
 
 The two deviations from the PAC, both inputs to the run rather than
 properties of the part:
@@ -643,6 +725,13 @@ door; the recipe exists from P1 so the door has one name for its whole life.
 --exit-on <line>        stop at a COMPLETE line of UART0's output; exits 0
 --efuse-mac <a:b:c:d:e:f>     the MAC the eFuse block answers [30:76:f5:ec:f6:34]
 --efuse-rev <major.minor>     the chip revision it answers [3.1]
+--flash <path>          back the flash chip with this file; written back at
+                        the end of the run, and created blank if absent
+--flash-copy <path>     read it once and never write it back
+--merged <path>         --flash-copy, spelled for what a ROM-up boot wants:
+                        the whole `espflash save-image --merge` chip. The
+                        chip's length is taken from the file
+--flash-len <bytes>     the chip's size [4194304, the desk board's 4 MB]
 --seed <n>   --hooks   --map   --help
 ```
 
@@ -668,11 +757,11 @@ starts a comment.
 ⚠️ `--timeout` is **emulated** time (PD9): no host gate runs on emulated
 microseconds, and `--wall-timeout` is the separate wall-clock end.
 
-⚠️ **An unrecognised flag is an error.** The one door P7 still owes
-(`--flash`) is deliberately *not* stubbed with a no-op, so the phase that
-adds it is visible in the diff instead of silently changing what an old
-command line meant. `--cache-off-fetch` arrived with P4; the six above it
-with P6.
+⚠️ **An unrecognised flag is an error.** A door a phase has not opened is
+deliberately *not* stubbed with a no-op, so the phase that adds it is visible
+in the diff instead of silently changing what an old command line meant.
+`--cache-off-fetch` arrived with P4; the six console-and-cable doors with P6;
+`--flash`, `--flash-copy`, `--merged` and `--flash-len` with P7.
 
 Exit codes are the C6's contract: 0 deadline **or an `--exit-on` match**,
 2 fault **or a cable reset without `--reboot-on-reset`**, 3 strict-bus
