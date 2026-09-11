@@ -363,7 +363,34 @@ pub struct BootFrame {
     /// order, which is the order `_WindowOverflow4` stores them in
     /// (`s32e a0, a5, -16` … `s32e a3, a5, -4`).
     pub save_area: [u32; 4],
+    /// `PS.OWB` at the application's entry — see [`BOOTLOADER_OWB`].
+    pub owb: u8,
 }
+
+/// `PS.OWB` the ESP-IDF second-stage bootloader leaves at the application's
+/// entry: **7**.
+///
+/// **Measured, not reasoned.** P7 wrote the direct-vs-ROM-up cross-check and
+/// it skipped, because the ROM-up walk stopped one instruction short of the
+/// application; M1 P6 landed `rer`/`wer`, the walk reached the entry, and
+/// `rom_up_and_direct_load_agree_on_what_the_app_sees` compared `PS` for the
+/// first time. ROM-up read `0x0006_0720`, the direct load `0x0006_0020`: one
+/// field, `OWB` (bits 11:8), 7 against 0.
+///
+/// OWB is the Old Window Base a window exception saves, and nothing in the
+/// application's `Reset` reads it — the field is scratch until the next
+/// window exception overwrites it, and the boot is unchanged either way. It
+/// is seeded anyway, for the reason the whole direct path exists: the claim
+/// is *"what the classic ROM and the IDF bootloader leave behind"*, and a
+/// field this repository can measure and chooses not to reproduce makes that
+/// claim smaller for nothing. It is also the cheapest kind of latent bug —
+/// a field nobody reads until somebody does.
+///
+/// It is **this bootloader's** number, not the architecture's: it is where
+/// `v5.1-beta1-378-gea5e0ff298`'s own call depth happened to leave the
+/// window when it jumped. A different bootloader would leave a different one,
+/// and the cross-check is what would say so.
+pub const BOOTLOADER_OWB: u8 = 7;
 
 impl BootFrame {
     /// The mask ROM's PRO-core stack top, from the ROM ELF's `__stack`.
@@ -385,6 +412,7 @@ impl BootFrame {
         Self {
             sp,
             save_area: [0, sp, 0, 0],
+            owb: BOOTLOADER_OWB,
         }
     }
 }
@@ -1109,6 +1137,7 @@ impl Esp32V3Builder {
             // `stall_key` (RTC_CNTL's two halves, P5) and with DPORT's
             // `appcpu_ctrl_*` (P4).
             stalled: [false, true],
+            pending_breaks: Vec::new(),
             stall_key,
             rom: rom_image,
             app: app_image,
@@ -1190,6 +1219,9 @@ pub struct Machine {
     /// both `sw_cpu_stall` fields, computed by the block that owns them.
     /// [`Machine::core_stalled`] reads it; P4 adds DPORT's
     /// `appcpu_runstall` as the third input to the same question.
+    /// Breakpoints waiting for the bytes they name to appear in memory.
+    /// See [`Machine::break_at_address_when`].
+    pending_breaks: Vec<(u32, [u8; 3], &'static str)>,
     stall_key: crate::periph::rtc_cntl::StallKey,
     /// **Two** slots: the classic is dual-core. Slot 1 is stalled for the
     /// whole of M3 — see the module docs.
@@ -1372,7 +1404,12 @@ impl Machine {
     /// exception.
     pub fn seed_boot_state(&mut self, entry: u32, frame: BootFrame) -> Result<(), BuildError> {
         self.harts[0].set_pc(entry);
-        self.harts[0].set_ps_raw(PS_BOOT);
+        // `PS_BOOT | OWB` — the window field the bootloader leaves, measured
+        // by the cross-check rather than assumed (`BOOTLOADER_OWB`).
+        self.harts[0].set_ps_raw(
+            PS_BOOT | ((u32::from(frame.owb) << lp_xt_emu::mach::sr::PS_OWB_SHIFT)
+                & lp_xt_emu::mach::sr::PS_OWB_MASK),
+        );
         self.harts[0].cpu_mut().set_a(1, frame.sp);
         for (i, word) in frame.save_area.iter().enumerate() {
             let at = frame.sp.wrapping_sub(16).wrapping_add(4 * i as u32);
@@ -1482,6 +1519,21 @@ impl Machine {
     /// The cache state and the flash MMU tables, for a test and for P7.
     pub fn cache(&self) -> &crate::cache::CacheHandle {
         &self.cache
+    }
+
+    /// The PRO core's flash MMU table, the 256 entries that decide what the
+    /// IROM and DROM windows contain.
+    ///
+    /// G2's app-entry cross-check compares this between the two boot paths:
+    /// the loader programs it by arithmetic and the IDF bootloader's
+    /// `cache_flash_mmu_set` fills it from the image header it parsed, and a
+    /// difference here is a difference in every byte of `.text` the
+    /// application reads afterwards.
+    pub fn flash_mmu_entries(&self) -> Vec<u32> {
+        let mmu = self.cache.lock().expect("cache poisoned");
+        (0..crate::cache::FLASH_MMU_ENTRIES as usize)
+            .map(|i| mmu.mmu.entry(0, i))
+            .collect()
     }
 
     /// One line per core, for `--probe` and the run report. Slot 1 is never
@@ -1738,6 +1790,58 @@ impl Machine {
             .install_at(&mut self.bus, address, "break-at", |_| HookResult::Stop)
     }
 
+    /// Stop the run the first time `address` is reached, but **only once the
+    /// three bytes there are `expect`**.
+    ///
+    /// ⚠️ A hook is a `break` written into the guest's instruction stream,
+    /// which is exactly right for a mask ROM — nothing rewrites
+    /// `0x4000_xxxx`. It is wrong for an address in IRAM on the ROM-up path,
+    /// and wrong in two different ways at once:
+    ///
+    /// - the second-stage bootloader loads its own segment over
+    ///   `0x4008_0404..`, and then the application's IRAM segment over
+    ///   `0x4008_0000..`, so a `break` planted before the run is **gone**
+    ///   twice over before the pc reaches it; and
+    /// - the bootloader's own code occupies the same addresses on the way
+    ///   past, at **different instruction boundaries**, so a patch that
+    ///   simply re-armed itself would plant three bytes across the middle of
+    ///   one of the bootloader's instructions and the run would die on an
+    ///   undecodable word a few bytes later — which is exactly what P8 saw
+    ///   before writing this.
+    ///
+    /// So the breakpoint waits. Every slice, while any is pending, the
+    /// machine reads the three bytes at the address and arms the hook the
+    /// moment they are the caller's — for the app-entry cross-check, the
+    /// application ELF's own first instruction. Before that the address
+    /// belongs to somebody else and nothing is patched.
+    pub fn break_at_address_when(&mut self, address: u32, expect: [u8; 3]) {
+        self.pending_breaks.push((address, expect, "break-at"));
+    }
+
+    /// Arm every pending breakpoint whose bytes have appeared.
+    fn arm_pending_breaks(&mut self) {
+        let mut still = Vec::new();
+        for (address, expect, symbol) in std::mem::take(&mut self.pending_breaks) {
+            match crate::rom::read_three(&mut self.bus, address) {
+                Ok(bytes) if bytes == expect => {
+                    if let Err(e) =
+                        self.hooks
+                            .install_at(&mut self.bus, address, symbol, |_| HookResult::Stop)
+                    {
+                        log::warn!("machine: arming `{symbol}` at {address:#010x}: {e}");
+                    } else {
+                        log::debug!(
+                            "machine: armed `{symbol}` at {address:#010x} at cycle {}",
+                            self.cycles()
+                        );
+                    }
+                }
+                _ => still.push((address, expect, symbol)),
+            }
+        }
+        self.pending_breaks = still;
+    }
+
     /// Stop the run the first time `symbol` is reached. Installs a hook that
     /// returns [`HookResult::Stop`].
     pub fn break_at(&mut self, symbol: &str) -> Result<u32, RomError> {
@@ -1758,6 +1862,13 @@ impl Machine {
     /// the bring-up rule.
     pub fn run_until(&mut self, stop: &StopCondition) -> Outcome {
         let started = Instant::now();
+        // Before the first instruction as well as after every slice: a
+        // direct load starts *at* the application's entry, so a breakpoint
+        // armed only at a slice boundary would arm one slice too late and
+        // the run would sail past the address it names.
+        if !self.pending_breaks.is_empty() {
+            self.arm_pending_breaks();
+        }
         let stop_cycle = stop.stop_cycle.unwrap_or(u64::MAX);
         let mut probes = stop.probes.clone();
         probes.sort_by(|a, b| a.0.cmp(&b.0));
@@ -1944,6 +2055,10 @@ impl Machine {
                 for (lo, hi) in self.bus.take_code_writes() {
                     self.harts[0].invalidate_block_range(lo, hi);
                 }
+            }
+
+            if !self.pending_breaks.is_empty() {
+                self.arm_pending_breaks();
             }
 
             if let Some(violation) = self.bus.first_strict_violation() {

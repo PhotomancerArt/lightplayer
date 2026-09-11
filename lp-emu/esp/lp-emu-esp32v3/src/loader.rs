@@ -214,12 +214,50 @@ pub const BOOTLOADER_FRAME_CHAIN: &[(&str, u32, u32)] = &[
     ("IDF bootloader load_image", 0x4007_95A8, 64),
 ];
 
+/// The four words at `[a1-16, a1)` when the ESP-IDF second-stage bootloader
+/// reaches the application's entry — `a0, a1, a2, a3` of the frame behind the
+/// app's, in the order `_WindowOverflow4` spills them.
+///
+/// **Measured**, at last, by
+/// `rom_up_boot.rs::rom_up_and_direct_load_agree_on_what_the_app_sees`. P3
+/// seeded `[0, sp, 0, 0]` — a coherent frame whose `a1` chains to itself —
+/// and said in as many words that it stood until a ROM-up run measured the
+/// real thing. P7 wrote the run; it skipped, because the walk stopped one
+/// instruction short of the application in `esp_cpu_dbgr_is_attached()`. M1
+/// P6 landed `rer`/`wer`, the walk reached the entry, and these are what was
+/// there:
+///
+/// ```text
+/// a1 = 0x3ffe3c80
+/// [a1-16 .. a1) = 0x00000000 0x3ffe3ca0 0x3ffe3c15 0x3ffe3cc0
+///                 a0         a1         a2         a3
+/// ```
+///
+/// `a0 = 0` is the frame chain's end, as P3 guessed. The other three are the
+/// bootloader's own live registers at the `callx8`, and they are
+/// `BOOTLOADER_SP_AT_APP_ENTRY`-relative in the sense that any of them would
+/// move if the stack did — so they belong to [`BootFrame::idf_bootloader`],
+/// which carries the measured stack pointer, and **not** to
+/// [`BootFrame::at`], which is the generic frame a synthetic entry point
+/// gets.
+///
+/// Nothing in the application reads them before its first window overflow
+/// overwrites them; they are seeded for the reason the direct path exists at
+/// all, which is to be *what the bootloader leaves*, and because a frame that
+/// is coherent-but-invented and one that is right look identical until
+/// something walks the chain.
+pub const BOOTLOADER_SAVE_AREA: [u32; 4] = [0x0000_0000, 0x3FFE_3CA0, 0x3FFE_3C15, 0x3FFE_3CC0];
+
 impl BootFrame {
     /// The frame the IDF bootloader leaves at the application's entry:
-    /// `a1 = ` [`BOOTLOADER_SP_AT_APP_ENTRY`], with the default save area.
-    /// The direct load's default from P3 on.
+    /// `a1 = ` [`BOOTLOADER_SP_AT_APP_ENTRY`] and the **measured**
+    /// [`BOOTLOADER_SAVE_AREA`]. The direct load's default.
     pub const fn idf_bootloader() -> Self {
-        Self::at(BOOTLOADER_SP_AT_APP_ENTRY)
+        Self {
+            sp: BOOTLOADER_SP_AT_APP_ENTRY,
+            save_area: BOOTLOADER_SAVE_AREA,
+            owb: crate::machine::BOOTLOADER_OWB,
+        }
     }
 }
 
@@ -746,7 +784,21 @@ pub fn stage_image_in_flash(
     }
 
     // 4. The table, both cores.
+    //
+    // **Every flash entry is invalidated first.** The mask ROM's `mmu_init`
+    // leaves `crate::cache::MMU_UNMAPPED` in every entry it does not map, and
+    // the classic's entry has no valid bit — so a table left at zero maps
+    // the whole of both windows onto flash page 0 rather than onto nothing,
+    // and a stray read anywhere in an unmapped DROM page comes back with
+    // plausible bytes. That is the constant's own doc comment, and the
+    // difference was found by comparing this table against a ROM-up boot's.
     let mut c = cache.lock().expect("cache poisoned");
+    for core in 0..crate::cache::CORES {
+        for index in 0..crate::cache::FLASH_MMU_ENTRIES {
+            c.mmu
+                .set_entry(core, index as usize, crate::cache::MMU_UNMAPPED);
+        }
+    }
     for page in &staging.pages {
         let Some(index) = FlashMmu::entry_index(page.vaddr, page_mode) else {
             log::warn!("loader: {:#010x} is in no flash window", page.vaddr);

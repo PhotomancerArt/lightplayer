@@ -329,13 +329,36 @@ impl HookTable {
 
 /// The three bytes at `address`, read through the bus's own decode so the
 /// patch cannot land somewhere the guest would not fetch from.
-fn read_three(bus: &mut SocBus, address: u32) -> Result<[u8; 3], RomError> {
+///
+/// ⚠️ **Read as aligned words, not as three bytes.** SRAM0 on this chip takes
+/// aligned 32-bit data access only — [`crate::memmap::SRAM0_WORD_ONLY`], a
+/// measured rule the bus enforces since DD37 — so `read_u8` at `0x4008_0844`
+/// is `InvalidAccess` and a byte-at-a-time read of this address refuses. It
+/// refused *silently* where it mattered: `Machine::break_at_address` returns
+/// the error, `tests/rom_up_boot.rs` discarded it with `let _ =`, and a
+/// `--break-at` on anything in IRAM simply never fired. A word read is what
+/// the rule permits and what the instruction fetch that will run these bytes
+/// does anyway.
+pub fn read_three(bus: &mut SocBus, address: u32) -> Result<[u8; 3], RomError> {
     use lp_emu_core::Bus;
     let mut out = [0u8; 3];
+    // At most two words: three bytes straddle a boundary when the address is
+    // one byte short of one.
+    let mut word_at = address & !3;
+    let mut word = bus
+        .read_word(word_at)
+        .map_err(|e| RomError::Elf(format!("reading {word_at:#010x}: {e}")))?
+        .to_le_bytes();
     for (i, byte) in out.iter_mut().enumerate() {
-        *byte = bus
-            .read_u8(address + i as u32)
-            .map_err(|e| RomError::Elf(format!("reading {:#010x}: {e}", address + i as u32)))?;
+        let at = address + i as u32;
+        if at & !3 != word_at {
+            word_at = at & !3;
+            word = bus
+                .read_word(word_at)
+                .map_err(|e| RomError::Elf(format!("reading {word_at:#010x}: {e}")))?
+                .to_le_bytes();
+        }
+        *byte = word[(at & 3) as usize];
     }
     Ok(out)
 }
