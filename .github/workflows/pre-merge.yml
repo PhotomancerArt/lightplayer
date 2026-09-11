@@ -344,6 +344,12 @@ jobs:
               - 'lp-emu/**'
               - 'lp-fw/fw-esp32v3/**'
               - 'scripts/emu/**'
+              # Since M5 P5 this job also runs the classic's heap-budget
+              # ratchet, so the gate has to fire when the gate's own script or
+              # its recorded figures change. Neither filter covered them
+              # before, which meant a record edit ran no chip gate at all.
+              - 'scripts/heap-budget-check.sh'
+              - 'scripts/heap-budget-record.json'
               - 'justfile'
               - '.github/workflows/pre-merge.yml'
               - '.github/actions/**'
@@ -1355,6 +1361,26 @@ jobs:
       - name: Emulator ESP32v3 gate (both boot paths, the reference image)
         run: cd lp2025 && just test-emu-esp32v3-gate
 
+      # The classic's half of the heap-budget record's chip section (M5 P5).
+      # It lives here rather than in `Heap budget (esp32c6 chip)` because it
+      # needs the Xtensa toolchain this job already installs — a cold espup
+      # install is ~8 minutes, and the other job is path-gated on `emu_c6`,
+      # which does not fire for `lp-fw/fw-esp32v3/**` at all.
+      #
+      # Cost, measured on an M2 Max with a warm cargo cache: 24 s all in — a
+      # 22 s `fw-esp32v3` rebuild (the recipe touches `src/main.rs`, because
+      # this crate's cfg-dependent codegen does not always retrigger on a
+      # feature flip) plus a 0.2 s boot that ends on its own `[JIT] used=`
+      # line at 119 ms of emulated time. The C6's arm in the other job is ~8
+      # minutes (its comment's own figure: a release `lp-cli`, a firmware
+      # build and the profile captures), so the classic's arm is well under
+      # it — but the two are not in the same job, so the comparison is about
+      # size and not about a shared budget. The release `lp-emu-esp32v3`
+      # binary the ratchet runs is the one expense this job does not already
+      # pay; it is a much smaller dependency tree than `lp-cli`'s.
+      - name: Heap budget ratchet — the classic's own ledger
+        run: cd lp2025 && just heap-budget-check-chips-v3
+
       - name: sccache stats
         if: always()
         shell: bash
@@ -1458,8 +1484,11 @@ jobs:
       # required `Validate (x64)` job because it needs a cross-target firmware
       # build; `heap-budget-check` in the required job prints a named SKIP for
       # the same reason, and a skip here would be a failure.
+      # `-c6` and not the bare `heap-budget-check-chips` since M5 P5: that one
+      # now does BOTH chips, and this job has no Xtensa toolchain. The
+      # classic's arm rides `Emulator ESP32v3 (x64)`, which does.
       - name: Heap budget ratchet — the C6's own ledger
-        run: cd lp2025 && just heap-budget-check-chips
+        run: cd lp2025 && just heap-budget-check-chips-c6
 
       - name: sccache stats
         if: always()

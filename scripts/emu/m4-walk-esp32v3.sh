@@ -1,8 +1,24 @@
 #!/usr/bin/env bash
-# The classic ESP32's frame walk, with the emulator where the board goes.
+# The classic ESP32's walk, with the emulator where the board goes.
 #
-#   scripts/emu/m4-walk-esp32v3.sh          # `just walk-esp32v3-emu-frame`
+#   scripts/emu/m4-walk-esp32v3.sh          # `just walk-esp32v3-emu`
+#   scripts/emu/m4-walk-esp32v3.sh --frame  # `just walk-esp32v3-emu-frame`
 #   scripts/emu/m4-walk-esp32v3.sh --keep   # leave the artefacts for inspection
+#
+# Two front doors, one script, and the difference between them is the boot and
+# the cable rather than the question:
+#
+#   `just walk-esp32v3-emu`        ROM-up from a merged 4 MiB image — the same
+#   (M5 P5, the whole walk)        bytes a flasher writes — with the CH340
+#                                  cable's own verbs driven over `--control`:
+#                                  attach, the classic-reset dance, open,
+#                                  upload, close, detach, and the port proved
+#                                  released at the end.
+#   `just walk-esp32v3-emu-frame`  the frame half (M4 P4): direct load, no
+#                                  cable. The iteration path — it skips the
+#                                  merged-image build and one whole boot, and
+#                                  asks exactly the same question of the
+#                                  frame.
 #
 # `scripts/emu/m4-walk.sh` is this script's C6 twin and was written first; read
 # it beside this one. Both ask the same question of a chip — does the shader it
@@ -35,6 +51,75 @@
 #   loud guard — so both chips render provably identical pixels, because the
 #   endpoint chooses a wire and never a colour.
 #
+# ## The boot path
+#
+# **ROM-up by default**, because the twin's whole point is to be the twin of
+# something that flashes and resets a board: the hart starts at the mask ROM's
+# reset vector, the real ROM attaches the flash chip and programs the MMU, the
+# real ESP-IDF second-stage bootloader espflash bundled reads the partition
+# table and maps the app, and only then does any of our code run. Nothing is
+# vendored — the merged image IS the provenance (DD25). It costs ~260 ms more
+# emulated time than a direct load (measured: `[RECOVERY] boot complete` at
+# 373,644 us ROM-up against ~115,000 us direct) and ~2.4 s of wall clock.
+#
+# `LP_WALK_BOOT=direct` takes the direct load instead, which `tests/
+# rom_up_boot.rs` holds byte-equal to the ROM-up path at the application's
+# entry (2,189,961 bytes, `PS`, `a1`, `VECBASE`, the save area and all 256
+# flash-MMU entries — with the 32-byte inter-segment DROM gap named and
+# excluded). `--frame` implies it.
+#
+# ## The cable, and why its verbs are in this file
+#
+# A hardware walk gets four things from the CH340 on the carrier board that a
+# reader never sees written down: the cable is in, the board is reset, a tty
+# is opened, and at the end the tty is released and the lines are left slack.
+# Here they are a socket — `--control tcp:` — and they are in the script
+# rather than in a human's head:
+#
+#   attach                    the cable goes in (host bookkeeping; the SoC
+#                             cannot see a bridge chip, see the crate README's
+#                             "The CH340 cable")
+#   reset                     {dtr:0,rts:1} then {rts:0} — the classic-reset
+#                             dance. The reboot happens on the RELEASE, and
+#                             with `--reboot-on-reset` that release reboots
+#                             the machine instead of ending the run
+#   open                      an application opened the tty
+#   …the upload…
+#   close / detach / state    and the last reply is ASSERTED: `port=closed`,
+#                             `cable=absent`, `dtr=0 rts=0`, `reboots=1`
+#
+# The console then holds TWO boots — the ROM banner the reset cut mid-line and
+# the whole boot after it — which is what a reset board's transcript looks
+# like and is the twin's own evidence that the cable did something.
+#
+# ⚠️ **What the reset does NOT buy is a second boot.** A reboot restores the
+# power-on snapshot, and on this machine that snapshot includes the flash
+# chip, so the boot after the cable reset formats the same blank `lpfs` the
+# first one did. On silicon every capture is a second boot because espflash
+# hard-resets after WRITING (M5 notes §3.2); the emulated twin of that is a
+# two-run recipe, and it is P6's, not this walk's.
+#
+# ## The upload's pacing, and why there are no `--wait-for` / `--chunk-gap`
+# ## flags
+#
+# The brief asked for two: UART0 has no RTS/CTS, so a host that writes faster
+# than the guest drains loses bytes. On this machine it cannot. `UartEngine::
+# poll_source` (`lp-emu-esp-common/src/engine/uart.rs`) delivers a live
+# socket's bytes **at the programmed baud** — "the wire delivers at baud: the
+# next byte, if there is one, is one symbol behind this one" — so at the
+# 921,600 baud the app programs, at most ~92 bytes reach the 128-byte RX FIFO
+# per millisecond, and `io_task` drains it on a 1 ms pacer. The host cannot
+# outrun the wire here even when it tries, and an overrun would be a sticky
+# `rx_overflow` rather than a quiet loss. So the honest answer is **no new
+# machine flags and no host-side gap**: `lp-cli upload` writes at socket speed
+# and the model meters it.
+#
+# The 30 ms chunk gap in the committed `walks/*.script` replays is a different
+# thing and stays a **run parameter**: M4 P4 measured it against the
+# window-spill crash (M4 P4b, PR #711), which is gone, and any gap that keeps
+# a 64-byte chunk inside the RX FIFO per 1 ms io_task turn does the same job.
+# It is not a gate and nothing here reads it.
+#
 # ## All three readings, on 2026-09-11 at a0707caaf + this branch
 #
 # The project loads, the output opens, the shader compiles, and the run reaches
@@ -60,6 +145,11 @@ PROJECT="${PROJECT:-projects/test/shader-oracle}"
 ENDPOINT_LABEL="${ENDPOINT_LABEL:-IO18}"
 PAD="${LP_WALK_PAD:-18}"
 LINK="${LP_WALK_LINK:-127.0.0.1:5607}"
+# The cable's own socket. Two sockets and not one, for the reason the crate
+# README's "The two sockets, and why there are two" gives: `lp-cli …
+# serial:tcp://` is a plain byte client, and in-band control would be a
+# dialect every client would have to speak.
+CTRL="${LP_WALK_CTRL:-127.0.0.1:5617}"
 # EMULATED time, and the walk's whole cost. The budget, measured on this
 # machine: the direct load reaches `[RECOVERY] boot complete` at ~115 ms, the
 # scripted upload lands its project at ~7.3 s (twelve requests, 64 B every
@@ -78,13 +168,30 @@ QUANTUM="${LP_WALK_QUANTUM:-256}"
 OUT="${LP_WALK_OUT:-$REPO/target/lp-emu-esp32v3-walk}"
 
 keep=0
+frame_only=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --keep) keep=1; shift ;;
-        -h|--help) sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --frame) frame_only=1; shift ;;
+        -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
+
+# The boot path and the cable, after the arguments: `--frame` is the frame
+# half and sets both defaults, and an explicit LP_WALK_BOOT still wins so the
+# two axes can be crossed by hand when something is being bisected.
+if [[ $frame_only -eq 1 ]]; then
+    BOOT="${LP_WALK_BOOT:-direct}"
+    CABLE="${LP_WALK_CABLE:-0}"
+else
+    BOOT="${LP_WALK_BOOT:-rom-up}"
+    CABLE="${LP_WALK_CABLE:-1}"
+fi
+case "$BOOT" in
+    rom-up | direct) ;;
+    *) echo "LP_WALK_BOOT='$BOOT' — expected rom-up or direct" >&2; exit 2 ;;
+esac
 
 command -v jq >/dev/null 2>&1 || {
     echo "jq not found. Install it (brew install jq) — the decoded frames are JSON." >&2
@@ -158,6 +265,29 @@ if ! strings "$elf" | grep -a '\[OUT\] dump frame=' >/dev/null; then
     exit 1
 fi
 
+# The bytes a flasher writes, when the walk is booting the way one does. The
+# recipe is `build-merged-image.sh`'s and not this script's: it pins
+# espflash 3.3.0, because a different espflash bundles a different
+# second-stage bootloader and the boot log would then be comparing two
+# programs.
+boot_args=()
+case "$BOOT" in
+    rom-up)
+        echo "==> building the merged 4 MiB image (the bytes a flasher writes)"
+        scripts/emu/build-merged-image.sh --chip esp32 "$elf" "$OUT/merged.bin"
+        boot_args=(--boot-mode rom-up --merged "$OUT/merged.bin")
+        ;;
+    direct)
+        boot_args=(--elf "$elf")
+        ;;
+esac
+if [[ "$CABLE" != 0 ]]; then
+    # `--reboot-on-reset` costs a copy of guest memory taken at build time,
+    # which is why the machine does not do it by default — and why it is
+    # asked for only on the arm that actually drives the cable.
+    boot_args+=(--control "tcp:$CTRL" --reboot-on-reset)
+fi
+
 # Release, and the expensive step on a cold cache — minutes, not seconds. It
 # has to be: the same binary uploads the project and the emulator's own
 # interpreter loop is a release build for the same reason.
@@ -172,9 +302,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "==> lp-emu-esp32v3 (direct load, ${TIMEOUT} emulated, quantum $QUANTUM) on $LINK"
+echo "==> lp-emu-esp32v3 ($BOOT boot, cable=$CABLE, ${TIMEOUT} emulated, quantum $QUANTUM) on $LINK"
 "$emu" \
-    --elf "$elf" \
+    "${boot_args[@]}" \
     --uart0 "tcp:$LINK" \
     --console "$console" \
     --dump-frames "file:$frames" \
@@ -199,6 +329,53 @@ if ! kill -0 "$emu_pid" 2>/dev/null; then
     echo "FAIL: the emulator exited before it served the link." >&2
     tail -20 "$OUT/emu.stderr" >&2
     exit 1
+fi
+
+# ----------------------------------------------------------------- the cable
+#
+# ONE client for the whole run, on fd 4, because the machine listens for one
+# control client at a time and a verb-per-connection would make the walk's own
+# reconnects part of what it is testing. Every verb is answered with exactly
+# one line, so `read` once per verb is the protocol and not a guess.
+cable_replies="$OUT/walk.cable.txt"
+: >"$cable_replies"
+cable_open=0
+cable() {
+    local verb="$*" reply=""
+    printf '%s\n' "$verb" >&4
+    # `|| true`: a read that times out returns non-zero and would take the
+    # script with it under `set -e` — at the point where the reply we are
+    # about to complain about would have been printed.
+    IFS= read -r -t 30 reply <&4 || true
+    printf '%-16s %s\n' "$verb" "$reply" | tee -a "$cable_replies"
+    CABLE_REPLY="$reply"
+}
+
+if [[ "$CABLE" != 0 ]]; then
+    echo
+    echo "===== CABLE ====="
+    # The probe is a SUBSHELL, and then the real connection is opened in this
+    # one: a failing `exec` redirection kills a non-interactive shell outright,
+    # so the reachability question is asked where the answer is cheap.
+    for _ in $(seq 1 300); do
+        (exec 4<>"/dev/tcp/${CTRL%%:*}/${CTRL##*:}") 2>/dev/null && { cable_open=1; break; }
+        kill -0 "$emu_pid" 2>/dev/null || break
+        sleep 0.1
+    done
+    if [[ $cable_open -eq 0 ]]; then
+        echo "FAIL: the machine never served the control socket on $CTRL." >&2
+        tail -20 "$OUT/emu.stderr" >&2
+        exit 1
+    fi
+    exec 4<>"/dev/tcp/${CTRL%%:*}/${CTRL##*:}"
+    # What a flasher does before it talks: plug in, reset the board, open the
+    # tty. The reset's RELEASE is the reboot (the crate README's "The verbs,
+    # and why the reboot is an edge"), and `--reboot-on-reset` is on, so the
+    # boot everything below watches is the one AFTER this line.
+    cable attach
+    cable reset
+    cable open
+    cable state
 fi
 
 # ---------------------------------------------------------------- the upload
@@ -226,6 +403,36 @@ else
     echo "upload: OK"
 fi
 
+# ------------------------------------------------- the cable, released again
+#
+# The client is gone, so the tty is closed and the cable comes out — which is
+# what a hardware walk does with `release_port` and a human's fingers, and the
+# half of it a human's fingers do is the half nobody writes down. The `state`
+# reply is the evidence, and it is ASSERTED rather than printed and admired.
+cable_failed=0
+if [[ "$CABLE" != 0 ]]; then
+    echo
+    echo "===== CABLE (released) ====="
+    cable close
+    cable detach
+    cable state
+    released="$CABLE_REPLY"
+    exec 4<&- || true
+    # `cable=absent`, which is the machine's own word for a detached cable
+    # (`ControlReply::State`), not "detached".
+    for want in "port=closed" "cable=absent" "dtr=0" "rts=0" "reboots=1"; do
+        if [[ "$released" != *"$want"* ]]; then
+            echo "FAIL: the cable's final state has no '$want':"
+            echo "  $released"
+            cable_failed=1
+        fi
+    done
+    if [[ $cable_failed -eq 0 ]]; then
+        echo "PASS: the port is released, the lines are slack, and the cable"
+        echo "      rebooted the chip exactly once."
+    fi
+fi
+
 # Let the guest render on past the upload to its deferred lit dump, then let
 # the machine reach its own emulated deadline rather than killing it — a killed
 # run has no report and no flushed frames.
@@ -249,8 +456,14 @@ echo "===== DEVICE ====="
 # `grep -m 40`, not `| head -40`: under `pipefail` a `head` that closes the pipe
 # kills `grep` with SIGPIPE and the whole pipeline reports 141, so the walk
 # would die HERE, at a progress print, on a run that was going perfectly.
+#
+# `cut -c1-600` because `Project` is in the filter and the upload's own
+# `projectRead` reply is a single ~30,000-character line of wire JSON: without
+# it one line buries the section. 600 keeps an `[OUT] dump` whole — its
+# prefix is ~100 characters and its `rgb=` is 384 — which is the one line here
+# that has to survive intact.
 grep -m 40 -aE "boot:|ESP-ROM|INIT|RECOVERY|Project|compilation|\[OUT\]|ERROR|does not produce" \
-    "$console" || true
+    "$console" | cut -c1-600 || true
 
 echo
 echo "===== ORACLE ====="
@@ -316,7 +529,7 @@ if [[ -z "$rv32_hex" ]]; then
     echo "      host frame is not an oracle.)" >&2
     exit 1
 fi
-fail=$upload_failed
+fail=$(( upload_failed | cable_failed ))
 
 # ⚠️ **Readings (b) and (c) are compared FIRST, and a missing reading (a) does
 # not stop them.** The firmware's own dump is the *deferred* one — 30 frames

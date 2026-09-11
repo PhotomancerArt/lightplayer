@@ -1067,6 +1067,98 @@ about dropped frames, and the one `tests/five_wires.rs` makes, is that the pad
 carried at least every frame the guest counted and under one report period
 more.
 
+### The walk, whole — the boot chain and the cable
+
+*M5 P5. `just walk-esp32v3-emu`, and `just walk-esp32v3-emu-frame` for the
+half above.*
+
+The frame walk asks the right question from a direct load with no cable in
+it. A hardware walk flashes a board, resets it over a CH340, opens a tty,
+uploads, and lets go of the port; the twin of that is one script with two
+front doors, and the short name is the bigger thing:
+
+| | `walk-esp32v3-emu` | `walk-esp32v3-emu-frame` |
+|---|---|---|
+| boot | ROM-up from a merged 4 MiB image | direct load |
+| cable | `--control tcp:` + `--reboot-on-reset` | none |
+| cost | ~2 min 45 s wall | ~2 min |
+| asks | the same question, from further back | the frame, three ways |
+
+The cable half is the part a hardware walk gets from a desk and never writes
+down, so it is written down here. One control client for the whole run:
+
+```text
+===== CABLE =====
+attach           ok attach cyc=2640000 us=11000
+reset            ok reset cyc=2880000 us=12000
+open             ok open cyc=240000 us=1000
+state            ok state cyc=480000 us=2000 cable=attached port=open dtr=0 rts=0 en=1 io0=1 strap=app reboots=1
+…
+===== CABLE (released) =====
+close            ok close cyc=334800000 us=1395000
+detach           ok detach cyc=335040000 us=1396000
+state            ok state cyc=335280000 us=1397000 cable=absent port=closed dtr=0 rts=0 en=1 io0=1 strap=app reboots=1
+```
+
+Read the cycles: `reset` lands at 2,880,000 and `open` at 240,000, because
+the reset's **release** rebooted the chip and the guest clock went back to
+zero ("[The verbs, and why the reboot is an edge](#the-verbs-and-why-the-reboot-is-an-edge)").
+The console then holds two boots — the ROM banner the reset cut mid-line and
+the whole boot after it — which is what a reset board's transcript looks
+like, and is the walk's own evidence that the cable did something. The final
+`state` is **asserted**, not admired: `port=closed`, `cable=absent`, both
+lines slack, `reboots=1`.
+
+⚠️ **What the reset does not buy is a second boot.** A reboot restores the
+power-on snapshot and that snapshot includes the flash chip, so the boot after
+the cable reset formats the same blank `lpfs` the first one did. On silicon
+every capture is a second boot because espflash hard-resets after *writing*;
+the emulated twin of that is a two-run recipe and is M5 P6's.
+
+**There are no `--wait-for` / `--chunk-gap` flags, and there is nothing for
+them to do.** UART0 has no RTS/CTS, so on silicon a host that writes faster
+than the guest drains loses bytes — but `UartEngine::poll_source` delivers a
+live socket's bytes *at the programmed baud*, one symbol apart, so at 921,600
+baud at most ~92 bytes reach the 128-byte RX FIFO per millisecond and
+`io_task` drains it on a 1 ms pacer. The host cannot outrun the wire here even
+when it tries. The 30 ms chunk gap in the committed `walks/*.script` replays
+is a **run parameter** and always was.
+
+### The heap gate, read from this machine
+
+*M5 P5. `just heap-budget-check-chips-v3`, `scripts/heap-budget-check.sh`,
+`scripts/heap-budget-record.json`.*
+
+`scripts/heap-budget-record.json`'s `chips` section is what the *firmware*
+costs, as opposed to what a project costs, and since M5 P5 the classic has a
+row in it beside the C6's. The shipped image (`esp32,server,float-f32`) is
+direct-loaded here and read from its first heartbeat triple:
+
+```text
+heap-budget: booting esp32v3 (esp32,server,float-f32) on lp-emu:esp32v3:t1
+  ok: totalBytes: 241552          ok: usedBytes: 17044
+  ok: freeBytes: 224508           ok: largestFreeBlock: 108526
+  ok: stackTotal: 45280           ok: stackHighWater: 16060 B (band 15500..16600)
+```
+
+⚠️ **The triple is elicited, not idle-emitted**, and that is the one thing a
+reader copying the C6's arm gets wrong. `esp32_memory_stats` runs on a project
+load/unload/stop-all or a client `runtime_status`, never on the five-second
+server heartbeat — a classic boot with nobody talking prints no `[MEM]` line
+at all. The gate asks, with
+`lp-emu/lp-emu-validate/walks/v3-stop-all.script`: the same bytes on the same
+trigger as `tests/boot_idle.rs` and as the desk sitting, and it stops on the
+first `[JIT] used=`, 119 ms into the boot.
+
+The four allocator figures are exact or ratcheted; the `[stack]` high-water is
+a **band**, because a differently laid-out image has a different deepest
+point. The classic's band is **measured on one host** — 16,060 B, twice,
+byte-identical — and the record says so in `stack_band_note` rather than
+implying a spread nobody has read. A runner's figure is M5 P6's to add.
+
+It runs in CI's `Emulator ESP32v3 (x64)` job and not the C6's heap job: the
+ELF is an Xtensa cross-build only that job installs, and the heap job's path
+filter (`emu_c6`) does not fire for `lp-fw/fw-esp32v3/**` at all.
 
 ### The sinks
 

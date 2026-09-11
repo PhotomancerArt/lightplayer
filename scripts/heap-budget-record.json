@@ -236,6 +236,41 @@
         "gap_note": "freeBytes +8 / usedBytes -8 on our side, constant across boot 3 and boot 10, two commits, both links and both boot paths: one live 8-byte block silicon has and we do not. Sampling, boot history and the loader are all refuted; naming it needs a true power-on capture. docs/debt/emulator-heap-ledger-differs-from-silicon-by-eight-bytes.md",
         "not_a_gate": "A different image at a different commit \u2014 totalBytes and stackTotal move with the tree, and comparing them across commits would be comparing two linker scripts. Read the four allocator figures and the 8 B; gate on `measured`."
       }
+    },
+    "esp32v3": {
+      "measured": {
+        "freeBytes": 224508,
+        "usedBytes": 17044,
+        "totalBytes": 241552,
+        "largestFreeBlock": 108526,
+        "stackHighWater": 16060,
+        "stackTotal": 45280,
+        "stackHighWaterBand": [
+          15500,
+          16600
+        ]
+      },
+      "recorded": "2026-09-11",
+      "commit": "376ebd220",
+      "comment": "What the classic's FIRMWARE costs: the shipped image (esp32,server,float-f32 \u2014 lp-fw/fw-esp32v3's own default feature set, the bytes the DOM-Z-102 is flashed with) direct-loaded on lp-emu:esp32v3:t1 and read from its FIRST heartbeat triple. \u26a0\ufe0f That triple is ELICITED, not idle-emitted: `esp32_memory_stats` runs on a project load/unload/stop-all or a client `runtime_status`, never on the five-second server heartbeat, so a classic boot with nobody talking prints no `[MEM]` line at all. The gate asks for it with lp-emu/lp-emu-validate/walks/v3-stop-all.script \u2014 the same bytes on the same trigger as lp-emu-esp32v3/tests/boot_idle.rs and as the desk sitting \u2014 and stops on the first `[JIT] used=` line. `measured` is this tree, and is the ratchet. Regenerate with `just heap-budget-baseline-chips-v3`; see docs/heap-budget-gate.md, \"The second source\".",
+      "image": "esp32,server,float-f32",
+      "configuration": "lp-emu:esp32v3:t1",
+      "sample": "the FIRST heartbeat triple, elicited by one `stopAllProjects` on `[INIT] I/O task spawned` +1 ms; the run ends on the first `[JIT] used=` at 119,041 us of emulated time",
+      "stack_band_note": "MEASURED ON ONE HOST ONLY, and that is a named gap for M5 P6. 16,060 B on an M2 Max at 376ebd220, twice, byte-identical; the band is that \u00b1500 B rounded outward, which is the C6's rule (DD45's measured host-to-host spread was 128 B there) and not a fitted number. What the band exists for is that a differently laid-out image has a different deepest point: the reference image a CI runner builds is the same 2,985,952 bytes as this host's and a different sha256. Nobody has yet read this figure off a runner. P6 measures it there and either confirms the band or replaces it with the two numbers.",
+      "silicon_reference": {
+        "commit": "c976f17a9",
+        "transcript": "lp-emu/transcripts/esp32v3/boot-idle/silicon-esp32v3-2026-09-11-c976f17a9-921600.txt",
+        "figures": {
+          "freeBytes": 223352,
+          "usedBytes": 18200,
+          "totalBytes": 241552,
+          "largestFreeBlock": 108526,
+          "stackHighWater": 16972,
+          "stackTotal": 45280
+        },
+        "gap_note": "largestFreeBlock, totalBytes and stackTotal are EQUAL to the byte (108526 / 241552 / 45280). usedBytes is 1,156 B lower here and stackHighWater 912 B lower, and NEITHER number is attributable yet: two confounders sit on top of them. (1) The silicon capture is a SECOND boot of a flash-backed lpfs (espflash hard-resets after writing); this run direct-loads with no flash chip at all and the firmware falls back to the memory FS, which is a different allocator load. (2) It is a different build \u2014 c976f17a9 in a cold worktree, sha256 670b7bf1\u2026, against this tree's 22ef9067\u2026 at the same 2,985,952 bytes. The same-image, same-flash comparison is M5 P6's emulated twin, and E2's pinned +84 B `[MEM] used` claim is a statement about THAT comparison, not about these two rows.",
+        "not_a_gate": "A different image at a different commit on a different boot shape. Read it as the two rows it is, and gate on `measured`."
+      }
     }
   }
 }
