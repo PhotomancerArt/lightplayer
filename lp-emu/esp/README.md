@@ -38,6 +38,13 @@ Under that, `lp-emu-core`'s guest memory, scheduler and cycle model.
 | the boot path | ROM → app | ROM → **the real ESP-IDF second-stage bootloader** out of a merged image → app, and the log is compared line for line against silicon |
 | the host link | a USB-Serial-JTAG peripheral *inside* the SoC — a client connecting **is** the port opening | a **CH340 bridge chip on the board**. Opening the port moves no chip state; what resets the chip is the auto-reset circuit driven by the modem lines, and the truth table is the board's |
 | memory | one flat HP SRAM | SRAM0 with a **measured word-only rule**, SRAM1, SRAM2, two RTC blocks, two flash windows through a per-core cache MMU |
+| the `rmt-chase` payload's chip half | `output::LedChannel` on GPIO18, `RMT_SIG_0` = **71**; the driver swaps RGB→GRB and `lp-ws281x` permutes again, so the wire carries the caller's RGB | the product's own `shared_driver` + `v3_rmt` on IO18 (there is no `LedChannel` here — M4 ruling R5), `RMT_SIG_0` = **87**, which is `RMT_SIG_4` on this chip's *input* table; **one** permutation, so the wire carries real GRB and the gate unpermutes before checksumming |
+
+Both machines carry that payload's gate — `lp-emu-esp32c6/tests/rmt_chase_replay.rs`
+and `lp-emu-esp32v3/tests/rmt_chase.rs` — and both say the same thing about
+768 frames: the guest's own FNV-1a of the buffer it handed the driver equals
+the decoder's FNV-1a of the bytes the pad carried. **On both chips, today,
+both readings are ours**; the silicon twin of the classic's transcript is M5's.
 
 A change to anything in the first list is a change to both machines, which is
 why CI's `emu_c6` and `emu_esp32v3` path filters both fire on `lp-emu/**`. A
