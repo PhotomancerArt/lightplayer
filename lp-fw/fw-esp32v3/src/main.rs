@@ -70,7 +70,10 @@
         // and everything core 1 runs (`wire_pusher::idle_once`'s
         // `rsil`/`waiti`) comes with it.
         feature = "test_appcore_rom_path",
-        feature = "test_cycle_probe"
+        feature = "test_cycle_probe",
+        // `board::esp32v3::fpu`'s `global_asm!` — the compile harness links
+        // that module for `CPENABLE`, and Xtensa `global_asm!` is gated too.
+        feature = "test_shader_compile_incremental"
     ),
     feature(asm_experimental_arch)
 )]
@@ -132,17 +135,25 @@ mod tests;
 // would be measuring itself. They are the S3's "harness needs an app module"
 // exception, earned rather than copied: the `allow(dead_code)` is for the app
 // surface the rig does not reach.
+//
+// The one other harness that also needs `board`:
+// `test_shader_compile_incremental` runs the real compiler, and the compiler
+// does f32 arithmetic — so it needs `board::esp32v3::fpu::arm()` for exactly
+// the reason that module's docs give (a core whose `CPENABLE` bit 0 is clear
+// takes `EXCCAUSE=32` on the first FP instruction). `board::esp32v3::init`
+// stays app-only; see that module.
 #[cfg_attr(
     fw_harness,
     allow(
         dead_code,
         unused_imports,
-        reason = "the canary rig reaches only `init_board` and `start_app_core_isr`; the rest of the app surface these modules carry is unreachable from a harness entrypoint"
+        reason = "the canary rig reaches only `init_board` and `start_app_core_isr`, the compile payload only `fpu::arm`; the rest of the app surface these modules carry is unreachable from a harness entrypoint"
     )
 )]
 #[cfg(any(
     all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)),
-    feature = "test_appcore_rom_path"
+    feature = "test_appcore_rom_path",
+    feature = "test_shader_compile_incremental"
 ))]
 mod board;
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]

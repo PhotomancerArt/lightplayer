@@ -14,5 +14,15 @@
 /// not gated on `float-f32`: the two instructions cost nothing, and a board that
 /// only arms when a feature is on is a board whose failure mode depends on how
 /// it was built.
+///
+/// Reachable from the `shader-compile-stress` harness as well as from the app
+/// (M5 P2): that harness runs the real compiler, the compiler does f32
+/// arithmetic, and an unarmed `CPENABLE` turns the first of those
+/// instructions into `EXCCAUSE=32` — which on a harness image with no
+/// recovery ledger is an exception loop, not a message.
 pub mod fpu;
+/// The app's board bring-up. App-only: it hands out the peripheral singleton
+/// and starts the runtime, neither of which a harness that replaces the
+/// application has any use for.
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 pub mod init;
