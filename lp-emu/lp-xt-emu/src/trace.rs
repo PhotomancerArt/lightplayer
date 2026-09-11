@@ -27,6 +27,15 @@ pub enum TraceEvent<'a> {
     BRegWrite { index: u8, value: bool },
     /// `nbytes` were written to data memory at `addr`.
     MemWrite { addr: u32, value: u32, nbytes: u8 },
+    /// An external register was read (`rer`, `write = false`) or written
+    /// (`wer`, `write = true`). `value` is what was read or what was written.
+    ///
+    /// Its own event rather than a `MemWrite`: the external-register space is
+    /// not memory, and the reason this event exists is that a guest spinning
+    /// on one address of it — an OCD register that is answering "no debugger"
+    /// forever, say — is otherwise invisible in a trace. The `rer` destination
+    /// register still gets its own [`TraceEvent::RegWrite`] after this.
+    ExtRegAccess { write: bool, addr: u32, value: u32 },
     /// The register window rotated (ENTRY / RETW / CALL).
     WindowRotate {
         what: &'static str,
@@ -121,6 +130,13 @@ impl Tracer for TextTracer {
                 nbytes,
             } => {
                 format!("             mem[{addr:#010x}] <- {value:#010x} ({nbytes}B)")
+            }
+            TraceEvent::ExtRegAccess { write, addr, value } => {
+                if write {
+                    format!("             wer ext[{addr:#010x}] <- {value:#010x}")
+                } else {
+                    format!("             rer ext[{addr:#010x}] -> {value:#010x}")
+                }
             }
             TraceEvent::WindowRotate {
                 what,

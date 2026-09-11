@@ -97,13 +97,19 @@
 //! - **A translator.** [`translated`] is the seam one would plug into and
 //!   nothing is plugged into it: with no core installed the hart runs the loop
 //!   it has always run, and everything observable is byte-identical.
-//! - **ICOUNT** counting, `LITBASE`-relative `l32r`, external registers
-//!   (`rer`/`wer` raise an illegal instruction, loudly), and any cache or
+//! - **ICOUNT** counting, `LITBASE`-relative `l32r`, and any cache or
 //!   region-protection *behaviour* (the TLB attributes are accepted and
 //!   remembered, RM §4.6.3.2).
+//!
+//! External registers are **no longer** in that list: `rer`/`wer` run, against
+//! the sparse store in [`extreg`] where an unwritten address reads 0. That
+//! zero is the honest reading of the one external register the firmware
+//! touches — `XDM_OCD_DCR_SET`, whose bit 0 asks "is a debugger attached?" —
+//! and the store, not a model of the debug module, is what this hart claims.
 
 pub mod breakpoint;
 mod exec;
+pub mod extreg;
 pub mod interrupt;
 pub mod mac16;
 pub mod sr;
@@ -124,6 +130,7 @@ use crate::executor::Exec;
 use crate::fp_policy::FpPolicy;
 use crate::trace::{NoopTracer, TraceEvent, Tracer};
 use breakpoint::BreakUnit;
+use extreg::ExternalRegs;
 use interrupt::{IntLine, InterruptUnit, Take};
 use mac16::Mac16;
 use sr::{
@@ -175,8 +182,10 @@ pub enum HartFault {
     /// not in the guest.
     UnmappedExecutorError { pc: u32 },
     /// **Only with [`XtHart::set_strict_unsupported`]`(true)`.** The word at
-    /// `pc` is one this emulator does not implement — an encoding the
-    /// decoder refuses, or an instruction the hart declines (`rer`/`wer`).
+    /// `pc` is one this emulator does not implement — today that is an
+    /// encoding the decoder refuses, and nothing else: the hart's own
+    /// declined set (`exec::is_unimplemented`) is empty now that `rer`/`wer`
+    /// have a model.
     /// The architectural answer is an illegal-instruction exception, and
     /// that is what the default gives; the strict stop exists for bring-up,
     /// where a guest that reaches its own illegal-instruction handler is a
@@ -228,6 +237,11 @@ pub struct XtHart<B: Bus> {
     /// source of truth per field; [`XtHart::ps`] composes the register.
     ps: u32,
     sr: SrFile,
+    /// What `rer`/`wer` reach: a sparse store, 0 everywhere nothing has been
+    /// written. Architectural state in the sense that matters here — it is
+    /// cloned with the hart and survives a snapshot — even though the space
+    /// it stands for is mostly outside the core. See [`extreg`].
+    ext: ExternalRegs,
     ints: InterruptUnit,
     timers: Timers,
     breaks: BreakUnit,
@@ -303,6 +317,7 @@ impl<B: Bus> Clone for XtHart<B> {
             cpu: self.cpu.clone(),
             ps: self.ps,
             sr: self.sr.clone(),
+            ext: self.ext.clone(),
             ints: self.ints.clone(),
             timers: self.timers.clone(),
             breaks: self.breaks.clone(),
@@ -365,6 +380,7 @@ impl<B: Bus> XtHart<B> {
             cpu,
             ps: PS_RESET,
             sr: SrFile::new(config.reset_vecbase),
+            ext: ExternalRegs::new(),
             ints: InterruptUnit::new(config.interrupts),
             timers: Timers::new(),
             breaks: BreakUnit::new(),
@@ -567,6 +583,23 @@ impl<B: Bus> XtHart<B> {
     #[must_use]
     pub const fn strict_unsupported(&self) -> bool {
         self.strict_unsupported
+    }
+
+    /// The external-register space `rer`/`wer` reach ([`extreg`]).
+    ///
+    /// A machine that has to answer for one of these addresses — a SoC that
+    /// hangs something real off the ERI window — seeds it here rather than
+    /// teaching the hart the chip.
+    #[inline]
+    #[must_use]
+    pub const fn external_regs(&self) -> &ExternalRegs {
+        &self.ext
+    }
+
+    /// Mutable access to the external-register space, for the same reason.
+    #[inline]
+    pub const fn external_regs_mut(&mut self) -> &mut ExternalRegs {
+        &mut self.ext
     }
 
     /// Forget whatever has been pre-decoded or translated for `[lo, hi)`.

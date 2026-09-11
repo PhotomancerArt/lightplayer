@@ -62,6 +62,12 @@
 //! [`XtHart::cpu_mut`](super::XtHart::cpu_mut) makes all three one object with
 //! one owner.
 //!
+//! `rer`/`wer` need no addition to any of this: they are already in
+//! `exec::is_hart_owned`, so a translated block that meets one takes the
+//! escape hatch and the interpreter runs it against
+//! [`XtHart::external_regs`](super::XtHart::external_regs) — the same store,
+//! the same trace, the same answer.
+//!
 //! A core cannot borrow the hart while the hart owns the core, so
 //! [`XtHart::run_slice`](super::XtHart::run_slice) **lifts the core out of the
 //! hart** for the length of a slice, exactly as the RV32 hart does and for the

@@ -13,6 +13,7 @@ use lp_xt_inst::{
     RfOp, SpecialReg, SrOp, StoreOp, UrOp, UserReg, WindowLsOp, encode,
 };
 
+use super::extreg::{DCR_ENABLEOCD, XDM_OCD_DCR_CLR, XDM_OCD_DCR_SET, XDM_OCD_DSR};
 use super::interrupt::{IntKind, IntLine};
 use super::sr::{PS_BOOT, PS_CALLINC_SHIFT, PS_EXCM, PS_INTLEVEL_MASK, PS_RESET, PS_UM, PS_WOE};
 use super::trap::{
@@ -2210,6 +2211,166 @@ fn entry_check_is_byte_granular() {
         } else {
             assert_eq!(runs, 0, "pc+{delta} is not an entry — the slots differ");
             assert_ne!(entry_slot(CODE), entry_slot(CODE + delta));
+        }
+    }
+}
+
+// --- external registers: `rer` / `wer` (M1 P6) -------------------------------
+
+/// An ERI address in no block anything documents — the round-trip's scratch.
+const ERI_SCRATCH: u32 = 0x0010_3210;
+
+/// The two words both classic boot paths stop on, as **bytes from the shipped
+/// images**, not as re-encodings of what this repo thinks they mean.
+///
+/// `0x0040_6890` is at pc `0x4010_01bd` in `esp_hal::debugger::
+/// debugger_connected()` (reached from `CpuControl::start_app_core`);
+/// `0x0040_6ee0` is at pc `0x4007_a526` in the IDF second-stage bootloader's
+/// `esp_cpu_dbgr_is_attached()`. Both are `rer` of `XDM_OCD_DCR_SET`, whose
+/// honest answer on this machine is 0 = no debugger attached.
+///
+/// The `decode` assertion is the operand-order claim in the open: the
+/// destination is `at` and the **address** is `as`, matching
+/// `xtensa_lx::is_debugger_attached`'s `asm!("rer {0}, {1}", out(reg) x,
+/// in(reg) XDM_OCD_DCR_SET)` (xtensa-lx-0.13.0 `src/lib.rs:98-104`).
+#[test]
+fn the_firmware_rer_words_read_zero_for_no_debugger_attached() {
+    for (word, addr_reg, dst_reg) in [(0x0040_6890u32, 8u8, 9u8), (0x0040_6ee0, 14, 14)] {
+        let bytes = word.to_le_bytes();
+        assert_eq!(
+            lp_xt_inst::decode(&bytes[..3]).expect("decodes").0,
+            Inst::ExtReg(false, a(dst_reg), a(addr_reg)),
+            "{word:#010x}",
+        );
+
+        let (mut hart, mut bus) = booted();
+        let i = (CODE - RAM_BASE) as usize;
+        bus.ram[i..i + 3].copy_from_slice(&bytes[..3]);
+        asm(&mut bus, CODE + 3, &[brk()]);
+        hart.cpu_mut().set_a(addr_reg, XDM_OCD_DCR_SET);
+        hart.cpu_mut().set_a(dst_reg, 0xFFFF_FFFF);
+
+        // Retires, and the pc advanced by exactly the 3 bytes it is wide.
+        assert_eq!(
+            hart.run_slice(&mut bus, 10),
+            SliceEnd::Ebreak { pc: CODE + 3 },
+            "{word:#010x}",
+        );
+        assert_eq!(hart.cpu().a(dst_reg), 0, "{word:#010x}");
+        assert_eq!(
+            hart.cpu().a(dst_reg) & DCR_ENABLEOCD,
+            0,
+            "{word:#010x}: DCR_ENABLEOCD clear is 'no debugger attached'",
+        );
+        // A read invents no entry.
+        assert!(hart.external_regs().is_empty(), "{word:#010x}");
+    }
+}
+
+#[test]
+fn wer_then_rer_round_trips_at_an_arbitrary_address() {
+    let (mut hart, mut bus) = booted();
+    asm(
+        &mut bus,
+        CODE,
+        &[
+            // wer a3, a2 : ExternalReg[a2] <- a3
+            Inst::ExtReg(true, a(3), a(2)),
+            // rer a4, a2 : a4 <- ExternalReg[a2]
+            Inst::ExtReg(false, a(4), a(2)),
+            brk(),
+        ],
+    );
+    hart.cpu_mut().set_a(2, ERI_SCRATCH);
+    hart.cpu_mut().set_a(3, 0xDEAD_BEEF);
+    hart.cpu_mut().set_a(4, 0xFFFF_FFFF);
+    hart.run_slice(&mut bus, 10);
+
+    assert_eq!(hart.cpu().a(4), 0xDEAD_BEEF);
+    assert_eq!(hart.external_regs().read(ERI_SCRATCH), 0xDEAD_BEEF);
+    // Exactly one address was touched — a write is not a range.
+    assert_eq!(hart.external_regs().len(), 1);
+    assert_eq!(
+        hart.external_regs().iter().collect::<Vec<_>>(),
+        vec![(ERI_SCRATCH, 0xDEAD_BEEF)],
+    );
+    // Neighbours are untouched and still read 0.
+    assert_eq!(hart.external_regs().read(ERI_SCRATCH + 4), 0);
+    assert_eq!(hart.external_regs().read(XDM_OCD_DCR_SET), 0);
+    // And the store is architectural state: a snapshot carries it.
+    assert_eq!(hart.clone().external_regs().read(ERI_SCRATCH), 0xDEAD_BEEF);
+}
+
+#[test]
+fn an_unwritten_external_register_reads_zero() {
+    for addr in [0u32, XDM_OCD_DCR_CLR, XDM_OCD_DSR, 0x1234_5678, u32::MAX] {
+        let (mut hart, mut bus) = booted();
+        asm(&mut bus, CODE, &[Inst::ExtReg(false, a(3), a(2)), brk()]);
+        hart.cpu_mut().set_a(2, addr);
+        hart.cpu_mut().set_a(3, 0xFFFF_FFFF);
+        hart.run_slice(&mut bus, 10);
+        assert_eq!(hart.cpu().a(3), 0, "{addr:#010x}");
+        assert!(hart.external_regs().is_empty(), "{addr:#010x}");
+    }
+}
+
+/// A machine can seed the space from the host side — the seam a SoC with
+/// something real on the ERI window would use.
+#[test]
+fn a_machine_can_seed_what_rer_reads() {
+    let (mut hart, mut bus) = booted();
+    asm(&mut bus, CODE, &[Inst::ExtReg(false, a(3), a(2)), brk()]);
+    hart.external_regs_mut()
+        .write(XDM_OCD_DCR_SET, DCR_ENABLEOCD);
+    hart.cpu_mut().set_a(2, XDM_OCD_DCR_SET);
+    hart.run_slice(&mut bus, 10);
+    assert_eq!(hart.cpu().a(3), DCR_ENABLEOCD);
+}
+
+/// Every access names itself in the trace, so a guest spinning on one OCD
+/// address is diagnosable rather than a silence.
+#[test]
+fn every_external_register_access_is_traced() {
+    let (mut hart, mut bus) = booted();
+    asm(
+        &mut bus,
+        CODE,
+        &[
+            Inst::ExtReg(true, a(3), a(2)),
+            Inst::ExtReg(false, a(4), a(2)),
+            brk(),
+        ],
+    );
+    hart.cpu_mut().set_a(2, XDM_OCD_DCR_SET);
+    hart.cpu_mut().set_a(3, 1);
+    let mut tracer = crate::TextTracer::new();
+    hart.run_slice_traced(&mut bus, 10, &mut tracer);
+    let dump = tracer.dump();
+    assert!(dump.contains("wer ext[0x0010200c] <- 0x00000001"), "{dump}");
+    assert!(dump.contains("rer ext[0x0010200c] -> 0x00000001"), "{dump}");
+}
+
+/// The user-mode runner is unchanged: `rer`/`wer` are machine-mode-only there
+/// and stay an illegal-instruction trap. The hart gaining a model does not
+/// quietly give the `Emulator` one.
+#[test]
+fn the_user_mode_emulator_still_refuses_extreg() {
+    for write in [false, true] {
+        let mut code = Vec::new();
+        code.extend(encode(&Inst::Entry(a(1), 32)));
+        code.extend(encode(&Inst::ExtReg(write, a(3), a(2))));
+        code.extend(encode(&retw()));
+        let mut emu = crate::Emulator::new();
+        match emu.run(&code, 0, 0) {
+            crate::RunOutcome::Trap(t) => {
+                assert_eq!(t.kind, crate::TrapKind::Exception, "write={write}: {t:?}");
+                assert_eq!(
+                    t.cause,
+                    crate::error::EXC_ILLEGAL_INSTRUCTION,
+                    "write={write}: {t:?}",
+                );
+            }
+            other => panic!("write={write}: expected a trap, got {other:?}"),
         }
     }
 }

@@ -75,13 +75,19 @@ pub(super) fn is_hart_owned(inst: &Inst) -> bool {
 }
 
 /// An instruction the emulator declines rather than the guest executing
-/// something genuinely illegal — the strict-stop set. External registers
-/// have no model here; an `rsr`/`wsr` of a register number outside the SR
-/// table never decodes (`lp-xt-inst` refuses it), so it arrives as an
-/// `Unsupported` word instead.
+/// something genuinely illegal — the strict-stop set.
+///
+/// **The set is empty.** `rer`/`wer` were its only members and they have a
+/// model now (M1 P6, [`super::extreg`]); an `rsr`/`wsr` of a register number
+/// outside the SR table never decodes (`lp-xt-inst` refuses it), so it
+/// arrives as an `Unsupported` word from the decoder instead and never
+/// reaches here. The predicate stays as the seam: the next instruction this
+/// hart decodes but declines belongs in it, and `deliver_trap` already knows
+/// to ask.
 #[inline]
 pub(super) fn is_unimplemented(inst: &Inst) -> bool {
-    matches!(inst, Inst::ExtReg(..))
+    let _ = inst;
+    false
 }
 
 fn illegal() -> Trap {
@@ -408,8 +414,49 @@ impl<B: Bus> XtHart<B> {
             // be removed."
             Inst::TlbInv(..) => retire(Flow::Next, InstClass::System, false),
 
-            // External registers: no model. Loud (see `is_unimplemented`).
-            Inst::ExtReg(..) => Err(illegal()),
+            // --- external registers (`rer`/`wer`, RM "External Registers") ---
+            //
+            // `rer at, as`: `AR[t] <- ExternalReg[AR[s]]`. `wer at, as`:
+            // `ExternalReg[AR[s]] <- AR[t]`. The address is in **`as`** and
+            // the data end is **`at`** both ways round, which is what
+            // `xtensa_lx::is_debugger_attached` encodes directly:
+            // `asm!("rer {0}, {1}", out(reg) x, in(reg) XDM_OCD_DCR_SET)`
+            // (xtensa-lx-0.13.0 `src/lib.rs:98-104`).
+            //
+            // Both are privileged instructions. This hart raises no
+            // privileged-instruction exception for any of them, because
+            // `CRING` is always 0 here (the module docs' "Rings" paragraph)
+            // — the firmware never leaves ring 0, and inventing a ring model
+            // for two instructions would be a different claim from the one
+            // the rest of the privileged set makes. The user-mode `Emulator`
+            // is where these are loud: its executors refuse `ExtReg` with
+            // `machine_mode_only()` and that is unchanged.
+            //
+            // The store is `super::extreg`: unwritten reads 0, writes are
+            // remembered. Every access is traced, because a guest spinning on
+            // an OCD register is otherwise a silence.
+            Inst::ExtReg(write, at, r#as) => {
+                let addr = self.cpu.a(r#as.num());
+                let t = at.num();
+                if write {
+                    let v = self.cpu.a(t);
+                    self.ext.write(addr, v);
+                    tracer.event(TraceEvent::ExtRegAccess {
+                        write: true,
+                        addr,
+                        value: v,
+                    });
+                } else {
+                    let v = self.ext.read(addr);
+                    tracer.event(TraceEvent::ExtRegAccess {
+                        write: false,
+                        addr,
+                        value: v,
+                    });
+                    self.wreg(t, v, tracer);
+                }
+                retire(Flow::Next, InstClass::System, false)
+            }
 
             // --- MAC16 (ruling R4) ---
             Inst::Mac(op, half, src) => {
