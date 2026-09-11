@@ -2419,8 +2419,36 @@ test-emu-esp32v3:
 # builds to the same target path, and a test that read whatever was there last
 # would pass against the wrong image (`lp-emu-esp32v3/src/test_support.rs`).
 # P8's `build-reference-image.sh` learns the classic and pins the commit.
+#
+# P7 adds the **merged chip image** alongside it: `espflash save-image --chip
+# esp32 --merge` on the same ELF, which bundles the exact ESP-IDF
+# `v5.1-beta1-378-gea5e0ff298-dirt` second-stage bootloader the desk board
+# runs (DD25 — nothing is vendored, the image IS the provenance), the
+# partition table, the app and an empty `lpfs`. Built here rather than in a
+# test so the two variables name one build: `rom_up_boot.rs` compares a
+# direct load of the ELF against a ROM-up boot of the merged image, and two
+# builds would make that comparison meaningless.
+#
+# ⚠️ `espflash` is therefore a **CI dependency** of this recipe (P8's job
+# installs it; `cargo install espflash` or the release tarball). With it
+# absent the merged image is not built, the variable is not set, and the
+# tests that need one print a SKIP notice rather than failing.
 test-emu-esp32v3-boot: build-fw-esp32v3
-    LP_EMU_ESP32V3_ELF={{ justfile_directory() }}/target/xtensa-esp32-none-elf/release-esp32v3/fw-esp32v3 cargo test -p lp-emu-esp32v3 -- --include-ignored
+    #!/usr/bin/env bash
+    set -euo pipefail
+    elf={{ justfile_directory() }}/target/xtensa-esp32-none-elf/release-esp32v3/fw-esp32v3
+    merged={{ justfile_directory() }}/target/lp-emu-esp32v3/merged.bin
+    export LP_EMU_ESP32V3_ELF="$elf"
+    if command -v espflash >/dev/null 2>&1; then
+      mkdir -p "$(dirname "$merged")"
+      espflash save-image --chip esp32 --merge \
+          --partition-table {{ fw_esp32v3_dir }}/partitions.csv \
+          --flash-size {{ v3_flash_size }} "$elf" "$merged"
+      export LP_EMU_ESP32V3_MERGED="$merged"
+    else
+      echo "espflash is not on PATH: the merged-image tests will SKIP" >&2
+    fi
+    cargo test -p lp-emu-esp32v3 -- --include-ignored
 
 # Run an image on the classic ESP32 (v3) machine.
 #

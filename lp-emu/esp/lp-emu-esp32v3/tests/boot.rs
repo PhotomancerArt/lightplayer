@@ -1007,9 +1007,18 @@ fn uart0_fifo_bytes(trace: &str) -> Vec<u8> {
         .collect()
 }
 
-/// Run the shipped image on the P3 boot set to `micros`, with UART0 traced
-/// into a sink, and hand back the machine, the outcome and the trace text.
-fn direct_traced(micros: u64) -> Option<(Machine, Outcome, String)> {
+/// Run the shipped image to `micros` with UART0 traced into a sink, and hand
+/// back the machine, the outcome and the trace text.
+///
+/// `chip` is what is behind SPI1 (P7). **It changes what the boot prints**:
+/// with a blank chip there is no partition table at `0x8000`, so the
+/// firmware falls back to its memory filesystem; with the merged image there
+/// is one, and the mount succeeds. Both are real readings of this machine,
+/// and both are pinned below.
+fn direct_traced_on(
+    micros: u64,
+    chip: lp_emu_esp32v3::flash::FlashBacking,
+) -> Option<(Machine, Outcome, String)> {
     let elf = match fw_esp32v3_image() {
         Ok(p) => p,
         Err(reason) => {
@@ -1021,6 +1030,7 @@ fn direct_traced(micros: u64) -> Option<(Machine, Outcome, String)> {
     let mut machine = Esp32V3Builder::new()
         .boot_mode(BootMode::Direct)
         .app(AppSource::Path(elf))
+        .flash(chip)
         .strict(true)
         .trace(Box::new(sink.clone()), vec!["UART0".into()])
         .build()
@@ -1029,11 +1039,48 @@ fn direct_traced(micros: u64) -> Option<(Machine, Outcome, String)> {
     Some((machine, outcome, sink.text()))
 }
 
-/// **Where the direct load stands at the end of P3.** With every block the
-/// strict run demanded accepted, the boot prints its whole `[INIT]` chain
-/// — into a register that remembers only the last byte — and then reaches
-/// the flash: esp-storage's `esp_rom_spiflash_read_status` writes
-/// `SPI1.cmd.flash_rdsr` (bit 27) and spins until hardware clears it:
+/// [`direct_traced_on`] with a blank chip.
+fn direct_traced(micros: u64) -> Option<(Machine, Outcome, String)> {
+    direct_traced_on(micros, lp_emu_esp32v3::flash::FlashBacking::Blank)
+}
+
+/// **Where the direct load stands at the end of P7**, and it is one
+/// instruction short of the idle heartbeat.
+///
+/// `rer a9, a8` with `a8 = 0x0010_200C` is `xtensa_lx::is_debugger_attached()`
+/// (`xtensa-lx-0.13.0/src/lib.rs:98-104`, whose `XDM_OCD_DCR_SET` that is),
+/// reached through `esp_hal::debugger::debugger_connected()` from
+/// `CpuControl::start_app_core` — the firmware's attempt to release core 1,
+/// which M3 does not grant (Q5) and which the image is entitled to try.
+///
+/// The instruction is not in `lp-xt-inst`'s `Inst` at all, so it is not a
+/// two-line addition to the hart: it needs a decode arm, an encode arm, a
+/// disassembly arm, an executor arm and the translator's coverage, in the
+/// **Xtensa ISA crate the shader backend also uses**. M3's own concurrency
+/// rules (`m3/notes.md` §12) put `lp-xt-emu` and its ISA crate out of this
+/// milestone's reach and call a hart change "a finding for the director". So
+/// it is pinned here rather than fixed here, and the pin is exact — a
+/// different word or a different pc means something else moved.
+const RER_PC: u32 = 0x4010_01bd;
+/// The word: `rer a9, a8`.
+const RER_WORD: u32 = 0x0040_6890;
+
+fn is_the_rer_stop(outcome: &Outcome) -> bool {
+    matches!(
+        outcome,
+        Outcome::Fault {
+            pc,
+            fault: lp_xt_emu::mach::HartFault::UnsupportedInstruction { word, .. },
+            ..
+        } if *pc == RER_PC && *word == RER_WORD
+    )
+}
+
+/// **The flash controller answers, and a blank chip has no partition table.**
+///
+/// P3 left the direct load spinning here: esp-storage's
+/// `esp_rom_spiflash_read_status` wrote `SPI1.cmd.flash_rdsr` (bit 27) and an
+/// accept block held the bit for ever —
 ///
 /// ```text
 /// 40083861:  s32i    a12, a10, 0        ; SPI1.cmd = 1 << 27
@@ -1042,61 +1089,49 @@ fn direct_traced(micros: u64) -> Option<(Machine, Outcome, String)> {
 /// 40083869:  bnez    a8, 40083864
 /// ```
 ///
-/// A register file holds the bit forever. That is P7's question in the
-/// phase file's own words — *"SPI1 `CMD` write: no flash chip"* — and this
-/// test holds the reading until P7 moves it.
+/// P7's SPI1 view completes the command inside the write, so `cmd` reads 0
+/// and the spin ends on its first pass. What the boot finds next is the
+/// honest consequence of an **empty** part: no partition table at `0x8000`,
+/// so `esp-bootloader-esp-idf`'s lookup fails and the firmware takes its own
+/// documented fallback. The merged-image reading is the test below.
 ///
-/// The hello was **P6's**, and it landed: the bytes below are the ones the
-/// guest wrote into `fifo`, and `tests/boot_idle.rs` is the same 543 bytes
-/// coming out of the host stream. The last assertion here used to read the
-/// block back and find the last byte, because an accept block remembers only
-/// the last write; UART0 is a view now, so `fifo` reads the **receive** side
-/// and an empty receive FIFO reads zero. That change of meaning is the phase.
+/// The hello was **P6's**, and it landed: the bytes below left the chip
+/// through UART0's shifter at 921,600 baud and are read back off the host
+/// stream. `fifo` reads the **receive** side on the read path, and an empty
+/// receive FIFO reads zero.
 #[test]
 #[ignore = "needs the shipped image; run through `just test-emu-esp32v3-boot`"]
-fn the_direct_load_says_hello_and_stands_at_the_flash_until_p7() {
-    let Some((mut machine, outcome, trace)) = direct_traced(20_000) else {
+fn the_flash_status_spin_ends_and_a_blank_chip_has_no_partition_table() {
+    let Some((mut machine, outcome, trace)) = direct_traced(300_000) else {
         return;
     };
     assert!(
-        matches!(outcome, Outcome::Deadline { .. }),
-        "no strict stop and no fault before the deadline: {outcome:?}"
-    );
-    let pc = machine.harts[0].pc();
-    let sym = machine.symbolize(pc).unwrap_or_default();
-    assert!(
-        sym.starts_with("esp_rom_spiflash_read_status"),
-        "spinning on the flash status command, got pc={pc:#010x} ({sym})"
-    );
-    assert!(
-        (0x4008_3864..=0x4008_386B).contains(&pc),
-        "inside the `memw; l32i; bnez` loop: {pc:#010x}"
+        is_the_rer_stop(&outcome),
+        "past the flash, as far as `start_app_core`'s `rer`: {outcome:?}"
     );
     assert_eq!(
         machine.peek_word(memmap::periph::SPI1),
-        Some(1 << 27),
-        "SPI1.cmd.flash_rdsr, remembered — the bit no register file can clear"
+        Some(0),
+        "SPI1.cmd reads idle: every trigger completed inside its own write"
+    );
+    let census = machine.flash().lock().expect("flash").command_census();
+    assert!(
+        census.status_reads > 0,
+        "the status read the spin was waiting on really ran: {census}"
     );
 
-    // The hello, byte for byte, out of the trace: the silicon capture's
-    // `[INIT]` chain (`../bench.md`), as far as the I/O task.
     let text = String::from_utf8_lossy(&uart0_fifo_bytes(&trace)).into_owned();
     assert!(
         text.starts_with("[INIT] fw-esp32v3 boot\n"),
         "the first line the boot prints: {text:?}"
     );
-    for line in [
-        "[INIT] chip=esp32 arch=xtensa heap=",
-        "[INIT] heap regions: 0 0x3ffe0440+15072 (ROM PRO stack)",
-        "[RECOVERY] boot: cause=power-on",
-        "[INIT] runtime started",
-        "[INIT] I/O task spawned (uart0 921600 8N1",
-    ] {
-        assert!(text.contains(line), "missing {line:?} in:\n{text}");
-    }
+    assert!(
+        text.contains("partition in the flashed table"),
+        "a blank chip has no partition table; the firmware says so:\n{text}"
+    );
     assert!(
         !text.contains("flash filesystem mounted"),
-        "the mount is the line after the flash read, and there is no flash chip"
+        "and does not claim to have mounted one:\n{text}"
     );
     // And the block holds none of it: `fifo` is the receive side on the read
     // path, the host sent nothing, and an empty receive FIFO reads zero.
@@ -1115,45 +1150,105 @@ fn the_direct_load_says_hello_and_stands_at_the_flash_until_p7() {
     );
 }
 
-/// The sha256 of the 543 bytes the direct load prints, **pinned**.
-///
-/// P3 measured the chain and printed it in
-/// `docs/reports/2026-09-10-esp32v3-strict-boot-inventory.md` §1.1; P4
-/// replaced DPORT's accept block with a view, which is the largest change a
-/// phase can make to a boot without touching the firmware, so the bytes get a
-/// golden rather than a spot check. The heap line inside it is byte-identical
-/// to L0's silicon capture (`../bench.md`).
-///
-/// ⚠️ It is a property of **this image**, not of the machine: the desk board
-/// runs a different commit (ruling R7), and a firmware change moves it. A
-/// failure here means "the boot printed something else", and the diff the
-/// test prints is what says whether that is a regression or a rebuild.
-const INIT_CHAIN_SHA256: &str = "ea8bae305953ef613f68a97fb84919378f33b37eb5623dcb970e8dce2b7343e7";
+/// **P7's acceptance, item 1.** With the merged image in the chip the direct
+/// load passes the flash spin, mounts `lpfs` and prints the line P6's gate
+/// stopped one short of.
+#[test]
+#[ignore = "needs the shipped image and espflash; run through `just test-emu-esp32v3-boot`"]
+fn the_direct_load_mounts_the_flash_filesystem() {
+    let merged = match lp_emu_esp32v3::test_support::merged_chip_image() {
+        Ok(p) => p,
+        Err(reason) => {
+            skip_notice("the_direct_load_mounts_the_flash_filesystem", &reason);
+            return;
+        }
+    };
+    let Some((machine, outcome, trace)) =
+        direct_traced_on(300_000, lp_emu_esp32v3::flash::FlashBacking::Copy(merged))
+    else {
+        return;
+    };
+    assert!(is_the_rer_stop(&outcome), "{outcome:?}");
+    let text = String::from_utf8_lossy(&uart0_fifo_bytes(&trace)).into_owned();
+    assert!(
+        text.ends_with("[INIT] flash filesystem mounted\n"),
+        "the line P6 stopped one short of:\n{text}"
+    );
+    // The mount really read the part, and the first boot formatted it.
+    let census = machine.flash().lock().expect("flash").command_census();
+    assert!(census.reads > 50, "{census}");
+    assert!(
+        census.sector_erases > 0,
+        "an empty `lpfs` is formatted on the first boot: {census}"
+    );
+}
 
-/// How many bytes that is.
-const INIT_CHAIN_LEN: usize = 543;
+/// The sha256 of the bytes the direct load prints, **pinned** — one golden
+/// per chip, because the chip changes what the firmware finds.
+///
+/// P3 measured a 543-byte chain and printed it in
+/// `docs/reports/2026-09-10-esp32v3-strict-boot-inventory.md` §1.1, ending at
+/// `[INIT] I/O task spawned`, because there was no flash chip and the boot
+/// spun at the door of the mount. P7 gave it one, so the chain continues —
+/// and where it goes depends on what is on the part. **Re-measured, not
+/// widened**: each golden is a whole byte stream with a sha, and the cause of
+/// the change is the line that follows `I/O task spawned` in each.
+///
+/// A blank chip: 543 bytes plus the `[ERROR] no lpfs partition …` fallback.
+///
+/// Both are properties of **this image**, not of the machine: the desk board
+/// runs a different commit (ruling R7), and a firmware change moves them. A
+/// failure means "the boot printed something else", and the text the test
+/// prints is what says whether that is a regression or a rebuild.
+const INIT_CHAIN_BLANK_SHA256: &str =
+    "bfb8d720edc298a3d902860525be2fa05fe701202babeb8e9b0cfee10d2aa40a";
+const INIT_CHAIN_BLANK_LEN: usize = 676;
 
-/// **P4's acceptance for the boot threshold.** The direct load with the DPORT
-/// view in place reaches the same place P3 left it — the flash status spin —
-/// and prints the same 543 bytes on the way.
+/// The merged image: 543 bytes plus `[INIT] flash filesystem mounted`, and
+/// **fewer** bytes than the blank-chip chain because the error line it
+/// replaces is longer than the success line.
+const INIT_CHAIN_MERGED_SHA256: &str =
+    "87fb3c418b9c2755d5e465dca1906e9f1d4ee64c96b53d1121f7fa23bbf3b373";
+const INIT_CHAIN_MERGED_LEN: usize = 575;
+
+/// The boot threshold, pinned on both chips.
 #[test]
 #[ignore = "needs the shipped image; run through `just test-emu-esp32v3-boot`"]
-fn the_init_chain_is_the_golden_543_bytes() {
+fn the_init_chain_is_the_golden_bytes() {
     use sha2::{Digest, Sha256};
 
     let Some((_, outcome, trace)) = direct_traced(300_000) else {
         return;
     };
-    assert!(
-        matches!(outcome, Outcome::Deadline { .. }),
-        "no strict stop, no fault and no cache-off stop: {outcome:?}"
-    );
+    assert!(is_the_rer_stop(&outcome), "{outcome:?}");
     let bytes = uart0_fifo_bytes(&trace);
     let text = String::from_utf8_lossy(&bytes).into_owned();
-    assert_eq!(bytes.len(), INIT_CHAIN_LEN, "the chain is:\n{text}");
+    assert_eq!(bytes.len(), INIT_CHAIN_BLANK_LEN, "the chain is:\n{text}");
     assert_eq!(
         format!("{:x}", Sha256::digest(&bytes)),
-        INIT_CHAIN_SHA256,
+        INIT_CHAIN_BLANK_SHA256,
+        "the chain is:\n{text}"
+    );
+
+    let merged = match lp_emu_esp32v3::test_support::merged_chip_image() {
+        Ok(p) => p,
+        Err(reason) => {
+            skip_notice("the_init_chain_is_the_golden_bytes (merged half)", &reason);
+            return;
+        }
+    };
+    let Some((_, outcome, trace)) =
+        direct_traced_on(300_000, lp_emu_esp32v3::flash::FlashBacking::Copy(merged))
+    else {
+        return;
+    };
+    assert!(is_the_rer_stop(&outcome), "{outcome:?}");
+    let bytes = uart0_fifo_bytes(&trace);
+    let text = String::from_utf8_lossy(&bytes).into_owned();
+    assert_eq!(bytes.len(), INIT_CHAIN_MERGED_LEN, "the chain is:\n{text}");
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&bytes)),
+        INIT_CHAIN_MERGED_SHA256,
         "the chain is:\n{text}"
     );
 }
