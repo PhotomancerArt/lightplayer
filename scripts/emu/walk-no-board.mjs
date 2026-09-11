@@ -289,7 +289,13 @@ async function main() {
           `— the page is still on the shell loader, which is a bundle problem and not a board one`,
       );
     }
-    console.log(`  studio is up\n`);
+    // An instrument that lies about its own conditions is worse than none:
+    // a hidden page throttles its timers and its Workers, so a walk run in
+    // one measures the throttle. Say which it was, every time.
+    const visibility = await driver.evaluate(
+      `JSON.stringify({ hidden: document.hidden, state: document.visibilityState })`,
+    );
+    console.log(`  studio is up — page visibility: ${visibility}\n`);
 
     // 1. FLASH — Studio's own esptool-js flow, into a chip with nothing on it.
     await step("flash", "Studio flashes the packaged firmware into a blank board", async () => {

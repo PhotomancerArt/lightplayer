@@ -438,6 +438,10 @@ export function tabBacking({ moduleUrl, boards = [TAB_BOARD] }) {
           link: board.link ?? "usb-serial-jtag",
           state: row.state ?? "idle",
           reboots: row.reboots ?? 0,
+          // Not in `GET /boards` — the door has nothing to say here. It is on
+          // the row because it is the tab's own honest fact, and because the
+          // walk and anyone at a console read this shape.
+          dilation: row.dilation ?? null,
         };
       });
     },
