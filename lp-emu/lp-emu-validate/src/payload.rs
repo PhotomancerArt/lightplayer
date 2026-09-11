@@ -2722,13 +2722,17 @@ mod tests {
     #[test]
     fn a_committed_stop_all_script_matches_boot_idles() {
         let root = repo_root();
-        let gate = std::fs::read_to_string(root.join("lp-emu/esp/lp-emu-esp32v3/tests/boot_idle.rs"))
-            .expect("boot_idle.rs");
+        let gate =
+            std::fs::read_to_string(root.join("lp-emu/esp/lp-emu-esp32v3/tests/boot_idle.rs"))
+                .expect("boot_idle.rs");
 
         let constant = |name: &str| -> String {
             let line = gate
                 .lines()
-                .find(|l| l.trim_start().starts_with(&format!("const {name}: &str = ")))
+                .find(|l| {
+                    l.trim_start()
+                        .starts_with(&format!("const {name}: &str = "))
+                })
                 .unwrap_or_else(|| panic!("boot_idle.rs no longer defines `{name}`"));
             let body = line
                 .split_once('"')
