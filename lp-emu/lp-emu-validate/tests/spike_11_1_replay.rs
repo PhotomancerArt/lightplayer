@@ -385,6 +385,47 @@ fn every_committed_transcript_is_filed_where_its_header_says() {
     assert!(seen >= 2, "expected the §11.1 pair, found {seen}");
 }
 
+/// The classic's four committed sidecars, re-filed in M5 P1 (ruling R3).
+///
+/// They were hand-written at the desk with `board_mac`, `chip_revision` and
+/// `baud`, and the header was not `deny_unknown_fields`, so all three were
+/// silently dropped: the MAC and the revision were in the files and invisible
+/// to every reader that mattered. This is the check that they are visible
+/// now, and it is here rather than beside the header's unit tests because
+/// what it asserts is about the COMMITTED files.
+///
+/// Not one value changed and no `.txt` was touched — which the filing test
+/// above proves independently, since `baud` is part of the stem and those
+/// four filenames are unchanged.
+#[test]
+fn the_classics_sidecars_carry_their_mac_revision_and_baud() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../transcripts/esp32v3/boot-idle");
+    let mut seen = 0;
+    for entry in std::fs::read_dir(&root).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_none_or(|e| e != "txt") {
+            continue;
+        }
+        let t =
+            Transcript::load(&path).unwrap_or_else(|e| panic!("loading {}: {e:#}", path.display()));
+        assert_eq!(
+            t.header.mac.as_deref(),
+            Some("30:76:f5:ec:f6:34"),
+            "{} has no MAC the code can see",
+            path.display()
+        );
+        assert_eq!(t.header.silicon_rev.as_deref(), Some("v3.1"), "{path:?}");
+        let baud = t.header.baud.expect("the rate this capture was taken at");
+        assert!(baud == 115_200 || baud == 921_600, "{baud} in {path:?}");
+        // The stem ends in the baud, which is what made `machine` droppable.
+        let stem = path.file_stem().unwrap().to_str().unwrap();
+        assert!(stem.ends_with(&baud.to_string()), "{stem}");
+        assert_eq!(t.header.machine, None, "the stopgap is gone from {path:?}");
+        seen += 1;
+    }
+    assert_eq!(seen, 4, "the two classic pairs, dirty-image and clean");
+}
+
 fn visit(dir: &Path, f: &mut impl FnMut(&Path)) {
     for entry in std::fs::read_dir(dir).unwrap() {
         let path = entry.unwrap().path();
