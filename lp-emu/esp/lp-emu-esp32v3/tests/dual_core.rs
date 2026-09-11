@@ -19,7 +19,11 @@
 //!    and the `permit` escape.
 //! 4. **The shipped image** (`#[ignore]`d, `just test-emu-esp32v3-boot`):
 //!    `[INIT] RMT ISR on APP core`, the binds in core 1's matrix, the pusher
-//!    parked in `waiti` on core 1.
+//!    parked in `waiti` on core 1, and core 1 executing no mask-ROM
+//!    instruction on the way to the bind
+//!    (`the_shipped_image_runs_no_rom_code_on_core_one` — the mechanism
+//!    behind (2), where the span itself is live allocator memory and a scan
+//!    of it would measure the firmware's allocations rather than core 1).
 //!
 //! # ⚠️ What changed under this branch, and why the fixture reads differently
 //!
@@ -36,8 +40,8 @@
 //! first instruction, the trace holds **no** ROM read of `DPORT+0x038` by
 //! hart 1, and the span is untouched. `machine.rs`'s "How core 1 starts"
 //! carries the evidence and the hardware rationale still owed;
-//! `docs/defects/2026-09-11-app-core-release-modelled-as-a-rom-reset.md` is
-//! the entry.
+//! `docs/defects/2026-09-11-the-emulator-ran-the-rom-reset-path-on-the-app-core.md`
+//! is the entry.
 
 use lp_emu_core::Bus;
 use lp_emu_esp32v3::cache::MmuDivergencePolicy;
@@ -487,7 +491,7 @@ fn the_release_resets_core_one_and_seeds_its_entry_state() {
     assert_eq!(
         m.harts[1].ps(),
         lp_emu_esp32v3::machine::APP_CORE_RELEASE_PS,
-        "PS is the ROM's own post-_start word, WOE | UM"
+        "PS is the ROM's post-_start word plus the CALLINC(2) of the call that reaches the entry"
     );
     let frame = m.app_core_boot_frame();
     assert_eq!(
@@ -725,10 +729,11 @@ fn dual_core_run(test: &str, mode: BootMode, micros: u64) -> Option<Machine> {
         "{mode:?}: the boot did not reach the heartbeat reply with core 1 running: {outcome:?}\n\
          {:#?}\n\
          If this is a strict-bus read at 0x00000008 from `LpFs::read_file` ~30k cycles after\n\
-         `core 1: released by DPORT`, it is the OPEN firmware defect\n\
-         docs/defects/2026-09-10-the-app-cores-rom-boot-rewrites-heap-region-0.md — the mask\n\
-         ROM's APP-core reset path re-unpacks .data_xtos_pro and zeroes .bss_xtos_pro over\n\
-         the firmware's heap region 0. Console so far:\n{text}",
+         `core 1: released by DPORT`, the APP core is running the mask ROM's reset path over\n\
+         the firmware's heap region 0 — the FIXED emulator defect\n\
+         docs/defects/2026-09-11-the-emulator-ran-the-rom-reset-path-on-the-app-core.md,\n\
+         which would mean this branch's release model has regressed. The firmware is not at\n\
+         fault: silicon rewrites nothing there (L2, PR #695). Console so far:\n{text}",
         m.core_report()
     );
     assert!(
@@ -768,9 +773,146 @@ fn the_firmware_reports_the_dual_core_deployment() {
     );
 }
 
+/// **The shipped image runs no ROM code on core 1** — the mechanism behind
+/// the bench's `changed=0`, asserted where it can be attributed.
+///
+/// `the_released_core_writes_nothing_into_the_rom_pro_span` is the memory
+/// half, and it is on the fixture for a reason that this test had to learn
+/// the hard way: on the shipped image `0x3ffe0440..0x3ffe1320` is **live
+/// allocator memory** — it is heap region 0 — and the PRO core writes there
+/// throughout the boot. A scan of that span across the release-to-bind
+/// window measures the firmware's own allocations, not core 1: it reports 8
+/// changed words 6,000 cycles after the release and 192 by the bind, with
+/// core 1 doing exactly none of it. So the span is pinned on the fixture,
+/// where core 0 provably never touches it, and what is pinned *here* is the
+/// cause rather than the effect.
+///
+/// Two claims, both attributable to core 1 alone:
+///
+/// 1. **The address DPORT holds is the firmware's, not the mask ROM's**, and
+///    the machine released core 1 with the ROM's APP-core stack top under it.
+/// 2. **Core 1 never executes in the mask ROM**, sampled from the release the
+///    whole way to `[INIT] RMT ISR on APP core`.
+///
+/// Claim 2 is a sample, and says so: core 1's pc is read once per short run
+/// window rather than per instruction, and the first read is a few hundred
+/// instructions into its life rather than at its first (the release is
+/// serviced inside a window, not at its edge — the run prints the count).
+/// It is not a weak claim: under the model this branch replaced core 1 spent
+/// its first several *thousand* instructions inside `_ResetVector` and the
+/// ROM's unpack tables, so every one of the first hundreds of samples would
+/// land in the ROM, the earliest included.
+#[test]
+#[ignore = "needs the shipped image and espflash; `just test-emu-esp32v3-boot`"]
+fn the_shipped_image_runs_no_rom_code_on_core_one() {
+    let test = "the_shipped_image_runs_no_rom_code_on_core_one";
+    let elf = match fw_esp32v3_image() {
+        Ok(p) => p,
+        Err(reason) => {
+            skip_notice(test, &reason);
+            return;
+        }
+    };
+    let merged = match merged_chip_image() {
+        Ok(p) => p,
+        Err(reason) => {
+            skip_notice(test, &reason);
+            return;
+        }
+    };
+    let len = std::fs::metadata(&merged).expect("the merged image").len() as u32;
+    let mut m = Esp32V3Builder::new()
+        .boot_mode(BootMode::Direct)
+        .app(AppSource::Path(elf))
+        .flash(FlashBacking::Copy(merged))
+        .flash_len(len)
+        .strict(true)
+        .build()
+        .expect("builds");
+
+    let rom = memmap::ROM_MASK_BASE..memmap::ROM_MASK_BASE + memmap::ROM_MASK_LEN;
+
+    // Up to the release, in short steps, so the look below is as near the
+    // release as the run loop can get.
+    let mut guard = 0;
+    while m.core_stalled(1) {
+        let o = m.run_until(&StopCondition {
+            stop_cycle: Some(m.cycles() + 2_400),
+            ..Default::default()
+        });
+        assert!(
+            matches!(o, Outcome::Deadline { .. }),
+            "the boot stopped before releasing core 1: {o:?}\n{}",
+            m.uart0().text()
+        );
+        guard += 1;
+        assert!(
+            guard < 20_000,
+            "core 1 was never released:\n{}",
+            m.uart0().text()
+        );
+    }
+    let released_at = m.cycles();
+
+    // (1) The boot address the guest wrote, read back through DPORT, and the
+    // frame the machine released with.
+    let entry = m
+        .peek_word(memmap::periph::DPORT + APPCPU_CTRL_D)
+        .expect("DPORT is mapped");
+    assert!(
+        !rom.contains(&entry),
+        "esp-hal's boot address is in the firmware's image, not the mask ROM: {entry:#010x}"
+    );
+    let retired_at_release = m.core_instructions(1);
+    assert_eq!(
+        m.app_core_frame().map(|f| f.sp),
+        Some(memmap::ROM_APP_STACK_TOP),
+        "the machine released core 1 with the ROM's APP-core stack top"
+    );
+
+    // (2) …and it never enters the ROM on the way to the bind.
+    let mut samples = 0u64;
+    loop {
+        assert!(
+            !rom.contains(&m.harts[1].pc()),
+            "core 1 is executing mask-ROM code at {:#010x} — the release model has regressed \
+             to the ROM reset path (sample {samples}, cycle {})",
+            m.harts[1].pc(),
+            m.cycles()
+        );
+        samples += 1;
+        let o = m.run_until(&StopCondition {
+            exit_on: Some(DUAL_CORE_LINE.to_string()),
+            stop_cycle: Some(m.cycles() + 2_400),
+            ..StopCondition::after_micros(2_000_000)
+        });
+        match o {
+            Outcome::ExitMatched { .. } => break,
+            Outcome::Deadline { .. } => {}
+            other => panic!(
+                "the bind line did not reach the wire: {other:?}\n{}",
+                m.uart0().text()
+            ),
+        }
+        assert!(
+            samples < 20_000,
+            "the bind line never reached the wire:\n{}",
+            m.uart0().text()
+        );
+    }
+    println!(
+        "[APPCORE-CANARY/emu] shipped image: core 1 started at appcpu_boot_addr {entry:#010x} \
+         at cycle {released_at} ({retired_at_release} retired by the first sample), and \
+         executed no mask-ROM instruction in \
+         {samples} samples to `{DUAL_CORE_LINE}` ({} instructions retired on core 1) \
+         — verdict=B",
+        m.core_instructions(1)
+    );
+}
+
 /// The same from the reset vector, through the real ROM and the real
 /// bootloader — core 1 held by the machine until DPORT releases it, then
-/// through the ROM's own reset path exactly as on the direct load.
+/// started at `appcpu_boot_addr` exactly as on the direct load.
 #[test]
 #[ignore = "needs espflash; `just test-emu-esp32v3-boot`"]
 fn the_rom_up_path_reports_the_dual_core_deployment() {
