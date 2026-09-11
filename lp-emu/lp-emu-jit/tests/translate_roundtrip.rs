@@ -1007,3 +1007,144 @@ fn the_exchange_area_is_where_the_protocol_says_it_is() {
     assert_eq!(host::EXCHANGE_INSTRET, 136);
     assert!(host::EXCHANGE_STATUS < u64::from(EXCHANGE_LEN));
 }
+
+// --- M7 P6b: the cross-function hop, priced on its own ----------------------
+
+/// A ring of `n` two-instruction blocks: `addi x1, x1, 1` then a `jal` to the
+/// next block, and the last one back to the first.
+///
+/// The shape exists to make **one** thing vary. Emitted as a single
+/// sub-dispatcher every edge is a `br` to a label or a back edge through the
+/// function's own `br_table` and nothing crosses; emitted one block to a
+/// function every edge is a cross — the epilogue flushes the live registers
+/// and both counters to the exchange area, the outer selector reads them back,
+/// picks the next function and calls it, and that function's prologue reloads
+/// them. Same guest work, same block set, same number of retired instructions;
+/// the difference in wall clock divided by the difference in crosses is what
+/// one hop costs.
+///
+/// `regs` is how many registers a block touches, and it is the second thing
+/// the fixture varies. A hop's cost is not one number: the epilogue stores and
+/// the prologue reloads exactly the registers that chunk's blocks name
+/// (`live_regs_in` is per sub-dispatcher), so a ring whose blocks touch one
+/// register prices the hop's *machinery* and a ring whose blocks touch all 31
+/// prices the hop a real image pays.
+fn hop_ring(n: u32, regs: u32) -> Vec<(u32, u32)> {
+    fn addi(rd: u32, rs1: u32, imm: i32) -> u32 {
+        ((imm as u32 & 0xfff) << 20) | (rs1 << 15) | (rd << 7) | 0x13
+    }
+    fn jal(rd: u32, offset: i32) -> u32 {
+        let o = offset as u32;
+        (((o >> 20) & 1) << 31)
+            | (((o >> 1) & 0x3ff) << 21)
+            | (((o >> 11) & 1) << 20)
+            | (((o >> 12) & 0xff) << 12)
+            | (rd << 7)
+            | 0x6f
+    }
+    let step = 4 * (regs + 1);
+    let mut out = Vec::with_capacity(((regs + 1) * n) as usize);
+    for i in 0..n {
+        let pc = GUEST_BASE + step * i;
+        let next = GUEST_BASE + step * ((i + 1) % n);
+        for r in 0..regs {
+            out.push((pc + 4 * r, addi(1 + r, 1 + r, 1)));
+        }
+        let at = pc + 4 * regs;
+        out.push((at, jal(0, next.wrapping_sub(at) as i32)));
+    }
+    out
+}
+
+/// The ring's whole block set, however many blocks that is.
+fn ring_set(rig: &Rig, n: u32) -> BlockSet {
+    discover(&[GUEST_BASE], n as usize + 8, &mut |pc| {
+        if (GUEST_BASE..GUEST_BASE + ARENA_LEN).contains(&pc) {
+            Some(rig.word_at(pc))
+        } else {
+            None
+        }
+    })
+    .set
+}
+
+/// The hop fixture (M7 P6b, H2): the same ring, emitted whole and emitted one
+/// block to a function, agreeing on everything a guest can observe and
+/// disagreeing only in how many times control crossed a function boundary.
+///
+/// `LP_EMU_JIT_ENGINE_CASE=<dir>` writes both cases out, and
+/// `scripts/emu/p6b-hop.mjs` times them in V8 and in JavaScriptCore. The
+/// assertions here are what makes that timing trustworthy: if the two runs did
+/// not retire the same instructions for the same cycles and leave the same
+/// registers, the difference between their wall clocks would not be the hop.
+#[test]
+fn a_ring_emitted_whole_and_one_block_to_a_function_differs_only_in_crosses() {
+    // A narrow ring (one live register) and a wide one (all 31), because the
+    // difference between the two hops is the register flush and the reader
+    // needs both halves to know which is which.
+    one_ring("narrow", 1);
+    one_ring("wide", 31);
+}
+
+fn one_ring(name: &str, regs: u32) {
+    const N: u32 = 64;
+    // 4,000,000 cycles is a stay long enough to time and short enough that
+    // cranelift runs it inside a unit test.
+    const END: u64 = 4_000_000;
+    let program = hop_ring(N, regs);
+
+    let mut whole = Rig::new(&program);
+    let set = ring_set(&whole, N);
+    assert_eq!(
+        set.blocks.len() as u32,
+        N,
+        "the ring is one block per `jal`"
+    );
+    let one = whole.run_split(
+        &alloc_name(name, "whole"),
+        &set,
+        Emit::EVERYTHING,
+        [0; 32],
+        END,
+        usize::MAX,
+    );
+
+    let mut split = Rig::new(&program);
+    let each = split.run_split(
+        &alloc_name(name, "split"),
+        &set,
+        Emit::EVERYTHING,
+        [0; 32],
+        END,
+        1,
+    );
+
+    assert_eq!(one.regs, each.regs, "the two splits compute the same thing");
+    assert_eq!(
+        one.instret, each.instret,
+        "and retire the same instructions"
+    );
+    assert_eq!(one.cycle, each.cycle, "for the same cycles");
+    assert_eq!(one.pc, each.pc, "and leave at the same pc");
+    assert_eq!(
+        one.cross, 0,
+        "one function: every edge is a label or the function's own `br_table`"
+    );
+    // Every block the stay entered but the first crossed into its own
+    // function, and the stay entered one more block than it retired: the last
+    // one found the budget gone and left without retiring anything. So the
+    // crosses are exactly the blocks that retired.
+    let blocks_run = one.instret / u64::from(regs + 1);
+    assert_eq!(
+        each.cross, blocks_run,
+        "one block to a function: every edge but the entry crosses"
+    );
+    assert!(
+        blocks_run > 50_000,
+        "the stay has to be long enough to time: {blocks_run} blocks"
+    );
+}
+
+fn alloc_name(ring: &str, split: &str) -> String {
+    format!("p6b-hop-{ring}-{split}")
+}
