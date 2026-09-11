@@ -1248,10 +1248,12 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
         if let Some((covered, total)) = machine.translated_coverage() {
             eprintln!(
                 "jit: coverage {:.2} % of retired ({covered} of {total} instructions ran inside \
-                 translated code); {} retranslation(s) after {} `fence.i`",
+                 translated code); {} retranslation(s) after {} `fence.i`, {} of them \
+                 incremental",
                 100.0 * covered as f64 / total.max(1) as f64,
                 machine.jit_retranslations(),
                 machine.fence_i_count(),
+                machine.jit_incremental_events(),
             );
         }
     }
