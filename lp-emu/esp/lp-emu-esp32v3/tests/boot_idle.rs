@@ -569,7 +569,7 @@ const HEAP_USED_GAP: u64 = 84;
 /// in `LpFs::read_file` ~30k cycles after the release; that was the
 /// emulator's own defect (the APP core was being run through the mask ROM's
 /// reset path over heap region 0 —
-/// `docs/defects/2026-09-11-the-emulator-ran-the-rom-reset-path-on-the-app-core.md`),
+/// `docs/defects/2026-09-10-the-emulator-ran-the-rom-reset-path-on-the-app-core.md`),
 /// and with it fixed the boot reaches the heartbeat and the figure can be
 /// read. On 2026-09-11, second boot, `[INIT] RMT ISR on APP core` on both
 /// sides:

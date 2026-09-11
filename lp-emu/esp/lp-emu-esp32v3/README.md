@@ -435,13 +435,16 @@ waiting:
   RMT ISR on PRO core (single-core semantics)` where silicon prints `[INIT]
   RMT ISR on APP core`. Heap region 3 is added in **both** arms, so the heap
   arithmetic is the same either way — which is why G2 compares memory-class
-  fields and not log text. **M4 P1 releases core 1** ("Two cores" above),
-  and the shipped image then dies ~30k cycles later in `LpFs::read_file`:
-  the ROM's APP-core reset path rewrites `0x3ffe0440..0x3ffe1320`, which the
-  firmware has already given to its allocator as heap region 0
-  (`docs/defects/2026-09-10-the-app-cores-rom-boot-rewrites-heap-region-0.md`,
-  **open**). The image-backed gates in `tests/boot_idle.rs` and
-  `tests/dual_core.rs` are red until it is fixed;
+  fields and not log text. **M4 P1 releases core 1** ("Two cores" above), so
+  this machine now prints silicon's line, and G2's memory half was re-pinned
+  with core 1 running. It did not get there on the first try: the release was
+  first modelled as a reset *through the mask ROM*, whose unpack and bss
+  tables rewrote `0x3ffe0440..0x3ffe1320` — memory the firmware has already
+  given to its allocator as heap region 0 — and the shipped image died ~30k
+  cycles later in `LpFs::read_file`. The bench refused that model
+  (`changed=0` on silicon, twice) and it was corrected; the entry is
+  `docs/defects/2026-09-10-the-emulator-ran-the-rom-reset-path-on-the-app-core.md`,
+  **fixed**, and it is worth reading before touching the release path;
 - the ROM-up walk runs on through `Loaded app from partition`, `Disabling RNG
   early entropy source` and the `E boot: Image contains multiple DROM
   segments` line that the desk board prints on every boot of this image, and

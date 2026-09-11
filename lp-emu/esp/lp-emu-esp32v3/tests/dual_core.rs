@@ -40,7 +40,7 @@
 //! first instruction, the trace holds **no** ROM read of `DPORT+0x038` by
 //! hart 1, and the span is untouched. `machine.rs`'s "How core 1 starts"
 //! carries the evidence and the hardware rationale still owed;
-//! `docs/defects/2026-09-11-the-emulator-ran-the-rom-reset-path-on-the-app-core.md`
+//! `docs/defects/2026-09-10-the-emulator-ran-the-rom-reset-path-on-the-app-core.md`
 //! is the entry.
 
 use lp_emu_core::Bus;
@@ -731,7 +731,7 @@ fn dual_core_run(test: &str, mode: BootMode, micros: u64) -> Option<Machine> {
          If this is a strict-bus read at 0x00000008 from `LpFs::read_file` ~30k cycles after\n\
          `core 1: released by DPORT`, the APP core is running the mask ROM's reset path over\n\
          the firmware's heap region 0 — the FIXED emulator defect\n\
-         docs/defects/2026-09-11-the-emulator-ran-the-rom-reset-path-on-the-app-core.md,\n\
+         docs/defects/2026-09-10-the-emulator-ran-the-rom-reset-path-on-the-app-core.md,\n\
          which would mean this branch's release model has regressed. The firmware is not at\n\
          fault: silicon rewrites nothing there (L2, PR #695). Console so far:\n{text}",
         m.core_report()

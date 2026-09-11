@@ -384,12 +384,14 @@ fn stop_all_script() -> lp_emu_esp_common::ScriptedSource {
 /// 1 released by the firmware, at `quantum` cycles per window, to the
 /// heartbeat reply or the deadline.
 ///
-/// ⚠️ On the shipped image at the time of writing this run ends on the
-/// strict stop in `LpFs::read_file` that
-/// `docs/defects/2026-09-10-the-app-cores-rom-boot-rewrites-heap-region-0.md`
-/// describes, ~30k cycles after the release. The comparisons below are
-/// made on whatever the run was — two runs of a crash are still one run —
-/// and say so in `outcome`.
+/// The comparisons below are made on whatever the run was — two runs of a
+/// crash are still one run — and say so in `outcome`. That was not idle
+/// wording: this test was written while the shipped image ended on a strict
+/// stop in `LpFs::read_file` ~30k cycles after the release
+/// (`docs/defects/2026-09-10-the-emulator-ran-the-rom-reset-path-on-the-app-core.md`,
+/// the release modelled as a reset through the mask ROM), and it held the
+/// determinism claim across the crash without widening anything. It now
+/// reaches the heartbeat reply.
 fn dual(quantum: u64, elf: &std::path::Path, chip: &std::path::Path) -> (Machine, Outcome) {
     let len = std::fs::metadata(chip).expect("the merged image").len() as u32;
     let mut m = Esp32V3Builder::new()
