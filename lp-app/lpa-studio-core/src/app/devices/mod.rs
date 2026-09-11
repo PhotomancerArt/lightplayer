@@ -8,7 +8,7 @@
 //!
 //! | `Command` | executed by |
 //! |---|---|
-//! | `Link { command }` | [`DeviceEffects`] → the routed [`Link`](lpa_devices::Link) (browser Web Serial on wasm, the fake on the host) |
+//! | `Link { command }` | [`DeviceEffects`] → the routed [`Link`](lpa_devices::Link) (browser Web Serial or the tab emulator on wasm, the fake on the host) |
 //! | `StartTimer` | [`DeviceEffects`] → one spawned future per timer on the app's timer factory |
 //! | `PersistRecord` / `DeleteRecord` | [`DeviceRoster`] → the kept `places::device_registry`, through the library host's locked catalog |
 //! | `RequestUsbGrant` | [`DeviceTransport::request_grant`] → the platform chooser |
