@@ -385,7 +385,9 @@ fn every_committed_transcript_is_filed_where_its_header_says() {
     assert!(seen >= 2, "expected the §11.1 pair, found {seen}");
 }
 
-/// The classic's four committed sidecars, re-filed in M5 P1 (ruling R3).
+/// Every committed classic `boot-idle` sidecar, starting with the four
+/// re-filed in M5 P1 (ruling R3) and including every pair a later sitting
+/// adds — M5 P4's is the third.
 ///
 /// They were hand-written at the desk with `board_mac`, `chip_revision` and
 /// `baud`, and the header was not `deny_unknown_fields`, so all three were
@@ -423,7 +425,16 @@ fn the_classics_sidecars_carry_their_mac_revision_and_baud() {
         assert_eq!(t.header.machine, None, "the stopgap is gone from {path:?}");
         seen += 1;
     }
-    assert_eq!(seen, 4, "the two classic pairs, dirty-image and clean");
+    // A floor rather than an exact count: the properties above are what this
+    // test is about, and a sitting that adds a pair (M5 P4 added the third)
+    // should not fail a test that was only ever counting the files that
+    // happened to exist when it was written. The floor keeps the loop from
+    // passing vacuously, which is the failure an exact count was guarding.
+    assert!(
+        seen >= 6,
+        "the classic's committed boot-idle pairs: the dirty image (L0), the clean pin L1 \
+         re-flashed, and M5 P4's sitting — found {seen} transcripts"
+    );
 }
 
 fn visit(dir: &Path, f: &mut impl FnMut(&Path)) {
