@@ -199,5 +199,11 @@ pub fn boot_set(
         // `bootloader_fill_random()` reads `WDEV_RND_REG` (ruling R4).
         (base::RNG, rng::LEN, Box::new(rng::Rng::new(seed))),
         (base::SHA, sha::LEN, Box::new(sha::Sha::new())),
+        // Both paths, last of all: the app's `init_board` claims the board's
+        // RMT channels one line after `[INIT] flash filesystem mounted`, and
+        // `Channel::new` read-modify-writes `ch0conf1`. P8 gives it an accept
+        // block so the heartbeat behind it is reachable; **M4** gives it a
+        // waveform (`accept::rmt`).
+        (base::RMT, accept::RMT_LEN, Box::new(accept::rmt())),
     ]
 }

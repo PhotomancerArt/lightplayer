@@ -283,6 +283,7 @@ fn run() -> Result<ExitCode, String> {
     let outcome = machine.run_until(&stop);
     machine.bus_mut().host.flush_all();
     print_outcome(&mut machine, &outcome);
+    print_run_summary(&machine);
     {
         let chip = machine.flash().lock().expect("flash poisoned");
         println!("flash: {}", chip.command_census());
@@ -293,6 +294,42 @@ fn run() -> Result<ExitCode, String> {
         Err(e) => eprintln!("lp-emu-esp32v3: writing the flash image back: {e}"),
     }
     Ok(ExitCode::from(outcome.exit_code() as u8))
+}
+
+/// The one line a gate reads: what the run cost and what it refused.
+///
+/// **`unmapped=0` is G2's first binary condition**, and before this line it
+/// was only ever readable as the absence of a `WARN` in the log — which is
+/// not a claim anyone can make from a transcript. `instructions` and `cycles`
+/// are the determinism pin's other two numbers beside the UART0 sha
+/// (`tests/determinism.rs`): a run is a pure function of its instruction
+/// stream, so two runs of the same image agree on all three or the run is not
+/// deterministic.
+///
+/// `idle` counts the deterministic idle skips — every time the guest parked
+/// in `waiti` and emulated time jumped to the next scheduled event. A boot
+/// that reaches its idle loop has many; one that is spinning has none, and
+/// the two look identical in a cycle count alone.
+///
+/// `fence` is [`lp_emu_esp_common::SocBus::missing_fence_reports`]: guest
+/// code executed from bytes the guest itself wrote without publishing them.
+/// A ROM-up boot has thousands by construction — the second-stage bootloader
+/// places the application's IRAM segment and jumps into it — so the number is
+/// reported rather than gated on.
+fn print_run_summary(machine: &Machine) {
+    let bus = machine.bus();
+    println!(
+        "run: cycles={} instructions={} idle={} unmapped={} (reads {}, writes {}, {} sites) \
+         fence={}",
+        machine.cycles(),
+        machine.instructions(),
+        machine.idle_skips(),
+        bus.unmapped_reads() + bus.unmapped_writes(),
+        bus.unmapped_reads(),
+        bus.unmapped_writes(),
+        bus.unmapped_sites(),
+        bus.missing_fence_reports(),
+    );
 }
 
 /// `--timeout` is emulated time: `micros * 240`.
@@ -452,6 +489,24 @@ fn print_outcome(machine: &mut Machine, outcome: &Outcome) {
             let pc = machine.harts[0].pc();
             let sym = machine.symbolize(pc).unwrap_or_else(|| "?".into());
             println!("DEADLINE cycle={cycle} ({micros} us emulated) pc={pc:#010x} ({sym})");
+            // ⚠️ The pc alone is a trap on this hart: the machine calls
+            // `poll_interrupts` at the END of every slice, so a guest that is
+            // taking interrupts at all is *always* sampled just after one was
+            // taken and always reports a vector. `PS`, `INTENABLE` and the
+            // pending mask are what separate "spinning in a vector" from
+            // "idling with an interrupt in flight" — and a level line that is
+            // pending, enabled and never taken is the third shape, which
+            // nothing else in this output would show.
+            let ps = machine.harts[0].ps();
+            let external = machine.bus().pending_cpu_interrupt_mask();
+            let ints = machine.harts[0].interrupts_mut();
+            let (intenable, pending) = (ints.intenable, ints.pending());
+            println!(
+                "  PS={ps:#010x} (INTLEVEL={}, EXCM={}) INTENABLE={intenable:#010x} \
+                 pending={pending:#010x} external={external:#010x}",
+                ps & 0xf,
+                u8::from(ps & lp_xt_emu::mach::sr::PS_EXCM != 0),
+            );
         }
         Outcome::Breakpoint { pc, .. } => {
             let sym = machine.symbolize(*pc).unwrap_or_else(|| "?".into());

@@ -161,6 +161,11 @@ pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     // `WDEV_RND_REG` on the AHB bus (ruling R4).
     "RNG",
     "SHA",
+    // Both paths, last of all — the block between `flash filesystem mounted`
+    // and the idle heartbeat: `init_board`'s `Channel::new` reads
+    // `RMT.ch0conf1` at cycle 5,640,047 (direct) / 65,360,003 (ROM-up). P8's
+    // accept block; M4's waveform.
+    "RMT",
 ];
 
 /// How far back [`Machine::symbolize`] will look for a name when no symbol's
@@ -1815,21 +1820,59 @@ impl Machine {
             match end {
                 SliceEnd::BudgetExhausted | SliceEnd::BusYield => {}
                 SliceEnd::Wfi => {
-                    // The deterministic idle skip: nothing can happen before
-                    // the next scheduled event, so move guest time there.
-                    // The host's own next service bounds it too, or a guest
-                    // parked in `waiti` would jump clean over a script.
-                    let event = self.bus.sched.next_deadline();
-                    let host = self.next_host_service();
-                    let wake = [event, host]
-                        .into_iter()
-                        .flatten()
-                        .min()
-                        .unwrap_or(stop_cycle)
-                        .max(self.cycles() + 1)
-                        .min(stop_cycle);
-                    self.harts[0].advance_to_cycle(wake);
-                    self.idle_skips += 1;
+                    // ⚠️ **Resample the matrix before deciding to skip.**
+                    //
+                    // The hart polls at the `waiti` itself (`Priv::Waiti`:
+                    // "an already-pending interrupt un-parks immediately"),
+                    // but it polls against the external mask the machine last
+                    // handed it — at the *previous* slice boundary. A line
+                    // the bus raised during this slice is therefore invisible
+                    // to that poll, and skipping on it jumps guest time to
+                    // the next *scheduled* event even though the guest was
+                    // already owed an interrupt.
+                    //
+                    // P8 found it as a wedge and it cost the milestone its
+                    // heartbeat: a level-2 interrupt (swi2, the io_task
+                    // executor) and a level-1 one (TIMG0 timer1, the 1 ms
+                    // pacer) came due in the same slice at cycle 7,732,422.
+                    // The hart took the level-2 one, its handler ran, `rfi 2`
+                    // returned to the idle loop, and the guest reached
+                    // `waiti` **inside the same slice** with TIMG0's line
+                    // still asserted and unserviced. Nothing was scheduled
+                    // behind it — the pacer re-arms from its own handler,
+                    // which had not run — so `next_deadline()` was `None`,
+                    // `wake` became `stop_cycle`, and the run jumped to its
+                    // deadline with one interrupt pending and 7,072,512
+                    // instructions retired, forever.
+                    //
+                    // So: fire what is due, resample [`CpuIntMatrix`], and
+                    // give the hart the poll it could not make for itself.
+                    // If that un-parks it, **there is no skip at all** — the
+                    // very next slice runs the handler. A skip is only
+                    // correct when nothing is pending, which is the claim
+                    // the skip was always making and could not previously
+                    // check.
+                    self.bus.run_due_events(self.cycles());
+                    let external = self.bus.pending_cpu_interrupt_mask();
+                    self.harts[0].set_external_mask(external);
+                    if !self.harts[0].poll_interrupts() {
+                        // The deterministic idle skip: nothing can happen
+                        // before the next scheduled event, so move guest time
+                        // there. The host's own next service bounds it too,
+                        // or a guest parked in `waiti` would jump clean over
+                        // a script.
+                        let event = self.bus.sched.next_deadline();
+                        let host = self.next_host_service();
+                        let wake = [event, host]
+                            .into_iter()
+                            .flatten()
+                            .min()
+                            .unwrap_or(stop_cycle)
+                            .max(self.cycles() + 1)
+                            .min(stop_cycle);
+                        self.harts[0].advance_to_cycle(wake);
+                        self.idle_skips += 1;
+                    }
                 }
                 SliceEnd::Ebreak { pc } => {
                     if !self.serve_breakpoint(pc) {
