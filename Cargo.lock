@@ -5709,6 +5709,7 @@ dependencies = [
  "log",
  "lp-emu-core",
  "lp-emu-esp-common",
+ "lp-ws281x",
  "lp-xt-emu",
  "lp-xt-inst",
  "sha2",

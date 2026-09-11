@@ -24,6 +24,12 @@ lp-emu-esp-common = { path = "../lp-emu-esp-common" }
 # inside the MIT fence (`lp-emu/lp-xt-emu`), so this edge costs the fence
 # nothing.
 lp-xt-emu = { path = "../../lp-xt-emu" }
+# `ChannelTiming` / `ColorOrder`: the WS281x wire's own numbers, shared with
+# the firmware that drives it so the emulator's decoder and the device's
+# encoder cannot drift apart. `lp-emu-esp-common`'s decoder already takes
+# them; this edge is so the machine can name a strip (`--strip-timing`,
+# `--strip-order`) without re-declaring either enum. The C6 has the same one.
+lp-ws281x = { path = "../../../lp-fw/lp-ws281x", default-features = false }
 log = { workspace = true }
 env_logger = { workspace = true }
 

@@ -846,6 +846,224 @@ arithmetic over absolute ticks, the pulse and word observation logs, and
 ruling R8) — the layouts differ in every register and three of the semantics
 are inverted, and one running example is not a generalisation.
 
+## The pad
+
+*M4 P3. The decoder, the two sinks and the name table.*
+
+A pad becomes **observed** the moment the guest routes it — the instant a
+write to `func_out_sel_cfg[n]` changes `Fabric::route_epoch`, the machine
+gives that pad a `Ws281xDecoder` and starts feeding it. Nothing has to be
+configured on the command line for that to happen, and a pad nothing routed
+is never decoded, never logged and never in `routed_pads()`.
+
+The decoders are fed from **`Machine::drain_pins`**, once per *window*, after
+both cores have had theirs and before the matrix feed. There is exactly one
+drain and everything that watches a pad reads the same stream out of it: the
+GPIO block's input latch, the strip decoders, and the pin log. That is what
+makes it impossible for the three to disagree about what was on the wire.
+
+> ⚠️ **Two cores, one fabric.** The edges are drained once per window, not
+> once per core, and the cycle a decoder reads is the **edge's own `at`** —
+> stamped by whoever drove the signal, not by the drain. The RMT emits both
+> halves of a word at the fetch, so an edge can be stamped slightly ahead of
+> the boundary it is drained at; that is a timestamp the decoder reads, never
+> a reordering. The interleave therefore cannot move a waveform, and
+> `tests/pin_frames.rs` pins that by decoding the same frame at two
+> `--core-quantum` values and comparing the dumps byte for byte.
+
+### 240 MHz, as a parameter
+
+`cpu_hz` is a **parameter** of `Ws281xDecoder`, and this machine passes
+`memmap::CPU_HZ` — **240 MHz**, against the C6's 160. One WS2812 bit is a
+different number of cycles on the two chips and every threshold the decoder
+applies follows from `cpu_hz`, so a literal anywhere on this path would
+silently misread one of them. The tolerance is the datasheet's ±150 ns and is
+**not a knob**: a pulse outside it is a finding about the transmitter, and a
+decoder that shrugged at one would be worth nothing as an oracle.
+
+### The three readings, and what they are not
+
+| reading | where it comes from |
+|---|---|
+| the words the engine fetched | `--rmt-logs`, `Machine::rmt_words(ch)` |
+| the pulses it drove | `--rmt-logs`, `Machine::rmt_pulses(ch)` |
+| the bytes off the pad | the decoders, `Machine::frames(pad)` / `--dump-frames` |
+
+> **All three are ours.** The decoder is this repository's, the fabric is this
+> repository's, and the RMT model is this repository's — so a frame read off
+> the pad and a frame the guest describes are **two readings of one machine**,
+> not a measurement. What they buy is that a bug has to be in the *same* place
+> in three independent code paths to hide. A silicon twin of the transcript is
+> M5's, and it is the only thing that turns any of this into a measurement.
+
+### The sinks
+
+`--dump-frames <-|stdout|file:PATH>` writes one `ws281x-frame` JSON line per
+frame **as it is decoded** — a stream, not a report, so a run that is killed
+still leaves the frames it had already seen. Frames are kept in memory either
+way, up to `FRAMES_PER_PAD_CAP` (8,192) per pad with a warning past it; the
+stream is not capped.
+
+```json
+{"kind":"ws281x-frame","pad":18,"signal":"RMT_SIG_0","n":0,
+ "start_us":0.000,"end_us":57.600,"bits":192,"leds":8,
+ "wire":"5a4f...","rgb":"4f5a...","errors":0,"trailing_bits":0,
+ "reset_us":357.600,"complete":true}
+```
+
+`wire` is what the wire carried (GRB for a WS2812) and `rgb` is that
+unpermuted with `--strip-order`: the frame the *driver* was handed. Both are
+in the record on purpose — a wrong assumption about the strip's order is then
+a visible difference between two fields rather than something silently baked
+into one.
+
+`--pin-log <path>` writes the raw edge stream, one line per edge, with a
+`# route` note whenever the matrix moves a pad:
+
+```text
+# route gpio18 <- RMT_SIG_0 (out_sel=87 inv=0)
+0.000 gpio18 1 cyc=0
+0.400 gpio18 0 cyc=96
+1.250 gpio18 1 cyc=300
+```
+
+The **cycle** is the number anything may compute with; the microseconds are
+for a human, and nothing is ever gated on an emulated microsecond (PD9). It
+is off by default and capped at `PIN_LOG_LINE_CAP` (2,000,000 lines, with a
+closing note): a 300-LED frame is 14,402 edges and the desk board's five
+wires at 30 fps are over two million a second.
+
+`--strip-timing ws2812|ws2811` and `--strip-order rgb|rbg|grb|gbr|brg|bgr`
+say how every routed pad is read; the defaults are the driver's own, WS2812
+and GRB.
+
+At exit the CLI flushes any frame still in flight — reported **incomplete**,
+with no `reset_us`, rather than invented — and prints one line per routed pad:
+
+```text
+pin gpio18: 22 frames, 22 complete, 0 errors, 256 leds, 12288 edges
+```
+
+### The name table
+
+`src/regs/output_signals.rs` is **hand-written**, unlike its neighbours in
+`regs/`: the GPIO matrix's signal enumeration is not a register block and is
+not in the PAC at all, so `pac-regnames.py` has nothing to read. It carries
+only the signals a trace has to *name*; anything else prints as `sig<N>`,
+which is honest about the table being partial.
+
+> ⚠️ **The classic's two enumerations do not agree, and mixing them mislabels
+> a trace line without failing anything.** `OutputSignal::RMT_SIG_0` is **87**;
+> `InputSignal::RMT_SIG_0` is **83**, so **87 is `RMT_SIG_4` on the input
+> side**. The two tables are separate and neither lookup falls back to the
+> other. `OUT_SEL_GPIO` is **256** here, where the C6's is 128 — and 128 is a
+> real peripheral signal on this chip.
+
+### The decoders ride the snapshot
+
+A decoder caught **mid-frame** carries real state: the partial byte, the bit
+count, the cycle the current pulse started. `Snapshot::pins` carries it, along
+with the frames each pad has completed and what each pad is routed to. The
+**sinks do not** — a file handle is not state — and the routing epoch is reset
+on restore so the first drain afterwards re-reads the fabric rather than
+trusting a number from another run.
+
+### ⚠️ What the shipped image does **not** yet do
+
+The shipped `fw-esp32v3` configures its four two-block slots at boot and then
+**starts no channel until a project's output opens**, which needs an `lp-cli
+upload` over UART0. That is blocked on ruling **R6** — see "The link, after
+the boot settles" below — so `tests/pin_frames.rs` drives the shipped image's
+own register sequence through the machine from the host side rather than
+waiting for the guest to issue it. Every register value in that test was read
+out of a `--trace-block RMT` run of the shipped image.
+
+## The link, after the boot settles
+
+*M4 P3's investigation of ruling **R6**. Open: root-caused to a component and
+a cycle, not yet fixed.*
+
+**The symptom.** A `--uart0-script` request fired `after "[RECOVERY] boot
+complete (first frame served)"` is never answered, and neither is a
+`then +Nms` follow-on after a request that *was* answered. The boot-idle gate
+(`tests/boot_idle.rs`) only works because its script fires on `[INIT] I/O task
+spawned`, during the busy boot.
+
+**It is not the UART, the script, or the link.** A `--trace-block UART0` run
+of the two-request script shows both requests arriving in full and being read
+out of the RX FIFO by the guest:
+
+```text
+cyc=30053426 poll_rx_into+0x52  R4 UART0+0x01c status = 0x00000015   21 bytes waiting
+cyc=30053490 poll_rx_into+0x113 R4 UART0+0x000 fifo = 0x0000004d      'M'
+…
+cyc=30293675 poll_rx_into+0x113 R4 UART0+0x000 fifo = 0x0000000a      '\n'   request 1, whole
+cyc=42293906 poll_rx_into+0x113 R4 UART0+0x000 fifo = 0x0000000a      '\n'   request 2, whole
+```
+
+So `ScriptedSource`'s `after`/`then` steps resolve, `UartEngine::poll_source`
+re-arms, and `io_task` drains the FIFO on its 1 ms pacer for the whole run.
+**The RX path is healthy**, and the three suspects the phase file named —
+the byte source's re-arm, UART0's RX line, and swi2 — are all refuted by this
+one trace.
+
+**What is actually dead.** The guest's **thread-mode embassy executor** — and
+with it `run_server_loop`, the only thing that reads the queue `io_task` is
+filling. On the same run, symbolised against the image:
+
+```text
+cyc=27652505 <TimeDriver>::arm_next_wakeup+0x21b  W4 TIMG0+0x000 t0.config = 0xc0002c00
+cyc=27892410 InterruptStatus::current             R4 DPORT+0x0ec core_0_intr_status0 = 0x0000c000
+cyc=27892860 SchedulerState::resume_task+0xa9     W4 DPORT+0x0dc cpu_intr_from_cpu0 = 1
+cyc=27892918 timer_tick_handler+0x285             W4 TIMG0+0x000 t0.config = 0xc0002800
+cyc=27895203 Executor::run_inner+0x1a7            W4 DPORT+0x0dc cpu_intr_from_cpu0 = 1
+   …and from here to the end of the run, only:
+cyc=…412581  io_pacer_isr                         W4 TIMG0+0x0a4 int_clr = 0x00000002
+cyc=…412671  __pender+0x2d                        W4 DPORT+0x0e4 cpu_intr_from_cpu2 = 1
+cyc=…413426  poll_rx_into+0x52                    R4 UART0+0x01c status = 0x00000000
+```
+
+The last TIMG0 **t0** alarm is armed at 27,652,505 and fires at 27,892,410.
+`timer_tick_handler` wakes the executor thread (swi0), clears the alarm, and
+then `arm_next_wakeup` writes **nothing** — which in esp-rtos 0.3.0 means the
+embassy timer queue's next wakeup is `u64::MAX`. The executor polls once more
+and parks in `ThreadFlag::wait` at 27,895,203, which sleeps the task with
+`Instant::EPOCH + Duration::MAX` — **no timer at all**. The server loop's own
+`embassy_time::Timer::after(1 ms)` at the bottom of `run_server_loop` was
+never re-registered, and `StreamingMessageRouterTransport::receive` is
+`try_receive` with no waker, so `io_task`'s `try_send` of the parsed `M!` line
+wakes nobody. The board is then awake forever on the 1 ms pacer and asleep
+forever everywhere else.
+
+**Why it is the classic's and not the firmware's.** The C6 runs the same
+`fw_esp32_common::server_loop` with the same 1 ms yield, and its committed
+walks open with **exactly this needle** — `walks/examples-basic.script`'s
+first line is `after "[RECOVERY] boot complete (first frame served)" …`,
+followed by dozens of requests that are all answered. The classic-only parts
+of this path are the esp-rtos time-driver **pair** (TIMG0 `t0` for the alarm,
+TIMG0 **LACT** for `esp_rtos::now()`), the swi2 interrupt executor, and the
+TIMG0 `t1` pacer. That pair is where the next dig starts, and the margin is
+worth knowing: on the last successful tick, `now` (LACT) was **3 µs** past the
+deadline the alarm had been armed for, out of 1,000.
+
+**Reproducer, for whoever picks it up** (nothing below is a workaround — the
+phase file's rules stand: no concatenated script steps, no widened
+`--exit-on`):
+
+```bash
+printf '%s\n%s\n' \
+  'after "[RECOVERY] boot complete (first frame served)" +1ms "M!{\"id\":1,\"msg\":\"stopAllProjects\"}\n"' \
+  'then +50ms "M!{\"id\":2,\"msg\":\"stopAllProjects\"}\n"' > /tmp/two.script
+cargo run -p lp-emu-esp32v3 --release -- --elf <fw-esp32v3> \
+    --strict-bus --core-quantum 256 --timeout 20s \
+    --uart0-script /tmp/two.script --uart0 file:/tmp/run.log \
+    --trace /tmp/run.trace --trace-block DPORT --trace-block TIMG0
+grep from_cpu0 /tmp/run.trace | tail -2   # the last swi0 is ~27.9 M cycles
+```
+
+It reproduces at `--core-quantum` 64, 256 and 4096, at the same point in the
+boot each time, so it is not a fine-grained interleaving race.
+
 ## Flash, and the cache window
 
 *P4 lands the tables and the enable bits; P7 lands the chip and the fill.*
@@ -1165,6 +1383,16 @@ door; the recipe exists from P1 so the door has one name for its whole life.
                         registry stores (M5 P1, ruling R2). Both forms work;
                         `@` decides when a value carries one
 --trace <path|->  --trace-block <name>
+--dump-frames <spec>    where decoded WS281x frames go: `-`/`stdout` or
+                        `file:<path>`; one `ws281x-frame` JSON line per frame
+                        (see "The pad"). Frames are kept in memory either way
+--pin-log <path>        the raw edge stream, `<us> <pad> <level> cyc=<cycle>`,
+                        with a `# route` note per routing change. Off by
+                        default; capped at 2,000,000 lines
+--strip-timing ws2812|ws2811    how every routed pad is decoded [ws2812]
+--strip-order rgb|rbg|grb|gbr|brg|bgr
+                        the order on the wire, which is what the record's
+                        `rgb` field is unpermuted with [grb]
 --uart0 <spec>          where UART0's bytes go: `-`/`stdout`, `memory`,
                         `file:<path>`, or `tcp:<addr>` to LISTEN for one
                         client at a time (whose bytes are UART0's RX). They
@@ -1322,6 +1550,7 @@ it fixed for P4–P8, is
 
 | `tests/boot_idle.rs` | **The hello, and G2 (a).** With the image: the `[INIT]` chain comes out of the **host stream** — 543 bytes, sha256 `ea8bae30…`, the same count and the same digest P3 measured going *into* the accept block — with zero unmapped accesses and no strict stop; the line order held against L0's capture; `--exit-on` stopping at a complete line. And both boot paths run to the **idle heartbeat**: the `[stack] heartbeat:`/`[MEM]`/`[JIT]` triple, the Q5 fallback line, the unsolicited wire hello, the answer to a scripted request, and `unmapped = 0` on each — plus the two paths' memory figures asserted equal to **each other** (not to silicon: different image bytes, ruling R7) |
 | `tests/rmt_registers.rs` | **M4 P2's gates.** Every offset looked up **by name** in `regs::RMT` rather than transcribed, and the resets asserted against that table's own `resets`. One test per quirk, each of which fails without it: `tx_lim` a repeating count that re-arms itself (one write, a 256-word transmission, four events 64 words apart — the C6's position semantics fire once); a `ch_tx_lim` write changing the period and not the count; the **global** wrap bit, and the same register serving channel 7; `tx_start` acted on with no `conf_update`; a window of end markers stopping the transmitter at the next word boundary; `mem_raddr_ex` absolute **and at bits 12:21**, with the APB write pointer at 0:9. Plus: a whole **WS2812 frame** — 8 LEDs, 194 words, a 128-word window, three ping-pong refills — driven by the register sequence the shipped image's own `--trace-block RMT` run issues, whose fetched words are the stream that went in, whose word start cycles are exact absolute tick positions, and whose edges off **gpio18** decode back to the bytes; `Gpio::peripheral_driven_pads` non-empty for the first time; the refill telemetry's entry and fill in words; `int_clr`'s W1C and the line on source 47; REF_TICK refused rather than guessed at; a byte-identical snapshot round trip; and **no register in the block graded `measured`** |
+| `tests/pin_frames.rs` | **M4 P3's gates.** The WS281x decoders on the whole machine: a pad becomes observed when the guest routes it, and `routed_pads()` carries `(PadId(18), RMT_SIG_0)`; the engine ends a transmission; the frame decoded off the fabric is whole, zero-error, 24 bytes, closed by its reset, and **is the frame that went in**; a frame the run ended mid-flight is flushed **incomplete** rather than invented; `--dump-frames` writes one `ws281x-frame` line naming `RMT_SIG_0` and carrying `wire` and `rgb` as two different fields; `--pin-log` writes one line per edge in guest-cycle order with a `# route` note; two runs write byte-identical dumps and so does a third at a different `--core-quantum`; and a decoder snapshotted **mid-bit** restores with its half-shifted bits and decodes the second half identically. Driven by the shipped image's own register sequence from the host side, because R6 blocks the upload that would make the guest issue it |
 | `tests/determinism.rs` | The plan's inviolable invariant. Two runs of each boot path agree on the UART sha, the byte count, the **cycle count**, the **instruction count**, the pc and the idle skips; a snapshot taken mid-run and restored into a **fresh** machine produces the same second half as the run that was never interrupted; and the state that is not a register — the flash MMU tables, the cache-enable bit, both halves of the stall key, the interrupt matrix, core 1's hold, the DBREAK slots — comes back through the struct. **M4 P1**: the single-core prefix run's three counters pinned to `origin/main`'s; two dual-core runs at quantum 256 and two at 64 each one run (both harts' counters, both pcs, the parks, a memory fingerprint); the two quanta's consoles equal byte for byte except the stack high-water figure, which the test names as interrupt timing |
 | `tests/dual_core.rs` | **M4 P1's gates.** A hand-built fixture with no firmware: core 0 performs esp-hal's `start_core1` DPORT sequence, core 1 comes up **through the mask ROM's own reset path and wait loop** (its two reads of `appcpu_boot_addr` read out of the bus trace), routes the doorbell into its own matrix and parks in `waiti` — costing nothing while parked — and core 0's `cpu_intr_from_cpu_1` wakes it into `_Level2InterruptVector` with `EPC2` naming the instruction after the `waiti`; the release is a reset (`CPENABLE = 0xff`, counters from the clock). Ruling R4 on a synthetic table disagreement: the stop names entry, page and both mappings, exits 7, and `permit` continues. **With the image**: `[INIT] RMT ISR on APP core` on both boot paths with `unmapped = 0`, the binds read back out of `core_1_intr_map` with `core_0_intr_map[RMT] = 16`, the pusher parked in `idle_once` — **red on the shipped image until the open defect below is fixed** |
 | `src/periph/gpio.rs`, `src/periph/io_mux.rs` (unit) | A plain `Output` pin drive reaching a pad and `enable` taking it back off the wire; `256` being the GPIO selector and `128` an ordinary signal; bank 1 carrying pads 32..39; the input matrix routing `U0RXD_IN` and refusing the two constants by name; `in_` served only through `fun_ie`; the PRO core's enable at `pin[n]` bit 15 and the APP core's at 13; **no peripheral signal reaching a pad**; the IO_MUX pad map walked against the generated table's own names, and asserted *not* to be in pad order |
