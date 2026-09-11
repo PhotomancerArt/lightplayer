@@ -97,6 +97,10 @@ function readEntries() {
     const end = u64();
     const watchLo = u64();
     const watchHi = u64();
+    // The interpreter runs between entries and writes registers, and
+    // registers are not memory, so the delta cannot carry them.
+    const regsIn = new Int32Array(31);
+    for (let i = 0; i < 31; i++) regsIn[i] = i32();
     const delta = [];
     for (let n = u32(); n > 0; n--) {
       const offset = u32();
@@ -122,6 +126,7 @@ function readEntries() {
       end,
       watchLo,
       watchHi,
+      regsIn,
       delta,
       calls,
       callCount,
@@ -144,11 +149,17 @@ const EXCHANGE_REGS = 0;
 const EXCHANGE_CYCLE = 128;
 const EXCHANGE_INSTRET = 136;
 const EXCHANGE_FLAGS = 144;
+const EXCHANGE_CROSS = 152;
 const X = meta.exchange;
 
 const memory = new WebAssembly.Memory({ initial: meta.pages });
 const bytes = new Uint8Array(memory.buffer);
 const view = new DataView(memory.buffer);
+// The register file as a typed array, so an entry's 31 inputs are one `set`
+// rather than 31 `setInt32`s. The replay pays a JS frame per entry whatever
+// happens — see the note on the rate below — and everything else in that
+// frame is worth deleting.
+const regFile = new Int32Array(memory.buffer, X + EXCHANGE_REGS, 32);
 
 function restore() {
   for (const r of image) bytes.set(r.bytes, r.offset);
@@ -216,10 +227,14 @@ const run = instance.exports.run;
 
 // ---- one iteration of the whole recording ---------------------------------
 
+let crosses = 0n;
+
 function iteration(check) {
   let retired = 0n;
   for (const e of entries) {
     for (const d of e.delta) bytes.set(d.bytes, d.offset);
+    regFile.set(e.regsIn, 1);
+    regFile[0] = 0;
     view.setBigUint64(X + EXCHANGE_CYCLE, e.cycleIn, true);
     view.setBigUint64(X + EXCHANGE_INSTRET, e.instretIn, true);
     current = e;
@@ -247,7 +262,7 @@ function iteration(check) {
         throw new Error(`entry ${e.entry}: flags ${flags & 3}, the recording says ${e.flags & 3}`);
       }
       for (let i = 0; i < 31; i++) {
-        const got = view.getInt32(X + EXCHANGE_REGS + 4 * (i + 1), true);
+        const got = regFile[i + 1];
         if (got !== e.regs[i]) {
           throw new Error(
             `entry ${e.entry}: x${i + 1} is ${got}, the recording says ${e.regs[i]}`,
@@ -261,6 +276,10 @@ function iteration(check) {
         );
       }
     }
+    // Counted here rather than assumed: a cross-function edge flushes and
+    // reloads the whole live register set through the exchange area, so its
+    // rate is what a blocks-per-function size is really buying or spending.
+    crosses += view.getBigUint64(X + EXCHANGE_CROSS, true);
     retired += e.instretOut - e.instretIn;
   }
   return retired;
@@ -270,7 +289,9 @@ function iteration(check) {
 // exit pc, both counters, the flags the host reads, all 31 registers and the
 // import call count. A fast wrong number is worse than no number.
 restore();
+crosses = 0n;
 const checked = iteration(true);
+const crossesPerIteration = crosses;
 if (checked !== BigInt(meta.retired)) {
   throw new Error(`the recording says ${meta.retired} instructions, the replay retired ${checked}`);
 }
@@ -309,6 +330,10 @@ console.log(
     instantiateMs: Number(instantiateMs.toFixed(2)),
     firstSecondNsPerInstr: Number(first.nsPerInstr.toFixed(3)),
     steadyNsPerInstr: Number(steady.nsPerInstr.toFixed(3)),
+    crossesPerIteration: Number(crossesPerIteration),
+    crossPerThousandInstr: Number(
+      ((crossesPerIteration * 1000n) / BigInt(meta.retired)).toString(),
+    ),
     firstSecondIterations: first.iterations,
     steadyIterations: steady.iterations,
     identity: "checked",

@@ -375,6 +375,23 @@ impl Rig {
         }
     }
 
+    /// The memory with the exchange area's **diagnostic** window cleared.
+    ///
+    /// Everything past the status field is a counter or a reason code the
+    /// host reports and nothing reads back (P5): how many cross-function
+    /// transfers the stay made, how many indirect jumps missed, and why it
+    /// ended. Two builds of the same block set are entitled to differ there
+    /// and nowhere else — an all-escape build ends its stay through
+    /// `escape_terminator` and an emitted one through the edge itself — so
+    /// this is what "byte for byte" means when the two are compared.
+    fn guest_memory(&self) -> Vec<u8> {
+        let mut out = self.mem.to_vec();
+        let from = (EXCHANGE_AT + 152) as usize;
+        let to = (EXCHANGE_AT + EXCHANGE_LEN) as usize;
+        out[from..to].fill(0);
+        out
+    }
+
     fn word_at(&self, guest: u32) -> u32 {
         let at = (ARENA_AT + (guest - GUEST_BASE)) as usize;
         u32::from_le_bytes([
@@ -498,6 +515,8 @@ impl Rig {
                 end,
                 &core.ops_mut().trace,
                 &outcome,
+                self.pages,
+                entry,
             );
         }
         outcome
@@ -525,7 +544,7 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 /// answer.
 #[expect(
     clippy::too_many_arguments,
-    reason = "a case file is exactly these eight things, and a struct to carry \
+    reason = "a case file is exactly these ten things, and a struct to carry \
               them between two functions in one file would name them twice"
 )]
 fn write_case(
@@ -537,6 +556,8 @@ fn write_case(
     end: u64,
     trace: &[Call],
     outcome: &Outcome,
+    pages: u64,
+    entry: u32,
 ) {
     use std::io::Write as _;
     std::fs::create_dir_all(dir).expect("the case directory");
@@ -564,7 +585,7 @@ fn write_case(
     let mut f = std::fs::File::create(format!("{dir}/{case}.json")).expect("the case");
     write!(
         f,
-        r#"{{"case":"{case}","pages":{PAGES},"exchange":{EXCHANGE_AT},"entry":0,"end":"{end}",
+        r#"{{"case":"{case}","pages":{pages},"exchange":{EXCHANGE_AT},"entry":{entry},"end":"{end}",
 "cycle":"0","instret":"0","watchLo":"0","watchHi":"0",
 "memoryFnv":"{}","initial":"{}","calls":[{}],
 "expect":{{"pc":{},"flags":{},"cycle":"{}","instret":"{}","regs":[{}],"memoryFnv":"{}"}}}}"#,
@@ -700,7 +721,11 @@ fn the_all_escape_build_agrees_with_the_emitted_one_on_everything() {
     assert_eq!(fast.instret, slow.instret);
     assert_eq!(fast.regs, slow.regs);
     assert_eq!(fast.flags, slow.flags);
-    assert_eq!(*emitted.mem, *escaped.mem, "and the memory, byte for byte");
+    assert_eq!(
+        emitted.guest_memory(),
+        escaped.guest_memory(),
+        "and the memory, byte for byte"
+    );
 }
 
 #[test]
@@ -735,7 +760,7 @@ fn a_ram_store_and_load_stay_inline_and_an_off_ram_one_goes_out() {
     assert_eq!(out.cycle, slow.cycle);
     assert_eq!(out.instret, slow.instret);
     assert_eq!(out.pc, slow.pc);
-    assert_eq!(*rig.mem, *escaped.mem);
+    assert_eq!(rig.guest_memory(), escaped.guest_memory());
 }
 
 #[test]

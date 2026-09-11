@@ -18,12 +18,13 @@ eagerly rather than chasing hot regions. See
 | `decode` | RV32IMC word → a small `Inst` with the emulator's own `InstClass` cost class and the instruction's width |
 | `blocks` | the guest blocks a translation is *of* |
 | `discover` | how they are found: a symbol-seeded, width-following sweep over the whole image |
-| `translate` | the block set → one wasm function |
+| `translate` | one **sub-dispatcher**'s body: a run of the block set as one wasm function |
+| `dispatch` | the block set → one wasm **module**: an outer selector over as many sub-dispatchers as the function-size limit needs, plus the flat tables that make an indirect jump an in-module branch |
 | `host` | what an emitted module is run against, and the exit protocol below |
 | `host_wasmtime` | a native host, behind `host-wasmtime`, so identity can be proven on the desk |
 | `replay` | the identity harness's record and compare shapes, including the per-entry memory-granule diff |
 
-Splitting the module across functions is P5's, and the browser host is P6's.
+The browser host is P6's.
 
 ## Discovery: the five rules, and why each one is there
 
@@ -89,7 +90,10 @@ run(entry_block: i32, cycle: i64, instret: i64, end: i64,
     watch_lo: i64, watch_hi: i64) -> i32
 ```
 
-and it returns **the guest pc to resume at**. Everything else goes through the
+and it returns **the guest pc to resume at**. That is the exported selector;
+inside the module each sub-dispatcher has the same parameters and returns an
+`i64` whose bit 32 says the low half is a global block index to continue at
+rather than a pc to leave at (see `dispatch`). Everything else goes through the
 *exchange area*, a fixed 256-byte window of the imported memory whose offset is
 folded into the module at emission time:
 
@@ -98,8 +102,23 @@ folded into the module at emission time:
 | `+0`   | `regs[32]`, one `i32` each, `x0` first |
 | `+128` | `mcycle` |
 | `+136` | `minstret` |
-| `+144` | flags — bit 0 "left after a store", bit 1 "the slice ended" |
+| `+144` | flags — bit 0 "left after a store", bit 1 "the slice ended", bit 2 "an MMIO load left a yield pending" |
 | `+148` | the status the last `step_one` reported |
+| `+152` | cross-function transfers this stay made (`i64`) |
+| `+160` | indirect jumps the target table did not resolve (`i64`) |
+| `+168` | why the stay ended — one of `host::why`'s codes |
+
+Bit 2 of the flags is not the host's: it is how one sub-dispatcher hands the
+next its pending-yield obligation across a cross-function edge, in the same
+flush-and-reload every other piece of stay state does (P5). The selector clears
+the whole field when the host enters, so a stale bit cannot be read as this
+stay's.
+
+The last three are **reported, never acted on**, and they are the reason a
+coverage shortfall names its own cause instead of being attributed by argument.
+`--jit-report` prints them per reason, and `LP_EMU_JIT_EXITS=1` adds the
+twenty-four exit sites that cost the most, each saying whether the module could
+have been entered there at all.
 
 The **whole** register file is in the exchange area, not just the registers the
 block set touches, because `step_one` runs an arbitrary guest instruction and
@@ -144,15 +163,138 @@ An encoding `decode` does not recognise cannot be escaped that way, because its
 *width* is unknown and so the next pc is unknown. Those end the block instead.
 Two escapes, one rule: never guess.
 
-## Two structural facts a reader will otherwise rediscover
+## Two-level dispatch, and the size it is set to (P5, JD8, JD26)
 
-- **wasm caps one function body at 7,654,321 bytes.** This crate emits one
-  function per block set, so a set has to fit. Measured on `render-basic`:
-  17,104 blocks emit 8.06 MB and are refused, so the ceiling is ~16,000
-  blocks — against the **156,053** a whole-image walk finds and the ~37,600 a
-  render run executes. **Cranelift refuses far earlier**, somewhere under
-  8,586 blocks, and takes 116 s to compile 4,272. Two-level dispatch (JD8) is
-  P5's, and these are the numbers it is sized against.
+wasm caps **one function body at 7,654,321 bytes**, and a whole-image walk of
+`render-basic` finds **201,244 blocks**. One function was never a tuning
+choice; it is arithmetically impossible. So the module is an outer **selector**
+over N **sub-dispatchers**, each holding a contiguous run of the block set and
+each keeping the `loop`/`br_table` shape inside. `dispatch`'s module docs have
+the shapes; what follows is the number the split is set to and how it was
+measured.
+
+**`--jit-fn-blocks` is the knob and 256 is the default.** JD26 says the size is
+chosen by measured steady-state throughput in JavaScriptCore, not by the limit.
+So it was: one native `--jit` run recorded 12,000 entries into translated code
+— every import answer in call order, the memory the interpreter changed between
+them, and what each entry produced — and `scripts/emu/jit-image-bench.mjs`
+replayed that recording in both engines against the **same block set** emitted
+at every size. A replay is an identity check as well as a stopwatch, and every
+row below is `"identity":"checked"`.
+
+`render-basic` t2, 201,244 blocks, 12,000 entries / 623,284 guest instructions
+per iteration, desk load average 11–17:
+
+| blocks/fn | functions | module | largest body | crosses /1k instr | **bun steady** | bun 1st sec | v8 (opt) | v8 (baseline) |
+|---:|---:|---:|---:|---:|---:|---:|---|---:|
+| 64 | 3,145 | 64.8 MB | 133,939 B | 64 | **9.16** | 10.84 | — | 7.20 |
+| 128 | 1,573 | 64.1 MB | 238,611 B | 60 | **15.91** | 17.66 | 6.84 | 7.16 |
+| 256 | 787 | 64.3 MB | 405,659 B | 59 | **10.86** | 17.90 | 18.01 | 6.91 |
+| 512 | 394 | 64.4 MB | 599,964 B | 57 | **20.87** | 23.56 | **OOM** | 7.02 |
+| 1,024 | 197 | 64.4 MB | 1,129,053 B | 57 | **16.91** | 19.72 | **OOM** | 7.10 |
+| 2,048 | 99 | 64.4 MB | 1,948,594 B | 39 | **18.11 / 27.08** | 18.39 | **OOM** | 6.05 |
+| 4,096 | 50 | 64.3 MB | 2,783,062 B | 38 | **20.64** | 21.14 | **OOM** | — |
+| 8,192 | 25 | 64.4 MB | 4,382,997 B | 38 | **17.07** | 24.25 | **OOM** | — |
+| 12,288 | 17 | 64.4 MB | 5,989,893 B | 37 | **14.87 / 14.98** | 19.28 | **OOM** | — |
+
+ns per guest instruction. Emit is 0.50–0.56 s at every size; instantiate is
+0.14–0.27 ms in bun and ~1 ms in node; compile is **180–242 ms in bun** for a
+64 MB module (2.9 ms/MB) and 36–42 ms in node.
+
+Three readings, and the third is the finding:
+
+1. **JavaScriptCore has no preference this desk can measure.** 9–27 ns across a
+   192× range of function sizes, and re-running one size gives 18.11 then
+   27.08. The spike's flat-`br_table` result is not contradicted; nothing about
+   *dispatch* argues for a size.
+2. **The cross-function edge rate is 37–64 per thousand guest instructions**,
+   and it stops improving above 2,048 blocks a function. The edges that remain
+   are between the mask ROM, HP SRAM and the flash-cache window, which no
+   contiguous chunking can put in one function.
+3. **V8's optimizing tier dies at 512 blocks a function and every size above**
+   — `Fatal process out of memory: Zone`, inside `WasmLoweringPhase`, after the
+   module has already compiled and instantiated. It survives at 128 and 256.
+   Its **baseline** tier compiles every size in 36–42 ms and runs them all at a
+   flat 6.05–7.20 ns, which is what proves the JSC curve is a tiering effect
+   and not a dispatch-shape one.
+
+So the default is **256**: the largest size at which every engine measured runs
+the module in its optimizing tier. Bigger buys a lower cross rate and nothing
+else that could be measured, and costs one engine entirely.
+
+**No sub-dispatcher may exceed 80 % of the limit** (`dispatch::BODY_BUDGET`,
+6,123,456 B). It is a test, not a habit: `no_sub_dispatcher_exceeds_the_body_budget`
+emits 40,000 blocks in one function, asserts it is over, and asserts every
+split of it is under. The host refuses a module over the budget and halves
+`--jit-fn-blocks`, because a block set is not the block set a size was chosen
+on — `--jit-escape-all` emits several times the bytes per block.
+
+### Indirect targets, in O(1), across functions
+
+Every guest **return** is a `jalr`, and P3 left the module at every one of
+them. Two flat tables in the arena's largest gap, beside the permission table,
+make it a branch instead: a **page map** over the whole 32-bit space at the
+permission table's own 16 KiB granularity, and a **slot array** per page that
+holds a block start — 8,192 `i32`s, one per two bytes, holding the global block
+index or `-1`. Every page with no block start points at one shared array of
+`-1`, so a wild address needs no bounds check and no branch of its own. Two
+loads, no search.
+
+On `render-basic` at the last translation event the tables are **7,307,264 B**
+(1 MiB page map plus 1 KiB… 32 KiB per populated page); on `render-rocaille`,
+7,176,192 B. Two-byte granularity is not an economy — 48.99 % of real block
+starts sit at 2 mod 4.
+
+### The seeding scope (JD26, item 4)
+
+`--jit-seeds`. Measured at the last translation event, emit-only:
+
+| image | scope | blocks | instructions | module | installed coverage |
+|---|---|---:|---:|---:|---:|
+| `render-basic` | all-symbols | 201,237 | 705,529 | 64.4 MB | **93.46 %** |
+| `render-basic` | entry-reachable | 47,322 | 54,295 | 6.6 MB | **18.75 %** |
+| `render-rocaille` | all-symbols | 195,962 | 701,472 | 63.7 MB | **96.51 %** |
+| `render-rocaille` | entry-reachable | 39,194 | 43,836 | 5.4 MB | **19.36 %** |
+
+Coverage decides and it is not close, so **all-symbols** stays the default. At
+the *boot* event entry-reachable finds **one block and two instructions** —
+rule 1 of the discovery section, verbatim: `_start` runs into a CSR write the
+translator refuses and the walk stops, and the trap vector is still zero. What
+it finds at a `fence.i` is almost all published-code sweep: 47,322 blocks
+holding 54,295 instructions is 1.15 instructions a block, which is what a walk
+seeded on data looks like.
+
+### `LP_EMU_JIT_PAD`
+
+JD1 carried the spike's "dispatcher-scaling knob" onto M7's list, and P5 is
+where it would have been used. It is **not here, and it is not coming**: no
+commit on `main` ever carried it, and what it did — grow a `br_table` with
+unreachable copies of a region's blocks — is worse than what replaced it.
+`--jit-fn-blocks` varies the split over the **real** whole-image block set, so
+every row of the sizing table above is real blocks running a real recording,
+with identity checked in both engines. The spike's own caveat was that above
+~10,000 blocks its padding harness emitted malformed bodies; a knob whose
+large sizes are known-broken is not the instrument for a question about large
+sizes. Nothing to bound and nothing to fix — it was replaced.
+
+## Two more structural facts a reader will otherwise rediscover
+- **The hart's entry index has to be exact once the whole image is
+  installed.** It was a 64 K-slot direct-mapped filter keyed by `pc >> 1`,
+  first claim wins, sized in P4 against the ~37,600 block starts a render image
+  executes; a collision cost an interpreted block. 155,608 pcs into 65,536
+  slots is not a filter, and coverage measured **58.87 %** with every block
+  installed — the hart kept leaving translated code at a pc that *was* a block
+  start and could not get back in. `lp_riscv_emu::mach::translated::EntryIndex`
+  is exact now, in the same two-level shape as the target table above.
+- **Translated code's inline RAM stores never reach the bus, and the
+  guest-published-code watcher lives on the bus.** While only two thousand
+  blocks were installed this was invisible: the shader JIT's own writer ran
+  interpreted, the bus saw its stores, and the publish was seeded. Install the
+  whole image and the writer is translated, the bus sees nothing, and the walk
+  stops finding 12 points of the run's instructions. The machine diffs
+  executable writable memory at each `fence.i` instead — word-granular, because
+  a coalesced run's base is wherever the diff started and on this chip that is
+  usually the stack. Found coverage 97.29 % → **99.16 %**.
 - **An invalidation retires the whole module, not the blocks whose bytes
   changed.** The entry index says where the hart may *enter*; a block's edges
   to other blocks are compiled into the module, so dropping one from the

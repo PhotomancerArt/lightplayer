@@ -255,6 +255,10 @@ OPTIONS:
                             `fence.i`)
     --jit-record-entries <n>  with --jit-record: how many entries to record
                             (default 20000)
+    --jit-record-sizes <a,b>  with --jit-record: also emit THE SAME block set
+                            at each of these blocks-per-function, beside the
+                            recording. One walk, one recording, every size —
+                            which is what makes JD26's sizing table one run
     --jit-report            print what the translated core translated, how
                             much of the run it covered, how often it left for
                             the interpreter, and what boot cost to build it
@@ -381,6 +385,7 @@ struct Args {
     jit_record: Option<PathBuf>,
     jit_record_after: u64,
     jit_record_entries: usize,
+    jit_record_sizes: Vec<usize>,
     strict_grade: Option<RegGrade>,
     strict_grade_blocks: Option<Vec<&'static str>>,
     probes: Vec<(u64, String)>,
@@ -453,7 +458,7 @@ fn run() -> Result<ExitCode, String> {
         } else {
             args.jit_record_entries
         };
-        builder = builder.jit_record(dir, after, entries);
+        builder = builder.jit_record(dir, after, entries, args.jit_record_sizes.clone());
     }
     if let Some(len) = args.flash_len {
         builder = builder.flash_len(len);
@@ -815,6 +820,17 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                 args.jit_record_after = text
                     .parse()
                     .map_err(|e| format!("--jit-record-after `{text}`: {e}"))?;
+            }
+            "--jit-record-sizes" => {
+                let text = value("--jit-record-sizes")?;
+                args.jit_record_sizes = text
+                    .split(',')
+                    .map(|s| {
+                        s.trim()
+                            .parse()
+                            .map_err(|e| format!("--jit-record-sizes `{s}`: {e}"))
+                    })
+                    .collect::<Result<Vec<usize>, String>>()?;
             }
             "--jit-record-entries" => {
                 let text = value("--jit-record-entries")?;

@@ -189,6 +189,9 @@ pub fn install(
         match JitCore::build(bus, &found.set, model, policy, discovery, per_fn, record) {
             Ok(core) => {
                 let report = core.build_report();
+                if let Some(r) = record {
+                    emit_sizes(bus, &found.set, model, policy, r);
+                }
                 let entries = found.set.entries().to_vec();
                 hart.set_translated_core(Box::new(core), &entries);
                 return Ok(report);
@@ -198,6 +201,62 @@ pub fn install(
                 log::warn!("jit: {e}; retrying with {per_fn} blocks per function");
             }
             Err(e) => return Err(e),
+        }
+    }
+}
+
+/// Emit `set` at each of `record.sizes` and write the modules out beside the
+/// recording, so JD26's sizing table is five modules of one block set rather
+/// than five walks.
+///
+/// Best effort and loud about it: a size that will not emit is a finding for
+/// the table, not a reason to abandon a run that has a working core.
+fn emit_sizes(
+    bus: &mut SocBus,
+    set: &BlockSet,
+    model: CycleModel,
+    policy: Emit,
+    record: &RecordRequest,
+) {
+    if record.sizes.is_empty() {
+        return;
+    }
+    let Ok(at) = areas(bus, set) else { return };
+    let layout = Layout {
+        memory_pages: at.pages,
+        guest_base: bus.guest_arena_base(),
+        arena_offset: 0,
+        perm_offset: at.perm_at,
+        exchange_offset: at.exchange_at,
+        indirect: Some(at.indirect_at),
+    };
+    if let Err(e) = std::fs::create_dir_all(&record.dir) {
+        log::error!("jit: {}: {e}", record.dir.display());
+        return;
+    }
+    for &size in &record.sizes {
+        let started = std::time::Instant::now();
+        let emitted = emit_module(set, model, layout, policy, size);
+        let emit_us = started.elapsed().as_micros();
+        let path = record.dir.join(format!("size-{size}.wasm"));
+        match std::fs::write(&path, &emitted.wasm) {
+            Ok(()) => eprintln!(
+                "jit: size {size}: {} blocks in {} fn, {} B, largest body {} B ({} the \
+                 {}-byte budget), emitted in {:.1} ms -> {}",
+                set.blocks.len(),
+                emitted.functions,
+                emitted.wasm.len(),
+                emitted.max_body_bytes,
+                if emitted.max_body_bytes <= BODY_BUDGET {
+                    "under"
+                } else {
+                    "OVER"
+                },
+                BODY_BUDGET,
+                emit_us as f64 / 1000.0,
+                path.display(),
+            ),
+            Err(e) => log::error!("jit: {}: {e}", path.display()),
         }
     }
 }
@@ -391,6 +450,15 @@ pub struct RecordRequest {
     pub dir: PathBuf,
     pub after_cycles: u64,
     pub entries: usize,
+    /// Extra blocks-per-function sizes to emit **the same block set** at,
+    /// beside the module the core itself is built from.
+    ///
+    /// This is what makes JD26's sizing table one recording rather than five.
+    /// A global block index does not depend on the split, so a module emitted
+    /// at any size answers the same recording — but only if it is emitted from
+    /// the *same* block set, and a second run's walk is not the same walk: the
+    /// guest publishes code, and what it published depends on what ran.
+    pub sizes: Vec<usize>,
 }
 
 /// What the machine asked for, so a report can say what it got.
@@ -848,9 +916,15 @@ impl JitCore {
         // translator's tables, and never the ~200 MiB the arena spans between
         // them — nothing reads it, and reading it would commit it.
         let recorder = record.map(|r| {
+            // Clipped to the wasm memory, which is whole pages of the arena
+            // and so stops short of its tail — on the C6 that tail is all
+            // 16 KiB of LP SRAM, and a replay has no memory to put it in.
+            let reachable = (at.pages * 65536) as u32;
             let mut live: Vec<(u32, u32, bool)> = spans
                 .iter()
                 .map(|&(base, len, _)| (base - arena_base, len, true))
+                .filter(|&(off, _, _)| off < reachable)
+                .map(|(off, len, v)| (off, len.min(reachable - off), v))
                 .collect();
             live.push((at.perm_at, PERM_ENTRIES, false));
             live.push((at.exchange_at, EXCHANGE_LEN, false));

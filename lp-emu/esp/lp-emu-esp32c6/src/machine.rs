@@ -131,19 +131,34 @@ pub const DEFAULT_JIT_BLOCKS: usize = usize::MAX;
 
 /// How many guest blocks one **sub-dispatcher** holds (`--jit-fn-blocks`).
 ///
-/// The number JD26 says is chosen by measured steady-state throughput in
+/// JD26 says this is chosen by measured steady-state throughput in
 /// JavaScriptCore — the phone's engine family — and not by the
-/// 7,654,321-byte function limit alone. The limit allows ~16,000 blocks at
-/// the census's ~470 B a block; whether a lazily tiering engine ever
-/// *optimises* a body that size is a separate question, and the one this
-/// default answers. See `lp-emu-jit/README.md` for the table it was read off.
-pub const DEFAULT_JIT_FN_BLOCKS: usize = 2048;
+/// 7,654,321-byte function limit alone. P5 measured the whole ladder from 64
+/// to 12,288 blocks a function, in both engines, against a real recording of
+/// a real run (`lp-emu-jit/README.md` has the table), and the measurement
+/// said something the limit does not:
+///
+/// - **JavaScriptCore has no measurable preference.** 9–27 ns per guest
+///   instruction across the whole ladder, with run-to-run variation at this
+///   desk's load as large as the spread between sizes. The spike's flat
+///   `br_table` result is not contradicted.
+/// - **V8's optimizing tier dies** — `Fatal process out of memory: Zone`,
+///   inside `WasmLoweringPhase` — at **512** blocks a function and every size
+///   above it. It survives at 128 and 256. Its baseline tier compiles every
+///   size and runs them all at a flat 6.9–7.3 ns.
+///
+/// So the default is the largest size at which **every engine measured runs
+/// the module in its optimizing tier**, which is 256. Bigger buys a lower
+/// cross-function edge rate (37 against 59 per thousand guest instructions at
+/// 12,288) and nothing else that could be measured; it costs one engine
+/// entirely.
+pub const DEFAULT_JIT_FN_BLOCKS: usize = 256;
 
 /// The same for `--jit-escape-all`, where a block emits several times the
 /// wasm: a register flush, a call and a reload per instruction instead of a
 /// few opcodes. `jit::install` halves on a refusal anyway; this keeps the
 /// common case from paying for one first.
-pub const DEFAULT_JIT_ESCAPE_FN_BLOCKS: usize = 512;
+pub const DEFAULT_JIT_ESCAPE_FN_BLOCKS: usize = 128;
 
 /// The default bound when every instruction goes through the escape hatch
 /// (`--jit-escape-all`).
@@ -928,7 +943,7 @@ pub struct Esp32C6Builder {
     jit_emit_only: Option<std::path::PathBuf>,
     /// `--jit-record <dir>`: record entries into translated code for another
     /// engine to replay.
-    jit_record: Option<(std::path::PathBuf, u64, usize)>,
+    jit_record: Option<(std::path::PathBuf, u64, usize, Vec<usize>)>,
     efuse: EfuseIdentity,
     time_grade: TimeGrade,
     strict: bool,
@@ -1238,8 +1253,9 @@ impl Esp32C6Builder {
         dir: std::path::PathBuf,
         after_cycles: u64,
         entries: usize,
+        sizes: Vec<usize>,
     ) -> Self {
-        self.jit_record = Some((dir, after_cycles, entries));
+        self.jit_record = Some((dir, after_cycles, entries, sizes));
         self
     }
 
@@ -2218,7 +2234,7 @@ pub struct Esp32C6Machine {
     /// Emit the module to this path instead of installing it.
     jit_emit_only: Option<std::path::PathBuf>,
     /// A recording request, armed at every translation event.
-    jit_record: Option<(std::path::PathBuf, u64, usize)>,
+    jit_record: Option<(std::path::PathBuf, u64, usize, Vec<usize>)>,
     /// The `fence.i` count the installed core was translated at. The run loop
     /// compares the hart's against it, and a difference is the guest having
     /// published code — the second translation event.
@@ -2523,11 +2539,14 @@ impl Esp32C6Machine {
         let record = self
             .jit_record
             .as_ref()
-            .map(|(dir, after_cycles, entries)| crate::jit::RecordRequest {
-                dir: dir.clone(),
-                after_cycles: *after_cycles,
-                entries: *entries,
-            });
+            .map(
+                |(dir, after_cycles, entries, sizes)| crate::jit::RecordRequest {
+                    dir: dir.clone(),
+                    after_cycles: *after_cycles,
+                    entries: *entries,
+                    sizes: sizes.clone(),
+                },
+            );
         let report = crate::jit::install(
             &mut self.harts[0],
             &mut self.bus,
