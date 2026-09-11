@@ -1,4 +1,4 @@
-[fw-checks-header] {"schema":1,"payload":"rmt-chase","chip":"esp32v3","firmware_commit":"e39cc8103461","firmware_features":"default,esp32,float-f32,server,test_rmt","firmware_dirty":false}
+[fw-checks-header] {"schema":1,"payload":"rmt-chase","chip":"esp32v3","firmware_commit":"dc2df69d4c8a","firmware_features":"default,esp32,float-f32,server,test_rmt","firmware_dirty":false}
 INFO - [rmt-chase] 256 LEDs on gpio18, 3 chases (768 frames), slot 0 blocks=4 window_words=256 half_words=128
 [fw-check-json] {"kind":"rmt-frame","n":0,"leds":256,"lit":1,"crc":"0xf88210a7"}
 [fw-check-json] {"kind":"rmt-frame","n":1,"leds":256,"lit":1,"crc":"0xc234d93f"}
