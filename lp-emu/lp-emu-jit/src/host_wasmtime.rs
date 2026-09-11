@@ -313,21 +313,37 @@ impl<H: HostOps + 'static> WasmtimeCore<H> {
              cycle: i64,
              address: i32,
              kind: i32,
-             value: i32|
-             -> i32 {
-                caller.data_mut().mmio_store(
+             value: i32,
+             post_pc: i32,
+             post_cycle: i64,
+             post_instret: i64|
+             -> i64 {
+                let out = caller.data_mut().mmio_store(
                     pc as u32,
                     cycle as u64,
                     address as u32,
                     kind as u32,
                     value as u32,
-                ) as i32
+                    post_pc as u32,
+                    post_cycle as u64,
+                    post_instret as u64,
+                );
+                (i64::from(out.status) << 32) | i64::from(out.pc)
             },
         );
         let step_one =
             wasmtime::Func::wrap(&mut store, |mut caller: Caller<'_, H>, pc: i32| -> i32 {
                 crate::host::escape_hatch(caller.data_mut(), pc as u32) as i32
             });
+        let poll = wasmtime::Func::wrap(
+            &mut store,
+            |mut caller: Caller<'_, H>, pc: i32, cycle: i64, instret: i64| -> i64 {
+                let out = caller
+                    .data_mut()
+                    .poll(pc as u32, cycle as u64, instret as u64);
+                (i64::from(out.status) << 32) | i64::from(out.pc)
+            },
+        );
 
         // The memory has to be **defined by a module**, not created with
         // `Memory::new`: `wasmtime::Memory::new` builds its instance with
@@ -354,6 +370,7 @@ impl<H: HostOps + 'static> WasmtimeCore<H> {
                 Extern::Func(mmio_load),
                 Extern::Func(mmio_store),
                 Extern::Func(step_one),
+                Extern::Func(poll),
                 Extern::Memory(memory),
             ],
         )?;

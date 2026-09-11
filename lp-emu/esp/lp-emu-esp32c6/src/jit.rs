@@ -41,8 +41,8 @@ use lp_emu_jit::discover::{DiscoverStats, Discovered, discover, discover_from};
 use lp_emu_jit::dispatch::{BODY_BUDGET, emit_module, target_table_bytes, write_target_tables};
 use lp_emu_jit::host::{
     self, EXCHANGE_LEN, FLAG_AFTER_STORE, FLAG_SLICE_ENDED, HostOps, MMIO_LEAVE_AFTER, MMIO_OK,
-    MMIO_PENDING, MMIO_REFUSED, MmioLoad, MmioStore, PERM_ENTRIES, PERM_SHIFT, STEP_CONTINUE,
-    STEP_SLICE_ENDED, StepOne, load_kind, store_kind,
+    MMIO_PENDING, MMIO_REFUSED, MMIO_SLICE_ENDED, MmioLoad, MmioStore, PERM_ENTRIES, PERM_SHIFT,
+    Polled, STEP_CONTINUE, STEP_SLICE_ENDED, StepOne, load_kind, store_kind,
 };
 use lp_emu_jit::translate::{Emit, Emitted, Layout};
 
@@ -719,9 +719,15 @@ pub struct JitStats {
     /// or a block whose own end left the set at a pc that happens to be a
     /// start.
     pub exit_known_pc: u64,
-    /// Exits carrying `FLAG_AFTER_STORE`: polling point (c), byte for byte
-    /// what an interpreted store does.
+    /// Exits carrying `FLAG_AFTER_STORE`: polling point (c) handed back to
+    /// the hart's own loop. **Zero on this machine since M7b P2** — the poll
+    /// runs inside the stay — and kept because a core that cannot poll still
+    /// reports it.
     pub exit_after_store: u64,
+    /// Polling points (c) run **inside** a stay, and how many of them ended
+    /// it (M7b P2). `polls - polls_left` is the exit that did not happen.
+    pub polls: u64,
+    pub polls_left: u64,
     /// Exits carrying `FLAG_SLICE_ENDED`.
     pub exit_slice_ended: u64,
     /// Entries that retired nothing: the first block did not fit the
@@ -874,9 +880,15 @@ pub struct C6Ops {
     /// The exchange area, inside the arena. Stable for the life of the
     /// machine, because the arena is.
     exchange: *mut u8,
-    /// The slice end the escape hatch reported, if any.
+    /// The slice end the escape hatch — or a polling point — reported, if any.
     slice_end: Option<SliceEnd>,
     escape_hatch: u64,
+    /// Polling points (c) this stay ran inside translated code (M7b P2), and
+    /// how many of them ended it. The difference is the exit class the phase
+    /// removed: a poll that answers `MMIO_OK` is an after-store exit that did
+    /// not happen.
+    polls: u64,
+    polls_left: u64,
     /// Every import call this entry made, in call order, while a recording is
     /// running. Empty and never touched otherwise.
     calls: Vec<CallRec>,
@@ -898,6 +910,70 @@ impl C6Ops {
         debug_assert!(!self.hart.is_null() && !self.bus.is_null());
         // SAFETY: the caller's obligation, above.
         unsafe { (&mut *self.hart, &mut *self.bus) }
+    }
+
+    /// **Polling point (c)**, run by the hart itself, from inside a stay
+    /// (M7b P2, plan.md BD2).
+    ///
+    /// This is not a re-implementation and it is not a test of whether the
+    /// poll *would* have mattered. It is the same three lines
+    /// `MachineHart::run_blocks`'s `after_store` arm runs, in the same order,
+    /// with the state the interpreter would be holding at exactly this
+    /// instruction: the post-store pc and the post-store counters (JD17).
+    ///
+    /// The bus's `set_issuing` pair is deliberately left alone — the
+    /// interpreter polls with the *store's* issuing pair still in place, which
+    /// is what `mmio_store` already set and what the pre-P2 exit already left
+    /// behind.
+    ///
+    /// Three answers:
+    ///
+    /// - the hart did not move and the bus is still pure: [`MMIO_OK`], carry
+    ///   on inside the stay, exactly as an interpreted block carries on;
+    /// - [`MMIO_SLICE_ENDED`]: `take_yield` said the machine takes over, which
+    ///   is `SliceEnd::BusYield` and travels the same way a `step_one` slice
+    ///   end does;
+    /// - [`MMIO_LEAVE_AFTER`]: an interrupt was delivered (the hart's pc moved
+    ///   to the trap vector), or the bus stopped claiming `fetch_is_pure`.
+    ///   Either way the stay leaves at the hart's pc, and `run_blocks`'s own
+    ///   `fetch_is_pure` check — which runs after **every** `core.run` — is
+    ///   what turns the second case into `run_slice_stepping`, exactly as it
+    ///   does today. That is why this is not a `SliceEnd`: the interpreter's
+    ///   answer to an impure fetch is not to end the slice.
+    fn polling_point(&mut self, post_pc: u32, post_cycle: u64, post_instret: u64) -> Polled {
+        self.polls += 1;
+        let out = {
+            // SAFETY: called from inside `enter`.
+            let (hart, bus) = unsafe { self.parts() };
+            hart.set_pc(post_pc);
+            hart.set_counters(post_cycle, post_instret);
+            if bus.take_sideband() {
+                hart.resample_external(bus);
+            }
+            if bus.take_yield() {
+                Polled {
+                    status: MMIO_SLICE_ENDED,
+                    pc: hart.pc(),
+                }
+            } else if hart.pc() != post_pc || !bus.fetch_is_pure() {
+                Polled {
+                    status: MMIO_LEAVE_AFTER,
+                    pc: hart.pc(),
+                }
+            } else {
+                Polled {
+                    status: MMIO_OK,
+                    pc: post_pc,
+                }
+            }
+        };
+        if out.status == MMIO_SLICE_ENDED {
+            self.slice_end = Some(SliceEnd::BusYield);
+        }
+        if out.status != MMIO_OK {
+            self.polls_left += 1;
+        }
+        out
     }
 }
 
@@ -960,26 +1036,33 @@ impl HostOps for C6Ops {
         address: u32,
         kind: u32,
         value: u32,
+        post_pc: u32,
+        post_cycle: u64,
+        post_instret: u64,
     ) -> MmioStore {
-        // SAFETY: called from inside `enter`.
-        let (_, bus) = unsafe { self.parts() };
-        bus.set_issuing(pc, cycle);
-        mmio_census::note(true, pc, address);
-        let written = match kind {
-            store_kind::B => bus.write_byte(address, value as i8),
-            store_kind::H => bus.write_halfword(address, value as i16),
-            store_kind::W => bus.write_word(address, value as i32),
-            other => unreachable!("the translator emits no store kind {other}"),
+        let written = {
+            // SAFETY: called from inside `enter`.
+            let (_, bus) = unsafe { self.parts() };
+            bus.set_issuing(pc, cycle);
+            mmio_census::note(true, pc, address);
+            match kind {
+                store_kind::B => bus.write_byte(address, value as i8),
+                store_kind::H => bus.write_halfword(address, value as i16),
+                store_kind::W => bus.write_word(address, value as i32),
+                other => unreachable!("the translator emits no store kind {other}"),
+            }
         };
         let out = match written {
-            Ok(()) => {
-                if bus.sideband_or_yield_pending() {
-                    MMIO_LEAVE_AFTER
-                } else {
-                    MMIO_OK
-                }
-            }
-            Err(_) => MMIO_REFUSED,
+            // The store retired, so the hart polls — here, in the same
+            // crossing, rather than by ending the stay (M7b P2).
+            Ok(()) => self.polling_point(post_pc, post_cycle, post_instret),
+            // The access did not happen. The interpreter re-runs the
+            // instruction and traps rather than retiring it, so there is no
+            // polling point to run.
+            Err(_) => Polled {
+                status: MMIO_REFUSED,
+                pc,
+            },
         };
         if self.recording {
             self.calls.push(CallRec {
@@ -989,7 +1072,23 @@ impl HostOps for C6Ops {
                 address,
                 access: kind,
                 value,
-                result: u64::from(out),
+                result: (u64::from(out.status) << 32) | u64::from(out.pc),
+            });
+        }
+        out
+    }
+
+    fn poll(&mut self, pc: u32, cycle: u64, instret: u64) -> Polled {
+        let out = self.polling_point(pc, cycle, instret);
+        if self.recording {
+            self.calls.push(CallRec {
+                kind: 2,
+                pc,
+                cycle,
+                address: 0,
+                access: 0,
+                value: 0,
+                result: (u64::from(out.status) << 32) | u64::from(out.pc),
             });
         }
         out
@@ -1329,6 +1428,8 @@ impl Module {
             bus: core::ptr::null_mut(),
             exchange,
             slice_end: None,
+            polls: 0,
+            polls_left: 0,
             escape_hatch: 0,
             calls: Vec::new(),
             recording: false,
@@ -1913,6 +2014,8 @@ impl TranslatedCore<SocBus> for JitCore {
         let calls = core::mem::take(&mut ops.calls);
         let escaped = core::mem::take(&mut ops.escape_hatch);
         self.stats.escape_hatch += escaped;
+        self.stats.polls += core::mem::take(&mut ops.polls);
+        self.stats.polls_left += core::mem::take(&mut ops.polls_left);
         let slice_end = ops.slice_end.take();
 
         let exit = match exit {
@@ -2147,6 +2250,7 @@ impl TranslatedCore<SocBus> for JitCore {
              instantiate {:.2} ms; \
              entries {}, retired {}, escape_hatch {}, cross {}, indirect_miss {}, \
              interpreted_between {}, exits known/unknown {}/{}, after_store {}, \
+             polls {} ({} left the stay), \
              slice_ended {}, no_progress {}, \
              invalidations {} (dropped {} blocks), \
              refused_pending {}, refused_watch {}, refused_no_entry {}, refused_impure {}, \
@@ -2190,6 +2294,8 @@ impl TranslatedCore<SocBus> for JitCore {
             s.exit_known_pc,
             s.exit_unknown_pc,
             s.exit_after_store,
+            s.polls,
+            s.polls_left,
             s.exit_slice_ended,
             s.exit_no_progress,
             s.invalidations,

@@ -21,9 +21,14 @@
 //!   block and one nested `block` per guest block. Forward edges branch
 //!   straight to the target's label; back edges go through the table; an edge
 //!   out of the set exits.
+//! - **A store runs polling point (c) without leaving** (M7b P2). The store
+//!   the bus serves fuses the poll into `mmio_store`'s own call; the inline
+//!   RAM store that owes one because a load left a yield calls `poll`. The
+//!   hart's own polling code runs, at the same instruction, with the
+//!   post-store pc and counters — and the stay carries on unless it moved.
 //! - **Every exit reports** pc, cycle count, retired-instruction count and the
-//!   after-store flag, so the interpreter resumes with identical state. The
-//!   protocol is written out in [`crate::host`].
+//!   flags, so the interpreter resumes with identical state. The protocol is
+//!   written out in [`crate::host`].
 //!
 //! # The escape hatch, and why bring-up cannot cliff
 //!
@@ -56,13 +61,12 @@ use crate::blocks::{Block, BlockEnd, BlockSet};
 use crate::decode::{Cond, Decoded, Inst, LoadKind, Op, OpI, StoreKind};
 use crate::host::{
     EXCHANGE_CYCLE, EXCHANGE_EXIT_WHY, EXCHANGE_FLAGS, EXCHANGE_INDIRECT_MISS, EXCHANGE_INSTRET,
-    EXCHANGE_REGS, EXCHANGE_STATUS, FLAG_AFTER_STORE, FLAG_PENDING, FLAG_SLICE_ENDED,
-    MMIO_LEAVE_AFTER, MMIO_PENDING, MMIO_REFUSED, PERM_READ_WRITE, PERM_SHIFT, load_kind,
-    store_kind, why,
+    EXCHANGE_REGS, EXCHANGE_STATUS, FLAG_PENDING, FLAG_SLICE_ENDED, MMIO_PENDING, MMIO_REFUSED,
+    MMIO_SLICE_ENDED, PERM_READ_WRITE, PERM_SHIFT, load_kind, store_kind, why,
 };
 
-/// The module the host imports `memory` from, and the module the three
-/// functions are imported from. One name for all four: the emulator instance
+/// The module the host imports `memory` from, and the module the four
+/// functions are imported from. One name for all five: the emulator instance
 /// exports them and a translated module imports them, and P2's seam contract
 /// says nothing about them beyond being ordinary wasm imports.
 pub const IMPORT_MODULE: &str = "emu";
@@ -254,9 +258,11 @@ fn body_locals() -> Vec<(u32, ValType)> {
 pub(crate) const F_MMIO_LOAD: u32 = 0;
 pub(crate) const F_MMIO_STORE: u32 = 1;
 pub(crate) const F_STEP_ONE: u32 = 2;
-/// The first function index a sub-dispatcher can have: the three imports come
+/// Polling point (c) for a store the bus never saw (M7b P2).
+pub(crate) const F_POLL: u32 = 3;
+/// The first function index a sub-dispatcher can have: the four imports come
 /// first, and the module defines everything after them.
-pub(crate) const F_FIRST_BODY: u32 = 3;
+pub(crate) const F_FIRST_BODY: u32 = 4;
 
 fn memarg(offset: u64) -> MemArg {
     MemArg {
@@ -832,6 +838,20 @@ impl<'a> Emitter<'a> {
             StoreKind::H => I::I32Store16(arena),
             StoreKind::W => I::I32Store(arena),
         });
+        // The bus never saw this store, so the only thing polling point (c)
+        // can have to do is the obligation an earlier MMIO load left
+        // ([`FLAG_PENDING`]). That one needs its own crossing, because there
+        // is no store call to fuse into.
+        self.i(I::LocalGet(L_PENDING));
+        self.i(I::If(BlockType::Empty));
+        self.extra += 1;
+        self.i(I::I32Const(0));
+        self.i(I::LocalSet(L_PENDING));
+        self.post_store_state(pc, inst_width, cost, cycles, retired);
+        self.i(I::Call(F_POLL));
+        self.unpack_poll();
+        self.extra -= 1;
+        self.i(I::End);
         self.i(I::Else);
         self.i(I::LocalGet(L_PERM_LO));
         self.i(I::LocalGet(L_PERM_HI));
@@ -839,6 +859,9 @@ impl<'a> Emitter<'a> {
         self.i(I::I32Eqz);
         self.i(I::If(BlockType::Empty));
         self.extra += 1;
+        // The bus serves the store and runs the polling point in the same
+        // crossing (M7b P2): the store's own `(pc, cycle)` first, then the
+        // post-store state the hart would be holding when it polled.
         self.i(I::I32Const(pc as i32));
         self.i(I::LocalGet(L_CYC));
         self.i(I::I64Const(cycles as i64));
@@ -846,16 +869,23 @@ impl<'a> Emitter<'a> {
         self.i(I::LocalGet(L_ADDR));
         self.i(I::I32Const(kind_code as i32));
         self.get(rs2);
+        self.post_store_state(pc, inst_width, cost, cycles, retired);
         self.i(I::Call(F_MMIO_STORE));
-        self.i(I::LocalSet(L_STATUS));
+        self.unpack_poll();
         self.i(I::LocalGet(L_STATUS));
         self.i(I::I32Const(MMIO_REFUSED as i32));
         self.i(I::I32Eq);
         self.i(I::If(BlockType::Empty));
         self.extra += 1;
+        // The access did not happen, so no polling point ran and the
+        // obligation an earlier load left is still live.
         self.exit(k, Some(pc), cycles, retired, 0, why::STORE_REFUSED);
         self.extra -= 1;
         self.i(I::End);
+        // The store retired and the host polled, so whatever the bus was
+        // holding is taken.
+        self.i(I::I32Const(0));
+        self.i(I::LocalSet(L_PENDING));
         self.i(I::Else);
         // Read-only RAM, or an access straddling two kinds of page.
         self.exit(k, Some(pc), cycles, retired, 0, why::STORE_STRADDLE);
@@ -864,24 +894,61 @@ impl<'a> Emitter<'a> {
         self.i(I::End);
         self.extra -= 1;
 
-        // Polling point (c). The store retired; the hart takes it from here.
+        // What the polling point said. [`MMIO_OK`] is zero and is the
+        // overwhelming case — the store retired, the hart did not move, and
+        // the stay carries on inside the same block, exactly as an
+        // interpreted block does after a store that raised nothing.
         self.i(I::LocalGet(L_STATUS));
-        self.i(I::I32Const(MMIO_LEAVE_AFTER as i32));
+        self.i(I::If(BlockType::Empty));
+        self.extra += 1;
+        self.i(I::LocalGet(L_STATUS));
+        self.i(I::I32Const(MMIO_SLICE_ENDED as i32));
         self.i(I::I32Eq);
-        self.i(I::LocalGet(L_PENDING));
-        self.i(I::I32Or);
         self.i(I::If(BlockType::Empty));
         self.extra += 1;
         self.exit(
             k,
-            Some(pc.wrapping_add(u32::from(inst_width))),
+            None,
             cycles + cost,
             retired + 1,
-            FLAG_AFTER_STORE,
-            why::AFTER_STORE,
+            FLAG_SLICE_ENDED,
+            why::SLICE_ENDED,
         );
         self.extra -= 1;
         self.i(I::End);
+        // The poll moved the hart: a delivered interrupt's vector, or a bus
+        // that stopped claiming `fetch_is_pure`. Leave where it left us, with
+        // no flag — the polling point has already run.
+        self.exit(k, None, cycles + cost, retired + 1, 0, why::AFTER_STORE);
+        self.extra -= 1;
+        self.i(I::End);
+    }
+
+    /// Push the three post-store arguments every polling point takes: the pc
+    /// the instruction retires to, and the counters with this instruction
+    /// charged (JD17).
+    fn post_store_state(&mut self, pc: u32, inst_width: u8, cost: u64, cycles: u64, retired: u32) {
+        self.i(I::I32Const(pc.wrapping_add(u32::from(inst_width)) as i32));
+        self.i(I::LocalGet(L_CYC));
+        self.i(I::I64Const((cycles + cost) as i64));
+        self.i(I::I64Add);
+        self.i(I::LocalGet(L_INSTRET));
+        self.i(I::I64Const(i64::from(retired) + 1));
+        self.i(I::I64Add);
+    }
+
+    /// Unpack a polling point's `(status << 32) | pc` into [`L_STATUS`] and
+    /// [`L_ADDR`], which is where [`Emitter::exit`] looks for a dynamic pc.
+    fn unpack_poll(&mut self) {
+        self.i(I::LocalSet(L_T64));
+        self.i(I::LocalGet(L_T64));
+        self.i(I::I64Const(32));
+        self.i(I::I64ShrU);
+        self.i(I::I32WrapI64);
+        self.i(I::LocalSet(L_STATUS));
+        self.i(I::LocalGet(L_T64));
+        self.i(I::I32WrapI64);
+        self.i(I::LocalSet(L_ADDR));
     }
 
     // --- arithmetic ---------------------------------------------------------

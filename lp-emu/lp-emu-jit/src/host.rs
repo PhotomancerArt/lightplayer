@@ -1,6 +1,6 @@
 //! The contract between an emitted module and whatever is hosting it.
 //!
-//! A translated module imports three functions and one linear memory, and
+//! A translated module imports four functions and one linear memory, and
 //! nothing else. This module is the Rust half of that: [`HostOps`] is what a
 //! host has to be able to do, and the constants are the wire format the
 //! emitted code uses to say what happened.
@@ -52,9 +52,42 @@
 //! **`cx.now` discipline (JD17).** The cycle and instruction counters live in
 //! wasm locals, and are handed back at every point the bus can observe them:
 //! as arguments to every MMIO import, in the exchange area before every
-//! `step_one`, and in the exchange area at every exit. P1b measured that
-//! charging a block's cycles at entry is not exact, because peripheral models
-//! read `cx.now` in the middle of a block.
+//! `step_one`, as the *post-store* arguments of every polling point, and in
+//! the exchange area at every exit. P1b measured that charging a block's
+//! cycles at entry is not exact, because peripheral models read `cx.now` in
+//! the middle of a block.
+//!
+//! # Polling point (c), and why it is an import (M7b P2)
+//!
+//! The hart polls interrupt state at exactly four points, and one of them —
+//! **(c)**, after a Store- or System-class instruction whose bus reports
+//! `take_sideband()` — falls inside a translated stay. It used to end the
+//! stay: the store exited with [`FLAG_AFTER_STORE`] and the hart ran the
+//! polling point out in its own loop. That was **53.2 % of all exits** on
+//! `render-basic` t2, and each one bought the interpreter 0.68 instructions.
+//!
+//! It is now a **poll import** instead. The polling point does not move: it
+//! still runs after exactly the instruction it always did, with the pc and the
+//! counters the interpreter would have had, and it is still *the hart's own
+//! code* that runs it — the host half sets the hart's pc and counters and
+//! calls `take_sideband` / `resample_external` / `take_yield`, in that order,
+//! rather than deciding whether the poll would have mattered. What changed is
+//! only **where it is called from**.
+//!
+//! Two imports carry it, because there are two kinds of store:
+//!
+//! - a store the bus serves goes out through [`HostOps::mmio_store`] already,
+//!   so the poll is **fused into that call** — no second crossing. Its result
+//!   widened from a status to `(status << 32) | pc`, the same shape
+//!   [`HostOps::mmio_load`]'s has;
+//! - a store the bus never sees — an inline RAM store made while
+//!   [`FLAG_PENDING`] is set, because an earlier MMIO **load** left a yield —
+//!   has no call to fuse into, so it gets [`HostOps::poll`].
+//!
+//! Per plan.md BD1 the poll is its own import rather than a widened
+//! `step_one`: `step_one` runs a guest *instruction*, `poll` runs a *polling
+//! point*, and giving the escape hatch's status codes two meanings would put a
+//! poll on a path where none belongs.
 
 // ---- the exchange area ----------------------------------------------------
 
@@ -97,6 +130,14 @@ pub const EXCHANGE_LEN: u32 = 256;
 /// The exit was an MMIO store whose side-band or yield the hart must now
 /// observe — polling point (c). The hart does exactly what it does after an
 /// interpreted store.
+///
+/// **Since M7b P2 a translated stay never sets this**: the polling point runs
+/// inside the stay, through [`HostOps::mmio_store`] or [`HostOps::poll`], and
+/// an exit that follows one is an ordinary exit at the pc the poll left the
+/// hart on. The flag stays in the protocol because a core that *cannot* poll
+/// — one whose host implements the imports without a hart to run them on —
+/// still reports it, and because the hart's own `after_store` arm is the
+/// fallback that answers it.
 pub const FLAG_AFTER_STORE: i32 = 1;
 /// The exit was [`HostOps::step_one`] reporting that the *slice* is over — a
 /// `wfi`, an `ebreak`, a bus yield or a fault. The host knows which; translated
@@ -187,15 +228,22 @@ pub const MMIO_OK: u32 = 0;
 /// and the interpreter runs the instruction and takes the trap, with the right
 /// `mepc` and the right `mtval`.
 pub const MMIO_REFUSED: u32 = 1;
-/// The store happened and the bus is now holding a side-band or a yield.
-/// Translated code leaves *after* the store with [`FLAG_AFTER_STORE`], so the
-/// hart observes it at exactly the store it always has.
+/// The access happened, polling point (c) ran, and it **moved the hart**: an
+/// interrupt was delivered, or the bus stopped claiming
+/// [`lp_emu_core::Bus::fetch_is_pure`]. Translated code leaves at the pc the
+/// answer carries — the trap vector, or the post-store pc — with the
+/// post-store counters and no flag, because the poll has already happened.
 pub const MMIO_LEAVE_AFTER: u32 = 2;
 /// The load happened and the bus is now holding a yield. The interpreter does
 /// not look after a load, so neither does translated code — but the *next*
 /// store must leave, even if it is an inline RAM store the bus never sees.
 /// Translated code remembers this in a local for the rest of the stay.
 pub const MMIO_PENDING: u32 = 3;
+/// The access happened, polling point (c) ran, and the bus asked to take over
+/// ([`lp_emu_core::Bus::take_yield`]). Translated code leaves at the pc the
+/// answer carries with [`FLAG_SLICE_ENDED`]; the host is holding the
+/// `SliceEnd`, exactly as it is after a `step_one` that ended the slice.
+pub const MMIO_SLICE_ENDED: u32 = 4;
 
 /// [`HostOps::step_one`]: the caller may carry on.
 pub const STEP_CONTINUE: u32 = 0;
@@ -247,9 +295,28 @@ pub struct MmioLoad {
     pub value: u32,
 }
 
-/// What a store told translated code: one of [`MMIO_OK`], [`MMIO_REFUSED`],
-/// [`MMIO_LEAVE_AFTER`].
-pub type MmioStore = u32;
+/// What a polling point told translated code: a status, and the guest pc the
+/// hart is at now that it has run.
+///
+/// The pc matters because polling point (c) can **deliver an interrupt**,
+/// which moves the hart to the trap vector. With [`MMIO_OK`] it is the
+/// post-store pc the caller handed in and translated code carries on; with
+/// anything else it is where the stay leaves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Polled {
+    /// One of [`MMIO_OK`], [`MMIO_REFUSED`], [`MMIO_LEAVE_AFTER`],
+    /// [`MMIO_SLICE_ENDED`].
+    pub status: u32,
+    /// The guest pc the hart is at. Meaningless when `status` is
+    /// [`MMIO_REFUSED`]: nothing happened, so translated code leaves at the
+    /// instruction's own pc having retired nothing.
+    pub pc: u32,
+}
+
+/// What a store told translated code. A store's answer *is* a polling point's
+/// answer since M7b P2, because the poll is fused into the store's own host
+/// call — see [`Polled`].
+pub type MmioStore = Polled;
 
 /// What [`HostOps::step_one`] left behind.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -271,9 +338,44 @@ pub trait HostOps {
     /// An access on a page the permission table says is not plain RAM.
     fn mmio_load(&mut self, pc: u32, cycle: u64, address: u32, kind: u32) -> MmioLoad;
 
-    /// The same, storing.
-    fn mmio_store(&mut self, pc: u32, cycle: u64, address: u32, kind: u32, value: u32)
-    -> MmioStore;
+    /// The same, storing — **and then polling point (c)**, because a store
+    /// that goes out to the bus is already a host crossing and the hart polls
+    /// after every store it retires.
+    ///
+    /// `pc` and `cycle` are the store's own, the pair the bus is told to
+    /// issue against. `post_pc`, `post_cycle` and `post_instret` are what the
+    /// hart would hold once the store retired — the next instruction's pc,
+    /// the cycle count with this instruction's cost charged, and `minstret`
+    /// plus one. The polling point runs with those, and only if the store
+    /// actually happened: a refused store never reaches one, because the
+    /// interpreter traps instead of retiring it.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the store's own (pc, cycle) and the polling point's post-store state are \
+                  different numbers, and JD17 says both cross the seam explicitly"
+    )]
+    fn mmio_store(
+        &mut self,
+        pc: u32,
+        cycle: u64,
+        address: u32,
+        kind: u32,
+        value: u32,
+        post_pc: u32,
+        post_cycle: u64,
+        post_instret: u64,
+    ) -> MmioStore;
+
+    /// Polling point (c) on its own, for the store the bus never saw.
+    ///
+    /// An MMIO **load** that left a yield sets [`FLAG_PENDING`], and from then
+    /// on every store — including an inline RAM store translated code performs
+    /// itself — is a polling point. There is no host call to fuse into, so
+    /// this is it (plan.md BD1).
+    ///
+    /// `pc`, `cycle` and `instret` are all **post-store**: the state the
+    /// interpreter would be holding at the polling point.
+    fn poll(&mut self, pc: u32, cycle: u64, instret: u64) -> Polled;
 
     /// The escape hatch (JD10): run **exactly one** guest instruction at `pc`,
     /// the way the interpreter would, and report where it left.
