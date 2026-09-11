@@ -279,12 +279,15 @@ fn emit_sizes(
         let path = record.dir.join(format!("size-{size}.wasm"));
         match std::fs::write(&path, &emitted.wasm) {
             Ok(()) => eprintln!(
-                "jit: size {size}: {} blocks in {} fn, {} B, largest body {} B ({} the \
+                "jit: size {size}: {} blocks in {} fn, {} B, largest body {} B \
+                 (sub-dispatcher {} B, selector {} B) ({} the \
                  {}-byte budget), emitted in {:.1} ms -> {}",
                 set.blocks.len(),
                 emitted.functions,
                 emitted.wasm.len(),
                 emitted.max_body_bytes,
+                emitted.max_sub_body_bytes,
+                emitted.selector_bytes,
                 if emitted.max_body_bytes <= BODY_BUDGET {
                     "under"
                 } else {
@@ -552,8 +555,15 @@ pub struct BuildReport {
     pub instantiate_us: u128,
     /// Sub-dispatchers in the module, not counting the outer selector.
     pub functions: usize,
-    /// The largest sub-dispatcher body, in bytes.
+    /// The largest body in the module, in bytes — **the outer selector
+    /// included** since M7 P6c. This is the number
+    /// [`BODY_BUDGET`] is checked against.
     pub max_body_bytes: usize,
+    /// The largest **sub-dispatcher** body, in bytes.
+    pub max_sub_body_bytes: usize,
+    /// The outer selector's own body, in bytes. `O(1)` with the flat
+    /// selector, `O(functions)` with the nested one.
+    pub selector_bytes: usize,
     /// The per-function block budget the module was actually emitted at,
     /// which is not what the caller asked for when the caller asked for more
     /// blocks than there are.
@@ -575,8 +585,8 @@ impl BuildReport {
         let ms = |us: u128| us as f64 / 1000.0;
         format!(
             "{event}: discovered {} blocks / {} instr in {:.1} ms; installed {} blocks / {} instr; \
-             emitted {} B in {:.1} ms in {} fn x {} blocks (largest {} B, targets {} B); \
-             compiled in {:.1} ms; instantiated in {:.2} ms",
+             emitted {} B in {:.1} ms in {} fn x {} blocks (largest {} B: sub-dispatcher {} B, \
+             selector {} B; targets {} B); compiled in {:.1} ms; instantiated in {:.2} ms",
             d.stats.blocks,
             d.stats.insts,
             ms(d.discover_us),
@@ -587,6 +597,8 @@ impl BuildReport {
             self.functions,
             self.fn_blocks,
             self.max_body_bytes,
+            self.max_sub_body_bytes,
+            self.selector_bytes,
             self.indirect_bytes,
             ms(self.compile_us),
             ms(self.instantiate_us),
@@ -954,11 +966,24 @@ impl JitCore {
         // Checked here rather than left to the engine, because every engine
         // reports it differently, none of them say what to do about it, and
         // the answer — a smaller `fn_blocks` — is one the caller can act on.
+        //
+        // `max_body_bytes` is the largest body in the module *including the
+        // outer selector* since M7 P6c. It used to be the largest
+        // sub-dispatcher, which is the same number only while the
+        // sub-dispatchers are the big functions — below 64 blocks a function
+        // they are not, and the check was blind at exactly the sizes DD20
+        // moved the default towards.
         if emitted.max_body_bytes > BODY_BUDGET {
+            let (what, other) = if emitted.selector_bytes > emitted.max_sub_body_bytes {
+                ("outer selector", "largest sub-dispatcher")
+            } else {
+                ("largest sub-dispatcher", "outer selector")
+            };
             return Err(format!(
-                "at {fn_blocks} blocks per function the largest sub-dispatcher is {} bytes, \
-                 over the {BODY_BUDGET}-byte budget; use fewer (--jit-fn-blocks)",
+                "at {fn_blocks} blocks per function the {what} is {} bytes, over the \
+                 {BODY_BUDGET}-byte budget (the {other} is {} B); use fewer (--jit-fn-blocks)",
                 emitted.max_body_bytes,
+                emitted.max_sub_body_bytes.min(emitted.selector_bytes),
             ));
         }
 
@@ -1076,6 +1101,8 @@ impl JitCore {
                 instantiate_us,
                 functions: emitted.functions,
                 max_body_bytes: emitted.max_body_bytes,
+                max_sub_body_bytes: emitted.max_sub_body_bytes,
+                selector_bytes: emitted.selector_bytes,
                 fn_blocks: fn_blocks.min(set.blocks.len()),
                 indirect_bytes: at.indirect_len,
             },
