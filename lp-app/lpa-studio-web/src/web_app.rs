@@ -19,7 +19,7 @@
 
 use core::cell::{Cell, RefCell};
 use core::time::Duration;
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use crate::app::StudioShell;
@@ -49,9 +49,9 @@ use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
 use lpa_studio_core::app::studio::studio_view_channel::CommandSender;
 use lpa_studio_core::{
-    HOME_NODE_ID, HomeOp, RuntimeOp, STUDIO_LOG_SINK, SettingsCommand, StudioActor, StudioCommand,
-    StudioController, UiAction, UiChromeSessionControl, UiLogEntry, UiLogLevel, UiStudioView,
-    has_unsaved_work,
+    HOME_NODE_ID, HomeOp, RuntimeKind, RuntimeOp, STUDIO_LOG_SINK, SettingsCommand, StudioActor,
+    StudioCommand, StudioController, UiAction, UiChromeSessionControl, UiLogEntry, UiLogLevel,
+    UiStudioView, has_unsaved_work,
 };
 use lpc_cloud_api::share_link;
 use lpc_history::PrefixedUid;
@@ -167,12 +167,18 @@ pub fn App() -> Element {
     use_hook(move || {
         router::replace(&route.peek().clone());
     });
-    // The library's `prj…` uids, latched from the last view whose library
-    // had actually MOUNTED. `None` means the library has not spoken yet:
-    // an empty roster from an unmounted store is not an answer, and
-    // answering "we don't have it" from one would send an owner reloading
-    // their own project down the visitor path.
-    let library_uids = use_hook(|| Rc::new(RefCell::new(None::<BTreeSet<String>>)));
+    // The library's `prj…` uids and what hardware each project declares,
+    // latched from the last view whose library had actually MOUNTED. `None`
+    // means the library has not spoken yet: an empty roster from an
+    // unmounted store is not an answer, and answering "we don't have it"
+    // from one would send an owner reloading their own project down the
+    // visitor path.
+    //
+    // The target rides along because `?on=emu` cannot be answered without
+    // it: whether this build has an emulator is a question about the
+    // project's BOARD (D21/D23), and the sentence a refusal leaves behind
+    // names that board.
+    let library_uids = use_hook(|| Rc::new(RefCell::new(None::<LibraryTargets>)));
     // A `/p/<uid>` route waiting for that roster (boot, before the store
     // has attached). Resolved by the view loop on the first mounted
     // library; navigation mid-session answers straight from the latch.
@@ -366,6 +372,15 @@ pub fn App() -> Element {
             controller.set_device_sim_transport(Rc::new(lpa_studio_core::SimDeviceTransport::new(
                 Rc::new(lpa_studio_core::BrowserSimLinkSource::resolving()),
             )));
+            // The same for emulated boards, and for the same reason. The
+            // source RESOLVES its module URL at power-on rather than at
+            // install: whether this build ships an emulator module is a
+            // fact about `pkg/engine-manifest.json`, which the page reads
+            // when a board actually needs it, and a build without one fails
+            // that one board's link with the reason (D21).
+            controller.set_emu_transport(Rc::new(lpa_studio_core::EmuDeviceTransport::new(
+                Rc::new(lpa_studio_core::BrowserEmuLinkSource::resolving()),
+            )));
         }
         let (actor, handle) = StudioActor::new(controller, make_pull_timer);
         let mut view_rx = handle.view;
@@ -406,8 +421,12 @@ pub fn App() -> Element {
                 if let Some(home) = next.home.as_ref()
                     && home.library_available
                 {
-                    *loop_library_uids.borrow_mut() =
-                        Some(home.projects.iter().map(|card| card.uid.clone()).collect());
+                    *loop_library_uids.borrow_mut() = Some(
+                        home.projects
+                            .iter()
+                            .map(|card| (card.uid.clone(), card.target.clone()))
+                            .collect(),
+                    );
                 }
                 let waiting = loop_pending_project.borrow().clone();
                 if let Some((uid, on)) = waiting
@@ -1623,7 +1642,7 @@ fn session_stopped_line(session: &UiChromeSessionControl, dirty: bool) -> Option
 fn resolve_project_route(
     uid: PrefixedUid,
     on: Option<DeviceHint>,
-    library_uids: &RefCell<Option<BTreeSet<String>>>,
+    library_uids: &RefCell<Option<LibraryTargets>>,
     tx: &CommandSender,
     pending_route_open: &Rc<Cell<bool>>,
     mut shared_project: Signal<router::PendingSharedProject>,
@@ -1631,19 +1650,19 @@ fn resolve_project_route(
     mut toasts: crate::base::Toasts,
 ) -> bool {
     let uid_string = uid.to_string();
-    let Some(in_library) = library_uids
+    let Some(target) = library_uids
         .borrow()
         .as_ref()
-        .map(|uids| uids.contains(&uid_string))
+        .map(|projects| projects.get(&uid_string).cloned())
     else {
         return false;
     };
-    if !in_library {
+    let Some(target) = target else {
         shared_project.set(router::PendingSharedProject(Some(uid)));
         route.set(StudioRoute::Home);
         return true;
-    }
-    let resolved = ResolvedHint::for_hint(on);
+    };
+    let resolved = ResolvedHint::for_hint(on, target.as_deref());
     if let Some(said) = resolved.notice() {
         toasts.say(said);
     }
@@ -1663,19 +1682,24 @@ fn resolve_project_route(
     true
 }
 
+/// The library's projects as the router needs them: uid → the project's
+/// advisory `target` (a catalog board id, `None` for Desktop).
+type LibraryTargets = BTreeMap<String, Option<String>>;
+
 /// What a `?on=` hint asks the actor for, once the edge has said what this
 /// build can actually do about it (PD14).
 enum ResolvedHint {
-    /// No hint, or a hint that resolves to "a sim of this project's
-    /// target": the ordinary open, and the model picks the device (D33).
-    Resolve,
+    /// No hint, or a hint that resolves to a KIND of runtime of this
+    /// project's target: the ordinary open, and the model picks the device
+    /// (D33). `prefer` is the kind, when one was asked for (D1).
+    Resolve { prefer: Option<RuntimeKind> },
     /// The hint named an instance. The model looks it up and either opens
     /// there or stops at the mismatch page (D50).
     Device(String),
     /// The hint named something this build has no backing for. The open is
     /// the ordinary one, the address loses the hint, and `said` is the one
     /// line that explains why.
-    Unbacked { said: &'static str },
+    Unbacked { said: String },
 }
 
 impl ResolvedHint {
@@ -1688,7 +1712,12 @@ impl ResolvedHint {
                 // running project: that is what the page is for.
                 over_running_project: false,
             },
-            ResolvedHint::Resolve | ResolvedHint::Unbacked { .. } => HomeOp::OpenPackage { key },
+            ResolvedHint::Resolve { prefer } => HomeOp::OpenPackage {
+                key,
+                prefer: *prefer,
+            },
+            // A dropped hint opens the way an address with no hint opens.
+            ResolvedHint::Unbacked { .. } => HomeOp::OpenPackage { key, prefer: None },
         }
     }
 
@@ -1699,36 +1728,62 @@ impl ResolvedHint {
     }
 
     /// The one line an unbacked hint leaves behind, if any.
-    fn notice(&self) -> Option<&'static str> {
+    fn notice(&self) -> Option<&str> {
         match self {
             ResolvedHint::Unbacked { said } => Some(said),
             _ => None,
         }
     }
 
-    /// The `?on=` hint, as this build can answer it (PD14, Q9).
+    /// The `?on=` hint, as this build can answer it for a project of
+    /// `target` (PD14, Q9, D1/D23).
     ///
-    /// Two of the four forms have no backing here and say so once rather
-    /// than failing silently or pretending: **emu** is the whole of the
-    /// emulator roadmap (this plan deliberately ships with no emulator
-    /// dependency, D48), and **ws:** is a device over the network, which
-    /// nothing in this build speaks. Both fall through to the ordinary
-    /// open — you asked to run this project somewhere, and a sim of its
-    /// target is somewhere — with the hint dropped so the address stops
-    /// claiming otherwise.
+    /// `emu` and `sim` are both kinds now, and both are HONOURED — the
+    /// address keeps the hint, and the model resolves a runtime of that
+    /// kind. `emu` is the one that can still be refused, and it is refused
+    /// for a REASON about this project's board rather than about this
+    /// build in general: `?on=emu` on a Desktop project, or on a board
+    /// Studio has no emulator for, has nothing to open. The sentence names
+    /// the board, because "no emulator in this build" stopped being true
+    /// and a person reading it would not know what to do about it.
+    ///
+    /// `ws:` is still a device over the network, which nothing in this
+    /// build speaks. Both refusals fall through to the ordinary open — you
+    /// asked to run this project somewhere, and a sim of its target is
+    /// somewhere — with the hint dropped so the address stops claiming
+    /// otherwise.
+    ///
+    /// **The module is not asked about here.** Whether this build ships an
+    /// emulator module lives in `pkg/engine-manifest.json`, which only the
+    /// page can read, and it reads it when a board actually needs one: an
+    /// emu whose module is missing fails its own link with that reason, on
+    /// its own card, where there is something to do about it. Guessing here
+    /// would be a second source of truth for a fact this code cannot see.
     ///
     /// Pure: the caller says the line and rewrites the address. What is
     /// decided here is only what this build can do about each form, which
     /// is the part worth pinning down in a test.
-    fn for_hint(on: Option<DeviceHint>) -> Self {
+    fn for_hint(on: Option<DeviceHint>, target: Option<&str>) -> Self {
+        let board = target.unwrap_or(lpa_studio_core::DESKTOP_BOARD_ID);
         match on {
-            None | Some(DeviceHint::Sim) => ResolvedHint::Resolve,
-            Some(DeviceHint::Mac(base_mac)) => ResolvedHint::Device(base_mac),
-            Some(DeviceHint::Emu) => ResolvedHint::Unbacked {
-                said: "No emulator in this build — opening on a sim",
+            None => ResolvedHint::Resolve { prefer: None },
+            Some(DeviceHint::Sim) => ResolvedHint::Resolve {
+                prefer: Some(RuntimeKind::Sim),
             },
+            Some(DeviceHint::Emu) if lpa_studio_core::emu_offered_for(board) => {
+                ResolvedHint::Resolve {
+                    prefer: Some(RuntimeKind::Emu),
+                }
+            }
+            Some(DeviceHint::Emu) => ResolvedHint::Unbacked {
+                said: format!(
+                    "No emulator for {} in this build — opening on a sim",
+                    lpa_studio_core::board_display_name(board)
+                ),
+            },
+            Some(DeviceHint::Mac(base_mac)) => ResolvedHint::Device(base_mac),
             Some(DeviceHint::Ws(_)) => ResolvedHint::Unbacked {
-                said: "No network devices in this build — opening on a sim",
+                said: "No network devices in this build — opening on a sim".to_string(),
             },
         }
     }
@@ -2111,6 +2166,9 @@ mod tests {
         }
     }
 
+    /// The one board this build emulates (`runtime_backing.rs`'s table).
+    const C6: &str = "seeed/xiao-esp32-c6";
+
     fn project_route() -> StudioRoute {
         StudioRoute::Project {
             uid: "prj0000000000000000".parse().expect("a project uid"),
@@ -2194,24 +2252,71 @@ mod tests {
     // `?on=` resolution at the route (PD14, Q9)
     // -----------------------------------------------------------------
 
-    /// No hint and `?on=sim` both mean the same thing: let the model pick
-    /// a sim of the project's target (D33). Neither says anything, and
-    /// neither touches the address.
+    /// A C6 project: `?on=emu` and `?on=sim` are BOTH honoured (D1), both
+    /// keep the hint in the address, and each asks for its own kind.
+    #[test]
+    fn both_kind_hints_are_honoured_on_an_emulated_board() {
+        for (on, want) in [
+            (DeviceHint::Emu, RuntimeKind::Emu),
+            (DeviceHint::Sim, RuntimeKind::Sim),
+        ] {
+            let resolved = ResolvedHint::for_hint(Some(on.clone()), Some(C6));
+
+            assert_eq!(resolved.notice(), None, "{on:?} is not refused");
+            assert_eq!(
+                resolved.dropped_hint_route(&project_route().with_device_hint(Some(on.clone()))),
+                None,
+                "{on:?} stays in the address"
+            );
+            match resolved.open_op("prj0000000000000000".to_string()) {
+                HomeOp::OpenPackage { prefer, .. } => {
+                    assert_eq!(prefer, Some(want), "{on:?}")
+                }
+                other => panic!("a kind resolves: {other:?}"),
+            }
+        }
+    }
+
+    /// No hint at all is the ordinary open, and it asks for NOTHING — which
+    /// is what keeps D1's "no default flips" literal: the model's own rung
+    /// lands it on a sim, on a C6 exactly as on Desktop.
     #[test]
     fn a_kind_hint_is_the_ordinary_open() {
-        for on in [None, Some(DeviceHint::Sim)] {
-            let resolved = ResolvedHint::for_hint(on.clone());
-            assert!(matches!(resolved, ResolvedHint::Resolve), "{on:?}");
-            assert_eq!(resolved.notice(), None, "{on:?}");
+        for target in [None, Some(C6), Some("lightplayer/desktop")] {
+            let resolved = ResolvedHint::for_hint(None, target);
+            assert!(
+                matches!(resolved, ResolvedHint::Resolve { prefer: None }),
+                "{target:?}"
+            );
+            assert_eq!(resolved.notice(), None, "{target:?}");
             assert_eq!(
                 resolved.dropped_hint_route(&project_route()),
                 None,
-                "{on:?}"
+                "{target:?}"
             );
             assert!(matches!(
                 resolved.open_op("prj0000000000000000".to_string()),
-                HomeOp::OpenPackage { .. }
+                HomeOp::OpenPackage { prefer: None, .. }
             ));
+        }
+    }
+
+    /// `?on=sim` is honoured on every target, emulated or not — it is the
+    /// one kind this build can always produce.
+    #[test]
+    fn the_sim_hint_is_honoured_everywhere() {
+        for target in [None, Some(C6), Some("quinled/dig-uno")] {
+            let resolved = ResolvedHint::for_hint(Some(DeviceHint::Sim), target);
+            assert!(
+                matches!(
+                    resolved,
+                    ResolvedHint::Resolve {
+                        prefer: Some(RuntimeKind::Sim)
+                    }
+                ),
+                "{target:?}"
+            );
+            assert_eq!(resolved.notice(), None, "{target:?}");
         }
     }
 
@@ -2220,8 +2325,10 @@ mod tests {
     /// what is running — that is what the page is for.
     #[test]
     fn a_mac_hint_names_the_device_and_never_pushes_over_on_arrival() {
-        let resolved =
-            ResolvedHint::for_hint(Some(DeviceHint::Mac("60:55:f9:0a:0b:0c".to_string())));
+        let resolved = ResolvedHint::for_hint(
+            Some(DeviceHint::Mac("60:55:f9:0a:0b:0c".to_string())),
+            Some(C6),
+        );
         assert_eq!(resolved.notice(), None);
         assert_eq!(resolved.dropped_hint_route(&project_route()), None);
         match resolved.open_op("prj0000000000000000".to_string()) {
@@ -2237,31 +2344,43 @@ mod tests {
         }
     }
 
-    /// `emu` and `ws:` parse — the addresses people write down keep
-    /// working when a backing lands — but this build has neither (D48,
-    /// Q9). Each says so once and falls through to the ordinary open, and
-    /// the address LOSES the hint: a bar that kept promising a device the
-    /// app already declined would ask for it again on every reload.
+    /// D23: `?on=emu` on a target this build has no emulator for, and
+    /// `ws:` anywhere, have nothing to open. Each says so once and falls
+    /// through to the ordinary open, and the address LOSES the hint: a bar
+    /// that kept promising a device the app already declined would ask for
+    /// it again on every reload.
+    ///
+    /// The emu sentence names the BOARD, because "no emulator in this
+    /// build" stopped being true the day the C6 row flipped — a person
+    /// reading the old words on a Desktop project could not tell what to do
+    /// about it.
     #[test]
     fn an_unbacked_hint_says_so_once_and_leaves_the_address() {
-        for (on, said) in [
+        for (on, target, said) in [
             (
                 DeviceHint::Emu,
-                "No emulator in this build — opening on a sim",
+                None,
+                "No emulator for Desktop in this build — opening on a sim",
+            ),
+            (
+                DeviceHint::Emu,
+                Some("quinled/dig-uno"),
+                "No emulator for QuinLED-Dig-Uno in this build — opening on a sim",
             ),
             (
                 DeviceHint::Ws("192.168.0.21:1234".to_string()),
+                Some(C6),
                 "No network devices in this build — opening on a sim",
             ),
         ] {
-            let resolved = ResolvedHint::for_hint(Some(on.clone()));
-            assert_eq!(resolved.notice(), Some(said), "{on:?}");
+            let resolved = ResolvedHint::for_hint(Some(on.clone()), target);
+            assert_eq!(resolved.notice(), Some(said), "{on:?} on {target:?}");
             assert!(
                 matches!(
                     resolved.open_op("prj0000000000000000".to_string()),
-                    HomeOp::OpenPackage { .. }
+                    HomeOp::OpenPackage { prefer: None, .. }
                 ),
-                "{on:?} opens the ordinary way"
+                "{on:?} opens the ordinary way, asking for nothing"
             );
             let hinted = project_route().with_device_hint(Some(on.clone()));
             assert_eq!(
