@@ -403,6 +403,17 @@ impl RunRequest {
             .join(format!("{}.usbscript", self.payload.name))
     }
 
+    /// The writable flash part a `second_boot` payload is run over: a copy of
+    /// the merged image the machine may write back to, so that the boot the
+    /// transcript is of mounts an `lpfs` an earlier boot formatted.
+    ///
+    /// Not the merged image itself — that one is the provenance, and a run
+    /// that wrote into it would leave the next reader holding bytes no
+    /// flasher ever produced.
+    pub fn writable_chip_path(&self) -> PathBuf {
+        self.out_dir.join(format!("{}.chip.bin", self.payload.name))
+    }
+
     /// Where the pin capture goes for a payload that has one: the decoded
     /// frames, one JSON line each, beside the console capture rather than
     /// inside it.
@@ -1202,8 +1213,57 @@ impl ConfigurationDriver for LpEmuDriver {
                          the image the ROM is about to run",
                     ),
                 );
-                emu.push("--merged".into());
-                emu.push(merged.display().to_string());
+                if arm.second_boot {
+                    // **M5 ruling R9, and 2032 bytes hang on it.** `espflash`
+                    // hard-resets after writing, so every silicon capture is
+                    // the boot AFTER the one that formatted the merged
+                    // image's blank `lpfs`. `--merged` is `--flash-copy`: the
+                    // chip is read once and never written back, so every run
+                    // of it is a FIRST boot and reports
+                    // `largest_free=106494`, 2032 B short of the desk board —
+                    // a difference between two boots, not between two
+                    // machines. So the merged bytes are copied onto a
+                    // WRITABLE part here and the machine is run over it
+                    // twice: the first run formats and flushes, the second is
+                    // the one the transcript is of.
+                    let chip = req.writable_chip_path();
+                    steps.push(
+                        PlanStep::new(
+                            "copy the merged image onto a writable flash part",
+                            vec![
+                                "cp".into(),
+                                merged.display().to_string(),
+                                chip.display().to_string(),
+                            ],
+                        )
+                        .with_note(
+                            "copied rather than written in place, and copied on every run: \
+                             the first boot below has to be a FIRST boot, so a part left \
+                             behind by an earlier recording must not be reused",
+                        ),
+                    );
+                    emu.push("--flash".into());
+                    emu.push(chip.display().to_string());
+                    notes.push(format!(
+                        "TWO RUNS, and the transcript is of the SECOND (M5 ruling R9). The \
+                         merged image is copied to {} and the machine is run over that \
+                         writable part twice: the first run formats the blank `lpfs` and \
+                         flushes it back, the second mounts what the first wrote. That is the \
+                         state every silicon capture of this payload was taken in — espflash \
+                         hard-resets after writing, so the format had already happened before \
+                         a reader ever opened the port. A first boot reports \
+                         `largest_free=106494`, 2032 B short of the desk board, purely \
+                         because the format is still live in the arena; it is a difference \
+                         between two boots and not between two machines, and it is not \
+                         something a comparison may absorb. Both runs use the same command \
+                         line, so the second is the first repeated rather than a different \
+                         run.",
+                        chip.display(),
+                    ));
+                } else {
+                    emu.push("--merged".into());
+                    emu.push(merged.display().to_string());
+                }
                 // Both are printed VERBATIM by the ROM's own banner
                 // (`rst:0x%x` / `boot:0x%x`), so they are inputs to the
                 // transcript, not decoration.
@@ -1362,11 +1422,33 @@ impl ConfigurationDriver for LpEmuDriver {
             );
         }
 
+        // The priming boot of a `second_boot` payload: the same command line,
+        // run first, for its effect on the flash part rather than for its
+        // output. Its capture is overwritten by the run below — the machine
+        // creates the file rather than appending to it — so what the
+        // transcript ends up being is the SECOND boot's console and nothing
+        // of the first's.
+        if arm.second_boot {
+            steps.push(
+                PlanStep::new(
+                    "run the machine once to format `lpfs` and flush the chip (ruling R9)",
+                    emu.clone(),
+                )
+                .with_note(
+                    "the same command line as the run below, not a different one: a priming \
+                     boot that did something else would leave the chip in a state no silicon \
+                     capture was ever taken in. Its console is discarded",
+                ),
+            );
+        }
         let mut run = PlanStep::new(
-            match (usb, state_payload) {
-                (_, true) => "run the machine, its own report to the capture",
-                (true, false) => "run the machine, the USB link to the capture",
-                (false, false) => "run the machine, UART0 to the capture",
+            match (usb, state_payload, arm.second_boot) {
+                (_, true, _) => "run the machine, its own report to the capture",
+                (true, false, _) => "run the machine, the USB link to the capture",
+                (false, false, false) => "run the machine, UART0 to the capture",
+                (false, false, true) => {
+                    "run the machine again — the SECOND boot, UART0 to the capture"
+                }
             },
             emu,
         )
@@ -2194,6 +2276,80 @@ mod tests {
             Some("0.3")
         );
         assert_eq!(Identity::default().efuse_rev(), None);
+    }
+
+    /// **M5 ruling R9 in the plan, not only in the registry.**
+    ///
+    /// `second_boot` has been a field on the classic's `boot-idle` arm since
+    /// P2; this is the driver acting on it. A run over `--merged` is a
+    /// `--flash-copy` run and therefore always a FIRST boot, which formats the
+    /// blank `lpfs` and reports `largest_free=106494` — 2032 B short of every
+    /// silicon capture of this payload, purely because the format is still
+    /// live. So the plan copies the merged bytes onto a writable part and
+    /// runs the machine twice over it, with the same command line both times.
+    #[test]
+    fn a_second_boot_payload_runs_the_machine_twice_over_a_writable_part() {
+        let mut req = request("lp-emu:esp32v3:t1", "boot-idle", None);
+        req.image = Some(PathBuf::from("target/emu-ref/c976f17a9-boot-idle/fw-esp32v3"));
+        let plan = LpEmuDriver.plan(&req).unwrap();
+        let rendered = plan.render();
+
+        // The part is a COPY, so a run left behind by an earlier recording
+        // cannot make the first boot a second one.
+        let copy = plan
+            .steps
+            .iter()
+            .find(|s| s.command.first().map(String::as_str) == Some("cp"))
+            .unwrap_or_else(|| panic!("no copy step:\n{rendered}"));
+        assert_eq!(
+            copy.command.last().unwrap(),
+            "target/validate/boot-idle.chip.bin",
+            "{rendered}"
+        );
+
+        // Two machine runs, and the same argv both times: the second boot is
+        // the first repeated, not a differently shaped run.
+        let runs: Vec<&PlanStep> = plan
+            .steps
+            .iter()
+            .filter(|s| s.command.iter().any(|a| a == "lp-emu-esp32v3"))
+            .collect();
+        assert_eq!(runs.len(), 2, "{rendered}");
+        assert_eq!(runs[0].command, runs[1].command, "{rendered}");
+        // Writable, so the first boot's format survives into the second.
+        assert!(
+            runs[0]
+                .command
+                .windows(2)
+                .any(|w| w[0] == "--flash" && w[1] == "target/validate/boot-idle.chip.bin"),
+            "{rendered}"
+        );
+        assert!(
+            !runs[0].command.iter().any(|a| a == "--merged"),
+            "`--merged` is `--flash-copy`: nothing the first boot wrote would reach the \
+             second\n{rendered}"
+        );
+        // And it is still a ROM-up boot, through the real mask ROM.
+        assert!(!runs[0].command.iter().any(|a| a == "--elf"), "{rendered}");
+        assert!(rendered.contains("the SECOND boot"), "{rendered}");
+    }
+
+    /// The other side of the same rule: a payload that does not ask for a
+    /// second boot still gets one run over a read-only `--merged` chip, which
+    /// is what every C6 ROM-up transcript was recorded with.
+    #[test]
+    fn a_rom_up_payload_without_second_boot_runs_once_over_a_read_only_chip() {
+        let req = request("lp-emu:esp32c6:t1", "rom-up-boot", None);
+        let plan = LpEmuDriver.plan(&req).unwrap();
+        let rendered = plan.render();
+        let runs = plan
+            .steps
+            .iter()
+            .filter(|s| s.command.iter().any(|a| a == "lp-emu-esp32c6"))
+            .count();
+        assert_eq!(runs, 1, "{rendered}");
+        assert!(rendered.contains("--merged"), "{rendered}");
+        assert!(!rendered.contains("--flash "), "{rendered}");
     }
 
     #[test]
