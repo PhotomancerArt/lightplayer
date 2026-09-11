@@ -239,8 +239,7 @@ const CONF1_IDLE_OUT_EN: u32 = 1 << 19;
 /// the bits self-clear. `ref_cnt_rst` is deliberately **not** in this set:
 /// the firmware sets it and then clears it in two separate writes, which
 /// only makes sense for a bit that holds.
-const CONF1_STROBES: u32 =
-    CONF1_TX_START | CONF1_MEM_WR_RST | CONF1_MEM_RD_RST | CONF1_APB_MEM_RST;
+const CONF1_STROBES: u32 = CONF1_TX_START | CONF1_MEM_WR_RST | CONF1_MEM_RD_RST | CONF1_APB_MEM_RST;
 /// PAC reset: `mem_owner 1`, `rx_filter_thres 15` — and, note,
 /// `ref_always_on` **clear**. Seeded from `regs::RMT`; see
 /// [`CH_CONF0_RESET`].
@@ -1048,7 +1047,8 @@ impl Rmt {
         let t0 = self.ch[ch].ticks_since_start;
         let word_start = self.ch[ch].cycle_at(&clock, div_cnt, t0);
         let second_at = self.ch[ch].cycle_at(&clock, div_cnt, t0 + u64::from(dur1));
-        let word_end = self.ch[ch].cycle_at(&clock, div_cnt, t0 + u64::from(dur1) + u64::from(dur2));
+        let word_end =
+            self.ch[ch].cycle_at(&clock, div_cnt, t0 + u64::from(dur1) + u64::from(dur2));
         self.push_pulse(
             ch,
             Pulse {
@@ -1095,7 +1095,9 @@ impl Rmt {
             self.ch[ch].since_thr = 0;
             self.raise(int_thr_bit(ch));
             let sent = self.ch[ch].frame_words;
-            note(cx, || format!("cyc={now} RMT ch{ch} thr sent={sent} lim={lim}"));
+            note(cx, || {
+                format!("cyc={now} RMT ch{ch} thr sent={sent} lim={lim}")
+            });
             // `now` is the word's own start cycle — when the counter reached
             // the threshold — not the dispatch cycle.
             self.open_refill(ch, now, cx);

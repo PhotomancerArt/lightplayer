@@ -15,13 +15,13 @@
 //! 4. [`a_window_of_end_markers_stops_at_the_next_word`]
 //! 5. [`mem_raddr_ex_is_an_offset_into_the_whole_ram`]
 
+use lp_emu_esp_common::pins::{PadId, SignalId};
+use lp_emu_esp_common::regnames::RegNames;
+use lp_emu_esp_common::{Peripheral, RegGrade, Sandbox};
 use lp_emu_esp32v3::memmap;
 use lp_emu_esp32v3::periph::gpio::Gpio;
 use lp_emu_esp32v3::periph::rmt::{self, Rmt};
 use lp_emu_esp32v3::regs;
-use lp_emu_esp_common::pins::{PadId, SignalId};
-use lp_emu_esp_common::regnames::RegNames;
-use lp_emu_esp_common::{Peripheral, RegGrade, Sandbox};
 
 // ---- reading the table --------------------------------------------------
 
@@ -90,7 +90,10 @@ fn the_channel_registers_are_where_the_table_says() {
     // The register block ends at `date`; the RAM starts a clear `0x700`
     // later and the aperture covers both.
     assert!(rmt_off("date") < rmt::REGS_LEN);
-    assert_eq!(rmt::RAM_OFFSET, memmap::periph::RMT_RAM - memmap::periph::RMT);
+    assert_eq!(
+        rmt::RAM_OFFSET,
+        memmap::periph::RMT_RAM - memmap::periph::RMT
+    );
     assert_eq!(
         rmt::LEN,
         rmt::RAM_OFFSET + 4 * rmt::RAM_WORDS as u32,
@@ -121,7 +124,10 @@ fn the_resets_are_the_pacs() {
         assert_eq!(sb.read(&mut r, conf1(ch)), rmt::CH_CONF1_RESET);
         // `tx_lim` resets to 0x80, and `chNcarrier_duty` to 0x0040_0040.
         assert_eq!(sb.read(&mut r, tx_lim(ch)), 0x80);
-        assert_eq!(sb.read(&mut r, rmt_off(&format!("ch{ch}carrier_duty"))), 0x0040_0040);
+        assert_eq!(
+            sb.read(&mut r, rmt_off(&format!("ch{ch}carrier_duty"))),
+            0x0040_0040
+        );
     }
     // ⚠️ `ref_always_on` (bit 17) is **clear** at reset: an unconfigured
     // channel selects `clk_ref`, not APB. M4's notes expected the opposite.
@@ -369,7 +375,10 @@ fn without_the_global_wrap_bit_the_window_does_not_wrap() {
     let (mut sb, mut r) = armed(7, 1, true, 0, data_word());
     start(&mut sb, &mut r, 7);
     sb.run_to(&mut r, 200 * WORD_CYCLES);
-    assert!(r.is_running(7), "wrap on: still transmitting past the window");
+    assert!(
+        r.is_running(7),
+        "wrap on: still transmitting past the window"
+    );
     assert_eq!(int_raw(&mut sb, &mut r) & rmt::int_err_bit(7), 0);
 }
 
@@ -385,7 +394,10 @@ fn tx_start_takes_effect_without_an_update() {
     r.set_keep_logs(true);
     assert!(!r.is_running(0));
     start(&mut sb, &mut r, 0);
-    assert!(r.is_running(0), "started by the write that carried tx_start");
+    assert!(
+        r.is_running(0),
+        "started by the write that carried tx_start"
+    );
     // …and the first word's pulses are already out, stamped at the start
     // cycle, with no second write of any kind. Both halves of a word are
     // emitted together at the fetch (see `push_pulse`), which is why the
@@ -672,7 +684,10 @@ fn the_refill_telemetry_measures_entry_and_fill_in_words() {
     assert_eq!(s.refills, 1, "one measurement closed");
     assert_eq!(s.entry_max, 4, "four words between the event and the write");
     assert_eq!(s.fill_max, 5, "five more before the last RAM write");
-    assert_eq!(s.half_words, 64, "the bucket denominator is the half-window");
+    assert_eq!(
+        s.half_words, 64,
+        "the bucket denominator is the half-window"
+    );
     assert_eq!(s.unanswered, 0);
     assert_eq!(
         rmt::RefillStats::hist_string(&s.entry_hist),
@@ -818,7 +833,11 @@ fn a_ws281x_frame_goes_out_word_for_word_and_decodes_back() {
     const GPIO18: u32 = 18;
     let bytes: Vec<u8> = (0..24u8).map(|i| i.wrapping_mul(11) ^ 0x5a).collect();
     let stream = frame_words(&bytes);
-    assert_eq!(stream.len(), 194, "192 bit words, a latch and an end marker");
+    assert_eq!(
+        stream.len(),
+        194,
+        "192 bit words, a latch and an end marker"
+    );
 
     let mut sb = Sandbox::new();
     let mut g = Gpio::new(0);
