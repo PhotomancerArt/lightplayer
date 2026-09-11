@@ -497,3 +497,192 @@ fn a_store_that_raises_nothing_no_longer_ends_the_stay() {
         "none of them had anything to do: {report}"
     );
 }
+
+// --- the SYSTIMER's published reads (M7b P3) -------------------------------
+//
+// These runs use `Esp32C6Builder::new()`, not `bare()`: on `bare()` the same
+// accesses land on a window with no SYSTIMER behind it, the machine publishes
+// nothing, and the test would pass while testing nothing.
+
+const ST: u32 = memmap::periph::SYSTIMER;
+const ST_CONF: i32 = 0x00;
+const ST_UNIT0_OP: i32 = 0x04;
+const ST_UNIT0_LOAD_HI: i32 = 0x0c;
+const ST_UNIT0_LOAD_LO: i32 = 0x10;
+const ST_UNIT0_VALUE_HI: i32 = 0x40;
+const ST_UNIT0_VALUE_LO: i32 = 0x44;
+const ST_UNIT1_VALUE_LO: i32 = 0x4c;
+const ST_UNIT0_LOAD: i32 = 0x5c;
+const ST_OP_UPDATE: u32 = 1 << 30;
+const ST_CONF_RESET: u32 = 0x4600_0000;
+const ST_UNIT0_WORK_EN: u32 = 1 << 30;
+
+/// esp-hal's `read_count`, written out: the `unit0_op` store that latches the
+/// count, then `unit0_op`, `unit0_value.lo`, `unit0_value.hi` and
+/// `unit0_value.lo` again — the five accesses that are 79.3 % of the run's
+/// MMIO. `s0` holds the block's base; the answers accumulate into `s2`/`s3`
+/// so a wrong one is a wrong register at the end.
+///
+/// `filler` instructions after it move the cycle the **next** latch store
+/// happens at, so the sequence is exercised at `now` values that are not
+/// multiples of `CYCLES_PER_TICK`.
+fn read_count(p: &mut Vec<u32>, filler: usize) {
+    p.extend(li(5, ST_OP_UPDATE));
+    p.push(sw(5, 8, ST_UNIT0_OP));
+    p.push(lw(6, 8, ST_UNIT0_OP));
+    p.push(lw(7, 8, ST_UNIT0_VALUE_LO));
+    p.push(lw(28, 8, ST_UNIT0_VALUE_HI));
+    p.push(lw(29, 8, ST_UNIT0_VALUE_LO));
+    p.push(add(18, 18, 7));
+    p.push(xor(19, 19, 28));
+    p.push(add(18, 18, 6));
+    p.push(xor(19, 19, 29));
+    for _ in 0..filler {
+        p.push(addi(20, 20, 1));
+    }
+}
+
+/// A guest that reads the system timer the way the firmware does, across every
+/// case the published-read path has to get right:
+///
+/// 1. a plain sweep at four different cycle residues;
+/// 2. the same across the **52-bit wrap**, reached by loading unit 0 near the
+///    top of its range;
+/// 3. unit 0 **stopped** by a `conf` write — the count is then a frozen
+///    constant, not `now / 10 + offset` — and started again;
+/// 4. a **unit 1** read and a **byte** read of `unit0_value.lo`, neither of
+///    which the block may serve.
+fn systimer_guest() -> Vec<u32> {
+    let mut p = Vec::new();
+    p.extend(li(8, ST));
+    p.push(addi(18, 0, 0));
+    p.push(addi(19, 0, 0));
+    p.push(addi(20, 0, 0));
+
+    for filler in 0..4 {
+        read_count(&mut p, filler);
+    }
+
+    // Near the top of the 52 bits, so the next few ticks wrap.
+    p.extend(li(5, 0x000f_ffff));
+    p.push(sw(5, 8, ST_UNIT0_LOAD_HI));
+    p.extend(li(5, 0xffff_ffe0));
+    p.push(sw(5, 8, ST_UNIT0_LOAD_LO));
+    p.push(addi(5, 0, 1));
+    p.push(sw(5, 8, ST_UNIT0_LOAD));
+    for filler in 0..8 {
+        read_count(&mut p, filler);
+    }
+
+    // Stopped: `count` is `frozen[0]`, and the latch store still latches it.
+    p.extend(li(5, ST_CONF_RESET & !ST_UNIT0_WORK_EN));
+    p.push(sw(5, 8, ST_CONF));
+    for filler in 0..3 {
+        read_count(&mut p, filler);
+    }
+    p.extend(li(5, ST_CONF_RESET));
+    p.push(sw(5, 8, ST_CONF));
+    for filler in 0..3 {
+        read_count(&mut p, filler);
+    }
+
+    // Neither of these is a published word read.
+    p.push(lw(21, 8, ST_UNIT1_VALUE_LO));
+    p.push(lbu(22, 8, ST_UNIT0_VALUE_LO));
+    p.push(EBREAK);
+    p
+}
+
+fn run_systimer(policy: Option<Emit>, trace: bool) -> (Outcome, Option<String>, String) {
+    let sink = lp_emu_esp_common::trace::SharedBuffer::new();
+    let mut builder = Esp32C6Builder::new();
+    if trace {
+        builder = builder.trace(Box::new(sink.clone()), vec!["SYSTIMER".to_string()]);
+    }
+    let mut m = builder.build().unwrap();
+    place(&mut m, CODE, &systimer_guest());
+    m.harts[0].set_pc(CODE);
+    if let Some(policy) = policy {
+        let model = m.harts[0].cycle_model();
+        let report = lp_emu_esp32c6::jit::install(
+            &mut m.harts[0],
+            &mut m.bus,
+            &[CODE],
+            256,
+            256,
+            model,
+            policy,
+            None,
+        )
+        .expect("the guest translates");
+        assert!(report.blocks > 0, "something was translated");
+    }
+    m.run_until(&StopCondition::after_micros(2_000));
+    let hart = &m.harts[0];
+    let out = Outcome {
+        regs: *hart.regs(),
+        pc: hart.pc(),
+        cycles: hart.cycle_count(),
+        retired: hart.instruction_count(),
+        data: Vec::new(),
+    };
+    let report = m.harts[0].translated_core_report();
+    (out, report, sink.contents())
+}
+
+/// **The oracle for this phase.** The whole `read_count` sweep — across the
+/// 52-bit wrap, with unit 0 stopped and started, and with the two accesses
+/// the block may not serve — is the interpreter's answer to the bit, and the
+/// published reads really did serve most of it.
+#[test]
+fn the_systimer_sequence_is_the_interpreters_to_the_bit() {
+    let (interpreted, none, _) = run_systimer(None, false);
+    assert!(none.is_none(), "no core, no report");
+    let (translated, report, _) = run_systimer(Some(Emit::EVERYTHING), false);
+    assert_eq!(
+        translated, interpreted,
+        "the published words answer exactly what the model's own `read_word` does"
+    );
+    let report = report.expect("--jit-report has something to print");
+    assert!(
+        !report.contains("systimer_fast 0 read(s)"),
+        "the published reads were actually used: {report}"
+    );
+    assert!(
+        !report.contains("(armed 0,"),
+        "and the block armed at least once: {report}"
+    );
+}
+
+/// The all-escape build reaches the SYSTIMER through `step_one` instead, which
+/// is the path that disarms the block on every instruction. Same answer.
+#[test]
+fn the_all_escape_build_reads_the_same_timer() {
+    let (interpreted, _, _) = run_systimer(None, false);
+    let (escaped, _, _) = run_systimer(Some(Emit::NOTHING), false);
+    assert_eq!(escaped, interpreted);
+}
+
+/// **The trace refusal.** `SocBus::read_mmio` emits a line per access and the
+/// free oracle compares those lines, so with a trace running the block must
+/// never arm — and the trace is then the interpreter's, line for line.
+///
+/// This is why the oracle's 20 ms `--trace` cells prove the *refusal* rather
+/// than the path, and why the 5,500 ms browser identity row is this phase's
+/// full-length oracle.
+#[test]
+fn a_running_trace_refuses_the_published_reads_and_the_lines_match() {
+    let (interpreted, _, lines_i) = run_systimer(None, true);
+    let (translated, report, lines_t) = run_systimer(Some(Emit::EVERYTHING), true);
+    assert_eq!(translated, interpreted);
+    assert!(!lines_i.is_empty(), "the trace wrote something");
+    assert_eq!(
+        lines_t, lines_i,
+        "every SYSTIMER access reached the bus and was traced"
+    );
+    let report = report.expect("--jit-report has something to print");
+    assert!(
+        report.contains("systimer_fast 0 read(s) served (armed 0, disarmed 0)"),
+        "the block never armed under a trace: {report}"
+    );
+}

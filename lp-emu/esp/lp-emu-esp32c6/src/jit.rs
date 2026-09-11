@@ -1566,7 +1566,6 @@ impl Module {
         // alias as well: publishing a read whose address is not the only way
         // to the register would be a second window this path cannot see.
         let fast_reads = systimer_fast_reads(bus, mem_base + at.fast_at);
-
         let layout = Layout {
             memory_pages,
             guest_base,

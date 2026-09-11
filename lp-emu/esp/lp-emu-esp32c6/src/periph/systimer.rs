@@ -363,6 +363,16 @@ impl Peripheral for Systimer {
         self.index = index;
     }
 
+    /// So the machine can read [`Systimer::value_words`] back (M7b P3).
+    ///
+    /// A translated core publishes this block's latched word and serves
+    /// `unit0_value.{lo,hi}` from it without reaching the bus; the publisher
+    /// needs the model's own value, and this is the seam it gets it through.
+    /// Read-only: nothing outside the bus drives this block.
+    fn as_any_mut(&mut self) -> Option<&mut dyn core::any::Any> {
+        Some(self)
+    }
+
     fn read(&mut self, off: u32, width: Width, cx: &mut BusCx<'_>) -> u32 {
         lane_of(self.read_word(off & !3, cx.now), off, width)
     }
