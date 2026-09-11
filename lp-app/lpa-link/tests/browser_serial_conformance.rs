@@ -203,7 +203,10 @@ async fn shim_over(boards: &[&str]) {
     for board in boards {
         ids.push(&JsValue::from_str(board));
     }
-    match (option_env!("LP_EMU_SERVE_URL"), option_env!("LP_EMU_TAB_MODULE")) {
+    match (
+        option_env!("LP_EMU_SERVE_URL"),
+        option_env!("LP_EMU_TAB_MODULE"),
+    ) {
         (Some(url), _) if !url.is_empty() => {
             JsFuture::from(js_install_live(url, &ids))
                 .await
