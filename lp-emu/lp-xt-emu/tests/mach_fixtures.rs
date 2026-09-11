@@ -72,6 +72,8 @@ const PRID_PRO_CPU: u32 = 0xCDCD;
 
 // Vector offsets the assertions name, from `mach::trap`'s table.
 const VECOFS_OF4: u32 = 0x000;
+const VECOFS_OF8: u32 = 0x080;
+const VECOFS_UF8: u32 = 0x0C0;
 const VECOFS_LEVEL3: u32 = 0x1C0;
 const VECOFS_DEBUG: u32 = 0x280;
 const VECOFS_KERNEL: u32 = 0x300;
@@ -331,7 +333,7 @@ impl VectorTracer {
 // Finding the ELFs — and refusing to skip where it matters
 // ---------------------------------------------------------------------------
 
-/// The seven fixture images this phase owns. `lp-xt/fixtures/elf/` is
+/// The fixture images. Seven from M1 P4, and `mach_callinc` from M4 P4b. `lp-xt/fixtures/elf/` is
 /// **gitignored**, so these are built, never committed — which is exactly how a
 /// test suite comes to skip and report success. [`mach_fixtures_present`] and
 /// the `Validate Xtensa (host)` CI job's assert step are the two guards.
@@ -343,6 +345,7 @@ const FIXTURES: &[&str] = &[
     "mach_ctxswitch",
     "mach_dbreak",
     "mach_lserr",
+    "mach_callinc",
 ];
 
 fn elf_path(name: &str) -> PathBuf {
@@ -697,6 +700,7 @@ fn transcript_of(name: &'static str) -> Option<String> {
         "mach_ctxswitch" => ctxswitch_run()?.1,
         "mach_dbreak" => dbreak_run()?.1,
         "mach_lserr" => lserr_run()?.1,
+        "mach_callinc" => callinc_run()?.1,
         other => panic!("no transcript builder for fixture {other}"),
     })
 }
@@ -1159,6 +1163,110 @@ fn mach_load_store_error_excvaddr() {
         "fault_load",
         "EPC1 ({:#010x}) names the faulting instruction",
         run.slot(3)
+    );
+}
+
+// ===========================================================================
+// (h) PS.CALLINC across a level-1 interrupt between a call8 and its entry
+// ===========================================================================
+
+fn callinc_run() -> Option<(Run, String)> {
+    let run = run("mach_callinc", &Script::empty())?;
+    let mut s = run.header();
+    let _ = writeln!(s, "rounds: {}", run.slot(1));
+    let _ = writeln!(s, "gap rounds (EPC1 == p4b_leaf): {}", run.slot(2));
+    let _ = writeln!(s, "first gap round k: {}", run.slot(3));
+    let _ = writeln!(s, "PS.CALLINC the handler saw on it: {}", run.slot(4));
+    let _ = writeln!(s, "leaf result on it: {}", run.slot(5));
+    let _ = writeln!(s, "interrupts taken: {}", run.slot(6));
+    let _ = writeln!(s, "windowstart in d3: {:#06x}", run.slot(7));
+    let _ = writeln!(s, "windowbase in d3: {}", run.slot(8));
+    let _ = writeln!(s, "rounds with a wrong result: {}", run.slot(9));
+    let _ = writeln!(s, "chain returned with the right sums: {}", run.slot(10));
+    let _ = writeln!(
+        s,
+        "epc1 on the first gap round: {}",
+        run.symbols.resolve(run.slot(11))
+    );
+    Some((run, s))
+}
+
+/// M4 P4b. A level-1 interrupt that lands between a `call8` and its callee's
+/// `entry` must hand `PS.CALLINC` back untouched — through xtensa-lx-rt's own
+/// vector, whose `call0 __naked_user_exception` runs *before* its `rsr a0,
+/// PS`. The classic's project loads died here: CALL0 zeroed CALLINC, the
+/// handler saved and restored the zero, and the re-run `entry` rotated by
+/// nothing, writing the callee's SP into the caller's `a1`; the caller's next
+/// `retw` then reloaded its own caller from the wrong save area
+/// (`_WindowUnderflow8`, `a1 = 0`).
+#[test]
+fn mach_callinc_survives_an_interrupt_between_call8_and_entry() {
+    let Some((run, _)) = callinc_run() else {
+        return;
+    };
+    assert!(
+        run.slot(2) >= 1,
+        "no round landed its interrupt on p4b_leaf's ENTRY: the scan over k \
+         missed the gap and nothing was tested. Interrupts taken: {}. Vectors: {}",
+        run.slot(6),
+        run.vectors.summary()
+    );
+    assert_eq!(
+        run.symbols.resolve(run.slot(11)),
+        "p4b_leaf",
+        "EPC1 on the gap round is the callee's first instruction"
+    );
+    assert_eq!(
+        run.slot(4),
+        2,
+        "PS.CALLINC as SAVE_CONTEXT saw it — after `call0 __naked_user_exception` \
+         — on the round that landed between the call8 and the entry. 0 is the \
+         M4 P4b failure: CALL0 zeroing CALLINC, and `rfe` re-running the ENTRY \
+         with it."
+    );
+    assert_eq!(
+        run.slot(5),
+        101,
+        "p4b_leaf ran in its own window, with its own argument, on the gap round"
+    );
+    assert_eq!(run.slot(9), 0, "every round returned ARG + 1");
+    assert_eq!(
+        run.slot(10),
+        1,
+        "the CALL8 chain returned through every frame with the right sums"
+    );
+    // The shape the fixture promises: when the rounds start, `d3` and the
+    // three frames under it (`d2`, `d1`, `main`) are CALL8 frames two bases
+    // apart with nothing resident between them — the classic's `ws = 0x2a`
+    // with one more frame — and the chain is spilled by save_context and
+    // reloaded on the way back out. (Below `main` sit `Reset`'s call4 frame
+    // and the boot frame, which is why the whole word is not tested.)
+    let (ws, wb) = (run.slot(7), run.slot(8));
+    for i in 0..4u32 {
+        let at = (wb + 16 - 2 * i) % 16;
+        assert_ne!(
+            ws & (1 << at),
+            0,
+            "CALL8 frame {i} below d3 (base {at}) is resident: ws={ws:#06x} wb={wb}"
+        );
+    }
+    for i in 0..3u32 {
+        let between = (wb + 16 - 2 * i - 1) % 16;
+        assert_eq!(
+            ws & (1 << between),
+            0,
+            "the base between two CALL8 frames (base {between}) is a gap: ws={ws:#06x} wb={wb}"
+        );
+    }
+    assert!(
+        run.vectors.entered(VECOFS_OF8),
+        "_WindowOverflow8 was entered: save_context spilled the CALL8 chain. Vectors: {}",
+        run.vectors.summary()
+    );
+    assert!(
+        run.vectors.entered(VECOFS_UF8),
+        "_WindowUnderflow8 was entered: the returns reloaded it. Vectors: {}",
+        run.vectors.summary()
     );
 }
 

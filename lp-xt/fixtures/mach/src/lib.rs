@@ -215,6 +215,10 @@ pub mod sr {
         debugcause, "rsr.debugcause {v}");
     reader!(/// `INTERRUPT` (SR 226): the lines pending right now.
         interrupt, "rsr.interrupt {v}");
+    reader!(/// `WINDOWSTART`: one bit per resident frame.
+        windowstart, "rsr.windowstart {v}");
+    reader!(/// `WINDOWBASE`: the current frame's base, in groups of four.
+        windowbase, "rsr.windowbase {v}");
 
     writer!(/// `INTENABLE`. `Reset` leaves this at 0.
         set_intenable, "wsr.intenable {v}");
@@ -223,6 +227,9 @@ pub mod sr {
         set_intset, "wsr.intset {v}");
     writer!(/// `INTCLEAR`: drop an edge or software line.
         set_intclear, "wsr.intclear {v}");
+    writer!(/// `CCOMPARE0`: arm timer 0, and clear its pending request (RM
+        /// §4.4.6.2 — the one thing that does).
+        set_ccompare0, "wsr.ccompare0 {v}");
     writer!(/// `DBREAKA0`, the watched address.
         set_dbreaka0, "wsr.dbreaka0 {v}");
     writer!(/// `DBREAKC0`: bit 31 = break on stores, bit 30 = on loads,
