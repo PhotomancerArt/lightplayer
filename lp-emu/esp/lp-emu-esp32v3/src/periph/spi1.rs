@@ -235,10 +235,64 @@ impl Spi1 {
         }
     }
 
-    /// The flash byte address the address phase carries. The masking and its
-    /// diagnostic are the engine's; the *offset* of `addr` is this block's.
-    fn flash_addr(&mut self, cx: &mut BusCx<'_>) -> u32 {
-        FlashEngine::flash_addr(self.regs.stored(ADDR), NAME, cx)
+    /// The flash byte address a **`usr`** transfer's address phase carries.
+    ///
+    /// ⚠️ **The classic packs `addr` two different ways, and this is the one
+    /// the C6 does not have.** The generic `usr` engine shifts the address
+    /// phase out of `addr` **MSB-first** for `user1.usr_addr_bitlen` bits, so
+    /// a 24-bit flash address sits in bits **31:8** — left-justified — and
+    /// the bits below it are QIO's mode nibble when the phase is 28 bits
+    /// wide. The C6 writes the plain byte address into its own `addr`, and a
+    /// model that carried that convention across reads the right register and
+    /// gets an address 256 times too big.
+    ///
+    /// That is not a theory. esp-storage's IRAM copy of
+    /// `esp_rom_spiflash_read` mounts `lpfs` by reading the partition table
+    /// at `0x8000`, and the first run of this block with the C6's convention
+    /// traced
+    ///
+    /// ```text
+    /// W4 SPI1+0x02c miso_dlen = 0x000001ff
+    /// W4 SPI1+0x004 addr      = 0x00800000
+    /// SPI1 read 64 bytes at 0x00800000 leaves the 0x400000-byte chip
+    /// ```
+    ///
+    /// — `0x8000 << 8`, refused as past the end of a 4 MiB part, 64 bytes of
+    /// `0xff` handed back, and the firmware printing `[ERROR] no ``lpfs``
+    /// partition in the flashed table`. A plausible failure a long way from
+    /// its cause, which is what this convention costs when it is got wrong.
+    ///
+    /// The shift is unconditional rather than derived from `usr_addr_bitlen`
+    /// because the *address* is always the top 24 bits either way: a 24-bit
+    /// phase puts it at 31:8 and a 28-bit one puts it at 31:8 with four mode
+    /// bits under it. The masking and its diagnostic stay the engine's.
+    fn usr_flash_addr(&mut self, cx: &mut BusCx<'_>) -> u32 {
+        FlashEngine::flash_addr(self.regs.stored(ADDR) >> 8, NAME, cx)
+    }
+
+    /// The flash byte address and byte count a **dedicated** `cmd` trigger
+    /// carries: `addr[23:0]` is the address and `addr[31:24]` is the length.
+    ///
+    /// The other half of the same register, and the mask ROM says so in one
+    /// instruction. `SPI_page_program` (`0x4006_2368`):
+    ///
+    /// ```text
+    /// 400623c8:  slli  a10, a5, 24      ; the byte count …
+    /// 400623cb:  and   a9, a3, a9       ; … and the address & 0xffffff
+    /// 400623ce:  or    a9, a10, a9
+    /// 400623d4:  s32i.n a9, a8, 0       ; → SPI1+0x04 addr
+    /// …
+    /// 4006241b:  l32r  a9, (0x2000000)  ; cmd = 1<<25, flash_pp
+    /// ```
+    ///
+    /// so the dedicated path is **not** left-justified. Two conventions, one
+    /// register, and which one applies is which trigger bit was written.
+    fn dedicated_addr_len(&mut self, cx: &mut BusCx<'_>) -> (u32, u32) {
+        let raw = self.regs.stored(ADDR);
+        (
+            FlashEngine::flash_addr(raw & 0x00ff_ffff, NAME, cx),
+            raw >> 24,
+        )
     }
 
     /// Bytes = `dlen + 1` bits, rounded up, capped at the 64-byte buffer.
@@ -298,7 +352,7 @@ impl Spi1 {
                 self.run(FlashOp::WriteDisable, cx);
             }
             CMD_FLASH_SE => {
-                let addr = self.flash_addr(cx);
+                let (addr, _) = self.dedicated_addr_len(cx);
                 self.run(
                     FlashOp::Erase {
                         addr,
@@ -308,7 +362,7 @@ impl Spi1 {
                 );
             }
             CMD_FLASH_BE => {
-                let addr = self.flash_addr(cx);
+                let (addr, _) = self.dedicated_addr_len(cx);
                 self.run(
                     FlashOp::Erase {
                         addr,
@@ -321,13 +375,25 @@ impl Spi1 {
                 self.run(FlashOp::EraseChip, cx);
             }
             CMD_FLASH_PP => {
-                let addr = self.flash_addr(cx);
-                let len = self.dlen_bytes(MOSI_DLEN);
+                // The byte count rides in `addr[31:24]` on this path — the
+                // ROM's own packing. `mosi_dlen` stands in when it is zero,
+                // which is what a caller that filled the buffer but left the
+                // count out would have meant.
+                let (addr, count) = self.dedicated_addr_len(cx);
+                let len = if count == 0 {
+                    self.dlen_bytes(MOSI_DLEN)
+                } else {
+                    count.min(spi_flash::BUFFER_LEN as u32)
+                };
                 self.run(FlashOp::Program { addr, len }, cx);
             }
             CMD_FLASH_READ => {
-                let addr = self.flash_addr(cx);
-                let len = self.dlen_bytes(MISO_DLEN);
+                let (addr, count) = self.dedicated_addr_len(cx);
+                let len = if count == 0 {
+                    self.dlen_bytes(MISO_DLEN)
+                } else {
+                    count.min(spi_flash::BUFFER_LEN as u32)
+                };
                 self.run(FlashOp::Read { addr, len }, cx);
             }
             other => self.refuse(other, cx),
@@ -361,7 +427,7 @@ impl Spi1 {
                 return;
             }
             self.phase(user, USER_ADDR, "address", command, cx);
-            let addr = self.flash_addr(cx);
+            let addr = self.usr_flash_addr(cx);
             let len = self.dlen_bytes(MISO_DLEN);
             self.run(FlashOp::Read { addr, len }, cx);
             return;
@@ -372,12 +438,12 @@ impl Spi1 {
                     return;
                 }
                 self.phase(user, USER_ADDR, "address", command, cx);
-                let addr = self.flash_addr(cx);
+                let addr = self.usr_flash_addr(cx);
                 let len = self.dlen_bytes(MOSI_DLEN);
                 self.run(FlashOp::Program { addr, len }, cx);
             }
             op::SECTOR_ERASE => {
-                let addr = self.flash_addr(cx);
+                let addr = self.usr_flash_addr(cx);
                 self.run(
                     FlashOp::Erase {
                         addr,
@@ -387,7 +453,7 @@ impl Spi1 {
                 );
             }
             op::BLOCK_ERASE_64K => {
-                let addr = self.flash_addr(cx);
+                let addr = self.usr_flash_addr(cx);
                 self.run(
                     FlashOp::Erase {
                         addr,
@@ -610,7 +676,7 @@ mod tests {
         let user = sb.read(&mut spi, USER);
         sb.write(&mut spi, USER, (user & !USER_MOSI) | USER_MISO | USER_ADDR);
         sb.write(&mut spi, USER2, 0x7000_0000 | u32::from(op::READ));
-        sb.write(&mut spi, ADDR, 0x0031_0000);
+        sb.write(&mut spi, ADDR, 0x0031_0000 << 8);
         sb.write(&mut spi, MISO_DLEN, 8 * 8 - 1);
         sb.write(&mut spi, CMD, CMD_USR);
         assert_eq!(sb.read(&mut spi, CMD), 0);
@@ -625,7 +691,7 @@ mod tests {
             flash.lock().unwrap().stage(0x1000, b"ABCD");
             sb.write(&mut spi, USER, USER_COMMAND | USER_ADDR | USER_MISO);
             sb.write(&mut spi, USER2, 0x7000_0000 | u32::from(*command));
-            sb.write(&mut spi, ADDR, 0x1000);
+            sb.write(&mut spi, ADDR, 0x1000 << 8);
             sb.write(&mut spi, MISO_DLEN, 4 * 8 - 1);
             sb.write(&mut spi, CMD, CMD_USR);
             assert_eq!(
@@ -642,7 +708,7 @@ mod tests {
         // cmd = 1<<18 | 1<<17, after a write-enable.
         let (mut sb, mut spi, flash) = rig();
         sb.write(&mut spi, CMD, CMD_FLASH_WREN);
-        sb.write(&mut spi, ADDR, 0x0031_0000);
+        sb.write(&mut spi, ADDR, 0x0031_0000 << 8);
         sb.write(&mut spi, W0, u32::from_le_bytes(*b"lpfs"));
         sb.write(&mut spi, MOSI_DLEN, 4 * 8 - 1);
         sb.write(&mut spi, USER, USER_COMMAND | USER_ADDR | USER_MOSI);
@@ -656,7 +722,7 @@ mod tests {
 
         // Without a write-enable the part ignores the program, and so does
         // this.
-        sb.write(&mut spi, ADDR, 0x0031_0010);
+        sb.write(&mut spi, ADDR, 0x0031_0010 << 8);
         sb.write(&mut spi, W0, u32::from_le_bytes(*b"nope"));
         sb.write(&mut spi, CMD, CMD_USR | CMD_FLASH_PES);
         assert_eq!(
@@ -670,7 +736,8 @@ mod tests {
         let (mut sb, mut spi, flash) = rig();
         flash.lock().unwrap().stage(0x0031_0800, b"stale");
         sb.write(&mut spi, CMD, CMD_FLASH_WREN);
-        // A byte inside the sector, not its base: the part aligns.
+        // A byte inside the sector, not its base: the part aligns. The
+        // dedicated path is NOT left-justified (`SPI_page_program`).
         sb.write(&mut spi, ADDR, 0x0031_0800);
         sb.write(&mut spi, CMD, CMD_FLASH_SE | CMD_FLASH_PES);
         assert_eq!(
@@ -741,7 +808,7 @@ mod tests {
         let mut spi = Spi1::new(flash);
         sb.write(&mut spi, USER, USER_COMMAND | USER_ADDR | USER_MISO);
         sb.write(&mut spi, USER2, 0x7000_0000 | u32::from(op::READ));
-        sb.write(&mut spi, ADDR, 0x0ffc);
+        sb.write(&mut spi, ADDR, 0x0ffc << 8);
         sb.write(&mut spi, MISO_DLEN, 16 * 8 - 1);
         sb.write(&mut spi, CMD, CMD_USR);
         assert_eq!(sb.read(&mut spi, W0), 0xffff_ffff);
@@ -762,6 +829,47 @@ mod tests {
         assert_eq!(spi.dlen_bytes(MISO_DLEN), spi_flash::BUFFER_LEN as u32);
         sb.write(&mut spi, MISO_DLEN, 4 * 8 - 1);
         assert_eq!(spi.dlen_bytes(MISO_DLEN), 4);
+    }
+
+    #[test]
+    fn the_addr_register_is_packed_two_ways_and_the_trigger_says_which() {
+        // The partition-table read that found this: esp-storage's IRAM copy
+        // of `esp_rom_spiflash_read` asks for 64 bytes at `0x8000` and
+        // writes `addr = 0x00800000` — the address left-justified into bits
+        // 31:8 for the `usr` engine's address phase.
+        let (mut sb, mut spi, flash) = rig();
+        flash.lock().unwrap().stage(0x8000, b"\xaaP");
+        sb.write(&mut spi, USER, USER_COMMAND | USER_ADDR | USER_MISO);
+        sb.write(&mut spi, USER2, 0x7000_0000 | u32::from(op::READ));
+        sb.write(&mut spi, ADDR, 0x0080_0000);
+        sb.write(&mut spi, MISO_DLEN, 512 - 1);
+        sb.write(&mut spi, CMD, CMD_USR);
+        assert_eq!(
+            sb.read(&mut spi, W0) & 0xffff,
+            0x50aa,
+            "the usr address phase is `addr >> 8`; the partition table's magic \
+             is at 0x8000 and nowhere near 0x800000"
+        );
+
+        // And the dedicated triggers are the other packing, from
+        // `SPI_page_program`: `(len << 24) | (addr & 0xffffff)`.
+        sb.write(&mut spi, CMD, CMD_FLASH_WREN);
+        for i in 0..2u32 {
+            sb.write(&mut spi, W0 + 4 * i, u32::from_le_bytes(*b"AAAA"));
+        }
+        sb.write(&mut spi, ADDR, (8 << 24) | 0x0031_0000);
+        sb.write(&mut spi, CMD, CMD_FLASH_PP);
+        assert_eq!(
+            flash.lock().unwrap().peek(0x0031_0000, 8).unwrap(),
+            b"AAAAAAAA",
+            "the dedicated page program takes the address from addr[23:0] \
+             and the byte count from addr[31:24]"
+        );
+        assert_eq!(
+            flash.lock().unwrap().peek(0x0031_0008, 1).unwrap(),
+            &[0xff],
+            "and stops at the count the register carried"
+        );
     }
 
     #[test]
