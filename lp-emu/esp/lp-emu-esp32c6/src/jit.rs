@@ -83,9 +83,32 @@ fn arena_word(arena: &[u8], base: u32, spans: &[(u32, u32, bool)], pc: u32) -> O
     }
 }
 
-/// The smallest block budget worth retrying at. Below this the set is too
-/// small to be evidence of anything, and a failure is a real failure.
-const MIN_BLOCKS: usize = 64;
+/// The smallest block budget worth retrying at, and the floor
+/// `--jit-fn-blocks` is clamped to. Below this the set is too small to be
+/// evidence of anything, and a failure is a real failure.
+///
+/// **8 since M7 P6b, and the reason is a measurement, not a preference.** At
+/// 64 — the floor P5 chose — every engine's curve was still falling and no
+/// smaller size could be asked for, so G-M7P had to record "the optimum is
+/// unmeasured below 64". It is measured now, on the same recording at every
+/// size (`scripts/emu/p6b-replay-sweep.mjs`), and the two engines disagree
+/// about which end of the range is safe:
+///
+/// - **JavaScriptCore keeps getting faster all the way down** — 8.75 ns per
+///   guest instruction at 8 blocks a function against 12.2–19.7 at 64, on the
+///   same module bytes and the same recording.
+/// - **V8 dies at the small end**, with the same
+///   `Fatal process out of memory: Zone` in `WasmLoweringPhase` that #680
+///   found at 512 blocks a function — and for the mirror-image reason. The
+///   module's largest function is a sub-dispatcher at big sizes and the
+///   **outer selector** at small ones: 730 KB and 25,156 nested blocks at 8,
+///   against 88 KB at 64. V8 compiles 32 (selector 176 KB) and refuses 16
+///   (352 KB).
+///
+/// So this is a floor on what can be *asked for*, and it is not a default.
+/// `--jit-fn-blocks`'s default is unchanged, and choosing it is a decision
+/// the G-M7P gate makes with both of those rows in front of it.
+const MIN_BLOCKS: usize = 8;
 
 /// Every guest pc the whole-image walk finds an instruction at, unbounded by
 /// any host's ceiling.
@@ -352,6 +375,44 @@ const _: () = {
     assert!(PERM_READ_WRITE == host::PERM_READ_WRITE);
     assert!(PERMISSION_PAGE_LEN == 1 << PERM_SHIFT);
 };
+
+/// Where an entry's time goes, sampled (M7 P6b, H3).
+///
+/// Off unless `--jit-entry-time <stride>` asked for it, because the whole
+/// point of the number is a run whose wall clock nobody has perturbed: a
+/// `std::time::Instant` costs about 20 ns on this desk and an entry costs
+/// about 450, so timing every entry would move what it measures by a third.
+/// One entry in `stride` is sampled instead, and `samples` is reported beside
+/// the sums so a reader can see what the mean is a mean of.
+///
+/// The four sums nest: `run_ns` is the whole of [`TranslatedCore::run`], and
+/// `enter_ns`, `index_ns` and `regs_ns` are pieces inside it — the module
+/// call, the two entry-index lookups, and the 32-register copy out to the
+/// exchange area and back. What is left over is the refusal rules, the
+/// counters and the exit bookkeeping.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct EntryTiming {
+    /// Sample one entry in this many. Zero means the timer is off.
+    pub stride: u64,
+    /// Entries seen, sampled or not.
+    pub seen: u64,
+    /// Entries actually timed.
+    pub samples: u64,
+    /// The whole of `run`, over the sampled entries.
+    pub run_ns: u64,
+    /// `enter` — the module — over the same entries.
+    pub enter_ns: u64,
+    /// The two `index` lookups: the entry pc, and the exit pc's census.
+    pub index_ns: u64,
+    /// The register file out to the exchange area and back.
+    pub regs_ns: u64,
+    /// Entries timed with the OUTER clock pair only — no inner ones.
+    pub plain_samples: u64,
+    /// The whole of `run` over those, which is the honest per-entry number:
+    /// the breakdown's own six `Instant::now()` calls inflate `run_ns` by
+    /// their own cost and this is the control that shows by how much.
+    pub plain_ns: u64,
+}
 
 /// How often the core was asked and what it did.
 #[derive(Clone, Copy, Debug, Default)]
@@ -728,6 +789,12 @@ pub struct JitCore {
     /// only under `LP_EMU_JIT_EXITS`. A coverage shortfall is a list of
     /// addresses, and this is the list.
     exit_sites: Option<BTreeMap<(u32, u32), (u64, u64)>>,
+    /// Where an entry's time goes, under `LP_EMU_JIT_ENTRY_TIME=<stride>`
+    /// (M7 P6b). An env var rather than a flag for the same reason
+    /// [`exit_sites`](Self::exit_sites) is one: it is a diagnostic nobody
+    /// runs by accident, and it perturbs the very wall clock the rest of the
+    /// run reports.
+    timing: EntryTiming,
     /// Guest bytes this module was translated from have changed. Like
     /// [`dead`](Self::dead) it stops the core being entered, but it is not a
     /// bug — it is the module waiting to be replaced at the next translation
@@ -987,6 +1054,14 @@ impl JitCore {
             at,
             last_exit: None,
             exit_sites: std::env::var_os("LP_EMU_JIT_EXITS").map(|_| BTreeMap::new()),
+            timing: EntryTiming {
+                stride: std::env::var("LP_EMU_JIT_ENTRY_TIME")
+                    .ok()
+                    .and_then(|v| v.parse::<u64>().ok())
+                    .filter(|&n| n > 0)
+                    .unwrap_or(0),
+                ..EntryTiming::default()
+            },
             report: BuildReport {
                 discovery,
                 blocks: set.blocks.len(),
@@ -1155,8 +1230,27 @@ impl TranslatedCore<SocBus> for JitCore {
                 return RunOutcome::Refused;
             }
         }
+        // M7 P6b H3. `timed` is `None` on every entry the stride skips, and
+        // an `Option` test is the whole cost of the timer being compiled in.
+        // Alternate samples: one carries the inner breakdown, the next carries
+        // only the outer pair. Six `Instant::now()` calls inside a 450 ns
+        // entry are not free, and `plain` is the control that prices them.
+        let (timed, breakdown) = if self.timing.stride != 0 {
+            let take = self.timing.seen % self.timing.stride == 0;
+            let breakdown = (self.timing.seen / self.timing.stride) % 2 == 0;
+            self.timing.seen += 1;
+            (take.then(std::time::Instant::now), breakdown)
+        } else {
+            (None, false)
+        };
+        let inner = if breakdown { timed } else { None };
         let pc = hart.pc();
-        let Some(&entry) = self.index.get(&pc) else {
+        let t_index = inner.map(|_| std::time::Instant::now());
+        let found = self.index.get(&pc).copied();
+        if let Some(t) = t_index {
+            self.timing.index_ns += t.elapsed().as_nanos() as u64;
+        }
+        let Some(entry) = found else {
             self.stats.refused_no_entry += 1;
             return RunOutcome::Refused;
         };
@@ -1223,6 +1317,7 @@ impl TranslatedCore<SocBus> for JitCore {
         if recording {
             regs_in.copy_from_slice(&hart.regs()[1..]);
         }
+        let t_regs = inner.map(|_| std::time::Instant::now());
         {
             let ops = self.core.ops_mut();
             ops.recording = recording;
@@ -1235,7 +1330,14 @@ impl TranslatedCore<SocBus> for JitCore {
             ops.hart = hart;
             ops.bus = bus;
         }
+        if let Some(t) = t_regs {
+            self.timing.regs_ns += t.elapsed().as_nanos() as u64;
+        }
+        let t_enter = inner.map(|_| std::time::Instant::now());
         let exit = self.core.enter(entry, cycle, instret, end, watch);
+        if let Some(t) = t_enter {
+            self.timing.enter_ns += t.elapsed().as_nanos() as u64;
+        }
         let ops = self.core.ops_mut();
         ops.hart = core::ptr::null_mut();
         ops.bus = core::ptr::null_mut();
@@ -1261,6 +1363,7 @@ impl TranslatedCore<SocBus> for JitCore {
         // The module leaves the hart's own pc and counters where the exchange
         // area says, so the outcome and the hart agree.
         let exit_why;
+        let t_regs_out = inner.map(|_| std::time::Instant::now());
         let mut regs = *hart.regs();
         {
             let x = self.core.ops_mut().exchange();
@@ -1297,6 +1400,9 @@ impl TranslatedCore<SocBus> for JitCore {
             hart.set_pc(exit.pc);
             hart.set_counters(cycle_count, instruction_count);
             self.stats.retired += instruction_count.saturating_sub(instret);
+        }
+        if let Some(t) = t_regs_out {
+            self.timing.regs_ns += t.elapsed().as_nanos() as u64;
         }
 
         if let Some(delta) = delta {
@@ -1339,7 +1445,12 @@ impl TranslatedCore<SocBus> for JitCore {
         if hart.instruction_count() == instret {
             self.stats.exit_no_progress += 1;
         }
-        if self.index.contains_key(&exit.pc) {
+        let t_index2 = inner.map(|_| std::time::Instant::now());
+        let known = self.index.contains_key(&exit.pc);
+        if let Some(t) = t_index2 {
+            self.timing.index_ns += t.elapsed().as_nanos() as u64;
+        }
+        if known {
             self.stats.exit_known_pc += 1;
         } else {
             self.stats.exit_unknown_pc += 1;
@@ -1348,6 +1459,15 @@ impl TranslatedCore<SocBus> for JitCore {
         self.stats.why[why].0 += 1;
         self.last_exit = Some((exit.pc, hart.instruction_count(), why));
 
+        if let Some(t) = timed {
+            if breakdown {
+                self.timing.run_ns += t.elapsed().as_nanos() as u64;
+                self.timing.samples += 1;
+            } else {
+                self.timing.plain_ns += t.elapsed().as_nanos() as u64;
+                self.timing.plain_samples += 1;
+            }
+        }
         if exit.flags & FLAG_SLICE_ENDED != 0 {
             let end = slice_end.unwrap_or_else(|| {
                 unreachable!("the module reported a slice end and the host recorded none")
@@ -1409,6 +1529,39 @@ impl TranslatedCore<SocBus> for JitCore {
                     self.where_is(*pc)
                 );
             }
+        }
+        // M7 P6b H3: where an entry's time goes, on its own line so nothing
+        // that parses the report line has to know about it and so it is
+        // absent from every run that did not ask for it.
+        let t = self.timing;
+        if t.samples > 0 {
+            let mean = |ns: u64| ns as f64 / t.samples as f64;
+            let whole = mean(t.run_ns);
+            let share = |ns: u64| 100.0 * mean(ns) / whole;
+            eprintln!(
+                "jit: entry cost: {} broken-down + {} plain sample(s) of {} entries (1 in {}); \
+                 run {:.1} ns unclocked inside, {:.1} ns with the breakdown's own six clocks = \
+                 enter {:.1} ns ({:.1} %) + index {:.1} ns ({:.1} %) + regs {:.1} ns ({:.1} %) \
+                 + {:.1} ns ({:.1} %) of refusal rules, counters and exit bookkeeping",
+                t.samples,
+                t.plain_samples,
+                t.seen,
+                t.stride,
+                if t.plain_samples > 0 {
+                    t.plain_ns as f64 / t.plain_samples as f64
+                } else {
+                    f64::NAN
+                },
+                whole,
+                mean(t.enter_ns),
+                share(t.enter_ns),
+                mean(t.index_ns),
+                share(t.index_ns),
+                mean(t.regs_ns),
+                share(t.regs_ns),
+                whole - mean(t.enter_ns) - mean(t.index_ns) - mean(t.regs_ns),
+                100.0 - share(t.enter_ns) - share(t.index_ns) - share(t.regs_ns),
+            );
         }
         let r = self.report;
         let s = self.stats;

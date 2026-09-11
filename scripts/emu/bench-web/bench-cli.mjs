@@ -13,6 +13,8 @@
 //   --exit-on             also pass the image's `--exit-on` marker
 //   --json <path>         write the rows out as JSON as well as printing them
 //   --tail                print the last lines of each run's own output
+//   --arg <flag>          repeatable; passed straight through to the
+//                         emulator's own argv, after everything above
 //
 // JD19: every generated-code A/B is measured in BOTH engines before it reaches
 // a conclusion, and `bun` is JavaScriptCore — the phone's family — while `node`
@@ -31,6 +33,7 @@ function parseArgs(argv) {
   const o = {
     stage: 'target/emu-bench-web', images: [], grades: [], modes: [], fnBlocks: [],
     timeout: '5500ms', wallTimeout: 600, exitOn: false, json: null, tail: false,
+    extraArgs: [],
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -45,6 +48,7 @@ function parseArgs(argv) {
     else if (a === '--exit-on') o.exitOn = true;
     else if (a === '--json') o.json = next();
     else if (a === '--tail') o.tail = true;
+    else if (a === '--arg') o.extraArgs.push(next());
     else if (a === '-h' || a === '--help') { console.log(readFileSync(new URL(import.meta.url)).toString().split('\n').filter((l) => l.startsWith('//')).join('\n')); process.exit(0); }
     else throw new Error('unknown option ' + a);
   }
@@ -99,6 +103,7 @@ for (const slug of o.images) {
         const r = await runOnce({
           compiled, image, elfBytes, grade, mode, fnBlocks,
           timeout: o.timeout, wallTimeout: o.wallTimeout, exitOn: o.exitOn,
+          extraArgs: o.extraArgs,
         });
         r.engine = engineName();
         r.loadavg = loadavg()[0];
