@@ -311,7 +311,9 @@ pub fn emit_module(
     // exactly what it was. An MMIO load calls it instead of the import when
     // the machine published any; the two have the same signature, so the call
     // site is byte-for-byte unchanged either way.
-    let fast_func = layout.fast_reads.map(|_| F_FIRST_BODY + count as u32 + 1);
+    let fast_func = layout
+        .fast_reads
+        .map(|_| F_FIRST_BODY + count as u32 + 1);
     let load_func = fast_func.unwrap_or(F_MMIO_LOAD);
 
     let mut bodies = Vec::with_capacity(count);
