@@ -463,12 +463,17 @@ fn direct_seed_ps() {
         .seed_boot_state(memmap::SRAM0_IRAM, frame)
         .expect("the boot frame seeds");
 
+    // `PS_BOOT | OWB(7)`. `PS_BOOT` is `WOE | UM | CALLINC(2)` = `0x0006_0020`
+    // — the Xtensa twin of the C6's `mstatus = 0x1888`, and the `CALLINC(2)`
+    // is the bootloader's `callx8`. P8 added the `OWB`: the ROM-up walk
+    // reached the application's entry for the first time and `PS` read
+    // `0x0006_0720` there, one field different from what the direct load
+    // seeded (`machine::BOOTLOADER_OWB`).
     assert_eq!(
-        machine.harts[0].ps(),
-        PS_BOOT,
-        "PS = WOE | UM | CALLINC(2) = 0x00060020 — the Xtensa twin of the C6's mstatus = 0x1888"
+        machine.harts[0].ps() & !lp_xt_emu::mach::sr::PS_OWB_MASK,
+        PS_BOOT
     );
-    assert_eq!(machine.harts[0].ps(), 0x0006_0020);
+    assert_eq!(machine.harts[0].ps(), 0x0006_0720);
     assert_eq!(machine.harts[0].pc(), memmap::SRAM0_IRAM);
 }
 
@@ -936,7 +941,7 @@ fn the_direct_load_enters_the_app_where_the_bootloader_would() {
     let app_entry = machine.app().expect("app").entry;
     assert_eq!(machine.harts[0].pc(), app_entry);
     assert_eq!(app_entry, 0x4008_0844, "`Reset` in the shipped image");
-    assert_eq!(machine.harts[0].ps(), PS_BOOT);
+    assert_eq!(machine.harts[0].ps(), 0x0006_0720, "PS_BOOT | OWB(7)");
     let frame = machine.boot_frame().expect("a direct load seeds a frame");
     assert_eq!(frame.sp, BOOTLOADER_SP_AT_APP_ENTRY);
     assert_eq!(machine.harts[0].cpu().a(1), 0x3FFE_3C80);
@@ -946,7 +951,18 @@ fn the_direct_load_enters_the_app_where_the_bootloader_would() {
         memmap::ROM_PRO_STACK_BASE < frame.sp && frame.sp < memmap::ROM_PRO_STACK_TOP,
         "inside the ROM's PRO stack"
     );
-    assert_eq!(machine.peek_word(frame.sp - 12), Some(frame.sp));
+    // The save area is the **measured** one now
+    // (`loader::BOOTLOADER_SAVE_AREA`): P3 seeded `[0, sp, 0, 0]` and said it
+    // stood until a ROM-up run measured the real thing, and P8's cross-check
+    // is that run. `a1` at `sp-12` is `0x3ffe3ca0`, not `sp`.
+    assert_eq!(
+        machine.peek_word(frame.sp - 12),
+        Some(lp_emu_esp32v3::loader::BOOTLOADER_SAVE_AREA[1])
+    );
+    assert_eq!(
+        frame.save_area,
+        lp_emu_esp32v3::loader::BOOTLOADER_SAVE_AREA
+    );
 }
 
 /// P2's recorded first strict stop of the direct load, held on a **bare**
@@ -1031,6 +1047,25 @@ fn direct_traced_on(
     micros: u64,
     chip: lp_emu_esp32v3::flash::FlashBacking,
 ) -> Option<(Machine, Outcome, String)> {
+    direct_traced_until(micros, chip, None)
+}
+
+/// The same, stopping on a **line** rather than on a cycle.
+///
+/// ⚠️ **P7's runs stopped on an instruction and P8's stop on a line.** Until
+/// M1 P6 landed `rer`/`wer` the direct load ended at a wall — `rer a9, a8` at
+/// `0x4010_01bd`, inside `CpuControl::start_app_core` — and every golden in
+/// this file was the byte stream up to it. The wall is gone: the boot takes
+/// its documented single-core fallback, prints the rest of its `[INIT]`
+/// chain and idles. A golden that named an instruction has nothing to name
+/// any more, so each one names the last line of the chain it is about
+/// instead. That is not a widening: the byte stream is still compared whole,
+/// with a sha and a length.
+fn direct_traced_until(
+    micros: u64,
+    chip: lp_emu_esp32v3::flash::FlashBacking,
+    exit_on: Option<&str>,
+) -> Option<(Machine, Outcome, String)> {
     let elf = match fw_esp32v3_image() {
         Ok(p) => p,
         Err(reason) => {
@@ -1047,7 +1082,10 @@ fn direct_traced_on(
         .trace(Box::new(sink.clone()), vec!["UART0".into()])
         .build()
         .expect("builds");
-    let outcome = machine.run_until(&StopCondition::after_micros(micros));
+    let outcome = machine.run_until(&StopCondition {
+        exit_on: exit_on.map(str::to_string),
+        ..StopCondition::after_micros(micros)
+    });
     Some((machine, outcome, sink.text()))
 }
 
@@ -1091,6 +1129,13 @@ const RER_PC: u32 = 0x4010_01bd;
 /// The word: `rer a9, a8`.
 const RER_WORD: u32 = 0x0040_6890;
 
+/// The wall is **gone**: M1 P6 landed `rer`/`wer` and the direct load runs
+/// past `0x4010_01bd` into the firmware's documented single-core fallback
+/// (`main.rs:838-845`, Q5), printing `[INIT] APP core unavailable; RMT ISR on
+/// PRO core (single-core semantics)` where silicon prints `[INIT] RMT ISR on
+/// APP core`. The two constants above stay because the *address* is still
+/// where the two boot paths met the instruction, and a run that stopped there
+/// again would mean `rer` had been un-landed.
 fn is_the_rer_stop(outcome: &Outcome) -> bool {
     matches!(
         outcome,
@@ -1102,6 +1147,11 @@ fn is_the_rer_stop(outcome: &Outcome) -> bool {
     )
 }
 
+/// The run stopped because the line it was told to wait for appeared.
+fn stopped_on_the_line(outcome: &Outcome) -> bool {
+    matches!(outcome, Outcome::ExitMatched { .. })
+}
+
 /// **The `rer` wall.** Run past the mount and the boot meets one instruction
 /// this machine's hart does not decode. Pinned exactly, so a later phase that
 /// lands `rer` deletes this test rather than editing it, and so a *different*
@@ -1110,12 +1160,17 @@ fn is_the_rer_stop(outcome: &Outcome) -> bool {
 #[ignore = "needs the shipped image and espflash; run through `just test-emu-esp32v3-boot`"]
 fn past_the_filesystem_the_boot_meets_the_one_opcode_this_hart_lacks() {
     let Some(chip) = merged_chip() else { return };
-    let Some((machine, outcome, trace)) = direct_traced_on(300_000, chip) else {
+    let Some((machine, outcome, trace)) = direct_traced_until(300_000, chip, Some(MOUNTED_LINE))
+    else {
         return;
     };
     assert!(
-        is_the_rer_stop(&outcome),
-        "the direct load's end of the line is `rer`, and nothing before it: {outcome:?}"
+        stopped_on_the_line(&outcome),
+        "the mount is reached, and nothing stops the boot before it: {outcome:?}"
+    );
+    assert!(
+        !is_the_rer_stop(&outcome),
+        "`rer` landed in M1 P6 and must stay landed"
     );
     assert!(
         machine.first_strict_violation().is_none(),
@@ -1163,12 +1218,16 @@ fn past_the_filesystem_the_boot_meets_the_one_opcode_this_hart_lacks() {
 #[test]
 #[ignore = "needs the shipped image; run through `just test-emu-esp32v3-boot`"]
 fn the_flash_status_spin_ends_and_a_blank_chip_has_no_partition_table() {
-    let Some((mut machine, outcome, trace)) = direct_traced(300_000) else {
+    let Some((mut machine, outcome, trace)) = direct_traced_until(
+        300_000,
+        lp_emu_esp32v3::flash::FlashBacking::Blank,
+        Some(BLANK_LAST_LINE),
+    ) else {
         return;
     };
     assert!(
-        is_the_rer_stop(&outcome),
-        "past the flash, as far as `start_app_core`'s `rer`: {outcome:?}"
+        stopped_on_the_line(&outcome),
+        "past the flash, as far as the memory-FS fallback: {outcome:?}"
     );
     assert_eq!(
         machine.peek_word(memmap::periph::SPI1),
@@ -1225,10 +1284,11 @@ fn the_flash_status_spin_ends_and_a_blank_chip_has_no_partition_table() {
 #[ignore = "needs the shipped image and espflash; run through `just test-emu-esp32v3-boot`"]
 fn the_direct_load_mounts_the_flash_filesystem() {
     let Some(chip) = merged_chip() else { return };
-    let Some((machine, outcome, trace)) = direct_traced_on(300_000, chip) else {
+    let Some((machine, outcome, trace)) = direct_traced_until(300_000, chip, Some(MOUNTED_LINE))
+    else {
         return;
     };
-    assert!(is_the_rer_stop(&outcome), "{outcome:?}");
+    assert!(stopped_on_the_line(&outcome), "{outcome:?}");
     let text = String::from_utf8_lossy(&uart0_fifo_bytes(&trace)).into_owned();
     assert!(
         text.ends_with("[INIT] flash filesystem mounted\n"),
@@ -1277,10 +1337,14 @@ const INIT_CHAIN_MERGED_LEN: usize = 575;
 fn the_init_chain_is_the_golden_bytes() {
     use sha2::{Digest, Sha256};
 
-    let Some((_, outcome, trace)) = direct_traced(300_000) else {
+    let Some((_, outcome, trace)) = direct_traced_until(
+        300_000,
+        lp_emu_esp32v3::flash::FlashBacking::Blank,
+        Some(BLANK_LAST_LINE),
+    ) else {
         return;
     };
-    assert!(is_the_rer_stop(&outcome), "{outcome:?}");
+    assert!(stopped_on_the_line(&outcome), "{outcome:?}");
     let bytes = uart0_fifo_bytes(&trace);
     let text = String::from_utf8_lossy(&bytes).into_owned();
     assert_eq!(bytes.len(), INIT_CHAIN_BLANK_LEN, "the chain is:\n{text}");
@@ -1291,10 +1355,10 @@ fn the_init_chain_is_the_golden_bytes() {
     );
 
     let Some(chip) = merged_chip() else { return };
-    let Some((_, outcome, trace)) = direct_traced_on(300_000, chip) else {
+    let Some((_, outcome, trace)) = direct_traced_until(300_000, chip, Some(MOUNTED_LINE)) else {
         return;
     };
-    assert!(is_the_rer_stop(&outcome), "{outcome:?}");
+    assert!(stopped_on_the_line(&outcome), "{outcome:?}");
     let bytes = uart0_fifo_bytes(&trace);
     let text = String::from_utf8_lossy(&bytes).into_owned();
     assert_eq!(bytes.len(), INIT_CHAIN_MERGED_LEN, "the chain is:\n{text}");

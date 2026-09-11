@@ -168,6 +168,26 @@ pub const MMU_ENTRIES: usize = 2048;
 /// The bytes one core's table occupies. `FLASH_MMU_APP - FLASH_MMU_PRO`.
 pub const MMU_TABLE_LEN: u32 = (MMU_ENTRIES * 4) as u32;
 
+/// What an **unmapped** flash-MMU entry holds: `0x100`.
+///
+/// ⚠️ **The classic's entry has no valid bit, so zero is a mapping.** P7
+/// found the first half of that — a write that does not change an entry
+/// still maps the page, because `0` over `0` *is* a mapping of flash page 0 —
+/// and P8's direct-vs-ROM-up cross-check found the other half: after the
+/// mask ROM's own `mmu_init`, every entry the boot did not map reads
+/// **`0x100`**, not `0`. The direct loader left them at `0`, which points a
+/// stray read in an unmapped DROM page at the first 64 KiB of the chip
+/// instead of at nothing.
+///
+/// The value is **not** transcribed from a datasheet. It is what the real
+/// ROM wrote, read back out of the ROM-up walk's own table by
+/// `rom_up_boot.rs::rom_up_and_direct_load_agree_on_what_the_app_sees` —
+/// entry 5 of the PRO table, ROM-up `0x100` against the direct load's `0x0`,
+/// which is the assertion that produced this constant. It is also 256 pages
+/// of 64 KiB = 16 MiB, past the end of any part this machine models, which
+/// is how an entry with no valid bit says "nothing here".
+pub const MMU_UNMAPPED: u32 = 0x100;
+
 /// How many of [`MMU_ENTRIES`] the **flash** MMU uses: four windows of 64.
 /// Above them, from index `0x400`, is `cache_sram_mmu_set`'s territory.
 pub const FLASH_MMU_ENTRIES: u32 = 256;

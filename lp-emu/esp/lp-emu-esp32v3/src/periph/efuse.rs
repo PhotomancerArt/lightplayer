@@ -50,15 +50,19 @@
 //!
 //! # What is burned, and what is not
 //!
-//! Only the fields something on the boot path reads are seeded; every other
-//! word is the PAC's zero, which is what an unburned fuse reads. The layout
-//! is esp-hal 1.1.1's (`src/efuse/esp32/fields.rs`, bit offsets inside
+//! **The base is the desk board's measured block 0** — the seven words
+//! `espefuse` read off the part, [`crate::loader::DESK_BLOCK0`] — and the
+//! two fields [`EfuseIdentity`] parameterises are overlaid on it
+//! ([`field_mask`] says which bits each one owns). So a default run reads
+//! what the board reads, and `--efuse-mac` / `--efuse-rev` change the MAC or
+//! the revision and nothing else. The layout of the overlaid fields is
+//! esp-hal 1.1.1's (`src/efuse/esp32/fields.rs`, bit offsets inside
 //! block 0):
 //!
 //! ```text
 //! MAC0                 bits  32..64   → blk0_rdata1 (+0x04), all four bytes
 //! MAC1                 bits  64..80   → blk0_rdata2 (+0x08) bits 15:0
-//! MAC_CRC              bits  80..88   → blk0_rdata2 (+0x08) bits 23:16   (not modelled, see below)
+//! MAC_CRC              bits  80..88   → blk0_rdata2 (+0x08) bits 23:16   (measured, not derived — see below)
 //! CHIP_VER_REV1        bit  111       → blk0_rdata3 (+0x0c) bit 15
 //! CHIP_VER_REV2        bit  180       → blk0_rdata5 (+0x14) bit 20
 //! WAFER_VERSION_MINOR  bits 184..186  → blk0_rdata5 (+0x14) bits 25:24
@@ -68,13 +72,18 @@
 //! `esp-hal-1.1.1/src/efuse/mod.rs:210`, and [`identity`] applies that
 //! extraction to the words [`words`] produces, both ways, in a test.
 //!
-//! **`MAC_CRC` is left at 0** and is a deliberate gap: it is a CRC-8 whose
-//! polynomial this phase has no source for in reach, nothing on either boot
-//! path reads it (esp-hal's `base_mac_address` does not; the ROM's check
-//! compares words against themselves), and inventing a checksum byte would
-//! be exactly the "seeded with the value a spin happened to want" mistake
-//! `crate::periph::accept`'s module docs exist to prevent. Recorded for
-//! whoever first meets a reader that does check it.
+//! **`MAC_CRC` is `0x7c`, and it was read rather than computed.** P5 left it
+//! at 0 with a note saying the CRC-8 polynomial was out of reach and that
+//! inventing a checksum byte would be the "seeded with the value a spin
+//! happened to want" mistake `crate::periph::accept`'s module docs exist to
+//! prevent. That reasoning was right and the gap is now closed the only way
+//! it could honestly be closed: L1a dumped the part
+//! (`../bench.md`), the byte is in [`crate::loader::DESK_BLOCK0`], and
+//! [`field_mask`] keeps the derived `MAC1` from erasing it. A `--efuse-mac`
+//! that changes the MAC leaves this byte stale, which is correct and worth
+//! knowing: the model still does not know the polynomial, so it cannot
+//! recompute one, and a run that changed the MAC and needed a valid CRC
+//! would have to be given the measured block for that part.
 //!
 //! ⚠️ **The major revision is not an eFuse field alone.** esp-hal's
 //! `major_chip_version` (`src/efuse/esp32/mod.rs`) is
@@ -153,6 +162,25 @@ pub fn words(id: &EfuseIdentity) -> [(usize, u32); 4] {
     [(1, w1), (2, w2), (3, w3), (5, w5)]
 }
 
+/// Which bits of block-0 word `word` the fields [`words`] derives actually
+/// own. Everything outside the mask is the measured array's.
+///
+/// | word | mask | fields |
+/// |---|---|---|
+/// | 1 | all | `MAC0`, bits 32..64 |
+/// | 2 | `0x0000_ffff` | `MAC1`, bits 64..80 — **not** `MAC_CRC` at 23:16 |
+/// | 3 | `0x0000_8000` | `CHIP_VER_REV1`, bit 111 |
+/// | 5 | `0x0310_0000` | `CHIP_VER_REV2` (bit 20) and `WAFER_VERSION_MINOR` (bits 25:24) |
+const fn field_mask(word: usize) -> u32 {
+    match word {
+        1 => 0xffff_ffff,
+        2 => 0x0000_ffff,
+        3 => 0x0000_8000,
+        5 => 0x0310_0000,
+        _ => 0,
+    }
+}
+
 /// The three bits esp-hal combines into a major revision, for `major`.
 ///
 /// `major_chip_version` (`esp-hal-1.1.1/src/efuse/esp32/mod.rs`) maps
@@ -190,6 +218,10 @@ pub fn identity(fuses: &[u32; BLK0_WORDS], eco2: bool) -> EfuseIdentity {
             _ => 0,
         },
         chip_minor: ((fuses[5] >> 24) & 0b11) as u8,
+        // Round-tripping an identity out of a block keeps the whole block,
+        // not just the fields this function reads: that is what makes
+        // `identity(e.fuses())` a lossless inverse of `Efuse::new`.
+        block0: *fuses,
     }
 }
 
@@ -204,10 +236,24 @@ pub struct Efuse {
 
 impl Efuse {
     /// The block, with `id` burned into block 0.
+    ///
+    /// The **base is the measured array** ([`EfuseIdentity::block0`],
+    /// defaulting to [`crate::loader::DESK_BLOCK0`]) and [`words`]'s derived
+    /// fields are overlaid on it, so a run with no `--efuse-*` flag reads
+    /// exactly what `espefuse` read off the desk board — `CLK8M_FREQ`,
+    /// `MAC_CRC` and `CONSOLE_DEBUG_DISABLE` included — and a run with one
+    /// changes the MAC or the revision and nothing else. Before P8 the base
+    /// was zeros and only four words were written; the fields nobody derived
+    /// read as unburned, which is a legal fuse value and therefore silent.
     pub fn new(id: EfuseIdentity) -> Self {
-        let mut fuses = [0u32; BLK0_WORDS];
+        let mut fuses = id.block0;
         for (word, value) in words(&id) {
-            fuses[word] = value;
+            // Only the bits the field owns: the measured word carries
+            // neighbours (`MAC_CRC` sits beside `MAC1` in word 2, and
+            // `WAFER_VERSION_MINOR` beside `CHIP_VER_REV2` in word 5) and an
+            // outright assignment would erase them.
+            let mask = field_mask(word);
+            fuses[word] = (fuses[word] & !mask) | (value & mask);
         }
 
         let mut regs = RegFile::new("EFUSE", EFUSE_LEN)
@@ -351,22 +397,50 @@ impl Peripheral for Efuse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::loader::DESK_MAC;
+    use crate::loader::{DESK_BLOCK0, DESK_MAC};
     use lp_emu_esp_common::Sandbox;
 
+    /// **A default machine's block 0 is the desk board's, word for word.**
+    ///
+    /// Not "the fields we derived agree" — the whole array, including the
+    /// three the derivation never touches and would have left at zero:
+    /// `CLK8M_FREQ` (word 4), `MAC_CRC` (word 2) and
+    /// `CONSOLE_DEBUG_DISABLE` (word 6).
     #[test]
-    fn the_desk_boards_identity_round_trips_through_the_words() {
+    fn a_default_machines_block_zero_is_the_measured_one() {
+        let e = Efuse::new(EfuseIdentity::default());
+        assert_eq!(e.fuses(), &DESK_BLOCK0, "`../bench.md` §L1a");
+        // The three the old derivation could not have produced.
+        assert_eq!(e.fuses()[4] & 0xff, 0x37, "CLK8M_FREQ = 55 → a 40 MHz XTAL");
+        assert_eq!((e.fuses()[2] >> 16) & 0xff, 0x7c, "MAC_CRC");
+        assert_eq!(e.fuses()[6] & 0b100, 0b100, "CONSOLE_DEBUG_DISABLE");
+    }
+
+    /// The other half: the derivation and the measurement say the same thing
+    /// where they overlap, so the overlay changes nothing on a default run
+    /// and a `--efuse-*` run is still coherent.
+    #[test]
+    fn the_derived_fields_agree_with_the_measured_block_zero() {
         let id = EfuseIdentity::default();
         assert_eq!(id.mac, DESK_MAC);
         assert_eq!((id.chip_major, id.chip_minor), (3, 1));
+        for (word, value) in words(&id) {
+            let mask = field_mask(word);
+            assert_eq!(
+                value & mask,
+                DESK_BLOCK0[word] & mask,
+                "word {word}: the derivation disagrees with the part"
+            );
+        }
         let e = Efuse::new(id);
         let f = e.fuses();
-        // MAC[2..6] big-endian in word 1, MAC[0..2] in word 2's low half.
+        // MAC[2..6] big-endian in word 1, MAC[0..2] in word 2's low half —
+        // with the measured CRC byte beside it, which the overlay preserves.
         assert_eq!(f[1], 0xf5ec_f634);
-        assert_eq!(f[2], 0x0000_3076);
+        assert_eq!(f[2], 0x007c_3076);
         // v3: CHIP_VER_REV1 (word 3 bit 15) and CHIP_VER_REV2 (word 5 bit
         // 20) both set; the third bit is APB_CTRL.date's.
-        assert_eq!(f[3], 1 << 15);
+        assert_eq!(f[3] & field_mask(3), 1 << 15);
         assert_eq!(f[5], (1 << 20) | (1 << 24), "REV2 set, minor = 1");
         assert_eq!(identity(f, true), id, "with APB_CTRL.date bit 31 set");
         assert_eq!(
@@ -384,10 +458,25 @@ mod tests {
                     mac: DESK_MAC,
                     chip_major: major,
                     chip_minor: minor,
+                    ..EfuseIdentity::default()
                 };
                 let e = Efuse::new(id);
                 let (_, _, eco2) = eco_bits(major);
-                assert_eq!(identity(e.fuses(), eco2 != 0), id);
+                let back = identity(e.fuses(), eco2 != 0);
+                assert_eq!(
+                    (back.mac, back.chip_major, back.chip_minor),
+                    (id.mac, id.chip_major, id.chip_minor)
+                );
+                // The overlay moved only the bits the two fields own; every
+                // measured word outside them came through untouched.
+                for word in 0..BLK0_WORDS {
+                    let keep = !field_mask(word);
+                    assert_eq!(
+                        e.fuses()[word] & keep,
+                        DESK_BLOCK0[word] & keep,
+                        "word {word} outside the derived fields"
+                    );
+                }
             }
         }
     }
@@ -454,8 +543,12 @@ mod tests {
         let mut e = Efuse::new(EfuseIdentity::default());
         sb.write(&mut e, 0x004, 0xdead_beef);
         assert_eq!(sb.read(&mut e, 0x004), 0xf5ec_f634, "the write was dropped");
-        // A word nobody burned reads the PAC's zero.
-        assert_eq!(sb.read(&mut e, 0x010), 0);
+        // Word 4 is the measured one P5 could not derive: `CLK8M_FREQ`
+        // 0x37 and bit 9, `0x237` (`crate::loader::DESK_BLOCK0`). Before P8
+        // it read 0 — which is a legal unburned value, so nothing said so.
+        assert_eq!(sb.read(&mut e, 0x010), 0x0000_0237);
+        // Word 0 really is unburned on this part, and reads zero.
+        assert_eq!(sb.read(&mut e, 0x000), 0);
         // And the rest of the block is accept-and-remember at the PAC's
         // resets: `clk` = 0x4052, `dac_conf` = 0x28.
         assert_eq!(sb.read(&mut e, 0x0f8), 0x0000_4052);
@@ -469,6 +562,7 @@ mod tests {
             mac: [1, 2, 3, 4, 5, 6],
             chip_major: 2,
             chip_minor: 3,
+            ..EfuseIdentity::default()
         });
         e.attached(7);
         sb.write(&mut e, CONF, CONF_READ_OPCODE);

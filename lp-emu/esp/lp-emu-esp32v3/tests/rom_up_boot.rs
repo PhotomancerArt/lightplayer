@@ -339,7 +339,84 @@ const BOOTLOADER_LOG: &[&str] = &[
     "I (\u{2026}) boot:  2 factory          factory app      00 00 00010000 00300000",
     "I (\u{2026}) boot:  3 lpfs             Unknown data     01 82 00310000 000f0000",
     "I (\u{2026}) boot: End of partition table",
+    // The three lines M1 P6's `rer`/`wer` put back on the walk: P7 stopped
+    // one instruction short of them, in `esp_cpu_dbgr_is_attached()`.
+    "I (\u{2026}) boot: Loaded app from partition at offset 0x10000",
+    "I (\u{2026}) boot: Disabling RNG early entropy source...",
+    // An `E`, and it is **correct**: this image really does have two DROM
+    // segments (the first 256 bytes of `esp_app_desc`), so the desk board
+    // prints this on every boot and so must a twin. Benign today because
+    // nothing reads segment 0 through the window.
+    "E (\u{2026}) boot: Image contains multiple DROM segments. Only the last one will be mapped.",
 ];
+
+/// The committed silicon capture the two tables above are transcribed from:
+/// `lp-emu/transcripts/esp32v3/boot-idle/`, which is L0's `cap_115200_a.bin`.
+///
+/// The literals stay in this file because they are what a reader compares
+/// against; [`the_two_tables_are_the_committed_silicon_captures_own_lines`]
+/// is what stops them being *only* literals. **Never edit a transcript**: a
+/// mismatch there is a re-capture or a regression, never a patch.
+const SILICON_115200: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../transcripts/esp32v3/boot-idle/",
+    "silicon-esp32v3-2026-09-10-2e21b6226-115200.txt"
+);
+
+/// The ROM banner and the bootloader log this file compares against are the
+/// desk board's own bytes, and this is the assertion that says so.
+///
+/// P7 transcribed them out of L0's capture by hand. That was right, and it
+/// left one gap: nothing in the repository held the capture, so a typo in a
+/// literal and a real difference in the machine were the same failure. The
+/// capture is committed now, and this test reads it.
+///
+/// **Two parts of the silicon capture are deliberately not compared**, and
+/// both are about something other than the bootloader: everything from the
+/// baud-change garbage onward (the app reprograms `clkdiv` to 921600
+/// mid-stream, so a 115200 capture ends in noise) and the `esp_image:
+/// segment` lines, which are image-derived — the desk board runs a different
+/// commit (ruling R7) and its segment table is therefore not this one's.
+#[test]
+fn the_two_tables_are_the_committed_silicon_captures_own_lines() {
+    let raw = std::fs::read(SILICON_115200).expect("the committed silicon capture");
+    let text = String::from_utf8_lossy(&raw).into_owned();
+    let lines = device_lines(&text);
+
+    // The banner, literally: eleven lines and the blank one, from the top.
+    assert_eq!(
+        &lines[..ROM_BANNER.len()],
+        ROM_BANNER,
+        "ROM_BANNER is not the committed capture's first lines"
+    );
+
+    // The bootloader's own, stamps masked, `esp_image: segment` dropped, and
+    // stopping at the last line before the app takes the console.
+    let last = BOOTLOADER_LOG.last().expect("a non-empty table");
+    let theirs: Vec<String> = lines[ROM_BANNER.len()..]
+        .iter()
+        .filter(|l| !l.is_empty())
+        .map(|l| mask_stamp(l))
+        .filter(|l| !l.contains("esp_image: segment "))
+        .take_while(|l| l != last)
+        .chain(std::iter::once((*last).to_string()))
+        .collect();
+    assert_eq!(
+        theirs.iter().map(String::as_str).collect::<Vec<_>>(),
+        BOOTLOADER_LOG,
+        "BOOTLOADER_LOG is not the committed capture's bootloader half"
+    );
+
+    // And the two things the sidecar says about this part.
+    assert!(
+        !text.contains("Saved PC:"),
+        "`Saved PC:` is absent on a power-on reset of this part"
+    );
+    assert!(
+        text.contains("Image contains multiple DROM segments"),
+        "the DROM-segments line is printed on every boot of this image"
+    );
+}
 
 /// `I (608) boot: …` → `I (…) boot: …`.
 ///
@@ -467,14 +544,20 @@ fn the_rom_up_boot_log_is_the_desks_line_for_line() {
         .filter(|l| !l.is_empty())
         .map(|l| mask_stamp(l))
         .collect();
-    let fixed: Vec<&String> = rest
+    // The walk runs past the bootloader and into the application now (M1 P6),
+    // so the comparison stops at the bootloader's last line — the app's own
+    // `[INIT]` chain is `tests/boot_idle.rs`'s subject, not this one's.
+    let last = BOOTLOADER_LOG.last().expect("a non-empty table");
+    let fixed: Vec<String> = rest
         .iter()
         .filter(|l| !l.contains("esp_image: segment "))
+        .take_while(|l| l != last)
+        .cloned()
+        .chain(std::iter::once((*last).to_string()))
         .collect();
-    let expected: Vec<&str> = BOOTLOADER_LOG.to_vec();
     assert_eq!(
-        fixed.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
-        expected,
+        fixed.iter().map(String::as_str).collect::<Vec<_>>(),
+        BOOTLOADER_LOG,
         "the bootloader's log is not the desk board's:\n{text}"
     );
 
@@ -511,21 +594,17 @@ fn the_rom_up_boot_log_is_the_desks_line_for_line() {
         assert_eq!(ours.trim_end(), want.trim_end(), "\n{text}");
     }
 
-    // 4. Where it stops, exactly: the bootloader's own debugger check.
+    // 4. And it does not stop: M1 P6 landed `rer`/`wer`, so the bootloader's
+    // `esp_cpu_dbgr_is_attached()` — `rer a14, a14` at `0x4007_a526`, where
+    // P7 pinned the end of this walk — now answers and hands over to the
+    // application, which prints its own `[INIT]` chain on the same console.
     assert!(
-        matches!(
-            outcome,
-            Outcome::Fault {
-                pc: 0x4007_a526,
-                fault: lp_xt_emu::mach::HartFault::UnsupportedInstruction {
-                    word: 0x0040_6ee0,
-                    ..
-                },
-                ..
-            }
-        ),
-        "the ROM-up boot's end of the line is `rer` in the bootloader's \
-         `esp_cpu_dbgr_is_attached()`, and nothing before it: {outcome:?}"
+        !matches!(outcome, Outcome::Fault { .. }),
+        "no fault anywhere in the walk: {outcome:?}"
+    );
+    assert!(
+        text.contains("[INIT] fw-esp32v3 boot"),
+        "the bootloader hands over to the application:\n{text}"
     );
 }
 
@@ -619,65 +698,90 @@ fn rom_up_and_direct_load_agree_on_what_the_app_sees() {
         .strict(true)
         .build()
         .expect("the ROM-up machine builds");
-    let entry = rom_up.app().expect("the app ELF").entry;
+    let app_elf = rom_up.app().expect("the app ELF").clone();
+    let entry = app_elf.entry;
     // The app's own `Reset`, by address: `--break-at _start` would find the
     // mask ROM's symbol of that name first.
-    let _ = rom_up.break_at_address(entry);
-    let outcome = rom_up.run_until(&StopCondition::after_micros(2_000_000));
+    //
+    // And **by expected bytes**, not by planting a `break` up front: on this
+    // path the address belongs to the second-stage bootloader until the
+    // bootloader loads the application over it. `Machine::break_at_address_when`
+    // says what goes wrong otherwise; `first_three` is the application's own
+    // first instruction, out of its own ELF.
+    let expect = first_three(&app_elf, entry);
+    rom_up.break_at_address_when(entry, expect);
+    let outcome = rom_up.run_until(&StopCondition::after_micros(4_000_000));
 
-    if !matches!(outcome, Outcome::Breakpoint { pc, .. } if pc == entry) {
-        skip_notice(
-            "rom_up_and_direct_load_agree_on_what_the_app_sees",
-            "the ROM-up boot does not reach the application's entry: it stops in the \
-             bootloader's own `esp_cpu_dbgr_is_attached()` on `rer`, which `lp-xt-inst` does \
-             not decode. Land `rer` and this test runs.",
-        );
-        assert!(
-            matches!(
-                outcome,
-                Outcome::Fault {
-                    pc: 0x4007_a526,
-                    ..
-                }
-            ),
-            "the only reason not to reach the app's entry is the `rer` wall: {outcome:?}"
-        );
-        return;
-    }
+    // P7 wrote this test with a skip here, because the ROM-up walk stopped
+    // one instruction short of the application in the bootloader's own
+    // `esp_cpu_dbgr_is_attached()` — `rer a14, a14` at `0x4007_a526`, which
+    // `lp-xt-inst` did not decode. M1 P6 landed `rer`/`wer`; the skip is
+    // gone and the assertion is the gate.
+    assert!(
+        matches!(outcome, Outcome::Breakpoint { pc, .. } if pc == entry),
+        "the ROM-up boot reaches the application's entry at {entry:#010x}: {outcome:?}"
+    );
 
-    // The direct load, the same ELF, the same chip behind it.
+    // The direct load, the same ELF, the same chip behind it. The same
+    // door, for the same reason plus one: the direct loader also places the
+    // application's IRAM segment from the host side, so the address does
+    // not hold the app's bytes until it has.
+    let merged_for_segments = merged.clone();
     let mut direct = direct(&elf, FlashBacking::Copy(merged));
-    let _ = direct.break_at_address(entry);
-    assert!(matches!(
-        direct.run_until(&StopCondition::after_micros(GATE_US)),
-        Outcome::Breakpoint { .. }
-    ));
+    direct.break_at_address_when(entry, expect);
+    let direct_outcome = direct.run_until(&StopCondition::after_micros(GATE_US));
+    assert!(
+        matches!(direct_outcome, Outcome::Breakpoint { pc, .. } if pc == entry),
+        "the direct load stops at the same instruction: {direct_outcome:?}"
+    );
 
     // 1. The app's own segments, byte for byte, in RAM and through the
     //    window. This is the whole claim: the bootloader put the same bytes
     //    in the same places the loader does, having found them itself.
-    let app = direct.app().expect("the app ELF").clone();
+    let app = app_elf;
+    let bytes = std::fs::read(&merged_for_segments).expect("the merged image");
+    let image = MergedImage::parse(&bytes).expect("it parses");
+    let (_, placed) = image.app.as_ref().expect("an app partition with an image");
+
     let mut compared = 0usize;
+    let mut skipped = 0usize;
     for seg in &app.segments {
         if seg.memsz == 0 || seg.data.is_empty() {
             continue;
         }
-        let a = read_span(&rom_up, seg.vaddr, seg.data.len() as u32);
-        let b = read_span(&direct, seg.vaddr, seg.data.len() as u32);
-        let first = a.iter().zip(b.iter()).position(|(x, y)| x != y);
-        assert!(
-            first.is_none(),
-            "segment {:#010x} differs at +{:#x}",
-            seg.vaddr,
-            first.unwrap_or(0)
-        );
-        compared += a.len();
+        let len = seg.data.len() as u32;
+        for (at, run) in mapped_runs(placed, seg.vaddr, len, &mut skipped) {
+            let a = read_span(&rom_up, at, run);
+            let b = read_span(&direct, at, run);
+            if let Some(off) = a.iter().zip(b.iter()).position(|(x, y)| x != y) {
+                let lo = off.saturating_sub(8);
+                let hi = (off + 24).min(a.len());
+                panic!(
+                    "{:#010x} differs at +{off:#x}\n  rom-up {:02x?}\n  direct {:02x?}",
+                    at,
+                    &a[lo..hi],
+                    &b[lo..hi],
+                );
+            }
+            compared += a.len();
+        }
     }
+    println!("app image: {compared} bytes byte-equal, {skipped} excluded (the gaps below)");
     assert!(compared > 2_000_000, "only {compared} bytes compared");
 
     // 2. The architectural state, and the four save-area words the direct
     //    load seeds — `BootFrame`'s `[0, sp, 0, 0]` stands until a ROM-up run
     //    measures them, and this is that measurement.
+    println!(
+        "app entry: PS rom-up {:#010x} direct {:#010x}; a1 rom-up {:#010x} direct {:#010x}; \
+         VECBASE rom-up {:#010x} direct {:#010x}",
+        rom_up.harts[0].ps(),
+        direct.harts[0].ps(),
+        rom_up.harts[0].cpu().a(1),
+        direct.harts[0].cpu().a(1),
+        rom_up.harts[0].sr().vecbase,
+        direct.harts[0].sr().vecbase,
+    );
     assert_eq!(rom_up.harts[0].ps(), direct.harts[0].ps(), "PS");
     assert_eq!(
         rom_up.harts[0].cpu().a(1),
@@ -702,6 +806,128 @@ fn rom_up_and_direct_load_agree_on_what_the_app_sees() {
             .to_vec(),
         "the direct load's seeded save area is the one the bootloader leaves"
     );
+
+    // 3. `VECBASE`. The application repoints it itself in `Reset`
+    //    (`xtensa-lx-rt-0.22.0/src/lib.rs:185-188`), so at its *entry* it is
+    //    still whatever put it there — the mask ROM's `0x4000_0000` on both
+    //    paths, which is what the direct load seeds and what the bootloader
+    //    leaves. A machine that seeded the app's own `0x4008_0000` here would
+    //    take the app's vectors for one instruction longer than silicon does.
+    assert_eq!(
+        rom_up.harts[0].sr().vecbase,
+        direct.harts[0].sr().vecbase,
+        "VECBASE at the app's entry"
+    );
+
+    // 4. The flash MMU. The loader programs the PRO table by arithmetic; the
+    //    bootloader's `cache_flash_mmu_set` fills it from the image header it
+    //    parsed. Both tables, entry for entry — this is the one piece of
+    //    machine state that decides what the app's IROM and DROM windows even
+    //    contain, so a difference here is a difference in every byte of
+    //    `.text` read afterwards.
+    let mmu_rom_up = rom_up.flash_mmu_entries();
+    let mmu_direct = direct.flash_mmu_entries();
+    assert_eq!(
+        mmu_rom_up.len(),
+        mmu_direct.len(),
+        "both tables have the same shape"
+    );
+    let first = mmu_rom_up
+        .iter()
+        .zip(mmu_direct.iter())
+        .position(|(a, b)| a != b);
+    assert!(
+        first.is_none(),
+        "the flash MMU tables differ at entry {}: ROM-up {:#x}, direct {:#x}",
+        first.unwrap_or(0),
+        mmu_rom_up[first.unwrap_or(0)],
+        mmu_direct[first.unwrap_or(0)],
+    );
+    println!(
+        "flash MMU: {} entries agree; {} mapped",
+        mmu_rom_up.len(),
+        mmu_rom_up.iter().filter(|e| **e != 0).count()
+    );
+}
+
+/// The parts of `vaddr..vaddr+len` the **merged image** actually places, in
+/// address order, with everything else counted into `skipped`.
+///
+/// ⚠️ **The two paths disagree in the gaps between the image's segments, and
+/// the ROM-up side is the one that is right.** The application ELF's DROM
+/// program header is one contiguous `0x3f400020..0x3f447410`; `espflash`
+/// splits the same bytes into image segments and writes an eight-byte header
+/// in front of each, so the flash page behind the DROM window carries those
+/// headers — and the sixteen bytes of the DRAM segment that sits between
+/// them — where the ELF carries padding.
+///
+/// P8 measured it at `0x3f400122`: ROM-up reads `fb 3f 10 00 …`, the flash's
+/// own bytes seen through the window, and the direct load reads zeros,
+/// because its loader placed the ELF's contiguous view over the same
+/// addresses. Thirty-two bytes, between `esp_app_desc` (which ends at
+/// `0x3f400120`) and `.rodata` (which starts at `0x3f400140`) — the gap the
+/// bootloader's own `E boot: Image contains multiple DROM segments` line is
+/// about. Nothing reads them on either path.
+///
+/// So the comparison is over **what the bootloader placed**, which is the
+/// claim being made: the bootloader put the same bytes in the same places
+/// the loader does, having found them itself. It is not widened to pass —
+/// it is narrowed to the bytes either side actually asserts, the excluded
+/// count is printed, and the difference is recorded here rather than
+/// smoothed over. Making the direct loader place flash pages rather than ELF
+/// segments in the two windows would close it; that is loader surgery and a
+/// finding for the director, not a P8 edit.
+fn mapped_runs(
+    placed: &lp_emu_esp32v3::image::EspImage,
+    vaddr: u32,
+    len: u32,
+    skipped: &mut usize,
+) -> Vec<(u32, u32)> {
+    let mut runs = Vec::new();
+    let mut at = vaddr;
+    let end = vaddr + len;
+    while at < end {
+        let covering = placed
+            .segments
+            .iter()
+            .find(|s| s.vaddr <= at && at < s.vaddr + s.len);
+        match covering {
+            Some(s) => {
+                let run_end = (s.vaddr + s.len).min(end);
+                runs.push((at, run_end - at));
+                at = run_end;
+            }
+            None => {
+                // The next segment start above `at`, or the end.
+                let next = placed
+                    .segments
+                    .iter()
+                    .map(|s| s.vaddr)
+                    .filter(|v| *v > at)
+                    .min()
+                    .unwrap_or(end)
+                    .min(end);
+                *skipped += (next - at) as usize;
+                at = next;
+            }
+        }
+    }
+    runs
+}
+
+/// The three bytes an ELF's own image holds at `address` — the instruction
+/// that has to be in memory before a breakpoint there means the application
+/// and not whoever occupied the address on the way past.
+fn first_three(app: &lp_emu_esp_common::ElfImage, address: u32) -> [u8; 3] {
+    for seg in &app.segments {
+        let end = seg.vaddr + seg.data.len() as u32;
+        if address < seg.vaddr || address + 3 > end {
+            continue;
+        }
+        let at = (address - seg.vaddr) as usize;
+        return seg.data[at..at + 3].try_into().expect("three bytes");
+    }
+    panic!("{address:#010x} is in no segment of the application image");
 }
 
 /// `len` bytes out of whichever RAM region holds them.

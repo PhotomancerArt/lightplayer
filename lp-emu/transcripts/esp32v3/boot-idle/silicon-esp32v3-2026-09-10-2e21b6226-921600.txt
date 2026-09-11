@@ -1,0 +1,102 @@
+[INIT] fw-esp32v3 boot
+[INIT] chip=esp32 arch=xtensa heap=15072+112640+98304+15536=241552 (ROM PRO stack + dram_seg arena + SRAM1 tail + ROM APP stack)
+[INIT] heap regions: 0 0x3ffe0440+15072 (ROM PRO stack), 1 .bss+112640 (dram_seg arena), 2 0x3ffe8000+98304 (SRAM1 tail), 3 0x3ffe4350+15536 (ROM APP stack, after core bind)
+[INIT] main stack 45488 B
+[RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true
+[INIT] runtime started
+[INIT] I/O task spawned (uart0 921600 8N1, swi2 executor prio2, timg0t1 pacer 1ms)
+[INIT] flash filesystem mounted
+[INIT] RMT ISR on APP core
+[INIT] heap region 3 live: 0x3ffe4350+15536 (ROM APP stack)
+[INIT] JIT code region: sram0 ibus 0x40088000..0x40098000 (64 KiB, placed, rwtext_end=0x40083e00); SRAM1 heap tail dbus 0x3ffe8000+98304 B
+[stack] heartbeat: high-water 16508 B of 45488 B (28980 B headroom)
+[MEM] free=225212 used=16340 largest_free=109429 retry_saves=0
+[JIT] used=0 peak=0 cap=65536 spans=0 peak_spans=0 allocs=0 frees=0 fails=0 largest_free=65536
+[stack] heartbeat: high-water 19420 B of 45488 B (26068 B headroom)
+[MEM] free=224996 used=16556 largest_free=109448 retry_saves=0
+[JIT] used=0 peak=0 cap=65536 spans=0 peak_spans=0 allocs=0 frees=0 fails=0 largest_free=65536
+[stack] heartbeat: high-water 19564 B of 45488 B (25924 B headroom)
+[MEM] free=224804 used=16748 largest_free=109437 retry_saves=0
+[JIT] used=0 peak=0 cap=65536 spans=0 peak_spans=0 allocs=0 frees=0 fails=0 largest_free=65536
+[MEM] free=224708 used=16844 largest_free=109445 retry_saves=0
+[JIT] used=0 peak=0 cap=65536 spans=0 peak_spans=0 allocs=0 frees=0 fails=0 largest_free=65536
+
+[INFO] fw_esp32v3: [fw-esp32v3] hardware manifest: domraem/dom-z-102 (DOM-Z-102)
+
+[INFO] fw_esp32v3::output::rmt::esp32v3_rmt_ws281x_driver: Esp32V3RmtWs281xDriver: 5 wires over 4 pooled slots (declared=5 plan=Some([2, 0, 2, 0, 2, 0, 2, 0]) slot0_window_words=128 slot0_half_words=64)
+
+[INFO] fw_esp32_common::boot: Boot: scanning /projects for projects
+
+[INFO] fw_esp32_common::boot: Boot: found configured startup project: Zook dome
+
+[INFO] fw_esp32_common::boot: Boot: auto-loading /projects/Zook dome
+
+[INFO] fw_esp32_common::boot: [mem] boot auto_load before: 225212 B free / 16340 B used (219k / 15k)
+
+[INFO] lpa_server::project: [mem] project new start: 219k free / 16k used
+
+[INFO] lpa_server::project: [mem] project new after root path: 219k free / 16k used
+
+[INFO] lpa_server::project: [mem] project new after services: 219k free / 16k used
+
+[INFO] fw_esp32v3::serial::io_task: [io_task] live: pacer ticks flowing (swi2 executor)
+[stack] heartbeat: high-water 32688 B of 45488 B (12800 B headroom)
+[MEM] free=186824 used=54728 largest_free=98302 retry_saves=0
+[JIT] used=0 peak=0 cap=65536 spans=0 peak_spans=0 allocs=0 frees=0 fails=0 largest_free=65536
+[MEM] free=186736 used=54816 largest_free=98301 retry_saves=0
+[JIT] used=0 peak=0 cap=65536 sp
+[INFO] lpa_server::project: [mem] ans=0 peak_spans=0 allocs=0 frees=0 fails=0 largest_free=65536
+project new after core project: 182k free / 53k used
+
+[INFO] lpa_server::project: [mem] project new after graphics: 182k free / 53k used
+[MEM] free=186804 used=54748 largest_free=98303 retry_saves=0
+[JIT] used=0 peak=0 cap=65536 spans=0 peak_spans=0 allocs=0 frees=0 fails=0 largest_free=65536
+
+[INFO] lpa_server::project: [mem] project new after wrapper: 182k free / 53k used
+
+[INFO] lpa_server::project_manager: Project loaded: Zook dome
+[MEM] free=183268 used=58284 largest_free=98288 retry_saves=0
+[JIT] used=0 peak=0 cap=65536 spans=0 peak_spans=0 allocs=0 frees=0 fails=0 largest_free=65536
+[INIT] fw-esp32 initialized, starting server loop... proto=20 commit=2e21b6226bcd dirt
+[INFO] fw_ey=true
+sp32_common::boot: [mem] boot auto_load after: 183268 B free / 58284 B used (178k / 56k)
+
+[INFO] fw_esp32_common::boot: Boot: auto-loaded project /projects/Zook dome
+
+M!{"id":0,"msg":{"hello":{"proto":20,"build":{"features":["node.button","node.clock","node.fixture","node.playlist","node.shader","node.texture","gfx.lpvm"],"package":"fw-esp32v3","commit":"2e21b6226bcd","dirty":true,"profile":"release-esp32v3"},"hardware":{"radio":false,"totalLedBudget":1500,"button":false,"boardId":"domraem/dom-z-102","baseMac":"30:76:f5:ec:f6:34","chipRevision":"3.1"},"deviceUid":null}}}
+
+[WARN] lpc_engine::nodes::shader::shader_node: [shader-node] sampling black fallback (node=NodeId(4), frame 1): shader not compiled
+
+[INFO] fw_esp32v3::output::rmt::esp32v3_rmt_ws281x_driver: Esp32V3RmtWs281xDriver::open: endpoint=esp32v3-rmt-ws281x:ws281x:local:IO18 gpio=/gpio/18 wire=0 bytes=900 (slot per transmission)
+
+[INFO] fw_esp32_common::output::provider: Esp32OutputProvider::open: Opened port handle=1, endpoint=ws281x:local:IO18, byte_count=900
+
+[INFO] fw_esp32v3::output::rmt::esp32v3_rmt_ws281x_driver: Esp32V3RmtWs281xDriver::open: endpoint=esp32v3-rmt-ws281x:ws281x:local:IO13 gpio=/gpio/13 wire=1 bytes=900 (slot per transmission)
+
+[INFO] fw_esp32_common::output::provider: Esp32OutputProvider::open: Opened port handle=2, endpoint=ws281x:local:IO13, byte_count=900
+
+[INFO] fw_esp32v3::output::rmt::esp32v3_rmt_ws281x_driver: Esp32V3RmtWs281xDriver::open: endpoint=esp32v3-rmt-ws281x:ws281x:local:IO2 gpio=/gpio/2 wire=2 bytes=900 (slot per transmission)
+
+[INFO] fw_esp32_common::output::provider: Esp32OutputProvider::open: Opened port handle=3, endpoint=ws281x:local:IO2, byte_count=900
+
+[INFO] fw_esp32v3::output::rmt::esp32v3_rmt_ws281x_driver: Esp32V3RmtWs281xDriver::open: endpoint=esp32v3-rmt-ws281x:ws281x:local:IO14 gpio=/gpio/14 wire=3 bytes=900 (slot per transmission)
+
+[INFO] fw_esp32_common::output::provider: Esp32OutputProvider::open: Opened port handle=4, endpoint=ws281x:local:IO14, byte_count=900
+
+[INFO] fw_esp32v3::output::rmt::esp32v3_rmt_ws281x_driver: Esp32V3RmtWs281xDriver::open: endpoint=esp32v3-rmt-ws281x:ws281x:local:IO16 gpio=/gpio/16 wire=4 bytes=900 (slot per transmission)
+
+[INFO] fw_esp32_common::output::provider: Esp32OutputProvider::open: Opened port handle=5, endpoint=ws281x:local:IO16, byte_count=900
+
+[INFO] fw_esp32_common::server_loop: [RECOVERY] boot complete (first frame served)
+
+[INFO] lpc_engine::nodes::shader::shader_node: [shader-node] compilation starting (node=NodeId(4), 1584 bytes)
+[MEM] free=118856 used=122696 largest_free=98295 retry_saves=0
+[JIT] used=0 peak=0 cap=65536 spans=0 peak_spans=0 allocs=0 frees=0 fails=0 largest_free=65536
+
+[INFO] lpc_shared::memory: [mem] shader compile before: 116k free / 119k used
+[MEM] free=116584 used=124968 largest_free=98295 retry_saves=0
+[JIT] used=2144 peak=2144 cap=65536 spans=1 peak_spans=1 allocs=1 frees=0 fails=0 largest_free=63392
+
+[INFO] lpc_shared::memory: [mem] shader compile after: 113k free / 122k used
+
+[INFO] lpc_engine::nodes::shader::shader_node: [shader-node] compilation succeeded (node=NodeId(4), elapsed=112ms, lpir_inst_count=187, lpir_func_count=3, lpir_import_count=2, final_inst_count=536, final_code_size=2144 bytes, float=fixed)

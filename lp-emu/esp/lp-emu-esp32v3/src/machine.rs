@@ -161,6 +161,11 @@ pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     // `WDEV_RND_REG` on the AHB bus (ruling R4).
     "RNG",
     "SHA",
+    // Both paths, last of all — the block between `flash filesystem mounted`
+    // and the idle heartbeat: `init_board`'s `Channel::new` reads
+    // `RMT.ch0conf1` at cycle 5,640,047 (direct) / 65,360,003 (ROM-up). P8's
+    // accept block; M4's waveform.
+    "RMT",
 ];
 
 /// How far back [`Machine::symbolize`] will look for a name when no symbol's
@@ -358,7 +363,34 @@ pub struct BootFrame {
     /// order, which is the order `_WindowOverflow4` stores them in
     /// (`s32e a0, a5, -16` … `s32e a3, a5, -4`).
     pub save_area: [u32; 4],
+    /// `PS.OWB` at the application's entry — see [`BOOTLOADER_OWB`].
+    pub owb: u8,
 }
+
+/// `PS.OWB` the ESP-IDF second-stage bootloader leaves at the application's
+/// entry: **7**.
+///
+/// **Measured, not reasoned.** P7 wrote the direct-vs-ROM-up cross-check and
+/// it skipped, because the ROM-up walk stopped one instruction short of the
+/// application; M1 P6 landed `rer`/`wer`, the walk reached the entry, and
+/// `rom_up_and_direct_load_agree_on_what_the_app_sees` compared `PS` for the
+/// first time. ROM-up read `0x0006_0720`, the direct load `0x0006_0020`: one
+/// field, `OWB` (bits 11:8), 7 against 0.
+///
+/// OWB is the Old Window Base a window exception saves, and nothing in the
+/// application's `Reset` reads it — the field is scratch until the next
+/// window exception overwrites it, and the boot is unchanged either way. It
+/// is seeded anyway, for the reason the whole direct path exists: the claim
+/// is *"what the classic ROM and the IDF bootloader leave behind"*, and a
+/// field this repository can measure and chooses not to reproduce makes that
+/// claim smaller for nothing. It is also the cheapest kind of latent bug —
+/// a field nobody reads until somebody does.
+///
+/// It is **this bootloader's** number, not the architecture's: it is where
+/// `v5.1-beta1-378-gea5e0ff298`'s own call depth happened to leave the
+/// window when it jumped. A different bootloader would leave a different one,
+/// and the cross-check is what would say so.
+pub const BOOTLOADER_OWB: u8 = 7;
 
 impl BootFrame {
     /// The mask ROM's PRO-core stack top, from the ROM ELF's `__stack`.
@@ -380,6 +412,7 @@ impl BootFrame {
         Self {
             sp,
             save_area: [0, sp, 0, 0],
+            owb: BOOTLOADER_OWB,
         }
     }
 }
@@ -661,6 +694,7 @@ pub struct Esp32V3Builder {
     control: Option<String>,
     control_script: Vec<(Cycles, ControlCommand)>,
     reboot_on_reset: bool,
+    strap_word: u32,
 }
 
 impl Default for Esp32V3Builder {
@@ -689,6 +723,7 @@ impl Default for Esp32V3Builder {
             control: None,
             control_script: Vec::new(),
             reboot_on_reset: false,
+            strap_word: crate::periph::accept::GPIO_STRAP_SPI_FAST_FLASH_BOOT,
         }
     }
 }
@@ -856,6 +891,29 @@ impl Esp32V3Builder {
         self
     }
 
+    /// What `GPIO.strap` reads: the strapping pins as the pads were latched
+    /// at reset (`--strap`).
+    ///
+    /// **An input to the run**, like the reset cause and the chip revision,
+    /// and the default is the desk board's own — `0x13`, which is what the
+    /// mask ROM prints raw as the `boot:0x%x` half of its banner
+    /// (`../bench.md`: `boot:0x13 (SPI_FAST_FLASH_BOOT)`; the derivation is
+    /// on [`crate::periph::accept::GPIO_STRAP_SPI_FAST_FLASH_BOOT`]). Zero is
+    /// not "no straps": it is the SDIO boot mode, and the mask ROM takes it
+    /// seriously enough to walk into `slc_init_attach`.
+    ///
+    /// ⚠️ **There is no download-mode default here, and that is deliberate.**
+    /// [`Strap::Download`] on the cable's side says IO0 was low when EN was
+    /// released; what word `GPIO.strap` then reads is a second fact, and this
+    /// repository has not measured it (`m3/notes.md` R8: L0 exercised the EN
+    /// half of the auto-reset circuit and not the IO0 half). A guessed word
+    /// would send the ROM down a path nobody checked. Pass the measured one
+    /// when L1 brings it back.
+    pub fn strap(mut self, word: u32) -> Self {
+        self.strap_word = word;
+        self
+    }
+
     /// The rate the host on the other end of the cable sends at
     /// (`--uart0-baud`, default
     /// [`crate::periph::uart::DEFAULT_HOST_BAUD`]). It changes what the
@@ -1011,6 +1069,7 @@ impl Esp32V3Builder {
                 Some(uart0_stream),
                 flash.clone(),
                 self.seed,
+                self.strap_word,
             );
             check_registration_order(&set)?;
             for (base, len, periph) in set {
@@ -1078,6 +1137,7 @@ impl Esp32V3Builder {
             // `stall_key` (RTC_CNTL's two halves, P5) and with DPORT's
             // `appcpu_ctrl_*` (P4).
             stalled: [false, true],
+            pending_breaks: Vec::new(),
             stall_key,
             rom: rom_image,
             app: app_image,
@@ -1159,6 +1219,9 @@ pub struct Machine {
     /// both `sw_cpu_stall` fields, computed by the block that owns them.
     /// [`Machine::core_stalled`] reads it; P4 adds DPORT's
     /// `appcpu_runstall` as the third input to the same question.
+    /// Breakpoints waiting for the bytes they name to appear in memory.
+    /// See [`Machine::break_at_address_when`].
+    pending_breaks: Vec<(u32, [u8; 3], &'static str)>,
     stall_key: crate::periph::rtc_cntl::StallKey,
     /// **Two** slots: the classic is dual-core. Slot 1 is stalled for the
     /// whole of M3 — see the module docs.
@@ -1341,7 +1404,13 @@ impl Machine {
     /// exception.
     pub fn seed_boot_state(&mut self, entry: u32, frame: BootFrame) -> Result<(), BuildError> {
         self.harts[0].set_pc(entry);
-        self.harts[0].set_ps_raw(PS_BOOT);
+        // `PS_BOOT | OWB` — the window field the bootloader leaves, measured
+        // by the cross-check rather than assumed (`BOOTLOADER_OWB`).
+        self.harts[0].set_ps_raw(
+            PS_BOOT
+                | ((u32::from(frame.owb) << lp_xt_emu::mach::sr::PS_OWB_SHIFT)
+                    & lp_xt_emu::mach::sr::PS_OWB_MASK),
+        );
         self.harts[0].cpu_mut().set_a(1, frame.sp);
         for (i, word) in frame.save_area.iter().enumerate() {
             let at = frame.sp.wrapping_sub(16).wrapping_add(4 * i as u32);
@@ -1451,6 +1520,21 @@ impl Machine {
     /// The cache state and the flash MMU tables, for a test and for P7.
     pub fn cache(&self) -> &crate::cache::CacheHandle {
         &self.cache
+    }
+
+    /// The PRO core's flash MMU table, the 256 entries that decide what the
+    /// IROM and DROM windows contain.
+    ///
+    /// G2's app-entry cross-check compares this between the two boot paths:
+    /// the loader programs it by arithmetic and the IDF bootloader's
+    /// `cache_flash_mmu_set` fills it from the image header it parsed, and a
+    /// difference here is a difference in every byte of `.text` the
+    /// application reads afterwards.
+    pub fn flash_mmu_entries(&self) -> Vec<u32> {
+        let mmu = self.cache.lock().expect("cache poisoned");
+        (0..crate::cache::FLASH_MMU_ENTRIES as usize)
+            .map(|i| mmu.mmu.entry(0, i))
+            .collect()
     }
 
     /// One line per core, for `--probe` and the run report. Slot 1 is never
@@ -1707,6 +1791,58 @@ impl Machine {
             .install_at(&mut self.bus, address, "break-at", |_| HookResult::Stop)
     }
 
+    /// Stop the run the first time `address` is reached, but **only once the
+    /// three bytes there are `expect`**.
+    ///
+    /// ⚠️ A hook is a `break` written into the guest's instruction stream,
+    /// which is exactly right for a mask ROM — nothing rewrites
+    /// `0x4000_xxxx`. It is wrong for an address in IRAM on the ROM-up path,
+    /// and wrong in two different ways at once:
+    ///
+    /// - the second-stage bootloader loads its own segment over
+    ///   `0x4008_0404..`, and then the application's IRAM segment over
+    ///   `0x4008_0000..`, so a `break` planted before the run is **gone**
+    ///   twice over before the pc reaches it; and
+    /// - the bootloader's own code occupies the same addresses on the way
+    ///   past, at **different instruction boundaries**, so a patch that
+    ///   simply re-armed itself would plant three bytes across the middle of
+    ///   one of the bootloader's instructions and the run would die on an
+    ///   undecodable word a few bytes later — which is exactly what P8 saw
+    ///   before writing this.
+    ///
+    /// So the breakpoint waits. Every slice, while any is pending, the
+    /// machine reads the three bytes at the address and arms the hook the
+    /// moment they are the caller's — for the app-entry cross-check, the
+    /// application ELF's own first instruction. Before that the address
+    /// belongs to somebody else and nothing is patched.
+    pub fn break_at_address_when(&mut self, address: u32, expect: [u8; 3]) {
+        self.pending_breaks.push((address, expect, "break-at"));
+    }
+
+    /// Arm every pending breakpoint whose bytes have appeared.
+    fn arm_pending_breaks(&mut self) {
+        let mut still = Vec::new();
+        for (address, expect, symbol) in std::mem::take(&mut self.pending_breaks) {
+            match crate::rom::read_three(&mut self.bus, address) {
+                Ok(bytes) if bytes == expect => {
+                    if let Err(e) = self
+                        .hooks
+                        .install_at(&mut self.bus, address, symbol, |_| HookResult::Stop)
+                    {
+                        log::warn!("machine: arming `{symbol}` at {address:#010x}: {e}");
+                    } else {
+                        log::debug!(
+                            "machine: armed `{symbol}` at {address:#010x} at cycle {}",
+                            self.cycles()
+                        );
+                    }
+                }
+                _ => still.push((address, expect, symbol)),
+            }
+        }
+        self.pending_breaks = still;
+    }
+
     /// Stop the run the first time `symbol` is reached. Installs a hook that
     /// returns [`HookResult::Stop`].
     pub fn break_at(&mut self, symbol: &str) -> Result<u32, RomError> {
@@ -1727,6 +1863,13 @@ impl Machine {
     /// the bring-up rule.
     pub fn run_until(&mut self, stop: &StopCondition) -> Outcome {
         let started = Instant::now();
+        // Before the first instruction as well as after every slice: a
+        // direct load starts *at* the application's entry, so a breakpoint
+        // armed only at a slice boundary would arm one slice too late and
+        // the run would sail past the address it names.
+        if !self.pending_breaks.is_empty() {
+            self.arm_pending_breaks();
+        }
         let stop_cycle = stop.stop_cycle.unwrap_or(u64::MAX);
         let mut probes = stop.probes.clone();
         probes.sort_by(|a, b| a.0.cmp(&b.0));
@@ -1815,21 +1958,69 @@ impl Machine {
             match end {
                 SliceEnd::BudgetExhausted | SliceEnd::BusYield => {}
                 SliceEnd::Wfi => {
-                    // The deterministic idle skip: nothing can happen before
-                    // the next scheduled event, so move guest time there.
-                    // The host's own next service bounds it too, or a guest
-                    // parked in `waiti` would jump clean over a script.
-                    let event = self.bus.sched.next_deadline();
-                    let host = self.next_host_service();
-                    let wake = [event, host]
-                        .into_iter()
-                        .flatten()
-                        .min()
-                        .unwrap_or(stop_cycle)
-                        .max(self.cycles() + 1)
-                        .min(stop_cycle);
-                    self.harts[0].advance_to_cycle(wake);
-                    self.idle_skips += 1;
+                    // ⚠️ **Resample the matrix before deciding to skip.**
+                    //
+                    // The hart polls at the `waiti` itself (`Priv::Waiti`:
+                    // "an already-pending interrupt un-parks immediately"),
+                    // but it polls against the external mask the machine last
+                    // handed it — at the *previous* slice boundary. A line
+                    // the bus raised during this slice is therefore invisible
+                    // to that poll, and skipping on it jumps guest time to
+                    // the next *scheduled* event even though the guest was
+                    // already owed an interrupt.
+                    //
+                    // P8 found it as a wedge and it cost the milestone its
+                    // heartbeat: a level-2 interrupt (swi2, the io_task
+                    // executor) and a level-1 one (TIMG0 timer1, the 1 ms
+                    // pacer) came due in the same slice at cycle 7,732,422.
+                    // The hart took the level-2 one, its handler ran, `rfi 2`
+                    // returned to the idle loop, and the guest reached
+                    // `waiti` **inside the same slice** with TIMG0's line
+                    // still asserted and unserviced. Nothing was scheduled
+                    // behind it — the pacer re-arms from its own handler,
+                    // which had not run — so `next_deadline()` was `None`,
+                    // `wake` became `stop_cycle`, and the run jumped to its
+                    // deadline with one interrupt pending and 7,072,512
+                    // instructions retired, forever.
+                    //
+                    // So: fire what is due, resample [`CpuIntMatrix`], and
+                    // give the hart the poll it could not make for itself.
+                    // If that un-parks it, **there is no skip at all** — the
+                    // very next slice runs the handler. A skip is only
+                    // correct when nothing is pending, which is the claim
+                    // the skip was always making and could not previously
+                    // check.
+                    self.bus.run_due_events(self.cycles());
+                    let external = self.bus.pending_cpu_interrupt_mask();
+                    self.harts[0].set_external_mask(external);
+                    if !self.harts[0].poll_interrupts() {
+                        // The deterministic idle skip: nothing can happen
+                        // before the next scheduled event, so move guest time
+                        // there. The host's own next service bounds it too,
+                        // or a guest parked in `waiti` would jump clean over
+                        // a script.
+                        let event = self.bus.sched.next_deadline();
+                        let host = self.next_host_service();
+                        // ⚠️ And the **byte** source's own next delivery.
+                        // `next_host_service` is the control channel only;
+                        // a `--uart0-script` step whose cycle is already
+                        // known is a third thing that can happen, and an
+                        // idle guest used to jump clean over it — the walk's
+                        // second request landed at the run's deadline
+                        // instead of 20 ms after its first. The C6's machine
+                        // has carried this term since DD13; this one did not
+                        // until a script with two steps in it was written.
+                        let bytes = self.bus.host.next_ready();
+                        let wake = [event, host, bytes]
+                            .into_iter()
+                            .flatten()
+                            .min()
+                            .unwrap_or(stop_cycle)
+                            .max(self.cycles() + 1)
+                            .min(stop_cycle);
+                        self.harts[0].advance_to_cycle(wake);
+                        self.idle_skips += 1;
+                    }
                 }
                 SliceEnd::Ebreak { pc } => {
                     if !self.serve_breakpoint(pc) {
@@ -1865,6 +2056,10 @@ impl Machine {
                 for (lo, hi) in self.bus.take_code_writes() {
                     self.harts[0].invalidate_block_range(lo, hi);
                 }
+            }
+
+            if !self.pending_breaks.is_empty() {
+                self.arm_pending_breaks();
             }
 
             if let Some(violation) = self.bus.first_strict_violation() {

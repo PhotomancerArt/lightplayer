@@ -177,55 +177,251 @@ fn exit_on_stops_at_a_complete_line() {
     );
 }
 
-/// Where the direct load now stands.
+/// The three lines G2 calls the **idle heartbeat**, in the order the board
+/// prints them.
+const HEARTBEAT: &[&str] = &["[stack] heartbeat: ", "[MEM] free=", "[JIT] used="];
+
+/// The Q5 fallback line. Silicon prints `[INIT] RMT ISR on APP core`; this
+/// machine is single-core and the firmware takes its documented other arm
+/// (`lp-fw/fw-esp32v3/src/main.rs:838-845`). Heap region 3 is added in
+/// **both** arms (`main.rs:846-855`), so the heap arithmetic is unaffected —
+/// which is why G2 compares memory-class fields and not log text.
+const SINGLE_CORE_LINE: &str = "[INIT] APP core unavailable; RMT ISR on PRO core";
+
+/// ⚠️ **The heartbeat triple is not idle-emitted, and P8 is where that was
+/// found out.**
 ///
-/// P6 left this run spinning on the flash controller's command word, with the
-/// whole console out on the wire and nothing left in the FIFO. **P7 gave the
-/// machine a flash chip**, so the spin ends on its first pass and the boot
-/// carries on — past the mount and into `CpuControl::start_app_core`, where it
-/// meets `rer`, the one instruction this hart does not decode
-/// (`tests/boot.rs`, `past_the_filesystem_the_boot_meets_the_one_opcode_this_hart_lacks`,
-/// has the pin and the reason it is an ISA-crate follow-up).
+/// `[stack] heartbeat:` / `[MEM]` / `[JIT]` come from `esp32_memory_stats`
+/// (`main.rs:445`), which `lpa_server` calls from `log_memory` on a project
+/// load, unload or stop-all and from `runtime_status` on a client read. It is
+/// **not** on the server loop's five-second heartbeat path — that one calls
+/// `heartbeat_memory_stats`, which fills a wire field and prints nothing.
 ///
-/// What this test keeps from P6 is the console: the first
-/// [`PREFIX_BYTES`] bytes on the wire are still byte-for-byte the golden, and
-/// the wire carried more of them than P6 could — which is the phase, in one
-/// figure.
-#[test]
-#[ignore = "needs the shipped image; run through `just test-emu-esp32v3-boot`"]
-fn past_the_hello_the_run_reaches_the_flash_and_goes_through_it() {
-    let Some(elf) = image() else { return };
-    let mut machine = Esp32V3Builder::new()
-        .boot_mode(BootMode::Direct)
-        .app(AppSource::Path(elf))
-        .strict(true)
-        .build()
-        .expect("builds");
-    let outcome = machine.run_until(&StopCondition::after_micros(80_000));
+/// On the desk board the triple appears because the board auto-loads the
+/// `Zook dome` project at boot, and it appears **before**
+/// `[INIT] fw-esp32 initialized, starting server loop` in L0's own capture,
+/// which is what makes it visible there at all. An emulator booting a blank
+/// `lpfs` has no project to load, so nothing calls that seam — the boot
+/// reaches `[RECOVERY] boot complete (first frame served)` and idles in
+/// `esp_rtos::task::idle_hook` with nothing more to say.
+///
+/// So the gate **asks for it**, over the wire, with the smallest request that
+/// reaches the same call site: `stopAllProjects`, which
+/// `handlers::handle_stop_all_projects` answers by calling `log_memory`
+/// whether or not any project is loaded. That is a client doing what a client
+/// does, on a machine with no client attached — which is also G2's "hello
+/// over the socket", one request earlier.
+const STOP_ALL: &str = "M!{\"id\":1,\"msg\":\"stopAllProjects\"}\n";
+
+/// The device's answer to it, and the gate runs' exit line.
+///
+/// ⚠️ It is the **last** of the things the gate asserts to reach the wire,
+/// not the first. The heartbeat triple is `esp_println` straight into the
+/// FIFO; the reply travels through the io_task's queue. A run that stopped
+/// on the triple would not have seen the reply yet — two console paths with
+/// different latencies, a fact about this firmware rather than this machine.
+const REPLY_LINE: &str = "\"id\":1,\"msg\":\"stopAllProjects\"";
+
+/// The script both gate runs use: wait for the io_task to say it is up, then
+/// send one request a millisecond later.
+///
+/// `after`, not an absolute cycle: a host client answers what it hears, and
+/// the two boot paths reach this line 240 million cycles apart.
+fn stop_all_script() -> lp_emu_esp_common::ScriptedSource {
+    lp_emu_esp_common::ScriptedSource::new().after(
+        "[INIT] I/O task spawned",
+        lp_emu_esp32v3::memmap::CYCLES_PER_US * 1_000,
+        STOP_ALL.as_bytes(),
+    )
+}
+
+/// What both halves of G2 (a) assert about a run that reached the heartbeat.
+fn assert_reached_the_heartbeat(machine: &Machine, outcome: &Outcome, path: &str) {
+    let text = machine.uart0().text();
     assert!(
-        matches!(outcome, Outcome::Fault { .. }),
-        "the flash no longer holds it; the `rer` wall does: {outcome:?}"
+        matches!(outcome, Outcome::ExitMatched { .. }),
+        "{path}: the run stops because the heartbeat appeared: {outcome:?}\n{text}"
     );
     assert!(
         machine.first_strict_violation().is_none(),
-        "and no strict refusal behind it"
-    );
-    // The flash controller really moved bytes rather than being spun on.
-    let census = machine.flash().lock().expect("flash").command_census();
-    assert!(census.reads > 0, "the flash was read: {census}");
-
-    // The console: the golden prefix, unchanged, and more of it on the wire
-    // than the run that stopped at the flash could carry.
-    let bytes = machine.uart0().bytes();
-    assert!(
-        bytes.len() > PREFIX_BYTES,
-        "the boot printed past `{LAST_LINE}`: {} bytes",
-        bytes.len()
+        "{path}: no strict refusal anywhere in the boot"
     );
     assert_eq!(
-        hex(&Sha256::digest(&bytes[..PREFIX_BYTES])),
-        PREFIX_SHA256,
-        "the golden prefix moved:\n{}",
-        String::from_utf8_lossy(&bytes)
+        machine.bus().unmapped_reads() + machine.bus().unmapped_writes(),
+        0,
+        "{path}: G2's first binary condition — zero unmapped accesses"
+    );
+    for line in HEARTBEAT {
+        assert!(text.contains(line), "{path}: no `{line}` in:\n{text}");
+    }
+    assert!(
+        text.contains(SINGLE_CORE_LINE),
+        "{path}: the Q5 fallback arm, not silicon's `RMT ISR on APP core`:\n{text}"
+    );
+    // ⚠️ **Not** `[RECOVERY] boot complete (first frame served)`, which the
+    // server loop prints on its first successful tick. That line is a
+    // `log::info!` and travels through the io_task's queue; the heartbeat
+    // triple is `esp_println`, straight into the FIFO. So the triple reaches
+    // the wire *first* and a run that stops on it has not seen the log line
+    // yet — two console paths with different latencies, which is a fact
+    // about this firmware and not about this machine. The frame really was
+    // served: `stopAllProjects` is answered below, and that answer comes out
+    // of `tick_and_send`.
+    // The hello the server sends unprompted, and the reply to the request
+    // the script made — G2 (d), over the wire rather than over a register.
+    assert!(
+        text.contains("\"id\":0,\"msg\":{\"hello\""),
+        "{path}: the unsolicited wire hello:\n{text}"
+    );
+    assert!(
+        text.contains("\"id\":1,\"msg\":\"stopAllProjects\""),
+        "{path}: the scripted request is answered:\n{text}"
+    );
+}
+
+/// **G2 (a), the direct half.** The shipped image, direct-loaded onto the
+/// merged chip, under `--strict-bus`, reaches the idle heartbeat with zero
+/// unmapped accesses.
+#[test]
+#[ignore = "needs the shipped image and espflash; run through `just test-emu-esp32v3-boot`"]
+fn the_direct_load_reaches_the_idle_heartbeat() {
+    let Some(elf) = image() else { return };
+    let merged = match lp_emu_esp32v3::test_support::merged_chip_image() {
+        Ok(p) => p,
+        Err(reason) => {
+            skip_notice("the_direct_load_reaches_the_idle_heartbeat", &reason);
+            return;
+        }
+    };
+    let len = std::fs::metadata(&merged).expect("the merged image").len() as u32;
+    let mut machine = Esp32V3Builder::new()
+        .boot_mode(BootMode::Direct)
+        .app(AppSource::Path(elf))
+        .flash(lp_emu_esp32v3::flash::FlashBacking::Copy(merged))
+        .flash_len(len)
+        .strict(true)
+        .uart0_script(stop_all_script())
+        .build()
+        .expect("builds");
+    let outcome = machine.run_until(&StopCondition {
+        exit_on: Some(REPLY_LINE.to_string()),
+        ..StopCondition::after_micros(2_000_000)
+    });
+    assert_reached_the_heartbeat(&machine, &outcome, "direct");
+}
+
+/// **G2 (a), the ROM-up half.** The same image, the same chip, started at the
+/// mask ROM's reset vector — through the real ROM and the real ESP-IDF
+/// second-stage bootloader — and the same heartbeat comes out.
+#[test]
+#[ignore = "needs the shipped image and espflash; run through `just test-emu-esp32v3-boot`"]
+fn the_rom_up_boot_reaches_the_idle_heartbeat() {
+    let merged = match lp_emu_esp32v3::test_support::merged_chip_image() {
+        Ok(p) => p,
+        Err(reason) => {
+            skip_notice("the_rom_up_boot_reaches_the_idle_heartbeat", &reason);
+            return;
+        }
+    };
+    let len = std::fs::metadata(&merged).expect("the merged image").len() as u32;
+    let mut machine = Esp32V3Builder::new()
+        .boot_mode(BootMode::RomUp)
+        .flash(lp_emu_esp32v3::flash::FlashBacking::Copy(merged))
+        .flash_len(len)
+        .strict(true)
+        .uart0_script(stop_all_script())
+        .build()
+        .expect("builds");
+    let outcome = machine.run_until(&StopCondition {
+        exit_on: Some(REPLY_LINE.to_string()),
+        ..StopCondition::after_micros(3_000_000)
+    });
+    assert_reached_the_heartbeat(&machine, &outcome, "rom-up");
+    // And the bootloader's own log is in front of it, including the `E` that
+    // is correct (`tests/rom_up_boot.rs` compares it line for line).
+    let text = machine.uart0().text();
+    assert!(text.contains("ets Jul 29 2019 12:21:46"), "the ROM banner");
+    assert!(
+        text.contains("Image contains multiple DROM segments"),
+        "the DROM-segments line the desk board prints on every boot"
+    );
+}
+
+/// **G2's memory figures, side by side with L0's.**
+///
+/// The two runs are of **different image bytes** — the desk board is on
+/// `2e21b6226bcd`-dirty (ruling R7) and this tree is not — so nothing here is
+/// asserted equal. What is asserted is that the triple parses, that both boot
+/// paths produce the **same** figures as each other, and that the numbers are
+/// printed where the gate packet can quote them. The equality against silicon
+/// is L1's, and it is held until L1 captures from a clean pinned commit.
+#[test]
+#[ignore = "needs the shipped image and espflash; run through `just test-emu-esp32v3-boot`"]
+fn the_two_paths_report_the_same_memory_figures() {
+    let Some(elf) = image() else { return };
+    let merged = match lp_emu_esp32v3::test_support::merged_chip_image() {
+        Ok(p) => p,
+        Err(reason) => {
+            skip_notice("the_two_paths_report_the_same_memory_figures", &reason);
+            return;
+        }
+    };
+    let len = std::fs::metadata(&merged).expect("the merged image").len() as u32;
+
+    let triple = |text: &str| -> Vec<String> {
+        text.lines()
+            .filter(|l| HEARTBEAT.iter().any(|h| l.contains(h)))
+            .map(|l| {
+                let at = HEARTBEAT
+                    .iter()
+                    .find_map(|h| l.find(h))
+                    .expect("a heartbeat line");
+                l[at..].to_string()
+            })
+            .take(3)
+            .collect()
+    };
+
+    let mut direct = Esp32V3Builder::new()
+        .boot_mode(BootMode::Direct)
+        .app(AppSource::Path(elf))
+        .flash(lp_emu_esp32v3::flash::FlashBacking::Copy(merged.clone()))
+        .flash_len(len)
+        .strict(true)
+        .uart0_script(stop_all_script())
+        .build()
+        .expect("builds");
+    direct.run_until(&StopCondition {
+        exit_on: Some("[JIT] used=".to_string()),
+        ..StopCondition::after_micros(2_000_000)
+    });
+
+    let mut rom_up = Esp32V3Builder::new()
+        .boot_mode(BootMode::RomUp)
+        .flash(lp_emu_esp32v3::flash::FlashBacking::Copy(merged))
+        .flash_len(len)
+        .strict(true)
+        .uart0_script(stop_all_script())
+        .build()
+        .expect("builds");
+    rom_up.run_until(&StopCondition {
+        exit_on: Some("[JIT] used=".to_string()),
+        ..StopCondition::after_micros(3_000_000)
+    });
+
+    let a = triple(&direct.uart0().text());
+    let b = triple(&rom_up.uart0().text());
+    assert_eq!(a.len(), 3, "the direct run printed the triple: {a:?}");
+    println!("direct:\n  {}", a.join("\n  "));
+    println!("rom-up:\n  {}", b.join("\n  "));
+    assert_eq!(a, b, "the two boot paths report the same memory figures");
+    // The one figure the boot banner carries too, so the triple can be read
+    // against `[INIT] chip=esp32 … heap=…`.
+    assert!(
+        direct
+            .uart0()
+            .text()
+            .contains("heap=15072+112640+98304+15536=241552"),
+        "the heap arithmetic is the desk board's, in both arms of Q5"
     );
 }

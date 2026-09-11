@@ -511,6 +511,7 @@ fn efuse_mac_default() {
             mac: [0x11, 0x22, 0x33, 0x44, 0x55, 0x66],
             chip_major: 1,
             chip_minor: 2,
+            ..EfuseIdentity::default()
         })
         .build()
         .expect("builds");

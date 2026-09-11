@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "payload": "boot-idle",
+  "chip": "esp32v3",
+  "configuration": "silicon:esp32v3",
+  "date": "2026-09-10",
+  "board": "domraem/dom-z-102",
+  "board_mac": "30:76:f5:ec:f6:34",
+  "chip_revision": "v3.1",
+  "baud": 921600,
+  "machine": "921600",
+  "firmware_commit": "2e21b6226bcd",
+  "firmware_features": ["esp32", "server", "float-f32"],
+  "firmware_dirty": true,
+  "source": "lab task L0, 2026-09-10 04:08, the second of two captures in one sitting. Same reset dance as the 115200 half; the port is reopened at the app's own baud because the app reprograms clkdiv mid-stream and one capture cannot read both rates.",
+  "capture": "python capture.py --baud 921600 --read 8",
+  "note": "THE BOARD IS RUNNING A DIRTY TREE (2e21b6226bcd-dirty) — see the 115200 sidecar and ruling R7. This half opens mid-symbol: the port is reopened at 921600 while the ROM and bootloader are still printing at 115200, so the leading bytes of the raw read are the tail of the bootloader's bytes destuffed at the wrong rate. The app console begins at '[INIT] fw-esp32v3 boot', once the app has reprogrammed the UART to 921600 and the two ends agree again.\n\nTHE COMMITTED .txt IS TRIMMED TO ITS DECODABLE SUFFIX. The leading noise (bytes [0, 6437) of the 13419-byte raw read) is not valid UTF-8 — `Transcript::load` (`std::fs::read_to_string`) fails outright on its first byte, which is a *read* failure, not a filing mismatch — and it is not something the device 'said' in any readable sense: it is one UART shifter destuffing 115200-baud bit times as if they were 921600 ones. Trimming it is not editing a transcript's content: every byte kept here is unchanged from the wire, in the same order, and the boundary is the first byte of '[INIT] fw-esp32v3 boot' (raw offset 6437), which is where the two ends' baud agree and the bytes become readable text. The full 13419-byte raw capture — leading noise and app console alike — is preserved byte-for-byte and untouched at `raw/silicon-esp32v3-2026-09-10-2e21b6226-921600.raw.bin` (bytes [6437, 13419) of that file are these same bytes; bytes [0, 6437) are the trimmed leading noise).\n\nTWO THINGS IN THIS CAPTURE ARE NOT WHAT M3 PRODUCES, AND BOTH ARE CORRECT.\n(1) The line '[INIT] RMT ISR on APP core'. M3 is single-core (Q5) and the firmware takes its documented fallback, printing '[INIT] APP core unavailable; RMT ISR on PRO core (single-core semantics)' instead (lp-fw/fw-esp32v3/src/main.rs:838-845). Heap region 3 is added in BOTH arms (main.rs:846-855 explains why it sits outside the branch), so the heap arithmetic is unaffected. G2's comparison is over memory-class fields, not over log text.\n(2) The '[stack] heartbeat:' / '[MEM]' / '[JIT]' triple in this capture is NOT idle-emitted. It comes from esp32_memory_stats, which lpa_server calls from log_memory on a project load/unload/stop and from runtime_status on a client read — and this board auto-loads the 'Zook dome' project at boot, which is what calls it here. An emulator booting a blank lpfs has no project to load and therefore prints no triple until a client asks for one; the P8 gate runs elicit it with a scripted 'stopAllProjects' over UART0, which reaches the same call site.\n\nBoot heap line: heap=15072+112640+98304+15536=241552; main stack 45488 B; JIT region sram0 ibus 0x40088000..0x40098000 with rwtext_end=0x40083e00. Five wires over four RMT slots on IO18, IO13, IO2, IO14, IO16.",
+  "trust": [
+    {
+      "class": "memory",
+      "grade": "measured",
+      "because": "the board is the ground truth; nothing models it"
+    },
+    {
+      "class": "boot-log",
+      "grade": "measured",
+      "because": "the real application printed these bytes over the real cable"
+    },
+    {
+      "class": "timing",
+      "grade": "measured",
+      "because": "a real clock on real flash with real wait states"
+    },
+    {
+      "class": "wire",
+      "grade": "measured",
+      "because": "real bytes over a real CH340K"
+    }
+  ]
+}
