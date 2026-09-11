@@ -2589,7 +2589,16 @@ bench-emu-c6-pgo:
 # result. D6: no source changes, no wasm32-unknown-unknown entry point.
 #
 #   just bench-emu-web              # build, stage, serve — open the printed URL
+#   just bench-emu-web --no-serve   # build and stage only
 #   just bench-emu-web --collect    # print every uploaded result-*.json as a table
+#
+# Since M7 P6 the build carries `--features jit`, so the page can run the
+# TRANSLATED core in the browser's own engine and A/B it against
+# `--interpreter` and across JD26's blocks-per-sub-dispatcher sizes without a
+# rebuild. The desk-engine half runs off the same stage directory:
+#
+#   bun  target/emu-bench-web/bench-cli.mjs --stage target/emu-bench-web
+#   node target/emu-bench-web/bench-cli.mjs --stage target/emu-bench-web
 #
 # Also an ORACLE, not a gate — see the script's header.
 bench-emu-web *args:
