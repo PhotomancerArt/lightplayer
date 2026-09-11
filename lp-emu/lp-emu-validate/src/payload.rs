@@ -1886,7 +1886,54 @@ pub static ALL_PAYLOADS: &[Payload] = &[
     },
     Payload {
         name: "boot-idle",
-        chips: &[],
+        // The classic's arm, and the only one M5 P1 can land: this payload
+        // IS the shipped image, so it needs no new firmware — the other
+        // three classic payloads (`shader-compile-stress`, `gpio-calibrate`,
+        // `cycle-probe`) wait on `fw-esp32v3` growing their harnesses in P2.
+        chips: &[ChipArm {
+            chip: "esp32v3",
+            // `fw-esp32v3`'s shipped set, on top of the crate's `esp32`
+            // chip feature (`lp-fw/fw-esp32v3/Cargo.toml`). No `memory_fs`
+            // and no `radio`: the classic boots from a modelled flash chip
+            // with a real filesystem, and there is no radio in the shipped
+            // classic image at all.
+            firmware_features: &["server", "float-f32"],
+            emulator_features: None,
+            // The PRODUCT's link. This part has no USB-Serial-JTAG
+            // peripheral, so UART0 over the CH340K is what it ships with —
+            // never `Uart0Spike`, whose cargo feature does not exist here.
+            link: Link::Uart0,
+            // Every silicon capture of this payload is a ROM-up boot: the
+            // real mask ROM banner and the real IDF second-stage bootloader
+            // lines are IN the committed transcript, and `boot-log` is the
+            // one class where the two paths genuinely differ. `Direct`
+            // stays available for iteration (`LP_WALK_BOOT=direct`), and
+            // `rom_up_boot.rs` already gates the two paths' app-entry
+            // equality.
+            boot: BootPath::RomUp {
+                reset_cause: "poweron",
+                strap: "app",
+            },
+            // A USB-host schedule means nothing on a UART0 chip.
+            host_plan: None,
+            // **This payload's heartbeat triple is ELICITED on the classic**
+            // — `esp32_memory_stats` is called on a project load/unload/
+            // stop-all or a client `runtime_status`, never from the
+            // five-second server heartbeat — so the C6's shape (boot, wait,
+            // stop on the `[stack]` line) produces NOTHING here unless the
+            // host asks. The asking is `boot_idle.rs::STOP_ALL`'s bytes on
+            // `[INIT] I/O task spawned`, and **M5 P2 lands it as a committed
+            // script** (suggested `walks/v3-stop-all.script`, beside the
+            // C6's walks, with its provenance in the walks README) and sets
+            // it here. Until then an emulated run of this arm boots and
+            // records the boot, which is honest and incomplete — it is not
+            // a transcript anything replays.
+            host_script: None,
+            // espflash hard-resets after writing, so every silicon capture
+            // is the boot AFTER the one that formatted `lpfs`. 2032 bytes of
+            // `largest_free` hang on this. See `ChipArm::second_boot`.
+            second_boot: true,
+        }],
         display_name: "Shipped image to the idle loop",
         fw_check_slug: "boot-idle",
         // The shipped-image walk as a payload (vision Q1: "shipped-image walks

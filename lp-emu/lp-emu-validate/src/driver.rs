@@ -1136,18 +1136,25 @@ impl ConfigurationDriver for LpEmuDriver {
                         "cargo".into(),
                         "build".into(),
                         "--target".into(),
-                        RV32_TARGET.into(),
+                        spec.target.into(),
                         "--profile".into(),
-                        FW_ESP32C6_PROFILE.into(),
+                        spec.profile.into(),
                         "--features".into(),
                         req.features()?.join(","),
                     ],
                 )
-                .in_dir(FW_ESP32C6_DIR);
+                .in_dir(spec.fw_dir);
                 build = build.with_note(if usb {
                     "no spike_uart0_link: this machine models the host's side of the \
                      USB-Serial-JTAG block (M6), so the shipped image runs on the link it \
                      ships with"
+                } else if req.effective_link()? == Link::Uart0 {
+                    // NOT the spike. This chip has no USB-Serial-JTAG
+                    // peripheral at all, so UART0 is the link the product
+                    // ships with and there is no feature to add.
+                    "UART0 is this chip's PRODUCT link, not a workaround: the part has no \
+                     USB-Serial-JTAG peripheral (lp-fw/fw-esp32v3/Cargo.toml), so no \
+                     `spike_uart0_link` exists here and none is built"
                 } else {
                     "spike_uart0_link is on for the same reason it is on for esp-emu: this \
                      payload's committed transcripts are of that image, and a transcript is \
@@ -1191,11 +1198,7 @@ impl ConfigurationDriver for LpEmuDriver {
                 steps.push(
                     PlanStep::new(
                         "build the merged flash image (the bytes a flasher writes)",
-                        vec![
-                            MERGED_IMAGE_SCRIPT.into(),
-                            elf.clone(),
-                            merged.display().to_string(),
-                        ],
+                        merged_image_command(spec, &elf, &merged),
                     )
                     .with_note(
                         "espflash 3.3.0 exactly: it bundles the ESP-IDF second-stage \
@@ -1422,6 +1425,24 @@ impl ConfigurationDriver for LpEmuDriver {
     }
 }
 
+/// `build-merged-image.sh`'s command line for this chip.
+///
+/// `--chip` is passed only when it is not the script's own default, and that
+/// is deliberate rather than lazy: the C6's committed `rom-up-boot` sidecar
+/// records this exact command line in its `source`, and a transcript is never
+/// re-baselined to suit a later idea. The script's default is `esp32c6` and
+/// says so; the classic has to name itself.
+fn merged_image_command(spec: &ChipSpec, elf: &str, merged: &Path) -> Vec<String> {
+    let mut command = vec![MERGED_IMAGE_SCRIPT.to_string()];
+    if spec.espflash_chip != ESP32C6.espflash_chip {
+        command.push("--chip".into());
+        command.push(spec.espflash_chip.into());
+    }
+    command.push(elf.to_string());
+    command.push(merged.display().to_string());
+    command
+}
+
 /// The directory-name slug `scripts/emu/build-reference-image.sh` gives a
 /// build of these features.
 ///
@@ -1436,6 +1457,18 @@ pub fn reference_image_slug(features: &[&str]) -> String {
         "esp32c6,server,radio,spike_uart0_link" => "boot-idle".to_string(),
         "esp32c6,server,radio,spike_uart0_link,memory_fs" => "boot-idle-memfs".to_string(),
         "esp32c6,server,radio,memory_fs" => "boot-idle-memfs-usb".to_string(),
+        // These two had DRIFTED out of the mirror — the script has named them
+        // since the render benches landed and this table did not, so a
+        // silicon run pointed at either reference image was refused with the
+        // long slug it was not built under. Found by
+        // `every_short_slug_in_the_script_is_in_the_slug_table`, which is why
+        // that test exists.
+        "esp32c6,server,radio,spike_uart0_link,memory_fs,bench_render_loop" => {
+            "render-basic".to_string()
+        }
+        "esp32c6,server,radio,spike_uart0_link,memory_fs,bench_project_rocaille" => {
+            "render-rocaille".to_string()
+        }
         // The classic's only short name, `build-reference-image.sh:189`: the
         // SHIPPED default feature set, which is the image every M3 gate runs
         // and the one a silicon capture is taken from. There is no memfs
@@ -1647,6 +1680,74 @@ pub fn default_out_dir() -> PathBuf {
 mod tests {
     use super::*;
     use crate::payload::find_payload;
+
+    /// The chip table is a mirror, and this is the mirror checked.
+    ///
+    /// `ChipSpec`'s values are the `justfile`'s and
+    /// `scripts/emu/build-reference-image.sh`'s; a value that drifts here
+    /// builds a different image than the one a human builds by hand, and the
+    /// transcripts would not be comparable. The script is the cheapest of the
+    /// two to read, and it carries the crate, binary, target and profile for
+    /// both chips in one `case`.
+    #[test]
+    fn the_chip_table_matches_build_reference_images_case() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/emu");
+        let script = std::fs::read_to_string(root.join("build-reference-image.sh")).unwrap();
+        for spec in CHIPS {
+            // The script's `case` is keyed on espflash's chip word.
+            let arm = script
+                .split(&format!("    {})\n", spec.espflash_chip))
+                .nth(1)
+                .unwrap_or_else(|| panic!("no `{}` arm in the script", spec.espflash_chip));
+            let arm = &arm[..arm.find(";;").expect("the arm ends")];
+            for (key, want) in [
+                ("crate=", spec.fw_dir),
+                ("binary=", spec.fw_binary),
+                ("target=", spec.target),
+                ("profile=", spec.profile),
+            ] {
+                let line = arm
+                    .lines()
+                    .find_map(|l| l.trim().strip_prefix(key))
+                    .unwrap_or_else(|| panic!("no `{key}` in the `{}` arm", spec.espflash_chip));
+                let got = line.trim().trim_matches('"');
+                assert_eq!(
+                    got, want,
+                    "chip table `{}` {key}{want} does not mirror the script's {got}",
+                    spec.chip
+                );
+            }
+        }
+    }
+
+    /// The slug table mirrors the same script's *second* `case`, the one that
+    /// names a reference image's directory — and a silicon `--image` is
+    /// checked against it, so a missing arm refuses a legitimate image.
+    #[test]
+    fn every_short_slug_in_the_script_is_in_the_slug_table() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/emu");
+        let script = std::fs::read_to_string(root.join("build-reference-image.sh")).unwrap();
+        let mut seen = 0;
+        for line in script.lines() {
+            let line = line.trim();
+            let Some((features, rest)) = line.split_once(") slug=") else {
+                continue;
+            };
+            if features == "*" {
+                continue;
+            }
+            let want = rest.trim().trim_end_matches(" ;;");
+            let features: Vec<&str> = features.split(',').collect();
+            assert_eq!(
+                reference_image_slug(&features),
+                want,
+                "the script gives `{}` the slug `{want}`",
+                features.join(","),
+            );
+            seen += 1;
+        }
+        assert!(seen >= 7, "expected the script's short slugs, found {seen}");
+    }
 
     fn request(config: &str, payload: &str, port: Option<&str>) -> RunRequest {
         RunRequest {
