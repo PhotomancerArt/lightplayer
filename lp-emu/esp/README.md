@@ -380,7 +380,7 @@ one would otherwise get a default board and no idea why.
 | `flash_len` | bytes | 4 MiB |
 | `strict` | `0`, `1` | `0` — a board is not a bring-up run |
 | `reboot_on_reset` | `0`, `1` | `1` — a reset dance reboots the chip rather than ending the world |
-| `usb_host` | `absent`, `attached`, `attached-open` | `absent` — the cable is the host's to plug in, with a control line |
+| `usb_host` | `absent`, `attached`, `attached-idle` | `absent`. The CLI's own three words: `attached` is the cable in with the port **open** from power-on, `attached-idle` is the cable in with it closed. A reset returns the block to this state, so a board that wants its boot log on the wire after every reset asks for `attached` |
 | `strap` | `app`, `download` | `app` |
 | `reset_cause` | `poweron`, `usb-uart-hpsys` | `poweron` |
 

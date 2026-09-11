@@ -170,7 +170,9 @@ impl Default for Config {
             // A board, not a run: a reset dance must reboot the chip rather
             // than end the world (the `emu serve` door's PD11 rule).
             reboot_on_reset: true,
-            // The cable is the consumer's to plug in, with a control line.
+            // No cable. The consumer plugs one in with a control line —
+            // and a board that wants its boot log on the wire asks for
+            // `usb_host=attached` instead, exactly as `emu run` does.
             usb_host: UsbHost::Absent,
             strap: Strap::App,
             reset_cause: ResetCause::PowerOn,
@@ -219,18 +221,15 @@ impl Config {
                 "reboot_on_reset" => {
                     cfg.reboot_on_reset = parse_flag(value).ok_or_else(|| bad("0 or 1"))?
                 }
+                // `HostState::parse`'s own three words, not a second
+                // spelling of them: `attached` is the cable in with the port
+                // OPEN from power-on (the CLI's default, and the door's),
+                // and `attached-idle` is the cable in with the port closed.
+                // Inventing a fourth word here once inverted the pair and
+                // cost an afternoon.
                 "usb_host" => {
-                    cfg.usb_host = match value {
-                        "absent" => UsbHost::Absent,
-                        // A cable, with the port closed — `open` is the
-                        // consumer's own control line, because a cable is
-                        // not a port open.
-                        "attached" => UsbHost::Attached { draining: false },
-                        "attached-open" => UsbHost::Attached { draining: true },
-                        _ => {
-                            return Err(bad("a host state (absent, attached, attached-open)"));
-                        }
-                    }
+                    cfg.usb_host = UsbHost::parse(value)
+                        .ok_or_else(|| bad("a host state (absent, attached, attached-idle)"))?;
                 }
                 "strap" => {
                     cfg.strap = match value {
