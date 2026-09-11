@@ -49,6 +49,32 @@ function loadTabModule() {
   return tabModule;
 }
 
+/**
+ * Where this page serves the emulator module.
+ *
+ * Resolved at POWER-ON, not when the source was built, and for the reason
+ * the sim's `discovered()` records at length: a served Studio build carries
+ * the sidecar under a content-hashed name only, `window.__lpEngineAssets`
+ * is a promise of the manifest that names it, and a link is built at
+ * power-on — which can be the page's first action. A snapshot taken any
+ * earlier is the unhashed fallback, which 404s.
+ *
+ * Absent key = this build serves no module (D21), and saying so by name
+ * beats a fetch failure on a URL nobody chose.
+ */
+async function resolveModuleUrl(pinned) {
+  if (pinned) return pinned;
+  const assets = await globalThis.__lpEngineAssets;
+  const url = assets?.emu_esp32c6_wasm;
+  if (!url) {
+    throw new Error(
+      "this build ships no emulator module " +
+        "(pkg/engine-manifest.json has no emu_esp32c6_wasm)",
+    );
+  }
+  return url;
+}
+
 function entry(id) {
   const found = ports.get(id);
   if (!found) throw new Error(`no emulated board with handle ${id}`);
@@ -92,10 +118,14 @@ function drain(e) {
  * Open one emulated board in this tab and hand back its handle.
  *
  * Synchronous on purpose: a link is built at power-on, and the model's
- * transport hands back a CLOSED link rather than a promise. The worker, the
- * module fetch and the board's cold ROM boot all happen behind
- * `isStarting`, which is what the studio asks before it decides a board has
- * given up.
+ * transport hands back a CLOSED link rather than a promise. Resolving the
+ * module URL, starting the worker, fetching the package and the board's
+ * cold ROM boot all happen behind `isStarting`, which is what the studio
+ * asks before it decides a board has given up; a failure among them is
+ * reported by `takeError`, which the link turns into an error event.
+ *
+ * `moduleUrl` is optional — absent means "ask the page at power-on", which
+ * is the only honest moment (see `resolveModuleUrl`).
  */
 export function openEmuPort({ uid, mac, moduleUrl, manifestUrl, persistKey }) {
   const id = nextId++;
@@ -128,8 +158,9 @@ export function openEmuPort({ uid, mac, moduleUrl, manifestUrl, persistKey }) {
   };
   ports.set(id, e);
   e.ready = (async () => {
+    const resolved = await resolveModuleUrl(moduleUrl);
     const { tabBacking } = await loadTabModule();
-    e.backing = tabBacking({ moduleUrl, boards: [board] });
+    e.backing = tabBacking({ moduleUrl: resolved, boards: [board] });
     const port = await e.backing.connect(board.id);
     port.onBytes((bytes) => e.chunks.push(bytes));
     port.onStats((stats) => {

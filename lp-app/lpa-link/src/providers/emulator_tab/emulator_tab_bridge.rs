@@ -77,9 +77,14 @@ pub struct EmulatorTabOptions {
     /// The minted base MAC the board wears in efuse and reports in its
     /// hello — the record's identity, not a second one.
     pub mac: String,
-    /// The emulator module this page serves (`emu_esp32c6_wasm` in the
-    /// engine manifest).
-    pub module_url: String,
+    /// A pinned emulator module URL, or `None` to ask the page for
+    /// `emu_esp32c6_wasm` at POWER-ON.
+    ///
+    /// `None` is what a served Studio build uses. The manifest naming the
+    /// content-hashed sidecar is a promise, a link is built at power-on,
+    /// and a URL snapshotted any earlier is the unhashed fallback that
+    /// 404s — the sim's `discovered()` lesson, applied here.
+    pub module_url: Option<String>,
     /// The packaged build a blank chip is born flashed with (D22), or
     /// `None` to come up blank.
     pub manifest_url: Option<String>,
@@ -107,7 +112,13 @@ impl EmulatorTabPort {
         };
         set("uid", JsValue::from_str(&options.uid));
         set("mac", JsValue::from_str(&options.mac));
-        set("moduleUrl", JsValue::from_str(&options.module_url));
+        set(
+            "moduleUrl",
+            match &options.module_url {
+                Some(url) => JsValue::from_str(url),
+                None => JsValue::NULL,
+            },
+        );
         set(
             "manifestUrl",
             match &options.manifest_url {

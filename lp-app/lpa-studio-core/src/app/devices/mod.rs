@@ -39,6 +39,10 @@
 /// is built with the provider that owns them.
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub mod browser_sim_source;
+/// Emus backed by the tab's emulator Worker. wasm-only, and only when the
+/// studio is built with the module that owns them.
+#[cfg(all(feature = "emulator-tab", target_arch = "wasm32"))]
+pub mod browser_emu_source;
 /// The browser Web Serial transport. wasm-only, and only when the studio is
 /// built with the provider that owns the port.
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
@@ -70,6 +74,8 @@ pub mod target_offer;
 
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use browser_sim_source::BrowserSimLinkSource;
+#[cfg(all(feature = "emulator-tab", target_arch = "wasm32"))]
+pub use browser_emu_source::BrowserEmuLinkSource;
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub use browser_transport::BrowserSerialTransport;
 pub use composite_transport::CompositeDeviceTransport;
