@@ -41,6 +41,27 @@ use super::device_transport::{DeviceTransportFuture, GrantedLink, LensLineTap, L
 use super::emu_transport::{EmuBacking, EmuLinkSource, EmuRuntimeControl, EmuSession};
 use super::sim_record::emu_link_info;
 
+/// `path` as an absolute URL, resolved against the SITE ROOT.
+///
+/// The root, not the current address. `firmware/<build id>/` is published
+/// at the site root by `lp-cli firmware package`, exactly as the engine
+/// sidecars are (`/pkg/…`, `sync-engine-sidecar.sh`), so a `./firmware/…`
+/// resolved against the page would name a different URL on `/devices` than
+/// on `/p/<slug>-prj…` and be wrong on all but one of them.
+///
+/// A path that is already absolute comes back unchanged. A build with no
+/// `window` gets the path back as it was, which fails later and visibly
+/// rather than here and silently.
+fn absolute_from_page(path: &str) -> String {
+    let Some(origin) = web_sys::window().and_then(|window| window.location().origin().ok()) else {
+        return path.to_string();
+    };
+    match web_sys::Url::new_with_base(path, &format!("{origin}/")) {
+        Ok(url) => url.href(),
+        Err(_) => path.to_string(),
+    }
+}
+
 /// Emus backed by the tab's emulator Worker.
 pub struct BrowserEmuLinkSource {
     /// A pinned module URL, or `None` — the served build — to ask the page
@@ -85,10 +106,23 @@ impl BrowserEmuLinkSource {
     /// The build a board of `target` is born flashed with (D22), or `None`
     /// when this build serves none for it — a blank chip, which is the
     /// card's needs-firmware face and its Flash verb, not a failure.
+    ///
+    /// **Absolute, resolved against the page.** The shared base path is
+    /// relative (`./firmware`, `browser_serial_esp32_options.rs`), which is
+    /// fine for the serial flasher because it fetches from the page. This
+    /// one is fetched by the WORKER, whose base URL is
+    /// `/lpa-link/emulator_worker.js` — so a relative path becomes
+    /// `/lpa-link/firmware/…`, the SPA's catch-all answers it with
+    /// `index.html`, and the board comes up blank with
+    /// `Unexpected token '<'` in the journal (measured 2026-09-11, the
+    /// first browser walk of the emu row). Resolving here, where the page
+    /// is, keeps the value self-describing everywhere downstream.
     fn manifest_url_for(&self, target: &str) -> Option<String> {
         let board = lpa_boards::board_by_id(target)?;
         let build_id = lpa_boards::provisioning_build_id(Some(board), Some(board.family.as_str()))?;
-        Some(self.firmware.firmware_manifest_path(build_id))
+        Some(absolute_from_page(
+            &self.firmware.firmware_manifest_path(build_id),
+        ))
     }
 }
 
