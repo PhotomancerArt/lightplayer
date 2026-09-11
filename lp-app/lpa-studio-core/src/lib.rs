@@ -37,6 +37,8 @@ pub use app::bus::{
 pub use app::devices::BrowserSerialTransport;
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::devices::BrowserSimLinkSource;
+#[cfg(all(feature = "emulator-tab", target_arch = "wasm32"))]
+pub use app::devices::BrowserEmuLinkSource;
 pub use app::devices::{
     Backing, CompletedPush, CompositeDeviceTransport, DEVICE_FEED_PARK_AFTER_FAILURES,
     DEVICE_FRAME_SNAPSHOT_INTERVAL_SECS, DeviceCardFeedView, DeviceEffectCall, DeviceEffectFacts,
