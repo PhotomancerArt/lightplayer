@@ -56,9 +56,12 @@
     feature(alloc_error_handler)
 )]
 // The SRAM0 probe harness also needs the asm feature, for its explicit
-// `isync` barrier trial. A harness build cfg's the app path out (`fw_harness`
-// is set), so the two arms never both declare it — `#![feature]` twice is an
-// error, which is why this is one attribute with an `any`, not two.
+// `isync` barrier trial, and so does the `cycle-probe` payload harness, whose
+// kernels ARE assembly (an instruction count read off the source is only a
+// fact if the source is instructions). A harness build cfg's the app path out
+// (`fw_harness` is set), so the arms never both declare it — `#![feature]`
+// twice is an error, which is why this is one attribute with an `any`, not
+// three.
 #![cfg_attr(
     any(
         all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)),
@@ -66,7 +69,8 @@
         // The APP-core canary rig calls the product's `start_app_core_isr`,
         // and everything core 1 runs (`wire_pusher::idle_once`'s
         // `rsil`/`waiti`) comes with it.
-        feature = "test_appcore_rom_path"
+        feature = "test_appcore_rom_path",
+        feature = "test_cycle_probe"
     ),
     feature(asm_experimental_arch)
 )]

@@ -39,14 +39,9 @@ use esp_hal::uart::Uart;
 use fw_checks::checks::gpio_calibrate::{Command, DutyRamp, LineParser, PulseRequest, Response};
 
 /// What this image calls itself in `CAL READY target=…` and in the in-band
-/// `[fw-checks-header]` line.
-///
-/// `esp32v3`, not `esp32`: it has to equal the sidecar's `chip`, which
-/// `lp-emu-validate` refuses to let disagree (`header.rs`,
-/// `agrees_with_inband`), and the validation system's name for this chip is
-/// `esp32v3` — `esp32` is the espflash chip name and the cargo feature, which
-/// are different words for a reason (M5 notes.md §1.1).
-pub const TARGET: &str = "esp32v3";
+/// `[fw-checks-header]` line — [`super::CHIP`], which is where the reason
+/// it is `esp32v3` rather than `esp32` is written down.
+pub const TARGET: &str = super::CHIP;
 
 /// One UART0 FIFO's worth. A single `read_buffered` empties it.
 const READ_BUF_LEN: usize = 128;

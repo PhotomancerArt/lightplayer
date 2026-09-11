@@ -40,6 +40,23 @@ pub mod appcore_rom_path;
 
 // ── The validation payloads (M5 P2) ─────────────────────────────────────────
 //
+/// What a payload harness calls this chip, in the in-band
+/// `[fw-checks-header]` line and anywhere else it names itself.
+///
+/// `esp32v3`, not `esp32`. It has to equal the sidecar's `chip`, which
+/// `lp-emu-validate` refuses to let disagree (`header.rs`,
+/// `TranscriptHeader::agrees_with_inband`, "chip: in-band … vs sidecar …"),
+/// and the validation system's name for this chip is `esp32v3`. `esp32` is
+/// the espflash chip name and this crate's cargo feature — three names for
+/// one part, and M5 notes.md §1.1 is the table that keeps them apart.
+#[cfg(any(
+    feature = "test_gpio_calibrate",
+    feature = "test_cycle_probe",
+    feature = "test_shader_compile_incremental"
+))]
+pub const CHIP: &str = "esp32v3";
+
+//
 // Three payload harnesses, each the CHIP HALF of a `fw-checks` payload: the
 // portable logic is in that crate and this crate supplies the chip — the
 // link, the pads, the clocks, the assembly. `fw-checks` is MIRRORED, never a
