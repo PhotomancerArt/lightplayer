@@ -315,8 +315,10 @@ const ROM_BANNER: &[&str] = &[
 ];
 
 /// The ESP-IDF second-stage bootloader's own log, with the millisecond stamps
-/// masked (see [`mask_stamp`]) and the `esp_image: segment` lines left out —
-/// those are image-derived and are compared against the image instead.
+/// masked (see [`mask_stamp`]), and **without** the `esp_image: segment`
+/// lines, which are image-derived: [`bootloader_log_with`] splices each
+/// side's own seven back in at [`SEGMENT_TABLE_ANCHOR`] before comparing, so
+/// nothing is filtered out of anybody's log (ruling R8).
 ///
 /// Literal for the same reason as the banner: espflash bundles a **fixed**
 /// bootloader binary (`v5.1-beta1-378-gea5e0ff298-dirt`, the one the desk
@@ -350,8 +352,56 @@ const BOOTLOADER_LOG: &[&str] = &[
     "E (\u{2026}) boot: Image contains multiple DROM segments. Only the last one will be mapped.",
 ];
 
-/// The committed silicon capture the two tables above are transcribed from:
-/// `lp-emu/transcripts/esp32v3/boot-idle/`, which is L0's `cap_115200_a.bin`.
+/// The line the bootloader prints the segment table directly after.
+const SEGMENT_TABLE_ANCHOR: &str = "I (\u{2026}) boot: End of partition table";
+
+/// [`BOOTLOADER_LOG`] with one image's own segment table spliced in where the
+/// bootloader prints it.
+///
+/// **Ruling R8.** The two tables used to be compared with the `esp_image:
+/// segment` lines *filtered out of both sides*, which hid three things a
+/// filter should never hide: a segment line in the wrong place, a segment
+/// line too many, and a segment line too few. Nothing is dropped now — each
+/// side's log is compared whole, against its own image's table.
+fn bootloader_log_with(segments: &[String]) -> Vec<String> {
+    let mut out = Vec::with_capacity(BOOTLOADER_LOG.len() + segments.len());
+    for line in BOOTLOADER_LOG {
+        out.push((*line).to_string());
+        if *line == SEGMENT_TABLE_ANCHOR {
+            out.extend(segments.iter().map(|s| s.trim_end().to_string()));
+        }
+    }
+    assert_eq!(
+        out.len(),
+        BOOTLOADER_LOG.len() + segments.len(),
+        "{SEGMENT_TABLE_ANCHOR:?} is not a line of BOOTLOADER_LOG"
+    );
+    out
+}
+
+/// The seven `esp_image: segment` lines the **desk board** printed on the
+/// pinned `75486b114` image, stamps masked, transcribed from
+/// [`SILICON_115200`] — and checked against it by
+/// [`the_two_tables_are_the_committed_silicon_captures_own_lines`].
+///
+/// These are the desk's, not this tree's. They are here so that the image
+/// this repository builds today can be *compared* with the image the board
+/// ran, rather than have the difference filtered away: see that test, and
+/// `m5/notes.md` §7 for the band the difference belongs to.
+const SILICON_SEGMENTS: &[&str] = &[
+    "I (\u{2026}) esp_image: segment 0: paddr=00010020 vaddr=3f400020 size=00100h (   256) map",
+    "I (\u{2026}) esp_image: segment 1: paddr=00010128 vaddr=3ffb0000 size=00010h (    16) load",
+    "I (\u{2026}) esp_image: segment 2: paddr=00010140 vaddr=3f400140 size=47010h (290832) map",
+    "I (\u{2026}) esp_image: segment 3: paddr=00057158 vaddr=3ffb0010 size=03044h ( 12356) load",
+    "I (\u{2026}) esp_image: segment 4: paddr=0005a1a4 vaddr=40080000 size=03f78h ( 16248) load",
+    "I (\u{2026}) esp_image: segment 5: paddr=0005e124 vaddr=00000000 size=01ef4h (  7924)",
+    "I (\u{2026}) esp_image: segment 6: paddr=00060020 vaddr=400d0020 size=1c86f0h (1869552) map",
+];
+
+/// The committed silicon capture the tables above are transcribed from:
+/// `lp-emu/transcripts/esp32v3/boot-idle/`, which is **L1's** 115200 capture
+/// of the pinned `75486b114` reference image — the image the desk board is
+/// running now, and the one every emulated twin is built from.
 ///
 /// The literals stay in this file because they are what a reader compares
 /// against; [`the_two_tables_are_the_committed_silicon_captures_own_lines`]
@@ -360,7 +410,7 @@ const BOOTLOADER_LOG: &[&str] = &[
 const SILICON_115200: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../transcripts/esp32v3/boot-idle/",
-    "silicon-esp32v3-2026-09-10-2e21b6226-115200.txt"
+    "silicon-esp32v3-2026-09-10-75486b114-115200.txt"
 );
 
 /// The ROM banner and the bootloader log this file compares against are the
@@ -371,12 +421,16 @@ const SILICON_115200: &str = concat!(
 /// literal and a real difference in the machine were the same failure. The
 /// capture is committed now, and this test reads it.
 ///
-/// **Two parts of the silicon capture are deliberately not compared**, and
-/// both are about something other than the bootloader: everything from the
-/// baud-change garbage onward (the app reprograms `clkdiv` to 921600
-/// mid-stream, so a 115200 capture ends in noise) and the `esp_image:
-/// segment` lines, which are image-derived — the desk board runs a different
-/// commit (ruling R7) and its segment table is therefore not this one's.
+/// **One part of the silicon capture is deliberately not compared**, and it
+/// is not about the bootloader: everything from the baud-change garbage
+/// onward, because the app reprograms `clkdiv` to 921600 mid-stream and a
+/// 115200 capture therefore ends in noise.
+///
+/// The `esp_image: segment` lines **are** compared now (ruling R8). They used
+/// to be filtered out on the grounds that the desk ran a different commit;
+/// L1 closed that by pinning the board to `75486b114` and capturing it, so
+/// the desk's own seven lines are [`SILICON_SEGMENTS`] and this test is what
+/// keeps that literal honest.
 #[test]
 fn the_two_tables_are_the_committed_silicon_captures_own_lines() {
     let raw = std::fs::read(SILICON_115200).expect("the committed silicon capture");
@@ -390,21 +444,25 @@ fn the_two_tables_are_the_committed_silicon_captures_own_lines() {
         "ROM_BANNER is not the committed capture's first lines"
     );
 
-    // The bootloader's own, stamps masked, `esp_image: segment` dropped, and
-    // stopping at the last line before the app takes the console.
+    // The bootloader's own, stamps masked, nothing filtered out, stopping at
+    // the last line before the app takes the console.
     let last = BOOTLOADER_LOG.last().expect("a non-empty table");
     let theirs: Vec<String> = lines[ROM_BANNER.len()..]
         .iter()
         .filter(|l| !l.is_empty())
         .map(|l| mask_stamp(l))
-        .filter(|l| !l.contains("esp_image: segment "))
         .take_while(|l| l != last)
         .chain(std::iter::once((*last).to_string()))
         .collect();
+    let want = bootloader_log_with(
+        &SILICON_SEGMENTS
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect::<Vec<_>>(),
+    );
     assert_eq!(
-        theirs.iter().map(String::as_str).collect::<Vec<_>>(),
-        BOOTLOADER_LOG,
-        "BOOTLOADER_LOG is not the committed capture's bootloader half"
+        theirs, want,
+        "BOOTLOADER_LOG + SILICON_SEGMENTS is not the committed capture's bootloader half"
     );
 
     // And the two things the sidecar says about this part.
@@ -481,12 +539,14 @@ fn strip_ansi(line: &str) -> String {
 /// - the **ROM banner** and the **bootloader's own lines**, literally,
 ///   against the two tables above. Both halves are fixed binaries, so both
 ///   are the same on any host and for any build of the application;
-/// - the **`esp_image: segment` lines**, against the merged image the machine
-///   was handed, parsed independently by [`lp_emu_esp32v3::image`]. Gating
-///   those on a transcript would gate on the linker: a different build of
-///   this repository produces different segment sizes, and the desk board
-///   runs a different commit (ruling R7) whose segment table is therefore not
-///   this one's;
+/// - the **`esp_image: segment` lines**, in position, against the merged image
+///   the machine was handed, parsed independently by
+///   [`lp_emu_esp32v3::image`] and spliced into the expected log by
+///   [`bootloader_log_with`] (ruling R8 — they used to be filtered out of the
+///   comparison, which hid a misplaced or a missing one). They are **not**
+///   gated on a transcript: that would gate on the linker, and a different
+///   build of this repository produces different segment sizes. What the
+///   desk's own table was on the pinned image is [`SILICON_SEGMENTS`];
 /// - the millisecond stamps are **masked**, and [`mask_stamp`] says why.
 ///
 /// ⚠️ **The run does not reach `Loaded app from partition`.** It stops one
@@ -538,7 +598,36 @@ fn the_rom_up_boot_log_is_the_desks_line_for_line() {
         "the ROM banner is not the desk board's:\n{text}"
     );
 
-    // 2. The bootloader's own lines, literally, stamps masked.
+    // 2. The bootloader's own lines, literally, stamps masked — and the
+    //    segment table in position among them, against the image the machine
+    //    was handed, parsed independently by `lp_emu_esp32v3::image`.
+    //    **Nothing is filtered out of either side** (ruling R8).
+    //
+    //    Segment 5 has `vaddr=00000000` and is neither mapped nor loaded, so
+    //    the bootloader prints an empty `%s` for it; `device_lines` has
+    //    already taken that trailing space off the machine's line and
+    //    `bootloader_log_with` takes it off the expected one.
+    let bytes = std::fs::read(&merged).expect("the merged image");
+    let parsed = MergedImage::parse(&bytes).expect("it parses");
+    let (_, app) = parsed.app.as_ref().expect("an app partition with an image");
+    let segments: Vec<String> = app
+        .segments
+        .iter()
+        .enumerate()
+        .map(|(n, seg)| {
+            format!(
+                "I (\u{2026}) esp_image: segment {n}: paddr={:08x} vaddr={:08x} \
+                 size={:05x}h ({:6}) {}",
+                seg.paddr,
+                seg.vaddr,
+                seg.len,
+                seg.len,
+                seg.placement()
+            )
+        })
+        .collect();
+    let want = bootloader_log_with(&segments);
+
     let rest: Vec<String> = lines[ROM_BANNER.len()..]
         .iter()
         .filter(|l| !l.is_empty())
@@ -548,51 +637,13 @@ fn the_rom_up_boot_log_is_the_desks_line_for_line() {
     // so the comparison stops at the bootloader's last line — the app's own
     // `[INIT]` chain is `tests/boot_idle.rs`'s subject, not this one's.
     let last = BOOTLOADER_LOG.last().expect("a non-empty table");
-    let fixed: Vec<String> = rest
+    let ours: Vec<String> = rest
         .iter()
-        .filter(|l| !l.contains("esp_image: segment "))
-        .take_while(|l| l != last)
+        .take_while(|l| *l != last)
         .cloned()
         .chain(std::iter::once((*last).to_string()))
         .collect();
-    assert_eq!(
-        fixed.iter().map(String::as_str).collect::<Vec<_>>(),
-        BOOTLOADER_LOG,
-        "the bootloader's log is not the desk board's:\n{text}"
-    );
-
-    // 3. The segment table, against the image the machine was handed.
-    let bytes = std::fs::read(&merged).expect("the merged image");
-    let parsed = MergedImage::parse(&bytes).expect("it parses");
-    let (_, app) = parsed.app.as_ref().expect("an app partition with an image");
-    let want: Vec<String> = app
-        .segments
-        .iter()
-        .enumerate()
-        .map(|(n, seg)| {
-            format!(
-                "esp_image: segment {n}: paddr={:08x} vaddr={:08x} size={:05x}h ({:6}) {}",
-                seg.paddr,
-                seg.vaddr,
-                seg.len,
-                seg.len,
-                seg.placement()
-            )
-        })
-        .collect();
-    let ours: Vec<String> = rest
-        .iter()
-        .filter(|l| l.contains("esp_image: segment "))
-        .map(|l| l[l.find("esp_image:").expect("the prefix")..].to_string())
-        .collect();
-    assert_eq!(ours.len(), want.len(), "one line per segment:\n{text}");
-    for (ours, want) in ours.iter().zip(want.iter()) {
-        // Segment 5 has `vaddr=00000000` and is neither mapped nor loaded;
-        // the bootloader prints an empty `%s` for it, which `trim_end` in
-        // `device_lines` has already taken off ours
-        // (`ImageSegment::placement`).
-        assert_eq!(ours.trim_end(), want.trim_end(), "\n{text}");
-    }
+    assert_eq!(ours, want, "the bootloader's log is not the desk board's:\n{text}");
 
     // 4. And it does not stop: M1 P6 landed `rer`/`wer`, so the bootloader's
     // `esp_cpu_dbgr_is_attached()` — `rer a14, a14` at `0x4007_a526`, where
