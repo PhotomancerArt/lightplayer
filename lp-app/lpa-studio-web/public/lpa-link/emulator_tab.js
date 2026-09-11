@@ -157,15 +157,20 @@ class TabHub {
       case "error": {
         const error = new Error(`${message.phase}: ${message.message}`);
         this.lastError = error;
-        // A failure with an id belongs to its caller; one without is the
-        // pacing loop's, and there is nobody to hand it to but the console.
+        // A failure with an id belongs to its caller. Handing it back is what
+        // turns a refusal into a rejected promise instead of a promise that
+        // never settles — and a control line that never settles is a
+        // `setSignals()` that never returns, which is how a flasher hangs.
         if (message.id != null && this.pending.has(message.id)) {
           this.pending.get(message.id).reject(error);
           this.pending.delete(message.id);
-        } else {
-          console.error(`[emu-tab] ${error.message}`);
-          rejectReady(error);
+          return;
         }
+        console.error(`[emu-tab] ${error.message}`);
+        // Only a failure before the board exists can still be the `create`
+        // that everyone is waiting on; afterwards this is the pacing loop's,
+        // and there is nobody to hand it to but the console.
+        if (this.row.state === "starting") rejectReady(error);
         return;
       }
 

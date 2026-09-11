@@ -133,9 +133,22 @@ function post(message, transfer) {
   self.postMessage(message, transfer ?? []);
 }
 
-function fail(phase, error) {
+/**
+ * Report a failure to the page, and — when it belongs to a request — say
+ * WHICH request, so the caller's promise can be rejected rather than left
+ * hanging.
+ *
+ * An error posted without an id is how a `signals` line that threw in here
+ * became a `setSignals()` that never resolved: esptool-js waited out its own
+ * connect timeout instead of seeing the refusal, retried the whole reset
+ * dance, and eventually gave up with "Failed to connect with the device"
+ * while this worker was healthy and running the guest at 0.47× real time
+ * (measured 2026-09-10).
+ */
+function fail(phase, error, id = null) {
   post({
     type: "error",
+    id,
     phase,
     message: error?.message ?? String(error),
     code: error?.code ?? null,
@@ -565,7 +578,7 @@ const onMessage = async (event) => {
   } catch (error) {
     // The worker never throws across `postMessage`: a rejected handler would
     // surface as an unhandled rejection in a thread nobody is watching.
-    fail(message.type ?? "message", error);
+    fail(message.type ?? "message", error, message.id ?? null);
   }
 };
 
