@@ -1693,7 +1693,7 @@ the same run rather than paying for two more, and say so.
 
 ### The transcript
 
-`lp-emu/transcripts/esp32v3/rmt-chase/lp-emu-esp32v3-t1-2026-09-11-2a31ad798.txt`
+`lp-emu/transcripts/esp32v3/rmt-chase/lp-emu-esp32v3-t1-2026-09-11-e39cc8103.txt`
 — the console — beside its `.pins.jsonl` (transcript **shape B**: one
 `ws281x-frame` record per frame) and a sidecar naming the image commit and
 sha256, the features, the grade (`t1`), the **core quantum** (256), the boot
