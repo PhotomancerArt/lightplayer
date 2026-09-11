@@ -176,6 +176,7 @@ use std::time::{Duration, Instant};
 use lp_emu_core::Bus;
 use lp_emu_core::sched::Cycles;
 use lp_emu_esp_common::bus::StrictViolation;
+use lp_emu_esp_common::pins::{PadId, SignalId};
 use lp_emu_esp_common::{ByteLog, ByteSink, ByteSource, ElfImage, SocBus, Strap};
 
 use crate::control::{Cable, CableReport, ControlCommand, ControlReply};
@@ -851,6 +852,8 @@ pub struct Esp32V3Builder {
     app_mmu_divergence: crate::cache::MmuDivergencePolicy,
     core_quantum: u64,
     boot_set: bool,
+    /// Keep the RMT's pulse and word logs ([`crate::periph::rmt::Rmt`]).
+    rmt_logs: bool,
     trace: Option<Box<dyn std::io::Write + Send>>,
     trace_blocks: Vec<String>,
     seed: u64,
@@ -882,6 +885,7 @@ impl Default for Esp32V3Builder {
             app_mmu_divergence: crate::cache::MmuDivergencePolicy::default(),
             core_quantum: CORE_QUANTUM_DEFAULT,
             boot_set: true,
+            rmt_logs: false,
             trace: None,
             trace_blocks: Vec::new(),
             seed: 0,
@@ -1035,6 +1039,18 @@ impl Esp32V3Builder {
     /// nothing forever.
     pub fn core_quantum(mut self, cycles: u64) -> Self {
         self.core_quantum = cycles.max(1);
+        self
+    }
+
+    /// Keep the RMT's per-channel pulse and word logs
+    /// ([`crate::periph::rmt::Rmt::set_keep_logs`]).
+    ///
+    /// **Off by default**: a 300-LED frame is 7,201 words and 14,402 pulses,
+    /// which a run that only wants a boot has no use for. The logs are the
+    /// word-level oracle a decoder test compares against, so the gates that
+    /// need them ask for them.
+    pub fn rmt_logs(mut self, keep: bool) -> Self {
+        self.rmt_logs = keep;
         self
     }
 
@@ -1353,7 +1369,29 @@ impl Esp32V3Builder {
             next_host_poll: 0,
             control_lines: 0,
             pending_reset: None,
+            gpio_index: None,
+            rmt_index: None,
+            pin_edges: std::collections::BTreeMap::new(),
         };
+
+        machine.gpio_index = machine.bus.peripheral_index("GPIO");
+        machine.rmt_index = machine.bus.peripheral_index("RMT");
+        if self.rmt_logs {
+            match machine.rmt_index {
+                Some(i) => {
+                    machine
+                        .bus
+                        .with_peripheral::<crate::periph::rmt::Rmt, _>(i, |r, _| {
+                            r.set_keep_logs(true)
+                        });
+                }
+                None => {
+                    return Err(BuildError::App(
+                        "rmt_logs was asked for and this machine has no RMT block".into(),
+                    ));
+                }
+            }
+        }
 
         if self.boot_mode == BootMode::Direct {
             let frame = self.boot_frame.unwrap_or_else(BootFrame::idf_bootloader);
@@ -1571,6 +1609,17 @@ pub struct Machine {
     /// Set when the auto-reset circuit released EN; drained at the next
     /// slice boundary by [`Machine::run_until`].
     pending_reset: Option<Strap>,
+    /// `GPIO`'s peripheral index: the block the drained edges are handed to
+    /// so its `status` latch sees what was on the wire. `None` on a machine
+    /// built with [`Esp32V3Builder::bare`].
+    gpio_index: Option<usize>,
+    /// `RMT`'s peripheral index, for the observation accessors.
+    rmt_index: Option<usize>,
+    /// Per pad, edges seen since the run started. **M4 P2's**: the fabric
+    /// now has a driver, so somebody has to take its edges off it every
+    /// slice or the buffer grows for the life of the run. P3 hangs the strip
+    /// decoders and the pin log off the same drain.
+    pin_edges: std::collections::BTreeMap<u8, u64>,
 }
 
 impl Machine {
@@ -1938,6 +1987,64 @@ impl Machine {
     /// machine built with [`Esp32V3Builder::bare`].
     pub fn peripheral_alias_map(&self) -> &[(&'static str, u32, u32)] {
         &self.alias_map
+    }
+
+    // ---- the pads and the RMT (M4 P2) ------------------------------------
+
+    /// The RMT block, read-only, through the bus's peripheral downcast
+    /// (`Peripheral::as_any`). `None` on a machine built with
+    /// [`Esp32V3Builder::bare`], which registers no RMT.
+    fn rmt(&self) -> Option<&crate::periph::rmt::Rmt> {
+        let index = self.rmt_index?;
+        self.bus.peripheral(index)?.as_any()?.downcast_ref()
+    }
+
+    /// Every pulse RMT channel `ch` has put on `RMT_SIG_0 + ch`, in order.
+    /// Empty unless the machine was built with
+    /// [`Esp32V3Builder::rmt_logs`].
+    pub fn rmt_pulses(&self, ch: usize) -> &[crate::periph::rmt::Pulse] {
+        self.rmt().map(|r| r.pulses(ch)).unwrap_or(&[])
+    }
+
+    /// Every word RMT channel `ch` fetched, with the cycle it was fetched
+    /// at — end markers included, so a frame reads `data … latch STOP`.
+    pub fn rmt_words(&self, ch: usize) -> &[(Cycles, u32)] {
+        self.rmt().map(|r| r.words(ch)).unwrap_or(&[])
+    }
+
+    /// `tx_end`s raised on RMT channel `ch`. Counted whether or not the logs
+    /// are kept.
+    pub fn rmt_frames_ended(&self, ch: usize) -> usize {
+        self.rmt().map(|r| r.frames_ended(ch)).unwrap_or(0)
+    }
+
+    /// What RMT channel `ch`'s refills have cost, in words. **Reported,
+    /// never gated** (D13/PD9) — see
+    /// [`crate::periph::rmt::RefillStats`].
+    pub fn rmt_refill_stats(&self, ch: usize) -> crate::periph::rmt::RefillStats {
+        self.rmt().map(|r| r.refill_stats(ch)).unwrap_or_default()
+    }
+
+    /// Which pads a **peripheral signal** — not `GPIO_OUT` — is routed to
+    /// and output-enabled on, as `GPIO` resolves it.
+    ///
+    /// Empty through M3, because nothing drove a signal; non-empty from M4
+    /// P2 once a wire has been claimed, and then it is the list of pads a
+    /// strip decoder should be watching.
+    pub fn peripheral_driven_pads(&mut self) -> Vec<(PadId, SignalId)> {
+        let Some(index) = self.gpio_index else {
+            return Vec::new();
+        };
+        self.bus
+            .with_peripheral::<crate::periph::gpio::Gpio, _>(index, |g, cx| {
+                g.peripheral_driven_pads(cx)
+            })
+            .unwrap_or_default()
+    }
+
+    /// Edges seen on pad `pad` since the run started.
+    pub fn pin_edges(&self, pad: u8) -> u64 {
+        self.pin_edges.get(&pad).copied().unwrap_or(0)
     }
 
     pub fn hook_calls(&self) -> u64 {
@@ -2435,6 +2542,10 @@ impl Machine {
             // and given the matrix feed it could not sample for itself.
             let at = self.clock();
             self.bus.run_due_events(at);
+            // The pads: whatever the window put on the wire, in cycle order,
+            // and before the feed — a pad whose edge latches a GPIO
+            // interrupt must reach the matrix in this same iteration.
+            self.drain_pins();
             self.feed_cores(at);
 
             // The deterministic idle skip: only when **every** running core
@@ -2549,6 +2660,37 @@ impl Machine {
             let external = self.bus.pending_cpu_interrupt_mask();
             self.harts[core].set_external_mask(external);
             self.harts[core].poll_interrupts();
+        }
+    }
+
+    /// Take the window's edges off the fabric and hand them to the blocks
+    /// that watch pads.
+    ///
+    /// **M4 P2's, and load-bearing from here on.** Until the RMT view
+    /// existed nothing drove a signal, so the fabric's edge buffer was
+    /// always empty and the machine never had to empty it. Now a running
+    /// channel puts two edges on the wire per word — 14,402 for a 300-LED
+    /// frame — and a machine that never drained them would grow a buffer for
+    /// the length of the run and hand `Gpio` nothing.
+    ///
+    /// Per edge rather than a before/after diff, so a pad that rose and fell
+    /// inside one window latches both directions and neither is lost. M4 P3
+    /// hangs the strip decoders and the `.pins.jsonl` log off this same
+    /// stream, which is what guarantees a decoder, a pin log and the GPIO
+    /// input latch can never disagree about what was on the wire.
+    fn drain_pins(&mut self) {
+        let edges = self.bus.pins.take_edges();
+        if edges.is_empty() {
+            return;
+        }
+        if let Some(index) = self.gpio_index {
+            self.bus
+                .with_peripheral::<crate::periph::gpio::Gpio, _>(index, |g, cx| {
+                    g.observe_edges(&edges, cx)
+                });
+        }
+        for edge in &edges {
+            *self.pin_edges.entry(edge.pad.0).or_default() += 1;
         }
     }
 

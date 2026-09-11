@@ -32,6 +32,7 @@ pub mod flash_mmu;
 pub mod gpio;
 pub mod i2c_ana_mst;
 pub mod io_mux;
+pub mod rmt;
 pub mod rng;
 pub mod rtc_cntl;
 pub mod sha;
@@ -204,9 +205,10 @@ pub fn boot_set(
         (base::SHA, sha::LEN, Box::new(sha::Sha::new())),
         // Both paths, last of all: the app's `init_board` claims the board's
         // RMT channels one line after `[INIT] flash filesystem mounted`, and
-        // `Channel::new` read-modify-writes `ch0conf1`. P8 gives it an accept
-        // block so the heartbeat behind it is reachable; **M4** gives it a
-        // waveform (`accept::rmt`).
-        (base::RMT, accept::RMT_LEN, Box::new(accept::rmt())),
+        // `Channel::new` read-modify-writes `ch0conf1`. M3 P8 gave it an
+        // accept block so the heartbeat behind it was reachable; **M4 P2**
+        // replaced that with the view ([`rmt`]) — in RMT's own place, never
+        // appended, because the order is a contract.
+        (base::RMT, rmt::LEN, Box::new(rmt::Rmt::new())),
     ]
 }

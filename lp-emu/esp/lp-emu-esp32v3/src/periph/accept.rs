@@ -307,51 +307,6 @@ pub fn i2s0() -> RegFile {
         .with_pac_grades()
 }
 
-/// `RMT`'s aperture: the **register block plus its channel RAM**.
-///
-/// The generated table runs to `+0x0fc` (`date`), but the block's window does
-/// not stop there: the eight channels' 64-word transmit buffers start at
-/// [`crate::memmap::periph::RMT_RAM`] (`0x3FF5_6800`, so `+0x800`) and run
-/// `8 * 64 * 4 = 0x800` bytes to `+0x1000`. One aperture covers both, which
-/// is what the firmware needs — `lp-ws281x` writes its symbols straight into
-/// the RAM window and its configuration into the registers.
-pub const RMT_LEN: u32 = 0x1000;
-
-/// `RMT` at `0x3FF5_6000` — **M4's block**, accept-and-remember here.
-///
-/// The **last** strict stop of both boot paths, and the only block left
-/// between `[INIT] flash filesystem mounted` and the idle heartbeat: at cycle
-/// 5,640,047 on the direct load and 65,360,003 on the ROM-up path,
-/// `boot_firmware+0x39a8` reads `ch0conf1` (`+0x024`) — the read half of the
-/// read-modify-write esp-hal's `Channel::new` does when `init_board` claims
-/// the first of the board's wire channels.
-///
-/// Every reset is the PAC's, and this block is the one place in M3 where
-/// that matters for more than a spin: `chNconf0` resets to `0x3110_0002` and
-/// `chNconf1` to `0x0000_0f20`, so the divider, the memory-block count and
-/// the idle level esp-hal read-modify-writes are the part's own, not zero.
-/// `chNstatus` (`+0x060`, read-only in the PAC) resets to 0 and nothing
-/// spins on it: esp-hal's transmit path waits on the **interrupt**
-/// (`int_raw.chN_tx_end`), not on the status word, so a channel that is
-/// configured and never started simply never finishes — which is exactly
-/// what M3's single-core, no-waveform machine should look like.
-///
-/// # What this is NOT
-///
-/// **No waveform is produced and none is decoded.** M3's pin class stays
-/// `modeled` for that reason (the crate README's table). A routed RMT signal
-/// reaches [`super::gpio`]'s fabric route and then nothing drives it, so
-/// [`lp_emu_esp_common::pins::Fabric::signal_level`] stays low for every
-/// `RMT_SIG_n` — which is what makes `no peripheral SIGNAL reaches a pad` an
-/// assertable boot fact rather than an absence nobody checked. M4 is the
-/// phase that gives the channels their time base, their symbol reader over
-/// the RAM window, `int_raw.chN_tx_end` and the WS281x decoder behind them.
-pub fn rmt() -> RegFile {
-    RegFile::new("RMT", RMT_LEN)
-        .with_names(regs::RMT)
-        .with_pac_grades()
-}
-
 /// An SPI controller's aperture: the generated table runs to `+0x3fc`
 /// (`date`); the PAC gives SPI0..SPI3 one `RegisterBlock`, so one length and
 /// one table serve them all.
@@ -409,7 +364,6 @@ mod tests {
             (rtc_io(), regs::RTC_IO),
             (sens(), regs::SENS),
             (i2s0(), regs::I2S0),
-            (rmt(), regs::RMT),
         ]
     }
 

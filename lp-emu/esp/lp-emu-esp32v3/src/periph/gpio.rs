@@ -124,13 +124,14 @@
 //!   edge is seen at the cycle it was stamped, with no synchroniser delay and
 //!   no glitch rejection.
 //!
-//! # No waveform reaches a pad in M3, and that is asserted
+//! # A waveform reaches a pad since M4 P2
 //!
-//! The routing is modelled; nothing drives an `RMT_SIG_n`, because
-//! [`super::accept::rmt`] is an accept block and M4 is the phase that gives
-//! the channels a time base. [`Gpio::peripheral_driven_pads`] is what turns
-//! that into a fact a boot test can assert instead of an absence nobody
-//! checked — the C6's boot gate has the same line.
+//! In M3 the routing was modelled and nothing drove an `RMT_SIG_n`, because
+//! the RMT was an accept block; [`Gpio::peripheral_driven_pads`] was how
+//! that became a fact a boot test could assert instead of an absence nobody
+//! checked. **M4 P2 gave the channels a time base** ([`super::rmt`]), so the
+//! same call is now the list of pads a strip decoder should be watching, and
+//! the boot gate asserts it is non-empty once a wire has been claimed.
 //!
 //! # Register grades
 //!
@@ -409,10 +410,11 @@ impl Gpio {
     /// Which pads a **peripheral signal** — not `GPIO_OUT` — is routed to and
     /// output-enabled on.
     ///
-    /// M3's boot gate asserts this is empty: the routing is modelled but no
-    /// block drives a signal, so a claim that a waveform reached a pad would
-    /// be false. M4 is the phase that makes it non-empty, and the same call
-    /// is then the list of pads a strip decoder should be watching.
+    /// M3's boot gate asserted this was empty: the routing was modelled but
+    /// no block drove a signal, so a claim that a waveform reached a pad
+    /// would have been false. **M4 P2 made it non-empty** — the RMT view's
+    /// symbol pump drives `RMT_SIG_0 + n` — and the same call is the list of
+    /// pads a strip decoder should be watching.
     pub fn peripheral_driven_pads(&self, cx: &BusCx<'_>) -> Vec<(PadId, SignalId)> {
         let enable = self.enable();
         (0..PAD_COUNT)
