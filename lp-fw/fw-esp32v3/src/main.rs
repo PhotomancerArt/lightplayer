@@ -128,7 +128,14 @@ mod tests;
 // would be measuring itself. They are the S3's "harness needs an app module"
 // exception, earned rather than copied: the `allow(dead_code)` is for the app
 // surface the rig does not reach.
-#[cfg_attr(fw_harness, allow(dead_code, unused_imports))]
+#[cfg_attr(
+    fw_harness,
+    allow(
+        dead_code,
+        unused_imports,
+        reason = "the canary rig reaches only `init_board` and `start_app_core_isr`; the rest of the app surface these modules carry is unreachable from a harness entrypoint"
+    )
+)]
 #[cfg(any(
     all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)),
     feature = "test_appcore_rom_path"
@@ -136,7 +143,14 @@ mod tests;
 mod board;
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 mod flash_storage;
-#[cfg_attr(fw_harness, allow(dead_code, unused_imports))]
+#[cfg_attr(
+    fw_harness,
+    allow(
+        dead_code,
+        unused_imports,
+        reason = "the canary rig reaches only `init_board` and `start_app_core_isr`; the rest of the app surface these modules carry is unreachable from a harness entrypoint"
+    )
+)]
 #[cfg(any(
     all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)),
     feature = "test_appcore_rom_path"
