@@ -56,40 +56,43 @@
 //! who expects a fixed channel will misread a trace. The decoder is keyed on
 //! the **pad**, which is why none of that matters here.
 //!
-//! # ⚠️ The window-spill defect, and why this file holds two tests
+//! # ⚠️ The console interleaves, so every console assertion reads a repaired one
 //!
-//! Loading any project kills this guest: a level-1 interrupt's
-//! `save_context` declares a frame spilled whose registers never reach
-//! memory, the `retw` that follows takes `_WindowUnderflow8` and restores
-//! `a1 = 0`, and the handler walks its spills down through unmapped memory.
-//! It is `lp-emu/lp-xt-emu`'s window machinery (M1) and it is being fixed in
-//! M4 **P4b** (PR #711); the crate README's "A frame three ways" carries
-//! the trace.
+//! The classic's writers yield mid-line: a record that has put half of itself
+//! into the TX FIFO can have another task's whole record land inside it. It is
+//! the same PR #300 interleaving defect that makes `frame_dump` defer its
+//! lit dump 30 frames, and it is *not* rare here — on this image the driver's
+//! own open line arrives cut in four:
 //!
-//! The gate is therefore **two** tests. Everything that can be read off the
-//! pad is [`the_first_lit_frame_off_io18_is_the_host_oracles_frame`];
-//! everything that needs the run to reach its own deadline — reading (a),
-//! whose deferred dump is 30 frames past the first lit one, `unmapped == 0`,
-//! and the two-run `--dump-frames` sha256 — is
+//! ```text
+//! …: Esp32V3RmtWs281xDriver::open: endpoint=esp32v3-rmt-ws281x[stack] heartbeat: …
+//! [MEM] free=177468 used=64084 …
+//! [JIT] used=0 peak=0 cap=65536 …
+//! :ws281x:local:IO18 gpio=/gpio/18 wire=0 bytes=192 (slot per transmission)
+//! ```
+//!
+//! So [`deinterleave`] rejoins a record around the whole records spliced into
+//! it — head, insertions, tail — and every assertion below reads the repaired
+//! console. Nothing is dropped and nothing is loosened: the gate still matches
+//! whole lines, including reading (a)'s 384 hex characters, which a split
+//! would otherwise truncate into a silent near-miss.
+//!
+//! # The two tests
+//!
+//! Everything that can be read off the pad is
+//! [`the_first_lit_frame_off_io18_is_the_host_oracles_frame`]; everything
+//! that needs the run to reach its own deadline — reading (a), whose deferred
+//! dump is 30 frames past the first lit one, `unmapped == 0`, and the two-run
+//! `--dump-frames` sha256 — is
 //! [`the_firmwares_own_dump_is_the_same_frame_and_the_run_reaches_its_deadline`].
-//! Neither is weakened; both stop at [`stopped_by_the_window_spill`], which
-//! recognises that one stop exactly and prints a `SKIP` notice naming it.
+//! Until M4 **P4b** (PR #711) both stopped short: loading any project killed
+//! the guest in a ROM window handler. That is fixed — `CALL0`/`CALLX0` no
+//! longer zero `PS.CALLINC` — and both tests run every assertion.
 //!
-//! ⚠️ **On this tree neither has run green**, and not only because of where
-//! the defect lands: at the committed script's 30 ms chunk gap the guest dies
-//! *inside `loadProject`*, before any output opens, so no frame reaches any
-//! pad at all. The claim itself is measured elsewhere — `just
-//! walk-esp32v3-emu-frame`, the live upload rather than this replay, puts two
-//! lit frames on IO18 and both are [`ORACLE_RGB`] byte for byte, and a 15 ms
-//! copy of this script (scratch, never committed) renders 56 whole frames
-//! with one distinct lit byte string, the same. So what is unreachable is the
-//! defect's doing, not the walk's. The script is P4b's to commit
-//! byte-identical, so it is not re-paced here.
-//!
-//! Both are `#[ignore]`d for `test_support`'s usual reason as well: a plain
-//! `cargo test --workspace` must never start a cross-target firmware build.
-//! `just test-emu-esp32v3-boot` builds the `frame-dump` image, names the file
-//! it built, and runs these.
+//! Both are `#[ignore]`d for `test_support`'s usual reason: a plain `cargo
+//! test --workspace` must never start a cross-target firmware build. `just
+//! test-emu-esp32v3-boot` builds the `frame-dump` image, names the file it
+//! built, and runs these.
 
 use std::path::{Path, PathBuf};
 
@@ -134,12 +137,17 @@ const PAD: u8 = 18;
 const LEDS: usize = 64;
 const BITS: usize = LEDS * 24;
 
-/// The walk's whole cost in emulated time. The upload lands its project a
-/// few seconds in (twelve requests, 64 B every 30 ms of guest time) and the
-/// shader then compiles incrementally over many render ticks; 30 s is room
-/// for the deferred dump 30 frames past the first lit frame, and the run
-/// ends earlier than that today on the window-spill defect.
-const GATE_US: u64 = 30_000_000;
+/// The walk's whole cost in emulated time, and it is **measured, not
+/// generous**: the upload lands its project ~7.3 s in (twelve requests, 64 B
+/// every 30 ms of guest time), the shader compiles, the first lit frame
+/// follows, and the deferred dump fires at the guest's frame 31 a further
+/// ~70 ms later. 10 s leaves the dump a second of margin and still decodes
+/// ~2,000 frames for "every later frame is the same frame".
+///
+/// ⚠️ It is a **run parameter, not a tolerance** — raising it costs CI
+/// minutes and buys nothing, because a clock-free project renders the same
+/// bytes for ever.
+const GATE_US: u64 = 10_000_000;
 
 /// Host-side safety net, so a wedged run fails the suite instead of hanging
 /// it.
@@ -189,6 +197,66 @@ fn fnv1a(data: &[u8]) -> u32 {
     hash
 }
 
+/// The prefixes a console record can only *begin* with. One of these inside a
+/// line is another task's record spliced into this one — never this record's
+/// own text.
+const RECORD_STARTS: [&str; 8] = [
+    "[INFO] ", "[WARN] ", "[ERROR] ", "[DEBUG] ", "[TRACE] ", "[MEM] ", "[JIT] ", "[stack] ",
+];
+
+/// **The console, repaired.** Rejoins a record that another task's records
+/// were spliced into: the head, every whole insertion, and the tail come back
+/// as the lines they were written as.
+///
+/// Nothing is discarded — the insertions are emitted in the order they
+/// arrived, so a `grep` over the result sees everything the guest said. See
+/// the module docs for the open line this exists for.
+fn deinterleave(text: &str) -> String {
+    let mut out: Vec<String> = Vec::new();
+    let mut pending = String::new();
+    let mut cut_open = false;
+    for line in text.lines() {
+        // A blank line belongs to whatever record just ended; it never ends a
+        // cut one.
+        if line.is_empty() {
+            out.push(String::new());
+            continue;
+        }
+        let interior = RECORD_STARTS
+            .iter()
+            .filter_map(|m| line.find(m))
+            .filter(|at| *at > 0)
+            .min();
+        // A line that BEGINS with a record marker is a whole record of its
+        // own — the second and third insertions into a cut line arrive this
+        // way — and it can never be the tail of one.
+        if interior.is_none() && cut_open && RECORD_STARTS.iter().any(|m| line.starts_with(m)) {
+            out.push(line.to_string());
+            continue;
+        }
+        match interior {
+            // …head[insertion: the insertion has its own newline, the head
+            // does not, so the head waits for its tail.
+            Some(at) => {
+                pending.push_str(&line[..at]);
+                cut_open = true;
+                out.push(line[at..].to_string());
+            }
+            // The tail of a cut record.
+            None if cut_open => {
+                pending.push_str(line);
+                out.push(std::mem::take(&mut pending));
+                cut_open = false;
+            }
+            None => out.push(line.to_string()),
+        }
+    }
+    if cut_open {
+        out.push(pending);
+    }
+    out.join("\n")
+}
+
 struct Run {
     m: Machine,
     outcome: Outcome,
@@ -219,7 +287,7 @@ fn run(elf: &Path, quantum: u64, dir: &Path) -> Run {
     // ⚠️ A frame is not closed until something follows its latch: the decoder
     // reports an open frame *incomplete* rather than inventing a reset gap.
     m.flush_frames();
-    let text = m.uart0().text();
+    let text = deinterleave(&m.uart0().text());
     let frames = m.frames(PAD).to_vec();
     Run {
         m,
@@ -228,47 +296,6 @@ fn run(elf: &Path, quantum: u64, dir: &Path) -> Run {
         frames,
         dump,
     }
-}
-
-/// **The window-spill defect, recognised exactly.**
-///
-/// `true` — with a `SKIP` notice naming it — when the run ended on M4 P4b's
-/// finding: a strict-bus stop inside one of the ROM's window handlers at an
-/// address a null `a1` produces. Anything else is a failure and is left to
-/// the assertions.
-///
-/// This is an early-out and **not** an `#[ignore]`, because an `#[ignore]` is
-/// not a skip here: `just test-emu-esp32v3-boot` — what CI's `Emulator
-/// ESP32v3 (x64)` job runs — runs `cargo test -- --include-ignored`, so an
-/// `#[ignore]`d test still runs and still fails. The attribute's job is to
-/// keep a bare `cargo test` away from the firmware image; this is what keeps
-/// a known, named, in-flight defect from turning the job red while the fix is
-/// being written on another branch. When P4b lands this stops matching and
-/// every assertion below runs for real.
-///
-/// `tests/five_wires.rs` carries the same function, and deliberately: a test
-/// file that imported its skip condition from another one would skip for a
-/// reason its reader cannot see.
-fn stopped_by_the_window_spill(m: &Machine, outcome: &Outcome, test: &str) -> bool {
-    let Outcome::StrictBus { violation } = outcome else {
-        return false;
-    };
-    let symbol = m.symbolize(violation.pc).unwrap_or_default();
-    if !symbol.contains("Window") || violation.address < 0xffff_0000 {
-        return false;
-    }
-    skip_notice(
-        test,
-        &format!(
-            "the window-spill defect M4 P4b is fixing — {:?} at 0x{:08x} ({symbol}, pc \
-             0x{:08x}, cycle {}). The guest dies inside the project it just loaded, so the \
-             frames this gate reads never happen. Branch \
-             PR #711 (claude/xt-m4-p4b-window-underflow); the crate README's \"A frame three ways\" \
-             has the trace.",
-            violation.access, violation.address, violation.pc, violation.cycle,
-        ),
-    );
-    true
 }
 
 /// The index of the first decoded frame with any non-zero byte on the wire.
@@ -299,8 +326,7 @@ fn last_dump_rgb(text: &str) -> Option<String> {
 /// oracle's frame, byte for byte, and every later frame this run got to is
 /// the same frame.
 #[test]
-#[ignore = "needs the fw-esp32v3 frame-dump ELF; run through `just test-emu-esp32v3-boot` \
-            (and skips on the M4 P4b window-spill defect until it lands)"]
+#[ignore = "needs the fw-esp32v3 frame-dump ELF; run through `just test-emu-esp32v3-boot`"]
 fn the_first_lit_frame_off_io18_is_the_host_oracles_frame() {
     let elf = match fw_esp32v3_frame_dump_image() {
         Ok(path) => path,
@@ -319,9 +345,6 @@ fn the_first_lit_frame_off_io18_is_the_host_oracles_frame() {
         r.frames.len(),
         r.m.bus().unmapped_reads() + r.m.bus().unmapped_writes(),
     );
-    if stopped_by_the_window_spill(&r.m, &r.outcome, "shader_oracle_pin") {
-        return;
-    }
 
     // 1. The guest heard the whole walk, and P1's dual core is still there.
     assert!(
@@ -468,10 +491,9 @@ fn the_first_lit_frame_off_io18_is_the_host_oracles_frame() {
 ///
 /// Everything here needs the guest to survive past the first lit frame: the
 /// firmware's own dump is *deferred* `LIT_DUMP_DELAY_FRAMES = 30` frames
-/// (`frame_dump.rs`), and the guest dies about 22 lit frames in.
+/// (`frame_dump.rs`), and until M4 P4b (#711) the guest died before it.
 #[test]
-#[ignore = "needs the fw-esp32v3 frame-dump ELF; run through `just test-emu-esp32v3-boot` \
-            (and skips on the M4 P4b window-spill defect until it lands)"]
+#[ignore = "needs the fw-esp32v3 frame-dump ELF; run through `just test-emu-esp32v3-boot`"]
 fn the_firmwares_own_dump_is_the_same_frame_and_the_run_reaches_its_deadline() {
     let elf = match fw_esp32v3_frame_dump_image() {
         Ok(path) => path,
@@ -479,9 +501,6 @@ fn the_firmwares_own_dump_is_the_same_frame_and_the_run_reaches_its_deadline() {
     };
     let (da, db) = (scratch("a"), scratch("b"));
     let a = run(&elf, 256, &da);
-    if stopped_by_the_window_spill(&a.m, &a.outcome, "shader_oracle_pin") {
-        return;
-    }
 
     assert!(
         matches!(a.outcome, Outcome::Deadline { .. }),
@@ -550,8 +569,9 @@ fn the_firmwares_own_dump_is_the_same_frame_and_the_run_reaches_its_deadline() {
 /// The committed script is what it claims to be: twelve requests, the hello
 /// first, `projectRead` last. No firmware, so this runs everywhere.
 ///
-/// ⚠️ M4 **P4b** commits this same file byte-identical at the same path, so
-/// the two branches merge clean. Regenerating it here would break that.
+/// ⚠️ M4 **P4b** landed this same file at the same path (#711), and this
+/// branch kept that copy on the rebase rather than its own. Regenerating it
+/// here would undo that.
 #[test]
 fn the_walk_script_is_the_twelve_requests_the_client_sends() {
     let text = std::fs::read_to_string(script_path()).expect("committed");
@@ -623,6 +643,27 @@ fn the_oracle_constant_is_sixty_four_pixels_and_its_own_crc() {
         .map(|i| u8::from_str_radix(&ORACLE_RGB[i..i + 2], 16).expect("hex"))
         .collect();
     assert_eq!(fnv1a(&bytes), ORACLE_CRC);
+}
+
+/// The repair, on the real shape it exists for: the driver's open line cut in
+/// four by a `[stack]`, a `[MEM]` and a `[JIT]` record. Every insertion is
+/// still there, in order, and the cut record is whole again.
+#[test]
+fn deinterleave_rejoins_a_record_the_console_cut_in_four() {
+    let cut = "[INFO] a: Esp32V3RmtWs281xDriver::open: endpoint=esp32v3-rmt-ws281x[stack] hi\n\
+         [MEM] free=1\n\
+         [JIT] used=0\n\
+         :ws281x:local:IO18 gpio=/gpio/18\n\
+         \n\
+         [INFO] b: next\n";
+    assert_eq!(
+        deinterleave(cut),
+        "[stack] hi\n[MEM] free=1\n[JIT] used=0\n[INFO] a: Esp32V3RmtWs281xDriver::open: \
+         endpoint=esp32v3-rmt-ws281x:ws281x:local:IO18 gpio=/gpio/18\n\n[INFO] b: next"
+    );
+    // An uncut console comes back as itself, blank lines and all.
+    let whole = "[INFO] a: one\n\n[MEM] free=1\n[INFO] b: two";
+    assert_eq!(deinterleave(whole), whole);
 }
 
 /// The dump reader takes the LAST `[OUT] dump` line, which is the deferred

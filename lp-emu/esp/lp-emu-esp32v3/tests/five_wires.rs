@@ -31,26 +31,35 @@
 //!   by design, and nothing here gates on a frame period, a phase or an
 //!   emulated microsecond (PD9).
 //!
-//! # ⚠️ The window-spill defect, and why this file holds two tests
+//! # ⚠️ The console interleaves, so every console assertion reads a repaired one
 //!
-//! Loading any project kills this guest (`_WindowUnderflow8` restores
-//! `a1 = 0`; the crate README's "A frame three ways" carries the trace, and
-//! M4 **P4b** (PR #711) is the fix). On this tree the five-wire walk reaches
-//! the outputs' open and the compile-window black frame on all five pads and
-//! stops there, so what is reachable today is the **routing**: five pads,
-//! the re-mux, whole frames with no bit errors, and determinism. Everything
-//! that needs the render to survive — five *distinct lit* wires, the per-wire
-//! checksum against the guest's own `[OUT] frame=… crc=` summary lines (one
-//! per `REPORT_EVERY_FRAMES = 60` frames, and the guest dies long before the
-//! sixtieth), the frame counts, `Outcome::Deadline`, `unmapped == 0` — is the
-//! third test, which is not weakened but stops at
-//! [`stopped_by_the_window_spill`]: that one stop, recognised exactly, with a
-//! `SKIP` notice naming it.
+//! The classic's writers yield mid-line, so another task's whole record can
+//! land inside one — the PR #300 interleaving defect, and on this image the
+//! driver's own open line arrives cut in four by a `[stack]`, a `[MEM]` and a
+//! `[JIT]` record. [`deinterleave`] rejoins a cut record around its
+//! insertions, and every console assertion below reads the repaired console.
+//! It matters most for the `[OUT] frame=… crc=…` summary lines this gate is
+//! built on: a split one would parse as a different number rather than as a
+//! missing line.
 //!
-//! Both are `#[ignore]`d for `test_support`'s usual reason as well: a plain
-//! `cargo test --workspace` must never start a cross-target firmware build.
-//! `just test-emu-esp32v3-boot` builds the `frame-dump` image, names the file
-//! it built, and runs these.
+//! # The three tests
+//!
+//! The **routing** is [`five_wires_share_four_slots_and_the_fifth_re_muxes_a_signal`],
+//! the **determinism** is
+//! [`the_second_wave_decodes_the_same_frames_across_two_runs_and_two_quanta`],
+//! and the **bytes** — five distinct lit wires, the per-wire checksum against
+//! the guest's own `[OUT] frame=… crc=` summary lines (one per
+//! `REPORT_EVERY_FRAMES = 60` frames), the frame counts, `Outcome::Deadline`,
+//! `unmapped == 0` — are
+//! [`every_wire_checksum_equals_the_guests_own_summary_line`]. Until M4
+//! **P4b** (PR #711) the third stopped short: loading any project killed the
+//! guest in a ROM window handler. That is fixed and all three run every
+//! assertion.
+//!
+//! All are `#[ignore]`d for `test_support`'s usual reason: a plain `cargo
+//! test --workspace` must never start a cross-target firmware build. `just
+//! test-emu-esp32v3-boot` builds the `frame-dump` image, names the file it
+//! built, and runs these.
 
 use std::path::{Path, PathBuf};
 
@@ -73,9 +82,12 @@ const PADS: [u8; 5] = [18, 16, 14, 2, 13];
 const LEDS: usize = 16;
 const BITS: usize = LEDS * 24;
 
-/// The walk's cost in emulated time; the run ends earlier than this today on
-/// the window-spill defect.
-const GATE_US: u64 = 30_000_000;
+/// The walk's cost in emulated time. Measured: the upload lands its project
+/// ~7.3 s in and the five outputs open right after it, so 10 s leaves room
+/// for several `REPORT_EVERY_FRAMES = 60` summary lines per wire. A **run
+/// parameter, not a tolerance** — a clock-free project renders the same bytes
+/// for ever, and every extra second is CI minutes for nothing.
+const GATE_US: u64 = 10_000_000;
 const WALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(900);
 
 /// The dual-core line — the pusher's whole premise, and P1's standing guard.
@@ -170,42 +182,56 @@ fn after(line: &str, needle: &str) -> String {
         .collect()
 }
 
-/// **The window-spill defect, recognised exactly.**
-///
-/// `true` — with a `SKIP` notice naming it — when the run ended on M4 P4b's
-/// finding: a strict-bus stop inside one of the ROM's window handlers at an
-/// address a null `a1` produces. Anything else is a failure and is left to
-/// the assertions.
-///
-/// An early-out and **not** an `#[ignore]`, because an `#[ignore]` is not a
-/// skip here: `just test-emu-esp32v3-boot` — what CI's `Emulator ESP32v3
-/// (x64)` job runs — runs `cargo test -- --include-ignored`, so an
-/// `#[ignore]`d test still runs and still fails. When P4b lands this stops
-/// matching and every assertion below runs for real.
-///
-/// `tests/shader_oracle_pin.rs` carries the same function, and deliberately:
-/// a test file that imported its skip condition from another one would skip
-/// for a reason its reader cannot see.
-fn stopped_by_the_window_spill(m: &Machine, outcome: &Outcome, test: &str) -> bool {
-    let Outcome::StrictBus { violation } = outcome else {
-        return false;
-    };
-    let symbol = m.symbolize(violation.pc).unwrap_or_default();
-    if !symbol.contains("Window") || violation.address < 0xffff_0000 {
-        return false;
+/// The prefixes a console record can only *begin* with. One of these inside a
+/// line is another task's record spliced into this one.
+const RECORD_STARTS: [&str; 8] = [
+    "[INFO] ", "[WARN] ", "[ERROR] ", "[DEBUG] ", "[TRACE] ", "[MEM] ", "[JIT] ", "[stack] ",
+];
+
+/// **The console, repaired**: a record another task's records were spliced
+/// into comes back as the line it was written as, with every insertion still
+/// present and in order. `tests/shader_oracle_pin.rs` carries the same
+/// function, and deliberately: a test file whose console repair lived in
+/// another one would be read without it.
+fn deinterleave(text: &str) -> String {
+    let mut out: Vec<String> = Vec::new();
+    let mut pending = String::new();
+    let mut cut_open = false;
+    for line in text.lines() {
+        if line.is_empty() {
+            out.push(String::new());
+            continue;
+        }
+        let interior = RECORD_STARTS
+            .iter()
+            .filter_map(|m| line.find(m))
+            .filter(|at| *at > 0)
+            .min();
+        // A line that BEGINS with a record marker is a whole record of its
+        // own — the second and third insertions into a cut line arrive this
+        // way — and it can never be the tail of one.
+        if interior.is_none() && cut_open && RECORD_STARTS.iter().any(|m| line.starts_with(m)) {
+            out.push(line.to_string());
+            continue;
+        }
+        match interior {
+            Some(at) => {
+                pending.push_str(&line[..at]);
+                cut_open = true;
+                out.push(line[at..].to_string());
+            }
+            None if cut_open => {
+                pending.push_str(line);
+                out.push(std::mem::take(&mut pending));
+                cut_open = false;
+            }
+            None => out.push(line.to_string()),
+        }
     }
-    skip_notice(
-        test,
-        &format!(
-            "the window-spill defect M4 P4b is fixing — {:?} at 0x{:08x} ({symbol}, pc \
-             0x{:08x}, cycle {}). The guest dies inside the project it just loaded, so the \
-             lit frames this gate reads never happen. Branch \
-             PR #711 (claude/xt-m4-p4b-window-underflow); the crate README's \"A frame three ways\" \
-             has the trace.",
-            violation.access, violation.address, violation.pc, violation.cycle,
-        ),
-    );
-    true
+    if cut_open {
+        out.push(pending);
+    }
+    out.join("\n")
 }
 
 /// A frame without its clock: everything the wire carried, and nothing about
@@ -278,7 +304,7 @@ fn run(elf: &Path, quantum: u64, dir: &Path) -> Run {
     // before reading the last one on any pad. The same call flushes the pin
     // log's writer, which is what makes the file below complete.
     m.flush_frames();
-    let text = m.uart0().text();
+    let text = deinterleave(&m.uart0().text());
     let frames = PADS.iter().map(|p| (*p, m.frames(*p).to_vec())).collect();
     let pin_log = std::fs::read_to_string(&log).unwrap_or_default();
     Run {
@@ -459,33 +485,58 @@ fn the_second_wave_decodes_the_same_frames_across_two_runs_and_two_quanta() {
     );
     assert_eq!(a.frames, b.frames, "two runs decoded different frames");
 
-    // ⚠️ Across two **quanta**, the bytes — and only the bytes. A different
-    // quantum is a different interleaving of the two cores, and the pusher
-    // lives on core 1: measured here, the same five frames start 64 cycles
-    // (0.27 µs) earlier at quantum 64 than at 256, one window's worth, while
-    // every bit on the wire is identical. So this compares the frame's
-    // *shape* — pad, index, bit count, wire bytes, errors, completeness — and
-    // never an absolute cycle, which is the same rule the rest of M4 follows
-    // for a different reason (PD9).
+    // ⚠️ Across two **quanta**, the bytes — and only the bytes, and only the
+    // frames both runs finished. A different quantum is a different
+    // interleaving of the two cores and the pusher lives on core 1, so the
+    // same frame starts a window apart (64 cycles, 0.27 µs) in the two runs
+    // while every bit on it is identical. The run ends on a **cycle**, so
+    // that window decides whether the last frame is past the deadline or cut
+    // by it: 2,000-odd frames in, one pad can carry one more frame at one
+    // quantum than at the other, and the last shared frame can be complete in
+    // one run and open in the other. Both are the deadline landing between
+    // two waves, not a waveform that changed.
+    //
+    // So the gate is: every frame before the last shared one is identical in
+    // *shape* — pad, index, bit count, wire bytes, trailing bits, errors,
+    // completeness — and the counts differ by at most one. Never an absolute
+    // cycle, which is the rule the rest of M4 follows for a different reason
+    // (PD9).
     //
     // `tests/pin_frames.rs` compares two quanta's dumps byte for byte
     // including their times; it can, because its waveform is driven from the
     // host on one core. This one cannot, and that difference is the second
     // wave's signature rather than a flaw in either.
     let c = run(&elf, 64, &dir);
-    assert_eq!(
-        shapes(&c.frames),
-        shapes(&a.frames),
-        "quantum 64 decoded different frames from quantum 256"
-    );
-    println!(
-        "five_wires: identical frames at quantum 256 (twice) and 64: {}",
-        a.frames
-            .iter()
-            .map(|(pad, f)| format!("gpio{pad}={}", f.len()))
-            .collect::<Vec<_>>()
-            .join(" ")
-    );
+    let (q256, q64) = (shapes(&a.frames), shapes(&c.frames));
+    assert_eq!(q256.len(), q64.len(), "a pad went missing at quantum 64");
+    for ((pad, fa), (_, fc)) in q256.iter().zip(q64.iter()) {
+        let shared = fa.len().min(fc.len());
+        let first_diff = fa.iter().zip(fc.iter()).position(|(x, y)| x != y);
+        println!(
+            "five_wires: gpio{pad}: q256 {} frame(s), q64 {} frame(s), first difference {:?} \
+             of {shared} shared",
+            fa.len(),
+            fc.len(),
+            first_diff,
+        );
+        if let Some(at) = first_diff {
+            assert!(
+                at + 1 >= shared,
+                "gpio{pad}: quantum 64 and quantum 256 decoded a different frame at index \
+                 {at} of {shared} shared — not merely a last frame the deadline cut \
+                 differently.\n  q256: {:?}\n  q64:  {:?}",
+                fa[at],
+                fc[at],
+            );
+        }
+        assert!(
+            fa.len().abs_diff(fc.len()) <= 1,
+            "gpio{pad}: {} frames at quantum 256 and {} at quantum 64 — more than the one \
+             frame a deadline can land inside",
+            fa.len(),
+            fc.len(),
+        );
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -501,11 +552,10 @@ fn the_second_wave_decodes_the_same_frames_across_two_runs_and_two_quanta() {
 /// dropped, and the run reaches its own deadline with nothing unmapped.
 ///
 /// All of it needs the render to survive: the summary lines are printed once
-/// every `REPORT_EVERY_FRAMES = 60` frames, and the guest dies long before
-/// the sixtieth.
+/// every `REPORT_EVERY_FRAMES = 60` frames, and until M4 P4b (#711) the guest
+/// died long before the sixtieth.
 #[test]
-#[ignore = "needs the fw-esp32v3 frame-dump ELF; run through `just test-emu-esp32v3-boot` \
-            (and skips on the M4 P4b window-spill defect until it lands)"]
+#[ignore = "needs the fw-esp32v3 frame-dump ELF; run through `just test-emu-esp32v3-boot`"]
 fn every_wire_checksum_equals_the_guests_own_summary_line() {
     let elf = match fw_esp32v3_frame_dump_image() {
         Ok(path) => path,
@@ -513,9 +563,12 @@ fn every_wire_checksum_equals_the_guests_own_summary_line() {
     };
     let dir = scratch("checksums");
     let r = run(&elf, 256, &dir);
-    if stopped_by_the_window_spill(&r.m, &r.outcome, "five_wires") {
-        return;
-    }
+    println!(
+        "five_wires: outcome {:?}, {} us emulated, unmapped {}",
+        r.outcome,
+        r.m.micros(),
+        r.m.bus().unmapped_reads() + r.m.bus().unmapped_writes(),
+    );
 
     assert!(
         matches!(r.outcome, Outcome::Deadline { .. }),
@@ -603,9 +656,13 @@ fn every_wire_checksum_equals_the_guests_own_summary_line() {
         );
     }
 
-    // No frame is dropped: the guest's own per-wire frame counter (the
-    // highest `frame=` it reported for that wire) and the decoder's count
-    // agree within one — the last frame may still be open at the deadline.
+    // No frame is dropped. ⚠️ The guest's own counter is only visible once
+    // every `REPORT_EVERY_FRAMES` frames, so its highest `frame=` is the last
+    // multiple of 60 it reached and **not** its total — "within one" would be
+    // a claim about when the deadline fell, not about dropped frames. The
+    // claim that is about dropped frames: the pad carried at least every
+    // frame the guest counted, and no more than one report period more.
+    const REPORT_EVERY_FRAMES: usize = 60;
     for (pad, frames) in &r.frames {
         let (_, crc, _) = per_wire.iter().find(|(p, _, _)| p == pad).expect("a wire");
         let claimed = summaries
@@ -615,9 +672,20 @@ fn every_wire_checksum_equals_the_guests_own_summary_line() {
             .max()
             .expect("a summary line");
         let decoded = frames.len();
+        println!(
+            "five_wires: gpio{pad}: the guest's last report was frame {claimed}, the pad \
+             carried {decoded}"
+        );
         assert!(
-            decoded + 1 >= claimed && claimed + 1 >= decoded,
-            "gpio{pad}: the guest counted {claimed} frames, the pad carried {decoded}"
+            decoded >= claimed,
+            "gpio{pad}: the guest counted {claimed} frames and the pad carried only \
+             {decoded} — frames were lost between the driver and the wire"
+        );
+        assert!(
+            decoded < claimed + REPORT_EVERY_FRAMES,
+            "gpio{pad}: the pad carried {decoded} frames while the guest's last report was \
+             frame {claimed} — more than the one report period ({REPORT_EVERY_FRAMES}) a \
+             deadline can fall inside, so summary lines are being lost"
         );
     }
     let _ = std::fs::remove_dir_all(&dir);
@@ -686,6 +754,26 @@ fn the_summary_parser_reads_the_line_the_firmware_prints() {
                 lit: 0
             },
         ]
+    );
+}
+
+/// The repair, on the shape the classic's console really produces.
+#[test]
+fn deinterleave_rejoins_a_summary_line_another_record_cut() {
+    let cut = "[INFO] f: [OUT] frame=60 leds=16 crc=0x5577[MEM] free=1\n\
+         2254 lit=16\n";
+    assert_eq!(
+        deinterleave(cut),
+        "[MEM] free=1\n[INFO] f: [OUT] frame=60 leds=16 crc=0x55772254 lit=16"
+    );
+    assert_eq!(
+        summaries(&deinterleave(cut)),
+        vec![Summary {
+            n: 60,
+            leds: 16,
+            crc: 0x5577_2254,
+            lit: 16
+        }]
     );
 }
 
