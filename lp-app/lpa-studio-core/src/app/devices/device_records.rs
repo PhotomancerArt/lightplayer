@@ -45,18 +45,26 @@ use crate::app::places::{HardwareId, RegisteredDevice};
 /// Transport label for a device reached over a `fw-browser` worker — a sim.
 pub const SIM_TRANSPORT: &str = "sim";
 
+/// Transport label for a device reached over an emulated SoC in this tab —
+/// an emu. Not a sim: it runs the target's OWN firmware image.
+pub const EMU_TRANSPORT: &str = "emu";
+
 /// The transport label for a device reached at `endpoint`.
 ///
 /// The label comes from the link's own provider class rather than from a
 /// constant this module chose: a `sim:` endpoint is served by
-/// `BrowserWorkerLink` over the browser-worker provider, everything else in
-/// this build by one of the serial kinds. Keeping the answer in
-/// `lpa-link`'s table is what stops the registry column and the link from
-/// disagreeing when a third device class arrives.
+/// `BrowserWorkerLink` over the browser-worker provider, an `emu:` one by a
+/// `ByteStreamLink` over the tab emulator, everything else in this build by
+/// one of the serial kinds. Keeping the answer in `lpa-link`'s table is what
+/// stops the registry column and the link from disagreeing when a fourth
+/// device class arrives.
 pub fn transport_label_for_endpoint(endpoint: &str) -> &'static str {
-    let kind = match endpoint.starts_with(super::sim_record::SIM_ENDPOINT_PREFIX) {
-        true => LinkProviderKind::BrowserWorker,
-        false => LinkProviderKind::BrowserSerialEsp32,
+    let kind = if endpoint.starts_with(super::sim_record::SIM_ENDPOINT_PREFIX) {
+        LinkProviderKind::BrowserWorker
+    } else if endpoint.starts_with(super::sim_record::EMU_ENDPOINT_PREFIX) {
+        LinkProviderKind::EmulatorTab
+    } else {
+        LinkProviderKind::BrowserSerialEsp32
     };
     // Every kind names itself today; a future class that does not yet is a
     // row that says nothing rather than a row that lies.
