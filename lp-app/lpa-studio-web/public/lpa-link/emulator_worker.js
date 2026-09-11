@@ -25,7 +25,7 @@
 //       if deficit <= 0:  await tick(); continue      // ahead: wait
 //       budget   = min(deficit, SLICE_US) as cycles   // never more than one slice
 //       outcome  = emu_run(budget)
-//       drain both channels to the page
+//       drain: USB bytes to the page NOW; console text into a buffer
 //       if micros() went backwards: the chip rebooted — re-anchor
 //       if deficit still > SLICE_US: DROP it — re-anchor to now — and let
 //                                   the dilation window report the loss
@@ -45,6 +45,24 @@
 // applied BETWEEN slices (the machine's own rule — a control line never
 // lands between two instructions), so a loop that never yielded would never
 // read its inbox.
+//
+// ========================== THE CONSOLE CADENCE ==========================
+//
+// The two channels leave this thread on different terms. USB bytes are the
+// wire: esptool's SLIP frames and the firmware's hello go out the moment a
+// slice produces them, untouched, because a flasher's timeouts are counting.
+// UART0 is the console, and nobody's timeout is counting on it — but a blank
+// ESP32-C6 prints `invalid header: 0xffffffff` in a tight loop, and posting
+// that line on every pacing slice woke the main thread ten times a second
+// for text nobody was reading (measured 2026-09-11 on an unflashed
+// `?emu=tab` board). So console text is COALESCED here and posted when it
+// has waited `CONSOLE_EVERY_MS` of wall time or grown past
+// `CONSOLE_FLUSH_BYTES`, whichever comes first. Bytes are concatenated in
+// the order the guest wrote them and decoded once per flush with a streaming
+// decoder, so a multi-byte character split across two slices — or across two
+// flushes — comes out whole. `destroy` flushes what is left before it
+// answers. Nothing is dropped and nothing is reordered; only the wake-ups
+// are fewer.
 //
 // =========================================================================
 //
@@ -68,6 +86,10 @@ const DILATION_WINDOW_MS = 1_000;
 const PERSIST_EVERY_MS = 2_000;
 /** Read buffer for each drain. One USB packet is 64 bytes; this is generous. */
 const READ_CAP = 1 << 16;
+/** How long console text may wait in the worker before it is posted, in wall ms. */
+const CONSOLE_EVERY_MS = 100;
+/** …or how much of it may wait, whichever comes first. See THE CONSOLE CADENCE. */
+const CONSOLE_FLUSH_BYTES = 4096;
 /** The chip this board models. */
 const FLASH_LEN = 4 * 1024 * 1024;
 /**
@@ -128,6 +150,10 @@ let flashHandle = null;
 let persistKey = null;
 /** What the last `created`/`stats` said, so `listBoards` can be answered. */
 let boardMac = null;
+/** Console bytes waiting to be posted, in guest order, and when the first arrived. */
+let consoleChunks = [];
+let consoleBytes = 0;
+let consoleSince = 0;
 
 function post(message, transfer) {
   self.postMessage(message, transfer ?? []);
@@ -361,6 +387,12 @@ async function pace() {
       await step();
     } catch (error) {
       running = false;
+      // Whatever the guest said before it died is still worth reading.
+      try {
+        flushConsole(true);
+      } catch {
+        // the failure below is the one to report
+      }
       fail("run", error);
       return;
     }
@@ -434,12 +466,47 @@ function resetDilationWindow(wallAt, micros) {
 function drain() {
   const bytes = emu.usbRead(READ_CAP);
   if (bytes.length) {
-    // Transferred, not copied: these can be a whole upload's worth.
+    // Transferred, not copied: these can be a whole upload's worth. And
+    // posted NOW — see THE CONSOLE CADENCE for why this channel is not
+    // coalesced with the other one.
     post({ type: "usb", bytes: bytes.buffer }, [bytes.buffer]);
   }
   const console0 = emu.uart0Read(READ_CAP);
   if (console0.length) {
-    post({ type: "uart0", text: decoder.decode(console0) });
+    // `uart0Read` hands back a copy (`emulator_wasi.js`'s `withOut`), so
+    // holding it past the next slice is safe.
+    if (consoleBytes === 0) consoleSince = now();
+    consoleChunks.push(console0);
+    consoleBytes += console0.length;
+  }
+  if (
+    consoleBytes > 0 &&
+    (consoleBytes >= CONSOLE_FLUSH_BYTES || now() - consoleSince >= CONSOLE_EVERY_MS)
+  ) {
+    flushConsole();
+  }
+}
+
+/**
+ * Post the console text that has accumulated, as ONE message.
+ *
+ * `final` is the last flush this worker will make (`destroy`, or the loop
+ * dying): it drains the streaming decoder too, so a trailing partial
+ * character is emitted rather than held for a flush that will never come.
+ */
+function flushConsole(final = false) {
+  if (consoleBytes === 0 && !final) return;
+  const all = new Uint8Array(consoleBytes);
+  let at = 0;
+  for (const chunk of consoleChunks) {
+    all.set(chunk, at);
+    at += chunk.length;
+  }
+  consoleChunks = [];
+  consoleBytes = 0;
+  const text = decoder.decode(all, { stream: !final });
+  if (text.length) {
+    post({ type: "uart0", text });
   }
 }
 
@@ -561,6 +628,17 @@ const onMessage = async (event) => {
       case "destroy": {
         running = false;
         try {
+          // The last of the console goes before the board does, and before
+          // `destroyed` — a page that tears the worker down on that reply
+          // must have already been handed every byte.
+          if (emu) {
+            const last = emu.uart0Read(READ_CAP);
+            if (last.length) {
+              consoleChunks.push(last);
+              consoleBytes += last.length;
+            }
+          }
+          flushConsole(true);
           persistIfDirty();
         } finally {
           flashHandle?.close();
