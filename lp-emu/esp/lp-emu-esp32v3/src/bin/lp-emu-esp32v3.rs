@@ -9,20 +9,23 @@
 //! codes are a contract (0 / 2 / 3 / 4 / 5), and the error text is part of
 //! what a bring-up session reads.
 //!
-//! **An unrecognised flag is an error.** The doors P6/P7/P8 add (`--uart0`,
-//! `--uart0-script`, `--control`, `--flash`) are deliberately *not* stubbed
-//! with no-ops, so the phase that adds one is visible in the diff instead of
-//! silently changing what an old command line meant. `--cache-off-fetch`
-//! arrived with P4 and D4.
+//! **An unrecognised flag is an error.** The one door P7 still owes
+//! (`--flash`) is deliberately *not* stubbed with a no-op, so the phase that
+//! adds it is visible in the diff instead of silently changing what an old
+//! command line meant. `--cache-off-fetch` arrived with P4 and D4; P6 added
+//! the six the console and the cable need: `--uart0`, `--uart0-script`,
+//! `--uart0-baud`, `--control`, `--control-script` and `--exit-on`.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
 use lp_emu_esp32v3::cache::CacheOffPolicy;
+use lp_emu_esp32v3::control;
 use lp_emu_esp32v3::loader::EfuseIdentity;
 use lp_emu_esp32v3::machine::{
     AppSource, BootMode, Esp32V3Builder, Machine, Outcome, RomSource, StopCondition, TimeGrade,
+    Uart0Sink,
 };
 use lp_emu_esp32v3::{bus_setup, memmap};
 
@@ -73,6 +76,31 @@ OPTIONS:
                             reaches <cycle>
     --trace <path|->        write the bus trace here
     --trace-block <name>    only trace this block (repeatable)
+    --uart0 <spec>          where UART0's bytes go: `-` or `stdout`,
+                            `file:<path>`, or `tcp:<addr>` to LISTEN for one
+                            client at a time (whose bytes are UART0's RX).
+                            They are always also kept in memory [memory]
+    --uart0-script <path>   deterministic host input on the wire: bytes at
+                            declared EMULATED times, an after-the-device-said-it
+                            form and a then-+<ms> form. The deterministic
+                            path — a live socket lets the host clock decide
+                            when a byte lands, a script does not
+    --uart0-baud <n>        the rate the host at the other end of the cable
+                            sends at [115200]. It changes what the auto-baud
+                            counters report and NOTHING else; it never
+                            overrides what the guest writes to clkdiv
+    --control <tcp:addr>    LISTEN for a control-channel client: the CH340
+                            cable's own socket (attach/detach/open/close/
+                            dtr/rts/signals/reset/download-mode/state). One
+                            reply line per command
+    --control-script <path> the same verbs at declared EMULATED times — the
+                            deterministic twin of a control client
+    --reboot-on-reset       the auto-reset circuit releasing EN reboots the
+                            machine instead of ending the run. Off by
+                            default: a reboot costs a copy of guest memory
+                            taken at build time
+    --exit-on <line>        stop when this appears on a COMPLETE line of
+                            UART0's output; exits 0
     --seed <n>              the machine's PRNG seed [0]
     --efuse-mac <a:b:..>    the MAC the eFuse block answers [30:76:f5:ec:f6:34, the desk board]
     --efuse-rev <maj.min>   the chip revision it answers [3.1, the desk board]
@@ -82,7 +110,8 @@ OPTIONS:
     -h, --help              this
 
 EXIT CODES:
-    0 the deadline was reached   2 the hart faulted
+    0 the deadline was reached, or --exit-on matched
+    2 the hart faulted, or the cable reset the chip without --reboot-on-reset
     3 a strict-bus refusal       4 the wall-clock net fired
     5 a --break-at was reached  6 a cache-off fetch (D4)
 ";
@@ -114,6 +143,13 @@ struct Args {
     probes: Vec<(u64, String)>,
     trace: Option<String>,
     trace_blocks: Vec<String>,
+    uart0: Uart0Sink,
+    uart0_script: Option<PathBuf>,
+    uart0_baud: Option<u64>,
+    control: Option<String>,
+    control_script: Option<PathBuf>,
+    reboot_on_reset: bool,
+    exit_on: Option<String>,
     seed: u64,
     efuse: EfuseIdentity,
     hooks: bool,
@@ -147,7 +183,35 @@ fn run() -> Result<ExitCode, String> {
         .strict(args.strict)
         .cache_off_fetch(args.cache_off)
         .seed(args.seed)
-        .efuse(args.efuse);
+        .efuse(args.efuse)
+        .uart0(args.uart0.clone())
+        .reboot_on_reset(args.reboot_on_reset);
+    if let Some(baud) = args.uart0_baud {
+        builder = builder.uart0_baud(baud);
+    }
+    if let Some(path) = &args.uart0_script {
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| format!("--uart0-script {}: {e}", path.display()))?;
+        let script = control::parse_byte_script(&text)
+            .map_err(|e| format!("--uart0-script {}: {e}", path.display()))?;
+        println!(
+            "uart0 script: {} chunks, {} bytes",
+            script.chunks(),
+            script.remaining()
+        );
+        builder = builder.uart0_script(script);
+    }
+    if let Some(addr) = &args.control {
+        builder = builder.control(addr.clone());
+    }
+    if let Some(path) = &args.control_script {
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| format!("--control-script {}: {e}", path.display()))?;
+        let script = control::parse_control_script(&text)
+            .map_err(|e| format!("--control-script {}: {e}", path.display()))?;
+        println!("control script: {} commands", script.len());
+        builder = builder.control_script(script);
+    }
     if let Some(path) = args.rom {
         builder = builder.rom(RomSource::Path(path));
     }
@@ -182,11 +246,13 @@ fn run() -> Result<ExitCode, String> {
     let timeout = args.timeout.unwrap_or(Duration::from_millis(100));
     let stop = StopCondition {
         stop_cycle: Some(emulated_cycles(timeout)),
+        exit_on: args.exit_on.clone(),
         wall_timeout: args.wall_timeout,
         probes: args.probes.clone(),
     };
 
     let outcome = machine.run_until(&stop);
+    machine.bus_mut().host.flush_all();
     print_outcome(&mut machine, &outcome);
     Ok(ExitCode::from(outcome.exit_code() as u8))
 }
@@ -331,6 +397,21 @@ fn print_outcome(machine: &mut Machine, outcome: &Outcome) {
         Outcome::CacheOffFetch { pc, access, .. } => {
             println!("{}", machine.cache_off_message(cycle, *pc, access));
         }
+        Outcome::ExitMatched { .. } => {
+            println!("EXIT MATCHED cycle={cycle} ({micros} us emulated)");
+        }
+        Outcome::Reset { strap, .. } => {
+            println!(
+                "RESET cycle={cycle} ({micros} us emulated): the auto-reset circuit released \
+                 EN with IO0 {} — strap {strap}. Pass --reboot-on-reset to make the machine \
+                 actually reboot instead of stopping here.",
+                if *strap == lp_emu_esp_common::Strap::Download {
+                    "low"
+                } else {
+                    "high"
+                }
+            );
+        }
         Outcome::Fault { pc, fault, .. } => {
             let sym = machine.symbolize(*pc).unwrap_or_else(|| "?".into());
             println!("FAULT pc={pc:#010x} ({sym}) cycle={cycle}: {fault:?}");
@@ -412,6 +493,39 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                 args.probes.push((cycle, name.to_string()));
             }
             "--trace" => args.trace = Some(value()?),
+            "--uart0" => {
+                let v = value()?;
+                args.uart0 = match v.as_str() {
+                    "-" | "stdout" => Uart0Sink::Stdout,
+                    "memory" => Uart0Sink::Memory,
+                    other => match other.split_once(':') {
+                        Some(("file", path)) => Uart0Sink::File(PathBuf::from(path)),
+                        Some(("tcp", addr)) => Uart0Sink::Tcp(addr.to_string()),
+                        _ => {
+                            return Err(format!(
+                                "--uart0 {other}: expected `-`, `stdout`, `memory`, \
+                                 `file:<path>` or `tcp:<addr>`"
+                            ));
+                        }
+                    },
+                };
+            }
+            "--uart0-script" => args.uart0_script = Some(PathBuf::from(value()?)),
+            "--uart0-baud" => {
+                let v = value()?;
+                args.uart0_baud = Some(
+                    v.parse()
+                        .map_err(|_| format!("--uart0-baud {v}: not a number"))?,
+                );
+            }
+            "--control" => {
+                let v = value()?;
+                let addr = v.strip_prefix("tcp:").unwrap_or(&v);
+                args.control = Some(addr.to_string());
+            }
+            "--control-script" => args.control_script = Some(PathBuf::from(value()?)),
+            "--reboot-on-reset" => args.reboot_on_reset = true,
+            "--exit-on" => args.exit_on = Some(value()?),
             "--trace-block" => args.trace_blocks.push(value()?),
             "--efuse-mac" => {
                 let v = value()?;
@@ -431,10 +545,9 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             }
             other => {
                 return Err(format!(
-                    "unrecognised flag `{other}`. This machine's blocks are accept probes, so \
-                     the doors a later phase adds (--uart0, --control, --flash, \
-                     --cache-off-fetch) are absent rather than accepted-and-ignored. `--help` \
-                     lists what exists."
+                    "unrecognised flag `{other}`. The doors P7 and P8 still owe (--flash, \
+                     --cache-off-fetch) are absent rather than accepted-and-ignored, so the \
+                     phase that adds one is visible in the diff. `--help` lists what exists."
                 ));
             }
         }

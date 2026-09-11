@@ -58,7 +58,9 @@ use std::time::{Duration, Instant};
 use lp_emu_core::Bus;
 use lp_emu_core::sched::Cycles;
 use lp_emu_esp_common::bus::StrictViolation;
-use lp_emu_esp_common::{ElfImage, SocBus};
+use lp_emu_esp_common::{ByteLog, ByteSink, ByteSource, ElfImage, SocBus, Strap};
+
+use crate::control::{Cable, CableReport, ControlCommand, ControlReply};
 use lp_xt_emu::mach::interrupt::{IntKind, IntLine};
 use lp_xt_emu::mach::sr::PS_BOOT;
 use lp_xt_emu::mach::trap::NUM_INTERRUPTS;
@@ -134,6 +136,11 @@ pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     // ROM-up, stop 1: `_ResetHandler_efuse_check_patch` reads its own
     // fuses seven instructions after the reset vector.
     "EFUSE",
+    // ROM-up, in `main`: `uartAttach` (`0x4000_9013`) touches `UART1 +0x10`
+    // as well as UART0's, at cycle 30,992 — before `mmu_init` below. The
+    // application never opens it, so this is the first place in the boot that
+    // meets it. P6.
+    "UART1",
     // ROM-up, after the eFuse gate: `mmu_init` clears both flash MMU tables
     // and `cache_flash_mmu_set` fills them (P4). The direct load never
     // reaches them, so this is where the boot meets them — last.
@@ -391,6 +398,12 @@ pub enum Outcome {
         symbol: Option<String>,
         access: crate::cache::CacheOffAccess,
     },
+    /// The auto-reset circuit released EN and the run was **not** asked to
+    /// perform reboots ([`Esp32V3Builder::reboot_on_reset`]). The strap is
+    /// what IO0 was holding at the release.
+    Reset { cycle: Cycles, strap: Strap },
+    /// `--exit-on`'s line appeared on UART0 and the run stopped there.
+    ExitMatched { cycle: Cycles },
 }
 
 impl Outcome {
@@ -398,8 +411,8 @@ impl Outcome {
     /// that drives both machines reads one table.
     pub const fn exit_code(&self) -> i32 {
         match self {
-            Outcome::Deadline { .. } => 0,
-            Outcome::Fault { .. } => 2,
+            Outcome::ExitMatched { .. } | Outcome::Deadline { .. } => 0,
+            Outcome::Fault { .. } | Outcome::Reset { .. } => 2,
             Outcome::StrictBus { .. } => 3,
             Outcome::WallTimeout { .. } => 4,
             Outcome::Breakpoint { .. } => 5,
@@ -418,6 +431,7 @@ impl Outcome {
             | Outcome::WallTimeout { cycle }
             | Outcome::Breakpoint { cycle, .. }
             | Outcome::CacheOffFetch { cycle, .. } => *cycle,
+            Outcome::Reset { cycle, .. } | Outcome::ExitMatched { cycle } => *cycle,
             Outcome::StrictBus { violation } => violation.cycle,
         }
     }
@@ -432,6 +446,10 @@ pub struct StopCondition {
     /// stops it", which on a machine with no peripherals means the first
     /// fault.
     pub stop_cycle: Option<Cycles>,
+    /// Stop when this line appears in UART0's bytes (`--exit-on`). Matched
+    /// against the bytes that have **left the shifter**, once the line they
+    /// are on is complete.
+    pub exit_on: Option<String>,
     /// Host-side safety net.
     pub wall_timeout: Option<Duration>,
     /// `(cycle, symbol)` — print the word at `symbol` when guest time
@@ -533,6 +551,75 @@ impl From<LoadError> for BuildError {
     }
 }
 
+/// Where a run's UART0 bytes go — and, for `Tcp`, where its RX bytes come
+/// from. Whatever the choice, the bytes are also kept in memory for
+/// `--exit-on` and [`Machine::uart0`].
+#[derive(Clone, Debug, Default)]
+pub enum Uart0Sink {
+    /// Collected in memory only.
+    #[default]
+    Memory,
+    Stdout,
+    File(PathBuf),
+    /// **Listen** on this address (`127.0.0.1:5555`) for one client at a
+    /// time; the client's bytes are UART0's RX. A run with a live socket is
+    /// not deterministic — `--uart0-script` is the deterministic path.
+    ///
+    /// ⚠️ On this chip a client connecting is **not** a port open and moves
+    /// no chip state: the port is a bridge chip on the board (`crate::control`).
+    Tcp(String),
+}
+
+/// A sink that keeps a copy of everything it forwards, so `--exit-on` can
+/// match on bytes that also went to stdout or a file.
+struct TeeSink {
+    log: ByteLog,
+    inner: Box<dyn ByteSink>,
+}
+
+impl ByteSink for TeeSink {
+    fn write(&mut self, bytes: &[u8]) {
+        self.log.append(bytes);
+        self.inner.write(bytes);
+    }
+
+    fn flush(&mut self) {
+        self.inner.flush();
+    }
+}
+
+/// A `ByteSink` over a file handle. Buffered: UART0 drains one byte at a
+/// time in emulated time, and a `write(2)` per byte is measurable.
+struct FileSink(std::io::BufWriter<std::fs::File>);
+
+impl ByteSink for FileSink {
+    fn write(&mut self, bytes: &[u8]) {
+        use std::io::Write;
+        let _ = self.0.write_all(bytes);
+    }
+
+    fn flush(&mut self) {
+        use std::io::Write;
+        let _ = self.0.flush();
+    }
+}
+
+/// The control channel's listener plus the tail of a line that arrived in
+/// pieces. One reply per command, `\n`-terminated, in [`crate::control`]'s
+/// grammar.
+struct ControlChannel {
+    host: lp_emu_esp_common::TcpHost,
+    partial: Vec<u8>,
+}
+
+/// The longest control line the channel will assemble. A client that sends
+/// more without a newline is answered once and resynchronised.
+const MAX_CONTROL_LINE: usize = 4 << 10;
+
+/// How often the host's side is looked at, in guest cycles: 1 ms, the C6's
+/// cadence and the UART's own live-source poll.
+const HOST_POLL_CYCLES: Cycles = crate::periph::uart::LIVE_POLL_CYCLES;
+
 /// Builds a [`Machine`].
 pub struct Esp32V3Builder {
     rom: RomSource,
@@ -550,6 +637,13 @@ pub struct Esp32V3Builder {
     trace: Option<Box<dyn std::io::Write + Send>>,
     trace_blocks: Vec<String>,
     seed: u64,
+    uart0: Uart0Sink,
+    uart0_source: Option<Box<dyn ByteSource>>,
+    uart0_script: Option<lp_emu_esp_common::ScriptedSource>,
+    uart0_baud: Option<u64>,
+    control: Option<String>,
+    control_script: Vec<(Cycles, ControlCommand)>,
+    reboot_on_reset: bool,
 }
 
 impl Default for Esp32V3Builder {
@@ -570,6 +664,13 @@ impl Default for Esp32V3Builder {
             trace: None,
             trace_blocks: Vec::new(),
             seed: 0,
+            uart0: Uart0Sink::default(),
+            uart0_source: None,
+            uart0_script: None,
+            uart0_baud: None,
+            control: None,
+            control_script: Vec::new(),
+            reboot_on_reset: false,
         }
     }
 }
@@ -596,6 +697,13 @@ impl fmt::Debug for Esp32V3Builder {
             .field("trace", &self.trace.is_some())
             .field("trace_blocks", &self.trace_blocks)
             .field("seed", &self.seed)
+            .field("uart0", &self.uart0)
+            .field("uart0_source", &self.uart0_source.is_some())
+            .field("uart0_script", &self.uart0_script.is_some())
+            .field("uart0_baud", &self.uart0_baud)
+            .field("control", &self.control)
+            .field("control_script", &self.control_script.len())
+            .field("reboot_on_reset", &self.reboot_on_reset)
             .finish()
     }
 }
@@ -697,6 +805,62 @@ impl Esp32V3Builder {
         self
     }
 
+    /// Where UART0's bytes go (`--uart0`).
+    pub fn uart0(mut self, sink: Uart0Sink) -> Self {
+        self.uart0 = sink;
+        self
+    }
+
+    /// Deterministic host input for UART0, as anything that is not a socket.
+    pub fn uart0_source(mut self, source: Box<dyn ByteSource>) -> Self {
+        self.uart0_source = Some(source);
+        self
+    }
+
+    /// Deterministic host input written as a script
+    /// ([`lp_emu_esp_common::ScriptedSource`]). Preferred over
+    /// [`uart0_source`](Self::uart0_source), because the builder hands it the
+    /// UART0 log — without which an `after "<line>"` step has nothing to
+    /// watch and never fires.
+    pub fn uart0_script(mut self, script: lp_emu_esp_common::ScriptedSource) -> Self {
+        self.uart0_script = Some(script);
+        self
+    }
+
+    /// The rate the host on the other end of the cable sends at
+    /// (`--uart0-baud`, default
+    /// [`crate::periph::uart::DEFAULT_HOST_BAUD`]). It changes what the
+    /// auto-baud counters report and nothing else; a scripted byte still
+    /// lands when the script says it does, and it never overrides what the
+    /// guest programs into `clkdiv`.
+    pub fn uart0_baud(mut self, baud: u64) -> Self {
+        self.uart0_baud = Some(baud);
+        self
+    }
+
+    /// Listen for a control-channel client on this address (`--control`).
+    pub fn control(mut self, addr: impl Into<String>) -> Self {
+        self.control = Some(addr.into());
+        self
+    }
+
+    /// The deterministic twin of a control client (`--control-script`).
+    pub fn control_script(mut self, script: Vec<(Cycles, ControlCommand)>) -> Self {
+        self.control_script = script;
+        self
+    }
+
+    /// Whether the auto-reset circuit releasing EN actually reboots the
+    /// machine, or ends the run with [`Outcome::Reset`].
+    ///
+    /// Off for a plain `run`, as on the C6: a reboot costs a whole copy of
+    /// guest memory taken at build time, and a run that will never reset
+    /// should not pay for it.
+    pub fn reboot_on_reset(mut self, reboot: bool) -> Self {
+        self.reboot_on_reset = reboot;
+        self
+    }
+
     pub fn build(self) -> Result<Machine, BuildError> {
         let rom_image = match &self.rom {
             RomSource::Vendored => rom::vendored()?,
@@ -732,6 +896,72 @@ impl Esp32V3Builder {
             .expect("cache poisoned")
             .set_policy(self.cache_off);
         let appcpu = crate::periph::dport::AppCoreControl::handle();
+        // The host's side of the wire, before any peripheral: UART0 holds a
+        // `StreamId` and nothing else. Its bytes are always tee'd into memory
+        // for `--exit-on`, the snapshot and `Machine::uart0`, whatever else
+        // they go to.
+        let uart0_log = ByteLog::new();
+        let mut uart0_tcp: Option<lp_emu_esp_common::TcpHost> = None;
+        // A script watches the same log the sink tees into, so an
+        // `after "<line>"` step sees exactly what the device sent.
+        let uart0_source = match self.uart0_script {
+            Some(script) => {
+                Some(Box::new(script.watching(uart0_log.clone())) as Box<dyn ByteSource>)
+            }
+            None => self.uart0_source,
+        };
+        let (inner, source): (Box<dyn ByteSink>, Box<dyn ByteSource>) = match &self.uart0 {
+            Uart0Sink::Memory => (
+                Box::new(lp_emu_esp_common::host::NullSink),
+                uart0_source.unwrap_or_else(|| Box::new(lp_emu_esp_common::host::NullSource)),
+            ),
+            Uart0Sink::Stdout => (
+                Box::new(lp_emu_esp_common::host::StdoutSink),
+                uart0_source.unwrap_or_else(|| Box::new(lp_emu_esp_common::host::NullSource)),
+            ),
+            Uart0Sink::File(path) => {
+                let file = std::fs::File::create(path)
+                    .map_err(|e| BuildError::Io(format!("creating {}: {e}", path.display())))?;
+                (
+                    Box::new(FileSink(std::io::BufWriter::new(file))),
+                    uart0_source.unwrap_or_else(|| Box::new(lp_emu_esp_common::host::NullSource)),
+                )
+            }
+            Uart0Sink::Tcp(addr) => {
+                let host = lp_emu_esp_common::TcpHost::listen(addr)
+                    .map_err(|e| BuildError::Io(format!("listening on {addr}: {e}")))?;
+                log::info!("UART0 listening on {}", host.local_addr());
+                if uart0_source.is_some() {
+                    log::warn!(
+                        "--uart0-script is ignored with --uart0 tcp: the client is the source"
+                    );
+                }
+                let halves = host.split();
+                uart0_tcp = Some(host);
+                halves
+            }
+        };
+        let uart0_stream = bus.host.add(
+            "uart0",
+            Box::new(TeeSink {
+                log: uart0_log.clone(),
+                inner,
+            }),
+            source,
+        );
+
+        let control = match &self.control {
+            Some(addr) => {
+                let host = lp_emu_esp_common::TcpHost::listen(addr)
+                    .map_err(|e| BuildError::Io(format!("listening on {addr}: {e}")))?;
+                eprintln!("control listening on {}", host.local_addr());
+                Some(ControlChannel {
+                    host,
+                    partial: Vec::new(),
+                })
+            }
+            None => None,
+        };
 
         let mut peripheral_map = Vec::new();
         let mut alias_map = Vec::new();
@@ -742,6 +972,7 @@ impl Esp32V3Builder {
                 stall_key.clone(),
                 cache.clone(),
                 appcpu.clone(),
+                Some(uart0_stream),
             );
             check_registration_order(&set)?;
             for (base, len, periph) in set {
@@ -821,6 +1052,19 @@ impl Esp32V3Builder {
             idle_skips: 0,
             seed: self.seed,
             rng: self.seed,
+            uart0_log,
+            uart0_tcp,
+            control,
+            control_script: self.control_script.into(),
+            cable: Cable::default(),
+            attached: false,
+            port_open: false,
+            reboot_on_reset: self.reboot_on_reset,
+            reboots: 0,
+            power_on: None,
+            next_host_poll: 0,
+            control_lines: 0,
+            pending_reset: None,
         };
 
         if self.boot_mode == BootMode::Direct {
@@ -828,9 +1072,29 @@ impl Esp32V3Builder {
             machine.direct_load(frame, self.flash_size)?;
         }
 
+        // Before the power-on snapshot, so a reboot restores the stated rate
+        // rather than the default: `--uart0-baud` describes the host at the
+        // other end of the cable, and that host does not change when the chip
+        // resets.
+        if let Some(baud) = self.uart0_baud
+            && let Some(i) = machine.bus.peripheral_index("UART0")
+        {
+            machine
+                .bus
+                .with_peripheral::<crate::periph::uart::Uart, _>(i, |u, _| u.set_host_baud(baud));
+        }
+
         // Guest time is zero and everything is placed: the one moment a
         // peripheral may schedule something before the guest touches it.
         machine.bus.start_peripherals();
+
+        // The state a reboot goes back to, taken before a single instruction
+        // runs. Only when a run asked to perform resets: it is a whole copy
+        // of guest memory, and a run that will never reboot should not pay
+        // for it.
+        if self.reboot_on_reset {
+            machine.power_on = Some(machine.snapshot());
+        }
 
         Ok(machine)
     }
@@ -880,6 +1144,27 @@ pub struct Machine {
     idle_skips: u64,
     seed: u64,
     rng: u64,
+    /// Everything UART0 has put on the wire, in the guest's order.
+    uart0_log: ByteLog,
+    uart0_tcp: Option<lp_emu_esp_common::TcpHost>,
+    control: Option<ControlChannel>,
+    control_script: std::collections::VecDeque<(Cycles, ControlCommand)>,
+    /// The two modem lines, as the host last drove them
+    /// ([`crate::control`]). **Not chip state**: it is the cable's.
+    cable: Cable,
+    attached: bool,
+    port_open: bool,
+    reboot_on_reset: bool,
+    reboots: u64,
+    /// The state a reboot goes back to; `None` unless the run asked for one.
+    power_on: Option<Snapshot>,
+    /// The next cycle the host's side is looked at. **An absolute guest
+    /// cycle that lives outside the snapshot** — see [`Machine::reboot`].
+    next_host_poll: Cycles,
+    control_lines: u64,
+    /// Set when the auto-reset circuit released EN; drained at the next
+    /// slice boundary by [`Machine::run_until`].
+    pending_reset: Option<Strap>,
 }
 
 impl Machine {
@@ -1080,6 +1365,44 @@ impl Machine {
         self.seed
     }
 
+    /// Everything UART0 has put on the wire — bytes that have left the
+    /// shifter, in the guest's order. Bytes still in the TX FIFO are not
+    /// here yet.
+    pub fn uart0(&self) -> &ByteLog {
+        &self.uart0_log
+    }
+
+    /// The UART0 TCP listener, when `Uart0Sink::Tcp` was chosen.
+    pub fn uart0_tcp(&self) -> Option<&lp_emu_esp_common::TcpHost> {
+        self.uart0_tcp.as_ref()
+    }
+
+    /// The two modem lines and what the auto-reset circuit makes of them.
+    pub fn cable(&self) -> Cable {
+        self.cable
+    }
+
+    /// How many times this run has actually rebooted the chip
+    /// ([`Esp32V3Builder::reboot_on_reset`]).
+    pub fn reboots(&self) -> u64 {
+        self.reboots
+    }
+
+    /// How many control lines this run has applied.
+    pub fn control_lines(&self) -> u64 {
+        self.control_lines
+    }
+
+    /// The cable's side, as the `state` verb reports it.
+    pub fn cable_report(&self) -> CableReport {
+        CableReport {
+            attached: self.attached,
+            port_open: self.port_open,
+            cable: self.cable,
+            reboots: self.reboots,
+        }
+    }
+
     /// The machine's seeded PRNG (SplitMix64). The only source of "random"
     /// in the machine, so a run with the same seed is the same run.
     pub fn next_random(&mut self) -> u64 {
@@ -1263,6 +1586,7 @@ impl Machine {
         let mut probes = stop.probes.clone();
         probes.sort_by(|a, b| a.0.cmp(&b.0));
         let mut next_probe = 0usize;
+        let mut matched = 0usize;
 
         loop {
             let now = self.cycles();
@@ -1276,12 +1600,35 @@ impl Machine {
                 return Outcome::Deadline { cycle: now };
             }
 
+            // The host's side, at a slice boundary and never inside one: the
+            // cable script's own cycles, then a client's lines. A command
+            // therefore never lands between two instructions of one slice,
+            // and the reply names the cycle it was drained at.
+            self.service_host(now);
+            // EN went high again: the chip starts, and it starts *now* —
+            // before the guest is given another slice of a chip that was
+            // being held in reset.
+            if let Some(strap) = self.pending_reset.take() {
+                if self.reboot_on_reset && self.reboot(strap) {
+                    log::info!(
+                        "machine: the auto-reset circuit released EN at cycle {now} — rebooting \
+                         into strap {strap}"
+                    );
+                    matched = 0;
+                    continue;
+                }
+                return Outcome::Reset { cycle: now, strap };
+            }
+
             let mut deadline = stop_cycle.min(now.saturating_add(MAX_SLICE_CYCLES));
             if let Some(event) = self.bus.sched.next_deadline() {
                 deadline = deadline.min(event.max(now + 1));
             }
             if let Some((at, _)) = probes.get(next_probe) {
                 deadline = deadline.min((*at).max(now + 1));
+            }
+            if let Some(at) = self.next_host_service() {
+                deadline = deadline.min(at.max(now + 1));
             }
             if self.bus.strict() {
                 deadline = deadline.min(now + STRICT_SLICE_CYCLES);
@@ -1325,10 +1672,14 @@ impl Machine {
                 SliceEnd::Wfi => {
                     // The deterministic idle skip: nothing can happen before
                     // the next scheduled event, so move guest time there.
-                    let wake = self
-                        .bus
-                        .sched
-                        .next_deadline()
+                    // The host's own next service bounds it too, or a guest
+                    // parked in `waiti` would jump clean over a script.
+                    let event = self.bus.sched.next_deadline();
+                    let host = self.next_host_service();
+                    let wake = [event, host]
+                        .into_iter()
+                        .flatten()
+                        .min()
                         .unwrap_or(stop_cycle)
                         .max(self.cycles() + 1)
                         .min(stop_cycle);
@@ -1374,6 +1725,11 @@ impl Machine {
                     cycle: self.cycles(),
                     pc,
                 };
+            }
+            if let Some(needle) = &stop.exit_on
+                && let Some(cycle) = self.exit_on_match(needle, &mut matched)
+            {
+                return Outcome::ExitMatched { cycle };
             }
             if let Some(limit) = stop.wall_timeout
                 && started.elapsed() >= limit
@@ -1496,6 +1852,368 @@ impl Machine {
         );
     }
 
+    // ---- the host's side: the cable, and the control channel -------------
+
+    /// The next cycle at which [`service_host`](Self::service_host) has
+    /// something to do, or `None` when nothing outside can reach this run.
+    ///
+    /// A scripted command's own cycle, or the socket poll cadence. It bounds
+    /// the slice and the idle skip, which is what stops a guest sitting in
+    /// `waiti` from jumping over the whole script.
+    fn next_host_service(&self) -> Option<Cycles> {
+        let scripted = self.control_script.front().map(|(at, _)| *at);
+        let polled = self.control.is_some().then_some(self.next_host_poll);
+        [scripted, polled].into_iter().flatten().min()
+    }
+
+    /// Apply everything the host has asked for by cycle `now`.
+    ///
+    /// The script first — its times are the contract — then the control
+    /// channel's lines. There is **no coupling rule** on this chip: a client
+    /// on the UART0 byte socket is a program that opened a bridge chip's tty,
+    /// and the SoC cannot see it (`crate::control`).
+    fn service_host(&mut self, now: Cycles) {
+        while self
+            .control_script
+            .front()
+            .is_some_and(|(at, _)| *at <= now)
+        {
+            let (_, command) = self.control_script.pop_front().expect("checked");
+            let reply = self.apply_control(&command, now);
+            if let ControlReply::Err(reason) = &reply {
+                log::warn!("--control-script: {reason}");
+            }
+        }
+
+        if self.control.is_none() || now < self.next_host_poll {
+            return;
+        }
+        self.next_host_poll = now.saturating_add(HOST_POLL_CYCLES);
+        self.service_control(now);
+    }
+
+    /// Read whole lines off the control socket and answer each with exactly
+    /// one reply line.
+    fn service_control(&mut self, now: Cycles) {
+        let Some(channel) = self.control.as_mut() else {
+            return;
+        };
+        let incoming = channel.host.take_inbound();
+        if incoming.is_empty() && channel.partial.is_empty() {
+            return;
+        }
+        channel.partial.extend_from_slice(&incoming);
+
+        let mut lines: Vec<Result<String, String>> = Vec::new();
+        while let Some(at) = channel.partial.iter().position(|b| *b == b'\n') {
+            let raw: Vec<u8> = channel.partial.drain(..=at).collect();
+            let text = String::from_utf8_lossy(&raw[..raw.len() - 1])
+                .trim_end_matches('\r')
+                .trim()
+                .to_string();
+            if text.is_empty() || text.starts_with('#') {
+                continue;
+            }
+            lines.push(Ok(text));
+        }
+        if channel.partial.len() > MAX_CONTROL_LINE {
+            channel.partial.clear();
+            lines.push(Err(format!(
+                "a line longer than {MAX_CONTROL_LINE} bytes with no newline — dropped, and \
+                 the channel resynchronised at the next newline"
+            )));
+        }
+
+        for line in lines {
+            let reply = match line {
+                Err(reason) => ControlReply::Err(reason),
+                Ok(text) => match ControlCommand::parse(&text) {
+                    Ok(command) => self.apply_control(&command, now),
+                    Err(reason) => ControlReply::Err(reason),
+                },
+            };
+            let channel = self.control.as_mut().expect("held for this run");
+            let mut out = reply.to_string();
+            out.push('\n');
+            if !channel.host.write_to_client(out.as_bytes()) {
+                log::warn!("control: `{}` had nobody left to answer", out.trim_end());
+            }
+        }
+    }
+
+    /// Apply one control command at guest cycle `now`.
+    ///
+    /// Every precondition is checked here rather than swallowed: a command
+    /// that could not be applied answers `err <reason>` and changes nothing,
+    /// so a script that has drifted out of step is visible rather than
+    /// quietly ineffective.
+    pub fn apply_control(&mut self, command: &ControlCommand, now: Cycles) -> ControlReply {
+        self.control_lines += 1;
+        match command {
+            ControlCommand::State => {
+                return ControlReply::State {
+                    cycle: now,
+                    report: self.cable_report(),
+                };
+            }
+            ControlCommand::Wait(_) => {
+                return ControlReply::Err(
+                    "`wait` is a --control-script command; a client on this socket waits by \
+                     waiting"
+                        .to_string(),
+                );
+            }
+            ControlCommand::Attach => {
+                if self.attached {
+                    return ControlReply::Err("attach: a cable is already attached".to_string());
+                }
+                self.attached = true;
+                self.note_cable(now, "attach: the cable is in — no chip state moved");
+                return ControlReply::Ok {
+                    verb: "attach",
+                    cycle: now,
+                };
+            }
+            ControlCommand::Detach => {
+                if !self.attached {
+                    return ControlReply::Err("detach: no cable is attached".to_string());
+                }
+                self.attached = false;
+                self.port_open = false;
+                // The lines go slack, which on this circuit is both
+                // deasserted, which is "run".
+                self.drive_lines(Cable::default(), now);
+                self.note_cable(now, "detach: the cable is out and both lines went slack");
+                return ControlReply::Ok {
+                    verb: "detach",
+                    cycle: now,
+                };
+            }
+            ControlCommand::Open => {
+                if !self.attached {
+                    return ControlReply::Err(
+                        "open: no cable is attached (attach first — a cable is not a port open)"
+                            .to_string(),
+                    );
+                }
+                if self.port_open {
+                    return ControlReply::Err("open: the port is already open".to_string());
+                }
+                self.port_open = true;
+                self.note_cable(
+                    now,
+                    "open: an application has the tty — the SoC cannot see it",
+                );
+                return ControlReply::Ok {
+                    verb: "open",
+                    cycle: now,
+                };
+            }
+            ControlCommand::Close => {
+                if !self.port_open {
+                    return ControlReply::Err("close: the port is not open".to_string());
+                }
+                self.port_open = false;
+                self.note_cable(now, "close: the tty is closed — no chip state moved");
+                return ControlReply::Ok {
+                    verb: "close",
+                    cycle: now,
+                };
+            }
+            _ => {}
+        }
+
+        // What is left drives the lines. Every one of them is the same
+        // circuit; the verbs differ only in which sequence they play.
+        let sequence: Vec<Cable> = match command {
+            ControlCommand::Signals { dtr, rts } => vec![Cable {
+                dtr: dtr.unwrap_or(self.cable.dtr),
+                rts: rts.unwrap_or(self.cable.rts),
+            }],
+            // `esptool_reset`, `spikes/serial-lab/index.html:341-357`.
+            ControlCommand::Reset => vec![
+                Cable {
+                    dtr: false,
+                    rts: true,
+                },
+                Cable {
+                    dtr: false,
+                    rts: false,
+                },
+            ],
+            // `bootloader_entry`, same file. The third step releases IO0
+            // after the chip has already started, which is why the strap is
+            // latched at the second.
+            ControlCommand::DownloadMode => vec![
+                Cable {
+                    dtr: false,
+                    rts: true,
+                },
+                Cable {
+                    dtr: true,
+                    rts: false,
+                },
+                Cable {
+                    dtr: false,
+                    rts: false,
+                },
+            ],
+            other => {
+                return ControlReply::Err(format!(
+                    "unreachable: `{}` is handled above",
+                    other.verb()
+                ));
+            }
+        };
+        for step in sequence {
+            self.drive_lines(step, now);
+        }
+        ControlReply::Ok {
+            verb: command.verb(),
+            cycle: now,
+        }
+    }
+
+    /// Drive the two modem lines, and act on the **EN edge**.
+    ///
+    /// EN low holds the chip in reset; EN going high is the chip starting,
+    /// latching IO0's level at that instant as the strap. Writing it as edges
+    /// rather than as verbs is what makes `signals dtr=0 rts=1` then
+    /// `signals dtr=0 rts=0` exactly one reboot — the circuit, not a special
+    /// case for a verb — and what makes the download dance's third step
+    /// harmless.
+    fn drive_lines(&mut self, next: Cable, now: Cycles) {
+        let was = self.cable;
+        self.cable = next;
+        if was == next {
+            return;
+        }
+        if self.bus.trace.is_enabled() {
+            let line = format!(
+                "cyc={now} CABLE dtr={} rts={} -> en={} io0={}",
+                u8::from(next.dtr),
+                u8::from(next.rts),
+                u8::from(next.en()),
+                u8::from(next.io0()),
+            );
+            self.bus.trace.note(&line);
+        }
+        // The rising edge of EN. `pending_reset` is drained at the next slice
+        // boundary, so a three-step dance that ends with EN high resets once.
+        if !was.en() && next.en() {
+            self.pending_reset = Some(next.strap());
+        }
+    }
+
+    fn note_cable(&mut self, now: Cycles, what: &str) {
+        if self.bus.trace.is_enabled() {
+            let line = format!("cyc={now} CABLE {what}");
+            self.bus.trace.note(&line);
+        }
+    }
+
+    /// Reboot into `strap`, as the chip does when the auto-reset circuit
+    /// releases EN.
+    ///
+    /// The machine goes back to the state it was built in. **The reset cause
+    /// does not change**, and that is not an omission: an EN-pin reset on
+    /// this part is a *chip* reset — it resets the RTC sub-system too — and
+    /// the classic has no code for one. esp-hal's own `SocResetReason` table
+    /// for esp32 (`third_party/esp-hal/src/rtc_cntl/rtc/esp32.rs:15-50`) runs
+    /// `ChipPowerOn = 0x01`, `CoreSw = 0x03`, … `SysRtcWdt = 0x10` and has no
+    /// external-reset variant at all, so `RTC_CNTL.reset_state` reads
+    /// `POWERON_RESET` after a cable reset exactly as it does after a power-on
+    /// — which is what the restored power-on state already says. **This is
+    /// the one place the classic differs from the C6's `USB_UART_HPSYS`**, and
+    /// it differs by having no code rather than by having a different one.
+    ///
+    /// The console keeps its bytes: a restore would put back the empty log the
+    /// machine was built with, and a boot log that lost everything before the
+    /// reset would be a worse record than one with both boots in it.
+    pub fn reboot(&mut self, strap: Strap) -> bool {
+        let Some(power_on) = self.power_on.clone() else {
+            return false;
+        };
+        let uart0 = self.uart0_log.bytes();
+        self.restore(&power_on);
+        self.uart0_log.replace(&uart0);
+        self.reboots += 1;
+        log::info!(
+            "machine: reboot {} — back to cycle {}, pc {:#010x}, strap {strap}",
+            self.reboots,
+            self.cycles(),
+            self.harts[0].pc()
+        );
+
+        // The host-poll deadline is an ABSOLUTE guest cycle and it lives
+        // outside the snapshot, so a restore that puts the clock back to zero
+        // would leave it in the guest's future — for as long as the board had
+        // been up. Until the guest re-earned those cycles the machine would
+        // read no control line and write no reply. MEASURED on the C6 (plan
+        // two M5, `emu serve`): a board 33 s of guest time old went silent for
+        // ~6 s of wall after a reset dance; one 120 s old went silent for ~3.5
+        // minutes, and the replies then arrived in a burst stamped 1 ms after
+        // the reset. A reset is the moment a flasher needs the chip MOST, so
+        // the deadline goes back with the clock.
+        self.next_host_poll = 0;
+
+        // The C6's second reboot rule is "re-derive the client/port coupling
+        // from both sides". On this chip there is nothing to re-derive **and
+        // that is the finding, not an omission**: no register reports the
+        // cable, so the two sides cannot disagree. What the rule becomes here
+        // is that the host's own state — the two lines, `attached`,
+        // `port_open` — is deliberately *not* touched by `restore`, because a
+        // reset does not unplug a cable. That is what lets the download
+        // dance's third step act on the lines the second one left.
+        if strap == Strap::Download {
+            log::warn!(
+                "machine: rebooted with IO0 low (the download strap). The classic's ROM \
+                 download console is P7's; this machine boots the same way either way and the \
+                 strap is recorded, not acted on."
+            );
+        }
+        true
+    }
+
+    /// Is `needle` on a **complete** line of UART0's output at or after the
+    /// anchor? Moves the anchor forward so a long run does not rescan.
+    ///
+    /// The search is over **bytes**, not `str`: a console is a byte stream and
+    /// anchoring an index into a lossily-decoded `String` lands inside a
+    /// multi-byte character and panics.
+    fn exit_on_match(&self, needle: &str, from: &mut usize) -> Option<Cycles> {
+        let needle = needle.as_bytes();
+        self.uart0_log
+            .with_bytes(|text| Self::line_complete(text, needle, from))
+            .then(|| self.cycles())
+    }
+
+    fn line_complete(text: &[u8], needle: &[u8], from: &mut usize) -> bool {
+        if text.len() <= *from {
+            return false;
+        }
+        let found = if needle.is_empty() {
+            Some(0)
+        } else {
+            text[*from..]
+                .windows(needle.len())
+                .position(|w| w == needle)
+        };
+        match found.map(|i| *from + i) {
+            Some(at) if text[at + needle.len()..].contains(&b'\n') => true,
+            // Matched, but the line is still arriving: hold the anchor here so
+            // the next byte re-checks this same match rather than the tail.
+            Some(at) => {
+                *from = at;
+                false
+            }
+            None => {
+                *from = text.len().saturating_sub(needle.len());
+                false
+            }
+        }
+    }
+
     /// Give the hook table first refusal on a `break` at `pc`. Returns
     /// `false` when nothing claims it, in which case the guest gets the
     /// architectural breakpoint.
@@ -1564,9 +2282,44 @@ impl Machine {
         self.bus.restore_scalars(&snap.scalars);
         self.bus.matrix_mut().load_state(&snap.matrix);
         self.bus.sched.restore(&snap.sched);
+        self.rearm_watchpoints();
         self.rng = snap.rng;
         self.hook_calls = snap.hook_calls;
         self.idle_skips = snap.idle_skips;
+    }
+
+    /// Re-arm the bus's hardware watchpoints after a restore.
+    ///
+    /// **A bug P6 found by being the first code that reboots.** A DBREAK
+    /// watchpoint lives on the **bus** and is written only by the hart's
+    /// `wsr` to `DBREAKA`/`DBREAKC` (`lp-xt-emu/src/mach/exec.rs:651-660`).
+    /// A restore replaces the hart wholesale, so the bus keeps whatever the
+    /// *previous* hart had armed while the restored hart's `DBREAK` pair
+    /// reads zero — and the two disagree until something writes `DBREAK`
+    /// again, which on a fresh boot nothing does for milliseconds.
+    ///
+    /// The shipped image arms one: esp-hal's stack guard is a four-byte
+    /// store watchpoint (`lp-xt-emu/src/mach/tests.rs:1448-1457`). Before
+    /// this call, a cable reset of a running app took a **debug exception**
+    /// fourteen instructions into the second boot, vectored through the mask
+    /// ROM's table and died on an unsupported instruction at `0x4000_0705`.
+    /// `src/snapshot.rs` already promised that "a restore re-arms them from
+    /// the restored hart"; nothing did.
+    ///
+    /// ⚠️ **This re-arms them from the power-on state, not from the restored
+    /// hart.** Every slot is disarmed through the ordinary
+    /// [`Bus::set_watchpoint`] path, so the armed bitmask and the
+    /// single-store fast path are recomputed with it. That is exactly right
+    /// for a reboot — the power-on
+    /// snapshot has `DBREAK` clear — and for every snapshot this machine
+    /// takes. Reading the pair back off the hart would need a public
+    /// accessor for its `BreakUnit`, which `lp-xt-emu` does not publish;
+    /// **M1 owns that crate and M3 reads it**, so the accessor is an M1
+    /// item and this is the honest half of the fix, not the whole one.
+    fn rearm_watchpoints(&mut self) {
+        for slot in 0..crate::bus_setup::WATCHPOINT_SLOTS {
+            Bus::set_watchpoint(&mut self.bus, slot, None);
+        }
     }
 }
 

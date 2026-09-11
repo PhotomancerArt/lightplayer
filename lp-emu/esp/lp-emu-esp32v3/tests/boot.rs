@@ -649,11 +649,19 @@ fn strict_stops_somewhere_honest_from_the_reset_vector() {
 ///
 /// `crate::periph::efuse` makes the read command a completion, so the check
 /// passes, the three reloads compare equal, and the ROM walks on into
-/// `main` — where it stops on the **next** unmodelled block: `uartAttach`
+/// `main`. P5 left it stopped at the **next** unmodelled block: `uartAttach`
 /// (`0x4000_9013`) writing `UART1 +0x10`, which the P3 ledger's §4.3 named
-/// in advance and which P6 owns. This test holds that reading.
+/// in advance.
+///
+/// **P6 modelled both UARTs, and the ROM walked past `uartAttach` and
+/// `Uart_Init`.** Its next strict stop is a block the P3 ledger did *not*
+/// predict — §4.3 expected `GPIO.strap` or `spi_flash_attach` next — and
+/// that is the reading this test now holds: the ROM's `gpio_pad_unhold`
+/// reads **`RTC_IO +0x74` (`dig_pad_hold`)** at `0x4000_a67d`, cycle 7,430.
+/// `RTC_IO` is on P5's "not reached by P3 and still unmapped" list; it is
+/// reached now, and it is P7's or P8's to answer, not P6's.
 #[test]
-fn rom_up_passes_the_efuse_check_and_stands_at_uart1_until_p6() {
+fn rom_up_walks_past_uart_attach_and_stands_at_rtc_io() {
     let mut machine = Esp32V3Builder::new()
         .boot_mode(BootMode::RomUp)
         .strict(true)
@@ -661,19 +669,24 @@ fn rom_up_passes_the_efuse_check_and_stands_at_uart1_until_p6() {
         .expect("builds");
     let outcome = machine.run_until(&StopCondition::after_micros(20_000));
     let Outcome::StrictBus { violation } = outcome else {
-        panic!("the ROM-up path stops on UART1, not on {outcome:?}");
+        panic!("the ROM-up path stops on RTC_IO, not on {outcome:?}");
     };
-    let sym = machine.symbolize(violation.pc).unwrap_or_default();
-    assert!(
-        sym.starts_with("uartAttach"),
-        "the stop is in the ROM's uartAttach, got pc={:#010x} ({sym})",
-        violation.pc
+    assert_eq!(violation.pc, 0x4000_a67d);
+    assert_eq!(
+        violation.address,
+        memmap::periph::RTC_IO + 0x74,
+        "RTC_IO.dig_pad_hold, read by the ROM's own pad-unhold routine"
     );
-    assert_eq!(violation.pc, 0x4000_9013);
-    assert_eq!(violation.address, memmap::periph::UART1 + 0x10);
+    assert_eq!(violation.cycle, 7_430);
     assert!(
         violation.in_mmio_window,
         "an unmodelled block, not a wild pointer"
+    );
+    // And `uartAttach`'s two writes are behind it: both UARTs took them.
+    assert_eq!(
+        machine.peek_word(memmap::periph::UART1 + 0x10),
+        Some(0),
+        "UART1.int_clr is write-only and reads back zero"
     );
 
     // The eFuse check is behind it: the read command self-cleared and the
@@ -707,7 +720,7 @@ fn the_efuse_checks_accumulator_lands_on_the_roms_own_constant() {
         .expect("builds");
     // `_ResetHandler_efuse_check_patch` seeds a13 with 0xee101017 and
     // requires 0xee10101a after three calls (`4000fdef`, `4000fdfe`); the
-    // difference is three ones. Reaching `uartAttach` at all is the proof —
+    // difference is three ones. Reaching `main` at all is the proof —
     // a wrong first read sends the ROM to `_rtc_trigger_sw_system_reset`
     // (`0x4000_FDC7`), which writes RTC_CNTL +0x00 and then `ill.n`.
     let outcome = machine.run_until(&StopCondition::after_micros(20_000));
@@ -1031,11 +1044,17 @@ fn direct_traced(micros: u64) -> Option<(Machine, Outcome, String)> {
 ///
 /// A register file holds the bit forever. That is P7's question in the
 /// phase file's own words — *"SPI1 `CMD` write: no flash chip"* — and this
-/// test holds the reading until P7 moves it. The hello is P6's: the bytes
-/// are all there, and not one of them left the chip.
+/// test holds the reading until P7 moves it.
+///
+/// The hello was **P6's**, and it landed: the bytes below are the ones the
+/// guest wrote into `fifo`, and `tests/boot_idle.rs` is the same 543 bytes
+/// coming out of the host stream. The last assertion here used to read the
+/// block back and find the last byte, because an accept block remembers only
+/// the last write; UART0 is a view now, so `fifo` reads the **receive** side
+/// and an empty receive FIFO reads zero. That change of meaning is the phase.
 #[test]
 #[ignore = "needs the shipped image; run through `just test-emu-esp32v3-boot`"]
-fn the_direct_load_says_hello_into_an_accept_block_and_stands_at_the_flash_until_p7() {
+fn the_direct_load_says_hello_and_stands_at_the_flash_until_p7() {
     let Some((mut machine, outcome, trace)) = direct_traced(20_000) else {
         return;
     };
@@ -1079,14 +1098,20 @@ fn the_direct_load_says_hello_into_an_accept_block_and_stands_at_the_flash_until
         !text.contains("flash filesystem mounted"),
         "the mount is the line after the flash read, and there is no flash chip"
     );
-    // And the block itself holds exactly one byte of all that: the last.
-    let last = *text.as_bytes().last().expect("bytes");
+    // And the block holds none of it: `fifo` is the receive side on the read
+    // path, the host sent nothing, and an empty receive FIFO reads zero.
+    // Every byte above left the chip through the shifter at 921,600 baud.
     assert_eq!(
         machine
             .peek_word(memmap::periph::UART0)
             .map(|w| (w & 0xff) as u8),
-        Some(last),
-        "an accept block remembers only the last write"
+        Some(0),
+        "the view's `fifo` read is a receive pop, not the last thing written"
+    );
+    assert_eq!(
+        machine.uart0().len(),
+        text.len(),
+        "and what the wire carried is what the guest wrote, byte for byte"
     );
 }
 
