@@ -1022,7 +1022,7 @@ that unwritten save area, gets `a1 = 0`, and the handler walks its spills down
 through unmapped memory (178 M unmapped writes in a non-strict run). So the
 hart's window model and the guest's `WINDOWSTART`/`WINDOWBASE` view disagree
 across a context save — `lp-emu/lp-xt-emu`'s window machinery (M1), which M4
-**P4b** is fixing.
+**P4b** is fixing (PR #711).
 
 It is the *machine*, not the firmware: the same image runs five wires × 300
 LEDs at 29.99 fps for 240 s on the desk board

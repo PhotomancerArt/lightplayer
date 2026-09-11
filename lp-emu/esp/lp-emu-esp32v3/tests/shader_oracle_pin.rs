@@ -63,7 +63,8 @@
 //! memory, the `retw` that follows takes `_WindowUnderflow8` and restores
 //! `a1 = 0`, and the handler walks its spills down through unmapped memory.
 //! It is `lp-emu/lp-xt-emu`'s window machinery (M1) and it is being fixed in
-//! M4 **P4b**; the crate README's "A frame three ways" carries the trace.
+//! M4 **P4b** (PR #711); the crate README's "A frame three ways" carries
+//! the trace.
 //!
 //! The gate is therefore **two** tests. Everything that can be read off the
 //! pad is [`the_first_lit_frame_off_io18_is_the_host_oracles_frame`];
@@ -262,7 +263,7 @@ fn stopped_by_the_window_spill(m: &Machine, outcome: &Outcome, test: &str) -> bo
             "the window-spill defect M4 P4b is fixing — {:?} at 0x{:08x} ({symbol}, pc \
              0x{:08x}, cycle {}). The guest dies inside the project it just loaded, so the \
              frames this gate reads never happen. Branch \
-             claude/xt-m4-p4b-window-underflow; the crate README's \"A frame three ways\" \
+             PR #711 (claude/xt-m4-p4b-window-underflow); the crate README's \"A frame three ways\" \
              has the trace.",
             violation.access, violation.address, violation.pc, violation.cycle,
         ),

@@ -35,8 +35,8 @@
 //!
 //! Loading any project kills this guest (`_WindowUnderflow8` restores
 //! `a1 = 0`; the crate README's "A frame three ways" carries the trace, and
-//! M4 **P4b** is the fix). On this tree the five-wire walk reaches the
-//! outputs' open and the compile-window black frame on all five pads and
+//! M4 **P4b** (PR #711) is the fix). On this tree the five-wire walk reaches
+//! the outputs' open and the compile-window black frame on all five pads and
 //! stops there, so what is reachable today is the **routing**: five pads,
 //! the re-mux, whole frames with no bit errors, and determinism. Everything
 //! that needs the render to survive — five *distinct lit* wires, the per-wire
@@ -200,7 +200,7 @@ fn stopped_by_the_window_spill(m: &Machine, outcome: &Outcome, test: &str) -> bo
             "the window-spill defect M4 P4b is fixing — {:?} at 0x{:08x} ({symbol}, pc \
              0x{:08x}, cycle {}). The guest dies inside the project it just loaded, so the \
              lit frames this gate reads never happen. Branch \
-             claude/xt-m4-p4b-window-underflow; the crate README's \"A frame three ways\" \
+             PR #711 (claude/xt-m4-p4b-window-underflow); the crate README's \"A frame three ways\" \
              has the trace.",
             violation.access, violation.address, violation.pc, violation.cycle,
         ),
