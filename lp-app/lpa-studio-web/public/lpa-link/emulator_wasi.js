@@ -4,7 +4,10 @@
 // The module is `lp-emu-esp32c6` built for `wasm32-wasip1` — an ordinary
 // command binary with a `_start` we never call, plus twenty-three exports we
 // do. See `lp-emu/esp/README.md` §"The tab host" for the ABI itself; this
-// file is the other side of it.
+// file is the other side of it. `emulator_worker.js` is the caller (it holds
+// the module and the pacing loop); `emulator_tab.js` is the port object one
+// layer up. `docs/adr/2026-09-10-the-c6-emulator-runs-in-the-tab.md` is the
+// decision record for the whole shape.
 //
 // NO FILE FAÇADE. The bench rig's shim (`scripts/emu/bench-web/worker.js`,
 // which is M7's file and is not imported here) stages a firmware ELF as a
