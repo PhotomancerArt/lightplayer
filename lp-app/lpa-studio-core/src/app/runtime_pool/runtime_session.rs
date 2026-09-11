@@ -52,6 +52,14 @@ pub const CONSOLE_TAIL_LEN: usize = 40;
 pub enum LinkTransport {
     /// A sim's worker channel (`sim:<uid>`): in-process, free.
     Sim,
+    /// An emulated board in this tab (`emu:<uid>`): in-process too, but
+    /// **not** free. The bytes cross an emulated USB-Serial-JTAG FIFO that
+    /// the guest firmware drains at its own modelled rate, so the wire has
+    /// the same bandwidth bound a real board's does — and the guest is
+    /// running slower than silicon, so pulling harder than the device
+    /// cadence would starve the heartbeats rather than get pictures sooner
+    /// (D14, Q8). It therefore takes the DEVICE cadence, not the sim's.
+    Emu,
     /// A serial port: the 150 ms floor and the focused-only subscription
     /// exist because of it.
     Serial,
@@ -59,13 +67,16 @@ pub enum LinkTransport {
 
 impl LinkTransport {
     /// Read the transport off a link's endpoint key. Everything that is not
-    /// a `sim:` endpoint is a wire — a serial port today, and anything that
-    /// arrives over one tomorrow.
+    /// a `sim:` or `emu:` endpoint is a wire — a serial port today, and
+    /// anything that arrives over one tomorrow.
     pub fn from_endpoint(endpoint: &str) -> Self {
-        match crate::uid_from_sim_endpoint(endpoint) {
-            Some(_) => Self::Sim,
-            None => Self::Serial,
+        if crate::uid_from_sim_endpoint(endpoint).is_some() {
+            return Self::Sim;
         }
+        if crate::uid_from_emu_endpoint(endpoint).is_some() {
+            return Self::Emu;
+        }
+        Self::Serial
     }
 }
 
@@ -313,7 +324,7 @@ impl RuntimeSession {
     pub fn cadence_interval(&self) -> Duration {
         match self.transport() {
             LinkTransport::Sim => RefreshCadence::simulator().interval(),
-            LinkTransport::Serial => RefreshCadence::device().interval(),
+            LinkTransport::Emu | LinkTransport::Serial => RefreshCadence::device().interval(),
         }
     }
 
@@ -453,6 +464,20 @@ impl DeviceLensAttachment {
             features: None,
         }
     }
+
+    /// The same stub over an EMU's tab link — the C6's own image on an
+    /// emulated SoC in this page.
+    pub(crate) fn emu_stub_for_test(uid: &str) -> Self {
+        Self {
+            device: lpa_devices::DeviceId(1),
+            link: lpa_devices::LinkId(1),
+            uid: uid.to_string(),
+            name: "XIAO ESP32-C6 emu".to_string(),
+            board_id: Some("seeed/xiao-esp32-c6".to_string()),
+            transport: LinkTransport::Emu,
+            features: None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -494,8 +519,32 @@ mod tests {
             LinkTransport::Sim
         );
         assert_eq!(
+            LinkTransport::from_endpoint(&crate::emu_endpoint("dev123").0),
+            LinkTransport::Emu
+        );
+        assert_eq!(
             LinkTransport::from_endpoint("usb-serial-0"),
             LinkTransport::Serial
         );
+    }
+
+    /// An emulated board's wire has a bandwidth bound, so it takes the
+    /// DEVICE cadence — the sim's tight loop would starve the heartbeats of
+    /// a guest that is already running slower than silicon (D14, Q8).
+    #[test]
+    fn an_emu_paces_like_a_device_not_like_a_sim() {
+        assert_ne!(
+            RefreshCadence::device().interval(),
+            RefreshCadence::simulator().interval(),
+            "the two cadences differ, or this proves nothing"
+        );
+
+        let emu = RuntimeSession::new(
+            RuntimeId::new(3),
+            RuntimePayload::Device(DeviceLensAttachment::emu_stub_for_test("devemu")),
+        );
+
+        assert_eq!(emu.transport(), LinkTransport::Emu);
+        assert_eq!(emu.cadence_interval(), RefreshCadence::device().interval());
     }
 }

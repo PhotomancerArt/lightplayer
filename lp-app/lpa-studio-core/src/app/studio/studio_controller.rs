@@ -543,7 +543,13 @@ impl StudioController {
         name: Option<&str>,
         random: &[u8; 6],
     ) -> Result<String, UiError> {
-        let minted = crate::new_sim_record(target, name, random, (self.now_secs)());
+        let minted = crate::new_sim_record(
+            target,
+            name,
+            random,
+            (self.now_secs)(),
+            crate::RuntimeKind::Sim,
+        );
         let sidecar_bytes = serde_json::to_vec(&minted.sidecar).unwrap_or_default();
         self.run_catalog_op(CatalogOp::CreateSimDevice {
             device: Box::new(minted.row.clone()),
@@ -1735,7 +1741,12 @@ impl StudioController {
         Some(crate::UiChromeSessionControl {
             face: match attachment.transport {
                 crate::LinkTransport::Sim => crate::DeviceFace::Sim,
-                crate::LinkTransport::Serial => crate::DeviceFace::Wire,
+                // An emu wears the wire face: it runs the target's OWN
+                // firmware image, so the verbs whose words depend on the
+                // face ("flash", "erase") mean what they say on it — which
+                // is also what `DeviceFace::from_transport` already answers
+                // for an `emu` registry row.
+                crate::LinkTransport::Emu | crate::LinkTransport::Serial => crate::DeviceFace::Wire,
             },
             key: format!("device:{}", attachment.uid),
             device: Some(attachment.device),
@@ -3638,7 +3649,9 @@ impl StudioController {
             .map_err(UiError::MissingSession)?;
         let protocol = match attachment.transport {
             crate::LinkTransport::Sim => "browser-worker",
-            crate::LinkTransport::Serial => "usb-serial",
+            // The same `M!` line framing over the same serial-shaped wire;
+            // the only difference is which side of the USB the chip is on.
+            crate::LinkTransport::Emu | crate::LinkTransport::Serial => "usb-serial",
         };
         let client = crate::StudioServerClient::from_lens_io(io, deadline, protocol);
         let id = self.pool.install(crate::RuntimePayload::Device(attachment));
