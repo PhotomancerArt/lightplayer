@@ -114,13 +114,24 @@ fn program0() -> Vec<(u32, Inst)> {
         store(APPCPU_CTRL_A),
     ];
     // `l32r a4, DELAY` — its field depends on where it lands.
-    let so_far: u32 = insts.iter().map(|i| lp_xt_inst::encode(i).len() as u32).sum();
+    let so_far: u32 = insts
+        .iter()
+        .map(|i| lp_xt_inst::encode(i).len() as u32)
+        .sum();
     insts.push(Inst::L32r(a4, l32r_field(CODE0 + so_far, LIT0 + 8)));
     // delay: addi a4, a4, -1 ; bnez a4, delay   (bnez target = pc + 4 + off)
-    let delay_pc: u32 = CODE0 + insts.iter().map(|i| lp_xt_inst::encode(i).len() as u32).sum::<u32>();
+    let delay_pc: u32 = CODE0
+        + insts
+            .iter()
+            .map(|i| lp_xt_inst::encode(i).len() as u32)
+            .sum::<u32>();
     insts.push(Inst::Addi(a4, a4, -1));
     let bnez_pc = delay_pc + 3;
-    insts.push(Inst::BranchZ(BrZ::Bnez, a4, delay_pc as i32 - (bnez_pc as i32 + 4)));
+    insts.push(Inst::BranchZ(
+        BrZ::Bnez,
+        a4,
+        delay_pc as i32 - (bnez_pc as i32 + 4),
+    ));
     insts.push(Inst::MoviN(a3, 1));
     insts.push(store(RING));
     insts.push(Inst::Nullary(NullaryOp::Memw));
@@ -198,7 +209,8 @@ fn fixture() -> (Machine, SharedSink) {
 
     let bus = machine.bus_mut();
     let word = |bus: &mut lp_emu_esp_common::SocBus, at: u32, v: u32| {
-        bus.load_image(at, &v.to_le_bytes()).expect("SRAM0 holds a literal");
+        bus.load_image(at, &v.to_le_bytes())
+            .expect("SRAM0 holds a literal");
     };
     word(bus, LIT0, memmap::periph::DPORT);
     word(bus, LIT0 + 4, CODE1);
@@ -230,7 +242,11 @@ fn run_until_state(m: &mut Machine, what: &str, done: impl Fn(&Machine) -> bool)
             m.core_report()
         );
         guard += 1;
-        assert!(guard < 1_000, "{what}: never happened\n{:?}", m.core_report());
+        assert!(
+            guard < 1_000,
+            "{what}: never happened\n{:?}",
+            m.core_report()
+        );
     }
 }
 
@@ -347,7 +363,11 @@ fn the_doorbell_reaches_core_one() {
             break o;
         }
         guard += 1;
-        assert!(guard < 1_000, "the doorbell never rang: {:?}", m.core_report());
+        assert!(
+            guard < 1_000,
+            "the doorbell never rang: {:?}",
+            m.core_report()
+        );
     };
     assert!(
         m.bus().irq.level(DOORBELL_SOURCE as u16),
@@ -383,7 +403,11 @@ fn the_doorbell_reaches_core_one() {
         0,
         "and not at core 0's: core 0's map for source 25 is untouched"
     );
-    assert_eq!(m.harts[0].pc(), core0_parked_pc(), "core 0 parked itself after ringing");
+    assert_eq!(
+        m.harts[0].pc(),
+        core0_parked_pc(),
+        "core 0 parked itself after ringing"
+    );
     assert!(
         m.core_instructions(1) > rom_instructions,
         "core 1 ran again after the take"
@@ -445,7 +469,10 @@ fn a_flash_mmu_table_disagreement_is_a_strict_stop() {
     assert_eq!(divergence.pro, 5);
     assert_eq!(divergence.app, 6);
     assert_eq!(divergence.vaddr, Some(0x400d_0000));
-    assert_eq!(outcome_code(&Outcome::MmuDivergence { cycle, divergence }), 7);
+    assert_eq!(
+        outcome_code(&Outcome::MmuDivergence { cycle, divergence }),
+        7
+    );
     let text = m.mmu_divergence_message(cycle, &divergence);
     println!("{text}");
     for needle in [
@@ -599,19 +626,25 @@ fn the_rom_up_path_reports_the_dual_core_deployment() {
 #[test]
 #[ignore = "needs the shipped image and espflash; `just test-emu-esp32v3-boot`"]
 fn core_one_binds_in_its_own_matrix() {
-    let Some(mut m) = dual_core_run("core_one_binds_in_its_own_matrix", BootMode::Direct, 2_000_000)
-    else {
+    let Some(mut m) = dual_core_run(
+        "core_one_binds_in_its_own_matrix",
+        BootMode::Direct,
+        2_000_000,
+    ) else {
         return;
     };
     const RMT: u32 = 47;
     let map = |m: &mut Machine, base: u32, source: u32| -> u32 {
         m.bus_mut().set_hart(0);
-        Bus::read_word(m.bus_mut(), memmap::periph::DPORT + base + 4 * source).expect("mapped") as u32
+        Bus::read_word(m.bus_mut(), memmap::periph::DPORT + base + 4 * source).expect("mapped")
+            as u32
     };
     let rmt1 = map(&mut m, CORE_1_INTR_MAP, RMT);
     let bell1 = map(&mut m, CORE_1_INTR_MAP, DOORBELL_SOURCE);
     let rmt0 = map(&mut m, CORE_0_INTR_MAP, RMT);
-    println!("core_1_intr_map[RMT]={rmt1} core_1_intr_map[swi1]={bell1} core_0_intr_map[RMT]={rmt0}");
+    println!(
+        "core_1_intr_map[RMT]={rmt1} core_1_intr_map[swi1]={bell1} core_0_intr_map[RMT]={rmt0}"
+    );
     assert!(rmt1 < 32, "the RMT ISR is bound on core 1");
     assert!(bell1 < 32, "the doorbell is bound on core 1");
     assert_eq!(
@@ -627,12 +660,19 @@ fn core_one_binds_in_its_own_matrix() {
 #[test]
 #[ignore = "needs the shipped image and espflash; `just test-emu-esp32v3-boot`"]
 fn the_pusher_parks_in_waiti_on_core_one() {
-    let Some(m) = dual_core_run("the_pusher_parks_in_waiti_on_core_one", BootMode::Direct, 2_000_000)
-    else {
+    let Some(m) = dual_core_run(
+        "the_pusher_parks_in_waiti_on_core_one",
+        BootMode::Direct,
+        2_000_000,
+    ) else {
         return;
     };
     assert!(m.wfi_ends(1) >= 1, "core 1 ended a window in waiti");
-    assert!(m.parked(1), "and is parked at the reply: {:?}", m.core_report());
+    assert!(
+        m.parked(1),
+        "and is parked at the reply: {:?}",
+        m.core_report()
+    );
     let pc = m.harts[1].pc();
     let sym = m.symbolize(pc).unwrap_or_default();
     assert!(

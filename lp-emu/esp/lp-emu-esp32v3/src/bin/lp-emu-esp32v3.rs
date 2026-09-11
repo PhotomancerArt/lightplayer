@@ -27,8 +27,8 @@ use lp_emu_esp32v3::control;
 use lp_emu_esp32v3::flash::FlashBacking;
 use lp_emu_esp32v3::loader::EfuseIdentity;
 use lp_emu_esp32v3::machine::{
-    AppSource, BootMode, CORE_QUANTUM_DEFAULT, CORES, Esp32V3Builder, Machine, Outcome,
-    RomSource, StopCondition, TimeGrade, Uart0Sink,
+    AppSource, BootMode, CORE_QUANTUM_DEFAULT, CORES, Esp32V3Builder, Machine, Outcome, RomSource,
+    StopCondition, TimeGrade, Uart0Sink,
 };
 use lp_emu_esp32v3::{bus_setup, memmap};
 
@@ -663,9 +663,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--hooks" => args.hooks = true,
             "--strict-bus" => args.strict = true,
             "--cache-off-fetch" => args.cache_off = CacheOffPolicy::parse(&value()?)?,
-            "--app-mmu-divergence" => {
-                args.mmu_divergence = MmuDivergencePolicy::parse(&value()?)?
-            }
+            "--app-mmu-divergence" => args.mmu_divergence = MmuDivergencePolicy::parse(&value()?)?,
             "--core-quantum" => {
                 let v = value()?;
                 let n: u64 = v

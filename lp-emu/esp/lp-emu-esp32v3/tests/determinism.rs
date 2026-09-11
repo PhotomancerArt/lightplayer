@@ -258,7 +258,14 @@ fn the_snapshot_carries_the_state_that_is_not_a_register() {
         "the CPU stall key, both halves"
     );
     assert_eq!(other.bus().matrix().save_state(), matrix, "the matrix");
-    assert!(other.core_stalled(1), "core 1 is still held");
+    // Since M4 P1 core 1 is released by DPORT during the boot, so its hold
+    // is whatever the run left it — and the snapshot carries that, not a
+    // constant.
+    assert_eq!(
+        other.core_stalled(1),
+        m.core_stalled(1),
+        "core 1's hold comes back as the run left it"
+    );
     // And the DBREAK slots: M1 P6 disarms the watchpoints on a restore and
     // re-arms them from the restored hart's own `DBREAK` registers, so the
     // count is the hart's and not a second copy that could disagree.
@@ -309,7 +316,10 @@ fn the_single_core_prefix_is_unchanged() {
         exit_on: Some("[INIT] I/O task spawned".to_string()),
         ..StopCondition::after_micros(200_000)
     });
-    assert!(matches!(outcome, Outcome::ExitMatched { .. }), "{outcome:?}");
+    assert!(
+        matches!(outcome, Outcome::ExitMatched { .. }),
+        "{outcome:?}"
+    );
     assert!(m.core_stalled(1), "core 1 was never started in this run");
     let bytes = m.uart0().bytes();
     assert_eq!(bytes.len(), PREFIX_BYTES);
@@ -412,7 +422,10 @@ fn two_runs_identical_dual_core() {
     let (b, ob) = dual(CORE_QUANTUM_DEFAULT, &elf, &chip);
     let (a, b) = (DualRun::of(&a, &oa), DualRun::of(&b, &ob));
     println!("quantum {CORE_QUANTUM_DEFAULT}: {a:?}");
-    assert_eq!(a, b, "two runs at quantum {CORE_QUANTUM_DEFAULT} are one run");
+    assert_eq!(
+        a, b,
+        "two runs at quantum {CORE_QUANTUM_DEFAULT} are one run"
+    );
 }
 
 /// The same at `--core-quantum 64`.

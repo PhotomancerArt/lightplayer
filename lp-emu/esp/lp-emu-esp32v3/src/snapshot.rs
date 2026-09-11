@@ -55,7 +55,11 @@ impl Snapshot {
     /// The guest cycle this snapshot was taken at: the machine's one clock,
     /// which is the furthest any hart has got.
     pub fn cycle(&self) -> Cycles {
-        self.harts.iter().map(|h| h.cycle_count()).max().unwrap_or(0)
+        self.harts
+            .iter()
+            .map(|h| h.cycle_count())
+            .max()
+            .unwrap_or(0)
     }
 
     /// Roughly how much host memory it holds. Region bytes dominate: the

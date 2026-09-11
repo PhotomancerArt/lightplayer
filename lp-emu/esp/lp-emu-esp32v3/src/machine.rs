@@ -1752,7 +1752,11 @@ impl Machine {
                         "core {c}: running, pc={pc:#010x}{sym} cycle={} instr={}{}",
                         hart.cycle_count(),
                         hart.instruction_count(),
-                        if hart.is_waiti() { "  parked(waiti)" } else { "" }
+                        if hart.is_waiti() {
+                            "  parked(waiti)"
+                        } else {
+                            ""
+                        }
                     )
                 }
             })
@@ -1779,9 +1783,7 @@ impl Machine {
 
     /// Instructions retired by `core` alone.
     pub fn core_instructions(&self, core: usize) -> u64 {
-        self.harts
-            .get(core)
-            .map_or(0, XtHart::instruction_count)
+        self.harts.get(core).map_or(0, XtHart::instruction_count)
     }
 
     pub fn first_strict_violation(&self) -> Option<StrictViolation> {
@@ -2180,10 +2182,7 @@ impl Machine {
             // D3: the window. The quantum is the *upper* bound on one core's
             // window; every bound above still applies, so a scheduled event,
             // a probe, a host service or a strict slice still shortens it.
-            let window = deadline
-                .saturating_sub(now)
-                .max(1)
-                .min(self.core_quantum);
+            let window = deadline.saturating_sub(now).max(1).min(self.core_quantum);
 
             // One window per core that is neither held nor parked, core 0
             // then core 1, each opening at `now`. A held core's counter does
@@ -2431,18 +2430,23 @@ impl Machine {
     /// A run whose guest never disables the cache never installs it and pays
     /// one `Option` test per access, which is what the bus already cost.
     fn sync_cache_watch(&mut self, core: usize) {
-        let wanted = self.cache.lock().expect("cache poisoned").watch_wanted(core);
+        let wanted = self
+            .cache
+            .lock()
+            .expect("cache poisoned")
+            .watch_wanted(core);
         let armed_for = wanted.then_some(core);
         if armed_for == self.cache_watch {
             return;
         }
         match armed_for {
-            Some(core) => self
-                .bus
-                .set_memory_cost(Some(Box::new(crate::cache::CacheOffWatch::new(
-                    self.cache.clone(),
-                    core,
-                )))),
+            Some(core) => {
+                self.bus
+                    .set_memory_cost(Some(Box::new(crate::cache::CacheOffWatch::new(
+                        self.cache.clone(),
+                        core,
+                    ))))
+            }
             None => self.bus.set_memory_cost(None),
         }
         self.cache_watch = armed_for;
@@ -2479,11 +2483,7 @@ impl Machine {
 
     /// What R4's stop says, and what it does not claim. Written for a reader
     /// who has just been stopped by it.
-    pub fn mmu_divergence_message(
-        &self,
-        cycle: Cycles,
-        d: &crate::cache::MmuDivergence,
-    ) -> String {
+    pub fn mmu_divergence_message(&self, cycle: Cycles, d: &crate::cache::MmuDivergence) -> String {
         let page = match d.vaddr {
             Some(v) => format!("virtual page {v:#010x}"),
             None => "an index with no reachable virtual address on this chip".to_string(),
