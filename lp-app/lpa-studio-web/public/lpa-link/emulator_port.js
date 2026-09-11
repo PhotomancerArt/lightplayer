@@ -7,16 +7,23 @@
 // into a `SerialPort`; a `ByteStreamLink` could turn the same object into a
 // device card without either side learning about the other.
 //
-// TWO BACKINGS, ONE SHAPE. This file ships the **native** backing only:
-// `lp-cli emu serve`'s WebSocket door (`GET /boards`, `ws /board/<id>/bytes`,
-// `ws /board/<id>/control`). A wasm backing — the sibling's mode A — drops in
-// behind the same methods, which is why every method here takes and returns
-// plain data and why nothing outside this file touches a WebSocket.
+// TWO BACKINGS, ONE SHAPE — AND BOTH NOW EXIST. This file ships the
+// **native** one: `lp-cli emu serve`'s WebSocket door (`GET /boards`,
+// `ws /board/<id>/bytes`, `ws /board/<id>/control`). The **tab** backing is
+// `emulator_tab.js`, a Worker holding the emulator's own wasm, and it did
+// NOT need a fork of this file: it reaches the same two channels through the
+// `transport.WebSocketImpl` seam below, with a WebSocket-shaped object per
+// channel, exactly as the conformance suite's scripted door does. Every
+// method here takes and returns plain data for that reason, and nothing
+// outside this file touches a WebSocket.
 //
-// WHERE THE NATIVE BACKING CANNOT ANSWER IT SAYS SO. `getFlash`, `putFlash`,
+// WHERE A BACKING CANNOT ANSWER IT SAYS SO. `getFlash`, `putFlash`,
 // `snapshot` and `probes` reject with "not available on the native backing"
 // rather than returning zeros: the door has no route for them, and a lie
-// inside the contract is worse than a gap.
+// inside the contract is worse than a gap. `TabEmulatorPort` overrides the
+// first, the second and the fourth — a Worker holds the chip, so it can
+// answer them — and leaves `snapshot` refused, because a `Snapshot` is
+// in-memory only and there is still no bytes format to hand over.
 //
 // THE SHIM TRANSLATES NOTHING. `signals()` writes the DTR/RTS lines onto the
 // control channel exactly as it was given them. The reset dances are DECODED
