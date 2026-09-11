@@ -354,10 +354,40 @@ would have to add, stated against the door as it actually is:
 wasm backing carries a machine in the page and can answer points 5 and 6 from
 it; a lie inside the contract is worse than a `NotSupportedError`.
 
+## Amendment 2026-09-11 — the wasm backing lands; points 5 and 6 close
+
+The handoff two sections up is fulfilled. `TabEmulatorPort extends
+EmulatorPort` (`lp-app/lpa-studio-web/public/lpa-link/emulator_tab.js`) is
+the wasm backing the table above called for, and rule 4's "not forked"
+sentence held exactly as written: it overrides only the four refused
+methods, nothing else in `emulator_port.js` changed shape.
+
+Against the eight-point table:
+
+- **Point 5 (flash get/put) answers.** `getFlash` / `putFlash` reach the
+  in-page machine's own chip through the `emu_flash_*` ABI — bytes a real
+  machine holds, not a door's persisted file. `snapshot()` **stays
+  refused**, on both backings: there is still no bytes format for a
+  `Snapshot` (its own module says in-memory only, on purpose), and this
+  amendment does not create one.
+- **Point 6 (probe getters) answers.** `probes()` reads the machine's own
+  heap ledger and pin state directly, in-process — the native backing's gap
+  was the door having no route for it, not the concept being unavailable.
+
+This is **mode A only** — the sibling plan's user-facing device, reached from
+the Devices picker or `?on=emu`. The **native backing this ADR describes is
+unchanged**: `?emu=tab` is `?emu=<url>`'s sibling flag, not a replacement —
+it installs the same `navigator.serial` polyfill, over the wasm-hosted board
+instead of a WebSocket door, for the emulator-first walk's server-less form
+(`just walk-no-board --tab`). `?emu=` and `?on=` remain orthogonal axes: a
+tab can run the dev-mode polyfill (`?emu=tab`) over a project opened on
+either kind of runtime.
+
+The wasm backing's own decisions — the Worker, the pacing contract, the
+flash image's home, the `emu_*` ABI — are their own ADR:
+[2026-09-10-the-c6-emulator-runs-in-the-tab.md](2026-09-10-the-c6-emulator-runs-in-the-tab.md).
+
 ## Follow-ups
-- **The wasm backing** of `EmulatorPort` (the sibling's mode A) fills points 5
-  and 6 above; when it lands, this table stops having "refused" rows for the
-  browser case. The contract it inherits is the section just above.
 - **The golden-trace question** (plan two OQ3) was answered at G2 and is its own
   ADR: [2026-09-10-an-emulator-captured-trace-is-evidence-not-a-fixture.md](2026-09-10-an-emulator-captured-trace-is-evidence-not-a-fixture.md).
   An emulator-captured trace is named `<id>.emu.jsonl`, a code guard makes
