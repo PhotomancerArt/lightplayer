@@ -62,6 +62,81 @@ fn emit_build_provenance() {
     println!("cargo:rustc-env=LP_BUILD_COMMIT={commit}");
     println!("cargo:rustc-env=LP_BUILD_DIRTY={dirty}");
     println!("cargo:rustc-env=LP_BUILD_PROFILE={profile}");
+    println!("cargo:rustc-env=LP_BUILD_FEATURES={}", enabled_features());
+}
+
+/// This crate's enabled cargo features, comma-separated and sorted, for the
+/// `[fw-checks-header]` line the M5 P2 payload harnesses print
+/// (`fw_checks::PayloadHeader::firmware_features`). The point is that a
+/// transcript states the image's feature set without anyone retyping it;
+/// sorted, so two builds of one feature set produce one string.
+///
+/// ⚠️ **The spelling has to be recovered, not guessed.** Cargo uppercases a
+/// feature name and turns `-` into `_` to build `CARGO_FEATURE_*`, and that
+/// map is not invertible: `fw-esp32c6`'s build script lowercases and leaves
+/// `_` alone, which is exact only because every feature that crate declares
+/// uses `_`. This one declares `float-f32`, `frame-dump`, `fixture-old-proto`
+/// and `fixture-no-hello`, so the same trick would write `float_f32` into a
+/// header — a feature name that does not exist and that no `cargo build`
+/// would accept. So the declared names come out of this crate's own
+/// `Cargo.toml`, which is the only place they are spelled correctly.
+fn enabled_features() -> String {
+    let declared = declared_features();
+    let mut features: Vec<String> = std::env::vars()
+        .filter_map(|(key, _)| key.strip_prefix("CARGO_FEATURE_").map(str::to_string))
+        .map(|var| {
+            declared
+                .iter()
+                .find(|name| cargo_feature_var(name) == var)
+                .cloned()
+                // A feature cargo told us about that the manifest does not
+                // declare cannot happen; fall back rather than panic, so a
+                // future cargo change degrades a header instead of a build.
+                .unwrap_or_else(|| var.to_ascii_lowercase())
+        })
+        .collect();
+    features.sort();
+    features.join(",")
+}
+
+/// `CARGO_FEATURE_*`'s suffix for a declared feature name, by cargo's rule.
+fn cargo_feature_var(name: &str) -> String {
+    name.to_ascii_uppercase().replace('-', "_")
+}
+
+/// The feature names declared in this crate's `[features]` table, read from
+/// the manifest so the spelling is the manifest's.
+fn declared_features() -> Vec<String> {
+    let path = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"))
+        .join("Cargo.toml");
+    let manifest = std::fs::read_to_string(&path).expect("read Cargo.toml");
+    let mut names = Vec::new();
+    let mut in_features = false;
+    for line in manifest.lines() {
+        let trimmed = line.trim_start();
+        // Section headers are at column zero in this manifest; a `[` that
+        // starts a trimmed line inside `[features]` is an array value's, so
+        // only an untrimmed-column-zero `[` ends the table.
+        if line.starts_with('[') {
+            in_features = line.trim_end() == "[features]";
+            continue;
+        }
+        if !in_features || trimmed.starts_with('#') {
+            continue;
+        }
+        let Some((name, _)) = trimmed.split_once('=') else {
+            continue;
+        };
+        let name = name.trim();
+        if !name.is_empty()
+            && name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        {
+            names.push(name.to_string());
+        }
+    }
+    names
 }
 
 /// Put this crate's directory on the linker search path so esp-hal's

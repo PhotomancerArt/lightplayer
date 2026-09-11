@@ -121,9 +121,18 @@ ws281x_telemetry = []
 #
 # Unlike fw-esp32s3's, this list does not name `lps-builtins?/float-f32`: that
 # crate is not a direct dependency here, and `lp-gfx-lpvm` forwards to both.
+# `lps-builtins?/float-f32` IS named, and only since the `shader-compile-stress`
+# harness (M5 P2) made that crate a direct optional dependency here. In an app
+# build it is redundant — `lp-gfx-lpvm` forwards to it, and cargo unifies — but
+# a `--no-default-features --features esp32,test_shader_compile_incremental`
+# build has no `lp-gfx-lpvm` to forward through, and a harness whose builtins
+# were Q32 while its engine was F32 would compile a different shader from the
+# app's. The `?` keeps it inert in every build that does not link the crate, so
+# the DEFAULT image is unchanged to the byte (proven in M5 P2's PR body).
 float-f32 = [
     "lpvm-native?/float-f32",
     "lp-gfx-lpvm?/float-f32",
+    "lps-builtins?/float-f32",
 ]
 
 # Print every transmitted WS281x frame to the serial log: one full hex dump per
@@ -229,6 +238,69 @@ test_sram0_exec = []
 # src/main.rs first when flipping features):
 #   cargo build --profile release-esp32v3 --features test_appcore_rom_path
 test_appcore_rom_path = []
+
+# ── The validation payloads (M5 P2) ──────────────────────────────────────────
+#
+# ⚠️ **Nothing above was retired to make room for these, and nothing here
+# replaces anything.** The classic's three existing `test_*` features are not
+# payload twins: `test_xt_fp_conformance` is the shared FP conformance oracle
+# (`lp-xt-fp-harness`), `test_interrupt_executor` is an esp-rtos behaviour
+# probe and upgrade canary, and `test_sram0_exec` is the memory-map probe DD37
+# cites. The C6's sixteen `test_*` features are what vision Q12's retirement
+# ledger was written about; this crate starts clean and stays that way — every
+# payload lands as `fw-checks` plus a thin chip harness from its first commit
+# (M5 notes.md §3.4).
+#
+# Each of the three below is the CHIP HALF of a payload whose portable logic
+# lives in `fw-checks`: the classic MIRRORS that crate, and never imports a
+# `fw-esp32c6` module. Each prints `fw_checks::write_header` as its first line
+# — through `esp_println::Printer`, not through `log`, because a harness that
+# installs no logger would otherwise print no header at all (the C6's G3
+# sitting-1 blocker, and the reason `write_header` exists).
+
+# The `shader-compile-stress` payload: the stepped `lps-glsl` + `lpvm-native`
+# compile pipeline run tick by tick on THIS chip's own JIT, with the heap
+# either side of every slice. The corpus, the per-tick line and the two
+# summary records are the chip half; `fw-checks`'s `check-shader-compile`
+# carries the record shapes the host parses.
+#
+# The JIT half already exists here — `server` pulls `lpvm-native` (with
+# `isa-xt` + `xt-placed-code`) and `lp-gfx-lpvm` — so what this adds is
+# `lp-shader`'s stepped frontend, the corpus's `lpir`/`lps-shared` types and
+# the builtin table. Build (touch src/main.rs first when flipping features):
+#   cargo build --profile release-esp32v3 --features esp32,test_shader_compile_incremental
+test_shader_compile_incremental = [
+    "dep:fw-checks",
+    "fw-checks/check-shader-compile",
+    "dep:lp-shader",
+    "dep:lpvm-native",
+    "dep:lpir",
+    "dep:lps-shared",
+    "dep:lps-builtins",
+]
+
+# The `gpio-calibrate` payload: the host asks for one GPIO at a time, the
+# device drives a soft-timed square wave on it and reports. The `CAL` line
+# protocol and the duty ramp are `fw-checks`'s (`check-gpio-calibrate`); what
+# stays here is UART0, `AnyPin::steal`, the clock — and the classic's own pad
+# policy, which is a chip fact and is NOT the C6's (see
+# `src/tests/gpio_calibrate.rs`).
+test_gpio_calibrate = ["dep:fw-checks", "fw-checks/check-gpio-calibrate"]
+
+# The `cycle-probe` payload: one kernel per term of a cycle model, each
+# bracketed by two independent clocks. `fw-checks`'s `check-cycle-probe` owns
+# the bracket, the repetition, the record and the portable kernels, and takes
+# the cycle counter as an injected function pointer; the chip half here is
+# **CCOUNT** (`rsr.ccount`, CPU cycles at 240 MHz — this chip has no `mcycle`
+# and no SYSTIMER), the Xtensa assembly loops whose instruction count has to
+# be exact, the IRAM/flash placement pair and the two MMIO addresses.
+#
+# ⚠️ **Recorded, never gated.** No host gate reads a classic cycle figure:
+# `lp-emu:esp32v3` defines `t1` alone (M5 ruling R1, E1 answered `t1` only),
+# so there is no calibrated grade for a number like this to be compared
+# against. What it is FOR is being the input a future `t2` would calibrate
+# from.
+test_cycle_probe = ["dep:fw-checks", "fw-checks/check-cycle-probe"]
 
 [dependencies]
 # Pins below come from the experiment repo's `fw/xt-runner-esp32/Cargo.toml`
@@ -414,6 +486,27 @@ lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false, feat
     "xt-map-esp32-classic",
 ], optional = true }
 lpfs = { path = "../../lp-base/lpfs", default-features = false, optional = true }
+
+# The payload harnesses' shared half (M5 P2), and the fence it sits on: this
+# crate MIRRORS `fw-checks` and never imports a `fw-esp32c6` module. Each
+# `test_*` payload feature above turns on exactly the `check-*` feature its
+# own harness needs, so a build links one payload's shared code and no more.
+# `default-features = false` keeps `std` off — it is a `no_std` crate here.
+fw-checks = { path = "../fw-checks", default-features = false, optional = true }
+
+# `test_shader_compile_incremental` only: the stepped compile pipeline and the
+# corpus's types. Every one of these is already in this firmware's dependency
+# graph through `server` -> `lp-gfx-lpvm` -> `lpvm-native`; naming them here is
+# what makes them reachable from a harness module, and `optional` is what keeps
+# a build that does not want the harness from linking them directly.
+lp-shader = { path = "../../lp-shader/lp-shader", default-features = false, optional = true }
+lpir = { path = "../../lp-shader/lpir", default-features = false, optional = true }
+lps-shared = { path = "../../lp-shader/lps-shared", default-features = false, optional = true }
+# The builtin table the JIT links against. `ensure_builtins_referenced()` is
+# what keeps the linker from dropping symbols only the emitted code calls —
+# `lp_gfx_lpvm::TargetLpvmGraphics::new` does the same thing for the app, and
+# the harness builds its engine directly, so it has to do it itself.
+lps-builtins = { path = "../../lp-shader/lps-builtins", default-features = false, optional = true }
 
 # The shared Xtensa FP conformance rig (`test_xt_fp_conformance`). Shared with
 # fw-esp32s3 rather than copied: it is a correctness oracle, and two copies that

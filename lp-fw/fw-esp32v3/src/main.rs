@@ -1188,7 +1188,18 @@ fn main() -> ! {
     #[cfg(feature = "test_xt_fp_conformance")]
     tests::xt_fp_conformance::run_all();
     #[cfg(feature = "test_sram0_exec")]
-    tests::sram0_exec::run()
+    tests::sram0_exec::run();
+
+    // The three M5 P2 payload harnesses. `gpio-calibrate` is handed the UART
+    // because its protocol is a conversation — it reads as well as writes;
+    // the other two only print, and `esp_println` reaches the same FIFO the
+    // `Uart` above just programmed the divisor for.
+    #[cfg(feature = "test_gpio_calibrate")]
+    tests::gpio_calibrate::run(_uart0);
+    #[cfg(feature = "test_cycle_probe")]
+    tests::cycle_probe::run();
+    #[cfg(feature = "test_shader_compile_incremental")]
+    tests::shader_compile_incremental::run();
 }
 
 /// Boot-to-hello entrypoint: the M2-P1 skeleton (bare build) and the M2-P3

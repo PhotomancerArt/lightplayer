@@ -37,3 +37,33 @@ pub mod sram0_exec;
 /// module docs.
 #[cfg(feature = "test_appcore_rom_path")]
 pub mod appcore_rom_path;
+
+// ── The validation payloads (M5 P2) ─────────────────────────────────────────
+//
+// Three payload harnesses, each the CHIP HALF of a `fw-checks` payload: the
+// portable logic is in that crate and this crate supplies the chip — the
+// link, the pads, the clocks, the assembly. `fw-checks` is MIRRORED, never a
+// `fw-esp32c6` module imported, which is what keeps "the shared payload logic
+// is shared and the chip half is chip code" true rather than aspirational.
+//
+// They differ from the three rigs above in what they are FOR: a rig answers a
+// question once and its capture is read by a person, while a payload's
+// capture is a transcript a replay compares field by field against the same
+// payload on another configuration. Hence the `[fw-checks-header]` line each
+// prints first — the in-band half of the provenance the sidecar also carries.
+
+/// The `gpio-calibrate` payload: the host drives one pad at a time and the
+/// device reports a ramping square wave. See the module docs — in particular
+/// the pad policy, which is this chip's and not the C6's.
+#[cfg(feature = "test_gpio_calibrate")]
+pub mod gpio_calibrate;
+
+/// The `cycle-probe` payload: one kernel per term of a cycle model, bracketed
+/// by CCOUNT and by TIMG0's LACT microseconds. **Recorded, never gated.**
+#[cfg(feature = "test_cycle_probe")]
+pub mod cycle_probe;
+
+/// The `shader-compile-stress` payload: the stepped compile pipeline on this
+/// chip's own JIT, tick by tick, with the heap either side of every slice.
+#[cfg(feature = "test_shader_compile_incremental")]
+pub mod shader_compile_incremental;
