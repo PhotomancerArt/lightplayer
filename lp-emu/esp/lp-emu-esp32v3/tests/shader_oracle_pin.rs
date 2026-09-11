@@ -483,7 +483,7 @@ fn the_first_lit_frame_off_io18_is_the_host_oracles_frame() {
 }
 
 // ---------------------------------------------------------------------------
-// The half the window-spill defect holds
+// Reading (a), and the run's own deadline
 // ---------------------------------------------------------------------------
 
 /// **Reading (a) is readings (b) and (c)**, and the run reaches its own

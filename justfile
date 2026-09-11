@@ -2839,12 +2839,13 @@ walk-esp32c6-emu *args: install-rv32-target build-rv32-builtins
 # UART0 (this chip has no USB-Serial-JTAG) and the project is retargeted
 # `D10` -> `IO18` into a scratch copy, because the DOM-Z-102 has no D10.
 #
-# ⚠️ It reaches two of its three readings today. The pad's lit frame IS the
-# host oracle's, byte for byte — and then the guest dies in `_WindowUnderflow8`
-# with a null `a1` (the window-spill finding in
-# `lp-emu/esp/lp-emu-esp32v3/README.md`, "A frame three ways"; M4 P4b is the
-# fix) before the firmware's own deferred dump, 30 frames later, can be
-# printed. The script prints every reading it got and exits non-zero.
+# It reaches all three readings and exits 0: 2,438 frames on IO18, one distinct
+# lit byte string, equal to the guest's own deferred `[OUT] dump` and to
+# `[ORACLE] rgb=` — 384 hex characters, three ways. It reached only two until
+# M4 P4b (PR #711) fixed the window-spill defect that killed the guest before
+# the deferred dump; `lp-emu/esp/lp-emu-esp32v3/README.md`'s "The window,
+# across a context save" is that trace. The script prints every reading it got
+# whatever happens, and exits non-zero if any of them is missing or differs.
 #
 # NOT in any CI job, for the C6 recipe's reason: it builds a firmware image and
 # a release `lp-cli` and then runs the machine for tens of emulated seconds.

@@ -35,22 +35,21 @@
 #   loud guard — so both chips render provably identical pixels, because the
 #   endpoint chooses a wire and never a colour.
 #
-# ## ⚠️ This walk reaches two of its three readings today (M4 P4)
+# ## All three readings, on 2026-09-11 at a0707caaf + this branch
 #
-# The guest dies a few seconds in, deterministically, in `_WindowUnderflow8`
-# with a null `a1`: a level-1 interrupt's `save_context` declares a frame
-# spilled whose registers never reach memory, and the `retw` that follows
-# restores garbage. The crate README's "A frame three ways" has the whole
-# trace; M4 P4b is the fix.
+# The project loads, the output opens, the shader compiles, and the run reaches
+# its own emulated deadline with `unmapped=0`: **2,438 frames on IO18, 2,437 of
+# them lit, one distinct lit byte string, and it equals the guest's own
+# deferred `[OUT] dump` and `[ORACLE] rgb=` — 384 hex characters, three ways.**
+# Exit 0.
 #
-# What that costs, measured on 2026-09-11 at 63965f5c7 + this branch: the
-# project loads, the output opens, the shader compiles (16 ms of guest time),
-# **two lit frames reach IO18 and both are `[ORACLE] rgb=` byte for byte** —
-# and then the guest dies mid-`projectRead`, so `lp-cli` reports a lost
-# connection and the run never reaches the deferred `[OUT] dump` 30 frames
-# later. So readings (b) and (c) agree and reading (a) is absent, the walk
-# prints all of it and exits non-zero. That is the honest outcome, and not
-# something to widen a tolerance around.
+# Until M4 **P4b** (PR #711) this walk reached only two of the three: loading a
+# project killed the guest a few seconds in, in `_WindowUnderflow8` with a null
+# `a1`, before the deferred dump 30 frames past the first lit frame could be
+# printed. `CALL0`/`CALLX0` zeroing `PS.CALLINC` was the cause; the crate
+# README's "The window, across a context save" has the trace. The walk's
+# evidence-first structure below is that episode's legacy and stays: a run that
+# loses its link must still print the frames the pad already carried.
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
@@ -63,14 +62,15 @@ PAD="${LP_WALK_PAD:-18}"
 LINK="${LP_WALK_LINK:-127.0.0.1:5607}"
 # EMULATED time, and the walk's whole cost. The budget, measured on this
 # machine: the direct load reaches `[RECOVERY] boot complete` at ~115 ms, the
-# scripted upload lands its project at ~2.5 s (twelve requests, 64 B every
-# 20 ms of guest time), and the classic then compiles the shader
-# INCREMENTALLY — ~92 render ticks, one compile stage each
-# (`fw-checks`'s shader-compile-stress) — so the first lit frame is ~92 frames
-# after the load and the deferred dump is 30 frames after that. 30 s is the
-# room that needs; raise it with LP_WALK_TIMEOUT for a longer soak and expect
-# the wall clock to move with it.
-TIMEOUT="${LP_WALK_TIMEOUT:-30s}"
+# scripted upload lands its project at ~7.3 s (twelve requests, 64 B every
+# 30 ms of guest time), the classic compiles the shader, and the deferred
+# `[OUT] dump` fires at the guest's frame 31 a further ~70 ms later. 10 s is
+# that with a second of margin; it was 30 s while the window-spill defect
+# (M4 P4b, PR #711) made a longer run the only hope of a dump, and a longer
+# run now costs wall clock and proves nothing more — a clock-free project
+# renders the same bytes for ever. Raise it with LP_WALK_TIMEOUT for a soak
+# and expect the wall clock to move with it.
+TIMEOUT="${LP_WALK_TIMEOUT:-10s}"
 # Wall-clock net. The classic runs several times slower than real time while
 # it is busy and FASTER than real time while it idles (the idle skip).
 WALL="${LP_WALK_WALL_TIMEOUT:-900}"
@@ -216,10 +216,10 @@ if [[ $cli_status -ne 0 ]]; then
     tail -30 "$OUT/cli.stderr" >&2
     # …and the walk carries on regardless, deliberately. A guest that dies
     # mid-upload has usually already loaded the project, opened its output and
-    # rendered — the run that found the window-spill defect got two lit frames
-    # onto the pad and then lost the link — and a walk that exits here throws
-    # away the only evidence it went to all this trouble to collect. The exit
-    # code still says FAILED.
+    # rendered — the run that found the window-spill defect (M4 P4b, PR #711)
+    # got two lit frames onto the pad and then lost the link — and a walk that
+    # exits here throws away the only evidence it went to all this trouble to
+    # collect. The exit code still says FAILED.
     echo "       continuing: the frames the pad already carried are printed below" >&2
     upload_failed=1
 else
@@ -236,8 +236,9 @@ emu_pid=
 if [[ $emu_status -ne 0 ]]; then
     echo "NOTE: the machine did not end at its deadline (exit $emu_status)." >&2
     grep -m 8 -aE "STRICT BUS STOP|FAULT|pc      =|cycle   =|access  =" "$OUT/emu.stdout" >&2 || true
-    echo "      Exit 3 is a strict-bus stop: see the crate README, \"A frame three ways\"," >&2
-    echo "      for the window-spill finding this walk is blocked on." >&2
+    echo "      Exit 3 is a strict-bus stop: the machine refused an access the guest" >&2
+    echo "      made. The crate README's \"The window, across a context save\" is the" >&2
+    echo "      last one of these to be diagnosed (M4 P4b, PR #711) and shows how." >&2
 fi
 
 echo
@@ -319,10 +320,10 @@ fail=$upload_failed
 
 # ⚠️ **Readings (b) and (c) are compared FIRST, and a missing reading (a) does
 # not stop them.** The firmware's own dump is the *deferred* one — 30 frames
-# past the first lit frame — so on a run the window-spill defect cuts short it
-# is the reading most likely to be absent, and the pad-against-oracle
-# comparison is exactly the evidence such a run still holds. An earlier draft
-# exited here on a black-only dump and threw that away.
+# past the first lit frame — so it is the reading a run that ends early loses
+# first, and the pad-against-oracle comparison is exactly the evidence such a
+# run still holds. An earlier draft exited here on a black-only dump and threw
+# that away.
 if [[ -z "$pad_hex" ]]; then
     echo "FAIL: no lit frame reached pad $PAD — the render never left the chip."
     echo "      $pad_frames frame(s) were decoded there."
@@ -358,7 +359,8 @@ if [[ -z "$device_hex" || ( "$dumps" == "1" && "$device_hex" =~ ^0+$ ) ]]; then
     echo "      The open-time dump is the compile-window black fallback; the deferred lit"
     echo "      dump fires 30 frames after the first LIT one. So either the run was too"
     echo "      short (raise LP_WALK_TIMEOUT) or it ended early — the NOTE above says"
-    echo "      which, and the crate README's \"A frame three ways\" says what is known."
+    echo "      which, and the crate README's \"A frame three ways\" says what the three"
+    echo "      readings are and how to triage a disagreement."
     fail=1
     device_hex=""
 fi

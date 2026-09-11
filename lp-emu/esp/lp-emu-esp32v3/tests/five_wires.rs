@@ -541,7 +541,7 @@ fn the_second_wave_decodes_the_same_frames_across_two_runs_and_two_quanta() {
 }
 
 // ---------------------------------------------------------------------------
-// The half the window-spill defect holds
+// The bytes: five checksums, and the run's own deadline
 // ---------------------------------------------------------------------------
 
 /// **Per wire, per frame: the pad against the guest's own checksum.**

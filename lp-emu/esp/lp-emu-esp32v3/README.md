@@ -991,74 +991,82 @@ routing over time:
 
 ⚠️ The pusher deliberately starts a queued second-wave frame **a wave late**
 (`shared_driver.rs`). That is by design, and nothing in `tests/five_wires.rs`
-gates on frame timing — only on bytes and counts. There is one more reason
-not to: across two `--core-quantum` values the five frames are byte-identical
-but start **64 cycles apart**, one window, because the pusher lives on the
-other core. `tests/pin_frames.rs` can compare two quanta's dumps including
-their times; it drives its waveform from the host on one core.
-`tests/five_wires.rs` compares the frame's *shape* instead, and that
-difference is the second wave's signature rather than a flaw in either.
+gates on frame timing — only on bytes and counts. There is one more reason not
+to: the pusher lives on the other core, so a different `--core-quantum` starts
+the same frame **64 cycles apart**, one window. Measured over 2,000 frames a
+pad, every frame the two runs shared was byte-identical on every pad — and the
+re-muxed pad, gpio13, carried 2,008 frames at quantum 256 and 2,009 at 64,
+because the deadline is a *cycle* and one window decides whether the last wave
+starts before it. `tests/pin_frames.rs` can compare two quanta's dumps
+including their times; it drives its waveform from the host on one core.
+`tests/five_wires.rs` compares the frames' *shape* up to the last one both
+runs finished, and allows the counts to differ by one — that difference is the
+second wave's signature rather than a flaw in either.
 
-#### ⚠️ Where this stops today: the window spill
+#### All three readings, measured
 
-Loading **any** project kills the guest, deterministically, at the same cycle
-under `--core-quantum` 64, 256 and 4096, on both boot paths, with the shipped
-image and with the `frame-dump` one:
-
-```text
-STRICT BUS STOP
-  pc      = 0x4008008f (~_WindowOverflow8+0xf)
-  cycle   = 889974142 (3708225 us emulated)
-  access  = Write Word at 0xffffffe0          (= a1 - 32 with a1 = 0)
-```
-
-Stepped instruction by instruction with a memory watch on the save area: a
-level-1 interrupt lands, `__naked_user_exception` → `save_context` runs on the
-interrupted stack and **WindowStart goes 0x002a → 0x0020** — two frames
-declared spilled — but the caller-save area of the frame that is about to
-return is written only by `save_context` itself and never by a window spill.
-The `retw` that follows takes `_WindowUnderflow8`, restores `a0`/`a1` from
-that unwritten save area, gets `a1 = 0`, and the handler walks its spills down
-through unmapped memory (178 M unmapped writes in a non-strict run). So the
-hart's window model and the guest's `WINDOWSTART`/`WINDOWBASE` view disagree
-across a context save — `lp-emu/lp-xt-emu`'s window machinery (M1), which M4
-**P4b** is fixing (PR #711).
-
-It is the *machine*, not the firmware: the same image runs five wires × 300
-LEDs at 29.99 fps for 240 s on the desk board
-(`lp-core/lpc-hardware/boards/domraem/dom-z-102.json`'s `measured` note), and
-`shader-compile-stress` compiles a whole shader on this machine with
-`unmapped=0`.
-
-**Two of the three readings agree anyway.** `just walk-esp32v3-emu-frame` —
-the live upload, not a replay — loads the project, opens the output, compiles
-the shader (16 ms of guest time) and puts **two lit frames on IO18 that are
-`[ORACLE] rgb=` byte for byte**, 384 characters, `crc=0x55772254`, before the
-guest dies mid-`projectRead`:
+`just walk-esp32v3-emu-frame` — the live `lp-cli upload`, not a replay —
+loads the project, opens the output, compiles the shader, and runs on to its
+own emulated deadline (10 s of guest time) with nothing unmapped:
 
 ```text
 ===== COMPARISON =====
-  pad 18: 3 frame(s) decoded, 2 lit, 1 distinct lit frame(s)
-PASS: pad 18 == [ORACLE] rgb (384 hex chars), 2 lit frame(s),
+  pad 18: 2438 frame(s) decoded, 2437 lit, 1 distinct lit frame(s)
+PASS: pad 18 == [ORACLE] rgb (384 hex chars), 2437 lit frame(s),
       all of them the same bytes.
-FAIL: the guest's own lit dump never arrived (reading (a)).
+PASS: the frame is byte-identical on all THREE readings (384 hex chars).
+  [OUT] dump == pad 18 == [ORACLE] rgb
+
+run: cycles=2400000000 instructions=1096173276 (core0=840485273 core1=255688003)
+     idle=1595005 unmapped=0 (reads 0, writes 0, 0 sites) fence=0 quantum=256
+pin gpio18: 2438 frames, 2438 complete, 0 errors, 64 leds, 7489536 edges
 ```
 
-So (b) = (c) is *measured*; (a) is what the defect still costs, because its
-dump is deferred thirty frames past the first lit one.
+`tests/shader_oracle_pin.rs` says the same thing per tick — `crc=0x55772254`,
+the deferred `[OUT] dump frame=31`, two runs' `--dump-frames` sha256-equal —
+and `tests/five_wires.rs` adds the five wires: five distinct byte strings,
+each equal to a `[OUT] frame=… crc=` line the guest itself printed, ~2,009
+whole frames a pad, zero bit errors.
 
-**Where the stop lands depends on the walk's pacing, which is worth knowing
-before reading any result.** The committed `walks/shader-oracle.script`
-replays its chunks 30 ms of guest time apart, and at that spacing the stop
-lands *inside `loadProject`*: **no frame reaches any pad at all**. A 15 ms
-copy of the same script (scratch — the committed one is P4b's to commit
-byte-identical, so it is not re-paced here) gets 56 whole frames off IO18
-with one distinct lit byte string, again equal to the oracle's. The five-wire
-walk at 20 ms reaches all five opens and the compile-window black frame on
-every pad. `tests/shader_oracle_pin.rs` and `tests/five_wires.rs` recognise
-this one stop exactly and print a `SKIP` notice naming P4b rather than
-weakening an assertion around it — so when P4b lands, the gates run rather
-than having to be rewritten.
+Until **M4 P4b** (PR #711) none of that was reachable: loading any project
+killed the guest in a ROM window handler a few seconds in, so the deferred
+dump — thirty frames past the first lit one — never printed. That is "[The
+window, across a context save](#the-window-across-a-context-save)" below, and
+it was the machine, not the firmware. The one thing it still decides is
+nothing: `walks/shader-oracle.script`'s 30 ms chunk gap used to choose *where*
+the guest died, and is now only how fast the upload lands.
+
+#### ⚠️ The console interleaves, so the gates read a repaired one
+
+The classic's writers yield mid-line, so a record that has put half of itself
+into the TX FIFO can have another task's whole record land inside it — the
+same PR #300 defect that makes `frame_dump` defer its lit dump. It is not
+rare: the driver's own open line arrives cut in four.
+
+```text
+…: Esp32V3RmtWs281xDriver::open: endpoint=esp32v3-rmt-ws281x[stack] heartbeat: …
+[MEM] free=177468 used=64084 …
+[JIT] used=0 peak=0 cap=65536 …
+:ws281x:local:IO18 gpio=/gpio/18 wire=0 bytes=192 (slot per transmission)
+```
+
+Both test files carry a `deinterleave` that rejoins a cut record around its
+insertions — nothing dropped, nothing loosened — and every console assertion
+reads the repaired console. It matters most for reading (a): a split would
+truncate its 384 hex characters into a near-miss that looks like a *wrong
+frame* rather than a missing line.
+
+#### ⚠️ The guest's frame counter is only visible every sixtieth frame
+
+`frame_dump::report` prints one `[OUT] frame=<n> … crc=…` line per
+`REPORT_EVERY_FRAMES = 60` frames, so the highest `n` on the console is the
+last multiple of sixty the guest reached and **not** its total — 1,980
+reported against 2,009 carried, on a run that dropped nothing. "The counts
+agree within one" is a claim about where the deadline fell. The claim that is
+about dropped frames, and the one `tests/five_wires.rs` makes, is that the pad
+carried at least every frame the guest counted and under one report period
+more.
+
 
 ### The sinks
 
@@ -1999,8 +2007,8 @@ it fixed for P4–P8, is
 | `tests/rmt_registers.rs` | **M4 P2's gates.** Every offset looked up **by name** in `regs::RMT` rather than transcribed, and the resets asserted against that table's own `resets`. One test per quirk, each of which fails without it: `tx_lim` a repeating count that re-arms itself (one write, a 256-word transmission, four events 64 words apart — the C6's position semantics fire once); a `ch_tx_lim` write changing the period and not the count; the **global** wrap bit, and the same register serving channel 7; `tx_start` acted on with no `conf_update`; a window of end markers stopping the transmitter at the next word boundary; `mem_raddr_ex` absolute **and at bits 12:21**, with the APB write pointer at 0:9. Plus: a whole **WS2812 frame** — 8 LEDs, 194 words, a 128-word window, three ping-pong refills — driven by the register sequence the shipped image's own `--trace-block RMT` run issues, whose fetched words are the stream that went in, whose word start cycles are exact absolute tick positions, and whose edges off **gpio18** decode back to the bytes; `Gpio::peripheral_driven_pads` non-empty for the first time; the refill telemetry's entry and fill in words; `int_clr`'s W1C and the line on source 47; REF_TICK refused rather than guessed at; a byte-identical snapshot round trip; and **no register in the block graded `measured`** |
 | `tests/pin_frames.rs` | **M4 P3's gates.** The WS281x decoders on the whole machine: a pad becomes observed when the guest routes it, and `routed_pads()` carries `(PadId(18), RMT_SIG_0)`; the engine ends a transmission; the frame decoded off the fabric is whole, zero-error, 24 bytes, closed by its reset, and **is the frame that went in**; a frame the run ended mid-flight is flushed **incomplete** rather than invented; `--dump-frames` writes one `ws281x-frame` line naming `RMT_SIG_0` and carrying `wire` and `rgb` as two different fields; `--pin-log` writes one line per edge in guest-cycle order with a `# route` note; two runs write byte-identical dumps and so does a third at a different `--core-quantum`; and a decoder snapshotted **mid-bit** restores with its half-shifted bits and decodes the second half identically. Driven by the shipped image's own register sequence from the host side, because R6 blocks the upload that would make the guest issue it |
 | `tests/rmt_chase.rs` | **M4 P5's gate.** The `rmt-chase` payload's own image run whole to its done marker under `--strict-bus`, and **all 768 frames the decoder read off IO18 checksum-equal to the guest's own `rmt-frame` record** — `fnv1a(unpermute(frame.wire, order))` against the line the firmware printed — with zero bit errors, zero trailing bits, 6,144 bits and 256 LEDs a frame, a reset gap closing every one and the chase pixel where the record says it is. Plus: IO18's route present and `RMT_SIG_0` with no *other* RMT signal routed anywhere (**not** the length of `routed_pads()` — gpio1, the console pad, is in it); two edges per bit and no dropped edges; two runs writing byte-identical dumps and a decoder snapshotted **mid-bit** restoring to the same frames, both over a 60 ms prefix because a whole run is 3.33 billion cycles. The first **guest-driven** channel on this chip — see "`rmt-chase` on the classic" |
-| `tests/shader_oracle_pin.rs` | **M4 P4's gate: a frame three ways.** `walks/shader-oracle.script` — a real `lp-cli upload` replayed in guest time over UART0 — on the **`frame-dump`** image, then the first *lit* frame off IO18 against the host oracle pinned from a run in this tree (`ORACLE_RGB`, `ORACLE_CRC = 0x5577_2254`, both engines agreeing on all 192 bytes) and against the firmware's own deferred `[OUT] dump` line; every later frame the same frame; the open line with `gpio=/gpio/18`; `routed_pads()` carrying `(PadId(18), RMT_SIG_0)` *by value*; `[INIT] RMT ISR on APP core` as P1's standing guard; two runs' `--dump-frames` sha256-equal. Plus the script's own shape, the FNV-1a vectors and the oracle constant's length and checksum, which need no firmware. **Skips, loudly, on the window-spill stop** — see "A frame three ways" |
-| `tests/five_wires.rs` | **M4 P4's second wave.** `projects/test/five-wire` uploaded by `walks/five-wire.script`: five pads routed, four pooled two-block slots, and **one signal driving a second pad with a park to `GPIO_OUT` between** — the re-mux, read off the pin log's routing notes; whole frames with no bit errors on every wire; the same frames across two runs and across two `--core-quantum` values (by *shape*: the pusher is on core 1, so the starts move by a window while the bytes do not). The per-wire checksum against the guest's own `[OUT] frame=… crc=` summary lines waits on the same defect, and skips the same way |
+| `tests/shader_oracle_pin.rs` | **M4 P4's gate: a frame three ways.** `walks/shader-oracle.script` — a real `lp-cli upload` replayed in guest time over UART0 — on the **`frame-dump`** image, then the first *lit* frame off IO18 against the host oracle pinned from a run in this tree (`ORACLE_RGB`, `ORACLE_CRC = 0x5577_2254`, both engines agreeing on all 192 bytes) and against the firmware's own deferred `[OUT] dump` line; every later frame the same frame; the open line with `gpio=/gpio/18`; `routed_pads()` carrying `(PadId(18), RMT_SIG_0)` *by value*; `[INIT] RMT ISR on APP core` as P1's standing guard; two runs' `--dump-frames` sha256-equal. Plus the script's own shape, the FNV-1a vectors and the oracle constant's length and checksum, which need no firmware. All of it runs since M4 P4b (#711) — see "A frame three ways" |
+| `tests/five_wires.rs` | **M4 P4's second wave.** `projects/test/five-wire` uploaded by `walks/five-wire.script`: five pads routed, four pooled two-block slots, and **one signal driving a second pad with a park to `GPIO_OUT` between** — the re-mux, read off the pin log's routing notes; whole frames with no bit errors on every wire; the same frames across two runs and across two `--core-quantum` values (by *shape*: the pusher is on core 1, so the starts move by a window while the bytes do not). Plus, since M4 P4b (#711), the per-wire checksum against the guest's own `[OUT] frame=… crc=` summary lines — five wires, five distinct byte strings, each one a checksum the guest printed — and no frame dropped |
 | `tests/determinism.rs` | The plan's inviolable invariant. Two runs of each boot path agree on the UART sha, the byte count, the **cycle count**, the **instruction count**, the pc and the idle skips; a snapshot taken mid-run and restored into a **fresh** machine produces the same second half as the run that was never interrupted; and the state that is not a register — the flash MMU tables, the cache-enable bit, both halves of the stall key, the interrupt matrix, core 1's hold, the DBREAK slots — comes back through the struct. **M4 P1**: the single-core prefix run's three counters pinned to `origin/main`'s; two dual-core runs at quantum 256 and two at 64 each one run (both harts' counters, both pcs, the parks, a memory fingerprint); the two quanta's consoles equal byte for byte except the stack high-water figure, which the test names as interrupt timing |
 | `tests/dual_core.rs` | **M4 P1's gates.** A hand-built fixture with no firmware: core 0 performs esp-hal's `start_core1` DPORT sequence, core 1 comes up **through the mask ROM's own reset path and wait loop** (its two reads of `appcpu_boot_addr` read out of the bus trace), routes the doorbell into its own matrix and parks in `waiti` — costing nothing while parked — and core 0's `cpu_intr_from_cpu_1` wakes it into `_Level2InterruptVector` with `EPC2` naming the instruction after the `waiti`; the release is a reset (`CPENABLE = 0xff`, counters from the clock). Ruling R4 on a synthetic table disagreement: the stop names entry, page and both mappings, exits 7, and `permit` continues. **With the image**: `[INIT] RMT ISR on APP core` on both boot paths with `unmapped = 0`, the binds read back out of `core_1_intr_map` with `core_0_intr_map[RMT] = 16`, the pusher parked in `idle_once` — **red on the shipped image until the open defect below is fixed** |
 | `src/periph/gpio.rs`, `src/periph/io_mux.rs` (unit) | A plain `Output` pin drive reaching a pad and `enable` taking it back off the wire; `256` being the GPIO selector and `128` an ordinary signal; bank 1 carrying pads 32..39; the input matrix routing `U0RXD_IN` and refusing the two constants by name; `in_` served only through `fun_ie`; the PRO core's enable at `pin[n]` bit 15 and the APP core's at 13; **no peripheral signal reaching a pad**; the IO_MUX pad map walked against the generated table's own names, and asserted *not* to be in pad order |
