@@ -714,10 +714,7 @@ mod tests {
         sb.write(&mut spi, USER, USER_COMMAND | USER_ADDR | USER_MOSI);
         sb.write(&mut spi, USER2, 0x7000_0000 | u32::from(op::PAGE_PROGRAM));
         sb.write(&mut spi, CMD, CMD_USR | CMD_FLASH_PES);
-        assert_eq!(
-            flash.lock().unwrap().peek(0x0031_0000, 4).unwrap(),
-            b"lpfs"
-        );
+        assert_eq!(flash.lock().unwrap().peek(0x0031_0000, 4).unwrap(), b"lpfs");
         assert_eq!(spi.status() & SR_WEL, 0, "the program consumed WEL");
 
         // Without a write-enable the part ignores the program, and so does

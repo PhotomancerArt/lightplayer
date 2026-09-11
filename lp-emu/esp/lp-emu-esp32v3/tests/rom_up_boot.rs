@@ -84,17 +84,15 @@ fn the_merged_image_carries_the_bootloader_the_desk_board_runs() {
 
     // The bootloader's own strings, in the bootloader's own window.
     let window = &bytes[..lp_emu_esp32v3::flash::PARTITION_TABLE_OFFSET as usize];
-    let has = |needle: &str| {
-        window
-            .windows(needle.len())
-            .any(|w| w == needle.as_bytes())
-    };
+    let has = |needle: &str| window.windows(needle.len()).any(|w| w == needle.as_bytes());
     assert!(has(BOOTLOADER_VERSION), "{BOOTLOADER_VERSION}");
     assert!(has(BOOTLOADER_COMPILE_TIME), "{BOOTLOADER_COMPILE_TIME}");
     assert!(has(BOOTLOADER_MULTICORE), "{BOOTLOADER_MULTICORE}");
     // And the one error line the desk board prints on every boot, which only
     // exists because the app image really does have two DROM segments.
-    assert!(has("Image contains multiple %s segments. Only the last one will be mapped."));
+    assert!(has(
+        "Image contains multiple %s segments. Only the last one will be mapped."
+    ));
 
     let parsed = MergedImage::parse(&bytes).expect("the merged image parses");
     assert_eq!(
@@ -102,7 +100,10 @@ fn the_merged_image_carries_the_bootloader_the_desk_board_runs() {
         lp_emu_esp32v3::flash::BOOTLOADER_OFFSET,
         "the classic's bootloader is at 0x1000, not the C6's 0x0"
     );
-    assert_eq!(parsed.bootloader.chip_id, lp_emu_esp32v3::image::CHIP_ID_ESP32);
+    assert_eq!(
+        parsed.bootloader.chip_id,
+        lp_emu_esp32v3::image::CHIP_ID_ESP32
+    );
     assert_eq!(parsed.bootloader.wp_pin, 0xee, "L0's `SPIWP:0xee`");
     assert_eq!(parsed.bootloader.spi_mode_name(), "DIO", "L0's `mode:DIO`");
     assert_eq!(parsed.bootloader.clock_div(), 2, "L0's `clock div:2`");
@@ -153,7 +154,8 @@ fn a_second_boot_from_the_same_chip_mounts_rather_than_reformats() {
         }
     };
     // A writable copy: the point is that the first boot's writes survive.
-    let chip = std::env::temp_dir().join(format!("lp-emu-v3-second-boot-{}.bin", std::process::id()));
+    let chip =
+        std::env::temp_dir().join(format!("lp-emu-v3-second-boot-{}.bin", std::process::id()));
     std::fs::copy(&merged, &chip).expect("a writable chip");
 
     let mut first = direct(&elf, FlashBacking::File(chip.clone()));

@@ -36,7 +36,12 @@ fn a_blank_chip_is_erased_and_knows_its_own_capacity() {
     let m = machine(FlashBacking::Blank);
     let chip = m.flash().lock().expect("flash");
     assert_eq!(chip.len(), DEFAULT_FLASH_LEN, "the desk board's 4 MiB");
-    assert!(chip.peek(0, 64).expect("in range").iter().all(|b| *b == 0xff));
+    assert!(
+        chip.peek(0, 64)
+            .expect("in range")
+            .iter()
+            .all(|b| *b == 0xff)
+    );
     // esp-storage decodes byte 2 of the JEDEC id as `log2(bytes)`.
     let [_, _, capacity, _] = chip.jedec_id().to_le_bytes();
     assert_eq!(1u32 << capacity, DEFAULT_FLASH_LEN);
