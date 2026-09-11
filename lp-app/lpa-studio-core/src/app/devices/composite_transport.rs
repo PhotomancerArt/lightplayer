@@ -1,15 +1,16 @@
-//! Two transports behind the one [`DeviceTransport`] the effects layer holds.
+//! Three transports behind the one [`DeviceTransport`] the effects layer
+//! holds.
 //!
 //! [`DeviceEffects`](super::DeviceEffects) has exactly one transport per
 //! build, and deliberately: a per-kind fork inside the effects layer is how a
-//! second device flow grows. So a build that can reach both silicon and sims
-//! installs ONE transport that owns both and routes by the only thing it
-//! honestly can — the link's own endpoint.
+//! second device flow grows. So a build that can reach silicon, sims and
+//! emulated boards installs ONE transport that owns all three and routes by
+//! the only thing it honestly can — the link's own endpoint.
 //!
 //! ```text
-//!   discover_granted ──► serial ∪ sim          (both, every sweep)
+//!   discover_granted ──► serial ∪ sim ∪ emu    (all three, every sweep)
 //!   request_grant    ──► serial                (a chooser is a port chooser)
-//!   run_effect       ──► endpoint "sim:…" ? sim : serial
+//!   run_effect       ──► endpoint "sim:…" ? sim : "emu:…" ? emu : serial
 //!   revoke_grant     ──► same rule
 //!   lens_client_io   ──► same rule
 //! ```
@@ -28,6 +29,14 @@
 //! Web Serial (Safari, Firefox), and the host has none at all. The composite
 //! takes `serial: Option<…>` for exactly that: the roster still fills with
 //! sims, and the ONE thing that degrades is the chooser, which says why.
+//!
+//! # A build with no emulator module serves no emus
+//!
+//! `emu` is optional for the mirror-image reason (D21): a Studio build that
+//! ships no emulator sidecar has nothing to power on, and installing a
+//! transport that could only fail would put a row in a picker that never
+//! works. Absent, an `emu:` endpoint is refused BY NAME rather than routed
+//! to serial, which would try to open a port that does not exist.
 
 use std::rc::Rc;
 
@@ -37,26 +46,48 @@ use super::device_transport::{
     DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceTransport,
     DeviceTransportFuture, GrantedLink, LensLineTap,
 };
-use super::sim_record::uid_from_sim_endpoint;
+use super::sim_record::{uid_from_emu_endpoint, uid_from_sim_endpoint};
 
-/// Serial and sim, behind one trait.
+/// Serial, sim and emu, behind one trait.
 pub struct CompositeDeviceTransport {
     /// `None` where this build cannot reach a serial port at all.
     serial: Option<Rc<dyn DeviceTransport>>,
     sim: Rc<dyn DeviceTransport>,
+    /// `None` where this build ships no emulator module (D21).
+    emu: Option<Rc<dyn DeviceTransport>>,
 }
 
 impl CompositeDeviceTransport {
+    /// Serial and sim, with no emulator in this build.
     pub fn new(serial: Option<Rc<dyn DeviceTransport>>, sim: Rc<dyn DeviceTransport>) -> Self {
-        Self { serial, sim }
+        Self {
+            serial,
+            sim,
+            emu: None,
+        }
     }
 
-    /// Which half owns this endpoint. A `sim:` endpoint is the sim
-    /// transport's; everything else belongs to serial, and a build without
-    /// one says so rather than silently answering with the wrong half.
+    /// Add the emu half. Separate from [`Self::new`] because it is the one
+    /// of the three that depends on what this build SHIPS rather than on
+    /// what the browser can do.
+    pub fn with_emu(mut self, emu: Rc<dyn DeviceTransport>) -> Self {
+        self.emu = Some(emu);
+        self
+    }
+
+    /// Which third owns this endpoint. A `sim:` endpoint is the sim
+    /// transport's, an `emu:` one the emulator's; everything else belongs
+    /// to serial. A build missing the half an endpoint names says so rather
+    /// than silently answering with the wrong one.
     fn route(&self, info: &LinkInfo) -> Result<Rc<dyn DeviceTransport>, String> {
         if uid_from_sim_endpoint(&info.endpoint.0).is_some() {
             return Ok(Rc::clone(&self.sim));
+        }
+        if uid_from_emu_endpoint(&info.endpoint.0).is_some() {
+            return self
+                .emu
+                .clone()
+                .ok_or_else(|| "this build ships no emulator".to_string());
         }
         self.serial
             .clone()
@@ -66,15 +97,18 @@ impl CompositeDeviceTransport {
 
 impl DeviceTransport for CompositeDeviceTransport {
     fn label(&self) -> &'static str {
-        match self.serial.is_some() {
-            true => "browser Web Serial + sim",
-            false => "sim only",
+        match (self.serial.is_some(), self.emu.is_some()) {
+            (true, true) => "browser Web Serial + sim + emu",
+            (true, false) => "browser Web Serial + sim",
+            (false, true) => "sim + emu",
+            (false, false) => "sim only",
         }
     }
 
     fn discover_granted(&self) -> DeviceTransportFuture<Result<Vec<GrantedLink>, String>> {
         let serial = self.serial.clone();
         let sim = Rc::clone(&self.sim);
+        let emu = self.emu.clone();
         Box::pin(async move {
             // A serial discovery that FAILED says nothing about which boards
             // exist, and the departure sweep detaches on the answer — so the
@@ -87,6 +121,9 @@ impl DeviceTransport for CompositeDeviceTransport {
                 None => Vec::new(),
             };
             granted.extend(sim.discover_granted().await?);
+            if let Some(emu) = &emu {
+                granted.extend(emu.discover_granted().await?);
+            }
             Ok(granted)
         })
     }
@@ -139,7 +176,7 @@ impl DeviceTransport for CompositeDeviceTransport {
 mod tests {
     use std::cell::RefCell;
 
-    use super::super::sim_record::sim_link_info;
+    use super::super::sim_record::{emu_link_info, sim_link_info};
     use super::*;
 
     /// A transport that records which of its methods were reached.
@@ -282,6 +319,74 @@ mod tests {
             calls.borrow().as_slice(),
             ["serial:discover", "sim:discover"]
         );
+    }
+
+    /// With an emulator in the build it is three transports, not two: every
+    /// sweep unions all three, and each endpoint scheme reaches its own.
+    #[test]
+    fn discovery_and_routing_are_three_way_with_an_emu() {
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let transport = composite(&calls, true)
+            .with_emu(Rc::new(SpyTransport::new("emu", &calls, &["emu:dev2"])));
+
+        let granted = block_on(transport.discover_granted()).expect("all three answered");
+
+        let endpoints: Vec<String> = granted
+            .iter()
+            .map(|grant| grant.info.endpoint.0.clone())
+            .collect();
+        assert_eq!(
+            endpoints,
+            vec![
+                "usb-1".to_string(),
+                "sim:dev1".to_string(),
+                "emu:dev2".to_string()
+            ]
+        );
+        assert_eq!(transport.label(), "browser Web Serial + sim + emu");
+
+        calls.borrow_mut().clear();
+        block_on(transport.run_effect(
+            emu_link_info("dev2", "XIAO ESP32-C6"),
+            DeviceEffectCall::EraseFlash,
+            Rc::new(|_, _| {}),
+        ))
+        .expect("the emu half answered");
+        block_on(transport.run_effect(
+            sim_link_info("dev1", "Desktop"),
+            DeviceEffectCall::EraseFlash,
+            Rc::new(|_, _| {}),
+        ))
+        .expect("the sim half answered");
+        block_on(transport.run_effect(
+            link_at("usb-1").info,
+            DeviceEffectCall::EraseFlash,
+            Rc::new(|_, _| {}),
+        ))
+        .expect("the serial half answered");
+
+        assert_eq!(
+            calls.borrow().as_slice(),
+            ["emu:effect", "sim:effect", "serial:effect"]
+        );
+    }
+
+    /// A build with no emulator refuses an `emu:` endpoint BY NAME. Routing
+    /// it to serial would try to open a port that does not exist.
+    #[test]
+    fn an_emu_endpoint_in_a_build_with_no_emulator_is_refused_by_name() {
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let transport = composite(&calls, true);
+
+        let refused = block_on(transport.run_effect(
+            emu_link_info("dev2", "XIAO ESP32-C6"),
+            DeviceEffectCall::EraseFlash,
+            Rc::new(|_, _| {}),
+        ))
+        .expect_err("there is no emu half");
+
+        assert!(refused.contains("emulator"), "{refused}");
+        assert!(calls.borrow().is_empty(), "nothing else was asked");
     }
 
     /// A serial enumeration that failed says nothing about which boards
