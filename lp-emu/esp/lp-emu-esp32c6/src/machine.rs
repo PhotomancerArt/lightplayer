@@ -3008,6 +3008,24 @@ impl Esp32C6Machine {
             .push((found.stats.blocks, found.stats.insts, us));
         self.jit_installed_starts
             .extend(found.set.entries().iter().copied());
+        // `LP_EMU_JIT_SPLIT_CENSUS=writable` asks a different question: not
+        // "what would the published module hold" but "what would a boot split
+        // along **writability** cost". Read-only guest code can never change,
+        // so a module holding only read-only blocks can never go stale — and
+        // the boot module going stale over four mis-swept data words is what
+        // otherwise sends every `fence.i` back to the whole image.
+        if std::env::var_os("LP_EMU_JIT_SPLIT_CENSUS").is_some_and(|v| v == "writable") {
+            let writable: Vec<(u32, u32)> = self
+                .bus
+                .region_spans()
+                .into_iter()
+                .filter(|&(_, _, w)| w)
+                .map(|(b, l, _)| (b, l))
+                .collect();
+            if let Some(prof) = self.harts[0].blockprof_mut() {
+                prof.watch_boundary_ranges(writable);
+            }
+        }
     }
 
     /// One `fence.i`'s worth of the census. See [`Self::split_census_on`].
@@ -3058,7 +3076,9 @@ impl Esp32C6Machine {
             }
         }
         #[cfg(feature = "jit")]
-        if Self::split_census_on() {
+        if Self::split_census_on()
+            && !std::env::var_os("LP_EMU_JIT_SPLIT_CENSUS").is_some_and(|v| v == "writable")
+        {
             self.split_census_event();
         }
         if self.jit_entry.is_none() {
@@ -3126,12 +3146,71 @@ impl Esp32C6Machine {
     /// A failure here is **not** fatal, unlike the one at boot: the machine
     /// already has a working core and a correct transcript either way, so it
     /// says so and carries on with what it has.
+    /// # Incremental since M7b P1 (DD18)
+    ///
+    /// The event above used to walk the whole image, emit 65 MB of wasm and
+    /// replace the core — three times on `render-basic` t2, for **22.0 % of the
+    /// run**. It now translates only what the installed modules do not already
+    /// hold and installs that beside them, and the whole-image path is what
+    /// happens when it cannot: a module went stale, or the run is recording.
+    /// See [`crate::jit::install_incremental`].
     #[cfg(feature = "jit")]
     fn retranslate_after_fence_i(&mut self) {
         let Some(entry) = self.jit_entry else { return };
         let escape_all = self.jit_escape_all;
         let blocks = self.jit_block_budget;
         let fn_blocks = self.jit_fn_blocks;
+        // `--jit-emit-only` writes a module out and installs nothing, so there
+        // is no core to add to and the whole-image path is the only one that
+        // means anything.
+        if self.jit_emit_only.is_none() {
+            let policy = if escape_all {
+                lp_emu_jit::translate::Emit::NOTHING
+            } else {
+                lp_emu_jit::translate::Emit::EVERYTHING
+            };
+            let model = self.time_grade.cycle_model();
+            let seeds = self.translation_seeds(entry);
+            match crate::jit::install_incremental(
+                &mut self.harts[0],
+                &mut self.bus,
+                &seeds,
+                fn_blocks,
+                model,
+                policy,
+            ) {
+                Ok(crate::jit::Incremental::Added(report)) => {
+                    if self.jit_report {
+                        eprintln!("jit: {}", report.boot_line("fence.i (incremental)"));
+                    }
+                    return;
+                }
+                Ok(crate::jit::Incremental::Nothing) => {
+                    if self.jit_report {
+                        eprintln!(
+                            "jit: fence.i (incremental): the publish claimed no code the \
+                             installed modules do not already hold; nothing emitted"
+                        );
+                    }
+                    return;
+                }
+                Ok(crate::jit::Incremental::WholeImage(why)) => {
+                    // On the report line rather than in a log: a run that went
+                    // back to the whole image paid 60 MB of emit for it, and a
+                    // number that large should say why it happened.
+                    if self.jit_report {
+                        eprintln!("jit: fence.i: the whole image, because {why}");
+                    }
+                    log::debug!("jit: retranslating the whole image after `fence.i`: {why}");
+                }
+                Err(e) => {
+                    log::warn!(
+                        "jit: the incremental module after `fence.i` did not build; \
+                         retranslating the whole image: {e}"
+                    );
+                }
+            }
+        }
         if let Err(e) =
             self.install_translated_core(entry, escape_all, blocks, fn_blocks, "fence.i")
         {

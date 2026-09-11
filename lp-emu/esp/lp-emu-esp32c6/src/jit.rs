@@ -223,11 +223,6 @@ pub fn install(
             seeds.first().copied().unwrap_or(0)
         ));
     }
-    let discovery = Discovery {
-        stats: whole.stats,
-        discover_us,
-    };
-
     let budget = whole.set.blocks.len().min(max_blocks);
     let found = if budget < whole.set.blocks.len() {
         walk(bus, seeds, budget, &nothing_known).0
@@ -235,23 +230,128 @@ pub fn install(
         whole
     };
 
-    // What halves now is the **per-function** budget, not the block set. P4
-    // halved the set, because one function was all there was and a refusal
-    // left no other lever; that cost coverage, which is the whole thing P5
-    // exists to stop paying. A module that will not build is now a module
-    // whose functions are too big, and the fix does not drop a block.
+    // **Two modules, split on whether the guest could rewrite the bytes**
+    // (M7b P1). Read-only guest code — the flash-cache window and the mask ROM
+    // — cannot change, so a module holding only that can never go stale, and
+    // it is 96 % of the image. Everything in writable memory goes in the other
+    // one, which is what a `fence.i` replaces.
+    //
+    // Without this split there is nothing for incremental translation to be
+    // incremental *against*: `render-basic` t2's first `fence.i` finds **four**
+    // blocks of the 154,544 whose bytes changed — mis-swept data in HP SRAM,
+    // not code anything runs — and the whole-module retire (DD18, and the
+    // soundness argument in `JitCore::verify`) then retires all 154,544 and
+    // re-emits 65 MB. Four words of churn cost the whole image.
+    //
+    // A recording is of ONE module's bytes, so a run that asked for one keeps
+    // the single-module shape; it is a diagnostic and its speed is nobody's
+    // number.
+    let sets = if record.is_some() {
+        vec![found.set.clone()]
+    } else {
+        split_by_writability(bus, &found.set)
+    };
+
+    let mut core: Option<JitCore> = None;
+    for set in &sets {
+        let used = core.as_ref().map_or(0, JitCore::gap_used);
+        let (module, recorder) = build_with_halving(
+            bus,
+            set,
+            model,
+            policy,
+            // The discovery figures are the WHOLE walk's, on the first module
+            // only: they describe the image, not the half of it this module
+            // holds, and `JitCore::totals` adds them up.
+            Discovery {
+                stats: if core.is_none() {
+                    found.stats
+                } else {
+                    Default::default()
+                },
+                discover_us: if core.is_none() { discover_us } else { 0 },
+            },
+            fn_blocks,
+            record,
+            used,
+        )?;
+        match core.as_mut() {
+            None => core = Some(JitCore::of(module, recorder, model)),
+            Some(c) => {
+                c.add(module);
+            }
+        }
+    }
+    let core = core.expect("a non-empty block set produces at least one module");
+    if let Some(r) = record {
+        emit_sizes(bus, &found.set, model, policy, r);
+    }
+    let report = core.totals();
+    let entries: Vec<u32> = core.index.keys().copied().collect();
+    hart.set_translated_core(Box::new(core), &entries);
+    Ok(report)
+}
+
+/// Split a block set into **read-only** blocks and **writable** blocks, in
+/// that order, dropping whichever half is empty.
+///
+/// The one rule the whole-module retire cares about: bytes the guest cannot
+/// write cannot make a module stale. A block is read-only when every byte it
+/// was translated from sits in a region the bus calls read-only; a block that
+/// straddles the two — which no real one does, but which nothing forbids —
+/// counts as writable, because "invalidating too much is slow, invalidating too
+/// little is wrong".
+fn split_by_writability(bus: &SocBus, set: &BlockSet) -> Vec<BlockSet> {
+    let spans = bus.region_spans();
+    let read_only = |pc: u32, len: u32| {
+        spans.iter().any(|&(base, l, writable)| {
+            !writable && pc >= base && u64::from(pc) + u64::from(len) <= u64::from(base) + u64::from(l)
+        })
+    };
+    let (mut ro, mut rw) = (Vec::new(), Vec::new());
+    for b in &set.blocks {
+        let len = b.end_pc().wrapping_sub(b.pc);
+        if read_only(b.pc, len) {
+            ro.push(b.clone());
+        } else {
+            rw.push(b.clone());
+        }
+    }
+    [ro, rw]
+        .into_iter()
+        .filter(|blocks| !blocks.is_empty())
+        .map(|blocks| {
+            let index = blocks
+                .iter()
+                .enumerate()
+                .map(|(i, b)| (b.pc, i))
+                .collect::<BTreeMap<_, _>>();
+            BlockSet::from_blocks(blocks, index)
+        })
+        .collect()
+}
+
+/// [`Module::build`], halving the per-function budget until the host stops
+/// refusing.
+///
+/// Halving is not a workaround, it is the honest shape: every engine refuses a
+/// large enough function and they refuse at wildly different sizes. See
+/// [`install`]'s own docs.
+#[allow(clippy::too_many_arguments)]
+fn build_with_halving(
+    bus: &mut SocBus,
+    set: &BlockSet,
+    model: CycleModel,
+    policy: Emit,
+    discovery: Discovery,
+    fn_blocks: usize,
+    record: Option<&RecordRequest>,
+    gap_used: u32,
+) -> Result<(Module, Option<(Recorder, u64)>), String> {
     let mut per_fn = fn_blocks.max(MIN_BLOCKS);
     loop {
-        match JitCore::build(bus, &found.set, model, policy, discovery, per_fn, record) {
-            Ok(core) => {
-                let report = core.build_report();
-                if let Some(r) = record {
-                    emit_sizes(bus, &found.set, model, policy, r);
-                }
-                let entries = found.set.entries().to_vec();
-                hart.set_translated_core(Box::new(core), &entries);
-                return Ok(report);
-            }
+        match Module::build(bus, set, model, policy, discovery, per_fn, record, gap_used) {
+            Ok(built) => return Ok(built),
             Err(e) if per_fn > MIN_BLOCKS => {
                 per_fn = (per_fn / 2).max(MIN_BLOCKS);
                 log::warn!("jit: {e}; retrying with {per_fn} blocks per function");
@@ -259,6 +359,123 @@ pub fn install(
             Err(e) => return Err(e),
         }
     }
+}
+
+/// The way back from the hart's boxed core to this crate's own.
+///
+/// See [`TranslatedCore::as_any_mut`]: the hart holds a `dyn TranslatedCore`
+/// and has no business knowing what a module is, so the machine crate asks for
+/// its own type back.
+trait AsJitCore {
+    fn as_jit_core(&mut self) -> Option<&mut JitCore>;
+}
+
+impl AsJitCore for lp_riscv_emu::mach::translated::BoxedCore<SocBus> {
+    fn as_jit_core(&mut self) -> Option<&mut JitCore> {
+        self.as_any_mut()?.downcast_mut::<JitCore>()
+    }
+}
+
+/// What one `fence.i` did, so the machine can say it and the report can be
+/// read without knowing this module's internals.
+pub enum Incremental {
+    /// A module was added beside the ones already installed.
+    Added(BuildReport),
+    /// The publish claimed nothing the installed modules do not already hold,
+    /// so nothing was emitted and nothing was compiled. **This is the cheapest
+    /// possible answer to a `fence.i` and it is a real one**: a second fence
+    /// over a buffer that was already swept adds no code.
+    Nothing,
+    /// The incremental path does not apply and the caller must do a whole-image
+    /// translation instead: a module went stale, or no core is installed, or
+    /// this run is recording.
+    WholeImage(String),
+}
+
+/// The **second** translation event, done incrementally (M7b P1, DD18).
+///
+/// Where [`install`] walks the whole image, emits ~65 MB of wasm and replaces
+/// the core, this keeps the **read-only** module — which is 96 % of the image
+/// and cannot have changed, because the guest cannot write those bytes — and
+/// re-emits only the writable side, which is what a publish can have touched
+/// and where the published code itself lands.
+///
+/// Three things make it exact rather than merely cheaper:
+///
+/// - the walk is given the read-only module's block starts as a **stop set**
+///   ([`lp_emu_jit::discover::discover_from`]), so exactly one module answers
+///   for any pc and the hart's entry index has one answer;
+/// - the new module gets **its own** indirect-target tables, in its own slice
+///   of the arena gap, because a target slot holds a block index and a block
+///   index only means something inside the module it was emitted with;
+/// - every edge that leaves a module is an ordinary **exit**, so the hart
+///   re-enters through the index and lands in whichever module holds the
+///   target. Cross-module control flow costs one entry, which is the number
+///   `LP_EMU_JIT_SPLIT_CENSUS` measured before any of this was built.
+///
+/// **The whole-module retire stays.** The writable module is retired and
+/// replaced *whole* at every event, exactly as the single module was before
+/// this phase — this is that retire, applied to the only module whose bytes
+/// can change. If the **read-only** module ever goes stale, which would mean
+/// the emulator moved bytes the guest calls read-only, this returns
+/// [`Incremental::WholeImage`] and the caller retranslates everything.
+///
+/// # Errors
+///
+/// Anything that stops the new module being built. The caller keeps what it
+/// has: a failure here costs coverage and never a transcript.
+pub fn install_incremental(
+    hart: &mut MachineHart<SocBus>,
+    bus: &mut SocBus,
+    seeds: &[u32],
+    fn_blocks: usize,
+    model: CycleModel,
+    policy: Emit,
+) -> Result<Incremental, String> {
+    let Some(core) = hart.translated_core_mut().and_then(|c| c.as_jit_core()) else {
+        return Ok(Incremental::WholeImage(
+            "no translated core is installed".to_string(),
+        ));
+    };
+    if core.recording() {
+        // A recording replays ONE module's bytes against one block set. Two
+        // live modules would make it a recording of neither, so a run that
+        // asked for one keeps the whole-image path — it is a diagnostic, and
+        // the speed of a diagnostic run is nobody's number.
+        return Ok(Incremental::WholeImage("this run is recording".to_string()));
+    }
+    core.verify_now(bus);
+    if let Some(why) = core.read_only_module_is_stale(bus) {
+        return Ok(Incremental::WholeImage(why));
+    }
+    // Retire every writable module and re-walk what they held. The walk stops
+    // at the read-only module's own starts, so what it claims is exactly "the
+    // writable side of the image as it now stands", published code included.
+    core.retire_all_but_read_only();
+    let known = core.installed_starts();
+    let gap_used = core.gap_used();
+
+    let (found, discover_us) = walk(bus, seeds, usize::MAX, &known);
+    if found.set.is_empty() {
+        return Ok(Incremental::Nothing);
+    }
+    let discovery = Discovery {
+        stats: found.stats,
+        discover_us,
+    };
+
+    let (module, _) = build_with_halving(
+        bus, &found.set, model, policy, discovery, fn_blocks, None, gap_used,
+    )?;
+
+    let core = hart
+        .translated_core_mut()
+        .and_then(|c| c.as_jit_core())
+        .expect("the core was here a moment ago");
+    let report = core.add(module);
+    let entries: Vec<u32> = core.index.keys().copied().collect();
+    hart.set_translated_entries(&entries);
+    Ok(Incremental::Added(report))
 }
 
 /// Emit `set` at each of `record.sizes` and write the modules out beside the
@@ -277,7 +494,7 @@ fn emit_sizes(
     if record.sizes.is_empty() {
         return;
     }
-    let Ok(at) = areas(bus, set) else { return };
+    let Ok(at) = areas(bus, set, 0) else { return };
     // Base zero, whatever host this build has: these bytes are for
     // `jit-image-bench.mjs`, which builds its own memory with the arena at
     // offset zero and replays a recording against it. See `JitCore::build` for
@@ -359,7 +576,7 @@ pub fn emit_only(
     if found.set.is_empty() {
         return Err("nothing translatable is reachable".to_string());
     }
-    let at = areas(bus, &found.set)?;
+    let at = areas(bus, &found.set, 0)?;
     write_permission_table(bus, at);
     write_target_tables(bus.guest_arena_mut(), 0, at.indirect_at, &found.set);
     let layout = Layout {
@@ -592,6 +809,9 @@ pub struct BuildReport {
     pub fn_blocks: usize,
     /// What the indirect-target page map and its slot arrays took.
     pub indirect_bytes: u32,
+    /// The arena gap the tables went in, and what is left of it.
+    pub gap_len: u32,
+    pub gap_left: u32,
 }
 
 impl BuildReport {
@@ -608,7 +828,8 @@ impl BuildReport {
         format!(
             "{event}: discovered {} blocks / {} instr in {:.1} ms; installed {} blocks / {} instr; \
              emitted {} B in {:.1} ms in {} fn x {} blocks (largest {} B: sub-dispatcher {} B, \
-             selector {} B; targets {} B); compiled in {:.1} ms; instantiated in {:.2} ms",
+             selector {} B; targets {} B of a {} B gap, {} B left); compiled in {:.1} ms; \
+             instantiated in {:.2} ms",
             d.stats.blocks,
             d.stats.insts,
             ms(d.discover_us),
@@ -622,6 +843,8 @@ impl BuildReport {
             self.max_sub_body_bytes,
             self.selector_bytes,
             self.indirect_bytes,
+            self.gap_len,
+            self.gap_left,
             ms(self.compile_us),
             ms(self.instantiate_us),
         )
@@ -794,23 +1017,47 @@ impl HostOps for C6Ops {
     }
 }
 
-/// A translated core for this machine.
-pub struct JitCore {
+/// One compiled, installed module, and everything that is per module rather
+/// than per core (M7b P1).
+///
+/// A core holds one of these at boot and one more per `fence.i` that published
+/// code the installed modules did not already hold. They never overlap: the
+/// incremental walk is given every installed module's block starts as a stop
+/// set, so exactly one module answers for any pc.
+pub struct Module {
     core: HostCore<C6Ops>,
-    /// Guest pc to block index. One lookup per entry, at the ~19,500 entries
-    /// per emulated second the slice cap implies; P4 and P5 are where this
-    /// moves into the module.
+    /// Guest pc to this module's **local** block index — what its selector
+    /// takes. The core's own index maps a pc to `(module, local)`.
     index: BTreeMap<u32, u32>,
     /// The guest bytes each block was translated from, kept so an
     /// invalidation can be answered exactly. ~4 bytes per translated
-    /// instruction — 10 KB for a P3 block set.
+    /// instruction.
     code: Vec<(u32, Box<[u8]>)>,
-    /// The cost model the module was emitted against. A block's budget check
+    report: BuildReport,
+    /// Guest bytes **this module** was translated from have changed. It stops
+    /// being entered and the next translation event replaces it; the other
+    /// modules are untouched, which is sound because every edge out of a
+    /// module is an exit and the hart re-enters through the index.
+    stale: bool,
+    /// The module's own bytes, kept only while a recording wants them.
+    wasm: Option<Vec<u8>>,
+    /// Where this module's tables ended up.
+    at: Areas,
+}
+
+/// A translated core for this machine: **one or more modules**, and one index
+/// over all of them.
+pub struct JitCore {
+    /// Installed modules, oldest first. Index 0 is the boot module.
+    mods: Vec<Module>,
+    /// Guest pc to `(module, local block index)`. One lookup per entry, at the
+    /// ~19,500 entries per emulated second the slice cap implies.
+    index: BTreeMap<u32, (u32, u32)>,
+    /// The cost model the modules were emitted against. A block's budget check
     /// has it folded in as a constant, so a model change is not something a
     /// byte re-check would notice.
     model: CycleModel,
     stats: JitStats,
-    report: BuildReport,
     /// Guest code changed under us and the blocks have not been re-checked
     /// yet. `invalidate` has no bus to check against, so the check happens at
     /// the next entry, which does.
@@ -831,18 +1078,12 @@ pub struct JitCore {
     /// runs by accident, and it perturbs the very wall clock the rest of the
     /// run reports.
     timing: EntryTiming,
-    /// Guest bytes this module was translated from have changed. Like
-    /// [`dead`](Self::dead) it stops the core being entered, but it is not a
-    /// bug — it is the module waiting to be replaced at the next translation
-    /// event (JD5).
-    stale: bool,
     /// A recording in progress, and the cycle count it starts at.
+    ///
+    /// A recording is of **one** module — it replays a block set against a
+    /// module's own bytes — so a run that asked for one never takes the
+    /// incremental path. See [`crate::jit::install_incremental`].
     recorder: Option<(Recorder, u64)>,
-    /// The module's own bytes, kept only while a recording wants them.
-    wasm: Option<Vec<u8>>,
-    /// Where the tables ended up, so a recording can say what a replay has to
-    /// reproduce.
-    at: Areas,
 }
 
 /// Where a translated module's tables sit in the arena.
@@ -855,11 +1096,30 @@ struct Areas {
     /// What the page map and its slot arrays take, together.
     indirect_len: u32,
     pages: u64,
+    /// The arena gap the three tables were placed in, and what is left of it
+    /// past them. A second live module's tables have to come out of the same
+    /// gap (M7b P1), so the number is reported rather than assumed.
+    gap_len: u32,
+    gap_left: u32,
 }
 
 /// Place the permission table and the exchange area in the arena's largest
 /// gap, and say how much of the arena a wasm memory can cover.
-fn areas(bus: &SocBus, set: &BlockSet) -> Result<Areas, String> {
+///
+/// `used` is how much of the gap earlier modules have already taken. The
+/// permission table and the exchange area are **shared** — one copy, at the
+/// gap's own base, whatever the module — because they hold the same bytes for
+/// every module and every module's [`Layout`] folds in the same offsets. The
+/// **indirect-target tables are not**: a slot holds a block index, and a block
+/// index only means something inside the module it was emitted with, so each
+/// live module gets its own slice of the gap past everything already placed
+/// (M7b P1, DD18).
+///
+/// On the C6 that is not a tight budget: the gap between the mask ROM's data
+/// and HP SRAM is **218,103,808 bytes**, and a whole-image table is about
+/// 6.6 MB of it. The boot line reports what is left after each module so a
+/// chip whose map is meaner says so rather than failing at the third event.
+fn areas(bus: &SocBus, set: &BlockSet, used: u32) -> Result<Areas, String> {
     let arena_len = bus.guest_arena().len();
     let pages = (arena_len / 65536) as u64;
     if pages == 0 {
@@ -867,18 +1127,20 @@ fn areas(bus: &SocBus, set: &BlockSet) -> Result<Areas, String> {
     }
     let indirect_len = u32::try_from(target_table_bytes(set))
         .map_err(|_| "the indirect-target tables do not fit a 32-bit offset".to_string())?;
-    let need = u64::from(PERM_ENTRIES) + u64::from(EXCHANGE_LEN) + u64::from(indirect_len);
+    let shared = u64::from(PERM_ENTRIES) + u64::from(EXCHANGE_LEN);
+    let need = u64::from(used).max(shared) + u64::from(indirect_len);
     let (gap_base, gap_len) = bus
         .largest_arena_gap()
         .ok_or_else(|| "the guest arena has no gap for the translator's tables".to_string())?;
     if u64::from(gap_len) < need {
         return Err(format!(
-            "the arena's largest gap is {gap_len} bytes and the translator's tables need {need}"
+            "the arena's largest gap is {gap_len} bytes, {used} of them are already a live \
+             module's tables, and this module's need {indirect_len} more"
         ));
     }
     let perm_at = gap_base - bus.guest_arena_base();
     let exchange_at = perm_at + PERM_ENTRIES;
-    let indirect_at = exchange_at + EXCHANGE_LEN;
+    let indirect_at = perm_at + (used.max(shared as u32));
     if u64::from(indirect_at) + u64::from(indirect_len) > pages * 65536 {
         return Err("the translator's tables fall outside the wasm memory".into());
     }
@@ -888,6 +1150,8 @@ fn areas(bus: &SocBus, set: &BlockSet) -> Result<Areas, String> {
         indirect_at,
         indirect_len,
         pages,
+        gap_len,
+        gap_left: gap_len - (need as u32),
     })
 }
 
@@ -927,14 +1191,15 @@ fn write_permission_table(bus: &mut SocBus, at: Areas) {
     );
 }
 
-impl JitCore {
-    /// Translate `set` and build a core for it.
+impl Module {
+    /// Translate `set` and build one module for it, past whatever `gap_used`
+    /// bytes of the arena gap earlier modules already hold.
     ///
     /// # Errors
     ///
     /// A block set that does not fit the arena's shape, or a module wasmtime
     /// will not compile.
-    pub fn build(
+    fn build(
         bus: &mut SocBus,
         set: &BlockSet,
         model: CycleModel,
@@ -942,8 +1207,9 @@ impl JitCore {
         discovery: Discovery,
         fn_blocks: usize,
         record: Option<&RecordRequest>,
-    ) -> Result<Self, String> {
-        let at = areas(bus, set)?;
+        gap_used: u32,
+    ) -> Result<(Self, Option<(Recorder, u64)>), String> {
+        let at = areas(bus, set, gap_used)?;
         write_permission_table(bus, at);
 
         let arena_len = bus.guest_arena().len();
@@ -1089,18 +1355,73 @@ impl JitCore {
         });
         let wasm = record.map(|_| emitted.wasm.clone());
 
-        Ok(Self {
-            core,
+        Ok((
+            Self {
+                core,
+                index,
+                code,
+                stale: false,
+                wasm,
+                at,
+                report: BuildReport {
+                    discovery,
+                    blocks: set.blocks.len(),
+                    insts: set.inst_count(),
+                    native_insts: emitted.native_insts,
+                    escaped_insts: emitted.escaped_insts,
+                    module_bytes: emitted.wasm.len(),
+                    emit_us,
+                    compile_us,
+                    instantiate_us,
+                    functions: emitted.functions,
+                    max_body_bytes: emitted.max_body_bytes,
+                    max_sub_body_bytes: emitted.max_sub_body_bytes,
+                    selector_bytes: emitted.selector_bytes,
+                    fn_blocks: fn_blocks.min(set.blocks.len()),
+                    indirect_bytes: at.indirect_len,
+                    gap_len: at.gap_len,
+                    gap_left: at.gap_left,
+                },
+            },
+            recorder,
+        ))
+    }
+
+    /// Check whether the guest bytes **this module** was translated from are
+    /// still what it was translated from, and say how many blocks changed.
+    fn changed_blocks(&self, bus: &SocBus) -> u64 {
+        let base = bus.guest_arena_base();
+        let arena = bus.guest_arena();
+        self.code
+            .iter()
+            .filter(|(pc, bytes)| {
+                let Ok(at) = usize::try_from(u64::from(*pc) - u64::from(base)) else {
+                    return true;
+                };
+                !arena
+                    .get(at..at + bytes.len())
+                    .is_some_and(|now| now == &bytes[..])
+            })
+            .count() as u64
+    }
+}
+
+impl JitCore {
+    /// A core holding one module, the way boot installs it.
+    fn of(module: Module, recorder: Option<(Recorder, u64)>, model: CycleModel) -> Self {
+        let index = module
+            .index
+            .iter()
+            .map(|(&pc, &b)| (pc, (0u32, b)))
+            .collect();
+        Self {
+            mods: vec![module],
             index,
-            code,
             model,
             stats: JitStats::default(),
             verify_pending: false,
             dead: false,
-            stale: false,
             recorder,
-            wasm,
-            at,
             last_exit: None,
             exit_sites: std::env::var_os("LP_EMU_JIT_EXITS").map(|_| BTreeMap::new()),
             timing: EntryTiming {
@@ -1111,27 +1432,143 @@ impl JitCore {
                     .unwrap_or(0),
                 ..EntryTiming::default()
             },
-            report: BuildReport {
-                discovery,
-                blocks: set.blocks.len(),
-                insts: set.inst_count(),
-                native_insts: emitted.native_insts,
-                escaped_insts: emitted.escaped_insts,
-                module_bytes: emitted.wasm.len(),
-                emit_us,
-                compile_us,
-                instantiate_us,
-                functions: emitted.functions,
-                max_body_bytes: emitted.max_body_bytes,
-                max_sub_body_bytes: emitted.max_sub_body_bytes,
-                selector_bytes: emitted.selector_bytes,
-                fn_blocks: fn_blocks.min(set.blocks.len()),
-                indirect_bytes: at.indirect_len,
-            },
-        })
+        }
     }
 
-    /// Check whether the guest bytes this module was translated from are
+    /// Add an already-built module beside the ones this core holds, and say
+    /// what it cost.
+    ///
+    /// The index is extended rather than rebuilt: the incremental walk was
+    /// given every installed module's starts as a stop set, so no pc it claims
+    /// is one an earlier module answers for. The `debug_assert` is that rule,
+    /// checked.
+    fn add(&mut self, module: Module) -> BuildReport {
+        let m = self.mods.len() as u32;
+        for (&pc, &b) in &module.index {
+            let clash = self.index.insert(pc, (m, b));
+            debug_assert!(
+                clash.is_none(),
+                "two modules answer for {pc:#010x}: the incremental walk was given the \
+                 wrong stop set"
+            );
+        }
+        let report = module.report;
+        self.mods.push(module);
+        report
+    }
+
+    /// Every block start the installed modules hold — the stop set the next
+    /// incremental walk is given.
+    #[must_use]
+    pub fn installed_starts(&self) -> BTreeSet<u32> {
+        self.index.keys().copied().collect()
+    }
+
+    /// How much of the arena gap the installed modules' tables have taken.
+    ///
+    /// Computed rather than remembered, because a retired module hands its
+    /// slice back and the next module may have it.
+    #[must_use]
+    pub fn gap_used(&self) -> u32 {
+        self.mods
+            .iter()
+            .map(|m| (m.at.indirect_at - m.at.perm_at) + m.at.indirect_len)
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Whether module 0 — the read-only one — went stale, and what changed.
+    ///
+    /// It should not be able to: the guest cannot write the bytes it was
+    /// translated from. If it ever does, something moved memory the bus calls
+    /// read-only, the split's whole premise is gone, and the honest answer is
+    /// to retranslate the image rather than to trust a module over a
+    /// measurement.
+    #[must_use]
+    pub fn read_only_module_is_stale(&self, bus: &SocBus) -> Option<String> {
+        let m = &self.mods[0];
+        if !m.stale {
+            return None;
+        }
+        Some(format!(
+            "the read-only module went stale: {} of its {} block(s) no longer match the \
+             guest's bytes",
+            m.changed_blocks(bus),
+            m.code.len(),
+        ))
+    }
+
+    /// Drop every module but the read-only one, and the index entries they
+    /// answered for.
+    ///
+    /// This **is** the whole-module retire (DD18), applied to the modules whose
+    /// bytes a publish can have changed. Dropping the module drops its
+    /// `HostCore`, which in the browser hands its function-table slot back.
+    pub fn retire_all_but_read_only(&mut self) {
+        self.mods.truncate(1);
+        self.index.retain(|_, &mut (m, _)| m == 0);
+    }
+
+    /// Whether a recording is running, which is what keeps a run that asked
+    /// for one on the whole-image path.
+    #[must_use]
+    pub fn recording(&self) -> bool {
+        self.recorder.is_some()
+    }
+
+    /// Re-check every module's bytes now rather than at the next entry, and
+    /// say whether any module went stale.
+    ///
+    /// The machine asks this at a translation event, because whether a module
+    /// is stale is what decides between adding a module and replacing the lot
+    /// (DD18: the whole-module retire stays).
+    pub fn verify_now(&mut self, bus: &SocBus) -> Option<String> {
+        if self.verify_pending {
+            self.verify(bus);
+        }
+        let stale: Vec<usize> = self
+            .mods
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| m.stale)
+            .map(|(i, _)| i)
+            .collect();
+        if stale.is_empty() {
+            return None;
+        }
+        // Named rather than counted: which module went stale, and how many of
+        // its blocks the guest rewrote, is the difference between "the shader
+        // buffer moved" and "the whole image is being re-emitted every event
+        // for four blocks of stack".
+        let mut out = String::from("the guest rewrote code these modules were translated from:");
+        for i in stale {
+            let m = &self.mods[i];
+            let changed = m.changed_blocks(bus);
+            out.push_str(&format!(
+                " module {i} ({changed} of {} block(s)",
+                m.code.len()
+            ));
+            let mut named = 0;
+            for (pc, bytes) in &m.code {
+                if named == 4 {
+                    break;
+                }
+                let at = (u64::from(*pc) - u64::from(bus.guest_arena_base())) as usize;
+                let same = bus
+                    .guest_arena()
+                    .get(at..at + bytes.len())
+                    .is_some_and(|now| now == &bytes[..]);
+                if !same {
+                    out.push_str(&format!(", {pc:#010x}"));
+                    named += 1;
+                }
+            }
+            out.push(')');
+        }
+        Some(out)
+    }
+
+    /// Check whether the guest bytes each module was translated from are
     /// still what it was translated from, and stop using it if they are not.
     ///
     /// This is the answer to an invalidation, and it is **exact**: a module
@@ -1159,27 +1596,31 @@ impl JitCore {
     /// entered, the run continues interpreted, and the next translation
     /// event replaces it. That is not a fallback, it is the design — JD5 has
     /// an event for precisely this.
+    ///
+    /// # Per module since M7b P1
+    ///
+    /// A core holds one module per translation event now, and the retire is
+    /// per module rather than per core. That is sound for exactly the reason
+    /// the whole-module retire exists: every edge **out of** a module is an
+    /// exit, so entering a module can only run that module's own blocks. A
+    /// module whose every block's bytes are unchanged is still a correct
+    /// translation of them whatever happened to the module next door.
     fn verify(&mut self, bus: &SocBus) {
         self.verify_pending = false;
         self.stats.invalidations += 1;
-        let base = bus.guest_arena_base();
-        let arena = bus.guest_arena();
-        let changed = self.code.iter().filter(|(pc, bytes)| {
-            let Ok(at) = usize::try_from(u64::from(*pc) - u64::from(base)) else {
-                return true;
-            };
-            !arena
-                .get(at..at + bytes.len())
-                .is_some_and(|now| now == &bytes[..])
-        });
-        let dropped = changed.count() as u64;
-        if dropped > 0 {
-            self.stats.dropped_blocks += dropped;
-            self.stale = true;
-            log::debug!(
-                "jit: {dropped} translated block(s) no longer match the guest's bytes; \
-                 the module is stale until the next translation event"
-            );
+        for m in &mut self.mods {
+            if m.stale {
+                continue;
+            }
+            let dropped = m.changed_blocks(bus);
+            if dropped > 0 {
+                self.stats.dropped_blocks += dropped;
+                m.stale = true;
+                log::debug!(
+                    "jit: {dropped} translated block(s) no longer match the guest's bytes; \
+                     that module is stale until the next translation event"
+                );
+            }
         }
     }
 
@@ -1198,17 +1639,20 @@ impl JitCore {
                  `crate::jit_record` does not carry that case, so no recording was written"
             );
             self.recorder = None;
-            self.wasm = None;
+            self.mods[0].wasm = None;
             return;
         }
-        let wasm = self.wasm.take().unwrap_or_default();
+        // A recording is of ONE module, which is why a run that asked for one
+        // never takes the incremental path (`install_incremental`).
+        let m = &mut self.mods[0];
+        let wasm = m.wasm.take().unwrap_or_default();
         let out = r.finish(
             &wasm,
             bus.guest_arena(),
-            self.at.pages,
-            self.at.exchange_at,
-            self.report.fn_blocks,
-            self.report.blocks,
+            m.at.pages,
+            m.at.exchange_at,
+            m.report.fn_blocks,
+            m.report.blocks,
         );
         match out {
             Ok(()) => eprintln!(
@@ -1235,11 +1679,13 @@ impl JitCore {
         if self.index.contains_key(&pc) {
             return "a block start".to_string();
         }
-        let at = self.code.partition_point(|(start, _)| *start <= pc);
-        if at > 0 {
-            let (start, bytes) = &self.code[at - 1];
-            if pc < start.wrapping_add(bytes.len() as u32) {
-                return format!("inside the block at {start:#010x}");
+        for m in &self.mods {
+            let at = m.code.partition_point(|(start, _)| *start <= pc);
+            if at > 0 {
+                let (start, bytes) = &m.code[at - 1];
+                if pc < start.wrapping_add(bytes.len() as u32) {
+                    return format!("inside the block at {start:#010x}");
+                }
             }
         }
         "not discovered".to_string()
@@ -1250,9 +1696,50 @@ impl JitCore {
         self.stats
     }
 
+    /// The **last** module's build report — what the translation event that
+    /// just ran cost. JD20's boot line is per event, so this is per event too.
     #[must_use]
     pub fn build_report(&self) -> BuildReport {
-        self.report
+        self.mods.last().expect("a core holds a module").report
+    }
+
+    /// Every installed module's report added together — what the run has paid
+    /// for translation and what it is running.
+    ///
+    /// The counts that add (blocks, instructions, bytes, milliseconds) add;
+    /// the ones that do not (the largest body, the split the last module was
+    /// emitted at, the gap) take the largest or the latest and say so by being
+    /// named that in the report line.
+    #[must_use]
+    pub fn totals(&self) -> BuildReport {
+        let mut out = self.mods[0].report;
+        for m in &self.mods[1..] {
+            let r = m.report;
+            out.discovery.stats.blocks += r.discovery.stats.blocks;
+            out.discovery.stats.insts += r.discovery.stats.insts;
+            out.discovery.stats.seeds += r.discovery.stats.seeds;
+            out.discovery.stats.starts += r.discovery.stats.starts;
+            out.discovery.stats.undecodable += r.discovery.stats.undecodable;
+            out.discovery.stats.empty_starts += r.discovery.stats.empty_starts;
+            out.discovery.stats.truncated |= r.discovery.stats.truncated;
+            out.discovery.discover_us += r.discovery.discover_us;
+            out.blocks += r.blocks;
+            out.insts += r.insts;
+            out.native_insts += r.native_insts;
+            out.escaped_insts += r.escaped_insts;
+            out.module_bytes += r.module_bytes;
+            out.emit_us += r.emit_us;
+            out.compile_us += r.compile_us;
+            out.instantiate_us += r.instantiate_us;
+            out.functions += r.functions;
+            out.max_body_bytes = out.max_body_bytes.max(r.max_body_bytes);
+            out.max_sub_body_bytes = out.max_sub_body_bytes.max(r.max_sub_body_bytes);
+            out.selector_bytes = out.selector_bytes.max(r.selector_bytes);
+            out.fn_blocks = r.fn_blocks;
+            out.indirect_bytes += r.indirect_bytes;
+            out.gap_left = r.gap_left;
+        }
+        out
     }
 }
 
@@ -1260,10 +1747,6 @@ impl TranslatedCore<SocBus> for JitCore {
     fn run(&mut self, hart: &mut MachineHart<SocBus>, bus: &mut SocBus, end: u64) -> RunOutcome {
         if self.dead {
             self.stats.refused_no_entry += 1;
-            return RunOutcome::Refused;
-        }
-        if self.stale {
-            self.stats.refused_stale += 1;
             return RunOutcome::Refused;
         }
         // The block set's budget checks have the cost model folded in as
@@ -1276,10 +1759,6 @@ impl TranslatedCore<SocBus> for JitCore {
         }
         if self.verify_pending {
             self.verify(bus);
-            if self.stale {
-                self.stats.refused_stale += 1;
-                return RunOutcome::Refused;
-            }
         }
         // M7 P6b H3. `timed` is `None` on every entry the stride skips, and
         // an `Option` test is the whole cost of the timer being compiled in.
@@ -1301,10 +1780,17 @@ impl TranslatedCore<SocBus> for JitCore {
         if let Some(t) = t_index {
             self.timing.index_ns += t.elapsed().as_nanos() as u64;
         }
-        let Some(entry) = found else {
+        let Some((module, entry)) = found else {
             self.stats.refused_no_entry += 1;
             return RunOutcome::Refused;
         };
+        let module = module as usize;
+        // Staleness is per module since M7b P1: the module that holds this pc
+        // is the only one whose bytes matter for entering here.
+        if self.mods[module].stale {
+            self.stats.refused_stale += 1;
+            return RunOutcome::Refused;
+        }
         // The refusal rules, in the order the spike learned them.
         //
         // A pending side-band or yield must be observed at exactly the store
@@ -1370,7 +1856,7 @@ impl TranslatedCore<SocBus> for JitCore {
         }
         let t_regs = inner.map(|_| std::time::Instant::now());
         {
-            let ops = self.core.ops_mut();
+            let ops = self.mods[module].core.ops_mut();
             ops.recording = recording;
             ops.calls.clear();
             let x = ops.exchange();
@@ -1385,11 +1871,11 @@ impl TranslatedCore<SocBus> for JitCore {
             self.timing.regs_ns += t.elapsed().as_nanos() as u64;
         }
         let t_enter = inner.map(|_| std::time::Instant::now());
-        let exit = self.core.enter(entry, cycle, instret, end, watch);
+        let exit = self.mods[module].core.enter(entry, cycle, instret, end, watch);
         if let Some(t) = t_enter {
             self.timing.enter_ns += t.elapsed().as_nanos() as u64;
         }
-        let ops = self.core.ops_mut();
+        let ops = self.mods[module].core.ops_mut();
         ops.hart = core::ptr::null_mut();
         ops.bus = core::ptr::null_mut();
         ops.recording = false;
@@ -1417,7 +1903,7 @@ impl TranslatedCore<SocBus> for JitCore {
         let t_regs_out = inner.map(|_| std::time::Instant::now());
         let mut regs = *hart.regs();
         {
-            let x = self.core.ops_mut().exchange();
+            let x = self.mods[module].core.ops_mut().exchange();
             for (i, r) in regs.iter_mut().enumerate() {
                 *r = i32::from_le_bytes([x[4 * i], x[4 * i + 1], x[4 * i + 2], x[4 * i + 3]]);
             }
@@ -1555,6 +2041,10 @@ impl TranslatedCore<SocBus> for JitCore {
         self.stats.retired
     }
 
+    fn as_any_mut(&mut self) -> Option<&mut dyn core::any::Any> {
+        Some(self)
+    }
+
     fn report(&self) -> String {
         for (code, &(exits, gap)) in self.stats.why.iter().enumerate() {
             if exits == 0 && gap == 0 {
@@ -1614,14 +2104,14 @@ impl TranslatedCore<SocBus> for JitCore {
                 100.0 - share(t.enter_ns) - share(t.index_ns) - share(t.regs_ns),
             );
         }
-        let r = self.report;
+        let r = self.totals();
         let s = self.stats;
         let d = r.discovery.stats;
         format!(
             "discovered {} blocks / {} instr from {} seeds ({} starts, {} ended undecodable, \
              {} named no code{}); \
              installed {} blocks / {} instr ({} emitted, {} escaped, {:.1} % static escape); \
-             module {} B in {} fn x {} blocks (largest body {} B, target tables {} B), \
+             {} module(s), {} B in {} fn x {} blocks (largest body {} B, target tables {} B), \
              discover {:.2} ms, emit {:.2} ms, compile {:.2} ms, \
              instantiate {:.2} ms; \
              entries {}, retired {}, escape_hatch {}, cross {}, indirect_miss {}, \
@@ -1650,6 +2140,7 @@ impl TranslatedCore<SocBus> for JitCore {
             } else {
                 100.0 * r.escaped_insts as f64 / r.insts as f64
             },
+            self.mods.len(),
             r.module_bytes,
             r.functions,
             r.fn_blocks,

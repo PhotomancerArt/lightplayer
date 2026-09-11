@@ -297,6 +297,10 @@ pub struct BlockProfile {
 struct Boundary {
     /// Guest instruction pcs on the far side — the published code.
     pcs: BTreeSet<u32>,
+    /// `[base, base + len)` guest address ranges on the far side, for a
+    /// boundary drawn by where the code **is** rather than by which walk found
+    /// it — M7b P1's writable/read-only split.
+    ranges: Vec<(u32, u32)>,
     /// Which side the last dispatch was on, or `None` before the first.
     last: Option<bool>,
     /// Dispatches that changed side.
@@ -349,6 +353,13 @@ impl BlockProfile {
         b.pcs.extend(pcs);
     }
 
+    /// The same, for a boundary drawn by guest **address range** rather than
+    /// by which walk claimed a pc.
+    pub fn watch_boundary_ranges(&mut self, ranges: impl IntoIterator<Item = (u32, u32)>) {
+        let b = self.boundary.get_or_insert_with(Boundary::default);
+        b.ranges.extend(ranges);
+    }
+
     /// What the boundary census counted, or `None` when nobody asked for one.
     #[must_use]
     pub fn boundary_census(&self) -> Option<BoundaryCensus> {
@@ -357,7 +368,7 @@ impl BlockProfile {
             crossings: b.crossings,
             inside: b.inside,
             inside_retired: b.inside_retired,
-            pcs: b.pcs.len(),
+            pcs: b.pcs.len() + b.ranges.iter().map(|&(_, l)| l as usize).sum::<usize>(),
         })
     }
 
@@ -368,7 +379,8 @@ impl BlockProfile {
         slot.1 += u64::from(retired);
         self.retired += u64::from(retired);
         if let Some(b) = self.boundary.as_mut() {
-            let inside = b.pcs.contains(&pc);
+            let inside = b.pcs.contains(&pc)
+                || b.ranges.iter().any(|&(base, len)| pc.wrapping_sub(base) < len);
             if inside {
                 b.inside += 1;
                 b.inside_retired += u64::from(retired);
@@ -503,6 +515,24 @@ impl<B: Bus> MachineHart<B> {
         // A freshly installed core knows exactly what it holds, so anything
         // recorded for the core it replaces is not its business.
         self.core_flush_pending = PendingInvalidate::None;
+    }
+
+    /// Rebuild the entry index over `entries`, **keeping** the installed core.
+    ///
+    /// What a core that grew rather than being replaced needs (M7b P1): a
+    /// translation event that installs an additional module beside the ones
+    /// already compiled widens the set of pcs the hart may enter at, and
+    /// nothing else about the core changes. A pending flush is left alone,
+    /// because unlike [`Self::set_translated_core`] the core this applies to is
+    /// the same core that asked for it.
+    pub fn set_translated_entries(&mut self, entries: &[u32]) {
+        self.core_entries = translated::EntryIndex::build(entries);
+    }
+
+    /// The installed core, to reach something only it and its own machine
+    /// crate understand — see [`translated::TranslatedCore::as_any_mut`].
+    pub fn translated_core_mut(&mut self) -> Option<&mut translated::BoxedCore<B>> {
+        self.core.as_mut()
     }
 
     /// Remove the installed core, if any, and go back to interpreting.

@@ -146,6 +146,23 @@ pub trait TranslatedCore<B: Bus> {
     /// line in [`TranslatedCore::report`] because the machine has to divide
     /// by something only it knows.
     fn retired(&self) -> u64;
+
+    /// A way back to the concrete core, for the machine crate that built it.
+    ///
+    /// This crate owns the seam and contains no translator, so there is
+    /// nothing it can usefully do with the answer — and that is the point.
+    /// M7b P1's incremental translation installs an **additional module**
+    /// beside the ones a core already holds, which is a conversation between
+    /// the machine crate and its own core about a shape this crate has no
+    /// business knowing. The alternative was a `fn extend(…)` on this trait
+    /// spelled in terms of block sets and wasm modules, which would put the
+    /// translator's vocabulary in the hart.
+    ///
+    /// The default is `None`, so a core that has no such conversation — every
+    /// test double in this crate — implements nothing.
+    fn as_any_mut(&mut self) -> Option<&mut dyn core::any::Any> {
+        None
+    }
 }
 
 /// A boxed [`TranslatedCore`].
