@@ -1483,7 +1483,12 @@ impl SocBus {
 
     /// Dispatch every event due at or before `now` to the peripheral that
     /// scheduled it.
-    pub fn run_due_events(&mut self, now: Cycles) {
+    ///
+    /// Returns how many it dispatched — the count it already keeps for
+    /// [`MAX_EVENTS_PER_TICK`], handed back so a caller can say whether a
+    /// slice boundary did anything (M7b P4's slice census). Callers that do
+    /// not care may ignore it.
+    pub fn run_due_events(&mut self, now: Cycles) -> u32 {
         self.now = now;
         let mut dispatched = 0u32;
         while let Some(id) = self.sched.pop_due(now) {
@@ -1519,6 +1524,7 @@ impl SocBus {
             };
             range.periph.on_event(id, &mut cx);
         }
+        dispatched
     }
 
     /// Give every peripheral its [`Peripheral::started`] call, in

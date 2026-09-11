@@ -1594,9 +1594,14 @@ run.
 
 `LP_EMU_JIT_EXITS=1` adds the twenty-four exit sites that cost the most, each
 with why the stay ended there and whether the module could have been entered
-at that pc at all.
+at that pc at all. **It also switches on `exits known/unknown`** in the report
+line: those two counters cost a `BTreeMap` lookup per exit — 183 ms of a 6.4 s
+`render-basic` t2 run — and nothing but the counters consumes it (M7b P4,
+plan.md BD5). With the variable unset the line says `not counted (set
+LP_EMU_JIT_EXITS)` rather than printing `0/0`, which would read as "every exit
+was at a known pc".
 
-Three more environment-gated diagnostics, all off by default, none of them
+More environment-gated diagnostics, all off by default, none of them
 consulted by anything, and every one of them perturbing the wall clock the
 rest of the run reports:
 
@@ -1607,6 +1612,7 @@ rest of the run reports:
 | `LP_EMU_JIT_MMIO_CENSUS=1` | every MMIO operation translated code issued, by peripheral, by register and by guest pc (M7 P6c) |
 | `LP_EMU_JIT_SPLIT_CENSUS=1` | with `--interpreter --blockprof`: what an incremental module would hold at each `fence.i`, and how often the run's control flow would cross the boundary that creates (M7b P1) |
 | `LP_EMU_JIT_SPLIT_CENSUS=writable` | the same census against the **writable/read-only** boundary, which is the one the shipped split actually draws |
+| `LP_EMU_SLICE_CENSUS=1` | what bounds each hart slice and what its boundary does (M7b P4). Not a translated-code diagnostic: the slice loop is the same loop with `--interpreter`, and the census answers for either |
 
 `--exit-on` stops at the **end of the line** the match is on, not at the
 match, and it watches **both** consoles — UART0 and the USB link — because

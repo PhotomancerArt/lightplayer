@@ -589,6 +589,11 @@ events, `wasm_encoder::Instruction::encode` the second-hottest function in the
 process. That is JD20's boot cost, and it is the single largest bucket in the
 emulator's half.
 
+⚠️ **Two of those rows are history, not the current shape.** M7b P4 took
+`Scheduler::next_deadline` out of the profile entirely and removed the larger
+of the two `BTreeMap` lookups behind the "entry index" row — see "What bounds a
+slice" below for the before/after.
+
 ### The MMIO census: it is SYSTIMER, and nothing else is close
 
 `LP_EMU_JIT_MMIO_CENSUS=1` counts every MMIO operation translated code issues,
@@ -1078,6 +1083,146 @@ is the contract: one polling point per store the bus served.
 SYSTIMER stayed at 11,626,424 through this phase and was the whole of the next
 one — see "The published-read path" above, which takes the census to
 5,881,883.
+
+## What bounds a slice, and what a slice boundary costs (M7b P4)
+
+`Esp32C6Machine::run_until` runs the hart in slices. A slice's length is the
+**minimum** of six terms — the `MAX_SLICE_CYCLES` cap (8,192), the scheduler's
+next live deadline, the next `--probe`, the next host service, `--strict-bus`'s
+1,024, and the run's own stop cycle — and every boundary then pays the same
+fixed list of work whether or not any of it has anything to do.
+
+P6c inferred **2.70 M slices** from 2,704,058 budget exits at 2.82 instructions
+each. That inference was wrong, and `LP_EMU_SLICE_CENSUS=1` is what says so:
+a budget exit is a *block-budget* exit inside a stay, not a slice end, and there
+are fewer slices than there are budget exits.
+
+### The census, `render-basic` t2, 16 blocks a function
+
+**1,531,923 slices over 880,000,000 cycles — 574.4 cycles per slice.**
+
+| what bounded the slice | slices | share |
+|---|---:|---:|
+| **the scheduler** | **1,475,330** | **96.31 %** |
+| the 8,192-cycle cap | 56,593 | 3.69 % |
+| the stop cycle / a probe / the host service / `--strict-bus` | 0 | 0.00 % |
+
+| which event, when it was the scheduler | slices | share |
+|---|---:|---:|
+| **RMT, local event 0 (`EV_WORD`, channel 0)** | **1,471,630** | **96.06 %** |
+| UART0 local 0 | 3,680 | 0.24 % |
+| TIMG0 | 20 | 0.00 % |
+
+96.04 % of slices are **128–255 cycles** long — one WS281x RMT word. The
+boundary is not idle: a due event fired on 96.38 % of them and a pin edge
+drained on 96.05 %, and only **3.60 % did nothing at all** — which is, to
+within a tenth of a point, the same slices the 8,192-cycle cap bounded.
+
+`render-rocaille` t2 is the same shape at a quarter of the rate: 450,818
+slices, 1,952.0 cycles each, scheduler 78.88 % (RMT 78.03 %), cap 21.12 %,
+21.06 % of boundaries doing nothing at all.
+
+**So the emulator does not take millions of slices because the cap is too
+small. It takes them because the RMT asks to be woken once per transmitted
+word, and a WS281x word is ~200 cycles.**
+
+### The scheduler's heap, which the census also measured
+
+`Scheduler::next_deadline` scanned the whole heap with a liveness filter —
+one `BTreeMap` lookup per entry — on the stated ground that "the pending set is
+a handful of alarms". It is not: on `render-basic` t2 the scan looked at
+**130.5 entries to find 2.0 live ones**, 355 at the worst slice. The RMT
+re-arms its RX idle alarm on every pad edge, and every `cancel` leaves a
+tombstone sitting at its own future deadline until `pop_due` reaches it.
+
+It now peels dead entries off the top instead, the way `pop_due` already does.
+Exact for the same reason the scan was: the heap is ordered by `(at, seq)`, so
+a live top **is** the earliest live deadline, and epochs only rise, so a dead
+entry can never come back. `peek_deadline` is the `&self` form for a caller
+that only has a shared borrow.
+
+### The counter that cost a lookup per exit (plan.md BD5)
+
+`JitCore::run`'s second `index.contains_key` fed nothing but `exit_known_pc` /
+`exit_unknown_pc`. It is now behind the `LP_EMU_JIT_EXITS` gate `exit_sites`
+already uses — a switch, not a deletion, because it is how a coverage shortfall
+names itself.
+
+### What the three changes were worth
+
+`node --cpu-prof`, `render-basic` t2, 16 blocks a function, one profile each:
+
+| bucket | before (ms) | after (ms) |
+|---|---:|---:|
+| `Scheduler::next_deadline` | **390.5** | **not in the profile** |
+| scheduler bucket, whole | 408.1 | **4.5** |
+| entry path (`JitCore::run`) | 644.6 | **460.7** |
+| hart slice loop (`run_until`) | 611.5 | 585.0 |
+| the run, attributed | 6,406.1 | 5,899.5 |
+
+### The two things that are NOT there, with the measurement that says so
+
+**The per-slice early-outs are not a lever.** The census says 96 % of
+boundaries genuinely do work; the items that never do — `service_host` (0 % of
+slices), `drain_tx_log`, `translate_if_code_was_published`, the side-band take
+— already return on a single field compare. An `#[inline(never)]` probe over
+all of them moved `run_until`'s self time from 571.4 ms to 371.7 ms and
+attributed the difference to the probe's own call overhead, not to work.
+
+**The entry index is not hot once BD5 is gone.** `JitCore::run`'s remaining
+`self.index.get(&pc)` was given a named `#[inline(never)]` wrapper and profiled
+over all 7,722,208 entries: it does not reach the profile's top thirty-one
+functions, so it is **under 23 ms of a 5.8 s run** — call overhead included.
+P6c's 201.5 ms "entry index" bucket was both lookups; BD5 was the whole of it.
+A flat page-map-plus-slot-array would be replacing a structure that costs less
+than 0.4 % of the run, so the `BTreeMap` stays.
+
+### The RMT's cadence: what it is worth, and why it was not taken
+
+If the RMT asked for one event per eight words instead of one per word, 87.5 %
+of the scheduler-bound slices would go. `run_until`'s self time is 571.4 ms
+over 1,531,923 slices — **373 ns of boundary per slice** — of which less than
+26 ms is `run_due_events`' dispatch (which scales with events, not slices). So
+the cadence is worth **up to ~500 ms of a 5.9 s run, about 8.5 %**. It is the
+largest single item left in the emulator's own loop.
+
+**It cannot be taken, and the reason is not a timing argument.** `Rmt::fetch`
+does four things at the word's own cycle, and three of them are transcript:
+
+1. it pushes the word's two pulses onto the fabric, and the machine hands that
+   stream to `Gpio::observe_edges` and `Rmt::observe_edges` at the next slice
+   boundary — so a pad edge delivered early raises a **GPIO interrupt** early
+   (plan.md **BD4**: an interrupt's cycle may not move);
+2. it raises `INT_TX_THR_SHIFT` when the read pointer reaches `ch_tx_lim`.
+   That bit is a **line**, not a timestamp: it becomes visible to the hart at
+   the boundary that polls it, so raising it N words early delivers the
+   interrupt N words early — again BD4;
+3. **it reads RMT RAM the guest has not written yet.** The threshold interrupt
+   above is what tells the firmware to refill, and the run's own report line
+   says how much room there is: `rmt refill ch0: 61696 measured, half=24 words;
+   entry max 20`. The transmitter is at most twenty words ahead of an ISR that
+   writes twenty-four. A fetch that ran even one refill ahead of the wire would
+   read words that do not exist yet — not a transcript difference, a wrong
+   frame.
+
+So the per-word event is not a cadence the emulator chose; it is the
+synchronisation between a transmitter and a guest writing into the same RAM.
+**M7b P4 writes the number down and does not take it** (the phase file's stop
+rule).
+
+**This is not the fidelity tier.** DD27 declined that tier because every
+peripheral model together is 3.4 % of the run — the models' own CPU self-time.
+The cadence costs through the hart's slice loop and the scheduler, buckets
+DD27 did not price, and nothing above replaces a peripheral with a memory tap.
+
+### And the budget poll (DD17) was not earned
+
+The phase file's step 4 builds a budget poll only if a material share of slices
+really are bounded by the 8,192-cycle cap. **3.69 % are** on `render-basic` t2
+(21.12 % on `render-rocaille`), and those are almost exactly the slices whose
+boundary does nothing at all — 3.60 % and 21.06 %. A poll that let every one of
+them run on would remove ~55 k boundaries of 1.53 M: about 20 ms, for a new
+import and an exactness argument the size of P2's. Not built.
 
 ## Two more structural facts a reader will otherwise rediscover
 - **The hart's entry index has to be exact once the whole image is
