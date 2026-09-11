@@ -28,9 +28,7 @@
 // purpose), and a lie inside the contract is worse than a gap.
 
 import { EmulatorPort } from "./emulator_port.js";
-import { deleteFlash } from "./emulator_worker.js";
-
-export { deleteFlash };
+import { removeFlashImage } from "./emulator_worker.js";
 
 /** The synthetic origin the port builds its channel URLs from. */
 const TAB_ORIGIN = "http://tab.emu.invalid/";
@@ -76,6 +74,18 @@ export const TAB_BOARD = {
 };
 
 /**
+ * Every hub with a live Worker, page-wide.
+ *
+ * Module-level because Forget is page-level: `deleteFlash` below is reached
+ * by uid with no backing in hand (the Rust side calls it as a bare function,
+ * and each emulated board is opened behind its OWN `tabBacking` closure), and
+ * it has to be able to find the worker that holds that board's chip open. A
+ * hub joins when it starts a worker and leaves when that worker is gone, so
+ * nothing here outlives a live thread.
+ */
+const liveHubs = new Set();
+
+/**
  * One Worker, and the bookkeeping the two channels share.
  *
  * Every ABI call is a message with an id, because a reply has to find the
@@ -110,6 +120,7 @@ class TabHub {
 
   start() {
     if (this.ready) return this.ready;
+    liveHubs.add(this);
     this.ready = new Promise((resolve, reject) => {
       this.worker = new Worker(new URL("./emulator_worker.js", import.meta.url), {
         type: "module",
@@ -293,8 +304,19 @@ class TabHub {
     return () => this.statsListeners.delete(listener);
   }
 
+  /**
+   * End the worker, gracefully first.
+   *
+   * The `destroy` reply is awaited rather than raced, because the worker
+   * writes the chip back and CLOSES its sync access handle before it sends
+   * that reply: terminating without it would leave the image locked against
+   * the very delete Forget is about to run.
+   */
   async destroy() {
-    if (!this.worker) return;
+    if (!this.worker) {
+      liveHubs.delete(this);
+      return;
+    }
     try {
       await this.request({ type: "destroy" });
     } catch {
@@ -303,7 +325,35 @@ class TabHub {
     this.worker.terminate();
     this.worker = null;
     this.ready = null;
+    liveHubs.delete(this);
   }
+
+  /** Whether this hub's board is the one persisted under `key`. */
+  holdsFlash(key) {
+    return key != null && (this.board.persistKey ?? null) === key;
+  }
+}
+
+/**
+ * Delete a board's persisted chip — the Forget verb, as the page sees it.
+ *
+ * THE WORKER GOES FIRST. The image lives behind an OPFS **sync access
+ * handle** held by the board's worker for as long as that worker lives, and
+ * OPFS refuses `removeEntry` on a file with an open handle
+ * (`NoModificationAllowedError`). Forget powers the board off before it
+ * calls this, but "powered off" upstream does not have to mean "that worker
+ * has answered `destroy`" — and when it does not, the delete used to fail
+ * and say nothing, which is exactly what Forget did on 2026-09-10: the card
+ * went, the 4 MiB image stayed. So this ends any live worker holding that
+ * key and only then removes the file. Sequencing, not a retry loop: once
+ * `destroy` has been answered the handle is closed, and a delete that still
+ * fails is a real failure and is reported as one.
+ */
+export async function deleteFlash(key) {
+  for (const hub of [...liveHubs]) {
+    if (hub.holdsFlash(key)) await hub.destroy();
+  }
+  return await removeFlashImage(key);
 }
 
 /**

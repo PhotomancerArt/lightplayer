@@ -95,8 +95,8 @@ const FLASH_LEN = 4 * 1024 * 1024;
 /**
  * Where persisted chips live, relative to the origin's OPFS root.
  *
- * Exported because Forget deletes a chip from the PAGE, when there is no
- * worker left to ask — see `deleteFlash` at the bottom. That is also why
+ * Exported because Forget deletes a chip from the PAGE — see
+ * `removeFlashImage` at the bottom. That is also why
  * this file guards its `self.onmessage` install: it is a Worker entry point
  * and a module the page imports, and importing it must not take the page's
  * message events.
@@ -109,7 +109,7 @@ const decoder = new TextDecoder();
  * A yield that a hidden tab throttles but does not clamp to 4 ms.
  *
  * Built on first use rather than at module scope: the page imports this file
- * for `deleteFlash`, and an open `MessageChannel` in a context that will
+ * for `removeFlashImage`, and an open `MessageChannel` in a context that will
  * never pace anything is a live handle for no reason.
  */
 let channel = null;
@@ -665,14 +665,38 @@ if (inWorker) {
 }
 
 /**
- * Delete a board's persisted chip — the Forget verb.
+ * Remove one board's persisted chip from the store. Answers whether there
+ * was a file to remove; **rejects** when there was one and it did not go.
  *
- * Called from the page, where there is no worker left to ask, which is why
- * it and [`FLASH_DIR`] live in this file rather than beside the caller: one
- * place knows the store's layout, and it is the place that writes to it.
+ * Called from the page, which is why it and [`FLASH_DIR`] live in this file
+ * rather than beside the caller: one place knows the store's layout, and it
+ * is the place that writes to it. The page's Forget verb is
+ * `emulator_tab.js`'s `deleteFlash`, which sequences the live worker out of
+ * the way first — this is only the removal.
+ *
+ * IT REPORTS ITS FAILURES. This used to be `removeEntry(...).catch(() => {})`,
+ * and a swallowed rejection is how Forget came to delete nothing while
+ * answering that it had: OPFS refuses `removeEntry` with
+ * `NoModificationAllowedError` while a sync access handle is open on the
+ * file, and that refusal went into the void (measured 2026-09-11). A missing
+ * file is the one honest no-op — there is nothing left to delete — and it
+ * answers `false` rather than throwing.
  */
-export async function deleteFlash(key) {
+export async function removeFlashImage(key) {
   const root = await navigator.storage.getDirectory();
-  const dir = await root.getDirectoryHandle(FLASH_DIR, { create: true });
-  await dir.removeEntry(`${key}.bin`).catch(() => {});
+  // No `create`: a delete must not bring the store into existence.
+  let dir;
+  try {
+    dir = await root.getDirectoryHandle(FLASH_DIR);
+  } catch (error) {
+    if (error?.name === "NotFoundError") return false;
+    throw error;
+  }
+  try {
+    await dir.removeEntry(`${key}.bin`);
+    return true;
+  } catch (error) {
+    if (error?.name === "NotFoundError") return false;
+    throw error;
+  }
 }
