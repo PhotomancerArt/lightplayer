@@ -61,7 +61,17 @@ pub mod decode;
 pub mod discover;
 pub mod dispatch;
 pub mod host;
-#[cfg(feature = "host-wasmtime")]
+/// The product host: the browser's own engine (JD11–JD13).
+///
+/// Present on every wasm target and behind no feature, because on a wasm
+/// target it is not an option — it is the only thing that can run an emitted
+/// module.
+#[cfg(target_family = "wasm")]
+pub mod host_browser;
+// `host-wasmtime` names a feature that only has a dependency to enable off a
+// wasm target (see this crate's `Cargo.toml`), so the module has to be gated
+// the same way: a wasm build with the feature on has the flag and no wasmtime.
+#[cfg(all(feature = "host-wasmtime", not(target_family = "wasm")))]
 pub mod host_wasmtime;
 pub mod replay;
 pub mod translate;

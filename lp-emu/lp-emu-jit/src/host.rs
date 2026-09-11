@@ -223,6 +223,20 @@ pub mod store_kind {
     pub const W: u32 = 2;
 }
 
+/// What one call into translated code produced.
+///
+/// Shared by both hosts — `host_wasmtime`'s `enter` and `host_browser`'s each
+/// return this — because it is the exit protocol's own shape rather than a
+/// property of whichever engine ran the module.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Exit {
+    /// The guest pc to resume at.
+    pub pc: u32,
+    /// The exchange area's flag word: [`FLAG_AFTER_STORE`],
+    /// [`FLAG_SLICE_ENDED`].
+    pub flags: i32,
+}
+
 /// What a bus access told translated code.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MmioLoad {

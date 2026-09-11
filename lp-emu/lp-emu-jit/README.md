@@ -22,9 +22,8 @@ eagerly rather than chasing hot regions. See
 | `dispatch` | the block set → one wasm **module**: an outer selector over as many sub-dispatchers as the function-size limit needs, plus the flat tables that make an indirect jump an in-module branch |
 | `host` | what an emitted module is run against, and the exit protocol below |
 | `host_wasmtime` | a native host, behind `host-wasmtime`, so identity can be proven on the desk |
+| `host_browser` | **the product host**: the browser's own engine, on every wasm target, behind no feature |
 | `replay` | the identity harness's record and compare shapes, including the per-entry memory-granule diff |
-
-The browser host is P6's.
 
 ## Discovery: the five rules, and why each one is there
 
@@ -146,6 +145,66 @@ because a block was translated. An MMIO *load* can leave a yield behind too, and
 the interpreter does not look after a load — so neither does translated code,
 but it remembers, and the next store leaves even if it is an inline RAM store
 the bus never sees.
+
+## The browser seam (P6, JD11–JD13, JD25)
+
+The exit protocol above says what a module expects. This says who gives it to
+it in the browser, which is the host the milestone's number comes from.
+
+**One namespace, and it is `emu`** — `translate::IMPORT_MODULE`. P2 left the
+name open; it is fixed here and nothing else may use it. A translated module
+imports `emu.memory`, `emu.mmio_load`, `emu.mmio_store`, `emu.step_one`, and
+all four are bound to the **emulator instance's own** memory and exports, so
+every call a translated module makes is wasm→wasm with no JS frame on it.
+
+| what | where |
+|---|---|
+| `jit_mmio_load`, `jit_mmio_store`, `jit_step_one` | exports of the emulator's wasip1 module (`host_browser`) |
+| `jit_table_probe`, `jit_table_selftest` | the entry-encoding round trip, run once at wiring time |
+| `emu_host.jit_compile`, `emu_host.jit_release` | the **only** two JS imports, called once per translation event |
+| `scripts/emu/bench-web/jit-host.js` | the JS half, as one importable ES module |
+
+**How a second Worker uses it.** `jit-host.js` exports `makeJitHost()` and
+nothing else it needs to be told about. Instantiate the emulator with
+`{...yourWasiShim.imports, ...host.imports}`, call `host.attach(instance)`
+**before `_start()`**, and run. `attach` throws rather than returns on a seam
+that will not work, and `host.events` afterwards is one entry per translation
+event — module bytes, the arena base, the engine's own compile and instantiate
+milliseconds, the table slot. It does no I/O, takes no options, and knows
+nothing about the bench page, which is what makes JD25's "Studio's worker
+imports it unchanged" a fact rather than an intention.
+
+**Three rules the browser adds, each paid for in measurement:**
+
+1. **`table.grow(1)` then a separate `table.set(idx, run)`.** Never the fused
+   `grow(delta, ref)`: JSC accepts it, `table.get(idx)` reports the funcref
+   back, and `call_indirect` on that same slot traps as a null entry (P2, S4).
+2. **The build needs `--export-table` *and* `--growable-table`.** Without the
+   first there is no `__indirect_function_table` to put an entry point in;
+   without the second wasm-ld pins the table's maximum to its initial size
+   (940 entries on this binary) and `table.grow` fails with a bare
+   `RangeError` naming neither the linker nor the flag. The
+   `#[unsafe(no_mangle)] pub extern "C"` exports need nothing at all — they
+   survive `--gc-sections` on their own in a `wasm32-wasip1` bin, with no
+   `-C link-arg=--export=<name>` and no `#[used]`. Checked against the
+   module's own export list, both ways round.
+3. **The arena is not at offset zero.** Natively the module's memory *is* the
+   arena; in the browser the module imports the emulator's whole linear memory
+   and the arena is an allocation inside it, so `Layout`'s `arena_offset`,
+   `perm_offset`, `exchange_offset` and `indirect` all shift — **and so do the
+   indirect page map's entries**, which are pointers into the memory rather
+   than into the host's view of the arena. Natively those are the same number
+   and nothing can tell them apart; in the browser a page map built the other
+   way sends every resolved `jalr` to a block index read out of guest data,
+   and installed coverage measures 0.00 % with a guest that never leaves the
+   second-stage bootloader.
+
+**A trap is fatal here.** Natively a wasm trap comes back as an `Err` and the
+run continues interpreted. In a browser engine a trap through `call_indirect`
+kills the instance, so `BrowserCore::enter` only ever returns `Err` for a
+host-side refusal and the rig reports the Worker's `error` event instead. The
+shape is kept identical to the native host's so the machine crate has one code
+path.
 
 ## The escape hatch, and why bring-up cannot cliff
 

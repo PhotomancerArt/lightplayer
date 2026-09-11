@@ -69,6 +69,8 @@ use wasmtime::{
 use crate::host::{EXCHANGE_FLAGS, HostOps};
 use crate::translate::ENTRY_FUNC;
 
+pub use crate::host::Exit;
+
 /// A linear memory that *is* the emulator's guest arena.
 ///
 /// # Safety
@@ -192,16 +194,6 @@ unsafe impl MemoryCreator for ArenaMemoryCreator {
             len: self.len,
         }))
     }
-}
-
-/// What one call into translated code produced.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Exit {
-    /// The guest pc to resume at.
-    pub pc: u32,
-    /// The exchange area's flag word: [`crate::host::FLAG_AFTER_STORE`],
-    /// [`crate::host::FLAG_SLICE_ENDED`].
-    pub flags: i32,
 }
 
 /// How an engine over `guard` should bounds-check the guest's accesses.

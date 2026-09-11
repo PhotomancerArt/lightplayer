@@ -851,7 +851,8 @@ just emu-c6 <elf> --strict-bus --timeout 6s     # the workshop binary, thirty fl
 just bench-emu-c6                               # its speed probe (an oracle, never a gate)
 scripts/emu/oracle-sweep.sh <bin-a> <bin-b>     # the identity oracle: uart + cycles + decoded FRAMES
 just bench-emu-c6-pgo                           # PGO recipe on top of the probe (opt-in, never a default build)
-just bench-emu-web                              # the same probe in a browser (wasip1 + JS WASI shim, LAN-served)
+just bench-emu-web                              # the same probe in a browser, TRANSLATED core selectable (wasip1 + JS WASI shim, LAN-served)
+bun target/emu-bench-web/bench-cli.mjs --stage target/emu-bench-web   # the desk-engine half of that rig (node too)
 just bench-emu-xt                               # the Xtensa core's probe (same rules)
 cargo run -p lp-cli -- validate run emu-m3 --config lp-emu:esp32c6:t1 --dry-run
 ```

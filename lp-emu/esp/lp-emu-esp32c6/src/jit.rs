@@ -44,8 +44,19 @@ use lp_emu_jit::host::{
     MMIO_PENDING, MMIO_REFUSED, MmioLoad, MmioStore, PERM_ENTRIES, PERM_SHIFT, STEP_CONTINUE,
     STEP_SLICE_ENDED, StepOne, load_kind, store_kind,
 };
-use lp_emu_jit::host_wasmtime::WasmtimeCore;
 use lp_emu_jit::translate::{Emit, Emitted, Layout};
+
+// Which host runs the emitted module, chosen by target and by nothing else.
+//
+// The two have the same surface on purpose — `new`, `enter`, `compile_us`,
+// `instantiate_us`, `module_bytes`, `ops_mut` — so everything below this line
+// is one code path. `WasmtimeCore` exists so identity can be proven on the
+// desk (JD18); `BrowserCore` is the product host (JD11–JD13), and on a wasm
+// target it is not a choice: it is the only thing that can run a module.
+#[cfg(target_family = "wasm")]
+use lp_emu_jit::host_browser::BrowserCore as HostCore;
+#[cfg(not(target_family = "wasm"))]
+use lp_emu_jit::host_wasmtime::WasmtimeCore as HostCore;
 use lp_riscv_emu::mach::translated::{RunOutcome, TranslatedCore};
 use lp_riscv_emu::mach::{MachineHart, SliceEnd};
 
@@ -222,6 +233,10 @@ fn emit_sizes(
         return;
     }
     let Ok(at) = areas(bus, set) else { return };
+    // Base zero, whatever host this build has: these bytes are for
+    // `jit-image-bench.mjs`, which builds its own memory with the arena at
+    // offset zero and replays a recording against it. See `JitCore::build` for
+    // the base a module that will actually be *entered* in a browser gets.
     let layout = Layout {
         memory_pages: at.pages,
         guest_base: bus.guest_arena_base(),
@@ -298,7 +313,7 @@ pub fn emit_only(
     }
     let at = areas(bus, &found.set)?;
     write_permission_table(bus, at);
-    write_target_tables(bus.guest_arena_mut(), at.indirect_at, &found.set);
+    write_target_tables(bus.guest_arena_mut(), 0, at.indirect_at, &found.set);
     let layout = Layout {
         memory_pages: at.pages,
         guest_base: base,
@@ -684,7 +699,7 @@ impl HostOps for C6Ops {
 
 /// A translated core for this machine.
 pub struct JitCore {
-    core: WasmtimeCore<C6Ops>,
+    core: HostCore<C6Ops>,
     /// Guest pc to block index. One lookup per entry, at the ~19,500 entries
     /// per emulated second the slice cap implies; P4 and P5 are where this
     /// moves into the module.
@@ -827,18 +842,39 @@ impl JitCore {
     ) -> Result<Self, String> {
         let at = areas(bus, set)?;
         write_permission_table(bus, at);
-        write_target_tables(bus.guest_arena_mut(), at.indirect_at, set);
+
+        let arena_len = bus.guest_arena().len();
+        let guest_base = bus.guest_arena_base();
+        let arena_ptr = bus.guest_arena_mut().as_mut_ptr();
+        // Where the arena sits inside the memory the module imports, and how
+        // big that memory is.
+        //
+        // Natively the module's memory *is* the arena — `host_wasmtime` hands
+        // the engine an alias of it — so the arena starts at offset zero and
+        // the fold on every guest access is one subtract. In the browser the
+        // module imports the emulator's **whole** linear memory, the arena is
+        // an ordinary allocation somewhere inside it, and every folded
+        // `memarg` base shifts by that allocation's address. The `Layout`
+        // already takes a base for exactly this; this is the one place the two
+        // hosts differ in what they put in it.
+        #[cfg(target_family = "wasm")]
+        let (mem_base, memory_pages) =
+            (arena_ptr as u32, core::arch::wasm32::memory_size(0) as u64);
+        #[cfg(not(target_family = "wasm"))]
+        let (mem_base, memory_pages) = (0u32, at.pages);
+
+        // After `mem_base` is known, and that ordering is the point: the page
+        // map's entries are pointers into the module's memory, not into the
+        // host's view of the arena.
+        write_target_tables(bus.guest_arena_mut(), mem_base, at.indirect_at, set);
 
         let layout = Layout {
-            memory_pages: at.pages,
-            guest_base: bus.guest_arena_base(),
-            // The memory *is* the arena, so the arena starts at offset zero
-            // and the fold is one subtract. In the browser this is the arena
-            // `Vec`'s own address inside the emulator's memory.
-            arena_offset: 0,
-            perm_offset: at.perm_at,
-            exchange_offset: at.exchange_at,
-            indirect: Some(at.indirect_at),
+            memory_pages,
+            guest_base,
+            arena_offset: mem_base,
+            perm_offset: mem_base + at.perm_at,
+            exchange_offset: mem_base + at.exchange_at,
+            indirect: Some(mem_base + at.indirect_at),
         };
 
         let started = std::time::Instant::now();
@@ -865,7 +901,7 @@ impl JitCore {
             .collect();
         // The guest bytes behind each block, so an invalidation can be
         // answered by asking whether they changed rather than by giving up.
-        let arena_base = bus.guest_arena_base();
+        let arena_base = guest_base;
         let code: Vec<(u32, Box<[u8]>)> = {
             let arena = bus.guest_arena();
             set.blocks
@@ -881,14 +917,15 @@ impl JitCore {
                 .collect()
         };
 
-        let arena_len = bus.guest_arena().len();
         let spans = bus.region_spans();
         // Straight from the arena, never a constant: this is what decides
         // whether the engine may elide its bounds checks, and only the
-        // allocation knows whether there is really a guard behind it.
+        // allocation knows whether there is really a guard behind it. In the
+        // browser it is always `None` — the arena there is a heap `Vec` inside
+        // the emulator's own linear memory, and the engine's guard pages are
+        // already under every access.
         let arena_guard = bus.guest_arena_guard();
         let exchange = bus.guest_arena_mut()[at.exchange_at as usize..].as_mut_ptr();
-        let arena_ptr = bus.guest_arena_mut().as_mut_ptr();
         let ops = C6Ops {
             hart: core::ptr::null_mut(),
             bus: core::ptr::null_mut(),
@@ -907,9 +944,8 @@ impl JitCore {
         // otherwise. `arena_guard` is the arena's own report: when it is
         // `Some`, the bytes past `arena_len` really are unmapped out to the
         // end of the reservation and its guard.
-        let core =
-            unsafe { WasmtimeCore::new(&emitted.wasm, ops, arena_ptr, arena_len, arena_guard) }
-                .map_err(|e| format!("the translated module did not build: {e:?}"))?;
+        let core = unsafe { HostCore::new(&emitted.wasm, ops, arena_ptr, arena_len, arena_guard) }
+            .map_err(|e| format!("the translated module did not build: {e:?}"))?;
         let (compile_us, instantiate_us) = (core.compile_us(), core.instantiate_us());
 
         // What a replay has to reproduce: the guest's own regions and the

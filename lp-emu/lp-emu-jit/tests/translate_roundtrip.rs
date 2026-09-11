@@ -446,7 +446,7 @@ impl Rig {
                 u64::from(IND_AT) + target_table_bytes(set) <= self.mem_len() as u64,
                 "the rig's memory has no room for the indirect-target tables"
             );
-            write_target_tables(&mut self.mem, IND_AT, set);
+            write_target_tables(&mut self.mem, 0, IND_AT, set);
         }
         let entry = self.entry;
         let layout = self.layout();

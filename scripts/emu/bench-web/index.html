@@ -12,42 +12,66 @@
   .sub { opacity: .7; font-size: 13px; word-break: break-all; }
   button { font: inherit; padding: 10px 18px; border-radius: 6px; border: 1px solid #0e6e6a; background: #0e6e6a; color: #fff; margin: 14px 0; }
   button:disabled { opacity: .5; }
-  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; font-size: 15px; margin-bottom: 10px; }
-  th, td { text-align: right; padding: 6px 8px; border-bottom: 1px solid rgba(128,128,128,.35); }
+  fieldset { border: 1px solid rgba(128,128,128,.4); border-radius: 8px; margin: 14px 0 0; padding: 10px 14px; }
+  legend { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; opacity: .7; }
+  label { font-size: 14px; margin-right: 18px; display: inline-block; }
+  select { font: inherit; padding: 4px 6px; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; font-size: 14px; margin-bottom: 10px; }
+  th, td { text-align: right; padding: 5px 6px; border-bottom: 1px solid rgba(128,128,128,.35); }
   th:first-child, td:first-child { text-align: left; }
-  th:nth-child(2), td:nth-child(2) { text-align: left; }
+  th:nth-child(2), td:nth-child(2), th:nth-child(3), td:nth-child(3) { text-align: left; }
   .headline { margin: 4px 0 16px; }
   .big { font-size: 24px; font-weight: 700; color: #0e6e6a; }
-  @media (prefers-color-scheme: dark) { .big { color: #4fb8b2; } }
-  pre { font-size: 12px; white-space: pre-wrap; opacity: .8; }
+  .bad { color: #b3261e; font-weight: 600; }
+  @media (prefers-color-scheme: dark) { .big { color: #4fb8b2; } .bad { color: #f2b8b5; } }
+  pre { font-size: 12px; white-space: pre-wrap; opacity: .8; overflow-x: auto; }
   #status { min-height: 1.5em; }
+  .wrap { overflow-x: auto; }
 </style>
 </head>
 <body>
 <h1>Emulator Bench</h1>
 <div class="sub" id="ua"></div>
 <div class="sub" id="build">Loading build info…</div>
-<button id="run">Run again</button>
+
+<fieldset>
+  <legend>what to run</legend>
+  <label>mode <select id="mode"></select></label>
+  <label>blocks/fn (JD26) <select id="fnBlocks"></select></label>
+  <label>bound <select id="timeout"></select></label>
+  <label>grade <select id="grade"></select></label>
+  <label>image <select id="image"></select></label>
+  <label>repeats <select id="repeats"><option>1</option><option>2</option><option>3</option></select></label>
+</fieldset>
+
+<button id="run">Run</button>
 <div id="status">Loading…</div>
 <div id="headlines"></div>
+<div class="wrap">
 <table id="results" hidden>
-  <thead><tr><th>run</th><th>image</th><th>grade</th><th>wall s</th><th>instr/s</th><th>real time</th><th>inst. ms</th></tr></thead>
+  <thead><tr>
+    <th>run</th><th>image</th><th>mode</th><th>grade</th><th>fn</th>
+    <th>wall s</th><th>ns/instr</th><th>real time</th><th>cover %</th>
+    <th>stay</th><th>esc %</th><th>boot ms</th><th>uart</th>
+  </tr></thead>
   <tbody></tbody>
 </table>
+</div>
+<pre id="boot"></pre>
 <pre id="tail"></pre>
-<script>
-  const ua = document.getElementById('ua');
-  ua.textContent = navigator.userAgent + ' · cores ' + (navigator.hardwareConcurrency || '?');
-  const status = document.getElementById('status'), tbody = document.querySelector('#results tbody');
-  const table = document.getElementById('results'), headlines = document.getElementById('headlines'), tail = document.getElementById('tail');
-  const btn = document.getElementById('run');
-  const buildEl = document.getElementById('build');
+<script type="module">
+  const $ = (id) => document.getElementById(id);
+  $('ua').textContent = navigator.userAgent + ' · cores ' + (navigator.hardwareConcurrency || '?');
+  const status = $('status'), tbody = document.querySelector('#results tbody');
+  const table = $('results'), headlines = $('headlines'), tail = $('tail'), boot = $('boot');
+  const btn = $('run'), buildEl = $('build');
   let worker = null, results = [], manifest = null;
 
   async function loadManifest() {
     if (manifest) return manifest;
     manifest = await (await fetch('manifest.json')).json();
     renderBuildInfo(manifest);
+    fillControls(manifest);
     return manifest;
   }
 
@@ -59,28 +83,54 @@
     buildEl.textContent = 'emu ' + b.short + ' (' + b.branch + (b.dirty ? ', dirty' : '') + ') built ' + b.built_at + ' · wasm ' + b.wasm_bytes + ' bytes';
   }
 
-  // Build the run plan: for each image in manifest order, repeat its full
-  // grade list `repeats` times (e.g. t1,t2,t1,t2) so a first-run vs warm
-  // comparison is available per grade without waiting for every image.
+  // Every fork the phone can be A/B'd across without a rebuild: the JD26 size
+  // knob and the `--interpreter` switch above all, so the Step A row is
+  // re-taken on the same binary, the same image, the same device and in the
+  // same session as the translated one.
+  function fillControls(m) {
+    const opts = (el, values, labels) => {
+      el.innerHTML = values.map((v, i) => '<option value="' + v + '">' + (labels ? labels[i] : v) + '</option>').join('');
+    };
+    const d = m.defaults || {};
+    opts($('mode'), m.modeChoices || ['jit', 'interp'], ['translated', '--interpreter']);
+    opts($('fnBlocks'), m.fnBlocksChoices || [256]);
+    opts($('timeout'), m.timeoutChoices || ['5500ms']);
+    opts($('grade'), ['t2', 't1', 'both']);
+    opts($('image'), m.images.map((i) => i.slug).concat(['all']));
+    $('mode').value = d.mode || 'jit';
+    $('fnBlocks').value = String(d.fnBlocks || 256);
+    $('timeout').value = d.timeout || '5500ms';
+    $('image').value = m.images.some((i) => i.slug === 'render-basic') ? 'render-basic' : m.images[0].slug;
+  }
+
   function buildPlan(m) {
+    const mode = $('mode').value;
+    const fnBlocks = Number($('fnBlocks').value);
+    const timeout = $('timeout').value;
+    const grades = $('grade').value === 'both' ? ['t1', 't2'] : [$('grade').value];
+    const slugs = $('image').value === 'all' ? m.images.map((i) => i.slug) : [$('image').value];
+    const repeats = Number($('repeats').value);
+    const wallTimeout = (m.defaults && m.defaults.wallTimeout) || 600;
+    const exitOn = !!(m.defaults && m.defaults.exitOn);
     const plan = [];
-    for (const image of m.images) {
-      for (let r = 0; r < m.repeats; r++) {
-        for (const grade of m.grades) plan.push({ slug: image.slug, grade });
+    for (const slug of slugs) {
+      for (let r = 0; r < repeats; r++) {
+        for (const grade of grades) plan.push({ slug, grade, mode, fnBlocks, timeout, wallTimeout, exitOn });
       }
     }
     return plan;
   }
 
   function renderHeadlines() {
-    const bySlug = {};
+    const by = {};
     for (const r of results) {
-      if (r.grade !== 't2' || !r.realtime) continue;
-      (bySlug[r.slug] ||= []).push(r.realtime);
+      if (!r.realtime) continue;
+      (by[r.slug + ' ' + r.grade + ' ' + r.mode] ||= []).push(r);
     }
-    headlines.innerHTML = Object.entries(bySlug).map(([slug, rts]) => {
-      const best = Math.max(...rts);
-      return '<div class="headline"><span class="big">' + best.toFixed(2) + '× real time</span> at t2, ' + slug + ' (best of ' + rts.length + ')</div>';
+    headlines.innerHTML = Object.entries(by).map(([key, rs]) => {
+      const best = rs.reduce((a, b) => (b.realtime > a.realtime ? b : a));
+      return '<div class="headline"><span class="big">' + best.realtime.toFixed(2) + '× real time</span> · ' +
+        best.nsPerInstr.toFixed(2) + ' ns/guest instr · ' + key + ' (best of ' + rs.length + ')</div>';
     }).join('');
   }
 
@@ -88,31 +138,51 @@
     const m = await loadManifest();
     const plan = buildPlan(m);
     if (worker) worker.terminate();
-    worker = new Worker('worker.js?v=' + (m.build ? m.build.short : 'dev'));
-    results = []; tbody.innerHTML = ''; headlines.innerHTML = ''; table.hidden = true; btn.disabled = true;
+    // A MODULE worker: it imports jit-host.js, which is the module Studio's
+    // own worker will import unchanged (JD25).
+    worker = new Worker('worker.js?v=' + (m.build ? m.build.short : 'dev'), { type: 'module' });
+    results = []; tbody.innerHTML = ''; headlines.innerHTML = ''; boot.textContent = ''; table.hidden = true; btn.disabled = true;
     status.textContent = 'Loading module…';
+    worker.onerror = (e) => { status.innerHTML = '<span class="bad">Worker died: ' + (e.message || e) + '</span>'; btn.disabled = false; };
     worker.onmessage = (ev) => {
       const d = ev.data;
-      if (d.type === 'loaded') status.textContent = 'Compiled in ' + d.compileMs.toFixed(0) + ' ms';
-      if (d.type === 'progress') status.textContent = 'Run ' + (d.i + 1) + ' of ' + d.n + ' (' + d.slug + ' ' + d.grade + ')… keep the screen on';
-      if (d.type === 'result') {
-        const r = d.r; results.push(r); table.hidden = false;
-        const tr = document.createElement('tr');
-        tr.innerHTML = '<td>' + (d.i + 1) + '</td><td>' + r.slug + '</td><td>' + r.grade + '</td><td>' + (r.wallMs / 1000).toFixed(2) + '</td><td>' +
-          (r.ips ? (r.ips / 1e6).toFixed(1) + ' M' : 'exit ' + r.exit) + '</td><td>' + (r.realtime ? r.realtime.toFixed(2) + '×' : '–') + '</td><td>' + r.instantiateMs.toFixed(0) + '</td>';
-        tbody.appendChild(tr);
-        tail.textContent = r.tail;
-        renderHeadlines();
-      }
+      if (d.type === 'loaded') status.textContent = 'emu.wasm (' + d.wasmBytes + ' B) compiled in ' + d.compileMs.toFixed(0) + ' ms';
+      if (d.type === 'progress') status.textContent = 'Run ' + (d.i + 1) + ' of ' + d.n + ' (' + d.step.slug + ' ' + d.step.grade + ' ' + d.step.mode + ')… keep the screen on';
+      if (d.type === 'result') { addRow(d.i, d.r); }
       if (d.type === 'done') { btn.disabled = false; send(m); }
-      if (d.type === 'error') { status.textContent = 'Error: ' + d.message; btn.disabled = false; }
+      if (d.type === 'error') { status.innerHTML = '<span class="bad">Error: ' + d.message + '</span>'; btn.disabled = false; }
     };
     worker.postMessage({ plan, images: m.images });
   }
 
+  function addRow(i, r) {
+    results.push(r); table.hidden = false;
+    const tr = document.createElement('tr');
+    const bootMs = (r.boot || []).reduce((a, b) => a + b.discoverMs + b.emitMs + b.compileMs + b.instantiateMs, 0);
+    const cells = [
+      i + 1, r.slug, r.mode, r.grade, r.fnBlocks ?? '–',
+      r.failed ? '–' : (r.wallMs / 1000).toFixed(2),
+      r.nsPerInstr ? r.nsPerInstr.toFixed(2) : '–',
+      r.realtime ? r.realtime.toFixed(3) + '×' : '–',
+      r.coverage !== undefined ? r.coverage.toFixed(2) : '–',
+      r.meanStay ? r.meanStay.toFixed(1) : '–',
+      r.escapeRate !== undefined ? (100 * r.escapeRate).toFixed(3) : '–',
+      bootMs ? bootMs.toFixed(0) : '–',
+      r.uartSha256 ? r.uartSha256.slice(0, 8) : '–',
+    ];
+    tr.innerHTML = cells.map((c) => '<td>' + c + '</td>').join('');
+    if (r.failed || r.trap || r.selftestError) tr.classList.add('bad');
+    tbody.appendChild(tr);
+    // JD20 says the boot cost is a product number, reported not buried: the
+    // emulator's own line, verbatim, per translation event.
+    if (r.boot && r.boot.length) boot.textContent = r.boot.map((b) => b.line).join('\n');
+    tail.textContent = r.failed || r.selftestError || r.trap || r.tail || '';
+    renderHeadlines();
+  }
+
   async function send(m) {
-    const payload = { ua: navigator.userAgent, cores: navigator.hardwareConcurrency, at: new Date().toISOString(), build: m.build,
-      results: results.map(r => ({ slug: r.slug, grade: r.grade, exit: r.exit, wallMs: r.wallMs, instr: r.instr, us: r.us, ips: r.ips, realtime: r.realtime, instantiateMs: r.instantiateMs })) };
+    const payload = { ua: navigator.userAgent, cores: navigator.hardwareConcurrency, at: new Date().toISOString(),
+      build: m.build, deviceMemory: navigator.deviceMemory || null, results };
     const name = 'result-' + payload.at.replace(/[:.]/g, '-') + '.json';
     const fd = new FormData();
     fd.append('file_to_upload', new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), name);
@@ -122,7 +192,7 @@
     } catch (e) { status.textContent = 'Done, but sending failed. Paste the table into the chat.'; }
   }
   btn.addEventListener('click', start);
-  start();
+  loadManifest().then(() => { status.textContent = 'Ready. Pick the row and press Run.'; });
 </script>
 </body>
 </html>

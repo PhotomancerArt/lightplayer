@@ -26,7 +26,14 @@ lp-emu-core = { path = "../lp-emu-core" }
 # that appears with the code that uses it is a dependency nobody reviewed.
 wasm-encoder = { version = "0.245", default-features = false }
 
-[dependencies.wasmtime]
+# NOT on a wasm target, and that is the whole point of the target table: the
+# product host is `host_browser`, which needs nothing but the engine it is
+# already running in, and `lp-emu-esp32c6` turns `host-wasmtime` on
+# unconditionally through its own `jit` feature. Without this, a
+# `wasm32-wasip1` build of the emulator would try to compile cranelift to wasm.
+# `lib.rs` gates `host_wasmtime` the same way, so the feature flag being on
+# with no wasmtime behind it is expressible and harmless.
+[target.'cfg(not(target_family = "wasm"))'.dependencies.wasmtime]
 version = "42"
 default-features = false
 features = ["cranelift", "runtime", "std"]
