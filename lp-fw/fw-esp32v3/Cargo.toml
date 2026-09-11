@@ -302,6 +302,26 @@ test_gpio_calibrate = ["dep:fw-checks", "fw-checks/check-gpio-calibrate"]
 # from.
 test_cycle_probe = ["dep:fw-checks", "fw-checks/check-cycle-probe"]
 
+# The `rmt-chase` payload's classic harness (M4 P5): a 256-LED chase on IO18
+# through the product's own `v3_rmt` backend, one record per frame. The
+# pattern, the checksum and the record live in fw-checks as
+# `checks::rmt_chase` — this feature is the alias, so
+# `just fwtest-rmt-esp32v3` and the emulator gate name one thing.
+#
+# ⚠️ Rides the default features' cohort, like `test_appcore_rom_path` and for
+# the same reason: the harness calls the PRODUCT's `board::esp32v3::init` and
+# its `output::rmt::{shared_driver, v3_rmt}`, and those modules need the
+# `server` cohort (`lp-ws281x`, `lpc-hardware`, `alloc`). A harness that
+# reimplemented either would be measuring itself. Build (touch src/main.rs
+# first when flipping features):
+#   cargo build --profile release-esp32v3 --features esp32,test_rmt
+#
+# `lpc-shared` is NOT named here, unlike the C6's `test_rmt`
+# (`fw-esp32c6/Cargo.toml:128`, for `recovery/panic_path.rs`): this crate's
+# `mod recovery` is `cfg`'d out of every harness build (`fw_harness`), and
+# `lpc-shared` arrives with the default cohort anyway.
+test_rmt = ["dep:fw-checks", "fw-checks/check-rmt"]
+
 [dependencies]
 # Pins below come from the experiment repo's `fw/xt-runner-esp32/Cargo.toml`
 # (proven on classic ESP32 silicon 2026-07-28, FINDINGS.md C1 PASS) — the

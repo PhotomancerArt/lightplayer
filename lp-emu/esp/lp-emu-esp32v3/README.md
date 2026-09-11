@@ -1649,6 +1649,7 @@ it fixed for P4–P8, is
 | `tests/boot_idle.rs` | **The hello, and G2 (a).** With the image: the `[INIT]` chain comes out of the **host stream** — 543 bytes, sha256 `ea8bae30…`, the same count and the same digest P3 measured going *into* the accept block — with zero unmapped accesses and no strict stop; the line order held against L0's capture; `--exit-on` stopping at a complete line. And both boot paths run to the **idle heartbeat**: the `[stack] heartbeat:`/`[MEM]`/`[JIT]` triple, the Q5 fallback line, the unsolicited wire hello, the answer to a scripted request, and `unmapped = 0` on each — plus the two paths' memory figures asserted equal to **each other** (not to silicon: different image bytes, ruling R7) |
 | `tests/rmt_registers.rs` | **M4 P2's gates.** Every offset looked up **by name** in `regs::RMT` rather than transcribed, and the resets asserted against that table's own `resets`. One test per quirk, each of which fails without it: `tx_lim` a repeating count that re-arms itself (one write, a 256-word transmission, four events 64 words apart — the C6's position semantics fire once); a `ch_tx_lim` write changing the period and not the count; the **global** wrap bit, and the same register serving channel 7; `tx_start` acted on with no `conf_update`; a window of end markers stopping the transmitter at the next word boundary; `mem_raddr_ex` absolute **and at bits 12:21**, with the APB write pointer at 0:9. Plus: a whole **WS2812 frame** — 8 LEDs, 194 words, a 128-word window, three ping-pong refills — driven by the register sequence the shipped image's own `--trace-block RMT` run issues, whose fetched words are the stream that went in, whose word start cycles are exact absolute tick positions, and whose edges off **gpio18** decode back to the bytes; `Gpio::peripheral_driven_pads` non-empty for the first time; the refill telemetry's entry and fill in words; `int_clr`'s W1C and the line on source 47; REF_TICK refused rather than guessed at; a byte-identical snapshot round trip; and **no register in the block graded `measured`** |
 | `tests/pin_frames.rs` | **M4 P3's gates.** The WS281x decoders on the whole machine: a pad becomes observed when the guest routes it, and `routed_pads()` carries `(PadId(18), RMT_SIG_0)`; the engine ends a transmission; the frame decoded off the fabric is whole, zero-error, 24 bytes, closed by its reset, and **is the frame that went in**; a frame the run ended mid-flight is flushed **incomplete** rather than invented; `--dump-frames` writes one `ws281x-frame` line naming `RMT_SIG_0` and carrying `wire` and `rgb` as two different fields; `--pin-log` writes one line per edge in guest-cycle order with a `# route` note; two runs write byte-identical dumps and so does a third at a different `--core-quantum`; and a decoder snapshotted **mid-bit** restores with its half-shifted bits and decodes the second half identically. Driven by the shipped image's own register sequence from the host side, because R6 blocks the upload that would make the guest issue it |
+| `tests/rmt_chase.rs` | **M4 P5's gate.** The `rmt-chase` payload's own image run whole to its done marker under `--strict-bus`, and **all 768 frames the decoder read off IO18 checksum-equal to the guest's own `rmt-frame` record** — `fnv1a(unpermute(frame.wire, order))` against the line the firmware printed — with zero bit errors, zero trailing bits, 6,144 bits and 256 LEDs a frame, a reset gap closing every one and the chase pixel where the record says it is. Plus: IO18's route present and `RMT_SIG_0` with no *other* RMT signal routed anywhere (**not** the length of `routed_pads()` — gpio1, the console pad, is in it); two edges per bit and no dropped edges; two runs writing byte-identical dumps and a decoder snapshotted **mid-bit** restoring to the same frames, both over a 60 ms prefix because a whole run is 3.33 billion cycles. The first **guest-driven** channel on this chip — see "`rmt-chase` on the classic" |
 | `tests/determinism.rs` | The plan's inviolable invariant. Two runs of each boot path agree on the UART sha, the byte count, the **cycle count**, the **instruction count**, the pc and the idle skips; a snapshot taken mid-run and restored into a **fresh** machine produces the same second half as the run that was never interrupted; and the state that is not a register — the flash MMU tables, the cache-enable bit, both halves of the stall key, the interrupt matrix, core 1's hold, the DBREAK slots — comes back through the struct. **M4 P1**: the single-core prefix run's three counters pinned to `origin/main`'s; two dual-core runs at quantum 256 and two at 64 each one run (both harts' counters, both pcs, the parks, a memory fingerprint); the two quanta's consoles equal byte for byte except the stack high-water figure, which the test names as interrupt timing |
 | `tests/dual_core.rs` | **M4 P1's gates.** A hand-built fixture with no firmware: core 0 performs esp-hal's `start_core1` DPORT sequence, core 1 comes up **through the mask ROM's own reset path and wait loop** (its two reads of `appcpu_boot_addr` read out of the bus trace), routes the doorbell into its own matrix and parks in `waiti` — costing nothing while parked — and core 0's `cpu_intr_from_cpu_1` wakes it into `_Level2InterruptVector` with `EPC2` naming the instruction after the `waiti`; the release is a reset (`CPENABLE = 0xff`, counters from the clock). Ruling R4 on a synthetic table disagreement: the stop names entry, page and both mappings, exits 7, and `permit` continues. **With the image**: `[INIT] RMT ISR on APP core` on both boot paths with `unmapped = 0`, the binds read back out of `core_1_intr_map` with `core_0_intr_map[RMT] = 16`, the pusher parked in `idle_once` — **red on the shipped image until the open defect below is fixed** |
 | `src/periph/gpio.rs`, `src/periph/io_mux.rs` (unit) | A plain `Output` pin drive reaching a pad and `enable` taking it back off the wire; `256` being the GPIO selector and `128` an ordinary signal; bank 1 carrying pads 32..39; the input matrix routing `U0RXD_IN` and refusing the two constants by name; `in_` served only through `fun_ie`; the PRO core's enable at `pin[n]` bit 15 and the APP core's at 13; **no peripheral signal reaching a pad**; the IO_MUX pad map walked against the generated table's own names, and asserted *not* to be in pad order |
@@ -1713,3 +1714,114 @@ are comparable only against an emulated run of the same bytes.
 - Every constant in `memmap.rs` carries the `file:line` it was read from.
 - The crate is MIT, as a unit with the rest of `lp-emu/`. See
   `../../README.md` and `just lint-emu-fence`.
+
+## `rmt-chase` on the classic
+
+*M4 P5. The payload's classic harness, the gate, and the pin transcript.*
+
+`rmt-chase` is a 256-LED white dot walking a strip three times — **768
+frames** — with one line per frame saying what the guest believes it sent:
+
+```text
+[fw-check-json] {"kind":"rmt-frame","n":0,"leds":256,"lit":1,"crc":"0xf88210a7"}
+```
+
+The pattern, the FNV-1a checksum, the record and the done marker are
+`fw-checks`'s (`checks::rmt_chase`) and are host-tested; the chip half is
+`lp-fw/fw-esp32v3/src/tests/test_rmt.rs`, behind `--features esp32,test_rmt`.
+That half drives the **product's own backend** — `shared_driver::DRIVER` over
+`v3_rmt`, opened with the same register sequence `Esp32V3RmtWs281xDriver::new`
+uses and routed with the same `route_rmt_to_gpio` the slot pool uses — rather
+than a ported wrapper (ruling R5; the classic has no `output::LedChannel`).
+It never starts the APP core: the payload is meant to be the simplest frame
+path this chip has, and a second core would add the wire pusher's slot pooling
+to it.
+
+### The three readings, and how many of them exist today
+
+| reading | where it comes from | today |
+|---|---|---|
+| the guest's own record | `rmt-frame` lines over UART0 | **here** |
+| the decoder's frame | the pad, `--dump-frames` | **here** |
+| silicon's | an instrument, or the same payload flashed and captured | **M5's** |
+
+> **Today both readings are ours.** The decoder is this repository's, the
+> fabric is this repository's and the RMT model is this repository's, so what
+> the gate below shows is that a bug would have to be in the same place in
+> three independent code paths to hide. **The silicon twin is M5's**, and it is
+> the only thing that turns any of this into a measurement.
+
+### The gate
+
+`tests/rmt_chase.rs`, run by `just test-emu-esp32v3-boot` against the image
+that recipe builds (`LP_EMU_ESP32V3_TEST_RMT_ELF` — a **second** variable,
+because every feature set builds to one target path and a gate that read
+whatever was there last would compare the chase against the shipped image):
+
+1. the payload run whole to its own done marker under `--strict-bus`;
+2. **all 768 frames checksum-equal** — `fnv1a(unpermute(frame.wire, order))`
+   against the record's `crc` — with zero bit errors, zero trailing bits, a
+   reset gap closing every frame, and the chase pixel where the record says;
+3. IO18's route present and `RMT_SIG_0` (`out_sel = 87`), and no *other* RMT
+   signal routed anywhere;
+4. two runs writing byte-identical `--dump-frames` files, and a decoder
+   snapshotted **mid-bit** restoring to decode the same frames.
+
+⚠️ **Not "exactly one routing note".** A plain boot routes **gpio1** too — the
+console TX pad, through `func_out_sel_cfg` — so it gets a decoder and a
+`pin gpio1: 0 frames …` summary line of its own. Asserting the length of
+`routed_pads()` would fail on a fact about the console. What is asserted is
+IO18's route *by value*, and that one RMT signal is routed.
+
+⚠️ **`unpermute`, where the C6's twin checksums the wire bytes directly.** The
+C6's `LedChannel` swaps RGB→GRB and `lp-ws281x` then permutes again, so the
+C6's wire carries the caller's RGB (`fw-checks`'s double-swap finding, DD34
+d). The classic harness hands the driver RGB and `lp-ws281x` permutes
+**once**, so this wire carries real GRB. This payload cannot tell the
+difference — every pixel is grey, and `wire == rgb` on all 768 frames — which
+is exactly why the correct form is written rather than the one that happens to
+pass.
+
+### Cost, and what the gate runs whole
+
+768 frames at 18,067 µs is **13.885 s of guest time, 3.33 billion cycles,
+about 107 s of host time**. The checksum gate runs the payload whole, because
+that is the claim; the determinism and snapshot gates run a 60 ms prefix of
+the same run rather than paying for two more, and say so.
+
+### The transcript
+
+`lp-emu/transcripts/esp32v3/rmt-chase/lp-emu-esp32v3-t1-2026-09-11-dc2df69d4.txt`
+— the console — beside its `.pins.jsonl` (transcript **shape B**: one
+`ws281x-frame` record per frame) and a sidecar naming the image commit and
+sha256, the features, the pin companion and the command that produced them.
+Hand-run and flagged as such: `lp-cli validate` has no `rmt-chase` arm for
+this chip, because the registry and the configuration are **M5's**.
+
+⚠️ **The facts about the run itself are in the sidecar's `note`, not in
+fields of their own.** The grade (`t1`), the **core quantum** (256), the boot
+path (direct), the core count and the run's counters — cycles, instructions,
+frames, edges, refills — are one labelled line each in the last paragraph of
+`note`, under `boot path:`, `time grade:`, `core quantum:`, `cores:` and
+`run:`. `TranscriptHeader` is `deny_unknown_fields` (M5 ruling R3), so a
+sidecar that spelled them as top-level keys is *refused*, loudly, by
+`every_committed_transcript_is_filed_where_its_header_says`. Widening the
+header is the contract's business and belongs to **M5 P6**, the replay
+phase; this phase records an artefact. When M5 P6 promotes them to fields it
+can lift them straight out of those lines.
+
+**Never edit a transcript.** A mismatch is a regression or a re-capture.
+
+### What P5 found that P3 could not
+
+P3's waveform was driven from the **host** (`tests/pin_frames.rs` writes the
+shipped image's own register sequence through the bus) because the shipped
+image starts no channel until a project's output opens — ruling **R6**. This
+is the first **guest-driven** channel on the classic: the firmware opens it,
+starts all 768 frames and services all **36,864** refills from its own ISR.
+Nothing behaved differently for it. The refill telemetry sits in bucket 0 for
+both entry and fill on every one of the 36,864 — entry never worse than 2
+words, fill never worse than 12, against a 128-word half — there are exactly
+two edges per bit and no dropped edges, and no frame truncated. A refill
+racing `tx_end` under guest timing was the thing to watch for and it did not
+happen.

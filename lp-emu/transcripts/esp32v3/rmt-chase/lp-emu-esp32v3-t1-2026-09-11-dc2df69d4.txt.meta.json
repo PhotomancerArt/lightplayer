@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "payload": "rmt-chase",
+  "chip": "esp32v3",
+  "configuration": "lp-emu:esp32v3:t1",
+  "date": "2026-09-11",
+  "firmware_commit": "dc2df69d4c8a",
+  "firmware_features": [
+    "default",
+    "esp32",
+    "float-f32",
+    "server",
+    "test_rmt"
+  ],
+  "firmware_dirty": false,
+  "firmware_sha256": "0cbe95ece1d4f967e26fb101938b1d90605a82970975e636eaa5eb7bbebd0650",
+  "tools": {
+    "lp-emu-esp32v3": "40.0.0 (dc2df69d4, clean)",
+    "rom": "esp32_rev300_rom.elf, loaded but not entered on this boot path"
+  },
+  "source": "(cd lp-fw/fw-esp32v3 && touch src/main.rs && cargo build --profile release-esp32v3 --features esp32,test_rmt) && cargo run -q --release -p lp-emu-esp32v3 -- --elf target/xtensa-esp32-none-elf/release-esp32v3/fw-esp32v3 --time-grade t1 --strict-bus --timeout 20s --wall-timeout 900 --exit-on '[rmt-chase] === DONE ===' --uart0 file:lp-emu/transcripts/esp32v3/rmt-chase/lp-emu-esp32v3-t1-2026-09-11-dc2df69d4.txt --dump-frames file:lp-emu/transcripts/esp32v3/rmt-chase/lp-emu-esp32v3-t1-2026-09-11-dc2df69d4.txt.pins.jsonl",
+  "capture": "HAND-RUN, not runner-written. `lp-cli validate` has no `rmt-chase` arm for this chip yet: the payload registry and the `lp-emu:esp32v3` configuration for it are M5's (M4 P5's out-of-scope line). The command above is the whole provenance; when M5 wires the registry it should reproduce these bytes from this commit.",
+  "pins": "lp-emu-esp32v3-t1-2026-09-11-dc2df69d4.txt.pins.jsonl",
+  "note": "THE GATE THIS ARTEFACT IS THE EVIDENCE FOR. All 768 `rmt-frame` records in the .txt have a decoded frame in the .pins.jsonl with the same FNV-1a checksum: 768 of 768 checksum-equal, 0 bit errors, 0 trailing bits, every frame 6,144 bits / 256 LEDs and closed by a real reset gap. The gap is 10,387.7..10,628.9 us (the 300 us latch plus the harness's own 10 ms `Delay`) and the frame period is 18,066.9..18,068.2 us. Those two are the GUEST's waits and nothing is gated on them (PD9); what is gated is bytes and checksums. `lp-emu-esp32v3/tests/rmt_chase.rs` is the same comparison in process, against the image `just test-emu-esp32v3-boot` builds.\n\nBOTH READINGS ARE OURS. The decoder, the fabric and the RMT model are all this repository's, so this is two readings of one machine and not a measurement. THE SILICON TWIN IS M5's, and it is the only thing that would turn any of it into one.\n\nTHE FIRST GUEST-DRIVEN CHANNEL ON THE CLASSIC. M4 P3's `tests/pin_frames.rs` drove the waveform from the HOST — it wrote the shipped image's own register sequence through the bus, because the shipped image starts no channel until a project's output opens (ruling R6). Here the firmware opens the channel, starts all 768 frames and services all 36,864 refills from its own ISR, and the waveform is the same shape: 2 edges per bit, no dropped edges, the refill telemetry sitting in bucket 0 for both entry and fill on every one of the 36,864.\n\nWIRE AND RGB ARE EQUAL IN ALL 768 FRAMES AND THAT PROVES NOTHING ABOUT COLOUR ORDER. Every pixel of this payload is grey (`[10,10,10]` or black), which is invariant under any permutation of the three channels — deliberately, so the chase says the same thing whichever way `fw-checks`'s double-swap finding (DD34 d) is settled. Note that the classic differs from the C6 here: the C6's `LedChannel` swaps RGB->GRB and `lp-ws281x` then permutes again, so the C6's wire carries the caller's RGB; the classic harness hands the driver RGB and `lp-ws281x` permutes ONCE, so this wire carries real GRB. The gate unpermutes before checksumming for that reason.\n\nPAD gpio1 IS IN THE RUN AND IS NOT A SECOND TRANSMITTER. `routed_pads()` carries `(PadId(1), Signal(SignalId(0)))` as well as `(PadId(18), Signal(SignalId(87)))`: gpio1 is the console TX pad, routed through `func_out_sel_cfg` by UART0's construction, so it gets a decoder and a `pin gpio1: 0 frames` summary line. Exactly one RMT signal is routed in this run and it is IO18's.\n\nRE-RECORDED TWICE, AND ALL THREE RECORDINGS ARE THE SAME WAVEFORM. The first capture was taken at 2a31ad798229, before this branch was rebased onto origin/main (that commit no longer exists); the second at e39cc8103461, before a rustfmt pass moved two chained calls in the harness and so moved the `#[track_caller]` locations baked into the image. Each time the artefact was re-recorded rather than left naming an image nobody can rebuild. The three images differ only in what build.rs stamps and where a panic location points, and the runs bear that out: the same 3,332,417,635 cycles and 3,332,414,548 instructions every time, and a BYTE-IDENTICAL .pins.jsonl across all three. The superseded pairs were never committed to main.\n\nTHE RUN, AND THE MACHINE THAT MADE IT. These five facts were top-level sidecar fields (`boot_path`, `time_grade`, `core_quantum`, `cores`, `run`) until the header refused them: `TranscriptHeader` is `deny_unknown_fields` (M5 ruling R3), and widening it is the contract's business — M5 P6's, the replay phase — not this artefact's. They are recorded here verbatim instead, one labelled line each, so a later reader (or M5 P6, promoting them back to fields) can lift them out.\nboot path: direct (BootMode::Direct — the app's PT_LOADs placed and the entry jumped to with the boot frame a bootloader would have left; the mask ROM is loaded in every configuration but is not run)\ntime grade: t1\ncore quantum: 256\ncores: one. The APP core is held by DPORT for the whole run (`appcpu_resetting`, `!appcpu_clkgate_en`) — the harness never calls `start_app_core_isr`, so the RMT ISR is bound on the PRO core and `core1=0` instructions is a property of the payload, not of the machine.\nrun: outcome=EXIT MATCHED on the payload's own done marker, cycles=3332417635, micros=13885073, instructions=3332414548, idle_skips=0, unmapped=0, strict_bus=true, frames_on_gpio18=768, frames_complete=768, frame_errors=0, edges_on_gpio18=9437184, rmt_refills=36864, refill_entry_max_words=2, refill_fill_max_words=12",
+  "trust": [
+    {
+      "class": "pin",
+      "grade": "modeled",
+      "because": "a pin IS observed on this machine (M4 P2/P3): the GPIO view is a routing layer over the bus's signal fabric, the RMT model drives RMT_SIG_0 into it, and a WS281x decoder reads a routed pad's edges at the datasheet's +/-150 ns into frames. This capture is the strongest evidence that path has: 768 guest-driven frames whose bytes the guest's own independent checksum agrees with, frame for frame, with zero bit errors. It is still not a measurement — the decoder and the transmitter are both ours — and what would move the grade is a capture from an instrument on a real pin. None exists; M5 records the silicon twin"
+    },
+    {
+      "class": "timing",
+      "grade": "modeled",
+      "because": "t1 counts one cycle per instruction — no cache, no flash wait states — and there is no measured Xtensa class table at all (`machine.rs` refuses t2/t3 with the reason). The frame period and the reset gap in this transcript are therefore SHAPE, not a prediction of silicon's: the transmission half is the RMT model's own tick arithmetic over the APB clock and is exact by construction, and the 10 ms half is the guest spinning on TIMG0's clock at one cycle an instruction. Nothing here is gated"
+    },
+    {
+      "class": "boot-log",
+      "grade": "modeled",
+      "because": "there is no boot log: this is a direct load, so the app's segments are placed and its entry is jumped to, and no ROM banner or second-stage bootloader line is printed at all. The .txt begins at the payload's own in-band header"
+    },
+    {
+      "class": "wire",
+      "grade": "modeled",
+      "because": "UART0's bytes leave at the modelled baud into a file sink; no cable, no CH340K, no host. The classic's silicon captures of other payloads are where that class is measured"
+    }
+  ]
+}

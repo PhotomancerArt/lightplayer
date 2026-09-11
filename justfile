@@ -1038,7 +1038,7 @@ clippy-fw-esp32v3:
     # a lint failure here is the first place a drift between the two crates
     # shows up without a board or a machine.
     for feat in test_xt_fp_conformance test_interrupt_executor test_sram0_exec \
-                test_appcore_rom_path \
+                test_appcore_rom_path test_rmt \
                 test_gpio_calibrate test_cycle_probe test_shader_compile_incremental; do
       echo "clippy: --features $feat"
       cargo clippy --profile release-esp32v3 --features "$feat" -- --no-deps -D warnings
@@ -1633,6 +1633,69 @@ fwtest-appcore-rom-path-esp32v3 port="":
     kill "$watcher" 2>/dev/null || true
     echo "--- [APPCORE-CANARY] lines ---"
     grep -a 'APPCORE-CANARY\|PANIC\|msg:' "$out" || echo "NO APPCORE-CANARY OUTPUT (see $out)"
+
+# The `rmt-chase` payload on the classic (M4 P5): flashes the `test_rmt`
+# harness and captures the 768 `rmt-frame` records and the done marker.
+#
+# 256 LEDs on **IO18**, three chases, one record per frame after the frame is
+# on the wire, then `[rmt-chase] === DONE ===`. About 13.9 s of chasing after
+# boot, so the watcher waits on the marker rather than on a fixed duration.
+#
+# The classic's flashing rules, the same ones every `fwtest-*-esp32v3` recipe
+# carries: foreground, under `script` (a bare `espflash monitor` stub-halts
+# this board — attach the monitor via `flash --monitor`), `--monitor-baud
+# 921600` because `board::esp32v3::init` programs UART0 there, and a
+# **port-scoped** SIGINT, the rule the two parallel classic lanes of
+# 2026-09-05 taught: an unscoped `pkill -f 'espflash flash'` takes out the
+# other board's mid-write flash.
+#
+# ⚠️ `grep -F`, not a bare pattern. The sentinel begins with `[rmt-chase]`,
+# which a basic regular expression reads as a **character class** — the match
+# then succeeds on any line holding one of those letters, and the watcher
+# kills the capture early. `desk-espflash-step.sh` has the unfixed idiom;
+# do not copy it here.
+#
+# ⚠️ Flashing this image REPLACES the app. Reflash the reference image
+# afterwards (`scripts/emu/build-reference-image.sh`) — this is a payload
+# harness, not a firmware. Recording a transcript from it is
+# `lp-cli validate`'s job (M5), not this recipe's; what this is for is a
+# person watching a strip.
+fwtest-rmt-esp32v3 port="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir xtensa-esp32-elf-gcc)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    mkdir -p target/fp-capture
+    out="target/fp-capture/rmt-chase-v3-$(date +%Y%m%d-%H%M%S).txt"
+    (cd {{ fw_esp32v3_dir }} && touch src/main.rs && \
+      cargo build --profile release-esp32v3 --features esp32,test_rmt)
+    args=(--chip esp32 --partition-table {{ fw_esp32v3_dir }}/partitions.csv --flash-size {{ v3_flash_size }} --monitor --monitor-baud 921600 --after hard-reset)
+    if [[ -n "{{ port }}" ]]; then
+      args+=(--port "{{ port }}")
+    fi
+    echo "capturing to $out"
+    : > "$out"
+    if [[ -n "{{ port }}" ]]; then
+      pkill_pattern='espflash flash.*--port {{ port }}'
+    else
+      pkill_pattern='espflash flash.*--chip esp32'
+    fi
+    (
+      for _ in $(seq 1 120); do
+        if grep -qaF '[rmt-chase] === DONE ===' "$out" 2>/dev/null; then break; fi
+        sleep 1
+      done
+      pkill -INT -f "$pkill_pattern" || true
+    ) &
+    watcher=$!
+    script -q "$out" espflash flash "${args[@]}" {{ fw_esp32v3_elf }} || true
+    kill "$watcher" 2>/dev/null || true
+    echo "--- [rmt-chase] summary ---"
+    grep -acF 'rmt-frame' "$out" | sed 's/^/rmt-frame records: /'
+    grep -aF -e 'fw-checks-header' -e 'rmt-chase] 256 LEDs' -e '=== DONE ===' "$out" \
+      || echo "NO rmt-chase OUTPUT (see $out)"
 
 fwtest-xt-fp-esp32v3 port="" family="" limit="0":
     #!/usr/bin/env bash
@@ -2563,7 +2626,9 @@ test-emu-esp32v3:
 #      idle heartbeat under `--strict-bus`, the ROM-up boot log against the
 #      committed silicon capture, the direct-vs-ROM-up app-entry byte
 #      equality, determinism on both paths, the cache-off stop and the
-#      second-boot-mounts test.
+#      second-boot-mounts test — and, since M4 P5, the `rmt-chase` gate: a
+#      SECOND image (`--features esp32,test_rmt`) run to its own done marker,
+#      768 frames off IO18 checksum-equal to the guest's own records.
 #   2. the two lints that cover both chips.
 #   3. the **reference image**, `--verify` — two builds in two cold
 #      worktrees at two different paths, one sha256. It is last because it is
@@ -2586,11 +2651,14 @@ test-emu-esp32v3-gate: test-emu-esp32v3-boot
     scripts/emu/build-reference-image.sh --verify --chip esp32 \
         esp32,server,float-f32 "$commit" none
 
-# The boot half: build the shipped `fw-esp32v3` image, then run the whole
-# suite with the direct-load tests included. The path is passed explicitly
-# (`LP_EMU_ESP32V3_ELF`) rather than trusted by convention — every feature set
-# builds to the same target path, and a test that read whatever was there last
-# would pass against the wrong image (`lp-emu-esp32v3/src/test_support.rs`).
+# The boot half: build the shipped `fw-esp32v3` image and the `rmt-chase`
+# harness image, then run the whole suite with the direct-load tests included.
+# Each path is passed explicitly (`LP_EMU_ESP32V3_ELF`,
+# `LP_EMU_ESP32V3_TEST_RMT_ELF`) rather than trusted by convention — every
+# feature set builds to the same target path, and a test that read whatever was
+# there last would pass against the wrong image
+# (`lp-emu-esp32v3/src/test_support.rs`). With two images that is no longer a
+# hypothetical, so both are COPIED out of the shared path as they are built.
 # P8's `build-reference-image.sh` learns the classic and pins the commit.
 #
 # P7 adds the **merged chip image** alongside it: `espflash save-image --chip
@@ -2609,18 +2677,35 @@ test-emu-esp32v3-gate: test-emu-esp32v3-boot
 test-emu-esp32v3-boot: build-fw-esp32v3
     #!/usr/bin/env bash
     set -euo pipefail
-    elf={{ justfile_directory() }}/target/xtensa-esp32-none-elf/release-esp32v3/fw-esp32v3
-    merged={{ justfile_directory() }}/target/lp-emu-esp32v3/merged.bin
-    export LP_EMU_ESP32V3_ELF="$elf"
+    built={{ justfile_directory() }}/target/xtensa-esp32-none-elf/release-esp32v3/fw-esp32v3
+    out={{ justfile_directory() }}/target/lp-emu-esp32v3
+    merged="$out/merged.bin"
+    mkdir -p "$out"
+    # ⚠️ Every feature set builds to ONE target path, so each image is copied
+    # out of it the moment it is built and the variables name the COPIES.
+    # Without that the second build below would silently replace the first and
+    # `LP_EMU_ESP32V3_ELF` would point at the chase harness — the exact failure
+    # `lp-emu-esp32v3/src/test_support.rs` exists to prevent, and the one the
+    # C6's P5 hit for real.
+    shipped="$out/fw-esp32v3-shipped.elf"
+    cp "$built" "$shipped"
+    export LP_EMU_ESP32V3_ELF="$shipped"
     if command -v espflash >/dev/null 2>&1; then
-      mkdir -p "$(dirname "$merged")"
       espflash save-image --chip esp32 --merge \
           --partition-table {{ fw_esp32v3_dir }}/partitions.csv \
-          --flash-size {{ v3_flash_size }} "$elf" "$merged"
+          --flash-size {{ v3_flash_size }} "$shipped" "$merged"
       export LP_EMU_ESP32V3_MERGED="$merged"
     else
       echo "espflash is not on PATH: the merged-image tests will SKIP" >&2
     fi
+    # The `rmt-chase` harness image (M4 P5), for `tests/rmt_chase.rs`. Built
+    # second, and it leaves the shared target path holding the HARNESS rather
+    # than the app — which is exactly why nothing reads that path.
+    just build-fw-esp32v3 test_rmt
+    chase="$out/fw-esp32v3-test-rmt.elf"
+    cp "$built" "$chase"
+    export LP_EMU_ESP32V3_TEST_RMT_ELF="$chase"
+    echo "images: shipped=$shipped chase=$chase"
     cargo test -p lp-emu-esp32v3 -- --include-ignored
 
 # Run an image on the classic ESP32 (v3) machine.

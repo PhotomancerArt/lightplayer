@@ -52,6 +52,7 @@ pub mod appcore_rom_path;
 #[cfg(any(
     feature = "test_gpio_calibrate",
     feature = "test_cycle_probe",
+    feature = "test_rmt",
     feature = "test_shader_compile_incremental"
 ))]
 pub const CHIP: &str = "esp32v3";
@@ -84,3 +85,11 @@ pub mod cycle_probe;
 /// chip's own JIT, tick by tick, with the heap either side of every slice.
 #[cfg(feature = "test_shader_compile_incremental")]
 pub mod shader_compile_incremental;
+
+/// The `rmt-chase` payload: a 256-LED white chase on IO18 through the
+/// product's own RMT backend, one `rmt-frame` record per frame. The classic
+/// twin of `fw-esp32c6/src/tests/test_rmt.rs` — see the module docs for why
+/// it drives `shared_driver` + `v3_rmt` rather than an `LedChannel` this chip
+/// does not have, and why it never starts the APP core.
+#[cfg(feature = "test_rmt")]
+pub mod test_rmt;

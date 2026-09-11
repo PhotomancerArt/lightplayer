@@ -48,6 +48,20 @@ pub const IMAGE_ENV: &str = "LP_EMU_ESP32V3_ELF";
 /// both variables, so they agree by construction.
 pub const MERGED_ENV: &str = "LP_EMU_ESP32V3_MERGED";
 
+/// The environment variable naming the built **`test_rmt` harness** ELF —
+/// the `rmt-chase` payload's classic image (`fw-esp32v3 --features
+/// esp32,test_rmt`, M4 P5).
+///
+/// A second variable rather than a second meaning for [`IMAGE_ENV`], and the
+/// reason is this file's first rule restated: **every feature set builds to
+/// the same target path**, so a gate that read whatever was there last would
+/// compare the chase against the shipped image or the other way round, and
+/// both would look like a failure of the machine. `just
+/// test-emu-esp32v3-boot` builds both images, copies each out of the shared
+/// target path as it is built, and names the copies — so the test and the
+/// build agree by construction.
+pub const IMAGE_TEST_RMT_ENV: &str = "LP_EMU_ESP32V3_TEST_RMT_ELF";
+
 /// The profile and target `fw-esp32v3` is built with (`justfile`:
 /// `build-fw-esp32v3`), for the notice a skipped test prints.
 pub const FW_TARGET: &str = "xtensa-esp32-none-elf";
@@ -84,6 +98,38 @@ pub fn fw_esp32v3_image() -> Result<PathBuf, String> {
             "{IMAGE_ENV} is not set. `just test-emu-esp32v3-boot` builds the shipped image \
              (`just build-fw-esp32v3`, target/{FW_TARGET}/{FW_PROFILE}/fw-esp32v3) and sets \
              it; a bare `cargo test` skips every test that needs one"
+        )),
+    }
+}
+
+/// The `rmt-chase` harness image, if the caller has one.
+///
+/// [`fw_esp32v3_image`]'s rules exactly — `Ok` when [`IMAGE_TEST_RMT_ENV`]
+/// names a file, `Err(reason)` when it is unset, a **panic** when it names a
+/// path that is not there.
+pub fn fw_esp32v3_test_rmt_image() -> Result<PathBuf, String> {
+    match std::env::var_os(IMAGE_TEST_RMT_ENV) {
+        Some(path) => {
+            let mut path = PathBuf::from(path);
+            if path.is_relative()
+                && !path.is_file()
+                && let Some(root) = workspace_root()
+            {
+                path = root.join(&path);
+            }
+            assert!(
+                path.is_file(),
+                "{IMAGE_TEST_RMT_ENV}={} names a file that does not exist; `just \
+                 test-emu-esp32v3-boot` builds the harness image (`just build-fw-esp32v3 \
+                 test_rmt`) and copies it out of target/{FW_TARGET}/{FW_PROFILE}/fw-esp32v3",
+                path.display()
+            );
+            Ok(path)
+        }
+        None => Err(format!(
+            "{IMAGE_TEST_RMT_ENV} is not set. `just test-emu-esp32v3-boot` builds the \
+             `rmt-chase` harness image (`--features esp32,test_rmt`) and sets it; a bare \
+             `cargo test` skips every test that needs one"
         )),
     }
 }
