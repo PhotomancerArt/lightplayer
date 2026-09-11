@@ -49,6 +49,15 @@ pub struct Snapshot {
     pub wfi_ends: [u64; CORES],
     /// The per-core window bound the run was using (`--core-quantum`).
     pub core_quantum: u64,
+    /// What the pads have decoded, and — the part that matters — **where
+    /// each decoder was between edges**.
+    ///
+    /// A decoder caught mid-frame carries real state: the partial byte, the
+    /// bit count, the cycle the current pulse started. One restored without
+    /// it would resume a frame that never existed, and the give-away is a
+    /// single bad pulse at the join rather than anything obviously wrong.
+    /// The **sinks** are deliberately not here — a file handle is not state.
+    pub pins: crate::machine::PinState,
 }
 
 impl Snapshot {

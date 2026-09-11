@@ -27,9 +27,10 @@ use lp_emu_esp32v3::control;
 use lp_emu_esp32v3::flash::FlashBacking;
 use lp_emu_esp32v3::loader::EfuseIdentity;
 use lp_emu_esp32v3::machine::{
-    AppSource, BootMode, CORE_QUANTUM_DEFAULT, CORES, Esp32V3Builder, Machine, Outcome, RomSource,
-    StopCondition, TimeGrade, Uart0Sink,
+    AppSource, BootMode, CORE_QUANTUM_DEFAULT, CORES, Esp32V3Builder, FrameSink, Machine, Outcome,
+    PinLogSink, RomSource, StopCondition, StripConfig, TimeGrade, Uart0Sink,
 };
+use lp_ws281x::{ChannelTiming, ColorOrder};
 use lp_emu_esp32v3::{bus_setup, memmap};
 
 const USAGE: &str = "\
@@ -65,6 +66,25 @@ OPTIONS:
                             wants a boot has no use for them. The refill-lag
                             summary below the run report is collected either
                             way — it is REPORTED, never gated (D13/PD9)
+    --dump-frames <spec>    where decoded WS281x frames go: `-` or `stdout`,
+                            or `file:<path>`. One `ws281x-frame` JSON line
+                            per frame as it is decoded, carrying BOTH the
+                            wire bytes and the `rgb` unpermutation, so a
+                            wrong order assumption is a visible difference
+                            between two fields rather than a silent one
+                            inside `rgb`. Frames are kept in memory either
+                            way [memory]
+    --pin-log <path>        the raw edge stream, one line per edge:
+                            `<us> <pad> <level> cyc=<cycle>`, with a
+                            `# route` note whenever the matrix moves a pad.
+                            Off by default -- a 300-LED frame is 14,402
+                            edges. Capped at 2,000,000 lines with a note
+    --strip-timing ws2812|ws2811
+                            the wire timing every routed pad is decoded as
+                            [ws2812]
+    --strip-order rgb|rbg|grb|gbr|brg|bgr
+                            the byte order on the wire, which is what the
+                            record's `rgb` field is unpermuted with [grb]
     --cache-off-fetch stop|permit
                             D4. `stop` (the default, and what every gate run
                             uses) ends the run the first time a core reaches
@@ -178,6 +198,10 @@ struct Args {
     mmu_divergence: MmuDivergencePolicy,
     core_quantum: Option<u64>,
     rmt_logs: bool,
+    dump_frames: FrameSink,
+    pin_log: PinLogSink,
+    strip_timing: Option<ChannelTiming>,
+    strip_order: Option<ColorOrder>,
     time_grade: TimeGrade,
     timeout: Option<Duration>,
     wall_timeout: Option<Duration>,
@@ -229,6 +253,12 @@ fn run() -> Result<ExitCode, String> {
         .app_mmu_divergence(args.mmu_divergence)
         .core_quantum(args.core_quantum.unwrap_or(CORE_QUANTUM_DEFAULT))
         .rmt_logs(args.rmt_logs)
+        .dump_frames(args.dump_frames.clone())
+        .pin_log(args.pin_log.clone())
+        .strip(
+            args.strip_order.unwrap_or(StripConfig::default().order),
+            args.strip_timing.unwrap_or(StripConfig::default().timing),
+        )
         .seed(args.seed)
         .efuse(args.efuse)
         .uart0(args.uart0.clone())
@@ -318,6 +348,11 @@ fn run() -> Result<ExitCode, String> {
     print_outcome(&mut machine, &outcome);
     print_run_summary(&machine);
     print_refill_lag(&machine);
+    // The pads, last: a frame still in flight when the deadline hit is
+    // closed here as INCOMPLETE rather than dropped, so the summary counts
+    // what the run actually saw.
+    machine.flush_frames();
+    print_pin_report(&machine);
     {
         let chip = machine.flash().lock().expect("flash poisoned");
         println!("flash: {}", chip.command_census());
@@ -373,6 +408,20 @@ fn print_run_summary(machine: &Machine) {
         bus.missing_fence_reports(),
         machine.core_quantum(),
     );
+}
+
+/// One line per routed pad at exit: what the strip decoders read off the
+/// fabric.
+///
+/// Silent for a run whose guest routed no pad, which is every run that never
+/// opens an output. ⚠️ **All three readings of a frame are this machine's**:
+/// the words the RMT fetched, the edges on the fabric and the bytes decoded
+/// here are one model read three ways, not a measurement. The silicon twin is
+/// M5's.
+fn print_pin_report(machine: &Machine) {
+    for line in machine.pin_report() {
+        println!("{line}");
+    }
 }
 
 /// The RMT's own reading of the refill race, per channel, at exit.
@@ -710,6 +759,32 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--hooks" => args.hooks = true,
             "--strict-bus" => args.strict = true,
             "--rmt-logs" => args.rmt_logs = true,
+            "--dump-frames" => {
+                let spec = value()?;
+                args.dump_frames = match spec.as_str() {
+                    "-" | "stdout" => FrameSink::Stdout,
+                    "memory" => FrameSink::Memory,
+                    other => match other.split_once(':') {
+                        Some(("file", path)) => FrameSink::File(PathBuf::from(path)),
+                        _ => FrameSink::File(PathBuf::from(other)),
+                    },
+                };
+            }
+            "--pin-log" => args.pin_log = PinLogSink::File(PathBuf::from(value()?)),
+            "--strip-timing" => {
+                let text = value()?;
+                args.strip_timing = Some(
+                    StripConfig::parse_timing(&text)
+                        .ok_or_else(|| format!("--strip-timing {text}: ws2812|ws2811"))?,
+                );
+            }
+            "--strip-order" => {
+                let text = value()?;
+                args.strip_order = Some(
+                    StripConfig::parse_order(&text)
+                        .ok_or_else(|| format!("--strip-order {text}: rgb|rbg|grb|gbr|brg|bgr"))?,
+                );
+            }
             "--cache-off-fetch" => args.cache_off = CacheOffPolicy::parse(&value()?)?,
             "--app-mmu-divergence" => args.mmu_divergence = MmuDivergencePolicy::parse(&value()?)?,
             "--core-quantum" => {

@@ -176,8 +176,10 @@ use std::time::{Duration, Instant};
 use lp_emu_core::Bus;
 use lp_emu_core::sched::Cycles;
 use lp_emu_esp_common::bus::StrictViolation;
-use lp_emu_esp_common::pins::{PadId, SignalId};
+use lp_emu_esp_common::pins::{PadId, RouteSource, SignalId};
+use lp_emu_esp_common::strip::ws281x::{Frame, Ws281xDecoder, unpermute};
 use lp_emu_esp_common::{ByteLog, ByteSink, ByteSource, ElfImage, SocBus, Strap};
+use lp_ws281x::{ChannelTiming, ColorOrder};
 
 use crate::control::{Cable, CableReport, ControlCommand, ControlReply};
 use lp_xt_emu::mach::interrupt::{IntKind, IntLine};
@@ -785,6 +787,178 @@ pub enum Uart0Sink {
     Tcp(String),
 }
 
+/// Where decoded WS281x frames go (`--dump-frames`).
+///
+/// One JSON line per frame, as it is decoded — a stream, not a report, so a
+/// run that is killed still leaves the frames it had already seen.
+#[derive(Clone, Debug, Default)]
+pub enum FrameSink {
+    /// Kept in memory only, for [`Machine::frames`].
+    #[default]
+    Memory,
+    Stdout,
+    File(PathBuf),
+}
+
+/// Where the raw pin log goes (`--pin-log`): one line per edge.
+///
+/// Never the default: a 300-LED frame is 14,400 edges and a second of the
+/// desk board's five wires is over two million.
+#[derive(Clone, Debug, Default)]
+pub enum PinLogSink {
+    #[default]
+    Off,
+    File(PathBuf),
+}
+
+/// Lines the pin log writes before it stops, with a closing note.
+pub const PIN_LOG_LINE_CAP: u64 = 2_000_000;
+
+/// Frames kept in memory per pad, with a note when the cap is reached. The
+/// `--dump-frames` stream itself is not capped.
+pub const FRAMES_PER_PAD_CAP: usize = 8_192;
+
+/// The strip a pad is decoded as: the wire timing, and the byte order the
+/// record's `rgb` field is unpermuted with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StripConfig {
+    pub timing: ChannelTiming,
+    pub order: ColorOrder,
+}
+
+impl Default for StripConfig {
+    fn default() -> Self {
+        Self {
+            timing: ChannelTiming::WS2812,
+            order: ColorOrder::Grb,
+        }
+    }
+}
+
+impl StripConfig {
+    /// `ws2812` | `ws2811`.
+    pub fn parse_timing(text: &str) -> Option<ChannelTiming> {
+        match text {
+            "ws2812" => Some(ChannelTiming::WS2812),
+            "ws2811" => Some(ChannelTiming::WS2811),
+            _ => None,
+        }
+    }
+
+    /// `rgb` | `rbg` | `grb` | `gbr` | `brg` | `bgr`.
+    pub fn parse_order(text: &str) -> Option<ColorOrder> {
+        match text {
+            "rgb" => Some(ColorOrder::Rgb),
+            "rbg" => Some(ColorOrder::Rbg),
+            "grb" => Some(ColorOrder::Grb),
+            "gbr" => Some(ColorOrder::Gbr),
+            "brg" => Some(ColorOrder::Brg),
+            "bgr" => Some(ColorOrder::Bgr),
+            _ => None,
+        }
+    }
+
+    /// The timing with this record's byte order on it.
+    pub fn timing(&self) -> ChannelTiming {
+        self.timing.with_color_order(self.order)
+    }
+}
+
+/// What the machine has decoded from the pads.
+///
+/// The sinks are deliberately not here: a snapshot is state, and a file
+/// handle is not ([`crate::snapshot`]). A decoder caught **mid-frame** is
+/// state — one restored without its half-shifted bits would resume a frame
+/// that never existed.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PinState {
+    /// Per pad, its decoder.
+    pub decoders: std::collections::BTreeMap<u8, Ws281xDecoder>,
+    /// Per pad, the frames it has completed.
+    pub frames: std::collections::BTreeMap<u8, Vec<Frame>>,
+    /// Per pad, what it is routed to right now.
+    pub routed: std::collections::BTreeMap<u8, RouteSource>,
+    /// Per pad, edges seen.
+    pub edges: std::collections::BTreeMap<u8, u64>,
+    /// Pads whose frame list reached [`FRAMES_PER_PAD_CAP`].
+    pub capped: std::collections::BTreeSet<u8>,
+}
+
+/// The pads, online: one decoder per routed pad, fed from the fabric every
+/// window, plus the two host sinks.
+///
+/// ⚠️ **Two cores, one fabric.** The edges are drained once per *window*, not
+/// once per core, and the cycle the decoder reads is the edge's own `at` —
+/// stamped by whoever drove the signal, not by the drain. So the interleave
+/// cannot reorder a waveform, and a frame decoded here is the same frame at
+/// any `--core-quantum`. That is the first thing a reader of a two-core
+/// machine will want to know about a decoded frame, so it is said here and
+/// in the crate README's "The pad".
+///
+/// `cpu_hz` is a **parameter** of [`Ws281xDecoder`] and the classic's is
+/// [`memmap::CPU_HZ`] = 240 MHz against the C6's 160: one WS2812 bit is a
+/// different number of cycles here and every threshold follows from it.
+struct PinObserver {
+    strip: StripConfig,
+    cpu_hz: u64,
+    state: PinState,
+    /// The last [`lp_emu_esp_common::pins::Fabric::route_epoch`] seen, so a
+    /// window that changed no routing walks no pads.
+    epoch: u64,
+    dump: Option<Box<dyn std::io::Write + Send>>,
+    pin_log: Option<Box<dyn std::io::Write + Send>>,
+    pin_log_lines: u64,
+    pin_log_capped: bool,
+}
+
+/// One decoded frame as a JSON line — the `--dump-frames` record.
+///
+/// `wire` is what the wire carried and `rgb` is that unpermuted with the
+/// configured order: the frame the *driver* was handed. Both are in the
+/// record on purpose, so a wrong order assumption is a visible difference
+/// between two fields rather than a silent one inside `rgb`.
+pub fn frame_record(frame: &Frame, strip: StripConfig, routed: Option<&RouteSource>) -> String {
+    let signal = match routed {
+        Some(RouteSource::Signal(sig, _)) => crate::regs::output_signals::output_signal_name(sig.0)
+            .map_or_else(|| format!("sig{}", sig.0), str::to_string),
+        Some(RouteSource::GpioOut) => "GPIO_OUT".to_string(),
+        None => "unrouted".to_string(),
+    };
+    let us = |cycles: Cycles| cycles as f64 / memmap::CYCLES_PER_US as f64;
+    let reset = match frame.reset_cycles {
+        Some(c) => format!("{:.3}", us(c)),
+        None => "null".to_string(),
+    };
+    format!(
+        "{{\"kind\":\"ws281x-frame\",\"pad\":{},\"signal\":\"{signal}\",\"n\":{},\
+         \"start_us\":{:.3},\"end_us\":{:.3},\"bits\":{},\"leds\":{},\
+         \"wire\":\"{}\",\"rgb\":\"{}\",\"errors\":{},\"trailing_bits\":{},\
+         \"reset_us\":{reset},\"complete\":{}}}",
+        frame.pad.0,
+        frame.n,
+        us(frame.start),
+        us(frame.end),
+        frame.bits,
+        frame.leds(),
+        hex(&frame.wire),
+        hex(&unpermute(&frame.wire, strip.order)),
+        frame.error_count,
+        frame.trailing_bits,
+        frame.is_complete(),
+    )
+}
+
+/// Lowercase hex, no separators — the shape `[ORACLE] rgb=` and the
+/// firmware's own `[OUT] dump` line already use.
+pub fn hex(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        let _ = write!(out, "{b:02x}");
+    }
+    out
+}
+
 /// A sink that keeps a copy of everything it forwards, so `--exit-on` can
 /// match on bytes that also went to stdout or a file.
 struct TeeSink {
@@ -854,6 +1028,12 @@ pub struct Esp32V3Builder {
     boot_set: bool,
     /// Keep the RMT's pulse and word logs ([`crate::periph::rmt::Rmt`]).
     rmt_logs: bool,
+    /// Where decoded frames go (`--dump-frames`).
+    dump_frames: FrameSink,
+    /// Where the per-edge pin log goes (`--pin-log`).
+    pin_log: PinLogSink,
+    /// How every routed pad is decoded (`--strip-timing` / `--strip-order`).
+    strip: StripConfig,
     trace: Option<Box<dyn std::io::Write + Send>>,
     trace_blocks: Vec<String>,
     seed: u64,
@@ -886,6 +1066,9 @@ impl Default for Esp32V3Builder {
             core_quantum: CORE_QUANTUM_DEFAULT,
             boot_set: true,
             rmt_logs: false,
+            dump_frames: FrameSink::default(),
+            pin_log: PinLogSink::default(),
+            strip: StripConfig::default(),
             trace: None,
             trace_blocks: Vec::new(),
             seed: 0,
@@ -1079,6 +1262,27 @@ impl Esp32V3Builder {
         self
     }
 
+    /// Where decoded WS281x frames go (`--dump-frames`). The default keeps
+    /// them in memory only, for [`Machine::frames`].
+    pub fn dump_frames(mut self, sink: FrameSink) -> Self {
+        self.dump_frames = sink;
+        self
+    }
+
+    /// Where the per-edge pin log goes (`--pin-log`). Off by default: this is
+    /// the rawest of the three readings and the largest by far.
+    pub fn pin_log(mut self, sink: PinLogSink) -> Self {
+        self.pin_log = sink;
+        self
+    }
+
+    /// How every routed pad is decoded (`--strip-timing` / `--strip-order`).
+    /// The default is the driver's own: WS2812 timing, GRB on the wire.
+    pub fn strip(mut self, order: ColorOrder, timing: ChannelTiming) -> Self {
+        self.strip = StripConfig { timing, order };
+        self
+    }
+
     /// Deterministic host input for UART0, as anything that is not a socket.
     pub fn uart0_source(mut self, source: Box<dyn ByteSource>) -> Self {
         self.uart0_source = Some(source);
@@ -1242,6 +1446,25 @@ impl Esp32V3Builder {
             source,
         );
 
+        // The two pad sinks. Opened here, with the run's other host handles,
+        // so a path that cannot be written fails the build rather than the
+        // first frame — a run that decoded for ten seconds into a file it
+        // could not create is worse than one that never started.
+        let open_write = |path: &PathBuf| -> Result<Box<dyn std::io::Write + Send>, BuildError> {
+            let file = std::fs::File::create(path)
+                .map_err(|e| BuildError::Io(format!("creating {}: {e}", path.display())))?;
+            Ok(Box::new(std::io::BufWriter::new(file)))
+        };
+        let dump_sink: Option<Box<dyn std::io::Write + Send>> = match &self.dump_frames {
+            FrameSink::Memory => None,
+            FrameSink::Stdout => Some(Box::new(std::io::stdout())),
+            FrameSink::File(path) => Some(open_write(path)?),
+        };
+        let pin_log_sink: Option<Box<dyn std::io::Write + Send>> = match &self.pin_log {
+            PinLogSink::Off => None,
+            PinLogSink::File(path) => Some(open_write(path)?),
+        };
+
         let control = match &self.control {
             Some(addr) => {
                 let host = lp_emu_esp_common::TcpHost::listen(addr)
@@ -1371,7 +1594,16 @@ impl Esp32V3Builder {
             pending_reset: None,
             gpio_index: None,
             rmt_index: None,
-            pin_edges: std::collections::BTreeMap::new(),
+            pins: PinObserver {
+                strip: self.strip,
+                cpu_hz: memmap::CPU_HZ,
+                state: PinState::default(),
+                epoch: 0,
+                dump: dump_sink,
+                pin_log: pin_log_sink,
+                pin_log_lines: 0,
+                pin_log_capped: false,
+            },
         };
 
         machine.gpio_index = machine.bus.peripheral_index("GPIO");
@@ -1615,11 +1847,14 @@ pub struct Machine {
     gpio_index: Option<usize>,
     /// `RMT`'s peripheral index, for the observation accessors.
     rmt_index: Option<usize>,
-    /// Per pad, edges seen since the run started. **M4 P2's**: the fabric
-    /// now has a driver, so somebody has to take its edges off it every
-    /// slice or the buffer grows for the life of the run. P3 hangs the strip
-    /// decoders and the pin log off the same drain.
-    pin_edges: std::collections::BTreeMap<u8, u64>,
+    /// The pads, online: one [`Ws281xDecoder`] per routed pad, the frames
+    /// they completed, and the two host sinks.
+    ///
+    /// **M4 P2** put the drain here, because the fabric had gained a driver
+    /// and nobody was taking its edges off it; **P3** hangs the decoders, the
+    /// `ws281x-frame` dump and the pin log off that one drain rather than
+    /// adding a second.
+    pins: PinObserver,
 }
 
 impl Machine {
@@ -2044,7 +2279,96 @@ impl Machine {
 
     /// Edges seen on pad `pad` since the run started.
     pub fn pin_edges(&self, pad: u8) -> u64 {
-        self.pin_edges.get(&pad).copied().unwrap_or(0)
+        self.pins.state.edges.get(&pad).copied().unwrap_or(0)
+    }
+
+    /// Every pad the guest has routed, ascending, with what it is routed to.
+    ///
+    /// A pad appears the moment `func_out_sel_cfg` names something, whether
+    /// or not anything has driven it yet — so an empty `frames()` on a pad
+    /// that *is* here separates "the matrix never routed it" from "the
+    /// engine never pumped it", which are different failures.
+    pub fn routed_pads(&self) -> Vec<(PadId, RouteSource)> {
+        self.pins
+            .state
+            .routed
+            .iter()
+            .map(|(p, r)| (PadId(*p), *r))
+            .collect()
+    }
+
+    /// The frames decoded on `pad`. Empty for a pad nothing routed.
+    pub fn frames(&self, pad: u8) -> &[Frame] {
+        self.pins
+            .state
+            .frames
+            .get(&pad)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    /// What is decoded, for a snapshot and for a test that wants to compare
+    /// two runs.
+    pub fn pin_state(&self) -> &PinState {
+        &self.pins.state
+    }
+
+    /// How each pad is being read: the wire timing and the byte order the
+    /// record's `rgb` field is unpermuted with.
+    pub fn strip(&self) -> StripConfig {
+        self.pins.strip
+    }
+
+    /// One line per routed pad: `pin gpio18: 22 frames, 22 complete, 0
+    /// errors, 256 leds`. What the CLI prints at exit.
+    pub fn pin_report(&self) -> Vec<String> {
+        self.pins
+            .state
+            .routed
+            .keys()
+            .map(|pad| {
+                let frames = self.frames(*pad);
+                let complete = frames.iter().filter(|f| f.is_complete()).count();
+                let errors: u64 = frames.iter().map(|f| f.error_count).sum();
+                let leds = frames.last().map(Frame::leds).unwrap_or(0);
+                format!(
+                    "pin gpio{pad}: {} frames, {complete} complete, {errors} errors, {leds} leds, \
+                     {} edges",
+                    frames.len(),
+                    self.pin_edges(*pad),
+                )
+            })
+            .collect()
+    }
+
+    /// End of the run: a frame still open on a pad is reported incomplete.
+    ///
+    /// Not part of [`run_until`](Self::run_until), because a run can be
+    /// resumed and closing a frame that is still being transmitted would
+    /// invent one — a flushed frame carries `reset_cycles: None` and so is
+    /// never `is_complete()`. The CLI calls it before its summary; so does a
+    /// test that wants the last frame.
+    pub fn flush_frames(&mut self) {
+        let at = self.clock();
+        let pads: Vec<u8> = self.pins.state.decoders.keys().copied().collect();
+        for pad in pads {
+            let Some(frame) = self
+                .pins
+                .state
+                .decoders
+                .get_mut(&pad)
+                .and_then(|d| d.flush(at))
+            else {
+                continue;
+            };
+            self.record_frame(pad, frame);
+        }
+        if let Some(w) = self.pins.dump.as_mut() {
+            let _ = w.flush();
+        }
+        if let Some(w) = self.pins.pin_log.as_mut() {
+            let _ = w.flush();
+        }
     }
 
     pub fn hook_calls(&self) -> u64 {
@@ -2674,11 +2998,48 @@ impl Machine {
     /// the length of the run and hand `Gpio` nothing.
     ///
     /// Per edge rather than a before/after diff, so a pad that rose and fell
-    /// inside one window latches both directions and neither is lost. M4 P3
-    /// hangs the strip decoders and the `.pins.jsonl` log off this same
+    /// inside one window latches both directions and neither is lost. **M4
+    /// P3** hangs the strip decoders and the `.pins.jsonl` log off this same
     /// stream, which is what guarantees a decoder, a pin log and the GPIO
     /// input latch can never disagree about what was on the wire.
+    ///
+    /// ⚠️ **Two cores, one fabric.** This runs once per *window*, after both
+    /// cores have had theirs and before the matrix feed — and the cycle each
+    /// decoder reads is the edge's own `at`, stamped by whoever drove the
+    /// signal. The RMT emits both halves of a word at the fetch, so an edge
+    /// can be stamped slightly ahead of the boundary it is drained at; that
+    /// is a timestamp the decoder reads, never a reordering, and it is why
+    /// the decoded frames do not move with `--core-quantum`.
     fn drain_pins(&mut self) {
+        // A pad becomes observed the moment the guest routes it, which is a
+        // change to `Fabric::route_epoch` — so a window that routed nothing
+        // walks no pads at all.
+        let epoch = self.bus.pins.route_epoch();
+        if epoch != self.pins.epoch {
+            self.pins.epoch = epoch;
+            let routes: Vec<(PadId, RouteSource)> = self
+                .bus
+                .pins
+                .routes()
+                .map(|(pad, route)| (pad, route.source))
+                .collect();
+            self.pins.state.routed.clear();
+            for (pad, source) in routes {
+                self.pins.state.routed.insert(pad.0, source);
+                let strip = self.pins.strip;
+                let cpu_hz = self.pins.cpu_hz;
+                // `or_insert_with`: a re-mux between the pusher's waves
+                // rewrites `func_out_sel_cfg` for a pad that is already
+                // being decoded, and throwing that decoder away would lose
+                // the bits of the frame in flight.
+                self.pins
+                    .state
+                    .decoders
+                    .entry(pad.0)
+                    .or_insert_with(|| Ws281xDecoder::new(pad, strip.timing(), cpu_hz));
+                self.note_pin_route(pad.0, source);
+            }
+        }
         let edges = self.bus.pins.take_edges();
         if edges.is_empty() {
             return;
@@ -2689,8 +3050,82 @@ impl Machine {
                     g.observe_edges(&edges, cx)
                 });
         }
-        for edge in &edges {
-            *self.pin_edges.entry(edge.pad.0).or_default() += 1;
+        for edge in edges {
+            let pad = edge.pad.0;
+            *self.pins.state.edges.entry(pad).or_default() += 1;
+            self.write_pin_log(&edge);
+            let Some(frame) = self
+                .pins
+                .state
+                .decoders
+                .get_mut(&pad)
+                .and_then(|d| d.feed(&edge))
+            else {
+                continue;
+            };
+            self.record_frame(pad, frame);
+        }
+    }
+
+    /// One `# route` note per pad in the pin log when the routing changes, so
+    /// a reader of the edge stream can see which signal was driving it.
+    fn note_pin_route(&mut self, pad: u8, source: RouteSource) {
+        let Some(w) = self.pins.pin_log.as_mut() else {
+            return;
+        };
+        let what = match source {
+            RouteSource::Signal(sig, invert) => {
+                let name = crate::regs::output_signals::output_signal_name(sig.0)
+                    .map_or_else(|| format!("sig{}", sig.0), str::to_string);
+                format!("{name} (out_sel={} inv={})", sig.0, u8::from(invert))
+            }
+            RouteSource::GpioOut => "GPIO_OUT".to_string(),
+        };
+        let _ = writeln!(w, "# route gpio{pad} <- {what}");
+    }
+
+    fn write_pin_log(&mut self, edge: &lp_emu_esp_common::pins::Edge) {
+        let Some(w) = self.pins.pin_log.as_mut() else {
+            return;
+        };
+        if self.pins.pin_log_lines >= PIN_LOG_LINE_CAP {
+            if !self.pins.pin_log_capped {
+                self.pins.pin_log_capped = true;
+                let _ = writeln!(
+                    w,
+                    "# pin log cap ({PIN_LOG_LINE_CAP} lines) reached; later edges are not logged"
+                );
+            }
+            return;
+        }
+        self.pins.pin_log_lines += 1;
+        // `<us> <pad> <level> cyc=<cycle>`: the microseconds are for a human
+        // and the **cycle** is the number anything may compute with. Emulated
+        // microseconds never gate anything (PD9).
+        let us = edge.at as f64 / memmap::CYCLES_PER_US as f64;
+        let _ = writeln!(
+            w,
+            "{us:.3} {} {} cyc={}",
+            edge.pad,
+            u8::from(edge.level),
+            edge.at
+        );
+    }
+
+    /// Keep a decoded frame, and write its record if a sink asked for one.
+    fn record_frame(&mut self, pad: u8, frame: Frame) {
+        if let Some(w) = self.pins.dump.as_mut() {
+            let line = frame_record(&frame, self.pins.strip, self.pins.state.routed.get(&pad));
+            let _ = writeln!(w, "{line}");
+        }
+        let frames = self.pins.state.frames.entry(pad).or_default();
+        if frames.len() < FRAMES_PER_PAD_CAP {
+            frames.push(frame);
+        } else if self.pins.state.capped.insert(pad) {
+            log::warn!(
+                "pin gpio{pad}: {FRAMES_PER_PAD_CAP} frames kept in memory; later ones are \
+                 decoded and dumped but not kept"
+            );
         }
     }
 
@@ -3375,6 +3810,7 @@ impl Machine {
             idle_skips: self.idle_skips,
             wfi_ends: self.wfi_ends,
             core_quantum: self.core_quantum,
+            pins: self.pins.state.clone(),
         }
     }
 
@@ -3389,6 +3825,11 @@ impl Machine {
         self.bus.matrix_mut().load_state(&snap.matrix);
         self.bus.sched.restore(&snap.sched);
         self.rearm_watchpoints();
+        // The decoders and their frames ride; the sinks do not, and the
+        // `epoch` is reset so the first drain after a restore re-reads the
+        // fabric's routing rather than trusting a number from another run.
+        self.pins.state = snap.pins.clone();
+        self.pins.epoch = 0;
         self.rng = snap.rng;
         self.hook_calls = snap.hook_calls;
         self.idle_skips = snap.idle_skips;
