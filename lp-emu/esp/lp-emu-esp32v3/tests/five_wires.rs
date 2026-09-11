@@ -202,10 +202,7 @@ fn stopped_by_the_window_spill(m: &Machine, outcome: &Outcome, test: &str) -> bo
              lit frames this gate reads never happen. Branch \
              claude/xt-m4-p4b-window-underflow; the crate README's \"A frame three ways\" \
              has the trace.",
-            violation.access,
-            violation.address,
-            violation.pc,
-            violation.cycle,
+            violation.access, violation.address, violation.pc, violation.cycle,
         ),
     );
     true
@@ -456,7 +453,10 @@ fn the_second_wave_decodes_the_same_frames_across_two_runs_and_two_quanta() {
     assert_eq!(a.outcome, b.outcome, "two identical runs diverged");
     assert_eq!(a.m.cycles(), b.m.cycles());
     assert_eq!(a.m.instructions(), b.m.instructions());
-    assert_eq!(a.text, b.text, "two runs of the same script said different things");
+    assert_eq!(
+        a.text, b.text,
+        "two runs of the same script said different things"
+    );
     assert_eq!(a.frames, b.frames, "two runs decoded different frames");
 
     // ⚠️ Across two **quanta**, the bytes — and only the bytes. A different
@@ -587,14 +587,20 @@ fn every_wire_checksum_equals_the_guests_own_summary_line() {
         "the guest printed no `[OUT] frame=` summary line:\n{}",
         r.text
     );
-    println!("five_wires: {} summary line(s): {summaries:?}", summaries.len());
+    println!(
+        "five_wires: {} summary line(s): {summaries:?}",
+        summaries.len()
+    );
     for (pad, crc, _) in &per_wire {
         let claimed = summaries
             .iter()
             .find(|s| s.crc == *crc)
             .unwrap_or_else(|| panic!("gpio{pad}: no summary line claims 0x{crc:08x}"));
         assert_eq!(claimed.leds, LEDS, "gpio{pad}");
-        assert!(claimed.lit > 0, "gpio{pad}: a summary line for a black frame");
+        assert!(
+            claimed.lit > 0,
+            "gpio{pad}: a summary line for a black frame"
+        );
     }
 
     // No frame is dropped: the guest's own per-wire frame counter (the

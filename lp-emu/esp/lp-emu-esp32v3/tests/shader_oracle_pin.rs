@@ -58,13 +58,12 @@
 //!
 //! # ⚠️ The window-spill defect, and why this file holds two tests
 //!
-//! Loading any project kills this guest about 22 lit frames in: a level-1
-//! interrupt's `save_context` declares a frame spilled whose registers never
-//! reach memory, the `retw` that follows takes `_WindowUnderflow8` and
-//! restores `a1 = 0`, and the handler walks its spills down through unmapped
-//! memory. It is `lp-emu/lp-xt-emu`'s window machinery (M1) and it is being
-//! fixed in M4 **P4b**; the crate README's "A frame three ways" carries the
-//! trace.
+//! Loading any project kills this guest: a level-1 interrupt's
+//! `save_context` declares a frame spilled whose registers never reach
+//! memory, the `retw` that follows takes `_WindowUnderflow8` and restores
+//! `a1 = 0`, and the handler walks its spills down through unmapped memory.
+//! It is `lp-emu/lp-xt-emu`'s window machinery (M1) and it is being fixed in
+//! M4 **P4b**; the crate README's "A frame three ways" carries the trace.
 //!
 //! The gate is therefore **two** tests. Everything that can be read off the
 //! pad is [`the_first_lit_frame_off_io18_is_the_host_oracles_frame`];
@@ -264,10 +263,7 @@ fn stopped_by_the_window_spill(m: &Machine, outcome: &Outcome, test: &str) -> bo
              frames this gate reads never happen. Branch \
              claude/xt-m4-p4b-window-underflow; the crate README's \"A frame three ways\" \
              has the trace.",
-            violation.access,
-            violation.address,
-            violation.pc,
-            violation.cycle,
+            violation.access, violation.address, violation.pc, violation.cycle,
         ),
     );
     true
@@ -351,14 +347,25 @@ fn the_first_lit_frame_off_io18_is_the_host_oracles_frame() {
     // list of one.
     let routed = r.m.routed_pads();
     assert!(
-        routed.contains(&(PadId(PAD), RouteSource::Signal(SignalId(rmt::RMT_SIG_0), false))),
+        routed.contains(&(
+            PadId(PAD),
+            RouteSource::Signal(SignalId(rmt::RMT_SIG_0), false)
+        )),
         "gpio{PAD} is not routed to RMT_SIG_0 (out_sel 87): {routed:?}"
     );
-    assert_eq!(r.m.strip().order, ColorOrder::Grb, "the default strip order");
+    assert_eq!(
+        r.m.strip().order,
+        ColorOrder::Grb,
+        "the default strip order"
+    );
 
     // 4. Frames, and a lit one.
     let frames = &r.frames;
-    assert!(!frames.is_empty(), "no frame reached gpio{PAD}:\n{}", r.text);
+    assert!(
+        !frames.is_empty(),
+        "no frame reached gpio{PAD}:\n{}",
+        r.text
+    );
     let lit = first_lit(frames).unwrap_or_else(|| {
         panic!(
             "{} frames on gpio{PAD} and every one of them black — the compile-window \
@@ -393,7 +400,10 @@ fn the_first_lit_frame_off_io18_is_the_host_oracles_frame() {
     let decoded = hex(&rgb);
     println!("shader_oracle_pin: pad {PAD}   rgb={decoded}");
     println!("shader_oracle_pin: [ORACLE]  rgb={ORACLE_RGB}");
-    println!("shader_oracle_pin: wire (as carried, GRB) ={}", hex(&f.wire));
+    println!(
+        "shader_oracle_pin: wire (as carried, GRB) ={}",
+        hex(&f.wire)
+    );
     assert_eq!(
         decoded,
         ORACLE_RGB,
