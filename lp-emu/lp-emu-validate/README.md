@@ -56,7 +56,7 @@ each exists because a scenario could not be expressed without it. (They join
 are the USB link's *cable*. M6 P5 is where the two links' scripts meet, and
 where it will be worth asking whether they should be one field.)
 
-- **`link`** — `UsbSerialJtag` or `Uart0Spike`. Until M6 every emulated run
+- **`link`** — `UsbSerialJtag`, `Uart0Spike`, or (M5) `Uart0`. Until M6 every emulated run
   got the `spike_uart0_link` feature, which moves the host link onto UART0,
   because "neither emulator has a USB host". That stopped being true, and it
   mattered: comparing a UART0-link image on our machine with a USB-link image
@@ -64,7 +64,10 @@ where it will be worth asking whether they should be one field.)
   (DD30). `esp-emu:*` still gets the workaround unconditionally — its USB
   model asserts SOF for ever (spike report §4) — and so do the two payloads
   whose committed transcripts are of that image. A transcript is never
-  re-baselined to suit a later idea.
+  re-baselined to suit a later idea. `Uart0` is the third thing and is
+  neither of the first two — see "`Link::Uart0` is not `Link::Uart0Spike`"
+  below. On a chip other than the C6 this field is read off the payload's
+  [`ChipArm`](#a-payload-on-a-chip-chiparm), not off the row.
 - **`host_plan`** — the `--usb-host` state a run starts in and the
   `--usb-script` that follows, in absolute emulated milliseconds. The script
   is written by a plan *step*, so its whole text lands in the sidecar's
@@ -101,10 +104,12 @@ The named reference implementation a payload ran on (plan PD4):
 
 ```text
 silicon:esp32c6                 real silicon, that chip
+silicon:esp32v3                 the desk's classic ESP32 (revision v3)
 esp-emu:0.42.0                  Espressif's binary emulator, that version
 lp-emu:esp32c6:t1               our machine, time grade 1 (instruction count)
 lp-emu:esp32c6:t2               our machine, time grade 2 (per-class model)
 lp-emu:esp32c6:t3               our machine, time grade 3 (+ what an address costs)
+lp-emu:esp32v3:t1               our classic machine, and its ONLY grade
 ```
 
 **Identity is the chip, not the board** (Yona, G2 2026-09-06). This is chip
@@ -130,6 +135,24 @@ reader can weigh it — evidence, not a promotion. `measured` means the class wa
 measured on silicon, or on a configuration whose agreement with silicon *for
 that class* is itself in a committed transcript; one payload's heap ledger is
 not a licence for the pin class.
+
+`lp-emu:esp32v3:t1` is the same rule applied to the classic, and its `memory`
+row is the register for how a `because` is written: it names the **seven**
+memory-class fields that are equal to the byte against the desk board on the
+same bytes, **and the two that are not** — `[MEM] used` +84 B and the
+`[stack]` high-water −960 B, both deterministic on both sides, with DD48's
+carry to M4 P1 named. A `because` that listed only the wins is the thing this
+table exists to prevent.
+
+It also has **one** time grade, and that is a statement rather than an
+omission: `TimeGrade` on `lp-emu-esp32v3` has one arm, there is no measured
+LX6 per-class cost model, and a `t2` that was `t1` under another name would be
+exactly the dishonesty the grades are for (M5 ruling R1). `ChipSpec::
+time_grades` is where a second one would be added. Note also that the classic
+has **no `usb-serial-jtag` row at all** — that part has no such peripheral —
+and `validate list` still prints `usb-serial-jtag=modeled` for it, because a
+class with no entry defaults to `modeled`; the absence of a row and a
+`modeled` row are not distinguished in that view.
 
 ### A band: how wrong a class is allowed to be
 
@@ -180,6 +203,25 @@ reproducible — M5 P1's digest caught three CI runs of one pinned firmware
 commit producing three different ELFs (`scripts/emu/build-reference-image.sh`
 names all three causes, and its `--verify` proves they are gone). A sha here is
 now something another host can reproduce.
+
+`baud` (added by M5 P1, additive in the same sense) is the line rate a capture
+was taken at, and it is **also a discriminator in the filename**, like
+`machine`. The classic prints its ROM and its second-stage bootloader at
+115200 and its application at 921600, so one image at one commit on one date
+is *two* transcripts that differ only in the rate the port was opened at, and
+without a discriminator the second would overwrite the first. A capture with
+no `baud` files exactly where it always did.
+
+**The header is `deny_unknown_fields`, and it was earned.** It used not to be,
+and four hand-written classic sidecars spelled three fields the way their
+author remembered them — `board_mac` for `mac`, `chip_revision` for
+`silicon_rev`, and `baud` before there was one. All three parsed cleanly and
+were silently dropped: the classic's committed transcripts carried a MAC and a
+chip revision that no code could see, with nothing to say so. A misspelled key
+is now a loud refusal naming the field. (M5 P1 re-filed those four sidecars
+onto the schema's keys — **keys only**, not one value changed and no `.txt`
+touched; the filing test proves it, because `baud` reproduces the stems those
+files already had.)
 
 When the payload also printed an in-band header (`[fw-checks-header] {…}`), the
 two must agree; `Transcript::load` refuses them if they do not.
@@ -268,6 +310,93 @@ Masking (`src/mask.rs`, the `scripts/spike/esp-emu/mask-transcript.sh` rules as
 code) names the differences that mean nothing — heap digits in prose, uptime,
 fps, tick counters, bootloader timestamps — each with the reason it is ignored.
 Masking here means *reported but not compared*, never *deleted*.
+
+## The chip table (M5 P1)
+
+The runner drives more than one chip, and everything that differs between
+them is **one row** in `ChipSpec` (`src/driver.rs`) — crate directory, target
+triple, profile, binary name, partition table, flash size, espflash's own
+chip word, the emulator package, the vendored mask ROM's stem, the monitor
+baud, the serial bridge's port prefix, and the time grades the machine
+actually defines.
+
+| | `esp32c6` | `esp32v3` |
+|---|---|---|
+| `espflash --chip` | `esp32c6` | **`esp32`** — espflash does not know the revision |
+| chip cargo feature | `esp32c6` | `esp32` |
+| target | `riscv32imac-unknown-none-elf` | `xtensa-esp32-none-elf` |
+| profile | `release-esp32` | `release-esp32v3` |
+| firmware crate | `lp-fw/fw-esp32c6` | `lp-fw/fw-esp32v3` |
+| emulator package | `lp-emu-esp32c6` | `lp-emu-esp32v3` |
+| mask ROM | `esp32c6_rev0_rom.elf` | `esp32_rev300_rom.elf` |
+| `--monitor-baud` | none | **921600, not optional** |
+| port | `cu.usbmodem…` (native USB) | `cu.wchusbserial…` (CH340K) |
+| time grades | `t1` `t2` `t3` | `t1` — and only `t1` |
+| product link | USB-Serial-JTAG | **UART0** (no USB-SJ peripheral) |
+
+**The table is a mirror, and the mirror is the contract.** Its values are the
+`justfile`'s (`xt_v3_target`, `v3_flash_size`, `fw_esp32v3_dir`, the profiles,
+`flash-fw-esp32v3`) and `scripts/emu/build-reference-image.sh`'s `case`. A
+value that drifts here builds a different image than the one a human builds by
+hand, and two transcripts of "the same" image would not be comparable — which
+is the only thing this crate exists to make them. Two tests check the mirror
+against the script on every `cargo test`, and the second of them found real
+drift the day it was written (`render-basic` and `render-rocaille` had been in
+the script and not in `reference_image_slug` since the render benches landed).
+
+Two entries in the table are the ones a reader will otherwise get wrong.
+`--monitor-baud 921600` on the classic is **not optional**: `board::esp32v3::
+init` reprograms `clkdiv` mid-stream, so the ROM and the second-stage
+bootloader talk at 115200 and the application at 921600, and a monitor left at
+115200 reads the application as line noise. One image therefore produces
+**two** transcripts, which is what the header's `baud` is for. And the
+held-port pre-check was a literal `usbmodem` grep until M5, so a held CH340
+port passed it silently; `ensure_port_free` takes the prefix from this table
+*and* checks the request's own `--port`.
+
+Adding a chip is one row plus arms on the payloads that run there. M6's S3 is
+the next one, and that is the shape it should take.
+
+### A payload on a chip: `ChipArm`
+
+A `Payload` had no chip until M5, because until M5 there was one chip. Three
+of its fields turned out to be chip facts — `firmware_features`, `link`,
+`host_plan` — and one thing the C6's `boot-idle` does not need turned out to
+be mandatory on the classic: a `host_script`.
+
+Everything else is chip-independent **by construction**: `fw_checks_feature`,
+`emits_header`, `sentinel`, `mask_set`, `fields`, `series`, `record_kinds`.
+Both chips print the same `[MEM] free=` / `[JIT] used=` / `[stack]
+heartbeat:` lines out of the same `lpa-server` / `fw-core` code. That is what
+makes **one payload name over two chips** possible, and it is why the classic
+gets arms rather than `v3-`-prefixed payload names: the committed silicon
+transcript's sidecar already says `"payload": "boot-idle"`, and transcripts
+are never edited.
+
+Read an arm through `Payload::arm(chip)`. `esp32c6` is *synthesised* from the
+top-level fields rather than duplicated, so a row that says nothing about
+chips means exactly what it always meant. A payload with no arm for the
+requested chip is a refusal that names the chips it does run on — never a
+fallback to the C6's features on another chip, which would build an image that
+does not exist.
+
+One arm field is a fact that cost a bench sitting to find. **`second_boot`**:
+espflash hard-resets after writing, so every silicon capture of the classic is
+the boot *after* the one that formatted `lpfs`. A machine handed a fresh flash
+copy is on its **first** boot and reports `largest_free=106494` — 2032 bytes
+short — for a reason that has nothing to do with the model. (The C6's
+`fresh_chip` says very nearly the opposite thing, and the two are not
+interchangeable.)
+
+### `Link::Uart0` is not `Link::Uart0Spike`
+
+`Uart0Spike` is a **C6 workaround**: the cargo feature `spike_uart0_link`
+moves the host link onto UART0 so an emulator with no USB host can be served.
+`Uart0` is the classic's **product** link — that part has no USB-Serial-JTAG
+peripheral at all. Conflating them would put a feature that does not exist on
+a classic build (an unbuildable command line) and would write `uart0-spike`
+into every classic sidecar, where it reads as a workaround rather than as the
+product.
 
 ## Runner
 

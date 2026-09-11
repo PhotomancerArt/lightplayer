@@ -38,7 +38,22 @@ pub const HEADER_SCHEMA: u32 = 1;
 pub const HEADER_PREFIX: &str = "[fw-checks-header] ";
 
 /// The full header: the sidecar's contents.
+///
+/// **`deny_unknown_fields`, and it was earned.** Until M5 P1 this struct
+/// accepted anything, and a hand-written sidecar that spelled a field the way
+/// its author remembered it — `board_mac` for `mac`, `chip_revision` for
+/// `silicon_rev` — parsed cleanly and silently dropped the value. Four
+/// committed classic transcripts carried a MAC and a chip revision that no
+/// code could see, for a day, with nothing to say so. A misspelled key is now
+/// a loud refusal naming the field, which is the only way that failure mode
+/// can never recur (M5 ruling R3).
+///
+/// The cost is that a sidecar written by a NEWER build than the one reading
+/// it is refused rather than partly understood. That is the right trade for a
+/// file whose whole job is provenance: a header nobody can fully read is
+/// exactly the "provenance is a guess" case the module doc refuses.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TranscriptHeader {
     pub schema: u32,
     /// Payload name, as in the registry (`shader-compile-stress`).
@@ -149,6 +164,30 @@ pub struct TranscriptHeader {
     /// `mac` and `silicon_rev`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub machine: Option<String>,
+    /// **The line rate this capture was taken at**, when the capture's
+    /// identity depends on it.
+    ///
+    /// Additive and optional, so no schema bump by this file's own rule (see
+    /// [`HEADER_SCHEMA`]), and a discriminator in the filename for
+    /// [`Self::machine`]'s exact reason. The classic ESP32 prints its ROM and
+    /// its second-stage bootloader at 115200 and its application at 921600 —
+    /// `board::esp32v3::init` reprograms `clkdiv` mid-stream — so **one image
+    /// produces two transcripts that differ only in the rate the port was
+    /// opened at**, and without a discriminator the second would overwrite
+    /// the first.
+    ///
+    /// DD46 accepted `machine` carrying the baud as a stopgap "M5 formalises
+    /// or replaces". This is the field that meant, and M5 P1 re-filed the
+    /// four committed classic sidecars onto it: `machine` goes back to its
+    /// documented meaning (which machine of a multi-machine payload, the MAC
+    /// without colons) and the stems those files already carry are unchanged,
+    /// because `file_stem` appends the baud exactly where the stopgap
+    /// appended the machine.
+    ///
+    /// A capture with no `baud` files exactly where it always did, which is
+    /// why every C6 transcript is untouched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub baud: Option<u32>,
     /// What this configuration is trusted for, per field class.
     #[serde(default)]
     pub trust: TrustTable,
@@ -159,15 +198,28 @@ impl TranscriptHeader {
         Configuration::parse(&self.configuration)
     }
 
-    /// The committed filename stem: `<configuration>-<date>-<short-commit>`.
+    /// The committed filename stem:
+    /// `<configuration>-<date>-<short-commit>[-<machine>][-<baud>]`.
+    ///
+    /// Both discriminators are optional and both are there for the same
+    /// reason: one payload, one configuration, one commit and one date can
+    /// produce more than one capture, and the filing scheme has to have room
+    /// for each. `machine` is two boards on one air; `baud` is one image read
+    /// at two line rates. A capture with neither files exactly where it
+    /// always did.
     pub fn file_stem(&self) -> Result<String> {
         let config = self.configuration()?;
         let short = short_commit(&self.firmware_commit);
-        let stem = format!("{}-{}-{}", config.slug(), self.date, short);
-        match &self.machine {
-            Some(machine) => Ok(format!("{stem}-{machine}")),
-            None => Ok(stem),
+        let mut stem = format!("{}-{}-{}", config.slug(), self.date, short);
+        if let Some(machine) = &self.machine {
+            stem.push('-');
+            stem.push_str(machine);
         }
+        if let Some(baud) = self.baud {
+            stem.push('-');
+            stem.push_str(&baud.to_string());
+        }
+        Ok(stem)
     }
 
     /// The committed path, relative to the transcripts root:
@@ -379,6 +431,7 @@ mod tests {
             note: None,
             pins: None,
             machine: None,
+            baud: None,
             trust: TrustTable::default(),
         }
     }
@@ -394,6 +447,56 @@ mod tests {
             h.relative_path().unwrap(),
             "esp32c6/shader-compile-stress/silicon-esp32c6-2026-09-06-d6cfaa205.txt"
         );
+    }
+
+    /// M5 ruling R3. `baud` is additive in the schema AND in the filename,
+    /// and the second half is the point: the classic prints its ROM at
+    /// 115200 and its application at 921600, so one image at one commit on
+    /// one date is two transcripts, and without a discriminator the second
+    /// would overwrite the first. A capture with no baud files where it
+    /// always did, which is why no C6 transcript moved.
+    #[test]
+    fn the_baud_is_an_additive_field_and_a_filename_discriminator() {
+        let mut h = header();
+        assert_eq!(h.baud, None);
+        let without = h.to_json().unwrap();
+        assert!(!without.contains("baud"), "{without}");
+        assert_eq!(
+            h.file_stem().unwrap(),
+            "silicon-esp32c6-2026-09-06-d6cfaa205",
+            "a header with no baud files exactly where it always did"
+        );
+
+        h.baud = Some(921_600);
+        assert_eq!(
+            h.file_stem().unwrap(),
+            "silicon-esp32c6-2026-09-06-d6cfaa205-921600"
+        );
+        let back = TranscriptHeader::from_json(&h.to_json().unwrap()).unwrap();
+        assert_eq!(back.baud, Some(921_600));
+
+        // Both discriminators, in the documented order.
+        h.machine = Some("a0f26287b48c".into());
+        assert_eq!(
+            h.file_stem().unwrap(),
+            "silicon-esp32c6-2026-09-06-d6cfaa205-a0f26287b48c-921600"
+        );
+    }
+
+    /// The failure this header could not previously report: a key spelled
+    /// the way its author remembered it parsed cleanly and dropped the value
+    /// (M5 ruling R3 — four committed classic sidecars carried a MAC and a
+    /// chip revision that no code could see).
+    #[test]
+    fn a_key_the_schema_does_not_know_is_refused_by_name() {
+        let h = header();
+        let mut doc: serde_json::Value = serde_json::from_str(&h.to_json().unwrap()).unwrap();
+        doc["board_mac"] = serde_json::json!("30:76:f5:ec:f6:34");
+        let err = format!(
+            "{:#}",
+            TranscriptHeader::from_json(&doc.to_string()).unwrap_err()
+        );
+        assert!(err.contains("board_mac"), "{err}");
     }
 
     #[test]

@@ -524,7 +524,7 @@ pub fn record_set(
             configuration: config.name(),
             date: date.to_string(),
             firmware_commit: firmware_commit.to_string(),
-            firmware_features: req.features().iter().map(|f| (*f).to_string()).collect(),
+            firmware_features: req.features()?.iter().map(|f| (*f).to_string()).collect(),
             firmware_dirty: provenance.firmware_dirty,
             firmware_sha256: None,
             silicon_rev: entry.silicon_rev.clone(),
@@ -559,6 +559,17 @@ pub fn record_set(
             // committed filename, so a two-board sitting files two transcripts
             // instead of writing one twice.
             machine: provenance.machine.map(str::to_string),
+            // The rate this capture was taken at, when the chip HAS one: a
+            // classic silicon monitor is opened at 921600 because the
+            // application reprograms clkdiv to it mid-stream, and one image
+            // at two rates is two transcripts (`TranscriptHeader::baud`). An
+            // emulated run has no port to open at a rate, and the C6's
+            // monitor has no rate to get wrong — both file exactly as they
+            // always did.
+            baud: match config.kind {
+                ConfigurationKind::Silicon => plan.chip.monitor_baud,
+                _ => None,
+            },
             trust: entry.trust.clone(),
         };
         let mut header = header;
@@ -676,6 +687,10 @@ fn request(
         image: opts.images.for_payload(payload.name).map(Path::to_path_buf),
         link_override: opts.link_override,
         identity: entry.identity(),
+        // From the configuration ENTRY, not from the configuration name:
+        // they agree for `silicon:<chip>` and `lp-emu:<chip>:<grade>` and do
+        // not for `esp-emu:<version>`, whose detail is a version.
+        chip: entry.chip.clone(),
     }
 }
 
@@ -765,6 +780,7 @@ mod tests {
             note: Some("a plan note.".into()),
             pins: None,
             machine: None,
+            baud: None,
             trust: Default::default(),
         };
         header.pins = Some(header.pins_file_name().unwrap());

@@ -3,8 +3,14 @@
 # bootloader at 0x0, the partition table at 0x8000, and the app at 0x10000,
 # in one 4 MiB file that is the whole chip.
 #
-#   scripts/emu/build-merged-image.sh <app.elf> [<out.bin>]
+#   scripts/emu/build-merged-image.sh [--chip esp32c6|esp32] <app.elf> [<out.bin>]
 #   → <out.bin>   (default: <app.elf dir>/merged.bin; sha256 written beside it)
+#
+# `--chip` is additive and defaults to `esp32c6`, which is what every caller
+# written before M5 asks for by saying nothing. The classic ESP32 names itself
+# (`--chip esp32`, espflash's own spelling — we record the revision as
+# `esp32v3`, espflash does not know it) and takes `lp-fw/fw-esp32v3`'s
+# partition table with it.
 #
 # Direct load (M3/M4) puts the app's segments straight into memory and stages
 # the flash-resident half at offsets the loader computes. A ROM-up boot reads
@@ -33,11 +39,26 @@
 # visible change and not a silent one.
 set -euo pipefail
 
-elf="${1:?usage: build-merged-image.sh <app.elf> [<out.bin>]}"
+chip=esp32c6
+if [[ "${1:-}" == "--chip" ]]; then
+    chip="${2:?--chip needs a value: esp32c6 or esp32}"
+    shift 2
+fi
+# `esp32v3` is our name for the part; espflash does not know it.
+[[ "$chip" == "esp32v3" ]] && chip=esp32
+
+elf="${1:?usage: build-merged-image.sh [--chip esp32c6|esp32] <app.elf> [<out.bin>]}"
 out="${2:-$(dirname "$elf")/merged.bin}"
 
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
-partitions="$repo/lp-fw/fw-esp32c6/partitions.csv"
+case "$chip" in
+    esp32c6) partitions="$repo/lp-fw/fw-esp32c6/partitions.csv" ;;
+    esp32)   partitions="$repo/lp-fw/fw-esp32v3/partitions.csv" ;;
+    *)
+        echo "build-merged-image: --chip $chip: known chips are esp32c6 and esp32 (alias esp32v3)" >&2
+        exit 2
+        ;;
+esac
 
 # The espflash whose bundled bootloader the committed transcripts came from.
 # A newer one is not automatically wrong — it is a different bootloader, and
@@ -83,7 +104,7 @@ mkdir -p "$(dirname "$out")"
 # test process may be reading this path while another writes it.
 staging="$out.partial"
 espflash save-image \
-    --chip esp32c6 \
+    --chip "$chip" \
     --merge \
     --partition-table "$partitions" \
     --flash-size 4mb \
@@ -92,7 +113,7 @@ espflash save-image \
     "$elf" "$staging"
 
 shasum -a 256 "$staging" | sed "s|$staging|$(basename "$out")|" > "$out.sha256"
-echo "elf=$elf espflash=$have_espflash partitions=$partitions" > "$out.provenance"
+echo "chip=$chip elf=$elf espflash=$have_espflash partitions=$partitions" > "$out.provenance"
 mv "$staging" "$out"
 echo "build-merged-image: done → $out"
 cat "$out.sha256"

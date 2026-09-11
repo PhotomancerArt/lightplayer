@@ -305,6 +305,7 @@ mod tests {
             note: None,
             pins: None,
             machine: None,
+            baud: None,
             trust: Default::default(),
         }
     }

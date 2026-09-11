@@ -94,6 +94,18 @@ pub enum Link {
     /// transcripts are of that image and a transcript is never re-baselined
     /// to suit a later idea.
     Uart0Spike,
+    /// UART0 as the **product's** link, not as a workaround: the classic
+    /// ESP32 has no USB-Serial-JTAG peripheral at all
+    /// (`lp-fw/fw-esp32v3/Cargo.toml`: "this chip has no USB-Serial-JTAG
+    /// peripheral — see `src/serial/`"), so its host link is UART0 over the
+    /// CH340K bridge on every configuration, silicon included.
+    ///
+    /// Distinct from [`Link::Uart0Spike`] for two reasons, and both bite (M5
+    /// ruling R4). `spike_uart0_link` is a **C6 cargo feature**: putting it on
+    /// a classic build produces a command line that does not compile. And a
+    /// classic sidecar reading `link=uart0-spike` would describe the shipped
+    /// product as a workaround, which is the opposite of what it is.
+    Uart0,
 }
 
 impl Link {
@@ -101,7 +113,15 @@ impl Link {
         match self {
             Self::UsbSerialJtag => "usb-serial-jtag",
             Self::Uart0Spike => "uart0-spike",
+            Self::Uart0 => "uart0",
         }
+    }
+
+    /// Does this link put its bytes on UART0? Both UART0 arms do, and the
+    /// machine's flags (`--uart0`, `--uart0-script`) are the same either way
+    /// — what differs is whether a cargo feature moved them there.
+    pub const fn is_uart0(self) -> bool {
+        matches!(self, Self::Uart0 | Self::Uart0Spike)
     }
 }
 
@@ -224,6 +244,14 @@ impl PinCapture {
 #[derive(Debug)]
 pub struct Payload {
     pub name: &'static str,
+    /// What this payload is on a chip **other than the C6** — one
+    /// [`ChipArm`] per chip. Empty is the common case and means "the C6
+    /// only", because the top-level fields below ARE the C6's arm and
+    /// [`Payload::arm`] synthesises it.
+    ///
+    /// Read it through [`Payload::arm`], never directly: a payload with no
+    /// arm for the requested chip is a refusal by name, not a fallback.
+    pub chips: &'static [ChipArm],
     pub display_name: &'static str,
     /// The `fw-checks` `FwCheck::slug()` this mirrors.
     pub fw_check_slug: &'static str,
@@ -382,6 +410,62 @@ pub enum BootPath {
     },
 }
 
+/// What a payload **is on one chip**: the half of a registry row that is a
+/// chip fact rather than a question.
+///
+/// A payload had no chip until M5, because until M5 there was one chip. Three
+/// of [`Payload`]'s fields turned out to be chip facts — `firmware_features`
+/// (the classic's shipped set is `esp32,server,float-f32`, not
+/// `server,radio,memory_fs`), `link` (the classic has no USB-Serial-JTAG
+/// peripheral) and `host_plan` (a USB-host schedule means nothing on a UART0
+/// chip) — and one thing the C6's `boot-idle` does not need at all turned out
+/// to be mandatory on the classic: a `host_script`, because the classic's
+/// heartbeat triple is **elicited** rather than idle-emitted.
+///
+/// Everything else — `fw_checks_feature`, `emits_header`, `sentinel`,
+/// `mask_set`, `fields`, `series`, `record_kinds` — is chip-independent by
+/// construction: both chips print the same `[MEM] free=` / `[JIT] used=` /
+/// `[stack] heartbeat:` lines out of the same `lpa-server` / `fw-core` code.
+/// That is what makes **one payload name over two chips** possible, and it is
+/// why the classic's rows are arms rather than `v3-`-prefixed payloads (M5
+/// ruling R5: the committed silicon transcript's sidecar already says
+/// `"payload": "boot-idle"`, and transcripts are never edited).
+#[derive(Clone, Copy, Debug)]
+pub struct ChipArm {
+    pub chip: &'static str,
+    /// See [`Payload::firmware_features`].
+    pub firmware_features: &'static [&'static str],
+    /// See [`Payload::emulator_features`].
+    pub emulator_features: Option<&'static [&'static str]>,
+    /// See [`Payload::link`].
+    pub link: Link,
+    /// See [`Payload::boot`].
+    pub boot: BootPath,
+    /// See [`Payload::host_plan`]. `None` on a UART0 chip, which has no USB
+    /// host to schedule.
+    pub host_plan: Option<HostPlan>,
+    /// See [`Payload::host_script`].
+    pub host_script: Option<&'static str>,
+    /// **Is every capture of this payload on this chip a SECOND boot?**
+    ///
+    /// M5 ruling R9, and it cost a bench sitting to find. `espflash`
+    /// hard-resets the board after writing, so every silicon capture of the
+    /// classic is the boot *after* the one that formatted `lpfs` in the
+    /// arena. A machine handed a fresh `FlashBacking::Copy` is on its
+    /// **first** boot, the format is still live, and it reports
+    /// `largest_free=106494` — **2032 bytes short** of the board's 108526,
+    /// for a reason that has nothing to do with the model. An emulated twin
+    /// therefore has to boot once, flush the chip, and read its figures off
+    /// the run after that.
+    ///
+    /// The C6's [`Payload::fresh_chip`] says very nearly the opposite thing
+    /// (erase the board *before* the run, so that the capture IS the first
+    /// boot); this is the classic's, and the two are not interchangeable.
+    /// The extra run is P2/P6's to implement — this field is where the next
+    /// chip's agent will look for the fact.
+    pub second_boot: bool,
+}
+
 impl Payload {
     pub fn class_of(&self, record: &str, field: &str) -> Option<FieldClass> {
         self.fields
@@ -391,6 +475,56 @@ impl Payload {
     }
 
     /// The firmware features this payload builds on `configuration`.
+    pub fn features_for(&self, emulated: bool) -> &'static [&'static str] {
+        match (emulated, self.emulator_features) {
+            (true, Some(f)) => f,
+            _ => self.firmware_features,
+        }
+    }
+
+    /// This payload **on that chip**, or `None` when it has no arm there.
+    ///
+    /// `esp32c6` is synthesised from the top-level fields rather than
+    /// duplicated into an arm, which is what keeps nineteen registry rows
+    /// from churning: the C6 *is* the default, and a row that says nothing
+    /// about chips still means exactly what it meant.
+    ///
+    /// `None` is a refusal the runner prints by name — "`gpio-input` has no
+    /// `esp32v3` arm" — never a silent fallback to the C6's features on
+    /// another chip, which would build an image that does not exist.
+    pub fn arm(&self, chip: &str) -> Option<ChipArm> {
+        if let Some(arm) = self.chips.iter().find(|a| a.chip == chip) {
+            return Some(*arm);
+        }
+        (chip == "esp32c6").then(|| ChipArm {
+            chip: "esp32c6",
+            firmware_features: self.firmware_features,
+            emulator_features: self.emulator_features,
+            link: self.link,
+            boot: self.boot,
+            host_plan: self.host_plan,
+            host_script: self.host_script,
+            // The C6's own fresh-chip rule is `fresh_chip`, and it is a
+            // different rule; nothing on the C6 is a second boot.
+            second_boot: false,
+        })
+    }
+
+    /// The chips this payload can run on, C6 first.
+    pub fn chip_names(&self) -> Vec<&'static str> {
+        let mut names = vec!["esp32c6"];
+        for arm in self.chips {
+            if arm.chip != "esp32c6" {
+                names.push(arm.chip);
+            }
+        }
+        names
+    }
+}
+
+impl ChipArm {
+    /// The firmware features this arm builds on an emulated configuration or
+    /// on silicon — [`Payload::features_for`]'s per-arm twin.
     pub fn features_for(&self, emulated: bool) -> &'static [&'static str] {
         match (emulated, self.emulator_features) {
             (true, Some(f)) => f,
@@ -1391,6 +1525,7 @@ static RMT_FRAME_FIELDS: &[FieldSpec] = &[
 pub static ALL_PAYLOADS: &[Payload] = &[
     Payload {
         name: "shader-compile-stress",
+        chips: &[],
         display_name: "Incremental shader compile stress",
         fw_check_slug: "shader-compile-stress",
         firmware_features: &["test_shader_compile_incremental"],
@@ -1493,6 +1628,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
     },
     Payload {
         name: "gpio-calibrate",
+        chips: &[],
         display_name: "Host-driven GPIO square-wave calibration",
         fw_check_slug: "gpio-calibrate",
         firmware_features: &["test_gpio_calibrate"],
@@ -1519,6 +1655,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
     },
     Payload {
         name: "uart-bridge",
+        chips: &[],
         display_name: "Transparent USB-Serial-JTAG <-> UART0 bridge",
         fw_check_slug: "uart-bridge",
         firmware_features: &["test_uart_bridge"],
@@ -1545,6 +1682,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
     },
     Payload {
         name: "jit-math-perf",
+        chips: &[],
         display_name: "JIT Q32 math perf",
         fw_check_slug: "jit-math-perf",
         firmware_features: &["test_jit_math_perf"],
@@ -1571,6 +1709,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
     },
     Payload {
         name: "cycle-probe",
+        chips: &[],
         display_name: "Cycle-model kernels, two clocks each",
         fw_check_slug: "cycle-probe",
         firmware_features: &["test_cycle_probe"],
@@ -1610,6 +1749,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
     },
     Payload {
         name: "gpio-input",
+        chips: &[],
         display_name: "A button and a quadrature encoder, read back off the pads",
         fw_check_slug: "gpio-input",
         firmware_features: &["test_gpio_input"],
@@ -1664,6 +1804,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
     },
     Payload {
         name: "espnow-broadcast",
+        chips: &[],
         display_name: "Two boards on the air, each saying what it sent and what it heard",
         fw_check_slug: "espnow-broadcast",
         firmware_features: &["test_espnow_broadcast"],
@@ -1710,6 +1851,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
     },
     Payload {
         name: "render-loop",
+        chips: &[],
         display_name: "Render loop (a real project, N frames, RMT on)",
         fw_check_slug: "render-loop",
         // The shipped server image with its filesystem pre-seeded and its
@@ -1744,6 +1886,54 @@ pub static ALL_PAYLOADS: &[Payload] = &[
     },
     Payload {
         name: "boot-idle",
+        // The classic's arm, and the only one M5 P1 can land: this payload
+        // IS the shipped image, so it needs no new firmware — the other
+        // three classic payloads (`shader-compile-stress`, `gpio-calibrate`,
+        // `cycle-probe`) wait on `fw-esp32v3` growing their harnesses in P2.
+        chips: &[ChipArm {
+            chip: "esp32v3",
+            // `fw-esp32v3`'s shipped set, on top of the crate's `esp32`
+            // chip feature (`lp-fw/fw-esp32v3/Cargo.toml`). No `memory_fs`
+            // and no `radio`: the classic boots from a modelled flash chip
+            // with a real filesystem, and there is no radio in the shipped
+            // classic image at all.
+            firmware_features: &["server", "float-f32"],
+            emulator_features: None,
+            // The PRODUCT's link. This part has no USB-Serial-JTAG
+            // peripheral, so UART0 over the CH340K is what it ships with —
+            // never `Uart0Spike`, whose cargo feature does not exist here.
+            link: Link::Uart0,
+            // Every silicon capture of this payload is a ROM-up boot: the
+            // real mask ROM banner and the real IDF second-stage bootloader
+            // lines are IN the committed transcript, and `boot-log` is the
+            // one class where the two paths genuinely differ. `Direct`
+            // stays available for iteration (`LP_WALK_BOOT=direct`), and
+            // `rom_up_boot.rs` already gates the two paths' app-entry
+            // equality.
+            boot: BootPath::RomUp {
+                reset_cause: "poweron",
+                strap: "app",
+            },
+            // A USB-host schedule means nothing on a UART0 chip.
+            host_plan: None,
+            // **This payload's heartbeat triple is ELICITED on the classic**
+            // — `esp32_memory_stats` is called on a project load/unload/
+            // stop-all or a client `runtime_status`, never from the
+            // five-second server heartbeat — so the C6's shape (boot, wait,
+            // stop on the `[stack]` line) produces NOTHING here unless the
+            // host asks. The asking is `boot_idle.rs::STOP_ALL`'s bytes on
+            // `[INIT] I/O task spawned`, and **M5 P2 lands it as a committed
+            // script** (suggested `walks/v3-stop-all.script`, beside the
+            // C6's walks, with its provenance in the walks README) and sets
+            // it here. Until then an emulated run of this arm boots and
+            // records the boot, which is honest and incomplete — it is not
+            // a transcript anything replays.
+            host_script: None,
+            // espflash hard-resets after writing, so every silicon capture
+            // is the boot AFTER the one that formatted `lpfs`. 2032 bytes of
+            // `largest_free` hang on this. See `ChipArm::second_boot`.
+            second_boot: true,
+        }],
         display_name: "Shipped image to the idle loop",
         fw_check_slug: "boot-idle",
         // The shipped-image walk as a payload (vision Q1: "shipped-image walks
@@ -1798,6 +1988,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
     },
     Payload {
         name: "usb-negative-control",
+        chips: &[],
         display_name: "Shipped image with the port closed from boot",
         fw_check_slug: "usb-negative-control",
         // The shipped image, flash-backed — `boot-idle` minus `memory_fs`.
@@ -1872,6 +2063,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
     },
     Payload {
         name: "usb-detach-reattach",
+        chips: &[],
         display_name: "The cable out mid-session and back in",
         fw_check_slug: "usb-detach-reattach",
         // The shipped image minus flash, like every M6 emulator scenario
@@ -1920,6 +2112,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
     },
     Payload {
         name: "usb-host-absent",
+        chips: &[],
         display_name: "The shipped image with no cable at all",
         fw_check_slug: "usb-host-absent",
         firmware_features: &["server", "radio", "memory_fs"],
@@ -1975,6 +2168,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
     },
     Payload {
         name: "boot-idle-flash",
+        chips: &[],
         display_name: "Shipped image to the idle loop, from flash",
         fw_check_slug: "boot-idle-flash",
         // `boot-idle` without `memory_fs`: the image that mounts `lpfs` from
@@ -2015,6 +2209,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
     },
     Payload {
         name: "upload-walk",
+        chips: &[],
         display_name: "Project upload walk (examples/basic)",
         fw_check_slug: "upload-walk",
         // The same flash-backed image with a host on the other end. The
@@ -2063,6 +2258,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
     },
     Payload {
         name: "upload-walk-usb",
+        chips: &[],
         display_name: "Project upload walk (examples/basic), over the USB link",
         fw_check_slug: "upload-walk-usb",
         // The same image, the same conversation, the same series — and the
@@ -2105,6 +2301,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
     },
     Payload {
         name: "meteor-walk-usb",
+        chips: &[],
         display_name: "Project upload walk (examples/meteor), over the USB link",
         fw_check_slug: "meteor-walk-usb",
         // The spike report §11.2's ledger, which is the one heap comparison
@@ -2165,6 +2362,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
     },
     Payload {
         name: "rmt-rx",
+        chips: &[],
         display_name: "An RMT frame put on gpio18 and read back off gpio19",
         fw_check_slug: "rmt-rx",
         firmware_features: &["test_rmt_rx"],
@@ -2211,6 +2409,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
     },
     Payload {
         name: "rmt-chase",
+        chips: &[],
         display_name: "RMT chase (256 LEDs, three passes)",
         fw_check_slug: "rmt-chase",
         firmware_features: &["test_rmt", "ws281x_telemetry"],
@@ -2268,6 +2467,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
     },
     Payload {
         name: "shader-oracle-walk",
+        chips: &[],
         display_name: "Project upload walk (projects/test/shader-oracle), over the USB link, with the pad observed",
         fw_check_slug: "shader-oracle-walk",
         // The same flash-backed product image as `upload-walk-usb`, walking
@@ -2318,6 +2518,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
     },
     Payload {
         name: "rom-up-boot",
+        chips: &[],
         display_name: "Reset vector to the idle loop, through the real ROM",
         fw_check_slug: "rom-up-boot",
         // The same bytes `boot-idle-flash` runs — the shipped image — reached
