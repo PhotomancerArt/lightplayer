@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "payload": "boot-idle",
+  "chip": "esp32v3",
+  "configuration": "silicon:esp32v3",
+  "date": "2026-09-10",
+  "board": "domraem/dom-z-102",
+  "board_mac": "30:76:f5:ec:f6:34",
+  "chip_revision": "v3.1",
+  "baud": 921600,
+  "machine": "921600",
+  "firmware_commit": "75486b114208",
+  "firmware_features": ["esp32", "server", "float-f32"],
+  "firmware_dirty": false,
+  "source": "lab task L1, 2026-09-10 21:45 (local), the second of two captures in one sitting on the RE-FLASHED board. Same image and same reset dance as the 115200 half; the port is reopened at the app's own baud because the app reprograms clkdiv mid-stream and one capture cannot read both rates. Image provenance: `scripts/emu/build-reference-image.sh --chip esp32 esp32,server,float-f32 75486b114 none` → ELF 2,985,952 B sha256 fb5e548982f2fc2dbc75e61945eb61e41561b876d0cd84b755466caed553107e; `espflash save-image --chip esp32 --merge --partition-table lp-fw/fw-esp32v3/partitions.csv --flash-size 4mb` → merged.bin 4,194,304 B sha256 46d4ed2cc66c1d0bfa7da9f176509eac687ee2a30b3d62688b96cf5d7c7f6c54; written with `espflash write-bin --chip esp32 --port /dev/cu.wchusbserial11330 --baud 460800 0x0 merged.bin` under `script -q /dev/null`.",
+  "capture": "python3 classic-capture.py v1 --port /dev/cu.wchusbserial11330 --baud 921600 --seconds 16 --out cap_921600.bin --send-after '[INIT] I/O task spawned:1:M!{\"id\":1,\"msg\":\"stopAllProjects\"}' --send-at '8.0:…' --send-at '12.0:…'",
+  "tools": {
+    "capture": "classic-capture.py v1 (lab task L1, 2026-09-10; pure termios/TIOCMSET, no pyserial on this host) — kept in the L1 session scratchpad, to be landed in scripts/emu/ by M5 as classic-reset-and-capture.py",
+    "port": "/dev/cu.wchusbserial11330 (CH340K 1a86:7522, locationID 0x01133000, port 3 of hub 0x01130000; the C6 A0:F2:62:87:B4:8C is port 2 of the same hub and was not touched)",
+    "flasher": "espflash 3.3.0"
+  },
+  "note": "THIS IS THE TRANSCRIPT G2's MEMORY COMPARISON IS AGAINST. Ruling R7 was answered (a): the board was re-flashed from the pinned clean commit 75486b114208 before this capture, so this transcript and the emulator's run are the SAME BYTES — the same ELF and the same merged.bin, sha256s in `source` above — and the hello stamps `dirty: false`. The earlier `silicon-esp32v3-2026-09-10-2e21b6226-921600` stays committed beside this one as the dirty-image record; nothing here replaces it.\n\nTHE HEARTBEAT TRIPLE IS ELICITED, NOT IDLE-EMITTED, AND ON THIS IMAGE IT COULD NOT BE ANYTHING ELSE. `[stack] heartbeat:` / `[MEM]` / `[JIT]` come from `esp32_memory_stats` (lp-fw/fw-esp32v3/src/main.rs:445), which `lpa_server` calls from `log_memory` on a project load/unload/stop-all and from `runtime_status` on a client read — never from the server loop's five-second heartbeat, which calls `heartbeat_memory_stats` and prints nothing (P8's finding). L0's board printed the triple unasked because it auto-loaded the `Zook dome` project at boot; THIS board's lpfs came from the merged image and is EMPTY — the capture contains `Boot: failed to list /projects: no such file or directory` — so it has no project to load and would print no triple at all. The triple here is asked for over the wire with exactly the request the emulator gate sends, `M!{\"id\":1,\"msg\":\"stopAllProjects\"}` + newline (`boot_idle.rs`'s STOP_ALL), whose `handle_stop_all_projects` calls `log_memory` whether or not any project is loaded. That makes the two sides the same stimulus as well as the same bytes.\n\nWHAT WAS SENT, AND WHEN. Three identical `stopAllProjects` requests. The FIRST is the gate-equivalent one: it is fired on the appearance of `[INIT] I/O task spawned`, the same trigger `boot_idle.rs::stop_all_script` uses. The gate's delay after that trigger is 1 ms of emulated time; here the host's select loop polls at 50 ms, so the real delay was 0-50 ms and the send landed 0.988 s after the reset — a host-latency difference, not a firmware one, and it is why nothing in the `timing` class is compared. The second and third were sent at 8.0 s and 12.0 s from the reset, to record the drift the bench notes require three samples for.\n\nTHE THREE SAMPLES, IN ORDER, AND WHAT DRIFTS. (1) `[stack] heartbeat: high-water 16972 B of 45280 B (28308 B headroom)` / `[MEM] free=223352 used=18200 largest_free=108526 retry_saves=0` / `[JIT] used=0 peak=0 cap=65536 spans=0 peak_spans=0 allocs=0 frees=0 fails=0 largest_free=65536`. (2) `[MEM] free=223784 used=17768 largest_free=108535` with the same `[JIT]` line. (3) `[MEM] free=223784 used=17768 largest_free=108544` with the same `[JIT]` line. Each request logs memory TWICE — `log_memory` before and after the stop — so the second `[MEM]` of each pair (223248/18304, then 223744/17808 twice) is the post-stop figure; the FIRST of the first pair is the one the emulator gate's run stops on, because its `--exit-on '[JIT] used='` matches the first `[JIT]` line to reach the wire. `[stack] heartbeat:` prints only when the high-water moves, which is why samples 2 and 3 carry no stack line: 16972 B was still the high-water at 8 s and at 12 s. `largest_free` moves by tens of bytes between samples and `free`/`used` by hundreds, exactly as L0 recorded — a single sample cannot tell a real difference from a transient.\n\nONE LINE HERE IS NOT WHAT M3 PRODUCES, AND IT IS CORRECT. `[INIT] RMT ISR on APP core`: M3 is single-core (Q5) and the firmware takes its documented fallback, printing `[INIT] APP core unavailable; RMT ISR on PRO core (single-core semantics)` instead (lp-fw/fw-esp32v3/src/main.rs:838-845). Heap region 3 is added in BOTH arms (main.rs:846-855), so the heap arithmetic is unaffected. G2's comparison is over memory-class fields, not over log text.\n\nBOOT-TIME MEMORY FACTS, FOR THE FIELD-BY-FIELD READ. Boot heap line `heap=15072+112640+98304+15536=241552`; `[INIT] main stack 45280 B` (L0's dirty tree said 45488 — this is the clean pin, and it is the emulator's number); JIT region `sram0 ibus 0x40088000..0x40098000 (64 KiB, placed, rwtext_end=0x40083f78)` (L0's dirty tree said rwtext_end=0x40083e00); SRAM1 heap tail dbus 0x3ffe8000+98304 B. The wire heartbeat's own memory object, which is a different reading taken at a different instant, is in this capture too: `freeBytes 224648 / usedBytes 16904 / totalBytes 241552 / largestFreeBlock 108524 / oomRetrySaves 0`.\n\nTHE COMMITTED .txt IS TRIMMED TO ITS DECODABLE SUFFIX: bytes [6454, 11881) of the 11881-byte raw read at `raw/silicon-esp32v3-2026-09-10-75486b114-921600.raw.bin`, which is preserved byte-for-byte and untouched. Bytes [0, 6454) are the ROM and the bootloader still printing at 115200 while this port is open at 921600 — one UART shifter destuffing 115200-baud bit times as if they were 921600 ones. That prefix is not valid UTF-8 (`Transcript::load` fails on its first byte, a READ failure rather than a filing mismatch) and is not something the device 'said' in any readable sense; the boundary kept here is the first byte of `[INIT] fw-esp32v3 boot`, where the two ends' baud agree again. Every byte kept is unchanged from the wire, in the same order. The interleaving inside the kept range — `[MEM]` lines cutting through `[INFO]` lines mid-word — is real and is on the wire: `esp_println` writes the triple straight into the FIFO while the log lines travel through the io_task's queue, two console paths with different latencies, a fact about this firmware rather than about the capture.\n\n`silicon:esp32v3` IS A CONFIGURATION IN validate.toml (P8 added it) BUT THE RUNNER CANNOT EXECUTE IT YET: `lp-emu-validate`'s driver is still chip-coupled to esp32c6, so this capture is evidence a human — and `boot_idle.rs::the_heartbeats_memory_figures_are_the_desk_boards` — compares, not something `lp-emu-validate` replays. That is M5's work.",
+  "trust": [
+    {
+      "class": "memory",
+      "grade": "measured",
+      "because": "the board is the ground truth; nothing models it"
+    },
+    {
+      "class": "timing",
+      "grade": "measured",
+      "because": "a real clock on real flash with real wait states"
+    },
+    {
+      "class": "boot-log",
+      "grade": "measured",
+      "because": "the real application printed these bytes over the real cable"
+    },
+    {
+      "class": "wire",
+      "grade": "measured",
+      "because": "real bytes over a real CH340K"
+    },
+    {
+      "class": "pin",
+      "grade": "modeled",
+      "because": "no instrument was on a pad in this capture"
+    }
+  ]
+}

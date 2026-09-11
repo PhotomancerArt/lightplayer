@@ -1,0 +1,37 @@
+ets Jul 29 2019 12:21:46
+
+rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+configsip: 0, SPIWP:0xee
+clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+mode:DIO, clock div:2
+load:0x3fff0030,len:7104
+load:0x40078000,len:15576
+load:0x40080400,len:4
+ho 8 tail 4 room 4
+load:0x40080404,len:3876
+entry 0x4008064c
+[0;32mI (31) boot: ESP-IDF v5.1-beta1-378-gea5e0ff298-dirt 2nd stage bootloader[0m
+[0;32mI (31) boot: compile time Jun  7 2023 07:48:23[0m
+[0;32mI (33) boot: Multicore bootloader[0m
+[0;32mI (37) boot: chip revision: v3.1[0m
+[0;32mI (41) boot.esp32: SPI Speed      : 40MHz[0m
+[0;32mI (46) boot.esp32: SPI Mode       : DIO[0m
+[0;32mI (50) boot.esp32: SPI Flash Size : 4MB[0m
+[0;32mI (55) boot: Enabling RNG early entropy source...[0m
+[0;32mI (60) boot: Partition Table:[0m
+[0;32mI (64) boot: ## Label            Usage          Type ST Offset   Length[0m
+[0;32mI (71) boot:  0 nvs              WiFi data        01 02 00009000 00006000[0m
+[0;32mI (79) boot:  1 phy_init         RF data          01 01 0000f000 00001000[0m
+[0;32mI (86) boot:  2 factory          factory app      00 00 00010000 00300000[0m
+[0;32mI (94) boot:  3 lpfs             Unknown data     01 82 00310000 000f0000[0m
+[0;32mI (101) boot: End of partition table[0m
+[0;32mI (105) esp_image: segment 0: paddr=00010020 vaddr=3f400020 size=00100h (   256) map[0m
+[0;32mI (114) esp_image: segment 1: paddr=00010128 vaddr=3ffb0000 size=00010h (    16) load[0m
+[0;32mI (122) esp_image: segment 2: paddr=00010140 vaddr=3f400140 size=47010h (290832) map[0m
+[0;32mI (235) esp_image: segment 3: paddr=00057158 vaddr=3ffb0010 size=03044h ( 12356) load[0m
+[0;32mI (241) esp_image: segment 4: paddr=0005a1a4 vaddr=40080000 size=03f78h ( 16248) load[0m
+[0;32mI (248) esp_image: segment 5: paddr=0005e124 vaddr=00000000 size=01ef4h (  7924) [0m
+[0;32mI (252) esp_image: segment 6: paddr=00060020 vaddr=400d0020 size=1c86f0h (1869552) map[0m
+[0;32mI (935) boot: Loaded app from partition at offset 0x10000[0m
+[0;32mI (936) boot: Disabling RNG early entropy source...[0m
+[0;31mE (936) boot: Image contains multiple DROM segments. Only the last one will be mapped.[0m
