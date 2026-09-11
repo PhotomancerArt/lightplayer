@@ -464,6 +464,25 @@ pub struct ChipArm {
     /// The extra run is P2/P6's to implement — this field is where the next
     /// chip's agent will look for the fact.
     pub second_boot: bool,
+    /// **Where a capture of this payload stops on this chip**, when that is
+    /// not where it stops on the C6.
+    ///
+    /// [`Payload::sentinel`] is one marker for a payload, which was right
+    /// while a payload was one chip's. `boot-idle` is where it stops being
+    /// right, and the reason is §3.1's: the classic's heartbeat triple is
+    /// **elicited**. On the C6 `[stack] heartbeat: high-water` IS the
+    /// five-second heartbeat's own line, so a capture that stops on it has
+    /// the whole sample in it. On the classic the same line is printed by
+    /// `esp32_memory_stats` about one second in, in answer to the host's
+    /// `stopAllProjects`, and the `[MEM]` and `[JIT]` lines the payload
+    /// exists for arrive *after* it — so a capture that stops there stops one
+    /// line early and records neither.
+    ///
+    /// The classic's arm therefore stops on `[JIT] used=`, the last line of
+    /// the same triple and exactly what the M3 gate's own `--exit-on` uses.
+    /// It is a later marker on the same stimulus, never a looser one: a run
+    /// that does not reach it is still refused.
+    pub sentinel: Option<Sentinel>,
 }
 
 impl Payload {
@@ -507,7 +526,25 @@ impl Payload {
             // The C6's own fresh-chip rule is `fresh_chip`, and it is a
             // different rule; nothing on the C6 is a second boot.
             second_boot: false,
+            // The C6 IS the default, here as everywhere else in this
+            // synthesis: no override, so `sentinel_for` returns the
+            // payload's own marker and every committed C6 transcript means
+            // exactly what it meant.
+            sentinel: None,
         })
+    }
+
+    /// The marker a capture of this payload stops on **on this chip**: the
+    /// arm's override where it has one, the payload's own otherwise.
+    ///
+    /// Taken by chip rather than by configuration, because it is a property
+    /// of what the firmware prints and not of which machine printed it —
+    /// silicon and an emulated twin of one chip stop on the same line, which
+    /// is the whole reason two transcripts of one payload are comparable.
+    pub fn sentinel_for(&self, chip: &str) -> Sentinel {
+        self.arm(chip)
+            .and_then(|a| a.sentinel)
+            .unwrap_or(self.sentinel)
     }
 
     /// The chips this payload can run on, C6 first.
@@ -1559,6 +1596,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
             // arena and there is no first-boot/second-boot difference to
             // have. `second_boot` is `boot-idle`'s fact, not the chip's.
             second_boot: false,
+            sentinel: None,
         }],
         display_name: "Incremental shader compile stress",
         fw_check_slug: "shader-compile-stress",
@@ -1691,6 +1729,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
             // harness holds up its own end of that.
             host_script: None,
             second_boot: false,
+            sentinel: None,
         }],
         display_name: "Host-driven GPIO square-wave calibration",
         fw_check_slug: "gpio-calibrate",
@@ -1803,6 +1842,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
             host_plan: None,
             host_script: None,
             second_boot: false,
+            sentinel: None,
         }],
         display_name: "Cycle-model kernels, two clocks each",
         fw_check_slug: "cycle-probe",
@@ -2036,6 +2076,17 @@ pub static ALL_PAYLOADS: &[Payload] = &[
             // is the boot AFTER the one that formatted `lpfs`. 2032 bytes of
             // `largest_free` hang on this. See `ChipArm::second_boot`.
             second_boot: true,
+            // **One line later than the C6's, and on the same stimulus.**
+            // `[stack] heartbeat: high-water` is the FIRST line of the
+            // classic's elicited triple, not the last, so a capture that
+            // stopped there would carry the stack figure and neither the
+            // `[MEM]` nor the `[JIT]` line — the two the memory comparison
+            // is made of. `[JIT] used=` closes the same triple and is what
+            // `lp-emu-esp32v3`'s own gate stops on
+            // (`tests/boot_idle.rs`). Silicon's committed capture contains
+            // both markers, so this is which line the transcript ENDS at,
+            // never a difference in what the two machines were asked.
+            sentinel: Some(Sentinel::Done("[JIT] used=")),
         }],
         display_name: "Shipped image to the idle loop",
         fw_check_slug: "boot-idle",

@@ -117,6 +117,20 @@ pub struct ChipSpec {
     // something measures one. `E1` (does `t2` exist on the classic?) is open
     // with Yona; until it is answered the classic offers `t1` alone.
     pub time_grades: &'static [&'static str],
+    /// Whether this machine's binary takes `--reset-cause` / `--strap` on a
+    /// ROM-up boot.
+    ///
+    /// The C6's does: it models two reset causes (`poweron`, `usb-uart`) and
+    /// two straps (`app`, `download`), both printed VERBATIM by the ROM's own
+    /// banner, so a plan that did not state them would be recording an
+    /// unstated choice. The classic's does not, and the reason is that it has
+    /// nothing to choose: `loader::ResetCause` has one arm (`PowerOn`) and the
+    /// strap word defaults to `GPIO_STRAP_SPI_FAST_FLASH_BOOT`, which is
+    /// exactly the `poweron`/`app` the payload asks for. A door a later phase
+    /// adds is absent rather than accepted-and-ignored there, so passing the
+    /// flags anyway is a hard refusal (exit 64) rather than a no-op — which is
+    /// what this field is for.
+    pub takes_reset_cause: bool,
 }
 
 /// The C6: the chip every configuration in this crate was written for, and the
@@ -136,6 +150,7 @@ pub const ESP32C6: ChipSpec = ChipSpec {
     monitor_baud: None,
     port_prefix: "cu.usbmodem",
     time_grades: &["t1", "t2", "t3"],
+    takes_reset_cause: true,
 };
 
 /// The classic ESP32 (revision v3), the desk's `domraem/dom-z-102`.
@@ -156,6 +171,7 @@ pub const ESP32V3: ChipSpec = ChipSpec {
     monitor_baud: Some(921_600),
     port_prefix: "cu.wchusbserial",
     time_grades: &["t1"],
+    takes_reset_cause: false,
 };
 
 /// Every chip this runner drives, in the order they were taught to it.
@@ -315,6 +331,14 @@ impl RunRequest {
                 self.payload.chip_names().join(", ")
             )
         })
+    }
+
+    /// The line this run's capture stops on, on this chip. See
+    /// [`Payload::sentinel_for`] — a payload's last line is the firmware's
+    /// and the classic's `boot-idle` triple ends one line later than the
+    /// C6's.
+    pub fn sentinel(&self) -> Sentinel {
+        self.payload.sentinel_for(&self.chip)
     }
 
     /// The host attachment this request actually runs with.
@@ -767,7 +791,7 @@ impl ConfigurationDriver for SiliconDriver {
                 let mut command = vec![
                     DESK_STEP_SCRIPT.into(),
                     capture.display().to_string(),
-                    req.payload.sentinel.marker().into(),
+                    req.sentinel().marker().into(),
                     req.timeout_secs.to_string(),
                     "--".into(),
                 ];
@@ -843,7 +867,7 @@ impl ConfigurationDriver for SiliconDriver {
                     "--seconds".into(),
                     req.timeout_secs.to_string(),
                 ];
-                if let Some(marker) = req.payload.sentinel.exit_on() {
+                if let Some(marker) = req.sentinel().exit_on() {
                     open.push("--until".into());
                     open.push(marker.into());
                 }
@@ -948,7 +972,7 @@ impl ConfigurationDriver for EspEmuDriver {
             "--log-color".into(),
             "never".into(),
         ];
-        if let Some(marker) = req.payload.sentinel.exit_on() {
+        if let Some(marker) = req.sentinel().exit_on() {
             emu.push("--exit-on".into());
             emu.push(marker.into());
         }
@@ -1105,7 +1129,28 @@ impl ConfigurationDriver for LpEmuDriver {
         }
         let elf = match &req.image {
             Some(path) => {
-                notes.push(if usb {
+                notes.push(if arm.link == Link::Uart0 {
+                    // NOT the spike sentence, and the difference matters in a
+                    // sidecar: `spike_uart0_link` is a C6 cargo feature and a
+                    // cherry-pick onto a C6 commit. This chip's host link IS
+                    // UART0, there is no feature and no dirty tree, and a
+                    // note saying otherwise would misdescribe the product as
+                    // a workaround (M5 ruling R4).
+                    format!(
+                        "running the pinned image {} rather than building one, and on this \
+                         chip that is the ONLY way the comparison is one: the transcript it \
+                         is set beside was taken on a board flashed with these exact bytes, \
+                         same commit and same sha256, so what differs between the two \
+                         captures is the machine and not the build (DD30). Nothing is \
+                         cherry-picked — UART0 over the CH340K is this part's shipped link, \
+                         not a feature — and \
+                         `scripts/emu/build-reference-image.sh --chip {} {} <commit> none` \
+                         builds it in a detached worktree at that commit.",
+                        path.display(),
+                        spec.espflash_chip,
+                        req.features()?.join(","),
+                    )
+                } else if usb {
                     format!(
                         "running the pinned image {} rather than building one. It is the \
                          shipped image over its own USB-Serial-JTAG link — no \
@@ -1178,7 +1223,7 @@ impl ConfigurationDriver for LpEmuDriver {
         // A payload whose subject is machine state has no console output at
         // all — with no cable the device says nothing, which is the finding —
         // so its transcript is the machine's own `--probe` report on stdout.
-        let state_payload = matches!(req.payload.sentinel, Sentinel::State(_));
+        let state_payload = matches!(req.sentinel(), Sentinel::State(_));
         let secs = req.run_secs();
         let mut emu: Vec<String> = vec![
             "cargo".into(),
@@ -1266,11 +1311,28 @@ impl ConfigurationDriver for LpEmuDriver {
                 }
                 // Both are printed VERBATIM by the ROM's own banner
                 // (`rst:0x%x` / `boot:0x%x`), so they are inputs to the
-                // transcript, not decoration.
-                emu.push("--reset-cause".into());
-                emu.push(reset_cause.into());
-                emu.push("--strap".into());
-                emu.push(strap.into());
+                // transcript, not decoration — on a machine that models more
+                // than one of each. The classic models exactly one reset
+                // cause and one strap and has no flags for them, so stating
+                // them there is a refusal rather than a no-op; the values the
+                // payload asks for are that machine's defaults, and the note
+                // is what keeps them on the record.
+                if spec.takes_reset_cause {
+                    emu.push("--reset-cause".into());
+                    emu.push(reset_cause.into());
+                    emu.push("--strap".into());
+                    emu.push(strap.into());
+                } else {
+                    notes.push(format!(
+                        "the boot is `{reset_cause}` / strap `{strap}`, and `{}`'s machine \
+                         takes no flag for either: it models one reset cause \
+                         (`loader::ResetCause::PowerOn`) and latches \
+                         `GPIO_STRAP_SPI_FAST_FLASH_BOOT`, which are exactly those two. \
+                         Recorded here rather than passed, so the transcript still says what \
+                         the ROM banner's `rst:` and `boot:` words are a record of.",
+                        spec.emu_package,
+                    ));
+                }
             }
         }
         emu.push("--time-grade".into());
@@ -1322,7 +1384,7 @@ impl ConfigurationDriver for LpEmuDriver {
             // of a machine quietly answering questions it cannot answer.
             "--strict-bus".into(),
         ]);
-        if let Some(marker) = req.payload.sentinel.exit_on() {
+        if let Some(marker) = req.sentinel().exit_on() {
             emu.push("--exit-on".into());
             emu.push(marker.into());
         }
@@ -2332,6 +2394,16 @@ mod tests {
         // And it is still a ROM-up boot, through the real mask ROM.
         assert!(!runs[0].command.iter().any(|a| a == "--elf"), "{rendered}");
         assert!(rendered.contains("the SECOND boot"), "{rendered}");
+
+        // The classic's binary has no `--reset-cause` / `--strap`: it models
+        // one of each, and passing a door it does not have is exit 64, not a
+        // no-op. The choice is on the record as a note instead.
+        assert!(
+            !runs[0].command.iter().any(|a| a == "--reset-cause"),
+            "{rendered}"
+        );
+        assert!(!runs[0].command.iter().any(|a| a == "--strap"), "{rendered}");
+        assert!(rendered.contains("takes no flag for either"), "{rendered}");
     }
 
     /// The other side of the same rule: a payload that does not ask for a
@@ -2350,6 +2422,9 @@ mod tests {
         assert_eq!(runs, 1, "{rendered}");
         assert!(rendered.contains("--merged"), "{rendered}");
         assert!(!rendered.contains("--flash "), "{rendered}");
+        // And the C6 DOES take the two ROM-banner flags, so they are stated.
+        assert!(rendered.contains("--reset-cause poweron"), "{rendered}");
+        assert!(rendered.contains("--strap app"), "{rendered}");
     }
 
     #[test]

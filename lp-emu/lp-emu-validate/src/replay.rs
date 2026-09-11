@@ -527,7 +527,7 @@ pub fn replay(
         if t.sentinel_line().is_none() {
             structural_problems.push(format!(
                 "{side} transcript never reached the payload sentinel `{}`",
-                payload.sentinel.marker()
+                t.sentinel_marker()
             ));
         }
     }

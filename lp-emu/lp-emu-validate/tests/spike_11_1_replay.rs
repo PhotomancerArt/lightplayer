@@ -399,6 +399,15 @@ fn every_committed_transcript_is_filed_where_its_header_says() {
 /// Not one value changed and no `.txt` was touched — which the filing test
 /// above proves independently, since `baud` is part of the stem and those
 /// four filenames are unchanged.
+///
+/// **`silicon:` captures only**, and the restriction is the point rather than
+/// a convenience. `baud` is the rate a capture was taken at — a property of
+/// the cable between a board and a reader — and M5 P6's emulated twins have
+/// no cable: their bytes are drained out of the UART0 model, and a rate
+/// written into one of those sidecars would be a number nobody measured. The
+/// MAC and the revision they DO carry, out of `validate.toml`'s eFuse
+/// identity, which is a different claim and is checked where the twins are
+/// (`tests/v3_replays.rs`).
 #[test]
 fn the_classics_sidecars_carry_their_mac_revision_and_baud() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../transcripts/esp32v3/boot-idle");
@@ -406,6 +415,13 @@ fn the_classics_sidecars_carry_their_mac_revision_and_baud() {
     for entry in std::fs::read_dir(&root).unwrap() {
         let path = entry.unwrap().path();
         if path.extension().is_none_or(|e| e != "txt") {
+            continue;
+        }
+        if !path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.starts_with("silicon-"))
+        {
             continue;
         }
         let t =

@@ -113,9 +113,22 @@ impl Transcript {
         Ok(None)
     }
 
+    /// The marker THIS transcript's capture was meant to stop on: the
+    /// payload's, on the chip its sidecar names.
+    ///
+    /// Chip-aware because a payload's last line is the firmware's, not the
+    /// registry's: the classic's `boot-idle` triple is elicited and ends at
+    /// `[JIT] used=` where the C6's five-second heartbeat ends at the
+    /// `[stack]` line (`ChipArm::sentinel`). A transcript whose sidecar names
+    /// no arm gets the payload's own marker, which is every C6 file in the
+    /// tree.
+    pub fn sentinel_marker(&self) -> &'static str {
+        self.payload.sentinel_for(&self.header.chip).marker()
+    }
+
     /// 1-based line number of the payload's sentinel, if it appeared.
     pub fn sentinel_line(&self) -> Option<usize> {
-        let marker = self.payload.sentinel.marker();
+        let marker = self.sentinel_marker();
         self.lines
             .iter()
             .position(|l| l.contains(marker))
