@@ -400,7 +400,11 @@ fn every_frame_the_guest_claims_is_on_the_pad_with_the_same_checksum() {
         *resets.iter().min().expect("frames") as f64 / cycles_per_us,
         *resets.iter().max().expect("frames") as f64 / cycles_per_us,
     );
-    let periods: Vec<u64> = r.frames.windows(2).map(|w| w[1].start - w[0].start).collect();
+    let periods: Vec<u64> = r
+        .frames
+        .windows(2)
+        .map(|w| w[1].start - w[0].start)
+        .collect();
     let (p_min, p_max) = (
         *periods.iter().min().expect("frames") as f64 / cycles_per_us,
         *periods.iter().max().expect("frames") as f64 / cycles_per_us,

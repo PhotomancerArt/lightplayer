@@ -132,7 +132,9 @@ pub fn run() -> ! {
     // `Esp32V3RmtWs281xDriver::new` establishes, because windows must never
     // change after init (`RmtHw::ram_words`'s contract).
     let plan = v3_rmt::plan_for_declared(DECLARED_WIRES).expect("a plan for one declared wire");
-    TX_PLAN.init(plan).expect("the block plan is published once");
+    TX_PLAN
+        .init(plan)
+        .expect("the block plan is published once");
 
     // Single core, so this binds the RMT handler on the PRO core (the M4
     // fallback shape). The handler is the product's own trampoline into
