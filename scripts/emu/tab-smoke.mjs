@@ -156,7 +156,7 @@ async function main() {
     "boot=rom-up",
     "strap=download",
     "reset_cause=usb-uart-hpsys",
-    "usb_host=attached-open",
+    "usb_host=attached",
     "mac=02:c6:7a:b0:00:01",
     "",
   ].join("\n");

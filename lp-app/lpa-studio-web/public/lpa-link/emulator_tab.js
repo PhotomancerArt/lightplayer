@@ -46,6 +46,14 @@ export const TAB_BOARD = {
   chip: "esp32c6",
   boot: "rom-up",
   link: "usb-serial-jtag",
+  // `usb_host=attached` is the CLI's own word: the cable in with the port
+  // OPEN from power-on. It has to be, and not the closed `attached-idle`: a
+  // reset returns the USB block to its power-on state, so a board whose port
+  // started closed comes back from every reset with nothing draining — and
+  // the host's reset dance is the FIRST thing a flasher does. Measured
+  // 2026-09-10: with the port closed at power-on, esptool-js's `connect()`
+  // failed on every attempt because the ROM's download console was writing
+  // to a port nobody was reading.
   cfg: [
     "boot=rom-up",
     "strap=app",
@@ -247,9 +255,16 @@ function channelClassFor(hub) {
         if (this.channel === "bytes") {
           // The coupling rule: a byte client arriving IS the machine's
           // `open`. The port sends no verb, so this does.
+          //
+          // An `err` here is NOT fatal, and the door proves it: its own
+          // coupling logs the refusal and carries on, because a board whose
+          // port is open from power-on (`usb_host=attached`, the CLI's
+          // default and this backing's) answers `err open: the port is
+          // already open` on the very first client. Throwing here would make
+          // every board that keeps its boot log unusable.
           const reply = await hub.control("open");
           if (reply.startsWith("err")) {
-            throw new Error(`opening the emulated port: ${reply}`);
+            console.debug(`[emu-tab] open: ${reply}`);
           }
           this._unsubscribe = hub.onBytes((bytes) => {
             this._fire("message", { data: bytes.buffer });
