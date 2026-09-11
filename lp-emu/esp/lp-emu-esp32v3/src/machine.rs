@@ -1433,31 +1433,51 @@ pub fn core_config(core: usize) -> CoreConfig {
 /// PRO core alone and is amended.
 pub const CPENABLE_RESET: u32 = 0xff;
 
-/// `PS` core 1 is released with: `WOE | UM` = `0x0004_0020`.
+/// `PS` core 1 is released with: `WOE | UM | CALLINC(2)` = `0x0006_0020` —
+/// [`PS_BOOT`], the same word a direct load seeds on core 0.
 ///
-/// **The ROM's own post-`_start` word**, read off the vendored rev300 ELF at
-/// `0x40000704` (`movi a2, 0x40020; wsr.ps a2`) — the module docs carry the
-/// disassembly. It is windowed-ABI enabled (`WOE`), user ring (`UM`),
-/// `INTLEVEL = 0`, `EXCM` clear, and `CALLINC = 0`.
+/// # Where the word comes from
 ///
-/// `CALLINC = 0` is the one field worth arguing about, so here is the
-/// argument. On silicon the firmware's entry — esp-hal's
-/// `start_core1_init::<F>`, an ordinary windowed-ABI Rust function whose
-/// prologue is `entry a1, N` — is reached by ROM `main`'s `callx8`, which
-/// would leave `CALLINC = 2` and rotate the window. This machine runs no ROM
-/// on core 1 (see the module docs), so nothing performs that call, and the
-/// released core is the *outermost* frame: `WindowBase = 0`,
-/// `WindowStart = 1`, and an `entry` that rotates by zero. That is the same
-/// architectural shape `_start` itself hands ROM `main`, which is why this is
-/// the ROM's word and not an invention — and the register file behind it is
-/// made safe the same way a direct load's is, with a [`BootFrame`] save area
-/// under `a1` so a window overflow through the outermost frame spills into
-/// the ROM's APP stack instead of through a null pointer.
+/// Two halves, both cited. `WOE | UM` with `INTLEVEL = 0` and `EXCM` clear
+/// is **the ROM's own post-`_start` word**, read off the vendored rev300 ELF
+/// at `0x40000704` (`movi a2, 0x40020; wsr.ps a2`) — the module docs carry
+/// the disassembly. `CALLINC = 2` is what reaching the firmware's entry
+/// costs: esp-hal's `start_core1_init::<F>` is an ordinary windowed-ABI Rust
+/// function whose prologue is `entry a1, N`, and on silicon ROM `main`
+/// reaches it with `callx8`, which sets `PS.CALLINC = 2` and makes that
+/// `entry` rotate the window by two register groups. It is the identical
+/// argument [`PS_BOOT`] records for the IDF bootloader's `callx8` into the
+/// application, on the identical kind of entry point.
 ///
-/// Nothing the firmware's entry does reads `PS.CALLINC`: it never returns
-/// (`-> !`), and `xtensa_lx::set_stack_pointer` zeroes `a0` and moves `a1` to
-/// esp-hal's own APP stack before the first call that could overflow.
-pub const APP_CORE_RELEASE_PS: u32 = lp_xt_emu::mach::sr::PS_WOE | lp_xt_emu::mach::sr::PS_UM;
+/// # ⚠️ `CALLINC = 0` was tried, and the machine refused it
+///
+/// The director's ruling DD53 sketched `PS = 0x40020` — the `_start` word
+/// alone, `CALLINC = 0` — reasoning that a machine which runs no ROM on core
+/// 1 performs no call, so the released core should be the outermost frame.
+/// That derivation misses what `entry` does. With `CALLINC = 0` it does not
+/// rotate: it *consumes* the seeded frame, moving `a1` down by the frame
+/// size in the same window, so the outermost live frame is now
+/// `sp - N` and the [`BootFrame`] save area seeded at `[sp-16, sp)` sits
+/// above it, belonging to nobody. The first window overflow deep enough to
+/// wrap then runs `_WindowOverflow8`'s `l32e a0, a1, -12` over uninitialised
+/// memory, reads zero, and stores through it:
+///
+/// ```text
+/// StrictViolation { cycle: 3261708, pc: 1074266255, address: 4294967264,
+///                   width: Word, access: Write, in_mmio_window: false, grade: None }
+/// ```
+///
+/// — the stop `the_direct_load_mounts_the_flash_filesystem` reports on the
+/// shipped image with this constant set to `0x0004_0020` and nothing else
+/// changed; `pc = 0x400d_570f`, `address = 0xffff_ffe0`. It reproduced
+/// byte-identically on two separate runs, and it is the exact failure
+/// [`BootFrame`]'s docs describe for a hart left with `a1 = 0`: a spill
+/// through a frame whose saved stack pointer is zero. With `CALLINC = 2` the
+/// `entry` rotates past the seeded frame, that frame stays live with its save
+/// area intact, and the overflow spills into the ROM's APP stack. The
+/// ruling's *intent* — the ROM's state, nothing invented — is kept; its
+/// arithmetic is corrected, and this is the correction.
+pub const APP_CORE_RELEASE_PS: u32 = PS_BOOT;
 
 /// A hart at the architectural reset state of **this part**, with the
 /// machine's cycle model and unsupported-opcode policy applied. What `build`
@@ -2696,7 +2716,7 @@ impl Machine {
     /// | field | value | where it comes from |
     /// |---|---|---|
     /// | `pc` | `appcpu_boot_addr` | esp-hal's `start_core1` wrote it ([`crate::periph::dport`]) |
-    /// | `PS` | [`APP_CORE_RELEASE_PS`] = `0x0004_0020` | the ROM's own `_start` word (`0x40000704`) |
+    /// | `PS` | [`APP_CORE_RELEASE_PS`] = `0x0006_0020` | the ROM's own `_start` word (`0x40000704`) plus the `CALLINC(2)` of the call that reaches the entry |
     /// | `a1` | `__stack_app` = `0x3ffe7e30` | the ROM ELF's symbol; `reserved_rom_stack_app`'s end in `third_party/esp-hal/ld/esp32/memory.x:35` |
     /// | `[a1-16, a1)` | a [`BootFrame`] save area | the window-overflow guard the direct load's seam documents |
     /// | `CPENABLE` | [`CPENABLE_RESET`] = `0xff` | measured on the desk board by M4 P1 |
