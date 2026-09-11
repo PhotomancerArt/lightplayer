@@ -323,7 +323,7 @@ async function create(message) {
   lastMicros = 0;
   lastStatsAt = origin;
   lastPersistAt = origin;
-  dilationWindow = [[origin, 0]];
+  resetDilationWindow(origin, 0);
   post({
     type: "created",
     mac: boardMac,
@@ -374,8 +374,11 @@ async function step() {
     if (micros < lastMicros) {
       // The chip rebooted inside the slice (`reboot_on_reset`): guest time
       // restarted, so the anchor has to as well or the loop would believe it
-      // was hours behind and drop for ever.
-      reanchor(now(), micros);
+      // was hours behind and drop for ever — and the dilation window's
+      // samples are now about a machine that no longer exists.
+      const at = now();
+      reanchor(at, micros);
+      resetDilationWindow(at, micros);
       post({ type: "rebooted", reboots: Number(emu.reboots()) });
     }
     lastMicros = micros;
@@ -400,8 +403,18 @@ async function step() {
 function reanchor(wallAt, micros) {
   origin = wallAt;
   guestOrigin = micros;
-  // The window's samples are relative to the old anchor and would read as a
-  // huge stall; start it again from here.
+  // The dilation window is deliberately NOT touched here. A re-anchor is the
+  // pacing rule dropping a deficit, and dilation is what reports that it
+  // happened: guest microseconds advanced per wall microsecond elapsed, over
+  // a window that spans re-anchors. Clearing it here left the window with one
+  // sample — and since a guest slower than real time re-anchors on EVERY
+  // slice, the number was `null` for ever, which is precisely when it was
+  // wanted (measured 2026-09-10: 18 s of guest time and no dilation at all).
+}
+
+/// A reboot restarts guest time, so the samples before it describe a machine
+/// that no longer exists. This is the one thing that empties the window.
+function resetDilationWindow(wallAt, micros) {
   dilationWindow = [[wallAt, micros]];
 }
 
