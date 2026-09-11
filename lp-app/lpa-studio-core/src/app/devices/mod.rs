@@ -123,7 +123,7 @@ pub use devices_op::{DeviceFace, DevicesOp};
 pub use emu_transport::{
     EmuBacking, EmuDeviceTransport, EmuLinkSource, EmuRuntimeControl, EmuSession,
 };
-pub use runtime_backing::{Backing, EMULATED_TARGETS, backing_for};
+pub use runtime_backing::{Backing, EMULATED_TARGETS, backing_for, emu_offered_for};
 pub use runtime_band::UiRuntimeBand;
 pub use shared_link_client_io::{ConversationInbox, SharedLinkClientIo};
 pub use sim_create_op::{SimCreateOp, sim_device_name};
