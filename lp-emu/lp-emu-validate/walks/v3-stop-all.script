@@ -1,0 +1,30 @@
+# The classic's `boot-idle` heartbeat triple is ELICITED — it does not fall
+# out of a boot the way the C6's does.
+#
+# `esp32_memory_stats` (`lp-fw/fw-esp32v3/src/main.rs`) is what prints
+# `[stack] heartbeat:` / `[MEM] free=` / `[JIT] used=`, and `lpa_server` calls
+# it on a project load, a project unload, a stop-all, or a client
+# `runtime_status` — NEVER from the five-second server heartbeat, which calls
+# `heartbeat_memory_stats` and prints nothing at all. So the C6's shape for
+# this payload (boot, wait 5.5 s, stop on the `[stack]` line) records an empty
+# transcript here: a classic boot with nobody talking prints no `[MEM]`, no
+# `[JIT]` and no `[stack] heartbeat:` line at all.
+#
+# This file is the asking. `stopAllProjects` is the smallest request that
+# reaches the same call site — `handlers::handle_stop_all_projects` calls
+# `log_memory` whether or not a project is loaded — and it is the same
+# stimulus the desk sitting uses (lab task L1, 2026-09-10), so silicon and an
+# emulated configuration are the same stimulus as well as the same bytes.
+#
+# ⚠️ Byte-for-byte `lp-emu/esp/lp-emu-esp32v3/tests/boot_idle.rs`'s `STOP_ALL`,
+# on that file's `LAST_LINE`, +1 ms — `stop_all_script()` there delays
+# `CYCLES_PER_US * 1_000`. `a_committed_stop_all_script_matches_boot_idles`
+# (`lp-emu-validate/src/payload.rs`) checks this file against those constants
+# rather than trusting the eye; if you edit this line, that test is what tells
+# you the gate and the walk have drifted apart.
+#
+# The known, unwidened gap (L1): this send lands 1 ms of emulated time after
+# the trigger, where a desk host's select loop polls at 50 ms. That is host
+# latency, and it is why nothing in the `timing` class is compared for this
+# payload.
+after "[INIT] I/O task spawned" +1 "M!{\"id\":1,\"msg\":\"stopAllProjects\"}\n"
