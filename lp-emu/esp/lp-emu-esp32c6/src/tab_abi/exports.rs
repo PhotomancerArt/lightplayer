@@ -552,6 +552,14 @@ pub unsafe extern "C" fn emu_flash_read(off: i32, out_ptr: i32, len: i32) -> i32
 /// bits, so writing an image over an unerased chip would AND it into
 /// nonsense. The host that calls this has the whole image and means it (D5).
 ///
+/// **One call per contiguous region.** Because the erase granule is 4 KiB,
+/// two calls whose ranges share a sector erase each other: the second one's
+/// erase takes the first one's bytes with it. A host that streams a large
+/// image must therefore either send it in one call or align every chunk to
+/// [`SECTOR_LEN`](crate::flash::SECTOR_LEN). This is the part's own
+/// behaviour rather than a limitation of the ABI, and a flasher on the wire
+/// has exactly the same rule.
+///
 /// # Safety
 ///
 /// The range must be readable in this module's memory.
