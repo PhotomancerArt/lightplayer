@@ -858,10 +858,8 @@ impl JitCore {
         // already takes a base for exactly this; this is the one place the two
         // hosts differ in what they put in it.
         #[cfg(target_family = "wasm")]
-        let (mem_base, memory_pages) = (
-            arena_ptr as u32,
-            core::arch::wasm32::memory_size(0) as u64,
-        );
+        let (mem_base, memory_pages) =
+            (arena_ptr as u32, core::arch::wasm32::memory_size(0) as u64);
         #[cfg(not(target_family = "wasm"))]
         let (mem_base, memory_pages) = (0u32, at.pages);
 

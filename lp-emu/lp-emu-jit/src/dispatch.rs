@@ -658,13 +658,27 @@ mod tests {
                 )
             };
             for (i, b) in set.blocks.iter().enumerate() {
-                assert_eq!(lookup(b.pc), i as i32, "base {base:#x}, block {i} at {:#010x}", b.pc);
-                assert_eq!(lookup(b.pc + 2), -1, "base {base:#x}, mid-block at {:#010x}", b.pc + 2);
+                assert_eq!(
+                    lookup(b.pc),
+                    i as i32,
+                    "base {base:#x}, block {i} at {:#010x}",
+                    b.pc
+                );
+                assert_eq!(
+                    lookup(b.pc + 2),
+                    -1,
+                    "base {base:#x}, mid-block at {:#010x}",
+                    b.pc + 2
+                );
             }
             // Every page with no block start reads -1, page zero and the top
             // of the address space included.
             for addr in [0u32, 2, 0x4080_0000, 0x5000_0000, 0xffff_fffe] {
-                assert_eq!(lookup(addr), -1, "base {base:#x}, {addr:#010x} starts no block");
+                assert_eq!(
+                    lookup(addr),
+                    -1,
+                    "base {base:#x}, {addr:#010x} starts no block"
+                );
             }
         }
     }

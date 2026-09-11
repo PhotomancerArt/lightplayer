@@ -191,7 +191,13 @@ pub extern "C" fn jit_mmio_load(pc: i32, cycle: i64, address: i32, kind: i32) ->
 pub extern "C" fn jit_mmio_store(pc: i32, cycle: i64, address: i32, kind: i32, value: i32) -> i32 {
     // SAFETY: as [`jit_mmio_load`].
     let ops = unsafe { &mut *current() };
-    ops.mmio_store(pc as u32, cycle as u64, address as u32, kind as u32, value as u32) as i32
+    ops.mmio_store(
+        pc as u32,
+        cycle as u64,
+        address as u32,
+        kind as u32,
+        value as u32,
+    ) as i32
 }
 
 /// `emu.step_one`: the escape hatch (JD10). Runs exactly one guest instruction
