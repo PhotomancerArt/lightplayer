@@ -35,17 +35,52 @@
 //!    path cannot be made to work by giving a register a peripheral model
 //!    owns its documented reset value.
 //!
-//! # Why the classic needs no `seed_data_image`
+//! # The classic needs `seed_data_image` too, and P7 found out why
 //!
 //! The C6's [`DataImage`] equivalent had to *reconstruct* a copy image: its
 //! ROM ELF is a debug view whose `_data_table_start` triples point at source
-//! bytes no section of the ELF carries. The classic's do not: every
-//! non-alloc `.data_*` section carries its bytes at a real file offset
-//! (`.data_xtos_pro` at file `0x06EA10`, and so on), so [`seed_data`] reads
-//! them directly and [`seed_data_image`] is **reporting only** — which of
-//! them were seeded, how many bytes, how many were empty. Ruling **R2**: seed
-//! every non-alloc `.data_*`, report the list, and assert it in `boot.rs` —
-//! never "the ones a boot needed".
+//! bytes no section of the ELF carries. P2 read the classic's ELF and
+//! concluded it did not need one — every non-alloc `.data_*` section carries
+//! its bytes at a real file offset (`.data_xtos_pro` at file `0x06EA10`, and
+//! so on), so [`seed_data`] reads them directly. That is true, and it is
+//! only half the story: it puts the bytes at the **destination**.
+//!
+//! ⚠️ **A ROM-up boot runs `unpcopy`, and `unpcopy` reads a source.** The
+//! reset vector's unpack loop walks a table of sixteen-byte quadruples at
+//! `_data_start` (`0x4000_D4F8`) … `_data_end` (`0x4000_D5C8`):
+//!
+//! ```text
+//! 40000501 <unpackloop>:
+//! 40000501:  l32i.n a6, a4, 0      ; destination start
+//! 40000503:  l32i.n a7, a4, 4      ; destination end
+//! 40000505:  l32i.n a8, a4, 8      ; SOURCE
+//! 40000507:  l32i.n a2, a4, 12     ; flag
+//! 40000515 <alwaysunpack>:
+//! 40000515:  l32i.n a2, a8, 0      ; *dst++ = *src++
+//! 40000517:  s32i.n a2, a6, 0
+//! 4000051d:  bltu   a6, a7, 40000515
+//! 40000520:  addi   a4, a4, 16
+//! ```
+//!
+//! and the sources are `0x4000_D670`…`0x4000_D890` and
+//! `0x4000_F0D0`…`0x4000_F4E8` — **past the end of `.text`** (which ends at
+//! `0x4000_D66C`), in the two `PT_LOAD`s whose `PhysAddr` differs from their
+//! `VirtAddr` and which `load` therefore places at their *virtual* address.
+//! Nothing put anything at the source, so on a ROM-up boot the loop copied
+//! **zeros over every seeded section**. The symptom was a long way from the
+//! cause: `g_ticks_per_us` went from the ROM's 13 to 0 at cycle 1,860, and
+//! four million cycles later the ESP-IDF bootloader's log timestamp divided
+//! by `ets_get_cpu_frequency() * 1000` and took a division-by-zero exception
+//! inside its own exception handler — reported as an unsupported `simcall`
+//! in `_DebugExceptionVector`.
+//!
+//! So [`seed_data_image`] places the ROM's **own copy** of those bytes at
+//! the source addresses the ROM's table names, read out of the table itself
+//! rather than guessed. `unpcopy` then copies the right bytes, exactly as it
+//! does on silicon, and a direct load (which never runs it) is unaffected.
+//!
+//! Ruling **R2** is unchanged: seed every non-alloc `.data_*`, report the
+//! list, and assert it in `boot.rs` — never "the ones a boot needed".
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -451,9 +486,116 @@ pub struct DataImage {
     pub bytes: u32,
 }
 
+/// The ROM's own unpack table: `_data_start` … `_data_end`, sixteen bytes
+/// per entry — `(destination start, destination end, source, flag)`.
+pub const UNPACK_TABLE_START: &str = "_data_start";
+pub const UNPACK_TABLE_END: &str = "_data_end";
+/// Bytes per entry.
+pub const UNPACK_ENTRY_LEN: u32 = 16;
+
+/// One range the reset vector's `unpcopy` will copy, and where from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UnpackRange {
+    pub dst: u32,
+    pub end: u32,
+    pub src: u32,
+}
+
+impl UnpackRange {
+    pub const fn len(&self) -> u32 {
+        self.end.saturating_sub(self.dst)
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        self.end <= self.dst
+    }
+}
+
+/// Read the ROM's unpack table out of the ROM image.
+///
+/// Out of the **image**, never out of a constant: the table is data in the
+/// ROM's own `.text`, so a different ROM revision carries a different one and
+/// this reads whichever one was vendored. An ELF with no `_data_start` /
+/// `_data_end` (a `--rom` override without symbols) yields an empty list and
+/// no placement, which is the old behaviour.
+pub fn unpack_table(bus: &SocBus, rom: &ElfImage) -> Vec<UnpackRange> {
+    let (Some(start), Some(end)) = (
+        rom.symbol(UNPACK_TABLE_START).map(|s| s.address),
+        rom.symbol(UNPACK_TABLE_END).map(|s| s.address),
+    ) else {
+        log::warn!(
+            "rom: no `{UNPACK_TABLE_START}`/`{UNPACK_TABLE_END}` in this ROM ELF; the reset \
+             vector's unpack loop will copy whatever is at its source addresses"
+        );
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let mut at = start;
+    while at + UNPACK_ENTRY_LEN <= end {
+        // Out of the bus, because `load` has already placed the ROM's
+        // `.text` there and the table is data inside it.
+        let word = |i: u32| -> Option<u32> {
+            let bytes = read_span(bus, at + 4 * i, 4)?;
+            Some(u32::from_le_bytes(bytes.try_into().ok()?))
+        };
+        match (word(0), word(1), word(2)) {
+            (Some(dst), Some(end_), Some(src)) => out.push(UnpackRange {
+                dst,
+                end: end_,
+                src,
+            }),
+            _ => break,
+        }
+        at += UNPACK_ENTRY_LEN;
+    }
+    out
+}
+
+/// Place the ROM's own copy of the seeded data at the **source** addresses
+/// its unpack table names, and report what [`seed_data`] did.
+///
+/// See the module docs for why this exists on the classic. The bytes come
+/// from the destinations [`seed_data`] has already filled, so the copy loop
+/// a ROM-up boot really runs moves the ELF's bytes rather than zeros; a
+/// destination the ELF left empty is copied as it is, because an invented
+/// source would be worse than an honest zero.
+pub fn seed_data_image(
+    bus: &mut SocBus,
+    rom: &ElfImage,
+    seeded: &[SeededSection],
+) -> Result<DataImage, RomError> {
+    for range in unpack_table(bus, rom) {
+        if range.is_empty() || range.src == range.dst {
+            continue;
+        }
+        let len = range.len();
+        let Some(bytes) = read_span(bus, range.dst, len) else {
+            log::warn!(
+                "rom: the unpack table's destination {:#010x}+{len} is in no region; its \
+                 source at {:#010x} is left as it is",
+                range.dst,
+                range.src
+            );
+            continue;
+        };
+        place_spanning(bus, range.src, &bytes, len)?;
+    }
+    Ok(image_of(seeded))
+}
+
+/// `len` bytes at `address` out of whichever region holds them.
+fn read_span(bus: &SocBus, address: u32, len: u32) -> Option<Vec<u8>> {
+    let region = bus
+        .regions()
+        .iter()
+        .find(|r| r.contains(address) && r.contains(address + len - 1))?;
+    let at = (address - region.base) as usize;
+    Some(bus.region_bytes(region)[at..at + len as usize].to_vec())
+}
+
 /// Report what [`seed_data`] did. Takes the seeded list rather than the bus
 /// so it cannot disagree with it.
-pub fn seed_data_image(seeded: &[SeededSection]) -> DataImage {
+fn image_of(seeded: &[SeededSection]) -> DataImage {
     DataImage {
         sections: seeded.len(),
         bytes: seeded.iter().map(|s| s.len).sum(),

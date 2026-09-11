@@ -136,6 +136,8 @@ pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     // ROM-up, stop 1: `_ResetHandler_efuse_check_patch` reads its own
     // fuses seven instructions after the reset vector.
     "EFUSE",
+    // ROM-up, cycle 7,430: `gpio_pad_unhold` reads `RTC_IO.dig_pad_hold`.
+    "RTC_IO",
     // ROM-up, in `main`: `uartAttach` (`0x4000_9013`) touches `UART1 +0x10`
     // as well as UART0's, at cycle 30,992 — before `mmu_init` below. The
     // application never opens it, so this is the first place in the boot that
@@ -150,6 +152,14 @@ pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     // `ets_sha_*` family. Nothing earlier on either path touches it — the
     // direct load has no bootloader, and the mask ROM's own reset path does
     // not hash anything.
+    // ROM-up, cycle 9,284,455: the IDF bootloader's RNG early entropy
+    // source reads `SENS.sar_read_ctrl2`.
+    "SENS",
+    // ROM-up, 112 cycles later: the same step reads the SAR through I2S0.
+    "I2S0",
+    // ROM-up, cycle 22,247,148: `bootloader_fill_random()` reads
+    // `WDEV_RND_REG` on the AHB bus (ruling R4).
+    "RNG",
     "SHA",
 ];
 
@@ -1000,6 +1010,7 @@ impl Esp32V3Builder {
                 appcpu.clone(),
                 Some(uart0_stream),
                 flash.clone(),
+                self.seed,
             );
             check_registration_order(&set)?;
             for (base, len, periph) in set {
@@ -1021,7 +1032,11 @@ impl Esp32V3Builder {
         // The ROM first, always (PD7), and its non-alloc data with it.
         let rom_segments = rom::load(&mut bus, &rom_image)?;
         let rom_data = rom::seed_data(&mut bus, &rom_image)?;
-        let rom_data_image = rom::seed_data_image(&rom_data);
+        // …and the ROM's own copy of those bytes at the source addresses its
+        // unpack table names, so that the reset vector's `unpcopy` — which a
+        // ROM-up boot really runs — copies them rather than the zeros the
+        // ELF leaves at their source addresses (`rom`'s module docs).
+        let rom_data_image = rom::seed_data_image(&mut bus, &rom_image, &rom_data)?;
 
         let app_image = match &self.app {
             AppSource::None => None,
@@ -1274,15 +1289,21 @@ impl Machine {
             let mut c = self.cache.lock().expect("cache poisoned");
             let page_mode = c.page_mode(0);
             let page_len = crate::cache::FlashMmu::page_len(page_mode);
+            let mut moved: Vec<u32> = Vec::new();
             for block in written {
                 // A 64 KiB flash block can hold several pages at a finer
                 // page mode; mark each.
                 let base = block * crate::flash::BLOCK_LEN;
                 let mut at = base;
                 while at < base + crate::flash::BLOCK_LEN {
-                    c.mmu.invalidate_page_at(at, page_mode);
+                    moved.extend(c.mmu.invalidate_page_at(at, page_mode));
                     at += page_len;
                 }
+            }
+            // The bytes under those window pages moved, so what they hold is
+            // no longer what the fill last put there.
+            for index in moved {
+                c.forget_fill(index);
             }
         }
         if !self.cache.lock().expect("cache poisoned").mmu.has_dirty() {
@@ -1673,6 +1694,17 @@ impl Machine {
     pub fn peek_symbol(&mut self, name: &str) -> Option<(u32, u32)> {
         let address = self.resolve_symbol(name)?;
         self.peek_word(address).map(|v| (address, v))
+    }
+
+    /// Stop the run the first time `address` is reached.
+    ///
+    /// The address form of [`break_at`](Self::break_at), for a caller that
+    /// already has one — the application's `e_entry`, say, whose symbol name
+    /// (`_start`) the **mask ROM** also uses, so resolving it by name finds
+    /// the wrong one on a machine that has both loaded.
+    pub fn break_at_address(&mut self, address: u32) -> Result<u32, RomError> {
+        self.hooks
+            .install_at(&mut self.bus, address, "break-at", |_| HookResult::Stop)
     }
 
     /// Stop the run the first time `symbol` is reached. Installs a hook that
@@ -2337,6 +2369,20 @@ impl Machine {
     /// architectural breakpoint.
     fn serve_breakpoint(&mut self, pc: u32) -> bool {
         let Some(hook) = self.hooks.get(pc) else {
+            // The guest executed a `break` nothing claims. It gets the
+            // architectural debug exception, which on this chip's mask ROM
+            // is three instructions ending in `simcall` — so what a reader
+            // sees is an unsupported opcode inside
+            // `_DebugExceptionVector`, a long way from the pc that asked for
+            // it. Name the real one here, once per address.
+            log::warn!(
+                "break at {pc:#010x}{} with no hook: the guest takes the \
+                 architectural debug exception",
+                match self.symbolize(pc) {
+                    Some(name) => format!(" ({name})"),
+                    None => String::new(),
+                }
+            );
             return false;
         };
         self.hook_calls += 1;

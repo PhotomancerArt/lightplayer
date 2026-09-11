@@ -81,6 +81,51 @@ impl ImageSegment {
     pub fn window(&self) -> Option<&'static str> {
         crate::loader::flash_window_of(self.vaddr).map(|(name, _)| name)
     }
+
+    /// Is this segment copied into on-chip RAM?
+    ///
+    /// ESP-IDF's `should_load()` (`bootloader_support/src/esp_image_format.c`)
+    /// asks whether the load address is in one of the chip's RAM windows and
+    /// skips the segment when it is not. The shipped image has such a
+    /// segment — number 5, `vaddr=00000000`, the DWARF/unwind block the
+    /// linker emits outside every region — and the bootloader's line for it
+    /// ends with an **empty** `%s` rather than `load`.
+    pub fn is_loaded(&self) -> bool {
+        if self.is_mapped() {
+            return false;
+        }
+        // SRAM0 (the IRAM window, where the vectors and `.rwtext` go), SRAM1
+        // and SRAM2 as `memmap` declares them, and RTC fast's data view.
+        let spans = [
+            (crate::memmap::SRAM0_BASE, crate::memmap::SRAM0_LEN),
+            (
+                crate::memmap::SRAM1_DBUS_BASE,
+                crate::memmap::SRAM1_DBUS_LEN,
+            ),
+            (
+                crate::memmap::SRAM2_ROM_RESERVED,
+                crate::memmap::DRAM_SEG_BASE + crate::memmap::DRAM_SEG_LEN
+                    - crate::memmap::SRAM2_ROM_RESERVED,
+            ),
+            (crate::memmap::RTC_FAST_DBUS, crate::memmap::RTC_FAST_LEN),
+            (crate::memmap::RTC_SLOW_BASE, crate::memmap::RTC_SLOW_LEN),
+        ];
+        spans
+            .iter()
+            .any(|(base, len)| self.vaddr >= *base && self.vaddr - base < *len)
+    }
+
+    /// The word the bootloader's `esp_image: segment N:` line ends with:
+    /// `map`, `load`, or nothing at all.
+    pub fn placement(&self) -> &'static str {
+        if self.is_mapped() {
+            "map"
+        } else if self.is_loaded() {
+            "load"
+        } else {
+            ""
+        }
+    }
 }
 
 /// An `esptool` image's header and segment table.
@@ -426,6 +471,14 @@ mod tests {
             "DRAM is loaded; both flash windows are mapped"
         );
         assert!(!image.segments[1].is_mapped());
+        assert_eq!(
+            image
+                .segments
+                .iter()
+                .map(|s| s.placement())
+                .collect::<Vec<_>>(),
+            vec!["map", "load", "map", "map"],
+        );
         // The line the desk board prints on every boot is about this count.
         assert_eq!(image.drom_segments(), 2);
     }

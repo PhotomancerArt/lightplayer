@@ -349,6 +349,12 @@ ESP32_TARGETS = [
     # WDEV_RND_REG, on the AHB bus (P3 found the window; P7 models the block).
     _v3("rng", "RNG"),
     _v3("frc_timer", "FRC_TIMER"),
+    # ⚠️ **The RNG's entropy path, not an audio block.** The ESP-IDF
+    # second-stage bootloader's `bootloader_random_enable()` drives I2S0's
+    # ADC-sampling mode to stir the hardware RNG, so a ROM-up boot reaches
+    # `0x3FF4_F0B0` five lines into the bootloader's log (P7). Nothing on
+    # this chip's audio path is modelled and nothing here suggests it is.
+    _v3("i2s0", "I2S0"),
     # M4's peripheral, generated here so M4 does not touch this script.
     _v3("rmt", "RMT"),
 ]

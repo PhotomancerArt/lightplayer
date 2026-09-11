@@ -357,13 +357,28 @@ fn the_ahb_mirror_is_the_same_block_at_a_second_base() {
     assert_eq!(machine.bus_mut().read_word(dport).unwrap(), 0x0000_0057);
 
     // The blocks nothing maps stay a strict stop through either door: an
-    // alias needs a registered block to point at (`SENS` is P5's).
+    // alias needs a registered block to point at.
+    //
+    // ⚠️ P5 wrote this against `SENS`, which P7's ROM-up boot reached — the
+    // ESP-IDF bootloader's RNG entropy step — so `SENS` is registered and
+    // aliased now. `FLASH_ENCRYPTION` is the block that is still named and
+    // unmapped, and it takes the assertion over.
+    let unmapped_ahb =
+        memmap::dport_to_ahb(memmap::periph::FLASH_ENCRYPTION).expect("it is in the mirror");
+    assert!(
+        machine
+            .peripheral_alias_map()
+            .iter()
+            .all(|(_, base, len)| unmapped_ahb < *base || unmapped_ahb >= base + len)
+    );
+    // …and `SENS` now *is* one, at the AHB address the ROM's own `main`
+    // reaches it through (P3 §4.3).
     let sens_ahb = memmap::dport_to_ahb(memmap::periph::SENS).expect("SENS is mirrored");
     assert!(
         machine
             .peripheral_alias_map()
             .iter()
-            .all(|(_, base, len)| sens_ahb < *base || sens_ahb >= base + len)
+            .any(|(n, base, _)| *n == "SENS" && *base == sens_ahb)
     );
 }
 
@@ -653,64 +668,53 @@ fn strict_stops_somewhere_honest_from_the_reset_vector() {
 /// (`0x4000_9013`) writing `UART1 +0x10`, which the P3 ledger's §4.3 named
 /// in advance.
 ///
-/// **P6 modelled both UARTs, and the ROM walked past `uartAttach` and
-/// `Uart_Init`.** Its next strict stop is a block the P3 ledger did *not*
-/// predict — §4.3 expected `GPIO.strap` or `spi_flash_attach` next — and
-/// that is the reading this test now holds: the ROM's `gpio_pad_unhold`
-/// reads **`RTC_IO +0x74` (`dig_pad_hold`)** at `0x4000_a67d`, cycle 7,430.
-/// `RTC_IO` is on P5's "not reached by P3 and still unmapped" list; it is
-/// reached now, and it is P7's or P8's to answer, not P6's.
+/// **P6 modelled both UARTs and P7 the rest**, so the ROM-up path no longer
+/// stands on a strict stop at all: it walks the whole mask ROM, hands over to
+/// the real ESP-IDF second-stage bootloader, and gets as far as the
+/// bootloader's own `esp_cpu_dbgr_is_attached()`.
+///
+/// P6's reading was `RTC_IO +0x74` (`dig_pad_hold`) at `0x4000_a67d`, cycle
+/// 7,430 — P7 answered it with an accept block, along with `GPIO.strap`,
+/// `SENS`, `I2S0` and the RNG. What this test holds now is the shape of the
+/// walk: **zero unmapped accesses, no strict refusal**, and the ROM's own
+/// banner on the wire. `tests/rom_up_boot.rs` compares the log itself.
 #[test]
-fn rom_up_walks_past_uart_attach_and_stands_at_rtc_io() {
+#[ignore = "needs the shipped image and espflash; run through `just test-emu-esp32v3-boot`"]
+fn rom_up_walks_the_whole_mask_rom_with_no_strict_stop() {
+    let Some(chip) = merged_chip() else { return };
     let mut machine = Esp32V3Builder::new()
         .boot_mode(BootMode::RomUp)
+        .flash(chip)
         .strict(true)
         .build()
         .expect("builds");
-    let outcome = machine.run_until(&StopCondition::after_micros(20_000));
-    let Outcome::StrictBus { violation } = outcome else {
-        panic!("the ROM-up path stops on RTC_IO, not on {outcome:?}");
-    };
-    assert_eq!(violation.pc, 0x4000_a67d);
-    assert_eq!(
-        violation.address,
-        memmap::periph::RTC_IO + 0x74,
-        "RTC_IO.dig_pad_hold, read by the ROM's own pad-unhold routine"
-    );
-    assert_eq!(violation.cycle, 7_430);
+    let outcome = machine.run_until(&StopCondition::after_micros(2_000_000));
     assert!(
-        violation.in_mmio_window,
-        "an unmodelled block, not a wild pointer"
+        machine.first_strict_violation().is_none(),
+        "no strict refusal anywhere in the ROM or the bootloader: {outcome:?}"
     );
-    // And `uartAttach`'s two writes are behind it: both UARTs took them.
+    assert_eq!(
+        machine.bus().unmapped_reads() + machine.bus().unmapped_writes(),
+        0,
+        "and zero unmapped accesses"
+    );
+    // `uartAttach`'s two writes are behind it: both UARTs took them.
     assert_eq!(
         machine.peek_word(memmap::periph::UART1 + 0x10),
         Some(0),
         "UART1.int_clr is write-only and reads back zero"
     );
-
-    // The eFuse check is behind it: the read command self-cleared and the
-    // opcode the ROM wrote is remembered.
-    assert_eq!(
-        machine.peek_word(memmap::periph::EFUSE + 0x104),
-        Some(0),
-        "EFUSE.cmd.read_cmd cleared itself"
+    let text = machine.uart0().text();
+    assert!(
+        text.starts_with("ets Jul 29 2019 12:21:46\r\n"),
+        "the mask ROM's own first line:\n{text}"
     );
-    assert_eq!(
-        machine.peek_word(memmap::periph::EFUSE + 0x0fc),
-        Some(0x5aa5),
-        "EFUSE.conf, the read opcode the ROM wrote"
-    );
-    // And the identity the check reloaded and compared three times over.
-    assert_eq!(
-        machine.peek_word(memmap::periph::EFUSE + 0x04),
-        Some(0xf5ec_f634),
-        "blk0_rdata1: MAC[2..6] of the desk board, big-endian"
+    assert!(
+        text.contains("2nd stage bootloader"),
+        "and the real bootloader's:\n{text}"
     );
 }
 
-/// The one number the ROM's check pins exactly: `cmd`'s first read must be
-/// 1 on each of the three calls, because the caller adds it to a checksum.
 #[test]
 fn the_efuse_checks_accumulator_lands_on_the_roms_own_constant() {
     let mut machine = Esp32V3Builder::new()
@@ -724,8 +728,16 @@ fn the_efuse_checks_accumulator_lands_on_the_roms_own_constant() {
     // a wrong first read sends the ROM to `_rtc_trigger_sw_system_reset`
     // (`0x4000_FDC7`), which writes RTC_CNTL +0x00 and then `ill.n`.
     let outcome = machine.run_until(&StopCondition::after_micros(20_000));
+    // ⚠️ P5 read a `StrictBus` here, because the ROM-up walk stopped on the
+    // next unmodelled block inside 20 ms. P7 answered every block it meets,
+    // so within 20 ms the walk is simply still running — the deadline. What
+    // is being asserted either way is the same thing, and it is the second
+    // assertion: the ROM did **not** take its software-reset path.
     assert!(
-        matches!(outcome, Outcome::StrictBus { .. }),
+        matches!(
+            outcome,
+            Outcome::Deadline { .. } | Outcome::StrictBus { .. }
+        ),
         "no fault: the anti-glitch check passed rather than resetting: {outcome:?}"
     );
     let pc = machine.harts[0].pc();

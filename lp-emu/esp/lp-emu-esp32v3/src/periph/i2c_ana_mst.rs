@@ -76,15 +76,38 @@ use lp_emu_esp_common::periph::RegGrade;
 use lp_emu_esp_common::regnames::RegNames;
 use lp_emu_esp_common::{BusCx, Peripheral, RegFile, Width};
 
-/// The block's aperture: eight command/status words, one per `host_id`
+/// How many command/status words the block has, one per `host_id`
 /// (`0x6000_E000 + 4·host_id`; the BBPLL is host 4, and the highest host
 /// esp-idf names for this chip is 7).
 ///
-/// Tight on purpose — a ninth host is a strict stop, not a silent zero — and
-/// the ROM's other literals in the block (`+0x50`, `+0x5c`, `+0x80`, the
-/// PHY's `ANA_CONFIG` words, P3's §4.3) are outside it until a boot reaches
-/// them.
-pub const I2C_ANA_MST_LEN: u32 = 0x20;
+/// Only these eight run a transaction. A ninth *host* is still a strict
+/// stop rather than a silent zero: the aperture below is larger than the
+/// host words, and everything past them is accept-and-remember.
+pub const I2C_ANA_MST_HOSTS: u32 = 8;
+
+/// The block's aperture.
+///
+/// P5 had this tight at `0x20` — the eight host words and nothing else —
+/// with a note that "the ROM's other literals in the block (`+0x50`,
+/// `+0x5c`, `+0x80`, the PHY's `ANA_CONFIG` words, P3's §4.3) are outside it
+/// until a boot reaches them". **P7's ROM-up boot reaches them**: the
+/// ESP-IDF second-stage bootloader's clock bring-up reads `+0x44` at cycle
+/// 2,360,588, eleven lines into the log and one instruction into its own
+/// `.text` at `0x4008_10BA`.
+///
+/// `0x6000_E044` and `0x6000_E048` are `ANA_CONFIG_REG` and
+/// `ANA_CONFIG2_REG` in ESP-IDF's `soc/esp32/include/soc/rtc.h` — the words
+/// that gate which analog blocks the I2C master may reach. Nothing in this
+/// machine acts on them: they are **accept-and-remember**, because the
+/// analog store behind the host words answers whatever was written to it
+/// regardless, and a model that gated it would be inventing a gate nobody
+/// measured. The aperture is `0x90` so `+0x80` (the last literal P3's §4.3
+/// found in the ROM's `.text`) is inside it too.
+pub const I2C_ANA_MST_LEN: u32 = 0x90;
+
+/// `ANA_CONFIG_REG` / `ANA_CONFIG2_REG`.
+pub const ANA_CONFIG: u32 = 0x044;
+pub const ANA_CONFIG2: u32 = 0x048;
 
 /// The analog I2C master's register names. **Hand-written**, because the
 /// `esp32` PAC has no block at this address; the layout is the mask ROM's
@@ -100,6 +123,8 @@ pub static I2C_ANA_MST_NAMES: RegNames = RegNames {
         (0x014, "host5"),
         (0x018, "host6"),
         (0x01c, "host7"),
+        (0x044, "ana_config"),
+        (0x048, "ana_config2"),
     ],
     resets: &[],
     access: &[],
@@ -142,7 +167,7 @@ impl I2cAnaMst {
             analog.insert((*block, *reg), *value);
         }
         let mut regs = RegFile::new("I2C_ANA_MST", I2C_ANA_MST_LEN).with_names(I2C_ANA_MST_NAMES);
-        for host in 0..I2C_ANA_MST_LEN / 4 {
+        for host in 0..I2C_ANA_MST_HOSTS {
             // `busy` is the ROM's spin and the guest never sets it.
             regs.set_read_override(4 * host, BUSY, 0);
         }
@@ -194,7 +219,14 @@ impl Peripheral for I2cAnaMst {
         // that completes a `{block, register}` pair works the way a word
         // write does. No driver on this chip writes it in lanes; nothing
         // here has to care that they might.
-        self.transact(off & !3);
+        //
+        // Only the eight host words are transactions. Everything above them
+        // in the aperture — `ana_config`, `ana_config2`, and the unnamed
+        // words up to `+0x8c` — is remembered and does nothing.
+        let word = off & !3;
+        if word < I2C_ANA_MST_HOSTS * 4 {
+            self.transact(word);
+        }
     }
 
     fn reg_name(&self, off: u32) -> Option<&'static str> {

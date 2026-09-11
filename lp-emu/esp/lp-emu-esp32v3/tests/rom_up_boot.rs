@@ -29,7 +29,9 @@
 
 use lp_emu_esp32v3::flash::{FACTORY_OFFSET, FlashBacking};
 use lp_emu_esp32v3::image::MergedImage;
-use lp_emu_esp32v3::machine::{AppSource, Esp32V3Builder, Machine, Outcome, StopCondition};
+use lp_emu_esp32v3::machine::{
+    AppSource, BootMode, Esp32V3Builder, Machine, Outcome, StopCondition,
+};
 use lp_emu_esp32v3::test_support::{fw_esp32v3_image, merged_chip_image, skip_notice};
 
 /// Long enough for the whole direct-load `[INIT]` chain past the filesystem
@@ -284,4 +286,431 @@ fn the_loaders_staged_pages_pack_factory_and_stay_page_congruent() {
     // boot above find a filesystem at all.
     let last = staging.pages.last().expect("pages");
     assert!(last.paddr + 0x1_0000 <= lp_emu_esp32v3::flash::LPFS_OFFSET);
+}
+
+// ---------------------------------------------------------------------------
+// The boot log
+// ---------------------------------------------------------------------------
+
+/// The mask ROM's own banner, **verbatim from L0** (`../bench.md`, the
+/// `cap_115200_a.bin` capture of the desk board). Eleven lines plus the blank
+/// one the ROM prints after its date stamp.
+///
+/// These are compared **literally**: the ROM is a fixed binary, the values in
+/// them are this machine's inputs (the reset cause, the strapping pins) or the
+/// merged image's header, and not one digit of them is ours to choose.
+const ROM_BANNER: &[&str] = &[
+    "ets Jul 29 2019 12:21:46",
+    "",
+    "rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)",
+    "configsip: 0, SPIWP:0xee",
+    "clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00",
+    "mode:DIO, clock div:2",
+    "load:0x3fff0030,len:7104",
+    "load:0x40078000,len:15576",
+    "load:0x40080400,len:4",
+    "ho 8 tail 4 room 4",
+    "load:0x40080404,len:3876",
+    "entry 0x4008064c",
+];
+
+/// The ESP-IDF second-stage bootloader's own log, with the millisecond stamps
+/// masked (see [`mask_stamp`]) and the `esp_image: segment` lines left out —
+/// those are image-derived and are compared against the image instead.
+///
+/// Literal for the same reason as the banner: espflash bundles a **fixed**
+/// bootloader binary (`v5.1-beta1-378-gea5e0ff298-dirt`, the one the desk
+/// board runs), so these lines are the same on any host and for any build of
+/// the application. The partition rows are `lp-fw/fw-esp32v3/partitions.csv`
+/// read back out of the flashed table.
+const BOOTLOADER_LOG: &[&str] = &[
+    "I (\u{2026}) boot: ESP-IDF v5.1-beta1-378-gea5e0ff298-dirt 2nd stage bootloader",
+    "I (\u{2026}) boot: compile time Jun  7 2023 07:48:23",
+    "I (\u{2026}) boot: Multicore bootloader",
+    "I (\u{2026}) boot: chip revision: v3.1",
+    "I (\u{2026}) boot.esp32: SPI Speed      : 40MHz",
+    "I (\u{2026}) boot.esp32: SPI Mode       : DIO",
+    "I (\u{2026}) boot.esp32: SPI Flash Size : 4MB",
+    "I (\u{2026}) boot: Enabling RNG early entropy source...",
+    "I (\u{2026}) boot: Partition Table:",
+    "I (\u{2026}) boot: ## Label            Usage          Type ST Offset   Length",
+    "I (\u{2026}) boot:  0 nvs              WiFi data        01 02 00009000 00006000",
+    "I (\u{2026}) boot:  1 phy_init         RF data          01 01 0000f000 00001000",
+    "I (\u{2026}) boot:  2 factory          factory app      00 00 00010000 00300000",
+    "I (\u{2026}) boot:  3 lpfs             Unknown data     01 82 00310000 000f0000",
+    "I (\u{2026}) boot: End of partition table",
+];
+
+/// `I (608) boot: …` → `I (…) boot: …`.
+///
+/// **The one field this comparison masks, and the only one.** The stamp is
+/// `esp_log_early_timestamp()`: `CCOUNT / (g_ticks_per_us * 1000)`, i.e.
+/// milliseconds of *CPU* time. This machine's time base is grade **t1** —
+/// cycles are instructions at a nominal 240 MHz (`TimeGrade`) — so the
+/// numbers are a count of the bootloader's own instructions rather than a
+/// clock, and there is no calibration in this repository that would make them
+/// silicon's. Masked and said so, rather than widened or quietly matched.
+fn mask_stamp(line: &str) -> String {
+    let is_log = ["I (", "E (", "W (", "D (", "V ("]
+        .iter()
+        .any(|p| line.starts_with(p));
+    if !is_log {
+        return line.to_string();
+    }
+    match line.find(')') {
+        Some(i) => format!("{}(\u{2026}){}", &line[..2], &line[i + 1..]),
+        None => line.to_string(),
+    }
+}
+
+/// The device's own bytes: `\r` dropped, the ANSI colour runs the IDF
+/// bootloader wraps its lines in stripped, nothing else touched.
+fn device_lines(text: &str) -> Vec<String> {
+    text.replace('\r', "")
+        .split('\n')
+        .map(strip_ansi)
+        .map(|l| l.trim_end().to_string())
+        .collect()
+}
+
+fn strip_ansi(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\u{1b}' {
+            out.push(c);
+            continue;
+        }
+        // CSI: `[`, then parameters, then a final byte in `@`..`~`. The `[`
+        // is itself in that range, so it has to be consumed before the scan.
+        if chars.peek() == Some(&'[') {
+            chars.next();
+        }
+        for c in chars.by_ref() {
+            if ('\u{40}'..='\u{7e}').contains(&c) {
+                break;
+            }
+        }
+    }
+    out
+}
+
+/// **P7's acceptance, item 2.** From the reset vector, through the real mask
+/// ROM and the real ESP-IDF second-stage bootloader, out of a real merged
+/// image — and the log is the desk board's, line for line.
+///
+/// What is compared against what, and why:
+///
+/// - the **ROM banner** and the **bootloader's own lines**, literally,
+///   against the two tables above. Both halves are fixed binaries, so both
+///   are the same on any host and for any build of the application;
+/// - the **`esp_image: segment` lines**, against the merged image the machine
+///   was handed, parsed independently by [`lp_emu_esp32v3::image`]. Gating
+///   those on a transcript would gate on the linker: a different build of
+///   this repository produces different segment sizes, and the desk board
+///   runs a different commit (ruling R7) whose segment table is therefore not
+///   this one's;
+/// - the millisecond stamps are **masked**, and [`mask_stamp`] says why.
+///
+/// ⚠️ **The run does not reach `Loaded app from partition`.** It stops one
+/// instruction short of it, in the bootloader's own
+/// `esp_cpu_dbgr_is_attached()` — `rer a14, a14` at `0x4007_a526` with
+/// `a14 = XDM_OCD_DCR_SET`, an instruction `lp-xt-inst` does not decode. The
+/// same instruction, from `esp_hal::debugger::debugger_connected()`, is what
+/// the direct load meets at `0x4010_01bd` (`tests/boot.rs`). It is an
+/// ISA-crate follow-up, not a hart tweak from an M3 branch, and it is pinned
+/// exactly here so that landing it turns this assertion into a longer log
+/// rather than into a puzzle.
+#[test]
+#[ignore = "needs a fw-esp32v3 build and espflash; `just test-emu-esp32v3-boot`"]
+fn the_rom_up_boot_log_is_the_desks_line_for_line() {
+    let merged = match merged_chip_image() {
+        Ok(p) => p,
+        Err(reason) => {
+            skip_notice("the_rom_up_boot_log_is_the_desks_line_for_line", &reason);
+            return;
+        }
+    };
+    let len = std::fs::metadata(&merged).expect("the merged image").len() as u32;
+    let mut machine = Esp32V3Builder::new()
+        .boot_mode(BootMode::RomUp)
+        .flash(FlashBacking::Copy(merged.clone()))
+        .flash_len(len)
+        .strict(true)
+        .build()
+        .expect("the ROM-up machine builds");
+    let outcome = machine.run_until(&StopCondition::after_micros(2_000_000));
+
+    assert!(
+        machine.first_strict_violation().is_none(),
+        "no strict refusal anywhere in the ROM or the bootloader: {outcome:?}"
+    );
+    assert_eq!(
+        machine.bus().unmapped_reads() + machine.bus().unmapped_writes(),
+        0,
+        "and zero unmapped accesses across the whole walk"
+    );
+
+    let lines = device_lines(&machine.uart0().text());
+    let text = lines.join("\n");
+
+    // 1. The mask ROM's banner, literally.
+    assert_eq!(
+        &lines[..ROM_BANNER.len()],
+        ROM_BANNER,
+        "the ROM banner is not the desk board's:\n{text}"
+    );
+
+    // 2. The bootloader's own lines, literally, stamps masked.
+    let rest: Vec<String> = lines[ROM_BANNER.len()..]
+        .iter()
+        .filter(|l| !l.is_empty())
+        .map(|l| mask_stamp(l))
+        .collect();
+    let fixed: Vec<&String> = rest
+        .iter()
+        .filter(|l| !l.contains("esp_image: segment "))
+        .collect();
+    let expected: Vec<&str> = BOOTLOADER_LOG.to_vec();
+    assert_eq!(
+        fixed.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+        expected,
+        "the bootloader's log is not the desk board's:\n{text}"
+    );
+
+    // 3. The segment table, against the image the machine was handed.
+    let bytes = std::fs::read(&merged).expect("the merged image");
+    let parsed = MergedImage::parse(&bytes).expect("it parses");
+    let (_, app) = parsed.app.as_ref().expect("an app partition with an image");
+    let want: Vec<String> = app
+        .segments
+        .iter()
+        .enumerate()
+        .map(|(n, seg)| {
+            format!(
+                "esp_image: segment {n}: paddr={:08x} vaddr={:08x} size={:05x}h ({:6}) {}",
+                seg.paddr,
+                seg.vaddr,
+                seg.len,
+                seg.len,
+                seg.placement()
+            )
+        })
+        .collect();
+    let ours: Vec<String> = rest
+        .iter()
+        .filter(|l| l.contains("esp_image: segment "))
+        .map(|l| l[l.find("esp_image:").expect("the prefix")..].to_string())
+        .collect();
+    assert_eq!(ours.len(), want.len(), "one line per segment:\n{text}");
+    for (ours, want) in ours.iter().zip(want.iter()) {
+        // Segment 5 has `vaddr=00000000` and is neither mapped nor loaded;
+        // the bootloader prints an empty `%s` for it, which `trim_end` in
+        // `device_lines` has already taken off ours
+        // (`ImageSegment::placement`).
+        assert_eq!(ours.trim_end(), want.trim_end(), "\n{text}");
+    }
+
+    // 4. Where it stops, exactly: the bootloader's own debugger check.
+    assert!(
+        matches!(
+            outcome,
+            Outcome::Fault {
+                pc: 0x4007_a526,
+                fault: lp_xt_emu::mach::HartFault::UnsupportedInstruction {
+                    word: 0x0040_6ee0,
+                    ..
+                },
+                ..
+            }
+        ),
+        "the ROM-up boot's end of the line is `rer` in the bootloader's \
+         `esp_cpu_dbgr_is_attached()`, and nothing before it: {outcome:?}"
+    );
+}
+
+/// **P7's acceptance, item 4, on the ROM-up path.** Two runs of the same
+/// command line are the same run.
+#[test]
+#[ignore = "needs a fw-esp32v3 build and espflash; `just test-emu-esp32v3-boot`"]
+fn the_rom_up_path_is_deterministic() {
+    let merged = match merged_chip_image() {
+        Ok(p) => p,
+        Err(reason) => {
+            skip_notice("the_rom_up_path_is_deterministic", &reason);
+            return;
+        }
+    };
+    let len = std::fs::metadata(&merged).expect("the merged image").len() as u32;
+    let once = || {
+        let mut m = Esp32V3Builder::new()
+            .boot_mode(BootMode::RomUp)
+            .flash(FlashBacking::Copy(merged.clone()))
+            .flash_len(len)
+            .strict(true)
+            .build()
+            .expect("builds");
+        let outcome = m.run_until(&StopCondition::after_micros(2_000_000));
+        let snap = m.snapshot();
+        (
+            outcome,
+            m.instructions(),
+            m.cycles(),
+            m.uart0().bytes(),
+            m.cache_fills(),
+            m.flash().lock().expect("flash").command_census(),
+            fingerprint(&snap.regions),
+        )
+    };
+    let a = once();
+    let b = once();
+    assert_eq!(a.0, b.0, "the outcome");
+    assert_eq!(a.1, b.1, "the instruction count");
+    assert_eq!(a.2, b.2, "the cycle count");
+    assert_eq!(a.3, b.3, "the console, byte for byte");
+    assert_eq!(a.4, b.4, "the cache fills");
+    assert_eq!(a.5, b.5, "the flash census");
+    assert_eq!(a.6, b.6, "guest memory, byte for byte");
+    // …and the RNG is part of that: `WDEV_RND_REG` is the machine's seeded
+    // PRNG (ruling R4), so the bootloader's image-hash salt is the same salt
+    // twice. A run that stirred real noise would fail this line, which is
+    // what makes it worth asserting rather than assuming.
+}
+
+/// **P7's acceptance, item 3** — and it is the one this phase could not run.
+///
+/// The cross-check compares the two boot paths at the application's entry:
+/// every byte of guest memory, plus the architectural hart state, with the
+/// eleven documented exceptions in [`lp_emu_esp32v3::loader`]'s module docs
+/// enumerated rather than the comparison widened.
+///
+/// ⚠️ **The ROM-up path does not reach the application's entry.** It stops
+/// one instruction short of `Loaded app from partition at offset 0x10000`,
+/// in the bootloader's own `esp_cpu_dbgr_is_attached()` — `rer a14, a14` at
+/// `0x4007_a526`, an instruction `lp-xt-inst` does not decode (see
+/// [`the_rom_up_boot_log_is_the_desks_line_for_line`]). So there is no
+/// ROM-up snapshot to compare, and this test **says so and skips** rather
+/// than comparing something else and calling it the cross-check.
+///
+/// It is written out in full so that landing `rer` turns it on without
+/// anybody having to remember what it was for. What it *can* check today —
+/// that the loader's synthetic flash offsets and the real image's are both
+/// page-congruent, and that the direct path reaches the filesystem — is in
+/// [`the_loaders_staged_pages_pack_factory_and_stay_page_congruent`] and in
+/// `tests/boot.rs`.
+#[test]
+#[ignore = "needs a fw-esp32v3 build and espflash; `just test-emu-esp32v3-boot`"]
+fn rom_up_and_direct_load_agree_on_what_the_app_sees() {
+    let (elf, merged) = match images() {
+        Ok(pair) => pair,
+        Err(reason) => {
+            skip_notice("rom_up_and_direct_load_agree_on_what_the_app_sees", &reason);
+            return;
+        }
+    };
+    let len = std::fs::metadata(&merged).expect("the merged image").len() as u32;
+    let mut rom_up = Esp32V3Builder::new()
+        .boot_mode(BootMode::RomUp)
+        // The ELF is a symbol table and a cross-check reference here; the
+        // bytes the machine runs come out of the chip.
+        .app(AppSource::Path(elf.clone()))
+        .flash(FlashBacking::Copy(merged.clone()))
+        .flash_len(len)
+        .strict(true)
+        .build()
+        .expect("the ROM-up machine builds");
+    let entry = rom_up.app().expect("the app ELF").entry;
+    // The app's own `Reset`, by address: `--break-at _start` would find the
+    // mask ROM's symbol of that name first.
+    let _ = rom_up.break_at_address(entry);
+    let outcome = rom_up.run_until(&StopCondition::after_micros(2_000_000));
+
+    if !matches!(outcome, Outcome::Breakpoint { pc, .. } if pc == entry) {
+        skip_notice(
+            "rom_up_and_direct_load_agree_on_what_the_app_sees",
+            "the ROM-up boot does not reach the application's entry: it stops in the \
+             bootloader's own `esp_cpu_dbgr_is_attached()` on `rer`, which `lp-xt-inst` does \
+             not decode. Land `rer` and this test runs.",
+        );
+        assert!(
+            matches!(
+                outcome,
+                Outcome::Fault {
+                    pc: 0x4007_a526,
+                    ..
+                }
+            ),
+            "the only reason not to reach the app's entry is the `rer` wall: {outcome:?}"
+        );
+        return;
+    }
+
+    // The direct load, the same ELF, the same chip behind it.
+    let mut direct = direct(&elf, FlashBacking::Copy(merged));
+    let _ = direct.break_at_address(entry);
+    assert!(matches!(
+        direct.run_until(&StopCondition::after_micros(GATE_US)),
+        Outcome::Breakpoint { .. }
+    ));
+
+    // 1. The app's own segments, byte for byte, in RAM and through the
+    //    window. This is the whole claim: the bootloader put the same bytes
+    //    in the same places the loader does, having found them itself.
+    let app = direct.app().expect("the app ELF").clone();
+    let mut compared = 0usize;
+    for seg in &app.segments {
+        if seg.memsz == 0 || seg.data.is_empty() {
+            continue;
+        }
+        let a = read_span(&rom_up, seg.vaddr, seg.data.len() as u32);
+        let b = read_span(&direct, seg.vaddr, seg.data.len() as u32);
+        let first = a.iter().zip(b.iter()).position(|(x, y)| x != y);
+        assert!(
+            first.is_none(),
+            "segment {:#010x} differs at +{:#x}",
+            seg.vaddr,
+            first.unwrap_or(0)
+        );
+        compared += a.len();
+    }
+    assert!(compared > 2_000_000, "only {compared} bytes compared");
+
+    // 2. The architectural state, and the four save-area words the direct
+    //    load seeds — `BootFrame`'s `[0, sp, 0, 0]` stands until a ROM-up run
+    //    measures them, and this is that measurement.
+    assert_eq!(rom_up.harts[0].ps(), direct.harts[0].ps(), "PS");
+    assert_eq!(
+        rom_up.harts[0].cpu().a(1),
+        direct.harts[0].cpu().a(1),
+        "a1 — the bootloader's stack pointer at the app's entry"
+    );
+    let sp = rom_up.harts[0].cpu().a(1);
+    let save: Vec<u32> = (0..4)
+        .map(|i| {
+            u32::from_le_bytes(
+                read_span(&rom_up, sp - 16 + 4 * i, 4)
+                    .try_into()
+                    .expect("4 bytes"),
+            )
+        })
+        .collect();
+    println!("ROM-up save area at {sp:#010x}: {save:#010x?}");
+    assert_eq!(
+        save,
+        lp_emu_esp32v3::machine::BootFrame::idf_bootloader()
+            .save_area
+            .to_vec(),
+        "the direct load's seeded save area is the one the bootloader leaves"
+    );
+}
+
+/// `len` bytes out of whichever RAM region holds them.
+fn read_span(m: &Machine, address: u32, len: u32) -> Vec<u8> {
+    for region in m.bus().regions() {
+        if region.contains(address) && region.contains(address + len - 1) {
+            let at = (address - region.base) as usize;
+            return m.bus().region_bytes(region)[at..at + len as usize].to_vec();
+        }
+    }
+    panic!("{address:#010x}+{len} is not in one RAM region");
 }

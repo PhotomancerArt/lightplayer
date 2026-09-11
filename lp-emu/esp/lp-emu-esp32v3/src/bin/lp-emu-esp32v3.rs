@@ -481,6 +481,25 @@ fn print_outcome(machine: &mut Machine, outcome: &Outcome) {
         Outcome::Fault { pc, fault, .. } => {
             let sym = machine.symbolize(*pc).unwrap_or_else(|| "?".into());
             println!("FAULT pc={pc:#010x} ({sym}) cycle={cycle}: {fault:?}");
+            // The exception registers, because a fault *inside a vector* says
+            // nothing about what asked for it. The classic's mask ROM ends
+            // its debug vector in `simcall`, so a guest that double-faults
+            // reports an unsupported opcode at `_DebugExceptionVector+0x5`
+            // and the useful address is `EPC1` (`m3/notes.md`: the earliest
+            // cause is the root).
+            let sr = machine.harts[0].sr();
+            let name = |at: u32| match machine.symbolize(at) {
+                Some(n) => format!(" ({n})"),
+                None => String::new(),
+            };
+            println!(
+                "  EXCCAUSE={} EXCVADDR={:#010x} EPC1={:#010x}{} PS={:#010x}",
+                sr.exccause,
+                sr.excvaddr,
+                sr.epc[1],
+                name(sr.epc[1]),
+                machine.harts[0].ps(),
+            );
         }
         Outcome::StrictBus { violation } => {
             let sym = machine

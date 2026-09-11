@@ -30,6 +30,7 @@ pub mod dport;
 pub mod efuse;
 pub mod flash_mmu;
 pub mod i2c_ana_mst;
+pub mod rng;
 pub mod rtc_cntl;
 pub mod sha;
 pub mod spi0;
@@ -121,6 +122,7 @@ pub fn boot_set(
     appcpu: dport::AppCoreHandle,
     uart0_stream: Option<StreamId>,
     flash: FlashHandle,
+    seed: u64,
 ) -> Vec<(u32, u32, BoxedPeripheral)> {
     vec![
         (
@@ -163,6 +165,9 @@ pub fn boot_set(
             efuse::EFUSE_LEN,
             Box::new(efuse::Efuse::new(identity)),
         ),
+        // ROM-up, after the eFuse gate and `Uart_Init`: `gpio_pad_unhold`
+        // reads `dig_pad_hold` at cycle 7,430.
+        (base::RTC_IO, accept::RTC_IO_LEN, Box::new(accept::rtc_io())),
         // ROM-up, in `main`: `uartAttach` (`0x4000_9013`) touches
         // `UART1 +0x10` as well as UART0's, at cycle 30,992 — before
         // `mmu_init` below. The application never opens it, so it has no
@@ -186,6 +191,13 @@ pub fn boot_set(
         // path reaches this block, and the mask ROM's own reset path does
         // not either — the bootloader's `bootloader_sha256_*` is the first
         // and only caller (`ets_sha_update`, `0x4005_C2A0`).
+        // ROM-up, in the ESP-IDF second-stage bootloader: the RNG early
+        // entropy source puts the SAR ADCs into free-running mode.
+        (base::SENS, accept::SENS_LEN, Box::new(accept::sens())),
+        (base::I2S0, accept::I2S0_LEN, Box::new(accept::i2s0())),
+        // ROM-up, in the bootloader's partition-table walk:
+        // `bootloader_fill_random()` reads `WDEV_RND_REG` (ruling R4).
+        (base::RNG, rng::LEN, Box::new(rng::Rng::new(seed))),
         (base::SHA, sha::LEN, Box::new(sha::Sha::new())),
     ]
 }

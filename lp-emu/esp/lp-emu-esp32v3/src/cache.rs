@@ -354,7 +354,10 @@ impl FlashMmu {
 
     /// Mark every entry that maps the flash page `flash_offset` falls in —
     /// what a flash write under the window means.
-    pub fn invalidate_page_at(&mut self, flash_offset: u32, page_mode: u8) {
+    ///
+    /// Returns the entry indices it marked, so the caller can forget what
+    /// those window pages were holding — the bytes under them moved.
+    pub fn invalidate_page_at(&mut self, flash_offset: u32, page_mode: u8) -> Vec<u32> {
         let page = flash_offset >> Self::shift(page_mode);
         let mut hits = Vec::new();
         for core in 0..CORES {
@@ -364,9 +367,10 @@ impl FlashMmu {
                 }
             }
         }
-        for (core, index) in hits {
-            self.mark_dirty(core, index);
+        for (core, index) in &hits {
+            self.mark_dirty(*core, *index);
         }
+        hits.into_iter().map(|(_, index)| index).collect()
     }
 
     /// Every entry in the flash half of both tables, marked for a refill.
@@ -459,6 +463,14 @@ pub struct ClassicCache {
     disabled_at: [Cycles; CORES],
     disabled_by: [Option<u32>; CORES],
     policy: CacheOffPolicy,
+    /// Which flash page each **PRO-core** window page already holds, or
+    /// `None` when it has never been filled. The dirty mark is unconditional
+    /// — a write that does not change an entry still maps the page, because
+    /// the classic's entry has no valid bit — and this is what keeps the
+    /// *copy* from being unconditional too: `mmu_init` clears 2048 entries,
+    /// and re-copying a hundred-odd 64 KiB pages that already hold the right
+    /// bytes would be seven megabytes of memcpy per call for no change.
+    filled: [Option<u32>; FLASH_MMU_ENTRIES as usize],
     /// The first offence since the machine last took one.
     offence: Option<CacheOffAccess>,
     /// Set around a host-side peek or poke, which goes through the bus's
@@ -493,6 +505,7 @@ impl ClassicCache {
             disabled_at: [0; CORES],
             disabled_by: [None; CORES],
             policy: CacheOffPolicy::default(),
+            filled: [None; FLASH_MMU_ENTRIES as usize],
             offence: None,
             host_access: false,
         }
@@ -553,6 +566,9 @@ impl ClassicCache {
             *slot = value;
         }
         if (was ^ value) & FLASH_PAGE_MODE_MASK != 0 {
+            // Every entry means something else now, and every window page
+            // holds bytes from the old page size.
+            self.forget_fills();
             self.mmu.mark_all_dirty();
         }
     }
@@ -593,6 +609,36 @@ impl ClassicCache {
     /// See [`ClassicCache`]'s `host_access`.
     pub fn set_host_access(&mut self, on: bool) {
         self.host_access = on;
+    }
+
+    /// Does the PRO core's window page `index` already hold flash page
+    /// `entry`? See [`ClassicCache`]'s `filled`.
+    pub fn already_filled(&self, index: u32, entry: u32) -> bool {
+        self.filled
+            .get(index as usize)
+            .copied()
+            .flatten()
+            .is_some_and(|held| held == entry)
+    }
+
+    /// Record that it does now.
+    pub fn note_filled(&mut self, index: u32, entry: u32) {
+        if let Some(slot) = self.filled.get_mut(index as usize) {
+            *slot = Some(entry);
+        }
+    }
+
+    /// Forget what one window page holds — the bytes under it moved.
+    pub fn forget_fill(&mut self, index: u32) {
+        if let Some(slot) = self.filled.get_mut(index as usize) {
+            *slot = None;
+        }
+    }
+
+    /// Forget what every window page holds — a snapshot restore, or anything
+    /// that changed the bytes under the whole table.
+    pub fn forget_fills(&mut self) {
+        self.filled = [None; FLASH_MMU_ENTRIES as usize];
     }
 
     /// The watch's entry point: one guest access, from the core whose slices
@@ -666,6 +712,7 @@ impl ClassicCache {
             }
         }
         // Whatever the window holds now, the table just changed under it.
+        self.forget_fills();
         self.mmu.mark_all_dirty();
     }
 }
@@ -755,6 +802,13 @@ pub fn fill(bus: &mut SocBus, flash: &crate::flash::FlashHandle, cache: &CacheHa
             );
             continue;
         };
+        if cache
+            .lock()
+            .expect("cache poisoned")
+            .already_filled(index, entry)
+        {
+            continue;
+        }
         let paddr = entry << FlashMmu::shift(page_mode);
         let Some(bytes) = flash.peek(paddr, page_len) else {
             log::warn!(
@@ -769,6 +823,10 @@ pub fn fill(bus: &mut SocBus, flash: &crate::flash::FlashHandle, cache: &CacheHa
             );
             continue;
         }
+        cache
+            .lock()
+            .expect("cache poisoned")
+            .note_filled(index, entry);
         filled += 1;
     }
     filled
