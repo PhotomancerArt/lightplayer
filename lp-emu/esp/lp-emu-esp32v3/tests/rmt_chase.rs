@@ -73,9 +73,15 @@ const DONE: &str = "[rmt-chase] === DONE ===";
 const GATE_US: u64 = 20_000_000;
 
 /// The prefix the determinism and snapshot gates run, in emulated
-/// microseconds: enough for three whole frames and into a fourth
-/// (≈ 18.07 ms a frame, the first starting at ≈ 2.5 ms).
+/// microseconds. **Measured, not assumed**: the first frame starts at
+/// 8,825.175 µs and runs 7,679.150 µs, and the period is 18,067 µs — so 60 ms
+/// holds three frames and the start of a fourth.
 const PREFIX_US: u64 = 60_000;
+
+/// A cycle inside the **first** frame, for the snapshot gate: between its
+/// start at 8,825.175 µs and its end at 16,504.325 µs. The assertion in that
+/// test is what proves it, not this arithmetic.
+const MID_FRAME_US: u64 = 12_000;
 
 /// Host-side safety net, so a wedged run fails the suite instead of hanging
 /// it. Generous against the ≈ 107 s a full run costs.
@@ -470,10 +476,9 @@ fn a_snapshot_taken_inside_a_frame_restores_the_decoder_mid_bit() {
     let Some(mut m) = machine("rmt_chase", FrameSink::Memory) else {
         return;
     };
-    // Inside the first frame: it starts a little after 2.5 ms and runs
-    // ≈ 7.7 ms. Five milliseconds is comfortably inside it, and the assertion
-    // below is what proves that rather than the arithmetic.
-    m.run_until(&StopCondition::after_micros(5_000));
+    // Inside the first frame ([`MID_FRAME_US`]); the assertion below is what
+    // proves it rather than the arithmetic.
+    m.run_until(&StopCondition::after_micros(MID_FRAME_US));
     assert!(
         m.pin_state()
             .decoders
@@ -496,7 +501,8 @@ fn a_snapshot_taken_inside_a_frame_restores_the_decoder_mid_bit() {
         "the restored run decoded different frames"
     );
     println!(
-        "rmt_chase: snapshot at 5 ms mid-bit, {} frame(s) decoded identically after restore",
+        "rmt_chase: snapshot at {MID_FRAME_US} us mid-bit, {} frame(s) decoded identically \
+         after restore",
         expected.len()
     );
 }
