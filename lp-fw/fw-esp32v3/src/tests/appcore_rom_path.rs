@@ -48,10 +48,14 @@
 //!
 //! The verdict line is computed from the scan:
 //!
-//! * `verdict=A` — bytes inside `0x3ffe0860..0x3ffe1320` were rewritten
-//!   (Reading A: the bss table ran).
-//! * `verdict=B` — only the seven handler-pointer pairs changed.
-//! * `verdict=other` — anything else, including "the core never bound".
+//! * `verdict=A` — bytes inside `.data_xtos_pro` or `.bss_xtos_pro` were
+//!   rewritten: the ROM's tables ran on the APP core.
+//! * `verdict=B` — the tables did not run. Either nothing at all changed
+//!   (`reason=nothing_rewritten`, which is what the DOM-Z-102 reported on
+//!   2026-09-11 — ROM `main` did not re-run either) or only the seven
+//!   handler-pointer pairs did (`reason=handler_pairs_only`).
+//! * `verdict=other` — the core never bound, the canary missed the span, or a
+//!   pattern neither reading predicts. The `reason=` line says which.
 //!
 //! The capture ends with `[APPCORE-CANARY] done`
 //! (`just fwtest-appcore-rom-path-esp32v3 <port>`). The rig asserts nothing:
@@ -301,18 +305,48 @@ pub fn run() -> ! {
     );
 
     // The verdict. `.bss_xtos_pro` is the discriminator: ROM `main`'s handler
-    // writes cannot reach it, so a single rewritten byte there means the bss
-    // table ran on the APP core.
-    let verdict = if !bound || covered == 0 {
-        "other"
-    } else if in_bss_xtos > 0 {
-        "A"
-    } else if changed > 0 && changed == in_handler {
-        "B"
+    // writes cannot reach it, so a single rewritten byte there means the ROM's
+    // tables ran on the APP core.
+    //
+    // ⚠️ Reading B's claim is "the tables did not re-run", NOT "the handler
+    // pairs were rewritten". The first bench run (2026-09-11, DOM-Z-102)
+    // reported `changed=0` — not even ROM `main`'s handler pairs — so "nothing
+    // was rewritten" has to land on B rather than on `other`, which is what an
+    // earlier arm here did. The `reason=` line keeps the two B sub-cases apart
+    // instead of hiding the difference behind one token.
+    let (verdict, reason) = if !bound {
+        ("other", "not_bound: the APP core never reported its bind")
+    } else if covered == 0 {
+        (
+            "other",
+            "no_coverage: the canary missed the ROM-rewrite span",
+        )
+    } else if in_bss_xtos > 0 || in_data_xtos > 0 {
+        (
+            "A",
+            "rom_tables_ran: the unpack and/or bss table rewrote live heap",
+        )
+    } else if changed == 0 {
+        (
+            "B",
+            "nothing_rewritten: the APP core's start touched no byte of the span \
+             — not even ROM main's exception-handler pairs, so ROM main did not \
+             re-run on it either",
+        )
+    } else if changed == in_handler {
+        (
+            "B",
+            "handler_pairs_only: ROM main re-ran and set its seven handler pairs, \
+             but the unpack and bss tables did not",
+        )
     } else {
-        "other"
+        (
+            "other",
+            "unexpected_pattern: read the ranges above before believing either reading",
+        )
     };
     esp_println::println!("[APPCORE-CANARY] verdict={verdict}");
+    esp_println::println!("[APPCORE-CANARY] reason={reason}");
     esp_println::println!("[APPCORE-CANARY] done");
 
     // `canary` stays in scope — the loop never ends, so it is never dropped
