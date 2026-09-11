@@ -202,20 +202,6 @@ cp "$wasm_bin" "$stage_dir/emu.wasm"
 cp "$rig_dir/index.html" "$rig_dir/worker.js" "$rig_dir/jit-host.js" \
    "$rig_dir/wasi-shim.js" "$rig_dir/bench-run.js" "$rig_dir/bench-cli.mjs" "$stage_dir/"
 
-manifest_images="[]"
-for spec in "${images[@]}"; do
-    IFS='|' read -r slug var features timeout exit_on commit spike <<<"$spec"
-    elf="$(resolve_image "$slug" "$var" "$features" "$commit" "$spike")"
-    cp "$elf" "$stage_dir/fw-$slug.elf"
-    entry="$(jq -n --arg slug "$slug" --arg elf "fw-$slug.elf" --arg timeout "$timeout" \
-        --arg exitOn "$exit_on" '{slug: $slug, elf: $elf, timeout: $timeout, exitOn: (if $exitOn == "" then null else $exitOn end)}')"
-    manifest_images="$(jq -c --argjson e "$entry" '. + [$e]' <<<"$manifest_images")"
-done
-
-# The `build` object lets the page (and every uploaded result) say what was
-# measured: the emulator's git sha/branch/dirty flag and when it was built,
-# so a phone that refreshes can see it picked up a new build, and the
-# collected log can attribute numbers without guessing.
 sha256() {
     if command -v shasum >/dev/null 2>&1; then
         shasum -a 256 "$1" | awk '{print $1}'
@@ -223,6 +209,41 @@ sha256() {
         sha256sum "$1" | awk '{print $1}'
     fi
 }
+
+manifest_images="[]"
+for spec in "${images[@]}"; do
+    IFS='|' read -r slug var features timeout exit_on commit spike <<<"$spec"
+    elf="$(resolve_image "$slug" "$var" "$features" "$commit" "$spike")"
+    cp "$elf" "$stage_dir/fw-$slug.elf"
+    # `elfStamp` is the cache buster the Worker puts on the ELF fetch. It is a
+    # CONTENT stamp (the first 12 hex of the image's sha256), not the build
+    # stamp every JS/wasm URL carries, and the difference is deliberate: these
+    # are pinned images (DD25) that move when the pin moves and at no other
+    # time, and hanging the emulator's git sha off 36 MB of ELF would make a
+    # phone re-download all four every time the emulator is rebuilt — on the
+    # LAN, between two rows of a gate sequence. A content stamp busts exactly
+    # when the bytes change, which for a firmware image is the only thing a
+    # stale copy could get wrong; and it would get it wrong as a plausible
+    # WRONG NUMBER rather than as a loud missing export.
+    elf_stamp="$(sha256 "$stage_dir/fw-$slug.elf" | cut -c1-12)"
+    entry="$(jq -n --arg slug "$slug" --arg elf "fw-$slug.elf" --arg timeout "$timeout" \
+        --arg stamp "$elf_stamp" \
+        --arg exitOn "$exit_on" '{slug: $slug, elf: $elf, elfStamp: $stamp, timeout: $timeout, exitOn: (if $exitOn == "" then null else $exitOn end)}')"
+    manifest_images="$(jq -c --argjson e "$entry" '. + [$e]' <<<"$manifest_images")"
+done
+
+# The `build` object lets the page (and every uploaded result) say what was
+# measured: the emulator's git sha/branch/dirty flag and when it was built,
+# so a phone that refreshes can see it picked up a new build, and the
+# collected log can attribute numbers without guessing.
+#
+# `build.short` is also the cache stamp the whole page hangs off: `index.html`
+# loads `worker.js?v=<short>`, the Worker reads that back off its own URL and
+# puts it on `emu.wasm` and on `bench-run.js`, and `bench-run.js` puts its own
+# stamp on `wasi-shim.js` and `jit-host.js`. That chain is what DD33 asked for
+# — a new build cannot load an old sibling — and it is why the page fetches
+# `manifest.json` itself with `no-store`: a cached manifest would hand out a
+# stale stamp and the whole consistent set behind it.
 build_sha="$(git rev-parse HEAD)"
 build_short="${build_sha:0:7}"
 build_branch="$(git branch --show-current)"
