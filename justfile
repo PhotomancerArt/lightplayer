@@ -2651,10 +2651,11 @@ test-emu-esp32v3-gate: test-emu-esp32v3-boot
     scripts/emu/build-reference-image.sh --verify --chip esp32 \
         esp32,server,float-f32 "$commit" none
 
-# The boot half: build the shipped `fw-esp32v3` image and the `rmt-chase`
-# harness image, then run the whole suite with the direct-load tests included.
-# Each path is passed explicitly (`LP_EMU_ESP32V3_ELF`,
-# `LP_EMU_ESP32V3_TEST_RMT_ELF`) rather than trusted by convention — every
+# The boot half: build the shipped `fw-esp32v3` image, the `rmt-chase` harness
+# image and the `frame-dump` image, then run the whole suite with the
+# direct-load tests included. Each path is passed explicitly
+# (`LP_EMU_ESP32V3_ELF`, `LP_EMU_ESP32V3_TEST_RMT_ELF`,
+# `LP_EMU_ESP32V3_FRAME_DUMP_ELF`) rather than trusted by convention — every
 # feature set builds to the same target path, and a test that read whatever was
 # there last would pass against the wrong image
 # (`lp-emu-esp32v3/src/test_support.rs`). With two images that is no longer a
@@ -2705,7 +2706,28 @@ test-emu-esp32v3-boot: build-fw-esp32v3
     chase="$out/fw-esp32v3-test-rmt.elf"
     cp "$built" "$chase"
     export LP_EMU_ESP32V3_TEST_RMT_ELF="$chase"
-    echo "images: shipped=$shipped chase=$chase"
+    # The `frame-dump` image (M4 P4), for `tests/shader_oracle_pin.rs` and
+    # `tests/five_wires.rs`: the shipped feature set PLUS the readout, so the
+    # guest prints `[OUT] dump …` / `[OUT] frame=… crc=…` beside every frame
+    # it transmits. Additive — it renders exactly what the shipped image
+    # renders — but a third build all the same, and copied out of the shared
+    # path for the reason the two above it are.
+    just build-fw-esp32v3 frame-dump
+    dump="$out/fw-esp32v3-frame-dump.elf"
+    cp "$built" "$dump"
+    # The readout has to be IN the image, checked here rather than in a test:
+    # a feature that stopped reaching the driver's write path would otherwise
+    # show up as "nothing rendered". `grep -a` and not `grep -qa` — under
+    # `pipefail` a `-q` grep closes the pipe on its first hit, `strings` dies
+    # of SIGPIPE and the pipeline reports 141, so the check would fail loudest
+    # exactly when it passed.
+    if ! strings "$dump" | grep -a '\[OUT\] dump frame=' >/dev/null; then
+      echo "the frame-dump image carries no readout: did the feature stop reaching the \
+    driver's write path?" >&2
+      exit 1
+    fi
+    export LP_EMU_ESP32V3_FRAME_DUMP_ELF="$dump"
+    echo "images: shipped=$shipped chase=$chase frame-dump=$dump"
     cargo test -p lp-emu-esp32v3 -- --include-ignored
 
 # Run an image on the classic ESP32 (v3) machine.
@@ -2804,6 +2826,31 @@ test-emu-serve:
 # Xtensa half of `ci-prereqs` has nothing to do with this chip.
 walk-esp32c6-emu *args: install-rv32-target build-rv32-builtins
     scripts/emu/m4-walk.sh {{ args }}
+
+# The same walk on the CLASSIC ESP32 (M4 P4) — the frame half only.
+#
+# Named `walk-esp32v3-emu-frame`, not `walk-esp32v3-emu`, on purpose: M5 P5
+# owns the classic's FULL walk twin (the payload batch, the heap gates, the
+# transcripts), and this one asks a single question — is the first lit frame
+# off IO18 the host oracle's frame, three ways? A reader who types the shorter
+# name should get the bigger thing.
+#
+# Two differences from the C6 recipe, both in the script's header: the link is
+# UART0 (this chip has no USB-Serial-JTAG) and the project is retargeted
+# `D10` -> `IO18` into a scratch copy, because the DOM-Z-102 has no D10.
+#
+# It reaches all three readings and exits 0: 2,438 frames on IO18, one distinct
+# lit byte string, equal to the guest's own deferred `[OUT] dump` and to
+# `[ORACLE] rgb=` — 384 hex characters, three ways. It reached only two until
+# M4 P4b (PR #711) fixed the window-spill defect that killed the guest before
+# the deferred dump; `lp-emu/esp/lp-emu-esp32v3/README.md`'s "The window,
+# across a context save" is that trace. The script prints every reading it got
+# whatever happens, and exits non-zero if any of them is missing or differs.
+#
+# NOT in any CI job, for the C6 recipe's reason: it builds a firmware image and
+# a release `lp-cli` and then runs the machine for tens of emulated seconds.
+walk-esp32v3-emu-frame *args: install-rv32-target build-rv32-builtins
+    scripts/emu/m4-walk-esp32v3.sh {{ args }}
 
 # Run one image on the C6 machine — the human front door.
 #
