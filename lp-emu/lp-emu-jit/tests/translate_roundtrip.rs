@@ -1602,9 +1602,16 @@ fn a_cross_function_edge_carries_the_obligation_a_pending_load_left() {
 /// A stay that ends while the yield is still unclaimed has to say so, and
 /// `FLAG_PENDING` is the bit that says it — not `FLAG_AFTER_STORE`, which
 /// means a store the stay could not poll for itself and which a stay has not
-/// set since M7b P2. The host reads the two together (`jit.rs`'s `POLL_OWED`),
-/// so the hart takes the poll either way; the bit is what a cross-function
-/// edge then reads back, and a wrong one is lost on the way through.
+/// set since M7b P2. The bit is what a cross-function edge reads back, and a
+/// wrong one is lost on the way through.
+///
+/// What the *host* does with it at an exit is F3's question, and the answer is
+/// **nothing**: `jit.rs`'s `POLL_OWED` is `FLAG_AFTER_STORE` alone, because the
+/// obligation is the bus's, not the hart's, and the interpreter that runs after
+/// the exit takes it at its own next store. Between P2 and F1 the two bits were
+/// read together and the poll ran at the exit's pc, one store early. The
+/// machine-level oracle for that is
+/// `lp-emu-esp32c6/tests/jit_identity.rs::an_exit_with_an_unclaimed_obligation_ends_the_slice_where_the_interpreter_does`.
 #[test]
 fn an_exit_while_a_load_is_pending_reports_it_as_pending() {
     // lui a1, 0x60000

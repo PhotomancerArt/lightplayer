@@ -20,6 +20,7 @@
 //! and no ELF.
 #![cfg(feature = "jit")]
 
+use lp_emu_esp_common::periph::{BusCx, Peripheral, Width};
 use lp_emu_esp32c6::machine::{Esp32C6Builder, Esp32C6Machine, StopCondition};
 use lp_emu_esp32c6::memmap;
 use lp_emu_jit::translate::Emit;
@@ -685,4 +686,195 @@ fn a_running_trace_refuses_the_published_reads_and_the_lines_match() {
         report.contains("systimer_fast 0 read(s) served (armed 0, disarmed 0)"),
         "the block never armed under a trace: {report}"
     );
+}
+
+// --- M7b F3: an exit while a load's obligation is unclaimed -----------------
+//
+// An MMIO **load** may leave something on the bus — `Bus::take_sideband` or
+// `Bus::take_yield` — and the interpreter does not look after a load. It
+// carries the obligation to the next Store- or System-class instruction and
+// polls there (polling point (c)). Translated code does the same while the
+// stay lasts: the load sets `FLAG_PENDING` and the next store calls the poll
+// import.
+//
+// The corner is the stay that **ends first**. Between P2 (#703) and F1 (#713)
+// the exit's `FLAG_PENDING` was read as "the hart owes polling point (c)", so
+// the hart ran it at the *exit's* pc — and when the bus was holding a yield
+// that ended the slice one store early, at a different cycle and a different
+// retired count than the interpreter retiring the same instruction stream.
+// Since F3 nothing is handed back: the bus still holds the obligation, the
+// core refuses to be re-entered while it does, and the interpreter takes it at
+// its own next store.
+//
+// ⚠️ No ESP32-C6 peripheral can reach this. `SocBus` sets `sideband` on MMIO
+// **writes** only (its own `sideband_is_set_by_mmio_writes_only`), and every
+// `BusCx::yield_to_machine` in the chip's peripheral set — SPI0's flash-MMU
+// entry, WIFI_MAC's TX handoff — is inside a `write`. So the test brings its
+// own block, which is the only way to put a real hart, a real bus and a real
+// translated module on the same side of the contract.
+
+/// A stand-in block whose **read** asks the machine to take over.
+///
+/// The name is `LP_CLKRST` because `Esp32C6Builder::build` refuses a
+/// peripheral whose name is not in `PERIPHERAL_REGISTRATION_ORDER`; nothing
+/// about the real block is being modelled here, and no modelled peripheral's
+/// behaviour moves (plan.md BD4). What is being modelled is a **bus** — the
+/// one `host::MMIO_PENDING` exists for.
+struct YieldOnRead;
+
+impl Peripheral for YieldOnRead {
+    fn name(&self) -> &'static str {
+        "LP_CLKRST"
+    }
+    fn read(&mut self, _off: u32, _width: Width, cx: &mut BusCx<'_>) -> u32 {
+        cx.yield_to_machine();
+        0
+    }
+    fn write(&mut self, _off: u32, _width: Width, _value: u32, _cx: &mut BusCx<'_>) {}
+    fn save_state(&self) -> Vec<u8> {
+        Vec::new()
+    }
+    fn load_state(&mut self, _bytes: &[u8]) {}
+}
+
+const YIELDING: u32 = 0x600B_0400;
+const YIELDING_LEN: u32 = 0x400;
+
+/// The guest, in one block plus a tail discovery cannot reach:
+///
+/// ```text
+///   li   a1, YIELDING      lui + addi
+///   li   a2, RESUME        lui + addi
+///   li   a0, DATA          lui + addi
+///   lw   a3, 0(a1)         the load that leaves the yield
+///   jalr x0, 0(a2)         an indirect jump the table cannot resolve
+/// RESUME:
+///   sw   a3, 0(a0)         plain RAM — where the interpreter polls
+///   ebreak
+/// ```
+///
+/// The `jalr` is what makes the exit: discovery cannot follow an indirect
+/// jump, so `RESUME` is not a block the module holds and the stay has to
+/// leave. It leaves **before the next store**, which is the whole corner, and
+/// it leaves by an ordinary exit class — the brief's "budget, edge-out,
+/// indirect-miss" — not by anything the polling contract asks for.
+fn pending_exit_guest() -> (Vec<u32>, u32) {
+    let mut p = Vec::new();
+    p.extend(li(11, YIELDING)); // a1
+    let resume_at = p.len();
+    p.push(0); // placeholder: lui  a2, hi(RESUME)
+    p.push(0); // placeholder: addi a2, a2, lo(RESUME)
+    p.extend(li(10, DATA)); // a0
+    p.push(lw(13, 11, 0)); // a3 = *YIELDING
+    p.push(jalr(0, 12, 0)); // -> RESUME, which the module does not hold
+    let resume = CODE + 4 * p.len() as u32;
+    p.push(sw(13, 10, 0)); // *DATA = a3
+    p.push(EBREAK);
+    let [hi, lo] = li(12, resume);
+    p[resume_at] = hi;
+    p[resume_at + 1] = lo;
+    (p, resume)
+}
+
+/// Where one slice ended, which is the whole of what this corner can move.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SliceStop {
+    end: String,
+    pc: u32,
+    cycles: u64,
+    retired: u64,
+}
+
+fn run_pending_exit(policy: Option<Emit>) -> (SliceStop, u32, Option<String>) {
+    let mut m = Esp32C6Builder::bare()
+        .peripheral(YIELDING, YIELDING_LEN, Box::new(YieldOnRead))
+        .build()
+        .expect("a bare machine with one yielding block");
+    let (program, resume) = pending_exit_guest();
+    place(&mut m, CODE, &program);
+    m.harts[0].set_pc(CODE);
+
+    if let Some(policy) = policy {
+        let model = m.harts[0].cycle_model();
+        let report = lp_emu_esp32c6::jit::install(
+            &mut m.harts[0],
+            &mut m.bus,
+            &[CODE],
+            256,
+            256,
+            model,
+            policy,
+            None,
+        )
+        .expect("the guest translates");
+        assert_eq!(
+            report.blocks, 1,
+            "the `jalr` ends the only block discovery can reach"
+        );
+    }
+
+    // One slice, by hand: `run_until` would run the next one straight after
+    // and the two answers would converge. Where *this* slice ends is the
+    // observable, and it is what the scheduler reads.
+    let end = m.harts[0].run_slice(&mut m.bus, 10_000);
+    let hart = &m.harts[0];
+    let stop = SliceStop {
+        end: format!("{end:?}"),
+        pc: hart.pc(),
+        cycles: hart.cycle_count(),
+        retired: hart.instruction_count(),
+    };
+    (stop, resume, m.harts[0].translated_core_report())
+}
+
+/// **The oracle for F3.** A stay that ends while an MMIO load's yield is still
+/// unclaimed leaves the slice ending exactly where the interpreter ends it: at
+/// the next store, not at the exit.
+#[test]
+fn an_exit_with_an_unclaimed_obligation_ends_the_slice_where_the_interpreter_does() {
+    let (interpreted, resume, none) = run_pending_exit(None);
+    assert!(none.is_none(), "no core, no report");
+    // Worth nothing unless the interpreter really did carry the obligation
+    // past the load and end the slice at the store.
+    assert_eq!(
+        interpreted.end, "BusYield",
+        "the peripheral's read asked the machine to take over: {interpreted:?}"
+    );
+    assert_eq!(
+        interpreted.pc,
+        resume + 4,
+        "and the interpreter polled after the RAM store, not at the `jalr`"
+    );
+    assert_eq!(interpreted.retired, 9, "{interpreted:?}");
+
+    let (translated, _, report) = run_pending_exit(Some(Emit::EVERYTHING));
+    assert_eq!(
+        translated, interpreted,
+        "the obligation rode the bus out of the stay and was taken at the \
+         interpreter's own next store"
+    );
+
+    let report = report.expect("--jit-report has something to print");
+    assert!(
+        report.contains("after_store 0,"),
+        "nothing was handed back for a poll at the exit's pc: {report}"
+    );
+    assert!(
+        report.contains("pending_out 1,"),
+        "and the corner named itself exactly once: {report}"
+    );
+    assert!(
+        report.contains("polls 0 ("),
+        "and no polling point ran inside the stay — the store that takes the \
+         obligation is out in the interpreter: {report}"
+    );
+}
+
+/// The all-escape build has to agree too: there the load is the interpreter's
+/// own, through `step_one`, and the module never sees a pending bit at all.
+#[test]
+fn the_all_escape_build_carries_the_same_obligation() {
+    let (interpreted, _, _) = run_pending_exit(None);
+    let (escaped, _, _) = run_pending_exit(Some(Emit::NOTHING));
+    assert_eq!(escaped, interpreted);
 }

@@ -208,10 +208,34 @@ of 1 was read by nobody at the far end of a cross-function edge and by
 here: an obligation that crossed into another function was **lost**, and the
 inline RAM store over there skipped a polling point the interpreter runs; and
 an exit while a load was pending reported a flag the protocol says a stay no
-longer sets. The host reads the two bits together (`jit.rs`'s `POLL_OWED`), so
-an exit still hands the poll to the hart's own `after_store` arm — the stay
-must not carry the obligation into a *later* stay, because the selector clears
-the flags word at every entry.
+longer sets. The stay must not carry the obligation into a *later* stay either,
+because the selector clears the flags word at every entry.
+
+#### And what the host does with it at an exit (M7b F3)
+
+**Nothing.** `jit.rs`'s `POLL_OWED` is `FLAG_AFTER_STORE` alone: a poll owed at
+the pc the stay left at, which only a core that cannot poll for itself ever
+reports. `FLAG_PENDING` is not that. It is an obligation the MMIO load left on
+the **bus**, and the interpreter takes a bus obligation at its next Store- or
+System-class instruction, not at whatever pc an exit happens to land on.
+
+Between P2 (#703) and F1 (#713) the host read the two bits together, so a stay
+that ended with a load's yield unclaimed ran polling point (c) out in
+`run_blocks` at the exit's pc — and with the bus holding a yield the slice
+ended there, **one store early**, at a different cycle and a different retired
+count than the interpreter retiring the same stream. Nothing had to be added to
+fix it: the bus is already carrying the obligation, `JitCore::run`'s own entry
+rule refuses to re-enter while `Bus::sideband_or_yield_pending` holds, and the
+interpreter in between polls exactly where it always does. The exit just has to
+stop claiming it.
+
+It is reachable by the protocol and not by this chip: `SocBus` sets `sideband`
+on MMIO **writes** only, and every `BusCx::yield_to_machine` in the C6's (and
+the classic's) peripheral set is inside a `write`, so no modelled load can leave
+one. The `--jit-report` line therefore reads `pending_out 0` on every real run —
+the counter exists so the corner names itself if a bus ever reaches it — and the
+oracle is a test that brings its own yielding block,
+`jit_identity.rs::an_exit_with_an_unclaimed_obligation_ends_the_slice_where_the_interpreter_does`.
 
 After the **escape hatch**, `FLAG_PENDING` means exactly what it meant before
 the escape. `step_one` runs the interpreter's own polling point for a Store-

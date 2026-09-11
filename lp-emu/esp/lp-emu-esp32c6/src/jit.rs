@@ -47,15 +47,24 @@ use lp_emu_jit::host::{
 };
 use lp_emu_jit::translate::{Emit, Emitted, FastRead, FastReads, FastSource, Layout};
 
-/// The exit flags that leave the hart owing polling point (c).
+/// The exit flag that leaves the hart owing polling point (c) **at the pc the
+/// stay left at**: a store the stay could not poll for itself, on a core whose
+/// host has no hart to run the poll on.
 ///
-/// [`FLAG_AFTER_STORE`] is a store the stay could not poll for itself — a
-/// core whose host has no hart to run the poll on. [`FLAG_PENDING`] is the
-/// obligation an MMIO **load** left: the stay ended before the store that
-/// would have taken it, so the hart takes it in its own `after_store` arm
-/// rather than the stay carrying it into a later one, where the selector
-/// would have cleared it (M7b F1).
-const POLL_OWED: i32 = FLAG_AFTER_STORE | FLAG_PENDING;
+/// [`FLAG_PENDING`] is deliberately **not** in this set (M7b F3). It is not a
+/// poll the hart owes here; it is the obligation an MMIO **load** left on the
+/// *bus*, and the interpreter takes that at the next Store- or System-class
+/// instruction, not at the pc an exit happens to land on. Between P2 (#703)
+/// and F1 (#713) the two were read together, so a stay that ended while a load's
+/// yield was unclaimed ran polling point (c) at the exit's pc and, when the bus
+/// was holding a yield, ended the slice there — one store early, at a different
+/// cycle and a different retired count than the interpreter retiring the same
+/// stream. The bus is what carries the obligation out of the stay: nothing in
+/// translated code took it, [`JitCore::run`]'s own entry rule refuses to
+/// re-enter while [`lp_emu_core::Bus::sideband_or_yield_pending`] holds, and
+/// the interpreter that runs in the meantime polls exactly where it always
+/// does. So the exact fix is to hand back nothing at all and let it.
+const POLL_OWED: i32 = FLAG_AFTER_STORE;
 
 // Which host runs the emitted module, chosen by target and by nothing else.
 //
@@ -736,14 +745,22 @@ pub struct JitStats {
     /// start.
     pub exit_known_pc: u64,
     /// Exits carrying [`POLL_OWED`]: polling point (c) handed back to the
-    /// hart's own loop.
+    /// hart's own loop, to be run at the pc the stay left at.
     ///
-    /// `FLAG_AFTER_STORE` itself is **zero on this machine since M7b P2** —
-    /// the poll runs inside the stay — and is kept because a core that cannot
-    /// poll still reports it. What does land here is `FLAG_PENDING`: a stay
-    /// that ended while an MMIO load's yield was still unclaimed owes the poll
-    /// to the hart (M7b F1).
+    /// **Zero on this machine since M7b P2** — the poll runs inside the stay —
+    /// and kept because a core that cannot poll still reports it.
     pub exit_after_store: u64,
+    /// Exits carrying [`FLAG_PENDING`]: the stay ended while an MMIO load's
+    /// yield was still unclaimed on the bus, so the *interpreter* takes it at
+    /// its next store (M7b F3).
+    ///
+    /// Nothing is handed back and nothing is owed here; this counts the corner
+    /// so that it names itself if a bus ever reaches it. On the ESP32-C6 it is
+    /// zero by construction: `sideband` is set by MMIO **writes** only
+    /// (`SocBus`'s own `sideband_is_set_by_mmio_writes_only`) and every
+    /// `yield_to_machine` in the chip's peripheral set is in a `write`, so no
+    /// modelled load can leave one.
+    pub exit_pending: u64,
     /// Polling points (c) run **inside** a stay, and how many of them ended
     /// it (M7b P2). `polls - polls_left` is the exit that did not happen.
     pub polls: u64,
@@ -2360,8 +2377,16 @@ impl TranslatedCore<SocBus> for JitCore {
             }
         }
 
-        if exit.flags & POLL_OWED != 0 {
-            self.stats.exit_after_store += 1;
+        // One test on the common path, as before: both bits are rare and
+        // neither is reachable on this chip.
+        let owed = exit.flags & (POLL_OWED | FLAG_PENDING);
+        if owed != 0 {
+            if owed & POLL_OWED != 0 {
+                self.stats.exit_after_store += 1;
+            }
+            if owed & FLAG_PENDING != 0 {
+                self.stats.exit_pending += 1;
+            }
         }
         if exit.flags & FLAG_SLICE_ENDED != 0 {
             self.stats.exit_slice_ended += 1;
@@ -2407,6 +2432,9 @@ impl TranslatedCore<SocBus> for JitCore {
             pc: hart.pc(),
             cycle_count: hart.cycle_count(),
             instruction_count: hart.instruction_count(),
+            // [`POLL_OWED`], and not the pending bit with it: a poll owed at
+            // *this* pc, not an obligation the bus is still holding for the
+            // interpreter's next store (M7b F3).
             after_store: exit.flags & POLL_OWED != 0,
         }
     }
@@ -2503,6 +2531,7 @@ impl TranslatedCore<SocBus> for JitCore {
              instantiate {:.2} ms; \
              entries {}, retired {}, escape_hatch {}, cross {}, indirect_miss {}, \
              interpreted_between {}, exits known/unknown {}/{}, after_store {}, \
+             pending_out {}, \
              polls {} ({} left the stay), \
              systimer_fast {} read(s) served (armed {}, disarmed {}), \
              slice_ended {}, no_progress {}, \
@@ -2548,6 +2577,7 @@ impl TranslatedCore<SocBus> for JitCore {
             s.exit_known_pc,
             s.exit_unknown_pc,
             s.exit_after_store,
+            s.exit_pending,
             s.polls,
             s.polls_left,
             s.fast_served,
