@@ -1958,6 +1958,7 @@ impl Esp32C6Builder {
             jit_record: None,
             jit_fence_i_at: 0,
             jit_retranslations: 0,
+            jit_incremental_events: 0,
             jit_published_seeds: Vec::new(),
             jit_code_shadow: Vec::new(),
             jit_code_spans: Vec::new(),
@@ -2273,6 +2274,11 @@ pub struct Esp32C6Machine {
     /// Retranslations performed, so a run can say whether the "exactly one
     /// `fence.i`, exactly one retranslation" the spike observed still holds.
     jit_retranslations: u64,
+    /// Of those, the ones answered **incrementally** (M7b P1): a module added
+    /// beside the read-only one rather than a whole-image re-emit. The number
+    /// the phase's lever is read off, and a test's only way to say which path
+    /// a `fence.i` took.
+    jit_incremental_events: u64,
     /// Seeds the *image* does not name: the base of every span of executable
     /// memory the guest has written and then published with a `fence.i`.
     ///
@@ -3098,6 +3104,14 @@ impl Esp32C6Machine {
         self.jit_retranslations
     }
 
+    /// How many of those were answered **incrementally** — a module installed
+    /// beside the read-only one, rather than the whole image re-emitted
+    /// (M7b P1, DD18).
+    #[must_use]
+    pub fn jit_incremental_events(&self) -> u64 {
+        self.jit_incremental_events
+    }
+
     /// Install a translated core over a hand-supplied seed list, and arm the
     /// two translation events (JD5) for it.
     ///
@@ -3180,12 +3194,14 @@ impl Esp32C6Machine {
                 policy,
             ) {
                 Ok(crate::jit::Incremental::Added(report)) => {
+                    self.jit_incremental_events += 1;
                     if self.jit_report {
                         eprintln!("jit: {}", report.boot_line("fence.i (incremental)"));
                     }
                     return;
                 }
                 Ok(crate::jit::Incremental::Nothing) => {
+                    self.jit_incremental_events += 1;
                     if self.jit_report {
                         eprintln!(
                             "jit: fence.i (incremental): the publish claimed no code the \

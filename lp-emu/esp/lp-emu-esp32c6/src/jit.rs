@@ -247,13 +247,13 @@ pub fn install(
     // the single-module shape; it is a diagnostic and its speed is nobody's
     // number.
     let sets = if record.is_some() {
-        vec![found.set.clone()]
+        vec![(found.set.clone(), false)]
     } else {
         split_by_writability(bus, &found.set)
     };
 
     let mut core: Option<JitCore> = None;
-    for set in &sets {
+    for (set, read_only) in &sets {
         let used = core.as_ref().map_or(0, JitCore::gap_used);
         let (module, recorder) = build_with_halving(
             bus,
@@ -274,6 +274,7 @@ pub fn install(
             fn_blocks,
             record,
             used,
+            *read_only,
         )?;
         match core.as_mut() {
             None => core = Some(JitCore::of(module, recorder, model)),
@@ -301,7 +302,7 @@ pub fn install(
 /// straddles the two — which no real one does, but which nothing forbids —
 /// counts as writable, because "invalidating too much is slow, invalidating too
 /// little is wrong".
-fn split_by_writability(bus: &SocBus, set: &BlockSet) -> Vec<BlockSet> {
+fn split_by_writability(bus: &SocBus, set: &BlockSet) -> Vec<(BlockSet, bool)> {
     let spans = bus.region_spans();
     let read_only = |pc: u32, len: u32| {
         spans.iter().any(|&(base, l, writable)| {
@@ -317,16 +318,16 @@ fn split_by_writability(bus: &SocBus, set: &BlockSet) -> Vec<BlockSet> {
             rw.push(b.clone());
         }
     }
-    [ro, rw]
+    [(ro, true), (rw, false)]
         .into_iter()
-        .filter(|blocks| !blocks.is_empty())
-        .map(|blocks| {
+        .filter(|(blocks, _)| !blocks.is_empty())
+        .map(|(blocks, read_only)| {
             let index = blocks
                 .iter()
                 .enumerate()
                 .map(|(i, b)| (b.pc, i))
                 .collect::<BTreeMap<_, _>>();
-            BlockSet::from_blocks(blocks, index)
+            (BlockSet::from_blocks(blocks, index), read_only)
         })
         .collect()
 }
@@ -347,10 +348,13 @@ fn build_with_halving(
     fn_blocks: usize,
     record: Option<&RecordRequest>,
     gap_used: u32,
+    read_only: bool,
 ) -> Result<(Module, Option<(Recorder, u64)>), String> {
     let mut per_fn = fn_blocks.max(MIN_BLOCKS);
     loop {
-        match Module::build(bus, set, model, policy, discovery, per_fn, record, gap_used) {
+        match Module::build(
+            bus, set, model, policy, discovery, per_fn, record, gap_used, read_only,
+        ) {
             Ok(built) => return Ok(built),
             Err(e) if per_fn > MIN_BLOCKS => {
                 per_fn = (per_fn / 2).max(MIN_BLOCKS);
@@ -465,7 +469,7 @@ pub fn install_incremental(
     };
 
     let (module, _) = build_with_halving(
-        bus, &found.set, model, policy, discovery, fn_blocks, None, gap_used,
+        bus, &found.set, model, policy, discovery, fn_blocks, None, gap_used, false,
     )?;
 
     let core = hart
@@ -1034,6 +1038,10 @@ pub struct Module {
     /// instruction.
     code: Vec<(u32, Box<[u8]>)>,
     report: BuildReport,
+    /// Every byte this module was translated from sits in a region the bus
+    /// calls read-only, so the guest cannot change them and this module can
+    /// never go stale. That is what a `fence.i` keeps.
+    read_only: bool,
     /// Guest bytes **this module** was translated from have changed. It stops
     /// being entered and the next translation event replaces it; the other
     /// modules are untouched, which is sound because every edge out of a
@@ -1208,6 +1216,7 @@ impl Module {
         fn_blocks: usize,
         record: Option<&RecordRequest>,
         gap_used: u32,
+        read_only: bool,
     ) -> Result<(Self, Option<(Recorder, u64)>), String> {
         let at = areas(bus, set, gap_used)?;
         write_permission_table(bus, at);
@@ -1360,6 +1369,7 @@ impl Module {
                 core,
                 index,
                 code,
+                read_only,
                 stale: false,
                 wasm,
                 at,
@@ -1486,12 +1496,9 @@ impl JitCore {
     /// measurement.
     #[must_use]
     pub fn read_only_module_is_stale(&self, bus: &SocBus) -> Option<String> {
-        let m = &self.mods[0];
-        if !m.stale {
-            return None;
-        }
+        let m = self.mods.iter().find(|m| m.read_only && m.stale)?;
         Some(format!(
-            "the read-only module went stale: {} of its {} block(s) no longer match the \
+            "a read-only module went stale: {} of its {} block(s) no longer match the \
              guest's bytes",
             m.changed_blocks(bus),
             m.code.len(),
@@ -1505,8 +1512,23 @@ impl JitCore {
     /// bytes a publish can have changed. Dropping the module drops its
     /// `HostCore`, which in the browser hands its function-table slot back.
     pub fn retire_all_but_read_only(&mut self) {
-        self.mods.truncate(1);
-        self.index.retain(|_, &mut (m, _)| m == 0);
+        let keep: Vec<usize> = self
+            .mods
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| m.read_only)
+            .map(|(i, _)| i)
+            .collect();
+        // Read-only modules are emitted first and never retired, so the ones
+        // that stay keep the indices they had and the index needs no
+        // renumbering — asserted rather than assumed.
+        debug_assert!(
+            keep.iter().enumerate().all(|(i, &m)| i == m),
+            "the read-only modules are not the first ones"
+        );
+        self.mods.truncate(keep.len());
+        let live = keep.len() as u32;
+        self.index.retain(|_, &mut (m, _)| m < live);
     }
 
     /// Whether a recording is running, which is what keeps a run that asked

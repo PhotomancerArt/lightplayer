@@ -299,10 +299,24 @@ fn a_fence_i_republishes_the_code_the_guest_wrote() {
     // meaning this one used to: `jit_retranslations() == 1` says the publish
     // reached the translator, and `t0 == 11` says the guest ran the
     // instruction it published rather than the one it was translated from.
+    // **Rewritten by M7b P1**, because the model it described is gone.
+    //
+    // P5 answered a `fence.i` by building a whole replacement core and
+    // installing it over the old one, so the core alive at the end of the run
+    // had invalidated nothing and the assertion read `invalidations 0 (dropped
+    // 0 blocks)`. That number was a property of the core having been thrown
+    // away, not of anything the guest did.
+    //
+    // The core **survives** the event now: the read-only module is kept and the
+    // writable one is retired and replaced (DD18), so the counters are the
+    // run's rather than the last core's — and they say the thing the old
+    // assertion could only imply. One invalidation, one block dropped: the
+    // publish was seen, and the module holding the bytes it changed was
+    // retired.
     assert!(
-        report.contains("invalidations 0 (dropped 0 blocks)"),
-        "the core installed after a publish is the replacement, which has \
-         invalidated nothing: {report}"
+        report.contains("invalidations 1 (dropped 1 blocks)"),
+        "the publish retires the module holding the block whose bytes changed, \
+         and the core that survives the event says so: {report}"
     );
 }
 
@@ -320,5 +334,190 @@ fn publishing_without_a_fence_is_reported_as_a_firmware_bug() {
         m.bus.missing_fence_reports() > 0,
         "an unpublished rewrite of code the guest has already executed is \
          M5's missing-fence report, and it is still armed"
+    );
+}
+
+// --- 5. the whole-module retire, twice over the same bytes (M7b P1) ---------
+
+/// Two publishes over the **same** bytes, each with its own `fence.i`.
+///
+/// M7b P1 made a `fence.i` incremental: the read-only module is kept and only
+/// the writable side is re-emitted. The retire that guarantees correctness is
+/// unchanged by that, and this is the test that says so — the guest overwrites
+/// one instruction, runs it, overwrites it again, and runs the second one.
+/// Every publish has to reach the translator, and translated code has to run
+/// the instruction the guest published rather than the one it was translated
+/// from, both times.
+#[test]
+fn two_publishes_over_the_same_bytes_each_run_what_was_published() {
+    const SUB2: u32 = 0x800;
+    let sub_at = CODE + SUB2;
+    // Long enough to cross the 8,192-cycle slice cap, so each publish gets its
+    // own translation event. Without it the whole guest runs inside one slice,
+    // both fences land before the machine ever looks, and the test would be
+    // asserting one event where it means to assert two.
+    let delay = |p: &mut Vec<u32>| {
+        p.extend(li(6, 5_000)); // t1 = 5,000
+        p.push(addi(6, 6, -1)); // t1 -= 1
+        p.push(bne(6, 0, -4)); // until zero
+    };
+    let mut p = Vec::new();
+    p.push(addi(5, 0, 0)); // t0 = 0
+    p.extend(li(10, sub_at)); // a0 = &sub
+    p.extend(li(11, addi(5, 5, 10))); // a1 = `addi t0, t0, 10`
+    p.extend(li(12, addi(5, 5, 100))); // a2 = `addi t0, t0, 100`
+    let call1 = p.len();
+    p.push(0); // jal ra, sub          t0 += 1
+    p.push(sw(11, 10, 0)); // *sub = a1
+    p.push(FENCE_I);
+    delay(&mut p);
+    let call2 = p.len();
+    p.push(0); // jal ra, sub          t0 += 10
+    p.push(sw(12, 10, 0)); // *sub = a2
+    p.push(FENCE_I);
+    delay(&mut p);
+    let call3 = p.len();
+    p.push(0); // jal ra, sub          t0 += 100
+    p.push(EBREAK);
+    let at = |i: usize| CODE + 4 * i as u32;
+    for &c in &[call1, call2, call3] {
+        p[c] = jal(1, sub_at.wrapping_sub(at(c)) as i32);
+    }
+    let sub = vec![addi(5, 5, 1), jalr(0, 1, 0)];
+
+    let mut plain = Esp32C6Builder::bare().build().unwrap();
+    place_words(&mut plain, CODE, &p);
+    place_words(&mut plain, sub_at, &sub);
+    plain.harts[0].set_pc(CODE);
+    plain.run_until(&StopCondition::after_micros(5_000));
+    assert_eq!(
+        plain.harts[0].regs()[5],
+        111,
+        "the interpreter runs 1, then 10, then 100"
+    );
+
+    let mut m = Esp32C6Builder::bare().build().unwrap();
+    place_words(&mut m, CODE, &p);
+    place_words(&mut m, sub_at, &sub);
+    m.harts[0].set_pc(CODE);
+    m.translate_from_seeds(&[CODE, sub_at], false, 256).unwrap();
+    m.run_until(&StopCondition::after_micros(5_000));
+
+    assert_eq!(
+        m.harts[0].regs()[5],
+        111,
+        "translated code must run each published instruction in turn, not the \
+         one the module was translated from"
+    );
+    assert_eq!(m.harts[0].fence_i_count(), 2, "two publishes");
+    assert_eq!(
+        m.jit_retranslations(),
+        2,
+        "both publishes reached the translator"
+    );
+    let report = m.harts[0]
+        .translated_core_report()
+        .expect("a core is installed");
+    // Two blocks dropped, one per publish. The *invalidation* count is
+    // larger — the hart asks whenever guest code may have changed, and a
+    // question whose answer is "nothing moved" is free — so the number that
+    // carries the meaning is the one that says a module was retired.
+    assert!(
+        report.contains("(dropped 2 blocks)"),
+        "each publish retires the module holding the block it rewrote — the \
+         whole-module retire, twice: {report}"
+    );
+    assert_eq!(
+        outcome(&m),
+        outcome(&plain),
+        "the whole machine state agrees with the interpreter's"
+    );
+}
+
+// --- 6. the incremental path itself (M7b P1) --------------------------------
+
+/// A guest whose program lives in **read-only** memory and which publishes
+/// **new** code into RAM.
+///
+/// This is the shape incremental translation exists for. The read-only module
+/// holds the program — the guest cannot write those bytes, so it can never go
+/// stale — and the `fence.i` replaces only the writable module, which is where
+/// the published code lands. The assertions are the three things that have to
+/// be true at once: the event took the incremental path, the machine still
+/// holds two modules, and the guest ran what it published.
+#[test]
+fn a_fence_i_that_publishes_new_code_keeps_the_read_only_module() {
+    let rom_at = memmap::FLASH_CACHE_BASE + 0x1000;
+    let ram_sub = CODE;
+    let published = CODE + 0x100;
+
+    // In RAM, translated at boot: `t0 += 1; ret`.
+    let ram = vec![addi(5, 5, 1), jalr(0, 1, 0)];
+
+    // In read-only memory: call the RAM routine, write a new routine into RAM,
+    // publish it, call that.
+    let mut p = Vec::new();
+    p.push(addi(5, 0, 0)); // t0 = 0
+    p.extend(li(10, ram_sub)); // a0 = &ram_sub
+    p.extend(li(11, published)); // a1 = &published
+    p.extend(li(12, addi(5, 5, 7))); // a2 = `addi t0, t0, 7`
+    p.extend(li(13, jalr(0, 1, 0))); // a3 = `ret`
+    p.push(jalr(1, 10, 0)); // call ram_sub        t0 += 1
+    p.push(sw(12, 11, 0)); // published[0] = a2
+    p.push(sw(13, 11, 4)); // published[1] = a3
+    p.push(FENCE_I);
+    p.push(jalr(1, 11, 0)); // call published      t0 += 7
+    p.push(EBREAK);
+
+    let build = || {
+        let mut m = Esp32C6Builder::bare().build().unwrap();
+        place_words(&mut m, rom_at, &p);
+        place_words(&mut m, ram_sub, &ram);
+        m.harts[0].set_pc(rom_at);
+        m
+    };
+
+    let mut plain = build();
+    plain.run_until(&StopCondition::after_micros(200));
+    assert_eq!(plain.harts[0].regs()[5], 8, "1 from RAM, then 7 published");
+
+    let mut m = build();
+    m.translate_from_seeds(&[rom_at, ram_sub], false, 256)
+        .unwrap();
+    let before = m
+        .harts[0]
+        .translated_core_report()
+        .expect("a core is installed");
+    assert!(
+        before.contains("2 module(s)"),
+        "boot installs the read-only half and the writable half separately: {before}"
+    );
+
+    m.run_until(&StopCondition::after_micros(200));
+
+    assert_eq!(
+        m.harts[0].regs()[5],
+        8,
+        "the guest ran the code it published"
+    );
+    assert_eq!(m.harts[0].fence_i_count(), 1, "one publish");
+    assert_eq!(m.jit_retranslations(), 1, "one translation event");
+    assert_eq!(
+        m.jit_incremental_events(),
+        1,
+        "and it took the incremental path: the read-only module was kept"
+    );
+    let after = m
+        .harts[0]
+        .translated_core_report()
+        .expect("a core is installed");
+    assert!(
+        after.contains("2 module(s)"),
+        "the read-only module plus the replacement writable one: {after}"
+    );
+    assert_eq!(
+        outcome(&m),
+        outcome(&plain),
+        "the whole machine state agrees with the interpreter's"
     );
 }
