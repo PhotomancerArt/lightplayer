@@ -16,6 +16,13 @@
 //! does not write the module that gathers them, because that module carries
 //! prose and assertions no generator could produce.
 //!
+//! So is [`output_signals`], and for a different reason: the GPIO matrix's
+//! signal enumeration is **not a register block** and is not in the PAC at
+//! all — it is esp-hal's metadata — so the generator has nothing to read.
+//! It is hand-written with both halves of the trap in its header (the classic
+//! numbers `OutputSignal::RMT_SIG_0 = 87` and `InputSignal::RMT_SIG_0 = 83`),
+//! exactly as the C6's twin is.
+//!
 //! # Three tables serve more than one peripheral
 //!
 //! The PAC gives several peripherals one `RegisterBlock` type each, so one
@@ -54,6 +61,7 @@ mod frc_timer;
 mod gpio;
 mod i2s0;
 mod io_mux;
+pub mod output_signals;
 mod rmt;
 mod rng;
 mod rtc_cntl;
