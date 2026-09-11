@@ -414,11 +414,11 @@ fn hart_slots() {
     assert!(!machine.core_stalled(0));
     assert!(
         machine.core_stalled(1),
-        "slot 1 is stalled for the whole of M3 (Q5)"
+        "slot 1 is held until the guest releases it through DPORT (M4 P1)"
     );
     assert!(
-        machine.core_report()[1].contains("stalled"),
-        "core 1 is never silently absent from a report: {:?}",
+        machine.core_report()[1].contains("held by [machine"),
+        "core 1 is never silently absent from a report, and the report names what holds it: {:?}",
         machine.core_report()
     );
 

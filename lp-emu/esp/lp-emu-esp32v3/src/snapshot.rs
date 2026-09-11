@@ -14,7 +14,8 @@
 //! | `scalars` | the bus's clock, issuing PC, side-band, the pin fabric and the unmapped counters — a restored run that reported different totals would not be the same run |
 //! | `sched` | the live event queue, with the sequence numbers that break ties |
 //! | `rng` | the seeded PRNG's position |
-//! | `hook_calls`, `idle_skips` | observables a test compares |
+//! | `hook_calls`, `idle_skips`, `wfi_ends` | observables a test compares |
+//! | `core_quantum` | the per-core window bound (D3). A run's future depends on it — two quanta are two interleavings — so a restore adopts the snapshot's rather than keeping the machine's |
 //!
 //! Watchpoints are **not** here: they live on the bus but they are derived
 //! from the hart's `DBREAK` registers, so a restore re-arms them from the
@@ -44,12 +45,17 @@ pub struct Snapshot {
     pub rng: u64,
     pub hook_calls: u64,
     pub idle_skips: u64,
+    /// How many windows each core has ended in `waiti`.
+    pub wfi_ends: [u64; CORES],
+    /// The per-core window bound the run was using (`--core-quantum`).
+    pub core_quantum: u64,
 }
 
 impl Snapshot {
-    /// The guest cycle this snapshot was taken at.
+    /// The guest cycle this snapshot was taken at: the machine's one clock,
+    /// which is the furthest any hart has got.
     pub fn cycle(&self) -> Cycles {
-        self.harts.first().map_or(0, |h| h.cycle_count())
+        self.harts.iter().map(|h| h.cycle_count()).max().unwrap_or(0)
     }
 
     /// Roughly how much host memory it holds. Region bytes dominate: the

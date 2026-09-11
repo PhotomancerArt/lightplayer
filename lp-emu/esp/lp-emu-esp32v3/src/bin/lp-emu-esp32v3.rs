@@ -15,19 +15,20 @@
 //! meant. `--cache-off-fetch` arrived with P4 and D4; P6 added the six the
 //! console and the cable need (`--uart0`, `--uart0-script`, `--uart0-baud`,
 //! `--control`, `--control-script`, `--exit-on`); P7 added the four the flash
-//! chip needs (`--flash`, `--flash-copy`, `--merged`, `--flash-len`).
+//! chip needs (`--flash`, `--flash-copy`, `--merged`, `--flash-len`); M4 P1
+//! added the two cores need (`--core-quantum`, `--app-mmu-divergence`).
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use lp_emu_esp32v3::cache::CacheOffPolicy;
+use lp_emu_esp32v3::cache::{CacheOffPolicy, MmuDivergencePolicy};
 use lp_emu_esp32v3::control;
 use lp_emu_esp32v3::flash::FlashBacking;
 use lp_emu_esp32v3::loader::EfuseIdentity;
 use lp_emu_esp32v3::machine::{
-    AppSource, BootMode, Esp32V3Builder, Machine, Outcome, RomSource, StopCondition, TimeGrade,
-    Uart0Sink,
+    AppSource, BootMode, CORE_QUANTUM_DEFAULT, CORES, Esp32V3Builder, Machine, Outcome,
+    RomSource, StopCondition, TimeGrade, Uart0Sink,
 };
 use lp_emu_esp32v3::{bus_setup, memmap};
 
@@ -67,6 +68,21 @@ OPTIONS:
                             the stall duration, not that silicon would crash,
                             not that the access is a bug. `permit` does not
                             check at all, and continues [stop]
+    --core-quantum <cycles> the upper bound on one core's window (D3). Every
+                            core that is not held gets a window of at most
+                            this many cycles per loop iteration, core 0 then
+                            core 1, on one guest clock; due events fire
+                            between windows. A run PARAMETER, recorded in the
+                            run report — two quanta are two interleavings
+                            whose cycle counts may differ and whose console
+                            must not [256]
+    --app-mmu-divergence stop|permit
+                            R4. This machine has ONE flash window behind BOTH
+                            cores' MMU tables and serves the PRO core's.
+                            `stop` (the default) ends the run at the first
+                            fill on which the APP core's entry disagrees with
+                            the PRO core's, naming both; `permit` logs it and
+                            keeps serving the PRO core's view [stop]
     --flash <path>          back the flash chip with this file: it is read at
                             start and written back when the run ends. A file
                             that does not exist is created blank
@@ -130,6 +146,7 @@ EXIT CODES:
     2 the hart faulted, or the cable reset the chip without --reboot-on-reset
     3 a strict-bus refusal       4 the wall-clock net fired
     5 a --break-at was reached  6 a cache-off fetch (D4)
+    7 a flash-MMU divergence between the two cores' tables (R4)
 ";
 
 fn main() -> ExitCode {
@@ -152,6 +169,8 @@ struct Args {
     boot_mode: Option<BootMode>,
     strict: bool,
     cache_off: CacheOffPolicy,
+    mmu_divergence: MmuDivergencePolicy,
+    core_quantum: Option<u64>,
     time_grade: TimeGrade,
     timeout: Option<Duration>,
     wall_timeout: Option<Duration>,
@@ -200,6 +219,8 @@ fn run() -> Result<ExitCode, String> {
         .time_grade(args.time_grade)
         .strict(args.strict)
         .cache_off_fetch(args.cache_off)
+        .app_mmu_divergence(args.mmu_divergence)
+        .core_quantum(args.core_quantum.unwrap_or(CORE_QUANTUM_DEFAULT))
         .seed(args.seed)
         .efuse(args.efuse)
         .uart0(args.uart0.clone())
@@ -320,19 +341,28 @@ fn run() -> Result<ExitCode, String> {
 /// A ROM-up boot has thousands by construction — the second-stage bootloader
 /// places the application's IRAM segment and jumps into it — so the number is
 /// reported rather than gated on.
+///
+/// `instructions` is the sum over both cores (ruling R10) and the per-core
+/// counts follow it in brackets; `quantum` is the run parameter D3 names,
+/// printed on every run so no transcript reader has to infer it.
 fn print_run_summary(machine: &Machine) {
     let bus = machine.bus();
+    let per_core: Vec<String> = (0..CORES)
+        .map(|c| format!("core{c}={}", machine.core_instructions(c)))
+        .collect();
     println!(
-        "run: cycles={} instructions={} idle={} unmapped={} (reads {}, writes {}, {} sites) \
-         fence={}",
+        "run: cycles={} instructions={} ({}) idle={} unmapped={} (reads {}, writes {}, {} \
+         sites) fence={} quantum={}",
         machine.cycles(),
         machine.instructions(),
+        per_core.join(" "),
         machine.idle_skips(),
         bus.unmapped_reads() + bus.unmapped_writes(),
         bus.unmapped_reads(),
         bus.unmapped_writes(),
         bus.unmapped_sites(),
         bus.missing_fence_reports(),
+        machine.core_quantum(),
     );
 }
 
@@ -487,34 +517,51 @@ fn print_outcome(machine: &mut Machine, outcome: &Outcome) {
     let micros = cycle / memmap::CYCLES_PER_US;
     match outcome {
         Outcome::Deadline { .. } => {
-            // Where the hart was when time ran out: a boot that is spinning
+            // Where each hart was when time ran out: a boot that is spinning
             // on a register an accept block cannot answer ends here, and the
             // pc is the whole diagnosis.
-            let pc = machine.harts[0].pc();
-            let sym = machine.symbolize(pc).unwrap_or_else(|| "?".into());
-            println!("DEADLINE cycle={cycle} ({micros} us emulated) pc={pc:#010x} ({sym})");
-            // ⚠️ The pc alone is a trap on this hart: the machine calls
-            // `poll_interrupts` at the END of every slice, so a guest that is
-            // taking interrupts at all is *always* sampled just after one was
-            // taken and always reports a vector. `PS`, `INTENABLE` and the
-            // pending mask are what separate "spinning in a vector" from
-            // "idling with an interrupt in flight" — and a level line that is
-            // pending, enabled and never taken is the third shape, which
-            // nothing else in this output would show.
-            let ps = machine.harts[0].ps();
-            let external = machine.bus().pending_cpu_interrupt_mask();
-            let ints = machine.harts[0].interrupts_mut();
-            let (intenable, pending) = (ints.intenable, ints.pending());
-            println!(
-                "  PS={ps:#010x} (INTLEVEL={}, EXCM={}) INTENABLE={intenable:#010x} \
-                 pending={pending:#010x} external={external:#010x}",
-                ps & 0xf,
-                u8::from(ps & lp_xt_emu::mach::sr::PS_EXCM != 0),
-            );
+            println!("DEADLINE cycle={cycle} ({micros} us emulated)");
+            for core in 0..CORES {
+                let pc = machine.harts[core].pc();
+                let sym = machine.symbolize(pc).unwrap_or_else(|| "?".into());
+                let state = if machine.core_stalled(core) {
+                    "held"
+                } else if machine.parked(core) {
+                    "parked(waiti)"
+                } else {
+                    "running"
+                };
+                println!("  core {core}: {state} pc={pc:#010x} ({sym})");
+                if machine.core_stalled(core) {
+                    continue;
+                }
+                // ⚠️ The pc alone is a trap on this hart: the machine polls
+                // at the END of every window, so a guest that is taking
+                // interrupts at all is *always* sampled just after one was
+                // taken and always reports a vector. `PS`, `INTENABLE` and
+                // the pending mask are what separate "spinning in a vector"
+                // from "idling with an interrupt in flight" — and a level
+                // line that is pending, enabled and never taken is the third
+                // shape, which nothing else in this output would show.
+                let ps = machine.harts[core].ps();
+                machine.bus_mut().set_hart(core);
+                let external = machine.bus().pending_cpu_interrupt_mask();
+                let ints = machine.harts[core].interrupts_mut();
+                let (intenable, pending) = (ints.intenable, ints.pending());
+                println!(
+                    "    PS={ps:#010x} (INTLEVEL={}, EXCM={}) INTENABLE={intenable:#010x} \
+                     pending={pending:#010x} external={external:#010x}",
+                    ps & 0xf,
+                    u8::from(ps & lp_xt_emu::mach::sr::PS_EXCM != 0),
+                );
+            }
         }
-        Outcome::Breakpoint { pc, .. } => {
+        Outcome::Breakpoint { core, pc, .. } => {
             let sym = machine.symbolize(*pc).unwrap_or_else(|| "?".into());
-            println!("BREAKPOINT pc={pc:#010x} ({sym}) cycle={cycle}");
+            println!("BREAKPOINT core={core} pc={pc:#010x} ({sym}) cycle={cycle}");
+        }
+        Outcome::MmuDivergence { divergence, .. } => {
+            println!("{}", machine.mmu_divergence_message(cycle, divergence));
         }
         Outcome::WallTimeout { .. } => {
             println!("WALL TIMEOUT cycle={cycle} ({micros} us emulated)");
@@ -537,16 +584,19 @@ fn print_outcome(machine: &mut Machine, outcome: &Outcome) {
                 }
             );
         }
-        Outcome::Fault { pc, fault, .. } => {
+        Outcome::Fault {
+            core, pc, fault, ..
+        } => {
+            let core = *core;
             let sym = machine.symbolize(*pc).unwrap_or_else(|| "?".into());
-            println!("FAULT pc={pc:#010x} ({sym}) cycle={cycle}: {fault:?}");
+            println!("FAULT core={core} pc={pc:#010x} ({sym}) cycle={cycle}: {fault:?}");
             // The exception registers, because a fault *inside a vector* says
             // nothing about what asked for it. The classic's mask ROM ends
             // its debug vector in `simcall`, so a guest that double-faults
             // reports an unsupported opcode at `_DebugExceptionVector+0x5`
             // and the useful address is `EPC1` (`m3/notes.md`: the earliest
             // cause is the root).
-            let sr = machine.harts[0].sr();
+            let sr = machine.harts[core].sr();
             let name = |at: u32| match machine.symbolize(at) {
                 Some(n) => format!(" ({n})"),
                 None => String::new(),
@@ -557,7 +607,7 @@ fn print_outcome(machine: &mut Machine, outcome: &Outcome) {
                 sr.excvaddr,
                 sr.epc[1],
                 name(sr.epc[1]),
-                machine.harts[0].ps(),
+                machine.harts[core].ps(),
             );
         }
         Outcome::StrictBus { violation } => {
@@ -613,6 +663,19 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--hooks" => args.hooks = true,
             "--strict-bus" => args.strict = true,
             "--cache-off-fetch" => args.cache_off = CacheOffPolicy::parse(&value()?)?,
+            "--app-mmu-divergence" => {
+                args.mmu_divergence = MmuDivergencePolicy::parse(&value()?)?
+            }
+            "--core-quantum" => {
+                let v = value()?;
+                let n: u64 = v
+                    .parse()
+                    .map_err(|_| format!("--core-quantum {v}: not a cycle count"))?;
+                if n == 0 {
+                    return Err("--core-quantum 0: a zero-cycle window runs nothing".into());
+                }
+                args.core_quantum = Some(n);
+            }
             "--elf" => args.elf = Some(PathBuf::from(value()?)),
             "--rom" => args.rom = Some(PathBuf::from(value()?)),
             "--boot-mode" => {

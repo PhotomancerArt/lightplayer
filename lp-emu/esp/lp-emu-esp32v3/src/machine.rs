@@ -5,24 +5,88 @@
 //!
 //! - the hart is [`lp_xt_emu::mach::XtHart`] rather than
 //!   `lp_riscv_emu::mach::MachineHart`, and
-//! - **`harts` has two slots, and slot 1 is stalled for the whole of M3.**
+//! - **`harts` has two slots, and the run loop gives every core that is not
+//!   held a window per iteration on one guest clock** — the deterministic
+//!   quantum interleave, plan decision D3 (M4 P1).
 //!
-//! # What "stalled" means here
+//! # Two cores, one clock
 //!
-//! The classic is dual-core. Slot 1 is *constructed* — it holds architectural
-//! state, it appears in a snapshot, `--probe` and the run report name it —
-//! and it is **never given a slice**, so it consumes no guest time. That is
-//! Q5's answer for this milestone, and it is a supported configuration of the
-//! firmware rather than a hole: `start_app_core` times out and the image
-//! takes its documented single-core fallback
-//! (`lp-fw/fw-esp32v3/src/main.rs:838-845`, which prints `[INIT] APP core
-//! unavailable; RMT ISR on PRO core (single-core semantics)`).
+//! The classic is dual-core. Both slots are constructed — each holds
+//! architectural state, appears in a snapshot, and is named by `--probe` and
+//! the run report — and [`Machine::run_until`] hands **each core that is not
+//! held** a window of at most [`CORE_QUANTUM_DEFAULT`] cycles
+//! (`--core-quantum`) per iteration, core 0 then core 1, on **one** guest
+//! clock: every running core is given the same window, due scheduler events
+//! fire between windows and never inside one, and the machine's clock is the
+//! furthest any hart has got. A core that is held costs nothing and its
+//! counters do not move; a core parked in `waiti` costs nothing either — it
+//! is not given a window until an interrupt is *taken*, which is what
+//! `waiti` means on silicon. When every running core is parked, guest time
+//! jumps to the next thing that can wake any of them (the deterministic idle
+//! skip): a scheduled event, the host's next service, a scripted byte, or
+//! **either hart's own `CCOMPARE` match** (ruling R9).
 //!
-//! On silicon a stalled core is held by two register pairs, and P4 wires
-//! [`Machine::core_stalled`] to them: `RTC_CNTL.options0.sw_stall_appcpu_c0`
-//! plus `RTC_CNTL.sw_cpu_stall.sw_stall_appcpu_c1` (both halves of the key)
-//! and `DPORT.appcpu_ctrl_c.appcpu_runstall`. In P2 none of those registers
-//! exists, so it is a plain machine field.
+//! The interleave is a pure function of the instruction streams, the
+//! scripted input and the quantum. It is **not silicon's scheduling**: on
+//! silicon the two cores run at once, and here a store by core 0 is visible
+//! to core 1's next load with no store buffer and no cache-coherence window
+//! in between — cross-core visibility is *stronger* than the part's, on
+//! purpose and stated (D3). A firmware race that needs a weak memory model to
+//! reproduce will not reproduce here, and two quanta are two different
+//! interleavings whose cycle counts may legitimately differ. What may not
+//! differ between quanta is anything the guest can observe about itself:
+//! the console bytes. A quantum that changes the console is a race the model
+//! is hiding, and `tests/determinism.rs` asserts it does not.
+//!
+//! # What "held" means here
+//!
+//! On silicon core 1 is held by three inputs, and [`Machine::core_stalled`]
+//! is the OR of them: the machine's own field (a core nothing has started),
+//! RTC_CNTL's two-register stall key (`options0.sw_stall_appcpu_c0` plus
+//! `sw_cpu_stall.sw_stall_appcpu_c1`, which stall only when the pair reads
+//! `0x86` — `with_app_core_stalled` uses this around every flash write), and
+//! DPORT's `appcpu_ctrl_*` (`appcpu_resetting`, `appcpu_clkgate_en`,
+//! `appcpu_runstall`: [`crate::periph::dport::AppCoreControl::holds_core1`]).
+//!
+//! # How core 1 starts
+//!
+//! **At the architectural reset, through the real ROM — no seed and no
+//! hook.** `esp_hal::system::CpuControl::start_app_core` writes the entry
+//! into `appcpu_ctrl_d.appcpu_boot_addr`, sets `clkgate_en`, clears
+//! `runstall` and pulses `appcpu_resetting`
+//! (`third_party/esp-hal/src/soc/esp32/cpu_control.rs`, `start_core1`).
+//! The DPORT view yields to the machine at the store that completes the
+//! release, and [`Machine::service_app_core_start`] puts slot 1 at the
+//! **reset state** — `pc = _ResetVector`, `PS = 0x1F`, the ROM's `VECBASE` —
+//! with its counters at the machine's clock, exactly as a reset would. The
+//! mask ROM does the rest, and this is what it does, read off the vendored
+//! ELF with `xtensa-esp32-elf-objdump`:
+//!
+//! ```text
+//! 40000456 <_ResetHandler+0x6>:  rsr.prid a2
+//! 40000459:  l32r a3, (0xabab)  ; bne a2, a3, .noappfastboot   — the PRO core
+//! 4000045f:  l32r a3, (0x3ff00038); l32i a3, a3, 0   — DPORT.appcpu_ctrl_d
+//! 40000465:  bbci a3, 31, .noappfastboot  — bit 31 clear: no "app fast boot"
+//! ...                                       (esp-hal's address has it clear)
+//! 40000704 <_start>:   a1 = __stack (0x3ffe3f20), PS = 0x40020, call4 main
+//! 400076d1 <main+0xd>: rsr.prid; bne → the PRO arm
+//! 400076dd <main+0x19>: memw; l32i a2, (0x3ff00038); beqz a2, main+0x19
+//!                       — the APP core's own wait loop on appcpu_boot_addr
+//! 40007bcf <main+0x50b>: user_code_start = a2; eight
+//!                        _xtos_set_exception_handler calls; callx8 a2
+//! ```
+//!
+//! So core 1 runs the ROM's reset path on the ROM's own stack, spins in
+//! `main`'s APP arm until `appcpu_boot_addr` is non-zero — it already is,
+//! esp-hal writes it before the release — and `callx8`'s esp-hal's
+//! `start_core1_init`, which sets its own `VECBASE` and stack pointer and
+//! calls the entry. Every register that path touches is one this machine
+//! models; `--strict-bus` is the proof, and `tests/dual_core.rs` reads the
+//! wait loop's own `DPORT+0x038` reads by hart 1 out of the bus trace.
+//!
+//! What is *not* reproduced is a timing claim: esp-hal's caller waits up to
+//! 10 ms of **guest** time for the bind, and this machine gets core 1 there
+//! in a few thousand windows. That is the guest's own wait, never a gate.
 //!
 //! # Peripherals: accept blocks, in the order the boot met them
 //!
@@ -81,6 +145,17 @@ pub const MAX_SLICE_CYCLES: u64 = 8_192;
 /// Under `--strict-bus` the loop checks for a refusal between slices, so a
 /// shorter slice reports the violating access closer to where it happened.
 const STRICT_SLICE_CYCLES: u64 = 1_024;
+
+/// The default per-core window, in guest cycles (`--core-quantum`; ruling
+/// R2 of M4). D3 says "low hundreds": a window this size puts ~30 windows
+/// inside the shortest thing either core waits on (the io_task's 1 ms
+/// pacer is 240,000 cycles; the pusher's refill deadline is 80 µs = 19,200)
+/// and costs a few per cent in per-window bookkeeping. It is the *upper*
+/// bound on one hart's window — a scheduled event, a probe, a host service
+/// or a strict slice still shortens it. It is a **parameter**, recorded in
+/// the run report, in `core_report()` and in the snapshot — never a tuned
+/// constant, and never a claim about silicon's scheduling.
+pub const CORE_QUANTUM_DEFAULT: u64 = 256;
 
 /// `PRID` on the PRO core. **A chip number, not a hart index**: the two cores
 /// answer `0xCDCD` and `0xABAB`, and esp-hal tells them apart by bit 13
@@ -422,8 +497,9 @@ impl BootFrame {
 pub enum Outcome {
     /// The emulated deadline was reached with no fault.
     Deadline { cycle: Cycles },
-    /// The hart cannot continue.
+    /// A hart cannot continue. `core` names which.
     Fault {
+        core: usize,
         cycle: Cycles,
         pc: u32,
         fault: HartFault,
@@ -434,9 +510,18 @@ pub enum Outcome {
     /// The wall-clock safety net fired. The only non-deterministic outcome,
     /// and it can only end a run.
     WallTimeout { cycle: Cycles },
-    /// A `--break-at` symbol was reached; the guest is stopped at its first
-    /// instruction with every register as the caller left it.
-    Breakpoint { cycle: Cycles, pc: u32 },
+    /// A `--break-at` symbol was reached on `core`; that core is stopped at
+    /// the symbol's first instruction with every register as the caller
+    /// left it.
+    Breakpoint { core: usize, cycle: Cycles, pc: u32 },
+    /// **Ruling R4.** A fill met a flash-MMU entry on which the two cores'
+    /// tables disagree, under `--app-mmu-divergence stop` (the default). See
+    /// [`crate::cache::MmuDivergencePolicy`] and
+    /// [`Machine::mmu_divergence_message`].
+    MmuDivergence {
+        cycle: Cycles,
+        divergence: crate::cache::MmuDivergence,
+    },
     /// **D4.** A core reached through a flash window with its own read cache
     /// disabled. See [`crate::cache`] for the design and
     /// [`Machine::cache_off_message`] for what the message claims and what it
@@ -470,6 +555,9 @@ impl Outcome {
             // reads 0/2/3/4/5 the same way on either, and 6 is a stop only
             // this chip can produce.
             Outcome::CacheOffFetch { .. } => 6,
+            // Seven is new with M4 P1 (ruling R4), for the same reason six
+            // was: a stop only this chip can produce.
+            Outcome::MmuDivergence { .. } => 7,
         }
     }
 
@@ -479,7 +567,8 @@ impl Outcome {
             | Outcome::Fault { cycle, .. }
             | Outcome::WallTimeout { cycle }
             | Outcome::Breakpoint { cycle, .. }
-            | Outcome::CacheOffFetch { cycle, .. } => *cycle,
+            | Outcome::CacheOffFetch { cycle, .. }
+            | Outcome::MmuDivergence { cycle, .. } => *cycle,
             Outcome::Reset { cycle, .. } | Outcome::ExitMatched { cycle } => *cycle,
             Outcome::StrictBus { violation } => violation.cycle,
         }
@@ -683,6 +772,8 @@ pub struct Esp32V3Builder {
     reset_cause: loader::ResetCause,
     efuse: loader::EfuseIdentity,
     cache_off: crate::cache::CacheOffPolicy,
+    app_mmu_divergence: crate::cache::MmuDivergencePolicy,
+    core_quantum: u64,
     boot_set: bool,
     trace: Option<Box<dyn std::io::Write + Send>>,
     trace_blocks: Vec<String>,
@@ -712,6 +803,8 @@ impl Default for Esp32V3Builder {
             reset_cause: loader::ResetCause::default(),
             efuse: loader::EfuseIdentity::default(),
             cache_off: crate::cache::CacheOffPolicy::default(),
+            app_mmu_divergence: crate::cache::MmuDivergencePolicy::default(),
+            core_quantum: CORE_QUANTUM_DEFAULT,
             boot_set: true,
             trace: None,
             trace_blocks: Vec::new(),
@@ -747,6 +840,8 @@ impl fmt::Debug for Esp32V3Builder {
             .field("reset_cause", &self.reset_cause)
             .field("efuse", &self.efuse)
             .field("cache_off", &self.cache_off)
+            .field("app_mmu_divergence", &self.app_mmu_divergence)
+            .field("core_quantum", &self.core_quantum)
             .field("boot_set", &self.boot_set)
             .field("trace", &self.trace.is_some())
             .field("trace_blocks", &self.trace_blocks)
@@ -847,6 +942,23 @@ impl Esp32V3Builder {
     /// run uses.
     pub fn cache_off_fetch(mut self, policy: crate::cache::CacheOffPolicy) -> Self {
         self.cache_off = policy;
+        self
+    }
+
+    /// `--app-mmu-divergence` (ruling R4). The default is
+    /// [`crate::cache::MmuDivergencePolicy::Stop`], and that is what every
+    /// gate run uses.
+    pub fn app_mmu_divergence(mut self, policy: crate::cache::MmuDivergencePolicy) -> Self {
+        self.app_mmu_divergence = policy;
+        self
+    }
+
+    /// `--core-quantum <cycles>`: the upper bound on one core's window
+    /// (D3). Default [`CORE_QUANTUM_DEFAULT`]. Zero is refused by the CLI;
+    /// here it is clamped to one, because a zero-cycle window would run
+    /// nothing forever.
+    pub fn core_quantum(mut self, cycles: u64) -> Self {
+        self.core_quantum = cycles.max(1);
         self
     }
 
@@ -978,10 +1090,11 @@ impl Esp32V3Builder {
         bus.set_matrix(Box::new(crate::intmatrix::Esp32V3IntMatrix::new()));
 
         let cache = crate::cache::ClassicCache::handle();
-        cache
-            .lock()
-            .expect("cache poisoned")
-            .set_policy(self.cache_off);
+        {
+            let mut c = cache.lock().expect("cache poisoned");
+            c.set_policy(self.cache_off);
+            c.set_divergence_policy(self.app_mmu_divergence);
+        }
         let appcpu = crate::periph::dport::AppCoreControl::handle();
         // The host's side of the wire, before any peripheral: UART0 holds a
         // `StreamId` and nothing else. Its bytes are always tee'd into memory
@@ -1109,20 +1222,9 @@ impl Esp32V3Builder {
         // Two harts, always. The classic is dual-core and a machine that
         // pretended otherwise would have nowhere for P4's DPORT view to
         // write, and nothing for a snapshot to carry.
-        let config = |prid| CoreConfig {
-            reset_pc: memmap::ROM_MASK_BASE + RESET_VECTOR_OFS,
-            reset_vecbase: memmap::ROM_MASK_BASE,
-            prid,
-            interrupts: CORE_INTERRUPTS,
-        };
-        let mut harts: Vec<XtHart<SocBus>> = vec![
-            XtHart::new(0, config(PRID_PRO)),
-            XtHart::new(1, config(PRID_APP)),
-        ];
-        for hart in &mut harts {
-            hart.set_cycle_model(self.time_grade.cycle_model());
-            hart.set_strict_unsupported(self.strict_unsupported);
-        }
+        let harts: Vec<XtHart<SocBus>> = (0..CORES)
+            .map(|core| fresh_hart(core, self.time_grade, self.strict_unsupported))
+            .collect();
 
         let mut machine = Machine {
             bus,
@@ -1132,11 +1234,15 @@ impl Esp32V3Builder {
             flash,
             cache_fills: 0,
             staging: loader::FlashStaging::default(),
-            cache_watch_armed: false,
-            // M3 never runs core 1 (Q5). `core_stalled` ORs this field with
-            // `stall_key` (RTC_CNTL's two halves, P5) and with DPORT's
-            // `appcpu_ctrl_*` (P4).
+            cache_watch: None,
+            // Core 1 is held by the machine until the guest releases it
+            // through DPORT (`service_app_core_start`). `core_stalled` ORs
+            // this field with `stall_key` (RTC_CNTL's two halves, P5) and
+            // with DPORT's `appcpu_ctrl_*` (P4).
             stalled: [false, true],
+            core_quantum: self.core_quantum,
+            wfi_ends: [0; CORES],
+            strict_unsupported: self.strict_unsupported,
             pending_breaks: Vec::new(),
             stall_key,
             rom: rom_image,
@@ -1211,6 +1317,56 @@ impl Esp32V3Builder {
 /// number (`m3/notes.md` §2), which is why `tests/boot.rs` asserts it.
 pub const RESET_VECTOR_OFS: u32 = 0x400;
 
+/// The architectural configuration of core `core`: the reset vector, the
+/// reset `VECBASE`, the chip's `PRID` for that core and the fixed
+/// interrupt table — the same for both cores except the `PRID`.
+pub fn core_config(core: usize) -> CoreConfig {
+    CoreConfig {
+        reset_pc: memmap::ROM_MASK_BASE + RESET_VECTOR_OFS,
+        reset_vecbase: memmap::ROM_MASK_BASE,
+        prid: if core == 0 { PRID_PRO } else { PRID_APP },
+        interrupts: CORE_INTERRUPTS,
+    }
+}
+
+/// What `CPENABLE` holds when a core comes out of reset on this part:
+/// **every coprocessor enabled**. Measured, not assumed, and found by M4 P1
+/// the hard way.
+///
+/// The evidence: the firmware's own conformance harness read `cpenable
+/// before=0x000000ff` at its first instruction on the desk board (classic
+/// rev v3.1, 2026-08-06; `lp-fw/fw-esp32v3/src/board/esp32v3/fpu.rs`), and
+/// **nothing between reset and that instruction writes the register** — the
+/// vendored rev300 mask ROM contains no `wsr.cpenable`/`xsr.cpenable` at all
+/// (`xtensa-esp32-elf-objdump -d` of `esp32_rev300_rom.elf`, zero hits), the
+/// ESP-IDF second-stage bootloader in the merged image has no such encoding
+/// (`t0 e0 13` / `t0 e0 61` scanned across `0x1000..0x8000`), and esp-hal
+/// 1.1.1 and xtensa-lx-rt 0.22 have none either (the firmware's module says
+/// so). So `0xff` is the reset state, on both cores.
+///
+/// `XtHart::new` leaves the ISA's generic `0`, and until M4 that was
+/// harmless: the PRO core arms bit 0 itself before its first FP instruction.
+/// **It is not harmless on core 1.** esp-hal is built with
+/// `float-save-restore`, so its level-1 interrupt entry (`save_context`)
+/// executes `rur.fcr` / `ssi f0..f15` unconditionally; with `CPENABLE = 0`
+/// the first doorbell core 1 takes raises `EXCCAUSE = 32` inside the
+/// handler, which is a double exception, and the core is dead
+/// (`tests/dual_core.rs` pins the doorbell arriving; this constant is why it
+/// is *taken*). The loader's `CPENABLE = 0` note was written against the
+/// PRO core alone and is amended.
+pub const CPENABLE_RESET: u32 = 0xff;
+
+/// A hart at the architectural reset state of **this part**, with the
+/// machine's cycle model and unsupported-opcode policy applied. What `build`
+/// makes both slots from, and what a core reset puts back.
+fn fresh_hart(core: usize, grade: TimeGrade, strict_unsupported: bool) -> XtHart<SocBus> {
+    let mut hart = XtHart::new(core as u32, core_config(core));
+    hart.cpu_mut().cpenable = CPENABLE_RESET;
+    hart.set_cycle_model(grade.cycle_model());
+    hart.set_strict_unsupported(strict_unsupported);
+    hart
+}
+
 /// The classic ESP32 machine.
 pub struct Machine {
     bus: SocBus,
@@ -1223,10 +1379,18 @@ pub struct Machine {
     /// See [`Machine::break_at_address_when`].
     pending_breaks: Vec<(u32, [u8; 3], &'static str)>,
     stall_key: crate::periph::rtc_cntl::StallKey,
-    /// **Two** slots: the classic is dual-core. Slot 1 is stalled for the
-    /// whole of M3 — see the module docs.
+    /// **Two** slots: the classic is dual-core. Slot 1 is held until the
+    /// guest releases it through DPORT — see the module docs.
     pub harts: Vec<XtHart<SocBus>>,
     stalled: [bool; CORES],
+    /// The upper bound on one core's window, in cycles (D3, `--core-quantum`).
+    core_quantum: u64,
+    /// How many windows each core has ended in `waiti` — the observable a
+    /// test uses to say "the pusher parked on core 1".
+    wfi_ends: [u64; CORES],
+    /// The builder's unsupported-opcode policy, kept so a core reset
+    /// (`service_app_core_start`) builds the new hart the same way.
+    strict_unsupported: bool,
     /// The flash MMU tables and the cache-enable state, shared with the
     /// DPORT and FLASH_MMU views.
     cache: crate::cache::CacheHandle,
@@ -1238,8 +1402,9 @@ pub struct Machine {
     cache_fills: u64,
     /// What a direct load staged in the chip and mapped ([`loader`]).
     staging: loader::FlashStaging,
-    /// Whether D4's watch is installed on the bus right now.
-    cache_watch_armed: bool,
+    /// Which core D4's watch is installed on the bus for right now, if any
+    /// (ruling R3: the watch is armed per *running* core).
+    cache_watch: Option<usize>,
     rom: ElfImage,
     app: Option<ElfImage>,
     rom_segments: Vec<PlacedSegment>,
@@ -1253,7 +1418,8 @@ pub struct Machine {
     boot_mode: BootMode,
     time_grade: TimeGrade,
     boot_frame: Option<BootFrame>,
-    stop_at: Option<u32>,
+    /// `(core, pc)` of a `--break-at` hook that asked the run to stop.
+    stop_at: Option<(usize, u32)>,
     hook_calls: u64,
     idle_skips: u64,
     seed: u64,
@@ -1537,22 +1703,85 @@ impl Machine {
             .collect()
     }
 
-    /// One line per core, for `--probe` and the run report. Slot 1 is never
-    /// silently absent.
+    /// Which of the three stall inputs hold `core` right now, by name, in
+    /// the order `core_stalled` consults them. Empty for a running core.
+    pub fn stall_inputs(&self, core: usize) -> Vec<&'static str> {
+        let mut held = Vec::new();
+        if self.stalled.get(core).copied().unwrap_or(true) {
+            held.push("machine");
+        }
+        if self.stall_key.stalled(core) {
+            held.push("rtc_cntl key 0x86");
+        }
+        if core == 1 {
+            let a = self.appcpu.lock().expect("appcpu poisoned");
+            if a.resetting {
+                held.push("dport appcpu_resetting");
+            }
+            if a.runstall {
+                held.push("dport appcpu_runstall");
+            }
+            if !a.clkgate_en {
+                held.push("dport !appcpu_clkgate_en");
+            }
+        }
+        held
+    }
+
+    /// One line per core plus the quantum, for `--probe` and the run report.
+    /// Slot 1 is never silently absent, and a held core says *which* input
+    /// is holding it.
     pub fn core_report(&self) -> Vec<String> {
-        (0..CORES)
+        let mut lines: Vec<String> = (0..CORES)
             .map(|c| {
+                let hart = &self.harts[c];
+                let pc = hart.pc();
+                let sym = self
+                    .symbolize(pc)
+                    .map(|s| format!(" ({s})"))
+                    .unwrap_or_default();
                 if self.core_stalled(c) {
-                    format!("core {c}: stalled (M3 is single-core; Q5)")
+                    format!(
+                        "core {c}: held by [{}], pc={pc:#010x}{sym} cycle={} instr={}",
+                        self.stall_inputs(c).join(", "),
+                        hart.cycle_count(),
+                        hart.instruction_count()
+                    )
                 } else {
                     format!(
-                        "core {c}: running, pc={:#010x} cycle={}",
-                        self.harts[c].pc(),
-                        self.harts[c].cycle_count()
+                        "core {c}: running, pc={pc:#010x}{sym} cycle={} instr={}{}",
+                        hart.cycle_count(),
+                        hart.instruction_count(),
+                        if hart.is_waiti() { "  parked(waiti)" } else { "" }
                     )
                 }
             })
-            .collect()
+            .collect();
+        lines.push(format!("quantum: {} cycles/window", self.core_quantum));
+        lines
+    }
+
+    /// The upper bound on one core's window, in cycles (`--core-quantum`).
+    pub fn core_quantum(&self) -> u64 {
+        self.core_quantum
+    }
+
+    /// How many windows `core` has ended in `waiti`.
+    pub fn wfi_ends(&self, core: usize) -> u64 {
+        self.wfi_ends.get(core).copied().unwrap_or(0)
+    }
+
+    /// Is `core` parked in `waiti` — not held, and waiting for an interrupt
+    /// to be taken? Such a core is given no window and costs nothing.
+    pub fn parked(&self, core: usize) -> bool {
+        !self.core_stalled(core) && self.harts.get(core).is_some_and(XtHart::is_waiti)
+    }
+
+    /// Instructions retired by `core` alone.
+    pub fn core_instructions(&self, core: usize) -> u64 {
+        self.harts
+            .get(core)
+            .map_or(0, XtHart::instruction_count)
     }
 
     pub fn first_strict_violation(&self) -> Option<StrictViolation> {
@@ -1633,8 +1862,32 @@ impl Machine {
 
     // ---- time ------------------------------------------------------------
 
+    /// The machine's one guest clock: the furthest any hart has got.
+    ///
+    /// Every running hart is given the same window, so they advance
+    /// together; a hart that ended a window early (a `waiti`, a bus yield,
+    /// a breakpoint) is brought up to this clock before its next window
+    /// opens, and a held core's counter does not move at all. While core 1
+    /// has never been released this is exactly `harts[0].cycle_count()`,
+    /// which is the M3 behaviour and is asserted in debug builds so a
+    /// single-core run is provably the run it always was.
+    pub fn clock(&self) -> Cycles {
+        let max = self
+            .harts
+            .iter()
+            .map(XtHart::cycle_count)
+            .max()
+            .unwrap_or(0);
+        debug_assert!(
+            !self.stalled[1] || max == self.harts[0].cycle_count(),
+            "a never-released core 1 must not own the clock"
+        );
+        max
+    }
+
+    /// [`Machine::clock`], under the name every caller has used since M3.
     pub fn cycles(&self) -> Cycles {
-        self.harts[0].cycle_count()
+        self.clock()
     }
 
     /// Emulated microseconds: `cycles / 240` ([`memmap::CPU_HZ`]).
@@ -1642,8 +1895,11 @@ impl Machine {
         self.cycles() / memmap::CYCLES_PER_US
     }
 
+    /// Instructions retired by **both** cores (ruling R10). The per-core
+    /// counts are [`Machine::core_instructions`] and the run report prints
+    /// them beside this sum.
     pub fn instructions(&self) -> u64 {
-        self.harts[0].instruction_count()
+        self.harts.iter().map(XtHart::instruction_count).sum()
     }
 
     // ---- symbols and memory ---------------------------------------------
@@ -1921,140 +2177,193 @@ impl Machine {
             if self.bus.strict() {
                 deadline = deadline.min(now + STRICT_SLICE_CYCLES);
             }
-            let mut budget = deadline.saturating_sub(now).max(1);
+            // D3: the window. The quantum is the *upper* bound on one core's
+            // window; every bound above still applies, so a scheduled event,
+            // a probe, a host service or a strict slice still shortens it.
+            let window = deadline
+                .saturating_sub(now)
+                .max(1)
+                .min(self.core_quantum);
 
-            // D4. Arming and disarming happen here, between slices, and the
-            // DPORT view asks for a boundary the moment either cache-enable
-            // bit moves — so the window between "the cache went off" and
-            // "the check is on" is zero instructions.
-            self.sync_cache_watch();
-            if self.cache_watch_armed {
-                // `MemoryCost` sees the address and not the pc, so while the
-                // watch is armed the hart runs one instruction at a time and
-                // the pc below is exactly the one that made the access. The
-                // armed window is a flash write's worth of instructions.
-                budget = 1;
-            }
-            let issuing_pc = self.harts[0].pc();
-
-            // M3's invariant, asserted every slice rather than assumed: core
-            // 1 is stalled and is never given time. P4 composes the three
-            // keys in `core_stalled`; a slice for slot 1 would be a bug
-            // nobody wrote a test for.
-            assert!(
-                self.core_stalled(1),
-                "core 1 is not stalled: M3 is single-core (Q5) and has no scheduler for two"
-            );
-
-            self.bus.set_time(now);
-            self.bus.set_hart(0);
-            let end = self.harts[0].run_slice(&mut self.bus, budget);
-
-            if let Some(outcome) = self.take_cache_off_fetch(issuing_pc) {
-                return outcome;
-            }
-            self.report_app_core_start();
-
-            match end {
-                SliceEnd::BudgetExhausted | SliceEnd::BusYield => {}
-                SliceEnd::Wfi => {
-                    // ⚠️ **Resample the matrix before deciding to skip.**
-                    //
-                    // The hart polls at the `waiti` itself (`Priv::Waiti`:
-                    // "an already-pending interrupt un-parks immediately"),
-                    // but it polls against the external mask the machine last
-                    // handed it — at the *previous* slice boundary. A line
-                    // the bus raised during this slice is therefore invisible
-                    // to that poll, and skipping on it jumps guest time to
-                    // the next *scheduled* event even though the guest was
-                    // already owed an interrupt.
-                    //
-                    // P8 found it as a wedge and it cost the milestone its
-                    // heartbeat: a level-2 interrupt (swi2, the io_task
-                    // executor) and a level-1 one (TIMG0 timer1, the 1 ms
-                    // pacer) came due in the same slice at cycle 7,732,422.
-                    // The hart took the level-2 one, its handler ran, `rfi 2`
-                    // returned to the idle loop, and the guest reached
-                    // `waiti` **inside the same slice** with TIMG0's line
-                    // still asserted and unserviced. Nothing was scheduled
-                    // behind it — the pacer re-arms from its own handler,
-                    // which had not run — so `next_deadline()` was `None`,
-                    // `wake` became `stop_cycle`, and the run jumped to its
-                    // deadline with one interrupt pending and 7,072,512
-                    // instructions retired, forever.
-                    //
-                    // So: fire what is due, resample [`CpuIntMatrix`], and
-                    // give the hart the poll it could not make for itself.
-                    // If that un-parks it, **there is no skip at all** — the
-                    // very next slice runs the handler. A skip is only
-                    // correct when nothing is pending, which is the claim
-                    // the skip was always making and could not previously
-                    // check.
-                    self.bus.run_due_events(self.cycles());
-                    let external = self.bus.pending_cpu_interrupt_mask();
-                    self.harts[0].set_external_mask(external);
-                    if !self.harts[0].poll_interrupts() {
-                        // The deterministic idle skip: nothing can happen
-                        // before the next scheduled event, so move guest time
-                        // there. The host's own next service bounds it too,
-                        // or a guest parked in `waiti` would jump clean over
-                        // a script.
-                        let event = self.bus.sched.next_deadline();
-                        let host = self.next_host_service();
-                        // ⚠️ And the **byte** source's own next delivery.
-                        // `next_host_service` is the control channel only;
-                        // a `--uart0-script` step whose cycle is already
-                        // known is a third thing that can happen, and an
-                        // idle guest used to jump clean over it — the walk's
-                        // second request landed at the run's deadline
-                        // instead of 20 ms after its first. The C6's machine
-                        // has carried this term since DD13; this one did not
-                        // until a script with two steps in it was written.
-                        let bytes = self.bus.host.next_ready();
-                        let wake = [event, host, bytes]
-                            .into_iter()
-                            .flatten()
-                            .min()
-                            .unwrap_or(stop_cycle)
-                            .max(self.cycles() + 1)
-                            .min(stop_cycle);
-                        self.harts[0].advance_to_cycle(wake);
-                        self.idle_skips += 1;
-                    }
+            // One window per core that is neither held nor parked, core 0
+            // then core 1, each opening at `now`. A held core's counter does
+            // not move; a parked core's is brought up to the clock by the
+            // feed below and it costs nothing else. See the module docs.
+            for core in 0..CORES {
+                if self.core_stalled(core) || self.harts[core].is_waiti() {
+                    continue;
                 }
-                SliceEnd::Ebreak { pc } => {
-                    if !self.serve_breakpoint(pc) {
-                        self.harts[0].deliver_breakpoint(pc);
-                    }
+                // A core that fell behind the clock — it ended its last
+                // window early, or was held while the other ran — is brought
+                // up to it before it runs again, so its window is the same
+                // span of guest time as the other core's.
+                self.harts[core].advance_to_cycle(now);
+
+                // D4, per running core (ruling R3). Arming and disarming
+                // happen here, between windows, and the DPORT view asks for
+                // a boundary the moment either cache-enable bit moves — so
+                // the window between "the cache went off" and "the check is
+                // on" is zero instructions.
+                self.sync_cache_watch(core);
+                let budget = if self.cache_watch.is_some() {
+                    // `MemoryCost` sees the address and not the pc, so while
+                    // the watch is armed the hart runs one instruction at a
+                    // time and the pc below is exactly the one that made the
+                    // access. The armed window is a flash write's worth of
+                    // instructions, on the core whose cache is off.
+                    1
+                } else {
+                    window
+                };
+                let issuing_pc = self.harts[core].pc();
+
+                self.bus.set_time(now);
+                self.bus.set_hart(core);
+                let end = self.harts[core].run_slice(&mut self.bus, budget);
+
+                if let Some(outcome) = self.take_cache_off_fetch(core, issuing_pc) {
+                    return outcome;
                 }
-                SliceEnd::Fault(fault) => {
-                    // A strict refusal that turned into a double fault is
-                    // still a strict refusal, and naming the access is more
-                    // useful than naming the vector.
-                    if let Some(violation) = self.bus.first_strict_violation() {
-                        return Outcome::StrictBus { violation };
+                // The DPORT view yields at the store that completes the
+                // release, so this runs at the boundary of the instruction
+                // that started core 1 — before core 1's own window opens.
+                self.service_app_core_start();
+
+                match end {
+                    SliceEnd::BudgetExhausted | SliceEnd::BusYield => {}
+                    SliceEnd::Wfi => {
+                        self.wfi_ends[core] += 1;
+                        // ⚠️ **Resample the matrix before leaving the core
+                        // parked.**
+                        //
+                        // The hart polls at the `waiti` itself (`Priv::Waiti`:
+                        // "an already-pending interrupt un-parks immediately"),
+                        // but it polls against the external mask the machine
+                        // last handed it — at the *previous* boundary. A line
+                        // the bus raised during this window is therefore
+                        // invisible to that poll, and parking on it would
+                        // leave the guest owed an interrupt.
+                        //
+                        // P8 found it as a wedge and it cost the milestone
+                        // its heartbeat: a level-2 interrupt (swi2, the
+                        // io_task executor) and a level-1 one (TIMG0 timer1,
+                        // the 1 ms pacer) came due in the same slice at cycle
+                        // 7,732,422. The hart took the level-2 one, its
+                        // handler ran, `rfi 2` returned to the idle loop, and
+                        // the guest reached `waiti` **inside the same slice**
+                        // with TIMG0's line still asserted and unserviced.
+                        // Nothing was scheduled behind it — the pacer re-arms
+                        // from its own handler, which had not run — so the
+                        // idle skip jumped to the run's deadline with one
+                        // interrupt pending and 7,072,512 instructions
+                        // retired, forever.
+                        //
+                        // So: fire what is due, resample [`CpuIntMatrix`] for
+                        // THIS hart, and give it the poll it could not make
+                        // for itself. If that un-parks it, it is not parked
+                        // at all and runs its next window. With two cores
+                        // this happens per core, and the skip below is taken
+                        // only when every running core stays parked.
+                        let at = self.harts[core].cycle_count();
+                        self.bus.run_due_events(at);
+                        self.bus.set_hart(core);
+                        let external = self.bus.pending_cpu_interrupt_mask();
+                        self.harts[core].set_external_mask(external);
+                        self.harts[core].poll_interrupts();
                     }
-                    return Outcome::Fault {
-                        cycle: self.cycles(),
-                        pc: self.harts[0].pc(),
-                        fault,
-                    };
+                    SliceEnd::Ebreak { pc } => {
+                        if !self.serve_breakpoint(core, pc) {
+                            self.harts[core].deliver_breakpoint(pc);
+                        }
+                    }
+                    SliceEnd::Fault(fault) => {
+                        // A strict refusal that turned into a double fault
+                        // is still a strict refusal, and naming the access is
+                        // more useful than naming the vector.
+                        if let Some(violation) = self.bus.first_strict_violation() {
+                            return Outcome::StrictBus { violation };
+                        }
+                        return Outcome::Fault {
+                            core,
+                            cycle: self.harts[core].cycle_count(),
+                            pc: self.harts[core].pc(),
+                            fault,
+                        };
+                    }
                 }
             }
 
-            let at = self.cycles();
+            // Between windows, once: the clock is the furthest hart, what is
+            // due fires, and every running core is brought up to the clock
+            // and given the matrix feed it could not sample for itself.
+            let at = self.clock();
             self.bus.run_due_events(at);
-            let external = self.bus.pending_cpu_interrupt_mask();
-            self.harts[0].set_external_mask(external);
-            self.harts[0].poll_interrupts();
+            self.feed_cores(at);
+
+            // The deterministic idle skip: only when **every** running core
+            // is parked in `waiti` and none of them un-parked on the feed
+            // above. Nothing can then happen before the earliest of: the
+            // next scheduled event, the host's next service, the byte
+            // source's next delivery (a `--uart0-script` step whose cycle is
+            // already known — an idle guest used to jump clean over it, and
+            // the walk's second request landed at the run's deadline), and
+            // **each running hart's own `CCOMPARE` match** (ruling R9: the
+            // classic's tick is TIMG0 today, so this changes nothing
+            // observable now; it is the difference between a loop that is
+            // correct and one that happens to work).
+            //
+            // A machine on which *no* core is running — both held — moves
+            // its harts' counters the same way rather than spinning: on
+            // silicon a RunStall'd core's `CCOUNT` keeps counting, and only
+            // the host (a cable reset) or the deadline can end that state.
+            if self.no_running_core_is_awake() {
+                let event = self.bus.sched.next_deadline();
+                let host = self.next_host_service();
+                let bytes = self.bus.host.next_ready();
+                let timers = (0..CORES)
+                    .filter(|c| !self.core_stalled(*c))
+                    .filter_map(|c| self.harts[c].next_timer_cycle());
+                let wake = [event, host, bytes]
+                    .into_iter()
+                    .flatten()
+                    .chain(timers)
+                    .min()
+                    .unwrap_or(stop_cycle)
+                    .max(at + 1)
+                    .min(stop_cycle);
+                let all_held = (0..CORES).all(|c| self.core_stalled(c));
+                for core in 0..CORES {
+                    if all_held || !self.core_stalled(core) {
+                        self.harts[core].advance_to_cycle(wake);
+                    }
+                }
+                self.idle_skips += 1;
+                // And the feed again at the wake: a timer the skip latched
+                // or an event due there is taken now, before the next
+                // iteration decides anything.
+                let at = self.clock();
+                self.bus.run_due_events(at);
+                self.feed_cores(at);
+            }
+
             // The window is a fill, so a table write or a flash write under
             // a mapped page has to reach the RAM behind it before the guest
             // runs again. Before the code-write drain below, because a fill
             // into an executable region *is* a code write.
             self.refill_cache();
+            if let Some(outcome) = self.take_mmu_divergence() {
+                return outcome;
+            }
+            // ⚠️ The code-write drain is per hart. A block cache on core 1
+            // that never heard about core 0's write would execute stale
+            // code — exactly what the classic's `codemem_esp32` install path
+            // does on purpose (JIT code written through a D-bus alias and
+            // executed from SRAM0).
             if self.bus.code_writes_pending() {
                 for (lo, hi) in self.bus.take_code_writes() {
-                    self.harts[0].invalidate_block_range(lo, hi);
+                    for hart in &mut self.harts {
+                        hart.invalidate_block_range(lo, hi);
+                    }
                 }
             }
 
@@ -2065,8 +2374,9 @@ impl Machine {
             if let Some(violation) = self.bus.first_strict_violation() {
                 return Outcome::StrictBus { violation };
             }
-            if let Some(pc) = self.stop_at.take() {
+            if let Some((core, pc)) = self.stop_at.take() {
                 return Outcome::Breakpoint {
+                    core,
                     cycle: self.cycles(),
                     pc,
                 };
@@ -2086,43 +2396,119 @@ impl Machine {
         }
     }
 
+    // ---- between windows -------------------------------------------------
+
+    /// Bring every running core up to `at` and hand each the matrix as
+    /// **its own** input (`set_hart` first — the feed is per hart, PD6),
+    /// then let it take what it can. A core parked in `waiti` un-parks here
+    /// and nowhere else.
+    fn feed_cores(&mut self, at: Cycles) {
+        for core in 0..CORES {
+            if self.core_stalled(core) {
+                continue;
+            }
+            self.harts[core].advance_to_cycle(at);
+            self.bus.set_hart(core);
+            let external = self.bus.pending_cpu_interrupt_mask();
+            self.harts[core].set_external_mask(external);
+            self.harts[core].poll_interrupts();
+        }
+    }
+
+    /// Is there no core that could retire an instruction right now — every
+    /// core either held or parked in `waiti`?
+    fn no_running_core_is_awake(&self) -> bool {
+        (0..CORES).all(|c| self.core_stalled(c) || self.harts[c].is_waiti())
+    }
+
     // ---- D4, the cache-off fetch stop ------------------------------------
 
-    /// Install or remove the watch, following
-    /// [`crate::cache::ClassicCache::watch_wanted`].
+    /// Install or remove the watch for the core about to run, following
+    /// [`crate::cache::ClassicCache::watch_wanted`] (ruling R3: per running
+    /// core, because `CacheOffWatch` is built with a core and the bus's
+    /// `MemoryCost` sees the address, not the hart).
     ///
     /// A run whose guest never disables the cache never installs it and pays
     /// one `Option` test per access, which is what the bus already cost.
-    fn sync_cache_watch(&mut self) {
-        // Core 0 is the only core M3 gives slices to (Q5). M4 asks per core.
-        let wanted = self.cache.lock().expect("cache poisoned").watch_wanted(0);
-        if wanted == self.cache_watch_armed {
+    fn sync_cache_watch(&mut self, core: usize) {
+        let wanted = self.cache.lock().expect("cache poisoned").watch_wanted(core);
+        let armed_for = wanted.then_some(core);
+        if armed_for == self.cache_watch {
             return;
         }
-        if wanted {
-            self.bus
+        match armed_for {
+            Some(core) => self
+                .bus
                 .set_memory_cost(Some(Box::new(crate::cache::CacheOffWatch::new(
                     self.cache.clone(),
-                    0,
-                ))));
-        } else {
-            self.bus.set_memory_cost(None);
+                    core,
+                )))),
+            None => self.bus.set_memory_cost(None),
         }
-        self.cache_watch_armed = wanted;
+        self.cache_watch = armed_for;
     }
 
-    /// The offence the watch recorded during the slice just run, as an
-    /// outcome. `pc` is the instruction that made the access — the slice was
-    /// one instruction long, which is what makes that exact rather than
-    /// approximate.
-    fn take_cache_off_fetch(&mut self, pc: u32) -> Option<Outcome> {
+    /// The offence the watch recorded during the window just run on `core`,
+    /// as an outcome. `pc` is the instruction that made the access — the
+    /// window was one instruction long, which is what makes that exact
+    /// rather than approximate.
+    fn take_cache_off_fetch(&mut self, core: usize, pc: u32) -> Option<Outcome> {
         let access = self.cache.lock().expect("cache poisoned").take_offence()?;
         Some(Outcome::CacheOffFetch {
-            cycle: self.cycles(),
+            cycle: self.harts[core].cycle_count(),
             pc,
             symbol: self.symbolize(pc),
             access,
         })
+    }
+
+    // ---- R4, the flash-MMU divergence stop --------------------------------
+
+    /// The disagreement the last fill met, as an outcome.
+    fn take_mmu_divergence(&mut self) -> Option<Outcome> {
+        let divergence = self
+            .cache
+            .lock()
+            .expect("cache poisoned")
+            .take_divergence()?;
+        Some(Outcome::MmuDivergence {
+            cycle: self.clock(),
+            divergence,
+        })
+    }
+
+    /// What R4's stop says, and what it does not claim. Written for a reader
+    /// who has just been stopped by it.
+    pub fn mmu_divergence_message(
+        &self,
+        cycle: Cycles,
+        d: &crate::cache::MmuDivergence,
+    ) -> String {
+        let page = match d.vaddr {
+            Some(v) => format!("virtual page {v:#010x}"),
+            None => "an index with no reachable virtual address on this chip".to_string(),
+        };
+        format!(
+            "FLASH-MMU DIVERGENCE  entry={}  cycle={cycle}\n  \
+             {page} (page mode {}): the APP core's table maps flash page {:#x}, the PRO \
+             core's maps {:#x}\n  \
+             core 1 is {}\n\n  \
+             This machine has ONE flash window behind BOTH cores' tables and serves the PRO\n  \
+             core's; through this entry core 1 would read bytes its own table does not name.\n  \
+             The IDF bootloader and the direct loader program both tables from one image, so\n  \
+             a disagreement is a finding, not a configuration.\n  \
+             `--app-mmu-divergence permit` continues, serving the PRO core's view (and claims\n  \
+             nothing about what core 1 would have read).",
+            d.index,
+            d.page_mode,
+            d.app,
+            d.pro,
+            if self.core_stalled(1) {
+                format!("held by [{}]", self.stall_inputs(1).join(", "))
+            } else {
+                "running".to_string()
+            },
+        )
     }
 
     /// What D4's stop says, and what it does not claim. Written for a reader
@@ -2175,25 +2561,49 @@ impl Machine {
         )
     }
 
-    /// Report the guest's attempt to start core 1, once.
+    /// Start core 1 the way the part does, once, when DPORT has released
+    /// it: `appcpu_resetting` cleared with `appcpu_clkgate_en` set and
+    /// `appcpu_runstall` clear ([`crate::periph::dport::AppCoreControl`]).
     ///
-    /// M3 does not start it (Q5). The firmware's own timeout arm then prints
-    /// `[INIT] APP core unavailable; RMT ISR on PRO core (single-core
-    /// semantics)` (`lp-fw/fw-esp32v3/src/main.rs:838-845`), which is a
-    /// supported configuration rather than a hole. M4 is what makes the
-    /// attempt succeed.
-    fn report_app_core_start(&mut self) {
-        let mut a = self.appcpu.lock().expect("appcpu poisoned");
-        let Some((at, entry)) = a.start_attempt else {
-            return;
+    /// **The core is put at the architectural reset**, not at the boot
+    /// address: slot 1 becomes a fresh hart (`pc = _ResetVector`,
+    /// `PS = 0x1F`, `VECBASE = 0x4000_0000`, every register zero) whose
+    /// counters start at the machine's clock, and the mask ROM's own reset
+    /// path takes it from there to `appcpu_boot_addr` — the module docs
+    /// carry the disassembly. Nothing is seeded, because the ROM's `_start`
+    /// sets `a1` and `PS` itself and `main`'s APP arm reads the boot
+    /// address; nothing is hooked.
+    ///
+    /// RTC_CNTL's half of the key may still hold the core (esp-hal unstalls
+    /// it before the DPORT sequence, so on this firmware it does not); that
+    /// is [`Machine::core_stalled`]'s question, asked before every window,
+    /// and the release here does not pre-empt it.
+    fn service_app_core_start(&mut self) {
+        let (at, entry) = {
+            let mut a = self.appcpu.lock().expect("appcpu poisoned");
+            let Some(start) = a.start_attempt else {
+                return;
+            };
+            if a.reported {
+                return;
+            }
+            a.reported = true;
+            start
         };
-        if a.reported {
-            return;
-        }
-        a.reported = true;
+        self.stalled[1] = false;
+        let clock = self.clock();
+        let mut hart = fresh_hart(1, self.time_grade, self.strict_unsupported);
+        hart.set_counters(clock, 0);
+        self.harts[1] = hart;
         log::info!(
-            "core 1: start requested at cycle {at} (entry {entry:#010x}); M3 is \
-             single-core (Q5) — the firmware takes its documented fallback"
+            "core 1: released by DPORT at cycle {at} — reset to _ResetVector at clock {clock}; \
+             appcpu_boot_addr = {entry:#010x} ({}){}",
+            self.symbolize(entry).unwrap_or_else(|| "?".into()),
+            if self.stall_key.stalled(1) {
+                "; RTC_CNTL's key still holds it"
+            } else {
+                ""
+            }
         );
     }
 
@@ -2559,10 +2969,10 @@ impl Machine {
         }
     }
 
-    /// Give the hook table first refusal on a `break` at `pc`. Returns
-    /// `false` when nothing claims it, in which case the guest gets the
-    /// architectural breakpoint.
-    fn serve_breakpoint(&mut self, pc: u32) -> bool {
+    /// Give the hook table first refusal on a `break` at `pc` on `core`.
+    /// Returns `false` when nothing claims it, in which case the guest gets
+    /// the architectural breakpoint.
+    fn serve_breakpoint(&mut self, core: usize, pc: u32) -> bool {
         let Some(hook) = self.hooks.get(pc) else {
             // The guest executed a `break` nothing claims. It gets the
             // architectural debug exception, which on this chip's mask ROM
@@ -2592,13 +3002,13 @@ impl Machine {
                 // rotation itself; none exists, and the table ships empty
                 // (see `rom`'s module docs). Recorded here so the first hook
                 // that needs `retw` finds the note instead of the bug.
-                let ra = self.harts[0].cpu().a(0);
-                self.harts[0].set_pc(ra);
+                let ra = self.harts[core].cpu().a(0);
+                self.harts[core].set_pc(ra);
                 true
             }
             HookResult::Breakpoint => false,
             HookResult::Stop => {
-                self.stop_at = Some(pc);
+                self.stop_at = Some((core, pc));
                 true
             }
         }
@@ -2628,6 +3038,8 @@ impl Machine {
             rng: self.rng,
             hook_calls: self.hook_calls,
             idle_skips: self.idle_skips,
+            wfi_ends: self.wfi_ends,
+            core_quantum: self.core_quantum,
         }
     }
 
@@ -2645,6 +3057,19 @@ impl Machine {
         self.rng = snap.rng;
         self.hook_calls = snap.hook_calls;
         self.idle_skips = snap.idle_skips;
+        self.wfi_ends = snap.wfi_ends;
+        // The quantum is something a run's future depends on (D3), so a
+        // restored run takes the snapshot's — and says so if that differs
+        // from what this machine was built with.
+        if self.core_quantum != snap.core_quantum {
+            log::info!(
+                "machine: restore adopts the snapshot's core quantum ({} cycles/window; this \
+                 machine was built with {})",
+                snap.core_quantum,
+                self.core_quantum
+            );
+            self.core_quantum = snap.core_quantum;
+        }
     }
 
     /// Re-arm the bus's hardware watchpoints after a restore.
@@ -2689,8 +3114,10 @@ impl fmt::Debug for Machine {
             .field("time_grade", &self.time_grade)
             .field("cores", &CORES)
             .field("stalled", &self.stalled)
+            .field("core_quantum", &self.core_quantum)
             .field("cycle", &self.cycles())
             .field("pc", &format_args!("{:#010x}", self.harts[0].pc()))
+            .field("pc1", &format_args!("{:#010x}", self.harts[1].pc()))
             .finish()
     }
 }
