@@ -38,28 +38,36 @@ set -euo pipefail
 # firmware costs, because in that emulator there is no firmware.
 #
 # `scripts/heap-budget-record.json`'s `chips` section is the other half, and
-# it comes from the SoC emulator (`lp-emu-esp32c6`, plan
-# `2026-09-06-1001-esp-emulator`): the shipped image booted whole, and the
-# `allocator` figures its own first heartbeat reports. That is the figure a
-# board reports, from the bytes a board is flashed with — M3 through M7
-# established it byte-equal to silicon on every memory-class value but a
-# constant 8 B, which the record carries beside it rather than hiding.
+# it comes from the SoC emulators (`lp-emu-esp32c6`, plan
+# `2026-09-06-1001-esp-emulator`; `lp-emu-esp32v3`, plan three M5 P5): the
+# shipped image booted whole, and the allocator figures its own first
+# heartbeat reports. That is the figure a board reports, from the bytes a
+# board is flashed with — on the C6, M3 through M7 established it byte-equal
+# to silicon on every memory-class value but a constant 8 B; on the classic,
+# G2 established seven memory-class fields equal to the byte with two named
+# gaps. Both records carry the gap beside the figure rather than hiding it.
+#
+# **Two chips since M5 P5**, and they differ in one way that matters more than
+# any other: the classic's heartbeat triple is **elicited**, not idle-emitted
+# (see `chip_measure`). A classic boot with nobody talking prints no `[MEM]`
+# line at all.
 #
 # The chip half needs a firmware ELF, so it does **not** run in the required
 # `test-rust-core` job: the cost rule that keeps a cross-target build out of
 # every workspace test run applies here too (`lp-emu-esp32c6`'s
-# `test_support` module says why). It runs in the path-gated
-# `heap-budget-chips` job (`Heap budget (esp32c6 chip)`), which builds the
-# firmware itself under `LP_EMU_BUILD_FW=1`. Without an image the chip half prints a
-# named SKIP and the projects half still gates; in `heap-budget-chips`
-# (CI's `Heap budget (esp32c6 chip)` job), where `LP_EMU_BUILD_FW=1` is
-# set, a skip is a failure.
+# `test_support` module says why). Each chip's arm runs in the path-gated job
+# that already carries its toolchain — the C6 in `heap-budget-chips`
+# (`Heap budget (esp32c6 chip)`, filter `emu_c6`), the classic in
+# `emu-esp32v3` (`Emulator ESP32v3 (x64)`, filter `emu_esp32v3`, the job that
+# installs the Xtensa toolchain and builds this firmware anyway). Both set
+# `LP_EMU_BUILD_FW=1`, where a skip is a failure. Without an image the chip
+# half prints a named SKIP and the projects half still gates.
 #
 # Usage:
-#   heap-budget-check.sh check [margin_pct]   # default margin 0
+#   heap-budget-check.sh check [margin_pct]          # default margin 0
 #   heap-budget-check.sh baseline
-#   heap-budget-check.sh chips [margin_pct]   # the chip half alone
-#   heap-budget-check.sh chips-baseline
+#   heap-budget-check.sh chips [margin_pct] [chip]   # the chip half alone
+#   heap-budget-check.sh chips-baseline [chip]
 
 cd "$(dirname "$0")/.."
 
@@ -150,33 +158,76 @@ project_windows() {
 
 # ---------------------------------------------------------------- the chips
 #
-# One chip today. The C6's shipped feature set, booted on `lp-emu:esp32c6:t1`
-# until its first heartbeat, whose `allocator` object and `[stack]` line are
-# what a board prints over the same link.
-CHIP_ID="esp32c6"
-CHIP_FEATURES="esp32c6,server,radio"
-CHIP_SLUG="ESP32C6_SERVER_RADIO"
-# Emulated microseconds. The heartbeat is on a 5 s tick; 6.5 s reaches the
-# first one with room and stops well before the second, so the figures are
-# always the SAME sample (M6 P4's finding: keying on "a heartbeat" rather than
-# on the 5 s tick let last-writes pick whichever one a capture ended on).
-CHIP_TIMEOUT="6500ms"
-# Direct load, not ROM-up. M7's G7-4 measured the two paths' idle heap
-# byte-identical, and this gate runs on every emulator PR — the bootloader
-# adds seconds of wall clock and nothing to the answer. The walk
-# (`scripts/emu/m4-walk.sh`) is the place that boots the whole chain.
+# TWO chips since M5 P5, and everything below this line dispatches on the
+# table rather than on a scalar. Each row is one SHIPPED image booted on its
+# own machine until its first heartbeat, whose allocator figures and `[stack]`
+# line are what a board prints over the same link.
+#
+# Direct load on both, not ROM-up. On the C6, M7's G7-4 measured the two paths'
+# idle heap byte-identical; on the classic `tests/rom_up_boot.rs` holds them
+# byte-equal at the application's entry. This gate runs on every emulator PR
+# and the bootloader adds seconds of wall clock and nothing to the answer —
+# the walks (`scripts/emu/m4-walk.sh`, `scripts/emu/m4-walk-esp32v3.sh`) are
+# where the whole chain gets booted.
+CHIPS="esp32c6 esp32v3"
+
+# Sets CHIP_FEATURES / CHIP_TIMEOUT / CHIP_CONFIG / CHIP_ELF_ENV
+# for one chip. The slug is the environment-variable spelling of the feature
+# set, and the env name differs per chip because the two emulators resolve
+# their own images (`lp_emu_esp32c6::test_support`,
+# `lp_emu_esp32v3::test_support`).
+chip_facts() {
+    CHIP_ID="$1"
+    case "$CHIP_ID" in
+    esp32c6)
+        CHIP_FEATURES="esp32c6,server,radio"
+        CHIP_ELF_ENV="LP_EMU_C6_ELF_ESP32C6_SERVER_RADIO"
+        # Emulated microseconds. The C6's heartbeat is on a 5 s tick; 6.5 s
+        # reaches the first one with room and stops well before the second, so
+        # the figures are always the SAME sample (M6 P4's finding: keying on
+        # "a heartbeat" rather than on the 5 s tick let last-writes pick
+        # whichever one a capture ended on).
+        CHIP_TIMEOUT="6500ms"
+        CHIP_CONFIG="lp-emu:esp32c6:t1"
+        ;;
+    esp32v3)
+        # `lp-fw/fw-esp32v3`'s own default feature set (`Cargo.toml`:
+        # `default = ["esp32", "server", "float-f32"]`) — the bytes the
+        # DOM-Z-102 is flashed with.
+        CHIP_FEATURES="esp32,server,float-f32"
+        CHIP_ELF_ENV="LP_EMU_V3_ELF_ESP32_SERVER_FLOAT_F32"
+        # ⚠️ NOT a 5 s window, and the difference is the whole classic arm:
+        # this chip's heartbeat triple is ELICITED, not idle-emitted, so the
+        # run is bounded by the request instead of by a tick. The triple lands
+        # 119,041 us into the boot (measured, this host) and `--exit-on` ends
+        # the run there; 1 s is that with eight times the margin, and a run
+        # that misses it says so by name rather than by silence.
+        CHIP_TIMEOUT="1s"
+        CHIP_CONFIG="lp-emu:esp32v3:t1"
+        ;;
+    *)
+        echo "::error::heap-budget: unknown chip '$CHIP_ID' (known: $CHIPS)" >&2
+        return 1
+        ;;
+    esac
+}
 
 # The shipped ELF, by the emulator's own resolution rules (its `test_support`
-# module is the authority): an explicit path, then the copy an earlier build
-# left, then — only with `LP_EMU_BUILD_FW=1` — a build. Prints the path, or
-# nothing and a reason on stderr.
+# module is the authority): an explicit path, then — only with
+# `LP_EMU_BUILD_FW=1` — a build. Prints the path, or nothing and a reason on
+# stderr.
 chip_elf() {
-    if [ -n "${LP_EMU_C6_ELF_ESP32C6_SERVER_RADIO:-}" ]; then
-        if [ -f "$LP_EMU_C6_ELF_ESP32C6_SERVER_RADIO" ]; then
-            echo "$LP_EMU_C6_ELF_ESP32C6_SERVER_RADIO"
+    chip_facts "$1" || return 1
+    # Bash 3.2 (macOS) has no `${!name}`-safe associative arrays worth the
+    # trouble here; one indirect expansion is enough and is what the C6 arm
+    # spelled out longhand before there were two chips.
+    local explicit="${!CHIP_ELF_ENV:-}"
+    if [ -n "$explicit" ]; then
+        if [ -f "$explicit" ]; then
+            echo "$explicit"
             return 0
         fi
-        echo "LP_EMU_C6_ELF_${CHIP_SLUG} points at a file that is not there" >&2
+        echo "${CHIP_ELF_ENV} points at a file that is not there" >&2
         return 1
     fi
     # No cache lookup, deliberately. `lp-emu-esp32c6`'s `test_support` keeps
@@ -191,40 +242,125 @@ chip_elf() {
     # set of that crate lands — safe only because we just built this one into
     # it, one line earlier.
     if [ "${LP_EMU_BUILD_FW:-}" != "1" ]; then
-        echo "no fw-esp32c6 ELF for ${CHIP_FEATURES}. Set LP_EMU_C6_ELF_${CHIP_SLUG} to one, or \
+        echo "no ${CHIP_ID} ELF for ${CHIP_FEATURES}. Set ${CHIP_ELF_ENV} to one, or \
 LP_EMU_BUILD_FW=1 to build it. Not built automatically: a workspace gate must not start a \
 cross-target firmware build." >&2
         return 1
     fi
-    ( cd lp-fw/fw-esp32c6 && cargo build --quiet --target riscv32imac-unknown-none-elf \
-        --profile release-esp32 --features "$CHIP_FEATURES" ) >&2 || return 1
-    echo "target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6"
+    case "$CHIP_ID" in
+    esp32c6)
+        ( cd lp-fw/fw-esp32c6 && cargo build --quiet --target riscv32imac-unknown-none-elf \
+            --profile release-esp32 --features "$CHIP_FEATURES" ) >&2 || return 1
+        echo "target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6"
+        ;;
+    esp32v3)
+        # Through the justfile recipe, and not `cd … && cargo build` like the
+        # C6's: that recipe owns two things this script must not duplicate —
+        # the Xtensa GCC linker's PATH (`just _xt-gcc-dir`, an espup install
+        # the host toolchain knows nothing about) and the `touch src/main.rs`
+        # a feature flip needs on THIS crate, whose cfg-dependent codegen does
+        # not always retrigger on its own. Naming the features rather than
+        # relying on the defaults is what makes the touch happen, and the
+        # walk's `frame-dump` build is exactly the neighbour that would
+        # otherwise leave a wrong image in the shared path.
+        just build-fw-esp32v3 "$CHIP_FEATURES" >&2 || return 1
+        echo "target/xtensa-esp32-none-elf/release-esp32v3/fw-esp32v3"
+        ;;
+    esac
 }
+
+# The committed stimulus for the classic's elicited heartbeat. It is the walk
+# registry's file rather than a heredoc so that the gate, the boot-idle test
+# and the desk sitting are the SAME stimulus as well as the same bytes; a unit
+# test in `lp-emu-validate` holds it byte-for-byte against `boot_idle.rs`'s
+# own constants.
+V3_STOP_ALL_SCRIPT="lp-emu/lp-emu-validate/walks/v3-stop-all.script"
 
 # `{freeBytes, usedBytes, totalBytes, largestFreeBlock, stackHighWater,
 # stackTotal}` from the first heartbeat of a boot, as JSON on stdout.
+#
+# ⚠️ **On the classic that heartbeat has to be ASKED for.** `esp32_memory_stats`
+# (`lp-fw/fw-esp32v3/src/main.rs`) is what prints the `[stack]` / `[MEM]` /
+# `[JIT]` triple, and `lpa_server` calls it on a project load, unload,
+# stop-all or a client `runtime_status` — NEVER from the five-second server
+# heartbeat, which calls `heartbeat_memory_stats` and prints nothing. A
+# classic boot with nobody talking prints no `[MEM]`, no `[JIT]` and no
+# `[stack] heartbeat:` line at all, and a gate that copied the C6's arm would
+# report "no first heartbeat" for ever. So the classic arm sends
+# `stopAllProjects` over UART0 and takes the FIRST triple, exactly as
+# `lp-emu-esp32v3/tests/boot_idle.rs` does.
 chip_measure() {
-    local elf="$1" dir
+    chip_facts "$1" || return 1
+    local elf="$2" dir
     dir="$(mktemp -d "${TMPDIR:-/tmp}/heap-budget-chip.XXXXXX")"
-    # `--release`, and it is not optional: the emulator's interpreter loop IS
-    # this binary, and a debug build takes tens of minutes to reach a
-    # heartbeat that release reaches in seconds. A gate nobody will wait for
-    # is a gate nobody runs.
+    # `--release`, and it is not optional on either chip: the emulator's
+    # interpreter loop IS this binary, and a debug build takes tens of minutes
+    # to reach a heartbeat that release reaches in seconds. A gate nobody will
+    # wait for is a gate nobody runs.
     #
-    # No `--link`: nothing needs to talk to it, and a gate that binds a port
-    # collides with whatever is already using one.
-    if ! cargo run -q --release -p lp-cli -- emu run --elf "$elf" \
+    # No link socket on either arm: nothing needs to talk to the C6, the
+    # classic is driven by a deterministic script rather than by a client, and
+    # a gate that binds a port collides with whatever is already using one.
+    local ok=0
+    case "$CHIP_ID" in
+    esp32c6)
+        cargo run -q --release -p lp-cli -- emu run --elf "$elf" \
             --timeout "$CHIP_TIMEOUT" --console "$dir/console.txt" \
-            >"$dir/emu.out" 2>"$dir/emu.err"; then
+            >"$dir/emu.out" 2>"$dir/emu.err" && ok=1
+        ;;
+    esp32v3)
+        # The machine binary, not `lp-cli emu run`: `emu run --chip` knows one
+        # chip today and teaching it the classic is M8's, not this gate's.
+        # `--strict-bus` is free here and is a second assertion for nothing:
+        # this boot's run report says `unmapped=0`, and a run that started
+        # reaching addresses nothing claims would stop and say where.
+        cargo run -q --release -p lp-emu-esp32v3 -- --elf "$elf" \
+            --uart0 "file:$dir/console.txt" \
+            --uart0-script "$V3_STOP_ALL_SCRIPT" \
+            --exit-on '[JIT] used=' \
+            --strict-bus --core-quantum 256 --time-grade t1 \
+            --timeout "$CHIP_TIMEOUT" --wall-timeout 600 \
+            >"$dir/emu.out" 2>"$dir/emu.err" && ok=1
+        ;;
+    esac
+    if [ "$ok" != 1 ]; then
         echo "::error::heap-budget: ${CHIP_ID}: the boot did not end cleanly" >&2
         tail -20 "$dir/emu.err" >&2
+        tail -5 "$dir/emu.out" >&2
         rm -rf "$dir"
         return 1
     fi
-    local memory stack
-    memory="$(grep -ao '"memory":{[^}]*}' "$dir/console.txt" | head -1 || true)"
+    # The stack line is the same on both chips, and `grep -o` rather than a
+    # whole line on purpose: this console INTERLEAVES (the classic prints the
+    # triple straight into the FIFO while another task is mid-line), so the
+    # `[stack]` text can start in the middle of somebody else's sentence.
+    local stack
     stack="$(grep -ao '\[stack\] heartbeat: high-water [0-9]* B of [0-9]* B' "$dir/console.txt" \
         | head -1 || true)"
+    # The four allocator figures are not: the C6 prints a JSON `"memory"`
+    # object, the classic prints `[MEM] free=… used=… largest_free=…`, out of
+    # the same `fw-core` seam by two different printers.
+    local memory=""
+    case "$CHIP_ID" in
+    esp32c6)
+        memory="$(grep -ao '"memory":{[^}]*}' "$dir/console.txt" | head -1 || true)"
+        [ -n "$memory" ] && memory="{${memory#\"memory\":\{}"
+        ;;
+    esp32v3)
+        local mem_line
+        mem_line="$(grep -ao '\[MEM\] free=[0-9]* used=[0-9]* largest_free=[0-9]*' \
+            "$dir/console.txt" | head -1 || true)"
+        if [ -n "$mem_line" ]; then
+            # `totalBytes` is free+used, which is the allocator's own arithmetic
+            # and equals the `[INIT] chip=esp32 … heap=…=241552` sum the boot
+            # prints from the region table one line earlier.
+            memory="$(echo "$mem_line" | awk '{
+                split($2, f, "="); split($3, u, "="); split($4, l, "=");
+                printf "{\"freeBytes\":%d,\"usedBytes\":%d,\"totalBytes\":%d,\"largestFreeBlock\":%d}",
+                    f[2], u[2], f[2] + u[2], l[2] }')"
+        fi
+        ;;
+    esac
     if [ -z "$memory" ] || [ -z "$stack" ]; then
         echo "::error::heap-budget: ${CHIP_ID}: no first heartbeat in ${CHIP_TIMEOUT} of emulated \
 time (memory line: ${memory:-none}; stack line: ${stack:-none}). The console is at \
@@ -234,7 +370,7 @@ $dir/console.txt." >&2
     local high total
     high="$(echo "$stack" | awk '{print $4}')"
     total="$(echo "$stack" | awk '{print $7}')"
-    echo "{${memory#\"memory\":\{}" \
+    echo "$memory" \
         | jq --argjson h "$high" --argjson t "$total" \
              '{freeBytes, usedBytes, totalBytes, largestFreeBlock,
                stackHighWater: $h, stackTotal: $t}'
@@ -249,16 +385,18 @@ $dir/console.txt." >&2
 # The memory class survives that; the stack figure does not, and pretending
 # otherwise would be a gate that fails on the host it runs on.
 chip_check() {
-    local margin="$1" fail=0
+    chip_facts "$1" || return 1
+    local margin="$2" fail=0
     local elf
-    if ! elf="$(chip_elf)"; then
+    if ! elf="$(chip_elf "$CHIP_ID")"; then
         echo "heap-budget: ${CHIP_ID}: SKIPPED — no firmware image (see stderr). The chip half \
-runs in CI's path-gated 'Heap budget (esp32c6 chip)' job, which sets LP_EMU_BUILD_FW=1."
+runs in CI's path-gated jobs, which set LP_EMU_BUILD_FW=1: 'Heap budget (esp32c6 chip)' for the \
+C6, 'Emulator ESP32v3 (x64)' for the classic (the job that already has the Xtensa toolchain)."
         return 0
     fi
-    echo "heap-budget: booting ${CHIP_ID} (${CHIP_FEATURES}) on lp-emu:esp32c6:t1 — $elf"
+    echo "heap-budget: booting ${CHIP_ID} (${CHIP_FEATURES}) on ${CHIP_CONFIG} — $elf"
     local meas
-    meas="$(chip_measure "$elf")" || return 1
+    meas="$(chip_measure "$CHIP_ID" "$elf")" || return 1
 
     local recorded
     recorded="$(jq -c --arg c "$CHIP_ID" '.chips[$c].measured // empty' "$RECORD")"
@@ -355,7 +493,7 @@ lands on the main task."
 
     if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
         {
-            echo "heap-budget \`${CHIP_ID}\` (${CHIP_FEATURES}, lp-emu:esp32c6:t1):"
+            echo "heap-budget \`${CHIP_ID}\` (${CHIP_FEATURES}, ${CHIP_CONFIG}):"
             echo '```'
             jq -r 'to_entries[] | "\(.key): \(.value)"' <<<"$meas"
             echo '```'
@@ -365,14 +503,15 @@ lands on the main task."
 }
 
 chip_baseline() {
+    chip_facts "$1" || return 1
     local elf
-    elf="$(chip_elf)" || {
+    elf="$(chip_elf "$CHIP_ID")" || {
         echo "heap-budget: cannot baseline ${CHIP_ID} without a firmware image." >&2
         return 1
     }
     echo "heap-budget: baselining ${CHIP_ID} (${CHIP_FEATURES}) — $elf"
     local meas
-    meas="$(chip_measure "$elf")" || return 1
+    meas="$(chip_measure "$CHIP_ID" "$elf")" || return 1
     # The band is the measurement ±500 B, rounded outward to the nearest 100:
     # DD45's measured spread between this host's image and a CI runner's was
     # 128 B, and the band is the documented spread with room, never a fitted
@@ -391,17 +530,42 @@ chip_baseline() {
     echo "heap-budget: wrote ${CHIP_ID} into ${RECORD}"
 }
 
+# Which chips a run covers: all of them, or the one named. CI's two jobs have
+# one toolchain each and so name one each — the C6 in `Heap budget (esp32c6
+# chip)`, the classic in `Emulator ESP32v3 (x64)`, which is the job that
+# already installs the Xtensa toolchain and builds this firmware. A bare
+# `chips` locally is still both.
+chips_for() {
+    if [ -z "${1:-}" ]; then
+        echo "$CHIPS"
+        return 0
+    fi
+    case " $CHIPS " in
+    *" $1 "*) echo "$1" ;;
+    *)
+        echo "::error::heap-budget: unknown chip '$1' (known: $CHIPS)" >&2
+        return 1
+        ;;
+    esac
+}
+
 mode="${1:-check}"
 
 case "$mode" in
 chips)
-    chip_check "${2:-0}"
-    exit $?
+    fail=0
+    for chip in $(chips_for "${3:-}"); do
+        chip_check "$chip" "${2:-0}" || fail=1
+    done
+    exit "$fail"
     ;;
 
 chips-baseline)
-    chip_baseline
-    exit $?
+    fail=0
+    for chip in $(chips_for "${2:-}"); do
+        chip_baseline "$chip" || fail=1
+    done
+    exit "$fail"
     ;;
 
 check)
@@ -481,7 +645,9 @@ check)
     # The chip half, which skips with a named reason when there is no firmware
     # image. `heap-budget-check.sh chips` is the same call on its own, for the
     # job that HAS one and must not skip.
-    chip_check "$margin" || fail=1
+    for chip in $CHIPS; do
+        chip_check "$chip" "$margin" || fail=1
+    done
     exit "$fail"
     ;;
 
@@ -529,7 +695,8 @@ baseline)
     ;;
 
 *)
-    echo "usage: $0 check [margin_pct] | baseline | chips [margin_pct] | chips-baseline" >&2
+    echo "usage: $0 check [margin_pct] | baseline | chips [margin_pct] [chip] | \
+chips-baseline [chip]   (chips: $CHIPS)" >&2
     exit 2
     ;;
 esac

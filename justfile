@@ -1975,27 +1975,57 @@ heap-budget-check margin_pct="0": install-rv32-target
 heap-budget-baseline: install-rv32-target
     scripts/heap-budget-check.sh baseline
 
-# The heap-budget record's OTHER source: the shipped ESP32-C6 firmware booted
-# whole on `lp-emu-esp32c6`, read from the allocator figures its own first
+# The heap-budget record's OTHER source: a shipped firmware image booted whole
+# on its own SoC emulator, read from the allocator figures its own first
 # heartbeat reports.
 #
 # `heap-budget-check` measures what a PROJECT costs, on an emulator that has
 # no firmware in it. This measures what the FIRMWARE costs, on the bytes a
-# board is flashed with — and M3 through M7 established that figure byte-equal
-# to silicon on every memory-class value but a constant 8 B, which the record
-# carries beside it. It is what "the heap gates are read from the emulator"
-# means (plan 2026-09-06-1001-esp-emulator, acceptance 8).
+# board is flashed with — on the C6, M3 through M7 established that figure
+# byte-equal to silicon on every memory-class value but a constant 8 B, which
+# the record carries beside it. It is what "the heap gates are read from the
+# emulator" means (plan 2026-09-06-1001-esp-emulator, acceptance 8; plan
+# 2026-09-10-0021-xtensa-emulator M5 P5 for the classic).
+#
+# TWO chips since M5 P5, and a bare invocation does both. The per-chip doors
+# below are what CI uses, because the two arms need different toolchains and
+# ride different jobs.
 #
 # Separate from `heap-budget-check` because it needs a cross-target firmware
 # build: the required test job must not start one, so `heap-budget-check`
-# prints a named SKIP there and CI's path-gated `emu-c6` job — which builds
-# firmware anyway — runs this, where a skip would be a failure.
-heap-budget-check-chips margin_pct="0": install-rv32-target
-    LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips {{ margin_pct }}
+# prints a named SKIP there and the path-gated jobs that build firmware anyway
+# run these, where a skip would be a failure.
+heap-budget-check-chips margin_pct="0" chip="": install-rv32-target
+    LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips {{ margin_pct }} {{ chip }}
 
-# Re-measure the chip figures into scripts/heap-budget-record.json.
-heap-budget-baseline-chips: install-rv32-target
-    LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips-baseline
+# The C6's arm alone — CI's `Heap budget (esp32c6 chip)` job, which has the
+# riscv32 target and no Xtensa toolchain.
+heap-budget-check-chips-c6 margin_pct="0": (heap-budget-check-chips margin_pct "esp32c6")
+
+# The classic's arm alone — CI's `Emulator ESP32v3 (x64)` job.
+#
+# It rides THAT job and not the C6's for two reasons, and both are about where
+# a toolchain already is. The classic's ELF is an Xtensa cross-build, which
+# only `emu-esp32v3` installs (a cold espup install is ~8 minutes, and paying
+# it twice to keep two ratchets in one job would be the expensive way round);
+# and `heap-budget-chips` is path-gated on `emu_c6`, which does not fire for
+# `lp-fw/fw-esp32v3/**` — so the classic's own firmware changes would have run
+# its own heap gate never. `emu_esp32v3` is the filter that fires for them.
+#
+# No `install-rv32-target`: nothing in this arm is riscv32. The machine is a
+# host binary and the image is Xtensa.
+heap-budget-check-chips-v3 margin_pct="0":
+    LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips {{ margin_pct }} esp32v3
+
+# Re-measure the chip figures into scripts/heap-budget-record.json — both
+# chips, or the one named.
+heap-budget-baseline-chips chip="": install-rv32-target
+    LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips-baseline {{ chip }}
+
+# Re-measure the classic's alone. Its band is measured on ONE host today (see
+# `stack_band_note` in the record); a runner's figure is M5 P6's to add.
+heap-budget-baseline-chips-v3:
+    LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips-baseline esp32v3
 
 # Emit RV32 stack-size metadata for the ESP32 firmware.
 # The direct cargo build can fail at final link on local ESP linker-script setup,
@@ -2827,17 +2857,43 @@ test-emu-serve:
 walk-esp32c6-emu *args: install-rv32-target build-rv32-builtins
     scripts/emu/m4-walk.sh {{ args }}
 
-# The same walk on the CLASSIC ESP32 (M4 P4) — the frame half only.
+# The same walk on the CLASSIC ESP32 — the whole thing (M5 P5).
 #
-# Named `walk-esp32v3-emu-frame`, not `walk-esp32v3-emu`, on purpose: M5 P5
-# owns the classic's FULL walk twin (the payload batch, the heap gates, the
-# transcripts), and this one asks a single question — is the first lit frame
-# off IO18 the host oracle's frame, three ways? A reader who types the shorter
-# name should get the bigger thing.
+# The shorter name IS the bigger thing, which is the rule M4 P4 wrote into the
+# `-frame` recipe below when it took the longer one. What this adds over the
+# frame half is the two things a hardware walk gets from a desk and a cable:
+#
+#   the boot   ROM-up from a merged 4 MiB image — the real mask ROM, the real
+#              ESP-IDF second-stage bootloader espflash bundles, the real
+#              partition table — instead of a direct load. `LP_WALK_BOOT=direct`
+#              still takes the fast path when something is being bisected.
+#   the cable  the CH340's own verbs over `--control tcp:`: attach, the
+#              classic-reset dance (whose RELEASE is the reboot), open, upload,
+#              then close / detach / `state` — and the final `state` reply is
+#              asserted, so "the port was released" is a gate and not a habit.
+#
+# It does NOT run the heap gate. That is `just heap-budget-check-chips-v3`,
+# for the reason the C6 keeps its own ratchet out of `walk-esp32c6-emu`: the
+# ratchet boots the SHIPPED image (`esp32,server,float-f32`) and the walk boots
+# the `frame-dump` one, and a recipe that built both would be two walks wearing
+# one name. CI runs the ratchet; nothing runs the walk (see below).
 #
 # Two differences from the C6 recipe, both in the script's header: the link is
 # UART0 (this chip has no USB-Serial-JTAG) and the project is retargeted
 # `D10` -> `IO18` into a scratch copy, because the DOM-Z-102 has no D10.
+#
+# NOT in any CI job, for the C6 recipe's reason: it builds a firmware image, a
+# merged flash image and a release `lp-cli`, and then runs the machine for tens
+# of emulated seconds. What it proves per-tick lives in `tests/
+# shader_oracle_pin.rs` and `tests/five_wires.rs`, which do run there.
+walk-esp32v3-emu *args: install-rv32-target build-rv32-builtins
+    scripts/emu/m4-walk-esp32v3.sh {{ args }}
+
+# The frame half of that walk (M4 P4): direct load, no cable.
+#
+# The iteration path — it skips the merged-image build and one whole boot — and
+# it asks exactly the same question of the frame: is the first lit frame off
+# IO18 the host oracle's frame, three ways?
 #
 # It reaches all three readings and exits 0: 2,438 frames on IO18, one distinct
 # lit byte string, equal to the guest's own deferred `[OUT] dump` and to
@@ -2846,11 +2902,8 @@ walk-esp32c6-emu *args: install-rv32-target build-rv32-builtins
 # the deferred dump; `lp-emu/esp/lp-emu-esp32v3/README.md`'s "The window,
 # across a context save" is that trace. The script prints every reading it got
 # whatever happens, and exits non-zero if any of them is missing or differs.
-#
-# NOT in any CI job, for the C6 recipe's reason: it builds a firmware image and
-# a release `lp-cli` and then runs the machine for tens of emulated seconds.
 walk-esp32v3-emu-frame *args: install-rv32-target build-rv32-builtins
-    scripts/emu/m4-walk-esp32v3.sh {{ args }}
+    scripts/emu/m4-walk-esp32v3.sh --frame {{ args }}
 
 # Run one image on the C6 machine — the human front door.
 #
