@@ -666,6 +666,7 @@ pub struct Esp32V3Builder {
     control: Option<String>,
     control_script: Vec<(Cycles, ControlCommand)>,
     reboot_on_reset: bool,
+    strap_word: u32,
 }
 
 impl Default for Esp32V3Builder {
@@ -694,6 +695,7 @@ impl Default for Esp32V3Builder {
             control: None,
             control_script: Vec::new(),
             reboot_on_reset: false,
+            strap_word: crate::periph::accept::GPIO_STRAP_SPI_FAST_FLASH_BOOT,
         }
     }
 }
@@ -861,6 +863,29 @@ impl Esp32V3Builder {
         self
     }
 
+    /// What `GPIO.strap` reads: the strapping pins as the pads were latched
+    /// at reset (`--strap`).
+    ///
+    /// **An input to the run**, like the reset cause and the chip revision,
+    /// and the default is the desk board's own — `0x13`, which is what the
+    /// mask ROM prints raw as the `boot:0x%x` half of its banner
+    /// (`../bench.md`: `boot:0x13 (SPI_FAST_FLASH_BOOT)`; the derivation is
+    /// on [`crate::periph::accept::GPIO_STRAP_SPI_FAST_FLASH_BOOT`]). Zero is
+    /// not "no straps": it is the SDIO boot mode, and the mask ROM takes it
+    /// seriously enough to walk into `slc_init_attach`.
+    ///
+    /// ⚠️ **There is no download-mode default here, and that is deliberate.**
+    /// [`Strap::Download`] on the cable's side says IO0 was low when EN was
+    /// released; what word `GPIO.strap` then reads is a second fact, and this
+    /// repository has not measured it (`m3/notes.md` R8: L0 exercised the EN
+    /// half of the auto-reset circuit and not the IO0 half). A guessed word
+    /// would send the ROM down a path nobody checked. Pass the measured one
+    /// when L1 brings it back.
+    pub fn strap(mut self, word: u32) -> Self {
+        self.strap_word = word;
+        self
+    }
+
     /// The rate the host on the other end of the cable sends at
     /// (`--uart0-baud`, default
     /// [`crate::periph::uart::DEFAULT_HOST_BAUD`]). It changes what the
@@ -1016,6 +1041,7 @@ impl Esp32V3Builder {
                 Some(uart0_stream),
                 flash.clone(),
                 self.seed,
+                self.strap_word,
             );
             check_registration_order(&set)?;
             for (base, len, periph) in set {
@@ -1863,7 +1889,17 @@ impl Machine {
                         // a script.
                         let event = self.bus.sched.next_deadline();
                         let host = self.next_host_service();
-                        let wake = [event, host]
+                        // ⚠️ And the **byte** source's own next delivery.
+                        // `next_host_service` is the control channel only;
+                        // a `--uart0-script` step whose cycle is already
+                        // known is a third thing that can happen, and an
+                        // idle guest used to jump clean over it — the walk's
+                        // second request landed at the run's deadline
+                        // instead of 20 ms after its first. The C6's machine
+                        // has carried this term since DD13; this one did not
+                        // until a script with two steps in it was written.
+                        let bytes = self.bus.host.next_ready();
+                        let wake = [event, host, bytes]
                             .into_iter()
                             .flatten()
                             .min()

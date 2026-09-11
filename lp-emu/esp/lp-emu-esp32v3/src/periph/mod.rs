@@ -29,7 +29,9 @@ pub mod accept;
 pub mod dport;
 pub mod efuse;
 pub mod flash_mmu;
+pub mod gpio;
 pub mod i2c_ana_mst;
+pub mod io_mux;
 pub mod rng;
 pub mod rtc_cntl;
 pub mod sha;
@@ -123,6 +125,7 @@ pub fn boot_set(
     uart0_stream: Option<StreamId>,
     flash: FlashHandle,
     seed: u64,
+    strap: u32,
 ) -> Vec<(u32, u32, BoxedPeripheral)> {
     vec![
         (
@@ -147,13 +150,13 @@ pub fn boot_set(
             Box::new(i2c_ana_mst::I2cAnaMst::new()),
         ),
         (base::TIMG1, timg::TIMG_LEN, Box::new(timg::Timg::timg1())),
-        (base::GPIO, accept::GPIO_LEN, Box::new(accept::gpio())),
+        (base::GPIO, gpio::LEN, Box::new(gpio::Gpio::new(strap))),
         (
             base::UART0,
             uart::UART_LEN,
             Box::new(uart::Uart::uart0(uart0_stream)),
         ),
-        (base::IO_MUX, accept::IO_MUX_LEN, Box::new(accept::io_mux())),
+        (base::IO_MUX, io_mux::LEN, Box::new(io_mux::IoMux::new())),
         (
             base::SPI1,
             accept::SPI_LEN,
