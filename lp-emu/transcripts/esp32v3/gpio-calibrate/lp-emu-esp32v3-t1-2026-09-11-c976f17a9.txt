@@ -1,0 +1,2 @@
+[fw-checks-header] {"schema":1,"payload":"gpio-calibrate","chip":"esp32v3","firmware_commit":"c976f17a9a1e","firmware_features":"default,esp32,float-f32,server,test_gpio_calibrate","firmware_dirty":false}
+CAL READY target=esp32v3

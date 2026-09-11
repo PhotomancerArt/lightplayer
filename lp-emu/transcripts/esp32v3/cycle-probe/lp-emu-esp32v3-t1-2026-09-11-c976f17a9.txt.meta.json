@@ -1,0 +1,54 @@
+{
+  "schema": 1,
+  "payload": "cycle-probe",
+  "chip": "esp32v3",
+  "configuration": "lp-emu:esp32v3:t1",
+  "date": "2026-09-11",
+  "firmware_commit": "c976f17a9",
+  "firmware_features": [
+    "default",
+    "esp32",
+    "float-f32",
+    "server",
+    "test_cycle_probe"
+  ],
+  "firmware_dirty": false,
+  "firmware_sha256": "68040bf5e6b1c36c7f79dd007c2e78497245beb97636c90835ff51ed2a74aa15",
+  "silicon_rev": "v3.1",
+  "board": "domraem/dom-z-102",
+  "mac": "30:76:f5:ec:f6:34",
+  "tools": {
+    "lp-emu-esp32v3": "40.0.0 (c5ce81d6b+dirty)",
+    "rom": "esp32_rev300_rom.elf sha256 920b70635440517866aab2230964a570d2cf2b676658d93c52fbac108c1cca31"
+  },
+  "source": "cargo run -q -p lp-emu-esp32v3 --release -- --elf target/emu-ref/c976f17a9-esp32+test_cycle_probe/fw-esp32v3 --time-grade t1 --uart0 file:target/validate/cycle-probe.cap --timeout 120s --wall-timeout 2400 --strict-bus --exit-on '[cycle-probe] === DONE ===' --efuse-mac 30:76:f5:ec:f6:34 --efuse-rev 3.1",
+  "capture": "lp-cli validate record cycle-probe --config lp-emu:esp32v3:t1",
+  "note": "running the pinned image target/emu-ref/c976f17a9-esp32+test_cycle_probe/fw-esp32v3 rather than building one, and on this chip that is the ONLY way the comparison is one: the transcript it is set beside was taken on a board flashed with these exact bytes, same commit and same sha256, so what differs between the two captures is the machine and not the build (DD30). Nothing is cherry-picked — UART0 over the CH340K is this part's shipped link, not a feature — and `scripts/emu/build-reference-image.sh --chip esp32 esp32,test_cycle_probe <commit> none` builds it in a detached worktree at that commit.",
+  "trust": [
+    {
+      "class": "memory",
+      "grade": "modeled",
+      "because": "the allocator is the guest's own and the RAM model is byte-exact, and on the shipped image against the desk board — same commit 75486b114208, same ELF sha256 fb5e548982f2…, same merged.bin — G2's field-by-field read is SEVEN of nine memory-class fields equal to the byte: the boot heap arithmetic `heap=15072+112640+98304+15536=241552`, `[INIT] main stack 45280 B`, the whole `[JIT]` census (`used=0 peak=0 cap=65536 spans=0 peak_spans=0 allocs=0 frees=0 fails=0 largest_free=65536`), `[MEM] largest_free 108526`, `retry_saves 0`, the heap total, and the JIT region line `sram0 ibus 0x40088000..0x40098000 (64 KiB, placed, rwtext_end=0x40083f78)`. TWO ARE NOT EQUAL AND BOTH ARE NAMED HERE: `[MEM] used` is +84 B on this machine and the `[stack]` high-water is -960 B, and neither is sampling — both repeat deterministically on both sides, which is what refuted the sampling explanation that would have made them go away. DD48 carried them to M4 P1 (two cores) rather than to a tuning knob; whichever way that lands, this row says what it found and the replay REPORTS the two differences rather than masking them. A further trap that is not a model difference at all: espflash hard-resets after writing, so every silicon capture is a SECOND boot, while a machine handed a fresh flash copy is on its first and reports `largest_free=106494` — 2032 B short — because the `lpfs` format is still live. The arm's `second_boot` is that fact. Never tuned toward any of it"
+    },
+    {
+      "class": "timing",
+      "grade": "modeled",
+      "because": "t1 counts one cycle per instruction — no cache, no flash wait states, no LX6 per-class cost model — and this machine defines NO OTHER GRADE (ruling R1): there is nothing on the classic to calibrate a `t2` against, and CCOUNT calibration is out of this plan's scope. What is modelled honestly is the UART0 drain, at baud in emulated time, which is why the wire's content and order are the firmware's. The first thing a `t2` would have to fix is DD40's crystal-versus-PLL rate gap: before the app reprograms the PLL the guest's own notion of the rate and ours differ, which is visible in the bootloader's timings and in nothing after them. The `cycle-probe` payload's CCOUNT figures are RECORDED on this configuration and gate nothing at all — they are that future grade's input, not a claim about milliseconds on silicon (the vision's graded ladder). The gate's stop-all send lands 1 ms of emulated time after its trigger line and a desk host's select loop polls at 50 ms; that is host latency, and it is why nothing in this class is compared between the two sides"
+    },
+    {
+      "class": "boot-log",
+      "grade": "modeled",
+      "because": "and it is the one class where this machine has the most to show. On the ROM-up path it prints the REAL mask ROM banner out of the real `esp32_rev300_rom.elf` and the REAL ESP-IDF `v5.1-beta1-378-gea5e0ff298` second-stage bootloader out of espflash 3.3.0's bundled resources — nothing is vendored and nothing is synthesised, so the image IS the provenance (DD25). `lp-emu-esp32v3/tests/rom_up_boot.rs` compares it line for line against the committed 115200 silicon capture of the same merged.bin, `rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)` included, and the benign `E boot: Image contains multiple DROM segments. Only the last one will be mapped.` line is printed by the desk board too (two DROM segments, the first 256 bytes of `esp_app_desc`). `modeled` all the same: the ROM's own printf is executed here rather than intercepted, but the second-stage bootloader's timings and the flash controller under it are ours"
+    },
+    {
+      "class": "wire",
+      "grade": "modeled",
+      "because": "the bytes are the guest's own, drained through the UART0 model at the configured baud, so their content and order are the firmware's. What is not the firmware's is when a host's bytes arrive on a live socket — that is host time, not guest time — and `--uart0-script` is the deterministic path for anything a transcript should carry. This row also carries the CABLE, because ruling R7 declined a class of its own for it: the CH340K's DTR/RTS to EN/IO0 circuit is modelled as the host's side of UART0 (`--control`, `--control-script`), and the real cable's download-mode row WAS measured on the desk — whole-status TIOCMSET 0x4, 100 ms, 0x2, 80 ms, 0x0, producing `boot:0x3 (DOWNLOAD_BOOT…)` and `waiting for download` (lab task L1's 161-byte raw attachment beside the 115200 transcript). The WCH macOS dext ignores single-bit TIOCMBIS/TIOCMBIC, which is why the model has a whole-status control channel at all. The classic binary has no `--strap` flag, so there is no emulated twin of that capture to compare it against yet; it is named here rather than promoted"
+    },
+    {
+      "class": "pin",
+      "grade": "modeled",
+      "because": "the waveform is a modelled RMT's, driven into the bus's signal fabric and decoded back by our own decoder (M4 P2/P3). NO INSTRUMENT HAS BEEN ON A CLASSIC PAD — not a logic analyser, not a scope — so both readings of the pad are ours, and the walk record says so in as many words. The two MODEM lines are the exception and they are not a pad: EN and IO0 were driven on the real cable and their effect read off the ROM's own banner, which is a measurement of the cable, recorded in the `wire` row above. `records_pins` is `false` on this configuration until the classic binary has `--dump-frames` (M4 P3), so no classic transcript claims a pin capture it does not have"
+    }
+  ]
+}

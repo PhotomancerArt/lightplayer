@@ -1,0 +1,178 @@
+[fw-checks-header] {"schema":1,"payload":"shader-compile-stress","chip":"esp32v3","firmware_commit":"c976f17a9a1e","firmware_features":"default,esp32,float-f32,server,test_shader_compile_incremental","firmware_dirty":false}
+INFO - [inc-shader-compile] cpenable=0x000000ff (PRO core, armed before the first compile)
+INFO - [inc-shader-compile] === incremental shader compile experiment starting (110 KiB arena + 98304 B SRAM1 tail, JIT region 0x40088000..0x40098000) ===
+INFO - [inc-shader-compile] compile budget: frontend_steps=1 backend_steps=1
+INFO - [inc-shader-compile] --- case=examples-basic ---
+INFO - [inc-shader-compile] case=examples-basic tick=1 stage=Frontend(Lex) slice_cycles=117556 slice_us=489 mem_before=203160 free/7784 used mem_after=190068 free/20876 used
+INFO - [inc-shader-compile] case=examples-basic tick=2 stage=Frontend(Index) slice_cycles=111726 slice_us=465 mem_before=190068 free/20876 used mem_after=186180 free/24764 used
+INFO - [inc-shader-compile] case=examples-basic tick=3 stage=Frontend(Body) slice_cycles=516660 slice_us=2152 mem_before=186180 free/24764 used mem_after=167096 free/43848 used
+INFO - [inc-shader-compile] case=examples-basic tick=4 stage=Frontend(BuildHir) slice_cycles=48339 slice_us=201 mem_before=167096 free/43848 used mem_after=175812 free/35132 used
+INFO - [inc-shader-compile] case=examples-basic tick=5 stage=Frontend(BuildHir) slice_cycles=33893 slice_us=141 mem_before=175812 free/35132 used mem_after=175076 free/35868 used
+INFO - [inc-shader-compile] case=examples-basic tick=6 stage=Frontend(BuildHir) slice_cycles=55804 slice_us=232 mem_before=175076 free/35868 used mem_after=174748 free/36196 used
+INFO - [inc-shader-compile] case=examples-basic tick=7 stage=Frontend(BuildHir) slice_cycles=32806 slice_us=136 mem_before=174748 free/36196 used mem_after=174172 free/36772 used
+INFO - [inc-shader-compile] case=examples-basic tick=8 stage=Frontend(BuildHir) slice_cycles=64338 slice_us=268 mem_before=174172 free/36772 used mem_after=173804 free/37140 used
+INFO - [inc-shader-compile] case=examples-basic tick=9 stage=Frontend(BuildHir) slice_cycles=63349 slice_us=263 mem_before=173804 free/37140 used mem_after=172996 free/37948 used
+INFO - [inc-shader-compile] case=examples-basic tick=10 stage=Frontend(BuildHir) slice_cycles=49095 slice_us=204 mem_before=172996 free/37948 used mem_after=172716 free/38228 used
+INFO - [inc-shader-compile] case=examples-basic tick=11 stage=Frontend(BuildHir) slice_cycles=53018 slice_us=220 mem_before=172716 free/38228 used mem_after=172148 free/38796 used
+INFO - [inc-shader-compile] case=examples-basic tick=12 stage=Frontend(BuildHir) slice_cycles=54994 slice_us=229 mem_before=172148 free/38796 used mem_after=171808 free/39136 used
+INFO - [inc-shader-compile] case=examples-basic tick=13 stage=Frontend(BuildHir) slice_cycles=98267 slice_us=409 mem_before=171808 free/39136 used mem_after=169996 free/40948 used
+INFO - [inc-shader-compile] case=examples-basic tick=14 stage=Frontend(BuildHir) slice_cycles=193910 slice_us=807 mem_before=169996 free/40948 used mem_after=169568 free/41376 used
+INFO - [inc-shader-compile] case=examples-basic tick=15 stage=Frontend(BuildHir) slice_cycles=1120 slice_us=4 mem_before=169568 free/41376 used mem_after=169568 free/41376 used
+INFO - [inc-shader-compile] case=examples-basic tick=16 stage=Frontend(BuildHir) slice_cycles=29997 slice_us=124 mem_before=169568 free/41376 used mem_after=175020 free/35924 used
+INFO - [inc-shader-compile] case=examples-basic tick=17 stage=Frontend(LowerLpir) slice_cycles=533283 slice_us=2222 mem_before=175020 free/35924 used mem_after=184380 free/26564 used
+INFO - [inc-shader-compile] case=examples-basic tick=18 stage=Prepare slice_cycles=100259 slice_us=417 mem_before=184380 free/26564 used mem_after=175876 free/35068 used
+INFO - [native-compile] stage=SetupModule functions=12
+INFO - [inc-shader-compile] case=examples-basic tick=19 stage=Backend slice_cycles=210957 slice_us=878 mem_before=175876 free/35068 used mem_after=167772 free/43172 used
+INFO - [native-compile] function=0 stage=CompileFunctionConstFold done
+INFO - [inc-shader-compile] case=examples-basic tick=20 stage=Backend slice_cycles=185374 slice_us=772 mem_before=167772 free/43172 used mem_after=167772 free/43172 used
+INFO - [native-compile] function=0 stage=CompileFunctionLower done
+INFO - [inc-shader-compile] case=examples-basic tick=21 stage=Backend slice_cycles=174939 slice_us=728 mem_before=167772 free/43172 used mem_after=166940 free/44004 used
+INFO - [native-compile] function=0 stage=CompileFunctionPeephole done
+INFO - [inc-shader-compile] case=examples-basic tick=22 stage=Backend slice_cycles=182768 slice_us=761 mem_before=166940 free/44004 used mem_after=166940 free/44004 used
+INFO - [native-compile] function=0 stage=CompileFunctionRegalloc done
+INFO - [inc-shader-compile] case=examples-basic tick=23 stage=Backend slice_cycles=182769 slice_us=761 mem_before=166940 free/44004 used mem_after=166472 free/44472 used
+INFO - [native-compile] function=0 stage=CompileFunctionEmit done
+INFO - [inc-shader-compile] case=examples-basic tick=24 stage=Backend slice_cycles=172327 slice_us=718 mem_before=166472 free/44472 used mem_after=168160 free/42784 used
+INFO - [native-compile] function=0 stage=CompileFunctionDebug done
+INFO - [inc-shader-compile] case=examples-basic tick=25 stage=Backend slice_cycles=175121 slice_us=729 mem_before=168160 free/42784 used mem_after=168144 free/42800 used
+INFO - [native-compile] function=1 stage=CompileFunctionConstFold done
+INFO - [inc-shader-compile] case=examples-basic tick=26 stage=Backend slice_cycles=185375 slice_us=772 mem_before=168144 free/42800 used mem_after=168144 free/42800 used
+INFO - [native-compile] function=1 stage=CompileFunctionLower done
+INFO - [inc-shader-compile] case=examples-basic tick=27 stage=Backend slice_cycles=174937 slice_us=728 mem_before=168144 free/42800 used mem_after=163540 free/47404 used
+INFO - [native-compile] function=1 stage=CompileFunctionPeephole done
+INFO - [inc-shader-compile] case=examples-basic tick=28 stage=Backend slice_cycles=182766 slice_us=761 mem_before=163540 free/47404 used mem_after=163540 free/47404 used
+INFO - [native-compile] function=1 stage=CompileFunctionRegalloc done
+INFO - [inc-shader-compile] case=examples-basic tick=29 stage=Backend slice_cycles=352814 slice_us=1470 mem_before=163540 free/47404 used mem_after=161928 free/49016 used
+INFO - [native-compile] function=1 stage=CompileFunctionEmit done
+INFO - [inc-shader-compile] case=examples-basic tick=30 stage=Backend slice_cycles=283064 slice_us=1179 mem_before=161928 free/49016 used mem_after=169092 free/41852 used
+INFO - [native-compile] function=1 stage=CompileFunctionDebug done
+INFO - [inc-shader-compile] case=examples-basic tick=31 stage=Backend slice_cycles=175126 slice_us=729 mem_before=169092 free/41852 used mem_after=169076 free/41868 used
+INFO - [native-compile] function=2 stage=CompileFunctionConstFold done
+INFO - [inc-shader-compile] case=examples-basic tick=32 stage=Backend slice_cycles=185376 slice_us=772 mem_before=169076 free/41868 used mem_after=169076 free/41868 used
+INFO - [native-compile] function=2 stage=CompileFunctionLower done
+INFO - [inc-shader-compile] case=examples-basic tick=33 stage=Backend slice_cycles=174934 slice_us=728 mem_before=169076 free/41868 used mem_after=167840 free/43104 used
+INFO - [native-compile] function=2 stage=CompileFunctionPeephole done
+INFO - [inc-shader-compile] case=examples-basic tick=34 stage=Backend slice_cycles=182768 slice_us=761 mem_before=167840 free/43104 used mem_after=167840 free/43104 used
+INFO - [native-compile] function=2 stage=CompileFunctionRegalloc done
+INFO - [inc-shader-compile] case=examples-basic tick=35 stage=Backend slice_cycles=182772 slice_us=761 mem_before=167840 free/43104 used mem_after=167392 free/43552 used
+INFO - [native-compile] function=2 stage=CompileFunctionEmit done
+INFO - [inc-shader-compile] case=examples-basic tick=36 stage=Backend slice_cycles=172326 slice_us=718 mem_before=167392 free/43552 used mem_after=169412 free/41532 used
+INFO - [native-compile] function=2 stage=CompileFunctionDebug done
+INFO - [inc-shader-compile] case=examples-basic tick=37 stage=Backend slice_cycles=175133 slice_us=729 mem_before=169412 free/41532 used mem_after=169400 free/41544 used
+INFO - [native-compile] function=3 stage=CompileFunctionConstFold done
+INFO - [inc-shader-compile] case=examples-basic tick=38 stage=Backend slice_cycles=185375 slice_us=772 mem_before=169400 free/41544 used mem_after=169400 free/41544 used
+INFO - [native-compile] function=3 stage=CompileFunctionLower done
+INFO - [inc-shader-compile] case=examples-basic tick=39 stage=Backend slice_cycles=174934 slice_us=728 mem_before=169400 free/41544 used mem_after=167964 free/42980 used
+INFO - [native-compile] function=3 stage=CompileFunctionPeephole done
+INFO - [inc-shader-compile] case=examples-basic tick=40 stage=Backend slice_cycles=182770 slice_us=761 mem_before=167964 free/42980 used mem_after=167964 free/42980 used
+INFO - [native-compile] function=3 stage=CompileFunctionRegalloc done
+INFO - [inc-shader-compile] case=examples-basic tick=41 stage=Backend slice_cycles=206628 slice_us=860 mem_before=167964 free/42980 used mem_after=167108 free/43836 used
+INFO - [native-compile] function=3 stage=CompileFunctionEmit done
+INFO - [inc-shader-compile] case=examples-basic tick=42 stage=Backend slice_cycles=211414 slice_us=880 mem_before=167108 free/43836 used mem_after=170260 free/40684 used
+INFO - [native-compile] function=3 stage=CompileFunctionDebug done
+INFO - [inc-shader-compile] case=examples-basic tick=43 stage=Backend slice_cycles=175140 slice_us=729 mem_before=170260 free/40684 used mem_after=170248 free/40696 used
+INFO - [native-compile] function=4 stage=CompileFunctionConstFold done
+INFO - [inc-shader-compile] case=examples-basic tick=44 stage=Backend slice_cycles=185374 slice_us=772 mem_before=170248 free/40696 used mem_after=170248 free/40696 used
+INFO - [native-compile] function=4 stage=CompileFunctionLower done
+INFO - [inc-shader-compile] case=examples-basic tick=45 stage=Backend slice_cycles=174937 slice_us=728 mem_before=170248 free/40696 used mem_after=168812 free/42132 used
+INFO - [native-compile] function=4 stage=CompileFunctionPeephole done
+INFO - [inc-shader-compile] case=examples-basic tick=46 stage=Backend slice_cycles=182767 slice_us=761 mem_before=168812 free/42132 used mem_after=168812 free/42132 used
+INFO - [native-compile] function=4 stage=CompileFunctionRegalloc done
+INFO - [inc-shader-compile] case=examples-basic tick=47 stage=Backend slice_cycles=206253 slice_us=859 mem_before=168812 free/42132 used mem_after=167956 free/42988 used
+INFO - [native-compile] function=4 stage=CompileFunctionEmit done
+INFO - [inc-shader-compile] case=examples-basic tick=48 stage=Backend slice_cycles=202046 slice_us=841 mem_before=167956 free/42988 used mem_after=171104 free/39840 used
+INFO - [native-compile] function=4 stage=CompileFunctionDebug done
+INFO - [inc-shader-compile] case=examples-basic tick=49 stage=Backend slice_cycles=175149 slice_us=729 mem_before=171104 free/39840 used mem_after=171092 free/39852 used
+INFO - [native-compile] function=5 stage=CompileFunctionConstFold done
+INFO - [inc-shader-compile] case=examples-basic tick=50 stage=Backend slice_cycles=185375 slice_us=772 mem_before=171092 free/39852 used mem_after=171092 free/39852 used
+INFO - [native-compile] function=5 stage=CompileFunctionLower done
+INFO - [inc-shader-compile] case=examples-basic tick=51 stage=Backend slice_cycles=174936 slice_us=728 mem_before=171092 free/39852 used mem_after=169804 free/41140 used
+INFO - [native-compile] function=5 stage=CompileFunctionPeephole done
+INFO - [inc-shader-compile] case=examples-basic tick=52 stage=Backend slice_cycles=182767 slice_us=761 mem_before=169804 free/41140 used mem_after=169804 free/41140 used
+INFO - [native-compile] function=5 stage=CompileFunctionRegalloc done
+INFO - [inc-shader-compile] case=examples-basic tick=53 stage=Backend slice_cycles=182770 slice_us=761 mem_before=169804 free/41140 used mem_after=169004 free/41940 used
+INFO - [native-compile] function=5 stage=CompileFunctionEmit done
+INFO - [inc-shader-compile] case=examples-basic tick=54 stage=Backend slice_cycles=205845 slice_us=857 mem_before=169004 free/41940 used mem_after=171040 free/39904 used
+INFO - [native-compile] function=5 stage=CompileFunctionDebug done
+INFO - [inc-shader-compile] case=examples-basic tick=55 stage=Backend slice_cycles=175150 slice_us=729 mem_before=171040 free/39904 used mem_after=171028 free/39916 used
+INFO - [native-compile] function=6 stage=CompileFunctionConstFold done
+INFO - [inc-shader-compile] case=examples-basic tick=56 stage=Backend slice_cycles=185371 slice_us=772 mem_before=171028 free/39916 used mem_after=171028 free/39916 used
+INFO - [native-compile] function=6 stage=CompileFunctionLower done
+INFO - [inc-shader-compile] case=examples-basic tick=57 stage=Backend slice_cycles=174936 slice_us=728 mem_before=171028 free/39916 used mem_after=170364 free/40580 used
+INFO - [native-compile] function=6 stage=CompileFunctionPeephole done
+INFO - [inc-shader-compile] case=examples-basic tick=58 stage=Backend slice_cycles=182768 slice_us=761 mem_before=170364 free/40580 used mem_after=170364 free/40580 used
+INFO - [native-compile] function=6 stage=CompileFunctionRegalloc done
+INFO - [inc-shader-compile] case=examples-basic tick=59 stage=Backend slice_cycles=182771 slice_us=761 mem_before=170364 free/40580 used mem_after=169876 free/41068 used
+INFO - [native-compile] function=6 stage=CompileFunctionEmit done
+INFO - [inc-shader-compile] case=examples-basic tick=60 stage=Backend slice_cycles=172328 slice_us=718 mem_before=169876 free/41068 used mem_after=171388 free/39556 used
+INFO - [native-compile] function=6 stage=CompileFunctionDebug done
+INFO - [inc-shader-compile] case=examples-basic tick=61 stage=Backend slice_cycles=175158 slice_us=729 mem_before=171388 free/39556 used mem_after=171376 free/39568 used
+INFO - [native-compile] function=7 stage=CompileFunctionConstFold done
+INFO - [inc-shader-compile] case=examples-basic tick=62 stage=Backend slice_cycles=185371 slice_us=772 mem_before=171376 free/39568 used mem_after=171376 free/39568 used
+INFO - [native-compile] function=7 stage=CompileFunctionLower done
+INFO - [inc-shader-compile] case=examples-basic tick=63 stage=Backend slice_cycles=174939 slice_us=728 mem_before=171376 free/39568 used mem_after=170244 free/40700 used
+INFO - [native-compile] function=7 stage=CompileFunctionPeephole done
+INFO - [inc-shader-compile] case=examples-basic tick=64 stage=Backend slice_cycles=182765 slice_us=761 mem_before=170244 free/40700 used mem_after=170244 free/40700 used
+INFO - [native-compile] function=7 stage=CompileFunctionRegalloc done
+INFO - [inc-shader-compile] case=examples-basic tick=65 stage=Backend slice_cycles=182771 slice_us=761 mem_before=170244 free/40700 used mem_after=169504 free/41440 used
+INFO - [native-compile] function=7 stage=CompileFunctionEmit done
+INFO - [inc-shader-compile] case=examples-basic tick=66 stage=Backend slice_cycles=172328 slice_us=718 mem_before=169504 free/41440 used mem_after=171620 free/39324 used
+INFO - [native-compile] function=7 stage=CompileFunctionDebug done
+INFO - [inc-shader-compile] case=examples-basic tick=67 stage=Backend slice_cycles=175163 slice_us=729 mem_before=171620 free/39324 used mem_after=171612 free/39332 used
+INFO - [native-compile] function=8 stage=CompileFunctionConstFold done
+INFO - [inc-shader-compile] case=examples-basic tick=68 stage=Backend slice_cycles=185374 slice_us=772 mem_before=171612 free/39332 used mem_after=171612 free/39332 used
+INFO - [native-compile] function=8 stage=CompileFunctionLower done
+INFO - [inc-shader-compile] case=examples-basic tick=69 stage=Backend slice_cycles=174937 slice_us=728 mem_before=171612 free/39332 used mem_after=169976 free/40968 used
+INFO - [native-compile] function=8 stage=CompileFunctionPeephole done
+INFO - [inc-shader-compile] case=examples-basic tick=70 stage=Backend slice_cycles=182767 slice_us=761 mem_before=169976 free/40968 used mem_after=169976 free/40968 used
+INFO - [native-compile] function=8 stage=CompileFunctionRegalloc done
+INFO - [inc-shader-compile] case=examples-basic tick=71 stage=Backend slice_cycles=240190 slice_us=1000 mem_before=169976 free/40968 used mem_after=168860 free/42084 used
+INFO - [native-compile] function=8 stage=CompileFunctionEmit done
+INFO - [inc-shader-compile] case=examples-basic tick=72 stage=Backend slice_cycles=185891 slice_us=774 mem_before=168860 free/42084 used mem_after=172316 free/38628 used
+INFO - [native-compile] function=8 stage=CompileFunctionDebug done
+INFO - [inc-shader-compile] case=examples-basic tick=73 stage=Backend slice_cycles=175172 slice_us=729 mem_before=172316 free/38628 used mem_after=172304 free/38640 used
+INFO - [native-compile] function=9 stage=CompileFunctionConstFold done
+INFO - [inc-shader-compile] case=examples-basic tick=74 stage=Backend slice_cycles=185371 slice_us=772 mem_before=172304 free/38640 used mem_after=172304 free/38640 used
+INFO - [native-compile] function=9 stage=CompileFunctionLower done
+INFO - [inc-shader-compile] case=examples-basic tick=75 stage=Backend slice_cycles=174939 slice_us=728 mem_before=172304 free/38640 used mem_after=168484 free/42460 used
+INFO - [native-compile] function=9 stage=CompileFunctionPeephole done
+INFO - [inc-shader-compile] case=examples-basic tick=76 stage=Backend slice_cycles=182765 slice_us=761 mem_before=168484 free/42460 used mem_after=168484 free/42460 used
+INFO - [native-compile] function=9 stage=CompileFunctionRegalloc done
+INFO - [inc-shader-compile] case=examples-basic tick=77 stage=Backend slice_cycles=553177 slice_us=2304 mem_before=168484 free/42460 used mem_after=165784 free/45160 used
+INFO - [native-compile] function=9 stage=CompileFunctionEmit done
+INFO - [inc-shader-compile] case=examples-basic tick=78 stage=Backend slice_cycles=485348 slice_us=2022 mem_before=165784 free/45160 used mem_after=173820 free/37124 used
+INFO - [native-compile] function=9 stage=CompileFunctionDebug done
+INFO - [inc-shader-compile] case=examples-basic tick=79 stage=Backend slice_cycles=175179 slice_us=729 mem_before=173820 free/37124 used mem_after=173808 free/37136 used
+INFO - [native-compile] function=10 stage=CompileFunctionConstFold done
+INFO - [inc-shader-compile] case=examples-basic tick=80 stage=Backend slice_cycles=187985 slice_us=783 mem_before=173808 free/37136 used mem_after=173808 free/37136 used
+INFO - [native-compile] function=10 stage=CompileFunctionLower done
+INFO - [inc-shader-compile] case=examples-basic tick=81 stage=Backend slice_cycles=177550 slice_us=739 mem_before=173808 free/37136 used mem_after=172404 free/38540 used
+INFO - [native-compile] function=10 stage=CompileFunctionPeephole done
+INFO - [inc-shader-compile] case=examples-basic tick=82 stage=Backend slice_cycles=185374 slice_us=772 mem_before=172404 free/38540 used mem_after=172404 free/38540 used
+INFO - [native-compile] function=10 stage=CompileFunctionRegalloc done
+INFO - [inc-shader-compile] case=examples-basic tick=83 stage=Backend slice_cycles=221690 slice_us=923 mem_before=172404 free/38540 used mem_after=171488 free/39456 used
+INFO - [native-compile] function=10 stage=CompileFunctionEmit done
+INFO - [inc-shader-compile] case=examples-basic tick=84 stage=Backend slice_cycles=252718 slice_us=1052 mem_before=171488 free/39456 used mem_after=174028 free/36916 used
+INFO - [native-compile] function=10 stage=CompileFunctionDebug done
+INFO - [inc-shader-compile] case=examples-basic tick=85 stage=Backend slice_cycles=177792 slice_us=740 mem_before=174028 free/36916 used mem_after=174004 free/36940 used
+INFO - [native-compile] function=11 stage=CompileFunctionConstFold done
+INFO - [inc-shader-compile] case=examples-basic tick=86 stage=Backend slice_cycles=187983 slice_us=783 mem_before=174004 free/36940 used mem_after=174004 free/36940 used
+INFO - [native-compile] function=11 stage=CompileFunctionLower done
+INFO - [inc-shader-compile] case=examples-basic tick=87 stage=Backend slice_cycles=177544 slice_us=739 mem_before=174004 free/36940 used mem_after=172904 free/38040 used
+INFO - [native-compile] function=11 stage=CompileFunctionPeephole done
+INFO - [inc-shader-compile] case=examples-basic tick=88 stage=Backend slice_cycles=185379 slice_us=772 mem_before=172904 free/38040 used mem_after=172904 free/38040 used
+INFO - [native-compile] function=11 stage=CompileFunctionRegalloc done
+INFO - [inc-shader-compile] case=examples-basic tick=89 stage=Backend slice_cycles=185380 slice_us=772 mem_before=172904 free/38040 used mem_after=172196 free/38748 used
+INFO - [native-compile] function=11 stage=CompileFunctionEmit done
+INFO - [inc-shader-compile] case=examples-basic tick=90 stage=Backend slice_cycles=201286 slice_us=838 mem_before=172196 free/38748 used mem_after=174196 free/36748 used
+INFO - [native-compile] function=11 stage=CompileFunctionDebug done
+INFO - [inc-shader-compile] case=examples-basic tick=91 stage=Backend slice_cycles=177793 slice_us=740 mem_before=174196 free/36748 used mem_after=174172 free/36772 used
+INFO - [native-compile] stage=AssembleModule completed_functions=12
+INFO - [inc-shader-compile] case=examples-basic tick=92 stage=Backend slice_cycles=429055 slice_us=1787 mem_before=174172 free/36772 used mem_after=196356 free/14588 used
+INFO - [inc-shader-compile] case=examples-basic finished ticks=92 total_cycles=17034998 total_us=70979 max_slice_cycles=553177 max_slice_us=2304 max_slice_stage=Backend heap_start=203160 free/7784 used heap_peak_used=49016 heap_resident=196356 free/14588 used
+INFO - [inc-shader-compile] case=examples-basic after_drop=203096 free/7848 used
+INFO - [inc-shader-compile] summary case=examples-basic build=71.0ms ticks=92 max_slice=2.3ms max_slice_stage=Backend peak=47.9KiB resident=14.2KiB after_drop=7.7KiB
+INFO - [fw-check-json] {"kind":"case-summary","check":"shader-compile-stress","case":"examples-basic","build_us":70979,"ticks":92,"max_slice_us":2304,"max_slice_stage":"Backend","peak_used":49016,"resident_used":14588,"after_drop_used":7848}
+INFO - [inc-shader-compile] summary total_build=71.0ms cases=1 worst_slice=2.3ms worst_peak=47.9KiB
+INFO - [fw-check-json] {"kind":"total-summary","check":"shader-compile-stress","build_us":70979,"cases":1,"worst_slice_us":2304,"worst_peak_used":49016}
+INFO - [inc-shader-compile] === DONE ===
