@@ -6,20 +6,32 @@
 //! - **sim** — the desktop firmware wearing the target's hardware manifest.
 //!   Fast, and exact about the hardware's *shape* (its endpoints, its
 //!   limits) rather than about its silicon.
-//! - **emu** — the target's own firmware image on an emulated SoC. Exact,
-//!   and slower. No target has one in this build.
+//! - **emu** — the target's own firmware image on an emulated SoC, in this
+//!   tab. Exact, and slower.
 //!
 //! It is a table rather than a `match` on the board id because the answer
-//! is a property of what Studio SHIPS, not of the board: the day
-//! `lp-emu-esp32c6` is wired in behind a device (mode A on the emulator
-//! roadmap), one row here flips and every surface that asks — the picker's
-//! row tag, the hint line, the runtime band's kind word — follows without a
-//! second decision anywhere.
+//! is a property of what Studio SHIPS, not of the board. **The day has
+//! come:** `lp-emu-esp32c6` is wired in behind a device (mode A), the XIAO
+//! ESP32-C6 row says `Emu`, and every surface that asks — the picker's row
+//! tag, the hint line, the runtime band's kind word — followed from that
+//! one edit without a second decision anywhere.
 //!
-//! [`EMULATED_TARGETS`] is empty today, so every row says `sim` — which is
-//! also why the picker's "simulate instead" hint stays hidden (A2): a
-//! sentence explaining a choice nobody has is noise, and the offer asks the
-//! table rather than hard-coding "hidden for now".
+//! # Two questions, not one (D21)
+//!
+//! [`backing_for`] answers "what would this build run this board as", which
+//! is what a tag on a row means. [`emu_offered_for`] answers the narrower
+//! "may a person actually pick an emu of this board here", and that is a
+//! **join**, not a table lookup: an emu is born flashed (D22), so it needs
+//! a served firmware build as well as a place in the table. It is the same
+//! join `flash_offer` makes (`device_flash.rs`), reused rather than
+//! re-decided.
+//!
+//! The third half of D21 — whether this build ships an emulator *module* —
+//! is deliberately NOT asked here. The module is a hashed sidecar the page
+//! resolves at power-on, so only the page can answer honestly, and it does:
+//! `BrowserEmuLinkSource` fails the link with the reason when the manifest
+//! has no emulator entry. A table in the core that guessed would be a
+//! second source of truth for a fact it cannot see.
 
 /// How this build runs a target that is not silicon on the desk.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -43,16 +55,19 @@ impl Backing {
 
 /// The targets this build ships an emulator for.
 ///
-/// **Empty on purpose.** Mode A on the emulator roadmap (`lp-emu-esp32c6`
-/// behind a device) adds ids here, and the picker's tags, the hint line and
-/// the band's kind word all follow from that one edit.
-pub const EMULATED_TARGETS: &[&str] = &[];
+/// One id per emulated SoC module. Adding a row is the whole of "Studio can
+/// emulate this board": the picker's tags, the hint line and the band's
+/// kind word all follow from it.
+pub const EMULATED_TARGETS: &[&str] = &["seeed/xiao-esp32-c6"];
 
 /// The backing this build has for `board_id`.
 ///
-/// One row per target, and today every row says the same thing. The
-/// argument is the board id (Desktop included — it is a board file like any
-/// other) so callers never have to hold a [`ProjectTarget`] to ask.
+/// One row per target. The argument is the board id (Desktop included — it
+/// is a board file like any other) so callers never have to hold a
+/// [`ProjectTarget`] to ask.
+///
+/// This is "what this build ships", not "what a person may pick right
+/// now" — see [`emu_offered_for`] for the offer.
 ///
 /// [`ProjectTarget`]: crate::app::library::ProjectTarget
 pub fn backing_for(board_id: &str) -> Backing {
@@ -60,6 +75,27 @@ pub fn backing_for(board_id: &str) -> Backing {
         true => Backing::Emu,
         false => Backing::Sim,
     }
+}
+
+/// Whether an **emu row** may be offered for `board_id` (D21).
+///
+/// Two conditions, both necessary:
+///
+/// 1. the table says this build has an emulator for the board, and
+/// 2. a served firmware build resolves for it — the same
+///    `provisioning_build_id` join `flash_offer` makes.
+///
+/// The second is what "born flashed" needs (D22): an emu with no served
+/// build comes up on a blank chip, which is a legible state for a board
+/// already in the roster but a poor thing to offer as a new device.
+pub fn emu_offered_for(board_id: &str) -> bool {
+    if !EMULATED_TARGETS.contains(&board_id) {
+        return false;
+    }
+    let Some(board) = lpa_boards::board_by_id(board_id) else {
+        return false;
+    };
+    lpa_boards::provisioning_build_id(Some(board), Some(board.family.as_str())).is_some()
 }
 
 #[cfg(test)]
@@ -71,11 +107,11 @@ mod tests {
     #[test]
     fn every_target_has_a_backing() {
         for board_id in crate::app::devices::target_offer::every_target() {
-            assert_eq!(
-                backing_for(board_id),
-                Backing::Sim,
-                "{board_id} is simulated in this build"
-            );
+            let expected = match board_id {
+                "seeed/xiao-esp32-c6" => Backing::Emu,
+                _ => Backing::Sim,
+            };
+            assert_eq!(backing_for(board_id), expected, "{board_id}");
         }
     }
 
@@ -90,10 +126,36 @@ mod tests {
         }
     }
 
-    /// A2: nothing is emulated, so the picker's emu/sim hint has nothing to
-    /// explain. When this test starts failing, the hint has earned its place.
+    /// A2's inverse: the C6 IS emulated in this build, so the picker's
+    /// emu/sim hint has something to explain and the emu row exists.
     #[test]
-    fn nothing_is_emulated_in_this_build() {
-        assert!(EMULATED_TARGETS.is_empty());
+    fn the_c6_is_emulated_in_this_build() {
+        assert_eq!(EMULATED_TARGETS, &["seeed/xiao-esp32-c6"]);
+        assert_eq!(backing_for("seeed/xiao-esp32-c6"), Backing::Emu);
+        assert!(emu_offered_for("seeed/xiao-esp32-c6"));
+    }
+
+    /// D21's join: the table alone is not the offer. A board that is not in
+    /// the table is never offered, and neither is one the table names but
+    /// this build serves no firmware build for.
+    #[test]
+    fn the_offer_needs_a_served_build_as_well_as_a_table_row() {
+        assert!(!emu_offered_for("lightplayer/desktop"));
+        assert!(!emu_offered_for("acme/not-a-board"));
+        for board_id in crate::app::devices::target_offer::every_target() {
+            if emu_offered_for(board_id) {
+                assert_eq!(
+                    backing_for(board_id),
+                    Backing::Emu,
+                    "{board_id} is offered but not in the table"
+                );
+                let board = lpa_boards::board_by_id(board_id).expect("an offered board is real");
+                assert!(
+                    lpa_boards::provisioning_build_id(Some(board), Some(board.family.as_str()))
+                        .is_some(),
+                    "{board_id} is offered with no served build"
+                );
+            }
+        }
     }
 }
