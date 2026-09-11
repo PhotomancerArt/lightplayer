@@ -28,7 +28,7 @@
 
 use lp_emu_esp32v3::flash::FlashBacking;
 use lp_emu_esp32v3::machine::{
-    AppSource, BootMode, Esp32V3Builder, Machine, Outcome, StopCondition,
+    AppSource, BootMode, CORE_QUANTUM_DEFAULT, Esp32V3Builder, Machine, Outcome, StopCondition,
 };
 use lp_emu_esp32v3::test_support::{fw_esp32v3_image, merged_chip_image, skip_notice};
 use sha2::{Digest, Sha256};
@@ -271,5 +271,216 @@ fn the_snapshot_carries_the_state_that_is_not_a_register() {
         other.harts[0].breakpoints().dbreakc,
         snap.harts[0].breakpoints().dbreakc,
         "DBREAKC"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// M4 P1: two cores, two quanta, and the single-core run that must not move
+// ---------------------------------------------------------------------------
+
+/// The 543-byte `[INIT]` prefix run's three counters on `origin/main` at
+/// `75486b114` (M3 P8), measured with the M3 single-hart loop **before** the
+/// two-core loop replaced it: the run to `[INIT] I/O task spawned` ends
+/// before the firmware starts core 1, so it is the single-core identity the
+/// phase file asks for — byte-identical output, the same cycle count, the
+/// same instruction count and the same idle-skip count.
+const PREFIX_CYCLES: u64 = 3_245_171;
+const PREFIX_INSTRUCTIONS: u64 = 3_245_157;
+const PREFIX_IDLE_SKIPS: u64 = 0;
+const PREFIX_BYTES: usize = 543;
+const PREFIX_SHA256: &str = "ea8bae305953ef613f68a97fb84919378f33b37eb5623dcb970e8dce2b7343e7";
+
+/// **The single-core safety net.** A run in which core 1 never starts is
+/// the run M3 produced: same bytes, same sha, same cycles, same
+/// instructions, same skips. The quantum is the loop's window bound now and
+/// the M3 loop had none below 8,192, so an equal cycle count here is the
+/// claim that windows change nothing a single hart can observe.
+#[test]
+#[ignore = "needs the shipped image; `just test-emu-esp32v3-boot`"]
+fn the_single_core_prefix_is_unchanged() {
+    let Some(elf) = elf() else { return };
+    let mut m = Esp32V3Builder::new()
+        .boot_mode(BootMode::Direct)
+        .app(AppSource::Path(elf))
+        .strict(true)
+        .build()
+        .expect("builds");
+    let outcome = m.run_until(&StopCondition {
+        exit_on: Some("[INIT] I/O task spawned".to_string()),
+        ..StopCondition::after_micros(200_000)
+    });
+    assert!(matches!(outcome, Outcome::ExitMatched { .. }), "{outcome:?}");
+    assert!(m.core_stalled(1), "core 1 was never started in this run");
+    let bytes = m.uart0().bytes();
+    assert_eq!(bytes.len(), PREFIX_BYTES);
+    assert_eq!(format!("{:x}", Sha256::digest(&bytes)), PREFIX_SHA256);
+    assert_eq!(
+        (m.cycles(), m.instructions(), m.idle_skips()),
+        (PREFIX_CYCLES, PREFIX_INSTRUCTIONS, PREFIX_IDLE_SKIPS),
+        "the three counters origin/main's single-hart loop produced"
+    );
+    assert_eq!(m.core_instructions(1), 0);
+}
+
+/// What a dual-core run is, for the purpose of "the same run": the bytes,
+/// both harts' counters, both pcs, the skips, the parks, and a fingerprint
+/// of every RAM region.
+#[derive(Debug, PartialEq, Eq)]
+struct DualRun {
+    sha256: String,
+    bytes: usize,
+    cycles: u64,
+    instructions: (u64, u64),
+    pcs: (u32, u32),
+    idle_skips: u64,
+    wfi_ends: (u64, u64),
+    memory: Vec<u64>,
+    outcome: String,
+}
+
+impl DualRun {
+    fn of(m: &Machine, outcome: &Outcome) -> Self {
+        let bytes = m.uart0().bytes();
+        Self {
+            sha256: format!("{:x}", Sha256::digest(&bytes)),
+            bytes: bytes.len(),
+            cycles: m.cycles(),
+            instructions: (m.core_instructions(0), m.core_instructions(1)),
+            pcs: (m.harts[0].pc(), m.harts[1].pc()),
+            idle_skips: m.idle_skips(),
+            wfi_ends: (m.wfi_ends(0), m.wfi_ends(1)),
+            memory: m.snapshot().regions.iter().map(|r| fnv1a(r)).collect(),
+            outcome: format!("{outcome:?}"),
+        }
+    }
+}
+
+fn fnv1a(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, b| {
+        (h ^ u64::from(*b)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
+}
+
+/// The P8 gate script, so the run reaches the idle heartbeat and its reply.
+fn stop_all_script() -> lp_emu_esp_common::ScriptedSource {
+    lp_emu_esp_common::ScriptedSource::new().after(
+        "[INIT] I/O task spawned",
+        lp_emu_esp32v3::memmap::CYCLES_PER_US * 1_000,
+        b"M!{\"id\":1,\"msg\":\"stopAllProjects\"}\n",
+    )
+}
+
+/// The shipped image, direct-loaded onto the merged chip, strict, with core
+/// 1 released by the firmware, at `quantum` cycles per window, to the
+/// heartbeat reply or the deadline.
+///
+/// ⚠️ On the shipped image at the time of writing this run ends on the
+/// strict stop in `LpFs::read_file` that
+/// `docs/defects/2026-09-10-the-app-cores-rom-boot-rewrites-heap-region-0.md`
+/// describes, ~30k cycles after the release. The comparisons below are
+/// made on whatever the run was — two runs of a crash are still one run —
+/// and say so in `outcome`.
+fn dual(quantum: u64, elf: &std::path::Path, chip: &std::path::Path) -> (Machine, Outcome) {
+    let len = std::fs::metadata(chip).expect("the merged image").len() as u32;
+    let mut m = Esp32V3Builder::new()
+        .boot_mode(BootMode::Direct)
+        .app(AppSource::Path(elf.to_path_buf()))
+        .flash(FlashBacking::Copy(chip.to_path_buf()))
+        .flash_len(len)
+        .strict(true)
+        .core_quantum(quantum)
+        .uart0_script(stop_all_script())
+        .build()
+        .expect("builds");
+    let outcome = m.run_until(&StopCondition {
+        exit_on: Some("\"id\":1,\"msg\":\"stopAllProjects\"".to_string()),
+        ..StopCondition::after_micros(DIRECT_US)
+    });
+    (m, outcome)
+}
+
+/// Two runs at the default quantum are one run: the UART sha, the byte
+/// count, the clock, both instruction counts, both pcs, the skips, the
+/// parks and the memory fingerprint.
+#[test]
+#[ignore = "needs the shipped image and espflash; `just test-emu-esp32v3-boot`"]
+fn two_runs_identical_dual_core() {
+    let (Some(elf), Some(chip)) = (elf(), merged()) else {
+        return;
+    };
+    let (a, oa) = dual(CORE_QUANTUM_DEFAULT, &elf, &chip);
+    let (b, ob) = dual(CORE_QUANTUM_DEFAULT, &elf, &chip);
+    let (a, b) = (DualRun::of(&a, &oa), DualRun::of(&b, &ob));
+    println!("quantum {CORE_QUANTUM_DEFAULT}: {a:?}");
+    assert_eq!(a, b, "two runs at quantum {CORE_QUANTUM_DEFAULT} are one run");
+}
+
+/// The same at `--core-quantum 64`.
+#[test]
+#[ignore = "needs the shipped image and espflash; `just test-emu-esp32v3-boot`"]
+fn two_runs_identical_dual_core_quantum_64() {
+    let (Some(elf), Some(chip)) = (elf(), merged()) else {
+        return;
+    };
+    let (a, oa) = dual(64, &elf, &chip);
+    let (b, ob) = dual(64, &elf, &chip);
+    let (a, b) = (DualRun::of(&a, &oa), DualRun::of(&b, &ob));
+    println!("quantum 64: {a:?}");
+    assert_eq!(a, b, "two runs at quantum 64 are one run");
+}
+
+/// **The honest form of D3.** Two quanta are two interleavings, so their
+/// cycle counts may legitimately differ — the counters are **not** asserted
+/// equal here, and the test prints both. What may not differ is anything the
+/// guest can observe about itself: the console.
+///
+/// **One line is excepted, and named:** `[stack] heartbeat: high-water N B`
+/// is the main stack's deepest point, which is a measurement the firmware
+/// makes of *where an interrupt landed in its own call tree* — an
+/// interrupt-timing observable. The quantum moves interrupt arrival by up
+/// to one window, so the figure may move with it; on the diagnostic
+/// firmware M4 P1 ran to the heartbeat, quantum 256 read 16220 B and
+/// quantum 64 read 16348 B, and every other byte of the 2,799-byte console
+/// was equal. Silicon's own reading of the same figure differs from this
+/// machine's by 960 B for the same reason (`tests/boot_idle.rs`,
+/// `STACK_HIGH_WATER_GAP`). A quantum that changed **any other** byte would
+/// be a race the model is hiding, and this test would fail on it rather
+/// than widen.
+#[test]
+#[ignore = "needs the shipped image and espflash; `just test-emu-esp32v3-boot`"]
+fn the_two_quanta_agree_on_what_the_guest_sees() {
+    let (Some(elf), Some(chip)) = (elf(), merged()) else {
+        return;
+    };
+    let (a, oa) = dual(CORE_QUANTUM_DEFAULT, &elf, &chip);
+    let (b, ob) = dual(64, &elf, &chip);
+    println!(
+        "quantum {CORE_QUANTUM_DEFAULT}: cycles={} instructions={:?} idle={} {oa:?}",
+        a.cycles(),
+        (a.core_instructions(0), a.core_instructions(1)),
+        a.idle_skips()
+    );
+    println!(
+        "quantum 64: cycles={} instructions={:?} idle={} {ob:?}",
+        b.cycles(),
+        (b.core_instructions(0), b.core_instructions(1)),
+        b.idle_skips()
+    );
+    let mask = |text: String| -> String {
+        text.lines()
+            .map(|l| match l.find("[stack] heartbeat: high-water ") {
+                Some(at) => format!(
+                    "{}[stack] heartbeat: high-water <interrupt-timing>",
+                    &l[..at]
+                ),
+                None => l.to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let (ta, tb) = (mask(a.uart0().text()), mask(b.uart0().text()));
+    assert_eq!(
+        ta, tb,
+        "the two quanta printed different consoles (the stack high-water line excepted)"
     );
 }

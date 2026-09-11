@@ -40,30 +40,88 @@ exactly two ways:
 
 - the hart is `lp_xt_emu::mach::XtHart<SocBus>` rather than
   `lp_riscv_emu::mach::MachineHart<SocBus>`, and
-- **`harts` has two slots, and slot 1 is stalled for the whole of M3.**
+- **`harts` has two slots, and both run** — on one guest clock, a window
+  each, the deterministic quantum interleave (M4 P1, plan decision D3).
 
-### What "stalled" means here
+### Two cores
 
-The classic is dual-core. Slot 1 is *constructed* — it holds architectural
-state, it appears in a snapshot, `--probe` and the run report name it — and it
-is **never given a slice**, so it consumes no guest time. `Machine::run_until`
-asserts `stalled[1]` before every slice rather than assuming it.
+*Written for someone deciding whether to trust a result.*
 
-That is Q5's answer for this milestone, and it is a supported configuration of
-the firmware rather than a hole: `start_app_core` times out and the image takes
-its documented single-core fallback (`lp-fw/fw-esp32v3/src/main.rs:838-845`,
-which prints `[INIT] APP core unavailable; RMT ISR on PRO core (single-core
-semantics)`). **M4 is where core 1 runs**, with an interrupt matrix and the
-deterministic quantum interleave.
+**What the interleave is.** `Machine::run_until` hands every core that is
+neither held nor parked a window of at most `--core-quantum` cycles (default
+`CORE_QUANTUM_DEFAULT = 256`) per iteration, core 0 then core 1, each window
+opening at the same guest cycle. Scheduled events fire **between** windows,
+never inside one; the interrupt matrix is fed per hart between windows; the
+machine's clock is the furthest any hart has got, and a hart that ended a
+window early is brought up to it before its next one. A core that is
+**held** — by the machine (nothing has started it), by RTC_CNTL's stall key
+(`options0.sw_stall_appcpu_c0` + `sw_cpu_stall.sw_stall_appcpu_c1` reading
+`0x86`, which is what `with_app_core_stalled` writes around a flash write),
+or by DPORT's `appcpu_resetting` / `appcpu_runstall` / `!appcpu_clkgate_en` —
+costs nothing and its counters do not move. A core **parked in `waiti`**
+costs nothing either: it is not given a window until an interrupt is
+*taken*, which is what `waiti` means. When every running core is parked,
+guest time jumps to the earliest thing that can wake any of them — the next
+scheduled event, the host's next service, a scripted byte, or either hart's
+own `CCOMPARE` match. `instructions` in the run report is the sum over both
+cores, with each core's count beside it; `core 1:` in the report says which
+input is holding it, or `parked(waiti)`.
 
-On silicon a stalled core is held by three inputs, and `Machine::core_stalled`
-is the OR of them. **P5 wired the first two**:
-`RTC_CNTL.options0.sw_stall_appcpu_c0` plus
-`RTC_CNTL.sw_cpu_stall.sw_stall_appcpu_c1` — both halves of one key, which
-stalls only when `(c1 << 2) | c0 == 0x86` — computed by the block that owns
-them and published through `rtc_cntl::StallKey`, a shared cell the machine
-holds. **P4 adds the third**, `DPORT.appcpu_ctrl_c.appcpu_runstall`, into the
-same OR. The machine's own field still holds slot 1 for the whole of M3.
+**How core 1 starts.** The way the part does: `CpuControl::start_app_core`
+writes `appcpu_boot_addr`, sets the clock gate, clears the runstall and
+pulses `appcpu_resetting`; at the store that completes the release the
+machine puts slot 1 at the **architectural reset** — `_ResetVector`,
+`PS = 0x1F`, the ROM's `VECBASE`, `CPENABLE = 0xff` — and the mask ROM does
+the rest: its reset handler checks `PRID`, its `main`'s APP-core arm spins on
+`appcpu_boot_addr` (`0x400076dd`: `memw; l32i; beqz`) and `callx8`'s it.
+Nothing is seeded and nothing is hooked; `tests/dual_core.rs` reads the wait
+loop's own `DPORT+0x038` reads out of the bus trace. `machine.rs`'s module
+docs carry the disassembly.
+
+**What it can show:** a core that never starts; a handler bound into the
+wrong core's matrix; a doorbell (`cpu_intr_from_cpu_1`, source 25) that
+never arrives; a pusher that never wakes; a flash write that runs without
+stalling the other core (D4's cache-off stop is armed per *running* core);
+two cores' flash-MMU tables that disagree (ruling R4, below); and — found
+while bringing it up — a ROM reset path on core 1 that rewrites memory the
+firmware believed was its own.
+
+**What it cannot show, ever:** store-buffer races, cache-coherence windows,
+any ordering weaker than "hart 0's store is visible to hart 1's next load".
+One `SocBus`, one arena: cross-core visibility here is **stronger than
+silicon's**, deliberately, and stated (D3). A firmware bug that needs a weak
+memory model to reproduce will not reproduce here. Nor is the interleave
+silicon's scheduling: it is a deterministic function of the two instruction
+streams, the scripted input and the quantum, and it makes no timing claim.
+
+**The quantum.** A run parameter, never a tuned constant: `--core-quantum
+<cycles>`, default 256, printed in the run report (`quantum=256`), in
+`core_report()` and carried in the snapshot (a restore adopts the
+snapshot's). Two quanta are two interleavings and their cycle counts may
+legitimately differ; what may not differ is anything the guest can observe
+about itself — the console. One console line is a measurement of interrupt
+timing, `[stack] heartbeat: high-water N B`, and does move with the quantum
+(and with silicon, by 960 B); `tests/determinism.rs` says so and compares
+everything else byte for byte.
+
+**`CPENABLE` resets to `0xff` on this part** (`machine::CPENABLE_RESET`):
+measured at the app's first instruction on the desk board, with no writer of
+the register anywhere between reset and there — not the ROM, not the
+bootloader, not esp-hal. It matters on core 1: esp-hal's `float-save-restore`
+interrupt entry saves the FP state unconditionally, and with the ISA's
+generic `0` the first doorbell double-faulted.
+
+**Ruling R4 — one window behind both tables.** `SocBus` holds each flash
+window in one arena, so the fill serves the PRO core's MMU table and there is
+no per-core copy for the APP core's. The IDF bootloader and the direct loader
+program both tables from one image, so a fill on which the APP core's entry
+disagrees with the PRO core's is a **strict stop** (`FLASH-MMU DIVERGENCE`,
+exit 7) naming both entries and the page; `--app-mmu-divergence permit` keeps
+P7's warning and serves the PRO core's view.
+
+`Machine::core_stalled` is still the OR of the three inputs P4 and P5 wired;
+what changed is that the machine's own hold is released at the DPORT
+sequence instead of asserted forever.
 
 ### The reset state, and the boot state
 
@@ -372,12 +430,18 @@ backend's too. **M1 P6 landed them.**
 Both walls fell at once, and three things behind them turned out to be
 waiting:
 
-- the direct load takes the firmware's documented single-core fallback
-  (`main.rs:838-845`, Q5) and prints `[INIT] APP core unavailable; RMT ISR on
-  PRO core (single-core semantics)` where silicon prints `[INIT] RMT ISR on
-  APP core`. Heap region 3 is added in **both** arms, so the heap arithmetic
-  is the same either way — which is why G2 compares memory-class fields and
-  not log text;
+- through M3 the direct load took the firmware's documented single-core
+  fallback (`main.rs:838-845`, Q5) and printed `[INIT] APP core unavailable;
+  RMT ISR on PRO core (single-core semantics)` where silicon prints `[INIT]
+  RMT ISR on APP core`. Heap region 3 is added in **both** arms, so the heap
+  arithmetic is the same either way — which is why G2 compares memory-class
+  fields and not log text. **M4 P1 releases core 1** ("Two cores" above),
+  and the shipped image then dies ~30k cycles later in `LpFs::read_file`:
+  the ROM's APP-core reset path rewrites `0x3ffe0440..0x3ffe1320`, which the
+  firmware has already given to its allocator as heap region 0
+  (`docs/defects/2026-09-10-the-app-cores-rom-boot-rewrites-heap-region-0.md`,
+  **open**). The image-backed gates in `tests/boot_idle.rs` and
+  `tests/dual_core.rs` are red until it is fixed;
 - the ROM-up walk runs on through `Loaded app from partition`, `Disabling RNG
   early entropy source` and the `E boot: Image contains multiple DROM
   segments` line that the desk board prints on every boot of this image, and
@@ -923,6 +987,9 @@ door; the recipe exists from P1 so the door has one name for its whole life.
 --strict-bus            an access nothing claims is a STOP, not a zero
 --cache-off-fetch stop|permit
                         D4; stop is the default and what every gate run uses
+--core-quantum <cycles> the upper bound on one core's window (D3) [256]
+--app-mmu-divergence stop|permit
+                        R4; stop is the default and what every gate run uses
 --time-grade t1         the only grade this machine defines
 --timeout <5s|1500ms|900us>   EMULATED time
 --wall-timeout <s>      the host-clock safety net; exits 4
@@ -1087,7 +1154,8 @@ it fixed for P4–P8, is
 | `src/periph/*.rs` (unit) | every accept block reads the PAC's resets except the listed deviation, and every listed deviation is real and has a reason; the eFuse read command reading set exactly once and then clearing itself, and three reloads comparing equal; RTC_CNTL's stall pair, its RWDT gate and its reported-not-performed software reset; the analog master answering the register asked for rather than the last one written |
 
 | `tests/boot_idle.rs` | **The hello, and G2 (a).** With the image: the `[INIT]` chain comes out of the **host stream** — 543 bytes, sha256 `ea8bae30…`, the same count and the same digest P3 measured going *into* the accept block — with zero unmapped accesses and no strict stop; the line order held against L0's capture; `--exit-on` stopping at a complete line. And both boot paths run to the **idle heartbeat**: the `[stack] heartbeat:`/`[MEM]`/`[JIT]` triple, the Q5 fallback line, the unsolicited wire hello, the answer to a scripted request, and `unmapped = 0` on each — plus the two paths' memory figures asserted equal to **each other** (not to silicon: different image bytes, ruling R7) |
-| `tests/determinism.rs` | The plan's inviolable invariant. Two runs of each boot path agree on the UART sha, the byte count, the **cycle count**, the **instruction count**, the pc and the idle skips; a snapshot taken mid-run and restored into a **fresh** machine produces the same second half as the run that was never interrupted; and the state that is not a register — the flash MMU tables, the cache-enable bit, both halves of the stall key, the interrupt matrix, core 1's hold, the DBREAK slots — comes back through the struct |
+| `tests/determinism.rs` | The plan's inviolable invariant. Two runs of each boot path agree on the UART sha, the byte count, the **cycle count**, the **instruction count**, the pc and the idle skips; a snapshot taken mid-run and restored into a **fresh** machine produces the same second half as the run that was never interrupted; and the state that is not a register — the flash MMU tables, the cache-enable bit, both halves of the stall key, the interrupt matrix, core 1's hold, the DBREAK slots — comes back through the struct. **M4 P1**: the single-core prefix run's three counters pinned to `origin/main`'s; two dual-core runs at quantum 256 and two at 64 each one run (both harts' counters, both pcs, the parks, a memory fingerprint); the two quanta's consoles equal byte for byte except the stack high-water figure, which the test names as interrupt timing |
+| `tests/dual_core.rs` | **M4 P1's gates.** A hand-built fixture with no firmware: core 0 performs esp-hal's `start_core1` DPORT sequence, core 1 comes up **through the mask ROM's own reset path and wait loop** (its two reads of `appcpu_boot_addr` read out of the bus trace), routes the doorbell into its own matrix and parks in `waiti` — costing nothing while parked — and core 0's `cpu_intr_from_cpu_1` wakes it into `_Level2InterruptVector` with `EPC2` naming the instruction after the `waiti`; the release is a reset (`CPENABLE = 0xff`, counters from the clock). Ruling R4 on a synthetic table disagreement: the stop names entry, page and both mappings, exits 7, and `permit` continues. **With the image**: `[INIT] RMT ISR on APP core` on both boot paths with `unmapped = 0`, the binds read back out of `core_1_intr_map` with `core_0_intr_map[RMT] = 16`, the pusher parked in `idle_once` — **red on the shipped image until the open defect below is fixed** |
 | `src/periph/gpio.rs`, `src/periph/io_mux.rs` (unit) | A plain `Output` pin drive reaching a pad and `enable` taking it back off the wire; `256` being the GPIO selector and `128` an ordinary signal; bank 1 carrying pads 32..39; the input matrix routing `U0RXD_IN` and refusing the two constants by name; `in_` served only through `fun_ie`; the PRO core's enable at `pin[n]` bit 15 and the APP core's at 13; **no peripheral signal reaching a pad**; the IO_MUX pad map walked against the generated table's own names, and asserted *not* to be in pad order |
 | `tests/uart_socket.rs` | The view **through the bus**, at the addresses a guest uses: scripted bytes arriving at the cycles the file names and reading back in order; an `int_clr` unable to clear `rxfifo_full` while it holds; the receive timeout refusing to clear until the FIFO is empty (the classic's third category). And the **cable** at machine level: the reboot on the *release* of EN and not on the assert, `reset` and `download-mode` one reboot each with the right strap, a release without `--reboot-on-reset` ending the run and naming the strap, and `attach`/`open` moving no chip state. With the image: a cable reset of the running app, one reboot, and **both boots in one console log** — 1,086 bytes, two identical halves |
 

@@ -181,11 +181,18 @@ fn exit_on_stops_at_a_complete_line() {
 /// prints them.
 const HEARTBEAT: &[&str] = &["[stack] heartbeat: ", "[MEM] free=", "[JIT] used="];
 
-/// The Q5 fallback line. Silicon prints `[INIT] RMT ISR on APP core`; this
-/// machine is single-core and the firmware takes its documented other arm
-/// (`lp-fw/fw-esp32v3/src/main.rs:838-845`). Heap region 3 is added in
-/// **both** arms (`main.rs:846-855`), so the heap arithmetic is unaffected —
-/// which is why G2 compares memory-class fields and not log text.
+/// The line silicon prints, and — **since M4 P1** — the line this machine
+/// prints: core 1 is released by DPORT, boots through the mask ROM's own
+/// reset path and binds the RMT ISR in its own matrix
+/// (`lp-fw/fw-esp32v3/src/main.rs:838-845`). Through M3 the machine held
+/// core 1 (Q5) and the firmware took its documented other arm,
+/// [`SINGLE_CORE_LINE`]; P8's gate asserted that arm, and this is the
+/// correction. Heap region 3 is added in **both** arms (`main.rs:846-855`),
+/// so the heap arithmetic is unaffected either way.
+const DUAL_CORE_LINE: &str = "[INIT] RMT ISR on APP core";
+
+/// The Q5 fallback arm — what this machine printed through M3, and what a
+/// run with core 1 running must **not** print.
 const SINGLE_CORE_LINE: &str = "[INIT] APP core unavailable; RMT ISR on PRO core";
 
 /// ⚠️ **The heartbeat triple is not idle-emitted, and P8 is where that was
@@ -255,8 +262,9 @@ fn assert_reached_the_heartbeat(machine: &Machine, outcome: &Outcome, path: &str
         assert!(text.contains(line), "{path}: no `{line}` in:\n{text}");
     }
     assert!(
-        text.contains(SINGLE_CORE_LINE),
-        "{path}: the Q5 fallback arm, not silicon's `RMT ISR on APP core`:\n{text}"
+        text.contains(DUAL_CORE_LINE) && !text.contains(SINGLE_CORE_LINE),
+        "{path}: core 1 runs (M4 P1), so the firmware prints silicon's `{DUAL_CORE_LINE}` and \
+         not the Q5 fallback:\n{text}"
     );
     // ⚠️ **Not** `[RECOVERY] boot complete (first frame served)`, which the
     // server loop prints on its first successful tick. That line is a
@@ -509,6 +517,16 @@ const HEAP_USED_GAP: u64 = 84;
 /// Q5 again is the suspect and again unproven; note that the naive reading of
 /// it points the wrong way (an RMT ISR moved onto the PRO core should make
 /// *this* machine's main stack deeper, not shallower). Pinned, not tolerated.
+///
+/// ⚠️ **M4 P1 could not re-measure either gap.** With core 1 running, the
+/// shipped image dies in `LpFs::read_file` ~30k cycles after the release
+/// (`docs/defects/2026-09-10-the-app-cores-rom-boot-rewrites-heap-region-0.md`),
+/// before any heartbeat — so both constants still carry the single-core
+/// fallback's figures, this test is red on the shipped image until the
+/// defect is fixed, and the first green run after that fix is the one that
+/// re-pins them. A diagnostic firmware with ESP-IDF's region ordering read
+/// `high-water 16268 B` and `free=223268 used=18284` on its second boot,
+/// which is not the shipped image and is quoted in the P1 report, not here.
 const STACK_HIGH_WATER_GAP: u64 = 960;
 
 /// **G2 (e).** Every memory-class field of the idle heartbeat, this machine
@@ -672,11 +690,12 @@ fn the_heartbeats_memory_figures_are_the_desk_boards() {
         "the high-water gap is the measured one; see STACK_HIGH_WATER_GAP"
     );
 
-    // The Q5 arm, named here too so a reader of a failure knows which of the
-    // two firmwares' supported configurations this machine was running.
+    // Which of the firmware's two supported configurations this machine was
+    // running, named so a reader of a failure knows. Since M4 P1 it is the
+    // dual-core one, the same as the desk board's.
     assert!(
-        emulated.contains(SINGLE_CORE_LINE),
-        "this machine is single-core and takes the Q5 fallback:\n{emulated}"
+        emulated.contains(DUAL_CORE_LINE),
+        "this machine runs core 1 (M4 P1) and binds the RMT ISR to it:\n{emulated}"
     );
     assert!(
         silicon.contains("[INIT] RMT ISR on APP core"),
