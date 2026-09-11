@@ -380,7 +380,9 @@ impl BlockProfile {
         self.retired += u64::from(retired);
         if let Some(b) = self.boundary.as_mut() {
             let inside = b.pcs.contains(&pc)
-                || b.ranges.iter().any(|&(base, len)| pc.wrapping_sub(base) < len);
+                || b.ranges
+                    .iter()
+                    .any(|&(base, len)| pc.wrapping_sub(base) < len);
             if inside {
                 b.inside += 1;
                 b.inside_retired += u64::from(retired);

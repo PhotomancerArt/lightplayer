@@ -147,7 +147,12 @@ pub fn discovered_instruction_pcs(bus: &SocBus, seeds: &[u32]) -> BTreeSet<u32> 
 ///
 /// Pure — it reads the arena and touches no peripheral.
 #[must_use]
-pub fn walk(bus: &SocBus, seeds: &[u32], budget: usize, known: &BTreeSet<u32>) -> (Discovered, u128) {
+pub fn walk(
+    bus: &SocBus,
+    seeds: &[u32],
+    budget: usize,
+    known: &BTreeSet<u32>,
+) -> (Discovered, u128) {
     let spans = bus.region_spans();
     let base = bus.guest_arena_base();
     let arena = bus.guest_arena();
@@ -306,7 +311,9 @@ fn split_by_writability(bus: &SocBus, set: &BlockSet) -> Vec<(BlockSet, bool)> {
     let spans = bus.region_spans();
     let read_only = |pc: u32, len: u32| {
         spans.iter().any(|&(base, l, writable)| {
-            !writable && pc >= base && u64::from(pc) + u64::from(len) <= u64::from(base) + u64::from(l)
+            !writable
+                && pc >= base
+                && u64::from(pc) + u64::from(len) <= u64::from(base) + u64::from(l)
         })
     };
     let (mut ro, mut rw) = (Vec::new(), Vec::new());
@@ -1893,7 +1900,9 @@ impl TranslatedCore<SocBus> for JitCore {
             self.timing.regs_ns += t.elapsed().as_nanos() as u64;
         }
         let t_enter = inner.map(|_| std::time::Instant::now());
-        let exit = self.mods[module].core.enter(entry, cycle, instret, end, watch);
+        let exit = self.mods[module]
+            .core
+            .enter(entry, cycle, instret, end, watch);
         if let Some(t) = t_enter {
             self.timing.enter_ns += t.elapsed().as_nanos() as u64;
         }

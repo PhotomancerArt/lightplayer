@@ -1962,6 +1962,7 @@ impl Esp32C6Builder {
             jit_published_seeds: Vec::new(),
             jit_code_shadow: Vec::new(),
             jit_code_spans: Vec::new(),
+            #[cfg(feature = "jit")]
             jit_installed_starts: BTreeSet::new(),
             jit_split_events: Vec::new(),
             power_on: None,
@@ -2313,6 +2314,7 @@ pub struct Esp32C6Machine {
     /// answers, so a second walk neither claims nor follows a start that is in
     /// here. It is rebuilt from scratch whenever a whole-module retire
     /// replaces everything, and grown by each incremental install.
+    #[cfg(feature = "jit")]
     jit_installed_starts: BTreeSet<u32>,
     /// M7b P1 step 1, off unless `LP_EMU_JIT_SPLIT_CENSUS` is set: what the
     /// incremental walk **would** find at each `fence.i`, without emitting
@@ -2998,6 +3000,7 @@ impl Esp32C6Machine {
     /// fall-through from claimed code straight into unclaimed — is not
     /// counted. Every control transfer ends a block, so that is the only case,
     /// and it is bounded by the number of blocks that straddle the boundary.
+    #[cfg(feature = "jit")]
     #[must_use]
     fn split_census_on() -> bool {
         static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();

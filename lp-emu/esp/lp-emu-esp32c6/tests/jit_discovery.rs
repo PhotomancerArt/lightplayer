@@ -484,8 +484,7 @@ fn a_fence_i_that_publishes_new_code_keeps_the_read_only_module() {
     let mut m = build();
     m.translate_from_seeds(&[rom_at, ram_sub], false, 256)
         .unwrap();
-    let before = m
-        .harts[0]
+    let before = m.harts[0]
         .translated_core_report()
         .expect("a core is installed");
     assert!(
@@ -507,8 +506,7 @@ fn a_fence_i_that_publishes_new_code_keeps_the_read_only_module() {
         1,
         "and it took the incremental path: the read-only module was kept"
     );
-    let after = m
-        .harts[0]
+    let after = m.harts[0]
         .translated_core_report()
         .expect("a core is installed");
     assert!(
