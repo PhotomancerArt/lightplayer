@@ -1,0 +1,31 @@
+[package]
+name = "lp-emu-esp32s3"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+# MIT as a unit with the rest of `lp-emu/`, NOT the workspace's AGPL.
+# See lp-emu/LICENSE-MIT and `just lint-emu-fence`.
+license = "MIT"
+description = "The ESP32-S3 (LX7) machine: memory map, mask-ROM loader, direct load, scheduler loop, snapshot, CLI"
+
+[lints]
+workspace = true
+
+[dependencies]
+lp-emu-core = { path = "../../lp-emu-core", features = ["std"] }
+lp-emu-esp-common = { path = "../lp-emu-esp-common" }
+# The Xtensa hart. Declared here from the crate's first commit even though P01
+# constructs none: the dependency edge is what makes P03's `machine.rs` an
+# addition rather than a manifest change nobody reviewed. `lp-xt-emu` is
+# inside the MIT fence (`lp-emu/lp-xt-emu`), so this edge costs the fence
+# nothing. The classic's manifest says the same thing about its own P2.
+lp-xt-emu = { path = "../../lp-xt-emu" }
+# `ChannelTiming` / `ColorOrder`: the WS281x wire's own numbers, shared with
+# the firmware that drives it so the emulator's decoder and the device's
+# encoder cannot drift apart. `lp-emu-esp-common`'s decoder already takes
+# them; this edge is so the machine can name a strip (`--strip-timing`,
+# `--strip-order`) without re-declaring either enum. Both other machines have
+# the same one.
+lp-ws281x = { path = "../../../lp-fw/lp-ws281x", default-features = false }
+log = { workspace = true }
+env_logger = { workspace = true }
