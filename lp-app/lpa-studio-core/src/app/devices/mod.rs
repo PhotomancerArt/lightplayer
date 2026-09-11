@@ -102,8 +102,8 @@ pub use device_push::{
     first_bundled_example_id, push_offer,
 };
 pub use device_records::{
-    SIM_TRANSPORT, auto_record_name, record_from_registry_row, registry_row_from_record,
-    transport_label_for_endpoint,
+    EMU_TRANSPORT, SIM_TRANSPORT, auto_record_name, record_from_registry_row,
+    registry_row_from_record, transport_label_for_endpoint,
 };
 pub use device_roster::{
     DeviceRoster, DeviceRosterView, JournalLine, RememberedView, RosterSplit, split_roster,
@@ -118,8 +118,9 @@ pub use runtime_band::UiRuntimeBand;
 pub use shared_link_client_io::{ConversationInbox, SharedLinkClientIo};
 pub use sim_create_op::{SimCreateOp, sim_device_name};
 pub use sim_record::{
-    NewSimRecord, SimRecord, delete_sim_record, mint_sim_identity, new_sim_record, read_sim_record,
-    sim_endpoint, sim_link_info, uid_from_sim_endpoint, write_sim_record,
+    NewSimRecord, RuntimeKind, SimRecord, delete_sim_record, emu_endpoint, emu_link_info,
+    mint_sim_identity, new_sim_record, read_sim_record, sim_endpoint, sim_link_info,
+    uid_from_emu_endpoint, uid_from_sim_endpoint, write_sim_record,
 };
 pub use sim_transport::{
     SimBacking, SimDeviceTransport, SimLinkSource, SimRuntimeControl, SimSession, SimTier,
