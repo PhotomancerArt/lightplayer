@@ -838,20 +838,6 @@ impl<'a> Emitter<'a> {
             StoreKind::H => I::I32Store16(arena),
             StoreKind::W => I::I32Store(arena),
         });
-        // The bus never saw this store, so the only thing polling point (c)
-        // can have to do is the obligation an earlier MMIO load left
-        // ([`FLAG_PENDING`]). That one needs its own crossing, because there
-        // is no store call to fuse into.
-        self.i(I::LocalGet(L_PENDING));
-        self.i(I::If(BlockType::Empty));
-        self.extra += 1;
-        self.i(I::I32Const(0));
-        self.i(I::LocalSet(L_PENDING));
-        self.post_store_state(pc, inst_width, cost, cycles, retired);
-        self.i(I::Call(F_POLL));
-        self.unpack_poll();
-        self.extra -= 1;
-        self.i(I::End);
         self.i(I::Else);
         self.i(I::LocalGet(L_PERM_LO));
         self.i(I::LocalGet(L_PERM_HI));
@@ -894,34 +880,81 @@ impl<'a> Emitter<'a> {
         self.i(I::End);
         self.extra -= 1;
 
-        // What the polling point said. [`MMIO_OK`] is zero and is the
-        // overwhelming case — the store retired, the hart did not move, and
-        // the stay carries on inside the same block, exactly as an
-        // interpreted block does after a store that raised nothing.
+        // Polling point (c)'s tail, and the **only** thing the common path
+        // pays for it: one `or` and one never-taken branch, which is a shape
+        // cheaper than the pre-P2 `status == MMIO_LEAVE_AFTER || pending`
+        // test it replaces. Everything else lives inside, emitted once per
+        // store and executed almost never — which matters twice, because
+        // emitted bytes are the module's compile time as well as its size.
+        //
+        // [`MMIO_OK`] is zero and is the overwhelming case: the store retired,
+        // the hart did not move, and the stay carries on inside the same
+        // block, exactly as an interpreted block does after a store that
+        // raised nothing.
+        self.i(I::LocalGet(L_STATUS));
+        self.i(I::LocalGet(L_PENDING));
+        self.i(I::I32Or);
+        self.i(I::If(BlockType::Empty));
+        self.extra += 1;
+
+        // The bus never saw an inline RAM store, so the only thing polling
+        // point (c) can have to do there is the obligation an earlier MMIO
+        // load left ([`FLAG_PENDING`]). That one needs its own crossing,
+        // because there is no store call to fuse into. A store the bus *did*
+        // see has already cleared this, so it cannot poll twice.
+        self.i(I::LocalGet(L_PENDING));
+        self.i(I::If(BlockType::Empty));
+        self.extra += 1;
+        self.i(I::I32Const(0));
+        self.i(I::LocalSet(L_PENDING));
+        self.post_store_state(pc, inst_width, cost, cycles, retired);
+        self.i(I::Call(F_POLL));
+        self.unpack_poll();
+        self.extra -= 1;
+        self.i(I::End);
+
+        // What the polling point said.
         self.i(I::LocalGet(L_STATUS));
         self.i(I::If(BlockType::Empty));
         self.extra += 1;
+        self.exit_after_poll(k, cycles + cost, retired + 1);
+        self.extra -= 1;
+        self.i(I::End);
+
+        self.extra -= 1;
+        self.i(I::End);
+    }
+
+    /// Leave because polling point (c) said so, at the pc it left the hart on
+    /// ([`L_ADDR`]).
+    ///
+    /// One exit rather than two, because the two differ only in the flag and
+    /// the reason: [`MMIO_SLICE_ENDED`] is the bus taking the slice, and
+    /// anything else is the hart having moved — a delivered interrupt's
+    /// vector, or a bus that stopped claiming `fetch_is_pure`. The latter
+    /// carries **no** flag: the polling point has already run, and
+    /// `run_blocks`'s own `fetch_is_pure` check after every `core.run` is what
+    /// answers the second case.
+    fn exit_after_poll(&mut self, k: usize, cycles: u64, retired: u32) {
         self.i(I::LocalGet(L_STATUS));
         self.i(I::I32Const(MMIO_SLICE_ENDED as i32));
         self.i(I::I32Eq);
-        self.i(I::If(BlockType::Empty));
-        self.extra += 1;
-        self.exit(
-            k,
-            None,
-            cycles + cost,
-            retired + 1,
-            FLAG_SLICE_ENDED,
-            why::SLICE_ENDED,
-        );
-        self.extra -= 1;
-        self.i(I::End);
-        // The poll moved the hart: a delivered interrupt's vector, or a bus
-        // that stopped claiming `fetch_is_pure`. Leave where it left us, with
-        // no flag — the polling point has already run.
-        self.exit(k, None, cycles + cost, retired + 1, 0, why::AFTER_STORE);
-        self.extra -= 1;
-        self.i(I::End);
+        self.i(I::LocalSet(L_T));
+        self.i(I::I32Const(why::SLICE_ENDED));
+        self.i(I::I32Const(why::AFTER_STORE));
+        self.i(I::LocalGet(L_T));
+        self.i(I::Select);
+        self.i(I::LocalSet(L_WHY));
+        self.i(I::I32Const(FLAG_SLICE_ENDED));
+        self.i(I::I32Const(0));
+        self.i(I::LocalGet(L_T));
+        self.i(I::Select);
+        self.i(I::LocalSet(L_FLAGS));
+        self.add_cycles(cycles);
+        self.add_retired(retired);
+        self.i(I::LocalGet(L_ADDR));
+        self.i(I::LocalSet(L_EXIT_PC));
+        self.i(I::Br(self.exit_depth(k)));
     }
 
     /// Push the three post-store arguments every polling point takes: the pc
