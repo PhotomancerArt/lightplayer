@@ -441,7 +441,7 @@ fn the_two_paths_report_the_same_memory_figures() {
     );
     let (hw_direct, hw_rom_up) = (number(&a[0], "high-water "), number(&b[0], "high-water "));
     assert_eq!(
-        hw_rom_up - hw_direct,
+        hw_rom_up as i64 - hw_direct as i64,
         PATH_HIGH_WATER_GAP,
         "the cross-path high-water gap is the measured one; see PATH_HIGH_WATER_GAP"
     );
@@ -598,7 +598,28 @@ const HEAP_USED_GAP: u64 = 84;
 /// Still unexplained, still pinned, still not tolerated: a change in either
 /// direction is a finding. With Q5 spent, the next suspect has to come from
 /// somewhere else.
-const STACK_HIGH_WATER_GAP: u64 = 752;
+///
+/// ⚠️ **Re-measured on 2026-09-11 after M4 P3b, and it moved again: 752 →
+/// 640.** P3b changed nothing about memory and everything about *when an
+/// interrupt lands*: the hart's poll point (c) had been zeroing its
+/// asserted-line mask on every MMIO store, so a line raised by a store was
+/// taken at the next slice boundary rather than at the next instruction
+/// (README, "The link, after the boot settles"). With interrupts delivered
+/// where silicon delivers them, this machine's main stack goes 112 B deeper
+/// and the gap to the desk board narrows by the same 112 — the direction a
+/// latency fix should move it, and the first of these re-measurements with
+/// a cause attached:
+///
+/// ```text
+/// silicon   [stack] heartbeat: high-water 16972 B of 45280 B (28308 B headroom)
+/// emulator  [stack] heartbeat: high-water 16332 B of 45280 B (28948 B headroom)
+/// ```
+///
+/// `[MEM]` and `[JIT]` did not move by a byte (`free=223268 used=18284
+/// largest_free=108526` before and after), which is what the sentence above
+/// — "84 B of placement rather than of accounting" — predicted for a change
+/// that touches no allocation. The remaining 640 B is still unexplained.
+const STACK_HIGH_WATER_GAP: u64 = 640;
 
 /// **The two boot paths' own high-water gap: the ROM-up boot goes 160 B
 /// deeper than the direct load.**
@@ -619,7 +640,17 @@ const STACK_HIGH_WATER_GAP: u64 = 752;
 ///
 /// Pinned rather than tolerated, like its two neighbours: a change in
 /// either direction is a finding.
-const PATH_HIGH_WATER_GAP: u64 = 160;
+///
+/// ⚠️ **Re-measured on 2026-09-11 after M4 P3b: 160 → −64, and the sign
+/// flipped.** `direct 16460`, `rom-up 16396`: the direct load now goes
+/// deeper, not the ROM-up boot. Same cause as [`STACK_HIGH_WATER_GAP`]'s
+/// move — interrupts are taken at the instruction after the MMIO store that
+/// raised them rather than at the next slice boundary, so where in the
+/// pacer's phase each path's heartbeat lands has changed. Signed from here
+/// on, because a pin that could only express one sign was hiding the
+/// direction. The rest of the triple is still identical between the paths
+/// to the byte (`free=223096 used=18456 largest_free=106494 retry_saves=0`).
+const PATH_HIGH_WATER_GAP: i64 = -64;
 
 /// **G2 (e).** Every memory-class field of the idle heartbeat, this machine
 /// against the desk board, on the same image and the same request.

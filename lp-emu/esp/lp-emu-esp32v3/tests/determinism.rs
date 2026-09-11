@@ -291,8 +291,18 @@ fn the_snapshot_carries_the_state_that_is_not_a_register() {
 /// before the firmware starts core 1, so it is the single-core identity the
 /// phase file asks for — byte-identical output, the same cycle count, the
 /// same instruction count and the same idle-skip count.
+///
+/// ⚠️ **M4 P3b moved the instruction count by six: 3,245,157 → 3,245,151.**
+/// Not the loop — the hart. Poll point (c) had been zeroing the hart's
+/// asserted-line mask on every MMIO store, so a line raised by a store was
+/// taken at the next slice boundary instead of at the next instruction
+/// (README, "The link, after the boot settles"). With interrupts taken where
+/// silicon takes them the same prefix retires six fewer instructions on the
+/// way to the same 543 bytes at the same cycle: the bytes, the sha, the
+/// cycle count and the skip count did not move. Re-pinned with that cause
+/// attached; a further change here is a finding again.
 const PREFIX_CYCLES: u64 = 3_245_171;
-const PREFIX_INSTRUCTIONS: u64 = 3_245_157;
+const PREFIX_INSTRUCTIONS: u64 = 3_245_151;
 const PREFIX_IDLE_SKIPS: u64 = 0;
 const PREFIX_BYTES: usize = 543;
 const PREFIX_SHA256: &str = "ea8bae305953ef613f68a97fb84919378f33b37eb5623dcb970e8dce2b7343e7";
