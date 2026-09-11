@@ -73,14 +73,22 @@ const DONE: &str = "[rmt-chase] === DONE ===";
 const GATE_US: u64 = 20_000_000;
 
 /// The prefix the determinism and snapshot gates run, in emulated
-/// microseconds. **Measured, not assumed**: the first frame starts at
-/// 8,825.175 µs and runs 7,679.150 µs, and the period is 18,067 µs — so 60 ms
-/// holds three frames and the start of a fourth.
+/// microseconds. **Measured, not assumed**: on a clean-tree build of this
+/// image the first frame starts at 8,836.046 µs and runs 7,679.150 µs, and
+/// the period is 18,067 µs — so 60 ms holds three frames and the start of a
+/// fourth.
 const PREFIX_US: u64 = 60_000;
 
 /// A cycle inside the **first** frame, for the snapshot gate: between its
-/// start at 8,825.175 µs and its end at 16,504.325 µs. The assertion in that
-/// test is what proves it, not this arithmetic.
+/// start at 8,836.046 µs and its end at 16,515.196 µs.
+///
+/// ⚠️ **The assertion in that test is what proves the point, not this
+/// arithmetic** — and it has to be, because the start moves with the *length*
+/// of what the guest prints before it. A dirty-tree build stamps
+/// `"firmware_dirty":true` into the in-band header, one byte shorter than
+/// `false`, and the first frame then starts one UART symbol (2,610 cycles,
+/// 10.875 µs) earlier. That is the UART drain being modelled at baud in
+/// emulated time, and it is why no gate here is a microsecond.
 const MID_FRAME_US: u64 = 12_000;
 
 /// Host-side safety net, so a wedged run fails the suite instead of hanging
