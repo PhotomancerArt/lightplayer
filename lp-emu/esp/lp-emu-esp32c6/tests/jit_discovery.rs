@@ -291,9 +291,18 @@ fn a_fence_i_republishes_the_code_the_guest_wrote() {
     let report = m.harts[0]
         .translated_core_report()
         .expect("a core is installed");
+    // P5 made the `fence.i` response a **retranslation**: the publish does not
+    // invalidate blocks inside the core that saw it, it builds a replacement
+    // core from the republished bytes and installs that one over it. So the
+    // core still installed here is the *new* one, and a new core has nothing
+    // to have invalidated. The two assertions above are what carries the
+    // meaning this one used to: `jit_retranslations() == 1` says the publish
+    // reached the translator, and `t0 == 11` says the guest ran the
+    // instruction it published rather than the one it was translated from.
     assert!(
-        report.contains("invalidations 1"),
-        "the publish reached the core: {report}"
+        report.contains("invalidations 0 (dropped 0 blocks)"),
+        "the core installed after a publish is the replacement, which has \
+         invalidated nothing: {report}"
     );
 }
 
