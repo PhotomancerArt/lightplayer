@@ -144,15 +144,17 @@ pub enum CatalogOp {
     ForgetRegisteredDevice {
         uid: String,
     },
-    /// Create a sim: its registry row and its `/device-sims/<uid>.json`
-    /// sidecar, in ONE settle.
+    /// Create a runtime device — a sim or an emu (D1/D6): its registry row
+    /// and its `/device-sims/<uid>.json` sidecar, in ONE settle.
     ///
-    /// One op rather than two because a half-created sim is not a state
+    /// One op rather than two because a half-created runtime is not a state
     /// worth having: a row with no sidecar is a board that cannot be
-    /// started, and a sidecar with no row is a device nothing lists. The
-    /// bytes arrive already encoded, so the host stays codec-free like the
-    /// frame sidecar's write.
-    CreateSimDevice {
+    /// started, and a sidecar with no row is a device nothing lists. It is
+    /// also one op for BOTH kinds: the sidecar's own `kind` field says
+    /// which, so there is nothing here for a second op to do. The bytes
+    /// arrive already encoded, so the host stays codec-free like the frame
+    /// sidecar's write.
+    CreateRuntimeDevice {
         device: Box<crate::app::places::RegisteredDevice>,
         sidecar_bytes: Vec<u8>,
     },
@@ -457,7 +459,7 @@ pub fn apply_catalog_op(
                 .map_err(|error| LibraryHostError::Host(error.to_string()))?;
             None
         }
-        CatalogOp::CreateSimDevice {
+        CatalogOp::CreateRuntimeDevice {
             device,
             sidecar_bytes,
         } => {

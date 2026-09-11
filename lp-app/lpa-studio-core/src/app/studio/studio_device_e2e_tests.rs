@@ -672,11 +672,12 @@ impl DeviceBench {
         bench.sim_restarts = restarts;
         bench.controller.set_device_sim_transport(sims);
 
-        let uid = drive(
-            bench
-                .controller
-                .create_sim_record(target, None, &SIM_RANDOM),
-        )
+        let uid = drive(bench.controller.create_runtime_record(
+            target,
+            None,
+            &SIM_RANDOM,
+            crate::RuntimeKind::Sim,
+        ))
         .expect("a sim is created");
         bench.settle_library();
         (bench, tasks, uid)
@@ -3664,11 +3665,10 @@ fn the_picker_mints_a_sim_of_the_picked_target_and_powers_it_on() {
 
     assert!(bench.registry().is_empty(), "nothing before the pick");
 
-    drive(
-        bench
-            .controller
-            .dispatch(crate::SimCreateOp::action_for(SIM_TARGET)),
-    )
+    drive(bench.controller.dispatch(crate::SimCreateOp::action_for(
+        SIM_TARGET,
+        crate::Backing::Sim,
+    )))
     .expect("the pick starts a device");
 
     let rows = bench.registry();
@@ -3718,11 +3718,10 @@ fn a_target_with_no_hardware_manifest_is_refused_rather_than_swapped() {
     let device = sim_light_player();
     let (mut bench, _tasks) = DeviceBench::build(&device, "unused-serial-port", false, false);
 
-    let error = drive(
-        bench
-            .controller
-            .dispatch(crate::SimCreateOp::action_for("quinled/dig-uno")),
-    )
+    let error = drive(bench.controller.dispatch(crate::SimCreateOp::action_for(
+        "quinled/dig-uno",
+        crate::Backing::Sim,
+    )))
     .expect_err("a target nothing can wear is refused");
 
     assert!(
@@ -4080,6 +4079,7 @@ fn open_package_cold(bench: &mut DeviceBench, tasks: &TaskPool, uid: &str) {
         crate::ControllerId::new(crate::HOME_NODE_ID),
         crate::HomeOp::OpenPackage {
             key: uid.to_string(),
+            prefer: None,
         },
     )))
     .expect("the gallery's open never fails loudly");
@@ -4381,7 +4381,10 @@ fn a_sim_that_never_says_hello_fails_the_open_instead_of_holding_it() {
 
     let outcome = drive(bench.controller.dispatch(UiAction::from_op(
         crate::ControllerId::new(crate::HOME_NODE_ID),
-        crate::HomeOp::OpenPackage { key: key.clone() },
+        crate::HomeOp::OpenPackage {
+            key: key.clone(),
+            prefer: None,
+        },
     )));
     assert!(
         outcome.is_ok(),
@@ -4439,7 +4442,7 @@ fn a_sim_that_never_says_hello_fails_the_open_instead_of_holding_it() {
         failure.retry,
         UiAction::from_op(
             crate::ControllerId::new(crate::HOME_NODE_ID),
-            crate::HomeOp::OpenPackage { key },
+            crate::HomeOp::OpenPackage { key, prefer: None },
         ),
         "Retry is the same open"
     );
@@ -4506,7 +4509,10 @@ fn opening_a_project_for_another_target_powers_the_first_sim_off_and_keeps_it() 
     drive(bench.controller.settle_library());
     let _ = drive(bench.controller.dispatch(UiAction::from_op(
         crate::ControllerId::new(crate::HOME_NODE_ID),
-        crate::HomeOp::OpenPackage { key: other },
+        crate::HomeOp::OpenPackage {
+            key: other,
+            prefer: None,
+        },
     )));
     for _ in 0..20 {
         bench.step(&tasks);
@@ -4568,7 +4574,10 @@ fn opening_a_project_under_a_board_lens_never_touches_the_board() {
     drive(bench.controller.settle_library());
     let _ = drive(bench.controller.dispatch(UiAction::from_op(
         crate::ControllerId::new(crate::HOME_NODE_ID),
-        crate::HomeOp::OpenPackage { key: uid },
+        crate::HomeOp::OpenPackage {
+            key: uid,
+            prefer: None,
+        },
     )));
     for _ in 0..20 {
         bench.step(&tasks);

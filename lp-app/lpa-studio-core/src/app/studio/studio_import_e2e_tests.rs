@@ -228,6 +228,7 @@ fn importing_a_pattern_vendors_the_folder_stamps_it_and_dedupes_a_second_copy() 
         ControllerId::new(HOME_NODE_ID),
         HomeOp::OpenPackage {
             key: workbench_uid.clone(),
+            prefer: None,
         },
     )));
     drive(actor.run_one_batch_for_test());
@@ -390,7 +391,10 @@ fn an_empty_library_still_offers_the_built_in_patterns() {
 
     handle.tx.send(StudioCommand::Action(UiAction::from_op(
         ControllerId::new(HOME_NODE_ID),
-        HomeOp::OpenPackage { key: workbench_uid },
+        HomeOp::OpenPackage {
+            key: workbench_uid,
+            prefer: None,
+        },
     )));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("open emits a snapshot");
@@ -441,6 +445,7 @@ fn importing_a_built_in_pattern_vendors_its_effect_folder_under_its_slug() {
         ControllerId::new(HOME_NODE_ID),
         HomeOp::OpenPackage {
             key: workbench_uid.clone(),
+            prefer: None,
         },
     )));
     drive(actor.run_one_batch_for_test());
