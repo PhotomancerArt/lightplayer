@@ -424,11 +424,6 @@ jobs:
       - name: Install RISC-V target
         run: rustup target add ${{ env.RISC_V_TARGET }}
 
-      # The emulator's OTHER target: the module a Studio tab hosts is the
-      # same CLI binary built for wasm32-wasip1 with the `emu_*` slice ABI in
-      # its export list (C6-in-tab P1, D12/D17).
-      - name: Install wasip1 target (the tab module)
-        run: rustup target add wasm32-wasip1
 
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
@@ -1258,6 +1253,14 @@ jobs:
       # `node scripts/emu/tab-smoke.mjs` — the hermetic ROM-boot smoke that
       # instantiates this module under the Worker's own WASI shim (D18) —
       # joins this step in P2, once that shim exists.
+      # The emulator's OTHER target: the module a Studio tab hosts is the
+      # same CLI binary built for wasm32-wasip1 with the `emu_*` slice ABI in
+      # its export list (C6-in-tab P1, D12/D17). `just emu-c6-wasm` installs
+      # it too, but naming it here keeps the toolchain this job needs
+      # readable in one place, beside the RISC-V target above.
+      - name: Install wasip1 target (the tab module)
+        run: rustup target add wasm32-wasip1
+
       - name: Tab module (wasm32-wasip1) + export gate
         run: cd lp2025 && just emu-c6-wasm
 
