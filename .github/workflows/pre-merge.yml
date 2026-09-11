@@ -317,6 +317,10 @@ jobs:
             emu_c6:
               - 'lp-emu/**'
               - 'lp-fw/fw-esp32c6/**'
+              # The tab host's WASI shim, which `scripts/emu/tab-smoke.mjs`
+              # IMPORTS rather than copies (C6-in-tab P2): a change to it
+              # changes what this job runs, so it must trigger this job.
+              - 'lp-app/lpa-studio-web/public/lpa-link/emulator_wasi.js'
               # The recipe that builds every image this job boots. It was
               # missing until L4, so a change to the reference build — the
               # thing that decides WHICH BYTES the gates run against — ran no
@@ -1250,19 +1254,33 @@ jobs:
       # (see its own comment), which is why this rides here rather than
       # becoming a fourth job for one `cargo build`.
       #
-      # `node scripts/emu/tab-smoke.mjs` — the hermetic ROM-boot smoke that
-      # instantiates this module under the Worker's own WASI shim (D18) —
-      # joins this step in P2, once that shim exists.
-      # The emulator's OTHER target: the module a Studio tab hosts is the
-      # same CLI binary built for wasm32-wasip1 with the `emu_*` slice ABI in
-      # its export list (C6-in-tab P1, D12/D17). `just emu-c6-wasm` installs
-      # it too, but naming it here keeps the toolchain this job needs
+      # `just emu-c6-wasm` installs the target itself if it is missing; it is
+      # named on its own step anyway, so the toolchain this job needs is
       # readable in one place, beside the RISC-V target above.
       - name: Install wasip1 target (the tab module)
         run: rustup target add wasm32-wasip1
 
       - name: Tab module (wasm32-wasip1) + export gate
         run: cd lp2025 && just emu-c6-wasm
+
+      # The tab host's hermetic smoke (C6-in-tab D18): the module just built,
+      # under the PAGE'S OWN WASI shim (it imports
+      # `public/lpa-link/emulator_wasi.js`, it does not copy it), driving the
+      # real mask ROM to its `ESP-ROM:esp32c6` banner and its `waiting for
+      # download` line, plus the flash word's blank → loaded → blank sequence
+      # and a control reply carrying `cyc=`.
+      #
+      # No browser, no firmware build, no network — which is the whole reason
+      # it can be a CI step at all. The tab-backed conformance suite and
+      # `just walk-no-board --tab` want Chrome and stay local recipes (PD9).
+      # Seconds, on a module that is already built.
+      - name: Set up node (the tab smoke)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Tab host smoke (node + the page's WASI shim)
+        run: cd lp2025 && node scripts/emu/tab-smoke.mjs
 
       - name: sccache stats
         if: always()
