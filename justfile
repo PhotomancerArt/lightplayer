@@ -2805,6 +2805,28 @@ test-emu-serve:
 walk-esp32c6-emu *args: install-rv32-target build-rv32-builtins
     scripts/emu/m4-walk.sh {{ args }}
 
+# The same walk on the CLASSIC ESP32 (M4 P4) — the frame half only.
+#
+# Named `walk-esp32v3-emu-frame`, not `walk-esp32v3-emu`, on purpose: M5 P5
+# owns the classic's FULL walk twin (the payload batch, the heap gates, the
+# transcripts), and this one asks a single question — is the first lit frame
+# off IO18 the host oracle's frame, three ways? A reader who types the shorter
+# name should get the bigger thing.
+#
+# Two differences from the C6 recipe, both in the script's header: the link is
+# UART0 (this chip has no USB-Serial-JTAG) and the project is retargeted
+# `D10` -> `IO18` into a scratch copy, because the DOM-Z-102 has no D10.
+#
+# ⚠️ It does not reach a lit frame today. The guest dies a few seconds into
+# rendering in `_WindowUnderflow8` with a null `a1` — the window-spill finding
+# in `lp-emu/esp/lp-emu-esp32v3/README.md`, "A frame three ways". The script
+# runs, prints both readings it can get, and fails at the comparison.
+#
+# NOT in any CI job, for the C6 recipe's reason: it builds a firmware image and
+# a release `lp-cli` and then runs the machine for tens of emulated seconds.
+walk-esp32v3-emu-frame *args: install-rv32-target build-rv32-builtins
+    scripts/emu/m4-walk-esp32v3.sh {{ args }}
+
 # Run one image on the C6 machine — the human front door.
 #
 #   just emu-c6 target/emu-ref/d6cfaa205-boot-idle-memfs/fw-esp32c6 --timeout 6s --strict-bus

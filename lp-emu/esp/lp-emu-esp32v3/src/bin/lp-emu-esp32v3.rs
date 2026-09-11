@@ -138,6 +138,14 @@ OPTIONS:
                             `file:<path>`, or `tcp:<addr>` to LISTEN for one
                             client at a time (whose bytes are UART0's RX).
                             They are always also kept in memory [memory]
+    --console <path>        write everything UART0 SAID to this file when the
+                            run ends. Not a second `--uart0` sink: the bytes
+                            are always tee'd into memory, and this is that
+                            log. It exists because `--uart0 tcp:` spends the
+                            wire on the link — a walk uploads over the socket
+                            and still wants the whole transcript, including
+                            what the device said after the client left
+                            (`lp-cli emu run --console`'s answer on the C6)
     --uart0-script <path>   deterministic host input on the wire: bytes at
                             declared EMULATED times, an after-the-device-said-it
                             form and a then-+<ms> form. The deterministic
@@ -210,6 +218,9 @@ struct Args {
     trace: Option<String>,
     trace_blocks: Vec<String>,
     uart0: Uart0Sink,
+    /// `--console <path>`: where the in-memory UART0 log is written at the
+    /// end of the run.
+    console: Option<PathBuf>,
     uart0_script: Option<PathBuf>,
     uart0_baud: Option<u64>,
     control: Option<String>,
@@ -356,6 +367,16 @@ fn run() -> Result<ExitCode, String> {
     {
         let chip = machine.flash().lock().expect("flash poisoned");
         println!("flash: {}", chip.command_census());
+    }
+    // The console, last of the sinks and after `flush_all`: everything UART0
+    // said since power-on, whoever was listening at the time. A walk that
+    // spends `--uart0` on the link (`tcp:`) has no other way to read it, and
+    // the bytes after the upload client disconnects are exactly the ones a
+    // frame walk is waiting for.
+    if let Some(path) = &args.console
+        && let Err(e) = std::fs::write(path, machine.uart0().bytes())
+    {
+        eprintln!("lp-emu-esp32v3: --console {}: {e}", path.display());
     }
     match machine.flush_flash() {
         Ok(true) => println!("flash: written back"),
@@ -842,6 +863,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                     },
                 };
             }
+            "--console" => args.console = Some(PathBuf::from(value()?)),
             "--uart0-script" => args.uart0_script = Some(PathBuf::from(value()?)),
             "--uart0-baud" => {
                 let v = value()?;
