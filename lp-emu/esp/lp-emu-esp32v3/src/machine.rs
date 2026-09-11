@@ -431,8 +431,7 @@ impl Outcome {
             | Outcome::WallTimeout { cycle }
             | Outcome::Breakpoint { cycle, .. }
             | Outcome::CacheOffFetch { cycle, .. } => *cycle,
-            | Outcome::Reset { cycle, .. }
-            | Outcome::ExitMatched { cycle } => *cycle,
+            Outcome::Reset { cycle, .. } | Outcome::ExitMatched { cycle } => *cycle,
             Outcome::StrictBus { violation } => violation.cycle,
         }
     }
@@ -2001,7 +2000,10 @@ impl Machine {
                     return ControlReply::Err("open: the port is already open".to_string());
                 }
                 self.port_open = true;
-                self.note_cable(now, "open: an application has the tty — the SoC cannot see it");
+                self.note_cable(
+                    now,
+                    "open: an application has the tty — the SoC cannot see it",
+                );
                 return ControlReply::Ok {
                     verb: "open",
                     cycle: now,
@@ -2193,7 +2195,9 @@ impl Machine {
         let found = if needle.is_empty() {
             Some(0)
         } else {
-            text[*from..].windows(needle.len()).position(|w| w == needle)
+            text[*from..]
+                .windows(needle.len())
+                .position(|w| w == needle)
         };
         match found.map(|i| *from + i) {
             Some(at) if text[at + needle.len()..].contains(&b'\n') => true,

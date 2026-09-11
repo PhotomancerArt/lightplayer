@@ -14,13 +14,13 @@
 //! machine supplies a clock, a scheduler and a bus decode and nothing
 //! competes for the registers.
 
+use lp_emu_esp_common::{ScriptedSource, Strap};
 use lp_emu_esp32v3::control::{Cable, ControlCommand};
 use lp_emu_esp32v3::machine::{
     AppSource, BootMode, Esp32V3Builder, Machine, Outcome, StopCondition,
 };
 use lp_emu_esp32v3::memmap;
 use lp_emu_esp32v3::test_support::{fw_esp32v3_image, skip_notice};
-use lp_emu_esp_common::{ScriptedSource, Strap};
 
 const FIFO: u32 = memmap::periph::UART0;
 const INT_RAW: u32 = memmap::periph::UART0 + 0x04;
@@ -187,8 +187,17 @@ fn the_auto_reset_circuit_reboots_on_the_release_and_not_on_the_assert() {
         .expect("builds");
 
     run_to(&mut machine, 1_500);
-    assert_eq!(machine.cable(), Cable { dtr: false, rts: true });
-    assert!(!machine.cable().en(), "EN is low: the chip is held in reset");
+    assert_eq!(
+        machine.cable(),
+        Cable {
+            dtr: false,
+            rts: true
+        }
+    );
+    assert!(
+        !machine.cable().en(),
+        "EN is low: the chip is held in reset"
+    );
     assert_eq!(machine.reboots(), 0, "holding EN low is not yet a boot");
 
     run_to(&mut machine, 3_000);

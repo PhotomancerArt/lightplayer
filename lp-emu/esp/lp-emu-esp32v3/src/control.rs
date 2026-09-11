@@ -330,10 +330,7 @@ pub enum ControlReply {
     /// `ok <verb> cyc=<cycle> us=<micros>` — applied, at that guest cycle.
     Ok { verb: &'static str, cycle: Cycles },
     /// `ok state cyc=… us=… cable=… port=… dtr=… rts=… en=… io0=… strap=… reboots=…`
-    State {
-        cycle: Cycles,
-        report: CableReport,
-    },
+    State { cycle: Cycles, report: CableReport },
     /// `err <reason>` — nothing was applied, and the reason says why.
     Err(String),
 }
@@ -351,7 +348,11 @@ impl std::fmt::Display for ControlReply {
                 "ok state cyc={cycle} us={} cable={} port={} dtr={} rts={} en={} io0={} \
                  strap={} reboots={}",
                 cycle / memmap::CYCLES_PER_US,
-                if report.attached { "attached" } else { "absent" },
+                if report.attached {
+                    "attached"
+                } else {
+                    "absent"
+                },
                 if report.port_open { "open" } else { "closed" },
                 u8::from(report.cable.dtr),
                 u8::from(report.cable.rts),
@@ -641,9 +642,30 @@ mod tests {
         // Neither line alone can hold both strap lines — the point of the
         // circuit, and what makes `dtr 1` on its own a download strap rather
         // than a reset.
-        assert_eq!(Cable { dtr: false, rts: true }.strap(), Strap::App);
-        assert_eq!(Cable { dtr: true, rts: false }.strap(), Strap::Download);
-        assert_eq!(Cable { dtr: true, rts: true }.strap(), Strap::App);
+        assert_eq!(
+            Cable {
+                dtr: false,
+                rts: true
+            }
+            .strap(),
+            Strap::App
+        );
+        assert_eq!(
+            Cable {
+                dtr: true,
+                rts: false
+            }
+            .strap(),
+            Strap::Download
+        );
+        assert_eq!(
+            Cable {
+                dtr: true,
+                rts: true
+            }
+            .strap(),
+            Strap::App
+        );
     }
 
     #[test]
@@ -798,8 +820,7 @@ mod tests {
 
     #[test]
     fn wait_shifts_every_later_line_and_emits_nothing_itself() {
-        let script =
-            parse_control_script("0 attach\n0 wait 500\n0 open\n100 reset\n").unwrap();
+        let script = parse_control_script("0 attach\n0 wait 500\n0 open\n100 reset\n").unwrap();
         assert_eq!(
             script,
             vec![

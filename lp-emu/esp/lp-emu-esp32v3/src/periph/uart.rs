@@ -132,6 +132,7 @@
 //! classic; M5 is the milestone that can raise a grade, and it will do it
 //! with a transcript pair, not with a boot that looked right.
 
+use lp_emu_core::sched::EventId;
 use lp_emu_esp_common::engine::uart::{
     RxDeliver, TxPush, UartConfig, UartEngine, UartEventIds, UartEvents,
 };
@@ -139,7 +140,6 @@ use lp_emu_esp_common::regfile::{lane_of, merge_lane};
 use lp_emu_esp_common::{
     BusCx, Peripheral, RegFile, RegGrade, RegGrades, StreamId, Width, event_id, event_local,
 };
-use lp_emu_core::sched::EventId;
 
 use crate::memmap;
 use crate::regs;
@@ -540,8 +540,8 @@ impl Uart {
     /// `conf1.rxfifo_full_thrhd` (0:6) with `mem_conf`'s three high bits.
     fn rx_full_thrhd(&self) -> usize {
         let low = self.regs.stored(CONF1) & CONF1_RXFIFO_FULL_THRHD_MASK;
-        let high = (self.regs.stored(MEM_CONF) >> MEM_CONF_RXFIFO_FULL_THRHD_H3_SHIFT)
-            & MEM_CONF_H3_MASK;
+        let high =
+            (self.regs.stored(MEM_CONF) >> MEM_CONF_RXFIFO_FULL_THRHD_H3_SHIFT) & MEM_CONF_H3_MASK;
         (low | (high << 7)) as usize
     }
 
@@ -549,8 +549,8 @@ impl Uart {
     fn tx_empty_thrhd(&self) -> usize {
         let low = (self.regs.stored(CONF1) >> CONF1_TXFIFO_EMPTY_THRHD_SHIFT)
             & CONF1_RXFIFO_FULL_THRHD_MASK;
-        let high = (self.regs.stored(MEM_CONF) >> MEM_CONF_TXFIFO_EMPTY_THRHD_H3_SHIFT)
-            & MEM_CONF_H3_MASK;
+        let high =
+            (self.regs.stored(MEM_CONF) >> MEM_CONF_TXFIFO_EMPTY_THRHD_H3_SHIFT) & MEM_CONF_H3_MASK;
         (low | (high << 7)) as usize
     }
 
@@ -616,7 +616,8 @@ impl Uart {
 
     fn push_tx(&mut self, byte: u8, cx: &mut BusCx<'_>) {
         let cfg = self.config();
-        if let TxPush::Dropped { first } = self.engine.push_tx(byte, &cfg, self.ids(), self.name, cx)
+        if let TxPush::Dropped { first } =
+            self.engine.push_tx(byte, &cfg, self.ids(), self.name, cx)
         {
             if first {
                 let line = format!(
@@ -699,7 +700,9 @@ impl Uart {
     /// not seen. The classic's `autobaud.glitch_filt` (bits 8:15) has no
     /// separate enable — a value of zero filters nothing.
     fn glitch_filter(&self) -> u64 {
-        u64::from((self.regs.stored(AUTOBAUD) >> AUTOBAUD_GLITCH_FILT_SHIFT) & AUTOBAUD_GLITCH_FILT_MASK)
+        u64::from(
+            (self.regs.stored(AUTOBAUD) >> AUTOBAUD_GLITCH_FILT_SHIFT) & AUTOBAUD_GLITCH_FILT_MASK,
+        )
     }
 
     /// The pulse counters' view of the frame that carried `byte`, landing at
@@ -942,7 +945,10 @@ impl Uart {
                         cx.now, cx.pc, self.name
                     );
                     cx.trace.note(&line);
-                    log::warn!("{}: mem_conf FIFO sizes are remembered, not applied", self.name);
+                    log::warn!(
+                        "{}: mem_conf FIFO sizes are remembered, not applied",
+                        self.name
+                    );
                 }
                 self.update_lines(cx);
             }
@@ -1219,7 +1225,11 @@ mod tests {
     fn the_921600_divisor_the_image_programs_gives_the_right_symbol_time() {
         let (mut sb, mut u, _) = rig(ScriptedSource::new());
         // 80e6 × 16 / 921,600 = 1388.9 → the integer divider esp-hal writes.
-        sb.write(&mut u, CLKDIV, 1_388 / 16 | ((1_388 % 16) << CLKDIV_FRAG_SHIFT));
+        sb.write(
+            &mut u,
+            CLKDIV,
+            1_388 / 16 | ((1_388 % 16) << CLKDIV_FRAG_SHIFT),
+        );
         assert_eq!(u.divider16(), 1_388);
         assert_eq!(u.baud(), 922_190, "80e6 × 16 / 1388, 0.06 % over 921,600");
         // 240e6 / 922,190 = 260.25 → 261 cycles a bit, 2,610 a 10-bit symbol.
@@ -1310,7 +1320,11 @@ mod tests {
         for _ in 0..4 {
             sb.read(&mut u, FIFO);
         }
-        assert_eq!(esp_hal_rx_count(&mut sb, &mut u), 0, "and empty reads empty");
+        assert_eq!(
+            esp_hal_rx_count(&mut sb, &mut u),
+            0,
+            "and empty reads empty"
+        );
     }
 
     #[test]
@@ -1388,7 +1402,11 @@ mod tests {
     #[test]
     fn the_autobaud_counters_measure_the_host_rate_the_run_states() {
         let (mut sb, mut u, _) = rig(ScriptedSource::new().at(0, b"\x55\x55"));
-        assert_eq!(sb.read(&mut u, LOWPULSE), PULSE_MIN_RESET, "reset: all ones");
+        assert_eq!(
+            sb.read(&mut u, LOWPULSE),
+            PULSE_MIN_RESET,
+            "reset: all ones"
+        );
         assert_eq!(sb.read(&mut u, RXD_CNT), 0);
         sb.write(&mut u, AUTOBAUD, pac(AUTOBAUD) | AUTOBAUD_EN);
         sb.run_to(&mut u, 2 * SYMBOL_ROM);

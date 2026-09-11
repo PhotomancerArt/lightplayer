@@ -21,8 +21,8 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use lp_emu_esp32v3::cache::CacheOffPolicy;
-use lp_emu_esp32v3::loader::EfuseIdentity;
 use lp_emu_esp32v3::control;
+use lp_emu_esp32v3::loader::EfuseIdentity;
 use lp_emu_esp32v3::machine::{
     AppSource, BootMode, Esp32V3Builder, Machine, Outcome, RomSource, StopCondition, TimeGrade,
     Uart0Sink,

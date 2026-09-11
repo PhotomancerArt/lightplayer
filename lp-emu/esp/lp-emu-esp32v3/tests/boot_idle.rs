@@ -165,7 +165,10 @@ fn two_runs_of_the_hello_are_one_run() {
 fn exit_on_stops_at_a_complete_line() {
     let Some(elf) = image() else { return };
     let (machine, outcome) = run_to_line(elf, "[INIT] runtime started", 60_000);
-    assert!(matches!(outcome, Outcome::ExitMatched { .. }), "{outcome:?}");
+    assert!(
+        matches!(outcome, Outcome::ExitMatched { .. }),
+        "{outcome:?}"
+    );
     let text = machine.uart0().text();
     assert!(text.ends_with("[INIT] runtime started\n"), "got:\n{text}");
     assert!(
