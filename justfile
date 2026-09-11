@@ -2274,7 +2274,7 @@ test-glsl-filetests:
 # (which need chip builds this gate deliberately avoids). Note the narrow
 # residue: drift unique to the emu fixture itself is only caught locally.
 [parallel]
-check-lint: fmt-check clippy check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities
+check-lint: fmt-check clippy check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
@@ -2291,6 +2291,16 @@ lint-serde-content:
 # instead of on a branch someone trusts.
 lint-browser-test-harness:
     ./scripts/browser-test-harness.sh --self-test
+
+# The classic's reset-and-capture script drives a CH340K cable, so its only
+# other proof is a board on a desk — which means nobody would dare change it.
+# This runs the half that needs no board: the reset sequences as numbers, the
+# --send-after grammar and matcher, the port-name rule for both locationIDs
+# this cable has had, and the span cutter against all four committed captures
+# under lp-emu/transcripts/esp32v3/, which it must reproduce from their
+# .raw.bin byte for byte. It opens no port.
+lint-classic-capture:
+    python3 scripts/emu/classic-reset-and-capture.py --self-test
 
 # The control-flow torture corpus is generated; without this gate, hand edits to
 # those files are silently reverted by the next `--write` (that is how the
