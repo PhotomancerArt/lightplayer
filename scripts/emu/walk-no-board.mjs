@@ -64,6 +64,16 @@ const BOARD_MODEL = process.env.WALK_BOARD_MODEL ?? "XIAO ESP32-C6";
 /// through the ROM's own download console and then the guest boots it.
 const FLASH_DEADLINE_MS = 900_000;
 const STEP_DEADLINE_MS = 180_000;
+/// How long Studio itself may take to arrive, which is a fact about a
+/// hundred-megabyte debug bundle and NOT about the board.
+///
+/// It is separate from `STEP_DEADLINE_MS` because conflating them makes a
+/// slow download look like a board that never answered: the first step's
+/// deadline was spent watching a progress bar, the screenshot said `Loading
+/// Studio…`, and the verdict said the card never offered `It's connected`
+/// (measured 2026-09-10 on the tab lane, with the machine otherwise busy).
+/// Wait for the app to exist, then start timing the board.
+const STUDIO_LOAD_DEADLINE_MS = 420_000;
 
 function args() {
   const tabByDefault = (process.env.WALK_BACKING ?? "") === "tab";
@@ -264,7 +274,22 @@ async function main() {
   try {
     await driver.navigate(url);
     const boards = await driver.awaitShim();
-    console.log(`  shim installed over ${boards.length} board(s): ${boards.map((b) => `${b.boardId} (${b.mac})`).join(", ")}\n`);
+    console.log(`  shim installed over ${boards.length} board(s): ${boards.map((b) => `${b.boardId} (${b.mac})`).join(", ")}`);
+
+    // The shim installs from an inline script, long before the app's wasm has
+    // finished downloading — so this is where Studio's own arrival is waited
+    // for, under its own deadline. Everything after it is about the board.
+    const appUp = await driver.waitFor(
+      `(document.querySelector('#main')?.innerText || '').length > 0`,
+      { timeoutMs: STUDIO_LOAD_DEADLINE_MS, what: "Studio to finish loading" },
+    );
+    if (!appUp) {
+      throw new Error(
+        `Studio did not finish loading within ${STUDIO_LOAD_DEADLINE_MS / 1000} s ` +
+          `— the page is still on the shell loader, which is a bundle problem and not a board one`,
+      );
+    }
+    console.log(`  studio is up\n`);
 
     // 1. FLASH — Studio's own esptool-js flow, into a chip with nothing on it.
     await step("flash", "Studio flashes the packaged firmware into a blank board", async () => {
@@ -466,7 +491,7 @@ async function main() {
     console.log(`  ${s.ok ? "✓" : "✗"} ${s.name.padEnd(9)} ${s.recordCount ?? s.records.length} record(s)   ${path.basename(s.shot)}`);
   }
   if (registry) {
-    console.log(`\n  door's live registry: ${registry.map((b) => `${b.id} flash=${b.flash} boot=${b.boot} reboots=${b.reboots} state=${b.state}`).join(" · ")}`);
+    console.log(`\n  the ${door ? "door" : "tab"}'s live registry: ${registry.map((b) => `${b.id} flash=${b.flash} boot=${b.boot} reboots=${b.reboots} state=${b.state}`).join(" · ")}`);
   }
   if (consoleErrors.length) {
     console.log("\n  page console errors:");
