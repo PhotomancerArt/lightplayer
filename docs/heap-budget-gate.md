@@ -199,9 +199,25 @@ board is flashed with — booted whole, run to its first heartbeat, and read fro
 the allocator figures the firmware itself reports over its own link.
 
 ```bash
-just heap-budget-check-chips     # the ratchet
+just heap-budget-check-chips     # the ratchet, both chips
 just heap-budget-baseline-chips  # re-measure into the record
 ```
+
+**Two chips since M5 P5** (plan `2026-09-10-0021-xtensa-emulator`): the
+classic ESP32's shipped `fw-esp32v3` image on `lp-emu-esp32v3`, beside the
+C6's. They have per-chip doors — `heap-budget-check-chips-c6`,
+`heap-budget-check-chips-v3`, and `heap-budget-baseline-chips-v3` — because
+the two arms need different toolchains and ride different CI jobs (below).
+
+⚠️ **The classic's first heartbeat has to be asked for.**
+`esp32_memory_stats` runs on a project load/unload/stop-all or a client
+`runtime_status`, never on the five-second server heartbeat, so a classic boot
+with nobody talking prints no `[MEM]`, no `[JIT]` and no `[stack] heartbeat:`
+line at all. The classic's arm sends one `stopAllProjects` over UART0 —
+`lp-emu/lp-emu-validate/walks/v3-stop-all.script`, the same bytes on the same
+trigger as `lp-emu-esp32v3/tests/boot_idle.rs` and as the desk sitting — and
+takes the first triple. It is the single thing most likely to be got wrong by
+copying the C6's arm.
 
 Five figures, each with its own direction, and one band:
 
@@ -244,11 +260,20 @@ out of every workspace test run applies here too. `just heap-budget-check`
 therefore prints a named SKIP for it when there is no image, and the projects
 half still gates; CI's path-gated `Heap budget (esp32c6 chip)` job (id
 `heap-budget-chips`, gated like the emulator job) runs
-`just heap-budget-check-chips`, where a skip is a failure. The direct load
-is used rather than the ROM-up boot: M7 measured the two paths' idle heap
-byte-identical, so the bootloader adds seconds of wall clock and nothing to the
-answer. The place that boots the whole chain is the walk,
-`scripts/emu/m4-walk.sh`.
+`just heap-budget-check-chips-c6`, where a skip is a failure. The classic's
+arm runs in `Emulator ESP32v3 (x64)` as `just heap-budget-check-chips-v3`
+instead, for two reasons that are both about where a toolchain already is: its
+ELF is an Xtensa cross-build only that job installs (a cold espup install is
+~8 minutes), and `heap-budget-chips` is path-gated on `emu_c6`, which does not
+fire for `lp-fw/fw-esp32v3/**` at all — so the classic's own firmware changes
+would have run its heap gate never.
+
+The direct load is used rather than the ROM-up boot on both chips: M7 measured
+the two paths' idle heap byte-identical on the C6, and
+`lp-emu-esp32v3/tests/rom_up_boot.rs` holds them byte-equal at the
+application's entry on the classic, so the bootloader adds seconds of wall
+clock and nothing to the answer. The places that boot the whole chain are the
+walks, `scripts/emu/m4-walk.sh` and `scripts/emu/m4-walk-esp32v3.sh`.
 
 ## Ratchet, not ceiling
 
@@ -502,10 +527,12 @@ core paths changed — four emulator runs (two projects × two modes), after the
 tests so `lp-cli` and `fw-emu` reuse warm dependencies. Referenced from
 `docs/adr/2026-08-01-esp32v3-flash-budget.md`.
 
-The **chip** half runs elsewhere: the path-gated `Heap budget (esp32c6 chip)`
-job, as `just heap-budget-check-chips`, because it needs a cross-target
-firmware build (the script builds it under `LP_EMU_BUILD_FW=1`) plus a release
-`lp-cli`. It was a step of the emulator job until 2026-09-08, when that job
+The **chip** half runs elsewhere: the C6's arm in the path-gated `Heap budget
+(esp32c6 chip)` job, as `just heap-budget-check-chips-c6`, and the classic's
+in `Emulator ESP32v3 (x64)` as `just heap-budget-check-chips-v3` — because
+each needs a cross-target firmware build (the script builds it under
+`LP_EMU_BUILD_FW=1`), and the C6's needs a release `lp-cli` on top. The C6's
+arm was a step of the emulator job until 2026-09-08, when that job
 outgrew its budget and the ratchet moved to a job of its own — one that also
 runs lp-cli's two emulator-backed tests, which share its `-p lp-cli` build
 (`just test-emu-c6-cli`). In `Validate (x64)` the same code
