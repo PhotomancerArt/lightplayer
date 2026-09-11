@@ -1,8 +1,48 @@
 #!/usr/bin/env bash
-# Build the reference fw-esp32c6 image the committed C6 transcripts came from.
+# Build the reference firmware image a committed transcript came from.
 #
-#   scripts/emu/build-reference-image.sh [--verify] <features> [<commit>=d6cfaa205] [<spike>=e8d64eeff|none]
-#   → target/emu-ref/<commit>-<slug>/fw-esp32c6   (ELF; sha256 printed and written beside it)
+#   scripts/emu/build-reference-image.sh [--verify] [--chip <chip>] <features> \
+#       [<commit>] [<spike>|none]
+#   → target/emu-ref/<commit>-<slug>/<binary>   (ELF; sha256 printed and written beside it)
+#
+# `--chip esp32c6` (the default, and every invocation that predates the flag)
+# builds `fw-esp32c6` for riscv32. `--chip esp32` — `esp32v3` is accepted as
+# the same thing, because that is what the emulator crate is called — builds
+# `fw-esp32v3` for **Xtensa**, on Espressif's Rust fork, through
+# `xtensa-esp32-elf-gcc`. M3 P8 added it; M6 adds the S3 by adding a case.
+#
+# ⚠️ **THE CLASSIC HAS NO SPIKE FEATURE, AND THAT IS THE POINT.** The C6's
+# reference images cherry-pick `spike_uart0_link` because the C6's own host
+# link is USB-Serial-JTAG and the transcripts were recorded over a spiked
+# UART0. The classic's link *is* UART0, so there is nothing to cherry-pick,
+# the worktree stays clean and `build.rs` stamps `dirty: false` — which is
+# what a silicon flash of the same commit stamps. Passing a spike to
+# `--chip esp32` is refused rather than ignored.
+#
+# **The classic's per-host band, measured 2026-09-10** (ruling **R6**: measure
+# a band, do not gate on cross-host equality). On this Mac —
+# `rustc 1.97.0-nightly (ca9a134e0 2026-04-26)` from the `esp` channel,
+# `xtensa-esp-elf` `esp-14.2.0_20240906`, aarch64-apple-darwin — the image
+# `esp32,server,float-f32` at `a795b664f` is
+#
+#     2,985,952 bytes   sha256 e4c41e7ec623e6c1e6386d9f82e4639225222e41c6abe910a402d595a14caaf5
+#
+# and `--verify` reproduces it: two builds, two cold worktrees at two
+# different path lengths, one sha256. **The band is "one host, one sha";**
+# whether this Mac and a GitHub runner agree is a further claim, unmeasured
+# here for the classic and known to be FALSE for the C6 (see the finding
+# further down). `--verify` prints `rustc -vV` and a section digest so two
+# hosts\' logs can be diffed when somebody wants to close that.
+#
+# ⚠️ **L0'S DESK BOARD IS RUNNING A DIRTY TREE** (`2e21b6226bcd`-dirty, see
+# `~/.photomancer/planning/lp2025/2026-09-10-0021-xtensa-emulator/bench.md`
+# and the sidecars under `lp-emu/transcripts/esp32v3/boot-idle/`). No commit
+# rebuilds those bytes, so THIS RECIPE CANNOT PRODUCE THE IMAGE THE FIRST
+# CLASSIC SILICON TRANSCRIPTS CAME FROM. That is ruling **R7**: lab task L1
+# either reflashes the board from a clean pinned commit before capturing, or
+# records the dirty diff alongside the capture. It is a director decision and
+# not something a build script can solve — it is written here because this is
+# where the next person looks for the image and does not find it.
 #
 # The image is REPRODUCIBLE on one host: the same bytes on every run, at any
 # path (see the determinism section below for the three causes that were not,
@@ -63,20 +103,73 @@
 set -euo pipefail
 
 verify=0
-if [[ "${1:-}" == "--verify" ]]; then
-    verify=1
-    shift
-fi
+chip=esp32c6
+while true; do
+    case "${1:-}" in
+        --verify) verify=1; shift ;;
+        --chip) chip="${2:?--chip needs a chip}"; shift 2 ;;
+        *) break ;;
+    esac
+done
+# The emulator crate for the classic is `lp-emu-esp32v3` and the firmware
+# crate is `fw-esp32v3`, so both spellings reach here; one canonical name.
+[[ "$chip" == "esp32v3" ]] && chip=esp32
 
-features="${1:?usage: build-reference-image.sh [--verify] <features> [<commit>] [<spike>|none]}"
-commit="${2:-d6cfaa205}"
-spike="${3:-e8d64eeff}"
+features="${1:?usage: build-reference-image.sh [--verify] [--chip <chip>] <features> [<commit>] [<spike>|none]}"
+
+repo="$(cd "$(dirname "$0")/../.." && pwd)"
+
+case "$chip" in
+    esp32c6)
+        crate="lp-fw/fw-esp32c6"
+        binary="fw-esp32c6"
+        target="riscv32imac-unknown-none-elf"
+        profile="release-esp32"
+        arch_cfg='cfg(target_arch = "riscv32")'
+        default_commit="d6cfaa205"
+        default_spike="e8d64eeff"
+        ;;
+    esp32)
+        crate="lp-fw/fw-esp32v3"
+        binary="fw-esp32v3"
+        target="xtensa-esp32-none-elf"
+        profile="release-esp32v3"
+        arch_cfg='cfg(target_arch = "xtensa")'
+        # No default: an esp32 reference image is always pinned explicitly,
+        # because there is no historical commit this chip's transcripts were
+        # recorded at that a clean tree can reproduce (R7, the header).
+        default_commit=""
+        default_spike="none"
+        ;;
+    *)
+        echo "build-reference-image: --chip $chip: known chips are esp32c6 and esp32 (alias esp32v3)" >&2
+        exit 2
+        ;;
+esac
+
+commit="${2:-$default_commit}"
+spike="${3:-$default_spike}"
 # `--no-spike` in the spike slot, for callers that would rather say it in words.
 [[ "$spike" == "--no-spike" ]] && spike=none
 
-repo="$(cd "$(dirname "$0")/../.." && pwd)"
-target="riscv32imac-unknown-none-elf"
-profile="release-esp32"
+if [[ -z "$commit" ]]; then
+    echo "build-reference-image: --chip $chip needs an explicit commit: there is no pinned default" >&2
+    exit 2
+fi
+if [[ "$chip" != esp32c6 && "$spike" != none ]]; then
+    echo "build-reference-image: --chip $chip takes no spike ($spike): the classic's host link IS UART0, so there is nothing to cherry-pick" >&2
+    exit 2
+fi
+
+# The Xtensa link goes through xtensa-esp32-elf-gcc, which lives in the esp
+# toolchain rather than on a stock PATH (`just _xt-gcc-dir` is the same
+# lookup `build-fw-esp32v3` does).
+if [[ "$chip" == esp32 ]]; then
+    gcc_bin="$(just --justfile "$repo/justfile" _xt-gcc-dir xtensa-esp32-elf-gcc 2>/dev/null || true)"
+    if [[ -n "$gcc_bin" ]]; then
+        export PATH="$gcc_bin:$PATH"
+    fi
+fi
 
 case "$features" in
     test_shader_compile_incremental,esp32c6,spike_uart0_link) slug=harness ;;
@@ -85,6 +178,11 @@ case "$features" in
     esp32c6,server,radio,memory_fs) slug=boot-idle-memfs-usb ;;
     esp32c6,server,radio,spike_uart0_link,memory_fs,bench_render_loop) slug=render-basic ;;
     esp32c6,server,radio,spike_uart0_link,memory_fs,bench_project_rocaille) slug=render-rocaille ;;
+    # The classic's only slug: the SHIPPED default feature set, which is the
+    # image every M3 gate runs and the one a silicon capture is taken from.
+    # There is no memfs variant — the classic boots from a modelled flash
+    # chip with a real filesystem, which is what "memfs-free" means in G2.
+    esp32,server,float-f32) slug=boot-idle ;;
     *) slug="${features//,/+}" ;;
 esac
 
@@ -93,11 +191,14 @@ out_dir="$repo/target/emu-ref/$commit-$slug"
 # own directory: two builds of one commit that differ in their features must
 # never share a checkout.
 if [[ "$spike" == "none" ]]; then
-    wt="$repo/target/emu-ref/wt-$commit-nospike"
+    # Chip-scoped: `--chip esp32` and `--chip esp32c6` at one commit are two
+    # different trees' worth of build output, and a shared `target/` would
+    # make the first cross-target build of each a cold one every time.
+    wt="$repo/target/emu-ref/wt-$commit-$chip-nospike"
 else
     wt="$repo/target/emu-ref/wt-$commit"
 fi
-elf="$out_dir/fw-esp32c6"
+elf="$out_dir/$binary"
 
 # ---------------------------------------------------------------------------
 # One builder at a time, across PROCESSES.
@@ -296,12 +397,34 @@ prepare_worktree() {
     fi
 
     mkdir -p "$wt/.cargo"
+    # ⚠️ **The build directory is pinned INSIDE the worktree**, and that is a
+    # fourth cause of non-reproducibility, found by P8 on the classic.
+    #
+    # This machine's `~/.cargo/config.toml` sets
+    # `build-dir = "~/.cache/cargo-build/{workspace-path-hash}"` — one
+    # intermediate cache per worktree, so that a dozen agent sessions do not
+    # each grow a 70 GB `target/`. The hash is a hash of the **workspace
+    # path**, and it lands in the ELF's debug info through the build scripts'
+    # `OUT_DIR`: two pinned worktrees at two paths produced two images that
+    # differed in exactly sixteen bytes,
+    # `…/cargo-build/b6/32cfab3cff3c65/…` against
+    # `…/cargo-build/9e/1e480d60c5e9ff/…`, same size, everything else equal.
+    #
+    # Remapping `~/.cache/cargo-build` would not help: the hash is *inside*
+    # the path, not a prefix of it. Pinning the build dir under `$wt` does,
+    # because `$wt` is already remapped to `/lp2025` two lines down — so the
+    # intermediates live where cargo would have put them with no host config
+    # at all, which is also what a CI runner has. It costs a cold build dir
+    # per pinned worktree, which is what a pinned worktree is for.
     cat > "$wt/.cargo/config.toml" <<CONFIG
 # Written by scripts/emu/build-reference-image.sh — see the determinism
-# comment there. Joins with lp-fw/fw-esp32c6/.cargo/config.toml's rustflags
-# (cargo concatenates arrays across config files); replacing them would drop
-# the linker script and the abort-tier flags.
-[target.'cfg(target_arch = "riscv32")']
+# comment there. Joins with $crate/.cargo/config.toml's rustflags (cargo
+# concatenates arrays across config files); replacing them would drop the
+# linker script and the abort-tier flags.
+[build]
+build-dir = "$wt/target"
+
+[target.'$arch_cfg']
 rustflags = [
   "--remap-path-prefix=$wt=/lp2025",
   "--remap-path-prefix=$cargo_home=/cargo",
@@ -328,8 +451,15 @@ image_drift() {
     local elf="$1"
     LC_ALL=C grep -aq '1970-01-01' "$elf" \
         || echo "the app descriptor is not stamped at SOURCE_DATE_EPOCH"
-    ! LC_ALL=C grep -aq '\.rodata_merge' "$elf" \
-        || echo "esp-hal's pristine rodata.x won the link (build.rs's patch missed the first build)"
+    # The `.rodata_merge` race is `fw-esp32c6/build.rs`'s: it patches esp-hal's
+    # generated `rodata.x` and had no ordering edge against esp-hal's own
+    # script. `fw-esp32v3/build.rs` patches no linker script at all, so there
+    # is nothing to race and nothing to heal — asking for the section on an
+    # image that never has one would fail every classic build.
+    if [[ "$chip" == esp32c6 ]]; then
+        ! LC_ALL=C grep -aq '\.rodata_merge' "$elf" \
+            || echo "esp-hal's pristine rodata.x won the link (build.rs's patch missed the first build)"
+    fi
 }
 
 # Build the image in `$1` and leave it at `$1/target/<triple>/<profile>/`.
@@ -339,12 +469,12 @@ image_drift() {
 # stamp case by cleaning the one package that carries it.
 build_image() {
     local wt="$1"
-    local built="$wt/target/$target/$profile/fw-esp32c6"
+    local built="$wt/target/$target/$profile/$binary"
     # The feature comment in Cargo.toml says `touch src/main.rs` after
     # flipping the spike feature; cargo's fingerprint covers features, but a
     # touch is cheap insurance against a stale build.rs provenance.
-    touch "$wt/lp-fw/fw-esp32c6/src/main.rs"
-    ( cd "$wt/lp-fw/fw-esp32c6" && cargo build --target "$target" --profile "$profile" --features "$features" )
+    touch "$wt/$crate/src/main.rs"
+    ( cd "$wt/$crate" && cargo build --target "$target" --profile "$profile" --features "$features" )
 
     local drift
     drift="$(image_drift "$built")"
@@ -360,10 +490,10 @@ build_image() {
         echo "build-reference-image: rebuilding — $drift" | tr '\n' ';'
         echo
         if [[ "$drift" == *"app descriptor"* ]]; then
-            ( cd "$wt/lp-fw/fw-esp32c6" && cargo clean -p esp-bootloader-esp-idf --target "$target" --profile "$profile" )
+            ( cd "$wt/$crate" && cargo clean -p esp-bootloader-esp-idf --target "$target" --profile "$profile" )
         fi
-        touch "$wt/lp-fw/fw-esp32c6/src/main.rs"
-        ( cd "$wt/lp-fw/fw-esp32c6" && cargo build --target "$target" --profile "$profile" --features "$features" )
+        touch "$wt/$crate/src/main.rs"
+        ( cd "$wt/$crate" && cargo build --target "$target" --profile "$profile" --features "$features" )
         drift="$(image_drift "$built")"
         if [[ -n "$drift" ]]; then
             echo "build-reference-image: the image is still not reproducible after a second build: $drift" >&2
@@ -380,22 +510,26 @@ build_image() {
 healed=0
 
 prepare_worktree "$wt"
-echo "build-reference-image: $features at $commit (+$spike) → $out_dir"
+echo "build-reference-image: $chip $features at $commit (+$spike) → $out_dir"
 build_image "$wt"
-built="$wt/target/$target/$profile/fw-esp32c6"
+built="$wt/target/$target/$profile/$binary"
 
 # Publish atomically. A reader outside the lock — a test binary that found
 # the file present and went straight to it — must see either no file or a
 # whole one, so the ELF arrives by `mv` within the same filesystem and never
 # by a `cp` a reader can catch half-done.
 mkdir -p "$out_dir"
-cp "$built" "$out_dir/.fw-esp32c6.partial"
+cp "$built" "$out_dir/.$binary.partial"
 (
     cd "$out_dir"
-    shasum -a 256 .fw-esp32c6.partial | sed 's|\.fw-esp32c6\.partial|fw-esp32c6|' | tee SHA256SUMS
+    shasum -a 256 ".$binary.partial" | sed "s|\.$binary\.partial|$binary|" | tee SHA256SUMS
 )
-echo "features=$features commit=$full_commit spike=$spike" > "$out_dir/PROVENANCE"
-mv "$out_dir/.fw-esp32c6.partial" "$elf"
+# The sidecar the C6's gates read, and the classic's: what was built, from
+# what, with what. The directory name is the provenance and this is the same
+# claim spelled out, so a runner can check the feature half without parsing a
+# path.
+echo "chip=$chip features=$features commit=$full_commit spike=$spike" > "$out_dir/PROVENANCE"
+mv "$out_dir/.$binary.partial" "$elf"
 sha="$(shasum -a 256 "$elf" | cut -d' ' -f1)"
 echo "build-reference-image: done → $elf"
 echo "build-reference-image: sha256 $sha"
@@ -421,11 +555,11 @@ if (( verify )); then
     echo "build-reference-image: toolchain $(rustc -vV | tr '\n' ' ')"
     python3 "$repo/scripts/emu/elf-section-digest.py" "$elf" || true
 
-    wt2="$repo/target/emu-ref/wt-$commit-verify-$slug"
+    wt2="$repo/target/emu-ref/wt-$commit-$chip-verify-$slug"
     echo "build-reference-image: --verify — a second build at $wt2"
     prepare_worktree "$wt2"
     build_image "$wt2"
-    built2="$wt2/target/$target/$profile/fw-esp32c6"
+    built2="$wt2/target/$target/$profile/$binary"
     sha2="$(shasum -a 256 "$built2" | cut -d' ' -f1)"
     echo "build-reference-image: verify sha256 $sha2"
     if [[ "$sha" != "$sha2" ]]; then

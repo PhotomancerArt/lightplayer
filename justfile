@@ -2413,6 +2413,40 @@ test-emu-c6-cli:
 test-emu-esp32v3:
     cargo test -p lp-emu-esp32v3
 
+# **M3's gate, whole.** What CI's `Emulator ESP32v3 (x64)` job runs and what
+# G2 is presented from.
+#
+# Three parts, in the order a reader should meet them:
+#
+#   1. `test-emu-esp32v3-boot` — the suite with the `#[ignore]`d half
+#      included, against a freshly built `fw-esp32v3` and an `espflash
+#      save-image --merge` chip beside it. That is both boot paths to the
+#      idle heartbeat under `--strict-bus`, the ROM-up boot log against the
+#      committed silicon capture, the direct-vs-ROM-up app-entry byte
+#      equality, determinism on both paths, the cache-off stop and the
+#      second-boot-mounts test.
+#   2. the two lints that cover both chips.
+#   3. the **reference image**, `--verify` — two builds in two cold
+#      worktrees at two different paths, one sha256. It is last because it is
+#      the slow half (two full Xtensa firmware builds, ~2 minutes each cold on
+#      an M2 Max) and because a failure there is a claim about the *recipe*
+#      rather than about the machine.
+#
+# The pinned commit is `origin/main` at the time of the run rather than a
+# frozen one, and that is deliberate: the classic has no historical commit
+# whose bytes a silicon transcript was recorded from — L0's board runs a
+# **dirty** `2e21b6226bcd` (ruling R7) — so there is nothing to freeze to
+# until L1 captures from a clean pin. `--verify` is still the whole claim it
+# is on the C6: this recipe gives the same image twice on this host.
+test-emu-esp32v3-gate: test-emu-esp32v3-boot
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just lint-emu-fence
+    just lint-emu-regnames
+    commit="$(git rev-parse --short HEAD)"
+    scripts/emu/build-reference-image.sh --verify --chip esp32 \
+        esp32,server,float-f32 "$commit" none
+
 # The boot half: build the shipped `fw-esp32v3` image, then run the whole
 # suite with the direct-load tests included. The path is passed explicitly
 # (`LP_EMU_ESP32V3_ELF`) rather than trusted by convention — every feature set

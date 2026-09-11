@@ -63,6 +63,7 @@ env:
 #                   ├─ firmware-esp32v3  (esp32 image size, manifest, clippy)
 #                   ├─ firmware-size     (esp32c6 image size, manifest)
 #                   ├─ emu-c6            (the C6 SoC emulator's own suite)
+#                   ├─ emu-esp32v3       (the classic ESP32 machine's gate)
 #                   └─ heap-budget-chips (chip heap ratchet + lp-cli emu tests)
 #
 # Every job is path-gated, including lint/validate via the `core` filter, so a
@@ -146,6 +147,7 @@ jobs:
       studio: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.studio }}
       firmware: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.firmware }}
       emu_c6: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.emu_c6 }}
+      emu_esp32v3: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.emu_esp32v3 }}
     steps:
       # Default quantifier ("some"): a filter is true when ANY changed file
       # matches one of its globs. Each list is the *dependency closure* of what
@@ -322,6 +324,29 @@ jobs:
               - 'scripts/emu/**'
               - 'justfile'
               - '.github/workflows/pre-merge.yml'
+            # emu_esp32v3 is the same shape for the CLASSIC ESP32's machine
+            # (`lp-emu-esp32v3`, plan three M3). The job it gates is
+            # **non-required** and path-gated (Q8, ruling R10): it builds a
+            # cross-target Xtensa firmware image, an `espflash save-image
+            # --merge` chip from it, and then the reference image twice for
+            # `--verify` — minutes, on a chip only one plan is working on.
+            #
+            # `lp-emu/**` rather than `lp-emu/esp/lp-emu-esp32v3/**`: the
+            # classic's machine sits on `lp-emu-esp-common`'s bus, scheduler,
+            # fabric and engines and on `lp-xt-emu`'s hart, so a change to any
+            # of them is a change to this machine. That is also what makes
+            # this job the C6's opposite number rather than its duplicate —
+            # `emu_c6` and `emu_esp32v3` fire together on a shared-crate
+            # change, which is the point: the two machines are the two sides
+            # of the extraction M2 did, and a change that moves one and not
+            # the other is exactly what nobody would notice.
+            emu_esp32v3:
+              - 'lp-emu/**'
+              - 'lp-fw/fw-esp32v3/**'
+              - 'scripts/emu/**'
+              - 'justfile'
+              - '.github/workflows/pre-merge.yml'
+              - '.github/actions/**'
 
       # `core` is the negative gate for lint + validate-x64: with
       # predicate-quantifier: every, a changed file counts only if it matches
@@ -1202,6 +1227,133 @@ jobs:
 
       - name: Emulator C6 boot tests + replays
         run: cd lp2025 && just test-emu-c6-boot
+
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: |
+          if command -v sccache >/dev/null; then
+            { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # The CLASSIC ESP32's machine, and M3's own gate.
+  #
+  # **Non-required and path-gated** (Q8, ruling R10 of the Xtensa emulator
+  # plan). It is here rather than in M5 for one reason: M3's gate is what this
+  # job runs, so the milestone's claim is protected by the thing that checks
+  # it, in the same PR that makes it.
+  #
+  # What it costs, and why each part is here:
+  #
+  #   * a cross-target **Xtensa** firmware build (`just build-fw-esp32v3`),
+  #     because the whole gate is about the SHIPPED image and not a fixture;
+  #   * `espflash save-image --chip esp32 --merge` on it, which bundles the
+  #     exact ESP-IDF `v5.1-beta1-378-gea5e0ff298` second-stage bootloader the
+  #     desk board runs — the ROM-up boot log is diffed against a silicon
+  #     capture of that binary's output, so the espflash version is
+  #     load-bearing and pinned to 3.3.0 like the C6 job's;
+  #   * the suite with the `#[ignore]`d half included: both boot paths to the
+  #     idle heartbeat under `--strict-bus`, the boot-log comparison, the
+  #     direct-vs-ROM-up app-entry byte equality, determinism, the snapshot
+  #     identity;
+  #   * the reference image **twice**, for `--verify`.
+  #
+  # `fetch-depth: 0` for the same reason as emu-c6: the reference build does
+  # `git worktree add --detach` at a pinned commit, which a depth-1 checkout
+  # cannot serve.
+  emu-esp32v3:
+    name: Emulator ESP32v3 (x64)
+    runs-on: ubuntu-24.04
+    # No p95 yet — this job is new in M3 P8. The budget is the C6 job's 35
+    # with the same reasoning: a fully cold run is two reference-image builds
+    # plus the shipped image plus the emulator suite, and a job living at
+    # 90 % of its budget is a job that starts failing on cache misses. The
+    # first green run's wall-clock goes in this comment.
+    timeout-minutes: 35
+    needs: detect-changes
+    if: needs.detect-changes.outputs.emu_esp32v3 == 'true'
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "false"
+      CARGO_PROFILE_TEST_DEBUG: "false"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+    steps:
+      - name: Install system deps (libudev for serialport/espflash)
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google*
+          sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
+          sudo apt-get install -y libudev-dev pkg-config
+
+      - name: Checkout lp2025
+        uses: actions/checkout@v4
+        with:
+          path: lp2025
+          # build-reference-image.sh does `git worktree add --detach` at a
+          # pinned commit; a shallow checkout has no history to detach to.
+          fetch-depth: 0
+
+      - name: Checkout lp-regalloc2
+        uses: actions/checkout@v4
+        with:
+          repository: PhotomancerArt/lp-regalloc2
+          path: lp-regalloc2
+
+      # The emulator itself is a HOST binary on the repo's own nightly; the
+      # firmware it boots is Xtensa. Both toolchains are installed, in that
+      # order, and the Xtensa one is NOT made default — `lp-fw/fw-esp32v3`
+      # selects it through its own rust-toolchain.toml, and making it default
+      # would build the host crates on the fork as well.
+      - name: Install Rust toolchain (host)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-27
+          components: rust-src
+
+      # Same version and buildtargets as the `firmware-esp32v3` job; keep them
+      # in sync. Pinned rather than floating so an espup release cannot turn a
+      # green PR red on its own.
+      - name: Install Xtensa Rust toolchain
+        uses: ./lp2025/.github/actions/xtensa-toolchain
+        with:
+          version: 1.95.0.0
+          buildtargets: esp32
+          default: false
+
+      - name: Run sccache
+        uses: mozilla/sccache-action@v0.0.10
+
+      # Its own shared-key: this job builds both a host test tree on the
+      # repo nightly AND an Xtensa firmware on the fork, so it matches
+      # neither `x64-nightly` nor `xtensa-fw` cleanly and would evict from
+      # whichever it borrowed. save-if main-only, cache-on-failure for the
+      # reason emu-c6's step gives: a cancelled run must still publish what
+      # it built.
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lp2025 -> target
+          cache-targets: false
+          cache-bin: false
+          shared-key: emu-esp32v3
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@v1.21.1
+
+      # Prebuilt and pinned, exactly as emu-c6 does it. espflash bundles the
+      # second-stage bootloader whose log this job diffs against a silicon
+      # capture: a different espflash is a different program in the image.
+      - name: Install espflash (prebuilt — the merged image's bootloader)
+        run: cargo binstall --no-confirm --locked espflash@3.3.0
+
+      - name: Emulator ESP32v3 gate (both boot paths, the reference image)
+        run: cd lp2025 && just test-emu-esp32v3-gate
 
       - name: sccache stats
         if: always()
