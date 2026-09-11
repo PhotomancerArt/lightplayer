@@ -339,7 +339,17 @@ function channelClassFor(hub) {
         hub
           .control(String(data))
           .then((line) => this._fire("message", { data: line }))
-          .catch((error) => this._fire("error", { error }));
+          // A transport failure is delivered as the protocol's OWN refusal,
+          // not as an `error` event. `EmulatorPort.command()` rejects on an
+          // `err …` reply and does nothing at all with an `error` event, so
+          // firing one leaves the caller's promise pending for ever — and
+          // that caller is usually `setSignals()` inside a flasher. `err` is
+          // also the truth: the line was not applied.
+          .catch((error) =>
+            this._fire("message", {
+              data: `err ${error?.message ?? String(error)}`,
+            }),
+          );
         return;
       }
       const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
