@@ -1246,13 +1246,14 @@ jobs:
       # lp-emu-esp32c6/src/tab_abi/ drifting apart is the failure it exists
       # to catch, and it is invisible to every native test.
       #
-      # Cost: a cold wasip1 release build of the emulator's dependency tree
-      # is 29 s on an M2 Max (measured 2026-09-10, from no wasip1 artifacts
-      # at all); on this runner expect a few minutes cold and much less once
-      # sccache has the tree, since it is content-addressed and target-triple
-      # aware. The 35-minute budget above is headroom rather than a ceiling
-      # (see its own comment), which is why this rides here rather than
-      # becoming a fourth job for one `cargo build`.
+      # Cost, MEASURED on this runner (2026-09-11, run 34555276339): the
+      # target install plus the build plus the export gate is **45 s**, cold
+      # sccache. 29 s of that is the same build on an M2 Max, so the runner is
+      # barely slower here — the wasip1 tree is small and sccache is
+      # content-addressed and target-triple aware. The 35-minute budget above
+      # is headroom rather than a ceiling (see its own comment), which is why
+      # this rides here rather than becoming a fourth job for one
+      # `cargo build`.
       #
       # `just emu-c6-wasm` installs the target itself if it is missing; it is
       # named on its own step anyway, so the toolchain this job needs is
@@ -1273,7 +1274,10 @@ jobs:
       # No browser, no firmware build, no network — which is the whole reason
       # it can be a CI step at all. The tab-backed conformance suite and
       # `just walk-no-board --tab` want Chrome and stay local recipes (PD9).
-      # Seconds, on a module that is already built.
+      #
+      # Cost, MEASURED (same run): **0.5 s** for all twenty-one claims, on a
+      # module the step above already built. The node setup beside it is the
+      # only part worth a second.
       - name: Set up node (the tab smoke)
         uses: actions/setup-node@v4
         with:
