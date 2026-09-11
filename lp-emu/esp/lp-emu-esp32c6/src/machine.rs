@@ -147,12 +147,31 @@ pub const DEFAULT_JIT_BLOCKS: usize = usize::MAX;
 ///   above it. It survives at 128 and 256. Its baseline tier compiles every
 ///   size and runs them all at a flat 6.9–7.3 ns.
 ///
-/// So the default is the largest size at which **every engine measured runs
-/// the module in its optimizing tier**, which is 256. Bigger buys a lower
-/// cross-function edge rate (37 against 59 per thousand guest instructions at
-/// 12,288) and nothing else that could be measured; it costs one engine
-/// entirely.
-pub const DEFAULT_JIT_FN_BLOCKS: usize = 256;
+/// **32 since M7 P6c (DD20), and the reason is a real run rather than a
+/// replay.** P5's ladder was a *replay* of a recording, which holds the entry
+/// rate and the cache behaviour of the run it was recorded from; P6b took the
+/// same sizes as whole `render-basic` t2 runs, interleaved and best-of-3 in
+/// one invocation per engine, and the two engines stopped agreeing with the
+/// replay and with each other:
+///
+/// | `--jit-fn-blocks` | node/V8 real time | bun/JSC real time |
+/// |---:|---:|---:|
+/// | 8 | process aborts (`Zone` OOM) | **0.493×** |
+/// | 32 | **0.637×** | 0.287× |
+/// | 64 | 0.566× | 0.164× |
+/// | that engine's `--interpreter` | 0.387× | 0.542× |
+///
+/// V8's window is bounded at **both** ends by the same fatal OOM, because the
+/// module's largest function is a sub-dispatcher at big sizes and the outer
+/// **selector** at small ones — so V8's best usable size is the smallest it
+/// survives, 32. JSC keeps getting faster all the way down to the
+/// [`crate::jit`] floor of 8, and 32 is three times better to it than 64.
+///
+/// So 32 is the size that serves both engines: V8's optimum, and within a
+/// factor of JSC's without asking for a size V8 cannot compile. It is a
+/// *default* — `--jit-fn-blocks` still takes anything from the floor up, and
+/// a caller that knows its engine should say so.
+pub const DEFAULT_JIT_FN_BLOCKS: usize = 32;
 
 /// The same for `--jit-escape-all`, where a block emits several times the
 /// wasm: a register flush, a call and a reload per instruction instead of a
