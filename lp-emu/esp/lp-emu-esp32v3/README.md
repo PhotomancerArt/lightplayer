@@ -928,6 +928,10 @@ door; the recipe exists from P1 so the door has one name for its whole life.
 --wall-timeout <s>      the host-clock safety net; exits 4
 --break-at <symbol>     stop at its first instruction
 --probe <cycle>:<name>  print the word at a symbol at a guest cycle
+--probe <name>@<ms>     the same, in EMULATED milliseconds — the C6 binary's
+                        spelling, and the one `lp-emu-validate`'s payload
+                        registry stores (M5 P1, ruling R2). Both forms work;
+                        `@` decides when a value carries one
 --trace <path|->  --trace-block <name>
 --uart0 <spec>          where UART0's bytes go: `-`/`stdout`, `memory`,
                         `file:<path>`, or `tcp:<addr>` to LISTEN for one

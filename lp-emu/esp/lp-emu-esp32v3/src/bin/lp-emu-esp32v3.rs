@@ -86,6 +86,10 @@ OPTIONS:
                             every register as the caller left it
     --probe <cycle>:<name>  print the word at symbol <name> when guest time
                             reaches <cycle>
+    --probe <name>@<ms>     the same thing said in EMULATED milliseconds, which
+                            is how the payload registry stores a probe and how
+                            the C6 binary spells it. Both forms work; `@` wins
+                            when a value carries one
     --trace <path|->        write the bus trace here
     --trace-block <name>    only trace this block (repeatable)
     --uart0 <spec>          where UART0's bytes go: `-` or `stdout`,
@@ -622,16 +626,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--timeout" => args.timeout = Some(parse_duration(&value()?)?),
             "--wall-timeout" => args.wall_timeout = Some(parse_duration(&value()?)?),
             "--break-at" => args.break_at.push(value()?),
-            "--probe" => {
-                let v = value()?;
-                let (cycle, name) = v
-                    .split_once(':')
-                    .ok_or_else(|| format!("--probe {v}: expected <cycle>:<symbol>"))?;
-                let cycle: u64 = cycle
-                    .parse()
-                    .map_err(|_| format!("--probe {v}: `{cycle}` is not a cycle count"))?;
-                args.probes.push((cycle, name.to_string()));
-            }
+            "--probe" => args.probes.push(parse_probe(&value()?)?),
             "--flash" => args.flash = Some(FlashBacking::File(PathBuf::from(value()?))),
             "--flash-copy" | "--merged" => {
                 args.flash = Some(FlashBacking::Copy(PathBuf::from(value()?)))
@@ -708,6 +703,45 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
     Ok(args)
 }
 
+/// `--probe`, in either of its two spellings, as `(cycle, symbol)`.
+///
+/// `<cycle>:<symbol>` is this binary's original: an absolute guest cycle,
+/// which is the unit the run loop actually schedules in.
+///
+/// `<symbol>@<ms>` is the C6 binary's, and it is accepted here because the
+/// payload registry stores probes as `(symbol, ms)` and hands one command line
+/// to both machines (`lp-emu-validate`'s `LpEmuDriver`). Teaching the
+/// **binary** the second spelling is cheaper and more honest than a per-chip
+/// formatter in the runner, and it removes a trap for every later reader (M5
+/// ruling R2). The milliseconds convert through `emulated_cycles`, the same
+/// helper `--timeout` uses, so `@120` and `--timeout 120ms` mean the same
+/// instant.
+///
+/// The two are told apart by which separator appears, and `@` is checked
+/// first: a symbol may contain `:` (a Rust path), a cycle count may not
+/// contain `@`.
+fn parse_probe(v: &str) -> Result<(u64, String), String> {
+    if let Some((name, ms)) = v.rsplit_once('@') {
+        let ms: u64 = ms
+            .parse()
+            .map_err(|_| format!("--probe {v}: `{ms}` is not a count of milliseconds"))?;
+        if name.is_empty() {
+            return Err(format!("--probe {v}: no symbol before the `@`"));
+        }
+        return Ok((emulated_cycles(Duration::from_millis(ms)), name.to_string()));
+    }
+    let (cycle, name) = v
+        .split_once(':')
+        .ok_or_else(|| format!("--probe {v}: expected <cycle>:<symbol> or <symbol>@<ms>"))?;
+    let cycle: u64 = cycle
+        .parse()
+        .map_err(|_| format!("--probe {v}: `{cycle}` is not a cycle count"))?;
+    if name.is_empty() {
+        return Err(format!("--probe {v}: no symbol after the `:`"));
+    }
+    Ok((cycle, name.to_string()))
+}
+
 /// `5s`, `1500ms`, `900us`. **Emulated** time everywhere except
 /// `--wall-timeout`, which reads the same syntax against the host clock.
 fn parse_duration(text: &str) -> Result<Duration, String> {
@@ -723,5 +757,76 @@ fn parse_duration(text: &str) -> Result<Duration, String> {
         "ms" => Ok(Duration::from_millis(n)),
         "us" => Ok(Duration::from_micros(n)),
         other => Err(format!("`{text}`: unknown unit `{other}` (s, ms, us)")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// M5 ruling R2: the classic binary learns the C6's `--probe` spelling
+    /// **additively**. The registry stores `(symbol, ms)` and hands one
+    /// command line to both machines, and `<cycle>:<name>` is what every
+    /// existing classic recipe already types.
+    #[test]
+    fn both_probe_spellings_parse() {
+        // The original: an absolute guest cycle.
+        assert_eq!(
+            parse_probe("120:TIMED_OUT").unwrap(),
+            (120, "TIMED_OUT".to_string())
+        );
+        // The C6's: emulated milliseconds, through `--timeout`'s own helper.
+        assert_eq!(
+            parse_probe("TIMED_OUT@120").unwrap(),
+            (
+                emulated_cycles(Duration::from_millis(120)),
+                "TIMED_OUT".to_string()
+            )
+        );
+        // And that conversion is the unit the run loop schedules in.
+        assert_eq!(
+            parse_probe("TIMED_OUT@120").unwrap().0,
+            120 * 1000 * memmap::CYCLES_PER_US
+        );
+    }
+
+    /// A symbol may carry a `:` (a Rust path); a cycle count may not carry an
+    /// `@`. So `@` decides, and it is checked first.
+    #[test]
+    fn an_at_sign_decides_which_spelling_it_is() {
+        let (cycle, name) = parse_probe("lp_fw::state::TIMED_OUT@5").unwrap();
+        assert_eq!(name, "lp_fw::state::TIMED_OUT");
+        assert_eq!(cycle, emulated_cycles(Duration::from_millis(5)));
+    }
+
+    #[test]
+    fn a_probe_that_is_neither_spelling_names_both() {
+        let err = parse_probe("TIMED_OUT").unwrap_err();
+        assert!(err.contains("<cycle>:<symbol>"), "{err}");
+        assert!(err.contains("<symbol>@<ms>"), "{err}");
+        // And a malformed one names the part that was wrong.
+        assert!(parse_probe("TIMED_OUT@soon").unwrap_err().contains("soon"));
+        assert!(parse_probe("soon:TIMED_OUT").unwrap_err().contains("soon"));
+        assert!(parse_probe("@5").unwrap_err().contains("no symbol"));
+        assert!(parse_probe("5:").unwrap_err().contains("no symbol"));
+    }
+
+    /// The flag reaches `Args` from a real argument vector, in both forms.
+    #[test]
+    fn the_flag_carries_both_forms_through_parse() {
+        let args = parse(
+            ["--probe", "120:A", "--probe", "B@1"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        )
+        .unwrap();
+        assert_eq!(
+            args.probes,
+            vec![
+                (120, "A".to_string()),
+                (emulated_cycles(Duration::from_millis(1)), "B".to_string()),
+            ]
+        );
     }
 }
