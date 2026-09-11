@@ -178,14 +178,29 @@ of implementation — code can lag these names during the transition.
 - **real** — silicon on the desk, or a real desktop LightPlayer server on
   the network. See [the device ADR](adr/2026-09-07-always-a-device-target-real-emu-sim.md).
 - **emu** — the real firmware binary for the target's chip, running in
-  `lp-emu` (boards only — there is no desktop emu). Exact; slower. See
-  [the device ADR](adr/2026-09-07-always-a-device-target-real-emu-sim.md).
+  `lp-emu` (boards only — there is no desktop emu) — in a Worker in the
+  tab (mode A), or behind the native door for the agent walk (mode B).
+  Exact; slower. See
+  [the device ADR](adr/2026-09-07-always-a-device-target-real-emu-sim.md)
+  and [the tab ADR](adr/2026-09-10-the-c6-emulator-runs-in-the-tab.md).
 - **sim** — the desktop firmware (`fw-browser` = fw-desktop running in
   the browser) wearing the target's manifest — any target. Fast; not
   exact. The desktop sim wears the desktop manifest; a board sim wears
   that board's. See [the device ADR](adr/2026-09-07-always-a-device-target-real-emu-sim.md).
 - **preview** — the sim engine used internally for gallery previews.
   Never a device. See [the device ADR](adr/2026-09-07-always-a-device-target-real-emu-sim.md).
+- **tab backing** — the wasm backing of `EmulatorPort`: one dedicated Web
+  Worker holding an `lp-emu-esp32c6` wasip1 module, driven one guest slice
+  at a time. A `ByteStreamLink` (mode A, the user's emu device) and the
+  `navigator.serial` polyfill (mode B, `?emu=tab`, the server-less walk)
+  are its two consumers; neither learns the other exists. See
+  [the tab ADR](adr/2026-09-10-the-c6-emulator-runs-in-the-tab.md).
+- **dilation** — guest µs per wall µs, the worker's own measure of how far
+  behind (or ahead of) real time an emulated board is running; the band's
+  speed word (`0.4×`). Reported, never built around — a slow or hidden
+  tab drops its deficit and re-anchors to now rather than sprinting to
+  catch up. `None` until the first measurement exists. See
+  [the tab ADR](adr/2026-09-10-the-c6-emulator-runs-in-the-tab.md).
 - **Emulator / simulator** — the things, never devices: an emulator runs
   the real binary; the simulator is the desktop firmware running in the
   browser (`fw-browser`).
