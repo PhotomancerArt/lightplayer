@@ -36,11 +36,13 @@ use std::process::Command;
 use anyhow::{Context, Result, bail};
 
 use crate::configuration::{Availability, Configuration, ConfigurationKind};
-use crate::payload::{BootPath, Capture, HostPlan, Link, Payload, Sentinel};
+use crate::payload::{BootPath, Capture, ChipArm, HostPlan, Link, Payload, Sentinel};
 
 /// Build constants, kept equal to the `justfile`'s variables of the same name.
 pub const RV32_TARGET: &str = "riscv32imac-unknown-none-elf";
+pub const XTENSA_V3_TARGET: &str = "xtensa-esp32-none-elf";
 pub const FW_ESP32C6_PROFILE: &str = "release-esp32";
+pub const FW_ESP32V3_PROFILE: &str = "release-esp32v3";
 pub const C6_FLASH_SIZE: &str = "4mb";
 pub const C6_PARTITIONS: &str = "lp-fw/fw-esp32c6/partitions.csv";
 /// The firmware package's directory, and the only place its build may run
@@ -54,7 +56,136 @@ pub const C6_PARTITIONS: &str = "lp-fw/fw-esp32c6/partitions.csv";
 /// `scripts/emu/build-reference-image.sh`; this constant is that same rule for
 /// the runner's plans. Found at G3 sitting 1, 2026-09-07.
 pub const FW_ESP32C6_DIR: &str = "lp-fw/fw-esp32c6";
+pub const FW_ESP32V3_DIR: &str = "lp-fw/fw-esp32v3";
 pub const DESK_STEP_SCRIPT: &str = "scripts/emu/desk-espflash-step.sh";
+
+/// Every build fact that differs between the chips this runner drives.
+///
+/// **Mirrored from the `justfile`** (`xt_v3_target`, `v3_flash_size`,
+/// `fw_esp32v3_dir`, the `release-esp32` / `release-esp32v3` profiles,
+/// `flash-fw-esp32c6` / `flash-fw-esp32v3`) and from
+/// `scripts/emu/build-reference-image.sh`'s own `case` block, exactly the way
+/// [`FW_ESP32C6_DIR`] mirrors `build-fw-esp32c6`. **The mirror is the
+/// contract**: a value that drifts here builds a different image than the one
+/// a human builds by hand, and the two transcripts would not be comparable —
+/// which is the only thing this crate exists to make them.
+///
+/// Adding a chip is one row plus its arms on the payloads that run there
+/// ([`crate::payload::ChipArm`]); nothing else in this file should need a
+/// `match` on a chip name. M6's S3 is the next row, and that is the shape it
+/// should take.
+#[derive(Clone, Copy, Debug)]
+pub struct ChipSpec {
+    /// The name a `[[configuration]]` and a transcript header spell
+    /// (`esp32c6`, `esp32v3`). Ours, not Espressif's.
+    pub chip: &'static str,
+    /// What `espflash --chip` is spelled. **They differ**: the classic's
+    /// revision is ours to record and espflash only knows `esp32`.
+    pub espflash_chip: &'static str,
+    /// The firmware crate's chip feature (`fw-esp32v3/Cargo.toml`'s `esp32`).
+    pub feature: &'static str,
+    pub target: &'static str,
+    pub profile: &'static str,
+    /// See [`FW_ESP32C6_DIR`] — the build must run from here, on both chips
+    /// and for the same reason.
+    pub fw_dir: &'static str,
+    pub fw_binary: &'static str,
+    pub partitions: &'static str,
+    pub flash_size: &'static str,
+    /// The emulator package `cargo run -p` names.
+    pub emu_package: &'static str,
+    /// The vendored mask ROM's stem in `lp-emu/esp/roms/SHA256SUMS`.
+    pub rom_elf: &'static str,
+    /// `--monitor-baud`, when a monitor on this chip needs one.
+    ///
+    /// `justfile:1107` calls the classic's "not optional":
+    /// `board::esp32v3::init` reprograms `clkdiv` mid-stream, so the ROM and
+    /// the bootloader talk at 115200 and the application at 921600, and a
+    /// monitor left at 115200 reads the application as line noise. The C6
+    /// enumerates as USB and has no rate to get wrong.
+    pub monitor_baud: Option<u32>,
+    /// What this chip's bridge enumerates as, for the held-port pre-check.
+    /// The C6 is native USB (`cu.usbmodem…`); the classic is a CH340K behind
+    /// WCH's dext (`cu.wchusbserial…`).
+    pub port_prefix: &'static str,
+    /// The time grades the machine defines. The classic has **one** (its
+    /// `TimeGrade` has one arm, `lp-emu-esp32v3/src/machine.rs`): there is no
+    /// measured LX6 per-class cost model, and a `t2` that is `t1` under
+    /// another name is the dishonesty the trust table exists to prevent
+    /// (M5 ruling R1).
+    // A second classic grade would be added HERE and nowhere else, once
+    // something measures one. `E1` (does `t2` exist on the classic?) is open
+    // with Yona; until it is answered the classic offers `t1` alone.
+    pub time_grades: &'static [&'static str],
+}
+
+/// The C6: the chip every configuration in this crate was written for, and the
+/// oracle every later row is checked against.
+pub const ESP32C6: ChipSpec = ChipSpec {
+    chip: "esp32c6",
+    espflash_chip: "esp32c6",
+    feature: "esp32c6",
+    target: RV32_TARGET,
+    profile: FW_ESP32C6_PROFILE,
+    fw_dir: FW_ESP32C6_DIR,
+    fw_binary: "fw-esp32c6",
+    partitions: C6_PARTITIONS,
+    flash_size: C6_FLASH_SIZE,
+    emu_package: "lp-emu-esp32c6",
+    rom_elf: "esp32c6_rev0_rom.elf",
+    monitor_baud: None,
+    port_prefix: "cu.usbmodem",
+    time_grades: &["t1", "t2", "t3"],
+};
+
+/// The classic ESP32 (revision v3), the desk's `domraem/dom-z-102`.
+pub const ESP32V3: ChipSpec = ChipSpec {
+    chip: "esp32v3",
+    // espflash knows `esp32`; the revision is ours to record, and it is in
+    // the configuration name and the sidecar's `silicon_rev`.
+    espflash_chip: "esp32",
+    feature: "esp32",
+    target: XTENSA_V3_TARGET,
+    profile: FW_ESP32V3_PROFILE,
+    fw_dir: FW_ESP32V3_DIR,
+    fw_binary: "fw-esp32v3",
+    partitions: "lp-fw/fw-esp32v3/partitions.csv",
+    flash_size: "4mb",
+    emu_package: "lp-emu-esp32v3",
+    rom_elf: "esp32_rev300_rom.elf",
+    monitor_baud: Some(921_600),
+    port_prefix: "cu.wchusbserial",
+    time_grades: &["t1"],
+};
+
+/// Every chip this runner drives, in the order they were taught to it.
+pub const CHIPS: &[&ChipSpec] = &[&ESP32C6, &ESP32V3];
+
+/// The row for a chip name, or a refusal that names what there is.
+pub fn chip_spec(chip: &str) -> Result<&'static ChipSpec> {
+    CHIPS
+        .iter()
+        .copied()
+        .find(|spec| spec.chip == chip)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "`{chip}` is not a chip this runner knows. It drives: {}.",
+                CHIPS
+                    .iter()
+                    .map(|s| s.chip)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        })
+}
+
+impl ChipSpec {
+    /// Where `cargo build --target … --profile …` leaves the firmware ELF,
+    /// relative to the repository root.
+    pub fn built_elf(&self) -> String {
+        format!("target/{}/{}/{}", self.target, self.profile, self.fw_binary)
+    }
+}
 
 /// Builds the whole 4 MiB flash part a `BootPath::RomUp` payload boots from:
 /// the second-stage bootloader at `0x0`, the partition table at `0x8000`,
@@ -118,6 +249,14 @@ pub struct RunRequest {
     /// frame compare equal to silicon's transcripts instead of differing for
     /// a reason that has nothing to do with the model.
     pub identity: Identity,
+    /// **Which chip this run is of**, as `validate.toml`'s
+    /// `[[configuration]].chip` says.
+    ///
+    /// Taken from the configuration entry rather than parsed out of the
+    /// name, because the two agree for `silicon:<chip>` and
+    /// `lp-emu:<chip>:<grade>` and do **not** for `esp-emu:<version>`, whose
+    /// detail is a version. One field, one source, no special case.
+    pub chip: String,
 }
 
 /// The eFuse identity an emulated configuration is given.
@@ -155,8 +294,31 @@ impl RunRequest {
     /// whose own `link` said `UsbSerialJtag` would — the plan cannot tell the
     /// two apart, which is the point (the sidecar's `firmware_features` line
     /// is what a reader tells them apart *by*, after the fact).
-    pub fn effective_link(&self) -> Link {
-        self.link_override.unwrap_or(self.payload.link)
+    pub fn effective_link(&self) -> Result<Link> {
+        Ok(self.link_override.unwrap_or(self.arm()?.link))
+    }
+
+    /// The chip this run is of.
+    pub fn chip(&self) -> &str {
+        &self.chip
+    }
+
+    /// This chip's build facts, or a refusal naming the chips there are.
+    pub fn spec(&self) -> Result<&'static ChipSpec> {
+        chip_spec(&self.chip)
+    }
+
+    /// This payload **on this chip**, or a refusal that names the chips it
+    /// does run on rather than quietly substituting the C6's.
+    pub fn arm(&self) -> Result<ChipArm> {
+        self.payload.arm(&self.chip).ok_or_else(|| {
+            anyhow::anyhow!(
+                "payload `{}` has no `{}` arm; it runs on: {}.",
+                self.payload.name,
+                self.chip,
+                self.payload.chip_names().join(", ")
+            )
+        })
     }
 
     /// The host attachment this request actually runs with.
@@ -175,19 +337,18 @@ impl RunRequest {
     /// bare link override needs to be honest about — `attached`, no script,
     /// the same state `espflash --monitor` puts a board in from its first
     /// byte — rather than silently recording a run that never happened.
-    pub fn effective_host_plan(&self) -> Option<HostPlan> {
-        if self.payload.host_plan.is_some() {
-            return self.payload.host_plan;
+    pub fn effective_host_plan(&self) -> Result<Option<HostPlan>> {
+        let arm = self.arm()?;
+        if arm.host_plan.is_some() {
+            return Ok(arm.host_plan);
         }
-        if self.link_override == Some(Link::UsbSerialJtag)
-            && self.payload.link != Link::UsbSerialJtag
-        {
-            return Some(HostPlan {
+        if self.link_override == Some(Link::UsbSerialJtag) && arm.link != Link::UsbSerialJtag {
+            return Ok(Some(HostPlan {
                 host: "attached",
                 script: "",
-            });
+            }));
         }
-        None
+        Ok(None)
     }
 
     /// The cargo feature list for this payload on this configuration.
@@ -203,18 +364,20 @@ impl RunRequest {
     /// says otherwise for this one run. Adding it on silicon would change the
     /// image under test; adding it to a USB-link payload on our own machine
     /// would defeat the comparison the milestone exists for (DD30).
-    pub fn features(&self) -> Vec<&'static str> {
-        let mut f = vec!["esp32c6"];
-        f.extend_from_slice(self.payload.features_for(self.emulated()));
+    pub fn features(&self) -> Result<Vec<&'static str>> {
+        // The chip feature comes from the chip table, not from a literal:
+        // `fw-esp32v3`'s is `esp32`, and the two are not the same word.
+        let mut f = vec![self.spec()?.feature];
+        f.extend_from_slice(self.arm()?.features_for(self.emulated()));
         let spike = match self.configuration.kind {
             ConfigurationKind::EspEmu => true,
-            ConfigurationKind::LpEmu => self.effective_link() == Link::Uart0Spike,
+            ConfigurationKind::LpEmu => self.effective_link()? == Link::Uart0Spike,
             ConfigurationKind::Silicon => false,
         };
         if spike {
             f.push("spike_uart0_link");
         }
-        f
+        Ok(f)
     }
 
     /// How long the run is given, in emulated seconds: the payload's own
@@ -332,6 +495,14 @@ impl PlanStep {
 pub struct RunPlan {
     pub configuration: String,
     pub payload: &'static str,
+    /// The port this plan touches, on silicon. `None` on an emulated
+    /// configuration, which has no board and no port to hold.
+    pub port: Option<String>,
+    /// The chip this plan is for. Not rendered — the configuration name
+    /// already carries it for a reader — but `execute` needs it to know which
+    /// bridge's port to check is free, and a plan that knew its own chip only
+    /// by re-parsing its configuration name would get `esp-emu:0.42.0` wrong.
+    pub chip: &'static ChipSpec,
     pub availability: Availability,
     pub steps: Vec<PlanStep>,
     /// Where the transcript body will be after the plan runs, relative to
@@ -420,12 +591,20 @@ impl ConfigurationDriver for SiliconDriver {
                 req.payload.name
             );
         }
-        let port = req.port.as_deref().context(
-            "a silicon run needs an explicit --port. The resolver is \
-             `cargo run -q -p lp-cli -- fwcheck port --chip esp32c6`; this runner will \
-             not pick a port for you, because a runner that grabs candidates[0] \
-             eventually flashes the wrong board.",
-        )?;
+        let spec = req.spec()?;
+        // Resolved before anything else, so "this payload has no arm on this
+        // chip" is the first thing a reader is told rather than a confusing
+        // failure three steps into a plan.
+        req.arm()?;
+        let port = req.port.as_deref().with_context(|| {
+            format!(
+                "a silicon run needs an explicit --port. The resolver is \
+                 `cargo run -q -p lp-cli -- fwcheck port --chip {}`; this runner will \
+                 not pick a port for you, because a runner that grabs candidates[0] \
+                 eventually flashes the wrong board.",
+                spec.espflash_chip,
+            )
+        })?;
         let capture = req.capture_path();
         let mut notes: Vec<String> = Vec::new();
         // A payload with a pin script is a payload whose two sides are driven
@@ -476,7 +655,7 @@ impl ConfigurationDriver for SiliconDriver {
                     .unwrap_or_default()
                     .to_string();
                 let under_ref = path.components().any(|c| c.as_os_str() == "emu-ref");
-                let slug = reference_image_slug(&req.features());
+                let slug = reference_image_slug(&req.features()?);
                 if !under_ref || !dir.ends_with(&slug) {
                     bail!(
                         "--image {} is not a reference image for this payload. A silicon run \
@@ -496,7 +675,7 @@ impl ConfigurationDriver for SiliconDriver {
                      detached worktree; the directory name is the provenance, and the runner \
                      checks its feature half.",
                     path.display(),
-                    req.features().join(","),
+                    req.features()?.join(","),
                 ));
                 path.display().to_string()
             }
@@ -508,16 +687,16 @@ impl ConfigurationDriver for SiliconDriver {
                             "cargo".into(),
                             "build".into(),
                             "--target".into(),
-                            RV32_TARGET.into(),
+                            spec.target.into(),
                             "--profile".into(),
-                            FW_ESP32C6_PROFILE.into(),
+                            spec.profile.into(),
                             "--features".into(),
-                            req.features().join(","),
+                            req.features()?.join(","),
                         ],
                     )
-                    .in_dir(FW_ESP32C6_DIR),
+                    .in_dir(spec.fw_dir),
                 );
-                format!("target/{RV32_TARGET}/{FW_ESP32C6_PROFILE}/fw-esp32c6")
+                spec.built_elf()
             }
         };
 
@@ -542,7 +721,7 @@ impl ConfigurationDriver for SiliconDriver {
                         "--".into(),
                         "erase-flash".into(),
                         "--chip".into(),
-                        "esp32c6".into(),
+                        spec.espflash_chip.into(),
                         "--port".into(),
                         port.into(),
                     ],
@@ -563,13 +742,13 @@ impl ConfigurationDriver for SiliconDriver {
             vec![
                 "flash".into(),
                 "--chip".into(),
-                "esp32c6".into(),
+                spec.espflash_chip.into(),
                 "--port".into(),
                 port.into(),
                 "--partition-table".into(),
-                C6_PARTITIONS.into(),
+                spec.partitions.into(),
                 "--flash-size".into(),
-                C6_FLASH_SIZE.into(),
+                spec.flash_size.into(),
                 "--after".into(),
                 "hard-reset".into(),
                 elf,
@@ -588,18 +767,38 @@ impl ConfigurationDriver for SiliconDriver {
                 let mut args = flash_args(elf);
                 // `--monitor` goes before the ELF, where espflash wants it.
                 args.insert(args.len() - 1, "--monitor".into());
+                // …and `--monitor-baud` with it, on a chip that has one.
+                // `justfile:1107` calls the classic's "not optional":
+                // `board::esp32v3::init` reprograms clkdiv mid-stream, so a
+                // monitor left at 115200 reads the application as line noise
+                // and the capture is a transcript of the bridge, not of the
+                // firmware.
+                if let Some(baud) = spec.monitor_baud {
+                    args.insert(args.len() - 1, "--monitor-baud".into());
+                    args.insert(args.len() - 1, baud.to_string());
+                }
                 command.extend(args);
+                let mut note = String::from(
+                    "the script pre-checks lsof/pgrep, runs espflash in the foreground under \
+                     script(1) with a SIG_DFL exec shim, SIGINTs that pid only, and post-checks \
+                     that the port is free. Never run two of these at once.",
+                );
+                if let Some(baud) = spec.monitor_baud {
+                    note.push_str(&format!(
+                        " --monitor-baud {baud} is NOT optional on this chip: the ROM and the \
+                         second-stage bootloader talk at 115200 and the application reprograms \
+                         clkdiv to {baud} mid-stream (justfile `flash-fw-esp32v3`). One image \
+                         therefore produces TWO transcripts at two rates, and the sidecar's \
+                         `baud` is which one a capture is."
+                    ));
+                }
                 steps.push(
                     PlanStep::new(
                         "flash and monitor in the foreground, stop at the sentinel",
                         command,
                     )
                     .with_env("PORT_DEV", port)
-                    .with_note(
-                        "the script pre-checks lsof/pgrep, runs espflash in the foreground under \
-                     script(1) with a SIG_DFL exec shim, SIGINTs that pid only, and post-checks \
-                     that the port is free. Never run two of these at once.",
-                    ),
+                    .with_note(note),
                 );
             }
             Capture::FlashThenOpenAfter(open_after_secs) => {
@@ -656,6 +855,8 @@ impl ConfigurationDriver for SiliconDriver {
         Ok(RunPlan {
             configuration: req.configuration.name(),
             payload: req.payload.name,
+            port: Some(port.to_string()),
+            chip: spec,
             availability: Availability::Available,
             steps,
             capture,
@@ -673,7 +874,7 @@ impl ConfigurationDriver for SiliconDriver {
     }
 
     fn execute(&self, plan: &RunPlan) -> Result<PathBuf> {
-        ensure_no_usbmodem_port_held()?;
+        ensure_port_free(plan.chip, plan.port.as_deref())?;
         run_steps(plan)?;
         Ok(plan.capture.clone())
     }
@@ -692,6 +893,19 @@ impl ConfigurationDriver for EspEmuDriver {
     }
 
     fn plan(&self, req: &RunRequest) -> Result<RunPlan> {
+        // esp-emu is the C6's second oracle and nothing else's: it has no
+        // classic machine, so this driver keeps its refusal rather than
+        // gaining a chip table row that would be a promise nobody can keep.
+        let spec = req.spec()?;
+        if spec.chip != ESP32C6.chip {
+            bail!(
+                "`{}`: esp-emu is the C6's second oracle only — there is no `{}` build of it \
+                 (M5 notes §1.1, row 7).",
+                req.configuration.name(),
+                spec.chip,
+            );
+        }
+        let arm = req.arm()?;
         if let Some(why) = req.payload.emulator_only {
             // Emulator-only does not mean *this* emulator: reading a static
             // out of the guest is how these payloads answer, and esp-emu has
@@ -702,7 +916,7 @@ impl ConfigurationDriver for EspEmuDriver {
                 req.payload.name
             );
         }
-        if req.payload.host_plan.is_some() {
+        if arm.host_plan.is_some() {
             bail!(
                 "payload `{}` makes a claim about the USB host, and this configuration's USB \
                  model asserts SOF for ever and reports EP1 free for ever (spike report §4): it \
@@ -712,14 +926,14 @@ impl ConfigurationDriver for EspEmuDriver {
             );
         }
         let binary = std::env::var(ESP_EMU_ENV).unwrap_or_else(|_| "esp-emu".into());
-        let elf = format!("target/{RV32_TARGET}/{FW_ESP32C6_PROFILE}/fw-esp32c6");
+        let elf = spec.built_elf();
         let image = req.out_dir.join(format!("{}.bin", req.payload.name));
         let capture = req.capture_path();
 
         let mut emu = vec![
             binary.clone(),
             "--chip".into(),
-            "esp32c6".into(),
+            spec.espflash_chip.into(),
             "--firmware".into(),
             image.display().to_string(),
             "--timeout".into(),
@@ -739,14 +953,14 @@ impl ConfigurationDriver for EspEmuDriver {
                     "cargo".into(),
                     "build".into(),
                     "--target".into(),
-                    RV32_TARGET.into(),
+                    spec.target.into(),
                     "--profile".into(),
-                    FW_ESP32C6_PROFILE.into(),
+                    spec.profile.into(),
                     "--features".into(),
-                    req.features().join(","),
+                    req.features()?.join(","),
                 ],
             )
-            .in_dir(FW_ESP32C6_DIR)
+            .in_dir(spec.fw_dir)
             .with_note(
                 "spike_uart0_link is on because the emulator has no USB host: the shipped \
                  image's USB-Serial-JTAG link cannot be served there (spike report §4, §5.1)",
@@ -757,12 +971,12 @@ impl ConfigurationDriver for EspEmuDriver {
                     "espflash".into(),
                     "save-image".into(),
                     "--chip".into(),
-                    "esp32c6".into(),
+                    spec.espflash_chip.into(),
                     "--flash-size".into(),
-                    C6_FLASH_SIZE.into(),
+                    spec.flash_size.into(),
                     "--merge".into(),
                     "--partition-table".into(),
-                    C6_PARTITIONS.into(),
+                    spec.partitions.into(),
                     elf,
                     image.display().to_string(),
                 ],
@@ -776,6 +990,8 @@ impl ConfigurationDriver for EspEmuDriver {
         Ok(RunPlan {
             configuration: req.configuration.name(),
             payload: req.payload.name,
+            port: None,
+            chip: spec,
             availability: Availability::Available,
             steps,
             capture,
@@ -801,7 +1017,8 @@ impl ConfigurationDriver for EspEmuDriver {
     }
 }
 
-/// Our own machine (`lp-emu/esp/lp-emu-esp32c6`), M3 onward.
+/// Our own machines (`lp-emu/esp/lp-emu-esp32c6` from M3, `lp-emu-esp32v3`
+/// from M5), one per chip in [`CHIPS`].
 ///
 /// Two steps and no ceremony: build the payload image (or take a pinned one),
 /// then run it with UART0 pointed at a file. Everything that decides what the
@@ -814,11 +1031,9 @@ impl ConfigurationDriver for EspEmuDriver {
 /// configuration name in the header is the only difference.
 pub struct LpEmuDriver;
 
-/// The emulator binary's package, and the `just` front door for a human.
-pub const LP_EMU_C6_PACKAGE: &str = "lp-emu-esp32c6";
-/// The vendored mask ROM's checksum file, read into the sidecar's `tools`.
-pub const C6_ROM_SHA256SUMS: &str = "lp-emu/esp/roms/SHA256SUMS";
-pub const C6_ROM_ELF: &str = "esp32c6_rev0_rom.elf";
+/// The vendored mask ROMs' checksum file, read into the sidecar's `tools`.
+/// Which stem inside it belongs to which chip is [`ChipSpec::rom_elf`].
+pub const ROM_SHA256SUMS: &str = "lp-emu/esp/roms/SHA256SUMS";
 
 /// How much host time the emulated timeout is allowed to cost before the
 /// wall-clock safety net fires.
@@ -840,31 +1055,36 @@ impl ConfigurationDriver for LpEmuDriver {
     }
 
     fn plan(&self, req: &RunRequest) -> Result<RunPlan> {
+        // The chip first: an unknown one bails with the same shape the
+        // `esp32c6`-only check used to, and a known one decides what the
+        // grades even are.
+        let spec = req.spec()?;
+        let arm = req.arm()?;
         let grade = req.configuration.qualifier.as_deref().unwrap_or("t1");
-        if !matches!(grade, "t1" | "t2" | "t3") {
+        if !spec.time_grades.contains(&grade) {
+            // Kept as the C6's sentence for the C6, because its three grades
+            // each mean something specific and a reader who mistyped one
+            // needs to be told what they are, not that there are three.
             bail!(
-                "`{}`: `{grade}` is not a time grade. The machine has three — `t1` counts \
-                 instructions, `t2` uses a per-class model, `t3` adds what an access's \
-                 address costs — and none of them is a claim about milliseconds on silicon \
-                 (the vision's graded ladder).",
-                req.configuration.name()
-            );
-        }
-        if req.configuration.detail != "esp32c6" {
-            bail!(
-                "`{}`: the only lp-emu machine is the C6 today",
-                req.configuration.name()
+                "`{}`: `{grade}` is not a time grade on `{}`. The C6's machine has three — \
+                 `t1` counts instructions, `t2` uses a per-class model, `t3` adds what an \
+                 access's address costs — and the classic defines `t1` alone (there is no \
+                 measured LX6 cost model, M5 ruling R1). This one has: {}. None of them is a \
+                 claim about milliseconds on silicon (the vision's graded ladder).",
+                req.configuration.name(),
+                spec.chip,
+                spec.time_grades.join(", "),
             );
         }
 
         let capture = req.capture_path();
-        let built = format!("target/{RV32_TARGET}/{FW_ESP32C6_PROFILE}/fw-esp32c6");
+        let built = spec.built_elf();
         let mut steps = Vec::new();
         let mut notes = Vec::new();
 
-        let usb = req.effective_link() == Link::UsbSerialJtag;
+        let usb = req.effective_link()? == Link::UsbSerialJtag;
         if let Some(overridden) = req.link_override
-            && overridden != req.payload.link
+            && overridden != arm.link
         {
             notes.push(format!(
                 "--link override: this run's link is `{}`, not payload `{}`'s own `{}` \
@@ -873,7 +1093,7 @@ impl ConfigurationDriver for LpEmuDriver {
                  can tell it from a run of the payload's default link).",
                 overridden.slug(),
                 req.payload.name,
-                req.payload.link.slug(),
+                arm.link.slug(),
             ));
         }
         let elf = match &req.image {
@@ -889,7 +1109,7 @@ impl ConfigurationDriver for LpEmuDriver {
                          `scripts/emu/build-reference-image.sh {} <commit> none` builds it in a \
                          detached worktree at that commit.",
                         path.display(),
-                        req.features().join(","),
+                        req.features()?.join(","),
                     )
                 } else {
                     format!(
@@ -900,7 +1120,7 @@ impl ConfigurationDriver for LpEmuDriver {
                          detached worktree and builds it there.",
                         path.display(),
                         REFERENCE_FIRMWARE_COMMIT,
-                        req.features().join(","),
+                        req.features()?.join(","),
                     )
                 });
                 path.display().to_string()
@@ -920,7 +1140,7 @@ impl ConfigurationDriver for LpEmuDriver {
                         "--profile".into(),
                         FW_ESP32C6_PROFILE.into(),
                         "--features".into(),
-                        req.features().join(","),
+                        req.features()?.join(","),
                     ],
                 )
                 .in_dir(FW_ESP32C6_DIR);
@@ -951,7 +1171,7 @@ impl ConfigurationDriver for LpEmuDriver {
             "run".into(),
             "-q".into(),
             "-p".into(),
-            LP_EMU_C6_PACKAGE.into(),
+            spec.emu_package.into(),
             "--release".into(),
             "--".into(),
         ];
@@ -961,7 +1181,7 @@ impl ConfigurationDriver for LpEmuDriver {
         // before this one to build that part (espflash is where the
         // second-stage bootloader comes from — there is nowhere else in the
         // repository to get that binary).
-        match req.payload.boot {
+        match arm.boot {
             BootPath::Direct => {
                 emu.push("--elf".into());
                 emu.push(elf.clone());
@@ -1010,7 +1230,7 @@ impl ConfigurationDriver for LpEmuDriver {
             emu.push("--uart0".into());
             emu.push(format!("file:{}", capture.display()));
         }
-        if let Some(plan) = req.effective_host_plan() {
+        if let Some(plan) = req.effective_host_plan()? {
             emu.push("--usb-host".into());
             emu.push(plan.host.into());
             if !plan.script.is_empty() {
@@ -1065,7 +1285,7 @@ impl ConfigurationDriver for LpEmuDriver {
         // addressed by path, the other content itself, and merging them
         // would force a 12 KB blob into the registry or a file onto a
         // three-line schedule.
-        if let Some(script) = req.payload.host_script {
+        if let Some(script) = arm.host_script {
             emu.push(
                 if usb {
                     "--usb-script"
@@ -1124,7 +1344,7 @@ impl ConfigurationDriver for LpEmuDriver {
             emu.push(rev.to_string());
         }
 
-        if let Some(plan) = req.effective_host_plan()
+        if let Some(plan) = req.effective_host_plan()?
             && !plan.script.is_empty()
         {
             // Written by a step rather than behind the runner's back, so the
@@ -1165,6 +1385,8 @@ impl ConfigurationDriver for LpEmuDriver {
         Ok(RunPlan {
             configuration: req.configuration.name(),
             payload: req.payload.name,
+            port: None,
+            chip: spec,
             availability: Availability::Available,
             steps,
             capture,
@@ -1176,7 +1398,7 @@ impl ConfigurationDriver for LpEmuDriver {
             cwd: req.repo_root.clone(),
             warnings: Vec::new(),
             notes,
-            tools: emulator_tools(&req.repo_root),
+            tools: emulator_tools(spec, &req.repo_root),
             image: Some(image),
         })
     }
@@ -1214,6 +1436,12 @@ pub fn reference_image_slug(features: &[&str]) -> String {
         "esp32c6,server,radio,spike_uart0_link" => "boot-idle".to_string(),
         "esp32c6,server,radio,spike_uart0_link,memory_fs" => "boot-idle-memfs".to_string(),
         "esp32c6,server,radio,memory_fs" => "boot-idle-memfs-usb".to_string(),
+        // The classic's only short name, `build-reference-image.sh:189`: the
+        // SHIPPED default feature set, which is the image every M3 gate runs
+        // and the one a silicon capture is taken from. There is no memfs
+        // variant — the classic boots from a modelled flash chip with a real
+        // filesystem.
+        "esp32,server,float-f32" => "boot-idle".to_string(),
         other => other.replace(',', "+"),
     }
 }
@@ -1229,18 +1457,18 @@ pub const REFERENCE_FIRMWARE_COMMIT: &str = "d6cfaa2051ae";
 /// is compiled into it, so two checkouts of the same source produce different
 /// bytes; the commit is what says which source ran, and the gates are what say
 /// the machine still behaves the same.
-fn emulator_tools(repo_root: &Path) -> BTreeMap<String, String> {
+fn emulator_tools(spec: &ChipSpec, repo_root: &Path) -> BTreeMap<String, String> {
     let mut tools = BTreeMap::new();
     tools.insert(
-        LP_EMU_C6_PACKAGE.to_string(),
+        spec.emu_package.to_string(),
         format!(
             "{} ({})",
             env!("CARGO_PKG_VERSION"),
             git_description(repo_root)
         ),
     );
-    if let Some(sha) = rom_sha256(repo_root) {
-        tools.insert("rom".to_string(), format!("{C6_ROM_ELF} sha256 {sha}"));
+    if let Some(sha) = rom_sha256(spec, repo_root) {
+        tools.insert("rom".to_string(), format!("{} sha256 {sha}", spec.rom_elf));
     }
     tools
 }
@@ -1285,10 +1513,10 @@ fn git_description(repo_root: &Path) -> String {
 /// The vendored ROM's sha256, read from the committed `SHA256SUMS` rather than
 /// recomputed: that file is the checked artefact (`rom_vendoring.rs` re-derives
 /// it in-process), and reading it here keeps one source of truth.
-fn rom_sha256(repo_root: &Path) -> Option<String> {
-    let text = std::fs::read_to_string(repo_root.join(C6_ROM_SHA256SUMS)).ok()?;
+fn rom_sha256(spec: &ChipSpec, repo_root: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(repo_root.join(ROM_SHA256SUMS)).ok()?;
     text.lines()
-        .find(|l| l.ends_with(C6_ROM_ELF))
+        .find(|l| l.ends_with(spec.rom_elf))
         .and_then(|l| l.split_whitespace().next())
         .map(str::to_string)
 }
@@ -1318,8 +1546,21 @@ pub fn driver_for(config: &Configuration) -> Box<dyn ConfigurationDriver> {
     }
 }
 
-/// The desk's first rule, in code: if anything holds a usbmodem port, stop.
-pub fn ensure_no_usbmodem_port_held() -> Result<()> {
+/// The desk's first rule, in code: if anything holds this chip's port, stop.
+///
+/// Two patterns are checked, and the second is the one that matters. The
+/// chip's own `port_prefix` catches "some board of this kind is held" — and
+/// it had to become a table lookup, because the check was written as a
+/// literal `usbmodem` grep and the classic is a **CH340K** behind WCH's
+/// dext, which enumerates as `/dev/cu.wchusbserial*`: a held classic port
+/// passed this gate silently. The request's **own `--port`**, when it has
+/// one, catches the case the prefix cannot — the exact device this run is
+/// about, whatever it is called.
+///
+/// The sentence is the part that saves a sitting: Studio's tab holds the port
+/// over Web Serial and takes it back on every reload, so "close the browser
+/// tab first" is the fix nine times out of ten.
+pub fn ensure_port_free(spec: &ChipSpec, port: Option<&str>) -> Result<()> {
     let out = Command::new("lsof").arg("-n").output();
     let Ok(out) = out else {
         // No lsof is not a licence to proceed blindly, but it is not a reason
@@ -1328,15 +1569,23 @@ pub fn ensure_no_usbmodem_port_held() -> Result<()> {
         return Ok(());
     };
     let text = String::from_utf8_lossy(&out.stdout);
+    let mut patterns = vec![
+        format!("/dev/{}", spec.port_prefix),
+        format!("/dev/tty.{}", spec.port_prefix.trim_start_matches("cu.")),
+    ];
+    if let Some(port) = port {
+        patterns.push(port.to_string());
+    }
     let held: Vec<&str> = text
         .lines()
-        .filter(|l| l.contains("/dev/cu.usbmodem") || l.contains("/dev/tty.usbmodem"))
+        .filter(|l| patterns.iter().any(|p| l.contains(p.as_str())))
         .collect();
     if held.is_empty() {
         Ok(())
     } else {
         bail!(
-            "a usbmodem port is already held — close Studio's tab (or the other lane) first:\n{}",
+            "a {} port is already held — close Studio's tab (or the other lane) first:\n{}",
+            spec.chip,
             held.join("\n")
         )
     }
@@ -1410,6 +1659,14 @@ mod tests {
             image: None,
             link_override: None,
             identity: Identity::default(),
+            // The chip the ENTRY says, exactly as `run::request` takes it:
+            // `esp-emu:0.42.0`'s detail is a version, not a chip. A test may
+            // name a configuration that is not in `validate.toml` (to check a
+            // refusal), and for those the parsed detail is the chip.
+            chip: crate::config::ValidateConfig::embedded()
+                .configuration(config)
+                .map(|e| e.chip.clone())
+                .unwrap_or_else(|_| Configuration::parse(config).unwrap().detail),
         }
     }
 
@@ -1496,7 +1753,7 @@ mod tests {
         assert!(flash < wait && wait < open, "{rendered}");
 
         // The shipped image, not the memfs variant.
-        assert_eq!(req.features(), vec!["esp32c6", "server", "radio"]);
+        assert_eq!(req.features().unwrap(), vec!["esp32c6", "server", "radio"]);
     }
 
     #[test]
@@ -1507,7 +1764,7 @@ mod tests {
             Some("/dev/cu.usbmodem1433201"),
         );
         assert_eq!(
-            req.features(),
+            req.features().unwrap(),
             vec!["esp32c6", "test_shader_compile_incremental"]
         );
     }
@@ -1515,7 +1772,7 @@ mod tests {
     #[test]
     fn esp_emu_adds_the_uart0_link_feature_and_exit_on() {
         let req = request("esp-emu:0.42.0", "shader-compile-stress", None);
-        assert!(req.features().contains(&"spike_uart0_link"));
+        assert!(req.features().unwrap().contains(&"spike_uart0_link"));
         let rendered = EspEmuDriver.plan(&req).unwrap().render();
         assert!(rendered.contains("--exit-on"), "{rendered}");
         assert!(rendered.contains("save-image"), "{rendered}");
@@ -1580,15 +1837,15 @@ mod tests {
             Link::Uart0Spike,
             "the registry is untouched"
         );
-        assert_eq!(req.effective_link(), Link::UsbSerialJtag);
+        assert_eq!(req.effective_link().unwrap(), Link::UsbSerialJtag);
         assert_eq!(
-            req.features(),
+            req.features().unwrap(),
             vec!["esp32c6", "test_shader_compile_incremental"],
             "no spike_uart0_link in the overridden feature list"
         );
         let plan = LpEmuDriver.plan(&req).unwrap();
         let rendered = plan.render();
-        // `req.features()` above is the precise check that `spike_uart0_link`
+        // `req.features().unwrap()` above is the precise check that `spike_uart0_link`
         // is gone; the note that explains WHY says its own name in prose
         // ("no spike_uart0_link: …"), so this checks the `--features` flag's
         // exact value rather than the substring's absence anywhere at all.
@@ -1631,10 +1888,10 @@ mod tests {
     fn a_link_override_onto_usb_synthesises_an_attached_host() {
         let mut req = request("lp-emu:esp32c6:t1", "shader-compile-stress", None);
         req.identity = desk_identity();
-        assert_eq!(req.effective_host_plan(), None, "no override, no host plan");
+        assert_eq!(req.effective_host_plan().unwrap(), None, "no override, no host plan");
         req.link_override = Some(Link::UsbSerialJtag);
         assert_eq!(
-            req.effective_host_plan(),
+            req.effective_host_plan().unwrap(),
             Some(HostPlan {
                 host: "attached",
                 script: "",
@@ -1655,7 +1912,7 @@ mod tests {
         req.identity = desk_identity();
         req.link_override = Some(Link::UsbSerialJtag);
         assert_eq!(
-            req.effective_host_plan(),
+            req.effective_host_plan().unwrap(),
             req.payload.host_plan,
             "the payload's own host_plan wins"
         );
@@ -1676,7 +1933,7 @@ mod tests {
         ));
         req.timeout_secs = 6;
         assert_eq!(
-            req.features(),
+            req.features().unwrap(),
             vec!["esp32c6", "server", "radio", "memory_fs"],
             "the shipped image over its own link builds no spike feature"
         );
@@ -1742,7 +1999,7 @@ mod tests {
         let mut req = request("lp-emu:esp32c6:t1", "usb-negative-control", None);
         req.identity = desk_identity();
         assert_eq!(
-            req.features(),
+            req.features().unwrap(),
             vec!["esp32c6", "server", "radio", "memory_fs"]
         );
         let rendered = LpEmuDriver.plan(&req).unwrap().render();
@@ -1754,7 +2011,7 @@ mod tests {
         // after a wait.
         let mut sil = request("silicon:esp32c6", "usb-negative-control", None);
         sil.port = Some("/dev/cu.usbmodem1433201".into());
-        assert_eq!(sil.features(), vec!["esp32c6", "server", "radio"]);
+        assert_eq!(sil.features().unwrap(), vec!["esp32c6", "server", "radio"]);
         let rendered = SiliconDriver.plan(&sil).unwrap().render();
         assert!(rendered.contains("desk-flash-no-monitor.sh"), "{rendered}");
         assert!(!rendered.contains("--usb-host"), "{rendered}");

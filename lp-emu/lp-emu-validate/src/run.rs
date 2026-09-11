@@ -524,7 +524,7 @@ pub fn record_set(
             configuration: config.name(),
             date: date.to_string(),
             firmware_commit: firmware_commit.to_string(),
-            firmware_features: req.features().iter().map(|f| (*f).to_string()).collect(),
+            firmware_features: req.features()?.iter().map(|f| (*f).to_string()).collect(),
             firmware_dirty: provenance.firmware_dirty,
             firmware_sha256: None,
             silicon_rev: entry.silicon_rev.clone(),
@@ -676,6 +676,10 @@ fn request(
         image: opts.images.for_payload(payload.name).map(Path::to_path_buf),
         link_override: opts.link_override,
         identity: entry.identity(),
+        // From the configuration ENTRY, not from the configuration name:
+        // they agree for `silicon:<chip>` and `lp-emu:<chip>:<grade>` and do
+        // not for `esp-emu:<version>`, whose detail is a version.
+        chip: entry.chip.clone(),
     }
 }
 
