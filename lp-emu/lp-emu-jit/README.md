@@ -125,13 +125,15 @@ that may read or write any register. The registers the block set *does* touch
 additionally live in wasm locals for the length of a stay, and are flushed and
 reloaded around every escape.
 
-Three imports, all from the module named `emu`, plus that module's `memory`:
+**Four** imports since M7b P2, all from the module named `emu`, plus that
+module's `memory`:
 
 | import | shape | says |
 |---|---|---|
 | `mmio_load` | `(pc, cycle, address, kind) -> (status << 32) \| value` | 0 ok · 1 the access did not happen, leave at this pc · 3 ok, and a yield is now pending |
-| `mmio_store` | `(pc, cycle, address, kind, value) -> status` | 0 ok · 1 did not happen · 2 happened, and the hart must observe a side-band now |
+| `mmio_store` | `(pc, cycle, address, kind, value, post_pc, post_cycle, post_instret) -> (status << 32) \| pc` | 0 ok, **carry on** · 1 did not happen · 2 the poll moved the hart, leave at `pc` · 4 the bus took the slice, leave at `pc` with the slice-ended flag |
 | `step_one` | `(pc) -> pc` | the escape hatch: run exactly one guest instruction the way the interpreter would |
+| `poll` | `(pc, cycle, instret) -> (status << 32) \| pc` | polling point (c) on its own, for the store the bus never saw. Same four answers, minus `MMIO_REFUSED` |
 
 **`cx.now` discipline (JD17).** The counters live in wasm locals and are handed
 back at every point the bus can observe them: as arguments to every MMIO import,
@@ -139,12 +141,62 @@ in the exchange area before every `step_one`, and in the exchange area at every
 exit. Charging a block's cycles at entry is *not* exact — P1b measured
 peripheral models reading `cx.now` mid-block.
 
-**Leaving after a store.** An MMIO store always leaves, because the bus always
-raises its side-band on one and the hart's polling point (c) does not move
-because a block was translated. An MMIO *load* can leave a yield behind too, and
-the interpreter does not look after a load — so neither does translated code,
-but it remembers, and the next store leaves even if it is an inline RAM store
-the bus never sees.
+### Polling after a store (M7b P2, DD17)
+
+Every store is a polling point. Until P2 every MMIO store was also an **exit**:
+`SocBus::write_mmio` raises the side-band unconditionally, so `mmio_store`
+always answered "leave", the stay ended, and the hart ran polling point (c) out
+in `run_blocks`. On `render-basic` t2 that was **4,245,005 of 11,843,442
+exits — 35.8 %**, each buying the interpreter 0.73 instructions before control
+came straight back.
+
+The polling point has not moved. It still runs after exactly the instruction it
+always did, with the pc and the counters the interpreter would have had, and it
+is still **the hart's own code** that runs it —
+`MachineHart::resample_external`, which is `pub` for this one caller and
+carries the contract beside it. What changed is only *where it is called from*,
+and the answer it can now give is "carry on".
+
+Two imports carry it, because there are two kinds of store:
+
+- a store the bus serves **already crosses to the host**, so the poll is fused
+  into that call. It costs no second crossing; it costs three more arguments —
+  the post-store pc, `mcycle` with the store charged, and `minstret` plus one —
+  and an `i64` result instead of an `i32`.
+- an inline RAM store made while bit 2 of the flags is set — an earlier MMIO
+  *load* left a yield, and the interpreter's polling point fires at the next
+  store of **any** kind — has no call to fuse into, so it gets `poll`.
+
+Per **BD1** the poll is its own import rather than a widened `step_one`:
+`step_one` runs a guest *instruction*, `poll` runs a *polling point*, and
+giving the escape hatch's status codes two meanings would put a poll on a path
+where none belongs.
+
+The host half is exact by construction (**BD2**) rather than by argument: set
+the hart's pc and counters, then `take_sideband()` → `resample_external` →
+`take_yield()`, in that order, and answer with the hart's own pc. It does not
+decide whether the poll *would* have mattered; it runs the poll and looks at
+where the hart ended up. `deliver_interrupt` takes only the CSR file, so the 32
+registers can stay in wasm locals for the length of the stay.
+
+One case deliberately is **not** a slice end: a bus that stops claiming
+`fetch_is_pure`. `run_blocks`'s answer to that is `cache.invalidate_all()` and
+`run_slice_stepping`, not a `SliceEnd`, and that check already runs after
+**every** `core.run` — so the poll answers `MMIO_LEAVE_AFTER`, the stay leaves
+ordinarily, and the hart's own check does what it always did.
+
+**What the emitted code pays.** The common path — an inline RAM store with
+nothing owed — is one `or` and one never-taken branch, which is *cheaper* than
+the `status == MMIO_LEAVE_AFTER || pending` test it replaces. The `poll` call,
+the result unpack and the exit are emitted once per store inside the cold arm.
+Emitted bytes still cost: the module goes **68,538,511 B → 76,166,092 B
+(+11.1 %)** on `render-basic` t2 at 16 blocks a function, and emit + compile go
+866 ms → 1,010 ms. That ~144 ms of one-time translation is real and is counted
+against the phase's steady-state win.
+
+`FLAG_AFTER_STORE` stays in the protocol even though this machine's core never
+sets it again: it is the answer a core that *cannot* poll still gives, and
+`run_blocks`'s `after_store` arm is the fallback that serves it.
 
 ## The browser seam (P6, JD11–JD13, JD25)
 
@@ -800,6 +852,72 @@ with identity checked in both engines. The spike's own caveat was that above
 ~10,000 blocks its padding harness emitted malformed bodies; a knob whose
 large sizes are known-broken is not the instrument for a question about large
 sizes. Nothing to bound and nothing to fix — it was replaced.
+
+## The after-store exit, and what it was worth (M7b P2, DD17)
+
+The mechanism is in "Polling after a store" above. This is what the phase
+measured, and the number is smaller than the milestone plan projected — which
+is the more useful half of the finding.
+
+**The exit census**, `render-basic` t2, 16 blocks a function, node/V8,
+`--jit --jit-report`, one invocation per stage:
+
+| why | before | share | instr after | after | share | instr after |
+|---|---:|---:|---:|---:|---:|---:|
+| after-store | 4,245,005 | 35.8 % | 3,085,814 | **1** | 0.0 % | **0** |
+| budget | 2,714,116 | 22.9 % | 7,688,630 | 2,834,596 | 36.7 % | 7,689,411 |
+| indirect-miss | 3,990,254 | 33.7 % | 2,468,809 | 3,993,292 | 51.7 % | 2,468,874 |
+| undecodable | 710,536 | 6.0 % | 827,370 | 710,536 | 9.2 % | 827,370 |
+| edge out | 183,531 | 1.5 % | 185,117 | 183,783 | 2.4 % | 185,369 |
+| **total** | **11,843,442** | | **14,255,740** | **7,722,208** | | **11,171,024** |
+
+The class is **gone**, not reduced: one exit in a whole run, and it is a real
+one — a poll that delivered an interrupt. 4,311,988 polling points ran inside
+stays, exactly the MMIO store count, and 4,311,987 of them answered "carry on".
+Mean stay 44.6 → 68.9 instructions; coverage 97.37 % → 97.94 %; cross-function
+transfers 41,659,754 → 41,772,422 (+0.27 %), which is what a longer stay costs.
+Budget exits rise 120,480, because a stay that no longer breaks at a store
+reaches more block-budget checks.
+
+**What it bought, and what it cost.** Best-of-5 interleaved, one invocation per
+engine, load quoted:
+
+| engine | size | before | after | Δ wall | translation Δ (emit + compile + instantiate) | steady-state Δ |
+|---|---:|---:|---:|---:|---:|---:|
+| node/V8 25.2.1 | 16 | 6.56 s / **0.839×** | 6.44 s / **0.854×** | **−120 ms** | +131 ms | **−251 ms** |
+| bun 1.1.18 / JSC | 8 | 7.76 s / **0.709×** | 7.84 s / **0.702×** | **+80 ms** | +91 ms | **−11 ms** |
+
+Two things that were not predicted:
+
+1. **An exit costs about 61 ns in V8 and about 3 ns in JSC.** 251 ms over
+   4,121,234 removed exits is 60.9 ns; 11 ms over the same is 2.6 ns. The
+   milestone plan budgeted ~600 ms for this class, which is ~145 ns an exit —
+   the entry path, the entry index, the module-side entry and a `run_blocks`
+   iteration added up from P6c's *instrumented* profile. The instrumentation is
+   the reason: `LP_EMU_JIT_ENTRY_TIME`'s own six `Instant::now()` calls cost
+   **1,618 ns** of the 2,114 ns it reports per entry, and the unclocked figure
+   it also prints is 495.9 ns before and 609.2 ns after — the whole entry,
+   module work included, not the part an exit pays twice.
+
+   **JSC's near-zero answer is the one that matters for the phone**, which is
+   JSC-family. Whatever P6c's 140 ns module-side entry at 8 blocks a function
+   is measuring, it is not a cost a removed exit gets back.
+
+2. **Emitted bytes are a real price.** Carrying the polling point inline costs
+   about 90 bytes a store, and the module goes 68,538,511 B → 76,166,092 B
+   (+11.1 %) at 16 blocks and 71,865,070 B → 79,492,518 B (+10.6 %) at 8. That
+   is +131 ms of translation in V8 and +91 ms in JSC — and in JSC it is the
+   *whole* of the row. The first cut of the emission was worse still
+   (76,759,632 B); folding the two exits into one and hoisting the `poll` call
+   into a single cold arm recovered 593,540 B and made the common path one
+   `or` and one never-taken branch.
+
+The MMIO census barely moves, as it should: **14,663,530 → 14,740,602
+operations (+0.53 %)**, SYSTIMER unchanged at 11,626,424 in both. The +77,072
+is the denominator, not the numerator — coverage rose 0.57 points, so slightly
+more of the run's peripheral traffic is issued by translated code. Stores are
+4,272,890 → 4,311,988, and the poll count equals the store count exactly, which
+is the contract: one polling point per store the bus served.
 
 ## Two more structural facts a reader will otherwise rediscover
 - **The hart's entry index has to be exact once the whole image is
