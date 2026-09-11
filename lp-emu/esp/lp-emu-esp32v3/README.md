@@ -1030,18 +1030,35 @@ LEDs at 29.99 fps for 240 s on the desk board
 `shader-compile-stress` compiles a whole shader on this machine with
 `unmapped=0`.
 
-**Where it lands depends on the walk's pacing, and that is worth knowing
-before reading a result.** The committed script writes its chunks 30 ms of
-guest time apart; on this tree that puts the stop *inside `loadProject`* and
-**no frame reaches any pad at all**. A 15 ms copy of the same script (scratch
-— the committed one is P4b's to commit byte-identical) gets 56 whole frames
-off IO18 with exactly one distinct lit byte string, and it is `[ORACLE] rgb=`
-byte for byte with FNV-1a `0x55772254`. The five-wire walk at 20 ms reaches
-all five opens and the compile-window black frame on every pad. So the claim
-holds; what is not yet reachable is reading (a), whose dump is thirty frames
-further on. `tests/shader_oracle_pin.rs` and `tests/five_wires.rs` recognise
+**Two of the three readings agree anyway.** `just walk-esp32v3-emu-frame` —
+the live upload, not a replay — loads the project, opens the output, compiles
+the shader (16 ms of guest time) and puts **two lit frames on IO18 that are
+`[ORACLE] rgb=` byte for byte**, 384 characters, `crc=0x55772254`, before the
+guest dies mid-`projectRead`:
+
+```text
+===== COMPARISON =====
+  pad 18: 3 frame(s) decoded, 2 lit, 1 distinct lit frame(s)
+PASS: pad 18 == [ORACLE] rgb (384 hex chars), 2 lit frame(s),
+      all of them the same bytes.
+FAIL: the guest's own lit dump never arrived (reading (a)).
+```
+
+So (b) = (c) is *measured*; (a) is what the defect still costs, because its
+dump is deferred thirty frames past the first lit one.
+
+**Where the stop lands depends on the walk's pacing, which is worth knowing
+before reading any result.** The committed `walks/shader-oracle.script`
+replays its chunks 30 ms of guest time apart, and at that spacing the stop
+lands *inside `loadProject`*: **no frame reaches any pad at all**. A 15 ms
+copy of the same script (scratch — the committed one is P4b's to commit
+byte-identical, so it is not re-paced here) gets 56 whole frames off IO18
+with one distinct lit byte string, again equal to the oracle's. The five-wire
+walk at 20 ms reaches all five opens and the compile-window black frame on
+every pad. `tests/shader_oracle_pin.rs` and `tests/five_wires.rs` recognise
 this one stop exactly and print a `SKIP` notice naming P4b rather than
-weakening an assertion around it.
+weakening an assertion around it — so when P4b lands, the gates run rather
+than having to be rewritten.
 
 ### The sinks
 

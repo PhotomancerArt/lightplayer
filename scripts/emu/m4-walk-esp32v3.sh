@@ -35,15 +35,22 @@
 #   loud guard — so both chips render provably identical pixels, because the
 #   endpoint chooses a wire and never a colour.
 #
-# ## ⚠️ This walk does not reach a lit frame today (M4 P4)
+# ## ⚠️ This walk reaches two of its three readings today (M4 P4)
 #
-# The guest dies a few seconds into rendering, deterministically, in
-# `_WindowUnderflow8` with a null `a1`: a level-1 interrupt's `save_context`
-# declares a frame spilled whose registers never reach memory, and the `retw`
-# that follows restores garbage. The crate README's "A frame three ways" has
-# the whole trace. Until that is fixed this script runs, prints the DEVICE and
-# ORACLE sections, and fails at the comparison with the pad's black frames —
-# which is the honest outcome and not something to widen a tolerance around.
+# The guest dies a few seconds in, deterministically, in `_WindowUnderflow8`
+# with a null `a1`: a level-1 interrupt's `save_context` declares a frame
+# spilled whose registers never reach memory, and the `retw` that follows
+# restores garbage. The crate README's "A frame three ways" has the whole
+# trace; M4 P4b is the fix.
+#
+# What that costs, measured on 2026-09-11 at 63965f5c7 + this branch: the
+# project loads, the output opens, the shader compiles (16 ms of guest time),
+# **two lit frames reach IO18 and both are `[ORACLE] rgb=` byte for byte** —
+# and then the guest dies mid-`projectRead`, so `lp-cli` reports a lost
+# connection and the run never reaches the deferred `[OUT] dump` 30 frames
+# later. So readings (b) and (c) agree and reading (a) is absent, the walk
+# prints all of it and exits non-zero. That is the honest outcome, and not
+# something to widen a tolerance around.
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
@@ -203,12 +210,21 @@ set +e
 cli_status=$?
 set -e
 tail -5 "$OUT/cli.stdout" || true
+upload_failed=0
 if [[ $cli_status -ne 0 ]]; then
     echo "upload: FAILED (exit $cli_status)" >&2
     tail -30 "$OUT/cli.stderr" >&2
-    exit 1
+    # …and the walk carries on regardless, deliberately. A guest that dies
+    # mid-upload has usually already loaded the project, opened its output and
+    # rendered — the run that found the window-spill defect got two lit frames
+    # onto the pad and then lost the link — and a walk that exits here throws
+    # away the only evidence it went to all this trouble to collect. The exit
+    # code still says FAILED.
+    echo "       continuing: the frames the pad already carried are printed below" >&2
+    upload_failed=1
+else
+    echo "upload: OK"
 fi
-echo "upload: OK"
 
 # Let the guest render on past the upload to its deferred lit dump, then let
 # the machine reach its own emulated deadline rather than killing it — a killed
@@ -258,7 +274,14 @@ echo
 echo "===== COMPARISON ====="
 # `grep -m 1`, never `| head -1`: see the DEVICE section for what a closed pipe
 # does to this script.
-hex_of() { echo "$1" | grep -m 1 -a "^\[$2\] rgb=" | cut -d= -f2; }
+#
+# ⚠️ `|| true` on every one of these, and it is not defensive noise: under
+# `pipefail` a `grep` that matches nothing fails the whole pipeline even
+# though `cut` succeeded, and an assignment from a failing command
+# substitution ends the script under `set -e`. A walk whose guest printed no
+# `rgb=` would then die at an *assignment*, with no comparison and no reason —
+# which is exactly the run that most needs one.
+hex_of() { echo "$1" | grep -m 1 -a "^\[$2\] rgb=" | cut -d= -f2 || true; }
 oracle_hex="$(hex_of "$oracle_out" ORACLE)"
 rv32_hex="$(hex_of "$oracle_out" ORACLE-RV32)"
 
@@ -266,17 +289,8 @@ rv32_hex="$(hex_of "$oracle_out" ORACLE-RV32)"
 # hardware walk. The first frame after a project load is the compile-window
 # black fallback (ADR 2026-08-03-memory-pressure-at-compile-safe-points), and
 # `frame_dump` dumps it at open before re-arming for the first lit frame.
-device_hex="$(grep -ao 'rgb=[0-9a-f]*' "$console" | tail -1 | cut -d= -f2)"
+device_hex="$(grep -ao 'rgb=[0-9a-f]*' "$console" | tail -1 | cut -d= -f2 || true)"
 dumps="$(grep -ac '\[OUT\] dump frame=' "$console" || true)"
-
-if [[ "$dumps" == "1" && "$device_hex" =~ ^0+$ ]]; then
-    echo "FAIL: the only frame dump in the console is the open-time black frame." >&2
-    echo "      That is the compile-window fallback; the deferred lit dump fires 30" >&2
-    echo "      frames after the first LIT one, and on this chip the shader compiles" >&2
-    echo "      incrementally over ~92 render ticks — so either the run was too short" >&2
-    echo "      (raise LP_WALK_TIMEOUT) or it ended early (the NOTE above says so)." >&2
-    exit 1
-fi
 
 pad_hex="$(jq -r --argjson pad "$PAD" -s '
     [ .[] | select(.kind == "ws281x-frame" and .pad == $pad and .complete
@@ -301,27 +315,54 @@ if [[ -z "$rv32_hex" ]]; then
     echo "      host frame is not an oracle.)" >&2
     exit 1
 fi
-if [[ -z "$device_hex" ]]; then
-    echo "FAIL: the guest printed no frame dump — nothing rendered." >&2
-    echo "      The DEVICE section above says why; the image was checked for the" >&2
-    echo "      readout before the run, so this is not a missing feature." >&2
-    exit 1
-fi
+fail=$upload_failed
+
+# ⚠️ **Readings (b) and (c) are compared FIRST, and a missing reading (a) does
+# not stop them.** The firmware's own dump is the *deferred* one — 30 frames
+# past the first lit frame — so on a run the window-spill defect cuts short it
+# is the reading most likely to be absent, and the pad-against-oracle
+# comparison is exactly the evidence such a run still holds. An earlier draft
+# exited here on a black-only dump and threw that away.
 if [[ -z "$pad_hex" ]]; then
-    echo "FAIL: no lit frame reached pad $PAD — the render never left the chip." >&2
-    echo "      $pad_frames frame(s) were decoded there. The firmware's own dump says" >&2
-    echo "      '$device_hex', so this is the RMT or the routing, not the render." >&2
-    exit 1
-fi
-if [[ "$distinct_lit" != "1" ]]; then
-    echo "FAIL: $distinct_lit distinct lit frames on pad $PAD, for a clock-free project." >&2
-    echo "      The render is not a function of the project alone; comparing any one of" >&2
-    echo "      them to the oracle would be luck." >&2
-    exit 1
+    echo "FAIL: no lit frame reached pad $PAD — the render never left the chip."
+    echo "      $pad_frames frame(s) were decoded there."
+    fail=1
+elif [[ "$distinct_lit" != "1" ]]; then
+    echo "FAIL: $distinct_lit distinct lit frames on pad $PAD, for a clock-free project."
+    echo "      The render is not a function of the project alone; comparing any one of"
+    echo "      them to the oracle would be luck."
+    fail=1
+elif [[ "$pad_hex" != "$oracle_hex" ]]; then
+    echo "FAIL: the pad and wasmtime differ."
+    echo "  pad $PAD:   $pad_hex"
+    echo "  wasmtime: $oracle_hex"
+    echo "  rv32-emu: $rv32_hex"
+    if [[ "$pad_hex" == "$rv32_hex" ]]; then
+        echo "  TRIAGE: the pad agrees with rv32-emu — a DIFFERENT code generator on a"
+        echo "          different ISA from the Xtensa one the classic JITs, so this is the"
+        echo "          wasmtime side. Start at lpvm-native, not at the machine."
+    else
+        echo "  TRIAGE: the pad agrees with NEITHER host engine. Both host engines agree"
+        echo "          with each other on this project, so this is the MACHINE or the"
+        echo "          classic's own code generator — the JIT's install path, the cache,"
+        echo "          or a peripheral."
+    fi
+    fail=1
+else
+    echo "PASS: pad $PAD == [ORACLE] rgb (${#pad_hex} hex chars), $lit_frames lit frame(s),"
+    echo "      all of them the same bytes."
 fi
 
-fail=0
-if [[ "$device_hex" != "$pad_hex" ]]; then
+if [[ -z "$device_hex" || ( "$dumps" == "1" && "$device_hex" =~ ^0+$ ) ]]; then
+    echo "FAIL: the guest's own lit dump never arrived (reading (a))."
+    echo "      The open-time dump is the compile-window black fallback; the deferred lit"
+    echo "      dump fires 30 frames after the first LIT one. So either the run was too"
+    echo "      short (raise LP_WALK_TIMEOUT) or it ended early — the NOTE above says"
+    echo "      which, and the crate README's \"A frame three ways\" says what is known."
+    fail=1
+    device_hex=""
+fi
+if [[ -n "$device_hex" && "$device_hex" != "$pad_hex" ]]; then
     echo "FAIL: the firmware's dump and the pad disagree."
     echo "  [OUT] dump: $device_hex"
     echo "  pad $PAD:      $pad_hex"
@@ -330,7 +371,7 @@ if [[ "$device_hex" != "$pad_hex" ]]; then
     echo "          cannot make, and the reason this walk exists."
     fail=1
 fi
-if [[ "$device_hex" != "$oracle_hex" ]]; then
+if [[ -n "$device_hex" && "$device_hex" != "$oracle_hex" ]]; then
     echo "FAIL: guest and wasmtime frames differ."
     echo "  guest:    $device_hex"
     echo "  wasmtime: $oracle_hex"
@@ -349,7 +390,7 @@ if [[ "$device_hex" != "$oracle_hex" ]]; then
 fi
 
 if [[ $fail -eq 0 ]]; then
-    echo "PASS: the frame is byte-identical on all three readings (${#device_hex} hex chars)."
+    echo "PASS: the frame is byte-identical on all THREE readings (${#device_hex} hex chars)."
     echo "  [OUT] dump == pad $PAD == [ORACLE] rgb"
     [[ "$device_hex" == "$rv32_hex" ]] || \
         echo "  note: rv32-emu differs from both — investigate."

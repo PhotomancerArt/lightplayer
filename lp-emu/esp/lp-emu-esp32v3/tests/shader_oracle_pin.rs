@@ -77,11 +77,12 @@
 //! ⚠️ **On this tree neither has run green**, and not only because of where
 //! the defect lands: at the committed script's 30 ms chunk gap the guest dies
 //! *inside `loadProject`*, before any output opens, so no frame reaches any
-//! pad at all. A 15 ms copy of the same script — scratch, never committed,
-//! and the pacing the script's header says was measured — renders 56 whole
-//! frames off IO18 with one distinct lit byte string, equal to [`ORACLE_RGB`]
-//! with FNV-1a [`ORACLE_CRC`]. So the claim below holds and its reachability
-//! is the defect's, not the walk's. The script is P4b's to commit
+//! pad at all. The claim itself is measured elsewhere — `just
+//! walk-esp32v3-emu-frame`, the live upload rather than this replay, puts two
+//! lit frames on IO18 and both are [`ORACLE_RGB`] byte for byte, and a 15 ms
+//! copy of this script (scratch, never committed) renders 56 whole frames
+//! with one distinct lit byte string, the same. So what is unreachable is the
+//! defect's doing, not the walk's. The script is P4b's to commit
 //! byte-identical, so it is not re-paced here.
 //!
 //! Both are `#[ignore]`d for `test_support`'s usual reason as well: a plain
