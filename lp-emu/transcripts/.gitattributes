@@ -5,3 +5,9 @@
 # is not a capture. The ANSI escapes, the espflash progress bars and the CRs are
 # all part of the bytes under test.
 *.txt -text
+
+# `raw/*.bin` beside a transcript is the same rule for a capture that could not
+# be trimmed to valid UTF-8 without losing bytes: the full read, unedited,
+# verbatim, with the trimmed `.txt`'s sidecar `note` stating which byte range
+# is which (esp32v3/boot-idle/silicon-esp32v3-2026-09-10-2e21b6226-*).
+*.bin -text

@@ -155,6 +155,34 @@ grade = "measured"
 because = "real bytes over a real port"
 
 [[configuration]]
+# Identity is the CHIP, not the board (Yona, G2 2026-09-06), same as
+# `silicon:esp32c6` above. The desk board is a `domraem/dom-z-102`, which
+# each transcript records in its own sidecar, beside `mac` and `silicon_rev`.
+name = "silicon:esp32v3"
+description = "Real ESP32 (classic, revision v3) silicon on a serial port. The desk board is a domraem/dom-z-102 (chip revision v3.1, MAC 30:76:f5:ec:f6:34) reached over a CH340K bridge, which each transcript records in its own sidecar."
+chip = "esp32v3"
+
+[[configuration.trust]]
+class = "memory"
+grade = "measured"
+because = "the board is the ground truth; nothing models it"
+
+[[configuration.trust]]
+class = "timing"
+grade = "measured"
+because = "a real clock on real flash with real wait states"
+
+[[configuration.trust]]
+class = "boot-log"
+grade = "measured"
+because = "the real ROM and the real IDF bootloader printed it"
+
+[[configuration.trust]]
+class = "wire"
+grade = "measured"
+because = "real bytes over a real CH340K"
+
+[[configuration]]
 name = "esp-emu:0.42.0"
 description = "Espressif's binary emulator, 0.42.0. A second oracle for the C6 only where the desk validated it (spike report §11)."
 chip = "esp32c6"

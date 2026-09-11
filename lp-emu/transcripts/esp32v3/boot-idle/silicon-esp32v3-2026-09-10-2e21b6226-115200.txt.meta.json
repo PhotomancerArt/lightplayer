@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "payload": "boot-idle",
+  "chip": "esp32v3",
+  "configuration": "silicon:esp32v3",
+  "date": "2026-09-10",
+  "board": "domraem/dom-z-102",
+  "board_mac": "30:76:f5:ec:f6:34",
+  "chip_revision": "v3.1",
+  "baud": 115200,
+  "machine": "115200",
+  "firmware_commit": "2e21b6226bcd",
+  "firmware_features": ["esp32", "server", "float-f32"],
+  "firmware_dirty": true,
+  "source": "lab task L0, 2026-09-10 04:20. Reset over the CH340K with whole-status TIOCMSET (RTS-only = EN low, then 0 to run) and eight seconds of reading, from the session scratchpad's capture.py. The WCH macOS dext ignores the single-bit TIOCMBIS/TIOCMBIC ioctls behind pyserial's .dtr/.rts setters, so the lines are driven whole-status or not at all (lp-app/lpa-client/src/stream/serialport_stream.rs:51-60 records the same hardware fact).",
+  "capture": "python capture.py --baud 115200 --read 8",
+  "note": "THE BOARD IS RUNNING A DIRTY TREE. 2e21b6226bcd-dirty, so no commit rebuilds these bytes and scripts/emu/build-reference-image.sh cannot produce the image that made them. That is ruling R7 (m3/notes.md), it is a director decision before lab task L1 is dispatched, and it is why G2's memory comparison is held: this transcript's boot-log SHAPE is comparable line for line, and its memory-class fields are comparable only against an emulated run of the SAME bytes. L1 either reflashes from a clean pinned commit or records the dirty diff. This capture is the 115200 half: the mask ROM banner and the ESP-IDF v5.1-beta1-378-gea5e0ff298 second-stage bootloader, ending in the baud-change garbage as the app reprograms clkdiv to 921600. The 'E boot: Image contains multiple DROM segments. Only the last one will be mapped.' line is benign and is printed on every boot of this image (two DROM segments, the first 256 bytes of esp_app_desc); a ROM-up twin must reproduce it, and does. 'Saved PC:' is absent: this part prints it only after a non-power-on reset.\n\nTHE COMMITTED .txt IS TRIMMED TO ITS DECODABLE PREFIX. `python capture.py` opened the port once at 115200 and kept reading through the app's own clkdiv reprogram to 921600, so the raw capture's tail (bytes 2236..3027 of the 3027-byte read) is line noise: the same UART shifter destuffing 921600-baud bit times as if they were 115200 ones, which is not valid UTF-8 and is not something the device 'said' in any readable sense. Loading it with `Transcript::load` (`std::fs::read_to_string`) fails outright on the first invalid byte — this is a *read* failure, not a filing mismatch, and trimming it is not editing a transcript's content: every byte kept here is unchanged from the wire, in the same order, and the boundary is the last complete line before the garbage starts (`...will be mapped.<ESC>[0m\\r\\n`, byte offset 2236 of the raw capture). The full 3027-byte raw capture — banner, bootloader, and the garbage tail alike — is preserved byte-for-byte and untouched at `raw/silicon-esp32v3-2026-09-10-2e21b6226-115200.raw.bin` (bytes [0, 2236) of that file are these same bytes; bytes [2236, 3027) are the trimmed tail).",
+  "trust": [
+    {
+      "class": "boot-log",
+      "grade": "measured",
+      "because": "the real mask ROM and the real IDF bootloader printed these bytes over the real cable"
+    },
+    {
+      "class": "memory",
+      "grade": "measured",
+      "because": "the board is the ground truth; nothing models it"
+    },
+    {
+      "class": "timing",
+      "grade": "measured",
+      "because": "a real clock on real flash with real wait states"
+    },
+    {
+      "class": "wire",
+      "grade": "measured",
+      "because": "real bytes over a real CH340K"
+    }
+  ]
+}
