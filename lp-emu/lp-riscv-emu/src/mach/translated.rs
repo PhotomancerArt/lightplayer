@@ -78,6 +78,14 @@ pub enum RunOutcome {
         /// yield the hart must now observe — polling point (c). The hart does
         /// exactly what it does after an interpreted store: `take_sideband()`
         /// then `resample_external`, `take_yield()` then end the slice.
+        ///
+        /// **This is the fallback, not the usual path (M7b P2).** A core that
+        /// can reach the hart runs the polling point itself, inside the stay,
+        /// through [`MachineHart::resample_external`] — so it never has to
+        /// leave for one, and it reports `false` here. The arm stays because a
+        /// core that *cannot* — a host without a hart to poll on — is still a
+        /// correct core, and because this is the contract the two answers are
+        /// compared against.
         after_store: bool,
     },
     /// It ran, and the last thing it did **ended the slice**.

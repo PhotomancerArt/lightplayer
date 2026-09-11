@@ -79,7 +79,7 @@ function runCase(name) {
     return call;
   };
 
-  // The three imports, replayed. `pc`, `cycle`, `address`, `kind` and `value`
+  // The four imports, replayed. `pc`, `cycle`, `address`, `kind` and `value`
   // are ignored on purpose: the recording is in call order, and checking the
   // arguments here would be checking the recorder against itself. What is
   // being checked is what the module *does* with the answers.
@@ -87,7 +87,10 @@ function runCase(name) {
     emu: {
       memory,
       mmio_load: () => BigInt(take("load").ret),
-      mmio_store: () => take("store").ret,
+      // `(status << 32) | pc` since M7b P2: a store's answer is a polling
+      // point's answer, so it is an i64 like a load's.
+      mmio_store: () => BigInt(take("store").ret),
+      poll: () => BigInt(take("poll").ret),
       step_one: () => {
         const call = take("step");
         for (let i = 0; i < 32; i++) {

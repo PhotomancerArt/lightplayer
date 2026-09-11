@@ -30,6 +30,12 @@
 //!   pending in the same breath. (Atomics are included: an AMO is a store.)
 //!   On a RAM-only `Bus` both calls are inlined constants the optimizer
 //!   deletes; `Memory` overrides neither.
+//!
+//!   Since M7b P2 this one may be **run from inside a translated stay**, at
+//!   exactly the same instruction, through
+//!   [`MachineHart::resample_external`] — which is why that method is `pub`
+//!   and carries the contract a caller has to keep. The point did not move:
+//!   only where it is called from did.
 //! - **(d)** whenever the owning machine calls
 //!   [`MachineHart::poll_interrupts`] at a scheduler event.
 //!
@@ -1427,8 +1433,30 @@ impl<B: Bus> MachineHart<B> {
     /// which for a UART's TX-done or a software interrupt is "never".
     /// [`Bus::pending_cpu_interrupt`] is the bus's answer, and a bus that
     /// raises the side-band is required to implement it.
+    ///
+    /// # Calling it from a translated core
+    ///
+    /// It is `pub` for one caller and one reason: a translated core that wants
+    /// to run polling point (c) **without ending its stay** has to run *this*,
+    /// not a copy of it (M7b, plan.md BD2). Two copies of a polling point is
+    /// the bug the poll import exists to avoid, so the rule is written down
+    /// here rather than left to the caller:
+    ///
+    /// - it may be called only at the **same instruction** the hart itself
+    ///   would have polled at — after a Store- or System-class instruction
+    ///   whose bus reported [`Bus::take_sideband`];
+    /// - the hart's `pc` and counters must already hold what the interpreter
+    ///   would hold there, which for a store is the **post-store** pc,
+    ///   `mcycle` with the instruction charged and `minstret` plus one (JD17);
+    /// - the caller must observe [`Bus::take_yield`] afterwards exactly as
+    ///   [`MachineHart::run_blocks`] does, and must not swallow a moved `pc`:
+    ///   a delivered interrupt means the stay leaves at the trap vector.
+    ///
+    /// It does not touch the register file — `trap::deliver_interrupt` takes
+    /// only the CSR file — so a caller holding the registers somewhere else
+    /// for the length of a stay does not have to flush them.
     #[inline]
-    fn resample_external(&mut self, bus: &B) {
+    pub fn resample_external(&mut self, bus: &B) {
         self.external = bus.pending_cpu_interrupt();
         self.poll_interrupts();
     }

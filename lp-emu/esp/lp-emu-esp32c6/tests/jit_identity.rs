@@ -305,3 +305,195 @@ fn a_core_whose_entries_are_never_reached_is_invisible() {
     assert_eq!(m.harts[0].cycle_count(), interpreted.cycles);
     assert_eq!(m.harts[0].instruction_count(), interpreted.retired);
 }
+
+// --- M7b P2: polling point (c) runs inside the stay -------------------------
+//
+// A store is a polling point. Until P2 it was also an **exit**: the stay ended
+// at every MMIO store and the hart ran the poll out in its own loop. Now the
+// poll runs inside the stay, through the store's own host call, and the two
+// tests below are the two answers it can give — "the hart moved" and "it did
+// not".
+//
+// These runs use the full peripheral set (`Esp32C6Builder::new`), not
+// `bare()`: the doorbell needs a real `INTPRI`, a real interrupt matrix and a
+// real `PLIC_MX` behind the MMIO windows, and on `bare()` the same stores land
+// on an unmapped window that raises nothing.
+
+/// The doorbell: `INTPRI.CPU_INTR_FROM_CPU0`. A store of 1 raises interrupt
+/// source `FROM_CPU_INTR0` (22) from **inside the store**, which is the shape
+/// polling point (c) exists for.
+const DOORBELL: u32 = memmap::periph::INTPRI + 0x90;
+/// `INTERRUPT_CORE0`'s map register for source 22: which CPU interrupt the
+/// matrix routes it to.
+const ROUTE_FROM_CPU0: u32 = memmap::periph::INTERRUPT_CORE0 + 4 * 22;
+/// `PLIC_MX`'s enable mask, and the priority of CPU interrupt 7. The reset
+/// threshold is 1, so 2 is takeable.
+const PLIC_ENABLE: u32 = memmap::periph::PLIC_MX;
+const PLIC_PRI7: u32 = memmap::periph::PLIC_MX + 0x10 + 4 * 7;
+/// The CPU interrupt the doorbell is routed to.
+const CPU_INT: u32 = 7;
+/// The trap handler: a marker and a tight self-loop, so nothing the handler
+/// does can move `mepc` after the interrupt set it.
+const HANDLER: u32 = memmap::HP_SRAM_BASE + 0x3000;
+
+/// A guest that arms the interrupt matrix and then rings the doorbell from
+/// the **middle of a block**.
+///
+/// Returns the program and the pc of the instruction after the store, which
+/// is what `mepc` has to be: the store retired, so the hart would have
+/// executed that one next.
+fn doorbell_guest() -> (Vec<u32>, u32) {
+    let mut p = Vec::new();
+    // Route source 22 to CPU interrupt 7, give it priority 2, enable it.
+    p.extend(li(8, ROUTE_FROM_CPU0));
+    p.push(addi(5, 0, CPU_INT as i32));
+    p.push(sw(5, 8, 0));
+    p.extend(li(8, PLIC_PRI7));
+    p.push(addi(5, 0, 2));
+    p.push(sw(5, 8, 0));
+    p.extend(li(8, PLIC_ENABLE));
+    p.push(addi(5, 0, 1 << CPU_INT));
+    p.push(sw(5, 8, 0));
+    // The store under test, with work either side of it so it is mid-block.
+    p.extend(li(9, DOORBELL));
+    p.push(addi(6, 0, 1));
+    p.push(addi(28, 0, 0));
+    p.push(addi(29, 0, 0));
+    let ring = p.len();
+    p.push(sw(6, 9, 0)); // ring: this raises the line from inside the store
+    p.push(addi(28, 28, 7)); // t3 — must NOT have run when the trap is taken
+    p.push(addi(29, 29, 9)); // t4 — likewise
+    p.push(EBREAK);
+    let after_ring = CODE + 4 * (ring as u32 + 1);
+    (p, after_ring)
+}
+
+/// What one doorbell run left behind, including the trap state the polling
+/// point produced.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Trapped {
+    regs: [i32; 32],
+    pc: u32,
+    cycles: u64,
+    retired: u64,
+    mepc: u32,
+    mcause: u32,
+}
+
+fn run_doorbell(policy: Option<Emit>) -> (Trapped, u32, Option<String>) {
+    let mut m = Esp32C6Builder::new().build().unwrap();
+    let (program, after_ring) = doorbell_guest();
+    place(&mut m, CODE, &program);
+    // A marker and a self-loop: once the handler is entered nothing else can
+    // trap, so `mepc` still holds what the interrupt put there.
+    place(&mut m, HANDLER, &[addi(30, 0, 0x55), jal(0, 0)]);
+    m.harts[0].set_pc(CODE);
+    // What the ROM leaves behind on real silicon: `MPP = 3`, `MPIE`, `MIE`
+    // (`csr::MSTATUS_BOOT`). Without `MIE` the poll wakes a `wfi` and
+    // delivers nothing, which is a different test.
+    let boot = lp_riscv_emu::mach::csr::MSTATUS_BOOT;
+    assert!(m.harts[0].set_csr_raw(lp_riscv_emu::mach::csr::MSTATUS, boot));
+    assert!(m.harts[0].set_csr_raw(lp_riscv_emu::mach::csr::MTVEC, HANDLER));
+    assert!(m.harts[0].set_csr_raw(lp_riscv_emu::mach::csr::MIE, 1 << CPU_INT));
+
+    if let Some(policy) = policy {
+        let model = m.harts[0].cycle_model();
+        let report = lp_emu_esp32c6::jit::install(
+            &mut m.harts[0],
+            &mut m.bus,
+            &[CODE],
+            256,
+            256,
+            model,
+            policy,
+            None,
+        )
+        .expect("the guest translates");
+        assert!(report.blocks > 0, "something was translated");
+    }
+    m.run_until(&StopCondition::after_micros(200));
+    let hart = &m.harts[0];
+    let out = Trapped {
+        regs: *hart.regs(),
+        pc: hart.pc(),
+        cycles: hart.cycle_count(),
+        retired: hart.instruction_count(),
+        mepc: hart.csr().mepc,
+        mcause: hart.csr().mcause,
+    };
+    (out, after_ring, m.harts[0].translated_core_report())
+}
+
+/// **Test 1.** A store that raises a line with `MIE` set takes the trap at
+/// exactly the instruction the interpreter takes it at, with the same `mepc`
+/// — and the translated run gets there without leaving the stay.
+#[test]
+fn a_store_that_raises_an_interrupt_traps_where_the_interpreter_traps() {
+    let (interpreted, after_ring, none) = run_doorbell(None);
+    assert!(none.is_none(), "no core, no report");
+    // Worth nothing unless the interrupt was actually taken, at the store.
+    assert_eq!(
+        interpreted.mepc, after_ring,
+        "the store retired and the trap was taken before the next \
+         instruction: {interpreted:?}"
+    );
+    assert_eq!(
+        interpreted.mcause,
+        0x8000_0000 | CPU_INT,
+        "an interrupt, not an exception: {interpreted:?}"
+    );
+    assert_eq!(
+        (interpreted.regs[28], interpreted.regs[29]),
+        (0, 0),
+        "the two instructions after the store did not retire: {interpreted:?}"
+    );
+    assert_eq!(interpreted.regs[30], 0x55, "the handler ran");
+
+    let (translated, _, report) = run_doorbell(Some(Emit::EVERYTHING));
+    assert_eq!(
+        translated, interpreted,
+        "the poll delivers at the same instruction, with the same mepc"
+    );
+    let report = report.expect("--jit-report has something to print");
+    // The polling point ran inside the stay, and this one moved the hart.
+    assert!(
+        report.contains("after_store 0,"),
+        "no stay left for a polling point: {report}"
+    );
+    assert!(!report.contains("polls 0 ("), "the poll ran: {report}");
+    assert!(
+        !report.contains("(0 left the stay)"),
+        "and at least one of them moved the hart: {report}"
+    );
+}
+
+/// The all-escape build has to agree too: there the store is the
+/// interpreter's own, so the trap comes out of `step_one` rather than out of
+/// the poll import, and the answer must still be the same.
+#[test]
+fn the_all_escape_build_takes_the_same_interrupt() {
+    let (interpreted, _, _) = run_doorbell(None);
+    let (escaped, _, _) = run_doorbell(Some(Emit::NOTHING));
+    assert_eq!(escaped, interpreted);
+}
+
+/// **Test 2.** A store that raises nothing the hart has to act on no longer
+/// ends the stay at all: the exit class is gone, and the polling point that
+/// replaced it answered "carry on" every single time.
+#[test]
+fn a_store_that_raises_nothing_no_longer_ends_the_stay() {
+    let (_, report) = run(Some(Emit::EVERYTHING));
+    let report = report.expect("--jit-report has something to print");
+    assert!(
+        report.contains("after_store 0,"),
+        "no stay leaves for a polling point any more: {report}"
+    );
+    assert!(
+        !report.contains("polls 0 ("),
+        "and the polling point still ran, once per store: {report}"
+    );
+    assert!(
+        report.contains("(0 left the stay)"),
+        "none of them had anything to do: {report}"
+    );
+}

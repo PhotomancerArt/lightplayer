@@ -9,10 +9,11 @@
 //!
 //! # The three halves of the seam
 //!
-//! 1. **Three exports of the emulator's own module** — [`jit_mmio_load`],
-//!    [`jit_mmio_store`], [`jit_step_one`]. The JS host hands them straight to
-//!    a translated module as its `emu.mmio_load` / `emu.mmio_store` /
-//!    `emu.step_one` imports, together with `emu.memory`, which is the
+//! 1. **Four exports of the emulator's own module** — [`jit_mmio_load`],
+//!    [`jit_mmio_store`], [`jit_step_one`], [`jit_poll`]. The JS host hands
+//!    them straight to a translated module as its `emu.mmio_load` /
+//!    `emu.mmio_store` / `emu.step_one` / `emu.poll` imports, together with
+//!    `emu.memory`, which is the
 //!    emulator's own linear memory. Every call a translated module makes is
 //!    therefore wasm→wasm; P2 measured that at 1.60 ns against 6.05 ns through
 //!    a JS shim.
@@ -186,18 +187,47 @@ pub extern "C" fn jit_mmio_load(pc: i32, cycle: i64, address: i32, kind: i32) ->
     (i64::from(out.status) << 32) | i64::from(out.value)
 }
 
-/// `emu.mmio_store`: the same, storing. Returns the status.
+/// `emu.mmio_store`: the same, storing — and polling point (c) with it (M7b
+/// P2). Returns `(status << 32) | pc`.
 #[unsafe(no_mangle)]
-pub extern "C" fn jit_mmio_store(pc: i32, cycle: i64, address: i32, kind: i32, value: i32) -> i32 {
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the wire shape of the import; see `HostOps::mmio_store`"
+)]
+pub extern "C" fn jit_mmio_store(
+    pc: i32,
+    cycle: i64,
+    address: i32,
+    kind: i32,
+    value: i32,
+    post_pc: i32,
+    post_cycle: i64,
+    post_instret: i64,
+) -> i64 {
     // SAFETY: as [`jit_mmio_load`].
     let ops = unsafe { &mut *current() };
-    ops.mmio_store(
+    let out = ops.mmio_store(
         pc as u32,
         cycle as u64,
         address as u32,
         kind as u32,
         value as u32,
-    ) as i32
+        post_pc as u32,
+        post_cycle as u64,
+        post_instret as u64,
+    );
+    (i64::from(out.status) << 32) | i64::from(out.pc)
+}
+
+/// `emu.poll`: polling point (c) for the store the bus never saw — an inline
+/// RAM store made while an earlier MMIO load's yield is still owed. Returns
+/// `(status << 32) | pc`.
+#[unsafe(no_mangle)]
+pub extern "C" fn jit_poll(pc: i32, cycle: i64, instret: i64) -> i64 {
+    // SAFETY: as [`jit_mmio_load`].
+    let ops = unsafe { &mut *current() };
+    let out = ops.poll(pc as u32, cycle as u64, instret as u64);
+    (i64::from(out.status) << 32) | i64::from(out.pc)
 }
 
 /// `emu.step_one`: the escape hatch (JD10). Runs exactly one guest instruction

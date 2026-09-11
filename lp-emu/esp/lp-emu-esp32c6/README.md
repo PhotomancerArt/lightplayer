@@ -1581,7 +1581,7 @@ run.
 |---|---|
 | `--jit` | translate the image to wasm at boot and at each guest `fence.i`, and run that instead of interpreting |
 | `--interpreter` | the free oracle: no translated core at all |
-| `--jit-report` | the boot-cost line per translation event (JD20), the coverage line, and the exit census — how many stays ended for each reason and how many instructions the interpreter then retired |
+| `--jit-report` | the boot-cost line per translation event (JD20), the coverage line, and the exit census — how many stays ended for each reason and how many instructions the interpreter then retired. Since M7b P2 it also carries `polls N (M left the stay)`: polling point (c) run **inside** a stay, and how many of those ended it. `N − M` is the after-store exit that did not happen |
 | `--jit-escape-all` | emit no guest semantics at all; every instruction through the escape hatch. Complete, correct, slow, and the proof that a partial translator can only be slow and never wrong |
 | `--jit-blocks <N>` | a bound on how many discovered blocks are installed. **Unbounded by default since P5** — the whole image installs — and kept only for asking what a smaller set costs |
 | `--jit-fn-blocks <N>` | guest blocks per wasm sub-dispatcher. wasm caps a function body at 7,654,321 bytes, so the module is a selector over as many functions as the image needs; this sizes one. Default **256**, chosen by measurement in both engines — `lp-emu-jit/README.md` has the table. A module the host refuses halves this and retries, and never drops a block |

@@ -64,7 +64,7 @@ const CHUNK: usize = 4096;
 /// One import call, as the replay hands it back.
 #[derive(Clone, Copy, Debug)]
 pub struct CallRec {
-    /// 0 `mmio_load`, 1 `mmio_store`.
+    /// 0 `mmio_load`, 1 `mmio_store`, 2 `poll` (M7b P2).
     pub kind: u8,
     pub pc: u32,
     pub cycle: u64,
@@ -72,7 +72,8 @@ pub struct CallRec {
     pub access: u32,
     /// The value a store carried; zero for a load.
     pub value: u32,
-    /// `(status << 32) | value` for a load, the status for a store.
+    /// `(status << 32) | value` for a load; `(status << 32) | pc` for a store
+    /// or a poll, because both of those answer a polling point.
     pub result: u64,
 }
 

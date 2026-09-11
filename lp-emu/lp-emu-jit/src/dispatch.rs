@@ -331,7 +331,11 @@ pub fn emit_module(
         [ValType::I32, ValType::I64, ValType::I32, ValType::I32],
         [ValType::I64],
     );
-    // 1: mmio_store(pc, cycle, address, kind, value) -> status
+    // 1: mmio_store(pc, cycle, address, kind, value,
+    //               post_pc, post_cycle, post_instret) -> (status << 32) | pc
+    //
+    // The last three are polling point (c)'s: the store's own call runs it, so
+    // a store that raises an interrupt does not have to leave (M7b P2).
     types.ty().function(
         [
             ValType::I32,
@@ -339,11 +343,18 @@ pub fn emit_module(
             ValType::I32,
             ValType::I32,
             ValType::I32,
+            ValType::I32,
+            ValType::I64,
+            ValType::I64,
         ],
-        [ValType::I32],
+        [ValType::I64],
     );
     // 2: step_one(pc) -> pc
     types.ty().function([ValType::I32], [ValType::I32]);
+    // 3: poll(pc, cycle, instret) -> (status << 32) | pc
+    types
+        .ty()
+        .function([ValType::I32, ValType::I64, ValType::I64], [ValType::I64]);
     let stay = [
         ValType::I32,
         ValType::I64,
@@ -352,9 +363,9 @@ pub fn emit_module(
         ValType::I64,
         ValType::I64,
     ];
-    // 3: a sub-dispatcher: (entry_local, …) -> (cross << 32) | value
+    // 4: a sub-dispatcher: (entry_local, …) -> (cross << 32) | value
     types.ty().function(stay, [ValType::I64]);
-    // 4: run(entry_global, …) -> exit pc
+    // 5: run(entry_global, …) -> exit pc
     types.ty().function(stay, [ValType::I32]);
     module.section(&types);
 
@@ -362,6 +373,7 @@ pub fn emit_module(
     imports.import(IMPORT_MODULE, "mmio_load", EntityType::Function(0));
     imports.import(IMPORT_MODULE, "mmio_store", EntityType::Function(1));
     imports.import(IMPORT_MODULE, "step_one", EntityType::Function(2));
+    imports.import(IMPORT_MODULE, "poll", EntityType::Function(3));
     imports.import(
         IMPORT_MODULE,
         "memory",
@@ -380,9 +392,9 @@ pub fn emit_module(
 
     let mut funcs = FunctionSection::new();
     for _ in 0..count {
-        funcs.function(3);
+        funcs.function(4);
     }
-    funcs.function(4);
+    funcs.function(5);
     module.section(&funcs);
 
     // The flat selector's own table: one funcref per sub-dispatcher, in
@@ -498,7 +510,7 @@ fn selector(count: usize, chunk: usize, layout: Layout, shape: Selector) -> Func
     e(I::LocalSet(S_FIDX));
 
     // The local index and the five stay arguments, which both shapes push in
-    // the same order onto the same six-parameter signature (type 3).
+    // the same order onto the same six-parameter signature (type 4).
     let args = |e: &mut dyn FnMut(I<'static>)| {
         // local = next % chunk
         e(I::LocalGet(S_NEXT));
@@ -524,7 +536,7 @@ fn selector(count: usize, chunk: usize, layout: Layout, shape: Selector) -> Func
             args(&mut e);
             e(I::LocalGet(S_FIDX));
             e(I::CallIndirect {
-                type_index: 3,
+                type_index: 4,
                 table_index: 0,
             });
             e(I::LocalSet(S_RET));

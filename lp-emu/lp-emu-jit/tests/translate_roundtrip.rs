@@ -20,8 +20,9 @@ use lp_emu_jit::discover::discover;
 use lp_emu_jit::dispatch::{Selector, emit_module, target_table_bytes, write_target_tables};
 use lp_emu_jit::host::{
     self, EXCHANGE_CROSS, EXCHANGE_CYCLE, EXCHANGE_INDIRECT_MISS, EXCHANGE_INSTRET, EXCHANGE_LEN,
-    EXCHANGE_REGS, HostOps, MMIO_OK, MmioLoad, MmioStore, PERM_ENTRIES, PERM_NONE, PERM_READ_WRITE,
-    PERM_SHIFT, STEP_CONTINUE, StepOne,
+    EXCHANGE_REGS, HostOps, MMIO_LEAVE_AFTER, MMIO_OK, MMIO_PENDING, MMIO_SLICE_ENDED, MmioLoad,
+    MmioStore, PERM_ENTRIES, PERM_NONE, PERM_READ_WRITE, PERM_SHIFT, Polled, STEP_CONTINUE,
+    StepOne,
 };
 use lp_emu_jit::host_wasmtime::WasmtimeCore;
 use lp_emu_jit::replay::GRANULE_BYTES;
@@ -52,8 +53,24 @@ struct FakeHost {
     loads: Vec<(u32, u64, u32, u32)>,
     /// `(pc, cycle, address, kind, value)` per `mmio_store`.
     stores: Vec<(u32, u64, u32, u32, u32)>,
+    /// The `(post_pc, post_cycle, post_instret)` each `mmio_store` was handed
+    /// for its polling point — the state the interpreter would hold there.
+    posts: Vec<(u32, u64, u64)>,
     /// The pcs handed to `step_one`, in order.
     escapes: Vec<u32>,
+    /// `(pc, cycle, instret)` per stand-alone `poll` — the polling point an
+    /// inline RAM store owes after a load left a yield (M7b P2).
+    polls: Vec<(u32, u64, u64)>,
+    /// What the polling point fused into the next `mmio_store` should answer.
+    /// `None` is the ordinary case: the store retired and the hart did not
+    /// move.
+    store_answer: Option<Polled>,
+    /// What a stand-alone `poll` should answer.
+    poll_answer: Option<Polled>,
+    /// When set, every `mmio_load` reports [`MMIO_PENDING`], which is how a
+    /// load leaves the obligation that makes the next inline RAM store a
+    /// polling point.
+    load_leaves_yield: bool,
     /// Every import call's *result*, in call order, so another engine can be
     /// handed the same answers without reimplementing the host. See
     /// `engine_case`.
@@ -64,7 +81,8 @@ struct FakeHost {
 #[derive(Clone, Debug)]
 enum Call {
     Load(i64),
-    Store(i32),
+    Store(i64),
+    Poll(i64),
     /// `(pc, cycle, instret, status, regs, memory granules the interpreter
     /// changed)`.
     ///
@@ -93,7 +111,11 @@ impl HostOps for FakeHost {
     fn mmio_load(&mut self, pc: u32, cycle: u64, address: u32, kind: u32) -> MmioLoad {
         self.loads.push((pc, cycle, address, kind));
         let out = MmioLoad {
-            status: MMIO_OK,
+            status: if self.load_leaves_yield {
+                MMIO_PENDING
+            } else {
+                MMIO_OK
+            },
             // A recognisable value, and a different one per address so a
             // mixed-up operand shows up as a wrong number rather than a zero.
             value: 0xAB00 | (address & 0xff),
@@ -111,10 +133,32 @@ impl HostOps for FakeHost {
         address: u32,
         kind: u32,
         value: u32,
+        post_pc: u32,
+        post_cycle: u64,
+        post_instret: u64,
     ) -> MmioStore {
         self.stores.push((pc, cycle, address, kind, value));
-        self.trace.push(Call::Store(MMIO_OK as i32));
-        MMIO_OK
+        self.posts.push((post_pc, post_cycle, post_instret));
+        let out = self.store_answer.unwrap_or(Polled {
+            status: MMIO_OK,
+            pc: post_pc,
+        });
+        self.trace.push(Call::Store(
+            (i64::from(out.status) << 32) | i64::from(out.pc),
+        ));
+        out
+    }
+
+    fn poll(&mut self, pc: u32, cycle: u64, instret: u64) -> Polled {
+        self.polls.push((pc, cycle, instret));
+        let out = self.poll_answer.unwrap_or(Polled {
+            status: MMIO_OK,
+            pc,
+        });
+        self.trace.push(Call::Poll(
+            (i64::from(out.status) << 32) | i64::from(out.pc),
+        ));
+        out
     }
 
     fn step_one(&mut self, pc: u32, cycle: u64, instret: u64, regs: &mut [i32; 32]) -> StepOne {
@@ -325,6 +369,12 @@ struct Rig {
     indirect: bool,
     /// The global block index the next run enters at.
     entry: u32,
+    /// What the polling point fused into a store should answer (M7b P2).
+    store_answer: Option<Polled>,
+    /// What a stand-alone `poll` should answer.
+    poll_answer: Option<Polled>,
+    /// Whether an `mmio_load` leaves a yield on the fake bus.
+    load_leaves_yield: bool,
 }
 
 impl Rig {
@@ -372,6 +422,9 @@ impl Rig {
             pages,
             indirect,
             entry: 0,
+            store_answer: None,
+            poll_answer: None,
+            load_leaves_yield: false,
         }
     }
 
@@ -464,7 +517,12 @@ impl Rig {
             len: mem_len,
             loads: Vec::new(),
             stores: Vec::new(),
+            posts: Vec::new(),
             escapes: Vec::new(),
+            polls: Vec::new(),
+            store_answer: self.store_answer,
+            poll_answer: self.poll_answer,
+            load_leaves_yield: self.load_leaves_yield,
             trace: Vec::new(),
         };
         // SAFETY: `self.mem` outlives `core`, and nothing else holds a
@@ -501,6 +559,8 @@ impl Rig {
             regs: out_regs,
             loads: core.ops_mut().loads.clone(),
             stores: core.ops_mut().stores.clone(),
+            posts: core.ops_mut().posts.clone(),
+            polls: core.ops_mut().polls.clone(),
             escapes: core.ops_mut().escapes.clone(),
             escaped_insts: emitted.escaped_insts,
             native_insts: emitted.native_insts,
@@ -566,7 +626,8 @@ fn write_case(
         .iter()
         .map(|c| match c {
             Call::Load(v) => format!(r#"{{"kind":"load","ret":"{v}"}}"#),
-            Call::Store(v) => format!(r#"{{"kind":"store","ret":{v}}}"#),
+            Call::Store(v) => format!(r#"{{"kind":"store","ret":"{v}"}}"#),
+            Call::Poll(v) => format!(r#"{{"kind":"poll","ret":"{v}"}}"#),
             Call::Step(pc, cycle, instret, status, regs, granules) => {
                 let regs: Vec<String> = regs.iter().map(ToString::to_string).collect();
                 let mem: Vec<String> = granules
@@ -642,6 +703,11 @@ struct Outcome {
     regs: [i32; 32],
     loads: Vec<(u32, u64, u32, u32)>,
     stores: Vec<(u32, u64, u32, u32, u32)>,
+    /// The `(post_pc, post_cycle, post_instret)` each `mmio_store` handed its
+    /// fused polling point (M7b P2).
+    posts: Vec<(u32, u64, u64)>,
+    /// The `(pc, cycle, instret)` of each stand-alone `poll`.
+    polls: Vec<(u32, u64, u64)>,
     escapes: Vec<u32>,
     escaped_insts: usize,
     native_insts: usize,
@@ -1247,4 +1313,189 @@ fn the_two_selector_shapes_retire_identically() {
             );
         }
     }
+}
+
+// --- M7b P2: polling point (c), inside the stay -----------------------------
+
+/// A guest pc that stands in for a trap vector: somewhere the block set does
+/// not hold, so a stay that leaves for it is unmistakable.
+const VECTOR: u32 = GUEST_BASE + 0x9000;
+
+/// `lui a1, 0x60000` / `addi a2, x0, 0x55` / `sw a2, 0(a1)` /
+/// `addi a4, x0, 0x11` / `jal x0, +4`: one MMIO store with an instruction
+/// after it that must not retire when the poll moves the hart.
+fn mmio_store_then_one_more() -> Vec<(u32, u32)> {
+    vec![
+        (GUEST_BASE, 0x6000_05b7),
+        (GUEST_BASE + 4, 0x0550_0613),
+        (GUEST_BASE + 8, 0x00c5_a023),
+        (GUEST_BASE + 12, 0x0110_0713),
+        (GUEST_BASE + 16, 0x0040_006f),
+    ]
+}
+
+/// The store's own host call carries the polling point's **post-store** state:
+/// the pc the instruction retires to, and the counters with it charged (JD17).
+///
+/// The store's own `(pc, cycle)` pair is the *pre*-store one and is checked by
+/// `an_off_ram_access_carries_the_exact_pc_and_cycle_to_the_import`; these are
+/// the three numbers P2 added, and they are the ones the hart's own polling
+/// point is run with.
+#[test]
+fn a_store_hands_its_polling_point_the_post_store_pc_and_counters() {
+    let program = mmio_store_then_one_more();
+    let mut rig = Rig::new(&program);
+    let set = set_of(&rig, GUEST_BASE);
+    let out = rig.run_named("poll-post-state", &set, Emit::EVERYTHING, [0; 32], u64::MAX);
+
+    let model = CycleModel::Esp32C6;
+    let lui = u64::from(model.cycles_for(lp_emu_core::InstClass::Lui));
+    let alu = u64::from(model.cycles_for(lp_emu_core::InstClass::Alu));
+    let store = u64::from(model.cycles_for(lp_emu_core::InstClass::Store));
+
+    assert_eq!(
+        out.posts,
+        vec![(GUEST_BASE + 12, lui + alu + store, 3)],
+        "the next instruction's pc, the cycle count with the store charged, \
+         and minstret with the store retired"
+    );
+    // Nothing moved, so the stay carried on through the store.
+    assert_eq!(out.instret, 5);
+    assert_eq!(out.flags, 0);
+    assert_eq!(
+        out.regs[14], 0x11,
+        "the instruction after the store retired"
+    );
+    assert!(
+        out.polls.is_empty(),
+        "an MMIO store needs no second crossing"
+    );
+}
+
+/// A poll that **moves the hart** — a delivered interrupt — ends the stay at
+/// the pc it reports, with the store retired and nothing after it.
+#[test]
+fn a_store_whose_poll_delivers_leaves_at_the_vector_with_no_flag() {
+    let program = mmio_store_then_one_more();
+    let mut rig = Rig::new(&program);
+    rig.store_answer = Some(Polled {
+        status: MMIO_LEAVE_AFTER,
+        pc: VECTOR,
+    });
+    let set = set_of(&rig, GUEST_BASE);
+    let out = rig.run_named("poll-delivers", &set, Emit::EVERYTHING, [0; 32], u64::MAX);
+
+    assert_eq!(
+        out.pc, VECTOR,
+        "the stay leaves where the poll left the hart"
+    );
+    assert_eq!(
+        out.flags, 0,
+        "and with no after-store flag: the polling point has already run"
+    );
+    assert_eq!(
+        out.instret, 3,
+        "the store retired; the next instruction did not"
+    );
+    assert_eq!(out.regs[14], 0, "nothing after the store ran");
+}
+
+/// A poll that says the **bus wants the slice** ends it the way a `step_one`
+/// slice end does, at the same pc.
+#[test]
+fn a_store_whose_poll_yields_ends_the_slice() {
+    let program = mmio_store_then_one_more();
+    let mut rig = Rig::new(&program);
+    rig.store_answer = Some(Polled {
+        status: MMIO_SLICE_ENDED,
+        pc: GUEST_BASE + 12,
+    });
+    let set = set_of(&rig, GUEST_BASE);
+    let out = rig.run_named("poll-yields", &set, Emit::EVERYTHING, [0; 32], u64::MAX);
+
+    assert_eq!(out.pc, GUEST_BASE + 12);
+    assert_eq!(out.flags, host::FLAG_SLICE_ENDED);
+    assert_eq!(out.instret, 3);
+    assert_eq!(out.regs[14], 0);
+}
+
+/// **The `FLAG_PENDING` store.** An MMIO load leaves a yield on the bus; the
+/// next store is an **inline RAM store the bus never sees**, and it is still a
+/// polling point. There is no store call to fuse into, so it makes its own
+/// crossing — with the same post-store state — and the slice ends at exactly
+/// that instruction.
+#[test]
+fn an_inline_ram_store_after_a_load_left_a_yield_polls_on_its_own() {
+    // lui  a1, 0x60000     (MMIO)
+    // lw   a3, 0(a1)       -> MMIO_PENDING: the bus is holding a yield
+    // lui  a2, 0x40000     (plain RAM)
+    // addi a4, x0, 0x77
+    // sw   a4, 0x100(a2)   -> inline, and a polling point
+    // addi a5, x0, 1       -> must not retire
+    // jal  x0, +4
+    let program = vec![
+        (GUEST_BASE, 0x6000_05b7),
+        (GUEST_BASE + 4, 0x0005_a683),
+        (GUEST_BASE + 8, 0x4000_0637),
+        (GUEST_BASE + 12, 0x0770_0713),
+        (GUEST_BASE + 16, 0x10e6_2023),
+        (GUEST_BASE + 20, 0x0010_0793),
+        (GUEST_BASE + 24, 0x0040_006f),
+    ];
+    let mut rig = Rig::new(&program);
+    rig.load_leaves_yield = true;
+    rig.poll_answer = Some(Polled {
+        status: MMIO_SLICE_ENDED,
+        pc: GUEST_BASE + 20,
+    });
+    let set = set_of(&rig, GUEST_BASE);
+    let out = rig.run_named(
+        "pending-ram-store",
+        &set,
+        Emit::EVERYTHING,
+        [0; 32],
+        u64::MAX,
+    );
+
+    let model = CycleModel::Esp32C6;
+    let lui = u64::from(model.cycles_for(lp_emu_core::InstClass::Lui));
+    let alu = u64::from(model.cycles_for(lp_emu_core::InstClass::Alu));
+    let load = u64::from(model.cycles_for(lp_emu_core::InstClass::Load));
+    let store = u64::from(model.cycles_for(lp_emu_core::InstClass::Store));
+
+    assert!(out.stores.is_empty(), "the RAM store never reached the bus");
+    assert_eq!(
+        out.polls,
+        vec![(GUEST_BASE + 20, 2 * lui + alu + load + store, 5)],
+        "one polling point, at the RAM store, with its post-store state"
+    );
+    assert_eq!(out.pc, GUEST_BASE + 20);
+    assert_eq!(out.flags, host::FLAG_SLICE_ENDED);
+    assert_eq!(
+        out.instret, 5,
+        "the RAM store retired; the `addi` after it did not"
+    );
+    assert_eq!(out.regs[15], 0);
+    // The store did land, inline: the poll is not a substitute for it.
+    let at = (ARENA_AT + 0x100) as usize;
+    assert_eq!(rig.mem[at], 0x77);
+}
+
+/// And an inline RAM store with **nothing pending** makes no crossing at all
+/// — which is the whole point of the `FLAG_PENDING` local.
+#[test]
+fn an_inline_ram_store_with_nothing_pending_calls_no_host_at_all() {
+    let program = vec![
+        (GUEST_BASE, 0x4000_0637),
+        (GUEST_BASE + 4, 0x0770_0713),
+        (GUEST_BASE + 8, 0x10e6_2023),
+        (GUEST_BASE + 12, 0x0040_006f),
+    ];
+    let mut rig = Rig::new(&program);
+    let set = set_of(&rig, GUEST_BASE);
+    let out = rig.run_named("plain-ram-store", &set, Emit::EVERYTHING, [0; 32], u64::MAX);
+    assert!(out.polls.is_empty());
+    assert!(out.stores.is_empty());
+    assert!(out.loads.is_empty());
+    assert_eq!(out.instret, 4);
 }

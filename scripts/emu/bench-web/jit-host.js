@@ -29,7 +29,7 @@
 // | `jit_release` | `(idx)` | null the slot so the next event can replace the module |
 //
 // Everything else is wasm→wasm. The translated module's `mmio_load`,
-// `mmio_store` and `step_one` imports are bound directly to the emulator
+// `mmio_store`, `step_one` and `poll` imports are bound directly to the emulator
 // instance's own exports and its `memory` to the emulator's own linear memory,
 // so no JS frame sits on any path the guest runs through. P2 measured the
 // difference: 1.60 ns for a wasm→wasm MMIO call against 6.05 ns through a JS
@@ -106,6 +106,7 @@ export function makeJitHost() {
           mmio_load: inst.exports.jit_mmio_load,
           mmio_store: inst.exports.jit_mmio_store,
           step_one: inst.exports.jit_step_one,
+          poll: inst.exports.jit_poll,
         },
       });
     } catch (e) {
@@ -186,7 +187,7 @@ export function makeJitHost() {
           ') — build it with -C link-arg=--growable-table, which is what removes the maximum ' +
           'wasm-ld otherwise pins to the table\'s initial size');
       }
-      for (const name of ['jit_mmio_load', 'jit_mmio_store', 'jit_step_one', 'jit_table_probe', 'jit_table_selftest']) {
+      for (const name of ['jit_mmio_load', 'jit_mmio_store', 'jit_step_one', 'jit_poll', 'jit_table_probe', 'jit_table_selftest']) {
         if (typeof instance.exports[name] !== 'function') {
           throw new Error('the emulator module does not export ' + name + ' — build it with --features jit');
         }

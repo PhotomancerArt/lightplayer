@@ -16,7 +16,7 @@
 #![cfg(feature = "host-wasmtime")]
 
 use lp_emu_core::arena::GuestArena;
-use lp_emu_jit::host::{EXCHANGE_LEN, HostOps, MmioLoad, MmioStore, StepOne};
+use lp_emu_jit::host::{EXCHANGE_LEN, HostOps, MmioLoad, MmioStore, Polled, StepOne};
 use lp_emu_jit::host_wasmtime::WasmtimeCore;
 use lp_emu_jit::translate::{ENTRY_FUNC, IMPORT_MODULE};
 use wasm_encoder::{
@@ -51,12 +51,19 @@ impl HostOps for NoHost {
         _address: u32,
         _kind: u32,
         _value: u32,
+        _post_pc: u32,
+        _post_cycle: u64,
+        _post_instret: u64,
     ) -> MmioStore {
         unreachable!("the guard module makes no MMIO access")
     }
 
     fn step_one(&mut self, _pc: u32, _cycle: u64, _instret: u64, _regs: &mut [i32; 32]) -> StepOne {
         unreachable!("the guard module escapes nothing")
+    }
+
+    fn poll(&mut self, _pc: u32, _cycle: u64, _instret: u64) -> Polled {
+        unreachable!("the guard module has no store to poll after")
     }
 
     fn exchange(&mut self) -> &mut [u8] {
@@ -77,7 +84,7 @@ fn guard_probe(access: Access) -> Vec<u8> {
     let mut module = Module::new();
 
     let mut types = TypeSection::new();
-    // The translator's four types, in its order, so the imports line up with
+    // The translator's five types, in its order, so the imports line up with
     // what `WasmtimeCore` supplies.
     types.ty().function(
         [ValType::I32, ValType::I64, ValType::I32, ValType::I32],
@@ -90,10 +97,16 @@ fn guard_probe(access: Access) -> Vec<u8> {
             ValType::I32,
             ValType::I32,
             ValType::I32,
+            ValType::I32,
+            ValType::I64,
+            ValType::I64,
         ],
-        [ValType::I32],
+        [ValType::I64],
     );
     types.ty().function([ValType::I32], [ValType::I32]);
+    types
+        .ty()
+        .function([ValType::I32, ValType::I64, ValType::I64], [ValType::I64]);
     types.ty().function(
         [
             ValType::I32,
@@ -111,6 +124,7 @@ fn guard_probe(access: Access) -> Vec<u8> {
     imports.import(IMPORT_MODULE, "mmio_load", EntityType::Function(0));
     imports.import(IMPORT_MODULE, "mmio_store", EntityType::Function(1));
     imports.import(IMPORT_MODULE, "step_one", EntityType::Function(2));
+    imports.import(IMPORT_MODULE, "poll", EntityType::Function(3));
     imports.import(
         IMPORT_MODULE,
         "memory",
@@ -125,11 +139,11 @@ fn guard_probe(access: Access) -> Vec<u8> {
     module.section(&imports);
 
     let mut funcs = FunctionSection::new();
-    funcs.function(3);
+    funcs.function(4);
     module.section(&funcs);
 
     let mut exports = ExportSection::new();
-    exports.export(ENTRY_FUNC, ExportKind::Func, 3);
+    exports.export(ENTRY_FUNC, ExportKind::Func, 4);
     module.section(&exports);
 
     let mem = MemArg {

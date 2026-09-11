@@ -1632,3 +1632,64 @@ fn the_entry_index_is_exact_at_every_size() {
     assert!(EntryIndex::default().is_empty());
     assert!(!EntryIndex::default().contains(RAM_BASE));
 }
+
+/// A core that **cannot** poll still works: it reports
+/// `RunOutcome::Ran { after_store: true }` and the hart runs polling point (c)
+/// for it, out in `run_blocks`.
+///
+/// M7b P2 made the translated core poll inside its own stay, so this arm is no
+/// longer the path the ESP32-C6 core takes. It is still the contract
+/// `translated::RunOutcome` publishes, and it is what a host with no hart to
+/// poll on has to be able to rely on — so it keeps a test of its own.
+#[test]
+fn a_core_that_cannot_poll_gets_polling_point_c_run_for_it() {
+    let mut rig = Rig::new();
+    // The hart resumes at `RAM_BASE + 4` with the line already raised, the
+    // way it would after a store the core reported.
+    rig.load(
+        RAM_BASE,
+        &[
+            encode::addi(Gpr::new(10), Gpr::new(0), 1),
+            encode::addi(Gpr::new(11), Gpr::new(0), 2),
+            encode::ebreak(),
+        ],
+    );
+    rig.trap_to_ebreak();
+    assert!(rig.hart.set_csr_raw(MIE, 1 << 7));
+    rig.bus.pending = Some(7);
+    rig.bus.sideband = true;
+
+    let core = shared(FakeCore {
+        outcome: super::translated::RunOutcome::Ran {
+            pc: RAM_BASE + 4,
+            cycle_count: 9,
+            instruction_count: 1,
+            after_store: true,
+        },
+        entries: 0,
+        invalidations: Vec::new(),
+    });
+    rig.hart
+        .set_translated_core(alloc::boxed::Box::new(core.clone()), &[RAM_BASE]);
+    let end = rig.run(500);
+
+    assert!(
+        matches!(end, SliceEnd::Ebreak { .. }),
+        "the handler's `ebreak` ended the slice: {end:?}"
+    );
+    assert_eq!(
+        rig.hart.csr().mepc,
+        RAM_BASE + 4,
+        "the trap was taken at exactly the instruction the core left at"
+    );
+    assert_eq!(rig.hart.csr().mcause, 0x8000_0007);
+    assert_eq!(
+        rig.reg(11),
+        0,
+        "the instruction after the store did not retire"
+    );
+    assert_eq!(
+        rig.bus.sideband_reads, 1,
+        "the hart took the side-band exactly once"
+    );
+}
