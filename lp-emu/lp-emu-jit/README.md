@@ -198,6 +198,35 @@ against the phase's steady-state win.
 sets it again: it is the answer a core that *cannot* poll still gives, and
 `run_blocks`'s `after_store` arm is the fallback that serves it.
 
+#### What `FLAG_PENDING` means, and what it means after an escape (M7b F1)
+
+`FLAG_PENDING` is bit 2, and the local behind it holds **that bit** rather than
+a bare 1 — the epilogue `or`s the local straight into the exit flags and the
+next sub-dispatcher's prologue reads it back with `& FLAG_PENDING`, so a value
+of 1 was read by nobody at the far end of a cross-function edge and by
+`run_blocks` as `FLAG_AFTER_STORE` at an exit. Two consequences, both fixed
+here: an obligation that crossed into another function was **lost**, and the
+inline RAM store over there skipped a polling point the interpreter runs; and
+an exit while a load was pending reported a flag the protocol says a stay no
+longer sets. The host reads the two bits together (`jit.rs`'s `POLL_OWED`), so
+an exit still hands the poll to the hart's own `after_store` arm — the stay
+must not carry the obligation into a *later* stay, because the selector clears
+the flags word at every entry.
+
+After the **escape hatch**, `FLAG_PENDING` means exactly what it meant before
+the escape. `step_one` runs the interpreter's own polling point for a Store-
+or Atomic-class instruction and not for a Load, so a yield an escaped *store*
+left comes back as `STEP_SLICE_ENDED`; a yield an escaped **load** left comes
+back as nothing at all, and the local stays clear. That is safe only because
+`Emit`'s single `memory` bit gates loads and stores together: a build whose
+loads escape has no inline store to skip a poll at, and a build with inline
+stores escapes no load. **Splitting that bit needs `step_one` to report
+`Bus::sideband_or_yield_pending` first** — guessing does not work, because
+setting the local after every escaped load makes an all-escape build disagree
+with an emitted one about a plain RAM load that reached no bus, and narrowing
+the guess to off-RAM loads leaves the same disagreement for an MMIO load that
+left nothing.
+
 ## The browser seam (P6, JD11–JD13, JD25)
 
 The exit protocol above says what a module expects. This says who gives it to

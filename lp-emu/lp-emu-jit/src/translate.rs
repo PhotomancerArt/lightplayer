@@ -532,6 +532,34 @@ impl<'a> Emitter<'a> {
         self.i(I::Br(self.exit_depth(k)));
         self.extra -= 1;
         self.i(I::End);
+
+        // **The obligation an escaped load leaves is not set here, and cannot
+        // be** (M7b F1).
+        //
+        // `step_one` runs polling point (c) the way the interpreter does —
+        // `mach/mod.rs::step` runs it after a Store- or Atomic-class
+        // instruction and **not** after a Load — so a yield an escaped *store*
+        // left is already back here as [`STEP_SLICE_ENDED`]. A yield an
+        // escaped **load** left is not: it sits on the bus with nothing here
+        // to remember it, and [`L_PENDING`] stays clear.
+        //
+        // That would matter if an escaped load could be followed by an
+        // **inline** store in the same stay, and it cannot: [`Emit`]'s one
+        // `memory` bit gates loads and stores together, so a build whose loads
+        // escape has no inline store to skip a polling point at, and a build
+        // with inline stores escapes no load. `--jit-escape-all` is the first
+        // kind and the product path is the second.
+        //
+        // It cannot be closed by guessing, either. Setting the local after
+        // every escaped load makes an all-escape build disagree with an
+        // emitted one on the exit flags after a plain **RAM** load, which
+        // reaches no bus at all; narrowing the guess to off-RAM loads leaves
+        // the same disagreement for an MMIO load that left nothing. The exact
+        // answer is `Bus::sideband_or_yield_pending` after the instruction,
+        // which only the host knows and which `step_one` has no way to say —
+        // its status word means one thing (BD1). **Splitting `Emit::memory`
+        // into a load bit and a store bit therefore requires giving `step_one`
+        // that answer first.**
     }
 
     /// After escaping a non-terminator: anything that moved the hart off the
@@ -798,12 +826,18 @@ impl<'a> Emitter<'a> {
         // The bus is holding a yield now. Nothing happens here — the
         // interpreter does not look after a load either — but the next store
         // has to leave.
+        //
+        // The value is [`FLAG_PENDING`] itself, not a bare 1: the epilogue
+        // `or`s this local straight into the exit flags and the next
+        // sub-dispatcher's prologue reads it back with `& FLAG_PENDING`, so
+        // any other bit both loses the obligation at a cross-function edge and
+        // tells the host something it did not mean (M7b F1).
         self.i(I::LocalGet(L_STATUS));
         self.i(I::I32Const(MMIO_PENDING as i32));
         self.i(I::I32Eq);
         self.i(I::If(BlockType::Empty));
         self.extra += 1;
-        self.i(I::I32Const(1));
+        self.i(I::I32Const(FLAG_PENDING));
         self.i(I::LocalSet(L_PENDING));
         self.extra -= 1;
         self.i(I::End);

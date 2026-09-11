@@ -41,11 +41,21 @@ use lp_emu_jit::discover::{DiscoverStats, Discovered, discover, discover_from};
 use lp_emu_jit::dispatch::{BODY_BUDGET, emit_module, target_table_bytes, write_target_tables};
 use lp_emu_jit::host::{
     self, EXCHANGE_LEN, FAST_ARMED, FAST_LEN, FAST_SERVED, FAST_WORDS, FLAG_AFTER_STORE,
-    FLAG_SLICE_ENDED, HostOps, MMIO_LEAVE_AFTER, MMIO_OK, MMIO_PENDING, MMIO_REFUSED,
+    FLAG_PENDING, FLAG_SLICE_ENDED, HostOps, MMIO_LEAVE_AFTER, MMIO_OK, MMIO_PENDING, MMIO_REFUSED,
     MMIO_SLICE_ENDED, MmioLoad, MmioStore, PERM_ENTRIES, PERM_SHIFT, Polled, STEP_CONTINUE,
     STEP_SLICE_ENDED, StepOne, load_kind, store_kind,
 };
 use lp_emu_jit::translate::{Emit, Emitted, FastRead, FastReads, FastSource, Layout};
+
+/// The exit flags that leave the hart owing polling point (c).
+///
+/// [`FLAG_AFTER_STORE`] is a store the stay could not poll for itself — a
+/// core whose host has no hart to run the poll on. [`FLAG_PENDING`] is the
+/// obligation an MMIO **load** left: the stay ended before the store that
+/// would have taken it, so the hart takes it in its own `after_store` arm
+/// rather than the stay carrying it into a later one, where the selector
+/// would have cleared it (M7b F1).
+const POLL_OWED: i32 = FLAG_AFTER_STORE | FLAG_PENDING;
 
 // Which host runs the emitted module, chosen by target and by nothing else.
 //
@@ -725,10 +735,14 @@ pub struct JitStats {
     /// or a block whose own end left the set at a pc that happens to be a
     /// start.
     pub exit_known_pc: u64,
-    /// Exits carrying `FLAG_AFTER_STORE`: polling point (c) handed back to
-    /// the hart's own loop. **Zero on this machine since M7b P2** — the poll
-    /// runs inside the stay — and kept because a core that cannot poll still
-    /// reports it.
+    /// Exits carrying [`POLL_OWED`]: polling point (c) handed back to the
+    /// hart's own loop.
+    ///
+    /// `FLAG_AFTER_STORE` itself is **zero on this machine since M7b P2** —
+    /// the poll runs inside the stay — and is kept because a core that cannot
+    /// poll still reports it. What does land here is `FLAG_PENDING`: a stay
+    /// that ended while an MMIO load's yield was still unclaimed owes the poll
+    /// to the hart (M7b F1).
     pub exit_after_store: u64,
     /// Polling points (c) run **inside** a stay, and how many of them ended
     /// it (M7b P2). `polls - polls_left` is the exit that did not happen.
@@ -2346,7 +2360,7 @@ impl TranslatedCore<SocBus> for JitCore {
             }
         }
 
-        if exit.flags & FLAG_AFTER_STORE != 0 {
+        if exit.flags & POLL_OWED != 0 {
             self.stats.exit_after_store += 1;
         }
         if exit.flags & FLAG_SLICE_ENDED != 0 {
@@ -2393,7 +2407,7 @@ impl TranslatedCore<SocBus> for JitCore {
             pc: hart.pc(),
             cycle_count: hart.cycle_count(),
             instruction_count: hart.instruction_count(),
-            after_store: exit.flags & FLAG_AFTER_STORE != 0,
+            after_store: exit.flags & POLL_OWED != 0,
         }
     }
 
