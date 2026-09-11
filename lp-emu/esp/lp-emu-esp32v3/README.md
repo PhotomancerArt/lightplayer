@@ -301,15 +301,97 @@ from inside a test).
 
 ## Booting from the reset vector
 
-*P5 opened it; P7 finishes it.* P3 left a `--boot-mode rom-up --strict-bus`
-run spinning seven instructions after the reset vector, inside the ROM's
-anti-glitch check on its own fuses. With `periph::efuse` making the read
-command a completion the check passes, the ROM walks into `main`, and the run
-now stops at `uartAttach+0x43` (`0x4000_9013`) writing `UART1 +0x10` at cycle
-9,488 — the block P3's §4.3 named next.
+```bash
+just build-fw-esp32v3
+espflash save-image --chip esp32 --merge \
+    --partition-table lp-fw/fw-esp32v3/partitions.csv --flash-size 4mb \
+    target/xtensa-esp32-none-elf/release-esp32v3/fw-esp32v3 chip.bin
+cargo run -p lp-emu-esp32v3 --release -- \
+    --boot-mode rom-up --merged chip.bin --strict-bus --timeout 2s --uart0 -
+```
 
-*P7.* The mask ROM boots the espflash-merged image through the real IDF
-bootloader, and the boot log is compared line for line against silicon.
+The hart starts at `0x4000_0400` with the architectural reset state and the
+machine seeds **nothing**: the flash chip holds a whole 4 MiB image and every
+step after that is real. The mask ROM checks its own fuses, reads the
+strapping pins, attaches the flash, programs the MMU, reads the second-stage
+bootloader out of the chip and jumps to it; the bootloader reads the partition
+table, verifies and hashes the app, and maps it.
+
+**Nothing is vendored** (DD25). `espflash save-image --chip esp32 --merge`
+bundles the exact ESP-IDF `v5.1-beta1-378-gea5e0ff298-dirt` second-stage
+bootloader the desk board runs (`../bench.md`), so the merged image *is* the
+provenance; a checked-in copy plus a sidecar would be a second one that could
+drift. `tests/rom_up_boot.rs` asserts the version string, the compile time and
+the multicore banner it finds **inside the image it was handed**. ⚠️ Never
+hand-write a bootloader stand-in: the boot log is the real bootloader's output
+or it is fiction.
+
+### What comes out, and what it is compared against
+
+Twenty-six lines, and they fall into three kinds:
+
+| lines | compared against | why |
+|---|---|---|
+| the eleven ROM banner lines (`ets Jul 29 2019 12:21:46` … `entry 0x4008064c`) | **literally**, against L0's own capture | the mask ROM is a fixed binary and the values are this machine's inputs (the reset cause, the strapping pins) or the image's header |
+| the bootloader's fifteen (version, compile time, `Multicore bootloader`, `chip revision: v3.1`, SPI 40MHz/DIO/4MB, the RNG entropy line, the four partition rows) | **literally**, against a table in the test | espflash bundles a fixed binary, so these are the same on any host and for any build of the application |
+| the seven `esp_image: segment N:` lines | against the **merged image**, parsed independently by `image.rs` | gating those on a transcript would gate on the linker: a different build has different segment sizes, and the desk board runs a different commit (ruling R7) |
+
+The `I (NNN)` millisecond stamps are **masked**, and that is the only field
+that is. They are `CCOUNT / (g_ticks_per_us * 1000)` — milliseconds of CPU
+time — and this machine's time base is grade `t1`, cycles counted as
+instructions, so the numbers are a count of the bootloader's own instructions
+rather than a clock. There is no calibration in this repository that would
+make them silicon's.
+
+### ⚠️ Where it stops: one instruction
+
+The run reaches the last `esp_image: segment` line and stops **one
+instruction short** of `Loaded app from partition at offset 0x10000`, in the
+bootloader's own `esp_cpu_dbgr_is_attached()`:
+
+```text
+4007a523:  l32r  a14, (0x0010200c)    ; XDM_OCD_DCR_SET
+4007a526:  rer   a14, a14             ; ← lp-xt-inst does not decode this
+```
+
+`rer` reads an *external* register over the OCD bus, and the only thing
+either boot path uses it for is "is a debugger attached?" — whose answer here
+is a flat **no**. The direct load meets the same instruction from the other
+side, at `0x4010_01bd`, through `esp_hal::debugger::debugger_connected()`
+inside `CpuControl::start_app_core`.
+
+It is **not** a two-line addition to the hart: `rer`/`wer` are absent from
+`lp-xt-inst`'s `Inst` altogether, so landing them touches the decoder, the
+encoder, the disassembler, the executor and the translator's coverage in the
+**Xtensa ISA crate the shader backend also uses**. M3's own concurrency rules
+put that crate out of this milestone's reach and call a hart change a finding
+for the director, so it is pinned exactly — by pc and by word, in
+`tests/boot.rs` and `tests/rom_up_boot.rs` — rather than fixed here.
+
+Two things wait behind it, and both are written out in full so that landing
+`rer` turns them on rather than leaving a puzzle: the direct load's idle
+heartbeat, and **the direct-load ↔ ROM-up cross-check**
+(`rom_up_and_direct_load_agree_on_what_the_app_sees`), which compares every
+byte of guest memory at the application's entry, the hart's `PS` and `a1`,
+and the four save-area words the direct load seeds. That test skips today
+with a notice naming this instruction.
+
+### The two findings a ROM-up boot is the only way to make
+
+Both are in the commit history and both were invisible to a direct load:
+
+1. **`seed_data_image` is not optional on the classic.** The reset vector's
+   `unpcopy` (`0x4000_0501`) copies each `.data_*` section from a **source**
+   address past the end of `.text`. P2 placed the destinations and concluded
+   no source image was needed; a ROM-up boot copied zeros over every one of
+   them, `g_ticks_per_us` went 13 → 0, and the bootloader's log timestamp
+   divided by zero four million cycles later. `rom::seed_data_image` now
+   places the ROM's own copy at the addresses the ROM's own table names.
+2. **A write that does not change an MMU entry still maps the page.** The
+   classic's entry carries no valid bit, so `cache_flash_mmu_set` storing `0`
+   over `mmu_init`'s `0` *is* a mapping of flash page 0 — and a fill that
+   skipped it left the ROM reading its own bootloader header out of an
+   unfilled window, printing `invalid header: 0x00000000` for ever.
 
 ## The CH340 cable
 
