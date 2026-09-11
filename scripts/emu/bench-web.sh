@@ -265,22 +265,35 @@ build_obj="$(jq -n --arg sha "$build_sha" --arg short "$build_short" --arg branc
 # in #678 and #680 was taken at, and 20 s is the longer bound a lazily tiering
 # engine's steady state needs to show.
 #
-# `fnBlocksChoices` is bounded at BOTH ends by the same fatal V8 OOM, and the
-# reasons are mirror images of each other. Above 256: `Fatal process out of
-# memory: Zone` in `WasmLoweringPhase` at 512 blocks a function and every size
-# above, AFTER the module compiles and instantiates (#680) — the largest
-# function there is a sub-dispatcher. Below 32: the same OOM, from a background
-# compile job, because the largest function there is the outer SELECTOR
-# (730 KB and 25,156 nested blocks at 8, against 176 KB at 32) — P6b. A browser
-# tab cannot catch either one, so neither end is offered here.
+# `fnBlocksChoices` runs 8 to 256, and each end of that range is a judgement
+# rather than a safe bound.
+#
+# Above 256 is not offered: `Fatal process out of memory: Zone` in
+# `WasmLoweringPhase` at 512 blocks a function and every size above it, AFTER
+# the module compiles and instantiates (#680) — the largest function there is a
+# sub-dispatcher. A browser tab cannot catch that, so the dropdown does not
+# lead anyone into it.
+#
+# 8 and 16 ARE offered, and did not used to be (DD32). The floor was 32 because
+# the same fatal OOM lived below it, from a background compile job, the largest
+# function there being the outer SELECTOR — 730 KB and 25,156 nested blocks at
+# 8, against 176 KB at 32 (P6b, with the NESTED selector). `Selector::DEFAULT`
+# has been `Flat` since #697; the phone's best size is 8 and V8's is 16 (#706,
+# the G-M7P rows); and the one-click preset beside the Run button takes 8 and
+# 16 already. A dropdown that cannot ask for the size the button next to it
+# runs, and that the gate quotes, is wrong about the rig rather than careful
+# about the engine. ⚠️ The risk has NOT gone away: on an engine that dies at 8
+# the tab dies with it and nothing uploads — which is that engine's answer to
+# the question the gate is asking.
 #
 # `defaults.fnBlocks` is 32 because `DEFAULT_JIT_FN_BLOCKS` is (DD20, P6c): the
 # page's default and the emulator's default are the same number or the page
-# lies about what a default run does.
+# lies about what a default run does. Widening the CHOICES does not touch it —
+# the default is M7b P5's to set, from a phone row (BD6).
 jq -n --argjson images "$manifest_images" --argjson build "$build_obj" \
     '{images: $images, grades: ["t1", "t2"], repeats: 1, build: $build,
       defaults: {mode: "jit", fnBlocks: 32, timeout: "5500ms", wallTimeout: 600, exitOn: false},
-      fnBlocksChoices: [32, 64, 128, 256],
+      fnBlocksChoices: [8, 16, 32, 64, 128, 256],
       timeoutChoices: ["5500ms", "20s"],
       modeChoices: ["jit", "interp"]}' >"$stage_dir/manifest.json"
 
