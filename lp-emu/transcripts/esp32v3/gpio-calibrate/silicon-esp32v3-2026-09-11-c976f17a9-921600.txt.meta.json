@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "payload": "gpio-calibrate",
+  "chip": "esp32v3",
+  "configuration": "silicon:esp32v3",
+  "date": "2026-09-11",
+  "board": "domraem/dom-z-102",
+  "mac": "30:76:f5:ec:f6:34",
+  "silicon_rev": "v3.1",
+  "firmware_commit": "c976f17a9",
+  "firmware_features": [
+    "default",
+    "esp32",
+    "float-f32",
+    "server",
+    "test_gpio_calibrate"
+  ],
+  "firmware_dirty": false,
+  "firmware_sha256": "a6d8ee8fa92693553b7bf906ba64cbcc178aa8bd128aaf6e212356ec38aff094",
+  "source": "PORT_DEV=/dev/cu.wchusbserial11330 scripts/emu/desk-espflash-step.sh target/validate/gpio-calibrate.cap 'CAL READY target=' 420 -- flash --chip esp32 --port /dev/cu.wchusbserial11330 --partition-table lp-fw/fw-esp32v3/partitions.csv --flash-size 4mb --after hard-reset --monitor --monitor-baud 921600 target/emu-ref/c976f17a9-esp32+test_gpio_calibrate/fw-esp32v3",
+  "capture": "lp-cli validate record v3-pins --config silicon:esp32v3",
+  "note": "flashing the pinned reference image target/emu-ref/c976f17a9-esp32+test_gpio_calibrate/fw-esp32v3 rather than building one: this payload's claim is a comparison against an emulated run of the SAME bytes (DD30), and the tree this runner stands in is not that commit. `scripts/emu/build-reference-image.sh esp32,test_gpio_calibrate <commit> none` builds it in a detached worktree; the directory name is the provenance, and the runner checks its feature half.\n\nTHE SENTENCES ABOVE AND THE `source`/`capture` lines ARE THE RUNNER'S OWN; everything from here down was ADDED BY HAND at the desk (M5 P4, 2026-09-11). Nothing was changed, only added.\n\nDESK. Board `domraem/dom-z-102`, revision v3.1 (espflash's `Chip type: esp32 (revision v3.1)` is in the transcript), MAC 30:76:f5:ec:f6:34, over the CH340K 1a86:7522 at locationID 0x1133000, port 3 of hub 0x1130000; the C6 on port 2 of the same hub was not touched. espflash 3.3.0, `--timeout-secs 420` (the default 120 does not cover this cable's write). The sentinel arrived 31 s after the step started.\n\nNOTHING DROVE A PAD IN THIS CAPTURE, AND THE TRANSCRIPT MUST NOT BE READ AS IF SOMETHING DID. `gpio-calibrate`'s sentinel is a READY line, not a done marker: the harness prints its header, replies `CAL READY target=esp32v3`, and then serves for ever, doing nothing at all until a host asks for a pad by name. This capture stops at that line, so what it records is the payload's SETUP: the image booted, the harness owns UART0, the pad policy is compiled in, and the part is ready to be asked. No `PULSE` was sent, no pad was driven, no level was read back. The self-loop this payload measures on silicon — the firmware driving its own pad and reading it back through `GPIO.in_`, because there is no wire and no hands on this bench — is a claim for the sitting that sends the commands, and it is not claimed here.\n\nTHE PAD POLICY THE IMAGE CARRIES, for the reader deciding what to ask for next: `BLOCKED_GPIO = [1, 3, 6, 7, 8, 9, 10, 11]` — GPIO1/3 are U0TXD/U0RXD, which are this chip's host link (driving either takes the console away mid-measurement), and GPIO6..=11 are the SPI flash pads, which is the case the C6 blocks GPIO12/13 for on a different pair of pins. `supports_gpio` is `0..=19 | 21..=23 | 25..=27 | 32..=33`: GPIO20/24 are not bonded out, GPIO28..=31 do not exist, and GPIO34..=39 are input-only — the part has no output driver on them. Note for a future sitting on THIS board: IO18, IO16, IO14, IO13 and IO2 are its five wire pads (bench.md L0), so a pulse asked for on one of them drives a real strip. The harness will not refuse that; only the person asking can.\n\nSECOND BOOT. espflash hard-resets after writing, so this is the boot after the write, as every silicon capture of this board is. A harness image never mounts `lpfs`, so there is no first/second-boot difference to have here and this payload's arm sets `second_boot: false`; an emulated twin needs one run, not two.\n\nTHE WHOLE READ IS HERE: the `.txt` is the pty log `target/validate/gpio-calibrate.cap` byte for byte, espflash's own output included, no range trimmed, so there is no separate `raw/` copy to make. The long binary-looking line is the ROM and the second-stage bootloader printing at 115200 into a monitor opened at 921600; the harness's in-band header sits at the end of it — `[fw-checks-header] {\"schema\":1,\"payload\":\"gpio-calibrate\",\"chip\":\"esp32v3\",\"firmware_commit\":\"c976f17a9a1e\",\"firmware_features\":\"default,esp32,float-f32,server,test_gpio_calibrate\",\"firmware_dirty\":false}` — and needs `grep -a` to read. That the header is there at all is this payload's own lesson repaid: it is written through `esp_println::Printer` rather than the log-based `emit_header`, because this harness installs no logger and a C6 silicon capture once came back with no header for exactly that reason.",
+  "baud": 921600,
+  "trust": [
+    {
+      "class": "memory",
+      "grade": "measured",
+      "because": "the board is the ground truth; nothing models it"
+    },
+    {
+      "class": "timing",
+      "grade": "measured",
+      "because": "a real clock on real flash with real wait states"
+    },
+    {
+      "class": "boot-log",
+      "grade": "measured",
+      "because": "the real ROM and the real IDF bootloader printed it"
+    },
+    {
+      "class": "wire",
+      "grade": "measured",
+      "because": "real bytes over a real CH340K"
+    }
+  ]
+}
