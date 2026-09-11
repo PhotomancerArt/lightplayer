@@ -16,12 +16,18 @@ different silicon.
 > blocks the strict bring-up pass demanded, **eight with behaviour** and six
 > still accept-and-remember probes.
 >
-> **The shipped image says hello.** Direct-loaded under `--strict-bus`, it
-> prints its whole `[INIT]` chain out of UART0's FIFO, through a shifter
-> draining at 921,600 baud in emulated time, and onto a host stream: 543
-> bytes, byte for byte, deterministically. It then stands at the flash
-> controller's command word, which is **P7**'s, and the ROM path stands at
-> `RTC_IO`. The sections below that name a later phase are stubs and say so.
+> **The shipped image boots, on both paths, and answers.** Direct-loaded
+> under `--strict-bus` it prints its whole `[INIT]` chain out of UART0's
+> FIFO, through a shifter draining at 921,600 baud in emulated time, and onto
+> a host stream; mounts `lpfs` out of a modelled flash chip; takes the
+> firmware's documented single-core fallback; serves its first frame; and
+> idles in `esp_rtos::task::idle_hook`. Started at the mask ROM's reset
+> vector instead, it walks the real ROM and the real ESP-IDF
+> `v5.1-beta1-378-gea5e0ff298` second-stage bootloader out of a real merged
+> image — banner and log line for line against the desk board's own capture —
+> and arrives at the same place. **Zero unmapped accesses on either path.**
+> A client on the wire gets the wire hello and an answer to its request.
+>
 > The stop ledger is
 > `docs/reports/2026-09-10-esp32v3-strict-boot-inventory.md`.
 
@@ -343,38 +349,80 @@ instructions, so the numbers are a count of the bootloader's own instructions
 rather than a clock. There is no calibration in this repository that would
 make them silicon's.
 
-### ⚠️ Where it stops: one instruction
+### Where it used to stop, and what happened when it did not
 
-The run reaches the last `esp_image: segment` line and stops **one
-instruction short** of `Loaded app from partition at offset 0x10000`, in the
-bootloader's own `esp_cpu_dbgr_is_attached()`:
+Until M1 P6 the walk ended **one instruction short** of `Loaded app from
+partition at offset 0x10000`, in the bootloader's own
+`esp_cpu_dbgr_is_attached()`:
 
 ```text
 4007a523:  l32r  a14, (0x0010200c)    ; XDM_OCD_DCR_SET
-4007a526:  rer   a14, a14             ; ← lp-xt-inst does not decode this
+4007a526:  rer   a14, a14             ; ← lp-xt-inst did not decode this
 ```
 
 `rer` reads an *external* register over the OCD bus, and the only thing
 either boot path uses it for is "is a debugger attached?" — whose answer here
-is a flat **no**. The direct load meets the same instruction from the other
+is a flat **no**. The direct load met the same instruction from the other
 side, at `0x4010_01bd`, through `esp_hal::debugger::debugger_connected()`
-inside `CpuControl::start_app_core`.
+inside `CpuControl::start_app_core`. It was pinned by pc and by word rather
+than fixed from an M3 branch, because `rer`/`wer` were absent from
+`lp-xt-inst`'s `Inst` altogether and that crate is the Xtensa shader
+backend's too. **M1 P6 landed them.**
 
-It is **not** a two-line addition to the hart: `rer`/`wer` are absent from
-`lp-xt-inst`'s `Inst` altogether, so landing them touches the decoder, the
-encoder, the disassembler, the executor and the translator's coverage in the
-**Xtensa ISA crate the shader backend also uses**. M3's own concurrency rules
-put that crate out of this milestone's reach and call a hart change a finding
-for the director, so it is pinned exactly — by pc and by word, in
-`tests/boot.rs` and `tests/rom_up_boot.rs` — rather than fixed here.
+Both walls fell at once, and three things behind them turned out to be
+waiting:
 
-Two things wait behind it, and both are written out in full so that landing
-`rer` turns them on rather than leaving a puzzle: the direct load's idle
-heartbeat, and **the direct-load ↔ ROM-up cross-check**
-(`rom_up_and_direct_load_agree_on_what_the_app_sees`), which compares every
-byte of guest memory at the application's entry, the hart's `PS` and `a1`,
-and the four save-area words the direct load seeds. That test skips today
-with a notice naming this instruction.
+- the direct load takes the firmware's documented single-core fallback
+  (`main.rs:838-845`, Q5) and prints `[INIT] APP core unavailable; RMT ISR on
+  PRO core (single-core semantics)` where silicon prints `[INIT] RMT ISR on
+  APP core`. Heap region 3 is added in **both** arms, so the heap arithmetic
+  is the same either way — which is why G2 compares memory-class fields and
+  not log text;
+- the ROM-up walk runs on through `Loaded app from partition`, `Disabling RNG
+  early entropy source` and the `E boot: Image contains multiple DROM
+  segments` line that the desk board prints on every boot of this image, and
+  hands over to the application;
+- the **cross-check** (`rom_up_and_direct_load_agree_on_what_the_app_sees`)
+  runs, and it is the subject of the next section.
+
+### What the two paths agree on at the application's entry
+
+2,189,961 bytes of the application's own image, byte for byte, in RAM and
+through both flash windows; `PS`; `a1`; `VECBASE`; the four save-area words;
+and all 256 flash-MMU entries. Four of those were **placeholders until this
+comparison measured them**, and each is now a named constant with the run
+that produced it beside it:
+
+| what | was | is | where |
+|---|---|---|---|
+| `PS.OWB` at the app's entry | 0 | **7** | `machine::BOOTLOADER_OWB` |
+| the save area at `[a1-16, a1)` | `[0, sp, 0, 0]`, a coherent invented frame | `[0, 0x3ffe3ca0, 0x3ffe3c15, 0x3ffe3cc0]` | `loader::BOOTLOADER_SAVE_AREA` |
+| an **unmapped** flash-MMU entry | `0` — which, with no valid bit, *is* a mapping of flash page 0 | **`0x100`**, what the ROM's own `mmu_init` leaves | `cache::MMU_UNMAPPED` |
+| the breakpoint that stops both paths there | a `break` planted before the run | armed when the app's own bytes arrive | `Machine::break_at_address_when` |
+
+⚠️ **Thirty-two bytes are excluded, and the ROM-up side is the one that is
+right.** The application ELF's DROM program header is one contiguous
+`0x3f400020..0x3f447410`; `espflash` splits the same bytes into image
+segments with an eight-byte header in front of each, so the flash page behind
+the DROM window carries those headers — and the sixteen bytes of the DRAM
+segment between them — where the ELF carries padding. Measured at
+`0x3f400122`: ROM-up reads the flash's own bytes, the direct load reads zeros
+because its loader placed the ELF's contiguous view. Nothing reads them on
+either path; the comparison is over **what the bootloader placed**, the
+excluded count is printed, and making the direct loader place flash pages
+rather than ELF segments in the two windows is the fix somebody else gets to
+make.
+
+⚠️ **A hook cannot be planted in IRAM ahead of a ROM-up boot**, which is what
+`break_at_address_when` exists for. Two reasons at once: the bootloader loads
+its own segment over `0x4008_0404..` and then the app's over `0x4008_0000..`,
+so the patch is gone twice over before the pc arrives; and the bootloader's
+own code occupies the same addresses at **different instruction boundaries**,
+so a patch that simply re-armed itself planted three bytes through the middle
+of one of them and the run died on an undecodable word a few bytes later.
+Separately, `rom::read_three` used to read the displaced instruction a byte at
+a time, which SRAM0's measured word-only rule (DD37) refuses — so a
+`--break-at` anywhere in IRAM had been failing silently on **both** paths.
 
 ### The two findings a ROM-up boot is the only way to make
 
@@ -495,7 +543,9 @@ deterministic twin: the same verbs with the times in the file.
 The C6's `usb-write`, `pin` and `pins` are **not** verbs here, and the error
 says so by name: there is no USB endpoint to write into (a host on this board
 sends bytes down the wire, which is `--uart0-script` or the byte socket), and
-the pad fabric is P8's.
+the pad fabric has no *waveform* to drive a pin against until **M4**. The
+fabric itself exists — see [Pads](#pads) — and the verbs that reach into it
+arrive with the RMT channels that make a pin observation mean something.
 
 ### A host-side fact that belongs beside the cable
 
@@ -508,6 +558,64 @@ that espflash carries `UnixTightReset` for the same reason. That constrains
 the lab script and `scripts/emu/`, **not** this emulator — written down here
 so nobody re-derives it, and so that a script driving the real board and one
 driving this socket are known to differ.
+
+## Pads
+
+Forty of them, in two 32-bit banks, over the bus's own signal fabric
+(`lp_emu_esp_common::pins`). The fabric is where the routing lives because a
+peripheral never sees another peripheral: `GPIO` writes the routing, `IO_MUX`
+writes each pad's input enable, and an output block drives its signal without
+ever learning who is listening.
+
+Three of the classic's numbers are **not** the C6's, and every one of them
+would have failed quietly:
+
+| | classic | C6 |
+|---|---|---|
+| `func_out_sel_cfg.out_sel` | bits 0:8, and **256** means "follow `GPIO_OUT[n]`" | bits 0:7, 128 |
+| input signals | **256** (`func0_in_sel_cfg` … `func255_in_sel_cfg` at `+0x130`) | 128 at `+0x154` |
+| `func_in_sel_cfg` constants | **48** low, **56** high | 0x3c low, 0x38 high |
+| `IO_MUX.mcu_sel`'s GPIO function | **2** | 1 |
+
+The C6's `OUT_SEL_GPIO` is an ordinary signal number here, and nothing drives
+it — so a pad routed with the wrong constant looks routed and reads low,
+which is exactly what a plain output pad is *supposed* to look like before
+anything writes `out`. `the_gpio_selector_is_256_and_128_is_an_ordinary_signal`
+is the test that says so.
+
+⚠️ **`IO_MUX`'s pad registers are not in pad order.** `+0x004` is `gpio36`,
+`+0x044` is `gpio0`, `+0x088` is `gpio1`: the block is laid out in the order
+the pads leave the package. The C6's `GPIO0 + 4 * pad` arithmetic would push
+`fun_ie` up to thirty-five pads away from the one the driver meant, and every
+one of those writes would still look plausible. `io_mux::PAD_OF_OFFSET` is
+the map, transcribed from the **generated** table's own register names and
+walked against them by a test so the two cannot drift. Thirty-six entries:
+this part has no GPIO 28..31.
+
+And two the classic has that the C6 does not: `out1`/`enable1`/`in1`/
+`status1` carry pads 32..39 as live registers rather than padding, and
+`pcpu_int`/`acpu_int` are one interrupt output per core. `int_ena`'s bit order
+is taken from `esp-hal-1.1.1`'s `gpio_intr_enable` (bit 0 = APP, bit 2 = PRO,
+so `pin[n]` bits 13 and 15) rather than from the PAC's own prose, which skips
+a bit and runs past the width of the field it describes.
+
+### What the pin class is trusted for: **nothing, yet**
+
+The routing is modelled. `IO_MUX`'s `fun_ie` reaches the fabric. `GPIO.enable`
+decides which routed pads drive. **No waveform is produced and none is
+decoded** — `RMT` is an accept block until M4, so no `RMT_SIG_n` is ever
+driven and every routed peripheral pad sits low.
+
+That is asserted rather than left as an absence nobody checked:
+`Gpio::peripheral_driven_pads` lists the pads that are output-enabled **and**
+routed to a peripheral signal rather than to `GPIO_OUT`, and M3's gate says
+it is empty. The same call is the list a strip decoder should be watching the
+moment M4 makes it non-empty.
+
+Not modelled, and each of these is an electrical fact a logic analyser on the
+pin header would not show you either: drive strength, the *value* of a pull-up
+or pull-down (an undriven pad reads low, not "pulled high"), open-drain, pad
+filters, the input synchroniser, and analog anything.
 
 ## Flash, and the cache window
 
@@ -673,24 +781,53 @@ PAC and each carries its reason beside it.
 | `TIMG0` | `0x3FF5_F000` | `0x100` | **view** | direct #4, cycle 109,989 | three counters (`t0`, `t1`, LACT), the RTC calibration, the MWDT gate | P5 |
 | `I2C_ANA_MST` | `0x6000_E000` (AHB) | `0x20` | **view** | direct #5, cycle 143,014 | the analog world as a `{block, register}` store behind eight host ports; `busy` reads 0 | P5 |
 | `TIMG1` | `0x3FF6_0000` | `0x100` | **view** | direct #6, cycle 3,563,841 | the same block at sources 18..21; the image only disables its MWDT | P5 |
-| `GPIO` | `0x3FF4_4000` | `0x600` | accept | direct #7, cycle 3,564,113 | the matrix routing U0RXD; `strap` reads the PAC's 0 | P8 |
+| `GPIO` | `0x3FF4_4000` | `0x1000` | **view** | direct #7, cycle 3,564,113 | the routing matrix over the bus's signal fabric: **40 pads in two banks**, `func_out_sel_cfg` (9-bit `out_sel`, `256` = follow `GPIO_OUT`), `func_in_sel_cfg` (**256** input signals, constants 48/56), `out`/`enable` and their bank-1 twins — `enable` is what makes a routed pad *drive* — the `in_`/`in1` pair through IO_MUX's `fun_ie`, the sticky interrupt latch and both per-core outputs. `strap` is a **deviation**: the desk board's `0x13` | P8 |
 | `UART0` | `0x3FF4_0000` | `0x80` | **view** | direct #8, cycle 3,564,269 | the FIFO pair on `engine::uart`, the shifter draining at the programmed baud in emulated time, `status.txfifo_cnt` counting down (the bit the ROM spins on), the thresholds, the receive timeout, the interrupt quad, `mem_rx_status`'s address pair (the RX-count errata), the auto-baud counters, and the host stream | P6 |
-| `IO_MUX` | `0x3FF4_9000` | `0x94` | accept | direct #9, cycle 3,568,671 | the U0TXD pad | P8 |
+| `IO_MUX` | `0x3FF4_9000` | `0x94` | **view** | direct #9, cycle 3,568,671 | one field — each pad's `fun_ie` (bit 9) pushed into the fabric as its input enable — over a pad map that is **not in pad order** (`+0x004` is `gpio36`, `+0x044` is `gpio0`), transcribed from the generated table's own names and checked against them. Thirty-six pads: this part has no GPIO 28..31 | P8 |
 | `SPI1` | `0x3FF4_2000` | `0x400` | **view** | direct #10, cycle 3,644,210 | the flash controller over `engine::spi_flash`: the `usr` engine and the dedicated triggers, the WIP/WEL latch the ROM spins on, the JEDEC id `esp_storage` decodes, and the two `addr` packings | P7 |
 | `SPI0` | `0x3FF4_3000` | `0x400` | accept + refusal | direct #11, cycle 3,644,282 | the ROM's idle wait on `ext2.st`, `cache_fctrl` bit 0 (`Cache_Read_Enable`'s other half), and `spi_flash_attach`'s eight writes. A `cmd` trigger here **refuses** rather than inventing a JEDEC id | P7 |
 | `EFUSE` | `0x3FF5_A000` | `0x200` | **view** | rom-up #1, cycle 7 | the fuse array, the read-data registers, and the read command as a **completion**; the MAC and chip revision | P5 |
 | `UART1` | `0x3FF5_0000` | `0x80` | **view** | rom-up, cycle 30,992 | the same model at its own base and its own interrupt source (35). The ROM's `uartAttach` touches `+0x10` on every boot; the application never opens it, so it has no host stream and its bytes go nowhere | P6 |
 | `FLASH_MMU` | `0x3FF1_0000` | `0x4000` | **view** | not reached by P3 | the two flash MMU page tables, written by the ROM's `mmu_init` and `cache_flash_mmu_set`; an entry write marks its page for P7's fill | P4 / P7 |
 | `SHA` | `0x3FF0_3000` | `0xc0` | **view** | not reached by P3 | the `TEXT` window (message **and** digest read-back) and the four per-family strobe quads over `engine::sha`, including the **`load`** step the C6 has no equivalent for. SHA-1 and SHA-256 compute; SHA-384/512 refuse. The ESP-IDF bootloader's image hash is the only caller | P7 |
+| `RMT` | `0x3FF5_6000` | `0x1000` | accept | **both paths, last**: direct cycle 5,640,047 / rom-up 65,360,003 | `init_board`'s `Channel::new` read-modify-writes `ch0conf1`, and the PAC's resets are the part's own (`chNconf0` `0x3110_0002`, `chNconf1` `0x0000_0f20`). The aperture covers the channel RAM at `+0x800`. **No waveform is produced and none is decoded** | M4 |
 
-The two deviations from the PAC, both inputs to the run rather than
-properties of the part:
+The three deviations from the PAC, every one of them an input to the run
+rather than a property of the part, and every one a builder parameter:
 
 - `RTC_CNTL.reset_state` — POWERON_RESET in both cause fields, the value
   L0's banner printed (`rtc_cntl::DEVIATIONS`);
 - `APB_CTRL.date` bit 31 — esp-hal's `eco_bit2`, the top bit of the major
   chip revision, which no eFuse word on this part carries
-  (`accept::DEVIATIONS`).
+  (`accept::DEVIATIONS`);
+- `GPIO.strap` — **`0x13`**, the strapping pins as the pads were latched at
+  reset. The PAC carries no reset for it, and zero is not "no straps": it is
+  the SDIO boot mode, which the mask ROM takes seriously enough to walk into
+  `slc_init_attach`. The value is the register **printed**: the ROM's `main`
+  loads it and passes it raw as the `boot:0x%x` argument of its banner, and
+  the desk board's banner reads `boot:0x13 (SPI_FAST_FLASH_BOOT)`.
+  `Esp32V3Builder::strap` overrides it. ⚠️ There is deliberately no
+  download-mode default: the cable's `Strap::Download` says IO0 was low when
+  EN was released, and what word `GPIO.strap` then reads is a second fact
+  this repository has not measured (R8).
+
+### eFuse block 0 is the desk board's, word for word
+
+Not four synthesised words but the **seven `espefuse` read off the part**
+(`loader::DESK_BLOCK0`), with the MAC and the chip revision overlaid on top
+so `--efuse-mac` and `--efuse-rev` still move what they name and nothing
+else. Three fuses on the boot path came with it that no derivation had
+produced, and all three had been reading zero — which is a legal unburned
+value, and therefore silent:
+
+| field | value | why it matters |
+|---|---|---|
+| `CLK8M_FREQ` | `0x37` (55) | the mask ROM's XTAL detection multiplies the internal oscillator's calibration by it. At 0 the ROM concluded **26 MHz** for a board with a 40 MHz crystal |
+| `MAC_CRC` | `0x7c` | left at 0 with a note saying the polynomial was out of reach. It did not have to be computed — it was read off the part |
+| `CONSOLE_DEBUG_DISABLE` | 1 | the ROM's BASIC-console fallback is fused **off** on this part |
+
+plus `CHIP_PACKAGE`, `CODING_SCHEME`, `ADC_VREF`, `CHIP_CPU_FREQ_RATED` and
+every security fuse off, none of which this crate has to name.
 
 Grades: every register is `documented` where the PAC calls it read-write and
 the block pretends nothing, `modeled` otherwise (`RegFile::with_pac_grades`);
@@ -923,15 +1060,15 @@ has both cause fields zero and a chip that just powered on reads
 `POWERON_RESET` (1) in each; the ROM's `extui` masks and the silicon banner
 are the citation.
 
-**Where P3 leaves it.** The direct load runs eleven stops deep, prints its
-whole `[INIT]` chain into `UART0.fifo` (543 bytes, cycles 3,622,541 to
-3,642,925, the silicon capture's lines as far as `[INIT] I/O task
-spawned`) and then spins in `esp_rom_spiflash_read_status` on
-`SPI1.cmd.flash_rdsr` — the phase file's own example of a stop that names
-its owner, P7. The ROM path spins on `EFUSE.cmd.read_cmd` — P5. Both
-readings are pinned in `tests/boot.rs`, along with the determinism of the
-run. The full ledger, with every pin's citation and the order it fixes for
-P4–P7, is `docs/reports/2026-09-10-esp32v3-strict-boot-inventory.md`.
+**Where the loop ended.** P3 recorded eleven stops and left the direct load
+spinning on `SPI1.cmd.flash_rdsr` (P7's) with the ROM path on
+`EFUSE.cmd.read_cmd` (P5's). The last of them was **RMT**, met by both paths
+one line after `[INIT] flash filesystem mounted` — `init_board`'s
+`Channel::new` reading `ch0conf1` at cycle 5,640,047 on the direct load and
+65,360,003 on the ROM-up walk. It is an accept block and M4 owns it; behind
+it, both paths idle. The full ledger, with every pin's citation and the order
+it fixed for P4–P8, is
+`docs/reports/2026-09-10-esp32v3-strict-boot-inventory.md`.
 
 ## Tests
 
@@ -945,11 +1082,53 @@ P4–P7, is `docs/reports/2026-09-10-esp32v3-strict-boot-inventory.md`.
 | `src/control.rs` (unit) | the auto-reset truth table as a table; every verb parsing to its command; the three verbs this chip does **not** have refused by name; the reply formats; each script refusing the other one's lines |
 | `src/periph/*.rs` (unit) | every accept block reads the PAC's resets except the listed deviation, and every listed deviation is real and has a reason; the eFuse read command reading set exactly once and then clearing itself, and three reloads comparing equal; RTC_CNTL's stall pair, its RWDT gate and its reported-not-performed software reset; the analog master answering the register asked for rather than the last one written |
 
-| `tests/boot_idle.rs` | **The hello.** With the image: the `[INIT]` chain comes out of the **host stream** — 543 bytes, sha256 `ea8bae30…`, the same count and the same digest P3 measured going *into* the accept block — with zero unmapped accesses and no strict stop; the line order held against L0's capture; two runs one digest, one cycle count, one instruction count; `--exit-on` stopping at a complete line; and the run standing at the flash until P7 with nothing left in the FIFO |
+| `tests/boot_idle.rs` | **The hello, and G2 (a).** With the image: the `[INIT]` chain comes out of the **host stream** — 543 bytes, sha256 `ea8bae30…`, the same count and the same digest P3 measured going *into* the accept block — with zero unmapped accesses and no strict stop; the line order held against L0's capture; `--exit-on` stopping at a complete line. And both boot paths run to the **idle heartbeat**: the `[stack] heartbeat:`/`[MEM]`/`[JIT]` triple, the Q5 fallback line, the unsolicited wire hello, the answer to a scripted request, and `unmapped = 0` on each — plus the two paths' memory figures asserted equal to **each other** (not to silicon: different image bytes, ruling R7) |
+| `tests/determinism.rs` | The plan's inviolable invariant. Two runs of each boot path agree on the UART sha, the byte count, the **cycle count**, the **instruction count**, the pc and the idle skips; a snapshot taken mid-run and restored into a **fresh** machine produces the same second half as the run that was never interrupted; and the state that is not a register — the flash MMU tables, the cache-enable bit, both halves of the stall key, the interrupt matrix, core 1's hold, the DBREAK slots — comes back through the struct |
+| `src/periph/gpio.rs`, `src/periph/io_mux.rs` (unit) | A plain `Output` pin drive reaching a pad and `enable` taking it back off the wire; `256` being the GPIO selector and `128` an ordinary signal; bank 1 carrying pads 32..39; the input matrix routing `U0RXD_IN` and refusing the two constants by name; `in_` served only through `fun_ie`; the PRO core's enable at `pin[n]` bit 15 and the APP core's at 13; **no peripheral signal reaching a pad**; the IO_MUX pad map walked against the generated table's own names, and asserted *not* to be in pad order |
 | `tests/uart_socket.rs` | The view **through the bus**, at the addresses a guest uses: scripted bytes arriving at the cycles the file names and reading back in order; an `int_clr` unable to clear `rxfifo_full` while it holds; the receive timeout refusing to clear until the FIFO is empty (the classic's third category). And the **cable** at machine level: the reboot on the *release* of EN and not on the assert, `reset` and `download-mode` one reboot each with the right strap, a release without `--reboot-on-reset` ending the run and naming the strap, and `attach`/`open` moving no chip state. With the image: a cable reset of the running app, one reboot, and **both boots in one console log** — 1,086 bytes, two identical halves |
 
 Run them with `just test-emu-esp32v3`, and the image-backed ones with
-`just test-emu-esp32v3-boot`.
+`just test-emu-esp32v3-boot`. **`just test-emu-esp32v3-gate` is the whole of
+M3's gate** — that suite, both lints, and the reference image built twice for
+`--verify` — and it is what CI's path-gated, non-required
+`Emulator ESP32v3 (x64)` job runs.
+
+## The reference image
+
+`scripts/emu/build-reference-image.sh --chip esp32 esp32,server,float-f32
+<commit> none` builds the shipped image in a detached worktree at a pinned
+commit, so `build.rs`'s `git rev-parse` stamps the right commit and the right
+`dirty` flag. `--verify` builds it a second time in a second cold worktree at
+a longer path and fails if the sha256s differ.
+
+**There is no spike feature and no memfs variant.** The C6 cherry-picks
+`spike_uart0_link` because its host link is USB-Serial-JTAG; the classic's
+link *is* UART0, so the tree stays clean and `dirty: false` is the honest
+stamp — the same stamp a silicon flash of that commit carries. And the
+classic boots from a modelled flash chip with a real filesystem, which is
+what "memfs-free" means in G2.
+
+**The per-host band, measured** (ruling R6): on an M2 Max with `rustc
+1.97.0-nightly (ca9a134e0)` from the `esp` channel and `xtensa-esp-elf`
+`esp-14.2.0_20240906`, the image at `a795b664f` is 2,985,952 bytes, sha256
+`e4c41e7e…`, twice. The band is *one host, one sha*; cross-host equality is a
+further claim and is not gated on.
+
+⚠️ **A fourth cause of non-reproducibility, which the C6's header does not
+list**: a `~/.cargo/config.toml` with
+`build-dir = ~/.cache/cargo-build/{workspace-path-hash}` puts a hash of the
+workspace path into the ELF's debug info through the build scripts'
+`OUT_DIR`. Two pinned worktrees produced images differing in exactly sixteen
+bytes. Remapping the parent cannot help — the hash is *inside* the path — so
+the recipe pins the build dir under the worktree, which the existing remap
+already covers.
+
+⚠️ **L0's desk board is running a dirty tree** (`2e21b6226bcd`-dirty), so no
+commit rebuilds the bytes the first classic silicon transcripts came from.
+That is ruling **R7**, it is a director decision before lab task L1 is
+dispatched, and it is why G2's memory comparison against silicon is held:
+the boot-log *shape* is comparable line for line, and the memory-class fields
+are comparable only against an emulated run of the same bytes.
 
 ## Provenance
 

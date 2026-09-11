@@ -5,12 +5,43 @@ cores live at the root of `lp-emu/`, and anything that assumes a *chip* — a
 memory map, MMIO decode, peripherals, a ROM image — lives under the vendor it
 belongs to.
 
-Today it holds one machine, and that machine boots the shipped firmware to its
-idle loop:
+It holds **two machines**, and both boot the shipped firmware to its idle
+loop:
 
 ```bash
 just emu-c6 target/emu-ref/d6cfaa205-boot-idle-memfs/fw-esp32c6 --timeout 6s --strict-bus
+just emu-esp32v3 target/emu-ref/<commit>-boot-idle/fw-esp32v3 --timeout 2s --strict-bus
 ```
+
+## Two machines
+
+They are the two sides of the engine extraction M2 did, and the interesting
+part is the seam between what they share and what they cannot.
+
+**Shared**, and shared *because* a second machine was built rather than in
+anticipation of one: `lp-emu-esp-common`'s bus and MMIO decode, the
+`Peripheral` trait and its `BusCx`, `RegFile`'s accept-and-remember with its
+table of exceptions, the bus trace and its spin detector, host byte streams,
+the interrupt-matrix seam, the **signal fabric** (pads, signals, edges,
+outside drivers, pad-to-pad wires) and the WS281x decoder over it, the ELF
+view, and the four peripheral **engines** — UART, TIMG, SPI-flash and SHA —
+each of which holds the behaviour and none of which holds a register offset.
+Under that, `lp-emu-core`'s guest memory, scheduler and cycle model.
+
+**Not shared**, and each of these is a place the two chips genuinely differ:
+
+| | `lp-emu-esp32c6` | `lp-emu-esp32v3` |
+|---|---|---|
+| hart | `lp-riscv-emu`, RV32IMAC | `lp-xt-emu`, Xtensa LX6 — register windows, a vector table, `PS` instead of `mstatus` |
+| cores | one | **two slots**, core 1 held by a three-part stall key (M3 runs single-core) |
+| register layouts | the `esp32c6` PAC | the `esp32` PAC. Almost nothing lines up: 40 pads in two banks against 31 in one, 256 input signals against 128, a `TEXT` window that is both message and digest, `LACT` as a clock |
+| the boot path | ROM → app | ROM → **the real ESP-IDF second-stage bootloader** out of a merged image → app, and the log is compared line for line against silicon |
+| the host link | a USB-Serial-JTAG peripheral *inside* the SoC — a client connecting **is** the port opening | a **CH340 bridge chip on the board**. Opening the port moves no chip state; what resets the chip is the auto-reset circuit driven by the modem lines, and the truth table is the board's |
+| memory | one flat HP SRAM | SRAM0 with a **measured word-only rule**, SRAM1, SRAM2, two RTC blocks, two flash windows through a per-core cache MMU |
+
+A change to anything in the first list is a change to both machines, which is
+why CI's `emu_c6` and `emu_esp32v3` path filters both fire on `lp-emu/**`. A
+change that moves one and not the other is exactly what nobody would notice.
 
 ## The layering
 
@@ -39,6 +70,12 @@ lp-cli validate            payloads, transcripts, replay, trust grading
   pad) with the WS281x decoder that reads it, and the PT_LOAD view of an
   ELF. It holds **no chip numbers** — see its
   README.
+
+- **`lp-emu-esp32v3/`** — the classic ESP32 (v3, LX6) machine: the same shape
+  on an Xtensa hart, with the mask ROM's own boot chain and the real IDF
+  second-stage bootloader behind it, a modelled flash chip and cache MMU, the
+  CH340 cable on its control channel, and the 40-pad fabric. It is the only
+  place classic chip numbers live — see its README.
 
 - **`lp-emu-esp32c6/`** — the C6 machine: the memory map (every base cited to
   esp-hal's linker script), the mask-ROM loader and its deliberately empty
