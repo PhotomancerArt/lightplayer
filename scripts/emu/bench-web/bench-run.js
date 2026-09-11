@@ -10,6 +10,42 @@
 import { makeWasi } from './wasi-shim.js';
 import { makeJitHost } from './jit-host.js';
 
+/// The gate rows, in the order the phone takes them.
+///
+/// A phone in someone's hand is not a place to drive six selects, and a row
+/// taken at a different bound than the row beside it is not a comparison. So
+/// the sequence the M7B gate quotes lives here, fixed, as data: `render-basic`
+/// at `t2` inside the 5500 ms `GATE_US` window, the JD26 blocks-per-function
+/// knob swept 8 -> 16 -> 32, and the same image re-taken under `--interpreter`
+/// on the same binary in the same session.
+///
+/// ⚠️ 8 and 16 are deliberately BELOW the `fnBlocksChoices` floor the staged
+/// manifest offers (32). That floor is there because V8 has died below it —
+/// `Fatal process out of memory: Zone` from a background compile job, the
+/// outer selector being 730 KB and 25,156 nested blocks at 8 against 176 KB at
+/// 32 (P6b) — and a browser tab cannot catch that. The preset asks for the two
+/// rows anyway, because whether the phone's own engine survives them IS the
+/// question the gate is asking; `node` 25's V8 took both on `render-basic`
+/// when this was written. On an engine that dies there, the page dies with it
+/// and nothing uploads — which is that engine's answer, and the one failure
+/// mode of this preset the rig cannot turn into a failed row.
+export const GATE_ROWS = [
+  { slug: 'render-basic', grade: 't2', mode: 'jit', fnBlocks: 8, timeout: '5500ms' },
+  { slug: 'render-basic', grade: 't2', mode: 'jit', fnBlocks: 16, timeout: '5500ms' },
+  { slug: 'render-basic', grade: 't2', mode: 'jit', fnBlocks: 32, timeout: '5500ms' },
+  { slug: 'render-basic', grade: 't2', mode: 'interp', fnBlocks: null, timeout: '5500ms' },
+];
+
+/// `GATE_ROWS` as a plan the Worker can run, taking the wall-clock guard and
+/// the `--exit-on` policy from the staged manifest so the preset and a
+/// hand-driven run differ in nothing but the rows.
+export function gateRowsPlan(manifest) {
+  const d = (manifest && manifest.defaults) || {};
+  const wallTimeout = d.wallTimeout ?? 600;
+  const exitOn = !!d.exitOn;
+  return GATE_ROWS.map((row) => ({ ...row, wallTimeout, exitOn }));
+}
+
 /// Build the emulator's own argv for one row.
 ///
 /// The two flags P6's table forks on are `mode` and `fnBlocks`, and they are

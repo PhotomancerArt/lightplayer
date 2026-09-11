@@ -10,8 +10,13 @@
   @media (prefers-color-scheme: dark) { body { background: #151b20; color: #e6ecef; } }
   h1 { font-size: 22px; margin: 0 0 4px; }
   .sub { opacity: .7; font-size: 13px; word-break: break-all; }
-  button { font: inherit; padding: 10px 18px; border-radius: 6px; border: 1px solid #0e6e6a; background: #0e6e6a; color: #fff; margin: 14px 0; }
+  button { font: inherit; padding: 10px 18px; border-radius: 6px; border: 1px solid #0e6e6a; background: #0e6e6a; color: #fff; margin: 14px 8px 4px 0; }
   button:disabled { opacity: .5; }
+  /* The preset is the button a phone in someone's hand presses, so it reads as
+     its own thing rather than as a second Run. */
+  button.preset { background: transparent; color: #0e6e6a; border-width: 2px; font-weight: 600; }
+  @media (prefers-color-scheme: dark) { button.preset { color: #4fb8b2; border-color: #4fb8b2; } }
+  #gateWhat { margin: 0 0 10px; }
   fieldset { border: 1px solid rgba(128,128,128,.4); border-radius: 8px; margin: 14px 0 0; padding: 10px 14px; }
   legend { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; opacity: .7; }
   label { font-size: 14px; margin-right: 18px; display: inline-block; }
@@ -45,6 +50,8 @@
 </fieldset>
 
 <button id="run">Run</button>
+<button id="runGate" class="preset">Run the gate rows</button>
+<div class="sub" id="gateWhat">the preset: render-basic t2 at 5500 ms — blocks/fn 8, 16, 32, then --interpreter</div>
 <div id="status">Loading…</div>
 <div id="headlines"></div>
 <div class="wrap">
@@ -64,7 +71,7 @@
   $('ua').textContent = navigator.userAgent + ' · cores ' + (navigator.hardwareConcurrency || '?');
   const status = $('status'), tbody = document.querySelector('#results tbody');
   const table = $('results'), headlines = $('headlines'), tail = $('tail'), boot = $('boot');
-  const btn = $('run'), buildEl = $('build');
+  const btn = $('run'), gateBtn = $('runGate'), buildEl = $('build');
   let worker = null, results = [], manifest = null;
 
   async function loadManifest() {
@@ -134,25 +141,37 @@
     }).join('');
   }
 
-  async function start() {
+  function setBusy(busy) { btn.disabled = busy; gateBtn.disabled = busy; }
+
+  /// One run, whatever asked for it.
+  ///
+  /// `preset` is null for the controls above and 'gate-rows' for the one-click
+  /// button; it changes three things and nothing else — who builds the plan
+  /// (the Worker does, off `bench-run.js`'s own `GATE_ROWS`, so the page never
+  /// has to be right about the rows twice), what the progress line calls a row,
+  /// and the marker on the uploaded JSON. The Worker path, the table, the
+  /// upload and the failure handling are the same code either way.
+  async function start(preset) {
     const m = await loadManifest();
-    const plan = buildPlan(m);
+    const plan = preset ? null : buildPlan(m);
     if (worker) worker.terminate();
     // A MODULE worker: it imports jit-host.js, which is the module Studio's
     // own worker will import unchanged (JD25).
     worker = new Worker('worker.js?v=' + (m.build ? m.build.short : 'dev'), { type: 'module' });
-    results = []; tbody.innerHTML = ''; headlines.innerHTML = ''; boot.textContent = ''; table.hidden = true; btn.disabled = true;
+    results = []; tbody.innerHTML = ''; headlines.innerHTML = ''; boot.textContent = ''; table.hidden = true; setBusy(true);
     status.textContent = 'Loading module…';
-    worker.onerror = (e) => { status.innerHTML = '<span class="bad">Worker died: ' + (e.message || e) + '</span>'; btn.disabled = false; };
+    worker.onerror = (e) => { status.innerHTML = '<span class="bad">Worker died: ' + (e.message || e) + '</span>'; setBusy(false); };
     worker.onmessage = (ev) => {
       const d = ev.data;
+      const word = preset ? 'Row' : 'Run';
       if (d.type === 'loaded') status.textContent = 'emu.wasm (' + d.wasmBytes + ' B) compiled in ' + d.compileMs.toFixed(0) + ' ms';
-      if (d.type === 'progress') status.textContent = 'Run ' + (d.i + 1) + ' of ' + d.n + ' (' + d.step.slug + ' ' + d.step.grade + ' ' + d.step.mode + ')… keep the screen on';
+      if (d.type === 'progress') status.textContent = word + ' ' + (d.i + 1) + ' of ' + d.n + ' (' + d.step.slug + ' ' + d.step.grade + ' ' + d.step.mode +
+        (d.step.mode === 'jit' ? ' fn ' + d.step.fnBlocks : '') + ')… keep the screen on';
       if (d.type === 'result') { addRow(d.i, d.r); }
-      if (d.type === 'done') { btn.disabled = false; send(m); }
-      if (d.type === 'error') { status.innerHTML = '<span class="bad">Error: ' + d.message + '</span>'; btn.disabled = false; }
+      if (d.type === 'done') { setBusy(false); send(m, preset); }
+      if (d.type === 'error') { status.innerHTML = '<span class="bad">Error: ' + d.message + '</span>'; setBusy(false); }
     };
-    worker.postMessage({ plan, images: m.images });
+    worker.postMessage({ plan, preset, defaults: m.defaults, images: m.images });
   }
 
   function addRow(i, r) {
@@ -180,9 +199,13 @@
     renderHeadlines();
   }
 
-  async function send(m) {
+  async function send(m, preset) {
     const payload = { ua: navigator.userAgent, cores: navigator.hardwareConcurrency, at: new Date().toISOString(),
       build: m.build, deviceMemory: navigator.deviceMemory || null, results };
+    // One file per run either way, with every row of it in order; the marker
+    // is what tells `--collect` (and whoever reads the JSON) that these four
+    // rows are the gate sequence and not four rows someone happened to pick.
+    if (preset) payload.preset = preset;
     const name = 'result-' + payload.at.replace(/[:.]/g, '-') + '.json';
     const fd = new FormData();
     fd.append('file_to_upload', new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), name);
@@ -191,8 +214,9 @@
       status.textContent = resp.ok ? 'Done. Results sent to the Mac as ' + name + '.' : 'Done, but sending failed (' + resp.status + '). Paste the table into the chat.';
     } catch (e) { status.textContent = 'Done, but sending failed. Paste the table into the chat.'; }
   }
-  btn.addEventListener('click', start);
-  loadManifest().then(() => { status.textContent = 'Ready. Pick the row and press Run.'; });
+  btn.addEventListener('click', () => start(null));
+  gateBtn.addEventListener('click', () => start('gate-rows'));
+  loadManifest().then(() => { status.textContent = 'Ready. Press "Run the gate rows", or pick a row and press Run.'; });
 </script>
 </body>
 </html>
