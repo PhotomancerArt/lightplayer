@@ -66,7 +66,12 @@ extern crate alloc;
 
 use core::marker::PhantomData;
 
-use alloc::{boxed::Box, collections::BTreeMap, string::String, vec::Vec};
+use alloc::{
+    boxed::Box,
+    collections::{BTreeMap, BTreeSet},
+    string::String,
+    vec::Vec,
+};
 
 use lp_emu_core::block::{BlockCache, BlockStats};
 use lp_emu_core::{Bus, CycleModel, InstClass, MemoryAccessKind, MemoryError};
@@ -266,6 +271,56 @@ pub struct BlockProfile {
     /// Block start pc → (entries, instructions retired starting there).
     counts: BTreeMap<u32, (u64, u64)>,
     retired: u64,
+    /// The **other side** of a module boundary, as guest instruction pcs, and
+    /// what the run's control flow did about it. `None` unless a caller asked
+    /// (M7b P1, the split census).
+    boundary: Option<Boundary>,
+}
+
+/// How often control crossed a proposed module boundary — M7b P1's step 1.
+///
+/// The question incremental translation turns on: *if the code the guest
+/// published at a `fence.i` were emitted as its own module rather than folded
+/// into a re-emitted whole image, how much of the run's control flow would
+/// cross between the two?* Every such transfer is an ordinary exit under the
+/// split — one host round trip each — where today it is a cross inside one
+/// module, which costs a flush and a reload and no host frame at all.
+///
+/// So the census is taken on the **interpreter**, which sees every block
+/// dispatch the run performs, and it classifies each one by whether its pc is
+/// an instruction in the published set. A dispatch whose class differs from
+/// the previous one is a crossing.
+///
+/// It is off by default, it is never consulted by anything, and a run that
+/// takes it is not a run whose wall clock means anything.
+#[derive(Clone, Debug, Default)]
+struct Boundary {
+    /// Guest instruction pcs on the far side — the published code.
+    pcs: BTreeSet<u32>,
+    /// `[base, base + len)` guest address ranges on the far side, for a
+    /// boundary drawn by where the code **is** rather than by which walk found
+    /// it — M7b P1's writable/read-only split.
+    ranges: Vec<(u32, u32)>,
+    /// Which side the last dispatch was on, or `None` before the first.
+    last: Option<bool>,
+    /// Dispatches that changed side.
+    crossings: u64,
+    /// Dispatches on the far side, and what they retired.
+    inside: u64,
+    inside_retired: u64,
+}
+
+/// What the split census counted. See [`BlockProfile::boundary_census`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BoundaryCensus {
+    /// Block dispatches whose side differed from the one before them.
+    pub crossings: u64,
+    /// Block dispatches on the far side of the boundary.
+    pub inside: u64,
+    /// Instructions those dispatches retired.
+    pub inside_retired: u64,
+    /// Guest instruction pcs the far side holds.
+    pub pcs: usize,
 }
 
 impl BlockProfile {
@@ -286,12 +341,56 @@ impl BlockProfile {
         self.counts.iter().map(|(&pc, &(n, r))| (pc, n, r))
     }
 
+    /// Add guest instruction pcs to the far side of the boundary the census
+    /// counts crossings of, and start counting if it was not already.
+    ///
+    /// Called once per translation event by the machine, because the published
+    /// set grows with each one. Crossings before the first call are not
+    /// counted, which is right: before the guest publishes there is nothing on
+    /// the far side to cross to.
+    pub fn watch_boundary(&mut self, pcs: impl IntoIterator<Item = u32>) {
+        let b = self.boundary.get_or_insert_with(Boundary::default);
+        b.pcs.extend(pcs);
+    }
+
+    /// The same, for a boundary drawn by guest **address range** rather than
+    /// by which walk claimed a pc.
+    pub fn watch_boundary_ranges(&mut self, ranges: impl IntoIterator<Item = (u32, u32)>) {
+        let b = self.boundary.get_or_insert_with(Boundary::default);
+        b.ranges.extend(ranges);
+    }
+
+    /// What the boundary census counted, or `None` when nobody asked for one.
+    #[must_use]
+    pub fn boundary_census(&self) -> Option<BoundaryCensus> {
+        let b = self.boundary.as_ref()?;
+        Some(BoundaryCensus {
+            crossings: b.crossings,
+            inside: b.inside,
+            inside_retired: b.inside_retired,
+            pcs: b.pcs.len() + b.ranges.iter().map(|&(_, l)| l as usize).sum::<usize>(),
+        })
+    }
+
     #[inline]
     fn note(&mut self, pc: u32, retired: u32) {
         let slot = self.counts.entry(pc).or_insert((0, 0));
         slot.0 += 1;
         slot.1 += u64::from(retired);
         self.retired += u64::from(retired);
+        if let Some(b) = self.boundary.as_mut() {
+            let inside = b.pcs.contains(&pc)
+                || b.ranges
+                    .iter()
+                    .any(|&(base, len)| pc.wrapping_sub(base) < len);
+            if inside {
+                b.inside += 1;
+                b.inside_retired += u64::from(retired);
+            }
+            if b.last.replace(inside).is_some_and(|was| was != inside) {
+                b.crossings += 1;
+            }
+        }
     }
 }
 
@@ -418,6 +517,24 @@ impl<B: Bus> MachineHart<B> {
         // A freshly installed core knows exactly what it holds, so anything
         // recorded for the core it replaces is not its business.
         self.core_flush_pending = PendingInvalidate::None;
+    }
+
+    /// Rebuild the entry index over `entries`, **keeping** the installed core.
+    ///
+    /// What a core that grew rather than being replaced needs (M7b P1): a
+    /// translation event that installs an additional module beside the ones
+    /// already compiled widens the set of pcs the hart may enter at, and
+    /// nothing else about the core changes. A pending flush is left alone,
+    /// because unlike [`Self::set_translated_core`] the core this applies to is
+    /// the same core that asked for it.
+    pub fn set_translated_entries(&mut self, entries: &[u32]) {
+        self.core_entries = translated::EntryIndex::build(entries);
+    }
+
+    /// The installed core, to reach something only it and its own machine
+    /// crate understand — see [`translated::TranslatedCore::as_any_mut`].
+    pub fn translated_core_mut(&mut self) -> Option<&mut translated::BoxedCore<B>> {
+        self.core.as_mut()
     }
 
     /// Remove the installed core, if any, and go back to interpreting.
@@ -558,6 +675,12 @@ impl<B: Bus> MachineHart<B> {
     #[must_use]
     pub fn blockprof(&self) -> Option<&BlockProfile> {
         self.blockprof.as_deref()
+    }
+
+    /// The census, to add to. `None` when the run did not ask for one.
+    #[inline]
+    pub fn blockprof_mut(&mut self) -> Option<&mut BlockProfile> {
+        self.blockprof.as_deref_mut()
     }
 
     /// The trap vector the hart would jump to, base only.

@@ -661,7 +661,7 @@ size puts them:
 
 | candidate | what it is worth here | measured by |
 |---|---:|---|
-| incremental `fence.i` translation | up to 2,058 ms (25.6 %) | this table; JD20 |
+| ~~incremental `fence.i` translation~~ **done (M7b P1): 1,050 ms of the 2,058, and 400 ms of it handed back at the module boundary** | up to 2,058 ms (25.6 %) | this table; JD20 |
 | the module's remaining 2.3× over a warm replay | up to ~1,250 ms (15.5 %) | the cold/warm table above |
 | the exit rules (`after_store` is 53.2 % of exits, buying 0.68 instructions each) | up to ~830 ms of entry path + hart loop | P6b's census |
 | the slice loop and the scheduler, which run per slice and not per entry | 1,171 ms (14.5 %) | this table |
@@ -684,6 +684,90 @@ On `render-basic` at the last translation event the tables are **7,307,264 B**
 (1 MiB page map plus 1 KiB… 32 KiB per populated page); on `render-rocaille`,
 7,176,192 B. Two-byte granularity is not an economy — 48.99 % of real block
 starts sit at 2 mod 4.
+
+**Per module since M7b P1.** A slot holds a *block index*, and a block index
+only means something inside the module it was emitted with, so two live modules
+need two sets of tables and the second set goes in its own slice of the same
+gap. That gap is **218,103,808 bytes** on the C6 — between the mask ROM's data
+and HP SRAM — and a `render-basic` run with two modules live uses 8,388,608 of
+it and leaves 209,452,800. The permission table and the exchange area are not
+duplicated: every module's `Layout` folds in the same offsets for them, and
+they hold the same bytes whichever module is reading.
+
+## Incremental translation at `fence.i` (M7b P1, DD18)
+
+JD5 has two translation events: boot, and every `fence.i`. Until M7b P1 both
+of them did the same thing — walk the whole image, emit 60–65 MB of wasm and
+ask the engine to compile it — and `render-basic` t2 does that **three times**,
+which P6c priced at **22.0 % of the run**.
+
+A `fence.i` is the guest saying "I wrote some code". Almost nothing else
+changed, so almost nothing else needs re-emitting. What stops that being
+obvious is the **whole-module retire**, three sections up: a block whose bytes
+changed makes the module holding it stale, because that block's body is
+reachable from every other block's compiled-in edges. On `render-basic` the
+first `fence.i` changes **four blocks of 154,544** — mis-swept data in HP SRAM
+that nothing executes — and under one module those four words retire the whole
+image.
+
+**So the image is split at boot on whether the guest can write it.**
+
+| module | what it holds | what a `fence.i` does to it |
+|---|---|---|
+| read-only | the flash-cache window and the mask ROM — 96 % of the image | nothing: those bytes cannot change, so it can never go stale |
+| writable | HP SRAM, LP SRAM, and every byte the guest publishes | retired and replaced **whole**, exactly as the single module was before |
+
+The retire is unchanged; it applies to the only module whose bytes a publish
+can have touched. Three things make the split exact:
+
+1. **One module answers for any pc.** The walk that builds the replacement is
+   given the read-only module's block starts as a **stop set**
+   (`discover::discover_from`): a seed in it is skipped, an edge into it is
+   neither followed nor claimed, and a block being built ends there. Two
+   modules answering for one pc would give the hart's `EntryIndex` two answers.
+2. **Each module has its own target tables**, for the reason the section above
+   gives.
+3. **Every edge out of a module is an ordinary exit** — `why::EDGE_OUT` or
+   `why::INDIRECT_MISS` — and the hart re-enters through the entry index,
+   landing in whichever module holds the target. Cross-module control flow
+   costs one host entry each, and that is the whole price of the split.
+
+**What it costs, measured before it was built.**
+`LP_EMU_JIT_SPLIT_CENSUS=writable` with `--interpreter --blockprof` classifies
+every block dispatch by which side of a proposed boundary its pc is on and
+counts the ones that change side. On `render-basic` t2 it predicted
+**3,770,996** crossings; the run delivers **11,843,442** exits against
+7,865,280, which is **3,978,162** more — the census was within 5 %. Almost all
+of it is `indirect-miss` (288,065 → 3,990,254): a `jalr` that used to resolve
+through the target table into the same module now resolves to `-1` and leaves.
+
+**What it buys.** `render-basic` t2, node/V8, 16 blocks a function:
+
+| event | before: emit / compile | after: emit / compile |
+|---|---:|---:|
+| boot | 753.4 ms / 36.4 ms | 817.3 ms / 44.0 ms |
+| `fence.i` #1 | 513.2 ms / 43.4 ms | **50.4 ms / 6.2 ms** |
+| `fence.i` #2 | 536.9 ms / 43.7 ms | **70.5 ms / 5.8 ms** |
+
+Boot costs more, because it now emits two modules and two sets of tables. Each
+`fence.i` costs a tenth of what it did. Coverage rises from **93.46 % to
+97.37 %** as a side effect: the replacement walk re-finds the writable side at
+every event rather than once.
+
+**The whole-module retire's other end.** A module that goes stale stops being
+entered and the run continues interpreted until the next event replaces it —
+per module now, rather than per core. That is sound for the same reason the
+retire exists: entering a module can only run *that* module's blocks, because
+every edge out of one is an exit.
+
+**The function table is not grown.** The obvious alternative — keep one module
+and add the new code to it — would need the flat selector's table to reach a
+function that did not exist when the module was compiled. It cannot: the table
+is declared `maximum = Some(count)` so that an engine can fold its bounds
+check, and JavaScriptCore's fused `table.grow(delta, ref)` accepts a new entry,
+reports the funcref back from `table.get`, and then traps on `call_indirect`
+against that same slot (P2, S4). A shared *imported* table would be a different
+design, not a smaller change.
 
 ### The seeding scope (JD26, item 4)
 

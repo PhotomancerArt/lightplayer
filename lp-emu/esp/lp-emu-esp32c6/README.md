@@ -1596,6 +1596,18 @@ run.
 with why the stay ended there and whether the module could have been entered
 at that pc at all.
 
+Three more environment-gated diagnostics, all off by default, none of them
+consulted by anything, and every one of them perturbing the wall clock the
+rest of the run reports:
+
+| variable | what it adds |
+|---|---|
+| `LP_EMU_JIT_EXITS=1` | the twenty-four costliest exit sites, above |
+| `LP_EMU_JIT_ENTRY_TIME=<stride>` | where an entry's time goes, sampled one in `<stride>` (M7 P6b) |
+| `LP_EMU_JIT_MMIO_CENSUS=1` | every MMIO operation translated code issued, by peripheral, by register and by guest pc (M7 P6c) |
+| `LP_EMU_JIT_SPLIT_CENSUS=1` | with `--interpreter --blockprof`: what an incremental module would hold at each `fence.i`, and how often the run's control flow would cross the boundary that creates (M7b P1) |
+| `LP_EMU_JIT_SPLIT_CENSUS=writable` | the same census against the **writable/read-only** boundary, which is the one the shipped split actually draws |
+
 `--exit-on` stops at the **end of the line** the match is on, not at the
 match, and it watches **both** consoles — UART0 and the USB link — because
 the shipped image's console is the USB one and a run with `--usb-host

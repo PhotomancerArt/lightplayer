@@ -112,12 +112,45 @@ pub fn discover(
     max_blocks: usize,
     fetch: &mut dyn FnMut(u32) -> Option<u32>,
 ) -> Discovered {
+    discover_from(seeds, max_blocks, &BTreeSet::new(), fetch)
+}
+
+/// Walk the image from `seeds`, and **stop where `known` already holds a
+/// block start**.
+///
+/// This is [`discover`] with one addition, and the addition is what makes
+/// incremental translation possible (M7b P1). A module that is already
+/// installed owns the blocks it was emitted from; a second walk over newly
+/// published code must not emit them a second time, because two modules
+/// holding the same block start would give the hart's entry index two answers
+/// for one pc.
+///
+/// `known` is therefore both a **stop set** and a **do-not-claim set**:
+///
+/// - a seed in `known` is skipped — the installed module already has it;
+/// - a static edge into `known` is not followed and not claimed, so the
+///   emitted block ends at that pc and the stay exits there. The hart re-enters
+///   through the entry index, into whichever module holds it. That exit is the
+///   cost this walk's shape is measured by;
+/// - a block being built stops at the first `known` start it runs into, exactly
+///   as it stops at one of its own starts.
+///
+/// Nothing here can be wrong, only short — the same rule [`discover`] lives
+/// under. A pc this walk declines to claim is a pc some other module holds or
+/// the interpreter runs.
+#[must_use]
+pub fn discover_from(
+    seeds: &[u32],
+    max_blocks: usize,
+    known: &BTreeSet<u32>,
+    fetch: &mut dyn FnMut(u32) -> Option<u32>,
+) -> Discovered {
     let mut stats = DiscoverStats {
         seeds: seeds.len(),
         ..DiscoverStats::default()
     };
-    let starts = find_starts(seeds, max_blocks, fetch, &mut stats);
-    let set = build(&starts, fetch, &mut stats);
+    let starts = find_starts(seeds, max_blocks, known, fetch, &mut stats);
+    let set = build(&starts, known, fetch, &mut stats);
     Discovered { set, stats }
 }
 
@@ -151,6 +184,7 @@ const MAX_SKIP: usize = 4;
 fn find_starts(
     seeds: &[u32],
     max_blocks: usize,
+    known: &BTreeSet<u32>,
     fetch: &mut dyn FnMut(u32) -> Option<u32>,
     stats: &mut DiscoverStats,
 ) -> BTreeSet<u32> {
@@ -169,7 +203,7 @@ fn find_starts(
                     truncated = true;
                     return false;
                 }
-                starts.insert(pc)
+                !known.contains(&pc) && starts.insert(pc)
             })
         }) else {
             break;
@@ -181,6 +215,11 @@ fn find_starts(
         let mut edge = |target: u32, starts: &mut BTreeSet<u32>, queue: &mut Vec<u32>| {
             if starts.len() >= max_blocks {
                 truncated = true;
+                return;
+            }
+            // A pc an installed module already holds is not this walk's to
+            // claim: the block being built ends there and the stay exits.
+            if known.contains(&target) {
                 return;
             }
             if starts.insert(target) {
@@ -224,6 +263,11 @@ fn find_starts(
                 }
                 skipped += 1;
                 let next = at.wrapping_add(encoded_width(word));
+                // Running into code an installed module already holds ends
+                // this march: from there on the other module is the answer.
+                if known.contains(&next) {
+                    break;
+                }
                 edge(next, &mut starts, &mut queue);
                 // Walked here rather than queued-and-restarted, so the count
                 // above is a bound on the whole run and not on each step of
@@ -279,6 +323,11 @@ fn find_starts(
                 edge(next, &mut starts, &mut queue);
                 break;
             }
+            // Same rule as the skip march above: a block that falls into an
+            // installed module's start ends there.
+            if known.contains(&next) {
+                break;
+            }
             at = next;
         }
     }
@@ -291,6 +340,7 @@ fn find_starts(
 /// Pass two: build each block, stopping at the next known start.
 fn build(
     starts: &BTreeSet<u32>,
+    known: &BTreeSet<u32>,
     fetch: &mut dyn FnMut(u32) -> Option<u32>,
     stats: &mut DiscoverStats,
 ) -> BlockSet {
@@ -299,7 +349,9 @@ fn build(
         let mut insts = Vec::new();
         let mut at = pc;
         let end = loop {
-            if insts.len() == MAX_BLOCK_INSTS || (!insts.is_empty() && starts.contains(&at)) {
+            if insts.len() == MAX_BLOCK_INSTS
+                || (!insts.is_empty() && (starts.contains(&at) || known.contains(&at)))
+            {
                 break BlockEnd::Fall(at);
             }
             let Some(word) = fetch(at) else {
@@ -457,6 +509,45 @@ mod tests {
         assert_eq!(found.set.blocks[1].insts.len(), 3);
         assert_eq!(found.set.blocks[0].insts[1].0, 0x1002);
         assert_eq!(found.set.blocks[0].insts[2].0, 0x1006);
+    }
+
+    /// The stop set (M7b P1): a second walk over newly published code neither
+    /// claims nor follows a block an installed module already holds.
+    ///
+    /// Without this an incremental module would emit its own copy of every
+    /// block the first walk found downstream of the publish, and the hart's
+    /// entry index would have two modules answering for one pc.
+    #[test]
+    fn a_known_start_stops_the_walk_and_is_never_claimed() {
+        // 0x1000: addi a0, a0, 1   0x00150513
+        // 0x1004: addi a1, a1, 1   0x00158593
+        // 0x1008: jal  x0, -8      → 0x1000
+        let words: [(u32, u32); 3] = [
+            (0x1000, 0x0015_0513),
+            (0x1004, 0x0015_8593),
+            (0x1008, 0xff9f_f06f),
+        ];
+        let mut fetch = move |pc: u32| words.iter().find(|(a, _)| *a == pc).map(|(_, w)| *w);
+
+        // With nothing known, the seed's block runs all three instructions and
+        // the `jal` names 0x1000, which is the seed itself.
+        let whole = discover(&[0x1000], 64, &mut fetch);
+        assert_eq!(whole.set.blocks.len(), 1);
+        assert_eq!(whole.set.blocks[0].insts.len(), 3);
+
+        // With 0x1004 already installed, the walk claims 0x1000 only, ends it
+        // falling into 0x1004, and never emits a block there.
+        let known: BTreeSet<u32> = [0x1004].into_iter().collect();
+        let part = discover_from(&[0x1000], 64, &known, &mut fetch);
+        let starts: Vec<u32> = part.set.blocks.iter().map(|b| b.pc).collect();
+        assert_eq!(starts, alloc::vec![0x1000]);
+        assert_eq!(part.set.blocks[0].insts.len(), 1);
+        assert_eq!(part.set.blocks[0].end, BlockEnd::Fall(0x1004));
+
+        // And a seed that is already installed is skipped outright.
+        let known: BTreeSet<u32> = [0x1000].into_iter().collect();
+        let none = discover_from(&[0x1000], 64, &known, &mut fetch);
+        assert!(none.set.is_empty());
     }
 
     /// Data in a `.text` span degrades to `Undecodable` rather than being
