@@ -18,6 +18,14 @@ pub use lp_emu_esp_common::engine::spi_flash::{
     BLOCK_LEN, FlashBacking, FlashCensus, FlashHandle, FlashImage, PAGE_LEN, SECTOR_LEN,
 };
 
+/// The first byte of an ESP image header. A chip whose reset vector starts
+/// with it has something to boot; a part full of `0xff` does not.
+///
+/// A **board** fact rather than a part fact, which is why it is here and not
+/// in the engine: the NOR chip does not care what is written to it, and it
+/// is the ROM that decides these four bytes mean an image.
+pub const ESP_IMAGE_MAGIC: u8 = 0xe9;
+
 /// The flash size the C6 boards ship with, and the size
 /// `lp-fw/fw-esp32c6/partitions.csv` fills exactly (`lpfs` ends at
 /// `0x310000 + 0xF0000 = 0x400000`).

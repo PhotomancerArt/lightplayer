@@ -1065,6 +1065,10 @@ pub struct Esp32C6Builder {
     /// endpoint, at declared cycles.
     usb_sj_source: Option<Box<dyn ByteSource>>,
     usb_script_source: Option<lp_emu_esp_common::ScriptedSource>,
+    /// The host end of a [`QueueSource`] installed by
+    /// [`usb_sj_queue_source`](Esp32C6Builder::usb_sj_queue_source), kept so
+    /// the built machine can hand it back.
+    usb_sj_queue: Option<lp_emu_esp_common::QueueHandle>,
     usb_host: UsbHost,
     usb_sj_drain: UsbSjDrain,
     /// `--control tcp:<host:port>`: listen for the line protocol.
@@ -1136,6 +1140,7 @@ impl Esp32C6Builder {
             usb_sj: UsbSjSink::default(),
             usb_sj_tried: UsbSjSink::default(),
             usb_sj_source: None,
+            usb_sj_queue: None,
             usb_script_source: None,
             usb_host: UsbHost::Absent,
             usb_sj_drain: UsbSjDrain::default(),
@@ -1463,6 +1468,27 @@ impl Esp32C6Builder {
         self
     }
 
+    /// Install a **live** in-process source on the USB link and keep its
+    /// handle: the scripted source's live twin, for a host that shares the
+    /// process and has no socket to be on.
+    ///
+    /// The wasm tab host's inbound half. Read the handle back from the built
+    /// machine with
+    /// [`usb_sj_host_handle`](Esp32C6Machine::usb_sj_host_handle) and push
+    /// bytes into it between [`run_until`](Esp32C6Machine::run_until) calls;
+    /// they reach the guest at the slice boundary the USB block next polls
+    /// at, exactly as a socket client's bytes do.
+    ///
+    /// This is not a new builder concept — it goes in through
+    /// [`usb_sj_source`](Self::usb_sj_source) like any other source, so the
+    /// same "a script and a socket are not both the source" rules apply.
+    pub fn usb_sj_queue_source(self) -> Self {
+        let (source, handle) = lp_emu_esp_common::QueueSource::new();
+        let mut this = self.usb_sj_source(Box::new(source));
+        this.usb_sj_queue = Some(handle);
+        this
+    }
+
     /// The USB host's state at power-on (`--usb-host`). `Absent` is P6's
     /// machine and the default; the control channel and `--usb-script` move
     /// it from there.
@@ -1660,6 +1686,7 @@ impl Esp32C6Builder {
             usb_sj_tried,
             usb_sj_source,
             usb_script_source,
+            usb_sj_queue,
             usb_host,
             usb_sj_drain,
             control,
@@ -2090,6 +2117,7 @@ impl Esp32C6Builder {
             usb_host,
             uart0_tcp,
             usb_sj_tcp,
+            usb_sj_queue,
             usb_sj_drain,
             usb_client_connected: false,
             usb_index,
@@ -2457,6 +2485,9 @@ pub struct Esp32C6Machine {
     uart0_tcp: Option<lp_emu_esp_common::TcpHost>,
     /// The USB byte-socket listener, when `--usb-sj tcp:` was chosen.
     usb_sj_tcp: Option<lp_emu_esp_common::TcpHost>,
+    /// The host end of the live in-process source, when the builder was
+    /// given one ([`Esp32C6Builder::usb_sj_queue_source`]).
+    usb_sj_queue: Option<lp_emu_esp_common::QueueHandle>,
     usb_sj_drain: UsbSjDrain,
     /// Whether a client was on the byte socket at the last poll — the edge
     /// the coupling rule watches.
@@ -4792,6 +4823,97 @@ impl Esp32C6Machine {
     }
 
     // ---- the host's side (M6 P3) -----------------------------------------
+
+    // ---- the in-process host's side (the tab host, C6-in-tab P1) ---------
+    //
+    // Four entry points an in-process host drives the machine through when
+    // there is no socket to be on: a control line, the two output drains,
+    // and the inbound queue's handle. Each is a thin call into the path the
+    // socket door already takes, so a tab and a door answer the same
+    // question from the same code.
+    //
+    // **Every one of them is called between `run_until` calls and nowhere
+    // else.** That is the same guarantee `service_host` has ("called only at
+    // a slice boundary, so a command never lands between two instructions of
+    // one slice"), obtained differently: the socket path gets it from the run
+    // loop, which only services the host at a boundary, and this path gets it
+    // by construction — the host has the machine back, so the machine is not
+    // running.
+
+    /// Apply one line of the control protocol and answer it, at the cycle
+    /// the machine is stopped at.
+    ///
+    /// The line grammar, the replies and the refusals are
+    /// [`crate::control`]'s, identical to the `--control` socket's: this
+    /// parses with [`ControlCommand::parse`] and applies with the same
+    /// private path a scripted command and a socket line take. `wait` is
+    /// refused, as it is on the socket — it is the script's verb, and a live
+    /// host waits by waiting.
+    ///
+    /// Call it only between [`run_until`](Self::run_until) calls; see the
+    /// section comment above for why that is not a caveat but a fact about
+    /// where the machine is when the host holds it.
+    pub fn control_line(&mut self, line: &str) -> ControlReply {
+        match ControlCommand::parse(line) {
+            Ok(command) => {
+                let now = self.cycles();
+                self.apply_control(&command, now)
+            }
+            Err(reason) => ControlReply::Err(reason),
+        }
+    }
+
+    /// Take everything a host on the USB link has been sent and not yet
+    /// read, leaving the log empty.
+    ///
+    /// The drain half of [`usb_sj`](Self::usb_sj), for a host that reads on
+    /// its own cadence rather than at the end of a run. Only bytes the guest
+    /// committed with the port **open** are here — what a closed port
+    /// swallowed is [`usb_sj_tried`](Self::usb_sj_tried)'s, which this does
+    /// not touch.
+    pub fn take_usb_sj_output(&mut self) -> Vec<u8> {
+        let bytes = self.usb_sj_log.bytes();
+        self.usb_sj_log.replace(&[]);
+        bytes
+    }
+
+    /// The same for UART0 — the console a `--console-dir` run writes to a
+    /// file, for a host that wants to show it.
+    ///
+    /// Draining it moves the window `--exit-on` scans, so a run that wants
+    /// both takes the console at the end. The tab host passes no `exit_on`
+    /// and is unaffected.
+    pub fn take_uart0_output(&mut self) -> Vec<u8> {
+        let bytes = self.uart0_log.bytes();
+        self.uart0_log.replace(&[]);
+        bytes
+    }
+
+    /// The host end of the live in-process source, when the builder
+    /// installed one ([`Esp32C6Builder::usb_sj_queue_source`]).
+    ///
+    /// Push host → device bytes into it between slices. `None` for every
+    /// other machine, including a socket-backed one: a caller that wanted
+    /// the queue and got `None` asked the wrong builder.
+    pub fn usb_sj_host_handle(&self) -> Option<lp_emu_esp_common::QueueHandle> {
+        self.usb_sj_queue.clone()
+    }
+
+    /// Does the chip hold something the reset vector could boot?
+    ///
+    /// One byte, asked of the CHIP rather than of a file: `0xe9` at offset
+    /// zero is an ESP image header, and a 4 MiB part full of `0xff` is a
+    /// chip with nothing on it. This is the `flash` word `emu serve` reports
+    /// and the same question the tab host's `loaded` face asks, from one
+    /// function, so a blank → flashed → loaded sequence reads the same
+    /// through either door.
+    pub fn has_image_at_reset_vector(&self) -> bool {
+        self.flash()
+            .lock()
+            .ok()
+            .and_then(|flash| flash.peek(0, 1).map(|head| head[0]))
+            .is_some_and(|head| head == crate::flash::ESP_IMAGE_MAGIC)
+    }
 
     /// The next cycle at which [`service_host`](Self::service_host) has
     /// something to do, or `None` when nothing outside can reach this run.
