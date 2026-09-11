@@ -36,6 +36,13 @@
 //!   [`MachineHart::resample_external`] — which is why that method is `pub`
 //!   and carries the contract a caller has to keep. The point did not move:
 //!   only where it is called from did.
+//!
+//!   And it is still *only* a Store or System class that reaches it. A
+//!   translated stay that ends while an MMIO **load** has left something on
+//!   the bus does not get one at the pc it left at: the bus is still holding
+//!   the side-band or the yield, `run_blocks` carries on interpreting, and the
+//!   next store takes it exactly where the interpreter's own does (M7b F3).
+//!   `RunOutcome::Ran`'s `after_store` is the store case and nothing else.
 //! - **(d)** whenever the owning machine calls
 //!   [`MachineHart::poll_interrupts`] at a scheduler event.
 //!
