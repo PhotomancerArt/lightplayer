@@ -15,7 +15,7 @@
 // thread it is on, and that thread must not be the one drawing the page.
 'use strict';
 
-import { runOnce } from './bench-run.js';
+import { runOnce, gateRowsPlan } from './bench-run.js';
 
 let compiled = null;
 const elfCache = {}; // slug -> Uint8Array
@@ -47,22 +47,32 @@ async function loadElf(image) {
 onmessage = async (ev) => {
   try {
     await loadModule();
-    const plan = ev.data.plan;
+    // The one-click preset asks for rows by name rather than sending a plan,
+    // so the sequence itself lives in `bench-run.js` beside the code that runs
+    // it — one definition for the page, this Worker and the node harness.
+    const plan = ev.data.preset === 'gate-rows'
+      ? gateRowsPlan({ defaults: ev.data.defaults })
+      : ev.data.plan;
     const images = {};
     for (const image of ev.data.images) images[image.slug] = image;
     for (let i = 0; i < plan.length; i++) {
       const step = plan[i];
       postMessage({ type: 'progress', i, n: plan.length, step });
-      const image = images[step.slug];
-      const elfBytes = await loadElf(image);
       let r;
       try {
+        // Fetching the image is inside the try with the run itself: a phone
+        // that drops the wifi between two rows of a four-row preset must lose
+        // THAT row, not the three around it and the upload with them.
+        const image = images[step.slug];
+        if (!image) throw new Error('no image ' + step.slug + ' in the manifest');
+        const elfBytes = await loadElf(image);
         r = await runOnce({ compiled, image, elfBytes, ...step });
       } catch (e) {
         // A row that could not be taken is a row that says so. The rig must
         // report a crash rather than hang on it — on a phone at 64 MB of wasm
         // that is the failure mode the director named by name.
         r = { slug: step.slug, grade: step.grade, mode: step.mode, fnBlocks: step.fnBlocks,
+              timeout: step.timeout,
               failed: String((e && e.stack) || e) };
       }
       postMessage({ type: 'result', i, r });
