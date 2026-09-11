@@ -184,6 +184,22 @@ instruments, and the discipline they keep is the same everywhere:
   device and reopens a new session after the banner has gone, while a passive
   reader cannot make a board boot at all. USB-SJ keeps its session across a
   *chip* reset, so a handle that is already open catches everything.
+- `classic-reset-and-capture.py` — the **classic**'s version of the line above,
+  and a different instrument because it is a different cable. The classic has no
+  USB-Serial-JTAG peripheral at all: its console is UART0 and the host's side of
+  UART0 is a CH340K whose DTR/RTS lines are wired to EN and IO0. The WCH dext
+  **ignores** the single-bit `TIOCMBIS`/`TIOCMBIC` the C6's script (and
+  pyserial's `.dtr`/`.rts`) issues, so the lines move only under whole-status
+  `TIOCMSET`, and the two scripts are not one script with a flag. It also
+  carries three facts that cost a bench sitting each: macOS's tty close
+  **drains** (so it `tcflush`es first), the ROM talks at 115200 while the
+  application reprograms `clkdiv` to 921600 (so one image is **two** captures,
+  each reading the other's bytes as noise), and the port name follows the hub
+  (so it resolves the cable by USB identity, `1a86:7522` plus a locationID, and
+  refuses rather than guesses). `--self-test` proves the argument grammar, the
+  send matcher and the span cutter **with no board** — the span cutter against
+  the four committed captures under `transcripts/esp32v3/`, which it has to
+  reproduce from their `.raw.bin` byte for byte.
 - `flash-image.sh` — the desk discipline in one place, which the two
   `uart-bridge-*` scripts go through: one named board, foreground, under a pty,
   refuse if a port is held, SIGINT by pid, wait for something the **image**
