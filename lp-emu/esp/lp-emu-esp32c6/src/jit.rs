@@ -37,7 +37,7 @@ use std::path::PathBuf;
 use lp_emu_core::{Bus, CycleModel};
 use lp_emu_esp_common::bus::{PERM_NONE, PERM_READ, PERM_READ_WRITE, PERMISSION_PAGE_LEN, SocBus};
 use lp_emu_jit::blocks::BlockSet;
-use lp_emu_jit::discover::{DiscoverStats, discover};
+use lp_emu_jit::discover::{DiscoverStats, Discovered, discover, discover_from};
 use lp_emu_jit::dispatch::{BODY_BUDGET, emit_module, target_table_bytes, write_target_tables};
 use lp_emu_jit::host::{
     self, EXCHANGE_LEN, FLAG_AFTER_STORE, FLAG_SLICE_ENDED, HostOps, MMIO_LEAVE_AFTER, MMIO_OK,
@@ -137,6 +137,36 @@ pub fn discovered_instruction_pcs(bus: &SocBus, seeds: &[u32]) -> BTreeSet<u32> 
         .collect()
 }
 
+/// Walk the image from `seeds`, stopping wherever `known` already holds a
+/// block start, and say how long it took in microseconds.
+///
+/// The one walk in this crate: [`install`] uses it, the incremental path uses
+/// it with the installed modules' starts as the stop set, and M7b P1's split
+/// census uses it to ask what the incremental set *would* hold before anything
+/// is emitted. `known` empty is the whole-image walk.
+///
+/// Pure — it reads the arena and touches no peripheral.
+#[must_use]
+pub fn walk(bus: &SocBus, seeds: &[u32], budget: usize, known: &BTreeSet<u32>) -> (Discovered, u128) {
+    let spans = bus.region_spans();
+    let base = bus.guest_arena_base();
+    let arena = bus.guest_arena();
+    let started = std::time::Instant::now();
+    let found = discover_from(seeds, budget, known, &mut |pc| {
+        arena_word(arena, base, &spans, pc)
+    });
+    (found, started.elapsed().as_micros())
+}
+
+/// Every guest instruction pc in `set`.
+#[must_use]
+pub fn instruction_pcs(set: &BlockSet) -> BTreeSet<u32> {
+    set.blocks
+        .iter()
+        .flat_map(|b| b.insts.iter().map(|&(pc, _)| pc))
+        .collect()
+}
+
 /// Discover the image from `seeds`, translate it, and install it on `hart`.
 ///
 /// This is **both** of JD5's translation events: the machine calls it once
@@ -181,20 +211,12 @@ pub fn install(
     policy: Emit,
     record: Option<&RecordRequest>,
 ) -> Result<BuildReport, String> {
-    let walk = |bus: &SocBus, budget: usize| {
-        let spans = bus.region_spans();
-        let base = bus.guest_arena_base();
-        let arena = bus.guest_arena();
-        let started = std::time::Instant::now();
-        let found = discover(seeds, budget, &mut |pc| arena_word(arena, base, &spans, pc));
-        (found, started.elapsed().as_micros())
-    };
-
+    let nothing_known = BTreeSet::new();
     // The whole image first, and **unbounded**, whatever budget the caller
     // named. `max_blocks` is a bound on what a host will compile, not on what
     // the program can run, and reporting the walk through the budget would
     // hide the very number P5 is sized against.
-    let (whole, discover_us) = walk(bus, usize::MAX);
+    let (whole, discover_us) = walk(bus, seeds, usize::MAX, &nothing_known);
     if whole.set.is_empty() {
         return Err(format!(
             "nothing translatable is reachable from {:#010x}",
@@ -208,7 +230,7 @@ pub fn install(
 
     let budget = whole.set.blocks.len().min(max_blocks);
     let found = if budget < whole.set.blocks.len() {
-        walk(bus, budget).0
+        walk(bus, seeds, budget, &nothing_known).0
     } else {
         whole
     };

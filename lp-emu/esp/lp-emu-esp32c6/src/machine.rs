@@ -1961,6 +1961,8 @@ impl Esp32C6Builder {
             jit_published_seeds: Vec::new(),
             jit_code_shadow: Vec::new(),
             jit_code_spans: Vec::new(),
+            jit_installed_starts: BTreeSet::new(),
+            jit_split_events: Vec::new(),
             power_on: None,
             reboots: 0,
             seed,
@@ -2079,6 +2081,16 @@ impl Esp32C6Builder {
             machine.bus.watch_guest_code(true);
             machine.arm_code_shadow();
             machine.install_translated_core(entry, jit_escape_all, blocks, fn_blocks, "boot")?;
+        }
+        // M7b P1 step 1: the split census wants the boot walk's starts as its
+        // stop set, and it is taken on a run with no core at all — so the walk
+        // happens here, where a `--jit` run's boot event would have been.
+        #[cfg(feature = "jit")]
+        if !jit && blockprof && boot_mode != BootMode::RomUp && Esp32C6Machine::split_census_on() {
+            // Not `jit_entry`: that field is what arms the *real* second
+            // translation event, and a census run has no core to rebuild.
+            machine.jit_seed_scope = jit_seed_scope;
+            machine.split_census_boot(entry);
         }
         Ok(machine)
     }
@@ -2288,6 +2300,20 @@ pub struct Esp32C6Machine {
     /// render run has two.
     jit_code_shadow: Vec<u8>,
     jit_code_spans: Vec<(u32, u32)>,
+    /// Every block start some installed module already holds — the stop set
+    /// the incremental walk at a `fence.i` is given (M7b P1, DD18).
+    ///
+    /// Two modules answering for one pc would give the hart's entry index two
+    /// answers, so a second walk neither claims nor follows a start that is in
+    /// here. It is rebuilt from scratch whenever a whole-module retire
+    /// replaces everything, and grown by each incremental install.
+    jit_installed_starts: BTreeSet<u32>,
+    /// M7b P1 step 1, off unless `LP_EMU_JIT_SPLIT_CENSUS` is set: what the
+    /// incremental walk **would** find at each `fence.i`, without emitting
+    /// anything, so the cost of the module boundary can be measured before the
+    /// boundary exists. One entry per event: blocks, instructions, walk
+    /// microseconds.
+    jit_split_events: Vec<(usize, usize, u128)>,
     /// The machine as it was built, kept only when
     /// [`Esp32C6Builder::reboot_on_reset`] asked for it — a reboot is a
     /// restore of this.
@@ -2702,6 +2728,34 @@ impl Esp32C6Machine {
             prof.retired(),
             prof.starts(),
         )];
+        // M7b P1 step 1, when the split census was asked for: what an
+        // incremental module would have held at each event, and how often the
+        // run's control flow would have crossed the boundary it creates.
+        for (i, &(blocks, insts, us)) in self.jit_split_events.iter().enumerate() {
+            lines.push(format!(
+                "splitcensus: {}: the incremental walk claims {blocks} blocks / {insts} instr \
+                 in {:.1} ms",
+                if i == 0 {
+                    "boot".to_string()
+                } else {
+                    format!("fence.i #{i}")
+                },
+                us as f64 / 1000.0,
+            ));
+        }
+        if let Some(c) = prof.boundary_census() {
+            lines.push(format!(
+                "splitcensus: the published side holds {} instruction pc(s); {} block \
+                 dispatch(es) landed on it, retiring {} instruction(s) ({:.2} % of {}); \
+                 {} dispatch(es) CROSSED the boundary",
+                c.pcs,
+                c.inside,
+                c.inside_retired,
+                100.0 * c.inside_retired as f64 / prof.retired().max(1) as f64,
+                prof.retired(),
+                c.crossings,
+            ));
+        }
         lines.push(format!(
             "blockprof: {} `fence.i`, {} guest-published code span(s) seeded{}",
             self.fence_i_count(),
@@ -2917,6 +2971,66 @@ impl Esp32C6Machine {
         out
     }
 
+    /// M7b P1 step 1: **would the module boundary be expensive?**
+    ///
+    /// Set `LP_EMU_JIT_SPLIT_CENSUS` and run `--interpreter --blockprof`, and
+    /// every `fence.i` walks the image the way the incremental path would —
+    /// from the same seeds, stopping wherever an already-installed module
+    /// holds a start — and hands the instruction pcs it claimed to the hart's
+    /// census as the far side of a module boundary. The interpreter sees every
+    /// block dispatch the run performs, so the crossings it then counts are
+    /// the transfers that would become **exits** under the split, where today
+    /// they are crosses inside one module.
+    ///
+    /// A diagnostic, off by default, and never consulted by anything. It is
+    /// deliberately taken on the interpreter rather than on `--jit`: a cross
+    /// inside an emitted module is invisible to the host, and a census that
+    /// could only see host entries would answer a different question.
+    ///
+    /// It is an answer at **block-dispatch granularity**: a transfer that
+    /// crosses the boundary without ending an interpreter block — a
+    /// fall-through from claimed code straight into unclaimed — is not
+    /// counted. Every control transfer ends a block, so that is the only case,
+    /// and it is bounded by the number of blocks that straddle the boundary.
+    #[must_use]
+    fn split_census_on() -> bool {
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ON.get_or_init(|| std::env::var_os("LP_EMU_JIT_SPLIT_CENSUS").is_some())
+    }
+
+    /// Claim the whole image the way a boot translation event would, without
+    /// emitting anything, so the census has a stop set to work against.
+    #[cfg(feature = "jit")]
+    fn split_census_boot(&mut self, entry: u32) {
+        let seeds = self.translation_seeds(entry);
+        let (found, us) = crate::jit::walk(&self.bus, &seeds, usize::MAX, &BTreeSet::new());
+        self.jit_split_events
+            .push((found.stats.blocks, found.stats.insts, us));
+        self.jit_installed_starts
+            .extend(found.set.entries().iter().copied());
+    }
+
+    /// One `fence.i`'s worth of the census. See [`Self::split_census_on`].
+    #[cfg(feature = "jit")]
+    fn split_census_event(&mut self) {
+        let entry = self.jit_entry.unwrap_or(self.boot_entry);
+        let seeds = self.translation_seeds(entry);
+        let (found, us) = crate::jit::walk(
+            &self.bus,
+            &seeds,
+            usize::MAX,
+            &self.jit_installed_starts.clone(),
+        );
+        self.jit_split_events
+            .push((found.stats.blocks, found.stats.insts, us));
+        self.jit_installed_starts
+            .extend(found.set.entries().iter().copied());
+        let pcs = crate::jit::instruction_pcs(&found.set);
+        if let Some(prof) = self.harts[0].blockprof_mut() {
+            prof.watch_boundary(pcs);
+        }
+    }
+
     fn translate_if_code_was_published(&mut self) {
         let now = self.harts[0].fence_i_count();
         if now == self.jit_fence_i_at {
@@ -2942,6 +3056,10 @@ impl Esp32C6Machine {
             if !self.jit_published_seeds.contains(&base) {
                 self.jit_published_seeds.push(base);
             }
+        }
+        #[cfg(feature = "jit")]
+        if Self::split_census_on() {
+            self.split_census_event();
         }
         if self.jit_entry.is_none() {
             return;
