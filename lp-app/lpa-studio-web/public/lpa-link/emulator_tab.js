@@ -105,6 +105,8 @@ class TabHub {
     /** The live registry row, kept current by `created` and `stats`. */
     this.row = { ...board, flash: "blank", state: "starting", reboots: 0, dilation: null };
     this.ready = null;
+    /** The teardown in flight, so a second caller joins it rather than racing it. */
+    this.destroying = null;
     this.lastError = null;
     /**
      * The last control lines and their replies, newest last.
@@ -311,8 +313,23 @@ class TabHub {
    * writes the chip back and CLOSES its sync access handle before it sends
    * that reply: terminating without it would leave the image locked against
    * the very delete Forget is about to run.
+   *
+   * One teardown, however many callers. Forget ends the worker and the port's
+   * own `dispose()` ends it too, so two are in flight at once by design — and
+   * two that each awaited their own `destroy` would have the second reading a
+   * worker the first had already terminated (a second request left to time
+   * out, and a `terminate()` on null).
    */
-  async destroy() {
+  destroy() {
+    if (!this.destroying) {
+      this.destroying = this._destroy().finally(() => {
+        this.destroying = null;
+      });
+    }
+    return this.destroying;
+  }
+
+  async _destroy() {
     if (!this.worker) {
       liveHubs.delete(this);
       return;
