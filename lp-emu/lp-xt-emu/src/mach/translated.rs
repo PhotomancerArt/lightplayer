@@ -128,8 +128,8 @@ pub enum RunOutcome {
         /// The last instruction retired was an MMIO store whose side-band or
         /// yield the hart must now observe — polling point (c). The hart does
         /// exactly what it does after an interpreted store: `take_sideband()`
-        /// then re-read [`Bus::pending_cpu_interrupt`], `take_yield()` then
-        /// end the slice.
+        /// then re-read [`Bus::pending_cpu_interrupt_mask`], `take_yield()`
+        /// then end the slice.
         after_store: bool,
     },
     /// It ran, and the last thing it did **ended the slice**.

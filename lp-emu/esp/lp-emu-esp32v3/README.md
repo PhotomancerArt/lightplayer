@@ -980,8 +980,10 @@ out of a `--trace-block RMT` run of the shipped image.
 
 ## The link, after the boot settles
 
-*M4 P3's investigation of ruling **R6**. Open: root-caused to a component and
-a cycle, not yet fixed.*
+*M4 P3's investigation of ruling **R6**, and M4 P3b's answer. **Fixed** —
+the cause was the hart's poll point (c), not the timer pair; the P3
+write-up stands as the record of where the dig started, and "Fixed" below
+is where it ended.*
 
 **The symptom.** A `--uart0-script` request fired `after "[RECOVERY] boot
 complete (first frame served)"` is never answered, and neither is a
@@ -1063,6 +1065,102 @@ grep from_cpu0 /tmp/run.trace | tail -2   # the last swi0 is ~27.9 M cycles
 
 It reproduces at `--core-quantum` 64, 256 and 4096, at the same point in the
 boot each time, so it is not a fine-grained interleaving race.
+
+**Fixed (M4 P3b): the hart dropped its own software interrupt.** Not the
+timer pair. The two counters are one clock in this model as on silicon, and
+the "3 µs" is ISR latency, not drift: `Timer::after(1 ms)` read LACT at
+cycle 27,651,924 (107,844 µs, so a deadline of 108,844), `arm_next_wakeup`
+read it again at 27,652,122 (`lactlo = 0x001a5452`, 107,845 µs) and armed
+`t0` for 999 µs (`t0.alarmlo = 0x00009c18`, 39,960 ticks at 40 MHz), the
+alarm fired, and the tick handler read LACT at 27,892,580
+(`lactlo = 0x001a92f1`, 108,847 µs) — three microseconds past a deadline it
+had set two reads earlier, on the same clock, with a `u64` division and an
+interrupt entry in between. The handler did everything right: it processed
+the embassy queue, **woke the server task**, and computed `MAX` because the
+queue was then genuinely empty. What was lost came after.
+
+The one register the P3 trace could not show is the executor thread's saved
+context. Two more traces did — the bus trace of the same run, and an
+instruction trace stepped from cycle 27,894,500 of it — and between them they
+discriminate the three hypotheses P3b was handed:
+
+```text
+cyc=27652505 <TimeDriver>::arm_next_wakeup+0x21b    W4 TIMG0+0x000 t0.config = 0xc0002c00   the one and only arm of the run
+cyc=27652595 Executor::run_inner+0x1a7              W4 DPORT+0x0dc cpu_intr_from_cpu0 = 1   flags.wait(): the task is Sleeping, swi0 raised
+cyc=27652669 Executor::run_inner+0x1a7              W4 DPORT+0x0dc cpu_intr_from_cpu0 = 1   …74 cycles later, again
+   …seven raises to cyc=27653039: the level-1 interrupt is never taken, the loop keeps lapping
+cyc=27653203 InterruptStatus::current               R4 DPORT+0x0ec core_0_intr_status0 = 0x01008000   t1 (bit 15) lands — AND swi0 (bit 24), still there
+cyc=27653546 cross_core_yield_handler+0x1d          W4 DPORT+0x0dc cpu_intr_from_cpu0 = 0   the switch, 950 cycles after the first raise
+cyc=27892410 InterruptStatus::current               R4 DPORT+0x0ec core_0_intr_status0 = 0x0000c000   the t0 alarm
+cyc=27892706 embassy_executor::raw::waker::wake                                            the server task goes on the executor's run queue
+cyc=27892860 SchedulerState::resume_task+0xa9       W4 DPORT+0x0dc cpu_intr_from_cpu0 = 1   …and its __pender resumes the executor thread
+cyc=27894564 cross_core_yield_handler+0x1d          W4 DPORT+0x0dc cpu_intr_from_cpu0 = 0   the switch back
+cyc=27894882 esp_rtos::now+0xb                      W4 TIMG0+0x080 lactupdate = 1          run_scheduler's clock read — the only read in the wake
+cyc=27895148 pc=0x400d2cbf run_inner+0x1d7          movi.n a8, 1                            resumed: the instruction AFTER take_all's s32c1i
+cyc=27895152 pc=0x400d2cc9                          beqz a10, +0x219                        a10 is the CAS result from cycle ~27,653,000
+cyc=27895153 pc=0x400d2d01                                                                  "the queue is empty"
+cyc=27895184 TaskExt::set_state                                                             Sleeping, for ever
+```
+
+Hypothesis 1 (parked on some other future): **no** — the executor polled
+nothing. Its last poll before the park is the `take_all` above, whose result
+was stale; the task is on the run queue and stays there. Hypothesis 2 (`t0`
+misread at the fire): **no** — between the fire at 27,892,410 and the
+non-write there are three `t0.config` accesses (esp-hal's `clear_interrupt`)
+and no `t0.lo`/`t0.hi` read at all. The director's hypothesis (LACT ahead of
+`t0`): **no** — the numbers above.
+
+**What actually happened.** `ThreadFlag::wait` marks the executor thread
+Sleeping, raises swi0 through a DPORT store *inside* a critical section, and
+expects the interrupt at the `wsr PS` that closes it. The hart's poll point
+(c) — the re-sample after any MMIO store — read
+`Bus::pending_cpu_interrupt()`, the RV32 matrix's single-line answer, widened
+to a mask. The Xtensa matrix answers that `None`, because `INTENABLE` and
+`PS.INTLEVEL` are the hart's own registers; widened, that is **0**. So every
+MMIO store on this machine zeroed the asserted-line mask the machine had fed
+at the slice boundary — and the store that raised swi0 hid swi0. The hart
+saw it again only at a later boundary that happened to fall outside the
+critical section, or, as here, when an unrelated line (the 1 ms pacer) made
+it re-sample. In the 950 cycles between, a thread the OS believed asleep
+lapped its loop seven times and was finally switched out mid-way through
+`dequeue_all`'s atomic swap, with the swap's result in `a10`. The tick handler
+then pushed the woken task onto that same queue; the resumed thread compared
+its stale `a10` with zero, took the empty branch, and slept at
+`Instant::EPOCH + Duration::MAX`. `push_was_empty` answers `false` for a
+non-empty queue, so no later pend could ever fire again. The `lp-xt-emu`
+module docs had carried this as "the approximation at poll point (c) is
+retired when M3's Xtensa machine binds a hart to a `SocBus`" — M3 fed the
+honest mask between slices and never retired the approximation inside one.
+
+The fix is the hart reading the mask form: `Bus::pending_cpu_interrupt_mask`
+(new, defaulting to the single-line answer widened, so every bus that only
+implements the RV32 form keeps its behaviour), overridden on `SocBus` with
+the same `CpuIntMatrix::asserted` the between-slice feed uses, read by
+`XtHart::resample_external`. `src/periph/timg.rs`, `engine::timg` and
+`machine.rs` are untouched; the RV32 hart and the C6 machine keep reading the
+single-line form. Pinned three ways: the hart's
+`poll_point_c_reads_the_mask_form_and_keeps_the_lines_the_machine_fed`, and on
+the shipped image `tests/uart_socket.rs`'s
+`a_script_with_three_requests_is_answered_three_times` (ids 1, 2, 3 on the
+wire, in order) and
+`the_thread_executor_keeps_re_arming_its_tick_after_the_boot_settles` — which
+counted **one** `t0` arm in two idle seconds before the fix and about two
+thousand after. With the fix the two-request reproducer above answers both,
+and the heartbeat reports `fps ≈ 979`: the server loop is running its 1 ms
+tick for the first time on this machine.
+
+⚠️ **Three things about this chip's tick worth carrying into M5's replay and
+M6's S3.** (1) esp-rtos arms `t0` by *resetting it to zero* on every arm
+(esp-hal's `OneShotTimer::schedule` is stop, clear, reset, load, start), so
+`t0.lo` never counts past ~40,000 and is no use as a timestamp — LACT is the
+only free-running counter, and `Instant::now()` costs seven reads of it
+(esp-hal polls `lactlo` for the latch to "change", which in this model it
+never does). (2) A settled classic wakes every millisecond from now on — the
+idle skip cannot skip further than the next `t0` alarm, and a run's
+instruction count is ~5× what it was when the executor slept. (3) The S3 has
+the same shape — software interrupts raised by MMIO store, enables in the
+CPU — so its bus must answer the mask form and must **not** implement
+`CpuIntMatrix::cpu_interrupt`; `SocBus` already does the first.
 
 ## Flash, and the cache window
 

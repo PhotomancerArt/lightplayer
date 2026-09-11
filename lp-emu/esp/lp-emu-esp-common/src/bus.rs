@@ -2475,6 +2475,15 @@ impl Bus for SocBus {
         self.matrix.cpu_interrupt(self.hart, &self.irq)
     }
 
+    /// The Xtensa hart's poll point (c) reads this after every MMIO store
+    /// (M4 P3b): the whole asserted set, not the single-line answer above —
+    /// which the classic's matrix leaves at `None`, so the single-line form
+    /// widened to a mask would be 0 and would drop every line the machine
+    /// fed at the slice boundary.
+    fn pending_cpu_interrupt_mask(&self) -> u32 {
+        SocBus::pending_cpu_interrupt_mask(self)
+    }
+
     /// May the hart's block cache decode ahead of the guest?
     ///
     /// Two things on this bus make a fetch more than a read, and either one

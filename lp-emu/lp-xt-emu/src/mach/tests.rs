@@ -83,6 +83,11 @@ struct TestBus {
     /// The stand-in for an interrupt matrix: what
     /// [`Bus::pending_cpu_interrupt`] answers.
     pending: Option<u8>,
+    /// When set, what [`Bus::pending_cpu_interrupt_mask`] answers instead
+    /// of the trait default (`pending` widened to a mask) — the shape of an
+    /// Xtensa matrix, which answers the single-line form `None` and the mask
+    /// form with the whole asserted set.
+    pending_mask: Option<u32>,
     /// When set, an access to [`MMIO`] latches this into `pending`.
     raise_on_mmio: Option<u8>,
     /// When clear, an MMIO access raises no side-band even though it may
@@ -97,6 +102,7 @@ impl TestBus {
             watchpoints: [None; 2],
             sideband: false,
             pending: None,
+            pending_mask: None,
             raise_on_mmio: None,
             sideband_enabled: true,
         }
@@ -240,6 +246,10 @@ impl Bus for TestBus {
     }
     fn pending_cpu_interrupt(&self) -> Option<u8> {
         self.pending
+    }
+    fn pending_cpu_interrupt_mask(&self) -> u32 {
+        self.pending_mask
+            .unwrap_or_else(|| self.pending.map_or(0, |n| 1 << (n & 31)))
     }
 }
 
@@ -823,6 +833,77 @@ fn poll_point_c_a_store_side_band_replaces_the_mask() {
         0,
         "the side-band replaced the stale mask"
     );
+}
+
+/// **M4 P3b (R6).** Poll point (c) reads the matrix's **mask**, not its
+/// single-line answer. An Xtensa matrix answers [`Bus::pending_cpu_interrupt`]
+/// `None` — the enables live in this hart — so a store that read the
+/// single-line form would zero the mask and drop every line the machine fed
+/// at the slice boundary. The shape that found it: a line fed at the
+/// boundary while `PS.INTLEVEL` masks it, a store to MMIO inside the
+/// critical section (esp-rtos raising its own yield through DPORT), then
+/// `wsr PS` lowering the level — the interrupt must arrive at that `wsr`,
+/// not at the next slice boundary.
+#[test]
+fn poll_point_c_reads_the_mask_form_and_keeps_the_lines_the_machine_fed() {
+    let (mut hart, mut bus) = booted();
+    hart.interrupts_mut().intenable = 1 << IRQ_LEVEL_L2;
+    // Inside a critical section: level 2 is masked.
+    hart.set_ps_raw(hart.ps() | 2);
+    // The machine's feed at the slice boundary.
+    hart.set_external_mask(1 << IRQ_LEVEL_L2);
+    // The Xtensa matrix's two answers: nothing to name, everything asserted.
+    bus.pending = None;
+    bus.pending_mask = Some(1 << IRQ_LEVEL_L2);
+    hart.cpu_mut().set_a(2, MMIO);
+    let after_store = asm(&mut bus, CODE, &[s32i(3, 2, 0)]);
+    let after_wsr = asm(
+        &mut bus,
+        after_store,
+        &[movi(2, (PS_BOOT & 0xFFF) as i32), wsr(SpecialReg::Ps, 2)],
+    );
+    asm(&mut bus, after_wsr, &[movi(4, 1), brk()]);
+    asm(&mut bus, VEC + super::trap::level_vecofs(2), &[brk()]);
+
+    assert_eq!(
+        hart.run_slice(&mut bus, 100),
+        SliceEnd::Ebreak {
+            pc: VEC + super::trap::level_vecofs(2)
+        },
+        "the level-2 line the machine fed survived the store's side-band"
+    );
+    assert_eq!(
+        hart.external_mask(),
+        1 << IRQ_LEVEL_L2,
+        "the mask came from the bus's mask form, not its single-line None"
+    );
+    assert_eq!(
+        hart.sr().epc[2],
+        after_wsr,
+        "delivered at the `wsr PS` that lowered the level, poll point (b)"
+    );
+    assert_eq!(
+        hart.cpu().a(4),
+        0,
+        "and before the next instruction retired"
+    );
+
+    // The same store on a bus that only implements the single-line form
+    // keeps the trait default's widening: `Some(n)` is line `n`.
+    let (mut hart, mut bus) = booted();
+    hart.interrupts_mut().intenable = 1 << IRQ_LEVEL_L2;
+    bus.raise_on_mmio = Some(IRQ_LEVEL_L2);
+    hart.cpu_mut().set_a(2, MMIO);
+    let after = asm(&mut bus, CODE, &[s32i(3, 2, 0)]);
+    asm(&mut bus, after, &[brk()]);
+    asm(&mut bus, VEC + super::trap::level_vecofs(2), &[brk()]);
+    assert_eq!(
+        hart.run_slice(&mut bus, 100),
+        SliceEnd::Ebreak {
+            pc: VEC + super::trap::level_vecofs(2)
+        }
+    );
+    assert_eq!(hart.external_mask(), 1 << IRQ_LEVEL_L2);
 }
 
 #[test]

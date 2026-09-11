@@ -35,13 +35,15 @@
 //!   turning on from the other side);
 //! - **(c)** after a Store-, Atomic- or System-class instruction whose bus
 //!   reports [`Bus::take_sideband`] `== true`: the hart re-reads
-//!   [`Bus::pending_cpu_interrupt`], **replaces** its asserted-line mask with
-//!   it, and polls — which is how an MMIO store that raises a peripheral
-//!   line is delivered before the next instruction retires, and how one
-//!   that lowers a line stops being pending in the same breath. Until M2
-//!   generalises that bus method to a bitmask, `Some(n)` is read as "line
-//!   `n` asserted and nothing else" — right for a single-source bus and
-//!   enough for the RAM-only fixtures;
+//!   [`Bus::pending_cpu_interrupt_mask`], **replaces** its asserted-line
+//!   mask with it, and polls — which is how an MMIO store that raises a
+//!   peripheral line is delivered before the next instruction retires, and
+//!   how one that lowers a line stops being pending in the same breath. The
+//!   **mask** form, because an Xtensa matrix cannot name a single line to
+//!   take (`INTENABLE` and `PS.INTLEVEL` are this hart's registers) and
+//!   answers the single-line [`Bus::pending_cpu_interrupt`] `None`; a bus
+//!   that only implements the single-line form is widened by the trait
+//!   default, which is what the RAM-only fixtures ride on;
 //! - **(d)** whenever the owning machine calls [`XtHart::poll_interrupts`]
 //!   at a scheduler event;
 //! - **(e)** — Xtensa only — when an internal `CCOMPARE` timer matches
@@ -693,15 +695,16 @@ impl<B: Bus> XtHart<B> {
     ///
     /// Level lines follow the mask; edge lines and the NMI latch on its
     /// rising edges. Setting it delivers nothing; the machine polls. This is
-    /// the seam ruling R5 names: M2's matrix produces exactly this mask, and
-    /// [`Bus::pending_cpu_interrupt`] is read at poll point (c) as a
-    /// one-line degenerate of it until M2 lands.
+    /// the seam ruling R5 names: M2's matrix produces exactly this mask
+    /// (`lp_emu_esp_common::SocBus::pending_cpu_interrupt_mask()`, from
+    /// `CpuIntMatrix::asserted`), the machine feeds it here between slices,
+    /// and poll point (c) reads the same mask through
+    /// [`Bus::pending_cpu_interrupt_mask`] after an MMIO store inside one.
     ///
-    /// M2 P2 landed the honest feed:
-    /// `lp_emu_esp_common::SocBus::pending_cpu_interrupt_mask()` returns this
-    /// mask directly, from `CpuIntMatrix::asserted`. The approximation at
-    /// poll point (c) is retired when M3's Xtensa machine binds a hart to a
-    /// `SocBus` and calls it; nothing here changes until then.
+    /// ⚠️ Until M4 P3b, poll point (c) read the single-line
+    /// [`Bus::pending_cpu_interrupt`] instead — `None` on every Xtensa bus —
+    /// and so zeroed this mask on every MMIO store. See
+    /// [`resample_external`](Self::resample_external).
     #[inline]
     pub fn set_external_mask(&mut self, mask: u32) {
         self.ints.set_external(mask);
@@ -1202,9 +1205,27 @@ impl<B: Bus> XtHart<B> {
     /// Answer a raised bus side-band: re-read the single line the bus can
     /// name today and poll. M2 replaces the `Option<u8>` with the bitmask.
     #[inline]
+    /// Poll point (c): the bus's side-band said an MMIO store may have moved
+    /// the interrupt state, so **replace** the asserted-line mask with what
+    /// the matrix asserts now and poll.
+    ///
+    /// ⚠️ The mask form, not [`Bus::pending_cpu_interrupt`]. That single-line
+    /// answer is the RV32 matrix's — it owns the enables and priorities and
+    /// can name one line to take. An Xtensa matrix answers it `None`, because
+    /// `INTENABLE` and `PS.INTLEVEL` are this hart's registers; widened to a
+    /// mask that is 0, and until M4 P3b this function did exactly that after
+    /// every MMIO store, throwing away every line the machine had fed at the
+    /// slice boundary. The guest that found it was esp-rtos's thread-mode
+    /// executor on the ESP32 classic: it raises its own yield (`swi0`, a
+    /// DPORT store) from inside a critical section, lowers `PS.INTLEVEL`, and
+    /// expects the interrupt at the next instruction. With the mask zeroed by
+    /// the store itself the hart ran on through the next iteration of the
+    /// executor loop instead, and was switched out mid-way through its
+    /// run-queue `take_all` when a later interrupt finally landed — a
+    /// context that, resumed, saw a stale "empty" and slept for ever with a
+    /// task in the queue.
     fn resample_external(&mut self, bus: &B) {
-        let mask = bus.pending_cpu_interrupt().map_or(0, |n| 1u32 << (n & 31));
-        self.ints.set_external(mask);
+        self.ints.set_external(bus.pending_cpu_interrupt_mask());
         self.poll_interrupts();
     }
 

@@ -393,3 +393,179 @@ fn a_cable_reset_reboots_the_running_app_and_the_log_has_both_boots() {
          this part is a chip reset and the classic has no code for one:\n{text}"
     );
 }
+
+// --- M4 P3b: the link after the boot settles (ruling R6) ---------------------
+
+/// The needle every C6 walk opens on, and the line the classic's server loop
+/// prints on its first successful tick. A request fired after it lands on a
+/// board that has left the busy boot behind — which is where R6 lived.
+const BOOT_COMPLETE: &str = "[RECOVERY] boot complete (first frame served)";
+
+/// A `--uart0-script` in the CLI's own grammar, parsed by the same parser:
+/// the first request a millisecond after the boot settles, the next two
+/// fifty milliseconds apart. Three separate steps on purpose — concatenating
+/// them into one delivery is the workaround R6 forbids.
+const THREE_REQUESTS: &str = concat!(
+    "after \"[RECOVERY] boot complete (first frame served)\" +1ms ",
+    "\"M!{\\\"id\\\":1,\\\"msg\\\":\\\"stopAllProjects\\\"}\\n\"\n",
+    "then +50ms \"M!{\\\"id\\\":2,\\\"msg\\\":\\\"stopAllProjects\\\"}\\n\"\n",
+    "then +50ms \"M!{\\\"id\\\":3,\\\"msg\\\":\\\"stopAllProjects\\\"}\\n\"\n",
+);
+
+/// A trace sink a test can read back: every line the machine's bus trace
+/// emits for the blocks the builder was given.
+#[derive(Clone, Default)]
+struct SharedTrace(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for SharedTrace {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().expect("trace sink").extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl SharedTrace {
+    fn text(&self) -> String {
+        String::from_utf8_lossy(&self.0.lock().expect("trace sink")).into_owned()
+    }
+}
+
+/// **R6, pinned on the wire.** Three requests, each its own script step, the
+/// first fired after `[RECOVERY] boot complete` — and three answers, in
+/// order. Before M4 P3b the first was swallowed: the guest's thread-mode
+/// executor had parked for ever at the end of its first iteration, because
+/// the software interrupt it raised to yield (a DPORT store) zeroed the
+/// hart's asserted-line mask at poll point (c) and was not taken until a
+/// later interrupt landed — by which time the executor thread had run on
+/// into its next `take_all` and was switched out mid-way through it, to
+/// resume later against a stale "empty". The cause and the trace are in the
+/// README, "The link, after the boot settles".
+#[test]
+#[ignore = "needs the shipped image; run through `just test-emu-esp32v3-boot`"]
+fn a_script_with_three_requests_is_answered_three_times() {
+    let elf = match fw_esp32v3_image() {
+        Ok(p) => p,
+        Err(reason) => {
+            skip_notice("uart_socket: three requests", &reason);
+            return;
+        }
+    };
+    let script = lp_emu_esp32v3::control::parse_byte_script(THREE_REQUESTS).expect("script");
+    let mut machine = Esp32V3Builder::new()
+        .boot_mode(BootMode::Direct)
+        .app(AppSource::Path(elf))
+        .strict(true)
+        .uart0_script(script)
+        .build()
+        .expect("builds");
+    let reply = |id: u32| format!("M!{{\"id\":{id},\"msg\":\"stopAllProjects\"}}");
+
+    // The boot settles at ~115 ms; the third request lands ~101 ms after
+    // that. Half a second is room, not a tuned number.
+    let outcome = machine.run_until(&StopCondition {
+        exit_on: Some(reply(3)),
+        ..StopCondition::after_micros(500_000)
+    });
+    let text = machine.uart0().text();
+    assert!(
+        matches!(outcome, Outcome::ExitMatched { .. }),
+        "the third answer is what stops the run: {outcome:?}\n{text}"
+    );
+    assert!(
+        machine.first_strict_violation().is_none(),
+        "no strict refusal anywhere in the run"
+    );
+    assert_eq!(
+        machine.bus().unmapped_reads() + machine.bus().unmapped_writes(),
+        0,
+        "zero unmapped accesses"
+    );
+    let boot_complete = text
+        .find(BOOT_COMPLETE)
+        .unwrap_or_else(|| panic!("no `{BOOT_COMPLETE}` on the wire:\n{text}"));
+    let mut last = boot_complete;
+    for id in 1..=3 {
+        let at = text[last..]
+            .find(&reply(id))
+            .map(|i| last + i)
+            .unwrap_or_else(|| panic!("request {id} was not answered after byte {last}:\n{text}"));
+        last = at;
+    }
+    assert_eq!(
+        text.matches("\"msg\":\"stopAllProjects\"").count(),
+        3,
+        "each request answered exactly once:\n{text}"
+    );
+}
+
+/// **The sleep itself, independent of the wire.** The shipped image runs
+/// idle for two seconds of guest time past the boot settling, and esp-rtos's
+/// thread-mode executor keeps re-arming the TIMG0 `t0` alarm that is its
+/// tick — one arm per `Timer::after(1 ms)` of the server loop, so about two
+/// thousand. Before M4 P3b there was exactly **one** in the whole run: the
+/// arm at the end of the first iteration, after which the executor parked at
+/// `Instant::EPOCH + Duration::MAX` and never registered another.
+///
+/// Counted as `t0.config` writes with both `en` (bit 31) and `alarm_en`
+/// (bit 10) set — the last write of esp-hal's `Timer::start`, once per arm.
+#[test]
+#[ignore = "needs the shipped image; run through `just test-emu-esp32v3-boot`"]
+fn the_thread_executor_keeps_re_arming_its_tick_after_the_boot_settles() {
+    let elf = match fw_esp32v3_image() {
+        Ok(p) => p,
+        Err(reason) => {
+            skip_notice("uart_socket: idle re-arm", &reason);
+            return;
+        }
+    };
+    let trace = SharedTrace::default();
+    let mut machine = Esp32V3Builder::new()
+        .boot_mode(BootMode::Direct)
+        .app(AppSource::Path(elf))
+        .strict(true)
+        .trace(Box::new(trace.clone()), vec!["TIMG0".to_string()])
+        .build()
+        .expect("builds");
+
+    // To the line, then two seconds of guest time past it.
+    let outcome = machine.run_until(&StopCondition {
+        exit_on: Some(BOOT_COMPLETE.to_string()),
+        ..StopCondition::after_micros(500_000)
+    });
+    assert!(
+        matches!(outcome, Outcome::ExitMatched { .. }),
+        "the boot settles: {outcome:?}\n{}",
+        machine.uart0().text()
+    );
+    let settled = machine.cycles();
+    let two_seconds = 2_000_000 * memmap::CYCLES_PER_US;
+    let outcome = machine.run_until(&StopCondition {
+        stop_cycle: Some(settled + two_seconds),
+        ..Default::default()
+    });
+    assert!(
+        matches!(outcome, Outcome::Deadline { .. }),
+        "two quiet seconds: {outcome:?}"
+    );
+    assert!(machine.first_strict_violation().is_none());
+
+    let arms = trace
+        .text()
+        .lines()
+        .filter(|line| line.contains("W4 TIMG0+0x000 t0.config = 0x"))
+        .filter(|line| {
+            let word = line.rsplit("= 0x").next().expect("a value");
+            let value = u32::from_str_radix(word.trim(), 16).expect("hex");
+            value & (1 << 31) != 0 && value & (1 << 10) != 0
+        })
+        .count();
+    assert!(
+        arms >= 1_000,
+        "the executor's tick was re-armed {arms} times in two idle seconds; one arm per \
+         millisecond is ~2,000, and one arm in total is the executor asleep at MAX"
+    );
+}
