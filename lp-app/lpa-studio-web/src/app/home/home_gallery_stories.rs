@@ -468,11 +468,14 @@ fn devices_page_story(remembered_open: bool) -> Element {
 }
 
 #[story(
-    description = "The add slot's target menu, open (D44, PD16, spike 2 + 2b). The slot keeps \"It's connected\" as its spectrum CTA — a board on the desk is the common case — and grows a quiet second verb, \"start a board here ▾\", because the slot where the next card appears should offer BOTH ways a card can appear. The menu is two groups: Desktop alone at the top (it is the default target and the one every new project gets), then every catalog board this build can actually start, in catalog order, each row a silhouette · name · tag. The tag is a lowercase WORD — the same word the runtime band and the `?on=` grammar use — rather than a chip or a sentence, and it says what this build would run the row AS: `sim` everywhere today, because nothing is emulated yet. For the same reason the emu-versus-sim hint line is absent: it explains a choice nobody has, and inert text is noise. Picking a row mints a sim record of that target, powers it on, and the card lands in the grid next to the slot that made it. The panel floats in the top layer, so the slot is exactly as tall open as shut and the roster never reflows."
+    description = "The add slot's target menu, open (D44, PD16, D1, spike 2 + 2b). The slot keeps \"It's connected\" as its spectrum CTA — a board on the desk is the common case — and grows a quiet second verb, \"start a board here ▾\", because the slot where the next card appears should offer BOTH ways a card can appear. The menu is two groups: Desktop alone at the top (it is the default target and the one every new project gets), then every catalog board this build can actually start, in catalog order, each row a silhouette · name · tag. The tag is a lowercase WORD — the same word the runtime band and the `?on=` grammar use — rather than a chip or a sentence, and it says what picking that row would START. THE THING TO LOOK AT: the XIAO ESP32-C6 now appears TWICE, because this build can emulate it and sim-versus-emu is the user's choice, never a default Studio flips. `emu` comes first — exact, then fast — and the two rows are otherwise identical, which is the claim: one board, two runtimes. The hint line under the rows has earned its place and explains the two words; it names NO modifier key, because the two rows are the whole of the choice. Picking a row mints a record of that kind, powers it on, and the card lands in the grid next to the slot that made it. The panel floats in the top layer, so the slot is exactly as tall open as shut and the roster never reflows."
 )]
 fn devices_target_pick_open() -> Element {
     rsx! {
-        section { class: "tw:grid tw:min-h-[520px] tw:w-[360px] tw:place-items-center tw:p-4",
+        // Tall enough for the WHOLE panel — every row plus the hint line
+        // under them. The panel floats in the top layer, so a section that
+        // merely fits the trigger clips exactly the half this story is for.
+        section { class: "tw:grid tw:min-h-[720px] tw:w-[360px] tw:place-items-center tw:p-4",
             TargetPickPopover { initially_open: true, on_action: |_| {} }
         }
     }
@@ -1512,6 +1515,88 @@ fn devices_card_sim_faces() -> Element {
             // record sits on the Devices page's remembered line with
             // Power on in the Reconnect slot (Q5), which
             // `devices_page_remembered_open` already captures.
+        }
+    }
+}
+
+#[story(
+    description = "The emu as a device (D1/D25): the SAME `DeviceRosterCard` a sim and a board get, differing in one 24px row — the runtime band, reading \"▶ Emu · XIAO ESP32-C6 · in this tab · <speed>\". Compare against `devices_card_sim_faces`: everything above and below the band is identical, which is the whole claim of \"always a device\". THE THING TO JUDGE IS THE LAST CLAUSE. A sim's band ends in the shader tier its worker was GRANTED; an emu grants no tier, so the honest thing to put where the tier went is the number that actually varies — how fast the emulated board runs against wall time. Three readings, and they are the real measured range: 0.5× is a desk tab doing ordinary work; 0.04× is a tab nobody is looking at, and it is written to two decimals precisely so it does not read \"0.0×\", which would be both wrong and alarming; and NOTHING MEASURED YET drops the clause entirely rather than printing a zero — an emu whose first measuring window has not closed is not a board running at no speed. `×` is a measurement of something the person can see (the board is slow), not a judgement about it; the word that would alarm is \"degraded\"."
+)]
+fn devices_card_emu_band() -> Element {
+    let faces: Vec<(&str, Option<f64>)> = vec![
+        ("Ready · a desk tab", Some(0.5)),
+        ("Ready · the tab is hidden", Some(0.042)),
+        ("Ready · nothing measured yet", None),
+    ];
+    rsx! {
+        section { class: "tw:p-4 tw:grid tw:gap-4",
+            div { class: "tw:grid tw:grid-cols-[repeat(2,400px)] tw:items-start tw:gap-3",
+                for (label , dilation) in faces {
+                    div { key: "{label}", class: "tw:grid tw:gap-2",
+                        p { class: "tw:m-0 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:tracking-wide tw:text-subtle-foreground",
+                            "{label}"
+                        }
+                        DeviceRosterCard {
+                            card: sim_card_view(31, "XIAO ESP32-C6 (emu)", "seeed/xiao-esp32-c6"),
+                            runtime: Some(UiRuntimeBand::emu("seeed/xiao-esp32-c6", dilation)),
+                            feed: None,
+                            open_uid: Some("dev000000daqf6dvvqz".to_string()),
+                            projects: packages(),
+                            examples: examples(),
+                            on_action: |_| {},
+                        }
+                    }
+                }
+                // The sim's band, at the same scale, so the one clause that
+                // differs is read side by side rather than remembered.
+                div { class: "tw:grid tw:gap-2",
+                    p { class: "tw:m-0 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:tracking-wide tw:text-subtle-foreground",
+                        "For comparison · the sim's band"
+                    }
+                    DeviceRosterCard {
+                        card: sim_card_view(32, "XIAO ESP32-C6 (sim)", "seeed/xiao-esp32-c6"),
+                        runtime: Some(UiRuntimeBand::sim("seeed/xiao-esp32-c6", Some("cpu"))),
+                        feed: None,
+                        open_uid: Some("dev000000daqf6dvvqz".to_string()),
+                        projects: packages(),
+                        examples: examples(),
+                        on_action: |_| {},
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "An emu that came up on a BLANK CHIP (D22/D24): the needs-firmware face, on the same card, with the emu band under it. An emu is born flashed — the record's first power-on hands the worker a manifest URL and the worker fetches the packaged build, writes it into the 4 MiB image and boots into it — so this face means the fetch did not happen: this build serves no image for the board, or the network refused. THE CLAIM TO CHECK IS THAT NOTHING IS SPECIAL HERE. It is verbatim the face a blank board on the desk gets (compare `devices_card_firmware_faces`): the same verdict line and the same board pick beside the same Flash firmware verb. (The terminal below them is the story fixture's shared transcript, shared with every card story on this page — it is furniture here, not evidence.) And the verb means what it says — mode A writes the emulated chip directly and resets it, with no ROM downloader in the way — which is exactly why the two verbs a sim has nothing honest to do are real on an emu. The band is the one row that tells you where this board is; the speed clause is absent because a chip that never booted has reported no time."
+)]
+fn devices_card_emu_needs_firmware() -> Element {
+    let card = DeviceView {
+        status: DeviceStatus::NeedsAttention,
+        state_label: "Blank flash — needs firmware".to_string(),
+        detail: Some("chip: esp32c6".to_string()),
+        firmware_face: lpa_studio_core::DeviceFirmwareFace::Blank,
+        remembered_firmware: None,
+        loaded_project: DeviceLoadedProject::Unknown,
+        can_receive_project: false,
+        can_remove_project: false,
+        escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
+        ..sim_card_view(33, "XIAO ESP32-C6 (emu)", "seeed/xiao-esp32-c6")
+    };
+    rsx! {
+        section { class: "tw:p-4",
+            div { class: "tw:grid tw:w-[400px] tw:gap-2",
+                DeviceRosterCard {
+                    card,
+                    runtime: Some(UiRuntimeBand::emu("seeed/xiao-esp32-c6", None)),
+                    feed: None,
+                    open_uid: Some("dev000000daqf6dvvqz".to_string()),
+                    projects: packages(),
+                    examples: examples(),
+                    on_action: |_| {},
+                }
+            }
         }
     }
 }
