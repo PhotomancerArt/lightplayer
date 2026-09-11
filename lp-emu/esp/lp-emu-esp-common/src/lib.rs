@@ -61,7 +61,10 @@ pub use bus::{
     event_peripheral,
 };
 pub use elf::{ElfImage, LoadSegment};
-pub use host::{ByteLog, ByteSink, ByteSource, HostSinks, ScriptedSource, StreamId, TcpHost};
+pub use host::{
+    ByteLog, ByteSink, ByteSource, HostSinks, QueueHandle, QueueSource, ScriptedSource, StreamId,
+    TcpHost,
+};
 pub use periph::{
     BusCx, CpuIntMatrix, IrqLines, MachineRequest, NoCpuInterrupts, Peripheral, RegGrade,
     RegGrades, Sandbox, Strap, Width,
