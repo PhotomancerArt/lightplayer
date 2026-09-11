@@ -41,6 +41,18 @@ const FONT = "12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace";
 /// the shape `createBus({ picker })` wants: a board id, or null for "closed
 /// with nothing" — which the polyfill turns into `NotFoundError`, the same
 /// rejection Chrome gives a cancelled chooser.
+/// How the chooser names where its boards are.
+///
+/// A backing is not always a URL: the tab backing describes itself as `in
+/// this tab`, which reads as a place rather than an address, so the
+/// preposition belongs to the description and not to this sentence. A URL
+/// keeps its `on`.
+function describeBacking(backing) {
+  const text = String(backing ?? "").trim();
+  if (!text) return "Emulated boards on the emulator";
+  return /^wss?:\/\//.test(text) ? `Emulated boards on ${text}` : `Emulated boards ${text}`;
+}
+
 export function createPicker({ backingUrl = "" } = {}) {
   return (candidates) => choose(candidates, backingUrl);
 }
@@ -80,7 +92,7 @@ function choose(candidates, backingUrl) {
     style(title, { fontSize: "13px", fontWeight: "600" });
     const subtitle = document.createElement("div");
     // The picker says what it is. The card it leads to will not, by design.
-    subtitle.textContent = `Emulated boards on ${backingUrl || "the emulator"}`;
+    subtitle.textContent = describeBacking(backingUrl);
     style(subtitle, { marginTop: "4px", color: PALETTE.dim });
     header.append(title, subtitle);
 
