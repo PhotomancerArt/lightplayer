@@ -2651,10 +2651,11 @@ test-emu-esp32v3-gate: test-emu-esp32v3-boot
     scripts/emu/build-reference-image.sh --verify --chip esp32 \
         esp32,server,float-f32 "$commit" none
 
-# The boot half: build the shipped `fw-esp32v3` image and the `rmt-chase`
-# harness image, then run the whole suite with the direct-load tests included.
-# Each path is passed explicitly (`LP_EMU_ESP32V3_ELF`,
-# `LP_EMU_ESP32V3_TEST_RMT_ELF`) rather than trusted by convention — every
+# The boot half: build the shipped `fw-esp32v3` image, the `rmt-chase` harness
+# image and the `frame-dump` image, then run the whole suite with the
+# direct-load tests included. Each path is passed explicitly
+# (`LP_EMU_ESP32V3_ELF`, `LP_EMU_ESP32V3_TEST_RMT_ELF`,
+# `LP_EMU_ESP32V3_FRAME_DUMP_ELF`) rather than trusted by convention — every
 # feature set builds to the same target path, and a test that read whatever was
 # there last would pass against the wrong image
 # (`lp-emu-esp32v3/src/test_support.rs`). With two images that is no longer a
@@ -2705,7 +2706,28 @@ test-emu-esp32v3-boot: build-fw-esp32v3
     chase="$out/fw-esp32v3-test-rmt.elf"
     cp "$built" "$chase"
     export LP_EMU_ESP32V3_TEST_RMT_ELF="$chase"
-    echo "images: shipped=$shipped chase=$chase"
+    # The `frame-dump` image (M4 P4), for `tests/shader_oracle_pin.rs` and
+    # `tests/five_wires.rs`: the shipped feature set PLUS the readout, so the
+    # guest prints `[OUT] dump …` / `[OUT] frame=… crc=…` beside every frame
+    # it transmits. Additive — it renders exactly what the shipped image
+    # renders — but a third build all the same, and copied out of the shared
+    # path for the reason the two above it are.
+    just build-fw-esp32v3 frame-dump
+    dump="$out/fw-esp32v3-frame-dump.elf"
+    cp "$built" "$dump"
+    # The readout has to be IN the image, checked here rather than in a test:
+    # a feature that stopped reaching the driver's write path would otherwise
+    # show up as "nothing rendered". `grep -a` and not `grep -qa` — under
+    # `pipefail` a `-q` grep closes the pipe on its first hit, `strings` dies
+    # of SIGPIPE and the pipeline reports 141, so the check would fail loudest
+    # exactly when it passed.
+    if ! strings "$dump" | grep -a '\[OUT\] dump frame=' >/dev/null; then
+      echo "the frame-dump image carries no readout: did the feature stop reaching the \
+    driver's write path?" >&2
+      exit 1
+    fi
+    export LP_EMU_ESP32V3_FRAME_DUMP_ELF="$dump"
+    echo "images: shipped=$shipped chase=$chase frame-dump=$dump"
     cargo test -p lp-emu-esp32v3 -- --include-ignored
 
 # Run an image on the classic ESP32 (v3) machine.

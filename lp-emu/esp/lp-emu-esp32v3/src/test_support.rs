@@ -62,6 +62,25 @@ pub const MERGED_ENV: &str = "LP_EMU_ESP32V3_MERGED";
 /// build agree by construction.
 pub const IMAGE_TEST_RMT_ENV: &str = "LP_EMU_ESP32V3_TEST_RMT_ELF";
 
+/// The environment variable naming the built **`frame-dump` image** — the
+/// shipped feature set *plus* `frame-dump` (M4 P4), the build whose driver
+/// prints `[OUT] open …`, `[OUT] dump frame=… rgb=…` and `[OUT] frame=…
+/// crc=…` beside every frame it transmits.
+///
+/// A **third** variable, for [`IMAGE_TEST_RMT_ENV`]'s reason and not for a
+/// new one: `frame-dump` is additive, so this image renders exactly what the
+/// shipped one renders — but it is still a separate build landing on the
+/// same target path, and a gate that read whatever was there last would
+/// compare the walk's frames against the chase harness or the shipped image
+/// and call the difference a machine finding. `just test-emu-esp32v3-boot`
+/// builds it, copies it out of the shared path, and names the copy.
+///
+/// ⚠️ The **only** image whose console carries a frame readout. A default
+/// build renders the same bytes and says nothing about them, so a test that
+/// wants reading (a) — the firmware's own record — must be gated on this
+/// one and nothing else.
+pub const IMAGE_FRAME_DUMP_ENV: &str = "LP_EMU_ESP32V3_FRAME_DUMP_ELF";
+
 /// The profile and target `fw-esp32v3` is built with (`justfile`:
 /// `build-fw-esp32v3`), for the notice a skipped test prints.
 pub const FW_TARGET: &str = "xtensa-esp32-none-elf";
@@ -130,6 +149,39 @@ pub fn fw_esp32v3_test_rmt_image() -> Result<PathBuf, String> {
             "{IMAGE_TEST_RMT_ENV} is not set. `just test-emu-esp32v3-boot` builds the \
              `rmt-chase` harness image (`--features esp32,test_rmt`) and sets it; a bare \
              `cargo test` skips every test that needs one"
+        )),
+    }
+}
+
+/// The `frame-dump` image, if the caller has one.
+///
+/// [`fw_esp32v3_image`]'s rules exactly — `Ok` when [`IMAGE_FRAME_DUMP_ENV`]
+/// names a file, `Err(reason)` when it is unset, a **panic** when it names a
+/// path that is not there.
+pub fn fw_esp32v3_frame_dump_image() -> Result<PathBuf, String> {
+    match std::env::var_os(IMAGE_FRAME_DUMP_ENV) {
+        Some(path) => {
+            let mut path = PathBuf::from(path);
+            if path.is_relative()
+                && !path.is_file()
+                && let Some(root) = workspace_root()
+            {
+                path = root.join(&path);
+            }
+            assert!(
+                path.is_file(),
+                "{IMAGE_FRAME_DUMP_ENV}={} names a file that does not exist; `just \
+                 test-emu-esp32v3-boot` builds the frame-dump image (`just \
+                 build-fw-esp32v3 frame-dump`) and copies it out of \
+                 target/{FW_TARGET}/{FW_PROFILE}/fw-esp32v3",
+                path.display()
+            );
+            Ok(path)
+        }
+        None => Err(format!(
+            "{IMAGE_FRAME_DUMP_ENV} is not set. `just test-emu-esp32v3-boot` builds the \
+             frame-dump image (`--features esp32,server,float-f32,frame-dump`) and sets it; \
+             a bare `cargo test` skips every test that needs one"
         )),
     }
 }
