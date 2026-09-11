@@ -546,7 +546,10 @@ mod tests {
             [BrowserSerialEsp32Options::default().firmware_manifest_path("esp32c6-4mb")],
             "one derivation of the manifest URL, shared with the serial flash"
         );
-        assert_eq!(facts.summary, "wrote LightPlayer C6 into the emulated flash");
+        assert_eq!(
+            facts.summary,
+            "wrote LightPlayer C6 into the emulated flash"
+        );
         assert_eq!(facts.probed_mac, None, "no preflight read anything");
         assert_eq!(facts.chip_name, None, "no tool named a chip");
     }
@@ -716,8 +719,8 @@ mod tests {
             'a: 'async_trait,
             Self: 'async_trait,
         {
-            use lpc_wire::server::{FsRequest, FsResponse};
             use lpc_wire::server::ServerMsgBody;
+            use lpc_wire::server::{FsRequest, FsResponse};
             let (note, body) = match msg.msg {
                 ClientRequest::ListLoadedProjects => (
                     "listLoadedProjects".to_string(),

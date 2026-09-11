@@ -219,7 +219,9 @@ impl EmulatorTabPort {
         let name = JsFuture::from(js_flash_package(self.id, manifest_url))
             .await
             .map_err(js_error)?;
-        Ok(name.as_string().unwrap_or_else(|| "the firmware".to_string()))
+        Ok(name
+            .as_string()
+            .unwrap_or_else(|| "the firmware".to_string()))
     }
 
     /// `state` + `pins` + the tab's own counters, as the JSON the page

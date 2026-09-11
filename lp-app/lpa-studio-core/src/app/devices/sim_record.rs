@@ -450,13 +450,7 @@ mod tests {
 
     #[test]
     fn an_unnamed_sim_gets_no_invented_name() {
-        let minted = new_sim_record(
-            "lightplayer/desktop",
-            None,
-            &RANDOM,
-            1.0,
-            RuntimeKind::Sim,
-        );
+        let minted = new_sim_record("lightplayer/desktop", None, &RANDOM, 1.0, RuntimeKind::Sim);
         assert!(
             minted.row.name.is_empty(),
             "naming is the registry's own rule, not minting's"

@@ -154,7 +154,9 @@ mod tests {
     fn sim_record(target: &str, base_mac: &str) -> SimRecord {
         SimRecord {
             version: 1,
-            kind: super::super::sim_record::RuntimeKind::Sim.as_str().to_string(),
+            kind: super::super::sim_record::RuntimeKind::Sim
+                .as_str()
+                .to_string(),
             target: target.to_string(),
             base_mac: base_mac.to_string(),
             created_at: 0.0,

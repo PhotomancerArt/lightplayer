@@ -65,7 +65,10 @@ impl DeviceByteStream for EmulatorTabStream {
             // The one failure this call has is the handle being gone —
             // `dispose` took it — which is a closed stream, not an IO
             // error the model should try to narrate.
-            let bytes = self.port.take_bytes().map_err(|_| ByteStreamError::Closed)?;
+            let bytes = self
+                .port
+                .take_bytes()
+                .map_err(|_| ByteStreamError::Closed)?;
             self.pending.extend(bytes);
         }
         let mut written = 0;
@@ -88,11 +91,7 @@ impl DeviceByteStream for EmulatorTabStream {
             .map_err(|error| ByteStreamError::io(error.to_string()))
     }
 
-    fn set_signals(
-        &mut self,
-        dtr: Option<bool>,
-        rts: Option<bool>,
-    ) -> Result<(), ByteStreamError> {
+    fn set_signals(&mut self, dtr: Option<bool>, rts: Option<bool>) -> Result<(), ByteStreamError> {
         self.port
             .signals(dtr, rts)
             .map_err(|error| ByteStreamError::io(error.to_string()))
