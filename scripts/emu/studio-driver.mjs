@@ -190,6 +190,13 @@ export class StudioDriver {
     await cdp.send("Runtime.enable", {}, sessionId);
     await cdp.send("Log.enable", {}, sessionId).catch(() => {});
     await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: WAIT_HELPER }, sessionId);
+    // A headless target Chrome considers unfocused is throttled the way a
+    // background tab is, and the command-line flags above do not reach it —
+    // they are about backgrounded WINDOWS. This is the one that reaches a
+    // CDP-created target, and it matters far more now that the page may be
+    // hosting an emulator: a throttled Worker runs the guest at a fraction
+    // of a per cent of real time, which reads as a board that never answered.
+    await cdp.send("Emulation.setFocusEmulationEnabled", { enabled: true }, sessionId).catch(() => {});
     return new StudioDriver({ cdp, sessionId, child, exited, userDataDir });
   }
 
