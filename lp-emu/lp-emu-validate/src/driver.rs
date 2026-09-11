@@ -170,11 +170,7 @@ pub fn chip_spec(chip: &str) -> Result<&'static ChipSpec> {
         .ok_or_else(|| {
             anyhow::anyhow!(
                 "`{chip}` is not a chip this runner knows. It drives: {}.",
-                CHIPS
-                    .iter()
-                    .map(|s| s.chip)
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                CHIPS.iter().map(|s| s.chip).collect::<Vec<_>>().join(", ")
             )
         })
 }
@@ -1989,7 +1985,11 @@ mod tests {
     fn a_link_override_onto_usb_synthesises_an_attached_host() {
         let mut req = request("lp-emu:esp32c6:t1", "shader-compile-stress", None);
         req.identity = desk_identity();
-        assert_eq!(req.effective_host_plan().unwrap(), None, "no override, no host plan");
+        assert_eq!(
+            req.effective_host_plan().unwrap(),
+            None,
+            "no override, no host plan"
+        );
         req.link_override = Some(Link::UsbSerialJtag);
         assert_eq!(
             req.effective_host_plan().unwrap(),
