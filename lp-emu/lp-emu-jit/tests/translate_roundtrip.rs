@@ -26,13 +26,15 @@ use lp_emu_jit::host::{
 };
 use lp_emu_jit::host_wasmtime::WasmtimeCore;
 use lp_emu_jit::replay::GRANULE_BYTES;
-use lp_emu_jit::translate::{Emit, Layout};
+use lp_emu_jit::translate::{Emit, FastRead, FastReads, FastSource, Layout};
 
 // The test memory: exchange, then the permission table, then 64 KiB of guest
 // RAM at `GUEST_BASE`. Six wasm pages, so the whole thing is one allocation
 // the emitted module addresses with folded constants exactly as the real one
 // does.
 const EXCHANGE_AT: u32 = 0;
+/// The published-read block (M7b P3), past the exchange area.
+const FAST_AT: u32 = 0x100;
 const PERM_AT: u32 = 0x1000;
 const ARENA_AT: u32 = PERM_AT + PERM_ENTRIES;
 const ARENA_LEN: u32 = 0x1_0000;
@@ -375,6 +377,8 @@ struct Rig {
     poll_answer: Option<Polled>,
     /// Whether an `mmio_load` leaves a yield on the fake bus.
     load_leaves_yield: bool,
+    /// The published MMIO word reads this rig folds into the module (M7b P3).
+    fast_reads: Option<FastReads>,
 }
 
 impl Rig {
@@ -390,6 +394,7 @@ impl Rig {
             perm_offset: PERM_AT,
             exchange_offset: EXCHANGE_AT,
             indirect: self.indirect.then_some(IND_AT),
+            fast_reads: self.fast_reads,
         }
     }
 
@@ -425,6 +430,7 @@ impl Rig {
             store_answer: None,
             poll_answer: None,
             load_leaves_yield: false,
+            fast_reads: None,
         }
     }
 

@@ -1044,6 +1044,31 @@ impl SocBus {
         self.mmio.iter().position(|r| r.periph.name() == name)
     }
 
+    /// The `[base, base + len)` window the peripheral at `index` answers at,
+    /// and whether **any** alias window also reaches it.
+    ///
+    /// A translated core uses this to recognise, in one compare, a store that
+    /// could have moved a value it publishes (M7b P3). An aliased block has
+    /// more than one such window, so it is reported rather than hidden: the
+    /// caller's honest answer is to publish nothing.
+    pub fn peripheral_window(&self, index: usize) -> Option<(u32, u32, bool)> {
+        let r = self.mmio.get(index)?;
+        let aliased = self.mmio_aliases.iter().any(|a| a.target == index);
+        Some((r.base, r.len, aliased))
+    }
+
+    /// Whether this bus is writing a trace.
+    ///
+    /// Every MMIO access emits an [`MmioEvent`] while it is, and the oracle
+    /// compares those lines, so anything that would serve an access without
+    /// reaching [`SocBus::read_mmio`] has to refuse while this is `true`
+    /// (M7b P3).
+    ///
+    /// [`MmioEvent`]: crate::trace::MmioEvent
+    pub fn trace_is_enabled(&self) -> bool {
+        self.trace.is_enabled()
+    }
+
     /// Drive one peripheral's own API from the machine, with a full
     /// [`BusCx`] — the seam a host-side control channel reaches a block
     /// through.
