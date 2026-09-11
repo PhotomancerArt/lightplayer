@@ -251,6 +251,15 @@ pub struct EfuseIdentity {
     /// Minor chip revision — 1 on the desk board. Two bits
     /// (`WAFER_VERSION_MINOR`, block 0 bits 184:185).
     pub chip_minor: u8,
+    /// **The desk board's block 0, read out with `espefuse`** — the base the
+    /// MAC and the revision above are overlaid on.
+    ///
+    /// See [`DESK_BLOCK0`]. Everything in the array that the two fields
+    /// above do not name is carried through as measured, which is the whole
+    /// reason it is here: a synthesised block 0 carries only the fields
+    /// somebody thought to synthesise, and the ones nobody thought of read
+    /// zero — and zero is a legal fuse value, so nothing ever says so.
+    pub block0: [u32; DESK_BLOCK0.len()],
 }
 
 impl Default for EfuseIdentity {
@@ -259,9 +268,48 @@ impl Default for EfuseIdentity {
             mac: DESK_MAC,
             chip_major: 3,
             chip_minor: 1,
+            block0: DESK_BLOCK0,
         }
     }
 }
+
+/// eFuse **block 0 of the desk board**, word for word, as `espefuse v5.1.0`
+/// dumped it on 2026-09-10 (`../bench.md` §L1a; raw output in that session's
+/// `l1a-efuse/dump.txt`). Read-only, `RD_DIS = 0`, `WR_DIS = 0`; blocks 1–3
+/// are all zero.
+///
+/// ```text
+/// 00000000 f5ecf634 007c3076 0000a200 00000237 01100000 00000004
+/// ```
+///
+/// The four words [`crate::periph::efuse::words`] derives from the MAC and
+/// the revision agree with this array bit for bit, which is asserted rather
+/// than assumed
+/// (`the_derived_fields_agree_with_the_measured_block_zero`). What the
+/// measurement adds on top of them is everything nobody thought to derive,
+/// and three of those are on the boot path:
+///
+/// | field | where | value | why it matters |
+/// |---|---|---|---|
+/// | `CLK8M_FREQ` | word 4, bits 7:0 | **`0x37` = 55** | the mask ROM's XTAL detection multiplies the internal 8 MHz oscillator's calibration by this. Read as 0 it concluded **26 MHz**; read as 55 it concludes **40 MHz**, which is the crystal on the board (`bench.md`) and what `RTC_CNTL.store4` then carries on both boot paths. |
+/// | `MAC_CRC` | word 2, bits 23:16 | **`0x7c`** | the CRC-8 over the MAC, which `crate::periph::efuse` previously left at 0 with a note saying the polynomial was out of reach. It does not have to be computed: it was read off the part. |
+/// | `CONSOLE_DEBUG_DISABLE` | word 6, bit 2 | **1** | the ROM's BASIC-console fallback is fused **off** on this part. A ROM-up boot that read it as 0 is a boot with a different escape hatch armed. |
+///
+/// The rest — `CHIP_PACKAGE` 1, `CODING_SCHEME` 0 (NONE), `ADC_VREF` raw 2,
+/// `CHIP_CPU_FREQ_RATED` 1 (240 MHz), `SPI_PAD_CONFIG_*` and `XPD_SDIO_*` all
+/// 0, and every security fuse off (`FLASH_CRYPT_CNT` 0, `ABS_DONE_*` 0,
+/// `JTAG_DISABLE` 0, `DISABLE_DL_*` 0, `UART_DOWNLOAD_DIS` 0, `KEY_STATUS`
+/// 0) — is carried by the words without this file having to name it, and
+/// that is the point.
+pub const DESK_BLOCK0: [u32; 7] = [
+    0x0000_0000,
+    0xf5ec_f634,
+    0x007c_3076,
+    0x0000_a200,
+    0x0000_0237,
+    0x0110_0000,
+    0x0000_0004,
+];
 
 impl EfuseIdentity {
     /// Parse `30:76:f5:ec:f6:34`.
