@@ -414,11 +414,11 @@ fn hart_slots() {
     assert!(!machine.core_stalled(0));
     assert!(
         machine.core_stalled(1),
-        "slot 1 is stalled for the whole of M3 (Q5)"
+        "slot 1 is held until the guest releases it through DPORT (M4 P1)"
     );
     assert!(
-        machine.core_report()[1].contains("stalled"),
-        "core 1 is never silently absent from a report: {:?}",
+        machine.core_report()[1].contains("held by [machine"),
+        "core 1 is never silently absent from a report, and the report names what holds it: {:?}",
         machine.core_report()
     );
 
@@ -1290,9 +1290,20 @@ fn the_direct_load_mounts_the_flash_filesystem() {
     };
     assert!(stopped_on_the_line(&outcome), "{outcome:?}");
     let text = String::from_utf8_lossy(&uart0_fifo_bytes(&trace)).into_owned();
+    // ⚠️ `contains`, not `ends_with`, and M4 P1 changed it. The run stops
+    // when the **wire** completes the mount line; what the guest had already
+    // put in the FIFO by then runs ahead of the wire by a constant lag, and
+    // with core 1 running the boot fills that lag with the two lines the
+    // single-core fallback never printed. The claim was always "the boot
+    // reached the mount", and that is what this asserts; the byte stream
+    // itself is pinned by `the_init_chain_is_the_golden_bytes`.
     assert!(
-        text.ends_with("[INIT] flash filesystem mounted\n"),
+        text.contains("[INIT] flash filesystem mounted\n"),
         "the line P6 stopped one short of:\n{text}"
+    );
+    assert!(
+        text.contains("[INIT] RMT ISR on APP core\n"),
+        "and with core 1 up it binds the RMT ISR there:\n{text}"
     );
     // The mount really read the part, and the first boot formatted it.
     let census = machine.flash().lock().expect("flash").command_census();
@@ -1319,17 +1330,28 @@ fn the_direct_load_mounts_the_flash_filesystem() {
 /// failure means "the boot printed something else", and the text the test
 /// prints is what says whether that is a regression or a rebuild.
 ///
-/// A blank chip: 543 bytes plus the `[ERROR] no lpfs partition …` fallback.
+/// ⚠️ **Both were re-measured by M4 P1, and both grew by the same 128 bytes.**
+/// The stop is the *wire* completing the anchor line, and what is hashed is
+/// what the guest had put in the FIFO by then — so the stream carries the
+/// constant FIFO lag plus whatever the boot printed inside it. With core 1
+/// running the boot prints two lines the single-core fallback did not
+/// (`[INIT] RMT ISR on APP core` and `[INIT] heap region 3 live: …`), and
+/// they land inside that lag. Re-measured, not widened: the old pins were
+/// `676`/`bfb8d720…` and `575`/`87fb3c41…`, taken when this machine had no
+/// APP core.
+///
+/// A blank chip: the P3 prefix, the `[ERROR] no lpfs partition …` fallback,
+/// and the dual-core tail.
 const INIT_CHAIN_BLANK_SHA256: &str =
-    "bfb8d720edc298a3d902860525be2fa05fe701202babeb8e9b0cfee10d2aa40a";
-const INIT_CHAIN_BLANK_LEN: usize = 676;
+    "3f91b2e29b1b3a2c7a0b80730eb7c457a7ab801d1a8b58fea0fb71bbf9a23eee";
+const INIT_CHAIN_BLANK_LEN: usize = 804;
 
-/// The merged image: the same 543 bytes plus `[INIT] flash filesystem
-/// mounted`, and **fewer** bytes than the blank-chip chain, because the error
-/// line it replaces is longer than the success line.
+/// The merged image: the same prefix plus `[INIT] flash filesystem mounted`,
+/// and **fewer** bytes than the blank-chip chain, because the error line it
+/// replaces is longer than the success line.
 const INIT_CHAIN_MERGED_SHA256: &str =
-    "87fb3c418b9c2755d5e465dca1906e9f1d4ee64c96b53d1121f7fa23bbf3b373";
-const INIT_CHAIN_MERGED_LEN: usize = 575;
+    "660ac8ddc039193b4423305ccb4356cd37a412c25c3ddf15f5eeb0b8c0afe9e1";
+const INIT_CHAIN_MERGED_LEN: usize = 703;
 
 /// The boot threshold, pinned on both chips.
 #[test]

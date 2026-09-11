@@ -79,7 +79,7 @@ use crate::output::rmt::shared_driver;
 /// runtime, never transcribed — see [`run`].
 ///
 /// The span the ROM's `flag = 1` tables cover, from the vendored rev300 ROM
-/// ELF (`docs/defects/2026-09-10-the-app-cores-rom-boot-rewrites-heap-region-0.md`).
+/// ELF (`docs/defects/2026-09-10-the-emulator-ran-the-rom-reset-path-on-the-app-core.md`).
 const ROM_REWRITE_LO: u32 = 0x3ffe_0440;
 /// Exclusive end of the ROM-rewrite span (`.bss_xtos_pro`'s end).
 const ROM_REWRITE_HI: u32 = 0x3ffe_1320;

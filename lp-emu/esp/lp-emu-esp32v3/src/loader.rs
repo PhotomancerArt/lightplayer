@@ -51,11 +51,14 @@
 //!   0x4000_0000` (the ROM's; the app repoints it itself at `lib.rs:185-188`),
 //!   `CCOUNT`/`CCOMPARE0..2 = 0` (architecturally undefined at reset; the
 //!   runtime zeroes the compares anyway, `lib.rs:165-167`), **`CPENABLE =
-//!   0`** — the firmware arms it itself (`board/esp32v3/init.rs:64`,
-//!   `super::fpu::arm()`), and seeding it would hide an `EXCCAUSE=32` the
-//!   guest is entitled to take. All of those are what `XtHart::new` leaves
-//!   and what [`crate::machine::Machine::seed_boot_state`] sets; nothing here
-//!   writes a special register.
+//!   0xff`** — the part's reset value on both cores
+//!   ([`crate::machine::CPENABLE_RESET`], measured; M4 P1 amended this
+//!   bullet, which used to say `0` on the argument that the firmware arms
+//!   bit 0 itself and a seed would hide an `EXCCAUSE=32` — true of the PRO
+//!   core's FPU arming, and fatal on core 1, whose interrupt entry saves the
+//!   FP state unconditionally). All of those are what the machine's
+//!   `fresh_hart` leaves and what [`crate::machine::Machine::seed_boot_state`]
+//!   sets; nothing here writes a special register.
 //! - `dram_seg` as plain zeroed RAM, and the ROM's two stacks
 //!   (`0x3FFE_1320 + 0x2C00`, `0x3FFE_5230 + 0x2C00`) as plain RAM: the
 //!   firmware reclaims both as heap regions 0 and 3 (L0's `[INIT] heap

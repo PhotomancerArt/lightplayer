@@ -279,6 +279,66 @@ impl CacheOffPolicy {
     }
 }
 
+/// What `--app-mmu-divergence` chooses (ruling **R4**, M4 P1). **`Stop` is
+/// the default and is what every gate run uses.**
+///
+/// This machine has **one** flash window behind **both** cores' MMU tables:
+/// `SocBus` holds the window in a single arena, so a fill from the APP core's
+/// table would overwrite the PRO core's view of the same address, and the
+/// fill serves the PRO core's table only ([`fill`]). That is an honest
+/// shortcut exactly as long as the two tables agree — the IDF bootloader
+/// programs both from one image header, and so does the direct loader — and
+/// a lie the moment they do not: core 1 would then fetch bytes its own table
+/// does not name, silently. P7 logged that case at `warn`. With core 1
+/// running, a lie the model can name is a stop (DD37's logic, DD45), and the
+/// escape is spelled the way D4's is.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MmuDivergencePolicy {
+    #[default]
+    Stop,
+    /// Log the disagreement at `warn`, as P7 did, and keep serving the PRO
+    /// core's table. Claims nothing about what core 1 would have read.
+    Permit,
+}
+
+impl MmuDivergencePolicy {
+    pub fn parse(text: &str) -> Result<Self, String> {
+        match text {
+            "stop" => Ok(MmuDivergencePolicy::Stop),
+            "permit" => Ok(MmuDivergencePolicy::Permit),
+            other => Err(format!(
+                "unknown --app-mmu-divergence `{other}` (expected stop or permit)"
+            )),
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            MmuDivergencePolicy::Stop => "stop",
+            MmuDivergencePolicy::Permit => "permit",
+        }
+    }
+}
+
+/// One flash-MMU entry on which the two cores' tables disagree, recorded at
+/// the fill that met it (ruling R4). Both entries and the page are named, so
+/// a reader can see which core's view the window is serving and which it is
+/// not.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MmuDivergence {
+    /// The entry index, `0..FLASH_MMU_ENTRIES`.
+    pub index: u32,
+    /// What the PRO core's table holds there — the one the window serves.
+    pub pro: u32,
+    /// What the APP core's table holds there — the one it does not.
+    pub app: u32,
+    /// The virtual page the entry names under the APP core's page mode, or
+    /// `None` for an index with no reachable virtual address on this chip.
+    pub vaddr: Option<u32>,
+    /// The APP core's page mode at the time.
+    pub page_mode: u8,
+}
+
 /// One guest access through a flash window by a core whose cache is off.
 ///
 /// `pc`, `cycle` and `symbol` are filled in by the machine, which is the only
@@ -496,6 +556,11 @@ pub struct ClassicCache {
     /// Set around a host-side peek or poke, which goes through the bus's
     /// decode and would otherwise look like a guest access.
     host_access: bool,
+    /// Ruling R4: what a fill does when the APP core's entry disagrees with
+    /// the PRO core's.
+    divergence_policy: MmuDivergencePolicy,
+    /// The first disagreement since the machine last took one.
+    divergence: Option<MmuDivergence>,
 }
 
 /// The tables and the cache state, shared between the register views and the
@@ -528,6 +593,8 @@ impl ClassicCache {
             filled: [None; FLASH_MMU_ENTRIES as usize],
             offence: None,
             host_access: false,
+            divergence_policy: MmuDivergencePolicy::default(),
+            divergence: None,
         }
     }
 
@@ -541,6 +608,21 @@ impl ClassicCache {
 
     pub fn set_policy(&mut self, policy: CacheOffPolicy) {
         self.policy = policy;
+    }
+
+    /// Ruling R4's policy: see [`MmuDivergencePolicy`].
+    pub fn divergence_policy(&self) -> MmuDivergencePolicy {
+        self.divergence_policy
+    }
+
+    pub fn set_divergence_policy(&mut self, policy: MmuDivergencePolicy) {
+        self.divergence_policy = policy;
+    }
+
+    /// The first table disagreement a fill met since the machine last took
+    /// one, cleared. Recorded only under [`MmuDivergencePolicy::Stop`].
+    pub fn take_divergence(&mut self) -> Option<MmuDivergence> {
+        self.divergence.take()
     }
 
     /// `*_cache_ctrl` as the guest reads it.
@@ -796,22 +878,35 @@ pub fn fill(bus: &mut SocBus, flash: &crate::flash::FlashHandle, cache: &CacheHa
         // ⚠️ **One window, one memory.** `SocBus` holds the flash windows in
         // a single arena, so there is no per-core copy for the APP core's
         // table to fill: a fill from core 1 would overwrite core 0's view of
-        // the same address. M3 runs core 0 only (Q5), so the fill is core
-        // 0's — and a core-1 entry that *disagrees* with core 0's is said
-        // out loud, because that is the case a per-core window would be
-        // needed for and M4 is where it would land.
+        // the same address. The fill is core 0's, always — and a core-1
+        // entry that *disagrees* with core 0's is the case a per-core window
+        // would be needed for. M3 said it at `warn`; with core 1 running
+        // (M4 P1) it is a **strict stop** under the default policy, ruling
+        // R4, because the window would then be serving core 1 bytes its own
+        // table does not name. `--app-mmu-divergence permit` keeps P7's warn.
         if core != 0 {
-            let pro = cache
-                .lock()
-                .expect("cache poisoned")
-                .mmu
-                .entry(0, index as usize);
+            let mut c = cache.lock().expect("cache poisoned");
+            let pro = c.mmu.entry(0, index as usize);
             if pro != entry {
-                log::warn!(
-                    "cache: the APP core's entry {index} maps flash page {entry:#x} where the \
-                     PRO core's maps {pro:#x}; this machine has one window behind both tables \
-                     and serves the PRO core's. See crate::cache::fill."
-                );
+                match c.divergence_policy {
+                    MmuDivergencePolicy::Stop => {
+                        if c.divergence.is_none() {
+                            c.divergence = Some(MmuDivergence {
+                                index,
+                                pro,
+                                app: entry,
+                                vaddr: FlashMmu::entry_vaddr(index, page_mode),
+                                page_mode,
+                            });
+                        }
+                    }
+                    MmuDivergencePolicy::Permit => log::warn!(
+                        "cache: the APP core's entry {index} maps flash page {entry:#x} where \
+                         the PRO core's maps {pro:#x}; this machine has one window behind both \
+                         tables and serves the PRO core's (--app-mmu-divergence permit). See \
+                         crate::cache::fill."
+                    ),
+                }
             }
             continue;
         }
