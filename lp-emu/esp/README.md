@@ -428,6 +428,14 @@ The consumer is `lp-app/lpa-studio-web/public/lpa-link/emulator_worker.js`,
 which is AGPL and on the other side of the MIT fence — it reaches this module
 by URL, and nothing here knows it exists.
 
+**The M7 translator hook is a named, unfilled seam.** `emulator_worker.js`
+already carries a comment marking where `scripts/emu/bench-web/jit-host.js`
+imports and where its `emu_host` imports would be supplied, behind a flag,
+once it is safe to touch that file — `jit-host.js` exists on `main`, but
+`emulator_worker.js` is under concurrent edit by other efforts as of this
+writing, so the hook itself is deferred to a follow-on phase rather than
+landed here. Nothing on this crate's side of the fence changes for it.
+
 ### The scripted form
 
 `--usb-script <file>` is `--uart0-script`'s grammar with the control words
