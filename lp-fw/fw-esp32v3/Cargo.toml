@@ -206,6 +206,30 @@ test_interrupt_executor = []
 #       --features esp32,test_sram0_exec
 test_sram0_exec = []
 
+# The APP-core ROM-path canary (lab task L2, plan `2026-09-10-0021-xtensa-emulator`).
+#
+# Settles a question only silicon can answer: does esp-hal's
+# `appcpu_resetting` pulse put the APP core back through the mask ROM's
+# `_ResetVector` — re-running the unpack/bss tables over
+# `0x3ffe0440..0x3ffe1320`, which this firmware has already handed to
+# esp-alloc as heap region 0 — or was the core parked in ROM `main`'s poll all
+# along, so that only the `appcpu_ctrl_d` write releases it? The classic
+# emulator models the first reading and kills the shipped image in
+# `LpFs::read_file`; the desk board boots the same bytes dual-core and runs.
+#
+# The rig fills the head of region 0 with `0xA5`, calls the PRODUCT's
+# `start_app_core_isr`, and reports every byte the ROM rewrote. See
+# `src/tests/appcore_rom_path.rs` and
+# `docs/defects/2026-09-10-the-app-cores-rom-boot-rewrites-heap-region-0.md`.
+#
+# Empty, like the interrupt-executor rig: it rides the default features'
+# cohort — it must, because it calls `board::esp32v3::init::init_board` and
+# `output::rmt::shared_driver::start_app_core_isr` rather than a copy of
+# either. Run `just fwtest-appcore-rom-path-esp32v3 <port>`. Build (touch
+# src/main.rs first when flipping features):
+#   cargo build --profile release-esp32v3 --features test_appcore_rom_path
+test_appcore_rom_path = []
+
 [dependencies]
 # Pins below come from the experiment repo's `fw/xt-runner-esp32/Cargo.toml`
 # (proven on classic ESP32 silicon 2026-07-28, FINDINGS.md C1 PASS) — the
