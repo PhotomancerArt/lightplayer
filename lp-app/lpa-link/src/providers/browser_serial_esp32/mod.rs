@@ -38,7 +38,6 @@
 
 mod browser_esp32_flash;
 mod browser_serial;
-mod browser_serial_esp32_options;
 mod port_client_io;
 mod provider;
 
@@ -47,7 +46,10 @@ pub use browser_esp32_flash::{
     BrowserEsp32FlashProgress, BrowserEsp32FlashResult, BrowserEsp32ProbeResult,
 };
 pub use browser_serial::{BrowserSerialPortHandle, granted_ports, install_serial_events};
-pub use browser_serial_esp32_options::{
+/// The packaged-firmware URL policy (declared outside the wasm gate in
+/// `providers/mod.rs` so the host-tested emu transport shares it);
+/// re-exported here so wasm consumers read one module path.
+pub use crate::providers::browser_serial_esp32_options::{
     BrowserSerialEsp32Options, DEFAULT_ESPTOOL_MODULE_PATH, DEFAULT_FIRMWARE_BASE_PATH,
 };
 pub use port_client_io::LensTapLine;
