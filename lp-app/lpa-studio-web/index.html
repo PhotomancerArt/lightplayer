@@ -463,7 +463,18 @@
                     // A page-internal contract, like `__lpShell`: the dev
                     // banner's controls, and an agent at the console, reach
                     // the boards through this. Studio never touches it.
-                    window.__lpEmuSerial = { bus, facade, backing, base: httpBase };
+                    // `tabBacking` is on here for the same reason the bus
+                    // is: `just walk-no-board --tab` has no `GET /boards` to
+                    // ask, and `describeBoards()` is a page-load cache that
+                    // goes stale after a flash. `listBoards()` reads the
+                    // worker's live row, so it is the tab's registry.
+                    window.__lpEmuSerial = {
+                        bus,
+                        facade,
+                        backing,
+                        base: httpBase,
+                        tabBacking,
+                    };
                     whenBody(() =>
                         chrome.installDevBanner({ bus, backingUrl: label, facade }),
                     );

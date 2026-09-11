@@ -280,6 +280,34 @@ lpa-link-browser-test: install-wasm32-target
         cargo test -p lpa-link --target wasm32-unknown-unknown \
             --features browser-serial-esp32 --test browser_serial_conformance
 
+# The SAME assertions against boards hosted IN THE TAB — one Worker per
+# board, each holding the emulator's own wasm, and no server anywhere
+# (C6-in-tab P2).
+#
+# The third backing the suite can run over, after the scripted door (CI) and
+# the live socket below. It is the strongest single proof the tab backing has:
+# every claim about the shipped `browser_serial.js`, the device controller,
+# the polyfill and `EmulatorPort` — made against a real emulated C6 that is
+# running inside the page under test.
+#
+# Local only, like the live half (plan two PD9): it wants Chrome and a
+# multi-MB wasm build. Any claim that fails ONLY here is a real divergence
+# between the door's coupling and the tab's — report it, do not patch it.
+lpa-link-browser-test-tab: install-wasm32-target install-wasip1-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v wasm-bindgen-test-runner >/dev/null 2>&1; then
+        echo "wasm-bindgen-test-runner not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
+        exit 1
+    fi
+    # The runner copies this into its served root; the suite fetches it from
+    # the path below. Built first so a stale module cannot be what ran.
+    just emu-c6-wasm
+    LP_EMU_TAB_MODULE="/pkg/lp_emu_esp32c6.wasm" \
+    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="$PWD/scripts/wasm-serial-test-runner.sh" \
+        cargo test -p lpa-link --target wasm32-unknown-unknown \
+            --features browser-serial-esp32 --test browser_serial_conformance
+
 # The SAME assertions against a live `lp-cli emu serve` holding a real
 # emulated C6 — the other half of M2's conformance suite.
 #
