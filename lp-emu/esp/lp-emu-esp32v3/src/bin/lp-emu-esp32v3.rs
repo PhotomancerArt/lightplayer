@@ -30,8 +30,8 @@ use lp_emu_esp32v3::machine::{
     AppSource, BootMode, CORE_QUANTUM_DEFAULT, CORES, Esp32V3Builder, FrameSink, Machine, Outcome,
     PinLogSink, RomSource, StopCondition, StripConfig, TimeGrade, Uart0Sink,
 };
-use lp_ws281x::{ChannelTiming, ColorOrder};
 use lp_emu_esp32v3::{bus_setup, memmap};
+use lp_ws281x::{ChannelTiming, ColorOrder};
 
 const USAGE: &str = "\
 lp-emu-esp32v3 — the classic ESP32 (v3, LX6) machine

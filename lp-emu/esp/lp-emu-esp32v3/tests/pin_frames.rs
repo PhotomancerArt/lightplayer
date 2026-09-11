@@ -31,11 +31,11 @@
 //! own, quoted value for value out of a `--trace-block RMT` run of it, and
 //! the host writes it through the same bus decode the guest would.
 
+use lp_emu_esp_common::pins::{PadId, RouteSource, SignalId};
+use lp_emu_esp_common::regnames::RegNames;
 use lp_emu_esp32v3::machine::{
     BootMode, Esp32V3Builder, FrameSink, Machine, PinLogSink, StopCondition, StripConfig,
 };
-use lp_emu_esp_common::pins::{PadId, RouteSource, SignalId};
-use lp_emu_esp_common::regnames::RegNames;
 use lp_emu_esp32v3::periph::rmt;
 use lp_emu_esp32v3::{memmap, regs};
 
@@ -150,10 +150,7 @@ fn rig(dump: FrameSink, pin_log: PinLogSink) -> Machine {
 /// line for line).
 fn arm_channel_0(m: &mut Machine) {
     assert!(m.poke_word(gpio_reg("enable_w1ts"), 1 << GPIO18));
-    assert!(m.poke_word(
-        gpio_reg("func18_out_sel_cfg"),
-        u32::from(rmt::RMT_SIG_0)
-    ));
+    assert!(m.poke_word(gpio_reg("func18_out_sel_cfg"), u32::from(rmt::RMT_SIG_0)));
 
     assert!(m.poke_word(rmt_reg("apb_conf"), 0x0000_0001)); // Rmt::new
     assert!(m.poke_word(conf1(0), 0x0002_0f20)); // configure_clock: APB
@@ -341,7 +338,10 @@ fn the_sinks_write_the_frame_and_the_edges() {
     let lines: Vec<&str> = dump.lines().filter(|l| !l.is_empty()).collect();
     assert_eq!(lines.len(), 1, "one line per decoded frame:\n{dump}");
     let record = lines[0];
-    assert!(record.starts_with("{\"kind\":\"ws281x-frame\","), "{record}");
+    assert!(
+        record.starts_with("{\"kind\":\"ws281x-frame\","),
+        "{record}"
+    );
     assert!(record.contains("\"pad\":18,"), "{record}");
     assert!(
         record.contains("\"signal\":\"RMT_SIG_0\""),
@@ -451,15 +451,16 @@ fn the_decoders_ride_the_snapshot() {
         ..Default::default()
     });
     let mid = m.pin_state().clone();
-    let decoder = mid
-        .decoders
-        .get(&GPIO18)
-        .expect("the pad is being decoded");
+    let decoder = mid.decoders.get(&GPIO18).expect("the pad is being decoded");
     assert!(
         decoder.is_mid_frame(),
         "the snapshot is taken with a frame open"
     );
-    assert_eq!(decoder.cpu_hz(), memmap::CPU_HZ, "240 MHz, not the C6's 160");
+    assert_eq!(
+        decoder.cpu_hz(),
+        memmap::CPU_HZ,
+        "240 MHz, not the C6's 160"
+    );
     let snap = m.snapshot();
     assert_eq!(snap.pins.decoders, mid.decoders, "the decoders are in it");
 
