@@ -555,6 +555,7 @@ fn create_records_a_saved_library_event_and_copies_match() {
         ControllerId::new(HOME_NODE_ID),
         HomeOp::OpenPackage {
             key: summary.uid.to_string(),
+            prefer: None,
         },
     )));
     drive(actor.run_one_batch_for_test());

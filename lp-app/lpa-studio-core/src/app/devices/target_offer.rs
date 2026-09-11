@@ -167,9 +167,7 @@ pub fn target_offer(scope: TargetScope) -> TargetOffer {
                 }
                 // One row per target, wearing the advisory "what this build
                 // would run it as" — which nothing renders here (D41).
-                TargetScope::Everything => None
-                    .into_iter()
-                    .chain(Some(row(backing_for(board_id)))),
+                TargetScope::Everything => None.into_iter().chain(Some(row(backing_for(board_id)))),
             }
         })
         .filter(|choice| match scope {
@@ -182,9 +180,7 @@ pub fn target_offer(scope: TargetScope) -> TargetOffer {
     // has one row per board and says nothing about backings (D41), so it
     // has nothing to explain even though its rows carry the advisory word.
     let hint = (scope == TargetScope::Runnable
-        && choices
-            .iter()
-            .any(|choice| choice.backing == Backing::Emu))
+        && choices.iter().any(|choice| choice.backing == Backing::Emu))
     .then_some(EMU_SIM_HINT);
     TargetOffer { choices, hint }
 }

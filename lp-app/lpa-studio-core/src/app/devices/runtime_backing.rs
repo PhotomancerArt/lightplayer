@@ -53,6 +53,21 @@ impl Backing {
     }
 }
 
+/// The two enums are the same distinction seen from two sides: [`Backing`]
+/// is what this build OFFERS, [`RuntimeKind`] is what a record IS. A record
+/// always came from an offer, so this direction is total and lossless; the
+/// other direction is not, and is deliberately absent.
+///
+/// [`RuntimeKind`]: super::sim_record::RuntimeKind
+impl From<super::sim_record::RuntimeKind> for Backing {
+    fn from(kind: super::sim_record::RuntimeKind) -> Self {
+        match kind {
+            super::sim_record::RuntimeKind::Emu => Self::Emu,
+            super::sim_record::RuntimeKind::Sim => Self::Sim,
+        }
+    }
+}
+
 /// The targets this build ships an emulator for.
 ///
 /// One id per emulated SoC module. Adding a row is the whole of "Studio can
