@@ -34,12 +34,16 @@ rustc-demangle = "0.1"
 # model of the same peripheral.
 lp-ws281x = { path = "../../../lp-fw/lp-ws281x", default-features = false }
 
-# The translator, and with it the wasmtime host that runs what it emits.
-# OPTIONAL and off by default, deliberately (JD9, JD18): the product host is
-# the browser's own engine, `wasmtime` needs minutes of cranelift compilation
-# on the images this ladder measures, and every test and CI job depends on
-# this binary starting fast. `--jit` on a build without this feature says so
-# and exits.
+# The translator, and with it whichever host runs what it emits.
+# OPTIONAL and off by default, deliberately (JD9, JD18): `wasmtime` needs
+# minutes of cranelift compilation on the images this ladder measures, and
+# every test and CI job depends on this binary starting fast. `--jit` on a
+# build without this feature says so and exits.
+#
+# `host-wasmtime` is asked for unconditionally and costs nothing on a wasm
+# target: `lp-emu-jit` declares wasmtime only for `cfg(not(target_family =
+# "wasm"))`, so a `wasm32-wasip1` build of this binary gets the translator and
+# `lp_emu_jit::host_browser` — the product host (JD11-JD13) — and no compiler.
 [dependencies.lp-emu-jit]
 path = "../../lp-emu-jit"
 features = ["host-wasmtime"]
