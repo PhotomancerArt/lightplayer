@@ -641,6 +641,7 @@ impl HostOps for C6Ops {
         // peripheral model reads both, and P1b measured that a cycle charged
         // at block entry is a different number.
         bus.set_issuing(pc, cycle);
+        mmio_census::note(false, pc, address);
         let read = match kind {
             load_kind::B => bus.read_byte(address).map(i32::from),
             load_kind::BU => bus.read_byte(address).map(|v| i32::from(v as u8)),
@@ -695,6 +696,7 @@ impl HostOps for C6Ops {
         // SAFETY: called from inside `enter`.
         let (_, bus) = unsafe { self.parts() };
         bus.set_issuing(pc, cycle);
+        mmio_census::note(true, pc, address);
         let written = match kind {
             store_kind::B => bus.write_byte(address, value as i8),
             store_kind::H => bus.write_halfword(address, value as i16),
@@ -1627,5 +1629,176 @@ impl TranslatedCore<SocBus> for JitCore {
             s.refused_impure,
             s.refused_stale,
         )
+    }
+}
+
+/// M7 P6c (Q2): a census of every MMIO operation translated code performs.
+///
+/// **Off unless `LP_EMU_JIT_MMIO_CENSUS` is set**, like `LP_EMU_JIT_EXITS`
+/// and P6b's `LP_EMU_JIT_ENTRY_TIME`: it is a diagnostic nobody runs by
+/// accident, it allocates per distinct address and per distinct guest pc, and
+/// it perturbs the wall clock the rest of the run reports.
+///
+/// **Why a thread-local and not a field.** The census has to span the whole
+/// run, and a run has three cores on `render-basic` t2 — boot plus two
+/// `fence.i` retranslations, each of which *replaces* the [`JitCore`]
+/// (JD5/P5). A counter on the core would be thrown away twice and the census
+/// would report the last third of the run. The emulator is single-threaded on
+/// every target this runs on (`wasm32-wasip1` has no threads at all), so a
+/// `thread_local!` is the run.
+///
+/// **What it counts.** Only MMIO that *translated code* issued, because the
+/// two [`HostOps`] callbacks are the translated module's only way out to the
+/// bus. Interpreted MMIO — inside the 6.54 % of retired instructions that run
+/// outside translated code — is not in it, and the report says so in its
+/// first line rather than implying a total.
+pub mod mmio_census {
+    use std::cell::RefCell;
+    use std::collections::BTreeMap;
+
+    use lp_emu_esp_common::bus::SocBus;
+    use lp_emu_esp_common::periph::Peripheral;
+
+    /// `[loads, stores]` — the two columns every row of the census has.
+    type Ops = [u64; 2];
+
+    #[derive(Default)]
+    struct Census {
+        /// Guest address → `[loads, stores]`. One entry per distinct
+        /// register, which is a few hundred on a render run.
+        by_address: BTreeMap<u32, Ops>,
+        /// Guest pc → `[loads, stores]`. One entry per distinct instruction
+        /// that performs MMIO.
+        by_pc: BTreeMap<u32, Ops>,
+        loads: u64,
+        stores: u64,
+    }
+
+    thread_local! {
+        static CENSUS: RefCell<Option<Census>> = const { RefCell::new(None) };
+    }
+
+    /// Whether the census is on, read once from the environment.
+    ///
+    /// A `OnceLock` rather than a per-call `var_os`, because this is
+    /// consulted on every MMIO operation — tens of millions on
+    /// `render-basic` t2 — and an environment lookup there would be the
+    /// measurement's own cost.
+    #[must_use]
+    pub fn on() -> bool {
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ON.get_or_init(|| std::env::var_os("LP_EMU_JIT_MMIO_CENSUS").is_some())
+    }
+
+    /// Record one MMIO operation issued from translated code.
+    #[inline]
+    pub fn note(store: bool, pc: u32, address: u32) {
+        if !on() {
+            return;
+        }
+        let k = usize::from(store);
+        CENSUS.with(|c| {
+            let mut slot = c.borrow_mut();
+            let c = slot.get_or_insert_with(Census::default);
+            c.by_address.entry(address).or_default()[k] += 1;
+            c.by_pc.entry(pc).or_default()[k] += 1;
+            if store {
+                c.stores += 1;
+            } else {
+                c.loads += 1;
+            }
+        });
+    }
+
+    /// The census as report lines, or `None` when it was never turned on.
+    ///
+    /// `bus` turns an address back into `PERIPHERAL+0xoff name` out of the
+    /// peripheral's own [`Peripheral::reg_name`], which is the same
+    /// resolution a trace line gets — so there is no second copy of the
+    /// memory map here to drift away from the machine's.
+    #[must_use]
+    pub fn report(bus: &SocBus) -> Option<String> {
+        CENSUS.with(|c| {
+            let slot = c.borrow();
+            let c = slot.as_ref()?;
+            let spans = bus.peripheral_spans();
+            let where_is = |address: u32| -> (String, String) {
+                for &(base, len, i) in &spans {
+                    if address.wrapping_sub(base) < len {
+                        let off = address - base;
+                        let p = bus.peripheral(i);
+                        let block = p.map_or("?", Peripheral::name);
+                        let reg = p.and_then(|p| p.reg_name(off)).unwrap_or("");
+                        return (block.to_string(), format!("+{off:#06x} {reg}"));
+                    }
+                }
+                ("(unmapped)".to_string(), format!(" {address:#010x}"))
+            };
+
+            let total = c.loads + c.stores;
+            let of = |n: u64| 100.0 * n as f64 / total.max(1) as f64;
+            let mut out = String::new();
+            out.push_str(&format!(
+                "jit: mmio census (translated code only): {total} operation(s) — {} load(s), \
+                 {} store(s), over {} distinct register(s) and {} distinct guest pc(s)\n",
+                c.loads,
+                c.stores,
+                c.by_address.len(),
+                c.by_pc.len(),
+            ));
+
+            // By peripheral: "which model answers most of them", the question
+            // the ladder's M4 census answered for the harness image.
+            let mut by_block: BTreeMap<String, Ops> = BTreeMap::new();
+            for (&a, ops) in &c.by_address {
+                let e = by_block.entry(where_is(a).0).or_default();
+                e[0] += ops[0];
+                e[1] += ops[1];
+            }
+            let mut blocks: Vec<_> = by_block.into_iter().collect();
+            blocks.sort_by_key(|(_, o)| std::cmp::Reverse(o[0] + o[1]));
+            for (block, o) in blocks {
+                let n = o[0] + o[1];
+                out.push_str(&format!(
+                    "jit: mmio by peripheral: {block:<22} {n:>12} ({:>6.2} %)  {:>12} load(s), \
+                     {:>12} store(s)\n",
+                    of(n),
+                    o[0],
+                    o[1],
+                ));
+            }
+
+            // By register, top 24.
+            let mut regs: Vec<_> = c.by_address.iter().map(|(&a, o)| (a, *o)).collect();
+            regs.sort_by_key(|(_, o)| std::cmp::Reverse(o[0] + o[1]));
+            for (a, o) in regs.iter().take(24) {
+                let (block, off) = where_is(*a);
+                let n = o[0] + o[1];
+                out.push_str(&format!(
+                    "jit: mmio by register: {:<34} {n:>12} ({:>6.2} %)  {:>12} load(s), \
+                     {:>12} store(s)\n",
+                    format!("{block}{off}"),
+                    of(n),
+                    o[0],
+                    o[1],
+                ));
+            }
+
+            // By guest pc, top 20 — the brief's number, and the one that says
+            // whether the traffic is a handful of loops or a spread.
+            let mut pcs: Vec<_> = c.by_pc.iter().map(|(&p, o)| (p, *o)).collect();
+            pcs.sort_by_key(|(_, o)| std::cmp::Reverse(o[0] + o[1]));
+            for (pc, o) in pcs.iter().take(20) {
+                let n = o[0] + o[1];
+                out.push_str(&format!(
+                    "jit: mmio by guest pc: {pc:#010x} {n:>12} ({:>6.2} %)  {:>12} load(s), \
+                     {:>12} store(s)\n",
+                    of(n),
+                    o[0],
+                    o[1],
+                ));
+            }
+            Some(out)
+        })
     }
 }

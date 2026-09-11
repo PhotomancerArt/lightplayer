@@ -2485,6 +2485,26 @@ impl Esp32C6Machine {
             .flatten()
     }
 
+    /// M7 P6c (Q2): the MMIO census, if `LP_EMU_JIT_MMIO_CENSUS` turned it on.
+    ///
+    /// Reported from here rather than from the core's own `report()` because
+    /// resolving an address to `PERIPHERAL+0xoff name` needs the bus, and a
+    /// [`crate::jit::JitCore`] has no bus — and because the census outlives
+    /// every core a run installs.
+    #[cfg(feature = "jit")]
+    #[must_use]
+    pub fn jit_mmio_census(&self) -> Option<String> {
+        crate::jit::mmio_census::report(&self.bus)
+    }
+
+    /// Without the `jit` feature there is no translated code and so no
+    /// census — the same shape, so the CLI needs no `cfg` of its own.
+    #[cfg(not(feature = "jit"))]
+    #[must_use]
+    pub fn jit_mmio_census(&self) -> Option<String> {
+        None
+    }
+
     /// Hold the hart to this machine's translation policy.
     ///
     /// With `--interpreter` there must be no core installed, whatever else

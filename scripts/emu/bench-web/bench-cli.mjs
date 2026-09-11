@@ -7,7 +7,7 @@
 //   --image <slug>        repeatable; default: render-basic render-rocaille
 //   --grade <t1|t2>       repeatable; default: t1 t2
 //   --mode <jit|interp>   repeatable; default: jit interp
-//   --fn-blocks <N>       repeatable; default: 256   (JD26's knob)
+//   --fn-blocks <N>       repeatable; default: 32   (JD26's knob; DD20's default)
 //   --timeout <spec>      the emulated bound; default 5500ms
 //   --wall-timeout <s>    default 600
 //   --exit-on             also pass the image's `--exit-on` marker
@@ -15,6 +15,13 @@
 //   --tail                print the last lines of each run's own output
 //   --arg <flag>          repeatable; passed straight through to the
 //                         emulator's own argv, after everything above
+//   --dump <dir>          write each run's WHOLE stdout+stderr there, as
+//                         <image>-<grade>-<mode>-<fn>.log. The bench table
+//                         shows eight lines of tail; a census is sixty.
+//   --env <NAME=value>    repeatable; the module's WASI environment. P6c uses
+//                         it for `LP_EMU_JIT_MMIO_CENSUS=1`, which is the only
+//                         way to reach an environment-gated diagnostic inside
+//                         a wasm row. The page never sets one.
 //
 // JD19: every generated-code A/B is measured in BOTH engines before it reaches
 // a conclusion, and `bun` is JavaScriptCore — the phone's family — while `node`
@@ -23,7 +30,7 @@
 // It imports `bench-run.js`, which imports `jit-host.js`, which is the module
 // Studio's worker will import too (JD25). A row taken here and a row taken on
 // the phone go through the same code.
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { loadavg } from 'node:os';
 import { join } from 'node:path';
 
@@ -33,7 +40,7 @@ function parseArgs(argv) {
   const o = {
     stage: 'target/emu-bench-web', images: [], grades: [], modes: [], fnBlocks: [],
     timeout: '5500ms', wallTimeout: 600, exitOn: false, json: null, tail: false,
-    extraArgs: [],
+    extraArgs: [], env: {}, dump: null,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -49,13 +56,15 @@ function parseArgs(argv) {
     else if (a === '--json') o.json = next();
     else if (a === '--tail') o.tail = true;
     else if (a === '--arg') o.extraArgs.push(next());
+    else if (a === '--dump') o.dump = next();
+    else if (a === '--env') { const kv = next(); const i2 = kv.indexOf('='); if (i2 < 0) throw new Error('--env wants NAME=value, got ' + kv); o.env[kv.slice(0, i2)] = kv.slice(i2 + 1); }
     else if (a === '-h' || a === '--help') { console.log(readFileSync(new URL(import.meta.url)).toString().split('\n').filter((l) => l.startsWith('//')).join('\n')); process.exit(0); }
     else throw new Error('unknown option ' + a);
   }
   if (!o.images.length) o.images = ['render-basic', 'render-rocaille'];
   if (!o.grades.length) o.grades = ['t1', 't2'];
   if (!o.modes.length) o.modes = ['jit', 'interp'];
-  if (!o.fnBlocks.length) o.fnBlocks = [256];
+  if (!o.fnBlocks.length) o.fnBlocks = [32];
   return o;
 }
 
@@ -103,8 +112,15 @@ for (const slug of o.images) {
         const r = await runOnce({
           compiled, image, elfBytes, grade, mode, fnBlocks,
           timeout: o.timeout, wallTimeout: o.wallTimeout, exitOn: o.exitOn,
-          extraArgs: o.extraArgs,
+          extraArgs: o.extraArgs, env: o.env, keepText: !!o.dump,
         });
+        if (o.dump) {
+          mkdirSync(o.dump, { recursive: true });
+          const p2 = join(o.dump, `${slug}-${grade}-${mode}-${fnBlocks ?? 'x'}.log`);
+          writeFileSync(p2, r.fullText ?? '');
+          delete r.fullText;
+          console.log('  -> ' + p2);
+        }
         r.engine = engineName();
         r.loadavg = loadavg()[0];
         rows.push(r);

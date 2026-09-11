@@ -783,6 +783,21 @@ impl SocBus {
             .collect()
     }
 
+    /// Every registered peripheral, as `(base, len, peripheral index)`, in
+    /// address order — the same shape
+    /// [`peripheral_aliases`](Self::peripheral_aliases) reports, for the main
+    /// table rather than the alias table.
+    ///
+    /// Read-only, and it exists so a diagnostic can turn a bare guest address
+    /// back into `PERIPHERAL+0xoff` without a second copy of the memory map
+    /// (M7 P6c's MMIO census). Nothing on a hot path calls it.
+    pub fn peripheral_spans(&self) -> Vec<(u32, u32, usize)> {
+        self.mmio_by_base
+            .iter()
+            .map(|&i| (self.mmio[i].base, self.mmio[i].len, i))
+            .collect()
+    }
+
     /// Declare an address range as MMIO. Accesses inside a window that no
     /// peripheral claims are still unmapped, but the machine knows they
     /// were meant to be peripheral space — which is what makes "the ROM

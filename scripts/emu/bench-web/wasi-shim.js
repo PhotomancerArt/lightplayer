@@ -12,7 +12,20 @@
 const EBADF = 8, ENOENT = 44, ENOTSUP = 58;
 const enc = new TextEncoder(), dec = new TextDecoder();
 
-export function makeWasi(args, elfFilename, elfBytes) {
+/// `env` is a plain `{NAME: value}` object, default empty — M7 P6c.
+///
+/// `environ_get` answered "no environment" until the MMIO census needed
+/// `LP_EMU_JIT_MMIO_CENSUS` to reach the module. Every diagnostic the
+/// emulator gates on an environment variable (`LP_EMU_JIT_EXITS`,
+/// `LP_EMU_JIT_ENTRY_TIME`, this one) was unreachable in the browser and in
+/// `bun`/`node` for that one reason, and each of them is a question P6c has
+/// to ask of the wasm build rather than of a native run eight minutes long.
+///
+/// **The page never sets one.** An empty object encodes exactly the two zeros
+/// the old shim returned, so a row taken with no `--env` is byte-identical in
+/// behaviour to a row taken before this existed.
+export function makeWasi(args, elfFilename, elfBytes, env = {}) {
+  const environ = Object.entries(env).map(([k, v]) => `${k}=${v}`);
   let memory = null;
   const out = { 1: [], 2: [] };            // stdout, stderr chunks (Uint8Array)
   const names = {};                         // fd -> the path it was created at
@@ -38,8 +51,22 @@ export function makeWasi(args, elfFilename, elfBytes) {
       }
       return 0;
     },
-    environ_sizes_get(cPtr, sPtr) { const dv = mem(); dv.setUint32(cPtr, 0, true); dv.setUint32(sPtr, 0, true); return 0; },
-    environ_get() { return 0; },
+    environ_sizes_get(cPtr, sPtr) {
+      const dv = mem();
+      dv.setUint32(cPtr, environ.length, true);
+      dv.setUint32(sPtr, environ.reduce((n, e) => n + enc.encode(e).length + 1, 0), true);
+      return 0;
+    },
+    environ_get(environPtr, bufPtr) {
+      const dv = mem(), m = u8();
+      let p = bufPtr;
+      for (let i = 0; i < environ.length; i++) {
+        dv.setUint32(environPtr + 4 * i, p, true);
+        const b = enc.encode(environ[i]);
+        m.set(b, p); m[p + b.length] = 0; p += b.length + 1;
+      }
+      return 0;
+    },
     clock_time_get(id, _prec, ptr) {
       const ns = id === 0 ? BigInt(Math.round(Date.now() * 1e6)) : BigInt(Math.round(performance.now() * 1e6));
       mem().setBigUint64(ptr, ns, true);

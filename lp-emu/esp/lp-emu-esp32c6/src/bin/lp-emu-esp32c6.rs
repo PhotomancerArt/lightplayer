@@ -1255,6 +1255,14 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
             );
         }
     }
+    // M7 P6c (Q2): the MMIO census, when `LP_EMU_JIT_MMIO_CENSUS` asked for
+    // it. Independent of `--jit-report` for the same reason the block profile
+    // below is: an environment variable that was set is an instruction, and
+    // silently dropping its output because a second flag was missing is how a
+    // measurement gets taken twice.
+    if let Some(census) = machine.jit_mmio_census() {
+        eprint!("{census}");
+    }
     // Independent of `--jit-report`: the census answers "where did the rest
     // go", and a run may want it with no core installed at all.
     if let Some(lines) = machine.blockprof_report(20) {
