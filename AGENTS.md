@@ -584,6 +584,7 @@ With a dev server already up on this worktree's port:
 
 ```bash
 just walk-no-board                        # flash → connect → identify → upload → detach → re-attach
+just walk-no-board --tab                  # the same six steps with NO SERVER — the board is a Worker in the page
 just device-scenario run s1 --emu         # one golden-trace scenario, no board
 just device-scenario                      # both lanes' capture status
 just device-scenario check-guard          # the overwrite guard, proved by trying
@@ -593,6 +594,13 @@ just device-scenario check-guard          # the overwrite guard, proved by tryin
 board, drives Studio in **headless** Chrome, and writes six screenshots, the
 device-event records each step produced, and the board's own console. It is
 not a CI job and must not become one.
+
+**`--tab` runs the identical walk against the tab backing** (`?emu=tab`):
+the emulator's own wasm in a dedicated Worker inside the page, so no `emu
+serve` process is started and nothing is listening on a socket. Same six
+steps, same assertions, same shots — which is what makes the two reports
+comparable face for face. The board is `tab-c6` rather than `c6-a`, and there
+is no board console on disk, because the console is the page's.
 
 Three things to know before you read its output:
 
@@ -854,6 +862,10 @@ scripts/emu/oracle-sweep.sh <bin-a> <bin-b>     # the identity oracle: uart + cy
 just bench-emu-c6-pgo                           # PGO recipe on top of the probe (opt-in, never a default build)
 just bench-emu-web                              # the same probe in a browser, TRANSLATED core selectable (wasip1 + JS WASI shim, LAN-served)
 bun target/emu-bench-web/bench-cli.mjs --stage target/emu-bench-web   # the desk-engine half of that rig (node too)
+just emu-c6-wasm                                # the module a Studio TAB hosts: wasip1 + the emu_* exports, verified
+just studio-emu-sidecar                         # …laid down where a served Studio can fetch it
+node scripts/emu/tab-smoke.mjs                  # the tab host's hermetic smoke (CI runs this)
+just lpa-link-browser-test-tab                  # the conformance suite over boards hosted in the tab (Chrome, local)
 just bench-emu-xt                               # the Xtensa core's probe (same rules)
 cargo run -p lp-cli -- validate run emu-m3 --config lp-emu:esp32c6:t1 --dry-run
 ```

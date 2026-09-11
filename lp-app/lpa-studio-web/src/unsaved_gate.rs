@@ -130,6 +130,7 @@ mod tests {
     fn every_gallery_open_replaces_the_loaded_project() {
         assert!(action_replaces_loaded_project(&home(HomeOp::OpenPackage {
             key: "prjabc".to_string(),
+            prefer: None,
         })));
         assert!(action_replaces_loaded_project(&home(HomeOp::OpenExample {
             id: "basic".to_string(),

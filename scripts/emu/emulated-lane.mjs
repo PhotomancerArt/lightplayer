@@ -243,11 +243,35 @@ async function runStep(step, ctx) {
 /// Open Studio on the canonical dev server with BOTH flags. They compose:
 /// `index.html`'s reader and `device_events_io.rs`'s are two separate parsers
 /// over the same query string and neither reads the other's parameter.
-export function studioUrlFor({ studioPort, doorAddr, sinkUrl, route = "/devices" }) {
+///
+/// `doorAddr: null` is the TAB backing (`?emu=tab`): the emulator runs in a
+/// Worker in the page and there is no address to name. Everything else about
+/// the lane is unchanged, which is the point of the spelling.
+export function studioUrlFor({ studioPort, doorAddr = null, sinkUrl, route = "/devices" }) {
   const query = new URLSearchParams();
-  query.set("emu", `ws://${doorAddr}`);
+  query.set("emu", doorAddr ? `ws://${doorAddr}` : "tab");
   query.set("capture-sink", sinkUrl);
   return `http://localhost:${studioPort}${route}?${query.toString()}`;
+}
+
+/// The LIVE registry, whichever backing is holding the boards.
+///
+/// The door answers `GET /boards`; the tab answers `listBoards()` on its
+/// backing, which reads the worker's own `stats` row. `describeBoards()` on
+/// the page is neither — it is a page-load cache and goes stale after a
+/// flash (M5 finding), which is exactly what this exists to avoid.
+export async function liveRegistry({ doorAddr = null, driver = null }) {
+  if (doorAddr) return boardRegistry(doorAddr);
+  if (!driver) throw new Error("liveRegistry needs a door address or a driver");
+  const json = await driver.evaluate(
+    `window.__lpEmuSerial?.tabBacking
+       ? window.__lpEmuSerial.tabBacking.listBoards().then((b) => JSON.stringify(b))
+       : Promise.resolve("null")`,
+    { awaitPromise: true },
+  );
+  const boards = JSON.parse(json ?? "null");
+  if (!boards) throw new Error("the page is not holding a tab backing");
+  return boards;
 }
 
 export { StudioDriver };

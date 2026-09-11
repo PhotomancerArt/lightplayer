@@ -241,6 +241,48 @@ kind of thing is behind this link" is not evidence it needs. Everything a
 sim does differently is either a transport fact (the endpoint says it) or
 a record fact (the sidecar says it).
 
+## Amendment 2026-09-11 — the emu backing lands; D1 replaces D43's default clause and all of D44
+
+The emulator roadmap named in Follow-ups below has a first landing: the C6
+emulator runs inside a Studio tab (mode A), a device beside the sim exactly
+as this ADR's terms block anticipated. Two vision decisions this ADR built
+on are amended, not by this ADR's own text (which never restated them) but
+at their source, because code now enforces the replacement:
+
+- **AAD-D43's last clause** — "No `?on=` → emu when a module exists, else
+  sim" — is **dropped**. A bare address with no history now behaves exactly
+  as it did before any C6 module existed: an idle sim of the target, else a
+  fresh sim.
+- **AAD-D44 is replaced outright.** "Emu is the default where both exist,
+  with a quiet `⌥` modifier to get the other" is gone. Both rows appear in
+  the picker, plainly tagged, and the two rows themselves are the choice —
+  no modifier key, no default.
+
+The replacement is **D1**, rule 5 of
+[2026-09-10-the-c6-emulator-runs-in-the-tab.md](2026-09-10-the-c6-emulator-runs-in-the-tab.md):
+sim or emu is an explicit, sticky-per-project user choice, and no default
+changes when a module lands.
+
+Two smaller extensions, named where this ADR already anticipated the shape:
+
+- **`LinkTransport` gains a third arm, `Emu`** (D14), beside the `{ Sim,
+  Serial }` this ADR's decision 1 restates as "what the old kind fork was
+  actually about". An emu's wire is in-process like a sim's but **not
+  free** — the bytes cross a modelled USB-Serial-JTAG FIFO — so it takes the
+  serial cadence (150 ms), not the sim's (33 ms). Still purely a transport
+  fact; `lpa-devices` gains no arm.
+- **The band gains the speed word.** Decision 4's `▶ Sim · Desktop · in
+  this tab · GPU` format gains a fourth clause for an emu card:
+  `Emu · <board> · in this tab · <dilation>×` — the tier slot an emu grants
+  none of, filled instead by the number that actually varies for it
+  (`speed_word`, `runtime_band.rs`). `None` drops the clause; it is never
+  guessed at.
+
+Two verbs still fork **wording only** between an emu and a serial device at
+one surface (`session_control`'s `DeviceFace` selection), which this
+amendment does not settle — carried as an open question in the new ADR's
+Follow-ups.
+
 ## Follow-ups
 
 - The `?on=` grammar, the `/device/<uid>` resolver and the mismatch page

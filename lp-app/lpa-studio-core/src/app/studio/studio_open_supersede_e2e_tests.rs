@@ -50,6 +50,7 @@ fn open(key: &str) -> StudioCommand {
         ControllerId::new(HOME_NODE_ID),
         HomeOp::OpenPackage {
             key: key.to_string(),
+            prefer: None,
         },
     ))
 }

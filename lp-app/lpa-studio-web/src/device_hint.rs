@@ -11,7 +11,7 @@
 //!
 //! | hint | means |
 //! |---|---|
-//! | `?on=emu` | the emu for the project's target — the real firmware binary in `lp-emu` |
+//! | `?on=emu` | the emu for the project's target — the board's real firmware on an emulated SoC in this tab |
 //! | `?on=sim` | the sim for the project's target — `fw-browser` wearing its manifest |
 //! | `?on=mac:60:55:f9:0a:0b:0c` | a board by identity: silicon on the desk, or an emu by its synthetic MAC |
 //! | `?on=ws:192.168.0.21:1234` | a device over WebSocket: a real desktop server, or a native emu backing |
@@ -39,10 +39,13 @@
     )
 )]
 pub(crate) enum DeviceHint {
-    /// `?on=emu` — the emu of the project's target. No emulator module
-    /// ships in this build (D48), so the arrival says so and falls back to
-    /// a sim; the hint parses today so the addresses people write down
-    /// keep working when one lands.
+    /// `?on=emu` — the emu of the project's target: the board's own
+    /// firmware image on an emulated SoC in this tab (D1).
+    ///
+    /// Honoured for a target this build emulates and a served build exists
+    /// for; on any other target the arrival says so, naming the board, and
+    /// falls back to a sim (D23). The lens writes it back, which is what
+    /// makes the choice stick to the project across reloads.
     Emu,
     /// `?on=sim` — the sim of the project's target.
     Sim,

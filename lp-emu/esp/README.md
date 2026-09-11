@@ -306,6 +306,136 @@ the cable in with the port **closed**, which is what makes the coupling rule
 visible on `state` — at the cost of the boot log, because the firmware does
 not write while nothing is draining, exactly as a board does not.
 
+### The tab host: the `emu_*` slice ABI
+
+The three doors above are all sockets. A Web Worker has none — and a Studio
+tab is where the fourth door leads: the machine compiled to
+**`wasm32-wasip1`**, instantiated by a page, and driven one guest slice at a
+time from JavaScript.
+
+**One artifact.** It is the same CLI binary the bench rig builds, and
+`_start` is untouched — `lp-emu esp32c6 run …` still works under a WASI
+runtime. Beside it, added to the export list **at link time**, are twenty-three
+`emu_*` functions. The JS host never calls `_start`; it calls the exports.
+
+```sh
+just emu-c6-wasm          # scripts/emu/build-tab-wasm.sh: build, then verify
+just studio-emu-sidecar   # lay it down where a served Studio can fetch it
+```
+
+The build script holds the export list, and after the build it **parses the
+module's export section and fails if any name is missing**. That is the gate:
+a rename in `lp-emu-esp32c6/src/tab_abi/` and a stale list in the script is a
+drift no native test can see. `--undefined` is passed alongside `--export`
+for each name because the exports live in the library crate, which reaches
+the binary as an archive, and a linker pulls archive members in only when
+something roots them.
+
+#### The exports
+
+Every one takes and returns `i32`/`i64` only; buffers are a pointer and a
+length into the module's own memory, from `emu_alloc`. A non-negative return
+is a count, a length, a flag or an outcome code; a negative one is an error
+code, and `emu_last_error` carries the sentence.
+
+| export | what it does |
+|---|---|
+| `emu_abi_version` → `i32` | `1` today. The JS side asserts it and refuses a mismatch out loud |
+| `emu_reply_max` → `i32` | the largest control reply, so the host sizes one scratch buffer |
+| `emu_last_error(out, cap)` | the sentence behind the last negative return |
+| `emu_alloc(len)` / `emu_free(ptr, len)` | buffers JS writes into before a call |
+| `emu_create(cfg, cfg_len, flash, flash_len)` | build the machine from the text config below and the chip's starting bytes (`FlashBacking::Bytes`; an empty slice is a blank chip). Refuses a second — one board per module |
+| `emu_create_direct(…, app, app_len)` | the same with an application ELF for `boot=direct` |
+| `emu_run(budget_cycles)` → outcome | run at most that much **guest** time |
+| `emu_cycles` / `emu_micros` / `emu_reboots` | the counters the host paces and reports on |
+| `emu_control(line, len, out, cap)` | one line of the control protocol above, verbatim; the reply's text into `out` |
+| `emu_usb_write(ptr, len)` | host → guest bytes, delivered at the next slice boundary the USB block polls at |
+| `emu_usb_read(out, cap)` / `emu_uart0_read(out, cap)` | guest → host bytes; what does not fit is kept for the next call |
+| `emu_flash_len` / `emu_flash_read(off, out, len)` | copy the chip out, whole or in chunks |
+| `emu_flash_write(off, ptr, len)` | a **flasher's** write: erase every sector the range touches, then place the bytes |
+| `emu_flash_erase_chip()` | the `Erase` verb |
+| `emu_flash_dirty()` / `emu_flash_mark_saved()` | the persistence cadence's question, and the host saying it has answered it |
+| `emu_flash_has_image()` | the `flash` word's `blank` / `loaded`, asked of the chip |
+| `emu_destroy()` | drop the machine |
+
+**Outcome codes**, `emu_run`'s return: `0` deadline (the ordinary answer —
+the slice ran out), `1` exit-matched, `2` fault, `3` strict-bus, `4` reset
+that was not rebooted, `5` breakpoint, `6` wall timeout (unreachable here,
+and numbered so a seventh outcome cannot take a taken number). A machine that
+returned a stopping code stays stopped and answers the same code again.
+
+**Error codes**: `-1` no machine, `-2` already created, `-3` bad config,
+`-4` build failed, `-5` buffer too small, `-6` bad buffer, `-7` out of range,
+`-8` unsupported.
+
+**The config** is one `key=value` per line, `#` comments allowed. An unknown
+key is refused by name rather than shrugged at, because a host that misspells
+one would otherwise get a default board and no idea why.
+
+| key | values | default |
+|---|---|---|
+| `mac` | `aa:bb:cc:dd:ee:ff` | the builder's own |
+| `boot` | `rom-up`, `direct` | `rom-up` |
+| `grade` | `t1`, `t2`, `t3` | `t1` |
+| `flash_len` | bytes | 4 MiB |
+| `strict` | `0`, `1` | `0` — a board is not a bring-up run |
+| `reboot_on_reset` | `0`, `1` | `1` — a reset dance reboots the chip rather than ending the world |
+| `usb_host` | `absent`, `attached`, `attached-idle` | `absent`. The CLI's own three words: `attached` is the cable in with the port **open** from power-on, `attached-idle` is the cable in with it closed. A reset returns the block to this state, so a board that wants its boot log on the wire after every reset asks for `attached` |
+| `strap` | `app`, `download` | `app` |
+| `reset_cause` | `poweron`, `usb-uart-hpsys` | `poweron` |
+
+#### Time, and the one thing that is not in it
+
+**Wall clock never enters the machine here either.** `emu_run` takes a budget
+in guest cycles and the slice carries no wall timeout: the host is the only
+party that knows what wall time is, and it converts on its own side of the
+wall. A tab that was hidden and throttled therefore falls *behind* — which is
+honest, and reportable as a number — rather than resuming with a sprint.
+
+The module declares eighteen `wasi_snapshot_preview1` imports and, on this
+path, **calls exactly one**: `clock_time_get`, which is `run_until`'s
+unconditional `Instant::now()`. It cannot influence a slice that carries no
+wall timeout. The rest are there because the binary also has a `_start` that
+reads files and arguments, and the host stubs them.
+
+#### Why no `_initialize`
+
+The exports are callable with `_start` never called, on the plain command
+binary: no `-Z wasi-exec-model=reactor`, no reactor `_initialize`. That is
+measured, not assumed — instantiate the module with a stub WASI shim, call
+`emu_abi_version`, `emu_create` with a blank chip on the download strap, and
+`emu_run`, and `emu_uart0_read` hands back the mask ROM's own
+`ESP-ROM:esp32c6-20220919` banner and its `waiting for download` line. The
+machine's static slot needs no runtime initialisation because there is none
+to run: it is one `UnsafeCell` in a `static`, valid precisely because the
+wasip1 build is single-threaded and every export runs to completion before
+JavaScript regains control.
+
+A blank chip on the **app** strap says something different and equally real:
+the banner, then `invalid header: 0xffffffff` forever, exactly as the part
+does (see `kind=rom-up` above). The download strap is how a smoke reaches the
+console without a firmware image.
+
+#### Where the module goes
+
+`just studio-emu-sidecar` copies it to the Studio assets tree, and
+`scripts/sync-engine-sidecar.sh` content-hashes it into a served `pkg/` as
+`lp_emu_esp32c6-<hash>.wasm`, naming it in `pkg/engine-manifest.json` under
+`emu_esp32c6_wasm`. Its **absence is not an error**: no key, and a Studio
+build that never ran `just emu-c6-wasm` serves normally without an emulator.
+
+The consumer is `lp-app/lpa-studio-web/public/lpa-link/emulator_worker.js`,
+which is AGPL and on the other side of the MIT fence — it reaches this module
+by URL, and nothing here knows it exists.
+
+**The M7 translator hook is a named, unfilled seam.** `emulator_worker.js`
+already carries a comment marking where `scripts/emu/bench-web/jit-host.js`
+imports and where its `emu_host` imports would be supplied, behind a flag,
+once it is safe to touch that file — `jit-host.js` exists on `main`, but
+`emulator_worker.js` is under concurrent edit by other efforts as of this
+writing, so the hook itself is deferred to a follow-on phase rather than
+landed here. Nothing on this crate's side of the fence changes for it.
+
 ### The scripted form
 
 `--usb-script <file>` is `--uart0-script`'s grammar with the control words

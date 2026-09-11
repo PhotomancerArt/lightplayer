@@ -57,6 +57,12 @@ So, operatively:
   underlying issue, so that every later walk inherits the more accurate
   behaviour. That is the whole point of the emulator.
 
+**Amendment 2026-09-11:** the walk now has a **server-less form**,
+`just walk-no-board --tab` — the identical six steps against the C6 emulator
+hosted in a Studio tab's own Worker, with no `lp-cli emu serve` process
+anywhere. See
+[2026-09-10-the-c6-emulator-runs-in-the-tab.md](2026-09-10-the-c6-emulator-runs-in-the-tab.md).
+
 ### 2. Emulated measurements are valid, but must never claim to be hardware-validated
 
 Yona, verbatim (G2 Q2):

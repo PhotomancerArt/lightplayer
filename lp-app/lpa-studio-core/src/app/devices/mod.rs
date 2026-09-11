@@ -8,7 +8,7 @@
 //!
 //! | `Command` | executed by |
 //! |---|---|
-//! | `Link { command }` | [`DeviceEffects`] → the routed [`Link`](lpa_devices::Link) (browser Web Serial on wasm, the fake on the host) |
+//! | `Link { command }` | [`DeviceEffects`] → the routed [`Link`](lpa_devices::Link) (browser Web Serial or the tab emulator on wasm, the fake on the host) |
 //! | `StartTimer` | [`DeviceEffects`] → one spawned future per timer on the app's timer factory |
 //! | `PersistRecord` / `DeleteRecord` | [`DeviceRoster`] → the kept `places::device_registry`, through the library host's locked catalog |
 //! | `RequestUsbGrant` | [`DeviceTransport::request_grant`] → the platform chooser |
@@ -35,6 +35,10 @@
 //! the miniature of this module; the discipline (drain the wire, then the due
 //! timers, generation-stamped) is the same.
 
+/// Emus backed by the tab's emulator Worker. wasm-only, and only when the
+/// studio is built with the module that owns them.
+#[cfg(all(feature = "emulator-tab", target_arch = "wasm32"))]
+pub mod browser_emu_source;
 /// Sims backed by `fw-browser` workers. wasm-only, and only when the studio
 /// is built with the provider that owns them.
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
@@ -59,6 +63,7 @@ pub mod device_records;
 pub mod device_roster;
 pub mod device_transport;
 pub mod devices_op;
+pub mod emu_transport;
 pub mod runtime_backing;
 pub mod runtime_band;
 pub mod shared_link_client_io;
@@ -67,6 +72,8 @@ pub mod sim_record;
 pub mod sim_transport;
 pub mod target_offer;
 
+#[cfg(all(feature = "emulator-tab", target_arch = "wasm32"))]
+pub use browser_emu_source::BrowserEmuLinkSource;
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use browser_sim_source::BrowserSimLinkSource;
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
@@ -102,8 +109,8 @@ pub use device_push::{
     first_bundled_example_id, push_offer,
 };
 pub use device_records::{
-    SIM_TRANSPORT, auto_record_name, record_from_registry_row, registry_row_from_record,
-    transport_label_for_endpoint,
+    EMU_TRANSPORT, SIM_TRANSPORT, auto_record_name, record_from_registry_row,
+    registry_row_from_record, transport_label_for_endpoint,
 };
 pub use device_roster::{
     DeviceRoster, DeviceRosterView, JournalLine, RememberedView, RosterSplit, split_roster,
@@ -113,13 +120,17 @@ pub use device_transport::{
     DeviceTransportFuture, GrantedLink, LensLineTap, LensTapEvent,
 };
 pub use devices_op::{DeviceFace, DevicesOp};
-pub use runtime_backing::{Backing, EMULATED_TARGETS, backing_for};
-pub use runtime_band::UiRuntimeBand;
+pub use emu_transport::{
+    EmuBacking, EmuDeviceTransport, EmuLinkSource, EmuRuntimeControl, EmuSession,
+};
+pub use runtime_backing::{Backing, EMULATED_TARGETS, backing_for, emu_offered_for};
+pub use runtime_band::{UiRuntimeBand, speed_word};
 pub use shared_link_client_io::{ConversationInbox, SharedLinkClientIo};
 pub use sim_create_op::{SimCreateOp, sim_device_name};
 pub use sim_record::{
-    NewSimRecord, SimRecord, delete_sim_record, mint_sim_identity, new_sim_record, read_sim_record,
-    sim_endpoint, sim_link_info, uid_from_sim_endpoint, write_sim_record,
+    NewSimRecord, RuntimeKind, SimRecord, delete_sim_record, emu_endpoint, emu_link_info,
+    mint_sim_identity, new_sim_record, read_sim_record, sim_endpoint, sim_link_info,
+    uid_from_emu_endpoint, uid_from_sim_endpoint, write_sim_record,
 };
 pub use sim_transport::{
     SimBacking, SimDeviceTransport, SimLinkSource, SimRuntimeControl, SimSession, SimTier,
