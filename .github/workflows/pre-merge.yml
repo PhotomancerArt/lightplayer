@@ -424,6 +424,12 @@ jobs:
       - name: Install RISC-V target
         run: rustup target add ${{ env.RISC_V_TARGET }}
 
+      # The emulator's OTHER target: the module a Studio tab hosts is the
+      # same CLI binary built for wasm32-wasip1 with the `emu_*` slice ABI in
+      # its export list (C6-in-tab P1, D12/D17).
+      - name: Install wasip1 target (the tab module)
+        run: rustup target add wasm32-wasip1
+
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
 
@@ -1292,6 +1298,27 @@ jobs:
       # self-comparison would pass and prove nothing.
       - name: Translated vs interpreted, one pinned image (differential oracle)
         run: cd lp2025 && just test-emu-jit-image harness t2 20ms
+
+      # The tab module: a release build of the machine for wasm32-wasip1,
+      # whose script FAILS if any `emu_*` export is missing from the linked
+      # module. That is the gate — the export list in
+      # scripts/emu/build-tab-wasm.sh and the ABI in
+      # lp-emu-esp32c6/src/tab_abi/ drifting apart is the failure it exists
+      # to catch, and it is invisible to every native test.
+      #
+      # Cost: a cold wasip1 release build of the emulator's dependency tree
+      # is 29 s on an M2 Max (measured 2026-09-10, from no wasip1 artifacts
+      # at all); on this runner expect a few minutes cold and much less once
+      # sccache has the tree, since it is content-addressed and target-triple
+      # aware. The 35-minute budget above is headroom rather than a ceiling
+      # (see its own comment), which is why this rides here rather than
+      # becoming a fourth job for one `cargo build`.
+      #
+      # `node scripts/emu/tab-smoke.mjs` — the hermetic ROM-boot smoke that
+      # instantiates this module under the Worker's own WASI shim (D18) —
+      # joins this step in P2, once that shim exists.
+      - name: Tab module (wasm32-wasip1) + export gate
+        run: cd lp2025 && just emu-c6-wasm
 
       - name: sccache stats
         if: always()
