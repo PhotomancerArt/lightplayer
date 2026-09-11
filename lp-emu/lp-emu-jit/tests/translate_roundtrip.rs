@@ -1522,6 +1522,187 @@ fn an_inline_ram_store_with_nothing_pending_calls_no_host_at_all() {
     assert_eq!(out.instret, 4);
 }
 
+// --- carrying the obligation across a boundary (M7b F1) ---------------------
+
+/// **The obligation survives a cross-function edge.**
+///
+/// `FLAG_PENDING` is how one sub-dispatcher hands the next the yield an MMIO
+/// load left: the epilogue `or`s it into the exit flags and the prologue reads
+/// it back with `& FLAG_PENDING`. The load here leaves one, the `jal` crosses
+/// into another function, and the **inline RAM store** over there is the
+/// polling point that owes it — so it must make its own crossing and end the
+/// slice exactly where an interpreted run would.
+///
+/// One block to a function is the shape that forces the edge; it is the same
+/// knob `a_ring_emitted_whole_and_one_block_to_a_function_differs_only_in_crosses`
+/// turns.
+#[test]
+fn a_cross_function_edge_carries_the_obligation_a_pending_load_left() {
+    // block 0:
+    //   lui  a1, 0x60000    (MMIO)
+    //   lw   a3, 0(a1)      -> MMIO_PENDING: the bus is holding a yield
+    //   lui  a2, 0x40000    (plain RAM)
+    //   jal  x0, +4         -> block 1, which is another function
+    // block 1:
+    //   addi a4, x0, 0x77
+    //   sw   a4, 0x100(a2)  -> inline, and the polling point the load owes
+    //   addi a5, x0, 1      -> must not retire
+    //   jal  x0, +4
+    let program = vec![
+        (GUEST_BASE, 0x6000_05b7),
+        (GUEST_BASE + 4, 0x0005_a683),
+        (GUEST_BASE + 8, 0x4000_0637),
+        (GUEST_BASE + 12, 0x0040_006f),
+        (GUEST_BASE + 16, 0x0770_0713),
+        (GUEST_BASE + 20, 0x10e6_2023),
+        (GUEST_BASE + 24, 0x0010_0793),
+        (GUEST_BASE + 28, 0x0040_006f),
+    ];
+    let mut rig = Rig::new(&program);
+    rig.load_leaves_yield = true;
+    rig.poll_answer = Some(Polled {
+        status: MMIO_SLICE_ENDED,
+        pc: GUEST_BASE + 24,
+    });
+    let set = set_of(&rig, GUEST_BASE);
+    assert_eq!(set.blocks.len(), 2, "the `jal` ends the first block");
+    let out = rig.run_split(
+        "pending-across-a-cross",
+        &set,
+        Emit::EVERYTHING,
+        [0; 32],
+        u64::MAX,
+        1,
+    );
+
+    let model = CycleModel::Esp32C6;
+    let lui = u64::from(model.cycles_for(lp_emu_core::InstClass::Lui));
+    let alu = u64::from(model.cycles_for(lp_emu_core::InstClass::Alu));
+    let load = u64::from(model.cycles_for(lp_emu_core::InstClass::Load));
+    let store = u64::from(model.cycles_for(lp_emu_core::InstClass::Store));
+    let jal = u64::from(model.cycles_for(lp_emu_core::InstClass::JalTail));
+
+    assert_eq!(out.cross, 1, "the `jal` went through the selector");
+    assert!(out.stores.is_empty(), "the RAM store never reached the bus");
+    assert_eq!(
+        out.polls,
+        vec![(GUEST_BASE + 24, 2 * lui + load + jal + alu + store, 6)],
+        "the obligation crossed with the stay and was taken at the RAM store"
+    );
+    assert_eq!(out.pc, GUEST_BASE + 24);
+    assert_eq!(out.flags, host::FLAG_SLICE_ENDED);
+    assert_eq!(
+        out.instret, 6,
+        "the RAM store retired; the `addi` after it did not"
+    );
+}
+
+/// **And an exit carries it in the field the protocol names for it.**
+///
+/// A stay that ends while the yield is still unclaimed has to say so, and
+/// `FLAG_PENDING` is the bit that says it — not `FLAG_AFTER_STORE`, which
+/// means a store the stay could not poll for itself and which a stay has not
+/// set since M7b P2. The host reads the two together (`jit.rs`'s `POLL_OWED`),
+/// so the hart takes the poll either way; the bit is what a cross-function
+/// edge then reads back, and a wrong one is lost on the way through.
+#[test]
+fn an_exit_while_a_load_is_pending_reports_it_as_pending() {
+    // lui a1, 0x60000
+    // lw  a3, 0(a1)     -> MMIO_PENDING
+    // jal x0, +4        -> off the end of the block set: the stay leaves
+    let program = vec![
+        (GUEST_BASE, 0x6000_05b7),
+        (GUEST_BASE + 4, 0x0005_a683),
+        (GUEST_BASE + 8, 0x0040_006f),
+    ];
+    let mut rig = Rig::new(&program);
+    rig.load_leaves_yield = true;
+    let set = set_of(&rig, GUEST_BASE);
+    let out = rig.run_named(
+        "pending-at-an-exit",
+        &set,
+        Emit::EVERYTHING,
+        [0; 32],
+        u64::MAX,
+    );
+
+    assert_eq!(out.loads.len(), 1);
+    assert!(out.polls.is_empty(), "a load is not a polling point");
+    assert_eq!(out.flags, host::FLAG_PENDING);
+    assert_eq!(out.pc, GUEST_BASE + 12);
+    assert_eq!(out.instret, 3);
+}
+
+/// **And an escape in between does not lose it.** `step_one` runs an
+/// arbitrary guest instruction on the hart, and the stay comes back and
+/// carries on — with the obligation an earlier load left still in hand, since
+/// nothing it ran was a store that could have taken it.
+///
+/// `Emit`'s `alu` bit off and `memory` bit on is the one policy that puts an
+/// escape between a pending load and an **inline** store; no flag asks for it
+/// (`--jit-escape-all` is `Emit::NOTHING`, where the store escapes too), which
+/// is why this is a test rather than a path the ladder measures.
+#[test]
+fn an_escape_between_a_pending_load_and_a_ram_store_keeps_the_poll() {
+    // lui  a1, 0x60000     escaped (alu)
+    // lw   a3, 0(a1)       emitted  -> MMIO_PENDING
+    // lui  a2, 0x40000     escaped (alu)
+    // addi a4, x0, 0x77    escaped (alu)
+    // sw   a4, 0x100(a2)   emitted, inline, and the polling point
+    // addi a5, x0, 1       must not retire
+    // jal  x0, +4
+    let program = vec![
+        (GUEST_BASE, 0x6000_05b7),
+        (GUEST_BASE + 4, 0x0005_a683),
+        (GUEST_BASE + 8, 0x4000_0637),
+        (GUEST_BASE + 12, 0x0770_0713),
+        (GUEST_BASE + 16, 0x10e6_2023),
+        (GUEST_BASE + 20, 0x0010_0793),
+        (GUEST_BASE + 24, 0x0040_006f),
+    ];
+    let mut rig = Rig::new(&program);
+    rig.load_leaves_yield = true;
+    rig.poll_answer = Some(Polled {
+        status: MMIO_SLICE_ENDED,
+        pc: GUEST_BASE + 20,
+    });
+    let set = set_of(&rig, GUEST_BASE);
+    let memory_only = Emit {
+        alu: false,
+        memory: true,
+        control: true,
+        selector: Selector::DEFAULT,
+    };
+    let out = rig.run_named(
+        "pending-across-an-escape",
+        &set,
+        memory_only,
+        [0; 32],
+        u64::MAX,
+    );
+
+    let model = CycleModel::Esp32C6;
+    let lui = u64::from(model.cycles_for(lp_emu_core::InstClass::Lui));
+    let alu = u64::from(model.cycles_for(lp_emu_core::InstClass::Alu));
+    let load = u64::from(model.cycles_for(lp_emu_core::InstClass::Load));
+    let store = u64::from(model.cycles_for(lp_emu_core::InstClass::Store));
+
+    assert_eq!(
+        out.escapes,
+        vec![GUEST_BASE, GUEST_BASE + 8, GUEST_BASE + 12],
+        "the two `lui`s and the `addi` went out; the memory instructions did not"
+    );
+    assert!(out.stores.is_empty(), "the RAM store never reached the bus");
+    assert_eq!(
+        out.polls,
+        vec![(GUEST_BASE + 20, 2 * lui + alu + load + store, 5)],
+        "the obligation survived the escapes and was taken at the RAM store"
+    );
+    assert_eq!(out.pc, GUEST_BASE + 20);
+    assert_eq!(out.flags, host::FLAG_SLICE_ENDED);
+    assert_eq!(out.instret, 5);
+}
+
 // --- the published MMIO word reads (M7b P3) --------------------------------
 
 /// `0x6000_0000` is published from slot 0, `0x6000_0004` reads a constant, and
