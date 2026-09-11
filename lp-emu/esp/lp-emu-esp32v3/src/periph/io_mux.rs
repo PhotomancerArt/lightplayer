@@ -298,7 +298,11 @@ mod tests {
         // `fun_ie` is bit 9, so it lives in the byte at `+1`.
         m.write(GPIO1 + 1, Width::Byte, FUN_IE >> 8, &mut sb.cx());
         assert!(sb.pins.pad_input_enable(PadId(1)));
-        assert_eq!(m.pad_config(1), Some(FUN_IE), "the lane replaced bits 8..15");
+        assert_eq!(
+            m.pad_config(1),
+            Some(FUN_IE),
+            "the lane replaced bits 8..15"
+        );
     }
 
     #[test]

@@ -234,7 +234,8 @@ fn the_snapshot_carries_the_state_that_is_not_a_register() {
 
     let mmu = m.flash_mmu_entries();
     assert!(
-        mmu.iter().any(|e| *e != lp_emu_esp32v3::cache::MMU_UNMAPPED),
+        mmu.iter()
+            .any(|e| *e != lp_emu_esp32v3::cache::MMU_UNMAPPED),
         "the bootloader mapped something"
     );
     let cache_on = m.cache().lock().expect("cache").enabled(0);

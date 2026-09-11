@@ -469,7 +469,10 @@ fn direct_seed_ps() {
     // reached the application's entry for the first time and `PS` read
     // `0x0006_0720` there, one field different from what the direct load
     // seeded (`machine::BOOTLOADER_OWB`).
-    assert_eq!(machine.harts[0].ps() & !lp_xt_emu::mach::sr::PS_OWB_MASK, PS_BOOT);
+    assert_eq!(
+        machine.harts[0].ps() & !lp_xt_emu::mach::sr::PS_OWB_MASK,
+        PS_BOOT
+    );
     assert_eq!(machine.harts[0].ps(), 0x0006_0720);
     assert_eq!(machine.harts[0].pc(), memmap::SRAM0_IRAM);
 }
@@ -956,7 +959,10 @@ fn the_direct_load_enters_the_app_where_the_bootloader_would() {
         machine.peek_word(frame.sp - 12),
         Some(lp_emu_esp32v3::loader::BOOTLOADER_SAVE_AREA[1])
     );
-    assert_eq!(frame.save_area, lp_emu_esp32v3::loader::BOOTLOADER_SAVE_AREA);
+    assert_eq!(
+        frame.save_area,
+        lp_emu_esp32v3::loader::BOOTLOADER_SAVE_AREA
+    );
 }
 
 /// P2's recorded first strict stop of the direct load, held on a **bare**
@@ -1212,9 +1218,11 @@ fn past_the_filesystem_the_boot_meets_the_one_opcode_this_hart_lacks() {
 #[test]
 #[ignore = "needs the shipped image; run through `just test-emu-esp32v3-boot`"]
 fn the_flash_status_spin_ends_and_a_blank_chip_has_no_partition_table() {
-    let Some((mut machine, outcome, trace)) =
-        direct_traced_until(300_000, lp_emu_esp32v3::flash::FlashBacking::Blank, Some(BLANK_LAST_LINE))
-    else {
+    let Some((mut machine, outcome, trace)) = direct_traced_until(
+        300_000,
+        lp_emu_esp32v3::flash::FlashBacking::Blank,
+        Some(BLANK_LAST_LINE),
+    ) else {
         return;
     };
     assert!(
@@ -1329,9 +1337,11 @@ const INIT_CHAIN_MERGED_LEN: usize = 575;
 fn the_init_chain_is_the_golden_bytes() {
     use sha2::{Digest, Sha256};
 
-    let Some((_, outcome, trace)) =
-        direct_traced_until(300_000, lp_emu_esp32v3::flash::FlashBacking::Blank, Some(BLANK_LAST_LINE))
-    else {
+    let Some((_, outcome, trace)) = direct_traced_until(
+        300_000,
+        lp_emu_esp32v3::flash::FlashBacking::Blank,
+        Some(BLANK_LAST_LINE),
+    ) else {
         return;
     };
     assert!(stopped_on_the_line(&outcome), "{outcome:?}");

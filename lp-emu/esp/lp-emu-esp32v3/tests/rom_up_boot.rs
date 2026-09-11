@@ -850,7 +850,6 @@ fn rom_up_and_direct_load_agree_on_what_the_app_sees() {
     );
 }
 
-
 /// The parts of `vaddr..vaddr+len` the **merged image** actually places, in
 /// address order, with everything else counted into `skipped`.
 ///

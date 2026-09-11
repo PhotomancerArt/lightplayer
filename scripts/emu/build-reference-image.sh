@@ -27,6 +27,10 @@
 #
 #     2,985,952 bytes   sha256 e4c41e7ec623e6c1e6386d9f82e4639225222e41c6abe910a402d595a14caaf5
 #
+# and again at `32f128f53` (P8's own merge of main), 2,985,952 bytes, sha256
+# `b702fab54986de09f7cf02d2b5e75ee95a64cd77844b943c60cc71927e7f27a6` — two
+# commits, two pairs of builds, each pair agreeing with itself.
+#
 # and `--verify` reproduces it: two builds, two cold worktrees at two
 # different path lengths, one sha256. **The band is "one host, one sha";**
 # whether this Mac and a GitHub runner agree is a further claim, unmeasured

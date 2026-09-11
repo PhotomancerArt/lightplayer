@@ -1407,8 +1407,9 @@ impl Machine {
         // `PS_BOOT | OWB` — the window field the bootloader leaves, measured
         // by the cross-check rather than assumed (`BOOTLOADER_OWB`).
         self.harts[0].set_ps_raw(
-            PS_BOOT | ((u32::from(frame.owb) << lp_xt_emu::mach::sr::PS_OWB_SHIFT)
-                & lp_xt_emu::mach::sr::PS_OWB_MASK),
+            PS_BOOT
+                | ((u32::from(frame.owb) << lp_xt_emu::mach::sr::PS_OWB_SHIFT)
+                    & lp_xt_emu::mach::sr::PS_OWB_MASK),
         );
         self.harts[0].cpu_mut().set_a(1, frame.sp);
         for (i, word) in frame.save_area.iter().enumerate() {
@@ -1824,9 +1825,9 @@ impl Machine {
         for (address, expect, symbol) in std::mem::take(&mut self.pending_breaks) {
             match crate::rom::read_three(&mut self.bus, address) {
                 Ok(bytes) if bytes == expect => {
-                    if let Err(e) =
-                        self.hooks
-                            .install_at(&mut self.bus, address, symbol, |_| HookResult::Stop)
+                    if let Err(e) = self
+                        .hooks
+                        .install_at(&mut self.bus, address, symbol, |_| HookResult::Stop)
                     {
                         log::warn!("machine: arming `{symbol}` at {address:#010x}: {e}");
                     } else {

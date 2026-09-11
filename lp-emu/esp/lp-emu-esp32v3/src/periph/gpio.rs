@@ -748,13 +748,21 @@ impl Peripheral for Gpio {
                 self.sync(cx);
             }
             OUT_W1TS | OUT1_W1TS => {
-                let (store, base) = if word == OUT_W1TS { (OUT, 0) } else { (OUT1, BANK) };
+                let (store, base) = if word == OUT_W1TS {
+                    (OUT, 0)
+                } else {
+                    (OUT1, BANK)
+                };
                 let new = self.regs.stored(store) | bits;
                 self.set_out_bank(store, base, new, cx);
                 self.sync(cx);
             }
             OUT_W1TC | OUT1_W1TC => {
-                let (store, base) = if word == OUT_W1TC { (OUT, 0) } else { (OUT1, BANK) };
+                let (store, base) = if word == OUT_W1TC {
+                    (OUT, 0)
+                } else {
+                    (OUT1, BANK)
+                };
                 let new = self.regs.stored(store) & !bits;
                 self.set_out_bank(store, base, new, cx);
                 self.sync(cx);
@@ -900,7 +908,10 @@ mod tests {
             super::super::accept::GPIO_STRAP_SPI_FAST_FLASH_BOOT
         );
         assert_eq!(g.reg_name(out_sel(39)), Some("func39_out_sel_cfg"));
-        assert_eq!(g.reg_name(FUNC_IN_SEL_CFG + 4 * 255), Some("func255_in_sel_cfg"));
+        assert_eq!(
+            g.reg_name(FUNC_IN_SEL_CFG + 4 * 255),
+            Some("func255_in_sel_cfg")
+        );
         // The word the ROM's `SelectSpiFunction` reaches has no name and is
         // still accepted and remembered (`super::accept`'s note).
         sb.write(&mut g, 0xf24, 0x8000_0000);
@@ -949,7 +960,10 @@ mod tests {
             ),
             "128 is a peripheral signal here, not `follow GPIO_OUT`"
         );
-        assert!(!sb.pins.pad_level(PadId(GPIO18 as u8)), "nothing drives 128");
+        assert!(
+            !sb.pins.pad_level(PadId(GPIO18 as u8)),
+            "nothing drives 128"
+        );
 
         sb.write(&mut g, out_sel(GPIO18), u32::from(OUT_SEL_GPIO));
         assert!(matches!(
@@ -1030,7 +1044,11 @@ mod tests {
         let mut g = Gpio::default();
         sb.pins.set_pad_input_enable(PadId(GPIO18 as u8), true);
         // Rising edge, PRO maskable.
-        sb.write(&mut g, PIN + 4 * GPIO18, (1 << INT_TYPE_SHIFT) | INT_ENA_PRO);
+        sb.write(
+            &mut g,
+            PIN + 4 * GPIO18,
+            (1 << INT_TYPE_SHIFT) | INT_ENA_PRO,
+        );
         sb.pins.drive_pad(PadId(GPIO18 as u8), true, 0);
         let edges = sb.pins.take_edges();
         g.observe_edges(&edges, &mut sb.cx());
@@ -1045,7 +1063,11 @@ mod tests {
         assert_eq!(sb.read(&mut g, PCPU_INT), 0);
 
         // The APP core's bit gates the other word.
-        sb.write(&mut g, PIN + 4 * GPIO18, (1 << INT_TYPE_SHIFT) | INT_ENA_APP);
+        sb.write(
+            &mut g,
+            PIN + 4 * GPIO18,
+            (1 << INT_TYPE_SHIFT) | INT_ENA_APP,
+        );
         sb.write(&mut g, STATUS_W1TS, 1 << GPIO18);
         assert_eq!(sb.read(&mut g, ACPU_INT), 1 << GPIO18);
         assert_eq!(sb.read(&mut g, PCPU_INT), 0);
@@ -1079,7 +1101,11 @@ mod tests {
         let mut g = Gpio::default();
         sb.pins.set_pad_input_enable(PadId(GPIO33 as u8), true);
         sb.pins.drive_pad(PadId(GPIO33 as u8), true, 0);
-        sb.write(&mut g, PIN + 4 * GPIO33, (3 << INT_TYPE_SHIFT) | INT_ENA_PRO);
+        sb.write(
+            &mut g,
+            PIN + 4 * GPIO33,
+            (3 << INT_TYPE_SHIFT) | INT_ENA_PRO,
+        );
         sb.write(&mut g, out_sel(GPIO33), u32::from(OUT_SEL_GPIO));
         let _ = sb.read(&mut g, IN1);
 

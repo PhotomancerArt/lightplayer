@@ -418,7 +418,10 @@ fn the_two_paths_report_the_same_memory_figures() {
     // The one figure the boot banner carries too, so the triple can be read
     // against `[INIT] chip=esp32 … heap=…`.
     assert!(
-        direct.uart0().text().contains("heap=15072+112640+98304+15536=241552"),
+        direct
+            .uart0()
+            .text()
+            .contains("heap=15072+112640+98304+15536=241552"),
         "the heap arithmetic is the desk board's, in both arms of Q5"
     );
 }
