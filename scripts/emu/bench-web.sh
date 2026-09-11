@@ -4,7 +4,17 @@
 #   just bench-emu-web              # build, stage, serve on the LAN
 #   just bench-emu-web --collect    # print every uploaded result-*.json as a table
 #   scripts/emu/bench-web.sh --no-build       # skip the wasip1 rebuild
+#   scripts/emu/bench-web.sh --no-serve       # build and stage only
 #   scripts/emu/bench-web.sh --port 12345     # serve on a specific port instead
+#
+# The desk-engine half of the same rig, off the same stage directory:
+#
+#   bun  target/emu-bench-web/bench-cli.mjs --stage target/emu-bench-web
+#   node target/emu-bench-web/bench-cli.mjs --stage target/emu-bench-web
+#
+# `--no-build` serves a stage directory a previous build produced even on a
+# worktree that has no `target/wasm32-wasip1/` of its own — build once on the
+# rig worktree, then `--no-build --port <n>` for every serve after it.
 #
 # Builds the wasip1 module of `lp-emu-esp32c6` (D6: no wasm32-unknown-unknown
 # entry point, no source changes — the module is the unmodified CLI binary
@@ -32,12 +42,14 @@ stage_dir="target/emu-bench-web"
 rig_dir="scripts/emu/bench-web"
 do_build=1
 do_collect=0
+do_serve=1
 port=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --collect) do_collect=1; shift ;;
         --no-build) do_build=0; shift ;;
+        --no-serve) do_serve=0; shift ;;
         --port) port="${2:?--port needs a number}"; shift 2 ;;
         -h|--help) sed -n '2,26p' "$0"; exit 0 ;;
         *) echo "bench-web: unknown option $1" >&2; exit 2 ;;
@@ -53,8 +65,10 @@ if [[ $do_collect -eq 1 ]]; then
         echo "bench-web: no result-*.json in $stage_dir yet (run the page first)" >&2
         exit 1
     fi
-    printf '%-13s %-15s %-16s %-4s %8s %10s %9s\n' device engine image grade "wall s" instr/s "real time"
-    printf '%-13s %-15s %-16s %-4s %8s %10s %9s\n' ------------- --------------- ---------------- ---- -------- ---------- ---------
+    printf '%-13s %-15s %-16s %-4s %-6s %4s %8s %9s %9s %7s\n' \
+        device engine image grade mode fn "wall s" ns/instr "real time" "cover %"
+    printf '%-13s %-15s %-16s %-4s %-6s %4s %8s %9s %9s %7s\n' \
+        ------------- --------------- ---------------- ---- ------ ---- -------- --------- --------- -------
     for f in "${files[@]}"; do
         ua="$(jq -r '.ua' "$f")"
         cores="$(jq -r '.cores' "$f")"
@@ -76,11 +90,14 @@ if [[ $do_collect -eq 1 ]]; then
             row="$(jq -c ".results[$i]" "$f")"
             slug="$(jq -r '.slug' <<<"$row")"
             grade="$(jq -r '.grade' <<<"$row")"
-            wall="$(jq -r '(.wallMs / 1000)' <<<"$row")"
-            ips="$(jq -r '.ips // 0' <<<"$row")"
+            mode="$(jq -r '.mode // "?"' <<<"$row")"
+            fn="$(jq -r '.fnBlocks // "-"' <<<"$row")"
+            wall="$(jq -r '(.wallMs // 0) / 1000' <<<"$row")"
+            ns="$(jq -r '.nsPerInstr // 0' <<<"$row")"
             rt="$(jq -r '.realtime // 0' <<<"$row")"
-            printf '%-13s %-15s %-16s %-4s %8.2f %8.1fM %8.2fx\n' \
-                "$device ($cores-core)" "$engine" "$slug" "$grade" "$wall" "$(awk -v v="$ips" 'BEGIN{printf "%.1f", v/1e6}')" "$rt"
+            cov="$(jq -r '.coverage // 0' <<<"$row")"
+            printf '%-13s %-15s %-16s %-4s %-6s %4s %8.2f %9.2f %8.3fx %7.2f\n' \
+                "$device ($cores-core)" "$engine" "$slug" "$grade" "$mode" "$fn" "$wall" "$ns" "$rt" "$cov"
         done
     done
     exit 0
@@ -92,12 +109,48 @@ if [[ $do_build -eq 1 ]]; then
         echo "bench-web: adding the wasm32-wasip1 target (rustup target add wasm32-wasip1)" >&2
         rustup target add wasm32-wasip1
     fi
-    echo "bench-web: cargo build -p lp-emu-esp32c6 --release --target wasm32-wasip1 (+bulk-memory,+simd128,+nontrapping-fptoint)" >&2
-    CARGO_TARGET_WASM32_WASIP1_RUSTFLAGS="-C target-feature=+bulk-memory,+simd128,+nontrapping-fptoint" \
-        cargo build -p lp-emu-esp32c6 --bin lp-emu-esp32c6 --release --target wasm32-wasip1
+    echo "bench-web: cargo build -p lp-emu-esp32c6 --features jit --release --target wasm32-wasip1 (+bulk-memory,+simd128,+nontrapping-fptoint, --export-table, --growable-table)" >&2
+    # THREE link arguments, and each was found by the module refusing to work
+    # without it (M7 P6):
+    #
+    # `--export-table` — without it the module exports `memory`, `_start`,
+    # `__main_void` and the five `jit_*` functions and NO
+    # `__indirect_function_table`, so `jit-host.js` has nowhere to put a
+    # translated module's entry point and refuses to attach.
+    #
+    # `--growable-table` — wasm-ld otherwise emits the function table with its
+    # maximum pinned to its initial size (940 entries here), and
+    # `table.grow(1)` fails with a plain `RangeError` that names neither the
+    # linker nor the flag. JD12(a) is entry by table index; a table that cannot
+    # grow is JD12(a) not working at all.
+    #
+    # The five `#[unsafe(no_mangle)] pub extern "C"` exports need NOTHING: they
+    # survive `--gc-sections` on their own in a `wasm32-wasip1` bin, with no
+    # `-C link-arg=--export=<name>` and no `#[used]`. Checked against the
+    # module's own export list, both ways round.
+    #
+    # `--features jit` is what makes this the translated build at all
+    # (`lp_emu_jit::host_browser`); it costs the wasm build no compiler, because
+    # `lp-emu-jit` declares `wasmtime` only for non-wasm targets.
+    CARGO_TARGET_WASM32_WASIP1_RUSTFLAGS="-C target-feature=+bulk-memory,+simd128,+nontrapping-fptoint -C link-arg=--export-table -C link-arg=--growable-table" \
+        cargo build -p lp-emu-esp32c6 --bin lp-emu-esp32c6 --features jit --release --target wasm32-wasip1
 fi
 wasm_bin="target/wasm32-wasip1/release/lp-emu-esp32c6.wasm"
-[[ -f "$wasm_bin" ]] || { echo "bench-web: $wasm_bin missing (run without --no-build first)" >&2; exit 1; }
+# `--no-build` on a worktree that has never built one: if the stage this branch
+# produced is already here, serve it rather than refusing. That is the shape
+# the director needs — one build on the persistent rig worktree, then
+# `--no-build --port <n>` for every serve after it, with no cargo in the way.
+if [[ ! -f "$wasm_bin" && $do_build -eq 0 ]]; then
+    if [[ -f "$stage_dir/emu.wasm" && -f "$stage_dir/manifest.json" ]]; then
+        echo "bench-web: no $wasm_bin; serving the staged $stage_dir as it is" >&2
+        do_stage=0
+    else
+        echo "bench-web: $wasm_bin missing and $stage_dir is not staged (run without --no-build first)" >&2
+        exit 1
+    fi
+fi
+do_stage="${do_stage:-1}"
+[[ $do_stage -eq 0 ]] || [[ -f "$wasm_bin" ]] || { echo "bench-web: $wasm_bin missing (run without --no-build first)" >&2; exit 1; }
 
 # The pinned reference images `bench-emu-c6` uses (same rows, same feature
 # lists, same pins) — built once and cached under target/emu-ref/, arch-neutral
@@ -138,9 +191,16 @@ resolve_image() {
     echo "$path"
 }
 
+if [[ $do_stage -eq 1 ]]; then
 mkdir -p "$stage_dir"
 cp "$wasm_bin" "$stage_dir/emu.wasm"
-cp "$rig_dir/index.html" "$rig_dir/worker.js" "$stage_dir/"
+# `worker.js` is a MODULE worker now (`{type: 'module'}`), because it imports
+# `jit-host.js` — and `jit-host.js` is the one importable module JD25 says
+# Studio's own worker will import unchanged, so it cannot be inlined here.
+# `bench-cli.mjs` is staged too, so the directory a phone loads and the
+# directory `bun`/`node` measure are the same directory.
+cp "$rig_dir/index.html" "$rig_dir/worker.js" "$rig_dir/jit-host.js" \
+   "$rig_dir/wasi-shim.js" "$rig_dir/bench-run.js" "$rig_dir/bench-cli.mjs" "$stage_dir/"
 
 manifest_images="[]"
 for spec in "${images[@]}"; do
@@ -176,12 +236,35 @@ build_obj="$(jq -n --arg sha "$build_sha" --arg short "$build_short" --arg branc
     --argjson wasmBytes "$wasm_bytes" \
     '{sha: $sha, short: $short, branch: $branch, dirty: $dirty, built_at: $builtAt, wasm_sha256: $wasmSha, wasm_bytes: $wasmBytes}')"
 
+# `defaults` is what the page starts its controls at, and every one of them is
+# selectable there without a rebuild (P6): the mode (translated against
+# `--interpreter`, the Step A row re-taken on the same binary, same image,
+# same device, same session), JD26's blocks-per-sub-dispatcher knob, and the
+# emulated bound — 5500 ms is `GATE_US`, the window every native oracle number
+# in #678 and #680 was taken at, and 20 s is the longer bound a lazily tiering
+# engine's steady state needs to show.
+#
+# `fnBlocksChoices` stops at 256 deliberately: V8's optimizing tier dies with
+# `Fatal process out of memory: Zone` in `WasmLoweringPhase` at 512 blocks a
+# function and every size above, AFTER the module compiles and instantiates
+# (#680). 256 is the largest size every engine measured runs optimized.
 jq -n --argjson images "$manifest_images" --argjson build "$build_obj" \
-    '{images: $images, grades: ["t1", "t2"], repeats: 2, build: $build}' >"$stage_dir/manifest.json"
+    '{images: $images, grades: ["t1", "t2"], repeats: 1, build: $build,
+      defaults: {mode: "jit", fnBlocks: 256, timeout: "5500ms", wallTimeout: 600, exitOn: false},
+      fnBlocksChoices: [64, 128, 256],
+      timeoutChoices: ["5500ms", "20s"],
+      modeChoices: ["jit", "interp"]}' >"$stage_dir/manifest.json"
 
 echo "bench-web: staged $stage_dir ($(du -sh "$stage_dir" | cut -f1)) build $build_short$([[ $build_dirty == true ]] && echo ' (dirty)')" >&2
+fi   # do_stage
 
 # --- serve ---------------------------------------------------------------
+if [[ $do_serve -eq 0 ]]; then
+    echo "bench-web: --no-serve; measure the desk engines off the stage with" >&2
+    echo "  bun  $stage_dir/bench-cli.mjs --stage $stage_dir" >&2
+    echo "  node $stage_dir/bench-cli.mjs --stage $stage_dir" >&2
+    exit 0
+fi
 if [[ -z "$port" ]]; then
     port="$(scripts/dev-port.sh emu-bench-web)"
 fi
