@@ -50,17 +50,74 @@
 //!
 //! # How core 1 starts
 //!
-//! **At the architectural reset, through the real ROM — no seed and no
-//! hook.** `esp_hal::system::CpuControl::start_app_core` writes the entry
-//! into `appcpu_ctrl_d.appcpu_boot_addr`, sets `clkgate_en`, clears
-//! `runstall` and pulses `appcpu_resetting`
+//! **At `appcpu_ctrl_d`'s address, with no ROM code executed.**
+//! `esp_hal::system::CpuControl::start_app_core` writes the entry into
+//! `appcpu_ctrl_d.appcpu_boot_addr`, sets `clkgate_en`, clears `runstall`
+//! and pulses `appcpu_resetting`
 //! (`third_party/esp-hal/src/soc/esp32/cpu_control.rs`, `start_core1`).
 //! The DPORT view yields to the machine at the store that completes the
-//! release, and [`Machine::service_app_core_start`] puts slot 1 at the
-//! **reset state** — `pc = _ResetVector`, `PS = 0x1F`, the ROM's `VECBASE` —
-//! with its counters at the machine's clock, exactly as a reset would. The
-//! mask ROM does the rest, and this is what it does, read off the vendored
-//! ELF with `xtensa-esp32-elf-objdump`:
+//! release, and [`Machine::service_app_core_start`] puts slot 1 straight at
+//! `appcpu_boot_addr` in the state esp-hal's trampoline is entered in — see
+//! [`Machine::service_app_core_start`] for the field-by-field list and
+//! [`APP_CORE_RELEASE_PS`] for the `PS` word. No `_ResetVector`, no unpack
+//! or bss tables, no ROM `main`.
+//!
+//! ## Why this is the model, and what is still owed
+//!
+//! **The bench ruled it.** This machine's first model (PR #692 as first
+//! written) did the architectural thing: released core 1 at `_ResetVector`
+//! and let the vendored ROM's reset path run. That path is real — its
+//! unpack and bss tables' `flag = 1` entries re-copy `.data_xtos_pro`
+//! (`0x3ffe0440..0x3ffe0858`) and zero `.bss_xtos_pro`
+//! (`0x3ffe0860..0x3ffe1320`), and ROM `main` writes seven
+//! `_xtos_set_exception_handler` pairs into the same span — and running it
+//! killed the shipped image in `LpFs::read_file`, because `fw-esp32v3`
+//! hands exactly that span to its allocator as heap region 0.
+//!
+//! Lab task L2 (PR #695) put the question to the DOM-Z-102 with a canary:
+//! allocate 4,096 B of `0xA5` at `0x3ffe0440` through the product's own
+//! `init_board`, call the product's `start_app_core_isr`, wait for the
+//! bind, and scan. Two sittings, two flashes, identical:
+//!
+//! ```text
+//! [APPCORE-CANARY] start_app_core_isr bound=true wait_us=210
+//! [APPCORE-CANARY] scan changed=0 ranges=0 handler_words=0 data_xtos_pro=0 bss_xtos_pro=0 outside=0
+//! [APPCORE-CANARY] verdict=B
+//! ```
+//!
+//! **Not one byte.** Not the tables, not even ROM `main`'s handler pairs —
+//! whose ROM-written values the same capture shows present *before* the
+//! canary buried them, so the scan can see them. Nothing in the ROM's reset
+//! path runs on core 1 when esp-hal starts it. The same harness on this
+//! machine scored `verdict=A`, `changed=3800`; that was the emulator's
+//! claim and the bench refused it
+//! (`docs/defects/2026-09-11-app-core-release-modelled-as-a-rom-reset.md`).
+//!
+//! **What is owed: the hardware rationale.** *Why* the `appcpu_resetting`
+//! pulse does not re-run the ROM is not established here. The plausible
+//! reading — the APP core has sat parked since power-on in ROM `main`'s
+//! `appcpu_boot_addr` poll, and the pulse either leaves that poll running
+//! or lands the core on a fast path that takes `ctrl_d` directly — matches
+//! the bench, but nothing in this repository proves it and it is **not**
+//! claimed. What is claimed is the observable the bench pinned: after the
+//! release, core 1 executes the firmware's entry and writes nothing into
+//! `0x3ffe0440..0x3ffe1320`. A machine that reproduces the observable and
+//! states the mechanism as unknown is honest; one that invents the
+//! mechanism to justify the observable is not.
+//!
+//! **Power-on is modelled the same way.** On a ROM-up boot core 1 is held
+//! from the first cycle by DPORT's reset values (`appcpu_resetting = 1`,
+//! `clkgate_en = 0`), so nothing runs on it until the firmware's release —
+//! and whether silicon's APP core ran its own ROM path at power-on, before
+//! the firmware's heap existed, is unobservable to both the firmware and
+//! the bench: the PRO core's own boot re-unpacks the same spans afterwards.
+//! So this machine runs no ROM on core 1 at power-on either, and says so
+//! rather than pretending the question was answered.
+//!
+//! The ROM's APP-core path, for the record, is this — read off the vendored
+//! ELF with `xtensa-esp32-elf-objdump`. It is what the bench says does
+//! *not* run, kept because a future reading of the open question starts
+//! here:
 //!
 //! ```text
 //! 40000456 <_ResetHandler+0x6>:  rsr.prid a2
@@ -76,17 +133,14 @@
 //!                        _xtos_set_exception_handler calls; callx8 a2
 //! ```
 //!
-//! So core 1 runs the ROM's reset path on the ROM's own stack, spins in
-//! `main`'s APP arm until `appcpu_boot_addr` is non-zero — it already is,
-//! esp-hal writes it before the release — and `callx8`'s esp-hal's
-//! `start_core1_init`, which sets its own `VECBASE` and stack pointer and
-//! calls the entry. Every register that path touches is one this machine
-//! models; `--strict-bus` is the proof, and `tests/dual_core.rs` reads the
-//! wait loop's own `DPORT+0x038` reads by hart 1 out of the bus trace.
+//! `_start`'s `PS = 0x40020` and the APP core's ROM stack top are where the
+//! released core's seeded state comes from: the ROM is still the source for
+//! *what state the firmware's entry is entered in*, even though its code no
+//! longer runs. [`Machine::service_app_core_start`] cites each field.
 //!
 //! What is *not* reproduced is a timing claim: esp-hal's caller waits up to
 //! 10 ms of **guest** time for the bind, and this machine gets core 1 there
-//! in a few thousand windows. That is the guest's own wait, never a gate.
+//! within a window or two. That is the guest's own wait, never a gate.
 //!
 //! # Peripherals: accept blocks, in the order the boot met them
 //!
@@ -480,6 +534,28 @@ impl BootFrame {
             .map(|s| s.address)
             .unwrap_or(memmap::ROM_PRO_STACK_TOP);
         Self::at(sp)
+    }
+
+    /// The mask ROM's **APP**-core stack top, from the ROM ELF's
+    /// `__stack_app` — `0x3FFE_7E30`, which is also
+    /// `reserved_rom_stack_app`'s end (`third_party/esp-hal/ld/esp32/
+    /// memory.x:35`) and `dram2_seg`'s origin. Three sources, one number,
+    /// the same shape as [`BootFrame::rom_pro_stack`].
+    ///
+    /// This is what core 1's `a1` is seeded with at the release
+    /// ([`Machine::service_app_core_start`]). The `owb` field is *not* the
+    /// bootloader's: the released core is the outermost frame and no window
+    /// exception has run on it, so `PS.OWB` is zero — see
+    /// [`APP_CORE_RELEASE_PS`], which is the word actually written.
+    pub fn rom_app_stack(rom: &ElfImage) -> Self {
+        let sp = rom
+            .symbol("__stack_app")
+            .map(|s| s.address)
+            .unwrap_or(memmap::ROM_APP_STACK_TOP);
+        Self {
+            owb: 0,
+            ..Self::at(sp)
+        }
     }
 
     /// A boot frame at an explicit stack pointer, with the default save area.
@@ -1255,6 +1331,7 @@ impl Esp32V3Builder {
             peripheral_map,
             alias_map,
             hooks: HookTable::new(),
+            app_core_frame: None,
             boot_mode: self.boot_mode,
             time_grade: self.time_grade,
             boot_frame: None,
@@ -1356,6 +1433,32 @@ pub fn core_config(core: usize) -> CoreConfig {
 /// PRO core alone and is amended.
 pub const CPENABLE_RESET: u32 = 0xff;
 
+/// `PS` core 1 is released with: `WOE | UM` = `0x0004_0020`.
+///
+/// **The ROM's own post-`_start` word**, read off the vendored rev300 ELF at
+/// `0x40000704` (`movi a2, 0x40020; wsr.ps a2`) — the module docs carry the
+/// disassembly. It is windowed-ABI enabled (`WOE`), user ring (`UM`),
+/// `INTLEVEL = 0`, `EXCM` clear, and `CALLINC = 0`.
+///
+/// `CALLINC = 0` is the one field worth arguing about, so here is the
+/// argument. On silicon the firmware's entry — esp-hal's
+/// `start_core1_init::<F>`, an ordinary windowed-ABI Rust function whose
+/// prologue is `entry a1, N` — is reached by ROM `main`'s `callx8`, which
+/// would leave `CALLINC = 2` and rotate the window. This machine runs no ROM
+/// on core 1 (see the module docs), so nothing performs that call, and the
+/// released core is the *outermost* frame: `WindowBase = 0`,
+/// `WindowStart = 1`, and an `entry` that rotates by zero. That is the same
+/// architectural shape `_start` itself hands ROM `main`, which is why this is
+/// the ROM's word and not an invention — and the register file behind it is
+/// made safe the same way a direct load's is, with a [`BootFrame`] save area
+/// under `a1` so a window overflow through the outermost frame spills into
+/// the ROM's APP stack instead of through a null pointer.
+///
+/// Nothing the firmware's entry does reads `PS.CALLINC`: it never returns
+/// (`-> !`), and `xtensa_lx::set_stack_pointer` zeroes `a0` and moves `a1` to
+/// esp-hal's own APP stack before the first call that could overflow.
+pub const APP_CORE_RELEASE_PS: u32 = lp_xt_emu::mach::sr::PS_WOE | lp_xt_emu::mach::sr::PS_UM;
+
 /// A hart at the architectural reset state of **this part**, with the
 /// machine's cycle model and unsupported-opcode policy applied. What `build`
 /// makes both slots from, and what a core reset puts back.
@@ -1415,6 +1518,9 @@ pub struct Machine {
     peripheral_map: Vec<(&'static str, u32, u32)>,
     alias_map: Vec<(&'static str, u32, u32)>,
     hooks: HookTable,
+    /// The stack state core 1 was released with, once it has been released
+    /// ([`Machine::service_app_core_start`]). `None` while it is still held.
+    app_core_frame: Option<BootFrame>,
     boot_mode: BootMode,
     time_grade: TimeGrade,
     boot_frame: Option<BootFrame>,
@@ -1600,6 +1706,18 @@ impl Machine {
 
     pub fn boot_frame(&self) -> Option<BootFrame> {
         self.boot_frame
+    }
+
+    /// The stack state core 1 will be (or was) released with: the ROM's
+    /// APP-core stack top and its save area
+    /// ([`BootFrame::rom_app_stack`]).
+    pub fn app_core_boot_frame(&self) -> BootFrame {
+        BootFrame::rom_app_stack(&self.rom)
+    }
+
+    /// The frame core 1 *was* released with, or `None` while it is held.
+    pub fn app_core_frame(&self) -> Option<BootFrame> {
+        self.app_core_frame
     }
 
     pub fn rom(&self) -> &ElfImage {
@@ -2561,18 +2679,51 @@ impl Machine {
         )
     }
 
-    /// Start core 1 the way the part does, once, when DPORT has released
-    /// it: `appcpu_resetting` cleared with `appcpu_clkgate_en` set and
-    /// `appcpu_runstall` clear ([`crate::periph::dport::AppCoreControl`]).
+    /// Start core 1 the way the bench says the part does, once, when DPORT
+    /// has released it: `appcpu_resetting` cleared with `appcpu_clkgate_en`
+    /// set and `appcpu_runstall` clear
+    /// ([`crate::periph::dport::AppCoreControl`]).
     ///
-    /// **The core is put at the architectural reset**, not at the boot
-    /// address: slot 1 becomes a fresh hart (`pc = _ResetVector`,
-    /// `PS = 0x1F`, `VECBASE = 0x4000_0000`, every register zero) whose
-    /// counters start at the machine's clock, and the mask ROM's own reset
-    /// path takes it from there to `appcpu_boot_addr` — the module docs
-    /// carry the disassembly. Nothing is seeded, because the ROM's `_start`
-    /// sets `a1` and `PS` itself and `main`'s APP arm reads the boot
-    /// address; nothing is hooked.
+    /// # What is modelled
+    ///
+    /// **Core 1 begins executing at `appcpu_ctrl_d.appcpu_boot_addr`, and no
+    /// ROM code runs on it** — no `_ResetVector`, no reset handler, no unpack
+    /// or bss table, no ROM `main`, no `_xtos_set_exception_handler`. Slot 1
+    /// becomes a fresh hart, so every register it does not name below is at
+    /// this part's reset value, and its counters start at the machine's
+    /// clock. Then exactly five things are seeded, each cited:
+    ///
+    /// | field | value | where it comes from |
+    /// |---|---|---|
+    /// | `pc` | `appcpu_boot_addr` | esp-hal's `start_core1` wrote it ([`crate::periph::dport`]) |
+    /// | `PS` | [`APP_CORE_RELEASE_PS`] = `0x0004_0020` | the ROM's own `_start` word (`0x40000704`) |
+    /// | `a1` | `__stack_app` = `0x3ffe7e30` | the ROM ELF's symbol; `reserved_rom_stack_app`'s end in `third_party/esp-hal/ld/esp32/memory.x:35` |
+    /// | `[a1-16, a1)` | a [`BootFrame`] save area | the window-overflow guard the direct load's seam documents |
+    /// | `CPENABLE` | [`CPENABLE_RESET`] = `0xff` | measured on the desk board by M4 P1 |
+    ///
+    /// `VECBASE` is the reset `0x4000_0000` that [`fresh_hart`] gives it, and
+    /// `PRID` is [`PRID_APP`] — both from [`core_config`], neither seeded
+    /// here. The firmware's entry (esp-hal's `start_core1_init`) sets its own
+    /// `VECBASE`, stack pointer and interrupt mask within its first dozen
+    /// instructions, so none of this survives long; what it must do is get
+    /// that function's `entry a1, N` prologue onto a real stack, which is why
+    /// `a1` and its save area are here at all.
+    ///
+    /// # Why, and what is owed
+    ///
+    /// The module docs carry the bench evidence (lab task L2, PR #695:
+    /// `changed=0` over `0x3ffe0440..0x3ffe1440`, two sittings) and the open
+    /// hardware question — *why* the `appcpu_resetting` pulse does not put
+    /// the APP core back through the ROM is **not** established here and is
+    /// not claimed. This models the observable, and the observable is the
+    /// thing the bench pinned.
+    ///
+    /// The same path serves a power-on release: on a ROM-up boot DPORT's
+    /// reset values hold core 1 from the first cycle and nothing runs on it
+    /// until the firmware's release, which arrives here. Whether silicon's
+    /// APP core ran its own ROM path at power-on is unobservable from either
+    /// side — the PRO core's boot re-unpacks the same spans afterwards — so
+    /// this machine does not run one and does not pretend to know.
     ///
     /// RTC_CNTL's half of the key may still hold the core (esp-hal unstalls
     /// it before the DPORT sequence, so on this firmware it does not); that
@@ -2590,14 +2741,36 @@ impl Machine {
             a.reported = true;
             start
         };
-        self.stalled[1] = false;
         let clock = self.clock();
+        if entry == 0 {
+            // esp-hal always writes `appcpu_ctrl_d` before the release, and
+            // the ROM's own APP arm would have spun here. With no ROM on this
+            // core there is nothing to spin in, so the honest answer is to
+            // leave it held and say why rather than fetch from address zero.
+            log::warn!(
+                "core 1: DPORT released it at cycle {at} with appcpu_boot_addr = 0 — nothing \
+                 to start, the core stays held (esp-hal writes the boot address first)"
+            );
+            return;
+        }
+        self.stalled[1] = false;
+        let frame = self.app_core_boot_frame();
         let mut hart = fresh_hart(1, self.time_grade, self.strict_unsupported);
         hart.set_counters(clock, 0);
+        hart.set_pc(entry);
+        hart.set_ps_raw(APP_CORE_RELEASE_PS);
+        hart.cpu_mut().set_a(1, frame.sp);
         self.harts[1] = hart;
+        for (i, word) in frame.save_area.iter().enumerate() {
+            let at = frame.sp.wrapping_sub(16).wrapping_add(4 * i as u32);
+            if let Err(e) = self.bus.load_image(at, &word.to_le_bytes()) {
+                log::warn!("core 1: seeding the APP boot frame at {at:#010x}: {e}");
+            }
+        }
+        self.app_core_frame = Some(frame);
         log::info!(
-            "core 1: released by DPORT at cycle {at} — reset to _ResetVector at clock {clock}; \
-             appcpu_boot_addr = {entry:#010x} ({}){}",
+            "core 1: released by DPORT at cycle {at} — started at appcpu_boot_addr at clock \
+             {clock}, no ROM code run; appcpu_boot_addr = {entry:#010x} ({}){}",
             self.symbolize(entry).unwrap_or_else(|| "?".into()),
             if self.stall_key.stalled(1) {
                 "; RTC_CNTL's key still holds it"
@@ -3058,6 +3231,17 @@ impl Machine {
         self.hook_calls = snap.hook_calls;
         self.idle_skips = snap.idle_skips;
         self.wfi_ends = snap.wfi_ends;
+        // The released-frame record follows DPORT's own `reported` flag,
+        // which `restore_peripherals` has just put back: a snapshot taken
+        // before the release carries no frame, one taken after carries the
+        // frame the release used. A reboot restores the power-on snapshot,
+        // where `reported` is false, so the frame goes with it.
+        self.app_core_frame = self
+            .appcpu
+            .lock()
+            .expect("appcpu poisoned")
+            .reported
+            .then(|| BootFrame::rom_app_stack(&self.rom));
         // The quantum is something a run's future depends on (D3), so a
         // restored run takes the snapshot's — and says so if that differs
         // from what this machine was built with.
