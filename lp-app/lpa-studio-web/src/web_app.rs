@@ -1814,6 +1814,10 @@ fn consume_shared_intent(
                     HOME_NODE_ID,
                     HomeOp::OpenPackage {
                         key: summary.uid.to_string(),
+                        // A share link carries no `?on=` of its own: what
+                        // the sender ran it on is not what the receiver
+                        // should be put on.
+                        prefer: None,
                     },
                 )));
             }
