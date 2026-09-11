@@ -281,12 +281,169 @@ So the default is **256**: the largest size at which every engine measured runs
 the module in its optimizing tier. Bigger buys a lower cross rate and nothing
 else that could be measured, and costs one engine entirely.
 
+> **Amended by P6b.** The table above stops at 64 because
+> `lp-emu-esp32c6`'s `MIN_BLOCKS` was 64 and nothing smaller could be asked
+> for. It is 8 now, the range below 64 is measured, and the shape of the
+> answer changes: **V8's `Zone` OOM bounds the size from BOTH sides**, and
+> JavaScriptCore's curve was still falling all the way down. See the next
+> section. Whether 256 stays the default is the G-M7P gate's decision, not
+> this file's.
+
 **No sub-dispatcher may exceed 80 % of the limit** (`dispatch::BODY_BUDGET`,
 6,123,456 B). It is a test, not a habit: `no_sub_dispatcher_exceeds_the_body_budget`
 emits 40,000 blocks in one function, asserts it is over, and asserts every
 split of it is under. The host refuses a module over the budget and halves
 `--jit-fn-blocks`, because a block set is not the block set a size was chosen
 on — `--jit-escape-all` emits several times the bytes per block.
+
+### Where an entry's time goes — the cost model (P6b)
+
+G-M7P read a whole-run fit as **448 ns per entry, 57 % of a `render-basic` t2
+run**, and **5.16 ns per translated guest instruction** against the spike's
+1.41 ns in the same engine on region modules. P6b asked where both numbers
+come from. Every number below is on `render-basic` t2 at the 5,500 ms bound
+unless it says otherwise, and every row that ran a real image carried the same
+UART0 sha256, `2407828f…`, as the interpreter on the same binary.
+
+**An entry, measured rather than fitted** (`LP_EMU_JIT_ENTRY_TIME=64`, native,
+wasmtime, one entry in 64 sampled, 61,448 broken-down and 61,447 control
+samples of 7,865,280 entries):
+
+| | ns | share |
+|---|---:|---:|
+| the whole of `TranslatedCore::run` — an entry **and the stay it runs** | **387.9** | 100 % |
+| the module call (`enter`) | 305.3 | 78.7 % |
+| the host's two `BTreeMap` entry-index lookups | 24.5 | 6.3 % |
+| the 32-register copy to the exchange area and back | 6.1 | 1.6 % |
+| the refusal rules, the counters and the exit bookkeeping | 52.0 | 13.4 % |
+
+So **the hart's own re-entry path is 82.6 ns**, a fifth of what a stay costs,
+and a third of that fifth is two ordered-map lookups — one of which
+(`index.contains_key(&exit.pc)`) exists only to feed the report's
+`exits known/unknown` counters. The same run reported the same 7,865,280
+entries, 31,054,609 crosses and `stopped after` line as the uninstrumented one,
+so the timer changed nothing but the clock.
+
+The breakdown's own six `Instant::now()` calls are not free: the same entry
+measures 387.9 ns with only the outer clock pair and 585.5 ns with the
+breakdown in it — about 20 ns a clock read, which is why the control sample
+exists and why each inner figure above has one read (≈20 ns) taken off it.
+
+**The module's own share, in both engines**, from
+`scripts/emu/p6b-entry-split.mjs` — one recording, cut into 100 windows of 200
+consecutive entries that differ 40× in instructions per entry (26.4 to
+1,070.8), least-squared, with the JavaScript rig's own per-entry cost measured
+separately (`P6B_NO_RUN=1`) and subtracted:
+
+| | per entry | per translated instruction |
+|---|---:|---:|
+| node/V8, 64 blocks/fn | 70.7 − 31.5 = **39.2 ns** | 1.401 − 0.049 = **1.35 ns** |
+| bun/JSC, 64 blocks/fn | 388.5 − 62.4 = **326.1 ns** | 11.204 − 0.032 = **11.17 ns** |
+
+**1.35 ns per guest instruction in V8 is the spike's number** (1.41 ns on a
+region module in the same engine). The translated code this crate emits is not
+slower than the spike's; what G-M7P read as a per-instruction gap is somewhere
+else.
+
+**The cross-function hop, priced on its own** — `scripts/emu/p6b-hop.mjs`
+against the `a_ring_emitted_whole_and_one_block_to_a_function_differs_only_in_crosses`
+fixture, which is one ring of 64 guest blocks emitted whole (no crosses) and
+one block to a function (a cross per block), asserted under wasmtime to retire
+the same instructions for the same cycles and leave the same registers:
+
+| the ring's blocks touch | node/V8 | bun/JSC |
+|---|---:|---:|
+| one guest register | **3.2 ns** | **2.0 ns** |
+| all 31 | **15.6 ns** | **7.5 ns** |
+
+`live_regs_in` is per sub-dispatcher, so a hop costs what the two chunks'
+live sets cost: the wide ring is the hop a real image pays. At 31,054,609
+crosses against 507,411,830 translated instructions that is **0.48 s of a 9.6 s
+V8 run, about 5 %** — real, and not the story.
+
+**Locals do not grow with the split.** `scripts/emu/p6b-module-anatomy.mjs`
+over the same block set emitted at six sizes:
+
+| blocks/fn | sub-dispatchers | locals per sub-dispatcher | largest sub-dispatcher | **the selector** |
+|---:|---:|---:|---:|---:|
+| 8 | 25,156 | **46** (43 i32, 3 i64) | 40,244 B | **730,452 B** |
+| 16 | 12,578 | **46** | 69,521 B | **351,947 B** |
+| 32 | 6,289 | **46** | 83,241 B | 175,855 B |
+| 64 | 3,145 | **46** | 132,815 B | 87,823 B |
+| 128 | 1,573 | **46** | 238,611 B | 45,380 B |
+| 256 | 787 | **46** | 405,659 B | 22,586 B |
+
+`body_locals()` is a fixed list and the bytes agree: 46 slots in 6 groups at
+every size. A 256-block function carries exactly the locals an 8-block one
+does, so wasm's zero-every-local-at-entry rule is a constant, not a size
+effect.
+
+That table also holds a fact `emit_module` does not report: **`max_body_bytes`
+covers the sub-dispatchers and not the selector**, and below 64 blocks a
+function the selector is by far the largest function in the module. It is what
+V8 refuses at the small end — every sub-dispatcher at 16 blocks a function is
+smaller than functions V8 optimises happily at 64, and the only thing bigger is
+the selector. `node --liftoff-only` runs the same module without complaint, so
+it is the optimizing tier and nothing else. **A `BODY_BUDGET` check that does
+not include the selector has a blind spot at the small end**, and it is
+recorded here rather than fixed, because fixing it is a size the gate has not
+chosen yet.
+
+**The size sweep, on real runs, one invocation per engine, interleaved and
+best-of-3** (`scripts/emu/p6b-rows.mjs`; `render-basic` t2, 5,500 ms; identity
+green on every row):
+
+| blocks/fn | node/V8 real time | bun/JSC real time |
+|---:|---:|---:|
+| 8 | **process aborts** (`Zone` OOM, `WasmLoweringPhase`, background tier-up) | **0.489×** |
+| 16 | **process aborts** | 0.453× |
+| 32 | **0.631×** | 0.287× |
+| 64 | 0.458× | 0.136× |
+| 128 | 0.383× | — |
+| that engine's own `--interpreter` | 0.377× | 0.528× |
+
+Read it as two different answers:
+
+- **V8 wants the smallest size it can survive, and that is 32.** 0.631× against
+  an interpreter at 0.377× is **1.68×**, and a quieter invocation of the same
+  sweep gave 0.645× against 0.499×, **1.29×**. Either way 32 beats the 64 the
+  gate measured, and 16 is not available: V8 does not refuse it, it calls
+  `FatalProcessOutOfMemory` from a background compile job, which no `install`
+  retry can catch.
+- **JavaScriptCore wants smaller still**, and the size knob is worth **3.6×**
+  to it: 0.136× at 64 blocks a function, 0.489× at 8. That does not overturn
+  G-M7P's JSC verdict — 0.489× against its own interpreter's 0.528× is 0.93×,
+  still a shade behind — but it turns "four times slower than its own
+  interpreter" into "level with it", on one constant.
+
+**And the cost model that comes out of all of it is not the one the gate
+drew.** A `node --cpu-prof` of a real run attributes wall clock by module, and
+two images whose entry rates differ 4.5× say the same thing:
+
+| | `render-basic` t2 | `render-rocaille` t2 |
+|---|---:|---:|
+| entries | 7,865,280 | 1,977,249 |
+| translated instructions | 507,411,830 | 569,755,861 |
+| **the translated modules' share of the run** | **39.3 %** | **46.6 %** |
+| the emulator's own wasm | 55.4 % | 47.8 % |
+| module ms ÷ entries | 642 ns | 1,744 ns |
+| module ms ÷ translated instructions | 9.96 ns | 6.05 ns |
+
+An image that enters translated code **4.5× less often per instruction** does
+not spend a smaller share of its run inside the module — it spends a larger
+one. Read as a per-entry cost the two runs disagree by 2.7×; read as a
+per-instruction cost they disagree by 1.6×, on a desk whose load moved between
+them. Fitting `a × entries + b × instructions` to a profiled pair taken
+thirteen seconds apart gives **+325 ns an entry**, and to a pair taken a minute
+apart gives **−113 ns an entry**. Two images and two unknowns is an exactly
+determined system with no residual to check, and on this desk it is not stable
+enough to carry a conclusion.
+
+So: **448 ns per entry is not a measured quantity.** What is measured is
+82.6 ns of hart per entry, 39 ns of module per entry in V8, 1.35 ns per
+translated instruction in V8 — and a real run in which the module's time scales
+with instructions and not with entries, and in which the emulator's own wasm,
+not the translator's output, is the larger half.
 
 ### Indirect targets, in O(1), across functions
 

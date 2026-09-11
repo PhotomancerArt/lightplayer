@@ -83,9 +83,32 @@ fn arena_word(arena: &[u8], base: u32, spans: &[(u32, u32, bool)], pc: u32) -> O
     }
 }
 
-/// The smallest block budget worth retrying at. Below this the set is too
-/// small to be evidence of anything, and a failure is a real failure.
-const MIN_BLOCKS: usize = 64;
+/// The smallest block budget worth retrying at, and the floor
+/// `--jit-fn-blocks` is clamped to. Below this the set is too small to be
+/// evidence of anything, and a failure is a real failure.
+///
+/// **8 since M7 P6b, and the reason is a measurement, not a preference.** At
+/// 64 — the floor P5 chose — every engine's curve was still falling and no
+/// smaller size could be asked for, so G-M7P had to record "the optimum is
+/// unmeasured below 64". It is measured now, on the same recording at every
+/// size (`scripts/emu/p6b-replay-sweep.mjs`), and the two engines disagree
+/// about which end of the range is safe:
+///
+/// - **JavaScriptCore keeps getting faster all the way down** — 8.75 ns per
+///   guest instruction at 8 blocks a function against 12.2–19.7 at 64, on the
+///   same module bytes and the same recording.
+/// - **V8 dies at the small end**, with the same
+///   `Fatal process out of memory: Zone` in `WasmLoweringPhase` that #680
+///   found at 512 blocks a function — and for the mirror-image reason. The
+///   module's largest function is a sub-dispatcher at big sizes and the
+///   **outer selector** at small ones: 730 KB and 25,156 nested blocks at 8,
+///   against 88 KB at 64. V8 compiles 32 (selector 176 KB) and refuses 16
+///   (352 KB).
+///
+/// So this is a floor on what can be *asked for*, and it is not a default.
+/// `--jit-fn-blocks`'s default is unchanged, and choosing it is a decision
+/// the G-M7P gate makes with both of those rows in front of it.
+const MIN_BLOCKS: usize = 8;
 
 /// Every guest pc the whole-image walk finds an instruction at, unbounded by
 /// any host's ceiling.

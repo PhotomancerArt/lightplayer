@@ -1095,7 +1095,11 @@ fn one_ring(name: &str, regs: u32) {
 
     let mut whole = Rig::new(&program);
     let set = ring_set(&whole, N);
-    assert_eq!(set.blocks.len() as u32, N, "the ring is one block per `jal`");
+    assert_eq!(
+        set.blocks.len() as u32,
+        N,
+        "the ring is one block per `jal`"
+    );
     let one = whole.run_split(
         &alloc_name(name, "whole"),
         &set,
@@ -1116,7 +1120,10 @@ fn one_ring(name: &str, regs: u32) {
     );
 
     assert_eq!(one.regs, each.regs, "the two splits compute the same thing");
-    assert_eq!(one.instret, each.instret, "and retire the same instructions");
+    assert_eq!(
+        one.instret, each.instret,
+        "and retire the same instructions"
+    );
     assert_eq!(one.cycle, each.cycle, "for the same cycles");
     assert_eq!(one.pc, each.pc, "and leave at the same pc");
     assert_eq!(

@@ -33,6 +33,11 @@ export function argsFor(o) {
     args.push('--interpreter');
   }
   if (o.exitOn && o.image.exitOn) args.push('--exit-on', o.image.exitOn);
+  // Anything else the caller wants on the emulator's own command line, in
+  // order. P6b uses it for `--jit-blocks <n>`, which shrinks the installed
+  // block set and so the module, and is how the footprint question gets
+  // asked without a native cranelift run. The page never sets it.
+  if (o.extraArgs) args.push(...o.extraArgs);
   return args;
 }
 
@@ -159,6 +164,7 @@ export async function runOnce(o) {
   const wallMs = t2 - t1;
   const r = {
     slug: o.image.slug, grade: o.grade, mode: o.mode, fnBlocks: o.mode === 'jit' ? o.fnBlocks : null,
+    extraArgs: o.extraArgs ?? null,
     timeout: o.timeout, exit, trap, selftest, selftestError,
     instantiateMs: t1 - t0, wallMs,
     ...readouts(text),
