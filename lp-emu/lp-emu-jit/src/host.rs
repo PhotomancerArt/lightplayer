@@ -219,6 +219,42 @@ pub const PERM_READ_WRITE: u8 = 2;
 /// 256 KiB buys that, once, per machine.
 pub const PERM_ENTRIES: u32 = 1 << (32 - PERM_SHIFT);
 
+// ---- the published-read block (M7b P3) ------------------------------------
+
+/// A machine may **publish** a handful of MMIO word reads whose values it
+/// guarantees, and translated code then serves them from memory instead of
+/// crossing to [`HostOps::mmio_load`].
+///
+/// This crate knows nothing about which registers those are (JD2: it may not
+/// name a peripheral). It knows only the shape: a small block of the imported
+/// memory holding an `armed` word, a served counter, and
+/// [`FAST_MAX_READS`] published `i32`s, plus a
+/// [`crate::translate::FastReads`] table folded into the module at emission
+/// time saying which guest word address reads which of them.
+///
+/// **`armed` is the whole correctness story.** The machine clears it the
+/// moment anything it published could have gone stale, and translated code
+/// then takes the import exactly as it did before — which is why every
+/// condition on this path is a *refusal* rather than an assertion. See
+/// `lp-emu-esp32c6`'s `jit` module for the C6's list and
+/// `lp-emu-jit/README.md` for why the list is the design.
+///
+/// `armed`, as an `i32`. Non-zero means the published words are current.
+pub const FAST_ARMED: u64 = 0;
+/// How many reads the published words have served, as an `i64`.
+///
+/// A permanent counter, not a debug build's, for the same reason
+/// [`EXCHANGE_CROSS`] is one: it is the only number that says what the path is
+/// doing, and the host's MMIO census cannot count an access that never reached
+/// it.
+pub const FAST_SERVED: u64 = 8;
+/// The published `i32`s, one every four bytes.
+pub const FAST_WORDS: u64 = 16;
+/// How many word addresses one machine may publish.
+pub const FAST_MAX_READS: usize = 4;
+/// How much of the imported memory the published-read block claims.
+pub const FAST_LEN: u32 = 64;
+
 // ---- what the imports say -------------------------------------------------
 
 /// The access happened and nothing else needs doing.

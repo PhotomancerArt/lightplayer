@@ -1162,6 +1162,187 @@ the same shape — software interrupts raised by MMIO store, enables in the
 CPU — so its bus must answer the mask form and must **not** implement
 `CpuIntMatrix::cpu_interrupt`; `SocBus` already does the first.
 
+## The window, across a context save
+
+*M4 P4b.* P4 found, walking a project upload, that **loading any project
+killed the guest a few emulated seconds in** — deterministically, at the same
+cycle under `--core-quantum` 64 / 256 / 4096, on both boot paths, with and
+without an output node:
+
+```
+STRICT BUS STOP
+  pc      = 0x400800c9 (~_WindowUnderflow8+0x9)
+  access  = Read Word at 0xfffffff4          (= a1 - 12 with a1 = 0)
+```
+
+The same image runs for hours on the desk board, so it was the machine. It
+was the **hart's shared executor**, and one line of it: `CALL0`/`CALLX0`
+wrote `PS.CALLINC = 0`.
+
+### Reproducing it, and where the cycle comes from
+
+`walks/shader-oracle.script` replays the whole upload over UART0 in guest
+time. On the shipped image built from this tree (`63965f5c7`, the default
+features) the stop is at cycle **1,093,494,221** (4.556 s); on P4's
+`frame-dump` build of the same tree it is at 910,614,952 (3.794 s); P4
+measured 617,813,647 on its own image. ⚠️ The cycle moves with the image
+and the PC does not: the fault needs an interrupt to land on one particular
+instruction, and which tick does so is a property of the instruction stream.
+A run that stops short of the crash — the first attempt here ran 4 s and saw
+34 clean frames — proves nothing; `tests/project_load_survives.rs` runs to 8 s
+for that reason.
+
+### The trace
+
+Taken instruction by instruction on the shipped image (a local hook that
+swapped the machine's `run_slice` for `run_slice_traced` from a chosen cycle;
+`--trace` is the bus trace and does not do this — see "What this needed"
+below). The level-1 pacer (`EXCCAUSE 4`) lands on core 0 with four live
+CALL8 frames at bases 1, 3, 5 and 7:
+
+```
+@slice now=1093492288 pc=0x40080340 (_UserExceptionVector)
+       wb=7 ws=0x00aa ps=0x00060d30 epc1=0x400880b0 a1=0x3ffddc40
+```
+
+`ps = 0x00060d30`: `CALLINC = 2`. `EPC1 = 0x400880b0` is an `entry` — the
+interrupt landed **between frame 7's `call8` and its callee's `entry`**. Nine
+instructions later the handler saves that PS into its exception frame:
+
+```
+I 0x40080340 wsr.excsave1 a0
+I 0x40080343 rsr.exccause a0
+I 0x40080346 beqi a0, 5, _AllocAException
+I 0x40080349 call0 __naked_user_exception      <-- the one instruction between the two that touches CALLINC
+I 0x40080a88 or a0, a1, a1
+I 0x40080a8b addmi a1, a1, -256
+I 0x40080a8e s32i a0, a1, 12                   W [0x3ffddb4c] <- 0x3ffddc40   XT_STK_A1
+I 0x40080a91 s32e a0, a1, -12
+I 0x40080a94 rsr.ps a0
+I 0x40080a97 s32i a0, a1, 4                    W [0x3ffddb44] <- 0x00040d30   XT_STK_PS: CALLINC = 0
+```
+
+Everything the director's hypotheses named was then checked and was right.
+`save_context`'s `SPILL_REGISTERS` (`and a12,a12,a12; rotw 3` ×4, `rotw 4`)
+rotated 7 → 10 → 13 → 0 and raised exactly the three overflows the RM puts
+there, each `_WindowOverflow8` because each victim's callee was a `call8`:
+
+```
+X rotw base 7 -> 10 ws=0x00aa ; -> 13 ; -> 0
+I 0x40080080 _WindowOverflow8  (base 1)  a0..a3 -> [0x3ffddd50..)  a4..a7 -> [0x3ffdde60..)  rfwo ws=0x00a8
+I 0x40080080 _WindowOverflow8  (base 3)  a0..a3 -> [0x3ffddcd0..)  a4..a7 -> [0x3ffddde0..)  rfwo ws=0x00a0
+X rotw base 0 -> 3
+I 0x40080080 _WindowOverflow8  (base 5)  a0..a3 -> [0x3ffddc30..0x3ffddc40)  a4..a7 -> [0x3ffddd40..)  rfwo ws=0x0080
+X rotw base 3 -> 7
+```
+
+Frame 5's `a0..a3` went to `[0x3ffddc30..)` — sixteen bytes under frame 7's
+`a1 = 0x3ffddc40`, the right place. A level-2 interrupt then nested inside
+the handler (`ws 0x0580 → 0x0400`, one `_WindowOverflow4` and one
+`_WindowOverflow8`), returned through `rfi 2`, and the level-1 handler's own
+returns reloaded through `_WindowUnderflow8` (base 10 → 8) and
+`_WindowUnderflow4` (8 → 7) with every `PS.OWB` and every address right.
+`restore_context`'s `l32i a1, a1, 12` read `0x3ffddc40` back. Then `rfe`,
+and the first instruction after it:
+
+```
+I 0x400880b0 entry a1, 128        X entry base 7 -> 7 ws=0x0080
+                                  R a1=AR[29] <- 0x3ffddbc0
+```
+
+The re-run `entry` rotated by **zero** — `CALLINC` came back from the
+frame as 0 — and wrote the callee's stack pointer into **frame 7's own
+`a1`**, 0x80 below where it was. The callee then ran in frame 7's window,
+and 141 cycles later frame 7's `retw` (`a0 = 0x8008884f`, a `call8` return)
+took `_WindowUnderflow8` at base 5 with `a9 = 0x3ffddbc0` instead of
+`0x3ffddc40`:
+
+```
+I 0x40088279 retw
+I 0x400800c0 l32e a0, a9, -16     [0x3ffddbb0] = 0        (the exception frame's ACCHI slot)
+I 0x400800c3 l32e a1, a9, -12     [0x3ffddbb4] = 0        (M0)
+I 0x400800c9 l32e a7, a1, -12     0xfffffff4 -> STRICT BUS STOP
+```
+
+P4's "written only by `save_context`" reading of its save area was exactly
+this: the `0x3f700000, 0` it saw were the `F14`/`F15` slots of its own
+exception frame (its callee's `entry` was 32 bytes, so `a1` had shifted by
+0x20 into `sp_exc + 0xd0`).
+
+### The cause, from the RM
+
+The ISA Reference Manual's CALL0 page (p. 297) gives the instruction exactly
+two effects:
+
+```
+AR[0] ← PC + 3
+nextPC ← (PC31..2 + (offset17 12||offset) + 1)||00
+```
+
+CALL4's (p. 299) is `WindowCheck (00, 00, 01)`, **`PS.CALLINC ← 01`**,
+`AR[0100] ← 01||(PC + 3)29..0`, and Table 4–113 says of CALL4/8/12 that
+"These instructions communicate the number of registers to hide using
+PS.CALLINC in addition to the operation of CALL0." `PS.CALLINC` is
+architectural state that lives for one instruction per windowed call, and
+xtensa-lx-rt's vector does a `call0` inside that instruction — so does
+ESP-IDF's. Silicon never noticed because silicon's CALL0 does not write it.
+`lp-emu/lp-xt-emu/src/executor/call.rs` did, and the hart, `save_context`,
+the spills, the underflows and `rfe` all faithfully carried the zero.
+
+None of the five hypotheses in the brief was it — `rotw`'s mapping, the
+`s32e`/`l32e` addresses, the per-instruction check while rotated,
+`wsr.windowstart`, `PS.OWB` across the nest — and the trace above is the
+evidence for each. The fault was upstream of all of them.
+
+### Why nothing caught it
+
+- **The mach fixtures raise their interrupts with `wsr.intset`**, which the
+  hart delivers on the very next instruction (poll point (b)) — a `call8`
+  never sits there — and their scripted external line lands at slice
+  boundaries the fixture does not choose. `mach_ctxswitch`'s twelve scripted
+  preemptions never fell in a gap.
+- **The user-mode runner has no interrupts**, so its ENTRY always sees the
+  CALLINC its own call just wrote; `WindowPolicy::Direct` also takes
+  `max(CALLINC, 1)`. The corpus goldens and the fp silicon replays are
+  byte-identical under the fix.
+- **The C6 boots to its heartbeat and `shader-compile-stress` compiles with
+  `unmapped = 0`** because neither loads a project: a render-loop tick is
+  what puts a 1 ms interrupt inside a `call8`/`entry` gap often enough.
+
+### What pins it
+
+- `lp-xt-emu`'s `mach_callinc` fixture (`lp-xt/fixtures/mach/src/bin/`): a
+  CALL8 chain, a `CCOMPARE0` match placed on a callee's `entry` by scanning
+  `k`, lx-rt's real vectors, and the returns. Its transcript with the fix:
+
+  ```
+  vectors entered: 0x340 x8, 0x080 x14, 0x000 x1, 0x0c0 x13
+  gap rounds (EPC1 == p4b_leaf): 1
+  first gap round k: 6
+  PS.CALLINC the handler saw on it: 2
+  leaf result on it: 101
+  windowstart in d3: 0x02ad
+  ```
+
+  On `origin/main` the same run derails on the gap round and dies in
+  1,599,729 double exceptions.
+- The hart's `a_call0_inside_the_vector_leaves_ps_callinc_for_the_interrupted_entry`
+  unit test: red on main with `saved PS = 0x00040030`.
+- `tests/project_load_survives.rs`: the shipped image, this script,
+  `--strict-bus`, 8 s; `Outcome::Deadline`, `unmapped = 0`, the load
+  answered, the heartbeat after it, and ≥ 60 whole frames on pad 18.
+
+### What this needed, and does not have
+
+There is no committed way to trace the hart's instructions at machine level:
+`--trace` is the bus trace, `--break-at` stops once. The trace above came
+from a 60-line local patch that swapped `run_slice` for `run_slice_traced`
+past a cycle and printed the hart's window state at every slice boundary;
+P4's report says it stepped "instruction by instruction with a memory
+watch" the same way. Two phases have now built that tool and thrown it away.
+A `--trace-inst <cycle>` door on this binary is the obvious next spend, and
+it belongs to whoever next needs it, not to this fix.
+
 ## Flash, and the cache window
 
 *P4 lands the tables and the enable bits; P7 lands the chip and the fill.*

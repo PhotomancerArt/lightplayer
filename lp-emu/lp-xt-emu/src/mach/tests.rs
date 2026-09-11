@@ -2455,3 +2455,117 @@ fn the_user_mode_emulator_still_refuses_extreg() {
         }
     }
 }
+
+// --- PS.CALLINC across a CALL0 (M4 P4b) --------------------------------------
+
+/// `call op, pc -> target`: the RM's `nextPC = (PC & ~3) + 4 + offset*4`,
+/// solved for the offset.
+fn call(op: lp_xt_inst::CallOp, pc: u32, target: u32) -> Inst {
+    let base = (pc & !3).wrapping_add(4);
+    Inst::Call(op, (target.wrapping_sub(base) as i32) >> 2)
+}
+
+/// The RM's CALL0/CALLX0 pages write `a0` and nothing else; only CALL4/8/12
+/// and CALLX4/8/12 set `PS.CALLINC`. That matters in exactly one place, and
+/// xtensa-lx-rt's `_UserExceptionVector` is it: the vector reaches its
+/// handler with `call0 __naked_user_exception` and only *then* does `rsr a0,
+/// PS` to save the interruptee's `PS`. A hart on which CALL0 zeroed CALLINC
+/// therefore handed every handler a `PS` with `CALLINC = 0`, and when the
+/// interrupt had landed between a CALLn and its callee's ENTRY — one
+/// instruction of exposure per call — `restore_context` + `rfe` re-ran that
+/// ENTRY with `CALLINC = 0`: no rotation, and the callee's SP written into
+/// the caller's `a1`. M4 P4b found it on the classic as every project load
+/// dying in `_WindowUnderflow8` with `a1 = 0`.
+///
+/// This is that shape, reduced: a `CCOMPARE0` match lands the level-1
+/// interrupt on the callee's ENTRY (poll point (e)), the vector does what
+/// lx-rt's does, and the handler saves and restores `PS` the way
+/// `SAVE_CONTEXT`/`RESTORE_CONTEXT` do. `mach_callinc` is the fixture twin,
+/// with the real vectors.
+#[test]
+fn a_call0_inside_the_vector_leaves_ps_callinc_for_the_interrupted_entry() {
+    let (mut hart, mut bus) = booted();
+    hart.interrupts_mut().intenable = 1 << IRQ_TIMER0_L1;
+    let callee = CODE + 0x100;
+    let handler = CODE + 0x200;
+    // rsr.ccount a2 ; addi a2, a2, 6 ; wsr.ccompare0 a2 ; nop ; nop ; call8 callee
+    //
+    // The call8 is instruction 5 and brings CCOUNT to 6 as it retires, so
+    // the match is delivered before the instruction after it — the callee's
+    // ENTRY (EPC1 = callee).
+    let call8_at = CODE + 15;
+    asm(
+        &mut bus,
+        CODE,
+        &[
+            rsr(SpecialReg::Ccount, 2),
+            addi(2, 2, 6),
+            wsr(SpecialReg::Ccompare0, 2),
+            nop(),
+            nop(),
+            call(lp_xt_inst::CallOp::Call8, call8_at, callee),
+        ],
+    );
+    asm(&mut bus, callee, &[Inst::Entry(a(1), 32), brk()]);
+    // lx-rt's vector: save a0, CALL0 into the handler.
+    asm(
+        &mut bus,
+        VEC + VECOFS_USER,
+        &[
+            wsr(SpecialReg::Excsave1, 0),
+            call(lp_xt_inst::CallOp::Call0, VEC + VECOFS_USER + 3, handler),
+        ],
+    );
+    // lx-rt's handler, reduced: `rsr PS` into the frame (here the
+    // interrupted frame's stack, a1 = STACK_TOP), disarm the timer — only a
+    // CCOMPARE write clears its request — then `wsr PS` back from the frame,
+    // restore a0, `rfe`.
+    asm(
+        &mut bus,
+        handler,
+        &[
+            rsr(SpecialReg::Ps, 2),
+            s32i(2, 1, 0),
+            rsr(SpecialReg::Epc1, 3),
+            s32i(3, 1, 4),
+            movi(3, 0),
+            wsr(SpecialReg::Ccompare0, 3),
+            l32i(2, 1, 0),
+            wsr(SpecialReg::Ps, 2),
+            rsr(SpecialReg::Excsave1, 0),
+            Inst::Rf(RfOp::Rfe),
+        ],
+    );
+    assert_eq!(
+        hart.run_slice(&mut bus, 1000),
+        SliceEnd::Ebreak { pc: callee + 3 }
+    );
+    assert_eq!(
+        bus.word_at(STACK_TOP + 4),
+        callee,
+        "EPC1: the interrupt landed on the callee's ENTRY"
+    );
+    let saved_ps = bus.word_at(STACK_TOP);
+    assert_eq!(
+        (saved_ps >> PS_CALLINC_SHIFT) & 3,
+        2,
+        "the PS the handler saved after its CALL0 still carries the call8's \
+         CALLINC (saved PS = {saved_ps:#010x})"
+    );
+    assert_eq!(
+        hart.cpu().window_base,
+        2,
+        "the ENTRY re-run after rfe rotated by CALLINC = 2"
+    );
+    assert_eq!(hart.cpu().window_start, 0b101);
+    assert_eq!(
+        hart.cpu().ar[1],
+        STACK_TOP,
+        "the caller's a1 (AR[1]) is untouched"
+    );
+    assert_eq!(
+        hart.cpu().a(1),
+        STACK_TOP - 32,
+        "the callee's a1, in the new window"
+    );
+}

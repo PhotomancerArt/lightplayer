@@ -51,6 +51,7 @@ DEST="lp-emu/esp/roms"
 WANTED=(
     "esp32c6_rev0_rom.elf"
     "esp32_rev300_rom.elf" # plan three M3 (Q2): the classic v3 machine
+    "esp32s3_rev0_rom.elf" # plan three M6 (Q2): the S3 machine
 )
 
 sha256() {

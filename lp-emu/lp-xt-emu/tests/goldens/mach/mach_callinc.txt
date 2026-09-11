@@ -1,0 +1,13 @@
+fixture: mach_callinc
+vectors entered: 0x340 x8, 0x080 x14, 0x000 x1, 0x0c0 x13
+rounds: 8
+gap rounds (EPC1 == p4b_leaf): 1
+first gap round k: 6
+PS.CALLINC the handler saw on it: 2
+leaf result on it: 101
+interrupts taken: 8
+windowstart in d3: 0x02ad
+windowbase in d3: 9
+rounds with a wrong result: 0
+chain returned with the right sums: 1
+epc1 on the first gap round: p4b_leaf

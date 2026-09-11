@@ -40,11 +40,22 @@ use lp_emu_jit::blocks::BlockSet;
 use lp_emu_jit::discover::{DiscoverStats, Discovered, discover, discover_from};
 use lp_emu_jit::dispatch::{BODY_BUDGET, emit_module, target_table_bytes, write_target_tables};
 use lp_emu_jit::host::{
-    self, EXCHANGE_LEN, FLAG_AFTER_STORE, FLAG_SLICE_ENDED, HostOps, MMIO_LEAVE_AFTER, MMIO_OK,
-    MMIO_PENDING, MMIO_REFUSED, MMIO_SLICE_ENDED, MmioLoad, MmioStore, PERM_ENTRIES, PERM_SHIFT,
-    Polled, STEP_CONTINUE, STEP_SLICE_ENDED, StepOne, load_kind, store_kind,
+    self, EXCHANGE_LEN, FAST_ARMED, FAST_LEN, FAST_SERVED, FAST_WORDS, FLAG_AFTER_STORE,
+    FLAG_PENDING, FLAG_SLICE_ENDED, HostOps, MMIO_LEAVE_AFTER, MMIO_OK, MMIO_PENDING, MMIO_REFUSED,
+    MMIO_SLICE_ENDED, MmioLoad, MmioStore, PERM_ENTRIES, PERM_SHIFT, Polled, STEP_CONTINUE,
+    STEP_SLICE_ENDED, StepOne, load_kind, store_kind,
 };
-use lp_emu_jit::translate::{Emit, Emitted, Layout};
+use lp_emu_jit::translate::{Emit, Emitted, FastRead, FastReads, FastSource, Layout};
+
+/// The exit flags that leave the hart owing polling point (c).
+///
+/// [`FLAG_AFTER_STORE`] is a store the stay could not poll for itself — a
+/// core whose host has no hart to run the poll on. [`FLAG_PENDING`] is the
+/// obligation an MMIO **load** left: the stay ended before the store that
+/// would have taken it, so the hart takes it in its own `after_store` arm
+/// rather than the stay carrying it into a later one, where the selector
+/// would have cleared it (M7b F1).
+const POLL_OWED: i32 = FLAG_AFTER_STORE | FLAG_PENDING;
 
 // Which host runs the emitted module, chosen by target and by nothing else.
 //
@@ -58,6 +69,9 @@ use lp_emu_jit::host_browser::BrowserCore as HostCore;
 #[cfg(not(target_family = "wasm"))]
 use lp_emu_jit::host_wasmtime::WasmtimeCore as HostCore;
 use lp_riscv_emu::mach::translated::{RunOutcome, TranslatedCore};
+
+use crate::memmap;
+use crate::periph::systimer::{self, Systimer};
 use lp_riscv_emu::mach::{MachineHart, SliceEnd};
 
 use crate::jit_record::{CallRec, EntryRec, Recorder};
@@ -517,6 +531,7 @@ fn emit_sizes(
         perm_offset: at.perm_at,
         exchange_offset: at.exchange_at,
         indirect: Some(at.indirect_at),
+        fast_reads: systimer_fast_reads(bus, at.fast_at),
     };
     if let Err(e) = std::fs::create_dir_all(&record.dir) {
         log::error!("jit: {}: {e}", record.dir.display());
@@ -597,6 +612,7 @@ pub fn emit_only(
         perm_offset: at.perm_at,
         exchange_offset: at.exchange_at,
         indirect: Some(at.indirect_at),
+        fast_reads: systimer_fast_reads(bus, at.fast_at),
     };
     let started = std::time::Instant::now();
     let emitted = emit_module(&found.set, model, layout, policy, fn_blocks);
@@ -719,15 +735,27 @@ pub struct JitStats {
     /// or a block whose own end left the set at a pc that happens to be a
     /// start.
     pub exit_known_pc: u64,
-    /// Exits carrying `FLAG_AFTER_STORE`: polling point (c) handed back to
-    /// the hart's own loop. **Zero on this machine since M7b P2** — the poll
-    /// runs inside the stay — and kept because a core that cannot poll still
-    /// reports it.
+    /// Exits carrying [`POLL_OWED`]: polling point (c) handed back to the
+    /// hart's own loop.
+    ///
+    /// `FLAG_AFTER_STORE` itself is **zero on this machine since M7b P2** —
+    /// the poll runs inside the stay — and is kept because a core that cannot
+    /// poll still reports it. What does land here is `FLAG_PENDING`: a stay
+    /// that ended while an MMIO load's yield was still unclaimed owes the poll
+    /// to the hart (M7b F1).
     pub exit_after_store: u64,
     /// Polling points (c) run **inside** a stay, and how many of them ended
     /// it (M7b P2). `polls - polls_left` is the exit that did not happen.
     pub polls: u64,
     pub polls_left: u64,
+    /// MMIO word reads translated code served from the published-read block
+    /// instead of crossing to the bus (M7b P3). Counted by translated code
+    /// itself: the MMIO census counts what reached the bus, and these did not,
+    /// so this is the only number that can say what the path did.
+    pub fast_served: u64,
+    /// Times the published words were armed, and times they were dropped.
+    pub fast_armed: u64,
+    pub fast_disarmed: u64,
     /// Exits carrying `FLAG_SLICE_ENDED`.
     pub exit_slice_ended: u64,
     /// Entries that retired nothing: the first block did not fit the
@@ -868,6 +896,64 @@ impl BuildReport {
     }
 }
 
+/// The SYSTIMER registers a translated core serves without the bus, and where
+/// each one's value comes from (M7b P3).
+///
+/// esp-hal's `read_count` — `Instant::now`, and 2.3 M of the 5.5 s run — is
+/// **five** accesses: a `unit0_op` store carrying `update`, then reads of
+/// `unit0_op`, `unit0_value.lo`, `unit0_value.hi` and `unit0_value.lo` again.
+/// The sequence is pure only *as a sequence*: `unit0_value` returns
+/// [`Systimer`]'s latched field, and the latch is written by the store.
+///
+/// **So the store is not served here.** It stays on [`HostOps::mmio_store`],
+/// where it latches the count through the model's own code, sets the bus's
+/// side-band, gets its trace line and its grade check, and runs polling point
+/// (c) on a crossing it was already paying for (M7b P2). What this serves is
+/// the four **loads**, which are 9,303,470 of the run's 11,626,424 SYSTIMER
+/// operations — and the host republishes the latched word on the store's own
+/// crossing, so what translated code reads is the model's own value rather
+/// than a re-derivation of it.
+///
+/// Ordered by how often each is read, because `$fast_load` compares in order.
+fn systimer_fast_reads(bus: &SocBus, offset: u32) -> Option<FastReads> {
+    // `None` when the chip does not have the block where this one does, or
+    // reaches it through an alias as well: a published read whose address is
+    // not the only way to the register would be a second window this path
+    // cannot see.
+    let (base, _, aliased) = bus
+        .peripheral_index("SYSTIMER")
+        .and_then(|i| bus.peripheral_window(i))?;
+    if base != memmap::periph::SYSTIMER || aliased {
+        return None;
+    }
+    Some(systimer_reads_at(offset))
+}
+
+fn systimer_reads_at(offset: u32) -> FastReads {
+    let base = memmap::periph::SYSTIMER;
+    let published = |off: u32, slot: u32| {
+        Some(FastRead {
+            address: base + off,
+            source: FastSource::Published(slot),
+        })
+    };
+    FastReads {
+        offset,
+        reads: [
+            published(systimer::UNIT0_VALUE_LO, 0),
+            published(systimer::UNIT0_VALUE_HI, 1),
+            // `read_word`'s `unit_op` arm answers with this constant and
+            // nothing else — it is not a function of the count, of the cycle
+            // or of anything the guest can change.
+            Some(FastRead {
+                address: base + systimer::UNIT0_OP,
+                source: FastSource::Constant(systimer::OP_VALUE_VALID as i32),
+            }),
+            None,
+        ],
+    }
+}
+
 /// What translated code calls back into.
 ///
 /// The two pointers are set for the length of one entry and cleared
@@ -893,6 +979,19 @@ pub struct C6Ops {
     /// running. Empty and never touched otherwise.
     calls: Vec<CallRec>,
     recording: bool,
+
+    // --- the SYSTIMER's published reads (M7b P3) --------------------------
+    /// The published-read block inside the arena, or null when this machine
+    /// published nothing. `FAST_LEN` bytes; see [`lp_emu_jit::host`].
+    fast: *mut u8,
+    /// The SYSTIMER's `[base, base + len)`, so one compare recognises a store
+    /// that could have moved the latch this publishes.
+    systimer_window: (u32, u32),
+    /// The index [`SocBus::with_peripheral`] reaches the SYSTIMER at.
+    systimer_index: usize,
+    /// Times the published words went from disarmed to armed, and back.
+    fast_armed: u64,
+    fast_disarmed: u64,
 }
 
 // SAFETY: the pointers are only dereferenced from inside a `WasmtimeCore::enter`
@@ -910,6 +1009,113 @@ impl C6Ops {
         debug_assert!(!self.hart.is_null() && !self.bus.is_null());
         // SAFETY: the caller's obligation, above.
         unsafe { (&mut *self.hart, &mut *self.bus) }
+    }
+
+    /// Arm or disarm the published-read block, counting the transition.
+    ///
+    /// Disarming is **always safe**: translated code then calls
+    /// [`HostOps::mmio_load`] exactly as it did before M7b P3, and the bus
+    /// serves the read with its trace line, its grade check, its census note
+    /// and its watchpoints. Every condition on this path is therefore a
+    /// refusal rather than an assertion, which is what makes the list of them
+    /// the design rather than an optimisation detail.
+    #[inline]
+    fn set_fast_armed(&mut self, on: bool) {
+        if self.fast.is_null() {
+            return;
+        }
+        // SAFETY: `fast` points at `FAST_LEN` bytes inside the bus's arena,
+        // which is allocated once and never moves, and which no region covers
+        // — see this module's docs. Unaligned because the gap it sits in is
+        // the arena's, not the allocator's.
+        let p = unsafe { self.fast.add(FAST_ARMED as usize) }.cast::<i32>();
+        // SAFETY: as above.
+        let was = unsafe { p.read_unaligned() } != 0;
+        if was == on {
+            return;
+        }
+        // SAFETY: as above.
+        unsafe { p.write_unaligned(i32::from(on)) };
+        if on {
+            self.fast_armed += 1;
+        } else {
+            self.fast_disarmed += 1;
+        }
+    }
+
+    /// Republish `Systimer`'s `unit0_value.{lo,hi}` and arm the block — or
+    /// leave it disarmed, when this run's configuration forbids the path
+    /// (M7b P3, plan.md BD3).
+    ///
+    /// The three refusals here are the ones the entry rules do **not** already
+    /// cover, and none of them is optional:
+    ///
+    /// - **the trace.** `SocBus::read_mmio` emits an `MmioEvent` on every
+    ///   access while a trace is running, and the free oracle compares those
+    ///   lines. An inline read emits none, so with `--trace` on the fast path
+    ///   must never arm — and the oracle's 20 ms cells then prove the refusal
+    ///   rather than the path.
+    /// - **a strict grade.** `SocBus::check_grade` runs on every MMIO access
+    ///   and can refuse one before the peripheral sees it.
+    /// - **`--strict-bus`.** It watches guest stores for the missing-fence
+    ///   checker and shortens the slice cap; an inline access is not watched.
+    ///
+    /// The entry rules in [`JitCore::run`] already cover load watchpoints,
+    /// more than one store watchpoint, and `Bus::fetch_is_pure` — which is
+    /// where a `t3` memory-cost model and an execute watchpoint are refused.
+    ///
+    /// What is *not* a condition, and the reason the phase is smaller than its
+    /// brief expected: `Systimer::offset[0]` and `frozen[0]` are not read
+    /// here at all. The published words are the model's own `latched[0]`,
+    /// copied after the model computed it, so a `CONF` write that stops the
+    /// unit or a `unit0_load` that moves it changes nothing this path
+    /// believes. The latch moves in exactly one place — `write_word`'s
+    /// `unit_op` arm — and only a store reaches it.
+    fn republish_systimer(&mut self) {
+        if self.fast.is_null() {
+            return;
+        }
+        let index = self.systimer_index;
+        let words = {
+            // SAFETY: called from inside `enter`.
+            let (_, bus) = unsafe { self.parts() };
+            if bus.trace_is_enabled() || bus.strict_grade().is_some() || bus.strict() {
+                None
+            } else {
+                bus.with_peripheral::<Systimer, _>(index, |s, _| s.value_words(0))
+            }
+        };
+        let Some(words) = words else {
+            self.set_fast_armed(false);
+            return;
+        };
+        for (i, w) in words.iter().enumerate() {
+            // SAFETY: see `set_fast_armed` — the same `FAST_LEN` bytes.
+            unsafe {
+                self.fast
+                    .add(FAST_WORDS as usize + 4 * i)
+                    .cast::<u32>()
+                    .write_unaligned(*w);
+            }
+        }
+        self.set_fast_armed(true);
+    }
+
+    /// Reads the published words have served since the machine was built.
+    ///
+    /// Counted by translated code, in the arena, because the host's MMIO
+    /// census counts what reached the bus and these never did.
+    fn fast_served(&self) -> u64 {
+        if self.fast.is_null() {
+            return 0;
+        }
+        // SAFETY: see `set_fast_armed` — the same `FAST_LEN` bytes.
+        unsafe {
+            self.fast
+                .add(FAST_SERVED as usize)
+                .cast::<u64>()
+                .read_unaligned()
+        }
     }
 
     /// **Polling point (c)**, run by the hart itself, from inside a stay
@@ -1052,6 +1258,14 @@ impl HostOps for C6Ops {
                 other => unreachable!("the translator emits no store kind {other}"),
             }
         };
+        // The latch the published reads mirror moves in one place — the
+        // SYSTIMER's own `unit_op` arm — and only a store can get there.
+        // Republishing on every store the block sees, rather than only on
+        // `unit0_op`, costs one compare and removes a case analysis from the
+        // correctness argument (M7b P3).
+        if address.wrapping_sub(self.systimer_window.0) < self.systimer_window.1 {
+            self.republish_systimer();
+        }
         let out = match written {
             // The store retired, so the hart polls — here, in the same
             // crossing, rather than by ending the stay (M7b P2).
@@ -1096,6 +1310,10 @@ impl HostOps for C6Ops {
 
     fn step_one(&mut self, pc: u32, cycle: u64, instret: u64, regs: &mut [i32; 32]) -> StepOne {
         self.escape_hatch += 1;
+        // An escaped instruction is an arbitrary one, and one of the things it
+        // can be is a store to `unit0_op`. Drop the published words rather
+        // than work out whether it was (M7b P3).
+        self.set_fast_armed(false);
         // SAFETY: called from inside `enter`.
         let (hart, bus) = unsafe { self.parts() };
         // Hand the hart everything translated code has been carrying, run one
@@ -1205,6 +1423,9 @@ pub struct JitCore {
 struct Areas {
     perm_at: u32,
     exchange_at: u32,
+    /// The published-read block (M7b P3). Shared with the exchange area, for
+    /// the same reason: it holds the same bytes for every live module.
+    fast_at: u32,
     /// The indirect-target page map; the slot arrays follow it.
     indirect_at: u32,
     /// What the page map and its slot arrays take, together.
@@ -1241,7 +1462,7 @@ fn areas(bus: &SocBus, set: &BlockSet, used: u32) -> Result<Areas, String> {
     }
     let indirect_len = u32::try_from(target_table_bytes(set))
         .map_err(|_| "the indirect-target tables do not fit a 32-bit offset".to_string())?;
-    let shared = u64::from(PERM_ENTRIES) + u64::from(EXCHANGE_LEN);
+    let shared = u64::from(PERM_ENTRIES) + u64::from(EXCHANGE_LEN) + u64::from(FAST_LEN);
     let need = u64::from(used).max(shared) + u64::from(indirect_len);
     let (gap_base, gap_len) = bus
         .largest_arena_gap()
@@ -1254,6 +1475,7 @@ fn areas(bus: &SocBus, set: &BlockSet, used: u32) -> Result<Areas, String> {
     }
     let perm_at = gap_base - bus.guest_arena_base();
     let exchange_at = perm_at + PERM_ENTRIES;
+    let fast_at = exchange_at + EXCHANGE_LEN;
     let indirect_at = perm_at + (used.max(shared as u32));
     if u64::from(indirect_at) + u64::from(indirect_len) > pages * 65536 {
         return Err("the translator's tables fall outside the wasm memory".into());
@@ -1261,6 +1483,7 @@ fn areas(bus: &SocBus, set: &BlockSet, used: u32) -> Result<Areas, String> {
     Ok(Areas {
         perm_at,
         exchange_at,
+        fast_at,
         indirect_at,
         indirect_len,
         pages,
@@ -1352,6 +1575,11 @@ impl Module {
         // host's view of the arena.
         write_target_tables(bus.guest_arena_mut(), mem_base, at.indirect_at, set);
 
+        // The SYSTIMER's published reads (M7b P3). `None` when the chip does
+        // not have the block where this one does, or reaches it through an
+        // alias as well: publishing a read whose address is not the only way
+        // to the register would be a second window this path cannot see.
+        let fast_reads = systimer_fast_reads(bus, mem_base + at.fast_at);
         let layout = Layout {
             memory_pages,
             guest_base,
@@ -1359,6 +1587,7 @@ impl Module {
             perm_offset: mem_base + at.perm_at,
             exchange_offset: mem_base + at.exchange_at,
             indirect: Some(mem_base + at.indirect_at),
+            fast_reads,
         };
 
         let started = std::time::Instant::now();
@@ -1422,7 +1651,16 @@ impl Module {
         // the emulator's own linear memory, and the engine's guard pages are
         // already under every access.
         let arena_guard = bus.guest_arena_guard();
+        let systimer = bus
+            .peripheral_index("SYSTIMER")
+            .and_then(|i| bus.peripheral_window(i).map(|(b, l, _)| (i, (b, l))))
+            .unwrap_or((usize::MAX, (0, 0)));
         let exchange = bus.guest_arena_mut()[at.exchange_at as usize..].as_mut_ptr();
+        let fast = if fast_reads.is_some() {
+            bus.guest_arena_mut()[at.fast_at as usize..].as_mut_ptr()
+        } else {
+            core::ptr::null_mut()
+        };
         let ops = C6Ops {
             hart: core::ptr::null_mut(),
             bus: core::ptr::null_mut(),
@@ -1433,6 +1671,11 @@ impl Module {
             escape_hatch: 0,
             calls: Vec::new(),
             recording: false,
+            fast,
+            systimer_window: systimer.1,
+            systimer_index: systimer.0,
+            fast_armed: 0,
+            fast_disarmed: 0,
         };
         // SAFETY: `arena_base` is the bus's own arena, allocated once during
         // construction from the chip's declared memory map and documented as
@@ -1463,6 +1706,7 @@ impl Module {
                 .collect();
             live.push((at.perm_at, PERM_ENTRIES, false));
             live.push((at.exchange_at, EXCHANGE_LEN, false));
+            live.push((at.fast_at, FAST_LEN, false));
             live.push((at.indirect_at, at.indirect_len, false));
             live.sort_unstable();
             (
@@ -1994,6 +2238,10 @@ impl TranslatedCore<SocBus> for JitCore {
                 x[4 * i..][..4].copy_from_slice(&r.to_le_bytes());
             }
             ops.slice_end = None;
+            // Whatever the published-read block holds was published in some
+            // earlier stay, and the interpreter has run since. Drop it: a stay
+            // only ever trusts a word it saw published inside itself (M7b P3).
+            ops.set_fast_armed(false);
             ops.hart = hart;
             ops.bus = bus;
         }
@@ -2016,6 +2264,11 @@ impl TranslatedCore<SocBus> for JitCore {
         self.stats.escape_hatch += escaped;
         self.stats.polls += core::mem::take(&mut ops.polls);
         self.stats.polls_left += core::mem::take(&mut ops.polls_left);
+        self.stats.fast_armed += core::mem::take(&mut ops.fast_armed);
+        self.stats.fast_disarmed += core::mem::take(&mut ops.fast_disarmed);
+        // Cumulative in the arena and shared by every live module, so this is
+        // an assignment rather than an addition.
+        self.stats.fast_served = ops.fast_served();
         let slice_end = ops.slice_end.take();
 
         let exit = match exit {
@@ -2107,7 +2360,7 @@ impl TranslatedCore<SocBus> for JitCore {
             }
         }
 
-        if exit.flags & FLAG_AFTER_STORE != 0 {
+        if exit.flags & POLL_OWED != 0 {
             self.stats.exit_after_store += 1;
         }
         if exit.flags & FLAG_SLICE_ENDED != 0 {
@@ -2154,7 +2407,7 @@ impl TranslatedCore<SocBus> for JitCore {
             pc: hart.pc(),
             cycle_count: hart.cycle_count(),
             instruction_count: hart.instruction_count(),
-            after_store: exit.flags & FLAG_AFTER_STORE != 0,
+            after_store: exit.flags & POLL_OWED != 0,
         }
     }
 
@@ -2251,6 +2504,7 @@ impl TranslatedCore<SocBus> for JitCore {
              entries {}, retired {}, escape_hatch {}, cross {}, indirect_miss {}, \
              interpreted_between {}, exits known/unknown {}/{}, after_store {}, \
              polls {} ({} left the stay), \
+             systimer_fast {} read(s) served (armed {}, disarmed {}), \
              slice_ended {}, no_progress {}, \
              invalidations {} (dropped {} blocks), \
              refused_pending {}, refused_watch {}, refused_no_entry {}, refused_impure {}, \
@@ -2296,6 +2550,9 @@ impl TranslatedCore<SocBus> for JitCore {
             s.exit_after_store,
             s.polls,
             s.polls_left,
+            s.fast_served,
+            s.fast_armed,
+            s.fast_disarmed,
             s.exit_slice_ended,
             s.exit_no_progress,
             s.invalidations,

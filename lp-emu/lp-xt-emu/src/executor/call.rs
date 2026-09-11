@@ -5,6 +5,9 @@
 //! *caller's* window and records `PS.CALLINC`. The callee's `ENTRY` performs the
 //! rotation, so `a[4*inc]` becomes the callee's `a0` and the caller's argument
 //! registers `a[4*inc + 2..]` become the callee's `a2..`.
+//!
+//! A non-windowed CALL0/CALLX0 writes `a0` and nothing else: `PS.CALLINC` is
+//! not its to touch (see `exec_call`).
 
 use lp_emu_core::bus::Bus;
 use lp_xt_inst::{CallOp, CallxOp, Inst};
@@ -50,9 +53,23 @@ impl<B: Bus> Exec<'_, B> {
 
         let ret = pc.wrapping_add(3);
         if inc == 0 {
-            // CALL0 / CALLX0: non-windowed. a0 = return address, no rotation.
+            // CALL0 / CALLX0: non-windowed. a0 = return address, no rotation,
+            // and **PS.CALLINC is left alone**: the RM's CALL0/CALLX0 pages
+            // list no write to it; only CALL4/8/12 and CALLX4/8/12 set it.
+            //
+            // The write that used to be here (`ps_callinc = 0`) was M4 P4b's
+            // finding. xtensa-lx-rt's `_UserExceptionVector` reaches its
+            // handler through `call0 __naked_user_exception` and only then
+            // does `rsr a0, PS`, so an interrupt that lands between a CALLn
+            // and its callee's ENTRY had its CALLINC zeroed before the
+            // handler could save it; `rfe` then re-ran that ENTRY with
+            // CALLINC = 0, which rotates by nothing and writes the callee's
+            // SP into the *caller's* `a1` — and the caller's next `retw`
+            // reloaded its own caller from the wrong save area. On the
+            // classic that killed every project load a few seconds in, in
+            // `_WindowUnderflow8` with `a1 = 0` (lp-emu-esp32v3's README,
+            // "The window, across a context save").
             self.wreg(0, ret, tracer);
-            self.cpu.ps_callinc = 0;
         } else {
             // Windowed: stage the mangled return address in a[4*inc], record
             // PS.CALLINC for the callee's ENTRY.

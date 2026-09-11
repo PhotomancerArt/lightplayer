@@ -7,8 +7,70 @@
 // here — the caller has them.
 'use strict';
 
-import { makeWasi } from './wasi-shim.js';
-import { makeJitHost } from './jit-host.js';
+// DD33 — this module passes on the stamp it was loaded with.
+//
+// `worker.js` is fetched as `worker.js?v=<build short>` and pulls this file in
+// as `./bench-run.js?v=<build short>`; a static `import './wasi-shim.js'` here
+// would drop the stamp again and leave a fresh `bench-run.js` free to pair with
+// a cached `wasi-shim.js` or `jit-host.js` — the same defect one level down,
+// and the one that killed Safari with a missing export and a bare stack. So
+// this module reads its OWN stamp off `import.meta.url` and hands it to both
+// siblings. The rule is self-propagating: every module in this directory that
+// imports a sibling stamps that import from its own URL.
+//
+// It is written out here rather than shared from a helper module because the
+// import of THAT helper would be the unstamped edge.
+//
+// `bench-cli.mjs` imports this file with no stamp (node/bun read the stage off
+// the filesystem, where there is no cache to go stale), so `STAMP` is null
+// there and the specifiers are the plain ones.
+const STAMP = new URL(import.meta.url).searchParams.get('v');
+const stamped = (name) => name + (STAMP ? '?v=' + STAMP : '');
+
+// Kicked off at module scope so both fetches are in flight immediately, and
+// awaited inside `runOnce` rather than at the top level — a top-level await
+// here would become a top-level await in `worker.js`'s graph, and a module
+// worker's message queue and TLA are a bad pair.
+const siblings = Promise.all([
+  import(stamped('./wasi-shim.js')),
+  import(stamped('./jit-host.js')),
+]).then(([wasiMod, jitMod]) => ({ makeWasi: wasiMod.makeWasi, makeJitHost: jitMod.makeJitHost }));
+
+/// The gate rows, in the order the phone takes them.
+///
+/// A phone in someone's hand is not a place to drive six selects, and a row
+/// taken at a different bound than the row beside it is not a comparison. So
+/// the sequence the M7B gate quotes lives here, fixed, as data: `render-basic`
+/// at `t2` inside the 5500 ms `GATE_US` window, the JD26 blocks-per-function
+/// knob swept 8 -> 16 -> 32, and the same image re-taken under `--interpreter`
+/// on the same binary in the same session.
+///
+/// ⚠️ 8 and 16 are deliberately BELOW the `fnBlocksChoices` floor the staged
+/// manifest offers (32). That floor is there because V8 has died below it —
+/// `Fatal process out of memory: Zone` from a background compile job, the
+/// outer selector being 730 KB and 25,156 nested blocks at 8 against 176 KB at
+/// 32 (P6b) — and a browser tab cannot catch that. The preset asks for the two
+/// rows anyway, because whether the phone's own engine survives them IS the
+/// question the gate is asking; `node` 25's V8 took both on `render-basic`
+/// when this was written. On an engine that dies there, the page dies with it
+/// and nothing uploads — which is that engine's answer, and the one failure
+/// mode of this preset the rig cannot turn into a failed row.
+export const GATE_ROWS = [
+  { slug: 'render-basic', grade: 't2', mode: 'jit', fnBlocks: 8, timeout: '5500ms' },
+  { slug: 'render-basic', grade: 't2', mode: 'jit', fnBlocks: 16, timeout: '5500ms' },
+  { slug: 'render-basic', grade: 't2', mode: 'jit', fnBlocks: 32, timeout: '5500ms' },
+  { slug: 'render-basic', grade: 't2', mode: 'interp', fnBlocks: null, timeout: '5500ms' },
+];
+
+/// `GATE_ROWS` as a plan the Worker can run, taking the wall-clock guard and
+/// the `--exit-on` policy from the staged manifest so the preset and a
+/// hand-driven run differ in nothing but the rows.
+export function gateRowsPlan(manifest) {
+  const d = (manifest && manifest.defaults) || {};
+  const wallTimeout = d.wallTimeout ?? 600;
+  const exitOn = !!d.exitOn;
+  return GATE_ROWS.map((row) => ({ ...row, wallTimeout, exitOn }));
+}
 
 /// Build the emulator's own argv for one row.
 ///
@@ -134,6 +196,7 @@ export async function runOnce(o) {
   // `o.env` is P6c's way to reach the emulator's environment-gated
   // diagnostics from a wasm row (`LP_EMU_JIT_MMIO_CENSUS` and the rest).
   // Absent on every row the page takes.
+  const { makeWasi, makeJitHost } = await siblings;
   const wasi = makeWasi(argsFor(o), o.image.elf, o.elfBytes, o.env ?? {});
   const host = makeJitHost();
 

@@ -202,20 +202,6 @@ cp "$wasm_bin" "$stage_dir/emu.wasm"
 cp "$rig_dir/index.html" "$rig_dir/worker.js" "$rig_dir/jit-host.js" \
    "$rig_dir/wasi-shim.js" "$rig_dir/bench-run.js" "$rig_dir/bench-cli.mjs" "$stage_dir/"
 
-manifest_images="[]"
-for spec in "${images[@]}"; do
-    IFS='|' read -r slug var features timeout exit_on commit spike <<<"$spec"
-    elf="$(resolve_image "$slug" "$var" "$features" "$commit" "$spike")"
-    cp "$elf" "$stage_dir/fw-$slug.elf"
-    entry="$(jq -n --arg slug "$slug" --arg elf "fw-$slug.elf" --arg timeout "$timeout" \
-        --arg exitOn "$exit_on" '{slug: $slug, elf: $elf, timeout: $timeout, exitOn: (if $exitOn == "" then null else $exitOn end)}')"
-    manifest_images="$(jq -c --argjson e "$entry" '. + [$e]' <<<"$manifest_images")"
-done
-
-# The `build` object lets the page (and every uploaded result) say what was
-# measured: the emulator's git sha/branch/dirty flag and when it was built,
-# so a phone that refreshes can see it picked up a new build, and the
-# collected log can attribute numbers without guessing.
 sha256() {
     if command -v shasum >/dev/null 2>&1; then
         shasum -a 256 "$1" | awk '{print $1}'
@@ -223,6 +209,41 @@ sha256() {
         sha256sum "$1" | awk '{print $1}'
     fi
 }
+
+manifest_images="[]"
+for spec in "${images[@]}"; do
+    IFS='|' read -r slug var features timeout exit_on commit spike <<<"$spec"
+    elf="$(resolve_image "$slug" "$var" "$features" "$commit" "$spike")"
+    cp "$elf" "$stage_dir/fw-$slug.elf"
+    # `elfStamp` is the cache buster the Worker puts on the ELF fetch. It is a
+    # CONTENT stamp (the first 12 hex of the image's sha256), not the build
+    # stamp every JS/wasm URL carries, and the difference is deliberate: these
+    # are pinned images (DD25) that move when the pin moves and at no other
+    # time, and hanging the emulator's git sha off 36 MB of ELF would make a
+    # phone re-download all four every time the emulator is rebuilt — on the
+    # LAN, between two rows of a gate sequence. A content stamp busts exactly
+    # when the bytes change, which for a firmware image is the only thing a
+    # stale copy could get wrong; and it would get it wrong as a plausible
+    # WRONG NUMBER rather than as a loud missing export.
+    elf_stamp="$(sha256 "$stage_dir/fw-$slug.elf" | cut -c1-12)"
+    entry="$(jq -n --arg slug "$slug" --arg elf "fw-$slug.elf" --arg timeout "$timeout" \
+        --arg stamp "$elf_stamp" \
+        --arg exitOn "$exit_on" '{slug: $slug, elf: $elf, elfStamp: $stamp, timeout: $timeout, exitOn: (if $exitOn == "" then null else $exitOn end)}')"
+    manifest_images="$(jq -c --argjson e "$entry" '. + [$e]' <<<"$manifest_images")"
+done
+
+# The `build` object lets the page (and every uploaded result) say what was
+# measured: the emulator's git sha/branch/dirty flag and when it was built,
+# so a phone that refreshes can see it picked up a new build, and the
+# collected log can attribute numbers without guessing.
+#
+# `build.short` is also the cache stamp the whole page hangs off: `index.html`
+# loads `worker.js?v=<short>`, the Worker reads that back off its own URL and
+# puts it on `emu.wasm` and on `bench-run.js`, and `bench-run.js` puts its own
+# stamp on `wasi-shim.js` and `jit-host.js`. That chain is what DD33 asked for
+# — a new build cannot load an old sibling — and it is why the page fetches
+# `manifest.json` itself with `no-store`: a cached manifest would hand out a
+# stale stamp and the whole consistent set behind it.
 build_sha="$(git rev-parse HEAD)"
 build_short="${build_sha:0:7}"
 build_branch="$(git branch --show-current)"
@@ -244,22 +265,35 @@ build_obj="$(jq -n --arg sha "$build_sha" --arg short "$build_short" --arg branc
 # in #678 and #680 was taken at, and 20 s is the longer bound a lazily tiering
 # engine's steady state needs to show.
 #
-# `fnBlocksChoices` is bounded at BOTH ends by the same fatal V8 OOM, and the
-# reasons are mirror images of each other. Above 256: `Fatal process out of
-# memory: Zone` in `WasmLoweringPhase` at 512 blocks a function and every size
-# above, AFTER the module compiles and instantiates (#680) — the largest
-# function there is a sub-dispatcher. Below 32: the same OOM, from a background
-# compile job, because the largest function there is the outer SELECTOR
-# (730 KB and 25,156 nested blocks at 8, against 176 KB at 32) — P6b. A browser
-# tab cannot catch either one, so neither end is offered here.
+# `fnBlocksChoices` runs 8 to 256, and each end of that range is a judgement
+# rather than a safe bound.
+#
+# Above 256 is not offered: `Fatal process out of memory: Zone` in
+# `WasmLoweringPhase` at 512 blocks a function and every size above it, AFTER
+# the module compiles and instantiates (#680) — the largest function there is a
+# sub-dispatcher. A browser tab cannot catch that, so the dropdown does not
+# lead anyone into it.
+#
+# 8 and 16 ARE offered, and did not used to be (DD32). The floor was 32 because
+# the same fatal OOM lived below it, from a background compile job, the largest
+# function there being the outer SELECTOR — 730 KB and 25,156 nested blocks at
+# 8, against 176 KB at 32 (P6b, with the NESTED selector). `Selector::DEFAULT`
+# has been `Flat` since #697; the phone's best size is 8 and V8's is 16 (#706,
+# the G-M7P rows); and the one-click preset beside the Run button takes 8 and
+# 16 already. A dropdown that cannot ask for the size the button next to it
+# runs, and that the gate quotes, is wrong about the rig rather than careful
+# about the engine. ⚠️ The risk has NOT gone away: on an engine that dies at 8
+# the tab dies with it and nothing uploads — which is that engine's answer to
+# the question the gate is asking.
 #
 # `defaults.fnBlocks` is 32 because `DEFAULT_JIT_FN_BLOCKS` is (DD20, P6c): the
 # page's default and the emulator's default are the same number or the page
-# lies about what a default run does.
+# lies about what a default run does. Widening the CHOICES does not touch it —
+# the default is M7b P5's to set, from a phone row (BD6).
 jq -n --argjson images "$manifest_images" --argjson build "$build_obj" \
     '{images: $images, grades: ["t1", "t2"], repeats: 1, build: $build,
       defaults: {mode: "jit", fnBlocks: 32, timeout: "5500ms", wallTimeout: 600, exitOn: false},
-      fnBlocksChoices: [32, 64, 128, 256],
+      fnBlocksChoices: [8, 16, 32, 64, 128, 256],
       timeoutChoices: ["5500ms", "20s"],
       modeChoices: ["jit", "interp"]}' >"$stage_dir/manifest.json"
 

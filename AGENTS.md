@@ -239,6 +239,7 @@ runtime.
 | `lp-xt-emu`      | Xtensa emulator + machine-mode hart (host) — in `lp-emu/` | yes (+std feat)  |
 | `lp-emu-esp32c6` | ESP32-C6 SoC emulator (host) — `lp-emu/esp/` | no        |
 | `lp-emu-esp32v3` | Classic ESP32 (v3, Xtensa LX6) SoC emulator (host) — `lp-emu/esp/`. Boots the shipped `fw-esp32v3` to its idle loop on **both** paths: direct-load, and from the mask ROM's reset vector through the real IDF bootloader. `just test-emu-esp32v3-gate` | no |
+| `lp-emu-esp32s3` | ESP32-S3 (Xtensa LX7) SoC emulator (host) — `lp-emu/esp/`. **M6 P01: register tables and a vendored ROM only — no map, no hart, no peripheral, no boot yet.** What the shipped image actually does is `docs/reports/2026-09-11-esp32s3-firmware-inventory.md` | no |
 
 Every emulator crate lives under **`lp-emu/`** and is **MIT**, not AGPL —
 see the license rule above and `lp-emu/README.md`. The rv32/Xtensa

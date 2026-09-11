@@ -29,6 +29,8 @@ Two modes:
     scripts/emu/pac-regnames.py            regenerate the esp32c6's tables
     scripts/emu/pac-regnames.py --pac esp32
                                            regenerate the classic's tables
+    scripts/emu/pac-regnames.py --pac esp32s3
+                                           regenerate the S3's tables
     scripts/emu/pac-regnames.py --check    fail if ANY chip's table is stale
 
 `just lint-emu-regnames` runs `--check`, so a hand edit is caught the way
@@ -360,6 +362,95 @@ ESP32_TARGETS = [
 ]
 
 
+def _s3(block: str, static: str) -> Target:
+    return Target(
+        block=block,
+        static=static,
+        out=f"lp-emu/esp/lp-emu-esp32s3/src/regs/{block}.rs",
+    )
+
+
+# The blocks generated for the **ESP32-S3**, from M6 P01's static inventory of
+# the shipped `fw-esp32s3` image
+# (`docs/reports/2026-09-11-esp32s3-firmware-inventory.md` §6): every block the
+# image's own MMIO census names, plus the four the ROM-up path will reach that
+# the application never does.
+#
+# The census is the reason this list is not the C6's: the S3 image touches
+# twenty-two blocks and none of them is a UART. `uart0` and `sha` are here
+# anyway because the mask ROM's console and the IDF bootloader's image hash are
+# the ROM-up path's, and a phase that met either would otherwise stop to
+# regenerate this script rather than to model a block.
+#
+# Two tables serve more than one peripheral, because the PAC gives them one
+# `RegisterBlock` type each: `timg0` is TIMG0 (`0x6001_f000`) and TIMG1
+# (`0x6002_0000`), and `uart0` is UART0/UART1/UART2. `spi0` and `spi1` are
+# separate modules on this chip, unlike the classic's single `spi0`.
+#
+# ⚠️ `interrupt_core0` and `interrupt_core1` are two PAC modules at ONE base —
+# `esp32s3-0.35.2/src/lib.rs` gives both `0x600c_2000`, and that is not an SVD
+# leak: they are two halves of one 4 KB window, core 0's registers at `+0x000`
+# and core 1's at `+0x800`, which is why the generated `interrupt_core1` table
+# starts at `+0x800` rather than at zero. Both are generated because the
+# register names differ per core and a trace that read one half against the
+# other's table would name every register wrongly.
+ESP32S3_TARGETS = [
+    # The clock gates, the reset gates, core 1's control, and the four
+    # software interrupts (`cpu_intr_from_cpu[0..4]` at `0x30..0x40`, M6
+    # notes §3.3) — 74 literal sites, the image's busiest block.
+    _s3("system", "SYSTEM"),
+    # Reset cause, the voltage/clock path esp-hal's `init` walks, and the
+    # **RWDT the shipped image arms and feeds on every boot** (M6 notes §5.2).
+    _s3("rtc_cntl", "RTC_CNTL"),
+    # The esp-rtos tick (TIMG0) and the second group the boot path configures.
+    _s3("timg0", "TIMG0"),
+    # `esp_rtos::now` and esp-hal's S3 time driver. The classic has no
+    # SYSTIMER; this chip's is the C6's shape.
+    _s3("systimer", "SYSTIMER"),
+    # The link. On the S3 the console is `jtag-serial` and there is no
+    # `spike_uart0_link`, so this block is the only way bytes leave the chip
+    # on the application path (M6 notes §5.3).
+    _s3("usb_device", "USB_DEVICE"),
+    # The strip. 4 TX channels, 48-word blocks, RAM at `+0x800`.
+    _s3("rmt", "RMT"),
+    # The 49-pad fabric (GPIO0..=GPIO48) and its mux.
+    _s3("gpio", "GPIO"),
+    _s3("io_mux", "IO_MUX"),
+    # MAC, chip revision, and the dbias/voltage fields esp-hal's clock path
+    # reads before it raises the core voltage.
+    _s3("efuse", "EFUSE"),
+    # The per-core source→CPU-interrupt maps. See the ⚠️ above.
+    _s3("interrupt_core0", "INTERRUPT_CORE0"),
+    _s3("interrupt_core1", "INTERRUPT_CORE1"),
+    # The cache and its MMU. ⚠️ The enable polarity is INVERTED relative to
+    # the C6's (M6 notes §3.4), and the flash-MMU **table** is not in this
+    # block — it is a directly-addressed window whose address came out of the
+    # vendored ROM's own `Cache_*` disassembly (the report's §8), never from
+    # the PAC and never from a datasheet.
+    _s3("extmem", "EXTMEM"),
+    # The flash controller and the cache's own port.
+    _s3("spi0", "SPI0"),
+    _s3("spi1", "SPI1"),
+    _s3("apb_ctrl", "APB_CTRL"),
+    # The analog master behind `request_pll_clk` / `configure_cpu_clk` — the
+    # classic's fifth strict stop, one chip over.
+    _s3("i2c_ana_mst", "I2C_ANA_MST"),
+    # The four RF-adjacent blocks `esp_hal::init` touches inline, one register
+    # each, all inside the first few thousand cycles of a strict bring-up.
+    # Nothing on this chip's radio is modelled and nothing here suggests it is.
+    _s3("bb", "BB"),
+    _s3("nrx", "NRX"),
+    _s3("fe", "FE"),
+    _s3("fe2", "FE2"),
+    # ROM-up only. The shipped image touches neither: it calls no ROM UART
+    # routine and no ROM SHA entry point (the report's §7). The mask ROM's own
+    # console is UART0's, and the IDF second-stage bootloader hashes the app
+    # image with SHA.
+    _s3("uart0", "UART0"),
+    _s3("sha", "SHA"),
+]
+
+
 @dataclass(frozen=True)
 class Chip:
     """One machine crate's PAC, its block table and its exclusions."""
@@ -397,6 +488,22 @@ CHIPS = {
         # WDEV's AHB address: `data` at +0x144 is 0x6003_5144, the classic's
         # WDEV_RND_REG. The PAC was right; the exclusion is gone and the
         # table is generated like every other (memmap::MMIO_AHB_BASE).
+    ),
+    "esp32s3": Chip(
+        pac="esp32s3",
+        version="0.35.2",
+        targets=ESP32S3_TARGETS,
+        # ⚠️ **The S3 HAS an interrupt-source enum and it is not generated
+        # here.** `esp32s3-0.35.2` puts `pub enum Interrupt` in `src/lib.rs`
+        # (line 325, 94 named variants numbered 0..=98 with gaps), not in a
+        # `src/interrupt.rs` as the C6 does — and `collect_sources` reads
+        # `src/interrupt.rs` by name. Teaching it a second path is a
+        # generator change, and M6 P01's scope is the CHIPS entry; the phase
+        # that first needs the table (P03's matrix, P04's blocks) makes it.
+        # The four numbers a phase needs in the meantime are written down in
+        # M6 notes §3.3: `RMT = 40`, `TG0_T0_LEVEL = 50`,
+        # `SYSTIMER_TARGET0..2 = 57,58,59`, `USB_DEVICE = 96`.
+        sources_out=None,
     ),
 }
 

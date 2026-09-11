@@ -198,6 +198,35 @@ against the phase's steady-state win.
 sets it again: it is the answer a core that *cannot* poll still gives, and
 `run_blocks`'s `after_store` arm is the fallback that serves it.
 
+#### What `FLAG_PENDING` means, and what it means after an escape (M7b F1)
+
+`FLAG_PENDING` is bit 2, and the local behind it holds **that bit** rather than
+a bare 1 — the epilogue `or`s the local straight into the exit flags and the
+next sub-dispatcher's prologue reads it back with `& FLAG_PENDING`, so a value
+of 1 was read by nobody at the far end of a cross-function edge and by
+`run_blocks` as `FLAG_AFTER_STORE` at an exit. Two consequences, both fixed
+here: an obligation that crossed into another function was **lost**, and the
+inline RAM store over there skipped a polling point the interpreter runs; and
+an exit while a load was pending reported a flag the protocol says a stay no
+longer sets. The host reads the two bits together (`jit.rs`'s `POLL_OWED`), so
+an exit still hands the poll to the hart's own `after_store` arm — the stay
+must not carry the obligation into a *later* stay, because the selector clears
+the flags word at every entry.
+
+After the **escape hatch**, `FLAG_PENDING` means exactly what it meant before
+the escape. `step_one` runs the interpreter's own polling point for a Store-
+or Atomic-class instruction and not for a Load, so a yield an escaped *store*
+left comes back as `STEP_SLICE_ENDED`; a yield an escaped **load** left comes
+back as nothing at all, and the local stays clear. That is safe only because
+`Emit`'s single `memory` bit gates loads and stores together: a build whose
+loads escape has no inline store to skip a poll at, and a build with inline
+stores escapes no load. **Splitting that bit needs `step_one` to report
+`Bus::sideband_or_yield_pending` first** — guessing does not work, because
+setting the local after every escaped load makes an all-escape build disagree
+with an emitted one about a plain RAM load that reached no bus, and narrowing
+the guess to off-RAM loads leaves the same disagreement for an MMIO load that
+left nothing.
+
 ## The browser seam (P6, JD11–JD13, JD25)
 
 The exit protocol above says what a module expects. This says who gives it to
@@ -570,6 +599,109 @@ one `SystemTimer::now()` sequence: latch `unit0_op`, read `hi`, read `lo`.
 **The ladder's two named suspects are not it.** The RMT refill is 12.33 % and
 the UART0 TX-FIFO poll is **0.06 %** (8,254 operations in a whole run).
 
+### The published-read path: what a peripheral fast path has to refuse
+
+**M7b P3.** 79.3 % of the census is `SystemTimer::now()`, and the run makes
+**2,322,975 of those calls in 5.5 s of guest time — 420,000 a second, one
+every 234 translated instructions.** esp-hal's `read_count` is five accesses:
+a `unit0_op` store carrying `update`, then reads of `unit0_op`,
+`unit0_value.lo`, `unit0_value.hi` and `unit0_value.lo` again.
+
+**The sequence is pure only as a sequence.** `unit0_value` does not compute
+anything: `Systimer::read_word` returns the stored field `latched[u]`, and the
+latch is written in exactly one place — `write_word`'s `unit_op` arm,
+`latched[u] = count(u, cx.now)`. `unit_op` itself reads the constant
+`OP_VALUE_VALID` and nothing else.
+
+So what translated code serves is the four **reads**, and a module may serve
+them because the machine **publishes** the model's own latched word:
+
+| word | what |
+|---|---|
+| `armed` (`i32`) | non-zero while the published words are current |
+| the published `i32`s | `Systimer::value_words(0)` — the *same expressions* `read_word`'s own arm answers with, because that arm calls this method |
+| `served` (`i64`) | reads translated code answered itself, counted by translated code |
+
+`$fast_load` is one private function of the emitted module with
+[`HostOps::mmio_load`]'s exact signature, emitted past the selector so every
+other function index is unchanged. An MMIO load's call site is byte-for-byte
+what it was; only the callee index changed, which costs **one byte per load
+site** (`+130,425 B`, +0.17 % of module) because the callee's LEB index got
+longer. The permission table is untouched: `SocBus::permission_table` is the
+bus's honest view of memory and every other consumer depends on that.
+
+**The store is not served.** Serving it would mean skipping
+`SocBus::write_mmio`'s unconditional `sideband = true` and the polling point
+(c) that M7b P2 fused into the store's own crossing — a point the interpreter
+runs after *every* MMIO store. There is no way to serve the store inline and
+still claim the poll ran where the interpreter's did without paying a crossing
+anyway. Leaving it alone is also what makes the rest exact: the host
+republishes on that crossing, so what a module reads is the model's value
+rather than a re-derivation of it, and `offset[0]`, `frozen[0]`, `CONF` and
+`unit0_load` never enter the argument. **A `conf` write that stops the unit
+changes what the next latch stores; it cannot change a word already latched.**
+
+#### The refusals are the design, not an optimisation detail
+
+`armed` is clear — and the read goes out through the import and is served by
+the bus with its trace line, its grade check, its census note and its
+watchpoints — whenever **any** of these holds. Every one is a *refusal*, none
+is an assertion, and refusing is always safe.
+
+| condition | why |
+|---|---|
+| a trace is running | `read_mmio` emits an `MmioEvent` per access and the oracle compares those lines; an inline read emits none |
+| a strict grade is set | `check_grade` runs on every access and can refuse one before the peripheral sees it |
+| `--strict-bus` | it watches guest stores for the missing-fence checker and shortens the slice cap |
+| the interpreter has run since the last exit | cleared at every `JitCore::run` entry: a stay only ever trusts a word it saw published **inside itself** |
+| an instruction escaped | cleared in `step_one`, because an escaped instruction can be a store to `unit_op` |
+| the address is not published, or the load is not a **word** | `Peripheral::read` serves sub-word lanes through `lane_of`, and unit 1 is a different register |
+| the block is not where this machine expects it, or is reached through an **alias** | an alias is a second address for the same register that this path cannot see, so nothing is published at all |
+
+`JitCore::run`'s own entry rules already cover the rest: no load watchpoints,
+at most one store watchpoint, and `Bus::fetch_is_pure` — which is where a `t3`
+memory-cost model and an execute watchpoint are refused.
+
+A **yield** is deliberately *not* a condition. `$fast_load` answers `MMIO_OK`
+where the import might have answered `MMIO_PENDING`, and that is observable
+only if `Bus::yield_now` is set while the stay's `FLAG_PENDING` is clear —
+which cannot happen inside a stay: entry refuses on
+`sideband_or_yield_pending()`, an MMIO load that leaves a yield answers
+`MMIO_PENDING` and sets the flag itself, and a store the bus served has its
+polling point take the yield and end the stay.
+
+**The trace refusal is what the free oracle's 20 ms cells measure.** They run
+with `--trace`, so in those four cells the path never arms and what they prove
+is the *refusal*. The path itself is proved by four more cells at a 500 ms
+window without a trace, and by the 5,500 ms browser identity rows.
+
+#### What it was worth
+
+`render-basic` t2, `LP_EMU_JIT_MMIO_CENSUS=1`, 16 blocks a function:
+
+| | before | after |
+|---|---:|---:|
+| MMIO operations translated code issued | 14,740,602 | **5,881,883** |
+| SYSTIMER | 11,626,424 (78.87 %) | **2,767,705 (47.05 %)** |
+| RMT — the new leader | 1,811,925 (12.29 %) | 1,811,925 (**30.81 %**) |
+| SYSTIMER loads | 9,303,449 | 444,730 |
+| stores, every peripheral | 4,311,988 | 4,311,988 |
+
+**8,858,719 reads — 95.2 % of the sequence's loads, 60.1 % of the whole
+census — never leave the module**, and the 4.8 % residue is the loads that
+happened while the block was disarmed. The exit census does not move by one
+exit: this removes host *crossings*, not exits.
+
+`render-basic` t2 goes **0.862× → 0.902×** in node/V8 (−280 ms) and **0.757× →
+0.782×** in bun/JSC (−240 ms), which prices an MMIO crossing at **31.6 ns in
+V8 and 27.1 ns in JSC**.
+
+That 1.17 ratio is the part worth remembering, because **an exit's is 23**
+(61 ns in V8, 3 ns in JSC — the section below). A translated core's two host
+costs do not scale together across engines, and a phase that reasons about one
+from the other will be wrong by an order of magnitude in the engine the phone
+runs.
+
 ### The module's time in a real run, against the same module replayed
 
 P6b measured 1.35 ns per translated instruction replaying windows, and 9.96 ns
@@ -918,6 +1050,10 @@ is the denominator, not the numerator — coverage rose 0.57 points, so slightly
 more of the run's peripheral traffic is issued by translated code. Stores are
 4,272,890 → 4,311,988, and the poll count equals the store count exactly, which
 is the contract: one polling point per store the bus served.
+
+SYSTIMER stayed at 11,626,424 through this phase and was the whole of the next
+one — see "The published-read path" above, which takes the census to
+5,881,883.
 
 ## Two more structural facts a reader will otherwise rediscover
 - **The hart's entry index has to be exact once the whole image is
