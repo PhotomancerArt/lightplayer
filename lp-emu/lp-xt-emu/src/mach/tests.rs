@@ -882,7 +882,11 @@ fn poll_point_c_reads_the_mask_form_and_keeps_the_lines_the_machine_fed() {
         after_wsr,
         "delivered at the `wsr PS` that lowered the level, poll point (b)"
     );
-    assert_eq!(hart.cpu().a(4), 0, "and before the next instruction retired");
+    assert_eq!(
+        hart.cpu().a(4),
+        0,
+        "and before the next instruction retired"
+    );
 
     // The same store on a bus that only implements the single-line form
     // keeps the trait default's widening: `Some(n)` is line `n`.
