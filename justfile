@@ -1033,7 +1033,13 @@ clippy-fw-esp32v3:
     # whole app path out, so linting the defaults leaves harness code completely
     # uncovered. That is exactly how 13 fw-esp32 harnesses once rotted
     # uncompiled. Add new `test_*` features to this list.
-    for feat in test_xt_fp_conformance test_interrupt_executor test_sram0_exec test_appcore_rom_path; do
+    # The three M5 P2 payload harnesses are in this list for exactly the same
+    # reason, and one more: each is the chip half of a `fw-checks` payload, so
+    # a lint failure here is the first place a drift between the two crates
+    # shows up without a board or a machine.
+    for feat in test_xt_fp_conformance test_interrupt_executor test_sram0_exec \
+                test_appcore_rom_path \
+                test_gpio_calibrate test_cycle_probe test_shader_compile_incremental; do
       echo "clippy: --features $feat"
       cargo clippy --profile release-esp32v3 --features "$feat" -- --no-deps -D warnings
     done
@@ -1095,6 +1101,71 @@ build-fw-esp32v3 features="":
       touch {{ fw_esp32v3_dir }}/src/main.rs
     fi
     cd {{ fw_esp32v3_dir }} && cargo "${args[@]}"
+
+# Build one classic-ESP32 validation payload's harness image (M5 P2).
+#
+# The payload NAME is the argument, not the cargo feature: `boot-idle`,
+# `shader-compile-stress`, `gpio-calibrate`, `cycle-probe` are what
+# `lp-emu-validate`'s registry, the transcripts and the desk batch all call
+# them, and the feature is an implementation detail this recipe owns. The
+# mapping mirrors the `ChipArm`s in `lp-emu/lp-emu-validate/src/payload.rs`;
+# if you add a payload there, add it here.
+#
+# ⚠️ Deliberately NOT a `fwtest-*-esp32v3` recipe. Those flash a board and open
+# a monitor; a payload is recorded through `lp-cli validate run --config
+# silicon:esp32v3` (which resolves the port, pins the image and writes the
+# sidecar), so a second, hand-rolled flashing path would be a second way to
+# produce a transcript nobody checked. This builds; the runner flashes.
+#
+#   just build-fw-esp32v3-payload gpio-calibrate
+#   just emu-fw-esp32v3-payload   gpio-calibrate    # …and run it
+build-fw-esp32v3-payload payload:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just build-fw-esp32v3 "$(just _v3-payload-features {{ payload }})"
+
+# Run a classic payload's harness image on our own machine, to its sentinel,
+# under `--strict-bus`. The cheapest proof an image is not merely linkable —
+# and a strict-bus stop here is a real finding (an address the machine does
+# not model), never something to pass `--strict-bus permit` around.
+emu-fw-esp32v3-payload payload:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just build-fw-esp32v3-payload {{ payload }}
+    cargo run -q --release -p lp-emu-esp32v3 -- \
+        --elf {{ fw_esp32v3_elf }} \
+        --uart0 - --time-grade t1 --timeout 60s --strict-bus \
+        --exit-on "$(just _v3-payload-sentinel {{ payload }})"
+
+# payload name -> the cargo features `build-fw-esp32v3` is given. Private: the
+# two recipes above are the front door.
+_v3-payload-features payload:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{ payload }}" in
+      # The shipped image. Named for completeness — `boot-idle` IS the
+      # product build, which is why it has no `test_*` feature at all.
+      boot-idle)             echo "esp32,server,float-f32" ;;
+      shader-compile-stress) echo "esp32,test_shader_compile_incremental" ;;
+      gpio-calibrate)        echo "esp32,test_gpio_calibrate" ;;
+      cycle-probe)           echo "esp32,test_cycle_probe" ;;
+      *) echo "unknown classic payload '{{ payload }}' (boot-idle, shader-compile-stress, gpio-calibrate, cycle-probe)" >&2; exit 2 ;;
+    esac
+
+# payload name -> the line a run stops on. Mirrors `Payload::sentinel` in
+# `lp-emu/lp-emu-validate/src/payload.rs`; the registry is the original.
+_v3-payload-sentinel payload:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{ payload }}" in
+      boot-idle)             echo "[stack] heartbeat: high-water" ;;
+      shader-compile-stress) echo "[inc-shader-compile] === DONE ===" ;;
+      # A Ready sentinel, not a done marker: the calibration payload serves
+      # forever and the host is what ends it.
+      gpio-calibrate)        echo "CAL READY target=" ;;
+      cycle-probe)           echo "[cycle-probe] === DONE ===" ;;
+      *) echo "unknown classic payload '{{ payload }}'" >&2; exit 2 ;;
+    esac
 
 # Flash fw-esp32v3 to a connected classic ESP32 and open the serial monitor.
 #

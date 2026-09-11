@@ -1525,7 +1525,41 @@ static RMT_FRAME_FIELDS: &[FieldSpec] = &[
 pub static ALL_PAYLOADS: &[Payload] = &[
     Payload {
         name: "shader-compile-stress",
-        chips: &[],
+        // The classic's arm (M5 P2). The compile-parity claim is the point of
+        // this payload on this chip: the same shader, compiled on the
+        // device's own JIT, tick by tick, with the heap figures beside each
+        // tick — and those memory figures are the compile-parity fields a
+        // replay compares. `fw-esp32v3`'s `server` feature already pulls
+        // `lpvm-native` and `lp-gfx-lpvm`, so the JIT half existed; what the
+        // harness adds is the case list, the per-tick line and the header
+        // (`lp-fw/fw-esp32v3/src/tests/shader_compile_incremental.rs`).
+        chips: &[ChipArm {
+            chip: "esp32v3",
+            // No `server`: a `test_*` build sets `fw_harness` and cfg's the
+            // whole app path out. The harness IS the entrypoint.
+            firmware_features: &["test_shader_compile_incremental"],
+            emulator_features: None,
+            // The PRODUCT's link, and the one difference from the C6's
+            // top-level row worth a sentence: the C6 keeps this payload on
+            // `Uart0Spike` because three committed captures are of that
+            // image. The classic has no such history and no such feature —
+            // `spike_uart0_link` does not exist on `fw-esp32v3`, and this
+            // part has no USB-Serial-JTAG peripheral at all.
+            link: Link::Uart0,
+            // `Direct`, not `RomUp`: a harness image is not the shipped
+            // image, there is no committed silicon boot log of it, and the
+            // `boot-log` class — the one class where the two paths differ —
+            // makes no claim here. `boot-idle` is where `RomUp` earns itself.
+            boot: BootPath::Direct,
+            // A USB-host schedule means nothing on a UART0 chip.
+            host_plan: None,
+            // The harness talks and the host only listens.
+            host_script: None,
+            // A harness build never mounts `lpfs`, so nothing formats an
+            // arena and there is no first-boot/second-boot difference to
+            // have. `second_boot` is `boot-idle`'s fact, not the chip's.
+            second_boot: false,
+        }],
         display_name: "Incremental shader compile stress",
         fw_check_slug: "shader-compile-stress",
         firmware_features: &["test_shader_compile_incremental"],
@@ -1628,7 +1662,36 @@ pub static ALL_PAYLOADS: &[Payload] = &[
     },
     Payload {
         name: "gpio-calibrate",
-        chips: &[],
+        // The classic's arm (M5 P2), mirroring `fw-checks`'s shared module
+        // over this chip's pads — `lp-fw/fw-esp32v3/src/tests/gpio_calibrate.rs`,
+        // never an import of the C6's file.
+        //
+        // ⚠️ The two sides of this payload are deliberately NOT conflated,
+        // and the sidecar `note` is where the difference is stated: on
+        // silicon the firmware drives its own pads and reads them back
+        // through `GPIO.in_` (the self-loop the silicon driver already
+        // writes a note about), while on an emulated configuration the levels
+        // arrive from outside. Both are real; neither is the other.
+        chips: &[ChipArm {
+            chip: "esp32v3",
+            firmware_features: &["test_gpio_calibrate"],
+            emulator_features: None,
+            // The product's link. `Uart0Spike` — the C6's top-level value
+            // here — names a cargo feature `fw-esp32v3` does not have, and
+            // "spike" in a classic sidecar would misdescribe the product
+            // (M5 ruling R4).
+            link: Link::Uart0,
+            // A harness image, so no committed ROM-up boot log and no
+            // `boot-log` claim. See the `shader-compile-stress` arm.
+            boot: BootPath::Direct,
+            host_plan: None,
+            // The host DOES drive this payload — but through `--pin-script`,
+            // which is `pin_script`'s business and the emulated side's
+            // alone. `host_script` is the UART0 conversation, and this
+            // harness holds up its own end of that.
+            host_script: None,
+            second_boot: false,
+        }],
         display_name: "Host-driven GPIO square-wave calibration",
         fw_check_slug: "gpio-calibrate",
         firmware_features: &["test_gpio_calibrate"],
@@ -1709,7 +1772,38 @@ pub static ALL_PAYLOADS: &[Payload] = &[
     },
     Payload {
         name: "cycle-probe",
-        chips: &[],
+        // The classic's arm (M5 P2). `fw-checks`'s shared module takes the
+        // cycle counter as an injected function pointer, so the chip half is
+        // the counter read plus the chip-bound kernels
+        // (`lp-fw/fw-esp32v3/src/tests/cycle_probe.rs`).
+        //
+        // ⚠️ **The counter is CCOUNT: CPU cycles at 240 MHz, RECORDED and
+        // NEVER GATED.** No host gate reads a classic cycle figure, and the
+        // reason is structural rather than squeamish: `lp-emu:esp32v3`
+        // defines `t1` alone (M5 ruling R1; the director's E1 answered "t1
+        // only"), so there is no calibrated grade for such a number to be
+        // compared against. What these figures are FOR is being the input a
+        // future `t2` would calibrate FROM — a classic cycle model built on
+        // CCOUNT, after DD40's crystal-vs-PLL time-base gap. Until that
+        // exists, a `timing`-class comparison here would be a claim nothing
+        // backs.
+        chips: &[ChipArm {
+            chip: "esp32v3",
+            firmware_features: &["test_cycle_probe"],
+            emulator_features: None,
+            // The product's own link, and for this payload it is the premise
+            // rather than a preference: the claim is that two machines run
+            // the SAME image over the SAME link, so a cycle difference is the
+            // machine's and not the link driver's. On this chip that link is
+            // UART0 and there is no other — no USB-Serial-JTAG peripheral
+            // exists here, which is also why the C6's `host_plan` has no
+            // classic counterpart.
+            link: Link::Uart0,
+            boot: BootPath::Direct,
+            host_plan: None,
+            host_script: None,
+            second_boot: false,
+        }],
         display_name: "Cycle-model kernels, two clocks each",
         fw_check_slug: "cycle-probe",
         firmware_features: &["test_cycle_probe"],
@@ -1886,10 +1980,11 @@ pub static ALL_PAYLOADS: &[Payload] = &[
     },
     Payload {
         name: "boot-idle",
-        // The classic's arm, and the only one M5 P1 can land: this payload
-        // IS the shipped image, so it needs no new firmware — the other
-        // three classic payloads (`shader-compile-stress`, `gpio-calibrate`,
-        // `cycle-probe`) wait on `fw-esp32v3` growing their harnesses in P2.
+        // The classic's arm. It was the only one M5 P1 could land, because
+        // this payload IS the shipped image and needs no new firmware; M5 P2
+        // grew `fw-esp32v3`'s three harnesses and gave the other three
+        // classic payloads (`shader-compile-stress`, `gpio-calibrate`,
+        // `cycle-probe`) their arms.
         chips: &[ChipArm {
             chip: "esp32v3",
             // `fw-esp32v3`'s shipped set, on top of the crate's `esp32`
@@ -1921,14 +2016,22 @@ pub static ALL_PAYLOADS: &[Payload] = &[
             // stop-all or a client `runtime_status`, never from the
             // five-second server heartbeat — so the C6's shape (boot, wait,
             // stop on the `[stack]` line) produces NOTHING here unless the
-            // host asks. The asking is `boot_idle.rs::STOP_ALL`'s bytes on
-            // `[INIT] I/O task spawned`, and **M5 P2 lands it as a committed
-            // script** (suggested `walks/v3-stop-all.script`, beside the
-            // C6's walks, with its provenance in the walks README) and sets
-            // it here. Until then an emulated run of this arm boots and
-            // records the boot, which is honest and incomplete — it is not
-            // a transcript anything replays.
-            host_script: None,
+            // host asks. The asking is the committed script below: exactly
+            // `boot_idle.rs::STOP_ALL`'s bytes on exactly that file's
+            // `LAST_LINE` (`[INIT] I/O task spawned`), one emulated
+            // millisecond later, which is what `stop_all_script()` there
+            // does. `a_committed_stop_all_script_matches_boot_idles` checks
+            // the file against those constants, so the gate and the walk
+            // cannot drift apart quietly.
+            //
+            // What it buys is that silicon and an emulated configuration are
+            // the same **stimulus** and not merely the same image: L1 asked
+            // with these bytes at the desk on 2026-09-10. The one gap, not
+            // widened, is that the emulated send lands 1 ms of guest time
+            // after the trigger where a desk host's select loop polls at
+            // 50 ms — host latency, and the reason nothing in the `timing`
+            // class is compared for this payload.
+            host_script: Some("lp-emu/lp-emu-validate/walks/v3-stop-all.script"),
             // espflash hard-resets after writing, so every silicon capture
             // is the boot AFTER the one that formatted `lpfs`. 2032 bytes of
             // `largest_free` hang on this. See `ChipArm::second_boot`.
@@ -2597,6 +2700,163 @@ pub fn find_payload(name: &str) -> Result<&'static Payload> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The repo root, from this crate's manifest directory.
+    fn repo_root() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("repo root")
+    }
+
+    /// The classic `boot-idle` arm's script **is** the gate's, byte for byte.
+    ///
+    /// Checked against the constants rather than by eye, because that is the
+    /// whole value of committing the file: `lp-emu-esp32v3`'s `boot_idle.rs`
+    /// drives the same conversation from `LAST_LINE` and `STOP_ALL`, and if
+    /// the two ever diverge the desk and the machine stop being the same
+    /// stimulus while still looking like it. The constants are read out of
+    /// that test's source — it is a `tests/` binary, not a library, so there
+    /// is nothing to import, and grepping the source is the honest version of
+    /// "the same bytes" rather than a second copy of them here.
+    #[test]
+    fn a_committed_stop_all_script_matches_boot_idles() {
+        let root = repo_root();
+        let gate =
+            std::fs::read_to_string(root.join("lp-emu/esp/lp-emu-esp32v3/tests/boot_idle.rs"))
+                .expect("boot_idle.rs");
+
+        let constant = |name: &str| -> String {
+            let line = gate
+                .lines()
+                .find(|l| {
+                    l.trim_start()
+                        .starts_with(&format!("const {name}: &str = "))
+                })
+                .unwrap_or_else(|| panic!("boot_idle.rs no longer defines `{name}`"));
+            let body = line
+                .split_once('"')
+                .and_then(|(_, r)| r.rsplit_once('"'))
+                .expect("a quoted constant")
+                .0;
+            body.to_string()
+        };
+
+        // Rust source escapes, which are also this script grammar's escapes
+        // for `\"` and `\\` — and the grammar spells a newline `\n` too, so
+        // the two literals are the same text and comparing them is exact.
+        let stop_all = constant("STOP_ALL");
+        let last_line = constant("LAST_LINE");
+
+        let script =
+            std::fs::read_to_string(root.join("lp-emu/lp-emu-validate/walks/v3-stop-all.script"))
+                .expect("v3-stop-all.script");
+        let directives: Vec<&str> = script
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .collect();
+        assert_eq!(
+            directives.len(),
+            1,
+            "the stop-all script is one line; it is the smallest request that \
+             reaches `esp32_memory_stats`, and a second line would be a second \
+             stimulus silicon never saw: {directives:?}"
+        );
+
+        // `+1` ms: `stop_all_script()` delays `CYCLES_PER_US * 1_000`.
+        let expected = format!("after \"{last_line}\" +1 \"{stop_all}\"");
+        assert_eq!(
+            directives[0], expected,
+            "the committed walk and `boot_idle.rs` have drifted apart"
+        );
+
+        // And the arm actually points at the file that was just checked.
+        let arm = find_payload("boot-idle")
+            .expect("boot-idle")
+            .arm("esp32v3")
+            .expect("the classic arm");
+        assert_eq!(
+            arm.host_script,
+            Some("lp-emu/lp-emu-validate/walks/v3-stop-all.script")
+        );
+        assert!(arm.second_boot, "M5 ruling R9 — 2032 bytes hang on it");
+    }
+
+    /// Every `host_script` and `pin_script` in the registry names a file that
+    /// is actually committed, on every arm as well as on the top-level row.
+    #[test]
+    fn every_script_a_payload_names_exists() {
+        let root = repo_root();
+        for p in ALL_PAYLOADS {
+            for path in [p.host_script, p.pin_script].into_iter().flatten() {
+                assert!(root.join(path).is_file(), "{}: missing `{path}`", p.name);
+            }
+            for arm in p.chips {
+                if let Some(path) = arm.host_script {
+                    assert!(
+                        root.join(path).is_file(),
+                        "{} on {}: missing `{path}`",
+                        p.name,
+                        arm.chip
+                    );
+                }
+            }
+        }
+    }
+
+    /// The classic's four payload arms, as M5 P2 landed them — and the two
+    /// facts a later reader is most likely to undo by accident.
+    ///
+    /// `Link::Uart0` on every one of them: `Uart0Spike` names a cargo feature
+    /// (`spike_uart0_link`) that does not exist on `fw-esp32v3`, so an arm
+    /// carrying it would build a command line for an image that cannot be
+    /// built (M5 ruling R4). And `RomUp` on `boot-idle` alone: every silicon
+    /// capture of the shipped image is a ROM-up boot with the real mask ROM
+    /// banner in the committed transcript, while no harness image has a
+    /// committed boot log to compare at all.
+    #[test]
+    fn the_classics_arms_speak_uart0_and_boot_the_way_their_captures_did() {
+        let expected: &[(&str, &[&str], BootPath)] = &[
+            (
+                "boot-idle",
+                &["server", "float-f32"],
+                BootPath::RomUp {
+                    reset_cause: "poweron",
+                    strap: "app",
+                },
+            ),
+            (
+                "shader-compile-stress",
+                &["test_shader_compile_incremental"],
+                BootPath::Direct,
+            ),
+            ("gpio-calibrate", &["test_gpio_calibrate"], BootPath::Direct),
+            ("cycle-probe", &["test_cycle_probe"], BootPath::Direct),
+        ];
+        for (name, features, boot) in expected {
+            let arm = find_payload(name)
+                .unwrap_or_else(|e| panic!("{name}: {e}"))
+                .arm("esp32v3")
+                .unwrap_or_else(|| panic!("{name} has no `esp32v3` arm"));
+            assert_eq!(arm.link, Link::Uart0, "{name}");
+            assert_eq!(arm.firmware_features, *features, "{name}");
+            assert_eq!(arm.boot, *boot, "{name}'s boot path");
+            // No USB host to schedule on a chip with no USB peripheral.
+            assert!(arm.host_plan.is_none(), "{name}");
+        }
+        // `second_boot` is the shipped image's fact — a harness never mounts
+        // `lpfs`, so it never formats an arena to be on the far side of.
+        for (name, expected) in [
+            ("boot-idle", true),
+            ("shader-compile-stress", false),
+            ("gpio-calibrate", false),
+            ("cycle-probe", false),
+        ] {
+            let arm = find_payload(name).unwrap().arm("esp32v3").unwrap();
+            assert_eq!(arm.second_boot, expected, "{name}");
+        }
+    }
 
     #[test]
     fn payload_names_are_unique() {

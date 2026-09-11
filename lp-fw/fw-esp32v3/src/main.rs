@@ -56,9 +56,12 @@
     feature(alloc_error_handler)
 )]
 // The SRAM0 probe harness also needs the asm feature, for its explicit
-// `isync` barrier trial. A harness build cfg's the app path out (`fw_harness`
-// is set), so the two arms never both declare it — `#![feature]` twice is an
-// error, which is why this is one attribute with an `any`, not two.
+// `isync` barrier trial, and so does the `cycle-probe` payload harness, whose
+// kernels ARE assembly (an instruction count read off the source is only a
+// fact if the source is instructions). A harness build cfg's the app path out
+// (`fw_harness` is set), so the arms never both declare it — `#![feature]`
+// twice is an error, which is why this is one attribute with an `any`, not
+// three.
 #![cfg_attr(
     any(
         all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)),
@@ -66,7 +69,11 @@
         // The APP-core canary rig calls the product's `start_app_core_isr`,
         // and everything core 1 runs (`wire_pusher::idle_once`'s
         // `rsil`/`waiti`) comes with it.
-        feature = "test_appcore_rom_path"
+        feature = "test_appcore_rom_path",
+        feature = "test_cycle_probe",
+        // `board::esp32v3::fpu`'s `global_asm!` — the compile harness links
+        // that module for `CPENABLE`, and Xtensa `global_asm!` is gated too.
+        feature = "test_shader_compile_incremental"
     ),
     feature(asm_experimental_arch)
 )]
@@ -128,17 +135,25 @@ mod tests;
 // would be measuring itself. They are the S3's "harness needs an app module"
 // exception, earned rather than copied: the `allow(dead_code)` is for the app
 // surface the rig does not reach.
+//
+// The one other harness that also needs `board`:
+// `test_shader_compile_incremental` runs the real compiler, and the compiler
+// does f32 arithmetic — so it needs `board::esp32v3::fpu::arm()` for exactly
+// the reason that module's docs give (a core whose `CPENABLE` bit 0 is clear
+// takes `EXCCAUSE=32` on the first FP instruction). `board::esp32v3::init`
+// stays app-only; see that module.
 #[cfg_attr(
     fw_harness,
     allow(
         dead_code,
         unused_imports,
-        reason = "the canary rig reaches only `init_board` and `start_app_core_isr`; the rest of the app surface these modules carry is unreachable from a harness entrypoint"
+        reason = "the canary rig reaches only `init_board` and `start_app_core_isr`, the compile payload only `fpu::arm`; the rest of the app surface these modules carry is unreachable from a harness entrypoint"
     )
 )]
 #[cfg(any(
     all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)),
-    feature = "test_appcore_rom_path"
+    feature = "test_appcore_rom_path",
+    feature = "test_shader_compile_incremental"
 ))]
 mod board;
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
@@ -1188,7 +1203,18 @@ fn main() -> ! {
     #[cfg(feature = "test_xt_fp_conformance")]
     tests::xt_fp_conformance::run_all();
     #[cfg(feature = "test_sram0_exec")]
-    tests::sram0_exec::run()
+    tests::sram0_exec::run();
+
+    // The three M5 P2 payload harnesses. `gpio-calibrate` is handed the UART
+    // because its protocol is a conversation — it reads as well as writes;
+    // the other two only print, and `esp_println` reaches the same FIFO the
+    // `Uart` above just programmed the divisor for.
+    #[cfg(feature = "test_gpio_calibrate")]
+    tests::gpio_calibrate::run(_uart0);
+    #[cfg(feature = "test_cycle_probe")]
+    tests::cycle_probe::run();
+    #[cfg(feature = "test_shader_compile_incremental")]
+    tests::shader_compile_incremental::run();
 }
 
 /// Boot-to-hello entrypoint: the M2-P1 skeleton (bare build) and the M2-P3
