@@ -425,3 +425,261 @@ fn the_two_paths_report_the_same_memory_figures() {
         "the heap arithmetic is the desk board's, in both arms of Q5"
     );
 }
+
+// ---------------------------------------------------------------------------
+// G2 (e), the memory half: this machine against the desk board, field by field.
+// ---------------------------------------------------------------------------
+
+/// The committed silicon transcript this machine's memory figures are read
+/// against — **lab task L1's**, taken from the DOM-Z-102 after it was
+/// re-flashed with the pinned clean reference image.
+///
+/// ⚠️ **It is the same bytes on both sides, and that is the whole point.**
+/// Ruling R7 was that L0's board ran `2e21b6226bcd`-**dirty**, which no
+/// commit rebuilds, so the earlier pair
+/// `silicon-esp32v3-2026-09-10-2e21b6226-{115200,921600}` could only ever be
+/// compared by judgement. L1 answered it (a): the board was written with
+/// `build-reference-image.sh --chip esp32 esp32,server,float-f32 75486b114`
+/// merged by `espflash save-image --merge`, and re-captured. Those two
+/// transcripts stay committed as the dirty-image record — `rom_up_boot.rs`
+/// still reads the 115200 one — and this is the one G2 stands on.
+const SILICON_921600: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../transcripts/esp32v3/boot-idle/",
+    "silicon-esp32v3-2026-09-10-75486b114-921600.txt"
+);
+
+/// The first line of `text` containing `marker`, from `marker` to the end of
+/// that line.
+///
+/// ⚠️ **Not a line-start match, deliberately.** `esp_println` writes the
+/// triple straight into the TX FIFO while `log::info!` lines travel through
+/// the io_task's queue, so on both sides a `[stack] heartbeat:` can begin in
+/// the middle of somebody else's line. That interleaving is on the wire and
+/// the transcript keeps it; reading from the marker is what makes the field
+/// readable without editing either side.
+fn field_line<'a>(text: &'a str, marker: &str) -> &'a str {
+    let at = text
+        .find(marker)
+        .unwrap_or_else(|| panic!("no `{marker}` in:\n{text}"));
+    text[at..].split(['\r', '\n']).next().expect("a line")
+}
+
+/// The decimal number following `key` in `line`.
+fn number(line: &str, key: &str) -> u64 {
+    let at = line
+        .find(key)
+        .unwrap_or_else(|| panic!("no `{key}` in `{line}`"));
+    let rest = &line[at + key.len()..];
+    let end = rest
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(rest.len());
+    rest[..end]
+        .parse()
+        .unwrap_or_else(|_| panic!("`{key}` in `{line}` is not a number"))
+}
+
+/// **The heap's live bytes, and this machine is 84 of them heavier.**
+///
+/// Measured by L1 on 2026-09-10, deterministic on both sides: three boots of
+/// this machine give `free=223268 used=18284` every time, and two separate
+/// power-on captures of the desk board give `free=223352 used=18200` every
+/// time. So it is **not** the transient the bench notes warn about — L1
+/// re-captured with the request fired within a millisecond of the trigger
+/// rather than within fifty, and silicon did not move — and it is not
+/// sampling noise, even though silicon's own three samples span 536 B.
+///
+/// The one structural difference known to exist between the two runs is
+/// **Q5**: silicon binds the RMT ISR to the APP core and this machine has no
+/// APP core, so the firmware takes its documented single-core arm
+/// ([`SINGLE_CORE_LINE`]). It is the prime suspect and it is not proven.
+/// Pinned rather than tolerated: a change in either direction is a finding.
+const HEAP_USED_GAP: u64 = 84;
+
+/// **The main stack's high-water, and the desk board goes 960 B deeper.**
+///
+/// Same measurement, same determinism, and the obvious explanation was
+/// **tested and refuted**: this is not a question of when the sample was
+/// taken. L1 tightened the host's send from a 50 ms poll to a 1 ms one, so
+/// the desk board's sample moved to within a millisecond of the same trigger
+/// this machine's script uses, and silicon reported the identical 16972 B.
+/// High-water is monotonic, so a later sample can only be larger — and
+/// silicon's stayed 16972 through three requests over twelve seconds.
+///
+/// Q5 again is the suspect and again unproven; note that the naive reading of
+/// it points the wrong way (an RMT ISR moved onto the PRO core should make
+/// *this* machine's main stack deeper, not shallower). Pinned, not tolerated.
+const STACK_HIGH_WATER_GAP: u64 = 960;
+
+/// **G2 (e).** Every memory-class field of the idle heartbeat, this machine
+/// against the desk board, on the same image and the same request.
+///
+/// # What is compared, and what is not
+///
+/// Compared: the boot banner's heap arithmetic, the main stack's **size**,
+/// the JIT region placement line, the whole `[JIT]` census, and the `[MEM]`
+/// line's `largest_free` and `retry_saves`. Those are equal, exactly.
+///
+/// Pinned rather than asserted equal: `used`/`free` and the stack's
+/// high-water — see [`HEAP_USED_GAP`] and [`STACK_HIGH_WATER_GAP`], which
+/// carry the measurements and say what is still unexplained. G2 asked for
+/// every memory-class field to be equal; two are not, deterministically, and
+/// a test that widened a threshold to hide that would be answering a
+/// different question.
+///
+/// Not compared at all: anything in the `timing` class, and anything the
+/// sidecar grades `modeled`. The desk board's sample is a host-latency
+/// distance from its trigger and this machine's is an emulated millisecond;
+/// that difference is real and is why the two `[MEM]` readings of a single
+/// `stopAllProjects` — `log_memory` runs before and after the stop — are
+/// taken as a pair on each side rather than across them.
+///
+/// # ⚠️ Why this machine boots twice
+///
+/// The desk board was captured on its **second** boot: `espflash` hard-resets
+/// after writing, so the board had already formatted the merged image's blank
+/// `lpfs` before L1 ever opened the port. A machine given a fresh
+/// `FlashBacking::Copy` is on its **first** boot, formats, and reports
+/// `largest_free=106494` — 2032 B short of silicon, purely because the format
+/// is still live in the arena. That gap is not a difference between the two
+/// machines and it disappears when both sides have mounted: this test boots
+/// once to format, flushes the chip, and reads the figures off the boot after
+/// it. `rom_up_boot.rs::a_second_boot_from_the_same_chip_mounts_rather_than_reformats`
+/// is the same fact from the flash census's side.
+#[test]
+#[ignore = "needs the shipped image and espflash; run through `just test-emu-esp32v3-boot`"]
+fn the_heartbeats_memory_figures_are_the_desk_boards() {
+    let Some(elf) = image() else { return };
+    let merged = match lp_emu_esp32v3::test_support::merged_chip_image() {
+        Ok(p) => p,
+        Err(reason) => {
+            skip_notice("the_heartbeats_memory_figures_are_the_desk_boards", &reason);
+            return;
+        }
+    };
+    let len = std::fs::metadata(&merged).expect("the merged image").len() as u32;
+    let silicon = std::fs::read_to_string(SILICON_921600).expect("the committed silicon capture");
+
+    // A writable chip, so the second boot mounts what the first one wrote —
+    // which is the state the desk board was in when it was captured.
+    let chip = std::env::temp_dir().join(format!("lp-emu-v3-l1-{}.bin", std::process::id()));
+    std::fs::copy(&merged, &chip).expect("a writable chip");
+    let boot = |script: bool| {
+        let mut b = Esp32V3Builder::new()
+            .boot_mode(BootMode::Direct)
+            .app(AppSource::Path(elf.clone()))
+            .flash(lp_emu_esp32v3::flash::FlashBacking::File(chip.clone()))
+            .flash_len(len)
+            .strict(true);
+        if script {
+            b = b.uart0_script(stop_all_script());
+        }
+        b.build().expect("builds")
+    };
+
+    let mut first = boot(false);
+    first.run_until(&StopCondition {
+        exit_on: Some("boot complete (first frame served)".to_string()),
+        ..StopCondition::after_micros(3_000_000)
+    });
+    assert!(
+        first.uart0().text().contains("Formatted and mounted fresh"),
+        "the first boot formats the merged image's blank `lpfs`:\n{}",
+        first.uart0().text()
+    );
+    first.flush_flash().expect("the write back");
+
+    let mut second = boot(true);
+    let outcome = second.run_until(&StopCondition {
+        exit_on: Some("[JIT] used=".to_string()),
+        ..StopCondition::after_micros(2_000_000)
+    });
+    let emulated = second.uart0().text();
+    assert!(
+        matches!(outcome, Outcome::ExitMatched { .. }),
+        "the second boot reaches the elicited heartbeat: {outcome:?}\n{emulated}"
+    );
+    assert!(
+        !emulated.contains("Formatted and mounted fresh"),
+        "the second boot MOUNTS what the first wrote:\n{emulated}"
+    );
+    let _ = std::fs::remove_file(&chip);
+
+    // The three lines the boot banner carries, which are image-derived and
+    // must be identical to the byte.
+    for marker in [
+        "[INIT] chip=esp32 arch=xtensa heap=",
+        "[INIT] main stack ",
+        "[INIT] JIT code region: ",
+    ] {
+        let (a, b) = (field_line(&silicon, marker), field_line(&emulated, marker));
+        println!("  {marker}\n    silicon  {a}\n    emulator {b}");
+        assert_eq!(a, b, "`{marker}` is image-derived and must be identical");
+    }
+
+    // The whole `[JIT]` census, which is a memory-class line end to end.
+    let (jit_s, jit_e) = (
+        field_line(&silicon, "[JIT] used="),
+        field_line(&emulated, "[JIT] used="),
+    );
+    println!("  [JIT]\n    silicon  {jit_s}\n    emulator {jit_e}");
+    assert_eq!(jit_s, jit_e, "the `[JIT]` census is identical");
+
+    // `[MEM]`, field by field.
+    let (mem_s, mem_e) = (
+        field_line(&silicon, "[MEM] free="),
+        field_line(&emulated, "[MEM] free="),
+    );
+    println!("  [MEM]\n    silicon  {mem_s}\n    emulator {mem_e}");
+    assert_eq!(
+        number(mem_s, "largest_free="),
+        number(mem_e, "largest_free="),
+        "the largest free block is the desk board's, once both sides have mounted"
+    );
+    assert_eq!(
+        number(mem_s, "retry_saves="),
+        number(mem_e, "retry_saves="),
+        "no OOM retry saved either side"
+    );
+    // `free` and `used` partition one arena, and the arena is the boot
+    // banner's 241552 on both sides — so the gap below is one number, not two.
+    assert_eq!(
+        number(mem_s, "free=") + number(mem_s, "used="),
+        number(mem_e, "free=") + number(mem_e, "used="),
+        "`free` and `used` partition the same total on both sides"
+    );
+    assert_eq!(
+        number(mem_e, "used=") - number(mem_s, "used="),
+        HEAP_USED_GAP,
+        "the live-bytes gap is the measured one; see HEAP_USED_GAP"
+    );
+
+    // `[stack] heartbeat:` — the size is image-derived and equal, the
+    // high-water is the second pinned gap.
+    let (st_s, st_e) = (
+        field_line(&silicon, "[stack] heartbeat: "),
+        field_line(&emulated, "[stack] heartbeat: "),
+    );
+    println!("  [stack]\n    silicon  {st_s}\n    emulator {st_e}");
+    assert_eq!(
+        number(st_s, " B of "),
+        number(st_e, " B of "),
+        "the main stack is the same size on both sides"
+    );
+    assert_eq!(
+        number(st_s, "high-water ") - number(st_e, "high-water "),
+        STACK_HIGH_WATER_GAP,
+        "the high-water gap is the measured one; see STACK_HIGH_WATER_GAP"
+    );
+
+    // The Q5 arm, named here too so a reader of a failure knows which of the
+    // two firmwares' supported configurations this machine was running.
+    assert!(
+        emulated.contains(SINGLE_CORE_LINE),
+        "this machine is single-core and takes the Q5 fallback:\n{emulated}"
+    );
+    assert!(
+        silicon.contains("[INIT] RMT ISR on APP core"),
+        "the desk board has an APP core and binds the RMT ISR to it"
+    );
+}

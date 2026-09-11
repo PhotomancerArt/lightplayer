@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "payload": "boot-idle",
+  "chip": "esp32v3",
+  "configuration": "silicon:esp32v3",
+  "date": "2026-09-10",
+  "board": "domraem/dom-z-102",
+  "board_mac": "30:76:f5:ec:f6:34",
+  "chip_revision": "v3.1",
+  "baud": 115200,
+  "machine": "115200",
+  "firmware_commit": "75486b114208",
+  "firmware_features": ["esp32", "server", "float-f32"],
+  "firmware_dirty": false,
+  "source": "lab task L1, 2026-09-10 21:44 (local), the first of two captures in one sitting on the RE-FLASHED board. The board was written with the pinned clean reference image before this capture (ruling R7, answer (a)): `scripts/emu/build-reference-image.sh --chip esp32 esp32,server,float-f32 75486b114 none` → ELF 2,985,952 B sha256 fb5e548982f2fc2dbc75e61945eb61e41561b876d0cd84b755466caed553107e, then `espflash save-image --chip esp32 --merge --partition-table lp-fw/fw-esp32v3/partitions.csv --flash-size 4mb` → merged.bin 4,194,304 B sha256 46d4ed2cc66c1d0bfa7da9f176509eac687ee2a30b3d62688b96cf5d7c7f6c54, written with `espflash write-bin --chip esp32 --port /dev/cu.wchusbserial11330 --baud 460800 0x0 merged.bin` in the foreground under `script -q /dev/null`. Reset over the CH340K with whole-status TIOCMSET (RTS-only 0x4 = EN low, then 0x0 to run) and eight seconds of reading. The WCH macOS dext ignores the single-bit TIOCMBIS/TIOCMBIC ioctls behind pyserial's .dtr/.rts setters, so the lines are driven whole-status or not at all (lp-app/lpa-client/src/stream/serialport_stream.rs:51-60 records the same hardware fact).",
+  "capture": "python3 classic-capture.py v1 --port /dev/cu.wchusbserial11330 --baud 115200 --seconds 8 --out cap_115200.bin",
+  "tools": {
+    "capture": "classic-capture.py v1 (lab task L1, 2026-09-10; pure termios/TIOCMSET, no pyserial on this host) — kept in the L1 session scratchpad, to be landed in scripts/emu/ by M5 as classic-reset-and-capture.py",
+    "port": "/dev/cu.wchusbserial11330 (CH340K 1a86:7522, locationID 0x01133000, port 3 of hub 0x01130000; the C6 A0:F2:62:87:B4:8C is port 2 of the same hub and was not touched)",
+    "flasher": "espflash 3.3.0"
+  },
+  "note": "THIS IS THE CLEAN-IMAGE HALF OF THE CLASSIC'S boot-idle RECORD, and it is what G2's memory comparison stands on. Ruling R7 was answered (a): the board was re-flashed from a pinned clean commit before capturing, so this transcript and the emulator's run of the same merged.bin are the SAME BYTES and the hello stamps `dirty: false`. The earlier pair `silicon-esp32v3-2026-09-10-2e21b6226-{115200,921600}` stays committed beside this one as the DIRTY-IMAGE record (2e21b6226bcd-dirty, the Zook dome project, ruling R7's problem statement); nothing here replaces it and `rom_up_boot.rs` still reads it.\n\nWHAT THIS HALF IS. The mask ROM banner and the ESP-IDF v5.1-beta1-378-gea5e0ff298 second-stage bootloader, at 115200, ending at the last bootloader line before the app reprograms clkdiv to 921600. `rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)` — the same strap word `GPIO.strap` defaults to. `Saved PC:` is absent: this part prints it only after a non-power-on reset. The `E boot: Image contains multiple DROM segments. Only the last one will be mapped.` line is benign and printed on every boot of this image (two DROM segments, the first 256 bytes of esp_app_desc).\n\nTHE `esp_image: segment` LINES ARE NOW THIS TREE'S OWN. On L0's dirty capture they were image-derived and therefore incomparable, which is why `rom_up_boot.rs` filters them out. This capture is the pinned clean image the M3 gates build, so its seven segment lines ARE the gate's image's — a finding for the director rather than an edit here, since that test is keyed to the L0 file by name and L1's remit does not extend to rom_up_boot.rs.\n\nTHE COMMITTED .txt IS THE DECODABLE MIDDLE OF THE RAW READ: bytes [32, 2268) of the 2521-byte raw capture at `raw/silicon-esp32v3-2026-09-10-75486b114-115200.raw.bin`, which is preserved byte-for-byte and untouched. The 32 leading bytes are the tail of the previous app session still shifting out at 921600 when the port was opened at 115200; the 253 trailing bytes are the same thing in the other direction, the app's own 921600 output destuffed as if it were 115200. Neither is valid UTF-8 (`Transcript::load` fails on the first byte of each, which is a READ failure rather than a filing mismatch) and neither is anything the device 'said' in any readable sense. Every byte kept here is unchanged from the wire, in the same order.\n\nRULING R8 IS ANSWERED AND ITS EVIDENCE IS BESIDE THIS FILE. `raw/silicon-esp32v3-2026-09-10-75486b114-115200-download-mode.raw.bin` (161 bytes) is the ROM's answer to esptool's bootloader_entry sequence driven whole-status on this same cable — TIOCMSET 0x4 (EN low), 100 ms, TIOCMSET 0x2 (DTR → IO0 low, EN released), 80 ms, TIOCMSET 0x0 — and it reads `rst:0x1 (POWERON_RESET),boot:0x3 (DOWNLOAD_BOOT(UART0/UART1/SDIO_REI_REO_V2))` then `waiting for download`. That is the download-mode value `GPIO.strap` had no measurement for: **0x3**. It is kept as a raw attachment rather than as its own transcript because `download-mode` is not a payload in validate.toml and inventing one is M5's call, not a lab task's.\n\nTHE CLASSIC HAS NO usb-serial-jtag CLASS. The C6's sidecars carry one; this part has no such peripheral and its host-link class is `wire`. The `pin` class is `modeled` here: no instrument was on a pad in this capture — but the two modem lines WERE measured, which is what the download-mode attachment above records.",
+  "trust": [
+    {
+      "class": "memory",
+      "grade": "measured",
+      "because": "the board is the ground truth; nothing models it"
+    },
+    {
+      "class": "timing",
+      "grade": "measured",
+      "because": "a real clock on real flash with real wait states"
+    },
+    {
+      "class": "boot-log",
+      "grade": "measured",
+      "because": "the real ROM and the real IDF bootloader printed it"
+    },
+    {
+      "class": "wire",
+      "grade": "measured",
+      "because": "real bytes over a real CH340K"
+    },
+    {
+      "class": "pin",
+      "grade": "modeled",
+      "because": "no instrument was on a pad in this capture; the EN/IO0 modem lines were driven and their effect read off the ROM banner, which is a measurement of the cable rather than of a pad"
+    }
+  ]
+}
