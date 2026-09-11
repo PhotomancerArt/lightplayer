@@ -7,8 +7,34 @@
 // here — the caller has them.
 'use strict';
 
-import { makeWasi } from './wasi-shim.js';
-import { makeJitHost } from './jit-host.js';
+// DD33 — this module passes on the stamp it was loaded with.
+//
+// `worker.js` is fetched as `worker.js?v=<build short>` and pulls this file in
+// as `./bench-run.js?v=<build short>`; a static `import './wasi-shim.js'` here
+// would drop the stamp again and leave a fresh `bench-run.js` free to pair with
+// a cached `wasi-shim.js` or `jit-host.js` — the same defect one level down,
+// and the one that killed Safari with a missing export and a bare stack. So
+// this module reads its OWN stamp off `import.meta.url` and hands it to both
+// siblings. The rule is self-propagating: every module in this directory that
+// imports a sibling stamps that import from its own URL.
+//
+// It is written out here rather than shared from a helper module because the
+// import of THAT helper would be the unstamped edge.
+//
+// `bench-cli.mjs` imports this file with no stamp (node/bun read the stage off
+// the filesystem, where there is no cache to go stale), so `STAMP` is null
+// there and the specifiers are the plain ones.
+const STAMP = new URL(import.meta.url).searchParams.get('v');
+const stamped = (name) => name + (STAMP ? '?v=' + STAMP : '');
+
+// Kicked off at module scope so both fetches are in flight immediately, and
+// awaited inside `runOnce` rather than at the top level — a top-level await
+// here would become a top-level await in `worker.js`'s graph, and a module
+// worker's message queue and TLA are a bad pair.
+const siblings = Promise.all([
+  import(stamped('./wasi-shim.js')),
+  import(stamped('./jit-host.js')),
+]).then(([wasiMod, jitMod]) => ({ makeWasi: wasiMod.makeWasi, makeJitHost: jitMod.makeJitHost }));
 
 /// The gate rows, in the order the phone takes them.
 ///
@@ -170,6 +196,7 @@ export async function runOnce(o) {
   // `o.env` is P6c's way to reach the emulator's environment-gated
   // diagnostics from a wasm row (`LP_EMU_JIT_MMIO_CENSUS` and the rest).
   // Absent on every row the page takes.
+  const { makeWasi, makeJitHost } = await siblings;
   const wasi = makeWasi(argsFor(o), o.image.elf, o.elfBytes, o.env ?? {});
   const host = makeJitHost();
 

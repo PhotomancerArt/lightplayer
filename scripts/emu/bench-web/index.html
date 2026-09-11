@@ -74,9 +74,17 @@
   const btn = $('run'), gateBtn = $('runGate'), buildEl = $('build');
   let worker = null, results = [], manifest = null;
 
+  // `manifest.json` is where the build stamp COMES FROM, so it is the one
+  // fetch on the page that cannot be allowed to come out of a cache: a stale
+  // manifest hands out a stale `build.short`, and the page then stamps every
+  // module URL with it and loads a whole consistent set of old files while
+  // believing it is fresh — which is DD33 again, one level further up, and
+  // invisible because the page's build line would agree with itself. Both
+  // belts: `cache: 'no-store'` where the option is honoured, and a
+  // per-load query for where it is not.
   async function loadManifest() {
     if (manifest) return manifest;
-    manifest = await (await fetch('manifest.json')).json();
+    manifest = await (await fetch('manifest.json?t=' + Date.now(), { cache: 'no-store' })).json();
     renderBuildInfo(manifest);
     fillControls(manifest);
     return manifest;
@@ -155,8 +163,15 @@
     const m = await loadManifest();
     const plan = preset ? null : buildPlan(m);
     if (worker) worker.terminate();
-    // A MODULE worker: it imports jit-host.js, which is the module Studio's
+    // A MODULE worker: it reaches jit-host.js, which is the module Studio's
     // own worker will import unchanged (JD25).
+    //
+    // The `?v=` here is the head of the chain, not the whole of it: the worker
+    // reads this stamp back off its own URL and puts it on `bench-run.js`,
+    // `emu.wasm` and (through `bench-run.js`) on `wasi-shim.js` and
+    // `jit-host.js`, so a new build can never load an old sibling (DD33).
+    // The one file no stamp can cover is this document; a phone that is
+    // showing a stale page reloads it the way any page reloads.
     worker = new Worker('worker.js?v=' + (m.build ? m.build.short : 'dev'), { type: 'module' });
     results = []; tbody.innerHTML = ''; headlines.innerHTML = ''; boot.textContent = ''; table.hidden = true; setBusy(true);
     status.textContent = 'Loading module…';

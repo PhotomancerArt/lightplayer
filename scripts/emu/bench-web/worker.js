@@ -1,11 +1,13 @@
 // The emulator's dedicated Worker.
 //
 // **A module worker** (`new Worker(url, {type: 'module'})`), which is a change
-// from the classic worker this rig had: it imports `jit-host.js`, and that
-// module has to stay importable *unchanged* by Studio's own worker (JD25), so
-// inlining it here was not an option. Module workers are the only shape that
-// can `import`; `importScripts` does not exist in one, and this file does not
-// use it.
+// from the classic worker this rig had: it reaches `jit-host.js` (through
+// `bench-run.js`), and that module has to stay importable *unchanged* by
+// Studio's own worker (JD25), so inlining it here was not an option. Module
+// workers are the only shape that can `import`; `importScripts` does not exist
+// in one, and this file does not use it. The import itself is dynamic rather
+// than static — see DD33 below — but it is still an ES module import, and
+// `import.meta` inside the graph is what carries the stamp down.
 //
 // **Dedicated is a correctness requirement, not a convenience** (JD13).
 // Compiling a translated module is `new WebAssembly.Module` called
@@ -15,8 +17,6 @@
 // thread it is on, and that thread must not be the one drawing the page.
 'use strict';
 
-import { runOnce, gateRowsPlan } from './bench-run.js';
-
 let compiled = null;
 const elfCache = {}; // slug -> Uint8Array
 
@@ -25,6 +25,22 @@ const elfCache = {}; // slug -> Uint8Array
 // matching emu.wasm on refresh instead of silently running an old build.
 const version = new URL(self.location.href).searchParams.get('v');
 const v = (name) => name + (version ? '?v=' + version : '');
+
+// DD33 — the stamp has to reach the SIBLINGS too.
+//
+// `import { runOnce } from './bench-run.js'` is a static specifier, and a
+// static specifier cannot carry the stamp this file was loaded with. That is
+// exactly how Safari paired a fresh `worker.js?v=…` with a *cached*
+// `bench-run.js` and died at a missing export with a bare stack: the entry was
+// versioned, everything behind it was not. A dynamic import can carry it, so
+// this edge is dynamic and stamped, and `bench-run.js` passes its own stamp on
+// to `wasi-shim.js` and `jit-host.js` the same way.
+//
+// Started here at module scope so the fetch is in flight while the page is
+// still wiring up, and awaited inside `onmessage` rather than at the top level:
+// a module worker's message queue and top-level await are a bad pair, and this
+// costs nothing to avoid.
+const benchRun = import(v('./bench-run.js'));
 
 async function loadModule() {
   if (compiled) return;
@@ -37,15 +53,25 @@ async function loadModule() {
   postMessage({ type: 'loaded', compileMs: performance.now() - t0, wasmBytes: bytes.byteLength });
 }
 
+// The ELF carries the manifest's own `elfStamp` (the first 12 hex of the
+// image's sha256), NOT the build stamp: these are pinned images (DD25) that
+// change when the pin changes and at no other time, and stamping 36 MB of ELF
+// with the emulator's git sha would make a phone re-download all four every
+// time the emulator is rebuilt. A content stamp busts exactly when the bytes
+// move — which, for a firmware image, is the only thing a stale copy could
+// ever get wrong, and it would get it wrong as a silently wrong NUMBER rather
+// than as a missing export.
 async function loadElf(image) {
   if (elfCache[image.slug]) return elfCache[image.slug];
-  const bytes = new Uint8Array(await (await fetch(image.elf)).arrayBuffer());
+  const url = image.elf + (image.elfStamp ? '?v=' + image.elfStamp : '');
+  const bytes = new Uint8Array(await (await fetch(url)).arrayBuffer());
   elfCache[image.slug] = bytes;
   return bytes;
 }
 
 onmessage = async (ev) => {
   try {
+    const { runOnce, gateRowsPlan } = await benchRun;
     await loadModule();
     // The one-click preset asks for rows by name rather than sending a plan,
     // so the sequence itself lives in `bench-run.js` beside the code that runs
