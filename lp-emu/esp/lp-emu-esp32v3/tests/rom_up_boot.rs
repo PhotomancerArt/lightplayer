@@ -360,7 +360,7 @@ const BOOTLOADER_LOG: &[&str] = &[
 const SILICON_115200: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../transcripts/esp32v3/boot-idle/",
-    "silicon-dom-z-102-2026-09-10-2e21b6226bcd-115200.txt"
+    "silicon-esp32v3-2026-09-10-2e21b6226-115200.txt"
 );
 
 /// The ROM banner and the bootloader log this file compares against are the
