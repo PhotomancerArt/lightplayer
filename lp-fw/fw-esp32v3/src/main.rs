@@ -71,6 +71,10 @@
         // `rsil`/`waiti`) comes with it.
         feature = "test_appcore_rom_path",
         feature = "test_cycle_probe",
+        // The `rmt-chase` harness links `output::rmt` for the product's own
+        // backend, and `wire_pusher`'s `rsil`/`waiti` idle window comes with
+        // the module even though core 1 never runs it.
+        feature = "test_rmt",
         // `board::esp32v3::fpu`'s `global_asm!` — the compile harness links
         // that module for `CPENABLE`, and Xtensa `global_asm!` is gated too.
         feature = "test_shader_compile_incremental"
@@ -88,7 +92,10 @@
 #[cfg(any(
     all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)),
     // The canary rig allocates — that is its whole instrument.
-    feature = "test_appcore_rom_path"
+    feature = "test_appcore_rom_path",
+    // The `rmt-chase` harness allocates nothing itself; it links
+    // `output::rmt`, whose endpoint-facing driver names `alloc`.
+    feature = "test_rmt"
 ))]
 extern crate alloc;
 
@@ -147,12 +154,13 @@ mod tests;
     allow(
         dead_code,
         unused_imports,
-        reason = "the canary rig reaches only `init_board` and `start_app_core_isr`, the compile payload only `fpu::arm`; the rest of the app surface these modules carry is unreachable from a harness entrypoint"
+        reason = "the canary rig reaches only `init_board` and `start_app_core_isr`, the compile payload only `fpu::arm`, and `rmt-chase` only `init_board` plus `output::rmt::{shared_driver, v3_rmt}`; the rest of the app surface these modules carry is unreachable from a harness entrypoint"
     )
 )]
 #[cfg(any(
     all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)),
     feature = "test_appcore_rom_path",
+    feature = "test_rmt",
     feature = "test_shader_compile_incremental"
 ))]
 mod board;
@@ -163,12 +171,13 @@ mod flash_storage;
     allow(
         dead_code,
         unused_imports,
-        reason = "the canary rig reaches only `init_board` and `start_app_core_isr`; the rest of the app surface these modules carry is unreachable from a harness entrypoint"
+        reason = "the canary rig reaches only `start_app_core_isr` and `rmt-chase` only the shared driver and the v3 backend; the rest of the app surface these modules carry is unreachable from a harness entrypoint"
     )
 )]
 #[cfg(any(
     all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)),
-    feature = "test_appcore_rom_path"
+    feature = "test_appcore_rom_path",
+    feature = "test_rmt"
 ))]
 mod output;
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
@@ -1170,10 +1179,22 @@ fn main() -> ! {
     tests::appcore_rom_path::run()
 }
 
+/// The `rmt-chase` payload's entrypoint. Its own for the same reason the
+/// canary rig's is: it takes the peripheral singleton through the product's
+/// `init_board` — the call that also programs UART0's baud divisor and hands
+/// back the RMT peripheral — and taking it twice panics, so it cannot share
+/// the generic harness `main` below.
+#[cfg(all(fw_harness, feature = "test_rmt"))]
+#[esp_hal::main]
+fn main() -> ! {
+    tests::test_rmt::run()
+}
+
 #[cfg(all(
     fw_harness,
     not(feature = "test_interrupt_executor"),
-    not(feature = "test_appcore_rom_path")
+    not(feature = "test_appcore_rom_path"),
+    not(feature = "test_rmt")
 ))]
 #[esp_hal::main]
 fn main() -> ! {

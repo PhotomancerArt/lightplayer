@@ -31,8 +31,15 @@ pub mod fpu;
 /// So the gate is a union, not app-only, and the M5 P2 payload harnesses are
 /// deliberately NOT in it: `shader-compile-stress` reaches `board` for
 /// `fpu::arm()` alone and must not drag the runtime in behind it.
+///
+/// The `rmt-chase` payload (`test_rmt`, M4 P5) is the second exception and
+/// earns it the same way: it drives the product's RMT backend, and the clock,
+/// the RMT peripheral and UART0's baud divisor all come out of this one call.
+/// It takes `init_board` and **not** `start_runtime` — the harness starts no
+/// executor.
 #[cfg(any(
     all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)),
-    feature = "test_appcore_rom_path"
+    feature = "test_appcore_rom_path",
+    feature = "test_rmt"
 ))]
 pub mod init;
