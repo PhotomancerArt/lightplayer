@@ -224,6 +224,12 @@ genuinely fits none of these, and define it here in one line.
   that ends it, but the resource is actually owned by the waiting program
   itself, so nothing outside the wait can ever produce the wake-up and
   the hold is indistinguishable from "any second now".
+- **`unexplained-transient-stall`** — a request or transfer goes quiet for
+  tens of seconds with the process still alive (heartbeats keep arriving)
+  and then either resumes or expires; reproduces intermittently and the
+  arresting mechanism has not yet been named. Filed for visibility and
+  recurrence-tracking, not as a diagnosed defect — the entry should be
+  reclassified the day a mechanism is found.
 
 ## Index
 
@@ -446,6 +452,9 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 | untested-path | 2026-09-06 | [emu-transport-drops-unprefixed-client-lines](2026-09-06-emu-transport-drops-unprefixed-client-lines.md) | fixed | lpa-client transport_serial/emulator (async `M!` framing) + lp-cli `emu` host spec |
 | shared-namespace-collision | 2026-09-08 | [a-stray-hello-answered-a-request-that-never-asked](2026-09-08-a-stray-hello-answered-a-request-that-never-asked.md) | fixed | lpa-client protocol_session/client/tokio_client/project_read_stream (correlation) |
 | lifecycle-ownership | 2026-09-08 | [serial-close-leaks-the-port-on-a-wedged-device](2026-09-08-serial-close-leaks-the-port-on-a-wedged-device.md) | fixed | lpa-client stream/serialport_stream + transport_serial framing thread/close; lpa-link host_serial_esp32 provider + DeviceSession::release_link |
+| assumed-context | 2026-09-11 | [a-reset-replays-the-boards-lifetime](2026-09-11-a-reset-replays-the-boards-lifetime.md) | **open** (escalated E4, fix brief drafted, not dispatched) | lp-emu/esp/lp-emu-esp32c6 machine.rs (`run_until`, `reboot`) |
+| partial-knowledge-loss | 2026-09-11 | [forget-leaves-the-emu-flash-image-in-opfs](2026-09-11-forget-leaves-the-emu-flash-image-in-opfs.md) | **open** (fix in flight elsewhere, W5) | lpa-studio-web public/lpa-link/emulator_worker.js (`deleteFlash`) |
+| unexplained-transient-stall | 2026-09-11 | [the-tab-walks-upload-step-flaked-once-in-three](2026-09-11-the-tab-walks-upload-step-flaked-once-in-three.md) | **open** (undiagnosed) | scripts/emu/walk-no-board.mjs — the tab-backed upload step |
 
 ## Predecessor: `docs/bugs/`
 
