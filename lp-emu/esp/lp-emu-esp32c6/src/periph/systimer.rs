@@ -166,7 +166,10 @@ impl Systimer {
     /// [`Systimer::write_word`]'s `unit_op` arm, which is the one event a
     /// publisher has to watch for.
     pub fn value_words(&self, u: usize) -> [u32; 2] {
-        [self.latched[u] as u32, (self.latched[u] >> 32) as u32 & MASK20]
+        [
+            self.latched[u] as u32,
+            (self.latched[u] >> 32) as u32 & MASK20,
+        ]
     }
 
     fn unit_of(&self, n: usize) -> usize {

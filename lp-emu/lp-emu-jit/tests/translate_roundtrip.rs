@@ -20,9 +20,9 @@ use lp_emu_jit::discover::discover;
 use lp_emu_jit::dispatch::{Selector, emit_module, target_table_bytes, write_target_tables};
 use lp_emu_jit::host::{
     self, EXCHANGE_CROSS, EXCHANGE_CYCLE, EXCHANGE_INDIRECT_MISS, EXCHANGE_INSTRET, EXCHANGE_LEN,
-    EXCHANGE_REGS, FAST_ARMED, FAST_SERVED, FAST_WORDS, HostOps, MMIO_LEAVE_AFTER, MMIO_OK, MMIO_PENDING, MMIO_SLICE_ENDED, MmioLoad,
-    MmioStore, PERM_ENTRIES, PERM_NONE, PERM_READ_WRITE, PERM_SHIFT, Polled, STEP_CONTINUE,
-    StepOne,
+    EXCHANGE_REGS, FAST_ARMED, FAST_SERVED, FAST_WORDS, HostOps, MMIO_LEAVE_AFTER, MMIO_OK,
+    MMIO_PENDING, MMIO_SLICE_ENDED, MmioLoad, MmioStore, PERM_ENTRIES, PERM_NONE, PERM_READ_WRITE,
+    PERM_SHIFT, Polled, STEP_CONTINUE, StepOne,
 };
 use lp_emu_jit::host_wasmtime::WasmtimeCore;
 use lp_emu_jit::replay::GRANULE_BYTES;
@@ -390,8 +390,7 @@ impl Rig {
     /// the two published words, and `armed`.
     fn publish(&mut self, armed: bool, words: [u32; 2]) {
         let at = FAST_AT as usize;
-        self.mem[at + FAST_ARMED as usize..][..4]
-            .copy_from_slice(&i32::from(armed).to_le_bytes());
+        self.mem[at + FAST_ARMED as usize..][..4].copy_from_slice(&i32::from(armed).to_le_bytes());
         for (i, w) in words.iter().enumerate() {
             self.mem[at + FAST_WORDS as usize + 4 * i..][..4].copy_from_slice(&w.to_le_bytes());
         }
@@ -1575,7 +1574,10 @@ fn a_published_word_read_is_served_without_a_host_call() {
     assert_eq!(out.regs[12] as u32, 0x00c0_ffee, "the published word");
     assert_eq!(out.regs[13], 0x1234, "the published constant");
     assert_eq!(out.regs[14] as u32, 0xab08, "nobody published this one");
-    assert_eq!(out.regs[15] as u32, 0xab00, "a byte load is not a word load");
+    assert_eq!(
+        out.regs[15] as u32, 0xab00,
+        "a byte load is not a word load"
+    );
     // The cycles are the interpreter's, not "the cycles of the loads that
     // crossed": a read the block served still charges its own cost, so the
     // third load is `lui + 2 x load` and the fourth is `lui + 3 x load`. That
